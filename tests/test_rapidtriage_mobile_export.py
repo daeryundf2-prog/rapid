@@ -28,6 +28,36 @@ class RapidTriageMobileExportTests(unittest.TestCase):
 
         self.assertIn("mobile-export", help_text)
 
+    def test_vendor_export_manifest_survives_non_utf8_codepage(self) -> None:
+        from rapidtriage.artifacts.mobile import build_vendor_export_manifest_profile
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            export_path = root / "device-export.csv"
+            export_path.write_text("header\n", encoding="ascii")
+            manifest_path = root / "export-metadata.json"
+            # A vendor export authored on a CP949 Korean Windows host can
+            # embed host-codepage bytes; strict UTF-8 decoding raised
+            # UnicodeDecodeError and killed the whole run before this guard.
+            manifest_path.write_bytes(
+                json.dumps({"tool_name": "vendor", "source_sha256": "a" * 64}).encode("ascii").replace(
+                    b'"vendor"', b'"\xd4 vendor"'
+                )
+            )
+
+            profile = build_vendor_export_manifest_profile(
+                export_path,
+                source_hashes={"sha256": "b" * 64},
+                source_tool="cellebrite",
+                rows=[],
+            )
+
+            self.assertTrue(profile["manifest_present"])
+            self.assertIn(
+                "Vendor export metadata sidecar was not valid UTF-8; decoded with replacement characters.",
+                profile["warnings"],
+            )
+
     def test_mobile_export_collects_vendor_csv_and_json_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

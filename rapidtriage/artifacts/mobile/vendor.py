@@ -77,7 +77,14 @@ def build_vendor_export_manifest_profile(
         "warnings": [],
     }
     try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest_bytes = manifest_path.read_bytes()
+        try:
+            manifest = json.loads(manifest_bytes.decode("utf-8"))
+        except UnicodeDecodeError:
+            # Vendor exports authored on non-UTF-8 hosts (e.g. CP949 Korean
+            # Windows) can carry manifest sidecars in the host codepage.
+            manifest = json.loads(manifest_bytes.decode("utf-8", errors="replace"))
+            profile["warnings"] = ["Vendor export metadata sidecar was not valid UTF-8; decoded with replacement characters."]
     except (OSError, json.JSONDecodeError) as exc:
         profile.update({"parse_status": "failed", "error": str(exc), "warnings": ["Vendor export metadata sidecar is not valid JSON."]})
         return profile

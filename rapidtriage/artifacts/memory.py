@@ -782,8 +782,15 @@ def text_context_preview(text: str, start: int, end: int) -> str:
 
 
 def classify_memory_url(url: str, context_preview: str = "") -> dict[str, object]:
-    parsed = urlparse(url)
-    host = (parsed.hostname or "").lower()
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        # Carved memory strings can look like URLs to a human but still fail
+        # strict urlparse validation (e.g. "[a-z0-9-]" bracketed hosts from
+        # regex fragments). Treat them as unclassifiable pivots instead of
+        # crashing the run.
+        parsed = None
+    host = ((parsed.hostname if parsed else None) or "").lower()
     context_lower = context_preview.lower()
     categories = ["web-url"]
     service = ""
@@ -801,7 +808,7 @@ def classify_memory_url(url: str, context_preview: str = "") -> dict[str, object
         categories.append("private-browsing-context")
     if any(token in host for token in SEARCH_ENGINE_DOMAINS):
         categories.append("search-engine")
-    query_terms = extract_url_query_terms(parsed.query)
+    query_terms = extract_url_query_terms(parsed.query if parsed else "")
     if query_terms:
         categories.append("search-query")
     categories = sorted(set(categories))
@@ -815,7 +822,7 @@ def classify_memory_url(url: str, context_preview: str = "") -> dict[str, object
     return {
         "profile_version": "memory-url-classification-v1",
         "host": host,
-        "scheme": parsed.scheme,
+        "scheme": parsed.scheme if parsed else "",
         "service": service,
         "service_family": service_family,
         "categories": categories,

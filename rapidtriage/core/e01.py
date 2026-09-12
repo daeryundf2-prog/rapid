@@ -1372,7 +1372,7 @@ def build_e01_provenance_profile(
 
 
 def default_runner(command: Sequence[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(list(command), capture_output=True, text=True)
+    return subprocess.run(list(command), capture_output=True, text=True, encoding="utf-8", errors="replace")
 
 
 def extract_e01_to_directory(
@@ -1485,7 +1485,7 @@ def extract_e01_to_directory(
         }
         write_e01_stage_checkpoint(checkpoint_path, checkpoint_payload)
         if mount_result.returncode != 0:
-            raise E01ExtractionError(f"ewfmount failed: {mount_result.stderr.strip()}")
+            raise E01ExtractionError(f"ewfmount failed: {(mount_result.stderr or '').strip()}")
         if not raw_image.exists():
             raise E01ExtractionError(f"ewfmount did not expose expected raw image: {raw_image}")
 
@@ -1498,7 +1498,7 @@ def extract_e01_to_directory(
         }
         write_e01_stage_checkpoint(checkpoint_path, checkpoint_payload)
         if mmls_result.returncode != 0:
-            raise E01ExtractionError(f"mmls failed: {mmls_result.stderr.strip()}")
+            raise E01ExtractionError(f"mmls failed: {(mmls_result.stderr or '').strip()}")
         partition_table = parse_mmls_partitions(mmls_result.stdout)
         recommended_sector = mmls_first_filesystem(mmls_result.stdout)
         start_sector = select_mmls_filesystem(
@@ -1531,7 +1531,7 @@ def extract_e01_to_directory(
         }
         if recover_result.returncode != 0:
             write_e01_stage_checkpoint(checkpoint_path, checkpoint_payload)
-            raise E01ExtractionError(f"tsk_recover failed: {recover_result.stderr.strip()}")
+            raise E01ExtractionError(f"tsk_recover failed: {(recover_result.stderr or '').strip()}")
         recovered_manifest = build_recovered_root_manifest(extract_dir)
         checkpoint_payload["completed"] = True
         checkpoint_payload["resume_ready"] = True
@@ -1724,25 +1724,67 @@ def build_recovered_root_manifest(
     }
 
 
+def _parse_mmls_row(line: str) -> tuple[str, str, int, int, int, str] | None:
+    """Parse one mmls row into (slot, slot_tag, start_sector, end_sector, sector_count, description).
+
+    Real Sleuth Kit output has five columns::
+
+        006:  002       0000239616   1952422776   1952183161   Basic data partition
+
+    where the second column is the GPT/DOS slot tag (``000``/``Meta``/``-------``),
+    not the start sector. Legacy fixtures used a three-column form without the
+    slot-tag column; both are accepted. ``Meta`` and ``Unallocated`` rows are
+    dropped by the caller.
+    """
+    match = re.search(r"^\s*(\d+):\s+(Meta|-+|\d+)\s+(\d+)\s+(\d+)\s+(\d+)[ \t]*(.*)$", line)
+    if match:
+        return (
+            match.group(1),
+            match.group(2),
+            int(match.group(3)),
+            int(match.group(4)),
+            int(match.group(5)),
+            match.group(6).strip(),
+        )
+    legacy = re.search(r"^\s*(\d+):\s+(\d+)\s+(\d+)\s+(.+)$", line)
+    if not legacy:
+        return None
+    start_sector = int(legacy.group(2))
+    end_sector = int(legacy.group(3))
+    if end_sector < start_sector:
+        return None
+    return (legacy.group(1), "", start_sector, end_sector, end_sector - start_sector + 1, legacy.group(4).strip())
+
+
+def _is_mmls_partition_row(slot_tag: str, description: str) -> bool:
+    lowered = description.lower()
+    if "unallocated" in lowered:
+        return False
+    if slot_tag and (slot_tag == "Meta" or set(slot_tag) <= {"-"}):
+        return False
+    return True
+
+
 def mmls_first_filesystem(text: str) -> int | None:
     best_start = None
     best_size = -1
     for line in text.splitlines():
-        match = re.search(r"^\s*\d+:\s+(\d+)\s+(\d+)\s+(.+)$", line)
-        if not match:
+        parsed = _parse_mmls_row(line)
+        if parsed is None:
             continue
-        start = int(match.group(1))
-        size = int(match.group(2))
-        description = match.group(3).lower()
-        if "swap" in description:
+        _slot, slot_tag, start, _end, count, description = parsed
+        if not _is_mmls_partition_row(slot_tag, description):
+            continue
+        lowered = description.lower()
+        if "swap" in lowered:
             continue
         if any(
-            token in description
+            token in lowered
             for token in ("fat", "exfat", "ntfs", "basic data", "msdos", "ext2", "ext3", "ext4", "linux", "xfs")
         ):
-            if size > best_size:
+            if count > best_size:
                 best_start = start
-                best_size = size
+                best_size = count
     return best_start
 
 
@@ -1764,17 +1806,17 @@ def parse_mmls_partitions(text: str) -> list[dict[str, object]]:
     partitions: list[dict[str, object]] = []
     sector_size = mmls_sector_size_bytes(text)
     for line in text.splitlines():
-        match = re.search(r"^\s*(\d+):\s+(\d+)\s+(\d+)\s+(.+)$", line)
-        if not match:
+        parsed = _parse_mmls_row(line)
+        if parsed is None:
             continue
-        description = match.group(4).strip()
-        start_sector = int(match.group(2))
-        sector_count = int(match.group(3))
+        slot, slot_tag, start_sector, _end_sector, sector_count, description = parsed
+        if not _is_mmls_partition_row(slot_tag, description):
+            continue
         filesystem_guess = guess_partition_filesystem(description)
         partitions.append(
             {
-                "slot": int(match.group(1)),
-                "partition_number": int(match.group(1)),
+                "slot": int(slot),
+                "partition_number": int(slot),
                 "start_sector": start_sector,
                 "sector_count": sector_count,
                 "sector_size_bytes": sector_size,
@@ -1907,8 +1949,6 @@ def is_supported_mmls_description(description: str) -> bool:
     if "swap" in lowered:
         return False
     return any(token in lowered for token in ("fat", "exfat", "ntfs", "basic data", "msdos", "ext2", "ext3", "ext4", "linux", "xfs"))
-
-
 def describe_source_integrity(path: Path, *, max_hash_bytes: int = DIRECT_IMAGE_HASH_LIMIT_BYTES) -> dict[str, object]:
     resolved = path.expanduser().resolve()
     try:

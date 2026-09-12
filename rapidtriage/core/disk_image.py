@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import json
 import re
 import shlex
 import shutil
 import subprocess
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -28,6 +29,7 @@ from .vsc import build_vsc_image_workflow_handoff
 
 RAW_IMAGE_SUFFIXES = (".dd", ".raw", ".img", ".001", ".000", ".0000", ".0001", ".00001", ".ima")
 RAW_IMAGE_REQUIRED_TOOLS = ("mmls", "tsk_recover")
+RAW_IMAGE_STAGE_CHECKPOINT_NAME = "rapidtriage-raw-image-stage-status.json"
 RAW_SPLIT_WORKFLOW_MANIFEST_VERSION = "raw-split-integrated-workflow-manifest-v1"
 RAW_SPLIT_REPORT_GRADE_VALIDATION_PLAN_VERSION = "raw-split-report-grade-validation-plan-v1"
 RAW_IMAGE_NATIVE_CAPABILITIES = {
@@ -729,7 +731,53 @@ def missing_raw_image_tools(tool_resolver: ToolResolver = shutil.which) -> list[
 
 
 def default_runner(command: Sequence[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(list(command), capture_output=True, text=True)
+    return subprocess.run(list(command), capture_output=True, text=True, encoding="utf-8", errors="replace")
+
+
+def raw_image_source_signature(image_paths: Sequence[Path]) -> dict[str, object]:
+    return {
+        "parts": [
+            {
+                "path": str(path),
+                "size": path.stat().st_size,
+                "mtime_ns": path.stat().st_mtime_ns,
+            }
+            for path in image_paths
+        ],
+        "part_count": len(image_paths),
+    }
+
+
+def load_raw_image_stage_checkpoint(path: Path) -> dict[str, object]:
+    if not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def write_raw_image_stage_checkpoint(path: Path, payload: Mapping[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_suffix(path.suffix + ".tmp")
+    temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    temp_path.replace(path)
+
+
+def raw_image_checkpoint_resume_ready(
+    checkpoint: Mapping[str, object],
+    *,
+    source_signature: Mapping[str, object],
+    extract_dir: Path,
+) -> bool:
+    if not checkpoint.get("completed") or not checkpoint.get("resume_ready"):
+        return False
+    if checkpoint.get("source_signature") != dict(source_signature):
+        return False
+    if not extract_dir.is_dir():
+        return False
+    return any(extract_dir.iterdir())
 
 
 def extract_raw_image_to_directory(
@@ -763,6 +811,33 @@ def extract_raw_image_to_directory(
     stage.mkdir(parents=True, exist_ok=True)
     extract_dir.mkdir(parents=True, exist_ok=True)
 
+    checkpoint_path = stage / RAW_IMAGE_STAGE_CHECKPOINT_NAME
+    source_signature = raw_image_source_signature(image_paths)
+    checkpoint = load_raw_image_stage_checkpoint(checkpoint_path)
+    if raw_image_checkpoint_resume_ready(
+        checkpoint,
+        source_signature=source_signature,
+        extract_dir=extract_dir,
+    ):
+        return DiskImageExtractionResult(
+            source_path=source_path,
+            stage_dir=stage,
+            extract_dir=extract_dir,
+            image_paths=image_paths,
+            partition_start_sector=checkpoint.get("partition_start_sector"),
+            recovery_mode=str(checkpoint.get("recovery_mode") or "partition-offset"),
+            source_integrity=tuple(describe_source_integrity(path) for path in image_paths),
+            tool_preflight=tuple(tool_preflight),
+            partition_table=tuple(checkpoint.get("partition_table") or ()),
+            split_part_warnings=split_part_warnings,
+            split_set_profile=split_set_profile,
+            recovered_root_manifest=dict(checkpoint.get("recovered_root_manifest") or {}),
+            command_history=tuple(checkpoint.get("command_history") or ()),
+            warnings=(
+                "Raw/split extraction resumed from a completed recovery checkpoint; verify checkpoint provenance before report use.",
+            ),
+        )
+
     mmls_result = runner(["mmls", *[str(path) for path in image_paths]])
     command_history = [command_record("partition-enumeration", ["mmls", *[str(path) for path in image_paths]], mmls_result)]
     start_sector = mmls_first_filesystem(mmls_result.stdout) if mmls_result.returncode == 0 else None
@@ -778,12 +853,29 @@ def extract_raw_image_to_directory(
     recover_result = runner(command)
     command_history.append(command_record("read-only-filesystem-recovery", command, recover_result))
     if recover_result.returncode != 0:
-        detail = recover_result.stderr.strip() or recover_result.stdout.strip()
+        stderr_text = (recover_result.stderr or "").strip()
+        stdout_text = (recover_result.stdout or "").strip()
+        detail = stderr_text or stdout_text
         if start_sector is None and mmls_result.returncode != 0:
-            mmls_detail = mmls_result.stderr.strip() or mmls_result.stdout.strip()
+            mmls_detail = (mmls_result.stderr or "").strip() or (mmls_result.stdout or "").strip()
             detail = f"{detail}; mmls failed before whole-image fallback: {mmls_detail}".strip("; ")
         raise DiskImageExtractionError(f"tsk_recover failed for raw/split image: {detail}")
     recovered_manifest = build_recovered_root_manifest(extract_dir)
+
+    write_raw_image_stage_checkpoint(
+        checkpoint_path,
+        {
+            "profile_version": "raw-image-stage-checkpoint-v1",
+            "source_signature": source_signature,
+            "partition_start_sector": start_sector,
+            "recovery_mode": recovery_mode,
+            "partition_table": [dict(row) for row in mark_selected_partition(partition_table, start_sector)],
+            "recovered_root_manifest": recovered_manifest,
+            "command_history": command_history,
+            "completed": True,
+            "resume_ready": True,
+        },
+    )
 
     return DiskImageExtractionResult(
         source_path=source_path,

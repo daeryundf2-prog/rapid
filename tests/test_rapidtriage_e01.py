@@ -294,6 +294,64 @@ DOS Partition Table
 
         self.assertEqual(mmls_first_filesystem(text), 13048)
 
+    def test_mmls_parses_real_sleuthkit_gpt_output(self) -> None:
+        text = """
+GUID Partition Table (EFI)
+Offset Sector: 0
+Units are in 512-byte sectors
+
+      Slot      Start        End          Length       Description
+000:  Meta      0000000000   0000000000   0000000001   Safety Table
+001:  -------   0000000000   0000002047   0000002048   Unallocated
+002:  Meta      0000000001   0000000001   0000000001   GPT Header
+003:  Meta      0000000002   0000000033   0000000032   Partition Table
+004:  000       0000002048   0000206847   0000204800   EFI system partition
+005:  001       0000206848   0000239615   0000032768   Microsoft reserved partition
+006:  002       0000239616   1952422776   1952183161   Basic data partition
+007:  -------   1952422777   1952423935   0000001159   Unallocated
+008:  003       1952423936   1953521663   0001097728
+"""
+
+        rows = parse_mmls_partitions(text)
+        self.assertEqual(len(rows), 4)
+        self.assertEqual(rows[0]["slot"], 4)
+        self.assertEqual(rows[0]["start_sector"], 2048)
+        self.assertEqual(rows[0]["description"], "EFI system partition")
+        self.assertEqual(rows[2]["slot"], 6)
+        self.assertEqual(rows[2]["start_sector"], 239616)
+        self.assertEqual(rows[2]["sector_count"], 1952183161)
+        self.assertEqual(rows[2]["size_bytes"], 1952183161 * 512)
+        self.assertEqual(rows[2]["filesystem_guess"], "windows-basic-data")
+        self.assertTrue(rows[2]["supported_filesystem_hint"])
+        self.assertFalse(rows[0]["supported_filesystem_hint"])
+        self.assertFalse(rows[1]["supported_filesystem_hint"])
+        self.assertEqual(rows[3]["slot"], 8)
+        self.assertEqual(rows[3]["start_sector"], 1952423936)
+        self.assertEqual(rows[3]["description"], "")
+        self.assertEqual(mmls_first_filesystem(text), 239616)
+
+    def test_mmls_parses_real_sleuthkit_mbr_output(self) -> None:
+        text = """
+DOS Partition Table
+Offset Sector: 0
+Units are in 512-byte sectors
+
+      Slot      Start        End          Length       Description
+000:  -------   0000000000   0000002047   0000002048   Unallocated
+001:  000       0000002048   0000206847   0000204800   NTFS / exFAT (0x07)
+002:  001       0000206848   0000239615   0000032768   Linux (0x83)
+"""
+
+        rows = parse_mmls_partitions(text)
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["slot"], 1)
+        self.assertEqual(rows[0]["start_sector"], 2048)
+        self.assertEqual(rows[0]["sector_count"], 204800)
+        self.assertEqual(rows[0]["filesystem_guess"], "ntfs")
+        self.assertTrue(rows[0]["supported_filesystem_hint"])
+        self.assertEqual(rows[1]["start_sector"], 206848)
+        self.assertEqual(mmls_first_filesystem(text), 2048)
+
     def test_mmls_partition_rows_include_browser_metadata(self) -> None:
         text = """
 DOS Partition Table
@@ -306,15 +364,16 @@ Units are in 512-byte sectors
 
         rows = parse_mmls_partitions(text)
 
-        self.assertEqual(rows[1]["partition_number"], 1)
-        self.assertEqual(rows[1]["start_sector"], 2048)
-        self.assertEqual(rows[1]["byte_offset"], 2048 * 512)
-        self.assertEqual(rows[1]["size_bytes"], 10000 * 512)
-        self.assertEqual(rows[1]["filesystem_guess"], "ntfs")
+        self.assertEqual(rows[0]["partition_number"], 1)
+        self.assertEqual(rows[0]["start_sector"], 2048)
+        self.assertEqual(rows[0]["byte_offset"], 2048 * 512)
+        self.assertEqual(rows[0]["size_bytes"], 7953 * 512)
+        self.assertEqual(rows[0]["filesystem_guess"], "ntfs")
+        self.assertTrue(rows[0]["supported_filesystem_hint"])
+        self.assertEqual(rows[1]["partition_number"], 3)
+        self.assertEqual(rows[1]["start_sector"], 13048)
         self.assertTrue(rows[1]["supported_filesystem_hint"])
-        self.assertFalse(rows[2]["supported_filesystem_hint"])
-        self.assertEqual(rows[2]["filesystem_guess"], "swap")
-        self.assertTrue(rows[1]["manual_override_allowed"])
+        self.assertTrue(rows[0]["manual_override_allowed"])
 
     def test_mmls_partition_selection_accepts_linux_xfs_and_ext(self) -> None:
         text = """
@@ -862,6 +921,95 @@ DOS Partition Table
             self.assertIn("trusted-conversion-recovery-diff", plan["blocking_slot_ids"])
             self.assertEqual(plan["expected_files"][0]["description"], "Users/alice/Documents/evidence.txt")
             self.assertEqual(len(plan["manifest_sha256"]), 64)
+
+    def test_extract_raw_image_reuses_completed_recovery_checkpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            image_path = root / "case.001"
+            image_path.write_bytes(b"part1")
+            stage_dir = root / "stage"
+            commands: list[list[str]] = []
+
+            def fake_runner(command):
+                commands.append(list(command))
+                if command[1:] == ["--version"]:
+                    return subprocess.CompletedProcess(command, 0, f"{command[0]} 1.0\n", "")
+                if command[0] == "mmls":
+                    return subprocess.CompletedProcess(command, 0, "001: 0000002048 0000020000 NTFS\n", "")
+                if command[0] == "tsk_recover":
+                    Path(command[-1]).mkdir(parents=True, exist_ok=True)
+                    (Path(command[-1]) / "evidence.txt").write_text("raw image invoice", encoding="utf-8")
+                    return subprocess.CompletedProcess(command, 0, "", "")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            tool_resolver = lambda name: f"/usr/bin/{name}"
+
+            first = extract_raw_image_to_directory(
+                image_path,
+                stage_dir,
+                runner=fake_runner,
+                tool_resolver=tool_resolver,
+            )
+            self.assertEqual(first.partition_start_sector, 2048)
+            self.assertTrue((first.extract_dir / "evidence.txt").is_file())
+            workflow_commands_first = [command for command in commands if command[1:] != ["--version"]]
+            self.assertEqual(len(workflow_commands_first), 2)
+
+            commands.clear()
+            second = extract_raw_image_to_directory(
+                image_path,
+                stage_dir,
+                runner=fake_runner,
+                tool_resolver=tool_resolver,
+            )
+
+            workflow_commands_second = [command for command in commands if command[1:] != ["--version"]]
+            self.assertEqual(workflow_commands_second, [])
+            self.assertEqual(second.partition_start_sector, 2048)
+            self.assertTrue((second.extract_dir / "evidence.txt").is_file())
+            self.assertIn("resumed from a completed recovery checkpoint", " ".join(second.warnings))
+
+    def test_extract_raw_image_ignores_stale_checkpoint_when_source_changed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            image_path = root / "case.001"
+            image_path.write_bytes(b"part1")
+            stage_dir = root / "stage"
+            commands: list[list[str]] = []
+
+            def fake_runner(command):
+                commands.append(list(command))
+                if command[1:] == ["--version"]:
+                    return subprocess.CompletedProcess(command, 0, f"{command[0]} 1.0\n", "")
+                if command[0] == "mmls":
+                    return subprocess.CompletedProcess(command, 0, "001: 0000002048 0000020000 NTFS\n", "")
+                if command[0] == "tsk_recover":
+                    Path(command[-1]).mkdir(parents=True, exist_ok=True)
+                    (Path(command[-1]) / "evidence.txt").write_text("changed image", encoding="utf-8")
+                    return subprocess.CompletedProcess(command, 0, "", "")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            tool_resolver = lambda name: f"/usr/bin/{name}"
+
+            extract_raw_image_to_directory(
+                image_path,
+                stage_dir,
+                runner=fake_runner,
+                tool_resolver=tool_resolver,
+            )
+            image_path.write_bytes(b"part1-changed")
+            commands.clear()
+
+            result = extract_raw_image_to_directory(
+                image_path,
+                stage_dir,
+                runner=fake_runner,
+                tool_resolver=tool_resolver,
+            )
+
+            workflow_commands = [command for command in commands if command[1:] != ["--version"]]
+            self.assertEqual(len(workflow_commands), 2)
+            self.assertEqual((result.extract_dir / "evidence.txt").read_text(encoding="utf-8"), "changed image")
 
     def test_extract_raw_image_runs_mmls_and_tsk_recover(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
