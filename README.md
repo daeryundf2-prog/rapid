@@ -420,6 +420,9 @@ Known-answer evidence는 `docs/validation/` 아래에 있습니다.
 | `scripts/` | release, smoke, sandbox, KakaoTalk, evidence helper |
 | `tests/` | unit, static, QC tests |
 
+품질 점검 도구(coverage, API contract snapshot, doc reference scanner)는
+[Quality checks](docs/rapidtriage-quality-checks.md)를 참고하세요.
+
 로컬 가상환경, 캐시, OMX runtime state, 원본 증거, 개인 case output은 커밋하지
 마세요. 재현 가능한 source, test, docs, schema, 작은 curated verification
 evidence만 Git에 남깁니다.
