@@ -263,16 +263,40 @@ def main(argv: list[str] | None = None) -> int:
         archive.writestr("tools/.gitkeep", "")
 
     write_dependency_inventory(output_dir)
+    # SBOM is generated before the release manifest/checksums so it is listed
+    # in the artifact inventory and covered by SHA256SUMS.
+    if run_repo_script(repo, "generate-sbom.py", "--output", str(output_dir / "sbom.cyclonedx.json")):
+        print(f"Wrote SBOM: {output_dir / 'sbom.cyclonedx.json'}")
     commercial_readiness = build_commercial_readiness_report(output_dir=output_dir)
     write_packaging_plan(output_dir)
     write_update_manifest(output_dir)
     write_release_manifest(output_dir, repo, commercial_readiness)
     write_sha256s(output_dir)
+    # Manifest signing runs last so it covers SHA256SUMS and every payload.
+    if run_repo_script(repo, "sign-release.py", "--release-dir", str(output_dir)):
+        print(f"Wrote release signature manifest: {output_dir / 'release-signature-manifest.json'}")
 
     print(f"Built portable zip: {portable_zip}")
     print(f"Wrote checksums: {output_dir / 'SHA256SUMS'}")
     print(f"Wrote release manifest: {output_dir / 'release-manifest.json'}")
     return 0
+
+
+def run_repo_script(repo: Path, script_name: str, *script_args: str) -> bool:
+    """Run a sibling release helper; warn (do not fail the build) on error."""
+    result = subprocess.run(
+        [sys.executable, str(repo / "scripts" / script_name), *script_args],
+        cwd=repo,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip().splitlines()
+        tail = detail[-1] if detail else "no output"
+        print(f"WARNING: scripts/{script_name} exited {result.returncode}: {tail}", file=sys.stderr)
+        return False
+    return True
 
 
 def add_if_exists(archive: zipfile.ZipFile, path: Path, arcname: str) -> None:

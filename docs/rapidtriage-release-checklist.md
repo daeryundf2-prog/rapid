@@ -18,7 +18,7 @@
 - Run `rapidtriage validation --output-dir ./release-validation --overwrite`.
 - On Windows, run `.\scripts\windows\smoke-test-rapidtriage.ps1`.
 - On macOS/Linux, run `sh scripts/smoke-test-rapidtriage.sh`.
-- Run `python scripts/build-release.py --output-dir release` and attach `SHA256SUMS` plus `dependency-inventory.txt`.
+- Run `python scripts/build-release.py --output-dir release` and attach `SHA256SUMS` plus `dependency-inventory.txt`. The build also emits `sbom.cyclonedx.json` (via `scripts/generate-sbom.py`) and `release-signature-manifest.json` (via `scripts/sign-release.py`); set `RAPIDTRIAGE_SIGNING_KEY` before the build to attach an HMAC-SHA256 manifest signature, then verify with `python scripts/sign-release.py --release-dir release --verify` (add `--require-signed` to reject unsigned manifests).
 - Run `python scripts/build-release.py --output-dir release --verify`.
 - Run `python scripts/check-dependencies.py --output logs/dependency-monitoring.json` and attach the dependency monitoring/SBOM evidence.
 - Run `python scripts/operations-security-readiness.py --output logs/operations-security-readiness.json --work-dir logs/operations-security-readiness --overwrite --json` and attach the numbered #108/#109/#110/#111/#118/#119/#120 readiness manifest plus component hashes.
@@ -53,7 +53,7 @@ Expected artifacts:
 - User guide and Windows quick-start docs.
 - macOS/Linux quick-start docs, E01 workflow docs, and fresh-machine smoke test docs.
 - Release validation JSON/Markdown package.
-- SHA256SUMS, signing/notarization evidence, and dependency inventory/SBOM.
+- SHA256SUMS, `sbom.cyclonedx.json`, `release-signature-manifest.json` (HMAC-SHA256 signed when `RAPIDTRIAGE_SIGNING_KEY` is set), signing/notarization evidence, and dependency inventory/SBOM.
 - Optional operations/security readiness bundle containing `operations-security-readiness.json`, `enterprise-policy.json`, `rbac-permission-smoke.json`, `backup-restore-drill-smoke.json`, `case-backup.json`, `case-restore.json`, `security-hardening-review.json`, `parser-sandbox-smoke.json`, `dependency-monitoring.json`, and component `SHA256SUMS`.
 - Optional internal evidence bundle under `logs/internal-release-evidence/` containing `internal-release-evidence-bundle.json`, `quickstart-lab-run.json`, `admin-deployment-smoke.json`, `synthetic-hostile-corpus-manifest.json`, `parser-sandbox-smoke.json`, `security-hardening-review.json`, `dependency-monitoring.json`, `dependency-release-linkage.json`, and bundle `SHA256SUMS`.
 - `release-evidence-report.json` and `release-evidence-report.md` showing PASS/FAIL for release, validation, benchmark, optional columnar benchmark, platform smoke, crash-export/redaction, parser-isolation smoke, dependency-monitoring, and security-hardening self-review evidence.

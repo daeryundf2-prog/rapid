@@ -92,6 +92,34 @@ docker run --rm -v "$PWD:/pkg" ubuntu:24.04 bash -c \
 sha256sum rapidtriage_0.2.0_amd64.deb rapidtriage-0.2.0.x86_64.rpm RapidTriage-x86_64.AppImage
 ```
 
+## Local manifest signing and SBOM
+
+`scripts/build-release.py` now emits two additional artifacts per build:
+
+- `sbom.cyclonedx.json` — CycloneDX-style SBOM produced by
+  `scripts/generate-sbom.py` (installed Python distributions via
+  `importlib.metadata`, runtime/tool versions, no extra dependencies). It is
+  generated before the checksum step, so it is covered by `SHA256SUMS`.
+- `release-signature-manifest.json` — produced by `scripts/sign-release.py`;
+  a manifest of SHA-256 digests for every file in the release directory
+  (including `SHA256SUMS` and the SBOM). When the `RAPIDTRIAGE_SIGNING_KEY`
+  environment variable is set, the manifest carries an HMAC-SHA256 signature
+  over the canonical file listing; without the key it is written unsigned
+  with a note.
+
+```bash
+# Standalone invocation
+python scripts/generate-sbom.py --output release/sbom.cyclonedx.json
+RAPIDTRIAGE_SIGNING_KEY=<key> python scripts/sign-release.py --release-dir release
+RAPIDTRIAGE_SIGNING_KEY=<key> python scripts/sign-release.py --release-dir release --verify
+python scripts/sign-release.py --release-dir release --verify --require-signed
+```
+
+The HMAC signature is symmetric tamper evidence for operator-controlled
+hosts, not a substitute for the platform signatures below — keep the key out
+of the release directory and version control. `--require-signed` makes
+verification fail when the manifest was produced without a key.
+
 ## Evidence Closure
 
 For each platform, attach to the release evidence bundle:
