@@ -60,9 +60,7 @@ jobs:
       - name: Check web JavaScript syntax
         if: matrix.os != 'windows-latest'
         run: |
-          node --check rapidtriage/web/static/app_workbench_config.js
-          node --check rapidtriage/web/static/app_state.js
-          node --check rapidtriage/web/static/app.js
+          for f in rapidtriage/web/static/*.js; do node --check "$f"; done
 
       - name: Build release package
         run: python scripts/build-release.py --output-dir release-ci --skip-build
