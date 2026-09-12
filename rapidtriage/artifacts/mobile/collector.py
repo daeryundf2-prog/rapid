@@ -1,25 +1,39 @@
 from __future__ import annotations
+
 import contextlib
-import csv
-import datetime as dt
-import hashlib
-import json
 import plistlib
-import shlex
 import sqlite3
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from ...core.forensic_accuracy import build_accuracy_gate
+
 from ...core.models import ArtifactRecord
 from ...core.submission import compute_hashes
-from ..review import build_forensic_review
-
 from .constants import (
     MAX_IOS_BACKUP_FILES,
     MAX_ROWS_PER_SOURCE,
     MAX_SQLITE_TABLES,
     MOBILE_EXPORT_SUFFIXES,
     PARSER_VERSION,
+)
+from .correlation import (
+    build_mobile_correlation_summary,
+)
+from .detect import (
+    build_mobile_analyst_review_profile,
+    chat_profile_message_tables,
+    detect_artifact_type,
+    detect_chat_service,
+    detect_source_tool,
+    is_chat_app_database_candidate,
+    service_family,
+)
+from .gates import (
+    build_mobile_export_source_profile,
+    build_mobile_forensic_review,
+    mobile_commercial_uplift_evidence,
+    mobile_core_accuracy_gates,
+    mobile_native_capabilities,
+    mobile_report_grade_assessment,
 )
 from .helpers import (
     chat_app_blockers,
@@ -39,14 +53,24 @@ from .helpers import (
     sqlite_row_count,
     sqlite_table_names,
 )
-from .detect import (
-    build_mobile_analyst_review_profile,
-    chat_profile_message_tables,
-    detect_artifact_type,
-    detect_chat_service,
-    detect_source_tool,
-    is_chat_app_database_candidate,
-    service_family,
+from .ios import (
+    build_ios_backup_deep_parser_manifest,
+    build_ios_backup_parser_manifest,
+    build_ios_backup_report_grade_validation_plan,
+    build_ios_backup_root_profile,
+    build_ios_backup_scope_profile,
+    build_ios_keychain_authority_gate,
+    build_ios_keychain_deep_inventory_manifest,
+    build_ios_keychain_report_grade_validation_plan,
+    build_ios_keychain_scope_profile,
+    build_ios_keychain_table_profile,
+    ios_backup_root_file_profile,
+    is_ios_backup_metadata_file,
+    is_ios_keychain_candidate,
+    sanitize_ios_plist,
+)
+from .loaders import (
+    load_rows,
 )
 from .messengers import (
     build_extended_messenger_parser_manifest,
@@ -74,46 +98,16 @@ from .messengers import (
     telegram_database_review_payload,
     whatsapp_database_review_payload,
 )
+from .normalize import (
+    normalize_ios_backup_file,
+    normalize_mobile_row,
+)
 from .vendor import (
     build_mobile_schema_compatibility_matrix,
     build_mobile_vendor_export_report_grade_validation_plan,
     build_mobile_vendor_import_manifest,
     build_mobile_vendor_schema_mapper_manifest,
     build_vendor_export_manifest_profile,
-)
-from .correlation import (
-    build_mobile_correlation_summary,
-)
-from .gates import (
-    build_mobile_export_source_profile,
-    build_mobile_forensic_review,
-    mobile_commercial_uplift_evidence,
-    mobile_core_accuracy_gates,
-    mobile_native_capabilities,
-    mobile_report_grade_assessment,
-)
-from .ios import (
-    build_ios_backup_deep_parser_manifest,
-    build_ios_backup_parser_manifest,
-    build_ios_backup_report_grade_validation_plan,
-    build_ios_backup_root_profile,
-    build_ios_backup_scope_profile,
-    build_ios_keychain_authority_gate,
-    build_ios_keychain_deep_inventory_manifest,
-    build_ios_keychain_report_grade_validation_plan,
-    build_ios_keychain_scope_profile,
-    build_ios_keychain_table_profile,
-    ios_backup_root_file_profile,
-    is_ios_backup_metadata_file,
-    is_ios_keychain_candidate,
-    sanitize_ios_plist,
-)
-from .loaders import (
-    load_rows,
-)
-from .normalize import (
-    normalize_ios_backup_file,
-    normalize_mobile_row,
 )
 
 

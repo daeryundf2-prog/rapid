@@ -1,18 +1,8 @@
 from __future__ import annotations
-import contextlib
-import csv
-import datetime as dt
-import hashlib
+
 import json
-import plistlib
-import shlex
-import sqlite3
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from ...core.forensic_accuracy import build_accuracy_gate
-from ...core.models import ArtifactRecord
-from ...core.submission import compute_hashes
-from ..review import build_forensic_review
 
 from .constants import (
     CHAT_APP_PROFILES,
@@ -26,6 +16,9 @@ from .constants import (
     PARSER_VERSION,
     VENDOR_ARTIFACT_MAPPER_KEYS,
     VENDOR_SCHEMA_REGISTRY,
+)
+from .detect import (
+    service_family,
 )
 from .helpers import (
     _gap_item_numbers,
@@ -42,9 +35,6 @@ from .helpers import (
     sha256_text,
     source_record_id,
     stable_mobile_sha256,
-)
-from .detect import (
-    service_family,
 )
 from .messengers import (
     chat_app_profile,

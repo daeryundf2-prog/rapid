@@ -1,19 +1,10 @@
 from __future__ import annotations
-import contextlib
-import csv
-import datetime as dt
-import hashlib
-import json
-import plistlib
-import shlex
-import sqlite3
-from collections.abc import Iterable, Mapping, Sequence
-from pathlib import Path
-from ...core.forensic_accuracy import build_accuracy_gate
-from ...core.models import ArtifactRecord
-from ...core.submission import compute_hashes
-from ..review import build_forensic_review
 
+from collections.abc import Mapping, Sequence
+from pathlib import Path
+
+from ...core.forensic_accuracy import build_accuracy_gate
+from ..review import build_forensic_review
 from .constants import (
     FUNCTIONAL_EXPANSION_BATCH_ID,
     IOS_QC_PREP_CONTRACT,
@@ -36,11 +27,11 @@ from .helpers import (
     optional_text,
     source_record_id,
 )
-from .vendor import (
-    build_vendor_schema_registry_profile,
-)
 from .manifests import (
     index_mobile_trusted_rows,
+)
+from .vendor import (
+    build_vendor_schema_registry_profile,
 )
 
 

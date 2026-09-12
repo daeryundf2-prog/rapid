@@ -1,19 +1,9 @@
 from __future__ import annotations
-import contextlib
-import csv
-import datetime as dt
-import hashlib
-import json
-import plistlib
-import shlex
-import sqlite3
-from collections.abc import Iterable, Mapping, Sequence
-from pathlib import Path
-from ...core.forensic_accuracy import build_accuracy_gate
-from ...core.models import ArtifactRecord
-from ...core.submission import compute_hashes
-from ..review import build_forensic_review
 
+from collections.abc import Mapping
+from pathlib import Path
+
+from ..review import build_forensic_review
 from .constants import (
     MAX_CHAT_DB_SAMPLE_ROWS,
     MAX_MOBILE_CORRELATION_TIMELINE_ROWS,
@@ -25,15 +15,15 @@ from .constants import (
     MOBILE_TIMELINE_REPORT_GRADE_BLOCKERS,
     MOBILE_TIMELINE_REPORT_GRADE_VALIDATION_PLAN_VERSION,
 )
+from .detect import (
+    first_mobile_alias,
+)
 from .helpers import (
     normalized_mobile_diff_value,
     optional_text,
     sha256_text,
     stable_mobile_sha256,
     unique_non_empty,
-)
-from .detect import (
-    first_mobile_alias,
 )
 from .vendor import (
     build_mobile_schema_compatibility_profile,

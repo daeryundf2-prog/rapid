@@ -1,19 +1,10 @@
 from __future__ import annotations
-import contextlib
-import csv
-import datetime as dt
-import hashlib
-import json
-import plistlib
-import shlex
-import sqlite3
-from collections.abc import Iterable, Mapping, Sequence
-from pathlib import Path
-from ...core.forensic_accuracy import build_accuracy_gate
-from ...core.models import ArtifactRecord
-from ...core.submission import compute_hashes
-from ..review import build_forensic_review
 
+from collections.abc import Mapping, Sequence
+from pathlib import Path
+
+from ...core.forensic_accuracy import build_accuracy_gate
+from ..review import build_forensic_review
 from .constants import (
     CHAT_APP_GAP_IDS,
     CHAT_APP_NATIVE_CAPABILITIES,
@@ -41,6 +32,10 @@ from .constants import (
     WHATSAPP_REPORT_GRADE_BLOCKERS,
     WHATSAPP_REPORT_GRADE_VALIDATION_PLAN_VERSION,
 )
+from .detect import (
+    first_mobile_alias,
+    service_family,
+)
 from .helpers import (
     chat_app_blockers,
     chat_app_gap_ids,
@@ -58,10 +53,6 @@ from .helpers import (
     stable_mobile_sha256,
     version_at_least,
     whatsapp_actor_shape,
-)
-from .detect import (
-    first_mobile_alias,
-    service_family,
 )
 
 

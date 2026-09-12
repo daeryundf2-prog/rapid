@@ -1,24 +1,12 @@
 from __future__ import annotations
-import contextlib
-import csv
-import datetime as dt
-import hashlib
-import json
-import plistlib
-import shlex
-import sqlite3
-from collections.abc import Iterable, Mapping, Sequence
-from pathlib import Path
-from ...core.forensic_accuracy import build_accuracy_gate
-from ...core.models import ArtifactRecord
-from ...core.submission import compute_hashes
-from ..review import build_forensic_review
 
-from .helpers import (
-    normalized_mobile_diff_value,
-)
+from collections.abc import Mapping
+
 from .detect import (
     first_mobile_alias,
+)
+from .helpers import (
+    normalized_mobile_diff_value,
 )
 
 

@@ -4,6 +4,19 @@ Date: 2026-09-09
 Branch: `codex/rapidforensic-complete`
 Tag: `v0.2.0` (restart baseline)
 
+## Monolith Package Split (2026-09-12)
+
+The former monolithic modules were split into packages:
+`rapidtriage/core/case_db.py` → `rapidtriage/core/case_db/`,
+`rapidtriage/api/app.py` → `rapidtriage/api/app/` (14 modules), and
+`rapidtriage/artifacts/mobile.py` → `rapidtriage/artifacts/mobile/`
+(12 modules). Each package `__init__.py` preserves the original module
+namespace so existing `from rapidtriage.api.app import create_app`,
+`from rapidtriage.core import case_db`, and `mobile.<name>` attribute
+access keep working. The duplicated per-module import preambles left
+over by the split were pruned; validation gates (unittest, ruff,
+vulture, compileall) remain green.
+
 ## Columnar Lane Complete (2026-09-09, Track B final slice)
 
 The workbench artifacts tab now loads through `loadArtifactsPayload`: it

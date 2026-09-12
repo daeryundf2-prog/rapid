@@ -1,24 +1,19 @@
 from __future__ import annotations
-import contextlib
-import csv
-import datetime as dt
-import hashlib
-import json
-import plistlib
-import shlex
-import sqlite3
-from collections.abc import Iterable, Mapping, Sequence
+
+from collections.abc import Mapping
 from pathlib import Path
-from ...core.forensic_accuracy import build_accuracy_gate
-from ...core.models import ArtifactRecord
-from ...core.submission import compute_hashes
-from ..review import build_forensic_review
 
 from .constants import (
     MEDIA_REFERENCE_KEYS,
     MESSAGE_ID_KEYS,
     REACTION_KEYS,
     TIMESTAMP_KEYS,
+)
+from .detect import (
+    detect_chat_service,
+    message_risk_flags,
+    mobile_decimal_location,
+    service_family,
 )
 from .helpers import (
     app_risk_flags,
@@ -43,11 +38,8 @@ from .helpers import (
     split_participants,
     unique_non_empty,
 )
-from .detect import (
-    detect_chat_service,
-    message_risk_flags,
-    mobile_decimal_location,
-    service_family,
+from .ios import (
+    build_ios_backup_file_profile,
 )
 from .messengers import (
     chat_app_issue_matrix,
@@ -60,9 +52,6 @@ from .messengers import (
     signal_message_review_profile,
     telegram_message_review_profile,
     whatsapp_message_review_profile,
-)
-from .ios import (
-    build_ios_backup_file_profile,
 )
 
 
