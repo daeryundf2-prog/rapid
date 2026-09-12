@@ -230,10 +230,12 @@ def case_db_path_restricted() -> bool:
     return not truthy_env("RAPIDTRIAGE_CASE_DB_UNRESTRICTED")
 
 
-def resolve_case_db_path(
+def _resolve_confined_case_path(
     store: RunJobStore,
     raw_path: str | Path,
-    extra_roots: Iterable[str | Path] = (),
+    extra_roots: Iterable[str | Path],
+    *,
+    kind: str,
 ) -> Path:
     candidate = Path(raw_path).expanduser().resolve()
     if not case_db_path_restricted():
@@ -244,12 +246,31 @@ def resolve_case_db_path(
     raise HTTPException(
         status_code=403,
         detail=(
-            f"case database path is outside allowed case-db roots: {candidate}; "
+            f"{kind} path is outside allowed case-db roots: {candidate}; "
             "allowed roots are run output directories, the server working directory, "
             "~/.rapidtriage, and RAPIDTRIAGE_CASE_DB_ROOTS entries "
             "(set RAPIDTRIAGE_CASE_DB_UNRESTRICTED=1 to disable this restriction)"
         ),
     )
+
+
+def resolve_case_db_path(
+    store: RunJobStore,
+    raw_path: str | Path,
+    extra_roots: Iterable[str | Path] = (),
+) -> Path:
+    return _resolve_confined_case_path(store, raw_path, extra_roots, kind="case database")
+
+
+def resolve_case_catalog_path(
+    store: RunJobStore,
+    raw_path: str | Path,
+    extra_roots: Iterable[str | Path] = (),
+) -> Path:
+    """Case catalogs share the case-db allowed roots: catalog JSON files are
+    case-management state and there is no separate RAPIDTRIAGE_CATALOG_ROOTS
+    env var — use RAPIDTRIAGE_CASE_DB_ROOTS for extra roots."""
+    return _resolve_confined_case_path(store, raw_path, extra_roots, kind="case catalog")
 
 
 def default_submission_manifest_path(store: RunJobStore, run_id: str) -> Path:

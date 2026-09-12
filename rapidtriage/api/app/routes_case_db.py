@@ -53,6 +53,7 @@ from .models import (
 def build_case_db_router(
     store: RunJobStore,
     open_request_case_database: Callable[[str | Path], CaseDatabase],
+    resolve_request_catalog_path: Callable[[str | Path], Path],
 ) -> APIRouter:
     router = APIRouter()
 
@@ -241,7 +242,8 @@ def build_case_db_router(
     @router.get("/api/case-catalog")
     def list_case_catalog(catalog: str | None = Query(None)) -> dict[str, object]:
         try:
-            case_catalog = CaseCatalog(Path(catalog).expanduser().resolve() if catalog else default_case_catalog_path())
+            catalog_path = resolve_request_catalog_path(catalog) if catalog else default_case_catalog_path()
+            case_catalog = CaseCatalog(catalog_path)
             return {"catalog": str(case_catalog.path), "cases": case_catalog.list_cases()}
         except CaseCatalogError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
@@ -250,7 +252,8 @@ def build_case_db_router(
     @router.post("/api/case-catalog/add-run")
     def add_case_catalog_run(request: CaseCatalogAddRunRequest) -> dict[str, object]:
         try:
-            case_catalog = CaseCatalog(Path(request.catalog).expanduser().resolve() if request.catalog else default_case_catalog_path())
+            catalog_path = resolve_request_catalog_path(request.catalog) if request.catalog else default_case_catalog_path()
+            case_catalog = CaseCatalog(catalog_path)
             case = case_catalog.add_run(
                 run_output=Path(request.run_output),
                 case_id=request.case_id,

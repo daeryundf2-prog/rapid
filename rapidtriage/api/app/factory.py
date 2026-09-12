@@ -16,6 +16,7 @@ from .constants import MUTATING_METHODS
 from .helpers import (
     allowed_api_hosts,
     request_host,
+    resolve_case_catalog_path,
     resolve_case_db_path,
     truthy_env,
 )
@@ -47,6 +48,9 @@ def create_app(
     def open_request_case_database(raw_path: str | Path):
         database_path = resolve_case_db_path(store, raw_path, configured_case_db_roots)
         return open_case_database(database_path)
+
+    def resolve_request_catalog_path(raw_path: str | Path) -> Path:
+        return resolve_case_catalog_path(store, raw_path, configured_case_db_roots)
 
     @api.middleware("http")
     async def require_auth_token(request: Request, call_next):
@@ -90,7 +94,7 @@ def create_app(
             )
 
     api.include_router(build_meta_router())
-    api.include_router(build_case_db_router(store, open_request_case_database))
+    api.include_router(build_case_db_router(store, open_request_case_database, resolve_request_catalog_path))
     api.include_router(build_runs_router(store))
     api.include_router(build_media_router(store))
     api.include_router(build_search_router(store))
