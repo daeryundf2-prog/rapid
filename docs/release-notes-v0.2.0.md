@@ -1,5 +1,7 @@
 # RapidTriage Release Notes
 
+> _Historical document — paths may reference pre-refactor layout._
+
 ## Version
 
 - Version: 0.2.0

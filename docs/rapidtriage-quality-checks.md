@@ -56,6 +56,14 @@ python scripts/check-doc-refs.py --warn-only # report only, always exits 0
 Historical record documents — `docs/plans/`, `docs/validation/`, dated
 `release-notes-*` files, and the `rapidtriage-core-forensics-*-validation.md`
 batch records — are listed as informational `STALE (historical)` entries and
-do not fail the check; they record what was true when written. CI runs the
-scanner in `--warn-only` mode (see the "Check doc path references" step in
-`.github/workflows/rapidtriage-ci.yml`).
+do not fail the check; they record what was true when written. A historical
+doc whose stale paths are acknowledged records carries the banner
+
+```markdown
+> _Historical document — paths may reference pre-refactor layout._
+```
+
+directly after its first heading; the scanner detects that marker and
+suppresses the file's findings entirely. CI runs the scanner as a real
+gate — it exits 1 on stale refs in maintained docs (see the "Check doc
+path references" step in `.github/workflows/rapidtriage-ci.yml`).

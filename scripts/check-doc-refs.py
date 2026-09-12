@@ -9,7 +9,10 @@ and reports any that no longer resolve to a real file or directory.
 Historical record documents (``docs/plans/``, ``docs/validation/``, dated
 ``release-notes-*``/batch validation records) are reported as informational
 only: they are records of what was true when written and are intentionally
-not rewritten.
+not rewritten. A historical doc that carries the banner marker
+``_Historical document — paths may reference pre-refactor layout._``
+is acknowledged as stale-by-record and its findings are suppressed
+entirely (neither printed nor counted).
 
 Exit status:
     1  stale references found in non-historical docs
@@ -79,11 +82,25 @@ IGNORED_SUBTREES = (
     "engines/rust/target",
 )
 
+# Banner placed after the first heading of historical record docs whose
+# stale path references are acknowledged records, not defects to fix.
+# Docs carrying this marker are skipped entirely by the scanner.
+HISTORICAL_BANNER_MARKER = (
+    "_Historical document — paths may reference pre-refactor layout._"
+)
+
 MARKDOWN_LINK_RE = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
 CODE_SPAN_RE = re.compile(r"`([^`\n]+)`")
 FENCED_BLOCK_RE = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
 DATE_RE = re.compile(r"20\d\d[-_]\d\d[-_]\d\d")
 BATCH_RECORD_RE = re.compile(r"rapidtriage-core-forensics-\d+-\d+-validation\.md$")
+
+
+def has_historical_banner(text: str) -> bool:
+    """True when a doc carries the acknowledged-historical banner marker as
+    real content. Fenced code blocks are stripped first so maintained docs
+    that merely *show* the marker in an example are not suppressed."""
+    return HISTORICAL_BANNER_MARKER in FENCED_BLOCK_RE.sub("", text)
 
 # Token characters stripped from both ends before resolving.
 TOKEN_STRIP = "\"'()[]{}<>,;:!"
@@ -202,9 +219,8 @@ def resolve_ref(token: str) -> str | None:
     return None
 
 
-def iter_refs(doc: Path) -> list[tuple[int, str]]:
-    """Yield (line_number, raw_ref_token) pairs from a markdown document."""
-    text = doc.read_text(encoding="utf-8")
+def iter_refs(text: str) -> list[tuple[int, str]]:
+    """Yield (line_number, raw_ref_token) pairs from markdown document text."""
     refs: list[tuple[int, str]] = []
 
     # Markdown link targets: [text](docs/foo.md), skip external/anchor links.
@@ -235,9 +251,13 @@ def iter_refs(doc: Path) -> list[tuple[int, str]]:
 def scan(docs: list[Path]) -> list[Finding]:
     findings: list[Finding] = []
     for doc in docs:
+        text = doc.read_text(encoding="utf-8")
+        if has_historical_banner(text):
+            # Acknowledged historical record: stale refs are intentional.
+            continue
         historical = is_historical_doc(doc)
         seen: set[tuple[int, str]] = set()
-        for line, token in iter_refs(doc):
+        for line, token in iter_refs(text):
             if not looks_like_path(token):
                 continue
             key = (line, token)

@@ -1,5 +1,7 @@
 # RapidForensic Review Recovery Plan - 2026-05-30
 
+> _Historical document — paths may reference pre-refactor layout._
+
 ## Requirements Summary
 
 The current repository was developed on macOS, tested on Windows, then received back on macOS. The immediate goal is to restore a clean, reproducible baseline before adding new recovery-engine work. The plan prioritizes failing verification, Windows/macOS parity, E01 workflow honesty, large-case stability, and viewer/extraction readiness.

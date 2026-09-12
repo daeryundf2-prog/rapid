@@ -1,5 +1,7 @@
 # RapidForensic Recovery Engine Test Specification
 
+> _Historical document — paths may reference pre-refactor layout._
+
 Status: approved for engineering validation
 Date: 2026-05-31
 Authority: `docs/plans/rapidforensic-recovery-review-plan-2026-05-30.md`

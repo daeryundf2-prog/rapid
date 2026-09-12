@@ -46,9 +46,12 @@ jobs:
           python -m vulture rapidtriage tests scripts --min-confidence 80
 
       - name: Check doc path references
-        # Informational only: reports stale repo-path references in markdown
-        # docs without failing the build.
-        run: python scripts/check-doc-refs.py --warn-only
+        # Gate: fails on stale repo-path references in maintained markdown
+        # docs. Acknowledged historical docs carrying the
+        # "_Historical document — paths may reference pre-refactor layout._"
+        # banner are suppressed; other historical record docs are
+        # informational only.
+        run: python scripts/check-doc-refs.py
 
       - name: Validate known-answer plumbing
         run: |
