@@ -160,6 +160,39 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("possible-cloud-upload-or-sync-state", sync_row["details"]["risk_flags"])
             self.assertTrue(sync_row["details"]["cloud_sync_row_review_profile"]["has_path_candidate"])
 
+    def test_windows_browser_collector_survives_rowid_alias_primary_key_sync_table(self) -> None:
+        # Field regression from a real OneDrive ListSync database
+        # (Microsoft.LocalContent.db, LocalContentDefects table): when a table
+        # declares "DefectID INTEGER PRIMARY KEY", the column is a rowid alias
+        # and "SELECT rowid, ..." reports the alias as the cursor key, so
+        # row["rowid"] raised IndexError and killed the whole run.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            sync_db = root / "Users" / "alice" / "AppData" / "Local" / "Microsoft" / "OneDrive" / "ListSync" / "Common" / "settings" / "Microsoft.LocalContent.db"
+            sync_db.parent.mkdir(parents=True)
+            connection = sqlite3.connect(sync_db)
+            try:
+                connection.execute(
+                    "CREATE TABLE LocalContentDefects (DefectID INTEGER PRIMARY KEY, Status INTEGER, LastRunTime INTEGER, State TEXT)"
+                )
+                connection.execute("INSERT INTO LocalContentDefects VALUES (5, 1, 1700000000, 'synced')")
+                connection.commit()
+            finally:
+                connection.close()
+            output = root / "browser-artifacts.json"
+
+            exit_code = main(["artifacts", str(root), "--kind", "browser", "--output", str(output)])
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            row_candidates = [
+                artifact
+                for artifact in payload["artifacts"]
+                if artifact["artifact_type"] == "desktop-cloud-sync-row-candidate"
+            ]
+            self.assertTrue(row_candidates)
+            self.assertEqual(row_candidates[0]["details"]["rowid"], 5)
+
     def test_windows_filesystem_collector_maps_ntfs_logfile_transaction_candidates(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

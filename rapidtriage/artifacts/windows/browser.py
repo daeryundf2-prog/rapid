@@ -1523,7 +1523,12 @@ def collect_desktop_cloud_sync_row_candidates(
                             "sync_db_name": path.name,
                             "source_table": table_name,
                             "source_index": emitted - 1,
-                            "rowid": row["rowid"],
+                            # The SELECT always projects rowid first, so read it
+                            # positionally: when a table declares "x INTEGER
+                            # PRIMARY KEY", SQLite renames the projected rowid
+                            # column to the alias (cursor keys lose "rowid")
+                            # and a row["rowid"] lookup raises IndexError.
+                            "rowid": row[0],
                             "semantic_hints": semantic_hints,
                             "local_path_candidate": first_sync_value(
                                 values, ("local_path", "path", "file_path", "filepath", "filename", "name")
