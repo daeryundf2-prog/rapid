@@ -124,7 +124,7 @@ Current modules that will need coordinated updates:
 - `rapidtriage/core/files.py` — evaluate file metadata, hashes, and path/date conditions
 - `rapidtriage/core/artifacts.py` — evaluate provider/artifact/detail matches
 - `rapidtriage/core/timeline.py` — propagate `matched_rules` and `ioc_hits` into generated events
-- `rapidtriage/core/run.py` — aggregate rule and IOC counts into run summaries and report highlights
+- `rapidtriage/core/run/` — aggregate rule and IOC counts into run summaries and report highlights
 - `rapidtriage/core/models.py` — extend dataclasses or output shims for additive fields
 - `rapidtriage/schemas/*.schema.json` — update JSON Schema contracts for every touched command
 

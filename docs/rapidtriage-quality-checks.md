@@ -46,7 +46,7 @@ Commit the regenerated fixture together with the API change.
 
 `scripts/check-doc-refs.py` scans `README.md` and `docs/**/*.md` for inline
 code tokens and markdown link targets that reference repository paths
-(`rapidtriage/core/run.py`, `scripts/build-release.py`, `api/app/factory.py`-style
+(`rapidtriage/core/run/` package, `scripts/build-release.py`, `api/app/factory.py`-style
 package-relative tokens, `tests/test_rapidtriage_api.py::test_name`,
 `file.py:123` line-number suffixes) and
 reports references that no longer resolve to a real file or directory.
