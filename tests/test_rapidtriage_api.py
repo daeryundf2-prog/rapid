@@ -79,9 +79,9 @@ def hash_file(path: Path, algorithm: str) -> str:
     return hasher.hexdigest()
 
 
-def api_test_client(store: RunJobStore | None = None):
+def api_test_client(store: RunJobStore | None = None, case_db_roots=None):
     return TestClient(
-        create_app(store or RunJobStore(), auth_token=TEST_API_TOKEN),
+        create_app(store or RunJobStore(), auth_token=TEST_API_TOKEN, case_db_roots=case_db_roots),
         headers={"X-RapidTriage-Token": TEST_API_TOKEN},
     )
 
@@ -3679,7 +3679,7 @@ class RapidTriageApiTests(unittest.TestCase):
             db_path = Path(tmp_dir) / "case.db"
             root.mkdir(parents=True, exist_ok=True)
             build_run_fixture(root)
-            client = api_test_client(RunJobStore())
+            client = api_test_client(RunJobStore(), case_db_roots=[tmp_dir])
 
             run_response = client.post(
                 "/api/runs",
@@ -3923,7 +3923,7 @@ class RapidTriageApiTests(unittest.TestCase):
             db_path = Path(tmp_dir) / "case-default.db"
             root.mkdir(parents=True, exist_ok=True)
             build_run_fixture(root)
-            client = api_test_client(RunJobStore())
+            client = api_test_client(RunJobStore(), case_db_roots=[tmp_dir])
 
             run_response = client.post(
                 "/api/runs",

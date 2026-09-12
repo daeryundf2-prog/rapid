@@ -47,4 +47,6 @@ RapidTriage is a local triage and review tool, not a full commercial forensic su
 
 - The web UI is designed for localhost use.
 - Remote binding requires explicit auth-token configuration.
+- `--allow-remote-without-auth` sets `RAPIDTRIAGE_DISABLE_AUTH=1` process-wide and disables all `/api` authentication for the server process; when the server is bound to a non-loopback host the CLI prints a warning because any client that can reach the port can read evidence metadata, run scans, and write case databases. Prefer `--auth-token`.
+- `/api/case-db/*` endpoints only open or create databases under allowed case-db roots: run output directories known to the job store, the server working directory, `~/.rapidtriage`, and extra roots listed in `RAPIDTRIAGE_CASE_DB_ROOTS` (separated by the platform path separator — `:` on POSIX, `;` on Windows). Out-of-root paths are rejected with HTTP 403. Set `RAPIDTRIAGE_CASE_DB_UNRESTRICTED=1` to restore the previous unrestricted behavior.
 - Do not expose RapidTriage directly to the internet.

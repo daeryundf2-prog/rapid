@@ -52,7 +52,7 @@ CANCELLATION_RETRY_TRUSTED_TOOLS = {
 
 
 def now_iso() -> str:
-    return dt.datetime.now().isoformat()
+    return dt.datetime.now(dt.timezone.utc).isoformat()
 
 
 def string_tuple(value: object) -> tuple[str, ...]:

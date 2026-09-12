@@ -5,7 +5,7 @@ import hashlib
 import json
 import mimetypes
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 
 from fastapi import HTTPException
@@ -197,6 +197,59 @@ def allowed_source_roots(summary: dict[str, object]) -> list[Path]:
         if root not in deduped:
             deduped.append(root)
     return deduped
+
+
+def case_db_roots_from_env() -> set[Path]:
+    """Extra case-DB roots from RAPIDTRIAGE_CASE_DB_ROOTS (os.pathsep-separated:
+    colon on POSIX, semicolon on Windows)."""
+    roots: set[Path] = set()
+    for item in os.environ.get("RAPIDTRIAGE_CASE_DB_ROOTS", "").split(os.pathsep):
+        item = item.strip()
+        if item:
+            roots.add(Path(item).expanduser().resolve())
+    return roots
+
+
+def allowed_case_db_roots(store: RunJobStore, extra_roots: Iterable[str | Path] = ()) -> set[Path]:
+    roots: set[Path] = {
+        (Path.home() / ".rapidtriage").resolve(),
+        Path.cwd().resolve(),
+    }
+    roots.update(case_db_roots_from_env())
+    roots.update(Path(root).expanduser().resolve() for root in extra_roots)
+    for job in store.list():
+        if job.summary:
+            try:
+                roots.add(run_output_dir(job.summary))
+            except RuntimeError:
+                continue
+    return roots
+
+
+def case_db_path_restricted() -> bool:
+    return not truthy_env("RAPIDTRIAGE_CASE_DB_UNRESTRICTED")
+
+
+def resolve_case_db_path(
+    store: RunJobStore,
+    raw_path: str | Path,
+    extra_roots: Iterable[str | Path] = (),
+) -> Path:
+    candidate = Path(raw_path).expanduser().resolve()
+    if not case_db_path_restricted():
+        return candidate
+    roots = allowed_case_db_roots(store, extra_roots)
+    if any(is_relative_to(candidate, root) for root in roots):
+        return candidate
+    raise HTTPException(
+        status_code=403,
+        detail=(
+            f"case database path is outside allowed case-db roots: {candidate}; "
+            "allowed roots are run output directories, the server working directory, "
+            "~/.rapidtriage, and RAPIDTRIAGE_CASE_DB_ROOTS entries "
+            "(set RAPIDTRIAGE_CASE_DB_UNRESTRICTED=1 to disable this restriction)"
+        ),
+    )
 
 
 def default_submission_manifest_path(store: RunJobStore, run_id: str) -> Path:

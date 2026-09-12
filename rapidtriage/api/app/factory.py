@@ -5,6 +5,7 @@ import mimetypes
 import os
 import secrets
 import sqlite3
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -105,6 +106,7 @@ from .helpers import (
     read_run_artifacts_for_capabilities,
     request_host,
     resolve_allowed_source_file,
+    resolve_case_db_path,
     truthy_env,
     validate_run_evidence_source,
 )
@@ -176,7 +178,12 @@ from .viewer_core import (
 )
 
 
-def create_app(job_store: RunJobStore | None = None, auth_token: str | None = None, require_auth: bool | None = None) -> FastAPI:
+def create_app(
+    job_store: RunJobStore | None = None,
+    auth_token: str | None = None,
+    require_auth: bool | None = None,
+    case_db_roots: Iterable[str | Path] | None = None,
+) -> FastAPI:
     store = job_store or default_job_store
     api = FastAPI(title="rapidtriage local API", version="0.2.0")
     static_dir = Path(__file__).resolve().parent.parent.parent / "web" / "static"
@@ -185,6 +192,12 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
     expected_token = "" if auth_disabled else configured_token or secrets.token_urlsafe(32)
     api.state.auth_required = bool(expected_token)
     api.state.auth_token = expected_token
+    configured_case_db_roots = frozenset(case_db_roots or ())
+    api.state.case_db_roots = configured_case_db_roots
+
+    def open_request_case_database(raw_path: str | Path):
+        database_path = resolve_case_db_path(store, raw_path, configured_case_db_roots)
+        return open_case_database(database_path)
 
     @api.middleware("http")
     async def require_auth_token(request: Request, call_next):
@@ -206,7 +219,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
                         content={"detail": "query token authentication is disabled; use X-RapidTriage-Token header"},
                     )
                 supplied = request.headers.get("X-RapidTriage-Token")
-                if supplied != expected_token:
+                if supplied is None or not secrets.compare_digest(supplied, expected_token):
                     return JSONResponse(status_code=401, content={"detail": "missing or invalid RapidTriage auth token"})
             return await call_next(request)
         except Exception as exc:
@@ -356,7 +369,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
     @api.post("/api/case-db/import-run")
     def import_run_to_case_db(request: CaseDbImportRunRequest) -> dict[str, object]:
         try:
-            database = open_case_database(Path(request.database))
+            database = open_request_case_database(request.database)
             return database.import_run_output(Path(request.run_output), case_id=request.case_id, case_name=request.name)
         except (CaseDatabaseError, SearchError, OSError, json.JSONDecodeError) as exc:
             raise HTTPException(status_code=400, detail=str(exc))
@@ -371,7 +384,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         case_id = request.case_id or f"run-{run_id}"
         case_name = request.name or f"rapidtriage run {run_id}"
         try:
-            database = open_case_database(database_path)
+            database = open_request_case_database(database_path)
             storage = database.case_storage_summary(case_id)
             already_imported = bool(storage["exists"]) and int(storage["summary"].get("evidence_source_count") or 0) > 0
             import_result = None
@@ -396,7 +409,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
     def search_case_db(request: CaseDbSearchRequest) -> dict[str, object]:
         try:
             keywords = resolve_keyword_packs(request.keywords, pack_names=request.keyword_packs)
-            database = open_case_database(Path(request.database))
+            database = open_request_case_database(request.database)
             payload = database.search_case(
                 case_id=request.case_id,
                 keywords=keywords,
@@ -426,7 +439,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
     @api.post("/api/case-db/review")
     def mark_case_db_review(request: CaseDbReviewRequest) -> dict[str, object]:
         try:
-            database = open_case_database(Path(request.database))
+            database = open_request_case_database(request.database)
             return database.mark_review(
                 case_id=request.case_id,
                 target_type=request.target_type,
@@ -447,7 +460,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
     @api.post("/api/case-db/review-batch")
     def mark_case_db_reviews_batch(request: CaseDbReviewBatchRequest) -> dict[str, object]:
         try:
-            database = open_case_database(Path(request.database))
+            database = open_request_case_database(request.database)
             return database.mark_reviews_batch(
                 case_id=request.case_id,
                 targets=request.targets,
@@ -467,7 +480,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
     @api.post("/api/case-db/report-export")
     def export_case_db_report_items(request: CaseDbReportExportRequest) -> dict[str, object]:
         try:
-            database = open_case_database(Path(request.database))
+            database = open_request_case_database(request.database)
             return database.export_reviewed_items(
                 case_id=request.case_id,
                 include_all=request.include_all,
@@ -479,7 +492,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
     @api.post("/api/case-db/saved-searches")
     def save_case_db_search(request: CaseDbSavedSearchRequest) -> dict[str, object]:
         try:
-            database = open_case_database(Path(request.database))
+            database = open_request_case_database(request.database)
             return database.save_search(
                 case_id=request.case_id,
                 name=request.name,
@@ -497,7 +510,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
     @api.post("/api/case-db/saved-searches/list")
     def list_case_db_saved_searches(request: CaseDbSavedSearchListRequest) -> dict[str, object]:
         try:
-            database = open_case_database(Path(request.database))
+            database = open_request_case_database(request.database)
             return {
                 "command": "case-db.saved-searches",
                 "database": str(Path(request.database).expanduser().resolve()),
