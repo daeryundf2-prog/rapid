@@ -412,7 +412,7 @@ class RapidTriageApiTests(unittest.TestCase):
             )
             mbox_path.write_bytes(first + second)
 
-            with patch("rapidtriage.api.app.EMAIL_PREVIEW_MAX_BYTES", len(first) + 16):
+            with patch("rapidtriage.api.app.email.EMAIL_PREVIEW_MAX_BYTES", len(first) + 16):
                 payload = build_source_preview("run-1", mbox_path)
 
         self.assertEqual(payload["preview_type"], "email")
@@ -437,8 +437,8 @@ class RapidTriageApiTests(unittest.TestCase):
             )
 
             with (
-                patch("rapidtriage.api.app.EMAIL_PREVIEW_MAX_BYTES", 256),
-                patch("rapidtriage.api.app.EMAIL_PREVIEW_MESSAGE_MAX_BYTES", 128),
+                patch("rapidtriage.api.app.email.EMAIL_PREVIEW_MAX_BYTES", 256),
+                patch("rapidtriage.api.app.email.EMAIL_PREVIEW_MESSAGE_MAX_BYTES", 128),
             ):
                 payload = build_source_preview("run-1", eml_path)
 

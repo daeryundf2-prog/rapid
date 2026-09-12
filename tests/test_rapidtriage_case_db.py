@@ -846,11 +846,11 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             database = open_case_database(db_path)
             database.create_case(case_id="CASE-SOURCE-SCOPE")
 
-            with mock.patch.object(case_db_module, "search_indexed_documents", side_effect=AssertionError("documents scanned")), mock.patch.object(
-                case_db_module,
+            with mock.patch.object(case_db_module.database, "search_indexed_documents", side_effect=AssertionError("documents scanned")), mock.patch.object(
+                case_db_module.database,
                 "search_artifacts",
                 side_effect=AssertionError("artifacts scanned"),
-            ), mock.patch.object(case_db_module, "search_events", side_effect=AssertionError("events scanned")):
+            ), mock.patch.object(case_db_module.database, "search_events", side_effect=AssertionError("events scanned")):
                 payload = database.search_case(case_id="CASE-SOURCE-SCOPE", keywords=["needle"], limit=10, sources=["files"])
 
             self.assertEqual(payload["summary"]["match_count"], 0)

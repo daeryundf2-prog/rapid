@@ -2419,7 +2419,7 @@
         "tests/test_rapidtriage_ops.py",
         "tests/test_rapidtriage_api.py",
         "rapidtriage/core/crash.py",
-        "rapidtriage/api/app.py",
+        "rapidtriage/api/app/__init__.py",
         "rapidtriage/web/static/app.js",
         "scripts/crash-export-smoke.py",
         "scripts/crash-redaction-review.py",
