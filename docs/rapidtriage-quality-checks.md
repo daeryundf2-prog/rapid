@@ -8,12 +8,16 @@ installed (`python -m pip install -e ".[web,test]"`).
 
 `coverage` is included in the `test` extra and configured in
 `pyproject.toml` (`[tool.coverage.run]`, `[tool.coverage.report]`). Coverage
-is **visibility only** — there is no `fail-under` percentage gate.
+carries a **`fail_under = 80`** floor: `coverage report` exits non-zero
+when total branch coverage drops below 80%. The measured baseline is 82%
+(846 tests, 2026-09); the floor is deliberately a little below the
+baseline so minor fluctuations do not break the build — raise it as
+coverage grows rather than lowering it.
 
 ```bash
 python -m coverage run -m unittest discover -s tests
 python -m coverage combine   # merges parallel data files into .coverage
-python -m coverage report    # per-file table with missing lines
+python -m coverage report    # per-file table; fails under 80% total
 python -m coverage html      # optional browsable report in htmlcov/
 ```
 

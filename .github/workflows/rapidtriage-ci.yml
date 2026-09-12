@@ -45,6 +45,13 @@ jobs:
           python -m ruff check rapidtriage tests scripts
           python -m vulture rapidtriage tests scripts --min-confidence 80
 
+      - name: Audit Python dependencies
+        # Non-blocking visibility step: pip-audit (from the test extra)
+        # reports known vulnerabilities in installed dependencies without
+        # failing the build.
+        continue-on-error: true
+        run: python -m pip_audit
+
       - name: Check doc path references
         # Gate: fails on stale repo-path references in maintained markdown
         # docs. Acknowledged historical docs carrying the

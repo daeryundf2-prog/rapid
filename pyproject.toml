@@ -96,8 +96,10 @@ ignore = [
 "scripts/*.py" = ["E402"]
 "tests/*.py" = ["E402"]
 
-# Coverage reporting is informational only: there is intentionally no
-# fail-under gate. See docs/rapidtriage-quality-checks.md.
+# Coverage gate: `coverage report` fails under fail_under. The floor is
+# set below the measured baseline (82% branch coverage as of 2026-09) so
+# small fluctuations do not break the build; raise it as coverage grows.
+# See docs/rapidtriage-quality-checks.md.
 [tool.coverage.run]
 source = ["rapidtriage"]
 omit = [
@@ -115,3 +117,4 @@ exclude_also = [
 ]
 show_missing = true
 skip_covered = false
+fail_under = 80
