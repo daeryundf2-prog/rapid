@@ -1,4 +1,41 @@
-function getWorkbenchSession() {
+// Session, search-draft, and virtualized-window persistence for the
+// RapidForensic analyst console. Shared workbench state lives in app.js and is
+// read here through live bindings; session restore writes back through
+// applySessionSnapshot.
+import { WORKBENCH_SESSION_CONTRACT } from "./app_workbench_config.js";
+import { escapeHtml, kbd, storageAvailable } from "./app_utils.js";
+import {
+  SEARCH_HISTORY_PREFIX,
+  SEARCH_STORAGE_PREFIX,
+  VIRTUAL_TABLE_ROW_LIMIT,
+  VIRTUAL_WINDOW_STORAGE_PREFIX,
+  VIRTUALIZATION_ASSESSMENT,
+  WORKBENCH_SESSION_STORAGE_KEY,
+  activeArtifactFilter,
+  activeStageId,
+  activeStageSubactionId,
+  activeTab,
+  activeViewGroup,
+  applyColumnPreset,
+  applySessionSnapshot,
+  applyWorkbenchFilters,
+  bindCaseDbBatchButtons,
+  bindCaseDbReportExportButton,
+  bindCaseDbReviewButtons,
+  bindSearchPresetButtons,
+  bindSearchResultButtons,
+  currentCaseDbSearchPayload,
+  currentSearchPayload,
+  currentWorkbenchControls,
+  detailPanel,
+  groupForTab,
+  renderCaseDbSearchResult,
+  renderSearchResults,
+  selectedRunId,
+  virtualWindowOffsets,
+} from "./app.js";
+
+export function getWorkbenchSession() {
   if (!storageAvailable()) return {};
   try {
     const payload = JSON.parse(window.localStorage.getItem(WORKBENCH_SESSION_STORAGE_KEY) || "{}");
@@ -8,7 +45,7 @@ function getWorkbenchSession() {
   }
 }
 
-function persistWorkbenchSession(extra = {}) {
+export function persistWorkbenchSession(extra = {}) {
   if (!storageAvailable()) return;
   const payload = {
     profile_version: WORKBENCH_SESSION_CONTRACT.profile_version,
@@ -26,18 +63,32 @@ function persistWorkbenchSession(extra = {}) {
   window.localStorage.setItem(WORKBENCH_SESSION_STORAGE_KEY, JSON.stringify(payload));
 }
 
-function restoreWorkbenchSession() {
+export function restoreWorkbenchSession() {
   const payload = getWorkbenchSession();
   if (!payload?.selectedRunId) return;
+  let selectedRunId = null;
+  let activeTab = "summary";
+  let activeViewGroup = "triage";
+  let activeArtifactFilter = "";
+  let activeStageId = "";
+  let activeStageSubactionId = "";
   selectedRunId = payload.selectedRunId;
   activeTab = payload.activeTab || "summary";
   activeViewGroup = payload.activeViewGroup || groupForTab(activeTab);
   activeArtifactFilter = payload.activeArtifactFilter || "";
   activeStageId = payload.activeStageId || "";
   activeStageSubactionId = payload.activeStageSubactionId || "";
+  applySessionSnapshot({
+    selectedRunId,
+    activeTab,
+    activeViewGroup,
+    activeArtifactFilter,
+    activeStageId,
+    activeStageSubactionId,
+  });
 }
 
-function restoreWorkbenchControls() {
+export function restoreWorkbenchControls() {
   const controls = getWorkbenchSession().tableControls || {};
   const mapping = [
     ["#tableFilter", controls.visible_filter],
@@ -55,17 +106,17 @@ function restoreWorkbenchControls() {
   applyWorkbenchFilters();
 }
 
-function virtualizedRows(rows, windowKey = "default") {
+export function virtualizedRows(rows, windowKey = "default") {
   const total = (rows || []).length;
   const offset = virtualWindowOffset(windowKey, total);
   return (rows || []).slice(offset, offset + VIRTUAL_TABLE_ROW_LIMIT);
 }
 
-function virtualWindowStorageKey() {
+export function virtualWindowStorageKey() {
   return `${VIRTUAL_WINDOW_STORAGE_PREFIX}${selectedRunId || "default"}`;
 }
 
-function loadVirtualWindowOffsets() {
+export function loadVirtualWindowOffsets() {
   if (!storageAvailable()) return;
   try {
     const saved = JSON.parse(window.localStorage.getItem(virtualWindowStorageKey()) || "{}");
@@ -77,7 +128,7 @@ function loadVirtualWindowOffsets() {
   }
 }
 
-function persistVirtualWindowOffset(windowKey, offset) {
+export function persistVirtualWindowOffset(windowKey, offset) {
   if (!storageAvailable()) return;
   try {
     const saved = JSON.parse(window.localStorage.getItem(virtualWindowStorageKey()) || "{}");
@@ -88,7 +139,7 @@ function persistVirtualWindowOffset(windowKey, offset) {
   }
 }
 
-function virtualWindowOffset(windowKey, total) {
+export function virtualWindowOffset(windowKey, total) {
   const rawOffset = Number(virtualWindowOffsets[windowKey] || 0);
   const safeTotal = Math.max(0, Number(total) || 0);
   const maxOffset = Math.max(0, safeTotal - VIRTUAL_TABLE_ROW_LIMIT);
@@ -97,7 +148,7 @@ function virtualWindowOffset(windowKey, total) {
   return clamped;
 }
 
-function renderVirtualizationNotice(rows, visibleRows, label, windowKey = "default") {
+export function renderVirtualizationNotice(rows, visibleRows, label, windowKey = "default") {
   const total = (rows || []).length;
   const visible = (visibleRows || []).length;
   const offset = virtualWindowOffset(windowKey, total);
@@ -117,7 +168,7 @@ function renderVirtualizationNotice(rows, visibleRows, label, windowKey = "defau
   `;
 }
 
-function renderVirtualWindowJumpControl(windowKey, total, offset, label) {
+export function renderVirtualWindowJumpControl(windowKey, total, offset, label) {
   return `
     <form class="virtual-window-jump" data-virtual-window-jump-key="${escapeHtml(windowKey)}" data-virtual-window-total="${total}">
       <label>
@@ -129,7 +180,7 @@ function renderVirtualWindowJumpControl(windowKey, total, offset, label) {
   `;
 }
 
-function bindVirtualWindowButtons() {
+export function bindVirtualWindowButtons() {
   for (const button of detailPanel.querySelectorAll("[data-virtual-window-key]")) {
     if (button.dataset.virtualWindowBound) continue;
     button.dataset.virtualWindowBound = "1";
@@ -151,7 +202,7 @@ function bindVirtualWindowButtons() {
   }
 }
 
-function setVirtualWindowOffset(windowKey, offset) {
+export function setVirtualWindowOffset(windowKey, offset) {
   virtualWindowOffsets[windowKey] = Math.max(0, Number(offset) || 0);
   persistVirtualWindowOffset(windowKey, virtualWindowOffsets[windowKey]);
   if (windowKey === "search" && currentSearchPayload) {
@@ -180,93 +231,89 @@ function setVirtualWindowOffset(windowKey, offset) {
   }
 }
 
-function storageAvailable() {
-  try {
-    window.localStorage.setItem("rapidtriage.storage-test", "1");
-    window.localStorage.removeItem("rapidtriage.storage-test");
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function searchStorageKey() {
+export function searchStorageKey() {
   return `${SEARCH_STORAGE_PREFIX}${selectedRunId || "default"}`;
 }
 
-function searchHistoryStorageKey() {
+export function searchHistoryStorageKey() {
   return `${SEARCH_HISTORY_PREFIX}${selectedRunId || "default"}`;
 }
 
-function caseDbHistoryStorageKey() {
+export function caseDbHistoryStorageKey() {
   return `${SEARCH_HISTORY_PREFIX}caseDb.${selectedRunId || "default"}`;
 }
 
-function getSearchDraft() {
-  if (!storageAvailable()) {
-    return { keywords: [], ocr: true, source: "", extension: "", path_contains: "", search_mode: "exact", fuzzy_distance: 1, proximity_window: 0, keyword_packs: [] };
-  }
+export function getSearchDraft() {
+  const defaults = {
+    keywords: [],
+    ocr: true,
+    source: "",
+    extension: "",
+    path_contains: "",
+    search_mode: "exact",
+    fuzzy_distance: 1,
+    proximity_window: 0,
+    hide_known_good: false,
+    keyword_packs: [],
+  };
+  if (!storageAvailable()) return defaults;
   try {
     const payload = JSON.parse(window.localStorage.getItem(searchStorageKey()) || "{}");
     return {
-      keywords: Array.isArray(payload.keywords) ? payload.keywords : [],
-      ocr: payload.ocr !== false,
-      source: payload.source || "",
-      extension: payload.extension || "",
-      path_contains: payload.path_contains || "",
-      search_mode: payload.search_mode || "exact",
-      fuzzy_distance: payload.fuzzy_distance ?? 1,
-      proximity_window: payload.proximity_window ?? 0,
-      keyword_packs: Array.isArray(payload.keyword_packs) ? payload.keyword_packs : [],
+      ...defaults,
+      ...payload,
+      keywords: Array.isArray(payload.keywords) ? payload.keywords.map(String).filter(Boolean) : [],
+      keyword_packs: Array.isArray(payload.keyword_packs) ? payload.keyword_packs.map(String).filter(Boolean) : [],
+      hide_known_good: Boolean(payload.hide_known_good),
     };
   } catch {
-    return { keywords: [], ocr: true, source: "", extension: "", path_contains: "", search_mode: "exact", fuzzy_distance: 1, proximity_window: 0, keyword_packs: [] };
+    return defaults;
   }
 }
 
-function setSearchDraft(payload) {
+export function setSearchDraft(payload) {
   if (!storageAvailable()) return;
-  window.localStorage.setItem(searchStorageKey(), JSON.stringify(payload));
+  try {
+    window.localStorage.setItem(searchStorageKey(), JSON.stringify(payload || {}));
+  } catch {
+    // Search drafts are convenience state only; failure should not block review.
+  }
 }
 
-function getSearchHistory() {
+export function getSearchHistory() {
   if (!storageAvailable()) return [];
   try {
     const payload = JSON.parse(window.localStorage.getItem(searchHistoryStorageKey()) || "[]");
-    return Array.isArray(payload) ? payload.filter((item) => Array.isArray(item.keywords)) : [];
+    return Array.isArray(payload) ? payload : [];
   } catch {
     return [];
   }
 }
 
-function rememberSearchKeywords(entry) {
+export function rememberSearchKeywords(entry) {
   if (!storageAvailable()) return;
-  const normalized = {
-    keywords: (entry.keywords || []).map(String).filter(Boolean),
+  const keywords = Array.isArray(entry?.keywords) ? entry.keywords.map(String).filter(Boolean) : [];
+  if (!keywords.length) return;
+  const key = keywords.join("\u0000").toLowerCase();
+  const history = getSearchHistory().filter((item) => {
+    const itemKey = (item.keywords || []).join("\u0000").toLowerCase();
+    return itemKey !== key;
+  });
+  history.unshift({
+    keywords,
     source: entry.source || "",
     extension: entry.extension || "",
     path_contains: entry.path_contains || "",
-    updated_at: new Date().toISOString(),
-  };
-  const signature = JSON.stringify({
-    keywords: normalized.keywords.map((item) => item.toLowerCase()),
-    source: normalized.source,
-    extension: normalized.extension,
-    path_contains: normalized.path_contains,
+    saved_at: new Date().toISOString(),
   });
-  const history = getSearchHistory().filter((item) => {
-    const itemSignature = JSON.stringify({
-      keywords: (item.keywords || []).map((keyword) => String(keyword).toLowerCase()),
-      source: item.source || "",
-      extension: item.extension || "",
-      path_contains: item.path_contains || "",
-    });
-    return itemSignature !== signature;
-  });
-  window.localStorage.setItem(searchHistoryStorageKey(), JSON.stringify([normalized, ...history].slice(0, 12)));
+  try {
+    window.localStorage.setItem(searchHistoryStorageKey(), JSON.stringify(history.slice(0, 12)));
+  } catch {
+    // Recent search chips are optional UI state.
+  }
 }
 
-function getCaseDbKeywordHistory() {
+export function getCaseDbKeywordHistory() {
   if (!storageAvailable()) return [];
   try {
     const payload = JSON.parse(window.localStorage.getItem(caseDbHistoryStorageKey()) || "[]");
@@ -276,7 +323,7 @@ function getCaseDbKeywordHistory() {
   }
 }
 
-function rememberCaseDbKeywords(entry) {
+export function rememberCaseDbKeywords(entry) {
   if (!storageAvailable()) return;
   const normalized = {
     keywords: (entry.keywords || []).map(String).filter(Boolean),

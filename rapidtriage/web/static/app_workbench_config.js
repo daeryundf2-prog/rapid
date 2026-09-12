@@ -1,4 +1,4 @@
-const VIEW_GROUPS = [
+export const VIEW_GROUPS = [
   {
     id: "intake",
     label: "접수",
@@ -42,7 +42,7 @@ const VIEW_GROUPS = [
     tabs: ["report"],
   },
 ];
-const FORENSIC_WORKFLOW_LANES = [
+export const FORENSIC_WORKFLOW_LANES = [
   {
     id: "intake",
     label: "접수",
@@ -104,7 +104,7 @@ const FORENSIC_WORKFLOW_LANES = [
     terms: ["timeline", "event", "created", "modified", "accessed", "timezone", "clock"],
   },
 ];
-const TAB_LABELS = {
+export const TAB_LABELS = {
   summary: "접수",
   search: "키워드 선별",
   review: "증거 선별",
@@ -115,7 +115,7 @@ const TAB_LABELS = {
   docs: "문서 검토",
   report: "보고서",
 };
-const FORENSIC_VIEW_MODES = [
+export const FORENSIC_VIEW_MODES = [
   { tab: "summary", label: "접수", hint: "image/hash/source", icon: "01" },
   { tab: "search", label: "선별", hint: "keyword/risk", icon: "02" },
   { tab: "artifacts", label: "아티팩트", hint: "parsed behavior", icon: "03" },
@@ -124,11 +124,11 @@ const FORENSIC_VIEW_MODES = [
   { tab: "review", label: "선별", hint: "tags/report", icon: "06" },
   { tab: "report", label: "보고서", hint: "bundle/export", icon: "07" },
 ];
-const LEGACY_WORKBENCH_VIEW_LABELS = [
+export const LEGACY_WORKBENCH_VIEW_LABELS = [
   { tab: "summary", label: "Overview" },
   { tab: "indicators", label: "Indicators" },
 ];
-const SHORTCUTS = [
+export const SHORTCUTS = [
   { keys: ["1", "2", "3", "4", "5"], label: "접수 / 선별 / 아티팩트 / 문서 / 시간축 전환" },
   { keys: ["Ctrl K", "Cmd K"], label: "명령 팔레트 열기", legacyLabel: "Open command palette" },
   { keys: ["Ctrl F", "Cmd F"], label: "현재 파일 검색 또는 결과 내 필터" },
@@ -141,7 +141,7 @@ const SHORTCUTS = [
   { keys: ["/"], label: "전체 케이스 검색으로 이동" },
   { keys: ["?"], label: "단축키 도움말 표시/숨김" },
 ];
-const LAZYWEB_WORKBENCH_MODEL = {
+export const LAZYWEB_WORKBENCH_MODEL = {
   profile_version: "lazyweb-command-center-model-v1",
   checklist_item: 18,
   legacy_labels: ["Unified search", "Source verify"],
@@ -257,14 +257,14 @@ const LAZYWEB_WORKBENCH_MODEL = {
     },
   ],
 };
-const LAZYWEB_CONTRACT_COPY_ALIASES = [
+export const LAZYWEB_CONTRACT_COPY_ALIASES = [
   "Evidence intake",
   "Unified search",
   "Source verify",
   "Review board",
   "Report bundle",
 ];
-const FORENSIC_RIBBON_GROUPS = [
+export const FORENSIC_RIBBON_GROUPS = [
   {
     id: "case",
     label: "Case",
@@ -301,7 +301,7 @@ const FORENSIC_RIBBON_GROUPS = [
     terms: ["powershell", "script", "threat", "indicator", "memory", "webshell", "lol"],
   },
 ];
-const FORENSIC_ARTIFACT_TAXONOMY = [
+export const FORENSIC_ARTIFACT_TAXONOMY = [
   {
     label: "Windows artifacts",
     hint: "EVTX, Registry, Prefetch, MFT/USN, ShellBags",
@@ -339,7 +339,7 @@ const FORENSIC_ARTIFACT_TAXONOMY = [
     terms: ["indicator", "ioc", "powershell", "script", "execution", "malware", "webshell", "lol", "fileless"],
   },
 ];
-const FORENSIC_FEATURE_CATALOG = [
+export const FORENSIC_FEATURE_CATALOG = [
   {
     id: "evidence-input",
     label: "증거 입력 / 케이스",
@@ -413,14 +413,14 @@ const FORENSIC_FEATURE_CATALOG = [
     purpose: "검토 표시, 보고서 포함, 해시/출처 기반 제출 묶음을 정리합니다.",
   },
 ];
-const VISIBLE_CAPABILITY_STATUS_LABELS = {
+export const VISIBLE_CAPABILITY_STATUS_LABELS = {
   usable: "사용 가능",
   partial: "부분 구현",
   inventory: "목록화",
   "validation-required": "검증 필요",
   "external-required": "외부 자료 필요",
 };
-const VISIBLE_FORENSIC_CAPABILITY_GROUPS = [
+export const VISIBLE_FORENSIC_CAPABILITY_GROUPS = [
   {
     id: "evidence-image-input",
     catalogId: "evidence-input",
@@ -1668,7 +1668,7 @@ const VISIBLE_FORENSIC_CAPABILITY_GROUPS = [
     ],
   },
 ];
-const WORKBENCH_ARTIFACT_TREE_GROUPS = [
+export const WORKBENCH_ARTIFACT_TREE_GROUPS = [
   {
     label: "윈도우",
     hint: "EVTX, Registry, Prefetch, MFT/USN, ShellBags, execution",
@@ -1730,7 +1730,7 @@ const WORKBENCH_ARTIFACT_TREE_GROUPS = [
     terms: ["validation", "qc", "readiness", "diff", "blocker", "commercial"],
   },
 ];
-const USER_WORKFLOW_STEPS = [
+export const USER_WORKFLOW_STEPS = [
   {
     label: "Input",
     title: "증거를 작게 시작",
@@ -1752,7 +1752,7 @@ const USER_WORKFLOW_STEPS = [
     text: "relevant와 include-in-report만 제출 묶음으로 빼고 나머지는 제외 사유를 남깁니다.",
   },
 ];
-const CORE_EVIDENCE_WORKFLOW = [
+export const CORE_EVIDENCE_WORKFLOW = [
   {
     id: "ingest",
     number: "1",
@@ -1808,7 +1808,7 @@ const CORE_EVIDENCE_WORKFLOW = [
     action: "보고서 후보 보기",
   },
 ];
-const WORKBENCH_SMOKE_CHECKPOINTS = [
+export const WORKBENCH_SMOKE_CHECKPOINTS = [
   { id: "open-workbench", selector: "[data-testid='workbench-shell']", label: "검토 콘솔 열기" },
   { id: "create-or-import-run", selector: "[data-testid='sample-run-button']", label: "케이스 생성 또는 불러오기" },
   { id: "select-run", selector: "[data-testid='case-hero']", label: "완료된 실행 선택" },
@@ -1817,18 +1817,18 @@ const WORKBENCH_SMOKE_CHECKPOINTS = [
   { id: "mark-evidence", selector: "[data-testid='viewer-review-form']", label: "증거 선별" },
   { id: "export-report", selector: "[data-testid='tab-report']", label: "보고서 내보내기" },
 ];
-const START_CHOICE_CONTRACT = {
+export const START_CHOICE_CONTRACT = {
   profile_version: "start-screen-choice-contract-v1",
   checklist_item: 9,
   required_choices: ["e01", "folder", "recent", "sample", "qc"],
 };
-const WORKBENCH_LAYOUT_CONTRACT = {
+export const WORKBENCH_LAYOUT_CONTRACT = {
   profile_version: "single-case-workbench-layout-v1",
   checklist_item: 10,
   required_regions: ["artifact-tree", "result-table", "preview-detail", "evidence-tray", "report-tray"],
   large_case_policy: "paged-results-plus-virtual-dom-window",
 };
-const FEATURE_PLACEMENT_CONTRACT = {
+export const FEATURE_PLACEMENT_CONTRACT = {
   profile_version: "forensic-feature-placement-contract-v1",
   checklist_item: 10,
   rule: "one-primary-home-per-feature-family",
@@ -1861,41 +1861,41 @@ const FEATURE_PLACEMENT_CONTRACT = {
     "large helper cards above evidence rows",
   ],
 };
-const TABLE_CONTROL_CONTRACT = {
+export const TABLE_CONTROL_CONTRACT = {
   profile_version: "large-result-table-control-contract-v1",
   checklist_item: 12,
   controls: ["pagination", "virtual-window", "visible-row-filter", "column-preset", "source-filter", "time-filter", "keyboard-navigation"],
 };
-const PREVIEW_DETAIL_CONTRACT = {
+export const PREVIEW_DETAIL_CONTRACT = {
   profile_version: "analyst-preview-detail-contract-v1",
   checklist_item: 13,
   default_metadata_state: "collapsed",
   required_cards: ["analyst-summary", "source-locator", "hash-verification", "limitation-warning", "review-actions"],
 };
-const VIEWER_NAVIGATION_CONTRACT = {
+export const VIEWER_NAVIGATION_CONTRACT = {
   profile_version: "viewer-navigation-history-contract-v1",
   checklist_item: 14,
   storage_scope: "per-run-local-browser",
   controls: ["back", "forward", "current-position", "history-preserves-review-context", "compare-pin-compatible"],
 };
-const WORKBENCH_SESSION_CONTRACT = {
+export const WORKBENCH_SESSION_CONTRACT = {
   profile_version: "workbench-session-restore-contract-v1",
   checklist_item: 15,
   persisted_fields: ["selectedRunId", "activeTab", "activeViewGroup", "activeArtifactFilter", "tableControls", "virtualWindowOffsets", "compareTray"],
 };
-const SEARCH_SOURCE_VERIFICATION_CONTRACT = {
+export const SEARCH_SOURCE_VERIFICATION_CONTRACT = {
   profile_version: "search-source-verification-contract-v1",
   checklist_item: 16,
   required_row_controls: ["view-review", "open-source", "pin-compare", "mark-review"],
   report_rule: "search-hit-is-a-lead-until-source-viewer-citation-and-hash-are-checked",
 };
-const SEARCH_RESULT_SOURCE_ACTION_CONTRACT = {
+export const SEARCH_RESULT_SOURCE_ACTION_CONTRACT = {
   profile_version: "search-result-source-viewer-actions-v1",
   qc_prep_item: 6,
   required_row_controls: ["open-source-viewer", "open-source-file", "search-inside-source", "pin-compare", "save-review"],
   report_rule: "viewer-open-and-review-save-before-report",
 };
-const CURRENT_FILE_SEARCH_CONTRACT = {
+export const CURRENT_FILE_SEARCH_CONTRACT = {
   profile_version: "current-file-search-ui-contract-v1",
   checklist_item: 17,
   required_fields: ["match-count", "result-limit", "truncation-state", "sqlite-scan-state", "reportability-warning"],

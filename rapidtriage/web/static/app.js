@@ -1,26 +1,113 @@
+// ES module entry point — RapidForensic analyst console.
+import {
+  CORE_EVIDENCE_WORKFLOW,
+  CURRENT_FILE_SEARCH_CONTRACT,
+  FEATURE_PLACEMENT_CONTRACT,
+  FORENSIC_ARTIFACT_TAXONOMY,
+  FORENSIC_FEATURE_CATALOG,
+  FORENSIC_RIBBON_GROUPS,
+  FORENSIC_VIEW_MODES,
+  FORENSIC_WORKFLOW_LANES,
+  LAZYWEB_WORKBENCH_MODEL,
+  PREVIEW_DETAIL_CONTRACT,
+  SEARCH_RESULT_SOURCE_ACTION_CONTRACT,
+  SEARCH_SOURCE_VERIFICATION_CONTRACT,
+  SHORTCUTS,
+  TABLE_CONTROL_CONTRACT,
+  USER_WORKFLOW_STEPS,
+  VIEWER_NAVIGATION_CONTRACT,
+  VIEW_GROUPS,
+  VISIBLE_CAPABILITY_STATUS_LABELS,
+  VISIBLE_FORENSIC_CAPABILITY_GROUPS,
+  WORKBENCH_ARTIFACT_TREE_GROUPS,
+  WORKBENCH_SMOKE_CHECKPOINTS,
+} from "./app_workbench_config.js";
+import {
+  escapeHtml,
+  fileName,
+  formatBytes,
+  formatNumber,
+  highlightSnippet,
+  kbd,
+  metric,
+  safeCssToken,
+  setStatus,
+  statusClass,
+  storageAvailable,
+  tabLabel,
+} from "./app_utils.js";
+import { api, errorMessageFromDetail } from "./app_api.js";
+import {
+  bindVirtualWindowButtons,
+  getCaseDbKeywordHistory,
+  getSearchDraft,
+  getSearchHistory,
+  loadVirtualWindowOffsets,
+  persistWorkbenchSession,
+  rememberCaseDbKeywords,
+  rememberSearchKeywords,
+  renderVirtualizationNotice,
+  restoreWorkbenchControls,
+  restoreWorkbenchSession,
+  setSearchDraft,
+  virtualizedRows,
+} from "./app_state.js";
+import {
+  bindCompareActions,
+  compareButton,
+  compareItemFromBookmark,
+  compareItemFromFileSearchMatch,
+  compareItemFromMatch,
+  compareItemFromPreview,
+} from "./app_compare.js";
+import {
+  applyEvidenceCheckRecommendation,
+  applyStartChoice,
+  bindCrashReportActions,
+  bindE01PartitionControls,
+  bindEvidenceCheckActions,
+  bindRunFormPersistence,
+  checkEvidenceSupport,
+  detectEvidenceImageKind,
+  extractLimitBytes,
+  hydrateRunForm,
+  isLikelyImageEvidencePath,
+  knownGoodMaxHashBytes,
+  optionalInteger,
+  parseKnownGoodHashFeeds,
+  refreshRunPlanPreview,
+  renderDoctorPanel,
+  renderEvidenceFailureGuidance,
+  renderEvidencePreflightSummary,
+  renderEvidenceToolPreflight,
+  renderRunPlanE01Readiness,
+  runStartingLabel,
+  updateRunSubmissionCta,
+} from "./app_intake.js";
+
 const apiStatus = document.querySelector("#apiStatus");
-const runForm = document.querySelector("#runForm");
-const runButton = document.querySelector("#runButton");
+export const runForm = document.querySelector("#runForm");
+export const runButton = document.querySelector("#runButton");
 const importForm = document.querySelector("#importForm");
 const importButton = document.querySelector("#importButton");
 const refreshButton = document.querySelector("#refreshButton");
-const sampleRunButton = document.querySelector("#sampleRunButton");
-const doctorButton = document.querySelector("#doctorButton");
+export const sampleRunButton = document.querySelector("#sampleRunButton");
+export const doctorButton = document.querySelector("#doctorButton");
 const crashReportsButton = document.querySelector("#crashReportsButton");
-const evidenceCheckButton = document.querySelector("#evidenceCheckButton");
-const evidenceCheckStatus = document.querySelector("#evidenceCheckStatus");
-const collectPlanButton = document.querySelector("#collectPlanButton");
+export const evidenceCheckButton = document.querySelector("#evidenceCheckButton");
+export const evidenceCheckStatus = document.querySelector("#evidenceCheckStatus");
+export const collectPlanButton = document.querySelector("#collectPlanButton");
 const runList = document.querySelector("#runList");
-const detailPanel = document.querySelector("#detailPanel");
+export const detailPanel = document.querySelector("#detailPanel");
 const sideStagePanel = document.querySelector("#sideStagePanel");
-const RUN_FORM_STORAGE_KEY = "rapidtriage.runForm.v1";
-const WORKBENCH_SESSION_STORAGE_KEY = "rapidtriage.workbenchSession.v1";
+export const RUN_FORM_STORAGE_KEY = "rapidtriage.runForm.v1";
+export const WORKBENCH_SESSION_STORAGE_KEY = "rapidtriage.workbenchSession.v1";
 const MAC_FIRST_EVIDENCE_STORAGE_KEY = "rapidtriage.macFirstEvidencePath.v1";
-const SEARCH_STORAGE_PREFIX = "rapidtriage.search.";
-const SEARCH_HISTORY_PREFIX = "rapidtriage.searchHistory.";
-const COMPARE_STORAGE_PREFIX = "rapidtriage.compare.";
+export const SEARCH_STORAGE_PREFIX = "rapidtriage.search.";
+export const SEARCH_HISTORY_PREFIX = "rapidtriage.searchHistory.";
+export const COMPARE_STORAGE_PREFIX = "rapidtriage.compare.";
 const REVIEW_SELECTION_STORAGE_PREFIX = "rapidtriage.reviewSelection.";
-const VIRTUAL_WINDOW_STORAGE_PREFIX = "rapidtriage.virtualWindow.";
+export const VIRTUAL_WINDOW_STORAGE_PREFIX = "rapidtriage.virtualWindow.";
 const VIEWER_NAVIGATION_STORAGE_PREFIX = "rapidtriage.viewerNavigation.";
 const SEARCH_PRESETS = [
   { label: "Credentials", keywords: ["password", "secret", "token", "credential"] },
@@ -28,7 +115,7 @@ const SEARCH_PRESETS = [
   { label: "Money trail", keywords: ["invoice", "wire", "account", "transfer"] },
   { label: "Intrusion", keywords: ["powershell", "rundll32", "remote", "persistence"] },
 ];
-const PROCESSING_PROFILES = {
+export const PROCESSING_PROFILES = {
   fast: {
     title: "Fast first pass",
     summary: "Indexes and classifies first, skips extraction by default, and is the safest start for large evidence.",
@@ -45,13 +132,13 @@ const PROCESSING_PROFILES = {
     badges: ["extracts matches", "no cap", "slow/heavy"],
   },
 };
-const RUN_MODE_COLLECTORS = {
+export const RUN_MODE_COLLECTORS = {
   seizure: ["browser", "recent files", "email", "cloud", "mobile/chat", "KakaoTalk", "APK", "media", "memory", "OS/account", "event logs", "registry", "shellbags", "remote access", "execution", "prefetch", "MFT/USN", "Windows system", "macOS"],
   fraud: ["browser", "recent files", "email", "cloud", "mobile/chat", "KakaoTalk", "APK", "media", "memory", "OS/account", "event logs", "registry", "shellbags", "remote access", "execution", "prefetch", "MFT/USN", "Windows system", "macOS"],
   hacking: ["browser", "recent files", "email", "cloud", "mobile/chat", "KakaoTalk", "APK", "media", "memory", "OS/account", "event logs", "registry", "shellbags", "remote access", "execution", "prefetch", "MFT/USN", "Windows system", "macOS"],
   recovery: ["recent files", "email", "cloud", "mobile/chat", "KakaoTalk", "APK", "media", "memory", "OS/account", "event logs", "registry", "shellbags", "remote access", "prefetch", "MFT/USN", "macOS"],
 };
-const IMAGE_EVIDENCE_FORMATS = [
+export const IMAGE_EVIDENCE_FORMATS = [
   {
     family: "ewf",
     label: "E01/Ex01",
@@ -83,7 +170,7 @@ const IMAGE_EVIDENCE_FORMATS = [
     pattern: /\.(?:aff|aff4|ad1|l01|lx01)(?:$|[\\/])/i,
   },
 ];
-const E01_PRE_RUN_STEPS = [
+export const E01_PRE_RUN_STEPS = [
   { label: "Input", text: "첫 E01/Ex01 세그먼트를 선택하고 segment order/integrity를 확인합니다." },
   { label: "Preflight", text: "ewfmount, mmls, tsk_recover 존재와 버전을 먼저 확인합니다." },
   { label: "Partition", text: "mmls 결과에서 지원 파일시스템 파티션을 자동 선택하거나 sector를 수동 지정합니다." },
@@ -91,13 +178,13 @@ const E01_PRE_RUN_STEPS = [
   { label: "Review", text: "추출 산출물을 검색, 뷰어, evidence tray, 보고서 후보로 이어갑니다." },
 ];
 const PAGE_SIZE = 250;
-const VIRTUAL_TABLE_ROW_LIMIT = 300;
-const VIRTUALIZATION_ASSESSMENT = {
+export const VIRTUAL_TABLE_ROW_LIMIT = 300;
+export const VIRTUALIZATION_ASSESSMENT = {
   commercial_gap_ids: ["#79"],
   status: "bounded-dom-window",
   row_limit: VIRTUAL_TABLE_ROW_LIMIT,
 };
-const COMPARE_LIMIT = 6;
+export const COMPARE_LIMIT = 6;
 const VIEWER_NAVIGATION_LIMIT = 30;
 const COMMAND_PALETTE_RESULT_LIMIT = 12;
 const GUI_CONTRACT_COPY_ALIASES = [
@@ -109,58 +196,30 @@ const GUI_CONTRACT_COPY_ALIASES = [
   "Do not conclude the mailbox is complete",
   "Copy citation",
 ];
-let selectedRunId = null;
+export let selectedRunId = null;
 let selectedRun = null;
-let activeTab = "summary";
-let activeViewGroup = "triage";
-let activeArtifactFilter = "";
-let activeStageId = "";
-let activeStageSubactionId = "";
+export let activeTab = "summary";
+export let activeViewGroup = "triage";
+export let activeArtifactFilter = "";
+export let activeStageId = "";
+export let activeStageSubactionId = "";
 let pollTimer = null;
 let workbenchFilterTimer = null;
 const pageOffsets = { timeline: 0, artifacts: 0, files: 0, docs: 0, indicators: 0 };
-const virtualWindowOffsets = { search: 0, caseDb: 0 };
-let currentSearchPayload = null;
+export const virtualWindowOffsets = { search: 0, caseDb: 0 };
+export let currentSearchPayload = null;
 let currentDocsIndexSearchPayload = null;
-let currentCaseDbSearchPayload = null;
+export let currentCaseDbSearchPayload = null;
 
-async function api(path, options = {}) {
-  const token = authToken();
-  const response = await fetch(path, {
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { "X-RapidTriage-Token": token } : {}),
-      ...(options.headers || {}),
-    },
-    ...options,
-  });
-  if (!response.ok) {
-    const detail = await response.json().catch(() => ({ detail: response.statusText }));
-    const error = new Error(errorMessageFromDetail(detail.detail || detail || response.statusText));
-    error.detail = detail.detail || detail;
-    throw error;
-  }
-  const contentType = response.headers.get("content-type") || "";
-  return contentType.includes("application/json") ? response.json() : response.text();
+export function applySessionSnapshot(payload = {}) {
+  selectedRunId = payload.selectedRunId;
+  activeTab = payload.activeTab;
+  activeViewGroup = payload.activeViewGroup;
+  activeArtifactFilter = payload.activeArtifactFilter;
+  activeStageId = payload.activeStageId;
+  activeStageSubactionId = payload.activeStageSubactionId;
 }
 
-function errorMessageFromDetail(detail) {
-  if (typeof detail === "string") return detail;
-  if (detail?.message) return detail.message;
-  if (detail?.source_path_resolution) {
-    const resolution = detail.source_path_resolution;
-    return `Source path unresolved after ${resolution.candidate_count || 0} candidate(s).`;
-  }
-  return String(detail || "Request failed");
-}
-
-function authToken() {
-  try {
-    return window.localStorage.getItem("rapidtriage.authToken") || "";
-  } catch {
-    return "";
-  }
-}
 
 async function checkHealth() {
   try {
@@ -5040,7 +5099,7 @@ function renderDocsIndexSidecarResults(payload) {
   `;
 }
 
-function renderSearchResults(payload, rows) {
+export function renderSearchResults(payload, rows) {
   const summary = payload.summary || {};
   const advancedProfile = payload.advanced_search_profile || {};
   const keywordPackProfile = payload.keyword_pack_selection_profile || {};
@@ -5525,7 +5584,7 @@ function bindDocsIndexSidecarSearch() {
   });
 }
 
-function bindSearchResultButtons() {
+export function bindSearchResultButtons() {
   for (const row of detailPanel.querySelectorAll("[data-viewer-row-path]")) {
     if (row.dataset.viewerRowBound) continue;
     row.dataset.viewerRowBound = "1";
@@ -5560,7 +5619,7 @@ function bindSearchResultButtons() {
   }
 }
 
-function bindSearchPresetButtons(form) {
+export function bindSearchPresetButtons(form) {
   if (!form) return;
   for (const button of detailPanel.querySelectorAll("[data-keywords]")) {
     if (button.dataset.keywordsBound) continue;
@@ -5579,7 +5638,7 @@ function bindSearchPresetButtons(form) {
   }
 }
 
-async function loadEvidencePreview(path, reviewContext = null, searchResultIndex = null, options = {}) {
+export async function loadEvidencePreview(path, reviewContext = null, searchResultIndex = null, options = {}) {
   const viewer = detailPanel.querySelector("#evidenceViewer");
   if (!viewer || !path) return;
   if (searchResultIndex !== null && searchResultIndex !== undefined && searchResultIndex !== "") {
@@ -6596,17 +6655,6 @@ function renderCurrentFileSearchProfile(payload) {
   `;
 }
 
-function compareItemFromFileSearchMatch(payload, match) {
-  return {
-    path: payload.path || match.source_path || "",
-    title: match.citation || `${payload.name || "source"} hit`,
-    source: "source-search",
-    kind: payload.mime_type || payload.extension || "",
-    preview: match.compare_preview || match.snippet || "",
-    pointer: match.pointer || "",
-  };
-}
-
 function reviewNoteFromFileSearchMatch(match) {
   const reviewCitation = match.review_note_citation || match.citation_profile?.review_note_citation || {};
   const locator = match.source_viewer_locator || match.citation_profile?.source_viewer_locator || {};
@@ -7443,52 +7491,6 @@ function renderSearchResultSourceActionControl(action, match, context, searchRes
   return "";
 }
 
-function compareButton(item) {
-  if (!item?.path) return "";
-  return `<button class="icon-action" type="button" title="비교 트레이에 고정" data-compare-item="${escapeHtml(JSON.stringify(item))}">비교</button>`;
-}
-
-function compareItemFromMatch(match, context = null) {
-  return {
-    path: match.path || "",
-    title: match.title || fileName(match.path) || "search hit",
-    source: match.source || context?.source || activeTab,
-    kind: match.kind || "",
-    preview: match.preview || context?.note || "",
-    pointer: context?.pointer || match.pointer || "",
-  };
-}
-
-function compareItemFromPreview(payload, reviewContext = null) {
-  const previewText = payload.text
-    ? `${payload.text.slice(0, 1200)}${payload.truncated || payload.text.length > 1200 ? "\n..." : ""}`
-    : payload.preview_type === "image"
-      ? "이미지 증거를 비교함에 고정했습니다. 미리보기로 원본 이미지를 다시 열 수 있습니다."
-      : payload.message || "";
-  return {
-    path: payload.path || "",
-    title: payload.name || fileName(payload.path) || "evidence",
-    source: reviewContext?.source || activeTab,
-    kind: payload.mime_type || payload.preview_type || "",
-    preview: previewText,
-    pointer: reviewContext?.pointer || "",
-  };
-}
-
-function compareItemFromBookmark(bookmark) {
-  const snapshot = bookmark.snapshot || {};
-  const reference = bookmark.reference || {};
-  const review = bookmark.review || {};
-  return {
-    path: snapshot.path || "",
-    title: bookmark.summary || fileName(snapshot.path) || bookmark.bookmark_id || "reviewed evidence",
-    source: reference.command || "review",
-    kind: review.status || "",
-    preview: bookmark.note || "",
-    pointer: reference.pointer || "",
-  };
-}
-
 function viewSourceButton(match, context, searchResultIndex = null) {
   if (!match.path) return "";
   const indexAttribute = searchResultIndex === null || searchResultIndex === undefined ? "" : ` data-search-result-index="${escapeHtml(searchResultIndex)}"`;
@@ -7540,7 +7542,7 @@ function updateClientFilterSummary() {
     : "";
 }
 
-function applyWorkbenchFilters() {
+export function applyWorkbenchFilters() {
   const visibleNeedle = detailPanel.querySelector("#tableFilter")?.value.trim().toLowerCase() || "";
   const sourceNeedle = detailPanel.querySelector("#sourceFilterInput")?.value.trim().toLowerCase() || "";
   const timeNeedle = detailPanel.querySelector("#timeFilterInput")?.value.trim().toLowerCase() || "";
@@ -7566,13 +7568,13 @@ function scheduleWorkbenchFilterUpdate() {
   }, 120);
 }
 
-function applyColumnPreset(preset) {
+export function applyColumnPreset(preset) {
   detailPanel.classList.remove("table-columns-compact", "table-columns-source");
   if (preset === "compact") detailPanel.classList.add("table-columns-compact");
   if (preset === "source") detailPanel.classList.add("table-columns-source");
 }
 
-function currentWorkbenchControls() {
+export function currentWorkbenchControls() {
   return {
     visible_filter: detailPanel.querySelector("#tableFilter")?.value || "",
     source_filter: detailPanel.querySelector("#sourceFilterInput")?.value || "",
@@ -7581,43 +7583,6 @@ function currentWorkbenchControls() {
   };
 }
 
-function metric(label, value) {
-  return `<div class="metric"><b>${value ?? 0}</b><span>${escapeHtml(label)}</span></div>`;
-}
-
-function setStatus(element, text, className) {
-  element.textContent = text;
-  element.className = `status-pill ${className}`;
-}
-
-function statusClass(status) {
-  if (status === "completed") return "ok";
-  if (status === "failed") return "failed";
-  return "";
-}
-
-function titleCase(value) {
-  return value.slice(0, 1).toUpperCase() + value.slice(1);
-}
-
-function kbd(value) {
-  return `<kbd>${escapeHtml(value)}</kbd>`;
-}
-
-function tabLabel(value) {
-  return TAB_LABELS[value] || titleCase(value);
-}
-
-function formatNumber(value) {
-  return Number(value || 0).toLocaleString();
-}
-
-function safeCssToken(value) {
-  return String(value || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, "-")
-    .replace(/^-+|-+$/g, "") || "unknown";
-}
 
 const ROW_FILTER_TEXT_LIMIT = 900;
 const ROW_FILTER_KEYS = [
@@ -7677,132 +7642,6 @@ function appendRowFilterFragments(fragments, value, depth) {
   }
 }
 
-function highlightSnippet(value, keywords) {
-  let html = escapeHtml(value);
-  for (const keyword of keywords) {
-    const needle = String(keyword || "").trim();
-    if (!needle) continue;
-    html = html.replace(new RegExp(`(${escapeRegExp(escapeHtml(needle))})`, "gi"), "<mark>$1</mark>");
-  }
-  return html;
-}
-
-function escapeRegExp(value) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-function fileName(path) {
-  return String(path || "").split(/[\\/]/).filter(Boolean).pop() || String(path || "");
-}
-
-function formatBytes(value) {
-  const size = Number(value || 0);
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-  return `${(size / 1024 / 1024).toFixed(1)} MB`;
-}
-
-function storageAvailable() {
-  try {
-    const key = "rapidtriage.storage.check";
-    window.localStorage.setItem(key, "1");
-    window.localStorage.removeItem(key);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function searchStorageKey() {
-  return `${SEARCH_STORAGE_PREFIX}${selectedRunId || "default"}`;
-}
-
-function searchHistoryStorageKey() {
-  return `${SEARCH_HISTORY_PREFIX}${selectedRunId || "default"}`;
-}
-
-function getSearchDraft() {
-  const defaults = {
-    keywords: [],
-    ocr: true,
-    source: "",
-    extension: "",
-    path_contains: "",
-    search_mode: "exact",
-    fuzzy_distance: 1,
-    proximity_window: 0,
-    hide_known_good: false,
-    keyword_packs: [],
-  };
-  if (!storageAvailable()) return defaults;
-  try {
-    const payload = JSON.parse(window.localStorage.getItem(searchStorageKey()) || "{}");
-    return {
-      ...defaults,
-      ...payload,
-      keywords: Array.isArray(payload.keywords) ? payload.keywords.map(String).filter(Boolean) : [],
-      keyword_packs: Array.isArray(payload.keyword_packs) ? payload.keyword_packs.map(String).filter(Boolean) : [],
-      hide_known_good: Boolean(payload.hide_known_good),
-    };
-  } catch {
-    return defaults;
-  }
-}
-
-function setSearchDraft(payload) {
-  if (!storageAvailable()) return;
-  try {
-    window.localStorage.setItem(searchStorageKey(), JSON.stringify(payload || {}));
-  } catch {
-    // Search drafts are convenience state only; failure should not block review.
-  }
-}
-
-function getSearchHistory() {
-  if (!storageAvailable()) return [];
-  try {
-    const payload = JSON.parse(window.localStorage.getItem(searchHistoryStorageKey()) || "[]");
-    return Array.isArray(payload) ? payload : [];
-  } catch {
-    return [];
-  }
-}
-
-function rememberSearchKeywords(entry) {
-  if (!storageAvailable()) return;
-  const keywords = Array.isArray(entry?.keywords) ? entry.keywords.map(String).filter(Boolean) : [];
-  if (!keywords.length) return;
-  const key = keywords.join("\u0000").toLowerCase();
-  const history = getSearchHistory().filter((item) => {
-    const itemKey = (item.keywords || []).join("\u0000").toLowerCase();
-    return itemKey !== key;
-  });
-  history.unshift({
-    keywords,
-    source: entry.source || "",
-    extension: entry.extension || "",
-    path_contains: entry.path_contains || "",
-    saved_at: new Date().toISOString(),
-  });
-  try {
-    window.localStorage.setItem(searchHistoryStorageKey(), JSON.stringify(history.slice(0, 12)));
-  } catch {
-    // Recent search chips are optional UI state.
-  }
-}
-
-function compareStorageKey() {
-  return `${COMPARE_STORAGE_PREFIX}${selectedRunId || "default"}`;
-}
 
 function viewerNavigationStorageKey() {
   return `${VIEWER_NAVIGATION_STORAGE_PREFIX}${selectedRunId || "default"}`;
@@ -7880,80 +7719,7 @@ async function goViewerNavigation(delta) {
   return true;
 }
 
-function getCompareItems() {
-  if (!storageAvailable()) return [];
-  try {
-    const payload = JSON.parse(window.localStorage.getItem(compareStorageKey()) || "[]");
-    return Array.isArray(payload) ? payload.filter((item) => item?.path).slice(0, COMPARE_LIMIT) : [];
-  } catch {
-    return [];
-  }
-}
-
-function setCompareItems(items) {
-  if (!storageAvailable()) return;
-  window.localStorage.setItem(compareStorageKey(), JSON.stringify(items.slice(0, COMPARE_LIMIT)));
-}
-
-function addCompareItem(item) {
-  if (!item?.path) return;
-  const nextItem = { ...item, added_at: new Date().toISOString() };
-  const existing = getCompareItems().filter((candidate) => candidate.path !== item.path);
-  setCompareItems([nextItem, ...existing].slice(0, COMPARE_LIMIT));
-  refreshCompareTray();
-}
-
-function removeCompareItem(path) {
-  setCompareItems(getCompareItems().filter((item) => item.path !== path));
-  refreshCompareTray();
-}
-
-function clearCompareItems() {
-  setCompareItems([]);
-  refreshCompareTray();
-}
-
-function renderCompareTray() {
-  const items = getCompareItems();
-  const primary = items.slice(0, 2);
-  return `
-    <section id="compareTray" class="compare-tray ${items.length ? "" : "empty"}" aria-label="증거 비교 보관함">
-      <div class="compare-heading">
-        <div>
-          <p class="eyebrow">비교 보관함</p>
-          <h3>증거 A/B 비교</h3>
-        </div>
-        <div class="detail-actions">
-          <span class="status-pill">${items.length}/${COMPARE_LIMIT}</span>
-          <button class="secondary-button" type="button" data-open-compare-diff ${items.length >= 2 ? "" : "disabled"}>원문 차이 보기</button>
-          <button class="secondary-button" type="button" data-clear-compare ${items.length ? "" : "disabled"}>비우기</button>
-        </div>
-      </div>
-      ${items.length ? renderCompareItems(primary, items.slice(2)) : '<p class="empty-state">검색 결과나 원본 뷰어에서 “비교함에 추가”를 누르면 탭을 오가도 자료가 여기 남습니다.</p>'}
-      ${items.length ? renderCompareCitationBundle(items) : ""}
-      <section id="compareDiffPanel"></section>
-    </section>
-  `;
-}
-
-function renderCompareItems(primaryItems, overflowItems) {
-  return `
-    <div class="compare-grid">
-      ${[0, 1].map((index) => renderCompareSlot(primaryItems[index], index)).join("")}
-    </div>
-    ${overflowItems.length ? `
-      <div class="compare-overflow">
-        ${overflowItems.map((item) => `
-          <button class="compare-chip" type="button" data-preview-compare-path="${escapeHtml(item.path)}" title="${escapeHtml(item.path)}">
-            ${escapeHtml(item.title || fileName(item.path))}
-          </button>
-        `).join("")}
-      </div>
-    ` : ""}
-  `;
-}
-
-function renderCompareCitationBundle(items) {
+export function renderCompareCitationBundle(items) {
   const citationText = items.map((item, index) => compareCitationLine(item, index)).join("\n");
   return `
     <section class="compare-citation-bundle" aria-label="report-citation-bundle">
@@ -7979,128 +7745,7 @@ function compareCitationLine(item, index) {
   return fields.filter(Boolean).join(" | ");
 }
 
-function renderCompareSlot(item, index) {
-  const label = index === 0 ? "A" : "B";
-  if (!item) {
-    return `
-      <article class="compare-slot placeholder">
-        <strong>${label}</strong>
-        <p>비교할 자료를 하나 더 고정하세요.</p>
-      </article>
-    `;
-  }
-  return `
-    <article class="compare-slot">
-      <div class="compare-slot-top">
-        <strong>${label}</strong>
-        <button class="icon-action" type="button" data-remove-compare-path="${escapeHtml(item.path)}">제거</button>
-      </div>
-      <h4>${escapeHtml(item.title || fileName(item.path))}</h4>
-      <div class="viewer-meta">
-        <span>${escapeHtml(item.source || "source")}</span>
-        <span>${escapeHtml(item.kind || "")}</span>
-      </div>
-      <p>${escapeHtml(item.preview || item.path)}</p>
-      <div class="review-actions">
-        <button class="secondary-button" type="button" data-preview-compare-path="${escapeHtml(item.path)}">미리보기 ${label}</button>
-        <button class="icon-action" type="button" data-copy-path="${escapeHtml(item.path)}">경로 복사</button>
-      </div>
-    </article>
-  `;
-}
-
-function refreshCompareTray() {
-  const tray = detailPanel.querySelector("#compareTray");
-  if (!tray) return;
-  tray.outerHTML = renderCompareTray();
-  bindCompareActions();
-}
-
-function bindCompareActions() {
-  bindCopyButtons();
-  for (const button of detailPanel.querySelectorAll("[data-compare-item]")) {
-    if (button.dataset.compareBound) continue;
-    button.dataset.compareBound = "1";
-    button.addEventListener("click", () => {
-      const item = parseCompareItem(button.dataset.compareItem);
-      addCompareItem(item);
-      button.textContent = "추가됨";
-    });
-  }
-  const clearButton = detailPanel.querySelector("[data-clear-compare]");
-  if (clearButton && !clearButton.dataset.compareBound) {
-    clearButton.dataset.compareBound = "1";
-    clearButton.addEventListener("click", clearCompareItems);
-  }
-  const diffButton = detailPanel.querySelector("[data-open-compare-diff]");
-  if (diffButton && !diffButton.dataset.compareBound) {
-    diffButton.dataset.compareBound = "1";
-    diffButton.addEventListener("click", openCompareDiff);
-  }
-  for (const button of detailPanel.querySelectorAll("[data-remove-compare-path]")) {
-    if (button.dataset.compareBound) continue;
-    button.dataset.compareBound = "1";
-    button.addEventListener("click", () => removeCompareItem(button.dataset.removeComparePath));
-  }
-  for (const button of detailPanel.querySelectorAll("[data-preview-compare-path]")) {
-    if (button.dataset.compareBound) continue;
-    button.dataset.compareBound = "1";
-    button.addEventListener("click", async () => {
-      await previewCompareItem(button.dataset.previewComparePath);
-    });
-  }
-}
-
-async function openCompareDiff() {
-  const panel = detailPanel.querySelector("#compareDiffPanel");
-  const [left, right] = getCompareItems();
-  if (!panel || !left?.path || !right?.path) return;
-  panel.innerHTML = '<p class="empty-state">A/B 원문 미리보기를 불러오고 있습니다.</p>';
-  try {
-    const [leftPayload, rightPayload] = await Promise.all([
-      api(`/api/runs/${selectedRunId}/source-preview?path=${encodeURIComponent(left.path)}`),
-      api(`/api/runs/${selectedRunId}/source-preview?path=${encodeURIComponent(right.path)}`),
-    ]);
-    panel.innerHTML = renderCompareDiff(leftPayload, rightPayload);
-  } catch (error) {
-    panel.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
-  }
-}
-
-function renderCompareDiff(left, right) {
-  if (left.preview_type !== "text" || right.preview_type !== "text") {
-    return '<p class="empty-state">원문 차이 보기는 두 항목 모두 텍스트 미리보기가 있을 때 사용할 수 있습니다.</p>';
-  }
-  const leftLines = String(left.text || "").split(/\r?\n/);
-  const rightLines = String(right.text || "").split(/\r?\n/);
-  const leftSet = new Set(leftLines);
-  const rightSet = new Set(rightLines);
-  const onlyLeft = leftLines.filter((line) => line.trim() && !rightSet.has(line)).slice(0, 80);
-  const onlyRight = rightLines.filter((line) => line.trim() && !leftSet.has(line)).slice(0, 80);
-  return `
-    <section class="compare-diff">
-      <div class="review-group-header">
-        <div>
-          <p class="eyebrow">text diff</p>
-          <h3>${escapeHtml(left.name)} vs ${escapeHtml(right.name)}</h3>
-        </div>
-        <span class="status-pill">${onlyLeft.length + onlyRight.length} differences</span>
-      </div>
-      <div class="compare-grid">
-        <article class="compare-slot">
-          <strong>Only in A</strong>
-          <pre class="viewer-text">${escapeHtml(onlyLeft.join("\n") || "No unique text in first preview.")}</pre>
-        </article>
-        <article class="compare-slot">
-          <strong>Only in B</strong>
-          <pre class="viewer-text">${escapeHtml(onlyRight.join("\n") || "No unique text in second preview.")}</pre>
-        </article>
-      </div>
-    </section>
-  `;
-}
-
-function bindCopyButtons() {
+export function bindCopyButtons() {
   for (const button of detailPanel.querySelectorAll("[data-copy-path]")) {
     if (button.dataset.copyBound) continue;
     button.dataset.copyBound = "1";
@@ -8108,16 +7753,6 @@ function bindCopyButtons() {
       await navigator.clipboard?.writeText(button.dataset.copyPath || "");
       button.textContent = "Copied";
     });
-  }
-}
-
-function parseCompareItem(value) {
-  if (!value) return null;
-  try {
-    const item = JSON.parse(value);
-    return item && typeof item === "object" ? item : null;
-  } catch {
-    return null;
   }
 }
 
@@ -8129,14 +7764,6 @@ function parseJsonDataset(value) {
   } catch {
     return null;
   }
-}
-
-async function previewCompareItem(path) {
-  if (!path) return;
-  if (!detailPanel.querySelector("#evidenceViewer")) {
-    await switchTab("search");
-  }
-  await loadEvidencePreview(path);
 }
 
 function bindPanelActions() {
@@ -8680,7 +8307,7 @@ function renderCaseDbEnsureResult(payload) {
   `;
 }
 
-function renderCaseDbSearchResult(payload) {
+export function renderCaseDbSearchResult(payload) {
   currentCaseDbSearchPayload = payload;
   const rows = payload.matches || [];
   const visibleRows = virtualizedRows(rows, "caseDb");
@@ -8856,7 +8483,7 @@ function sourceReferenceLine(reference) {
   return parts.length ? `<span class="source-reference">${escapeHtml(parts.join(" · "))}</span>` : "";
 }
 
-function bindCaseDbReportExportButton(database, caseId) {
+export function bindCaseDbReportExportButton(database, caseId) {
   const button = detailPanel.querySelector("[data-case-db-export-report]");
   if (!button) return;
   button.addEventListener("click", async () => {
@@ -8878,7 +8505,7 @@ function bindCaseDbReportExportButton(database, caseId) {
   });
 }
 
-function bindCaseDbReviewButtons(database, caseId) {
+export function bindCaseDbReviewButtons(database, caseId) {
   for (const button of detailPanel.querySelectorAll("[data-case-db-review]")) {
     button.addEventListener("click", async () => {
       const payload = JSON.parse(button.dataset.caseDbReview || "{}");
@@ -8898,7 +8525,7 @@ function bindCaseDbReviewButtons(database, caseId) {
   }
 }
 
-function bindCaseDbBatchButtons(database, caseId) {
+export function bindCaseDbBatchButtons(database, caseId) {
   for (const button of detailPanel.querySelectorAll("[data-case-db-select]")) {
     button.addEventListener("click", () => {
       const mode = button.dataset.caseDbSelect;
@@ -9173,7 +8800,7 @@ function refreshReviewSelectionUi() {
   }
 }
 
-async function switchTab(tab, options = {}) {
+export async function switchTab(tab, options = {}) {
   if (!tab) return;
   activeTab = tab;
   if (tab !== "artifacts") activeArtifactFilter = "";
@@ -9212,7 +8839,7 @@ function tabsForGroup(groupId) {
   return viewGroupById(groupId).tabs;
 }
 
-function groupForTab(tab) {
+export function groupForTab(tab) {
   return VIEW_GROUPS.find((group) => group.tabs.includes(tab))?.id || "triage";
 }
 
@@ -9284,431 +8911,6 @@ function renderPaginationControls(pagination, tab) {
       <button class="secondary-button" type="button" data-page-tab="${escapeHtml(tab)}" data-page-offset="${pagination.next_offset ?? pagination.offset}" ${pagination.next_offset === null ? "disabled" : ""}>Next ${pagination.limit} ${kbd("]")}</button>
     </div>
   `;
-}
-
-function hydrateRunForm() {
-  if (!storageAvailable()) return;
-  const saved = JSON.parse(window.localStorage.getItem(RUN_FORM_STORAGE_KEY) || "{}");
-  for (const [selector, key] of [
-    ["#rootInput", "root"],
-    ["#modeInput", "mode"],
-    ["#inputKindInput", "inputKind"],
-    ["#outputInput", "outputDir"],
-    ["#processingProfileInput", "processingProfile"],
-    ["#collectProfileInput", "collectProfile"],
-    ["#maxExtractMbInput", "maxExtractMb"],
-    ["#maxFileCountInput", "maxFileCount"],
-    ["#e01PartitionStartSectorInput", "e01PartitionStartSector"],
-    ["#knownGoodHashFeedInput", "knownGoodHashFeeds"],
-    ["#knownGoodMaxHashMbInput", "knownGoodMaxHashMb"],
-    ["#importOutputInput", "importOutputDir"],
-  ]) {
-    const element = document.querySelector(selector);
-    if (element && saved[key] !== undefined) element.value = saved[key];
-  }
-  for (const [selector, key] of [
-    ["#readOnlyInput", "readOnly"],
-    ["#dryRunInput", "dryRun"],
-    ["#overwriteInput", "overwrite"],
-    ["#hideKnownGoodInput", "hideKnownGood"],
-  ]) {
-    const element = document.querySelector(selector);
-    if (element && saved[key] !== undefined) element.checked = Boolean(saved[key]);
-  }
-}
-
-function persistRunForm() {
-  if (!storageAvailable()) return;
-  const payload = {
-    root: document.querySelector("#rootInput")?.value || "",
-    mode: document.querySelector("#modeInput")?.value || "fraud",
-    inputKind: document.querySelector("#inputKindInput")?.value || "",
-    outputDir: document.querySelector("#outputInput")?.value || "",
-    processingProfile: document.querySelector("#processingProfileInput")?.value || "fast",
-    collectProfile: document.querySelector("#collectProfileInput")?.value || "intrusion",
-    maxExtractMb: document.querySelector("#maxExtractMbInput")?.value || "0",
-    maxFileCount: document.querySelector("#maxFileCountInput")?.value || "0",
-    e01PartitionStartSector: document.querySelector("#e01PartitionStartSectorInput")?.value || "",
-    knownGoodHashFeeds: document.querySelector("#knownGoodHashFeedInput")?.value || "",
-    knownGoodMaxHashMb: document.querySelector("#knownGoodMaxHashMbInput")?.value || "64",
-    importOutputDir: document.querySelector("#importOutputInput")?.value || "",
-    readOnly: document.querySelector("#readOnlyInput")?.checked ?? true,
-    dryRun: document.querySelector("#dryRunInput")?.checked ?? false,
-    overwrite: document.querySelector("#overwriteInput")?.checked ?? false,
-    hideKnownGood: document.querySelector("#hideKnownGoodInput")?.checked ?? false,
-  };
-  window.localStorage.setItem(RUN_FORM_STORAGE_KEY, JSON.stringify(payload));
-}
-
-function bindRunFormPersistence() {
-  for (const selector of [
-    "#rootInput",
-    "#modeInput",
-    "#inputKindInput",
-    "#outputInput",
-    "#processingProfileInput",
-    "#collectProfileInput",
-    "#maxExtractMbInput",
-    "#maxFileCountInput",
-    "#e01PartitionStartSectorInput",
-    "#knownGoodHashFeedInput",
-    "#knownGoodMaxHashMbInput",
-    "#importOutputInput",
-    "#readOnlyInput",
-    "#dryRunInput",
-    "#overwriteInput",
-    "#hideKnownGoodInput",
-  ]) {
-    document.querySelector(selector)?.addEventListener("input", persistRunForm);
-    document.querySelector(selector)?.addEventListener("change", persistRunForm);
-    document.querySelector(selector)?.addEventListener("input", refreshRunPlanPreview);
-    document.querySelector(selector)?.addEventListener("change", refreshRunPlanPreview);
-  }
-  document.querySelector("#processingProfileInput")?.addEventListener("change", applyProcessingProfile);
-  document.querySelector("#rootInput")?.addEventListener("input", applyRootEvidenceHints);
-  document.querySelector("#rootInput")?.addEventListener("change", applyRootEvidenceHints);
-  collectPlanButton?.addEventListener("click", previewCollectPlan);
-  bindStartChoiceCards();
-}
-
-function bindStartChoiceCards() {
-  for (const button of document.querySelectorAll("[data-intake-action]")) {
-    button.addEventListener("click", () => applyStartChoice(button.dataset.intakeAction || ""));
-  }
-}
-
-function applyStartChoice(action) {
-  const rootInput = document.querySelector("#rootInput");
-  const inputKindInput = document.querySelector("#inputKindInput");
-  const processingProfileInput = document.querySelector("#processingProfileInput");
-  const modeInput = document.querySelector("#modeInput");
-  if (action === "e01") {
-    if (inputKindInput) inputKindInput.value = "e01-derived";
-    if (processingProfileInput) processingProfileInput.value = "fast";
-    if (modeInput) modeInput.value = "fraud";
-    rootInput?.focus();
-    evidenceCheckStatus.textContent = "E01/Ex01 또는 이미지 경로를 넣고 이미지 지원 확인을 누르면 도구, 파티션, 마운트/추출 필요 여부를 먼저 확인합니다.";
-  } else if (action === "folder") {
-    if (inputKindInput) inputKindInput.value = "folder";
-    if (processingProfileInput) processingProfileInput.value = "fast";
-    if (modeInput) modeInput.value = "fraud";
-    rootInput?.focus();
-    evidenceCheckStatus.textContent = "이미지를 이미 마운트/추출한 폴더나 벤더 Export 폴더 경로를 넣고 분석 실행을 누르면 됩니다.";
-  } else if (action === "recent") {
-    document.querySelector("#importOutputInput")?.focus();
-  } else if (action === "sample") {
-    sampleRunButton?.click();
-  } else if (action === "qc") {
-    doctorButton?.click();
-  }
-  persistRunForm();
-  refreshRunPlanPreview();
-}
-
-function detectEvidenceImageKind(root) {
-  const value = String(root || "").trim();
-  if (!value) return { isImage: false, family: "", label: "", inputKind: "" };
-  for (const format of IMAGE_EVIDENCE_FORMATS) {
-    if (format.pattern.test(value)) {
-      return {
-        isImage: true,
-        family: format.family,
-        label: format.label,
-        inputKind: format.inputKind,
-      };
-    }
-  }
-  return { isImage: false, family: "", label: "", inputKind: "" };
-}
-
-function applyRootEvidenceHints() {
-  const root = document.querySelector("#rootInput")?.value || "";
-  const rootError = document.querySelector("#rootInputError");
-  if (root.trim() && rootError) rootError.hidden = true;
-  const inputKindInput = document.querySelector("#inputKindInput");
-  const detected = detectEvidenceImageKind(root);
-  if (detected.isImage && detected.inputKind && inputKindInput && ["", "e01-derived", "disk-image-derived", "archive-image-derived"].includes(inputKindInput.value)) {
-    inputKindInput.value = detected.inputKind;
-  }
-  if (evidenceCheckStatus && evidenceCheckStatus.dataset.checkedRoot !== root) {
-    delete evidenceCheckStatus.dataset.checkedRoot;
-    evidenceCheckStatus.textContent = detected.isImage
-      ? `${detected.label} 이미지로 보입니다. 먼저 이미지 지원 확인으로 필요한 도구, 파티션/마운트/추출 가능 여부를 확인하세요.`
-      : "E01/Ex01/RAW/VHDX/DMG는 먼저 도구와 파티션 처리 가능 여부를 확인합니다.";
-  }
-  persistRunForm();
-  refreshRunPlanPreview();
-}
-
-function applyProcessingProfile() {
-  const profile = document.querySelector("#processingProfileInput")?.value || "fast";
-  const readOnly = document.querySelector("#readOnlyInput");
-  const maxExtractMb = document.querySelector("#maxExtractMbInput");
-  const maxFileCount = document.querySelector("#maxFileCountInput");
-  const overwrite = document.querySelector("#overwriteInput");
-  if (profile === "fast") {
-    if (readOnly) readOnly.checked = true;
-    if (maxExtractMb) maxExtractMb.value = "0";
-    if (maxFileCount) maxFileCount.value = "0";
-    if (overwrite) overwrite.checked = false;
-  }
-  if (profile === "standard") {
-    if (readOnly) readOnly.checked = false;
-    if (maxExtractMb) maxExtractMb.value = "512";
-    if (maxFileCount) maxFileCount.value = "1000";
-    if (overwrite) overwrite.checked = false;
-  }
-  if (profile === "deep") {
-    if (readOnly) readOnly.checked = false;
-    if (maxExtractMb) maxExtractMb.value = "0";
-    if (maxFileCount) maxFileCount.value = "0";
-  }
-  persistRunForm();
-  refreshRunPlanPreview();
-}
-
-function refreshRunPlanPreview() {
-  const target = document.querySelector("#runPlanPreview");
-  if (!target) return;
-  const root = document.querySelector("#rootInput")?.value || "";
-  const profileKey = document.querySelector("#processingProfileInput")?.value || "fast";
-  const profile = PROCESSING_PROFILES[profileKey] || PROCESSING_PROFILES.fast;
-  const readOnly = document.querySelector("#readOnlyInput")?.checked ?? true;
-  const dryRun = document.querySelector("#dryRunInput")?.checked ?? false;
-  const maxExtractBytes = extractLimitBytes();
-  const maxFiles = Number(document.querySelector("#maxFileCountInput")?.value || 0);
-  const e01PartitionStartSector = optionalInteger(document.querySelector("#e01PartitionStartSectorInput")?.value);
-  const knownGoodFeeds = parseKnownGoodHashFeeds();
-  const hideKnownGood = document.querySelector("#hideKnownGoodInput")?.checked ?? false;
-  const knownGoodMaxBytes = knownGoodMaxHashBytes();
-  const mode = document.querySelector("#modeInput")?.value || "fraud";
-  const collectors = RUN_MODE_COLLECTORS[mode] || RUN_MODE_COLLECTORS.fraud;
-  const badges = [
-    ...profile.badges,
-    readOnly ? "read-only" : "extract allowed",
-    dryRun ? "dry-run" : "writes output",
-    knownGoodFeeds.length ? `${knownGoodFeeds.length} known-good feed(s)` : "no known-good feed",
-    hideKnownGood ? "hide known-good" : "known-good reviewable",
-  ];
-  target.innerHTML = `
-    <p class="eyebrow">run plan preview</p>
-    <h3>${escapeHtml(profile.title)} · ${escapeHtml(titleCase(mode))}</h3>
-    <p>${escapeHtml(profile.summary)}</p>
-    <p>Collectors: ${collectors.map((collector) => `<code>${escapeHtml(collector)}</code>`).join(" ")}</p>
-    ${renderRunPlanE01Readiness(root, e01PartitionStartSector, profileKey)}
-    <div class="processing-caps">
-      ${badges.map((badge) => `<span>${escapeHtml(badge)}</span>`).join("")}
-      <span>Max extract: ${maxExtractBytes ? formatBytes(maxExtractBytes) : "uncapped/none"}</span>
-      <span>Max files: ${Number.isFinite(maxFiles) && maxFiles > 0 ? formatNumber(maxFiles) : "uncapped/none"}</span>
-      <span>E01 partition: ${e01PartitionStartSector === null ? "auto largest supported" : `sector ${formatNumber(e01PartitionStartSector)}`}</span>
-      <span>Known-good hash cap: ${formatBytes(knownGoodMaxBytes)}</span>
-      <span>Signature mismatch: always on</span>
-    </div>
-  `;
-  updateRunSubmissionCta(root, profileKey);
-}
-
-function isLikelyE01Path(root) {
-  return detectEvidenceImageKind(root).family === "ewf";
-}
-
-function isLikelyImageEvidencePath(root) {
-  return detectEvidenceImageKind(root).isImage;
-}
-
-function updateRunSubmissionCta(root, profileKey = "fast") {
-  if (!runButton) return;
-  if (runButton.disabled) return;
-  const detected = detectEvidenceImageKind(root);
-  if (isLikelyE01Path(root)) {
-    runButton.dataset.e01Detected = "true";
-    delete runButton.dataset.evidenceImageDetected;
-    runButton.textContent = profileKey === "fast"
-      ? "E01 사전 점검 + 빠른 분석"
-      : "E01 인입 + 분석 실행";
-    return;
-  }
-  if (detected.isImage) {
-    runButton.dataset.evidenceImageDetected = "true";
-    delete runButton.dataset.e01Detected;
-    runButton.textContent = profileKey === "fast"
-      ? "이미지 빠른 분석 실행"
-      : "이미지 인입 + 분석 실행";
-    return;
-  }
-  delete runButton.dataset.e01Detected;
-  delete runButton.dataset.evidenceImageDetected;
-  runButton.textContent = "분석 실행";
-}
-
-function runStartingLabel(root) {
-  if (isLikelyE01Path(root)) return "E01 분석 준비 중...";
-  if (isLikelyImageEvidencePath(root)) return "이미지 증거 분석 준비 중...";
-  return "분석 시작 중...";
-}
-
-function renderRunPlanE01Readiness(root, partitionStartSector, profileKey) {
-  const detected = detectEvidenceImageKind(root);
-  if (!detected.isImage) return "";
-  if (!isLikelyE01Path(root)) {
-    const imageWarning = profileKey === "deep"
-      ? "대용량 이미지에서 심층 추출은 오래 걸릴 수 있습니다. 빠른 1차 분석 후 필요한 범위만 깊게 보세요."
-      : "이미지 증거는 먼저 지원 확인으로 도구와 추출 방식을 확인한 뒤 빠른 1차 분석을 권장합니다.";
-    const strategyText = detected.family === "forensic-container"
-      ? "벤더 도구로 Export/마운트 후 폴더 분석"
-      : "지원 확인 후 마운트/추출 또는 직접 분석";
-    return `
-      <section class="run-plan-e01-readiness" aria-label="Image evidence pre-run readiness">
-        <div class="review-group-header">
-          <div>
-            <p class="eyebrow">image evidence pre-run</p>
-            <h4>${escapeHtml(detected.label)} 이미지 증거로 보입니다</h4>
-          </div>
-          <span class="status-pill warning">support check recommended</span>
-        </div>
-        <p>${escapeHtml(imageWarning)}</p>
-        <div class="processing-caps">
-          <span>Recommended input kind: ${escapeHtml(detected.inputKind || "vendor-export-first")}</span>
-          <span>${escapeHtml(strategyText)}</span>
-          <span>해시/출처/도구 버전 보존 필요</span>
-        </div>
-      </section>
-    `;
-  }
-  const sectorText = partitionStartSector === null
-    ? "auto select largest supported filesystem"
-    : `use sector ${formatNumber(partitionStartSector)}`;
-  const profileWarning = profileKey === "deep"
-    ? "Deep extraction can be very slow on E01. Start fast unless you already narrowed the target."
-    : "Good start: run fast/standard first, then deepen after search results point to useful evidence.";
-  return `
-    <section class="run-plan-e01-readiness" aria-label="E01 pre-run readiness">
-      <div class="review-group-header">
-        <div>
-          <p class="eyebrow">windows 11 e01 pre-run</p>
-          <h4>E01 single-case workflow will run before artifact analysis</h4>
-        </div>
-        <span class="status-pill warning">preflight required</span>
-      </div>
-      <p>${escapeHtml(profileWarning)}</p>
-      <div class="processing-caps">
-        <span>Recommended input kind: e01-derived</span>
-        <span>Partition: ${escapeHtml(sectorText)}</span>
-        <span>Evidence support check recommended</span>
-      </div>
-      <div class="e01-pre-run-grid">
-        ${E01_PRE_RUN_STEPS.map((step, index) => `
-          <article>
-            <strong>${index + 1}. ${escapeHtml(step.label)}</strong>
-            <span>${escapeHtml(step.text)}</span>
-          </article>
-        `).join("")}
-      </div>
-    </section>
-  `;
-}
-
-function optionalInteger(value) {
-  const text = String(value ?? "").trim();
-  if (!text) return null;
-  const number = Number(text);
-  if (!Number.isInteger(number) || number < 0) return null;
-  return number;
-}
-
-function extractLimitBytes() {
-  const mb = Number(document.querySelector("#maxExtractMbInput")?.value || 0);
-  if (!Number.isFinite(mb) || mb <= 0) return 0;
-  return Math.floor(mb * 1024 * 1024);
-}
-
-function parseKnownGoodHashFeeds() {
-  const raw = document.querySelector("#knownGoodHashFeedInput")?.value || "";
-  return raw
-    .split(/[\n,;]+/)
-    .map((value) => value.trim())
-    .filter(Boolean);
-}
-
-function knownGoodMaxHashBytes() {
-  const raw = document.querySelector("#knownGoodMaxHashMbInput")?.value;
-  if (raw === undefined || String(raw).trim() === "") return 64 * 1024 * 1024;
-  const mb = Number(raw);
-  if (!Number.isFinite(mb) || mb < 0) return 64 * 1024 * 1024;
-  return Math.floor(mb * 1024 * 1024);
-}
-
-async function previewCollectPlan() {
-  const target = document.querySelector("#collectPlanPreview");
-  const root = document.querySelector("#rootInput")?.value || "";
-  const profile = document.querySelector("#collectProfileInput")?.value || "intrusion";
-  const inputKind = document.querySelector("#inputKindInput")?.value || null;
-  if (!target) return;
-  if (!root.trim()) {
-    target.innerHTML = '<p class="empty-state">먼저 마운트/Export된 증거 경로를 넣어주세요.</p>';
-    return;
-  }
-  collectPlanButton.disabled = true;
-  collectPlanButton.textContent = "확인 중...";
-  target.innerHTML = '<p class="empty-state">중요 아티팩트 경로를 확인하는 중입니다...</p>';
-  try {
-    const payload = await api("/api/collect/plan", {
-      method: "POST",
-      body: JSON.stringify({ root, profile, input_kind: inputKind }),
-    });
-    target.innerHTML = renderCollectPlanPreview(payload);
-  } catch (error) {
-    target.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
-  } finally {
-    collectPlanButton.disabled = false;
-    collectPlanButton.textContent = "수집 대상 보기";
-  }
-}
-
-function renderCollectPlanPreview(payload) {
-  const summary = payload.summary || {};
-  const categoryCounts = summary.category_counts || {};
-  const presentTargets = (payload.targets || []).filter((target) => target.exists).slice(0, 8);
-  const exportCommand = `rapidtriage collect-export ${shellQuote(payload.root || "ROOT")} ./collect-export --profile ${shellQuote(payload.profile || "intrusion")} --copy`;
-  return `
-    <div class="processing-caps">
-      <span>Profile: ${escapeHtml(payload.profile || "")}</span>
-      <span>Present: ${formatNumber(summary.present_count || 0)}</span>
-      <span>Missing: ${formatNumber(summary.missing_count || 0)}</span>
-      <span>Total targets: ${formatNumber(summary.target_count || 0)}</span>
-    </div>
-    <div class="processing-step-grid">
-      ${Object.entries(categoryCounts).map(([category, counts]) => `
-        <article class="processing-step ${counts.present_count ? "none" : "notice"}">
-          <div>
-            <strong>${escapeHtml(category)}</strong>
-            <span>${formatNumber(counts.present_count || 0)}/${formatNumber(counts.target_count || 0)}</span>
-          </div>
-          <p>${formatNumber(counts.missing_count || 0)} missing targets</p>
-        </article>
-      `).join("")}
-    </div>
-    ${presentTargets.length ? `
-      <div class="dense-list">
-        ${presentTargets.map((target) => `
-          <div class="dense-row">
-            <strong>${escapeHtml(target.label || target.relative_path || "target")}</strong>
-            <span>${escapeHtml(target.relative_path || target.path || "")}</span>
-          </div>
-        `).join("")}
-      </div>
-    ` : '<p class="empty-state">No target paths were found for this profile.</p>'}
-    <div class="command-list">
-      <code>${escapeHtml(exportCommand)}</code>
-      <code>rapidtriage run ./collect-export/evidence --mode hacking --read-only</code>
-    </div>
-  `;
-}
-
-function shellQuote(value) {
-  const text = String(value || "");
-  if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(text)) return text;
-  return `'${text.replace(/'/g, "'\\''")}'`;
 }
 
 runForm.addEventListener("submit", async (event) => {
@@ -9880,139 +9082,9 @@ function renderCrashReportsPanel(payload) {
   `;
 }
 
-function bindCrashReportActions() {
-  detailPanel.querySelectorAll("[data-crash-detail]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      const target = detailPanel.querySelector("#crashReportDetail");
-      try {
-        const payload = await api(`/api/crash-reports/${encodeURIComponent(button.dataset.crashDetail || "")}`);
-        const report = payload.payload || {};
-        target.innerHTML = `
-          <h4>${escapeHtml(payload.summary?.crash_id || "")}</h4>
-          <p>${escapeHtml(report.privacy_note || "")}</p>
-          <code>${escapeHtml(payload.path || "")}</code>
-          <pre>${escapeHtml(JSON.stringify({
-            exception: report.exception,
-            context: report.context,
-            redaction_matrix_hash: report.crash_redaction_matrix_hash,
-            no_upload_manifest_hash: report.crash_no_upload_manifest_hash,
-          }, null, 2))}</pre>
-        `;
-      } catch (error) {
-        target.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
-      }
-    });
-  });
-  detailPanel.querySelectorAll("[data-crash-export]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      const target = detailPanel.querySelector("#crashReportDetail");
-      try {
-        const payload = await api(`/api/crash-reports/${encodeURIComponent(button.dataset.crashExport || "")}/export`, {
-          method: "POST",
-          body: JSON.stringify({}),
-        });
-        target.innerHTML = `
-          <h4>Crash export bundle created</h4>
-          <p>Bundle SHA256: ${escapeHtml(payload.bundle_sha256 || "")}</p>
-          <code>${escapeHtml(payload.bundle_path || "")}</code>
-          <p class="help-text">이 ZIP은 로컬에만 생성됩니다. 업로드나 외부 전송은 하지 않습니다.</p>
-        `;
-      } catch (error) {
-        target.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
-      }
-    });
-  });
-}
-
 evidenceCheckButton?.addEventListener("click", checkEvidenceSupport);
 
-async function checkEvidenceSupport() {
-  const root = document.querySelector("#rootInput")?.value?.trim();
-  if (!root) {
-    evidenceCheckStatus.textContent = "먼저 E01/Ex01/RAW/VHDX/DMG 이미지나 마운트/Export 폴더 경로를 넣어주세요.";
-    return;
-  }
-  evidenceCheckButton.disabled = true;
-  evidenceCheckButton.textContent = "확인 중...";
-  evidenceCheckStatus.textContent = "이미지 형식, 필요한 도구, 파티션/마운트 처리 가능 여부를 확인하는 중입니다...";
-  try {
-    const payload = await api("/api/evidence/identify", {
-      method: "POST",
-      body: JSON.stringify({ path: root }),
-    });
-    const result = payload.result || {};
-    applyEvidenceCheckRecommendation(result);
-    evidenceCheckStatus.innerHTML = renderEvidenceCheckStatus(result);
-    evidenceCheckStatus.dataset.checkedRoot = root;
-    bindEvidenceCheckActions();
-  } catch (error) {
-    evidenceCheckStatus.textContent = error.message;
-  } finally {
-    evidenceCheckButton.disabled = false;
-    evidenceCheckButton.textContent = "이미지 지원 확인";
-  }
-}
-
-function bindEvidenceCheckActions() {
-  if (!evidenceCheckStatus) return;
-  for (const button of evidenceCheckStatus.querySelectorAll("[data-open-tab]")) {
-    if (button.dataset.evidenceOpenTabBound) continue;
-    button.dataset.evidenceOpenTabBound = "1";
-    button.addEventListener("click", async () => {
-      await switchTab(button.dataset.openTab);
-    });
-  }
-  for (const button of evidenceCheckStatus.querySelectorAll("[data-start-configured-e01-run]")) {
-    if (button.dataset.e01StartBound) continue;
-    button.dataset.e01StartBound = "1";
-    button.addEventListener("click", () => {
-      const inputKindInput = document.querySelector("#inputKindInput");
-      if (inputKindInput) inputKindInput.value = "e01-derived";
-      updateRunSubmissionCta(document.querySelector("#rootInput")?.value || "", document.querySelector("#processingProfileInput")?.value || "fast");
-      runForm?.requestSubmit();
-    });
-  }
-  bindE01PartitionControls(evidenceCheckStatus);
-}
-
-function bindE01PartitionControls(rootElement) {
-  if (!rootElement) return;
-  for (const button of rootElement.querySelectorAll("[data-e01-partition-sector]")) {
-    if (button.dataset.e01PartitionBound) continue;
-    button.dataset.e01PartitionBound = "1";
-    button.addEventListener("click", () => {
-      const sectorInput = document.querySelector("#e01PartitionStartSectorInput");
-      if (sectorInput) {
-        sectorInput.value = button.dataset.e01PartitionSector || "";
-        sectorInput.focus();
-      }
-      persistRunForm();
-      refreshRunPlanPreview();
-    });
-  }
-  for (const button of rootElement.querySelectorAll("[data-e01-partition-focus]")) {
-    if (button.dataset.e01PartitionFocusBound) continue;
-    button.dataset.e01PartitionFocusBound = "1";
-    button.addEventListener("click", () => {
-      const sectorInput = document.querySelector("#e01PartitionStartSectorInput");
-      sectorInput?.scrollIntoView({ behavior: "smooth", block: "center" });
-      sectorInput?.focus();
-    });
-  }
-}
-
-function applyEvidenceCheckRecommendation(result) {
-  const workflow = result.ingest_workflow || {};
-  const recommendedInputKind = workflow.recommended_input_kind || "";
-  const inputKind = document.querySelector("#inputKindInput");
-  if (inputKind && !inputKind.value && recommendedInputKind) {
-    inputKind.value = recommendedInputKind;
-  }
-  persistRunForm();
-  refreshRunPlanPreview();
-}
-
-function renderEvidenceCheckStatus(result) {
+export function renderEvidenceCheckStatus(result) {
   const support = result.supported ? "supported" : "not supported";
   const action = result.can_extract || result.can_mount ? "direct handling available" : "mount/export first";
   const missing = (result.missing_tools || []).length ? ` Missing tools: ${(result.missing_tools || []).join(", ")}.` : "";
@@ -10200,86 +9272,6 @@ function renderE01HandoffContract(contract) {
         <ul>${(contract.required_output_chain || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
         <code>${escapeHtml(contract.run_command || "")}</code>
       </details>
-    </section>
-  `;
-}
-
-function renderEvidenceFailureGuidance(guidance) {
-  if (!guidance) return "";
-  return `
-    <section class="evidence-preflight-summary warning">
-      <div class="processing-caps">
-        <span>Failure class: ${escapeHtml(guidance.category || "unknown")}</span>
-      </div>
-      <strong>${escapeHtml(guidance.title || "Evidence handling issue")}</strong>
-      <p>${escapeHtml(guidance.analyst_message || "")}</p>
-      ${(guidance.next_actions || []).length ? `
-        <ul>${(guidance.next_actions || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
-      ` : ""}
-    </section>
-  `;
-}
-
-function renderEvidencePreflightSummary(summary) {
-  if (!summary) return "";
-  return `
-    <section class="evidence-preflight-summary">
-      <div class="processing-caps">
-        <span>Status: ${escapeHtml(summary.status || "unknown")}</span>
-        <span>Available: ${formatNumber(summary.available_count || 0)}</span>
-        <span>Missing: ${formatNumber(summary.missing_count || 0)}</span>
-      </div>
-      <p>${escapeHtml(summary.operator_message || "")}</p>
-      ${(summary.remediation_steps || []).length ? `
-        <details class="match-details">
-          <summary>How to fix missing E01 tools</summary>
-          <ul>${(summary.remediation_steps || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
-        </details>
-      ` : ""}
-    </section>
-  `;
-}
-
-function renderEvidenceToolPreflight(rows) {
-  if (!rows.length) return "";
-  return `
-    <details class="match-details evidence-tool-details">
-      <summary>Tool preflight details</summary>
-      <div class="dense-list">
-        ${rows.map((row) => `
-          <div class="dense-row">
-            <strong>${escapeHtml(row.tool || "")} · ${row.available ? "available" : "missing"}</strong>
-            <span>${escapeHtml(row.version || row.path || row.remediation || "No version/path available")}</span>
-            <small>${escapeHtml(row.purpose || "")}</small>
-            ${row.install_hint ? `<small>${escapeHtml(row.install_hint)}</small>` : ""}
-          </div>
-        `).join("")}
-      </div>
-    </details>
-  `;
-}
-
-function renderDoctorPanel(payload) {
-  const checks = payload.checks || [];
-  return `
-    <section class="guidance-card">
-      <p class="eyebrow">환경 점검</p>
-      <h3>RapidTriage 상태: ${escapeHtml(payload.status || "unknown")}</h3>
-      <div class="metric-grid">
-        ${metric("OK", payload.summary?.ok)}
-        ${metric("경고", payload.summary?.warn)}
-        ${metric("오류", payload.summary?.error)}
-        ${metric("점검 항목", payload.summary?.check_count)}
-      </div>
-      <div class="dense-list">
-        ${checks.map((check) => `
-          <div class="dense-row">
-            <strong>${escapeHtml(check.name || "")} · ${escapeHtml(check.status || "")}</strong>
-            <span>${escapeHtml(check.summary || "")}</span>
-            ${check.remediation ? `<span>${escapeHtml(check.remediation)}</span>` : ""}
-          </div>
-        `).join("")}
-      </div>
     </section>
   `;
 }
