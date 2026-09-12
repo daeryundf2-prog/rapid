@@ -1,0 +1,220 @@
+{
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/case-catalog": {
+      "get": "list_case_catalog_api_case_catalog_get"
+    },
+    "/api/case-catalog/add-run": {
+      "post": "add_case_catalog_run_api_case_catalog_add_run_post"
+    },
+    "/api/case-db/import-run": {
+      "post": "import_run_to_case_db_api_case_db_import_run_post"
+    },
+    "/api/case-db/report-export": {
+      "post": "export_case_db_report_items_api_case_db_report_export_post"
+    },
+    "/api/case-db/review": {
+      "post": "mark_case_db_review_api_case_db_review_post"
+    },
+    "/api/case-db/review-batch": {
+      "post": "mark_case_db_reviews_batch_api_case_db_review_batch_post"
+    },
+    "/api/case-db/saved-searches": {
+      "post": "save_case_db_search_api_case_db_saved_searches_post"
+    },
+    "/api/case-db/saved-searches/list": {
+      "post": "list_case_db_saved_searches_api_case_db_saved_searches_list_post"
+    },
+    "/api/case-db/search": {
+      "post": "search_case_db_api_case_db_search_post"
+    },
+    "/api/collect/plan": {
+      "post": "collect_plan_api_collect_plan_post"
+    },
+    "/api/collect/profiles": {
+      "get": "collect_profiles_api_collect_profiles_get"
+    },
+    "/api/commercial-readiness": {
+      "get": "commercial_readiness_api_commercial_readiness_get"
+    },
+    "/api/crash-reports": {
+      "get": "crash_reports_api_crash_reports_get"
+    },
+    "/api/crash-reports/{crash_id}": {
+      "get": "crash_report_detail_api_crash_reports__crash_id__get"
+    },
+    "/api/crash-reports/{crash_id}/export": {
+      "post": "crash_report_export_api_crash_reports__crash_id__export_post"
+    },
+    "/api/doctor": {
+      "get": "doctor_api_doctor_get"
+    },
+    "/api/enterprise/policy": {
+      "get": "enterprise_policy_api_enterprise_policy_get"
+    },
+    "/api/evidence/formats": {
+      "get": "evidence_formats_api_evidence_formats_get"
+    },
+    "/api/evidence/identify": {
+      "post": "identify_evidence_path_api_evidence_identify_post"
+    },
+    "/api/forensic-capabilities": {
+      "get": "get_forensic_capabilities_api_forensic_capabilities_get"
+    },
+    "/api/health": {
+      "get": "health_api_health_get"
+    },
+    "/api/keyword-packs": {
+      "get": "keyword_packs_api_keyword_packs_get"
+    },
+    "/api/runs": {
+      "get": "list_runs_api_runs_get",
+      "post": "create_run_api_runs_post"
+    },
+    "/api/runs/import": {
+      "post": "import_run_api_runs_import_post"
+    },
+    "/api/runs/{run_id}": {
+      "delete": "delete_run_api_runs__run_id__delete",
+      "get": "get_run_api_runs__run_id__get"
+    },
+    "/api/runs/{run_id}/artifacts": {
+      "get": "get_run_artifacts_api_runs__run_id__artifacts_get"
+    },
+    "/api/runs/{run_id}/bookmarks": {
+      "post": "create_run_bookmark_api_runs__run_id__bookmarks_post"
+    },
+    "/api/runs/{run_id}/cancel": {
+      "post": "cancel_run_api_runs__run_id__cancel_post"
+    },
+    "/api/runs/{run_id}/capabilities": {
+      "get": "get_run_capabilities_api_runs__run_id__capabilities_get"
+    },
+    "/api/runs/{run_id}/case": {
+      "get": "get_run_case_api_runs__run_id__case_get"
+    },
+    "/api/runs/{run_id}/case-db/ensure": {
+      "post": "ensure_run_case_db_api_runs__run_id__case_db_ensure_post"
+    },
+    "/api/runs/{run_id}/case-report": {
+      "post": "create_case_report_api_runs__run_id__case_report_post"
+    },
+    "/api/runs/{run_id}/case-report/file": {
+      "get": "download_case_report_api_runs__run_id__case_report_file_get"
+    },
+    "/api/runs/{run_id}/case-report/file/{format_name}": {
+      "get": "download_case_report_format_api_runs__run_id__case_report_file__format_name__get"
+    },
+    "/api/runs/{run_id}/columnar-artifacts": {
+      "get": "get_run_columnar_artifacts_api_runs__run_id__columnar_artifacts_get"
+    },
+    "/api/runs/{run_id}/docs": {
+      "get": "get_run_docs_api_runs__run_id__docs_get"
+    },
+    "/api/runs/{run_id}/docs-index-search": {
+      "get": "search_run_docs_index_api_runs__run_id__docs_index_search_get"
+    },
+    "/api/runs/{run_id}/files": {
+      "get": "get_run_files_api_runs__run_id__files_get"
+    },
+    "/api/runs/{run_id}/indicators": {
+      "get": "get_run_indicators_api_runs__run_id__indicators_get"
+    },
+    "/api/runs/{run_id}/indicators/ti-enrichment": {
+      "get": "get_run_indicator_ti_enrichment_api_runs__run_id__indicators_ti_enrichment_get"
+    },
+    "/api/runs/{run_id}/output-files": {
+      "get": "get_run_output_files_api_runs__run_id__output_files_get"
+    },
+    "/api/runs/{run_id}/outputs/{output_name}": {
+      "get": "get_run_output_api_runs__run_id__outputs__output_name__get"
+    },
+    "/api/runs/{run_id}/outputs/{output_name}/file": {
+      "get": "download_run_output_api_runs__run_id__outputs__output_name__file_get"
+    },
+    "/api/runs/{run_id}/outputs/{output_name}/preview": {
+      "get": "preview_run_output_api_runs__run_id__outputs__output_name__preview_get"
+    },
+    "/api/runs/{run_id}/report": {
+      "get": "get_run_report_api_runs__run_id__report_get"
+    },
+    "/api/runs/{run_id}/retry": {
+      "post": "retry_run_api_runs__run_id__retry_post"
+    },
+    "/api/runs/{run_id}/reviewer-bundle": {
+      "post": "create_reviewer_bundle_api_runs__run_id__reviewer_bundle_post"
+    },
+    "/api/runs/{run_id}/reviewer-bundle/file": {
+      "get": "download_reviewer_bundle_api_runs__run_id__reviewer_bundle_file_get"
+    },
+    "/api/runs/{run_id}/search": {
+      "get": "search_run_api_runs__run_id__search_get"
+    },
+    "/api/runs/{run_id}/source-email-attachment": {
+      "get": "source_email_attachment_api_runs__run_id__source_email_attachment_get"
+    },
+    "/api/runs/{run_id}/source-file": {
+      "get": "download_source_file_api_runs__run_id__source_file_get"
+    },
+    "/api/runs/{run_id}/source-hex-range": {
+      "get": "source_hex_range_api_runs__run_id__source_hex_range_get"
+    },
+    "/api/runs/{run_id}/source-image-gallery": {
+      "get": "source_image_gallery_api_runs__run_id__source_image_gallery_get"
+    },
+    "/api/runs/{run_id}/source-media-cue": {
+      "get": "source_media_cue_api_runs__run_id__source_media_cue_get"
+    },
+    "/api/runs/{run_id}/source-metadata": {
+      "get": "source_metadata_api_runs__run_id__source_metadata_get"
+    },
+    "/api/runs/{run_id}/source-ocr-queue": {
+      "get": "source_ocr_queue_api_runs__run_id__source_ocr_queue_get"
+    },
+    "/api/runs/{run_id}/source-ocr-translation": {
+      "get": "source_ocr_translation_api_runs__run_id__source_ocr_translation_get"
+    },
+    "/api/runs/{run_id}/source-preview": {
+      "get": "preview_source_file_api_runs__run_id__source_preview_get"
+    },
+    "/api/runs/{run_id}/source-search": {
+      "get": "search_source_file_api_runs__run_id__source_search_get"
+    },
+    "/api/runs/{run_id}/source-sqlite-table": {
+      "get": "source_sqlite_table_api_runs__run_id__source_sqlite_table_get"
+    },
+    "/api/runs/{run_id}/source-sqlite-wal-preview": {
+      "get": "source_sqlite_wal_preview_api_runs__run_id__source_sqlite_wal_preview_get"
+    },
+    "/api/runs/{run_id}/submission-manifest": {
+      "get": "get_submission_manifest_api_runs__run_id__submission_manifest_get"
+    },
+    "/api/runs/{run_id}/submission-manifest/file": {
+      "get": "download_submission_manifest_api_runs__run_id__submission_manifest_file_get"
+    },
+    "/api/runs/{run_id}/summary": {
+      "get": "get_run_summary_api_runs__run_id__summary_get"
+    },
+    "/api/runs/{run_id}/timeline": {
+      "get": "get_run_timeline_api_runs__run_id__timeline_get"
+    },
+    "/api/runs/{run_id}/validation-package": {
+      "get": "get_run_validation_package_api_runs__run_id__validation_package_get"
+    },
+    "/api/runs/{run_id}/validation-package/file": {
+      "get": "download_run_validation_package_api_runs__run_id__validation_package_file_get"
+    },
+    "/api/runs/{run_id}/viewer-workflow-validation": {
+      "get": "get_run_viewer_workflow_validation_api_runs__run_id__viewer_workflow_validation_get"
+    },
+    "/api/sample-case/run": {
+      "post": "run_sample_case_api_sample_case_run_post"
+    },
+    "/api/workbench/large-result-evidence": {
+      "get": "workbench_large_result_evidence_api_workbench_large_result_evidence_get"
+    },
+    "/api/workbench/smoke-contract": {
+      "get": "workbench_smoke_contract_api_workbench_smoke_contract_get"
+    }
+  }
+}
