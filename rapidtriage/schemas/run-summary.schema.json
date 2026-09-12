@@ -215,6 +215,16 @@
             "type": "string"
           }
         },
+        "delta_applied_outputs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "evidence_delta": {
+          "type": "object",
+          "additionalProperties": true
+        },
         "input_fingerprint": {
           "type": "object",
           "additionalProperties": true

@@ -44,6 +44,17 @@ from .e01 import (
 from .extract import DEFAULT_EXTRACT_MANIFEST_NAME, SUPPORTED_DOC_KINDS, run_extract
 from .files import DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES, run_files_scan
 from .forensic_accuracy import build_accuracy_gate
+from .incremental import (
+    EVIDENCE_DELTA_MANIFEST_NAME,
+    EVIDENCE_DELTA_SCOPE_DIR_NAME,
+    EvidenceDeltaContext,
+    build_evidence_delta,
+    build_evidence_delta_manifest,
+    fingerprint_file_index,
+    materialize_delta_scope,
+    merge_delta_artifact_payload,
+    merge_delta_files_payload,
+)
 from .indicators import build_indicator_summary
 from .input_root import InputRoot, derive_child_input_root, resolve_input_root
 from .reporting import build_run_report_context, render_run_markdown_report
@@ -422,7 +433,57 @@ def run_triage_mode(
         )
     write_result(current_fingerprint, fingerprint_path)
 
+    # R-7c: when --resume is requested but the input fingerprint changed,
+    # compute a per-file delta so unchanged evidence paths can keep their
+    # prior files/artifact stage rows instead of being recollected.
+    evidence_delta: dict[str, object] | None = None
+    evidence_delta_context: EvidenceDeltaContext | None = None
+    if (
+        resume
+        and previous_fingerprint
+        and str(previous_fingerprint.get("fingerprint") or "")
+        != str(current_fingerprint.get("fingerprint") or "")
+    ):
+        evidence_delta = build_evidence_delta(previous_fingerprint, current_fingerprint)
+        if evidence_delta.get("usable"):
+            blockers = [str(item) for item in evidence_delta.get("blockers") or []]
+            scope_manifest = materialize_delta_scope(
+                scan_root,
+                output_dir / EVIDENCE_DELTA_SCOPE_DIR_NAME,
+                evidence_delta.get("scope_paths") or [],
+            )
+            files_delta_enabled = (
+                not known_good_hash_feeds
+                and not hide_known_good
+                and known_good_max_hash_bytes == DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES
+            )
+            if not files_delta_enabled:
+                blockers.append(
+                    "known-good feeds change candidate classification; files stage delta disabled"
+                )
+            artifacts_delta_enabled = scan_root == input_root.root_path
+            if not artifacts_delta_enabled:
+                blockers.append(
+                    "scan scope narrows the fingerprinted root; artifact stage delta disabled"
+                )
+            evidence_delta_context = EvidenceDeltaContext(
+                scope_root=Path(str(scope_manifest["scope_root"])),
+                source_root=scan_root,
+                scope_file_count=int(scope_manifest.get("file_count") or 0),
+                added=frozenset(str(path) for path in (evidence_delta.get("added") or [])),
+                removed=frozenset(str(path) for path in (evidence_delta.get("removed") or [])),
+                changed=frozenset(str(path) for path in (evidence_delta.get("changed") or [])),
+                unchanged=frozenset(str(path) for path in (evidence_delta.get("unchanged_paths") or [])),
+                files_delta_enabled=files_delta_enabled,
+                artifacts_delta_enabled=artifacts_delta_enabled,
+                blockers=tuple(blockers),
+                scope_manifest=scope_manifest,
+            )
+            if blockers:
+                evidence_delta["blockers"] = blockers
+
     reused_outputs: set[str] = set()
+    delta_applied_outputs: set[str] = set()
     checkpoint_records: list[dict[str, object]] = []
 
     manifest_payload, reused = load_or_build_json(
@@ -462,25 +523,59 @@ def run_triage_mode(
         and not hide_known_good
         and known_good_max_hash_bytes == DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES
     )
-    files_payload, reused = load_or_build_json(
-        files_path,
-        resume=files_scan_resume,
-        expected_command="files",
-        required_keys=("summary", "candidates"),
-        producer=lambda: run_files_scan(
-            scan_input_root,
-            categories=profile.file_scan_categories,
-            path_contains=profile.file_scan_path_contains or None,
-            limit=run_scan_limit,
-            rule_set=rule_set,
-            known_good_hash_feeds=known_good_hash_feeds,
-            hide_known_good=hide_known_good,
-            known_good_max_hash_bytes=known_good_max_hash_bytes,
-        ),
-    )
+    files_payload: dict[str, object] | None = None
+    if evidence_delta_context is not None and evidence_delta_context.files_delta_enabled:
+        previous_files_payload = load_reusable_json(
+            files_path,
+            expected_command="files",
+            required_keys=("summary", "candidates"),
+        )
+        if previous_files_payload is not None:
+            delta_files_payload = (
+                run_files_scan(
+                    derive_child_input_root(input_root, evidence_delta_context.scope_root),
+                    categories=profile.file_scan_categories,
+                    path_contains=profile.file_scan_path_contains or None,
+                    limit=run_scan_limit,
+                    rule_set=rule_set,
+                )
+                if evidence_delta_context.scope_file_count
+                else None
+            )
+            files_payload = merge_delta_files_payload(
+                previous_files_payload,
+                delta_files_payload,
+                delta=evidence_delta_context,
+            )
+            delta_applied_outputs.add("files")
+    if files_payload is None:
+        files_payload, reused = load_or_build_json(
+            files_path,
+            resume=files_scan_resume,
+            expected_command="files",
+            required_keys=("summary", "candidates"),
+            producer=lambda: run_files_scan(
+                scan_input_root,
+                categories=profile.file_scan_categories,
+                path_contains=profile.file_scan_path_contains or None,
+                limit=run_scan_limit,
+                rule_set=rule_set,
+                known_good_hash_feeds=known_good_hash_feeds,
+                hide_known_good=hide_known_good,
+                known_good_max_hash_bytes=known_good_max_hash_bytes,
+            ),
+        )
+    else:
+        reused = False
     if reused:
         reused_outputs.add("files")
-    record_run_checkpoint(checkpoint_records, "files", files_path, reused=reused)
+    record_run_checkpoint(
+        checkpoint_records,
+        "files",
+        files_path,
+        reused=reused,
+        delta_merged="files" in delta_applied_outputs,
+    )
     files_payload["scan_scope_root"] = str(scan_input_root.root_path)
     record_memory_cap("files")
 
@@ -496,13 +591,26 @@ def run_triage_mode(
         artifacts_dir=artifacts_dir,
         resume=effective_resume,
         rule_set=rule_set,
+        delta=(
+            evidence_delta_context
+            if evidence_delta_context is not None and evidence_delta_context.artifacts_delta_enabled
+            else None
+        ),
     )
     write_result(artifact_scheduler_manifest, scheduler_path)
     for kind in profile.artifacts_kinds:
-        artifact_payload, artifact_path, reused = artifact_results[kind]
+        artifact_payload, artifact_path, reused, delta_merged = artifact_results[kind]
         if reused:
             reused_outputs.add(f"artifacts-{kind}")
-        record_run_checkpoint(checkpoint_records, f"artifacts-{kind}", artifact_path, reused=reused)
+        if delta_merged:
+            delta_applied_outputs.add(f"artifacts-{kind}")
+        record_run_checkpoint(
+            checkpoint_records,
+            f"artifacts-{kind}",
+            artifact_path,
+            reused=reused,
+            delta_merged=delta_merged,
+        )
         artifact_outputs[kind] = artifact_path
         artifact_payloads[kind] = artifact_payload
         write_result(artifact_payload, artifact_path)
@@ -611,6 +719,16 @@ def run_triage_mode(
         resume_disabled_reason=resume_disabled_reason,
         checkpoints=checkpoint_records,
     )
+    evidence_delta_manifest: dict[str, object] | None = None
+    if evidence_delta is not None:
+        evidence_delta_manifest = build_evidence_delta_manifest(
+            delta=evidence_delta,
+            context=evidence_delta_context,
+            output_dir=output_dir,
+            files_stage=files_payload,
+            artifact_stages=artifact_payloads,
+            resume_requested=resume,
+        )
 
     outputs = {
         "fingerprint": fingerprint_path,
@@ -633,6 +751,8 @@ def run_triage_mode(
         "summary": summary_path,
         "report": report_path,
     }
+    if evidence_delta_manifest is not None:
+        outputs["evidence_delta"] = output_dir / EVIDENCE_DELTA_MANIFEST_NAME
     if isinstance(image_result, E01ExtractionResult):
         outputs = {"e01": e01_metadata_path, **outputs}
     if isinstance(image_result, DiskImageExtractionResult):
@@ -683,6 +803,8 @@ def run_triage_mode(
             "hide_known_good": hide_known_good,
             "known_good_max_hash_bytes": known_good_max_hash_bytes,
             "reused_outputs": sorted(reused_outputs),
+            "delta_applied_outputs": sorted(delta_applied_outputs),
+            "evidence_delta": evidence_delta_manifest or {},
             "input_fingerprint": current_fingerprint,
             "artifact_scheduler": {
                 "strategy": "parallel-threaded-deterministic-output",
@@ -2034,10 +2156,12 @@ def collect_artifact_stages(
     artifacts_dir: Path,
     resume: bool,
     rule_set: RuleSet | None,
-) -> tuple[dict[str, tuple[dict[str, object], Path, bool]], dict[str, object]]:
+    delta: EvidenceDeltaContext | None = None,
+) -> tuple[dict[str, tuple[dict[str, object], Path, bool, bool]], dict[str, object]]:
     artifacts_dir.mkdir(parents=True, exist_ok=True)
-    results: dict[str, tuple[dict[str, object], Path, bool]] = {}
+    results: dict[str, tuple[dict[str, object], Path, bool, bool]] = {}
     pending: list[tuple[str, Path]] = []
+    delta_pending: list[tuple[str, Path, dict[str, object]]] = []
     events: list[dict[str, object]] = []
     output_order = list(kinds)
     max_workers = artifact_scheduler_workers(kinds)
@@ -2047,9 +2171,9 @@ def collect_artifact_stages(
             artifact_path,
             expected_command="artifacts",
             required_keys=("summary", "artifacts"),
-        ) if resume else None
-        if reusable is not None:
-            results[kind] = (reusable, artifact_path, True)
+        ) if (resume or delta is not None) else None
+        if reusable is not None and resume:
+            results[kind] = (reusable, artifact_path, True, False)
             events.append(
                 build_scheduler_event(
                     kind=kind,
@@ -2064,17 +2188,70 @@ def collect_artifact_stages(
                     duration_ms=0,
                 )
             )
+        elif reusable is not None and delta is not None:
+            delta_pending.append((kind, artifact_path, reusable))
         else:
             pending.append((kind, artifact_path))
 
-    if pending:
+    def record_delta_merge(
+        kind: str,
+        artifact_path: Path,
+        merged: dict[str, object],
+        *,
+        started_at: str | None,
+        completed_at: str | None,
+        duration_ms: int,
+    ) -> None:
+        results[kind] = (merged, artifact_path, False, True)
+        events.append(
+            build_scheduler_event(
+                kind=kind,
+                output_path=artifact_path,
+                status="delta-merged",
+                reused=False,
+                delta_merged=True,
+                queued_order=output_order.index(kind),
+                output_order=output_order.index(kind),
+                payload=merged,
+                started_at=started_at,
+                completed_at=completed_at,
+                duration_ms=duration_ms,
+            )
+        )
+
+    if pending or delta_pending:
+        scope_input_root = (
+            derive_child_input_root(input_root, delta.scope_root) if delta else input_root
+        )
         with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="rapidtriage-artifact") as executor:
-            futures = {
-                executor.submit(timed_artifact_collection, input_root, kind=kind, rule_set=rule_set): (kind, path)
-                for kind, path in pending
-            }
+            futures = {}
+            for kind, artifact_path in pending:
+                future = executor.submit(
+                    timed_artifact_collection, input_root, kind=kind, rule_set=rule_set
+                )
+                futures[future] = ("full", kind, artifact_path, None)
+            if delta is not None:
+                for kind, artifact_path, previous in delta_pending:
+                    if delta.scope_file_count:
+                        future = executor.submit(
+                            timed_artifact_collection,
+                            scope_input_root,
+                            kind=kind,
+                            rule_set=rule_set,
+                        )
+                        futures[future] = ("delta", kind, artifact_path, previous)
+                    else:
+                        # Removal-only delta: no scope files to recollect.
+                        record_delta_merge(
+                            kind,
+                            artifact_path,
+                            merge_delta_artifact_payload(previous, None, delta=delta),
+                            started_at=None,
+                            completed_at=None,
+                            duration_ms=0,
+                        )
             for future in as_completed(futures):
-                kind, artifact_path = futures[future]
+                mode, kind, artifact_path, previous = futures[future]
                 try:
                     payload, started_at, completed_at, duration_ms = future.result()
                     status = "completed"
@@ -2082,9 +2259,41 @@ def collect_artifact_stages(
                     started_at = dt.datetime.now(dt.timezone.utc).isoformat()
                     completed_at = started_at
                     duration_ms = 0
-                    payload = isolated_parser_error_payload(kind, input_root=input_root, exc=exc)
+                    payload = isolated_parser_error_payload(
+                        kind,
+                        input_root=scope_input_root if mode == "delta" else input_root,
+                        exc=exc,
+                    )
                     status = "error"
-                results[kind] = (payload, artifact_path, False)
+                if mode == "delta" and status == "completed" and delta is not None:
+                    record_delta_merge(
+                        kind,
+                        artifact_path,
+                        merge_delta_artifact_payload(
+                            previous if isinstance(previous, dict) else {},
+                            payload,
+                            delta=delta,
+                        ),
+                        started_at=started_at,
+                        completed_at=completed_at,
+                        duration_ms=duration_ms,
+                    )
+                    continue
+                if mode == "delta" and status == "error" and delta is not None:
+                    # Delta-scope collection failed; fall back to a full
+                    # collection so coverage is preserved (crash isolation).
+                    try:
+                        payload, started_at, completed_at, duration_ms = timed_artifact_collection(
+                            input_root, kind=kind, rule_set=rule_set
+                        )
+                        status = "completed"
+                    except Exception as exc:
+                        started_at = dt.datetime.now(dt.timezone.utc).isoformat()
+                        completed_at = started_at
+                        duration_ms = 0
+                        payload = isolated_parser_error_payload(kind, input_root=input_root, exc=exc)
+                        status = "error"
+                results[kind] = (payload, artifact_path, False, False)
                 events.append(
                     build_scheduler_event(
                         kind=kind,
@@ -2134,6 +2343,7 @@ def build_scheduler_event(
     started_at: str | None,
     completed_at: str | None,
     duration_ms: int,
+    delta_merged: bool = False,
 ) -> dict[str, object]:
     summary = payload.get("summary") if isinstance(payload.get("summary"), Mapping) else {}
     parser_errors = payload.get("parser_errors") if isinstance(payload.get("parser_errors"), list) else []
@@ -2141,6 +2351,7 @@ def build_scheduler_event(
         "kind": kind,
         "status": status,
         "reused": reused,
+        "delta_merged": delta_merged,
         "queued_order": queued_order,
         "deterministic_output_order": output_order,
         "started_at": started_at,
@@ -2198,6 +2409,7 @@ def build_parser_scheduler_manifest(
         "completed_count": completed_count,
         "completed_or_isolated_count": completed_count,
         "reused_count": reused_count,
+        "delta_merged_count": sum(1 for event in sorted_events if event.get("delta_merged")),
         "error_count": error_count,
         "max_workers": max_workers,
         "deterministic_output_order": list(kinds),
@@ -3453,23 +3665,21 @@ def build_incremental_reuse_plan(
 
 
 def incremental_file_record_index(fingerprint_payload: Mapping[str, object]) -> dict[str, Mapping[str, object]]:
-    records = fingerprint_payload.get("files")
-    if not isinstance(records, list):
-        return {}
-    indexed: dict[str, Mapping[str, object]] = {}
-    for record in records:
-        if not isinstance(record, Mapping):
-            continue
-        relative_path = str(record.get("relative_path") or "")
-        if relative_path:
-            indexed[relative_path] = record
-    return indexed
+    return fingerprint_file_index(fingerprint_payload)
 
 
-def record_run_checkpoint(records: list[dict[str, object]], stage: str, path: Path, *, reused: bool) -> None:
+def record_run_checkpoint(
+    records: list[dict[str, object]],
+    stage: str,
+    path: Path,
+    *,
+    reused: bool,
+    delta_merged: bool = False,
+) -> None:
     record = {
         "stage": stage,
-        "status": "reused" if reused else "completed",
+        "status": "delta-merged" if delta_merged else ("reused" if reused else "completed"),
+        "delta_merged": delta_merged,
         "output": str(path),
         "exists": path.is_file(),
         "size_bytes": path.stat().st_size if path.is_file() else None,
