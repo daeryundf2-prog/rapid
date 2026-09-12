@@ -113,7 +113,17 @@ def resolve_reviewer_identity(explicit: str | None) -> str | None:
 def add_web_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--host", default="127.0.0.1", help="Host interface for the local web server")
     parser.add_argument("--port", type=int, default=8765, help="Port for the local web server")
-    parser.add_argument("--auth-token", help="Require X-RapidTriage-Token for API calls")
+    parser.add_argument(
+        "--auth-token",
+        "--token",
+        dest="auth_token",
+        help="Require X-RapidTriage-Token for API calls (also read from RAPIDTRIAGE_TOKEN or RAPIDTRIAGE_AUTH_TOKEN)",
+    )
+    parser.add_argument(
+        "--remote",
+        action="store_true",
+        help="Hardened remote mode: allow non-loopback binding only with a token; keeps auth and Host/Origin gates on",
+    )
     parser.add_argument("--allow-remote-without-auth", action="store_true", help="Allow non-localhost binding without auth token")
     parser.add_argument("--reload", action="store_true", help="Enable uvicorn reload for UI/API development")
     parser.add_argument("--crash-log-dir", help="Local-only directory for web/API crash reports")

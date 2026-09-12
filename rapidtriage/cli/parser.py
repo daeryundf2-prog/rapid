@@ -1952,6 +1952,7 @@ def build_parser() -> argparse.ArgumentParser:
             Examples:
               rapidtriage web
               rapidtriage web --host 127.0.0.1 --port 8765
+              rapidtriage web --remote --host 0.0.0.0 --token <token>
             """
         ),
     )

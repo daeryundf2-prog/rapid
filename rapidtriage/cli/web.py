@@ -21,6 +21,7 @@ def build_web_parser() -> argparse.ArgumentParser:
             Examples:
               rapidtriage-web
               rapidtriage-web --host 127.0.0.1 --port 8765
+              rapidtriage-web --remote --host 0.0.0.0 --token <token>
             """
         ),
     )
@@ -35,12 +36,34 @@ def run_web_server(
     auth_token: str | None = None,
     allow_remote_without_auth: bool = False,
     crash_log_dir: str | None = None,
+    remote: bool = False,
 ) -> int:
     loopback_hosts = {"127.0.0.1", "localhost", "::1"}
-    if host not in loopback_hosts and not auth_token and not allow_remote_without_auth:
+    if remote and allow_remote_without_auth:
+        raise RuntimeError("--remote and --allow-remote-without-auth are mutually exclusive: --remote keeps API auth on.")
+    if remote:
+        # --remote is the supported non-loopback path: a token is mandatory so
+        # /api auth and the Host/Origin gates stay on. RAPIDTRIAGE_TOKEN is the
+        # documented env source; RAPIDTRIAGE_AUTH_TOKEN is accepted as the
+        # channel the server process actually reads.
+        auth_token = auth_token or os.environ.get("RAPIDTRIAGE_TOKEN") or os.environ.get("RAPIDTRIAGE_AUTH_TOKEN")
+        if not auth_token:
+            raise RuntimeError(
+                "--remote requires an API token: pass --token (or --auth-token) "
+                "or set RAPIDTRIAGE_TOKEN / RAPIDTRIAGE_AUTH_TOKEN."
+            )
+    elif host not in loopback_hosts and not auth_token and not allow_remote_without_auth:
         raise RuntimeError(
             "Refusing to bind RapidTriage to a non-localhost interface without --auth-token. "
-            "Use --auth-token or --allow-remote-without-auth if you understand the risk."
+            "Use --auth-token, --remote with a token, or --allow-remote-without-auth if you understand the risk."
+        )
+    if remote and host not in loopback_hosts:
+        print(
+            "WARNING: RapidTriage remote mode is localhost-tool-grade: API token auth and "
+            f"Host/Origin gates stay on for {host}:{port}, but traffic is plaintext HTTP. "
+            "Put a TLS-terminating reverse proxy in front for real remote access, and set "
+            "RAPIDTRIAGE_ALLOWED_HOSTS to the serving hostname so Host checks pass.",
+            file=sys.stderr,
         )
     try:
         import uvicorn
@@ -86,6 +109,7 @@ def web_main(argv=None) -> int:
             args.auth_token,
             args.allow_remote_without_auth,
             args.crash_log_dir,
+            remote=args.remote,
         )
     except RuntimeError as exc:
         parser.error(str(exc))
