@@ -409,7 +409,7 @@ Known-answer evidence는 `docs/validation/` 아래에 있습니다.
 
 | 경로 | 설명 |
 | --- | --- |
-| `rapidtriage/cli.py` | CLI entry point |
+| `rapidtriage/cli/` | CLI entry point |
 | `rapidtriage/api/app/` | FastAPI local API |
 | `rapidtriage/web/static/` | Local web UI |
 | `rapidtriage/core/` | orchestration, case DB, search, validation, reporting |

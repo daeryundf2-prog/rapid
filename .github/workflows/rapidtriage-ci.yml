@@ -45,6 +45,11 @@ jobs:
           python -m ruff check rapidtriage tests scripts
           python -m vulture rapidtriage tests scripts --min-confidence 80
 
+      - name: Check doc path references
+        # Informational only: reports stale repo-path references in markdown
+        # docs without failing the build.
+        run: python scripts/check-doc-refs.py --warn-only
+
       - name: Validate known-answer plumbing
         run: |
           python scripts/known-answer-qc.py --manifest tests/fixtures/known_answer/tier0-basic/manifest.json --check-files --fixture-root tests/fixtures/known_answer/tier0-basic/files --json

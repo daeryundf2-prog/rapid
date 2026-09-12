@@ -1417,7 +1417,7 @@ SQLite 기반 아티팩트는 브라우저 History, 카카오톡, Sticky Notes, 
 
 ```bash
 .venv/bin/python -m py_compile \
-  rapidtriage/api/app.py \
+  rapidtriage/api/app/*.py \
   rapidtriage/core/visible_capabilities.py \
   tests/test_rapidtriage_api.py \
   tests/test_rapidtriage_web_static.py
