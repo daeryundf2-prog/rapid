@@ -108,7 +108,7 @@ from ...core.visible_capabilities import build_visible_capability_response
 
 
 DEFAULT_INTERNAL_VALIDATION_PACKAGE = (
-    Path(__file__).resolve().parents[2]
+    Path(__file__).resolve().parents[3]
     / "docs"
     / "validation"
     / "rapidtriage-core-forensics-001-120-known-answer.json"

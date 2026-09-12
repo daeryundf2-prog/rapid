@@ -208,7 +208,7 @@ from .runops import (
 def create_app(job_store: RunJobStore | None = None, auth_token: str | None = None, require_auth: bool | None = None) -> FastAPI:
     store = job_store or default_job_store
     api = FastAPI(title="rapidtriage local API", version="0.2.0")
-    static_dir = Path(__file__).resolve().parent.parent / "web" / "static"
+    static_dir = Path(__file__).resolve().parent.parent.parent / "web" / "static"
     auth_disabled = truthy_env("RAPIDTRIAGE_DISABLE_AUTH") or require_auth is False
     configured_token = auth_token or os.environ.get("RAPIDTRIAGE_AUTH_TOKEN") or ""
     expected_token = "" if auth_disabled else configured_token or secrets.token_urlsafe(32)

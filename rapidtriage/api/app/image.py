@@ -130,7 +130,7 @@ from .viewer_core import (
 
 def build_image_preview(source_path: Path, *, image_url: str, run_id: str | None = None) -> dict[str, object]:
     try:
-        from ..artifacts.media import build_image_record
+        from ...artifacts.media import build_image_record
 
         artifact = build_image_record(source_path)
         details = artifact.details
@@ -478,7 +478,7 @@ def build_source_ocr_queue_page_manifest(
 
 def build_source_ocr_translation_package(*, run_id: str, source_path: Path, include_text: bool) -> dict[str, object]:
     try:
-        from ..artifacts.media import (
+        from ...artifacts.media import (
             build_image_record,
             build_korean_ocr_translation_report_grade_validation_plan,
         )
@@ -865,7 +865,7 @@ def build_image_gallery_page(
 
 def image_gallery_item_summary(*, run_id: str, path: Path, anchor_path: Path) -> dict[str, object]:
     try:
-        from ..artifacts.media import build_image_record
+        from ...artifacts.media import build_image_record
 
         details = build_image_record(path).details
     except Exception as exc:
