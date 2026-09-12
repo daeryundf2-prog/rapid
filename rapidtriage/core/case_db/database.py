@@ -88,6 +88,7 @@ from .reporting import (
     build_report_quality_matrix,
     build_report_warning_display_summary,
     build_review_export_item,
+    build_synthetic_media_summary,
 )
 from .review import (
     acquisition_metadata_to_dict,
@@ -1237,6 +1238,7 @@ class CaseDatabase:
             timezone_validation = build_timezone_validation(connection, normalized_case_id)
             clock_skew_analysis = build_clock_skew_analysis(connection, normalized_case_id)
             contamination_warnings = build_evidence_contamination_warnings(connection, normalized_case_id)
+            synthetic_media_summary = build_synthetic_media_summary(connection, normalized_case_id)
         status_counts: dict[str, int] = {}
         verification_counts: dict[str, int] = {}
         for item in items:
@@ -1264,6 +1266,7 @@ class CaseDatabase:
             citation_index=citation_index,
             status_counts=status_counts,
             verification_counts=verification_counts,
+            synthetic_media_summary=synthetic_media_summary,
         )
         reproducibility = build_report_reproducibility_manifest(items, citation_index)
         forensic_integrity_matrix = build_forensic_integrity_matrix(
@@ -1351,6 +1354,9 @@ class CaseDatabase:
             "timezone_missing_count": timezone_validation["summary"]["missing_timezone_count"],
             "clock_skew_warning_count": clock_skew_analysis["summary"]["warning_count"],
             "contamination_warning_count": contamination_warnings["summary"]["warning_count"],
+            "synthetic_media_artifact_count": synthetic_media_summary["artifact_count"],
+            "synthetic_media_high_band_count": synthetic_media_summary["high_band_count"],
+            "synthetic_media_scan_error_count": synthetic_media_summary["scan_error_count"],
         }
         history_rows = [
             history
@@ -1407,6 +1413,7 @@ class CaseDatabase:
             "timezone_validation": timezone_validation,
             "clock_skew_analysis": clock_skew_analysis,
             "contamination_warnings": contamination_warnings,
+            "synthetic_media_summary": synthetic_media_summary,
             "items": items,
         }
 

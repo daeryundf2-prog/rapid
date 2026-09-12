@@ -28,6 +28,7 @@ from .helpers import (
     artifact_source_path,
     build_fts_query,
     matched_keywords,
+    optional_float,
     optional_int,
     optional_str,
     parse_json_object,
@@ -341,6 +342,22 @@ def build_review_priority(match: Mapping[str, object], keywords: list[str]) -> d
     if source == "artifacts" and any(token in kind for token in ("eventlog", "powershell", "wmi", "prefetch", "registry-run", "rdp")):
         score += 20
         reasons.append("high-value Windows artifact")
+    if source == "artifacts" and kind.startswith("synthetic-media"):
+        synthetic_score = optional_float(metadata.get("score"))
+        synthetic_band = str(metadata.get("band") or "").lower()
+        synthetic_scan_status = str(metadata.get("scan_status") or "")
+        if synthetic_band in {"high", "critical"} or (synthetic_score is not None and synthetic_score >= 70):
+            score += 40
+            reasons.append("high-band synthetic-media screening hit")
+        elif synthetic_band in {"medium", "elevated", "moderate"} or (
+            synthetic_score is not None and synthetic_score >= 35
+        ):
+            score += 15
+            reasons.append("elevated synthetic-media screening score")
+        if synthetic_scan_status == "error":
+            score += 10
+            reasons.append("synthetic-media scan error requires examiner follow-up")
+        reasons.append("synthetic-media score orders review only; it is not an authenticity verdict")
     if any(token in title_preview for token in ("password", "credential", "token", "secret", "powershell", "rundll32", "wmic", "bitlocker")):
         score += 15
         reasons.append("high-value keyword context")

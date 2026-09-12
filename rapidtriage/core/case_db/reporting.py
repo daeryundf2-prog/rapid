@@ -6,6 +6,10 @@ import json
 import sqlite3
 from collections.abc import Mapping, Sequence
 
+from ...artifacts.synthetic_media import (
+    SYNTHETIC_MEDIA_SCORE_GUIDANCE,
+    SYNTHETIC_MEDIA_SCORE_SEMANTICS,
+)
 from ..forensic_accuracy import build_accuracy_gate
 from .constants import (
     COURT_EXHIBIT_EXPORT_GAP_ID,
@@ -19,7 +23,9 @@ from .constants import (
     VALIDATION_WARNING_UX_GAP_ID,
 )
 from .helpers import (
+    artifact_details,
     nested_mapping_str,
+    optional_float,
     parse_json_list,
     parse_json_object,
     stable_payload_sha256,
@@ -69,6 +75,7 @@ __all__ = [
     "build_report_warning_display_profile",
     "build_report_warning_display_summary",
     "build_review_export_item",
+    "build_synthetic_media_summary",
     "case_report_commercial_uplift_evidence",
     "case_report_reportability_decision",
     "citation_diff_key",
@@ -273,6 +280,89 @@ def build_report_warning_display_summary(items: Sequence[Mapping[str, object]]) 
     }
 
 
+def build_synthetic_media_summary(
+    connection: sqlite3.Connection,
+    case_id: str,
+) -> dict[str, object]:
+    """Aggregate synthetic-media (deepfake-lens) artifacts for report roll-up.
+
+    Scores are prioritization signals only: this summary orders review work and
+    must never be presented as proof that media is or is not synthetic.
+    """
+    rows = connection.execute(
+        """
+        SELECT citation_id, artifact_type, data_json
+        FROM artifact
+        WHERE case_id = ? AND artifact_type LIKE 'synthetic-media-%'
+        ORDER BY id ASC
+        """,
+        (case_id,),
+    ).fetchall()
+    artifact_type_counts: dict[str, int] = {}
+    band_counts: dict[str, int] = {}
+    scan_status_counts: dict[str, int] = {}
+    scores: list[float] = []
+    high_band_citations: set[str] = set()
+    limitations: set[str] = set()
+    next_checks: set[str] = set()
+    scanned_file_count = 0
+    scan_error_count = 0
+    provider_unavailable = False
+    for row in rows:
+        artifact_type = str(row["artifact_type"] or "")
+        artifact_type_counts[artifact_type] = artifact_type_counts.get(artifact_type, 0) + 1
+        details = artifact_details(parse_json_object(row["data_json"]))
+        scan_status = str(details.get("scan_status") or "")
+        if scan_status:
+            scan_status_counts[scan_status] = scan_status_counts.get(scan_status, 0) + 1
+        if artifact_type == "synthetic-media-scan-status":
+            provider_unavailable = True
+            continue
+        if artifact_type == "synthetic-media-scan-summary":
+            continue
+        if artifact_type == "synthetic-media-scan-error" or scan_status == "error":
+            scan_error_count += 1
+            continue
+        scanned_file_count += 1
+        score = optional_float(details.get("score"))
+        if score is not None:
+            scores.append(score)
+        band = str(details.get("band") or "").lower()
+        if band:
+            band_counts[band] = band_counts.get(band, 0) + 1
+        if band in {"high", "critical"} or (score is not None and score >= 70):
+            citation_id = str(row["citation_id"] or "")
+            if citation_id:
+                high_band_citations.add(citation_id)
+        for key, bucket in (("limitations", limitations), ("next_checks", next_checks)):
+            values = details.get(key)
+            if isinstance(values, list):
+                for item in values:
+                    if isinstance(item, str) and item:
+                        bucket.add(item)
+    summary_core = {
+        "profile_version": "synthetic-media-summary-v1",
+        "artifact_count": len(rows),
+        "scanned_file_count": scanned_file_count,
+        "scan_error_count": scan_error_count,
+        "provider_unavailable": provider_unavailable,
+        "artifact_type_counts": dict(sorted(artifact_type_counts.items())),
+        "band_counts": dict(sorted(band_counts.items())),
+        "scan_status_counts": dict(sorted(scan_status_counts.items())),
+        "scored_file_count": len(scores),
+        "max_score": max(scores) if scores else None,
+        "high_band_count": len(high_band_citations),
+        "high_band_citations": sorted(high_band_citations),
+        "limitations": sorted(limitations)[:10],
+        "next_checks": sorted(next_checks)[:10],
+        "score_semantics": SYNTHETIC_MEDIA_SCORE_SEMANTICS,
+        "score_guidance": SYNTHETIC_MEDIA_SCORE_GUIDANCE,
+        "validation_required": bool(scores or scan_error_count),
+        "commercial_claim_allowed": False,
+    }
+    return {**summary_core, "summary_hash": stable_payload_sha256(summary_core)}
+
+
 def build_report_quality_matrix(
     *,
     items: Sequence[Mapping[str, object]],
@@ -460,6 +550,7 @@ def build_case_db_report_generation_package(
     status_counts: Mapping[str, int],
     verification_counts: Mapping[str, int],
     item_preview_limit: int = 200,
+    synthetic_media_summary: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     markdown_document, markdown_truncated = render_case_db_report_markdown(
         case_id=case_id,
@@ -468,6 +559,7 @@ def build_case_db_report_generation_package(
         status_counts=status_counts,
         verification_counts=verification_counts,
         item_preview_limit=item_preview_limit,
+        synthetic_media_summary=synthetic_media_summary,
     )
     item_row_hashes = [
         stable_payload_sha256({"row_type": "case-db-report-generation-item", "row": item})
@@ -526,6 +618,7 @@ def build_case_db_report_generation_package(
         "commercial_gap_ids": ["#22"],
         "markdown_document": markdown_document,
         "markdown_truncated": markdown_truncated,
+        "synthetic_media_summary": dict(synthetic_media_summary or {}),
         "manifest": manifest,
         "hash_bundle": hash_bundle,
         "hash_bundle_sha256": manifest["hash_bundle_sha256"],
@@ -543,6 +636,7 @@ def render_case_db_report_markdown(
     status_counts: Mapping[str, int],
     verification_counts: Mapping[str, int],
     item_preview_limit: int,
+    synthetic_media_summary: Mapping[str, object] | None = None,
 ) -> tuple[str, bool]:
     lines = [
         "# RapidForensic Case DB Report Export",
@@ -581,6 +675,22 @@ def render_case_db_report_markdown(
             [
                 f"> Markdown preview is bounded to {item_preview_limit} items for large-case safety.",
                 "> The full selected item rows remain available in the JSON report export.",
+                "",
+            ]
+        )
+    if synthetic_media_summary is not None:
+        lines.extend(
+            [
+                "## Synthetic-Media Summary",
+                "",
+                f"- Artifact rows: {synthetic_media_summary.get('artifact_count', 0)}",
+                f"- Scanned files: {synthetic_media_summary.get('scanned_file_count', 0)}",
+                f"- High-band review hits: {synthetic_media_summary.get('high_band_count', 0)}",
+                f"- Scan errors: {synthetic_media_summary.get('scan_error_count', 0)}",
+                f"- Provider unavailable: `{bool(synthetic_media_summary.get('provider_unavailable'))}`",
+                f"- Band counts: `{json.dumps(synthetic_media_summary.get('band_counts') or {}, ensure_ascii=False, sort_keys=True)}`",
+                f"- Score semantics: `{synthetic_media_summary.get('score_semantics', '')}`",
+                f"- Guidance: {synthetic_media_summary.get('score_guidance', '')}",
                 "",
             ]
         )

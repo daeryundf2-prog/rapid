@@ -397,6 +397,21 @@ def artifact_search_metadata(row: Mapping[str, object]) -> dict[str, object]:
         "extraction_method",
         "parser_confidence",
         "matched_rules",
+        "score",
+        "band",
+        "band_label",
+        "verdict",
+        "scan_status",
+        "scan_kind",
+        "scan_error",
+        "signal_count",
+        "score_semantics",
+        "score_guidance",
+        "validation_required",
+        "validation_guidance",
+        "limitations",
+        "next_checks",
+        "commercial_grade_ready",
     )
     metadata = {key: details[key] for key in keys if details.get(key) not in (None, "", [])}
     source_viewer_locator = artifact_source_viewer_locator(details)
