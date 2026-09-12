@@ -34,6 +34,7 @@ web = [
 ]
 test = [
   "build>=1.0",
+  "coverage>=7.0",
   "fastapi>=0.110",
   "httpx>=0.27",
   "jsonschema>=4.0",
@@ -94,3 +95,23 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "scripts/*.py" = ["E402"]
 "tests/*.py" = ["E402"]
+
+# Coverage reporting is informational only: there is intentionally no
+# fail-under gate. See docs/rapidtriage-quality-checks.md.
+[tool.coverage.run]
+source = ["rapidtriage"]
+omit = [
+  "tests/*",
+  "*/__init__.py",
+]
+branch = true
+parallel = true
+
+[tool.coverage.report]
+exclude_also = [
+  "if __name__ == .__main__.:",
+  "if TYPE_CHECKING:",
+  "raise NotImplementedError",
+]
+show_missing = true
+skip_covered = false
