@@ -18,6 +18,12 @@ from ..core.case import (
 from ..core.case_catalog import CaseCatalog, CaseCatalogError
 from ..core.case_db import CaseDatabaseError, open_case_database
 from ..core.case_export import CaseExportError, export_case_uco_jsonld
+from ..core.cross_case import (
+    CrossCaseError,
+    correlate_case_databases,
+    resolve_cross_case_output,
+    write_cross_case_report,
+)
 from ..core.docs import write_result
 from ..core.keyword_packs import KeywordPackError, resolve_keyword_packs
 from ..core.run import RunModeError
@@ -416,6 +422,40 @@ def handle_case_export_uco(args: argparse.Namespace, parser: argparse.ArgumentPa
 
 
 
+def handle_cross_case_correlate(args: argparse.Namespace, parser: argparse.ArgumentParser, rule_set) -> int:
+    try:
+        payload = correlate_case_databases(
+            [Path(path) for path in args.databases],
+            case_ids=args.case_id or [],
+            max_shared=args.max_shared,
+        )
+        output_path = write_cross_case_report(
+            payload,
+            resolve_cross_case_output(
+                [Path(path) for path in args.databases],
+                Path(args.output) if args.output else None,
+            ),
+        )
+    except (CrossCaseError, OSError) as exc:
+        parser.error(str(exc))
+    payload["output"] = str(output_path)
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        summary = payload["summary"]
+        print(f"Saved cross-case correlation report: {output_path}")
+        print(f"Correlated scopes: {summary['scope_count']}")
+        print(
+            "Shared: "
+            f"{summary['shared_hash_count']} hashes, "
+            f"{summary['shared_path_count']} paths, "
+            f"{summary['shared_artifact_identifier_count']} artifact identifiers"
+        )
+        print(f"Correlated scope pairs: {summary['correlated_scope_pair_count']}")
+    return 0
+
+
+
 def handle_case_catalog(args: argparse.Namespace, parser: argparse.ArgumentParser, rule_set) -> int:
         catalog = CaseCatalog(Path(args.catalog).expanduser().resolve())
         added_case = None
@@ -525,6 +565,7 @@ HANDLERS = {
     "case-review": handle_case_review,
     "case-db-report": handle_case_db_report,
     "case-export-uco": handle_case_export_uco,
+    "cross-case-correlate": handle_cross_case_correlate,
     "case-catalog": handle_case_catalog,
     "sample": handle_sample,
     "bundle": handle_bundle,

@@ -1153,6 +1153,25 @@ def build_parser() -> argparse.ArgumentParser:
     case_export_uco.add_argument("--max-rows", type=int, default=25000, help="Maximum rows exported per table")
     case_export_uco.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
+    cross_case = sub.add_parser(
+        "cross-case-correlate",
+        help="Correlate shared hashes, paths, and artifact identifiers across case databases",
+        description="Correlate shared hashes, paths, and artifact identifiers across case databases",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage cross-case-correlate ./case-a.db ./case-b.db
+              rapidtriage cross-case-correlate ./case-a.db ./case-b.db --case-id CASE-001 --output correlation.json --json
+            """
+        ),
+    )
+    cross_case.add_argument("databases", nargs="+", help="Paths to SQLite case databases (at least two)")
+    cross_case.add_argument("--case-id", action="append", help="Limit correlation to these case IDs (repeatable)")
+    cross_case.add_argument("--output", help="Optional report output path (default: next to the first database)")
+    cross_case.add_argument("--max-shared", type=int, default=5000, help="Maximum shared entities per section")
+    cross_case.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
     evidence = sub.add_parser(
         "evidence",
         help="Identify the evidence adapter that would handle a source path",
