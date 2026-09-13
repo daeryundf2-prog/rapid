@@ -20,7 +20,12 @@
               <p class="brand-subtitle">증거를 넣고, 분석하고, 검색/뷰어/리뷰/보고서까지 한 화면에서 이어갑니다.</p>
             </div>
           </div>
-          <span id="apiStatus" class="status-pill">확인 중</span>
+          <span id="apiStatus" class="status-pill" role="button" tabindex="0" title="클릭하면 API 토큰을 입력할 수 있습니다">확인 중</span>
+        </div>
+        <div id="tokenBar" class="token-bar" hidden>
+          <input id="tokenInput" type="password" autocomplete="off" placeholder="API 토큰 입력 (서버 시작 시 콘솔에 출력됨)" aria-label="API 토큰">
+          <button id="tokenSave" type="button">연결</button>
+          <span id="tokenHint" class="token-hint">토큰은 브라우저 localStorage에만 저장됩니다.</span>
         </div>
         <div class="operator-badges" aria-label="Console strengths">
           <span>원본 보호 우선</span>

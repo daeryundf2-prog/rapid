@@ -825,6 +825,22 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("reportability_warning", loader_body)
         self.assertIn("columnar-store", loader_body)
 
+    def test_token_entry_ui_is_wired_to_auth_storage(self) -> None:
+        index_html = (REPO_ROOT / "rapidtriage" / "web" / "static" / "index.html").read_text(encoding="utf-8")
+        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+        app_api_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app_api.js").read_text(encoding="utf-8")
+
+        # The console must offer an in-page token entry instead of forcing
+        # users to hand-edit localStorage from devtools.
+        self.assertIn('id="tokenBar"', index_html)
+        self.assertIn('id="tokenInput"', index_html)
+        self.assertIn('id="tokenSave"', index_html)
+        self.assertIn("rapidtriage.authToken", app_api_js)
+        self.assertIn("setAuthToken", app_js)
+        self.assertIn("토큰 필요", app_js)
+        # A 401 must surface the token bar automatically.
+        self.assertIn("error.status === 401", app_js)
+
 
 if __name__ == "__main__":
     unittest.main()

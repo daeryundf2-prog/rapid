@@ -36,7 +36,7 @@ import {
   storageAvailable,
   tabLabel,
 } from "./app_utils.js";
-import { api, errorMessageFromDetail } from "./app_api.js";
+import { api, errorMessageFromDetail, setAuthToken } from "./app_api.js";
 import {
   bindVirtualWindowButtons,
   getCaseDbKeywordHistory,
@@ -221,13 +221,53 @@ export function applySessionSnapshot(payload = {}) {
 }
 
 
+const tokenBar = document.querySelector("#tokenBar");
+const tokenInput = document.querySelector("#tokenInput");
+const tokenSave = document.querySelector("#tokenSave");
+
+function showTokenBar(show) {
+  if (tokenBar) tokenBar.hidden = !show;
+}
+
 async function checkHealth() {
   try {
     await api("/api/health");
     setStatus(apiStatus, "연결됨", "ok");
+    showTokenBar(false);
   } catch (error) {
+    if (error && error.status === 401) {
+      setStatus(apiStatus, "토큰 필요", "failed");
+      showTokenBar(true);
+      return;
+    }
     setStatus(apiStatus, "오프라인", "failed");
   }
+}
+
+if (apiStatus) {
+  apiStatus.addEventListener("click", () => showTokenBar(tokenBar ? tokenBar.hidden : false));
+  apiStatus.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      showTokenBar(tokenBar ? tokenBar.hidden : false);
+    }
+  });
+}
+if (tokenSave && tokenInput) {
+  const submitToken = async () => {
+    const value = tokenInput.value.trim();
+    if (!value) return;
+    setAuthToken(value);
+    setStatus(apiStatus, "확인 중", "");
+    await checkHealth();
+  };
+  tokenSave.addEventListener("click", submitToken);
+  tokenInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      submitToken();
+    }
+  });
 }
 
 async function loadRuns() {

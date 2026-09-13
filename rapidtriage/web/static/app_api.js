@@ -14,6 +14,7 @@ export async function api(path, options = {}) {
     const detail = await response.json().catch(() => ({ detail: response.statusText }));
     const error = new Error(errorMessageFromDetail(detail.detail || detail || response.statusText));
     error.detail = detail.detail || detail;
+    error.status = response.status;
     throw error;
   }
   const contentType = response.headers.get("content-type") || "";
@@ -35,5 +36,13 @@ export function authToken() {
     return window.localStorage.getItem("rapidtriage.authToken") || "";
   } catch {
     return "";
+  }
+}
+
+export function setAuthToken(token) {
+  try {
+    window.localStorage.setItem("rapidtriage.authToken", token);
+  } catch {
+    // localStorage may be disabled; the console still reports the failure.
   }
 }

@@ -4905,6 +4905,49 @@ body::before {
   border-color: rgba(255, 255, 255, 0.22);
   background: rgba(255, 255, 255, 0.08);
   color: #f8efe2;
+  cursor: pointer;
+}
+
+.token-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.token-bar[hidden] {
+  display: none;
+}
+
+.token-bar input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #f8efe2;
+  font-size: 0.8rem;
+}
+
+.token-bar input::placeholder {
+  color: rgba(248, 239, 226, 0.5);
+}
+
+.token-bar button {
+  padding: 6px 14px;
+  border: none;
+  border-radius: 6px;
+  background: var(--cyan);
+  color: #10212b;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.token-bar .token-hint {
+  font-size: 0.7rem;
+  color: rgba(248, 239, 226, 0.6);
 }
 
 .brand-subtitle {
