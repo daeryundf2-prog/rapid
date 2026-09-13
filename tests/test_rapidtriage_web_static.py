@@ -669,7 +669,7 @@ class RapidTriageWebStaticTests(unittest.TestCase):
             self.assertIn(expected, config_js)
             self.assertIn(expected, index_html)
         self.assertIn("data-testid=\"core-evidence-workflow\"", index_html)
-        self.assertIn("data-testid=\"six-step-mission-strip\"", index_html)
+        self.assertIn("data-testid=\"five-step-mission-strip\"", index_html)
         self.assertIn("renderCoreEvidenceWorkflow", app_js)
         self.assertIn("coreEvidenceWorkflowStatuses", app_js)
         self.assertIn("payload.workflow?.stages", app_js)
