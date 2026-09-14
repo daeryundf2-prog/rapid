@@ -1655,6 +1655,20 @@ def extract_e01_to_directory(
         checkpoint_payload["recovered_root_manifest"] = recovered_manifest
         checkpoint_payload["recovered_inventory_fingerprint"] = recovered_inventory_fingerprint(recovered_manifest)
         write_e01_stage_checkpoint(checkpoint_path, checkpoint_payload)
+        warnings: list[str] = []
+        if direct_ewf_probe is not None:
+            warnings.append(
+                "ewfmount was not installed; the installed Sleuth Kit read the E01/Ex01 segment set directly. "
+                "Verify the build's EWF support and preserve command history for provenance."
+            )
+        if partition_selection and not partition_selection.get("selected_supported_filesystem_hint"):
+            warnings.append(
+                "Requested partition has no recognized filesystem description in mmls output "
+                "(possible mojibake or unsupported layout); recovery was delegated to Sleuth Kit as an analyst override."
+            )
+        warnings.append(
+            "E01/Ex01 direct extraction is an orchestrated libewf/Sleuth Kit workflow; validate results against case requirements."
+        )
         return E01ExtractionResult(
             source_path=source_path,
             stage_dir=stage,
@@ -1673,17 +1687,7 @@ def extract_e01_to_directory(
             ),
             partition_selection=partition_selection,
             command_history=tuple(command_history),
-            warnings=(
-                (
-                    "ewfmount was not installed; the installed Sleuth Kit read the E01/Ex01 segment set directly. "
-                    "Verify the build's EWF support and preserve command history for provenance."
-                ),
-                "E01/Ex01 direct extraction is an orchestrated libewf/Sleuth Kit workflow; validate results against case requirements.",
-            )
-            if direct_ewf_probe is not None
-            else (
-                "E01/Ex01 direct extraction is an orchestrated libewf/Sleuth Kit workflow; validate results against case requirements.",
-            ),
+            warnings=tuple(warnings),
             resume_status=build_e01_resume_status(checkpoint_path, checkpoint_payload, resumed=False),
             recovered_root_manifest=recovered_manifest,
             segment_set_profile=segment_set_profile,
@@ -1978,7 +1982,7 @@ def select_mmls_filesystem(text: str, *, preferred_start_sector: int | None = No
         return mmls_first_filesystem(text)
     for partition in partitions:
         if int(partition.get("start_sector") or -1) == preferred_start_sector:
-            if not partition.get("supported_filesystem_hint"):
+            if not partition.get("supported_filesystem_hint") and not partition.get("manual_override_allowed"):
                 raise E01ExtractionError(
                     f"requested partition start sector {preferred_start_sector} does not look like a supported filesystem"
                 )
@@ -2012,7 +2016,7 @@ def parse_mmls_partitions(text: str) -> list[dict[str, object]]:
                 "supported_filesystem_hint": is_supported_mmls_description(description),
                 "recommended_for_recovery": False,
                 "selected_for_recovery": False,
-                "manual_override_allowed": True,
+                "manual_override_allowed": "swap" not in description.lower(),
             }
         )
     return partitions
