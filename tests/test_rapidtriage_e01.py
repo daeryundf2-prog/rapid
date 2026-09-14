@@ -403,6 +403,24 @@ DOS Partition Table
         with self.assertRaises(E01ExtractionError):
             select_mmls_filesystem(text, preferred_start_sector=999999)
 
+    def test_mmls_manual_override_allows_mojibake_description(self) -> None:
+        # win32 mmls prints '?' for non-ASCII GPT names, so the description
+        # carries no filesystem hint; an explicit sector must still work.
+        text = """
+GUID Partition Table (EFI)
+Units are in 512-byte sectors
+
+      Slot      Start        End          Length       Description
+004:  000       0000002048   0000534527   0000532480   ?????
+006:  002       0000567296   0457496575   0456929280   ???s
+"""
+
+        rows = parse_mmls_partitions(text)
+        self.assertFalse(rows[1]["supported_filesystem_hint"])
+        self.assertTrue(rows[1]["manual_override_allowed"])
+        self.assertEqual(select_mmls_filesystem(text, preferred_start_sector=567296), 567296)
+        self.assertIsNone(mmls_first_filesystem(text))
+
     def test_extract_e01_reports_missing_external_tools(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             e01_path = Path(tmp_dir) / "case.E01"
