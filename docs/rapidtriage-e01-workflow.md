@@ -38,6 +38,8 @@ The GUI `Check evidence support` action now shows a compact E01 readiness card:
 
 On Windows, a native Sleuth Kit build with EWF support can read E01/Ex01 directly without `ewfmount`; WSL2 or a separate forensic mounting/export workflow remain reliable alternatives.
 
+Performance note: direct EWF reads are I/O-bound through libewf's chunked decompression, which is slow for large multi-segment images (observed ~1.5 MiB/s when reading and writing the same HDD). For large images, first exporting to raw with `ewfexport -f raw -u -p 67108864 -t TARGET.raw IMAGE.E01` (the larger `-p` process buffer is significant — ~50+ MiB/s versus ~1.5 MiB/s in one Windows test) and running the triage against the raw image is substantially faster than direct E01 recovery.
+
 Recommended steps:
 
 1. Mount or export the E01/Ex01 using your trusted forensic toolchain.
