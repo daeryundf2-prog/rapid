@@ -1265,7 +1265,11 @@ def prepare_run_input_root(
         return InputRoot(source_path=str(root_path), root_path=result.extract_dir, kind="e01-derived"), result
     if is_raw_image_path(root_path):
         try:
-            result = extract_raw_image_to_directory(root_path, output_dir / "_disk_image")
+            result = extract_raw_image_to_directory(
+                root_path,
+                output_dir / "_disk_image",
+                partition_start_sector=e01_partition_start_sector,
+            )
         except DiskImageExtractionError as exc:
             raise RunModeError(str(exc)) from exc
         return InputRoot(source_path=str(root_path), root_path=result.extract_dir, kind="disk-image-derived"), result

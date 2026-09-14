@@ -1812,7 +1812,7 @@ Units are in 512-byte sectors
             output_dir = root / "run-out"
             image_path.write_bytes(b"raw")
 
-            def fake_extract(source_path: Path, stage_dir: Path) -> DiskImageExtractionResult:
+            def fake_extract(source_path: Path, stage_dir: Path, *, partition_start_sector=None) -> DiskImageExtractionResult:
                 extract_dir = stage_dir / "filesystem"
                 extract_dir.mkdir(parents=True, exist_ok=True)
                 build_run_fixture(extract_dir)
@@ -1821,7 +1821,7 @@ Units are in 512-byte sectors
                     stage_dir=stage_dir,
                     extract_dir=extract_dir,
                     image_paths=(source_path,),
-                    partition_start_sector=2048,
+                    partition_start_sector=partition_start_sector if partition_start_sector is not None else 2048,
                     recovery_mode="partition-offset",
                 )
 

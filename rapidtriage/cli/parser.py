@@ -1953,7 +1953,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--max-extract-size-bytes", type=int, default=0, help="Cap total copied bytes per extract stage (0 means unlimited)")
     run.add_argument("--max-file-count", type=int, default=0, help="Cap run docs/files candidates and copied files per extract stage (0 means unlimited)")
     run.add_argument("--memory-cap-bytes", type=int, default=0, help="Stop the run at safe stage boundaries if RSS exceeds this value (0 also honors RAPIDTRIAGE_MEMORY_CAP_BYTES when set)")
-    run.add_argument("--e01-partition-start-sector", type=int, help="Use this mmls partition start sector for direct E01/Ex01 recovery instead of the automatic recommendation")
+    run.add_argument("--e01-partition-start-sector", type=int, help="Use this mmls partition start sector for direct E01/Ex01 or raw/split recovery instead of the automatic recommendation")
     run.add_argument("--overwrite", action="store_true", help="Allow extract stages to overwrite existing output files")
     run.add_argument("--resume", action="store_true", help="Reuse valid existing stage JSON outputs in OUTPUT_DIR and rerun missing or invalid stages")
     run.add_argument(

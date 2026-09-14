@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .e01 import (
+    E01ExtractionError,
     TSK_RECOVER_SCOPE_FLAGS,
     build_image_stage_control_contract,
     build_recovered_root_manifest,
@@ -26,6 +27,7 @@ from .e01 import (
     mmls_first_filesystem,
     parse_mmls_partitions,
     recovered_inventory_fingerprint,
+    select_mmls_filesystem,
     stable_manifest_sha256,
     tsk_recover_tool_inputs_match,
 )
@@ -807,6 +809,7 @@ def extract_raw_image_to_directory(
     *,
     runner: CommandRunner = default_runner,
     tool_resolver: ToolResolver = shutil.which,
+    partition_start_sector: int | None = None,
 ) -> DiskImageExtractionResult:
     source_path = image_path.expanduser().resolve()
     if not source_path.is_file():
@@ -839,6 +842,9 @@ def extract_raw_image_to_directory(
         checkpoint,
         source_signature=source_signature,
         extract_dir=extract_dir,
+    ) and (
+        partition_start_sector is None
+        or int(checkpoint.get("partition_start_sector") or -1) == partition_start_sector
     ):
         return DiskImageExtractionResult(
             source_path=source_path,
@@ -862,8 +868,20 @@ def extract_raw_image_to_directory(
 
     mmls_result = runner(["mmls", *[str(path) for path in image_paths]])
     command_history = [command_record("partition-enumeration", ["mmls", *[str(path) for path in image_paths]], mmls_result)]
-    start_sector = mmls_first_filesystem(mmls_result.stdout) if mmls_result.returncode == 0 else None
     partition_table = parse_mmls_partitions(mmls_result.stdout) if mmls_result.returncode == 0 else []
+    if partition_start_sector is not None:
+        if mmls_result.returncode != 0:
+            detail = (mmls_result.stderr or "").strip() or (mmls_result.stdout or "").strip()
+            raise DiskImageExtractionError(f"mmls failed for raw/split image: {detail}")
+        try:
+            start_sector = select_mmls_filesystem(
+                mmls_result.stdout,
+                preferred_start_sector=partition_start_sector,
+            )
+        except E01ExtractionError as exc:
+            raise DiskImageExtractionError(str(exc)) from exc
+    else:
+        start_sector = mmls_first_filesystem(mmls_result.stdout) if mmls_result.returncode == 0 else None
 
     recovery_scope = build_tsk_recover_recovery_scope()
     command = ["tsk_recover", *TSK_RECOVER_SCOPE_FLAGS]
@@ -923,7 +941,18 @@ def extract_raw_image_to_directory(
         split_set_profile=split_set_profile,
         recovered_root_manifest=recovered_manifest,
         command_history=tuple(command_history),
-        warnings=(
+        warnings=tuple(
+            [
+                "Requested partition has no recognized filesystem description in mmls output "
+                "(possible mojibake or unsupported layout); recovery was delegated to Sleuth Kit as an analyst override."
+            ]
+            if any(
+                row.get("start_sector") == start_sector and not row.get("supported_filesystem_hint")
+                for row in partition_table
+            )
+            else []
+        )
+        + (
             "Raw/split direct extraction is an orchestrated Sleuth Kit workflow; validate recovered paths and timestamps before reporting.",
         ),
         recovery_scope=recovery_scope,
