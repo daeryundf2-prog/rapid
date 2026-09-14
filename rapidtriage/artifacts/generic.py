@@ -12,6 +12,7 @@ from xml.etree import ElementTree as ET
 from zipfile import ZipInfo
 
 from ..core.models import ArtifactRecord
+from ..core.safe_xml import UnsafeXmlError, safe_xml_fromstring
 from ..core.submission import compute_hashes
 
 PARSER_VERSION = "generic-documents-v4"
@@ -497,8 +498,8 @@ def extract_odf_properties(archive: zipfile.ZipFile, names: set[str]) -> dict[st
 
 def extract_xml_leaf_text(xml_data: bytes) -> dict[str, str]:
     try:
-        root = ET.fromstring(xml_data)
-    except ET.ParseError:
+        root = safe_xml_fromstring(xml_data)
+    except (ET.ParseError, UnsafeXmlError):
         return {}
     props: dict[str, str] = {}
     for node in root.iter():
@@ -517,8 +518,8 @@ def extract_ooxml_external_references(archive: zipfile.ZipFile, names: set[str])
         except (KeyError, OSError):
             continue
         try:
-            root = ET.fromstring(xml_data)
-        except ET.ParseError:
+            root = safe_xml_fromstring(xml_data)
+        except (ET.ParseError, UnsafeXmlError):
             continue
         for node in root.iter():
             target = str(node.attrib.get("Target") or "")

@@ -30,21 +30,21 @@ TOOL_PREFLIGHT_PROFILES: dict[str, dict[str, object]] = {
         "package": "libewf",
         "version_commands": (("ewfmount", "--version"), ("ewfmount", "-V")),
         "install_hint": "Install libewf/ewf-tools, then verify `ewfmount` is on PATH.",
-        "windows_hint": "On Windows, use WSL2 with libewf installed or mount/export the image with a trusted forensic suite.",
+        "windows_hint": "On Windows, ewfmount is usually absent; a Sleuth Kit build with EWF support can read the image directly. WSL2 or a vendor export are alternatives.",
     },
     "mmls": {
         "purpose": "Enumerate partitions and filesystem offsets before recovery.",
         "package": "sleuthkit",
         "version_commands": (("mmls", "--version"), ("mmls", "-V")),
         "install_hint": "Install Sleuth Kit, then verify `mmls` is on PATH.",
-        "windows_hint": "On Windows, install Sleuth Kit in WSL2 or use a trusted tool to export the filesystem folder.",
+        "windows_hint": "On Windows, the native Sleuth Kit win32 build works; WSL2 or a vendor export also work.",
     },
     "tsk_recover": {
         "purpose": "Recover files from the selected partition into the run output directory.",
         "package": "sleuthkit",
         "version_commands": (("tsk_recover", "--version"), ("tsk_recover", "-V")),
         "install_hint": "Install Sleuth Kit, then verify `tsk_recover` is on PATH.",
-        "windows_hint": "On Windows, prefer WSL2 or a vendor export if native Sleuth Kit recovery is unavailable.",
+        "windows_hint": "On Windows, the native Sleuth Kit win32 build works; WSL2 or a vendor export also work.",
     },
 }
 E01_NATIVE_CAPABILITIES = {
@@ -71,7 +71,7 @@ E01_FAILURE_GUIDANCE: dict[str, dict[str, object]] = {
         "title": "Required E01 tool is missing",
         "analyst_message": "Direct E01 extraction cannot start until libewf/Sleuth Kit tools are available.",
         "next_actions": [
-            "Install libewf/ewf-tools and Sleuth Kit, preferably in WSL2 on Windows.",
+            "Install a Sleuth Kit build with EWF support (native Windows builds read E01 directly), libewf/ewf-tools, or use WSL2 which provides both.",
             "Or mount/export the image read-only with a trusted forensic suite and scan the exported folder.",
         ],
     },
@@ -120,7 +120,7 @@ E01_FAILURE_GUIDANCE: dict[str, dict[str, object]] = {
         "analyst_message": "The workstation could not access the image, mount point, or recovered output path.",
         "next_actions": [
             "Check filesystem permissions and confirm the output directory is writable.",
-            "On macOS/Linux, verify FUSE/libewf permissions; on Windows, prefer WSL2 or trusted export.",
+            "On macOS/Linux, verify FUSE/libewf permissions; on Windows, a Sleuth Kit build with EWF support can read the image directly, otherwise use WSL2 or a trusted export.",
         ],
     },
     "external-tool-failure": {
@@ -205,6 +205,7 @@ class E01ExtractionResult:
     recovered_root_manifest: dict[str, object] = field(default_factory=dict)
     segment_set_profile: dict[str, object] = field(default_factory=dict)
     recovery_scope: dict[str, object] = field(default_factory=dict)
+    mount_strategy: str = "ewfmount-fuse"
     commercial_grade_ready: bool = False
 
     def to_dict(self) -> dict[str, object]:
@@ -224,6 +225,7 @@ class E01ExtractionResult:
             "command_history": list(self.command_history),
             "warnings": list(self.warnings),
             "partition_selection": self.partition_selection,
+            "mount_strategy": self.mount_strategy,
             "partition_browser": build_e01_partition_browser_contract(
                 partition_selection=self.partition_selection,
                 partition_table=self.partition_table,
@@ -522,6 +524,33 @@ def missing_e01_tools(tool_resolver: ToolResolver = shutil.which) -> list[str]:
     return [tool for tool in E01_REQUIRED_TOOLS if tool_resolver(tool) is None]
 
 
+def sleuthkit_direct_e01_probe(
+    source_path: Path,
+    *,
+    runner: CommandRunner | None = None,
+    tool_resolver: ToolResolver = shutil.which,
+) -> subprocess.CompletedProcess[str] | None:
+    """Return the ``mmls`` result when this Sleuth Kit build reads E01 directly.
+
+    Sleuth Kit builds compiled with libewf can open EWF segment sets without an
+    ``ewfmount`` FUSE layer. The probe runs ``mmls`` on the image itself; a zero
+    return code with at least one parsed partition row means direct read works.
+    Returns ``None`` when the probe is unavailable or the image is unreadable.
+    """
+    if tool_resolver("mmls") is None or tool_resolver("tsk_recover") is None:
+        return None
+    run_command = runner if runner is not None else default_runner
+    try:
+        result = run_command(["mmls", str(source_path)])
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    if not parse_mmls_partitions(result.stdout or ""):
+        return None
+    return result
+
+
 def e01_preflight_summary(
     tool_preflight: Sequence[Mapping[str, object]],
     *,
@@ -559,7 +588,7 @@ def e01_preflight_summary(
         "direct_extract_ready": bool(rows and not missing),
         "remediation_steps": remediation_steps,
         "windows_guidance": [
-            "Use WSL2 with libewf and Sleuth Kit installed for direct extraction, or scan a trusted read-only export folder.",
+            "A native Windows Sleuth Kit build with EWF support can read E01/Ex01 directly; otherwise use WSL2 with libewf+Sleuth Kit or scan a trusted read-only export folder.",
             "Keep the external mount/export log with the RapidForensic run output.",
         ],
         "fallback_strategy": "mount-or-export-first" if missing else "auto-extract-then-scan",
@@ -1455,38 +1484,60 @@ def extract_e01_to_directory(
             command_history=tuple(checkpoint.get("command_history") or ()),
             recovered_root_manifest=dict(checkpoint.get("recovered_root_manifest") or {}),
             segment_set_profile=dict(checkpoint.get("segment_set_profile") or segment_set_profile),
+            mount_strategy=str(checkpoint.get("mount_strategy") or "ewfmount-fuse"),
             warnings=(
                 "E01 extraction resumed from a completed filesystem recovery checkpoint; verify checkpoint provenance before report use.",
             ),
             resume_status=build_e01_resume_status(checkpoint_path, checkpoint, resumed=True),
             recovery_scope=build_tsk_recover_recovery_scope(),
         )
-    if missing:
-        write_e01_stage_checkpoint(
-            checkpoint_path,
-            {
-                "profile_version": E01_STAGE_CHECKPOINT_VERSION,
-                "source_signature": source_signature,
-                "requested_start_sector": partition_start_sector,
-                "segment_set_profile": segment_set_profile,
-                "completed": False,
-                "resume_ready": False,
-                "stages": {
-                    "dependency-preflight": {
-                        "status": "blocked",
-                        "missing_tools": missing,
-                    }
-                },
-            },
-        )
-        joined = ", ".join(missing)
-        raise E01ExtractionError(
-            f"E01 direct input requires external tools: {joined}. "
-            "Install libewf/Sleuth Kit, run `rapidtriage evidence IMAGE.E01 --json` for preflight, "
-            "or mount/export the image read-only with a trusted forensic tool and scan that folder."
-        )
-
     command_history: list[dict[str, object]] = []
+    direct_ewf_probe: subprocess.CompletedProcess[str] | None = None
+    if missing:
+        blocked = True
+        if missing == ["ewfmount"]:
+            # The canonical path mounts through ewfmount (FUSE), but Sleuth Kit
+            # builds compiled with libewf read E01/Ex01 segment sets directly.
+            # Probe with mmls before declaring the source blocked.
+            direct_ewf_probe = sleuthkit_direct_e01_probe(
+                source_path,
+                runner=runner,
+                tool_resolver=tool_resolver,
+            )
+            if direct_ewf_probe is not None:
+                command_history.append(
+                    command_record("partition-enumeration", ["mmls", str(source_path)], direct_ewf_probe)
+                )
+                blocked = False
+        if blocked:
+            write_e01_stage_checkpoint(
+                checkpoint_path,
+                {
+                    "profile_version": E01_STAGE_CHECKPOINT_VERSION,
+                    "source_signature": source_signature,
+                    "requested_start_sector": partition_start_sector,
+                    "segment_set_profile": segment_set_profile,
+                    "completed": False,
+                    "resume_ready": False,
+                    "stages": {
+                        "dependency-preflight": {
+                            "status": "blocked",
+                            "missing_tools": missing,
+                        }
+                    },
+                },
+            )
+            joined = ", ".join(missing)
+            raise E01ExtractionError(
+                f"E01 direct input requires external tools: {joined}. "
+                "Install libewf/Sleuth Kit, use a Sleuth Kit build with EWF support, "
+                "run `rapidtriage evidence IMAGE.E01 --json` for preflight, "
+                "or mount/export the image read-only with a trusted forensic tool and scan that folder."
+            )
+
+    mount_strategy = "sleuthkit-direct-ewf" if direct_ewf_probe is not None else "ewfmount-fuse"
+    if direct_ewf_probe is not None:
+        raw_image = source_path
     partition_table: list[dict[str, object]] = []
     recovery_scope = build_tsk_recover_recovery_scope()
     checkpoint_payload: dict[str, object] = {
@@ -1495,8 +1546,9 @@ def extract_e01_to_directory(
         "requested_start_sector": partition_start_sector,
         "segment_set_profile": segment_set_profile,
         "recovery_scope": recovery_scope,
+        "mount_strategy": mount_strategy,
         "tool_inputs": {
-            "mount_tool": "ewfmount",
+            "mount_tool": "ewfmount" if direct_ewf_probe is None else "sleuthkit-libewf",
             "partition_tool": "mmls",
             "recovery_tool": "tsk_recover",
             "recovery_scope": recovery_scope,
@@ -1507,7 +1559,8 @@ def extract_e01_to_directory(
         "stages": {
             "dependency-preflight": {
                 "status": "completed",
-                "missing_tools": [],
+                "missing_tools": list(missing),
+                "mount_strategy": mount_strategy,
                 "preflight_summary": e01_preflight_summary(tool_preflight, missing_tools=[]),
             }
         },
@@ -1515,21 +1568,34 @@ def extract_e01_to_directory(
     write_e01_stage_checkpoint(checkpoint_path, checkpoint_payload)
 
     try:
-        mount_result = runner(["ewfmount", str(source_path), str(mount_dir)])
-        command_history.append(command_record("mount-ewf", ["ewfmount", str(source_path), str(mount_dir)], mount_result))
-        checkpoint_payload["command_history"] = command_history
-        checkpoint_payload["stages"] = {
-            **dict(checkpoint_payload.get("stages") or {}),
-            "mount-ewf": {"status": "completed" if mount_result.returncode == 0 else "failed"},
-        }
-        write_e01_stage_checkpoint(checkpoint_path, checkpoint_payload)
-        if mount_result.returncode != 0:
-            raise E01ExtractionError(f"ewfmount failed: {(mount_result.stderr or '').strip()}")
-        if not raw_image.exists():
-            raise E01ExtractionError(f"ewfmount did not expose expected raw image: {raw_image}")
+        if direct_ewf_probe is not None:
+            mmls_result = direct_ewf_probe
+            checkpoint_payload["command_history"] = command_history
+            checkpoint_payload["stages"] = {
+                **dict(checkpoint_payload.get("stages") or {}),
+                "mount-ewf": {
+                    "status": "skipped",
+                    "reason": "ewfmount-unavailable; Sleuth Kit read the E01/Ex01 segment set directly",
+                },
+                "partition-enumeration": {"status": "completed"},
+            }
+            write_e01_stage_checkpoint(checkpoint_path, checkpoint_payload)
+        else:
+            mount_result = runner(["ewfmount", str(source_path), str(mount_dir)])
+            command_history.append(command_record("mount-ewf", ["ewfmount", str(source_path), str(mount_dir)], mount_result))
+            checkpoint_payload["command_history"] = command_history
+            checkpoint_payload["stages"] = {
+                **dict(checkpoint_payload.get("stages") or {}),
+                "mount-ewf": {"status": "completed" if mount_result.returncode == 0 else "failed"},
+            }
+            write_e01_stage_checkpoint(checkpoint_path, checkpoint_payload)
+            if mount_result.returncode != 0:
+                raise E01ExtractionError(f"ewfmount failed: {(mount_result.stderr or '').strip()}")
+            if not raw_image.exists():
+                raise E01ExtractionError(f"ewfmount did not expose expected raw image: {raw_image}")
 
-        mmls_result = runner(["mmls", str(raw_image)])
-        command_history.append(command_record("partition-enumeration", ["mmls", str(raw_image)], mmls_result))
+            mmls_result = runner(["mmls", str(raw_image)])
+            command_history.append(command_record("partition-enumeration", ["mmls", str(raw_image)], mmls_result))
         checkpoint_payload["command_history"] = command_history
         checkpoint_payload["stages"] = {
             **dict(checkpoint_payload.get("stages") or {}),
@@ -1608,15 +1674,25 @@ def extract_e01_to_directory(
             partition_selection=partition_selection,
             command_history=tuple(command_history),
             warnings=(
+                (
+                    "ewfmount was not installed; the installed Sleuth Kit read the E01/Ex01 segment set directly. "
+                    "Verify the build's EWF support and preserve command history for provenance."
+                ),
+                "E01/Ex01 direct extraction is an orchestrated libewf/Sleuth Kit workflow; validate results against case requirements.",
+            )
+            if direct_ewf_probe is not None
+            else (
                 "E01/Ex01 direct extraction is an orchestrated libewf/Sleuth Kit workflow; validate results against case requirements.",
             ),
             resume_status=build_e01_resume_status(checkpoint_path, checkpoint_payload, resumed=False),
             recovered_root_manifest=recovered_manifest,
             segment_set_profile=segment_set_profile,
             recovery_scope=recovery_scope,
+            mount_strategy=mount_strategy,
         )
     finally:
-        unmount_e01_mount(mount_dir, runner=runner, tool_resolver=tool_resolver)
+        if direct_ewf_probe is None:
+            unmount_e01_mount(mount_dir, runner=runner, tool_resolver=tool_resolver)
 
 
 def e01_source_signature(path: Path) -> dict[str, object]:
@@ -1888,7 +1964,7 @@ def mmls_first_filesystem(text: str) -> int | None:
             continue
         if any(
             token in lowered
-            for token in ("fat", "exfat", "ntfs", "basic data", "msdos", "ext2", "ext3", "ext4", "linux", "xfs")
+            for token in ("fat", "exfat", "ntfs", "basic data", "efi system", "msdos", "ext2", "ext3", "ext4", "linux", "xfs")
         ):
             if count > best_size:
                 best_start = start
@@ -2027,6 +2103,8 @@ def mmls_sector_size_bytes(text: str) -> int:
 
 def guess_partition_filesystem(description: str) -> str:
     lowered = description.lower()
+    if "efi system" in lowered:
+        return "fat"
     if "ntfs" in lowered:
         return "ntfs"
     if "exfat" in lowered:
@@ -2056,7 +2134,7 @@ def is_supported_mmls_description(description: str) -> bool:
     lowered = description.lower()
     if "swap" in lowered:
         return False
-    return any(token in lowered for token in ("fat", "exfat", "ntfs", "basic data", "msdos", "ext2", "ext3", "ext4", "linux", "xfs"))
+    return any(token in lowered for token in ("fat", "exfat", "ntfs", "basic data", "efi system", "msdos", "ext2", "ext3", "ext4", "linux", "xfs"))
 def describe_source_integrity(path: Path, *, max_hash_bytes: int = DIRECT_IMAGE_HASH_LIMIT_BYTES) -> dict[str, object]:
     resolved = path.expanduser().resolve()
     try:
@@ -3670,7 +3748,7 @@ def collect_tool_preflight(
             "purpose": profile.get("purpose") or "External tool required by the selected evidence workflow.",
             "package": profile.get("package") or tool,
             "install_hint": profile.get("install_hint") or f"Install {tool} and ensure it is on PATH.",
-            "windows_hint": profile.get("windows_hint") or "Use WSL2 or a trusted mounted/exported evidence folder when the tool is unavailable.",
+            "windows_hint": profile.get("windows_hint") or "Install the tool natively on Windows when a build exists, or use WSL2 / a trusted mounted/exported evidence folder.",
             "version_command": list(version_commands[0]),
             "version_commands": [list(command) for command in version_commands],
             "remediation": None if resolved is not None else profile.get("install_hint") or f"Install {tool} and ensure it is on PATH.",

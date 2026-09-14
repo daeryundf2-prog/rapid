@@ -14,6 +14,7 @@ from urllib.parse import unquote_plus
 from ...core.audit import compute_sha256
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
+from ...core.safe_xml import UnsafeXmlError, safe_xml_parse
 from .common import (
     build_forensic_review,
     isoformat_from_timestamp,
@@ -1333,8 +1334,8 @@ def collect_wifi_profile_artifacts(root: Path) -> Iterable[ArtifactRecord]:
 
 def parse_wifi_profile(path: Path) -> dict[str, object]:
     try:
-        tree = ET.parse(path)
-    except (ET.ParseError, OSError):
+        tree = safe_xml_parse(path)
+    except (ET.ParseError, UnsafeXmlError, OSError):
         return {}
     root = tree.getroot()
     if local_name(root.tag).lower() != "wlanprofile" and not any(local_name(element.tag).lower() == "ssidconfig" for element in root.iter()):
@@ -3537,8 +3538,8 @@ def parse_iis_application_host_config(root: Path, config_path: Path) -> dict[str
         "application_pools": {},
     }
     try:
-        tree = ET.parse(config_path)
-    except (OSError, ET.ParseError) as exc:
+        tree = safe_xml_parse(config_path)
+    except (OSError, ET.ParseError, UnsafeXmlError) as exc:
         profile["parse_status"] = "parse-failed"
         profile["error"] = str(exc)[:160]
         return profile
@@ -3822,8 +3823,8 @@ def collect_task_scheduler(root: Path) -> Iterable[ArtifactRecord]:
         return
     for path in sorted((item for item in tasks_root.rglob("*") if item.is_file()), key=lambda item: str(item).lower()):
         try:
-            xml_root = ET.parse(path).getroot()
-        except (ET.ParseError, OSError):
+            xml_root = safe_xml_parse(path).getroot()
+        except (ET.ParseError, UnsafeXmlError, OSError):
             continue
         stat_result = path.stat()
         command = first_text(xml_root, "Command")

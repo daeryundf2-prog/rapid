@@ -13,6 +13,8 @@ from pathlib import Path
 from urllib.parse import urlparse
 from xml.etree import ElementTree as ET
 
+from .safe_xml import UnsafeXmlError, safe_xml_fromstring
+
 
 class RuleConfigError(ValueError):
     """Raised when a rapidtriage rule file is invalid."""
@@ -925,8 +927,8 @@ def _extract_docx_text(path: Path) -> str:
     except (FileNotFoundError, PermissionError, OSError, zipfile.BadZipFile, KeyError):
         return ""
     try:
-        root = ET.fromstring(xml_data)
-    except ET.ParseError:
+        root = safe_xml_fromstring(xml_data)
+    except (ET.ParseError, UnsafeXmlError):
         return ""
     texts = []
     for node in root.iter():

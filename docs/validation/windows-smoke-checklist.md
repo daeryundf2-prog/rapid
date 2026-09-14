@@ -34,7 +34,7 @@ Record:
 
 ```powershell
 python --version
-python -m pip show dashcam-tools
+python -m pip show rapidtriage
 python -m pip show jsonschema
 python -m pip show ruff
 python -m pip show vulture

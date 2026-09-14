@@ -323,7 +323,8 @@ Units are in 512-byte sectors
         self.assertEqual(rows[2]["size_bytes"], 1952183161 * 512)
         self.assertEqual(rows[2]["filesystem_guess"], "windows-basic-data")
         self.assertTrue(rows[2]["supported_filesystem_hint"])
-        self.assertFalse(rows[0]["supported_filesystem_hint"])
+        self.assertEqual(rows[0]["filesystem_guess"], "fat")
+        self.assertTrue(rows[0]["supported_filesystem_hint"])
         self.assertFalse(rows[1]["supported_filesystem_hint"])
         self.assertEqual(rows[3]["slot"], 8)
         self.assertEqual(rows[3]["start_sector"], 1952423936)
@@ -655,6 +656,73 @@ DOS Partition Table
                 "do-not-report-e01-ex01-workflow-as-native-complete",
             )
             self.assertFalse(e01_uplift["reportability_decision"]["ready_for_court_report"])
+
+    def test_extract_e01_direct_read_when_ewfmount_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            e01_path = root / "case.E01"
+            stage_dir = root / "stage"
+            e01_path.write_bytes(b"EVF")
+            commands: list[list[str]] = []
+
+            def fake_runner(command):
+                commands.append(list(command))
+                if command[1:] == ["--version"]:
+                    return subprocess.CompletedProcess(command, 0, f"{command[0]} 1.0\n", "")
+                if command[0] == "mmls":
+                    return subprocess.CompletedProcess(command, 0, "001: 0000002048 0000020000 NTFS\n", "")
+                if command[0] == "tsk_recover":
+                    Path(command[-1]).mkdir(parents=True, exist_ok=True)
+                    (Path(command[-1]) / "evidence.txt").write_text("fraud invoice", encoding="utf-8")
+                    return subprocess.CompletedProcess(command, 0, "", "")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            def resolver(name):
+                return None if name == "ewfmount" else f"/usr/bin/{name}"
+
+            result = extract_e01_to_directory(
+                e01_path,
+                stage_dir,
+                runner=fake_runner,
+                tool_resolver=resolver,
+            )
+
+            self.assertEqual(result.partition_start_sector, 2048)
+            self.assertEqual(result.mount_strategy, "sleuthkit-direct-ewf")
+            self.assertEqual(result.raw_image_path, e01_path.resolve())
+            workflow_commands = [command for command in commands if command[1:] != ["--version"]]
+            self.assertEqual([command[0] for command in workflow_commands], ["mmls", "tsk_recover"])
+            self.assertIn("read the E01/Ex01 segment set directly", result.warnings[0])
+            stage_status = json.loads((stage_dir / "rapidtriage-e01-stage-status.json").read_text(encoding="utf-8"))
+            self.assertEqual(stage_status["stages"]["mount-ewf"]["status"], "skipped")
+            self.assertEqual(stage_status["mount_strategy"], "sleuthkit-direct-ewf")
+
+    def test_extract_e01_blocked_when_sleuthkit_cannot_read_e01(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            e01_path = root / "case.E01"
+            e01_path.write_bytes(b"EVF")
+
+            def fake_runner(command):
+                if command[1:] == ["--version"]:
+                    return subprocess.CompletedProcess(command, 0, f"{command[0]} 1.0\n", "")
+                if command[0] == "mmls":
+                    return subprocess.CompletedProcess(command, 1, "", "cannot determine partition type")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            def resolver(name):
+                return None if name == "ewfmount" else f"/usr/bin/{name}"
+
+            with self.assertRaises(E01ExtractionError) as context:
+                extract_e01_to_directory(
+                    e01_path,
+                    root / "stage",
+                    runner=fake_runner,
+                    tool_resolver=resolver,
+                )
+
+            self.assertIn("requires external tools", str(context.exception))
+            self.assertIn("ewfmount", str(context.exception))
 
     def test_extract_e01_records_user_partition_override(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

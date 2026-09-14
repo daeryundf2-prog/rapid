@@ -26,7 +26,7 @@ Set-Location $RepoRoot
 git rev-parse HEAD
 git status --short
 $Python --version
-$Python -m pip show dashcam-tools
+$Python -m pip show rapidtriage
 $Python -m pip show jsonschema
 ```
 

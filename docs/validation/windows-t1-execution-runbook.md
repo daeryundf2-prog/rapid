@@ -56,7 +56,7 @@ Do not place this directory inside the Git repository.
 Record version and command output for:
 
 - Python.
-- RapidForensic / `dashcam-tools` package.
+- RapidForensic / `rapidtriage` package.
 - Acquisition tool.
 - Ex01-capable tool, if used.
 - Trusted/reference tools.

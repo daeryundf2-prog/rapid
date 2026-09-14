@@ -12,7 +12,7 @@ This guide is for running the local RapidTriage web UI from a source checkout on
 Optional tools:
 
 - Tesseract OCR enables image OCR.
-- `ewfmount`, `mmls`, and `tsk_recover` enable direct E01 extraction when available. On Windows, using WSL2 or a pre-mounted/extracted evidence folder is usually more reliable.
+- `ewfmount`, `mmls`, and `tsk_recover` enable direct E01 extraction when available. On Windows, a native Sleuth Kit build compiled with libewf can read E01/Ex01 directly without `ewfmount`; WSL2 or a pre-mounted/extracted evidence folder also work.
 
 ## One-Command Start
 
@@ -89,7 +89,7 @@ Recommended first workflow:
 2. Point RapidTriage at the mounted/extracted folder.
 3. Use keyword search, source preview, review marks, submission hashes, and report draft features.
 
-Direct E01 input is supported only when the required external tools are available. If `rapidtriage doctor` warns that E01 tools are missing, use WSL2 or scan a mounted/extracted folder instead.
+Direct E01 input is supported only when the required external tools are available. On Windows, a Sleuth Kit build with EWF support can read E01/Ex01 directly; `rapidtriage evidence IMAGE.E01 --json` reports which path is available. If `rapidtriage doctor` warns that E01 tools are missing, install an EWF-capable Sleuth Kit build, use WSL2, or scan a mounted/extracted folder instead.
 
 When sharing results from Windows, prefer the Review board's reviewer bundle export. The ZIP contains static reviewer HTML, selected evidence JSON, report exports, hash manifests, and a bundle manifest, but it does not include the original image. Verify the ZIP SHA256 from `rapidtriage-bundle-manifest.json` before external handoff.
 

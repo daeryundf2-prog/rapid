@@ -134,7 +134,7 @@ def check_package_import(package: str, category: str, *, required: bool, extra: 
     spec = importlib.util.find_spec(package)
     if spec is None:
         status = ERROR if required else WARN
-        remediation = f"Install the '{extra}' extra: pip install 'dashcam-tools[{extra}]'." if extra else f"Install {package}."
+        remediation = f"Install the '{extra}' extra: pip install 'rapidtriage[{extra}]'." if extra else f"Install {package}."
         return DoctorCheck(
             name=f"python-package:{package}",
             category=category,
@@ -256,7 +256,7 @@ def check_e01_tools(tool_resolver: ToolResolver) -> DoctorCheck:
             status=WARN,
             summary="E01 direct extraction tools are incomplete.",
             details=details,
-            remediation="Install libewf and Sleuth Kit, use WSL2, or mount/extract the image first and scan the mounted folder.",
+            remediation="Install a Sleuth Kit build with EWF support (native Windows builds can read E01 directly) or libewf for ewfmount; alternatively use WSL2 or scan a mounted/extracted folder.",
         )
     return DoctorCheck(
         name="tools:e01",

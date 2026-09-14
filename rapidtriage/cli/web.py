@@ -73,7 +73,7 @@ def run_web_server(
     try:
         import uvicorn
     except ImportError as exc:
-        raise RuntimeError("rapidtriage web requires the 'web' extra: pip install 'dashcam-tools[web]'") from exc
+        raise RuntimeError("rapidtriage web requires the 'web' extra: pip install 'rapidtriage[web]'") from exc
     if not auth_token and not allow_remote_without_auth:
         import secrets
 

@@ -18,6 +18,7 @@ from typing import NamedTuple
 
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
+from ...core.safe_xml import UnsafeXmlError, safe_xml_fromstring, safe_xml_parse
 
 EVENT_LOG_ROOT = ("Windows", "System32", "winevt", "Logs")
 PARSER_VERSION = "eventlog-normalized-v21"
@@ -1094,8 +1095,8 @@ def event_message_manifest_entries(path: Path, text: str) -> list[tuple[str, str
     """Extract provider/event message templates from a Windows Event Manifest XML file."""
 
     try:
-        root = ET.fromstring(text)
-    except ET.ParseError:
+        root = safe_xml_fromstring(text)
+    except (ET.ParseError, UnsafeXmlError):
         return []
 
     string_table: dict[str, str] = {}
@@ -1422,8 +1423,8 @@ def collect_xml_events(
     message_catalog: Mapping[str, Mapping[str, Mapping[str, object]]] | None = None,
 ) -> Iterable[ArtifactRecord]:
     try:
-        tree = ET.parse(path)
-    except (ET.ParseError, OSError):
+        tree = safe_xml_parse(path)
+    except (ET.ParseError, UnsafeXmlError, OSError):
         return
     root = tree.getroot()
     events = [root] if strip_namespace(root.tag) == "Event" else root.findall(".//{*}Event")

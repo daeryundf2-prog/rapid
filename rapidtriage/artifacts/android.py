@@ -12,6 +12,7 @@ from pathlib import Path
 
 from ..core.forensic_accuracy import build_accuracy_gate
 from ..core.models import ArtifactRecord
+from ..core.safe_xml import UnsafeXmlError, safe_xml_fromstring
 from ..core.submission import compute_hashes
 from .review import build_forensic_review
 
@@ -299,8 +300,8 @@ def parse_manifest(archive: zipfile.ZipFile) -> dict[str, object]:
             "raw_manifest_preview": raw[:80].hex(),
         }
     try:
-        root = ET.fromstring(text)
-    except ET.ParseError:
+        root = safe_xml_fromstring(text)
+    except (ET.ParseError, UnsafeXmlError):
         return {
             "manifest_format": "text-unparseable",
             "package": "",

@@ -36,7 +36,7 @@ The GUI `Check evidence support` action now shows a compact E01 readiness card:
 
 ## Recommended Windows Workflow
 
-Direct E01 handling is usually more reliable through WSL2 or a separate forensic mounting/export workflow.
+On Windows, a native Sleuth Kit build with EWF support can read E01/Ex01 directly without `ewfmount`; WSL2 or a separate forensic mounting/export workflow remain reliable alternatives.
 
 Recommended steps:
 

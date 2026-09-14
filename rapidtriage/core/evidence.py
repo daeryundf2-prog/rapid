@@ -43,6 +43,7 @@ from .e01 import (
     image_reportability_decision,
     image_workflow_analyst_review_profile,
     missing_e01_tools,
+    sleuthkit_direct_e01_probe,
     stable_manifest_sha256,
 )
 from .virtual_disk import (
@@ -423,7 +424,13 @@ class EwfAdapter:
     def identify(self, source: Path) -> EvidenceAdapterResult:
         missing = missing_e01_tools()
         supported = source.suffix.lower() in self.supported_suffixes
-        ready = supported and not missing
+        direct_ewf_read = False
+        if supported and source.is_file() and missing == ["ewfmount"]:
+            # EWF-capable Sleuth Kit builds read E01/Ex01 segment sets directly
+            # without an ewfmount FUSE layer; probe once so `can_extract`
+            # reflects what `run` will actually attempt.
+            direct_ewf_read = sleuthkit_direct_e01_probe(source) is not None
+        ready = supported and (not missing or direct_ewf_read)
         report_grade = image_report_grade_assessment("#22", E01_REPORT_GRADE_BLOCKERS)
         source_integrity = describe_source_integrity(source) if source.is_file() else None
         segment_set_profile = build_e01_segment_set_profile(source) if source.is_file() and supported else None
@@ -473,21 +480,35 @@ class EwfAdapter:
             required_tools=list(E01_REQUIRED_TOOLS),
             missing_tools=missing,
             message=(
-                "E01/Ex01 can be extracted with libewf and Sleuth Kit tools."
+                (
+                    "E01/Ex01 will be read directly by the installed Sleuth Kit (EWF-capable build); "
+                    "ewfmount is not installed."
+                )
+                if direct_ewf_read
+                else "E01/Ex01 can be extracted with libewf and Sleuth Kit tools."
                 if supported and not missing
-                else "E01/Ex01 detected, but required external tools are missing. Use WSL2 or a mounted/extracted folder."
+                else "E01/Ex01 detected, but required external tools are missing. Install an EWF-capable Sleuth Kit build, use WSL2, or scan a mounted/extracted folder."
             ),
-            support_level="direct-extract" if supported and not missing else "tooling-required",
-            scan_strategy="auto-extract-then-scan" if supported and not missing else "mount-or-export-first",
+            support_level="direct-extract" if supported and ready else "tooling-required",
+            scan_strategy="auto-extract-then-scan" if supported and ready else "mount-or-export-first",
             next_actions=(
                 ["Run rapidtriage run IMAGE.E01 --mode hacking --output-dir OUTPUT."]
-                if supported and not missing
+                if supported and ready
                 else [
-                    "Install libewf and Sleuth Kit tools, or use WSL2 where they are available.",
+                    "Install a Sleuth Kit build with EWF support (native Windows builds work) or libewf (ewfmount); WSL2 is another option.",
                     "Alternatively mount/export the E01/Ex01 with a trusted forensic tool and scan the resulting folder.",
                 ]
             ),
-            warnings=[] if ready else ["Direct E01/Ex01 extraction is disabled until required tools are present."],
+            warnings=(
+                [
+                    "ewfmount is absent; extraction relies on this Sleuth Kit build's EWF support. "
+                    "Verify TSK provenance before report use."
+                ]
+                if direct_ewf_read
+                else []
+            )
+            if ready
+            else ["Direct E01/Ex01 extraction is disabled until required tools are present."],
             external_validation_required=True,
             source_integrity=source_integrity,
             tool_preflight=tool_preflight,
