@@ -1,13 +1,18 @@
 # RapidForensic / RapidTriage
 
-RapidForensic은 로컬 우선(local-first) 디지털 포렌식 triage 작업대입니다.
-현재 실행 이름은 `rapidtriage`이며, Python CLI와 로컬 웹 UI로 구성되어
-있습니다.
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-005571?style=flat-square&logo=fastapi)](https://fastapi.tiangolo.com/)
+[![Taxonomy](https://img.shields.io/badge/Taxonomy-51%20Targets-brightgreen.svg?style=flat-square)](docs/)
+[![Validation](https://img.shields.io/badge/Validation-120%2F120%20Packages-success.svg?style=flat-square)](docs/)
+[![Architecture: Local-First](https://img.shields.io/badge/Architecture-Local--First%20DFIR-orange.svg?style=flat-square)](rapidtriage/)
 
-목표는 명확합니다. E01/Ex01 워크플로우 산출물, 마운트된 이미지, 폴더,
-RAW/가상 디스크 export, ZIP/archive, DB, 로그, 문서 묶음 같은 입력을 받아
-분석관이 필요한 증거를 빠르게 검색하고, 원본 근거를 확인하고, 리뷰 상태를
-부여하고, 보고서 후보와 제출 패키지로 정리하게 만드는 것입니다.
+> **Local-First Digital Forensic Triage Workbench & Evidentiary Analysis Pipeline**  
+> High-speed forensic triage, automated artifact collection across 50+ targets, case indexing, timeline reconstruction, and verifiable reporting via Python CLI (`rapidtriage`) and Local Web UI.
+
+RapidForensic(실행명 `rapidtriage`)은 로컬 우선(local-first) 디지털 포렌식 triage 작업대입니다. Python CLI와 경량 로컬 웹 UI(FastAPI)로 구성되어 있습니다.
+
+E01/Ex01 워크플로우 산출물, 마운트된 이미지, RAW/가상 디스크 export, 폴더, 아카이브, DB, 로그, 문서 묶음 등 다양한 형태의 디지털 증거를 신속히 수집·색인하고, 원본 근거 기반의 타임라인 및 지표 분석을 거쳐 법적 검토용 보고서 후보를 생성하는 오픈소스 DFIR 워크벤치입니다.
 
 이 저장소에는 과거 dashcam 도구와 Mac cleanup helper 같은 레거시 파일도
 남아 있습니다. 포렌식 제품 본체는 아래 경로를 중심으로 보면 됩니다.
