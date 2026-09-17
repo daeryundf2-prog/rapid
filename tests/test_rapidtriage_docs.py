@@ -14,6 +14,7 @@ from rapidtriage.core.docs import (
     extract_text,
     run_docs_search,
     scan_document_candidates,
+    write_result,
 )
 from rapidtriage.core.safe_xml import UnsafeXmlError
 
@@ -336,6 +337,21 @@ class RapidTriageDocsTests(unittest.TestCase):
             self.assertIn("source-viewer-hit-context-validation-required", payload["commercial_blockers"])
             self.assertEqual(payload["index_file"]["path"], str(index_output.resolve()))
             self.assertTrue((root / "docs-index-search.audit.json").exists())
+
+    def test_write_result_streams_json_without_single_dumps_call(self) -> None:
+        payload = {
+            "command": "docs-index",
+            "documents": [{"id": 0, "path": "a.txt", "text_length": 4}],
+            "terms": {"alpha": [{"document_id": 0, "count": 2}]},
+        }
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            target = Path(tmp_dir) / "nested" / "index.json"
+            with patch("rapidtriage.core.docs.json.dumps", side_effect=AssertionError("monolithic dumps")):
+                write_result(payload, target)
+            self.assertEqual(
+                target.read_text(encoding="utf-8"),
+                json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            )
 
     def test_manifest_reports_windows_modules_as_separate_providers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

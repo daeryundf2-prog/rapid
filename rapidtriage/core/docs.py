@@ -455,7 +455,9 @@ def search_docs_index_payload(
 
 def write_result(payload: dict[str, object], output: Path) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    with output.open("w", encoding="utf-8", buffering=4 * 1024 * 1024) as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
 
 
 def extract_text(
