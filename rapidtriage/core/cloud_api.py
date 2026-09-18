@@ -99,6 +99,60 @@ class CloudApiCollectionError(ValueError):
     """Raised when a cloud API collection manifest or request is unsafe/invalid."""
 
 
+CREDENTIAL_HEADER_NAMES = frozenset({"authorization", "x-api-key", "api-key"})
+LOOPBACK_HOSTNAMES = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def url_origin(url: str) -> tuple[str, str]:
+    parsed = urllib.parse.urlparse(str(url))
+    return (parsed.scheme.lower(), parsed.netloc.lower())
+
+
+def strip_credential_headers(headers: Mapping[str, object]) -> dict[str, str]:
+    """Remove credential-bearing headers before cross-origin hops."""
+    return {
+        str(key): str(value)
+        for key, value in dict(headers).items()
+        if str(key).lower() not in CREDENTIAL_HEADER_NAMES
+    }
+
+
+def validate_hop_url(next_url: str, *, current_url: str, allow_insecure_http: bool) -> None:
+    """Validate one redirect/pagination hop: absolute URL plus no HTTPS downgrade."""
+    validate_url(next_url, allow_insecure_http=allow_insecure_http)
+    current_scheme = urllib.parse.urlparse(str(current_url)).scheme.lower()
+    next_parsed = urllib.parse.urlparse(next_url)
+    if (
+        current_scheme == "https"
+        and next_parsed.scheme.lower() == "http"
+        and (next_parsed.hostname or "") not in LOOPBACK_HOSTNAMES
+    ):
+        raise CloudApiCollectionError(f"refusing HTTPS-to-HTTP downgrade during collection hop: {next_url}")
+
+
+class CredentialScopedRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Scope credential headers to the request origin and reject HTTPS downgrades."""
+
+    def __init__(self, *, allow_insecure_http: bool = False) -> None:
+        super().__init__()
+        self._allow_insecure_http = allow_insecure_http
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        new_request = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new_request is None:
+            return None
+        validate_hop_url(
+            new_request.full_url,
+            current_url=req.full_url,
+            allow_insecure_http=self._allow_insecure_http,
+        )
+        if url_origin(new_request.full_url) != url_origin(req.full_url):
+            for name in list(new_request.headers):
+                if str(name).lower() in CREDENTIAL_HEADER_NAMES:
+                    del new_request.headers[name]
+        return new_request
+
+
 def run_cloud_api_collection(
     manifest_path: Path,
     *,
@@ -527,16 +581,26 @@ def execute_request(
     attempts: list[dict[str, object]] = []
     pagination = prepared.get("pagination") if isinstance(prepared.get("pagination"), Mapping) else {}
     pagination_profile = new_pagination_execution_profile(pagination)
-    current_url = str(prepared["url"])
+    original_url = str(prepared["url"])
+    original_origin = url_origin(original_url)
+    current_url = original_url
     seen_url_hashes = {hashlib.sha256(current_url.encode("utf-8")).hexdigest()}
     page_limit = int(pagination.get("max_pages") or 1) if pagination.get("mode") not in {"", "none", None} else 1
     for page_number in range(1, page_limit + 1):
+        page_headers = dict(prepared["headers"])
+        if url_origin(current_url) != original_origin:
+            page_headers = strip_credential_headers(page_headers)
+            pagination_profile["cross_origin_hop_count"] = int(
+                pagination_profile.get("cross_origin_hop_count") or 0
+            ) + 1
+            pagination_profile["credential_headers_stripped_cross_origin"] = True
         page_result = fetch_cloud_api_page(
             index=index,
             name=str(prepared["name"]),
             method=str(prepared["method"]),
             url=current_url,
-            headers=dict(prepared["headers"]),
+            headers=page_headers,
+            allow_insecure_http=bool(prepared.get("allow_insecure_http")),
             request_body=request_body,
             responses_dir=responses_dir,
             timeout_seconds=timeout_seconds,
@@ -626,8 +690,12 @@ def fetch_cloud_api_page(
     retry_statuses: set[int],
     backoff_seconds: float,
     page_number: int,
+    allow_insecure_http: bool = False,
 ) -> dict[str, object]:
     attempts: list[dict[str, object]] = []
+    opener = urllib.request.build_opener(
+        CredentialScopedRedirectHandler(allow_insecure_http=allow_insecure_http)
+    )
     for attempt in range(1, max_attempts + 1):
         request = urllib.request.Request(
             url,
@@ -636,7 +704,7 @@ def fetch_cloud_api_page(
             method=method,
         )
         try:
-            with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+            with opener.open(request, timeout=timeout_seconds) as response:
                 content = response.read(max_response_bytes + 1)
                 truncated = len(content) > max_response_bytes
                 if truncated:
@@ -847,6 +915,8 @@ def new_pagination_execution_profile(pagination: Mapping[str, object]) -> dict[s
         "delta_token_sha256s": [],
         "max_pages_reached": False,
         "repeated_next_url_detected": False,
+        "cross_origin_hop_count": 0,
+        "credential_headers_stripped_cross_origin": False,
         "truncation_seen": False,
         "raw_tokens_serialized": False,
         "commercial_gap_ids": ["#40"],
@@ -915,7 +985,7 @@ def resolve_next_page(
         next_value=next_value,
         query_param=text_value(pagination.get("next_query_param") or next_field),
     )
-    validate_url(next_url, allow_insecure_http=allow_insecure_http)
+    validate_hop_url(next_url, current_url=current_url, allow_insecure_http=allow_insecure_http)
     return {
         "next_url": next_url,
         "next_token_sha256": hash_token(next_value),
@@ -980,7 +1050,7 @@ def hash_token(value: str) -> str:
 def redact_headers(headers: Mapping[str, object]) -> dict[str, str]:
     redacted = {}
     for key, value in headers.items():
-        if key.lower() in {"authorization", "x-api-key", "api-key"}:
+        if key.lower() in CREDENTIAL_HEADER_NAMES:
             redacted[str(key)] = "<REDACTED>"
         else:
             redacted[str(key)] = str(value)
@@ -992,7 +1062,7 @@ def request_credential_handling(prepared: Mapping[str, object]) -> dict[str, obj
     sensitive_headers = [
         str(key)
         for key in headers
-        if str(key).lower() in {"authorization", "x-api-key", "api-key"}
+        if str(key).lower() in CREDENTIAL_HEADER_NAMES
     ]
     return {
         "sensitive_header_names": sensitive_headers,

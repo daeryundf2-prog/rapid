@@ -23,6 +23,7 @@ import {
   WORKBENCH_SMOKE_CHECKPOINTS,
 } from "./app_workbench_config.js";
 import {
+  columnarPagination,
   escapeHtml,
   fileName,
   formatBytes,
@@ -8907,14 +8908,7 @@ async function loadArtifactsPayload() {
         artifacts: {
           "columnar-store": {
             artifacts: rows,
-            pagination: {
-              offset: columnar.offset,
-              limit: columnar.limit,
-              total: columnar.total_count,
-              returned: columnar.returned_count,
-              has_more: !!columnar.has_more,
-              next_cursor: columnar.next_offset,
-            },
+            pagination: columnarPagination(columnar),
             columnar_query_profile: {
               profile_version: columnar.profile_version,
               engine: columnar.engine,

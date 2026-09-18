@@ -12,6 +12,7 @@ from pathlib import Path
 from .docs import SUPPORTED_DOC_EXTS, extract_text
 from .search import SearchError, load_run_summary
 from .source_paths import resolve_source_path_in_roots
+from .sqlite_snapshot import open_sqlite_snapshot
 from .submission import compute_hashes
 
 SOURCE_READ_PROFILE_VERSION = "source-read-v1"
@@ -394,18 +395,18 @@ def search_sqlite_source(
     scanned_tables = 0
     scanned_rows = 0
     searchable_columns = 0
-    try:
-        connection = sqlite3.connect(f"{source_path.resolve().as_uri()}?mode=ro", uri=True)
-    except sqlite3.Error as exc:
-        return [], {
-            "sqlite_search": True,
-            "sqlite_status": f"open-failed: {exc}",
-            "sqlite_scanned_tables": 0,
-            "sqlite_scanned_rows": 0,
-            "sqlite_searchable_columns": 0,
-        }
-    with contextlib.closing(connection):
-        connection.row_factory = sqlite3.Row
+    provenance: dict[str, object] = {}
+    with contextlib.ExitStack() as stack:
+        try:
+            connection = stack.enter_context(open_sqlite_snapshot(source_path, provenance=provenance))
+        except sqlite3.Error as exc:
+            return [], {
+                "sqlite_search": True,
+                "sqlite_status": f"open-failed: {exc}",
+                "sqlite_scanned_tables": 0,
+                "sqlite_scanned_rows": 0,
+                "sqlite_searchable_columns": 0,
+            }
         try:
             table_rows = connection.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
@@ -479,6 +480,7 @@ def search_sqlite_source(
         "sqlite_scanned_rows": scanned_rows,
         "sqlite_searchable_columns": searchable_columns,
         "sqlite_row_scan_limit": max_rows,
+        "sqlite_snapshot": provenance,
     }
 
 
@@ -687,8 +689,8 @@ def build_sqlite_table_preview(
     limit = normalize_limit(limit, default=DEFAULT_SQLITE_ROW_LIMIT, maximum=MAX_SQLITE_ROW_LIMIT)
     offset = max(0, int(offset or 0))
     try:
-        with contextlib.closing(sqlite3.connect(f"{source_path.as_uri()}?mode=ro", uri=True)) as connection:
-            connection.row_factory = sqlite3.Row
+        provenance: dict[str, object] = {}
+        with open_sqlite_snapshot(source_path, provenance=provenance) as connection:
             tables = list_sqlite_tables(connection)
             if table not in tables:
                 raise SourceReadError(f"sqlite table not found: {table}")
@@ -697,7 +699,7 @@ def build_sqlite_table_preview(
                 raise SourceReadError(f"sqlite table has no readable columns: {table}")
             if where_column and where_column not in columns:
                 raise SourceReadError(f"sqlite filter column not found in {table}: {where_column}")
-            return sqlite_table_payload(
+            payload = sqlite_table_payload(
                 connection,
                 source_path=source_path,
                 table=table,
@@ -707,6 +709,8 @@ def build_sqlite_table_preview(
                 where_column=where_column,
                 where_contains=where_contains,
             )
+            payload["sqlite_snapshot"] = provenance
+            return payload
     except sqlite3.DatabaseError as exc:
         raise SourceReadError(f"sqlite read failed for {source_path}: {exc}") from exc
 

@@ -12,12 +12,15 @@ from pathlib import Path
 
 from .audit import compute_sha256
 from .forensic_accuracy import build_accuracy_gate
+from .process_bounds import run_bounded_command
 from .vsc import build_vsc_image_workflow_handoff
 
 E01_REQUIRED_TOOLS = ("ewfmount", "mmls", "tsk_recover")
 E01_SUFFIXES = (".e01", ".ex01")
 DIRECT_IMAGE_HASH_LIMIT_BYTES = 128 * 1024 * 1024
 E01_STAGE_CHECKPOINT_NAME = "rapidtriage-e01-stage-status.json"
+E01_STAGE_CHECKPOINT_VERSION = "e01-stage-checkpoint-v2"
+TSK_RECOVER_SCOPE_FLAGS = ("-e",)
 E01_INTEGRATED_WORKFLOW_MANIFEST_VERSION = "e01-ex01-integrated-workflow-manifest-v1"
 E01_REPORT_GRADE_VALIDATION_PLAN_VERSION = "e01-ex01-report-grade-validation-plan-v1"
 IMAGE_STRESS_KNOWN_ANSWER_PROFILE_VERSION = "image-stress-known-answer-workflow-v1"
@@ -160,6 +163,30 @@ class E01ExtractionError(RuntimeError):
     """Raised when an E01 image cannot be exposed as a triageable folder."""
 
 
+def build_tsk_recover_recovery_scope() -> dict[str, object]:
+    """Document the explicit tsk_recover recovery scope used by every extraction.
+
+    ``tsk_recover -e`` recovers all files (allocated and unallocated). The
+    contradictory ``-a`` flag (allocated files only) is never combined with
+    ``-e`` because it would silently drop deleted-file recovery.
+    """
+    return {
+        "profile_version": "tsk-recover-recovery-scope-v1",
+        "tool": "tsk_recover",
+        "flags": list(TSK_RECOVER_SCOPE_FLAGS),
+        "scope": "all-files-allocated-and-unallocated",
+        "allocated_files": True,
+        "unallocated_files": True,
+        "deleted_files_in_scope": True,
+        "rejected_flags": ["-a"],
+        "note": (
+            "tsk_recover -e exports allocated and unallocated entries; the contradictory "
+            "-a (allocated-only) flag is never combined with -e because it would silently "
+            "narrow recovery away from deleted files."
+        ),
+    }
+
+
 @dataclass(frozen=True)
 class E01ExtractionResult:
     source_path: Path
@@ -177,6 +204,7 @@ class E01ExtractionResult:
     resume_status: dict[str, object] = field(default_factory=dict)
     recovered_root_manifest: dict[str, object] = field(default_factory=dict)
     segment_set_profile: dict[str, object] = field(default_factory=dict)
+    recovery_scope: dict[str, object] = field(default_factory=dict)
     commercial_grade_ready: bool = False
 
     def to_dict(self) -> dict[str, object]:
@@ -227,6 +255,7 @@ class E01ExtractionResult:
             "resume_status": self.resume_status,
             "recovered_root_manifest": self.recovered_root_manifest,
             "segment_set_profile": self.segment_set_profile,
+            "recovery_scope": self.recovery_scope,
             "e01_provenance_profile": build_e01_provenance_profile(
                 source_path=self.source_path,
                 source_integrity=self.source_integrity,
@@ -1372,7 +1401,7 @@ def build_e01_provenance_profile(
 
 
 def default_runner(command: Sequence[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(list(command), capture_output=True, text=True, encoding="utf-8", errors="replace")
+    return run_bounded_command(command, encoding="utf-8")
 
 
 def extract_e01_to_directory(
@@ -1430,12 +1459,13 @@ def extract_e01_to_directory(
                 "E01 extraction resumed from a completed filesystem recovery checkpoint; verify checkpoint provenance before report use.",
             ),
             resume_status=build_e01_resume_status(checkpoint_path, checkpoint, resumed=True),
+            recovery_scope=build_tsk_recover_recovery_scope(),
         )
     if missing:
         write_e01_stage_checkpoint(
             checkpoint_path,
             {
-                "profile_version": "e01-stage-checkpoint-v1",
+                "profile_version": E01_STAGE_CHECKPOINT_VERSION,
                 "source_signature": source_signature,
                 "requested_start_sector": partition_start_sector,
                 "segment_set_profile": segment_set_profile,
@@ -1458,11 +1488,20 @@ def extract_e01_to_directory(
 
     command_history: list[dict[str, object]] = []
     partition_table: list[dict[str, object]] = []
+    recovery_scope = build_tsk_recover_recovery_scope()
     checkpoint_payload: dict[str, object] = {
-        "profile_version": "e01-stage-checkpoint-v1",
+        "profile_version": E01_STAGE_CHECKPOINT_VERSION,
         "source_signature": source_signature,
         "requested_start_sector": partition_start_sector,
         "segment_set_profile": segment_set_profile,
+        "recovery_scope": recovery_scope,
+        "tool_inputs": {
+            "mount_tool": "ewfmount",
+            "partition_tool": "mmls",
+            "recovery_tool": "tsk_recover",
+            "recovery_scope": recovery_scope,
+            "requested_start_sector": partition_start_sector,
+        },
         "completed": False,
         "resume_ready": False,
         "stages": {
@@ -1521,7 +1560,17 @@ def extract_e01_to_directory(
         checkpoint_payload["partition_selection"] = partition_selection
         write_e01_stage_checkpoint(checkpoint_path, checkpoint_payload)
 
-        recover_command = ["tsk_recover", "-e", "-a", "-o", str(start_sector), str(raw_image), str(extract_dir)]
+        recover_command = [
+            "tsk_recover",
+            *TSK_RECOVER_SCOPE_FLAGS,
+            "-o",
+            str(start_sector),
+            str(raw_image),
+            str(extract_dir),
+        ]
+        tool_inputs = checkpoint_payload["tool_inputs"]
+        if isinstance(tool_inputs, dict):
+            tool_inputs["tsk_recover_argv"] = recover_command
         recover_result = runner(recover_command)
         command_history.append(command_record("read-only-filesystem-recovery", recover_command, recover_result))
         checkpoint_payload["command_history"] = command_history
@@ -1538,6 +1587,7 @@ def extract_e01_to_directory(
         checkpoint_payload["extract_dir"] = str(extract_dir)
         checkpoint_payload["raw_image_path"] = str(raw_image)
         checkpoint_payload["recovered_root_manifest"] = recovered_manifest
+        checkpoint_payload["recovered_inventory_fingerprint"] = recovered_inventory_fingerprint(recovered_manifest)
         write_e01_stage_checkpoint(checkpoint_path, checkpoint_payload)
         return E01ExtractionResult(
             source_path=source_path,
@@ -1563,17 +1613,54 @@ def extract_e01_to_directory(
             resume_status=build_e01_resume_status(checkpoint_path, checkpoint_payload, resumed=False),
             recovered_root_manifest=recovered_manifest,
             segment_set_profile=segment_set_profile,
+            recovery_scope=recovery_scope,
         )
     finally:
         unmount_e01_mount(mount_dir, runner=runner, tool_resolver=tool_resolver)
 
 
 def e01_source_signature(path: Path) -> dict[str, object]:
-    stat = path.stat()
+    """Bind a checkpoint to every discovered source segment, not just the selected file."""
+    segments = discover_e01_segments(path)
+    rows: list[dict[str, object]] = []
+    for segment in segments:
+        try:
+            stat = segment.stat()
+        except OSError:
+            rows.append({"path": str(segment), "missing": True})
+            continue
+        rows.append({"path": str(segment), "size": stat.st_size, "mtime_ns": stat.st_mtime_ns})
     return {
-        "path": str(path),
-        "size": stat.st_size,
-        "mtime_ns": stat.st_mtime_ns,
+        "profile_version": "e01-source-signature-v2",
+        "selected_path": str(path),
+        "segment_count": len(segments),
+        "segments": rows,
+    }
+
+
+def recovered_inventory_fingerprint(manifest: Mapping[str, object]) -> dict[str, object]:
+    """Fingerprint the current recovered-file inventory for checkpoint binding."""
+    files = manifest.get("files") if isinstance(manifest.get("files"), list) else []
+    rows = []
+    for entry in files:
+        if not isinstance(entry, Mapping):
+            continue
+        rows.append(
+            {
+                "relative_path": str(entry.get("relative_path") or ""),
+                "size": int(entry.get("size") or 0),
+                "sha256": str(entry.get("sha256") or ""),
+                "hash_status": str(entry.get("hash_status") or ""),
+            }
+        )
+    canonical = json.dumps(sorted(rows, key=lambda row: row["relative_path"]), sort_keys=True)
+    unhashed = sum(1 for row in rows if not row["sha256"])
+    return {
+        "profile_version": "recovered-inventory-fingerprint-v1",
+        "file_count": len(rows),
+        "unhashed_file_count": unhashed,
+        "covers_all_file_bytes": bool(rows) and unhashed == 0,
+        "fingerprint_sha256": hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
     }
 
 
@@ -1594,6 +1681,15 @@ def write_e01_stage_checkpoint(path: Path, payload: Mapping[str, object]) -> Non
     temp_path.replace(path)
 
 
+def tsk_recover_tool_inputs_match(tool_inputs: Mapping[str, object]) -> bool:
+    recovery_scope = tool_inputs.get("recovery_scope")
+    if not isinstance(recovery_scope, Mapping):
+        return False
+    if list(recovery_scope.get("flags") or []) != list(TSK_RECOVER_SCOPE_FLAGS):
+        return False
+    return str(tool_inputs.get("recovery_tool") or "") == "tsk_recover"
+
+
 def e01_checkpoint_resume_ready(
     checkpoint: Mapping[str, object],
     *,
@@ -1601,6 +1697,8 @@ def e01_checkpoint_resume_ready(
     requested_start_sector: int | None,
     extract_dir: Path,
 ) -> bool:
+    if checkpoint.get("profile_version") != E01_STAGE_CHECKPOINT_VERSION:
+        return False
     if not checkpoint.get("completed") or not checkpoint.get("resume_ready"):
         return False
     if checkpoint.get("source_signature") != dict(source_signature):
@@ -1612,9 +1710,18 @@ def e01_checkpoint_resume_ready(
         return False
     if partition_selection.get("selected_start_sector") in (None, ""):
         return False
+    tool_inputs = checkpoint.get("tool_inputs")
+    if not isinstance(tool_inputs, Mapping) or not tsk_recover_tool_inputs_match(tool_inputs):
+        return False
+    expected_fingerprint = checkpoint.get("recovered_inventory_fingerprint")
+    if not isinstance(expected_fingerprint, Mapping):
+        return False
     if not extract_dir.is_dir():
         return False
-    return any(extract_dir.iterdir())
+    if not any(extract_dir.iterdir()):
+        return False
+    current_fingerprint = recovered_inventory_fingerprint(build_recovered_root_manifest(extract_dir))
+    return current_fingerprint.get("fingerprint_sha256") == expected_fingerprint.get("fingerprint_sha256")
 
 
 def build_e01_resume_status(
@@ -1643,9 +1750,10 @@ def build_e01_resume_status(
         ],
         "reuse_reasons": [
             "completed checkpoint was present",
-            "source signature matched current image",
+            "source signature matched every discovered image segment",
             "requested partition start sector matched",
-            "recovered filesystem output directory still contains files",
+            "recovery tool inputs and scope matched",
+            "recovered filesystem inventory fingerprint matched current output",
         ]
         if resumed
         else [],

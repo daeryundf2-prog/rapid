@@ -21,6 +21,7 @@ HASH_CACHE_REPORT_GRADE_BLOCKERS = [
     "multi-run-stale-cache-replay-required",
 ]
 _HASH_CACHE: dict[tuple[str, int, int, int, int], dict[str, str]] = {}
+_HASH_CACHE_PATH_INDEX: dict[str, set[tuple[str, int, int, int, int]]] = {}
 _HASH_CACHE_STATS = {
     "hits": 0,
     "misses": 0,
@@ -34,6 +35,7 @@ _HASH_CACHE_SESSION_ID = hashlib.sha256(b"rapidtriage-hash-cache-session-0").hex
 def reset_hash_cache() -> None:
     global _HASH_CACHE_SESSION_ID, _HASH_CACHE_SESSION_SEQUENCE
     _HASH_CACHE.clear()
+    _HASH_CACHE_PATH_INDEX.clear()
     _HASH_CACHE_EVENTS.clear()
     for key in _HASH_CACHE_STATS:
         _HASH_CACHE_STATS[key] = 0
@@ -43,23 +45,15 @@ def reset_hash_cache() -> None:
     ).hexdigest()
 
 
-def compute_hashes_cached(path: Path, *, chunk_size: int = 8 * 1024 * 1024) -> dict[str, str]:
+def compute_hashes_fresh(path: Path, *, chunk_size: int = 8 * 1024 * 1024) -> dict[str, str]:
+    """Hash file bytes directly, bypassing the metadata-keyed cache.
+
+    Use this for explicit integrity/submission verification paths where a
+    same-size metadata-preserving modification must still produce a fresh
+    digest. Performance paths that do not claim fresh verification should keep
+    using :func:`compute_hashes_cached`.
+    """
     resolved = path.expanduser().resolve()
-    stat_result = resolved.stat()
-    key = hash_cache_key(resolved, stat_result)
-    stale_keys = [existing for existing in _HASH_CACHE if existing[0] == str(resolved) and existing != key]
-    for stale_key in stale_keys:
-        _HASH_CACHE.pop(stale_key, None)
-    if stale_keys:
-        _HASH_CACHE_STATS["invalidations"] += len(stale_keys)
-        append_hash_cache_event("invalidated", resolved, key, cache_hit=False)
-    cached = _HASH_CACHE.get(key)
-    if cached is not None:
-        _HASH_CACHE_STATS["hits"] += 1
-        append_hash_cache_event("hit", resolved, key, cache_hit=True)
-        return dict(cached)
-    _HASH_CACHE_STATS["misses"] += 1
-    append_hash_cache_event("miss", resolved, key, cache_hit=False)
     hashers = {
         "md5": hashlib.md5(usedforsecurity=False),
         "sha1": hashlib.sha1(usedforsecurity=False),
@@ -69,8 +63,34 @@ def compute_hashes_cached(path: Path, *, chunk_size: int = 8 * 1024 * 1024) -> d
         for chunk in iter(lambda: handle.read(chunk_size), b""):
             for hasher in hashers.values():
                 hasher.update(chunk)
-    hashes = {name: hasher.hexdigest() for name, hasher in hashers.items()}
+    return {name: hasher.hexdigest() for name, hasher in hashers.items()}
+
+
+def compute_hashes_cached(path: Path, *, chunk_size: int = 8 * 1024 * 1024) -> dict[str, str]:
+    resolved = path.expanduser().resolve()
+    stat_result = resolved.stat()
+    key = hash_cache_key(resolved, stat_result)
+    resolved_text = str(resolved)
+    indexed_keys = _HASH_CACHE_PATH_INDEX.get(resolved_text) or ()
+    stale_keys = [existing for existing in indexed_keys if existing != key and existing in _HASH_CACHE]
+    for stale_key in stale_keys:
+        _HASH_CACHE.pop(stale_key, None)
+    if stale_keys:
+        _HASH_CACHE_PATH_INDEX[resolved_text] = set(indexed_keys) - set(stale_keys)
+        if not _HASH_CACHE_PATH_INDEX[resolved_text]:
+            del _HASH_CACHE_PATH_INDEX[resolved_text]
+        _HASH_CACHE_STATS["invalidations"] += len(stale_keys)
+        append_hash_cache_event("invalidated", resolved, key, cache_hit=False)
+    cached = _HASH_CACHE.get(key)
+    if cached is not None:
+        _HASH_CACHE_STATS["hits"] += 1
+        append_hash_cache_event("hit", resolved, key, cache_hit=True)
+        return dict(cached)
+    _HASH_CACHE_STATS["misses"] += 1
+    append_hash_cache_event("miss", resolved, key, cache_hit=False)
+    hashes = compute_hashes_fresh(resolved, chunk_size=chunk_size)
     _HASH_CACHE[key] = hashes
+    _HASH_CACHE_PATH_INDEX.setdefault(resolved_text, set()).add(key)
     return dict(hashes)
 
 
@@ -273,6 +293,7 @@ def import_hash_cache_snapshot(path: Path) -> dict[str, object]:
             skipped += 1
             continue
         _HASH_CACHE[key] = {name: str(hashes.get(name) or "") for name in HASH_ALGORITHMS}
+        _HASH_CACHE_PATH_INDEX.setdefault(key[0], set()).add(key)
         imported += 1
     return {
         "profile_version": "hash-cache-snapshot-import-report-v1",

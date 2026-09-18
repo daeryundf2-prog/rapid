@@ -678,6 +678,7 @@ def query_columnar_artifact_records(
         "returned_count": len(records),
         "has_more": end < total_count,
         "next_offset": end if end < total_count else None,
+        "previous_offset": max(0, bounded_offset - bounded_limit) if bounded_offset > 0 else None,
         "records": records,
         "reportability_warning": (
             "Columnar sidecar rows are derived index views of ArtifactRecordV1 rows; "

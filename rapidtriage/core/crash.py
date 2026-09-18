@@ -697,15 +697,27 @@ def build_crash_report_grade_validation_plan(
     return plan
 
 
+SENSITIVE_CONTEXT_TOKENS = ("token", "secret", "password", "credential", "cookie")
+
+
 def sanitize_context(context: Mapping[str, object]) -> dict[str, object]:
-    sanitized: dict[str, object] = {}
-    for key, value in context.items():
-        text = str(value)
-        lowered = key.lower()
-        if any(token in lowered for token in ("token", "secret", "password", "credential", "cookie")):
-            sanitized[key] = "<redacted>"
-        elif len(text) > 500:
-            sanitized[key] = text[:500] + "...<truncated>"
-        else:
-            sanitized[key] = value
-    return sanitized
+    return {str(key): _sanitize_context_value(key, value) for key, value in context.items()}
+
+
+def _sanitize_context_value(key: object, value: object, *, depth: int = 0) -> object:
+    lowered = str(key).lower()
+    if any(token in lowered for token in SENSITIVE_CONTEXT_TOKENS):
+        return "<redacted>"
+    if isinstance(value, Mapping):
+        if depth >= 8:
+            return "<truncated-depth>"
+        items = list(value.items())[:200]
+        return {str(child_key): _sanitize_context_value(child_key, child, depth=depth + 1) for child_key, child in items}
+    if isinstance(value, (list, tuple)):
+        if depth >= 8:
+            return "<truncated-depth>"
+        return [_sanitize_context_value(key, item, depth=depth + 1) for item in value[:200]]
+    text = str(value)
+    if len(text) > 500:
+        return text[:500] + "...<truncated>"
+    return value

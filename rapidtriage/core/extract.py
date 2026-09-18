@@ -90,6 +90,7 @@ def run_extract(
     )
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    resolved_output_dir = output_dir.resolve()
     extracted_entries: list[dict[str, object]] = []
     skipped_entries: list[dict[str, object]] = []
     copied_bytes = 0
@@ -105,6 +106,14 @@ def run_extract(
 
         destination_relative = build_destination_relative_path(source_path, root)
         destination_path = output_dir / destination_relative
+        if destination_path.is_symlink() or not destination_path.resolve().is_relative_to(resolved_output_dir):
+            skipped_entries.append(
+                {
+                    "original_path": str(source_path),
+                    "reason": "destination-outside-output-dir",
+                }
+            )
+            continue
         destination_path.parent.mkdir(parents=True, exist_ok=True)
         source_stat = source_path.stat()
 

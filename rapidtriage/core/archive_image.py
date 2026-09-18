@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .e01 import collect_tool_preflight, command_record, describe_source_integrity
+from .process_bounds import run_bounded_command
 
 ARCHIVE_IMAGE_SUFFIXES = (".iso", ".dmg", ".wim", ".swm")
 ARCHIVE_IMAGE_TOOLS = ("7zz", "7z", "bsdtar")
@@ -88,7 +89,7 @@ def missing_archive_image_tools(
 
 
 def default_runner(command: Sequence[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(list(command), capture_output=True, text=True)
+    return run_bounded_command(command)
 
 
 def extract_archive_image_to_directory(

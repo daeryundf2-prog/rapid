@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import datetime as dt
-import shutil
 import sqlite3
-import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+from ...core.sqlite_snapshot import open_sqlite_snapshot as _open_sqlite_snapshot
 from ..review import (
     build_forensic_review,  # noqa: F401 - re-exported for Windows artifact modules.
 )
@@ -28,20 +27,11 @@ def iter_windows_user_homes(root: Path) -> Iterator[Path]:
 
 
 @contextmanager
-def open_sqlite_snapshot(path: Path) -> Iterator[sqlite3.Connection]:
-    suffix = path.suffix or ".sqlite"
-    with tempfile.NamedTemporaryFile(prefix="rapidtriage-", suffix=suffix, delete=False) as handle:
-        temp_path = Path(handle.name)
-    try:
-        shutil.copy2(path, temp_path)
-        connection = sqlite3.connect(temp_path)
-        connection.row_factory = sqlite3.Row
-        try:
-            yield connection
-        finally:
-            connection.close()
-    finally:
-        temp_path.unlink(missing_ok=True)
+def open_sqlite_snapshot(
+    path: Path, *, provenance: dict[str, object] | None = None
+) -> Iterator[sqlite3.Connection]:
+    with _open_sqlite_snapshot(path, provenance=provenance) as connection:
+        yield connection
 
 
 def isoformat_from_timestamp(timestamp: float | None) -> str | None:

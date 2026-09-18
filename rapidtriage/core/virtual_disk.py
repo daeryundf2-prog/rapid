@@ -14,6 +14,8 @@ from .disk_image import (
     missing_raw_image_tools,
 )
 from .e01 import (
+    TSK_RECOVER_SCOPE_FLAGS,
+    build_tsk_recover_recovery_scope,
     collect_tool_preflight,
     command_record,
     describe_source_integrity,
@@ -24,6 +26,7 @@ from .e01 import (
     image_validation_matrix,
     stable_manifest_sha256,
 )
+from .process_bounds import run_bounded_command
 
 VIRTUAL_DISK_SUFFIXES = (".vhd", ".vhdx", ".vmdk", ".vdi", ".xva", ".qcow", ".qcow2")
 QEMU_CONVERTIBLE_SUFFIXES = (".vhd", ".vhdx", ".vmdk", ".vdi", ".qcow", ".qcow2")
@@ -447,7 +450,7 @@ def build_virtual_disk_report_grade_validation_plan(
     if expected_partition_start_sector is not None:
         fsstat_argv.extend(["-o", str(expected_partition_start_sector)])
     fsstat_argv.append(str(converted_raw))
-    tsk_recover_argv = ["tsk_recover", "-e", "-a"]
+    tsk_recover_argv = ["tsk_recover", *TSK_RECOVER_SCOPE_FLAGS]
     if expected_partition_start_sector is not None:
         tsk_recover_argv.extend(["-o", str(expected_partition_start_sector)])
     tsk_recover_argv.extend([str(converted_raw), str(output_root / "filesystem")])
@@ -657,6 +660,7 @@ def build_virtual_disk_report_grade_validation_plan(
         "status": "report-validation-blocked" if blocker_slots else "ready-for-report-review",
         "commercial_grade_ready": False,
         "recovery_mode": recovery_mode or ("partition-offset" if expected_partition_start_sector is not None else "unknown"),
+        "recovery_scope": build_tsk_recover_recovery_scope(),
         "expected_partition_start_sector": expected_partition_start_sector,
         "expected_files": expected_file_rows,
         "source_integrity": source_row,
@@ -800,7 +804,7 @@ def missing_virtual_disk_tools(
 
 
 def default_runner(command: Sequence[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(list(command), capture_output=True, text=True)
+    return run_bounded_command(command)
 
 
 def extract_virtual_disk_to_directory(

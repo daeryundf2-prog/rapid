@@ -17,6 +17,119 @@ from rapidtriage.core.bundle import (
 )
 from rapidtriage.core.normalize import normalize_artifacts
 from rapidtriage.core.sample_case import run_sample_workflow
+from rapidtriage.core.validation import (
+    build_known_answer_trusted_diff,
+    build_known_answer_validation,
+)
+
+
+class KnownAnswerReadinessTests(unittest.TestCase):
+    def setUp(self) -> None:
+        temporary_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary_directory.cleanup)
+        self.root = Path(temporary_directory.name)
+        self.manifest = self.root / "manifest.json"
+        self.evidence = self.root / "synthetic-evidence.txt"
+        self.evidence.write_text("synthetic engineering fixture\n", encoding="utf-8")
+
+    def build_validation(self, datasets: list[dict[str, object]]) -> dict[str, object]:
+        self.manifest.write_text(json.dumps({"datasets": datasets}), encoding="utf-8")
+        return build_known_answer_validation(self.manifest)
+
+    def test_absent_manifest_is_not_ready(self) -> None:
+        validation = build_known_answer_validation()
+
+        self.assertEqual(validation["status"], "not-provided")
+        self.assertEqual(validation["dataset_count"], 0)
+        self.assertEqual(validation["datasets"], [])
+        self.assertIn("known-answer-manifest-not-attached", validation["blockers"])
+        self.assertIs(validation["ready_for_court_report"], False)
+
+    def test_empty_datasets_are_not_ready(self) -> None:
+        validation = self.build_validation([])
+
+        self.assertEqual(validation["status"], "loaded")
+        self.assertEqual(validation["dataset_count"], 0)
+        self.assertEqual(validation["status_counts"], {})
+        self.assertTrue(validation["blockers"])
+        self.assertIs(validation["ready_for_court_report"], False)
+
+    def test_declared_pass_with_missing_file_is_not_ready(self) -> None:
+        missing = self.root / "missing-evidence.txt"
+        validation = self.build_validation([
+            {"id": "synthetic-pass", "status": "pass", "evidence_paths": [str(self.evidence), str(missing)]},
+        ])
+
+        self.assertEqual(validation["status"], "all-passed")
+        self.assertEqual(validation["status_counts"], {"pass": 1})
+        dataset = validation["datasets"][0]
+        self.assertEqual([row["exists"] for row in dataset["evidence_files"]], [True, False])
+        self.assertIs(dataset["evidence_paths_present"], False)
+        self.assertIs(validation["ready_for_court_report"], False)
+
+    def test_declared_pass_without_paths_is_not_ready(self) -> None:
+        for path_fields in ({}, {"evidence_paths": []}):
+            with self.subTest(path_fields=path_fields):
+                validation = self.build_validation([
+                    {"id": "synthetic-pass", "status": "pass", **path_fields},
+                ])
+
+                self.assertEqual(validation["status"], "all-passed")
+                self.assertEqual(validation["status_counts"], {"pass": 1})
+                self.assertEqual(validation["datasets"][0]["evidence_files"], [])
+                self.assertIs(validation["datasets"][0]["evidence_paths_present"], False)
+                self.assertIs(validation["ready_for_court_report"], False)
+
+    def test_existing_evidence_does_not_clear_review_blockers(self) -> None:
+        validation = self.build_validation([
+            {"id": "synthetic-pass", "status": "pass", "evidence_paths": [str(self.evidence)]},
+        ])
+
+        self.assertEqual(validation["status"], "all-passed")
+        self.assertEqual(validation["dataset_count"], 1)
+        self.assertIs(validation["datasets"][0]["evidence_paths_present"], True)
+        self.assertEqual(validation["datasets"][0]["evidence_hash_count"], 1)
+        self.assertIn("review-open-known-answer-results", validation["blockers"])
+        self.assertIn("public-corpus-coverage-must-match-claimed-parser-scope", validation["blockers"])
+        self.assertIn("independent-expected-answer-review-required", validation["blockers"])
+        self.assertIs(validation["ready_for_court_report"], False)
+
+    def test_mixed_pass_fail_datasets_are_not_ready(self) -> None:
+        validation = self.build_validation([
+            {"id": "synthetic-pass", "status": "pass", "evidence_paths": [str(self.evidence)]},
+            {"id": "synthetic-fail", "status": "fail", "evidence_paths": [str(self.evidence)]},
+        ])
+
+        self.assertEqual(validation["status"], "loaded-with-open-results")
+        self.assertEqual(validation["dataset_count"], 2)
+        self.assertEqual(validation["status_counts"], {"pass": 1, "fail": 1})
+        self.assertTrue(all(dataset["evidence_paths_present"] for dataset in validation["datasets"]))
+        self.assertIs(validation["ready_for_court_report"], False)
+
+    def test_synthetic_trusted_diff_pass_does_not_override_unresolved_blockers(self) -> None:
+        baseline = self.build_validation([
+            {
+                "id": "synthetic-pass",
+                "status": "pass",
+                "expected": {"required_assertions": ["synthetic engineering fixture"]},
+                "evidence_paths": [str(self.evidence)],
+            },
+        ])
+        synthetic_diff = build_known_answer_trusted_diff(baseline, baseline)
+        validation = build_known_answer_validation(self.manifest, trusted_diff=synthetic_diff)
+
+        self.assertEqual(synthetic_diff["status"], "pass")
+        self.assertEqual(validation["status"], "all-passed")
+        self.assertIs(validation["datasets"][0]["evidence_paths_present"], True)
+        self.assertEqual(validation["trusted_known_answer_diff"]["status"], "pass")
+        self.assertNotIn("trusted-known-answer-manifest-diff-missing", validation["blockers"])
+        self.assertIn("trusted-diff-present-but-commercial-retest-required", validation["blockers"])
+        self.assertIn("public-corpus-coverage-must-match-claimed-parser-scope", validation["blockers"])
+        self.assertIn("independent-expected-answer-review-required", validation["blockers"])
+        self.assertIn("release-signoff-required", validation["blockers"])
+        self.assertIs(validation["known_answer_pipeline_manifest"]["independent_expected_answer_review_attached"], False)
+        self.assertIs(validation["known_answer_report_grade_validation_plan"]["ready_for_court_report"], False)
+        self.assertIs(validation["ready_for_court_report"], False)
 
 
 class RapidTriageFinalRoadmapTests(unittest.TestCase):

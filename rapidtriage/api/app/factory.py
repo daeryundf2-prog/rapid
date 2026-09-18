@@ -38,6 +38,11 @@ def create_app(
     api = FastAPI(title="rapidtriage local API", version="0.2.0")
     static_dir = Path(__file__).resolve().parent.parent.parent / "web" / "static"
     auth_disabled = truthy_env("RAPIDTRIAGE_DISABLE_AUTH") or require_auth is False
+    if auth_disabled and (auth_token or os.environ.get("RAPIDTRIAGE_AUTH_TOKEN")):
+        raise RuntimeError(
+            "conflicting authentication settings: RAPIDTRIAGE_DISABLE_AUTH/require_auth=False "
+            "cannot be combined with an explicit auth token; refusing to weaken authentication silently"
+        )
     configured_token = auth_token or os.environ.get("RAPIDTRIAGE_AUTH_TOKEN") or ""
     expected_token = "" if auth_disabled else configured_token or secrets.token_urlsafe(32)
     api.state.auth_required = bool(expected_token)

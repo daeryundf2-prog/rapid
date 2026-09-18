@@ -24,10 +24,19 @@ __all__ = [
     "table_columns",
 ]
 
+REVIEW_MARK_MIGRATION_COLUMNS = ("assignee", "priority", "due_at", "source_citation_package_json")
+
+
 def apply_schema(connection: sqlite3.Connection) -> None:
     current_version = get_schema_version(connection)
     if current_version not in (0, SCHEMA_VERSION):
         raise CaseDatabaseError(f"unsupported case DB schema version: {current_version}")
+    if current_version == SCHEMA_VERSION:
+        review_mark_columns = {
+            str(row["name"]) for row in connection.execute("PRAGMA table_info(review_mark)")
+        }
+        if set(REVIEW_MARK_MIGRATION_COLUMNS) <= review_mark_columns:
+            return
     connection.executescript(SCHEMA_SQL)
     ensure_column(connection, "review_mark", "assignee", "TEXT NOT NULL DEFAULT ''")
     ensure_column(connection, "review_mark", "priority", "TEXT NOT NULL DEFAULT 'normal'")

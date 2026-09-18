@@ -4,7 +4,7 @@ import datetime as dt
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from .hash_cache import compute_hashes_cached
+from .hash_cache import compute_hashes_cached, compute_hashes_fresh
 
 HASH_ALGORITHMS = ("md5", "sha1", "sha256")
 
@@ -47,7 +47,7 @@ def build_submission_manifest(
             continue
 
         stat_result = source_path.stat()
-        hashes = compute_hashes(source_path)
+        hashes = compute_hashes_fresh(source_path)
         reference = bookmark.get("reference")
         items.append(
             {
@@ -63,6 +63,7 @@ def build_submission_manifest(
                     "size": stat_result.st_size,
                     "modified_at": dt.datetime.fromtimestamp(stat_result.st_mtime, tz=dt.timezone.utc).isoformat(),
                     "hashes": hashes,
+                    "hash_source": "fresh-file-read",
                 },
             }
         )
@@ -73,6 +74,17 @@ def build_submission_manifest(
         "case_id": str(case_payload.get("case_id") or ""),
         "title": str(case_payload.get("title") or ""),
         "hash_algorithms": list(HASH_ALGORITHMS),
+        "hash_verification": {
+            "scope": "submission-manifest",
+            "metadata_cache_bypassed": True,
+            "hash_source": "fresh-file-read",
+            "note": (
+                "Submission manifest hashes are always re-read from disk so a same-size "
+                "metadata-preserving modification still changes the reported digest. The "
+                "metadata-keyed hash cache is reserved for performance paths that do not "
+                "claim fresh verification."
+            ),
+        },
         "options": {
             "include_all": include_all,
             "max_items": max_items,
@@ -89,6 +101,12 @@ def build_submission_manifest(
 
 
 def compute_hashes(path: Path, *, chunk_size: int = 8 * 1024 * 1024) -> dict[str, str]:
+    """Metadata-cache-backed hashing for performance paths only.
+
+    Callers that claim fresh integrity or submission verification must use
+    ``compute_hashes_fresh`` instead so metadata-preserving modifications are
+    never masked by a cached digest.
+    """
     return compute_hashes_cached(path, chunk_size=chunk_size)
 
 

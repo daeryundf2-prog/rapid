@@ -698,7 +698,7 @@ DOS Partition Table
 
             workflow_commands = [command for command in commands if command[1:] != ["--version"]]
             recover_command = next(command for command in workflow_commands if command[0] == "tsk_recover")
-            self.assertEqual(recover_command[4], "2048")
+            self.assertEqual(recover_command[recover_command.index("-o") + 1], "2048")
             metadata = result.to_dict()
             self.assertEqual(metadata["partition_start_sector"], 2048)
             self.assertEqual(metadata["partition_selection"]["selected_start_sector"], 2048)

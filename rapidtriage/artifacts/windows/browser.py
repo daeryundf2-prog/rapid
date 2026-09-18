@@ -6501,8 +6501,9 @@ def file_hashes(path: Path) -> dict[str, str]:
 
 
 def extract_chromium_history_and_downloads(history_db: Path) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    provenance: dict[str, object] = {}
     try:
-        with open_sqlite_snapshot(history_db) as connection:
+        with open_sqlite_snapshot(history_db, provenance=provenance) as connection:
             if not sqlite_table_exists(connection, "urls"):
                 return [], []
 
@@ -6558,6 +6559,8 @@ def extract_chromium_history_and_downloads(history_db: Path) -> tuple[list[dict[
             download_rows: list[dict[str, object]] = []
             if sqlite_table_exists(connection, "downloads"):
                 download_rows = extract_chromium_downloads(connection)
+            for row in [*history_rows, *download_rows]:
+                row["sqlite_snapshot"] = provenance
             return history_rows, download_rows
     except (sqlite3.DatabaseError, OSError):
         return [], []

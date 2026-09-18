@@ -10,8 +10,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .e01 import (
+    TSK_RECOVER_SCOPE_FLAGS,
     build_image_stage_control_contract,
     build_recovered_root_manifest,
+    build_tsk_recover_recovery_scope,
     collect_tool_preflight,
     command_record,
     describe_source_integrity,
@@ -23,13 +25,17 @@ from .e01 import (
     mark_selected_partition,
     mmls_first_filesystem,
     parse_mmls_partitions,
+    recovered_inventory_fingerprint,
     stable_manifest_sha256,
+    tsk_recover_tool_inputs_match,
 )
+from .process_bounds import run_bounded_command
 from .vsc import build_vsc_image_workflow_handoff
 
 RAW_IMAGE_SUFFIXES = (".dd", ".raw", ".img", ".001", ".000", ".0000", ".0001", ".00001", ".ima")
 RAW_IMAGE_REQUIRED_TOOLS = ("mmls", "tsk_recover")
 RAW_IMAGE_STAGE_CHECKPOINT_NAME = "rapidtriage-raw-image-stage-status.json"
+RAW_IMAGE_STAGE_CHECKPOINT_VERSION = "raw-image-stage-checkpoint-v2"
 RAW_SPLIT_WORKFLOW_MANIFEST_VERSION = "raw-split-integrated-workflow-manifest-v1"
 RAW_SPLIT_REPORT_GRADE_VALIDATION_PLAN_VERSION = "raw-split-report-grade-validation-plan-v1"
 RAW_IMAGE_NATIVE_CAPABILITIES = {
@@ -75,6 +81,7 @@ class DiskImageExtractionResult:
     recovered_root_manifest: dict[str, object] = field(default_factory=dict)
     command_history: tuple[dict[str, object], ...] = ()
     warnings: tuple[str, ...] = ()
+    recovery_scope: dict[str, object] = field(default_factory=dict)
     commercial_grade_ready: bool = False
 
     def to_dict(self) -> dict[str, object]:
@@ -142,6 +149,7 @@ class DiskImageExtractionResult:
             "recovered_root_manifest": self.recovered_root_manifest,
             "command_history": list(self.command_history),
             "warnings": list(self.warnings),
+            "recovery_scope": self.recovery_scope,
             "commercial_grade_ready": self.commercial_grade_ready,
             "commercial_gap_ids": ["#23"],
             "validation_matrix": image_validation_matrix(
@@ -491,7 +499,7 @@ def build_raw_split_report_grade_validation_plan(
         for index, item in enumerate(expected_files or [])
         if str(item).strip()
     ]
-    tsk_recover_argv = ["tsk_recover", "-e", "-a"]
+    tsk_recover_argv = ["tsk_recover", *TSK_RECOVER_SCOPE_FLAGS]
     if expected_partition_start_sector is not None:
         tsk_recover_argv.extend(["-o", str(expected_partition_start_sector)])
     tsk_recover_argv.extend([*[str(path) for path in parts], str(output_root / "filesystem")])
@@ -655,6 +663,7 @@ def build_raw_split_report_grade_validation_plan(
         "status": "report-validation-blocked" if blocker_slots else "ready-for-report-review",
         "commercial_grade_ready": False,
         "recovery_mode": recovery_mode or ("partition-offset" if expected_partition_start_sector is not None else "unknown"),
+        "recovery_scope": build_tsk_recover_recovery_scope(),
         "expected_partition_start_sector": expected_partition_start_sector,
         "expected_files": expected_file_rows,
         "source_integrity": source_rows,
@@ -731,11 +740,12 @@ def missing_raw_image_tools(tool_resolver: ToolResolver = shutil.which) -> list[
 
 
 def default_runner(command: Sequence[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(list(command), capture_output=True, text=True, encoding="utf-8", errors="replace")
+    return run_bounded_command(command, encoding="utf-8")
 
 
 def raw_image_source_signature(image_paths: Sequence[Path]) -> dict[str, object]:
     return {
+        "profile_version": "raw-image-source-signature-v2",
         "parts": [
             {
                 "path": str(path),
@@ -771,13 +781,24 @@ def raw_image_checkpoint_resume_ready(
     source_signature: Mapping[str, object],
     extract_dir: Path,
 ) -> bool:
+    if checkpoint.get("profile_version") != RAW_IMAGE_STAGE_CHECKPOINT_VERSION:
+        return False
     if not checkpoint.get("completed") or not checkpoint.get("resume_ready"):
         return False
     if checkpoint.get("source_signature") != dict(source_signature):
         return False
+    tool_inputs = checkpoint.get("tool_inputs")
+    if not isinstance(tool_inputs, Mapping) or not tsk_recover_tool_inputs_match(tool_inputs):
+        return False
+    expected_fingerprint = checkpoint.get("recovered_inventory_fingerprint")
+    if not isinstance(expected_fingerprint, Mapping):
+        return False
     if not extract_dir.is_dir():
         return False
-    return any(extract_dir.iterdir())
+    if not any(extract_dir.iterdir()):
+        return False
+    current_fingerprint = recovered_inventory_fingerprint(build_recovered_root_manifest(extract_dir))
+    return current_fingerprint.get("fingerprint_sha256") == expected_fingerprint.get("fingerprint_sha256")
 
 
 def extract_raw_image_to_directory(
@@ -836,6 +857,7 @@ def extract_raw_image_to_directory(
             warnings=(
                 "Raw/split extraction resumed from a completed recovery checkpoint; verify checkpoint provenance before report use.",
             ),
+            recovery_scope=build_tsk_recover_recovery_scope(),
         )
 
     mmls_result = runner(["mmls", *[str(path) for path in image_paths]])
@@ -843,7 +865,8 @@ def extract_raw_image_to_directory(
     start_sector = mmls_first_filesystem(mmls_result.stdout) if mmls_result.returncode == 0 else None
     partition_table = parse_mmls_partitions(mmls_result.stdout) if mmls_result.returncode == 0 else []
 
-    command = ["tsk_recover", "-e", "-a"]
+    recovery_scope = build_tsk_recover_recovery_scope()
+    command = ["tsk_recover", *TSK_RECOVER_SCOPE_FLAGS]
     recovery_mode = "whole-image"
     if start_sector is not None:
         command.extend(["-o", str(start_sector)])
@@ -865,12 +888,21 @@ def extract_raw_image_to_directory(
     write_raw_image_stage_checkpoint(
         checkpoint_path,
         {
-            "profile_version": "raw-image-stage-checkpoint-v1",
+            "profile_version": RAW_IMAGE_STAGE_CHECKPOINT_VERSION,
             "source_signature": source_signature,
             "partition_start_sector": start_sector,
             "recovery_mode": recovery_mode,
+            "recovery_scope": recovery_scope,
+            "tool_inputs": {
+                "partition_tool": "mmls",
+                "recovery_tool": "tsk_recover",
+                "recovery_scope": recovery_scope,
+                "mmls_argv": ["mmls", *[str(path) for path in image_paths]],
+                "tsk_recover_argv": command,
+            },
             "partition_table": [dict(row) for row in mark_selected_partition(partition_table, start_sector)],
             "recovered_root_manifest": recovered_manifest,
+            "recovered_inventory_fingerprint": recovered_inventory_fingerprint(recovered_manifest),
             "command_history": command_history,
             "completed": True,
             "resume_ready": True,
@@ -894,6 +926,7 @@ def extract_raw_image_to_directory(
         warnings=(
             "Raw/split direct extraction is an orchestrated Sleuth Kit workflow; validate recovered paths and timestamps before reporting.",
         ),
+        recovery_scope=recovery_scope,
     )
 
 

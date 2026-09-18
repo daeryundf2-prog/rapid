@@ -537,7 +537,12 @@ def build_known_answer_validation(
         ),
         "recommended_public_corpora": known_answer_recommended_public_corpora(),
         "release_gate": "known-answer manifest should be attached for any parser claimed report-grade",
-        "ready_for_court_report": manifest_status == "all-passed",
+        "ready_for_court_report": (
+            manifest_status == "all-passed"
+            and bool(datasets)
+            and all(item["evidence_paths_present"] for item in datasets)
+            and not blockers
+        ),
         "core_accuracy_gates": [
             build_accuracy_gate(
                 81,

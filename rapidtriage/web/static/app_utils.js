@@ -2,7 +2,7 @@
 import { TAB_LABELS } from "./app_workbench_config.js";
 
 export function metric(label, value) {
-  return `<div class="metric"><b>${value ?? 0}</b><span>${escapeHtml(label)}</span></div>`;
+  return `<div class="metric"><b>${escapeHtml(value ?? 0)}</b><span>${escapeHtml(label)}</span></div>`;
 }
 
 export function setStatus(element, text, className) {
@@ -60,6 +60,21 @@ export function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+export function columnarPagination(columnar) {
+  const offset = Number(columnar?.offset || 0);
+  const limit = Number(columnar?.limit || 0);
+  return {
+    offset,
+    limit,
+    total: Number(columnar?.total_count || 0),
+    returned: Number(columnar?.returned_count || 0),
+    has_more: !!columnar?.has_more,
+    next_offset: columnar?.next_offset ?? null,
+    previous_offset:
+      columnar?.previous_offset ?? (offset > 0 ? Math.max(0, offset - limit) : null),
+  };
 }
 
 export function fileName(path) {

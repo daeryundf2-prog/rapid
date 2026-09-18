@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import contextlib
 import datetime as dt
 import hashlib
 import json
@@ -13,6 +12,7 @@ from urllib.parse import quote
 from fastapi import HTTPException
 
 from ...core.forensic_accuracy import build_accuracy_gate
+from ...core.sqlite_snapshot import open_sqlite_snapshot
 from .constants import (
     FUNCTIONAL_SCALE_BATCH_ID,
     LARGE_SQLITE_FTS_REPORT_GRADE_BLOCKERS,
@@ -56,7 +56,7 @@ def first_sqlite_table_name(source_path: Path) -> str:
     if not is_sqlite_candidate(source_path):
         return ""
     try:
-        with contextlib.closing(sqlite3.connect(f"{source_path.as_uri()}?mode=ro", uri=True)) as connection:
+        with open_sqlite_snapshot(source_path) as connection:
             row = connection.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name LIMIT 1"
             ).fetchone()
@@ -66,10 +66,11 @@ def first_sqlite_table_name(source_path: Path) -> str:
 
 
 def build_sqlite_preview(source_path: Path, *, run_id: str | None = None) -> dict[str, object]:
+    provenance: dict[str, object] = {}
     try:
-        with contextlib.closing(sqlite3.connect(f"{source_path.as_uri()}?mode=ro", uri=True)) as connection:
-            connection.row_factory = sqlite3.Row
+        with open_sqlite_snapshot(source_path, provenance=provenance) as connection:
             database_metadata = sqlite_database_metadata(connection, source_path)
+            database_metadata["sqlite_snapshot"] = provenance
             tables = list_sqlite_tables(connection)
             previews = [
                 preview_sqlite_table(connection, table, source_path=source_path)
@@ -514,7 +515,7 @@ def sqlite_database_metadata(connection: sqlite3.Connection, source_path: Path) 
     try:
         database_rows = connection.execute("PRAGMA database_list").fetchall()
         metadata["database_list"] = [
-            {"sequence": row[0], "name": str(row[1]), "file": str(row[2] or "")}
+            {"sequence": row[0], "name": str(row[1]), "file": str(source_path) if row[1] == "main" else ""}
             for row in database_rows
         ]
     except sqlite3.DatabaseError:
@@ -977,9 +978,9 @@ def build_sqlite_table_page(
     order_by: str | None,
     descending: bool,
 ) -> dict[str, object]:
+    provenance: dict[str, object] = {}
     try:
-        with contextlib.closing(sqlite3.connect(f"{source_path.as_uri()}?mode=ro", uri=True)) as connection:
-            connection.row_factory = sqlite3.Row
+        with open_sqlite_snapshot(source_path, provenance=provenance) as connection:
             tables = set(list_sqlite_tables(connection))
             if table not in tables:
                 raise HTTPException(status_code=404, detail="table not found in SQLite database")
@@ -1096,6 +1097,7 @@ def build_sqlite_table_page(
     )
     return {
         "command": "source-sqlite-table",
+        "sqlite_snapshot": provenance,
         "profile_version": "sqlite-table-page-v1",
         "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["sqlite"]],
         "path": str(source_path),
@@ -1748,8 +1750,8 @@ def search_sqlite_file(
     resume_table = str((resume_state or {}).get("table") or "")
     resume_next_row_number = max(1, optional_int_for_api((resume_state or {}).get("next_row_number")) or 1)
     resume_consumed = not bool(resume_table)
-    with contextlib.closing(sqlite3.connect(f"{source_path.as_uri()}?mode=ro", uri=True)) as connection:
-        connection.row_factory = sqlite3.Row
+    provenance: dict[str, object] = {}
+    with open_sqlite_snapshot(source_path, provenance=provenance) as connection:
         for table in list_sqlite_tables(connection):
             if len(matches) >= limit:
                 break
@@ -1888,6 +1890,7 @@ def search_sqlite_file(
                                     "sqlite_resume_state": next_resume_state,
                                     "sqlite_resume_requested": bool(resume_state),
                                     "sqlite_resume_consumed": resume_consumed,
+                                    "sqlite_snapshot": provenance,
                                 }
                             break
     truncated = bool(truncated_tables)
@@ -1902,4 +1905,5 @@ def search_sqlite_file(
         "sqlite_resume_state": next_resume_state,
         "sqlite_resume_requested": bool(resume_state),
         "sqlite_resume_consumed": resume_consumed,
+        "sqlite_snapshot": provenance,
     }

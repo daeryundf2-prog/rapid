@@ -727,17 +727,19 @@ def collect_native_ntfs_artifacts(root: Path) -> Iterable[ArtifactRecord]:
         if resolved in seen:
             continue
         if is_native_mft_path(path):
-            yield build_mft_inventory_record(path)
+            mft_source_hashes = file_hashes(path)
+            yield build_mft_inventory_record(path, source_hashes=mft_source_hashes)
             mft_records = mft_records_by_path.get(resolved) or parse_mft_record_headers(read_prefix(path, NATIVE_SCAN_LIMIT))
             bounded_path_cache = mft_path_caches_by_volume.get(resolved.parent) or build_mft_bounded_path_cache(mft_records)
             for index, record in enumerate(mft_records):
-                yield build_native_mft_record(path, record, index, bounded_path_cache)
+                yield build_native_mft_record(path, record, index, bounded_path_cache, source_hashes=mft_source_hashes)
             seen.add(resolved)
         elif is_native_usn_path(path):
             bounded_path_cache = nearest_mft_path_cache(path, mft_path_caches_by_volume)
-            yield build_usn_journal_inventory_record(path, bounded_path_cache)
+            usn_source_hashes = file_hashes(path)
+            yield build_usn_journal_inventory_record(path, bounded_path_cache, source_hashes=usn_source_hashes)
             for index, record in enumerate(parse_usn_records(read_prefix(path, NATIVE_SCAN_LIMIT))):
-                yield build_native_usn_record(path, record, index, bounded_path_cache)
+                yield build_native_usn_record(path, record, index, bounded_path_cache, source_hashes=usn_source_hashes)
             seen.add(resolved)
 
 
@@ -1070,7 +1072,12 @@ def nearest_mft_path_cache(
     return best_cache
 
 
-def build_mft_inventory_record(path: Path) -> ArtifactRecord:
+def build_mft_inventory_record(
+    path: Path,
+    *,
+    source_hashes: Mapping[str, str] | None = None,
+) -> ArtifactRecord:
+    resolved_source_hashes = dict(source_hashes) if source_hashes is not None else file_hashes(path)
     stat_result = path.stat()
     blob = read_prefix(path, NATIVE_SCAN_LIMIT)
     mft_records = parse_mft_record_headers(blob)
@@ -1103,7 +1110,7 @@ def build_mft_inventory_record(path: Path) -> ArtifactRecord:
             "reportability": "inventory-only",
             "source_path": str(path.resolve()),
             "source_format": "ntfs-mft",
-            "source_hashes": file_hashes(path),
+            "source_hashes": dict(resolved_source_hashes),
             "size": stat_result.st_size,
             "modified_at": dt.datetime.fromtimestamp(stat_result.st_mtime, dt.timezone.utc).isoformat(),
             "scan_bytes": len(blob),
@@ -1130,7 +1137,7 @@ def build_mft_inventory_record(path: Path) -> ArtifactRecord:
                 "mft-file",
                 {
                     "source_path": str(path.resolve()),
-                    "source_hashes": file_hashes(path),
+                    "source_hashes": dict(resolved_source_hashes),
                     "record_header_samples": mft_records[:50],
                     "path_candidates": path_candidates[:50],
                     "validation_checks": validation_checks,
@@ -1143,7 +1150,7 @@ def build_mft_inventory_record(path: Path) -> ArtifactRecord:
                 artifact_scope="inventory",
                 details={
                     "source_path": str(path.resolve()),
-                    "source_hashes": file_hashes(path),
+                    "source_hashes": dict(resolved_source_hashes),
                     "native_record_count": len(mft_records),
                     "scan_bytes": len(blob),
                     "record_validation_counts": count_values(record.get("validation_status") for record in mft_records),
@@ -1157,7 +1164,7 @@ def build_mft_inventory_record(path: Path) -> ArtifactRecord:
                 "mft",
                 {
                     "source_path": str(path.resolve()),
-                    "source_hashes": file_hashes(path),
+                    "source_hashes": dict(resolved_source_hashes),
                     "artifact_type": "mft-file",
                     "ntfs_validation_matrix": ntfs_validation_matrix(validation_checks),
                     "ntfs_report_grade_assessment": report_grade,
@@ -1175,7 +1182,10 @@ def build_mft_inventory_record(path: Path) -> ArtifactRecord:
 def build_usn_journal_inventory_record(
     path: Path,
     mft_path_cache: Mapping[int, Mapping[str, object]] | None = None,
+    *,
+    source_hashes: Mapping[str, str] | None = None,
 ) -> ArtifactRecord:
+    resolved_source_hashes = dict(source_hashes) if source_hashes is not None else file_hashes(path)
     stat_result = path.stat()
     blob = read_prefix(path, NATIVE_SCAN_LIMIT)
     scan = parse_usn_record_scan(blob)
@@ -1209,7 +1219,7 @@ def build_usn_journal_inventory_record(
             "reportability": "inventory-only",
             "source_path": str(path.resolve()),
             "source_format": "ntfs-usn-journal",
-            "source_hashes": file_hashes(path),
+            "source_hashes": dict(resolved_source_hashes),
             "size": stat_result.st_size,
             "modified_at": dt.datetime.fromtimestamp(stat_result.st_mtime, dt.timezone.utc).isoformat(),
             "scan_bytes": len(blob),
@@ -1243,7 +1253,7 @@ def build_usn_journal_inventory_record(
                 "usn-journal-file",
                 {
                     "source_path": str(path.resolve()),
-                    "source_hashes": file_hashes(path),
+                    "source_hashes": dict(resolved_source_hashes),
                     "record_samples": records[:50],
                     "scan_metadata": scan_metadata,
                     "validation_checks": validation_checks,
@@ -1256,7 +1266,7 @@ def build_usn_journal_inventory_record(
                 artifact_scope="inventory",
                 details={
                     "source_path": str(path.resolve()),
-                    "source_hashes": file_hashes(path),
+                    "source_hashes": dict(resolved_source_hashes),
                     "scan_metadata": scan_metadata,
                     "native_record_count": len(records),
                     "reason_flag_counts": count_many(record.get("reason_flags") for record in records),
@@ -1272,7 +1282,7 @@ def build_usn_journal_inventory_record(
                 "usn",
                 {
                     "source_path": str(path.resolve()),
-                    "source_hashes": file_hashes(path),
+                    "source_hashes": dict(resolved_source_hashes),
                     "artifact_type": "usn-journal-file",
                     "ntfs_validation_matrix": ntfs_validation_matrix(validation_checks),
                     "ntfs_report_grade_assessment": report_grade,
@@ -1293,7 +1303,10 @@ def build_native_mft_record(
     record: Mapping[str, object],
     index: int,
     bounded_path_cache: Mapping[int, Mapping[str, object]] | None = None,
+    *,
+    source_hashes: Mapping[str, str] | None = None,
 ) -> ArtifactRecord:
+    resolved_source_hashes = dict(source_hashes) if source_hashes is not None else file_hashes(path)
     path_candidates = list(record.get("path_candidates") or [])
     file_path = str(path_candidates[0]) if path_candidates else ""
     standard_information = record.get("standard_information") if isinstance(record.get("standard_information"), Mapping) else {}
@@ -1317,7 +1330,7 @@ def build_native_mft_record(
         "reportability": "triage",
         "source_path": str(path.resolve()),
         "source_format": "ntfs-mft",
-        "source_hashes": file_hashes(path),
+        "source_hashes": dict(resolved_source_hashes),
         "source_index": index,
         "artifact_family": "mft",
         "record_number": str(record.get("record_number_candidate", "")),
@@ -1361,7 +1374,7 @@ def build_native_mft_record(
             "mft-record",
             {
                 "source_path": str(path.resolve()),
-                "source_hashes": file_hashes(path),
+                "source_hashes": dict(resolved_source_hashes),
                 "source_index": index,
                 "file_path": file_path,
                 "parent_reference": str(parent_reference or ""),
@@ -1444,7 +1457,10 @@ def build_native_usn_record(
     record: Mapping[str, object],
     index: int,
     mft_path_cache: Mapping[int, Mapping[str, object]] | None = None,
+    *,
+    source_hashes: Mapping[str, str] | None = None,
 ) -> ArtifactRecord:
+    resolved_source_hashes = dict(source_hashes) if source_hashes is not None else file_hashes(path)
     bounded_mft_path = usn_bounded_mft_path_correlation(record, mft_path_cache or {})
     details = {
         "parser": "windows-usn-native",
@@ -1453,7 +1469,7 @@ def build_native_usn_record(
         "reportability": "triage",
         "source_path": str(path.resolve()),
         "source_format": "ntfs-usn-journal",
-        "source_hashes": file_hashes(path),
+        "source_hashes": dict(resolved_source_hashes),
         "source_index": index,
         "artifact_family": "usn",
         "record_number": str(record.get("file_reference_number") or ""),
@@ -1498,7 +1514,7 @@ def build_native_usn_record(
             "usn-record",
             {
                 "source_path": str(path.resolve()),
-                "source_hashes": file_hashes(path),
+                "source_hashes": dict(resolved_source_hashes),
                 "source_index": index,
                 "file_path": str(record.get("file_name") or ""),
                 "timestamp": str(record.get("timestamp") or ""),

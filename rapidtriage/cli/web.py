@@ -41,6 +41,11 @@ def run_web_server(
     loopback_hosts = {"127.0.0.1", "localhost", "::1"}
     if remote and allow_remote_without_auth:
         raise RuntimeError("--remote and --allow-remote-without-auth are mutually exclusive: --remote keeps API auth on.")
+    if remote and os.environ.get("RAPIDTRIAGE_DISABLE_AUTH", "").strip().lower() in {"1", "true", "yes", "on"}:
+        raise RuntimeError(
+            "--remote requires API authentication but RAPIDTRIAGE_DISABLE_AUTH is set. "
+            "Unset RAPIDTRIAGE_DISABLE_AUTH or drop --remote; refusing to weaken authentication silently."
+        )
     if remote:
         # --remote is the supported non-loopback path: a token is mandatory so
         # /api auth and the Host/Origin gates stay on. RAPIDTRIAGE_TOKEN is the
