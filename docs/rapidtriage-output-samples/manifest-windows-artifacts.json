@@ -1277,7 +1277,44 @@
                 "last_visit_time_source": "urls.last_visit_time",
                 "transition": "",
                 "visit_duration_micros": 0,
-                "query_hint": ""
+                "query_hint": "",
+                "sqlite_snapshot": {
+                  "profile_version": "sqlite-working-snapshot-v1",
+                  "source_path": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History",
+                  "files": [
+                    {
+                      "path": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History",
+                      "exists": true,
+                      "sha256": "<DYNAMIC_FILE_META>",
+                      "st_dev": "<DYNAMIC_FILE_META>",
+                      "st_ino": "<DYNAMIC_FILE_META>",
+                      "st_size": "<DYNAMIC_FILE_META>",
+                      "st_mtime_ns": "<DYNAMIC_FILE_META>",
+                      "st_ctime_ns": "<DYNAMIC_FILE_META>",
+                      "st_mode": "<DYNAMIC_FILE_META>",
+                      "copied": true
+                    },
+                    {
+                      "path": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History-wal",
+                      "exists": false,
+                      "copied": false
+                    },
+                    {
+                      "path": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History-shm",
+                      "exists": false,
+                      "copied": false
+                    },
+                    {
+                      "path": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History-journal",
+                      "exists": false,
+                      "copied": false
+                    }
+                  ],
+                  "hash_scope": "individual-source-files; database hash excludes WAL",
+                  "wal_included": false,
+                  "stability_check": "before-after fingerprints and copy hashes; not atomic live acquisition",
+                  "shm_policy": "rebuilt only in private working directory"
+                }
               },
               {
                 "source_table": "urls",
@@ -1290,7 +1327,44 @@
                 "last_visit_time_source": "urls.last_visit_time",
                 "transition": "",
                 "visit_duration_micros": 0,
-                "query_hint": ""
+                "query_hint": "",
+                "sqlite_snapshot": {
+                  "profile_version": "sqlite-working-snapshot-v1",
+                  "source_path": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History",
+                  "files": [
+                    {
+                      "path": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History",
+                      "exists": true,
+                      "sha256": "<DYNAMIC_FILE_META>",
+                      "st_dev": "<DYNAMIC_FILE_META>",
+                      "st_ino": "<DYNAMIC_FILE_META>",
+                      "st_size": "<DYNAMIC_FILE_META>",
+                      "st_mtime_ns": "<DYNAMIC_FILE_META>",
+                      "st_ctime_ns": "<DYNAMIC_FILE_META>",
+                      "st_mode": "<DYNAMIC_FILE_META>",
+                      "copied": true
+                    },
+                    {
+                      "path": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History-wal",
+                      "exists": false,
+                      "copied": false
+                    },
+                    {
+                      "path": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History-shm",
+                      "exists": false,
+                      "copied": false
+                    },
+                    {
+                      "path": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History-journal",
+                      "exists": false,
+                      "copied": false
+                    }
+                  ],
+                  "hash_scope": "individual-source-files; database hash excludes WAL",
+                  "wal_included": false,
+                  "stability_check": "before-after fingerprints and copy hashes; not atomic live acquisition",
+                  "shm_policy": "rebuilt only in private working directory"
+                }
               }
             ],
             "downloads": [
@@ -1303,7 +1377,44 @@
                 "total_bytes": 4096,
                 "state": 1,
                 "started_at": "2026-04-08T16:01:00+00:00",
-                "ended_at": "2026-04-08T16:02:00+00:00"
+                "ended_at": "2026-04-08T16:02:00+00:00",
+                "sqlite_snapshot": {
+                  "profile_version": "sqlite-working-snapshot-v1",
+                  "source_path": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History",
+                  "files": [
+                    {
+                      "path": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History",
+                      "exists": true,
+                      "sha256": "<DYNAMIC_FILE_META>",
+                      "st_dev": "<DYNAMIC_FILE_META>",
+                      "st_ino": "<DYNAMIC_FILE_META>",
+                      "st_size": "<DYNAMIC_FILE_META>",
+                      "st_mtime_ns": "<DYNAMIC_FILE_META>",
+                      "st_ctime_ns": "<DYNAMIC_FILE_META>",
+                      "st_mode": "<DYNAMIC_FILE_META>",
+                      "copied": true
+                    },
+                    {
+                      "path": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History-wal",
+                      "exists": false,
+                      "copied": false
+                    },
+                    {
+                      "path": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History-shm",
+                      "exists": false,
+                      "copied": false
+                    },
+                    {
+                      "path": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History-journal",
+                      "exists": false,
+                      "copied": false
+                    }
+                  ],
+                  "hash_scope": "individual-source-files; database hash excludes WAL",
+                  "wal_included": false,
+                  "stability_check": "before-after fingerprints and copy hashes; not atomic live acquisition",
+                  "shm_policy": "rebuilt only in private working directory"
+                }
               }
             ],
             "internet_usage": [
@@ -2457,7 +2568,44 @@
                 "last_visit_time_source": "urls.last_visit_time",
                 "transition": "",
                 "visit_duration_micros": 0,
-                "query_hint": ""
+                "query_hint": "",
+                "sqlite_snapshot": {
+                  "profile_version": "sqlite-working-snapshot-v1",
+                  "source_path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Edge/User Data/Profile 1/History",
+                  "files": [
+                    {
+                      "path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Edge/User Data/Profile 1/History",
+                      "exists": true,
+                      "sha256": "<DYNAMIC_FILE_META>",
+                      "st_dev": "<DYNAMIC_FILE_META>",
+                      "st_ino": "<DYNAMIC_FILE_META>",
+                      "st_size": "<DYNAMIC_FILE_META>",
+                      "st_mtime_ns": "<DYNAMIC_FILE_META>",
+                      "st_ctime_ns": "<DYNAMIC_FILE_META>",
+                      "st_mode": "<DYNAMIC_FILE_META>",
+                      "copied": true
+                    },
+                    {
+                      "path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Edge/User Data/Profile 1/History-wal",
+                      "exists": false,
+                      "copied": false
+                    },
+                    {
+                      "path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Edge/User Data/Profile 1/History-shm",
+                      "exists": false,
+                      "copied": false
+                    },
+                    {
+                      "path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Edge/User Data/Profile 1/History-journal",
+                      "exists": false,
+                      "copied": false
+                    }
+                  ],
+                  "hash_scope": "individual-source-files; database hash excludes WAL",
+                  "wal_included": false,
+                  "stability_check": "before-after fingerprints and copy hashes; not atomic live acquisition",
+                  "shm_policy": "rebuilt only in private working directory"
+                }
               }
             ],
             "downloads": [
@@ -2470,7 +2618,44 @@
                 "total_bytes": 8192,
                 "state": 1,
                 "started_at": "2026-04-07T09:10:00+00:00",
-                "ended_at": "2026-04-07T09:11:00+00:00"
+                "ended_at": "2026-04-07T09:11:00+00:00",
+                "sqlite_snapshot": {
+                  "profile_version": "sqlite-working-snapshot-v1",
+                  "source_path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Edge/User Data/Profile 1/History",
+                  "files": [
+                    {
+                      "path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Edge/User Data/Profile 1/History",
+                      "exists": true,
+                      "sha256": "<DYNAMIC_FILE_META>",
+                      "st_dev": "<DYNAMIC_FILE_META>",
+                      "st_ino": "<DYNAMIC_FILE_META>",
+                      "st_size": "<DYNAMIC_FILE_META>",
+                      "st_mtime_ns": "<DYNAMIC_FILE_META>",
+                      "st_ctime_ns": "<DYNAMIC_FILE_META>",
+                      "st_mode": "<DYNAMIC_FILE_META>",
+                      "copied": true
+                    },
+                    {
+                      "path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Edge/User Data/Profile 1/History-wal",
+                      "exists": false,
+                      "copied": false
+                    },
+                    {
+                      "path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Edge/User Data/Profile 1/History-shm",
+                      "exists": false,
+                      "copied": false
+                    },
+                    {
+                      "path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Edge/User Data/Profile 1/History-journal",
+                      "exists": false,
+                      "copied": false
+                    }
+                  ],
+                  "hash_scope": "individual-source-files; database hash excludes WAL",
+                  "wal_included": false,
+                  "stability_check": "before-after fingerprints and copy hashes; not atomic live acquisition",
+                  "shm_policy": "rebuilt only in private working directory"
+                }
               }
             ],
             "internet_usage": [

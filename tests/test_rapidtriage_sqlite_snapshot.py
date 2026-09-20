@@ -38,7 +38,7 @@ class SqliteSnapshotTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.source = self.root / "evidence"
         self.source.mkdir()
-        self.path = self.source / "History ?#.db"
+        self.path = self.source / "History !@# &.db"
         self.working = self.root / "working"
         self.working.mkdir()
         self.original_temporary_directory = tempfile.TemporaryDirectory
@@ -245,7 +245,12 @@ class SqliteSnapshotTests(unittest.TestCase):
                 self.fail("snapshot yielded")
         self.make_database(wal=False)
         wal = Path(str(self.path) + "-wal")
-        wal.symlink_to(self.path)
+        try:
+            wal.symlink_to(self.path)
+        except OSError:
+            # Windows needs admin/Developer Mode for symlinks; a plain
+            # directory exercises the same non-regular-file rejection.
+            wal.mkdir()
         with self.assertRaisesRegex(sqlite_snapshot.SqliteSnapshotError, "regular file"):
             with open_sqlite_snapshot(self.path):
                 self.fail("snapshot yielded")

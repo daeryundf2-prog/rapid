@@ -20,6 +20,15 @@ def _files_payload(root: Path, *relative_paths: str) -> dict[str, object]:
 
 
 class ExtractDestinationSymlinkTests(unittest.TestCase):
+    def setUp(self) -> None:
+        # Windows requires admin or Developer Mode to create symlinks
+        # (WinError 1314); probe once and skip rather than error.
+        try:
+            with tempfile.TemporaryDirectory() as probe:
+                (Path(probe) / "link").symlink_to(Path(probe) / "target")
+        except OSError as exc:
+            self.skipTest(f"symlink creation unavailable: {exc}")
+
     def test_symlinked_destination_parent_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)

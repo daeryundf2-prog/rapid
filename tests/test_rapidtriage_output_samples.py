@@ -470,12 +470,32 @@ def compact_hash_cache_validation_slots(value: object) -> object:
     return compacted
 
 
+def compact_sqlite_snapshot_provenance(value: Any) -> Any:
+    if not isinstance(value, dict):
+        return value
+    compact = dict(value)
+    files = compact.get("files")
+    if isinstance(files, list):
+        compact["files"] = [
+            {
+                key: ("<DYNAMIC_FILE_META>" if key == "sha256" or key.startswith("st_") else item[key])
+                for key in item
+            }
+            if isinstance(item, dict)
+            else item
+            for item in files
+        ]
+    return compact
+
+
 def mask_dynamic_manifest_hashes(value: Any) -> Any:
     if isinstance(value, dict):
         masked = {}
         for key, child in value.items():
             if key == "manifest_sha256" or key.endswith("_manifest_hash"):
                 masked[key] = "<DYNAMIC_MANIFEST_HASH>"
+            elif key == "sqlite_snapshot":
+                masked[key] = compact_sqlite_snapshot_provenance(child)
             else:
                 masked[key] = mask_dynamic_manifest_hashes(child)
         return masked

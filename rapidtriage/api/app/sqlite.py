@@ -1807,92 +1807,97 @@ def search_sqlite_file(
                     params_list.append(table_offset)
                 params = tuple(params_list)
                 row_cursor = connection.execute(query, params)
-            for page_row_index, row in enumerate(row_cursor, start=0):
-                row_number = table_start_row_number + page_row_index
-                if effective_row_scan_limit > 0 and page_row_index >= effective_row_scan_limit:
-                    truncated_tables.append(table)
-                    next_resume_state = {
-                        "table": table,
-                        "next_row_number": row_number,
-                        "reason": "sqlite-row-scan-limit",
-                        "scanned_row_count": scanned_rows,
-                        "match_count": len(matches),
-                    }
-                    break
-                scanned_rows += 1
-                row_values = {column: sqlite_preview_value(row[column]) for column in scan_columns}
-                primary_key_values = sqlite_primary_key_values(row_values, primary_key_columns)
-                for column in text_columns:
-                    value = row[column]
-                    if value is None:
-                        continue
-                    text = str(value)
-                    lowered = text.lower()
-                    for keyword in keywords:
-                        offset = lowered.find(keyword)
-                        if offset >= 0:
-                            query_hash = stable_payload_sha256(
-                                {
-                                    "table": table,
-                                    "columns": text_columns,
-                                    "mode": "source-search",
-                                    "keyword": keyword,
-                                    "row_scan_limit": effective_row_scan_limit or "unbounded",
-                                    "row_start_number": table_start_row_number,
-                                }
-                            )
-                            sqlite_locator = sqlite_row_source_viewer_locator(
-                                source_path=source_path,
-                                table=table,
-                                row_number=row_number,
-                                rowid=row["__rapid_source_rowid"] if rowid_available else "",
-                                primary_key_values=primary_key_values,
-                                column=column,
-                                offset=max(row_number - 1, 0),
-                                limit=row_scan_limit,
-                                query_hash=query_hash,
-                                source_context="source-search",
-                            )
-                            matches.append(
-                                {
-                                    "keyword": keyword,
-                                    "line": f"{table}:{row_number}",
-                                    "offset": offset,
-                                    "snippet": snippet_around(text, offset, len(keyword), context=context),
-                                    "table": table,
-                                    "column": column,
-                                    "row_number": row_number,
-                                    "rowid": row["__rapid_source_rowid"] if rowid_available else "",
-                                    "primary_key_values": primary_key_values,
-                                    "source_viewer_locator": sqlite_locator,
-                                    "sqlite_row_locator": sqlite_locator,
-                                    "review_note_citation": sqlite_row_review_note_citation(sqlite_locator),
-                                }
-                            )
-                            if len(matches) >= limit:
-                                result_limit_reached = True
-                                next_resume_state = {
-                                    "table": table,
-                                    "next_row_number": row_number + 1,
-                                    "reason": "result-limit",
-                                    "scanned_row_count": scanned_rows,
-                                    "match_count": len(matches),
-                                    "rowid": row["__rapid_source_rowid"] if rowid_available else "",
-                                }
-                                return matches, True, {
-                                    "sqlite_scanned_table_count": scanned_tables,
-                                    "sqlite_scanned_row_count": scanned_rows,
-                                    "sqlite_row_scan_limit": effective_row_scan_limit or None,
-                                    "sqlite_scan_truncated": True,
-                                    "sqlite_truncated_tables": truncated_tables[:10],
-                                    "sqlite_full_cursor_scan": False,
-                                    "sqlite_result_limit_reached": result_limit_reached,
-                                    "sqlite_resume_state": next_resume_state,
-                                    "sqlite_resume_requested": bool(resume_state),
-                                    "sqlite_resume_consumed": resume_consumed,
-                                    "sqlite_snapshot": provenance,
-                                }
-                            break
+            try:
+                for page_row_index, row in enumerate(row_cursor, start=0):
+                    row_number = table_start_row_number + page_row_index
+                    if effective_row_scan_limit > 0 and page_row_index >= effective_row_scan_limit:
+                        truncated_tables.append(table)
+                        next_resume_state = {
+                            "table": table,
+                            "next_row_number": row_number,
+                            "reason": "sqlite-row-scan-limit",
+                            "scanned_row_count": scanned_rows,
+                            "match_count": len(matches),
+                        }
+                        break
+                    scanned_rows += 1
+                    row_values = {column: sqlite_preview_value(row[column]) for column in scan_columns}
+                    primary_key_values = sqlite_primary_key_values(row_values, primary_key_columns)
+                    for column in text_columns:
+                        value = row[column]
+                        if value is None:
+                            continue
+                        text = str(value)
+                        lowered = text.lower()
+                        for keyword in keywords:
+                            offset = lowered.find(keyword)
+                            if offset >= 0:
+                                query_hash = stable_payload_sha256(
+                                    {
+                                        "table": table,
+                                        "columns": text_columns,
+                                        "mode": "source-search",
+                                        "keyword": keyword,
+                                        "row_scan_limit": effective_row_scan_limit or "unbounded",
+                                        "row_start_number": table_start_row_number,
+                                    }
+                                )
+                                sqlite_locator = sqlite_row_source_viewer_locator(
+                                    source_path=source_path,
+                                    table=table,
+                                    row_number=row_number,
+                                    rowid=row["__rapid_source_rowid"] if rowid_available else "",
+                                    primary_key_values=primary_key_values,
+                                    column=column,
+                                    offset=max(row_number - 1, 0),
+                                    limit=row_scan_limit,
+                                    query_hash=query_hash,
+                                    source_context="source-search",
+                                )
+                                matches.append(
+                                    {
+                                        "keyword": keyword,
+                                        "line": f"{table}:{row_number}",
+                                        "offset": offset,
+                                        "snippet": snippet_around(text, offset, len(keyword), context=context),
+                                        "table": table,
+                                        "column": column,
+                                        "row_number": row_number,
+                                        "rowid": row["__rapid_source_rowid"] if rowid_available else "",
+                                        "primary_key_values": primary_key_values,
+                                        "source_viewer_locator": sqlite_locator,
+                                        "sqlite_row_locator": sqlite_locator,
+                                        "review_note_citation": sqlite_row_review_note_citation(sqlite_locator),
+                                    }
+                                )
+                                if len(matches) >= limit:
+                                    result_limit_reached = True
+                                    next_resume_state = {
+                                        "table": table,
+                                        "next_row_number": row_number + 1,
+                                        "reason": "result-limit",
+                                        "scanned_row_count": scanned_rows,
+                                        "match_count": len(matches),
+                                        "rowid": row["__rapid_source_rowid"] if rowid_available else "",
+                                    }
+                                    return matches, True, {
+                                        "sqlite_scanned_table_count": scanned_tables,
+                                        "sqlite_scanned_row_count": scanned_rows,
+                                        "sqlite_row_scan_limit": effective_row_scan_limit or None,
+                                        "sqlite_scan_truncated": True,
+                                        "sqlite_truncated_tables": truncated_tables[:10],
+                                        "sqlite_full_cursor_scan": False,
+                                        "sqlite_result_limit_reached": result_limit_reached,
+                                        "sqlite_resume_state": next_resume_state,
+                                        "sqlite_resume_requested": bool(resume_state),
+                                        "sqlite_resume_consumed": resume_consumed,
+                                        "sqlite_snapshot": provenance,
+                                    }
+                                break
+            finally:
+                # A mid-iteration cursor keeps the snapshot file locked on
+                # Windows and breaks tempdir cleanup; always finalize it.
+                row_cursor.close()
     truncated = bool(truncated_tables)
     return matches, truncated, {
         "sqlite_scanned_table_count": scanned_tables,

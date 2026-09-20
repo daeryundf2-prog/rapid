@@ -8,6 +8,7 @@
     "case_id",
     "title",
     "hash_algorithms",
+    "hash_verification",
     "options",
     "summary",
     "items",
@@ -21,6 +22,17 @@
     "hash_algorithms": {
       "type": "array",
       "items": { "enum": ["md5", "sha1", "sha256"] }
+    },
+    "hash_verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "metadata_cache_bypassed", "hash_source", "note"],
+      "properties": {
+        "scope": { "type": "string" },
+        "metadata_cache_bypassed": { "type": "boolean" },
+        "hash_source": { "type": "string" },
+        "note": { "type": "string" }
+      }
     },
     "options": {
       "type": "object",
@@ -58,12 +70,13 @@
           "evidence": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["path", "name", "size", "modified_at", "hashes"],
+            "required": ["path", "name", "size", "modified_at", "hashes", "hash_source"],
             "properties": {
               "path": { "type": "string" },
               "name": { "type": "string" },
               "size": { "type": "integer" },
               "modified_at": { "type": "string", "format": "date-time" },
+              "hash_source": { "type": "string" },
               "hashes": {
                 "type": "object",
                 "additionalProperties": false,

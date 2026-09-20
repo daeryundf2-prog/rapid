@@ -439,40 +439,45 @@ def search_sqlite_source(
                 )
             except sqlite3.Error:
                 continue
-            for row in rows:
-                scanned_rows += 1
-                rowid = row["__rapid_rowid"] if has_rowid and "__rapid_rowid" in row.keys() else ""
-                for column in columns:
-                    value = row[column]
-                    if value is None:
-                        continue
-                    text = str(value)
-                    for match in search_preview_text(
-                        text,
-                        keywords,
-                        relative_path=relative_path,
-                        limit=normalized_limit - len(matches),
-                        context=normalized_context,
-                    ):
-                        match.update(
-                            {
-                                "table": table,
-                                "column": column,
-                                "rowid": rowid,
-                                "citation": (
-                                    f"{relative_path} table {table} rowid {rowid} "
-                                    f"column {column} offset {match['offset']} keyword {match['keyword']}"
-                                ),
-                                "source_path": relative_path,
-                            }
-                        )
-                        matches.append(match)
+            try:
+                for row in rows:
+                    scanned_rows += 1
+                    rowid = row["__rapid_rowid"] if has_rowid and "__rapid_rowid" in row.keys() else ""
+                    for column in columns:
+                        value = row[column]
+                        if value is None:
+                            continue
+                        text = str(value)
+                        for match in search_preview_text(
+                            text,
+                            keywords,
+                            relative_path=relative_path,
+                            limit=normalized_limit - len(matches),
+                            context=normalized_context,
+                        ):
+                            match.update(
+                                {
+                                    "table": table,
+                                    "column": column,
+                                    "rowid": rowid,
+                                    "citation": (
+                                        f"{relative_path} table {table} rowid {rowid} "
+                                        f"column {column} offset {match['offset']} keyword {match['keyword']}"
+                                    ),
+                                    "source_path": relative_path,
+                                }
+                            )
+                            matches.append(match)
+                            if len(matches) >= normalized_limit:
+                                break
                         if len(matches) >= normalized_limit:
                             break
-                    if len(matches) >= normalized_limit:
+                    if len(matches) >= normalized_limit or scanned_rows >= max_rows:
                         break
-                if len(matches) >= normalized_limit or scanned_rows >= max_rows:
-                    break
+            finally:
+                # A mid-iteration cursor keeps the snapshot file locked on
+                # Windows and breaks tempdir cleanup; always finalize it.
+                rows.close()
     return matches[:normalized_limit], {
         "sqlite_search": True,
         "sqlite_status": "searched",
