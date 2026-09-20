@@ -12,6 +12,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from .forensic_accuracy import build_accuracy_gate
+from .json_stream import LazyArray, LazyObject, Scalar, open_json
 from .rules import RuleSet
 
 URL_RE = re.compile(r"https?://[^\s\]\[\)\(\}\{\"'<>]+", re.IGNORECASE)
@@ -66,27 +67,45 @@ def build_indicator_summary(
     ti_feeds: Sequence[Path] | None = None,
     max_indicators: int = DEFAULT_MAX_INDICATORS,
     max_sources_per_indicator: int = DEFAULT_MAX_SOURCES_PER_INDICATOR,
+    output_payloads: Mapping[str, Mapping[str, object]] | None = None,
+    streamed_outputs: Iterable[str] | None = None,
 ) -> dict[str, object]:
     summary = load_run_summary(run_output)
     outputs = summary.get("outputs")
     if not isinstance(outputs, Mapping):
         raise IndicatorSummaryError("run summary does not include outputs")
 
+    streamed = set(streamed_outputs or ())
     accumulator: dict[tuple[str, str], dict[str, object]] = {}
     scanner_accumulator: dict[tuple[str, str, str], dict[str, object]] = {}
     source_counts: Counter[str] = Counter()
     for output_name, output_path in iter_run_json_outputs(outputs):
-        payload = read_json_path(output_path)
+        source = {
+            "output": output_name,
+            "output_path": str(output_path),
+        }
+        if output_name in streamed:
+            if not output_path.is_file():
+                continue
+            source_counts[output_name] += 1
+            collect_indicators_from_stream(
+                output_path,
+                accumulator,
+                scanner_accumulator,
+                source=source,
+                max_sources_per_indicator=max_sources_per_indicator,
+            )
+            continue
+        payload = (output_payloads or {}).get(output_name)
+        if payload is None:
+            payload = read_json_path(output_path)
         if not payload:
             continue
         source_counts[output_name] += 1
         collect_ioc_scanner_hits_from_payload(
             payload,
             scanner_accumulator,
-            source={
-                "output": output_name,
-                "output_path": str(output_path),
-            },
+            source=source,
             max_sources_per_hit=max_sources_per_indicator,
         )
         for pointer, value, context in iter_scalar_contexts(payload):
@@ -94,8 +113,7 @@ def build_indicator_summary(
                 value,
                 accumulator,
                 source={
-                    "output": output_name,
-                    "output_path": str(output_path),
+                    **source,
                     "pointer": pointer,
                     **context,
                 },
@@ -314,6 +332,140 @@ def add_indicator(
             sources.append(compact_source)
 
 
+def collect_indicators_from_stream(
+    path: Path,
+    accumulator: MutableMapping[tuple[str, str], dict[str, object]],
+    scanner_accumulator: MutableMapping[tuple[str, str, str], dict[str, object]],
+    *,
+    source: Mapping[str, str],
+    max_sources_per_indicator: int,
+) -> None:
+    """Collect indicators and scanner IOC hits from an output too large to load.
+
+    Performs a single ``json_stream`` walk so each array item or object
+    member is materialized one at a time. Scalar coverage matches
+    ``iter_scalar_contexts`` — only mapping members are yielded — but the
+    per-object emit order differs (siblings are buffered so their context
+    is complete), which can change which capped sources are recorded. The
+    nested-before-root ``ioc_hits`` fallback matches
+    collect_ioc_scanner_hits_from_payload.
+    """
+    pending_root_hits: list[tuple[str, Mapping[str, object], dict[str, str]]] = []
+    nested_hit_seen = False
+    with open_json(path) as root:
+        for event in _iter_stream_events(root, pointer=""):
+            kind = event[0]
+            if kind == "scalar":
+                _, pointer, text, context = event
+                collect_indicators_from_text(
+                    text,
+                    accumulator,
+                    source={**source, "pointer": pointer, **context},
+                    max_sources_per_indicator=max_sources_per_indicator,
+                )
+            elif kind == "ioc_root":
+                _, pointer, hit, context = event
+                pending_root_hits.append((pointer, hit, context))
+            else:
+                _, pointer, hit, context = event
+                nested_hit_seen = True
+                add_ioc_scanner_hit_from_dict(
+                    scanner_accumulator,
+                    hit,
+                    pointer=pointer,
+                    context=context,
+                    source=source,
+                    max_sources_per_hit=max_sources_per_indicator,
+                )
+    if not nested_hit_seen:
+        for pointer, hit, context in pending_root_hits:
+            add_ioc_scanner_hit_from_dict(
+                scanner_accumulator,
+                hit,
+                pointer=pointer,
+                context=context,
+                source=source,
+                max_sources_per_hit=max_sources_per_indicator,
+            )
+
+
+def _iter_stream_events(
+    node: object,
+    pointer: str,
+) -> Iterable[tuple]:
+    """Yield ``("scalar"|"ioc"|"ioc_root", pointer, payload, context)``.
+
+    Mirrors iter_scalar_contexts + iter_ioc_hit_contexts over json_stream
+    lazy nodes in one pass. ``ioc_root`` marks root-level ``ioc_hits``
+    entries so callers can apply the nested-first fallback.
+    """
+    if isinstance(node, Scalar):
+        return
+    if isinstance(node, LazyArray):
+        for index, item in enumerate(node.items(lazy=True)):
+            yield from _iter_stream_events(item, f"{pointer}/{index}")
+        return
+    if not isinstance(node, LazyObject):
+        return
+    scalars: dict[str, object] = {}
+    scalar_order: list[str] = []
+    hits: list[tuple[str, Mapping[str, object]]] = []
+    for key, child in node.members():
+        if isinstance(child, Scalar):
+            scalars[key] = child.value
+            scalar_order.append(key)
+        elif key == "ioc_hits" and isinstance(child, LazyArray):
+            for index, hit in enumerate(child.items()):
+                hit_pointer = f"{pointer}/ioc_hits/{index}"
+                if isinstance(hit, Mapping):
+                    hits.append((hit_pointer, hit))
+                for scalar_pointer, scalar_text, scalar_context in iter_scalar_contexts(hit, hit_pointer):
+                    yield "scalar", scalar_pointer, scalar_text, scalar_context
+        else:
+            # Lazy containers must be consumed while the parent members()
+            # cursor is positioned on them — deferring past the loop leaves
+            # the reader beyond the child's bytes.
+            yield from _iter_stream_events(child, f"{pointer}/{escape_pointer(str(key))}")
+    context = context_from_mapping(scalars)
+    for key in scalar_order:
+        item = scalars[key]
+        if item is None:
+            continue
+        text = str(item)
+        if text and len(text) <= MAX_SCALAR_LENGTH:
+            yield "scalar", f"{pointer}/{escape_pointer(str(key))}", text, context
+    tag = "ioc_root" if not pointer else "ioc"
+    for hit_pointer, hit in hits:
+        yield tag, hit_pointer, hit, context
+
+
+def add_ioc_scanner_hit_from_dict(
+    accumulator: MutableMapping[tuple[str, str, str], dict[str, object]],
+    hit: Mapping[str, object],
+    *,
+    pointer: str,
+    context: Mapping[str, str],
+    source: Mapping[str, str],
+    max_sources_per_hit: int,
+) -> None:
+    """Validate one scanner hit dict and accumulate it."""
+    rule_id = str(hit.get("rule_id") or "").strip()
+    hit_type = str(hit.get("type") or "").strip().lower()
+    value = normalize_ioc_scanner_value(hit_type, str(hit.get("value") or ""))
+    if not rule_id or not hit_type or not value:
+        return
+    count = safe_positive_int(hit.get("count"), default=1)
+    add_ioc_scanner_hit(
+        accumulator,
+        rule_id=rule_id,
+        hit_type=hit_type,
+        value=value,
+        count=count,
+        source={**source, "pointer": pointer, **context},
+        max_sources_per_hit=max_sources_per_hit,
+    )
+
+
 def collect_ioc_scanner_hits_from_payload(
     payload: Mapping[str, object],
     accumulator: MutableMapping[tuple[str, str, str], dict[str, object]],
@@ -326,19 +478,12 @@ def collect_ioc_scanner_hits_from_payload(
     nested_hits = list(iter_ioc_hit_contexts(payload, pointer="", include_root=False))
     hit_contexts = nested_hits or list(iter_ioc_hit_contexts(payload, pointer="", include_root=True))
     for pointer, hit, context in hit_contexts:
-        rule_id = str(hit.get("rule_id") or "").strip()
-        hit_type = str(hit.get("type") or "").strip().lower()
-        value = normalize_ioc_scanner_value(hit_type, str(hit.get("value") or ""))
-        if not rule_id or not hit_type or not value:
-            continue
-        count = safe_positive_int(hit.get("count"), default=1)
-        add_ioc_scanner_hit(
+        add_ioc_scanner_hit_from_dict(
             accumulator,
-            rule_id=rule_id,
-            hit_type=hit_type,
-            value=value,
-            count=count,
-            source={**source, "pointer": pointer, **context},
+            hit,
+            pointer=pointer,
+            context=context,
+            source=source,
             max_sources_per_hit=max_sources_per_hit,
         )
 

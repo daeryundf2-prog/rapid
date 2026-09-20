@@ -37,6 +37,7 @@ def run_timeline(
     docs_inputs: Sequence[Path] | None = None,
     artifacts_inputs: Sequence[Path] | None = None,
     rule_set: RuleSet | None = None,
+    input_payloads: Mapping[str, Mapping[str, object]] | None = None,
 ) -> dict[str, object]:
     input_root = resolve_input_root(root or Path.cwd(), kind=input_kind)
     normalized_files = normalize_input_paths(files_inputs)
@@ -49,7 +50,7 @@ def run_timeline(
     events: list[dict[str, object]] = []
     if normalized_files:
         for input_path in normalized_files:
-            payload = load_input_payload(input_path, expected_command="files")
+            payload = load_input_payload(input_path, expected_command="files", input_payloads=input_payloads)
             events.extend(extract_file_events(payload, input_path))
     else:
         payload = run_files_scan(input_root, rule_set=rule_set)
@@ -57,14 +58,14 @@ def run_timeline(
 
     if normalized_docs:
         for input_path in normalized_docs:
-            payload = load_input_payload(input_path, expected_command="docs")
+            payload = load_input_payload(input_path, expected_command="docs", input_payloads=input_payloads)
             events.extend(extract_docs_events(payload, input_path))
     else:
         events.extend(extract_document_candidate_events(scan_document_candidates(input_root), Path("generated:docs")))
 
     if normalized_artifacts:
         for input_path in normalized_artifacts:
-            payload = load_input_payload(input_path, expected_command="artifacts")
+            payload = load_input_payload(input_path, expected_command="artifacts", input_payloads=input_payloads)
             events.extend(extract_artifact_events(payload, input_path))
     else:
         for kind in SUPPORTED_ARTIFACT_KINDS:
@@ -113,14 +114,32 @@ def normalize_input_paths(paths: Sequence[Path] | None) -> list[Path]:
     return normalized
 
 
-def load_input_payload(path: Path, *, expected_command: str) -> dict[str, object]:
+def load_input_payload(
+    path: Path,
+    *,
+    expected_command: str,
+    input_payloads: Mapping[str, Mapping[str, object]] | None = None,
+) -> Mapping[str, object]:
+    if input_payloads:
+        override = input_payloads.get(str(path.expanduser().resolve()))
+        if override is not None:
+            return validate_input_payload(override, path, expected_command=expected_command)
     if not path.is_file():
         raise TimelineError(f"timeline input does not exist: {path}")
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise TimelineError(f"timeline input is not valid JSON: {path}") from exc
-    if not isinstance(payload, dict):
+    return validate_input_payload(payload, path, expected_command=expected_command)
+
+
+def validate_input_payload(
+    payload: object,
+    path: Path,
+    *,
+    expected_command: str,
+) -> Mapping[str, object]:
+    if not isinstance(payload, Mapping):
         raise TimelineError(f"timeline input must be a JSON object: {path}")
     if payload.get("command") != expected_command:
         actual = payload.get("command")

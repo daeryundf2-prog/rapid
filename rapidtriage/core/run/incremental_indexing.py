@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import os
 from collections.abc import (
     Mapping,
     Sequence,
@@ -15,10 +16,12 @@ from ..forensic_accuracy import build_accuracy_gate
 from ..incremental import fingerprint_file_index
 from .constants import (
     DEFAULT_INCREMENTAL_HASH_MAX_BYTES,
+    DEFAULT_REUSABLE_JSON_MAX_BYTES,
     INCREMENTAL_INDEXING_GAP_ID,
     INCREMENTAL_INDEXING_REPORT_GRADE_BLOCKERS,
     INCREMENTAL_INDEXING_REPORT_GRADE_VALIDATION_PLAN_VERSION,
     INCREMENTAL_TRUSTED_DIFF_BLOCKER_68,
+    REUSABLE_JSON_MAX_BYTES_ENV,
 )
 from .performance import performance_commercial_uplift_evidence
 
@@ -38,7 +41,26 @@ __all__ = [
     "load_or_build_json",
     "load_reusable_json",
     "refresh_incremental_fingerprint_manifest",
+    "reusable_json_max_bytes",
 ]
+
+
+def reusable_json_max_bytes() -> int:
+    """Return the resume-side JSON reload cap in bytes.
+
+    A cached stage output larger than this limit is treated as
+    non-reusable: loading it with ``json.loads`` would risk a MemoryError
+    on multi-gigabyte run outputs, so the stage is rebuilt instead. The
+    limit can be overridden with ``RAPIDTRIAGE_REUSABLE_JSON_MAX_BYTES``
+    (``0`` disables the guard).
+    """
+    raw = os.environ.get(REUSABLE_JSON_MAX_BYTES_ENV)
+    if raw is None:
+        return DEFAULT_REUSABLE_JSON_MAX_BYTES
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return DEFAULT_REUSABLE_JSON_MAX_BYTES
 
 
 def load_or_build_json(
@@ -48,9 +70,15 @@ def load_or_build_json(
     producer,
     expected_command: str | None = None,
     required_keys: Sequence[str] = (),
+    max_load_bytes: int | None = None,
 ) -> tuple[dict[str, object], bool]:
     if resume:
-        payload = load_reusable_json(path, expected_command=expected_command, required_keys=required_keys)
+        payload = load_reusable_json(
+            path,
+            expected_command=expected_command,
+            required_keys=required_keys,
+            max_load_bytes=max_load_bytes,
+        )
         if payload is not None:
             return payload, True
     return producer(), False
@@ -61,10 +89,14 @@ def load_reusable_json(
     *,
     expected_command: str | None,
     required_keys: Sequence[str],
+    max_load_bytes: int | None = None,
 ) -> dict[str, object] | None:
     if not path.is_file():
         return None
+    limit = reusable_json_max_bytes() if max_load_bytes is None else max_load_bytes
     try:
+        if limit and path.stat().st_size > limit:
+            return None
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError, UnicodeDecodeError):
         return None

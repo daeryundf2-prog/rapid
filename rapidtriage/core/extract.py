@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import shutil
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 
 from .audit import compute_sha256
@@ -65,8 +65,12 @@ def run_extract(
     max_extract_size_bytes: int = 0,
     max_file_count: int = 0,
     overwrite: bool = False,
+    payload: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
-    payload = load_extract_payload(input_json)
+    if payload is None:
+        payload = load_extract_payload(input_json)
+    else:
+        payload = validate_extract_payload(payload)
     source_command = payload["command"]
     root = resolve_payload_root(payload.get("root"), input_json.parent)
     source_items = extract_source_items(payload, source_command)
@@ -193,7 +197,10 @@ def load_extract_payload(input_json: Path) -> dict[str, object]:
         raise ExtractError(f"input JSON not found: {input_json}") from exc
     except json.JSONDecodeError as exc:
         raise ExtractError(f"invalid JSON input: {input_json}") from exc
+    return validate_extract_payload(payload)
 
+
+def validate_extract_payload(payload: object) -> dict[str, object]:
     if not isinstance(payload, dict):
         raise ExtractError("input JSON must contain an object payload")
     command = payload.get("command")

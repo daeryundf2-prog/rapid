@@ -680,6 +680,7 @@ def run_triage_mode(
             max_extract_size_bytes=max_extract_size_bytes,
             max_file_count=max_file_count,
             overwrite=overwrite,
+            payload=docs_payload,
         ),
     )
     if reused:
@@ -699,6 +700,7 @@ def run_triage_mode(
             max_extract_size_bytes=max_extract_size_bytes,
             max_file_count=max_file_count,
             overwrite=overwrite,
+            payload=files_payload,
         ),
     )
     if reused:
@@ -720,6 +722,14 @@ def run_triage_mode(
             docs_inputs=[docs_path],
             artifacts_inputs=list(artifact_outputs.values()),
             rule_set=rule_set,
+            input_payloads={
+                str(files_path.expanduser().resolve()): files_payload,
+                str(docs_path.expanduser().resolve()): docs_payload,
+                **{
+                    str(path.expanduser().resolve()): artifact_payloads[kind]
+                    for kind, path in artifact_outputs.items()
+                },
+            },
         ),
     )
     if reused:
@@ -748,6 +758,12 @@ def run_triage_mode(
         producer=lambda: build_indicator_summary(
             {"outputs": {key: str(path) for key, path in provisional_outputs.items()}},
             rule_set=rule_set,
+            output_payloads={
+                "docs": docs_payload,
+                "files": files_payload,
+                "timeline": timeline_payload,
+                **{f"artifacts_{kind}": payload for kind, payload in artifact_payloads.items()},
+            },
         ),
     )
     if reused:
