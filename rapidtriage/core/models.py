@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 
 
 @dataclass
@@ -36,6 +36,7 @@ class FileCandidate:
     modified_epoch: float
     categories: list[str]
     reasons: dict[str, list[str]]
+    recovery: dict[str, object] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)

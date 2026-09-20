@@ -8,6 +8,12 @@ from pathlib import Path
 
 from .docs import write_result
 from .input_root import InputRoot, resolve_input_root
+from .recovery import (
+    CANDIDATE_KIND_CARVED,
+    CANDIDATE_KIND_PARTIAL_CORRUPT,
+    build_recovery_record,
+    count_candidate_kinds,
+)
 
 DEFAULT_MAX_SCAN_BYTES = 256 * 1024 * 1024
 DEFAULT_MAX_CARVE_BYTES = 50 * 1024 * 1024
@@ -114,6 +120,7 @@ def run_bounded_carving(
             "scanned_file_count": scanned_files,
             "scanned_byte_count": scanned_bytes,
             "candidate_count": len(entries),
+            "candidate_kind_counts": count_candidate_kinds(entries),
             "extracted_count": sum(1 for entry in entries if entry.get("extracted_path")),
             "skipped_count": len(skipped),
             "kind_counts": count_kinds(entries),
@@ -153,6 +160,12 @@ def carve_buffer(
                 "sha256": digest,
                 "status": status,
                 "extracted_path": None,
+                "recovery": carved_recovery_record(
+                    status,
+                    signature=signature,
+                    source_path=source_path,
+                    offset=offset,
+                ),
             }
             if extract:
                 output_path = output_dir / f"{source_path.stem}-{offset:012x}-{digest[:12]}{signature.extension}"
@@ -162,6 +175,59 @@ def carve_buffer(
             remaining -= 1
             start_at = max(offset + 1, end_offset)
     return sorted(entries, key=lambda item: (str(item["source_path"]), int(item["offset"])))
+
+
+def carved_recovery_record(
+    status: str,
+    *,
+    signature: CarvingSignature,
+    source_path: Path,
+    offset: int,
+) -> dict[str, object]:
+    if status == "footer-validated":
+        return build_recovery_record(
+            CANDIDATE_KIND_CARVED,
+            confidence="high",
+            validation_status="validated",
+            deletion_state="unallocated-candidate",
+            source_path=str(source_path),
+            source_offset=offset,
+            boundary_method="signature-footer",
+            signature_type=signature.kind,
+            limitation=(
+                "Validated at signature level only; internal structure and "
+                "content integrity are not verified."
+            ),
+        )
+    if status == "bounded-no-footer":
+        return build_recovery_record(
+            CANDIDATE_KIND_PARTIAL_CORRUPT,
+            confidence="low",
+            validation_status="partial",
+            deletion_state="unallocated-candidate",
+            source_path=str(source_path),
+            source_offset=offset,
+            boundary_method="signature-footer",
+            signature_type=signature.kind,
+            limitation=(
+                "Footer not found within the bounded scan window; the "
+                "candidate may be truncated or a false positive."
+            ),
+        )
+    return build_recovery_record(
+        CANDIDATE_KIND_CARVED,
+        confidence="low",
+        validation_status="unverified",
+        deletion_state="unallocated-candidate",
+        source_path=str(source_path),
+        source_offset=offset,
+        boundary_method="header-only-bounded",
+        signature_type=signature.kind,
+        limitation=(
+            "No footer signature is defined for this format; the candidate "
+            "is bounded only by max_carve_bytes and needs manual validation."
+        ),
+    )
 
 
 def carve_candidate(

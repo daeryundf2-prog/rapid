@@ -10,6 +10,7 @@ from pathlib import Path
 
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
+from ...core.recovery import build_recovery_record
 
 PARSER_VERSION = "registry-normalized-v13"
 REGISTRY_EXPORT_PATTERN = re.compile(r"^\[(?P<key>.+)]$")
@@ -1493,6 +1494,23 @@ def registry_recovery_evidence(
     )
     return {
         "candidate_kind": candidate_kind,
+        "recovery": build_recovery_record(
+            candidate_kind,
+            subtype=candidate_kind,
+            confidence=path_confidence or "low",
+            validation_status=(
+                "partial"
+                if allocation_status == "free-or-deleted-candidate" and cell_size > 0
+                else "unverified"
+            ),
+            deletion_state="registry-free-cell-candidate",
+            source_offset=candidate.get("cell_offset"),
+            limitation=(
+                "A positive-size free cell is an unallocated-cell candidate, "
+                "not a proven deletion; requires surrounding hbin context and "
+                "independent offset validation."
+            ),
+        ),
         "cell_kind": str(candidate.get("cell_kind") or ""),
         "cell_signature": str(candidate.get("cell_signature") or ""),
         "cell_offset": int(candidate.get("cell_offset") or 0),

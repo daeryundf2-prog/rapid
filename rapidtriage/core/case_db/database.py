@@ -9,6 +9,11 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from ..artifact_store import read_jsonl_artifacts, validate_artifact_record
+from ..recovery import (
+    is_deleted_candidate_kind,
+    is_recovered_candidate_kind,
+    recovery_record_from_payload,
+)
 from ..review_reporting_controls import build_review_reporting_contract
 from ..search import load_run_summary
 from ..submission_qc_controls import build_submission_qc_contract
@@ -1468,14 +1473,16 @@ class CaseDatabase:
                     continue
                 path = str(row.get("path") or "")
                 hashes = hash_existing_file(path)
+                recovery = recovery_record_from_payload(row)
+                candidate_kind = str(recovery.get("candidate_kind") or "")
                 connection.execute(
                     """
                     INSERT INTO file_record (
                         citation_id, case_id, evidence_source_id, path, normalized_path, extension,
                         size_bytes, modified_at, hash_md5, hash_sha1, hash_sha256,
-                        is_deleted, is_recovered
+                        is_deleted, is_recovered, source_offset
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         next_citation_id_for_connection(connection, case_id, "file"),
@@ -1489,8 +1496,9 @@ class CaseDatabase:
                         hashes.get("md5"),
                         hashes.get("sha1"),
                         hashes.get("sha256"),
-                        1 if "recycle" in path.lower() or "deleted" in path.lower() else 0,
-                        1 if "recycle" in path.lower() or "deleted" in path.lower() else 0,
+                        1 if is_deleted_candidate_kind(candidate_kind) else 0,
+                        1 if is_recovered_candidate_kind(candidate_kind) else 0,
+                        optional_int(recovery.get("source_offset")),
                     ),
                 )
                 count += 1

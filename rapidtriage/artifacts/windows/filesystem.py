@@ -12,6 +12,12 @@ from pathlib import Path
 
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
+from ...core.recovery import (
+    CANDIDATE_KIND_DELETED_ENTRY,
+    CANDIDATE_KIND_EXISTING,
+    CANDIDATE_KIND_ORPHAN_RECORD,
+    build_recovery_record,
+)
 from .common import build_forensic_review
 
 PARSER_VERSION = "windows-filesystem-v9"
@@ -608,6 +614,22 @@ def collect_recycle_bin_artifacts(root: Path) -> Iterable[ArtifactRecord]:
                     "paired_payload_hashes": file_hashes(paired_payload) if paired_payload else {},
                     "validation_required": True,
                     "validation_guidance": "Recycle Bin $I metadata is mapped to the sibling $R payload when present; validate high-value deletion timelines with MFT/USN and shell activity.",
+                    "recovery": build_recovery_record(
+                        CANDIDATE_KIND_DELETED_ENTRY,
+                        subtype="recycle-bin-i-file",
+                        confidence="high",
+                        validation_status="unverified",
+                        deletion_state="recycled",
+                        source_path=str(metadata_path.resolve()),
+                        source_record_id=suffix,
+                        limitation=(
+                            "$I metadata confirms the file was recycled; "
+                            "content recovery requires the paired $R payload."
+                            if paired_payload
+                            else "$I metadata found without a paired $R payload; "
+                            "content bytes are not recoverable from this record."
+                        ),
+                    ),
                     "risk_flags": ["deleted-file-recycle-bin"],
                     "commercial_grade_ready": False,
                     "commercial_grade_blockers": [
@@ -1115,6 +1137,18 @@ def build_mft_inventory_record(
             "modified_at": dt.datetime.fromtimestamp(stat_result.st_mtime, dt.timezone.utc).isoformat(),
             "scan_bytes": len(blob),
             "native_record_count": len(mft_records),
+            "recovery_candidate_inventory": {
+                "schema": "candidate-kind-v1",
+                "scope": "bounded-header-scan",
+                "candidate_kind_counts": {
+                    "existing": sum(1 for item in mft_records if item.get("in_use")),
+                    "deleted-entry": sum(1 for item in mft_records if not item.get("in_use")),
+                },
+                "limitation": (
+                    "Bounded scan only; orphan/partial-corrupt classification "
+                    "requires per-record build_native_mft_record output."
+                ),
+            },
             "record_validation_counts": count_values(record.get("validation_status") for record in mft_records),
             "sequence_validation_counts": count_values(
                 (record.get("sequence_validation") or {}).get("status")
@@ -1237,6 +1271,17 @@ def build_usn_journal_inventory_record(
             "trailing_unparsed_bytes": scan_metadata["trailing_unparsed_bytes"],
             "trailing_unparsed_window_bytes": scan_metadata["trailing_unparsed_window_bytes"],
             "native_record_count": len(records),
+            "recovery_candidate_inventory": {
+                "schema": "candidate-kind-v1",
+                "scope": "bounded-record-scan",
+                "candidate_kind_counts": {
+                    "deleted-entry": sum(1 for item in records if item.get("deleted_hint")),
+                },
+                "limitation": (
+                    "USN events are journal observations; a delete event does "
+                    "not establish content recoverability."
+                ),
+            },
             "record_validation_counts": count_values(record.get("validation_status") for record in records),
             "record_version_counts": count_values(str(record.get("major_version") or "") for record in records),
             "reason_flag_counts": count_many(record.get("reason_flags") for record in records),
@@ -1298,6 +1343,50 @@ def build_usn_journal_inventory_record(
     )
 
 
+def mft_recovery_record(record: Mapping[str, object], file_path: str) -> dict[str, object]:
+    """Classify a native MFT FILE record in the unified taxonomy.
+
+    `in_use` maps to deleted-entry; a live record with no resolvable
+    path maps to orphan-record; otherwise existing. Confidence stays
+    medium/low because data-run decoding is not performed.
+    """
+    in_use = bool(record.get("in_use"))
+    if not in_use:
+        return build_recovery_record(
+            CANDIDATE_KIND_DELETED_ENTRY,
+            subtype="mft-file-record-not-in-use",
+            confidence="medium",
+            deletion_state="mft-record-not-in-use",
+            source_record_id=record.get("record_number_candidate"),
+            source_offset=record.get("record_offset"),
+            limitation=(
+                "The in-use flag marks this record as deleted metadata; "
+                "content recovery requires data-run decoding, which is not "
+                "report-grade validated."
+            ),
+        )
+    if not file_path:
+        return build_recovery_record(
+            CANDIDATE_KIND_ORPHAN_RECORD,
+            subtype="mft-file-record-path-unresolved",
+            confidence="low",
+            deletion_state="mft-parent-unresolved",
+            source_record_id=record.get("record_number_candidate"),
+            source_offset=record.get("record_offset"),
+            limitation=(
+                "Record is marked in-use but no file path could be resolved "
+                "from FILE_NAME attributes or the bounded parent cache."
+            ),
+        )
+    return build_recovery_record(
+        CANDIDATE_KIND_EXISTING,
+        confidence="high",
+        deletion_state="allocated",
+        source_record_id=record.get("record_number_candidate"),
+        source_offset=record.get("record_offset"),
+    )
+
+
 def build_native_mft_record(
     path: Path,
     record: Mapping[str, object],
@@ -1343,6 +1432,7 @@ def build_native_mft_record(
         "timestamp": timestamp,
         "timestamp_source": timestamp_source,
         "deleted_hint": not bool(record.get("in_use")),
+        "recovery": mft_recovery_record(record, file_path),
         "sequence_number": record.get("sequence_number", 0),
         "hard_link_count": record.get("hard_link_count", 0),
         "first_attribute_offset": record.get("first_attribute_offset", 0),
@@ -1452,6 +1542,40 @@ def build_native_mft_record(
     )
 
 
+def usn_recovery_record(record: Mapping[str, object]) -> dict[str, object]:
+    """Classify a USN journal record in the unified taxonomy.
+
+    A FILE_DELETE event is deleted-entry *evidence*, not a recovered
+    object; the limitation makes that explicit. Other events are
+    classified ``existing`` for schema uniformity even though a journal
+    event does not assert the file's current allocation state.
+    """
+    if bool(record.get("deleted_hint")):
+        return build_recovery_record(
+            CANDIDATE_KIND_DELETED_ENTRY,
+            subtype="usn-file-delete-event",
+            confidence="medium",
+            deletion_state="journal-observed-delete",
+            source_record_id=record.get("file_reference_number"),
+            source_offset=record.get("record_offset"),
+            limitation=(
+                "USN FILE_DELETE journal event; does not establish that the "
+                "file content is recoverable."
+            ),
+        )
+    return build_recovery_record(
+        CANDIDATE_KIND_EXISTING,
+        confidence="low",
+        deletion_state="journal-event",
+        source_record_id=record.get("file_reference_number"),
+        source_offset=record.get("record_offset"),
+        limitation=(
+            "USN journal event record; does not assert the file's current "
+            "allocation state."
+        ),
+    )
+
+
 def build_native_usn_record(
     path: Path,
     record: Mapping[str, object],
@@ -1478,6 +1602,7 @@ def build_native_usn_record(
         "timestamp": str(record.get("timestamp") or ""),
         "timestamp_source": "usn_filetime" if record.get("timestamp") else "invalid_or_missing_filetime",
         "deleted_hint": bool(record.get("deleted_hint")),
+        "recovery": usn_recovery_record(record),
         "rename_hint": str(record.get("rename_hint") or ""),
         "reason": str(record.get("reason") or ""),
         "reason_raw": record.get("reason_raw", 0),

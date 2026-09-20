@@ -21,6 +21,11 @@ from .hash_cache import (
 )
 from .input_root import InputRoot, resolve_input_root
 from .models import FileCandidate
+from .recovery import (
+    CANDIDATE_KIND_EXISTING,
+    build_recovery_record,
+    count_candidate_kinds,
+)
 from .rules import RuleSet, annotate_files_payload
 
 DEFAULT_FILE_CATEGORIES: tuple[str, ...] = (
@@ -450,6 +455,7 @@ def run_files_scan(
             "known_good_hash_skipped_large_count": known_good_profile["skipped_large_count"],
             "known_good_nsrl_rds_feed_count": known_good_profile["nsrl_rds_feed_count"],
             "known_good_nsrl_rds_row_count": known_good_profile["nsrl_rds_row_count"],
+            "candidate_kind_counts": count_candidate_kinds(candidate_payloads),
             "signature_checked_count": signature_profile["checked_count"],
             "signature_mismatch_count": signature_profile["mismatch_count"],
             "signature_unrecognized_known_extension_count": signature_profile["unrecognized_known_extension_count"],
@@ -1410,6 +1416,17 @@ def build_file_candidate(path: Path, entry_stat: os.stat_result, categories: Seq
         modified_epoch=entry_stat.st_mtime,
         categories=matched_categories,
         reasons=reasons,
+        recovery=build_recovery_record(
+            CANDIDATE_KIND_EXISTING,
+            confidence="high",
+            deletion_state="allocated",
+            source_id="filesystem-scan",
+            source_path=str(path),
+            limitation=(
+                "Allocated filesystem object observed during scan; byte-level "
+                "content integrity is not verified unless a hash profile ran."
+            ),
+        ),
     )
 
 

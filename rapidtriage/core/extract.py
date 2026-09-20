@@ -147,6 +147,8 @@ def run_extract(
             "modified_at": dt.datetime.fromtimestamp(source_stat.st_mtime, tz=dt.timezone.utc).isoformat(),
             "size": source_stat.st_size,
         }
+        if isinstance(item.get("recovery"), dict):
+            entry["recovery"] = dict(item["recovery"])
         if source_command == "files":
             entry["categories"] = extract_candidate_categories(item)
         if source_command == "docs":
