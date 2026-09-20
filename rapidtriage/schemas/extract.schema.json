@@ -61,7 +61,8 @@
           "size": { "type": "integer" },
           "categories": { "type": "array", "items": { "type": "string" } },
           "kind": { "type": "string" },
-          "matched_keywords": { "type": "array", "items": { "type": "string" } }
+          "matched_keywords": { "type": "array", "items": { "type": "string" } },
+          "recovery": { "type": "object", "additionalProperties": true }
         }
       }
     },

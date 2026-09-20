@@ -161,6 +161,12 @@
         "known_good_nsrl_rds_row_count": {
           "type": "integer"
         },
+        "candidate_kind_counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          }
+        },
         "signature_checked_count": {
           "type": "integer"
         },
@@ -285,6 +291,75 @@
           "file_signature": {
             "type": "object",
             "additionalProperties": true
+          },
+          "recovery": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "schema",
+              "candidate_kind",
+              "confidence",
+              "validation_status",
+              "limitations",
+              "reportability",
+              "commercial_claim_allowed"
+            ],
+            "properties": {
+              "schema": {
+                "type": "string"
+              },
+              "candidate_kind": {
+                "enum": [
+                  "existing",
+                  "deleted-entry",
+                  "orphan-record",
+                  "carved",
+                  "partial-corrupt"
+                ]
+              },
+              "subtype": {
+                "type": ["string", "null"]
+              },
+              "confidence": {
+                "enum": ["high", "medium", "low", "unknown"]
+              },
+              "validation_status": {
+                "enum": ["unverified", "validated", "partial", "rejected"]
+              },
+              "deletion_state": {
+                "type": ["string", "null"]
+              },
+              "source_id": {
+                "type": ["string", "null"]
+              },
+              "source_path": {
+                "type": ["string", "null"]
+              },
+              "source_record_id": {
+                "type": ["string", "null"]
+              },
+              "source_offset": {
+                "type": ["integer", "null"]
+              },
+              "boundary_method": {
+                "type": ["string", "null"]
+              },
+              "signature_type": {
+                "type": ["string", "null"]
+              },
+              "limitations": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "reportability": {
+                "type": "string"
+              },
+              "commercial_claim_allowed": {
+                "type": "boolean"
+              }
+            }
           }
         }
       }
