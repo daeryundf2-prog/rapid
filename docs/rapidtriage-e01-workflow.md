@@ -69,6 +69,24 @@ The same evidence JSON also includes two report-limiting readiness objects:
 
 These fields are deliberately conservative. They make the UI and reports show what can be triaged now, what requires a lawful unlock or externally decrypted export, and which corpus/trusted-tool evidence is still missing before commercial-grade or court-report claims.
 
+## NTFS Metadata Extraction (`ntfs-meta`)
+
+When the Sleuth Kit tools (`mmls`, `fls`, `icat`, `fsstat`) are on `PATH`, `rapidtriage ntfs-meta` extracts the NTFS metadata files that `tsk_recover` does not export — `$MFT` and `$UsnJrnl:$J` — directly from a raw/dd or E01/Ex01 image:
+
+```powershell
+rapidtriage ntfs-meta .\case.E01 --output-dir .\case-run\ntfs-meta --parse --json
+```
+
+What it does:
+
+- selects the filesystem partition from `mmls` output; when localized/mojibake description text defeats name matching it falls back to probing partitions with `fsstat` (raw images additionally verify the NTFS OEM ID in the boot sector)
+- extracts `$MFT` (inode 0) with `icat` as a full stream
+- locates `$UsnJrnl:$J` under `$Extend` and extracts it with `icat -h` so sparse holes are omitted — the output file is compacted, so byte offsets in the extracted stream are **not** the logical journal offsets; pass `--full-journal` to keep the full sparse stream when logical offsets must be preserved
+- writes `MFT.bin`, `UsnJrnl_J.bin`, and `rapidtriage-ntfs-meta.json` recording partition provenance, exact tool command lines, per-output SHA-256, skipped/missing components, and limitations
+- with `--parse`, additionally runs the native MFT and USN parsers over the extracted streams and reports bounded record counts, validation status, and `candidate-kind-v1` kind inventories (existing / deleted-entry / orphan-record)
+
+This is evidence-metadata extraction for analysis, not acquisition: the image is only read through the tools, and `extraction_status` reports `blocked`/`partial`/`complete` rather than silently omitting failures. A bounded parse is explicitly labeled — it is not a complete $MFT or journal inventory.
+
 ## Recommended macOS/Linux Workflow
 
 If `libewf` and Sleuth Kit tools are installed:

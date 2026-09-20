@@ -704,6 +704,22 @@ def build_parser() -> argparse.ArgumentParser:
     carve.add_argument("--ext", action="append", help="Only scan source files with this extension (repeatable)")
     carve.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
+    ntfs_meta = sub.add_parser(
+        "ntfs-meta",
+        help="Extract NTFS $MFT and $UsnJrnl:$J from a raw/E01 image via Sleuth Kit",
+        description=(
+            "Extract NTFS metadata files ($MFT, $UsnJrnl:$J) from a disk image using "
+            "mmls/fls/icat, then optionally run the native parsers and report record "
+            "counts and candidate-kind classifications."
+        ),
+    )
+    ntfs_meta.add_argument("image", help="Raw/dd or E01 image readable by the installed Sleuth Kit build")
+    ntfs_meta.add_argument("--output-dir", required=True, help="Directory that receives MFT.bin, UsnJrnl_J.bin, and the manifest")
+    ntfs_meta.add_argument("--partition-offset", type=int, help="Filesystem partition start sector (default: largest filesystem partition from mmls)")
+    ntfs_meta.add_argument("--full-journal", action="store_true", help="Write the full $J stream including sparse holes (default omits holes; offsets are then relative to the compacted output)")
+    ntfs_meta.add_argument("--parse", action="store_true", help="Run the native MFT/USN parsers over the extracted metadata")
+    ntfs_meta.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
     compare = sub.add_parser(
         "compare",
         help="Compare two files for A/B review with hashes and optional text diff",

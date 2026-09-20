@@ -12,6 +12,7 @@ from ..core.cloud_api import CloudApiCollectionError, run_cloud_api_collection
 from ..core.collect_plan import CollectPlanError, build_collect_plan, run_collect_export
 from ..core.docs import write_result
 from ..core.input_root import resolve_input_root
+from ..core.ntfs_metadata import NTFSMetadataError, extract_ntfs_metadata
 from ..core.vsc import (
         VscCompareError,
         compare_vsc_snapshots,
@@ -357,6 +358,106 @@ def handle_carve(args: argparse.Namespace, parser: argparse.ArgumentParser, rule
         return 0
 
 
+def handle_ntfs_meta(args: argparse.Namespace, parser: argparse.ArgumentParser, rule_set) -> int:
+        output_dir = Path(args.output_dir).expanduser().resolve()
+        try:
+            payload = extract_ntfs_metadata(
+                Path(args.image),
+                output_dir,
+                partition_start_sector=args.partition_offset,
+                sparse_journal=not args.full_journal,
+            )
+        except (NTFSMetadataError, OSError) as exc:
+            parser.error(str(exc))
+
+        if args.parse:
+            payload["parse"] = _run_ntfs_metadata_parse(payload)
+
+        manifest_path = Path(str(payload["manifest_path"]))
+        write_result(payload, manifest_path)
+        audit_output = audit_path_for(manifest_path)
+        write_audit_record(
+            audit_output,
+            command="ntfs-meta",
+            options={
+                "image": str(Path(args.image).expanduser().resolve()),
+                "output_dir": str(output_dir),
+                "partition_offset": args.partition_offset,
+                "sparse_journal": not args.full_journal,
+                "parse": args.parse,
+            },
+            output_files=[
+                ("ntfs-meta-json", manifest_path),
+                *[
+                    (f"ntfs-meta:{name}", Path(str(entry["path"])).resolve())
+                    for name, entry in (payload.get("outputs") or {}).items()
+                    if isinstance(entry, dict) and entry.get("path")
+                ],
+            ],
+        )
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(f"Saved NTFS metadata manifest: {manifest_path}")
+            print(f"Saved audit JSON: {audit_output}")
+            print(f"Status: {payload['extraction_status']}  Outputs: {sorted(payload['outputs'])}")
+        return 0
+
+
+def _run_ntfs_metadata_parse(payload: dict) -> dict[str, object]:
+        """Run the native MFT/USN parsers over freshly extracted metadata."""
+        from ..artifacts.windows.filesystem import (
+            build_mft_inventory_record,
+            parse_usn_record_scan,
+            usn_recovery_record,
+        )
+
+        outputs = payload.get("outputs") if isinstance(payload.get("outputs"), dict) else {}
+        parse: dict[str, object] = {}
+        mft_entry = outputs.get("mft") if isinstance(outputs.get("mft"), dict) else None
+        if mft_entry and mft_entry.get("path"):
+            artifact = build_mft_inventory_record(Path(str(mft_entry["path"])))
+            details = artifact.details
+            parse["mft"] = {
+                "parser": details.get("parser"),
+                "native_record_count": details.get("native_record_count"),
+                "record_validation_counts": details.get("record_validation_counts"),
+                "recovery_candidate_inventory": details.get("recovery_candidate_inventory"),
+                "scan_bytes": details.get("scan_bytes"),
+                "scan_bounded": True,
+                "limitation": (
+                    "Native inventory parses a bounded prefix of $MFT "
+                    "(NATIVE_SCAN_LIMIT); full-volume counts require a "
+                    "dedicated parser or unbounded scan."
+                ),
+            }
+        usn_entry = outputs.get("usn_journal") if isinstance(outputs.get("usn_journal"), dict) else None
+        if usn_entry and usn_entry.get("path"):
+            journal_path = Path(str(usn_entry["path"]))
+            blob = journal_path.read_bytes()
+            scan = parse_usn_record_scan(blob)
+            records = scan.get("records") or []
+            from collections import Counter
+
+            kind_counts = Counter(
+                str(usn_recovery_record(r).get("candidate_kind") or "existing")
+                for r in records
+            )
+            parse["usn_journal"] = {
+                "parser": "windows-usn-native",
+                "record_count": len(records),
+                "record_limit_reached": bool(scan.get("record_limit_reached")),
+                "timestamp_range": dict(scan.get("timestamp_range") or {}),
+                "candidate_kind_counts": dict(kind_counts),
+                "scanned_bytes": len(blob),
+                "limitation": (
+                    "Records were parsed from the sparse-compacted stream; "
+                    "record offsets are relative to the extracted file, not "
+                    "the logical $J stream."
+                ),
+            }
+        return parse
+
 
 __all__ = ["HANDLERS"]
 
@@ -369,4 +470,5 @@ HANDLERS = {
     "vsc-discover": handle_vsc_discover,
     "vsc-extract": handle_vsc_extract,
     "carve": handle_carve,
+    "ntfs-meta": handle_ntfs_meta,
 }
