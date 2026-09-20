@@ -257,48 +257,71 @@ def main() -> int:
     log("loading files payload")
     files_payload = json.loads(files_path.read_text(encoding="utf-8"))
 
-    docs_extract_payload = run_extract(
-        docs_path,
-        docs_extract_dir,
-        kinds=profile.docs_extract_kinds,
-        payload=docs_payload,
-    )
-    write_result(docs_extract_payload, docs_extract_manifest)
-    record_run_checkpoint(checkpoint_records, "docs-extract", docs_extract_manifest, reused=False)
-    log(f"docs extract done: {docs_extract_payload['summary']}")
+    if docs_extract_manifest.is_file() and docs_extract_manifest.stat().st_size > 0:
+        docs_extract_payload = json.loads(docs_extract_manifest.read_text(encoding="utf-8"))
+        record_run_checkpoint(checkpoint_records, "docs-extract", docs_extract_manifest, reused=True)
+        reused_outputs.add("docs-extract")
+        log(f"docs extract reused: {docs_extract_payload['summary']}")
+    else:
+        docs_extract_payload = run_extract(
+            docs_path,
+            docs_extract_dir,
+            kinds=profile.docs_extract_kinds,
+            payload=docs_payload,
+        )
+        write_result(docs_extract_payload, docs_extract_manifest)
+        record_run_checkpoint(checkpoint_records, "docs-extract", docs_extract_manifest, reused=False)
+        log(f"docs extract done: {docs_extract_payload['summary']}")
 
-    files_extract_payload = run_extract(
-        files_path,
-        files_extract_dir,
-        categories=profile.file_extract_categories,
-        payload=files_payload,
-    )
-    write_result(files_extract_payload, files_extract_manifest)
-    record_run_checkpoint(checkpoint_records, "files-extract", files_extract_manifest, reused=False)
-    log(f"files extract done: {files_extract_payload['summary']}")
+    if files_extract_manifest.is_file() and files_extract_manifest.stat().st_size > 0:
+        files_extract_payload = json.loads(files_extract_manifest.read_text(encoding="utf-8"))
+        record_run_checkpoint(checkpoint_records, "files-extract", files_extract_manifest, reused=True)
+        reused_outputs.add("files-extract")
+        log(f"files extract reused: {files_extract_payload['summary']}")
+    else:
+        files_extract_payload = run_extract(
+            files_path,
+            files_extract_dir,
+            categories=profile.file_extract_categories,
+            payload=files_payload,
+        )
+        write_result(files_extract_payload, files_extract_manifest)
+        record_run_checkpoint(checkpoint_records, "files-extract", files_extract_manifest, reused=False)
+        log(f"files extract done: {files_extract_payload['summary']}")
 
-    log("building timeline (artifact arrays streamed from disk)")
-    input_payloads: dict[str, dict[str, object]] = {
-        str(files_path.expanduser().resolve()): files_payload,
-        str(docs_path.expanduser().resolve()): docs_payload,
-    }
-    for kind, path in artifact_paths.items():
-        input_payloads[str(path.expanduser().resolve())] = artifact_streaming_payload(path, kind)
-    timeline_payload = run_timeline(
-        root=input_root.root_path,
-        input_kind=input_root.kind,
-        files_inputs=[files_path],
-        docs_inputs=[docs_path],
-        artifacts_inputs=list(artifact_paths.values()),
-        input_payloads=input_payloads,
-    )
-    write_result(timeline_payload, timeline_path)
-    timeline_report_path.write_text(
-        build_timeline_report(timeline_payload),
-        encoding="utf-8",
-    )
-    record_run_checkpoint(checkpoint_records, "timeline", timeline_path, reused=False)
-    log(f"timeline done: {timeline_payload['summary']}")
+    if timeline_path.is_file() and timeline_path.stat().st_size > 0:
+        timeline_payload = json.loads(timeline_path.read_text(encoding="utf-8"))
+        record_run_checkpoint(checkpoint_records, "timeline", timeline_path, reused=True)
+        reused_outputs.add("timeline")
+        log(f"timeline reused: {timeline_payload['summary']}")
+        if not timeline_report_path.is_file():
+            timeline_report_path.write_text(
+                build_timeline_report(timeline_payload),
+                encoding="utf-8",
+            )
+    else:
+        log("building timeline (artifact arrays streamed from disk)")
+        input_payloads: dict[str, dict[str, object]] = {
+            str(files_path.expanduser().resolve()): files_payload,
+            str(docs_path.expanduser().resolve()): docs_payload,
+        }
+        for kind, path in artifact_paths.items():
+            input_payloads[str(path.expanduser().resolve())] = artifact_streaming_payload(path, kind)
+        timeline_payload = run_timeline(
+            root=input_root.root_path,
+            input_kind=input_root.kind,
+            files_inputs=[files_path],
+            docs_inputs=[docs_path],
+            artifacts_inputs=list(artifact_paths.values()),
+            input_payloads=input_payloads,
+        )
+        write_result(timeline_payload, timeline_path)
+        timeline_report_path.write_text(
+            build_timeline_report(timeline_payload),
+            encoding="utf-8",
+        )
+        record_run_checkpoint(checkpoint_records, "timeline", timeline_path, reused=False)
+        log(f"timeline done: {timeline_payload['summary']}")
 
     artifact_outputs = {f"artifacts_{kind}": path for kind, path in artifact_paths.items()}
     provisional_outputs = {

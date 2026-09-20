@@ -180,9 +180,16 @@ class _Reader:
         """Skip a container whose opening bracket was already consumed."""
         depth = 1
         in_string = False
+        skip_first = False
         while True:
             buf = self._buf
             pos = self._pos
+            if skip_first:
+                # A "\\" was the last char of the previous chunk; the escaped
+                # char is the first char of this buffer and must not be
+                # interpreted (e.g. '"' would wrongly toggle in_string).
+                pos += 1
+                skip_first = False
             while True:
                 match = _SPECIAL.search(buf, pos)
                 if match is None:
@@ -192,7 +199,11 @@ class _Reader:
                 pos = match.end()
                 if in_string:
                     if ch == "\\":
-                        pos += 1  # escaped char — safe to land past buffer end
+                        pos += 1
+                        if pos > len(buf):
+                            skip_first = True
+                            pos = len(buf)
+                            break
                     elif ch == '"':
                         in_string = False
                 elif ch == '"':
@@ -326,9 +337,15 @@ def open_json(path: Path, *, chunk_size: int = 1 << 22) -> Iterator[LazyObject]:
         reader.close()
 
 
-def iter_array_items(path: Path, member: str, *, lazy: bool = False) -> Iterator[Any]:
+def iter_array_items(
+    path: Path,
+    member: str,
+    *,
+    lazy: bool = False,
+    chunk_size: int = 1 << 22,
+) -> Iterator[Any]:
     """Yield items of the top-level ``member`` array of a JSON object file."""
-    with open_json(path) as root:
+    with open_json(path, chunk_size=chunk_size) as root:
         for key, node in root.members():
             if key != member:
                 continue
@@ -338,9 +355,9 @@ def iter_array_items(path: Path, member: str, *, lazy: bool = False) -> Iterator
             return
 
 
-def read_member(path: Path, member: str) -> Any:
+def read_member(path: Path, member: str, *, chunk_size: int = 1 << 22) -> Any:
     """Return the parsed value of one top-level object member."""
-    with open_json(path) as root:
+    with open_json(path, chunk_size=chunk_size) as root:
         for key, node in root.members():
             if key == member:
                 return node.materialize()

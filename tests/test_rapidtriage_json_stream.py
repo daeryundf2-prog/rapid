@@ -133,6 +133,29 @@ class JsonStreamReaderTests(unittest.TestCase):
                 with open_json(path):
                     pass
 
+    def test_skip_container_escape_at_chunk_boundary(self) -> None:
+        # A "\\" as the last byte of a chunk must not let the escaped char in
+        # the next chunk be interpreted (e.g. '"' toggling in_string), which
+        # desyncs the skip and corrupts all following members.
+        payload = {
+            "big": ["pre\\" + "x" * 33 + '"post', {"k": ["v\\", 1]}],
+            "wanted": [1, {"deep": "v"}, 3],
+        }
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = write_json(Path(tmp_dir) / "esc.json", payload)
+            for chunk_size in range(4, 96):
+                with self.subTest(chunk_size=chunk_size):
+                    self.assertEqual(
+                        read_member(path, "wanted", chunk_size=chunk_size),
+                        payload["wanted"],
+                    )
+                    self.assertEqual(
+                        list(
+                            iter_array_items(path, "wanted", chunk_size=chunk_size)
+                        ),
+                        payload["wanted"],
+                    )
+
 
 class ExtractPayloadTests(unittest.TestCase):
     def test_run_extract_accepts_in_memory_payload(self) -> None:
