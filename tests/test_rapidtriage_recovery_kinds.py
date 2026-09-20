@@ -141,7 +141,7 @@ class CarvingRecoveryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir) / "case"
             root.mkdir()
-            (root / "slack.bin").write_bytes(b"\xff\xd8\xfftruncated-image-without-eoi")
+            (root / "slack.bin").write_bytes(b"\xff\xd8\xff\xe0truncated-image-without-eoi")
 
             payload = run_bounded_carving(root, Path(tmp_dir) / "carve")
 
@@ -155,7 +155,7 @@ class CarvingRecoveryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir) / "case"
             root.mkdir()
-            (root / "frag.bin").write_bytes(b"PK\x03\x04zip-fragment")
+            (root / "frag.bin").write_bytes(b"PK\x03\x04\x14\x00\x00\x00\x08\x00zip-fragment")
 
             payload = run_bounded_carving(root, Path(tmp_dir) / "carve")
 

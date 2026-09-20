@@ -702,6 +702,12 @@ def build_parser() -> argparse.ArgumentParser:
     carve.add_argument("--max-carve-bytes", type=int, default=DEFAULT_MAX_CARVE_BYTES, help="Maximum bytes to copy for one carved candidate")
     carve.add_argument("--max-candidates", type=int, default=DEFAULT_MAX_CANDIDATES, help="Maximum carving candidates to report")
     carve.add_argument("--ext", action="append", help="Only scan source files with this extension (repeatable)")
+    carve.add_argument(
+        "--kind",
+        action="append",
+        help="Only carve these signature kinds (repeatable; default all: jpeg, png, pdf, zip, sqlite, gif, 7z, rar)",
+    )
+    carve.add_argument("--resume", action="store_true", help="Resume from rapidtriage-carve.checkpoint.json in OUTPUT_DIR when the carving options match")
     carve.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
     ntfs_meta = sub.add_parser(
@@ -1988,6 +1994,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=64 * 1024 * 1024,
         help="Maximum file size to hash for run known-good checks (default: 67108864)",
+    )
+    run.add_argument(
+        "--carve",
+        action="store_true",
+        help="Run an opt-in bounded signature-carving stage over the scan root and attach its summary to the run output",
     )
     run.add_argument(
         "--columnar-store",

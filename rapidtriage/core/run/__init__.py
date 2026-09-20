@@ -33,6 +33,7 @@ from ..audit import (
     compute_sha256,
     write_audit_record,
 )
+from ..carving import CarvingError, run_bounded_carving
 from ..columnar_store import (
     ColumnarStoreUnavailable,
     convert_jsonl_to_parquet,
@@ -366,6 +367,7 @@ def run_triage_mode(
     known_good_max_hash_bytes: int = DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES,
     rule_set: RuleSet | None = None,
     columnar_store: bool = False,
+    carve: bool = False,
 ) -> dict[str, object]:
     normalized_mode = mode.lower()
     if normalized_mode not in SUPPORTED_RUN_MODES:
@@ -624,6 +626,23 @@ def run_triage_mode(
     files_payload["scan_scope_root"] = str(scan_input_root.root_path)
     record_memory_cap("files")
 
+    carve_payload: dict[str, object] | None = None
+    carve_output_path = output_dir / "carving" / "rapidtriage-carve.json"
+    if carve:
+        # Opt-in bounded carving over the same scan root. The carve stage
+        # keeps its own checkpoint so --resume continues mid-scan rather
+        # than re-running completed sources.
+        try:
+            carve_payload = run_bounded_carving(
+                scan_input_root,
+                carve_output_path.parent,
+                resume=effective_resume,
+            )
+        except CarvingError as exc:
+            raise RunModeError(f"carve stage failed: {exc}") from exc
+        record_run_checkpoint(checkpoint_records, "carve", carve_output_path, reused=False)
+        record_memory_cap("carve")
+
     write_result(manifest_payload, manifest_path)
     write_result(docs_payload, docs_path)
     write_result(files_payload, files_path)
@@ -814,6 +833,8 @@ def run_triage_mode(
     }
     if evidence_delta_manifest is not None:
         outputs["evidence_delta"] = output_dir / EVIDENCE_DELTA_MANIFEST_NAME
+    if carve_payload is not None:
+        outputs["carve"] = carve_output_path
     if isinstance(image_result, E01ExtractionResult):
         outputs = {"e01": e01_metadata_path, **outputs}
     if isinstance(image_result, DiskImageExtractionResult):
@@ -888,6 +909,16 @@ def run_triage_mode(
     )
     audit_output = output_dir / "rapidtriage-run-audit.json"
     summary_payload["audit"] = str(audit_output)
+    if carve_payload is not None:
+        summary_payload["carving"] = {
+            "enabled": True,
+            "output": str(carve_output_path),
+            "summary": carve_payload.get("summary", {}),
+            "limitation": (
+                "Signature carving over the scan root is a bounded triage aid; "
+                "candidates are not validated against unallocated space."
+            ),
+        }
     memory_cap_manifest = summary_payload.get("processing", {}).get("memory_cap_enforcement", {}).get(
         "memory_cap_enforcement_manifest",
         {},

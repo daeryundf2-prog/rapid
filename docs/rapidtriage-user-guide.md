@@ -372,6 +372,19 @@ When you use `rapidtriage run`, the Windows collectors are wired into the case w
 - `recovery` runs recent-file, OS/account, event log, filesystem, Linux system, and macOS system collectors so deleted-file and restore clues still enter the timeline without doing carving.
 - Search and Case DB import can then find hits across documents, logs, event exports, PowerShell history, MFT/USN imports, and timeline rows from the same run output.
 
+## Signature Carving (`carve`)
+
+`rapidtriage carve <root> --output-dir <dir>` runs bounded signature carving for recovered-content candidates over a mounted/exported folder or a single file:
+
+- Signatures: JPEG, PNG, PDF, ZIP, SQLite, GIF, 7z, RAR (`--kind` selects a subset, repeatable).
+- Each candidate records source path, byte offset/end offset, SHA-256, a `candidate-kind-v1` recovery block (`carved` vs `partial-corrupt`), confidence, and a boundary method: `signature-footer`, `length-field` (SQLite in-header size), or `header-only-bounded`.
+- Structural header validation emits `false-positive-rejected` rows (with `rejected_reason`) instead of silently dropping or blindly trusting raw signature hits.
+- Source files are scanned in overlapping 8 MiB chunks so headers straddling chunk boundaries are still found and memory stays bounded.
+- `--extract` writes carved bytes under `<dir>/carved/`; `--resume` continues from `rapidtriage-carve.checkpoint.json` (fail-closed if the carving options changed).
+- `rapidtriage run --carve` attaches the same bounded stage to a triage run and records it in run checkpoints and the summary JSON.
+
+Carving here is a bounded triage aid: it does not know whether bytes came from unallocated space, and `validated` means signature/length consistency — not file-content verification.
+
 ## macOS System Artifacts
 
 On mounted or exported macOS evidence, `macos-system` collects a baseline set of reviewable artifacts:

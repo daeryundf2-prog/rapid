@@ -325,6 +325,8 @@ def handle_carve(args: argparse.Namespace, parser: argparse.ArgumentParser, rule
                 max_carve_bytes=args.max_carve_bytes,
                 max_candidates=args.max_candidates,
                 extensions=args.ext,
+                kinds=args.kind,
+                resume=args.resume,
             )
         except (CarvingError, OSError, ValueError) as exc:
             parser.error(str(exc))
@@ -340,6 +342,8 @@ def handle_carve(args: argparse.Namespace, parser: argparse.ArgumentParser, rule
                 "max_carve_bytes": args.max_carve_bytes,
                 "max_candidates": args.max_candidates,
                 "extensions": args.ext or [],
+                "kinds": args.kind or [],
+                "resume": bool(args.resume),
             },
             input_root=input_root,
             output_files=[("carve-json", output)]

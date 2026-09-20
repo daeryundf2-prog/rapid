@@ -91,6 +91,17 @@
     "audit": {
       "type": "string"
     },
+    "carving": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "output", "summary", "limitation"],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "output": {"type": "string"},
+        "summary": {"type": "object", "additionalProperties": true},
+        "limitation": {"type": "string"}
+      }
+    },
     "profile": {
       "type": "object",
       "additionalProperties": false,

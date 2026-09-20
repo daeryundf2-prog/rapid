@@ -52,6 +52,7 @@ def handle_run(args: argparse.Namespace, parser: argparse.ArgumentParser, rule_s
                 known_good_max_hash_bytes=args.known_good_max_hash_bytes,
                 rule_set=rule_set,
                 columnar_store=args.columnar_store,
+                carve=getattr(args, "carve", False),
             )
         except RunModeError as exc:
             parser.error(str(exc))
