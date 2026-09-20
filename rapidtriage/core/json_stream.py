@@ -43,6 +43,7 @@ __all__ = [
 
 _WS = " \t\r\n"
 _SPECIAL = re.compile(r'["{}\[\]\\]')
+_NUMBER_TAIL = re.compile(r"[.eE][+-]?")
 
 
 class JsonStreamError(ValueError):
@@ -130,8 +131,18 @@ class _Reader:
                 if self._eof or not self._more():
                     raise self._fail(f"invalid JSON value: {exc}") from exc
                 continue
-            if end == len(self._buf) and not self._eof and self._more():
-                continue  # a bare scalar may extend into the next chunk
+            if not self._eof and (
+                end == len(self._buf)
+                # A number whose parse stopped on a '.'/'e'/'e+'/... at the
+                # buffer edge may be truncated mid-token ("-1." could really
+                # be "-1.973" continuing into the next chunk).
+                or (
+                    isinstance(result, (int, float))
+                    and not isinstance(result, bool)
+                    and _NUMBER_TAIL.fullmatch(self._buf, end) is not None
+                )
+            ) and self._more():
+                continue  # the token may extend into the next chunk
             self._pos = end
             return result
 

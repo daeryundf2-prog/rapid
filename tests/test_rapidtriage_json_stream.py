@@ -156,6 +156,32 @@ class JsonStreamReaderTests(unittest.TestCase):
                         payload["wanted"],
                     )
 
+    def test_number_at_chunk_boundary(self) -> None:
+        # raw_decode stops a number at a '.'/'e'/'+'/'-' that lacks its
+        # continuation; when that stop lands on the buffer edge the reader
+        # must refill instead of accepting the truncated value.
+        payload = {
+            "nums": [-1.973, 1.5e30, 222, -0.001, 3.14e-7, 1.25e+8],
+            "obj": {"a": -2.5, "b": 6.02e23},
+            "wanted": "ok",
+        }
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = write_json(Path(tmp_dir) / "nums.json", payload)
+            for chunk_size in range(4, 80):
+                with self.subTest(chunk_size=chunk_size):
+                    self.assertEqual(
+                        list(iter_array_items(path, "nums", chunk_size=chunk_size)),
+                        payload["nums"],
+                    )
+                    self.assertEqual(
+                        read_member(path, "obj", chunk_size=chunk_size),
+                        payload["obj"],
+                    )
+                    self.assertEqual(
+                        read_member(path, "wanted", chunk_size=chunk_size),
+                        "ok",
+                    )
+
 
 class ExtractPayloadTests(unittest.TestCase):
     def test_run_extract_accepts_in_memory_payload(self) -> None:
