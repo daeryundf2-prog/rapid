@@ -732,7 +732,7 @@ class RapidTriageOpsTests(unittest.TestCase):
                 payload["benchmark_command_manifest"]["manifest_hash"],
             )
             self.assertIn(payload["release_threshold_profile"]["status"], {"pass", "needs-review"})
-            self.assertEqual(len(payload["release_threshold_profile"]["checks"]), 3)
+            self.assertEqual(len(payload["release_threshold_profile"]["checks"]), 5)
             self.assertFalse(payload["release_threshold_profile"]["trusted_threshold_manifest_attached"])
             self.assertEqual(
                 payload["release_threshold_profile"]["trusted_diff_blocker"],

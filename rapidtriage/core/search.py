@@ -4,7 +4,7 @@ import datetime as dt
 import hashlib
 import json
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +12,7 @@ from .analysis import build_search_analysis
 from .docs import build_preview, extract_text
 from .files import CATEGORY_RULES
 from .forensic_accuracy import build_accuracy_gate
+from .json_stream import JsonStreamError, iter_array_items
 from .search_backend import build_search_backend_contract
 
 IMAGE_EXTS = set(CATEGORY_RULES["images"]["extensions"])
@@ -933,22 +934,26 @@ def search_docs(
     limit: int,
     search_options: Mapping[str, object] | None = None,
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
-    payload = read_json_output(outputs, "docs")
-    if not payload:
+    raw_docs_path = outputs.get("docs")
+    if not raw_docs_path:
+        return [], []
+    docs_path = Path(str(raw_docs_path))
+    if not docs_path.is_file():
         return [], []
     matches = []
     errors: list[dict[str, object]] = []
-    for item in payload.get("extraction_errors", []):
+    plan = build_keyword_match_plan(keywords, search_options=search_options)
+    for item in iter_path_array(docs_path, "extraction_errors"):
         normalized_error = normalize_document_extraction_error(item)
         if normalized_error:
             errors.append(normalized_error)
     skipped_paths = {str(error.get("path", "")) for error in errors if error.get("path")}
     result_index_by_path = {
         str(item.get("path")): index
-        for index, item in enumerate(payload.get("results", []))
+        for index, item in enumerate(iter_path_array(docs_path, "results"))
         if isinstance(item, Mapping) and item.get("path")
     }
-    for index, candidate in enumerate(payload.get("candidates", [])):
+    for index, candidate in enumerate(iter_path_array(docs_path, "candidates")):
         if not isinstance(candidate, Mapping):
             continue
         path = Path(str(candidate.get("path", "")))
@@ -971,7 +976,7 @@ def search_docs(
                 }
             )
             text = ""
-        matched = match_keywords(text, keywords, search_options=search_options)
+        matched = match_keywords(text, keywords, search_options=search_options, plan=plan)
         if not matched:
             continue
         matches.append(
@@ -1019,15 +1024,13 @@ def search_files(
     limit: int,
     search_options: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
-    payload = read_json_output(outputs, "files")
-    if not payload:
-        return []
     matches = []
-    for index, candidate in enumerate(payload.get("candidates", [])):
+    plan = build_keyword_match_plan(keywords, search_options=search_options)
+    for index, candidate in enumerate(iter_output_array(outputs, "files", "candidates")):
         if not isinstance(candidate, Mapping):
             continue
-        haystack = json.dumps(candidate, ensure_ascii=False, sort_keys=True)
-        matched = match_keywords(haystack, keywords, search_options=search_options)
+        haystack = json.dumps(candidate, ensure_ascii=False)
+        matched = match_keywords(haystack, keywords, search_options=search_options, plan=plan)
         if not matched:
             continue
         path = str(candidate.get("path", ""))
@@ -1057,20 +1060,18 @@ def search_artifacts(
     search_options: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     matches = []
+    plan = build_keyword_match_plan(keywords, search_options=search_options)
     for output_name, raw_path in sorted(outputs.items()):
         name = str(output_name)
         if not name.startswith("artifacts_"):
             continue
-        payload = read_json_path(Path(str(raw_path)))
-        if not payload:
-            continue
         artifact_kind = name.removeprefix("artifacts_")
         source = "web" if artifact_kind == "browser" else "artifacts"
-        for index, artifact in enumerate(payload.get("artifacts", [])):
+        for index, artifact in enumerate(iter_path_array(Path(str(raw_path)), "artifacts")):
             if not isinstance(artifact, Mapping):
                 continue
-            haystack = json.dumps(artifact, ensure_ascii=False, sort_keys=True)
-            matched = match_keywords(haystack, keywords, search_options=search_options)
+            haystack = json.dumps(artifact, ensure_ascii=False)
+            matched = match_keywords(haystack, keywords, search_options=search_options, plan=plan)
             if not matched:
                 continue
             path = str(artifact.get("path", ""))
@@ -1100,15 +1101,13 @@ def search_timeline(
     limit: int,
     search_options: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
-    payload = read_json_output(outputs, "timeline")
-    if not payload:
-        return []
     matches = []
-    for index, event in enumerate(payload.get("events", [])):
+    plan = build_keyword_match_plan(keywords, search_options=search_options)
+    for index, event in enumerate(iter_output_array(outputs, "timeline", "events")):
         if not isinstance(event, Mapping):
             continue
-        haystack = json.dumps(event, ensure_ascii=False, sort_keys=True)
-        matched = match_keywords(haystack, keywords, search_options=search_options)
+        haystack = json.dumps(event, ensure_ascii=False)
+        matched = match_keywords(haystack, keywords, search_options=search_options, plan=plan)
         if not matched:
             continue
         matches.append(
@@ -1136,15 +1135,17 @@ def search_indicators(
     limit: int,
     search_options: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
-    payload = read_json_output(outputs, "indicators")
-    if not payload:
+    raw_indicators_path = outputs.get("indicators")
+    if not raw_indicators_path:
         return []
+    indicators_path = Path(str(raw_indicators_path))
     matches = []
-    for index, indicator in enumerate(payload.get("indicators", [])):
+    plan = build_keyword_match_plan(keywords, search_options=search_options)
+    for index, indicator in enumerate(iter_path_array(indicators_path, "indicators")):
         if not isinstance(indicator, Mapping):
             continue
-        haystack = json.dumps(indicator, ensure_ascii=False, sort_keys=True)
-        matched = match_keywords(haystack, keywords, search_options=search_options)
+        haystack = json.dumps(indicator, ensure_ascii=False)
+        matched = match_keywords(haystack, keywords, search_options=search_options, plan=plan)
         if not matched:
             continue
         sources = indicator.get("sources")
@@ -1171,7 +1172,7 @@ def search_indicators(
         remaining_limit = 0 if not limit else limit - len(matches)
         matches.extend(
             search_ioc_scanner_hits(
-                payload,
+                indicators_path,
                 keywords,
                 limit=remaining_limit,
                 search_options=search_options,
@@ -1181,18 +1182,25 @@ def search_indicators(
 
 
 def search_ioc_scanner_hits(
-    payload: Mapping[str, object],
+    payload: Mapping[str, object] | Path,
     keywords: Sequence[str],
     *,
     limit: int,
     search_options: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     matches = []
-    for index, hit in enumerate(payload.get("ioc_scanner_hits", [])):
+    if isinstance(payload, Mapping):
+        hits: Iterable = (
+            item for item in payload.get("ioc_scanner_hits", []) if isinstance(item, Mapping)
+        )
+    else:
+        hits = iter_path_array(Path(str(payload)), "ioc_scanner_hits")
+    plan = build_keyword_match_plan(keywords, search_options=search_options)
+    for index, hit in enumerate(hits):
         if not isinstance(hit, Mapping):
             continue
-        haystack = json.dumps(hit, ensure_ascii=False, sort_keys=True)
-        matched = match_keywords(haystack, keywords, search_options=search_options)
+        haystack = json.dumps(hit, ensure_ascii=False)
+        matched = match_keywords(haystack, keywords, search_options=search_options, plan=plan)
         if not matched:
             continue
         sources = hit.get("sources")
@@ -1227,13 +1235,11 @@ def search_ocr(
     limit: int,
     search_options: Mapping[str, object] | None = None,
 ) -> tuple[list[dict[str, object]], list[dict[str, str]]]:
-    payload = read_json_output(outputs, "files")
-    if not payload:
-        return [], []
     matches = []
     errors: list[dict[str, str]] = []
     sidecar_matched_candidate_indices: set[int] = set()
-    for index, candidate in enumerate(payload.get("candidates", [])):
+    plan = build_keyword_match_plan(keywords, search_options=search_options)
+    for index, candidate in enumerate(iter_output_array(outputs, "files", "candidates")):
         if not isinstance(candidate, Mapping):
             continue
         path = Path(str(candidate.get("path", "")))
@@ -1245,7 +1251,7 @@ def search_ocr(
             except OSError as exc:
                 errors.append({"path": str(sidecar), "error": str(exc)})
                 continue
-            matched = match_keywords(text, keywords, search_options=search_options)
+            matched = match_keywords(text, keywords, search_options=search_options, plan=plan)
             if not matched:
                 continue
             matches.append(
@@ -1277,7 +1283,7 @@ def search_ocr(
             return matches, errors
         return [], [{"path": "", "error": f"OCR dependencies unavailable: {exc}"}]
 
-    for index, candidate in enumerate(payload.get("candidates", [])):
+    for index, candidate in enumerate(iter_output_array(outputs, "files", "candidates")):
         if not isinstance(candidate, Mapping):
             continue
         if index in sidecar_matched_candidate_indices:
@@ -1293,7 +1299,7 @@ def search_ocr(
         except Exception as exc:
             errors.append({"path": str(path), "error": str(exc)})
             continue
-        matched = match_keywords(text, keywords, search_options=search_options)
+        matched = match_keywords(text, keywords, search_options=search_options, plan=plan)
         if not matched:
             continue
         matches.append(
@@ -1357,21 +1363,81 @@ def normalize_keywords(keywords: Sequence[str], *, search_mode: str) -> list[str
     return output
 
 
+def build_keyword_match_plan(
+    keywords: Sequence[str],
+    *,
+    search_options: Mapping[str, object] | None = None,
+) -> list[dict[str, object]]:
+    """Precompute per-keyword match data once per query.
+
+    Stem variants, simple-word checks, and regex compilation depend only
+    on the keyword, not on the row; hoisting them out of the per-row
+    loop avoids repeating that work for every candidate in a large
+    corpus.
+    """
+    options = search_options or {}
+    mode = normalize_search_mode(str(options.get("search_mode") or "exact"))
+    plan: list[dict[str, object]] = []
+    for keyword in keywords:
+        entry: dict[str, object] = {
+            "keyword": keyword,
+            "mode": mode,
+            "lower": keyword if mode == "regex" else keyword.lower(),
+        }
+        if mode == "regex":
+            try:
+                entry["regex"] = re.compile(keyword, flags=re.IGNORECASE | re.MULTILINE)
+            except re.error:
+                entry["regex"] = None
+        elif mode == "fuzzy":
+            entry["max_distance"] = max(0, min(int(options.get("fuzzy_distance") or 1), 2))
+            entry["stems"] = keyword_stems(keyword) if is_simple_word(keyword) else None
+        else:
+            entry["stems"] = keyword_stems(keyword) if is_simple_word(keyword) else None
+        plan.append(entry)
+    return plan
+
+
 def match_keywords(
     text: str,
     keywords: Sequence[str],
     *,
     search_options: Mapping[str, object] | None = None,
+    plan: Sequence[Mapping[str, object]] | None = None,
 ) -> list[str]:
-    options = search_options or {}
-    mode = normalize_search_mode(str(options.get("search_mode") or "exact"))
-    if mode == "regex":
-        return [keyword for keyword in keywords if regex_keyword_matches(text, keyword)]
-    if mode == "fuzzy":
-        max_distance = max(0, min(int(options.get("fuzzy_distance") or 1), 2))
-        return [keyword for keyword in keywords if fuzzy_keyword_matches(text, keyword, max_distance=max_distance)]
-    lower = text.lower()
-    return [keyword for keyword in keywords if exact_or_stem_matches(lower, keyword)]
+    entries = list(plan) if plan is not None else build_keyword_match_plan(keywords, search_options=search_options)
+    lower: str | None = None
+    tokens: set[str] | None = None
+    matched: list[str] = []
+    for entry in entries:
+        keyword = str(entry["keyword"])
+        mode = str(entry["mode"])
+        if mode == "regex":
+            pattern = entry.get("regex")
+            if pattern is not None and pattern.search(text):
+                matched.append(keyword)
+            continue
+        if mode == "fuzzy":
+            if fuzzy_keyword_matches(
+                text,
+                keyword,
+                max_distance=int(entry.get("max_distance") or 1),
+                stems=entry.get("stems"),
+            ):
+                matched.append(keyword)
+            continue
+        if lower is None:
+            lower = text.lower()
+        if str(entry["lower"]) in lower:
+            matched.append(keyword)
+            continue
+        stems = entry.get("stems")
+        if stems:
+            if tokens is None:
+                tokens = set(tokenize_words(lower))
+            if stems & tokens:
+                matched.append(keyword)
+    return matched
 
 
 def regex_keyword_matches(text: str, pattern: str) -> bool:
@@ -1390,13 +1456,19 @@ def exact_or_stem_matches(lower_text: str, keyword: str) -> bool:
     return any(stem in tokens for stem in keyword_stems(keyword))
 
 
-def fuzzy_keyword_matches(text: str, keyword: str, *, max_distance: int) -> bool:
+def fuzzy_keyword_matches(
+    text: str,
+    keyword: str,
+    *,
+    max_distance: int,
+    stems: object = None,
+) -> bool:
     lower = text.lower()
     if exact_or_stem_matches(lower, keyword):
         return True
     if not is_simple_word(keyword):
         return False
-    keyword_variants = keyword_stems(keyword)
+    keyword_variants = stems if isinstance(stems, (set, frozenset)) else keyword_stems(keyword)
     for token in tokenize_words(lower):
         if abs(len(token) - len(keyword)) > max_distance + 1:
             continue
@@ -1742,6 +1814,41 @@ def read_json_output(outputs: Mapping[str, object], name: str) -> Mapping[str, o
     if not raw_path:
         return None
     return read_json_path(Path(str(raw_path)))
+
+
+def iter_output_array(
+    outputs: Mapping[str, object], name: str, member: str
+):
+    """Stream items of a top-level array member of a run output file.
+
+    Run outputs such as files.json or timeline.json can hold hundreds of
+    thousands of rows; iterating them keeps peak RSS bounded to one row
+    instead of materializing the whole payload. Missing files, missing
+    members, and malformed JSON yield an empty iterator rather than
+    raising so a damaged output degrades to zero matches, consistent
+    with ``read_json_output`` returning ``None``.
+    """
+    raw_path = outputs.get(name)
+    if not raw_path:
+        return
+    path = Path(str(raw_path)).expanduser().resolve()
+    if not path.is_file():
+        return
+    try:
+        yield from iter_array_items(path, member)
+    except (JsonStreamError, OSError):
+        return
+
+
+def iter_path_array(path: Path, member: str):
+    """Stream a top-level array member from an explicit JSON path."""
+    path = Path(path).expanduser().resolve()
+    if not path.is_file():
+        return
+    try:
+        yield from iter_array_items(path, member)
+    except (JsonStreamError, OSError):
+        return
 
 
 def read_json_path(path: Path) -> Mapping[str, object] | None:

@@ -14,7 +14,7 @@ from pathlib import Path
 from .docs import write_result
 from .forensic_accuracy import build_accuracy_gate
 from .run import run_triage_mode
-from .search import run_unified_search
+from .search import run_unified_search, stable_search_sha256
 
 DEFAULT_BENCHMARK_FILE_COUNT = 100
 DEFAULT_BENCHMARK_KEYWORD = "password"
@@ -22,6 +22,7 @@ DEFAULT_STRESS_SIZE_TB = (1, 5, 10)
 DEFAULT_BENCHMARK_THRESHOLDS = {
     "search_p95_seconds": 2.0,
     "memory_peak_bytes": 512 * 1024 * 1024,
+    "search_memory_peak_bytes": 512 * 1024 * 1024,
     "records_per_second_min": 25.0,
 }
 BENCHMARK_GAP_ID = "#66"
@@ -108,12 +109,23 @@ def run_benchmark(
     _, peak_memory = tracemalloc.get_traced_memory()
     tracemalloc.stop()
 
+    # Search memory is measured on one traced warm-up pass; the timed
+    # iterations below run untraced so tracemalloc bookkeeping does not
+    # inflate latency (it multiplies allocation-heavy runtime by ~5x).
+    tracemalloc.start()
+    search_payload: dict[str, object] = run_unified_search(
+        run_output_dir, [keyword], include_ocr=False, limit=50
+    )
+    _, search_peak_memory = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+
     search_latencies = []
-    search_payload: dict[str, object] = {}
+    match_hashes = {stable_search_sha256(search_payload.get("matches", []))}
     for _ in range(max(1, search_iterations)):
         started = time.perf_counter()
         search_payload = run_unified_search(run_output_dir, [keyword], include_ocr=False, limit=50)
         search_latencies.append(time.perf_counter() - started)
+        match_hashes.add(stable_search_sha256(search_payload.get("matches", [])))
 
     json_path = output_dir / "rapidtriage-benchmark.json"
     markdown_path = output_dir / "rapidtriage-benchmark.md"
@@ -121,6 +133,8 @@ def run_benchmark(
     metric_values = {
         "ingest_seconds": ingest_seconds,
         "memory_peak_bytes": peak_memory,
+        "search_memory_peak_bytes": search_peak_memory,
+        "search_deterministic": len(match_hashes) == 1,
         "search_p50_seconds": statistics.median(search_latencies),
         "search_p95_seconds": percentile(search_latencies, 95),
         "run_output_size_bytes": sum(db_sizes.values()),
@@ -175,6 +189,8 @@ def run_benchmark(
         "metrics": {
             "ingest_seconds": round(float(metric_values["ingest_seconds"] or 0), 6),
             "memory_peak_bytes": peak_memory,
+            "search_memory_peak_bytes": search_peak_memory,
+            "search_deterministic": bool(metric_values["search_deterministic"]),
             "search_p50_seconds": round(float(metric_values["search_p50_seconds"] or 0), 6),
             "search_p95_seconds": round(float(metric_values["search_p95_seconds"] or 0), 6),
             "search_latency_samples_seconds": [round(value, 6) for value in search_latencies],
@@ -811,6 +827,8 @@ def benchmark_release_threshold_profile(
     active_thresholds = dict(thresholds or DEFAULT_BENCHMARK_THRESHOLDS)
     search_p95 = numeric_value(metrics.get("search_p95_seconds"))
     memory_peak = numeric_value(metrics.get("memory_peak_bytes"))
+    search_memory_peak = numeric_value(metrics.get("search_memory_peak_bytes"))
+    deterministic = metrics.get("search_deterministic")
     records_per_second = numeric_value(metrics.get("records_per_second"))
     checks = [
         {
@@ -826,6 +844,20 @@ def benchmark_release_threshold_profile(
             "threshold": int(active_thresholds["memory_peak_bytes"]),
             "observed": int(memory_peak),
             "status": "pass" if memory_peak <= active_thresholds["memory_peak_bytes"] else "fail",
+        },
+        {
+            "metric": "search_memory_peak_bytes",
+            "operator": "<=",
+            "threshold": int(active_thresholds["search_memory_peak_bytes"]),
+            "observed": int(search_memory_peak),
+            "status": "pass" if search_memory_peak <= active_thresholds["search_memory_peak_bytes"] else "fail",
+        },
+        {
+            "metric": "search_deterministic",
+            "operator": "==",
+            "threshold": True,
+            "observed": bool(deterministic),
+            "status": "pass" if deterministic is True else "fail",
         },
         {
             "metric": "records_per_second",

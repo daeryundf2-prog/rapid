@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
+import tempfile
 import unittest
+from pathlib import Path
 
 from rapidtriage.core.process_bounds import (
     CHILD_TIMEOUT_EXIT_CODE,
@@ -12,6 +15,7 @@ from rapidtriage.core.process_bounds import (
 from rapidtriage.core.release_gates import (
     CAPABILITY_TIERS,
     STATUS_TO_CAPABILITY_TIER,
+    benchmark_evidence_input,
     build_capability_tier_manifest,
     build_known_answer_matrix,
     build_release_gate_manifest,
@@ -126,6 +130,8 @@ class Stage6ReleaseGateManifestTests(unittest.TestCase):
         self.assertIn("tb-scale-runs", manifest["blocked_gate_ids"])
         self.assertIn("installer-signing", manifest["blocked_gate_ids"])
         self.assertIn("independent-human-review", manifest["blocked_gate_ids"])
+        self.assertIn("quantitative-accuracy-thresholds", manifest["blocked_gate_ids"])
+        self.assertIn("quantitative-performance-thresholds", manifest["blocked_gate_ids"])
         self.assertIs(manifest["ready_for_court_report"], False)
         self.assertIs(manifest["commercial_claim_allowed"], False)
         self.assertTrue(manifest["manifest_sha256"])
@@ -145,6 +151,38 @@ class Stage6ReleaseGateManifestTests(unittest.TestCase):
         self.assertEqual(coverage["status"], "executed")
         self.assertNotIn("coverage-measurement", manifest["blocked_gate_ids"])
         self.assertIs(manifest["release_ready"], False)
+
+    def test_benchmark_evidence_input_flips_performance_gate_only_on_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "rapidtriage-benchmark.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "options": {"file_count": 2000},
+                        "release_threshold_profile": {"status": "pass"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            evidence = benchmark_evidence_input(path)
+            self.assertTrue(evidence["executed_evidence"])
+            manifest = build_release_gate_manifest(
+                evidence_inputs={"quantitative-performance-thresholds": evidence}
+            )
+            gate = next(
+                g for g in manifest["gates"] if g["gate_id"] == "quantitative-performance-thresholds"
+            )
+            self.assertEqual(gate["status"], "executed")
+
+            path.write_text(
+                json.dumps({"release_threshold_profile": {"status": "needs-review"}}),
+                encoding="utf-8",
+            )
+            self.assertEqual(benchmark_evidence_input(path)["executed_evidence"], "")
+            self.assertEqual(
+                benchmark_evidence_input(Path(tmp) / "missing.json")["executed_evidence"], ""
+            )
+            self.assertEqual(benchmark_evidence_input("")["executed_evidence"], "")
 
 
 if __name__ == "__main__":

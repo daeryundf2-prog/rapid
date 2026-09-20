@@ -194,6 +194,22 @@ RELEASE_GATE_SLOTS: tuple[dict[str, Any], ...] = (
         "evidence": "trusted/reference tool outputs required",
     },
     {
+        "gate_id": "quantitative-accuracy-thresholds",
+        "status": "blocked-not-executed",
+        "evidence": (
+            "precision/recall/FPR thresholds defined (>=0.995 / >=0.990 / <=0.005) "
+            "but not measured on a known-answer corpus; tier0 synthetic comparator only"
+        ),
+    },
+    {
+        "gate_id": "quantitative-performance-thresholds",
+        "status": "blocked-not-executed",
+        "evidence": (
+            "benchmark emits release_threshold_profile (search p95/memory/determinism) "
+            "but no representative-scale run is attached as evidence"
+        ),
+    },
+    {
         "gate_id": "tb-scale-runs",
         "status": "blocked-external-evidence-required",
         "evidence": "10 TB / 1M-file survival runs not executed",
@@ -298,6 +314,34 @@ def build_known_answer_matrix() -> dict[str, object]:
         json.dumps(matrix_core, sort_keys=True, ensure_ascii=False).encode("utf-8")
     ).hexdigest()
     return matrix_core
+
+
+def benchmark_evidence_input(benchmark_json: object) -> dict[str, object]:
+    """Convert a rapidtriage-benchmark.json path into a release-gate evidence input.
+
+    Fail-closed: returns ``{"executed_evidence": ""}`` unless the file exists and
+    its ``release_threshold_profile.status`` is ``pass``.
+    """
+    from pathlib import Path
+
+    path = Path(str(benchmark_json or "")).expanduser()
+    if not benchmark_json or not path.is_file():
+        return {"executed_evidence": ""}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"executed_evidence": ""}
+    profile = payload.get("release_threshold_profile") if isinstance(payload, Mapping) else None
+    status = str(profile.get("status") or "") if isinstance(profile, Mapping) else ""
+    if status != "pass":
+        return {"executed_evidence": ""}
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    return {
+        "executed_evidence": (
+            f"benchmark {path} sha256={digest} "
+            f"release_threshold_status=pass file_count={payload.get('options', {}).get('file_count')}"
+        )
+    }
 
 
 def build_release_gate_manifest(*, evidence_inputs: Mapping[str, object] | None = None) -> dict[str, object]:
