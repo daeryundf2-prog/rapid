@@ -504,6 +504,12 @@ pulled with a record-level extractor (`D:\devin\extract-nexstin.py`):
 | `Windows.edb` (906 MB, real ESE) | 31/31 tables; **133,725/133,770 rows field-matched** vs dissect.esedb (99.97%) |
 | `SRUDB.dat` (64 MB) | **130,339/130,339 rows, 100% agreement**, IdMap recall 1.0 |
 | `Amcache.hve` | recall 1.0, precision 0.976, SHA1 2,703/2,730 (consistent with BSH) |
+| Jumplists (`AutomaticDestinations`, 9 files) | **14/14 destinations matched** vs `olefile` + LnkParse3 reference (100%); RapidTriage decodes cp949 Korean correctly where LnkParse3 emits mojibake |
+| `Security.evtx` | 9,950 records decoded under the 4 MiB bounded scan; **9,938/9,950 matched** python-evtx on the scanned prefix (12 diffs: timestamp float noise + minor event-ID gaps). 19,394 trusted records sat beyond the scan bound — prefix accuracy, not full-file coverage |
+| `UsrClass.dat` ShellBags (2 hives) | 4,591 + 24 BagMRU entries; **4,590 + 23 paths decoded** via native shellitem chain decode (extension-block UTF-16, GUID, drive-letter, property-store, network/UNC). Residual: 47 items on unsupported variants (0x00/0x78/0x01/0x36 delegates) — surfaced as `unsupported-type`, not silently dropped |
+| PowerShell `ConsoleHost_history.txt` | 194 command records parsed |
+| Scheduled tasks (`System32/Tasks`, 242 XML files) | 242 task records parsed |
+| BITS downloader | `qmgr0.dat` absent on this image; `qmgr.db` (1.8 MB ESE) present — collector correctly reports `not-sqlite-header` and falls back to bounded string inventory; native ESE catalog decodes 6 tables (`Jobs`/`Files` nearly empty — idle queue) |
 
 Windows.edb required extending `ese_native.py` with long-value (LV)
 btree resolution (Separated tagged fields), multi-value parsing, and
@@ -521,6 +527,20 @@ eventually raising `COMPRESS_XPRESS9` on a scheme-byte collision (its
 RapidTriage's emitted LV bytes match the LV header's declared size
 exactly on traced rows. Second reference-tool defect documented
 (regipy duplicate-GUID UserAssist rows was the first).
+
+Security.evtx caveat: the EVTX collector applies `ETL_SCAN_LIMIT`
+(4 MiB) before decoding, so the 9,950-record count is a bounded
+prefix of the 29,344-record file, not full coverage. The bound is
+reported in output; raising it is a performance decision, not a
+correctness gate — the scanned prefix matched at 99.88%.
+
+ShellBags caveat: no independent BagMRU parser is available for
+Windows/Python 3.12 (regipy's plugin needs pyfwsi C bindings;
+dissect.shellitem is too thin), so shellitem decode is validated by
+known-answer filesystem existence only (BSH: 59% exact + 18%
+parent-exists, consistent with deleted/moved-folder persistence).
+The NEXSTIN decode counts confirm the walker, not semantic
+correctness of every path.
 
 ## Release-gate impact
 
