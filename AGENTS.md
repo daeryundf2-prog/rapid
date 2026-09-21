@@ -244,6 +244,14 @@ git diff --check
 git status --short
 ```
 
+Real-evidence engineering measurements (require real image + Sleuth Kit outputs outside Git):
+
+```bash
+python scripts/mft-reference-diff.py --mft <MFT.bin> --ils <ils -e out> --fls <fls -rp out> --output <report.json>
+python scripts/fls-coverage-diff.py --files-json <rapidtriage-files.json> --fls <fls -rp out> --strip-prefix <run-prefix> --output <report.json>
+python scripts/carve-known-answer.py --output-dir <dir> --extract --json
+```
+
 For Windows T1 work, use `docs/validation/windows-t1-execution-runbook.md`, `docs/validation/windows-t1-operator-inputs.md`, and `docs/validation/windows-t1-command-template.ps1.md`. These are preparation documents only; actual E01/Ex01 acquisition, trusted/reference export, and RapidForensic recovery execution require operator approval and external storage outside Git.
 
 Report Engineering Baseline and Release Evidence separately. Release Evidence remains blocked until real external E01/Ex01, Windows, trusted/reference tool, scale, and review records exist.

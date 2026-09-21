@@ -87,6 +87,19 @@ What it does:
 
 This is evidence-metadata extraction for analysis, not acquisition: the image is only read through the tools, and `extraction_status` reports `blocked`/`partial`/`complete` rather than silently omitting failures. A bounded parse is explicitly labeled — it is not a complete $MFT or journal inventory.
 
+### Cross-tool verification (engineering measurement)
+
+When Sleuth Kit is available, the extracted `MFT.bin` can be diffed against TSK's own view of the same image:
+
+```powershell
+fls -rp -o <partition-start-sector> .\case.E01 > fls-recursive.txt
+ils -e -o <partition-start-sector> .\case.E01 > ils-all.txt
+python scripts/mft-reference-diff.py --mft MFT.bin --ils ils-all.txt --fls fls-recursive.txt --output mft-diff-report.json
+python scripts/carve-known-answer.py --output-dir .\carve-ka --extract
+```
+
+`mft-reference-diff.py` reports inode coverage, deleted-entry detection TP/FP/FN vs `ils` allocation flags, reconstructed-path agreement vs `fls`, and `$DATA` size agreement. `carve-known-answer.py` builds a deterministic synthetic corpus (planted files, truncated plants, false-signature plants) and reports carving precision/recall/FPR. Both emit `release_evidence_status: engineering_check_only` — they quantify internal accuracy but are not release evidence without reviewer sign-off and corpus disclosure.
+
 ## Recommended macOS/Linux Workflow
 
 If `libewf` and Sleuth Kit tools are installed:
