@@ -406,6 +406,40 @@ engineering reference, not a recognized trusted tool.
 
 Report: `D:\devin\trusted-ref\srum-diff-report.json`.
 
+## USN journal native decode vs dissect.ntfs (B-series)
+
+`$UsnJrnl:$J` (inode 100727) extracted from the E01 with Sleuth Kit
+`icat`; the 18.5 GB sparse stream carries ~38 MB of live records in the
+tail region (`0x44c000000`+). RapidTriage `parse_usn_record_scan`
+(v2/v3/v4 record decode) was compared against `dissect.ntfs.usnjrnl`
+on the same 38 MB tail (`scripts/usn-reference-diff.py`).
+
+| Metric | Result |
+|--------|--------|
+| Records compared (300k cap) | **300,000 / 300,000** |
+| Full field agreement | **300,000 / 300,000 (1.0)** |
+| Fields compared | record_length, major/minor version, USN, raw FILETIME, file/parent MFT references, reason, source_info, security_id, file_attributes, filename |
+| Raw FILETIME integer diffs | **0** |
+| Filename decode (incl. UTF-16 Korean) | identical |
+
+Note: ISO-8601 rendering differs by ±1µs on ~201k rows (float vs
+integer serialization); the authoritative raw FILETIME integers are
+identical. The journal stream beyond the 38 MB tail is zero-filled
+sparse; full-journal replay and MFT-correlation stay gated.
+
+Report: `D:\devin\trusted-ref\usn-diff-report.json`.
+
+## Recycle Bin $I native decode — paired-payload known-answer
+
+14 real `$I` metadata files decoded from
+`$RECYCLE.BIN\S-1-5-21-…-1001`: version-2 header, declared size,
+FILETIME deletion timestamp, UTF-16LE original path (Korean paths
+decode correctly). 7 `$R` payloads exist in the image; **all 7 paired
+sizes match the `$I`-declared `deleted_file_size` exactly** — a
+self-contained known-answer check on the size field. The remaining 7
+`$I` records have no `$R` in the image (genuine absence, emitted as
+`coverage_status: i-file-only`).
+
 ## Release-gate impact
 
 `quantitative-accuracy-thresholds` stays `blocked`: the gate requires
