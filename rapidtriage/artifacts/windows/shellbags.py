@@ -9,6 +9,7 @@ from pathlib import Path
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 from .common import build_forensic_review
+from .execution import registry_value_data_bytes
 from .registry import (
     MAX_HIVE_CELL_SCAN_BYTES,
     MAX_HIVE_STRING_SCAN_BYTES,
@@ -20,10 +21,13 @@ from .registry import (
     hive_hint_from_path,
     iter_registry_cell_candidates,
     parse_registry_hive_header,
+    registry_subkey_offsets_for_key,
     registry_transaction_log_evidence,
     registry_transaction_replay_profile,
     registry_value_data_preview,
+    registry_value_offsets_for_key,
 )
+from .shellitem import decode_shellitem
 
 PARSER_VERSION = "windows-shellbags-native-v4"
 SHELLBAG_USER_HIVES = {"NTUSER.DAT", "USRCLASS.DAT"}
@@ -43,12 +47,16 @@ SHELLBAG_CAPABILITIES = {
     "bag_id_candidate_extraction": True,
     "node_id_candidate_extraction": True,
     "key_last_write_timestamp_hint": True,
-    "binary_shell_item_decode": False,
+    "binary_shell_item_decode": True,
     "bag_node_relationship_validation": False,
     "transaction_log_replay": False,
     "deleted_slack_shellbag_validation": False,
 }
 MAX_NATIVE_SHELLBAG_CANDIDATES = 200
+MAX_SHELLBAG_CELL_RECORDS = 1_000_000
+MAX_SHELLBAG_DECODE_DEPTH = 64
+MAX_SHELLBAG_DECODE_ENTRIES = 50_000
+MAX_SHELLBAG_VALUE_BYTES = 4 * 1024 * 1024
 
 
 class WindowsShellbagsProvider:
@@ -101,7 +109,7 @@ def collect_native_shellbag_hive(path: Path) -> Iterable[ArtifactRecord]:
     metadata = parse_registry_hive_header(header)
     transaction_log_evidence = registry_transaction_log_evidence(path)
     source_hashes = file_hashes(path)
-    cell_candidates = iter_registry_cell_candidates(blob)
+    cell_candidates = iter_registry_cell_candidates(blob, record_limit=MAX_SHELLBAG_CELL_RECORDS)
     value_by_offset = {
         int(candidate.get("cell_offset") or 0): candidate
         for candidate in cell_candidates
@@ -140,6 +148,14 @@ def collect_native_shellbag_hive(path: Path) -> Iterable[ArtifactRecord]:
             hbin_offset=int(key_details.get("hbin_offset") or 0),
             allocation_status=str(key_details.get("allocation_status") or ""),
         )
+
+    yield from iter_native_shellbag_entries(
+        path,
+        blob,
+        cell_candidates,
+        source_hashes,
+        transaction_log_evidence,
+    )
 
     for string_index, value in enumerate(extract_utf16le_strings(blob)):
         if not is_shellbag_source(value):
@@ -684,6 +700,188 @@ def shellbag_analyst_review_profile(details: Mapping[str, object]) -> dict[str, 
             "decoding, transaction/deleted-state validation, and trusted parser diff evidence."
         ),
     }
+
+
+def _shellbag_entry_record(
+    path: Path,
+    blob: bytes,
+    source_hashes: Mapping[str, str],
+    transaction_log_evidence: Mapping[str, object],
+    *,
+    node_cell: Mapping[str, object],
+    value_cells: Mapping[int, Mapping[str, object]],
+    source_key_path: str,
+    node_key_path: str,
+    shell_path: str,
+    slot_name: str,
+    depth: int,
+    bagmru_root: bool,
+    decoded: Mapping[str, object],
+    item_cell: Mapping[str, object] | None,
+) -> ArtifactRecord:
+    node_slot = None
+    for value_offset in registry_value_offsets_for_key(blob, node_cell):
+        value_cell = value_cells.get(value_offset)
+        if value_cell is None or str(value_cell.get("name") or "") != "NodeSlot":
+            continue
+        raw = registry_value_data_bytes(blob, value_cell, max_size=MAX_SHELLBAG_VALUE_BYTES)
+        if len(raw) >= 4:
+            node_slot = int.from_bytes(raw[:4], "little")
+    return ArtifactRecord(
+        provider="windows-shellbags",
+        artifact_type="shellbag-entry",
+        path=str(path),
+        supported=True,
+        details={
+            "parser": "windows-shellbags-native-hive",
+            "parser_version": PARSER_VERSION,
+            "coverage_status": "native-bagmru-shellitem-decode",
+            "reportability": "review",
+            "source_path": str(path.resolve()),
+            "source_format": "registry-hive",
+            "source_hashes": dict(source_hashes),
+            "hive_name": path.name,
+            "hive_hint": hive_hint_from_path(path),
+            "user_hive_scope": "ntuser" if path.name.upper() == "NTUSER.DAT" else "usrclass",
+            "candidate_source": "native-bagmru-decode",
+            "source_key_path": source_key_path,
+            "node_key_path": node_key_path,
+            "shellbag_section": shellbag_section(source_key_path),
+            "shell_path": shell_path,
+            "slot_name": slot_name,
+            "node_slot": node_slot,
+            "bagmru_root": bagmru_root,
+            "depth": depth,
+            "shellitem": dict(decoded),
+            "shellitem_value_cell_offset": int(item_cell.get("cell_offset") or 0)
+            if item_cell is not None
+            else 0,
+            "key_cell_offset": int(node_cell.get("cell_offset") or 0),
+            "key_last_written_at": str(node_cell.get("last_written_at") or ""),
+            "registry_transaction_log_evidence": dict(transaction_log_evidence),
+            "validation_checks": {
+                "key_cell_parsed": True,
+                "shellitem_value_present": bagmru_root or item_cell is not None,
+                "shellitem_decoded": bagmru_root
+                or (bool(str(decoded.get("name") or ""))
+                    and str(decoded.get("decode_method") or "") != "unresolved"),
+            },
+            "commercial_grade_ready": False,
+            "commercial_grade_blockers": list(SHELLBAG_BLOCKERS),
+        },
+    )
+
+
+def _shellbag_key_cell_path(
+    key_cells: Mapping[int, Mapping[str, object]],
+    cell: Mapping[str, object],
+) -> str:
+    parts: list[str] = []
+    seen: set[int] = set()
+    current: Mapping[str, object] | None = cell
+    while current is not None:
+        offset = int(current.get("cell_offset") or 0)
+        if offset in seen:
+            break
+        seen.add(offset)
+        name = str(current.get("name") or "")
+        if name:
+            parts.append(name)
+        current = key_cells.get(int(current.get("parent_cell_offset") or 0))
+    return "\\".join(reversed(parts))
+
+
+def iter_native_shellbag_entries(
+    path: Path,
+    blob: bytes,
+    cell_candidates: Sequence[Mapping[str, object]],
+    source_hashes: Mapping[str, str],
+    transaction_log_evidence: Mapping[str, object],
+) -> Iterable[ArtifactRecord]:
+    """Walk BagMRU key trees and decode each node's shellitem into a path."""
+    key_cells = {
+        int(candidate.get("cell_offset") or 0): candidate
+        for candidate in cell_candidates
+        if candidate.get("cell_kind") == "key-node"
+    }
+    value_cells = {
+        int(candidate.get("cell_offset") or 0): candidate
+        for candidate in cell_candidates
+        if candidate.get("cell_kind") == "value"
+    }
+    emitted = 0
+    for root_cell in sorted(key_cells.values(), key=lambda item: int(item.get("cell_offset") or 0)):
+        if emitted >= MAX_SHELLBAG_DECODE_ENTRIES:
+            return
+        if str(root_cell.get("name") or "").lower() != "bagmru":
+            continue
+        source_key_path = _shellbag_key_cell_path(key_cells, root_cell)
+        if not is_shellbag_source(source_key_path):
+            continue
+        yield _shellbag_entry_record(
+            path,
+            blob,
+            source_hashes,
+            transaction_log_evidence,
+            node_cell=root_cell,
+            value_cells=value_cells,
+            source_key_path=source_key_path,
+            node_key_path=source_key_path,
+            shell_path="",
+            slot_name="",
+            depth=0,
+            bagmru_root=True,
+            decoded={},
+            item_cell=None,
+        )
+        emitted += 1
+        queue: list[tuple[Mapping[str, object], str, int, str]] = [
+            (root_cell, "", 0, source_key_path)
+        ]
+        while queue and emitted < MAX_SHELLBAG_DECODE_ENTRIES:
+            node_cell, parent_shell_path, depth, node_key_path = queue.pop(0)
+            if depth > MAX_SHELLBAG_DECODE_DEPTH:
+                continue
+            value_by_name: dict[str, Mapping[str, object]] = {}
+            for value_offset in registry_value_offsets_for_key(blob, node_cell):
+                value_cell = value_cells.get(value_offset)
+                if value_cell is not None:
+                    value_by_name[str(value_cell.get("name") or "")] = value_cell
+            for child_offset in registry_subkey_offsets_for_key(blob, node_cell):
+                child_cell = key_cells.get(child_offset)
+                if child_cell is None:
+                    continue
+                slot_name = str(child_cell.get("name") or "")
+                item_cell = value_by_name.get(slot_name)
+                item_blob = (
+                    registry_value_data_bytes(blob, item_cell, max_size=MAX_SHELLBAG_VALUE_BYTES)
+                    if item_cell is not None
+                    else b""
+                )
+                decoded = decode_shellitem(item_blob) if item_blob else {}
+                item_name = (str(decoded.get("name") or "") or f"<slot-{slot_name}>").rstrip("\\")
+                child_shell_path = (
+                    f"{parent_shell_path}\\{item_name}" if parent_shell_path else item_name
+                )
+                child_key_path = f"{node_key_path}\\{slot_name}"
+                yield _shellbag_entry_record(
+                    path,
+                    blob,
+                    source_hashes,
+                    transaction_log_evidence,
+                    node_cell=child_cell,
+                    value_cells=value_cells,
+                    source_key_path=source_key_path,
+                    node_key_path=child_key_path,
+                    shell_path=child_shell_path,
+                    slot_name=slot_name,
+                    depth=depth + 1,
+                    bagmru_root=False,
+                    decoded=decoded,
+                    item_cell=item_cell,
+                )
+                emitted += 1
+                queue.append((child_cell, child_shell_path, depth + 1, child_key_path))
 
 
 def is_shellbag_source(value: str) -> bool:

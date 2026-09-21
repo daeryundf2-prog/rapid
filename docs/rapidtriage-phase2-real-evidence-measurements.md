@@ -440,6 +440,44 @@ self-contained known-answer check on the size field. The remaining 7
 `$I` records have no `$R` in the image (genuine absence, emitted as
 `coverage_status: i-file-only`).
 
+## ShellBags native BagMRU/shellitem decode — known-answer (B-series)
+
+`collect_native_shellbag_hive` previously emitted key-tree/string-pivot
+candidates only, and its bounded cell scan (500 records) truncated the
+BagMRU subtree entirely on the real 8.6 MB `UsrClass.dat` (54,421 cells,
+14,963 key nodes). A native BagMRU walk was added: key-cell parent links
+locate `Shell\BagMRU` / `ShellNoRoam\BagMRU` roots, each child slot's
+shellitem is read from the parent's numbered value, and a bounded
+SHITEMID decoder (`rapidtriage/artifacts/windows/shellitem.py`) resolves
+names per item class.
+
+Real-evidence result on `Users\user\...\UsrClass.dat` (SHA-hashed,
+`shellitem_value_cell_offset`/`key_cell_offset` provenance per row):
+
+| Metric | Value |
+|---|---|
+| `shellbag-entry` rows | 1,225 (1 BagMRU root + 1,224 nodes) |
+| `extension-block-utf16` (fs long name) | 1,038 |
+| `guid` (known folder CLSID) | 46 |
+| `property-store-utf16` (1SPS items) | 43 |
+| `network-ansi` (0xc3 UNC items) | 9 |
+| `drive-letter` | 7 |
+| `unsupported-type` / `unresolved` | 78 / 2 |
+
+Known-answer check (`scripts/shellbags-known-answer.py`): of 177 decoded
+paths anchored at `C:\`, **105 resolve to real paths in the extracted
+image (59.3%) and 31 more have an existing parent**. Missing paths are
+coherent deleted-folder names (e.g. `C:\pgsql\bin`,
+`Downloads\nanum-all\나눔 글꼴\나눔고딕`), not decode artifacts — ShellBags
+persist folders deleted after browsing, so <100% existence is expected.
+
+No independent BagMRU parser comparison was possible: regipy's ShellBags
+plugins require `pyfwsi` (libyal C bindings, not installable on this
+Windows/py3.12 environment) and `dissect.shellitem` covers only LNK
+IDList containers. `trusted ShellBags parser diff is required` and the
+other family blockers therefore remain; decoded paths are triage
+pivots, not report-grade folder-access testimony.
+
 ## Release-gate impact
 
 `quantitative-accuracy-thresholds` stays `blocked`: the gate requires

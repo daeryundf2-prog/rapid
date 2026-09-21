@@ -102,6 +102,7 @@ from rapidtriage.artifacts.windows.search_index import (
 from rapidtriage.artifacts.windows.shellbags import (
     WindowsShellbagsProvider,
     build_shellbag_trusted_diff,
+    collect_native_shellbag_hive,
     shellbag_core_accuracy_gates,
 )
 from rapidtriage.artifacts.windows.srum_ese import build_srum_row_candidates
@@ -115,6 +116,7 @@ from tests.windows_artifact_fixtures import (
     build_minimal_shellbags_registry_hive,
     build_minimal_usn_journal,
     build_minimal_usn_journal_v3,
+    build_shellbag_decode_registry_hive,
 )
 
 FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "rapidtriage" / "windows_artifacts"
@@ -4301,7 +4303,7 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             )
             self.assertFalse(key_tree.details["commercial_grade_ready"])
             self.assertIn("#15", key_tree.details["shellbag_report_grade_assessment"]["commercial_gap_ids"])
-            self.assertFalse(key_tree.details["shellbag_native_capabilities"]["binary_shell_item_decode"])
+            self.assertTrue(key_tree.details["shellbag_native_capabilities"]["binary_shell_item_decode"])
             self.assertIn("requires_dedicated_shellbags_parser", key_tree.details["validation_checks"])
             shellbag_gate = key_tree.details["core_accuracy_gates"][0]
             self.assertEqual(shellbag_gate["gap_id"], "#15")
@@ -4347,7 +4349,7 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                 shellbag_manifest["activity_timestamps"]["primary_timestamp"],
                 "2024-04-02T03:04:05+00:00",
             )
-            self.assertFalse(shellbag_manifest["binary_payload"]["binary_shell_item_decode_capability"])
+            self.assertTrue(shellbag_manifest["binary_payload"]["binary_shell_item_decode_capability"])
             self.assertEqual(
                 shellbag_manifest["transaction_and_deleted_state"]["transaction_log_status"],
                 "present-not-replayed",
@@ -4370,6 +4372,32 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertEqual(
                 key_tree.details["shellbag_depth_manifest_hash"],
                 shellbag_manifest["manifest_sha256"],
+            )
+
+    def test_shellbags_native_bagmru_decode_emits_shell_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            hive_path = Path(tmp_dir) / "UsrClass.dat"
+            hive_path.write_bytes(
+                build_shellbag_decode_registry_hive(
+                    datetime(2024, 4, 2, 3, 4, 5, tzinfo=timezone.utc),
+                )
+            )
+            records = list(collect_native_shellbag_hive(hive_path))
+            entries = [record for record in records if record.artifact_type == "shellbag-entry"]
+
+            self.assertTrue(entries)
+            root = next(record for record in entries if record.details["bagmru_root"])
+            self.assertEqual(root.details["source_key_path"], "Shell\\BagMRU")
+            child = next(record for record in entries if not record.details["bagmru_root"])
+            self.assertEqual(child.details["shell_path"], "My Computer")
+            self.assertEqual(child.details["slot_name"], "0")
+            self.assertEqual(child.details["shellitem"]["decode_method"], "guid")
+            self.assertGreater(child.details["shellitem_value_cell_offset"], 0)
+            self.assertTrue(child.details["validation_checks"]["shellitem_decoded"])
+            self.assertFalse(child.details["commercial_grade_ready"])
+            self.assertIn(
+                "trusted ShellBags parser diff is required",
+                child.details["commercial_grade_blockers"],
             )
 
     def test_registry_hive_reconstructs_native_key_and_value_links(self) -> None:

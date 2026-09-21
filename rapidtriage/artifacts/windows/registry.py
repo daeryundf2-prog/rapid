@@ -3534,7 +3534,11 @@ def suspicious_value_flags(value: str) -> list[str]:
     return [f"suspicious-value:{term}" for term in SUSPICIOUS_VALUE_TERMS if term in lowered]
 
 
-def iter_registry_cell_candidates(blob: bytes) -> list[dict[str, object]]:
+def iter_registry_cell_candidates(
+    blob: bytes,
+    *,
+    record_limit: int = MAX_HIVE_CELL_RECORDS,
+) -> list[dict[str, object]]:
     scan_blob = blob[:MAX_HIVE_CELL_SCAN_BYTES]
     candidates: list[dict[str, object]] = []
     seen_offsets: set[int] = set()
@@ -3543,7 +3547,7 @@ def iter_registry_cell_candidates(blob: bytes) -> list[dict[str, object]]:
         hbin_size = int(hbin.get("hbin_size") or 0)
         cursor = hbin_offset + HIVE_BIN_HEADER_SIZE
         hbin_end = min(len(scan_blob), hbin_offset + hbin_size)
-        while cursor + 8 <= hbin_end and len(candidates) < MAX_HIVE_CELL_RECORDS:
+        while cursor + 8 <= hbin_end and len(candidates) < record_limit:
             cell_size_raw = read_i32(scan_blob, cursor)
             cell_size = abs(cell_size_raw)
             if cell_size < 8 or cell_size > MAX_HIVE_CELL_SIZE:
@@ -3570,7 +3574,7 @@ def iter_registry_cell_candidates(blob: bytes) -> list[dict[str, object]]:
 
     for signature in (b"nk", b"vk"):
         cursor = 0
-        while len(candidates) < MAX_HIVE_CELL_RECORDS:
+        while len(candidates) < record_limit:
             signature_offset = scan_blob.find(signature, cursor)
             if signature_offset < 0:
                 break

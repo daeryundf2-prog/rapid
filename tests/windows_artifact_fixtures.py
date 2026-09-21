@@ -1050,6 +1050,87 @@ def build_minimal_shellbags_registry_hive(timestamp: datetime, embedded_name: st
     return bytes(header) + bytes(hbin)
 
 
+def build_shellbag_decode_registry_hive(
+    timestamp: datetime,
+    embedded_name: str = "UsrClass.dat",
+    shellitem_blob: bytes = bytes.fromhex("14001f50e04fd020ea3a6910a2d808002b30309d0000"),
+) -> bytes:
+    """Hive with a BagMRU root, one slot child, and a real GUID shellitem."""
+    header = bytearray(4096)
+    header[0:4] = b"regf"
+    header[4:8] = (11).to_bytes(4, "little")
+    header[8:12] = (11).to_bytes(4, "little")
+    header[12:20] = datetime_to_filetime(timestamp).to_bytes(8, "little")
+    header[20:24] = (1).to_bytes(4, "little")
+    header[24:28] = (5).to_bytes(4, "little")
+    header[36:40] = (32).to_bytes(4, "little")
+    header[40:44] = (4096).to_bytes(4, "little")
+    header[44:48] = (1).to_bytes(4, "little")
+    header[48:112] = embedded_name.encode("utf-16le")[:64].ljust(64, b"\x00")
+    header[508:512] = (0x12345678).to_bytes(4, "little")
+
+    root_relative_offset = 32
+    root_size = _registry_cell_size(0x4C + len(b"Shell"))
+    subkey_list_relative_offset = root_relative_offset + root_size
+    subkey_list_size = _registry_cell_size(12)
+    bagmru_relative_offset = subkey_list_relative_offset + subkey_list_size
+    bagmru_size = _registry_cell_size(0x4C + len(b"BagMRU"))
+    bag_subkey_list_relative_offset = bagmru_relative_offset + bagmru_size
+    bag_subkey_list_size = _registry_cell_size(12)
+    child_relative_offset = bag_subkey_list_relative_offset + bag_subkey_list_size
+    child_size = _registry_cell_size(0x4C + len(b"0"))
+    value_list_relative_offset = child_relative_offset + child_size
+    value_list_size = _registry_cell_size(4)
+    vk_relative_offset = value_list_relative_offset + value_list_size
+    vk_size = _registry_cell_size(20 + len(b"0"))
+    data_relative_offset = vk_relative_offset + vk_size
+
+    cell_payload = b"".join(
+        [
+            build_registry_nk_cell(
+                "Shell",
+                timestamp,
+                allocated=True,
+                stable_subkey_count=1,
+                stable_subkey_list_relative_offset=subkey_list_relative_offset,
+            ),
+            build_registry_subkey_list_cell([bagmru_relative_offset]),
+            build_registry_nk_cell(
+                "BagMRU",
+                timestamp,
+                allocated=True,
+                parent_relative_offset=root_relative_offset,
+                stable_subkey_count=1,
+                stable_subkey_list_relative_offset=bag_subkey_list_relative_offset,
+                value_count=1,
+                value_list_relative_offset=value_list_relative_offset,
+            ),
+            build_registry_subkey_list_cell([child_relative_offset]),
+            build_registry_nk_cell(
+                "0",
+                timestamp,
+                allocated=True,
+                parent_relative_offset=bagmru_relative_offset,
+            ),
+            build_registry_value_list_cell([vk_relative_offset]),
+            build_registry_vk_cell(
+                "0",
+                allocated=True,
+                value_type=3,
+                external_data_relative_offset=data_relative_offset,
+                external_data_size=len(shellitem_blob),
+            ),
+            _registry_cell(shellitem_blob, allocated=True),
+        ]
+    )
+    hbin = bytearray(4096)
+    hbin[0:4] = b"hbin"
+    hbin[4:8] = (0).to_bytes(4, "little")
+    hbin[8:12] = len(hbin).to_bytes(4, "little")
+    hbin[32 : 32 + min(len(cell_payload), len(hbin) - 32)] = cell_payload[: len(hbin) - 32]
+    return bytes(header) + bytes(hbin)
+
+
 def rot13(value: str) -> str:
     result = []
     for char in value:
