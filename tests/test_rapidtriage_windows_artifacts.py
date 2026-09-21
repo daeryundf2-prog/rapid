@@ -21,6 +21,7 @@ from rapidtriage.artifacts.windows.os_account import build_os_account_trusted_di
 from rapidtriage.artifacts.windows.system import web_request_basename_sources
 from rapidtriage.cli import main
 from tests.windows_artifact_fixtures import (
+    build_chunk_template_evtx,
     build_corrupt_evtx_record_candidate,
     build_evtx_with_checked_chunk,
     build_evtx_with_slack_record,
@@ -2403,6 +2404,43 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                     and item["text"] == "powershell -enc TemplateValue"
                     for item in native_evtx["details"]["evtx_binxml"]["value_fields"]
                 )
+            )
+
+    def test_eventlog_collector_decodes_chunk_referenced_template_system_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            evtx_path = root / "Windows" / "System32" / "winevt" / "Logs" / "ChunkRef.evtx"
+            evtx_path.parent.mkdir(parents=True, exist_ok=True)
+            evtx_path.write_bytes(
+                build_chunk_template_evtx(
+                    record_id=890,
+                    timestamp=datetime(2024, 4, 3, 3, 4, 5, tzinfo=timezone.utc),
+                    command="powershell -enc ChunkReferenced",
+                )
+            )
+            output = root / "eventlog.json"
+
+            self.assertEqual(main(["artifacts", str(root), "--kind", "eventlog", "--output", str(output)]), 0)
+            artifacts = json.loads(output.read_text(encoding="utf-8"))["artifacts"]
+            native_evtx = next(
+                item
+                for item in artifacts
+                if item["artifact_type"] == "eventlog-event"
+                and item["details"]["parser"] == "windows-eventlog-evtx-native"
+            )
+            details = native_evtx["details"]
+
+            self.assertEqual(details["evtx_system_decode"]["status"], "decoded")
+            self.assertEqual(details["record_id"], "890")
+            self.assertEqual(details["event_id"], "4104")
+            self.assertEqual(details["provider_name"], "Microsoft-Windows-PowerShell")
+            self.assertEqual(details["channel"], "Microsoft-Windows-PowerShell/Operational")
+            self.assertEqual(details["computer"], "TEST-CHUNK-HOST")
+            self.assertEqual(details["binxml_system_fields"]["EventID"], "4104")
+            self.assertEqual(details["binxml_system_fields"]["Computer"], "TEST-CHUNK-HOST")
+            self.assertEqual(
+                details["binxml_event_data_fields"]["CommandLine"],
+                "powershell -enc ChunkReferenced",
             )
 
     def test_eventlog_collector_labels_native_evtx_slack_records(self) -> None:

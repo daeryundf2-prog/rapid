@@ -1536,6 +1536,24 @@ def collect_native_evtx_events(
                 timestamp = filetime_to_iso(read_u64(record_blob, 16))
                 payload = record_blob[EVTX_RECORD_HEADER_SIZE:]
                 binxml = parse_native_evtx_binxml(payload)
+                chunk_offset = (
+                    EVTX_FILE_HEADER_SIZE
+                    + ((offset - EVTX_FILE_HEADER_SIZE) // EVTX_CHUNK_SIZE) * EVTX_CHUNK_SIZE
+                    if offset >= EVTX_FILE_HEADER_SIZE
+                    else 0
+                )
+                chunk_data = blob[chunk_offset : min(len(blob), chunk_offset + EVTX_CHUNK_SIZE)]
+                system_decode = decode_evtx_system_section(chunk_data, offset - chunk_offset)
+                decoded_fields = system_decode.get("value_fields")
+                if isinstance(decoded_fields, list) and decoded_fields:
+                    existing_fields = binxml.get("value_fields")
+                    binxml = {
+                        **binxml,
+                        "value_fields": [
+                            *decoded_fields,
+                            *(existing_fields if isinstance(existing_fields, list) else []),
+                        ],
+                    }
                 grammar_profile = native_evtx_binxml_grammar_coverage_profile(binxml)
                 binxml_promoted = native_evtx_promoted_fields(binxml)
                 extracted_strings = extract_utf16le_strings(payload)
@@ -1590,6 +1608,11 @@ def collect_native_evtx_events(
                     "binxml_event_data_sequence": list(binxml_promoted.get("event_data_sequence") or []),
                     "binxml_event_data_values_by_name": dict(binxml_promoted.get("event_data_values_by_name") or {}),
                     "binxml_user_data_fields": dict(binxml_promoted.get("user_data_fields") or {}),
+                    "evtx_system_decode": {
+                        key: value
+                        for key, value in system_decode.items()
+                        if key != "value_fields"
+                    },
                     "evtx_file_header": native_evtx_file_header(blob),
                     "evtx_chunk_context": chunk_context,
                     "evtx_record_offset": offset,
@@ -4794,9 +4817,12 @@ def walk_evtx_template_definition(
     Walks the template definition tree that follows a TemplateNode header.
     Names are resolved through the chunk string heap; substitution tokens
     (0x0D normal / 0x0E conditional) record the element or attribute path
-    they replace.
+    they replace. Literal value tokens are collected separately because
+    templates can bake constant text (for example ``<Computer>``) into the
+    definition itself.
     """
     mapping: dict[int, str] = {}
+    static_values: dict[str, str] = {}
     warnings: list[str] = []
     stack: list[str] = []
     pending_attribute = ""
@@ -4835,6 +4861,11 @@ def walk_evtx_template_definition(
             continue
         if kind == 0x05:
             detail = read_inline_binxml_value_detail(chunk_data, offset)
+            text = str(detail.get("text") or "")
+            if text and stack and not isinstance(detail.get("nested_binxml"), Mapping):
+                base = "/".join(stack)
+                path = f"{base}/@{pending_attribute}" if pending_attribute else base
+                static_values.setdefault(path, text)
             pending_attribute = ""
             offset = int(detail.get("next_offset") or offset + 2)
             continue
@@ -4858,7 +4889,7 @@ def walk_evtx_template_definition(
         break
     if guard >= MAX_NATIVE_EVTX_BINXML_TOKENS:
         warnings.append("definition-token-budget-exhausted")
-    return mapping, warnings
+    return mapping, static_values, warnings
 
 
 def decode_evtx_system_section(chunk_data: bytes, record_chunk_offset: int) -> dict[str, object]:
@@ -4892,8 +4923,19 @@ def decode_evtx_system_section(chunk_data: bytes, record_chunk_offset: int) -> d
     if data_length <= 0 or template_offset + 24 + data_length > len(chunk_data):
         result["status"] = "template-length-out-of-bounds"
         return result
-    mapping, warnings = walk_evtx_template_definition(chunk_data, template_offset + 24, data_length)
-    values_offset = payload_offset + 4 + 10 + 24 + data_length
+    mapping, static_values, warnings = walk_evtx_template_definition(
+        chunk_data, template_offset + 24, data_length
+    )
+    # Records carry two TemplateInstance layouts: the first record using a
+    # template embeds the definition inline (u32 0 marker, then a 24-byte
+    # template-entry header + definition); later records reference the chunk
+    # template table and store the substitution value count directly.
+    values_cursor = payload_offset + 14
+    values_offset = values_cursor
+    if values_cursor + 24 <= len(chunk_data) and read_u32(chunk_data, values_cursor) == 0:
+        inline_length = read_u32(chunk_data, values_cursor + 20)
+        if 0 < inline_length <= len(chunk_data) - (values_cursor + 24):
+            values_offset = values_cursor + 24 + inline_length
     values, _, value_warnings = read_binxml_template_values(chunk_data, values_offset)
     result["warnings"] = [*warnings, *value_warnings]
     value_fields: list[dict[str, object]] = []
@@ -4915,8 +4957,24 @@ def decode_evtx_system_section(chunk_data: bytes, record_chunk_offset: int) -> d
                 "confidence": "binxml-template-substitution-named",
             }
         )
+    for path, text in static_values.items():
+        if not path.startswith("Event/System/"):
+            continue
+        value_fields.append(
+            {
+                "element": path.split("/")[-1],
+                "element_path": path,
+                "text": text,
+                "value": text,
+                "value_type": "StringType",
+                "confidence": "binxml-template-static-text",
+            }
+        )
     result["value_fields"] = value_fields[:200]
-    result["substitution_count"] = len(value_fields)
+    result["static_field_count"] = len(static_values)
+    result["substitution_count"] = sum(
+        1 for row in value_fields if row.get("confidence") == "binxml-template-substitution-named"
+    )
     promoted = native_evtx_promoted_fields({"value_fields": value_fields})
     system_fields = promoted.get("system_fields")
     result["system_fields"] = system_fields if isinstance(system_fields, Mapping) else {}

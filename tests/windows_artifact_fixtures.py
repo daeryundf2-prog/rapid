@@ -609,6 +609,132 @@ def _fixture_crc32(value: bytes) -> int:
     return zlib.crc32(value) & 0xFFFFFFFF
 
 
+def _evtx_chunk_name_node(text: str) -> bytes:
+    return (b"\x00" * 6) + len(text).to_bytes(2, "little") + text.encode("utf-16le") + b"\x00\x00"
+
+
+def _evtx_tpl_start(definition: bytearray, chunk_base: int, name: str) -> None:
+    position = chunk_base + len(definition)
+    definition += (
+        b"\x01"
+        + b"\x00\x00"
+        + b"\x00\x00\x00\x00"
+        + (position + 11).to_bytes(4, "little")
+        + _evtx_chunk_name_node(name)
+    )
+
+
+def _evtx_tpl_end(definition: bytearray) -> None:
+    definition += b"\x04"
+
+
+def _evtx_tpl_sub(definition: bytearray, index: int, value_type: int = 0x01) -> None:
+    definition += b"\x0d" + index.to_bytes(2, "little") + bytes([value_type])
+
+
+def _evtx_tpl_static_text(definition: bytearray, text: str) -> None:
+    definition += b"\x05\x01" + len(text).to_bytes(2, "little") + text.encode("utf-16le")
+
+
+def build_chunk_template_evtx(record_id: int, timestamp: datetime, command: str) -> bytes:
+    """EVTX whose record references a chunk template-table entry.
+
+    Exercises the referenced-TemplateInstance layout: the record stores only
+    a chunk template offset plus substitution values, while the template
+    definition (element names, static ``<Computer>`` text) lives in the
+    chunk's template region.
+    """
+    template_offset = 2000
+    definition = bytearray(b"\x0f\x01\x01\x00")
+    chunk_base = template_offset + 24
+    _evtx_tpl_start(definition, chunk_base, "Event")
+    _evtx_tpl_start(definition, chunk_base, "System")
+    _evtx_tpl_start(definition, chunk_base, "EventID")
+    _evtx_tpl_sub(definition, 0, 0x06)
+    _evtx_tpl_end(definition)
+    _evtx_tpl_start(definition, chunk_base, "ProviderName")
+    _evtx_tpl_sub(definition, 1)
+    _evtx_tpl_end(definition)
+    _evtx_tpl_start(definition, chunk_base, "Channel")
+    _evtx_tpl_sub(definition, 2)
+    _evtx_tpl_end(definition)
+    _evtx_tpl_start(definition, chunk_base, "Computer")
+    _evtx_tpl_static_text(definition, "TEST-CHUNK-HOST")
+    _evtx_tpl_end(definition)
+    _evtx_tpl_end(definition)
+    _evtx_tpl_start(definition, chunk_base, "EventData")
+    _evtx_tpl_start(definition, chunk_base, "CommandLine")
+    _evtx_tpl_sub(definition, 3)
+    _evtx_tpl_end(definition)
+    _evtx_tpl_end(definition)
+    _evtx_tpl_end(definition)
+    definition += b"\x00"
+
+    template_entry = (
+        (0).to_bytes(4, "little")
+        + bytes.fromhex("00112233445566778899aabbccddeeff")
+        + len(definition).to_bytes(4, "little")
+        + bytes(definition)
+    )
+
+    provider = "Microsoft-Windows-PowerShell"
+    channel = "Microsoft-Windows-PowerShell/Operational"
+    value_blobs = [
+        (4104).to_bytes(2, "little"),
+        provider.encode("utf-16le"),
+        channel.encode("utf-16le"),
+        command.encode("utf-16le"),
+    ]
+    value_types = [0x06, 0x01, 0x01, 0x01]
+    descriptors = b"".join(
+        len(blob).to_bytes(2, "little") + bytes([value_types[index], 0])
+        for index, blob in enumerate(value_blobs)
+    )
+    values_region = (
+        len(value_blobs).to_bytes(4, "little") + descriptors + b"".join(value_blobs)
+    )
+    payload = (
+        b"\x0f\x01\x01\x00"
+        + b"\x0c\x01"
+        + bytes.fromhex("00112233")
+        + template_offset.to_bytes(4, "little")
+        + values_region
+    )
+    size = 28 + len(payload)
+    record = (
+        b"**\x00\x00"
+        + size.to_bytes(4, "little")
+        + record_id.to_bytes(8, "little")
+        + datetime_to_filetime(timestamp).to_bytes(8, "little")
+        + payload
+        + size.to_bytes(4, "little")
+    )
+
+    chunk = bytearray(65536)
+    chunk[0:8] = b"ElfChnk\x00"
+    chunk[8:16] = record_id.to_bytes(8, "little")
+    chunk[16:24] = record_id.to_bytes(8, "little")
+    chunk[24:32] = record_id.to_bytes(8, "little")
+    chunk[32:40] = record_id.to_bytes(8, "little")
+    record_chunk_offset = 512
+    free_space_offset = record_chunk_offset + len(record)
+    chunk[40:44] = record_chunk_offset.to_bytes(4, "little")
+    chunk[44:48] = free_space_offset.to_bytes(4, "little")
+    chunk[48:52] = free_space_offset.to_bytes(4, "little")
+    chunk[record_chunk_offset:free_space_offset] = record
+    chunk[template_offset : template_offset + len(template_entry)] = template_entry
+
+    header = bytearray(4096)
+    header[0:8] = b"ElfFile\x00"
+    header[24:32] = (record_id + 1).to_bytes(8, "little")
+    header[32:36] = (4096).to_bytes(4, "little")
+    header[36:38] = (1).to_bytes(2, "little")
+    header[38:40] = (3).to_bytes(2, "little")
+    header[40:42] = (4096).to_bytes(2, "little")
+    header[42:44] = (1).to_bytes(2, "little")
+    return bytes(header) + bytes(chunk)
+
+
 def build_corrupt_evtx_record_candidate(record_id: int, timestamp: datetime, strings: list[str]) -> bytes:
     blob = bytearray(build_minimal_evtx(record_id, timestamp, strings))
     declared_size = len(blob) - 4096 + 2048
