@@ -4,16 +4,17 @@
 # dependencies = ["dissect.esedb>=3.10"]
 # ///
 # --- How to run ---
-#   uv run scripts/srum-reference-diff.py --srudb <SRUDB.dat> --output <report.json> --json
+#   uv run scripts/windows-edb-reference-diff.py --edb <Windows.edb> --output <report.json> --json
 #
 # Compares RapidTriage's native ESE decode (ese_native.py: header,
 # catalog, page/tag/node walk, fixed/variable/tagged record fields)
-# against dissect.esedb's independent row decode on the same SRUDB.dat.
+# against dissect.esedb's independent row decode on the same
+# Windows.edb search index.
 #
-# Metrics: per-table row counts, canonical row-multiset equality
-# (field-level agreement per decoded row), and SruDbIdMapTable
-# IdIndex -> identity recall. Rows are compared as canonical JSON
-# multisets because neither side exposes a stable cross-parser key.
+# Metrics: per-table row counts and canonical row-multiset equality
+# (field-level agreement per decoded row). Rows are compared as
+# canonical JSON multisets because neither side exposes a stable
+# cross-parser key.
 #
 # Engineering measurement only; dissect.esedb is not in the
 # recognized trusted-tool list, so results stay
@@ -43,7 +44,6 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from rapidtriage.artifacts.windows.ese_native import EseDatabase
-from rapidtriage.artifacts.windows.srum_ese import decode_srudb_ese_catalog
 
 MAX_COMPARE_ROWS_PER_TABLE = 250_000
 
@@ -97,7 +97,6 @@ def rapid_side(path: Path) -> dict[str, object]:
     blob = path.read_bytes()
     db = EseDatabase(blob)
     tables: dict[str, dict[str, object]] = {}
-    idmap: dict[int, str] = {}
     for table in db.tables:
         column_names = [column.name for column in table.columns]
         datetime_columns = {column.name for column in table.columns if column.coltyp == 8}
@@ -110,16 +109,9 @@ def rapid_side(path: Path) -> dict[str, object]:
                 break
             rows[canon_row(row, column_names, datetime_columns)] += 1
             count += 1
-            if table.name == "SruDbIdMapTable" and row.get("IdType") == 0:
-                blob_value = row.get("IdBlob")
-                if isinstance(blob_value, (bytes, bytearray)):
-                    text = bytes(blob_value).decode("utf-16le", errors="ignore").strip("\x00").strip()
-                    if text:
-                        idmap[int(row.get("IdIndex") or 0)] = text
         tables[table.name] = {"rows": rows, "row_count": count, "truncated": truncated}
     return {
         "tables": tables,
-        "idmap": idmap,
         "page_size": db.page_size,
         "page_count": db.page_count,
         "limitations": list(db.limitations),
@@ -131,7 +123,6 @@ def trusted_side(path: Path) -> dict[str, object]:
     from dissect.esedb import EseDB
 
     tables: dict[str, dict[str, object]] = {}
-    idmap: dict[int, str] = {}
     table_errors: list[dict[str, str]] = []
     with path.open("rb") as handle:
         db = EseDB(handle)
@@ -152,39 +143,35 @@ def trusted_side(path: Path) -> dict[str, object]:
                     row = {column: record.get(column) for column in column_names}
                     rows[canon_row(row, column_names, datetime_columns)] += 1
                     count += 1
-                    if name == "SruDbIdMapTable" and record.get("IdType") == 0:
-                        blob_value = record.get("IdBlob")
-                        if isinstance(blob_value, bytes):
-                            text = blob_value.decode("utf-16le", errors="ignore").strip("\x00").strip()
-                            if text:
-                                idmap[int(record.get("IdIndex") or 0)] = text
             except Exception as exc:
                 table_errors.append({"name": name, "error": repr(exc)[:160]})
             tables[name] = {"rows": rows, "row_count": count, "truncated": truncated}
-    return {"tables": tables, "idmap": idmap, "table_errors": table_errors}
+    return {"tables": tables, "table_errors": table_errors}
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--srudb", required=True, type=Path)
+    parser.add_argument("--edb", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
 
-    digest = hashlib.sha256(args.srudb.read_bytes()).hexdigest()
+    digest = hashlib.sha256()
+    with args.edb.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(8 << 20), b""):
+            digest.update(chunk)
 
     errors: list[str] = []
     try:
-        catalog = decode_srudb_ese_catalog(args.srudb)
-        rapid = rapid_side(args.srudb)
+        rapid = rapid_side(args.edb)
     except Exception as exc:
         errors.append(f"rapid: {exc!r}"[:200])
-        catalog, rapid = {}, {"tables": {}, "idmap": {}, "limitations": [], "errors": []}
+        rapid = {"tables": {}, "limitations": [], "errors": []}
     try:
-        trusted = trusted_side(args.srudb)
+        trusted = trusted_side(args.edb)
     except Exception as exc:
         errors.append(f"trusted: {exc!r}"[:200])
-        trusted = {"tables": {}, "idmap": {}, "table_errors": []}
+        trusted = {"tables": {}, "table_errors": []}
 
     table_reports: list[dict[str, object]] = []
     matched_rows = 0
@@ -213,15 +200,8 @@ def main(argv: list[str] | None = None) -> int:
             }
         )
 
-    rapid_idmap = rapid["idmap"]
-    trusted_idmap = trusted["idmap"]
-    idmap_keys = set(trusted_idmap) | set(rapid_idmap)
-    idmap_matched = sum(1 for key in idmap_keys if trusted_idmap.get(key) == rapid_idmap.get(key))
-    idmap_only_trusted = sorted(key for key in idmap_keys if key in trusted_idmap and key not in rapid_idmap)[:50]
-    idmap_only_rapid = sorted(key for key in idmap_keys if key in rapid_idmap and key not in trusted_idmap)[:50]
-
     report = {
-        "schema_version": "srum-reference-diff-v2",
+        "schema_version": "windows-edb-reference-diff-v1",
         "release_evidence_status": "engineering_check_only",
         "report_use_warning": (
             "RapidTriage native ESE decode vs dissect.esedb row decode. "
@@ -229,13 +209,14 @@ def main(argv: list[str] | None = None) -> int:
             "written after the last checkpoint may be absent on both sides. "
             "dissect.esedb is an engineering reference, not a recognized trusted tool."
         ),
-        "srudb": str(args.srudb),
-        "srudb_sha256": digest,
-        "file_size": args.srudb.stat().st_size,
+        "edb": str(args.edb),
+        "edb_sha256": digest.hexdigest(),
+        "file_size": args.edb.stat().st_size,
         "rapid_decode": {
-            "catalog": catalog,
             "limitations": rapid.get("limitations") or [],
             "errors": rapid.get("errors") or [],
+            "page_size": rapid.get("page_size"),
+            "page_count": rapid.get("page_count"),
         },
         "trusted_table_errors": trusted.get("table_errors") or [],
         "tables": table_reports,
@@ -245,15 +226,6 @@ def main(argv: list[str] | None = None) -> int:
         "total_rows_rapid": rapid_total,
         "total_rows_matched": matched_rows,
         "row_field_agreement": round(matched_rows / trusted_total, 6) if trusted_total else None,
-        "idmap": {
-            "trusted_entries": len(trusted_idmap),
-            "rapid_entries": len(rapid_idmap),
-            "matched_entries": idmap_matched,
-            "recall": round(idmap_matched / len(trusted_idmap), 6) if trusted_idmap else None,
-            "precision": round(idmap_matched / len(rapid_idmap), 6) if rapid_idmap else None,
-            "only_trusted_idindex_sample": idmap_only_trusted,
-            "only_rapid_idindex_sample": idmap_only_rapid,
-        },
         "errors": errors,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -264,8 +236,7 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"tables={report['table_count_rapid']}/{report['table_count_trusted']} "
             f"rows={rapid_total}/{trusted_total} matched={matched_rows} "
-            f"agreement={report['row_field_agreement']} "
-            f"idmap_recall={report['idmap']['recall']}"
+            f"agreement={report['row_field_agreement']}"
         )
         print(f"-> {args.output}")
     return 0

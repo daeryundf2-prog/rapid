@@ -37,6 +37,7 @@ from tests.windows_artifact_fixtures import (
     build_corrupt_evtx_record_candidate,
     build_evtx_with_checked_chunk,
     build_evtx_with_slack_record,
+    build_minimal_ese_database_with_lv,
     build_minimal_evtx,
     build_minimal_mft,
     build_minimal_registry_hive,
@@ -3809,6 +3810,37 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
         self.assertEqual(markers, [])
         self.assertEqual(node.record_file_offset, 6 * 4096 + 40)
         self.assertFalse(node.deleted)
+
+    def test_ese_native_decoder_resolves_separated_long_values(self) -> None:
+        chunks = [b"AAAA" * 300, b"BBBB" * 300, b"C" * 517]
+        blob = build_minimal_ese_database_with_lv(lv_chunks=chunks)
+
+        db = EseDatabase(blob)
+
+        table = db.tables[0]
+        self.assertEqual(table.lv_root_page, 6)
+        rows = list(db.iter_table_rows(table))
+        self.assertEqual(len(rows), 1)
+        _node, row, markers = rows[0]
+        self.assertEqual(row["Blob"], b"".join(chunks))
+        self.assertEqual(markers, [])
+
+    def test_ese_native_decoder_marks_unresolved_long_value_keys(self) -> None:
+        blob = bytearray(build_minimal_ese_database_with_lv(lv_chunks=[b"A" * 64]))
+        # Corrupt the LV header node's key so the record's key misses.
+        db = EseDatabase(bytes(blob))
+        table = db.tables[0]
+        lv_page = db.page(table.lv_root_page)
+        header_tag_offset = lv_page.tag(1).offset
+        page_start = (table.lv_root_page + 1) * db.page_size + lv_page.data_start
+        blob[page_start + header_tag_offset + 2] = 0x99
+
+        db = EseDatabase(bytes(blob))
+        table = db.tables[0]
+        rows = list(db.iter_table_rows(table))
+        _node, row, markers = rows[0]
+        self.assertEqual(row.get("Blob"), b"\x01\x02\x03\x04")
+        self.assertIn("Blob:lv-key-unresolved", markers)
 
     def test_ese_native_decoder_flags_dirty_database_state(self) -> None:
         blob = bytearray(_minimal_ese_database_with_catalog())

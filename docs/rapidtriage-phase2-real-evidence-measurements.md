@@ -491,10 +491,36 @@ semantics and trusted-tool diff blockers remain.
 Separately, the proven `EseDatabase` decoder (validated 365,840/365,840
 rows vs `dissect.esedb` on SRUDB) is now wired into the `Windows.edb`
 inventory path via `probe_edb_native_catalog` — catalog/table decode runs
-on any real Windows.edb it encounters, bounded at 256 MB. No Windows.edb
-exists on this image, so this path is exercised only on the synthetic
-fixture (which has no catalog — `catalog_decoded` correctly reports
-false); real-evidence validation stays open.
+on any real Windows.edb it encounters, bounded at 256 MB.
+
+## Second-image cross-validation (NEXSTIN `260807_ssd.E01`, Win10)
+
+A second physical E01 (GPT, NTFS partition at sector 239616) was probed
+via `pyewf` + `dissect.ntfs` without full extraction; artifacts were
+pulled with a record-level extractor (`D:\devin\extract-nexstin.py`):
+
+| Artifact | Result |
+|---|---|
+| `Windows.edb` (906 MB, real ESE) | 31/31 tables; **133,725/133,770 rows field-matched** vs dissect.esedb (99.97%) |
+| `SRUDB.dat` (64 MB) | **130,339/130,339 rows, 100% agreement**, IdMap recall 1.0 |
+| `Amcache.hve` | recall 1.0, precision 0.976, SHA1 2,703/2,730 (consistent with BSH) |
+
+Windows.edb required extending `ese_native.py` with long-value (LV)
+btree resolution (Separated tagged fields), multi-value parsing, and
+7-bit/XPRESS decompression (XPRESS via optional `dissect.util` import;
+raw bytes + `compressed-value-not-decompressed` marker otherwise).
+Small-page TAGFLD flag reading was also fixed (flags byte is present
+whenever `fExtendedInfo` is set, on any page size).
+
+Residual Windows.edb divergence is **not** a RapidTriage decode error:
+dissect.esedb's `get_long_value` accumulates `chunk_offset += next_chunk_offset`
+instead of `=`, so for LVs spanning 3+ stored chunks its span check fails
+and it wrongly decompresses uncompressed chunks — corrupting output and
+eventually raising `COMPRESS_XPRESS9` on a scheme-byte collision (its
+`SystemIndex_1_Properties` iteration aborts at row 3,190 of 16,226).
+RapidTriage's emitted LV bytes match the LV header's declared size
+exactly on traced rows. Second reference-tool defect documented
+(regipy duplicate-GUID UserAssist rows was the first).
 
 ## Release-gate impact
 

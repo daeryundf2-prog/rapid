@@ -13,9 +13,7 @@ a full JET engine:
 Deliberately not implemented (emitted as explicit limitations):
 
 - ESE transaction-log replay (dirty databases miss tail writes)
-- Long-value page resolution (Separated columns emit LV markers)
-- XPRESS/7-bit column compression (Compressed columns emit raw bytes)
-- Multi-value tagged columns (emitted as raw bytes with a flag)
+- XPRESS9/XPRESS10 column compression (marked per field)
 - Page checksum verification
 
 The format layout follows the public Extensible-Storage-Engine sources
@@ -299,12 +297,15 @@ class EseTagField:
             self.offset = raw_offset & 0x1FFF
             self.has_extended_info = bool(raw_offset & 0x4000)
             self.is_null = bool(raw_offset & 0x2000)
-            self.flags = 0
         else:
             self.offset = raw_offset & 0x7FFF
             self.has_extended_info = True
-            flag_index = tagged_start + self.offset
-            self.flags = data[flag_index] if flag_index < len(data) else 0
+        flag_index = tagged_start + self.offset
+        if self.has_extended_info and flag_index < len(data):
+            self.flags = data[flag_index]
+        else:
+            self.flags = 0
+        if not is_small_page:
             self.is_null = bool(self.flags & TAGFLD_NULL)
 
 
@@ -318,6 +319,7 @@ class EseRecordData:
         "is_small_page",
         "last_fixed_id",
         "last_variable_id",
+        "lv_getter",
         "new_record_format",
         "tagged_data_start",
         "tagged_fields",
@@ -326,10 +328,18 @@ class EseRecordData:
         "variable_offsets",
     )
 
-    def __init__(self, data: bytes | memoryview, *, new_record_format: bool, is_small_page: bool):
+    def __init__(
+        self,
+        data: bytes | memoryview,
+        *,
+        new_record_format: bool,
+        is_small_page: bool,
+        lv_getter: Any = None,
+    ):
         self.data = data
         self.new_record_format = new_record_format
         self.is_small_page = is_small_page
+        self.lv_getter = lv_getter
         self.header_ok = len(data) >= 4
         self.last_fixed_id = 0
         self.last_variable_id = 0
@@ -423,16 +433,57 @@ class EseRecordData:
         if not (0 <= start <= end):
             return field, None, markers + ["tagged-bounds-invalid"]
         value = bytes(self.data[start:end])
-        if field.flags & TAGFLD_SEPARATED:
-            markers.append("lv-separated-value")
-            return field, value, markers
-        if field.flags & TAGFLD_COMPRESSED:
-            markers.append("compressed-value-not-decompressed")
-            return field, value, markers
         if field.flags & (TAGFLD_MULTI_VALUES | TAGFLD_TWO_VALUES):
-            markers.append("multi-value-raw")
-            return field, value, markers
+            elements, mv_markers = self._parse_multivalue(value, field)
+            return field, elements, markers + mv_markers
+        if field.flags & TAGFLD_SEPARATED:
+            resolved = self.lv_getter(value) if self.lv_getter is not None else None
+            if resolved is None:
+                markers.append("lv-key-unresolved")
+            else:
+                value = resolved
+        elif field.flags & TAGFLD_COMPRESSED:
+            decompressed = decompress_ese_value(value)
+            if decompressed is None:
+                markers.append("compressed-value-not-decompressed")
+            else:
+                value = decompressed
         return field, value, markers
+
+    def _parse_multivalue(self, value: bytes, field: EseTagField) -> tuple[list[bytes], list[str]]:
+        markers: list[str] = []
+        separated_instance = 0x8000
+        if field.flags & TAGFLD_TWO_VALUES:
+            if not value:
+                return [], markers
+            first_size = value[0]
+            elements = [value[1 : 1 + first_size], value[1 + first_size :]]
+        elif field.flags & TAGFLD_MULTI_VALUES and len(value) >= 2:
+            first_offset = struct.unpack("<H", value[:2])[0] & 0x7FFF
+            num_values = min(first_offset // 2, 4096)
+            if num_values == 0 or first_offset > len(value):
+                return [value], markers
+            offsets = list(struct.unpack(f"<{num_values}H", value[:first_offset])) + [len(value)]
+            elements = []
+            for index in range(num_values):
+                offset = offsets[index]
+                element = bytes(value[offset & 0x7FFF : offsets[index + 1] & 0x7FFF])
+                if offset & separated_instance:
+                    resolved = self.lv_getter(element) if self.lv_getter is not None else None
+                    if resolved is None:
+                        markers.append("lv-key-unresolved")
+                    else:
+                        element = resolved
+                elements.append(element)
+        else:
+            elements = [value]
+        if field.flags & TAGFLD_COMPRESSED and elements:
+            decompressed = decompress_ese_value(elements[0])
+            if decompressed is None:
+                markers.append("compressed-value-not-decompressed")
+            else:
+                elements[0] = decompressed
+        return elements, markers
 
     def value(self, column: EseColumn) -> tuple[Any, list[str]]:
         if not self.header_ok:
@@ -446,7 +497,58 @@ class EseRecordData:
             field, raw, markers = self._tagged(column)
         if raw is None:
             return None, markers
+        if isinstance(raw, list):
+            return [parse_column_value(column, element) for element in raw], markers
         return parse_column_value(column, raw), markers
+
+
+def _sevenbit_decompress(buf: bytes, *, wide: bool) -> bytes:
+    """ESE 7-bit ASCII/UNICODE decompression (native port)."""
+    out = bytearray()
+    value = 0
+    shift = 0
+    for byte in buf:
+        value |= byte << shift
+        out.append(value & 0x7F)
+        if wide:
+            out.append(0)
+        value >>= 7
+        shift += 1
+        if shift == 7:
+            out.append(value & 0x7F)
+            if wide:
+                out.append(0)
+            value >>= 7
+            shift = 0
+    return bytes(out)
+
+
+def decompress_ese_value(buf: bytes) -> bytes | None:
+    """Decompress an ESE compressed field; None when the scheme is unsupported.
+
+    Mirrors dissect.esedb.compression.decompress: 7-bit ASCII/UNICODE are
+    decoded natively; XPRESS uses dissect.util when importable (dev-only
+    dependency); XPRESS9/XPRESS10 are unsupported upstream too.
+    """
+    if not buf:
+        return None
+    identifier = buf[0] >> 3
+    if identifier == 1:
+        return _sevenbit_decompress(buf[1:], wide=False)
+    if identifier == 2:
+        return _sevenbit_decompress(buf[1:], wide=True)
+    if identifier == 3:
+        try:
+            from dissect.util.compression import lzxpress
+        except ImportError:
+            return None
+        try:
+            return lzxpress.decompress(buf[3:])
+        except Exception:
+            return None
+    if identifier in (5, 6):
+        return None
+    return buf
 
 
 def parse_column_value(column: EseColumn, raw: bytes) -> Any:
@@ -647,13 +749,106 @@ class EseDatabase:
         if not self.tables:
             self.errors.append("catalog-decoded-no-tables")
 
+    def _find_node(self, page: EsePage, key: bytes) -> EseNode | None:
+        """Binary-search a page's nodes for ``key`` (dissect.esedb semantics)."""
+        nodes = list(page.nodes())
+        if not nodes:
+            return None
+        first, last = 0, len(nodes) - 1
+        while first < last:
+            mid = (first + last) // 2
+            node = nodes[mid]
+            if key < node.key:
+                last = mid
+            elif key == node.key:
+                if not page.is_leaf:
+                    node = nodes[min(mid + 1, len(nodes) - 1)]
+                return node
+            else:
+                first = mid + 1
+        return nodes[first]
+
+    def _next_node(self, page: EsePage, node: EseNode) -> tuple[EsePage, EseNode] | None:
+        """Return the (page, node) after ``node``, crossing leaf pages."""
+        next_tag = node.tag_num + 1
+        if next_tag <= page.node_count:
+            tag = page.tag(next_tag)
+            if tag is not None:
+                try:
+                    return page, EseNode(tag, page)
+                except (IndexError, struct.error):
+                    return None
+            return None
+        if not page.next_page:
+            return None
+        next_page = self.page(page.next_page)
+        if next_page is None:
+            return None
+        tag = next_page.tag(1)
+        if tag is None:
+            return None
+        try:
+            return next_page, EseNode(tag, next_page)
+        except (IndexError, struct.error):
+            return None
+
+    def get_long_value(self, table: EseTable, key: bytes) -> bytes | None:
+        """Resolve a Separated tagged field against the table's LV btree.
+
+        The field bytes are the LV key; the lookup key is the byte-reversed
+        form. The header node (key == rkey) carries the total size; chunk
+        nodes share the rkey prefix and end with a big-endian cumulative
+        offset. Chunks whose stored length differs from their span are
+        compressed.
+        """
+        if not key or not table.lv_root_page:
+            return None
+        rkey = key[::-1]
+        page = self.page(table.lv_root_page)
+        while page is not None and not page.is_leaf:
+            node = self._find_node(page, rkey)
+            if node is None:
+                return None
+            page = self.page(node.child_page)
+        if page is None:
+            return None
+        node = self._find_node(page, rkey)
+        if node is None or node.key != rkey or len(node.data) < 8:
+            return None
+        _flags, size = struct.unpack("<2I", node.data[:8])
+        chunks: list[bytes] = []
+        offsets: list[int] = []
+        cursor = self._next_node(page, node)
+        while cursor is not None:
+            cur_page, cur_node = cursor
+            if not cur_node.key.startswith(rkey):
+                break
+            chunks.append(bytes(cur_node.data))
+            if len(cur_node.key) >= 4:
+                offsets.append(struct.unpack(">I", cur_node.key[-4:])[0])
+            cursor = self._next_node(cur_page, cur_node)
+        offsets.append(int(size))
+        out: list[bytes] = []
+        position = 0
+        for chunk, next_offset in zip(chunks, offsets[1:], strict=False):
+            if len(chunk) != next_offset - position:
+                decompressed = decompress_ese_value(chunk)
+                if decompressed is None:
+                    return None
+                chunk = decompressed
+            out.append(chunk)
+            position = next_offset
+        return b"".join(out)
+
     def iter_table_rows(self, table: EseTable) -> Iterable[tuple[EseNode, dict[str, Any], list[str]]]:
         root = self.page(table.root_page)
+        lv_getter = (lambda key, t=table: self.get_long_value(t, key)) if table.lv_root_page else None
         for node in self.iter_leaf_nodes(root):
             record = EseRecordData(
                 node.data,
                 new_record_format=bool(node.page_flags & PAGE_FLAG_NEW_RECORD_FORMAT),
                 is_small_page=self.is_small_page,
+                lv_getter=lv_getter,
             )
             row: dict[str, Any] = {}
             markers: list[str] = []
