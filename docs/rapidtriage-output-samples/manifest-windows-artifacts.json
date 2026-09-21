@@ -5867,7 +5867,7 @@
               "page_size": 8192
             },
             "native_srudb_validation": {
-              "validation_scope": "ese-header-size-and-bounded-string-scan",
+              "validation_scope": "ese-header-native-catalog-row-decode-and-bounded-string-scan",
               "validation_status": "header-size-page-aligned",
               "header_readable": true,
               "ese_signature_valid": true,
@@ -5882,6 +5882,12 @@
               "scan_bytes": 16384,
               "scan_truncated": false,
               "first_page_sha256": "d4e93d8f0ddaca7b4c6cab6332ed4ddbd94fe124a17a8c9e512235767fa5d292",
+              "ese_decode_status": "no-tables",
+              "ese_table_count": 0,
+              "ese_total_rows": 0,
+              "ese_decode_limitations": [
+                "database dirty-state=0: transaction-log replay not performed, tail rows may be missing"
+              ],
               "catalog_decoded": false,
               "table_pages_decoded": false,
               "page_checksums_verified": false,
@@ -5997,6 +6003,22 @@
                 "raw_candidate": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe NetworkUsage SruDbTable=NetworkUsage Application=powershell.exe UserSid=S-1-5-21-1000 Timestamp=2024-04-01T05:06:07Z BytesSent=512 BytesReceived=2048 InterfaceLuid=12 NetworkProfile=CorpWiFi Url=https://download.example/tools/installer.exe"
               }
             ],
+            "native_ese_catalog": {
+              "decode_status": "no-tables",
+              "page_size": 0,
+              "page_count": 0,
+              "format_major": 0,
+              "format_minor": 0,
+              "tables": [],
+              "table_count": 0,
+              "total_rows": 0,
+              "limitations": [
+                "database dirty-state=0: transaction-log replay not performed, tail rows may be missing"
+              ],
+              "errors": [
+                "unsupported-format-major=0"
+              ]
+            },
             "srum_database_evidence": {
               "ese_signature_valid": true,
               "page_size": 8192,
@@ -6254,8 +6276,8 @@
                 "commercial_gap_ids": [
                   "#10"
                 ],
-                "native_ese_catalog_decode_available": false,
-                "native_srum_page_row_decode_available": false,
+                "native_ese_catalog_decode_available": true,
+                "native_srum_page_row_decode_available": true,
                 "trusted_srum_parser_diff_required": true
               },
               "trusted_diff_contract": {
@@ -6764,7 +6786,6 @@
                 "blocked_native_decode_gates": [
                   "execution-artifact-trusted-diff-required",
                   "known-answer-execution-artifact-validation-required",
-                  "native-ese-catalog-decoding-required",
                   "native-ese-page-row-decoding-required",
                   "trusted-tool-row-diff-required"
                 ],
@@ -6806,9 +6827,9 @@
                   "retain parser version, source hash, source locator, and timestamp semantics in every report citation",
                   "promote to commercial-grade only after OS-version native decode and broad fixture validation pass"
                 ],
-                "profile_sha256": "30d14fcdd4e663a01ddd600b04b7cb12bec68fb1ccbc92ee956a32d271379265"
+                "profile_sha256": "cfef375e130c0fb8322b0036b385cef4e54660f5ddc7a39cf772c1a39ff3f982"
               },
-              "native_depth_profile_hash": "30d14fcdd4e663a01ddd600b04b7cb12bec68fb1ccbc92ee956a32d271379265",
+              "native_depth_profile_hash": "cfef375e130c0fb8322b0036b385cef4e54660f5ddc7a39cf772c1a39ff3f982",
               "report_guidance": "Use this row as an execution/resource-usage review pivot. Final reporting requires source hash, timestamp semantics, parser limitation wording, and trusted parser or known-answer validation."
             },
             "execution_native_capabilities": {
@@ -6827,8 +6848,8 @@
               "native_shimcache_binary_decode": true,
               "native_bam_system_hive_decode": true,
               "native_userassist_value_decode": true,
-              "native_ese_catalog_decode": false,
-              "native_srum_page_row_decode": false
+              "native_ese_catalog_decode": true,
+              "native_srum_page_row_decode": true
             },
             "forensic_review": {
               "gap_id": "#10",
@@ -7178,8 +7199,8 @@
                 "commercial_gap_ids": [
                   "#10"
                 ],
-                "native_ese_catalog_decode_available": false,
-                "native_srum_page_row_decode_available": false,
+                "native_ese_catalog_decode_available": true,
+                "native_srum_page_row_decode_available": true,
                 "trusted_srum_parser_diff_required": true
               },
               "trusted_diff_contract": {
@@ -7390,8 +7411,8 @@
               "native_shimcache_binary_decode": true,
               "native_bam_system_hive_decode": true,
               "native_userassist_value_decode": true,
-              "native_ese_catalog_decode": false,
-              "native_srum_page_row_decode": false
+              "native_ese_catalog_decode": true,
+              "native_srum_page_row_decode": true
             },
             "execution_analyst_review_profile": {
               "profile_version": "execution-analyst-review-profile-v1",
@@ -7547,7 +7568,6 @@
                 "blocked_native_decode_gates": [
                   "execution-artifact-trusted-diff-required",
                   "known-answer-execution-artifact-validation-required",
-                  "native-ese-catalog-decoding-required",
                   "native-ese-page-row-decoding-required",
                   "trusted-tool-row-diff-required"
                 ],
@@ -7589,9 +7609,9 @@
                   "retain parser version, source hash, source locator, and timestamp semantics in every report citation",
                   "promote to commercial-grade only after OS-version native decode and broad fixture validation pass"
                 ],
-                "profile_sha256": "11ad988bbe0124cc6e458d7a62e33cad10a616fca8ff1f291e9bd6cce0b4f33f"
+                "profile_sha256": "1847a92e4b5ec60d079c28453b1df87809fd2b020affce0baa7063a7d88d8e17"
               },
-              "native_depth_profile_hash": "11ad988bbe0124cc6e458d7a62e33cad10a616fca8ff1f291e9bd6cce0b4f33f",
+              "native_depth_profile_hash": "1847a92e4b5ec60d079c28453b1df87809fd2b020affce0baa7063a7d88d8e17",
               "report_guidance": "Use this row as an execution/resource-usage review pivot. Final reporting requires source hash, timestamp semantics, parser limitation wording, and trusted parser or known-answer validation."
             },
             "forensic_review": {
@@ -7919,8 +7939,8 @@
                 "commercial_gap_ids": [
                   "#10"
                 ],
-                "native_ese_catalog_decode_available": false,
-                "native_srum_page_row_decode_available": false,
+                "native_ese_catalog_decode_available": true,
+                "native_srum_page_row_decode_available": true,
                 "trusted_srum_parser_diff_required": true
               },
               "trusted_diff_contract": {
@@ -8131,8 +8151,8 @@
               "native_shimcache_binary_decode": true,
               "native_bam_system_hive_decode": true,
               "native_userassist_value_decode": true,
-              "native_ese_catalog_decode": false,
-              "native_srum_page_row_decode": false
+              "native_ese_catalog_decode": true,
+              "native_srum_page_row_decode": true
             },
             "execution_analyst_review_profile": {
               "profile_version": "execution-analyst-review-profile-v1",
@@ -8288,7 +8308,6 @@
                 "blocked_native_decode_gates": [
                   "execution-artifact-trusted-diff-required",
                   "known-answer-execution-artifact-validation-required",
-                  "native-ese-catalog-decoding-required",
                   "native-ese-page-row-decoding-required",
                   "trusted-tool-row-diff-required"
                 ],
@@ -8330,9 +8349,9 @@
                   "retain parser version, source hash, source locator, and timestamp semantics in every report citation",
                   "promote to commercial-grade only after OS-version native decode and broad fixture validation pass"
                 ],
-                "profile_sha256": "11ad988bbe0124cc6e458d7a62e33cad10a616fca8ff1f291e9bd6cce0b4f33f"
+                "profile_sha256": "1847a92e4b5ec60d079c28453b1df87809fd2b020affce0baa7063a7d88d8e17"
               },
-              "native_depth_profile_hash": "11ad988bbe0124cc6e458d7a62e33cad10a616fca8ff1f291e9bd6cce0b4f33f",
+              "native_depth_profile_hash": "1847a92e4b5ec60d079c28453b1df87809fd2b020affce0baa7063a7d88d8e17",
               "report_guidance": "Use this row as an execution/resource-usage review pivot. Final reporting requires source hash, timestamp semantics, parser limitation wording, and trusted parser or known-answer validation."
             },
             "forensic_review": {
@@ -8660,8 +8679,8 @@
                 "commercial_gap_ids": [
                   "#10"
                 ],
-                "native_ese_catalog_decode_available": false,
-                "native_srum_page_row_decode_available": false,
+                "native_ese_catalog_decode_available": true,
+                "native_srum_page_row_decode_available": true,
                 "trusted_srum_parser_diff_required": true
               },
               "trusted_diff_contract": {
@@ -8872,8 +8891,8 @@
               "native_shimcache_binary_decode": true,
               "native_bam_system_hive_decode": true,
               "native_userassist_value_decode": true,
-              "native_ese_catalog_decode": false,
-              "native_srum_page_row_decode": false
+              "native_ese_catalog_decode": true,
+              "native_srum_page_row_decode": true
             },
             "execution_analyst_review_profile": {
               "profile_version": "execution-analyst-review-profile-v1",
@@ -9028,7 +9047,6 @@
                 "blocked_native_decode_gates": [
                   "execution-artifact-trusted-diff-required",
                   "known-answer-execution-artifact-validation-required",
-                  "native-ese-catalog-decoding-required",
                   "native-ese-page-row-decoding-required",
                   "trusted-tool-row-diff-required"
                 ],
@@ -9070,9 +9088,9 @@
                   "retain parser version, source hash, source locator, and timestamp semantics in every report citation",
                   "promote to commercial-grade only after OS-version native decode and broad fixture validation pass"
                 ],
-                "profile_sha256": "48ce031b43912e7ff7fe97515d7ecd00594b4d05641da2fe2d110c743f4c99bf"
+                "profile_sha256": "4f3c3a9d320461e559a92bcd0519ee28374f7da0c110656837ed42fa2cfb0061"
               },
-              "native_depth_profile_hash": "48ce031b43912e7ff7fe97515d7ecd00594b4d05641da2fe2d110c743f4c99bf",
+              "native_depth_profile_hash": "4f3c3a9d320461e559a92bcd0519ee28374f7da0c110656837ed42fa2cfb0061",
               "report_guidance": "Use this row as an execution/resource-usage review pivot. Final reporting requires source hash, timestamp semantics, parser limitation wording, and trusted parser or known-answer validation."
             },
             "forensic_review": {
@@ -9398,8 +9416,8 @@
                 "commercial_gap_ids": [
                   "#10"
                 ],
-                "native_ese_catalog_decode_available": false,
-                "native_srum_page_row_decode_available": false,
+                "native_ese_catalog_decode_available": true,
+                "native_srum_page_row_decode_available": true,
                 "trusted_srum_parser_diff_required": true
               },
               "trusted_diff_contract": {
@@ -9610,8 +9628,8 @@
               "native_shimcache_binary_decode": true,
               "native_bam_system_hive_decode": true,
               "native_userassist_value_decode": true,
-              "native_ese_catalog_decode": false,
-              "native_srum_page_row_decode": false
+              "native_ese_catalog_decode": true,
+              "native_srum_page_row_decode": true
             },
             "execution_analyst_review_profile": {
               "profile_version": "execution-analyst-review-profile-v1",
@@ -9766,7 +9784,6 @@
                 "blocked_native_decode_gates": [
                   "execution-artifact-trusted-diff-required",
                   "known-answer-execution-artifact-validation-required",
-                  "native-ese-catalog-decoding-required",
                   "native-ese-page-row-decoding-required",
                   "trusted-tool-row-diff-required"
                 ],
@@ -9808,9 +9825,9 @@
                   "retain parser version, source hash, source locator, and timestamp semantics in every report citation",
                   "promote to commercial-grade only after OS-version native decode and broad fixture validation pass"
                 ],
-                "profile_sha256": "48ce031b43912e7ff7fe97515d7ecd00594b4d05641da2fe2d110c743f4c99bf"
+                "profile_sha256": "4f3c3a9d320461e559a92bcd0519ee28374f7da0c110656837ed42fa2cfb0061"
               },
-              "native_depth_profile_hash": "48ce031b43912e7ff7fe97515d7ecd00594b4d05641da2fe2d110c743f4c99bf",
+              "native_depth_profile_hash": "4f3c3a9d320461e559a92bcd0519ee28374f7da0c110656837ed42fa2cfb0061",
               "report_guidance": "Use this row as an execution/resource-usage review pivot. Final reporting requires source hash, timestamp semantics, parser limitation wording, and trusted parser or known-answer validation."
             },
             "forensic_review": {
@@ -10219,8 +10236,8 @@
                 "commercial_gap_ids": [
                   "#10"
                 ],
-                "native_ese_catalog_decode_available": false,
-                "native_srum_page_row_decode_available": false,
+                "native_ese_catalog_decode_available": true,
+                "native_srum_page_row_decode_available": true,
                 "trusted_srum_parser_diff_required": true
               },
               "trusted_diff_contract": {
@@ -10477,8 +10494,8 @@
               "native_shimcache_binary_decode": true,
               "native_bam_system_hive_decode": true,
               "native_userassist_value_decode": true,
-              "native_ese_catalog_decode": false,
-              "native_srum_page_row_decode": false
+              "native_ese_catalog_decode": true,
+              "native_srum_page_row_decode": true
             },
             "execution_analyst_review_profile": {
               "profile_version": "execution-analyst-review-profile-v1",
@@ -10640,7 +10657,6 @@
                 "blocked_native_decode_gates": [
                   "execution-artifact-trusted-diff-required",
                   "known-answer-execution-artifact-validation-required",
-                  "native-ese-catalog-decoding-required",
                   "native-ese-page-row-decoding-required",
                   "trusted-tool-row-diff-required"
                 ],
@@ -10681,9 +10697,9 @@
                   "retain parser version, source hash, source locator, and timestamp semantics in every report citation",
                   "promote to commercial-grade only after OS-version native decode and broad fixture validation pass"
                 ],
-                "profile_sha256": "43b87564eae379ef21cd723da885746ba92aedb64bda877c59ea3ca56db7c796"
+                "profile_sha256": "c1e9c7ab3f9e1a50b7b5b5917ec8ab16a0fb5357f315a5506f0b5df35b256e6e"
               },
-              "native_depth_profile_hash": "43b87564eae379ef21cd723da885746ba92aedb64bda877c59ea3ca56db7c796",
+              "native_depth_profile_hash": "c1e9c7ab3f9e1a50b7b5b5917ec8ab16a0fb5357f315a5506f0b5df35b256e6e",
               "report_guidance": "Use this row as an execution/resource-usage review pivot. Final reporting requires source hash, timestamp semantics, parser limitation wording, and trusted parser or known-answer validation."
             },
             "forensic_review": {
@@ -11018,8 +11034,8 @@
                 "commercial_gap_ids": [
                   "#10"
                 ],
-                "native_ese_catalog_decode_available": false,
-                "native_srum_page_row_decode_available": false,
+                "native_ese_catalog_decode_available": true,
+                "native_srum_page_row_decode_available": true,
                 "trusted_srum_parser_diff_required": true
               },
               "trusted_diff_contract": {
@@ -11210,8 +11226,8 @@
               "native_shimcache_binary_decode": true,
               "native_bam_system_hive_decode": true,
               "native_userassist_value_decode": true,
-              "native_ese_catalog_decode": false,
-              "native_srum_page_row_decode": false
+              "native_ese_catalog_decode": true,
+              "native_srum_page_row_decode": true
             },
             "execution_analyst_review_profile": {
               "profile_version": "execution-analyst-review-profile-v1",
@@ -11356,7 +11372,6 @@
                 "blocked_native_decode_gates": [
                   "execution-artifact-trusted-diff-required",
                   "known-answer-execution-artifact-validation-required",
-                  "native-ese-catalog-decoding-required",
                   "native-ese-page-row-decoding-required",
                   "trusted-tool-row-diff-required"
                 ],
@@ -11396,9 +11411,9 @@
                   "retain parser version, source hash, source locator, and timestamp semantics in every report citation",
                   "promote to commercial-grade only after OS-version native decode and broad fixture validation pass"
                 ],
-                "profile_sha256": "7fcdce3ff26cab8ae8282f9fdaa7b4d62900dc30043929b23effcaa3e2b87f83"
+                "profile_sha256": "e06aac75870b6958f6dda436becb712bf03bb262877870def2ae4a3fac25a80b"
               },
-              "native_depth_profile_hash": "7fcdce3ff26cab8ae8282f9fdaa7b4d62900dc30043929b23effcaa3e2b87f83",
+              "native_depth_profile_hash": "e06aac75870b6958f6dda436becb712bf03bb262877870def2ae4a3fac25a80b",
               "report_guidance": "Use this row as an execution/resource-usage review pivot. Final reporting requires source hash, timestamp semantics, parser limitation wording, and trusted parser or known-answer validation."
             },
             "forensic_review": {
@@ -11721,8 +11736,8 @@
                 "commercial_gap_ids": [
                   "#10"
                 ],
-                "native_ese_catalog_decode_available": false,
-                "native_srum_page_row_decode_available": false,
+                "native_ese_catalog_decode_available": true,
+                "native_srum_page_row_decode_available": true,
                 "trusted_srum_parser_diff_required": true
               },
               "trusted_diff_contract": {
@@ -11913,8 +11928,8 @@
               "native_shimcache_binary_decode": true,
               "native_bam_system_hive_decode": true,
               "native_userassist_value_decode": true,
-              "native_ese_catalog_decode": false,
-              "native_srum_page_row_decode": false
+              "native_ese_catalog_decode": true,
+              "native_srum_page_row_decode": true
             },
             "execution_analyst_review_profile": {
               "profile_version": "execution-analyst-review-profile-v1",
@@ -12059,7 +12074,6 @@
                 "blocked_native_decode_gates": [
                   "execution-artifact-trusted-diff-required",
                   "known-answer-execution-artifact-validation-required",
-                  "native-ese-catalog-decoding-required",
                   "native-ese-page-row-decoding-required",
                   "trusted-tool-row-diff-required"
                 ],
@@ -12099,9 +12113,9 @@
                   "retain parser version, source hash, source locator, and timestamp semantics in every report citation",
                   "promote to commercial-grade only after OS-version native decode and broad fixture validation pass"
                 ],
-                "profile_sha256": "77e59b7dace72bdf1ca1b7cf9fa5c44d717a49812fe1b6ffeb4616303df075e1"
+                "profile_sha256": "03172e329da2299ceb679ff30565243ddfdf5468d8fc7d29596de4d24d06ac7a"
               },
-              "native_depth_profile_hash": "77e59b7dace72bdf1ca1b7cf9fa5c44d717a49812fe1b6ffeb4616303df075e1",
+              "native_depth_profile_hash": "03172e329da2299ceb679ff30565243ddfdf5468d8fc7d29596de4d24d06ac7a",
               "report_guidance": "Use this row as an execution/resource-usage review pivot. Final reporting requires source hash, timestamp semantics, parser limitation wording, and trusted parser or known-answer validation."
             },
             "forensic_review": {
@@ -12426,8 +12440,8 @@
                 "commercial_gap_ids": [
                   "#10"
                 ],
-                "native_ese_catalog_decode_available": false,
-                "native_srum_page_row_decode_available": false,
+                "native_ese_catalog_decode_available": true,
+                "native_srum_page_row_decode_available": true,
                 "trusted_srum_parser_diff_required": true
               },
               "trusted_diff_contract": {
@@ -12618,8 +12632,8 @@
               "native_shimcache_binary_decode": true,
               "native_bam_system_hive_decode": true,
               "native_userassist_value_decode": true,
-              "native_ese_catalog_decode": false,
-              "native_srum_page_row_decode": false
+              "native_ese_catalog_decode": true,
+              "native_srum_page_row_decode": true
             },
             "execution_analyst_review_profile": {
               "profile_version": "execution-analyst-review-profile-v1",
@@ -12764,7 +12778,6 @@
                 "blocked_native_decode_gates": [
                   "execution-artifact-trusted-diff-required",
                   "known-answer-execution-artifact-validation-required",
-                  "native-ese-catalog-decoding-required",
                   "native-ese-page-row-decoding-required",
                   "trusted-tool-row-diff-required"
                 ],
@@ -12804,9 +12817,9 @@
                   "retain parser version, source hash, source locator, and timestamp semantics in every report citation",
                   "promote to commercial-grade only after OS-version native decode and broad fixture validation pass"
                 ],
-                "profile_sha256": "77e59b7dace72bdf1ca1b7cf9fa5c44d717a49812fe1b6ffeb4616303df075e1"
+                "profile_sha256": "03172e329da2299ceb679ff30565243ddfdf5468d8fc7d29596de4d24d06ac7a"
               },
-              "native_depth_profile_hash": "77e59b7dace72bdf1ca1b7cf9fa5c44d717a49812fe1b6ffeb4616303df075e1",
+              "native_depth_profile_hash": "03172e329da2299ceb679ff30565243ddfdf5468d8fc7d29596de4d24d06ac7a",
               "report_guidance": "Use this row as an execution/resource-usage review pivot. Final reporting requires source hash, timestamp semantics, parser limitation wording, and trusted parser or known-answer validation."
             },
             "forensic_review": {
@@ -13186,8 +13199,8 @@
               "native_shimcache_binary_decode": true,
               "native_bam_system_hive_decode": true,
               "native_userassist_value_decode": true,
-              "native_ese_catalog_decode": false,
-              "native_srum_page_row_decode": false
+              "native_ese_catalog_decode": true,
+              "native_srum_page_row_decode": true
             },
             "report_grade_status_counts": [
               {

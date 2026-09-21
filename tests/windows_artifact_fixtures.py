@@ -1530,6 +1530,75 @@ def _write_srum_database_fixture(path: Path) -> None:
     )
 
 
+def _minimal_ese_database_with_catalog() -> bytes:
+    """Minimal valid ESE image: header + catalog (MSysObjects) + one table leaf."""
+    page_size = 4096
+    catalog_fixed_sizes = [4, 2, 4, 4, 4, 4, 4, 1, 2, 4, 2, 4]
+    catalog_fixed_offsets = {}
+    running = 0
+    for index, size in enumerate(catalog_fixed_sizes):
+        catalog_fixed_offsets[index + 1] = running
+        running += size
+
+    def record(last_fixed_id: int, fixed_region: bytes, variable_values: list[bytes]) -> bytes:
+        num_variable = len(variable_values)
+        bitmap = bytes((last_fixed_id + 7) // 8)
+        variable_offset_start = 4 + len(fixed_region) + len(bitmap)
+        offsets = bytearray()
+        variable_data = bytearray()
+        for value in variable_values:
+            variable_data += value
+            offsets += len(variable_data).to_bytes(2, "little")
+        header = bytes([last_fixed_id, 127 + num_variable]) + variable_offset_start.to_bytes(2, "little")
+        return header + fixed_region + bitmap + bytes(offsets) + bytes(variable_data)
+
+    def catalog_fixed(fields: dict[int, int]) -> bytes:
+        region = bytearray(sum(catalog_fixed_sizes))
+        for identifier, value in fields.items():
+            offset = catalog_fixed_offsets[identifier]
+            size = catalog_fixed_sizes[identifier - 1]
+            region[offset : offset + size] = int(value).to_bytes(size, "little", signed=False)
+        return bytes(region)
+
+    def catalog_node(fields: dict[int, int], name: str) -> bytes:
+        return (0).to_bytes(2, "little") + record(12, catalog_fixed(fields), [name.encode("cp1252")])
+
+    def page(flags: int, nodes: list[bytes]) -> bytes:
+        buf = bytearray(page_size)
+        data = bytearray()
+        tag_entries = []
+        for node in nodes:
+            tag_entries.append((len(node), len(data)))
+            data += node
+        buf[40 : 40 + len(data)] = data
+        buf[32:34] = len(data).to_bytes(2, "little")
+        buf[34:36] = ((1 << 12) | (len(nodes) + 1)).to_bytes(2, "little")
+        buf[36:40] = flags.to_bytes(4, "little")
+        for index, (size, offset) in enumerate(tag_entries):
+            position = page_size - 4 * (index + 2)
+            buf[position : position + 2] = size.to_bytes(2, "little")
+            buf[position + 2 : position + 4] = offset.to_bytes(2, "little")
+        return bytes(buf)
+
+    table_row = (0).to_bytes(2, "little") + record(1, (42).to_bytes(4, "little"), [b"hello"])
+    catalog_page = page(
+        0x1 | 0x2,
+        [
+            catalog_node({2: 1, 3: 2, 4: 5}, "TestTable"),
+            catalog_node({1: 2, 2: 2, 3: 1, 4: 4, 5: 4}, "Counter"),
+            catalog_node({1: 2, 2: 2, 3: 128, 4: 10, 7: 1252}, "Label"),
+        ],
+    )
+    table_page = page(0x2, [table_row])
+    header = bytearray(page_size)
+    header[4:8] = (0x89ABCDEF).to_bytes(4, "little")
+    header[52:56] = (2).to_bytes(4, "little")
+    header[232:236] = (0x620).to_bytes(4, "little")
+    header[0xEC:0xF0] = page_size.to_bytes(4, "little")
+    blocks = [bytes(header), bytes(page_size), bytes(page_size), bytes(page_size), bytes(page_size), catalog_page, table_page]
+    return b"".join(blocks)
+
+
 def _write_filesystem_fixtures(mft_csv: Path, usn_jsonl: Path, mft_native: Path, usn_journal: Path) -> None:
     mft_csv.parent.mkdir(parents=True, exist_ok=True)
     mft_csv.write_text(

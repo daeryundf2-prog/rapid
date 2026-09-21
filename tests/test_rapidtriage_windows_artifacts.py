@@ -15,9 +15,13 @@ from rapidtriage.artifacts.windows.browser import (
     browser_core_accuracy_gates,
     build_browser_secret_trusted_diff,
 )
+from rapidtriage.artifacts.windows.ese_native import EseDatabase
 from rapidtriage.artifacts.windows.eventlog import collect_native_evtx_events
 from rapidtriage.artifacts.windows.execution import (
     build_execution_artifact_trusted_diff,
+    build_srum_database_inventory_record,
+    build_srum_schema_row_records,
+    srum_schema_row_identity,
 )
 from rapidtriage.artifacts.windows.os_account import build_os_account_trusted_diff
 from rapidtriage.artifacts.windows.prefetch import prefetch_header_hints
@@ -28,6 +32,7 @@ from rapidtriage.artifacts.windows.recent_files import (
 from rapidtriage.artifacts.windows.system import web_request_basename_sources
 from rapidtriage.cli import main
 from tests.windows_artifact_fixtures import (
+    _minimal_ese_database_with_catalog,
     build_chunk_template_evtx,
     build_corrupt_evtx_record_candidate,
     build_evtx_with_checked_chunk,
@@ -3556,7 +3561,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                 srum_database_rows[0]["details"]["srum_report_citation_manifest_hash"],
                 srum_database_manifest["manifest_sha256"],
             )
-            self.assertFalse(srum_database_manifest["validation_summary"]["native_srum_page_row_decode_available"])
+            self.assertTrue(srum_database_manifest["validation_summary"]["native_srum_page_row_decode_available"])
             self.assertIn("trusted-srum-parser-diff-required", srum_database_manifest["reportability"]["blockers"])
             self.assertTrue(srum_database_rows[0]["details"]["validation_checks"]["ese_signature_valid"])
             self.assertEqual(
@@ -3569,7 +3574,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("native-srum-row-decoding-required", srum_database_rows[0]["details"]["commercial_grade_blockers"])
             self.assertIn("#10", srum_database_rows[0]["details"]["execution_report_grade_assessment"]["commercial_gap_ids"])
             self.assertEqual(srum_database_rows[0]["details"]["forensic_review"]["gap_id"], "#10")
-            self.assertFalse(srum_database_rows[0]["details"]["execution_native_capabilities"]["native_srum_page_row_decode"])
+            self.assertTrue(srum_database_rows[0]["details"]["execution_native_capabilities"]["native_srum_page_row_decode"])
             srum_db_gate = srum_database_rows[0]["details"]["core_accuracy_gates"][0]
             self.assertEqual(srum_db_gate["gap_id"], "#10")
             self.assertIn("ESE header/page-size validation", srum_db_gate["satisfied_checks"])
@@ -3626,7 +3631,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                 "source-tool-export-normalization",
             )
             self.assertIn(
-                "native-ese-catalog-decoding-required",
+                "native-ese-page-row-decoding-required",
                 srum_row_review_profile["native_depth_profile"]["blocked_native_decode_gates"],
             )
             self.assertTrue(srum_row_candidate["details"]["validation_checks"]["requires_srum_parser"])
@@ -3641,7 +3646,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertTrue(srum_table["details"]["validation_checks"]["requires_srum_parser"])
             summary = next(item for item in artifacts if item["artifact_type"] == "windows-execution-summary")
             groups = {item["display_name"]: item for item in summary["details"]["groups"]}
-            self.assertFalse(summary["details"]["native_capabilities"]["native_ese_catalog_decode"])
+            self.assertTrue(summary["details"]["native_capabilities"]["native_ese_catalog_decode"])
             self.assertTrue(summary["details"]["report_grade_status_counts"])
             self.assertEqual(
                 summary["details"]["execution_correlation_profile"]["profile_version"],
@@ -3786,6 +3791,60 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
         self.assertFalse(diff["commercial_grade_evidence"])
         self.assertEqual(diff["mismatch_count"], 1)
         self.assertIn("execution-artifact-trusted-diff-required", diff["reportability_decision"]["blockers"])
+
+    def test_ese_native_decoder_reads_catalog_and_table_rows(self) -> None:
+        blob = _minimal_ese_database_with_catalog()
+
+        db = EseDatabase(blob)
+
+        self.assertEqual(db.page_size, 4096)
+        self.assertFalse(db.errors)
+        self.assertEqual([table.name for table in db.tables], ["TestTable"])
+        table = db.tables[0]
+        self.assertEqual([(column.identifier, column.name) for column in table.columns], [(1, "Counter"), (128, "Label")])
+        rows = list(db.iter_table_rows(table))
+        self.assertEqual(len(rows), 1)
+        node, row, markers = rows[0]
+        self.assertEqual(row, {"Counter": 42, "Label": "hello"})
+        self.assertEqual(markers, [])
+        self.assertEqual(node.record_file_offset, 6 * 4096 + 40)
+        self.assertFalse(node.deleted)
+
+    def test_ese_native_decoder_flags_dirty_database_state(self) -> None:
+        blob = bytearray(_minimal_ese_database_with_catalog())
+        blob[52:56] = (3).to_bytes(4, "little")
+
+        db = EseDatabase(bytes(blob))
+
+        self.assertTrue(any("dirty-state=3" in item for item in db.limitations))
+
+    def test_srum_schema_rows_emit_from_native_ese_decode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "SRUDB.dat"
+            path.write_bytes(_minimal_ese_database_with_catalog())
+
+            inventory = build_srum_database_inventory_record(path)
+            rows = list(build_srum_schema_row_records(path, inventory.details))
+
+            self.assertEqual(inventory.details["native_ese_catalog"]["decode_status"], "decoded")
+            self.assertTrue(inventory.details["validation_checks"]["row_level_decoding_available"])
+            self.assertEqual(len(rows), 1)
+            record = rows[0]
+            self.assertEqual(record.artifact_type, "srum-schema-row")
+            self.assertEqual(record.details["table_name"], "TestTable")
+            self.assertEqual(record.details["row_fields"], {"Counter": 42, "Label": "hello"})
+            self.assertEqual(record.details["source_offset"], 6 * 4096 + 40)
+            self.assertTrue(record.details["validation_checks"]["row_level_decoding_available"])
+            self.assertFalse(record.details["commercial_grade_ready"])
+            self.assertIn("ese-transaction-log-replay-not-performed", record.details["commercial_grade_blockers"])
+
+    def test_srum_schema_row_identity_decodes_idblob(self) -> None:
+        self.assertEqual(
+            srum_schema_row_identity({"IdBlob": "!!svchost.exe!1972/12/14:16:22:50".encode("utf-16le")}),
+            "svchost.exe",
+        )
+        self.assertEqual(srum_schema_row_identity({"AppId": "app.exe"}), "app.exe")
+        self.assertEqual(srum_schema_row_identity({}), "")
 
     def test_windows_prefetch_fixture_surfaces_run_count_and_last_run_time(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

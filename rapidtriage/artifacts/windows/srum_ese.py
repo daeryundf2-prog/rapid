@@ -6,8 +6,10 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 
 from .ese import ESE_SCAN_READ_SIZE, read_prefix
+from .ese_native import EseDatabase
 
 ESE_PAGE_SIZES = {2048, 4096, 8192, 16384, 32768}
+SRUM_NATIVE_DECODE_MAX_BYTES = 512 * 1024 * 1024
 SRUM_ROW_CLUSTER_WINDOW_BYTES = 4096
 WINDOWS_PATH_RE = re.compile(r"(?i)(?:[a-z]:\\|\\\\)[^\x00\r\n\t\"'<>|]{4,260}")
 URL_RE = re.compile(r"(?i)https?://[^\s\x00\"'<>]{4,300}")
@@ -57,15 +59,90 @@ def analyze_srudb_native(path: Path, *, ese_header: Mapping[str, object]) -> dic
     string_hits = list(unique_string_hits(iter_printable_string_hits(blob)))[:400]
     table_candidates = build_srum_table_candidates(string_hits)
     row_candidates = build_srum_row_candidates(string_hits)
+    ese_decode = decode_srudb_ese_catalog(path)
     return {
-        "native_srudb_validation": build_srudb_validation(path, ese_header, blob),
+        "native_srudb_validation": build_srudb_validation(path, ese_header, blob, ese_decode=ese_decode),
         "native_string_hit_count": len(string_hits),
         "native_srum_table_candidates": table_candidates,
         "native_srum_row_candidates": row_candidates,
+        "native_ese_catalog": ese_decode,
     }
 
 
-def build_srudb_validation(path: Path, ese_header: Mapping[str, object], blob: bytes) -> dict[str, object]:
+def decode_srudb_ese_catalog(path: Path, *, max_bytes: int = SRUM_NATIVE_DECODE_MAX_BYTES) -> dict[str, object]:
+    try:
+        stat_result = path.stat()
+    except OSError:
+        return {"decode_status": "unreadable", "tables": [], "table_count": 0, "total_rows": 0}
+    if stat_result.st_size > max_bytes:
+        return {
+            "decode_status": "size-bound-skipped",
+            "tables": [],
+            "table_count": 0,
+            "total_rows": 0,
+            "file_size": stat_result.st_size,
+        }
+    try:
+        blob = path.read_bytes()
+    except OSError:
+        return {"decode_status": "unreadable", "tables": [], "table_count": 0, "total_rows": 0}
+    db = EseDatabase(blob)
+    tables: list[dict[str, object]] = []
+    total_rows = 0
+    for table in db.tables:
+        count = sum(1 for _ in db.iter_table_rows(table))
+        tables.append(
+            {
+                "name": table.name,
+                "root_page": table.root_page,
+                "column_count": len(table.columns),
+                "row_count": count,
+                "lv_root_page": table.lv_root_page,
+            }
+        )
+        total_rows += count
+    return {
+        "decode_status": "decoded" if db.tables else "no-tables",
+        "page_size": db.page_size,
+        "page_count": db.page_count,
+        "format_major": db.format_major,
+        "format_minor": db.format_minor,
+        "tables": tables,
+        "table_count": len(db.tables),
+        "total_rows": total_rows,
+        "limitations": list(db.limitations),
+        "errors": list(db.errors),
+    }
+
+
+def iter_srudb_schema_rows(path: Path, *, max_bytes: int = SRUM_NATIVE_DECODE_MAX_BYTES) -> Iterable[dict[str, object]]:
+    try:
+        stat_result = path.stat()
+        if stat_result.st_size > max_bytes:
+            return
+        blob = path.read_bytes()
+    except OSError:
+        return
+    db = EseDatabase(blob)
+    for table in db.tables:
+        # MSys* entries are ESE catalog metadata and *LT tables hold raw
+        # long-value payloads keyed by parent id; neither is a SRUM data row.
+        if table.name.startswith("MSys") or table.name.endswith("LT"):
+            continue
+        for node, row, markers in db.iter_table_rows(table):
+            yield {
+                "table_name": table.name,
+                "table_root_page": table.root_page,
+                "page_num": node.page_num,
+                "tag_num": node.tag_num,
+                "record_file_offset": node.record_file_offset,
+                "deleted": node.deleted,
+                "row": row,
+                "markers": list(markers),
+            }
+
+
+def build_srudb_validation(path: Path, ese_header: Mapping[str, object], blob: bytes, *, ese_decode: Mapping[str, object] | None = None) -> dict[str, object]:
     try:
         file_size = path.stat().st_size
     except OSError:
@@ -81,8 +158,13 @@ def build_srudb_validation(path: Path, ese_header: Mapping[str, object], blob: b
         status = "header-size-plausible"
     if status == "header-size-plausible" and trailing_bytes == 0:
         status = "header-size-page-aligned"
+    decode = ese_decode or {}
+    decode_status = str(decode.get("decode_status") or "not-attempted")
+    table_count = int(decode.get("table_count") or 0)
+    if status == "header-size-page-aligned" and decode_status == "decoded" and table_count:
+        status = "ese-catalog-and-rows-decoded"
     return {
-        "validation_scope": "ese-header-size-and-bounded-string-scan",
+        "validation_scope": "ese-header-native-catalog-row-decode-and-bounded-string-scan",
         "validation_status": status,
         "header_readable": header_readable,
         "ese_signature_valid": signature_valid,
@@ -97,11 +179,15 @@ def build_srudb_validation(path: Path, ese_header: Mapping[str, object], blob: b
         "scan_bytes": len(blob),
         "scan_truncated": file_size > len(blob),
         "first_page_sha256": hashlib.sha256(blob[:page_size]).hexdigest() if page_size and len(blob) >= page_size else "",
-        "catalog_decoded": False,
-        "table_pages_decoded": False,
+        "ese_decode_status": decode_status,
+        "ese_table_count": table_count,
+        "ese_total_rows": int(decode.get("total_rows") or 0),
+        "ese_decode_limitations": list(decode.get("limitations") or []),
+        "catalog_decoded": decode_status == "decoded" and bool(table_count),
+        "table_pages_decoded": decode_status == "decoded" and bool(table_count),
         "page_checksums_verified": False,
-        "row_level_decoding_available": False,
-        "requires_dedicated_ese_srum_parser": True,
+        "row_level_decoding_available": decode_status == "decoded" and bool(table_count),
+        "requires_dedicated_ese_srum_parser": decode_status != "decoded",
     }
 
 

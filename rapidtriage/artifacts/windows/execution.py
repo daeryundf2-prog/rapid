@@ -28,7 +28,7 @@ from .registry import (
     registry_value_data_preview,
     registry_value_offsets_for_key,
 )
-from .srum_ese import analyze_srudb_native
+from .srum_ese import analyze_srudb_native, iter_srudb_schema_rows
 
 PARSER_VERSION = "windows-execution-v14"
 REGISTRY_EXPORT_EXT = ".reg"
@@ -36,6 +36,7 @@ SRUM_IMPORT_SUFFIXES = {".csv", ".json", ".jsonl", ".ndjson"}
 AMCACHE_HIVE_NAME = "AMCACHE.HVE"
 SYSTEM_HIVE_NAME = "SYSTEM"
 MAX_NATIVE_AMCACHE_SCAN_BYTES = 64 * 1024 * 1024
+MAX_NATIVE_SRUM_SCHEMA_ROWS = 20_000
 AMCACHE_INVENTORY_SECTIONS = ("InventoryApplicationFile", "File", "InventoryApplication", "Programs")
 MAX_AMCACHE_SCHEMA_CELLS = 400_000
 MAX_AMCACHE_SCHEMA_ROWS = 20_000
@@ -100,8 +101,8 @@ EXECUTION_NATIVE_CAPABILITIES = {
     "native_shimcache_binary_decode": True,
     "native_bam_system_hive_decode": True,
     "native_userassist_value_decode": True,
-    "native_ese_catalog_decode": False,
-    "native_srum_page_row_decode": False,
+    "native_ese_catalog_decode": True,
+    "native_srum_page_row_decode": True,
 }
 EXECUTION_REPORT_GRADE_BLOCKERS = [
     "execution-artifact-trusted-diff-required",
@@ -2325,9 +2326,9 @@ def build_srum_database_inventory_record(path: Path) -> ArtifactRecord:
         "has_url_pivots": bool(pivots.get("url_candidates")),
         "has_native_srum_table_candidates": bool(table_candidates),
         "has_native_srum_row_candidates": bool(row_candidates),
-        "row_level_decoding_available": False,
-        "native_table_catalog_decoding_available": False,
-        "requires_srum_parser": True,
+        "row_level_decoding_available": bool(dict(native_validation).get("row_level_decoding_available")),
+        "native_table_catalog_decoding_available": bool(dict(native_validation).get("catalog_decoded")),
+        "requires_srum_parser": not bool(dict(native_validation).get("row_level_decoding_available")),
     }
     report_grade = execution_report_grade_assessment(
         execution_validation_matrix(validation_checks),
@@ -2395,7 +2396,13 @@ def build_srum_database_inventory_record(path: Path) -> ArtifactRecord:
         details={
             "parser": "windows-srum-ese-inventory",
             "parser_version": PARSER_VERSION,
-            "coverage_status": "ese-header-string-scan" if ese_header.get("header_readable") else "detected",
+            "coverage_status": (
+                "ese-catalog-and-rows-decoded"
+                if dict(native_validation).get("row_level_decoding_available")
+                else "ese-header-string-scan"
+                if ese_header.get("header_readable")
+                else "detected"
+            ),
             "reportability": "inventory-only",
             "source_path": str(path.resolve()),
             "source_format": "ese-srum",
@@ -2408,6 +2415,7 @@ def build_srum_database_inventory_record(path: Path) -> ArtifactRecord:
             "native_srum_table_candidate_count": len(table_candidates),
             "native_srum_row_candidate_count": len(row_candidates),
             "native_srum_row_candidates": row_candidates[:20],
+            "native_ese_catalog": native_srudb["native_ese_catalog"],
             "srum_database_evidence": srum_database_evidence(
                 ese_header,
                 native_validation,
@@ -2641,6 +2649,120 @@ def build_srum_database_pivot_records(path: Path, inventory_details: Mapping[str
         )
     yield from build_srum_database_table_candidate_records(path, inventory_details)
     yield from build_srum_database_row_candidate_records(path, inventory_details)
+    yield from build_srum_schema_row_records(path, inventory_details)
+
+
+def build_srum_schema_row_records(path: Path, inventory_details: Mapping[str, object]) -> Iterable[ArtifactRecord]:
+    catalog = inventory_details.get("native_ese_catalog")
+    if not isinstance(catalog, Mapping) or catalog.get("decode_status") != "decoded":
+        return
+    source_hashes = file_hashes(path)
+    emitted = 0
+    for entry in iter_srudb_schema_rows(path):
+        if emitted >= MAX_NATIVE_SRUM_SCHEMA_ROWS:
+            break
+        yield build_srum_schema_row_record(path, source_hashes, entry, emitted)
+        emitted += 1
+
+
+def build_srum_schema_row_record(
+    path: Path,
+    source_hashes: Mapping[str, str],
+    entry: Mapping[str, object],
+    index: int,
+) -> ArtifactRecord:
+    row = dict(entry.get("row") or {})
+    markers = [str(marker) for marker in entry.get("markers") or []]
+    table_name = str(entry.get("table_name") or "")
+    record_offset = int(entry.get("record_file_offset") or 0)
+    app_identity = srum_schema_row_identity(row)
+    timestamp = str(row.get("TimeStamp") or row.get("EndTime") or row.get("Timestamp") or "")
+    validation_checks = {
+        "has_table_name": bool(table_name),
+        "has_source_offset": bool(record_offset),
+        "row_level_decoding_available": True,
+        "native_table_catalog_decoding_available": True,
+        "has_app_identity": bool(app_identity),
+        "has_timestamp_candidate": bool(timestamp),
+        "has_long_value_marker": any("long_value" in marker or "separated" in marker for marker in markers),
+        "deleted_row": bool(entry.get("deleted")),
+        "requires_correlation": True,
+        "requires_second_parser_validation": True,
+    }
+    report_grade = execution_report_grade_assessment(
+        execution_validation_matrix(validation_checks),
+        validation_required=True,
+        gap_ids=["#10"],
+        extra_blockers=[
+            "ese-transaction-log-replay-not-performed",
+            "srum-table-semantic-mapping-required",
+            "trusted-srum-parser-diff-required",
+        ],
+    )
+    return ArtifactRecord(
+        provider=WindowsExecutionProvider.name,
+        artifact_type="srum-schema-row",
+        path=str(path.resolve()),
+        supported=True,
+        details={
+            "parser": "windows-srum-ese-schema-row",
+            "parser_version": PARSER_VERSION,
+            "coverage_status": "native-ese-row-decode",
+            "reportability": "review",
+            "source_path": str(path.resolve()),
+            "source_format": "ese-srum-native-decode",
+            "source_hashes": dict(source_hashes),
+            "source_index": index,
+            "source_offset": record_offset,
+            "table_name": table_name,
+            "table_root_page": entry.get("table_root_page", 0),
+            "page_num": entry.get("page_num", 0),
+            "tag_num": entry.get("tag_num", 0),
+            "deleted_row": bool(entry.get("deleted")),
+            "app_identity": app_identity,
+            "timestamp": timestamp,
+            "timestamp_source": "native-ese-row-field" if timestamp else "not-decoded",
+            "row_fields": row,
+            "decode_markers": markers,
+            "row_level_decoding_available": True,
+            "evidence_strength": "srum-row-indicator-candidate",
+            "validation_required": True,
+            "validation_checks": validation_checks,
+            "execution_validation_matrix": execution_validation_matrix(validation_checks),
+            "execution_report_grade_assessment": report_grade,
+            "forensic_review": build_forensic_review(
+                gap_id="#10",
+                artifact_goal="SRUM ESE row-level decode",
+                primary_evidence=[
+                    f"table={table_name}",
+                    f"identity={app_identity}" if app_identity else "",
+                    f"timestamp={timestamp}" if timestamp else "",
+                ],
+                validation_required=True,
+                report_grade_assessment=report_grade,
+                caveats=[
+                    "ESE transaction-log replay not performed; dirty-database tail rows may be missing",
+                    "SRUM table GUID/semantic mapping requires independent validation",
+                    "row counters are not standalone proof of execution",
+                ],
+            ),
+            "commercial_grade_ready": False,
+            "commercial_grade_blockers": report_grade["blockers"],
+            "risk_flags": srum_candidate_risk_flags("srum-schema-row", app_identity),
+            "risk_score": 30,
+            "raw_preview": repr(row)[:2000],
+        },
+    )
+
+
+def srum_schema_row_identity(row: Mapping[str, object]) -> str:
+    blob = row.get("IdBlob")
+    if isinstance(blob, (bytes, bytearray)):
+        text = bytes(blob).decode("utf-16le", errors="replace").strip("\x00")
+        # SruDbIdMapTable IdBlob values are "!"-separated: identity, install
+        # timestamp, and context tokens; the leading segment is the app/user path.
+        return next((part for part in text.split("!") if part.strip()), text.strip())
+    return str(row.get("IdBlob") or row.get("AppId") or row.get("UserId") or "")
 
 
 def build_srum_database_table_candidate_records(path: Path, inventory_details: Mapping[str, object]) -> Iterable[ArtifactRecord]:
@@ -4588,7 +4710,10 @@ def execution_native_depth_blockers(artifact_family: str, validation_checks: Map
     if artifact_family == "srum":
         if not EXECUTION_NATIVE_CAPABILITIES["native_ese_catalog_decode"]:
             blockers.add("native-ese-catalog-decoding-required")
-        if not EXECUTION_NATIVE_CAPABILITIES["native_srum_page_row_decode"]:
+        if (
+            not EXECUTION_NATIVE_CAPABILITIES["native_srum_page_row_decode"]
+            or validation_checks.get("row_level_decoding_available") is not True
+        ):
             blockers.add("native-ese-page-row-decoding-required")
     if validation_checks.get("requires_second_parser_validation") or validation_checks.get("requires_srum_parser"):
         blockers.add("trusted-tool-row-diff-required")
@@ -4691,7 +4816,10 @@ def execution_native_depth_profile(
                     and validation_checks.get("native_binary_layout_decoding_available") is True
                 )
                 if artifact_family == "bam-dam"
-                else bool(EXECUTION_NATIVE_CAPABILITIES["native_srum_page_row_decode"])
+                else (
+                    bool(EXECUTION_NATIVE_CAPABILITIES["native_srum_page_row_decode"])
+                    and validation_checks.get("row_level_decoding_available") is True
+                )
                 if artifact_family == "srum"
                 else False
             ),

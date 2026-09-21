@@ -365,6 +365,47 @@ engineering reference, not a recognized trusted tool.
 
 Report: `D:\devin\trusted-ref\userassist-diff-report.json`.
 
+## SRUM/ESE native decode vs dissect.esedb (B-series)
+
+`rapidtriage/artifacts/windows/ese_native.py` is a bounded native ESE
+decoder (database header, small/large page headers, tag arrays, B-tree
+branch/leaf traversal, MSysObjects catalog bootstrap, fixed/variable/
+tagged record fields, text/int/GUID/binary/OLE-date values). It feeds
+`analyze_srudb_native` (`native_ese_catalog`) and emits bounded
+`srum-schema-row` records (`MAX_NATIVE_SRUM_SCHEMA_ROWS = 20,000`,
+system `MSys*`/`*LT` tables excluded, per-row `record_file_offset`).
+
+Comparison target: real `SRUDB.dat` (104 MB, dirty state=3, 4096-byte
+pages) against `dissect.esedb` row decode
+(`scripts/srum-reference-diff.py`).
+
+| Metric | Result |
+|--------|--------|
+| Tables discovered | **16/16** (all MSys + SruDbIdMap + GUID tables) |
+| Row counts | **365,840/365,840** identical per table |
+| Canonical row-multiset field agreement | **365,840/365,840 (1.0)** |
+| SruDbIdMapTable IdIndex→identity | **15,045/15,045 recall=1.0 precision=1.0** |
+
+Two parser bugs found and fixed during this diff: logical→physical
+page mapping (`physical = logical + 2`; header/shadow pages) and the
+final tagged-field boundary (`data_end == len(record)` is legal).
+`parse_column_value` now decodes JET DateTime (coltyp 8) as an OLE
+Automation double → ISO string; dissect returns the raw int64, so the
+diff normalizes both sides column-aware.
+
+Limitations (kept as blockers/caveats): the database is dirty
+(state=3) and **no transaction-log replay** is performed, so tail rows
+may be missing; long-value (`TAGFLD_SEPARATED`) and compressed tagged
+payloads are surfaced as markers, not resolved; SRUM table GUID →
+semantic family mapping still requires independent validation;
+`srum-schema-row` records stay `reportability: review` with
+`ese-transaction-log-replay-not-performed`,
+`srum-table-semantic-mapping-required`, and
+`trusted-srum-parser-diff-required` blockers. dissect.esedb is an
+engineering reference, not a recognized trusted tool.
+
+Report: `D:\devin\trusted-ref\srum-diff-report.json`.
+
 ## Release-gate impact
 
 `quantitative-accuracy-thresholds` stays `blocked`: the gate requires
