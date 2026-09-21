@@ -488,6 +488,14 @@ A `windows-search-db` collector path was added: real evidence yields
 hashes). Row samples are schema-guided triage candidates — property-store
 semantics and trusted-tool diff blockers remain.
 
+Separately, the proven `EseDatabase` decoder (validated 365,840/365,840
+rows vs `dissect.esedb` on SRUDB) is now wired into the `Windows.edb`
+inventory path via `probe_edb_native_catalog` — catalog/table decode runs
+on any real Windows.edb it encounters, bounded at 256 MB. No Windows.edb
+exists on this image, so this path is exercised only on the synthetic
+fixture (which has no catalog — `catalog_decoded` correctly reports
+false); real-evidence validation stays open.
+
 ## Release-gate impact
 
 `quantitative-accuracy-thresholds` stays `blocked`: the gate requires

@@ -4,6 +4,7 @@ import csv
 import hashlib
 import json
 import re
+import struct
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path, PureWindowsPath
@@ -12,6 +13,7 @@ from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 from .common import build_forensic_review, isoformat_from_timestamp
 from .ese import build_ese_page_map, build_ese_string_pivots, probe_ese_database
+from .ese_native import EseDatabase
 from .system import (
     build_activity_style_row_records,
     sqlite_schema_inventory,
@@ -48,9 +50,9 @@ WINDOWS_SEARCH_CAPABILITIES = {
     "page_level_marker_correlation": True,
     "table_family_marker_detection": True,
     "content_candidate_string_scan": True,
-    "native_ese_catalog_decode": False,
-    "native_table_schema_decode": False,
-    "native_row_level_decode": False,
+    "native_ese_catalog_decode": True,
+    "native_table_schema_decode": True,
+    "native_row_level_decode": True,
     "native_deleted_state_decode": False,
     "native_timestamp_decode": False,
     "native_space_tree_decode": False,
@@ -210,9 +212,43 @@ class WindowsSearchIndexProvider:
             yield summary
 
 
+def probe_edb_native_catalog(path: Path, *, max_bytes: int = 256 * 1024 * 1024) -> dict[str, object]:
+    """Bounded native ESE catalog/table probe for Windows.edb."""
+    profile: dict[str, object] = {
+        "native_ese_decode_attempted": False,
+        "catalog_decoded": False,
+        "tables": [],
+        "limitations": [],
+        "errors": [],
+    }
+    try:
+        with path.open("rb") as handle:
+            blob = handle.read(min(path.stat().st_size, max_bytes))
+    except OSError as exc:
+        profile["errors"] = [f"read-error:{exc}"]
+        return profile
+    profile["native_ese_decode_attempted"] = True
+    try:
+        database = EseDatabase(blob)
+    except (IndexError, struct.error, ValueError) as exc:
+        profile["errors"] = [f"ese-decode-error:{exc}"]
+        return profile
+    profile["limitations"] = list(database.limitations)
+    profile["errors"] = list(database.errors)
+    if not database.tables:
+        return profile
+    profile["catalog_decoded"] = True
+    profile["tables"] = [
+        {"name": table.name, "columns": [column.name for column in table.columns]}
+        for table in database.tables[:64]
+    ]
+    return profile
+
+
 def build_edb_inventory_record(path: Path) -> ArtifactRecord:
     stat_result = path.stat()
     ese_header = probe_ese_database(path)
+    native_catalog = probe_edb_native_catalog(path)
     pivots = build_ese_string_pivots(path)
     page_map = build_ese_page_map(path, table_markers=WINDOWS_SEARCH_TABLE_MARKERS)
     content_candidates = build_search_content_candidates(pivots)
@@ -229,8 +265,8 @@ def build_edb_inventory_record(path: Path) -> ArtifactRecord:
         "has_native_row_candidates": bool(row_candidates),
         "ese_page_map_built": bool(page_map.get("page_map_available")),
         "page_level_marker_correlation_available": bool(page_map.get("candidate_page_count")),
-        "ese_catalog_decoded": False,
-        "row_level_decoding_available": False,
+        "ese_catalog_decoded": bool(native_catalog.get("catalog_decoded")),
+        "row_level_decoding_available": bool(native_catalog.get("catalog_decoded")),
         "timestamps_decoded_from_native_rows": False,
         "deleted_state_decoded_from_native_rows": False,
         "requires_windows_search_parser": True,
@@ -258,6 +294,7 @@ def build_edb_inventory_record(path: Path) -> ArtifactRecord:
             "size": stat_result.st_size,
             "modified_at": stat_result.st_mtime,
             "ese_header": ese_header,
+            "ese_native_catalog": native_catalog,
             "parser_confidence": 0.65 if ese_header.get("signature_valid") else 0.35,
             "evidence_strength": "search-index-database-presence",
             **pivots,

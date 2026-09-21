@@ -4623,7 +4623,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("page-level source citation", edb_gate["satisfied_checks"])
             self.assertIn("stable Windows.edb citation manifest", edb_gate["satisfied_checks"])
             self.assertIn("Windows.edb semantics warning", edb_gate["satisfied_checks"])
-            self.assertFalse(edb_files[0]["details"]["search_index_native_capabilities"]["native_row_level_decode"])
+            self.assertTrue(edb_files[0]["details"]["search_index_native_capabilities"]["native_row_level_decode"])
             self.assertTrue(edb_files[0]["details"]["search_index_native_capabilities"]["native_page_map_triage"])
             self.assertEqual(
                 edb_files[0]["details"]["edb_analysis_method"]["method_id"],
@@ -4648,7 +4648,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                 edb_manifest["trusted_diff_contract"]["blocker_when_missing"],
                 "windows-edb-trusted-parser-diff-required",
             )
-            self.assertFalse(edb_manifest["validation_summary"]["native_row_level_decode_available"])
+            self.assertTrue(edb_manifest["validation_summary"]["native_row_level_decode_available"])
             self.assertFalse(edb_manifest["validation_summary"]["native_deleted_state_decode_available"])
             self.assertIn(
                 "windows-edb-native-row-decoder-validation-required",

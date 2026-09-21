@@ -15089,6 +15089,17 @@
               "file_type": 1,
               "page_size": 8192
             },
+            "ese_native_catalog": {
+              "native_ese_decode_attempted": true,
+              "catalog_decoded": false,
+              "tables": [],
+              "limitations": [
+                "database dirty-state=0: transaction-log replay not performed, tail rows may be missing"
+              ],
+              "errors": [
+                "unsupported-format-major=0"
+              ]
+            },
             "parser_confidence": 0.65,
             "evidence_strength": "search-index-database-presence",
             "string_scan_bytes": 16384,
@@ -15464,8 +15475,8 @@
                 "commercial_gap_ids": [
                   "#11"
                 ],
-                "native_ese_catalog_decode_available": false,
-                "native_row_level_decode_available": false,
+                "native_ese_catalog_decode_available": true,
+                "native_row_level_decode_available": true,
                 "native_deleted_state_decode_available": false,
                 "trusted_windows_search_parser_diff_required": true
               },
@@ -15705,9 +15716,9 @@
               "page_level_marker_correlation": true,
               "table_family_marker_detection": true,
               "content_candidate_string_scan": true,
-              "native_ese_catalog_decode": false,
-              "native_table_schema_decode": false,
-              "native_row_level_decode": false,
+              "native_ese_catalog_decode": true,
+              "native_table_schema_decode": true,
+              "native_row_level_decode": true,
               "native_deleted_state_decode": false,
               "native_timestamp_decode": false,
               "native_space_tree_decode": false,
@@ -16304,8 +16315,8 @@
                 "commercial_gap_ids": [
                   "#11"
                 ],
-                "native_ese_catalog_decode_available": false,
-                "native_row_level_decode_available": false,
+                "native_ese_catalog_decode_available": true,
+                "native_row_level_decode_available": true,
                 "native_deleted_state_decode_available": false,
                 "trusted_windows_search_parser_diff_required": true
               },
@@ -16514,9 +16525,9 @@
               "page_level_marker_correlation": true,
               "table_family_marker_detection": true,
               "content_candidate_string_scan": true,
-              "native_ese_catalog_decode": false,
-              "native_table_schema_decode": false,
-              "native_row_level_decode": false,
+              "native_ese_catalog_decode": true,
+              "native_table_schema_decode": true,
+              "native_row_level_decode": true,
               "native_deleted_state_decode": false,
               "native_timestamp_decode": false,
               "native_space_tree_decode": false,
@@ -16996,8 +17007,8 @@
                 "commercial_gap_ids": [
                   "#11"
                 ],
-                "native_ese_catalog_decode_available": false,
-                "native_row_level_decode_available": false,
+                "native_ese_catalog_decode_available": true,
+                "native_row_level_decode_available": true,
                 "native_deleted_state_decode_available": false,
                 "trusted_windows_search_parser_diff_required": true
               },
@@ -17149,9 +17160,9 @@
               "page_level_marker_correlation": true,
               "table_family_marker_detection": true,
               "content_candidate_string_scan": true,
-              "native_ese_catalog_decode": false,
-              "native_table_schema_decode": false,
-              "native_row_level_decode": false,
+              "native_ese_catalog_decode": true,
+              "native_table_schema_decode": true,
+              "native_row_level_decode": true,
               "native_deleted_state_decode": false,
               "native_timestamp_decode": false,
               "native_space_tree_decode": false,
@@ -17591,8 +17602,8 @@
                 "commercial_gap_ids": [
                   "#11"
                 ],
-                "native_ese_catalog_decode_available": false,
-                "native_row_level_decode_available": false,
+                "native_ese_catalog_decode_available": true,
+                "native_row_level_decode_available": true,
                 "native_deleted_state_decode_available": false,
                 "trusted_windows_search_parser_diff_required": true
               },
@@ -17743,9 +17754,9 @@
               "page_level_marker_correlation": true,
               "table_family_marker_detection": true,
               "content_candidate_string_scan": true,
-              "native_ese_catalog_decode": false,
-              "native_table_schema_decode": false,
-              "native_row_level_decode": false,
+              "native_ese_catalog_decode": true,
+              "native_table_schema_decode": true,
+              "native_row_level_decode": true,
               "native_deleted_state_decode": false,
               "native_timestamp_decode": false,
               "native_space_tree_decode": false,
@@ -18180,8 +18191,8 @@
                 "commercial_gap_ids": [
                   "#11"
                 ],
-                "native_ese_catalog_decode_available": false,
-                "native_row_level_decode_available": false,
+                "native_ese_catalog_decode_available": true,
+                "native_row_level_decode_available": true,
                 "native_deleted_state_decode_available": false,
                 "trusted_windows_search_parser_diff_required": true
               },
@@ -18332,9 +18343,9 @@
               "page_level_marker_correlation": true,
               "table_family_marker_detection": true,
               "content_candidate_string_scan": true,
-              "native_ese_catalog_decode": false,
-              "native_table_schema_decode": false,
-              "native_row_level_decode": false,
+              "native_ese_catalog_decode": true,
+              "native_table_schema_decode": true,
+              "native_row_level_decode": true,
               "native_deleted_state_decode": false,
               "native_timestamp_decode": false,
               "native_space_tree_decode": false,
@@ -18771,8 +18782,8 @@
                 "commercial_gap_ids": [
                   "#11"
                 ],
-                "native_ese_catalog_decode_available": false,
-                "native_row_level_decode_available": false,
+                "native_ese_catalog_decode_available": true,
+                "native_row_level_decode_available": true,
                 "native_deleted_state_decode_available": false,
                 "trusted_windows_search_parser_diff_required": true
               },
@@ -18923,9 +18934,9 @@
               "page_level_marker_correlation": true,
               "table_family_marker_detection": true,
               "content_candidate_string_scan": true,
-              "native_ese_catalog_decode": false,
-              "native_table_schema_decode": false,
-              "native_row_level_decode": false,
+              "native_ese_catalog_decode": true,
+              "native_table_schema_decode": true,
+              "native_row_level_decode": true,
               "native_deleted_state_decode": false,
               "native_timestamp_decode": false,
               "native_space_tree_decode": false,
@@ -19509,8 +19520,8 @@
                 "commercial_gap_ids": [
                   "#11"
                 ],
-                "native_ese_catalog_decode_available": false,
-                "native_row_level_decode_available": false,
+                "native_ese_catalog_decode_available": true,
+                "native_row_level_decode_available": true,
                 "native_deleted_state_decode_available": false,
                 "trusted_windows_search_parser_diff_required": true
               },
@@ -19729,9 +19740,9 @@
               "page_level_marker_correlation": true,
               "table_family_marker_detection": true,
               "content_candidate_string_scan": true,
-              "native_ese_catalog_decode": false,
-              "native_table_schema_decode": false,
-              "native_row_level_decode": false,
+              "native_ese_catalog_decode": true,
+              "native_table_schema_decode": true,
+              "native_row_level_decode": true,
               "native_deleted_state_decode": false,
               "native_timestamp_decode": false,
               "native_space_tree_decode": false,
@@ -20287,8 +20298,8 @@
                 "commercial_gap_ids": [
                   "#11"
                 ],
-                "native_ese_catalog_decode_available": false,
-                "native_row_level_decode_available": false,
+                "native_ese_catalog_decode_available": true,
+                "native_row_level_decode_available": true,
                 "native_deleted_state_decode_available": false,
                 "trusted_windows_search_parser_diff_required": true
               },
@@ -20461,9 +20472,9 @@
               "page_level_marker_correlation": true,
               "table_family_marker_detection": true,
               "content_candidate_string_scan": true,
-              "native_ese_catalog_decode": false,
-              "native_table_schema_decode": false,
-              "native_row_level_decode": false,
+              "native_ese_catalog_decode": true,
+              "native_table_schema_decode": true,
+              "native_row_level_decode": true,
               "native_deleted_state_decode": false,
               "native_timestamp_decode": false,
               "native_space_tree_decode": false,
@@ -21001,8 +21012,8 @@
                 "commercial_gap_ids": [
                   "#11"
                 ],
-                "native_ese_catalog_decode_available": false,
-                "native_row_level_decode_available": false,
+                "native_ese_catalog_decode_available": true,
+                "native_row_level_decode_available": true,
                 "native_deleted_state_decode_available": false,
                 "trusted_windows_search_parser_diff_required": true
               },
@@ -21175,9 +21186,9 @@
               "page_level_marker_correlation": true,
               "table_family_marker_detection": true,
               "content_candidate_string_scan": true,
-              "native_ese_catalog_decode": false,
-              "native_table_schema_decode": false,
-              "native_row_level_decode": false,
+              "native_ese_catalog_decode": true,
+              "native_table_schema_decode": true,
+              "native_row_level_decode": true,
               "native_deleted_state_decode": false,
               "native_timestamp_decode": false,
               "native_space_tree_decode": false,
@@ -21717,8 +21728,8 @@
                 "commercial_gap_ids": [
                   "#11"
                 ],
-                "native_ese_catalog_decode_available": false,
-                "native_row_level_decode_available": false,
+                "native_ese_catalog_decode_available": true,
+                "native_row_level_decode_available": true,
                 "native_deleted_state_decode_available": false,
                 "trusted_windows_search_parser_diff_required": true
               },
@@ -21891,9 +21902,9 @@
               "page_level_marker_correlation": true,
               "table_family_marker_detection": true,
               "content_candidate_string_scan": true,
-              "native_ese_catalog_decode": false,
-              "native_table_schema_decode": false,
-              "native_row_level_decode": false,
+              "native_ese_catalog_decode": true,
+              "native_table_schema_decode": true,
+              "native_row_level_decode": true,
               "native_deleted_state_decode": false,
               "native_timestamp_decode": false,
               "native_space_tree_decode": false,
@@ -22429,8 +22440,8 @@
                 "commercial_gap_ids": [
                   "#11"
                 ],
-                "native_ese_catalog_decode_available": false,
-                "native_row_level_decode_available": false,
+                "native_ese_catalog_decode_available": true,
+                "native_row_level_decode_available": true,
                 "native_deleted_state_decode_available": false,
                 "trusted_windows_search_parser_diff_required": true
               },
@@ -22603,9 +22614,9 @@
               "page_level_marker_correlation": true,
               "table_family_marker_detection": true,
               "content_candidate_string_scan": true,
-              "native_ese_catalog_decode": false,
-              "native_table_schema_decode": false,
-              "native_row_level_decode": false,
+              "native_ese_catalog_decode": true,
+              "native_table_schema_decode": true,
+              "native_row_level_decode": true,
               "native_deleted_state_decode": false,
               "native_timestamp_decode": false,
               "native_space_tree_decode": false,
@@ -23145,8 +23156,8 @@
                 "commercial_gap_ids": [
                   "#11"
                 ],
-                "native_ese_catalog_decode_available": false,
-                "native_row_level_decode_available": false,
+                "native_ese_catalog_decode_available": true,
+                "native_row_level_decode_available": true,
                 "native_deleted_state_decode_available": false,
                 "trusted_windows_search_parser_diff_required": true
               },
@@ -23319,9 +23330,9 @@
               "page_level_marker_correlation": true,
               "table_family_marker_detection": true,
               "content_candidate_string_scan": true,
-              "native_ese_catalog_decode": false,
-              "native_table_schema_decode": false,
-              "native_row_level_decode": false,
+              "native_ese_catalog_decode": true,
+              "native_table_schema_decode": true,
+              "native_row_level_decode": true,
               "native_deleted_state_decode": false,
               "native_timestamp_decode": false,
               "native_space_tree_decode": false,
@@ -23796,8 +23807,8 @@
                 "commercial_gap_ids": [
                   "#11"
                 ],
-                "native_ese_catalog_decode_available": false,
-                "native_row_level_decode_available": false,
+                "native_ese_catalog_decode_available": true,
+                "native_row_level_decode_available": true,
                 "native_deleted_state_decode_available": false,
                 "trusted_windows_search_parser_diff_required": false
               },
@@ -23952,9 +23963,9 @@
               "page_level_marker_correlation": true,
               "table_family_marker_detection": true,
               "content_candidate_string_scan": true,
-              "native_ese_catalog_decode": false,
-              "native_table_schema_decode": false,
-              "native_row_level_decode": false,
+              "native_ese_catalog_decode": true,
+              "native_table_schema_decode": true,
+              "native_row_level_decode": true,
               "native_deleted_state_decode": false,
               "native_timestamp_decode": false,
               "native_space_tree_decode": false,
