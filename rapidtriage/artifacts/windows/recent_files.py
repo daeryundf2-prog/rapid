@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import struct
 import uuid
@@ -255,7 +256,7 @@ def parse_lnk_metadata_from_bytes(data: bytes) -> dict[str, object]:
         if isinstance(block.get("property_store_data"), dict)
     ]
     target_path = first_non_empty(
-        link_info.get("local_base_path"),
+        link_info.get("full_path"),
         string_data.get("relative_path"),
         next(iter(embedded_paths), ""),
     )
@@ -567,8 +568,8 @@ def parse_lnk_link_info(data: bytes, link_flags: int) -> dict[str, str]:
         "header_size": str(header_size),
         "local_base_path_offset": str(local_base_path_offset),
         "common_path_suffix_offset": str(common_path_suffix_offset),
-        "local_base_path": read_c_string(block, local_base_path_offset, "cp1252"),
-        "common_path_suffix": read_c_string(block, common_path_suffix_offset, "cp1252"),
+        "local_base_path": read_c_string(block, local_base_path_offset, "lnk-ansi"),
+        "common_path_suffix": read_c_string(block, common_path_suffix_offset, "lnk-ansi"),
     }
     if header_size >= 0x24:
         result["local_base_path_unicode_offset"] = str(read_u32(block, 28))
@@ -579,7 +580,21 @@ def parse_lnk_link_info(data: bytes, link_flags: int) -> dict[str, str]:
             result["local_base_path"] = result["local_base_path_unicode"]
         if result["common_path_suffix_unicode"]:
             result["common_path_suffix"] = result["common_path_suffix_unicode"]
+    # MS-SHLLINK: the target's full path is reconstructed by appending
+    # CommonPathSuffix to LocalBasePath. Writers that already embed the
+    # complete path in LocalBasePath are handled by the suffix check.
+    result["full_path"] = join_lnk_base_suffix(
+        result["local_base_path"], result["common_path_suffix"]
+    )
     return result
+
+
+def join_lnk_base_suffix(base: str, suffix: str) -> str:
+    if not base:
+        return suffix
+    if not suffix or base.lower().endswith(suffix.lower()):
+        return base
+    return base.rstrip("\\") + "\\" + suffix.lstrip("\\")
 
 
 def jump_list_metadata(path: Path, artifact_type: str) -> dict[str, object]:
@@ -2633,12 +2648,13 @@ def read_lnk_counted_string(data: bytes, offset: int, is_unicode: bool) -> tuple
     offset += 2
     byte_count = char_count * 2 if is_unicode else char_count
     raw = data[offset : offset + byte_count]
-    encoding = "utf-16le" if is_unicode else "cp1252"
-    return decode_text(raw, encoding), min(len(data), offset + byte_count)
+    if is_unicode:
+        return decode_text(raw, "utf-16le"), min(len(data), offset + byte_count)
+    return decode_lnk_ansi(raw), min(len(data), offset + byte_count)
 
 
 def extract_windows_paths(data: bytes) -> list[str]:
-    paths = {decode_text(match.group(0), "cp1252").rstrip("\\") for match in WINDOWS_PATH_RE.finditer(data)}
+    paths = {decode_lnk_ansi(match.group(0)).rstrip("\\") for match in WINDOWS_PATH_RE.finditer(data)}
     for match in UTF16_WINDOWS_PATH_RE.finditer(data):
         text = decode_text(match.group(0), "utf-16le").rstrip("\x00\\")
         if len(text) >= 4:
@@ -2656,7 +2672,20 @@ def read_c_string(data: bytes, offset: int, encoding: str) -> str:
         if data[end : end + step] == terminator:
             break
         end += step
+    if encoding == "lnk-ansi":
+        return decode_lnk_ansi(data[offset:end])
     return decode_text(data[offset:end], encoding)
+
+
+def decode_lnk_ansi(data: bytes) -> str:
+    # MS-SHLLINK ANSI strings use the writer's system codepage, not a fixed
+    # encoding. mbcs resolves to the host ANSI codepage on Windows (e.g.
+    # cp949 on Korean systems); elsewhere fall back to cp1252.
+    encoding = "mbcs" if os.name == "nt" else "cp1252"
+    try:
+        return data.decode(encoding, errors="ignore").strip("\x00\r\n\t ")
+    except LookupError:
+        return decode_text(data, "cp1252")
 
 
 def decode_text(data: bytes, encoding: str) -> str:

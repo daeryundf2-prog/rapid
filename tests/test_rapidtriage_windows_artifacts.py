@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import contextlib
 import json
+import locale
+import os
 import sqlite3
 import tempfile
 import unittest
@@ -18,6 +20,10 @@ from rapidtriage.artifacts.windows.execution import (
     build_execution_artifact_trusted_diff,
 )
 from rapidtriage.artifacts.windows.os_account import build_os_account_trusted_diff
+from rapidtriage.artifacts.windows.recent_files import (
+    join_lnk_base_suffix,
+    parse_lnk_link_info,
+)
 from rapidtriage.artifacts.windows.system import web_request_basename_sources
 from rapidtriage.cli import main
 from tests.windows_artifact_fixtures import (
@@ -1660,6 +1666,66 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             )
             self.assertIn(r"C:\Users\alice\Documents\Incident Notes.docx", automatic["details"]["embedded_paths"])
             self.assertEqual(custom["details"]["destinations"][0]["target_path"], r"C:\Users\alice\Downloads\installer.exe")
+
+    def test_lnk_link_info_reconstructs_full_path_from_truncated_base(self) -> None:
+        # Real-world writers may store a truncated LocalBasePath with the
+        # remainder in CommonPathSuffix (observed on Korean cp949 LNKs).
+        # MS-SHLLINK reconstructs the target as base + suffix.
+        self.assertEqual(
+            join_lnk_base_suffix(r"C:\Users", r"user\file.pdf"),
+            r"C:\Users\user\file.pdf",
+        )
+        self.assertEqual(
+            join_lnk_base_suffix(r"C:\Users\user\file.pdf", r"file.pdf"),
+            r"C:\Users\user\file.pdf",
+        )
+        self.assertEqual(join_lnk_base_suffix("", "file.pdf"), "file.pdf")
+        self.assertEqual(join_lnk_base_suffix(r"C:\A", ""), r"C:\A")
+
+        local_base = b"C:\\Users\x00"
+        suffix = b"user\\Downloads\\file.pdf\x00"
+        volume_id = b"\x14\x00\x00\x00" + b"\x00" * 16
+        link_info = bytearray(0x1C)
+        link_info[4:8] = (0x1C).to_bytes(4, "little")
+        link_info[8:12] = (0x1).to_bytes(4, "little")
+        link_info[12:16] = (0x1C).to_bytes(4, "little")
+        link_info[16:20] = (0x1C + len(volume_id)).to_bytes(4, "little")
+        link_info[20:24] = (0).to_bytes(4, "little")
+        link_info[24:28] = (0x1C + len(volume_id) + len(local_base)).to_bytes(4, "little")
+        block = bytes(link_info) + volume_id + local_base + suffix
+        block = len(block).to_bytes(4, "little") + block[4:]
+        data = b"\x00" * 0x4C + block
+
+        parsed = parse_lnk_link_info(data, 0x00000002)
+        self.assertEqual(parsed["parse_status"], "parsed")
+        self.assertEqual(parsed["local_base_path"], "C:\\Users")
+        self.assertEqual(parsed["common_path_suffix"], "user\\Downloads\\file.pdf")
+        self.assertEqual(parsed["full_path"], "C:\\Users\\user\\Downloads\\file.pdf")
+
+    @unittest.skipUnless(
+        os.name == "nt" and locale.getpreferredencoding(False).lower() == "cp949",
+        "cp949 ANSI decode requires a Korean Windows host codepage",
+    )
+    def test_lnk_link_info_decodes_cp949_ansi_fields(self) -> None:
+        local_base = "C:\\Users".encode("cp949") + b"\x00"
+        suffix = "user\\Downloads\\대상포진.pdf".encode("cp949") + b"\x00"
+        volume_id = b"\x14\x00\x00\x00" + b"\x00" * 16
+        link_info = bytearray(0x1C)
+        link_info[4:8] = (0x1C).to_bytes(4, "little")
+        link_info[8:12] = (0x1).to_bytes(4, "little")
+        link_info[12:16] = (0x1C).to_bytes(4, "little")
+        link_info[16:20] = (0x1C + len(volume_id)).to_bytes(4, "little")
+        link_info[20:24] = (0).to_bytes(4, "little")
+        link_info[24:28] = (0x1C + len(volume_id) + len(local_base)).to_bytes(4, "little")
+        block = bytes(link_info) + volume_id + local_base + suffix
+        block = len(block).to_bytes(4, "little") + block[4:]
+        data = b"\x00" * 0x4C + block
+
+        parsed = parse_lnk_link_info(data, 0x00000002)
+        self.assertEqual(
+            parsed["full_path"],
+            "C:\\Users\\user\\Downloads\\대상포진.pdf",
+        )
 
     def test_eventlog_collector_uses_provider_message_catalog(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

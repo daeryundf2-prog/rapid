@@ -106,6 +106,46 @@ field agreement beyond System-section fields is not yet measured.
 Report: `D:\devin\trusted-ref\evtx-diff-report.json`,
 `evtx-diff-small.json`.
 
+## LNK native parse vs LnkParse3 (B-series)
+
+`scripts/lnk-reference-diff.py` (requires `LnkParse3`) diffs
+`parse_lnk_metadata` against the independent parser on all 298 real
+`.lnk` files found under the extracted image.
+
+The comparison exposed a real RapidTriage defect, now fixed:
+
+- `target_path` used only `LocalBasePath`. Some writers store a
+  truncated base (`C:\Users`) with the remainder in
+  `CommonPathSuffix`; MS-SHLLINK reconstruction appends the suffix.
+  Fixed via `join_lnk_base_suffix` (`recent_files.py`).
+- ANSI string fields were decoded as cp1252, mangling the writer's
+  system codepage (cp949 on this image). ANSI LinkInfo/StringData/embedded
+  paths now decode via the host ANSI codepage (`mbcs` on Windows,
+  cp1252 fallback). LnkParse3's latin-1 output is re-decoded the same
+  way inside the diff script (counted, not hidden).
+
+Final result on 298 files:
+
+| Metric | Result |
+|--------|--------|
+| Files compared | 298 |
+| Fully matched | 281 |
+| Field mismatches | 0 |
+| One-sided fields | 15 — all `target_path` where LnkParse3 emits nothing (shell-folder links with `ForceNoLinkInfo`; RapidTriage recovers a path from embedded shell-item strings — unverifiable by this reference) |
+| RapidTriage parse failures | 0 |
+| LnkParse3 parse failures | 2 (`unpack requires a buffer`, $Recycle.Bin links) |
+
+LnkParse3 additionally emitted warnings (`size must be 76`,
+`METADATA_PROPERTIES_BLOCK`, unsupported `sort_index_value`) — logged
+as reference-parser limitations, not RapidTriage failures.
+
+Limitations: shell-folder/CLSID link targets are not semantically
+validated (both tools surface strings, not resolved objects); 15
+one-sided files mean the comparison cannot confirm those targets;
+8.3 short names in TargetIDList-derived paths are not expanded.
+
+Report: `D:\devin\trusted-ref\lnk-diff-report.json`.
+
 ## Release-gate impact
 
 `quantitative-accuracy-thresholds` stays `blocked`: the gate requires
