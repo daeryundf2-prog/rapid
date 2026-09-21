@@ -3178,7 +3178,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("#7", exported_amcache["details"]["execution_report_grade_assessment"]["commercial_gap_ids"])
             self.assertEqual(exported_amcache["details"]["forensic_review"]["gap_id"], "#7")
             self.assertIn("Amcache", exported_amcache["details"]["forensic_review"]["artifact_goal"])
-            self.assertFalse(exported_amcache["details"]["execution_native_capabilities"]["native_amcache_schema_decode"])
+            self.assertTrue(exported_amcache["details"]["execution_native_capabilities"]["native_amcache_schema_decode"])
             exported_amcache_manifest = exported_amcache["details"]["amcache_report_citation_manifest"]
             self.assertEqual(
                 exported_amcache_manifest["manifest_version"],

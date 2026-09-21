@@ -14,6 +14,17 @@ from ...core.models import ArtifactRecord
 from .common import build_forensic_review, iter_windows_user_homes
 from .ese import ESE_SCAN_READ_SIZE, build_ese_string_pivots, probe_ese_database
 from .os_account import decode_reg_export
+from .registry import (
+    HIVE_BIN_HEADER_SIZE,
+    MAX_HIVE_CELL_SIZE,
+    align_registry_cell_size,
+    iter_registry_hbin_descriptors,
+    parse_registry_cell_candidate,
+    read_i32,
+    registry_subkey_offsets_for_key,
+    registry_value_data_preview,
+    registry_value_offsets_for_key,
+)
 from .srum_ese import analyze_srudb_native
 
 PARSER_VERSION = "windows-execution-v14"
@@ -21,7 +32,10 @@ REGISTRY_EXPORT_EXT = ".reg"
 SRUM_IMPORT_SUFFIXES = {".csv", ".json", ".jsonl", ".ndjson"}
 AMCACHE_HIVE_NAME = "AMCACHE.HVE"
 SYSTEM_HIVE_NAME = "SYSTEM"
-MAX_NATIVE_AMCACHE_SCAN_BYTES = 8 * 1024 * 1024
+MAX_NATIVE_AMCACHE_SCAN_BYTES = 64 * 1024 * 1024
+AMCACHE_INVENTORY_SECTIONS = ("InventoryApplicationFile", "File", "InventoryApplication", "Programs")
+MAX_AMCACHE_SCHEMA_CELLS = 400_000
+MAX_AMCACHE_SCHEMA_ROWS = 20_000
 AMCACHE_ROW_CLUSTER_WINDOW_BYTES = 4096
 MAX_NATIVE_SHIMCACHE_SCAN_BYTES = 8 * 1024 * 1024
 SHIMCACHE_ROW_CLUSTER_WINDOW_BYTES = 4096
@@ -60,7 +74,7 @@ EXECUTION_NATIVE_CAPABILITIES = {
     "srum_native_string_pivots": True,
     "srum_table_marker_candidates": True,
     "srum_row_string_candidates": True,
-    "native_amcache_schema_decode": False,
+    "native_amcache_schema_decode": True,
     "native_shimcache_binary_decode": False,
     "native_bam_system_hive_decode": False,
     "native_ese_catalog_decode": False,
@@ -1060,6 +1074,188 @@ def build_native_bam_dam_records(path: Path) -> Iterable[ArtifactRecord]:
                 "raw_preview": executable_path,
             },
         )
+def iter_amcache_hive_cells(blob: bytes, *, max_cells: int = MAX_AMCACHE_SCHEMA_CELLS) -> dict[int, dict[str, object]]:
+    # hbin-walk nk/vk parse for schema decoding — deliberately not bounded by
+    # the record-emission MAX_HIVE_CELL_RECORDS cap.
+    cells: dict[int, dict[str, object]] = {}
+    for hbin in iter_registry_hbin_descriptors(blob):
+        hbin_offset = int(hbin.get("hbin_offset") or 0)
+        cursor = hbin_offset + HIVE_BIN_HEADER_SIZE
+        hbin_end = int(hbin.get("hbin_end_offset") or 0)
+        while cursor + 8 <= hbin_end and len(cells) < max_cells:
+            cell_size_raw = read_i32(blob, cursor)
+            cell_size = abs(cell_size_raw)
+            if cell_size < 8 or cell_size > MAX_HIVE_CELL_SIZE:
+                break
+            if cursor + cell_size > hbin_end:
+                break
+            signature = blob[cursor + 4 : cursor + 6]
+            candidate = parse_registry_cell_candidate(
+                blob,
+                cursor,
+                cursor + 4,
+                cell_size,
+                cell_size_raw,
+                signature,
+                scan_method="hbin-walk",
+                hbin_offset=hbin_offset,
+            )
+            if candidate is not None:
+                cells[cursor] = candidate
+            cursor += align_registry_cell_size(cell_size)
+    return cells
+
+
+def decode_amcache_schema_rows(blob: bytes) -> tuple[list[dict[str, object]], dict[str, object]]:
+    profile: dict[str, object] = {"decode_status": "no-cells", "sections": {}, "cell_count": 0}
+    if len(blob) < 4096 or not blob.startswith(b"regf"):
+        profile["decode_status"] = "not-regf"
+        return [], profile
+    cells = iter_amcache_hive_cells(blob)
+    profile["cell_count"] = len(cells)
+    if not cells:
+        return [], profile
+    wanted = {name.lower(): name for name in AMCACHE_INVENTORY_SECTIONS}
+    section_nodes = {
+        str(node.get("name") or "").lower(): node
+        for node in cells.values()
+        if node.get("cell_kind") == "key-node"
+        and str(node.get("name") or "").lower() in wanted
+    }
+    rows: list[dict[str, object]] = []
+    for lower_name, node in section_nodes.items():
+        subkey_offsets = registry_subkey_offsets_for_key(blob, node)
+        decoded = 0
+        for offset in subkey_offsets:
+            subkey = cells.get(offset)
+            if not subkey:
+                continue
+            values: dict[str, str] = {}
+            for value_offset in registry_value_offsets_for_key(blob, subkey):
+                value_cell = cells.get(value_offset)
+                if value_cell is None:
+                    continue
+                name = str(value_cell.get("name") or "") or "(default)"
+                values[name] = registry_value_data_preview(blob, value_cell)
+            if not values:
+                continue
+            decoded += 1
+            if len(rows) < MAX_AMCACHE_SCHEMA_ROWS:
+                rows.append(
+                    {
+                        "section": wanted[lower_name],
+                        "key_name": str(subkey.get("name") or ""),
+                        "cell_offset": offset,
+                        "last_written_at": str(subkey.get("last_written_at") or ""),
+                        "allocation_status": str(subkey.get("allocation_status") or ""),
+                        "values": values,
+                    }
+                )
+        profile["sections"][wanted[lower_name]] = {
+            "declared_subkeys": int(node.get("subkey_count") or 0),
+            "decoded_subkey_offsets": len(subkey_offsets),
+            "decoded_rows": decoded,
+        }
+    profile["decode_status"] = "decoded" if rows else "no-decodable-rows"
+    profile["schema_row_count"] = len(rows)
+    return rows, profile
+
+
+def amcache_schema_row_fields(row: Mapping[str, object]) -> dict[str, str]:
+    values = row.get("values") if isinstance(row.get("values"), Mapping) else {}
+    file_id = str(values.get("FileId") or "")
+    if len(file_id) == 44 and file_id.lower().startswith("0000"):
+        sha1 = file_id[4:].lower()
+    elif len(file_id) == 40:
+        sha1 = file_id.lower()
+    else:
+        sha1 = ""
+    return {
+        "executable_path": str(values.get("LowerCaseLongPath") or values.get("FullPath") or ""),
+        "program_name": str(values.get("Name") or ""),
+        "sha1": sha1,
+        "file_id": file_id,
+        "size_bytes": str(values.get("Size") or ""),
+        "link_date_raw": str(values.get("LinkDate") or ""),
+        "product_name": str(values.get("ProductName") or ""),
+        "version": str(values.get("ProductVersion") or values.get("Version") or ""),
+        "publisher": str(values.get("Publisher") or ""),
+        "program_id": str(values.get("ProgramId") or ""),
+        "binary_type": str(values.get("BinaryType") or ""),
+        "original_file_name": str(values.get("OriginalFileName") or ""),
+    }
+
+
+def build_amcache_schema_row_record(
+    path: Path,
+    source_hashes: Mapping[str, str],
+    row: Mapping[str, object],
+    index: int,
+) -> ArtifactRecord:
+    fields = amcache_schema_row_fields(row)
+    validation_checks = {
+        "has_decoded_values": bool(row.get("values")),
+        "has_executable_path": bool(fields["executable_path"]),
+        "has_sha1_file_id": bool(fields["sha1"]),
+        "has_cell_offset": bool(row.get("cell_offset")),
+        "native_schema_decoding_available": True,
+    }
+    report_grade = execution_report_grade_assessment(
+        execution_validation_matrix(validation_checks),
+        validation_required=True,
+        gap_ids=["#7"],
+        extra_blockers=["amcache-schema-row-field-semantics-validation-required"],
+    )
+    return ArtifactRecord(
+        provider=WindowsExecutionProvider.name,
+        artifact_type="amcache-schema-row",
+        path=str(path.resolve()),
+        supported=True,
+        details={
+            "parser": "windows-amcache-schema-row",
+            "parser_version": PARSER_VERSION,
+            "coverage_status": "native-schema-row",
+            "reportability": "review",
+            "source_path": str(path.resolve()),
+            "source_format": "amcache-hive",
+            "source_hashes": dict(source_hashes),
+            "source_index": index,
+            "section": row.get("section", ""),
+            "key_name": row.get("key_name", ""),
+            "cell_offset": row.get("cell_offset", 0),
+            "allocation_status": row.get("allocation_status", ""),
+            "key_last_written_at": row.get("last_written_at", ""),
+            **fields,
+            "decoded_value_count": len(row.get("values") or {}),
+            "decoded_values": dict(row.get("values") or {}),
+            "native_schema_decoding_available": True,
+            "validation_checks": validation_checks,
+            "validation_required": True,
+            "execution_validation_matrix": execution_validation_matrix(validation_checks),
+            "execution_report_grade_assessment": report_grade,
+            "forensic_review": build_forensic_review(
+                gap_id="#7",
+                artifact_goal="Amcache inventory row reconstruction",
+                primary_evidence=[
+                    f"path={fields['executable_path']}" if fields["executable_path"] else "",
+                    f"sha1={fields['sha1']}" if fields["sha1"] else "",
+                    f"cell_offset={row.get('cell_offset', '')}",
+                ],
+                validation_required=True,
+                report_grade_assessment=report_grade,
+                caveats=[
+                    "schema-row decode is structural; field semantics and timestamps still require trusted-tool confirmation"
+                ],
+            ),
+            "commercial_grade_ready": False,
+            "commercial_grade_blockers": report_grade["blockers"],
+            "risk_flags": execution_path_risk_flags(fields["executable_path"]),
+            "risk_score": min(100, len(execution_path_risk_flags(fields["executable_path"])) * 25),
+            "raw_preview": f"{row.get('section', '')}\\{row.get('key_name', '')}",
+        },
+    )
+
+
 def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
     try:
         stat_result = path.stat()
@@ -1068,6 +1264,7 @@ def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
     except OSError:
         return
     source_hashes = file_hashes(path)
+    schema_rows, schema_decode_profile = decode_amcache_schema_rows(blob)
     occurrences = list(iter_registry_like_string_occurrences(blob))
     strings = list(unique_preserve_order(item["text"] for item in occurrences))
     amcache_clusters = collect_amcache_candidate_clusters(occurrences)
@@ -1084,7 +1281,7 @@ def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
         "has_sha1_candidates": bool(sha1_candidates),
         "has_row_cluster_candidates": bool(amcache_clusters),
         "has_source_offsets": any(cluster.get("source_offset") is not None for cluster in amcache_clusters),
-        "native_schema_decoding_available": False,
+        "native_schema_decoding_available": bool(schema_rows),
         "requires_second_parser_validation": True,
     }
     hive_report_grade = execution_report_grade_assessment(
@@ -1163,6 +1360,8 @@ def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
             "extracted_string_count": len(strings),
             "path_candidates": path_candidates,
             "sha1_candidates": sha1_candidates,
+            "amcache_schema_decode": schema_decode_profile,
+            "schema_row_count": len(schema_rows),
             "amcache_candidate_clusters": amcache_clusters[:100],
             "amcache_candidate_cluster_count": len(amcache_clusters),
             "amcache_hive_evidence": amcache_hive_evidence(path_candidates, sha1_candidates, strings, amcache_clusters),
@@ -1217,6 +1416,8 @@ def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
             "raw_preview": " ".join(strings[:25])[:2000],
         },
     )
+    for index, schema_row in enumerate(schema_rows):
+        yield build_amcache_schema_row_record(path, source_hashes, schema_row, index)
     clusters_by_path = {normalize_execution_path(str(cluster.get("executable_path") or "")): cluster for cluster in amcache_clusters}
     for index, candidate in enumerate(path_candidates[:100]):
         cluster = clusters_by_path.get(normalize_execution_path(candidate), {})
@@ -3726,7 +3927,10 @@ def execution_native_depth_level(artifact_type: str, source_format: str) -> str:
 
 def execution_native_depth_blockers(artifact_family: str, validation_checks: Mapping[str, object]) -> list[str]:
     blockers = {"execution-artifact-trusted-diff-required", "known-answer-execution-artifact-validation-required"}
-    if artifact_family == "amcache" and not EXECUTION_NATIVE_CAPABILITIES["native_amcache_schema_decode"]:
+    if artifact_family == "amcache" and (
+        not EXECUTION_NATIVE_CAPABILITIES["native_amcache_schema_decode"]
+        or validation_checks.get("native_schema_decoding_available") is not True
+    ):
         blockers.add("native-amcache-schema-decoding-required")
     if artifact_family == "shimcache-appcompatcache" and not EXECUTION_NATIVE_CAPABILITIES["native_shimcache_binary_decode"]:
         blockers.add("native-appcompatcache-layout-decoding-required")

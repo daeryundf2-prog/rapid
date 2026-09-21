@@ -209,6 +209,46 @@ paths are string-candidate pivots only.
 
 Report: `D:\devin\trusted-ref\prefetch-diff-report.json`.
 
+## Amcache native schema decode vs regipy (B-series)
+
+`scripts/amcache-reference-diff.py` (requires `regipy`) diffs the
+Amcache hive against regipy's schema-decoded
+`Root\InventoryApplicationFile` / `Root\File` rows on the real
+`Windows\appcompat\Programs\Amcache.hve` (~6.8 MB, 2,255 declared
+InventoryApplicationFile subkeys).
+
+Before this stage RapidTriage used bounded string pivots only
+(`native_amcache_schema_decode: False`) and measured path recall of
+~2% / precision ~46% / SHA1 overlap 1-of-29 — the pivot surface could
+not compete with schema decode. A native decoder
+(`decode_amcache_schema_rows` in `execution.py`) now walks the hive's
+`nk`/`vk` cells via the shared registry primitives and emits
+`amcache-schema-row` records with decoded values (`LowerCaseLongPath`,
+`FileId`, `Name`, `Publisher`, `Size`, version/language fields), cell
+offsets, and per-section decode coverage. String-pivot `amcache-entry`
+records are retained as supplemental candidates.
+
+Final result on the real hive:
+
+| Metric | Before (string pivot) | After (schema decode) |
+|--------|----------------------|----------------------|
+| Declared subkeys decoded | 0 | 2,255 / 2,255 (+ 333 InventoryApplication) |
+| Path recall vs regipy | 0.0204 | **1.0** |
+| Path precision | 0.46 | 0.9766 (54 extra = string-pivot candidates) |
+| SHA1 `FileId` common | 1 / 29 | 2,104 / 2,132 |
+| Trusted-only SHA1s | — | 0 |
+
+Limitations: `InventoryApplicationFile` field semantics (e.g. which
+timestamps mean install vs execution) are decoded structurally but not
+semantically validated — schema-row records carry
+`amcache-schema-row-field-semantics-validation-required` and stay
+`reportability: review`. Non-file sections (`InventoryApplication`,
+`Programs`) are decoded but excluded from the path comparison.
+regipy remains an engineering reference, not a recognized trusted
+tool.
+
+Report: `D:\devin\trusted-ref\amcache-diff-report.json`.
+
 ## Release-gate impact
 
 `quantitative-accuracy-thresholds` stays `blocked`: the gate requires

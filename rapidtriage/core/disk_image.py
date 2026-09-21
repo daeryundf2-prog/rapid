@@ -10,8 +10,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .e01 import (
-    E01ExtractionError,
     TSK_RECOVER_SCOPE_FLAGS,
+    E01ExtractionError,
     build_image_stage_control_contract,
     build_recovered_root_manifest,
     build_tsk_recover_recovery_scope,
