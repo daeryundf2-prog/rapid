@@ -249,6 +249,44 @@ tool.
 
 Report: `D:\devin\trusted-ref\amcache-diff-report.json`.
 
+## ShimCache native binary decode vs regipy (B-series)
+
+`scripts/shimcache-reference-diff.py` (requires `regipy`) diffs the
+SYSTEM hive AppCompatCache value against regipy's `ShimCachePlugin`
+(which embeds the Mandiant ShimCacheParser) on the real
+`Windows\System32\config\SYSTEM` hive (~25.7 MB).
+
+Before this stage RapidTriage used string-pivot clusters only
+(`native_shimcache_binary_decode: False`). A native decoder now walks
+the hive `nk`/`vk` cells, locates `ControlSet*\Control\Session
+Manager\AppCompatCache`, reads the (potentially `db`-segmented) binary
+value, detects the Win8/8.1/10/10-Creators `00ts`/`10ts` layouts, and
+emits `shimcache-schema-entry` records with ordered
+(`cache_order`, path, last-mod FILETIME) rows. NT5.2/NT6.1/XP magics
+are detected but reported `detected-unsupported-layout` rather than
+silently misparsed.
+
+Final result on the real hive:
+
+| Metric | Result |
+|--------|--------|
+| regipy ShimCache rows | 849 |
+| RapidTriage schema-entry rows | 849 |
+| Ordered (order, path, timestamp) row matches | **849 / 849** |
+| Path recall / precision | **1.0 / 1.0** |
+| Timestamp agreement (ms) | **1.0** |
+
+Limitations: `exec_flag` semantics (Win8 CSRSS flag) are decoded but
+not independently validated; ShimCache presence remains
+presence-not-execution and schema-entry records stay
+`reportability: review` with
+`shimcache-entry-semantic-validation-required` /
+`os-build-layout-validation-required` blockers. NT5.2/NT6.1/XP layouts
+are detected but not decoded. regipy is an engineering reference, not
+a recognized trusted tool.
+
+Report: `D:\devin\trusted-ref\shimcache-diff-report.json`.
+
 ## Release-gate impact
 
 `quantitative-accuracy-thresholds` stays `blocked`: the gate requires

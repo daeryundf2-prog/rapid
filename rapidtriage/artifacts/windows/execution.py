@@ -21,6 +21,9 @@ from .registry import (
     iter_registry_hbin_descriptors,
     parse_registry_cell_candidate,
     read_i32,
+    read_u16,
+    read_u32,
+    registry_relative_to_file_offset,
     registry_subkey_offsets_for_key,
     registry_value_data_preview,
     registry_value_offsets_for_key,
@@ -37,8 +40,13 @@ AMCACHE_INVENTORY_SECTIONS = ("InventoryApplicationFile", "File", "InventoryAppl
 MAX_AMCACHE_SCHEMA_CELLS = 400_000
 MAX_AMCACHE_SCHEMA_ROWS = 20_000
 AMCACHE_ROW_CLUSTER_WINDOW_BYTES = 4096
-MAX_NATIVE_SHIMCACHE_SCAN_BYTES = 8 * 1024 * 1024
+MAX_NATIVE_SHIMCACHE_SCAN_BYTES = 64 * 1024 * 1024
 SHIMCACHE_ROW_CLUSTER_WINDOW_BYTES = 4096
+SHIMCACHE_WIN8_STATS_SIZE = 0x80
+SHIMCACHE_WIN10_STATS_SIZE = 0x30
+SHIMCACHE_ENTRY_META_LEN = 12
+SHIMCACHE_MAX_VALUE_BYTES = 32 * 1024 * 1024
+SHIMCACHE_MAX_ENTRIES = 8192
 MAX_NATIVE_BAM_DAM_SCAN_BYTES = 8 * 1024 * 1024
 BAM_DAM_ROW_CLUSTER_WINDOW_BYTES = 4096
 POWERSHELL_HISTORY = ("AppData", "Roaming", "Microsoft", "Windows", "PowerShell", "PSReadLine", "ConsoleHost_history.txt")
@@ -75,7 +83,7 @@ EXECUTION_NATIVE_CAPABILITIES = {
     "srum_table_marker_candidates": True,
     "srum_row_string_candidates": True,
     "native_amcache_schema_decode": True,
-    "native_shimcache_binary_decode": False,
+    "native_shimcache_binary_decode": True,
     "native_bam_system_hive_decode": False,
     "native_ese_catalog_decode": False,
     "native_srum_page_row_decode": False,
@@ -687,6 +695,7 @@ def build_native_shimcache_records(path: Path) -> Iterable[ArtifactRecord]:
         return
 
     source_hashes = file_hashes(path)
+    schema_rows, schema_decode_profile = decode_shimcache_schema(blob)
     occurrences = list(iter_registry_like_string_occurrences(blob))
     appcompat_markers = [
         item
@@ -695,8 +704,10 @@ def build_native_shimcache_records(path: Path) -> Iterable[ArtifactRecord]:
         or "appcompatflags" in str(item.get("text") or "").lower()
     ]
     clusters = collect_shimcache_candidate_clusters(occurrences)
-    if not clusters and not appcompat_markers:
+    if not clusters and not appcompat_markers and not schema_rows:
         return
+    for index, schema_row in enumerate(schema_rows):
+        yield build_shimcache_schema_entry_record(path, source_hashes, schema_row, index)
     validation_checks = {
         "has_executable_path": any(cluster.get("executable_path") for cluster in clusters),
         "has_native_binary_path_candidates": bool(clusters),
@@ -833,6 +844,7 @@ def build_native_shimcache_records(path: Path) -> Iterable[ArtifactRecord]:
                 "shimcache_report_citation_manifest": citation_manifest,
                 "shimcache_report_citation_manifest_hash": citation_manifest["manifest_sha256"],
                 "evidence_strength": "program-presence-not-proof-of-execution",
+                "shimcache_binary_decode": schema_decode_profile,
                 "parser_confidence": float(cluster.get("parser_confidence") or 0.52),
                 "validation_required": True,
                 "validation_checks": row_checks,
@@ -875,6 +887,257 @@ def build_native_shimcache_records(path: Path) -> Iterable[ArtifactRecord]:
                 "raw_preview": executable_path,
             },
         )
+
+
+def registry_value_data_bytes(blob: bytes, value_cell: Mapping[str, object], *, max_size: int) -> bytes:
+    value_size = int(value_cell.get("value_data_size") or 0)
+    if value_size <= 0 or value_size > max_size:
+        return b""
+    if value_cell.get("value_data_inline"):
+        return int(value_cell.get("value_data_relative_offset") or 0).to_bytes(4, "little")[:value_size]
+    data_offset = int(value_cell.get("value_data_offset") or 0)
+    data_start = data_offset + 4
+    if data_offset <= 0 or data_start >= len(blob):
+        return b""
+    if blob[data_start : data_start + 2] == b"db" and value_size > 0x3FD8:
+        segment_count = read_u16(blob, data_start + 2)
+        list_offset = registry_relative_to_file_offset(read_u32(blob, data_start + 4)) + 4
+        if segment_count <= 0 or list_offset + 4 * segment_count > len(blob):
+            return b""
+        parts: list[bytes] = []
+        remaining = value_size
+        for index in range(segment_count):
+            segment_offset = registry_relative_to_file_offset(read_u32(blob, list_offset + 4 * index)) + 4
+            take = min(0x3FD8, remaining)
+            if segment_offset <= 4 or segment_offset + take > len(blob):
+                break
+            parts.append(blob[segment_offset : segment_offset + take])
+            remaining -= take
+            if remaining <= 0:
+                break
+        return b"".join(parts)
+    if data_start + value_size > len(blob):
+        return b""
+    return blob[data_start : data_start + value_size]
+
+
+def decode_shimcache_value_data(data: bytes) -> tuple[list[dict[str, object]], dict[str, object]]:
+    profile: dict[str, object] = {"format": "unknown", "value_size": len(data)}
+    if len(data) < 16:
+        profile["decode_status"] = "value-too-small"
+        return [], profile
+    magic = int.from_bytes(data[0:4], "little")
+    if magic in {0xBADC0FFE, 0xBADC0FEE, 0xDEADBEEF}:
+        profile["format"] = {0xBADC0FFE: "nt5.2", 0xBADC0FEE: "nt6.1", 0xDEADBEEF: "winxp"}[magic]
+        profile["decode_status"] = "detected-unsupported-layout"
+        return [], profile
+    if len(data) > SHIMCACHE_WIN8_STATS_SIZE and data[SHIMCACHE_WIN8_STATS_SIZE : SHIMCACHE_WIN8_STATS_SIZE + 4] == b"00ts":
+        profile["format"] = "win8"
+        stats_size = SHIMCACHE_WIN8_STATS_SIZE
+    elif len(data) > SHIMCACHE_WIN8_STATS_SIZE and data[SHIMCACHE_WIN8_STATS_SIZE : SHIMCACHE_WIN8_STATS_SIZE + 4] == b"10ts":
+        profile["format"] = "win8.1"
+        stats_size = SHIMCACHE_WIN8_STATS_SIZE
+    elif len(data) > SHIMCACHE_WIN10_STATS_SIZE and data[SHIMCACHE_WIN10_STATS_SIZE : SHIMCACHE_WIN10_STATS_SIZE + 4] == b"10ts":
+        profile["format"] = "win10"
+        stats_size = SHIMCACHE_WIN10_STATS_SIZE
+    elif len(data) > SHIMCACHE_WIN10_STATS_SIZE + 4 and data[SHIMCACHE_WIN10_STATS_SIZE + 4 : SHIMCACHE_WIN10_STATS_SIZE + 8] == b"10ts":
+        profile["format"] = "win10-creators-update"
+        stats_size = SHIMCACHE_WIN10_STATS_SIZE + 4
+    else:
+        profile["decode_status"] = "unrecognized-magic"
+        profile["magic_hex"] = hex(magic)
+        return [], profile
+
+    entries: list[dict[str, object]] = []
+    position = stats_size
+    order = 0
+    while position + SHIMCACHE_ENTRY_META_LEN <= len(data) and order < SHIMCACHE_MAX_ENTRIES:
+        entry_magic = data[position : position + 4]
+        if entry_magic not in {b"00ts", b"10ts"}:
+            profile["decode_status"] = "entry-magic-mismatch"
+            profile["stopped_at_offset"] = position
+            return entries, profile
+        crc32 = read_u32(data, position + 4)
+        entry_len = read_u32(data, position + 8)
+        entry_start = position + SHIMCACHE_ENTRY_META_LEN
+        if entry_len <= 0 or entry_start + entry_len > len(data):
+            profile["decode_status"] = "entry-length-out-of-bounds"
+            profile["stopped_at_offset"] = position
+            return entries, profile
+        body = data[entry_start : entry_start + entry_len]
+        path_len = int.from_bytes(body[0:2], "little")
+        path = body[2 : 2 + path_len].decode("utf-16le", errors="replace") if path_len else ""
+        entry: dict[str, object] = {
+            "cache_order": order,
+            "entry_offset": position,
+            "path": path,
+            "crc32": crc32,
+        }
+        cursor = 2 + path_len
+        if profile["format"] in {"win8", "win8.1"}:
+            package_len = int.from_bytes(body[cursor : cursor + 2], "little") if cursor + 2 <= len(body) else 0
+            cursor += 2 + package_len
+            if cursor + 20 <= len(body):
+                flags = read_u32(body, cursor)
+                low = read_u32(body, cursor + 12)
+                high = read_u32(body, cursor + 16)
+                entry["exec_flag"] = bool(flags & 0x2)
+                entry["last_mod_date"] = filetime_to_iso((high << 32) | low)
+        else:
+            if cursor + 8 <= len(body):
+                low = read_u32(body, cursor)
+                high = read_u32(body, cursor + 4)
+                if low + high:
+                    entry["last_mod_date"] = filetime_to_iso((high << 32) | low)
+                else:
+                    position = entry_start + entry_len
+                    continue
+        entries.append(entry)
+        order += 1
+        position = entry_start + entry_len
+    profile["decode_status"] = "decoded" if entries else "no-entries"
+    profile["entry_count"] = len(entries)
+    profile["truncated_by_cap"] = position < len(data)
+    return entries, profile
+
+
+def decode_shimcache_schema(blob: bytes) -> tuple[list[dict[str, object]], dict[str, object]]:
+    profile: dict[str, object] = {"decode_status": "no-cells", "values_seen": 0, "cell_count": 0}
+    if len(blob) < 4096 or not blob.startswith(b"regf"):
+        profile["decode_status"] = "not-regf"
+        return [], profile
+    cells = iter_amcache_hive_cells(blob)
+    profile["cell_count"] = len(cells)
+    if not cells:
+        return [], profile
+    rows: list[dict[str, object]] = []
+    for offset, node in cells.items():
+        if node.get("cell_kind") != "key-node" or str(node.get("name") or "").lower() != "appcompatcache":
+            continue
+        parent = cells.get(int(node.get("parent_cell_offset") or 0)) or {}
+        control_set = ""
+        if str(parent.get("name") or "").lower() == "session manager":
+            ancestor = parent
+            for _ in range(8):
+                ancestor = cells.get(int(ancestor.get("parent_cell_offset") or 0)) or {}
+                name = str(ancestor.get("name") or "")
+                if not name:
+                    break
+                if name.lower().startswith("controlset") or name.lower() in {"currentcontrolset", "clone"}:
+                    control_set = name
+                    break
+        for value_offset in registry_value_offsets_for_key(blob, node):
+            value_cell = cells.get(value_offset)
+            if value_cell is None or str(value_cell.get("name") or "").lower() != "appcompatcache":
+                continue
+            profile["values_seen"] += 1
+            data = registry_value_data_bytes(blob, value_cell, max_size=SHIMCACHE_MAX_VALUE_BYTES)
+            entries, value_profile = decode_shimcache_value_data(data)
+            profile[f"decode_{profile['values_seen']}"] = value_profile
+            for entry in entries:
+                rows.append(
+                    {
+                        "control_set": control_set,
+                        "key_cell_offset": offset,
+                        "value_cell_offset": value_offset,
+                        "value_format": value_profile.get("format", ""),
+                        "cache_order": entry.get("cache_order", 0),
+                        "entry_offset": entry.get("entry_offset", 0),
+                        "executable_path": entry.get("path", ""),
+                        "last_mod_date": entry.get("last_mod_date", ""),
+                        "exec_flag": entry.get("exec_flag", ""),
+                        "key_last_written_at": str(node.get("last_written_at") or ""),
+                    }
+                )
+    profile["decode_status"] = "decoded" if rows else "no-decodable-rows"
+    profile["schema_row_count"] = len(rows)
+    return rows, profile
+
+
+def build_shimcache_schema_entry_record(
+    path: Path,
+    source_hashes: Mapping[str, str],
+    row: Mapping[str, object],
+    index: int,
+) -> ArtifactRecord:
+    executable_path = str(row.get("executable_path") or "")
+    timestamp = str(row.get("last_mod_date") or "")
+    validation_checks = {
+        "has_executable_path": bool(executable_path),
+        "has_cache_order": True,
+        "has_timestamp_candidate": bool(timestamp),
+        "has_source_offset": bool(row.get("entry_offset") is not None),
+        "has_value_cell_offset": bool(row.get("value_cell_offset")),
+        "requires_correlation": True,
+        "requires_second_parser_validation": True,
+        "native_binary_layout_decoding_available": True,
+        "correlation_targets": execution_correlation_targets("shimcache-entry"),
+    }
+    report_grade = execution_report_grade_assessment(
+        execution_validation_matrix(validation_checks),
+        validation_required=True,
+        gap_ids=["#8"],
+        extra_blockers=["shimcache-entry-semantic-validation-required", "os-build-layout-validation-required"],
+    )
+    source_key = (
+        f"SYSTEM\\{row.get('control_set')}\\Control\\Session Manager\\AppCompatCache"
+        if row.get("control_set")
+        else "SYSTEM\\ControlSet*\\Control\\Session Manager\\AppCompatCache"
+    )
+    return ArtifactRecord(
+        provider=WindowsExecutionProvider.name,
+        artifact_type="shimcache-schema-entry",
+        path=str(path.resolve()),
+        supported=True,
+        details={
+            "parser": "windows-shimcache-schema-entry",
+            "parser_version": PARSER_VERSION,
+            "coverage_status": "native-binary-decode",
+            "reportability": "review",
+            "source_path": str(path.resolve()),
+            "source_format": "system-hive-native-shimcache-decode",
+            "source_hashes": dict(source_hashes),
+            "source_key": source_key,
+            "source_index": index,
+            "control_set": row.get("control_set", ""),
+            "key_cell_offset": row.get("key_cell_offset", 0),
+            "value_cell_offset": row.get("value_cell_offset", 0),
+            "entry_offset": row.get("entry_offset", 0),
+            "value_format": row.get("value_format", ""),
+            "cache_order": row.get("cache_order", index),
+            "executable_path": executable_path,
+            "timestamp": timestamp,
+            "timestamp_source": "native-shimcache-entry-filetime" if timestamp else "not_present_in_entry",
+            "exec_flag": row.get("exec_flag", ""),
+            "key_last_written_at": row.get("key_last_written_at", ""),
+            "native_binary_layout_decoding_available": True,
+            "evidence_strength": "program-presence-not-proof-of-execution",
+            "validation_required": True,
+            "validation_checks": validation_checks,
+            "execution_validation_matrix": execution_validation_matrix(validation_checks),
+            "execution_report_grade_assessment": report_grade,
+            "forensic_review": build_forensic_review(
+                gap_id="#8",
+                artifact_goal="ShimCache entry reconstruction",
+                primary_evidence=[
+                    f"path={executable_path}" if executable_path else "",
+                    f"cache_order={row.get('cache_order', '')}",
+                    f"last_mod_date={timestamp}" if timestamp else "",
+                ],
+                validation_required=True,
+                report_grade_assessment=report_grade,
+                caveats=[
+                    "ShimCache presence proves the file was shimmed/checked, not that it executed",
+                    "entry order and last-mod semantics require trusted-tool confirmation",
+                ],
+            ),
+            "commercial_grade_ready": False,
+            "commercial_grade_blockers": report_grade["blockers"],
+            "risk_flags": execution_risk_flags("shimcache-entry", executable_path, {}),
+            "risk_score": min(100, len(execution_path_risk_flags(executable_path)) * 25 + 10),
+            "raw_preview": executable_path,
+        },
+    )
 
 
 def collect_native_bam_dam_system_hives(root: Path) -> Iterable[ArtifactRecord]:
@@ -3898,9 +4161,9 @@ def execution_artifact_validation_profile(
 
 
 def execution_native_depth_family(artifact_type: str) -> str:
-    if artifact_type in {"amcache-entry", "amcache-hive"}:
+    if artifact_type in {"amcache-entry", "amcache-hive", "amcache-schema-row"}:
         return "amcache"
-    if artifact_type == "shimcache-entry":
+    if artifact_type in {"shimcache-entry", "shimcache-schema-entry"}:
         return "shimcache-appcompatcache"
     if artifact_type == "bam-entry":
         return "bam-dam"
@@ -3932,7 +4195,10 @@ def execution_native_depth_blockers(artifact_family: str, validation_checks: Map
         or validation_checks.get("native_schema_decoding_available") is not True
     ):
         blockers.add("native-amcache-schema-decoding-required")
-    if artifact_family == "shimcache-appcompatcache" and not EXECUTION_NATIVE_CAPABILITIES["native_shimcache_binary_decode"]:
+    if artifact_family == "shimcache-appcompatcache" and (
+        not EXECUTION_NATIVE_CAPABILITIES["native_shimcache_binary_decode"]
+        or validation_checks.get("native_binary_layout_decoding_available") is not True
+    ):
         blockers.add("native-appcompatcache-layout-decoding-required")
     if artifact_family == "bam-dam" and not EXECUTION_NATIVE_CAPABILITIES["native_bam_system_hive_decode"]:
         blockers.add("native-system-hive-bam-decoding-required")
@@ -4851,7 +5117,7 @@ def execution_core_accuracy_gates(artifact_type: str, details: Mapping[str, obje
         if shimcache_manifest_hash:
             satisfied.append("stable ShimCache row manifest")
         satisfied.append("not-proof-of-execution warning")
-        if not EXECUTION_NATIVE_CAPABILITIES["native_shimcache_binary_decode"]:
+        if EXECUTION_NATIVE_CAPABILITIES["native_shimcache_binary_decode"]:
             satisfied.append("malformed binary bounds checks")
         if trusted_diff.get("status") == "pass":
             satisfied.append("trusted ShimCache parser diff pass")
