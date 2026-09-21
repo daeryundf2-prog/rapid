@@ -146,6 +146,69 @@ one-sided files mean the comparison cannot confirm those targets;
 
 Report: `D:\devin\trusted-ref\lnk-diff-report.json`.
 
+## Registry native scan vs regipy (B-series)
+
+`scripts/registry-reference-diff.py` (requires `regipy`) diffs
+`collect_registry_hive` against regipy's live-tree walk on 6 real hives
+from the extracted image (4× NTUSER.DAT, 2× UsrClass.dat; 8 KiB –
+18 MiB).
+
+| Metric | Result |
+|--------|--------|
+| Hives compared | 6, 0 errors |
+| Base-block header fields | 0 diffs (sequence numbers, FILETIME last-write, versions, hbin size) |
+| Rapid-only root-reachable key paths | **0** — every confidently reconstructed path exists in the reference live tree |
+| Rapid-only stale/orphaned cells | 5 — flagged `root_reachable=False` by our parser; live-tree walks legitimately skip stale cells |
+| Common-key timestamps | 1,049/1,050 match (1 mismatch on a stale cell) |
+| Common-key value names | 1,285 consistent (⊆), 1 conflict (same stale cell) |
+| Key coverage vs reference | 0.007%–100% — bounded by `MAX_HIVE_CELL_SCAN_BYTES=16MiB` / `MAX_HIVE_CELL_RECORDS=500`; large hives intentionally cover only the first cells |
+
+The value-name comparison uses subset-consistency (rapid ⊆ trusted):
+the bounded scan decodes fewer vk cells than a full walk, so incomplete
+lists are expected; any rapid name absent from the reference is a
+conflict. Exactly one conflict was found, on a stale cell.
+
+Limitations: value *data* payloads, deleted-cell recovery candidates,
+and transaction-log replay are not compared; coverage on the 18 MiB
+NTUSER.DAT is ~2% by design.
+
+Report: `D:\devin\trusted-ref\registry-diff-report.json`.
+
+## Prefetch native parse vs windowsprefetch (B-series)
+
+`scripts/prefetch-reference-diff.py` (requires `windowsprefetch`) diffs
+`prefetch_header_hints` against the independent parser on all 42 real
+`.pf` files under `Windows\Prefetch`.
+
+The comparison exposed a real capability gap, now fixed: every real
+file was MAM-compressed v31 and RapidTriage previously detected but did
+not decompress them (all fields empty). Native MAM decompression via
+`ntdll.RtlDecompressBufferEx` (XPRESS_HUFF, CRC32-checked when the flag
+is set) was added; non-Windows hosts report the limitation instead of
+silently parsing nothing (`decompression_status` /
+`not-attempted-non-windows-host`).
+
+Final result on 42 files:
+
+| Metric | Result |
+|--------|--------|
+| Files compared | 42 |
+| Fully matched | 42 |
+| Field mismatches | 0 |
+| Fields compared | SCCA version, executable name, run count, last-run timestamp, full run-time set |
+| RapidTriage parse failures | 0 |
+| windowsprefetch parse failures | 0 |
+
+Timestamps are truncated to milliseconds and normalized to naive-UTC on
+both sides (RapidTriage emits tz-aware ISO; windowsprefetch emits
+naive).
+
+Limitations: file-metrics array, trace chains, and the authoritative
+volume table remain undecoded by both parsers at this level; referenced
+paths are string-candidate pivots only.
+
+Report: `D:\devin\trusted-ref\prefetch-diff-report.json`.
+
 ## Release-gate impact
 
 `quantitative-accuracy-thresholds` stays `blocked`: the gate requires

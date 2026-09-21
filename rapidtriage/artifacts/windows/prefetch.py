@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import binascii
 import hashlib
 import json
+import os
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path, PureWindowsPath
@@ -95,7 +97,8 @@ PREFETCH_COMMERCIAL_BLOCKERS = [
 PREFETCH_NATIVE_CAPABILITIES = {
     "scca_signature_validation": True,
     "compressed_prefetch_detection": True,
-    "compressed_prefetch_decompression": False,
+    "compressed_prefetch_decompression": True,
+    "compressed_prefetch_decompression_platform": "windows-ntdll-only",
     "common_header_version_offsets": True,
     "section_locator_bounds_profile": True,
     "run_count_and_last_run_times": True,
@@ -240,12 +243,19 @@ def prefetch_header_hints(path: Path) -> dict[str, object]:
         blob = path.read_bytes()
     except OSError:
         return {"binary_format_detected": False}
-    header = blob[:4096]
     compression_probe = prefetch_compression_probe(blob)
+    decompressed, decompression = decompress_mam_prefetch(blob)
+    if decompressed:
+        parse_blob = decompressed
+    else:
+        parse_blob = blob
+    header = parse_blob[:4096]
     is_scca = len(header) >= 8 and header[4:8] == b"SCCA"
     prefetch_version = int.from_bytes(header[:4], "little") if is_scca else 0
     version_metadata = prefetch_version_metadata(prefetch_version)
-    section_bounds_profile = prefetch_section_bounds_profile(blob, version_metadata, compression_probe)
+    section_bounds_profile = prefetch_section_bounds_profile(
+        parse_blob, version_metadata, compression_probe, decompressed=bool(decompressed)
+    )
     hints: dict[str, object] = {
         "binary_format_detected": is_scca,
         "prefetch_parse_status": "parsed-common-header" if version_metadata["supported_common_layout"] else "inventory-only",
@@ -263,11 +273,12 @@ def prefetch_header_hints(path: Path) -> dict[str, object]:
         "file_reference_candidates": [],
         "file_reference_candidate_count": 0,
         "prefetch_compression": compression_probe,
+        "prefetch_decompression": decompression,
         "prefetch_section_bounds_profile": section_bounds_profile,
         "prefetch_validation_checks": prefetch_validation_checks(
             is_scca=is_scca,
             prefetch_version=prefetch_version,
-            blob_size=len(blob),
+            blob_size=len(parse_blob),
             declared_file_size=0,
             run_count=0,
             run_times=[],
@@ -280,18 +291,18 @@ def prefetch_header_hints(path: Path) -> dict[str, object]:
     }
     if not is_scca:
         return hints
-    hints["declared_file_size"] = read_u32(blob, 0x0C)
+    hints["declared_file_size"] = read_u32(parse_blob, 0x0C)
     run_count_offset = version_metadata.get("run_count_offset")
     last_run_offset = version_metadata.get("last_run_time_offset")
     last_run_slots = int(version_metadata.get("last_run_time_slots") or 0)
     if run_count_offset is not None:
-        hints["run_count"] = read_u32(blob, int(run_count_offset))
+        hints["run_count"] = read_u32(parse_blob, int(run_count_offset))
     if last_run_offset is not None:
-        run_times = prefetch_run_times(blob, int(last_run_offset), slots=last_run_slots)
+        run_times = prefetch_run_times(parse_blob, int(last_run_offset), slots=last_run_slots)
         hints["last_run_times"] = run_times
         hints["last_run_at"] = run_times[0] if run_times else ""
-    strings = extract_utf16le_strings(blob[: min(len(blob), MAX_PREFETCH_SCAN_BYTES)])
-    fixed_header_name = read_prefetch_executable_name(blob)
+    strings = extract_utf16le_strings(parse_blob[: min(len(parse_blob), MAX_PREFETCH_SCAN_BYTES)])
+    fixed_header_name = read_prefetch_executable_name(parse_blob)
     executable_names = [item for item in strings if ".exe" in item.lower()]
     if fixed_header_name:
         hints["header_executable_name"] = fixed_header_name
@@ -309,7 +320,7 @@ def prefetch_header_hints(path: Path) -> dict[str, object]:
     hints["prefetch_validation_checks"] = prefetch_validation_checks(
         is_scca=is_scca,
         prefetch_version=prefetch_version,
-        blob_size=len(blob),
+        blob_size=len(parse_blob),
         declared_file_size=int(hints["declared_file_size"]),
         run_count=int(hints["run_count"]),
         run_times=list(hints["last_run_times"]),
@@ -322,6 +333,82 @@ def prefetch_header_hints(path: Path) -> dict[str, object]:
     return hints
 
 
+def decompress_mam_prefetch(blob: bytes) -> tuple[bytes, dict[str, object]]:
+    # MAM container: u32 signature ("MAM" + compression-algorithm nibble +
+    # CRC flag), u32 declared uncompressed size, optional u32 CRC32, then
+    # the compressed stream. Decompression uses ntdll RtlDecompressBufferEx
+    # (XPRESS_HUFF) and is therefore Windows-only; other hosts report the
+    # limitation instead of silently parsing nothing.
+    status: dict[str, object] = {"attempted": bool(blob[:3] == b"MAM" and len(blob) >= 8)}
+    if not status["attempted"]:
+        status["status"] = "not-mam"
+        return b"", status
+    if os.name != "nt":
+        status["status"] = "not-attempted-non-windows-host"
+        return b"", status
+    signature = int.from_bytes(blob[:4], "little")
+    declared_size = int.from_bytes(blob[4:8], "little")
+    algorithm_id = (signature & 0x0F000000) >> 24
+    compressed = blob[8:]
+    if signature & 0xF0000000 and len(compressed) >= 4:
+        declared_crc = int.from_bytes(compressed[:4], "little")
+        crc = binascii.crc32(blob[:8])
+        crc = binascii.crc32(b"\x00\x00\x00\x00", crc)
+        crc = binascii.crc32(compressed[4:], crc)
+        status["crc32_ok"] = crc == declared_crc
+        compressed = compressed[4:]
+        if not status["crc32_ok"]:
+            status["status"] = "crc-mismatch"
+            return b"", status
+    try:
+        import ctypes
+
+        ntdll = ctypes.windll.ntdll
+        workspace_compress = ctypes.c_uint32()
+        workspace_fragment = ctypes.c_uint32()
+        rc = ntdll.RtlGetCompressionWorkSpaceSize(
+            ctypes.c_uint16(algorithm_id),
+            ctypes.byref(workspace_compress),
+            ctypes.byref(workspace_fragment),
+        )
+        if rc:
+            status["status"] = f"workspace-error-0x{rc & 0xFFFFFFFF:08x}"
+            return b"", status
+        source = (ctypes.c_ubyte * len(compressed)).from_buffer_copy(compressed)
+        target = (ctypes.c_ubyte * declared_size)()
+        final_size = ctypes.c_uint32()
+        workspace = (ctypes.c_ubyte * workspace_fragment.value)()
+        rc = ntdll.RtlDecompressBufferEx(
+            ctypes.c_uint16(algorithm_id),
+            ctypes.byref(target),
+            ctypes.c_uint32(declared_size),
+            ctypes.byref(source),
+            ctypes.c_uint32(len(compressed)),
+            ctypes.byref(final_size),
+            ctypes.byref(workspace),
+        )
+        if rc:
+            status["status"] = f"decompress-error-0x{rc & 0xFFFFFFFF:08x}"
+            return b"", status
+        if final_size.value != declared_size:
+            status["status"] = "size-mismatch"
+            status["produced_size"] = int(final_size.value)
+            return b"", status
+    except (AttributeError, OSError) as exc:
+        status["status"] = f"unavailable:{exc.__class__.__name__}"
+        return b"", status
+    status.update(
+        {
+            "status": "decompressed",
+            "method": "ntdll-RtlDecompressBufferEx",
+            "algorithm_id": algorithm_id,
+            "compressed_size": len(compressed),
+            "declared_uncompressed_size": declared_size,
+        }
+    )
+    return bytes(target), status
+
+
 def prefetch_compression_probe(blob: bytes) -> dict[str, object]:
     magic = blob[:4]
     detected = magic[:3] == b"MAM"
@@ -331,8 +418,16 @@ def prefetch_compression_probe(blob: bytes) -> dict[str, object]:
         "format": "windows-prefetch-mam" if detected else "plain-or-unknown",
         "magic_hex": magic.hex(),
         "declared_uncompressed_size": declared_uncompressed_size,
-        "decompression_status": "not-implemented-recorded" if detected else "not-needed",
-        "reportability": "external-decompression-required" if detected else "normal-scca-path",
+        "decompression_status": (
+            "native-attempt-on-windows" if detected and os.name == "nt"
+            else "external-decompression-required" if detected
+            else "not-needed"
+        ),
+        "reportability": (
+            "native-decompression-on-windows" if detected and os.name == "nt"
+            else "external-decompression-required" if detected
+            else "normal-scca-path"
+        ),
     }
 
 
@@ -373,6 +468,7 @@ def prefetch_section_bounds_profile(
     blob: bytes,
     version_metadata: Mapping[str, object],
     compression_probe: Mapping[str, object],
+    decompressed: bool = False,
 ) -> dict[str, object]:
     version = int(version_metadata.get("version") or 0)
     supported = bool(version_metadata.get("supported_common_layout"))
@@ -385,6 +481,7 @@ def prefetch_section_bounds_profile(
         "actual_file_size": len(blob),
         "declared_file_size": declared_file_size,
         "compressed_prefetch_detected": bool(compression_probe.get("detected")),
+        "decompressed_for_analysis": decompressed,
         "bounds_status": "unsupported-layout",
         "section_count_declared": 0,
         "declared_sections_within_file": False,
@@ -393,7 +490,7 @@ def prefetch_section_bounds_profile(
             "section-locator-only; file metrics, trace chains, and volume records are not decoded as report-grade rows"
         ),
     }
-    if compression_probe.get("detected"):
+    if compression_probe.get("detected") and not decompressed:
         profile["bounds_status"] = "compressed-not-decompressed"
         profile["section_profile_hash"] = prefetch_stable_sha256(profile)
         return profile

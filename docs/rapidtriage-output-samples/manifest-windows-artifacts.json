@@ -24584,6 +24584,10 @@
               "decompression_status": "not-needed",
               "reportability": "normal-scca-path"
             },
+            "prefetch_decompression": {
+              "attempted": false,
+              "status": "not-mam"
+            },
             "prefetch_section_bounds_profile": {
               "profile_version": "prefetch-section-bounds-profile-v1",
               "parser_version": "prefetch-inventory-v9",
@@ -24592,6 +24596,7 @@
               "actual_file_size": 512,
               "declared_file_size": 512,
               "compressed_prefetch_detected": false,
+              "decompressed_for_analysis": false,
               "bounds_status": "section-locators-recorded",
               "section_count_declared": 0,
               "declared_sections_within_file": false,
@@ -24650,7 +24655,7 @@
                 }
               ],
               "decode_boundary": "section-locator-only; file metrics, trace chains, and volume records are not decoded as report-grade rows",
-              "section_profile_hash": "25541309a2d9031e9ce9869a0e7263954619120d9c1eec7f4029c0f8ffd32ebe"
+              "section_profile_hash": "af2d621f138c7c1d8bf0d3fd868d37709003a2c7c53270d58bb8f7e7093a2f80"
             },
             "prefetch_validation_checks": {
               "has_scca_signature": true,
@@ -24823,7 +24828,8 @@
             "prefetch_native_capabilities": {
               "scca_signature_validation": true,
               "compressed_prefetch_detection": true,
-              "compressed_prefetch_decompression": false,
+              "compressed_prefetch_decompression": true,
+              "compressed_prefetch_decompression_platform": "windows-ntdll-only",
               "common_header_version_offsets": true,
               "section_locator_bounds_profile": true,
               "run_count_and_last_run_times": true,
@@ -24869,7 +24875,7 @@
                 "source_index:",
                 "source_sha256:4ed0441ececfe85a462ba5770a37ae31ada11a969d8a3f75ab7fa567ed6c0d5a",
                 "artifact_type:prefetch-file",
-                "section_profile_hash:25541309a2d9031e9ce9869a0e7263954619120d9c1eec7f4029c0f8ffd32ebe"
+                "section_profile_hash:af2d621f138c7c1d8bf0d3fd868d37709003a2c7c53270d58bb8f7e7093a2f80"
               ],
               "passed_validation_matrix_ids": [
                 "scca-signature",
@@ -24943,7 +24949,7 @@
                 "prefetch_version": 30,
                 "section_bounds_status": "section-locators-recorded",
                 "section_count_declared": 0,
-                "section_profile_hash": "25541309a2d9031e9ce9869a0e7263954619120d9c1eec7f4029c0f8ffd32ebe",
+                "section_profile_hash": "af2d621f138c7c1d8bf0d3fd868d37709003a2c7c53270d58bb8f7e7093a2f80",
                 "full_file_metrics_decode_required_for_commercial_claims": true
               },
               "next_internal_step": "Finish file metrics, MFT reference, authoritative volume, compressed PF, and cross-version corpus validation.",
@@ -25015,7 +25021,7 @@
                 "prefetch_version": 30,
                 "section_bounds_status": "section-locators-recorded",
                 "section_count_declared": 0,
-                "section_profile_hash": "25541309a2d9031e9ce9869a0e7263954619120d9c1eec7f4029c0f8ffd32ebe",
+                "section_profile_hash": "af2d621f138c7c1d8bf0d3fd868d37709003a2c7c53270d58bb8f7e7093a2f80",
                 "run_count": 3,
                 "last_run_at": "2024-04-01T09:10:11+00:00",
                 "referenced_path_count": 1
@@ -25103,7 +25109,7 @@
                 "declared_file_size": 512,
                 "actual_file_size": 512,
                 "file_size_matches_declared": true,
-                "section_bounds_profile_hash": "25541309a2d9031e9ce9869a0e7263954619120d9c1eec7f4029c0f8ffd32ebe",
+                "section_bounds_profile_hash": "af2d621f138c7c1d8bf0d3fd868d37709003a2c7c53270d58bb8f7e7093a2f80",
                 "section_bounds_status": "section-locators-recorded",
                 "section_count_declared": 0,
                 "declared_sections_within_file": false
@@ -25161,7 +25167,7 @@
                 "bounds_status": "section-locators-recorded",
                 "section_count_declared": 0,
                 "declared_sections_within_file": false,
-                "section_profile_hash": "25541309a2d9031e9ce9869a0e7263954619120d9c1eec7f4029c0f8ffd32ebe",
+                "section_profile_hash": "af2d621f138c7c1d8bf0d3fd868d37709003a2c7c53270d58bb8f7e7093a2f80",
                 "sections": [
                   {
                     "section": "file_metrics_array",
@@ -25249,7 +25255,7 @@
                 {
                   "kind": "prefetch-section-bounds",
                   "bounds_status": "section-locators-recorded",
-                  "section_profile_hash": "25541309a2d9031e9ce9869a0e7263954619120d9c1eec7f4029c0f8ffd32ebe"
+                  "section_profile_hash": "af2d621f138c7c1d8bf0d3fd868d37709003a2c7c53270d58bb8f7e7093a2f80"
                 },
                 {
                   "kind": "prefetch-compression-state",
@@ -25455,7 +25461,8 @@
             "prefetch_native_capabilities": {
               "scca_signature_validation": true,
               "compressed_prefetch_detection": true,
-              "compressed_prefetch_decompression": false,
+              "compressed_prefetch_decompression": true,
+              "compressed_prefetch_decompression_platform": "windows-ntdll-only",
               "common_header_version_offsets": true,
               "section_locator_bounds_profile": true,
               "run_count_and_last_run_times": true,
@@ -25501,7 +25508,7 @@
                 "source_index:0",
                 "source_sha256:4ed0441ececfe85a462ba5770a37ae31ada11a969d8a3f75ab7fa567ed6c0d5a",
                 "artifact_type:prefetch-reference",
-                "section_profile_hash:25541309a2d9031e9ce9869a0e7263954619120d9c1eec7f4029c0f8ffd32ebe"
+                "section_profile_hash:af2d621f138c7c1d8bf0d3fd868d37709003a2c7c53270d58bb8f7e7093a2f80"
               ],
               "passed_validation_matrix_ids": [
                 "scca-signature",
@@ -25575,7 +25582,7 @@
                 "prefetch_version": 30,
                 "section_bounds_status": "section-locators-recorded",
                 "section_count_declared": 0,
-                "section_profile_hash": "25541309a2d9031e9ce9869a0e7263954619120d9c1eec7f4029c0f8ffd32ebe",
+                "section_profile_hash": "af2d621f138c7c1d8bf0d3fd868d37709003a2c7c53270d58bb8f7e7093a2f80",
                 "full_file_metrics_decode_required_for_commercial_claims": true
               },
               "next_internal_step": "Finish file metrics, MFT reference, authoritative volume, compressed PF, and cross-version corpus validation.",

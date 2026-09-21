@@ -20,6 +20,7 @@ from rapidtriage.artifacts.windows.execution import (
     build_execution_artifact_trusted_diff,
 )
 from rapidtriage.artifacts.windows.os_account import build_os_account_trusted_diff
+from rapidtriage.artifacts.windows.prefetch import prefetch_header_hints
 from rapidtriage.artifacts.windows.recent_files import (
     join_lnk_base_suffix,
     parse_lnk_link_info,
@@ -3839,6 +3840,70 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                 references[0]["details"]["prefetch_execution_depth_manifest"]["artifact_type"],
                 "prefetch-reference",
             )
+
+    @unittest.skipUnless(os.name == "nt", "MAM decompression uses ntdll RtlDecompressBufferEx")
+    def test_prefetch_mam_decompression_recovers_scca_fields(self) -> None:
+        import ctypes
+
+        # Build a minimal SCCA v31 inner blob.
+        inner = bytearray(0x200)
+        inner[0:4] = (31).to_bytes(4, "little")
+        inner[4:8] = b"SCCA"
+        inner[0x0C:0x10] = len(inner).to_bytes(4, "little")
+        name = "TESTAPP.EXE".encode("utf-16le")
+        inner[0x10 : 0x10 + len(name)] = name
+        filetime = datetime_to_filetime(datetime(2024, 5, 1, 12, 0, 0, tzinfo=timezone.utc))
+        inner[0x80:0x88] = filetime.to_bytes(8, "little")
+        inner[0xD0:0xD4] = (5).to_bytes(4, "little")
+
+        # Compress with the same OS API MAM files use.
+        ntdll = ctypes.windll.ntdll
+        algorithm_id = 4  # COMPRESSION_FORMAT_XPRESS_HUFF
+        ws_compress = ctypes.c_uint32()
+        ws_fragment = ctypes.c_uint32()
+        rc = ntdll.RtlGetCompressionWorkSpaceSize(
+            ctypes.c_uint16(algorithm_id), ctypes.byref(ws_compress), ctypes.byref(ws_fragment)
+        )
+        self.assertEqual(rc, 0)
+        source = (ctypes.c_ubyte * len(inner)).from_buffer_copy(bytes(inner))
+        capacity = len(inner) + 4096
+        target = (ctypes.c_ubyte * capacity)()
+        produced = ctypes.c_uint32()
+        workspace = (ctypes.c_ubyte * ws_compress.value)()
+        rc = ntdll.RtlCompressBuffer(
+            ctypes.c_uint16(algorithm_id),
+            ctypes.byref(source),
+            ctypes.c_uint32(len(inner)),
+            ctypes.byref(target),
+            ctypes.c_uint32(capacity),
+            ctypes.c_uint32(4096),
+            ctypes.byref(produced),
+            ctypes.byref(workspace),
+        )
+        self.assertEqual(rc, 0)
+
+        signature = 0x004D414D | (algorithm_id << 24)
+        mam_blob = (
+            signature.to_bytes(4, "little")
+            + len(inner).to_bytes(4, "little")
+            + bytes(target[: produced.value])
+        )
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            pf = Path(tmp_dir) / "TESTAPP.EXE-12345678.pf"
+            pf.write_bytes(mam_blob)
+            hints = prefetch_header_hints(pf)
+
+        self.assertEqual(hints["prefetch_decompression"]["status"], "decompressed")
+        self.assertEqual(hints["prefetch_decompression"]["method"], "ntdll-RtlDecompressBufferEx")
+        self.assertTrue(hints["binary_format_detected"])
+        self.assertEqual(hints["prefetch_version"], 31)
+        self.assertEqual(hints["header_executable_name"], "TESTAPP.EXE")
+        self.assertEqual(hints["run_count"], 5)
+        self.assertEqual(hints["last_run_at"], "2024-05-01T12:00:00+00:00")
+        self.assertTrue(
+            hints["prefetch_section_bounds_profile"]["decompressed_for_analysis"]
+        )
 
     def test_windows_prefetch_collector_is_available_as_dedicated_artifacts_kind(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
