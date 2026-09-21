@@ -948,7 +948,6 @@ def build_minimal_registry_hive(timestamp: datetime, embedded_name: str, strings
     child_relative_offset = subkey_list_relative_offset + subkey_list_size
     child_size = _registry_cell_size(0x4C + len(child_name.encode("latin-1", errors="ignore")))
     value_list_cell_relative_offset = child_relative_offset + child_size
-    value_list_data_relative_offset = value_list_cell_relative_offset + 4
     value_list_size = _registry_cell_size(4)
     value_relative_offset = value_list_cell_relative_offset + value_list_size
     cell_payload = b"".join(
@@ -967,7 +966,7 @@ def build_minimal_registry_hive(timestamp: datetime, embedded_name: str, strings
                 allocated=True,
                 parent_relative_offset=root_relative_offset,
                 value_count=1,
-                value_list_relative_offset=value_list_data_relative_offset,
+                value_list_relative_offset=value_list_cell_relative_offset,
             ),
             build_registry_value_list_cell([value_relative_offset]),
             build_registry_vk_cell(
@@ -1014,7 +1013,6 @@ def build_minimal_shellbags_registry_hive(timestamp: datetime, embedded_name: st
     bagmru_relative_offset = subkey_list_relative_offset + subkey_list_size
     bagmru_size = _registry_cell_size(0x4C + len(b"BagMRU"))
     value_list_cell_relative_offset = bagmru_relative_offset + bagmru_size
-    value_list_data_relative_offset = value_list_cell_relative_offset + 4
     value_list_size = _registry_cell_size(8)
     shell_item_value_relative_offset = value_list_cell_relative_offset + value_list_size
     shell_item_value_size = _registry_cell_size(20 + len(b"0"))
@@ -1036,7 +1034,7 @@ def build_minimal_shellbags_registry_hive(timestamp: datetime, embedded_name: st
                 allocated=True,
                 parent_relative_offset=root_relative_offset,
                 value_count=2,
-                value_list_relative_offset=value_list_data_relative_offset,
+                value_list_relative_offset=value_list_cell_relative_offset,
             ),
             build_registry_value_list_cell([shell_item_value_relative_offset, node_slot_value_relative_offset]),
             build_registry_vk_cell("0", allocated=True, value_type=3, inline_data=b"\x14\x00\x1fP"),

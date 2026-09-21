@@ -287,6 +287,46 @@ a recognized trusted tool.
 
 Report: `D:\devin\trusted-ref\shimcache-diff-report.json`.
 
+## BAM/DAM native hive decode vs regipy (B-series)
+
+`scripts/bam-dam-reference-diff.py` (requires `regipy`) diffs the
+SYSTEM hive `Services\bam\state\UserSettings\<SID>` per-user values
+(value name = device path, data = FILETIME) against regipy's
+`BAMPlugin` on the same real SYSTEM hive.
+
+Before this stage BAM/DAM used string-pivot clusters only
+(`native_bam_system_hive_decode: False`). `decode_bam_dam_schema` now
+walks `UserSettings` keys under `bam`/`dam` service ancestors,
+enumerates SID subkeys and their value lists, and emits
+`bam-schema-entry` records with SID, ControlSet, device path, and
+FILETIME.
+
+This work exposed a shared parser bug:
+`registry_value_offsets_for_key` read the value-list array starting at
+the cell offset instead of skipping the 4-byte cell-size header, so
+the first slot was garbage and the last listed value of every key was
+silently dropped. The fix (read entries at `value_list_offset + 4`)
+matches the real-hive convention regipy uses; the two test fixtures
+that stored the data offset were corrected to store the cell offset.
+
+Final result on the real hive:
+
+| Metric | Before fix | After fix |
+|--------|-----------|-----------|
+| regipy BAM rows | 115 | 115 |
+| RapidTriage schema rows | 110 | **115** |
+| (sid, path) row recall / precision | 0.9565 / 1.0 | **1.0 / 1.0** |
+| Timestamp agreement (ms) | 1.0 | **1.0** |
+
+Limitations: BAM/DAM value FILETIME semantics (last-execution vs
+activity window) are decoded but not independently validated;
+`bam-schema-entry` stays `reportability: review` with
+`bam-dam-filetime-row-validation-required`. DAM entries and
+`dam\state` trees are decoded when present (none in this hive).
+regipy is an engineering reference, not a recognized trusted tool.
+
+Report: `D:\devin\trusted-ref\bam-dam-diff-report.json`.
+
 ## Release-gate impact
 
 `quantitative-accuracy-thresholds` stays `blocked`: the gate requires

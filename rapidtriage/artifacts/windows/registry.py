@@ -3919,12 +3919,13 @@ def registry_value_offsets_for_key(blob: bytes, key_node: Mapping[str, object]) 
     value_list_offset = int(key_node.get("value_list_offset") or 0)
     if value_count <= 0 or value_count > 4096 or value_list_offset <= 0:
         return []
-    end = value_list_offset + value_count * 4
+    list_start = value_list_offset + 4
+    end = list_start + value_count * 4
     if end > len(blob):
         return []
     offsets: list[int] = []
     for index in range(value_count):
-        relative = read_u32(blob, value_list_offset + index * 4)
+        relative = read_u32(blob, list_start + index * 4)
         file_offset = registry_relative_to_file_offset(relative)
         if file_offset:
             offsets.append(file_offset)

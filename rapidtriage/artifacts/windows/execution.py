@@ -47,7 +47,7 @@ SHIMCACHE_WIN10_STATS_SIZE = 0x30
 SHIMCACHE_ENTRY_META_LEN = 12
 SHIMCACHE_MAX_VALUE_BYTES = 32 * 1024 * 1024
 SHIMCACHE_MAX_ENTRIES = 8192
-MAX_NATIVE_BAM_DAM_SCAN_BYTES = 8 * 1024 * 1024
+MAX_NATIVE_BAM_DAM_SCAN_BYTES = 64 * 1024 * 1024
 BAM_DAM_ROW_CLUSTER_WINDOW_BYTES = 4096
 POWERSHELL_HISTORY = ("AppData", "Roaming", "Microsoft", "Windows", "PowerShell", "PSReadLine", "ConsoleHost_history.txt")
 
@@ -84,7 +84,7 @@ EXECUTION_NATIVE_CAPABILITIES = {
     "srum_row_string_candidates": True,
     "native_amcache_schema_decode": True,
     "native_shimcache_binary_decode": True,
-    "native_bam_system_hive_decode": False,
+    "native_bam_system_hive_decode": True,
     "native_ese_catalog_decode": False,
     "native_srum_page_row_decode": False,
 }
@@ -1161,6 +1161,7 @@ def build_native_bam_dam_records(path: Path) -> Iterable[ArtifactRecord]:
         return
 
     source_hashes = file_hashes(path)
+    schema_rows, schema_decode_profile = decode_bam_dam_schema(blob)
     occurrences = list(iter_registry_like_string_occurrences(blob))
     markers = [
         item
@@ -1169,8 +1170,10 @@ def build_native_bam_dam_records(path: Path) -> Iterable[ArtifactRecord]:
         or "\\services\\dam\\" in str(item.get("text") or "").lower()
     ]
     clusters = collect_bam_dam_candidate_clusters(occurrences)
-    if not clusters and not markers:
+    if not clusters and not markers and not schema_rows:
         return
+    for index, schema_row in enumerate(schema_rows):
+        yield build_bam_dam_schema_entry_record(path, source_hashes, schema_row, index)
 
     for index, cluster in enumerate(clusters[:100]):
         executable_path = str(cluster.get("executable_path") or "")
@@ -1289,6 +1292,7 @@ def build_native_bam_dam_records(path: Path) -> Iterable[ArtifactRecord]:
                     ] if isinstance(cluster.get("nearby_metadata_candidates"), list) else [],
                 ),
                 "bam_dam_decode_profile": decode_profile,
+                "bam_dam_schema_decode": schema_decode_profile,
                 "bam_dam_row_manifest": bam_dam_manifest,
                 "bam_dam_row_manifest_hash": bam_dam_manifest.get("manifest_sha256", ""),
                 "bam_dam_report_citation_manifest": citation_manifest,
@@ -1337,6 +1341,178 @@ def build_native_bam_dam_records(path: Path) -> Iterable[ArtifactRecord]:
                 "raw_preview": executable_path,
             },
         )
+
+
+def decode_bam_dam_schema(blob: bytes) -> tuple[list[dict[str, object]], dict[str, object]]:
+    profile: dict[str, object] = {"decode_status": "no-cells", "sid_keys_seen": 0, "cell_count": 0}
+    if len(blob) < 4096 or not blob.startswith(b"regf"):
+        profile["decode_status"] = "not-regf"
+        return [], profile
+    cells = iter_amcache_hive_cells(blob)
+    profile["cell_count"] = len(cells)
+    if not cells:
+        return [], profile
+
+    def _ancestor_names(node: Mapping[str, object]) -> list[str]:
+        names: list[str] = []
+        cursor = node
+        for _ in range(8):
+            cursor = cells.get(int(cursor.get("parent_cell_offset") or 0)) or {}
+            name = str(cursor.get("name") or "")
+            if not name:
+                break
+            names.append(name)
+        return names
+
+    rows: list[dict[str, object]] = []
+    for node in cells.values():
+        if node.get("cell_kind") != "key-node" or str(node.get("name") or "").lower() != "usersettings":
+            continue
+        ancestors = _ancestor_names(node)
+        lowered = [name.lower() for name in ancestors]
+        service = ""
+        if "bam" in lowered:
+            service = "bam"
+        elif "dam" in lowered:
+            service = "dam"
+        else:
+            continue
+        control_set = next((name for name in ancestors if name.lower().startswith("controlset")), "")
+        for sid_offset in registry_subkey_offsets_for_key(blob, node):
+            sid_key = cells.get(sid_offset)
+            if sid_key is None:
+                continue
+            sid = str(sid_key.get("name") or "")
+            if not sid.startswith("S-1-"):
+                continue
+            profile["sid_keys_seen"] += 1
+            sequence_number = ""
+            version = ""
+            for value_offset in registry_value_offsets_for_key(blob, sid_key):
+                value_cell = cells.get(value_offset)
+                if value_cell is None:
+                    continue
+                name = str(value_cell.get("name") or "")
+                lowered_name = name.lower()
+                data = registry_value_data_bytes(blob, value_cell, max_size=SHIMCACHE_MAX_VALUE_BYTES)
+                if lowered_name == "sequencenumber":
+                    sequence_number = str(int.from_bytes(data[:4], "little")) if len(data) >= 4 else ""
+                    continue
+                if lowered_name == "version":
+                    version = str(int.from_bytes(data[:4], "little")) if len(data) >= 4 else ""
+                    continue
+                timestamp = filetime_to_iso(int.from_bytes(data[:8], "little")) if len(data) >= 8 else ""
+                rows.append(
+                    {
+                        "service": service,
+                        "control_set": control_set,
+                        "user_sid": sid,
+                        "sid_key_cell_offset": sid_offset,
+                        "value_cell_offset": value_offset,
+                        "executable_path": name,
+                        "timestamp": timestamp,
+                        "sequence_number": sequence_number,
+                        "version": version,
+                        "key_last_written_at": str(sid_key.get("last_written_at") or ""),
+                        "value_data_size": int(value_cell.get("value_data_size") or 0),
+                    }
+                )
+    profile["decode_status"] = "decoded" if rows else "no-decodable-rows"
+    profile["schema_row_count"] = len(rows)
+    return rows, profile
+
+
+def build_bam_dam_schema_entry_record(
+    path: Path,
+    source_hashes: Mapping[str, str],
+    row: Mapping[str, object],
+    index: int,
+) -> ArtifactRecord:
+    executable_path = str(row.get("executable_path") or "")
+    timestamp = str(row.get("timestamp") or "")
+    user_sid = str(row.get("user_sid") or "")
+    validation_checks = {
+        "has_executable_path": bool(executable_path),
+        "has_user_or_sid": bool(user_sid),
+        "has_user": bool(user_sid),
+        "has_timestamp": bool(timestamp),
+        "has_source_offset": bool(row.get("value_cell_offset")),
+        "requires_correlation": True,
+        "requires_second_parser_validation": True,
+        "native_binary_layout_decoding_available": True,
+        "correlation_targets": execution_correlation_targets("bam-entry"),
+    }
+    report_grade = execution_report_grade_assessment(
+        execution_validation_matrix(validation_checks),
+        validation_required=True,
+        gap_ids=["#9"],
+        extra_blockers=["bam-dam-filetime-row-validation-required"],
+    )
+    control_set = str(row.get("control_set") or "")
+    service = str(row.get("service") or "bam")
+    source_key = (
+        f"SYSTEM\\{control_set}\\Services\\{service}\\State\\UserSettings\\{user_sid}"
+        if control_set
+        else f"SYSTEM\\ControlSet*\\Services\\{service}\\*\\UserSettings\\{user_sid}"
+    )
+    return ArtifactRecord(
+        provider=WindowsExecutionProvider.name,
+        artifact_type="bam-schema-entry",
+        path=str(path.resolve()),
+        supported=True,
+        details={
+            "parser": "windows-bam-dam-schema-entry",
+            "parser_version": PARSER_VERSION,
+            "coverage_status": "native-schema-decode",
+            "reportability": "review",
+            "source_path": str(path.resolve()),
+            "source_format": "system-hive-native-bam-dam-decode",
+            "source_hashes": dict(source_hashes),
+            "source_key": source_key,
+            "source_index": index,
+            "service": service,
+            "control_set": control_set,
+            "user_sid": user_sid,
+            "sid_key_cell_offset": row.get("sid_key_cell_offset", 0),
+            "value_cell_offset": row.get("value_cell_offset", 0),
+            "executable_path": executable_path,
+            "device_path": executable_path if executable_path.lower().startswith("\\device\\") else "",
+            "timestamp": timestamp,
+            "timestamp_source": "native-bam-dam-value-filetime" if timestamp else "not_present_in_value",
+            "sequence_number": row.get("sequence_number", ""),
+            "version": row.get("version", ""),
+            "key_last_written_at": row.get("key_last_written_at", ""),
+            "value_data_size": row.get("value_data_size", 0),
+            "native_binary_layout_decoding_available": True,
+            "evidence_strength": "recent-execution-indicator-candidate",
+            "validation_required": True,
+            "validation_checks": validation_checks,
+            "execution_validation_matrix": execution_validation_matrix(validation_checks),
+            "execution_report_grade_assessment": report_grade,
+            "forensic_review": build_forensic_review(
+                gap_id="#9",
+                artifact_goal="BAM/DAM per-user execution row reconstruction",
+                primary_evidence=[
+                    f"path={executable_path}" if executable_path else "",
+                    f"sid={user_sid}" if user_sid else "",
+                    f"timestamp={timestamp}" if timestamp else "",
+                ],
+                validation_required=True,
+                report_grade_assessment=report_grade,
+                caveats=[
+                    "BAM/DAM value FILETIME semantics (last-execution vs activity window) require trusted-tool confirmation",
+                    "correlate with Prefetch/ShimCache before execution claims",
+                ],
+            ),
+            "commercial_grade_ready": False,
+            "commercial_grade_blockers": report_grade["blockers"],
+            "risk_flags": execution_risk_flags("bam-entry", executable_path, {}),
+            "risk_score": min(100, len(execution_path_risk_flags(executable_path)) * 25 + 25),
+            "raw_preview": executable_path,
+        },
+    )
+
+
 def iter_amcache_hive_cells(blob: bytes, *, max_cells: int = MAX_AMCACHE_SCHEMA_CELLS) -> dict[int, dict[str, object]]:
     # hbin-walk nk/vk parse for schema decoding — deliberately not bounded by
     # the record-emission MAX_HIVE_CELL_RECORDS cap.
@@ -4165,7 +4341,7 @@ def execution_native_depth_family(artifact_type: str) -> str:
         return "amcache"
     if artifact_type in {"shimcache-entry", "shimcache-schema-entry"}:
         return "shimcache-appcompatcache"
-    if artifact_type == "bam-entry":
+    if artifact_type in {"bam-entry", "bam-schema-entry"}:
         return "bam-dam"
     if artifact_type.startswith("srum-"):
         return "srum"
@@ -4200,7 +4376,10 @@ def execution_native_depth_blockers(artifact_family: str, validation_checks: Map
         or validation_checks.get("native_binary_layout_decoding_available") is not True
     ):
         blockers.add("native-appcompatcache-layout-decoding-required")
-    if artifact_family == "bam-dam" and not EXECUTION_NATIVE_CAPABILITIES["native_bam_system_hive_decode"]:
+    if artifact_family == "bam-dam" and (
+        not EXECUTION_NATIVE_CAPABILITIES["native_bam_system_hive_decode"]
+        or validation_checks.get("native_binary_layout_decoding_available") is not True
+    ):
         blockers.add("native-system-hive-bam-decoding-required")
     if artifact_family == "srum":
         if not EXECUTION_NATIVE_CAPABILITIES["native_ese_catalog_decode"]:
@@ -4288,11 +4467,20 @@ def execution_native_depth_profile(
             "timestamp_semantics_labeled": bool(evidence_fields.get("timestamp") or evidence_fields.get("timestamp_source")),
             "source_offset_preserved": evidence_fields.get("source_offset") not in ("", None),
             "native_schema_or_layout_decode": (
-                bool(EXECUTION_NATIVE_CAPABILITIES["native_amcache_schema_decode"])
+                (
+                    bool(EXECUTION_NATIVE_CAPABILITIES["native_amcache_schema_decode"])
+                    and validation_checks.get("native_schema_decoding_available") is True
+                )
                 if artifact_family == "amcache"
-                else bool(EXECUTION_NATIVE_CAPABILITIES["native_shimcache_binary_decode"])
+                else (
+                    bool(EXECUTION_NATIVE_CAPABILITIES["native_shimcache_binary_decode"])
+                    and validation_checks.get("native_binary_layout_decoding_available") is True
+                )
                 if artifact_family == "shimcache-appcompatcache"
-                else bool(EXECUTION_NATIVE_CAPABILITIES["native_bam_system_hive_decode"])
+                else (
+                    bool(EXECUTION_NATIVE_CAPABILITIES["native_bam_system_hive_decode"])
+                    and validation_checks.get("native_binary_layout_decoding_available") is True
+                )
                 if artifact_family == "bam-dam"
                 else bool(EXECUTION_NATIVE_CAPABILITIES["native_srum_page_row_decode"])
                 if artifact_family == "srum"
