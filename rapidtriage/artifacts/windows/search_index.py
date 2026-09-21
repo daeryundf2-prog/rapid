@@ -10,11 +10,17 @@ from pathlib import Path, PureWindowsPath
 
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
-from .common import build_forensic_review
+from .common import build_forensic_review, isoformat_from_timestamp
 from .ese import build_ese_page_map, build_ese_string_pivots, probe_ese_database
+from .system import (
+    build_activity_style_row_records,
+    sqlite_schema_inventory,
+    windows_user_profile_attribution,
+)
 
 PARSER_VERSION = "windows-search-index-import-v8"
 SEARCH_EDB_PATH = ("ProgramData", "Microsoft", "Search", "Data", "Applications", "Windows", "Windows.edb")
+SEARCH_DB_PATH = ("ProgramData", "Microsoft", "Search", "Data", "Applications", "Windows", "Windows.db")
 SUPPORTED_EXPORT_SUFFIXES = {".csv", ".json", ".jsonl", ".ndjson"}
 EXPORT_HINTS = ("windows.edb", "windows-search", "searchindex", "search-index", "edbexport", "winsearch")
 WINDOWS_SEARCH_EDB_BLOCKERS = [
@@ -49,7 +55,14 @@ WINDOWS_SEARCH_CAPABILITIES = {
     "native_timestamp_decode": False,
     "native_space_tree_decode": False,
     "native_long_value_tree_decode": False,
+    "windows_db_sqlite_inventory": True,
+    "windows_db_row_samples": True,
 }
+WINDOWS_SEARCH_DB_BLOCKERS = [
+    "windows-db-table-semantic-mapping-required",
+    "windows-db-property-store-decoding-required",
+    "windows-edb-trusted-parser-diff-required",
+]
 WINDOWS_EDB_TRUSTED_DIFF_COMPARE_FIELDS = [
     "artifact_type",
     "path",
@@ -155,6 +168,13 @@ class WindowsSearchIndexProvider:
             records.extend(build_edb_row_candidate_records(edb_path, inventory.details))
             seen.add(edb_path.resolve())
 
+        db_path = root.joinpath(*SEARCH_DB_PATH)
+        if db_path.is_file():
+            inventory = build_windows_db_inventory_record(db_path, root=root)
+            records.append(inventory)
+            records.extend(build_activity_style_row_records(inventory))
+            seen.add(db_path.resolve())
+
         for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
             if not path.is_file():
                 continue
@@ -169,6 +189,12 @@ class WindowsSearchIndexProvider:
                 records.extend(build_edb_page_candidate_records(path, inventory.details))
                 records.extend(build_edb_table_candidate_records(path, inventory.details))
                 records.extend(build_edb_row_candidate_records(path, inventory.details))
+                seen.add(resolved)
+                continue
+            if path.name.lower() == "windows.db":
+                inventory = build_windows_db_inventory_record(path, root=root)
+                records.append(inventory)
+                records.extend(build_activity_style_row_records(inventory))
                 seen.add(resolved)
                 continue
             if path.suffix.lower() not in SUPPORTED_EXPORT_SUFFIXES or not any(hint in lowered for hint in EXPORT_HINTS):
@@ -375,6 +401,45 @@ def build_edb_inventory_record(path: Path) -> ArtifactRecord:
             "note": "Windows.edb is inventoried directly with bounded ESE header/string/page-map/table candidate pivots; page candidates preserve offset/hash context for review, but export CSV/JSON rows with a trusted ESE/Search parser for full table, timestamp, and deleted-state decoding.",
             },
         ),
+    )
+
+
+def build_windows_db_inventory_record(path: Path, *, root: Path | None = None) -> ArtifactRecord:
+    stat_result = path.stat()
+    schema_inventory = sqlite_schema_inventory(path)
+    profile_attribution = windows_user_profile_attribution(path, root=root)
+    opened = bool(schema_inventory.get("opened_readonly"))
+    return ArtifactRecord(
+        provider=WindowsSearchIndexProvider.name,
+        artifact_type="windows-search-db",
+        path=str(path.resolve()),
+        supported=opened,
+        details={
+            "parser": "windows-search-index-import",
+            "parser_version": PARSER_VERSION,
+            "coverage_status": "sqlite-schema-inventory" if opened else "database-file-inventory",
+            "reportability": "triage",
+            "source_path": str(path.resolve()),
+            "source_format": "windows-search-sqlite-db",
+            "source_hashes": file_hashes(path),
+            "size": stat_result.st_size,
+            "modified_at": isoformat_from_timestamp(stat_result.st_mtime),
+            "timestamp": isoformat_from_timestamp(stat_result.st_mtime),
+            "profile_attribution": profile_attribution,
+            "sqlite_schema_inventory": schema_inventory,
+            "table_count": schema_inventory.get("table_count", 0),
+            "total_row_count": schema_inventory.get("total_row_count", 0),
+            "windows_search_capabilities": dict(WINDOWS_SEARCH_CAPABILITIES),
+            "parser_confidence": "medium" if opened else "low",
+            "validation_required": True,
+            "validation_guidance": (
+                "Windows.db (Windows 11 SQLite search index) inventoried via schema and bounded row samples. "
+                "Property-store semantics, table-to-field mapping, and a trusted-tool diff are required before "
+                "report-grade Windows Search conclusions."
+            ),
+            "commercial_grade_ready": False,
+            "commercial_grade_blockers": list(WINDOWS_SEARCH_DB_BLOCKERS),
+        },
     )
 
 

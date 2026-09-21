@@ -95,6 +95,7 @@ from rapidtriage.artifacts.windows.registry import (
     stable_registry_json_sha256,
 )
 from rapidtriage.artifacts.windows.search_index import (
+    WindowsSearchIndexProvider,
     build_search_row_candidates,
     build_windows_edb_trusted_diff,
     windows_search_core_accuracy_gates,
@@ -4399,6 +4400,47 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                 "trusted ShellBags parser diff is required",
                 child.details["commercial_grade_blockers"],
             )
+
+    def test_windows_db_sqlite_search_index_inventory_and_rows(self) -> None:
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = (
+                Path(tmp_dir)
+                / "ProgramData"
+                / "Microsoft"
+                / "Search"
+                / "Data"
+                / "Applications"
+                / "Windows"
+                / "Windows.db"
+            )
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            connection = sqlite3.connect(db_path)
+            connection.execute(
+                "CREATE TABLE SystemIndex_1 (WorkId INTEGER, DocumentId INTEGER, CreateTime INTEGER)"
+            )
+            connection.execute("INSERT INTO SystemIndex_1 VALUES (1, 7, 133456789000000000)")
+            connection.commit()
+            connection.close()
+
+            records = list(WindowsSearchIndexProvider().collect(Path(tmp_dir)))
+            inventory = [record for record in records if record.artifact_type == "windows-search-db"]
+            rows = [record for record in records if record.artifact_type == "windows-search-row-candidate"]
+
+            self.assertEqual(len(inventory), 1)
+            details = inventory[0].details
+            self.assertEqual(details["coverage_status"], "sqlite-schema-inventory")
+            self.assertEqual(details["source_format"], "windows-search-sqlite-db")
+            self.assertEqual(details["table_count"], 1)
+            self.assertTrue(details["sqlite_schema_inventory"]["opened_readonly"])
+            self.assertFalse(details["commercial_grade_ready"])
+            self.assertIn(
+                "windows-db-table-semantic-mapping-required",
+                details["commercial_grade_blockers"],
+            )
+            self.assertTrue(rows)
+            self.assertEqual(rows[0].details["parent_artifact_type"], "windows-search-db")
 
     def test_registry_hive_reconstructs_native_key_and_value_links(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

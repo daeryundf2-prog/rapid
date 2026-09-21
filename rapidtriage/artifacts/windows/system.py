@@ -1790,6 +1790,8 @@ def activity_style_row_artifact_type(parent_artifact_type: str) -> str:
         return "activities-cache-row-candidate"
     if parent_artifact_type == "notification-database":
         return "notification-row-candidate"
+    if parent_artifact_type == "windows-search-db":
+        return "windows-search-row-candidate"
     return ""
 
 

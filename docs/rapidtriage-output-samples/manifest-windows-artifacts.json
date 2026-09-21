@@ -15711,7 +15711,9 @@
               "native_deleted_state_decode": false,
               "native_timestamp_decode": false,
               "native_space_tree_decode": false,
-              "native_long_value_tree_decode": false
+              "native_long_value_tree_decode": false,
+              "windows_db_sqlite_inventory": true,
+              "windows_db_row_samples": true
             },
             "windows_search_analyst_review_profile": {
               "profile_version": "windows-search-analyst-review-profile-v1",
@@ -16518,7 +16520,9 @@
               "native_deleted_state_decode": false,
               "native_timestamp_decode": false,
               "native_space_tree_decode": false,
-              "native_long_value_tree_decode": false
+              "native_long_value_tree_decode": false,
+              "windows_db_sqlite_inventory": true,
+              "windows_db_row_samples": true
             },
             "windows_search_analyst_review_profile": {
               "profile_version": "windows-search-analyst-review-profile-v1",
@@ -17151,7 +17155,9 @@
               "native_deleted_state_decode": false,
               "native_timestamp_decode": false,
               "native_space_tree_decode": false,
-              "native_long_value_tree_decode": false
+              "native_long_value_tree_decode": false,
+              "windows_db_sqlite_inventory": true,
+              "windows_db_row_samples": true
             },
             "windows_search_analyst_review_profile": {
               "profile_version": "windows-search-analyst-review-profile-v1",
@@ -17743,7 +17749,9 @@
               "native_deleted_state_decode": false,
               "native_timestamp_decode": false,
               "native_space_tree_decode": false,
-              "native_long_value_tree_decode": false
+              "native_long_value_tree_decode": false,
+              "windows_db_sqlite_inventory": true,
+              "windows_db_row_samples": true
             },
             "windows_search_analyst_review_profile": {
               "profile_version": "windows-search-analyst-review-profile-v1",
@@ -18330,7 +18338,9 @@
               "native_deleted_state_decode": false,
               "native_timestamp_decode": false,
               "native_space_tree_decode": false,
-              "native_long_value_tree_decode": false
+              "native_long_value_tree_decode": false,
+              "windows_db_sqlite_inventory": true,
+              "windows_db_row_samples": true
             },
             "windows_search_analyst_review_profile": {
               "profile_version": "windows-search-analyst-review-profile-v1",
@@ -18919,7 +18929,9 @@
               "native_deleted_state_decode": false,
               "native_timestamp_decode": false,
               "native_space_tree_decode": false,
-              "native_long_value_tree_decode": false
+              "native_long_value_tree_decode": false,
+              "windows_db_sqlite_inventory": true,
+              "windows_db_row_samples": true
             },
             "windows_search_analyst_review_profile": {
               "profile_version": "windows-search-analyst-review-profile-v1",
@@ -19723,7 +19735,9 @@
               "native_deleted_state_decode": false,
               "native_timestamp_decode": false,
               "native_space_tree_decode": false,
-              "native_long_value_tree_decode": false
+              "native_long_value_tree_decode": false,
+              "windows_db_sqlite_inventory": true,
+              "windows_db_row_samples": true
             },
             "windows_search_analyst_review_profile": {
               "profile_version": "windows-search-analyst-review-profile-v1",
@@ -20453,7 +20467,9 @@
               "native_deleted_state_decode": false,
               "native_timestamp_decode": false,
               "native_space_tree_decode": false,
-              "native_long_value_tree_decode": false
+              "native_long_value_tree_decode": false,
+              "windows_db_sqlite_inventory": true,
+              "windows_db_row_samples": true
             },
             "windows_search_analyst_review_profile": {
               "profile_version": "windows-search-analyst-review-profile-v1",
@@ -21165,7 +21181,9 @@
               "native_deleted_state_decode": false,
               "native_timestamp_decode": false,
               "native_space_tree_decode": false,
-              "native_long_value_tree_decode": false
+              "native_long_value_tree_decode": false,
+              "windows_db_sqlite_inventory": true,
+              "windows_db_row_samples": true
             },
             "windows_search_analyst_review_profile": {
               "profile_version": "windows-search-analyst-review-profile-v1",
@@ -21879,7 +21897,9 @@
               "native_deleted_state_decode": false,
               "native_timestamp_decode": false,
               "native_space_tree_decode": false,
-              "native_long_value_tree_decode": false
+              "native_long_value_tree_decode": false,
+              "windows_db_sqlite_inventory": true,
+              "windows_db_row_samples": true
             },
             "windows_search_analyst_review_profile": {
               "profile_version": "windows-search-analyst-review-profile-v1",
@@ -22589,7 +22609,9 @@
               "native_deleted_state_decode": false,
               "native_timestamp_decode": false,
               "native_space_tree_decode": false,
-              "native_long_value_tree_decode": false
+              "native_long_value_tree_decode": false,
+              "windows_db_sqlite_inventory": true,
+              "windows_db_row_samples": true
             },
             "windows_search_analyst_review_profile": {
               "profile_version": "windows-search-analyst-review-profile-v1",
@@ -23303,7 +23325,9 @@
               "native_deleted_state_decode": false,
               "native_timestamp_decode": false,
               "native_space_tree_decode": false,
-              "native_long_value_tree_decode": false
+              "native_long_value_tree_decode": false,
+              "windows_db_sqlite_inventory": true,
+              "windows_db_row_samples": true
             },
             "windows_search_analyst_review_profile": {
               "profile_version": "windows-search-analyst-review-profile-v1",
@@ -23934,7 +23958,9 @@
               "native_deleted_state_decode": false,
               "native_timestamp_decode": false,
               "native_space_tree_decode": false,
-              "native_long_value_tree_decode": false
+              "native_long_value_tree_decode": false,
+              "windows_db_sqlite_inventory": true,
+              "windows_db_row_samples": true
             },
             "windows_search_analyst_review_profile": {
               "profile_version": "windows-search-analyst-review-profile-v1",

@@ -478,6 +478,16 @@ IDList containers. `trusted ShellBags parser diff is required` and the
 other family blockers therefore remain; decoded paths are triage
 pivots, not report-grade folder-access testimony.
 
+## Windows.db (Windows 11 search index) — SQLite inventory
+
+This image has no `Windows.edb` (ESE); Windows 11 uses the SQLite
+`Windows.db` at `ProgramData\Microsoft\Search\Data\Applications\Windows`.
+A `windows-search-db` collector path was added: real evidence yields
+23 `SystemIndex_*` tables and 289,717 inventoried rows, with bounded
+`windows-search-row-candidate` samples (rowid + table locator + source
+hashes). Row samples are schema-guided triage candidates — property-store
+semantics and trusted-tool diff blockers remain.
+
 ## Release-gate impact
 
 `quantitative-accuracy-thresholds` stays `blocked`: the gate requires
