@@ -202,7 +202,7 @@
               "reportability": "inventory-only",
               "scan_status": "skipped-optional-dependency",
               "reason": "deepfake_lens python module is not importable in this environment",
-              "deepfake_lens_cli_path": "",
+              "deepfake_lens_cli_path": "C:\\Users\\HP\\AppData\\Local\\Programs\\Python\\Python312\\Scripts\\deepfake-lens.EXE",
               "install_hint": "Install the deepfake-lens toolkit (pip install deepfake-lens or a checkout on PYTHONPATH) to enable synthetic-media screening.",
               "score_semantics": "prioritization-score-not-truth-label",
               "validation_required": false
