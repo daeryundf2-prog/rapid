@@ -47,6 +47,20 @@ SHIMCACHE_WIN10_STATS_SIZE = 0x30
 SHIMCACHE_ENTRY_META_LEN = 12
 SHIMCACHE_MAX_VALUE_BYTES = 32 * 1024 * 1024
 SHIMCACHE_MAX_ENTRIES = 8192
+NTUSER_HIVE_NAME = "NTUSER.DAT"
+MAX_NATIVE_USERASSIST_SCAN_BYTES = 64 * 1024 * 1024
+USERASSIST_MAX_VALUE_BYTES = 64 * 1024
+USERASSIST_GUID_PATH_MAPPINGS = {
+    "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}": r"%SYSTEM32%",
+    "{6D809377-6AF0-444B-8957-A3773F02200E}": r"%PROGRAMFILES%",
+    "{7C5A40EF-A0FB-4BFC-874A-C0F2E0B9FA8E}": r"%PROGRAMFILES(X86)%",
+    "{F38BF404-1D43-42F2-9305-67DE0B28FC23}": r"%WINDIR%",
+    "{0139D44E-6AFE-49F2-8690-3DAFCAE6FFB8}": r"%PROGRAMDATA%\Microsoft\Windows\Start Menu\Programs",
+    "{9E3995AB-1F9C-4F13-B827-48B24B6C7174}": r"%AppData%\Roaming\Microsoft\Internet Explorer\Quick Launch\User Pinned",
+    "{A77F5D77-2E2B-44C3-A6A2-ABA601054A51}": r"%AppData%\Roaming\Microsoft\Windows\Start Menu\Programs",
+    "{D65231B0-B2F1-4857-A4CE-A8E7C6EA7D27}": r"%WINDIR%\SysWOW64",
+}
+USERASSIST_METADATA_NAMES = {"UEME_CTLSESSION"}
 MAX_NATIVE_BAM_DAM_SCAN_BYTES = 64 * 1024 * 1024
 BAM_DAM_ROW_CLUSTER_WINDOW_BYTES = 4096
 POWERSHELL_HISTORY = ("AppData", "Roaming", "Microsoft", "Windows", "PowerShell", "PSReadLine", "ConsoleHost_history.txt")
@@ -85,6 +99,7 @@ EXECUTION_NATIVE_CAPABILITIES = {
     "native_amcache_schema_decode": True,
     "native_shimcache_binary_decode": True,
     "native_bam_system_hive_decode": True,
+    "native_userassist_value_decode": True,
     "native_ese_catalog_decode": False,
     "native_srum_page_row_decode": False,
 }
@@ -289,6 +304,7 @@ class WindowsExecutionProvider:
             *collect_native_amcache_hives(root),
             *collect_native_shimcache_system_hives(root),
             *collect_native_bam_dam_system_hives(root),
+            *collect_native_userassist_ntuser_hives(root),
             *collect_powershell_history(root),
             *collect_srum_imports(root),
             *collect_srum_dat_inventory(root),
@@ -1509,6 +1525,192 @@ def build_bam_dam_schema_entry_record(
             "risk_flags": execution_risk_flags("bam-entry", executable_path, {}),
             "risk_score": min(100, len(execution_path_risk_flags(executable_path)) * 25 + 25),
             "raw_preview": executable_path,
+        },
+    )
+
+
+def collect_native_userassist_ntuser_hives(root: Path) -> Iterable[ArtifactRecord]:
+    seen: set[Path] = set()
+    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+        if not path.is_file() or path.name.upper() != NTUSER_HIVE_NAME:
+            continue
+        resolved = path.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        yield from build_native_userassist_records(path)
+
+
+def build_native_userassist_records(path: Path) -> Iterable[ArtifactRecord]:
+    try:
+        stat_result = path.stat()
+        with path.open("rb") as handle:
+            blob = handle.read(min(stat_result.st_size, MAX_NATIVE_USERASSIST_SCAN_BYTES))
+    except OSError:
+        return
+    source_hashes = file_hashes(path)
+    rows, profile = decode_userassist_schema(blob)
+    for index, row in enumerate(rows):
+        yield build_userassist_schema_entry_record(path, source_hashes, row, index)
+
+
+def decode_userassist_schema(blob: bytes) -> tuple[list[dict[str, object]], dict[str, object]]:
+    profile: dict[str, object] = {"decode_status": "no-cells", "count_keys_seen": 0, "cell_count": 0}
+    if len(blob) < 4096 or not blob.startswith(b"regf"):
+        profile["decode_status"] = "not-regf"
+        return [], profile
+    cells = iter_amcache_hive_cells(blob)
+    profile["cell_count"] = len(cells)
+    if not cells:
+        return [], profile
+
+    rows: list[dict[str, object]] = []
+    for offset, node in cells.items():
+        if node.get("cell_kind") != "key-node" or str(node.get("name") or "").lower() != "count":
+            continue
+        parent = cells.get(int(node.get("parent_cell_offset") or 0)) or {}
+        guid = str(parent.get("name") or "")
+        grandparent = cells.get(int(parent.get("parent_cell_offset") or 0)) or {}
+        if not (guid.startswith("{") and str(grandparent.get("name") or "").lower() == "userassist"):
+            continue
+        profile["count_keys_seen"] += 1
+        for value_offset in registry_value_offsets_for_key(blob, node):
+            value_cell = cells.get(value_offset)
+            if value_cell is None:
+                continue
+            raw_name = str(value_cell.get("name") or "")
+            decoded_name = decode_userassist_name(raw_name)
+            if decoded_name.upper() in USERASSIST_METADATA_NAMES:
+                continue
+            display_name = decoded_name
+            lowered_name = display_name.lower()
+            for guid_token, mapped in USERASSIST_GUID_PATH_MAPPINGS.items():
+                if guid_token.lower() in lowered_name:
+                    position = lowered_name.index(guid_token.lower())
+                    display_name = display_name[:position] + mapped + display_name[position + len(guid_token) :]
+                    break
+            data = registry_value_data_bytes(blob, value_cell, max_size=USERASSIST_MAX_VALUE_BYTES)
+            entry: dict[str, object] = {
+                "guid": guid,
+                "count_key_cell_offset": offset,
+                "value_cell_offset": value_offset,
+                "raw_value_name": raw_name,
+                "decoded_name": decoded_name,
+                "display_path": display_name,
+                "key_last_written_at": str(node.get("last_written_at") or ""),
+                "value_data_size": int(value_cell.get("value_data_size") or 0),
+            }
+            if len(data) == 72:
+                entry.update(
+                    {
+                        "layout": "win7",
+                        "session_id": int.from_bytes(data[0:4], "little"),
+                        "run_counter": int.from_bytes(data[4:8], "little"),
+                        "focus_count": int.from_bytes(data[8:12], "little"),
+                        "total_focus_time_ms": int.from_bytes(data[12:16], "little"),
+                        "timestamp": filetime_to_iso(int.from_bytes(data[60:68], "little")),
+                    }
+                )
+            elif len(data) == 16:
+                entry.update(
+                    {
+                        "layout": "winxp",
+                        "session_id": int.from_bytes(data[0:4], "little"),
+                        "run_counter": int.from_bytes(data[4:8], "little"),
+                        "timestamp": filetime_to_iso(int.from_bytes(data[8:16], "little")),
+                    }
+                )
+            else:
+                entry["layout"] = "unrecognized"
+            rows.append(entry)
+    profile["decode_status"] = "decoded" if rows else "no-decodable-rows"
+    profile["schema_row_count"] = len(rows)
+    return rows, profile
+
+
+def build_userassist_schema_entry_record(
+    path: Path,
+    source_hashes: Mapping[str, str],
+    row: Mapping[str, object],
+    index: int,
+) -> ArtifactRecord:
+    display_path = str(row.get("display_path") or "")
+    executable_path = display_path if looks_like_executable_path(display_path) else ""
+    timestamp = str(row.get("timestamp") or "")
+    validation_checks = {
+        "has_decoded_name": bool(row.get("decoded_name")),
+        "has_executable_path": bool(executable_path),
+        "has_run_counter": row.get("run_counter") is not None,
+        "has_timestamp": bool(timestamp),
+        "has_source_offset": bool(row.get("value_cell_offset")),
+        "layout_recognized": row.get("layout") in {"win7", "winxp"},
+        "requires_correlation": True,
+        "requires_second_parser_validation": True,
+        "native_binary_layout_decoding_available": True,
+        "correlation_targets": execution_correlation_targets("userassist-entry"),
+    }
+    report_grade = execution_report_grade_assessment(
+        execution_validation_matrix(validation_checks),
+        validation_required=True,
+        gap_ids=["#8"],
+        extra_blockers=["userassist-field-semantics-validation-required"],
+    )
+    return ArtifactRecord(
+        provider=WindowsExecutionProvider.name,
+        artifact_type="userassist-schema-entry",
+        path=str(path.resolve()),
+        supported=True,
+        details={
+            "parser": "windows-userassist-schema-entry",
+            "parser_version": PARSER_VERSION,
+            "coverage_status": "native-schema-decode",
+            "reportability": "review",
+            "source_path": str(path.resolve()),
+            "source_format": "ntuser-native-userassist-decode",
+            "source_hashes": dict(source_hashes),
+            "source_key": f"NTUSER\\Explorer\\UserAssist\\{row.get('guid', '')}\\Count",
+            "source_index": index,
+            "guid": row.get("guid", ""),
+            "count_key_cell_offset": row.get("count_key_cell_offset", 0),
+            "value_cell_offset": row.get("value_cell_offset", 0),
+            "raw_value_name": row.get("raw_value_name", ""),
+            "decoded_name": row.get("decoded_name", ""),
+            "executable_path": executable_path,
+            "display_path": display_path,
+            "layout": row.get("layout", ""),
+            "session_id": row.get("session_id", ""),
+            "run_counter": row.get("run_counter", ""),
+            "focus_count": row.get("focus_count", ""),
+            "total_focus_time_ms": row.get("total_focus_time_ms", ""),
+            "timestamp": timestamp,
+            "timestamp_source": "native-userassist-value-filetime" if timestamp else "not_present_in_value",
+            "key_last_written_at": row.get("key_last_written_at", ""),
+            "value_data_size": row.get("value_data_size", 0),
+            "native_binary_layout_decoding_available": True,
+            "evidence_strength": "user-execution-indicator-candidate",
+            "validation_required": True,
+            "validation_checks": validation_checks,
+            "execution_validation_matrix": execution_validation_matrix(validation_checks),
+            "execution_report_grade_assessment": report_grade,
+            "forensic_review": build_forensic_review(
+                gap_id="#8",
+                artifact_goal="UserAssist entry reconstruction",
+                primary_evidence=[
+                    f"path={display_path}" if display_path else "",
+                    f"run_counter={row.get('run_counter', '')}",
+                    f"timestamp={timestamp}" if timestamp else "",
+                ],
+                validation_required=True,
+                report_grade_assessment=report_grade,
+                caveats=[
+                    "UserAssist records GUI launches via Explorer; focus/run counters and timestamp semantics require trusted-tool confirmation",
+                ],
+            ),
+            "commercial_grade_ready": False,
+            "commercial_grade_blockers": report_grade["blockers"],
+            "risk_flags": execution_risk_flags("userassist-entry", display_path, {}),
+            "risk_score": min(100, len(execution_path_risk_flags(executable_path or display_path)) * 25 + 10),
+            "raw_preview": display_path,
         },
     )
 
@@ -4343,6 +4545,8 @@ def execution_native_depth_family(artifact_type: str) -> str:
         return "shimcache-appcompatcache"
     if artifact_type in {"bam-entry", "bam-schema-entry"}:
         return "bam-dam"
+    if artifact_type in {"userassist-entry", "userassist-schema-entry"}:
+        return "userassist"
     if artifact_type.startswith("srum-"):
         return "srum"
     return "windows-execution"
@@ -4414,6 +4618,11 @@ def execution_native_depth_requirements(artifact_family: str) -> list[str]:
             "decode ESE catalog, table pages, and tagged columns",
             "map SRUM table GUIDs by Windows build",
             "validate app/user/timestamp/counter semantics against SrumECmd or libesedb fixtures",
+        ],
+        "userassist": [
+            "decode ROT13 value names under UserAssist Count keys",
+            "decode Win7 72-byte and WinXP 16-byte value layouts",
+            "validate run/focus counters and FILETIME semantics against regipy or known-answer fixtures",
         ],
     }
     return requirements.get(artifact_family, ["validate source-specific execution artifact semantics"])

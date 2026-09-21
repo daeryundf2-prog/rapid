@@ -35,9 +35,13 @@ from tests.windows_artifact_fixtures import (
     build_minimal_evtx,
     build_minimal_mft,
     build_minimal_registry_hive,
+    build_minimal_userassist_registry_hive,
     build_template_evtx,
     build_windows_artifact_fixture,
     datetime_to_filetime,
+    rot13,
+    userassist_win7_value_data,
+    userassist_winxp_value_data,
 )
 
 
@@ -3661,6 +3665,80 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertTrue(groups["powershell.exe"]["source_artifact_refs"])
             self.assertIn("suspicious-command:powershell -enc", groups["powershell.exe"]["risk_flags"])
             self.assertIn("Prefetch", groups["evil.exe"]["correlation_targets"])
+
+    def test_windows_execution_collector_decodes_native_userassist_ntuser(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            build_windows_artifact_fixture(root)
+            stamp = datetime(2025, 5, 30, 1, 44, 31, tzinfo=timezone.utc)
+            ntuser = root / "Users" / "user" / "NTUSER.DAT"
+            ntuser.parent.mkdir(parents=True, exist_ok=True)
+            ntuser.write_bytes(
+                build_minimal_userassist_registry_hive(
+                    stamp,
+                    value_blobs=[
+                        (
+                            rot13("{9E3995AB-1F9C-4F13-B827-48B24B6C7174}\\TaskBar\\File Explorer.lnk"),
+                            userassist_win7_value_data(
+                                session_id=129,
+                                run_counter=20,
+                                focus_count=3,
+                                total_focus_time_ms=2000,
+                                timestamp=stamp,
+                            ),
+                        ),
+                        (
+                            rot13(r"C:\Legacy\tool.exe"),
+                            userassist_winxp_value_data(session_id=0, run_counter=7, timestamp=stamp),
+                        ),
+                        (
+                            rot13("UEME_CTLSESSION"),
+                            userassist_winxp_value_data(session_id=1, run_counter=1, timestamp=stamp),
+                        ),
+                        (rot13("C:\\truncated.bin"), b"\x01\x02\x03"),
+                    ],
+                )
+            )
+            output = root / "execution.json"
+
+            self.assertEqual(main(["artifacts", str(root), "--kind", "windows-execution", "--output", str(output)]), 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            rows = [item for item in payload["artifacts"] if item["artifact_type"] == "userassist-schema-entry"]
+
+            self.assertEqual(len(rows), 3)
+            win7 = next(row for row in rows if row["details"]["layout"] == "win7")
+            self.assertEqual(
+                win7["details"]["decoded_name"],
+                "{9E3995AB-1F9C-4F13-B827-48B24B6C7174}\\TaskBar\\File Explorer.lnk",
+            )
+            self.assertEqual(
+                win7["details"]["display_path"],
+                r"%AppData%\Roaming\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\File Explorer.lnk",
+            )
+            self.assertEqual(win7["details"]["run_counter"], 20)
+            self.assertEqual(win7["details"]["focus_count"], 3)
+            self.assertEqual(win7["details"]["total_focus_time_ms"], 2000)
+            self.assertEqual(win7["details"]["session_id"], 129)
+            self.assertEqual(win7["details"]["timestamp"], "2025-05-30T01:44:31+00:00")
+            self.assertEqual(win7["details"]["timestamp_source"], "native-userassist-value-filetime")
+            self.assertEqual(win7["details"]["source_format"], "ntuser-native-userassist-decode")
+            self.assertEqual(win7["details"]["source_path"], str(ntuser.resolve()))
+            self.assertGreater(win7["details"]["value_cell_offset"], 0)
+            self.assertEqual(len(win7["details"]["source_hashes"]["sha256"]), 64)
+            self.assertTrue(win7["details"]["native_binary_layout_decoding_available"])
+            self.assertFalse(win7["details"]["commercial_grade_ready"])
+            self.assertIn("userassist-field-semantics-validation-required", win7["details"]["commercial_grade_blockers"])
+
+            winxp = next(row for row in rows if row["details"]["layout"] == "winxp")
+            self.assertEqual(winxp["details"]["decoded_name"], r"C:\Legacy\tool.exe")
+            self.assertEqual(winxp["details"]["run_counter"], 7)
+            self.assertEqual(winxp["details"]["timestamp"], "2025-05-30T01:44:31+00:00")
+
+            truncated = next(row for row in rows if row["details"]["layout"] == "unrecognized")
+            self.assertEqual(truncated["details"]["decoded_name"], "C:\\truncated.bin")
+            self.assertFalse(truncated["details"]["validation_checks"]["layout_recognized"])
+
+            self.assertFalse(any("UEME" in row["details"]["decoded_name"] for row in rows))
 
     def test_execution_artifact_trusted_diff_passes_matching_rows(self) -> None:
         rapid = [

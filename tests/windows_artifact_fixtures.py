@@ -1050,6 +1050,144 @@ def build_minimal_shellbags_registry_hive(timestamp: datetime, embedded_name: st
     return bytes(header) + bytes(hbin)
 
 
+def rot13(value: str) -> str:
+    result = []
+    for char in value:
+        lowered = char.lower()
+        if "a" <= lowered <= "z":
+            offset = (ord(lowered) - 97 + 13) % 26
+            result.append(chr(97 + offset) if char.islower() else chr(65 + offset))
+        else:
+            result.append(char)
+    return "".join(result)
+
+
+def userassist_win7_value_data(
+    *,
+    session_id: int,
+    run_counter: int,
+    focus_count: int,
+    total_focus_time_ms: int,
+    timestamp: datetime,
+) -> bytes:
+    body = bytearray(72)
+    body[0:4] = session_id.to_bytes(4, "little")
+    body[4:8] = run_counter.to_bytes(4, "little")
+    body[8:12] = focus_count.to_bytes(4, "little")
+    body[12:16] = total_focus_time_ms.to_bytes(4, "little")
+    body[60:68] = datetime_to_filetime(timestamp).to_bytes(8, "little")
+    return bytes(body)
+
+
+def userassist_winxp_value_data(*, session_id: int, run_counter: int, timestamp: datetime) -> bytes:
+    body = bytearray(16)
+    body[0:4] = session_id.to_bytes(4, "little")
+    body[4:8] = run_counter.to_bytes(4, "little")
+    body[8:16] = datetime_to_filetime(timestamp).to_bytes(8, "little")
+    return bytes(body)
+
+
+def build_minimal_userassist_registry_hive(
+    timestamp: datetime,
+    *,
+    embedded_name: str = "NTUSER.DAT",
+    guid_name: str = "{CEBFF5CD-ACE2-4F4F-9178-9926F41749EA}",
+    value_blobs: list[tuple[str, bytes]] | None = None,
+) -> bytes:
+    header = bytearray(4096)
+    header[0:4] = b"regf"
+    header[4:8] = (11).to_bytes(4, "little")
+    header[8:12] = (11).to_bytes(4, "little")
+    header[12:20] = datetime_to_filetime(timestamp).to_bytes(8, "little")
+    header[20:24] = (1).to_bytes(4, "little")
+    header[24:28] = (5).to_bytes(4, "little")
+    header[36:40] = (32).to_bytes(4, "little")
+    header[40:44] = (4096).to_bytes(4, "little")
+    header[44:48] = (1).to_bytes(4, "little")
+    header[48:112] = embedded_name.encode("utf-16le")[:64].ljust(64, b"\x00")
+    header[508:512] = (0x12345678).to_bytes(4, "little")
+
+    if value_blobs is None:
+        value_blobs = [
+            (
+                rot13("{9E3995AB-1F9C-4F4F-9178-9926F41749EA}\\TaskBar\\File Explorer.lnk"),
+                userassist_win7_value_data(
+                    session_id=129,
+                    run_counter=20,
+                    focus_count=3,
+                    total_focus_time_ms=20,
+                    timestamp=timestamp,
+                ),
+            ),
+        ]
+
+    root_relative_offset = 32
+    root_size = _registry_cell_size(0x4C + len(b"UserAssist"))
+    guid_relative_offset = root_relative_offset + root_size
+    guid_size = _registry_cell_size(0x4C + len(guid_name.encode("latin-1", errors="ignore")))
+    count_relative_offset = guid_relative_offset + guid_size
+    count_size = _registry_cell_size(0x4C + len(b"Count"))
+    value_list_relative_offset = count_relative_offset + count_size
+    value_list_size = _registry_cell_size(4 * len(value_blobs))
+
+    cursor = value_list_relative_offset + value_list_size
+    vk_offsets: list[int] = []
+    vk_cells: list[bytes] = []
+    data_cells: list[bytes] = []
+    data_cursor = cursor
+    for encoded_name, value_data in value_blobs:
+        vk_offsets.append(data_cursor)
+        vk_cells.append(b"")  # placeholder; offsets depend on all vk sizes
+        data_cursor += _registry_cell_size(20 + len(encoded_name.encode("latin-1", errors="ignore")))
+    for index, (encoded_name, value_data) in enumerate(value_blobs):
+        data_relative_offset = data_cursor
+        data_cells.append(_registry_cell(value_data, allocated=True))
+        data_cursor += _registry_cell_size(len(value_data))
+        vk_cells[index] = build_registry_vk_cell(
+            encoded_name,
+            allocated=True,
+            value_type=3,
+            external_data_relative_offset=data_relative_offset,
+            external_data_size=len(value_data),
+        )
+
+    cell_payload = b"".join(
+        [
+            build_registry_nk_cell(
+                "UserAssist",
+                timestamp,
+                allocated=True,
+                stable_subkey_count=1,
+                stable_subkey_list_relative_offset=0,
+            ),
+            build_registry_nk_cell(
+                guid_name,
+                timestamp,
+                allocated=True,
+                parent_relative_offset=root_relative_offset,
+                stable_subkey_count=1,
+            ),
+            build_registry_nk_cell(
+                "Count",
+                timestamp,
+                allocated=True,
+                parent_relative_offset=guid_relative_offset,
+                value_count=len(value_blobs),
+                value_list_relative_offset=value_list_relative_offset,
+            ),
+            build_registry_value_list_cell(vk_offsets),
+            *vk_cells,
+            *data_cells,
+        ]
+    )
+    hbin = bytearray(4096)
+    hbin[0:4] = b"hbin"
+    hbin[4:8] = (0).to_bytes(4, "little")
+    hbin[8:12] = len(hbin).to_bytes(4, "little")
+    hbin[32 : 32 + min(len(cell_payload), len(hbin) - 32)] = cell_payload[: len(hbin) - 32]
+    return bytes(header) + bytes(hbin)
+
+
 def build_registry_nk_cell(
     name: str,
     timestamp: datetime,
@@ -1082,6 +1220,8 @@ def build_registry_vk_cell(
     allocated: bool,
     value_type: int = 1,
     inline_data: bytes = b"",
+    external_data_relative_offset: int = 0,
+    external_data_size: int = 0,
 ) -> bytes:
     name_bytes = name.encode("latin-1", errors="ignore")
     body = bytearray(20 + len(name_bytes))
@@ -1090,6 +1230,9 @@ def build_registry_vk_cell(
     if inline_data:
         body[4:8] = (0x80000000 | len(inline_data)).to_bytes(4, "little")
         body[8:12] = inline_data[:4].ljust(4, b"\x00")
+    elif external_data_size:
+        body[4:8] = external_data_size.to_bytes(4, "little")
+        body[8:12] = external_data_relative_offset.to_bytes(4, "little")
     else:
         body[4:8] = (4).to_bytes(4, "little")
         body[8:12] = (0).to_bytes(4, "little")

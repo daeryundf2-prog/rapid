@@ -6826,6 +6826,7 @@
               "native_amcache_schema_decode": true,
               "native_shimcache_binary_decode": true,
               "native_bam_system_hive_decode": true,
+              "native_userassist_value_decode": true,
               "native_ese_catalog_decode": false,
               "native_srum_page_row_decode": false
             },
@@ -7388,6 +7389,7 @@
               "native_amcache_schema_decode": true,
               "native_shimcache_binary_decode": true,
               "native_bam_system_hive_decode": true,
+              "native_userassist_value_decode": true,
               "native_ese_catalog_decode": false,
               "native_srum_page_row_decode": false
             },
@@ -8128,6 +8130,7 @@
               "native_amcache_schema_decode": true,
               "native_shimcache_binary_decode": true,
               "native_bam_system_hive_decode": true,
+              "native_userassist_value_decode": true,
               "native_ese_catalog_decode": false,
               "native_srum_page_row_decode": false
             },
@@ -8868,6 +8871,7 @@
               "native_amcache_schema_decode": true,
               "native_shimcache_binary_decode": true,
               "native_bam_system_hive_decode": true,
+              "native_userassist_value_decode": true,
               "native_ese_catalog_decode": false,
               "native_srum_page_row_decode": false
             },
@@ -9605,6 +9609,7 @@
               "native_amcache_schema_decode": true,
               "native_shimcache_binary_decode": true,
               "native_bam_system_hive_decode": true,
+              "native_userassist_value_decode": true,
               "native_ese_catalog_decode": false,
               "native_srum_page_row_decode": false
             },
@@ -10471,6 +10476,7 @@
               "native_amcache_schema_decode": true,
               "native_shimcache_binary_decode": true,
               "native_bam_system_hive_decode": true,
+              "native_userassist_value_decode": true,
               "native_ese_catalog_decode": false,
               "native_srum_page_row_decode": false
             },
@@ -11203,6 +11209,7 @@
               "native_amcache_schema_decode": true,
               "native_shimcache_binary_decode": true,
               "native_bam_system_hive_decode": true,
+              "native_userassist_value_decode": true,
               "native_ese_catalog_decode": false,
               "native_srum_page_row_decode": false
             },
@@ -11905,6 +11912,7 @@
               "native_amcache_schema_decode": true,
               "native_shimcache_binary_decode": true,
               "native_bam_system_hive_decode": true,
+              "native_userassist_value_decode": true,
               "native_ese_catalog_decode": false,
               "native_srum_page_row_decode": false
             },
@@ -12609,6 +12617,7 @@
               "native_amcache_schema_decode": true,
               "native_shimcache_binary_decode": true,
               "native_bam_system_hive_decode": true,
+              "native_userassist_value_decode": true,
               "native_ese_catalog_decode": false,
               "native_srum_page_row_decode": false
             },
@@ -13176,6 +13185,7 @@
               "native_amcache_schema_decode": true,
               "native_shimcache_binary_decode": true,
               "native_bam_system_hive_decode": true,
+              "native_userassist_value_decode": true,
               "native_ese_catalog_decode": false,
               "native_srum_page_row_decode": false
             },

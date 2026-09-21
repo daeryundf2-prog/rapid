@@ -327,6 +327,44 @@ regipy is an engineering reference, not a recognized trusted tool.
 
 Report: `D:\devin\trusted-ref\bam-dam-diff-report.json`.
 
+## UserAssist native hive decode vs regipy (B-series)
+
+`scripts/userassist-reference-diff.py` (requires `regipy`) diffs
+NTUSER.DAT `UserAssist\<GUID>\Count` values against regipy's
+`UserAssistPlugin` on the same real NTUSER.DAT (18MB).
+
+`decode_userassist_schema` walks hive cells for `Count` keys whose
+parent is a GUID key under `UserAssist`, ROT13-decodes value names,
+maps known GUIDs to `%VAR%` path prefixes (same mapping table as
+regipy), decodes the Win7 72-byte layout (session id, run counter,
+focus count, total focus ms, FILETIME at offset 60) and the WinXP
+16-byte layout, and emits `userassist-schema-entry` records with
+key/value cell offsets and source hashes. `UEME_CTLSESSION` is
+skipped (regipy whitelist); other `UEME_*` values are emitted as rows.
+
+Reference quirk found: regipy's hardcoded `GUIDS` list contains
+duplicates (`{CEBFF5CD…}`, `{F4E57C4B…}` appear twice), so its raw
+output double-counts those Count keys — 342 raw entries vs 170 unique
+rows. The diff deduplicates the reference side before comparing.
+
+Final result on the real hive:
+
+| Metric | Result |
+|--------|--------|
+| regipy rows (raw / deduped) | 342 / 170 |
+| RapidTriage schema rows | **170** |
+| (decoded name) row recall / precision | **1.0 / 1.0** |
+| Full field match (ts, run, focus, focus_ms, session) | **170/170** |
+
+Limitations: FILETIME zero is normalized to the `1601-01-01` epoch
+for comparison (RapidTriage emits null). UserAssist is a GUI-launch
+pivot only — not standalone proof of execution; records stay
+`reportability: review` with
+`userassist-field-semantics-validation-required`. regipy is an
+engineering reference, not a recognized trusted tool.
+
+Report: `D:\devin\trusted-ref\userassist-diff-report.json`.
+
 ## Release-gate impact
 
 `quantitative-accuracy-thresholds` stays `blocked`: the gate requires
