@@ -74,6 +74,7 @@ NTFS_LOGFILE_OPERATION_KEYWORDS = {
 SIGNATURE_SCAN_LIMIT = 4096
 SIGNATURE_SCAN_FILE_LIMIT = 5000
 USN_RECORD_SCAN_LIMIT = 5000
+_USN_NONZERO_BYTE = re.compile(rb"[^\x00]")
 USN_LARGE_RECORD_THRESHOLD = 512
 USN_V4_EXTENT_PREVIEW_LIMIT = 64
 MFT_RUNLIST_PREVIEW_BYTE_LIMIT = 256
@@ -5993,6 +5994,16 @@ def parse_usn_record_scan(
         record = parse_usn_record_at(blob, offset)
         if record is None:
             skipped_bytes += 1
+            # A 4+ byte zero run cannot contain the start of a record
+            # (its little-endian length field would be zero), so sparse
+            # regions of $UsnJrnl:$J can be skipped in one regex search.
+            if blob[offset] == 0:
+                nonzero = _USN_NONZERO_BYTE.search(blob, offset, scan_stop_offset)
+                gap_end = nonzero.start() if nonzero is not None else scan_stop_offset
+                if gap_end - offset >= 4:
+                    skipped_bytes += gap_end - offset - 4
+                    offset = gap_end - 3
+                    continue
             offset += 1
             continue
         if int(record["next_record_cursor"]) > scan_stop_offset:
