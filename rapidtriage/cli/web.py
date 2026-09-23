@@ -41,10 +41,16 @@ def run_web_server(
     loopback_hosts = {"127.0.0.1", "localhost", "::1"}
     if remote and allow_remote_without_auth:
         raise RuntimeError("--remote and --allow-remote-without-auth are mutually exclusive: --remote keeps API auth on.")
-    if remote and os.environ.get("RAPIDTRIAGE_DISABLE_AUTH", "").strip().lower() in {"1", "true", "yes", "on"}:
+    disable_auth = os.environ.get("RAPIDTRIAGE_DISABLE_AUTH", "").strip().lower() in {"1", "true", "yes", "on"}
+    if remote and disable_auth:
         raise RuntimeError(
             "--remote requires API authentication but RAPIDTRIAGE_DISABLE_AUTH is set. "
             "Unset RAPIDTRIAGE_DISABLE_AUTH or drop --remote; refusing to weaken authentication silently."
+        )
+    if disable_auth and auth_token:
+        raise RuntimeError(
+            "conflicting authentication settings: RAPIDTRIAGE_DISABLE_AUTH cannot be combined with "
+            "--auth-token; refusing to weaken authentication silently."
         )
     if remote:
         # --remote is the supported non-loopback path: a token is mandatory so
@@ -74,7 +80,10 @@ def run_web_server(
         import uvicorn
     except ImportError as exc:
         raise RuntimeError("rapidtriage web requires the 'web' extra: pip install 'rapidtriage[web]'") from exc
-    if not auth_token and not allow_remote_without_auth:
+    if disable_auth:
+        os.environ.pop("RAPIDTRIAGE_AUTH_TOKEN", None)
+        print("RapidTriage API authentication DISABLED for this local session.")
+    elif not auth_token and not allow_remote_without_auth:
         import secrets
 
         auth_token = os.environ.get("RAPIDTRIAGE_AUTH_TOKEN") or secrets.token_urlsafe(32)

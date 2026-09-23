@@ -202,6 +202,40 @@ class RapidTriageWebServerSecurityTests(unittest.TestCase):
         self.assertNotIn("DISABLED", stderr.getvalue())
         self.assertNotIn("RAPIDTRIAGE_DISABLE_AUTH", os.environ)
 
+    def test_run_web_server_disable_auth_skips_token_generation_on_loopback(self) -> None:
+        captured: dict[str, object] = {}
+        fake_uvicorn = types.SimpleNamespace(
+            run=lambda *args, **kwargs: captured.update({"kwargs": kwargs})
+        )
+        previous_disable = os.environ.pop("RAPIDTRIAGE_DISABLE_AUTH", None)
+        previous_token = os.environ.pop("RAPIDTRIAGE_AUTH_TOKEN", None)
+        try:
+            os.environ["RAPIDTRIAGE_DISABLE_AUTH"] = "1"
+            with patch.dict(sys.modules, {"uvicorn": fake_uvicorn}):
+                result = run_web_server("127.0.0.1", 8877)
+            self.assertEqual(result, 0)
+            self.assertNotIn("RAPIDTRIAGE_AUTH_TOKEN", os.environ)
+            self.assertEqual(captured["kwargs"]["host"], "127.0.0.1")
+        finally:
+            os.environ.pop("RAPIDTRIAGE_DISABLE_AUTH", None)
+            os.environ.pop("RAPIDTRIAGE_AUTH_TOKEN", None)
+            if previous_disable is not None:
+                os.environ["RAPIDTRIAGE_DISABLE_AUTH"] = previous_disable
+            if previous_token is not None:
+                os.environ["RAPIDTRIAGE_AUTH_TOKEN"] = previous_token
+
+    def test_run_web_server_disable_auth_conflicts_with_explicit_token(self) -> None:
+        previous_disable = os.environ.pop("RAPIDTRIAGE_DISABLE_AUTH", None)
+        try:
+            os.environ["RAPIDTRIAGE_DISABLE_AUTH"] = "1"
+            with self.assertRaises(RuntimeError) as raised:
+                run_web_server("127.0.0.1", 8877, auth_token="fixed-token")
+            self.assertIn("conflicting authentication settings", str(raised.exception))
+        finally:
+            os.environ.pop("RAPIDTRIAGE_DISABLE_AUTH", None)
+            if previous_disable is not None:
+                os.environ["RAPIDTRIAGE_DISABLE_AUTH"] = previous_disable
+
 
 if __name__ == "__main__":
     unittest.main()
