@@ -254,6 +254,20 @@ if (apiStatus) {
     }
   });
 }
+const newCaseButton = document.querySelector("#newCaseButton");
+if (newCaseButton) {
+  newCaseButton.addEventListener("click", () => {
+    const opening = !document.body.classList.contains("intake-open");
+    document.body.classList.toggle("intake-open", opening);
+    if (opening) {
+      const rootInput = document.querySelector("#rootInput");
+      rootInput?.scrollIntoView({ block: "center", behavior: "smooth" });
+      rootInput?.focus();
+      rootInput?.select();
+    }
+  });
+}
+
 if (tokenSave && tokenInput) {
   const submitToken = async () => {
     const value = tokenInput.value.trim();
@@ -367,6 +381,7 @@ async function loadRunDetail(runId, tab = "summary") {
   }
   selectedRunId = runId;
   document.body.classList.add("analysis-active");
+  document.body.classList.remove("intake-open");
   loadVirtualWindowOffsets();
   activeTab = tab;
   activeViewGroup = groupForTab(tab);

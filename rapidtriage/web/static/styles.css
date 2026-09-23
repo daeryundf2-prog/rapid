@@ -17500,3 +17500,28 @@ body.analysis-active .run-item .run-item-path,
 body.has-runs .run-item .run-item-path {
   color: #64748b !important;
 }
+
+/* Intake re-entry: while a run is open the queue header exposes a
+   "새 증거 추가" toggle (body.intake-open) that reveals the intake form
+   instead of leaving analysts with no way to start a new case. */
+body.analysis-active.intake-open .run-panel > .run-form {
+  display: grid !important;
+  margin-top: 8px !important;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.panel-section-title .new-case-button {
+  margin-left: auto;
+  flex-shrink: 0;
+  min-height: 32px;
+  padding: 5px 10px;
+  font-size: 0.72rem;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+
+body.analysis-active.intake-open .panel-section-title .new-case-button,
+body.has-runs.intake-open .panel-section-title .new-case-button {
+  border-color: var(--accent-strong, #0f766e);
+}
