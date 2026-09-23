@@ -422,6 +422,8 @@ class EwfAdapter:
     supported_suffixes = E01_SUFFIXES
 
     def identify(self, source: Path) -> EvidenceAdapterResult:
+        from .e01_native import native_e01_available
+
         missing = missing_e01_tools()
         supported = source.suffix.lower() in self.supported_suffixes
         direct_ewf_read = False
@@ -430,7 +432,8 @@ class EwfAdapter:
             # without an ewfmount FUSE layer; probe once so `can_extract`
             # reflects what `run` will actually attempt.
             direct_ewf_read = sleuthkit_direct_e01_probe(source) is not None
-        ready = supported and (not missing or direct_ewf_read)
+        native_decode = supported and source.is_file() and not direct_ewf_read and bool(missing) and native_e01_available()
+        ready = supported and (not missing or direct_ewf_read or native_decode)
         report_grade = image_report_grade_assessment("#22", E01_REPORT_GRADE_BLOCKERS)
         source_integrity = describe_source_integrity(source) if source.is_file() else None
         segment_set_profile = build_e01_segment_set_profile(source) if source.is_file() and supported else None
@@ -485,6 +488,11 @@ class EwfAdapter:
                     "ewfmount is not installed."
                 )
                 if direct_ewf_read
+                else (
+                    "E01/Ex01 will be decoded natively (pyewf + dissect.ntfs); "
+                    "external ewfmount/Sleuth Kit tools are absent. Engineering-grade path."
+                )
+                if native_decode
                 else "E01/Ex01 can be extracted with libewf and Sleuth Kit tools."
                 if supported and not missing
                 else "E01/Ex01 detected, but required external tools are missing. Install an EWF-capable Sleuth Kit build, use WSL2, or scan a mounted/extracted folder."
@@ -505,6 +513,12 @@ class EwfAdapter:
                     "Verify TSK provenance before report use."
                 ]
                 if direct_ewf_read
+                else [
+                    "ewfmount/Sleuth Kit are absent; the run will decode EWF segments with pyewf and "
+                    "recover files with dissect.ntfs. This is an engineering-grade native path — "
+                    "validate recovered content against case requirements before report use."
+                ]
+                if native_decode
                 else []
             )
             if ready
@@ -535,6 +549,7 @@ class EwfAdapter:
                 "ewf_libewf_mount_orchestration": True,
                 "auto_extract_then_scan": ready,
                 "native_e01_ex01_parser": False,
+                "python_native_ewf_extraction": bool(native_decode),
                 "encrypted_volume_unlock_workflow": False,
             },
             limitations=[

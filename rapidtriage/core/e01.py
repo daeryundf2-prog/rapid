@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .audit import compute_sha256
+from .e01_native import native_e01_available
 from .forensic_accuracy import build_accuracy_gate
 from .process_bounds import run_bounded_command
 from .vsc import build_vsc_image_workflow_handoff
@@ -1509,6 +1510,20 @@ def extract_e01_to_directory(
                     command_record("partition-enumeration", ["mmls", str(source_path)], direct_ewf_probe)
                 )
                 blocked = False
+        if blocked and native_e01_available():
+            return _extract_e01_native_fallback(
+                source_path=source_path,
+                stage=stage,
+                mount_dir=mount_dir,
+                extract_dir=extract_dir,
+                checkpoint_path=checkpoint_path,
+                source_signature=source_signature,
+                segment_set_profile=segment_set_profile,
+                partition_start_sector=partition_start_sector,
+                tool_preflight=tool_preflight,
+                missing_tools=missing,
+                command_history=command_history,
+            )
         if blocked:
             write_e01_stage_checkpoint(
                 checkpoint_path,
@@ -1697,6 +1712,185 @@ def extract_e01_to_directory(
     finally:
         if direct_ewf_probe is None:
             unmount_e01_mount(mount_dir, runner=runner, tool_resolver=tool_resolver)
+
+
+def _enrich_native_partitions(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    for row in rows:
+        description = str(row.get("description") or "")
+        row.setdefault("filesystem_guess", guess_partition_filesystem(description))
+        row.setdefault("supported_filesystem_hint", is_supported_mmls_description(description))
+        row.setdefault("recommended_for_recovery", False)
+        row.setdefault("selected_for_recovery", False)
+        row.setdefault("manual_override_allowed", "swap" not in description.lower())
+    return rows
+
+
+def _extract_e01_native_fallback(
+    *,
+    source_path: Path,
+    stage: Path,
+    mount_dir: Path,
+    extract_dir: Path,
+    checkpoint_path: Path,
+    source_signature: dict[str, object],
+    segment_set_profile: dict[str, object],
+    partition_start_sector: int | None,
+    tool_preflight: tuple[dict[str, object], ...],
+    missing_tools: list[str],
+    command_history: list[dict[str, object]],
+) -> E01ExtractionResult:
+    """Recover files with pyewf + dissect.ntfs when external tools are absent."""
+    from .e01_native import NATIVE_MOUNT_STRATEGY, extract_e01_native
+
+    recovery_scope = build_tsk_recover_recovery_scope()
+    recovery_scope = {
+        **recovery_scope,
+        "tool": "pyewf+dissect.ntfs",
+        "note": (
+            "Native Python decode path: pyewf reads the EWF segment set and "
+            "dissect.ntfs walks the selected NTFS partition (allocated tree "
+            "walk plus a best-effort deleted-record MFT sweep under "
+            "_deleted_mft/). Engineering-grade path; not a trusted-tool "
+            "substitute."
+        ),
+    }
+    checkpoint_payload: dict[str, object] = {
+        "profile_version": E01_STAGE_CHECKPOINT_VERSION,
+        "source_signature": source_signature,
+        "requested_start_sector": partition_start_sector,
+        "segment_set_profile": segment_set_profile,
+        "recovery_scope": recovery_scope,
+        "mount_strategy": NATIVE_MOUNT_STRATEGY,
+        "tool_inputs": {
+            "mount_tool": "pyewf",
+            "partition_tool": "native-mbr-gpt",
+            "recovery_tool": "dissect.ntfs",
+            "recovery_scope": recovery_scope,
+            "requested_start_sector": partition_start_sector,
+        },
+        "completed": False,
+        "resume_ready": False,
+        "stages": {
+            "dependency-preflight": {
+                "status": "completed",
+                "missing_tools": list(missing_tools),
+                "mount_strategy": NATIVE_MOUNT_STRATEGY,
+            },
+            "mount-ewf": {
+                "status": "completed",
+                "engine": "pyewf",
+            },
+        },
+        "command_history": command_history,
+    }
+    write_e01_stage_checkpoint(checkpoint_path, checkpoint_payload)
+
+    try:
+        segments = discover_e01_segments(source_path)
+        result = extract_e01_native(
+            source_path,
+            segments,
+            extract_dir,
+            partition_start_sector=partition_start_sector,
+        )
+    except Exception as exc:
+        checkpoint_payload["stages"] = {
+            **dict(checkpoint_payload.get("stages") or {}),
+            "native-filesystem-recovery": {"status": "failed", "error": str(exc)},
+        }
+        write_e01_stage_checkpoint(checkpoint_path, checkpoint_payload)
+        raise E01ExtractionError(f"native E01 extraction failed: {exc}") from exc
+
+    partition_table = _enrich_native_partitions(list(result.get("partition_table") or []))
+    selected_start_sector = int(result.get("selected_start_sector") or 0)
+    recommended_sector = select_native_recommended_sector(partition_table)
+    partition_selection = build_partition_selection_metadata(
+        partition_table,
+        selected_start_sector=selected_start_sector,
+        recommended_start_sector=recommended_sector,
+        requested_start_sector=partition_start_sector,
+    )
+    marked = mark_selected_partition(
+        partition_table,
+        selected_start_sector,
+        recommended_start_sector=recommended_sector,
+    )
+    stats = dict(result.get("stats") or {})
+    recovered_manifest = build_recovered_root_manifest(extract_dir)
+    recovered_manifest = {
+        **recovered_manifest,
+        "native_extraction_stats": stats,
+        "engine": "pyewf+dissect.ntfs",
+    }
+    command_history.append(
+        {
+            "stage": "native-filesystem-recovery",
+            "engine": "pyewf+dissect.ntfs",
+            "files": stats.get("files"),
+            "deleted_files": stats.get("deleted_files"),
+            "errors": stats.get("errors"),
+        }
+    )
+    checkpoint_payload.update(
+        {
+            "command_history": command_history,
+            "partition_table": marked,
+            "partition_selection": partition_selection,
+            "completed": True,
+            "resume_ready": True,
+            "extract_dir": str(extract_dir),
+            "raw_image_path": str(source_path),
+            "recovered_root_manifest": recovered_manifest,
+            "recovered_inventory_fingerprint": recovered_inventory_fingerprint(recovered_manifest),
+            "stages": {
+                **dict(checkpoint_payload.get("stages") or {}),
+                "partition-enumeration": {"status": "completed", "engine": "native-mbr-gpt"},
+                "native-filesystem-recovery": {"status": "completed"},
+            },
+        }
+    )
+    write_e01_stage_checkpoint(checkpoint_path, checkpoint_payload)
+    warnings = [
+        "ewfmount/Sleuth Kit were unavailable; pyewf + dissect.ntfs decoded the "
+        "E01/Ex01 segment set natively. Validate recovered content against case "
+        "requirements; this is an engineering-grade path, not a trusted-tool "
+        "substitute.",
+        "Native recovery walks the allocated NTFS tree and performs a "
+        "best-effort deleted-record sweep; ADS streams, reparse targets, and "
+        "encrypted volumes are not expanded.",
+    ]
+    return E01ExtractionResult(
+        source_path=source_path,
+        stage_dir=stage,
+        mount_dir=mount_dir,
+        raw_image_path=source_path,
+        extract_dir=extract_dir,
+        partition_start_sector=selected_start_sector,
+        source_integrity=describe_source_integrity(source_path),
+        tool_preflight=tuple(tool_preflight),
+        partition_table=tuple(marked),
+        partition_selection=partition_selection,
+        command_history=tuple(command_history),
+        warnings=tuple(warnings),
+        resume_status=build_e01_resume_status(checkpoint_path, checkpoint_payload, resumed=False),
+        recovered_root_manifest=recovered_manifest,
+        segment_set_profile=segment_set_profile,
+        recovery_scope=recovery_scope,
+        mount_strategy=NATIVE_MOUNT_STRATEGY,
+    )
+
+
+def select_native_recommended_sector(partitions: Sequence[dict[str, object]]) -> int | None:
+    best_start = None
+    best_size = -1
+    for row in partitions:
+        if not row.get("supported_filesystem_hint"):
+            continue
+        count = int(row.get("sector_count") or 0)
+        if count > best_size:
+            best_size = count
+            best_start = int(row.get("start_sector") or 0)
+    return best_start
 
 
 def e01_source_signature(path: Path) -> dict[str, object]:

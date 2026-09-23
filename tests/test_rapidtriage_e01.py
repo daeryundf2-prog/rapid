@@ -426,10 +426,27 @@ Units are in 512-byte sectors
             e01_path = Path(tmp_dir) / "case.E01"
             e01_path.write_bytes(b"EVF")
 
-            with self.assertRaises(E01ExtractionError) as context:
-                extract_e01_to_directory(e01_path, Path(tmp_dir) / "stage", tool_resolver=lambda _: None)
+            with patch("rapidtriage.core.e01.native_e01_available", return_value=False):
+                with self.assertRaises(E01ExtractionError) as context:
+                    extract_e01_to_directory(e01_path, Path(tmp_dir) / "stage", tool_resolver=lambda _: None)
 
             self.assertIn("requires external tools", str(context.exception))
+
+    def test_extract_e01_native_fallback_surfaces_decode_failure(self) -> None:
+        from rapidtriage.core.e01_native import native_e01_available
+
+        if not native_e01_available():
+            self.skipTest("pyewf/dissect.ntfs not importable in this environment")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            e01_path = Path(tmp_dir) / "case.E01"
+            e01_path.write_bytes(b"EVF")
+            with self.assertRaises(E01ExtractionError) as context:
+                extract_e01_to_directory(e01_path, Path(tmp_dir) / "stage", tool_resolver=lambda _: None)
+            self.assertIn("native E01 extraction failed", str(context.exception))
+            checkpoint = json.loads(
+                (Path(tmp_dir) / "stage" / "rapidtriage-e01-stage-status.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(checkpoint["mount_strategy"], "python-native-ewf")
 
     def test_e01_segment_set_profile_detects_missing_split_segment(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -731,13 +748,14 @@ Units are in 512-byte sectors
             def resolver(name):
                 return None if name == "ewfmount" else f"/usr/bin/{name}"
 
-            with self.assertRaises(E01ExtractionError) as context:
-                extract_e01_to_directory(
-                    e01_path,
-                    root / "stage",
-                    runner=fake_runner,
-                    tool_resolver=resolver,
-                )
+            with patch("rapidtriage.core.e01.native_e01_available", return_value=False):
+                with self.assertRaises(E01ExtractionError) as context:
+                    extract_e01_to_directory(
+                        e01_path,
+                        root / "stage",
+                        runner=fake_runner,
+                        tool_resolver=resolver,
+                    )
 
             self.assertIn("requires external tools", str(context.exception))
             self.assertIn("ewfmount", str(context.exception))

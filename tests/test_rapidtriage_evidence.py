@@ -37,11 +37,14 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
 
             result = identify_evidence(image_path).to_dict()
 
+            from rapidtriage.core.e01_native import native_e01_available
+
+            native_decode = native_e01_available()
             self.assertEqual(result["adapter"], "ewf")
             self.assertEqual(result["detected_format"], "e01")
             self.assertIn("ewfmount", result["required_tools"])
-            self.assertEqual(result["supported"], result["missing_tools"] == [])
-            self.assertEqual(result["can_extract"], result["missing_tools"] == [])
+            self.assertEqual(result["supported"], result["missing_tools"] == [] or native_decode)
+            self.assertEqual(result["can_extract"], result["missing_tools"] == [] or native_decode)
             self.assertIn(result["support_level"], {"direct-extract", "tooling-required"})
             self.assertTrue(result["next_actions"])
             self.assertFalse(result["commercial_grade_ready"])
@@ -203,7 +206,9 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             image_path = Path(tmp_dir) / "case.E01"
             image_path.write_bytes(b"EVF")
 
-            with patch("rapidtriage.core.evidence.missing_e01_tools", return_value=["ewfmount"]):
+            with patch("rapidtriage.core.evidence.missing_e01_tools", return_value=["ewfmount"]), patch(
+                "rapidtriage.core.e01_native.native_e01_available", return_value=False
+            ):
                 result = identify_evidence(image_path).to_dict()
 
             self.assertEqual(result["supported"], False)
