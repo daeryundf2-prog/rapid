@@ -446,6 +446,16 @@ def extract_e01_native(
         selected = next(p for p in partitions if int(p.get("start_sector") or -1) == start_sector)
         byte_offset = int(selected.get("byte_offset") or start_sector * sector_size)
         reader = EwfSectorReader(handle, base=byte_offset, size=int(selected.get("size_bytes") or 0))
+        reader.seek(0)
+        boot = reader.read(512) or b""
+        oem = boot[3:11]
+        if oem != b"NTFS    ":
+            readable = oem.decode("ascii", "replace").strip() or "unknown"
+            raise ValueError(
+                f"native E01 extraction supports NTFS only; partition at sector {start_sector} "
+                f"reports filesystem signature '{readable}' ({selected.get('description') or 'untyped'}). "
+                "Mount or export the image with a trusted tool, then select the resulting folder."
+            )
         fs = NTFS(reader)
         stats: dict[str, int] = {
             "files": 0,

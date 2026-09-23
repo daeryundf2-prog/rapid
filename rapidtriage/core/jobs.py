@@ -1701,6 +1701,8 @@ def default_run_output_dir(root: Path, mode: str, *, run_id: str | None = None) 
     suffix = f"rapidtriage-run-{mode.lower()}"
     if run_id:
         suffix = f"{suffix}-{run_id}"
+    if root.is_file():
+        return root.parent / f"{root.stem}-{suffix}"
     return root / suffix
 
 

@@ -145,6 +145,31 @@ class RapidTriageRunTests(unittest.TestCase):
         self.assertIn("--byte-offset", commands["source-search"].format_help())
         self.assertIn("--sqlite-row-scan-limit", commands["source-search"].format_help())
 
+    def test_default_run_output_dir_for_file_root_uses_sibling_directory(self) -> None:
+        from rapidtriage.core.jobs import default_run_output_dir
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            image = Path(tmp_dir) / "case.E01"
+            image.write_bytes(b"EVF")
+
+            output_dir = default_run_output_dir(image, "fraud", run_id="abc123")
+
+            self.assertEqual(output_dir.parent, image.parent)
+            self.assertIn("case", output_dir.name)
+            self.assertIn("rapidtriage-run-fraud-abc123", output_dir.name)
+            self.assertNotEqual(output_dir.parent, image)
+
+    def test_default_run_output_dir_for_directory_root_nests_inside(self) -> None:
+        from rapidtriage.core.jobs import default_run_output_dir
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "evidence-root"
+            root.mkdir()
+
+            output_dir = default_run_output_dir(root, "seizure", run_id="abc123")
+
+            self.assertEqual(output_dir.parent, root)
+
     def test_run_fraud_mode_writes_component_outputs_summary_and_report(self) -> None:
         self.assert_run_mode_outputs("fraud")
 
