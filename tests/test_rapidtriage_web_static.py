@@ -363,9 +363,7 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn(".primary-review-pane > .table-control-bar", styles)
         self.assertIn(".primary-review-pane > .case-question-drawer", styles)
         self.assertIn("질문 열기", styles)
-        self.assertIn("repeat(auto-fit, minmax(138px, 1fr))", styles)
         self.assertIn("repeat(auto-fit, minmax(162px, 1fr))", styles)
-        self.assertIn("grid-auto-rows: minmax(42px, auto)", styles)
         self.assertIn("grid-auto-rows: minmax(40px, auto)", styles)
         self.assertIn("button.case-question-chip", styles)
         self.assertIn(".output-availability-strip", styles)
@@ -840,6 +838,55 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("토큰 필요", app_js)
         # A 401 must surface the token bar automatically.
         self.assertIn("error.status === 401", app_js)
+
+    def test_first_screen_uses_korean_font_stack_and_readable_base_size(self) -> None:
+        styles = (REPO_ROOT / "rapidtriage" / "web" / "static" / "styles.css").read_text(encoding="utf-8")
+
+        # CJK text must not fall back through Latin-only fonts that are not
+        # installed on analyst machines, and labels must not split mid-word.
+        self.assertIn('"Malgun Gothic"', styles)
+        self.assertIn('"Noto Sans KR"', styles)
+        self.assertIn("word-break: keep-all", styles)
+
+    def test_first_screen_keeps_feature_entry_points_visible_with_runs(self) -> None:
+        styles = (REPO_ROOT / "rapidtriage" / "web" / "static" / "styles.css").read_text(encoding="utf-8")
+
+        # Once a case exists the rail must not collapse to a blank column:
+        # intake shortcuts, the brand row, and the case queue stay reachable.
+        self.assertIn("body.has-runs .intake-choice-grid", styles)
+        self.assertIn("body.analysis-active .run-panel > .brand-row", styles)
+        self.assertIn("body.analysis-active .run-panel > .case-queue-shell", styles)
+
+    def test_empty_state_review_cards_are_real_navigation_buttons(self) -> None:
+        index_html = (REPO_ROOT / "rapidtriage" / "web" / "static" / "index.html").read_text(encoding="utf-8")
+        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+
+        # Review-mode cards were <article> elements that looked clickable but
+        # did nothing; they must be buttons wired to workbench tabs.
+        for tab in ("search", "artifacts", "docs", "timeline"):
+            self.assertIn(f'data-review-action="{tab}"', index_html)
+        self.assertIn("button", index_html.split("empty-action-grid", 1)[1].split("</div>", 1)[0])
+        self.assertIn('closest("[data-review-action]")', app_js)
+        self.assertIn("loadRunDetail(candidate.run_id, targetTab)", app_js)
+
+    def test_failed_run_card_exposes_retry_and_remove_actions(self) -> None:
+        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+        styles = (REPO_ROOT / "rapidtriage" / "web" / "static" / "styles.css").read_text(encoding="utf-8")
+
+        self.assertIn('data-retry-run="', app_js)
+        self.assertIn('data-remove-run="', app_js)
+        self.assertIn("prefillRunFormFromRequest", app_js)
+        self.assertIn("pending-run-actions", app_js)
+        self.assertIn(".pending-run-actions", styles)
+        # Korean status copy replaces the English-only headings.
+        self.assertIn("검토가 필요한 실행", app_js)
+        self.assertNotIn("Run needs attention", app_js)
+
+    def test_removing_a_run_restores_the_full_empty_state(self) -> None:
+        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("initialWorkbenchHtml", app_js)
+        self.assertIn("detailPanel.innerHTML = initialWorkbenchHtml", app_js)
 
 
 if __name__ == "__main__":

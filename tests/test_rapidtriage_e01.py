@@ -448,6 +448,58 @@ Units are in 512-byte sectors
             )
             self.assertEqual(checkpoint["mount_strategy"], "python-native-ewf")
 
+    def test_extract_e01_native_fallback_surfaces_truncation_warning(self) -> None:
+        from rapidtriage.core.e01_native import native_e01_available
+
+        if not native_e01_available():
+            self.skipTest("pyewf/dissect.ntfs not importable in this environment")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            e01_path = root / "case.E01"
+            e01_path.write_bytes(b"EVF")
+            partition_row = {
+                "partition_number": 0,
+                "start_sector": 2048,
+                "sector_count": 4096,
+                "size_bytes": 2048 * 512,
+                "byte_offset": 2048 * 512,
+                "sector_size_bytes": 512,
+                "description": "Basic data partition",
+                "filesystem_guess": "windows-basic-data",
+                "supported_filesystem_hint": True,
+            }
+            fake_result = {
+                "media_size_bytes": 4096 * 512,
+                "sector_size_bytes": 512,
+                "partition_table": [partition_row],
+                "selected_partition": partition_row,
+                "selected_start_sector": 2048,
+                "stats": {
+                    "files": 200_000,
+                    "bytes": 0,
+                    "errors": 0,
+                    "truncated": 42,
+                    "deleted_files": 0,
+                },
+            }
+            with patch(
+                "rapidtriage.core.e01_native.extract_e01_native",
+                return_value=fake_result,
+            ):
+                result = extract_e01_to_directory(
+                    e01_path,
+                    root / "stage",
+                    tool_resolver=lambda _: None,
+                )
+            self.assertTrue(any("safety cap" in warning for warning in result.warnings))
+            checkpoint = json.loads(
+                (root / "stage" / "rapidtriage-e01-stage-status.json").read_text(encoding="utf-8")
+            )
+            recovery_entry = next(
+                entry for entry in checkpoint["command_history"] if entry["stage"] == "native-filesystem-recovery"
+            )
+            self.assertEqual(recovery_entry["truncated"], 42)
+
     def test_e01_segment_set_profile_detects_missing_split_segment(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

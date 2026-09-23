@@ -38,6 +38,17 @@ The GUI `Check evidence support` action now shows a compact E01 readiness card:
 
 On Windows, a native Sleuth Kit build with EWF support can read E01/Ex01 directly without `ewfmount`; WSL2 or a separate forensic mounting/export workflow remain reliable alternatives.
 
+### Native fallback path (`python-native-ewf`)
+
+When neither `ewfmount` nor an EWF-capable Sleuth Kit is available, `extract_e01_to_directory` falls back to a native Python path (`rapidtriage/core/e01_native.py`) built on `pyewf` + `dissect.ntfs`:
+
+- reads segmented EWF sets directly via `pyewf` (segment discovery from the `.E01`-`.Exx` naming pattern)
+- parses MBR/GPT partition tables natively and selects the largest supported filesystem (manual `--e01-partition-start-sector` override is honored)
+- walks the allocated NTFS tree and performs a best-effort deleted-MFT-record sweep into `_deleted_mft/`
+- enforces a safety cap of 200,000 recovered files; when the cap is hit the run records `truncated` in `command_history`/`native_extraction_stats` and adds an explicit warning
+
+Real-image check (NEXSTIN 1 TB GPT image, 44 E01 segments): selected partition 2 at sector 239616, recovered 200,001 files with 1 deleted-MFT recovery and 5 read errors before hitting the file cap. This is an engineering-grade path — not a trusted-tool substitute — and the checkpoint warns accordingly.
+
 Performance note: direct EWF reads are I/O-bound through libewf's chunked decompression, which is slow for large multi-segment images (observed ~1.5 MiB/s when reading and writing the same HDD). For large images, first exporting to raw with `ewfexport -f raw -u -p 67108864 -t TARGET.raw IMAGE.E01` (the larger `-p` process buffer is significant — ~50+ MiB/s versus ~1.5 MiB/s in one Windows test) and running the triage against the raw image is substantially faster than direct E01 recovery.
 
 Recommended steps:

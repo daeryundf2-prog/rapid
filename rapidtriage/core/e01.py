@@ -1829,6 +1829,7 @@ def _extract_e01_native_fallback(
             "files": stats.get("files"),
             "deleted_files": stats.get("deleted_files"),
             "errors": stats.get("errors"),
+            "truncated": stats.get("truncated"),
         }
     )
     checkpoint_payload.update(
@@ -1859,6 +1860,13 @@ def _extract_e01_native_fallback(
         "best-effort deleted-record sweep; ADS streams, reparse targets, and "
         "encrypted volumes are not expanded.",
     ]
+    if stats.get("truncated"):
+        warnings.append(
+            f"Native extraction hit the {200_000:,}-file safety cap "
+            f"({stats.get('truncated'):,} further entries skipped). Re-run "
+            "with a narrower partition selection or raise the limit if "
+            "complete coverage is required."
+        )
     return E01ExtractionResult(
         source_path=source_path,
         stage_dir=stage,
