@@ -282,7 +282,11 @@ async function loadRuns() {
   }
 }
 
+let lastRunList = [];
+let initialWorkbenchHtml = "";
+
 function renderRunList(runs) {
+  lastRunList = runs;
   runList.innerHTML = "";
   document.body.classList.toggle("has-runs", Boolean(runs.length));
   document.body.classList.toggle("analysis-active", Boolean(selectedRunId));
@@ -404,13 +408,36 @@ function renderPendingRun(run) {
       <span class="status-pill ${statusClass(run.status)}">${escapeHtml(run.status)}</span>
     </div>
     <section class="guidance-card">
-      <p class="eyebrow">working</p>
-      <h3>${run.error ? "Run needs attention" : "Run is still processing"}</h3>
-      <p>${run.error ? escapeHtml(run.error) : "You can keep this page open. The list refreshes automatically and the run will open when it completes."}</p>
+      <p class="eyebrow">처리 상태</p>
+      <h3>${run.error ? "검토가 필요한 실행" : "분석을 진행하고 있습니다"}</h3>
+      <p>${run.error ? escapeHtml(run.error) : "이 페이지를 열어두면 목록이 자동으로 새로고침되고 완료되면 결과가 열립니다."}</p>
       ${renderRunStepList(run.steps || [])}
       ${run.error ? '<p class="help-text">실패한 단계만 확인한 뒤 같은 output directory로 재실행하면 완료된 산출물을 최대한 보존하면서 다시 점검할 수 있습니다.</p>' : ""}
+      ${run.error ? `
+        <div class="pending-run-actions">
+          <button type="button" data-retry-run="${escapeHtml(run.run_id)}">같은 설정으로 다시 준비</button>
+          <button type="button" class="secondary-button danger" data-remove-run="${escapeHtml(run.run_id)}">목록에서 제거</button>
+        </div>
+      ` : ""}
     </section>
   `;
+}
+
+function prefillRunFormFromRequest(request) {
+  const setValue = (selector, value) => {
+    const el = document.querySelector(selector);
+    if (el && value !== undefined && value !== null) el.value = value;
+  };
+  setValue("#rootInput", request.root || "");
+  setValue("#modeInput", request.mode || "fraud");
+  setValue("#inputKindInput", request.input_kind || "");
+  setValue("#outputInput", request.output_dir || "");
+  const readOnly = document.querySelector("#readOnlyInput");
+  if (readOnly) readOnly.checked = request.read_only !== false;
+  const overwrite = document.querySelector("#overwriteInput");
+  if (overwrite) overwrite.checked = Boolean(request.overwrite);
+  document.querySelector("#rootInput")?.scrollIntoView({ block: "center", behavior: "smooth" });
+  document.querySelector("#runButton")?.focus();
 }
 
 function renderRunStepList(steps) {
@@ -9322,12 +9349,42 @@ async function removeSelectedRun() {
     document.body.classList.remove("analysis-active");
     updateSideStagePanel();
     persistWorkbenchSession({ selectedRunId: null, activeTab: "summary", activeViewGroup: "triage" });
-    detailPanel.innerHTML = '<p class="empty-state">Run removed from the local catalog. Output files were not deleted.</p>';
+    detailPanel.innerHTML = initialWorkbenchHtml || '<p class="empty-state">Run removed from the local catalog. Output files were not deleted.</p>';
     await loadRuns();
   } catch (error) {
     detailPanel.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
   }
 }
+
+initialWorkbenchHtml = detailPanel ? detailPanel.innerHTML : "";
+
+detailPanel?.addEventListener("click", async (event) => {
+  const reviewButton = event.target.closest("[data-review-action]");
+  if (reviewButton) {
+    const targetTab = reviewButton.dataset.reviewAction || "summary";
+    const candidate =
+      (selectedRunId && lastRunList.find((run) => run.run_id === selectedRunId)) ||
+      lastRunList.find((run) => run.status === "completed") ||
+      lastRunList[0];
+    if (candidate) {
+      await loadRunDetail(candidate.run_id, targetTab);
+    } else {
+      document.querySelector("#rootInput")?.scrollIntoView({ block: "center", behavior: "smooth" });
+      document.querySelector("#rootInput")?.focus();
+    }
+    return;
+  }
+  const retryButton = event.target.closest("[data-retry-run]");
+  if (retryButton) {
+    const run = lastRunList.find((item) => item.run_id === retryButton.dataset.retryRun) || selectedRun;
+    if (run?.request) prefillRunFormFromRequest(run.request);
+    return;
+  }
+  const removeButton = event.target.closest("[data-remove-run]");
+  if (removeButton) {
+    await removeSelectedRun();
+  }
+});
 
 hydrateRunForm();
 restoreWorkbenchSession();

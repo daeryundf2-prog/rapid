@@ -18632,3 +18632,198 @@ body.has-runs .run-panel .side-stage-panel .stage-nav-subactions-drawer:not([ope
 .stage-nav-subactions-drawer[open] > .stage-nav-subactions {
   margin-top: 4px !important;
 }
+
+/* UX readability + discoverability fix:
+   - Korean-aware font stack on the base body so CJK glyphs do not fall back
+     through missing Latin-only fonts (Atkinson/Avenir are not installed on
+     most Windows machines).
+   - Larger base size and keep-all word breaking so Korean labels never split
+     mid-word inside narrow rails.
+   - Minimum touch targets on the primary interactive surfaces.
+   - Keep workflow entry points visible even after a case exists instead of
+     hiding every intake control. */
+body {
+  font-family: "Pretendard Variable", "Pretendard", "IBM Plex Sans KR",
+    "Noto Sans KR", "Malgun Gothic", "Apple SD Gothic Neo", "Segoe UI",
+    system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+h1, h2, h3, h4,
+label, button, summary, th, .eyebrow,
+.stage-nav-main, .stage-subaction, .tab-button,
+.run-item, .intake-choice-card, .empty-action-card,
+.mission-strip, .user-run-steps, .image-evidence-flow {
+  word-break: keep-all;
+}
+
+code, pre, .run-item-path, .mono, [data-path] {
+  word-break: break-all;
+  overflow-wrap: anywhere;
+}
+
+.shell,
+body.has-runs .shell,
+body.analysis-active .shell {
+  grid-template-columns: minmax(320px, 360px) minmax(0, 1fr) !important;
+}
+
+@media (max-width: 1280px) {
+  .shell,
+  body.has-runs .shell,
+  body.analysis-active .shell {
+    grid-template-columns: minmax(280px, 320px) minmax(0, 1fr) !important;
+  }
+}
+
+/* Entry points stay reachable after runs exist: collapse to a compact grid
+   instead of removing them entirely. */
+body.has-runs .intake-choice-grid,
+body.analysis-active .intake-choice-grid {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin: 10px 0;
+}
+
+body.has-runs .intake-choice-card,
+body.analysis-active .intake-choice-card {
+  padding: 10px 12px;
+  border-radius: 12px;
+}
+
+body.has-runs .intake-choice-card span,
+body.analysis-active .intake-choice-card span {
+  font-size: 0.72rem;
+}
+
+/* Comfortable touch targets (>=40px) on primary interactive surfaces. */
+.run-panel button,
+.results-panel button,
+.secondary-button,
+.tab-button,
+.run-item,
+.stage-nav-main,
+.stage-subaction,
+.intake-choice-card,
+.empty-action-card,
+.empty-state-actions button {
+  min-height: 40px;
+}
+
+.run-item {
+  min-height: 56px;
+}
+
+/* Interactive text must not drop below a readable size. */
+.run-panel button,
+.results-panel button,
+.stage-nav-main,
+.stage-subaction,
+.tab-button,
+.intake-choice-card strong,
+.empty-action-card strong {
+  font-size: max(0.8rem, 12px);
+}
+
+/* Calmer empty-state hero: guidance instead of a wall of giant text. */
+.empty-workbench-hero h2 {
+  font-size: clamp(1.35rem, 2vw, 1.9rem) !important;
+  max-width: 40ch;
+  line-height: 1.35;
+}
+
+.empty-workbench-hero p {
+  font-size: 0.95rem;
+  max-width: 62ch;
+}
+
+/* Review-mode cards are real buttons now. */
+.empty-action-card {
+  border: 1px solid #d8e1ec;
+  border-radius: 14px;
+  background: #ffffff;
+  color: inherit;
+  padding: 14px 16px;
+  text-align: left;
+  cursor: pointer;
+  display: grid;
+  gap: 6px;
+  align-content: start;
+}
+
+.empty-action-card:hover,
+.empty-action-card:focus-visible {
+  border-color: var(--accent, #2563eb);
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+}
+
+.empty-action-card span {
+  color: var(--muted, #64748b);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+/* Pending/failed run card gets visible recovery actions. */
+.pending-run-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* Failed/pending runs must never blank the left rail: keep the brand row and
+   the case queue reachable even while the stage navigator is empty. */
+body.analysis-active .run-panel > .brand-row {
+  display: flex !important;
+}
+
+body.analysis-active .run-panel > .case-queue-shell {
+  display: block !important;
+}
+
+/* Override the compacted run-item sizing so case entries stay easy to hit. */
+body.analysis-active button.run-item,
+body.has-runs button.run-item,
+.run-item {
+  min-height: 48px !important;
+  padding: 10px 12px !important;
+}
+
+/* Keep run identity visible when a case is open: id + status stay readable
+   instead of collapsing to a bare mode chip. */
+body.analysis-active .run-item .run-item-main {
+  display: grid !important;
+  gap: 2px;
+}
+
+body.analysis-active .run-item .run-item-kicker {
+  font-size: 0.66rem;
+}
+
+body.analysis-active .run-item strong {
+  font-size: 0.8rem;
+}
+
+body.analysis-active .run-item .run-item-path {
+  font-size: 0.68rem;
+}
+
+body.analysis-active .run-item .run-item-meta .status-pill {
+  display: inline-flex !important;
+  font-size: 0.66rem;
+}
+
+/* Run identity contrast: the id and path were rendering in near-white. */
+.run-item strong,
+body.analysis-active .run-item strong,
+body.has-runs .run-item strong {
+  color: #1e293b !important;
+}
+
+.run-item .run-item-path,
+body.analysis-active .run-item .run-item-path,
+body.has-runs .run-item .run-item-path {
+  color: #64748b !important;
+}

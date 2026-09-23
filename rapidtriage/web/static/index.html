@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>RapidForensic Analyst Console</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230f766e'/%3E%3Ctext x='32' y='39' text-anchor='middle' font-size='22' font-family='Arial' font-weight='700' fill='white'%3ERF%3C/text%3E%3C/svg%3E" />
-    <link rel="stylesheet" href="/assets/styles.css?v=professional-copy-20260518-overlap-fix-2" />
+    <link rel="stylesheet" href="/assets/styles.css?v=ux-readability-fix-1" />
   </head>
   <body>
     <a class="skip-link" href="#detailPanel">Skip to case workspace</a>
@@ -341,17 +341,17 @@
               </div>
             </div>
             <div class="empty-action-grid" aria-label="Main review modes">
-              <article class="empty-action-card"><strong>키워드 선별</strong><span>사건 단어로 전체 자료를 3클릭 안에 좁힙니다.</span></article>
-              <article class="empty-action-card"><strong>아티팩트 검토</strong><span>EVTX, Registry, Browser, AI, USB, MFT/USN을 행위별로 봅니다.</span></article>
-              <article class="empty-action-card"><strong>문서 검토</strong><span>PDF/Office/text/메일/메신저/OCR 중심으로 선별합니다.</span></article>
-              <article class="empty-action-card"><strong>시간축 분석</strong><span>파일, 로그, 웹, 앱 흔적을 시간 흐름으로 연결합니다.</span></article>
+              <button type="button" class="empty-action-card" data-review-action="search"><strong>키워드 선별</strong><span>사건 단어로 전체 자료를 3클릭 안에 좁힙니다.</span></button>
+              <button type="button" class="empty-action-card" data-review-action="artifacts"><strong>아티팩트 검토</strong><span>EVTX, Registry, Browser, AI, USB, MFT/USN을 행위별로 봅니다.</span></button>
+              <button type="button" class="empty-action-card" data-review-action="docs"><strong>문서 검토</strong><span>PDF/Office/text/메일/메신저/OCR 중심으로 선별합니다.</span></button>
+              <button type="button" class="empty-action-card" data-review-action="timeline"><strong>시간축 분석</strong><span>파일, 로그, 웹, 앱 흔적을 시간 흐름으로 연결합니다.</span></button>
             </div>
           </section>
         </div>
       </section>
     </main>
-    <script type="module" src="/assets/app_workbench_config.js?v=forensic-priority-13"></script>
-    <script type="module" src="/assets/app_state.js?v=forensic-priority-13"></script>
-    <script type="module" src="/assets/app.js?v=forensic-priority-13"></script>
+    <script type="module" src="/assets/app_workbench_config.js?v=ux-readability-fix-1"></script>
+    <script type="module" src="/assets/app_state.js?v=ux-readability-fix-1"></script>
+    <script type="module" src="/assets/app.js?v=ux-readability-fix-1"></script>
   </body>
 </html>
