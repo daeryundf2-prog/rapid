@@ -67,6 +67,7 @@ import {
   bindCrashReportActions,
   bindE01PartitionControls,
   bindEvidenceCheckActions,
+  bindPathPickerButtons,
   bindRunFormPersistence,
   checkEvidenceSupport,
   detectEvidenceImageKind,
@@ -475,8 +476,8 @@ function renderDetailShell(run, tab) {
     <section class="workbench-command-deck" aria-label="Case command deck">
       ${renderCaseHero(run)}
     </section>
-    <div class="tab-row redundant-tab-row" aria-label="보조 탭 전환">
-      ${tabs.map((item) => `<button class="tab-button ${item === tab ? "active" : ""}" data-tab="${item}" data-testid="tab-${escapeHtml(item)}" type="button">${escapeHtml(tabLabel(item))}</button>`).join("")}
+    <div class="tab-row redundant-tab-row" role="tablist" aria-label="보조 탭 전환">
+      ${tabs.map((item) => `<button class="tab-button ${item === tab ? "active" : ""}" role="tab" aria-selected="${item === tab ? "true" : "false"}" aria-controls="tabBody" data-tab="${escapeHtml(item)}" data-testid="tab-${escapeHtml(item)}" type="button">${escapeHtml(tabLabel(item))}</button>`).join("")}
     </div>
     ${renderWorkbenchLayoutFrame(run, tab)}
     <details class="workbench-intel-drawer">
@@ -1214,7 +1215,8 @@ function renderWorkbenchLayoutFrame(run, tab) {
           <span>대량 결과는 cursor page와 가상 행으로 안전하게 나눠 봅니다.</span>
         </div>
         ${renderAdaptiveViewerHeader(run, tab)}
-        <div id="tabBody" class="tab-body" data-testid="tab-body"></div>
+        <p id="tabStatus" class="sr-only" role="status" aria-live="polite"></p>
+        <div id="tabBody" class="tab-body" role="tabpanel" data-testid="tab-body"></div>
       </main>
       ${renderIntelligencePanel(run, tab, reportCandidates)}
     </section>
@@ -2619,7 +2621,9 @@ function bindTabButtons() {
       activeViewGroup = groupForTab(activeTab);
       activeArtifactFilter = "";
       for (const item of detailPanel.querySelectorAll(".tab-button")) {
-        item.classList.toggle("active", item === button);
+        const selected = item === button;
+        item.classList.toggle("active", selected);
+        item.setAttribute("aria-selected", selected ? "true" : "false");
       }
       for (const item of detailPanel.querySelectorAll(".forensic-view-mode")) {
         item.classList.toggle("active", item.dataset.tab === activeTab);
@@ -2726,6 +2730,7 @@ function renderCommandPalette(run, tab) {
               class="command-palette-command ${index === 0 ? "active" : ""}"
               type="button"
               role="option"
+              aria-selected="${index === 0 ? "true" : "false"}"
               data-command-text="${escapeHtml([command.category, command.label, command.hint, command.shortcut, command.filter].filter(Boolean).join(" ").toLowerCase())}"
               data-command-tab="${escapeHtml(command.tab || "")}"
               data-command-filter="${escapeHtml(command.filter || "")}"
@@ -2746,6 +2751,8 @@ function renderCommandPalette(run, tab) {
 
 async function renderActiveTab() {
   const body = detailPanel.querySelector("#tabBody");
+  const tabStatus = detailPanel.querySelector("#tabStatus");
+  if (tabStatus) tabStatus.textContent = `${tabLabel(activeTab)} 불러오는 중`;
   body.innerHTML = '<p class="empty-state">Loading...</p>';
   try {
     if (activeTab === "summary") body.innerHTML = renderSummary(selectedRun.summary);
@@ -2759,6 +2766,10 @@ async function renderActiveTab() {
     if (activeTab === "review" || activeTab === "bookmarks") body.innerHTML = renderReviewBoard(await api(`/api/runs/${selectedRunId}/case`));
   } catch (error) {
     body.innerHTML = renderTabLoadError(error, activeTab);
+    if (tabStatus) tabStatus.textContent = `${tabLabel(activeTab)} 불러오기 실패`;
+  }
+  if (tabStatus && !body.querySelector('[data-testid="tab-load-error"]')) {
+    tabStatus.textContent = `${tabLabel(activeTab)} 탭을 불러왔습니다`;
   }
   bindPanelActions();
   bindBookmarkButtons();
@@ -7956,8 +7967,17 @@ function bindCommandPaletteActions() {
   }
   const input = palette.querySelector("#commandPaletteInput");
   input?.addEventListener("input", () => filterCommandPalette(input.value));
-  input?.addEventListener("keydown", async (event) => {
-    if (event.key === "Enter") {
+  palette.addEventListener("keydown", async (event) => {
+    if (event.key === "Tab") {
+      trapCommandPaletteTab(event);
+      return;
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      moveCommandPaletteSelection(event.key === "ArrowDown" ? 1 : -1);
+      return;
+    }
+    if (event.key === "Enter" && event.target === palette.querySelector("#commandPaletteInput")) {
       event.preventDefault();
       const command = firstVisibleCommandPaletteButton();
       if (command) await executeCommandPaletteButton(command);
@@ -7967,6 +7987,16 @@ function bindCommandPaletteActions() {
       closeCommandPalette();
     }
   });
+  for (const command of palette.querySelectorAll(".command-palette-command")) {
+    command.addEventListener("focus", () => {
+      for (const other of palette.querySelectorAll(".command-palette-command")) {
+        other.classList.remove("active");
+        other.setAttribute("aria-selected", "false");
+      }
+      command.classList.add("active");
+      command.setAttribute("aria-selected", "true");
+    });
+  }
   for (const command of palette.querySelectorAll(".command-palette-command")) {
     command.addEventListener("click", async () => executeCommandPaletteButton(command));
   }
@@ -7981,10 +8011,13 @@ function commandPaletteIsOpen() {
   return Boolean(palette && !palette.hidden);
 }
 
+let commandPaletteReturnFocus = null;
+
 function openCommandPalette(prefill = "") {
   if (!selectedRunId) return false;
   const palette = commandPaletteElement();
   if (!palette) return false;
+  commandPaletteReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   palette.hidden = false;
   palette.classList.add("open");
   palette.setAttribute("aria-hidden", "false");
@@ -8006,6 +8039,49 @@ function closeCommandPalette() {
   palette.classList.remove("open");
   palette.setAttribute("aria-hidden", "true");
   palette.hidden = true;
+  if (commandPaletteReturnFocus?.isConnected) commandPaletteReturnFocus.focus();
+  commandPaletteReturnFocus = null;
+}
+
+function commandPaletteFocusableElements() {
+  const palette = commandPaletteElement();
+  if (!palette) return [];
+  return Array.from(
+    palette.querySelectorAll("#commandPaletteInput, .command-palette-command, button[data-command-palette-close]")
+  ).filter((element) => !element.hidden && !element.disabled);
+}
+
+function trapCommandPaletteTab(event) {
+  const focusables = commandPaletteFocusableElements();
+  if (!focusables.length) return;
+  const first = focusables[0];
+  const last = focusables[focusables.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
+function moveCommandPaletteSelection(direction) {
+  const commands = Array.from(
+    commandPaletteElement()?.querySelectorAll(".command-palette-command") || []
+  ).filter((button) => !button.hidden);
+  if (!commands.length) return;
+  const currentIndex = commands.indexOf(document.activeElement);
+  const nextIndex = currentIndex === -1
+    ? (direction > 0 ? 0 : commands.length - 1)
+    : (currentIndex + direction + commands.length) % commands.length;
+  commands.forEach((button) => {
+    button.classList.remove("active");
+    button.setAttribute("aria-selected", "false");
+  });
+  const next = commands[nextIndex];
+  next.classList.add("active");
+  next.setAttribute("aria-selected", "true");
+  next.focus();
 }
 
 function filterCommandPalette(query) {
@@ -8018,9 +8094,12 @@ function filterCommandPalette(query) {
     const visible = !terms.length || terms.every((term) => haystack.includes(term));
     command.hidden = !visible || visibleCount >= COMMAND_PALETTE_RESULT_LIMIT;
     command.classList.remove("active");
+    command.setAttribute("aria-selected", "false");
     if (!command.hidden) visibleCount += 1;
   }
-  firstVisibleCommandPaletteButton()?.classList.add("active");
+  const firstVisible = firstVisibleCommandPaletteButton();
+  firstVisible?.classList.add("active");
+  firstVisible?.setAttribute("aria-selected", "true");
   palette.classList.toggle("empty", visibleCount === 0);
 }
 
@@ -8720,9 +8799,11 @@ function bindReviewSelectionActions() {
 function bindKeyboardShortcuts() {
   document.addEventListener("keydown", async (event) => {
     const commandShortcut = event.metaKey || event.ctrlKey;
-    if (commandPaletteIsOpen() && event.key === "Escape") {
-      event.preventDefault();
-      closeCommandPalette();
+    if (commandPaletteIsOpen()) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeCommandPalette();
+      }
       return;
     }
     if (isTypingTarget(event.target) && !commandShortcut) return;
@@ -8747,7 +8828,7 @@ function bindKeyboardShortcuts() {
       return;
     }
     if (!event.metaKey && !event.ctrlKey && !event.altKey && event.key === " ") {
-      if (await previewFirstVisibleRow()) event.preventDefault();
+      if (!isInteractiveTarget(event.target) && await previewFirstVisibleRow()) event.preventDefault();
       return;
     }
     if (event.altKey && !event.metaKey && !event.ctrlKey && (event.key === "[" || event.key === "]")) {
@@ -8782,6 +8863,11 @@ function isTypingTarget(target) {
   if (!(target instanceof HTMLElement)) return false;
   const tag = target.tagName.toLowerCase();
   return tag === "input" || tag === "textarea" || tag === "select" || target.isContentEditable;
+}
+
+function isInteractiveTarget(target) {
+  if (!(target instanceof HTMLElement)) return false;
+  return Boolean(target.closest("button, a[href], summary, [role='button'], [role='option'], [role='tab'], [role='link'], [role='switch'], [role='checkbox'], [type='checkbox'], [type='radio']"));
 }
 
 function toggleShortcutHelp(forceOpen = null) {
@@ -8906,7 +8992,9 @@ export async function switchTab(tab, options = {}) {
     return;
   }
   for (const item of detailPanel.querySelectorAll(".tab-button")) {
-    item.classList.toggle("active", item.dataset.tab === tab);
+    const selected = item.dataset.tab === tab;
+    item.classList.toggle("active", selected);
+    item.setAttribute("aria-selected", selected ? "true" : "false");
   }
   await renderActiveTab();
   refreshSourceNavigatorState();
@@ -9171,11 +9259,27 @@ export function renderEvidenceCheckStatus(result) {
         <span>${escapeHtml(result.adapter || "adapter")} · ${escapeHtml(support)} · ${escapeHtml(action)}</span>
       </div>
       <p>${escapeHtml(result.message || "")}${escapeHtml(missing)}</p>
+      ${renderE01SegmentSetNotice(result.segment_set_profile || null)}
       ${renderE01IngestWorkflow(result.ingest_workflow || null)}
       ${renderEvidencePreflightSummary(result.preflight_summary || null)}
       ${renderEvidenceFailureGuidance(result.failure_guidance || null)}
       ${renderEvidenceToolPreflight(result.tool_preflight || [])}
     </div>
+  `;
+}
+
+function renderE01SegmentSetNotice(profile) {
+  if (!profile || !profile.profile_version) return "";
+  const warnings = profile.warnings || [];
+  const count = formatNumber(profile.segment_count || 0);
+  const firstOk = profile.selected_is_first_segment;
+  return `
+    <section class="e01-segment-notice ${warnings.length ? "warning" : "ok"}" aria-live="polite">
+      <strong>세그먼트 ${count}개${firstOk ? "" : " · 첫 세그먼트가 아님"}</strong>
+      ${warnings.length
+        ? `<ul>${warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")}</ul>`
+        : `<span class="help-text">분할 순서가 연속적으로 확인됐습니다.</span>`}
+    </section>
   `;
 }
 
@@ -9404,6 +9508,7 @@ detailPanel?.addEventListener("click", async (event) => {
 hydrateRunForm();
 restoreWorkbenchSession();
 bindRunFormPersistence();
+bindPathPickerButtons();
 refreshRunPlanPreview();
 bindKeyboardShortcuts();
 checkHealth();

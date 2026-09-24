@@ -126,16 +126,17 @@ export function applyStartChoice(action) {
     if (inputKindInput) inputKindInput.value = "e01-derived";
     if (processingProfileInput) processingProfileInput.value = "fast";
     if (modeInput) modeInput.value = "fraud";
-    rootInput?.focus();
-    evidenceCheckStatus.textContent = "E01/Ex01 또는 이미지 경로를 넣고 이미지 지원 확인을 누르면 도구, 파티션, 마운트/추출 필요 여부를 먼저 확인합니다.";
+    evidenceCheckStatus.textContent = "파일 브라우저에서 E01/Ex01 또는 이미지를 고르세요. 직접 경로 입력도 가능합니다.";
+    if (rootInput) openPathPicker(rootInput);
   } else if (action === "folder") {
     if (inputKindInput) inputKindInput.value = "folder";
     if (processingProfileInput) processingProfileInput.value = "fast";
     if (modeInput) modeInput.value = "fraud";
-    rootInput?.focus();
-    evidenceCheckStatus.textContent = "이미지를 이미 마운트/추출한 폴더나 벤더 Export 폴더 경로를 넣고 분석 실행을 누르면 됩니다.";
+    evidenceCheckStatus.textContent = "파일 브라우저에서 Export/마운트 폴더로 들어간 뒤 '이 폴더 선택'을 누르세요.";
+    if (rootInput) openPathPicker(rootInput);
   } else if (action === "recent") {
-    document.querySelector("#importOutputInput")?.focus();
+    const importInput = document.querySelector("#importOutputInput");
+    if (importInput) openPathPicker(importInput);
   } else if (action === "sample") {
     sampleRunButton?.click();
   } else if (action === "qc") {
@@ -659,4 +660,241 @@ export function renderDoctorPanel(payload) {
       </div>
     </section>
   `;
+}
+
+// --- Local path picker: browse the server filesystem instead of typing paths ---
+let pickerReturnFocus = null;
+let pickerTargetInput = null;
+let pickerCurrentPath = "";
+let pickerShowHidden = false;
+
+export function bindPathPickerButtons() {
+  for (const button of document.querySelectorAll("[data-path-picker-for]")) {
+    button.addEventListener("click", () => {
+      const input = document.querySelector(button.dataset.pathPickerFor);
+      if (input) openPathPicker(input);
+    });
+  }
+}
+
+function pathPickerElement() {
+  return document.querySelector("#pathPicker");
+}
+
+function ensurePathPicker() {
+  let picker = pathPickerElement();
+  if (picker) return picker;
+  picker = document.createElement("div");
+  picker.id = "pathPicker";
+  picker.className = "path-picker";
+  picker.setAttribute("role", "dialog");
+  picker.setAttribute("aria-modal", "true");
+  picker.setAttribute("aria-label", "증거 위치 선택");
+  picker.hidden = true;
+  picker.innerHTML = `
+    <div class="path-picker-backdrop" data-picker-close></div>
+    <div class="path-picker-shell">
+      <div class="path-picker-header">
+        <div>
+          <p class="eyebrow">파일 브라우저</p>
+          <strong>증거 이미지 또는 폴더 선택</strong>
+        </div>
+        <button class="icon-action" type="button" data-picker-close aria-label="선택 닫기">Esc</button>
+      </div>
+      <div class="path-picker-bar">
+        <button type="button" class="secondary-button" data-picker-up>상위 폴더</button>
+        <code class="path-picker-current" data-picker-current></code>
+        <label class="inline-toggle"><input type="checkbox" data-picker-hidden /> 숨김 표시</label>
+      </div>
+      <div class="path-picker-list" role="listbox" aria-label="폴더와 파일 목록" data-picker-list></div>
+      <div class="path-picker-footer">
+        <button type="button" class="secondary-button" data-picker-home>홈 폴더</button>
+        <span class="help-text">폴더는 누르면 들어가고, 파일은 누르면 바로 선택됩니다.</span>
+        <button type="button" data-picker-use-current>이 폴더 선택</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(picker);
+  picker.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closePathPicker();
+      return;
+    }
+    if (event.key === "Tab") {
+      trapPathPickerTab(event);
+      return;
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      movePathPickerSelection(event.key === "ArrowDown" ? 1 : -1);
+    }
+  });
+  for (const closer of picker.querySelectorAll("[data-picker-close]")) {
+    closer.addEventListener("click", closePathPicker);
+  }
+  picker.querySelector("[data-picker-up]")?.addEventListener("click", () => {
+    const parent = picker.dataset.parentPath || "";
+    if (parent) loadPathPickerDirectory(parent);
+  });
+  picker.querySelector("[data-picker-home]")?.addEventListener("click", () => {
+    loadPathPickerDirectory(picker.dataset.homePath || "");
+  });
+  picker.querySelector("[data-picker-hidden]")?.addEventListener("change", (event) => {
+    pickerShowHidden = event.target.checked;
+    loadPathPickerDirectory(pickerCurrentPath);
+  });
+  picker.querySelector("[data-picker-use-current]")?.addEventListener("click", () => {
+    if (pickerCurrentPath) selectPathPickerValue(pickerCurrentPath);
+  });
+  return picker;
+}
+
+function pickerFocusableElements() {
+  const picker = pathPickerElement();
+  if (!picker) return [];
+  return Array.from(
+    picker.querySelectorAll("button, input, .path-picker-entry")
+  ).filter((element) => !element.hidden && !element.disabled);
+}
+
+function trapPathPickerTab(event) {
+  const focusables = pickerFocusableElements();
+  if (!focusables.length) return;
+  const first = focusables[0];
+  const last = focusables[focusables.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
+function movePathPickerSelection(direction) {
+  const picker = pathPickerElement();
+  const entries = Array.from(picker?.querySelectorAll(".path-picker-entry") || []).filter(
+    (entry) => !entry.hidden
+  );
+  if (!entries.length) return;
+  const currentIndex = entries.indexOf(document.activeElement);
+  const nextIndex = currentIndex === -1
+    ? (direction > 0 ? 0 : entries.length - 1)
+    : (currentIndex + direction + entries.length) % entries.length;
+  entries[nextIndex].focus();
+}
+
+export function openPathPicker(input) {
+  pickerTargetInput = input;
+  pickerReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const picker = ensurePathPicker();
+  picker.hidden = false;
+  picker.classList.add("open");
+  const seed = (input.value || "").trim();
+  loadPathPickerDirectory(seed);
+}
+
+export function closePathPicker() {
+  const picker = pathPickerElement();
+  if (!picker) return;
+  picker.classList.remove("open");
+  picker.hidden = true;
+  if (pickerReturnFocus?.isConnected) pickerReturnFocus.focus();
+  pickerReturnFocus = null;
+}
+
+async function loadPathPickerDirectory(path) {
+  const picker = ensurePathPicker();
+  const list = picker.querySelector("[data-picker-list]");
+  list.innerHTML = '<p class="empty-state">폴더를 읽는 중...</p>';
+  try {
+    const payload = await api(
+      `/api/browse?path=${encodeURIComponent(path || "")}&show_hidden=${pickerShowHidden ? "1" : "0"}`
+    );
+    pickerCurrentPath = payload.path;
+    picker.dataset.parentPath = payload.parent || "";
+    picker.dataset.homePath = payload.home || "";
+    picker.querySelector("[data-picker-current]").textContent = payload.path;
+    picker.querySelector("[data-picker-up]").disabled = !payload.parent;
+    renderPathPickerEntries(payload);
+  } catch (error) {
+    list.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
+  }
+}
+
+function ewfSegmentCount(name, entries) {
+  const match = /^(.*)\.e(x?0?1)$/i.exec(name || "");
+  if (!match) return 0;
+  const stem = match[1].toLowerCase();
+  return entries.filter((entry) =>
+    entry.kind === "file" && new RegExp(`^${stem.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.e(x?\\d\\d)$`, "i").test(entry.name)
+  ).length;
+}
+
+function renderPathPickerEntries(payload) {
+  const picker = ensurePathPicker();
+  const list = picker.querySelector("[data-picker-list]");
+  const entries = payload.entries || [];
+  if (!entries.length) {
+    list.innerHTML = '<p class="empty-state">표시할 항목이 없습니다. 숨김 파일 표시를 켜거나 상위 폴더로 이동하세요.</p>';
+    return;
+  }
+  list.innerHTML = entries.map((entry, index) => {
+    const isDir = entry.kind === "directory";
+    const icon = isDir ? "📁" : (entry.evidence_candidate ? "🧾" : "📄");
+    const size = isDir ? "" : formatBytes(entry.size_bytes || 0);
+    const segments = !isDir ? ewfSegmentCount(entry.name, entries) : 0;
+    const meta = isDir
+      ? "폴더"
+      : segments > 0
+        ? `${escapeHtml(size)} · 세그먼트 ${segments}개`
+        : escapeHtml(size);
+    return `
+      <button
+        type="button"
+        class="path-picker-entry ${isDir ? "is-dir" : ""} ${entry.evidence_candidate ? "is-evidence" : ""}"
+        role="option"
+        aria-selected="false"
+        data-picker-index="${index}"
+      >
+        <span class="path-picker-icon" aria-hidden="true">${icon}</span>
+        <strong>${escapeHtml(entry.name)}</strong>
+        <span class="path-picker-meta">${meta}</span>
+      </button>
+    `;
+  }).join("") + (payload.truncated ? '<p class="help-text">항목이 많아 일부만 표시했습니다.</p>' : "");
+  for (const button of list.querySelectorAll(".path-picker-entry")) {
+    button.addEventListener("click", () => {
+      const entry = entries[Number(button.dataset.pickerIndex)];
+      if (!entry) return;
+      if (entry.kind === "directory") {
+        loadPathPickerDirectory(entry.path);
+      } else {
+        selectPathPickerValue(entry.path);
+      }
+    });
+    button.addEventListener("focus", () => {
+      for (const other of list.querySelectorAll(".path-picker-entry")) {
+        other.setAttribute("aria-selected", "false");
+      }
+      button.setAttribute("aria-selected", "true");
+    });
+  }
+}
+
+function selectPathPickerValue(path) {
+  const target = pickerTargetInput;
+  if (target) {
+    target.value = path;
+    target.dispatchEvent(new Event("input", { bubbles: true }));
+    target.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+  closePathPicker();
+  target?.focus();
+  // For the evidence field, immediately check support so the analyst sees
+  // tool/partition requirements without a second click.
+  if (target?.id === "rootInput" && detectEvidenceImageKind(path).isImage) {
+    checkEvidenceSupport();
+  }
 }

@@ -20,50 +20,34 @@
               <p class="brand-subtitle">증거를 넣고, 분석하고, 검색/뷰어/리뷰/보고서까지 한 화면에서 이어갑니다.</p>
             </div>
           </div>
-          <span id="apiStatus" class="status-pill" role="button" tabindex="0" title="클릭하면 API 토큰을 입력할 수 있습니다">확인 중</span>
+          <span id="apiStatus" class="status-pill" role="button" tabindex="0" aria-live="polite" title="클릭하면 API 토큰을 입력할 수 있습니다">확인 중</span>
         </div>
         <div id="tokenBar" class="token-bar" hidden>
           <input id="tokenInput" type="password" autocomplete="off" placeholder="API 토큰 입력 (서버 시작 시 콘솔에 출력됨)" aria-label="API 토큰">
           <button id="tokenSave" type="button">연결</button>
           <span id="tokenHint" class="token-hint">토큰은 브라우저 localStorage에만 저장됩니다.</span>
         </div>
-        <div class="operator-badges" aria-label="Console strengths">
-          <span>원본 보호 우선</span>
-          <span>대용량 대응</span>
-          <span>검토/보고서 연결</span>
-        </div>
         <section id="sideStagePanel" class="side-stage-panel" aria-label="현재 케이스 단계 선택" hidden></section>
-        <section class="start-focus-card" aria-label="Recommended start">
-          <p class="eyebrow">이미지 증거 우선</p>
-          <h2>E01/Ex01 같은 포렌식 이미지를 먼저 넣는 흐름입니다</h2>
-          <p>이미지를 선택하면 지원 여부, 필요한 마운트/추출 도구, 파티션 선택, 해시/출처 기록을 먼저 확인한 뒤 분석으로 넘어갑니다.</p>
-          <div class="image-evidence-flow" aria-label="Image evidence flow">
-            <span><strong>1</strong> 이미지 선택</span>
-            <span><strong>2</strong> 지원/도구 확인</span>
-            <span><strong>3</strong> 파티션·마운트</span>
-            <span><strong>4</strong> 분석/검색</span>
-          </div>
-        </section>
         <section class="intake-choice-grid" aria-label="Start workflow choices" data-testid="start-choice-grid">
           <button type="button" class="intake-choice-card primary" data-intake-action="e01" data-testid="start-choice-e01">
-            <strong>이미지 증거</strong>
-            <span>E01/Ex01, RAW, VHDX, DMG → 지원 확인 → 분석</span>
+            <strong>이미지 파일 선택</strong>
+            <span>E01/Ex01, RAW, VHDX, DMG — 파일을 고르면 지원 여부를 바로 확인</span>
           </button>
           <button type="button" class="intake-choice-card" data-intake-action="folder" data-testid="start-choice-folder">
-            <strong>Folder / Export</strong>
-            <span>이미지에서 추출/마운트한 폴더나 벤더 export를 스캔</span>
+            <strong>폴더 선택</strong>
+            <span>추출/마운트한 폴더나 벤더 Export 폴더를 분석</span>
           </button>
           <button type="button" class="intake-choice-card" data-intake-action="recent" data-testid="start-choice-recent">
-            <strong>Recent case</strong>
-            <span>기존 실행 산출물을 가져와 이어보기</span>
+            <strong>기존 결과 이어가기</strong>
+            <span>이전 분석 산출물 폴더를 불러오기</span>
           </button>
           <button type="button" class="intake-choice-card" data-intake-action="sample" data-testid="start-choice-sample">
-            <strong>Sample case</strong>
+            <strong>샘플로 연습</strong>
             <span>안전한 연습 케이스로 흐름 확인</span>
           </button>
           <button type="button" class="intake-choice-card" data-intake-action="qc" data-testid="start-choice-qc">
-            <strong>Validation / QC</strong>
-            <span>runtime, evidence support, validation package 확인</span>
+            <strong>환경 점검 (고급)</strong>
+            <span>도구 설치 상태와 검증 정보 확인</span>
           </button>
         </section>
         <form id="runForm" class="run-form" novalidate>
@@ -72,14 +56,12 @@
             <h2>이미지 또는 추출 폴더 선택</h2>
             <p>대부분은 E01/Ex01 같은 이미지에서 시작합니다. 폴더만 있는 경우도 같은 칸에 넣으면 됩니다.</p>
           </div>
-          <div class="user-run-steps" aria-label="Run steps">
-            <span><strong>1</strong> 경로 입력</span>
-            <span><strong>2</strong> 이미지 지원 확인</span>
-            <span><strong>3</strong> 실행</span>
-          </div>
           <label class="root-field">
             증거 이미지 또는 분석 폴더
-            <input id="rootInput" name="root" placeholder="/cases/case.E01, /cases/disk001.Ex01, /cases/image.raw, /cases/export-folder" data-testid="evidence-root-input" />
+            <span class="path-input-row">
+              <input id="rootInput" name="root" placeholder="/cases/case.E01, /cases/disk001.Ex01, /cases/image.raw, /cases/export-folder" data-testid="evidence-root-input" />
+              <button type="button" class="secondary-button path-browse-button" data-path-picker-for="#rootInput" data-testid="evidence-browse-button">찾아보기…</button>
+            </span>
           </label>
           <p id="rootInputError" class="form-error" role="alert" hidden>분석할 E01/Ex01, 이미지, ZIP, 또는 폴더 경로를 먼저 입력하세요.</p>
           <div class="evidence-check-row">
@@ -113,7 +95,10 @@
 
           <label class="output-field">
             결과 저장 위치
-            <input id="outputInput" name="outputDir" placeholder="auto: ROOT/rapidtriage-run-MODE" />
+            <span class="path-input-row">
+              <input id="outputInput" name="outputDir" placeholder="auto: ROOT/rapidtriage-run-MODE" />
+              <button type="button" class="secondary-button path-browse-button" data-path-picker-for="#outputInput">찾아보기…</button>
+            </span>
           </label>
 
           <label class="profile-field">
@@ -133,7 +118,7 @@
             <section id="runPlanPreview" class="run-plan-preview run-plan-summary" aria-live="polite"></section>
 
             <section class="run-plan-preview collection-plan-card" aria-label="Collection profile preview">
-              <p class="eyebrow">target collection</p>
+              <p class="eyebrow">수집 대상</p>
               <h3>수집 대상 미리보기</h3>
               <p>큰 분석을 돌리기 전에 Windows/macOS 주요 아티팩트 경로가 있는지 먼저 확인합니다.</p>
               <label>
@@ -170,9 +155,9 @@
             </label>
 
             <section class="run-plan-preview known-good-run-options" aria-label="Known-good and signature triage options">
-              <p class="eyebrow">file triage controls</p>
-              <h3>Known-good suppression and extension spoofing checks</h3>
-              <p class="help-text">Use a TXT/CSV/JSON MD5/SHA1/SHA256 feed to mark normal files. Signature mismatch checks run automatically and appear in the Files tab.</p>
+              <p class="eyebrow">파일 선별 옵션</p>
+              <h3>Known-good 제외와 확장자 위장 검사</h3>
+              <p class="help-text">TXT/CSV/JSON MD5·SHA1·SHA256 피드로 정상 파일을 표시합니다. 시그니처 불일치 검사는 자동으로 실행되어 Files 탭에 표시됩니다.</p>
               <label>
                 Known-good 해시 피드 경로
                 <textarea id="knownGoodHashFeedInput" name="knownGoodHashFeeds" rows="3" placeholder="/cases/feeds/nsrl-lite.csv&#10;/cases/feeds/company-whitelist.json"></textarea>
@@ -294,7 +279,10 @@
           </div>
           <label>
             분석 결과 폴더
-            <input id="importOutputInput" name="importOutputDir" placeholder="/cases/case-001/rapidtriage-run-fraud" />
+            <span class="path-input-row">
+              <input id="importOutputInput" name="importOutputDir" placeholder="/cases/case-001/rapidtriage-run-fraud" />
+              <button type="button" class="secondary-button path-browse-button" data-path-picker-for="#importOutputInput">찾아보기…</button>
+            </span>
           </label>
           <button id="importButton" type="submit">결과 불러오기</button>
         </form>

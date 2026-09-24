@@ -747,7 +747,7 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("knownGoodHashFeedInput", index_html)
         self.assertIn("hideKnownGoodInput", index_html)
         self.assertIn("knownGoodMaxHashMbInput", index_html)
-        self.assertIn("Known-good suppression and extension spoofing checks", index_html)
+        self.assertIn("Known-good 제외와 확장자 위장 검사", index_html)
         self.assertIn("parseKnownGoodHashFeeds", app_js)
         self.assertIn("knownGoodMaxHashBytes", app_js)
         self.assertIn("known_good_hash_feeds: parseKnownGoodHashFeeds()", app_js)
@@ -887,6 +887,63 @@ class RapidTriageWebStaticTests(unittest.TestCase):
 
         self.assertIn("initialWorkbenchHtml", app_js)
         self.assertIn("detailPanel.innerHTML = initialWorkbenchHtml", app_js)
+
+    def test_accessibility_contracts_for_tabs_palette_and_shortcuts(self) -> None:
+        index_html = (REPO_ROOT / "rapidtriage" / "web" / "static" / "index.html").read_text(encoding="utf-8")
+        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+        styles = (REPO_ROOT / "rapidtriage" / "web" / "static" / "styles.css").read_text(encoding="utf-8")
+
+        # Tab row exposes tablist semantics and selection state.
+        self.assertIn('role="tablist"', app_js)
+        self.assertIn('role="tab" aria-selected=', app_js)
+        self.assertIn('aria-controls="tabBody"', app_js)
+        self.assertIn('role="tabpanel"', app_js)
+        # Tab loads announce themselves through a status region.
+        self.assertIn('id="tabStatus" class="sr-only" role="status"', app_js)
+        # Command palette is a real modal: focus trap, focus restore,
+        # arrow-key option navigation, and aria-selected state.
+        self.assertIn("trapCommandPaletteTab", app_js)
+        self.assertIn("commandPaletteReturnFocus", app_js)
+        self.assertIn("moveCommandPaletteSelection", app_js)
+        self.assertIn('role="option"', app_js)
+        self.assertIn('aria-selected="${index === 0 ? "true" : "false"}"', app_js)
+        self.assertIn("commandPaletteIsOpen()", app_js)
+        # Space on a focused control must activate that control instead of
+        # being captured by the row-preview shortcut.
+        self.assertIn("isInteractiveTarget", app_js)
+        self.assertIn("!isInteractiveTarget(event.target)", app_js)
+        # apiStatus announces connection state changes to assistive tech.
+        self.assertIn('id="apiStatus" class="status-pill" role="button" tabindex="0" aria-live="polite"', index_html)
+        # Palette search input keeps a visible keyboard focus indicator.
+        self.assertIn("input:focus-visible", styles)
+
+    def test_path_picker_contract_for_evidence_and_import_inputs(self) -> None:
+        index_html = (REPO_ROOT / "rapidtriage" / "web" / "static" / "index.html").read_text(encoding="utf-8")
+        intake_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app_intake.js").read_text(encoding="utf-8")
+        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+
+        # Both path fields expose a browse control wired to the picker.
+        self.assertIn('data-path-picker-for="#rootInput"', index_html)
+        self.assertIn('data-path-picker-for="#importOutputInput"', index_html)
+        self.assertIn('data-path-picker-for="#outputInput"', index_html)
+        # The picker is a modal dialog with focus trap, focus restore,
+        # arrow-key navigation, and explicit folder selection.
+        self.assertIn('picker.id = "pathPicker"', intake_js)
+        self.assertIn('aria-modal', intake_js)
+        self.assertIn("trapPathPickerTab", intake_js)
+        self.assertIn("pickerReturnFocus", intake_js)
+        self.assertIn("movePathPickerSelection", intake_js)
+        self.assertIn("이 폴더 선택", intake_js)
+        # Buttons are bound at startup.
+        self.assertIn("bindPathPickerButtons()", app_js)
+        # Image/folder start choices open the picker instead of only focusing.
+        self.assertIn("openPathPicker(rootInput)", intake_js)
+        # Selecting an image in the picker auto-runs the support check and the
+        # status card discloses EWF segment-set continuity warnings.
+        self.assertIn("checkEvidenceSupport()", intake_js)
+        self.assertIn("renderE01SegmentSetNotice", app_js)
+        self.assertIn("segment_set_profile", app_js)
+        self.assertIn("세그먼트", app_js)
 
 
 if __name__ == "__main__":
