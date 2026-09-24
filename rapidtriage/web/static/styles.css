@@ -17733,3 +17733,13 @@ body.has-runs.intake-open .panel-section-title .new-case-button {
   --op-shadow: var(--rf-shadow);
   --op-shadow-soft: var(--rf-shadow-soft);
 }
+
+.path-picker-roots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.path-picker-roots[hidden] {
+  display: none;
+}

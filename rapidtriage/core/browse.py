@@ -36,6 +36,29 @@ class BrowseError(ValueError):
     """Raised when a browse path cannot be listed."""
 
 
+def list_roots() -> list[str]:
+    """Return filesystem roots the picker can jump between.
+
+    Windows needs real drive letters — ``C:\\`` has no parent so the up
+    button can never reach ``D:\\`` evidence. POSIX exposes a single root.
+    """
+    listdrives = getattr(os, "listdrives", None)
+    if listdrives is not None:
+        try:
+            drives = [str(drive) for drive in listdrives()]
+            if drives:
+                return drives
+        except OSError:
+            pass
+    if os.name == "nt":
+        return [
+            f"{letter}:\\"
+            for letter in "CDEFGHIJKLMNOPQRSTUVWXYZ"
+            if Path(f"{letter}:\\").exists()
+        ]
+    return [os.sep]
+
+
 def _is_evidence_candidate(path: Path) -> bool:
     suffix = path.suffix.lower()
     return suffix in EVIDENCE_FILE_SUFFIXES or suffix in _EXTRA_EWF_FAMILY
@@ -108,6 +131,7 @@ def browse_directory(
         "parent": str(parent) if parent != resolved else None,
         "home": str(Path.home()),
         "separator": os.sep,
+        "roots": list_roots(),
         "entries": rows,
         "entry_count": len(rows),
         "truncated": truncated,

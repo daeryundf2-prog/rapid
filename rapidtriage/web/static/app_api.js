@@ -46,3 +46,17 @@ export function setAuthToken(token) {
     // localStorage may be disabled; the console still reports the failure.
   }
 }
+
+// First-run handoff: the CLI prints http://host/#token=<token> so the
+// analyst does not have to copy anything. Fragments never reach the
+// server; read once, persist, and strip it from the address bar.
+try {
+  const fragment = new URLSearchParams(window.location.hash.slice(1));
+  const handoffToken = fragment.get("token");
+  if (handoffToken) {
+    setAuthToken(handoffToken);
+    window.history.replaceState(null, "", window.location.pathname + window.location.search);
+  }
+} catch {
+  // Non-critical: the token bar remains the manual path.
+}

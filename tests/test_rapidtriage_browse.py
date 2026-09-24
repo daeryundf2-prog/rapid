@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from rapidtriage.core.browse import BrowseError, browse_directory
+from rapidtriage.core.browse import BrowseError, browse_directory, list_roots
 
 
 class BrowseDirectoryTest(unittest.TestCase):
@@ -45,6 +45,15 @@ class BrowseDirectoryTest(unittest.TestCase):
             self.assertEqual(result["path"], str(Path(tmp).resolve()))
             with self.assertRaises(BrowseError):
                 browse_directory(str(Path(tmp) / "missing"))
+
+    def test_roots_are_returned_so_windows_picker_can_switch_drives(self) -> None:
+        # On Windows the picker must expose drive letters — a drive root has
+        # no parent so the up button alone can never reach another volume.
+        roots = list_roots()
+        self.assertTrue(roots)
+        with tempfile.TemporaryDirectory() as tmp:
+            result = browse_directory(tmp)
+            self.assertEqual(result["roots"], roots)
 
     def test_max_entries_truncates_and_discloses(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

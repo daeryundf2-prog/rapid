@@ -89,7 +89,8 @@ def run_web_server(
         auth_token = os.environ.get("RAPIDTRIAGE_AUTH_TOKEN") or secrets.token_urlsafe(32)
         os.environ["RAPIDTRIAGE_AUTH_TOKEN"] = auth_token
         print("RapidTriage API token required for /api routes.")
-        print(f"Set browser localStorage key rapidtriage.authToken to: {auth_token}")
+        print(f"Open this URL in a browser (it hands the token to the console once): http://{host}:{port}/#token={auth_token}")
+        print(f"Or paste this token into the console token field: {auth_token}")
     if allow_remote_without_auth:
         # uvicorn re-imports `rapidtriage.api.app:app` (module-scope
         # `app = create_app()`), so auth cannot be passed as an explicit flag;
@@ -108,6 +109,15 @@ def run_web_server(
         os.environ["RAPIDTRIAGE_AUTH_TOKEN"] = auth_token
     if crash_log_dir:
         os.environ["RAPIDTRIAGE_CRASH_LOG_DIR"] = str(Path(crash_log_dir).expanduser().resolve())
+    if host in loopback_hosts and not reload:
+        # First-run friction: open the console automatically. The #token=
+        # fragment is never sent over the wire; the page reads it once,
+        # stores it, and strips it from the address bar.
+        import threading
+        import webbrowser
+
+        fragment = f"/#token={auth_token}" if auth_token else ""
+        threading.Timer(1.2, lambda: webbrowser.open(f"http://{host}:{port}{fragment}")).start()
     uvicorn.run("rapidtriage.api.app:app", host=host, port=port, reload=reload)
     return 0
 

@@ -706,10 +706,11 @@ function ensurePathPicker() {
         <code class="path-picker-current" data-picker-current></code>
         <label class="inline-toggle"><input type="checkbox" data-picker-hidden /> 숨김 표시</label>
       </div>
+      <div class="path-picker-roots" data-picker-roots hidden></div>
       <div class="path-picker-list" role="listbox" aria-label="폴더와 파일 목록" data-picker-list></div>
       <div class="path-picker-footer">
         <button type="button" class="secondary-button" data-picker-home>홈 폴더</button>
-        <span class="help-text">폴더는 누르면 들어가고, 파일은 누르면 바로 선택됩니다.</span>
+        <span class="help-text">이 PC(분석 서버)의 폴더를 찾습니다. 폴더는 누르면 들어가고, 파일은 누르면 바로 선택됩니다.</span>
         <button type="button" data-picker-use-current>이 폴더 선택</button>
       </div>
     </div>
@@ -817,9 +818,28 @@ async function loadPathPickerDirectory(path) {
     picker.dataset.homePath = payload.home || "";
     picker.querySelector("[data-picker-current]").textContent = payload.path;
     picker.querySelector("[data-picker-up]").disabled = !payload.parent;
+    renderPathPickerRoots(payload.roots || []);
     renderPathPickerEntries(payload);
   } catch (error) {
     list.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
+  }
+}
+
+function renderPathPickerRoots(roots) {
+  const picker = ensurePathPicker();
+  const row = picker.querySelector("[data-picker-roots]");
+  if (!row) return;
+  if (roots.length <= 1) {
+    row.hidden = true;
+    row.innerHTML = "";
+    return;
+  }
+  row.hidden = false;
+  row.innerHTML = roots.map((root) => `
+    <button type="button" class="secondary-button path-picker-root" data-picker-root="${escapeHtml(root)}">${escapeHtml(root)}</button>
+  `).join("");
+  for (const button of row.querySelectorAll("[data-picker-root]")) {
+    button.addEventListener("click", () => loadPathPickerDirectory(button.dataset.pickerRoot));
   }
 }
 
