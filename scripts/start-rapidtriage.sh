@@ -82,17 +82,13 @@ if [ "$DOCTOR_ONLY" -eq 1 ]; then
   exit 0
 fi
 
-if [ "$NO_BROWSER" -eq 0 ]; then
-  step "Opening $WEB_URL"
-  if command -v open >/dev/null 2>&1; then
-    open "$WEB_URL" >/dev/null 2>&1 || true
-  elif command -v xdg-open >/dev/null 2>&1; then
-    xdg-open "$WEB_URL" >/dev/null 2>&1 || true
-  else
-    echo "Open this URL in your browser: $WEB_URL"
-  fi
+# The server opens the browser itself with a one-time token URL
+# (http://host:port/#token=...). Opening $WEB_URL here would race the
+# token handoff and land the analyst on a token wall.
+if [ "$NO_BROWSER" -eq 1 ]; then
+  export RAPIDTRIAGE_NO_BROWSER=1
 fi
 
 step "Starting rapidtriage web UI"
-echo "Press Ctrl+C in this terminal to stop the server."
+echo "The browser opens automatically with the API token. Press Ctrl+C in this terminal to stop the server."
 "$VENV_PYTHON" -m rapidtriage web --host "$HOST_NAME" --port "$PORT"

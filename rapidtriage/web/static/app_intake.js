@@ -710,7 +710,7 @@ function ensurePathPicker() {
       <div class="path-picker-list" role="listbox" aria-label="폴더와 파일 목록" data-picker-list></div>
       <div class="path-picker-footer">
         <button type="button" class="secondary-button" data-picker-home>홈 폴더</button>
-        <span class="help-text">이 PC(분석 서버)의 폴더를 찾습니다. 폴더는 누르면 들어가고, 파일은 누르면 바로 선택됩니다.</span>
+        <span class="help-text">이 PC(분석 서버)의 폴더를 찾습니다. 폴더는 누르면 들어가고, 파일은 누르면 바로 선택됩니다. 네트워크 드라이브는 매핑 후 보이고, 미매핑 경로는 직접 입력하세요.</span>
         <button type="button" data-picker-use-current>이 폴더 선택</button>
       </div>
     </div>

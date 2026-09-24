@@ -945,6 +945,25 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("segment_set_profile", app_js)
         self.assertIn("세그먼트", app_js)
 
+    def test_first_run_handoff_contracts(self) -> None:
+        index_html = (REPO_ROOT / "rapidtriage" / "web" / "static" / "index.html").read_text(encoding="utf-8")
+        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+        api_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app_api.js").read_text(encoding="utf-8")
+        intake_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app_intake.js").read_text(encoding="utf-8")
+
+        # One-time #token= fragment handoff: read once, persist, strip.
+        self.assertIn('fragment.get("token")', api_js)
+        self.assertIn("history.replaceState", api_js)
+        # Shortcut help is reachable without a keyboard: a visible button
+        # toggles a mounted help region and exposes aria-expanded.
+        self.assertIn('id="shortcutHelpButton"', index_html)
+        self.assertIn('id="shortcutHelpMount"', index_html)
+        self.assertIn("mountShortcutHelp()", app_js)
+        self.assertIn('aria-expanded', index_html)
+        # Windows analysts can switch drives — the picker renders root chips.
+        self.assertIn("data-picker-roots", intake_js)
+        self.assertIn("renderPathPickerRoots", intake_js)
+
 
 if __name__ == "__main__":
     unittest.main()

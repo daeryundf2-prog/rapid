@@ -75,12 +75,16 @@ if ($DoctorOnly) {
     exit 0
 }
 
-if (!$NoBrowser) {
-    Write-Step "Opening $WebUrl"
-    Start-Process $WebUrl
+# The server opens the browser itself with a one-time token URL
+# (http://host:port/#token=...). Opening $WebUrl here would race the
+# token handoff and land the analyst on a token wall.
+if ($NoBrowser) {
+    $env:RAPIDTRIAGE_NO_BROWSER = "1"
+} else {
+    Remove-Item Env:RAPIDTRIAGE_NO_BROWSER -ErrorAction SilentlyContinue
 }
 
 Write-Step "Starting rapidtriage web UI"
-Write-Host "Press Ctrl+C in this window to stop the server."
+Write-Host "The browser opens automatically with the API token. Press Ctrl+C in this window to stop the server."
 Invoke-VenvPython @("-m", "rapidtriage", "web", "--host", $HostName, "--port", "$Port")
 exit $LASTEXITCODE

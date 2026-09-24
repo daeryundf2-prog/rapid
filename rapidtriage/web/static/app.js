@@ -8874,9 +8874,21 @@ function isInteractiveTarget(target) {
 }
 
 function toggleShortcutHelp(forceOpen = null) {
-  const help = detailPanel.querySelector("#shortcutHelp");
-  if (!help) return;
-  help.open = forceOpen === null ? !help.open : Boolean(forceOpen);
+  const help = document.querySelector("#shortcutHelp");
+  const mount = document.querySelector("#shortcutHelpMount");
+  const button = document.querySelector("#shortcutHelpButton");
+  if (!help || !mount) return;
+  const opening = forceOpen === null ? !help.open : Boolean(forceOpen);
+  help.open = opening;
+  mount.hidden = !opening;
+  button?.setAttribute("aria-expanded", opening ? "true" : "false");
+}
+
+function mountShortcutHelp() {
+  const mount = document.querySelector("#shortcutHelpMount");
+  if (!mount) return;
+  mount.innerHTML = renderShortcutHelp();
+  document.querySelector("#shortcutHelpButton")?.addEventListener("click", () => toggleShortcutHelp());
 }
 
 async function openCaseSearch() {
@@ -9561,6 +9573,7 @@ restoreWorkbenchSession();
 bindRunFormPersistence();
 bindPathPickerButtons();
 bindMissionStrip();
+mountShortcutHelp();
 refreshRunPlanPreview();
 bindKeyboardShortcuts();
 checkHealth();

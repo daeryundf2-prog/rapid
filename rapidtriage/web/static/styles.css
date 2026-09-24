@@ -17743,3 +17743,7 @@ body.has-runs.intake-open .panel-section-title .new-case-button {
 .path-picker-roots[hidden] {
   display: none;
 }
+
+.shortcut-help-mount {
+  margin-top: 10px;
+}

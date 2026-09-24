@@ -109,7 +109,8 @@ def run_web_server(
         os.environ["RAPIDTRIAGE_AUTH_TOKEN"] = auth_token
     if crash_log_dir:
         os.environ["RAPIDTRIAGE_CRASH_LOG_DIR"] = str(Path(crash_log_dir).expanduser().resolve())
-    if host in loopback_hosts and not reload:
+    no_browser = os.environ.get("RAPIDTRIAGE_NO_BROWSER", "").strip().lower() in {"1", "true", "yes", "on"}
+    if host in loopback_hosts and not reload and not no_browser:
         # First-run friction: open the console automatically. The #token=
         # fragment is never sent over the wire; the page reads it once,
         # stores it, and strips it from the address bar.
