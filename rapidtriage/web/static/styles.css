@@ -4849,6 +4849,7 @@ body::before {
 
 .operator-badges span,
 .mission-strip span,
+.mission-strip button,
 .results-mode-pill {
   border: 1px solid rgba(19, 32, 43, 0.1);
   border-radius: 999px;
@@ -6120,7 +6121,8 @@ body.analysis-active .collect-plan-preview {
 
 }
 
-.mission-strip span {
+.mission-strip span,
+.mission-strip button {
   display: inline-flex;
   align-items: center;
 
@@ -17685,4 +17687,49 @@ body.has-runs.intake-open .panel-section-title .new-case-button {
 .e01-segment-notice ul {
   margin: 0;
   padding-left: 18px;
+}
+
+/* Mission strip: real step navigation, not a decorative banner. */
+.mission-strip button {
+  min-height: 34px;
+  border-color: rgba(19, 32, 43, 0.14);
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--command, #20303c);
+  box-shadow: none;
+}
+
+.mission-strip button:hover {
+  transform: none;
+  border-color: var(--accent, #0f766e);
+}
+
+.mission-strip button.active {
+  border-color: var(--accent, #0f766e);
+  background: var(--accent, #0f766e);
+  color: #fff;
+}
+
+/* Canonical token aliases: collapse the op-* generation onto --rf-*.
+   The palettes are near-identical; aliasing removes a third token family
+   so future edits touch one source of truth. Distinct roles (op-navy,
+   op-gold) stay on their own values. */
+:root {
+  --op-bg: var(--rf-bg);
+  --op-bg-warm: var(--rf-bg);
+  --op-surface: var(--rf-panel);
+  --op-surface-2: var(--rf-panel-soft);
+  --op-surface-3: var(--rf-primary-soft);
+  --op-ink: var(--rf-ink);
+  --op-ink-soft: var(--rf-ink-2);
+  --op-muted: var(--rf-muted);
+  --op-line: var(--rf-line);
+  --op-line-strong: var(--rf-line-strong);
+  --op-primary: var(--rf-primary);
+  --op-primary-strong: var(--rf-primary);
+  --op-primary-soft: var(--rf-primary-soft);
+  --op-red: var(--rf-danger);
+  --op-green: var(--rf-good);
+  --op-radius: var(--rf-radius);
+  --op-shadow: var(--rf-shadow);
+  --op-shadow-soft: var(--rf-shadow-soft);
 }

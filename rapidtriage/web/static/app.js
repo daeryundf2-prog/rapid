@@ -257,9 +257,11 @@ if (apiStatus) {
 }
 const newCaseButton = document.querySelector("#newCaseButton");
 if (newCaseButton) {
+  newCaseButton.setAttribute("aria-expanded", "false");
   newCaseButton.addEventListener("click", () => {
     const opening = !document.body.classList.contains("intake-open");
     document.body.classList.toggle("intake-open", opening);
+    newCaseButton.setAttribute("aria-expanded", opening ? "true" : "false");
     if (opening) {
       const rootInput = document.querySelector("#rootInput");
       rootInput?.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -305,6 +307,7 @@ function renderRunList(runs) {
   runList.innerHTML = "";
   document.body.classList.toggle("has-runs", Boolean(runs.length));
   document.body.classList.toggle("analysis-active", Boolean(selectedRunId));
+  updateMissionStrip();
   if (!runs.length) {
     runList.innerHTML = renderEmptyRunList();
     return;
@@ -2937,7 +2940,7 @@ function renderImageStageControlStatus(payload) {
     <section class="image-stage-control-card" data-testid="image-stage-control-contract" data-qc-prep-item="${escapeHtml(contract.qc_prep_item || 4)}">
       <div class="review-group-header">
         <div>
-          <p class="eyebrow">QC-prep #4 stage controls</p>
+          <p class="eyebrow">QC 준비 #4 단계 제어</p>
           <h3>Checkpoint, resume, cancel, retry</h3>
           <p>이미지 처리 단계가 어디까지 갔는지, 재개/취소/재시도 근거가 남았는지 확인합니다.</p>
         </div>
@@ -3470,7 +3473,7 @@ function renderCaseDbPanel(payload) {
   const defaultCaseId = selectedRunId ? `run-${selectedRunId}` : "CASE-001";
   return `
     <section class="guidance-card case-db-panel">
-      <p class="eyebrow">Case DB</p>
+      <p class="eyebrow">케이스 DB</p>
       <h3>검색 결과를 검토 기록으로 고정</h3>
       <p>JSON을 따로 가져오지 않아도 현재 실행 결과를 Case DB로 준비하고, 키워드 검색에서 선별 상태까지 이어갑니다.</p>
       <form id="caseDbImportForm" class="search-form">
@@ -3579,7 +3582,7 @@ function renderWorkflowGuide(summary) {
   return `
     <section class="guidance-card">
       <div>
-        <p class="eyebrow">recommended next steps</p>
+        <p class="eyebrow">추천 다음 단계</p>
         <h3>Search, inspect, then review evidence</h3>
       </div>
       <div class="step-list">
@@ -3721,7 +3724,7 @@ function renderIndicators(payload) {
   return `
     <section class="guidance-card">
       <div>
-        <p class="eyebrow">ioc review</p>
+        <p class="eyebrow">IOC 검토</p>
         <h3>URLs, domains, IPs, and hashes found across the run</h3>
       </div>
       <p>이 목록은 피벗 단서입니다. 매칭 규칙과 위험 플래그는 최종 귀속 판단이 아니므로, 보고 전 원본 행을 반드시 확인하세요.</p>
@@ -3950,7 +3953,7 @@ function renderArtifactValidationSummary(rows) {
   return `
     <section class="artifact-validation-summary" aria-label="Artifact validation summary" data-testid="artifact-validation-summary">
       <div>
-        <p class="eyebrow">artifact validation</p>
+        <p class="eyebrow">아티팩트 검증</p>
         <strong>${escapeHtml(summary.total)} row(s) · ${escapeHtml(summary.validationRequired)} need validation · ${escapeHtml(summary.notCommercialReady)} not commercial-ready</strong>
         <span>${escapeHtml(summary.reportable)} reportable row(s) · ${escapeHtml(summary.blockerTotal)} blocker reference(s)</span>
       </div>
@@ -4820,7 +4823,7 @@ function renderFileTriageSummary(payload) {
     <section class="file-triage-summary" data-testid="file-triage-summary">
       <div class="processing-summary-head">
         <div>
-          <p class="eyebrow">file triage</p>
+          <p class="eyebrow">파일 선별</p>
           <h3>Known-good suppression and extension spoofing</h3>
           <p class="help-text">정상 파일 숨김 여부와 확장자 위장 의심 파일을 여기서 바로 확인합니다.</p>
         </div>
@@ -5278,7 +5281,7 @@ function renderSearchFacets(payload, rows) {
   return `
     <section class="search-facet-panel" aria-label="Search result facets">
       <div>
-        <p class="eyebrow">review facets</p>
+        <p class="eyebrow">리뷰 필터</p>
         <h4>현재 결과를 바로 좁혀보기</h4>
         <p>Source나 artifact kind를 눌러 같은 검색 결과 안에서 빠르게 필터링합니다. 원본 검토 흐름은 유지됩니다.</p>
       </div>
@@ -5381,7 +5384,7 @@ function renderSearchAnalysis(analysis) {
   return `
     <section class="analysis-grid" aria-label="Search analysis pivots">
       <article class="analysis-card">
-        <p class="eyebrow">clusters</p>
+        <p class="eyebrow">클러스터</p>
         <h3>Review by repeated patterns</h3>
         ${clusters.length ? clusters.slice(0, 5).map((cluster) => `
           <button class="analysis-chip" type="button" data-filter="${escapeHtml(String(cluster.value || ""))}">
@@ -5391,7 +5394,7 @@ function renderSearchAnalysis(analysis) {
         `).join("") : '<p class="help-text">No repeated clusters yet.</p>'}
       </article>
       <article class="analysis-card">
-        <p class="eyebrow">entities</p>
+        <p class="eyebrow">엔터티</p>
         <h3>Pivot people, accounts, URLs</h3>
         ${entities.length ? entities.slice(0, 8).map((entity) => `
           <button class="entity-pill" type="button" data-filter="${escapeHtml(entity.value || "")}">
@@ -5400,7 +5403,7 @@ function renderSearchAnalysis(analysis) {
         `).join("") : '<p class="help-text">No entities extracted from current hits.</p>'}
       </article>
       <article class="analysis-card">
-        <p class="eyebrow">workbook</p>
+        <p class="eyebrow">워크북</p>
         <h3>Draft hypotheses</h3>
         ${hypotheses.length ? hypotheses.slice(0, 4).map((hypothesis) => `
           <details class="hypothesis-card">
@@ -5415,7 +5418,7 @@ function renderSearchAnalysis(analysis) {
         </p>
       </article>
       <article class="analysis-card">
-        <p class="eyebrow">dedupe</p>
+        <p class="eyebrow">중복 제거</p>
         <h3>Collapse repeated hits</h3>
         <div class="mini-stat-row">
           <span>${escapeHtml(dedupProfile.duplicate_group_count || 0)} groups</span>
@@ -5435,7 +5438,7 @@ function renderSearchAnalysis(analysis) {
         </p>
       </article>
       <article class="analysis-card">
-        <p class="eyebrow">graph / timeline</p>
+        <p class="eyebrow">그래프 / 시간축</p>
         <h3>Relationship scale</h3>
         <div class="mini-stat-row">
           <span>${escapeHtml(graphSummary.node_count || 0)} nodes</span>
@@ -5537,7 +5540,7 @@ function renderKnownGoodSearchSuppression(payload) {
   return `
     <section class="search-verification-card compact known-good-search-suppression" data-testid="known-good-search-suppression">
       <div>
-        <p class="eyebrow">known-good suppression</p>
+        <p class="eyebrow">known-good 제외</p>
         <h3>${profile.hide_known_good ? `${formatNumber(suppressed)} hidden` : `${formatNumber(known)} reviewable`} known-good / NSRL hit(s)</h3>
         <p>${escapeHtml(profile.reportability_note || "Known-good hits are triage noise controls, not evidence deletion.")}</p>
       </div>
@@ -6002,7 +6005,7 @@ function renderSqlitePreview(sqlite) {
         <article class="viewer-panel sqlite-table-card">
           <div class="viewer-header compact">
             <div>
-              <p class="eyebrow">sqlite table</p>
+              <p class="eyebrow">SQLite 테이블</p>
               <h3>${escapeHtml(table.name)}</h3>
             </div>
             <span class="status-pill">${escapeHtml(table.row_count ?? "unknown")} rows</span>
@@ -6056,7 +6059,7 @@ function renderSqliteSidecarState(profile) {
     <article class="sqlite-sidecar-card ${requiresReview ? "warning" : "ok"}" data-testid="sqlite-sidecar-state">
       <div class="viewer-header compact">
         <div>
-          <p class="eyebrow">sqlite sidecar state</p>
+          <p class="eyebrow">SQLite 사이드카 상태</p>
           <h3>WAL / SHM / rollback journal review</h3>
         </div>
         <span class="status-pill ${requiresReview ? "warning" : "ok"}">${requiresReview ? "review required" : "none detected"}</span>
@@ -6727,7 +6730,7 @@ function renderCurrentFileSearchProfile(payload) {
   return `
     <section class="current-file-search-profile ${controls.truncated ? "warning" : ""}" data-testid="current-file-search-profile" data-current-file-search-contract="${escapeHtml(CURRENT_FILE_SEARCH_CONTRACT.profile_version)}">
       <div>
-        <p class="eyebrow">current-file search</p>
+        <p class="eyebrow">현재 파일 검색</p>
         <strong>${escapeHtml(profile.searchable ? "Searchable source" : "Search limited or blocked")}</strong>
         <span>${escapeHtml(profile.reportability_decision?.allowed_use || "verification pivot")}</span>
       </div>
@@ -6962,7 +6965,7 @@ function renderSelectedRowInspector(payload) {
   const chips = Array.from(new Set((payload.chips || []).filter(Boolean))).slice(0, 8);
   return `
     <section class="selected-row-inspector" data-testid="selected-row-inspector">
-      <p class="eyebrow">selected evidence</p>
+      <p class="eyebrow">선택된 증거</p>
       <strong>${escapeHtml(payload.title || "선택된 결과")}</strong>
       <span>${escapeHtml(payload.preview || "행을 선택했습니다. 아래 원본 경로와 리뷰 동작을 확인하세요.")}</span>
       <dl>
@@ -7079,7 +7082,7 @@ function renderReviewBoard(payload) {
     return `
       ${renderReviewStateDashboard([], {})}
       <section class="guidance-card">
-        <p class="eyebrow">review board</p>
+        <p class="eyebrow">리뷰 보드</p>
         <h3>No reviewed evidence yet</h3>
         <p>검색 결과를 원본 뷰어에서 확인한 뒤 선별 상태를 저장하면 이 보드에 누적됩니다.</p>
         <div class="guidance-actions">
@@ -7093,7 +7096,7 @@ function renderReviewBoard(payload) {
     return `
       ${renderReviewStateDashboard([], summary)}
       <section class="guidance-card">
-        <p class="eyebrow">review board</p>
+        <p class="eyebrow">리뷰 보드</p>
         <h3>No reviewed evidence yet</h3>
         <p>Classify search hits as relevant, needs review, or not relevant to build this board.</p>
         <div class="guidance-actions">
@@ -7253,7 +7256,7 @@ function renderCaseReportPanel(summary, casePayload) {
   return `
     <section class="guidance-card">
       <div>
-        <p class="eyebrow">report drafting</p>
+        <p class="eyebrow">보고서 작성</p>
         <h3>Write a submission-style investigation report</h3>
       </div>
       <p>Creates rapidtriage-case-report.md from case metadata, reviewed evidence, analyst notes, and the submission hash manifest.</p>
@@ -8409,7 +8412,7 @@ function renderCaseDbSavedSearches(savedSearches) {
   return `
     <div class="review-group-header">
       <div>
-        <p class="eyebrow">saved searches</p>
+        <p class="eyebrow">저장된 검색</p>
         <h3>Repeat useful searches without retyping</h3>
       </div>
       <span class="status-pill">${savedSearches.length}</span>
@@ -8989,6 +8992,7 @@ export async function switchTab(tab, options = {}) {
     restoreWorkbenchControls();
     persistWorkbenchSession();
     await renderActiveTab();
+    updateMissionStrip();
     return;
   }
   for (const item of detailPanel.querySelectorAll(".tab-button")) {
@@ -9000,6 +9004,7 @@ export async function switchTab(tab, options = {}) {
   refreshSourceNavigatorState();
   updateSideStagePanel();
   persistWorkbenchSession();
+  updateMissionStrip();
 }
 
 function viewGroupById(groupId) {
@@ -9012,6 +9017,52 @@ function tabsForGroup(groupId) {
 
 export function groupForTab(tab) {
   return VIEW_GROUPS.find((group) => group.tabs.includes(tab))?.id || "triage";
+}
+
+// Mission strip: reflect the current stage and let each step navigate.
+const MISSION_STEP_FOR_GROUP = {
+  intake: 0,
+  triage: 1,
+  artifact: 1,
+  timeline: 1,
+  documents: 2,
+  review: 3,
+  deliver: 4,
+};
+
+const MISSION_STEP_TARGET = [
+  { group: "intake", tab: "summary" },
+  { group: "triage", tab: "search" },
+  { group: "documents", tab: "docs" },
+  { group: "review", tab: "review" },
+  { group: "deliver", tab: "report" },
+];
+
+function updateMissionStrip() {
+  const strip = document.querySelector(".mission-strip");
+  if (!strip) return;
+  const step = selectedRunId ? (MISSION_STEP_FOR_GROUP[activeViewGroup] ?? 1) : 0;
+  for (const button of strip.querySelectorAll("[data-mission-step]")) {
+    const active = Number(button.dataset.missionStep) === step;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-current", active ? "step" : "false");
+  }
+}
+
+function bindMissionStrip() {
+  for (const button of document.querySelectorAll(".mission-strip [data-mission-step]")) {
+    button.addEventListener("click", async () => {
+      const step = Number(button.dataset.missionStep);
+      if (step === 0 && !selectedRunId) {
+        document.querySelector("#rootInput")?.scrollIntoView({ block: "center", behavior: "smooth" });
+        document.querySelector("#rootInput")?.focus();
+        return;
+      }
+      if (!selectedRunId) return;
+      const target = MISSION_STEP_TARGET[step];
+      if (target) await switchTab(target.tab, { syncStage: true });
+    });
+  }
 }
 
 function pagedUrl(tab) {
@@ -9153,7 +9204,7 @@ sampleRunButton?.addEventListener("click", async () => {
   sampleRunButton.textContent = "샘플 생성 중...";
   detailPanel.innerHTML = `
     <section class="empty-state-card">
-      <p class="eyebrow">sample case</p>
+      <p class="eyebrow">샘플 케이스</p>
       <h3>Creating a safe practice case</h3>
       <p>샘플 증거를 만들고 read-only triage를 실행하는 중입니다. 보통 몇 초 안에 완료됩니다.</p>
     </section>
@@ -9213,7 +9264,7 @@ function renderCrashReportsPanel(payload) {
     <section class="guidance-card crash-dashboard" data-testid="crash-dashboard">
       <div class="review-group-header">
         <div>
-          <p class="eyebrow">local-only crash reporting</p>
+          <p class="eyebrow">로컬 전용 크래시 리포트</p>
           <h3>Crash export dashboard</h3>
           <p>자동 업로드 없이 로컬 JSON만 읽습니다. 필요한 항목은 ZIP export로 묶어 운영자가 직접 전달합니다.</p>
         </div>
@@ -9285,7 +9336,7 @@ function renderE01SegmentSetNotice(profile) {
 
 function renderE01IngestWorkflow(workflow) {
   if (!workflow) return "";
-  const e01WorkflowLabel = "Starting E01 workflow";
+  const e01WorkflowLabel = "E01 처리 시작";
   const stages = workflow.stages || [];
   return `
     <section class="e01-workflow-panel">
@@ -9330,7 +9381,7 @@ function renderVscWorkflowHandoff(handoff) {
     <section class="vsc-handoff-card" data-testid="vsc-workflow-handoff" data-qc-prep-item="${escapeHtml(handoff.qc_prep_item || 3)}">
       <div class="review-group-header">
         <div>
-          <p class="eyebrow">QC-prep #3 VSC handoff</p>
+          <p class="eyebrow">QC 준비 #3 VSC 인계</p>
           <strong>Shadow copy discovery → compare → extract</strong>
           <span>${escapeHtml(handoff.goal || "")}</span>
         </div>
@@ -9371,7 +9422,7 @@ function renderE01PartitionBrowser(browser) {
     <section class="e01-partition-browser" data-testid="e01-partition-browser" data-qc-prep-item="${escapeHtml(browser.qc_prep_item || 2)}">
       <div class="review-group-header">
         <div>
-          <p class="eyebrow">QC-prep #2 partition browser</p>
+          <p class="eyebrow">QC 준비 #2 파티션 브라우저</p>
           <strong>E01 partition choice</strong>
           <span>${escapeHtml(browser.goal || "Review mmls partitions before extraction.")}</span>
         </div>
@@ -9432,7 +9483,7 @@ function renderE01HandoffContract(contract) {
   return `
     <section class="e01-handoff-card" data-testid="e01-end-to-end-handoff" data-qc-prep-item="${escapeHtml(contract.qc_prep_item || 1)}">
       <div>
-        <p class="eyebrow">QC-prep #1 handoff</p>
+        <p class="eyebrow">QC 준비 #1 인계</p>
         <strong>Evidence → run → search → review → report</strong>
         <span>${escapeHtml(contract.goal || "")}</span>
       </div>
@@ -9509,6 +9560,7 @@ hydrateRunForm();
 restoreWorkbenchSession();
 bindRunFormPersistence();
 bindPathPickerButtons();
+bindMissionStrip();
 refreshRunPlanPreview();
 bindKeyboardShortcuts();
 checkHealth();

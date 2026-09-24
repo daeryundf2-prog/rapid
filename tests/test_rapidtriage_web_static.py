@@ -91,7 +91,7 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         styles = (REPO_ROOT / "rapidtriage" / "web" / "static" / "styles.css").read_text(encoding="utf-8")
 
         self.assertIn("renderSearchFacets", app_js)
-        self.assertIn("review facets", app_js)
+        self.assertIn("리뷰 필터", app_js)
         self.assertIn("search-facet-chip[data-filter]", app_js)
         self.assertIn("aria-label=\"Filter results by", app_js)
         self.assertIn("search-facet-panel", styles)

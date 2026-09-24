@@ -299,12 +299,12 @@
             <button id="refreshButton" type="button">새로고침</button>
           </div>
         </div>
-        <div class="mission-strip" aria-label="Review workflow reminder" data-testid="five-step-mission-strip">
-          <span><strong>1</strong> 접수</span>
-          <span><strong>2</strong> 탐색</span>
-          <span><strong>3</strong> 검토</span>
-          <span><strong>4</strong> 선별</span>
-          <span><strong>5</strong> 보고</span>
+        <div class="mission-strip" role="navigation" aria-label="검토 단계 이동" data-testid="five-step-mission-strip">
+          <button type="button" data-mission-step="0"><strong>1</strong> 접수</button>
+          <button type="button" data-mission-step="1"><strong>2</strong> 탐색</button>
+          <button type="button" data-mission-step="2"><strong>3</strong> 검토</button>
+          <button type="button" data-mission-step="3"><strong>4</strong> 선별</button>
+          <button type="button" data-mission-step="4"><strong>5</strong> 보고</button>
         </div>
         <div id="detailPanel" class="detail-panel" data-testid="detail-panel">
           <section class="empty-state workbench-empty-state operator-empty-state">
@@ -313,6 +313,7 @@
                 <p class="eyebrow">새 케이스 시작</p>
                 <h2>이미지 증거를 넣으면 분석 가능 여부부터 확인합니다.</h2>
                 <p>E01/Ex01, RAW, VHDX, DMG, ZIP, 추출 폴더를 같은 흐름으로 받습니다. 이후 키워드 검색, 원본 검토, 증거 선별, 보고서 후보 정리까지 하나의 콘솔에서 이어집니다.</p>
+                <p class="help-text">키보드 <kbd>?</kbd> 를 누르면 단축키 도움말이 열립니다.</p>
                 <div class="empty-state-actions" aria-label="Start actions">
                   <button type="button" data-intake-action="e01">이미지/E01 선택</button>
                   <button class="secondary-button" type="button" data-intake-action="folder">Export 폴더 연결</button>
