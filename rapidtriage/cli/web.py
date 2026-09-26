@@ -82,14 +82,14 @@ def run_web_server(
         raise RuntimeError("rapidtriage web requires the 'web' extra: pip install 'rapidtriage[web]'") from exc
     if disable_auth:
         os.environ.pop("RAPIDTRIAGE_AUTH_TOKEN", None)
-        print("RapidTriage API authentication DISABLED for this local session.")
+        print("RapidTriage API authentication DISABLED for this local session.", flush=True)
     elif not auth_token and not allow_remote_without_auth:
         import secrets
 
         auth_token = os.environ.get("RAPIDTRIAGE_AUTH_TOKEN") or secrets.token_urlsafe(32)
         os.environ["RAPIDTRIAGE_AUTH_TOKEN"] = auth_token
-        print("RapidTriage API token required for /api routes.")
-        print(f"Set browser localStorage key rapidtriage.authToken to: {auth_token}")
+        print("RapidTriage API token required for /api routes.", flush=True)
+        print(f"Set browser localStorage key rapidtriage.authToken to: {auth_token}", flush=True)
     if allow_remote_without_auth:
         # uvicorn re-imports `rapidtriage.api.app:app` (module-scope
         # `app = create_app()`), so auth cannot be passed as an explicit flag;
@@ -103,7 +103,7 @@ def run_web_server(
                 "Use --auth-token unless you fully control the network segment.",
                 file=sys.stderr,
             )
-    print(f"Starting rapidtriage web UI at http://{host}:{port}")
+    print(f"Starting rapidtriage web UI at http://{host}:{port}", flush=True)
     if auth_token:
         os.environ["RAPIDTRIAGE_AUTH_TOKEN"] = auth_token
     if crash_log_dir:

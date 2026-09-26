@@ -45,6 +45,7 @@ class BookmarkCreateRequest(BaseModel):
     bookmark_id: str | None = None
     tag: str | None = None
     tags: list[str] | None = None
+    remove_tags: list[str] | None = None
     note: str | None = None
     case_id: str | None = None
     title: str | None = None

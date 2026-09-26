@@ -23,6 +23,8 @@ from ...core.jobs import (
 )
 from ...core.visible_capabilities import build_visible_capability_response
 from .helpers import (
+    default_case_path,
+    enrich_summary_counts,
     get_job,
     get_job_payload,
     get_named_output,
@@ -41,6 +43,8 @@ from .runops import (
     build_run_output_preview,
     build_run_viewer_workflow_validation,
 )
+from .timeline_hist import build_timeline_histogram
+from .tree import build_run_issues, build_run_tree
 
 
 def build_runs_router(
@@ -123,7 +127,11 @@ def build_runs_router(
         job = get_job(store, run_id)
         if job.summary is None:
             raise HTTPException(status_code=409, detail="run is not completed")
-        return job.summary
+        try:
+            case_path = default_case_path(store, run_id)
+        except HTTPException:
+            case_path = None
+        return enrich_summary_counts(job.summary, case_path=case_path)
 
 
     @router.get("/api/runs/{run_id}/capabilities")
@@ -183,6 +191,16 @@ def build_runs_router(
         return FileResponse(path, filename=path.name)
 
 
+    @router.get("/api/runs/{run_id}/tree")
+    def get_run_tree(run_id: str) -> dict[str, object]:
+        return build_run_tree(store, run_id)
+
+
+    @router.get("/api/runs/{run_id}/issues")
+    def get_run_issues(run_id: str) -> dict[str, object]:
+        return build_run_issues(store, run_id)
+
+
     @router.get("/api/runs/{run_id}/timeline")
     def get_run_timeline(
         run_id: str,
@@ -192,6 +210,12 @@ def build_runs_router(
     ) -> dict[str, object]:
         payload = get_named_output(store, run_id, "timeline")
         return paginate_payload(payload, "events", offset=offset, limit=limit, cursor=cursor)
+
+
+    @router.get("/api/runs/{run_id}/timeline-histogram")
+    def get_run_timeline_histogram(run_id: str) -> dict[str, object]:
+        payload = get_named_output(store, run_id, "timeline")
+        return build_timeline_histogram(payload)
 
 
     @router.get("/api/runs/{run_id}/indicators")

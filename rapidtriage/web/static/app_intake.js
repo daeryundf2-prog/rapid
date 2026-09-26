@@ -14,17 +14,19 @@ import {
   PROCESSING_PROFILES,
   RUN_FORM_STORAGE_KEY,
   RUN_MODE_COLLECTORS,
-  collectPlanButton,
-  detailPanel,
-  doctorButton,
-  evidenceCheckButton,
-  evidenceCheckStatus,
-  renderEvidenceCheckStatus,
-  runButton,
-  runForm,
-  sampleRunButton,
-  switchTab,
-} from "./app.js";
+} from "./app_workbench_config.js";
+import { workbenchInvoke } from "./app_store.js";
+
+const detailPanelEl = () => workbenchInvoke("detailPanel");
+const collectPlanButton = (...args) => workbenchInvoke("collectPlanButton", ...args);
+const doctorButton = (...args) => workbenchInvoke("doctorButton", ...args);
+const evidenceCheckButton = (...args) => workbenchInvoke("evidenceCheckButton", ...args);
+const evidenceCheckStatus = (...args) => workbenchInvoke("evidenceCheckStatus", ...args);
+const renderEvidenceCheckStatus = (...args) => workbenchInvoke("renderEvidenceCheckStatus", ...args);
+const runButton = (...args) => workbenchInvoke("runButton", ...args);
+const runFormEl = () => workbenchInvoke("runForm");
+const runSampleCase = (...args) => workbenchInvoke("runSampleCase", ...args);
+const switchTab = (...args) => workbenchInvoke("switchTab", ...args);
 
 export function hydrateRunForm() {
   if (!storageAvailable()) return;
@@ -137,7 +139,7 @@ export function applyStartChoice(action) {
   } else if (action === "recent") {
     document.querySelector("#importOutputInput")?.focus();
   } else if (action === "sample") {
-    sampleRunButton?.click();
+    void runSampleCase();
   } else if (action === "qc") {
     doctorButton?.click();
   }
@@ -452,9 +454,9 @@ export function shellQuote(value) {
 }
 
 export function bindCrashReportActions() {
-  detailPanel.querySelectorAll("[data-crash-detail]").forEach((button) => {
+  detailPanelEl().querySelectorAll("[data-crash-detail]").forEach((button) => {
     button.addEventListener("click", async () => {
-      const target = detailPanel.querySelector("#crashReportDetail");
+      const target = detailPanelEl().querySelector("#crashReportDetail");
       try {
         const payload = await api(`/api/crash-reports/${encodeURIComponent(button.dataset.crashDetail || "")}`);
         const report = payload.payload || {};
@@ -474,9 +476,9 @@ export function bindCrashReportActions() {
       }
     });
   });
-  detailPanel.querySelectorAll("[data-crash-export]").forEach((button) => {
+  detailPanelEl().querySelectorAll("[data-crash-export]").forEach((button) => {
     button.addEventListener("click", async () => {
-      const target = detailPanel.querySelector("#crashReportDetail");
+      const target = detailPanelEl().querySelector("#crashReportDetail");
       try {
         const payload = await api(`/api/crash-reports/${encodeURIComponent(button.dataset.crashExport || "")}/export`, {
           method: "POST",
@@ -538,7 +540,7 @@ export function bindEvidenceCheckActions() {
       const inputKindInput = document.querySelector("#inputKindInput");
       if (inputKindInput) inputKindInput.value = "e01-derived";
       updateRunSubmissionCta(document.querySelector("#rootInput")?.value || "", document.querySelector("#processingProfileInput")?.value || "fast");
-      runForm?.requestSubmit();
+      runFormEl()?.requestSubmit();
     });
   }
   bindE01PartitionControls(evidenceCheckStatus);

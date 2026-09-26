@@ -68,6 +68,19 @@ from tests.test_rapidtriage_run import build_run_fixture
 from tests.windows_artifact_fixtures import build_windows_artifact_fixture
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# R3-2: console bundle = app.js + extracted screen/feature modules.
+_STATIC_DIR = REPO_ROOT / "rapidtriage" / "web" / "static"
+APP_JS_BUNDLE = "\n".join(
+    path.read_text(encoding="utf-8")
+    for path in sorted(_STATIC_DIR.glob("app*.js"))
+)
+
+# R3-3: screen styles live in per-screen stylesheets loaded after styles.css.
+STYLES_BUNDLE = "\n".join(
+    path.read_text(encoding="utf-8")
+    for path in sorted(_STATIC_DIR.glob("*.css"))
+)
 TEST_API_TOKEN = "rapidtriage-test-token"
 
 
@@ -812,11 +825,11 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertTrue(run_payload["summary"]["run_bound"])
 
     def test_web_console_exposes_maestro_style_artifact_workbench(self) -> None:
-        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+        app_js = APP_JS_BUNDLE
         config_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app_workbench_config.js").read_text(encoding="utf-8")
         state_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app_state.js").read_text(encoding="utf-8")
         index_html = (REPO_ROOT / "rapidtriage" / "web" / "static" / "index.html").read_text(encoding="utf-8")
-        styles = (REPO_ROOT / "rapidtriage" / "web" / "static" / "styles.css").read_text(encoding="utf-8")
+        styles = STYLES_BUNDLE
 
         self.assertIn('/assets/app_workbench_config.js', index_html)
         self.assertIn('/assets/app_state.js', index_html)
@@ -1177,9 +1190,9 @@ class RapidTriageApiTests(unittest.TestCase):
 
     def test_workbench_smoke_contract_exposes_browser_test_flow(self) -> None:
         client = api_test_client(RunJobStore())
-        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+        app_js = APP_JS_BUNDLE
         index_html = (REPO_ROOT / "rapidtriage" / "web" / "static" / "index.html").read_text(encoding="utf-8")
-        styles = (REPO_ROOT / "rapidtriage" / "web" / "static" / "styles.css").read_text(encoding="utf-8")
+        styles = STYLES_BUNDLE
 
         response = client.get("/api/workbench/smoke-contract")
 

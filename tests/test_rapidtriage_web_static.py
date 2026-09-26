@@ -12,9 +12,45 @@ from rapidtriage.core.visible_capabilities import (
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
+def _read_static(name: str) -> str:
+    return (REPO_ROOT / "rapidtriage" / "web" / "static" / name).read_text(encoding="utf-8")
+
+
+# R3-2: screen renderers live in dedicated modules; static contract checks treat
+# the bundle (app.js + extracted modules) as the console source of truth.
+APP_JS_BUNDLE = "\n".join(
+    _read_static(name)
+    for name in (
+        "app.js",
+        "app_case_header.js",
+        "app_artifact_grid.js",
+        "app_timeline_view.js",
+        "app_detail_panel.js",
+        "app_intake.js",
+        "app_state.js",
+        "app_store.js",
+    )
+)
+
+# R3-3: screen styles live in per-screen stylesheets loaded after styles.css.
+STYLES_BUNDLE = "\n".join(
+    _read_static(name)
+    for name in (
+        "styles.css",
+        "case_header.css",
+        "artifact_grid.css",
+        "timeline_view.css",
+        "detail_panel.css",
+        "kakao.css",
+        "hexview.css",
+        "heatmap.css",
+    )
+)
+
+
 class RapidTriageWebStaticTests(unittest.TestCase):
     def test_web_artifact_workbench_exposes_ntfs_replay_review_cards(self) -> None:
-        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+        app_js = APP_JS_BUNDLE
 
         self.assertIn("ntfsArtifactPreviewText", app_js)
         self.assertIn("renderNtfsReplayPreviewArtifactCard", app_js)
@@ -48,8 +84,8 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("Court-grade rename/delete replay still requires full-journal ordering", app_js)
 
     def test_web_workbench_exposes_run_validation_diff_inventory_panel(self) -> None:
-        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
-        styles = (REPO_ROOT / "rapidtriage" / "web" / "static" / "styles.css").read_text(encoding="utf-8")
+        app_js = APP_JS_BUNDLE
+        styles = STYLES_BUNDLE
 
         self.assertIn("data-testid=\"run-validation-diff-panel\"", app_js)
         self.assertIn("loadRunValidationPackageSummary", app_js)
@@ -65,8 +101,8 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("compact-dl", styles)
 
     def test_web_workbench_exposes_mac_first_evidence_detail_rows(self) -> None:
-        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
-        styles = (REPO_ROOT / "rapidtriage" / "web" / "static" / "styles.css").read_text(encoding="utf-8")
+        app_js = APP_JS_BUNDLE
+        styles = STYLES_BUNDLE
 
         self.assertIn("MAC_FIRST_EVIDENCE_STORAGE_KEY", app_js)
         self.assertIn("bindMacFirstEvidenceControls", app_js)
@@ -87,8 +123,8 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("mac-first-evidence-controls", styles)
 
     def test_search_results_expose_review_facets_for_fast_triage(self) -> None:
-        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
-        styles = (REPO_ROOT / "rapidtriage" / "web" / "static" / "styles.css").read_text(encoding="utf-8")
+        app_js = APP_JS_BUNDLE
+        styles = STYLES_BUNDLE
 
         self.assertIn("renderSearchFacets", app_js)
         self.assertIn("review facets", app_js)
@@ -98,11 +134,11 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("search-facet-chip", styles)
 
     def test_workbench_review_queue_and_schema_visibility_contracts(self) -> None:
-        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+        app_js = APP_JS_BUNDLE
         config_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app_workbench_config.js").read_text(encoding="utf-8")
         state_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app_state.js").read_text(encoding="utf-8")
         index_html = (REPO_ROOT / "rapidtriage" / "web" / "static" / "index.html").read_text(encoding="utf-8")
-        styles = (REPO_ROOT / "rapidtriage" / "web" / "static" / "styles.css").read_text(encoding="utf-8")
+        styles = STYLES_BUNDLE
 
         self.assertIn('/assets/app_workbench_config.js', index_html)
         self.assertIn('/assets/app_state.js', index_html)
@@ -112,8 +148,12 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("function persistWorkbenchSession", state_js)
         self.assertIn("activeStageId,", state_js)
         self.assertIn("activeStageSubactionId,", state_js)
-        self.assertIn("activeStageId = payload.activeStageId || \"\";", state_js)
-        self.assertIn("activeStageSubactionId = payload.activeStageSubactionId || \"\";", state_js)
+        self.assertIn('payload.activeStageId || ""', state_js)
+        self.assertIn('payload.activeStageSubactionId || ""', state_js)
+        # R3-1: app_state must not import mutable live bindings from app.js —
+        # shared state goes through the app_store.js contract instead.
+        self.assertNotIn('from "./app.js"', state_js)
+        self.assertIn('from "./app_store.js"', state_js)
         self.assertIn("let activeStageId = \"\";", app_js)
         self.assertIn("let activeStageSubactionId = \"\";", app_js)
         self.assertIn("function stageIdForTab", app_js)
@@ -211,9 +251,9 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("docs-index-sidecar-search", styles)
 
     def test_forensic_operator_layout_exposes_available_features_without_stage_coupling(self) -> None:
-        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+        app_js = APP_JS_BUNDLE
         config_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app_workbench_config.js").read_text(encoding="utf-8")
-        styles = (REPO_ROOT / "rapidtriage" / "web" / "static" / "styles.css").read_text(encoding="utf-8")
+        styles = STYLES_BUNDLE
 
         self.assertIn("FEATURE_PLACEMENT_CONTRACT", config_js)
         self.assertIn("forensic-feature-placement-contract-v1", config_js)
@@ -383,9 +423,9 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("Priority 1 forensic operator layout", styles)
 
     def test_lazyweb_command_center_is_connected_to_workbench_tabs(self) -> None:
-        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+        app_js = APP_JS_BUNDLE
         config_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app_workbench_config.js").read_text(encoding="utf-8")
-        styles = (REPO_ROOT / "rapidtriage" / "web" / "static" / "styles.css").read_text(encoding="utf-8")
+        styles = STYLES_BUNDLE
 
         self.assertIn("LAZYWEB_WORKBENCH_MODEL", config_js)
         self.assertIn("lazyweb-command-center-model-v1", config_js)
@@ -407,9 +447,9 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("body.analysis-active .lazyweb-command-center", styles)
 
     def test_forensic_feature_catalog_makes_available_functions_discoverable(self) -> None:
-        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+        app_js = APP_JS_BUNDLE
         config_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app_workbench_config.js").read_text(encoding="utf-8")
-        styles = (REPO_ROOT / "rapidtriage" / "web" / "static" / "styles.css").read_text(encoding="utf-8")
+        styles = STYLES_BUNDLE
 
         self.assertIn("FORENSIC_FEATURE_CATALOG", config_js)
         self.assertIn("증거 입력 / 케이스", config_js)
@@ -437,9 +477,9 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn(".developer-diagnostics-drawer:not([open]) .forensic-feature-catalog", styles)
 
     def test_hidden_forensic_capabilities_are_exposed_as_visible_steps(self) -> None:
-        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+        app_js = APP_JS_BUNDLE
         config_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app_workbench_config.js").read_text(encoding="utf-8")
-        styles = (REPO_ROOT / "rapidtriage" / "web" / "static" / "styles.css").read_text(encoding="utf-8")
+        styles = STYLES_BUNDLE
 
         self.assertIn("VISIBLE_FORENSIC_CAPABILITY_GROUPS", config_js)
         self.assertIn("VISIBLE_CAPABILITY_STATUS_LABELS", config_js)
@@ -650,10 +690,10 @@ class RapidTriageWebStaticTests(unittest.TestCase):
                 self.assertTrue(capability["gui_surfaces"])
 
     def test_core_six_step_evidence_workflow_is_visually_primary(self) -> None:
-        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+        app_js = APP_JS_BUNDLE
         config_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app_workbench_config.js").read_text(encoding="utf-8")
         index_html = (REPO_ROOT / "rapidtriage" / "web" / "static" / "index.html").read_text(encoding="utf-8")
-        styles = (REPO_ROOT / "rapidtriage" / "web" / "static" / "styles.css").read_text(encoding="utf-8")
+        styles = STYLES_BUNDLE
 
         self.assertIn("CORE_EVIDENCE_WORKFLOW", config_js)
         for expected in [
@@ -717,14 +757,14 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("body.analysis-active .completed-core-workflow", styles)
 
     def test_docs_tab_discloses_skipped_extraction_errors(self) -> None:
-        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+        app_js = APP_JS_BUNDLE
 
         self.assertIn("payload.extraction_errors", app_js)
         self.assertIn("document(s) skipped during text extraction", app_js)
         self.assertIn("Search continued; review the skipped list", app_js)
 
     def test_search_tab_discloses_document_extraction_errors(self) -> None:
-        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+        app_js = APP_JS_BUNDLE
 
         self.assertIn("payload.documents?.errors", app_js)
         self.assertIn("renderDocumentErrors", app_js)
@@ -732,17 +772,17 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("Search coverage is partial for these documents", app_js)
 
     def test_case_db_search_discloses_document_extraction_errors(self) -> None:
-        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+        app_js = APP_JS_BUNDLE
 
         self.assertIn("const documentErrors = payload.documents?.errors || [];", app_js)
         self.assertIn("metric(\"Document errors\", payload.summary?.document_error_count)", app_js)
         self.assertIn("renderDocumentErrors(documentErrors)", app_js)
 
     def test_file_triage_controls_are_exposed_in_gui_and_files_tab(self) -> None:
-        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+        app_js = APP_JS_BUNDLE
         index_html = (REPO_ROOT / "rapidtriage" / "web" / "static" / "index.html").read_text(encoding="utf-8")
         workbench_config = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app_workbench_config.js").read_text(encoding="utf-8")
-        styles = (REPO_ROOT / "rapidtriage" / "web" / "static" / "styles.css").read_text(encoding="utf-8")
+        styles = STYLES_BUNDLE
 
         self.assertIn("knownGoodHashFeedInput", index_html)
         self.assertIn("hideKnownGoodInput", index_html)
@@ -766,9 +806,9 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn(".file-triage-table tr.risk-row", styles)
 
     def test_command_palette_connects_lazyweb_actions_to_forensic_workbench(self) -> None:
-        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+        app_js = APP_JS_BUNDLE
         config_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app_workbench_config.js").read_text(encoding="utf-8")
-        styles = (REPO_ROOT / "rapidtriage" / "web" / "static" / "styles.css").read_text(encoding="utf-8")
+        styles = STYLES_BUNDLE
 
         self.assertIn("quick_actions", config_js)
         self.assertIn("Filter visible rows", config_js)
@@ -789,7 +829,7 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("body.analysis-active .command-palette-shell", styles)
 
     def test_row_filter_text_is_bounded_for_large_records(self) -> None:
-        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+        app_js = APP_JS_BUNDLE
 
         row_text_body = app_js.split("function rowText(value) {", 1)[1].split("function compactRowFilterText", 1)[0]
         self.assertIn("ROW_FILTER_TEXT_LIMIT", app_js)
@@ -800,7 +840,7 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("filter text bounded to ${ROW_FILTER_TEXT_LIMIT} chars/row", app_js)
 
     def test_e01_smoke_stage_status_panel_is_rendered_from_registered_output(self) -> None:
-        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+        app_js = APP_JS_BUNDLE
 
         self.assertIn("renderE01SmokeStageStatus(payload)", app_js)
         self.assertIn("function renderE01SmokeStageStatus(payload)", app_js)
@@ -811,7 +851,7 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("renderE01SmokeStageStatus(payload)", summary_render_body)
 
     def test_artifacts_tab_prefers_columnar_sidecar_with_json_fallback(self) -> None:
-        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+        app_js = APP_JS_BUNDLE
 
         self.assertIn("function loadArtifactsPayload()", app_js)
         self.assertIn("renderArtifacts(await loadArtifactsPayload())", app_js)
@@ -825,7 +865,7 @@ class RapidTriageWebStaticTests(unittest.TestCase):
 
     def test_token_entry_ui_is_wired_to_auth_storage(self) -> None:
         index_html = (REPO_ROOT / "rapidtriage" / "web" / "static" / "index.html").read_text(encoding="utf-8")
-        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+        app_js = APP_JS_BUNDLE
         app_api_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app_api.js").read_text(encoding="utf-8")
 
         # The console must offer an in-page token entry instead of forcing
@@ -840,7 +880,7 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("error.status === 401", app_js)
 
     def test_first_screen_uses_korean_font_stack_and_readable_base_size(self) -> None:
-        styles = (REPO_ROOT / "rapidtriage" / "web" / "static" / "styles.css").read_text(encoding="utf-8")
+        styles = STYLES_BUNDLE
 
         # CJK text must not fall back through Latin-only fonts that are not
         # installed on analyst machines, and labels must not split mid-word.
@@ -849,7 +889,7 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("word-break: keep-all", styles)
 
     def test_first_screen_keeps_feature_entry_points_visible_with_runs(self) -> None:
-        styles = (REPO_ROOT / "rapidtriage" / "web" / "static" / "styles.css").read_text(encoding="utf-8")
+        styles = STYLES_BUNDLE
 
         # Once a case exists the rail must not collapse to a blank column:
         # intake shortcuts, the brand row, and the case queue stay reachable.
@@ -859,7 +899,7 @@ class RapidTriageWebStaticTests(unittest.TestCase):
 
     def test_empty_state_review_cards_are_real_navigation_buttons(self) -> None:
         index_html = (REPO_ROOT / "rapidtriage" / "web" / "static" / "index.html").read_text(encoding="utf-8")
-        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+        app_js = APP_JS_BUNDLE
 
         # Review-mode cards were <article> elements that looked clickable but
         # did nothing; they must be buttons wired to workbench tabs.
@@ -870,8 +910,8 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn("loadRunDetail(candidate.run_id, targetTab)", app_js)
 
     def test_failed_run_card_exposes_retry_and_remove_actions(self) -> None:
-        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
-        styles = (REPO_ROOT / "rapidtriage" / "web" / "static" / "styles.css").read_text(encoding="utf-8")
+        app_js = APP_JS_BUNDLE
+        styles = STYLES_BUNDLE
 
         self.assertIn('data-retry-run="', app_js)
         self.assertIn('data-remove-run="', app_js)
@@ -883,7 +923,7 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertNotIn("Run needs attention", app_js)
 
     def test_removing_a_run_restores_the_full_empty_state(self) -> None:
-        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+        app_js = APP_JS_BUNDLE
 
         self.assertIn("initialWorkbenchHtml", app_js)
         self.assertIn("detailPanel.innerHTML = initialWorkbenchHtml", app_js)

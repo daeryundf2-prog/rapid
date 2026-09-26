@@ -1,0 +1,58 @@
+/* Timeline density heatmap (R2-4) — screen-scoped styles. */
+
+.timeline-heatmap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--op-line, #d7dde3);
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 10px;
+  margin: 8px 0;
+}
+
+.heatmap-header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.heatmap-hint {
+  font-size: 11px;
+  color: var(--op-subtle, #5d6b76);
+}
+
+.timeline-heatmap canvas {
+  display: block;
+  max-width: 100%;
+  cursor: crosshair;
+  border: 1px solid var(--op-line, #e5e9ed);
+  border-radius: 6px;
+}
+
+.heatmap-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+
+.heatmap-controls input {
+  font-family: ui-monospace, Consolas, "Courier New", monospace;
+  font-size: 11px;
+  width: 21ch;
+  padding: 3px 6px;
+  border: 1px solid var(--op-line, #d7dde3);
+  border-radius: 6px;
+}
+
+.heatmap-status {
+  font-size: 11px;
+  color: var(--op-subtle, #5d6b76);
+}
+
+.timeline-heatmap.heatmap-empty canvas {
+  display: none;
+}

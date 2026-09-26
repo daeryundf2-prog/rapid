@@ -21,6 +21,7 @@ from .helpers import (
     truthy_env,
 )
 from .routes_case_db import build_case_db_router
+from .routes_ioc import build_ioc_router
 from .routes_media import build_media_router
 from .routes_meta import build_meta_router
 from .routes_reports import build_reports_router
@@ -101,12 +102,17 @@ def create_app(
     api.include_router(build_meta_router())
     api.include_router(build_case_db_router(store, open_request_case_database, resolve_request_catalog_path))
     api.include_router(build_runs_router(store))
+    api.include_router(build_ioc_router(store))
     api.include_router(build_media_router(store))
     api.include_router(build_search_router(store))
     api.include_router(build_reports_router(store))
 
     if static_dir.is_dir():
         api.mount("/assets", StaticFiles(directory=static_dir), name="rapidtriage-assets")
+
+        v2_dir = static_dir / "v2"
+        if v2_dir.is_dir():
+            api.mount("/v2", StaticFiles(directory=v2_dir, html=True), name="rapidtriage-v2")
 
         @api.get("/", include_in_schema=False)
         def index() -> FileResponse:

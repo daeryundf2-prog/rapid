@@ -1,0 +1,215 @@
+/* KakaoTalk chat-bubble viewer (R2-2) — screen-scoped styles. */
+
+.kakao-chat {
+  --kakao-bg: #b2c7d9;
+  --kakao-bubble-in: #ffffff;
+  --kakao-bubble-out: #fee84e;
+  --kakao-text: #1a1a1a;
+  --kakao-subtle: #5d6b76;
+  --kakao-line: rgba(27, 41, 51, 0.18);
+
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--kakao-bg);
+  border: 1px solid var(--kakao-line);
+  border-radius: 12px;
+  padding: 10px 12px;
+  max-height: 60vh;
+  overflow-y: auto;
+  color: var(--kakao-text);
+}
+
+.kakao-chat-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--kakao-line);
+}
+
+.kakao-count {
+  font-size: 11px;
+  color: var(--kakao-subtle);
+}
+
+.kakao-status-notes {
+  margin: 0;
+  padding: 4px 8px;
+  list-style: none;
+  font-size: 11px;
+  color: #5b4a00;
+  background: rgba(255, 240, 170, 0.65);
+  border-radius: 8px;
+}
+
+.kakao-empty {
+  margin: 16px 0;
+  text-align: center;
+  font-size: 12px;
+  color: var(--kakao-subtle);
+}
+
+.kakao-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 0;
+}
+
+.kakao-day-separator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  font-size: 11px;
+  color: var(--kakao-subtle);
+}
+
+.kakao-day-separator::before,
+.kakao-day-separator::after {
+  content: "";
+  flex: 1;
+  border-top: 1px solid var(--kakao-line);
+}
+
+.kakao-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.kakao-row-in {
+  justify-content: flex-start;
+}
+
+.kakao-row-out {
+  justify-content: flex-end;
+}
+
+.kakao-avatar {
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  border-radius: 12px;
+  background: #e8edf1;
+  color: #44545f;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.kakao-avatar-spacer {
+  flex: 0 0 32px;
+  width: 32px;
+}
+
+.kakao-bubble-stack {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  max-width: 72%;
+}
+
+.kakao-author {
+  position: absolute;
+  margin-top: -18px;
+  font-size: 11px;
+  color: var(--kakao-subtle);
+}
+
+.kakao-bubble {
+  position: relative;
+  background: var(--kakao-bubble-in);
+  border-radius: 4px 14px 14px 14px;
+  padding: 8px 10px;
+  font-size: 13px;
+  line-height: 1.45;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.08);
+  word-break: break-word;
+}
+
+.kakao-row-out .kakao-bubble {
+  background: var(--kakao-bubble-out);
+  border-radius: 14px 4px 14px 14px;
+}
+
+.kakao-text {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.kakao-time {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--kakao-subtle);
+  align-self: flex-end;
+  padding-bottom: 2px;
+}
+
+.kakao-provenance {
+  display: block;
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--kakao-subtle);
+  opacity: 0.8;
+}
+
+.kakao-attachment {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.06);
+  min-width: 140px;
+}
+
+.kakao-attachment[data-viewer-row-path] {
+  cursor: pointer;
+}
+
+.kakao-attachment-icon {
+  font-size: 20px;
+}
+
+.kakao-attachment-icon img {
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 6px;
+}
+
+.kakao-attachment-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.kakao-attachment-meta strong {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kakao-attachment-meta small {
+  font-size: 10px;
+  color: var(--kakao-subtle);
+}
+
+.kakao-card {
+  margin: 6px 0;
+}
+
+.kakao-card > summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 0;
+}

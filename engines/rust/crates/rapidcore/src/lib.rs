@@ -2,6 +2,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::Path;
 
+pub mod evtx;
+#[cfg(feature = "python")]
+pub mod py;
+
 pub const ARTIFACT_SCHEMA_VERSION: &str = "ArtifactRecordV1";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

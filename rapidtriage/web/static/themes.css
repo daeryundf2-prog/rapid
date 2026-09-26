@@ -1,0 +1,80 @@
+/* Theme overrides (R4-4). The :root palette in styles.css is the default
+   "Nordic Slate" dark theme. This file defines the "Warm Paper" light theme
+   plus shared theme-transition rules. Applied via <html data-theme>. */
+
+html[data-theme] body {
+  transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+html[data-theme="warm-paper"] {
+  --focus: #b2640a;
+  --cyan: #0e7a72;
+  --command: #f4efe6;
+  --command-2: #ece4d6;
+  --danger-soft: rgba(176, 44, 12, 0.1);
+  --bg: #f2ede4;
+  --panel: rgba(255, 252, 246, 0.96);
+  --panel-strong: #fbf7ef;
+  --ink: #2b2620;
+  --muted: #6f6353;
+  --line: rgba(120, 96, 64, 0.26);
+  --accent: #0e7a72;
+  --accent-strong: #0a5e58;
+  --accent-soft: rgba(14, 122, 114, 0.1);
+  --gold: #9a6b1c;
+  --warn: #a3541f;
+  --ok: #2f7a4d;
+  --shadow: 0 18px 44px rgba(90, 70, 40, 0.18);
+  --shadow-soft: 0 10px 26px rgba(90, 70, 40, 0.12);
+  --shadow-command: 0 16px 44px rgba(90, 70, 40, 0.2);
+  --liquid-panel: linear-gradient(180deg, rgba(255, 252, 246, 0.97), rgba(247, 241, 230, 0.98));
+  --liquid-panel-hot: linear-gradient(180deg, rgba(255, 250, 240, 0.98), rgba(243, 235, 222, 0.99));
+  --liquid-border: rgba(120, 96, 64, 0.28);
+  --liquid-border-strong: rgba(14, 122, 114, 0.45);
+  --button-border: rgba(120, 96, 64, 0.34);
+  --button-primary-bg: linear-gradient(180deg, #12958b 0%, #0c6f68 100%);
+  --button-primary-hover: linear-gradient(180deg, #1aaaa0 0%, #0e7a72 100%);
+  --button-secondary-bg: linear-gradient(180deg, rgba(244, 238, 226, 0.98), rgba(234, 226, 212, 0.98));
+  --button-secondary-hover: linear-gradient(180deg, rgba(250, 246, 236, 0.98), rgba(238, 230, 218, 0.98));
+  --button-glow: 0 8px 18px rgba(14, 122, 114, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  --button-quiet-glow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
+  --rf-canvas: #efe9dd;
+  --rf-panel-2: #f7f2e8;
+  --rf-surface: #ede6d8;
+  --rf-text: #2b2620;
+  --rf-soft: #4d4337;
+  --rf-accent: #0e7a72;
+  --rf-accent-2: #0a5e58;
+}
+
+/* Code/terminal surfaces should stay readable in the light theme. */
+html[data-theme="warm-paper"] pre,
+html[data-theme="warm-paper"] code,
+html[data-theme="warm-paper"] .hexview-canvas {
+  color-scheme: light;
+}
+
+/* Theme picker control in the brand row. */
+.theme-picker {
+  margin-left: auto;
+  align-self: center;
+  font: inherit;
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--panel-strong);
+  border: 1px solid var(--button-border);
+  border-radius: var(--button-radius, 12px);
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.theme-picker:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* Explicit palette labels for the theme picker. */
+html[data-theme="nordic-slate"] .theme-swatch-slate,
+html[data-theme="warm-paper"] .theme-swatch-paper {
+  border-color: var(--accent);
+}

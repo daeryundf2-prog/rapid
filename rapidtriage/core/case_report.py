@@ -10,6 +10,9 @@ from collections.abc import Mapping
 from pathlib import Path
 from xml.sax.saxutils import escape as xml_escape
 
+from .korean_report import TEMPLATE_ID as KOREAN_EXPERT_TEMPLATE_ID
+from .korean_report import build_korean_expert_report
+
 CASE_REPORT_EXPORTS = {
     "md": "rapidtriage-case-report.md",
     "html": "rapidtriage-case-report.html",
@@ -30,6 +33,13 @@ def build_case_report_markdown(
     case_title = str(metadata.get("title") or case_payload.get("title") or "rapidtriage case report")
     case_id = str(metadata.get("case_number") or case_payload.get("case_id") or "")
     template = str(metadata.get("template") or "legal-handoff")
+    if template == KOREAN_EXPERT_TEMPLATE_ID:
+        return build_korean_expert_report(
+            run_summary=run_summary,
+            case_payload=case_payload,
+            submission_manifest=submission_manifest,
+            metadata=metadata,
+        )
     investigator = str(metadata.get("investigator") or "")
     organization = str(metadata.get("organization") or "")
     requester = str(metadata.get("requester") or "")
@@ -255,6 +265,7 @@ def template_noise_policy(template: str) -> str:
         "legal-handoff": "balanced handoff; includes procedure and evidence hashes while avoiding raw JSON dumps.",
         "technical-appendix": "fuller technical appendix; includes processing caps, warnings, source path, and parser context.",
         "hash-only": "hash appendix only; omits narrative analysis and most metadata.",
+        "korean-expert": "court-submission draft; 감정서 structure with CoC, tool validation, legal checklist, and limitations.",
     }
     return policies.get(template, policies["legal-handoff"])
 

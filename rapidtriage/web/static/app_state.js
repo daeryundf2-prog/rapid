@@ -2,38 +2,18 @@
 // RapidForensic analyst console. Shared workbench state lives in app.js and is
 // read here through live bindings; session restore writes back through
 // applySessionSnapshot.
-import { WORKBENCH_SESSION_CONTRACT } from "./app_workbench_config.js";
-import { escapeHtml, kbd, storageAvailable } from "./app_utils.js";
 import {
   SEARCH_HISTORY_PREFIX,
   SEARCH_STORAGE_PREFIX,
   VIRTUAL_TABLE_ROW_LIMIT,
   VIRTUAL_WINDOW_STORAGE_PREFIX,
   VIRTUALIZATION_ASSESSMENT,
+  WORKBENCH_SESSION_CONTRACT,
   WORKBENCH_SESSION_STORAGE_KEY,
-  activeArtifactFilter,
-  activeStageId,
-  activeStageSubactionId,
-  activeTab,
-  activeViewGroup,
-  applyColumnPreset,
-  applySessionSnapshot,
-  applyWorkbenchFilters,
-  bindCaseDbBatchButtons,
-  bindCaseDbReportExportButton,
-  bindCaseDbReviewButtons,
-  bindSearchPresetButtons,
-  bindSearchResultButtons,
-  currentCaseDbSearchPayload,
-  currentSearchPayload,
-  currentWorkbenchControls,
-  detailPanel,
-  groupForTab,
-  renderCaseDbSearchResult,
-  renderSearchResults,
-  selectedRunId,
-  virtualWindowOffsets,
-} from "./app.js";
+} from "./app_workbench_config.js";
+import { workbenchInvoke, workbenchState } from "./app_store.js";
+
+const detailPanelEl = () => workbenchInvoke("detailPanel");
 
 export function getWorkbenchSession() {
   if (!storageAvailable()) return {};
@@ -49,14 +29,14 @@ export function persistWorkbenchSession(extra = {}) {
   if (!storageAvailable()) return;
   const payload = {
     profile_version: WORKBENCH_SESSION_CONTRACT.profile_version,
-    selectedRunId,
-    activeTab,
-    activeViewGroup,
-    activeArtifactFilter,
-    activeStageId,
-    activeStageSubactionId,
-    tableControls: currentWorkbenchControls(),
-    virtualWindowOffsets,
+    selectedRunId: workbenchState.selectedRunId,
+    activeTab: workbenchState.activeTab,
+    activeViewGroup: workbenchState.activeViewGroup,
+    activeArtifactFilter: workbenchState.activeArtifactFilter,
+    activeStageId: workbenchState.activeStageId,
+    activeStageSubactionId: workbenchState.activeStageSubactionId,
+    tableControls: workbenchInvoke("currentWorkbenchControls"),
+    virtualWindowOffsets: workbenchState.virtualWindowOffsets,
     updated_at: new Date().toISOString(),
     ...extra,
   };
@@ -66,26 +46,15 @@ export function persistWorkbenchSession(extra = {}) {
 export function restoreWorkbenchSession() {
   const payload = getWorkbenchSession();
   if (!payload?.selectedRunId) return;
-  let selectedRunId = null;
-  let activeTab = "summary";
-  let activeViewGroup = "triage";
-  let activeArtifactFilter = "";
-  let activeStageId = "";
-  let activeStageSubactionId = "";
-  selectedRunId = payload.selectedRunId;
-  activeTab = payload.activeTab || "summary";
-  activeViewGroup = payload.activeViewGroup || groupForTab(activeTab);
-  activeArtifactFilter = payload.activeArtifactFilter || "";
-  activeStageId = payload.activeStageId || "";
-  activeStageSubactionId = payload.activeStageSubactionId || "";
-  applySessionSnapshot({
-    selectedRunId,
-    activeTab,
-    activeViewGroup,
-    activeArtifactFilter,
-    activeStageId,
-    activeStageSubactionId,
-  });
+  const snapshot = {
+    selectedRunId: payload.selectedRunId,
+    activeTab: payload.activeTab || "summary",
+    activeViewGroup: payload.activeViewGroup || workbenchInvoke("groupForTab", payload.activeTab || "summary"),
+    activeArtifactFilter: payload.activeArtifactFilter || "",
+    activeStageId: payload.activeStageId || "",
+    activeStageSubactionId: payload.activeStageSubactionId || "",
+  };
+  workbenchInvoke("applySessionSnapshot", snapshot);
 }
 
 export function restoreWorkbenchControls() {
@@ -96,14 +65,14 @@ export function restoreWorkbenchControls() {
     ["#timeFilterInput", controls.time_filter],
   ];
   for (const [selector, value] of mapping) {
-    const input = detailPanel.querySelector(selector);
+    const input = detailPanelEl().querySelector(selector);
     if (input && value !== undefined) input.value = value || "";
   }
   const preset = controls.column_preset || "analyst";
-  const presetInput = detailPanel.querySelector("#columnPresetInput");
+  const presetInput = detailPanelEl().querySelector("#columnPresetInput");
   if (presetInput) presetInput.value = preset;
-  applyColumnPreset(preset);
-  applyWorkbenchFilters();
+  workbenchInvoke("applyColumnPreset", preset);
+  workbenchInvoke("applyWorkbenchFilters");
 }
 
 export function virtualizedRows(rows, windowKey = "default") {
@@ -113,7 +82,7 @@ export function virtualizedRows(rows, windowKey = "default") {
 }
 
 export function virtualWindowStorageKey() {
-  return `${VIRTUAL_WINDOW_STORAGE_PREFIX}${selectedRunId || "default"}`;
+  return `${VIRTUAL_WINDOW_STORAGE_PREFIX}${workbenchState.selectedRunId || "default"}`;
 }
 
 export function loadVirtualWindowOffsets() {
@@ -121,7 +90,7 @@ export function loadVirtualWindowOffsets() {
   try {
     const saved = JSON.parse(window.localStorage.getItem(virtualWindowStorageKey()) || "{}");
     for (const [key, value] of Object.entries(saved || {})) {
-      virtualWindowOffsets[key] = Math.max(0, Number(value) || 0);
+      workbenchState.virtualWindowOffsets[key] = Math.max(0, Number(value) || 0);
     }
   } catch {
     // Ignore corrupt client-side viewport state; server data remains authoritative.
@@ -140,11 +109,11 @@ export function persistVirtualWindowOffset(windowKey, offset) {
 }
 
 export function virtualWindowOffset(windowKey, total) {
-  const rawOffset = Number(virtualWindowOffsets[windowKey] || 0);
+  const rawOffset = Number(workbenchState.virtualWindowOffsets[windowKey] || 0);
   const safeTotal = Math.max(0, Number(total) || 0);
   const maxOffset = Math.max(0, safeTotal - VIRTUAL_TABLE_ROW_LIMIT);
   const clamped = Math.min(Math.max(0, rawOffset), maxOffset);
-  virtualWindowOffsets[windowKey] = clamped;
+  workbenchState.virtualWindowOffsets[windowKey] = clamped;
   return clamped;
 }
 
@@ -181,14 +150,14 @@ export function renderVirtualWindowJumpControl(windowKey, total, offset, label) 
 }
 
 export function bindVirtualWindowButtons() {
-  for (const button of detailPanel.querySelectorAll("[data-virtual-window-key]")) {
+  for (const button of detailPanelEl().querySelectorAll("[data-virtual-window-key]")) {
     if (button.dataset.virtualWindowBound) continue;
     button.dataset.virtualWindowBound = "1";
     button.addEventListener("click", () => {
       setVirtualWindowOffset(button.dataset.virtualWindowKey, Number(button.dataset.virtualWindowOffset || 0));
     });
   }
-  for (const form of detailPanel.querySelectorAll("[data-virtual-window-jump-key]")) {
+  for (const form of detailPanelEl().querySelectorAll("[data-virtual-window-jump-key]")) {
     if (form.dataset.virtualWindowBound) continue;
     form.dataset.virtualWindowBound = "1";
     form.addEventListener("submit", (event) => {
@@ -203,44 +172,54 @@ export function bindVirtualWindowButtons() {
 }
 
 export function setVirtualWindowOffset(windowKey, offset) {
-  virtualWindowOffsets[windowKey] = Math.max(0, Number(offset) || 0);
-  persistVirtualWindowOffset(windowKey, virtualWindowOffsets[windowKey]);
-  if (windowKey === "search" && currentSearchPayload) {
-    const pane = detailPanel.querySelector(".search-results-pane");
+  workbenchState.virtualWindowOffsets[windowKey] = Math.max(0, Number(offset) || 0);
+  persistVirtualWindowOffset(windowKey, workbenchState.virtualWindowOffsets[windowKey]);
+  if (windowKey === "search" && workbenchInvoke("currentSearchPayload")) {
+    const pane = detailPanelEl().querySelector(".search-results-pane");
     if (pane) {
-      pane.innerHTML = renderSearchResults(currentSearchPayload, currentSearchPayload.matches || []);
-      bindSearchResultButtons();
-      bindSearchPresetButtons(detailPanel.querySelector("#unifiedSearchForm"));
+      pane.innerHTML = renderSearchResultsBridge();
+      workbenchInvoke("bindSearchResultButtons");
+      bindSearchPresetButtons(detailPanelEl().querySelector("#unifiedSearchForm"));
       bindVirtualWindowButtons();
     }
   }
-  if (windowKey === "caseDb" && currentCaseDbSearchPayload) {
-    const output = detailPanel.querySelector("#caseDbResult");
+  if (windowKey === "caseDb" && workbenchInvoke("currentCaseDbSearchPayload")) {
+    const output = detailPanelEl().querySelector("#caseDbResult");
     if (output) {
-      output.innerHTML = renderCaseDbSearchResult(currentCaseDbSearchPayload);
-      const importForm = detailPanel.querySelector("#caseDbImportForm");
+      output.innerHTML = renderCaseDbSearchResultBridge();
+      const importForm = detailPanelEl().querySelector("#caseDbImportForm");
       const database = importForm?.elements.database?.value || "";
       const caseId = importForm?.elements.case_id?.value || "";
       if (database && caseId) {
-        bindCaseDbReviewButtons(database, caseId);
-        bindCaseDbBatchButtons(database, caseId);
-        bindCaseDbReportExportButton(database, caseId);
+        workbenchInvoke("bindCaseDbReviewButtons", database, caseId);
+        workbenchInvoke("bindCaseDbBatchButtons", database, caseId);
+        workbenchInvoke("bindCaseDbReportExportButton", database, caseId);
       }
       bindVirtualWindowButtons();
     }
   }
 }
 
+
+function renderSearchResultsBridge() {
+  const payload = workbenchInvoke("currentSearchPayload");
+  return workbenchInvoke("renderSearchResults", payload, payload?.matches || []);
+}
+
+function renderCaseDbSearchResultBridge() {
+  return workbenchInvoke("renderCaseDbSearchResult", workbenchInvoke("currentCaseDbSearchPayload"));
+}
+
 export function searchStorageKey() {
-  return `${SEARCH_STORAGE_PREFIX}${selectedRunId || "default"}`;
+  return `${SEARCH_STORAGE_PREFIX}${workbenchState.selectedRunId || "default"}`;
 }
 
 export function searchHistoryStorageKey() {
-  return `${SEARCH_HISTORY_PREFIX}${selectedRunId || "default"}`;
+  return `${SEARCH_HISTORY_PREFIX}${workbenchState.selectedRunId || "default"}`;
 }
 
 export function caseDbHistoryStorageKey() {
-  return `${SEARCH_HISTORY_PREFIX}caseDb.${selectedRunId || "default"}`;
+  return `${SEARCH_HISTORY_PREFIX}caseDb.${workbenchState.selectedRunId || "default"}`;
 }
 
 export function getSearchDraft() {

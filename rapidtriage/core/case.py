@@ -106,6 +106,7 @@ def create_or_update_case_payload(
     source_pointer: str | None = None,
     bookmark_id: str | None = None,
     tags: list[str] | None = None,
+    remove_tags: list[str] | None = None,
     note: str | None = None,
     review_status: str | None = None,
     include_in_report: bool | None = None,
@@ -133,11 +134,12 @@ def create_or_update_case_payload(
             source_pointer=source_pointer,
             bookmark_id=bookmark_id,
             tags=tags or [],
+            remove_tags=remove_tags or [],
             note=note,
             review_status=review_status,
             include_in_report=include_in_report,
         )
-    elif source_pointer or bookmark_id or tags or note or review_status or include_in_report is not None:
+    elif source_pointer or bookmark_id or tags or remove_tags or note or review_status or include_in_report is not None:
         raise CaseBookmarkError("--source is required when using bookmark-specific options")
 
     payload["summary"] = build_case_summary(payload.get("bookmarks", []))
@@ -191,6 +193,7 @@ def upsert_bookmark(
     source_pointer: str,
     bookmark_id: str | None,
     tags: list[str],
+    remove_tags: list[str],
     note: str | None,
     review_status: str | None,
     include_in_report: bool | None,
@@ -287,7 +290,15 @@ def upsert_bookmark(
         include_in_report=include_in_report,
         reviewed_at=now,
     )
-    next_tags = normalize_tags([*prior_tags, *merged_tags]) if merged_tags else prior_tags
+    removed = set(normalize_tags(remove_tags))
+    if merged_tags:
+        next_tags = normalize_tags([*prior_tags, *merged_tags])
+    else:
+        next_tags = list(prior_tags)
+    if removed:
+        next_tags = [tag for tag in next_tags if tag not in removed]
+    if merged_tags and not next_tags:
+        next_tags = []
     next_note = note if note is not None else prior_note
     changed_fields = changed_review_fields(
         prior_tags=prior_tags,

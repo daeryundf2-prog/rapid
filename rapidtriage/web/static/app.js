@@ -9,6 +9,7 @@ import {
   FORENSIC_VIEW_MODES,
   FORENSIC_WORKFLOW_LANES,
   LAZYWEB_WORKBENCH_MODEL,
+  PAGE_SIZE as APP_PAGE_SIZE,
   PREVIEW_DETAIL_CONTRACT,
   SEARCH_RESULT_SOURCE_ACTION_CONTRACT,
   SEARCH_SOURCE_VERIFICATION_CONTRACT,
@@ -17,11 +18,17 @@ import {
   USER_WORKFLOW_STEPS,
   VIEWER_NAVIGATION_CONTRACT,
   VIEW_GROUPS,
+  VIRTUAL_TABLE_ROW_LIMIT,
   VISIBLE_CAPABILITY_STATUS_LABELS,
   VISIBLE_FORENSIC_CAPABILITY_GROUPS,
   WORKBENCH_ARTIFACT_TREE_GROUPS,
   WORKBENCH_SMOKE_CHECKPOINTS,
 } from "./app_workbench_config.js";
+import {
+  registerWorkbenchBinding,
+  syncWorkbenchState,
+  workbenchState,
+} from "./app_store.js";
 import {
   columnarPagination,
   escapeHtml,
@@ -38,6 +45,7 @@ import {
   tabLabel,
 } from "./app_utils.js";
 import { api, errorMessageFromDetail, setAuthToken } from "./app_api.js";
+import { runCounts } from "./app_metrics.js";
 import {
   bindVirtualWindowButtons,
   getCaseDbKeywordHistory,
@@ -61,6 +69,48 @@ import {
   compareItemFromMatch,
   compareItemFromPreview,
 } from "./app_compare.js";
+import {
+  VirtualTable,
+  applyVirtualTableFilter,
+  getVirtualTable,
+  registerVirtualTable,
+} from "./app_virtual.js";
+import { renderKakaoArtifactChatCard } from "./app_kakao.js";
+import { mountHexViewers, renderHexViewerShell } from "./app_hexview.js";
+import { mountCrossDeviceIoc, renderCrossDeviceIocShell } from "./app_ioc.js";
+import { initThemePicker } from "./app_theme.js";
+import {
+  initArtifactGrid,
+  renderArtifacts,
+  artifactCommercialBlockers,
+  artifactGroupNextOffset,
+  artifactGroupTotal,
+  artifactPaginationSummary,
+  filteredPagination,
+  flattenArtifactRows,
+  queueArtifactsNextPage,
+  renderArtifactRow,
+  renderArtifactValidationSummary,
+  summarizeArtifactValidation,
+} from "./app_artifact_grid.js";
+import {
+  initCaseHeader,
+  renderCaseHero,
+  renderCoreEvidenceWorkflow,
+  coreEvidenceWorkflowStatuses,
+  runWorkflowStatusLabel,
+} from "./app_case_header.js";
+import {
+  initDetailPanel,
+  renderAdvancedDiagnosticsPanel,
+  renderDetailShell,
+  renderWorkbenchLayoutFrame,
+  workflowLaneForTab,
+  workflowLanes,
+} from "./app_detail_panel.js";
+import { initTimelineView, renderTimeline, renderTimelineReviewLanes } from "./app_timeline_view.js";
+import { mountTimelineHeatmap, renderTimelineHeatmapShell } from "./app_heatmap.js";
+import { PowerReviewer } from "./app_shortcuts.js";
 import {
   applyEvidenceCheckRecommendation,
   applyStartChoice,
@@ -101,14 +151,11 @@ export const collectPlanButton = document.querySelector("#collectPlanButton");
 const runList = document.querySelector("#runList");
 export const detailPanel = document.querySelector("#detailPanel");
 const sideStagePanel = document.querySelector("#sideStagePanel");
-export const RUN_FORM_STORAGE_KEY = "rapidtriage.runForm.v1";
-export const WORKBENCH_SESSION_STORAGE_KEY = "rapidtriage.workbenchSession.v1";
+
 const MAC_FIRST_EVIDENCE_STORAGE_KEY = "rapidtriage.macFirstEvidencePath.v1";
-export const SEARCH_STORAGE_PREFIX = "rapidtriage.search.";
-export const SEARCH_HISTORY_PREFIX = "rapidtriage.searchHistory.";
-export const COMPARE_STORAGE_PREFIX = "rapidtriage.compare.";
+
 const REVIEW_SELECTION_STORAGE_PREFIX = "rapidtriage.reviewSelection.";
-export const VIRTUAL_WINDOW_STORAGE_PREFIX = "rapidtriage.virtualWindow.";
+
 const VIEWER_NAVIGATION_STORAGE_PREFIX = "rapidtriage.viewerNavigation.";
 const SEARCH_PRESETS = [
   { label: "Credentials", keywords: ["password", "secret", "token", "credential"] },
@@ -116,76 +163,7 @@ const SEARCH_PRESETS = [
   { label: "Money trail", keywords: ["invoice", "wire", "account", "transfer"] },
   { label: "Intrusion", keywords: ["powershell", "rundll32", "remote", "persistence"] },
 ];
-export const PROCESSING_PROFILES = {
-  fast: {
-    title: "Fast first pass",
-    summary: "Indexes and classifies first, skips extraction by default, and is the safest start for large evidence.",
-    badges: ["read-only", "no extraction", "fast triage"],
-  },
-  standard: {
-    title: "Standard bounded extraction",
-    summary: "Runs the same triage plus capped extraction so reviewable copies are available without runaway output size.",
-    badges: ["bounded extraction", "512 MB cap", "1000 file cap"],
-  },
-  deep: {
-    title: "Deep uncapped extraction",
-    summary: "Removes extraction caps for deliberate deep review. Use after fast/standard tells you where to focus.",
-    badges: ["extracts matches", "no cap", "slow/heavy"],
-  },
-};
-export const RUN_MODE_COLLECTORS = {
-  seizure: ["browser", "recent files", "email", "cloud", "mobile/chat", "KakaoTalk", "APK", "media", "memory", "OS/account", "event logs", "registry", "shellbags", "remote access", "execution", "prefetch", "MFT/USN", "Windows system", "macOS"],
-  fraud: ["browser", "recent files", "email", "cloud", "mobile/chat", "KakaoTalk", "APK", "media", "memory", "OS/account", "event logs", "registry", "shellbags", "remote access", "execution", "prefetch", "MFT/USN", "Windows system", "macOS"],
-  hacking: ["browser", "recent files", "email", "cloud", "mobile/chat", "KakaoTalk", "APK", "media", "memory", "OS/account", "event logs", "registry", "shellbags", "remote access", "execution", "prefetch", "MFT/USN", "Windows system", "macOS"],
-  recovery: ["recent files", "email", "cloud", "mobile/chat", "KakaoTalk", "APK", "media", "memory", "OS/account", "event logs", "registry", "shellbags", "remote access", "prefetch", "MFT/USN", "macOS"],
-};
-export const IMAGE_EVIDENCE_FORMATS = [
-  {
-    family: "ewf",
-    label: "E01/Ex01",
-    inputKind: "e01-derived",
-    pattern: /(?:^|[\\/])[^\\/]+\.(?:e\d{2}|ex\d{2})(?:$|[\\/])/i,
-  },
-  {
-    family: "raw",
-    label: "RAW/DD/split",
-    inputKind: "disk-image-derived",
-    pattern: /\.(?:dd|raw|img|ima|001|000|0000|0001|00001)(?:$|[\\/])/i,
-  },
-  {
-    family: "virtual-disk",
-    label: "VHD/VMDK/QCOW",
-    inputKind: "disk-image-derived",
-    pattern: /\.(?:vhd|vhdx|vmdk|vdi|xva|qcow|qcow2)(?:$|[\\/])/i,
-  },
-  {
-    family: "archive-image",
-    label: "DMG/ISO/WIM",
-    inputKind: "archive-image-derived",
-    pattern: /\.(?:dmg|iso|wim|swm)(?:$|[\\/])/i,
-  },
-  {
-    family: "forensic-container",
-    label: "AFF/AD/L01",
-    inputKind: "",
-    pattern: /\.(?:aff|aff4|ad1|l01|lx01)(?:$|[\\/])/i,
-  },
-];
-export const E01_PRE_RUN_STEPS = [
-  { label: "Input", text: "첫 E01/Ex01 세그먼트를 선택하고 segment order/integrity를 확인합니다." },
-  { label: "Preflight", text: "ewfmount, mmls, tsk_recover 존재와 버전을 먼저 확인합니다." },
-  { label: "Partition", text: "mmls 결과에서 지원 파일시스템 파티션을 자동 선택하거나 sector를 수동 지정합니다." },
-  { label: "Extract", text: "read-only 우선으로 추출 provenance와 command history를 남깁니다." },
-  { label: "Review", text: "추출 산출물을 검색, 뷰어, evidence tray, 보고서 후보로 이어갑니다." },
-];
-const PAGE_SIZE = 250;
-export const VIRTUAL_TABLE_ROW_LIMIT = 300;
-export const VIRTUALIZATION_ASSESSMENT = {
-  commercial_gap_ids: ["#79"],
-  status: "bounded-dom-window",
-  row_limit: VIRTUAL_TABLE_ROW_LIMIT,
-};
-export const COMPARE_LIMIT = 6;
+
 const VIEWER_NAVIGATION_LIMIT = 30;
 const COMMAND_PALETTE_RESULT_LIMIT = 12;
 const GUI_CONTRACT_COPY_ALIASES = [
@@ -207,7 +185,72 @@ export let activeStageSubactionId = "";
 let pollTimer = null;
 let workbenchFilterTimer = null;
 const pageOffsets = { timeline: 0, artifacts: 0, files: 0, docs: 0, indicators: 0 };
-export const virtualWindowOffsets = { search: 0, caseDb: 0 };
+// app_state.js owns the virtualWindowOffsets slice — share the store object
+// so mutations from either side stay visible without live bindings.
+export const virtualWindowOffsets = workbenchState.virtualWindowOffsets;
+
+/** Push scalar workbench state into the shared store after mutations. */
+function flushWorkbenchState() {
+  syncWorkbenchState({
+    selectedRunId,
+    activeTab,
+    activeViewGroup,
+    activeArtifactFilter,
+    activeStageId,
+    activeStageSubactionId,
+  });
+}
+// --- Screen module wiring (R3-2) ---------------------------------------------
+// Screen renderers live in dedicated modules; their dependencies are injected
+// once here so the module graph stays acyclic.
+initCaseHeader({ artifactGroupCount, runCounts });
+initTimelineView({
+  bookmarkButton,
+  compactRowFilterText,
+  renderPaginationControls,
+  renderPaginationNotice,
+  rowInspectorAttributes,
+  rowText,
+});
+initArtifactGrid({
+  api,
+  PAGE_SIZE: APP_PAGE_SIZE,
+  artifactActionButtons,
+  artifactPreviewText,
+  artifactSourceCategory,
+  compactRowFilterText,
+  getActiveArtifactFilter: () => activeArtifactFilter,
+  getDetailPanel: () => detailPanel,
+  getSelectedRunId: () => selectedRunId,
+  queueVirtualTable,
+  renderArtifactDetails,
+  renderArtifactValidationBadges,
+  renderPaginationControls,
+  rowInspectorAttributes,
+  rowText,
+});
+initDetailPanel({
+  groupForTab,
+  renderAdaptiveViewerHeader,
+  renderArtifactTreeRows,
+  renderEvidenceSourceNavigator,
+  renderForensicFeatureCatalog,
+  renderForensicQuestionBar,
+  renderForensicRibbon,
+  renderIntelligencePanel,
+  renderLazywebCommandCenter,
+  renderSecondaryWorkbenchControls,
+  renderTableControlBar,
+  renderValidationReadinessBanner,
+  renderWorkbenchSmokePanel,
+  runCounts,
+  setActiveViewGroup: (group) => {
+    activeViewGroup = group;
+    flushWorkbenchState();
+  },
+  tabsForGroup,
+});
+
 export let currentSearchPayload = null;
 let currentDocsIndexSearchPayload = null;
 export let currentCaseDbSearchPayload = null;
@@ -219,8 +262,8 @@ export function applySessionSnapshot(payload = {}) {
   activeArtifactFilter = payload.activeArtifactFilter;
   activeStageId = payload.activeStageId;
   activeStageSubactionId = payload.activeStageSubactionId;
+  flushWorkbenchState();
 }
-
 
 const tokenBar = document.querySelector("#tokenBar");
 const tokenInput = document.querySelector("#tokenInput");
@@ -308,29 +351,99 @@ function renderRunList(runs) {
     runList.innerHTML = renderEmptyRunList();
     return;
   }
-  for (const run of runs) {
-    const request = run.request || {};
-    const isSelected = run.run_id === selectedRunId;
-    const mode = request.mode || "case";
-    const root = request.root || request.output_dir || "";
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = `run-item ${isSelected ? "selected" : ""}`;
-    button.title = `${mode} · ${run.run_id} · ${run.status}`;
-    button.setAttribute("aria-label", `${run.run_id} 케이스 열기, 모드 ${runModeLabel(mode)}, 상태 ${statusLabel(run.status)}`);
-    button.innerHTML = `
+  const liveRuns = runs.filter((run) => run.status !== "failed");
+  const failedRuns = runs.filter((run) => run.status === "failed");
+  for (const run of liveRuns) {
+    runList.appendChild(renderRunItem(run));
+  }
+  if (failedRuns.length) {
+    const group = document.createElement("details");
+    group.className = "failed-runs-group";
+    group.innerHTML = `
+      <summary>
+        <span>실패 ${formatNumber(failedRuns.length)}건</span>
+        <button type="button" class="secondary-button failed-runs-clear">모두 삭제</button>
+      </summary>
+      <div class="failed-runs-list"></div>
+    `;
+    const list = group.querySelector(".failed-runs-list");
+    for (const run of failedRuns) {
+      list.appendChild(renderRunItem(run, { failed: true }));
+    }
+    group.querySelector(".failed-runs-clear").addEventListener("click", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!window.confirm(`실패한 실행 ${failedRuns.length}건을 목록에서 모두 삭제합니다. 출력 파일은 유지됩니다.`)) return;
+      for (const run of failedRuns) {
+        await deleteRunRecord(run.run_id);
+      }
+      await loadRuns();
+    });
+    runList.appendChild(group);
+  }
+}
+
+function renderRunItem(run, { failed = false } = {}) {
+  const request = run.request || {};
+  const isSelected = run.run_id === selectedRunId;
+  const mode = request.mode || "case";
+  const root = request.root || request.output_dir || "";
+  const displayName = fileName(root) || "증거 경로 없음";
+  const row = document.createElement("div");
+  row.className = `run-item-row${failed ? " failed" : ""}`;
+  row.innerHTML = `
+    <button
+      type="button"
+      class="run-item ${isSelected ? "selected" : ""}"
+      title="${escapeHtml(root || mode)} · ${escapeHtml(run.run_id)} · ${escapeHtml(statusLabel(run.status))}"
+      aria-label="${escapeHtml(displayName)} 케이스 열기, 모드 ${escapeHtml(runModeLabel(mode))}, 상태 ${escapeHtml(statusLabel(run.status))}"
+    >
       <span class="run-item-main">
-        <span class="run-item-kicker">${escapeHtml(runModeLabel(mode))}</span>
-        <strong>${escapeHtml(run.run_id)}</strong>
-        <span class="run-item-path">${escapeHtml(run.origin || "web")} · ${escapeHtml(root)}</span>
+        <span class="run-item-kicker">${escapeHtml(runModeLabel(mode))} · ${escapeHtml(formatRunTime(run.created_at))}</span>
+        <strong>${escapeHtml(displayName)}</strong>
+        <span class="run-item-path">${escapeHtml(root)}</span>
       </span>
       <span class="run-item-meta">
         <span class="status-pill ${statusClass(run.status)}">${escapeHtml(statusLabel(run.status))}</span>
         <span class="run-item-open">${isSelected ? "열림" : "열기"}</span>
       </span>
-    `;
-    button.addEventListener("click", () => loadRunDetail(run.run_id, activeTab));
-    runList.appendChild(button);
+    </button>
+    ${failed ? `<button type="button" class="run-item-delete" title="이 실행을 목록에서 삭제" aria-label="실패한 실행 ${escapeHtml(displayName)} 삭제">삭제</button>` : ""}
+  `;
+  row.querySelector(".run-item").addEventListener("click", () => loadRunDetail(run.run_id, activeTab));
+  if (failed) {
+    row.querySelector(".run-item-delete").addEventListener("click", async (event) => {
+      event.stopPropagation();
+      if (!window.confirm(`실패한 실행 "${displayName}"을(를) 목록에서 삭제합니다. 출력 파일은 유지됩니다.`)) return;
+      await deleteRunRecord(run.run_id);
+      await loadRuns();
+    });
+  }
+  return row;
+}
+
+function formatRunTime(value) {
+  if (!value) return "시간 기록 없음";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return String(value);
+  return parsed.toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+async function deleteRunRecord(runId) {
+  try {
+    await api(`/api/runs/${runId}`, { method: "DELETE" });
+  } catch (error) {
+    setStatus(apiStatus, `삭제 실패: ${error.message}`, "failed");
+    return;
+  }
+  if (selectedRunId === runId) {
+    selectedRunId = null;
+    selectedRun = null;
+    activeStageId = "";
+    activeStageSubactionId = "";
+    flushWorkbenchState();
+    document.body.classList.remove("analysis-active");
+    detailPanel.innerHTML = initialWorkbenchHtml || "";
   }
 }
 
@@ -385,6 +498,8 @@ async function loadRunDetail(runId, tab = "summary") {
   loadVirtualWindowOffsets();
   activeTab = tab;
   activeViewGroup = groupForTab(tab);
+  flushWorkbenchState();
+  syncMissionStrip(tab);
   selectedRun = await api(`/api/runs/${runId}`);
   if (selectedRun.status !== "completed" || !selectedRun.summary) {
     selectedRun.capabilities = null;
@@ -468,80 +583,6 @@ function renderRunStepList(steps) {
   `;
 }
 
-function renderDetailShell(run, tab) {
-  activeViewGroup = groupForTab(tab);
-  const tabs = tabsForGroup(activeViewGroup);
-  return `
-    <section class="workbench-command-deck" aria-label="Case command deck">
-      ${renderCaseHero(run)}
-    </section>
-    <div class="tab-row redundant-tab-row" aria-label="보조 탭 전환">
-      ${tabs.map((item) => `<button class="tab-button ${item === tab ? "active" : ""}" data-tab="${item}" data-testid="tab-${escapeHtml(item)}" type="button">${escapeHtml(tabLabel(item))}</button>`).join("")}
-    </div>
-    ${renderWorkbenchLayoutFrame(run, tab)}
-    <details class="workbench-intel-drawer">
-      <summary>
-        <span>개발/QC 진단</span>
-        <strong>일반 분석에는 접어두기</strong>
-      </summary>
-      ${renderAdvancedDiagnosticsPanel(run, tab)}
-    </details>
-  `;
-}
-
-function renderAdvancedDiagnosticsPanel(run, tab) {
-  const summary = run.summary?.summary || {};
-  const processing = run.summary?.processing || {};
-  const outputCount = Object.keys(run.summary?.outputs || {}).length;
-  return `
-    <section class="advanced-diagnostics-panel" data-testid="advanced-diagnostics-panel" aria-label="개발 및 검증 진단">
-      <div class="advanced-diagnostics-copy">
-        <p class="eyebrow">진단 전용</p>
-        <h3>분석 흐름에 필요 없는 기능 상태는 여기로 분리했습니다</h3>
-        <p>아래 정보는 구현 범위, 검증 상태, 성능 스모크 확인용입니다. 실제 증거 검토는 왼쪽 영역과 가운데 리뷰 화면에서 진행하세요.</p>
-      </div>
-      <div class="advanced-diagnostics-grid">
-        ${metric("문서", summary.document_match_count)}
-        ${metric("파일", summary.file_candidate_count)}
-        ${metric("타임라인", summary.timeline_event_count)}
-        ${metric("검증 이슈", processing.warning_count)}
-        ${metric("산출물", outputCount)}
-      </div>
-      <details class="developer-diagnostics-drawer">
-        <summary>
-          <span>워크플로우/기능 구현 지도</span>
-          <strong>개발자·QC용 상세 보기</strong>
-        </summary>
-        ${renderLazywebCommandCenter(run, tab)}
-        ${renderForensicFeatureCatalog(run, tab)}
-      </details>
-      <details class="developer-diagnostics-drawer">
-        <summary>
-          <span>검증 리본 / 스모크 결과</span>
-          <strong>테스트 근거 보기</strong>
-        </summary>
-        ${renderForensicRibbon(run)}
-        ${renderWorkbenchSmokePanel(run)}
-      </details>
-    </section>
-  `;
-}
-
-function workflowLanes() {
-  if (typeof FORENSIC_WORKFLOW_LANES !== "undefined" && Array.isArray(FORENSIC_WORKFLOW_LANES)) {
-    return FORENSIC_WORKFLOW_LANES;
-  }
-  return [];
-}
-
-function workflowLaneForTab(tab) {
-  const lanes = workflowLanes();
-  const groupId = groupForTab(tab);
-  return lanes.find((lane) => lane.tab === tab || lane.id === groupId || (lane.id === "documents" && groupId === "documents"))
-    || lanes[0]
-    || { id: "triage", label: tabLabel(tab), tab, terms: [tab], modules: [] };
-}
-
 function renderWorkflowLaneBoard(run, tab) {
   const lanes = workflowLanes();
   if (!lanes.length) return "";
@@ -597,11 +638,11 @@ function renderHumanActionGuide(run, tab) {
 }
 
 function humanActionGuideForTab(run, tab) {
-  const summary = run.summary?.summary || {};
-  const docs = Number(summary.document_match_count || 0);
-  const files = Number(summary.file_candidate_count || 0);
-  const timeline = Number(summary.timeline_event_count || 0);
-  const reportCandidates = Number(summary.report_item_count || 0);
+  const counts = runCounts(run);
+  const docs = counts.docs;
+  const files = counts.files;
+  const timeline = counts.timelineEvents;
+  const reportCandidates = counts.reviewItems;
   const artifactSignals = artifactGroupCount(run, ["evtx", "registry", "browser", "ai", "kakao", "mail", "message", "mft", "usn"]);
   const baseSteps = ["전체 검색", "원본 확인", "리뷰 표시", "보고서 정리"];
   const guides = {
@@ -819,9 +860,7 @@ function renderLazywebCommandCenter(run, tab) {
     : { profile_version: "local-command-center-model", commands: [] };
   const commands = model.commands || [];
   const activeCommand = commands.find((command) => command.tab === tab) || commands[0] || {};
-  const summary = run.summary?.summary || {};
-  const processing = run.summary?.processing || {};
-  const outputs = Object.keys(run.summary?.outputs || {});
+  const counts = runCounts(run);
   const signalCount = artifactGroupCount(run, [
     "evtx",
     "eventlog",
@@ -837,9 +876,9 @@ function renderLazywebCommandCenter(run, tab) {
   ]);
   const metrics = [
     { label: "포렌식 단서", value: signalCount, hint: "아티팩트/검색 분류" },
-    { label: "보고서 후보", value: Number(summary.report_item_count || 0), hint: "선별 완료" },
-    { label: "산출물 포인터", value: outputs.length, hint: "원본 연결" },
-    { label: "검증 이슈", value: Number(processing.warning_count || 0), hint: "제한사항" },
+    { label: "보고서 후보", value: counts.reviewItems, hint: "선별 완료" },
+    { label: "산출물 포인터", value: counts.outputs, hint: "원본 연결" },
+    { label: "검증 이슈", value: counts.validationIssues, hint: "제한사항" },
   ];
   return `
     <section class="lazyweb-command-center" aria-label="케이스 이동 패널" data-testid="lazyweb-command-center" data-model-contract="${escapeHtml(model.profile_version || "unknown")}">
@@ -926,13 +965,12 @@ function renderTableControlBar(tab) {
 
 function caseStageFlow(run, tab, currentStageId = "") {
   const payload = normalizeRunPayload(run);
-  const summary = payload.summary || {};
-  const processing = payload.processing || {};
-  const warningCount = Number(processing.warning_count || 0);
-  const reportCandidates = Number(summary.report_item_count || 0);
-  const docs = Number(summary.document_match_count || 0);
-  const files = Number(summary.file_candidate_count || 0);
-  const timeline = Number(summary.timeline_event_count || 0);
+  const counts = runCounts(payload);
+  const warningCount = counts.validationIssues;
+  const reportCandidates = counts.reviewItems;
+  const docs = counts.docs;
+  const files = counts.files;
+  const timeline = counts.timelineEvents;
   const artifacts = artifactViewRowCount(run);
   const windowsActivity = artifactCategoryCount(run, "windows");
   const evtxCount = artifactRowGroupCount(run, ["evtx", "eventlog", "windows-event"]);
@@ -953,7 +991,7 @@ function caseStageFlow(run, tab, currentStageId = "") {
   const messengerCount = artifactGroupCount(run, ["kakao", "whatsapp", "telegram", "signal", "line", "discord", "chat"]);
   const iocCount = artifactGroupCount(run, ["ioc", "indicator", "ip", "url", "domain", "hash"]);
   const reviewCount = reportCandidates || artifactGroupCount(run, ["review", "relevant", "citation", "report"]);
-  const outputCount = Object.keys(payload.outputs || {}).length;
+  const outputCount = counts.outputs;
   const stages = [
     {
       id: "source",
@@ -1178,6 +1216,7 @@ function bindSideStagePanelActions() {
       activeStageId = stageId;
       activeStageSubactionId = stageSubactionId;
       activeArtifactFilter = targetTab === "artifacts" ? sourceCategoryFilter : "";
+      flushWorkbenchState();
       await switchTab(targetTab, { stageId, stageSubactionId, syncStage: true });
       applyArtifactTreeFilter(filter);
       refreshSourceNavigatorState();
@@ -1185,49 +1224,12 @@ function bindSideStagePanelActions() {
   }
 }
 
-function renderWorkbenchLayoutFrame(run, tab) {
-  const summary = run.summary?.summary || {};
-  const reportCandidates = Number(summary.report_item_count || 0);
-  const activeLane = workflowLaneForTab(tab);
-  return `
-    <section class="case-workbench-layout judgment-workbench" aria-label="단일 케이스 검토 화면" data-testid="case-workbench-layout" data-workflow-lane="${escapeHtml(activeLane.id)}" data-placement-contract="${escapeHtml(FEATURE_PLACEMENT_CONTRACT.profile_version)}">
-      <main class="workbench-result-zone primary-review-pane" aria-label="주요 증거 검토 영역" data-testid="workbench-result-table">
-        <nav class="workbench-mode-strip source-navigator" aria-label="자료 유형 바로가기" data-testid="workbench-artifact-tree">
-          ${renderEvidenceSourceNavigator(run, tab, { includeSourceCard: false })}
-          <details class="artifact-pivot-drawer" hidden>
-            <summary>아티팩트 빠른 이동</summary>
-            <div class="artifact-tree-lane" data-testid="artifact-tree-lane-find">
-              ${renderArtifactTreeRows(run, tab, ["윈도우", "웹 / AI", "Mail", "메신저", "모바일", "미디어 / OCR", "시간축", "검색"])}
-            </div>
-            <div class="artifact-tree-lane" data-testid="artifact-tree-lane-deliver">
-              ${renderArtifactTreeRows(run, tab, ["보고서", "검증"])}
-            </div>
-          </details>
-        </nav>
-        ${renderForensicQuestionBar(run, tab)}
-        ${renderValidationReadinessBanner(run, tab)}
-        ${renderSecondaryWorkbenchControls(run, tab)}
-        ${renderTableControlBar(tab)}
-        <div class="workbench-region-header">
-          <p class="eyebrow">검토 화면</p>
-          <strong>${escapeHtml(tabLabel(tab))}</strong>
-          <span>대량 결과는 cursor page와 가상 행으로 안전하게 나눠 봅니다.</span>
-        </div>
-        ${renderAdaptiveViewerHeader(run, tab)}
-        <div id="tabBody" class="tab-body" data-testid="tab-body"></div>
-      </main>
-      ${renderIntelligencePanel(run, tab, reportCandidates)}
-    </section>
-  `;
-}
-
 function renderSecondaryWorkbenchControls(run, tab) {
-  const summary = run.summary?.summary || {};
-  const outputs = run.summary?.outputs || {};
+  const counts = runCounts(run);
   const readyCount = outputAvailabilityItems(run).filter((item) => item.status === "ready").length;
-  const outputCount = Object.keys(outputs).length;
+  const outputCount = counts.outputs;
   const artifactCount = artifactViewRowCount(run);
-  const docCount = Number(summary.document_match_count || 0);
+  const docCount = counts.docs;
   return `
     <details class="secondary-workbench-drawer" data-testid="secondary-workbench-drawer">
       <summary>
@@ -1247,9 +1249,9 @@ function renderSecondaryWorkbenchControls(run, tab) {
 }
 
 function renderValidationReadinessBanner(run, tab) {
-  const summary = run.summary?.summary || {};
-  const warningCount = Number(summary.warning_count || summary.validation_issue_count || 0);
-  const reportCount = Number(summary.report_item_count || 0);
+  const counts = runCounts(run);
+  const warningCount = counts.validationIssues;
+  const reportCount = counts.reviewItems;
   const artifactRows = artifactViewRowCount(run);
   const status = warningCount ? "needs-validation" : "baseline";
   const label = warningCount ? `${formatNumber(warningCount)}개 검증 이슈` : "검증 이슈 0";
@@ -1382,11 +1384,12 @@ function renderOutputAvailabilityStrip(run, tab) {
 function outputAvailabilityItems(run) {
   const summary = run.summary?.summary || {};
   const outputs = run.summary?.outputs || {};
+  const counts = runCounts(run);
   const artifactRows = artifactViewRowCount(run);
-  const documentHits = Number(summary.document_match_count || 0);
-  const fileCandidates = Number(summary.file_candidate_count || 0);
-  const timelineEvents = Number(summary.timeline_event_count || 0);
-  const reportCandidates = Number(summary.report_item_count || 0);
+  const documentHits = counts.docs;
+  const fileCandidates = counts.files;
+  const timelineEvents = counts.timelineEvents;
+  const reportCandidates = counts.reviewItems;
   const searchableSignals = artifactRows + documentHits + fileCandidates + timelineEvents;
   const artifactKeys = Object.keys(outputs).filter((key) => key.startsWith("artifacts_"));
   return [
@@ -1432,7 +1435,7 @@ function availabilityStatusLabel(status) {
 }
 
 function renderForensicQuestionBar(run, tab) {
-  const summary = run.summary?.summary || {};
+  const counts = runCounts(run);
   const questions = forensicQuestionItems(run);
   return `
     <details class="case-question-bar case-question-drawer" aria-label="포렌식 질문별 빠른 이동" data-testid="case-question-bar">
@@ -1441,7 +1444,7 @@ function renderForensicQuestionBar(run, tab) {
           <em>질문 피벗</em>
           <strong>키워드·USB·웹/AI·문서·시간축으로 좁히기</strong>
         </span>
-        <b>문서 ${formatNumber(summary.document_match_count || 0)} · 파일 ${formatNumber(summary.file_candidate_count || 0)} · 시간축 ${formatNumber(summary.timeline_event_count || 0)}</b>
+        <b>문서 ${formatNumber(counts.docs)} · 파일 ${formatNumber(counts.files)} · 시간축 ${formatNumber(counts.timelineEvents)}</b>
       </summary>
       <div class="case-question-list">
         ${questions.map((item) => `
@@ -1463,12 +1466,12 @@ function renderForensicQuestionBar(run, tab) {
 }
 
 function forensicQuestionItems(run) {
-  const summary = run.summary?.summary || {};
+  const counts = runCounts(run);
   const artifactRows = artifactViewRowCount(run);
-  const documentHits = Number(summary.document_match_count || 0);
-  const fileCandidates = Number(summary.file_candidate_count || 0);
-  const timelineEvents = Number(summary.timeline_event_count || 0);
-  const reportCandidates = Number(summary.report_item_count || 0);
+  const documentHits = counts.docs;
+  const fileCandidates = counts.files;
+  const timelineEvents = counts.timelineEvents;
+  const reportCandidates = counts.reviewItems;
   return [
     {
       label: "키워드 단서",
@@ -1526,11 +1529,12 @@ function renderEvidenceSourceNavigator(run, tab, options = {}) {
   const summary = run.summary?.summary || {};
   const root = run.request?.root || run.summary?.output_dir || "not recorded";
   const includeSourceCard = options.includeSourceCard !== false;
+  const counts = runCounts(run);
   const artifactRows = artifactViewRowCount(run);
-  const documentHits = Number(summary.document_match_count || 0);
-  const fileCandidates = Number(summary.file_candidate_count || 0);
-  const timelineEvents = Number(summary.timeline_event_count || 0);
-  const reportCandidates = Number(summary.report_item_count || 0);
+  const documentHits = counts.docs;
+  const fileCandidates = counts.files;
+  const timelineEvents = counts.timelineEvents;
+  const reportCandidates = counts.reviewItems;
   const searchableSignals = artifactRows + documentHits + fileCandidates + timelineEvents;
   const sourceGroups = [
     {
@@ -1712,12 +1716,11 @@ function renderPreviewRail(run, tab, reportCandidates) {
 function renderIntelligencePanel(run, tab, reportCandidates) {
   const activeLane = workflowLaneForTab(tab);
   const guide = humanActionGuideForTab(run, tab);
-  const summary = run.summary?.summary || {};
-  const processing = run.summary?.processing || {};
-  const warningCount = Number(processing.warning_count || 0);
+  const counts = runCounts(run);
+  const warningCount = counts.validationIssues;
   const artifactSignals = artifactGroupCount(run, ["evtx", "registry", "browser", "ai", "usb", "mft", "usn", "mail", "kakao", "ocr"]);
-  const documentHits = Number(summary.document_match_count || 0);
-  const timelineEvents = Number(summary.timeline_event_count || 0);
+  const documentHits = counts.docs;
+  const timelineEvents = counts.timelineEvents;
   const priorityScore = Math.min(100, Math.round((warningCount * 12) + Math.min(artifactSignals, 40) + Math.min(documentHits / 5, 20) + Math.min(timelineEvents / 20, 18)));
   const keywordChips = intelligenceKeywordChips(run, tab);
   return `
@@ -1987,11 +1990,11 @@ function renderSourceLocatorCard(run) {
 }
 
 function renderHashVerificationCard(run) {
-  const outputs = Object.keys(run.summary?.outputs || {});
+  const counts = runCounts(run);
   return `
     <section class="preview-detail-card hash-verification-card" data-testid="preview-hash-card">
       <p class="eyebrow">출처 / 인용</p>
-      <strong>산출물 포인터 ${formatNumber(outputs.length)}개</strong>
+      <strong>산출물 포인터 ${formatNumber(counts.outputs)}개</strong>
       <span>보고서 후보는 source hash, parser version, offset/index, review state가 붙은 뒤에만 제출 묶음으로 올립니다.</span>
       <button class="secondary-button" type="button" data-open-tab="report">해시 목록 열기</button>
     </section>
@@ -1999,8 +2002,7 @@ function renderHashVerificationCard(run) {
 }
 
 function renderLimitationWarningCard(run) {
-  const processing = run.summary?.processing || {};
-  const warningCount = Number(processing.warning_count || 0);
+  const warningCount = runCounts(run).validationIssues;
   const label = warningCount ? `검증 이슈 ${formatNumber(warningCount)}건` : "검증 이슈 없음";
   return `
     <section class="preview-detail-card limitation-warning-card ${warningCount ? "warning" : ""}" data-testid="preview-limitation-warning">
@@ -2259,153 +2261,6 @@ function renderRunValidationPackageSummary(payload) {
   `;
 }
 
-function renderCaseHero(run) {
-  const payload = run.summary || {};
-  const summary = payload.summary || {};
-  const processing = payload.processing || {};
-  const outputCount = Object.keys(payload.outputs || {}).length;
-  const warningCount = Number(processing.warning_count || 0);
-  const artifactSignals = FORENSIC_ARTIFACT_TAXONOMY.reduce((sum, item) => sum + artifactGroupCount(payload, item.terms), 0);
-  const source = run.request.root || payload.output_dir || "Evidence source";
-  const headline = warningCount ? `검증 이슈 ${formatNumber(warningCount)}건 확인 필요` : "검토 가능한 결과가 준비되었습니다";
-  return `
-    <section class="case-hero review-first-case-strip" aria-label="Case mission control" data-testid="case-hero">
-      <div class="case-hero-main">
-        <p class="eyebrow">현재 케이스</p>
-        <h2>${escapeHtml(headline)}</h2>
-        <p class="case-source-line"><span>입력 증거</span><code>${escapeHtml(source)}</code></p>
-      </div>
-      <div class="case-hero-metrics">
-        ${caseHeroMetric("문서", summary.document_match_count)}
-        ${caseHeroMetric("파일", summary.file_candidate_count)}
-        ${caseHeroMetric("타임라인", summary.timeline_event_count)}
-        ${caseHeroMetric("아티팩트", artifactSignals)}
-        ${caseHeroMetric("산출물", outputCount)}
-        ${caseHeroMetric("이슈", warningCount)}
-      </div>
-    </section>
-  `;
-}
-
-function caseHeroMetric(label, value) {
-  return `
-    <span class="case-hero-metric">
-      <strong>${formatNumber(value || 0)}</strong>
-      <em>${escapeHtml(label)}</em>
-    </span>
-  `;
-}
-
-function renderCoreEvidenceWorkflow(run) {
-  const payload = run.summary || {};
-  const contractStages = Array.isArray(payload.workflow?.stages) ? payload.workflow.stages : [];
-  const steps = contractStages.length
-    ? contractStages.map((stage, index) => ({
-      id: stage.id,
-      number: String(index + 1),
-      label: stage.label || stage.id,
-      title: stage.title || stage.id,
-      tab: stage.gui?.primary_tab || "summary",
-      action: stage.gui?.next_action || "Open",
-    }))
-    : (typeof CORE_EVIDENCE_WORKFLOW !== "undefined" ? CORE_EVIDENCE_WORKFLOW : []);
-  if (!steps.length) return "";
-  const statuses = coreEvidenceWorkflowStatuses(payload);
-  return `
-    <section class="core-evidence-workflow completed-core-workflow" aria-label="Core evidence workflow" data-testid="core-evidence-workflow">
-      ${steps.map((step) => {
-        const status = statuses[step.id] || {};
-        const stateClass = status.ready ? (status.warning ? "warning" : "done") : (status.blocked ? "blocked" : "pending");
-        return `
-          <button class="core-workflow-step ${stateClass}" type="button" data-open-tab="${escapeHtml(step.tab || "summary")}" data-core-workflow-step="${escapeHtml(step.id)}" data-testid="core-workflow-step-${escapeHtml(step.id)}">
-            <span class="sr-only">${escapeHtml(`${step.label || ""} ${status.state || ""}`)}</span>
-            <span class="core-workflow-number">${escapeHtml(step.number || "")}</span>
-            <span class="core-workflow-body">
-              <span class="core-workflow-topline">
-                <em>${escapeHtml(step.label || "")}</em>
-                <i>${escapeHtml(status.state || "pending")}</i>
-              </span>
-              <strong>${escapeHtml(step.title || "")}</strong>
-              <small>${escapeHtml(status.detail || step.text || "")}</small>
-              <b>${escapeHtml(step.action || "Open")}</b>
-            </span>
-          </button>
-        `;
-      }).join("")}
-    </section>
-  `;
-}
-
-function coreEvidenceWorkflowStatuses(payload) {
-  const workflowStages = Array.isArray(payload.workflow?.stages) ? payload.workflow.stages : [];
-  if (workflowStages.length) {
-    return Object.fromEntries(workflowStages.map((stage) => {
-      const warnings = Number(stage.warning_count || 0);
-      return [stage.id, {
-        ready: Boolean(stage.ready),
-        warning: stage.status === "warning" || warnings > 0,
-        blocked: stage.status === "blocked",
-        state: runWorkflowStatusLabel(stage.status || "pending"),
-        detail: `${(stage.step_names || []).length}단계 · 산출물 ${(stage.output_keys || []).length}개 · 이슈 ${warnings}건`,
-      }];
-    }));
-  }
-  const summary = payload.summary || {};
-  const outputs = payload.outputs || {};
-  const artifactKinds = Object.keys(payload.artifacts || {});
-  const docs = Number(summary.document_match_count || 0);
-  const files = Number(summary.file_candidate_count || 0);
-  const timeline = Number(summary.timeline_event_count || 0);
-  const extracted = Number(summary.docs_extracted_count || 0) + Number(summary.files_extracted_count || 0);
-  const outputCount = Object.keys(outputs).length;
-  const searchable = docs + files + timeline;
-  const extractManifestReady = Boolean(outputs.docs_extract_manifest || outputs.files_extract_manifest);
-  const reportReady = Boolean(outputs.report || outputs.summary || summary.report_candidate_count);
-  const warningCount = Number(summary.warning_count || 0) + Number(summary.parser_warning_count || 0);
-  return {
-    ingest: {
-      ready: outputCount > 0 || Boolean(payload.source || payload.request || summary.source_kind),
-      state: outputCount > 0 ? "입력 확인" : "입력 대기",
-      detail: "증거 종류, read-only 전제, dependency, mount/export 필요 여부를 먼저 확인합니다.",
-    },
-    extract: {
-      ready: extracted > 0 || extractManifestReady,
-      state: extracted > 0 ? "추출 완료" : (extractManifestReady ? "추출 가능" : "설정 필요"),
-      detail: extracted > 0
-        ? `${formatNumber(extracted)}개 파일 추출 · manifest/SHA256 기록 있음`
-        : "추출 manifest를 보고 필요한 후보만 output 폴더로 꺼냅니다.",
-    },
-    parse: {
-      ready: outputCount > 0 || searchable > 0 || artifactKinds.length > 0,
-      state: outputCount > 0 ? "분석 완료" : "확인 필요",
-      detail: `${formatNumber(docs)} 문서 · ${formatNumber(files)} 파일 · ${formatNumber(timeline)} 타임라인 · ${formatNumber(artifactKinds.length)} 아티팩트 그룹`,
-    },
-    index: {
-      ready: searchable > 0,
-      state: searchable > 0 ? "검색 가능" : "검색 대기",
-      detail: `${formatNumber(searchable)}개 문서/파일/타임라인 row를 전체 검색 대상으로 사용`,
-    },
-    review: {
-      ready: searchable > 0 || reportReady,
-      warning: warningCount > 0,
-      state: warningCount > 0 ? "검토 필요" : "리뷰 준비",
-      detail: "검색 결과를 source viewer에서 확인한 뒤 relevant, needs-review, excluded, note, tag를 남깁니다.",
-    },
-    report: {
-      ready: reportReady,
-      state: reportReady ? "보고서 가능" : "후보 대기",
-      detail: "evidence tray와 citation, limitation, validation 상태를 보고서 후보에 연결합니다.",
-    },
-  };
-}
-
-function runWorkflowStatusLabel(status) {
-  if (status === "completed") return "완료";
-  if (status === "warning") return "경고";
-  if (status === "blocked") return "차단";
-  return "대기";
-}
-
 function runWorkflowChecklistStatusLabel(status) {
   if (status === "ready") return "확인 준비";
   if (status === "warning") return "주의 필요";
@@ -2438,7 +2293,6 @@ function artifactSignalText(payload) {
 
 function artifactGroupCount(payload, terms) {
   const normalized = normalizeRunPayload(payload);
-  const summary = normalized.summary || {};
   const artifacts = artifactGroupsFromPayload(normalized);
   const steps = Array.isArray(normalized.steps) ? normalized.steps : [];
   const lowerTerms = (terms || []).map((term) => String(term).toLowerCase());
@@ -2460,17 +2314,18 @@ function artifactGroupCount(payload, terms) {
     if (!lowerTerms.some((term) => stepText.includes(term))) continue;
     count += Number(step.artifact_count || step.indicator_count || step.row_count || step.count || 0);
   }
+  const counts = runCounts(normalized);
   if (lowerTerms.some((term) => ["document", "pdf", "office", "ocr"].includes(term))) {
-    count += Number(summary.document_match_count || 0);
+    count += counts.docs;
   }
   if (lowerTerms.some((term) => ["file", "image", "video", "audio", "media"].includes(term))) {
-    count += Number(summary.file_candidate_count || 0);
+    count += counts.files;
   }
   if (lowerTerms.some((term) => ["timeline", "event", "evtx"].includes(term))) {
-    count += Number(summary.timeline_event_count || 0);
+    count += counts.timelineEvents;
   }
   if (lowerTerms.some((term) => ["report", "case", "custody"].includes(term))) {
-    count += Number(summary.report_item_count || 0);
+    count += counts.reviewItems;
   }
   return count;
 }
@@ -2573,8 +2428,7 @@ function renderForensicRibbon(run) {
 }
 
 function renderCaseCommandBar(run) {
-  const summary = run.summary?.summary || {};
-  const reviewCount = summary.report_item_count || 0;
+  const reviewCount = runCounts(run).reviewItems;
   return `
     <section class="case-command-bar" aria-label="Analyst command bar">
       <div class="case-command-main">
@@ -2618,8 +2472,11 @@ function bindTabButtons() {
       activeTab = button.dataset.tab;
       activeViewGroup = groupForTab(activeTab);
       activeArtifactFilter = "";
+      flushWorkbenchState();
       for (const item of detailPanel.querySelectorAll(".tab-button")) {
-        item.classList.toggle("active", item === button);
+        const isActive = item === button;
+        item.classList.toggle("active", isActive);
+        item.setAttribute("aria-current", isActive ? "page" : "false");
       }
       for (const item of detailPanel.querySelectorAll(".forensic-view-mode")) {
         item.classList.toggle("active", item.dataset.tab === activeTab);
@@ -2659,7 +2516,7 @@ function bindTabButtons() {
 function renderShortcutHelp() {
   return `
     <details id="shortcutHelp" class="shortcut-help">
-      <summary>단축키 ${kbd("?")}</summary>
+      <summary>단축키 ${kbd("?")} <span class="reviewer-status" aria-live="polite"></span></summary>
       <div class="shortcut-grid">
         ${SHORTCUTS.map((item) => `
           <div class="shortcut-row">
@@ -2765,6 +2622,10 @@ async function renderActiveTab() {
   bindSearchForm();
   bindSearchResultButtons();
   restoreWorkbenchControls();
+  mountVirtualTables();
+  mountTimelineWidgets();
+  mountCrossDeviceIoc(detailPanel, () => api("/api/ioc/cross-device"));
+  applyTimelineRangeFilter();
   refreshSourceNavigatorState();
 }
 
@@ -2817,15 +2678,13 @@ function tabRecoveryCopy(tab) {
 function renderSummary(payload) {
   const summary = payload.summary || {};
   const outputs = payload.outputs || {};
-  const processing = payload.processing || {};
-  const outputCount = Object.keys(outputs).length;
-  const warningCount = Number(processing.warning_count || 0);
-  const searchableRows = Number(summary.document_match_count || 0)
-    + Number(summary.file_candidate_count || 0)
-    + Number(summary.timeline_event_count || 0);
+  const counts = runCounts(payload);
+  const outputCount = counts.outputs;
+  const warningCount = counts.validationIssues;
+  const searchableRows = counts.docs + counts.files + counts.timelineEvents;
   const source = selectedRun?.request?.root || payload.input_root || payload.root || payload.output_dir || "not recorded";
   const legacySummary = `
-    ${renderWorkflowGuide(summary)}
+    ${renderWorkflowGuide(payload)}
     ${renderUserWorkflowMap()}
     ${renderCaseReadinessDashboard(payload)}
     ${renderE01RunWorkflowStatus(payload)}
@@ -2834,12 +2693,12 @@ function renderSummary(payload) {
     ${renderForensicArtifactNavigator(payload)}
     ${renderRunActionStrip(payload)}
     ${renderProcessingSummary(payload)}
-    ${renderWorkspaceCards(summary)}
+    ${renderWorkspaceCards(payload)}
     <div class="metric-grid">
-      ${metric("문서 히트", summary.document_match_count)}
-      ${metric("파일 후보", summary.file_candidate_count)}
-      ${metric("시간축 이벤트", summary.timeline_event_count)}
-      ${metric("지표", payload.steps?.find((step) => step.name === "indicators")?.indicator_count || 0)}
+      ${metric("문서 히트", counts.docs)}
+      ${metric("파일 후보", counts.files)}
+      ${metric("시간축 이벤트", counts.timelineEvents)}
+      ${metric("지표", counts.indicators)}
       ${metric("추출 파일", (summary.docs_extracted_count || 0) + (summary.files_extracted_count || 0))}
     </div>
     ${renderCaseDbPanel(payload)}
@@ -2877,9 +2736,9 @@ function renderSummary(payload) {
         </div>
       </div>
       <div class="operator-summary-metrics" aria-label="Case totals">
-        ${metric("문서", summary.document_match_count)}
-        ${metric("파일", summary.file_candidate_count)}
-        ${metric("타임라인", summary.timeline_event_count)}
+        ${metric("문서", counts.docs)}
+        ${metric("파일", counts.files)}
+        ${metric("타임라인", counts.timelineEvents)}
         ${metric("검색 대상", searchableRows)}
         ${metric("산출물", outputCount)}
         ${metric("이슈", warningCount)}
@@ -3025,16 +2884,14 @@ function renderE01SmokeStageStatus(payload) {
 }
 
 function renderCaseReadinessDashboard(payload) {
-  const summary = payload.summary || {};
-  const processing = payload.processing || {};
-  const outputs = payload.outputs || {};
   const root = selectedRun?.request?.root || payload.input_root || payload.root || payload.output_dir || "";
   const lowerRoot = String(root).toLowerCase();
   const isE01 = lowerRoot.endsWith(".e01") || lowerRoot.includes(".e01.");
-  const warningCount = Number(processing.warning_count || 0);
-  const searchableRows = Number(summary.document_match_count || 0) + Number(summary.file_candidate_count || 0) + Number(summary.timeline_event_count || 0);
-  const reportCandidates = Number(summary.report_item_count || 0);
-  const outputCount = Object.keys(outputs).length;
+  const counts = runCounts(payload);
+  const warningCount = counts.validationIssues;
+  const searchableRows = counts.docs + counts.files + counts.timelineEvents;
+  const reportCandidates = counts.reviewItems;
+  const outputCount = counts.outputs;
   const readinessCards = [
     {
       label: "입력",
@@ -3169,6 +3026,8 @@ function renderProcessingSummary(payload) {
   const caps = processing.caps || {};
   const warnings = Array.isArray(processing.warnings) ? processing.warnings : [];
   const steps = Array.isArray(payload.steps) ? payload.steps : [];
+  const counts = runCounts(payload);
+  const issueBreakdown = counts.validationIssueBreakdown;
   return `
     <section class="processing-summary" aria-label="Processing transparency">
       <div class="processing-summary-head">
@@ -3177,8 +3036,9 @@ function renderProcessingSummary(payload) {
           <h3>${escapeHtml(processing.profile_label || "처리 프로파일")}</h3>
           <p>완료 표시가 누락을 숨기지 않도록 처리, 제외, 제한, 빈 결과를 함께 보여줍니다.</p>
         </div>
-        <span class="warning-badge ${escapeHtml(processing.highest_warning_level || "none")}">
-          ${escapeHtml(processing.highest_warning_level || "none")} · ${formatNumber(processing.warning_count || 0)}
+        <span class="warning-badge ${escapeHtml(processing.highest_warning_level || "none")}"
+          title="검증 이슈 ${formatNumber(counts.validationIssues)}건 = 단계 경고 ${formatNumber(issueBreakdown.stepWarnings)} + 파서 오류 ${formatNumber(issueBreakdown.parserErrors)}">
+          ${escapeHtml(processing.highest_warning_level || "none")} · ${formatNumber(counts.validationIssues)}
         </span>
       </div>
       ${renderParserWarningBadges(payload)}
@@ -3337,6 +3197,7 @@ async function loadRunOutputPreview(outputName) {
     const payload = await api(`/api/runs/${selectedRunId}/outputs/${encodeURIComponent(outputName)}/preview`);
     viewer.innerHTML = renderRunOutputViewer(payload);
     bindViewerButtons();
+    mountWorkbenchHexViewers(viewer);
   } catch (error) {
     viewer.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
   } finally {
@@ -3515,27 +3376,28 @@ function renderCaseDbPanel(payload) {
   `;
 }
 
-function renderWorkspaceCards(summary) {
+function renderWorkspaceCards(payload) {
+  const counts = runCounts(payload);
   const cards = [
     {
       label: "1. Triage",
       title: "Start with bounded inventory",
       text: "Open only the files, document hits, artifacts, or timeline page you need. Each heavy table is loaded in small pages.",
-      metric: `${formatNumber((summary.file_candidate_count || 0) + (summary.document_match_count || 0))} indexed rows`,
+      metric: `${formatNumber(counts.files + counts.docs)} indexed rows`,
       tab: "files",
     },
     {
       label: "2. Find",
       title: "Search across evidence",
       text: "Keyword search reaches documents, logs, browser/web artifacts, file metadata, timeline rows, and optional OCR.",
-      metric: `${formatNumber(summary.document_match_count || 0)} document hits`,
+      metric: `${formatNumber(counts.docs)} document hits`,
       tab: "search",
     },
     {
       label: "3. Review",
       title: "Turn hits into decisions",
       text: "원본을 확인하고 태그, 관련성, 보고서 포함 여부를 결정합니다.",
-      metric: `보고서 후보 ${formatNumber(summary.report_item_count || 0)}건`,
+      metric: `보고서 후보 ${formatNumber(counts.reviewItems)}건`,
       tab: "review",
     },
     {
@@ -3563,8 +3425,9 @@ function renderWorkspaceCards(summary) {
   `;
 }
 
-function renderWorkflowGuide(summary) {
-  const hasSearchableData = (summary.document_match_count || 0) + (summary.file_candidate_count || 0) + (summary.timeline_event_count || 0) > 0;
+function renderWorkflowGuide(payload) {
+  const counts = runCounts(payload);
+  const hasSearchableData = counts.docs + counts.files + counts.timelineEvents > 0;
   return `
     <section class="guidance-card">
       <div>
@@ -3596,118 +3459,13 @@ function renderHighlightList(highlights) {
   return `<div class="dense-list">${rows.map((item) => `<div class="dense-row"><strong>${escapeHtml(item.name || item.path || "item")}</strong><span>${escapeHtml(item.path || item.summary || "")}</span></div>`).join("")}</div>`;
 }
 
-function renderTimeline(payload) {
-  const rows = payload.events || [];
-  const offset = payload.pagination?.offset || 0;
-  if (!rows.length) return '<p class="empty-state">No timeline events.</p>';
-  return `
-    ${renderPaginationNotice(payload.pagination, "timeline")}
-    ${renderTimelineReviewLanes(payload)}
-    <div class="review-list-shell" role="region" aria-label="Timeline result list">
-      <table class="data-table">
-        <thead><tr><th>Time</th><th>Source</th><th>Type</th><th>Summary</th><th></th></tr></thead>
-        <tbody>
-          ${rows.map((event, index) => {
-            const pointer = `/events/${offset + index}`;
-            const context = { source: "timeline", pointer, title: event.summary || "timeline event", note: event.summary || "", path: event.path || "", tags: ["timeline", event.source, event.event_type].filter(Boolean) };
-            const inspector = {
-              title: event.summary || "Timeline event",
-              source: event.source || "timeline",
-              kind: event.event_type || "event",
-              timestamp: event.timestamp || "",
-              path: event.path || "",
-              pointer,
-              preview: event.summary || "",
-              chips: ["timeline", event.source, event.event_type].filter(Boolean),
-              reviewContext: context,
-            };
-            return `
-              <tr class="selectable-result-row" data-filter="${rowText(event)}" ${rowInspectorAttributes(inspector)} ${event.path ? `data-viewer-row-path="${escapeHtml(event.path)}" data-review-context="${escapeHtml(JSON.stringify(context))}"` : ""}>
-                <td>${escapeHtml(event.timestamp)}</td>
-                <td>${escapeHtml(event.source)}</td>
-                <td>${escapeHtml(event.event_type)}</td>
-                <td><strong>${escapeHtml(event.summary)}</strong><span>${escapeHtml(event.path || "")}</span></td>
-                <td>${bookmarkButton("timeline", pointer, event.summary)}</td>
-              </tr>
-            `;
-          }).join("")}
-        </tbody>
-      </table>
-    </div>
-    ${renderPaginationControls(payload.pagination, "timeline")}
-  `;
-}
-
-function renderTimelineReviewLanes(payload) {
-  const rows = payload.events || [];
-  const lanes = [
-    {
-      label: "파일 생성/수정",
-      filter: "file path modified created",
-      terms: ["file", "path", "modified", "created", "mft", "usn"],
-      hint: "문서 작성, 복사, 삭제 직전 파일 활동을 먼저 봅니다.",
-    },
-    {
-      label: "웹·AI 활동",
-      filter: "browser url ai chatgpt claude gemini perplexity",
-      terms: ["browser", "url", "web", "ai", "chatgpt", "claude", "gemini", "perplexity"],
-      hint: "검색, 다운로드, AI 프롬프트, 웹 접속 흐름을 모읍니다.",
-    },
-    {
-      label: "윈도우 이벤트",
-      filter: "evtx eventlog logon powershell defender",
-      terms: ["evtx", "eventlog", "logon", "powershell", "defender", "wmi", "task"],
-      hint: "로그온, 실행, 보안 이벤트를 시간순으로 확인합니다.",
-    },
-    {
-      label: "외부장치/반출",
-      filter: "usb shellbag mount drive external download",
-      terms: ["usb", "shellbag", "mount", "drive", "external", "download"],
-      hint: "USB 연결, 다운로드, 외부 저장장치 관련 단서를 봅니다.",
-    },
-    {
-      label: "메신저/메일",
-      filter: "chat kakao telegram whatsapp mail email attachment",
-      terms: ["chat", "kakao", "telegram", "whatsapp", "mail", "email", "attachment"],
-      hint: "대화, 메일, 첨부파일 흐름을 사건 시간에 맞춰 봅니다.",
-    },
-    {
-      label: "삭제/위험",
-      filter: "delete removed warning risk validation",
-      terms: ["delete", "deleted", "removed", "warning", "risk", "validation"],
-      hint: "삭제 흔적과 검증 경고가 있는 타임라인만 좁힙니다.",
-    },
-  ];
-  return `
-    <details class="tab-assist-drawer timeline-review-lanes" aria-label="타임라인 사건 재구성 레인" data-testid="timeline-review-lanes">
-      <summary>
-        <span>
-          <em>시간 재구성</em>
-          <strong>행위별 필터 ${formatNumber(lanes.length)}개 · 이벤트 ${formatNumber(rows.length)}개</strong>
-        </span>
-      </summary>
-      <div class="tab-assist-body timeline-lane-grid">
-        ${lanes.map((lane) => {
-          const count = rows.filter((row) => lane.terms.some((term) => compactRowFilterText(row).includes(term))).length;
-          return `
-            <button class="secondary-button timeline-lane-card" type="button" data-timeline-lane-filter="${escapeHtml(lane.filter)}" title="${escapeHtml(lane.hint)}">
-              <span>${escapeHtml(lane.label)}</span>
-              <b>${formatNumber(count)}</b>
-              <em>${escapeHtml(lane.hint)}</em>
-            </button>
-          `;
-        }).join("")}
-      </div>
-    </details>
-  `;
-}
-
 function renderIndicators(payload) {
   const rows = payload.indicators || [];
   const summary = payload.summary || {};
   const offset = payload.pagination?.offset || 0;
   if (!rows.length) return '<p class="empty-state">No indicators were found in this run.</p>';
   return `
+    ${renderCrossDeviceIocShell()}
     <section class="guidance-card">
       <div>
         <p class="eyebrow">ioc review</p>
@@ -3830,194 +3588,105 @@ function renderChipList(items) {
   return `<div class="eventlog-chip-row">${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>`;
 }
 
-function renderArtifacts(payload) {
-  const groups = payload.artifacts || {};
-  const rows = [];
-  for (const [kind, artifactPayload] of Object.entries(groups)) {
-    const offset = artifactPayload.pagination?.offset || 0;
-    for (const [index, artifact] of (artifactPayload.artifacts || []).entries()) {
-      rows.push({ kind, index: offset + index, artifact });
-    }
-  }
-  const displayRows = activeArtifactFilter
-    ? rows.filter(({ kind, artifact }) => artifactSourceCategory(kind, artifact) === activeArtifactFilter)
-    : rows;
-  const pagination = activeArtifactFilter
-    ? filteredPagination(displayRows.length, "artifacts")
-    : artifactPaginationSummary(groups, rows.length);
-  if (!displayRows.length) return '<p class="empty-state">No artifact rows.</p>';
-  return `
-    ${renderPaginationNotice(pagination, "artifacts")}
-    ${renderArtifactValidationSummary(displayRows)}
-    <div class="review-list-shell" role="region" aria-label="Artifact result list">
-      <table class="data-table">
-        <thead><tr><th>Kind</th><th>Type</th><th>Provider</th><th>Evidence</th><th></th></tr></thead>
-        <tbody>
-          ${displayRows.map(({ kind, index, artifact }) => {
-            const sourceCategory = artifactSourceCategory(kind, artifact);
-            const context = { source: `artifacts:${kind}`, pointer: `/${kind}/${index}`, title: artifact.artifact_type || kind, note: artifactPreviewText(artifact), path: artifact.path || "", tags: ["artifact", kind, artifact.artifact_type].filter(Boolean) };
-            const inspector = {
-              title: artifactPreviewText(artifact),
-              source: kind,
-              kind: artifact.artifact_type || "artifact",
-              provider: artifact.provider || "",
-              timestamp: artifact.timestamp || artifact.last_write_time || "",
-              path: artifact.path || "",
-              pointer: context.pointer,
-              preview: artifactPreviewText(artifact),
-              chips: ["artifact", kind, artifact.artifact_type, artifact.provider].filter(Boolean),
-              reviewContext: context,
-            };
-            return `
-              <tr class="selectable-result-row" data-source-category="${escapeHtml(sourceCategory)}" data-filter="${rowText({ kind, ...artifact })}" ${rowInspectorAttributes(inspector)} ${artifact.path ? `data-viewer-row-path="${escapeHtml(artifact.path)}" data-review-context="${escapeHtml(JSON.stringify(context))}"` : ""}>
-                <td>${escapeHtml(kind)}</td>
-                <td>${escapeHtml(artifact.artifact_type)}</td>
-                <td>${escapeHtml(artifact.provider)}</td>
-                <td>
-                  <strong>${escapeHtml(artifactPreviewText(artifact))}</strong>
-                  ${renderArtifactValidationBadges(artifact)}
-                  <span>${escapeHtml(artifact.path || "")}</span>
-                  ${renderArtifactDetails(artifact)}
-                </td>
-                <td class="action-stack">${artifactActionButtons(kind, index, artifact)}</td>
-              </tr>
-            `;
-          }).join("")}
-        </tbody>
-      </table>
-    </div>
-    ${renderPaginationControls(pagination, "artifacts")}
-  `;
+// --- True virtual scroll wiring (R2-1) -------------------------------------
+// Tables that can hold thousands of rows mount a VirtualTable instead of
+// rendering every row into the DOM. Mount specs are queued during render
+// (the tbody does not exist yet) and materialized after innerHTML lands.
+
+const pendingVirtualMounts = [];
+
+const powerReviewer = new PowerReviewer({
+  detailPanel: () => detailPanel,
+  activeTab: () => activeTab,
+  runId: () => selectedRunId,
+  api: (path, options) => api(path, options),
+  getVirtualTable: (key) => getVirtualTable(key),
+  openPreview: (path, reviewContext) => loadEvidencePreview(path, reviewContext),
+  onStatus: (text) => {
+    const el = detailPanel?.querySelector(".reviewer-status");
+    if (el) el.textContent = text;
+  },
+});
+
+function queueVirtualTable(spec) {
+  pendingVirtualMounts.push(spec);
 }
 
-function filteredPagination(total, collection) {
-  return {
-    collection,
-    offset: 0,
-    limit: Math.max(total, 1),
-    returned: total,
-    total,
-    previous_offset: null,
-    next_offset: null,
+function workbenchRowFilterPredicate() {
+  const visibleNeedle = (detailPanel.querySelector("#tableFilter")?.value || "").trim().toLowerCase();
+  const sourceNeedle = (detailPanel.querySelector("#sourceFilterInput")?.value || "").trim().toLowerCase();
+  const timeNeedle = (detailPanel.querySelector("#timeFilterInput")?.value || "").trim().toLowerCase();
+  const artifactNeedle = activeTab === "artifacts" ? activeArtifactFilter : "";
+  if (!visibleNeedle && !sourceNeedle && !timeNeedle && !artifactNeedle) return null;
+  return (item) => {
+    if (artifactNeedle && item.sourceCategory !== artifactNeedle) return false;
+    const haystack = item.filterText || "";
+    if (visibleNeedle && !haystack.includes(visibleNeedle)) return false;
+    if (sourceNeedle && !haystack.includes(sourceNeedle)) return false;
+    if (timeNeedle && !haystack.includes(timeNeedle)) return false;
+    return true;
   };
 }
 
-function artifactPaginationSummary(groups, returned) {
-  let total = 0;
-  let limit = 0;
-  let offset = null;
-  let previousOffset = null;
-  let nextOffset = null;
-  for (const artifactPayload of Object.values(groups || {})) {
-    const pagination = artifactPayload?.pagination;
-    if (!pagination) continue;
-    total += Number(pagination.total || 0);
-    limit = Math.max(limit, Number(pagination.limit || 0));
-    offset = offset === null ? Number(pagination.offset || 0) : Math.min(offset, Number(pagination.offset || 0));
-    if (pagination.previous_offset !== null && pagination.previous_offset !== undefined) {
-      previousOffset = previousOffset === null ? Number(pagination.previous_offset || 0) : Math.min(previousOffset, Number(pagination.previous_offset || 0));
-    }
-    if (pagination.next_offset !== null && pagination.next_offset !== undefined) {
-      nextOffset = nextOffset === null ? Number(pagination.next_offset || 0) : Math.min(nextOffset, Number(pagination.next_offset || 0));
-    }
+let timelineRangeFilter = null;
+
+function applyTimelineRangeFilter() {
+  const rows = detailPanel.querySelectorAll("[data-timeline-ts]");
+  if (!timelineRangeFilter) {
+    for (const row of rows) row.hidden = false;
+    return;
   }
-  if (!limit && !total && !returned) return null;
-  return {
-    collection: "artifacts",
-    offset: offset ?? 0,
-    limit: limit || Math.max(returned, 1),
-    returned,
-    total: total || returned,
-    previous_offset: previousOffset,
-    next_offset: nextOffset,
-  };
-}
-
-function renderArtifactValidationSummary(rows) {
-  const summary = summarizeArtifactValidation(rows);
-  if (!summary.total) return "";
-  return `
-    <section class="artifact-validation-summary" aria-label="Artifact validation summary" data-testid="artifact-validation-summary">
-      <div>
-        <p class="eyebrow">artifact validation</p>
-        <strong>${escapeHtml(summary.total)} row(s) · ${escapeHtml(summary.validationRequired)} need validation · ${escapeHtml(summary.notCommercialReady)} not commercial-ready</strong>
-        <span>${escapeHtml(summary.reportable)} reportable row(s) · ${escapeHtml(summary.blockerTotal)} blocker reference(s)</span>
-      </div>
-      <div class="artifact-validation-summary-grid">
-        <article>
-          <strong>Top gaps</strong>
-          <span>${escapeHtml(summary.topGaps.map(([gap, count]) => `${gap} ${count}`).join(" · ") || "No gap gates")}</span>
-        </article>
-        <article>
-          <strong>Top blockers</strong>
-          <span>${escapeHtml(summary.topBlockers.map(([blocker, count]) => `${blocker} ${count}`).join(" · ") || "No blocker listed")}</span>
-        </article>
-      </div>
-    </section>
-  `;
-}
-
-function summarizeArtifactValidation(rows) {
-  const gapCounts = new Map();
-  const blockerCounts = new Map();
-  let validationRequired = 0;
-  let notCommercialReady = 0;
-  let reportable = 0;
-  let blockerTotal = 0;
+  const { start, end } = timelineRangeFilter;
   for (const row of rows) {
-    const artifact = row.artifact || {};
-    const details = artifact.details || {};
-    const gates = Array.isArray(details.core_accuracy_gates) ? details.core_accuracy_gates : [];
-    if (details.validation_required || gates.some((gate) => gate.status === "validation-required")) {
-      validationRequired += 1;
-    }
-    if (details.reportability === "reportable") {
-      reportable += 1;
-    }
-    if (details.commercial_grade_ready === false || gates.some((gate) => gate.commercial_grade_ready === false)) {
-      notCommercialReady += 1;
-    }
-    for (const gate of gates) {
-      if (gate.gap_id) gapCounts.set(gate.gap_id, (gapCounts.get(gate.gap_id) || 0) + 1);
-    }
-    for (const blocker of artifactCommercialBlockers(details)) {
-      blockerTotal += 1;
-      blockerCounts.set(blocker, (blockerCounts.get(blocker) || 0) + 1);
-    }
+    const ts = row.dataset.timelineTs || "";
+    row.hidden = Boolean(ts) && (ts < start || ts >= end);
   }
-  const byCount = ([leftKey, leftCount], [rightKey, rightCount]) => rightCount - leftCount || String(leftKey).localeCompare(String(rightKey));
-  return {
-    total: rows.length,
-    validationRequired,
-    notCommercialReady,
-    reportable,
-    blockerTotal,
-    topGaps: Array.from(gapCounts.entries()).sort(byCount).slice(0, 5),
-    topBlockers: Array.from(blockerCounts.entries()).sort(byCount).slice(0, 5),
-  };
 }
 
-function artifactCommercialBlockers(details) {
-  const blockers = new Set();
-  const candidateLists = [
-    details.commercial_grade_blockers,
-    details.evtx_commercial_readiness_profile?.blockers,
-    details.registry_native_depth_readiness_profile?.blockers,
-    details.ntfs_native_depth_readiness_profile?.blockers,
-    details.account_privilege_deep_parse_profile?.commercial_grade_blockers,
-    details.execution_artifact_validation_profile?.commercial_grade_blockers,
-    details.execution_report_grade_assessment?.blockers,
-    details.os_account_report_grade_assessment?.blockers,
-    details.registry_report_grade_assessment?.blockers,
-    details.ntfs_report_grade_assessment?.blockers,
-  ];
-  for (const list of candidateLists) {
-    if (!Array.isArray(list)) continue;
-    for (const item of list) {
-      if (item) blockers.add(String(item));
-    }
+function mountTimelineWidgets() {
+  mountTimelineHeatmap(
+    detailPanel,
+    () => api(`/api/runs/${encodeURIComponent(selectedRunId)}/timeline-histogram`),
+    {
+      onRangeSelect: (start, end) => {
+        timelineRangeFilter = { start, end };
+        applyTimelineRangeFilter();
+      },
+      onRangeClear: () => {
+        timelineRangeFilter = null;
+        applyTimelineRangeFilter();
+      },
+    },
+  );
+}
+
+function mountVirtualTables() {
+  for (const spec of pendingVirtualMounts.splice(0)) {
+    const tbody = detailPanel.querySelector(`tbody[data-virtual-key="${spec.key}"]`);
+    if (!tbody) continue;
+    const shell = tbody.closest(".review-list-shell") || tbody.parentElement;
+    if (shell) shell.classList.add("virtual-scroll");
+    const table = new VirtualTable({
+      tbody,
+      scroller: shell,
+      colCount: spec.colCount,
+      estimatedRowHeight: spec.estimatedRowHeight || 68,
+      overscan: 10,
+      renderRow: (item, index) => {
+        const html = spec.renderRow(item, index);
+        return html.replace("<tr", `<tr data-vindex="${index}"`);
+      },
+      filter: workbenchRowFilterPredicate() || spec.filter || null,
+      onNeedMore: spec.onNeedMore || null,
+      onRendered: () => {
+        bindSearchResultButtons();
+        bindCompareActions();
+        bindBookmarkButtons();
+      },
+    });
+    table.setItems(spec.items || []);
+    registerVirtualTable(spec.key, table);
   }
-  return Array.from(blockers);
 }
 
 function renderArtifactValidationBadges(artifact) {
@@ -4138,6 +3807,7 @@ function renderArtifactDetails(artifact) {
   const aiUsageCard = renderAiUsageArtifactCard(artifact);
   const aiConversationCard = renderAiConversationArtifactCard(artifact);
   const cloudExportReviewCard = renderCloudExportReviewArtifactCard(artifact);
+  const kakaoChatCard = renderKakaoArtifactChatCard(artifact);
   return `
     <details class="match-details artifact-inline-details">
       <summary>세부 검증 보기</summary>
@@ -4151,6 +3821,7 @@ function renderArtifactDetails(artifact) {
       ${aiUsageCard}
       ${aiConversationCard}
       ${cloudExportReviewCard}
+      ${kakaoChatCard}
       <details class="artifact-json-preview">
         <summary>Raw JSON 보기</summary>
         <pre>${escapeHtml(JSON.stringify(artifact.details, null, 2))}</pre>
@@ -5182,11 +4853,28 @@ function renderDocsIndexSidecarResults(payload) {
   `;
 }
 
+function renderSearchMatchRow({ match, index }) {
+  const context = bookmarkContextForMatch(match) || {};
+  return `
+    <tr data-filter="${rowText(match)}" ${match.path ? `data-viewer-row-path="${escapeHtml(match.path)}" data-review-context="${escapeHtml(JSON.stringify(context))}" data-search-result-index="${escapeHtml(index)}"` : ""}>
+      <td>${escapeHtml(match.source)}<span>${escapeHtml(match.kind || "")}</span></td>
+      <td><strong>${escapeHtml(match.title || fileName(match.path))}</strong><span>${escapeHtml(match.path || "")}</span>${renderSearchResultLocator(match)}</td>
+      <td>${escapeHtml((match.matched_keywords || []).join(", "))}</td>
+      <td>
+        ${escapeHtml(match.preview || "")}
+        ${renderSearchMetadata(match)}
+      </td>
+      <td class="action-stack">
+        ${reviewActionButtons(match, index)}
+      </td>
+    </tr>
+  `;
+}
+
 export function renderSearchResults(payload, rows) {
   const summary = payload.summary || {};
   const advancedProfile = payload.advanced_search_profile || {};
   const keywordPackProfile = payload.keyword_pack_selection_profile || {};
-  const visibleRows = virtualizedRows(rows, "search");
   const documentErrors = payload.documents?.errors || [];
   if (!rows.length) {
     const ocrErrors = payload.ocr?.errors || [];
@@ -5202,6 +4890,14 @@ export function renderSearchResults(payload, rows) {
       ${renderOcrErrors(ocrErrors)}
     `;
   }
+  const items = rows.map((match, index) => ({ match, index, filterText: compactRowFilterText(match) }));
+  queueVirtualTable({
+    key: "search",
+    colCount: 5,
+    estimatedRowHeight: 88,
+    items,
+    renderRow: renderSearchMatchRow,
+  });
   return `
     <div class="metric-grid search-metrics">
       ${metric("Matches", summary.match_count)}
@@ -5216,29 +4912,15 @@ export function renderSearchResults(payload, rows) {
     ${renderAdvancedSearchProfile(advancedProfile)}
     ${renderKeywordPackSelectionProfile(keywordPackProfile)}
     ${renderSearchAnalysis(payload.analysis)}
-    ${renderVirtualizationNotice(rows, visibleRows, "search matches", "search")}
-    <table class="data-table">
-      <thead><tr><th>출처</th><th>항목</th><th>키워드</th><th>미리보기 / 근거</th><th></th></tr></thead>
-      <tbody>
-        ${visibleRows.map((match, index) => {
-          const context = bookmarkContextForMatch(match) || {};
-          return `
-            <tr data-filter="${rowText(match)}" ${match.path ? `data-viewer-row-path="${escapeHtml(match.path)}" data-review-context="${escapeHtml(JSON.stringify(context))}" data-search-result-index="${escapeHtml(index)}"` : ""}>
-              <td>${escapeHtml(match.source)}<span>${escapeHtml(match.kind || "")}</span></td>
-              <td><strong>${escapeHtml(match.title || fileName(match.path))}</strong><span>${escapeHtml(match.path || "")}</span>${renderSearchResultLocator(match)}</td>
-              <td>${escapeHtml((match.matched_keywords || []).join(", "))}</td>
-              <td>
-                ${escapeHtml(match.preview || "")}
-                ${renderSearchMetadata(match)}
-              </td>
-              <td class="action-stack">
-                ${reviewActionButtons(match, index)}
-              </td>
-            </tr>
-          `;
-        }).join("")}
-      </tbody>
-    </table>
+    <div class="pagination-bar">
+      <span>${formatNumber(rows.length)}건 일치 · 스크롤 가상화 (DOM ~50행)</span>
+    </div>
+    <div class="review-list-shell" role="region" aria-label="Search result list">
+      <table class="data-table">
+        <thead><tr><th>출처</th><th>항목</th><th>키워드</th><th>미리보기 / 근거</th><th></th></tr></thead>
+        <tbody data-virtual-key="search"></tbody>
+      </table>
+    </div>
     ${renderDocumentErrors(documentErrors)}
     ${renderOcrErrors(payload.ocr?.errors || [])}
   `;
@@ -5737,6 +5419,7 @@ export async function loadEvidencePreview(path, reviewContext = null, searchResu
       viewer.dataset.currentSearchResultIndex = String(searchResultIndex);
     }
     bindViewerButtons();
+    mountWorkbenchHexViewers(viewer);
   } catch (error) {
     viewer.innerHTML = `
       <p class="empty-state">${escapeHtml(error.message)}</p>
@@ -5745,6 +5428,12 @@ export async function loadEvidencePreview(path, reviewContext = null, searchResu
   } finally {
     viewer.setAttribute("aria-busy", "false");
   }
+}
+
+function mountWorkbenchHexViewers(container) {
+  mountHexViewers(container, async (path, offset, length) =>
+    api(`/api/runs/${encodeURIComponent(selectedRunId)}/source-hex-range?path=${encodeURIComponent(path)}&offset=${encodeURIComponent(offset)}&length=${encodeURIComponent(length)}`),
+  );
 }
 
 function renderSourceResolutionDiagnostics(detail) {
@@ -6286,6 +5975,9 @@ function renderHexPreview(hexPayload, payload) {
   const rows = hexPayload.rows || [];
   const rangeProfile = hexPayload.range_citation_profile || {};
   const exportUrl = rangeProfile.default_export_url;
+  const canvasShell = payload.path
+    ? `<details class="hex-interactive" open><summary>인터랙티브 헥스 뷰어 (범위 읽기)</summary>${renderHexViewerShell({ path: payload.path, initialOffset: 0, pageLength: 1024 })}</details>`
+    : "";
   return `
     <section class="structured-preview">
       <div class="file-search-summary">
@@ -6294,6 +5986,7 @@ function renderHexPreview(hexPayload, payload) {
         ${metric("Rows", rows.length)}
         ${metric("Range", `${hexPayload.first_offset_hex || "0x0"}-${hexPayload.last_offset_hex || "n/a"}`)}
       </div>
+      ${canvasShell}
       <p class="help-text">Hex 뷰어는 읽기 전용이며 범위가 제한됩니다. 미리보기 SHA256: ${escapeHtml(hexPayload.preview_sha256 || "n/a")}. 바이트 오프셋을 보고하기 전 전체 파일 해시는 원본 메타데이터로 확인하세요.</p>
       <div class="hex-citation-card">
         <strong>Byte range citation</strong>
@@ -7003,11 +6696,12 @@ function renderReport(markdown) {
 function renderReportReadinessGate() {
   const summary = selectedRun?.summary?.summary || {};
   const outputs = selectedRun?.summary?.outputs || {};
+  const counts = runCounts(selectedRun);
   const checks = [
     {
       label: "선별 증거",
-      count: Number(summary.report_item_count || 0),
-      ready: Number(summary.report_item_count || 0) > 0,
+      count: counts.reviewItems,
+      ready: counts.reviewItems > 0,
       action: "review",
       detail: "관련 있음 + 보고서 포함으로 표시된 항목",
     },
@@ -7020,14 +6714,14 @@ function renderReportReadinessGate() {
     },
     {
       label: "인용 근거",
-      count: Number(summary.report_item_count || 0),
-      ready: Number(summary.report_item_count || 0) > 0,
+      count: counts.reviewItems,
+      ready: counts.reviewItems > 0,
       action: "review",
       detail: "source, pointer, parser, offset/index",
     },
     {
       label: "제한사항",
-      count: Number(summary.warning_count || summary.validation_issue_count || 0),
+      count: counts.validationIssues,
       ready: true,
       action: "summary",
       detail: "검증 경고와 parser limitation 명시",
@@ -7080,7 +6774,7 @@ function renderReviewBoard(payload) {
   const bookmarks = payload.case.bookmarks || [];
   if (!bookmarks.length) {
     return `
-      ${renderReviewStateDashboard([], summary)}
+      ${renderReviewStateDashboard([], payload.case.summary || {})}
       <section class="guidance-card">
         <p class="eyebrow">review board</p>
         <h3>No reviewed evidence yet</h3>
@@ -7256,6 +6950,7 @@ function renderCaseReportPanel(summary, casePayload) {
               <option value="executive-summary">Executive summary</option>
               <option value="technical-appendix">Technical appendix</option>
               <option value="hash-only">Hash-only appendix</option>
+              <option value="korean-expert">감정서 (Korean expert)</option>
             </select>
           </label>
           <label>
@@ -7458,6 +7153,8 @@ function renderReviewHistory(bookmark) {
 
 function bindBookmarkButtons() {
   for (const button of detailPanel.querySelectorAll("[data-bookmark-source]")) {
+    if (button.dataset.bookmarkBound) continue;
+    button.dataset.bookmarkBound = "1";
     button.addEventListener("click", async () => {
       const tag = activeTab === "artifacts" ? "artifact" : activeTab;
       button.disabled = true;
@@ -7617,6 +7314,21 @@ function updateClientFilterSummary() {
     summaryAnchor.insertAdjacentElement("afterend", summary);
   }
   const visibleCount = rows.filter((row) => !row.hidden).length;
+  // Virtualized tables report logical counts, not mounted DOM rows.
+  for (const key of ["artifacts", "search"]) {
+    const table = getVirtualTable(key);
+    if (table && table.items?.length) {
+      const virtualVisible = table.count;
+      const virtualTotal = table.items.length;
+      summary.hidden = !filterActive;
+      summary.classList.toggle("empty", filterActive && virtualVisible === 0);
+      detailPanel.classList.toggle("client-filter-empty", filterActive && virtualVisible === 0 && virtualTotal > 0);
+      summary.textContent = filterActive
+        ? `현재 화면 필터 결과 ${formatNumber(virtualVisible)}건 / 로드된 행 ${formatNumber(virtualTotal)}건`
+        : "";
+      return;
+    }
+  }
   detailPanel.classList.toggle("client-filter-empty", filterActive && visibleCount === 0 && rows.length > 0);
   summary.hidden = !filterActive;
   summary.classList.toggle("empty", filterActive && visibleCount === 0);
@@ -7626,6 +7338,10 @@ function updateClientFilterSummary() {
 }
 
 export function applyWorkbenchFilters() {
+  const predicate = workbenchRowFilterPredicate();
+  for (const key of ["artifacts", "search"]) {
+    applyVirtualTableFilter(key, predicate);
+  }
   const visibleNeedle = detailPanel.querySelector("#tableFilter")?.value.trim().toLowerCase() || "";
   const sourceNeedle = detailPanel.querySelector("#sourceFilterInput")?.value.trim().toLowerCase() || "";
   const timeNeedle = detailPanel.querySelector("#timeFilterInput")?.value.trim().toLowerCase() || "";
@@ -7665,7 +7381,6 @@ export function currentWorkbenchControls() {
     column_preset: detailPanel.querySelector("#columnPresetInput")?.value || "analyst",
   };
 }
-
 
 const ROW_FILTER_TEXT_LIMIT = 900;
 const ROW_FILTER_KEYS = [
@@ -7724,7 +7439,6 @@ function appendRowFilterFragments(fragments, value, depth) {
     appendRowFilterFragments(fragments, value[key], depth + 1);
   }
 }
-
 
 function viewerNavigationStorageKey() {
   return `${VIEWER_NAVIGATION_STORAGE_PREFIX}${selectedRunId || "default"}`;
@@ -8766,7 +8480,19 @@ function bindKeyboardShortcuts() {
       if (toggleViewerReportShortcut()) event.preventDefault();
       return;
     }
+    if (!event.metaKey && !event.ctrlKey && !event.altKey && /^[jkbre]$/.test(event.key.toLowerCase())) {
+      if (await powerReviewer.handleKey(event.key)) {
+        event.preventDefault();
+        return;
+      }
+    }
     if (!event.metaKey && !event.ctrlKey && !event.altKey && /^[1-5]$/.test(event.key)) {
+      // Digits toggle priority tags on the focused review row; without a row
+      // cursor they keep the legacy view-group switch behavior.
+      if (await powerReviewer.handleKey(event.key)) {
+        event.preventDefault();
+        return;
+      }
       event.preventDefault();
       await switchViewGroupByIndex(Number(event.key) - 1);
       return;
@@ -8883,9 +8609,20 @@ function refreshReviewSelectionUi() {
   }
 }
 
+function syncMissionStrip(tab) {
+  const lane = workflowLaneForTab(tab).id;
+  const missionStep = { intake: "intake", triage: "triage", review: "deliver", deliver: "report" }[lane] || "review";
+  for (const item of document.querySelectorAll(".mission-strip [data-mission-step]")) {
+    const isCurrent = item.dataset.missionStep === missionStep;
+    item.classList.toggle("active", isCurrent);
+    item.setAttribute("aria-current", isCurrent ? "step" : "false");
+  }
+}
+
 export async function switchTab(tab, options = {}) {
   if (!tab) return;
   activeTab = tab;
+  syncMissionStrip(tab);
   if (tab !== "artifacts") activeArtifactFilter = "";
   if (options.stageId) {
     activeStageId = options.stageId;
@@ -8893,6 +8630,7 @@ export async function switchTab(tab, options = {}) {
     activeStageId = stageIdForTab(caseStageFlow(selectedRun, tab, ""), tab);
   }
   activeStageSubactionId = options.stageSubactionId || "";
+  flushWorkbenchState();
   const nextGroup = groupForTab(tab);
   const tabIsVisible = Array.from(detailPanel.querySelectorAll(".tab-button")).some((item) => item.dataset.tab === tab);
   if (activeViewGroup !== nextGroup || !tabIsVisible) {
@@ -8906,7 +8644,9 @@ export async function switchTab(tab, options = {}) {
     return;
   }
   for (const item of detailPanel.querySelectorAll(".tab-button")) {
-    item.classList.toggle("active", item.dataset.tab === tab);
+    const isActive = item.dataset.tab === tab;
+    item.classList.toggle("active", isActive);
+    item.setAttribute("aria-current", isActive ? "page" : "false");
   }
   await renderActiveTab();
   refreshSourceNavigatorState();
@@ -8928,7 +8668,7 @@ export function groupForTab(tab) {
 
 function pagedUrl(tab) {
   const offset = pageOffsets[tab] || 0;
-  return `/api/runs/${selectedRunId}/${tab}?offset=${offset}&limit=${PAGE_SIZE}`;
+  return `/api/runs/${selectedRunId}/${tab}?offset=${offset}&limit=${APP_PAGE_SIZE}`;
 }
 
 async function loadArtifactsPayload() {
@@ -8936,7 +8676,7 @@ async function loadArtifactsPayload() {
   // produced one and duckdb answered; otherwise fall back to the JSON
   // artifact outputs without changing the render contract.
   try {
-    const columnar = await api(`/api/runs/${encodeURIComponent(selectedRunId)}/columnar-artifacts?offset=${pageOffsets.artifacts || 0}&limit=${PAGE_SIZE}`);
+    const columnar = await api(`/api/runs/${encodeURIComponent(selectedRunId)}/columnar-artifacts?offset=${pageOffsets.artifacts || 0}&limit=${APP_PAGE_SIZE}`);
     if (columnar && columnar.status === "queried" && Array.isArray(columnar.records)) {
       const rows = columnar.records.map((record) => ({
         artifact_type: record.artifact_type || record.artifact_family,
@@ -9060,9 +8800,7 @@ importForm.addEventListener("submit", async (event) => {
   }
 });
 
-sampleRunButton?.addEventListener("click", async () => {
-  sampleRunButton.disabled = true;
-  sampleRunButton.textContent = "샘플 생성 중...";
+export async function runSampleCase() {
   detailPanel.innerHTML = `
     <section class="empty-state-card">
       <p class="eyebrow">sample case</p>
@@ -9083,11 +8821,10 @@ sampleRunButton?.addEventListener("click", async () => {
     await loadRunDetail(payload.run.run_id, activeTab);
   } catch (error) {
     detailPanel.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
-  } finally {
-    sampleRunButton.disabled = false;
-    sampleRunButton.textContent = "샘플 실행";
   }
-});
+}
+
+sampleRunButton?.addEventListener("click", runSampleCase);
 
 doctorButton?.addEventListener("click", async () => {
   doctorButton.disabled = true;
@@ -9361,6 +9098,7 @@ async function removeSelectedRun() {
     selectedRun = null;
     activeStageId = "";
     activeStageSubactionId = "";
+    flushWorkbenchState();
     document.body.classList.remove("analysis-active");
     updateSideStagePanel();
     persistWorkbenchSession({ selectedRunId: null, activeTab: "summary", activeViewGroup: "triage" });
@@ -9374,6 +9112,13 @@ async function removeSelectedRun() {
 initialWorkbenchHtml = detailPanel ? detailPanel.innerHTML : "";
 
 detailPanel?.addEventListener("click", async (event) => {
+  const scrollButton = event.target.closest("[data-scroll-target]");
+  if (scrollButton) {
+    const target = document.querySelector(scrollButton.dataset.scrollTarget);
+    target?.scrollIntoView({ block: "start", behavior: "smooth" });
+    document.querySelector("#rootInput")?.focus({ preventScroll: true });
+    return;
+  }
   const reviewButton = event.target.closest("[data-review-action]");
   if (reviewButton) {
     const targetTab = reviewButton.dataset.reviewAction || "summary";
@@ -9401,8 +9146,49 @@ detailPanel?.addEventListener("click", async (event) => {
   }
 });
 
+// Register the public workbench capabilities consumed through the store
+// contract by app_state/app_compare/app_intake (R3-1: no circular imports).
+for (const [name, fn] of Object.entries({
+  detailPanel: () => detailPanel,
+  runForm: () => runForm,
+  groupForTab,
+  applySessionSnapshot,
+  applyColumnPreset,
+  applyWorkbenchFilters,
+  currentWorkbenchControls,
+  currentSearchPayload: () => currentSearchPayload,
+  currentCaseDbSearchPayload: () => currentCaseDbSearchPayload,
+  renderSearchResults,
+  renderCaseDbSearchResult,
+  bindSearchResultButtons,
+  bindSearchPresetButtons,
+  bindCaseDbReviewButtons,
+  bindCaseDbBatchButtons,
+  bindCaseDbReportExportButton,
+  bindCopyButtons,
+  loadEvidencePreview,
+  renderCompareCitationBundle,
+  switchTab,
+  collectPlanButton,
+  doctorButton,
+  evidenceCheckButton,
+  evidenceCheckStatus,
+  renderEvidenceCheckStatus,
+  runButton,
+  runSampleCase,
+})) {
+  registerWorkbenchBinding(name, fn);
+}
+flushWorkbenchState();
+
 hydrateRunForm();
 restoreWorkbenchSession();
+
+{
+  const themePicker = initThemePicker();
+  const brandRow = document.querySelector(".brand-row");
+  if (brandRow) brandRow.appendChild(themePicker);
+}
 bindRunFormPersistence();
 refreshRunPlanPreview();
 bindKeyboardShortcuts();

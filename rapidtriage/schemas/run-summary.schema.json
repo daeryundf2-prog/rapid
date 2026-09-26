@@ -828,7 +828,8 @@
         "preferred_location_candidate_count",
         "timeline_event_count",
         "silent_failure_risk",
-        "silent_failure_risk_check_count"
+        "silent_failure_risk_check_count",
+        "counts"
       ],
       "properties": {
         "document_candidate_count": {
@@ -922,6 +923,63 @@
         },
         "ioc_hit_count": {
           "type": "integer"
+        },
+        "counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "validation_issues",
+            "validation_issue_breakdown",
+            "outputs",
+            "artifacts",
+            "docs",
+            "files",
+            "timeline_events",
+            "review_items",
+            "indicators"
+          ],
+          "properties": {
+            "validation_issues": {
+              "type": "integer"
+            },
+            "validation_issue_breakdown": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "step_warnings",
+                "parser_errors"
+              ],
+              "properties": {
+                "step_warnings": {
+                  "type": "integer"
+                },
+                "parser_errors": {
+                  "type": "integer"
+                }
+              }
+            },
+            "outputs": {
+              "type": "integer"
+            },
+            "artifacts": {
+              "type": "integer"
+            },
+            "docs": {
+              "type": "integer"
+            },
+            "files": {
+              "type": "integer"
+            },
+            "timeline_events": {
+              "type": "integer"
+            },
+            "review_items": {
+              "type": "integer"
+            },
+            "indicators": {
+              "type": "integer"
+            }
+          }
         }
       }
     },

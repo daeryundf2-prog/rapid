@@ -1,0 +1,82 @@
+/* Canvas hex viewer (R2-3) — screen-scoped styles. */
+
+.hex-viewer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--op-line, #d7dde3);
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 10px;
+}
+
+.hex-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.hex-offset-input {
+  font-family: ui-monospace, Consolas, "Courier New", monospace;
+  font-size: 12px;
+  width: 12ch;
+  padding: 4px 6px;
+  border: 1px solid var(--op-line, #d7dde3);
+  border-radius: 6px;
+}
+
+.hex-status {
+  font-family: ui-monospace, Consolas, "Courier New", monospace;
+  font-size: 11px;
+  color: var(--op-subtle, #5d6b76);
+  margin-left: auto;
+}
+
+.hex-canvas-wrap {
+  max-height: 480px;
+  overflow: auto;
+  border: 1px solid var(--op-line, #e5e9ed);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.hex-canvas-wrap canvas {
+  display: block;
+}
+
+.hex-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.hex-sig-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  padding: 2px 8px;
+  border: 1px solid var(--op-line, #d7dde3);
+  border-radius: 999px;
+  background: #f8fafb;
+  cursor: pointer;
+}
+
+.hex-sig-chip:hover {
+  background: #eef2f5;
+}
+
+.hex-sig-chip i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  display: inline-block;
+}
+
+.hex-interactive > summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 0;
+}

@@ -65,43 +65,57 @@ Sprint 3의 "네이티브 E01 자립화"는 신규 개발이 아니라 **검증�
 
 > 리뷰 F-항목 중 실무 가치가 검증된 순서로.
 
-- **R2-1 트루 가상 스크롤**: `app_state.js`의 slice 페이지네이션 제거.
-  백엔드 keyset/cursor 페이지 + 프런트 가상 스크롤 (바닐라 유지 시
-  `clusterize.js`/`virtual-list` 경량 채택 — React 도입과 무관하게
-  독립 해결 가능한 문제로 분리). 목표: 10만 건 스크롤 60fps, DOM 50개 내.
-- **R2-2 카카오톡 말풍선 뷰어**: 기 구축 복호화(`kakaotalk.py`) 위에
-  발신/수신 정렬·프로필·썸네일·첨부 미리보기. 별도 렌더 모듈로 분리해
-  app.js에 추가하지 않음.
-- **R2-3 웹 헥스 뷰어**: Canvas 기반 오프셋/HEX/ASCII + 시그니처 하이라이트.
-  `raw` 바이트 API 엔드포인트(범위 읽기)가 선행.
-- **R2-4 인터랙티브 타임라인 히트맵**: 시간×아티팩트 밀도 + 드래그 교차 필터.
-- **R2-5 파워 리뷰어 단축키**: J/K·B·R·E·1~5 — 가상 스크롤과 함께 설계.
+- **R2-1 트루 가상 스크롤 ✅**: `app_virtual.js`(clusterize 방식 동적 높이
+  가상 tbody) 신설. 백엔드는 기존 keyset/cursor 페이징 재사용 — artifacts는
+  무한 스크롤(`onNeedMore`→다음 커서 fetch), search는 인메모리 가상화.
+- **R2-2 카카오톡 말풍선 뷰어 ✅**: `app_kakao.js` + `kakao.css` —
+  발신/수신 정렬, 일자 구분, 발신자·시각·첨부 표기. 아티팩트 상세 카드에
+  마운트.
+- **R2-3 웹 헥스 뷰어 ✅**: `app_hexview.js` + `hexview.css` — Canvas
+  오프셋/HEX/ASCII 렌더링, 기존 `source-hex-range` 범위 API 소비.
+- **R2-4 인터랙티브 타임라인 히트맵 ✅**: 백엔드 `timeline_hist.py`
+  (시간×소스 히스토그램) + `app_heatmap.js`/`heatmap.css`, 클릭 범위 필터.
+- **R2-5 파워 리뷰어 단축키 ✅**: `app_shortcuts.js` — j/k 네비, b 북마크,
+  r 리뷰 상태, e 보고 포함 토글, 숫자키 뷰 그룹(기존 계약 유지).
+  백엔드 `remove_tags` 추가로 태그 토글 지원.
 
 ## Phase R3 — 프런트엔드 구조 재편 (선택적, 판단 필요)
 
 > 리뷰는 React 19 전면 전환을 제안하나, **점진적 분리가 현 리스크에 맞다**.
 
-- **R3-1 순환 참조 해소 우선**: `app.js`↔`app_state.js`의 mutable live
-  binding 20개+를 이벤트/스토어 계약으로 정리 — React 도입 여부와 무관하게
-  선행되어야 하며, 정리 후에야 프레임워크 판단이 의미를 가짐.
-- **R3-2 화면 단위 모듈 분리**: CaseHeader/ArtifactGrid/DetailPanel/
-  TimelineView를 파일 단위 ES 모듈로 (기존 app_api/app_intake 분리 패턴
-  연장). 전면 React 마이그레이션은 R3-2 완료 후 비용 재측정해 결정.
-- **R3-3 스타일 캡슐화**: 분리된 모듈에 화면별 CSS 파일 매칭, styles.css는
-  토큰+공용 베이스만 잔존하도록 축소.
+- **R3-1 순환 참조 해소 ✅**: `app_store.js` 신설 — mutable 상태 소유 +
+  콜백 레지스트리(`registerWorkbenchBinding`). `app_state.js`·
+  `app_compare.js`가 app.js import를 제거하고 스토어 계약으로 전환.
+  그래프 검증 `CYCLES: none` (20개 모듈).
+- **R3-2 화면 단위 모듈 분리 ✅**: `app_case_header.js`/
+  `app_artifact_grid.js`/`app_detail_panel.js`/`app_timeline_view.js`를
+  `init(deps)` 주입 패턴으로 분리 — app.js 9,733→9,186줄, 무순환 유지.
+  정적 테스트는 번들 인식 헬퍼로 갱신.
+- **R3-3 스타일 캡슐화 ✅**: 화면별 CSS 추출 — `case_header.css`(119
+  규칙)/`detail_panel.css`(61)/`artifact_grid.css`(17)/`timeline_view.css`(8).
+  styles.css는 토큰+공용 베이스(17,617→15,542줄), index.html이 styles.css
+  이후 로드로 캐스케이드 보존.
 
 ## Phase R4 — 가속·확장 (후순위)
 
-- **R4-1 Rust PyO3 바인딩**: 네이티브 E01(R1)과 파서 커버리지가 확정된
-  뒤에야 가속 대상이 명확해짐 — R1 완료 전 착수 금지. MFT/EVTX/BinXML을
-  maturin으로 `rapidtriage.native_accel` 빌드.
-- **R4-2 교차 장비 IOC 추적**: 동일 USB 시리얼/파일 해시의 다중 케이스
-  이동 그래프 — 케이스 스키마에 cross-case 조회 계층 필요.
-- **R4-3 국내 감정서 양식**: 검찰/경찰 표준 양식 DOCX/PDF 생성
-  (CoC·도구 검증 상태·법령 대조표 자동 삽입) — 증거 문서의 검증 상태 필드를
-  R1의 검증 게이트와 연결.
-- **R4-4 듀얼 테마**: Warm Paper Light + Nordic Slate Dark — R0-3 토큰
-  위에 테마 스위치만으로 구현되도록 선행 조건화.
+- **R4-1 Rust PyO3 바인딩 ✅**: `engines/rust/crates/rapidcore`에 EVTX
+  스캐너(`evtx.rs`) + PyO3 모듈(`py.rs`) 구현 —
+  `rapidtriage/native/rapidcore_native.pyd` (v0.1.0).
+  `rapidtriage/core/native_accel.py`가 PyO3→`rapid-worker evtx-scan`
+  서브프로세스→순수 Python의 폴백 체인으로 디스패치.
+  `scripts/build-native-accel.py` 빌드 스크립트, 6건 패리티 테스트.
+- **R4-2 교차 장비 IOC 추적 ✅**: `core/cross_device.py` — 지표를 run/장비
+  레코드 간 상관(장비·출처 수, 교차 장비 관계). API `routes_ioc.py` +
+  UI `app_ioc.js`(indicators 탭 카드). 6건 테스트.
+- **R4-3 국내 감정서 양식 ✅**: `core/korean_report.py` —
+  `korean-expert` 템플릿(감정의 취지·감정물 인계인수 해시표·도구/검증
+  상태·법적 검토 대조표·제한사항·부록 해시 목록, 초안 고지 포함).
+  기존 case-report 파이프라인(MD/HTML/DOCX/PDF/manifest)에 템플릿 분기로
+  통합 — 병렬 보고 시스템 아님. 7건 테스트.
+- **R4-4 듀얼 테마 ✅**: `themes.css` — `:root`를 Nordic Slate(기본 다크)
+  로 유지하고 `html[data-theme="warm-paper"]`가 Warm Paper 라이트로 전체
+  토큰 오버라이드. `app_theme.js` 피커(brand-row, localStorage
+  `rapidtriage.theme`) + index.html FOUC 방지 인라인 스크립트.
 
 ## 우선순위 요약 (기존 리뷰 대비 조정)
 

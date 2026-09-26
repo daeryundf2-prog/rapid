@@ -429,6 +429,28 @@ The web API also exposes `/api/runs/{run_id}/outputs/{output_name}/preview` (`ru
 - preferred-location candidate counts
 - timeline event counts
 
+`summary.counts` is the canonical headline-counter block. Every UI surface reads its numbers from here instead of re-deriving them:
+
+- `validation_issues` — total of `step_warnings` + `parser_errors` (validation issues include both processing warnings and parser errors; the breakdown keeps them separable)
+- `validation_issue_breakdown.step_warnings` — `processing.warning_count` (step-level warning/notice items)
+- `validation_issue_breakdown.parser_errors` — sum of per-step `parser_error_count`
+- `outputs` — number of registered output entries
+- `artifacts` — total artifact rows across artifact groups
+- `docs` — matched document count
+- `files` — file candidate count
+- `timeline_events` — timeline event count
+- `review_items` — bookmarked include-in-report count; written as `0` at run time and refreshed from `rapidtriage-case.json` when the API serves the summary, because review state changes after the run completes
+- `indicators` — extracted indicator (IOC) count
+
+Run summaries written before this block existed are backfilled by the API with the same formulas (`rapidtriage/core/run/summary.py: derive_counts`), so `summary.counts` is always present on `/api/runs/{run_id}` and `/api/runs/{run_id}/summary` responses.
+
+### v2 workbench browse endpoints
+
+The React workbench (`/v2`) reads the same run outputs through two additional browse endpoints:
+
+- `GET /api/runs/{run_id}/tree` — returns `{"run_id", "root", "nodes"}` where `nodes` is the evidence-tree hierarchy with per-node `id`, `label`, `count`, optional `collection` (`files`, `artifacts`, `docs`, `timeline`, `indicators`, `review`, `issues`), optional `kind`/`artifact_type`/`category` filters, and nested `children`. Artifact nodes are grouped into analyst-facing categories (OS 계정, 이벤트 로그, 레지스트리, 실행 흔적, 파일 사용, 원격 접속, 브라우저, 메신저·메일, 클라우드 내보내기, 모바일, 미디어, 문서, 메모리, 파일시스템·시스템) and per-node counts come from each output's `summary` block via a bounded head scan, so the endpoint does not fully parse multi-MB artifact payloads. Node counts follow `summary.counts` semantics.
+- `GET /api/runs/{run_id}/issues` — returns `{"issues": [...], "count"}` with normalized validation-issue rows (`step`, `kind` = `단계 경고`/`파서 오류`, `level`, `message`). Rows mirror the canonical formula: `processing.warnings` entries plus `parser_errors` entries extracted from each `artifacts_*` output. `count` equals `summary.counts.validation_issues` for the same run.
+
 `highlights` currently contains:
 
 - `document_hits`

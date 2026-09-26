@@ -25,6 +25,9 @@ fn run(args: Vec<String>) -> Result<(), String> {
         println!("rapid-worker {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
+    if args.first().map(String::as_str) == Some("evtx-scan") {
+        return emit_evtx_scan(&args[1..]);
+    }
     if args.first().map(String::as_str) != Some("parse") {
         return Err(format!("unsupported command: {}", args[0]));
     }
@@ -48,8 +51,33 @@ fn run(args: Vec<String>) -> Result<(), String> {
 
 fn print_help() {
     println!(
-        "rapid-worker\n\nCommands:\n  --version\n  parse --kind noop --source PATH [--case-id CASE] [--source-id SOURCE]\n  parse --kind file-inventory --source PATH [--case-id CASE] [--source-id SOURCE] [--max-records N]\n  parse --kind evtx-inventory --source PATH [--case-id CASE] [--source-id SOURCE] [--max-records N]\n  parse --kind evtx-records --source PATH [--case-id CASE] [--source-id SOURCE] [--max-records N]"
+        "rapid-worker\n\nCommands:\n  --version\n  evtx-scan PATH [--max-records N]\n  parse --kind noop --source PATH [--case-id CASE] [--source-id SOURCE]\n  parse --kind file-inventory --source PATH [--case-id CASE] [--source-id SOURCE] [--max-records N]\n  parse --kind evtx-inventory --source PATH [--case-id CASE] [--source-id SOURCE] [--max-records N]\n  parse --kind evtx-records --source PATH [--case-id CASE] [--source-id SOURCE] [--max-records N]"
     );
+}
+
+/// Emit the rapidcore::evtx structural scan as JSON (native_accel fallback path).
+fn emit_evtx_scan(args: &[String]) -> Result<(), String> {
+    let path = args
+        .first()
+        .ok_or_else(|| "evtx-scan requires a file path".to_string())?;
+    let mut max_records = 100_000usize;
+    let mut index = 1usize;
+    while index < args.len() {
+        if args[index] == "--max-records" && index + 1 < args.len() {
+            max_records = args[index + 1]
+                .parse()
+                .map_err(|_| "invalid --max-records value".to_string())?;
+            index += 2;
+        } else {
+            return Err(format!("unsupported evtx-scan argument: {}", args[index]));
+        }
+    }
+    let result = rapidcore::evtx::scan_evtx(Path::new(path), max_records)?;
+    println!(
+        "{}",
+        serde_json::to_string(&result).map_err(|err| err.to_string())?
+    );
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq)]

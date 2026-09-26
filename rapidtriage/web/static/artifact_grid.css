@@ -1,0 +1,137 @@
+/* ArtifactGrid screen styles (R3-3). Extracted from styles.css — loaded after it. */
+
+
+
+.artifact-validation-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 5px;
+}
+
+
+.artifact-validation-badges span {
+  width: fit-content;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.05);
+  padding: 2px 7px;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+}
+
+
+.artifact-validation-summary {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(280px, 1.4fr);
+  gap: 12px;
+  margin: 10px 0;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 12% 8%, rgba(240, 184, 75, 0.16), transparent 30%),
+    linear-gradient(135deg, #fffdf8, #f7faf9);
+  padding: 12px;
+}
+
+
+.artifact-validation-summary .eyebrow {
+  margin-bottom: 3px;
+}
+
+
+.artifact-validation-summary strong {
+  display: block;
+  color: var(--ink);
+}
+
+
+.artifact-validation-summary span {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+
+.artifact-validation-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+
+.artifact-validation-summary-grid article {
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.64);
+  padding: 9px;
+}
+
+
+.eventlog-card {
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fffdf8;
+  padding: 10px;
+}
+
+
+.eventlog-card-header {
+  display: grid;
+  gap: 2px;
+}
+
+
+.eventlog-card-header strong {
+  color: var(--ink);
+}
+
+
+.eventlog-card-header span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+
+body.analysis-active .artifact-validation-badges,
+body.has-runs .artifact-validation-badges {
+  gap: 4px !important;
+  margin-top: 4px !important;
+}
+
+
+body.analysis-active .artifact-validation-badges span,
+body.has-runs .artifact-validation-badges span {
+  padding: 2px 6px !important;
+  font-size: 0.58rem !important;
+  letter-spacing: 0 !important;
+  text-transform: none !important;
+}
+
+
+body.analysis-active .core-accuracy-card .eventlog-card-header,
+body.has-runs .core-accuracy-card .eventlog-card-header {
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  align-items: baseline !important;
+  gap: 6px !important;
+}
+
+
+body.analysis-active .core-accuracy-card .eventlog-card-header strong,
+body.has-runs .core-accuracy-card .eventlog-card-header strong {
+  font-size: 0.7rem !important;
+  line-height: 1.1 !important;
+}
+
+
+body.analysis-active .core-accuracy-card .eventlog-card-header span,
+body.has-runs .core-accuracy-card .eventlog-card-header span {
+  font-size: 0.58rem !important;
+  white-space: nowrap !important;
+}

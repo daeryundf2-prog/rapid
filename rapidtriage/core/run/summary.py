@@ -64,6 +64,7 @@ __all__ = [
     "collect_preferred_candidates",
     "count_artifact_types",
     "count_matched_keywords",
+    "derive_counts",
     "infer_processing_profile_label",
     "streaming_parser_stage_row",
     "summarize_document_hits",
@@ -197,6 +198,27 @@ def build_run_summary(
             "timeline_event_count": int(timeline_payload.get("summary", {}).get("event_count", 0)),
             "silent_failure_risk": bool(silent_failure.get("silent_failure_risk")),
             "silent_failure_risk_check_count": int(silent_failure.get("risk_check_count", 0)),
+            # Canonical counters — the UI must read every headline number from
+            # this block instead of re-deriving counts with local formulas.
+            "counts": {
+                "validation_issues": int(processing_summary.get("warning_count") or 0)
+                + sum(int(step.get("parser_error_count") or 0) for step in step_rows),
+                "validation_issue_breakdown": {
+                    "step_warnings": int(processing_summary.get("warning_count") or 0),
+                    "parser_errors": sum(int(step.get("parser_error_count") or 0) for step in step_rows),
+                },
+                "outputs": len(outputs),
+                "artifacts": sum(
+                    int(entry.get("artifact_count") or 0) for entry in artifact_summary.values()
+                ),
+                "docs": int(docs_payload.get("summary", {}).get("match_count", 0)),
+                "files": int(files_payload.get("summary", {}).get("candidate_count", 0)),
+                "timeline_events": int(timeline_payload.get("summary", {}).get("event_count", 0)),
+                # Review state lives in the case file and changes after the run
+                # completes; the summary endpoint refreshes this at read time.
+                "review_items": 0,
+                "indicators": int(indicators_payload.get("summary", {}).get("indicator_count", 0)),
+            },
         },
         "highlights": {
             "document_hits": summarize_document_hits(docs_payload.get("results", []), limit=5),
@@ -219,6 +241,39 @@ def build_run_summary(
         payload["summary"]["matched_rule_count"] = int(annotation_summary["matched_rule_count"])
         payload["summary"]["ioc_hit_count"] = int(annotation_summary["ioc_hit_count"])
     return payload
+
+
+def derive_counts(payload: Mapping[str, object]) -> dict[str, object]:
+    """Recompute the canonical ``summary.counts`` block for run summaries
+    written before the block existed, using the same formulas as
+    ``build_run_summary``.
+    """
+    inner = payload.get("summary") if isinstance(payload.get("summary"), Mapping) else {}
+    processing = payload.get("processing") if isinstance(payload.get("processing"), Mapping) else {}
+    steps = [step for step in payload.get("steps", []) if isinstance(step, Mapping)] if isinstance(payload.get("steps"), list) else []
+    outputs = payload.get("outputs") if isinstance(payload.get("outputs"), Mapping) else {}
+    artifact_groups = inner.get("artifacts") if isinstance(inner.get("artifacts"), Mapping) else {}
+    step_warnings = int(processing.get("warning_count") or 0)
+    parser_errors = sum(int(step.get("parser_error_count") or 0) for step in steps)
+    indicators_step = next((step for step in steps if step.get("name") == "indicators"), {})
+    return {
+        "validation_issues": step_warnings + parser_errors,
+        "validation_issue_breakdown": {
+            "step_warnings": step_warnings,
+            "parser_errors": parser_errors,
+        },
+        "outputs": len(outputs),
+        "artifacts": sum(
+            int(group.get("artifact_count") or 0)
+            for group in artifact_groups.values()
+            if isinstance(group, Mapping)
+        ),
+        "docs": int(inner.get("document_match_count") or 0),
+        "files": int(inner.get("file_candidate_count") or 0),
+        "timeline_events": int(inner.get("timeline_event_count") or 0),
+        "review_items": 0,
+        "indicators": int(indicators_step.get("indicator_count") or 0),
+    }
 
 
 def build_processing_summary(

@@ -11,6 +11,11 @@ from pathlib import Path
 from fastapi import HTTPException
 from pydantic import BaseModel
 
+from ...core.case import (
+    CaseBookmarkError,
+    build_case_summary,
+    load_case_payload,
+)
 from ...core.evidence import identify_evidence
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.jobs import (
@@ -18,6 +23,7 @@ from ...core.jobs import (
     is_relative_to,
     run_output_dir,
 )
+from ...core.run.summary import derive_counts
 from ...core.source_paths import (
     candidate_source_paths,
     source_path_resolution_diagnostics,
@@ -100,8 +106,47 @@ def validate_run_evidence_source(raw_root: str) -> None:
         )
 
 
+def case_report_item_count(case_path: Path) -> int:
+    try:
+        payload = load_case_payload(case_path)
+    except (CaseBookmarkError, FileNotFoundError, OSError, ValueError):
+        return 0
+    summary = payload.get("summary")
+    if isinstance(summary, Mapping):
+        return int(summary.get("report_item_count") or 0)
+    bookmarks = payload.get("bookmarks")
+    return int(build_case_summary(bookmarks).get("report_item_count") or 0) if isinstance(bookmarks, list) else 0
+
+
+def enrich_summary_counts(summary: Mapping[str, object], case_path: Path | None = None) -> dict[str, object]:
+    """Return the run summary with a canonical ``summary.counts`` block.
+
+    Summaries written before the block existed are backfilled with the same
+    formulas used at write time; ``review_items`` is refreshed from the case
+    file because review state changes after a run completes.
+    """
+    payload = dict(summary)
+    inner = payload.get("summary")
+    inner = dict(inner) if isinstance(inner, Mapping) else {}
+    raw_counts = inner.get("counts")
+    counts = dict(raw_counts) if isinstance(raw_counts, Mapping) else derive_counts(payload)
+    if case_path is not None:
+        counts["review_items"] = case_report_item_count(case_path)
+    inner["counts"] = counts
+    payload["summary"] = inner
+    return payload
+
+
 def get_job_payload(store: RunJobStore, run_id: str, *, include_summary: bool) -> dict[str, object]:
-    return get_job(store, run_id).to_dict(include_summary=include_summary)
+    job = get_job(store, run_id)
+    payload = job.to_dict(include_summary=include_summary)
+    if include_summary and job.summary is not None:
+        try:
+            case_path = default_case_path(store, run_id)
+        except HTTPException:
+            case_path = None
+        payload["summary"] = enrich_summary_counts(job.summary, case_path=case_path)
+    return payload
 
 
 def get_named_output(store: RunJobStore, run_id: str, output_name: str) -> dict[str, object]:

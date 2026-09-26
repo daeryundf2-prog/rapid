@@ -218,6 +218,7 @@ def build_reports_router(
                 source_pointer=request.pointer,
                 bookmark_id=request.bookmark_id,
                 tags=normalize_bookmark_tags(request),
+                remove_tags=[str(item).strip() for item in (request.remove_tags or []) if str(item).strip()] or None,
                 note=request.note,
                 review_status=request.review_status,
                 include_in_report=request.include_in_report,

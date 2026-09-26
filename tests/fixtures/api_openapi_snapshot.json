@@ -64,6 +64,9 @@
     "/api/health": {
       "get": "health_api_health_get"
     },
+    "/api/ioc/cross-device": {
+      "get": "cross_device_ioc_api_ioc_cross_device_get"
+    },
     "/api/keyword-packs": {
       "get": "keyword_packs_api_keyword_packs_get"
     },
@@ -122,6 +125,9 @@
     },
     "/api/runs/{run_id}/indicators/ti-enrichment": {
       "get": "get_run_indicator_ti_enrichment_api_runs__run_id__indicators_ti_enrichment_get"
+    },
+    "/api/runs/{run_id}/issues": {
+      "get": "get_run_issues_api_runs__run_id__issues_get"
     },
     "/api/runs/{run_id}/output-files": {
       "get": "get_run_output_files_api_runs__run_id__output_files_get"
@@ -197,6 +203,12 @@
     },
     "/api/runs/{run_id}/timeline": {
       "get": "get_run_timeline_api_runs__run_id__timeline_get"
+    },
+    "/api/runs/{run_id}/timeline-histogram": {
+      "get": "get_run_timeline_histogram_api_runs__run_id__timeline_histogram_get"
+    },
+    "/api/runs/{run_id}/tree": {
+      "get": "get_run_tree_api_runs__run_id__tree_get"
     },
     "/api/runs/{run_id}/validation-package": {
       "get": "get_run_validation_package_api_runs__run_id__validation_package_get"

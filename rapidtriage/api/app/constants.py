@@ -431,7 +431,7 @@ BROWSER_E2E_PERFORMANCE_CONTRACT_VERSION = "browser-e2e-performance-contract-v1"
 
 WORKBENCH_SMOKE_SELECTORS = {
     "shell": "[data-testid='workbench-shell']",
-    "sample_run": "[data-testid='sample-run-button']",
+    "sample_run": "[data-testid='start-choice-sample']",
     "evidence_root": "[data-testid='evidence-root-input']",
     "evidence_support": "[data-testid='evidence-support-button']",
     "run_submit": "[data-testid='run-submit-button']",

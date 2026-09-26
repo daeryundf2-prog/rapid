@@ -1,0 +1,66 @@
+/* TimelineView screen styles (R3-3). Extracted from styles.css — loaded after it. */
+
+
+
+.timeline-mini {
+  margin: 10px 0 0;
+  padding-left: 18px;
+}
+
+
+.timeline-mini li {
+  margin: 6px 0;
+}
+
+
+.timeline-mini b,
+.timeline-mini span {
+  display: block;
+  overflow-wrap: anywhere;
+  font-size: 0.78rem;
+}
+
+
+.timeline-mini span {
+  color: var(--muted);
+}
+
+
+.timeline-review-lanes {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 8px;
+  padding: 8px;
+  border: 1px solid #dde5ef;
+  border-radius: 14px;
+  background: #ffffff;
+}
+
+
+.timeline-lane-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 5px;
+}
+
+
+.timeline-lane-card span,
+.timeline-lane-card b {
+  color: inherit;
+  font-size: 0.62rem;
+  font-weight: 950;
+  line-height: 1;
+}
+
+
+.timeline-lane-card em {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  color: #64748b;
+  font-size: 0.52rem;
+  font-style: normal;
+  font-weight: 760;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -129,7 +129,11 @@ export const LEGACY_WORKBENCH_VIEW_LABELS = [
   { tab: "indicators", label: "Indicators" },
 ];
 export const SHORTCUTS = [
-  { keys: ["1", "2", "3", "4", "5"], label: "접수 / 선별 / 아티팩트 / 문서 / 시간축 전환" },
+  { keys: ["J", "K"], label: "리뷰 행 아래/위로 이동 (가상 스크롤 포함)" },
+  { keys: ["B"], label: "현재 행 선별(북마크)" },
+  { keys: ["R"], label: "현재 행 관련 있음 + 보고서 포함" },
+  { keys: ["E"], label: "현재 행 원본 미리보기" },
+  { keys: ["1", "2", "3", "4", "5"], label: "행 커서 있으면 우선순위 태그 p1~p5 토글 / 없으면 뷰 그룹 전환" },
   { keys: ["Ctrl K", "Cmd K"], label: "명령 팔레트 열기", legacyLabel: "Open command palette" },
   { keys: ["Ctrl F", "Cmd F"], label: "현재 파일 검색 또는 결과 내 필터" },
   { keys: ["Space"], label: "선택한 증거 빠른 확인" },
@@ -1810,7 +1814,7 @@ export const CORE_EVIDENCE_WORKFLOW = [
 ];
 export const WORKBENCH_SMOKE_CHECKPOINTS = [
   { id: "open-workbench", selector: "[data-testid='workbench-shell']", label: "검토 콘솔 열기" },
-  { id: "create-or-import-run", selector: "[data-testid='sample-run-button']", label: "케이스 생성 또는 불러오기" },
+  { id: "create-or-import-run", selector: "[data-testid='start-choice-sample']", label: "케이스 생성 또는 불러오기" },
   { id: "select-run", selector: "[data-testid='case-hero']", label: "완료된 실행 선택" },
   { id: "search-case", selector: "[data-testid='global-case-search']", label: "케이스 검색" },
   { id: "open-source-viewer", selector: "[data-testid='source-viewer']", label: "원본 뷰어 열기" },
@@ -1900,3 +1904,81 @@ export const CURRENT_FILE_SEARCH_CONTRACT = {
   checklist_item: 17,
   required_fields: ["match-count", "result-limit", "truncation-state", "sqlite-scan-state", "reportability-warning"],
 };
+
+// --- Shared module constants (moved from app.js during R3-1 cycle break)
+export const RUN_FORM_STORAGE_KEY = "rapidtriage.runForm.v1";
+export const WORKBENCH_SESSION_STORAGE_KEY = "rapidtriage.workbenchSession.v1";
+export const SEARCH_STORAGE_PREFIX = "rapidtriage.search.";
+export const SEARCH_HISTORY_PREFIX = "rapidtriage.searchHistory.";
+export const COMPARE_STORAGE_PREFIX = "rapidtriage.compare.";
+export const VIRTUAL_WINDOW_STORAGE_PREFIX = "rapidtriage.virtualWindow.";
+export const PROCESSING_PROFILES = {
+  fast: {
+    title: "Fast first pass",
+    summary: "Indexes and classifies first, skips extraction by default, and is the safest start for large evidence.",
+    badges: ["read-only", "no extraction", "fast triage"],
+  },
+  standard: {
+    title: "Standard bounded extraction",
+    summary: "Runs the same triage plus capped extraction so reviewable copies are available without runaway output size.",
+    badges: ["bounded extraction", "512 MB cap", "1000 file cap"],
+  },
+  deep: {
+    title: "Deep uncapped extraction",
+    summary: "Removes extraction caps for deliberate deep review. Use after fast/standard tells you where to focus.",
+    badges: ["extracts matches", "no cap", "slow/heavy"],
+  },
+};
+export const RUN_MODE_COLLECTORS = {
+  seizure: ["browser", "recent files", "email", "cloud", "mobile/chat", "KakaoTalk", "APK", "media", "memory", "OS/account", "event logs", "registry", "shellbags", "remote access", "execution", "prefetch", "MFT/USN", "Windows system", "macOS"],
+  fraud: ["browser", "recent files", "email", "cloud", "mobile/chat", "KakaoTalk", "APK", "media", "memory", "OS/account", "event logs", "registry", "shellbags", "remote access", "execution", "prefetch", "MFT/USN", "Windows system", "macOS"],
+  hacking: ["browser", "recent files", "email", "cloud", "mobile/chat", "KakaoTalk", "APK", "media", "memory", "OS/account", "event logs", "registry", "shellbags", "remote access", "execution", "prefetch", "MFT/USN", "Windows system", "macOS"],
+  recovery: ["recent files", "email", "cloud", "mobile/chat", "KakaoTalk", "APK", "media", "memory", "OS/account", "event logs", "registry", "shellbags", "remote access", "prefetch", "MFT/USN", "macOS"],
+};
+export const IMAGE_EVIDENCE_FORMATS = [
+  {
+    family: "ewf",
+    label: "E01/Ex01",
+    inputKind: "e01-derived",
+    pattern: /(?:^|[\\/])[^\\/]+\.(?:e\d{2}|ex\d{2})(?:$|[\\/])/i,
+  },
+  {
+    family: "raw",
+    label: "RAW/DD/split",
+    inputKind: "disk-image-derived",
+    pattern: /\.(?:dd|raw|img|ima|001|000|0000|0001|00001)(?:$|[\\/])/i,
+  },
+  {
+    family: "virtual-disk",
+    label: "VHD/VMDK/QCOW",
+    inputKind: "disk-image-derived",
+    pattern: /\.(?:vhd|vhdx|vmdk|vdi|xva|qcow|qcow2)(?:$|[\\/])/i,
+  },
+  {
+    family: "archive-image",
+    label: "DMG/ISO/WIM",
+    inputKind: "archive-image-derived",
+    pattern: /\.(?:dmg|iso|wim|swm)(?:$|[\\/])/i,
+  },
+  {
+    family: "forensic-container",
+    label: "AFF/AD/L01",
+    inputKind: "",
+    pattern: /\.(?:aff|aff4|ad1|l01|lx01)(?:$|[\\/])/i,
+  },
+];
+export const E01_PRE_RUN_STEPS = [
+  { label: "Input", text: "첫 E01/Ex01 세그먼트를 선택하고 segment order/integrity를 확인합니다." },
+  { label: "Preflight", text: "ewfmount, mmls, tsk_recover 존재와 버전을 먼저 확인합니다." },
+  { label: "Partition", text: "mmls 결과에서 지원 파일시스템 파티션을 자동 선택하거나 sector를 수동 지정합니다." },
+  { label: "Extract", text: "read-only 우선으로 추출 provenance와 command history를 남깁니다." },
+  { label: "Review", text: "추출 산출물을 검색, 뷰어, evidence tray, 보고서 후보로 이어갑니다." },
+];
+export const PAGE_SIZE = 250;
+export const VIRTUAL_TABLE_ROW_LIMIT = 300;
+export const VIRTUALIZATION_ASSESSMENT = {
+  commercial_gap_ids: ["#79"],
+  status: "bounded-dom-window",
+  row_limit: VIRTUAL_TABLE_ROW_LIMIT,
+};
+export const COMPARE_LIMIT = 6;

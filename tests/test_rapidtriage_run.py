@@ -2002,6 +2002,29 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertEqual(Path(summary_payload["outputs"]["summary"]).resolve(), summary_path.resolve())
             self.assertEqual(Path(summary_payload["outputs"]["report"]).resolve(), report_path.resolve())
             self.assertGreaterEqual(summary_payload["summary"]["timeline_event_count"], 1)
+            counts = summary_payload["summary"]["counts"]
+            self.assertEqual(counts["outputs"], len(summary_payload["outputs"]))
+            self.assertEqual(
+                counts["validation_issues"],
+                summary_payload["processing"]["warning_count"]
+                + sum(int(step.get("parser_error_count") or 0) for step in summary_payload["steps"]),
+            )
+            self.assertEqual(
+                counts["validation_issue_breakdown"]["step_warnings"],
+                summary_payload["processing"]["warning_count"],
+            )
+            self.assertEqual(
+                counts["docs"], summary_payload["summary"]["document_match_count"]
+            )
+            self.assertEqual(
+                counts["files"], summary_payload["summary"]["file_candidate_count"]
+            )
+            self.assertEqual(
+                counts["timeline_events"], summary_payload["summary"]["timeline_event_count"]
+            )
+            self.assertEqual(counts["review_items"], 0)
+            self.assertIn("indicators", counts)
+            self.assertIn("artifacts", counts)
             self.assertIn("silent_failure_detection", summary_payload)
             self.assertIn("silent_failure_risk", summary_payload["summary"])
             self.assertIn("silent-failure-detector", {step["name"] for step in summary_payload["steps"]})

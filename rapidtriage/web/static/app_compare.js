@@ -4,14 +4,10 @@ import { escapeHtml, fileName, storageAvailable } from "./app_utils.js";
 import {
   COMPARE_LIMIT,
   COMPARE_STORAGE_PREFIX,
-  activeTab,
-  bindCopyButtons,
-  detailPanel,
-  loadEvidencePreview,
-  renderCompareCitationBundle,
-  selectedRunId,
-  switchTab,
-} from "./app.js";
+} from "./app_workbench_config.js";
+import { workbenchInvoke, workbenchState } from "./app_store.js";
+
+const detailPanelEl = () => workbenchInvoke("detailPanel");
 
 export function compareItemFromFileSearchMatch(payload, match) {
   return {
@@ -33,7 +29,7 @@ export function compareItemFromMatch(match, context = null) {
   return {
     path: match.path || "",
     title: match.title || fileName(match.path) || "search hit",
-    source: match.source || context?.source || activeTab,
+    source: match.source || context?.source || workbenchState.activeTab,
     kind: match.kind || "",
     preview: match.preview || context?.note || "",
     pointer: context?.pointer || match.pointer || "",
@@ -49,7 +45,7 @@ export function compareItemFromPreview(payload, reviewContext = null) {
   return {
     path: payload.path || "",
     title: payload.name || fileName(payload.path) || "evidence",
-    source: reviewContext?.source || activeTab,
+    source: reviewContext?.source || workbenchState.activeTab,
     kind: payload.mime_type || payload.preview_type || "",
     preview: previewText,
     pointer: reviewContext?.pointer || "",
@@ -71,7 +67,7 @@ export function compareItemFromBookmark(bookmark) {
 }
 
 export function compareStorageKey() {
-  return `${COMPARE_STORAGE_PREFIX}${selectedRunId || "default"}`;
+  return `${COMPARE_STORAGE_PREFIX}${workbenchState.selectedRunId || "default"}`;
 }
 
 export function getCompareItems() {
@@ -124,7 +120,7 @@ export function renderCompareTray() {
         </div>
       </div>
       ${items.length ? renderCompareItems(primary, items.slice(2)) : '<p class="empty-state">검색 결과나 원본 뷰어에서 “비교함에 추가”를 누르면 탭을 오가도 자료가 여기 남습니다.</p>'}
-      ${items.length ? renderCompareCitationBundle(items) : ""}
+      ${items.length ? workbenchInvoke("renderCompareCitationBundle", items) : ""}
       <section id="compareDiffPanel"></section>
     </section>
   `;
@@ -178,15 +174,15 @@ export function renderCompareSlot(item, index) {
 }
 
 export function refreshCompareTray() {
-  const tray = detailPanel.querySelector("#compareTray");
+  const tray = detailPanelEl().querySelector("#compareTray");
   if (!tray) return;
   tray.outerHTML = renderCompareTray();
   bindCompareActions();
 }
 
 export function bindCompareActions() {
-  bindCopyButtons();
-  for (const button of detailPanel.querySelectorAll("[data-compare-item]")) {
+  workbenchInvoke("bindCopyButtons");
+  for (const button of detailPanelEl().querySelectorAll("[data-compare-item]")) {
     if (button.dataset.compareBound) continue;
     button.dataset.compareBound = "1";
     button.addEventListener("click", () => {
@@ -195,22 +191,22 @@ export function bindCompareActions() {
       button.textContent = "추가됨";
     });
   }
-  const clearButton = detailPanel.querySelector("[data-clear-compare]");
+  const clearButton = detailPanelEl().querySelector("[data-clear-compare]");
   if (clearButton && !clearButton.dataset.compareBound) {
     clearButton.dataset.compareBound = "1";
     clearButton.addEventListener("click", clearCompareItems);
   }
-  const diffButton = detailPanel.querySelector("[data-open-compare-diff]");
+  const diffButton = detailPanelEl().querySelector("[data-open-compare-diff]");
   if (diffButton && !diffButton.dataset.compareBound) {
     diffButton.dataset.compareBound = "1";
     diffButton.addEventListener("click", openCompareDiff);
   }
-  for (const button of detailPanel.querySelectorAll("[data-remove-compare-path]")) {
+  for (const button of detailPanelEl().querySelectorAll("[data-remove-compare-path]")) {
     if (button.dataset.compareBound) continue;
     button.dataset.compareBound = "1";
     button.addEventListener("click", () => removeCompareItem(button.dataset.removeComparePath));
   }
-  for (const button of detailPanel.querySelectorAll("[data-preview-compare-path]")) {
+  for (const button of detailPanelEl().querySelectorAll("[data-preview-compare-path]")) {
     if (button.dataset.compareBound) continue;
     button.dataset.compareBound = "1";
     button.addEventListener("click", async () => {
@@ -220,14 +216,14 @@ export function bindCompareActions() {
 }
 
 export async function openCompareDiff() {
-  const panel = detailPanel.querySelector("#compareDiffPanel");
+  const panel = detailPanelEl().querySelector("#compareDiffPanel");
   const [left, right] = getCompareItems();
   if (!panel || !left?.path || !right?.path) return;
   panel.innerHTML = '<p class="empty-state">A/B 원문 미리보기를 불러오고 있습니다.</p>';
   try {
     const [leftPayload, rightPayload] = await Promise.all([
-      api(`/api/runs/${selectedRunId}/source-preview?path=${encodeURIComponent(left.path)}`),
-      api(`/api/runs/${selectedRunId}/source-preview?path=${encodeURIComponent(right.path)}`),
+      api(`/api/runs/${workbenchState.selectedRunId}/source-preview?path=${encodeURIComponent(left.path)}`),
+      api(`/api/runs/${workbenchState.selectedRunId}/source-preview?path=${encodeURIComponent(right.path)}`),
     ]);
     panel.innerHTML = renderCompareDiff(leftPayload, rightPayload);
   } catch (error) {
@@ -280,8 +276,8 @@ export function parseCompareItem(value) {
 
 export async function previewCompareItem(path) {
   if (!path) return;
-  if (!detailPanel.querySelector("#evidenceViewer")) {
-    await switchTab("search");
+  if (!detailPanelEl().querySelector("#evidenceViewer")) {
+    await workbenchInvoke("switchTab", "search");
   }
-  await loadEvidencePreview(path);
+  await workbenchInvoke("loadEvidencePreview", path);
 }
