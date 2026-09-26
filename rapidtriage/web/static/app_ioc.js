@@ -91,6 +91,9 @@ export function mountCrossDeviceIoc(container, fetchPackage) {
           }
         })
         .catch(() => {
+          // Allow retry on next toggle — a transient failure should not pin
+          // the card to its error message for the session.
+          delete card.dataset.loaded;
           empty.textContent = "교차 장비 IOC 로드 실패 — 서버 상태를 확인하세요.";
         });
     },

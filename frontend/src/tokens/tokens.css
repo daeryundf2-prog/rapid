@@ -1,0 +1,156 @@
+/* Design tokens — the only allowed palette/scale in the v2 UI.
+   Plan contract: 9 grays, accent + hover/active, 4 status colors,
+   8 tag colors, 1 deleted marker; 6 font sizes; 6 spacings; 3 row heights.
+   Dark is the default theme; light is applied via [data-theme="light"]
+   or prefers-color-scheme when the user has not chosen a theme. */
+
+:root {
+  --font-ui:
+    "Pretendard", "Noto Sans KR", "Malgun Gothic", "Apple SD Gothic Neo", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "D2Coding", "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+
+  --fs-aux: 0.6875rem; /* 11px — 보조 텍스트 */
+  --fs-table-aux: 0.75rem; /* 12px — 표 보조 */
+  --fs-body: 0.8125rem; /* 13px — 기본 */
+  --fs-panel-title: 0.875rem; /* 14px — 패널 제목 */
+  --fs-screen-title: 1rem; /* 16px — 화면 제목 */
+  --fs-case: 1.25rem; /* 20px — 케이스명 */
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  --row-h: 28px;
+  --row-h-dense: 24px;
+  --row-h-roomy: 32px;
+}
+
+/* Dark theme (default). */
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --gray-50: #f4f6f8;
+  --gray-100: #dde2e8;
+  --gray-200: #b9c2cc;
+  --gray-300: #93a0ae;
+  --gray-400: #6e7d8d;
+  --gray-500: #51606f;
+  --gray-600: #3a4753;
+  --gray-700: #28313b;
+  --gray-800: #1a2129;
+  --gray-900: #10151b;
+
+  --bg: var(--gray-900);
+  --bg-panel: var(--gray-800);
+  --bg-raised: var(--gray-700);
+  --line: var(--gray-600);
+  --text: var(--gray-100);
+  --text-muted: var(--gray-300);
+
+  --accent: #4d9fff;
+  --accent-hover: #6fb1ff;
+  --accent-active: #2f88f0;
+  --on-accent: #0b1117;
+
+  --ok: #3fb96f;
+  --warn: #d9a32e;
+  --danger: #e05d5d;
+  --info: #4d9fff;
+
+  --tag-1: #e05d5d;
+  --tag-2: #d9a32e;
+  --tag-3: #3fb96f;
+  --tag-4: #3fa7b9;
+  --tag-5: #4d9fff;
+  --tag-6: #8f7ae0;
+  --tag-7: #c96ab8;
+  --tag-8: #9a8f7a;
+
+  --deleted: #e05d5d;
+}
+
+/* Light theme. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --gray-50: #f7f9fb;
+  --gray-100: #eceff3;
+  --gray-200: #d5dbe2;
+  --gray-300: #b3bdc8;
+  --gray-400: #8b98a6;
+  --gray-500: #637180;
+  --gray-600: #47535f;
+  --gray-700: #333d47;
+  --gray-800: #222a33;
+  --gray-900: #141a21;
+
+  --bg: var(--gray-50);
+  --bg-panel: #ffffff;
+  --bg-raised: var(--gray-100);
+  --line: var(--gray-200);
+  --text: var(--gray-900);
+  --text-muted: var(--gray-500);
+
+  --accent: #1f6fd6;
+  --accent-hover: #1a62bd;
+  --accent-active: #1553a3;
+  --on-accent: #ffffff;
+
+  --ok: #1d7d47;
+  --warn: #9a6d12;
+  --danger: #b83232;
+  --info: #1f6fd6;
+
+  --tag-1: #b83232;
+  --tag-2: #9a6d12;
+  --tag-3: #1d7d47;
+  --tag-4: #187383;
+  --tag-5: #1f6fd6;
+  --tag-6: #5f4bc0;
+  --tag-7: #a03e8e;
+  --tag-8: #6e6350;
+
+  --deleted: #b83232;
+}
+
+/* OS preference applies only when the user has not chosen a theme. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    color-scheme: light;
+    --gray-50: #f7f9fb;
+    --gray-100: #eceff3;
+    --gray-200: #d5dbe2;
+    --gray-300: #b3bdc8;
+    --gray-400: #8b98a6;
+    --gray-500: #637180;
+    --gray-600: #47535f;
+    --gray-700: #333d47;
+    --gray-800: #222a33;
+    --gray-900: #141a21;
+    --bg: var(--gray-50);
+    --bg-panel: #ffffff;
+    --bg-raised: var(--gray-100);
+    --line: var(--gray-200);
+    --text: var(--gray-900);
+    --text-muted: var(--gray-500);
+    --accent: #1f6fd6;
+    --accent-hover: #1a62bd;
+    --accent-active: #1553a3;
+    --on-accent: #ffffff;
+    --ok: #1d7d47;
+    --warn: #9a6d12;
+    --danger: #b83232;
+    --info: #1f6fd6;
+    --tag-1: #b83232;
+    --tag-2: #9a6d12;
+    --tag-3: #1d7d47;
+    --tag-4: #187383;
+    --tag-5: #1f6fd6;
+    --tag-6: #5f4bc0;
+    --tag-7: #a03e8e;
+    --tag-8: #6e6350;
+    --deleted: #b83232;
+  }
+}

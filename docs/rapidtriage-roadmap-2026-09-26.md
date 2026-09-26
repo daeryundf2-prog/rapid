@@ -95,6 +95,9 @@ Sprint 3의 "네이티브 E01 자립화"는 신규 개발이 아니라 **검증�
   규칙)/`detail_panel.css`(61)/`artifact_grid.css`(17)/`timeline_view.css`(8).
   styles.css는 토큰+공용 베이스(17,617→15,542줄), index.html이 styles.css
   이후 로드로 캐스케이드 보존.
+- **R3-4 React 전환 판단 ✅(공존 결정)**: 비용 재측정 결과 바닐라를
+  canonical로 유지하고 React v2는 `/v2` opt-in으로 제공 —
+  `docs/rapidtriage-frontend-decision-2026-09-26.md` (패리티 체크리스트 포함).
 
 ## Phase R4 — 가속·확장 (후순위)
 

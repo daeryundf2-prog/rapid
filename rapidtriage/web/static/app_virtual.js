@@ -208,6 +208,11 @@ export class VirtualTable {
     if (this._rafId) window.cancelAnimationFrame(this._rafId);
     if (this.scroller) this.scroller.removeEventListener("scroll", this._onScroll);
     if (this._resizeObserver) this._resizeObserver.disconnect();
+    // Drop this table from the registry so destroyed tables (and their
+    // retained item arrays) do not accumulate across run switches.
+    for (const [key, table] of registry) {
+      if (table === this) registry.delete(key);
+    }
   }
 }
 

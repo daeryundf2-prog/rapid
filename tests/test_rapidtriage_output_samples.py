@@ -6,6 +6,7 @@ import re
 import shutil
 import tempfile
 import unittest
+import unittest.mock
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,6 +18,21 @@ from tests.windows_artifact_fixtures import _minimal_ese_database, build_minimal
 
 SAMPLES_DIR = Path(__file__).resolve().parent.parent / "docs" / "rapidtriage-output-samples"
 WINDOWS_FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "rapidtriage" / "windows_artifacts"
+
+
+def _deepfake_lens_unavailable():
+    """Force the optional deepfake-lens provider into its unavailable lane.
+
+    Committed output-sample fixtures were recorded with ``deepfake_lens``
+    absent. On machines where the toolkit happens to be installed the
+    provider emits real scan artifacts instead of the unavailable stub,
+    so sample tests pin the availability seam to keep the recorded
+    fixtures environment-independent.
+    """
+    return unittest.mock.patch(
+        "rapidtriage.artifacts.synthetic_media.deepfake_lens_module",
+        return_value=None,
+    )
 
 
 def write_minimal_docx(path: Path, text: str) -> None:
@@ -249,6 +265,9 @@ def normalize_payload(payload: Any, root: Path) -> Any:
                 continue
             if key == "platform" and isinstance(value, str):
                 normalized[normalized_key] = "<PLATFORM>"
+                continue
+            if key == "deepfake_lens_cli_path" and isinstance(value, str):
+                normalized[normalized_key] = "<DEEPFAKE_LENS_CLI>"
                 continue
             normalized[normalized_key] = normalize_payload(value, root)
         return normalized
@@ -567,10 +586,11 @@ class RapidTriageOutputSamplesTests(unittest.TestCase):
             set_mtime(report, datetime(2024, 1, 2, 3, 5, 6, tzinfo=timezone.utc))
             set_mtime(evidence, datetime(2024, 1, 2, 3, 6, 7, tzinfo=timezone.utc))
 
-            self.assertEqual(main(["docs", str(root), "-k", "secret", "-k", "keyword", "--output", str(output)]), 0)
+            with _deepfake_lens_unavailable():
+                self.assertEqual(main(["docs", str(root), "-k", "secret", "-k", "keyword", "--output", str(output)]), 0)
 
             actual = canonicalize_docs(normalize_payload(load_json(output), root))
-            expected = load_json(SAMPLES_DIR / "docs-keyword-search.json")
+            expected = normalize_payload(load_json(SAMPLES_DIR / "docs-keyword-search.json"), root)
             self.assertEqual(actual, expected)
 
     def test_files_sample_matches_contract_fixture(self) -> None:
@@ -666,10 +686,11 @@ class RapidTriageOutputSamplesTests(unittest.TestCase):
             output = root / "rapidtriage-manifest.json"
 
             build_windows_collector_sample_fixture(root)
-            self.assertEqual(main(["manifest", str(root), "--output", str(output)]), 0)
+            with _deepfake_lens_unavailable():
+                self.assertEqual(main(["manifest", str(root), "--output", str(output)]), 0)
 
             actual = canonicalize_manifest(normalize_payload(load_json(output), root))
-            expected = canonicalize_manifest(load_json(SAMPLES_DIR / "manifest-windows-artifacts.json"))
+            expected = canonicalize_manifest(normalize_payload(load_json(SAMPLES_DIR / "manifest-windows-artifacts.json"), root))
             self.assertEqual(actual, expected)
 
     def test_repo_windows_fixture_still_matches_documented_collector_shape(self) -> None:

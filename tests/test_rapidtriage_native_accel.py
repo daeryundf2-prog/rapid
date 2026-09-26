@@ -6,8 +6,10 @@ result parity between the two paths on a synthetic EVTX blob.
 from __future__ import annotations
 
 import struct
+import subprocess
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 from rapidtriage.core import native_accel
@@ -90,6 +92,35 @@ class NativeAccelTests(unittest.TestCase):
         result = native_accel.scan_evtx(tiny)
         self.assertEqual(result["chunks"], [])
         self.assertEqual(result["records"], [])
+
+    def test_failed_worker_falls_back_to_python(self) -> None:
+        # A degraded worker lane (non-zero exit) must not take the scan down —
+        # the documented contract is a fallback chain.
+        with unittest.mock.patch.object(
+            native_accel, "_EXTENSION", None
+        ), unittest.mock.patch.object(
+            native_accel, "_worker_binary", return_value=Path("fake-worker")
+        ), unittest.mock.patch.object(
+            native_accel.subprocess,
+            "run",
+            side_effect=subprocess.CalledProcessError(1, ["fake-worker"]),
+        ):
+            result = native_accel.scan_evtx(self.evtx)
+        self.assertEqual(len(result["records"]), 2)
+
+    def test_worker_bad_output_falls_back_to_python(self) -> None:
+        class _Completed:
+            stdout = "not json"
+
+        with unittest.mock.patch.object(
+            native_accel, "_EXTENSION", None
+        ), unittest.mock.patch.object(
+            native_accel, "_worker_binary", return_value=Path("fake-worker")
+        ), unittest.mock.patch.object(
+            native_accel.subprocess, "run", return_value=_Completed()
+        ):
+            result = native_accel.scan_evtx(self.evtx)
+        self.assertEqual(len(result["records"]), 2)
 
     def test_engine_info_reports_shape(self) -> None:
         info = native_accel.engine_info()

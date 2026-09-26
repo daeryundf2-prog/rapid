@@ -177,14 +177,20 @@ def scan_evtx(path: str | Path, max_records: int = 100_000) -> dict[str, Any]:
         return json.loads(_EXTENSION.scan_evtx(str(path), max_records))
     worker = _worker_binary()
     if worker is not None:
-        completed = subprocess.run(
-            [str(worker), "evtx-scan", str(path), "--max-records", str(max_records)],
-            capture_output=True,
-            text=True,
-            timeout=300,
-            check=True,
-        )
-        return json.loads(completed.stdout)
+        try:
+            completed = subprocess.run(
+                [str(worker), "evtx-scan", str(path), "--max-records", str(max_records)],
+                capture_output=True,
+                text=True,
+                timeout=300,
+                check=True,
+            )
+            return json.loads(completed.stdout)
+        except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+            # Worker exists but failed (non-zero exit, timeout, malformed
+            # output) — the documented chain is a *fallback*, so degraded
+            # worker lanes must not take the whole scan down with them.
+            pass
     return _scan_evtx_python(path, max_records)
 
 
