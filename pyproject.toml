@@ -19,19 +19,32 @@ classifiers = [
   "Topic :: Multimedia :: Video",
   "Topic :: Utilities",
 ]
+# Web console is a first-class entry point (`rapidtriage-web`), so its
+# server deps are base requirements. Heavy media deps (OpenCV/tesseract/
+# numpy — hundreds of MB) moved to the [dashcam] extra: every rapidtriage
+# import site already guards them with try/except or function-local imports.
 dependencies = [
-  "opencv-python>=4.7",
-  "pytesseract>=0.3.10",
-  "numpy>=1.23",
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.27",
 ]
 
 [project.optional-dependencies]
 # E01 extraction uses external tools (ewfmount, sleuthkit) not python deps
-full = []
-web = [
-  "fastapi>=0.110",
-  "uvicorn[standard]>=0.27",
+dashcam = [
+  "opencv-python>=4.7",
+  "pytesseract>=0.3.10",
+  "numpy>=1.23",
 ]
+full = [
+  "rapidtriage[dashcam,columnar,kakaotalk,native-e01]",
+]
+# In-process E01/Ex01 decoding: pyewf reads the segment set and
+# dissect.ntfs walks NTFS — no ewfmount/FUSE/Sleuth Kit required.
+native-e01 = [
+  "dissect.ntfs>=3.10",
+  "libewf-python>=20240506",
+]
+web = []
 test = [
   "build>=1.0",
   "coverage>=7.0",
@@ -43,6 +56,8 @@ test = [
   "pycryptodome>=3.20",
   "ruff==0.16.*",
   "vulture>=2.11",
+  # dashcam_tools tests exercise cv2/numpy/tesseract paths.
+  "rapidtriage[dashcam]",
 ]
 columnar = [
   "pyarrow>=15",

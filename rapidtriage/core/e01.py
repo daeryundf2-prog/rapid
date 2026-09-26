@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shlex
 import shutil
@@ -158,6 +159,24 @@ IMAGE_WORKFLOW_TRUSTED_DIFF_BLOCKERS = {
 }
 CommandRunner = Callable[[Sequence[str]], subprocess.CompletedProcess[str]]
 ToolResolver = Callable[[str], str | None]
+
+E01_ENGINE_ENV_VAR = "RAPIDTRIAGE_E01_ENGINE"
+E01_ENGINE_CHOICES = ("auto", "native", "external")
+
+
+def resolve_e01_engine(engine: str | None = None) -> str:
+    """Resolve the E01 decoding engine: explicit argument > env > ``auto``.
+
+    ``auto`` prefers the in-process pyewf + dissect.ntfs path and falls back
+    to ewfmount/Sleuth Kit when the native path is unavailable or fails.
+    ``native`` forces the in-process path; ``external`` forces ewfmount/TSK.
+    """
+    raw = (engine or os.environ.get(E01_ENGINE_ENV_VAR) or "auto").strip().lower()
+    if raw not in E01_ENGINE_CHOICES:
+        raise E01ExtractionError(
+            f"unsupported E01 engine {raw!r}; expected one of {', '.join(E01_ENGINE_CHOICES)}"
+        )
+    return raw
 
 
 class E01ExtractionError(RuntimeError):
@@ -1439,6 +1458,7 @@ def extract_e01_to_directory(
     stage_dir: Path,
     *,
     partition_start_sector: int | None = None,
+    engine: str | None = None,
     runner: CommandRunner = default_runner,
     tool_resolver: ToolResolver = shutil.which,
 ) -> E01ExtractionResult:
@@ -1494,6 +1514,64 @@ def extract_e01_to_directory(
         )
     command_history: list[dict[str, object]] = []
     direct_ewf_probe: subprocess.CompletedProcess[str] | None = None
+    resolved_engine = resolve_e01_engine(engine)
+    native_enabled = native_e01_available()
+
+    if resolved_engine == "native":
+        if not native_enabled:
+            from .e01_native import native_e01_missing_modules
+
+            missing_modules = ", ".join(native_e01_missing_modules())
+            raise E01ExtractionError(
+                f"native E01 engine requested but modules are unavailable: {missing_modules}. "
+                "Install the `native-e01` extra (pyewf + dissect.ntfs), select engine=external, "
+                f"or unset {E01_ENGINE_ENV_VAR}."
+            )
+        return _extract_e01_native_fallback(
+            source_path=source_path,
+            stage=stage,
+            mount_dir=mount_dir,
+            extract_dir=extract_dir,
+            checkpoint_path=checkpoint_path,
+            source_signature=source_signature,
+            segment_set_profile=segment_set_profile,
+            partition_start_sector=partition_start_sector,
+            tool_preflight=tool_preflight,
+            missing_tools=list(missing),
+            command_history=command_history,
+            engine_note="requested",
+        )
+
+    native_failure: E01ExtractionError | None = None
+    if resolved_engine == "auto" and native_enabled:
+        try:
+            return _extract_e01_native_fallback(
+                source_path=source_path,
+                stage=stage,
+                mount_dir=mount_dir,
+                extract_dir=extract_dir,
+                checkpoint_path=checkpoint_path,
+                source_signature=source_signature,
+                segment_set_profile=segment_set_profile,
+                partition_start_sector=partition_start_sector,
+                tool_preflight=tool_preflight,
+                missing_tools=list(missing),
+                command_history=command_history,
+                engine_note="preferred",
+            )
+        except E01ExtractionError as exc:
+            native_failure = exc
+            command_history.append(
+                {
+                    "stage": "native-filesystem-recovery",
+                    "purpose": "native-filesystem-recovery",
+                    "command": ["pyewf+dissect.ntfs", str(source_path)],
+                    "status": "failed",
+                    "error": str(exc),
+                    "fallback": "external-tools",
+                }
+            )
+
     if missing:
         blocked = True
         if missing == ["ewfmount"]:
@@ -1510,7 +1588,7 @@ def extract_e01_to_directory(
                     command_record("partition-enumeration", ["mmls", str(source_path)], direct_ewf_probe)
                 )
                 blocked = False
-        if blocked and native_e01_available():
+        if blocked and resolved_engine == "auto" and native_enabled and native_failure is None:
             return _extract_e01_native_fallback(
                 source_path=source_path,
                 stage=stage,
@@ -1525,29 +1603,40 @@ def extract_e01_to_directory(
                 command_history=command_history,
             )
         if blocked:
-            write_e01_stage_checkpoint(
-                checkpoint_path,
-                {
-                    "profile_version": E01_STAGE_CHECKPOINT_VERSION,
-                    "source_signature": source_signature,
-                    "requested_start_sector": partition_start_sector,
-                    "segment_set_profile": segment_set_profile,
-                    "completed": False,
-                    "resume_ready": False,
-                    "stages": {
-                        "dependency-preflight": {
-                            "status": "blocked",
-                            "missing_tools": missing,
-                        }
-                    },
+            blocked_payload: dict[str, object] = {
+                "profile_version": E01_STAGE_CHECKPOINT_VERSION,
+                "source_signature": source_signature,
+                "requested_start_sector": partition_start_sector,
+                "segment_set_profile": segment_set_profile,
+                "completed": False,
+                "resume_ready": False,
+                "stages": {
+                    "dependency-preflight": {
+                        "status": "blocked",
+                        "missing_tools": missing,
+                    }
                 },
-            )
+            }
+            if native_failure is not None:
+                from .e01_native import NATIVE_MOUNT_STRATEGY
+
+                blocked_payload["mount_strategy"] = NATIVE_MOUNT_STRATEGY
+                blocked_payload["stages"] = {
+                    **dict(blocked_payload["stages"]),
+                    "native-filesystem-recovery": {
+                        "status": "failed",
+                        "error": str(native_failure),
+                    },
+                }
+            write_e01_stage_checkpoint(checkpoint_path, blocked_payload)
             joined = ", ".join(missing)
+            native_context = f" Native engine also failed: {native_failure}." if native_failure else ""
             raise E01ExtractionError(
                 f"E01 direct input requires external tools: {joined}. "
                 "Install libewf/Sleuth Kit, use a Sleuth Kit build with EWF support, "
                 "run `rapidtriage evidence IMAGE.E01 --json` for preflight, "
                 "or mount/export the image read-only with a trusted forensic tool and scan that folder."
+                + native_context
             )
 
     mount_strategy = "sleuthkit-direct-ewf" if direct_ewf_probe is not None else "ewfmount-fuse"
@@ -1738,8 +1827,9 @@ def _extract_e01_native_fallback(
     tool_preflight: tuple[dict[str, object], ...],
     missing_tools: list[str],
     command_history: list[dict[str, object]],
+    engine_note: str = "fallback",
 ) -> E01ExtractionResult:
-    """Recover files with pyewf + dissect.ntfs when external tools are absent."""
+    """Recover files with pyewf + dissect.ntfs (in-process, no external tools)."""
     from .e01_native import NATIVE_MOUNT_STRATEGY, extract_e01_native
 
     recovery_scope = build_tsk_recover_recovery_scope()
@@ -1767,6 +1857,7 @@ def _extract_e01_native_fallback(
             "recovery_tool": "dissect.ntfs",
             "recovery_scope": recovery_scope,
             "requested_start_sector": partition_start_sector,
+            "engine_note": engine_note,
         },
         "completed": False,
         "resume_ready": False,
@@ -1792,6 +1883,7 @@ def _extract_e01_native_fallback(
             segments,
             extract_dir,
             partition_start_sector=partition_start_sector,
+            system_dir=stage / "_system",
         )
     except Exception as exc:
         checkpoint_payload["stages"] = {
@@ -1821,6 +1913,7 @@ def _extract_e01_native_fallback(
         **recovered_manifest,
         "native_extraction_stats": stats,
         "engine": "pyewf+dissect.ntfs",
+        "system_artifacts": dict(result.get("system_artifacts") or {}),
     }
     command_history.append(
         {
@@ -1851,11 +1944,29 @@ def _extract_e01_native_fallback(
         }
     )
     write_e01_stage_checkpoint(checkpoint_path, checkpoint_payload)
+    if engine_note == "preferred":
+        lead_warning = (
+            "pyewf + dissect.ntfs decoded the E01/Ex01 segment set in-process "
+            "(native engine preferred in auto mode). Validate recovered content "
+            "against case requirements; this is an engineering-grade path, not "
+            "a trusted-tool substitute."
+        )
+    elif engine_note == "requested":
+        lead_warning = (
+            "pyewf + dissect.ntfs decoded the E01/Ex01 segment set in-process "
+            "because the native engine was explicitly requested. Validate "
+            "recovered content against case requirements; this is an "
+            "engineering-grade path, not a trusted-tool substitute."
+        )
+    else:
+        lead_warning = (
+            "ewfmount/Sleuth Kit were unavailable; pyewf + dissect.ntfs decoded "
+            "the E01/Ex01 segment set natively. Validate recovered content "
+            "against case requirements; this is an engineering-grade path, not "
+            "a trusted-tool substitute."
+        )
     warnings = [
-        "ewfmount/Sleuth Kit were unavailable; pyewf + dissect.ntfs decoded the "
-        "E01/Ex01 segment set natively. Validate recovered content against case "
-        "requirements; this is an engineering-grade path, not a trusted-tool "
-        "substitute.",
+        lead_warning,
         "Native recovery walks the allocated NTFS tree and performs a "
         "best-effort deleted-record sweep; ADS streams, reparse targets, and "
         "encrypted volumes are not expanded.",

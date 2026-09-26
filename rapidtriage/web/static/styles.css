@@ -1,24 +1,145 @@
+/* Design tokens — consolidated from scattered :root blocks (R0-3).
+   New styles must reference these variables instead of raw values. */
 :root {
-
-
-
-
-
-
-
-
-
-
-
   --focus: #e0a12e;
-
-
   --cyan: #26d9d0;
-
-
-
-
-
+  --command: #17202b;
+  --command-2: #202b38;
+  --danger-soft: rgba(255, 126, 92, 0.16);
+  --bg: #080e15;
+  --panel: rgba(15, 22, 31, 0.94);
+  --panel-strong: #121b27;
+  --ink: #e9eff5;
+  --muted: #97a6b7;
+  --line: rgba(142, 160, 178, 0.22);
+  --accent: #57d3c9;
+  --accent-strong: #8ee7df;
+  --accent-soft: rgba(87, 211, 201, 0.12);
+  --gold: #d9b86f;
+  --warn: #e9a06f;
+  --ok: #7bd39b;
+  --shadow: 0 18px 56px rgba(0, 0, 0, 0.3);
+  --shadow-soft: 0 12px 34px rgba(0, 0, 0, 0.22);
+  --shadow-command: 0 18px 56px rgba(0, 0, 0, 0.34);
+  --liquid-panel: linear-gradient(180deg, rgba(20, 29, 41, 0.94), rgba(12, 19, 29, 0.96));
+  --liquid-panel-hot: linear-gradient(180deg, rgba(24, 34, 48, 0.96), rgba(13, 20, 30, 0.98));
+  --liquid-border: rgba(144, 169, 190, 0.2);
+  --liquid-border-strong: rgba(87, 211, 201, 0.42);
+  --button-radius: 12px;
+  --button-border: rgba(135, 156, 176, 0.28);
+  --button-primary-bg: linear-gradient(180deg, #7ae0d7 0%, #35b8af 100%);
+  --button-primary-hover: linear-gradient(180deg, #9aeee7 0%, #43c8be 100%);
+  --button-secondary-bg: linear-gradient(180deg, rgba(37, 49, 63, 0.96), rgba(25, 35, 48, 0.98));
+  --button-secondary-hover: linear-gradient(180deg, rgba(47, 61, 77, 0.98), rgba(31, 43, 58, 0.98));
+  --button-glow: 0 10px 22px rgba(53, 184, 175, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.32);
+  --button-quiet-glow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Apple SD Gothic Neo",
+    "Pretendard Variable", "Pretendard", "Segoe UI Variable", "Segoe UI",
+    "Noto Sans KR", sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Apple SD Gothic Neo",
+    "Pretendard Variable", "Pretendard", "Segoe UI Variable", "Segoe UI",
+    "Noto Sans KR", sans-serif;
+  --font-mono: "SFMono-Regular", "Cascadia Code", "JetBrains Mono", "D2Coding",
+    "Menlo", monospace;
+  --rf-canvas: #0b1118;
+  --rf-panel-2: #151f2b;
+  --rf-surface: #182433;
+  --rf-text: #edf3f7;
+  --rf-soft: #c8d4df;
+  --rf-accent: #70ddd3;
+  --rf-accent-2: #a6eee8;
+  --rf-radius-lg: 22px;
+  --rf-radius-md: 16px;
+  --rf-bg: #f6f8fb;
+  --rf-panel: #ffffff;
+  --rf-panel-soft: #f9fbff;
+  --rf-ink: #101827;
+  --rf-ink-2: #273449;
+  --rf-muted: #66758a;
+  --rf-line: #dce3ee;
+  --rf-line-strong: #c8d3e2;
+  --rf-primary: #1f6feb;
+  --rf-primary-soft: #eaf2ff;
+  --rf-primary-border: #9dc0ff;
+  --rf-good: #13795b;
+  --rf-warn: #b45309;
+  --rf-danger: #b42318;
+  --rf-shadow: 0 18px 50px rgba(16, 24, 39, 0.08);
+  --rf-shadow-soft: 0 10px 28px rgba(16, 24, 39, 0.06);
+  --rf-radius: 20px;
+  --rf-page-bg: #e9eef5;
+  --rf-page-ink: #111827;
+  --rf-page-muted: #526171;
+  --rf-page-line: #d4dde8;
+  --rf-rail-bg: #0e1724;
+  --rf-rail-card: #162235;
+  --rf-rail-card-2: #1c2b40;
+  --rf-rail-ink: #f8fafc;
+  --rf-rail-muted: #cbd5e1;
+  --rf-workspace: #f8fafc;
+  --rf-workspace-card: #ffffff;
+  --rf-workspace-soft: #f1f5f9;
+  --rf-workspace-ink: #172033;
+  --rf-workspace-muted: #5b6b7e;
+  --rf-workspace-line: #d8e1ec;
+  --rf-warning-bg: #fff7ed;
+  --rf-warning-ink: #9a3412;
+  --rf-danger-bg: #fff1f2;
+  --rf-danger-ink: #be123c;
+  --rf-ok-bg: #ecfdf3;
+  --rf-ok-ink: #166534;
+  --rf-paper: #f1f1ed;
+  --rf-paper-soft: #f7f6f2;
+  --rf-paper-card: #fffdf9;
+  --rf-brass: #897a65;
+  --rf-brass-soft: rgba(137, 122, 101, 0.16);
+  --rf-periwinkle: #8a9caf;
+  --rf-periwinkle-soft: rgba(138, 156, 175, 0.18);
+  --rf-mauve: #a0918b;
+  --rf-mauve-soft: rgba(160, 145, 139, 0.16);
+  --rf-command-blue: #3f4a61;
+  --rf-command-blue-strong: #2b3448;
+  --rf-command-blue-soft: rgba(63, 74, 97, 0.12);
+  --rf-graphite: #151922;
+  --rf-graphite-2: #242b3a;
+  --rf-clean-line: rgba(63, 74, 97, 0.16);
+  --rf-clean-line-strong: rgba(63, 74, 97, 0.34);
+  --rf-focus: rgba(138, 156, 175, 0.38);
+  --rf-action: var(--rf-command-blue);
+  --rf-action-hover: var(--rf-command-blue-strong);
+  --rf-action-soft: var(--rf-command-blue-soft);
+  --rf-action-line: rgba(138, 156, 175, 0.48);
+  --rf-image-accent: var(--rf-command-blue);
+  --rf-image-accent-strong: var(--rf-command-blue-strong);
+  --rf-image-accent-soft: var(--rf-command-blue-soft);
+  --op-bg: #eef2f6;
+  --op-bg-warm: #f7f3ea;
+  --op-surface: #ffffff;
+  --op-surface-2: #f8fafc;
+  --op-surface-3: #eef4ff;
+  --op-ink: #0f172a;
+  --op-ink-soft: #334155;
+  --op-muted: #64748b;
+  --op-line: rgba(15, 23, 42, 0.12);
+  --op-line-strong: rgba(15, 23, 42, 0.22);
+  --op-primary: #2563eb;
+  --op-primary-strong: #1d4ed8;
+  --op-primary-soft: rgba(37, 99, 235, 0.11);
+  --op-navy: #111827;
+  --op-navy-2: #1f2937;
+  --op-gold: #d97706;
+  --op-gold-soft: rgba(217, 119, 6, 0.13);
+  --op-red: #b42318;
+  --op-green: #157347;
+  --op-radius: 22px;
+  --op-shadow: 0 24px 70px rgba(15, 23, 42, 0.11);
+  --op-shadow-soft: 0 12px 34px rgba(15, 23, 42, 0.08);
+  --rf-type-caption: 0.66rem;
+  --rf-type-label: 0.72rem;
+  --rf-type-body: 0.78rem;
+  --rf-type-row-title: 0.82rem;
+  --rf-type-section: 0.9rem;
+  --rf-line-readable: 1.38;
 }
 
 * {
@@ -5285,7 +5406,7 @@ body::before {
 
 
 
-@media (max-width: 880px) {.shell {
+@media (max-width: 1024px) {.shell {
     grid-template-columns: 1fr;
     padding: 18px 0;
   }.run-panel {
@@ -5361,21 +5482,7 @@ body::before {
   }}
 
 /* Dense forensic-console skin: optimized for analyst review, not marketing cards. */
-:root {
 
-
-
-
-
-
-
-
-
-  --command: #17202b;
-  --command-2: #202b38;
-
-
-}
 
 
 
@@ -6607,7 +6714,7 @@ body.analysis-active .workbench-side-stack .core-workflow-step {
   padding: 8px;
 }
 
-@media (max-width: 1180px) {body.has-runs .shell,
+@media (max-width: 1280px) {body.has-runs .shell,
   body.analysis-active .shell {
     grid-template-columns: 1fr;
   }body.has-runs .run-panel,
@@ -6649,7 +6756,7 @@ body.analysis-active .workbench-side-stack .core-workflow-step {
     max-height: none;
   }}
 
-@media (max-width: 880px) {.mission-strip,
+@media (max-width: 1024px) {.mission-strip,
   .case-hero-metrics,
   body.analysis-active .completed-core-workflow {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -6929,31 +7036,7 @@ button:disabled,
 }
 
 /* 2026 trend pass: liquid-bento cockpit, expressive controls, dense forensic readability. */
-:root {
 
-
-
-
-
-
-
-
-
-
-
-
-  --danger-soft: rgba(255, 126, 92, 0.16);
-
-
-
-
-
-
-
-
-
-
-}
 
 body {
   overflow-x: hidden;
@@ -7221,7 +7304,7 @@ body.analysis-active .run-item::before {
   }
 }
 
-@media (max-width: 880px) {.case-hero {
+@media (max-width: 1024px) {.case-hero {
     border-radius: 24px;
   }.case-hero h2 {
     font-size: clamp(1.6rem, 10vw, 2.6rem);
@@ -7231,43 +7314,7 @@ body.analysis-active .run-item::before {
   }}
 
 /* Operator-grade calm pass: readable, current, and less toy-like than the trend layer above. */
-:root {
-  --bg: #080e15;
-  --panel: rgba(15, 22, 31, 0.94);
-  --panel-strong: #121b27;
-  --ink: #e9eff5;
-  --muted: #97a6b7;
-  --line: rgba(142, 160, 178, 0.22);
-  --accent: #57d3c9;
-  --accent-strong: #8ee7df;
-  --accent-soft: rgba(87, 211, 201, 0.12);
-  --gold: #d9b86f;
-  --warn: #e9a06f;
-  --ok: #7bd39b;
-  --shadow: 0 18px 56px rgba(0, 0, 0, 0.3);
-  --shadow-soft: 0 12px 34px rgba(0, 0, 0, 0.22);
-  --shadow-command: 0 18px 56px rgba(0, 0, 0, 0.34);
-  --liquid-panel: linear-gradient(180deg, rgba(20, 29, 41, 0.94), rgba(12, 19, 29, 0.96));
-  --liquid-panel-hot: linear-gradient(180deg, rgba(24, 34, 48, 0.96), rgba(13, 20, 30, 0.98));
-  --liquid-border: rgba(144, 169, 190, 0.2);
-  --liquid-border-strong: rgba(87, 211, 201, 0.42);
-  --button-radius: 12px;
-  --button-border: rgba(135, 156, 176, 0.28);
-  --button-primary-bg: linear-gradient(180deg, #7ae0d7 0%, #35b8af 100%);
-  --button-primary-hover: linear-gradient(180deg, #9aeee7 0%, #43c8be 100%);
-  --button-secondary-bg: linear-gradient(180deg, rgba(37, 49, 63, 0.96), rgba(25, 35, 48, 0.98));
-  --button-secondary-hover: linear-gradient(180deg, rgba(47, 61, 77, 0.98), rgba(31, 43, 58, 0.98));
-  --button-glow: 0 10px 22px rgba(53, 184, 175, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.32);
-  --button-quiet-glow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Apple SD Gothic Neo",
-    "Pretendard Variable", "Pretendard", "Segoe UI Variable", "Segoe UI",
-    "Noto Sans KR", sans-serif;
-  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Apple SD Gothic Neo",
-    "Pretendard Variable", "Pretendard", "Segoe UI Variable", "Segoe UI",
-    "Noto Sans KR", sans-serif;
-  --font-mono: "SFMono-Regular", "Cascadia Code", "JetBrains Mono", "D2Coding",
-    "Menlo", monospace;
-}
+
 
 
 
@@ -7911,7 +7958,7 @@ body.analysis-active .run-form {
 
 
 
-@media (max-width: 1180px) {.shell,
+@media (max-width: 1280px) {.shell,
   body.has-runs .shell,
   body.analysis-active .shell {
     grid-template-columns: 1fr;
@@ -7922,7 +7969,7 @@ body.analysis-active .run-form {
     min-height: auto;
   }}
 
-@media (max-width: 760px) {.shell,
+@media (max-width: 768px) {.shell,
   body.has-runs .shell,
   body.analysis-active .shell {
     padding: 8px;
@@ -8167,17 +8214,17 @@ body.has-runs .mission-strip {
   grid-template-columns: repeat(6, minmax(0, 1fr));
 }
 
-@media (max-width: 1500px) {body.analysis-active .case-hero-metrics,
+@media (max-width: 1536px) {body.analysis-active .case-hero-metrics,
   body.has-runs .case-hero-metrics {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }}
 
-@media (max-width: 1180px) {body.has-runs .shell,
+@media (max-width: 1280px) {body.has-runs .shell,
   body.analysis-active .shell {
     grid-template-columns: 1fr !important;
   }}
 
-@media (max-width: 760px) {body.analysis-active .quick-actions,
+@media (max-width: 768px) {body.analysis-active .quick-actions,
   body.has-runs .quick-actions,
   body.analysis-active .mission-strip,
   body.has-runs .mission-strip,
@@ -8193,22 +8240,7 @@ body.has-runs .mission-strip {
   }}
 
 /* Design director + QC overhaul: mature forensic cockpit, no mystery rails, no overflow. */
-:root {
-  --rf-canvas: #0b1118;
 
-  --rf-panel-2: #151f2b;
-  --rf-surface: #182433;
-
-
-  --rf-text: #edf3f7;
-
-  --rf-soft: #c8d4df;
-  --rf-accent: #70ddd3;
-  --rf-accent-2: #a6eee8;
-
-  --rf-radius-lg: 22px;
-  --rf-radius-md: 16px;
-}
 
 html,
 body {
@@ -8530,13 +8562,13 @@ body.analysis-active .case-hero-metric {
 
 
 
-@media (max-width: 1500px) {.case-hero-metrics,
+@media (max-width: 1536px) {.case-hero-metrics,
   body.has-runs .case-hero-metrics,
   body.analysis-active .case-hero-metrics {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }}
 
-@media (max-width: 1180px) {.shell,
+@media (max-width: 1280px) {.shell,
   body.has-runs .shell,
   body.analysis-active .shell {
     grid-template-columns: 1fr !important;
@@ -8545,7 +8577,7 @@ body.analysis-active .case-hero-metric {
     max-height: none;
   }}
 
-@media (max-width: 720px) {.case-source-line,
+@media (max-width: 768px) {.case-source-line,
   .run-item,
   body.has-runs .run-item,
   body.analysis-active .run-item {
@@ -8561,36 +8593,7 @@ body.analysis-active .case-hero-metric {
   }}
 
 /* Operator UI hard reset v4: reduce to intake, review, intelligence. */
-:root {
-  --rf-bg: #f6f8fb;
-  --rf-panel: #ffffff;
-  --rf-panel-soft: #f9fbff;
-  --rf-ink: #101827;
-  --rf-ink-2: #273449;
-  --rf-muted: #66758a;
-  --rf-line: #dce3ee;
-  --rf-line-strong: #c8d3e2;
-  --rf-primary: #1f6feb;
-  --rf-primary-soft: #eaf2ff;
-  --rf-primary-border: #9dc0ff;
-  --rf-good: #13795b;
-  --rf-warn: #b45309;
-  --rf-danger: #b42318;
-  --rf-shadow: 0 18px 50px rgba(16, 24, 39, 0.08);
-  --rf-shadow-soft: 0 10px 28px rgba(16, 24, 39, 0.06);
-  --rf-radius: 20px;
 
-
-
-
-
-
-
-
-
-
-
-}
 
 
 
@@ -9484,7 +9487,7 @@ body.analysis-active .case-hero-metric {
   color: var(--rf-ink) !important;
 }
 
-@media (max-width: 1500px) {.shell,
+@media (max-width: 1536px) {.shell,
   body.has-runs .shell,
   body.analysis-active .shell {
     grid-template-columns: 320px minmax(0, 1fr) !important;
@@ -9492,7 +9495,7 @@ body.analysis-active .case-hero-metric {
     grid-template-columns: 250px minmax(380px, 1fr) 300px !important;
   }}
 
-@media (max-width: 1180px) {.shell,
+@media (max-width: 1280px) {.shell,
   body.has-runs .shell,
   body.analysis-active .shell,
   .case-hero,
@@ -9783,40 +9786,13 @@ body.has-runs .run-form::before {
   margin-inline: 14px;
 }
 
-@media (max-width: 1180px) {.operator-summary-board,
+@media (max-width: 1280px) {.operator-summary-board,
   .operator-summary-route {
     grid-template-columns: 1fr;
   }}
 
 /* Readability color pass: dark command rail, light review workspace, WCAG-minded contrast. */
-:root {
-  --rf-page-bg: #e9eef5;
-  --rf-page-ink: #111827;
-  --rf-page-muted: #526171;
-  --rf-page-line: #d4dde8;
-  --rf-rail-bg: #0e1724;
-  --rf-rail-card: #162235;
-  --rf-rail-card-2: #1c2b40;
-  --rf-rail-ink: #f8fafc;
-  --rf-rail-muted: #cbd5e1;
-  --rf-workspace: #f8fafc;
-  --rf-workspace-card: #ffffff;
-  --rf-workspace-soft: #f1f5f9;
-  --rf-workspace-ink: #172033;
-  --rf-workspace-muted: #5b6b7e;
-  --rf-workspace-line: #d8e1ec;
 
-
-
-
-  --rf-warning-bg: #fff7ed;
-  --rf-warning-ink: #9a3412;
-  --rf-danger-bg: #fff1f2;
-  --rf-danger-ink: #be123c;
-  --rf-ok-bg: #ecfdf3;
-  --rf-ok-ink: #166534;
-
-}
 
 
 
@@ -10474,13 +10450,13 @@ body.analysis-active .known-good-run-options {
   color: #ffffff;
 }
 
-@media (max-width: 1180px) {.shell,
+@media (max-width: 1280px) {.shell,
   body.has-runs .shell,
   body.analysis-active .shell {
     grid-template-columns: 1fr !important;
   }}
 
-@media (max-width: 780px) {.intake-choice-grid,
+@media (max-width: 768px) {.intake-choice-grid,
   .image-evidence-flow,
   .user-run-steps,
   .case-next-route,
@@ -10945,7 +10921,7 @@ body.analysis-active .workbench-command-deck {
   border-color: rgba(93, 111, 128, 0.28);
 }
 
-@media (max-width: 1380px) {.workflow-lane-board,
+@media (max-width: 1280px) {.workflow-lane-board,
   .case-workbench-layout.judgment-workbench {
     grid-template-columns: 1fr;
   }.workflow-lane-grid {
@@ -10954,7 +10930,7 @@ body.analysis-active .workbench-command-deck {
     padding-bottom: 4px;
   }}
 
-@media (max-width: 900px) {.workflow-lane-grid,
+@media (max-width: 1024px) {.workflow-lane-grid,
   .workbench-switchboard .forensic-view-mode-bar,
   .adaptive-viewer-header,
   .review-state-matrix {
@@ -11393,32 +11369,7 @@ button.run-item:hover {
 
 /* Final Paper Dashboard palette selected from Colormind UI rolls:
    #F1F1ED #A0918B #8A9CAF #897A65 #3F4A61. */
-:root {
-  --rf-paper: #f1f1ed;
-  --rf-paper-soft: #f7f6f2;
-  --rf-paper-card: #fffdf9;
-  --rf-brass: #897a65;
-  --rf-brass-soft: rgba(137, 122, 101, 0.16);
-  --rf-periwinkle: #8a9caf;
-  --rf-periwinkle-soft: rgba(138, 156, 175, 0.18);
-  --rf-mauve: #a0918b;
-  --rf-mauve-soft: rgba(160, 145, 139, 0.16);
-  --rf-command-blue: #3f4a61;
-  --rf-command-blue-strong: #2b3448;
-  --rf-command-blue-soft: rgba(63, 74, 97, 0.12);
-  --rf-graphite: #151922;
-  --rf-graphite-2: #242b3a;
-  --rf-clean-line: rgba(63, 74, 97, 0.16);
-  --rf-clean-line-strong: rgba(63, 74, 97, 0.34);
-  --rf-focus: rgba(138, 156, 175, 0.38);
-  --rf-action: var(--rf-command-blue);
-  --rf-action-hover: var(--rf-command-blue-strong);
-  --rf-action-soft: var(--rf-command-blue-soft);
-  --rf-action-line: rgba(138, 156, 175, 0.48);
-  --rf-image-accent: var(--rf-command-blue);
-  --rf-image-accent-strong: var(--rf-command-blue-strong);
-  --rf-image-accent-soft: var(--rf-command-blue-soft);
-}
+
 
 
 
@@ -11622,30 +11573,7 @@ body.analysis-active .case-hero {
 /* Operator UX reset v3:
    Reduce dashboard noise and make the first forensic path obvious:
    evidence intake -> search/triage -> source review -> report selection. */
-:root {
-  --op-bg: #eef2f6;
-  --op-bg-warm: #f7f3ea;
-  --op-surface: #ffffff;
-  --op-surface-2: #f8fafc;
-  --op-surface-3: #eef4ff;
-  --op-ink: #0f172a;
-  --op-ink-soft: #334155;
-  --op-muted: #64748b;
-  --op-line: rgba(15, 23, 42, 0.12);
-  --op-line-strong: rgba(15, 23, 42, 0.22);
-  --op-primary: #2563eb;
-  --op-primary-strong: #1d4ed8;
-  --op-primary-soft: rgba(37, 99, 235, 0.11);
-  --op-navy: #111827;
-  --op-navy-2: #1f2937;
-  --op-gold: #d97706;
-  --op-gold-soft: rgba(217, 119, 6, 0.13);
-  --op-red: #b42318;
-  --op-green: #157347;
-  --op-radius: 22px;
-  --op-shadow: 0 24px 70px rgba(15, 23, 42, 0.11);
-  --op-shadow-soft: 0 12px 34px rgba(15, 23, 42, 0.08);
-}
+
 
 html {
   background: var(--op-bg);
@@ -12513,7 +12441,7 @@ pre,
   color: #1e293b;
 }
 
-@media (max-width: 1180px) {.shell,
+@media (max-width: 1280px) {.shell,
   body.has-runs .shell,
   body.analysis-active .shell {
     grid-template-columns: 1fr !important;
@@ -12535,7 +12463,7 @@ pre,
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }}
 
-@media (max-width: 720px) {.shell,
+@media (max-width: 768px) {.shell,
   body.has-runs .shell,
   body.analysis-active .shell {
     width: min(100vw - 16px, 100%);
@@ -13214,7 +13142,7 @@ body.analysis-active .case-hero-metric,
   border-radius: 12px !important;
 }
 
-@media (max-width: 1540px) {.shell,
+@media (max-width: 1536px) {.shell,
   body.has-runs .shell,
   body.analysis-active .shell {
     grid-template-columns: minmax(280px, 300px) minmax(0, 1fr) !important;
@@ -13491,7 +13419,7 @@ body.analysis-active .case-hero-metric,
   grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
 }
 
-@media (max-width: 1180px) {.case-next-route {
+@media (max-width: 1280px) {.case-next-route {
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }}
 
@@ -14023,7 +13951,7 @@ body.has-runs .review-list-shell {
   min-height: 360px !important;
 }
 
-@media (max-width: 1540px) {body.analysis-active .shell,
+@media (max-width: 1536px) {body.analysis-active .shell,
   body.has-runs .shell {
     grid-template-columns: minmax(208px, 224px) minmax(0, 1fr) !important;
   }body.analysis-active .case-workbench-layout.judgment-workbench,
@@ -14031,7 +13959,7 @@ body.has-runs .review-list-shell {
     grid-template-columns: 112px minmax(0, 1fr) 212px !important;
   }}
 
-@media (max-width: 1180px) {body.analysis-active .shell,
+@media (max-width: 1280px) {body.analysis-active .shell,
   body.has-runs .shell,
   .review-first-case-strip,
   body.analysis-active .review-first-case-strip,
@@ -14300,7 +14228,7 @@ body.has-runs .intel-keyword-cloud button {
   gap: 7px !important;
 }
 
-@media (max-width: 1540px) {body.analysis-active .shell,
+@media (max-width: 1536px) {body.analysis-active .shell,
   body.has-runs .shell {
     grid-template-columns: minmax(192px, 208px) minmax(0, 1fr) !important;
   }body.analysis-active .case-workbench-layout.judgment-workbench,
@@ -14368,7 +14296,7 @@ body.has-runs .source-card.active {
   box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.42) !important;
 }
 
-@media (max-width: 1540px) {body.analysis-active .case-workbench-layout.judgment-workbench,
+@media (max-width: 1536px) {body.analysis-active .case-workbench-layout.judgment-workbench,
   body.has-runs .case-workbench-layout.judgment-workbench {
     grid-template-columns: 70px minmax(0, 1fr) 200px !important;
   }}
@@ -14560,7 +14488,7 @@ body.analysis-active .intel-action-card {
   border-radius: 11px !important;
 }
 
-@media (max-width: 1540px) {body.analysis-active .shell {
+@media (max-width: 1536px) {body.analysis-active .shell {
     grid-template-columns: 182px minmax(0, 1fr) !important;
   }body.analysis-active .case-workbench-layout.judgment-workbench {
     grid-template-columns: 66px minmax(0, 1fr) 188px !important;
@@ -15838,7 +15766,7 @@ body.has-runs .results-panel button.operator-shortcut-button.active,
   color: #174ea6 !important;
 }
 
-@media (max-width: 1180px) {.search-scope-planner {
+@media (max-width: 1280px) {.search-scope-planner {
     grid-template-columns: 1fr;
   }.artifact-pivot-strip {
     grid-template-columns: 1fr;
@@ -15957,7 +15885,7 @@ body.has-runs .results-panel button.capability-map-row small,
   font-weight: 850;
 }
 
-@media (max-width: 1180px) {body.analysis-active .case-workbench-layout.judgment-workbench,
+@media (max-width: 1280px) {body.analysis-active .case-workbench-layout.judgment-workbench,
   body.has-runs .case-workbench-layout.judgment-workbench {
     grid-template-columns: 1fr !important;
   }body.analysis-active .primary-review-pane > .workbench-mode-strip .source-stack,
@@ -15980,14 +15908,7 @@ body.has-runs .results-panel button.capability-map-row small,
    The forensic cockpit must stay dense, but not microscopic. This final layer
    raises the reading floor, gives the right inspector enough width for Korean
    labels, and keeps table actions aligned without stealing the review pane. */
-:root {
-  --rf-type-caption: 0.66rem;
-  --rf-type-label: 0.72rem;
-  --rf-type-body: 0.78rem;
-  --rf-type-row-title: 0.82rem;
-  --rf-type-section: 0.9rem;
-  --rf-line-readable: 1.38;
-}
+
 
 body.analysis-active,
 body.has-runs {
@@ -16183,7 +16104,7 @@ body.has-runs .table-control-bar select,
   font-size: var(--rf-type-body) !important;
 }
 
-@media (max-width: 1420px) {body.analysis-active .case-workbench-layout.judgment-workbench,
+@media (max-width: 1536px) {body.analysis-active .case-workbench-layout.judgment-workbench,
   body.has-runs .case-workbench-layout.judgment-workbench {
     grid-template-columns: minmax(0, 1fr) 250px !important;
   }body.analysis-active .primary-review-pane > .workbench-mode-strip .source-stack,
@@ -17131,12 +17052,12 @@ body.has-runs .workbench-intel-drawer > summary strong {
   margin-top: 8px !important;
 }
 
-@media (max-width: 1420px) {body.analysis-active .primary-review-pane > .table-control-bar,
+@media (max-width: 1536px) {body.analysis-active .primary-review-pane > .table-control-bar,
   body.has-runs .primary-review-pane > .table-control-bar {
     grid-template-columns: repeat(2, minmax(0, 1fr)) auto !important;
   }}
 
-@media (max-width: 980px) {body.analysis-active .primary-review-pane > .table-control-bar,
+@media (max-width: 1024px) {body.analysis-active .primary-review-pane > .table-control-bar,
   body.has-runs .primary-review-pane > .table-control-bar {
     grid-template-columns: 1fr !important;
   }.advanced-diagnostics-grid {
@@ -17524,4 +17445,94 @@ body.analysis-active.intake-open .run-panel > .run-form {
 body.analysis-active.intake-open .panel-section-title .new-case-button,
 body.has-runs.intake-open .panel-section-title .new-case-button {
   border-color: var(--accent-strong, #0f766e);
+}
+
+/* Current workflow step marker (aria-current="step" is set by syncMissionStrip). */
+.mission-strip span[aria-current="step"] {
+  background: var(--accent-soft, rgba(15, 118, 110, 0.14));
+  border-color: var(--accent-strong, #0f766e);
+  color: var(--accent-strong, #0f766e);
+  font-weight: 700;
+}
+
+/* Failed-run cleanup group (0-7): failed runs collapse under a
+   "실패 N건" disclosure with per-item and bulk delete actions. */
+.run-item-row {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.run-item-row .run-item {
+  flex: 1;
+  min-width: 0;
+}
+
+.run-item-delete {
+  align-self: center;
+  flex-shrink: 0;
+  min-height: 32px;
+  padding: 4px 10px;
+  border: 1px solid rgba(185, 28, 28, 0.4);
+  border-radius: 8px;
+  background: transparent;
+  color: #b91c1c;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.run-item-delete:hover {
+  background: rgba(185, 28, 28, 0.08);
+}
+
+.failed-runs-group {
+  margin-top: 6px;
+  border: 1px dashed rgba(185, 28, 28, 0.35);
+  border-radius: 10px;
+}
+
+.failed-runs-group > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #b91c1c;
+  list-style: none;
+}
+
+.failed-runs-group > summary::-webkit-details-marker {
+  display: none;
+}
+
+.failed-runs-group > summary .failed-runs-clear {
+  min-height: 28px;
+  padding: 3px 10px;
+  font-size: 0.7rem;
+}
+
+.failed-runs-list {
+  display: grid;
+  gap: 4px;
+  padding: 4px 8px 8px;
+}
+
+/* Narrow-viewport overflow fix: grid children default to min-width:auto and
+   refuse to shrink below long unbreakable content (paths, hashes), which
+   clipped the right side of dense rows at ~1024px. */
+.dense-row,
+.dense-row > *,
+.bookmark-row,
+.bookmark-row > * {
+  min-width: 0;
+}
+
+.dense-row strong,
+.dense-row code,
+.bookmark-row strong {
+  overflow-wrap: anywhere;
 }

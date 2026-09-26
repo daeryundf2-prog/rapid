@@ -424,6 +424,22 @@ def _sweep_deleted_mft_records(fs: Any, extract_dir: Path, stats: dict[str, int]
             return
 
 
+def _dump_ntfs_system_record(rec: Any, out_path: Path) -> int:
+    """Dump a raw NTFS record stream (e.g. $MFT) for reference-diff tooling."""
+    size = int(rec.size())
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    src = rec.open()
+    remaining = size
+    with out_path.open("wb") as dst:
+        while remaining > 0:
+            chunk = src.read(min(8 << 20, remaining))
+            if not chunk:
+                break
+            dst.write(chunk)
+            remaining -= len(chunk)
+    return size - max(remaining, 0)
+
+
 def extract_e01_native(
     source_path: Path,
     segments: list[Path],
@@ -431,6 +447,7 @@ def extract_e01_native(
     *,
     partition_start_sector: int | None = None,
     include_deleted: bool = True,
+    system_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Open an EWF segment set, select a partition, and recover files via NTFS.
 
@@ -470,6 +487,17 @@ def extract_e01_native(
         _walk_ntfs_dir(root, extract_dir, stats)
         if include_deleted:
             _sweep_deleted_mft_records(fs, extract_dir, stats)
+        system_artifacts: dict[str, str] = {}
+        if system_dir is not None:
+            # Dump $MFT (record 0) outside the recovered tree so reference-diff
+            # tooling can compare the native view with ils/fls -rp output.
+            try:
+                mft_rec = fs.mft.get(0)
+                mft_path = system_dir / "MFT.bin"
+                _dump_ntfs_system_record(mft_rec, mft_path)
+                system_artifacts["mft"] = str(mft_path)
+            except Exception:
+                stats["errors"] += 1
         return {
             "media_size_bytes": int(handle.get_media_size()),
             "sector_size_bytes": sector_size,
@@ -477,6 +505,7 @@ def extract_e01_native(
             "selected_partition": selected,
             "selected_start_sector": start_sector,
             "stats": stats,
+            "system_artifacts": system_artifacts,
             "volume_name": getattr(fs, "volume_name", "") or "",
             "serial": getattr(fs, "serial", None),
         }

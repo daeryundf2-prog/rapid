@@ -448,6 +448,263 @@ Units are in 512-byte sectors
             )
             self.assertEqual(checkpoint["mount_strategy"], "python-native-ewf")
 
+    def _fake_native_result(self) -> dict:
+        partition_row = {
+            "partition_number": 0,
+            "start_sector": 2048,
+            "sector_count": 4096,
+            "size_bytes": 2048 * 512,
+            "byte_offset": 2048 * 512,
+            "sector_size_bytes": 512,
+            "description": "Basic data partition",
+            "filesystem_guess": "windows-basic-data",
+            "supported_filesystem_hint": True,
+        }
+        return {
+            "media_size_bytes": 4096 * 512,
+            "sector_size_bytes": 512,
+            "partition_table": [partition_row],
+            "selected_partition": partition_row,
+            "selected_start_sector": 2048,
+            "stats": {
+                "files": 3,
+                "bytes": 1024,
+                "errors": 0,
+                "depth_skips": 0,
+                "truncated": 0,
+                "deleted_files": 1,
+                "deleted_read_errors": 0,
+            },
+            "volume_name": "EVIDENCE",
+            "serial": None,
+        }
+
+    def test_extract_e01_engine_native_forces_in_process_path(self) -> None:
+        from rapidtriage.core.e01_native import native_e01_available
+
+        if not native_e01_available():
+            self.skipTest("pyewf/dissect.ntfs not importable in this environment")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            e01_path = Path(tmp_dir) / "case.E01"
+            e01_path.write_bytes(b"EVF")
+            calls = []
+
+            def fake_runner(command):
+                calls.append(list(command))
+                return subprocess.CompletedProcess(command, 0, f"{command[0]} 1.0\n", "")
+
+            with patch(
+                "rapidtriage.core.e01_native.extract_e01_native",
+                return_value=self._fake_native_result(),
+            ):
+                result = extract_e01_to_directory(
+                    e01_path,
+                    Path(tmp_dir) / "stage",
+                    engine="native",
+                    runner=fake_runner,
+                    tool_resolver=lambda name: f"/usr/bin/{name}",
+                )
+            self.assertEqual(result.mount_strategy, "python-native-ewf")
+            # External recovery tools must not run under engine=native
+            # (tool-preflight --version probes still run for capability audit).
+            workflow_calls = [c[0] for c in calls if c[1:] != ["--version"]]
+            self.assertNotIn("ewfmount", workflow_calls)
+            self.assertNotIn("tsk_recover", workflow_calls)
+            self.assertTrue(any("explicitly requested" in warning for warning in result.warnings))
+
+    def test_extract_e01_engine_native_requires_modules(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            e01_path = Path(tmp_dir) / "case.E01"
+            e01_path.write_bytes(b"EVF")
+            with patch("rapidtriage.core.e01.native_e01_available", return_value=False):
+                with self.assertRaises(E01ExtractionError) as context:
+                    extract_e01_to_directory(
+                        e01_path,
+                        Path(tmp_dir) / "stage",
+                        engine="native",
+                        tool_resolver=lambda name: f"/usr/bin/{name}",
+                    )
+            self.assertIn("native E01 engine requested but modules are unavailable", str(context.exception))
+
+    def test_extract_e01_engine_external_skips_native_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            e01_path = Path(tmp_dir) / "case.E01"
+            e01_path.write_bytes(b"EVF")
+            with self.assertRaises(E01ExtractionError) as context:
+                extract_e01_to_directory(
+                    e01_path,
+                    Path(tmp_dir) / "stage",
+                    engine="external",
+                    tool_resolver=lambda _: None,
+                )
+            # All tools missing + external engine: blocked error, no native attempt.
+            self.assertIn("E01 direct input requires external tools", str(context.exception))
+            self.assertNotIn("native E01 extraction failed", str(context.exception))
+
+    def test_extract_e01_engine_env_var_and_invalid_choice(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            e01_path = Path(tmp_dir) / "case.E01"
+            e01_path.write_bytes(b"EVF")
+            with self.assertRaises(E01ExtractionError) as context:
+                extract_e01_to_directory(e01_path, Path(tmp_dir) / "s1", engine="bogus")
+            self.assertIn("unsupported E01 engine", str(context.exception))
+            with patch.dict("os.environ", {"RAPIDTRIAGE_E01_ENGINE": "bogus"}):
+                with self.assertRaises(E01ExtractionError) as env_context:
+                    extract_e01_to_directory(e01_path, Path(tmp_dir) / "s2")
+            self.assertIn("unsupported E01 engine", str(env_context.exception))
+
+    def test_extract_e01_auto_mode_falls_back_to_external_on_native_failure(self) -> None:
+        from rapidtriage.core.e01_native import native_e01_available
+
+        if not native_e01_available():
+            self.skipTest("pyewf/dissect.ntfs not importable in this environment")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            e01_path = Path(tmp_dir) / "case.E01"
+            e01_path.write_bytes(b"EVF")  # invalid EWF — native open fails
+            stage_dir = Path(tmp_dir) / "stage"
+
+            def fake_runner(command):
+                if command[1:] == ["--version"]:
+                    return subprocess.CompletedProcess(command, 0, f"{command[0]} 1.0\n", "")
+                if command[0] == "ewfmount":
+                    (Path(command[2]) / "ewf1").write_bytes(b"raw")
+                    return subprocess.CompletedProcess(command, 0, "", "")
+                if command[0] == "mmls":
+                    return subprocess.CompletedProcess(command, 0, "001: 0000002048 0000020000 NTFS\n", "")
+                if command[0] == "tsk_recover":
+                    Path(command[-1]).mkdir(parents=True, exist_ok=True)
+                    (Path(command[-1]) / "evidence.txt").write_text("fraud invoice", encoding="utf-8")
+                    return subprocess.CompletedProcess(command, 0, "", "")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            result = extract_e01_to_directory(
+                e01_path,
+                stage_dir,
+                runner=fake_runner,
+                tool_resolver=lambda name: f"/usr/bin/{name}",
+            )
+            self.assertTrue((result.extract_dir / "evidence.txt").is_file())
+            self.assertEqual(result.mount_strategy, "ewfmount-fuse")
+            failed_native = [
+                entry
+                for entry in result.command_history
+                if entry.get("purpose") == "native-filesystem-recovery"
+            ]
+            self.assertTrue(failed_native)
+            self.assertIn("native E01 extraction failed", failed_native[0]["error"])
+
+    def test_extract_e01_corrupt_header_reports_native_and_tool_context(self) -> None:
+        from rapidtriage.core.e01_native import native_e01_available
+
+        if not native_e01_available():
+            self.skipTest("pyewf/dissect.ntfs not importable in this environment")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            e01_path = Path(tmp_dir) / "case.E01"
+            e01_path.write_bytes(b"NOT-AN-EWF-HEADER" * 8)
+            with self.assertRaises(E01ExtractionError) as context:
+                extract_e01_to_directory(e01_path, Path(tmp_dir) / "stage", tool_resolver=lambda _: None)
+            message = str(context.exception)
+            self.assertIn("E01 direct input requires external tools", message)
+            self.assertIn("Native engine also failed", message)
+
+    def test_extract_e01_native_invalid_partition_override_surfaces(self) -> None:
+        from rapidtriage.core.e01_native import native_e01_available
+
+        if not native_e01_available():
+            self.skipTest("pyewf/dissect.ntfs not importable in this environment")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            e01_path = Path(tmp_dir) / "case.E01"
+            e01_path.write_bytes(b"EVF")
+            with patch(
+                "rapidtriage.core.e01_native.extract_e01_native",
+                side_effect=ValueError("requested partition start sector 999999 was not found in the partition table"),
+            ):
+                with self.assertRaises(E01ExtractionError) as context:
+                    extract_e01_to_directory(
+                        e01_path,
+                        Path(tmp_dir) / "stage",
+                        engine="native",
+                        partition_start_sector=999999,
+                    )
+            self.assertIn("was not found in the partition table", str(context.exception))
+
+    def test_extract_e01_native_unsupported_filesystem_surfaces(self) -> None:
+        from rapidtriage.core.e01_native import native_e01_available
+
+        if not native_e01_available():
+            self.skipTest("pyewf/dissect.ntfs not importable in this environment")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            e01_path = Path(tmp_dir) / "case.E01"
+            e01_path.write_bytes(b"EVF")
+            with patch(
+                "rapidtriage.core.e01_native.extract_e01_native",
+                side_effect=ValueError(
+                    "native E01 extraction supports NTFS only; partition at sector 2048 reports filesystem signature 'EXFAT'"
+                ),
+            ):
+                with self.assertRaises(E01ExtractionError) as context:
+                    extract_e01_to_directory(e01_path, Path(tmp_dir) / "stage", engine="native")
+            self.assertIn("supports NTFS only", str(context.exception))
+
+    def test_extract_e01_native_records_system_artifacts_in_manifest(self) -> None:
+        from rapidtriage.core.e01_native import native_e01_available
+
+        if not native_e01_available():
+            self.skipTest("pyewf/dissect.ntfs not importable in this environment")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            e01_path = Path(tmp_dir) / "case.E01"
+            e01_path.write_bytes(b"EVF")
+            mft_path = Path(tmp_dir) / "stage" / "_system" / "MFT.bin"
+            fake = self._fake_native_result()
+            fake["system_artifacts"] = {"mft": str(mft_path)}
+            with patch(
+                "rapidtriage.core.e01_native.extract_e01_native",
+                return_value=fake,
+            ):
+                result = extract_e01_to_directory(e01_path, Path(tmp_dir) / "stage", engine="native")
+            manifest = result.recovered_root_manifest
+            self.assertEqual(manifest["system_artifacts"]["mft"], str(mft_path))
+
+    def test_dump_ntfs_system_record_streams_bounded_chunks(self) -> None:
+        from rapidtriage.core.e01_native import _dump_ntfs_system_record
+
+        class _FakeStream:
+            def __init__(self, data: bytes):
+                self._data = data
+                self._pos = 0
+
+            def read(self, n: int) -> bytes:
+                chunk = self._data[self._pos : self._pos + n]
+                self._pos += len(chunk)
+                return chunk
+
+        class _FakeRec:
+            def __init__(self, data: bytes):
+                self._data = data
+
+            def size(self) -> int:
+                return len(self._data)
+
+            def open(self):
+                return _FakeStream(self._data)
+
+        payload = b"MFT-RECORD" * 5000
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            out = Path(tmp_dir) / "_system" / "MFT.bin"
+            written = _dump_ntfs_system_record(_FakeRec(payload), out)
+            self.assertEqual(written, len(payload))
+            self.assertEqual(out.read_bytes(), payload)
+
+    def test_extract_e01_missing_middle_segment_blocked_everywhere(self) -> None:
+        """A gap in the EWF segment chain must not silently decode."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            (root / "case.E01").write_bytes(b"EVF")
+            (root / "case.E03").write_bytes(b"EVF")  # E02 missing
+            profile = build_e01_segment_set_profile(root / "case.E01")
+            self.assertFalse(profile["contiguous"])
+            self.assertTrue(any("[2]" in warning for warning in profile["warnings"]))
+
     def test_extract_e01_native_fallback_surfaces_truncation_warning(self) -> None:
         from rapidtriage.core.e01_native import native_e01_available
 
@@ -708,7 +965,12 @@ Units are in 512-byte sectors
             self.assertEqual(provenance["source_image"]["name"], "case.E01")
             self.assertEqual(provenance["selected_partition"]["selected_start_sector"], 2048)
             self.assertEqual(len(provenance["tool_versions"]), 3)
-            self.assertEqual(len(provenance["command_history"]), 3)
+            external_history = [
+                entry
+                for entry in provenance["command_history"]
+                if entry.get("purpose") != "native-filesystem-recovery"
+            ]
+            self.assertEqual(len(external_history), 3)
             self.assertFalse(provenance["read_only_posture"]["source_mutation_allowed"])
             self.assertEqual(len(provenance["manifest_sha256"]), 64)
             self.assertEqual(workflow_manifest["provenance_profile"]["manifest_sha256"], provenance["manifest_sha256"])
