@@ -3532,6 +3532,10 @@ class RapidTriageApiTests(unittest.TestCase):
             report_file_response = client.get(f"/api/runs/{run_id}/case-report/file")
             self.assertEqual(report_file_response.status_code, 200)
             self.assertIn("디지털 포렌식 분석 보고서", report_file_response.text)
+            # The download must serve the report written by the POST above —
+            # regenerating with a default request would clobber the chosen
+            # template (previously this endpoint rebuilt with legal-handoff).
+            self.assertIn("Report template: `technical-appendix`", report_file_response.text)
             html_report_response = client.get(f"/api/runs/{run_id}/case-report/file/html")
             self.assertEqual(html_report_response.status_code, 200)
             self.assertIn("<h1>디지털 포렌식 분석 보고서</h1>", html_report_response.text)

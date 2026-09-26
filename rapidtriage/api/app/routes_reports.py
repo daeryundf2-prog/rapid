@@ -131,11 +131,12 @@ def build_reports_router(
 
     @router.get("/api/runs/{run_id}/case-report/file")
     def download_case_report(run_id: str) -> FileResponse:
-        request = CaseReportCreateRequest()
         report_path = default_case_report_path(store, run_id)
-        markdown = build_run_case_report(store, run_id, request)
-        write_case_report_exports(markdown, report_path)
-        write_case_report_audit(store, run_id, report_path, request)
+        if not report_path.is_file():
+            request = CaseReportCreateRequest()
+            markdown = build_run_case_report(store, run_id, request)
+            write_case_report_exports(markdown, report_path)
+            write_case_report_audit(store, run_id, report_path, request)
         return FileResponse(report_path, filename=report_path.name, media_type="text/markdown")
 
 
@@ -144,12 +145,19 @@ def build_reports_router(
         normalized = format_name.lower()
         if normalized not in {"md", "html", "docx", "pdf", "manifest"}:
             raise HTTPException(status_code=404, detail="unsupported case report format")
-        request = CaseReportCreateRequest()
         report_path = default_case_report_path(store, run_id)
-        markdown = build_run_case_report(store, run_id, request)
-        write_case_report_exports(markdown, report_path)
-        write_case_report_audit(store, run_id, report_path, request)
+        if not report_path.is_file():
+            request = CaseReportCreateRequest()
+            markdown = build_run_case_report(store, run_id, request)
+            write_case_report_exports(markdown, report_path)
+            write_case_report_audit(store, run_id, report_path, request)
         path = case_report_export_paths(report_path)[normalized]
+        if not path.is_file():
+            # Export missing for an existing report (e.g. written before the
+            # export set changed) — re-export from the stored markdown so the
+            # template the author chose is preserved instead of regenerated
+            # with default settings.
+            write_case_report_exports(report_path.read_text(encoding="utf-8"), report_path)
         media_types = {
             "md": "text/markdown",
             "html": "text/html",
