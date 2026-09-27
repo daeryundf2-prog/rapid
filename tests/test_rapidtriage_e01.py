@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -756,6 +757,71 @@ Units are in 512-byte sectors
                 entry for entry in checkpoint["command_history"] if entry["stage"] == "native-filesystem-recovery"
             )
             self.assertEqual(recovery_entry["truncated"], 42)
+
+    def test_native_extract_file_limit_defaults_and_env_override(self) -> None:
+        from rapidtriage.core import e01_native
+
+        env = os.environ.copy()
+        env.pop(e01_native.NATIVE_MAX_EXTRACT_FILES_ENV, None)
+        with patch.dict(os.environ, env, clear=True):
+            self.assertEqual(e01_native.native_extract_file_limit(), e01_native.MAX_NATIVE_EXTRACT_FILES)
+        with patch.dict(os.environ, {e01_native.NATIVE_MAX_EXTRACT_FILES_ENV: "7"}):
+            self.assertEqual(e01_native.native_extract_file_limit(), 7)
+        for bogus in ("not-a-number", "0", "-5"):
+            with patch.dict(os.environ, {e01_native.NATIVE_MAX_EXTRACT_FILES_ENV: bogus}):
+                self.assertEqual(e01_native.native_extract_file_limit(), e01_native.MAX_NATIVE_EXTRACT_FILES)
+
+    def test_native_walk_counts_every_capped_file_as_truncated(self) -> None:
+        from rapidtriage.core import e01_native
+
+        class _FakeFile:
+            def is_dir(self) -> bool:
+                return False
+
+            def is_file(self) -> bool:
+                return True
+
+            def size(self) -> int:
+                return 1
+
+            def open(self):
+                import io
+
+                return io.BytesIO(b"x")
+
+        class _FakeDir:
+            def __init__(self, children):
+                self._children = children
+
+            def is_dir(self) -> bool:
+                return True
+
+            def is_file(self) -> bool:
+                return False
+
+            def listdir(self):
+                return list(self._children)
+
+            def get(self, name):
+                return self._children.get(name)
+
+        children = {f"file-{index}.txt": _FakeFile() for index in range(5)}
+        children["nested"] = _FakeDir({f"nested-{index}.txt": _FakeFile() for index in range(3)})
+        root = _FakeDir(children)
+        stats = {
+            "files": 0,
+            "bytes": 0,
+            "errors": 0,
+            "depth_skips": 0,
+            "truncated": 0,
+            "deleted_files": 0,
+            "deleted_read_errors": 0,
+            "file_limit": 3,
+        }
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            e01_native._walk_ntfs_dir(root, Path(tmp_dir), stats, limit=3)
+        self.assertEqual(stats["files"], 3)
+        self.assertEqual(stats["truncated"], 5)
 
     def test_e01_segment_set_profile_detects_missing_split_segment(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

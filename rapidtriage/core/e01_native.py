@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import os
 import struct
 import uuid
 from pathlib import Path
@@ -77,6 +78,20 @@ MBR_TYPE_DESCRIPTIONS = {
 SWAP_DESCRIPTIONS = ("swap",)
 MAX_NATIVE_EXTRACT_FILES = 200_000
 MAX_NATIVE_EXTRACT_BYTES = 0  # 0 = unbounded; callers may cap later
+NATIVE_MAX_EXTRACT_FILES_ENV = "RAPIDTRIAGE_NATIVE_MAX_EXTRACT_FILES"
+
+
+def native_extract_file_limit() -> int:
+    """Active per-image extraction cap; env override for large real evidence."""
+    raw = os.environ.get(NATIVE_MAX_EXTRACT_FILES_ENV, "").strip()
+    if raw:
+        try:
+            value = int(raw)
+            if value > 0:
+                return value
+        except ValueError:
+            pass
+    return MAX_NATIVE_EXTRACT_FILES
 
 
 def native_e01_available() -> bool:
@@ -342,10 +357,18 @@ def _dump_ntfs_record(rec: Any, out_path: Path, stats: dict[str, int]) -> None:
     stats["bytes"] += size - max(remaining, 0)
 
 
-def _walk_ntfs_dir(node: Any, out_dir: Path, stats: dict[str, int], depth: int = 0) -> None:
+def _walk_ntfs_dir(
+    node: Any,
+    out_dir: Path,
+    stats: dict[str, int],
+    depth: int = 0,
+    limit: int | None = None,
+) -> None:
     if depth > 64:
         stats["depth_skips"] += 1
         return
+    if limit is None:
+        limit = native_extract_file_limit()
     try:
         names = list(node.listdir())
     except Exception:
@@ -364,11 +387,11 @@ def _walk_ntfs_dir(node: Any, out_dir: Path, stats: dict[str, int], depth: int =
         target = out_dir / _safe_component(name)
         try:
             if rec.is_dir():
-                _walk_ntfs_dir(rec, target, stats, depth + 1)
+                _walk_ntfs_dir(rec, target, stats, depth + 1, limit)
             elif rec.is_file():
-                if stats["files"] >= MAX_NATIVE_EXTRACT_FILES:
+                if stats["files"] >= limit:
                     stats["truncated"] += 1
-                    return
+                    continue
                 _dump_ntfs_record(rec, target, stats)
         except Exception:
             stats["errors"] += 1
@@ -392,8 +415,15 @@ def _mft_record_count(fs: Any) -> int:
     return stream_size // max(record_size, 256)
 
 
-def _sweep_deleted_mft_records(fs: Any, extract_dir: Path, stats: dict[str, int]) -> None:
+def _sweep_deleted_mft_records(
+    fs: Any,
+    extract_dir: Path,
+    stats: dict[str, int],
+    limit: int | None = None,
+) -> None:
     """Best-effort recovery of MFT records whose in-use flag is cleared."""
+    if limit is None:
+        limit = native_extract_file_limit()
     total = _mft_record_count(fs)
     deleted_dir = extract_dir / "_deleted_mft"
     consecutive_missing = 0
@@ -412,6 +442,9 @@ def _sweep_deleted_mft_records(fs: Any, extract_dir: Path, stats: dict[str, int]
             filename = rec.filename or f"record-{index}"
         except Exception:
             continue
+        if stats["files"] >= limit:
+            stats["truncated"] += 1
+            continue
         target = deleted_dir / f"{index}-{_safe_component(filename)}"
         before_errors = stats["errors"]
         _dump_ntfs_record(rec, target, stats)
@@ -419,9 +452,6 @@ def _sweep_deleted_mft_records(fs: Any, extract_dir: Path, stats: dict[str, int]
             stats["deleted_read_errors"] += 1
         else:
             stats["deleted_files"] += 1
-        if stats["files"] >= MAX_NATIVE_EXTRACT_FILES:
-            stats["truncated"] += 1
-            return
 
 
 def _dump_ntfs_system_record(rec: Any, out_path: Path) -> int:
@@ -482,11 +512,12 @@ def extract_e01_native(
             "truncated": 0,
             "deleted_files": 0,
             "deleted_read_errors": 0,
+            "file_limit": native_extract_file_limit(),
         }
         root = fs.mft.get(5)
-        _walk_ntfs_dir(root, extract_dir, stats)
+        _walk_ntfs_dir(root, extract_dir, stats, limit=stats["file_limit"])
         if include_deleted:
-            _sweep_deleted_mft_records(fs, extract_dir, stats)
+            _sweep_deleted_mft_records(fs, extract_dir, stats, limit=stats["file_limit"])
         system_artifacts: dict[str, str] = {}
         if system_dir is not None:
             # Dump $MFT (record 0) outside the recovered tree so reference-diff
