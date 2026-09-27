@@ -771,10 +771,16 @@ Units are in 512-byte sectors
             with patch.dict(os.environ, {e01_native.NATIVE_MAX_EXTRACT_FILES_ENV: bogus}):
                 self.assertEqual(e01_native.native_extract_file_limit(), e01_native.MAX_NATIVE_EXTRACT_FILES)
 
-    def test_native_walk_counts_every_capped_file_as_truncated(self) -> None:
-        from rapidtriage.core import e01_native
-
+    def _fake_ntfs_fixtures(self):
         class _FakeFile:
+            _counter = 0
+
+            def __init__(self, segment=None):
+                if segment is None:
+                    _FakeFile._counter += 1
+                    segment = 10_000 + _FakeFile._counter
+                self.segment = segment
+
             def is_dir(self) -> bool:
                 return False
 
@@ -790,8 +796,9 @@ Units are in 512-byte sectors
                 return io.BytesIO(b"x")
 
         class _FakeDir:
-            def __init__(self, children):
+            def __init__(self, children, dos_names=()):
                 self._children = children
+                self._dos_names = set(dos_names)
 
             def is_dir(self) -> bool:
                 return True
@@ -799,16 +806,18 @@ Units are in 512-byte sectors
             def is_file(self) -> bool:
                 return False
 
-            def listdir(self):
+            def listdir(self, ignore_dos=False):
+                if ignore_dos:
+                    return [name for name in self._children if name not in self._dos_names]
                 return list(self._children)
 
             def get(self, name):
                 return self._children.get(name)
 
-        children = {f"file-{index}.txt": _FakeFile() for index in range(5)}
-        children["nested"] = _FakeDir({f"nested-{index}.txt": _FakeFile() for index in range(3)})
-        root = _FakeDir(children)
-        stats = {
+        return _FakeFile, _FakeDir
+
+    def _fresh_stats(self, limit: int) -> dict:
+        return {
             "files": 0,
             "bytes": 0,
             "errors": 0,
@@ -816,12 +825,45 @@ Units are in 512-byte sectors
             "truncated": 0,
             "deleted_files": 0,
             "deleted_read_errors": 0,
-            "file_limit": 3,
+            "alias_skips": 0,
+            "file_limit": limit,
         }
+
+    def test_native_walk_counts_every_capped_file_as_truncated(self) -> None:
+        from rapidtriage.core import e01_native
+
+        _FakeFile, _FakeDir = self._fake_ntfs_fixtures()
+        children = {f"file-{index}.txt": _FakeFile() for index in range(5)}
+        children["nested"] = _FakeDir({f"nested-{index}.txt": _FakeFile() for index in range(3)})
+        root = _FakeDir(children)
+        stats = self._fresh_stats(3)
         with tempfile.TemporaryDirectory() as tmp_dir:
             e01_native._walk_ntfs_dir(root, Path(tmp_dir), stats, limit=3)
         self.assertEqual(stats["files"], 3)
         self.assertEqual(stats["truncated"], 5)
+
+    def test_native_walk_dedupes_dos_aliases_and_keeps_dos_only_names(self) -> None:
+        from rapidtriage.core import e01_native
+
+        _FakeFile, _FakeDir = self._fake_ntfs_fixtures()
+        shared = _FakeFile(segment=42)
+        children = {
+            "alpha.txt": _FakeFile(),
+            "longname.txt": shared,
+            "LONGN~1.TXT": shared,  # DOS alias for the same record
+            "DOSONLY~1.TXT": _FakeFile(),  # record only reachable via DOS name
+        }
+        root = _FakeDir(children, dos_names={"LONGN~1.TXT", "DOSONLY~1.TXT"})
+        stats = self._fresh_stats(100)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            out = Path(tmp_dir)
+            e01_native._walk_ntfs_dir(root, out, stats, limit=100)
+            self.assertEqual(stats["files"], 3)
+            self.assertEqual(stats["alias_skips"], 1)
+            self.assertTrue((out / "alpha.txt").is_file())
+            self.assertTrue((out / "longname.txt").is_file())
+            self.assertTrue((out / "DOSONLY~1.TXT").is_file())
+            self.assertFalse((out / "LONGN~1.TXT").exists())
 
     def test_e01_segment_set_profile_detects_missing_split_segment(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

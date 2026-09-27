@@ -370,11 +370,17 @@ def _walk_ntfs_dir(
     if limit is None:
         limit = native_extract_file_limit()
     try:
-        names = list(node.listdir())
+        # NTFS indexes carry both the Win32 long name and any DOS 8.3 alias
+        # for the same record. Walk non-DOS names first and dedupe on the
+        # record segment so each file is extracted once under its long name,
+        # while records that only have a DOS name are still recovered.
+        preferred_names = list(node.listdir(ignore_dos=True))
+        dos_only_names = [n for n in node.listdir() if n not in preferred_names]
     except Exception:
         stats["errors"] += 1
         return
-    for name in names:
+    seen_segments: set[int] = set()
+    for name in (*preferred_names, *dos_only_names):
         if name in (".", ".."):
             continue
         try:
@@ -384,6 +390,12 @@ def _walk_ntfs_dir(
             continue
         if rec is None:
             continue
+        segment = getattr(rec, "segment", None)
+        if segment is not None:
+            if segment in seen_segments:
+                stats["alias_skips"] += 1
+                continue
+            seen_segments.add(segment)
         target = out_dir / _safe_component(name)
         try:
             if rec.is_dir():
@@ -512,6 +524,7 @@ def extract_e01_native(
             "truncated": 0,
             "deleted_files": 0,
             "deleted_read_errors": 0,
+            "alias_skips": 0,
             "file_limit": native_extract_file_limit(),
         }
         root = fs.mft.get(5)
