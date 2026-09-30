@@ -67,12 +67,18 @@ kakaotalk = [
   "openpyxl>=3.1",
   "pycryptodome>=3.20",
 ]
+# Local speech-to-text for dashcam audio: whisper runs in-process and
+# pulls torch (~2GB). Never required — dashcam-stt fails closed when absent.
+stt = [
+  "openai-whisper>=20231117",
+]
 
 [project.scripts]
 dashcam-report = "dashcam_tools.report:main"
 dashcam-gui = "dashcam_tools.gui:main"
 dashcam-rename = "dashcam_tools.rename:cli"
 dashcam-ingest = "dashcam_tools.ingest:cli"
+dashcam-stt = "dashcam_tools.stt:cli"
 rapidtriage = "rapidtriage.cli:main"
 rapidtriage-web = "rapidtriage.cli:web_main"
 
