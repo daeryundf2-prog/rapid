@@ -250,6 +250,17 @@ def normalize_payload(payload: Any, root: Path) -> Any:
             if key == "platform" and isinstance(value, str):
                 normalized[normalized_key] = "<PLATFORM>"
                 continue
+            # Tool-discovery paths (e.g. shutil.which("deepfake-lens")) are
+            # machine-dependent: the value differs per host and is empty when
+            # the optional tool is not installed. Mask them so checked-in
+            # fixtures stay portable.
+            if (
+                isinstance(key, str)
+                and key.endswith(("_cli_path", "_tool_path", "_bin_path", "_binary_path"))
+                and isinstance(value, str)
+            ):
+                normalized[normalized_key] = "<TOOL_PATH>"
+                continue
             normalized[normalized_key] = normalize_payload(value, root)
         return normalized
     if isinstance(payload, list):

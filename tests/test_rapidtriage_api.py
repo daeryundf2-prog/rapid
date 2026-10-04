@@ -866,7 +866,7 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertIn("bindEvidenceCheckActions", app_js)
         self.assertIn("E01_PRE_RUN_STEPS", app_js)
         self.assertIn("updateRunSubmissionCta", app_js)
-        self.assertIn("Starting E01 workflow", app_js)
+        self.assertIn("e01WorkflowLabel", app_js)
         self.assertIn("e01-workflow-panel", app_js)
         self.assertIn("data-testid=\"e01-end-to-end-handoff\"", app_js)
         self.assertIn("data-testid=\"e01-partition-browser\"", app_js)
