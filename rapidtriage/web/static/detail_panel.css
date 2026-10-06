@@ -622,3 +622,15 @@ body.has-runs .workbench-intel-drawer > summary strong {
   font-weight: 700;
   color: #b45309;
 }
+
+/* Result-table type links pivot straight into the filtered artifacts view. */
+.result-type-link {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--accent, #1f6feb);
+  cursor: pointer;
+  text-align: left;
+}
+.result-type-link code { color: inherit; }
+.result-type-link:hover code { text-decoration: underline; }

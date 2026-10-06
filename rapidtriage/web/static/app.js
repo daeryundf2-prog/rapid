@@ -2859,9 +2859,10 @@ function renderCollectedArtifactsTable(artifactRows, artifactTotal) {
   const MAX_ROWS = 50;
   const rows = artifactRows.slice(0, MAX_ROWS).map(({ kind, artifact }) => {
     const path = artifact.path || artifact.details?.source_path || "";
+    const type = artifact.artifact_type || kind;
     return `
       <tr>
-        <td><code>${escapeHtml(artifact.artifact_type || kind)}</code></td>
+        <td><button class="result-type-link" type="button" data-open-tab="artifacts" data-artifact-filter="${escapeHtml(type)}" title="${escapeHtml(type)} 유형만 필터"><code>${escapeHtml(type)}</code></button></td>
         <td><code>${escapeHtml(fileName(path) || "-")}</code></td>
         <td><code>${escapeHtml(artifact.provider || "-")}</code></td>
         <td class="path-cell"><code>${escapeHtml(path)}</code></td>
@@ -2905,7 +2906,7 @@ function renderArtifactTypeTable(summary) {
   const totalRows = rows.reduce((sum, r) => sum + r.count, 0);
   const rowHtml = rows.map((r) => `
     <tr>
-      <td><code>${escapeHtml(r.type)}</code></td>
+      <td><button class="result-type-link" type="button" data-open-tab="artifacts" data-artifact-filter="${escapeHtml(r.type)}" title="${escapeHtml(r.type)} 유형의 실제 데이터 행 보기"><code>${escapeHtml(r.type)}</code></button></td>
       <td class="num">${formatNumber(r.count)}</td>
       <td><code>${escapeHtml(r.provider)}</code></td>
       <td class="path-cell"><code>${escapeHtml(r.output)}</code></td>
@@ -2915,7 +2916,7 @@ function renderArtifactTypeTable(summary) {
     testId: "result-artifact-types",
     title: "수집된 아티팩트 유형",
     count: rows.length,
-    headers: ["유형", "건수", "수집기", "산출물 파일"],
+    headers: ["유형 (클릭 시 데이터 보기)", "건수", "수집기", "산출물 파일"],
     rowHtml,
     empty: "수집된 아티팩트 유형이 없습니다.",
   });
@@ -7707,6 +7708,8 @@ const ROW_FILTER_KEYS = [
   "source",
   "kind",
   "type",
+  "artifact_type",
+  "provider",
   "status",
   "review_status",
   "verification_status",
