@@ -2747,6 +2747,98 @@ function tabRecoveryCopy(tab) {
   return copy[tab] || "현재 탭의 결과 산출물이 없거나 접근할 수 없습니다.";
 }
 
+function renderFindingsDigest(payload) {
+  const summary = payload.summary || {};
+  const highlights = payload.highlights || {};
+  const docHits = highlights.document_hits || [];
+  const keywordCounts = summary.matched_keyword_counts || {};
+  const recovered = payload.source?.recovered_root_manifest?.files || [];
+  const fileHighlights = [
+    ...(highlights.recent_file_candidates || []),
+    ...(highlights.large_file_candidates || []),
+    ...(highlights.preferred_location_candidates || []),
+  ].slice(0, 8);
+  const artifactTypes = Object.entries(summary.artifact_type_counts || {})
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8);
+  const deletedLike = recovered.filter((f) => {
+    const name = String(f.relative_path || "").split(/[\\/]/).pop() || "";
+    return /^_|~$/.test(name);
+  });
+  const hasFindings = docHits.length || recovered.length || fileHighlights.length
+    || Object.keys(keywordCounts).length || artifactTypes.length;
+  if (!hasFindings) return "";
+  return `
+    <section class="findings-digest" data-testid="findings-digest" aria-label="이번 분석에서 발견된 내용">
+      <div class="findings-digest-head">
+        <p class="eyebrow">이번 분석에서 찾은 것</p>
+        <h3>복구·매칭 결과 먼저 보기</h3>
+      </div>
+      ${Object.keys(keywordCounts).length ? `
+        <div class="findings-row" data-testid="findings-keywords">
+          <strong>키워드 매칭</strong>
+          <div class="finding-chips">
+            ${Object.entries(keywordCounts).map(([kw, count]) => `<span class="finding-chip">${escapeHtml(kw)} <b>${escapeHtml(count)}</b>건</span>`).join("")}
+          </div>
+        </div>
+      ` : ""}
+      ${docHits.length ? `
+        <div class="findings-row" data-testid="findings-doc-hits">
+          <strong>문서 내용 히트 ${docHits.length}건</strong>
+          <div class="findings-list">
+            ${docHits.slice(0, 8).map((hit) => `
+              <article class="finding-item">
+                <code>${escapeHtml(fileName(hit.path || ""))}</code>
+                <span class="finding-keywords">${(hit.matched_keywords || []).map((k) => escapeHtml(k)).join(", ")}</span>
+                ${hit.preview ? `<p class="finding-preview">${escapeHtml(String(hit.preview).slice(0, 220))}</p>` : ""}
+                <span class="finding-path">${escapeHtml(hit.path || "")}</span>
+              </article>
+            `).join("")}
+          </div>
+        </div>
+      ` : ""}
+      ${recovered.length ? `
+        <div class="findings-row" data-testid="findings-recovered">
+          <strong>이미지에서 복구된 파일 ${recovered.length}개${deletedLike.length ? ` (삭제 흔적 ${deletedLike.length}개 포함)` : ""}</strong>
+          <div class="findings-list findings-list-recovered">
+            ${recovered.slice(0, 12).map((f) => {
+              const name = String(f.relative_path || "").split(/[\\/]/).pop() || "";
+              const isDeleted = /^_|~$/.test(name);
+              return `
+                <article class="finding-item ${isDeleted ? "finding-deleted" : ""}">
+                  <code>${escapeHtml(f.relative_path || "")}</code>
+                  <span class="finding-meta">${formatBytes(f.size || 0)}${isDeleted ? " · 삭제 후 복구 추정" : ""}</span>
+                </article>
+              `;
+            }).join("")}
+          </div>
+        </div>
+      ` : ""}
+      ${fileHighlights.length ? `
+        <div class="findings-row" data-testid="findings-file-highlights">
+          <strong>주목 파일 후보</strong>
+          <div class="findings-list">
+            ${fileHighlights.map((item) => `
+              <article class="finding-item">
+                <code>${escapeHtml(item.name || item.path || "")}</code>
+                <span class="finding-path">${escapeHtml(item.path || item.summary || "")}</span>
+              </article>
+            `).join("")}
+          </div>
+        </div>
+      ` : ""}
+      ${artifactTypes.length ? `
+        <div class="findings-row" data-testid="findings-artifact-types">
+          <strong>수집된 흔적 종류</strong>
+          <div class="finding-chips">
+            ${artifactTypes.map(([type, count]) => `<span class="finding-chip">${escapeHtml(type)} <b>${escapeHtml(count)}</b></span>`).join("")}
+          </div>
+        </div>
+      ` : ""}
+    </section>
+  `;
+}
+
 function renderSummary(payload) {
   const summary = payload.summary || {};
   const outputs = payload.outputs || {};
@@ -2794,11 +2886,13 @@ function renderSummary(payload) {
     </div>
   `;
   return `
+    ${renderFindingsDigest(payload)}
     <section class="operator-summary-board" aria-label="Operator case summary" data-testid="operator-summary-board">
       <div class="operator-summary-main">
         <p class="eyebrow">요약</p>
-        <h3>${warningCount ? `검증 이슈 ${formatNumber(warningCount)}건 확인 필요` : "검토 가능한 결과가 준비되었습니다"}</h3>
+        <h3>${counts.docs || counts.files || counts.indicators ? `발견 ${formatNumber(counts.docs)}문서 · ${formatNumber(counts.files)}파일 · 지표 ${formatNumber(counts.indicators)}건` : "검토 가능한 결과가 준비되었습니다"}</h3>
         <p class="case-source-line"><span>입력 증거</span><code>${escapeHtml(source)}</code></p>
+        ${warningCount ? `<p class="help-text">검증 이슈 ${formatNumber(warningCount)}건 — 보고 전에 검증 패널에서 확인하세요.</p>` : ""}
         <p>요약 화면은 전체 산출물을 나열하는 곳이 아니라, 다음 검토 동선을 결정하는 시작점입니다. 세부 검증 자료는 고급 패널에서 확인합니다.</p>
         <div class="operator-summary-actions">
           <button type="button" data-open-tab="search">전체 검색</button>
@@ -9482,8 +9576,12 @@ restoreWorkbenchSession();
 
 {
   const themePicker = initThemePicker();
-  const brandRow = document.querySelector(".brand-row");
-  if (brandRow) brandRow.appendChild(themePicker);
+  const actionsRow = document.querySelector(".results-actions");
+  if (actionsRow) {
+    actionsRow.prepend(themePicker);
+  } else {
+    document.querySelector(".brand-row")?.appendChild(themePicker);
+  }
 }
 bindRunFormPersistence();
 bindPathPickerButtons();

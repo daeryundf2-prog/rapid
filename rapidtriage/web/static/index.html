@@ -68,6 +68,14 @@
             <span>도구 설치 상태와 검증 정보 확인</span>
           </button>
         </section>
+        <section class="case-queue-shell" aria-label="Case queue">
+          <div class="panel-section-title">
+            <p class="eyebrow">케이스 큐</p>
+            <strong>현재 케이스</strong>
+            <button id="newCaseButton" class="secondary-button new-case-button" type="button" data-testid="new-case-button">새 증거 추가</button>
+          </div>
+          <div id="runList" class="run-list" data-testid="run-list"></div>
+        </section>
         <form id="runForm" class="run-form" novalidate>
           <div class="form-intro">
             <p class="eyebrow">새 분석</p>
@@ -207,15 +215,6 @@
           <button id="sampleRunButton" class="secondary-button" type="button" data-testid="sample-run-button">샘플 실행</button>
           <button id="doctorButton" class="secondary-button" type="button" data-testid="runtime-check-button">환경 점검</button>
           <button id="crashReportsButton" class="secondary-button" type="button" data-testid="crash-reports-button">크래시 로그</button>
-        </section>
-
-        <section class="case-queue-shell" aria-label="Case queue">
-          <div class="panel-section-title">
-            <p class="eyebrow">케이스 큐</p>
-            <strong>현재 케이스</strong>
-            <button id="newCaseButton" class="secondary-button new-case-button" type="button" data-testid="new-case-button">새 증거 추가</button>
-          </div>
-          <div id="runList" class="run-list" data-testid="run-list"></div>
         </section>
 
         <details class="workflow-help-details">
