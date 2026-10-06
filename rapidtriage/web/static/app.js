@@ -2673,7 +2673,15 @@ async function renderActiveTab() {
   if (tabStatus) tabStatus.textContent = `${tabLabel(activeTab)} 불러오는 중`;
   body.innerHTML = '<p class="empty-state">Loading...</p>';
   try {
-    if (activeTab === "summary") body.innerHTML = renderSummary(selectedRun.summary);
+    if (activeTab === "summary") {
+      let artifactGroups = null;
+      try {
+        artifactGroups = (await loadArtifactsPayload()).artifacts || null;
+      } catch {
+        artifactGroups = null;
+      }
+      body.innerHTML = renderSummary(selectedRun.summary, artifactGroups);
+    }
     if (activeTab === "search") body.innerHTML = renderSearch();
     if (activeTab === "timeline") body.innerHTML = renderTimeline(await api(pagedUrl("timeline")));
     if (activeTab === "indicators") body.innerHTML = renderIndicators(await api(pagedUrl("indicators")));
@@ -2747,105 +2755,147 @@ function tabRecoveryCopy(tab) {
   return copy[tab] || "현재 탭의 결과 산출물이 없거나 접근할 수 없습니다.";
 }
 
-function renderFindingsDigest(payload) {
-  const summary = payload.summary || {};
-  const highlights = payload.highlights || {};
-  const docHits = highlights.document_hits || [];
-  const keywordCounts = summary.matched_keyword_counts || {};
-  const recovered = payload.source?.recovered_root_manifest?.files || [];
-  const fileHighlights = [
-    ...(highlights.recent_file_candidates || []),
-    ...(highlights.large_file_candidates || []),
-    ...(highlights.preferred_location_candidates || []),
-  ].slice(0, 8);
-  const artifactTypes = Object.entries(summary.artifact_type_counts || {})
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 8);
-  const deletedLike = recovered.filter((f) => {
-    const name = String(f.relative_path || "").split(/[\\/]/).pop() || "";
-    return /^_|~$/.test(name);
-  });
-  const hasFindings = docHits.length || recovered.length || fileHighlights.length
-    || Object.keys(keywordCounts).length || artifactTypes.length;
-  if (!hasFindings) return "";
+function isDeletedLikeName(name) {
+  return /^_|^~\$/.test(String(name || ""));
+}
+
+function formatNsTimestamp(value) {
+  const ns = Number(value);
+  if (!Number.isFinite(ns) || ns <= 0) return "";
+  const date = new Date(ns / 1e6);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString();
+}
+
+function renderResultTable({ testId, title, count, headers, rowHtml, empty, note }) {
   return `
-    <section class="findings-digest" data-testid="findings-digest" aria-label="이번 분석에서 발견된 내용">
-      <div class="findings-digest-head">
-        <p class="eyebrow">이번 분석에서 찾은 것</p>
-        <h3>복구·매칭 결과 먼저 보기</h3>
+    <section class="result-table-block" data-testid="${escapeHtml(testId)}">
+      <div class="result-table-head">
+        <h3>${escapeHtml(title)} <span class="result-count">${formatNumber(count)}</span></h3>
+        ${note || ""}
       </div>
-      ${Object.keys(keywordCounts).length ? `
-        <div class="findings-row" data-testid="findings-keywords">
-          <strong>키워드 매칭</strong>
-          <div class="finding-chips">
-            ${Object.entries(keywordCounts).map(([kw, count]) => `<span class="finding-chip">${escapeHtml(kw)} <b>${escapeHtml(count)}</b>건</span>`).join("")}
-          </div>
+      ${count ? `
+        <div class="result-table-scroll" role="region" aria-label="${escapeHtml(title)}">
+          <table class="data-table result-table">
+            <thead><tr>${headers.map((h) => `<th>${escapeHtml(h)}</th>`).join("")}</tr></thead>
+            <tbody>${rowHtml}</tbody>
+          </table>
         </div>
-      ` : ""}
-      ${docHits.length ? `
-        <div class="findings-row" data-testid="findings-doc-hits">
-          <strong>문서 내용 히트 ${docHits.length}건</strong>
-          <div class="findings-list">
-            ${docHits.slice(0, 8).map((hit) => `
-              <article class="finding-item">
-                <code>${escapeHtml(fileName(hit.path || ""))}</code>
-                <span class="finding-keywords">${(hit.matched_keywords || []).map((k) => escapeHtml(k)).join(", ")}</span>
-                ${hit.preview ? `<p class="finding-preview">${escapeHtml(String(hit.preview).slice(0, 220))}</p>` : ""}
-                <span class="finding-path">${escapeHtml(hit.path || "")}</span>
-              </article>
-            `).join("")}
-          </div>
-        </div>
-      ` : ""}
-      ${recovered.length ? `
-        <div class="findings-row" data-testid="findings-recovered">
-          <strong>이미지에서 복구된 파일 ${recovered.length}개${deletedLike.length ? ` (삭제 흔적 ${deletedLike.length}개 포함)` : ""}</strong>
-          <div class="findings-list findings-list-recovered">
-            ${recovered.slice(0, 12).map((f) => {
-              const name = String(f.relative_path || "").split(/[\\/]/).pop() || "";
-              const isDeleted = /^_|~$/.test(name);
-              return `
-                <article class="finding-item ${isDeleted ? "finding-deleted" : ""}">
-                  <code>${escapeHtml(f.relative_path || "")}</code>
-                  <span class="finding-meta">${formatBytes(f.size || 0)}${isDeleted ? " · 삭제 후 복구 추정" : ""}</span>
-                </article>
-              `;
-            }).join("")}
-          </div>
-        </div>
-      ` : ""}
-      ${fileHighlights.length ? `
-        <div class="findings-row" data-testid="findings-file-highlights">
-          <strong>주목 파일 후보</strong>
-          <div class="findings-list">
-            ${fileHighlights.map((item) => `
-              <article class="finding-item">
-                <code>${escapeHtml(item.name || item.path || "")}</code>
-                <span class="finding-path">${escapeHtml(item.path || item.summary || "")}</span>
-              </article>
-            `).join("")}
-          </div>
-        </div>
-      ` : ""}
-      ${artifactTypes.length ? `
-        <div class="findings-row" data-testid="findings-artifact-types">
-          <strong>수집된 흔적 종류</strong>
-          <div class="finding-chips">
-            ${artifactTypes.map(([type, count]) => `<span class="finding-chip">${escapeHtml(type)} <b>${escapeHtml(count)}</b></span>`).join("")}
-          </div>
-        </div>
-      ` : ""}
+      ` : `<p class="empty-state">${escapeHtml(empty)}</p>`}
     </section>
   `;
 }
 
-function renderSummary(payload) {
+function renderRecoveredFilesTable(recovered) {
+  const MAX_ROWS = 200;
+  const rows = recovered.slice(0, MAX_ROWS).map((f) => {
+    const name = fileName(f.relative_path || "");
+    const deleted = isDeletedLikeName(name);
+    const sha = String(f.sha256 || "");
+    return `
+      <tr${deleted ? ' class="row-deleted"' : ""}>
+        <td><code>${escapeHtml(name)}</code>${deleted ? ' <span class="status-pill warning">삭제 후 복구 추정</span>' : ""}</td>
+        <td class="num">${formatBytes(f.size || 0)}</td>
+        <td>${escapeHtml(formatNsTimestamp(f.mtime_ns) || "-")}</td>
+        <td><code class="hash-cell" title="${escapeHtml(sha)}">${escapeHtml(sha.slice(0, 16))}${sha ? "…" : ""}</code></td>
+        <td class="path-cell"><code>${escapeHtml(f.relative_path || "")}</code></td>
+      </tr>
+    `;
+  }).join("");
+  const overflow = recovered.length > MAX_ROWS
+    ? `<p class="help-text">상위 ${formatNumber(MAX_ROWS)}건만 표시 — 전체는 파일 탭에서 확인하세요.</p>`
+    : "";
+  return renderResultTable({
+    testId: "result-recovered-files",
+    title: "이미지에서 복구된 파일",
+    count: recovered.length,
+    headers: ["파일명", "크기", "수정 시각", "SHA-256", "경로"],
+    rowHtml: rows,
+    empty: "복구된 파일이 없습니다.",
+    note: `<button class="secondary-button" type="button" data-open-tab="files">파일 탭에서 전체 보기</button>`,
+  }) + overflow;
+}
+
+function renderKeywordHitsTable(docHits, keywordCounts) {
+  const counts = keywordCounts || {};
+  const MAX_ROWS = 100;
+  const rows = docHits.slice(0, MAX_ROWS).map((hit) => {
+    const keywords = hit.matched_keywords || [];
+    return `
+      <tr>
+        <td>${keywords.map((k) => `<mark>${escapeHtml(k)}</mark>`).join(" ") || "-"}</td>
+        <td><code>${escapeHtml(fileName(hit.path || ""))}</code></td>
+        <td class="preview-cell">${hit.preview ? highlightSnippet(String(hit.preview).slice(0, 300), keywords) : "-"}</td>
+        <td class="path-cell"><code>${escapeHtml(hit.path || "")}</code></td>
+      </tr>
+    `;
+  }).join("");
+  const note = Object.keys(counts).length
+    ? `<span class="finding-chips">${Object.entries(counts).map(([kw, n]) => `<span class="finding-chip">${escapeHtml(kw)} <b>${escapeHtml(n)}</b>건</span>`).join("")}</span>`
+    : "";
+  return renderResultTable({
+    testId: "result-keyword-hits",
+    title: "키워드 매치",
+    count: docHits.length,
+    headers: ["매칭 키워드", "파일", "내용 미리보기", "경로"],
+    rowHtml: rows,
+    empty: "매칭된 키워드가 없습니다.",
+    note: `<div class="result-table-note">${note}<button class="secondary-button" type="button" data-open-tab="search">검색 탭에서 추가 검색</button></div>`,
+  });
+}
+
+function renderCollectedArtifactsTable(artifactRows, artifactTotal) {
+  const MAX_ROWS = 50;
+  const rows = artifactRows.slice(0, MAX_ROWS).map(({ kind, artifact }) => {
+    const path = artifact.path || artifact.details?.source_path || "";
+    return `
+      <tr>
+        <td><code>${escapeHtml(artifact.artifact_type || kind)}</code></td>
+        <td><code>${escapeHtml(fileName(path) || "-")}</code></td>
+        <td><code>${escapeHtml(artifact.provider || "-")}</code></td>
+        <td class="path-cell"><code>${escapeHtml(path)}</code></td>
+      </tr>
+    `;
+  }).join("");
+  const total = artifactTotal || artifactRows.length;
+  const overflow = total > MAX_ROWS
+    ? `<p class="help-text">상위 ${formatNumber(MAX_ROWS)}건만 표시 — 전체 ${formatNumber(total)}건은 아티팩트 탭에서 확인하세요.</p>`
+    : "";
+  return renderResultTable({
+    testId: "result-artifacts",
+    title: "수집된 흔적 (아티팩트)",
+    count: total,
+    headers: ["유형", "대상 파일", "수집기", "경로"],
+    rowHtml: rows,
+    empty: "수집된 아티팩트가 없습니다.",
+    note: `<button class="secondary-button" type="button" data-open-tab="artifacts">아티팩트 탭에서 검토</button>`,
+  }) + overflow;
+}
+
+function renderOutputsTable(outputs, runId) {
+  const entries = Object.entries(outputs || {});
+  const rows = entries.map(([name, path]) => `
+    <tr>
+      <td><strong>${escapeHtml(name)}</strong></td>
+      <td><a href="/api/runs/${encodeURIComponent(runId)}/outputs/${encodeURIComponent(name)}/file">다운로드</a></td>
+      <td class="path-cell"><code>${escapeHtml(path)}</code></td>
+    </tr>
+  `).join("");
+  return renderResultTable({
+    testId: "result-outputs",
+    title: "생성물 (산출물)",
+    count: entries.length,
+    headers: ["이름", "다운로드", "경로"],
+    rowHtml: rows,
+    empty: "산출물이 없습니다.",
+  });
+}
+
+function renderSummary(payload, artifactGroups = null) {
   const summary = payload.summary || {};
   const outputs = payload.outputs || {};
   const counts = runCounts(payload);
-  const outputCount = counts.outputs;
   const warningCount = counts.validationIssues;
-  const searchableRows = counts.docs + counts.files + counts.timelineEvents;
   const source = selectedRun?.request?.root || payload.input_root || payload.root || payload.output_dir || "not recorded";
   const legacySummary = `
     ${renderWorkflowGuide(payload)}
@@ -2871,62 +2921,35 @@ function renderSummary(payload) {
         <h3>핵심 단서</h3>
         ${renderHighlightList(payload.highlights || {})}
       </section>
-      <section>
-        <h3>산출물</h3>
-        <ul class="output-list">
-          ${Object.entries(outputs).map(([name, path]) => `
-            <li>
-              <strong>${escapeHtml(name)}</strong>
-              <a href="/api/runs/${encodeURIComponent(selectedRunId)}/outputs/${encodeURIComponent(name)}/file">다운로드</a>
-              <br><span>${escapeHtml(path)}</span>
-            </li>
-          `).join("")}
-        </ul>
-      </section>
     </div>
   `;
+  const recovered = payload.source?.recovered_root_manifest?.files || [];
+  const docHits = payload.highlights?.document_hits || [];
+  const artifactRows = artifactGroups ? flattenArtifactRows(artifactGroups) : [];
+  const artifactTotal = artifactGroups ? artifactGroupTotal(artifactGroups) : 0;
   return `
-    ${renderFindingsDigest(payload)}
-    <section class="operator-summary-board" aria-label="Operator case summary" data-testid="operator-summary-board">
-      <div class="operator-summary-main">
-        <p class="eyebrow">요약</p>
-        <h3>${counts.docs || counts.files || counts.indicators ? `발견 ${formatNumber(counts.docs)}문서 · ${formatNumber(counts.files)}파일 · 지표 ${formatNumber(counts.indicators)}건` : "검토 가능한 결과가 준비되었습니다"}</h3>
-        <p class="case-source-line"><span>입력 증거</span><code>${escapeHtml(source)}</code></p>
-        ${warningCount ? `<p class="help-text">검증 이슈 ${formatNumber(warningCount)}건 — 보고 전에 검증 패널에서 확인하세요.</p>` : ""}
-        <p>요약 화면은 전체 산출물을 나열하는 곳이 아니라, 다음 검토 동선을 결정하는 시작점입니다. 세부 검증 자료는 고급 패널에서 확인합니다.</p>
+    <section class="results-listing" data-testid="results-listing" aria-label="분석 결과 목록">
+      <div class="results-listing-head">
+        <div>
+          <p class="eyebrow">분석 결과</p>
+          <h3>복구 ${formatNumber(recovered.length)}파일 · 키워드 매치 ${formatNumber(docHits.length)}건 · 수집 흔적 ${formatNumber(artifactTotal || artifactRows.length)}건</h3>
+          <p class="case-source-line"><span>입력 증거</span><code>${escapeHtml(source)}</code></p>
+          ${warningCount ? `<p class="help-text">검증 이슈 ${formatNumber(warningCount)}건 — 아래 "처리·검증 상세"에서 확인하세요.</p>` : ""}
+        </div>
         <div class="operator-summary-actions">
           <button type="button" data-open-tab="search">전체 검색</button>
-          <button class="secondary-button" type="button" data-open-tab="artifacts">아티팩트 보기</button>
           <button class="secondary-button" type="button" data-open-tab="review">선별 보드</button>
           <button class="secondary-button" type="button" data-open-tab="report">보고서</button>
         </div>
       </div>
-      <div class="operator-summary-metrics" aria-label="Case totals">
-        ${metric("문서", counts.docs)}
-        ${metric("파일", counts.files)}
-        ${metric("타임라인", counts.timelineEvents)}
-        ${metric("검색 대상", searchableRows)}
-        ${metric("산출물", outputCount)}
-        ${metric("이슈", warningCount)}
-      </div>
-      <div class="operator-summary-route">
-        <article>
-          <strong>1. 키워드 선별</strong>
-          <span>키워드, OCR, 문서, 로그, 웹/AI 흔적을 먼저 좁힙니다.</span>
-        </article>
-        <article>
-          <strong>2. 원본 검토</strong>
-          <span>테이블 결과를 source viewer, SQLite, hex, document viewer로 확인합니다.</span>
-        </article>
-        <article>
-          <strong>3. 증거 선별</strong>
-          <span>관련 있음, 재검토, 제외, 보고서 포함 상태를 남깁니다.</span>
-        </article>
-      </div>
+      ${renderRecoveredFilesTable(recovered)}
+      ${renderKeywordHitsTable(docHits, summary.matched_keyword_counts)}
+      ${renderCollectedArtifactsTable(artifactRows, artifactTotal)}
+      ${renderOutputsTable(outputs, selectedRunId)}
     </section>
     <details class="operator-advanced-summary">
       <summary>
-        <span>검증/산출물 전체 상세</span>
+        <span>처리·검증 상세 (진단 정보)</span>
         <strong>필요할 때만 열기</strong>
       </summary>
       ${legacySummary}

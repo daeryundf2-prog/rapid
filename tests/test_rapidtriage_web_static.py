@@ -847,7 +847,7 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         self.assertIn('data-testid="e01-smoke-stage-status"', app_js)
         self.assertIn("e01_smoke_stage_status", app_js)
         self.assertIn("E01 스모크 단계 상태", app_js)
-        summary_render_body = app_js.split("function renderSummary(payload) {", 1)[1].split("function ", 1)[0]
+        summary_render_body = app_js.split("function renderSummary(payload", 1)[1].split("function ", 1)[0]
         self.assertIn("renderE01SmokeStageStatus(payload)", summary_render_body)
 
     def test_artifacts_tab_prefers_columnar_sidecar_with_json_fallback(self) -> None:
