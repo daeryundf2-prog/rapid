@@ -90,6 +90,7 @@ import {
   artifactPaginationSummary,
   filteredPagination,
   flattenArtifactRows,
+  setActiveArtifactType,
   queueArtifactsNextPage,
   renderArtifactRow,
   renderArtifactValidationSummary,
@@ -2547,6 +2548,7 @@ function bindTabButtons() {
       activeTab = button.dataset.tab;
       activeViewGroup = groupForTab(activeTab);
       activeArtifactFilter = "";
+      setActiveArtifactType("");
       flushWorkbenchState();
       for (const item of detailPanel.querySelectorAll(".tab-button")) {
         const selected = item === button;
@@ -2862,7 +2864,7 @@ function renderCollectedArtifactsTable(artifactRows, artifactTotal) {
     const type = artifact.artifact_type || kind;
     return `
       <tr>
-        <td><button class="result-type-link" type="button" data-open-tab="artifacts" data-artifact-filter="${escapeHtml(type)}" title="${escapeHtml(type)} 유형만 필터"><code>${escapeHtml(type)}</code></button></td>
+        <td><button class="result-type-link" type="button" data-open-tab="artifacts" data-artifact-type="${escapeHtml(type)}" title="${escapeHtml(type)} 유형만 데이터 표로 보기"><code>${escapeHtml(type)}</code></button></td>
         <td><code>${escapeHtml(fileName(path) || "-")}</code></td>
         <td><code>${escapeHtml(artifact.provider || "-")}</code></td>
         <td class="path-cell"><code>${escapeHtml(path)}</code></td>
@@ -2906,7 +2908,7 @@ function renderArtifactTypeTable(summary) {
   const totalRows = rows.reduce((sum, r) => sum + r.count, 0);
   const rowHtml = rows.map((r) => `
     <tr>
-      <td><button class="result-type-link" type="button" data-open-tab="artifacts" data-artifact-filter="${escapeHtml(r.type)}" title="${escapeHtml(r.type)} 유형의 실제 데이터 행 보기"><code>${escapeHtml(r.type)}</code></button></td>
+      <td><button class="result-type-link" type="button" data-open-tab="artifacts" data-artifact-type="${escapeHtml(r.type)}" title="${escapeHtml(r.type)} 유형의 실제 데이터 행 보기"><code>${escapeHtml(r.type)}</code></button></td>
       <td class="num">${formatNumber(r.count)}</td>
       <td><code>${escapeHtml(r.provider)}</code></td>
       <td class="path-cell"><code>${escapeHtml(r.output)}</code></td>
@@ -7899,6 +7901,11 @@ function bindPanelActions() {
       const sourceCategoryFilter = button.dataset.sourceCategoryFilter || "";
       const filter = capability?.dataset.capabilityFilter || button.dataset.artifactFilter || "";
       activeArtifactFilter = targetTab === "artifacts" ? sourceCategoryFilter : "";
+      if (button.dataset.artifactType !== undefined && targetTab === "artifacts") {
+        setActiveArtifactType(button.dataset.artifactType);
+      } else if (targetTab !== "artifacts") {
+        setActiveArtifactType("");
+      }
       await switchTab(targetTab, { syncStage: false });
       if (button.classList.contains("source-card")) {
         setWorkbenchVisibleFilter("");
@@ -7906,6 +7913,18 @@ function bindPanelActions() {
         applyArtifactTreeFilter(filter);
       }
       refreshSourceNavigatorState();
+    });
+  }
+  for (const chip of detailPanel.querySelectorAll("[data-artifact-type]")) {
+    if (chip.hasAttribute("data-open-tab")) continue;
+    if (chip.dataset.artifactTypeBound) continue;
+    chip.dataset.artifactTypeBound = "1";
+    chip.addEventListener("click", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setActiveArtifactType(chip.dataset.artifactType || "");
+      await renderActiveTab();
+      persistWorkbenchSession();
     });
   }
   for (const button of detailPanel.querySelectorAll("[data-doc-lane-filter]")) {
@@ -9020,7 +9039,10 @@ export async function switchTab(tab, options = {}) {
   if (!tab) return;
   activeTab = tab;
   updateMissionStrip();
-  if (tab !== "artifacts") activeArtifactFilter = "";
+  if (tab !== "artifacts") {
+    activeArtifactFilter = "";
+    setActiveArtifactType("");
+  }
   if (options.stageId) {
     activeStageId = options.stageId;
   } else if (options.syncStage) {

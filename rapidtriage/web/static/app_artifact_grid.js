@@ -23,6 +23,105 @@ export function initArtifactGrid(deps) {
 
 let artifactsPagePagination = null;
 let artifactsPageLoading = false;
+let activeArtifactType = "";
+
+export function setActiveArtifactType(value) {
+  activeArtifactType = String(value || "");
+}
+
+export function getActiveArtifactType() {
+  return activeArtifactType;
+}
+
+const TYPE_GRID_ROW_LIMIT = 400;
+const TYPE_GRID_COLUMN_LIMIT = 6;
+const TYPE_GRID_SKIP_DETAIL_KEYS = new Set([
+  "parser", "parser_version", "source_path", "source_format",
+]);
+
+function artifactRowType(kind, artifact) {
+  return String(artifact?.artifact_type || kind || "unknown");
+}
+
+function detailScalarValue(value) {
+  if (value === null || value === undefined) return undefined;
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+  return undefined;
+}
+
+function pickTypeGridColumns(rows) {
+  const frequency = new Map();
+  for (const { artifact } of rows) {
+    const details = artifact?.details;
+    if (!details || typeof details !== "object") continue;
+    for (const [key, value] of Object.entries(details)) {
+      if (TYPE_GRID_SKIP_DETAIL_KEYS.has(key)) continue;
+      if (detailScalarValue(value) === undefined) continue;
+      frequency.set(key, (frequency.get(key) || 0) + 1);
+    }
+  }
+  return [...frequency.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, TYPE_GRID_COLUMN_LIMIT)
+    .map(([key]) => key);
+}
+
+function artifactRowLabel(kind, artifact) {
+  const details = artifact?.details || {};
+  return artifact?.path || details.entry_name || details.source_path || artifact?.title || kind;
+}
+
+function renderTypeDataGrid(rows, type) {
+  const shown = rows.slice(0, TYPE_GRID_ROW_LIMIT);
+  const extraColumns = pickTypeGridColumns(shown);
+  const header = ["대상", ...extraColumns, "경로"];
+  const body = shown.map(({ kind, index, artifact }) => {
+    const details = artifact?.details || {};
+    return `
+      <tr>
+        <td><strong>${escapeHtml(fileLabel(artifactRowLabel(kind, artifact)))}</strong></td>
+        ${extraColumns.map((key) => `<td>${escapeHtml(detailScalarValue(details[key]) ?? "")}</td>`).join("")}
+        <td class="path-cell"><code>${escapeHtml(artifact?.path || details.source_path || "")}</code></td>
+      </tr>
+    `;
+  }).join("");
+  const overflow = rows.length > shown.length
+    ? `<p class="help-text">상위 ${formatNumber(shown.length)}행만 표시 — 나머지는 표 필터를 좁히거나 산출물 파일에서 확인하세요.</p>`
+    : "";
+  return `
+    <div class="result-table-scroll artifact-type-grid" role="region" aria-label="${escapeHtml(type)} 데이터 행">
+      <table class="data-table result-table">
+        <thead><tr>${header.map((h) => `<th>${escapeHtml(h)}</th>`).join("")}</tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>
+    ${overflow}
+  `;
+}
+
+function fileLabel(path) {
+  return String(path || "").split(/[\\/]/).filter(Boolean).pop() || String(path || "");
+}
+
+function renderTypeChipBar(rows) {
+  const counts = new Map();
+  for (const { kind, artifact } of rows) {
+    const type = artifactRowType(kind, artifact);
+    counts.set(type, (counts.get(type) || 0) + 1);
+  }
+  const types = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  if (!types.length) return "";
+  return `
+    <div class="artifact-type-chip-bar" role="group" aria-label="아티팩트 유형별 보기" data-testid="artifact-type-chip-bar">
+      <button type="button" class="artifact-type-chip ${activeArtifactType ? "" : "active"}" data-artifact-type="">전체 ${formatNumber(rows.length)}</button>
+      ${types.map(([type, count]) => `
+        <button type="button" class="artifact-type-chip ${activeArtifactType === type ? "active" : ""}" data-artifact-type="${escapeHtml(type)}">${escapeHtml(type)} <b>${formatNumber(count)}</b></button>
+      `).join("")}
+    </div>
+  `;
+}
 
 export function filteredPagination(total, collection) {
   return {
@@ -251,6 +350,18 @@ export function renderArtifacts(payload) {
   const activeArtifactFilter = getActiveArtifactFilter();
   const groups = payload.artifacts || {};
   const rows = flattenArtifactRows(groups);
+  const typeChipBar = renderTypeChipBar(rows);
+  if (activeArtifactType) {
+    const typeRows = rows.filter(({ kind, artifact }) => artifactRowType(kind, artifact) === activeArtifactType);
+    if (!typeRows.length) return `${typeChipBar}<p class="empty-state">이 유형의 행이 없습니다.</p>`;
+    return `
+      ${typeChipBar}
+      <div class="pagination-bar">
+        <span>${escapeHtml(activeArtifactType)} · ${formatNumber(typeRows.length)}행 — 유형별 데이터 표</span>
+      </div>
+      ${renderTypeDataGrid(typeRows, activeArtifactType)}
+    `;
+  }
   const displayRows = activeArtifactFilter
     ? rows.filter(({ kind, artifact }) => artifactSourceCategory(kind, artifact) === activeArtifactFilter)
     : rows;
@@ -273,6 +384,7 @@ export function renderArtifacts(payload) {
     onNeedMore: (_endIndex, table) => queueArtifactsNextPage(table),
   });
   return `
+    ${typeChipBar}
     <div class="pagination-bar">
       <span data-artifact-virtual-notice>로드됨 ${formatNumber(displayRows.length)}건 / 전체 ${formatNumber(pagination.total || displayRows.length)}건 · 스크롤 가상화 · ${kbd("J")}/${kbd("K")} 행 이동</span>
     </div>

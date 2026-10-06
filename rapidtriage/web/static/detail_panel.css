@@ -634,3 +634,29 @@ body.has-runs .workbench-intel-drawer > summary strong {
 }
 .result-type-link code { color: inherit; }
 .result-type-link:hover code { text-decoration: underline; }
+
+/* Artifact type chip bar + per-type data grid (AXIOM-style category browse). */
+.artifact-type-chip-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.artifact-type-chip {
+  border: 1px solid var(--rf-line, #d8e1ec);
+  border-radius: 999px;
+  background: #ffffff;
+  padding: 4px 12px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--rf-ink-2, #334155);
+  cursor: pointer;
+}
+.artifact-type-chip b { color: var(--accent, #1f6feb); }
+.artifact-type-chip.active {
+  background: var(--accent, #1f6feb);
+  border-color: var(--accent, #1f6feb);
+  color: #ffffff;
+}
+.artifact-type-chip.active b { color: #dbeafe; }
+.artifact-type-grid td { font-size: 0.8rem; }
