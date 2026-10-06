@@ -7627,23 +7627,25 @@ function updateClientFilterSummary() {
   const rows = clientFilteredRows();
   const summaryAnchor = detailPanel.querySelector(".pagination-bar:not(.pagination-actions)");
   let summary = detailPanel.querySelector("[data-client-filter-summary]");
-  if (!rows.length || !summaryAnchor) {
-    detailPanel.classList.remove("client-filter-empty");
-    if (summary) summary.hidden = true;
-    return;
-  }
   const visibleNeedle = detailPanel.querySelector("#tableFilter")?.value.trim() || "";
   const sourceNeedle = detailPanel.querySelector("#sourceFilterInput")?.value.trim() || "";
   const timeNeedle = detailPanel.querySelector("#timeFilterInput")?.value.trim() || "";
   const filterActive = Boolean(activeArtifactFilter || visibleNeedle || sourceNeedle || timeNeedle);
+  if (!summaryAnchor) {
+    detailPanel.classList.remove("client-filter-empty");
+    if (summary) summary.hidden = true;
+    return;
+  }
   if (!summary) {
     summary = document.createElement("div");
     summary.className = "client-filter-summary";
     summary.dataset.clientFilterSummary = "true";
+    summary.setAttribute("aria-live", "polite");
     summaryAnchor.insertAdjacentElement("afterend", summary);
   }
   const visibleCount = rows.filter((row) => !row.hidden).length;
-  // Virtualized tables report logical counts, not mounted DOM rows.
+  // Virtualized tables report logical counts, not mounted DOM rows — check
+  // them before bailing on an empty DOM row set.
   for (const key of ["artifacts", "search"]) {
     const table = getVirtualTable(key);
     if (table && table.items?.length) {
@@ -7657,6 +7659,11 @@ function updateClientFilterSummary() {
         : "";
       return;
     }
+  }
+  if (!rows.length) {
+    detailPanel.classList.remove("client-filter-empty");
+    summary.hidden = true;
+    return;
   }
   detailPanel.classList.toggle("client-filter-empty", filterActive && visibleCount === 0 && rows.length > 0);
   summary.hidden = !filterActive;

@@ -234,9 +234,9 @@ function renderTypeChipBar(rows, groups = {}, total = 0) {
   if (!types.length) return "";
   return `
     <div class="artifact-type-chip-bar" role="group" aria-label="아티팩트 유형별 보기" data-testid="artifact-type-chip-bar">
-      <button type="button" class="artifact-type-chip ${activeArtifactType ? "" : "active"}" data-artifact-type="">전체 ${formatNumber(total || rows.length)}</button>
+      <button type="button" class="artifact-type-chip ${activeArtifactType ? "" : "active"}" aria-pressed="${activeArtifactType ? "false" : "true"}" data-artifact-type="">전체 ${formatNumber(total || rows.length)}</button>
       ${types.map(([type, count]) => `
-        <button type="button" class="artifact-type-chip ${activeArtifactType === type ? "active" : ""}" data-artifact-type="${escapeHtml(type)}">${escapeHtml(type)} <b>${formatNumber(count)}</b></button>
+        <button type="button" class="artifact-type-chip ${activeArtifactType === type ? "active" : ""}" aria-pressed="${activeArtifactType === type ? "true" : "false"}" data-artifact-type="${escapeHtml(type)}">${escapeHtml(type)} <b>${formatNumber(count)}</b></button>
       `).join("")}
     </div>
   `;
@@ -488,7 +488,7 @@ export function renderArtifacts(payload) {
     return `
       ${typeChipBar}
       <div class="pagination-bar">
-        <span>${escapeHtml(activeArtifactType)} · ${formatNumber(typeRows.length)}행 / 전체 ${formatNumber(typeTotal)}건 — 유형별 데이터 표</span>${moreButton}
+        <span aria-live="polite">${escapeHtml(activeArtifactType)} · ${formatNumber(typeRows.length)}행 / 전체 ${formatNumber(typeTotal)}건 — 유형별 데이터 표</span>${moreButton}
       </div>
       ${renderTypeDataGrid(typeRows, activeArtifactType)}
     `;
@@ -506,7 +506,7 @@ export function renderArtifacts(payload) {
   return `
     ${typeChipBar}
     <div class="pagination-bar">
-      <span data-artifact-virtual-notice>로드됨 ${formatNumber(displayRows.length)}건 / 전체 ${formatNumber(pagination.total || displayRows.length)}건 · 스크롤 가상화 · ${kbd("J")}/${kbd("K")} 행 이동</span>
+      <span data-artifact-virtual-notice aria-live="polite">로드됨 ${formatNumber(displayRows.length)}건 / 전체 ${formatNumber(pagination.total || displayRows.length)}건 · 스크롤 가상화 · ${kbd("J")}/${kbd("K")} 행 이동</span>
     </div>
     ${renderArtifactValidationSummary(displayRows)}
     <div class="review-list-shell" role="region" aria-label="Artifact result list">
