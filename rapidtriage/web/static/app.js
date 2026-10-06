@@ -3432,6 +3432,8 @@ function renderRunWorkflowOutputLinks(stage) {
 async function loadRunOutputPreview(outputName) {
   const viewer = detailPanel.querySelector("#evidenceViewer");
   if (!viewer || !selectedRunId || !outputName) return;
+  const viewerDrawer = viewer.closest("details");
+  if (viewerDrawer && !viewerDrawer.open) viewerDrawer.open = true;
   viewer.setAttribute("aria-busy", "true");
   viewer.innerHTML = '<p class="empty-state">산출물 미리보기를 불러오는 중입니다...</p>';
   try {
@@ -5650,6 +5652,8 @@ export function bindSearchPresetButtons(form) {
 export async function loadEvidencePreview(path, reviewContext = null, searchResultIndex = null, options = {}) {
   const viewer = detailPanel.querySelector("#evidenceViewer");
   if (!viewer || !path) return;
+  const viewerDrawer = viewer.closest("details");
+  if (viewerDrawer && !viewerDrawer.open) viewerDrawer.open = true;
   if (searchResultIndex !== null && searchResultIndex !== undefined && searchResultIndex !== "") {
     viewer.dataset.currentSearchResultIndex = String(searchResultIndex);
   }
@@ -6940,6 +6944,8 @@ function showSelectedRowInspector(row) {
     item.classList.remove("selected-row");
   }
   row.classList.add("selected-row");
+  const drawer = viewer.closest("details");
+  if (drawer && !drawer.open) drawer.open = true;
   viewer.removeAttribute("aria-busy");
   viewer.innerHTML = renderSelectedRowInspector(payload);
   bindSearchResultButtons();
