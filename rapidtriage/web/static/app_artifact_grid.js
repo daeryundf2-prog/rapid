@@ -51,14 +51,29 @@ function detailScalarValue(value) {
   return undefined;
 }
 
+function flattenDetailFields(details, prefix = "", depth = 0, out = {}) {
+  if (!details || typeof details !== "object") return out;
+  for (const [key, value] of Object.entries(details)) {
+    const flatKey = prefix ? `${prefix}.${key}` : key;
+    const scalar = detailScalarValue(value);
+    if (scalar !== undefined) {
+      out[flatKey] = scalar;
+      continue;
+    }
+    if (depth < 2 && value && typeof value === "object" && !Array.isArray(value)) {
+      flattenDetailFields(value, flatKey, depth + 1, out);
+    }
+  }
+  return out;
+}
+
 function pickTypeGridColumns(rows) {
   const frequency = new Map();
   for (const { artifact } of rows) {
-    const details = artifact?.details;
-    if (!details || typeof details !== "object") continue;
-    for (const [key, value] of Object.entries(details)) {
-      if (TYPE_GRID_SKIP_DETAIL_KEYS.has(key)) continue;
-      if (detailScalarValue(value) === undefined) continue;
+    const flat = flattenDetailFields(artifact?.details);
+    for (const key of Object.keys(flat)) {
+      const root = key.split(".", 1)[0];
+      if (TYPE_GRID_SKIP_DETAIL_KEYS.has(root)) continue;
       frequency.set(key, (frequency.get(key) || 0) + 1);
     }
   }
@@ -73,17 +88,37 @@ function artifactRowLabel(kind, artifact) {
   return artifact?.path || details.entry_name || details.source_path || artifact?.title || kind;
 }
 
+function artifactRowAttributes(kind, index, artifact) {
+  const sourceCategory = artifactSourceCategory(kind, artifact);
+  const context = { source: `artifacts:${kind}`, pointer: `/${kind}/${index}`, title: artifact.artifact_type || kind, note: artifactPreviewText(artifact), path: artifact.path || "", tags: ["artifact", kind, artifact.artifact_type].filter(Boolean) };
+  const inspector = {
+    title: artifactPreviewText(artifact),
+    source: kind,
+    kind: artifact.artifact_type || "artifact",
+    provider: artifact.provider || "",
+    timestamp: artifact.timestamp || artifact.last_write_time || "",
+    path: artifact.path || "",
+    pointer: context.pointer,
+    preview: artifactPreviewText(artifact),
+    chips: ["artifact", kind, artifact.artifact_type, artifact.provider].filter(Boolean),
+    reviewContext: context,
+  };
+  return `class="selectable-result-row" data-source-category="${escapeHtml(sourceCategory)}" data-filter="${rowText({ kind, ...artifact })}" ${rowInspectorAttributes(inspector)} ${artifact.path ? `data-viewer-row-path="${escapeHtml(artifact.path)}" data-review-context="${escapeHtml(JSON.stringify(context))}"` : ""}`;
+}
+
 function renderTypeDataGrid(rows, type) {
   const shown = rows.slice(0, TYPE_GRID_ROW_LIMIT);
   const extraColumns = pickTypeGridColumns(shown);
-  const header = ["대상", ...extraColumns, "경로"];
+  const header = ["대상", ...extraColumns, "경로", "검토"];
   const body = shown.map(({ kind, index, artifact }) => {
     const details = artifact?.details || {};
+    const flat = flattenDetailFields(details);
     return `
-      <tr>
+      <tr ${artifactRowAttributes(kind, index, artifact)}>
         <td><strong>${escapeHtml(fileLabel(artifactRowLabel(kind, artifact)))}</strong></td>
-        ${extraColumns.map((key) => `<td>${escapeHtml(detailScalarValue(details[key]) ?? "")}</td>`).join("")}
+        ${extraColumns.map((key) => `<td>${escapeHtml(flat[key] ?? "")}</td>`).join("")}
         <td class="path-cell"><code>${escapeHtml(artifact?.path || details.source_path || "")}</code></td>
+        <td class="action-stack">${artifactActionButtons(kind, index, artifact)}</td>
       </tr>
     `;
   }).join("");
@@ -287,22 +322,8 @@ export function renderArtifactValidationSummary(rows) {
 }
 
 export function renderArtifactRow({ kind, index, artifact }) {
-  const sourceCategory = artifactSourceCategory(kind, artifact);
-  const context = { source: `artifacts:${kind}`, pointer: `/${kind}/${index}`, title: artifact.artifact_type || kind, note: artifactPreviewText(artifact), path: artifact.path || "", tags: ["artifact", kind, artifact.artifact_type].filter(Boolean) };
-  const inspector = {
-    title: artifactPreviewText(artifact),
-    source: kind,
-    kind: artifact.artifact_type || "artifact",
-    provider: artifact.provider || "",
-    timestamp: artifact.timestamp || artifact.last_write_time || "",
-    path: artifact.path || "",
-    pointer: context.pointer,
-    preview: artifactPreviewText(artifact),
-    chips: ["artifact", kind, artifact.artifact_type, artifact.provider].filter(Boolean),
-    reviewContext: context,
-  };
   return `
-    <tr class="selectable-result-row" data-source-category="${escapeHtml(sourceCategory)}" data-filter="${rowText({ kind, ...artifact })}" ${rowInspectorAttributes(inspector)} ${artifact.path ? `data-viewer-row-path="${escapeHtml(artifact.path)}" data-review-context="${escapeHtml(JSON.stringify(context))}"` : ""}>
+    <tr ${artifactRowAttributes(kind, index, artifact)}>
       <td>${escapeHtml(kind)}</td>
       <td>${escapeHtml(artifact.artifact_type)}</td>
       <td>${escapeHtml(artifact.provider)}</td>
@@ -350,9 +371,12 @@ export function renderArtifacts(payload) {
   const activeArtifactFilter = getActiveArtifactFilter();
   const groups = payload.artifacts || {};
   const rows = flattenArtifactRows(groups);
-  const typeChipBar = renderTypeChipBar(rows);
+  const scopedRows = activeArtifactFilter
+    ? rows.filter(({ kind, artifact }) => artifactSourceCategory(kind, artifact) === activeArtifactFilter)
+    : rows;
+  const typeChipBar = renderTypeChipBar(scopedRows);
   if (activeArtifactType) {
-    const typeRows = rows.filter(({ kind, artifact }) => artifactRowType(kind, artifact) === activeArtifactType);
+    const typeRows = scopedRows.filter(({ kind, artifact }) => artifactRowType(kind, artifact) === activeArtifactType);
     if (!typeRows.length) return `${typeChipBar}<p class="empty-state">이 유형의 행이 없습니다.</p>`;
     return `
       ${typeChipBar}
@@ -362,9 +386,7 @@ export function renderArtifacts(payload) {
       ${renderTypeDataGrid(typeRows, activeArtifactType)}
     `;
   }
-  const displayRows = activeArtifactFilter
-    ? rows.filter(({ kind, artifact }) => artifactSourceCategory(kind, artifact) === activeArtifactFilter)
-    : rows;
+  const displayRows = scopedRows;
   const pagination = activeArtifactFilter
     ? filteredPagination(displayRows.length, "artifacts")
     : artifactPaginationSummary(groups, rows.length);

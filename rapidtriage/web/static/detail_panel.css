@@ -660,3 +660,49 @@ body.has-runs .workbench-intel-drawer > summary strong {
 }
 .artifact-type-chip.active b { color: #dbeafe; }
 .artifact-type-grid td { font-size: 0.8rem; }
+.artifact-type-grid .action-stack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  white-space: nowrap;
+}
+.artifact-type-grid .action-stack .icon-action,
+.artifact-type-grid .action-stack .mini-link {
+  width: auto;
+  min-height: 22px;
+  padding: 2px 8px;
+  font-size: 0.72rem;
+}
+.artifact-type-grid .data-table { background: #ffffff; }
+.artifact-type-grid .data-table td.action-stack { white-space: nowrap; }
+.artifact-type-grid .action-stack {
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  flex-direction: row !important;
+}
+.artifact-type-grid .action-stack > * { width: auto !important; flex: 0 0 auto; }
+.artifact-type-grid .data-table { height: auto !important; }
+.artifact-type-grid .data-table tbody tr { height: auto !important; }
+.artifact-type-grid.result-table-scroll { max-height: 70vh; overflow-y: auto; }
+.artifact-type-grid .row-action-dock {
+  border: 0;
+  background: none;
+  padding: 0 !important;
+}
+.artifact-type-grid .row-action-dock > span { display: none; }
+.artifact-type-grid .row-action-dock > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.artifact-type-grid .row-action-dock .icon-action,
+.artifact-type-grid .row-action-dock .mini-link {
+  width: auto !important;
+  flex: 0 0 auto;
+}
+body.has-runs .artifact-type-grid .row-action-dock .icon-action,
+body.has-runs .artifact-type-grid .row-action-dock .mini-link,
+body.analysis-active .artifact-type-grid .row-action-dock .icon-action,
+body.analysis-active .artifact-type-grid .row-action-dock .mini-link {
+  width: auto !important;
+}
