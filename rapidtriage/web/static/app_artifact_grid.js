@@ -134,9 +134,20 @@ function artifactRowTimestamp(artifact, flat) {
 }
 
 function renderTypeDataGrid(rows, type) {
-  const shown = rows.slice(0, TYPE_GRID_ROW_LIMIT);
-  const flats = shown.map(({ artifact }) => flattenDetailFields(artifact?.details));
-  const hasTimestamp = shown.some((_, i) => artifactRowTimestamp(shown[i].artifact, flats[i]));
+  const capped = rows.slice(0, TYPE_GRID_ROW_LIMIT);
+  const flats = capped.map(({ artifact }) => flattenDetailFields(artifact?.details));
+  const hasTimestamp = capped.some((_, i) => artifactRowTimestamp(capped[i].artifact, flats[i]));
+  const order = capped.map((_, i) => i);
+  if (hasTimestamp) {
+    const stamp = (i) => {
+      const raw = artifactRowTimestamp(capped[i].artifact, flats[i]);
+      const parsed = Date.parse(String(raw));
+      return Number.isNaN(parsed) ? Number.NEGATIVE_INFINITY : parsed;
+    };
+    order.sort((a, b) => stamp(b) - stamp(a));
+  }
+  const shown = order.map((i) => capped[i]);
+  const sortedFlats = order.map((i) => flats[i]);
   const extraColumns = pickTypeGridColumns(shown).filter((key) => {
     if (!hasTimestamp) return true;
     return !TYPE_GRID_TIMESTAMP_KEYS.includes(key.split(".").pop());
@@ -144,7 +155,7 @@ function renderTypeDataGrid(rows, type) {
   const header = ["대상", ...(hasTimestamp ? ["시각"] : []), ...extraColumns, "경로", "검토"];
   const body = shown.map(({ kind, index, artifact }, i) => {
     const details = artifact?.details || {};
-    const flat = flats[i];
+    const flat = sortedFlats[i];
     return `
       <tr ${artifactRowAttributes(kind, index, artifact)}>
         <td><strong>${escapeHtml(fileLabel(artifactRowLabel(kind, artifact)))}</strong></td>

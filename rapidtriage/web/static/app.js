@@ -510,6 +510,8 @@ async function loadRunDetail(runId, tab = "summary") {
     currentDocsIndexSearchPayload = null;
     activeStageId = "";
     activeStageSubactionId = "";
+    activeArtifactFilter = "";
+    setActiveArtifactType("");
   }
   selectedRunId = runId;
   document.body.classList.add("analysis-active");
