@@ -55,13 +55,34 @@ run's real `files.json` when it finishes. Samples of the current gap
 (mostly NTFS 8.3 aliases, `$Extend` ADS streams, `$RECYCLE.BIN`
 recovered items) are in `bsh-fls-diff.json` next to the image.
 
+## Engine fix — mmls mojibake partition selection (2026-10-06)
+
+The resumed native run `0be94beb4160` was cancelled: on this Windows TSK
+build `mmls` prints GPT partition names as `?????`, so
+`mmls_first_filesystem()` found no filesystem token and the pipeline
+silently stayed on the engineering-grade `python-native-ewf` path
+(estimated days for 624k files). Fix (commits `0a3f955`, `374f424`):
+when no description token matches, select the largest data partition and
+label `selection_source = largest-data-partition-unknown-filesystem`;
+fsstat/tsk_recover fail loudly if the pick is wrong. On BSH this picks
+start sector 567296 — the same 233.9 GB NTFS partition verified earlier
+with `fsstat`.
+
+A replacement run `0f1f32c78b0a` (output `rt-run-tsk/`) was started with
+`RAPIDTRIAGE_E01_ENGINE=external`; its stage checkpoint records
+`mount_strategy: sleuthkit-direct-ewf`, `recovery_tool: tsk_recover -e`,
+selected start sector 567296 — the trusted-tool path, not the native
+fallback. The earlier native run's numbers remain engineering evidence
+only.
+
 ## Pending
 
 - [x] `fls -rp` export (780,645 entries)
 - [x] `fls-coverage-diff` baseline against the *partial* tree
       (8.7% — incomplete extraction artifact, not parity verdict)
-- [ ] RapidTriage seizure run `0be94beb4160` completion → re-run
-      `fls-coverage-diff` on the real `files.json` → artifact row
-      counts per type vs the AXIOM category list in
-      `axiom-coverage-comparison-2026-10-06.md`
+- [x] Engine switched to trusted-tool path for the parity run
+      (`0f1f32c78b0a`, `sleuthkit-direct-ewf` + `tsk_recover -e`)
+- [ ] Run `0f1f32c78b0a` completion → re-run `fls-coverage-diff` on the
+      real `files.json` → artifact row counts per type vs the AXIOM
+      category list in `axiom-coverage-comparison-2026-10-06.md`
 - [ ] Reviewer sign-off to graduate any figure above into Release Evidence
