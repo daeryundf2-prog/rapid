@@ -68,17 +68,29 @@ function flattenDetailFields(details, prefix = "", depth = 0, out = {}) {
 }
 
 function pickTypeGridColumns(rows) {
-  const frequency = new Map();
+  const stats = new Map();
   for (const { artifact } of rows) {
     const flat = flattenDetailFields(artifact?.details);
-    for (const key of Object.keys(flat)) {
+    for (const [key, value] of Object.entries(flat)) {
       const root = key.split(".", 1)[0];
       if (TYPE_GRID_SKIP_DETAIL_KEYS.has(root)) continue;
-      frequency.set(key, (frequency.get(key) || 0) + 1);
+      let entry = stats.get(key);
+      if (!entry) {
+        entry = { count: 0, values: new Set() };
+        stats.set(key, entry);
+      }
+      entry.count += 1;
+      if (entry.values.size < 8) entry.values.add(String(value));
     }
   }
-  return [...frequency.entries()]
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+  return [...stats.entries()]
+    .sort((a, b) => {
+      const distinctA = a[1].values.size > 1 ? 1 : 0;
+      const distinctB = b[1].values.size > 1 ? 1 : 0;
+      if (distinctA !== distinctB) return distinctB - distinctA;
+      if (a[1].count !== b[1].count) return b[1].count - a[1].count;
+      return a[0].localeCompare(b[0]);
+    })
     .slice(0, TYPE_GRID_COLUMN_LIMIT)
     .map(([key]) => key);
 }
