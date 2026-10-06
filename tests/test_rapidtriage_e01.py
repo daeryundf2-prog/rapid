@@ -1182,6 +1182,51 @@ Units are in 512-byte sectors
             self.assertIn("requires external tools", str(context.exception))
             self.assertIn("ewfmount", str(context.exception))
 
+    def test_extract_e01_whole_volume_filesystem_via_fsstat(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            e01_path = root / "case.E01"
+            stage_dir = root / "stage"
+            e01_path.write_bytes(b"EVF")
+            commands: list[list[str]] = []
+
+            def fake_runner(command):
+                commands.append(list(command))
+                if command[1:] == ["--version"]:
+                    return subprocess.CompletedProcess(command, 0, f"{command[0]} 1.0\n", "")
+                if command[0] == "mmls":
+                    return subprocess.CompletedProcess(command, 1, "", "cannot determine partition type")
+                if command[0] == "fsstat":
+                    return subprocess.CompletedProcess(command, 0, "FILE SYSTEM INFORMATION\nFile System Type: Ext2\n", "")
+                if command[0] == "tsk_recover":
+                    Path(command[-1]).mkdir(parents=True, exist_ok=True)
+                    (Path(command[-1]) / "passwords.txt").write_text("root:toor", encoding="utf-8")
+                    return subprocess.CompletedProcess(command, 0, "", "")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            def resolver(name):
+                return None if name == "ewfmount" else f"/usr/bin/{name}"
+
+            result = extract_e01_to_directory(
+                e01_path,
+                stage_dir,
+                runner=fake_runner,
+                tool_resolver=resolver,
+            )
+
+            self.assertEqual(result.partition_start_sector, 0)
+            self.assertEqual(result.mount_strategy, "sleuthkit-direct-ewf")
+            self.assertTrue((result.extract_dir / "passwords.txt").is_file())
+            workflow_commands = [command for command in commands if command[1:] != ["--version"]]
+            self.assertEqual(
+                [command[0] for command in workflow_commands][:3],
+                ["mmls", "fsstat", "tsk_recover"],
+            )
+            recover_argv = next(c for c in workflow_commands if c[0] == "tsk_recover")
+            self.assertEqual(recover_argv[recover_argv.index("-o") + 1], "0")
+            stage_status = json.loads((stage_dir / "rapidtriage-e01-stage-status.json").read_text(encoding="utf-8"))
+            self.assertEqual(stage_status["stages"]["partition-enumeration"]["status"], "skipped")
+
     def test_extract_e01_records_user_partition_override(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

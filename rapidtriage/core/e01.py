@@ -571,6 +571,43 @@ def sleuthkit_direct_e01_probe(
     return result
 
 
+def sleuthkit_direct_fs_probe(
+    source_path: Path,
+    *,
+    runner: CommandRunner | None = None,
+    tool_resolver: ToolResolver = shutil.which,
+) -> subprocess.CompletedProcess[str] | None:
+    """Return the ``fsstat -o 0`` result when the image is a bare filesystem.
+
+    Some images store a filesystem starting at sector 0 with no partition
+    table (superfloppy layout or a carved/single-volume export). ``mmls``
+    reports nothing to enumerate there; ``fsstat`` can still identify the
+    filesystem so ``tsk_recover -o 0`` can recover it directly.
+    """
+    if tool_resolver("fsstat") is None or tool_resolver("tsk_recover") is None:
+        return None
+    run_command = runner if runner is not None else default_runner
+    try:
+        result = run_command(["fsstat", "-o", "0", str(source_path)])
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    if "file system type" not in (result.stdout or "").lower():
+        return None
+    return result
+
+
+def fsstat_filesystem_description(stdout: str) -> str:
+    for line in (stdout or "").splitlines():
+        if "file system type" in line.lower():
+            _, _, value = line.partition(":")
+            value = value.strip()
+            if value:
+                return value
+    return ""
+
+
 def e01_preflight_summary(
     tool_preflight: Sequence[Mapping[str, object]],
     *,
@@ -1514,6 +1551,7 @@ def extract_e01_to_directory(
         )
     command_history: list[dict[str, object]] = []
     direct_ewf_probe: subprocess.CompletedProcess[str] | None = None
+    direct_fs_probe: subprocess.CompletedProcess[str] | None = None
     resolved_engine = resolve_e01_engine(engine)
     native_enabled = native_e01_available()
 
@@ -1588,6 +1626,23 @@ def extract_e01_to_directory(
                     command_record("partition-enumeration", ["mmls", str(source_path)], direct_ewf_probe)
                 )
                 blocked = False
+            else:
+                # A partitioned image probe failed; the image may carry a
+                # bare filesystem at sector 0 with no partition table.
+                direct_fs_probe = sleuthkit_direct_fs_probe(
+                    source_path,
+                    runner=runner,
+                    tool_resolver=tool_resolver,
+                )
+                if direct_fs_probe is not None:
+                    command_history.append(
+                        command_record(
+                            "whole-volume-filesystem-detection",
+                            ["fsstat", "-o", "0", str(source_path)],
+                            direct_fs_probe,
+                        )
+                    )
+                    blocked = False
         if blocked and resolved_engine == "auto" and native_enabled and native_failure is None:
             return _extract_e01_native_fallback(
                 source_path=source_path,
@@ -1639,8 +1694,9 @@ def extract_e01_to_directory(
                 + native_context
             )
 
-    mount_strategy = "sleuthkit-direct-ewf" if direct_ewf_probe is not None else "ewfmount-fuse"
-    if direct_ewf_probe is not None:
+    direct_ewf_read = direct_ewf_probe is not None or direct_fs_probe is not None
+    mount_strategy = "sleuthkit-direct-ewf" if direct_ewf_read else "ewfmount-fuse"
+    if direct_ewf_read:
         raw_image = source_path
     partition_table: list[dict[str, object]] = []
     recovery_scope = build_tsk_recover_recovery_scope()
@@ -1672,7 +1728,42 @@ def extract_e01_to_directory(
     write_e01_stage_checkpoint(checkpoint_path, checkpoint_payload)
 
     try:
-        if direct_ewf_probe is not None:
+        if direct_fs_probe is not None and direct_ewf_probe is None:
+            mmls_result = None
+            partition_table = [
+                {
+                    "slot": 0,
+                    "partition_number": 0,
+                    "start_sector": 0,
+                    "sector_count": 0,
+                    "sector_size_bytes": 512,
+                    "byte_offset": 0,
+                    "size_bytes": 0,
+                    "description": fsstat_filesystem_description(direct_fs_probe.stdout or "")
+                    or "whole-volume filesystem",
+                    "filesystem_guess": fsstat_filesystem_description(direct_fs_probe.stdout or "").lower(),
+                    "boot_flag": False,
+                    "supported_filesystem_hint": True,
+                    "recommended_for_recovery": True,
+                    "selected_for_recovery": True,
+                    "manual_override_allowed": True,
+                    "whole_volume_filesystem": True,
+                }
+            ]
+            checkpoint_payload["command_history"] = command_history
+            checkpoint_payload["stages"] = {
+                **dict(checkpoint_payload.get("stages") or {}),
+                "mount-ewf": {
+                    "status": "skipped",
+                    "reason": "ewfmount-unavailable; Sleuth Kit read the E01/Ex01 segment set directly",
+                },
+                "partition-enumeration": {
+                    "status": "skipped",
+                    "reason": "no partition table; fsstat -o 0 detected a whole-volume filesystem",
+                },
+            }
+            write_e01_stage_checkpoint(checkpoint_path, checkpoint_payload)
+        elif direct_ewf_probe is not None:
             mmls_result = direct_ewf_probe
             checkpoint_payload["command_history"] = command_history
             checkpoint_payload["stages"] = {
@@ -1701,21 +1792,32 @@ def extract_e01_to_directory(
             mmls_result = runner(["mmls", str(raw_image)])
             command_history.append(command_record("partition-enumeration", ["mmls", str(raw_image)], mmls_result))
         checkpoint_payload["command_history"] = command_history
-        checkpoint_payload["stages"] = {
-            **dict(checkpoint_payload.get("stages") or {}),
-            "partition-enumeration": {"status": "completed" if mmls_result.returncode == 0 else "failed"},
-        }
-        write_e01_stage_checkpoint(checkpoint_path, checkpoint_payload)
-        if mmls_result.returncode != 0:
-            raise E01ExtractionError(f"mmls failed: {(mmls_result.stderr or '').strip()}")
-        partition_table = parse_mmls_partitions(mmls_result.stdout)
-        recommended_sector = mmls_first_filesystem(mmls_result.stdout)
-        start_sector = select_mmls_filesystem(
-            mmls_result.stdout,
-            preferred_start_sector=partition_start_sector,
-        )
-        if start_sector is None:
-            raise E01ExtractionError("mmls could not find a FAT/exFAT/NTFS/basic-data filesystem partition")
+        if mmls_result is not None:
+            checkpoint_payload["stages"] = {
+                **dict(checkpoint_payload.get("stages") or {}),
+                "partition-enumeration": {"status": "completed" if mmls_result.returncode == 0 else "failed"},
+            }
+            write_e01_stage_checkpoint(checkpoint_path, checkpoint_payload)
+            if mmls_result.returncode != 0:
+                raise E01ExtractionError(f"mmls failed: {(mmls_result.stderr or '').strip()}")
+            partition_table = parse_mmls_partitions(mmls_result.stdout)
+            recommended_sector = mmls_first_filesystem(mmls_result.stdout)
+            start_sector = select_mmls_filesystem(
+                mmls_result.stdout,
+                preferred_start_sector=partition_start_sector,
+            )
+            if start_sector is None:
+                raise E01ExtractionError("mmls could not find a FAT/exFAT/NTFS/basic-data filesystem partition")
+        else:
+            # Whole-volume filesystem: no partition table was enumerated, so
+            # the recovery offset is the sector the fsstat probe validated.
+            if partition_start_sector is not None and partition_start_sector != 0:
+                raise E01ExtractionError(
+                    f"requested partition start sector {partition_start_sector} but the image has no "
+                    "partition table; whole-volume filesystem recovery is only available at sector 0"
+                )
+            recommended_sector = 0
+            start_sector = 0
         partition_selection = build_partition_selection_metadata(
             partition_table,
             selected_start_sector=start_sector,
@@ -1760,7 +1862,7 @@ def extract_e01_to_directory(
         checkpoint_payload["recovered_inventory_fingerprint"] = recovered_inventory_fingerprint(recovered_manifest)
         write_e01_stage_checkpoint(checkpoint_path, checkpoint_payload)
         warnings: list[str] = []
-        if direct_ewf_probe is not None:
+        if direct_ewf_read:
             warnings.append(
                 "ewfmount was not installed; the installed Sleuth Kit read the E01/Ex01 segment set directly. "
                 "Verify the build's EWF support and preserve command history for provenance."
@@ -1799,7 +1901,7 @@ def extract_e01_to_directory(
             mount_strategy=mount_strategy,
         )
     finally:
-        if direct_ewf_probe is None:
+        if direct_ewf_probe is None and direct_fs_probe is None:
             unmount_e01_mount(mount_dir, runner=runner, tool_resolver=tool_resolver)
 
 
@@ -2237,7 +2339,7 @@ def _parse_mmls_row(line: str) -> tuple[str, str, int, int, int, str] | None:
     slot-tag column; both are accepted. ``Meta`` and ``Unallocated`` rows are
     dropped by the caller.
     """
-    match = re.search(r"^\s*(\d+):\s+(Meta|-+|\d+)\s+(\d+)\s+(\d+)\s+(\d+)[ \t]*(.*)$", line)
+    match = re.search(r"^\s*(\d+):\s+(Meta|-+|\d+(?::\d+)*)\s+(\d+)\s+(\d+)\s+(\d+)[ \t]*(.*)$", line)
     if match:
         return (
             match.group(1),

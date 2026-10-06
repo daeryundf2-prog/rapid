@@ -44,6 +44,7 @@ from .e01 import (
     image_workflow_analyst_review_profile,
     missing_e01_tools,
     sleuthkit_direct_e01_probe,
+    sleuthkit_direct_fs_probe,
     stable_manifest_sha256,
 )
 from .virtual_disk import (
@@ -431,7 +432,10 @@ class EwfAdapter:
             # EWF-capable Sleuth Kit builds read E01/Ex01 segment sets directly
             # without an ewfmount FUSE layer; probe once so `can_extract`
             # reflects what `run` will actually attempt.
-            direct_ewf_read = sleuthkit_direct_e01_probe(source) is not None
+            direct_ewf_read = (
+                sleuthkit_direct_e01_probe(source) is not None
+                or sleuthkit_direct_fs_probe(source) is not None
+            )
         native_decode = supported and source.is_file() and not direct_ewf_read and bool(missing) and native_e01_available()
         ready = supported and (not missing or direct_ewf_read or native_decode)
         report_grade = image_report_grade_assessment("#22", E01_REPORT_GRADE_BLOCKERS)
