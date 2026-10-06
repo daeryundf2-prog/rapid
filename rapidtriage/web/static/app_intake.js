@@ -1,5 +1,6 @@
 // ES module extracted from app.js — RapidForensic analyst console.
 import { api } from "./app_api.js";
+import { bindBrowseButton } from "./app_browse.js";
 import {
   escapeHtml,
   formatBytes,
@@ -18,12 +19,12 @@ import {
 import { workbenchInvoke } from "./app_store.js";
 
 const detailPanelEl = () => workbenchInvoke("detailPanel");
-const collectPlanButton = (...args) => workbenchInvoke("collectPlanButton", ...args);
-const doctorButton = (...args) => workbenchInvoke("doctorButton", ...args);
-const evidenceCheckButton = (...args) => workbenchInvoke("evidenceCheckButton", ...args);
-const evidenceCheckStatus = (...args) => workbenchInvoke("evidenceCheckStatus", ...args);
+const collectPlanButton = document.querySelector("#collectPlanButton");
+const doctorButton = document.querySelector("#doctorButton");
+const evidenceCheckButton = document.querySelector("#evidenceCheckButton");
+const evidenceCheckStatus = document.querySelector("#evidenceCheckStatus");
 const renderEvidenceCheckStatus = (...args) => workbenchInvoke("renderEvidenceCheckStatus", ...args);
-const runButton = (...args) => workbenchInvoke("runButton", ...args);
+const runButton = document.querySelector("#runButton");
 const runFormEl = () => workbenchInvoke("runForm");
 const runSampleCase = (...args) => workbenchInvoke("runSampleCase", ...args);
 const switchTab = (...args) => workbenchInvoke("switchTab", ...args);
@@ -52,6 +53,7 @@ export function hydrateRunForm() {
     ["#readOnlyInput", "readOnly"],
     ["#dryRunInput", "dryRun"],
     ["#overwriteInput", "overwrite"],
+    ["#extractInput", "extract"],
     ["#hideKnownGoodInput", "hideKnownGood"],
   ]) {
     const element = document.querySelector(selector);
@@ -77,6 +79,7 @@ export function persistRunForm() {
     readOnly: document.querySelector("#readOnlyInput")?.checked ?? true,
     dryRun: document.querySelector("#dryRunInput")?.checked ?? false,
     overwrite: document.querySelector("#overwriteInput")?.checked ?? false,
+    extract: document.querySelector("#extractInput")?.checked ?? false,
     hideKnownGood: document.querySelector("#hideKnownGoodInput")?.checked ?? false,
   };
   window.localStorage.setItem(RUN_FORM_STORAGE_KEY, JSON.stringify(payload));
@@ -99,6 +102,7 @@ export function bindRunFormPersistence() {
     "#readOnlyInput",
     "#dryRunInput",
     "#overwriteInput",
+    "#extractInput",
     "#hideKnownGoodInput",
   ]) {
     document.querySelector(selector)?.addEventListener("input", persistRunForm);
@@ -110,6 +114,16 @@ export function bindRunFormPersistence() {
   document.querySelector("#rootInput")?.addEventListener("input", applyRootEvidenceHints);
   document.querySelector("#rootInput")?.addEventListener("change", applyRootEvidenceHints);
   collectPlanButton?.addEventListener("click", previewCollectPlan);
+  bindBrowseButton(
+    document.querySelector("#rootBrowseButton"),
+    document.querySelector("#rootInput"),
+    { mode: "any" },
+  );
+  bindBrowseButton(
+    document.querySelector("#outputBrowseButton"),
+    document.querySelector("#outputInput"),
+    { mode: "dir" },
+  );
   bindStartChoiceCards();
 }
 

@@ -12,6 +12,7 @@ import {
   WORKBENCH_SESSION_STORAGE_KEY,
 } from "./app_workbench_config.js";
 import { workbenchInvoke, workbenchState } from "./app_store.js";
+import { storageAvailable } from "./app_utils.js";
 
 const detailPanelEl = () => workbenchInvoke("detailPanel");
 

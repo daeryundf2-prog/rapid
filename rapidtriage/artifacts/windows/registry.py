@@ -11,6 +11,7 @@ from pathlib import Path
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 from ...core.recovery import build_recovery_record
+from .._walk import iter_evidence_paths
 
 PARSER_VERSION = "registry-normalized-v13"
 REGISTRY_EXPORT_PATTERN = re.compile(r"^\[(?P<key>.+)]$")
@@ -266,7 +267,7 @@ class WindowsRegistryProvider:
 
     def collect(self, root: Path) -> Iterable[ArtifactRecord]:
         records: list[ArtifactRecord] = []
-        for path in sorted(root.rglob("*.reg"), key=lambda item: str(item).lower()):
+        for path in sorted(iter_evidence_paths(root, "*.reg"), key=lambda item: str(item).lower()):
             if not path.is_file():
                 continue
             records.extend(collect_reg_export(path))
@@ -280,7 +281,7 @@ class WindowsRegistryProvider:
 
 def candidate_registry_hive_paths(root: Path) -> Iterable[Path]:
     seen: set[Path] = set()
-    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
         if not path.is_file():
             continue
         name = path.name.upper()

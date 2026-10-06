@@ -83,7 +83,7 @@ class RapidTriageAuditTests(unittest.TestCase):
             root.mkdir(parents=True, exist_ok=True)
             build_run_fixture(root)
 
-            self.assertEqual(main(["run", str(root), "--mode", "fraud", "--output-dir", str(output_dir)]), 0)
+            self.assertEqual(main(["run", str(root), "--mode", "fraud", "--output-dir", str(output_dir), "--extract"]), 0)
 
             audit_path = output_dir / "rapidtriage-run-audit.json"
             self.assertTrue(audit_path.is_file())

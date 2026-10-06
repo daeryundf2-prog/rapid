@@ -48,11 +48,24 @@ const columns: LegacyColumnDef<RunListItem>[] = [
   },
 ];
 
+function runMatchesFilter(run: RunListItem, needle: string): boolean {
+  const haystack = [cellName(run), run.run_id, run.status, run.request?.mode, run.request?.root]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return haystack.includes(needle);
+}
+
 export function RunTablePane({ runs }: { runs: RunListItem[] }) {
   const selectedRunId = useUiStore((s) => s.selectedRunId);
   const selectRun = useUiStore((s) => s.selectRun);
+  const tableFilter = useUiStore((s) => s.tableFilter);
+  const filteredRuns = useMemo(() => {
+    const needle = tableFilter.trim().toLowerCase();
+    return needle ? runs.filter((run) => runMatchesFilter(run, needle)) : runs;
+  }, [runs, tableFilter]);
   const table = useLegacyTable<RunListItem>({
-    data: runs,
+    data: filteredRuns,
     columns,
     getCoreRowModel: getCoreRowModel(),
   });
@@ -62,10 +75,14 @@ export function RunTablePane({ runs }: { runs: RunListItem[] }) {
     <div className="pane" data-testid="item-table-pane">
       <div className="pane-title">
         <span>항목</span>
-        <span className="badge muted">{runs.length}건</span>
+        <span className="badge muted">
+          {filteredRuns.length === runs.length
+            ? `${runs.length}건`
+            : `${filteredRuns.length}/${runs.length}건`}
+        </span>
       </div>
       <div className="pane-body">
-        {runs.length === 0 ? (
+        {filteredRuns.length === 0 ? (
           <p className="pane-empty">표시할 항목이 없습니다.</p>
         ) : (
           <table className="data-table">

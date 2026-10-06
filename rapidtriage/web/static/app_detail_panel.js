@@ -1,7 +1,8 @@
 // DetailPanel screen module (R3-2). Workbench shell: command deck, layout
 // frame, and diagnostics drawer. All heavy sub-renderers stay in app.js and are
 // injected once via initDetailPanel.
-import { escapeHtml, metric, tabLabel } from "./app_utils.js";
+import { devModeEnabled, escapeHtml, metric, tabLabel } from "./app_utils.js";
+import { workbenchState } from "./app_store.js";
 import { FEATURE_PLACEMENT_CONTRACT } from "./app_workbench_config.js";
 import { renderCaseHero } from "./app_case_header.js";
 
@@ -111,7 +112,8 @@ export function renderAdvancedDiagnosticsPanel(run, tab) {
 
 export function renderDetailShell(run, tab) {
   setActiveViewGroup(groupForTab(tab));
-  const tabs = tabsForGroup(activeViewGroup);
+  const tabs = tabsForGroup(workbenchState.activeViewGroup);
+  const devMode = devModeEnabled();
   return `
     <section class="workbench-command-deck" aria-label="Case command deck">
       ${renderCaseHero(run)}
@@ -120,12 +122,20 @@ export function renderDetailShell(run, tab) {
       ${tabs.map((item) => `<button class="tab-button ${item === tab ? "active" : ""}" data-tab="${item}" data-testid="tab-${escapeHtml(item)}" type="button" aria-current="${item === tab ? "page" : "false"}">${escapeHtml(tabLabel(item))}</button>`).join("")}
     </div>
     ${renderWorkbenchLayoutFrame(run, tab)}
-    <details class="workbench-intel-drawer">
-      <summary>
-        <span>개발/QC 진단</span>
-        <strong>일반 분석에는 접어두기</strong>
-      </summary>
-      ${renderAdvancedDiagnosticsPanel(run, tab)}
-    </details>
+    <div class="dev-mode-strip" data-testid="dev-mode-strip">
+      <button type="button" class="mini-inline-button" data-dev-mode-toggle="${devMode ? "off" : "on"}">
+        ${devMode ? "개발자 도구 끄기" : "개발자 도구"}
+      </button>
+      <small>${devMode ? "검증·진단 패널 표시 중" : "검증·진단 패널은 개발자 모드에서만 표시됩니다."}</small>
+    </div>
+    ${devMode ? `
+      <details class="workbench-intel-drawer">
+        <summary>
+          <span>개발/QC 진단</span>
+          <strong>일반 분석에는 접어두기</strong>
+        </summary>
+        ${renderAdvancedDiagnosticsPanel(run, tab)}
+      </details>
+    ` : ""}
   `;
 }

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from ..core.models import ArtifactRecord
 from ..core.submission import compute_hashes
+from ._walk import iter_evidence_paths
 
 PARSER_VERSION = "synthetic-media-deepfake-lens-v1"
 DEEPFAKE_LENS_MODULE = "deepfake_lens"
@@ -93,7 +94,7 @@ class SyntheticMediaProvider:
 
 def iter_synthetic_media_candidates(root: Path) -> Iterable[Path]:
     suffixes = SYNTHETIC_MEDIA_IMAGE_EXTENSIONS | SYNTHETIC_MEDIA_TEXT_EXTENSIONS
-    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
         if path.is_file() and path.suffix.lower() in suffixes:
             yield path
 

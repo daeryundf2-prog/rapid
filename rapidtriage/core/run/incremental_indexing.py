@@ -12,6 +12,7 @@ from collections.abc import (
 )
 from pathlib import Path
 
+from ..files import iter_evidence_paths
 from ..forensic_accuracy import build_accuracy_gate
 from ..incremental import fingerprint_file_index
 from .constants import (
@@ -35,7 +36,10 @@ __all__ = [
     "hash_incremental_file_content",
     "incremental_file_record_index",
     "incremental_file_records_head_hash",
+    "incremental_file_records_metadata_digest",
+    "incremental_fingerprint_content_hashed",
     "incremental_fingerprint_diff_value",
+    "incremental_fingerprints_equivalent",
     "incremental_indexing_assessment",
     "incremental_indexing_core_accuracy_gates",
     "load_or_build_json",
@@ -114,7 +118,23 @@ def build_run_input_fingerprint(
     *,
     max_files: int = 5000,
     max_content_hash_bytes: int = DEFAULT_INCREMENTAL_HASH_MAX_BYTES,
+    hash_contents: bool = True,
 ) -> dict[str, object]:
+    """Build the bounded input fingerprint used for ``--resume`` decisions.
+
+    The payload shape is identical whether or not content hashing runs:
+    every file record carries ``relative_path``/``size_bytes``/``mtime_ns``
+    plus a ``sha256``/``hash_status`` pair. With ``hash_contents=False`` no
+    file bytes are read (``hash_status`` is ``"disabled"``) and the
+    ``fingerprint`` digest is path+size+mtime only; with
+    ``hash_contents=True`` each file up to ``max_content_hash_bytes`` is
+    SHA-256 hashed into the digest as before. The orchestrator passes
+    ``hash_contents=resume`` so non-resume runs skip hashing every file,
+    while ``--resume`` runs still build a content-hashed baseline. Both
+    digests remain deterministic for the same input state and hash policy;
+    ``incremental_fingerprints_equivalent`` compares across policies.
+    """
+    effective_max_content_hash_bytes = max_content_hash_bytes if hash_contents else 0
     hasher = hashlib.sha256()
     scanned_files = 0
     total_size = 0
@@ -125,7 +145,7 @@ def build_run_input_fingerprint(
     content_skipped_count = 0
     content_error_count = 0
     try:
-        iterator = root.rglob("*") if root.is_dir() else iter([root])
+        iterator = iter_evidence_paths(root, "*") if root.is_dir() else iter([root])
         for path in iterator:
             if not path.is_file():
                 continue
@@ -138,7 +158,7 @@ def build_run_input_fingerprint(
             content_sha256, hash_status = hash_incremental_file_content(
                 path,
                 size_bytes=stat.st_size,
-                max_content_hash_bytes=max_content_hash_bytes,
+                max_content_hash_bytes=effective_max_content_hash_bytes,
             )
             if hash_status == "hashed":
                 content_hashed_count += 1
@@ -180,7 +200,7 @@ def build_run_input_fingerprint(
             "latest_mtime_epoch": latest_mtime,
             "max_files": max_files,
             "truncated": truncated,
-            "content_hash_max_bytes": max_content_hash_bytes,
+            "content_hash_max_bytes": effective_max_content_hash_bytes,
             "content_hashed_file_count": content_hashed_count,
             "content_hash_skipped_file_count": content_skipped_count,
             "content_hash_error_count": content_error_count,
@@ -189,7 +209,8 @@ def build_run_input_fingerprint(
         },
         "content_hash_policy": {
             "profile_version": "incremental-content-hash-policy-v1",
-            "max_content_hash_bytes": max_content_hash_bytes,
+            "hash_contents": bool(hash_contents),
+            "max_content_hash_bytes": effective_max_content_hash_bytes,
             "hash_algorithm": "sha256",
             "hashed_files": content_hashed_count,
             "skipped_files": content_skipped_count,
@@ -593,6 +614,70 @@ def hash_incremental_file_content(
     except OSError:
         return None, "error"
     return digest.hexdigest(), "hashed"
+
+
+def incremental_fingerprint_content_hashed(payload: Mapping[str, object]) -> bool:
+    """Return whether a fingerprint payload was built with content hashing.
+
+    Fingerprints written before the ``hash_contents`` policy field existed
+    always hashed file contents, so a missing flag means ``True``.
+    """
+    policy = (
+        payload.get("content_hash_policy")
+        if isinstance(payload.get("content_hash_policy"), Mapping)
+        else {}
+    )
+    if "hash_contents" in policy:
+        return bool(policy.get("hash_contents"))
+    return not policy or int(policy.get("max_content_hash_bytes") or 0) > 0
+
+
+def incremental_file_records_metadata_digest(records: object) -> str:
+    """Recompute the path+size+mtime digest over stored file records.
+
+    The stored ``fingerprint`` digest mixes per-file content hashes in when
+    they exist, so a metadata-only fingerprint (``hash_contents=False``)
+    can never equal a content-hashed one even for identical input. This
+    digest recomputes the metadata portion that both record sets carry.
+    A same-size/same-mtime content change is only detectable when both
+    fingerprints were content-hashed.
+    """
+    hasher = hashlib.sha256()
+    if isinstance(records, list):
+        for record in records:
+            if not isinstance(record, Mapping):
+                continue
+            hasher.update(
+                str(record.get("relative_path") or "").lower().encode("utf-8", errors="replace")
+            )
+            hasher.update(str(int(record.get("size_bytes") or 0)).encode("ascii"))
+            hasher.update(str(int(record.get("mtime_ns") or 0)).encode("ascii"))
+    return hasher.hexdigest()
+
+
+def incremental_fingerprints_equivalent(
+    previous: Mapping[str, object],
+    current: Mapping[str, object],
+) -> bool:
+    """Return True when two run input fingerprints describe the same input.
+
+    Stored digests are only comparable when both runs used the same
+    content-hash policy. When the policies differ (for example a
+    metadata-only baseline fingerprint compared with a ``--resume`` run's
+    content-hashed one) the comparison falls back to the metadata digest
+    so resume still reuses outputs instead of reporting a spurious change.
+    """
+    previous_digest = str(previous.get("fingerprint") or "")
+    current_digest = str(current.get("fingerprint") or "")
+    if previous_digest == current_digest:
+        return True
+    if incremental_fingerprint_content_hashed(previous) == incremental_fingerprint_content_hashed(
+        current
+    ):
+        return False
+    return incremental_file_records_metadata_digest(
+        previous.get("files")
+    ) == incremental_file_records_metadata_digest(current.get("files"))
 
 
 def build_incremental_reuse_plan(

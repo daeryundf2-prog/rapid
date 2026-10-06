@@ -31,6 +31,7 @@ import {
 } from "./app_store.js";
 import {
   columnarPagination,
+  devModeEnabled,
   escapeHtml,
   fileName,
   formatBytes,
@@ -39,6 +40,7 @@ import {
   kbd,
   metric,
   safeCssToken,
+  setDevMode,
   setStatus,
   statusClass,
   storageAvailable,
@@ -110,6 +112,7 @@ import {
 } from "./app_detail_panel.js";
 import { initTimelineView, renderTimeline, renderTimelineReviewLanes } from "./app_timeline_view.js";
 import { mountTimelineHeatmap, renderTimelineHeatmapShell } from "./app_heatmap.js";
+import { renderMarkdownToHtml } from "./app_markdown.js";
 import { PowerReviewer } from "./app_shortcuts.js";
 import {
   applyEvidenceCheckRecommendation,
@@ -268,6 +271,17 @@ export function applySessionSnapshot(payload = {}) {
 const tokenBar = document.querySelector("#tokenBar");
 const tokenInput = document.querySelector("#tokenInput");
 const tokenSave = document.querySelector("#tokenSave");
+
+// The CLI prints a ready-to-open `/#token=...` URL: adopt the fragment token
+// into localStorage once, then strip it from the address bar (mirrors the
+// v2 client in frontend/src/api/client.ts).
+{
+  const fragmentToken = window.location.hash.match(/[#&]token=([^&]+)/);
+  if (fragmentToken?.[1]) {
+    setAuthToken(decodeURIComponent(fragmentToken[1]));
+    window.history.replaceState(null, "", window.location.pathname + window.location.search);
+  }
+}
 
 function showTokenBar(show) {
   if (tokenBar) tokenBar.hidden = !show;
@@ -515,8 +529,10 @@ async function loadRunDetail(runId, tab = "summary") {
   restoreWorkbenchControls();
   bindMacFirstEvidenceControls();
   persistWorkbenchSession();
-  loadRunValidationPackageSummary(runId);
-  loadCommercialReadinessSummary();
+  if (devModeEnabled()) {
+    loadRunValidationPackageSummary(runId);
+    loadCommercialReadinessSummary();
+  }
   await renderActiveTab();
 }
 
@@ -2122,6 +2138,50 @@ function bindMacFirstEvidenceControls() {
   });
 }
 
+function bindDevModeToggle() {
+  for (const button of detailPanel.querySelectorAll("[data-dev-mode-toggle]")) {
+    if (button.dataset.devModeBound) continue;
+    button.dataset.devModeBound = "1";
+    button.addEventListener("click", () => {
+      void toggleDevMode(button.dataset.devModeToggle === "on");
+    });
+  }
+}
+
+function toggleDevMode(enable) {
+  setDevMode(enable);
+  if (!enable) stripDevQueryFlag();
+  syncDevSurfaceVisibility();
+  if (!selectedRun) return;
+  detailPanel.innerHTML = renderDetailShell(selectedRun, activeTab);
+  updateSideStagePanel();
+  bindTabButtons();
+  restoreWorkbenchControls();
+  bindMacFirstEvidenceControls();
+  persistWorkbenchSession();
+  if (devModeEnabled()) {
+    loadRunValidationPackageSummary(selectedRunId);
+    loadCommercialReadinessSummary();
+  }
+  void renderActiveTab();
+}
+
+function stripDevQueryFlag() {
+  try {
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has("dev")) return;
+    url.searchParams.delete("dev");
+    window.history.replaceState(null, "", url.toString());
+  } catch {
+    // Query cleanup is cosmetic; localStorage already carries the flag.
+  }
+}
+
+function syncDevSurfaceVisibility() {
+  const devMode = devModeEnabled();
+  if (crashReportsButton) crashReportsButton.hidden = !devMode;
+}
+
 function renderCommercialReadinessSummary(payload) {
   const gates = payload?.gate_counts || {};
   const validated = gates.validated || {};
@@ -2510,6 +2570,7 @@ function bindTabButtons() {
     persistWorkbenchSession();
   });
   detailPanel.querySelector("#removeRunButton")?.addEventListener("click", removeSelectedRun);
+  bindDevModeToggle();
   bindCompareActions();
 }
 
@@ -4594,7 +4655,7 @@ function renderDocs(payload) {
                 <td><strong>${escapeHtml(fileName(doc.path))}</strong><span>${escapeHtml(doc.path)}</span></td>
                 <td>${escapeHtml(doc.kind)}</td>
                 <td>${escapeHtml((doc.matched_keywords || []).join(", "))}</td>
-                <td>${escapeHtml(doc.preview || "")}</td>
+                <td>${highlightSnippet(doc.preview || "", doc.matched_keywords || [])}</td>
                 <td class="action-stack">${renderRowActionDock([
                   doc.path ? viewSourceButton(match, context) : "",
                   compareButton(compareItemFromMatch(match, context)),
@@ -4807,6 +4868,7 @@ function renderDocsIndexSidecarSearch(payload = null, draft = {}) {
 function renderDocsIndexSidecarResults(payload) {
   const summary = payload.summary || {};
   const rows = payload.results || [];
+  const terms = payload.query?.terms || [];
   const warning = payload.api_profile?.reportability_warning || "문서 인덱스 히트를 보고서에 넣기 전 원본 뷰어로 확인하세요.";
   if (!rows.length) {
     return `
@@ -4839,7 +4901,7 @@ function renderDocsIndexSidecarResults(payload) {
           return `
             <tr data-viewer-row-path="${escapeHtml(result.path || "")}" data-search-result-index="docs-index-${escapeHtml(index)}">
               <td><strong>${escapeHtml(fileName(result.path) || result.path || "document")}</strong><span>${escapeHtml(result.path || "")}</span><small>${escapeHtml(result.source_locator || "")}</small></td>
-              <td>${escapeHtml((result.matched_terms || []).map((item) => `${item.term}:${item.count}`).join(", "))}</td>
+              <td>${(result.matched_terms || []).map((item) => `${highlightSnippet(item.term, terms)}:${escapeHtml(item.count)}`).join(", ")}</td>
               <td>${escapeHtml(result.score || 0)}</td>
               <td class="action-stack">
                 ${result.path ? reviewActionButtons(match, `docs-index-${index}`) : ""}
@@ -4853,15 +4915,16 @@ function renderDocsIndexSidecarResults(payload) {
   `;
 }
 
-function renderSearchMatchRow({ match, index }) {
+function renderSearchMatchRow({ match, index, keywords = [] }) {
   const context = bookmarkContextForMatch(match) || {};
+  const terms = keywords.length ? keywords : match.matched_keywords || [];
   return `
     <tr data-filter="${rowText(match)}" ${match.path ? `data-viewer-row-path="${escapeHtml(match.path)}" data-review-context="${escapeHtml(JSON.stringify(context))}" data-search-result-index="${escapeHtml(index)}"` : ""}>
       <td>${escapeHtml(match.source)}<span>${escapeHtml(match.kind || "")}</span></td>
       <td><strong>${escapeHtml(match.title || fileName(match.path))}</strong><span>${escapeHtml(match.path || "")}</span>${renderSearchResultLocator(match)}</td>
       <td>${escapeHtml((match.matched_keywords || []).join(", "))}</td>
       <td>
-        ${escapeHtml(match.preview || "")}
+        ${highlightSnippet(match.preview || "", terms)}
         ${renderSearchMetadata(match)}
       </td>
       <td class="action-stack">
@@ -4890,7 +4953,7 @@ export function renderSearchResults(payload, rows) {
       ${renderOcrErrors(ocrErrors)}
     `;
   }
-  const items = rows.map((match, index) => ({ match, index, filterText: compactRowFilterText(match) }));
+  const items = rows.map((match, index) => ({ match, index, keywords: payload.keywords || [], filterText: compactRowFilterText(match) }));
   queueVirtualTable({
     key: "search",
     colCount: 5,
@@ -5275,6 +5338,7 @@ function bindSearchForm() {
       detailPanel.querySelector("#tabBody").innerHTML = renderSearch(payload);
       bindSearchForm();
       bindBookmarkButtons();
+      mountVirtualTables();
     } catch (error) {
       detailPanel.querySelector("#tabBody").insertAdjacentHTML("beforeend", `<p class="empty-state">${escapeHtml(error.message)}</p>`);
     } finally {
@@ -5823,10 +5887,15 @@ function renderImagePreview(imagePayload, payload) {
       </div>
       <p class="help-text">Gallery review hint: ${escapeHtml(gallery.report_selection_hint || "Verify hashes and context before report use.")}</p>
       <div class="image-gallery-card">
-        <strong>Folder gallery page</strong>
+        <strong>폴더 이미지 갤러리</strong>
         <span>Bucket: ${escapeHtml(galleryPage.anchor_similarity_bucket || "n/a")} · limit ${escapeHtml(galleryPage.default_limit || "n/a")}</span>
-        ${galleryPage.default_page_url ? `<a href="${escapeHtml(galleryPage.default_page_url)}" target="_blank" rel="noreferrer">Open gallery JSON</a>` : ""}
-        ${galleryPage.bucket_page_url ? `<a href="${escapeHtml(galleryPage.bucket_page_url)}" target="_blank" rel="noreferrer">Open similar bucket</a>` : ""}
+        <div id="imageGalleryGrid" class="image-gallery-grid" data-image-gallery-grid data-gallery-anchor-path="${escapeHtml(payload.path)}" data-gallery-offset="0" data-gallery-limit="${escapeHtml(galleryPage.default_limit || 50)}" aria-busy="false">
+          <p class="empty-state">갤러리 썸네일을 불러오는 중...</p>
+        </div>
+        <div class="image-grid-links">
+          ${galleryPage.default_page_url ? `<a class="mini-link" href="${escapeHtml(galleryPage.default_page_url)}" target="_blank" rel="noreferrer">JSON</a>` : ""}
+          ${galleryPage.bucket_page_url ? `<a class="mini-link" href="${escapeHtml(galleryPage.bucket_page_url)}" target="_blank" rel="noreferrer">유사 버킷 JSON</a>` : ""}
+        </div>
         <small>${escapeHtml(galleryPage.report_use_warning || "Treat image grouping as triage until validated.")}</small>
       </div>
       <div class="ocr-queue-card">
@@ -5847,6 +5916,68 @@ function renderImagePreview(imagePayload, payload) {
       ${imagePayload.translation_sidecar?.text ? `<details><summary>Translation sidecar excerpt</summary><pre class="viewer-text">${escapeHtml(imagePayload.translation_sidecar.text)}</pre></details>` : ""}
     </section>
   `;
+}
+
+async function loadImageGalleryGrid(grid) {
+  const path = grid.dataset.galleryAnchorPath;
+  if (!path) return;
+  const offset = Math.max(0, Number(grid.dataset.galleryOffset || 0));
+  const limit = Math.max(1, Number(grid.dataset.galleryLimit || 50));
+  grid.setAttribute("aria-busy", "true");
+  try {
+    const params = new URLSearchParams({ path, offset: String(offset), limit: String(limit) });
+    const payload = await api(`/api/runs/${encodeURIComponent(selectedRunId)}/source-image-gallery?${params.toString()}`);
+    grid.innerHTML = renderImageGalleryGrid(payload);
+    bindImageGalleryGridButtons(grid);
+  } catch (error) {
+    grid.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
+  } finally {
+    grid.setAttribute("aria-busy", "false");
+  }
+}
+
+function renderImageGalleryGrid(payload) {
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+  if (!items.length) {
+    return '<p class="empty-state">같은 폴더에서 미리볼 이미지를 찾지 못했습니다.</p>';
+  }
+  const offset = Math.max(0, Number(payload?.offset || 0));
+  const limit = Math.max(1, Number(payload?.limit || items.length || 1));
+  const total = Number(payload?.total || items.length);
+  const nextOffset = payload?.has_next ? Number(payload?.next_offset ?? offset + items.length) : null;
+  const prevOffset = offset > 0 ? Math.max(0, offset - limit) : null;
+  return `
+    <div class="image-grid-meta">
+      <span>${formatNumber(offset + 1)}-${formatNumber(offset + items.length)} / ${formatNumber(total)} 이미지</span>
+      ${payload?.similarity_bucket_filter ? `<span>버킷 ${escapeHtml(payload.similarity_bucket_filter)}</span>` : ""}
+    </div>
+    <div class="image-grid" role="list" aria-label="폴더 이미지 갤러리">
+      ${items.map((item) => `
+        <button type="button" class="image-grid-item${item.is_anchor ? " anchor" : ""}" role="listitem" data-gallery-image-path="${escapeHtml(item.path)}" title="${escapeHtml(item.path)}">
+          <img src="${escapeHtml(item.source_url || item.preview_url || "")}" alt="${escapeHtml(item.name)}" loading="lazy" />
+          <span class="image-grid-name">${escapeHtml(item.name)}</span>
+        </button>
+      `).join("")}
+    </div>
+    <div class="image-grid-pager">
+      <button type="button" class="mini-inline-button" data-gallery-page-offset="${prevOffset ?? 0}" ${prevOffset === null ? "disabled" : ""}>이전</button>
+      <button type="button" class="mini-inline-button" data-gallery-page-offset="${nextOffset ?? offset}" ${nextOffset === null ? "disabled" : ""}>다음</button>
+    </div>
+  `;
+}
+
+function bindImageGalleryGridButtons(grid) {
+  for (const button of grid.querySelectorAll("[data-gallery-image-path]")) {
+    button.addEventListener("click", () => {
+      void loadEvidencePreview(button.dataset.galleryImagePath);
+    });
+  }
+  for (const button of grid.querySelectorAll("[data-gallery-page-offset]")) {
+    button.addEventListener("click", () => {
+      grid.dataset.galleryOffset = button.dataset.galleryPageOffset || "0";
+      void loadImageGalleryGrid(grid);
+    });
+  }
 }
 
 function renderJsonPreview(json, payload) {
@@ -6149,6 +6280,11 @@ function bindViewerButtons() {
     button.addEventListener("click", async () => {
       await loadSqliteWalPreview(button);
     });
+  }
+  const imageGalleryGrid = detailPanel.querySelector("[data-image-gallery-grid]");
+  if (imageGalleryGrid && !imageGalleryGrid.dataset.galleryBound) {
+    imageGalleryGrid.dataset.galleryBound = "1";
+    void loadImageGalleryGrid(imageGalleryGrid);
   }
   for (const button of detailPanel.querySelectorAll("[data-focus-source-search]")) {
     if (button.dataset.focusSourceSearchBound) continue;
@@ -6689,7 +6825,11 @@ function renderReport(markdown) {
       </div>
       <p class="help-text">권장 순서: 증거 선별, 해시 목록 생성, 확인된 증거만 케이스 보고서 또는 reviewer bundle에 포함.</p>
     </section>
-    <pre class="report-view">${escapeHtml(markdown)}</pre>
+    <div class="report-rendered" data-testid="report-rendered">${renderMarkdownToHtml(markdown)}</div>
+    <details class="report-raw">
+      <summary>원문 보기</summary>
+      <pre class="report-view">${escapeHtml(markdown)}</pre>
+    </details>
   `;
 }
 
@@ -6769,6 +6909,7 @@ function renderReviewBoard(payload) {
           <button class="secondary-button" type="button" data-open-tab="search">Go to search</button>
         </div>
       </section>
+      ${renderCaseReportPanel({}, payload.case || {})}
     `;
   }
   const bookmarks = payload.case.bookmarks || [];
@@ -6783,6 +6924,7 @@ function renderReviewBoard(payload) {
           <button class="secondary-button" type="button" data-open-tab="search">Go to search</button>
         </div>
       </section>
+      ${renderCaseReportPanel(payload.case.summary || {}, payload.case)}
     `;
   }
   const summary = payload.case.summary || {};
@@ -6988,11 +7130,11 @@ function renderCaseReportPanel(summary, casePayload) {
         </label>
         <div class="review-actions">
           <label class="check-label"><input name="include_all" type="checkbox" /> 보고서 후보 외 검토 완료 항목도 포함</label>
-          <button type="submit" ${reportCount ? "" : "disabled"}>보고서 초안 생성</button>
+          <button type="submit">보고서 초안 생성</button>
           <span id="caseReportStatus" class="review-save-status"></span>
         </div>
       </form>
-      ${reportCount ? "" : '<p class="help-text">보고서 초안을 만들기 전에 증거를 “보고서 후보에 포함”으로 표시하세요.</p>'}
+      ${reportCount ? "" : '<p class="help-text">마킹된 증거 없이 실행 요약 보고서를 생성합니다. 증거를 “보고서 후보에 포함”으로 표시하면 해시 목록도 함께 채워집니다.</p>'}
     </section>
   `;
 }
@@ -8174,7 +8316,7 @@ export function renderCaseDbSearchResult(payload) {
               <td><strong>${escapeHtml(match.citation_id || "")}</strong><span>${escapeHtml(match.target_type || "")}:${escapeHtml(match.target_id || "")}</span></td>
               <td>${priorityBadge(match.review_priority)}<span>${escapeHtml(match.review_priority?.recommended_action || "")}</span></td>
               <td>${escapeHtml(match.source || "")}<span>${escapeHtml(match.kind || "")}</span></td>
-              <td><strong>${escapeHtml(match.title || "")}</strong><span>${escapeHtml(match.preview || match.path || "")}</span>${sourceReferenceLine(sourceRef)}</td>
+              <td><strong>${escapeHtml(match.title || "")}</strong><span>${highlightSnippet(match.preview || match.path || "", payload.keywords || [])}</span>${sourceReferenceLine(sourceRef)}</td>
               <td>
                 ${escapeHtml(review.status || "unreviewed")}
                 <span>${escapeHtml(review.verification_status || "unverified")}</span>
@@ -8750,6 +8892,7 @@ runForm.addEventListener("submit", async (event) => {
     read_only: document.querySelector("#readOnlyInput").checked,
     dry_run: document.querySelector("#dryRunInput").checked,
     overwrite: document.querySelector("#overwriteInput").checked,
+    extract: document.querySelector("#extractInput")?.checked ?? false,
     max_extract_size_bytes: extractLimitBytes(),
     max_file_count: Number(document.querySelector("#maxFileCountInput")?.value || 0),
     e01_partition_start_sector: optionalInteger(document.querySelector("#e01PartitionStartSectorInput")?.value),
@@ -8840,6 +8983,7 @@ doctorButton?.addEventListener("click", async () => {
   }
 });
 
+syncDevSurfaceVisibility();
 crashReportsButton?.addEventListener("click", async () => {
   crashReportsButton.disabled = true;
   crashReportsButton.textContent = "크래시 불러오는 중...";

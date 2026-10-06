@@ -14,6 +14,7 @@ from pathlib import Path
 from ..core.forensic_accuracy import build_accuracy_gate
 from ..core.models import ArtifactRecord
 from ..core.submission import compute_hashes
+from ._walk import iter_evidence_paths
 from .review import build_forensic_review
 
 PARSER_VERSION = "email-artifacts-v2"
@@ -160,7 +161,7 @@ class EmailArtifactsProvider:
         return True
 
     def collect(self, root: Path) -> Iterable[ArtifactRecord]:
-        for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+        for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
             if path.is_file() and path.suffix.lower() in EMAIL_SUFFIXES:
                 yield from collect_email_path(path)
             elif path.is_file() and is_maildir_message(path):

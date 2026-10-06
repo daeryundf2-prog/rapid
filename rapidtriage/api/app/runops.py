@@ -17,6 +17,7 @@ from fastapi import HTTPException
 from ...core.audit import audit_path_for, write_audit_record
 from ...core.case import (
     CaseBookmarkError,
+    build_empty_case_payload,
     load_case_payload,
 )
 from ...core.case_report import (
@@ -594,6 +595,17 @@ def build_run_output_preview(*, run_id: str, output_name: str, output_path: Path
     return payload
 
 
+def load_case_payload_or_empty(case_path: Path) -> dict[str, object]:
+    """Return the stored case payload, or an empty review payload when no
+    bookmarks exist yet — a run-summary report/manifest is still valid."""
+    if not case_path.is_file():
+        return build_empty_case_payload(case_path, case_id=None, title=None)
+    try:
+        return load_case_payload(case_path)
+    except CaseBookmarkError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
 def build_run_submission_manifest(
     store: RunJobStore,
     run_id: str,
@@ -605,12 +617,7 @@ def build_run_submission_manifest(
     if job.summary is None:
         raise HTTPException(status_code=409, detail="run is not completed")
     case_path = default_case_path(store, run_id)
-    if not case_path.is_file():
-        raise HTTPException(status_code=404, detail="case review file not found")
-    try:
-        case_payload = load_case_payload(case_path)
-    except CaseBookmarkError as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
+    case_payload = load_case_payload_or_empty(case_path)
     try:
         return build_submission_manifest(
             case_payload,
@@ -631,12 +638,7 @@ def build_run_case_report(
     if job.summary is None:
         raise HTTPException(status_code=409, detail="run is not completed")
     case_path = default_case_path(store, run_id)
-    if not case_path.is_file():
-        raise HTTPException(status_code=404, detail="case review file not found")
-    try:
-        case_payload = load_case_payload(case_path)
-    except CaseBookmarkError as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
+    case_payload = load_case_payload_or_empty(case_path)
     manifest = build_run_submission_manifest(
         store,
         run_id,

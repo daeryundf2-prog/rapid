@@ -8,6 +8,7 @@ from pathlib import Path
 
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
+from .._walk import iter_evidence_paths
 from .common import build_forensic_review
 from .execution import registry_value_data_bytes
 from .registry import (
@@ -70,7 +71,7 @@ class WindowsShellbagsProvider:
 
     def collect(self, root: Path) -> Iterable[ArtifactRecord]:
         emitted = 0
-        for path in sorted(root.rglob("*.reg"), key=lambda item: str(item).lower()):
+        for path in sorted(iter_evidence_paths(root, "*.reg"), key=lambda item: str(item).lower()):
             if not path.is_file():
                 continue
             for record in collect_reg_export(path):

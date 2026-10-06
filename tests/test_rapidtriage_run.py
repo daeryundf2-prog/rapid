@@ -426,7 +426,7 @@ class RapidTriageRunTests(unittest.TestCase):
             root.mkdir(parents=True, exist_ok=True)
             build_run_fixture(root)
 
-            exit_code = main(["run", str(root), "--mode", "fraud", "--output-dir", str(output_dir), "--read-only"])
+            exit_code = main(["run", str(root), "--mode", "fraud", "--output-dir", str(output_dir), "--read-only", "--extract"])
 
             self.assertEqual(exit_code, 0)
             summary_payload: dict[str, Any] = json.loads(
@@ -1906,7 +1906,9 @@ class RapidTriageRunTests(unittest.TestCase):
             root.mkdir(parents=True, exist_ok=True)
             build_run_fixture(root)
 
-            exit_code = main(["run", str(root), "--mode", mode, "--output-dir", str(output_dir)])
+            exit_code = main(
+                ["run", str(root), "--mode", mode, "--output-dir", str(output_dir), "--extract"]
+            )
 
             self.assertEqual(exit_code, 0)
             self.assertTrue(output_dir.is_dir())

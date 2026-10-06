@@ -569,7 +569,12 @@ def build_run_workflow_stage(
         has_evidence = True
     status = "blocked" if failed else ("warning" if warning_messages else ("completed" if has_evidence else "pending"))
 
-    if definition.id == "extract" and bool(safety.get("read_only")) and status == "warning":
+    if definition.id == "extract" and safety.get("extract") is False:
+        next_action = (
+            "Extraction was disabled for this run; rerun with --extract to copy and hash "
+            "candidates before relying on extracted evidence."
+        )
+    elif definition.id == "extract" and bool(safety.get("read_only")) and status == "warning":
         next_action = "Read-only mode intentionally skipped extraction; review manifests before reporting absence."
     elif definition.id == "ingest" and source.get("type") in {"e01", "raw-image", "virtual-disk", "archive-image"}:
         next_action = "Confirm image workflow provenance, selected partition/root, and downstream handoff outputs."

@@ -47,6 +47,7 @@ def handle_run(args: argparse.Namespace, parser: argparse.ArgumentParser, rule_s
                 e01_partition_start_sector=getattr(args, "e01_partition_start_sector", None),
                 overwrite=args.overwrite,
                 resume=args.resume,
+                extract_enabled=getattr(args, "extract", False),
                 known_good_hash_feeds=args.known_good_hash_feed,
                 hide_known_good=args.hide_known_good,
                 known_good_max_hash_bytes=args.known_good_max_hash_bytes,

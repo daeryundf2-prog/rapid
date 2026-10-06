@@ -192,6 +192,60 @@ def run_extract(
     }
 
 
+def extract_manifest_disabled(payload: Mapping[str, object]) -> bool:
+    """Return True for the in-memory extraction-disabled placeholder payload."""
+    return bool(payload.get("disabled"))
+
+
+def build_disabled_extract_payload(
+    input_json: Path,
+    output_dir: Path,
+    *,
+    source_command: str,
+) -> dict[str, object]:
+    """Build the manifest-shaped placeholder used when run extraction is off.
+
+    ``rapidtriage run`` extraction is opt-in (``--extract``). When disabled,
+    the run skips the copy+SHA-256 stage entirely and keeps this payload in
+    memory so downstream summary/report consumers see the same manifest keys
+    with zero counts. Nothing is written to ``output_dir``.
+    """
+    return {
+        "command": "extract",
+        "source_command": source_command,
+        "input_json": str(input_json),
+        "root": None,
+        "generated_at": dt.datetime.now().isoformat(),
+        "output_dir": str(output_dir),
+        "disabled": True,
+        "disabled_reason": "extraction-disabled-by-default; rerun with --extract to copy and hash candidates",
+        "filters": {
+            "name_contains": [],
+            "path_contains": [],
+            "extensions": [],
+            "categories": [],
+            "kinds": [],
+            "limit": 0,
+        },
+        "safety": {
+            "dry_run": False,
+            "read_only": False,
+            "max_extract_size_bytes": 0,
+            "max_file_count": 0,
+            "overwrite": False,
+            "extraction_enabled": False,
+        },
+        "summary": {
+            "input_count": 0,
+            "selected_count": 0,
+            "extracted_count": 0,
+            "skipped_count": 0,
+        },
+        "entries": [],
+        "skipped": [],
+    }
+
+
 def load_extract_payload(input_json: Path) -> dict[str, object]:
     try:
         payload = json.loads(input_json.read_text(encoding="utf-8"))

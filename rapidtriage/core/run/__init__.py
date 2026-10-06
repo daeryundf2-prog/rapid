@@ -18,9 +18,10 @@ from concurrent.futures import (
     ThreadPoolExecutor,
     as_completed,
 )
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
+from ...artifacts import clear_collect_cache
 from ..archive_image import (
     ArchiveImageExtractionError,
     ArchiveImageExtractionResult,
@@ -63,6 +64,8 @@ from ..e01 import (
 from ..extract import (
     DEFAULT_EXTRACT_MANIFEST_NAME,
     SUPPORTED_DOC_KINDS,
+    build_disabled_extract_payload,
+    extract_manifest_disabled,
     run_extract,
 )
 from ..files import (
@@ -200,6 +203,7 @@ __all__ = [
     "build_checkpoint_resume_trusted_diff",
     "build_columnar_artifacts_sidecar",
     "build_completed_e01_workflow_status",
+    "build_disabled_extract_payload",
     "build_e01_ex01_integrated_workflow_manifest",
     "build_e01_operator_runbook",
     "build_evidence_delta",
@@ -268,6 +272,7 @@ __all__ = [
     "enforce_memory_cap",
     "extract_archive_image_to_directory",
     "extract_e01_to_directory",
+    "extract_manifest_disabled",
     "extract_raw_image_to_directory",
     "extract_virtual_disk_to_directory",
     "extract_warning_level",
@@ -280,7 +285,10 @@ __all__ = [
     "highest_warning_level",
     "incremental_file_record_index",
     "incremental_file_records_head_hash",
+    "incremental_file_records_metadata_digest",
+    "incremental_fingerprint_content_hashed",
     "incremental_fingerprint_diff_value",
+    "incremental_fingerprints_equivalent",
     "incremental_indexing_assessment",
     "incremental_indexing_core_accuracy_gates",
     "infer_processing_profile_label",
@@ -362,6 +370,7 @@ def run_triage_mode(
     e01_partition_start_sector: int | None = None,
     overwrite: bool = False,
     resume: bool = False,
+    extract_enabled: bool = False,
     known_good_hash_feeds: Sequence[str | Path] = (),
     hide_known_good: bool = False,
     known_good_max_hash_bytes: int = DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES,
@@ -378,8 +387,19 @@ def run_triage_mode(
         raise RunModeError(f"run mode '{normalized_mode}' is not implemented yet (currently available: {available})")
 
     profile = RUN_PROFILES[normalized_mode]
+    if not extract_enabled:
+        # Extraction is opt-in (--extract). RUN_PROFILES still documents the
+        # extraction kinds/categories each mode uses when it is enabled; with
+        # it off, the effective profile is empty so no docs-extract/ or
+        # files-extract/ copy+hash work runs and the summary reports the
+        # effective (empty) extraction scope.
+        profile = replace(profile, docs_extract_kinds=(), file_extract_categories=())
     output_dir = output_dir.expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
+    # The collect cache lets the manifest stage and the artifacts stage share
+    # one provider collection per run; clearing here guarantees a long-lived
+    # server process never reuses stale results for a changed root.
+    clear_collect_cache()
     effective_memory_cap = resolve_memory_cap_bytes(memory_cap_bytes)
     memory_cap_stage_checks: list[dict[str, object]] = []
 
@@ -434,7 +454,9 @@ def run_triage_mode(
     if isinstance(image_result, VirtualDiskExtractionResult):
         write_result(image_result.to_dict(), virtual_disk_metadata_path)
 
-    current_fingerprint = build_run_input_fingerprint(scan_root)
+    # Per-file content hashing is only needed for --resume reuse decisions;
+    # non-resume runs fingerprint on path+size+mtime metadata only.
+    current_fingerprint = build_run_input_fingerprint(scan_root, hash_contents=resume)
     record_memory_cap("fingerprint")
     previous_fingerprint = (
         load_reusable_json(
@@ -445,9 +467,13 @@ def run_triage_mode(
         if fingerprint_path.is_file()
         else None
     )
+    fingerprint_changed = previous_fingerprint is not None and not incremental_fingerprints_equivalent(
+        previous_fingerprint,
+        current_fingerprint,
+    )
     resume_disabled_reason = ""
     effective_resume = resume
-    if resume and previous_fingerprint and previous_fingerprint.get("fingerprint") != current_fingerprint.get("fingerprint"):
+    if resume and fingerprint_changed:
         effective_resume = False
         resume_disabled_reason = "input fingerprint changed; rebuilding stage outputs"
         current_fingerprint["core_accuracy_gates"] = incremental_indexing_core_accuracy_gates(
@@ -485,12 +511,7 @@ def run_triage_mode(
     # prior files/artifact stage rows instead of being recollected.
     evidence_delta: dict[str, object] | None = None
     evidence_delta_context: EvidenceDeltaContext | None = None
-    if (
-        resume
-        and previous_fingerprint
-        and str(previous_fingerprint.get("fingerprint") or "")
-        != str(current_fingerprint.get("fingerprint") or "")
-    ):
+    if resume and fingerprint_changed and previous_fingerprint:
         evidence_delta = build_evidence_delta(previous_fingerprint, current_fingerprint)
         if evidence_delta.get("usable"):
             blockers = [str(item) for item in evidence_delta.get("blockers") or []]
@@ -685,48 +706,65 @@ def run_triage_mode(
     write_result(parser_crash_ledger, parser_crash_ledger_path)
     record_memory_cap("artifacts")
 
-    docs_extract_payload, reused = load_or_build_json(
-        docs_extract_manifest,
-        resume=effective_resume,
-        expected_command="extract",
-        required_keys=("summary", "entries", "skipped"),
-        producer=lambda: run_extract(
+    if extract_enabled:
+        docs_extract_payload, reused = load_or_build_json(
+            docs_extract_manifest,
+            resume=effective_resume,
+            expected_command="extract",
+            required_keys=("summary", "entries", "skipped"),
+            producer=lambda: run_extract(
+                docs_path,
+                docs_extract_dir,
+                kinds=profile.docs_extract_kinds,
+                dry_run=dry_run,
+                read_only=read_only,
+                max_extract_size_bytes=max_extract_size_bytes,
+                max_file_count=max_file_count,
+                overwrite=overwrite,
+                payload=docs_payload,
+            ),
+        )
+        if reused:
+            reused_outputs.add("docs-extract")
+        record_run_checkpoint(checkpoint_records, "docs-extract", docs_extract_manifest, reused=reused)
+        files_extract_payload, reused = load_or_build_json(
+            files_extract_manifest,
+            resume=effective_resume,
+            expected_command="extract",
+            required_keys=("summary", "entries", "skipped"),
+            producer=lambda: run_extract(
+                files_path,
+                files_extract_dir,
+                categories=profile.file_extract_categories,
+                dry_run=dry_run,
+                read_only=read_only,
+                max_extract_size_bytes=max_extract_size_bytes,
+                max_file_count=max_file_count,
+                overwrite=overwrite,
+                payload=files_payload,
+            ),
+        )
+        if reused:
+            reused_outputs.add("files-extract")
+        record_run_checkpoint(checkpoint_records, "files-extract", files_extract_manifest, reused=reused)
+        write_result(docs_extract_payload, docs_extract_manifest)
+        write_result(files_extract_payload, files_extract_manifest)
+    else:
+        # Extraction is opt-in: write manifest-shaped placeholders so output
+        # paths stay present and downstream summary/report consumers see the
+        # same keys with zero counts — only the copy+hash work is skipped.
+        docs_extract_payload = build_disabled_extract_payload(
             docs_path,
             docs_extract_dir,
-            kinds=profile.docs_extract_kinds,
-            dry_run=dry_run,
-            read_only=read_only,
-            max_extract_size_bytes=max_extract_size_bytes,
-            max_file_count=max_file_count,
-            overwrite=overwrite,
-            payload=docs_payload,
-        ),
-    )
-    if reused:
-        reused_outputs.add("docs-extract")
-    record_run_checkpoint(checkpoint_records, "docs-extract", docs_extract_manifest, reused=reused)
-    files_extract_payload, reused = load_or_build_json(
-        files_extract_manifest,
-        resume=effective_resume,
-        expected_command="extract",
-        required_keys=("summary", "entries", "skipped"),
-        producer=lambda: run_extract(
+            source_command="docs",
+        )
+        files_extract_payload = build_disabled_extract_payload(
             files_path,
             files_extract_dir,
-            categories=profile.file_extract_categories,
-            dry_run=dry_run,
-            read_only=read_only,
-            max_extract_size_bytes=max_extract_size_bytes,
-            max_file_count=max_file_count,
-            overwrite=overwrite,
-            payload=files_payload,
-        ),
-    )
-    if reused:
-        reused_outputs.add("files-extract")
-    record_run_checkpoint(checkpoint_records, "files-extract", files_extract_manifest, reused=reused)
-    write_result(docs_extract_payload, docs_extract_manifest)
-    write_result(files_extract_payload, files_extract_manifest)
+            source_command="files",
+        )
+        write_result(docs_extract_payload, docs_extract_manifest)
+        write_result(files_extract_payload, files_extract_manifest)
     record_memory_cap("extract")
 
     timeline_payload, reused = load_or_build_json(
@@ -879,6 +917,7 @@ def run_triage_mode(
             else ("environment" if os.environ.get(MEMORY_CAP_ENV) else "unset"),
             "overwrite": overwrite,
             "resume": resume,
+            "extract": extract_enabled,
             "resume_effective": effective_resume,
             "resume_disabled_reason": resume_disabled_reason,
             "known_good_hash_feeds": [str(path) for path in known_good_hash_feeds],
@@ -955,6 +994,7 @@ def run_triage_mode(
             "memory_cap_bytes": effective_memory_cap,
             "overwrite": overwrite,
             "resume": resume,
+            "extract": extract_enabled,
             "known_good_hash_feeds": [str(path) for path in known_good_hash_feeds],
             "hide_known_good": hide_known_good,
             "known_good_max_hash_bytes": known_good_max_hash_bytes,

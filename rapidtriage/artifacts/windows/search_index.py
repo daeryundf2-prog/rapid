@@ -11,6 +11,7 @@ from pathlib import Path, PureWindowsPath
 
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
+from .._walk import iter_evidence_paths
 from .common import build_forensic_review, isoformat_from_timestamp
 from .ese import build_ese_page_map, build_ese_string_pivots, probe_ese_database
 from .ese_native import EseDatabase
@@ -177,7 +178,7 @@ class WindowsSearchIndexProvider:
             records.extend(build_activity_style_row_records(inventory))
             seen.add(db_path.resolve())
 
-        for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+        for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
             if not path.is_file():
                 continue
             resolved = path.resolve()

@@ -11,6 +11,7 @@ from pathlib import Path
 
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
+from .._walk import iter_evidence_paths
 from .common import build_forensic_review, iter_windows_user_homes
 from .ese import ESE_SCAN_READ_SIZE, build_ese_string_pivots, probe_ese_database
 from .os_account import decode_reg_export
@@ -317,7 +318,7 @@ class WindowsExecutionProvider:
 
 
 def collect_execution_reg_exports(root: Path) -> Iterable[ArtifactRecord]:
-    for path in sorted(root.rglob(f"*{REGISTRY_EXPORT_EXT}"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, f"*{REGISTRY_EXPORT_EXT}"), key=lambda item: str(item).lower()):
         try:
             text = decode_reg_export(path.read_bytes())
         except OSError:
@@ -681,7 +682,7 @@ def build_execution_registry_record(path: Path, key: str, values: Mapping[str, s
 
 def collect_native_amcache_hives(root: Path) -> Iterable[ArtifactRecord]:
     seen: set[Path] = set()
-    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
         if not path.is_file() or path.name.upper() != AMCACHE_HIVE_NAME:
             continue
         resolved = path.resolve()
@@ -693,7 +694,7 @@ def collect_native_amcache_hives(root: Path) -> Iterable[ArtifactRecord]:
 
 def collect_native_shimcache_system_hives(root: Path) -> Iterable[ArtifactRecord]:
     seen: set[Path] = set()
-    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
         if not path.is_file() or path.name.upper() != SYSTEM_HIVE_NAME:
             continue
         resolved = path.resolve()
@@ -1159,7 +1160,7 @@ def build_shimcache_schema_entry_record(
 
 def collect_native_bam_dam_system_hives(root: Path) -> Iterable[ArtifactRecord]:
     seen: set[Path] = set()
-    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
         if not path.is_file() or path.name.upper() != SYSTEM_HIVE_NAME:
             continue
         resolved = path.resolve()
@@ -1532,7 +1533,7 @@ def build_bam_dam_schema_entry_record(
 
 def collect_native_userassist_ntuser_hives(root: Path) -> Iterable[ArtifactRecord]:
     seen: set[Path] = set()
-    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
         if not path.is_file() or path.name.upper() != NTUSER_HIVE_NAME:
             continue
         resolved = path.resolve()
@@ -2278,7 +2279,7 @@ def collect_powershell_history(root: Path) -> Iterable[ArtifactRecord]:
 
 
 def collect_srum_imports(root: Path) -> Iterable[ArtifactRecord]:
-    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
         if not path.is_file() or path.suffix.lower() not in SRUM_IMPORT_SUFFIXES:
             continue
         if "srum" not in str(path).lower() and "srudb" not in str(path).lower():
@@ -2297,7 +2298,7 @@ def collect_srum_dat_inventory(root: Path) -> Iterable[ArtifactRecord]:
         yield inventory
         yield from build_srum_database_pivot_records(canonical_path, inventory.details)
         seen.add(canonical_path.resolve())
-    for path in sorted(root.rglob("SRUDB.dat"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, "SRUDB.dat"), key=lambda item: str(item).lower()):
         if not path.is_file():
             continue
         resolved = path.resolve()

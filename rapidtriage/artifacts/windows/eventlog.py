@@ -19,6 +19,7 @@ from typing import NamedTuple
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 from ...core.safe_xml import UnsafeXmlError, safe_xml_fromstring, safe_xml_parse
+from .._walk import iter_evidence_paths
 
 EVENT_LOG_ROOT = ("Windows", "System32", "winevt", "Logs")
 PARSER_VERSION = "eventlog-normalized-v21"
@@ -1050,7 +1051,7 @@ def discover_event_message_catalogs(root: Path) -> dict[str, dict[str, dict[str,
     """Find bounded provider message catalogs that travel with a case folder."""
 
     catalogs: list[dict[str, dict[str, dict[str, object]]]] = []
-    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
         if len(catalogs) >= MAX_AUTO_MESSAGE_CATALOGS:
             break
         if not path.is_file() or not looks_like_event_message_catalog(path):
@@ -1403,13 +1404,13 @@ def candidate_eventlog_paths(root: Path) -> Iterable[Path]:
         yield from sorted(
             (
                 path
-                for path in logs_root.rglob("*")
+                for path in iter_evidence_paths(logs_root, "*")
                 if path.is_file() and path.suffix.lower() in EVENT_EXPORT_SUFFIXES | {".evtx"} | ETL_SUFFIXES
             ),
             key=lambda item: str(item).lower(),
         )
 
-    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
         if not path.is_file() or path.suffix.lower() not in EVENT_EXPORT_SUFFIXES | {".evtx"} | ETL_SUFFIXES:
             continue
         lowered = str(path.relative_to(root)).lower()

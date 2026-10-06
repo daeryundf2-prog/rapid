@@ -22,11 +22,26 @@ export function App() {
   const selectedRunId = useUiStore((s) => s.selectedRunId);
   const selectedNode = useUiStore((s) => s.selectedNode);
   const [tokenVersion, setTokenVersion] = useState(0);
+  const tableFilter = useUiStore((s) => s.tableFilter);
+  const setTableFilter = useUiStore((s) => s.setTableFilter);
+  const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (captureFragmentToken()) {
       setTokenVersion((v) => v + 1);
     }
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        searchRef.current?.focus();
+        searchRef.current?.select();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
   const layout = useDefaultLayout({
@@ -78,7 +93,14 @@ export function App() {
           {selectedRunId ? `케이스 ${selectedRunId}` : "케이스를 선택하세요"}
         </span>
         <div className="header-search">
-          <input type="search" placeholder="전체 검색 (Ctrl+K)" aria-label="전체 검색" />
+          <input
+            ref={searchRef}
+            type="search"
+            placeholder="표 필터 (Ctrl+K)"
+            aria-label="표 필터"
+            value={tableFilter}
+            onChange={(event) => setTableFilter(event.target.value)}
+          />
           <button
             type="button"
             className="button"

@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { type ReactNode, useRef } from "react";
+import { type ReactNode, useMemo, useRef } from "react";
 import {
   getRunArtifacts,
   getRunDocs,
@@ -148,6 +148,7 @@ export function CollectionTablePane({ node }: { node: TreeNode }) {
   const selectedRunId = useUiStore((s) => s.selectedRunId);
   const selectItem = useUiStore((s) => s.selectItem);
   const selectedItem = useUiStore((s) => s.selectedItem);
+  const tableFilter = useUiStore((s) => s.tableFilter);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const query = useQuery({
@@ -157,7 +158,12 @@ export function CollectionTablePane({ node }: { node: TreeNode }) {
   });
 
   const columns = node.collection ? COLUMNS[node.collection] : undefined;
-  const rows = query.data?.rows ?? [];
+  const allRows = query.data?.rows ?? [];
+  const rows = useMemo(() => {
+    const needle = tableFilter.trim().toLowerCase();
+    if (!needle) return allRows;
+    return allRows.filter((row) => JSON.stringify(row).toLowerCase().includes(needle));
+  }, [allRows, tableFilter]);
   const total = query.data?.total ?? node.count;
 
   const virtualizer = useVirtualizer({

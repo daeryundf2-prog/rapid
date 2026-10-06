@@ -8,6 +8,7 @@ from pathlib import Path
 
 from ..core.models import ArtifactRecord
 from ..core.submission import compute_hashes
+from ._walk import iter_evidence_paths
 from .memory import MEMORY_DUMP_SCAN_LIMIT, build_scan_ranges, is_memory_dump_candidate
 from .windows.common import build_forensic_review
 from .windows.ese import build_ese_page_map, build_ese_string_pivots
@@ -138,14 +139,14 @@ class KakaoTalkWindowsProvider:
 
 
 def find_windows_edb_files(root: Path) -> Iterable[Path]:
-    for path in sorted(root.rglob("Windows.edb"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, "Windows.edb"), key=lambda item: str(item).lower()):
         if path.is_file():
             yield path
 
 
 def find_kakaotalk_app_databases(root: Path) -> Iterable[Path]:
     count = 0
-    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
         if not path.is_file():
             continue
         if not is_kakaotalk_path(path):
@@ -172,7 +173,7 @@ def is_kakaotalk_path(path: Path) -> bool:
 
 
 def find_registry_sources(root: Path) -> Iterable[Path]:
-    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
         if not path.is_file():
             continue
         if path.suffix.lower() == ".reg" or path.name.upper() in REGISTRY_HIVE_NAMES:
@@ -180,7 +181,7 @@ def find_registry_sources(root: Path) -> Iterable[Path]:
 
 
 def find_memory_sources(root: Path) -> Iterable[Path]:
-    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
         if path.is_file() and is_memory_dump_candidate(path):
             yield path
 

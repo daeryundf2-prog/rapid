@@ -7,7 +7,7 @@ import json
 import os
 import threading
 import uuid
-from collections import Counter
+from collections import Counter, OrderedDict
 from collections.abc import Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -49,6 +49,12 @@ CANCELLATION_RETRY_TRUSTED_TOOLS = {
     "job-store-transition-oracle",
     "long-running-job-control-export",
 }
+# Parsed run-output payloads are large (a real manifest is ~57 MB), so
+# RunJobStore.read_output memoizes parsed JSON in a small LRU bounded by both
+# entry count and an approximate byte budget (source file size is used as a
+# cheap proxy for parsed-payload memory).
+OUTPUT_JSON_CACHE_MAX_ENTRIES = 4
+OUTPUT_JSON_CACHE_MAX_BYTES = 200 * 1024 * 1024
 
 
 def now_iso() -> str:
@@ -84,6 +90,7 @@ class RunRequest:
     e01_partition_start_sector: int | None = None
     overwrite: bool = False
     resume: bool = False
+    extract: bool = False
     known_good_hash_feeds: tuple[str, ...] = ()
     hide_known_good: bool = False
     known_good_max_hash_bytes: int = DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES
@@ -103,6 +110,7 @@ class RunRequest:
             "e01_partition_start_sector": self.e01_partition_start_sector,
             "overwrite": self.overwrite,
             "resume": self.resume,
+            "extract": self.extract,
             "known_good_hash_feeds": list(self.known_good_hash_feeds),
             "hide_known_good": self.hide_known_good,
             "known_good_max_hash_bytes": self.known_good_max_hash_bytes,
@@ -128,6 +136,7 @@ class RunRequest:
             ),
             overwrite=bool(payload.get("overwrite", False)),
             resume=bool(payload.get("resume", False)),
+            extract=bool(payload.get("extract", False)),
             known_good_hash_feeds=string_tuple(payload.get("known_good_hash_feeds", [])),
             hide_known_good=bool(payload.get("hide_known_good", False)),
             known_good_max_hash_bytes=int_or_default(
@@ -227,6 +236,94 @@ class RunJob:
         )
 
 
+class OutputJsonCache:
+    """Small thread-safe LRU for parsed run-output JSON payloads.
+
+    Entries are keyed by ``(resolved path, mtime_ns, size)`` so a rewritten
+    output file self-invalidates on the next read — stale revisions simply age
+    out through LRU eviction. The cache is shared by every ``RunJobStore`` in
+    the process so the memory bound applies globally.
+
+    Cached payloads are returned as the same object across hits: callers must
+    treat the result as read-only. All current consumers were audited and copy
+    before mutating (``paginate_payload`` copies into a new page dict,
+    ``build_indicator_ti_enrichment_package`` copies each indicator row, the
+    remaining callers only read).
+    """
+
+    def __init__(self, *, max_entries: int = OUTPUT_JSON_CACHE_MAX_ENTRIES, max_bytes: int = OUTPUT_JSON_CACHE_MAX_BYTES) -> None:
+        self._max_entries = max(1, int(max_entries))
+        self._max_bytes = max(0, int(max_bytes))
+        self._entries: OrderedDict[tuple[str, int, int], tuple[dict[str, object], int]] = OrderedDict()
+        self._total_bytes = 0
+        self._lock = threading.Lock()
+
+    def read(self, path: Path) -> dict[str, object]:
+        resolved = Path(path).expanduser().resolve()
+        stat = resolved.stat()  # raises FileNotFoundError like read_text would
+        key = (str(resolved), stat.st_mtime_ns, stat.st_size)
+        with self._lock:
+            hit = self._entries.get(key)
+            if hit is not None:
+                self._entries.move_to_end(key)
+                return hit[0]
+        payload = json.loads(resolved.read_text(encoding="utf-8"))
+        with self._lock:
+            previous = self._entries.get(key)
+            if previous is not None:
+                self._total_bytes -= previous[1]
+            self._entries[key] = (payload, stat.st_size)
+            self._entries.move_to_end(key)
+            self._total_bytes += stat.st_size
+            self._evict()
+        return payload
+
+    def invalidate(self, path: Path | str | None = None) -> None:
+        """Drop every entry, or every cached revision of one resolved path."""
+        with self._lock:
+            if path is None:
+                self._entries.clear()
+                self._total_bytes = 0
+                return
+            target = str(Path(path).expanduser().resolve())
+            stale = [key for key in self._entries if key[0] == target]
+            for key in stale:
+                self._total_bytes -= self._entries[key][1]
+                del self._entries[key]
+
+    def _evict(self) -> None:
+        while self._entries and (
+            len(self._entries) > self._max_entries or self._total_bytes > self._max_bytes
+        ):
+            _key, (_payload, size) = self._entries.popitem(last=False)
+            self._total_bytes -= size
+
+    def stats(self) -> dict[str, int]:
+        with self._lock:
+            return {"entries": len(self._entries), "bytes": self._total_bytes}
+
+
+_output_json_cache = OutputJsonCache()
+
+
+def read_output_json(path: Path) -> dict[str, object]:
+    """Parse a run-output JSON file through the shared LRU cache."""
+    return _output_json_cache.read(path)
+
+
+def invalidate_output_json_cache(path: Path | str | None = None) -> None:
+    """Invalidate cached payloads — every entry, or all revisions of ``path``."""
+    _output_json_cache.invalidate(path)
+
+
+def _invalidate_summary_outputs(summary: Mapping[str, object] | None) -> None:
+    outputs = summary.get("outputs") if isinstance(summary, Mapping) else None
+    if not isinstance(outputs, Mapping):
+        return
+    for raw_path in outputs.values():
+        invalidate_output_json_cache(Path(str(raw_path)))
+
+
 class RunJobStore:
     def __init__(self, *, max_workers: int = 2, state_path: Path | None = None) -> None:
         self._jobs: dict[str, RunJob] = {}
@@ -295,7 +392,20 @@ class RunJobStore:
 
     def read_output(self, run_id: str, output_name: str) -> dict[str, object]:
         output_path = self.output_path(run_id, output_name)
-        return json.loads(output_path.read_text(encoding="utf-8"))
+        return read_output_json(output_path)
+
+    def invalidate_output_cache(self, run_id: str | None = None) -> None:
+        """Drop cached parsed outputs — all entries, or one run's outputs.
+
+        Rewrites already self-invalidate because cache keys embed
+        ``(resolved path, mtime_ns, size)``; explicit invalidation additionally
+        frees memory and covers byte-identical rewrites.
+        """
+        if run_id is None:
+            invalidate_output_json_cache()
+            return
+        job = self.get(run_id)
+        _invalidate_summary_outputs(job.summary)
 
     def output_path(self, run_id: str, output_name: str) -> Path:
         job = self.get(run_id)
@@ -389,15 +499,17 @@ class RunJobStore:
                 job.completed_at = existing.completed_at
             self._jobs[run_id] = job
             self._write_state_locked()
+        _invalidate_summary_outputs(summary)
         return job
 
     def remove(self, run_id: str) -> None:
         with self._lock:
             if run_id not in self._jobs:
                 raise KeyError(run_id)
-            del self._jobs[run_id]
+            job = self._jobs.pop(run_id)
             self._futures.pop(run_id, None)
             self._write_state_locked()
+        _invalidate_summary_outputs(job.summary)
 
     def cancel(self, run_id: str) -> RunJob:
         with self._lock:
@@ -492,6 +604,9 @@ class RunJobStore:
             job.updated_at = job.completed_at
             append_job_transition(job, event_type="job-completed", status="completed", step="finalize", message="Run completed")
             self._write_state_locked()
+        # Outputs were just (re)written by run_triage_mode — drop any stale
+        # cached payloads for this run, e.g. a retry over the same output_dir.
+        _invalidate_summary_outputs(summary)
         return summary
 
     def _mark_step(self, run_id: str, name: str, status: str, *, message: str = "") -> None:
@@ -1688,6 +1803,7 @@ def execute_run_request(request: RunRequest, *, run_id: str | None = None) -> di
             e01_partition_start_sector=request.e01_partition_start_sector,
             overwrite=request.overwrite,
             resume=request.resume,
+            extract_enabled=request.extract,
             known_good_hash_feeds=request.known_good_hash_feeds,
             hide_known_good=request.hide_known_good,
             known_good_max_hash_bytes=request.known_good_max_hash_bytes,

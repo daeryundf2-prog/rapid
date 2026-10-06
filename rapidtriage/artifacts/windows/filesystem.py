@@ -18,6 +18,7 @@ from ...core.recovery import (
     CANDIDATE_KIND_ORPHAN_RECORD,
     build_recovery_record,
 )
+from .._walk import iter_evidence_paths
 from .common import build_forensic_review
 
 PARSER_VERSION = "windows-filesystem-v9"
@@ -212,7 +213,7 @@ class WindowsFilesystemProvider:
         yield from collect_recycle_bin_artifacts(root)
         yield from collect_ads_stream_artifacts(root)
         yield from collect_signature_mismatch_artifacts(root)
-        for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+        for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
             if not path.is_file() or path.suffix.lower() not in SUPPORTED_SUFFIXES:
                 continue
             family = artifact_family(path)
@@ -228,7 +229,7 @@ class WindowsFilesystemProvider:
 def collect_ads_stream_artifacts(root: Path) -> Iterable[ArtifactRecord]:
     yield from collect_native_ads_stream_artifacts(root)
     scanned = 0
-    for path in sorted((item for item in root.rglob("*") if item.is_file()), key=lambda item: str(item).lower()):
+    for path in sorted((item for item in iter_evidence_paths(root, "*") if item.is_file()), key=lambda item: str(item).lower()):
         scanned += 1
         if scanned > ADS_SCAN_FILE_LIMIT:
             break
@@ -577,9 +578,9 @@ def ads_review_priority(
 
 
 def collect_recycle_bin_artifacts(root: Path) -> Iterable[ArtifactRecord]:
-    recycle_roots = [path for path in root.rglob("$Recycle.Bin") if path.is_dir()]
+    recycle_roots = [path for path in iter_evidence_paths(root, "$Recycle.Bin") if path.is_dir()]
     for recycle_root in sorted(recycle_roots, key=lambda item: str(item).lower()):
-        for metadata_path in sorted(recycle_root.rglob("$I*"), key=lambda item: str(item).lower()):
+        for metadata_path in sorted(iter_evidence_paths(recycle_root, "$I*"), key=lambda item: str(item).lower()):
             if not metadata_path.is_file():
                 continue
             parsed = parse_recycle_bin_i_file(metadata_path)
@@ -673,7 +674,7 @@ def decode_recycle_original_path(blob: bytes) -> str:
 
 def collect_signature_mismatch_artifacts(root: Path) -> Iterable[ArtifactRecord]:
     scanned = 0
-    for path in sorted((item for item in root.rglob("*") if item.is_file()), key=lambda item: str(item).lower()):
+    for path in sorted((item for item in iter_evidence_paths(root, "*") if item.is_file()), key=lambda item: str(item).lower()):
         if path.name.startswith("$I") or path.name.startswith("$R"):
             continue
         scanned += 1
@@ -734,7 +735,7 @@ def detect_file_signature(blob: bytes) -> dict[str, object] | None:
 
 def collect_native_ntfs_artifacts(root: Path) -> Iterable[ArtifactRecord]:
     seen: set[Path] = set()
-    candidate_paths = sorted((path for path in root.rglob("*") if path.is_file()), key=lambda item: str(item).lower())
+    candidate_paths = sorted((path for path in iter_evidence_paths(root, "*") if path.is_file()), key=lambda item: str(item).lower())
     mft_records_by_path: dict[Path, list[dict[str, object]]] = {}
     mft_path_caches_by_volume: dict[Path, dict[int, dict[str, object]]] = {}
     for path in candidate_paths:
@@ -767,7 +768,7 @@ def collect_native_ntfs_artifacts(root: Path) -> Iterable[ArtifactRecord]:
 
 
 def collect_ntfs_logfile_artifacts(root: Path) -> Iterable[ArtifactRecord]:
-    for path in sorted((item for item in root.rglob("*") if item.is_file()), key=lambda item: str(item).lower()):
+    for path in sorted((item for item in iter_evidence_paths(root, "*") if item.is_file()), key=lambda item: str(item).lower()):
         if not is_native_logfile_path(path):
             continue
         yield build_ntfs_logfile_inventory_record(path)

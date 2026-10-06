@@ -4150,6 +4150,56 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(response.status_code, 404, response.text)
             self.assertIn("columnar_artifacts", response.json()["detail"])
 
+    def test_browse_lists_roots_and_directories(self) -> None:
+        client = api_test_client()
+
+        roots = client.get("/api/browse")
+        self.assertEqual(roots.status_code, 200, roots.text)
+        roots_payload = roots.json()
+        self.assertIsNone(roots_payload["path"])
+        self.assertGreaterEqual(len(roots_payload["entries"]), 1)
+        self.assertTrue(all(entry["is_dir"] for entry in roots_payload["entries"]))
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            (base / "subdir").mkdir()
+            (base / "evidence.E01").write_bytes(b"E01")
+            (base / ".hidden").mkdir()
+
+            listing = client.get("/api/browse", params={"path": str(base)})
+            self.assertEqual(listing.status_code, 200, listing.text)
+            payload = listing.json()
+            self.assertEqual(payload["path"], str(base.resolve()))
+            names = [entry["name"] for entry in payload["entries"]]
+            self.assertIn("subdir", names)
+            self.assertIn("evidence.E01", names)
+            self.assertNotIn(".hidden", names)
+            # directories sort before files
+            self.assertLess(names.index("subdir"), names.index("evidence.E01"))
+            file_entry = next(e for e in payload["entries"] if e["name"] == "evidence.E01")
+            self.assertFalse(file_entry["is_dir"])
+            self.assertEqual(file_entry["size"], 3)
+
+    def test_browse_missing_path_and_file_target(self) -> None:
+        client = api_test_client()
+        missing = client.get("/api/browse", params={"path": str(Path(tempfile.gettempdir()) / "rt-browse-missing-xyz")})
+        self.assertEqual(missing.status_code, 404)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            target = Path(tmp_dir) / "single.txt"
+            target.write_text("x", encoding="utf-8")
+            response = client.get("/api/browse", params={"path": str(target)})
+            self.assertEqual(response.status_code, 200, response.text)
+            payload = response.json()
+            self.assertEqual(len(payload["entries"]), 1)
+            self.assertEqual(payload["entries"][0]["path"], str(target.resolve()))
+            self.assertFalse(payload["entries"][0]["is_dir"])
+
+    def test_browse_requires_auth_token(self) -> None:
+        client = TestClient(create_app(RunJobStore(), auth_token=TEST_API_TOKEN))
+        response = client.get("/api/browse")
+        self.assertEqual(response.status_code, 401)
+
 
 if __name__ == "__main__":
     unittest.main()

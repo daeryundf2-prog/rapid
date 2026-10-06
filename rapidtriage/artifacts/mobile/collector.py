@@ -8,6 +8,7 @@ from pathlib import Path
 
 from ...core.models import ArtifactRecord
 from ...core.submission import compute_hashes
+from .._walk import iter_evidence_paths
 from .constants import (
     MAX_IOS_BACKUP_FILES,
     MAX_ROWS_PER_SOURCE,
@@ -121,7 +122,7 @@ class MobileExportProvider:
         return True
 
     def collect(self, root: Path) -> Iterable[ArtifactRecord]:
-        for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+        for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
             if not path.is_file():
                 continue
             if is_ios_keychain_candidate(path):

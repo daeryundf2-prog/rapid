@@ -4,7 +4,7 @@ import datetime as dt
 from collections import Counter
 from pathlib import Path
 
-from ..artifacts import artifact_collectors, get_artifact_collector
+from ..artifacts import artifact_collectors, collect_cached, get_artifact_collector
 from .artifact_store import attach_artifact_record_contracts
 from .input_root import InputRoot, resolve_input_root
 from .rules import RuleSet, annotate_artifacts_payload
@@ -35,7 +35,7 @@ def run_artifact_collection(
     parser_errors: list[dict[str, str]] = []
     collection_status = "completed"
     try:
-        artifacts = [item.to_dict() for item in collector.collect(input_root.root_path)]
+        artifacts = [item.to_dict() for item in collect_cached(collector, input_root.root_path)]
     except Exception as exc:
         artifacts = []
         collection_status = "failed-isolated"

@@ -1959,6 +1959,7 @@ def build_parser() -> argparse.ArgumentParser:
               rapidtriage run /cases/image-mount --mode recovery --output-dir ./rapidtriage-run-recovery
               rapidtriage run /cases/image.E01 --mode fraud --output-dir ./rapidtriage-run-e01
               rapidtriage run . --mode hacking --read-only --max-file-count 50
+              rapidtriage run . --mode fraud --extract
             """
         ),
     )
@@ -1967,12 +1968,13 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--mode", required=True, choices=sorted(SUPPORTED_RUN_MODES), help="Incident mode to execute")
     run.add_argument(
         "--output-dir",
-        help="Directory that receives the generated JSON, extract manifests, and execution report "
-        "(default: ROOT/rapidtriage-run-MODE)",
+        help="Directory that receives the generated JSON, extract manifests (with --extract), "
+        "and execution report (default: ROOT/rapidtriage-run-MODE)",
     )
     run.add_argument("--dry-run", action="store_true", help="Skip evidence copying during extract stages")
     run.add_argument("--read-only", action="store_true", help="Run triage without copying evidence files during extract stages")
-    run.add_argument("--max-extract-size-bytes", type=int, default=0, help="Cap total copied bytes per extract stage (0 means unlimited)")
+    run.add_argument("--extract", action="store_true", help="Copy and hash extraction candidates into docs-extract/ and files-extract/ (default: off)")
+    run.add_argument("--max-extract-size-bytes", type=int, default=0, help="Cap total copied bytes per extract stage (0 means unlimited; requires --extract)")
     run.add_argument("--max-file-count", type=int, default=0, help="Cap run docs/files candidates and copied files per extract stage (0 means unlimited)")
     run.add_argument("--memory-cap-bytes", type=int, default=0, help="Stop the run at safe stage boundaries if RSS exceeds this value (0 also honors RAPIDTRIAGE_MEMORY_CAP_BYTES when set)")
     run.add_argument("--e01-partition-start-sector", type=int, help="Use this mmls partition start sector for direct E01/Ex01 or raw/split recovery instead of the automatic recommendation")

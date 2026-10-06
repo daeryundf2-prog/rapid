@@ -15,6 +15,7 @@ from pathlib import Path
 from ..core.forensic_accuracy import build_accuracy_gate
 from ..core.models import ArtifactRecord
 from ..core.submission import compute_hashes
+from ._walk import iter_evidence_paths
 from .review import build_forensic_review
 from .windows.browser import collect_ai_service_export_artifacts
 
@@ -244,7 +245,7 @@ class CloudExportProvider:
         return True
 
     def collect(self, root: Path) -> Iterable[ArtifactRecord]:
-        for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+        for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
             if path.is_file() and path.suffix.lower() in CLOUD_JSON_SUFFIXES:
                 yield from collect_cloud_json(path)
             elif path.is_file() and path.suffix.lower() in CLOUD_CSV_SUFFIXES:

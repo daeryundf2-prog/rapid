@@ -69,6 +69,7 @@ def build_runs_router(
             e01_partition_start_sector=request.e01_partition_start_sector,
             overwrite=request.overwrite,
             resume=request.resume,
+            extract=request.extract,
             known_good_hash_feeds=tuple(path.strip() for path in request.known_good_hash_feeds if path.strip()),
             hide_known_good=request.hide_known_good,
             known_good_max_hash_bytes=request.known_good_max_hash_bytes,

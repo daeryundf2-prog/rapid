@@ -9,6 +9,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from ..core.models import ArtifactRecord
+from ._walk import iter_evidence_paths
 
 PARSER_VERSION = "linux-system-v2"
 SKIP_USERS = {"daemon", "nobody", "sync", "shutdown", "halt", "mail", "news", "uucp", "operator", "games"}
@@ -628,7 +629,7 @@ def collect_cron(root: Path) -> Iterable[ArtifactRecord]:
         if path.is_file():
             yield from collect_cron_file(path, owner=path.name, has_user_field=cron_file_has_user_field(path))
         elif path.is_dir():
-            for cron_file in sorted((item for item in path.rglob("*") if item.is_file()), key=lambda item: str(item).lower()):
+            for cron_file in sorted((item for item in iter_evidence_paths(path, "*") if item.is_file()), key=lambda item: str(item).lower()):
                 yield from collect_cron_file(
                     cron_file,
                     owner=cron_file.name,

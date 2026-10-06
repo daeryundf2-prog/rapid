@@ -6,6 +6,8 @@ from collections import Counter
 from collections.abc import Mapping
 from pathlib import Path
 
+from ..extract import extract_manifest_disabled
+
 __all__ = [
     "annotate_step",
     "build_extract_step",
@@ -222,6 +224,22 @@ def mark_reused_step(row: dict[str, object], reused_outputs: set[str]) -> dict[s
 
 
 def build_extract_step(name: str, output: Path, payload: Mapping[str, object]) -> dict[str, object]:
+    if extract_manifest_disabled(payload):
+        return annotate_step(
+            {
+                "name": name,
+                "status": "skipped",
+                "output": str(output),
+                "disabled": True,
+                "disabled_reason": str(payload.get("disabled_reason") or "extraction-disabled"),
+                "selected_count": 0,
+                "extracted_count": 0,
+                "skipped_count": 0,
+                "skip_reasons": {},
+            },
+            warning_level="none",
+            warning_messages=[],
+        )
     summary = payload.get("summary", {})
     selected_count = int(summary.get("selected_count", 0)) if isinstance(summary, Mapping) else 0
     extracted_count = int(summary.get("extracted_count", 0)) if isinstance(summary, Mapping) else 0

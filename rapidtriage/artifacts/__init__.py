@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import inspect
 import os
+import threading
 import warnings
 from collections.abc import Mapping
 from pathlib import Path
@@ -34,6 +35,41 @@ from .windows.system import WindowsSystemArtifactsProvider
 
 PLUGIN_FILE_PATTERN = "*_provider.py"
 PLUGIN_DIRS_ENV = "RAPIDTRIAGE_PLUGIN_DIRS"
+
+# Per-process collect() memo shared by the manifest stage and the artifacts
+# stage. A single run asks every provider for the same artifact list twice;
+# keying on (collector_kind, root path) lets the second caller reuse the
+# first result so each provider walks/parses the tree only once per run.
+# Entries are only ever stored after a successful collect, so error
+# semantics stay identical to an uncached call. The cache is cleared at the
+# start of every run so a long-lived server process never serves stale
+# results for a root that changed on disk.
+_COLLECT_CACHE_MAX_ENTRIES = 256
+_collect_cache: dict[tuple[str, str], list[object]] = {}
+_collect_cache_lock = threading.Lock()
+
+
+def collect_cached(provider: object, root_path: Path) -> list[object]:
+    """Return ``provider.collect(root_path)`` cached by (kind, root)."""
+    kind = str(getattr(provider, "collector_kind", "") or "").strip().lower()
+    key = (kind, str(root_path))
+    with _collect_cache_lock:
+        cached = _collect_cache.get(key)
+    if cached is not None:
+        return cached
+    # collect() may return a generator; materialize once so every caller of
+    # the cached value sees the full list instead of an exhausted iterator.
+    items = list(provider.collect(root_path))
+    with _collect_cache_lock:
+        if len(_collect_cache) >= _COLLECT_CACHE_MAX_ENTRIES:
+            _collect_cache.clear()
+        _collect_cache[key] = items
+    return items
+
+
+def clear_collect_cache() -> None:
+    with _collect_cache_lock:
+        _collect_cache.clear()
 
 
 def _builtin_providers() -> list[object]:

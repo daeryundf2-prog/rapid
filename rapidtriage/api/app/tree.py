@@ -16,7 +16,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from ...core.jobs import RunJobStore
+from ...core.jobs import RunJobStore, read_output_json
 from .helpers import default_case_path, enrich_summary_counts, get_job, get_output_path
 
 SUMMARY_SCAN_BYTES = 65536
@@ -93,7 +93,9 @@ def read_output_key(path: Path, key: str) -> Any:
                     return decoded
                 except json.JSONDecodeError:
                     pass
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        # Full-parse fallback goes through the shared LRU so large outputs
+        # (tens of MB) are not re-parsed on every tree/issues request.
+        payload = read_output_json(path)
     except (OSError, json.JSONDecodeError):
         return None
     return payload.get(key) if isinstance(payload, dict) else None

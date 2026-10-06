@@ -95,6 +95,25 @@ EXPECTED_SIGNATURES_BY_EXTENSION: dict[str, set[str]] = {
     for rule in SIGNATURE_RULES
     for extension in rule["extensions"]  # type: ignore[union-attr]
 }
+RUN_OUTPUT_DIR_PREFIX = "rapidtriage-run"
+
+
+def iter_evidence_paths(root: Path, pattern: str = "*") -> Iterable[Path]:
+    """Yield ``root.rglob(pattern)`` while pruning run-output directories.
+
+    Run output directories (``rapidtriage-run*``) created inside an evidence
+    root must never be re-ingested as evidence: scanning them makes every
+    subsequent run slower and pollutes results with the tool's own outputs.
+    """
+    for path in root.rglob(pattern):
+        try:
+            relative = path.relative_to(root)
+        except ValueError:
+            relative = path
+        if any(part.startswith(RUN_OUTPUT_DIR_PREFIX) for part in relative.parts):
+            continue
+        yield path
+
 FUZZY_TEXT_EXTENSIONS = {
     ".txt",
     ".md",
@@ -517,6 +536,8 @@ def scan_file_candidates(
                 for entry in entries:
                     try:
                         if entry.is_dir(follow_symlinks=False):
+                            if entry.name.startswith(RUN_OUTPUT_DIR_PREFIX):
+                                continue
                             pending.append(Path(entry.path))
                             continue
                         if not entry.is_file(follow_symlinks=False):
@@ -1592,8 +1613,12 @@ def build_fuzzy_text_duplicate_groups(
             right = text_items[right_index]
             token_score = jaccard_similarity(left["tokens"], right["tokens"])
             if token_score < min_similarity:
-                sequence_score = difflib.SequenceMatcher(None, left["normalized"], right["normalized"]).ratio()
-                if sequence_score < min_similarity:
+                matcher = difflib.SequenceMatcher(None, left["normalized"], right["normalized"])
+                if matcher.real_quick_ratio() < min_similarity:
+                    continue
+                if matcher.quick_ratio() < min_similarity:
+                    continue
+                if matcher.ratio() < min_similarity:
                     continue
             adjacency[left_index].add(right_index)
             adjacency[right_index].add(left_index)

@@ -14,6 +14,7 @@ from zipfile import ZipInfo
 from ..core.models import ArtifactRecord
 from ..core.safe_xml import UnsafeXmlError, safe_xml_fromstring
 from ..core.submission import compute_hashes
+from ._walk import iter_evidence_paths
 
 PARSER_VERSION = "generic-documents-v4"
 STICKY_NOTE_ROW_LIMIT = 5000
@@ -130,7 +131,7 @@ class GenericDocumentArtifactProvider:
 
 
 def collect_archive_inventory(root: Path) -> Iterable[ArtifactRecord]:
-    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
         if not safe_is_file(path) or path.suffix.lower() not in ARCHIVE_SUFFIXES:
             continue
         stat_result = safe_stat(path)
@@ -374,7 +375,7 @@ def zip_datetime_to_iso(value: Sequence[int]) -> str:
 
 
 def collect_document_metadata_risk(root: Path) -> Iterable[ArtifactRecord]:
-    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
         if not safe_is_file(path) or path.suffix.lower() not in DOCUMENT_METADATA_SUFFIXES:
             continue
         profile = document_metadata_profile(path)
@@ -410,7 +411,7 @@ def collect_document_metadata_risk(root: Path) -> Iterable[ArtifactRecord]:
 
 
 def collect_sticky_notes(root: Path) -> Iterable[ArtifactRecord]:
-    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
         if not safe_is_file(path) or path.name.lower() != "plum.sqlite":
             continue
         yield from collect_sticky_notes_sqlite(path)
@@ -883,7 +884,7 @@ def iter_utf16le_strings_with_offsets(blob: bytes, *, minimum: int) -> Iterable[
 
 
 def collect_local_llm_inventory(root: Path) -> Iterable[ArtifactRecord]:
-    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
         if not safe_is_file(path):
             continue
         product = infer_local_llm_product(path)
@@ -1088,7 +1089,7 @@ def collect_local_llm_sqlite_prompt_candidates(
 
 
 def collect_desktop_ai_app_inventory(root: Path) -> Iterable[ArtifactRecord]:
-    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
         if not safe_is_file(path) or path.suffix.lower() not in DESKTOP_AI_APP_SUFFIXES:
             continue
         product = infer_desktop_ai_product(path)

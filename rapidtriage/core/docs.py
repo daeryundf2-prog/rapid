@@ -16,7 +16,8 @@ from email.message import EmailMessage
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
-from ..artifacts import all_providers
+from ..artifacts import all_providers, collect_cached
+from .files import RUN_OUTPUT_DIR_PREFIX
 from .input_root import InputRoot, resolve_input_root
 from .models import DocumentCandidate, DocumentMatch
 from .rules import RuleSet, annotate_docs_payload
@@ -87,7 +88,8 @@ BOUNDED_MAIL_CONTAINER_SCAN_LIMIT = 2 * 1024 * 1024
 def scan_document_candidates(root: InputRoot | Path, limit: int = 0) -> list[DocumentCandidate]:
     input_root = resolve_input_root(root)
     candidates: list[DocumentCandidate] = []
-    for dirpath, _, files in os.walk(input_root.root_path):
+    for dirpath, dirnames, files in os.walk(input_root.root_path):
+        dirnames[:] = [name for name in dirnames if not name.startswith(RUN_OUTPUT_DIR_PREFIX)]
         for name in files:
             path = Path(dirpath) / name
             suffix = path.suffix.lower()
@@ -120,7 +122,7 @@ def build_manifest(root: InputRoot | Path, keywords: Sequence[str], *, input_kin
                 "description": provider.description,
                 "target_platform": provider.target_platform,
                 "supported": provider.supported(),
-                "artifacts": [item.to_dict() for item in provider.collect(input_root.root_path)],
+                "artifacts": [item.to_dict() for item in collect_cached(provider, input_root.root_path)],
             }
         )
     return {

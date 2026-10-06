@@ -12,6 +12,7 @@ from urllib.parse import parse_qs, unquote_plus, urlparse
 
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
+from .._walk import iter_evidence_paths
 from .common import (
     build_forensic_review,
     isoformat_from_timestamp,
@@ -359,7 +360,7 @@ class WindowsBrowserArtifactsProvider:
 
 
 def collect_webcachev01_artifacts(root: Path) -> Iterable[ArtifactRecord]:
-    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
         if not path.is_file() or path.name.lower() not in WEBCACHE_NAMES:
             continue
         stat_result = path.stat()
@@ -490,7 +491,7 @@ def browser_unique_preserve_order(values: Sequence[str]) -> list[str]:
 
 
 def collect_desktop_cloud_sync_db_artifacts(root: Path) -> Iterable[ArtifactRecord]:
-    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
         if not path.is_file() or not is_cloud_sync_db_candidate(path):
             continue
         stat_result = path.stat()
@@ -552,7 +553,7 @@ def collect_ai_service_export_artifacts(
     parser_version: str | None = None,
 ) -> Iterable[ArtifactRecord]:
     scanned = 0
-    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
         if scanned >= MAX_AI_EXPORT_FILES:
             break
         if not path.is_file() or path.suffix.lower() not in AI_EXPORT_SUFFIXES:
@@ -5733,7 +5734,7 @@ def inventory_browser_storage_path(
     total_bytes = 0
     sample_files: list[dict[str, object]] = []
     truncated = False
-    candidates = [source] if source.is_file() else sorted(source.rglob("*"), key=lambda item: str(item).lower())
+    candidates = [source] if source.is_file() else sorted(iter_evidence_paths(source, "*"), key=lambda item: str(item).lower())
     for candidate in candidates:
         if not candidate.is_file():
             continue
@@ -5806,7 +5807,7 @@ def browser_storage_source_context_profile(
         if source.is_file()
         else [
             item
-            for item in sorted(source.rglob("*"), key=lambda path: str(path).lower())
+            for item in sorted(iter_evidence_paths(source, "*"), key=lambda path: str(path).lower())
             if item.is_file()
         ]
     )
@@ -6189,7 +6190,7 @@ def iter_ai_storage_files(profile_dir: Path) -> Iterable[Path]:
         root = profile_dir.joinpath(*relative)
         if not root.exists():
             continue
-        candidates = [root] if root.is_file() else sorted(root.rglob("*"), key=lambda item: str(item).lower())
+        candidates = [root] if root.is_file() else sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower())
         for candidate in candidates:
             if yielded >= MAX_AI_STORAGE_FILES:
                 return

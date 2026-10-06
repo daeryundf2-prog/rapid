@@ -30,11 +30,14 @@ interface UiState {
   selectedNode: TreeNode | null;
   /** Selected item row in the center table (shown in the detail pane). */
   selectedItem: ItemRow | null;
+  /** Header search text; filters the center table client-side. */
+  tableFilter: string;
   setTheme: (theme: Theme | null) => void;
   toggleTheme: () => void;
   selectRun: (runId: string | null) => void;
   selectNode: (node: TreeNode | null) => void;
   selectItem: (item: ItemRow | null) => void;
+  setTableFilter: (value: string) => void;
 }
 
 export const useUiStore = create<UiState>((set, get) => ({
@@ -62,6 +65,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   selectRun: (runId) => set({ selectedRunId: runId, selectedNode: null, selectedItem: null }),
   selectNode: (node) => set({ selectedNode: node, selectedItem: null }),
   selectItem: (item) => set({ selectedItem: item }),
+  tableFilter: "",
+  setTableFilter: (value) => set({ tableFilter: value }),
 }));
 
 export function systemTheme(): Theme {

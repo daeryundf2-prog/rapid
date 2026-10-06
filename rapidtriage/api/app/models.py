@@ -22,6 +22,7 @@ class RunCreateRequest(BaseModel):
     e01_partition_start_sector: int | None = None
     overwrite: bool = False
     resume: bool = False
+    extract: bool = False
     known_good_hash_feeds: list[str] = Field(default_factory=list)
     hide_known_good: bool = False
     known_good_max_hash_bytes: int = Field(DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES, ge=0)

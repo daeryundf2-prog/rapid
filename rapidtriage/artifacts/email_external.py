@@ -14,6 +14,7 @@ from pathlib import Path
 
 from ..core.docs import write_result
 from ..core.submission import compute_hashes
+from ._walk import iter_evidence_paths
 from .email import (
     EMAIL_FORMAT_PROFILES,
     EMAIL_REQUIRED_TOOLS_BY_FORMAT,
@@ -284,7 +285,7 @@ def build_email_external_command(tool: str, source_path: Path, export_dir: Path,
 
 def inventory_email_external_exports(export_dir: Path) -> list[dict[str, object]]:
     rows = []
-    for path in sorted(export_dir.rglob("*"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(export_dir, "*"), key=lambda item: str(item).lower()):
         if not path.is_file():
             continue
         stat = path.stat()

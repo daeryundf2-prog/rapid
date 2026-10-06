@@ -89,7 +89,11 @@ def run_web_server(
         auth_token = os.environ.get("RAPIDTRIAGE_AUTH_TOKEN") or secrets.token_urlsafe(32)
         os.environ["RAPIDTRIAGE_AUTH_TOKEN"] = auth_token
         print("RapidTriage API token required for /api routes.", flush=True)
-        print(f"Set browser localStorage key rapidtriage.authToken to: {auth_token}", flush=True)
+        print(flush=True)
+        url_host = f"[{host}]" if ":" in host else host
+        print(f"    Open this URL in your browser:  http://{url_host}:{port}/#token={auth_token}", flush=True)
+        print(flush=True)
+        print(f"(or set browser localStorage key rapidtriage.authToken to: {auth_token})", flush=True)
     if allow_remote_without_auth:
         # uvicorn re-imports `rapidtriage.api.app:app` (module-scope
         # `app = create_app()`), so auth cannot be passed as an explicit flag;

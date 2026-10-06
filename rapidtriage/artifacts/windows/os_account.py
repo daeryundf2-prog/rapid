@@ -11,6 +11,7 @@ from pathlib import Path
 
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
+from .._walk import iter_evidence_paths
 from .common import build_forensic_review
 from .registry import (
     MAX_HIVE_CELL_SCAN_BYTES,
@@ -185,7 +186,7 @@ def collect_user_profiles(root: Path) -> Iterable[ArtifactRecord]:
 
 
 def collect_registry_export_hints(root: Path) -> Iterable[ArtifactRecord]:
-    for path in sorted(root.rglob(f"*{REGISTRY_EXPORT_EXT}"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, f"*{REGISTRY_EXPORT_EXT}"), key=lambda item: str(item).lower()):
         try:
             raw = path.read_bytes()
         except OSError:
@@ -278,7 +279,7 @@ def collect_sam_hive_candidates(root: Path) -> Iterable[ArtifactRecord]:
 
 def candidate_sam_hive_paths(root: Path) -> Iterable[Path]:
     seen: set[Path] = set()
-    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
         if not path.is_file() or path.name.upper() != SAM_HIVE_NAME:
             continue
         resolved = path.resolve()

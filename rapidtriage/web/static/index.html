@@ -86,7 +86,10 @@
           </div>
           <label class="root-field">
             증거 이미지 또는 분석 폴더
-            <input id="rootInput" name="root" placeholder="/cases/case.E01, /cases/disk001.Ex01, /cases/image.raw, /cases/export-folder" data-testid="evidence-root-input" />
+            <span class="path-input-row">
+              <input id="rootInput" name="root" placeholder="/cases/case.E01, /cases/disk001.Ex01, /cases/image.raw, /cases/export-folder" data-testid="evidence-root-input" />
+              <button id="rootBrowseButton" class="secondary-button" type="button" data-testid="evidence-browse-button">찾아보기</button>
+            </span>
           </label>
           <p id="rootInputError" class="form-error" role="alert" hidden>분석할 E01/Ex01, 이미지, ZIP, 또는 폴더 경로를 먼저 입력하세요.</p>
           <div class="evidence-check-row">
@@ -104,23 +107,14 @@
                 <option value="recovery">삭제/복구 단서</option>
               </select>
             </label>
-            <label>
-              입력 유형
-              <select id="inputKindInput" name="inputKind">
-                <option value="">자동 판단</option>
-                <option value="folder">폴더 / Export</option>
-                <option value="mounted-image">마운트된 이미지</option>
-                <option value="e01-derived">E01/Ex01 이미지 / 추출 결과</option>
-                <option value="disk-image-derived">RAW/DD/가상디스크 이미지</option>
-                <option value="archive-image-derived">DMG/ISO/WIM 이미지</option>
-                <option value="live">현재 PC 경로</option>
-              </select>
-            </label>
           </div>
 
           <label class="output-field">
             결과 저장 위치
-            <input id="outputInput" name="outputDir" placeholder="auto: ROOT/rapidtriage-run-MODE" />
+            <span class="path-input-row">
+              <input id="outputInput" name="outputDir" placeholder="auto: ROOT/rapidtriage-run-MODE" />
+              <button id="outputBrowseButton" class="secondary-button" type="button">폴더 선택</button>
+            </span>
           </label>
 
           <label class="profile-field">
@@ -136,6 +130,19 @@
               <span>고급 옵션</span>
               <strong>수집 대상, 제한값, E01 섹터, Known-good 설정</strong>
             </summary>
+
+            <label>
+              입력 유형 (자동 판단이 기본)
+              <select id="inputKindInput" name="inputKind">
+                <option value="">자동 판단</option>
+                <option value="folder">폴더 / Export</option>
+                <option value="mounted-image">마운트된 이미지</option>
+                <option value="e01-derived">E01/Ex01 이미지 / 추출 결과</option>
+                <option value="disk-image-derived">RAW/DD/가상디스크 이미지</option>
+                <option value="archive-image-derived">DMG/ISO/WIM 이미지</option>
+                <option value="live">현재 PC 경로</option>
+              </select>
+            </label>
 
             <section id="runPlanPreview" class="run-plan-preview run-plan-summary" aria-live="polite"></section>
 
@@ -201,6 +208,7 @@
             <label><input id="readOnlyInput" type="checkbox" checked /> 읽기 전용</label>
             <label><input id="dryRunInput" type="checkbox" /> 시험 실행</label>
             <label><input id="overwriteInput" type="checkbox" /> 추출물 덮어쓰기</label>
+            <label title="증거 파일을 결과 폴더에 복사하고 SHA-256 해시를 계산합니다 (느림, 보고서 첨부용)"><input id="extractInput" type="checkbox" /> 증거 파일 복사 추출</label>
           </div>
 
           <button id="runButton" type="submit" data-testid="run-submit-button">분석 실행</button>

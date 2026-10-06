@@ -1,6 +1,9 @@
 {
   "openapi": "3.1.0",
   "paths": {
+    "/api/browse": {
+      "get": "browse_api_browse_get"
+    },
     "/api/case-catalog": {
       "get": "list_case_catalog_api_case_catalog_get"
     },

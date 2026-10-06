@@ -9,6 +9,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from ..core.models import ArtifactRecord
+from ._walk import iter_evidence_paths
 from .windows.browser import (
     build_browser_artifacts,
     build_browser_storage_only_artifacts,
@@ -522,7 +523,7 @@ def collect_launch_agent_dir(path: Path, *, owner: str) -> Iterable[ArtifactReco
 
 
 def collect_macos_native_inventory(root: Path) -> Iterable[ArtifactRecord]:
-    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
         if not path.is_file():
             continue
         relative_parts = path.relative_to(root).parts
@@ -585,7 +586,7 @@ def build_macos_native_record(root: Path, path: Path, *, artifact_type: str, par
 
 def iter_apfs_snapshot_hints(root: Path) -> Iterable[Path]:
     hint_names = {".snapshots", "com.apple.timemachine.localsnapshots", "snapshots"}
-    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
         lowered = path.name.lower()
         parent_blob = str(path.parent).lower()
         if lowered in hint_names or "localsnapshot" in lowered or "apfs" in lowered and "snapshot" in parent_blob:

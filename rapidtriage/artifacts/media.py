@@ -9,6 +9,8 @@ import re
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 
+from ._walk import iter_evidence_paths
+
 try:
     import cv2  # type: ignore[import-not-found]
 except ModuleNotFoundError:
@@ -208,7 +210,7 @@ class MediaImageProvider:
         return True
 
     def collect(self, root: Path) -> Iterable[ArtifactRecord]:
-        for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+        for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
             if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS:
                 yield build_image_record(path)
             elif path.is_file() and path.suffix.lower() in VIDEO_EXTENSIONS:

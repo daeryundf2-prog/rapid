@@ -10,6 +10,7 @@ from urllib.parse import parse_qsl, unquote_plus, urlparse
 
 from ..core.models import ArtifactRecord
 from ..core.submission import compute_hashes
+from ._walk import iter_evidence_paths
 
 PARSER_VERSION = "memory-volatility-v3"
 MEMORY_OUTPUT_SUFFIXES = {".json", ".jsonl", ".ndjson"}
@@ -114,7 +115,7 @@ class MemoryVolatilityProvider:
         return True
 
     def collect(self, root: Path) -> Iterable[ArtifactRecord]:
-        for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+        for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
             if not path.is_file():
                 continue
             suffix = path.suffix.lower()

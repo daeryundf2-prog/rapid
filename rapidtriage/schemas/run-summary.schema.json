@@ -184,6 +184,9 @@
         "read_only": {
           "type": "boolean"
         },
+        "extract": {
+          "type": "boolean"
+        },
         "max_extract_size_bytes": {
           "type": "integer"
         },

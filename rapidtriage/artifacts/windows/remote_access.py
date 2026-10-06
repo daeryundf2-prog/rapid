@@ -6,6 +6,7 @@ from pathlib import Path
 
 from ...core.audit import compute_sha256
 from ...core.models import ArtifactRecord
+from .._walk import iter_evidence_paths
 from .common import isoformat_from_timestamp, iter_windows_user_homes
 from .system import (
     IP_RE,
@@ -83,7 +84,7 @@ def collect_rdp_cache_files(root: Path) -> Iterable[ArtifactRecord]:
         cache_root = user_root.joinpath(*RDP_CACHE_ROOT)
         if not cache_root.is_dir():
             continue
-        for path in sorted((item for item in cache_root.rglob("*") if item.is_file()), key=lambda item: str(item).lower()):
+        for path in sorted((item for item in iter_evidence_paths(cache_root, "*") if item.is_file()), key=lambda item: str(item).lower()):
             stat_result = path.stat()
             thumbnail_candidates = scan_thumbnail_candidates(path)
             yield ArtifactRecord(
@@ -108,7 +109,7 @@ def collect_rdp_cache_files(root: Path) -> Iterable[ArtifactRecord]:
 
 
 def collect_rdp_registry_exports(root: Path) -> Iterable[ArtifactRecord]:
-    for path in sorted(root.rglob("*.reg"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, "*.reg"), key=lambda item: str(item).lower()):
         text = read_text(path)
         if "Terminal Server Client" not in text:
             continue
@@ -129,7 +130,7 @@ def collect_rdp_registry_exports(root: Path) -> Iterable[ArtifactRecord]:
 
 
 def collect_third_party_remote_control_artifacts(root: Path) -> Iterable[ArtifactRecord]:
-    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
         if not path.is_file():
             continue
         product = remote_control_product_for_path(path)

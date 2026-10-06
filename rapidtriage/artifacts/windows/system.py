@@ -15,6 +15,7 @@ from ...core.audit import compute_sha256
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 from ...core.safe_xml import UnsafeXmlError, safe_xml_parse
+from .._walk import iter_evidence_paths
 from .common import (
     build_forensic_review,
     isoformat_from_timestamp,
@@ -242,7 +243,7 @@ class WindowsSystemArtifactsProvider:
 
 
 def collect_print_spooler_artifacts(root: Path) -> Iterable[ArtifactRecord]:
-    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
         if not path.is_file() or path.suffix.lower() not in {".spl", ".shd"}:
             continue
         lower = str(path).lower()
@@ -296,7 +297,7 @@ def collect_print_spooler_artifacts(root: Path) -> Iterable[ArtifactRecord]:
 
 
 def collect_third_party_remote_control_artifacts(root: Path) -> Iterable[ArtifactRecord]:
-    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
         if not path.is_file():
             continue
         product = remote_control_product_for_path(path)
@@ -577,7 +578,7 @@ def remote_control_risk_flags(product: str, profile: Mapping[str, object]) -> li
 
 def collect_windows_recall_artifacts(root: Path) -> Iterable[ArtifactRecord]:
     emitted = 0
-    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
         if not path.is_file() or emitted >= 2000:
             continue
         role = windows_recall_path_role(path)
@@ -821,7 +822,7 @@ def remote_control_product_for_path(path: Path) -> str:
 
 
 def collect_bits_qmgr_artifacts(root: Path) -> Iterable[ArtifactRecord]:
-    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
         if not path.is_file():
             continue
         lower = str(path).lower().replace("\\", "/")
@@ -1101,7 +1102,7 @@ def bits_qmgr_risk_flags(
 
 
 def collect_setupapi_usb_artifacts(root: Path) -> Iterable[ArtifactRecord]:
-    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
         if not path.is_file() or path.name.lower() != "setupapi.dev.log":
             continue
         stat_result = path.stat()
@@ -1278,7 +1279,7 @@ def setupapi_usb_risk_flags(profile: Mapping[str, object]) -> list[str]:
 
 
 def collect_wifi_profile_artifacts(root: Path) -> Iterable[ArtifactRecord]:
-    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
         if not path.is_file() or path.suffix.lower() != ".xml":
             continue
         normalized = str(path).lower().replace("\\", "/")
@@ -1440,7 +1441,7 @@ def decode_best_effort(blob: bytes) -> str:
 
 
 def collect_explorer_cache_artifacts(root: Path) -> Iterable[ArtifactRecord]:
-    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
         if not path.is_file():
             continue
         name = path.name.lower()
@@ -1652,7 +1653,7 @@ def explorer_cache_candidate_hash(source_sha256: str, candidate_kind: str, candi
 
 def collect_activity_notification_uwp_artifacts(root: Path) -> Iterable[ArtifactRecord]:
     emitted_packages = 0
-    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
         name = path.name.lower()
         if path.is_file() and name == "activitiescache.db":
             record = build_activity_style_record(path, "activities-cache-db", "connected-devices-activities", root=root)
@@ -1929,7 +1930,7 @@ def profile_sid_candidates(root: Path | None, profile_name: str, *, max_files: i
     profile_token = rf"\\users\\{re.escape(profile_name.lower())}"
     sid_candidates: list[dict[str, object]] = []
     scanned = 0
-    for candidate in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+    for candidate in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
         if scanned >= max_files:
             break
         if not candidate.is_file():
@@ -2080,7 +2081,7 @@ def uwp_package_index(root: Path, *, limit: int = 500) -> list[dict[str, object]
     packages: list[dict[str, object]] = []
     if root is None:
         return packages
-    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
         if len(packages) >= limit:
             break
         if not path.is_dir() or path.parent.name.lower() != "packages" or "appdata" not in str(path).lower():
@@ -2972,7 +2973,7 @@ def correlate_web_requests_to_files(root: Path, parsed_log: Mapping[str, object]
     basenames = set(basename_sources)
     matches: list[dict[str, object]] = []
     if basenames:
-        for candidate in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+        for candidate in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
             if len(matches) >= 50:
                 break
             if not candidate.is_file() or candidate.name.lower() not in basenames:
@@ -3015,7 +3016,7 @@ def web_request_basename_sources(uri_samples: Sequence[object]) -> dict[str, dic
 
 
 def collect_webshell_and_server_log_artifacts(root: Path) -> Iterable[ArtifactRecord]:
-    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
         if not path.is_file():
             continue
         lowered = str(path).lower()
@@ -3406,7 +3407,7 @@ def correlate_webshell_to_web_logs(root: Path, path: Path, *, max_logs: int = 80
     normalized_times: list[str] = []
     suspicious_count = 0
     scanned_logs = 0
-    for log_path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+    for log_path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
         if scanned_logs >= max_logs or not log_path.is_file():
             continue
         lowered = str(log_path).lower()
@@ -3522,7 +3523,7 @@ def web_log_source_ip(row: Mapping[str, str]) -> str:
 
 def iis_application_host_profiles(root: Path, *, max_configs: int = 20) -> list[dict[str, object]]:
     profiles: list[dict[str, object]] = []
-    for candidate in sorted(root.rglob("applicationHost.config"), key=lambda item: str(item).lower()):
+    for candidate in sorted(iter_evidence_paths(root, "applicationHost.config"), key=lambda item: str(item).lower()):
         if len(profiles) >= max_configs:
             break
         if not candidate.is_file():
@@ -3823,7 +3824,7 @@ def collect_task_scheduler(root: Path) -> Iterable[ArtifactRecord]:
     tasks_root = root.joinpath(*TASKS_ROOT)
     if not tasks_root.is_dir():
         return
-    for path in sorted((item for item in tasks_root.rglob("*") if item.is_file()), key=lambda item: str(item).lower()):
+    for path in sorted((item for item in iter_evidence_paths(tasks_root, "*") if item.is_file()), key=lambda item: str(item).lower()):
         try:
             xml_root = safe_xml_parse(path).getroot()
         except (ET.ParseError, UnsafeXmlError, OSError):
@@ -3943,7 +3944,7 @@ def collect_task_scheduler(root: Path) -> Iterable[ArtifactRecord]:
 
 
 def collect_defender_policy_artifacts(root: Path) -> Iterable[ArtifactRecord]:
-    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
         if not path.is_file() or path.suffix.lower() not in DEFENDER_POLICY_SUFFIXES:
             continue
         lower_path = str(path).lower().replace("/", "\\")
@@ -4295,10 +4296,10 @@ def collect_wer_reports(root: Path) -> Iterable[ArtifactRecord]:
     candidates: list[Path] = []
     programdata = root.joinpath(*WER_ROOTS[0])
     if programdata.is_dir():
-        candidates.extend(path for path in programdata.rglob("Report.wer") if path.is_file())
+        candidates.extend(path for path in iter_evidence_paths(programdata, "Report.wer") if path.is_file())
     users = root / "Users"
     if users.is_dir():
-        candidates.extend(path for path in users.rglob("Report.wer") if path.is_file() and "WER" in str(path))
+        candidates.extend(path for path in iter_evidence_paths(users, "Report.wer") if path.is_file() and "WER" in str(path))
     for path in sorted(set(candidates), key=lambda item: str(item).lower()):
         fields = parse_key_value_file(path)
         stat_result = path.stat()
@@ -4327,7 +4328,7 @@ def collect_wmi_repository(root: Path) -> Iterable[ArtifactRecord]:
     repository = root.joinpath(*WMI_REPOSITORY_ROOT)
     if not repository.is_dir():
         return
-    for path in sorted((item for item in repository.rglob("*") if item.is_file()), key=lambda item: str(item).lower()):
+    for path in sorted((item for item in iter_evidence_paths(repository, "*") if item.is_file()), key=lambda item: str(item).lower()):
         if path.name.upper() not in WMI_REPOSITORY_NAMES and path.suffix.upper() not in WMI_REPOSITORY_SUFFIXES:
             continue
         stat_result = path.stat()
@@ -4353,7 +4354,7 @@ def collect_wmi_repository(root: Path) -> Iterable[ArtifactRecord]:
 
 
 def collect_zone_identifier_ads(root: Path) -> Iterable[ArtifactRecord]:
-    for path in sorted(root.rglob("*Zone.Identifier"), key=lambda item: str(item).lower()):
+    for path in sorted(iter_evidence_paths(root, "*Zone.Identifier"), key=lambda item: str(item).lower()):
         if not path.is_file():
             continue
         match = ZONE_IDENTIFIER_PATTERN.match(path.name)
