@@ -2883,6 +2883,48 @@ function renderCollectedArtifactsTable(artifactRows, artifactTotal) {
   }) + overflow;
 }
 
+function renderArtifactTypeTable(summary) {
+  const providers = summary.artifacts || {};
+  const rows = [];
+  const emptyProviders = [];
+  for (const [provider, info] of Object.entries(providers)) {
+    const typeCounts = info.artifact_type_counts || {};
+    const outputName = fileName(info.output || "");
+    if (!Object.keys(typeCounts).length && !info.artifact_count) {
+      emptyProviders.push(provider);
+      continue;
+    }
+    for (const [type, count] of Object.entries(typeCounts)) {
+      rows.push({ provider, type, count: Number(count) || 0, output: outputName });
+    }
+    if (!Object.keys(typeCounts).length && info.artifact_count) {
+      rows.push({ provider, type: "(유형 미분류)", count: Number(info.artifact_count) || 0, output: outputName });
+    }
+  }
+  rows.sort((a, b) => b.count - a.count || a.type.localeCompare(b.type));
+  const totalRows = rows.reduce((sum, r) => sum + r.count, 0);
+  const rowHtml = rows.map((r) => `
+    <tr>
+      <td><code>${escapeHtml(r.type)}</code></td>
+      <td class="num">${formatNumber(r.count)}</td>
+      <td><code>${escapeHtml(r.provider)}</code></td>
+      <td class="path-cell"><code>${escapeHtml(r.output)}</code></td>
+    </tr>
+  `).join("");
+  const table = renderResultTable({
+    testId: "result-artifact-types",
+    title: "수집된 아티팩트 유형",
+    count: rows.length,
+    headers: ["유형", "건수", "수집기", "산출물 파일"],
+    rowHtml,
+    empty: "수집된 아티팩트 유형이 없습니다.",
+  });
+  const footer = `
+    <p class="help-text">유형 ${formatNumber(rows.length)}종 · 총 ${formatNumber(totalRows)}건${emptyProviders.length ? ` · 결과 0건 수집기 ${formatNumber(emptyProviders.length)}개: ${escapeHtml(emptyProviders.join(", "))}` : ""}</p>
+  `;
+  return table + footer;
+}
+
 function renderOutputsTable(outputs, runId) {
   const entries = Object.entries(outputs || {});
   const rows = entries.map(([name, path]) => `
@@ -2948,6 +2990,7 @@ function renderSummary(payload, artifactGroups = null) {
       </div>
       ${renderRecoveredFilesTable(recovered)}
       ${renderKeywordHitsTable(docHits, summary.matched_keyword_counts)}
+      ${renderArtifactTypeTable(summary)}
       ${renderCollectedArtifactsTable(artifactRows, artifactTotal)}
       ${renderOutputsTable(outputs, selectedRunId)}
     </section>
