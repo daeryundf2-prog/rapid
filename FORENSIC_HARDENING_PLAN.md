@@ -193,3 +193,18 @@ Before production release, create and attach:
 - `large-case-benchmark.json` for 100k files, 1M metadata rows, and the approved 10TB-class corpus.
 - `legal-operator-review-checklist.md` with completed technical, forensic methodology, operator, and legal reviews.
 - Windows runtime logs for E01/Ex01, Korean filename handling, viewer smoke, extraction export, and interruption/resume.
+
+## UI/UX Follow-up Roadmap
+
+Implemented in the intake/UX pass (see git history around `5db5293`+):
+
+- Evidence path picker (`GET /api/browse` + `core/browse.py`), browse buttons on all path inputs, intake cards opening the picker, auto support-check on image selection, EWF segment-count/warning surfacing.
+- Readability floor: font-size floor 0.72rem, `--rf-type-*` scale bump, 44px primary / 34px compact controls.
+- First-screen declutter, mission strip made into real step navigation, dev/QC diagnostics stay behind `details` drawers.
+
+Remaining structured work (not claimable as done):
+
+1. `app.js` (~9.5k lines) module split: tab renderers, search, viewers, report into separate ES modules — review each split as an independent change.
+2. CSS `!important` reduction: safe only after the op-*/rf-* alias layer stabilizes; remove in per-section commits with visual diff checks.
+3. Remote deployment: `/api/browse` enumerates the API host filesystem (see `core/browse.py` docstring). A remote-capable picker requires an upload or local-agent design — not implemented and not claimed.
+4. Historical fixture DB migration coverage, stable keyset pagination, streamed storage ingestion, OS-level process sandboxing: unchanged from earlier stages.

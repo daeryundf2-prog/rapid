@@ -20,7 +20,6 @@ from .helpers import (
     resolve_case_db_path,
     truthy_env,
 )
-from .routes_browse import build_browse_router
 from .routes_case_db import build_case_db_router
 from .routes_ioc import build_ioc_router
 from .routes_media import build_media_router
@@ -101,7 +100,6 @@ def create_app(
             )
 
     api.include_router(build_meta_router())
-    api.include_router(build_browse_router())
     api.include_router(build_case_db_router(store, open_request_case_database, resolve_request_catalog_path))
     api.include_router(build_runs_router(store))
     api.include_router(build_ioc_router(store))

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
 
+from ...core.browse import BrowseError, browse_directory
 from ...core.collect_plan import (
     CollectPlanError,
     build_collect_plan,
@@ -125,6 +126,17 @@ def build_meta_router() -> APIRouter:
     @router.get("/api/evidence/formats")
     def evidence_formats() -> dict[str, object]:
         return {"formats": supported_evidence_formats()}
+
+
+    @router.get("/api/browse")
+    def browse_filesystem(
+        path: str | None = Query(default=None, max_length=4096),
+        show_hidden: bool = Query(False),
+    ) -> dict[str, object]:
+        try:
+            return browse_directory(path, show_hidden=show_hidden)
+        except BrowseError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
 
     @router.post("/api/evidence/identify")

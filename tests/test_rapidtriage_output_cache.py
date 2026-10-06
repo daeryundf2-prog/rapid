@@ -17,7 +17,7 @@ except ModuleNotFoundError as exc:
 
 if HAS_FASTAPI:
     from rapidtriage.api.app import create_app
-    from rapidtriage.api.app.routes_browse import BROWSE_ENTRY_LIMIT
+    from rapidtriage.core.browse import BROWSE_ENTRY_LIMIT
 from rapidtriage.core.jobs import (
     RunJobStore,
     invalidate_output_json_cache,
@@ -155,10 +155,11 @@ class BrowseApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200, response.text)
         payload = response.json()
-        self.assertIsNone(payload["path"])
+        self.assertEqual(payload["path"], str(Path.home()))
+        self.assertGreaterEqual(len(payload["roots"]), 1)
         self.assertGreaterEqual(len(payload["entries"]), 1)
         for entry in payload["entries"]:
-            self.assertTrue(entry["is_dir"])
+            self.assertIn(entry["kind"], ("directory", "file"))
             self.assertTrue(entry["path"])
 
     def test_browse_directory_lists_directories_first_and_skips_hidden(self) -> None:
@@ -180,12 +181,12 @@ class BrowseApiTests(unittest.TestCase):
             names = [entry["name"] for entry in payload["entries"]]
             self.assertEqual(names, ["aaa_dir", "zzz_dir", "a.txt", "b.txt"])
             by_name = {entry["name"]: entry for entry in payload["entries"]}
-            self.assertTrue(by_name["aaa_dir"]["is_dir"])
-            self.assertIsNone(by_name["aaa_dir"]["size"])
-            self.assertFalse(by_name["a.txt"]["is_dir"])
-            self.assertEqual(by_name["a.txt"]["size"], 2)
+            self.assertEqual(by_name["aaa_dir"]["kind"], "directory")
+            self.assertNotIn("size_bytes", by_name["aaa_dir"])
+            self.assertEqual(by_name["a.txt"]["kind"], "file")
+            self.assertEqual(by_name["a.txt"]["size_bytes"], 2)
 
-    def test_browse_file_path_returns_single_entry(self) -> None:
+    def test_browse_file_path_opens_parent_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "evidence.txt"
             target.write_text("bytes", encoding="utf-8")
@@ -194,18 +195,19 @@ class BrowseApiTests(unittest.TestCase):
 
             self.assertEqual(response.status_code, 200, response.text)
             payload = response.json()
-            self.assertEqual(payload["path"], str(target.resolve()))
-            self.assertEqual(len(payload["entries"]), 1)
-            self.assertEqual(payload["entries"][0]["name"], "evidence.txt")
-            self.assertFalse(payload["entries"][0]["is_dir"])
-            self.assertEqual(payload["entries"][0]["size"], 5)
+            self.assertEqual(payload["path"], str(Path(tmp).resolve()))
+            names = [entry["name"] for entry in payload["entries"]]
+            self.assertIn("evidence.txt", names)
+            entry = next(e for e in payload["entries"] if e["name"] == "evidence.txt")
+            self.assertEqual(entry["kind"], "file")
+            self.assertEqual(entry["size_bytes"], 5)
 
-    def test_browse_missing_path_returns_404(self) -> None:
+    def test_browse_missing_path_returns_400(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             missing = Path(tmp) / "does-not-exist"
             response = self._client().get("/api/browse", params={"path": str(missing)})
 
-            self.assertEqual(response.status_code, 404)
+            self.assertEqual(response.status_code, 400)
             self.assertIn("detail", response.json())
 
     def test_browse_caps_entries_at_limit(self) -> None:

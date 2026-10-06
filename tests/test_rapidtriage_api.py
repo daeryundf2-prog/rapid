@@ -879,7 +879,7 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertIn("bindEvidenceCheckActions", app_js)
         self.assertIn("E01_PRE_RUN_STEPS", app_js)
         self.assertIn("updateRunSubmissionCta", app_js)
-        self.assertIn("Starting E01 workflow", app_js)
+        self.assertIn("e01WorkflowLabel", app_js)
         self.assertIn("e01-workflow-panel", app_js)
         self.assertIn("data-testid=\"e01-end-to-end-handoff\"", app_js)
         self.assertIn("data-testid=\"e01-partition-browser\"", app_js)
@@ -4156,9 +4156,10 @@ class RapidTriageApiTests(unittest.TestCase):
         roots = client.get("/api/browse")
         self.assertEqual(roots.status_code, 200, roots.text)
         roots_payload = roots.json()
-        self.assertIsNone(roots_payload["path"])
+        self.assertEqual(roots_payload["path"], str(Path.home()))
+        self.assertGreaterEqual(len(roots_payload["roots"]), 1)
         self.assertGreaterEqual(len(roots_payload["entries"]), 1)
-        self.assertTrue(all(entry["is_dir"] for entry in roots_payload["entries"]))
+        self.assertTrue(all(entry["kind"] in ("directory", "file") for entry in roots_payload["entries"]))
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             base = Path(tmp_dir)
@@ -4177,13 +4178,14 @@ class RapidTriageApiTests(unittest.TestCase):
             # directories sort before files
             self.assertLess(names.index("subdir"), names.index("evidence.E01"))
             file_entry = next(e for e in payload["entries"] if e["name"] == "evidence.E01")
-            self.assertFalse(file_entry["is_dir"])
-            self.assertEqual(file_entry["size"], 3)
+            self.assertEqual(file_entry["kind"], "file")
+            self.assertTrue(file_entry["evidence_candidate"])
+            self.assertEqual(file_entry["size_bytes"], 3)
 
     def test_browse_missing_path_and_file_target(self) -> None:
         client = api_test_client()
         missing = client.get("/api/browse", params={"path": str(Path(tempfile.gettempdir()) / "rt-browse-missing-xyz")})
-        self.assertEqual(missing.status_code, 404)
+        self.assertEqual(missing.status_code, 400)
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             target = Path(tmp_dir) / "single.txt"
@@ -4191,9 +4193,13 @@ class RapidTriageApiTests(unittest.TestCase):
             response = client.get("/api/browse", params={"path": str(target)})
             self.assertEqual(response.status_code, 200, response.text)
             payload = response.json()
-            self.assertEqual(len(payload["entries"]), 1)
-            self.assertEqual(payload["entries"][0]["path"], str(target.resolve()))
-            self.assertFalse(payload["entries"][0]["is_dir"])
+            # A file seed opens its parent directory for selection.
+            self.assertEqual(payload["path"], str(Path(tmp_dir).resolve()))
+            names = [entry["name"] for entry in payload["entries"]]
+            self.assertIn("single.txt", names)
+            entry = next(e for e in payload["entries"] if e["name"] == "single.txt")
+            self.assertEqual(entry["path"], str(target.resolve()))
+            self.assertEqual(entry["kind"], "file")
 
     def test_browse_requires_auth_token(self) -> None:
         client = TestClient(create_app(RunJobStore(), auth_token=TEST_API_TOKEN))

@@ -120,6 +120,7 @@ import {
   bindCrashReportActions,
   bindE01PartitionControls,
   bindEvidenceCheckActions,
+  bindPathPickerButtons,
   bindRunFormPersistence,
   checkEvidenceSupport,
   detectEvidenceImageKind,
@@ -313,9 +314,11 @@ if (apiStatus) {
 }
 const newCaseButton = document.querySelector("#newCaseButton");
 if (newCaseButton) {
+  newCaseButton.setAttribute("aria-expanded", "false");
   newCaseButton.addEventListener("click", () => {
     const opening = !document.body.classList.contains("intake-open");
     document.body.classList.toggle("intake-open", opening);
+    newCaseButton.setAttribute("aria-expanded", opening ? "true" : "false");
     if (opening) {
       const rootInput = document.querySelector("#rootInput");
       rootInput?.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -361,6 +364,7 @@ function renderRunList(runs) {
   runList.innerHTML = "";
   document.body.classList.toggle("has-runs", Boolean(runs.length));
   document.body.classList.toggle("analysis-active", Boolean(selectedRunId));
+  updateMissionStrip();
   if (!runs.length) {
     runList.innerHTML = renderEmptyRunList();
     return;
@@ -513,7 +517,7 @@ async function loadRunDetail(runId, tab = "summary") {
   activeTab = tab;
   activeViewGroup = groupForTab(tab);
   flushWorkbenchState();
-  syncMissionStrip(tab);
+  updateMissionStrip();
   selectedRun = await api(`/api/runs/${runId}`);
   if (selectedRun.status !== "completed" || !selectedRun.summary) {
     selectedRun.capabilities = null;
@@ -2534,9 +2538,9 @@ function bindTabButtons() {
       activeArtifactFilter = "";
       flushWorkbenchState();
       for (const item of detailPanel.querySelectorAll(".tab-button")) {
-        const isActive = item === button;
-        item.classList.toggle("active", isActive);
-        item.setAttribute("aria-current", isActive ? "page" : "false");
+        const selected = item === button;
+        item.classList.toggle("active", selected);
+        item.setAttribute("aria-selected", selected ? "true" : "false");
       }
       for (const item of detailPanel.querySelectorAll(".forensic-view-mode")) {
         item.classList.toggle("active", item.dataset.tab === activeTab);
@@ -2644,6 +2648,7 @@ function renderCommandPalette(run, tab) {
               class="command-palette-command ${index === 0 ? "active" : ""}"
               type="button"
               role="option"
+              aria-selected="${index === 0 ? "true" : "false"}"
               data-command-text="${escapeHtml([command.category, command.label, command.hint, command.shortcut, command.filter].filter(Boolean).join(" ").toLowerCase())}"
               data-command-tab="${escapeHtml(command.tab || "")}"
               data-command-filter="${escapeHtml(command.filter || "")}"
@@ -2664,6 +2669,8 @@ function renderCommandPalette(run, tab) {
 
 async function renderActiveTab() {
   const body = detailPanel.querySelector("#tabBody");
+  const tabStatus = detailPanel.querySelector("#tabStatus");
+  if (tabStatus) tabStatus.textContent = `${tabLabel(activeTab)} 불러오는 중`;
   body.innerHTML = '<p class="empty-state">Loading...</p>';
   try {
     if (activeTab === "summary") body.innerHTML = renderSummary(selectedRun.summary);
@@ -2677,6 +2684,10 @@ async function renderActiveTab() {
     if (activeTab === "review" || activeTab === "bookmarks") body.innerHTML = renderReviewBoard(await api(`/api/runs/${selectedRunId}/case`));
   } catch (error) {
     body.innerHTML = renderTabLoadError(error, activeTab);
+    if (tabStatus) tabStatus.textContent = `${tabLabel(activeTab)} 불러오기 실패`;
+  }
+  if (tabStatus && !body.querySelector('[data-testid="tab-load-error"]')) {
+    tabStatus.textContent = `${tabLabel(activeTab)} 탭을 불러왔습니다`;
   }
   bindPanelActions();
   bindBookmarkButtons();
@@ -2846,7 +2857,7 @@ function renderImageStageControlStatus(payload) {
     <section class="image-stage-control-card" data-testid="image-stage-control-contract" data-qc-prep-item="${escapeHtml(contract.qc_prep_item || 4)}">
       <div class="review-group-header">
         <div>
-          <p class="eyebrow">QC-prep #4 stage controls</p>
+          <p class="eyebrow">QC 준비 #4 단계 제어</p>
           <h3>Checkpoint, resume, cancel, retry</h3>
           <p>이미지 처리 단계가 어디까지 갔는지, 재개/취소/재시도 근거가 남았는지 확인합니다.</p>
         </div>
@@ -3381,7 +3392,7 @@ function renderCaseDbPanel(payload) {
   const defaultCaseId = selectedRunId ? `run-${selectedRunId}` : "CASE-001";
   return `
     <section class="guidance-card case-db-panel">
-      <p class="eyebrow">Case DB</p>
+      <p class="eyebrow">케이스 DB</p>
       <h3>검색 결과를 검토 기록으로 고정</h3>
       <p>JSON을 따로 가져오지 않아도 현재 실행 결과를 Case DB로 준비하고, 키워드 검색에서 선별 상태까지 이어갑니다.</p>
       <form id="caseDbImportForm" class="search-form">
@@ -3492,7 +3503,7 @@ function renderWorkflowGuide(payload) {
   return `
     <section class="guidance-card">
       <div>
-        <p class="eyebrow">recommended next steps</p>
+        <p class="eyebrow">추천 다음 단계</p>
         <h3>Search, inspect, then review evidence</h3>
       </div>
       <div class="step-list">
@@ -3529,7 +3540,7 @@ function renderIndicators(payload) {
     ${renderCrossDeviceIocShell()}
     <section class="guidance-card">
       <div>
-        <p class="eyebrow">ioc review</p>
+        <p class="eyebrow">IOC 검토</p>
         <h3>URLs, domains, IPs, and hashes found across the run</h3>
       </div>
       <p>이 목록은 피벗 단서입니다. 매칭 규칙과 위험 플래그는 최종 귀속 판단이 아니므로, 보고 전 원본 행을 반드시 확인하세요.</p>
@@ -4541,7 +4552,7 @@ function renderFileTriageSummary(payload) {
     <section class="file-triage-summary" data-testid="file-triage-summary">
       <div class="processing-summary-head">
         <div>
-          <p class="eyebrow">file triage</p>
+          <p class="eyebrow">파일 선별</p>
           <h3>Known-good suppression and extension spoofing</h3>
           <p class="help-text">정상 파일 숨김 여부와 확장자 위장 의심 파일을 여기서 바로 확인합니다.</p>
         </div>
@@ -5012,7 +5023,7 @@ function renderSearchFacets(payload, rows) {
   return `
     <section class="search-facet-panel" aria-label="Search result facets">
       <div>
-        <p class="eyebrow">review facets</p>
+        <p class="eyebrow">리뷰 필터</p>
         <h4>현재 결과를 바로 좁혀보기</h4>
         <p>Source나 artifact kind를 눌러 같은 검색 결과 안에서 빠르게 필터링합니다. 원본 검토 흐름은 유지됩니다.</p>
       </div>
@@ -5115,7 +5126,7 @@ function renderSearchAnalysis(analysis) {
   return `
     <section class="analysis-grid" aria-label="Search analysis pivots">
       <article class="analysis-card">
-        <p class="eyebrow">clusters</p>
+        <p class="eyebrow">클러스터</p>
         <h3>Review by repeated patterns</h3>
         ${clusters.length ? clusters.slice(0, 5).map((cluster) => `
           <button class="analysis-chip" type="button" data-filter="${escapeHtml(String(cluster.value || ""))}">
@@ -5125,7 +5136,7 @@ function renderSearchAnalysis(analysis) {
         `).join("") : '<p class="help-text">No repeated clusters yet.</p>'}
       </article>
       <article class="analysis-card">
-        <p class="eyebrow">entities</p>
+        <p class="eyebrow">엔터티</p>
         <h3>Pivot people, accounts, URLs</h3>
         ${entities.length ? entities.slice(0, 8).map((entity) => `
           <button class="entity-pill" type="button" data-filter="${escapeHtml(entity.value || "")}">
@@ -5134,7 +5145,7 @@ function renderSearchAnalysis(analysis) {
         `).join("") : '<p class="help-text">No entities extracted from current hits.</p>'}
       </article>
       <article class="analysis-card">
-        <p class="eyebrow">workbook</p>
+        <p class="eyebrow">워크북</p>
         <h3>Draft hypotheses</h3>
         ${hypotheses.length ? hypotheses.slice(0, 4).map((hypothesis) => `
           <details class="hypothesis-card">
@@ -5149,7 +5160,7 @@ function renderSearchAnalysis(analysis) {
         </p>
       </article>
       <article class="analysis-card">
-        <p class="eyebrow">dedupe</p>
+        <p class="eyebrow">중복 제거</p>
         <h3>Collapse repeated hits</h3>
         <div class="mini-stat-row">
           <span>${escapeHtml(dedupProfile.duplicate_group_count || 0)} groups</span>
@@ -5169,7 +5180,7 @@ function renderSearchAnalysis(analysis) {
         </p>
       </article>
       <article class="analysis-card">
-        <p class="eyebrow">graph / timeline</p>
+        <p class="eyebrow">그래프 / 시간축</p>
         <h3>Relationship scale</h3>
         <div class="mini-stat-row">
           <span>${escapeHtml(graphSummary.node_count || 0)} nodes</span>
@@ -5271,7 +5282,7 @@ function renderKnownGoodSearchSuppression(payload) {
   return `
     <section class="search-verification-card compact known-good-search-suppression" data-testid="known-good-search-suppression">
       <div>
-        <p class="eyebrow">known-good suppression</p>
+        <p class="eyebrow">known-good 제외</p>
         <h3>${profile.hide_known_good ? `${formatNumber(suppressed)} hidden` : `${formatNumber(known)} reviewable`} known-good / NSRL hit(s)</h3>
         <p>${escapeHtml(profile.reportability_note || "Known-good hits are triage noise controls, not evidence deletion.")}</p>
       </div>
@@ -5744,7 +5755,7 @@ function renderSqlitePreview(sqlite) {
         <article class="viewer-panel sqlite-table-card">
           <div class="viewer-header compact">
             <div>
-              <p class="eyebrow">sqlite table</p>
+              <p class="eyebrow">SQLite 테이블</p>
               <h3>${escapeHtml(table.name)}</h3>
             </div>
             <span class="status-pill">${escapeHtml(table.row_count ?? "unknown")} rows</span>
@@ -5798,7 +5809,7 @@ function renderSqliteSidecarState(profile) {
     <article class="sqlite-sidecar-card ${requiresReview ? "warning" : "ok"}" data-testid="sqlite-sidecar-state">
       <div class="viewer-header compact">
         <div>
-          <p class="eyebrow">sqlite sidecar state</p>
+          <p class="eyebrow">SQLite 사이드카 상태</p>
           <h3>WAL / SHM / rollback journal review</h3>
         </div>
         <span class="status-pill ${requiresReview ? "warning" : "ok"}">${requiresReview ? "review required" : "none detected"}</span>
@@ -6545,7 +6556,7 @@ function renderCurrentFileSearchProfile(payload) {
   return `
     <section class="current-file-search-profile ${controls.truncated ? "warning" : ""}" data-testid="current-file-search-profile" data-current-file-search-contract="${escapeHtml(CURRENT_FILE_SEARCH_CONTRACT.profile_version)}">
       <div>
-        <p class="eyebrow">current-file search</p>
+        <p class="eyebrow">현재 파일 검색</p>
         <strong>${escapeHtml(profile.searchable ? "Searchable source" : "Search limited or blocked")}</strong>
         <span>${escapeHtml(profile.reportability_decision?.allowed_use || "verification pivot")}</span>
       </div>
@@ -6780,7 +6791,7 @@ function renderSelectedRowInspector(payload) {
   const chips = Array.from(new Set((payload.chips || []).filter(Boolean))).slice(0, 8);
   return `
     <section class="selected-row-inspector" data-testid="selected-row-inspector">
-      <p class="eyebrow">selected evidence</p>
+      <p class="eyebrow">선택된 증거</p>
       <strong>${escapeHtml(payload.title || "선택된 결과")}</strong>
       <span>${escapeHtml(payload.preview || "행을 선택했습니다. 아래 원본 경로와 리뷰 동작을 확인하세요.")}</span>
       <dl>
@@ -6902,7 +6913,7 @@ function renderReviewBoard(payload) {
     return `
       ${renderReviewStateDashboard([], {})}
       <section class="guidance-card">
-        <p class="eyebrow">review board</p>
+        <p class="eyebrow">리뷰 보드</p>
         <h3>No reviewed evidence yet</h3>
         <p>검색 결과를 원본 뷰어에서 확인한 뒤 선별 상태를 저장하면 이 보드에 누적됩니다.</p>
         <div class="guidance-actions">
@@ -6917,7 +6928,7 @@ function renderReviewBoard(payload) {
     return `
       ${renderReviewStateDashboard([], payload.case.summary || {})}
       <section class="guidance-card">
-        <p class="eyebrow">review board</p>
+        <p class="eyebrow">리뷰 보드</p>
         <h3>No reviewed evidence yet</h3>
         <p>Classify search hits as relevant, needs review, or not relevant to build this board.</p>
         <div class="guidance-actions">
@@ -7078,7 +7089,7 @@ function renderCaseReportPanel(summary, casePayload) {
   return `
     <section class="guidance-card">
       <div>
-        <p class="eyebrow">report drafting</p>
+        <p class="eyebrow">보고서 작성</p>
         <h3>Write a submission-style investigation report</h3>
       </div>
       <p>Creates rapidtriage-case-report.md from case metadata, reviewed evidence, analyst notes, and the submission hash manifest.</p>
@@ -7812,8 +7823,17 @@ function bindCommandPaletteActions() {
   }
   const input = palette.querySelector("#commandPaletteInput");
   input?.addEventListener("input", () => filterCommandPalette(input.value));
-  input?.addEventListener("keydown", async (event) => {
-    if (event.key === "Enter") {
+  palette.addEventListener("keydown", async (event) => {
+    if (event.key === "Tab") {
+      trapCommandPaletteTab(event);
+      return;
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      moveCommandPaletteSelection(event.key === "ArrowDown" ? 1 : -1);
+      return;
+    }
+    if (event.key === "Enter" && event.target === palette.querySelector("#commandPaletteInput")) {
       event.preventDefault();
       const command = firstVisibleCommandPaletteButton();
       if (command) await executeCommandPaletteButton(command);
@@ -7823,6 +7843,16 @@ function bindCommandPaletteActions() {
       closeCommandPalette();
     }
   });
+  for (const command of palette.querySelectorAll(".command-palette-command")) {
+    command.addEventListener("focus", () => {
+      for (const other of palette.querySelectorAll(".command-palette-command")) {
+        other.classList.remove("active");
+        other.setAttribute("aria-selected", "false");
+      }
+      command.classList.add("active");
+      command.setAttribute("aria-selected", "true");
+    });
+  }
   for (const command of palette.querySelectorAll(".command-palette-command")) {
     command.addEventListener("click", async () => executeCommandPaletteButton(command));
   }
@@ -7837,10 +7867,13 @@ function commandPaletteIsOpen() {
   return Boolean(palette && !palette.hidden);
 }
 
+let commandPaletteReturnFocus = null;
+
 function openCommandPalette(prefill = "") {
   if (!selectedRunId) return false;
   const palette = commandPaletteElement();
   if (!palette) return false;
+  commandPaletteReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   palette.hidden = false;
   palette.classList.add("open");
   palette.setAttribute("aria-hidden", "false");
@@ -7862,6 +7895,49 @@ function closeCommandPalette() {
   palette.classList.remove("open");
   palette.setAttribute("aria-hidden", "true");
   palette.hidden = true;
+  if (commandPaletteReturnFocus?.isConnected) commandPaletteReturnFocus.focus();
+  commandPaletteReturnFocus = null;
+}
+
+function commandPaletteFocusableElements() {
+  const palette = commandPaletteElement();
+  if (!palette) return [];
+  return Array.from(
+    palette.querySelectorAll("#commandPaletteInput, .command-palette-command, button[data-command-palette-close]")
+  ).filter((element) => !element.hidden && !element.disabled);
+}
+
+function trapCommandPaletteTab(event) {
+  const focusables = commandPaletteFocusableElements();
+  if (!focusables.length) return;
+  const first = focusables[0];
+  const last = focusables[focusables.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
+function moveCommandPaletteSelection(direction) {
+  const commands = Array.from(
+    commandPaletteElement()?.querySelectorAll(".command-palette-command") || []
+  ).filter((button) => !button.hidden);
+  if (!commands.length) return;
+  const currentIndex = commands.indexOf(document.activeElement);
+  const nextIndex = currentIndex === -1
+    ? (direction > 0 ? 0 : commands.length - 1)
+    : (currentIndex + direction + commands.length) % commands.length;
+  commands.forEach((button) => {
+    button.classList.remove("active");
+    button.setAttribute("aria-selected", "false");
+  });
+  const next = commands[nextIndex];
+  next.classList.add("active");
+  next.setAttribute("aria-selected", "true");
+  next.focus();
 }
 
 function filterCommandPalette(query) {
@@ -7874,9 +7950,12 @@ function filterCommandPalette(query) {
     const visible = !terms.length || terms.every((term) => haystack.includes(term));
     command.hidden = !visible || visibleCount >= COMMAND_PALETTE_RESULT_LIMIT;
     command.classList.remove("active");
+    command.setAttribute("aria-selected", "false");
     if (!command.hidden) visibleCount += 1;
   }
-  firstVisibleCommandPaletteButton()?.classList.add("active");
+  const firstVisible = firstVisibleCommandPaletteButton();
+  firstVisible?.classList.add("active");
+  firstVisible?.setAttribute("aria-selected", "true");
   palette.classList.toggle("empty", visibleCount === 0);
 }
 
@@ -8186,7 +8265,7 @@ function renderCaseDbSavedSearches(savedSearches) {
   return `
     <div class="review-group-header">
       <div>
-        <p class="eyebrow">saved searches</p>
+        <p class="eyebrow">저장된 검색</p>
         <h3>Repeat useful searches without retyping</h3>
       </div>
       <span class="status-pill">${savedSearches.length}</span>
@@ -8576,9 +8655,11 @@ function bindReviewSelectionActions() {
 function bindKeyboardShortcuts() {
   document.addEventListener("keydown", async (event) => {
     const commandShortcut = event.metaKey || event.ctrlKey;
-    if (commandPaletteIsOpen() && event.key === "Escape") {
-      event.preventDefault();
-      closeCommandPalette();
+    if (commandPaletteIsOpen()) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeCommandPalette();
+      }
       return;
     }
     if (isTypingTarget(event.target) && !commandShortcut) return;
@@ -8603,7 +8684,7 @@ function bindKeyboardShortcuts() {
       return;
     }
     if (!event.metaKey && !event.ctrlKey && !event.altKey && event.key === " ") {
-      if (await previewFirstVisibleRow()) event.preventDefault();
+      if (!isInteractiveTarget(event.target) && await previewFirstVisibleRow()) event.preventDefault();
       return;
     }
     if (event.altKey && !event.metaKey && !event.ctrlKey && (event.key === "[" || event.key === "]")) {
@@ -8652,10 +8733,27 @@ function isTypingTarget(target) {
   return tag === "input" || tag === "textarea" || tag === "select" || target.isContentEditable;
 }
 
+function isInteractiveTarget(target) {
+  if (!(target instanceof HTMLElement)) return false;
+  return Boolean(target.closest("button, a[href], summary, [role='button'], [role='option'], [role='tab'], [role='link'], [role='switch'], [role='checkbox'], [type='checkbox'], [type='radio']"));
+}
+
 function toggleShortcutHelp(forceOpen = null) {
-  const help = detailPanel.querySelector("#shortcutHelp");
-  if (!help) return;
-  help.open = forceOpen === null ? !help.open : Boolean(forceOpen);
+  const help = document.querySelector("#shortcutHelp");
+  const mount = document.querySelector("#shortcutHelpMount");
+  const button = document.querySelector("#shortcutHelpButton");
+  if (!help || !mount) return;
+  const opening = forceOpen === null ? !help.open : Boolean(forceOpen);
+  help.open = opening;
+  mount.hidden = !opening;
+  button?.setAttribute("aria-expanded", opening ? "true" : "false");
+}
+
+function mountShortcutHelp() {
+  const mount = document.querySelector("#shortcutHelpMount");
+  if (!mount) return;
+  mount.innerHTML = renderShortcutHelp();
+  document.querySelector("#shortcutHelpButton")?.addEventListener("click", () => toggleShortcutHelp());
 }
 
 async function openCaseSearch() {
@@ -8751,20 +8849,10 @@ function refreshReviewSelectionUi() {
   }
 }
 
-function syncMissionStrip(tab) {
-  const lane = workflowLaneForTab(tab).id;
-  const missionStep = { intake: "intake", triage: "triage", review: "deliver", deliver: "report" }[lane] || "review";
-  for (const item of document.querySelectorAll(".mission-strip [data-mission-step]")) {
-    const isCurrent = item.dataset.missionStep === missionStep;
-    item.classList.toggle("active", isCurrent);
-    item.setAttribute("aria-current", isCurrent ? "step" : "false");
-  }
-}
-
 export async function switchTab(tab, options = {}) {
   if (!tab) return;
   activeTab = tab;
-  syncMissionStrip(tab);
+  updateMissionStrip();
   if (tab !== "artifacts") activeArtifactFilter = "";
   if (options.stageId) {
     activeStageId = options.stageId;
@@ -8783,17 +8871,19 @@ export async function switchTab(tab, options = {}) {
     restoreWorkbenchControls();
     persistWorkbenchSession();
     await renderActiveTab();
+    updateMissionStrip();
     return;
   }
   for (const item of detailPanel.querySelectorAll(".tab-button")) {
-    const isActive = item.dataset.tab === tab;
-    item.classList.toggle("active", isActive);
-    item.setAttribute("aria-current", isActive ? "page" : "false");
+    const selected = item.dataset.tab === tab;
+    item.classList.toggle("active", selected);
+    item.setAttribute("aria-selected", selected ? "true" : "false");
   }
   await renderActiveTab();
   refreshSourceNavigatorState();
   updateSideStagePanel();
   persistWorkbenchSession();
+  updateMissionStrip();
 }
 
 function viewGroupById(groupId) {
@@ -8806,6 +8896,52 @@ function tabsForGroup(groupId) {
 
 export function groupForTab(tab) {
   return VIEW_GROUPS.find((group) => group.tabs.includes(tab))?.id || "triage";
+}
+
+// Mission strip: reflect the current stage and let each step navigate.
+const MISSION_STEP_FOR_GROUP = {
+  intake: 0,
+  triage: 1,
+  artifact: 1,
+  timeline: 1,
+  documents: 2,
+  review: 3,
+  deliver: 4,
+};
+
+const MISSION_STEP_TARGET = [
+  { group: "intake", tab: "summary" },
+  { group: "triage", tab: "search" },
+  { group: "documents", tab: "docs" },
+  { group: "review", tab: "review" },
+  { group: "deliver", tab: "report" },
+];
+
+function updateMissionStrip() {
+  const strip = document.querySelector(".mission-strip");
+  if (!strip) return;
+  const step = selectedRunId ? (MISSION_STEP_FOR_GROUP[activeViewGroup] ?? 1) : 0;
+  for (const button of strip.querySelectorAll("[data-mission-step]")) {
+    const active = Number(button.dataset.missionStep) === step;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-current", active ? "step" : "false");
+  }
+}
+
+function bindMissionStrip() {
+  for (const button of document.querySelectorAll(".mission-strip [data-mission-step]")) {
+    button.addEventListener("click", async () => {
+      const step = Number(button.dataset.missionStep);
+      if (step === 0 && !selectedRunId) {
+        document.querySelector("#rootInput")?.scrollIntoView({ block: "center", behavior: "smooth" });
+        document.querySelector("#rootInput")?.focus();
+        return;
+      }
+      if (!selectedRunId) return;
+      const target = MISSION_STEP_TARGET[step];
+      if (target) await switchTab(target.tab, { syncStage: true });
+    });
+  }
 }
 
 function pagedUrl(tab) {
@@ -8946,7 +9082,7 @@ importForm.addEventListener("submit", async (event) => {
 export async function runSampleCase() {
   detailPanel.innerHTML = `
     <section class="empty-state-card">
-      <p class="eyebrow">sample case</p>
+      <p class="eyebrow">샘플 케이스</p>
       <h3>Creating a safe practice case</h3>
       <p>샘플 증거를 만들고 read-only triage를 실행하는 중입니다. 보통 몇 초 안에 완료됩니다.</p>
     </section>
@@ -9006,7 +9142,7 @@ function renderCrashReportsPanel(payload) {
     <section class="guidance-card crash-dashboard" data-testid="crash-dashboard">
       <div class="review-group-header">
         <div>
-          <p class="eyebrow">local-only crash reporting</p>
+          <p class="eyebrow">로컬 전용 크래시 리포트</p>
           <h3>Crash export dashboard</h3>
           <p>자동 업로드 없이 로컬 JSON만 읽습니다. 필요한 항목은 ZIP export로 묶어 운영자가 직접 전달합니다.</p>
         </div>
@@ -9052,6 +9188,7 @@ export function renderEvidenceCheckStatus(result) {
         <span>${escapeHtml(result.adapter || "adapter")} · ${escapeHtml(support)} · ${escapeHtml(action)}</span>
       </div>
       <p>${escapeHtml(result.message || "")}${escapeHtml(missing)}</p>
+      ${renderE01SegmentSetNotice(result.segment_set_profile || null)}
       ${renderE01IngestWorkflow(result.ingest_workflow || null)}
       ${renderEvidencePreflightSummary(result.preflight_summary || null)}
       ${renderEvidenceFailureGuidance(result.failure_guidance || null)}
@@ -9060,9 +9197,24 @@ export function renderEvidenceCheckStatus(result) {
   `;
 }
 
+function renderE01SegmentSetNotice(profile) {
+  if (!profile || !profile.profile_version) return "";
+  const warnings = profile.warnings || [];
+  const count = formatNumber(profile.segment_count || 0);
+  const firstOk = profile.selected_is_first_segment;
+  return `
+    <section class="e01-segment-notice ${warnings.length ? "warning" : "ok"}" aria-live="polite">
+      <strong>세그먼트 ${count}개${firstOk ? "" : " · 첫 세그먼트가 아님"}</strong>
+      ${warnings.length
+        ? `<ul>${warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")}</ul>`
+        : `<span class="help-text">분할 순서가 연속적으로 확인됐습니다.</span>`}
+    </section>
+  `;
+}
+
 function renderE01IngestWorkflow(workflow) {
   if (!workflow) return "";
-  const e01WorkflowLabel = "Starting E01 workflow";
+  const e01WorkflowLabel = "E01 처리 시작";
   const stages = workflow.stages || [];
   return `
     <section class="e01-workflow-panel">
@@ -9107,7 +9259,7 @@ function renderVscWorkflowHandoff(handoff) {
     <section class="vsc-handoff-card" data-testid="vsc-workflow-handoff" data-qc-prep-item="${escapeHtml(handoff.qc_prep_item || 3)}">
       <div class="review-group-header">
         <div>
-          <p class="eyebrow">QC-prep #3 VSC handoff</p>
+          <p class="eyebrow">QC 준비 #3 VSC 인계</p>
           <strong>Shadow copy discovery → compare → extract</strong>
           <span>${escapeHtml(handoff.goal || "")}</span>
         </div>
@@ -9148,7 +9300,7 @@ function renderE01PartitionBrowser(browser) {
     <section class="e01-partition-browser" data-testid="e01-partition-browser" data-qc-prep-item="${escapeHtml(browser.qc_prep_item || 2)}">
       <div class="review-group-header">
         <div>
-          <p class="eyebrow">QC-prep #2 partition browser</p>
+          <p class="eyebrow">QC 준비 #2 파티션 브라우저</p>
           <strong>E01 partition choice</strong>
           <span>${escapeHtml(browser.goal || "Review mmls partitions before extraction.")}</span>
         </div>
@@ -9209,7 +9361,7 @@ function renderE01HandoffContract(contract) {
   return `
     <section class="e01-handoff-card" data-testid="e01-end-to-end-handoff" data-qc-prep-item="${escapeHtml(contract.qc_prep_item || 1)}">
       <div>
-        <p class="eyebrow">QC-prep #1 handoff</p>
+        <p class="eyebrow">QC 준비 #1 인계</p>
         <strong>Evidence → run → search → review → report</strong>
         <span>${escapeHtml(contract.goal || "")}</span>
       </div>
@@ -9334,6 +9486,9 @@ restoreWorkbenchSession();
   if (brandRow) brandRow.appendChild(themePicker);
 }
 bindRunFormPersistence();
+bindPathPickerButtons();
+bindMissionStrip();
+mountShortcutHelp();
 refreshRunPlanPreview();
 bindKeyboardShortcuts();
 checkHealth();

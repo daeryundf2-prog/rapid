@@ -140,6 +140,23 @@ jobs:
         working-directory: frontend
         run: npm run e2e
 
+  contract-drift:
+    name: Vendored contract drift check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Check contract drift
+        # Gate: contracts/ vendors lazy-contracts; fails when file hashes
+        # drift from the sha256 pinned in contracts/PIN.json.
+        run: python scripts/check-contract-drift.py
+
   rust-worker:
     name: Rust worker checks
     runs-on: ubuntu-latest

@@ -3,7 +3,7 @@
 // injected once via initDetailPanel.
 import { devModeEnabled, escapeHtml, metric, tabLabel } from "./app_utils.js";
 import { workbenchState } from "./app_store.js";
-import { FEATURE_PLACEMENT_CONTRACT } from "./app_workbench_config.js";
+import { FEATURE_PLACEMENT_CONTRACT, FORENSIC_WORKFLOW_LANES } from "./app_workbench_config.js";
 import { renderCaseHero } from "./app_case_header.js";
 
 let groupForTab, renderAdaptiveViewerHeader, renderArtifactTreeRows,
@@ -25,10 +25,7 @@ export function initDetailPanel(deps) {
 }
 
 export function workflowLanes() {
-  if (typeof FORENSIC_WORKFLOW_LANES !== "undefined" && Array.isArray(FORENSIC_WORKFLOW_LANES)) {
-    return FORENSIC_WORKFLOW_LANES;
-  }
-  return [];
+  return Array.isArray(FORENSIC_WORKFLOW_LANES) ? FORENSIC_WORKFLOW_LANES : [];
 }
 
 export function workflowLaneForTab(tab) {
@@ -67,7 +64,8 @@ export function renderWorkbenchLayoutFrame(run, tab) {
           <span>대량 결과는 cursor page와 가상 행으로 안전하게 나눠 봅니다.</span>
         </div>
         ${renderAdaptiveViewerHeader(run, tab)}
-        <div id="tabBody" class="tab-body" data-testid="tab-body"></div>
+        <p id="tabStatus" class="sr-only" role="status" aria-live="polite"></p>
+        <div id="tabBody" class="tab-body" role="tabpanel" data-testid="tab-body"></div>
       </main>
       ${renderIntelligencePanel(run, tab, reportCandidates)}
     </section>
@@ -118,8 +116,8 @@ export function renderDetailShell(run, tab) {
     <section class="workbench-command-deck" aria-label="Case command deck">
       ${renderCaseHero(run)}
     </section>
-    <div class="tab-row redundant-tab-row" aria-label="보조 탭 전환">
-      ${tabs.map((item) => `<button class="tab-button ${item === tab ? "active" : ""}" data-tab="${item}" data-testid="tab-${escapeHtml(item)}" type="button" aria-current="${item === tab ? "page" : "false"}">${escapeHtml(tabLabel(item))}</button>`).join("")}
+    <div class="tab-row redundant-tab-row" role="tablist" aria-label="보조 탭 전환">
+      ${tabs.map((item) => `<button class="tab-button ${item === tab ? "active" : ""}" role="tab" aria-selected="${item === tab ? "true" : "false"}" aria-controls="tabBody" data-tab="${escapeHtml(item)}" data-testid="tab-${escapeHtml(item)}" type="button">${escapeHtml(tabLabel(item))}</button>`).join("")}
     </div>
     ${renderWorkbenchLayoutFrame(run, tab)}
     <div class="dev-mode-strip" data-testid="dev-mode-strip">
