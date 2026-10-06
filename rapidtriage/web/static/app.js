@@ -91,6 +91,7 @@ import {
   filteredPagination,
   flattenArtifactRows,
   setActiveArtifactType,
+  loadMoreArtifactRows,
   queueArtifactsNextPage,
   renderArtifactRow,
   renderArtifactValidationSummary,
@@ -7933,6 +7934,16 @@ function bindPanelActions() {
       setActiveArtifactType(chip.dataset.artifactType || "");
       await renderActiveTab();
       persistWorkbenchSession();
+    });
+  }
+  for (const button of detailPanel.querySelectorAll("[data-artifact-load-more]")) {
+    if (button.dataset.artifactLoadMoreBound) continue;
+    button.dataset.artifactLoadMoreBound = "1";
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      button.textContent = "불러오는 중...";
+      await loadMoreArtifactRows();
+      await renderActiveTab();
     });
   }
   for (const button of detailPanel.querySelectorAll("[data-doc-lane-filter]")) {

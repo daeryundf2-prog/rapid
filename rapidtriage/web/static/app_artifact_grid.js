@@ -22,6 +22,30 @@ export function initArtifactGrid(deps) {
 }
 
 let artifactsPagePagination = null;
+let extraArtifactRows = [];
+let extraArtifactRowsRunId = null;
+let extraNextOffset; // undefined = first page only, null = exhausted
+
+export async function loadMoreArtifactRows() {
+  if (artifactsPageLoading || artifactsPagePagination?.next_offset == null) return 0;
+  const selectedRunId = getSelectedRunId();
+  artifactsPageLoading = true;
+  const nextOffset = artifactsPagePagination.next_offset;
+  try {
+    const payload = await api(`/api/runs/${encodeURIComponent(selectedRunId)}/artifacts?offset=${nextOffset}&limit=${PAGE_SIZE}`);
+    const rows = flattenArtifactRows(payload.artifacts || {});
+    extraArtifactRows = extraArtifactRows.concat(rows);
+    extraNextOffset = artifactGroupNextOffset(payload.artifacts || {});
+    artifactsPagePagination = { ...artifactsPagePagination, next_offset: extraNextOffset };
+    return rows.length;
+  } catch {
+    extraNextOffset = null;
+    artifactsPagePagination = { ...artifactsPagePagination, next_offset: null };
+    return 0;
+  } finally {
+    artifactsPageLoading = false;
+  }
+}
 let artifactsPageLoading = false;
 let activeArtifactType = "";
 
@@ -184,17 +208,33 @@ function fileLabel(path) {
   return String(path || "").split(/[\\/]/).filter(Boolean).pop() || String(path || "");
 }
 
-function renderTypeChipBar(rows) {
+function artifactTypeCounts(rows, groups = {}) {
   const counts = new Map();
+  const summarized = new Set();
+  for (const [kind, payload] of Object.entries(groups)) {
+    const typeCounts = payload?.summary?.artifact_type_counts;
+    if (typeCounts && typeof typeCounts === "object") {
+      summarized.add(kind);
+      for (const [type, count] of Object.entries(typeCounts)) {
+        counts.set(type, (counts.get(type) || 0) + Number(count || 0));
+      }
+    }
+  }
   for (const { kind, artifact } of rows) {
+    if (summarized.has(kind)) continue;
     const type = artifactRowType(kind, artifact);
     counts.set(type, (counts.get(type) || 0) + 1);
   }
+  return counts;
+}
+
+function renderTypeChipBar(rows, groups = {}, total = 0) {
+  const counts = artifactTypeCounts(rows, groups);
   const types = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   if (!types.length) return "";
   return `
     <div class="artifact-type-chip-bar" role="group" aria-label="아티팩트 유형별 보기" data-testid="artifact-type-chip-bar">
-      <button type="button" class="artifact-type-chip ${activeArtifactType ? "" : "active"}" data-artifact-type="">전체 ${formatNumber(rows.length)}</button>
+      <button type="button" class="artifact-type-chip ${activeArtifactType ? "" : "active"}" data-artifact-type="">전체 ${formatNumber(total || rows.length)}</button>
       ${types.map(([type, count]) => `
         <button type="button" class="artifact-type-chip ${activeArtifactType === type ? "active" : ""}" data-artifact-type="${escapeHtml(type)}">${escapeHtml(type)} <b>${formatNumber(count)}</b></button>
       `).join("")}
@@ -393,9 +433,11 @@ export function queueArtifactsNextPage(table) {
     .then((payload) => {
       const rows = flattenArtifactRows(payload.artifacts || {});
       table.appendItems(rows);
+      extraArtifactRows = extraArtifactRows.concat(rows);
+      extraNextOffset = artifactGroupNextOffset(payload.artifacts || {});
       artifactsPagePagination = {
         ...artifactsPagePagination,
-        next_offset: artifactGroupNextOffset(payload.artifacts || {}),
+        next_offset: extraNextOffset,
         returned: existingCount + rows.length,
       };
       const notice = detailPanel.querySelector("[data-artifact-virtual-notice]");
@@ -404,6 +446,7 @@ export function queueArtifactsNextPage(table) {
       }
     })
     .catch(() => {
+      extraNextOffset = null;
       artifactsPagePagination = { ...artifactsPagePagination, next_offset: null };
     })
     .finally(() => {
@@ -414,33 +457,44 @@ export function queueArtifactsNextPage(table) {
 export function renderArtifacts(payload) {
   const activeArtifactFilter = getActiveArtifactFilter();
   const groups = payload.artifacts || {};
-  const rows = flattenArtifactRows(groups);
+  const runId = getSelectedRunId();
+  if (runId !== extraArtifactRowsRunId) {
+    extraArtifactRows = [];
+    extraArtifactRowsRunId = runId;
+    extraNextOffset = undefined;
+  }
+  const rows = flattenArtifactRows(groups).concat(extraArtifactRows);
   const scopedRows = activeArtifactFilter
     ? rows.filter(({ kind, artifact }) => artifactSourceCategory(kind, artifact) === activeArtifactFilter)
     : rows;
-  const typeChipBar = renderTypeChipBar(scopedRows);
+  const pagination = activeArtifactFilter
+    ? filteredPagination(scopedRows.length, "artifacts")
+    : artifactPaginationSummary(groups, rows.length);
+  artifactsPagePagination = activeArtifactFilter
+    ? { next_offset: null }
+    : { next_offset: extraNextOffset !== undefined ? extraNextOffset : artifactGroupNextOffset(groups) };
+  artifactsPageLoading = false;
+  const typeChipBar = renderTypeChipBar(scopedRows, activeArtifactFilter ? {} : groups, pagination?.total);
   if (activeArtifactType) {
     const typeRows = scopedRows.filter(({ kind, artifact }) => artifactRowType(kind, artifact) === activeArtifactType);
-    if (!typeRows.length) return `${typeChipBar}<p class="empty-state">이 유형의 행이 없습니다.</p>`;
+    const typeCounts = artifactTypeCounts(scopedRows, activeArtifactFilter ? {} : groups);
+    const typeTotal = typeCounts.get(activeArtifactType) || typeRows.length;
+    if (!typeRows.length) {
+      return `${typeChipBar}<p class="empty-state">이 유형의 행이 없습니다.${artifactsPagePagination?.next_offset != null ? ' <button type="button" class="mini-link" data-artifact-load-more>더 불러오기</button>' : ""}</p>`;
+    }
+    const moreButton = artifactsPagePagination?.next_offset != null && typeRows.length < typeTotal
+      ? ` <button type="button" class="mini-link" data-artifact-load-more>다음 페이지 불러오기 (전체 ${formatNumber(typeTotal)}건 중 ${formatNumber(typeRows.length)}행 로드됨)</button>`
+      : "";
     return `
       ${typeChipBar}
       <div class="pagination-bar">
-        <span>${escapeHtml(activeArtifactType)} · ${formatNumber(typeRows.length)}행 — 유형별 데이터 표</span>
+        <span>${escapeHtml(activeArtifactType)} · ${formatNumber(typeRows.length)}행 / 전체 ${formatNumber(typeTotal)}건 — 유형별 데이터 표</span>${moreButton}
       </div>
       ${renderTypeDataGrid(typeRows, activeArtifactType)}
     `;
   }
   const displayRows = scopedRows;
-  const pagination = activeArtifactFilter
-    ? filteredPagination(displayRows.length, "artifacts")
-    : artifactPaginationSummary(groups, rows.length);
-  if (!displayRows.length) return '<p class="empty-state">No artifact rows.</p>';
-  // Track pagination for the infinite-scroll fetcher: only when the artifact
-  // filter is off do backend pages map 1:1 onto the virtual row space.
-  artifactsPagePagination = activeArtifactFilter
-    ? { next_offset: null }
-    : { next_offset: artifactGroupNextOffset(groups) };
-  artifactsPageLoading = false;
+  if (!displayRows.length) return `${typeChipBar}<p class="empty-state">No artifact rows.</p>`;
   queueVirtualTable({
     key: "artifacts",
     colCount: 5,
