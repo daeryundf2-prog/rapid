@@ -2371,6 +2371,8 @@ def _is_mmls_partition_row(slot_tag: str, description: str) -> bool:
 def mmls_first_filesystem(text: str) -> int | None:
     best_start = None
     best_size = -1
+    fallback_start = None
+    fallback_size = -1
     for line in text.splitlines():
         parsed = _parse_mmls_row(line)
         if parsed is None:
@@ -2381,6 +2383,9 @@ def mmls_first_filesystem(text: str) -> int | None:
         lowered = description.lower()
         if "swap" in lowered:
             continue
+        if count > fallback_size:
+            fallback_start = start
+            fallback_size = count
         if any(
             token in lowered
             for token in ("fat", "exfat", "ntfs", "basic data", "efi system", "msdos", "ext2", "ext3", "ext4", "linux", "xfs")
@@ -2388,7 +2393,11 @@ def mmls_first_filesystem(text: str) -> int | None:
             if count > best_size:
                 best_start = start
                 best_size = count
-    return best_start
+    # mmls description text can be mojibake (e.g. "?????" on some Windows TSK
+    # builds) — when no filesystem token matched, fall back to the largest
+    # data partition; downstream fsstat/tsk_recover will fail loudly if the
+    # pick is not actually a filesystem.
+    return best_start if best_start is not None else fallback_start
 
 
 def select_mmls_filesystem(text: str, *, preferred_start_sector: int | None = None) -> int | None:

@@ -420,7 +420,10 @@ Units are in 512-byte sectors
         self.assertFalse(rows[1]["supported_filesystem_hint"])
         self.assertTrue(rows[1]["manual_override_allowed"])
         self.assertEqual(select_mmls_filesystem(text, preferred_start_sector=567296), 567296)
-        self.assertIsNone(mmls_first_filesystem(text))
+        # When no description token matches, fall back to the largest data
+        # partition instead of refusing; downstream fsstat/tsk_recover will
+        # fail loudly if the pick is wrong.
+        self.assertEqual(mmls_first_filesystem(text), 567296)
 
     def test_extract_e01_reports_missing_external_tools(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
