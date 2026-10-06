@@ -560,3 +560,65 @@ body.has-runs .workbench-intel-drawer > summary strong {
   padding: 0 3px;
   font-weight: 700;
 }
+
+/* Collapsed gate/viewer drawers keep the top of the review pane compact. */
+.validation-readiness-drawer { display: block; }
+.validation-readiness-drawer > summary,
+.adaptive-viewer-drawer > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  list-style: none;
+}
+.validation-readiness-drawer > summary::-webkit-details-marker,
+.adaptive-viewer-drawer > summary::-webkit-details-marker { display: none; }
+.validation-readiness-drawer > summary span,
+.adaptive-viewer-drawer > summary span { display: grid; gap: 2px; min-width: 0; }
+.validation-readiness-drawer > summary em,
+.adaptive-viewer-drawer > summary em {
+  font-style: normal;
+  font-size: 0.7rem;
+  font-weight: 800;
+  color: #9a3412;
+  letter-spacing: 0.02em;
+}
+.validation-readiness-drawer.status-baseline > summary em { color: #166534; }
+.validation-readiness-drawer > summary b,
+.adaptive-viewer-drawer > summary b {
+  flex: 0 0 auto;
+  font-size: 0.74rem;
+  color: #64748b;
+  white-space: nowrap;
+}
+.validation-readiness-drawer > summary::after,
+.adaptive-viewer-drawer > summary::after {
+  content: "펼치기";
+  flex: 0 0 auto;
+  padding: 4px 9px;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #475569;
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+.validation-readiness-drawer[open] > summary::after,
+.adaptive-viewer-drawer[open] > summary::after { content: "접기"; }
+.validation-readiness-body,
+.adaptive-viewer-body {
+  display: grid;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed #e2e8f0;
+  margin-top: 8px;
+  font-size: 0.82rem;
+  color: var(--rf-ink-2, #334155);
+}
+.case-hero-warning {
+  margin: 4px 0 0;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #b45309;
+}

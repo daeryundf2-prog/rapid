@@ -15,14 +15,24 @@ export function renderCaseHero(run) {
   const counts = runCounts(payload);
   const warningCount = counts.validationIssues;
   const artifactSignals = FORENSIC_ARTIFACT_TAXONOMY.reduce((sum, item) => sum + artifactGroupCount(payload, item.terms), 0);
+  const recoveredCount = (payload.source?.recovered_root_manifest?.files || []).length;
+  const keywordHits = (payload.highlights?.document_hits || []).length;
   const source = run.request.root || payload.output_dir || "Evidence source";
-  const headline = warningCount ? `검증 이슈 ${formatNumber(warningCount)}건 확인 필요` : "검토 가능한 결과가 준비되었습니다";
+  const foundBits = [
+    recoveredCount ? `복구 파일 ${formatNumber(recoveredCount)}개` : "",
+    keywordHits ? `키워드 매치 ${formatNumber(keywordHits)}건` : "",
+    artifactSignals ? `수집 흔적 ${formatNumber(artifactSignals)}건` : "",
+  ].filter(Boolean);
+  const headline = foundBits.length
+    ? foundBits.join(" · ")
+    : (warningCount ? `검증 이슈 ${formatNumber(warningCount)}건 확인 필요` : "검토 가능한 결과가 준비되었습니다");
   return `
     <section class="case-hero review-first-case-strip" aria-label="Case mission control" data-testid="case-hero">
       <div class="case-hero-main">
         <p class="eyebrow">현재 케이스</p>
         <h2>${escapeHtml(headline)}</h2>
         <p class="case-source-line"><span>입력 증거</span><code>${escapeHtml(source)}</code></p>
+        ${warningCount ? `<p class="case-hero-warning">검증 이슈 ${formatNumber(warningCount)}건 — 원본 확인 후 판단하세요.</p>` : ""}
       </div>
       <div class="case-hero-metrics">
         ${caseHeroMetric("문서", counts.docs)}

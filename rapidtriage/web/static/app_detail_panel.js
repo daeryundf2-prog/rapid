@@ -58,11 +58,6 @@ export function renderWorkbenchLayoutFrame(run, tab) {
         ${renderValidationReadinessBanner(run, tab)}
         ${renderSecondaryWorkbenchControls(run, tab)}
         ${renderTableControlBar(tab)}
-        <div class="workbench-region-header">
-          <p class="eyebrow">검토 화면</p>
-          <strong>${escapeHtml(tabLabel(tab))}</strong>
-          <span>대량 결과는 cursor page와 가상 행으로 안전하게 나눠 봅니다.</span>
-        </div>
         ${renderAdaptiveViewerHeader(run, tab)}
         <p id="tabStatus" class="sr-only" role="status" aria-live="polite"></p>
         <div id="tabBody" class="tab-body" role="tabpanel" data-testid="tab-body"></div>

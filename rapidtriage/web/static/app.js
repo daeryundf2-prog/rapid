@@ -955,6 +955,7 @@ function renderForensicViewModeBar(run, tab) {
 }
 
 function renderTableControlBar(tab) {
+  if (tab === "summary") return "";
   return `
     <section class="table-control-bar" aria-label="Large result table controls" data-testid="table-control-bar" data-control-contract="${escapeHtml(TABLE_CONTROL_CONTRACT.profile_version)}">
       <label>
@@ -1276,18 +1277,23 @@ function renderValidationReadinessBanner(run, tab) {
   const status = warningCount ? "needs-validation" : "baseline";
   const label = warningCount ? `${formatNumber(warningCount)}개 검증 이슈` : "검증 이슈 0";
   return `
-    <section class="validation-readiness-banner status-${safeCssToken(status)}" aria-label="검증 및 법정성 주의" data-testid="validation-readiness-banner">
-      <div>
-        <p class="eyebrow">검증 게이트</p>
-        <strong>${escapeHtml(label)} · 원본 확인 후 판단</strong>
-        <span>아티팩트 ${formatNumber(artifactRows)}개, 보고 후보 ${formatNumber(reportCount)}개. parser limitation, source hash, 원본 위치가 없는 항목은 제출 근거로 쓰지 않습니다.</span>
+    <details class="validation-readiness-banner status-${safeCssToken(status)} validation-readiness-drawer" aria-label="검증 및 법정성 주의" data-testid="validation-readiness-banner">
+      <summary>
+        <span>
+          <em>검증 게이트</em>
+          <strong>${escapeHtml(label)} · 원본 확인 후 판단</strong>
+        </span>
+        <b>아티팩트 ${formatNumber(artifactRows)}개 · 보고 후보 ${formatNumber(reportCount)}개</b>
+      </summary>
+      <div class="validation-readiness-body">
+        <span>parser limitation, source hash, 원본 위치가 없는 항목은 제출 근거로 쓰지 않습니다.</span>
+        <div class="validation-gate-actions">
+          <button class="secondary-button ${tab === "summary" ? "active" : ""}" type="button" data-open-tab="summary">원본/해시</button>
+          <button class="secondary-button ${tab === "review" ? "active" : ""}" type="button" data-open-tab="review">선별 검증</button>
+          <button class="secondary-button ${tab === "report" ? "active" : ""}" type="button" data-open-tab="report">보고 점검</button>
+        </div>
       </div>
-      <div class="validation-gate-actions">
-        <button class="secondary-button ${tab === "summary" ? "active" : ""}" type="button" data-open-tab="summary">원본/해시</button>
-        <button class="secondary-button ${tab === "review" ? "active" : ""}" type="button" data-open-tab="review">선별 검증</button>
-        <button class="secondary-button ${tab === "report" ? "active" : ""}" type="button" data-open-tab="report">보고 점검</button>
-      </div>
-    </section>
+    </details>
   `;
 }
 
@@ -1645,16 +1651,21 @@ function sourceNavigatorItemActive(item, tab = activeTab) {
 function renderAdaptiveViewerHeader(run, tab) {
   const profile = adaptiveViewerProfile(tab);
   return `
-    <section class="adaptive-viewer-header" aria-label="상황별 증거 뷰어" data-testid="adaptive-evidence-viewer">
-      <div>
-        <p class="eyebrow">뷰어</p>
-        <strong>${escapeHtml(profile.title)}</strong>
+    <details class="adaptive-viewer-header adaptive-viewer-drawer" aria-label="상황별 증거 뷰어" data-testid="adaptive-evidence-viewer">
+      <summary>
+        <span>
+          <em>뷰어</em>
+          <strong>${escapeHtml(profile.title)}</strong>
+        </span>
+        <b>${escapeHtml(profile.viewers[0] || "")} 외 ${formatNumber(profile.viewers.length - 1)}개</b>
+      </summary>
+      <div class="adaptive-viewer-body">
         <span>${escapeHtml(profile.body)}</span>
+        <div class="viewer-chip-row" aria-label="사용 가능한 뷰어">
+          ${profile.viewers.map((viewer) => `<span>${escapeHtml(viewer)}</span>`).join("")}
+        </div>
       </div>
-      <div class="viewer-chip-row" aria-label="사용 가능한 뷰어">
-        ${profile.viewers.map((viewer) => `<span>${escapeHtml(viewer)}</span>`).join("")}
-      </div>
-    </section>
+    </details>
   `;
 }
 
@@ -2895,8 +2906,6 @@ function renderSummary(payload, artifactGroups = null) {
   const summary = payload.summary || {};
   const outputs = payload.outputs || {};
   const counts = runCounts(payload);
-  const warningCount = counts.validationIssues;
-  const source = selectedRun?.request?.root || payload.input_root || payload.root || payload.output_dir || "not recorded";
   const legacySummary = `
     ${renderWorkflowGuide(payload)}
     ${renderUserWorkflowMap()}
@@ -2930,12 +2939,7 @@ function renderSummary(payload, artifactGroups = null) {
   return `
     <section class="results-listing" data-testid="results-listing" aria-label="분석 결과 목록">
       <div class="results-listing-head">
-        <div>
-          <p class="eyebrow">분석 결과</p>
-          <h3>복구 ${formatNumber(recovered.length)}파일 · 키워드 매치 ${formatNumber(docHits.length)}건 · 수집 흔적 ${formatNumber(artifactTotal || artifactRows.length)}건</h3>
-          <p class="case-source-line"><span>입력 증거</span><code>${escapeHtml(source)}</code></p>
-          ${warningCount ? `<p class="help-text">검증 이슈 ${formatNumber(warningCount)}건 — 아래 "처리·검증 상세"에서 확인하세요.</p>` : ""}
-        </div>
+        <p class="eyebrow">분석 결과</p>
         <div class="operator-summary-actions">
           <button type="button" data-open-tab="search">전체 검색</button>
           <button class="secondary-button" type="button" data-open-tab="review">선별 보드</button>
