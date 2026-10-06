@@ -40,9 +40,28 @@ Input hashes: MFT sha256 `ab00ad06…f12d`, ils sha256 `4e5b31f4…894ca`
   seizure-mode run to finish; `fls-coverage-diff.py` will compare our
   `files.json` against `bsh-fls.txt` once both complete.
 
+## `fls -rp` export — completed (780,645 entries)
+
+`fls` produced 623,770 allocated file paths, 93,219 dir paths,
+63,656 deleted entries.
+
+**Important caveat**: the `_e01/filesystem` tree inherited from the
+2025-09-24 run was extracted incompletely (`stage-status.completed =
+false`, 92,173 files on disk). A first `fls-coverage-diff` against
+that partial tree shows 8.7% coverage — measuring the *incomplete
+extraction*, not parser parity. The resumed seizure run
+`0be94beb4160` is completing extraction; re-run the diff against the
+run's real `files.json` when it finishes. Samples of the current gap
+(mostly NTFS 8.3 aliases, `$Extend` ADS streams, `$RECYCLE.BIN`
+recovered items) are in `bsh-fls-diff.json` next to the image.
+
 ## Pending
 
-- [ ] `fls -rp` export completion → `fls-coverage-diff.py` run
-- [ ] RapidTriage seizure run `0be94beb4160` completion → artifact row counts
-      per type vs the AXIOM category list in `axiom-coverage-comparison-2026-10-06.md`
+- [x] `fls -rp` export (780,645 entries)
+- [x] `fls-coverage-diff` baseline against the *partial* tree
+      (8.7% — incomplete extraction artifact, not parity verdict)
+- [ ] RapidTriage seizure run `0be94beb4160` completion → re-run
+      `fls-coverage-diff` on the real `files.json` → artifact row
+      counts per type vs the AXIOM category list in
+      `axiom-coverage-comparison-2026-10-06.md`
 - [ ] Reviewer sign-off to graduate any figure above into Release Evidence
