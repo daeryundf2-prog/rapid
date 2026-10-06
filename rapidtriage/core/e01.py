@@ -1869,8 +1869,9 @@ def extract_e01_to_directory(
             )
         if partition_selection and not partition_selection.get("selected_supported_filesystem_hint"):
             warnings.append(
-                "Requested partition has no recognized filesystem description in mmls output "
-                "(possible mojibake or unsupported layout); recovery was delegated to Sleuth Kit as an analyst override."
+                "Selected partition has no recognized filesystem description in mmls output "
+                "(possible mojibake or unsupported layout); recovery proceeded via Sleuth Kit "
+                "on the largest data partition — verify the filesystem before relying on results."
             )
         warnings.append(
             "E01/Ex01 direct extraction is an orchestrated libewf/Sleuth Kit workflow; validate results against case requirements."
@@ -2487,7 +2488,15 @@ def build_partition_selection_metadata(
         "selected_filesystem_guess": selected.get("filesystem_guess", ""),
         "recommended_start_sector": recommended_start_sector,
         "requested_start_sector": requested_start_sector,
-        "selection_source": "user-request" if requested_start_sector is not None else "largest-supported-filesystem",
+        "selection_source": (
+            "user-request"
+            if requested_start_sector is not None
+            else (
+                "largest-supported-filesystem"
+                if selected.get("supported_filesystem_hint")
+                else "largest-data-partition-unknown-filesystem"
+            )
+        ),
         "selected_supported_filesystem_hint": bool(selected.get("supported_filesystem_hint")),
         "selected_description": selected.get("description", ""),
         "partition_count": len(partitions),
