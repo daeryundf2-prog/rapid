@@ -16496,3 +16496,23 @@ body.has-runs.intake-open .panel-section-title .new-case-button {
 .shortcut-help-mount {
   margin-top: 10px;
 }
+
+/* Final authority for the run-panel stacking order: once a case exists the
+   case queue comes right after the brand row, then the intake form, then the
+   convenience actions. Earlier generations of rules re-ordered these blocks
+   (e.g. order:4 on .case-queue-shell), so this block pins the analyst-facing
+   sequence explicitly. */
+body.has-runs .run-panel > .case-queue-shell,
+body.analysis-active .run-panel > .case-queue-shell {
+  order: 2 !important;
+}
+
+body.has-runs .run-panel > .run-form,
+body.analysis-active .run-panel > .run-form {
+  order: 3 !important;
+}
+
+body.has-runs .run-panel > .quick-actions,
+body.analysis-active .run-panel > .quick-actions {
+  order: 4 !important;
+}
