@@ -118,16 +118,37 @@ function artifactRowAttributes(kind, index, artifact) {
   return `class="selectable-result-row" data-source-category="${escapeHtml(sourceCategory)}" data-filter="${rowText({ kind, ...artifact })}" ${rowInspectorAttributes(inspector)} ${artifact.path ? `data-viewer-row-path="${escapeHtml(artifact.path)}" data-review-context="${escapeHtml(JSON.stringify(context))}"` : ""}`;
 }
 
+const TYPE_GRID_TIMESTAMP_KEYS = [
+  "timestamp", "last_write_time", "mtime", "created", "modified", "datetime",
+];
+
+function artifactRowTimestamp(artifact, flat) {
+  const top = artifact?.timestamp || artifact?.last_write_time;
+  if (top) return top;
+  for (const key of TYPE_GRID_TIMESTAMP_KEYS) {
+    if (flat[key]) return flat[key];
+    const match = Object.keys(flat).find((k) => k.endsWith(`.${key}`));
+    if (match) return flat[match];
+  }
+  return "";
+}
+
 function renderTypeDataGrid(rows, type) {
   const shown = rows.slice(0, TYPE_GRID_ROW_LIMIT);
-  const extraColumns = pickTypeGridColumns(shown);
-  const header = ["대상", ...extraColumns, "경로", "검토"];
-  const body = shown.map(({ kind, index, artifact }) => {
+  const flats = shown.map(({ artifact }) => flattenDetailFields(artifact?.details));
+  const hasTimestamp = shown.some((_, i) => artifactRowTimestamp(shown[i].artifact, flats[i]));
+  const extraColumns = pickTypeGridColumns(shown).filter((key) => {
+    if (!hasTimestamp) return true;
+    return !TYPE_GRID_TIMESTAMP_KEYS.includes(key.split(".").pop());
+  });
+  const header = ["대상", ...(hasTimestamp ? ["시각"] : []), ...extraColumns, "경로", "검토"];
+  const body = shown.map(({ kind, index, artifact }, i) => {
     const details = artifact?.details || {};
-    const flat = flattenDetailFields(details);
+    const flat = flats[i];
     return `
       <tr ${artifactRowAttributes(kind, index, artifact)}>
         <td><strong>${escapeHtml(fileLabel(artifactRowLabel(kind, artifact)))}</strong></td>
+        ${hasTimestamp ? `<td class="num">${escapeHtml(artifactRowTimestamp(artifact, flat))}</td>` : ""}
         ${extraColumns.map((key) => `<td>${escapeHtml(flat[key] ?? "")}</td>`).join("")}
         <td class="path-cell"><code>${escapeHtml(artifact?.path || details.source_path || "")}</code></td>
         <td class="action-stack">${artifactActionButtons(kind, index, artifact)}</td>
