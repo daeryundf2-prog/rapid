@@ -14,7 +14,7 @@ from pathlib import Path
 from .audit import compute_sha256
 from .e01_native import native_e01_available
 from .forensic_accuracy import build_accuracy_gate
-from .process_bounds import run_bounded_command
+from .process_bounds import child_timeout_seconds, run_bounded_command
 from .vsc import build_vsc_image_workflow_handoff
 
 E01_REQUIRED_TOOLS = ("ewfmount", "mmls", "tsk_recover")
@@ -1490,6 +1490,24 @@ def default_runner(command: Sequence[str]) -> subprocess.CompletedProcess[str]:
     return run_bounded_command(command, encoding="utf-8")
 
 
+def tsk_recover_timeout_seconds(partition_size_bytes: int | None) -> int:
+    """Scale the recovery wall-clock bound to the selected partition size.
+
+    The 3600s generic child timeout kills ``tsk_recover`` partway through
+    multi-hundred-GB images (observed on a 126 GB E01: killed at 3600s with
+    ~190k files written). Scale by a conservative 5 MiB/s minimum read+write
+    throughput plus headroom; an explicit operator override via
+    RAPIDTRIAGE_CHILD_TIMEOUT_SECONDS always wins.
+    """
+    if os.environ.get("RAPIDTRIAGE_CHILD_TIMEOUT_SECONDS", "").strip():
+        return child_timeout_seconds()
+    default = child_timeout_seconds()
+    if not partition_size_bytes or partition_size_bytes <= 0:
+        return default
+    scaled = int(partition_size_bytes / (5 * 1024 * 1024)) + 600
+    return max(default, scaled)
+
+
 def extract_e01_to_directory(
     e01_path: Path,
     stage_dir: Path,
@@ -1841,9 +1859,29 @@ def extract_e01_to_directory(
             str(extract_dir),
         ]
         tool_inputs = checkpoint_payload["tool_inputs"]
+        selected_partition = next(
+            (p for p in partition_table if int(p.get("start_sector") or -1) == start_sector),
+            {},
+        )
+        selected_partition_bytes = int(
+            selected_partition.get("size_bytes")
+            or int(selected_partition.get("sector_count") or 0)
+            * int(selected_partition.get("sector_size_bytes") or 512)
+            # Whole-volume recovery has no partition row — the compressed
+            # segment total is a lower bound on the bytes to walk.
+            or (segment_set_profile or {}).get("total_size_bytes")
+            or 0
+        )
+        recover_timeout = tsk_recover_timeout_seconds(selected_partition_bytes)
         if isinstance(tool_inputs, dict):
             tool_inputs["tsk_recover_argv"] = recover_command
-        recover_result = runner(recover_command)
+            tool_inputs["tsk_recover_timeout_seconds"] = recover_timeout
+        if runner is default_runner:
+            recover_result = run_bounded_command(
+                recover_command, timeout_seconds=recover_timeout, encoding="utf-8"
+            )
+        else:
+            recover_result = runner(recover_command)
         command_history.append(command_record("read-only-filesystem-recovery", recover_command, recover_result))
         checkpoint_payload["command_history"] = command_history
         checkpoint_payload["stages"] = {

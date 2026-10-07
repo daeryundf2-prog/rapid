@@ -34,6 +34,7 @@ from rapidtriage.core.e01 import (
     image_core_accuracy_gates,
     mmls_first_filesystem,
     parse_mmls_partitions,
+    tsk_recover_timeout_seconds,
     select_mmls_filesystem,
 )
 from rapidtriage.core.e01_smoke import (
@@ -424,6 +425,28 @@ Units are in 512-byte sectors
         # partition instead of refusing; downstream fsstat/tsk_recover will
         # fail loudly if the pick is wrong.
         self.assertEqual(mmls_first_filesystem(text), 567296)
+
+    def test_tsk_recover_timeout_scales_with_partition_size(self) -> None:
+        import os as _os
+        saved = _os.environ.pop("RAPIDTRIAGE_CHILD_TIMEOUT_SECONDS", None)
+        try:
+            # small partition → generic 3600s bound
+            self.assertEqual(tsk_recover_timeout_seconds(1 * 1024 * 1024), 3600)
+            # 234 GiB partition → ~12.4h bound, not the 1h default
+            big = 234 * 1024 ** 3
+            timeout = tsk_recover_timeout_seconds(big)
+            self.assertGreaterEqual(timeout, int(big / (5 * 1024 * 1024)))
+            self.assertGreater(timeout, 3600)
+        finally:
+            if saved is not None:
+                _os.environ["RAPIDTRIAGE_CHILD_TIMEOUT_SECONDS"] = saved
+        _os.environ["RAPIDTRIAGE_CHILD_TIMEOUT_SECONDS"] = "999"
+        try:
+            self.assertEqual(tsk_recover_timeout_seconds(234 * 1024 ** 3), 999)
+        finally:
+            del _os.environ["RAPIDTRIAGE_CHILD_TIMEOUT_SECONDS"]
+            if saved is not None:
+                _os.environ["RAPIDTRIAGE_CHILD_TIMEOUT_SECONDS"] = saved
 
     def test_extract_e01_reports_missing_external_tools(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
