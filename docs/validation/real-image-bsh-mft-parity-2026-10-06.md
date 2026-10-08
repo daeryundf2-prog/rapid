@@ -75,6 +75,54 @@ selected start sector 567296 — the trusted-tool path, not the native
 fallback. The earlier native run's numbers remain engineering evidence
 only.
 
+## `tsk_recover -e` extraction vs `fls -rp` — measured 2026-10-08
+
+The first external-engine run `0f1f32c78b0a` was killed by the fixed
+3600 s child timeout at ~190k files (rc=124). Timeout was changed to a
+partition-size-proportional bound (commit `835a42c`, ~12.4 h for the
+234 GB partition) and the run retried as `8c821ed6a78d`.
+
+`tsk_recover` completed after ~19.5 h and wrote **646,661 files** to
+`rt-run-tsk/_e01/filesystem`. Path-level comparison against the
+`fls -rp` allocated namespace (623,770 paths), run against a synthesized
+`files.json` of the extracted tree (`bsh-extracted-files-tsk.json`,
+sha256 `6df0433e…c3c85`):
+
+| Metric | Value |
+|---|---|
+| fls allocated paths covered by extraction | **589,929 / 623,770 = 94.57%** |
+| fls allocated paths not extracted | 33,841 |
+| extracted paths absent from fls allocated set | 56,732 |
+
+Breakdown of the 33,841 uncovered paths:
+
+- **27** NTFS metafiles (`$MFT`, `$LogFile`, `$Boot`, `$Secure:$*`,
+  `$Extend/$UsnJrnl`, …) — `tsk_recover` does not emit metafiles as
+  regular files; they are recovered via `icat`/system-artifact capture
+  (`$MFT` was extracted separately at 1.46 GB for the MFT diff above).
+- **1,825** alternate data streams (`:Zone.Identifier`, `:encryptable`,
+  …) — `tsk_recover` does not write ADS as standalone files.
+- **~31,989** regular paths, dominated by `Users/user` (27,363),
+  `ProgramData/Microsoft` (1,797), `Windows/SoftwareDistribution`
+  (1,688). MFT-level check on 3,000 sampled inodes: **2,762 are
+  zero-byte** (92%) — `tsk_recover` skips files with no data runs by
+  design. The remaining ~8% are small (45–~200 B) files; likely the
+  same zero-content/near-empty class plus isolated extraction errors
+  recorded in stderr (`Error writing file`, compressed-deleted-entry
+  decompress failures).
+
+Of the 56,732 extracted-but-not-in-fls-allocated paths, 2,649 sit under
+`$Extend/$Deleted` (deleted entries recovered by `-e`); the remainder
+are recovered deleted content placed elsewhere plus 8.3 alias names —
+consistent with the 63,656 deleted entries `fls` enumerated but
+excluded from the allocated set.
+
+**Verdict**: the trusted-tool extraction covers **94.6%** of the fls
+allocated file namespace; the 5.4% gap is almost entirely structural
+(NTFS metafiles, ADS, zero-byte records), not lost user content.
+Engineering check only — Release Evidence still requires reviewer
+sign-off and artifact-layer row parity.
+
 ## Pending
 
 - [x] `fls -rp` export (780,645 entries)
@@ -82,7 +130,11 @@ only.
       (8.7% — incomplete extraction artifact, not parity verdict)
 - [x] Engine switched to trusted-tool path for the parity run
       (`0f1f32c78b0a`, `sleuthkit-direct-ewf` + `tsk_recover -e`)
-- [ ] Run `0f1f32c78b0a` completion → re-run `fls-coverage-diff` on the
-      real `files.json` → artifact row counts per type vs the AXIOM
+- [x] `tsk_recover -e` extraction completed (646,661 files, ~19.5 h)
+- [x] `fls-coverage-diff` against the real extracted tree —
+      **94.57%** allocated-path coverage; gap = metafiles + ADS +
+      zero-byte records (see breakdown above)
+- [ ] Triage/collection of the extracted tree still running inside run
+      `8c821ed6a78d` → artifact row counts per type vs the AXIOM
       category list in `axiom-coverage-comparison-2026-10-06.md`
 - [ ] Reviewer sign-off to graduate any figure above into Release Evidence
