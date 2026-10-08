@@ -82,7 +82,7 @@ The first external-engine run `0f1f32c78b0a` was killed by the fixed
 partition-size-proportional bound (commit `835a42c`, ~12.4 h for the
 234 GB partition) and the run retried as `8c821ed6a78d`.
 
-`tsk_recover` completed after ~19.5 h and wrote **646,661 files** to
+`tsk_recover` completed after ~7 h and wrote **646,661 files** to
 `rt-run-tsk/_e01/filesystem`. Path-level comparison against the
 `fls -rp` allocated namespace (623,770 paths), run against a synthesized
 `files.json` of the extracted tree (`bsh-extracted-files-tsk.json`,
