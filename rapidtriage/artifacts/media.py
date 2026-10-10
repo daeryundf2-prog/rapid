@@ -22,6 +22,7 @@ except ModuleNotFoundError:
     Image = None  # type: ignore[assignment]
 
 from ..core.forensic_accuracy import build_accuracy_gate
+from ..core.image_io import imread_unicode_safe
 from ..core.models import ArtifactRecord
 from ..core.submission import compute_hashes
 
@@ -1185,7 +1186,7 @@ def build_image_record(path: Path) -> ArtifactRecord:
     if not has_plausible_image_signature(resolved):
         image = None
     else:
-        image = cv2.imread(str(resolved), cv2.IMREAD_UNCHANGED)
+        image = imread_unicode_safe(cv2, resolved, cv2.IMREAD_UNCHANGED)
     if image is None:
         details.update(
             {

@@ -347,6 +347,48 @@ if (tokenSave && tokenInput) {
   });
 }
 
+// Run-list polling: fast while a run is queued/running (live progress),
+// slow when idle, slower still while the tab is hidden. One timer only.
+const RUN_POLL_ACTIVE_MS = 1500;
+const RUN_POLL_IDLE_MS = 5000;
+const RUN_POLL_HIDDEN_MS = 15000;
+
+function hasActiveRun(runs) {
+  return (runs || []).some((run) => ["queued", "running"].includes(String(run.status || "").toLowerCase()));
+}
+
+function nextRunPollDelay() {
+  const delay = hasActiveRun(lastRunList) ? RUN_POLL_ACTIVE_MS : RUN_POLL_IDLE_MS;
+  return document.hidden ? Math.max(delay, RUN_POLL_HIDDEN_MS) : delay;
+}
+
+function scheduleRunPoll() {
+  if (pollTimer) clearTimeout(pollTimer);
+  pollTimer = setTimeout(async () => {
+    pollTimer = null;
+    try {
+      await loadRuns();
+    } catch (error) {
+      // Keep polling; the API status line reports connection errors.
+    } finally {
+      scheduleRunPoll();
+    }
+  }, nextRunPollDelay());
+}
+
+function renderRunProgress(progress) {
+  if (!progress || typeof progress !== "object") return "";
+  const total = Number(progress.total_count || 0);
+  const done = Number(progress.completed_count || 0);
+  const running = Array.isArray(progress.running) ? progress.running : [];
+  const parts = [];
+  if (progress.stage) parts.push(`단계 ${escapeHtml(progress.stage)}`);
+  if (total) parts.push(`제공자 ${formatNumber(done)}/${formatNumber(total)}`);
+  if (running.length) parts.push(`실행 중 ${escapeHtml(running.slice(0, 3).join(", "))}${running.length > 3 ? ` 외 ${running.length - 3}` : ""}`);
+  if (!parts.length) return "";
+  return `<span class="run-item-progress">${parts.join(" · ")}</span>`;
+}
+
 async function loadRuns() {
   const payload = await api("/api/runs");
   renderRunList(payload.runs || []);
@@ -422,6 +464,7 @@ function renderRunItem(run, { failed = false } = {}) {
         <span class="run-item-kicker">${escapeHtml(runModeLabel(mode))} · ${escapeHtml(formatRunTime(run.created_at))}</span>
         <strong>${escapeHtml(displayName)}</strong>
         <span class="run-item-path">${escapeHtml(root)}</span>
+        ${renderRunProgress(run.progress)}
       </span>
       <span class="run-item-meta">
         <span class="status-pill ${statusClass(run.status)}">${escapeHtml(statusLabel(run.status))}</span>
@@ -5131,7 +5174,7 @@ export function renderSearchResults(payload, rows) {
         ${metric("OCR errors", summary.ocr_error_count)}
       </div>
       ${renderKnownGoodSearchSuppression(payload)}
-      <p class="empty-state">No matches found.</p>
+      <p class="empty-state">No matches found.${payload.truncated ? " (시간 예산 초과로 부분 결과 — 검색 범위를 좁히세요)" : ""}</p>
       ${renderDocumentErrors(documentErrors)}
       ${renderOcrErrors(ocrErrors)}
     `;
@@ -5159,7 +5202,7 @@ export function renderSearchResults(payload, rows) {
     ${renderKeywordPackSelectionProfile(keywordPackProfile)}
     ${renderSearchAnalysis(payload.analysis)}
     <div class="pagination-bar">
-      <span>${formatNumber(rows.length)}건 일치 · 스크롤 가상화 (DOM ~50행)</span>
+      <span>${formatNumber(rows.length)}건 일치 · ${escapeHtml(payload.backend === "fts" ? "색인(FTS)" : "스캔")}${payload.elapsed_ms != null ? ` ${formatNumber(Math.round(payload.elapsed_ms))}ms` : ""}${payload.truncated ? " · 시간 예산 초과로 부분 결과" : ""} · 스크롤 가상화 (DOM ~50행)</span>
     </div>
     <div class="review-list-shell" role="region" aria-label="Search result list">
       <table class="data-table">
@@ -9711,5 +9754,4 @@ mountShortcutHelp();
 refreshRunPlanPreview();
 bindKeyboardShortcuts();
 checkHealth();
-loadRuns();
-pollTimer = setInterval(loadRuns, 4000);
+loadRuns().catch(() => {}).finally(scheduleRunPoll);

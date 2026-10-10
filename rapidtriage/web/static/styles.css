@@ -6167,6 +6167,14 @@ body.analysis-active .run-item .run-item-path {
   white-space: nowrap;
 }
 
+.run-item-progress {
+  overflow: hidden;
+  color: #7fd1b9;
+  font-size: 0.85em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .run-item-meta {
   display: grid;
   justify-items: end;
