@@ -329,7 +329,9 @@ class E01GapStageIntegrationTests(unittest.TestCase):
             self.assertEqual(failures["failures"][0]["inode"], 70)
             fls_call = next(call for call in calls if call[0] == "fls")
             self.assertEqual(fls_call[:6], ["fls", "-r", "-p", "-l", "-z", "UTC"])
-            self.assertIn(["icat", "-o", "2048", str(root / "case.E01"), "70"], calls)
+            # The stage resolves the image path; TemporaryDirectory may hand back an
+            # unresolved alias (8.3 short names on Windows, /var -> /private/var on macOS).
+            self.assertIn(["icat", "-o", "2048", str((root / "case.E01").resolve()), "70"], calls)
             long_map = json.loads((stage_dir / LONG_PATH_MAP_NAME).read_text(encoding="utf-8"))
             self.assertEqual(long_map["recovered_count"], 1)
             zero = json.loads((stage_dir / ZERO_BYTE_LISTING_NAME).read_text(encoding="utf-8"))
