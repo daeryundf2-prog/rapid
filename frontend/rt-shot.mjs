@@ -1,9 +1,12 @@
 import { chromium } from "playwright";
+
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
 const errs = [];
-page.on("pageerror", e => errs.push(e.message));
-await page.goto("http://127.0.0.1:8766/#token=UXgF4cb44InmOr6xyXPNebZ0pXHTAfbH91bgwPdFtUI", { waitUntil: "networkidle" });
+page.on("pageerror", (e) => errs.push(e.message));
+await page.goto("http://127.0.0.1:8766/#token=UXgF4cb44InmOr6xyXPNebZ0pXHTAfbH91bgwPdFtUI", {
+  waitUntil: "networkidle",
+});
 await page.waitForTimeout(2000);
 await page.screenshot({ path: "C:/Temp/rt-first.png", fullPage: true });
 console.log("errors:", errs);

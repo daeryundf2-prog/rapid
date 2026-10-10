@@ -142,13 +142,12 @@ fn scan_record_headers_in_chunk(
             };
             if declared_size >= RECORD_HEADER_SIZE as u32 && declared_size <= MAX_RECORD_SIZE {
                 let trailing_size = read_u32_le(blob, offset + declared_size as usize - 4);
-                let allocation_status = if chunk.free_space_offset == 0
-                    || (offset as u32) < chunk.free_space_offset
-                {
-                    "allocated"
-                } else {
-                    "slack"
-                };
+                let allocation_status =
+                    if chunk.free_space_offset == 0 || (offset as u32) < chunk.free_space_offset {
+                        "allocated"
+                    } else {
+                        "slack"
+                    };
                 output.push(EvtxScanRecord {
                     offset: chunk.offset + offset as u64,
                     chunk_offset: chunk.offset,
