@@ -185,8 +185,13 @@ class EvidencePathCacheTests(unittest.TestCase):
                 disable_evidence_path_cache()
 
         wer_dir = users / "alice" / "AppData" / "Local" / "Microsoft" / "Windows" / "WER" / "ReportQueue" / "AppCrash_2"
+        # 3.12+ matches on-disk names: case-insensitive only where pathlib
+        # normalises case (Windows). <3.12 probes ``dir / pattern`` for
+        # existence, so any case-insensitive filesystem (Windows, default
+        # macOS APFS) yields the pattern's casing.
+        fs_case_insensitive = (wer_dir / "Report.wer").exists()
         self.assertEqual(modern_literal, [str(wer_dir / "report.WER")] if os.name == "nt" else [])
-        self.assertEqual(legacy_literal, [str(wer_dir / "Report.wer")] if os.name == "nt" else [])
+        self.assertEqual(legacy_literal, [str(wer_dir / "Report.wer")] if fs_case_insensitive else [])
         self.assertEqual(legacy_wildcard, [str(wer_dir / "report.WER")])
         self.assertEqual(legacy_dir, [str(root / "$Recycle.Bin")])
         self.assertEqual(

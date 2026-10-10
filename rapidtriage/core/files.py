@@ -334,10 +334,21 @@ def _cached_evidence_paths(root: Path, pattern: str) -> list[Path] | None:
         return list(candidates)
     if not glob.has_magic(pattern) and _literal_pattern_uses_pattern_casing():
         # Python <3.12 pathlib answers a literal (non-wildcard) name with
-        # _PreciseSelector, which yields ``parent / pattern`` (the pattern's
-        # casing) after an existence check instead of the on-disk name.
-        return [path.parent / pattern for path in candidates if matcher(path.name)]
+        # _PreciseSelector: for every directory of the walk (pre-order, the
+        # root first) it yields ``directory / pattern`` when that path exists.
+        # Mirror that with an existence probe per directory instead of name
+        # matching, so a case-insensitive filesystem (macOS, Windows) gives
+        # the same hits as the uncached walk.
+        return _literal_matches_like_pathlib(root, candidates, pattern)
     return [path for path in candidates if matcher(path.name)]
+
+
+def _literal_matches_like_pathlib(root: Path, candidates: Iterable[Path], pattern: str) -> list[Path]:
+    directories: dict[str, Path] = {str(root): root}
+    for path in candidates:
+        parent = path.parent
+        directories.setdefault(str(parent), parent)
+    return [directory / pattern for directory in directories.values() if (directory / pattern).exists()]
 
 
 def _literal_pattern_uses_pattern_casing() -> bool:
