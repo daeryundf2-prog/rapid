@@ -4,6 +4,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from rapidtriage.core.ntfs_metadata import (
     NTFSMetadataError,
@@ -137,7 +138,9 @@ class NTFSMetadataExtractTests(unittest.TestCase):
                     tool_resolver=_all_tools,
                 )
 
-    def test_garbled_description_falls_back_to_fsstat_probe(self) -> None:
+    def test_garbled_description_resolves_via_mmls_fallback(self) -> None:
+        # Garbled description still resolves through select_mmls_filesystem's
+        # largest-data-partition fallback, so the fsstat probe is not reached.
         def runner(command):
             argv = [str(part) for part in command]
             if argv[0] == "mmls":
@@ -159,10 +162,10 @@ class NTFSMetadataExtractTests(unittest.TestCase):
                 tool_resolver=_all_tools,
             )
             self.assertEqual(payload["partition"]["start_sector"], 567296)
-            self.assertEqual(payload["partition"]["selection_method"], "fsstat-probe")
+            self.assertEqual(payload["partition"]["selection_method"], "mmls-description")
             self.assertEqual(payload["extraction_status"], "complete")
 
-    def test_ewf_image_verifies_filesystem_via_fsstat(self) -> None:
+    def test_ewf_image_reports_mmls_selection_with_verified_filesystem(self) -> None:
         def runner(command):
             argv = [str(part) for part in command]
             if argv[0] == "mmls":
@@ -183,8 +186,58 @@ class NTFSMetadataExtractTests(unittest.TestCase):
                 stream_runner=_fake_stream_runner,
                 tool_resolver=_all_tools,
             )
+            self.assertEqual(payload["partition"]["start_sector"], 567296)
+            self.assertEqual(payload["partition"]["selection_method"], "mmls-description")
+            self.assertTrue(payload["partition"]["filesystem_verified"])
+
+    def test_no_mmls_selection_probes_candidates_with_fsstat(self) -> None:
+        # select_mmls_filesystem only returns None when every data row is swap,
+        # which is not a realistic listing, so it is patched to None here to
+        # reach the fsstat-probe branch. Two garbled data partitions: the larger
+        # one (probed first) is not NTFS; only the smaller one at sector 2048 is.
+        two_partition_mmls = """GUID Partition Table (EFI)
+Offset Sector: 0
+Units are in 512-byte sectors
+
+      Slot      Start        End          Length       Description
+000:  Meta      0000000000   0000000000   0000000001   Safety Table
+001:  -------   0000000000   0000002047   0000002048   Unallocated
+002:  000       0000002048   0000004095   0000002048   ???s
+003:  001       0000567296   0457496575   0456929280   ???s
+"""
+        fsstat_offsets: list[str] = []
+
+        def runner(command):
+            argv = [str(part) for part in command]
+            if argv[0] == "mmls":
+                return subprocess.CompletedProcess(argv, 0, two_partition_mmls, "")
+            if argv[0] == "fsstat":
+                offset = argv[argv.index("-o") + 1]
+                fsstat_offsets.append(offset)
+                fs_type = "NTFS" if offset == "2048" else "Unknown"
+                return subprocess.CompletedProcess(argv, 0, f"File System Type: {fs_type}\n", "")
+            if argv[0] == "fls":
+                return subprocess.CompletedProcess(argv, 0, FLS_EXTEND_OUTPUT, "")
+            raise AssertionError(argv)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            image = Path(tmp) / "case.E01"
+            image.write_bytes(EWF_MAGIC + b"container-bytes")
+            with mock.patch(
+                "rapidtriage.core.ntfs_metadata.select_mmls_filesystem", return_value=None
+            ):
+                payload = extract_ntfs_metadata(
+                    image,
+                    Path(tmp) / "meta",
+                    runner=runner,
+                    stream_runner=_fake_stream_runner,
+                    tool_resolver=_all_tools,
+                )
+            self.assertEqual(fsstat_offsets[:2], ["567296", "2048"])
+            self.assertEqual(payload["partition"]["start_sector"], 2048)
             self.assertEqual(payload["partition"]["selection_method"], "fsstat-probe")
             self.assertTrue(payload["partition"]["filesystem_verified"])
+            self.assertEqual(payload["extraction_status"], "complete")
 
     def test_journal_not_found_records_skip(self) -> None:
         def no_journal_runner(command):

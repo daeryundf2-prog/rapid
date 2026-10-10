@@ -10,7 +10,26 @@ name: string
 description: string
 target_platform: string
 supported: boolean
-artifacts: {
+collection_status?: string
+parser_errors?: {
+[k: string]: unknown | undefined
+}[]
+artifact_count?: number
+artifact_type_counts?: {
+[k: string]: number | undefined
+}
+/**
+ * JSONL row stream of this provider; run manifests reference it instead of embedding artifacts
+ */
+records_path?: (string | null)
+/**
+ * Per-kind artifacts summary JSON (artifacts/rapidtriage-artifacts-<kind>.json)
+ */
+artifacts_output?: (string | null)
+/**
+ * Standalone manifests only (rapidtriage scan/manifest); run manifests carry artifact_count and records_path
+ */
+artifacts?: {
 provider: string
 artifact_type: string
 path: string

@@ -16,14 +16,33 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["name", "description", "target_platform", "supported", "artifacts"],
+        "required": ["name", "description", "target_platform", "supported"],
         "properties": {
           "name": { "type": "string" },
           "description": { "type": "string" },
           "target_platform": { "type": "string" },
           "supported": { "type": "boolean" },
+          "collection_status": { "type": "string" },
+          "parser_errors": {
+            "type": "array",
+            "items": { "type": "object", "additionalProperties": true }
+          },
+          "artifact_count": { "type": "integer" },
+          "artifact_type_counts": {
+            "type": "object",
+            "additionalProperties": { "type": "integer" }
+          },
+          "records_path": {
+            "type": ["string", "null"],
+            "description": "JSONL row stream of this provider; run manifests reference it instead of embedding artifacts"
+          },
+          "artifacts_output": {
+            "type": ["string", "null"],
+            "description": "Per-kind artifacts summary JSON (artifacts/rapidtriage-artifacts-<kind>.json)"
+          },
           "artifacts": {
             "type": "array",
+            "description": "Standalone manifests only (rapidtriage scan/manifest); run manifests carry artifact_count and records_path",
             "items": {
               "type": "object",
               "additionalProperties": false,

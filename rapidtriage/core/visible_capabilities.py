@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import bisect
+import re
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -780,10 +782,18 @@ def build_visible_capability_response(
     status_counts: Counter[str] = Counter()
     total_signals = 0
     capability_count = 0
+    # Flatten every artifact row to lowercase text once; each capability
+    # then only runs substring checks (rows were re-flattened per capability).
+    prepared = ArtifactSignalIndex(artifacts) if artifacts else None
     for group in CAPABILITY_GROUPS:
         rendered_capabilities: list[dict[str, Any]] = []
         for capability in group["capabilities"]:
-            signal_count = capability_signal_count(capability["terms"], run_summary=run_summary, artifacts=artifacts)
+            signal_count = capability_signal_count(
+                capability["terms"],
+                run_summary=run_summary,
+                artifacts=artifacts,
+                prepared=prepared,
+            )
             rendered = render_capability(group, capability)
             status = str(rendered["status"])
             status_counts[status] += 1
@@ -836,6 +846,19 @@ def build_visible_capability_response(
         },
         "groups": rendered_groups,
     }
+
+
+
+# Every character that occurs in a capability term; any other character can
+# never be part of a term match, so row texts are split on runs of them.
+_CAPABILITY_TERM_CHARS = frozenset(
+    char
+    for group in CAPABILITY_GROUPS
+    for capability in group["capabilities"]
+    for term in capability["terms"]
+    for char in str(term).lower()
+)
+_NON_TERM_CHARS_RE = re.compile("[^" + "".join(re.escape(char) for char in sorted(_CAPABILITY_TERM_CHARS)) + "]+")
 
 
 def render_capability(group: Mapping[str, Any], capability: Mapping[str, Any]) -> dict[str, Any]:
@@ -946,11 +969,99 @@ def validate_visible_capability_contract(
     return issues
 
 
+class ArtifactSignalIndex:
+    """Artifact rows flattened once for capability signal counting.
+
+    ``compact_text`` runs exactly once per row. A capability term can only
+    match inside a maximal run of characters that occur in capability terms,
+    so each row text is split into such segments and identical segments are
+    shared across rows (field names repeat in every row). A term's matching
+    rows are found with ``str.find`` over the NUL-joined unique segments and
+    memoized as a row bitmask; a capability's count is the popcount of its
+    terms' OR-ed masks -- the same as counting rows where any term is a
+    substring of the row text. Terms using other characters fall back to a
+    scan of the full row texts.
+    """
+
+    __slots__ = ("_masks", "payloads")
+
+    def __init__(self, artifacts: Mapping[str, Any]) -> None:
+        self.payloads: list[dict[str, Any]] = []
+        for name, payload in artifacts.items():
+            texts = [compact_text(row).lower() for row in artifact_rows(payload)]
+            segment_masks: dict[str, int] = {}
+            for row_index, text in enumerate(texts):
+                bit = 1 << row_index
+                for segment in _NON_TERM_CHARS_RE.split(text):
+                    if segment:
+                        segment_masks[segment] = segment_masks.get(segment, 0) | bit
+            segments = list(segment_masks)
+            starts: list[int] = []
+            position = 0
+            for segment in segments:
+                starts.append(position)
+                position += len(segment) + 1
+            self.payloads.append(
+                {
+                    "name": str(name).lower(),
+                    "size": artifact_payload_size(payload),
+                    "texts": texts,
+                    "joined": "\x00".join(segments),
+                    "starts": starts,
+                    "segment_masks": [segment_masks[segment] for segment in segments],
+                    "all_rows": (1 << len(texts)) - 1,
+                }
+            )
+        self._masks: dict[tuple[int, str], int] = {}
+
+    def _term_mask(self, payload_index: int, term: str) -> int:
+        key = (payload_index, term)
+        mask = self._masks.get(key)
+        if mask is not None:
+            return mask
+        payload = self.payloads[payload_index]
+        mask = 0
+        if not term:
+            mask = payload["all_rows"]
+        elif _CAPABILITY_TERM_CHARS.issuperset(term):
+            joined: str = payload["joined"]
+            starts: list[int] = payload["starts"]
+            segment_masks: list[int] = payload["segment_masks"]
+            found = joined.find(term)
+            while found >= 0:
+                segment = bisect.bisect_right(starts, found) - 1
+                mask |= segment_masks[segment]
+                if segment + 1 >= len(starts):
+                    break
+                found = joined.find(term, starts[segment + 1])
+        else:
+            for row_index, text in enumerate(payload["texts"]):
+                if term in text:
+                    mask |= 1 << row_index
+        self._masks[key] = mask
+        return mask
+
+    def signal_count(self, lower_terms: Sequence[str]) -> int:
+        count = 0
+        for index, payload in enumerate(self.payloads):
+            if any(term in payload["name"] for term in lower_terms):
+                count += payload["size"]
+                continue
+            if not payload["texts"]:
+                continue
+            mask = 0
+            for term in lower_terms:
+                mask |= self._term_mask(index, term)
+            count += mask.bit_count()
+        return count
+
+
 def capability_signal_count(
     terms: Sequence[str],
     *,
     run_summary: Mapping[str, Any] | None = None,
     artifacts: Mapping[str, Any] | None = None,
+    prepared: ArtifactSignalIndex | None = None,
 ) -> int:
     lower_terms = tuple(str(term).lower() for term in terms)
     if not lower_terms:
@@ -959,13 +1070,8 @@ def capability_signal_count(
     if run_summary:
         count += text_signal_count(run_summary, lower_terms)
     if artifacts:
-        for name, payload in artifacts.items():
-            if any(term in str(name).lower() for term in lower_terms):
-                count += artifact_payload_size(payload)
-                continue
-            for row in artifact_rows(payload):
-                if any(term in compact_text(row).lower() for term in lower_terms):
-                    count += 1
+        index = prepared if prepared is not None else ArtifactSignalIndex(artifacts)
+        count += index.signal_count(lower_terms)
     return count
 
 
@@ -988,6 +1094,9 @@ def artifact_payload_size(payload: Any) -> int:
         pagination = payload.get("pagination")
         if isinstance(pagination, Mapping) and isinstance(pagination.get("total"), int):
             return max(0, int(pagination["total"]))
+        # JSONL-backed run outputs hold only a preview inline.
+        if isinstance(payload.get("record_count"), int):
+            return max(0, int(payload["record_count"]))
         rows = payload.get("artifacts") or payload.get("items") or payload.get("rows")
         if isinstance(rows, Sequence) and not isinstance(rows, (str, bytes, bytearray)):
             return len(rows)

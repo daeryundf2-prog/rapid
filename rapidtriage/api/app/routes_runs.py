@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,7 @@ from .helpers import (
     get_named_output,
     get_output_path,
     read_run_artifacts_for_capabilities,
+    run_progress_payload,
     validate_run_evidence_source,
 )
 from .models import (
@@ -37,6 +39,7 @@ from .models import (
     RunImportRequest,
 )
 from .pagination import (
+    paginate_artifact_output,
     paginate_payload,
 )
 from .runops import (
@@ -45,6 +48,47 @@ from .runops import (
 )
 from .timeline_hist import build_timeline_histogram
 from .tree import build_run_issues, build_run_tree
+
+ACTIVE_RUN_STATUSES = frozenset({"queued", "running"})
+
+
+def compact_run_progress(progress: Mapping[str, object] | None) -> dict[str, object] | None:
+    """Stage, provider counts, and running provider kinds from run progress."""
+    if not isinstance(progress, Mapping):
+        return None
+    running = progress.get("running") if isinstance(progress.get("running"), list) else []
+    return {
+        "status": progress.get("status"),
+        "stage": progress.get("stage"),
+        "completed_count": progress.get("completed_count"),
+        "total_count": progress.get("total_count"),
+        "error_count": progress.get("error_count"),
+        "running": [
+            str(item.get("kind")) if isinstance(item, Mapping) else str(item)
+            for item in running
+        ],
+        "updated_at": progress.get("updated_at"),
+    }
+
+
+CAPABILITY_RESPONSE_CACHE_MAX_ENTRIES = 16
+_CAPABILITY_RESPONSE_CACHE: dict[tuple[object, ...], dict[str, object]] = {}
+
+
+def capability_response_cache_key(run_id: str, summary: Mapping[str, object]) -> tuple[object, ...]:
+    """Run id plus (path, mtime_ns, size) of every artifacts output and the summary JSON."""
+    outputs = summary.get("outputs") if isinstance(summary.get("outputs"), Mapping) else {}
+    stamps: list[tuple[str, int, int]] = []
+    for name in sorted(outputs):
+        if not (str(name).startswith("artifacts_") or name == "summary"):
+            continue
+        path = Path(str(outputs[name]))
+        try:
+            stat = path.stat()
+            stamps.append((str(path), stat.st_mtime_ns, stat.st_size))
+        except OSError:
+            stamps.append((str(path), -1, -1))
+    return (run_id, tuple(stamps))
 
 
 def build_runs_router(
@@ -89,12 +133,24 @@ def build_runs_router(
 
     @router.get("/api/runs")
     def list_runs() -> dict[str, Any]:
-        return {"runs": [job.to_dict() for job in store.list()]}
+        runs = []
+        for job in store.list():
+            row = job.to_dict()
+            if job.status in ACTIVE_RUN_STATUSES:
+                # Compact live progress for the run card (full payload on
+                # GET /api/runs/{run_id}); finished runs skip the file read.
+                row["progress"] = compact_run_progress(run_progress_payload(job))
+            runs.append(row)
+        return {"runs": runs}
 
 
     @router.get("/api/runs/{run_id}")
     def get_run(run_id: str) -> dict[str, Any]:
-        return get_job_payload(store, run_id, include_summary=True)
+        payload = get_job_payload(store, run_id, include_summary=True)
+        # Live per-provider progress (rapidtriage-run-progress.json); null
+        # until the run has written it.
+        payload["progress"] = run_progress_payload(get_job(store, run_id))
+        return payload
 
 
     @router.delete("/api/runs/{run_id}", status_code=204)
@@ -140,10 +196,20 @@ def build_runs_router(
         job = get_job(store, run_id)
         if job.summary is None:
             raise HTTPException(status_code=409, detail="run is not completed")
-        return build_visible_capability_response(
+        # Completed run outputs are immutable; reuse the response until any
+        # artifacts output (or the summary) changes on disk.
+        cache_key = capability_response_cache_key(run_id, job.summary)
+        cached = _CAPABILITY_RESPONSE_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
+        response = build_visible_capability_response(
             run_summary=job.summary,
             artifacts=read_run_artifacts_for_capabilities(store, run_id, job.summary),
         )
+        if len(_CAPABILITY_RESPONSE_CACHE) >= CAPABILITY_RESPONSE_CACHE_MAX_ENTRIES:
+            _CAPABILITY_RESPONSE_CACHE.pop(next(iter(_CAPABILITY_RESPONSE_CACHE)))
+        _CAPABILITY_RESPONSE_CACHE[cache_key] = response
+        return response
 
 
     @router.get("/api/runs/{run_id}/viewer-workflow-validation")
@@ -267,9 +333,9 @@ def build_runs_router(
             if name.startswith("artifacts_"):
                 try:
                     artifact_payload = store.read_output(run_id, name)
-                    artifacts[name.removeprefix("artifacts_")] = paginate_payload(
+                    artifacts[name.removeprefix("artifacts_")] = paginate_artifact_output(
                         artifact_payload,
-                        "artifacts",
+                        payload_path=get_output_path(store, run_id, name),
                         offset=offset,
                         limit=limit,
                         cursor=cursor,

@@ -11,6 +11,8 @@ import sys
 import time
 from collections import Counter
 from collections.abc import (
+    Callable,
+    Iterator,
     Mapping,
     Sequence,
 )
@@ -21,15 +23,20 @@ from concurrent.futures import (
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from ...artifacts import clear_collect_cache
+from ...artifacts import all_providers, clear_collect_cache
 from ..archive_image import (
     ArchiveImageExtractionError,
     ArchiveImageExtractionResult,
     extract_archive_image_to_directory,
     is_archive_image_path,
 )
-from ..artifact_store import write_jsonl_artifacts
-from ..artifacts import run_artifact_collection
+from ..artifact_profiles import iter_payload_records, resolve_records_path
+from ..artifact_store import artifact_record_with_fields, write_jsonl_artifacts
+from ..artifacts import (
+    finalize_artifact_payload,
+    materialize_artifact_payload,
+    run_artifact_collection,
+)
 from ..audit import (
     compute_sha256,
     write_audit_record,
@@ -48,6 +55,8 @@ from ..disk_image import (
 )
 from ..docs import (
     build_manifest,
+    build_manifest_summary,
+    provider_progress_key,
     run_docs_search,
     write_result,
 )
@@ -70,6 +79,8 @@ from ..extract import (
 )
 from ..files import (
     DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES,
+    disable_evidence_path_cache,
+    enable_evidence_path_cache,
     run_files_scan,
 )
 from ..forensic_accuracy import build_accuracy_gate
@@ -119,8 +130,20 @@ from .markdown import *
 from .memory import *
 from .parser_isolation import *
 from .performance import *
+from .persist import (
+    CASE_DB_FILE_NAME,
+    DOCS_TEXT_SPOOL_NAME,
+    DocumentTextSpool,
+    build_run_case_db,
+    skipped_case_db_record,
+)
 from .preview_sandbox import *
 from .profiles import *
+from .progress import (
+    RUN_PROGRESS_FILE_NAME,
+    RunProgress,
+    read_run_progress,
+)
 from .scheduler import *
 from .source import *
 from .sqlite_fts import *
@@ -167,6 +190,7 @@ __all__ = [
     "RUNTIME_DEFENSIBILITY_BATCH_ID",
     "RUN_DOC_EXTRACT_KINDS",
     "RUN_PROFILES",
+    "RUN_PROGRESS_FILE_NAME",
     "SCHEDULER_REPORT_GRADE_BLOCKERS",
     "SCHEDULER_REPORT_GRADE_VALIDATION_PLAN_VERSION",
     "SCHEDULER_TRUSTED_DIFF_BLOCKER_75",
@@ -188,6 +212,7 @@ __all__ = [
     "RuleSet",
     "RunModeError",
     "RunProfile",
+    "RunProgress",
     "Sequence",
     "ThreadPoolExecutor",
     "VirtualDiskExtractionError",
@@ -197,6 +222,8 @@ __all__ = [
     "append_extract_rows",
     "append_related_document_rows",
     "append_timeline_rows",
+    "artifact_payload_count",
+    "artifact_payload_progress_status",
     "artifact_scheduler_workers",
     "as_completed",
     "build_accuracy_gate",
@@ -220,6 +247,7 @@ __all__ = [
     "build_indicator_summary",
     "build_key_hit_rows",
     "build_manifest",
+    "build_manifest_summary",
     "build_markdown_report",
     "build_memory_cap_trusted_diff",
     "build_parser_crash_isolation_ledger",
@@ -326,6 +354,7 @@ __all__ = [
     "prepare_run_input_root",
     "preview_sandbox_report_grade_validation_plan",
     "preview_sandbox_run_output_policy_row",
+    "read_run_progress",
     "record_run_checkpoint",
     "refresh_incremental_fingerprint_manifest",
     "render_run_markdown_report",
@@ -349,6 +378,7 @@ __all__ = [
     "sys",
     "time",
     "timed_artifact_collection",
+    "tracked_artifact_collection",
     "write_audit_record",
     "write_jsonl_artifacts",
     "write_result",
@@ -377,7 +407,14 @@ def run_triage_mode(
     rule_set: RuleSet | None = None,
     columnar_store: bool = False,
     carve: bool = False,
+    collector_options: Mapping[str, Mapping[str, object]] | None = None,
+    case_db: bool = True,
 ) -> dict[str, object]:
+    """Run every triage stage for ``root`` into ``output_dir``.
+
+    ``case_db`` (default on) makes the ``persist`` stage build the run-local
+    search index ``<output_dir>/rapidtriage-case.db``.
+    """
     normalized_mode = mode.lower()
     if normalized_mode not in SUPPORTED_RUN_MODES:
         supported = ", ".join(SUPPORTED_RUN_MODES)
@@ -402,19 +439,106 @@ def run_triage_mode(
     clear_collect_cache()
     effective_memory_cap = resolve_memory_cap_bytes(memory_cap_bytes)
     memory_cap_stage_checks: list[dict[str, object]] = []
+    progress = RunProgress(output_dir)
+    progress.start(stage="prepare")
 
     def record_memory_cap(stage: str) -> None:
         memory_cap_stage_checks.append(
             enforce_memory_cap(stage, effective_memory_cap, sequence=len(memory_cap_stage_checks) + 1)
         )
 
-    record_memory_cap("prepare")
-    input_root, image_result = prepare_run_input_root(
-        root,
-        input_kind=input_kind,
-        output_dir=output_dir,
-        e01_partition_start_sector=e01_partition_start_sector,
+    try:
+        record_memory_cap("prepare")
+        input_root, image_result = prepare_run_input_root(
+            root,
+            input_kind=input_kind,
+            output_dir=output_dir,
+            e01_partition_start_sector=e01_partition_start_sector,
+        )
+        progress.set_run_root(str(input_root.root_path))
+        progress.complete_stage("prepare")
+        # Every provider walks the same evidence tree; the run-scoped path
+        # cache makes each tree walk happen once per run (see core/files.py).
+        enable_evidence_path_cache()
+        try:
+            summary_payload = _run_triage_stages(
+                input_root,
+                image_result,
+                profile=profile,
+                normalized_mode=normalized_mode,
+                output_dir=output_dir,
+                progress=progress,
+                record_memory_cap=record_memory_cap,
+                memory_cap_stage_checks=memory_cap_stage_checks,
+                effective_memory_cap=effective_memory_cap,
+                dry_run=dry_run,
+                read_only=read_only,
+                max_extract_size_bytes=max_extract_size_bytes,
+                max_file_count=max_file_count,
+                memory_cap_bytes=memory_cap_bytes,
+                overwrite=overwrite,
+                resume=resume,
+                extract_enabled=extract_enabled,
+                known_good_hash_feeds=known_good_hash_feeds,
+                hide_known_good=hide_known_good,
+                known_good_max_hash_bytes=known_good_max_hash_bytes,
+                rule_set=rule_set,
+                columnar_store=columnar_store,
+                carve=carve,
+                collector_options=collector_options,
+                case_db=case_db,
+            )
+        finally:
+            disable_evidence_path_cache()
+    except BaseException as exc:
+        progress.fail(exc)
+        raise
+    progress.finish()
+    return summary_payload
+
+
+def _run_triage_stages(
+    input_root: InputRoot,
+    image_result: E01ExtractionResult
+    | DiskImageExtractionResult
+    | ArchiveImageExtractionResult
+    | VirtualDiskExtractionResult
+    | None,
+    *,
+    profile: RunProfile,
+    normalized_mode: str,
+    output_dir: Path,
+    progress: RunProgress,
+    record_memory_cap: Callable[[str], None],
+    memory_cap_stage_checks: list[dict[str, object]],
+    effective_memory_cap: int,
+    dry_run: bool,
+    read_only: bool,
+    max_extract_size_bytes: int,
+    max_file_count: int,
+    memory_cap_bytes: int,
+    overwrite: bool,
+    resume: bool,
+    extract_enabled: bool,
+    known_good_hash_feeds: Sequence[str | Path],
+    hide_known_good: bool,
+    known_good_max_hash_bytes: int,
+    rule_set: RuleSet | None,
+    columnar_store: bool,
+    carve: bool,
+    collector_options: Mapping[str, Mapping[str, object]] | None = None,
+    case_db: bool = True,
+) -> dict[str, object]:
+    """Run every stage after the input root is prepared (see run_triage_mode)."""
+
+    def finish_stage(stage: str, details: Mapping[str, object] | None = None) -> None:
+        record_memory_cap(stage)
+        progress.complete_stage(stage, details)
+
+    progress.register_providers(
+        [*profile.artifacts_kinds, *(provider_progress_key(provider) for provider in all_providers())]
     )
+    progress.begin_stage("fingerprint")
     scan_root = resolve_scan_root(input_root.root_path, profile)
     scan_input_root = derive_child_input_root(input_root, scan_root)
     run_scan_limit = max(0, max_file_count)
@@ -457,7 +581,7 @@ def run_triage_mode(
     # Per-file content hashing is only needed for --resume reuse decisions;
     # non-resume runs fingerprint on path+size+mtime metadata only.
     current_fingerprint = build_run_input_fingerprint(scan_root, hash_contents=resume)
-    record_memory_cap("fingerprint")
+    finish_stage("fingerprint")
     previous_fingerprint = (
         load_reusable_json(
             fingerprint_path,
@@ -554,36 +678,121 @@ def run_triage_mode(
     delta_applied_outputs: set[str] = set()
     checkpoint_records: list[dict[str, object]] = []
 
+    # Artifact providers run first, in parallel on the scheduler's worker
+    # pool, and each provider's output file is written the moment it
+    # completes (collect_artifact_stages). The manifest stage afterwards only
+    # assembles cached collections plus providers outside the profile.
+    progress.begin_stage("artifacts")
+    artifact_outputs: dict[str, Path] = {}
+    artifact_payloads: dict[str, dict[str, object]] = {}
+    artifact_results, artifact_scheduler_manifest = collect_artifact_stages(
+        input_root,
+        profile.artifacts_kinds,
+        artifacts_dir=artifacts_dir,
+        resume=effective_resume,
+        rule_set=rule_set,
+        delta=(
+            evidence_delta_context
+            if evidence_delta_context is not None and evidence_delta_context.artifacts_delta_enabled
+            else None
+        ),
+        progress=progress,
+        memory_check=record_memory_cap,
+        collector_options=collector_options,
+    )
+    write_result(artifact_scheduler_manifest, scheduler_path)
+    for kind in profile.artifacts_kinds:
+        artifact_payload, artifact_path, reused, delta_merged = artifact_results[kind]
+        if reused:
+            reused_outputs.add(f"artifacts-{kind}")
+        if delta_merged:
+            delta_applied_outputs.add(f"artifacts-{kind}")
+        record_run_checkpoint(
+            checkpoint_records,
+            f"artifacts-{kind}",
+            artifact_path,
+            reused=reused,
+            delta_merged=delta_merged,
+        )
+        artifact_outputs[kind] = artifact_path
+        artifact_payloads[kind] = artifact_payload
+    parser_crash_ledger = build_parser_crash_isolation_ledger(
+        artifact_payloads=artifact_payloads,
+        scheduler_manifest=artifact_scheduler_manifest,
+    )
+    write_result(parser_crash_ledger, parser_crash_ledger_path)
+    finish_stage("artifacts")
+
+    progress.begin_stage("manifest")
     manifest_payload, reused = load_or_build_json(
         manifest_path,
         resume=effective_resume,
         required_keys=("providers",),
-        producer=lambda: build_manifest(input_root, profile.keywords),
+        producer=lambda: build_manifest(
+            input_root,
+            profile.keywords,
+            progress=progress,
+            artifact_payloads=artifact_payloads,
+            artifact_outputs=artifact_outputs,
+            records_dir=artifacts_dir,
+        ),
     )
+    # Every provider row is now a summary pointing at its per-kind JSONL;
+    # nothing later in the run needs memoized provider collections.
+    clear_collect_cache()
     if reused:
         reused_outputs.add("manifest")
+        progress.mark_unfinished_reused()
+    write_result(manifest_payload, manifest_path)
     record_run_checkpoint(checkpoint_records, "manifest", manifest_path, reused=reused)
-    record_memory_cap("manifest")
+    finish_stage("manifest")
+    # docs.json carries only per-provider counts; the full artifact rows live
+    # in manifest.json and artifacts/rapidtriage-artifacts-<kind>.json.
+    manifest_summary = build_manifest_summary(manifest_payload)
+
+    progress.begin_stage("docs")
+    # The docs stage spools each document's extracted text for the persist
+    # step's case DB (documents are not extracted twice); a stale spool from
+    # an interrupted run is dropped first.
+    docs_text_spool_path = output_dir / DOCS_TEXT_SPOOL_NAME
+    docs_text_spool_path.unlink(missing_ok=True)
+
+    def produce_docs_payload() -> dict[str, object]:
+        if not case_db:
+            return run_docs_search(
+                scan_input_root,
+                profile.keywords,
+                limit=run_scan_limit,
+                rule_set=rule_set,
+                index_output=docs_index_path,
+                manifest=manifest_payload,
+            )
+        with DocumentTextSpool(docs_text_spool_path) as spool:
+            return run_docs_search(
+                scan_input_root,
+                profile.keywords,
+                limit=run_scan_limit,
+                rule_set=rule_set,
+                index_output=docs_index_path,
+                manifest=manifest_payload,
+                text_sink=spool.write,
+            )
 
     docs_payload, reused = load_or_build_json(
         docs_path,
         resume=effective_resume and docs_index_path.is_file(),
         expected_command="docs",
         required_keys=("summary", "results"),
-        producer=lambda: run_docs_search(
-            scan_input_root,
-            profile.keywords,
-            limit=run_scan_limit,
-            rule_set=rule_set,
-            index_output=docs_index_path,
-        ),
+        producer=produce_docs_payload,
     )
     if reused:
         reused_outputs.update({"docs", "docs-index"})
     record_run_checkpoint(checkpoint_records, "docs", docs_path, reused=reused)
-    docs_payload["manifest"] = manifest_payload
+    docs_payload["manifest"] = manifest_summary
     docs_payload["scan_scope_root"] = str(scan_input_root.root_path)
-    record_memory_cap("docs")
+    finish_stage("docs")
+
+    progress.begin_stage("files")
 
     files_scan_resume = (
         effective_resume
@@ -645,11 +854,12 @@ def run_triage_mode(
         delta_merged="files" in delta_applied_outputs,
     )
     files_payload["scan_scope_root"] = str(scan_input_root.root_path)
-    record_memory_cap("files")
+    finish_stage("files")
 
     carve_payload: dict[str, object] | None = None
     carve_output_path = output_dir / "carving" / "rapidtriage-carve.json"
     if carve:
+        progress.begin_stage("carve")
         # Opt-in bounded carving over the same scan root. The carve stage
         # keeps its own checkpoint so --resume continues mid-scan rather
         # than re-running completed sources.
@@ -662,50 +872,12 @@ def run_triage_mode(
         except CarvingError as exc:
             raise RunModeError(f"carve stage failed: {exc}") from exc
         record_run_checkpoint(checkpoint_records, "carve", carve_output_path, reused=False)
-        record_memory_cap("carve")
+        finish_stage("carve")
 
-    write_result(manifest_payload, manifest_path)
     write_result(docs_payload, docs_path)
     write_result(files_payload, files_path)
 
-    artifact_outputs: dict[str, Path] = {}
-    artifact_payloads: dict[str, dict[str, object]] = {}
-    artifact_results, artifact_scheduler_manifest = collect_artifact_stages(
-        input_root,
-        profile.artifacts_kinds,
-        artifacts_dir=artifacts_dir,
-        resume=effective_resume,
-        rule_set=rule_set,
-        delta=(
-            evidence_delta_context
-            if evidence_delta_context is not None and evidence_delta_context.artifacts_delta_enabled
-            else None
-        ),
-    )
-    write_result(artifact_scheduler_manifest, scheduler_path)
-    for kind in profile.artifacts_kinds:
-        artifact_payload, artifact_path, reused, delta_merged = artifact_results[kind]
-        if reused:
-            reused_outputs.add(f"artifacts-{kind}")
-        if delta_merged:
-            delta_applied_outputs.add(f"artifacts-{kind}")
-        record_run_checkpoint(
-            checkpoint_records,
-            f"artifacts-{kind}",
-            artifact_path,
-            reused=reused,
-            delta_merged=delta_merged,
-        )
-        artifact_outputs[kind] = artifact_path
-        artifact_payloads[kind] = artifact_payload
-        write_result(artifact_payload, artifact_path)
-    parser_crash_ledger = build_parser_crash_isolation_ledger(
-        artifact_payloads=artifact_payloads,
-        scheduler_manifest=artifact_scheduler_manifest,
-    )
-    write_result(parser_crash_ledger, parser_crash_ledger_path)
-    record_memory_cap("artifacts")
-
+    progress.begin_stage("extract")
     if extract_enabled:
         docs_extract_payload, reused = load_or_build_json(
             docs_extract_manifest,
@@ -765,7 +937,9 @@ def run_triage_mode(
         )
         write_result(docs_extract_payload, docs_extract_manifest)
         write_result(files_extract_payload, files_extract_manifest)
-    record_memory_cap("extract")
+    finish_stage("extract")
+
+    progress.begin_stage("timeline")
 
     timeline_payload, reused = load_or_build_json(
         timeline_path,
@@ -794,7 +968,9 @@ def run_triage_mode(
     record_run_checkpoint(checkpoint_records, "timeline", timeline_path, reused=reused)
     write_result(timeline_payload, timeline_path)
     timeline_report_path.write_text(build_timeline_report(timeline_payload), encoding="utf-8")
-    record_memory_cap("timeline")
+    finish_stage("timeline")
+
+    progress.begin_stage("indicators")
 
     provisional_outputs = {
         "manifest": manifest_path,
@@ -827,7 +1003,32 @@ def run_triage_mode(
         reused_outputs.add("indicators")
     record_run_checkpoint(checkpoint_records, "indicators", indicators_path, reused=reused)
     write_result(indicators_payload, indicators_path)
-    record_memory_cap("indicators")
+    finish_stage("indicators")
+
+    # persist: build the run-local case DB (SQLite FTS5) that unified search
+    # queries instead of rescanning every output. A failure leaves the run
+    # completed and searchable through the bounded scan backend.
+    progress.begin_stage("persist")
+    if case_db:
+        case_db_record = build_run_case_db(
+            output_dir,
+            {**provisional_outputs, "indicators": indicators_path},
+            root=str(input_root.root_path),
+            source={"type": input_root.kind, "analysis_root": str(input_root.root_path)},
+            docs_text_spool=docs_text_spool_path,
+        )
+    else:
+        docs_text_spool_path.unlink(missing_ok=True)
+        case_db_record = skipped_case_db_record("disabled by --no-case-db")
+    finish_stage(
+        "persist",
+        {
+            key: case_db_record[key]
+            for key in ("started_at", "status", "search_backend", "counts", "elapsed_seconds", "error", "reason")
+            if key in case_db_record
+        },
+    )
+    progress.begin_stage("report")
     write_run_checkpoints(
         checkpoint_path,
         output_dir=output_dir,
@@ -869,6 +1070,8 @@ def run_triage_mode(
         "summary": summary_path,
         "report": report_path,
     }
+    if case_db_record.get("status") == "completed":
+        outputs["case_db"] = output_dir / CASE_DB_FILE_NAME
     if evidence_delta_manifest is not None:
         outputs["evidence_delta"] = output_dir / EVIDENCE_DELTA_MANIFEST_NAME
     if carve_payload is not None:
@@ -912,9 +1115,7 @@ def run_triage_mode(
             "max_extract_size_bytes": max_extract_size_bytes,
             "max_file_count": max_file_count,
             "memory_cap_bytes": effective_memory_cap,
-            "memory_cap_source": "argument"
-            if memory_cap_bytes
-            else ("environment" if os.environ.get(MEMORY_CAP_ENV) else "unset"),
+            "memory_cap_source": memory_cap_source(memory_cap_bytes),
             "overwrite": overwrite,
             "resume": resume,
             "extract": extract_enabled,
@@ -948,6 +1149,8 @@ def run_triage_mode(
     )
     audit_output = output_dir / "rapidtriage-run-audit.json"
     summary_payload["audit"] = str(audit_output)
+    summary_payload["search_backend"] = str(case_db_record["search_backend"])
+    summary_payload["case_db"] = dict(case_db_record)
     if carve_payload is not None:
         summary_payload["carving"] = {
             "enabled": True,
@@ -1091,31 +1294,34 @@ def build_columnar_artifacts_sidecar(
         manifest_core["status"] = "skipped"
         manifest_core["reason"] = "no-artifact-payload-outputs"
         return manifest_core
-    records: list[dict[str, object]] = []
     invalid = 0
-    for _, path in artifact_outputs:
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            invalid += 1
-            continue
-        rows = payload.get("artifacts") if isinstance(payload.get("artifacts"), list) else []
-        for row in rows:
-            if not isinstance(row, dict):
+    staged = 0
+
+    def iter_records() -> Iterator[dict[str, object]]:
+        # Rows stream from each per-kind JSONL (profile-expanded) and the
+        # ArtifactRecordV1 ``fields`` are rebuilt from ``details`` (I10).
+        nonlocal invalid, staged
+        for _, path in artifact_outputs:
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                rows = iter_payload_records(payload, payload_path=path, expand=True)
+                for row in rows:
+                    record = artifact_record_with_fields(row)
+                    if record is not None:
+                        staged += 1
+                        yield record
+                    elif row.get("artifact_record") is not None:
+                        invalid += 1
+            except (OSError, ValueError):
                 invalid += 1
-                continue
-            record = row.get("artifact_record")
-            if isinstance(record, dict) and record.get("schema") == "ArtifactRecordV1":
-                records.append(record)
-            elif record is not None:
-                invalid += 1
-    manifest_core["record_count"] = len(records)
-    manifest_core["invalid_record_count"] = invalid
+
     jsonl_path = output_dir / "rapidtriage-artifacts-records.jsonl"
     jsonl_manifest_path = output_dir / "rapidtriage-artifacts-records.jsonl.manifest.json"
     parquet_path = output_dir / "rapidtriage-artifacts-records.parquet"
     try:
-        write_jsonl_artifacts(records, output_path=jsonl_path, manifest_path=jsonl_manifest_path)
+        write_jsonl_artifacts(iter_records(), output_path=jsonl_path, manifest_path=jsonl_manifest_path)
+        manifest_core["record_count"] = staged
+        manifest_core["invalid_record_count"] = invalid
     except Exception as exc:
         manifest_core["status"] = "failed"
         manifest_core["reason"] = f"jsonl-stage-write-failed: {exc}"
@@ -1128,7 +1334,7 @@ def build_columnar_artifacts_sidecar(
         manifest_core["parquet_path"] = str(parquet_path)
         manifest_core["row_group_size"] = parquet_result.get("row_group_size")
         manifest_core["parquet_size_bytes"] = parquet_result.get("size_bytes")
-        manifest_core["record_count"] = parquet_result.get("record_count", len(records))
+        manifest_core["record_count"] = parquet_result.get("record_count", staged)
         manifest_core["rejected_count"] = parquet_result.get("rejected_count", 0)
     except ColumnarStoreUnavailable as exc:
         manifest_core["status"] = "skipped"
@@ -1139,6 +1345,27 @@ def build_columnar_artifacts_sidecar(
     return manifest_core
 
 
+def artifact_records_path(artifact_path: Path) -> Path:
+    """JSONL row stream that sits next to a per-kind ``.json`` summary."""
+    return artifact_path.with_suffix(".jsonl")
+
+
+def load_reusable_artifact_payload(artifact_path: Path) -> dict[str, object] | None:
+    """Reusable per-kind payload, or ``None`` when its JSONL rows are missing."""
+    payload = load_reusable_json(
+        artifact_path,
+        expected_command="artifacts",
+        required_keys=("summary", "artifacts"),
+    )
+    if payload is None:
+        return None
+    if payload.get("records_path") or payload.get("records_file"):
+        records_path = resolve_records_path(payload, artifact_path)
+        if records_path is None or not records_path.is_file():
+            return None
+    return payload
+
+
 def collect_artifact_stages(
     input_root: InputRoot,
     kinds: Sequence[str],
@@ -1147,7 +1374,22 @@ def collect_artifact_stages(
     resume: bool,
     rule_set: RuleSet | None,
     delta: EvidenceDeltaContext | None = None,
+    progress: RunProgress | None = None,
+    memory_check: Callable[[str], None] | None = None,
+    collector_options: Mapping[str, Mapping[str, object]] | None = None,
 ) -> tuple[dict[str, tuple[dict[str, object], Path, bool, bool]], dict[str, object]]:
+    """Collect artifact kinds on the bounded worker pool.
+
+    Each kind streams its rows to ``artifacts/rapidtriage-artifacts-<kind>.jsonl``
+    inside the worker and writes a small ``.json`` summary (summary,
+    ``artifact_type_profiles``, a row preview, ``records_path``) as soon as
+    it completes, so a later failure never loses finished provider outputs
+    and no provider's full row list outlives its own collection. Reused
+    payloads are already on disk and are not rewritten. ``progress``
+    (optional) receives queued/running/terminal state per kind;
+    ``memory_check`` runs after every provider and fails the run fast when
+    it raises (memory cap).
+    """
     artifacts_dir.mkdir(parents=True, exist_ok=True)
     results: dict[str, tuple[dict[str, object], Path, bool, bool]] = {}
     pending: list[tuple[str, Path]] = []
@@ -1155,15 +1397,14 @@ def collect_artifact_stages(
     events: list[dict[str, object]] = []
     output_order = list(kinds)
     max_workers = artifact_scheduler_workers(kinds)
+    options_by_kind = dict(collector_options or {})
     for kind in kinds:
         artifact_path = artifacts_dir / f"rapidtriage-artifacts-{kind}.json"
-        reusable = load_reusable_json(
-            artifact_path,
-            expected_command="artifacts",
-            required_keys=("summary", "artifacts"),
-        ) if (resume or delta is not None) else None
+        reusable = load_reusable_artifact_payload(artifact_path) if (resume or delta is not None) else None
         if reusable is not None and resume:
             results[kind] = (reusable, artifact_path, True, False)
+            if progress is not None:
+                progress.provider_reused(kind, artifact_count=artifact_payload_count(reusable))
             events.append(
                 build_scheduler_event(
                     kind=kind,
@@ -1183,16 +1424,35 @@ def collect_artifact_stages(
         else:
             pending.append((kind, artifact_path))
 
+    def check_memory(kind: str) -> None:
+        if memory_check is not None:
+            memory_check(f"artifacts:{kind}")
+
     def record_delta_merge(
         kind: str,
         artifact_path: Path,
-        merged: dict[str, object],
+        previous: Mapping[str, object],
+        delta_payload: Mapping[str, object] | None,
         *,
         started_at: str | None,
         completed_at: str | None,
         duration_ms: int,
     ) -> None:
+        assert delta is not None
+        merged = merge_delta_artifact_payload(
+            materialize_artifact_payload(previous, payload_path=artifact_path),
+            materialize_artifact_payload(delta_payload) if delta_payload is not None else None,
+            delta=delta,
+        )
+        merged = finalize_artifact_payload(merged, records_path=artifact_records_path(artifact_path))
         results[kind] = (merged, artifact_path, False, True)
+        write_result(merged, artifact_path)
+        if progress is not None:
+            progress.provider_finished(
+                kind,
+                status=artifact_payload_progress_status(merged, "completed"),
+                artifact_count=artifact_payload_count(merged),
+            )
         events.append(
             build_scheduler_event(
                 kind=kind,
@@ -1208,26 +1468,36 @@ def collect_artifact_stages(
                 duration_ms=duration_ms,
             )
         )
+        check_memory(kind)
 
     if pending or delta_pending:
         scope_input_root = (
             derive_child_input_root(input_root, delta.scope_root) if delta else input_root
         )
-        with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="rapidtriage-artifact") as executor:
+        executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="rapidtriage-artifact")
+        try:
             futures = {}
             for kind, artifact_path in pending:
                 future = executor.submit(
-                    timed_artifact_collection, input_root, kind=kind, rule_set=rule_set
+                    tracked_artifact_collection,
+                    progress,
+                    input_root,
+                    kind=kind,
+                    rule_set=rule_set,
+                    records_path=artifact_records_path(artifact_path),
+                    collector_options=options_by_kind.get(kind),
                 )
                 futures[future] = ("full", kind, artifact_path, None)
             if delta is not None:
                 for kind, artifact_path, previous in delta_pending:
                     if delta.scope_file_count:
                         future = executor.submit(
-                            timed_artifact_collection,
+                            tracked_artifact_collection,
+                            progress,
                             scope_input_root,
                             kind=kind,
                             rule_set=rule_set,
+                            collector_options=options_by_kind.get(kind),
                         )
                         futures[future] = ("delta", kind, artifact_path, previous)
                     else:
@@ -1235,7 +1505,8 @@ def collect_artifact_stages(
                         record_delta_merge(
                             kind,
                             artifact_path,
-                            merge_delta_artifact_payload(previous, None, delta=delta),
+                            previous,
+                            None,
                             started_at=None,
                             completed_at=None,
                             duration_ms=0,
@@ -1259,11 +1530,8 @@ def collect_artifact_stages(
                     record_delta_merge(
                         kind,
                         artifact_path,
-                        merge_delta_artifact_payload(
-                            previous if isinstance(previous, dict) else {},
-                            payload,
-                            delta=delta,
-                        ),
+                        previous if isinstance(previous, dict) else {},
+                        payload,
                         started_at=started_at,
                         completed_at=completed_at,
                         duration_ms=duration_ms,
@@ -1274,7 +1542,11 @@ def collect_artifact_stages(
                     # collection so coverage is preserved (crash isolation).
                     try:
                         payload, started_at, completed_at, duration_ms = timed_artifact_collection(
-                            input_root, kind=kind, rule_set=rule_set
+                            input_root,
+                            kind=kind,
+                            rule_set=rule_set,
+                            records_path=artifact_records_path(artifact_path),
+                            collector_options=options_by_kind.get(kind),
                         )
                         status = "completed"
                     except Exception as exc:
@@ -1284,6 +1556,15 @@ def collect_artifact_stages(
                         payload = isolated_parser_error_payload(kind, input_root=input_root, exc=exc)
                         status = "error"
                 results[kind] = (payload, artifact_path, False, False)
+                # Persist each provider the moment it finishes (I4); the run
+                # does not rewrite these files later.
+                write_result(payload, artifact_path)
+                if progress is not None:
+                    progress.provider_finished(
+                        kind,
+                        status=artifact_payload_progress_status(payload, status),
+                        artifact_count=artifact_payload_count(payload),
+                    )
                 events.append(
                     build_scheduler_event(
                         kind=kind,
@@ -1298,6 +1579,13 @@ def collect_artifact_stages(
                         duration_ms=duration_ms,
                     )
                 )
+                check_memory(kind)
+        except BaseException:
+            # Fail fast (e.g. memory cap): drop queued providers instead of
+            # waiting for the whole pool; running workers finish on their own.
+            executor.shutdown(wait=False, cancel_futures=True)
+            raise
+        executor.shutdown(wait=True)
     scheduler_manifest = build_parser_scheduler_manifest(
         kinds=kinds,
         max_workers=max_workers,
@@ -1307,15 +1595,67 @@ def collect_artifact_stages(
     return results, scheduler_manifest
 
 
+def tracked_artifact_collection(
+    progress: RunProgress | None,
+    input_root: InputRoot,
+    *,
+    kind: str,
+    rule_set: RuleSet | None,
+    records_path: Path | None = None,
+    collector_options: Mapping[str, object] | None = None,
+) -> tuple[dict[str, object], str, str, int]:
+    """Worker entry point: mark ``kind`` running when its thread starts."""
+    if progress is not None:
+        progress.provider_running(kind)
+    return timed_artifact_collection(
+        input_root,
+        kind=kind,
+        rule_set=rule_set,
+        records_path=records_path,
+        collector_options=collector_options,
+    )
+
+
+def artifact_payload_count(payload: Mapping[str, object]) -> int:
+    summary = payload.get("summary")
+    if isinstance(summary, Mapping):
+        try:
+            return int(summary.get("artifact_count") or 0)
+        except (TypeError, ValueError):
+            return 0
+    return 0
+
+
+def artifact_payload_progress_status(payload: Mapping[str, object], status: str) -> str:
+    """``error`` for scheduler errors and isolated collector failures."""
+    if status == "error":
+        return "error"
+    summary = payload.get("summary")
+    if isinstance(summary, Mapping) and summary.get("collection_status") == "failed-isolated":
+        return "error"
+    return "completed"
+
+
 def timed_artifact_collection(
     input_root: InputRoot,
     *,
     kind: str,
     rule_set: RuleSet | None,
+    records_path: Path | None = None,
+    collector_options: Mapping[str, object] | None = None,
 ) -> tuple[dict[str, object], str, str, int]:
     start = time.perf_counter()
     started_at = dt.datetime.now(dt.timezone.utc).isoformat()
-    payload = run_artifact_collection(input_root, kind=kind, rule_set=rule_set)
+    # use_cache=False: the manifest stage reuses this payload's summary, so
+    # nothing needs the provider's full row list after it is streamed out.
+    payload = run_artifact_collection(
+        input_root,
+        kind=kind,
+        rule_set=rule_set,
+        records_path=records_path,
+        collector_options=dict(collector_options) if collector_options else None,
+        use_cache=False,
+    )
     completed_at = dt.datetime.now(dt.timezone.utc).isoformat()
     duration_ms = max(0, int((time.perf_counter() - start) * 1000))
     return payload, started_at, completed_at, duration_ms

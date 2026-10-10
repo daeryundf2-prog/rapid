@@ -134,7 +134,35 @@ sign-off and artifact-layer row parity.
 - [x] `fls-coverage-diff` against the real extracted tree —
       **94.57%** allocated-path coverage; gap = metafiles + ADS +
       zero-byte records (see breakdown above)
-- [ ] Triage/collection of the extracted tree still running inside run
-      `8c821ed6a78d` → artifact row counts per type vs the AXIOM
-      category list in `axiom-coverage-comparison-2026-10-06.md`
+- [ ] Triage/collection of the extracted tree → artifact row counts
+      per type vs the AXIOM category list in
+      `axiom-coverage-comparison-2026-10-06.md`
 - [ ] Reviewer sign-off to graduate any figure above into Release Evidence
+
+## Run failure — 8c821ed6a78d (2026-10-08 21:38 UTC)
+
+Run `8c821ed6a78d` **failed** after 41.7 h total during the
+`manifest` stage write. Recorded detail:
+
+- Error: `Object of type bytes is not JSON serializable`.
+- `rapidtriage-manifest.json` (7.2 GB) was **truncated mid-stream**
+  (`"IdBlob": ` at file tail) when `json.dump` hit a bytes value
+  inside the manifest payload.
+- Root cause — code-version skew: the running server process
+  (started 2026-10-07 12:59 KST) had loaded `write_result()`
+  **without** `default=json_default`. Current HEAD already contains
+  the fix (`json_default` encodes bytes losslessly as
+  `{"__type__": "bytes", "hex": …}`), so the crash cannot recur on a
+  restarted server.
+- Preserved outputs: `_e01` extraction tree (646,661 files),
+  `rapidtriage-run-fingerprint.json`, `rapidtriage-e01.json`,
+  `rapidtriage-docs-index.json` (5.2 GB, valid JSON — verified tail).
+- Lost outputs: `rapidtriage-manifest.json` (truncated — unusable),
+  `rapidtriage-docs.json`, `rapidtriage-files.json` (never written).
+- Per-stage timing: `bsh-run-timing.json` — prepare <1 s,
+  `tsk_recover` extraction ~7 h, scan/collect inside `triage`
+  ~34.6 h until the manifest write crash.
+- Structural lesson: the ~33 h file-scan stage holds its results
+  only in memory and writes `files.json` at the end; a late crash
+  forfeits all of it. Incremental persistence of scan/artifact
+  output is required for large-case viability.

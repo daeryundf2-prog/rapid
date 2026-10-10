@@ -34,8 +34,8 @@ from rapidtriage.core.e01 import (
     image_core_accuracy_gates,
     mmls_first_filesystem,
     parse_mmls_partitions,
-    tsk_recover_timeout_seconds,
     select_mmls_filesystem,
+    tsk_recover_timeout_seconds,
 )
 from rapidtriage.core.e01_smoke import (
     E01_STAGE_STATUS_RUN_COPY_NAME,
@@ -1082,7 +1082,13 @@ Units are in 512-byte sectors
             self.assertEqual(metadata["preflight_summary"]["status"], "ready")
             self.assertFalse(metadata["preflight_summary"]["blocked"])
             self.assertTrue(metadata["partition_table"][0]["selected_for_recovery"])
-            self.assertEqual(metadata["command_history"][-1]["purpose"], "read-only-filesystem-recovery")
+            recovery_purposes = [row["purpose"] for row in metadata["command_history"]]
+            self.assertIn("read-only-filesystem-recovery", recovery_purposes)
+            # P14: the post-recovery coverage-gap stage (fls listing + icat) follows tsk_recover.
+            self.assertEqual(
+                recovery_purposes[recovery_purposes.index("read-only-filesystem-recovery") + 1 :],
+                ["fls-coverage-listing", "icat-gap-recovery"],
+            )
             self.assertEqual(metadata["recovered_root_manifest"]["profile_version"], "e01-recovered-root-manifest-v1")
             self.assertEqual(metadata["recovered_root_manifest"]["hashed_file_count"], 1)
             self.assertEqual(metadata["recovered_root_manifest"]["files"][0]["relative_path"], "evidence.txt")
@@ -1102,7 +1108,7 @@ Units are in 512-byte sectors
             external_history = [
                 entry
                 for entry in provenance["command_history"]
-                if entry.get("purpose") != "native-filesystem-recovery"
+                if entry.get("purpose") not in {"native-filesystem-recovery", "fls-coverage-listing", "icat-gap-recovery"}
             ]
             self.assertEqual(len(external_history), 3)
             self.assertFalse(provenance["read_only_posture"]["source_mutation_allowed"])
@@ -1174,7 +1180,7 @@ Units are in 512-byte sectors
             self.assertEqual(result.mount_strategy, "sleuthkit-direct-ewf")
             self.assertEqual(result.raw_image_path, e01_path.resolve())
             workflow_commands = [command for command in commands if command[1:] != ["--version"]]
-            self.assertEqual([command[0] for command in workflow_commands], ["mmls", "tsk_recover"])
+            self.assertEqual([command[0] for command in workflow_commands], ["mmls", "tsk_recover", "fls"])
             self.assertIn("read the E01/Ex01 segment set directly", result.warnings[0])
             stage_status = json.loads((stage_dir / "rapidtriage-e01-stage-status.json").read_text(encoding="utf-8"))
             self.assertEqual(stage_status["stages"]["mount-ewf"]["status"], "skipped")

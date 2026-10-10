@@ -212,7 +212,7 @@ class Stage3E01ResumeIntegrityTests(unittest.TestCase):
             commands: list[list[str]] = []
 
             self._run_once(e01_path, stage_dir, commands)
-            recovered = stage_dir / "filesystem" / "evidence.txt"
+            recovered = stage_dir / "fs" / "evidence.txt"
             original = recovered.read_bytes()
             tampered = b"tampered-same!"[: len(original)]
             recovered.write_bytes(tampered)

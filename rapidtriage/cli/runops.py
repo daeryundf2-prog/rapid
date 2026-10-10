@@ -23,6 +23,7 @@ from ..core.plugins import (
 from ..core.rearchitecture import build_rearchitecture_status
 from ..core.run import RunModeError, run_triage_mode
 from ..core.worker import RustWorkerClient, WorkerError
+from .helpers import eventlog_collector_options
 from .web import run_web_server
 
 
@@ -54,6 +55,10 @@ def handle_run(args: argparse.Namespace, parser: argparse.ArgumentParser, rule_s
                 rule_set=rule_set,
                 columnar_store=args.columnar_store,
                 carve=getattr(args, "carve", False),
+                collector_options=(
+                    {"eventlog": eventlog_collector_options(args)} if eventlog_collector_options(args) else None
+                ),
+                case_db=getattr(args, "case_db", True),
             )
         except RunModeError as exc:
             parser.error(str(exc))
@@ -79,9 +84,13 @@ def handle_artifacts(args: argparse.Namespace, parser: argparse.ArgumentParser, 
             if args.output
             else (Path.cwd() / f"rapidtriage-artifacts-{args.kind}.json").resolve()
         )
-        collector_options = {}
+        collector_options: dict[str, object] = {}
         if args.eventlog_message_catalog:
             collector_options["message_catalog_path"] = Path(args.eventlog_message_catalog).expanduser().resolve()
+        eventlog_options = eventlog_collector_options(args)
+        if eventlog_options and args.kind != "eventlog":
+            parser.error("--eventlog-structure-rows/--eventlog-record-detail can only be used with --kind eventlog")
+        collector_options.update(eventlog_options)
         try:
             payload = run_artifact_collection(
                 root,

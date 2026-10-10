@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 from xml.etree import ElementTree as ET
 
 from .safe_xml import UnsafeXmlError, safe_xml_fromstring
+from .textnorm import normalize_search_term, normalize_search_text
 
 
 class RuleConfigError(ValueError):
@@ -98,25 +99,37 @@ class _RuleEvaluator:
     def evaluate_context(self, context: RecordContext) -> tuple[list[str], list[dict[str, object]]]:
         matched_rules: list[str] = []
         ioc_hits: list[dict[str, object]] = []
+        # Normalize the record once (NFC + casefold), not once per rule.
+        folded = _FoldedContext(
+            path=normalize_search_text(context.path),
+            text=tuple(normalize_search_text(value) for value in context.text_values if value),
+            urls=tuple(normalize_search_text(value) for value in context.url_values if value),
+            domains=tuple(normalize_search_text(value) for value in context.domain_values if value),
+        )
         for rule in self.rule_set.rules:
-            rule_hits = self._evaluate_rule(rule, context)
+            rule_hits = self._evaluate_rule(rule, context, folded)
             if rule_hits is None:
                 continue
             matched_rules.append(rule.id)
             ioc_hits.extend(rule_hits)
         return matched_rules, dedupe_ioc_hits(ioc_hits)
 
-    def _evaluate_rule(self, rule: Rule, context: RecordContext) -> list[dict[str, object]] | None:
-        path_lower = context.path.lower()
+    def _evaluate_rule(
+        self,
+        rule: Rule,
+        context: RecordContext,
+        folded: _FoldedContext,
+    ) -> list[dict[str, object]] | None:
+        path_lower = folded.path
         extension = context.extension.lower()
         artifact_type = context.artifact_type.lower()
-        normalized_text = [value.lower() for value in context.text_values if value]
-        normalized_urls = [value.lower() for value in context.url_values if value]
-        normalized_domains = [value.lower() for value in context.domain_values if value]
+        normalized_text = folded.text
+        normalized_urls = folded.urls
+        normalized_domains = folded.domains
 
         if rule.ext and extension not in rule.ext:
             return None
-        if rule.path_terms and not any(term in path_lower for term in rule.path_terms):
+        if rule.path_terms and not any(normalize_search_term(term) in path_lower for term in rule.path_terms):
             return None
         if rule.artifact_types and artifact_type not in rule.artifact_types:
             return None
@@ -153,6 +166,16 @@ class _RuleEvaluator:
         if path not in self._hash_cache:
             self._hash_cache[path] = compute_sha256(path)
         return self._hash_cache[path]
+
+
+@dataclass(frozen=True)
+class _FoldedContext:
+    """RecordContext values after ``normalize_search_text`` (matching only)."""
+
+    path: str
+    text: tuple[str, ...]
+    urls: tuple[str, ...]
+    domains: tuple[str, ...]
 
 
 def load_rule_set(path: Path | str) -> RuleSet:
@@ -515,6 +538,42 @@ def annotate_artifacts_payload(payload: MutableMapping[str, object], rule_set: R
     return payload
 
 
+class StreamingArtifactAnnotator:
+    """Row-at-a-time annotate_artifacts_payload for streamed collections.
+
+    annotate(row) sets matched_rules/ioc_hits on the row exactly as
+    the payload-level annotator does; apply(payload) writes the same
+    payload-level summary annotate_artifacts_payload would have written.
+    """
+
+    def __init__(self, rule_set: RuleSet) -> None:
+        self.rule_set = rule_set
+        self._evaluator = _RuleEvaluator(rule_set)
+        self._matched_rules: set[str] = set()
+        self._hit_counts: Counter[tuple[str, str, str]] = Counter()
+
+    def annotate(self, row: MutableMapping[str, object]) -> None:
+        self._evaluator.annotate_items([row], [context_from_artifact(row)])
+        for rule_id in row.get("matched_rules", []) or []:
+            self._matched_rules.add(str(rule_id))
+        for hit in row.get("ioc_hits", []) or []:
+            if isinstance(hit, dict):
+                self._hit_counts[(str(hit.get("rule_id", "")), str(hit.get("type", "")), str(hit.get("value", "")))] += 1
+
+    def apply(self, payload: MutableMapping[str, object]) -> None:
+        summary = {
+            "matched_rules": sorted(self._matched_rules),
+            "matched_rule_count": len(self._matched_rules),
+            "ioc_hits": [
+                {"rule_id": rule_id, "type": hit_type, "value": value, "count": count}
+                for (rule_id, hit_type, value), count in sorted(self._hit_counts.items())
+                if rule_id and hit_type and value
+            ],
+            "ioc_hit_count": int(sum(self._hit_counts.values())),
+        }
+        apply_annotation_summary(payload, summary, self.rule_set)
+
+
 def annotate_timeline_payload(payload: MutableMapping[str, object], rule_set: RuleSet) -> MutableMapping[str, object]:
     events = [item for item in payload.get("events", []) if isinstance(item, dict)]
     evaluator = _RuleEvaluator(rule_set)
@@ -711,9 +770,15 @@ def dedupe_ioc_hits(hits: Sequence[Mapping[str, object]]) -> list[dict[str, obje
 
 
 def match_substrings(needles: Sequence[str], haystacks: Sequence[str]) -> list[str]:
+    """Return ``needles`` found in ``haystacks``.
+
+    Haystacks must already be ``normalize_search_text`` output; needles are
+    normalized here and reported in their original (rule) form.
+    """
     matched = []
     for needle in needles:
-        if any(needle in haystack for haystack in haystacks):
+        folded = normalize_search_term(needle)
+        if any(folded in haystack for haystack in haystacks):
             matched.append(needle)
     return matched
 
@@ -727,13 +792,14 @@ def match_hashes(needles: Sequence[str], file_hash: str | None) -> list[str]:
 def match_domains(needles: Sequence[str], domains: Sequence[str], urls: Sequence[str], texts: Sequence[str]) -> list[str]:
     matched: list[str] = []
     for needle in needles:
-        if any(domain == needle or domain.endswith(f".{needle}") for domain in domains):
+        folded = normalize_search_term(needle)
+        if any(domain == folded or domain.endswith(f".{folded}") for domain in domains):
             matched.append(needle)
             continue
-        if any(needle in url for url in urls):
+        if any(folded in url for url in urls):
             matched.append(needle)
             continue
-        if any(needle in text for text in texts):
+        if any(folded in text for text in texts):
             matched.append(needle)
     return matched
 
@@ -741,10 +807,11 @@ def match_domains(needles: Sequence[str], domains: Sequence[str], urls: Sequence
 def match_urls(needles: Sequence[str], urls: Sequence[str], texts: Sequence[str]) -> list[str]:
     matched: list[str] = []
     for needle in needles:
-        if any(needle in url for url in urls):
+        folded = normalize_search_term(needle)
+        if any(folded in url for url in urls):
             matched.append(needle)
             continue
-        if any(needle in text for text in texts):
+        if any(folded in text for text in texts):
             matched.append(needle)
     return matched
 

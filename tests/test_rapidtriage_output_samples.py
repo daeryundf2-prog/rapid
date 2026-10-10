@@ -10,10 +10,10 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 from rapidtriage.cli import build_parser, main
 from rapidtriage.core.hash_cache import reset_hash_cache
-from unittest import mock
 from tests.windows_artifact_fixtures import _minimal_ese_database, build_minimal_lnk
 
 SAMPLES_DIR = Path(__file__).resolve().parent.parent / "docs" / "rapidtriage-output-samples"
@@ -280,6 +280,10 @@ def canonicalize_manifest(payload: dict[str, Any]) -> dict[str, Any]:
     canonical = mask_dynamic_manifest_hashes(dict(payload))
     providers = [dict(item) for item in canonical["providers"]]
     for provider in providers:
+        # docs.json embeds a manifest summary (artifact_count only); the
+        # full artifact rows exist only in manifest.json / artifacts/*.json.
+        if "artifacts" not in provider:
+            continue
         provider["artifacts"] = sorted(
             provider["artifacts"],
             key=lambda artifact: (
@@ -589,6 +593,8 @@ class RapidTriageOutputSamplesTests(unittest.TestCase):
             actual = canonicalize_docs(normalize_payload(load_json(output), root))
             expected = load_json(SAMPLES_DIR / "docs-keyword-search.json")
             self.assertEqual(actual, expected)
+            self.assertTrue(all("artifacts" not in provider for provider in actual["manifest"]["providers"]))
+            self.assertTrue(all("artifact_count" in provider for provider in actual["manifest"]["providers"]))
 
     def test_files_sample_matches_contract_fixture(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

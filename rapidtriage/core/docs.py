@@ -10,18 +10,22 @@ import re
 import zipfile
 import zlib
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from email import policy
 from email.message import EmailMessage
 from pathlib import Path
+from typing import Protocol
 from xml.etree import ElementTree as ET
 
 from ..artifacts import all_providers, collect_cached
 from .files import RUN_OUTPUT_DIR_PREFIX
 from .input_root import InputRoot, resolve_input_root
+from .json_safe import json_default
 from .models import DocumentCandidate, DocumentMatch
 from .rules import RuleSet, annotate_docs_payload
 from .safe_xml import safe_xml_fromstring
+from .textnorm import locate_normalized, normalize_nfc, normalize_search_text
 
 SUPPORTED_DOC_EXTS = {
     ".cfg",
@@ -72,7 +76,9 @@ HTML_EXTS = {"htm", "html"}
 OFFICE_OPEN_XML_EXTS = {"docx", "pptx", "xlsx"}
 OPEN_DOCUMENT_EXTS = {"odp", "ods", "odt"}
 DOCS_INDEX_TOKEN_PATTERN = re.compile(r"[\w@./:-]{2,}", flags=re.UNICODE)
-DOCS_INDEX_VERSION = 1
+# v2: index terms are NFC + casefold (v1 used str.lower(), so NFD text indexed
+# as decomposed jamo). v1 indexes still load; queries are normalized either way.
+DOCS_INDEX_VERSION = 2
 MAX_EXTRACT_TEXT_BYTES = 50_000_000
 MAX_ZIP_TEXT_MEMBER_BYTES = 10_000_000
 MAX_ZIP_TEXT_TOTAL_BYTES = 50_000_000
@@ -83,6 +89,15 @@ MAX_PDF_STREAM_DECOMPRESSED_BYTES = 10_000_000
 class TextExtractionTooLarge(ValueError):
     pass
 BOUNDED_MAIL_CONTAINER_SCAN_LIMIT = 2 * 1024 * 1024
+MANIFEST_COLLECT_MAX_WORKERS = 8
+
+
+class ManifestProgress(Protocol):
+    """Per-provider progress sink used by ``build_manifest`` (see core/run/progress.py)."""
+
+    def provider_running(self, kind: str) -> None: ...
+
+    def provider_finished(self, kind: str, *, status: str, artifact_count: int) -> None: ...
 
 
 def scan_document_candidates(root: InputRoot | Path, limit: int = 0) -> list[DocumentCandidate]:
@@ -112,19 +127,149 @@ def scan_document_candidates(root: InputRoot | Path, limit: int = 0) -> list[Doc
     return candidates
 
 
-def build_manifest(root: InputRoot | Path, keywords: Sequence[str], *, input_kind: str | None = None) -> dict[str, object]:
+def manifest_collect_workers(task_count: int) -> int:
+    """Bounded worker count shared by the manifest and artifact stages.
+
+    Provider collection is dominated by evidence-tree walks and file reads
+    (I/O bound), so the cap is ``min(8, cpu_count)`` rather than the CPU count.
+    """
+    limit = min(MANIFEST_COLLECT_MAX_WORKERS, os.cpu_count() or 4)
+    return max(1, min(limit, int(task_count)))
+
+
+def provider_progress_key(provider: object) -> str:
+    """Provider identity used by run progress (the collector kind)."""
+    kind = str(getattr(provider, "collector_kind", "") or "").strip().lower()
+    return kind or str(getattr(provider, "name", "") or "")
+
+
+def manifest_summary_row(
+    provider: object,
+    payload: Mapping[str, object],
+    *,
+    output_path: Path | None = None,
+) -> dict[str, object]:
+    """Manifest provider row that references a per-kind artifacts output.
+
+    Carries counts and the ``records_path`` of the JSONL row stream instead
+    of an ``artifacts`` array (run-pipeline-mitigations I13).
+    """
+    from .artifact_profiles import payload_record_count, resolve_records_path
+
+    summary = payload.get("summary") if isinstance(payload.get("summary"), Mapping) else {}
+    records_path = resolve_records_path(payload, output_path)
+    row: dict[str, object] = {
+        "name": provider.name,
+        "description": provider.description,
+        "target_platform": provider.target_platform,
+        "supported": provider.supported(),
+        "artifact_count": payload_record_count(payload),
+        "artifact_type_counts": dict(summary.get("artifact_type_counts") or {}),
+        "records_path": str(records_path) if records_path is not None else None,
+        "artifacts_output": str(output_path) if output_path is not None else None,
+    }
+    status = str(summary.get("collection_status") or "")
+    if status and status != "completed":
+        row["collection_status"] = status
+    parser_errors = payload.get("parser_errors")
+    if isinstance(parser_errors, list) and parser_errors:
+        row["parser_errors"] = list(parser_errors)
+    return row
+
+
+def build_manifest(
+    root: InputRoot | Path,
+    keywords: Sequence[str],
+    *,
+    input_kind: str | None = None,
+    progress: ManifestProgress | None = None,
+    artifact_payloads: Mapping[str, Mapping[str, object]] | None = None,
+    artifact_outputs: Mapping[str, Path] | None = None,
+    records_dir: Path | None = None,
+) -> dict[str, object]:
+    """Assemble provider rows, collecting providers in parallel.
+
+    Rows keep ``all_providers()`` order. Standalone (no ``records_dir``),
+    each row embeds its ``artifacts`` array; providers already collected in
+    this process (``collect_cached``) are cache hits. In a run,
+    ``artifact_payloads``/``artifact_outputs`` (the artifacts stage results)
+    and ``records_dir`` make every row a summary that points at the per-kind
+    JSONL row stream: covered kinds reuse the artifacts-stage output and
+    uncovered providers are collected into ``records_dir``. A provider whose
+    collect raises is isolated (``collection_status: failed-isolated``)
+    instead of aborting the whole manifest.
+    """
     input_root = resolve_input_root(root, kind=input_kind)
-    provider_rows = []
-    for provider in all_providers():
-        provider_rows.append(
-            {
-                "name": provider.name,
-                "description": provider.description,
-                "target_platform": provider.target_platform,
-                "supported": provider.supported(),
-                "artifacts": [item.to_dict() for item in collect_cached(provider, input_root.root_path)],
-            }
+    root_path = input_root.root_path
+    providers = list(all_providers())
+    covered = dict(artifact_payloads or {})
+    outputs = dict(artifact_outputs or {})
+
+    def collect_summary_row(provider: object, progress_key: str) -> dict[str, object]:
+        from .artifacts import run_artifact_collection
+
+        assert records_dir is not None
+        # Providers outside the run profile are not run outputs
+        # (artifacts_<kind>); keep them apart from the per-kind outputs.
+        output_path = records_dir / MANIFEST_ONLY_RECORDS_DIR / f"rapidtriage-artifacts-{progress_key}.json"
+        payload = run_artifact_collection(
+            input_root,
+            kind=progress_key,
+            records_path=output_path.with_suffix(".jsonl"),
+            use_cache=False,
         )
+        write_result(payload, output_path)
+        return manifest_summary_row(provider, payload, output_path=output_path)
+
+    def collect_row(provider: object) -> dict[str, object]:
+        progress_key = provider_progress_key(provider)
+        if progress_key in covered:
+            return manifest_summary_row(provider, covered[progress_key], output_path=outputs.get(progress_key))
+        if progress is not None:
+            progress.provider_running(progress_key)
+        if records_dir is not None:
+            row = collect_summary_row(provider, progress_key)
+            if progress is not None:
+                failed = row.get("collection_status") == "failed-isolated"
+                progress.provider_finished(
+                    progress_key,
+                    status="error" if failed else "completed",
+                    artifact_count=int(row.get("artifact_count") or 0),
+                )
+            return row
+        row: dict[str, object] = {
+            "name": provider.name,
+            "description": provider.description,
+            "target_platform": provider.target_platform,
+            "supported": provider.supported(),
+        }
+        try:
+            row["artifacts"] = [item.to_dict() for item in collect_cached(provider, root_path)]
+        except Exception as exc:
+            row["artifacts"] = []
+            row["collection_status"] = "failed-isolated"
+            row["parser_errors"] = [
+                {
+                    "kind": progress_key,
+                    "collector": str(provider.name),
+                    "error_type": type(exc).__name__,
+                    "message": str(exc),
+                }
+            ]
+            if progress is not None:
+                progress.provider_finished(progress_key, status="error", artifact_count=0)
+            return row
+        if progress is not None:
+            progress.provider_finished(progress_key, status="completed", artifact_count=len(row["artifacts"]))
+        return row
+
+    with ThreadPoolExecutor(
+        max_workers=manifest_collect_workers(len(providers)),
+        thread_name_prefix="rapidtriage-manifest",
+    ) as executor:
+        # executor.map yields in submission order, keeping the manifest
+        # provider order deterministic regardless of completion order.
+        provider_rows = list(executor.map(collect_row, providers))
     return {
         "generated_at": dt.datetime.now().isoformat(),
         "root": str(input_root.root_path),
@@ -132,6 +277,41 @@ def build_manifest(root: InputRoot | Path, keywords: Sequence[str], *, input_kin
         "keywords": list(keywords),
         "providers": provider_rows,
     }
+
+
+# Subdirectory of artifacts/ holding rows of providers the run profile
+# does not schedule (collected only for the manifest).
+MANIFEST_ONLY_RECORDS_DIR = "manifest-only"
+
+MANIFEST_SUMMARY_PROVIDER_FIELDS = ("name", "description", "target_platform", "supported")
+
+
+def build_manifest_summary(manifest_payload: Mapping[str, object]) -> dict[str, object]:
+    """Reduce a manifest to per-provider counts for embedding in docs.json.
+
+    The full artifact rows stay in ``rapidtriage-manifest.json`` and
+    ``artifacts/rapidtriage-artifacts-<kind>.json``; docs.json keeps only
+    ``{name, description, target_platform, supported, artifact_count}`` per
+    provider so the same artifact arrays are never stored twice.
+    """
+    providers: list[dict[str, object]] = []
+    for provider in manifest_payload.get("providers") or []:
+        if not isinstance(provider, Mapping):
+            continue
+        row = {field: provider.get(field) for field in MANIFEST_SUMMARY_PROVIDER_FIELDS}
+        artifacts = provider.get("artifacts")
+        if isinstance(artifacts, list):
+            row["artifact_count"] = len(artifacts)
+        else:
+            row["artifact_count"] = int(provider.get("artifact_count") or 0)
+        providers.append(row)
+    summary = {
+        key: manifest_payload[key]
+        for key in ("generated_at", "root", "platform", "keywords")
+        if key in manifest_payload
+    }
+    summary["providers"] = providers
+    return summary
 
 
 def run_docs_search(
@@ -142,28 +322,42 @@ def run_docs_search(
     input_kind: str | None = None,
     rule_set: RuleSet | None = None,
     index_output: Path | None = None,
+    manifest: Mapping[str, object] | None = None,
+    text_sink: Callable[[str, str, str], None] | None = None,
 ) -> dict[str, object]:
+    """Search documents under ``root``; ``manifest`` reuses an already-built
+    provider manifest (run pipeline) instead of collecting providers again.
+
+    ``text_sink(path, text, extraction_error)`` receives every candidate's
+    extracted text in candidate order (the run pipeline spools it for the
+    persist step's case DB so documents are not extracted twice)."""
     input_root = resolve_input_root(root, kind=input_kind)
-    normalized = [item.lower() for item in keywords]
+    normalized = [normalize_search_text(item) for item in keywords]
     candidates = scan_document_candidates(input_root, limit=limit)
     matches: list[DocumentMatch] = []
     text_by_path: dict[str, str] = {}
     extraction_errors: list[dict[str, object]] = []
     for candidate in candidates:
+        extraction_error = ""
         try:
             text = extract_text(Path(candidate.path), candidate.kind)
         except TextExtractionTooLarge as exc:
             text = ""
+            extraction_error = f"{type(exc).__name__}: {exc}"
             extraction_errors.append(
                 document_extraction_error(candidate, "input-too-large", exc, recoverable=True)
             )
         except (OSError, UnicodeError, zipfile.BadZipFile, ET.ParseError, ValueError) as exc:
             text = ""
+            extraction_error = f"{type(exc).__name__}: {exc}"
             extraction_errors.append(
                 document_extraction_error(candidate, "text-extraction-failed", exc, recoverable=True)
             )
         text_by_path[candidate.path] = text
-        matched = [keyword for keyword in normalized if keyword in text.lower()]
+        if text_sink is not None:
+            text_sink(candidate.path, text, extraction_error)
+        haystack = normalize_search_text(text) if normalized else ""
+        matched = [keyword for keyword in normalized if keyword in haystack]
         if not matched:
             continue
         matches.append(
@@ -184,7 +378,9 @@ def run_docs_search(
             "match_count": len(matches),
             "supported_extensions": sorted(SUPPORTED_DOC_EXTS),
         },
-        "manifest": build_manifest(input_root, normalized),
+        "manifest": build_manifest_summary(
+            manifest if manifest is not None else build_manifest(input_root, normalized)
+        ),
         "candidates": [item.to_dict() for item in candidates],
         "results": [item.to_dict() for item in matches],
     }
@@ -196,7 +392,9 @@ def run_docs_search(
         annotate_docs_payload(payload, rule_set, text_by_path=text_by_path)
     if index_output is not None:
         index_payload = build_docs_index(input_root, candidates, text_by_path)
-        write_result(index_payload, index_output)
+        # Machine-read inverted index: written compact (C JSON encoder);
+        # the indented writer took minutes on large cases.
+        write_result(index_payload, index_output, indent=None)
         payload["index"] = {
             "command": "docs-index",
             "path": str(index_output),
@@ -264,6 +462,8 @@ def build_docs_index(
         "strategy": "processed-text-inverted-index",
         "analyzer": {
             "case_fold": True,
+            "case_fold_method": "unicode-casefold",
+            "unicode_normalization": "NFC",
             "token_pattern": DOCS_INDEX_TOKEN_PATTERN.pattern,
             "stores_full_text": False,
             "stores_text_hashes": True,
@@ -280,7 +480,12 @@ def build_docs_index(
 
 
 def tokenize_index_terms(text: str) -> list[str]:
-    return [match.group(0).lower()[:256] for match in DOCS_INDEX_TOKEN_PATTERN.finditer(text)]
+    # Tokenize the NFC form (NFD combining marks are not ``\w`` and would split
+    # words), then casefold each token; queries go through the same function.
+    return [
+        normalize_search_text(match.group(0))[:256]
+        for match in DOCS_INDEX_TOKEN_PATTERN.finditer(normalize_nfc(text))
+    ]
 
 
 def normalize_index_query_terms(keywords: Sequence[str]) -> list[str]:
@@ -292,7 +497,7 @@ def normalize_index_query_terms(keywords: Sequence[str]) -> list[str]:
             continue
         tokens = tokenize_index_terms(raw)
         if not tokens:
-            tokens = [raw.lower()[:256]]
+            tokens = [normalize_search_text(raw)[:256]]
         for token in tokens:
             if token in seen:
                 continue
@@ -455,10 +660,10 @@ def search_docs_index_payload(
     }
 
 
-def write_result(payload: dict[str, object], output: Path) -> None:
+def write_result(payload: dict[str, object], output: Path, *, indent: int | None = 2) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("w", encoding="utf-8", buffering=4 * 1024 * 1024) as handle:
-        json.dump(payload, handle, ensure_ascii=False, indent=2)
+        json.dump(payload, handle, ensure_ascii=False, indent=indent, default=json_default)
         handle.write("\n")
 
 
@@ -596,24 +801,41 @@ def _extract_pdf_text(
     *,
     max_stream_decompressed_bytes: int = MAX_PDF_STREAM_DECOMPRESSED_BYTES,
 ) -> str:
+    """Literal strings shown by PDF text objects (``BT`` ... ``ET``).
+
+    Each stream is inflated when it is Flate-compressed (raw otherwise) and
+    only strings inside text objects are kept: scanning compressed bytes or
+    font/image streams for ``(...)`` produced megabytes of binary noise per
+    PDF (and a multi-GB docs index) without adding readable text. A file
+    without any stream (rare hand-written PDFs) is still scanned whole.
+    """
     data = path.read_bytes()
     snippets: list[str] = []
-    for stream in re.findall(rb"stream\r?\n(.*?)\r?\nendstream", data, re.DOTALL):
-        candidates = [stream]
+    found_stream = False
+    for match in _PDF_STREAM_RE.finditer(data):
+        found_stream = True
+        stream = match.group(1)
         try:
-            candidates.append(
-                _decompress_pdf_stream(
-                    stream,
-                    max_decompressed_bytes=max_stream_decompressed_bytes,
-                )
-            )
+            content = _decompress_pdf_stream(stream, max_decompressed_bytes=max_stream_decompressed_bytes)
         except zlib.error:
-            pass
-        for item in candidates:
-            snippets.extend(_extract_pdf_literal_strings(item))
-    if not snippets:
+            content = stream
+        snippets.extend(_extract_pdf_text_object_strings(content))
+    if not found_stream:
         snippets.extend(_extract_pdf_literal_strings(data))
     return " ".join(snippets)
+
+
+_PDF_TEXT_OBJECT_RE = re.compile(rb"\bBT\b(.*?)\bET\b", re.DOTALL)
+_PDF_STREAM_RE = re.compile(rb"stream\r?\n(.*?)\r?\nendstream", re.DOTALL)
+
+
+def _extract_pdf_text_object_strings(content: bytes) -> list[str]:
+    if b"BT" not in content:
+        return []
+    found: list[str] = []
+    for block in _PDF_TEXT_OBJECT_RE.findall(content):
+        found.extend(_extract_pdf_literal_strings(block))
+    return found
 
 
 def _decompress_pdf_stream(stream: bytes, *, max_decompressed_bytes: int) -> bytes:
@@ -777,11 +999,14 @@ def _strip_markup(text: str) -> str:
 
 
 def build_preview(text: str, keyword: str, radius: int = 80) -> str:
-    lower = text.lower()
-    index = lower.find(keyword.lower())
-    if index < 0:
-        return text[: radius * 2].strip()
+    # Match offsets come from normalized (NFC + casefold) text, whose length can
+    # differ from ``text``; locate_normalized maps the span onto the NFC form of
+    # the text, so the preview is cut from that form (== ``text`` when NFC).
+    located = locate_normalized(text, keyword)
+    if located is None:
+        return normalize_nfc(text[: radius * 2]).strip()
+    display, index, match_end = located
     start = max(0, index - radius)
-    end = min(len(text), index + len(keyword) + radius)
-    preview = text[start:end].strip()
+    end = min(len(display), match_end + radius)
+    preview = display[start:end].strip()
     return preview.replace("\n", " ")

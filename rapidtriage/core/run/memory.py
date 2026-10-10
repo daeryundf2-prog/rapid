@@ -22,6 +22,9 @@ from .constants import (
 from .profiles import RunModeError
 
 __all__ = [
+    "DEFAULT_MEMORY_CAP_FALLBACK_BYTES",
+    "DEFAULT_MEMORY_CAP_RAM_FRACTION",
+    "MemoryCapExceeded",
     "build_memory_cap_trusted_diff",
     "current_memory_rss_bytes",
     "enforce_memory_cap",
@@ -29,25 +32,143 @@ __all__ = [
     "memory_cap_enforcement_manifest",
     "memory_cap_policy_profile",
     "memory_cap_report_grade_validation_plan",
+    "memory_cap_source",
     "memory_cap_stage_check_row",
     "memory_cap_stage_telemetry_manifest",
+    "peak_memory_rss_bytes",
+    "physical_memory_bytes",
     "resolve_memory_cap_bytes",
 ]
 
 
-def resolve_memory_cap_bytes(argument_value: int) -> int:
-    if argument_value > 0:
-        return argument_value
-    raw_value = os.environ.get(MEMORY_CAP_ENV, "")
-    if not raw_value:
+# Default run memory cap when neither --memory-cap-bytes nor the environment
+# variable sets one: half of physical RAM (run-pipeline-mitigations I13),
+# or 16 GiB when physical RAM cannot be read.
+DEFAULT_MEMORY_CAP_RAM_FRACTION = 0.5
+DEFAULT_MEMORY_CAP_FALLBACK_BYTES = 16 * 1024**3
+
+
+class MemoryCapExceeded(RunModeError):
+    """Run RSS crossed the memory cap at a stage/provider boundary (fail fast)."""
+
+    code = "memory-cap"
+
+    def __init__(self, message: str, *, stage: str, row: Mapping[str, object]) -> None:
+        super().__init__(message)
+        self.stage = stage
+        self.row = dict(row)
+
+
+def physical_memory_bytes() -> int:
+    """Installed physical RAM in bytes (0 when it cannot be determined)."""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            class MEMORYSTATUSEX(ctypes.Structure):
+                _fields_ = [
+                    ("dwLength", wintypes.DWORD),
+                    ("dwMemoryLoad", wintypes.DWORD),
+                    ("ullTotalPhys", ctypes.c_ulonglong),
+                    ("ullAvailPhys", ctypes.c_ulonglong),
+                    ("ullTotalPageFile", ctypes.c_ulonglong),
+                    ("ullAvailPageFile", ctypes.c_ulonglong),
+                    ("ullTotalVirtual", ctypes.c_ulonglong),
+                    ("ullAvailVirtual", ctypes.c_ulonglong),
+                    ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+                ]
+
+            status = MEMORYSTATUSEX()
+            status.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+                return int(status.ullTotalPhys)
+        except Exception:
+            return 0
         return 0
     try:
-        return max(0, int(raw_value))
-    except ValueError:
+        return int(os.sysconf("SC_PAGE_SIZE")) * int(os.sysconf("SC_PHYS_PAGES"))
+    except (AttributeError, OSError, ValueError):
         return 0
+
+
+def default_memory_cap_bytes() -> int:
+    physical = physical_memory_bytes()
+    if physical <= 0:
+        return DEFAULT_MEMORY_CAP_FALLBACK_BYTES
+    return int(physical * DEFAULT_MEMORY_CAP_RAM_FRACTION)
+
+
+def memory_cap_source(argument_value: int) -> str:
+    """Where ``resolve_memory_cap_bytes`` took the cap from."""
+    if argument_value > 0:
+        return "argument"
+    raw_value = os.environ.get(MEMORY_CAP_ENV, "").strip()
+    if raw_value:
+        try:
+            int(raw_value)
+            return "environment"
+        except ValueError:
+            pass
+    return "default-physical-ram-fraction"
+
+
+def resolve_memory_cap_bytes(argument_value: int) -> int:
+    """Effective run memory cap.
+
+    ``--memory-cap-bytes`` wins, then ``RAPIDTRIAGE_MEMORY_CAP_BYTES``
+    (``0`` there disables the cap explicitly); otherwise half of physical
+    RAM (16 GiB fallback when RAM cannot be read).
+    """
+    if argument_value > 0:
+        return argument_value
+    raw_value = os.environ.get(MEMORY_CAP_ENV, "").strip()
+    if raw_value:
+        try:
+            return max(0, int(raw_value))
+        except ValueError:
+            pass
+    return default_memory_cap_bytes()
+
+
+def _windows_process_memory() -> tuple[int, int]:
+    """(working set, peak working set) of this process on Windows."""
+    import ctypes
+    from ctypes import wintypes
+
+    class PROCESS_MEMORY_COUNTERS(ctypes.Structure):
+        _fields_ = [
+            ("cb", wintypes.DWORD),
+            ("PageFaultCount", wintypes.DWORD),
+            ("PeakWorkingSetSize", ctypes.c_size_t),
+            ("WorkingSetSize", ctypes.c_size_t),
+            ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+            ("PagefileUsage", ctypes.c_size_t),
+            ("PeakPagefileUsage", ctypes.c_size_t),
+        ]
+
+    counters = PROCESS_MEMORY_COUNTERS()
+    counters.cb = ctypes.sizeof(PROCESS_MEMORY_COUNTERS)
+    get_info = ctypes.windll.psapi.GetProcessMemoryInfo
+    get_info.argtypes = [wintypes.HANDLE, ctypes.POINTER(PROCESS_MEMORY_COUNTERS), wintypes.DWORD]
+    get_info.restype = wintypes.BOOL
+    handle = ctypes.windll.kernel32.GetCurrentProcess()
+    if not get_info(handle, ctypes.byref(counters), counters.cb):
+        return 0, 0
+    return int(counters.WorkingSetSize), int(counters.PeakWorkingSetSize)
 
 
 def current_memory_rss_bytes() -> int:
+    """Resident set size of this process (Windows: current working set;
+    POSIX: ``ru_maxrss``, i.e. the high-water mark)."""
+    if sys.platform == "win32":
+        try:
+            return _windows_process_memory()[0]
+        except Exception:
+            return 0
     try:
         import resource
 
@@ -59,12 +180,24 @@ def current_memory_rss_bytes() -> int:
     return rss * 1024
 
 
+def peak_memory_rss_bytes() -> int:
+    """High-water resident set size of this process (0 when unavailable)."""
+    if sys.platform == "win32":
+        try:
+            return _windows_process_memory()[1]
+        except Exception:
+            return 0
+    return current_memory_rss_bytes()
+
+
 def enforce_memory_cap(stage: str, memory_cap_bytes: int, *, sequence: int = 0) -> dict[str, object]:
     row = memory_cap_stage_check_row(stage, memory_cap_bytes, sequence=sequence)
     if row["over_cap"]:
-        raise RunModeError(
+        raise MemoryCapExceeded(
             f"memory cap exceeded at stage {stage}: current_rss_bytes={row['current_rss_bytes']} "
-            f"cap_bytes={memory_cap_bytes} utilization_percent={row['utilization_percent']}"
+            f"cap_bytes={memory_cap_bytes} utilization_percent={row['utilization_percent']}",
+            stage=stage,
+            row=row,
         )
     return row
 

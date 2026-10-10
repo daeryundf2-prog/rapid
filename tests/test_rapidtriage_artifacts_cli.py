@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from rapidtriage.cli import build_parser, main
+from rapidtriage.core.artifact_store import artifact_record_with_fields
 
 FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "rapidtriage" / "windows_artifacts"
 
@@ -44,7 +45,13 @@ class RapidTriageArtifactsCliTests(unittest.TestCase):
             first_record = payload["artifacts"][0]["artifact_record"]
             self.assertEqual(first_record["schema"], "ArtifactRecordV1")
             self.assertEqual(first_record["artifact_family"], "browser")
-            self.assertEqual(first_record["fields"]["gui_contract"]["primary_tab"], "artifacts")
+            # Rows are serialized once: the envelope omits ``fields`` and it is
+            # rebuilt from ``details`` on demand.
+            self.assertNotIn("fields", first_record)
+            self.assertEqual(first_record["fields_source"], "details")
+            rebuilt = artifact_record_with_fields(payload["artifacts"][0])
+            self.assertEqual(rebuilt["fields"]["gui_contract"]["primary_tab"], "artifacts")
+            self.assertEqual(rebuilt["fields"]["details"], payload["artifacts"][0]["details"])
 
     def test_recent_files_artifacts_command_writes_expected_payload(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

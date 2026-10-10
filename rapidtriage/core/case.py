@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from .artifact_profiles import iter_payload_records
 from .docs import write_result
 from .schema_validation import SchemaValidationError, load_schema, validate
 
@@ -380,6 +381,10 @@ def resolve_case_source_row(
     except ValueError as exc:
         raise CaseBookmarkError(f"bookmark pointer segment is not a list index: {tokens[1]!r}") from exc
 
+    if source_command == "artifacts" and payload.get("records_path") and index >= 0:
+        # JSONL-backed run output: the inline array is only a preview.
+        collection = list(iter_payload_records(payload, offset=index, limit=1))
+        index = 0
     try:
         item = collection[index]
     except IndexError as exc:

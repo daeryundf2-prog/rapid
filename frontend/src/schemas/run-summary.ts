@@ -20,6 +20,30 @@ conversion_tool?: string
 scan_scope_root: string
 output_dir: string
 audit?: string
+/**
+ * Unified search backend for this run: fts when the persist step built rapidtriage-case.db, else scan (bounded).
+ */
+search_backend?: ("fts" | "scan")
+/**
+ * Persist step record for the run-local case DB search index.
+ */
+case_db?: {
+status: ("completed" | "failed" | "skipped")
+search_backend: ("fts" | "scan")
+path?: string
+case_id?: string
+started_at?: string
+completed_at?: string
+elapsed_seconds?: number
+document_text_source?: string
+counts?: {
+[k: string]: number | undefined
+}
+size_bytes?: number
+error?: string
+reason?: string
+[k: string]: unknown | undefined
+}
 carving?: {
 enabled: boolean
 output: string
@@ -41,6 +65,7 @@ artifacts_kinds: string[]
 safety: {
 dry_run: boolean
 read_only: boolean
+extract?: boolean
 max_extract_size_bytes: number
 max_file_count: number
 memory_cap_bytes: number

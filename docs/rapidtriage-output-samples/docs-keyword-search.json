@@ -50,270 +50,168 @@
         "description": "Cross-platform document candidates discovered from the filesystem",
         "target_platform": "any",
         "supported": true,
-        "artifacts": [
-          {
-            "provider": "generic-documents",
-            "artifact_type": "document-metadata-risk",
-            "path": "<ROOT>/report.docx",
-            "supported": true,
-            "details": {
-              "parser": "document-metadata-risk",
-              "parser_version": "generic-documents-v4",
-              "source_path": "<ROOT>/report.docx",
-              "source_hashes": {
-                "md5": "b95555de96ac97f41dbb04ab82398800",
-                "sha1": "1fcbb0a6aba697ebd42d3b4c74e214031dc274e3",
-                "sha256": "eb054447adf11f487f65c7f0851679ca9b0bb1ce3328fed7b011b151f7967e89"
-              },
-              "document_family": "docx",
-              "metadata_profile": {
-                "profile_version": "document-metadata-risk-profile-v1",
-                "analysis_status": "parsed",
-                "document_family": "docx",
-                "properties": {},
-                "author_candidates": [],
-                "timestamp_candidates": {},
-                "macro_profile": {
-                  "macro_present": false,
-                  "macro_paths": [],
-                  "macro_scan_status": "not-detected"
-                },
-                "external_reference_candidates": [],
-                "risk_flags": [
-                  "document-metadata-profile"
-                ],
-                "values_are_candidates": true,
-                "validation_guidance": "Document metadata and VBA presence are triage pivots. Confirm author/timestamp semantics and macro behavior with a dedicated Office/ODF parser or sandbox before reporting intent or malware conclusions."
-              },
-              "author_candidates": [],
-              "timestamp_candidates": {},
-              "macro_profile": {
-                "macro_present": false,
-                "macro_paths": [],
-                "macro_scan_status": "not-detected"
-              },
-              "external_reference_candidates": [],
-              "coverage_status": "document-metadata-and-risk-profile",
-              "validation_required": true,
-              "commercial_grade_ready": false,
-              "commercial_grade_blockers": [
-                "office-version-metadata-fixture-required",
-                "macro-static-analysis-not-complete",
-                "trusted-document-parser-diff-required"
-              ],
-              "risk_flags": [
-                "document-metadata-profile"
-              ]
-            }
-          },
-          {
-            "provider": "generic-documents",
-            "artifact_type": "document-pattern",
-            "path": "<ROOT>",
-            "supported": true,
-            "details": {
-              "extension": ".docx"
-            }
-          },
-          {
-            "provider": "generic-documents",
-            "artifact_type": "document-pattern",
-            "path": "<ROOT>",
-            "supported": true,
-            "details": {
-              "extension": ".pdf"
-            }
-          },
-          {
-            "provider": "generic-documents",
-            "artifact_type": "document-pattern",
-            "path": "<ROOT>",
-            "supported": true,
-            "details": {
-              "extension": ".txt"
-            }
-          }
-        ]
+        "artifact_count": 4
       },
       {
         "name": "android-apk-artifacts",
         "description": "Android APK inventory, hashes, manifest metadata, permissions, and triage risk flags",
         "target_platform": "android",
         "supported": true,
-        "artifacts": []
+        "artifact_count": 0
       },
       {
         "name": "cloud-export-artifacts",
         "description": "Cloud account export normalization for Google Takeout-style activity/location and account JSON",
         "target_platform": "cloud",
         "supported": true,
-        "artifacts": []
+        "artifact_count": 0
       },
       {
         "name": "email-artifacts",
         "description": "Email EML/MBOX parsing and PST/OST/MSG bounded mailbox inventory",
         "target_platform": "any",
         "supported": true,
-        "artifacts": []
+        "artifact_count": 0
       },
       {
         "name": "linux-system-artifacts",
         "description": "Linux user, shell history, SSH, auth log, cron, and systemd triage artifacts",
         "target_platform": "linux",
         "supported": true,
-        "artifacts": []
+        "artifact_count": 0
       },
       {
         "name": "macos-system-artifacts",
         "description": "macOS user, browser, quarantine, TCC privacy permission, and LaunchAgent triage artifacts",
         "target_platform": "macos",
         "supported": true,
-        "artifacts": []
+        "artifact_count": 0
       },
       {
         "name": "media-image-artifacts",
         "description": "Image inventory with dimensions, hashes, perceptual hash, OCR queue hints, and similarity buckets",
         "target_platform": "any",
         "supported": true,
-        "artifacts": []
+        "artifact_count": 0
       },
       {
         "name": "memory-volatility-artifacts",
         "description": "Volatility/Volatility3 output normalization plus bounded direct memory dump indicator scanning",
         "target_platform": "memory",
         "supported": true,
-        "artifacts": []
+        "artifact_count": 0
       },
       {
         "name": "synthetic-media-artifacts",
         "description": "Optional deepfake-lens screening of image/text evidence; emits prioritization scores for review ordering, not truth labels",
         "target_platform": "any",
         "supported": false,
-        "artifacts": [
-          {
-            "provider": "synthetic-media-artifacts",
-            "artifact_type": "synthetic-media-scan-status",
-            "path": "<ROOT>",
-            "supported": false,
-            "details": {
-              "parser": "synthetic-media-deepfake-lens",
-              "parser_version": "synthetic-media-deepfake-lens-v1",
-              "coverage_status": "provider-unavailable",
-              "reportability": "inventory-only",
-              "scan_status": "skipped-optional-dependency",
-              "reason": "deepfake_lens python module is not importable in this environment",
-              "deepfake_lens_cli_path": "<TOOL_PATH>",
-              "install_hint": "Install the deepfake-lens toolkit (pip install deepfake-lens or a checkout on PYTHONPATH) to enable synthetic-media screening.",
-              "score_semantics": "prioritization-score-not-truth-label",
-              "validation_required": false
-            }
-          }
-        ]
+        "artifact_count": 1
       },
       {
         "name": "mobile-export-artifacts",
         "description": "Cellebrite/XRY/GrayKey/AXIOM-style mobile export CSV/JSON normalization",
         "target_platform": "mobile",
         "supported": true,
-        "artifacts": []
+        "artifact_count": 0
       },
       {
         "name": "kakaotalk-macos-database-inventory",
         "description": "macOS KakaoTalk container and database inventory with SQLite openability checks",
         "target_platform": "macos",
         "supported": true,
-        "artifacts": []
+        "artifact_count": 0
       },
       {
         "name": "kakaotalk-windows-correlation",
         "description": "KakaoTalk Windows correlation across Windows.edb, Registry, and memory dumps",
         "target_platform": "windows",
         "supported": true,
-        "artifacts": []
+        "artifact_count": 0
       },
       {
         "name": "windows-browser-artifacts",
         "description": "Windows browser history/download collectors backed by real profile files",
         "target_platform": "windows",
         "supported": true,
-        "artifacts": []
+        "artifact_count": 0
       },
       {
         "name": "windows-recent-files",
         "description": "Windows Recent items and Jump Lists collected from per-user profile directories",
         "target_platform": "windows",
         "supported": true,
-        "artifacts": []
+        "artifact_count": 0
       },
       {
         "name": "windows-os-account",
         "description": "Windows OS and account summary artifacts",
         "target_platform": "windows",
         "supported": true,
-        "artifacts": []
+        "artifact_count": 0
       },
       {
         "name": "windows-execution",
         "description": "Windows execution artifacts from registry exports and PowerShell history",
         "target_platform": "windows",
         "supported": true,
-        "artifacts": []
+        "artifact_count": 0
       },
       {
         "name": "windows-filesystem",
         "description": "Windows MFT and USN Journal imports plus bounded native NTFS inventory",
         "target_platform": "windows",
         "supported": true,
-        "artifacts": []
+        "artifact_count": 0
       },
       {
         "name": "windows-eventlog",
         "description": "Windows Event Log EVTX inventory and XML/JSON/JSONL/CSV event imports",
         "target_platform": "windows",
         "supported": true,
-        "artifacts": []
+        "artifact_count": 0
       },
       {
         "name": "windows-registry",
         "description": "Windows Registry .reg export artifacts",
         "target_platform": "windows",
         "supported": true,
-        "artifacts": []
+        "artifact_count": 0
       },
       {
         "name": "windows-remote-access",
         "description": "Windows RDP configuration, cache, and exported destination artifacts",
         "target_platform": "windows",
         "supported": true,
-        "artifacts": []
+        "artifact_count": 0
       },
       {
         "name": "windows-search-index",
         "description": "Windows Search index EDB inventory and CSV/JSON export imports",
         "target_platform": "windows",
         "supported": true,
-        "artifacts": []
+        "artifact_count": 0
       },
       {
         "name": "windows-shellbags",
         "description": "Windows ShellBags from Registry exports and native user-hive candidates",
         "target_platform": "windows",
         "supported": true,
-        "artifacts": []
+        "artifact_count": 0
       },
       {
         "name": "windows-prefetch",
         "description": "Windows Prefetch execution artifact inventory",
         "target_platform": "windows",
         "supported": true,
-        "artifacts": []
+        "artifact_count": 0
       },
       {
         "name": "windows-system-artifacts",
         "description": "Windows Task Scheduler, Defender, Firewall, WER, and Zone.Identifier artifacts",
         "target_platform": "windows",
         "supported": true,
-        "artifacts": []
+        "artifact_count": 0
       }
     ]
   },

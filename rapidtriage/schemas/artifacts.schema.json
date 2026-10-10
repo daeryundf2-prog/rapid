@@ -117,7 +117,8 @@
           },
           "artifact_record": {
             "type": "object",
-            "additionalProperties": true
+            "additionalProperties": true,
+            "description": "ArtifactRecordV1 envelope; run outputs omit fields (fields_source: details) and hoist constant envelope parts into artifact_type_profiles"
           },
           "matched_rules": {
             "type": "array",
@@ -150,6 +151,18 @@
                 }
               }
             }
+          },
+          "profile_ref": {
+            "type": "string",
+            "description": "artifact_type whose artifact_type_profiles entry holds this row's hoisted constant blocks; merge it back with expand_profile"
+          },
+          "incremental_reuse": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "context_ref": {
+            "type": "boolean",
+            "description": "true when artifact_type_profiles[profile_ref].contexts[path] holds this row's per-source-file constants"
           }
         }
       }
@@ -276,6 +289,69 @@
           }
         }
       }
+    },
+    "artifact_type_profiles": {
+      "type": "object",
+      "description": "Per artifact_type templates of constant (parts of) details blocks and the ArtifactRecordV1 envelope; rows with profile_ref deep-merge their residue over them",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "details": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "artifact_record": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "contexts": {
+            "type": "object",
+            "description": "per source file (row path) templates: details/artifact_record",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "codes": {
+            "type": "object",
+            "description": "dictionary-encoded details labels: key -> value list; rows hold the index",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "collector_options": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "artifacts_preview": {
+      "type": "boolean",
+      "description": "true when artifacts holds only the first rows; the full row stream is records_path"
+    },
+    "record_count": {
+      "type": "integer",
+      "description": "rows in records_path"
+    },
+    "records_path": {
+      "type": "string",
+      "description": "absolute path of the JSONL row stream (one artifacts row per line)"
+    },
+    "records_file": {
+      "type": "string",
+      "description": "records_path file name, resolved next to this JSON when the run directory moved"
+    },
+    "records_format": {
+      "const": "jsonl"
+    },
+    "incremental_delta": {
+      "type": "object",
+      "additionalProperties": true
     }
   }
 }

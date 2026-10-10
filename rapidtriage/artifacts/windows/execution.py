@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import bisect
 import codecs
 import csv
 import datetime as dt
@@ -2723,7 +2724,7 @@ def build_srum_schema_row_record(
             "app_identity": app_identity,
             "timestamp": timestamp,
             "timestamp_source": "native-ese-row-field" if timestamp else "not-decoded",
-            "row_fields": row,
+            "row_fields": _json_safe_row_fields(row),
             "decode_markers": markers,
             "row_level_decoding_available": True,
             "evidence_strength": "srum-row-indicator-candidate",
@@ -2754,6 +2755,48 @@ def build_srum_schema_row_record(
             "raw_preview": repr(row)[:2000],
         },
     )
+
+
+SRUM_ROW_FIELD_UTF16_PREVIEW_CHARS = 120
+
+
+def _json_safe_row_fields(row: Mapping[str, object]) -> dict[str, object]:
+    """Return ESE row columns with binary values converted to JSON objects.
+
+    Native ESE decoding yields raw ``bytes`` for binary/long-value columns
+    (for example ``SruDbIdMapTable.IdBlob``). Each binary value becomes
+    ``{"hex", "length"}`` plus a ``utf16le_preview`` when the bytes decode as
+    printable UTF-16LE text, which is the common IdBlob encoding.
+    """
+    return {str(key): _json_safe_row_value(value) for key, value in row.items()}
+
+
+def _json_safe_row_value(value: object) -> object:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        raw = bytes(value)
+        converted: dict[str, object] = {"hex": raw.hex(), "length": len(raw)}
+        preview = _utf16le_preview(raw)
+        if preview:
+            converted["utf16le_preview"] = preview
+        return converted
+    if isinstance(value, Mapping):
+        return _json_safe_row_fields(value)
+    if isinstance(value, (list, tuple)):
+        return [_json_safe_row_value(item) for item in value]
+    return value
+
+
+def _utf16le_preview(raw: bytes) -> str:
+    if not raw or len(raw) % 2:
+        return ""
+    try:
+        text = raw.decode("utf-16le")
+    except UnicodeDecodeError:
+        return ""
+    text = text.rstrip("\x00")
+    if not text or not text.isprintable():
+        return ""
+    return text[:SRUM_ROW_FIELD_UTF16_PREVIEW_CHARS]
 
 
 def srum_schema_row_identity(row: Mapping[str, object]) -> str:
@@ -6682,7 +6725,30 @@ def iter_utf16le_string_occurrences(blob: bytes, *, min_chars: int = 4) -> Itera
             yield {"text": text, "offset": start, "encoding": "utf-16le"}
 
 
+def occurrence_window_lookup(
+    occurrences: Sequence[Mapping[str, object]],
+    window_bytes: int,
+):
+    """Return ``nearby(offset)``: occurrences within ``window_bytes`` of ``offset``.
+
+    Same rows, in the same (input) order, as filtering every occurrence with
+    ``abs(offset - source) <= window_bytes``, but via binary search over the
+    sorted offsets instead of a full scan per path occurrence (which made
+    hive string clustering quadratic).
+    """
+    keyed = sorted((int(candidate.get("offset") or 0), index) for index, candidate in enumerate(occurrences))
+    offsets = [offset for offset, _ in keyed]
+
+    def nearby(source_offset: int) -> list[Mapping[str, object]]:
+        low = bisect.bisect_left(offsets, source_offset - window_bytes)
+        high = bisect.bisect_right(offsets, source_offset + window_bytes)
+        return [occurrences[index] for index in sorted(keyed[position][1] for position in range(low, high))]
+
+    return nearby
+
+
 def collect_amcache_candidate_clusters(occurrences: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+    nearby_occurrences = occurrence_window_lookup(occurrences, AMCACHE_ROW_CLUSTER_WINDOW_BYTES)
     path_occurrences = [
         item
         for item in occurrences
@@ -6695,11 +6761,7 @@ def collect_amcache_candidate_clusters(occurrences: Sequence[Mapping[str, object
         if not normalized_path:
             continue
         source_offset = int(item.get("offset") or 0)
-        nearby = [
-            candidate
-            for candidate in occurrences
-            if abs(int(candidate.get("offset") or 0) - source_offset) <= AMCACHE_ROW_CLUSTER_WINDOW_BYTES
-        ]
+        nearby = nearby_occurrences(source_offset)
         sha1_candidates = sorted(
             {
                 match.group(0).lower()
@@ -6744,6 +6806,7 @@ def collect_amcache_candidate_clusters(occurrences: Sequence[Mapping[str, object
 
 
 def collect_shimcache_candidate_clusters(occurrences: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+    nearby_occurrences = occurrence_window_lookup(occurrences, SHIMCACHE_ROW_CLUSTER_WINDOW_BYTES)
     path_occurrences = [
         item
         for item in occurrences
@@ -6756,11 +6819,7 @@ def collect_shimcache_candidate_clusters(occurrences: Sequence[Mapping[str, obje
         if not normalized_path:
             continue
         source_offset = int(item.get("offset") or 0)
-        nearby = [
-            candidate
-            for candidate in occurrences
-            if abs(int(candidate.get("offset") or 0) - source_offset) <= SHIMCACHE_ROW_CLUSTER_WINDOW_BYTES
-        ]
+        nearby = nearby_occurrences(source_offset)
         timestamp_candidates = [
             value
             for _, value in sorted(
@@ -6798,6 +6857,7 @@ def collect_shimcache_candidate_clusters(occurrences: Sequence[Mapping[str, obje
 
 
 def collect_bam_dam_candidate_clusters(occurrences: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+    nearby_occurrences = occurrence_window_lookup(occurrences, BAM_DAM_ROW_CLUSTER_WINDOW_BYTES)
     path_occurrences = [
         item
         for item in occurrences
@@ -6810,11 +6870,7 @@ def collect_bam_dam_candidate_clusters(occurrences: Sequence[Mapping[str, object
         if not normalized_path:
             continue
         source_offset = int(item.get("offset") or 0)
-        nearby = [
-            candidate
-            for candidate in occurrences
-            if abs(int(candidate.get("offset") or 0) - source_offset) <= BAM_DAM_ROW_CLUSTER_WINDOW_BYTES
-        ]
+        nearby = nearby_occurrences(source_offset)
         user_sid = next(
             (
                 match.group(0)

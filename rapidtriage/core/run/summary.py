@@ -92,7 +92,7 @@ def build_run_summary(
     source: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     provider_counts = {
-        str(provider["name"]): len(provider.get("artifacts", []))
+        str(provider["name"]): manifest_provider_artifact_count(provider)
         for provider in manifest_payload.get("providers", [])
         if isinstance(provider, dict) and provider.get("name")
     }
@@ -1061,12 +1061,30 @@ def infer_processing_profile_label(
     return "Deep - uncapped extraction"
 
 
+def manifest_provider_artifact_count(provider: Mapping[str, object]) -> int:
+    """Rows of a manifest provider: inline ``artifacts`` or the summary count."""
+    artifacts = provider.get("artifacts")
+    if isinstance(artifacts, list):
+        return len(artifacts)
+    try:
+        return int(provider.get("artifact_count") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def count_artifact_types(providers: object) -> Counter[str]:
     counts: Counter[str] = Counter()
     if not isinstance(providers, list):
         return counts
     for provider in providers:
         if not isinstance(provider, dict):
+            continue
+        type_counts = provider.get("artifact_type_counts")
+        if "artifacts" not in provider and isinstance(type_counts, Mapping):
+            # Run manifests carry per-provider summaries, not row arrays.
+            for artifact_type, count in type_counts.items():
+                if artifact_type:
+                    counts[str(artifact_type)] += int(count or 0)
             continue
         artifacts = provider.get("artifacts", [])
         if not isinstance(artifacts, list):

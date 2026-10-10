@@ -32,7 +32,14 @@ name: string
 description: string
 target_platform: string
 supported: boolean
-artifacts: {
+/**
+ * Number of artifact rows the provider produced; the rows themselves are in rapidtriage-manifest.json and artifacts/*.json.
+ */
+artifact_count?: number
+/**
+ * Legacy docs.json outputs embedded every artifact row here; current outputs omit it.
+ */
+artifacts?: {
 provider: string
 artifact_type: string
 path: string

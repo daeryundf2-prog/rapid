@@ -11,6 +11,7 @@ from collections.abc import Iterable, Mapping, MutableMapping, Sequence
 from pathlib import Path
 from urllib.parse import urlparse
 
+from .artifact_profiles import iter_payload_records
 from .forensic_accuracy import build_accuracy_gate
 from .json_stream import LazyArray, LazyObject, Scalar, open_json
 from .rules import RuleSet
@@ -102,6 +103,16 @@ def build_indicator_summary(
         if not payload:
             continue
         source_counts[output_name] += 1
+        if output_name.startswith("artifacts_") and (payload.get("records_path") or payload.get("records_file")):
+            collect_indicators_from_artifact_records(
+                payload,
+                output_path,
+                accumulator,
+                scanner_accumulator,
+                source=source,
+                max_sources_per_indicator=max_sources_per_indicator,
+            )
+            continue
         collect_ioc_scanner_hits_from_payload(
             payload,
             scanner_accumulator,
@@ -241,6 +252,52 @@ def iter_run_json_outputs(outputs: Mapping[str, object]) -> Iterable[tuple[str, 
         path = Path(str(raw_path)).expanduser().resolve()
         if path.is_file():
             yield output_name, path
+
+
+def collect_indicators_from_artifact_records(
+    payload: Mapping[str, object],
+    payload_path: Path,
+    accumulator: MutableMapping[tuple[str, str], dict[str, object]],
+    scanner_accumulator: MutableMapping[tuple[str, str, str], dict[str, object]],
+    *,
+    source: Mapping[str, str],
+    max_sources_per_indicator: int,
+) -> None:
+    """Scan a JSONL-backed per-kind payload one row at a time.
+
+    Pointers keep the inline shape (``/artifacts/<index>/...``). Rows are
+    scanned as stored: constant blocks hoisted to ``artifact_type_profiles``
+    are scanned once there instead of once per row.
+    """
+    head = {key: value for key, value in payload.items() if key != "artifacts"}
+    nested_hits = list(iter_ioc_hit_contexts(head, pointer="", include_root=False))
+    for pointer, value, context in iter_scalar_contexts(head):
+        collect_indicators_from_text(
+            value,
+            accumulator,
+            source={**source, "pointer": pointer, **context},
+            max_sources_per_indicator=max_sources_per_indicator,
+        )
+    for index, row in enumerate(iter_payload_records(payload, payload_path=payload_path, expand=False)):
+        row_pointer = f"/artifacts/{index}"
+        nested_hits.extend(iter_ioc_hit_contexts(row, pointer=row_pointer, include_root=False))
+        for pointer, value, context in iter_scalar_contexts(row, row_pointer):
+            collect_indicators_from_text(
+                value,
+                accumulator,
+                source={**source, "pointer": pointer, **context},
+                max_sources_per_indicator=max_sources_per_indicator,
+            )
+    hit_contexts = nested_hits or list(iter_ioc_hit_contexts(head, pointer="", include_root=True))
+    for pointer, hit, context in hit_contexts:
+        add_ioc_scanner_hit_from_dict(
+            scanner_accumulator,
+            hit,
+            pointer=pointer,
+            context=context,
+            source=source,
+            max_sources_per_hit=max_sources_per_indicator,
+        )
 
 
 def read_json_path(path: Path) -> Mapping[str, object] | None:

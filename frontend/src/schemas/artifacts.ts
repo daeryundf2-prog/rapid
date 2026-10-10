@@ -31,6 +31,9 @@ supported: boolean
 details: {
 [k: string]: unknown | undefined
 }
+/**
+ * ArtifactRecordV1 envelope; run outputs omit fields (fields_source: details) and hoist constant envelope parts into artifact_type_profiles
+ */
 artifact_record?: {
 [k: string]: unknown | undefined
 }
@@ -41,6 +44,17 @@ type: string
 value: string
 count?: number
 }[]
+/**
+ * artifact_type whose artifact_type_profiles entry holds this row's hoisted constant blocks; merge it back with expand_profile
+ */
+profile_ref?: string
+incremental_reuse?: {
+[k: string]: unknown | undefined
+}
+/**
+ * true when artifact_type_profiles[profile_ref].contexts[path] holds this row's per-source-file constants
+ */
+context_ref?: boolean
 }[]
 artifact_record_contract?: {
 profile_version: "artifact-output-contract-v1"
@@ -72,4 +86,54 @@ type: string
 value: string
 count?: number
 }[]
+/**
+ * Per artifact_type templates of constant (parts of) details blocks and the ArtifactRecordV1 envelope; rows with profile_ref deep-merge their residue over them
+ */
+artifact_type_profiles?: {
+[k: string]: {
+details?: {
+[k: string]: unknown | undefined
+}
+artifact_record?: {
+[k: string]: unknown | undefined
+}
+/**
+ * per source file (row path) templates: details/artifact_record
+ */
+contexts?: {
+[k: string]: {
+[k: string]: unknown | undefined
+} | undefined
+}
+/**
+ * dictionary-encoded details labels: key -> value list; rows hold the index
+ */
+codes?: {
+[k: string]: string[] | undefined
+}
+} | undefined
+}
+collector_options?: {
+[k: string]: unknown | undefined
+}
+/**
+ * true when artifacts holds only the first rows; the full row stream is records_path
+ */
+artifacts_preview?: boolean
+/**
+ * rows in records_path
+ */
+record_count?: number
+/**
+ * absolute path of the JSONL row stream (one artifacts row per line)
+ */
+records_path?: string
+/**
+ * records_path file name, resolved next to this JSON when the run directory moved
+ */
+records_file?: string
+records_format?: "jsonl"
+incremental_delta?: {
+[k: string]: unknown | undefined
+}
 }
