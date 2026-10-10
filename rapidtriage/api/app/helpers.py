@@ -19,10 +19,13 @@ from ...core.case import (
 from ...core.evidence import identify_evidence
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.jobs import (
+    RunJob,
     RunJobStore,
+    default_run_output_dir,
     is_relative_to,
     run_output_dir,
 )
+from ...core.run.progress import read_run_progress
 from ...core.run.summary import derive_counts
 from ...core.source_paths import (
     candidate_source_paths,
@@ -84,6 +87,30 @@ def get_job(store: RunJobStore, run_id: str):
         return store.get(run_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="run not found")
+
+
+def job_output_dir(job: RunJob) -> Path | None:
+    """Output directory a job writes to, also while it is still running."""
+    if job.summary:
+        try:
+            return run_output_dir(job.summary)
+        except RuntimeError:
+            pass
+    request = job.request
+    if request.output_dir:
+        return Path(request.output_dir).expanduser().resolve()
+    if not request.root:
+        return None
+    try:
+        return default_run_output_dir(Path(request.root).expanduser().resolve(), request.mode, run_id=job.run_id)
+    except OSError:
+        return None
+
+
+def run_progress_payload(job: RunJob) -> dict[str, object] | None:
+    """Contents of ``rapidtriage-run-progress.json`` for ``job`` (or ``None``)."""
+    output_dir = job_output_dir(job)
+    return read_run_progress(output_dir) if output_dir is not None else None
 
 
 def validate_run_evidence_source(raw_root: str) -> None:

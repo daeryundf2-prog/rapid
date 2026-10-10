@@ -4,6 +4,8 @@ import json
 import tempfile
 import unittest
 import zipfile
+from datetime import date, datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
 
@@ -12,6 +14,7 @@ from rapidtriage.core.docs import (
     MAX_EXTRACT_TEXT_BYTES,
     TextExtractionTooLarge,
     extract_text,
+    json_default,
     run_docs_search,
     scan_document_candidates,
     write_result,
@@ -352,6 +355,48 @@ class RapidTriageDocsTests(unittest.TestCase):
                 target.read_text(encoding="utf-8"),
                 json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
             )
+
+    def test_write_result_encodes_bytes_datetime_path_and_set_values(self) -> None:
+        stamp = datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+        payload = {
+            "a": b"\x00\xff",
+            "b": bytearray(b"\x01"),
+            "m": memoryview(b"\x02\x03"),
+            "d": stamp,
+            "day": date(2024, 1, 2),
+            "p": Path("evidence") / "note.txt",
+            "s": {2, 1},
+            "f": frozenset({"beta", "alpha"}),
+            "n": Decimal("1.50"),
+            "nested": [{"blob": b"AB"}],
+        }
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            target = Path(tmp_dir) / "safe.json"
+            write_result(payload, target)
+            loaded = json.loads(target.read_text(encoding="utf-8"))
+
+        self.assertEqual(loaded["a"], {"__type__": "bytes", "hex": "00ff", "length": 2})
+        self.assertEqual(loaded["b"], {"__type__": "bytes", "hex": "01", "length": 1})
+        self.assertEqual(loaded["m"], {"__type__": "bytes", "hex": "0203", "length": 2})
+        self.assertEqual(loaded["d"], stamp.isoformat())
+        self.assertEqual(loaded["day"], "2024-01-02")
+        self.assertEqual(loaded["p"], str(Path("evidence") / "note.txt"))
+        self.assertEqual(loaded["s"], [1, 2])
+        self.assertEqual(loaded["f"], ["alpha", "beta"])
+        self.assertEqual(loaded["n"], "1.50")
+        self.assertEqual(loaded["nested"], [{"blob": {"__type__": "bytes", "hex": "4142", "length": 2}}])
+        self.assertEqual(bytes.fromhex(loaded["a"]["hex"]), b"\x00\xff")
+
+    def test_write_result_still_rejects_unknown_objects(self) -> None:
+        class Opaque:
+            pass
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            target = Path(tmp_dir) / "opaque.json"
+            with self.assertRaises(TypeError):
+                write_result({"value": Opaque()}, target)
+        with self.assertRaises(TypeError):
+            json_default(Opaque())
 
     def test_manifest_reports_windows_modules_as_separate_providers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

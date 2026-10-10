@@ -3579,6 +3579,40 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(bundle_file_response.status_code, 200)
             self.assertEqual(bundle_file_response.content[:2], b"PK")
 
+    def test_get_run_includes_live_progress_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            root = tmp_path / "case-root"
+            output_dir = tmp_path / "run-out"
+            root.mkdir(parents=True, exist_ok=True)
+            build_run_fixture(root)
+
+            client = api_test_client(RunJobStore(state_path=tmp_path / "state" / "runs.json"))
+            run_response = client.post(
+                "/api/runs",
+                json={"root": str(root), "mode": "fraud", "output_dir": str(output_dir), "wait": True},
+            )
+            run_id = run_response.json()["run_id"]
+
+            response = client.get(f"/api/runs/{run_id}")
+            self.assertEqual(response.status_code, 200)
+            payload = response.json()
+            self.assertIn("progress", payload)
+            progress = payload["progress"]
+            self.assertEqual(progress["command"], "run-progress")
+            self.assertEqual(progress["status"], "completed")
+            self.assertEqual(progress["completed_count"], progress["total_count"])
+            self.assertGreater(progress["total_count"], 0)
+            self.assertTrue(
+                all(item["status"] in {"completed", "reused"} for item in progress["providers"].values())
+            )
+            # Existing response keys are unchanged.
+            self.assertEqual(payload["status"], "completed")
+            self.assertIn("summary", payload)
+
+            (output_dir / "rapidtriage-run-progress.json").unlink()
+            self.assertIsNone(client.get(f"/api/runs/{run_id}").json()["progress"])
+
     def test_run_catalog_persists_and_imports_existing_output_dir(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)

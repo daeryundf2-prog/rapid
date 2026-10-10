@@ -25348,9 +25348,9 @@
                 "diff run counts, timestamps, paths, and volume data against PECmd or trusted known-answer corpus",
                 "correlate execution claim with Amcache, BAM/DAM, SRUM, EVTX, MFT, or USN evidence"
               ],
-              "manifest_sha256": "<DYNAMIC_MANIFEST_HASH>"
+              "manifest_sha256": "ac631d3056540160a4be2469d9ecd5709b3b262aaa41eee7b0fe5d64a84fc05e"
             },
-            "prefetch_execution_depth_manifest_hash": "<DYNAMIC_MANIFEST_HASH>"
+            "prefetch_execution_depth_manifest_hash": "ac631d3056540160a4be2469d9ecd5709b3b262aaa41eee7b0fe5d64a84fc05e"
           }
         },
         {
@@ -25744,161 +25744,26 @@
             },
             "prefetch_execution_depth_manifest": {
               "manifest_version": "prefetch-execution-depth-manifest-v1",
-              "parser_version": "prefetch-inventory-v9",
-              "commercial_batch_id": "commercial-uplift-016-020",
-              "item_number": 16,
-              "gap_id": "#16",
-              "qc_prep_item_number": 31,
-              "qc_prep_item_goal": "Deepen Prefetch version 17/23/26/30/31 support, compressed PF handling, volume/file metrics, and trace-chain evidence.",
-              "qc_prep_contract": {
-                "item_number": 31,
-                "goal": "Deepen Prefetch version 17/23/26/30/31 support, compressed PF handling, volume/file metrics, and trace-chain evidence.",
-                "implemented_outputs": [
-                  "version-specific common-header profile for versions 17, 23, 26, 30, and observed 31",
-                  "compressed MAM/PF detection with explicit decompression limitation",
-                  "version-aware section bounds profile for file metrics, trace chains, filename strings, and volume locators",
-                  "bounded referenced-path, volume-device, and file-reference candidate pivots",
-                  "execution-depth manifest with source hash, offsets, validation checks, and report blockers"
-                ],
-                "commercial_blockers": [
-                  "native file metrics array decoding",
-                  "authoritative volume table decoding",
-                  "trace-chain/directory section validation",
-                  "PECmd/known-answer cross-version corpus diff evidence"
-                ]
-              },
+              "manifest_detail": "counts-summary",
+              "full_manifest_row": "prefetch-file",
               "artifact_type": "prefetch-reference",
-              "source": {
-                "source_path": "<ROOT>/Windows/Prefetch/POWERSHELL.EXE-12345678.pf",
-                "source_sha256": "4ed0441ececfe85a462ba5770a37ae31ada11a969d8a3f75ab7fa567ed6c0d5a",
-                "source_format": "pf",
-                "source_index": 0,
-                "size": ""
-              },
-              "row_identity": {
-                "entry_name": "POWERSHELL.EXE-12345678.pf",
-                "executable_hint": "POWERSHELL.EXE",
-                "prefetch_hash": "12345678",
-                "artifact_type": "prefetch-reference",
-                "source_index": 0
-              },
+              "entry_name": "POWERSHELL.EXE-12345678.pf",
+              "source_index": 0,
               "row_identity_hash": "04ce238d9cbeadba4108e07ca912397b64b6ff47e40bf80a127bd6846e379d48",
-              "format_validation": {
-                "binary_format_detected": false,
-                "scca_signature": false,
-                "prefetch_version": 0,
-                "layout_name": "",
-                "windows_family": "",
-                "supported_common_layout": false,
-                "declared_file_size": 0,
-                "actual_file_size": 0,
-                "file_size_matches_declared": null,
-                "section_bounds_profile_hash": "",
-                "section_bounds_status": "",
-                "section_count_declared": 0,
-                "declared_sections_within_file": false
-              },
-              "execution_counters": {
-                "run_count": 3,
-                "run_count_present": false,
-                "run_count_plausible": false,
-                "last_run_at": "2024-04-01T09:10:11+00:00",
-                "last_run_times": [],
-                "last_run_time_count": 0,
-                "last_run_times_not_future": false
-              },
-              "referenced_file_metrics": {
+              "counts": {
                 "referenced_path_count": 1,
-                "referenced_paths_preview": [
-                  "\\DEVICE\\HARDDISKVOLUME3\\WINDOWS\\SYSTEM32\\WINDOWSPOWERSHELL\\V1.0\\POWERSHELL.EXE"
-                ],
                 "volume_candidate_count": 0,
-                "volume_candidates": [],
                 "file_reference_candidate_count": 0,
-                "file_reference_candidates": [],
-                "file_metrics_section_status": "",
-                "filename_strings_section_status": "",
-                "volume_information_section_status": "",
-                "full_file_metrics_decoded": false,
-                "mft_file_reference_decode_available": false,
-                "authoritative_volume_table_decoded": false
-              },
-              "section_bounds": {
-                "profile_version": "",
-                "bounds_status": "",
+                "run_count": 3,
+                "last_run_time_count": 0,
                 "section_count_declared": 0,
-                "declared_sections_within_file": false,
-                "section_profile_hash": "",
-                "sections": [],
-                "decode_boundary": ""
+                "citation_ref_count": 6
               },
-              "compression": {
-                "detected": false,
-                "format": "",
-                "declared_uncompressed_size": 0,
-                "decompression_status": "",
-                "decompressed_by_rapidforensic": false
-              },
-              "citation_refs": [
-                {
-                  "kind": "prefetch-source-file",
-                  "source_path": "<ROOT>/Windows/Prefetch/POWERSHELL.EXE-12345678.pf",
-                  "source_sha256": "4ed0441ececfe85a462ba5770a37ae31ada11a969d8a3f75ab7fa567ed6c0d5a"
-                },
-                {
-                  "kind": "prefetch-header-layout",
-                  "prefetch_version": 0,
-                  "layout_name": ""
-                },
-                {
-                  "kind": "prefetch-execution-counters",
-                  "run_count": 3,
-                  "last_run_at": "2024-04-01T09:10:11+00:00"
-                },
-                {
-                  "kind": "prefetch-reference-candidates",
-                  "referenced_path_count": 1,
-                  "volume_candidate_count": 0
-                },
-                {
-                  "kind": "prefetch-section-bounds",
-                  "bounds_status": "",
-                  "section_profile_hash": ""
-                },
-                {
-                  "kind": "prefetch-compression-state",
-                  "format": "",
-                  "decompression_status": ""
-                }
-              ],
-              "reportability": {
-                "allowed_use": "prefetch-execution-triage-pivot",
-                "decision": "report-only-with-execution-correlation",
-                "ready_for_court_report": false,
-                "commercial_grade_ready": false,
-                "execution_claim_requires_correlation": true,
-                "file_metrics_complete": false,
-                "blockers": [
-                  "authoritative-volume-table-decoding-not-implemented",
-                  "full-file-metrics-array-decoding-not-implemented",
-                  "known-answer-prefetch-corpus-required",
-                  "mft-file-reference-decoding-not-implemented",
-                  "prefetch-cross-tool-execution-correlation-required",
-                  "prefetch-file-metrics-and-volume-table-validation-required",
-                  "prefetch-trusted-parser-diff-required",
-                  "trace-chain-directory-section-validation-required"
-                ]
-              },
-              "required_before_commercial_grade": [
-                "decode full file metrics array and MFT file references",
-                "decode authoritative volume table and trace chains",
-                "decompress and validate MAM-compressed Prefetch files when present",
-                "diff run counts, timestamps, paths, and volume data against PECmd or trusted known-answer corpus",
-                "correlate execution claim with Amcache, BAM/DAM, SRUM, EVTX, MFT, or USN evidence"
-              ],
-              "manifest_sha256": "<DYNAMIC_MANIFEST_HASH>"
+              "section_bounds_status": "",
+              "reportability_decision": "report-only-with-execution-correlation",
+              "manifest_sha256": "072eb8a1ad28cb08fc0fe2e4f9e5d53cfc630343e746633e43d402a6511f133c"
             },
-            "prefetch_execution_depth_manifest_hash": "<DYNAMIC_MANIFEST_HASH>"
+            "prefetch_execution_depth_manifest_hash": "072eb8a1ad28cb08fc0fe2e4f9e5d53cfc630343e746633e43d402a6511f133c"
           }
         }
       ]

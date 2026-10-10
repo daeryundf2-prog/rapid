@@ -11,6 +11,7 @@ from typing import Any
 
 from rapidtriage.cli import build_parser, main
 from rapidtriage.core.artifacts import SUPPORTED_ARTIFACT_KINDS
+from rapidtriage.core.docs import MANIFEST_COLLECT_MAX_WORKERS
 from rapidtriage.core.input_root import InputRoot
 from rapidtriage.core.reporting import (
     build_run_report_context,
@@ -695,7 +696,7 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertEqual(memory_cap_ledger["stage_telemetry_manifest_hash"], memory_cap_telemetry["manifest_hash"])
             self.assertGreaterEqual(memory_cap_telemetry["stage_check_count"], 8)
             self.assertEqual(memory_cap_telemetry["first_stage"], "prepare")
-            self.assertEqual(memory_cap_telemetry["last_stage"], "indicators")
+            self.assertEqual(memory_cap_telemetry["last_stage"], "persist")
             self.assertEqual(
                 summary_payload["processing"]["memory_cap_enforcement"][
                     "memory_cap_report_grade_validation_plan_hash"
@@ -810,7 +811,8 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertTrue(scheduler_manifest["deterministic_order_verified"])
             self.assertEqual(scheduler_manifest["resource_policy"]["backpressure_window"], scheduler_manifest["max_workers"])
             self.assertEqual(scheduler_manifest["deterministic_output_order"], list(summary_payload["safety"]["artifact_scheduler"]["manifest"]["deterministic_output_order"]))
-            self.assertTrue(scheduler_manifest["resource_policy"]["cpu_worker_limit"] <= 4)
+            # Bounded pool shared with the manifest stage: min(8, cpu_count).
+            self.assertTrue(scheduler_manifest["resource_policy"]["cpu_worker_limit"] <= MANIFEST_COLLECT_MAX_WORKERS)
             self.assertTrue(scheduler_manifest["events"])
             self.assertEqual(scheduler_manifest["event_row_count"], len(scheduler_manifest["events"]))
             self.assertRegex(scheduler_manifest["scheduler_event_row_head_hash"], r"^[0-9a-f]{64}$")
@@ -1047,7 +1049,8 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertEqual(summary_payload["processing"]["parser_crash_isolation"]["core_accuracy_gates"][0]["gap_id"], "#71")
             self.assertEqual(summary_payload["processing"]["memory_cap_enforcement"]["core_accuracy_gates"][0]["gap_id"], "#72")
             self.assertEqual(summary_payload["processing"]["parallel_parser_scheduler"]["core_accuracy_gates"][0]["gap_id"], "#75")
-            self.assertEqual(summary_payload["resource_caps"]["memory_cap_bytes"], 0)
+            # Unset cap now defaults to half of physical RAM (fail-fast guard).
+            self.assertGreater(summary_payload["resource_caps"]["memory_cap_bytes"], 0)
             self.assertIn("checkpoints", summary_payload["outputs"])
             checkpoints = json.loads((output_dir / "rapidtriage-run-checkpoints.json").read_text(encoding="utf-8"))
             self.assertEqual(checkpoints["command"], "run-checkpoints")

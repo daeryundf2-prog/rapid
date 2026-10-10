@@ -10,6 +10,7 @@ from collections.abc import (
 )
 from pathlib import Path
 
+from ..docs import manifest_collect_workers
 from ..forensic_accuracy import build_accuracy_gate
 from .constants import (
     PARALLEL_PARSER_SCHEDULER_GAP_ID,
@@ -30,7 +31,8 @@ __all__ = [
 
 
 def artifact_scheduler_workers(kinds: Sequence[str]) -> int:
-    return max(1, min(4, len(tuple(kinds))))
+    # Same bounded policy as the manifest stage's parallel provider collection.
+    return manifest_collect_workers(len(tuple(kinds)))
 
 
 def parallel_parser_scheduler_assessment(

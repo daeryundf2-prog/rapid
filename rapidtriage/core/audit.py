@@ -7,6 +7,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 
 from .input_root import InputRoot, resolve_input_root
+from .json_safe import json_default
 
 DEFAULT_AUDIT_ROOT_FILE_LIMIT = 5_000
 DEFAULT_AUDIT_ROOT_DIR_LIMIT = 2_000
@@ -149,7 +150,7 @@ def write_audit_record(
         },
     }
     audit_path.parent.mkdir(parents=True, exist_ok=True)
-    audit_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    audit_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=json_default) + "\n", encoding="utf-8")
     return payload
 
 

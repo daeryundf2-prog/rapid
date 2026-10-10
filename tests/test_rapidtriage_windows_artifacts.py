@@ -20,6 +20,7 @@ from rapidtriage.artifacts.windows.eventlog import collect_native_evtx_events
 from rapidtriage.artifacts.windows.execution import (
     build_execution_artifact_trusted_diff,
     build_srum_database_inventory_record,
+    build_srum_schema_row_record,
     build_srum_schema_row_records,
     srum_schema_row_identity,
 )
@@ -261,7 +262,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             )
             output = root / "eventlog.json"
 
-            self.assertEqual(main(["artifacts", str(root), "--kind", "eventlog", "--output", str(output)]), 0)
+            self.assertEqual(main(["artifacts", str(root), "--kind", "eventlog", "--eventlog-structure-rows", "--eventlog-record-detail", "full", "--output", str(output)]), 0)
 
             payload = json.loads(output.read_text(encoding="utf-8"))
             artifact = next(item for item in payload["artifacts"] if item["artifact_type"] == "etl-trace-file")
@@ -345,7 +346,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             )
             output = root / "eventlog.json"
 
-            self.assertEqual(main(["artifacts", str(root), "--kind", "eventlog", "--output", str(output)]), 0)
+            self.assertEqual(main(["artifacts", str(root), "--kind", "eventlog", "--eventlog-structure-rows", "--eventlog-record-detail", "full", "--output", str(output)]), 0)
 
             payload = json.loads(output.read_text(encoding="utf-8"))
             event_rows = [item for item in payload["artifacts"] if item["artifact_type"] == "eventlog-event"]
@@ -435,7 +436,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             )
             output = root / "eventlog.json"
 
-            self.assertEqual(main(["artifacts", str(root), "--kind", "eventlog", "--output", str(output)]), 0)
+            self.assertEqual(main(["artifacts", str(root), "--kind", "eventlog", "--eventlog-structure-rows", "--eventlog-record-detail", "full", "--output", str(output)]), 0)
 
             payload = json.loads(output.read_text(encoding="utf-8"))
             session = next(item for item in payload["artifacts"] if item["artifact_type"] == "eventlog-logon-session")
@@ -1790,6 +1791,9 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                         str(root),
                         "--kind",
                         "eventlog",
+                        "--eventlog-structure-rows",
+                        "--eventlog-record-detail",
+                        "full",
                         "--eventlog-message-catalog",
                         str(catalog),
                         "--output",
@@ -1866,6 +1870,9 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                         str(root),
                         "--kind",
                         "eventlog",
+                        "--eventlog-structure-rows",
+                        "--eventlog-record-detail",
+                        "full",
                         "--eventlog-message-catalog",
                         str(catalog),
                         "--output",
@@ -1947,6 +1954,9 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                         str(root),
                         "--kind",
                         "eventlog",
+                        "--eventlog-structure-rows",
+                        "--eventlog-record-detail",
+                        "full",
                         "--eventlog-message-catalog",
                         str(manifest),
                         "--output",
@@ -2020,7 +2030,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             )
             output = root / "eventlog.json"
 
-            self.assertEqual(main(["artifacts", str(root), "--kind", "eventlog", "--output", str(output)]), 0)
+            self.assertEqual(main(["artifacts", str(root), "--kind", "eventlog", "--eventlog-structure-rows", "--eventlog-record-detail", "full", "--output", str(output)]), 0)
 
             artifacts = json.loads(output.read_text(encoding="utf-8"))["artifacts"]
             native_evtx = next(
@@ -2045,7 +2055,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             fixture = build_windows_artifact_fixture(root)
             output = root / "eventlog.json"
 
-            self.assertEqual(main(["artifacts", str(root), "--kind", "eventlog", "--output", str(output)]), 0)
+            self.assertEqual(main(["artifacts", str(root), "--kind", "eventlog", "--eventlog-structure-rows", "--eventlog-record-detail", "full", "--output", str(output)]), 0)
             payload = json.loads(output.read_text(encoding="utf-8"))
             artifacts = payload["artifacts"]
             event_rows = [item for item in artifacts if item["artifact_type"] == "eventlog-event"]
@@ -2341,7 +2351,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             )
             output = root / "eventlog.json"
 
-            self.assertEqual(main(["artifacts", str(root), "--kind", "eventlog", "--output", str(output)]), 0)
+            self.assertEqual(main(["artifacts", str(root), "--kind", "eventlog", "--eventlog-structure-rows", "--eventlog-record-detail", "full", "--output", str(output)]), 0)
             artifacts = json.loads(output.read_text(encoding="utf-8"))["artifacts"]
             native_rows = [
                 item
@@ -2395,7 +2405,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             )
             output = root / "eventlog.json"
 
-            self.assertEqual(main(["artifacts", str(root), "--kind", "eventlog", "--output", str(output)]), 0)
+            self.assertEqual(main(["artifacts", str(root), "--kind", "eventlog", "--eventlog-structure-rows", "--eventlog-record-detail", "full", "--output", str(output)]), 0)
             artifacts = json.loads(output.read_text(encoding="utf-8"))["artifacts"]
             chunk = next(item for item in artifacts if item["artifact_type"] == "eventlog-chunk")["details"]
             native_evtx = next(
@@ -2426,7 +2436,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             )
             output = root / "eventlog.json"
 
-            self.assertEqual(main(["artifacts", str(root), "--kind", "eventlog", "--output", str(output)]), 0)
+            self.assertEqual(main(["artifacts", str(root), "--kind", "eventlog", "--eventlog-structure-rows", "--eventlog-record-detail", "full", "--output", str(output)]), 0)
             artifacts = json.loads(output.read_text(encoding="utf-8"))["artifacts"]
             native_evtx = next(
                 item
@@ -2497,7 +2507,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             )
             output = root / "eventlog.json"
 
-            self.assertEqual(main(["artifacts", str(root), "--kind", "eventlog", "--output", str(output)]), 0)
+            self.assertEqual(main(["artifacts", str(root), "--kind", "eventlog", "--eventlog-structure-rows", "--eventlog-record-detail", "full", "--output", str(output)]), 0)
             artifacts = json.loads(output.read_text(encoding="utf-8"))["artifacts"]
             native_evtx = next(
                 item
@@ -2539,7 +2549,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             )
             output = root / "eventlog.json"
 
-            self.assertEqual(main(["artifacts", str(root), "--kind", "eventlog", "--output", str(output)]), 0)
+            self.assertEqual(main(["artifacts", str(root), "--kind", "eventlog", "--eventlog-structure-rows", "--eventlog-record-detail", "full", "--output", str(output)]), 0)
             artifacts = json.loads(output.read_text(encoding="utf-8"))["artifacts"]
             native_evtx = next(
                 item
@@ -2659,7 +2669,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             )
             output = root / "eventlog.json"
 
-            self.assertEqual(main(["artifacts", str(root), "--kind", "eventlog", "--output", str(output)]), 0)
+            self.assertEqual(main(["artifacts", str(root), "--kind", "eventlog", "--eventlog-structure-rows", "--eventlog-record-detail", "full", "--output", str(output)]), 0)
             artifacts = json.loads(output.read_text(encoding="utf-8"))["artifacts"]
             candidates = [item for item in artifacts if item["artifact_type"] == "eventlog-record-candidate"]
             inventory = next(item for item in artifacts if item["artifact_type"] == "eventlog-file")["details"]
@@ -3869,6 +3879,44 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertTrue(record.details["validation_checks"]["row_level_decoding_available"])
             self.assertFalse(record.details["commercial_grade_ready"])
             self.assertIn("ese-transaction-log-replay-not-performed", record.details["commercial_grade_blockers"])
+
+    def test_srum_schema_row_fields_convert_binary_columns_to_hex_objects(self) -> None:
+        id_blob = "!!svchost.exe!1972/12/14:16:22:50".encode("utf-16le")
+        sid_blob = b"\x01\x05\x00\x00\x00\x00\x00\x05"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "SRUDB.dat"
+            path.write_bytes(b"\x00" * 16)
+            record = build_srum_schema_row_record(
+                path,
+                {"sha256": "0" * 64},
+                {
+                    "table_name": "SruDbIdMapTable",
+                    "record_file_offset": 4096,
+                    "row": {
+                        "IdType": 0,
+                        "IdIndex": 7,
+                        "IdBlob": id_blob,
+                        "Sid": bytearray(sid_blob),
+                        "Nested": {"Inner": b"\xff"},
+                        "Parts": [b"\x00\x01"],
+                    },
+                    "markers": [],
+                },
+                0,
+            )
+
+        row_fields = record.details["row_fields"]
+        encoded = json.dumps(record.to_dict(), ensure_ascii=False)
+        self.assertIn("utf16le_preview", encoded)
+        self.assertEqual(row_fields["IdType"], 0)
+        self.assertEqual(row_fields["IdBlob"]["hex"], id_blob.hex())
+        self.assertEqual(row_fields["IdBlob"]["length"], len(id_blob))
+        self.assertEqual(row_fields["IdBlob"]["utf16le_preview"], "!!svchost.exe!1972/12/14:16:22:50")
+        self.assertEqual(row_fields["Sid"]["hex"], sid_blob.hex())
+        self.assertNotIn("utf16le_preview", row_fields["Sid"])
+        self.assertEqual(row_fields["Nested"], {"Inner": {"hex": "ff", "length": 1}})
+        self.assertEqual(row_fields["Parts"][0]["hex"], "0001")
+        self.assertEqual(record.details["app_identity"], "svchost.exe")
 
     def test_srum_schema_row_identity_decodes_idblob(self) -> None:
         self.assertEqual(

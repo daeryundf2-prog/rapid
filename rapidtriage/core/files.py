@@ -3,15 +3,31 @@ from __future__ import annotations
 import csv
 import datetime as dt
 import difflib
+import fnmatch
+import glob
 import hashlib
 import json
 import os
 import re
 import stat as stat_module
+import sys
+import threading
 import zipfile
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path, PurePosixPath
+from typing import NamedTuple
 
+from .extraction_failures import (
+    ADS_SOURCE_ID,
+    LONG_PATH_SOURCE_ID,
+    ZERO_BYTE_SOURCE_ID,
+    SidecarFile,
+    extraction_stage_for_root,
+    iso_to_epoch,
+    iter_extraction_sidecar_files,
+    load_extraction_inode_index,
+    normalize_relative_key,
+)
 from .forensic_accuracy import build_accuracy_gate
 from .hash_cache import (
     HASH_CACHE_GAP_ID,
@@ -27,6 +43,7 @@ from .recovery import (
     count_candidate_kinds,
 )
 from .rules import RuleSet, annotate_files_payload
+from .textnorm import normalize_search_text
 
 DEFAULT_FILE_CATEGORIES: tuple[str, ...] = (
     "documents",
@@ -104,7 +121,22 @@ def iter_evidence_paths(root: Path, pattern: str = "*") -> Iterable[Path]:
     Run output directories (``rapidtriage-run*``) created inside an evidence
     root must never be re-ingested as evidence: scanning them makes every
     subsequent run slower and pollutes results with the tool's own outputs.
+
+    While the run-scoped evidence path cache is enabled (only inside
+    ``run_triage_mode``), each evidence tree is walked once and later calls
+    for the same root, a sub-root, or a simple name pattern are answered from
+    that snapshot with results identical to the uncached walk.
     """
+    if _EVIDENCE_PATH_CACHE_ENABLED and _evidence_pattern_is_cacheable(pattern):
+        cached = _cached_evidence_paths(root, pattern)
+        if cached is not None:
+            yield from cached
+            return
+    for path, _relative in _walk_evidence_paths(root, pattern):
+        yield path
+
+
+def _walk_evidence_paths(root: Path, pattern: str) -> Iterable[tuple[Path, Path]]:
     for path in root.rglob(pattern):
         try:
             relative = path.relative_to(root)
@@ -112,7 +144,229 @@ def iter_evidence_paths(root: Path, pattern: str = "*") -> Iterable[Path]:
             relative = path
         if any(part.startswith(RUN_OUTPUT_DIR_PREFIX) for part in relative.parts):
             continue
-        yield path
+        yield path, relative
+
+
+class _EvidencePathSnapshot:
+    __slots__ = ("entries", "root_text")
+
+    def __init__(self, root_text: str, entries: list[tuple[Path, str]]) -> None:
+        self.root_text = root_text
+        # (path as yielded by the walk, path relative to the snapshot root)
+        self.entries = entries
+
+
+# Run-scoped evidence path cache. A single run calls iter_evidence_paths(root,
+# "*") ~100 times across providers; on a 600k-file tree each walk costs
+# minutes. While enabled, the first call for a root materializes the pruned
+# ``rglob("*")`` walk once and every later call for that root (or any
+# sub-root below it) filters the snapshot instead of walking the disk again.
+# The evidence tree is treated as immutable for the duration of a run. The
+# cache is OFF by default so CLI collectors and unit tests keep the uncached
+# behavior; run_triage_mode enables it after preparing the input root and
+# disables (and clears) it in a ``finally``.
+_EVIDENCE_PATH_CACHE: dict[str, _EvidencePathSnapshot] = {}
+_EVIDENCE_PATH_CACHE_ENABLED = False
+# Concurrent runs in one server process each enable/disable the cache; it is
+# only switched off (and cleared) when the last active run disables it.
+_EVIDENCE_PATH_CACHE_USERS = 0
+_EVIDENCE_PATH_CACHE_LOCK = threading.Lock()
+# pathlib matches glob patterns case-insensitively exactly when the path
+# flavour normalizes case (Windows); mirror that decision for cache filters.
+_EVIDENCE_PATH_CASE_SENSITIVE = os.path.normcase("Aa") == "Aa"
+
+
+def enable_evidence_path_cache() -> None:
+    """Turn the run-scoped evidence path cache on (cleared on first enable)."""
+    global _EVIDENCE_PATH_CACHE_ENABLED, _EVIDENCE_PATH_CACHE_USERS
+    with _EVIDENCE_PATH_CACHE_LOCK:
+        if _EVIDENCE_PATH_CACHE_USERS == 0:
+            _EVIDENCE_PATH_CACHE.clear()
+        _EVIDENCE_PATH_CACHE_USERS += 1
+        _EVIDENCE_PATH_CACHE_ENABLED = True
+
+
+def disable_evidence_path_cache() -> None:
+    """Release one enable; the last release turns the cache off and frees it."""
+    global _EVIDENCE_PATH_CACHE_ENABLED, _EVIDENCE_PATH_CACHE_USERS
+    with _EVIDENCE_PATH_CACHE_LOCK:
+        _EVIDENCE_PATH_CACHE_USERS = max(0, _EVIDENCE_PATH_CACHE_USERS - 1)
+        if _EVIDENCE_PATH_CACHE_USERS == 0:
+            _EVIDENCE_PATH_CACHE_ENABLED = False
+            _EVIDENCE_PATH_CACHE.clear()
+            _EVIDENCE_STAT_MEMO.clear()
+            _EVIDENCE_RESOLVE_MEMO.clear()
+
+
+# Per-run memo of stat()/resolve() answers for snapshot paths. Every provider
+# filters the shared snapshot with ``path.is_file()`` and many call
+# ``path.resolve()`` per candidate; on Windows each of those is a metadata
+# syscall costing milliseconds, repeated ~50 times per file per run. Like the
+# path snapshot itself, the memo assumes the evidence tree is immutable for
+# the duration of a run and is cleared when the cache is disabled.
+_EVIDENCE_STAT_MEMO: dict[tuple[str, bool], object] = {}
+_EVIDENCE_RESOLVE_MEMO: dict[tuple[str, bool], str] = {}
+
+
+class _StatError(NamedTuple):
+    errno: int | None
+    strerror: str | None
+    filename: object
+
+
+class _SnapshotPath(type(Path())):  # type: ignore[misc]
+    """Path yielded from the run-scoped evidence snapshot.
+
+    While the cache is enabled, ``stat``/``is_file``/``is_dir``/``exists``/
+    ``resolve`` answers are memoized per path string for the run; otherwise
+    it behaves exactly like ``Path``. Paths derived from it (``parent``,
+    ``/``) share the memo, which is keyed by the full path.
+    """
+
+    __slots__ = ()
+
+    def stat(self, *, follow_symlinks: bool = True):  # type: ignore[override]
+        if not _EVIDENCE_PATH_CACHE_ENABLED:
+            return super().stat(follow_symlinks=follow_symlinks)
+        key = (str(self), follow_symlinks)
+        cached = _EVIDENCE_STAT_MEMO.get(key)
+        if cached is None:
+            try:
+                cached = super().stat(follow_symlinks=follow_symlinks)
+            except OSError as exc:
+                # Keep only the error fields: caching the exception itself
+                # would pin its traceback (and every caller frame's locals,
+                # e.g. decoded images) for the rest of the run.
+                cached = _StatError(exc.errno, exc.strerror, exc.filename)
+            _EVIDENCE_STAT_MEMO[key] = cached
+        if isinstance(cached, _StatError):
+            # A fresh instance per raise (OSError(errno, ...) maps to the
+            # matching subclass, e.g. FileNotFoundError).
+            raise OSError(cached.errno, cached.strerror, cached.filename)
+        return cached
+
+    def _memo_mode(self) -> int | None:
+        try:
+            return self.stat().st_mode
+        except (OSError, ValueError):
+            return None
+
+    def is_file(self, *args: object, **kwargs: object) -> bool:  # type: ignore[override]
+        if args or kwargs or not _EVIDENCE_PATH_CACHE_ENABLED:
+            return super().is_file(*args, **kwargs)
+        mode = self._memo_mode()
+        return mode is not None and stat_module.S_ISREG(mode)
+
+    def is_dir(self, *args: object, **kwargs: object) -> bool:  # type: ignore[override]
+        if args or kwargs or not _EVIDENCE_PATH_CACHE_ENABLED:
+            return super().is_dir(*args, **kwargs)
+        mode = self._memo_mode()
+        return mode is not None and stat_module.S_ISDIR(mode)
+
+    def exists(self, *args: object, **kwargs: object) -> bool:  # type: ignore[override]
+        if args or kwargs or not _EVIDENCE_PATH_CACHE_ENABLED:
+            return super().exists(*args, **kwargs)
+        return self._memo_mode() is not None
+
+    def resolve(self, strict: bool = False):  # type: ignore[override]
+        if not _EVIDENCE_PATH_CACHE_ENABLED:
+            return super().resolve(strict=strict)
+        key = (str(self), strict)
+        cached = _EVIDENCE_RESOLVE_MEMO.get(key)
+        if cached is None:
+            cached = str(super().resolve(strict=strict))
+            _EVIDENCE_RESOLVE_MEMO[key] = cached
+        return type(self)(cached)
+
+
+def _evidence_pattern_is_cacheable(pattern: str) -> bool:
+    # Only single-component name patterns can be answered by filtering the
+    # cached ``rglob("*")`` walk; anything with a separator or ``**`` keeps
+    # the original rglob semantics.
+    if not pattern or pattern in {".", ".."} or "**" in pattern:
+        return False
+    return "/" not in pattern and os.sep not in pattern and (os.altsep is None or os.altsep not in pattern)
+
+
+def _evidence_cache_key(path: Path) -> str:
+    return os.path.normcase(os.path.abspath(str(path)))
+
+
+def _cached_evidence_paths(root: Path, pattern: str) -> list[Path] | None:
+    """Answer ``iter_evidence_paths(root, pattern)`` from the run cache.
+
+    Returns ``None`` when the cache cannot answer (cache disabled meanwhile,
+    or ``root`` is not an existing directory) so the caller walks normally.
+    """
+    root_key = _evidence_cache_key(root)
+    with _EVIDENCE_PATH_CACHE_LOCK:
+        if not _EVIDENCE_PATH_CACHE_ENABLED:
+            return None
+        located = _locate_evidence_snapshot(root, root_key)
+        if located is None:
+            if not root.is_dir():
+                return None
+            entries = [(_SnapshotPath(path), str(relative)) for path, relative in _walk_evidence_paths(root, "*")]
+            snapshot = _EvidencePathSnapshot(str(root), entries)
+            # An ancestor snapshot answers every sub-root, so drop snapshots
+            # this one now covers to keep memory bounded to one tree.
+            prefix = root_key.rstrip(os.sep) + os.sep
+            for key in [key for key in _EVIDENCE_PATH_CACHE if key.startswith(prefix)]:
+                del _EVIDENCE_PATH_CACHE[key]
+            _EVIDENCE_PATH_CACHE[root_key] = snapshot
+            located = (snapshot, "")
+    snapshot, sub_relative = located
+    matcher = None if pattern == "*" else _evidence_name_matcher(pattern)
+    if not sub_relative:
+        if str(root) == snapshot.root_text:
+            candidates: Iterable[Path] = (path for path, _relative in snapshot.entries)
+        else:
+            candidates = (_SnapshotPath(root, relative) for _path, relative in snapshot.entries)
+    else:
+        prefix = os.path.normcase(sub_relative) + os.sep
+        prefix_length = len(prefix)
+        candidates = (
+            _SnapshotPath(root, relative[prefix_length:])
+            for _path, relative in snapshot.entries
+            if len(relative) > prefix_length and os.path.normcase(relative[:prefix_length]) == prefix
+        )
+    if matcher is None:
+        return list(candidates)
+    if not glob.has_magic(pattern) and _literal_pattern_uses_pattern_casing():
+        # Python <3.12 pathlib answers a literal (non-wildcard) name with
+        # _PreciseSelector, which yields ``parent / pattern`` (the pattern's
+        # casing) after an existence check instead of the on-disk name.
+        return [path.parent / pattern for path in candidates if matcher(path.name)]
+    return [path for path in candidates if matcher(path.name)]
+
+
+def _literal_pattern_uses_pattern_casing() -> bool:
+    """Whether ``Path.rglob(<literal name>)`` yields the pattern's casing."""
+    return sys.version_info < (3, 12)
+
+
+def _locate_evidence_snapshot(root: Path, root_key: str) -> tuple[_EvidencePathSnapshot, str] | None:
+    """Find the cached snapshot covering ``root`` and ``root``'s path below it."""
+    snapshot = _EVIDENCE_PATH_CACHE.get(root_key)
+    if snapshot is not None:
+        return snapshot, ""
+    absolute = Path(os.path.abspath(str(root)))
+    for ancestor in absolute.parents:
+        snapshot = _EVIDENCE_PATH_CACHE.get(_evidence_cache_key(ancestor))
+        if snapshot is None:
+            continue
+        relative = absolute.relative_to(ancestor)
+        # The ancestor walk pruned run-output directories; a sub-root that
+        # lives inside one cannot be answered from it.
+        if any(part.startswith(RUN_OUTPUT_DIR_PREFIX) for part in relative.parts):
+            return None
+        return snapshot, str(relative)
+    return None
+
+
+def _evidence_name_matcher(pattern: str):
+    flags = 0 if _EVIDENCE_PATH_CASE_SENSITIVE else re.IGNORECASE
+    return re.compile(fnmatch.translate(pattern), flags).match
 
 FUZZY_TEXT_EXTENSIONS = {
     ".txt",
@@ -528,6 +782,26 @@ def scan_file_candidates(
     candidates: list[FileCandidate] = []
     scanned_files = 0
     pending = [root]
+    # E01 extraction roots carry sidecars (inode map, long-path/zero-byte/ADS
+    # recoveries) written by the extraction gap stage; plain folders do not.
+    extraction_stage = extraction_stage_for_root(root)
+    inode_index = load_extraction_inode_index(root) if extraction_stage is not None else {}
+    on_disk_keys: set[str] | None = set() if extraction_stage is not None else None
+    root_text = str(root)
+
+    def passes_filters(candidate: FileCandidate) -> bool:
+        if normalized_path_mismatch(candidate.path, path_contains):
+            return False
+        if normalized_name_mismatch(candidate.name, name_contains):
+            return False
+        if extensions and candidate.extension not in extensions:
+            return False
+        modified_dt = _naive_local_datetime(candidate.modified_epoch)
+        if modified_after and modified_dt < modified_after:
+            return False
+        if modified_before and modified_dt > modified_before:
+            return False
+        return True
 
     while pending:
         current = pending.pop()
@@ -546,20 +820,19 @@ def scan_file_candidates(
                     except (FileNotFoundError, PermissionError, OSError):
                         continue
                     scanned_files += 1
+                    relative_key = ""
+                    if on_disk_keys is not None:
+                        relative_key = normalize_relative_key(entry.path[len(root_text) :])
+                        on_disk_keys.add(relative_key)
                     candidate = build_file_candidate(Path(entry.path), entry_stat, categories)
                     if candidate is None:
                         continue
-                    if normalized_path_mismatch(candidate.path, path_contains):
+                    if not passes_filters(candidate):
                         continue
-                    if normalized_name_mismatch(candidate.name, name_contains):
-                        continue
-                    if extensions and candidate.extension not in extensions:
-                        continue
-                    modified_dt = dt.datetime.fromtimestamp(candidate.modified_epoch)
-                    if modified_after and modified_dt < modified_after:
-                        continue
-                    if modified_before and modified_dt > modified_before:
-                        continue
+                    if inode_index:
+                        inode = inode_index.get(relative_key)
+                        if inode is not None:
+                            candidate.recovery["mft_ref"] = inode
                     candidates.append(candidate)
                     if limit and len(candidates) >= limit:
                         candidates.sort(key=lambda item: (-item.modified_epoch, item.path))
@@ -567,8 +840,84 @@ def scan_file_candidates(
         except (FileNotFoundError, NotADirectoryError, PermissionError):
             continue
 
+    if extraction_stage is not None:
+        on_disk_inodes = {inode_index[key] for key in on_disk_keys or () if key in inode_index}
+        for sidecar in iter_extraction_sidecar_files(root):
+            if sidecar.source_id == ZERO_BYTE_SOURCE_ID:
+                # Prefer inode identity; fall back to case-insensitive relative path
+                # because listing names are code-page decoded and may be lossy.
+                if sidecar.inode is not None and sidecar.inode in on_disk_inodes:
+                    continue
+                if normalize_relative_key(sidecar.relative_path) in (on_disk_keys or ()):
+                    continue
+            candidate = build_sidecar_file_candidate(root, sidecar, categories)
+            if candidate is None or not passes_filters(candidate):
+                continue
+            candidates.append(candidate)
+            if limit and len(candidates) >= limit:
+                break
+
     candidates.sort(key=lambda item: (-item.modified_epoch, item.path))
     return candidates, scanned_files
+
+
+def _naive_local_datetime(epoch: float) -> dt.datetime:
+    try:
+        return dt.datetime.fromtimestamp(epoch)
+    except (OverflowError, OSError, ValueError):
+        return dt.datetime.fromtimestamp(0)
+
+
+_SIDECAR_LIMITATIONS = {
+    LONG_PATH_SOURCE_ID: (
+        "tsk_recover could not create this file (Windows MAX_PATH); content was recovered by inode with "
+        "icat into recovery.content_path. Path is the original NTFS path decoded from the fls listing."
+    ),
+    ZERO_BYTE_SOURCE_ID: (
+        "Zero-byte $DATA file listed by fls -rpl; tsk_recover writes no file for it. Existence and "
+        "timestamps come from the listing; the name is code-page decoded and '?' marks lost characters."
+    ),
+    ADS_SOURCE_ID: (
+        "Alternate data stream recovered by inode-attribute id with icat into recovery.content_path "
+        "(size cap 1 MB). Path is host path + ':' + stream name."
+    ),
+}
+
+
+def build_sidecar_file_candidate(root: Path, sidecar: SidecarFile, categories: Sequence[str]) -> FileCandidate | None:
+    """FileCandidate for a file recovered or listed outside the extraction tree."""
+    relative = sidecar.relative_path.strip("/")
+    if not relative:
+        return None
+    path = root.joinpath(*relative.split("/"))
+    modified_epoch = max(0.0, iso_to_epoch(sidecar.modified_at))
+    pseudo_stat = os.stat_result((stat_module.S_IFREG | 0o644, 0, 0, 1, 0, 0, sidecar.size, modified_epoch, modified_epoch, modified_epoch))
+    candidate = build_file_candidate(path, pseudo_stat, categories)
+    if candidate is None:
+        return None
+    confidence = "medium" if sidecar.name_lossy or sidecar.source_id == ZERO_BYTE_SOURCE_ID else "high"
+    extra: dict[str, object] = {
+        "mft_ref": sidecar.inode,
+        "content_path": sidecar.content_path,
+        "original_relative_path": relative,
+        "listing_timestamps": dict(sidecar.timestamps),
+        "name_lossy": sidecar.name_lossy,
+    }
+    if sidecar.sha256:
+        extra["sha256"] = sidecar.sha256
+    if sidecar.stream_name:
+        extra["stream_name"] = sidecar.stream_name
+    candidate.recovery = build_recovery_record(
+        CANDIDATE_KIND_EXISTING,
+        confidence=confidence,
+        deletion_state="allocated",
+        source_id=sidecar.source_id,
+        source_path=sidecar.content_path or str(path),
+        source_record_id=sidecar.inode,
+        limitation=_SIDECAR_LIMITATIONS.get(sidecar.source_id),
+        extra=extra,
+    )
+    return candidate
 
 
 def load_known_good_hash_feeds(paths: Sequence[str | Path]) -> dict[str, object]:
@@ -1402,8 +1751,8 @@ def detect_file_signature(header: bytes) -> str | None:
 
 def build_file_candidate(path: Path, entry_stat: os.stat_result, categories: Sequence[str]) -> FileCandidate | None:
     extension = path.suffix.lower()
-    filename = path.name.lower()
-    path_text = str(path).lower()
+    filename = normalize_search_text(path.name)
+    path_text = normalize_search_text(str(path))
     matched_categories: list[str] = []
     reasons: dict[str, list[str]] = {}
 
@@ -1469,7 +1818,7 @@ def normalize_categories(categories: Sequence[str] | None) -> list[str]:
 def normalize_text_filters(values: Sequence[str] | None) -> list[str]:
     normalized: list[str] = []
     for value in values or []:
-        key = value.strip().lower()
+        key = normalize_search_text(value.strip())
         if key:
             normalized.append(key)
     return normalized
@@ -1500,16 +1849,22 @@ def parse_modified_bound(value: str | None) -> dt.datetime | None:
 
 
 def normalized_name_mismatch(name: str, filters: Sequence[str]) -> bool:
-    lowered = name.lower()
+    """``filters`` come from ``normalize_text_filters`` (NFC + casefold)."""
+    lowered = normalize_search_text(name)
     return any(fragment not in lowered for fragment in filters)
 
 
 def normalized_path_mismatch(path: str, filters: Sequence[str]) -> bool:
-    lowered = path.lower()
+    lowered = normalize_search_text(path)
     return any(fragment not in lowered for fragment in filters)
 
 
 def first_contains(text: str, values: Iterable[str]) -> str | None:
+    """Return the first of ``values`` found in ``text``.
+
+    ``text`` is ``normalize_search_text`` output; ``values`` must already be in
+    that form (CATEGORY_RULES keywords are lowercase ASCII).
+    """
     for value in values:
         if value in text:
             return value

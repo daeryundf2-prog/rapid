@@ -40,26 +40,42 @@ PLUGIN_DIRS_ENV = "RAPIDTRIAGE_PLUGIN_DIRS"
 # stage. A single run asks every provider for the same artifact list twice;
 # keying on (collector_kind, root path) lets the second caller reuse the
 # first result so each provider walks/parses the tree only once per run.
-# Entries are only ever stored after a successful collect, so error
-# semantics stay identical to an uncached call. The cache is cleared at the
-# start of every run so a long-lived server process never serves stale
-# results for a root that changed on disk.
+# A failed collect is memoized as its exception and re-raised to later
+# callers for the same (kind, root), so the manifest stage never re-runs a
+# provider that already failed (and was isolated) in the artifacts stage.
+# The cache is cleared at the start of every run so a long-lived server
+# process never serves stale results for a root that changed on disk.
 _COLLECT_CACHE_MAX_ENTRIES = 256
 _collect_cache: dict[tuple[str, str], list[object]] = {}
+_collect_failures: dict[tuple[str, str], Exception] = {}
 _collect_cache_lock = threading.Lock()
 
 
 def collect_cached(provider: object, root_path: Path) -> list[object]:
     """Return ``provider.collect(root_path)`` cached by (kind, root)."""
     kind = str(getattr(provider, "collector_kind", "") or "").strip().lower()
-    key = (kind, str(root_path))
+    # Providers configured with non-default collector options (e.g. the
+    # eventlog ``structure_rows``/``record_detail`` switches) expose an
+    # ``options_key`` so differently-shaped collections never share a slot.
+    options_key = str(getattr(provider, "options_key", "") or "")
+    key = (f"{kind}|{options_key}" if options_key else kind, str(root_path))
     with _collect_cache_lock:
         cached = _collect_cache.get(key)
+        failure = _collect_failures.get(key)
     if cached is not None:
         return cached
+    if failure is not None:
+        raise failure
     # collect() may return a generator; materialize once so every caller of
     # the cached value sees the full list instead of an exhausted iterator.
-    items = list(provider.collect(root_path))
+    try:
+        items = list(provider.collect(root_path))
+    except Exception as exc:
+        with _collect_cache_lock:
+            if len(_collect_failures) >= _COLLECT_CACHE_MAX_ENTRIES:
+                _collect_failures.clear()
+            _collect_failures[key] = exc
+        raise
     with _collect_cache_lock:
         if len(_collect_cache) >= _COLLECT_CACHE_MAX_ENTRIES:
             _collect_cache.clear()
@@ -70,6 +86,7 @@ def collect_cached(provider: object, root_path: Path) -> list[object]:
 def clear_collect_cache() -> None:
     with _collect_cache_lock:
         _collect_cache.clear()
+        _collect_failures.clear()
 
 
 def _builtin_providers() -> list[object]:
