@@ -6,6 +6,7 @@ from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 
+from .artifact_profiles import iter_payload_records
 from .artifacts import SUPPORTED_ARTIFACT_KINDS, run_artifact_collection
 from .docs import scan_document_candidates
 from .files import run_files_scan
@@ -255,9 +256,9 @@ def build_document_summary(path: str, matched_keywords: Sequence[str]) -> str:
 def extract_artifact_events(payload: Mapping[str, object], input_path: Path) -> list[dict[str, object]]:
     events: list[dict[str, object]] = []
     kind = str(payload.get("kind", ""))
-    for artifact in payload.get("artifacts", []):
-        if not isinstance(artifact, dict):
-            continue
+    # JSONL-backed run payloads keep only a preview inline; stream every row
+    # (profile-expanded) from ``records_path`` instead.
+    for artifact in iter_payload_records(payload, payload_path=input_path):
         artifact_type = str(artifact.get("artifact_type", "artifact"))
         artifact_path = str(artifact.get("path", ""))
         provider = str(artifact.get("provider", ""))

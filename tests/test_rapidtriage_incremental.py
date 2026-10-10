@@ -138,9 +138,9 @@ class RapidTriageIncrementalIngestTests(unittest.TestCase):
             collected_roots: list[str] = []
             original = run_module.timed_artifact_collection
 
-            def spy(input_root, *, kind, rule_set):
+            def spy(input_root, *, kind, rule_set, **kwargs):
                 collected_roots.append(str(input_root.root_path))
-                return original(input_root, kind=kind, rule_set=rule_set)
+                return original(input_root, kind=kind, rule_set=rule_set, **kwargs)
 
             with mock.patch.object(run_module, "timed_artifact_collection", side_effect=spy):
                 self.assertEqual(

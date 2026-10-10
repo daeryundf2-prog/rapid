@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import csv
+import dataclasses
 import datetime as dt
+import functools
 import hashlib
 import html
 import json
 import mmap
 import re
 import struct
+import tempfile
 import xml.etree.ElementTree as ET
 import zlib
 from collections import Counter, defaultdict
@@ -16,7 +19,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import NamedTuple
 
+from ...core.artifact_profiles import cap_list_field
 from ...core.forensic_accuracy import build_accuracy_gate
+from ...core.json_safe import json_default
 from ...core.models import ArtifactRecord
 from ...core.safe_xml import UnsafeXmlError, safe_xml_fromstring, safe_xml_parse
 from .._walk import iter_evidence_paths
@@ -59,6 +64,116 @@ ETL_WINDOWS_PATH_RE = re.compile(r"(?i)(?:[a-z]:\\|\\\\|\\device\\)[^\x00\r\n\t\
 ETL_IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 EVENT_EXPORT_HINTS = ("event", "evtx", "hayabusa", "chainsaw", "winevt", "winlog")
 LOGON_SESSION_EVENT_IDS = {"4624", "4634", "4647", "4672", "4778", "4779"}
+# Per-event output shape. ``full`` keeps every per-event validation/report
+# block (provider default, used by direct callers and fixtures); ``triage``
+# is the compact projection the artifacts pipeline uses by default
+# (run-pipeline-mitigations I11/I12): identity, pivots, bounded message and
+# EventData values, record locator, and short validation status codes.
+EVENTLOG_RECORD_DETAIL_FULL = "full"
+EVENTLOG_RECORD_DETAIL_TRIAGE = "triage"
+EVENTLOG_RECORD_DETAILS = (EVENTLOG_RECORD_DETAIL_FULL, EVENTLOG_RECORD_DETAIL_TRIAGE)
+EVENTLOG_TRIAGE_PROJECTION_VERSION = "eventlog-triage-projection-v1"
+# Triage caps: rendered message / EventData value text is cut to this many
+# characters; EventData keeps at most this many fields/values; native rows
+# with no decoded EventData keep this many recovered strings instead.
+EVENTLOG_TRIAGE_TEXT_MAX_CHARS = 512
+EVENTLOG_TRIAGE_EVENT_DATA_MAX_ITEMS = 64
+EVENTLOG_TRIAGE_STRING_MAX_ITEMS = 16
+EVENTLOG_TRIAGE_STRING_MAX_CHARS = 128
+EVENTLOG_TRIAGE_IDENTITY_KEYS = (
+    "parser",
+    "parser_version",
+    "coverage_status",
+    "reportability",
+    "evidence_strength",
+    "parser_confidence",
+    "source_path",
+    "source_format",
+    "source_index",
+    "timestamp",
+    "event_id",
+    "record_id",
+    "provider_name",
+    "channel",
+    "channel_family",
+    "level",
+    "computer",
+    "user_sid",
+    "event_category",
+    "event_family",
+    "event_description",
+    "event_tags",
+    "risk_score",
+    "validation_required",
+    "commercial_grade_ready",
+    "evtx_record_offset",
+    "evtx_record_size",
+    "evtx_record_sha256",
+    "evtx_binxml_status",
+    "evtx_field_fidelity",
+    "evtx_recovery_status",
+    "evtx_allocation_status",
+)
+# Pivot fields kept only when non-empty (consumers read them with .get()).
+EVENTLOG_TRIAGE_PIVOT_KEYS = (
+    "user_name",
+    "subject_user_name",
+    "target_user_name",
+    "target_domain_name",
+    "logon_type",
+    "source_ip",
+    "source_port",
+    "destination_ip",
+    "destination_hostname",
+    "destination_port",
+    "service_name",
+    "service_file_name",
+    "process_id",
+    "thread_id",
+    "process_name",
+    "new_process_name",
+    "parent_process_name",
+    "parent_command_line",
+    "script_block_text",
+    "query_name",
+    "target_object",
+    "image_loaded",
+    "task_name",
+    "workstation_name",
+    "logon_process_name",
+    "authentication_package_name",
+    "status_code",
+    "failure_reason",
+    "share_name",
+    "relative_target_name",
+    "device_instance_id",
+    "device_id",
+    "ssid",
+    "interface_guid",
+    "document_name",
+    "printer_name",
+    "job_id",
+    "url",
+    "remote_name",
+    "local_file",
+    "task",
+    "opcode",
+    "keywords",
+    "risk_flags",
+    "caution_labels",
+    "matched_rules",
+    "ioc_hits",
+)
+EVENTLOG_TRIAGE_OMITTED_BLOCKS = (
+    "data (native EVTX: duplicate of top-level fields)",
+    "evtx_binxml / binxml_* token and value-field dumps",
+    "evtx_* validation matrix/checks, recovery, provenance, citation, readiness and parse profiles",
+    "core_accuracy_gates / commercial_uplift_evidence",
+    "message_rendering / event_semantics_profile / source_viewer_locator",
+    "extracted_strings / parameter_candidates / native_indicators (bounded strings kept when no EventData decoded)",
+    "evtx_file_header / evtx_chunk_context (per-file and per-chunk context; see eventlog-file row)",
+    "source_hashes (per-file; see eventlog-file row)",
+)
 EVTX_FILE_SIGNATURE = b"ElfFile\x00"
 EVTX_CHUNK_SIGNATURE = b"ElfChnk\x00"
 EVTX_FILE_HEADER_SIZE = 4096
@@ -1339,13 +1454,37 @@ class WindowsEventLogProvider:
     description = "Windows Event Log EVTX inventory and XML/JSON/JSONL/CSV event imports"
     target_platform = "windows"
 
-    def __init__(self, message_catalog_path: Path | None = None):
+    def __init__(
+        self,
+        message_catalog_path: Path | None = None,
+        *,
+        structure_rows: bool = True,
+        record_detail: str = EVENTLOG_RECORD_DETAIL_FULL,
+    ):
+        if record_detail not in EVENTLOG_RECORD_DETAILS:
+            supported = ", ".join(EVENTLOG_RECORD_DETAILS)
+            raise ValueError(f"unsupported eventlog record_detail: {record_detail} (supported: {supported})")
         self.message_catalog_path = message_catalog_path
+        self.structure_rows = bool(structure_rows)
+        self.record_detail = record_detail
         self._message_catalog: dict[str, dict[str, dict[str, object]]] | None = None
+
+    @property
+    def options_key(self) -> str:
+        """Collect-cache discriminator for non-default output shapes."""
+        if self.structure_rows and self.record_detail == EVENTLOG_RECORD_DETAIL_FULL:
+            return ""
+        return f"structure_rows={int(self.structure_rows)};record_detail={self.record_detail}"
 
     def with_options(self, **options: object) -> WindowsEventLogProvider:
         catalog = options.get("message_catalog_path")
-        return WindowsEventLogProvider(Path(str(catalog)).expanduser().resolve() if catalog else self.message_catalog_path)
+        structure_rows = options.get("structure_rows")
+        record_detail = options.get("record_detail")
+        return WindowsEventLogProvider(
+            Path(str(catalog)).expanduser().resolve() if catalog else self.message_catalog_path,
+            structure_rows=self.structure_rows if structure_rows is None else bool(structure_rows),
+            record_detail=self.record_detail if record_detail is None else str(record_detail),
+        )
 
     def supported(self) -> bool:
         return True
@@ -1361,41 +1500,87 @@ class WindowsEventLogProvider:
         return merge_event_message_catalogs(auto_catalog, explicit_catalog)
 
     def collect(self, root: Path) -> Iterable[ArtifactRecord]:
-        records: list[ArtifactRecord] = []
+        """Yield event rows as they are parsed, then logon sessions, detections, and the summary.
+
+        Rows are streamed (no per-provider row list). Derived rows are built
+        from bounded state: each event's built-in detections are computed
+        from the full event when it is parsed and spooled to a temporary
+        file (they are emitted after all events, as before); logon sessions
+        keep only the few fields of logon/logoff events they correlate
+        (``logon_session_input_record``); the summary is accumulated
+        incrementally (``EventlogSummaryAccumulator``). Output order and
+        content are identical to the former list-based collection.
+        """
+        triage = self.record_detail == EVENTLOG_RECORD_DETAIL_TRIAGE
+        logon_inputs: list[ArtifactRecord] = []
+        summary = EventlogSummaryAccumulator()
         seen: set[Path] = set()
         message_catalog = self.message_catalog_for_root(root)
-        for path in candidate_eventlog_paths(root):
-            resolved = path.resolve()
-            if resolved in seen or not path.is_file():
-                continue
-            seen.add(resolved)
-            suffix = path.suffix.lower()
-            if suffix == ".xml":
-                records.extend(collect_xml_events(path, message_catalog=message_catalog))
-            elif suffix in {".json", ".jsonl", ".ndjson"}:
-                records.extend(collect_json_like_events(path, message_catalog=message_catalog))
-            elif suffix == ".csv":
-                records.extend(collect_csv_events(path, message_catalog=message_catalog))
-            elif suffix == ".evtx":
-                native_records = list(collect_native_evtx_events(path, message_catalog=message_catalog))
-                records.extend(native_records)
-                native_event_count = sum(1 for record in native_records if record.artifact_type == "eventlog-event")
-                native_candidate_count = sum(1 for record in native_records if record.artifact_type == "eventlog-record-candidate")
-                records.append(
-                    build_eventlog_file_record(
+        with tempfile.TemporaryFile("w+", encoding="utf-8") as detection_spool:
+
+            def emit(record: ArtifactRecord) -> ArtifactRecord:
+                if record.artifact_type == "eventlog-event" and isinstance(record.details, Mapping):
+                    for detection in build_builtin_detection_records([record]):
+                        if triage:
+                            detection = triage_eventlog_record(detection)
+                        detection_spool.write(json.dumps(dataclasses.asdict(detection), ensure_ascii=False, default=json_default))
+                        detection_spool.write("\n")
+                    if str(record.details.get("event_id") or "") in LOGON_SESSION_EVENT_IDS:
+                        logon_inputs.append(logon_session_input_record(record))
+                    if triage:
+                        record = triage_eventlog_record(record)
+                elif triage and record.artifact_type == "eventlog-detection":
+                    record = triage_eventlog_record(record)
+                summary.add(record)
+                return record
+
+            for path in candidate_eventlog_paths(root):
+                resolved = path.resolve()
+                if resolved in seen or not path.is_file():
+                    continue
+                seen.add(resolved)
+                suffix = path.suffix.lower()
+                if suffix == ".xml":
+                    for record in collect_xml_events(path, message_catalog=message_catalog):
+                        yield emit(record)
+                elif suffix in {".json", ".jsonl", ".ndjson"}:
+                    for record in collect_json_like_events(path, message_catalog=message_catalog):
+                        yield emit(record)
+                elif suffix == ".csv":
+                    for record in collect_csv_events(path, message_catalog=message_catalog):
+                        yield emit(record)
+                elif suffix == ".evtx":
+                    native_stats: dict[str, int] = {}
+                    for record in collect_native_evtx_events(
                         path,
-                        native_record_count=native_event_count,
-                        native_record_candidate_count=native_candidate_count,
+                        message_catalog=message_catalog,
+                        structure_rows=self.structure_rows,
+                        record_detail=self.record_detail,
+                        stats=native_stats,
+                    ):
+                        yield emit(record)
+                    yield emit(
+                        build_eventlog_file_record(
+                            path,
+                            native_record_count=native_stats.get("event_count", 0),
+                            native_record_candidate_count=native_stats.get("candidate_count", 0),
+                            native_chunk_count=native_stats.get("chunk_count", 0),
+                            structure_rows=self.structure_rows,
+                        )
                     )
-                )
-            elif suffix in ETL_SUFFIXES:
-                records.append(build_etl_trace_inventory_record(path))
-        records.extend(build_logon_session_records(root, records))
-        records.extend(build_builtin_detection_records(records))
-        yield from records
-        summary = build_eventlog_summary(root, records)
-        if summary is not None:
-            yield summary
+                elif suffix in ETL_SUFFIXES:
+                    yield emit(build_etl_trace_inventory_record(path))
+            for record in build_logon_session_records(root, logon_inputs):
+                summary.add(record)
+                yield record
+            detection_spool.seek(0)
+            for line in detection_spool:
+                record = ArtifactRecord(**json.loads(line))
+                summary.add(record)
+                yield record
+        built = summary.build(root)
+        if built is not None:
+            yield built
 
 
 def candidate_eventlog_paths(root: Path) -> Iterable[Path]:
@@ -1516,7 +1701,19 @@ def collect_native_evtx_events(
     path: Path,
     *,
     message_catalog: Mapping[str, Mapping[str, Mapping[str, object]]] | None = None,
+    structure_rows: bool = True,
+    record_detail: str = EVENTLOG_RECORD_DETAIL_FULL,
+    stats: dict[str, int] | None = None,
 ) -> Iterable[ArtifactRecord]:
+    """Yield native EVTX rows.
+
+    ``structure_rows=False`` suppresses the ``eventlog-chunk`` and
+    ``eventlog-record-candidate`` structural rows (still counted in
+    ``stats``). ``record_detail="triage"`` skips the per-event report/
+    citation/readiness blocks that the triage projection drops anyway.
+    """
+    counters = stats if stats is not None else {}
+    full_detail = record_detail != EVENTLOG_RECORD_DETAIL_TRIAGE
     try:
         with open_evtx_binary_view(path) as blob:
             if not blob_startswith(blob, EVTX_FILE_SIGNATURE):
@@ -1524,12 +1721,22 @@ def collect_native_evtx_events(
 
             source_hashes = file_hashes(path)
             for chunk_index, chunk in enumerate(iter_native_evtx_chunks(blob)):
-                yield native_evtx_chunk_record(path, chunk_index, source_hashes, blob, chunk)
+                counters["chunk_count"] = counters.get("chunk_count", 0) + 1
+                if structure_rows:
+                    yield native_evtx_chunk_record(path, chunk_index, source_hashes, blob, chunk)
 
             previous_record_id: int | None = None
+            # Records are visited in file order, so consecutive records share
+            # a chunk: slice each chunk once and parse each of its template
+            # definitions once (the parse is a pure function of the bytes).
+            cached_chunk_offset = -1
+            chunk_data = b""
+            template_cache: dict[tuple[int, int], tuple[dict[int, str], dict[str, str], list[str]]] = {}
             for source_index, candidate in enumerate(iter_evtx_record_candidates(blob)):
                 if not candidate.parseable:
-                    yield native_evtx_record_candidate_record(path, source_index, source_hashes, blob, candidate)
+                    counters["candidate_count"] = counters.get("candidate_count", 0) + 1
+                    if structure_rows:
+                        yield native_evtx_record_candidate_record(path, source_index, source_hashes, blob, candidate)
                     continue
                 offset = candidate.offset
                 record_blob = candidate.record_blob
@@ -1543,8 +1750,15 @@ def collect_native_evtx_events(
                     if offset >= EVTX_FILE_HEADER_SIZE
                     else 0
                 )
-                chunk_data = blob[chunk_offset : min(len(blob), chunk_offset + EVTX_CHUNK_SIZE)]
-                system_decode = decode_evtx_system_section(chunk_data, offset - chunk_offset)
+                if chunk_offset != cached_chunk_offset:
+                    chunk_data = blob[chunk_offset : min(len(blob), chunk_offset + EVTX_CHUNK_SIZE)]
+                    cached_chunk_offset = chunk_offset
+                    template_cache = {}
+                system_decode = decode_evtx_system_section(
+                    chunk_data,
+                    offset - chunk_offset,
+                    template_cache=template_cache,
+                )
                 decoded_fields = system_decode.get("value_fields")
                 if isinstance(decoded_fields, list) and decoded_fields:
                     existing_fields = binxml.get("value_fields")
@@ -1673,6 +1887,12 @@ def collect_native_evtx_events(
                 details.update(data)
                 details["parser_confidence"] = native_evtx_confidence(details)
                 details["evtx_report_grade_assessment"] = native_evtx_report_grade_assessment(details)
+                counters["event_count"] = counters.get("event_count", 0) + 1
+                if not full_detail:
+                    details["commercial_grade_ready"] = details["evtx_report_grade_assessment"]["report_grade_ready"]
+                    details["commercial_grade_blockers"] = list(details["evtx_report_grade_assessment"]["blockers"])
+                    yield event_record(path, "eventlog-event", details)
+                    continue
                 details["evtx_record_provenance"] = native_evtx_record_provenance(details)
                 details["evtx_native_parse_profile"] = native_evtx_native_parse_profile(details)
                 details["evtx_message_rendering_profile"] = native_evtx_message_rendering_profile(details)
@@ -4893,7 +5113,12 @@ def walk_evtx_template_definition(
     return mapping, static_values, warnings
 
 
-def decode_evtx_system_section(chunk_data: bytes, record_chunk_offset: int) -> dict[str, object]:
+def decode_evtx_system_section(
+    chunk_data: bytes,
+    record_chunk_offset: int,
+    *,
+    template_cache: dict[tuple[int, int], tuple[dict[int, str], dict[str, str], list[str]]] | None = None,
+) -> dict[str, object]:
     """Decode the System section of a native EVTX record via its template.
 
     Resolves named System/EventData fields through the record's template
@@ -4924,9 +5149,13 @@ def decode_evtx_system_section(chunk_data: bytes, record_chunk_offset: int) -> d
     if data_length <= 0 or template_offset + 24 + data_length > len(chunk_data):
         result["status"] = "template-length-out-of-bounds"
         return result
-    mapping, static_values, warnings = walk_evtx_template_definition(
-        chunk_data, template_offset + 24, data_length
-    )
+    cache_key = (template_offset, data_length)
+    cached = template_cache.get(cache_key) if template_cache is not None else None
+    if cached is None:
+        cached = walk_evtx_template_definition(chunk_data, template_offset + 24, data_length)
+        if template_cache is not None:
+            template_cache[cache_key] = cached
+    mapping, static_values, warnings = cached
     # Records carry two TemplateInstance layouts: the first record using a
     # template embeds the definition inline (u32 0 marker, then a 24-byte
     # template-entry header + definition); later records reference the chunk
@@ -5280,23 +5509,26 @@ def channel_hint_from_path(path: Path) -> str:
     return stem.replace("%4", "/")
 
 
+_COMMAND_STRING_PATTERNS = (
+    r"\bpowershell(?:\.exe)?\s+",
+    r"\bpwsh(?:\.exe)?\s+",
+    r"\bcmd\.exe\s+",
+    r"\bwscript(?:\.exe)?\s+",
+    r"\bcscript(?:\.exe)?\s+",
+    r"\brundll32(?:\.exe)?\s+",
+    r"\bregsvr32(?:\.exe)?\s+",
+    r"\bmshta(?:\.exe)?\s+",
+    r"\bwevtutil(?:\.exe)?\s+",
+    r"\bvssadmin(?:\.exe)?\s+",
+    r"\bwmic(?:\.exe)?\s+",
+)
+# One alternation is equivalent to trying each pattern with re.search.
+_COMMAND_STRING_RE = re.compile("|".join(_COMMAND_STRING_PATTERNS))
+
+
 def first_command_string(strings: Sequence[str]) -> str:
-    command_patterns = (
-        r"\bpowershell(?:\.exe)?\s+",
-        r"\bpwsh(?:\.exe)?\s+",
-        r"\bcmd\.exe\s+",
-        r"\bwscript(?:\.exe)?\s+",
-        r"\bcscript(?:\.exe)?\s+",
-        r"\brundll32(?:\.exe)?\s+",
-        r"\bregsvr32(?:\.exe)?\s+",
-        r"\bmshta(?:\.exe)?\s+",
-        r"\bwevtutil(?:\.exe)?\s+",
-        r"\bvssadmin(?:\.exe)?\s+",
-        r"\bwmic(?:\.exe)?\s+",
-    )
     for value in strings:
-        lowered = value.lower()
-        if any(re.search(pattern, lowered) for pattern in command_patterns):
+        if _COMMAND_STRING_RE.search(value.lower()):
             return value
     return ""
 
@@ -5985,49 +6217,50 @@ def normalize_event_details(
     message_catalog: Mapping[str, Mapping[str, Mapping[str, object]]] | None = None,
 ) -> dict[str, object]:
     normalized_event_id = normalize_event_id(event_id)
-    target_user_name = first_data_text(data, "TargetUserName", "TargetUser", "AccountName")
-    subject_user_name = first_data_text(data, "SubjectUserName", "SubjectUser")
-    target_domain_name = first_data_text(data, "TargetDomainName", "AccountDomain")
-    logon_type = first_data_text(data, "LogonType")
-    source_ip = first_data_text(data, "IpAddress", "SourceAddress", "SourceIp", "SourceNetworkAddress")
-    source_port = first_data_text(data, "IpPort", "SourcePort")
-    service_name = first_data_text(data, "ServiceName")
-    service_file_name = first_data_text(data, "ServiceFileName", "ImagePath")
-    new_process_name = first_data_text(data, "NewProcessName", "ProcessName", "Image")
-    parent_process_name = first_data_text(data, "ParentProcessName", "CreatorProcessName")
-    parent_command_line = first_data_text(data, "ParentCommandLine", "ParentProcessCommandLine")
-    script_block_text = first_data_text(data, "ScriptBlockText")
-    destination_ip = first_data_text(data, "DestinationIp", "DestAddress", "DestinationAddress")
-    destination_hostname = first_data_text(data, "DestinationHostname", "DestinationHostName", "DestHost")
-    destination_port = first_data_text(data, "DestinationPort", "DestPort")
-    query_name = first_data_text(data, "QueryName", "Query", "DnsQuery")
-    target_object = first_data_text(data, "TargetObject", "ObjectName", "ObjectValueName")
-    image_loaded = first_data_text(data, "ImageLoaded", "LoadedImage")
-    task_name = first_data_text(data, "TaskName", "TaskContent")
-    workstation_name = first_data_text(data, "WorkstationName", "Workstation")
-    logon_process_name = first_data_text(data, "LogonProcessName")
-    authentication_package_name = first_data_text(data, "AuthenticationPackageName")
-    status_code = first_data_text(data, "Status", "SubStatus", "ErrorCode")
-    failure_reason = first_data_text(data, "FailureReason")
-    share_name = first_data_text(data, "ShareName")
-    relative_target_name = first_data_text(data, "RelativeTargetName", "FileName")
-    device_instance_id = first_data_text(data, "DeviceInstanceId", "DeviceInstanceID", "DeviceId", "DeviceID")
-    ssid = first_data_text(data, "SSID", "Ssid", "ProfileName", "ConnectionName")
-    interface_guid = first_data_text(data, "InterfaceGuid", "InterfaceGUID", "InterfaceGuidString")
-    document_name = first_data_text(data, "DocumentName", "Param1")
-    printer_name = first_data_text(data, "PrinterName", "Param2")
-    job_id = first_data_text(data, "JobId", "JobID", "TransferId", "TransferID", "DisplayName")
-    url = first_data_text(data, "URL", "Url", "RemoteName", "OwnerUrl")
-    remote_name = first_data_text(data, "RemoteName", "RemoteFileName", "RemoteUrl", "URL", "Url")
-    local_file = first_data_text(data, "LocalFile", "LocalName", "FileName", "Path")
+    pick_data_text = data_text_picker(data)
+    target_user_name = pick_data_text("TargetUserName", "TargetUser", "AccountName")
+    subject_user_name = pick_data_text("SubjectUserName", "SubjectUser")
+    target_domain_name = pick_data_text("TargetDomainName", "AccountDomain")
+    logon_type = pick_data_text("LogonType")
+    source_ip = pick_data_text("IpAddress", "SourceAddress", "SourceIp", "SourceNetworkAddress")
+    source_port = pick_data_text("IpPort", "SourcePort")
+    service_name = pick_data_text("ServiceName")
+    service_file_name = pick_data_text("ServiceFileName", "ImagePath")
+    new_process_name = pick_data_text("NewProcessName", "ProcessName", "Image")
+    parent_process_name = pick_data_text("ParentProcessName", "CreatorProcessName")
+    parent_command_line = pick_data_text("ParentCommandLine", "ParentProcessCommandLine")
+    script_block_text = pick_data_text("ScriptBlockText")
+    destination_ip = pick_data_text("DestinationIp", "DestAddress", "DestinationAddress")
+    destination_hostname = pick_data_text("DestinationHostname", "DestinationHostName", "DestHost")
+    destination_port = pick_data_text("DestinationPort", "DestPort")
+    query_name = pick_data_text("QueryName", "Query", "DnsQuery")
+    target_object = pick_data_text("TargetObject", "ObjectName", "ObjectValueName")
+    image_loaded = pick_data_text("ImageLoaded", "LoadedImage")
+    task_name = pick_data_text("TaskName", "TaskContent")
+    workstation_name = pick_data_text("WorkstationName", "Workstation")
+    logon_process_name = pick_data_text("LogonProcessName")
+    authentication_package_name = pick_data_text("AuthenticationPackageName")
+    status_code = pick_data_text("Status", "SubStatus", "ErrorCode")
+    failure_reason = pick_data_text("FailureReason")
+    share_name = pick_data_text("ShareName")
+    relative_target_name = pick_data_text("RelativeTargetName", "FileName")
+    device_instance_id = pick_data_text("DeviceInstanceId", "DeviceInstanceID", "DeviceId", "DeviceID")
+    ssid = pick_data_text("SSID", "Ssid", "ProfileName", "ConnectionName")
+    interface_guid = pick_data_text("InterfaceGuid", "InterfaceGUID", "InterfaceGuidString")
+    document_name = pick_data_text("DocumentName", "Param1")
+    printer_name = pick_data_text("PrinterName", "Param2")
+    job_id = pick_data_text("JobId", "JobID", "TransferId", "TransferID", "DisplayName")
+    url = pick_data_text("URL", "Url", "RemoteName", "OwnerUrl")
+    remote_name = pick_data_text("RemoteName", "RemoteFileName", "RemoteUrl", "URL", "Url")
+    local_file = pick_data_text("LocalFile", "LocalName", "FileName", "Path")
     if not user_sid:
-        user_sid = first_data_text(data, "TargetUserSid", "SubjectUserSid", "UserSid")
+        user_sid = pick_data_text("TargetUserSid", "SubjectUserSid", "UserSid")
     if not user_name:
-        user_name = target_user_name or subject_user_name or first_data_text(data, "UserName", "User", "Owner")
+        user_name = target_user_name or subject_user_name or pick_data_text("UserName", "User", "Owner")
     if not process_name:
         process_name = new_process_name
     if not command_line:
-        command_line = first_data_text(data, "CommandLine", "ProcessCommandLine") or script_block_text
+        command_line = pick_data_text("CommandLine", "ProcessCommandLine") or script_block_text
     category, description = event_category_for(normalized_event_id, channel, provider_name, data)
     channel_family_value = channel_family(channel)
     event_family = inferred_event_family(category, channel_family_value)
@@ -6129,7 +6362,7 @@ def normalize_event_details(
         "reportability": reportability,
         "parser_confidence": parser_confidence,
         "evidence_strength": "partial-event-record" if is_native_evtx else "event-log-record",
-        "source_path": str(source_path.resolve()),
+        "source_path": resolved_path_text(source_path),
         "source_format": source_format,
         "source_index": source_index,
         "source_hashes": dict(source_hashes),
@@ -6237,7 +6470,7 @@ def eventlog_record_source_viewer_locator(
         "profile_version": "eventlog-record-source-viewer-locator-v1",
         "qc_prep_item": 7,
         "viewer": "eventlog-record",
-        "source_path": str(source_path.resolve()),
+        "source_path": resolved_path_text(source_path),
         "source_format": source_format,
         "source_sha256": source_sha256,
         "record_id": str(record_id or ""),
@@ -6268,8 +6501,17 @@ def build_eventlog_file_record(
     *,
     native_record_count: int = 0,
     native_record_candidate_count: int = 0,
+    native_chunk_count: int | None = None,
+    structure_rows: bool = True,
 ) -> ArtifactRecord:
     stat_result = path.stat()
+    extra: dict[str, object] = {}
+    if native_chunk_count is not None:
+        extra["native_chunk_count"] = native_chunk_count
+    if not structure_rows:
+        # Chunk/record-candidate rows were counted but not emitted
+        # (``--eventlog-structure-rows`` restores them).
+        extra["structure_rows_emitted"] = False
     return ArtifactRecord(
         provider=WindowsEventLogProvider.name,
         artifact_type="eventlog-file",
@@ -6300,6 +6542,7 @@ def build_eventlog_file_record(
             "native_validation_required": True,
             "recommended_parsers": ["EvtxECmd", "Hayabusa", "Chainsaw", "Velociraptor Windows.EventLogs.Evtx"],
             "note": "Binary EVTX detected. RapidTriage emits partial native record rows when record headers and BinXML fields are recoverable; import EvtxECmd/Hayabusa/Chainsaw/Velociraptor JSONL/CSV/XML output for report-grade provider message rendering.",
+            **extra,
         },
     )
 
@@ -6358,6 +6601,188 @@ def build_etl_trace_inventory_record(path: Path) -> ArtifactRecord:
             ],
             "recommended_parsers": ["tracerpt", "Windows Performance Toolkit", "Velociraptor Windows ETW artifacts"],
         },
+    )
+
+
+_TRIAGE_CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def _bounded_text(value: object, limit: int = EVENTLOG_TRIAGE_TEXT_MAX_CHARS) -> tuple[str, bool]:
+    """Triage preview text: C0 control bytes (undecoded BinXML tokens) removed, then cut to ``limit``."""
+    text = _TRIAGE_CONTROL_CHARS_RE.sub("", str(value or ""))
+    if len(text) <= limit:
+        return text, False
+    return text[:limit], True
+
+
+def _bounded_event_data(data: Mapping[str, object]) -> tuple[dict[str, object], bool]:
+    bounded: dict[str, object] = {}
+    truncated = len(data) > EVENTLOG_TRIAGE_EVENT_DATA_MAX_ITEMS
+    for key in list(data)[:EVENTLOG_TRIAGE_EVENT_DATA_MAX_ITEMS]:
+        value = data[key]
+        if isinstance(value, (Mapping, list)):
+            value = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+        if isinstance(value, str):
+            value, cut = _bounded_text(value)
+            truncated = truncated or cut
+        bounded[str(key)] = value
+    return bounded, truncated
+
+
+def _native_event_data_values(binxml: Mapping[str, object]) -> list[str]:
+    """Template substitution values outside Event/System (unnamed EventData)."""
+    values: list[str] = []
+    for item in binxml.get("value_fields") or []:
+        if not isinstance(item, Mapping):
+            continue
+        if str(item.get("element_path") or "").startswith("Event/System"):
+            continue
+        text = str(item.get("text") or "")
+        if text:
+            values.append(text)
+    return values
+
+
+def triage_eventlog_details(details: Mapping[str, object]) -> dict[str, object]:
+    """Compact per-event projection (``record_detail="triage"``).
+
+    Keeps identity, pivots (non-empty only), the rendered message and
+    EventData values (bounded), the native record locator, and short
+    validation status codes; per-event validation/report boilerplate and
+    per-file context are omitted (``record_projection`` lists them).
+    """
+    slim: dict[str, object] = {key: details[key] for key in EVENTLOG_TRIAGE_IDENTITY_KEYS if key in details}
+    for key in EVENTLOG_TRIAGE_PIVOT_KEYS:
+        value = details.get(key)
+        if value not in (None, "", [], {}):
+            slim[key] = value
+    for key, value in list(slim.items()):
+        # Partially decoded native fields can carry kilobytes of garbage.
+        if isinstance(value, str) and len(value) > EVENTLOG_TRIAGE_TEXT_MAX_CHARS:
+            slim[key] = value[:EVENTLOG_TRIAGE_TEXT_MAX_CHARS]
+            slim[f"{key}_truncated"] = True
+    raw_preview = str(details.get("raw_preview") or "")
+    command_line = str(details.get("command_line") or "")
+    if command_line and command_line != raw_preview:
+        slim["command_line"] = _bounded_text(command_line)[0]
+    rule = details.get("rule")
+    if isinstance(rule, Mapping) and (rule.get("title") or rule.get("id")):
+        slim["rule"] = dict(rule)
+    message, cut = _bounded_text(details.get("event_message") or "")
+    if message:
+        slim["event_message"] = message
+        if cut:
+            slim["event_message_truncated"] = True
+    is_native = details.get("parser") == "windows-eventlog-evtx-native"
+    event_data: Mapping[str, object] = {}
+    if is_native:
+        named = details.get("binxml_event_data_fields")
+        event_data = named if isinstance(named, Mapping) else {}
+    else:
+        raw = details.get("data")
+        event_data = raw if isinstance(raw, Mapping) else {}
+    if event_data:
+        bounded, truncated = _bounded_event_data(event_data)
+        slim["event_data"] = bounded
+        if truncated:
+            slim["event_data_truncated"] = True
+    elif is_native:
+        binxml = details.get("evtx_binxml") if isinstance(details.get("evtx_binxml"), Mapping) else {}
+        values = _native_event_data_values(binxml)
+        if values:
+            slim["event_data_values"] = [_bounded_text(value)[0] for value in values]
+            cap_list_field(slim, "event_data_values", EVENTLOG_TRIAGE_EVENT_DATA_MAX_ITEMS)
+        else:
+            strings = [str(item) for item in details.get("extracted_strings") or [] if str(item)]
+            if strings:
+                slim["extracted_strings"] = [_bounded_text(item, EVENTLOG_TRIAGE_STRING_MAX_CHARS)[0] for item in strings]
+                cap_list_field(slim, "extracted_strings", EVENTLOG_TRIAGE_STRING_MAX_ITEMS)
+    if is_native:
+        integrity = details.get("evtx_record_integrity") if isinstance(details.get("evtx_record_integrity"), Mapping) else {}
+        sequence = details.get("evtx_record_sequence") if isinstance(details.get("evtx_record_sequence"), Mapping) else {}
+        indicators = details.get("native_indicators") if isinstance(details.get("native_indicators"), Mapping) else {}
+        chunk_context = details.get("evtx_chunk_context") if isinstance(details.get("evtx_chunk_context"), Mapping) else {}
+        report_grade = (
+            details.get("evtx_report_grade_assessment")
+            if isinstance(details.get("evtx_report_grade_assessment"), Mapping)
+            else {}
+        )
+        chunk_offset = int_text(chunk_context.get("chunk_offset"))
+        slim["evtx_integrity_status"] = (
+            "trailing-size-valid" if integrity.get("trailing_size_valid") else "trailing-size-unverified"
+        )
+        slim["evtx_sequence_status"] = str(sequence.get("status") or "unknown")
+        slim["evtx_channel_hint_source"] = str(indicators.get("channel_hint_source") or "unknown")
+        slim["evtx_chunk_boundary_status"] = str(chunk_context.get("chunk_boundary_status") or "unknown")
+        slim["evtx_report_grade_status"] = str(report_grade.get("status") or "unknown")
+        if chunk_offset is not None and chunk_offset >= EVTX_FILE_HEADER_SIZE:
+            slim["evtx_chunk_index"] = (chunk_offset - EVTX_FILE_HEADER_SIZE) // EVTX_CHUNK_SIZE
+    slim["record_projection"] = {
+        "profile_version": EVENTLOG_TRIAGE_PROJECTION_VERSION,
+        "record_detail": EVENTLOG_RECORD_DETAIL_TRIAGE,
+        "omitted_blocks": list(EVENTLOG_TRIAGE_OMITTED_BLOCKS),
+        "full_detail_option": "collector option record_detail=full",
+        "per_file_context_row": "eventlog-file",
+    }
+    return slim
+
+
+def triage_eventlog_detection_details(details: Mapping[str, object]) -> dict[str, object]:
+    """Detection rows keep every populated field; empty pivot strings are dropped."""
+    return {key: value for key, value in details.items() if value != ""}
+
+
+def triage_eventlog_record(record: ArtifactRecord) -> ArtifactRecord:
+    details = record.details if isinstance(record.details, Mapping) else {}
+    if record.artifact_type == "eventlog-event":
+        slim = triage_eventlog_details(details)
+    elif record.artifact_type == "eventlog-detection":
+        slim = triage_eventlog_detection_details(details)
+    else:
+        return record
+    return ArtifactRecord(
+        provider=record.provider,
+        artifact_type=record.artifact_type,
+        path=record.path,
+        supported=record.supported,
+        details=slim,
+    )
+
+
+_LOGON_SESSION_INPUT_KEYS = (
+    "event_id",
+    "event_category",
+    "record_id",
+    "channel",
+    "computer",
+    "user_name",
+    "target_user_name",
+    "subject_user_name",
+    "target_domain_name",
+    "logon_type",
+    "source_ip",
+    "workstation_name",
+    "source_path",
+    "source_index",
+    "source_hashes",
+    "timestamp",
+    "event_created_at",
+)
+_LOGON_ID_DATA_KEYS = frozenset({"targetlogonid", "logonid", "subjectlogonid"})
+
+
+def logon_session_input_record(record: ArtifactRecord) -> ArtifactRecord:
+    """Keep only what ``build_logon_session_records`` reads from an event."""
+    details = record.details if isinstance(record.details, Mapping) else {}
+    light = {key: details[key] for key in _LOGON_SESSION_INPUT_KEYS if key in details}
+    data = details.get("data") if isinstance(details.get("data"), Mapping) else {}
+    light["data"] = {key: value for key, value in data.items() if normalize_key(key) in _LOGON_ID_DATA_KEYS}
+    return ArtifactRecord(
+        provider=record.provider,
+        artifact_type=record.artifact_type,
+        path=record.path,
+        supported=record.supported,
+        details=light,
     )
 
 
@@ -6683,65 +7108,73 @@ def build_builtin_detection_record(source_record: ArtifactRecord, rule: Mapping[
     return event_record(Path(source_record.path), "eventlog-detection", detection_details)
 
 
-def build_eventlog_summary(root: Path, records: Sequence[ArtifactRecord]) -> ArtifactRecord | None:
-    event_rows = [
-        record
-        for record in records
-        if record.artifact_type == "eventlog-event" and isinstance(record.details, Mapping)
-    ]
-    detection_rows = [
-        record
-        for record in records
-        if record.artifact_type == "eventlog-detection" and isinstance(record.details, Mapping)
-    ]
-    parsed_rows = [
-        record
-        for record in records
-        if record.artifact_type in {"eventlog-event", "eventlog-detection", "eventlog-record-candidate"}
-        and isinstance(record.details, Mapping)
-    ]
-    inventory_rows = [record for record in records if record.artifact_type == "eventlog-file"]
-    chunk_rows = [
-        record
-        for record in records
-        if record.artifact_type == "eventlog-chunk" and isinstance(record.details, Mapping)
-    ]
-    candidate_rows = [
-        record
-        for record in records
-        if record.artifact_type == "eventlog-record-candidate" and isinstance(record.details, Mapping)
-    ]
-    if not parsed_rows and not inventory_rows:
-        return None
+class EventlogSummaryAccumulator:
+    """Streaming form of the ``eventlog-summary`` builder.
 
-    event_id_counts: Counter[str] = Counter()
-    category_counts: Counter[str] = Counter()
-    family_counts: Counter[str] = Counter()
-    channel_counts: Counter[str] = Counter()
-    channel_family_counts: Counter[str] = Counter()
-    user_counts: Counter[str] = Counter()
-    source_ip_counts: Counter[str] = Counter()
-    process_counts: Counter[str] = Counter()
-    parser_status_counts: Counter[str] = Counter()
-    reportability_counts: Counter[str] = Counter()
-    risk_term_counts: Counter[str] = Counter()
-    native_integrity_counts: Counter[str] = Counter()
-    native_sequence_counts: Counter[str] = Counter()
-    native_channel_hint_counts: Counter[str] = Counter()
-    native_binxml_status_counts: Counter[str] = Counter()
-    native_recovery_status_counts: Counter[str] = Counter()
-    native_allocation_status_counts: Counter[str] = Counter()
-    native_boundary_status_counts: Counter[str] = Counter()
-    native_report_grade_status_counts: Counter[str] = Counter()
-    native_chunk_integrity_counts: Counter[str] = Counter()
-    source_paths: set[str] = set()
-    timestamps: list[str] = []
-    high_risk_events: list[dict[str, object]] = []
-    record_ids_by_channel: dict[str, list[int]] = defaultdict(list)
-    detection_rule_counts: Counter[str] = Counter()
-    detection_level_counts: Counter[str] = Counter()
+    Rows are added one at a time (the provider no longer keeps every event
+    row), and ``build`` produces exactly what the list-based builder did:
+    counters keep per-row-group insertion order (events, detections, record
+    candidates, chunks) so ``most_common`` tie order is unchanged, first/last
+    timestamps are tracked instead of sorting every timestamp, record ids are
+    kept per channel as sets (``record_sequence_gaps`` de-duplicates anyway),
+    and high-risk rows are pruned to a stable top ``HIGH_RISK_KEEP``.
+    """
 
-    for record in event_rows:
+    GROUPS = ("event", "detection", "candidate", "chunk")
+    HIGH_RISK_KEEP = 50
+
+    def __init__(self) -> None:
+        self.counts: Counter[str] = Counter()
+        self.counters: dict[str, dict[str, Counter[str]]] = defaultdict(lambda: {group: Counter() for group in self.GROUPS})
+        self.source_paths: set[str] = set()
+        self.first_timestamp: str | None = None
+        self.last_timestamp: str | None = None
+        self.record_ids_by_channel: dict[str, set[int]] = defaultdict(set)
+        self.high_risk: dict[str, list[dict[str, object]]] = {"event": [], "detection": []}
+
+    def _inc(self, counter: str, group: str, value: str) -> None:
+        if value:
+            self.counters[counter][group][value] += 1
+
+    def _merged(self, counter: str) -> Counter[str]:
+        merged: Counter[str] = Counter()
+        for group in self.GROUPS:
+            merged.update(self.counters[counter][group])
+        return merged
+
+    def _timestamp(self, timestamp: str) -> None:
+        if self.first_timestamp is None or timestamp < self.first_timestamp:
+            self.first_timestamp = timestamp
+        if self.last_timestamp is None or timestamp > self.last_timestamp:
+            self.last_timestamp = timestamp
+
+    def _high_risk(self, group: str, row: dict[str, object]) -> None:
+        rows = self.high_risk[group]
+        rows.append(row)
+        if len(rows) >= self.HIGH_RISK_KEEP * 20:
+            self.high_risk[group] = _top_risk_events(rows)
+
+    def add(self, record: ArtifactRecord) -> None:
+        artifact_type = record.artifact_type
+        if artifact_type == "eventlog-file":
+            self.counts["inventory"] += 1
+            return
+        if not isinstance(record.details, Mapping):
+            return
+        if artifact_type == "eventlog-event":
+            self.counts["event"] += 1
+            self._add_event(record)
+        elif artifact_type == "eventlog-detection":
+            self.counts["detection"] += 1
+            self._add_detection(record)
+        elif artifact_type == "eventlog-record-candidate":
+            self.counts["candidate"] += 1
+            self._add_candidate(record)
+        elif artifact_type == "eventlog-chunk":
+            self.counts["chunk"] += 1
+            self._add_chunk(record)
+
+    def _add_event(self, record: ArtifactRecord) -> None:
         details = record.details
         event_id = str(details.get("event_id") or "")
         category = str(details.get("event_category") or "")
@@ -6755,48 +7188,65 @@ def build_eventlog_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
         timestamp = str(details.get("timestamp") or details.get("event_created_at") or "")
         record_id = int_text(details.get("record_id"))
 
-        increment_counter(event_id_counts, event_id)
-        increment_counter(category_counts, category)
-        increment_counter(family_counts, family)
-        increment_counter(channel_counts, channel)
-        increment_counter(channel_family_counts, channel_family_value)
-        increment_counter(user_counts, user_name)
-        increment_counter(source_ip_counts, source_ip)
-        increment_counter(process_counts, process_name)
-        increment_counter(parser_status_counts, str(details.get("coverage_status") or ""))
-        increment_counter(reportability_counts, str(details.get("reportability") or ""))
+        self._inc("event_id_counts", "event", event_id)
+        self._inc("category_counts", "event", category)
+        self._inc("family_counts", "event", family)
+        self._inc("channel_counts", "event", channel)
+        self._inc("channel_family_counts", "event", channel_family_value)
+        self._inc("user_counts", "event", user_name)
+        self._inc("source_ip_counts", "event", source_ip)
+        self._inc("process_counts", "event", process_name)
+        self._inc("parser_status_counts", "event", str(details.get("coverage_status") or ""))
+        self._inc("reportability_counts", "event", str(details.get("reportability") or ""))
         if details.get("parser") == "windows-eventlog-evtx-native":
             integrity = details.get("evtx_record_integrity") if isinstance(details.get("evtx_record_integrity"), Mapping) else {}
             sequence = details.get("evtx_record_sequence") if isinstance(details.get("evtx_record_sequence"), Mapping) else {}
             native_indicators = details.get("native_indicators") if isinstance(details.get("native_indicators"), Mapping) else {}
-            increment_counter(
-                native_integrity_counts,
-                "trailing-size-valid" if integrity.get("trailing_size_valid") else "trailing-size-unverified",
+            # Triage-projected events carry the same labels as short codes.
+            self._inc(
+                "native_integrity_counts", "event",
+                str(
+                    details.get("evtx_integrity_status")
+                    or ("trailing-size-valid" if integrity.get("trailing_size_valid") else "trailing-size-unverified")
+                ),
             )
-            increment_counter(native_sequence_counts, str(sequence.get("status") or "unknown"))
-            increment_counter(native_channel_hint_counts, str(native_indicators.get("channel_hint_source") or "unknown"))
-            increment_counter(native_binxml_status_counts, str(details.get("evtx_binxml_status") or "unknown"))
-            increment_counter(native_recovery_status_counts, str(details.get("evtx_recovery_status") or "unknown"))
-            increment_counter(native_allocation_status_counts, str(details.get("evtx_allocation_status") or "unknown"))
+            self._inc(
+                "native_sequence_counts", "event",
+                str(details.get("evtx_sequence_status") or sequence.get("status") or "unknown"),
+            )
+            self._inc(
+                "native_channel_hint_counts", "event",
+                str(details.get("evtx_channel_hint_source") or native_indicators.get("channel_hint_source") or "unknown"),
+            )
+            self._inc("native_binxml_status_counts", "event", str(details.get("evtx_binxml_status") or "unknown"))
+            self._inc("native_recovery_status_counts", "event", str(details.get("evtx_recovery_status") or "unknown"))
+            self._inc("native_allocation_status_counts", "event", str(details.get("evtx_allocation_status") or "unknown"))
             chunk_context = details.get("evtx_chunk_context") if isinstance(details.get("evtx_chunk_context"), Mapping) else {}
             report_grade = (
                 details.get("evtx_report_grade_assessment")
                 if isinstance(details.get("evtx_report_grade_assessment"), Mapping)
                 else {}
             )
-            increment_counter(native_boundary_status_counts, str(chunk_context.get("chunk_boundary_status") or "unknown"))
-            increment_counter(native_report_grade_status_counts, str(report_grade.get("status") or "unknown"))
+            self._inc(
+                "native_boundary_status_counts", "event",
+                str(details.get("evtx_chunk_boundary_status") or chunk_context.get("chunk_boundary_status") or "unknown"),
+            )
+            self._inc(
+                "native_report_grade_status_counts", "event",
+                str(details.get("evtx_report_grade_status") or report_grade.get("status") or "unknown"),
+            )
         for flag in details.get("risk_flags") or []:
             text = str(flag)
             if text.startswith("suspicious-term:"):
-                increment_counter(risk_term_counts, text.removeprefix("suspicious-term:"))
-        source_paths.add(source_path)
+                self._inc("risk_term_counts", "event", text.removeprefix("suspicious-term:"))
+        self.source_paths.add(source_path)
         if timestamp:
-            timestamps.append(timestamp)
+            self._timestamp(timestamp)
         if record_id is not None:
-            record_ids_by_channel[channel].append(record_id)
+            self.record_ids_by_channel[channel].add(record_id)
         if int(details.get("risk_score") or 0) >= 40 or details.get("risk_flags"):
-            high_risk_events.append(
+            self._high_risk(
+                "event",
                 {
                     "timestamp": timestamp,
                     "event_id": event_id,
@@ -6812,7 +7262,7 @@ def build_eventlog_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
                 }
             )
 
-    for record in detection_rows:
+    def _add_detection(self, record: ArtifactRecord) -> None:
         details = record.details
         channel = str(details.get("channel") or "unknown")
         source_path = str(details.get("source_path") or record.path)
@@ -6821,17 +7271,18 @@ def build_eventlog_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
         rule = details.get("rule") if isinstance(details.get("rule"), Mapping) else {}
         rule_id = str(rule.get("id") or rule.get("title") or "")
         rule_level = str(rule.get("level") or "")
-        increment_counter(detection_rule_counts, rule_id)
-        increment_counter(detection_level_counts, rule_level)
-        increment_counter(parser_status_counts, str(details.get("coverage_status") or ""))
-        increment_counter(reportability_counts, str(details.get("reportability") or ""))
-        source_paths.add(source_path)
+        self._inc("detection_rule_counts", "detection", rule_id)
+        self._inc("detection_level_counts", "detection", rule_level)
+        self._inc("parser_status_counts", "detection", str(details.get("coverage_status") or ""))
+        self._inc("reportability_counts", "detection", str(details.get("reportability") or ""))
+        self.source_paths.add(source_path)
         if timestamp:
-            timestamps.append(timestamp)
+            self._timestamp(timestamp)
         if record_id is not None:
-            record_ids_by_channel[channel].append(record_id)
+            self.record_ids_by_channel[channel].add(record_id)
         if int(details.get("risk_score") or 0) >= 40 or details.get("risk_flags"):
-            high_risk_events.append(
+            self._high_risk(
+                "detection",
                 {
                     "timestamp": timestamp,
                     "event_id": str(details.get("event_id") or ""),
@@ -6847,106 +7298,127 @@ def build_eventlog_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
                 }
             )
 
-    for record in candidate_rows:
+    def _add_candidate(self, record: ArtifactRecord) -> None:
         details = record.details
         source_path = str(details.get("source_path") or record.path)
         timestamp = str(details.get("timestamp") or "")
-        source_paths.add(source_path)
+        self.source_paths.add(source_path)
         if timestamp:
-            timestamps.append(timestamp)
-        increment_counter(parser_status_counts, str(details.get("coverage_status") or ""))
-        increment_counter(reportability_counts, str(details.get("reportability") or ""))
-        increment_counter(native_recovery_status_counts, str(details.get("evtx_recovery_status") or "unknown"))
-        increment_counter(native_allocation_status_counts, str(details.get("evtx_allocation_status") or "unknown"))
+            self._timestamp(timestamp)
+        self._inc("parser_status_counts", "candidate", str(details.get("coverage_status") or ""))
+        self._inc("reportability_counts", "candidate", str(details.get("reportability") or ""))
+        self._inc("native_recovery_status_counts", "candidate", str(details.get("evtx_recovery_status") or "unknown"))
+        self._inc("native_allocation_status_counts", "candidate", str(details.get("evtx_allocation_status") or "unknown"))
         chunk_context = details.get("evtx_chunk_context") if isinstance(details.get("evtx_chunk_context"), Mapping) else {}
         report_grade = (
             details.get("evtx_report_grade_assessment")
             if isinstance(details.get("evtx_report_grade_assessment"), Mapping)
             else {}
         )
-        increment_counter(native_boundary_status_counts, str(chunk_context.get("chunk_boundary_status") or "unknown"))
-        increment_counter(native_report_grade_status_counts, str(report_grade.get("status") or "unknown"))
+        self._inc("native_boundary_status_counts", "candidate", str(chunk_context.get("chunk_boundary_status") or "unknown"))
+        self._inc("native_report_grade_status_counts", "candidate", str(report_grade.get("status") or "unknown"))
 
-    for record in chunk_rows:
+    def _add_chunk(self, record: ArtifactRecord) -> None:
         details = record.details
-        source_paths.add(str(details.get("source_path") or record.path))
+        self.source_paths.add(str(details.get("source_path") or record.path))
         integrity = details.get("evtx_chunk_integrity") if isinstance(details.get("evtx_chunk_integrity"), Mapping) else {}
-        increment_counter(
-            native_chunk_integrity_counts,
+        self._inc(
+            "native_chunk_integrity_counts", "chunk",
             "structure-plausible" if integrity.get("structure_plausible") else "structure-warning",
         )
-        increment_counter(
-            native_chunk_integrity_counts,
+        self._inc(
+            "native_chunk_integrity_counts", "chunk",
             str(integrity.get("checksum_status") or "checksum-unknown"),
         )
-        increment_counter(parser_status_counts, str(details.get("coverage_status") or ""))
-        increment_counter(reportability_counts, str(details.get("reportability") or ""))
+        self._inc("parser_status_counts", "chunk", str(details.get("coverage_status") or ""))
+        self._inc("reportability_counts", "chunk", str(details.get("reportability") or ""))
 
-    timestamps.sort()
-    details = {
-        "parser": "windows-eventlog-summary",
-        "parser_version": PARSER_VERSION,
-        "coverage_status": "summarized",
-        "reportability": "triage",
-        "source_path": str(root.resolve()),
-        "source_format": "summary",
-        "event_count": len(event_rows),
-        "detection_count": len(detection_rows),
-        "parsed_row_count": len(parsed_rows),
-        "inventory_count": len(inventory_rows),
-        "native_chunk_count": len(chunk_rows),
-        "record_candidate_count": len(candidate_rows),
-        "source_files": sorted(source_paths),
-        "detection_rule_counts": counter_items(detection_rule_counts),
-        "event_id_counts": counter_items(event_id_counts),
-        "event_category_counts": counter_items(category_counts),
-        "event_family_counts": counter_items(family_counts),
-        "channel_counts": counter_items(channel_counts),
-        "channel_family_counts": counter_items(channel_family_counts),
-        "user_counts": counter_items(user_counts),
-        "source_ip_counts": counter_items(source_ip_counts),
-        "process_counts": counter_items(process_counts),
-        "parser_status_counts": counter_items(parser_status_counts),
-        "reportability_counts": counter_items(reportability_counts),
-        "risk_term_counts": counter_items(risk_term_counts),
-        "native_integrity_counts": counter_items(native_integrity_counts),
-        "native_sequence_counts": counter_items(native_sequence_counts),
-        "native_channel_hint_counts": counter_items(native_channel_hint_counts),
-        "native_binxml_status_counts": counter_items(native_binxml_status_counts),
-        "native_recovery_status_counts": counter_items(native_recovery_status_counts),
-        "native_allocation_status_counts": counter_items(native_allocation_status_counts),
-        "native_boundary_status_counts": counter_items(native_boundary_status_counts),
-        "native_report_grade_status_counts": counter_items(native_report_grade_status_counts),
-        "native_chunk_integrity_counts": counter_items(native_chunk_integrity_counts),
-        "native_capabilities": NATIVE_EVTX_CAPABILITIES,
-        "native_report_grade_blockers": NATIVE_EVTX_REPORT_GRADE_BLOCKERS,
-        "detection_level_counts": counter_items(detection_level_counts),
-        "first_event_at": timestamps[0] if timestamps else "",
-        "last_event_at": timestamps[-1] if timestamps else "",
-        "high_risk_events": sorted(high_risk_events, key=lambda item: int(item.get("risk_score") or 0), reverse=True)[:50],
-        "record_sequence_gaps": record_sequence_gaps(record_ids_by_channel),
-        "summary_notes": [
-            "Review record_sequence_gaps as triage hints only; filtered exports may naturally contain non-contiguous EventRecordID values.",
-            "Binary EVTX rows include partial native record scans when recoverable; native_binxml_status_counts shows whether BinXML field decoding is complete.",
-            "eventlog-record-candidate rows and evtx_recovery_context mark slack/deleted/corrupt candidates that require independent validation.",
-            "eventlog-chunk rows expose native chunk bounds and checksum observations so recovery candidates can be reviewed against chunk slack/structure.",
-            "Use message_rendering.validation_required and external parser exports to separate built-in fallback messages from report-grade provider resource rendering.",
-        ],
-    }
-    return ArtifactRecord(
-        provider=WindowsEventLogProvider.name,
-        artifact_type="eventlog-summary",
-        path=str(root.resolve()),
-        supported=True,
-        details=details,
-    )
+    def build(self, root: Path) -> ArtifactRecord | None:
+        parsed = self.counts["event"] + self.counts["detection"] + self.counts["candidate"]
+        if not parsed and not self.counts["inventory"]:
+            return None
+        details = {
+            "parser": "windows-eventlog-summary",
+            "parser_version": PARSER_VERSION,
+            "coverage_status": "summarized",
+            "reportability": "triage",
+            "source_path": str(root.resolve()),
+            "source_format": "summary",
+            "event_count": self.counts["event"],
+            "detection_count": self.counts["detection"],
+            "parsed_row_count": self.counts["event"] + self.counts["detection"] + self.counts["candidate"],
+            "inventory_count": self.counts["inventory"],
+            "native_chunk_count": self.counts["chunk"],
+            "record_candidate_count": self.counts["candidate"],
+            "source_files": sorted(self.source_paths),
+            "detection_rule_counts": counter_items(self._merged("detection_rule_counts")),
+            "event_id_counts": counter_items(self._merged("event_id_counts")),
+            "event_category_counts": counter_items(self._merged("category_counts")),
+            "event_family_counts": counter_items(self._merged("family_counts")),
+            "channel_counts": counter_items(self._merged("channel_counts")),
+            "channel_family_counts": counter_items(self._merged("channel_family_counts")),
+            "user_counts": counter_items(self._merged("user_counts")),
+            "source_ip_counts": counter_items(self._merged("source_ip_counts")),
+            "process_counts": counter_items(self._merged("process_counts")),
+            "parser_status_counts": counter_items(self._merged("parser_status_counts")),
+            "reportability_counts": counter_items(self._merged("reportability_counts")),
+            "risk_term_counts": counter_items(self._merged("risk_term_counts")),
+            "native_integrity_counts": counter_items(self._merged("native_integrity_counts")),
+            "native_sequence_counts": counter_items(self._merged("native_sequence_counts")),
+            "native_channel_hint_counts": counter_items(self._merged("native_channel_hint_counts")),
+            "native_binxml_status_counts": counter_items(self._merged("native_binxml_status_counts")),
+            "native_recovery_status_counts": counter_items(self._merged("native_recovery_status_counts")),
+            "native_allocation_status_counts": counter_items(self._merged("native_allocation_status_counts")),
+            "native_boundary_status_counts": counter_items(self._merged("native_boundary_status_counts")),
+            "native_report_grade_status_counts": counter_items(self._merged("native_report_grade_status_counts")),
+            "native_chunk_integrity_counts": counter_items(self._merged("native_chunk_integrity_counts")),
+            "native_capabilities": NATIVE_EVTX_CAPABILITIES,
+            "native_report_grade_blockers": NATIVE_EVTX_REPORT_GRADE_BLOCKERS,
+            "detection_level_counts": counter_items(self._merged("detection_level_counts")),
+            "first_event_at": self.first_timestamp or "",
+            "last_event_at": self.last_timestamp or "",
+            "high_risk_events": _top_risk_events([*self.high_risk["event"], *self.high_risk["detection"]]),
+            "record_sequence_gaps": record_sequence_gaps(self.record_ids_by_channel),
+            "summary_notes": [
+                "Review record_sequence_gaps as triage hints only; filtered exports may naturally contain non-contiguous EventRecordID values.",
+                "Binary EVTX rows include partial native record scans when recoverable; native_binxml_status_counts shows whether BinXML field decoding is complete.",
+                "eventlog-record-candidate rows and evtx_recovery_context mark slack/deleted/corrupt candidates that require independent validation.",
+                "eventlog-chunk rows expose native chunk bounds and checksum observations so recovery candidates can be reviewed against chunk slack/structure.",
+                "Use message_rendering.validation_required and external parser exports to separate built-in fallback messages from report-grade provider resource rendering.",
+            ],
+        }
+        return ArtifactRecord(
+            provider=WindowsEventLogProvider.name,
+            artifact_type="eventlog-summary",
+            path=str(root.resolve()),
+            supported=True,
+            details=details,
+        )
+
+
+def _top_risk_events(rows: Sequence[dict[str, object]]) -> list[dict[str, object]]:
+    """Stable top-50 by risk score (ties keep arrival order)."""
+    return sorted(rows, key=lambda item: int(item.get("risk_score") or 0), reverse=True)[: EventlogSummaryAccumulator.HIGH_RISK_KEEP]
+
+
+def build_eventlog_summary(root: Path, records: Iterable[ArtifactRecord]) -> ArtifactRecord | None:
+    accumulator = EventlogSummaryAccumulator()
+    for record in records:
+        accumulator.add(record)
+    return accumulator.build(root)
+
+
+@functools.lru_cache(maxsize=4096)
+def resolved_path_text(path: Path) -> str:
+    """``str(path.resolve())`` memoized: every event of a log shares one source file."""
+    return str(path.resolve())
 
 
 def event_record(path: Path, artifact_type: str, details: Mapping[str, object]) -> ArtifactRecord:
     return ArtifactRecord(
         provider=WindowsEventLogProvider.name,
         artifact_type=artifact_type,
-        path=str(path.resolve()),
+        path=resolved_path_text(path),
         supported=True,
         details=dict(details),
     )
@@ -7117,8 +7589,18 @@ def first_matching_string(values: Sequence[str], *needles: str) -> str:
     return ""
 
 
+_NON_ALNUM_KEY_RE = re.compile(r"[^a-z0-9]")
+
+
 def normalize_key(value: object) -> str:
-    return re.sub(r"[^a-z0-9]", "", str(value).lower())
+    return _normalize_key_text(str(value))
+
+
+@functools.lru_cache(maxsize=65536)
+def _normalize_key_text(text: str) -> str:
+    # Event field names repeat across every event; memoizing keeps the
+    # per-event first_data_text() lookups off the regex engine.
+    return _NON_ALNUM_KEY_RE.sub("", text.lower())
 
 
 def first_value(row: Mapping[str, object], *keys: str) -> object:
@@ -7133,6 +7615,16 @@ def first_data_text(row: Mapping[str, object], *keys: str) -> str:
     lowered = {normalize_key(key): value for key, value in row.items()}
     value = first_value(lowered, *keys)
     return str(value or "")
+
+
+def data_text_picker(row: Mapping[str, object]):
+    """``first_data_text`` bound to one row: its keys are normalized once."""
+    lowered = {normalize_key(key): value for key, value in row.items()}
+
+    def pick(*keys: str) -> str:
+        return str(first_value(lowered, *keys) or "")
+
+    return pick
 
 
 def split_tags(value: object) -> list[str]:

@@ -37,6 +37,7 @@ __all__ = [
     "LazyObject",
     "Scalar",
     "iter_array_items",
+    "iter_jsonl_items",
     "open_json",
     "read_member",
 ]
@@ -373,3 +374,36 @@ def read_member(path: Path, member: str, *, chunk_size: int = 1 << 22) -> Any:
             if key == member:
                 return node.materialize()
     raise JsonStreamError(f"member {member!r} not found")
+
+
+def iter_jsonl_items(
+    path: Path,
+    *,
+    offset: int = 0,
+    limit: int | None = None,
+) -> Iterator[Any]:
+    """Yield parsed records of a JSON Lines file, one line at a time.
+
+    ``offset`` skips that many non-blank records without parsing them and
+    ``limit`` stops after that many records, so paging a multi-GB JSONL
+    stream costs one line scan up to ``offset + limit``. A malformed line
+    raises ``JsonStreamError`` naming the line number.
+    """
+    if limit is not None and limit <= 0:
+        return
+    yielded = 0
+    index = 0
+    with open(Path(path), "r", encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            if not line.strip():
+                continue
+            index += 1
+            if index <= offset:
+                continue
+            try:
+                yield json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise JsonStreamError(f"invalid JSON on line {line_number} of {path}: {exc}") from exc
+            yielded += 1
+            if limit is not None and yielded >= limit:
+                return

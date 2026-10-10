@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import binascii
+import functools
 import hashlib
 import json
 import os
@@ -8,6 +9,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path, PureWindowsPath
 
+from ...core.artifact_profiles import cap_list_field
 from ...core.audit import compute_sha256
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
@@ -38,8 +40,13 @@ QC_PREP_PREFETCH_CONTRACT = {
     ],
 }
 MAX_PREFETCH_SCAN_BYTES = 1024 * 1024
+# Per-record list caps (run-pipeline-mitigations §7 I12). Lists longer than
+# the cap are cut and marked ``<key>_truncated: true`` / ``<key>_total: n``.
+# referenced_paths stays at 200 (within the ≤256 contract); the per-file
+# file_reference_candidates list is capped at 64 entries.
 MAX_REFERENCED_PATHS = 200
 MAX_CANDIDATES = 200
+MAX_FILE_REFERENCE_CANDIDATES = 64
 MAX_REASONABLE_RUN_COUNT = 1_000_000
 PREFETCH_VERSION_LAYOUTS = {
     17: {
@@ -146,7 +153,7 @@ class WindowsPrefetchProvider:
             report_grade = prefetch_report_grade_assessment(validation_checks)
             core_accuracy_gates = prefetch_core_accuracy_gates(
                 {
-                    "source_path": str(path.resolve()),
+                    "source_path": resolved_path_text(path),
                     "source_hashes": source_hashes,
                     "validation_checks": validation_checks,
                     **header,
@@ -155,7 +162,7 @@ class WindowsPrefetchProvider:
             yield ArtifactRecord(
                 provider=self.name,
                 artifact_type="prefetch-file",
-                path=str(path.resolve()),
+                path=resolved_path_text(path),
                 supported=True,
                 details=with_prefetch_depth_manifest({
                     "parser": "windows-prefetch-inventory",
@@ -164,7 +171,7 @@ class WindowsPrefetchProvider:
                     "coverage_status": "detected",
                     "reportability": "triage",
                     "parser_confidence": header.get("parser_confidence", "low"),
-                    "source_path": str(path.resolve()),
+                    "source_path": resolved_path_text(path),
                     "source_format": "pf",
                     "source_hashes": source_hashes,
                     "executable_hint": header_executable_name or filename_executable_hint,
@@ -188,7 +195,7 @@ class WindowsPrefetchProvider:
                     "prefetch_native_capabilities": dict(PREFETCH_NATIVE_CAPABILITIES),
                     "commercial_uplift_evidence": prefetch_commercial_uplift_evidence(
                         {
-                            "source_path": str(path.resolve()),
+                            "source_path": resolved_path_text(path),
                             "source_hashes": source_hashes,
                             "artifact_type": "prefetch-file",
                             "prefetch_validation_matrix": prefetch_validation_matrix(validation_checks),
@@ -311,11 +318,13 @@ def prefetch_header_hints(path: Path) -> dict[str, object]:
     referenced_paths = referenced_prefetch_paths(strings)
     volume_candidates = prefetch_volume_candidates(referenced_paths)
     file_reference_candidates = prefetch_file_reference_candidates(referenced_paths)
-    hints["referenced_paths"] = referenced_paths[:MAX_REFERENCED_PATHS]
+    hints["referenced_paths"] = list(referenced_paths)
+    cap_list_field(hints, "referenced_paths", MAX_REFERENCED_PATHS)
     hints["referenced_path_count"] = len(referenced_paths)
     hints["volume_candidates"] = volume_candidates[:MAX_CANDIDATES]
     hints["volume_candidate_count"] = len(volume_candidates)
-    hints["file_reference_candidates"] = file_reference_candidates[:MAX_CANDIDATES]
+    hints["file_reference_candidates"] = list(file_reference_candidates)
+    cap_list_field(hints, "file_reference_candidates", MAX_FILE_REFERENCE_CANDIDATES)
     hints["file_reference_candidate_count"] = len(file_reference_candidates)
     hints["prefetch_validation_checks"] = prefetch_validation_checks(
         is_scca=is_scca,
@@ -544,6 +553,12 @@ def prefetch_section_bounds_profile(
     return profile
 
 
+@functools.lru_cache(maxsize=4096)
+def resolved_path_text(path: Path) -> str:
+    """``str(path.resolve())`` memoized: every reference row of a PF shares its file."""
+    return str(path.resolve())
+
+
 def build_prefetch_reference_record(
     path: Path,
     referenced_path: str,
@@ -556,7 +571,7 @@ def build_prefetch_reference_record(
     report_grade = prefetch_report_grade_assessment(validation_checks)
     core_accuracy_gates = prefetch_core_accuracy_gates(
         {
-            "source_path": str(path.resolve()),
+            "source_path": resolved_path_text(path),
             "source_hashes": dict(source_hashes),
             "source_index": index,
             "validation_checks": validation_checks,
@@ -567,7 +582,7 @@ def build_prefetch_reference_record(
     return ArtifactRecord(
         provider=WindowsPrefetchProvider.name,
         artifact_type="prefetch-reference",
-        path=str(path.resolve()),
+        path=resolved_path_text(path),
         supported=True,
         details=with_prefetch_depth_manifest({
             "parser": "windows-prefetch-reference",
@@ -576,7 +591,7 @@ def build_prefetch_reference_record(
             "coverage_status": "native-reference-string",
             "reportability": "triage",
             "parser_confidence": "low",
-            "source_path": str(path.resolve()),
+            "source_path": resolved_path_text(path),
             "source_format": "pf",
             "source_hashes": dict(source_hashes),
             "source_index": index,
@@ -602,7 +617,7 @@ def build_prefetch_reference_record(
             "prefetch_native_capabilities": dict(PREFETCH_NATIVE_CAPABILITIES),
             "commercial_uplift_evidence": prefetch_commercial_uplift_evidence(
                 {
-                    "source_path": str(path.resolve()),
+                    "source_path": resolved_path_text(path),
                     "source_hashes": dict(source_hashes),
                     "source_index": index,
                     "artifact_type": "prefetch-reference",
@@ -628,7 +643,7 @@ def build_prefetch_reference_record(
             ),
             "validation_guidance": "Prefetch reference rows are recovered from bounded native strings; validate complete file metrics and volumes with PECmd before final testimony.",
             "raw_preview": referenced_path,
-        }),
+        }, summary_only=True),
     )
 
 
@@ -916,11 +931,50 @@ def prefetch_reportability_decision(
     }
 
 
-def with_prefetch_depth_manifest(details: dict[str, object]) -> dict[str, object]:
+def with_prefetch_depth_manifest(details: dict[str, object], *, summary_only: bool = False) -> dict[str, object]:
     details["prefetch_analyst_review_profile"] = prefetch_analyst_review_profile(details)
-    details["prefetch_execution_depth_manifest"] = prefetch_execution_depth_manifest(details)
-    details["prefetch_execution_depth_manifest_hash"] = details["prefetch_execution_depth_manifest"]["manifest_sha256"]
+    manifest = prefetch_execution_depth_manifest(details)
+    details["prefetch_execution_depth_manifest"] = (
+        prefetch_execution_depth_manifest_summary(manifest) if summary_only else manifest
+    )
+    details["prefetch_execution_depth_manifest_hash"] = manifest["manifest_sha256"]
     return details
+
+
+def prefetch_execution_depth_manifest_summary(manifest: Mapping[str, object]) -> dict[str, object]:
+    """Counts-only view of a per-row depth manifest (§7 I12).
+
+    Reference rows repeat their parent PF's layout, section, compression and
+    reportability context; the full manifest stays on the ``prefetch-file``
+    row and the reference row keeps counts, statuses, and the full
+    manifest's ``manifest_sha256``.
+    """
+    metrics = manifest.get("referenced_file_metrics") if isinstance(manifest.get("referenced_file_metrics"), Mapping) else {}
+    counters = manifest.get("execution_counters") if isinstance(manifest.get("execution_counters"), Mapping) else {}
+    section = manifest.get("section_bounds") if isinstance(manifest.get("section_bounds"), Mapping) else {}
+    reportability = manifest.get("reportability") if isinstance(manifest.get("reportability"), Mapping) else {}
+    row_identity = manifest.get("row_identity") if isinstance(manifest.get("row_identity"), Mapping) else {}
+    return {
+        "manifest_version": manifest.get("manifest_version"),
+        "manifest_detail": "counts-summary",
+        "full_manifest_row": "prefetch-file",
+        "artifact_type": manifest.get("artifact_type"),
+        "entry_name": row_identity.get("entry_name", ""),
+        "source_index": row_identity.get("source_index", ""),
+        "row_identity_hash": manifest.get("row_identity_hash"),
+        "counts": {
+            "referenced_path_count": metrics.get("referenced_path_count", 0),
+            "volume_candidate_count": metrics.get("volume_candidate_count", 0),
+            "file_reference_candidate_count": metrics.get("file_reference_candidate_count", 0),
+            "run_count": counters.get("run_count", 0),
+            "last_run_time_count": counters.get("last_run_time_count", 0),
+            "section_count_declared": section.get("section_count_declared", 0),
+            "citation_ref_count": len(manifest.get("citation_refs") or []),
+        },
+        "section_bounds_status": section.get("bounds_status", ""),
+        "reportability_decision": reportability.get("decision", ""),
+        "manifest_sha256": manifest.get("manifest_sha256"),
+    }
 
 
 def prefetch_analyst_review_profile(details: Mapping[str, object]) -> dict[str, object]:

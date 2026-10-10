@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from pathlib import Path
 
 from fastapi import HTTPException
 
+from ...core.artifact_profiles import iter_payload_records, payload_record_count
 from .constants import (
     PAGINATION_CURSOR_REPORT_GRADE_VALIDATION_PLAN_VERSION,
     PAGINATION_TRUSTED_DIFF_BLOCKER_78,
@@ -30,15 +32,24 @@ def paginate_payload(
     limit: int,
     cursor: str | None = None,
     omit_fields: tuple[str, ...] = (),
+    row_window: Callable[[int, int], list[object]] | None = None,
+    window_total: int | None = None,
 ) -> dict[str, object]:
+    """Page ``payload[collection_name]``.
+
+    ``row_window(offset, limit)`` with ``window_total`` pages a collection
+    that is not held inline (e.g. a JSONL-backed artifacts output streaming
+    from ``records_path``).
+    """
     if limit <= 0:
         return payload
     if cursor:
         offset = decode_pagination_cursor(cursor)
+    windowed = row_window is not None and window_total is not None
     rows = payload.get(collection_name)
     if not isinstance(rows, list):
         rows = []
-    total = len(rows)
+    total = int(window_total) if windowed else len(rows)
     end = min(offset + limit, total)
     returned = max(0, end - offset)
     has_more = end < total
@@ -77,7 +88,7 @@ def paginate_payload(
             page[field] = [] if isinstance(page[field], list) else None
     if omit_fields:
         page["omitted_fields"] = list(omit_fields)
-    page[collection_name] = rows[offset:end]
+    page[collection_name] = row_window(offset, max(0, end - offset)) if windowed else rows[offset:end]
     page["pagination"] = {
         "collection": collection_name,
         "offset": offset,
@@ -476,3 +487,35 @@ def decode_pagination_cursor(cursor: str) -> int:
         return max(0, int(text))
     except ValueError:
         raise HTTPException(status_code=400, detail="invalid pagination cursor")
+
+
+def paginate_artifact_output(
+    payload: dict[str, object],
+    *,
+    payload_path: Path | str,
+    offset: int,
+    limit: int,
+    cursor: str | None = None,
+) -> dict[str, object]:
+    """Page a per-kind artifacts output, streaming JSONL-backed rows.
+
+    Run outputs keep only a row preview inline and the full row stream in
+    ``records_path``; pages are read straight from that JSONL (rows are
+    ``artifact_type_profiles``-expanded) with ``total = record_count``.
+    Inline payloads page as before.
+    """
+    if not (payload.get("records_path") or payload.get("records_file")):
+        return paginate_payload(payload, "artifacts", offset=offset, limit=limit, cursor=cursor)
+
+    def window(start: int, count: int) -> list[object]:
+        return list(iter_payload_records(payload, payload_path=payload_path, offset=start, limit=count))
+
+    return paginate_payload(
+        payload,
+        "artifacts",
+        offset=offset,
+        limit=limit,
+        cursor=cursor,
+        row_window=window,
+        window_total=payload_record_count(payload),
+    )

@@ -6,6 +6,7 @@ import json
 from collections.abc import Mapping
 from pathlib import Path
 
+from .artifact_profiles import iter_artifact_output_rows
 from .search import load_run_summary
 
 
@@ -87,11 +88,8 @@ def normalize_artifacts(outputs: Mapping[str, object]) -> list[dict[str, object]
         if not str(name).startswith("artifacts_"):
             continue
         try:
-            payload = json.loads(Path(str(raw_path)).expanduser().resolve().read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        rows = payload.get("artifacts") if isinstance(payload, Mapping) else None
-        if not isinstance(rows, list):
+            rows = list(iter_artifact_output_rows(Path(str(raw_path))))
+        except (OSError, ValueError):
             continue
         for row in rows:
             if not isinstance(row, Mapping):

@@ -56,7 +56,11 @@ from ..core.macos_live_smoke import (
 from ..core.run import SUPPORTED_RUN_MODES
 from ..core.sample_case import DEFAULT_SAMPLE_DIR, DEFAULT_SAMPLE_MODE
 from ..core.validation_diff_runners import VERSION_PROBE_TIMEOUT_SECONDS
-from .helpers import add_rules_argument, add_web_arguments
+from .helpers import (
+    add_eventlog_output_arguments,
+    add_rules_argument,
+    add_web_arguments,
+)
 
 HELP_FORMATTER = argparse.RawDescriptionHelpFormatter
 TOP_LEVEL_EPILOG = """Examples:
@@ -221,6 +225,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--eventlog-message-catalog",
         help="JSON provider/event message catalog for --kind eventlog rendering",
     )
+    add_eventlog_output_arguments(artifacts)
     add_rules_argument(artifacts)
 
     email_external = sub.add_parser(
@@ -2007,6 +2012,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Write an opt-in columnar sidecar: stage ArtifactRecordV1 rows as JSONL and convert to Parquet for large-case query (requires pyarrow from the columnar extra; skipped when unavailable)",
     )
+    run.add_argument(
+        "--no-case-db",
+        dest="case_db",
+        action="store_false",
+        help="Skip the persist step's run-local search index (rapidtriage-case.db); unified search then uses the bounded scan backend",
+    )
+    add_eventlog_output_arguments(run)
     add_rules_argument(run)
 
     web = sub.add_parser(

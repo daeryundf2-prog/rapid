@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO, Any
 
+from .json_safe import json_default
+
 ARTIFACT_RECORD_SCHEMA = "ArtifactRecordV1"
 REQUIRED_ARTIFACT_RECORD_FIELDS = {
     "schema",
@@ -26,6 +28,7 @@ REQUIRED_ARTIFACT_RECORD_FIELDS = {
 }
 REQUIRED_SOURCE_FIELDS = {"case_id", "source_id", "source_path", "offset", "length", "hashes"}
 LEGACY_ADAPTER_VERSION = "legacy-artifact-contract-adapter-v1"
+ARTIFACT_RECORD_FIELDS_SOURCE = "details"
 
 
 class ArtifactStoreError(ValueError):
@@ -110,7 +113,9 @@ class JsonlArtifactStreamWriter:
             if self.reject_invalid:
                 return
         assert self._handle is not None
-        self._handle.write(json.dumps(dict(record), ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+        self._handle.write(
+            json.dumps(dict(record), ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=json_default)
+        )
         self._handle.write("\n")
         self.record_count += 1
 
@@ -203,7 +208,7 @@ def write_jsonl_artifact_manifest(
         "storage_role": "worker-jsonl-staging-before-parquet",
         "errors": errors[:100],
     }
-    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, default=json_default) + "\n", encoding="utf-8")
     return result
 
 
@@ -242,12 +247,19 @@ def build_artifact_record_v1_from_legacy(
     index: int,
     case_id: str = "standalone-artifacts",
     source_id: str | None = None,
+    include_fields: bool = True,
 ) -> dict[str, object]:
     """Adapt existing collector rows into the normalized ArtifactRecordV1 contract.
 
     Legacy collectors still return compact rows for backwards compatibility. This adapter
     gives search/review/report/columnar layers a stable contract without rewriting every
     parser at once.
+
+    With ``include_fields=False`` the record is the normalized *envelope*
+    only: ``fields`` (which embeds a full copy of ``details``) is omitted and
+    ``fields_source: "details"`` marks that ``artifact_record_with_fields``
+    rebuilds it from the row. Run outputs store envelopes so each record is
+    serialized once (run-pipeline-mitigations §7 I10).
     """
     details = row.get("details") if isinstance(row.get("details"), Mapping) else {}
     artifact_type = str(row.get("artifact_type") or kind or "artifact")
@@ -277,7 +289,45 @@ def build_artifact_record_v1_from_legacy(
         details.get("commercial_grade_ready"),
         default=False,
     )
-    fields = {
+    record_core: dict[str, object] = {
+        "schema": ARTIFACT_RECORD_SCHEMA,
+        "artifact_family": str(kind or artifact_type),
+        "artifact_type": artifact_type,
+        "parser": parser,
+        "parser_version": parser_version,
+        "source": source,
+        "confidence": confidence,
+        "validation_required": validation_required,
+        "commercial_grade_ready": commercial_ready,
+        "commercial_grade_blockers": blockers,
+        "legal_limitations": legal_limitations,
+    }
+    record_core["artifact_id"] = stable_artifact_id(record_core, index=index)
+    if include_fields:
+        record_core["fields"] = build_artifact_record_fields(
+            row,
+            details,
+            artifact_type=artifact_type,
+            provider_name=provider_name,
+            path=path,
+            validation_required=validation_required,
+        )
+    else:
+        record_core["fields_source"] = ARTIFACT_RECORD_FIELDS_SOURCE
+    return record_core
+
+
+def build_artifact_record_fields(
+    row: Mapping[str, object],
+    details: Mapping[str, object],
+    *,
+    artifact_type: str,
+    provider_name: str,
+    path: str,
+    validation_required: bool,
+) -> dict[str, object]:
+    """ArtifactRecordV1 ``fields``: a deterministic function of the legacy row."""
+    return {
         "legacy_provider": str(row.get("provider") or provider_name),
         "legacy_supported": bool(row.get("supported", True)),
         "legacy_path": path,
@@ -293,22 +343,35 @@ def build_artifact_record_v1_from_legacy(
             "filter_terms": artifact_filter_terms(artifact_type, details),
         },
     }
-    record_core = {
-        "schema": ARTIFACT_RECORD_SCHEMA,
-        "artifact_family": str(kind or artifact_type),
-        "artifact_type": artifact_type,
-        "parser": parser,
-        "parser_version": parser_version,
-        "source": source,
-        "confidence": confidence,
-        "validation_required": validation_required,
-        "commercial_grade_ready": commercial_ready,
-        "commercial_grade_blockers": blockers,
-        "legal_limitations": legal_limitations,
-        "fields": fields,
-    }
-    record_core["artifact_id"] = stable_artifact_id(record_core, index=index)
-    return record_core
+
+
+def artifact_record_with_fields(row: Mapping[str, object]) -> dict[str, object] | None:
+    """Return the row's full ArtifactRecordV1, rebuilding ``fields`` from ``details``.
+
+    Run outputs store the envelope only (``fields_source: "details"``);
+    consumers that need ``fields`` (columnar sidecar, case DB import) call
+    this on a profile-expanded row. Rows that still embed ``fields`` are
+    returned as-is. Returns ``None`` when the row has no ArtifactRecordV1.
+    """
+    record = row.get("artifact_record")
+    if not isinstance(record, Mapping) or record.get("schema") != ARTIFACT_RECORD_SCHEMA:
+        return None
+    if "fields" in record:
+        return dict(record)
+    details = row.get("details") if isinstance(row.get("details"), Mapping) else {}
+    source = record.get("source") if isinstance(record.get("source"), Mapping) else {}
+    artifact_type = str(record.get("artifact_type") or row.get("artifact_type") or "artifact")
+    path = str(row.get("path") or details.get("source_path") or details.get("path") or source.get("source_path") or "")
+    rebuilt = {key: value for key, value in record.items() if key != "fields_source"}
+    rebuilt["fields"] = build_artifact_record_fields(
+        row,
+        details,
+        artifact_type=artifact_type,
+        provider_name=str(row.get("provider") or ""),
+        path=path,
+        validation_required=bool(record.get("validation_required")),
+    )
+    return rebuilt
 
 
 def attach_artifact_record_contracts(
@@ -317,7 +380,13 @@ def attach_artifact_record_contracts(
     kind: str,
     root: str | Path,
     case_id: str = "standalone-artifacts",
+    include_fields: bool = True,
 ) -> dict[str, object]:
+    """Attach an ArtifactRecordV1 to every row and summarize contract validity.
+
+    Validation always runs on the complete record (with ``fields``);
+    ``include_fields=False`` then stores the envelope only.
+    """
     provider = payload.get("provider") if isinstance(payload.get("provider"), Mapping) else {}
     provider_name = str(provider.get("name") or kind)
     rows = payload.get("artifacts") if isinstance(payload.get("artifacts"), list) else []
@@ -326,46 +395,90 @@ def attach_artifact_record_contracts(
     invalid_count = 0
     contract_errors: list[dict[str, object]] = []
     for index, row in enumerate(rows, start=1):
-        if not isinstance(row, Mapping):
-            adapted_rows.append(row)
-            invalid_count += 1
-            contract_errors.append({"index": index, "errors": ["artifact-row-must-be-object"]})
-            continue
-        artifact_record = build_artifact_record_v1_from_legacy(
+        adapted, errors = adapt_artifact_row(
             row,
+            index=index,
             kind=kind,
             provider_name=provider_name,
             root=root,
-            index=index,
             case_id=case_id,
-            source_id=kind,
+            include_fields=include_fields,
         )
-        errors = validate_artifact_record(artifact_record)
-        if errors:
-            invalid_count += 1
-            contract_errors.append({"index": index, "errors": errors, "artifact_type": row.get("artifact_type")})
-        else:
-            valid_count += 1
-        adapted = dict(row)
-        adapted["artifact_record"] = artifact_record
         adapted_rows.append(adapted)
+        if errors is None:
+            valid_count += 1
+        else:
+            invalid_count += 1
+            contract_errors.append(errors)
     result = dict(payload)
     result["artifacts"] = adapted_rows
-    result["artifact_record_contract"] = {
-        "profile_version": "artifact-output-contract-v1",
-        "schema": ARTIFACT_RECORD_SCHEMA,
-        "adapter_version": LEGACY_ADAPTER_VERSION,
-        "record_count": len(rows),
-        "valid_count": valid_count,
-        "invalid_count": invalid_count,
-        "gui_usable": invalid_count == 0,
-        "errors": contract_errors[:100],
-    }
+    result["artifact_record_contract"] = artifact_record_contract_summary(
+        record_count=len(rows),
+        valid_count=valid_count,
+        invalid_count=invalid_count,
+        errors=contract_errors,
+    )
     summary = dict(result.get("summary")) if isinstance(result.get("summary"), Mapping) else {}
     summary["artifact_record_contract_valid_count"] = valid_count
     summary["artifact_record_contract_invalid_count"] = invalid_count
     result["summary"] = summary
     return result
+
+
+def adapt_artifact_row(
+    row: object,
+    *,
+    index: int,
+    kind: str,
+    provider_name: str,
+    root: str | Path,
+    case_id: str = "standalone-artifacts",
+    include_fields: bool = True,
+) -> tuple[object, dict[str, object] | None]:
+    """Attach the ArtifactRecordV1 (or envelope) to one row.
+
+    Returns ``(row, contract_error)``; ``contract_error`` is ``None`` when the
+    full record validates. Used per row by streaming collection.
+    """
+    if not isinstance(row, Mapping):
+        return row, {"index": index, "errors": ["artifact-row-must-be-object"]}
+    artifact_record = build_artifact_record_v1_from_legacy(
+        row,
+        kind=kind,
+        provider_name=provider_name,
+        root=root,
+        index=index,
+        case_id=case_id,
+        source_id=kind,
+    )
+    errors = validate_artifact_record(artifact_record)
+    if not include_fields:
+        artifact_record.pop("fields", None)
+        artifact_record["fields_source"] = ARTIFACT_RECORD_FIELDS_SOURCE
+    adapted = dict(row)
+    adapted["artifact_record"] = artifact_record
+    if errors:
+        return adapted, {"index": index, "errors": errors, "artifact_type": row.get("artifact_type")}
+    return adapted, None
+
+
+def artifact_record_contract_summary(
+    *,
+    record_count: int,
+    valid_count: int,
+    invalid_count: int,
+    errors: list[dict[str, object]],
+) -> dict[str, object]:
+    return {
+        "profile_version": "artifact-output-contract-v1",
+        "schema": ARTIFACT_RECORD_SCHEMA,
+        "adapter_version": LEGACY_ADAPTER_VERSION,
+        "record_count": record_count,
+        "valid_count": valid_count,
+        "invalid_count": invalid_count,
+        "gui_usable": invalid_count == 0,
+        "errors": errors[:100],
+    }
 
 
 def build_artifact_source(

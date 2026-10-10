@@ -87,6 +87,31 @@ def compact_commercial_readiness_payload(payload: dict[str, object], *, limit: i
     return compact
 
 
+def add_eventlog_output_arguments(command: argparse.ArgumentParser) -> None:
+    command.add_argument(
+        "--eventlog-structure-rows",
+        action="store_true",
+        help="Also emit EVTX eventlog-chunk and eventlog-record-candidate structure rows (off by default; counts stay on eventlog-file rows)",
+    )
+    command.add_argument(
+        "--eventlog-record-detail",
+        choices=("triage", "full"),
+        default=None,
+        help="Per-event output shape: triage (default compact projection) or full (every per-event validation/report block)",
+    )
+
+
+def eventlog_collector_options(args: argparse.Namespace) -> dict[str, object]:
+    """Eventlog collector options requested on the command line (empty = pipeline defaults)."""
+    options: dict[str, object] = {}
+    if getattr(args, "eventlog_structure_rows", False):
+        options["structure_rows"] = True
+    record_detail = getattr(args, "eventlog_record_detail", None)
+    if record_detail:
+        options["record_detail"] = str(record_detail)
+    return options
+
+
 def add_rules_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--rules", help="Path to a rapidtriage JSON/YAML or YARA-lite string rule file for matched_rules and IOC lookup")
 
