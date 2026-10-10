@@ -13,6 +13,17 @@ from pathlib import Path
 
 from .audit import compute_sha256
 from .e01_native import native_e01_available
+from .extraction_failures import (
+    E01_EXTRACT_DIR_NAME,
+    E01_LEGACY_EXTRACT_DIR_NAMES,
+    StreamRunner,
+    default_stream_runner,
+    gap_recovery_enabled,
+    gap_recovery_workers,
+    record_tsk_recover_stderr,
+    run_extraction_gap_recovery,
+    text_runner_stream_adapter,
+)
 from .forensic_accuracy import build_accuracy_gate
 from .process_bounds import child_timeout_seconds, run_bounded_command
 from .vsc import build_vsc_image_workflow_handoff
@@ -1508,6 +1519,106 @@ def tsk_recover_timeout_seconds(partition_size_bytes: int | None) -> int:
     return max(default, scaled)
 
 
+def resolve_e01_extract_dir(stage: Path, checkpoint: Mapping[str, object]) -> Path:
+    """Return the extraction root for ``stage``.
+
+    New runs use the short ``fs`` name (P14: fewer characters lost to
+    ``MAX_PATH``). A completed checkpoint that recorded a legacy ``filesystem``
+    root keeps resolving to it so existing runs still resume.
+    """
+    recorded = str(checkpoint.get("extract_dir") or "")
+    if recorded:
+        recorded_path = Path(recorded)
+        if (
+            recorded_path.name in E01_LEGACY_EXTRACT_DIR_NAMES
+            and recorded_path.parent == stage
+            and recorded_path.is_dir()
+        ):
+            return recorded_path
+    return stage / E01_EXTRACT_DIR_NAME
+
+
+def e01_extract_dir_layout(extract_dir: Path) -> dict[str, object]:
+    return {
+        "current_name": E01_EXTRACT_DIR_NAME,
+        "legacy_names": list(E01_LEGACY_EXTRACT_DIR_NAMES),
+        "resolved_name": extract_dir.name,
+        "legacy_alias_in_use": extract_dir.name in E01_LEGACY_EXTRACT_DIR_NAMES,
+    }
+
+
+def _resolve_stream_runner(runner: CommandRunner, stream_runner: StreamRunner | None) -> tuple[StreamRunner, int]:
+    if stream_runner is not None:
+        return stream_runner, 1
+    if runner is default_runner:
+        return default_stream_runner, gap_recovery_workers()
+    return text_runner_stream_adapter(runner), 1
+
+
+def run_e01_extraction_gap_stage(
+    *,
+    stage: Path,
+    extract_dir: Path,
+    raw_image: Path,
+    start_sector: int,
+    runner: CommandRunner,
+    stream_runner: StreamRunner | None,
+    tool_resolver: ToolResolver,
+    tsk_stderr: str | None,
+    checkpoint_payload: dict[str, object],
+    checkpoint_path: Path,
+    command_history: list[dict[str, object]],
+) -> list[str]:
+    """P14/P15/P17: persist tsk_recover stderr, then recover coverage gaps.
+
+    Never fails the extraction: errors become a ``failed`` stage row plus a warning.
+    """
+    stages = dict(checkpoint_payload.get("stages") or {})
+    warnings: list[str] = []
+    missing = [tool for tool in ("fls", "icat") if tool_resolver(tool) is None]
+    if not gap_recovery_enabled() or missing:
+        if tsk_stderr is not None:
+            record_tsk_recover_stderr(stage, extract_dir, tsk_stderr)
+        if missing and gap_recovery_enabled():
+            stages["extraction-gap-recovery"] = {"status": "skipped", "reason": "missing tools", "missing_tools": missing}
+            warnings.append(
+                "Sleuth Kit fls/icat not found; long-path, zero-byte, and ADS coverage gaps of tsk_recover were not recovered."
+            )
+        else:
+            stages["extraction-gap-recovery"] = {"status": "skipped", "reason": "disabled by RAPIDTRIAGE_E01_GAP_RECOVERY"}
+    else:
+        effective_runner, workers = _resolve_stream_runner(runner, stream_runner)
+        try:
+            summary = run_extraction_gap_recovery(
+                stage=stage,
+                extract_dir=extract_dir,
+                image=raw_image,
+                offset_sector=start_sector,
+                stream_runner=effective_runner,
+                tsk_stderr=tsk_stderr,
+                workers=workers,
+            )
+        except Exception as exc:
+            stages["extraction-gap-recovery"] = {"status": "failed", "error": f"{type(exc).__name__}: {exc}"}
+            warnings.append(f"Extraction coverage-gap recovery failed: {type(exc).__name__}: {exc}")
+        else:
+            for row in summary.get("commands") or ():
+                if isinstance(row, Mapping):
+                    command_history.append({"stage": "extraction-gap-recovery", **dict(row)})
+            stages["extraction-gap-recovery"] = {key: value for key, value in summary.items() if key != "commands"}
+            warnings.extend(str(item) for item in summary.get("warnings") or ())
+            long_path = summary.get("long_path") if isinstance(summary.get("long_path"), Mapping) else {}
+            if long_path and int(long_path.get("recovered_count") or 0):
+                warnings.append(
+                    f"{long_path.get('recovered_count')} files beyond Windows MAX_PATH were recovered with icat into "
+                    f"{stage / 'long'}; the files index shows their original paths."
+                )
+    checkpoint_payload["stages"] = stages
+    checkpoint_payload["command_history"] = command_history
+    write_e01_stage_checkpoint(checkpoint_path, checkpoint_payload)
+    return warnings
+
+
 def extract_e01_to_directory(
     e01_path: Path,
     stage_dir: Path,
@@ -1516,6 +1627,7 @@ def extract_e01_to_directory(
     engine: str | None = None,
     runner: CommandRunner = default_runner,
     tool_resolver: ToolResolver = shutil.which,
+    stream_runner: StreamRunner | None = None,
 ) -> E01ExtractionResult:
     source_path = e01_path.expanduser().resolve()
     if not source_path.is_file():
@@ -1526,17 +1638,17 @@ def extract_e01_to_directory(
     stage = stage_dir.expanduser().resolve()
     mount_dir = stage / "_ewfmount"
     raw_image = mount_dir / "ewf1"
-    extract_dir = stage / "filesystem"
+    checkpoint_path = stage / E01_STAGE_CHECKPOINT_NAME
+    checkpoint = load_e01_stage_checkpoint(checkpoint_path)
+    extract_dir = resolve_e01_extract_dir(stage, checkpoint)
     stage.mkdir(parents=True, exist_ok=True)
     mount_dir.mkdir(parents=True, exist_ok=True)
     extract_dir.mkdir(parents=True, exist_ok=True)
-    checkpoint_path = stage / E01_STAGE_CHECKPOINT_NAME
     source_signature = e01_source_signature(source_path)
     segment_set_profile = build_e01_segment_set_profile(source_path)
 
     missing = missing_e01_tools(tool_resolver)
     tool_preflight = collect_tool_preflight(E01_REQUIRED_TOOLS, runner=runner, tool_resolver=tool_resolver)
-    checkpoint = load_e01_stage_checkpoint(checkpoint_path)
     if e01_checkpoint_resume_ready(
         checkpoint,
         source_signature=source_signature,
@@ -1546,6 +1658,38 @@ def extract_e01_to_directory(
         partition_selection = dict(checkpoint.get("partition_selection") or {})
         partition_table = list(checkpoint.get("partition_table") or [])
         selected_start_sector = int(partition_selection.get("selected_start_sector") or 0)
+        resume_warnings = [
+            "E01 extraction resumed from a completed filesystem recovery checkpoint; verify checkpoint provenance before report use."
+        ]
+        gap_stage = dict(checkpoint.get("stages") or {}).get("extraction-gap-recovery")
+        resumed_raw_image = Path(str(checkpoint.get("raw_image_path") or raw_image))
+        gap_stage_done = isinstance(gap_stage, Mapping) and gap_stage.get("status") in {"completed", "skipped"}
+        if not gap_stage_done and checkpoint.get("mount_strategy") == "sleuthkit-direct-ewf" and resumed_raw_image.is_file():
+            # Pre-P14 checkpoint: recover coverage gaps without re-running tsk_recover.
+            resume_history = [dict(row) for row in checkpoint.get("command_history") or [] if isinstance(row, Mapping)]
+            recover_row = next(
+                (row for row in resume_history if row.get("purpose") == "read-only-filesystem-recovery"),
+                None,
+            )
+            resume_payload = dict(checkpoint)
+            resume_payload["extract_dir_layout"] = e01_extract_dir_layout(extract_dir)
+            resume_warnings.extend(
+                run_e01_extraction_gap_stage(
+                    stage=stage,
+                    extract_dir=extract_dir,
+                    raw_image=resumed_raw_image,
+                    start_sector=selected_start_sector,
+                    runner=runner,
+                    stream_runner=stream_runner,
+                    tool_resolver=tool_resolver,
+                    # Older checkpoints only kept the 2000-char stderr preview.
+                    tsk_stderr=str(recover_row.get("stderr_preview") or "") if recover_row else None,
+                    checkpoint_payload=resume_payload,
+                    checkpoint_path=checkpoint_path,
+                    command_history=resume_history,
+                )
+            )
+            checkpoint = resume_payload
         return E01ExtractionResult(
             source_path=source_path,
             stage_dir=stage,
@@ -1561,9 +1705,7 @@ def extract_e01_to_directory(
             recovered_root_manifest=dict(checkpoint.get("recovered_root_manifest") or {}),
             segment_set_profile=dict(checkpoint.get("segment_set_profile") or segment_set_profile),
             mount_strategy=str(checkpoint.get("mount_strategy") or "ewfmount-fuse"),
-            warnings=(
-                "E01 extraction resumed from a completed filesystem recovery checkpoint; verify checkpoint provenance before report use.",
-            ),
+            warnings=tuple(resume_warnings),
             resume_status=build_e01_resume_status(checkpoint_path, checkpoint, resumed=True),
             recovery_scope=build_tsk_recover_recovery_scope(),
         )
@@ -1734,6 +1876,8 @@ def extract_e01_to_directory(
         },
         "completed": False,
         "resume_ready": False,
+        "extract_dir": str(extract_dir),
+        "extract_dir_layout": e01_extract_dir_layout(extract_dir),
         "stages": {
             "dependency-preflight": {
                 "status": "completed",
@@ -1899,6 +2043,19 @@ def extract_e01_to_directory(
         checkpoint_payload["recovered_root_manifest"] = recovered_manifest
         checkpoint_payload["recovered_inventory_fingerprint"] = recovered_inventory_fingerprint(recovered_manifest)
         write_e01_stage_checkpoint(checkpoint_path, checkpoint_payload)
+        gap_warnings = run_e01_extraction_gap_stage(
+            stage=stage,
+            extract_dir=extract_dir,
+            raw_image=raw_image,
+            start_sector=start_sector,
+            runner=runner,
+            stream_runner=stream_runner,
+            tool_resolver=tool_resolver,
+            tsk_stderr=str(recover_result.stderr or ""),
+            checkpoint_payload=checkpoint_payload,
+            checkpoint_path=checkpoint_path,
+            command_history=command_history,
+        )
         warnings: list[str] = []
         if direct_ewf_read:
             warnings.append(
@@ -1914,6 +2071,7 @@ def extract_e01_to_directory(
         warnings.append(
             "E01/Ex01 direct extraction is an orchestrated libewf/Sleuth Kit workflow; validate results against case requirements."
         )
+        warnings.extend(gap_warnings)
         return E01ExtractionResult(
             source_path=source_path,
             stage_dir=stage,

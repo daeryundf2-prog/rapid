@@ -10,6 +10,7 @@ import subprocess
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 
+from ...core.extraction_failures import ADS_SOURCE_ID, iter_recovered_ads_rows
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 from ...core.recovery import (
@@ -212,6 +213,7 @@ class WindowsFilesystemProvider:
         yield from collect_ntfs_logfile_artifacts(root)
         yield from collect_recycle_bin_artifacts(root)
         yield from collect_ads_stream_artifacts(root)
+        yield from collect_recovered_ads_artifacts(root)
         yield from collect_signature_mismatch_artifacts(root)
         for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
             if not path.is_file() or path.suffix.lower() not in SUPPORTED_SUFFIXES:
@@ -299,6 +301,119 @@ def collect_ads_stream_artifacts(root: Path) -> Iterable[ArtifactRecord]:
             provider=WindowsFilesystemProvider.name,
             artifact_type="ads-stream-candidate",
             path=str(path.resolve()),
+            supported=True,
+            details=details,
+        )
+
+
+ZONE_IDENTIFIER_ZONE_NAMES = {
+    "0": "local-machine",
+    "1": "local-intranet",
+    "2": "trusted-sites",
+    "3": "internet",
+    "4": "restricted-sites",
+}
+
+
+def parse_zone_identifier(blob: bytes) -> dict[str, object]:
+    """Parse a ``Zone.Identifier`` stream (``[ZoneTransfer]`` INI) into typed fields."""
+    fields = parse_ads_zone_identifier_fields(blob)
+    zone_id = fields.get("ZoneId", "").strip()
+    return {
+        "zone_id": zone_id,
+        "zone_name": ZONE_IDENTIFIER_ZONE_NAMES.get(zone_id, "unknown" if zone_id else ""),
+        "host_url": fields.get("HostUrl", ""),
+        "referrer_url": fields.get("ReferrerUrl", ""),
+        "last_writer_package_family_name": fields.get("LastWriterPackageFamilyName", ""),
+        "app_zone_id": fields.get("AppZoneId", ""),
+        "has_zone_transfer_section": "[zonetransfer]" in decode_ads_text(blob).lower(),
+        "fields": fields,
+    }
+
+
+def collect_recovered_ads_artifacts(root: Path) -> Iterable[ArtifactRecord]:
+    """Rows for ADS streams the E01 gap stage recovered with ``icat`` (ads-map.json).
+
+    ``Zone.Identifier`` streams become ``zone-identifier`` rows (download
+    provenance: ZoneId, HostUrl, ReferrerUrl); other streams become
+    ``ads-stream-candidate`` rows. Paths are the original NTFS host paths.
+    """
+    for row in iter_recovered_ads_rows(root):
+        stream_name = str(row.get("stream_name") or "")
+        content_path = Path(str(row.get("recovered_path")))
+        try:
+            blob = read_prefix(content_path, ADS_PREFIX_SCAN_LIMIT)
+        except OSError:
+            continue
+        host_relative = str(row.get("host_relative_path") or "")
+        host_path = root.joinpath(*[part for part in host_relative.split("/") if part])
+        stream_path = f"{host_path}:{stream_name}"
+        timestamps = row.get("timestamps") if isinstance(row.get("timestamps"), Mapping) else {}
+        common = {
+            "parser_version": PARSER_VERSION,
+            "reportability": "triage",
+            "source_path": str(content_path),
+            "source_format": "icat-recovered-ads-stream",
+            "source_id": ADS_SOURCE_ID,
+            "source_hashes": {"sha256": str(row.get("sha256") or "")},
+            "source_size": int(row.get("size") or 0),
+            "mft_ref": row.get("inode"),
+            "attribute_type": row.get("attr_type"),
+            "attribute_id": row.get("attr_id"),
+            "host_file_path": str(host_path),
+            "host_relative_path": host_relative,
+            "host_file_name": host_path.name,
+            "host_timestamps": dict(timestamps),
+            "stream_name": stream_name,
+            "name_lossy": bool(row.get("name_lossy")),
+            "source_locator": {
+                "viewer": "source-hex-range",
+                "path": str(content_path),
+                "byte_offset": 0,
+                "byte_length": min(len(blob), ADS_PREFIX_SCAN_LIMIT),
+                "stream_name": stream_name,
+            },
+            "validation_required": True,
+            "commercial_grade_ready": False,
+        }
+        if stream_name.lower() == "zone.identifier":
+            zone = parse_zone_identifier(blob)
+            details = {
+                **common,
+                "parser": "windows-zone-identifier",
+                "coverage_status": "icat-recovered-zone-identifier",
+                **{key: value for key, value in zone.items() if key != "fields"},
+                "zone_identifier_fields": zone["fields"],
+                "bounded_preview": ads_text_preview(blob),
+                "validation_guidance": (
+                    "Zone.Identifier recovered by inode-attribute id from the source image. HostUrl/ReferrerUrl "
+                    "are written by the downloading application and can be absent or altered; corroborate with "
+                    "browser history before reporting download provenance."
+                ),
+            }
+            yield ArtifactRecord(
+                provider=WindowsFilesystemProvider.name,
+                artifact_type="zone-identifier",
+                path=stream_path,
+                supported=True,
+                details=details,
+            )
+            continue
+        detected = detect_file_signature(blob)
+        details = {
+            **common,
+            "parser": "windows-ads-stream-inventory",
+            "coverage_status": "icat-recovered-ads-stream",
+            "stream_type": "$DATA",
+            "stream_family": ads_stream_family(stream_name, detected, {}),
+            "detected_signature_kind": detected.get("kind", "") if detected else "",
+            "bounded_preview": ads_text_preview(blob),
+            "risk_flags": ads_risk_flags(stream_name, blob, detected, {}, True),
+        }
+        yield ArtifactRecord(
+            provider=WindowsFilesystemProvider.name,
+            artifact_type="ads-stream-candidate",
+            path=stream_path,
             supported=True,
             details=details,
         )
