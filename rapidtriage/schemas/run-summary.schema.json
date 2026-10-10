@@ -91,6 +91,30 @@
     "audit": {
       "type": "string"
     },
+    "search_backend": {
+      "type": "string",
+      "enum": ["fts", "scan"],
+      "description": "Unified search backend for this run: fts when the persist step built rapidtriage-case.db, else scan (bounded)."
+    },
+    "case_db": {
+      "type": "object",
+      "description": "Persist step record for the run-local case DB search index.",
+      "required": ["status", "search_backend"],
+      "properties": {
+        "status": {"type": "string", "enum": ["completed", "failed", "skipped"]},
+        "search_backend": {"type": "string", "enum": ["fts", "scan"]},
+        "path": {"type": "string"},
+        "case_id": {"type": "string"},
+        "started_at": {"type": "string"},
+        "completed_at": {"type": "string"},
+        "elapsed_seconds": {"type": "number"},
+        "document_text_source": {"type": "string"},
+        "counts": {"type": "object", "additionalProperties": {"type": "integer"}},
+        "size_bytes": {"type": "integer"},
+        "error": {"type": "string"},
+        "reason": {"type": "string"}
+      }
+    },
     "carving": {
       "type": "object",
       "additionalProperties": false,

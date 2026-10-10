@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import itertools
 import json
 import sqlite3
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 
+from ..artifact_profiles import iter_artifact_output_row_views
 from ..artifact_store import read_jsonl_artifacts, validate_artifact_record
+from ..json_stream import JsonStreamError, iter_array_items
 from ..recovery import (
     is_deleted_candidate_kind,
     is_recovered_candidate_kind,
@@ -17,6 +20,7 @@ from ..recovery import (
 from ..review_reporting_controls import build_review_reporting_contract
 from ..search import load_run_summary
 from ..submission_qc_controls import build_submission_qc_contract
+from ..textnorm import normalize_nfc
 from .base import (
     CaseDatabaseError,
     CaseRecord,
@@ -47,6 +51,7 @@ from .fts import (
     case_db_fts_optimization_assessment,
     case_db_search_index_health,
     rebuild_case_db_search_indexes,
+    sync_fts_row_nfc,
 )
 from .helpers import (
     artifact_details,
@@ -142,9 +147,99 @@ __all__ = [
     "review_changed_fields",
 ]
 
+def recorded_candidate_hashes(row: Mapping[str, object]) -> dict[str, str]:
+    """Hashes a file candidate already carries (``hashes`` map or top-level keys)."""
+    nested = row.get("hashes")
+    source = nested if isinstance(nested, Mapping) else row
+    return {
+        algorithm: str(source[algorithm])
+        for algorithm in ("md5", "sha1", "sha256")
+        if isinstance(source.get(algorithm), str) and source.get(algorithm)
+    }
+
+
+# Run-output imports commit every N rows so one 280k-row output is not one
+# transaction (bounded journal/page-cache growth; a failure keeps the rows
+# committed so far).
+IMPORT_COMMIT_INTERVAL = 20000
+
+
+def commit_periodically(connection: sqlite3.Connection, count: int, citations: CitationAllocator) -> None:
+    if count % IMPORT_COMMIT_INTERVAL == 0:
+        citations.flush()
+        connection.commit()
+
+
+class CitationAllocator:
+    """Citation ids for a bulk import from one ``citation_sequence`` read.
+
+    ``next_citation_id_for_connection`` costs four statements per row (a
+    fifth of a 280k-row import); this reads the sequence and prefix on the
+    first id, counts in Python and writes the sequence back on ``flush``
+    (before each periodic commit and on exit, before the connection's own
+    commit). Ids are identical to per-row allocation.
+    """
+
+    def __init__(self, connection: sqlite3.Connection, case_id: str, kind: str) -> None:
+        self._connection = connection
+        self._case_id = case_id
+        self._kind = kind.strip().lower()
+        self._stem = ""
+        self._last: int | None = None
+        self._flushed: int | None = None
+
+    def __enter__(self) -> CitationAllocator:
+        return self
+
+    def __exit__(self, exc_type: object, *_exc: object) -> None:
+        if exc_type is None:
+            self.flush()
+
+    def next(self) -> str:
+        if self._last is None:
+            first = next_citation_id_for_connection(self._connection, self._case_id, self._kind)
+            self._stem, _, number = first.rpartition("-")
+            self._last = int(number)
+            self._flushed = self._last + 1
+        else:
+            self._last += 1
+        return f"{self._stem}-{self._last:0{CITATION_WIDTH}d}"
+
+    def flush(self) -> None:
+        if self._last is None or self._last + 1 == self._flushed:
+            return
+        self._connection.execute(
+            "UPDATE citation_sequence SET next_value = MAX(next_value, ?) WHERE case_id = ? AND kind = ?",
+            (self._last + 1, self._case_id, self._kind),
+        )
+        self._flushed = self._last + 1
+
+
+# Key added to imported artifact rows: which run output row they came from.
+ARTIFACT_SOURCE_LOCATOR_KEY = "source_locator"
+
+
+def iter_output_member(outputs: Mapping[str, object], name: str, member: str) -> Iterator[object]:
+    """Stream the ``member`` array of a run output file (bounded memory)."""
+    raw_path = outputs.get(name)
+    if not raw_path:
+        return
+    path = Path(str(raw_path)).expanduser()
+    if not path.is_file():
+        return
+    try:
+        yield from iter_array_items(path, member)
+    except (JsonStreamError, OSError):
+        return
+
+
 class CaseDatabase:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, *, bulk_load: bool = False):
+        """``bulk_load`` is for building a fresh, disposable DB (the run
+        persist step): no WAL, no fsync. A crash leaves a DB the caller
+        deletes and rebuilds, never a case DB an examiner relies on."""
         self.path = path.expanduser().resolve()
+        self.bulk_load = bulk_load
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -155,7 +250,11 @@ class CaseDatabase:
         connection.execute("PRAGMA temp_store = MEMORY")
         connection.execute("PRAGMA cache_size = -65536")
         try:
-            connection.execute("PRAGMA journal_mode = WAL")
+            if self.bulk_load:
+                connection.execute("PRAGMA journal_mode = MEMORY")
+                connection.execute("PRAGMA synchronous = OFF")
+            else:
+                connection.execute("PRAGMA journal_mode = WAL")
         except sqlite3.DatabaseError:
             pass
         try:
@@ -378,7 +477,20 @@ class CaseDatabase:
         *,
         case_id: str,
         case_name: str | None = None,
+        document_texts: Iterable[tuple[str, str, str | None]] | None = None,
+        hash_files: bool = True,
     ) -> dict[str, object]:
+        """Import a run's outputs (files, docs, artifacts, indicators, timeline).
+
+        Large outputs are streamed (artifact JSONL, timeline events), so
+        memory stays bounded. ``document_texts`` optionally supplies the
+        ``(path, text, extraction_error)`` already extracted by the run's docs
+        stage, in docs-candidate order, instead of extracting every document
+        again. ``hash_files=False`` skips re-hashing the evidence source and
+        every file candidate (hashes the run already recorded are kept); the
+        run pipeline's persist step uses it so a 100+ GB image is not read
+        again just to build the search index.
+        """
         summary = load_run_summary(run_summary)
         outputs = summary.get("outputs")
         if not isinstance(outputs, Mapping):
@@ -394,11 +506,11 @@ class CaseDatabase:
         if case_row is None:
             self.create_case(case_id=case_id, name=case_name, case_root=case_root)
 
-        evidence_source_id = self._insert_evidence_source(case_id, summary)
+        evidence_source_id = self._insert_evidence_source(case_id, summary, hash_source=hash_files)
         counts = {
             "evidence_source_count": 1,
-            "file_record_count": self._import_files(case_id, evidence_source_id, outputs),
-            "indexed_document_count": self._import_docs(case_id, evidence_source_id, outputs),
+            "file_record_count": self._import_files(case_id, evidence_source_id, outputs, hash_files=hash_files),
+            "indexed_document_count": self._import_docs(case_id, evidence_source_id, outputs, document_texts=document_texts),
             "artifact_count": self._import_artifacts(case_id, evidence_source_id, outputs),
             "indicator_count": self._import_indicators(case_id, evidence_source_id, outputs),
             "event_count": self._import_timeline(case_id, evidence_source_id, outputs),
@@ -1422,14 +1534,14 @@ class CaseDatabase:
             "items": items,
         }
 
-    def _insert_evidence_source(self, case_id: str, summary: Mapping[str, object]) -> int:
+    def _insert_evidence_source(self, case_id: str, summary: Mapping[str, object], *, hash_source: bool = True) -> int:
         source = summary.get("source")
         source_payload = source if isinstance(source, Mapping) else {}
         source_path = str(source_payload.get("source_path") or summary.get("root") or "")
         analysis_root = str(source_payload.get("analysis_root") or summary.get("root") or "")
         timestamp = now_iso()
         size = path_size(source_path)
-        hashes = hash_existing_file(source_path)
+        hashes = hash_existing_file(source_path) if hash_source else {}
         with self.connect() as connection:
             citation_id = next_citation_id_for_connection(connection, case_id, "evidence")
             cursor = connection.execute(
@@ -1461,21 +1573,25 @@ class CaseDatabase:
             )
             return int(cursor.lastrowid)
 
-    def _import_files(self, case_id: str, evidence_source_id: int, outputs: Mapping[str, object]) -> int:
-        payload = read_output(outputs, "files")
-        rows = payload.get("candidates") if isinstance(payload, Mapping) else None
-        if not isinstance(rows, list):
-            return 0
+    def _import_files(
+        self,
+        case_id: str,
+        evidence_source_id: int,
+        outputs: Mapping[str, object],
+        *,
+        hash_files: bool = True,
+    ) -> int:
+        rows = iter_output_member(outputs, "files", "candidates")
         count = 0
-        with self.connect() as connection:
+        with self.connect() as connection, CitationAllocator(connection, case_id, "file") as citations:
             for row in rows:
                 if not isinstance(row, Mapping):
                     continue
                 path = str(row.get("path") or "")
-                hashes = hash_existing_file(path)
+                hashes = hash_existing_file(path) if hash_files else recorded_candidate_hashes(row)
                 recovery = recovery_record_from_payload(row)
                 candidate_kind = str(recovery.get("candidate_kind") or "")
-                connection.execute(
+                cursor = connection.execute(
                     """
                     INSERT INTO file_record (
                         citation_id, case_id, evidence_source_id, path, normalized_path, extension,
@@ -1485,7 +1601,7 @@ class CaseDatabase:
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        next_citation_id_for_connection(connection, case_id, "file"),
+                        citations.next(),
                         case_id,
                         evidence_source_id,
                         path,
@@ -1501,23 +1617,45 @@ class CaseDatabase:
                         optional_int(recovery.get("source_offset")),
                     ),
                 )
+                sync_fts_row_nfc(
+                    connection,
+                    "file_record_fts",
+                    int(cursor.lastrowid),
+                    {"path": path, "extension": str(row.get("extension") or "")},
+                )
                 count += 1
+                commit_periodically(connection, count, citations)
         return count
 
-    def _import_docs(self, case_id: str, evidence_source_id: int, outputs: Mapping[str, object]) -> int:
-        payload = read_output(outputs, "docs")
-        rows = payload.get("candidates") if isinstance(payload, Mapping) else None
-        if not isinstance(rows, list):
-            return 0
+    def _import_docs(
+        self,
+        case_id: str,
+        evidence_source_id: int,
+        outputs: Mapping[str, object],
+        *,
+        document_texts: Iterable[tuple[str, str, str | None]] | None = None,
+    ) -> int:
+        rows = iter_output_member(outputs, "docs", "candidates")
+        texts = iter(document_texts) if document_texts is not None else None
         count = 0
-        with self.connect() as connection:
+        with self.connect() as connection, CitationAllocator(connection, case_id, "indexed_document") as citations:
             for row in rows:
                 if not isinstance(row, Mapping):
                     continue
                 path = Path(str(row.get("path") or ""))
                 kind = str(row.get("kind") or "")
-                body, extraction_error = safe_extract_text(path, kind)
-                title = path.name
+                supplied = next(texts, None) if texts is not None else None
+                if supplied is not None and supplied[0] == str(path):
+                    body, extraction_error = supplied[1], supplied[2]
+                else:
+                    if supplied is not None:
+                        texts = None  # out of step: extract the rest directly
+                    body, extraction_error = safe_extract_text(path, kind)
+                # indexed_document is the content table of indexed_document_fts
+                # (external content): store NFC so the index, snippet() and
+                # 'rebuild' all see the same composed text (NFD Korean names).
+                body = normalize_nfc(body)
+                title = normalize_nfc(path.name)
                 cursor = connection.execute(
                     """
                     INSERT INTO indexed_document (
@@ -1527,7 +1665,7 @@ class CaseDatabase:
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        next_citation_id_for_connection(connection, case_id, "indexed_document"),
+                        citations.next(),
                         case_id,
                         evidence_source_id,
                         "document",
@@ -1567,27 +1705,35 @@ class CaseDatabase:
                         ),
                     )
                 count += 1
+                commit_periodically(connection, count, citations)
         return count
 
     def _import_artifacts(self, case_id: str, evidence_source_id: int, outputs: Mapping[str, object]) -> int:
         count = 0
-        with self.connect() as connection:
+        with self.connect() as connection, CitationAllocator(connection, case_id, "artifact") as citations:
             for output_name, raw_path in sorted(outputs.items()):
                 name = str(output_name)
                 if not name.startswith("artifacts_"):
                     continue
-                payload = read_json_path(Path(str(raw_path)))
-                rows = payload.get("artifacts") if isinstance(payload, Mapping) else None
-                if not isinstance(rows, list):
+                try:
+                    views = iter_artifact_output_row_views(Path(str(raw_path)))
+                    first = next(views, None)
+                except (OSError, ValueError):
                     continue
-                for row in rows:
-                    if not isinstance(row, Mapping):
-                        continue
+                if first is None:
+                    continue
+                for row_index, row, varying_row in itertools.chain((first,), views):
                     artifact_type = str(row.get("artifact_type") or name.removeprefix("artifacts_"))
                     details = artifact_details(row)
                     title = artifact_title(row)
                     summary = artifact_summary(row)
-                    connection.execute(
+                    # Store/index what varies per row (per-type boilerplate stays
+                    # in the output's artifact_type_profiles) plus a locator back
+                    # to the run output row (``/artifacts/<row_index>``).
+                    stored = dict(varying_row)
+                    stored[ARTIFACT_SOURCE_LOCATOR_KEY] = {"output_name": name, "row_index": row_index}
+                    data_json = json.dumps(stored, ensure_ascii=False, sort_keys=True, default=str)
+                    cursor = connection.execute(
                         """
                         INSERT INTO artifact (
                             citation_id, case_id, evidence_source_id, artifact_type, parser_name,
@@ -1596,7 +1742,7 @@ class CaseDatabase:
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
-                            next_citation_id_for_connection(connection, case_id, "artifact"),
+                            citations.next(),
                             case_id,
                             evidence_source_id,
                             artifact_type,
@@ -1604,28 +1750,27 @@ class CaseDatabase:
                             str(details.get("parser_version") or ""),
                             title,
                             summary,
-                            json.dumps(dict(row), ensure_ascii=False, sort_keys=True),
+                            data_json,
                             None,
                             now_iso(),
                         ),
                     )
+                    sync_artifact_fts_nfc(connection, int(cursor.lastrowid), title, summary, data_json)
                     count += 1
+                    commit_periodically(connection, count, citations)
         return count
 
     def _import_timeline(self, case_id: str, evidence_source_id: int, outputs: Mapping[str, object]) -> int:
-        payload = read_output(outputs, "timeline")
-        rows = payload.get("events") if isinstance(payload, Mapping) else None
-        if not isinstance(rows, list):
-            return 0
+        rows = iter_output_member(outputs, "timeline", "events")
         count = 0
-        with self.connect() as connection:
+        with self.connect() as connection, CitationAllocator(connection, case_id, "event") as citations:
             for row in rows:
                 if not isinstance(row, Mapping):
                     continue
                 timestamp = str(row.get("timestamp") or "")
                 if not timestamp:
                     continue
-                connection.execute(
+                cursor = connection.execute(
                     """
                     INSERT INTO event (
                         citation_id, case_id, evidence_source_id, event_type, timestamp,
@@ -1634,7 +1779,7 @@ class CaseDatabase:
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        next_citation_id_for_connection(connection, case_id, "event"),
+                        citations.next(),
                         case_id,
                         evidence_source_id,
                         str(row.get("event_type") or ""),
@@ -1647,7 +1792,19 @@ class CaseDatabase:
                         None,
                     ),
                 )
+                sync_fts_row_nfc(
+                    connection,
+                    "event_fts",
+                    int(cursor.lastrowid),
+                    {
+                        "event_type": str(row.get("event_type") or ""),
+                        "target": str(row.get("path") or ""),
+                        "description": str(row.get("summary") or ""),
+                        "source": str(row.get("source") or ""),
+                    },
+                )
                 count += 1
+                commit_periodically(connection, count, citations)
         return count
 
     def _import_indicators(self, case_id: str, evidence_source_id: int, outputs: Mapping[str, object]) -> int:
@@ -1657,7 +1814,7 @@ class CaseDatabase:
         if not isinstance(indicator_rows, list) and not isinstance(scanner_rows, list):
             return 0
         count = 0
-        with self.connect() as connection:
+        with self.connect() as connection, CitationAllocator(connection, case_id, "artifact") as citations:
             for index, row in enumerate(indicator_rows if isinstance(indicator_rows, list) else []):
                 if not isinstance(row, Mapping):
                     continue
@@ -1665,7 +1822,8 @@ class CaseDatabase:
                 details = artifact_details(artifact)
                 title = artifact_title(artifact)
                 summary = artifact_summary(artifact)
-                connection.execute(
+                data_json = json.dumps(artifact, ensure_ascii=False, sort_keys=True)
+                cursor = connection.execute(
                     """
                     INSERT INTO artifact (
                         citation_id, case_id, evidence_source_id, artifact_type, parser_name,
@@ -1674,7 +1832,7 @@ class CaseDatabase:
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        next_citation_id_for_connection(connection, case_id, "artifact"),
+                        citations.next(),
                         case_id,
                         evidence_source_id,
                         str(artifact.get("artifact_type") or "indicator"),
@@ -1682,12 +1840,14 @@ class CaseDatabase:
                         str(details.get("parser_version") or "1"),
                         title,
                         summary,
-                        json.dumps(artifact, ensure_ascii=False, sort_keys=True),
+                        data_json,
                         None,
                         now_iso(),
                     ),
                 )
+                sync_artifact_fts_nfc(connection, int(cursor.lastrowid), title, summary, data_json)
                 count += 1
+                commit_periodically(connection, count, citations)
             for index, row in enumerate(scanner_rows if isinstance(scanner_rows, list) else []):
                 if not isinstance(row, Mapping):
                     continue
@@ -1695,7 +1855,8 @@ class CaseDatabase:
                 details = artifact_details(artifact)
                 title = artifact_title(artifact)
                 summary = artifact_summary(artifact)
-                connection.execute(
+                data_json = json.dumps(artifact, ensure_ascii=False, sort_keys=True)
+                cursor = connection.execute(
                     """
                     INSERT INTO artifact (
                         citation_id, case_id, evidence_source_id, artifact_type, parser_name,
@@ -1704,7 +1865,7 @@ class CaseDatabase:
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        next_citation_id_for_connection(connection, case_id, "artifact"),
+                        citations.next(),
                         case_id,
                         evidence_source_id,
                         str(artifact.get("artifact_type") or "indicator-ioc-scanner-hit"),
@@ -1712,12 +1873,14 @@ class CaseDatabase:
                         str(details.get("parser_version") or "1"),
                         title,
                         summary,
-                        json.dumps(artifact, ensure_ascii=False, sort_keys=True),
+                        data_json,
                         None,
                         now_iso(),
                     ),
                 )
+                sync_artifact_fts_nfc(connection, int(cursor.lastrowid), title, summary, data_json)
                 count += 1
+                commit_periodically(connection, count, citations)
         return count
 
     def _import_vsc_artifacts(self, case_id: str, evidence_source_id: int, payload: Mapping[str, object]) -> int:
@@ -1741,7 +1904,8 @@ class CaseDatabase:
                     details = artifact_details(artifact)
                     title = artifact_title(artifact)
                     summary = artifact_summary(artifact)
-                    connection.execute(
+                    data_json = json.dumps(artifact, ensure_ascii=False, sort_keys=True)
+                    cursor = connection.execute(
                         """
                         INSERT INTO artifact (
                             citation_id, case_id, evidence_source_id, artifact_type, parser_name,
@@ -1758,11 +1922,12 @@ class CaseDatabase:
                             str(details.get("parser_version") or "1"),
                             title,
                             summary,
-                            json.dumps(artifact, ensure_ascii=False, sort_keys=True),
+                            data_json,
                             None,
                             now_iso(),
                         ),
                     )
+                    sync_artifact_fts_nfc(connection, int(cursor.lastrowid), title, summary, data_json)
                     count += 1
         return count
 
@@ -1779,6 +1944,7 @@ class CaseDatabase:
                 artifact = worker_artifact_row(record, source_jsonl=str(jsonl_path), index=index)
                 title = artifact_title(artifact)
                 summary = artifact_summary(artifact)
+                data_json = json.dumps(artifact, ensure_ascii=False, sort_keys=True)
                 cursor = connection.execute(
                     """
                     INSERT INTO artifact (
@@ -1796,13 +1962,14 @@ class CaseDatabase:
                         str(record.get("parser_version") or ""),
                         title,
                         summary,
-                        json.dumps(artifact, ensure_ascii=False, sort_keys=True),
+                        data_json,
                         optional_float(record.get("confidence")),
                         now_iso(),
                     ),
                 )
+                sync_artifact_fts_nfc(connection, int(cursor.lastrowid), title, summary, data_json)
                 artifact_id = int(cursor.lastrowid)
-                index_body = worker_record_index_text(artifact)
+                index_body = normalize_nfc(worker_record_index_text(artifact))
                 doc_cursor = connection.execute(
                     """
                     INSERT INTO indexed_document (
@@ -1818,7 +1985,7 @@ class CaseDatabase:
                         artifact_id,
                         "worker-artifact",
                         str(record.get("artifact_type") or ""),
-                        title,
+                        normalize_nfc(title),
                         index_body,
                         "",
                         now_iso(),
@@ -1826,7 +1993,7 @@ class CaseDatabase:
                 )
                 connection.execute(
                     "INSERT INTO indexed_document_fts(rowid, title, body) VALUES (?, ?, ?)",
-                    (int(doc_cursor.lastrowid), title, index_body),
+                    (int(doc_cursor.lastrowid), normalize_nfc(title), index_body),
                 )
                 artifact_count += 1
                 indexed_document_count += 1
@@ -1952,4 +2119,20 @@ def case_record_from_row(row: sqlite3.Row) -> CaseRecord:
         status=str(row["status"]),
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
+    )
+
+
+def sync_artifact_fts_nfc(
+    connection: sqlite3.Connection,
+    artifact_id: int,
+    title: str,
+    summary: str,
+    data_json: str,
+) -> None:
+    """NFC the artifact_fts row the insert trigger copied from ``artifact``."""
+    sync_fts_row_nfc(
+        connection,
+        "artifact_fts",
+        artifact_id,
+        {"title": title, "summary": summary, "metadata": data_json},
     )

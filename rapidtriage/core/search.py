@@ -9,11 +9,15 @@ from pathlib import Path
 from typing import Any
 
 from .analysis import build_search_analysis
+from .artifact_profiles import iter_artifact_output_rows
 from .docs import build_preview, extract_text
 from .files import CATEGORY_RULES
 from .forensic_accuracy import build_accuracy_gate
+from .image_io import imread_unicode_safe
 from .json_stream import JsonStreamError, iter_array_items
 from .search_backend import build_search_backend_contract
+from .search_budget import SearchBudget, SourceScan, resolve_scan_budget_seconds
+from .textnorm import normalize_nfc, normalize_search_text
 
 IMAGE_EXTS = set(CATEGORY_RULES["images"]["extensions"])
 SEARCH_FEATURE_GAP_ID = "#61"
@@ -34,6 +38,12 @@ SEARCH_REPORT_GRADE_BLOCKERS = [
     "trusted-advanced-search-query-hit-diff-is-required-before-commercial-claim",
 ]
 SEARCH_TRUSTED_DIFF_BLOCKER_61 = "trusted-advanced-search-query-hit-diff-missing"
+SEARCH_BACKEND_FTS = "fts"
+SEARCH_BACKEND_SCAN = "scan"
+# Scan order (and the order matches are concatenated in): the scan backend
+# skips unrequested sources before scanning and hands each source the limit
+# still left after the previous ones.
+SCAN_SOURCE_ORDER = ("documents", "files", "artifacts", "indicators", "timeline", "ocr")
 ADVANCED_SEARCH_REPORT_GRADE_VALIDATION_PLAN_VERSION = "advanced-search-report-grade-validation-plan-v1"
 ADVANCED_SEARCH_REPORT_GRADE_BLOCKERS = [
     "source-row-hash-verification-required",
@@ -67,7 +77,19 @@ def run_unified_search(
     fuzzy_distance: int = 1,
     proximity_window: int = 0,
     hide_known_good: bool = False,
+    use_case_db: bool = True,
+    case_db_path: Path | None = None,
+    scan_budget_seconds: float | None = None,
 ) -> dict[str, object]:
+    """Search a completed run's outputs.
+
+    Uses the run-local case DB index (``backend: "fts"``) when it exists
+    (``case_db_path`` or the run's ``rapidtriage-case.db``), else scans the
+    outputs (``backend: "scan"``). Both backends stop at ``limit`` and at the
+    wall-clock budget (``scan_budget_seconds``, default
+    ``RAPIDTRIAGE_SEARCH_SCAN_BUDGET_SECONDS`` or 20 s); a budget stop
+    returns the matches found so far with ``truncated: true``.
+    """
     summary = load_run_summary(run_summary)
     normalized = normalize_keywords(keywords, search_mode=search_mode)
     if not normalized:
@@ -77,29 +99,71 @@ def run_unified_search(
     normalized_proximity_window = max(0, min(int(proximity_window or 0), 100))
     normalized_sources = {item.strip().lower() for item in (sources or []) if item.strip()}
     normalized_extensions = normalize_extensions(extensions or [])
-    normalized_path_fragment = (path_contains or "").strip().lower()
+    normalized_path_fragment = normalize_search_text((path_contains or "").strip())
 
     outputs = summary.get("outputs")
     if not isinstance(outputs, Mapping):
         raise SearchError("run summary does not include outputs")
 
-    matches: list[dict[str, object]] = []
-    document_errors: list[dict[str, object]] = []
-    ocr_errors: list[dict[str, str]] = []
     search_options = {
         "search_mode": normalized_search_mode,
         "fuzzy_distance": normalized_fuzzy_distance,
         "proximity_window": normalized_proximity_window,
     }
-    document_matches, document_errors = search_docs(outputs, normalized, limit=limit, search_options=search_options)
-    matches.extend(document_matches)
-    matches.extend(search_files(outputs, normalized, limit=limit, search_options=search_options))
-    matches.extend(search_artifacts(outputs, normalized, limit=limit, search_options=search_options))
-    matches.extend(search_indicators(outputs, normalized, limit=limit, search_options=search_options))
-    matches.extend(search_timeline(outputs, normalized, limit=limit, search_options=search_options))
-    if include_ocr:
-        ocr_matches, ocr_errors = search_ocr(outputs, normalized, limit=limit, search_options=search_options)
-        matches.extend(ocr_matches)
+    budget = SearchBudget(resolve_scan_budget_seconds(scan_budget_seconds))
+    backend = SEARCH_BACKEND_SCAN
+    index_error = ""
+    index_path = None
+    if use_case_db:
+        from .search_fts import resolve_run_case_db
+
+        index_path = Path(case_db_path) if case_db_path is not None else resolve_run_case_db(summary)
+    fts_result = None
+    if index_path is not None and index_path.is_file():
+        from .search_fts import CaseIndexError, fts_unified_matches
+
+        try:
+            fts_result = fts_unified_matches(
+                index_path,
+                outputs,
+                normalized,
+                search_options=search_options,
+                sources=normalized_sources,
+                extensions=normalized_extensions,
+                path_fragment=normalized_path_fragment,
+                hide_known_good=hide_known_good,
+                include_ocr=include_ocr,
+                limit=limit,
+                budget=budget,
+                # Index backend: OCR sidecars only; live Tesseract over every
+                # image runs only when the OCR source is requested explicitly.
+                ocr_search=lambda remaining, scan: search_ocr(
+                    outputs,
+                    normalized,
+                    limit=remaining,
+                    search_options=search_options,
+                    scan=scan,
+                    live_ocr="ocr" in normalized_sources,
+                ),
+            )
+        except CaseIndexError as exc:
+            index_error = str(exc)
+            budget = SearchBudget(budget.seconds)
+    if fts_result is not None:
+        backend = SEARCH_BACKEND_FTS
+        matches, document_errors, ocr_errors = fts_result
+    else:
+        matches, document_errors, ocr_errors = scan_unified_matches(
+            outputs,
+            normalized,
+            search_options=search_options,
+            sources=normalized_sources,
+            extensions=normalized_extensions,
+            path_fragment=normalized_path_fragment,
+            include_ocr=include_ocr,
+            limit=limit,
+            budget=budget,
+        )
     matches = filter_matches(
         matches,
         sources=normalized_sources,
@@ -230,7 +294,73 @@ def run_unified_search(
     }
     if include_analysis:
         payload["analysis"] = build_search_analysis(matches, normalized)
+    payload["backend"] = backend
+    payload["truncated"] = budget.truncated
+    payload["scanned"] = budget.scanned()
+    payload["scan_budget_seconds"] = budget.seconds
+    if index_error:
+        payload["index_error"] = index_error
+    payload["elapsed_ms"] = budget.elapsed_ms()
     return payload
+
+
+def scan_unified_matches(
+    outputs: Mapping[str, object],
+    keywords: Sequence[str],
+    *,
+    search_options: Mapping[str, object],
+    sources: set[str],
+    extensions: set[str],
+    path_fragment: str,
+    include_ocr: bool,
+    limit: int,
+    budget: SearchBudget,
+) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, str]]]:
+    """Scan backend: requested sources only, in scan order, each stopping at
+    the limit still open and at its share of the wall-clock budget."""
+    planned = [
+        source
+        for source in SCAN_SOURCE_ORDER
+        if (source != "ocr" or include_ocr)
+        and (not sources or source in sources or (source == "artifacts" and "web" in sources))
+    ]
+    matches: list[dict[str, object]] = []
+    document_errors: list[dict[str, object]] = []
+    ocr_errors: list[dict[str, str]] = []
+    visible = 0
+    for position, source in enumerate(planned):
+        remaining = max(0, limit - visible) if limit else 0
+        if limit and remaining == 0:
+            budget.skip_source(source, "limit")
+            continue
+        scan = budget.start_source(source, sources_left=len(planned) - position)
+        if source == "documents":
+            found, document_errors = search_docs(
+                outputs, keywords, limit=remaining, search_options=search_options, scan=scan
+            )
+        elif source == "files":
+            found = search_files(outputs, keywords, limit=remaining, search_options=search_options, scan=scan)
+        elif source == "artifacts":
+            found = search_artifacts(
+                outputs,
+                keywords,
+                limit=remaining,
+                search_options=search_options,
+                scan=scan,
+                include_web=not sources or "web" in sources,
+                include_other=not sources or "artifacts" in sources,
+            )
+        elif source == "indicators":
+            found = search_indicators(outputs, keywords, limit=remaining, search_options=search_options, scan=scan)
+        elif source == "timeline":
+            found = search_timeline(outputs, keywords, limit=remaining, search_options=search_options, scan=scan)
+        else:
+            found, ocr_errors = search_ocr(outputs, keywords, limit=remaining, search_options=search_options, scan=scan)
+        kept = filter_matches(found, sources=sources, extensions=extensions, path_fragment=path_fragment)
+        matches.extend(kept)
+        visible += len(kept)
+        scan.finish(matches=len(kept), limit_reached=bool(limit) and len(found) >= remaining)
+    return matches, document_errors, ocr_errors
 
 
 def workbench_search_profile(
@@ -855,7 +985,7 @@ def validate_search_queries(keywords: Sequence[str], *, search_mode: str) -> lis
         }
         if mode == "regex":
             try:
-                re.compile(keyword, flags=re.IGNORECASE | re.MULTILINE)
+                re.compile(normalize_nfc(keyword), flags=re.IGNORECASE | re.MULTILINE)
             except re.error as exc:
                 record["valid"] = False
                 record["error"] = str(exc)
@@ -933,6 +1063,7 @@ def search_docs(
     *,
     limit: int,
     search_options: Mapping[str, object] | None = None,
+    scan: SourceScan | None = None,
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     raw_docs_path = outputs.get("docs")
     if not raw_docs_path:
@@ -956,6 +1087,8 @@ def search_docs(
     for index, candidate in enumerate(iter_path_array(docs_path, "candidates")):
         if not isinstance(candidate, Mapping):
             continue
+        if scan is not None and not scan.tick():
+            break
         path = Path(str(candidate.get("path", "")))
         if str(path) in skipped_paths:
             continue
@@ -1023,12 +1156,15 @@ def search_files(
     *,
     limit: int,
     search_options: Mapping[str, object] | None = None,
+    scan: SourceScan | None = None,
 ) -> list[dict[str, object]]:
     matches = []
     plan = build_keyword_match_plan(keywords, search_options=search_options)
     for index, candidate in enumerate(iter_output_array(outputs, "files", "candidates")):
         if not isinstance(candidate, Mapping):
             continue
+        if scan is not None and not scan.tick():
+            break
         haystack = json.dumps(candidate, ensure_ascii=False)
         matched = match_keywords(haystack, keywords, search_options=search_options, plan=plan)
         if not matched:
@@ -1058,6 +1194,9 @@ def search_artifacts(
     *,
     limit: int,
     search_options: Mapping[str, object] | None = None,
+    scan: SourceScan | None = None,
+    include_web: bool = True,
+    include_other: bool = True,
 ) -> list[dict[str, object]]:
     matches = []
     plan = build_keyword_match_plan(keywords, search_options=search_options)
@@ -1067,9 +1206,13 @@ def search_artifacts(
             continue
         artifact_kind = name.removeprefix("artifacts_")
         source = "web" if artifact_kind == "browser" else "artifacts"
-        for index, artifact in enumerate(iter_path_array(Path(str(raw_path)), "artifacts")):
+        if not (include_web if source == "web" else include_other):
+            continue
+        for index, artifact in enumerate(iter_artifact_rows_safe(Path(str(raw_path)))):
             if not isinstance(artifact, Mapping):
                 continue
+            if scan is not None and not scan.tick():
+                return matches
             haystack = json.dumps(artifact, ensure_ascii=False)
             matched = match_keywords(haystack, keywords, search_options=search_options, plan=plan)
             if not matched:
@@ -1100,12 +1243,15 @@ def search_timeline(
     *,
     limit: int,
     search_options: Mapping[str, object] | None = None,
+    scan: SourceScan | None = None,
 ) -> list[dict[str, object]]:
     matches = []
     plan = build_keyword_match_plan(keywords, search_options=search_options)
     for index, event in enumerate(iter_output_array(outputs, "timeline", "events")):
         if not isinstance(event, Mapping):
             continue
+        if scan is not None and not scan.tick():
+            break
         haystack = json.dumps(event, ensure_ascii=False)
         matched = match_keywords(haystack, keywords, search_options=search_options, plan=plan)
         if not matched:
@@ -1134,6 +1280,7 @@ def search_indicators(
     *,
     limit: int,
     search_options: Mapping[str, object] | None = None,
+    scan: SourceScan | None = None,
 ) -> list[dict[str, object]]:
     raw_indicators_path = outputs.get("indicators")
     if not raw_indicators_path:
@@ -1144,6 +1291,8 @@ def search_indicators(
     for index, indicator in enumerate(iter_path_array(indicators_path, "indicators")):
         if not isinstance(indicator, Mapping):
             continue
+        if scan is not None and not scan.tick():
+            return matches
         haystack = json.dumps(indicator, ensure_ascii=False)
         matched = match_keywords(haystack, keywords, search_options=search_options, plan=plan)
         if not matched:
@@ -1176,6 +1325,7 @@ def search_indicators(
                 keywords,
                 limit=remaining_limit,
                 search_options=search_options,
+                scan=scan,
             )
         )
     return matches
@@ -1187,6 +1337,7 @@ def search_ioc_scanner_hits(
     *,
     limit: int,
     search_options: Mapping[str, object] | None = None,
+    scan: SourceScan | None = None,
 ) -> list[dict[str, object]]:
     matches = []
     if isinstance(payload, Mapping):
@@ -1199,6 +1350,8 @@ def search_ioc_scanner_hits(
     for index, hit in enumerate(hits):
         if not isinstance(hit, Mapping):
             continue
+        if scan is not None and not scan.tick():
+            break
         haystack = json.dumps(hit, ensure_ascii=False)
         matched = match_keywords(haystack, keywords, search_options=search_options, plan=plan)
         if not matched:
@@ -1234,7 +1387,10 @@ def search_ocr(
     *,
     limit: int,
     search_options: Mapping[str, object] | None = None,
+    scan: SourceScan | None = None,
+    live_ocr: bool = True,
 ) -> tuple[list[dict[str, object]], list[dict[str, str]]]:
+    """OCR sidecar text first, then (``live_ocr``) Tesseract on each image."""
     matches = []
     errors: list[dict[str, str]] = []
     sidecar_matched_candidate_indices: set[int] = set()
@@ -1245,6 +1401,8 @@ def search_ocr(
         path = Path(str(candidate.get("path", "")))
         if path.suffix.lower() not in IMAGE_EXTS:
             continue
+        if scan is not None and not scan.tick():
+            return matches, errors
         for sidecar in find_ocr_sidecars(path):
             try:
                 text = sidecar.read_text(encoding="utf-8", errors="replace")
@@ -1274,10 +1432,16 @@ def search_ocr(
             sidecar_matched_candidate_indices.add(index)
             if limit and len(matches) >= limit:
                 return matches, errors
+    if not live_ocr:
+        return matches, errors
     try:
         import cv2
         import pytesseract
-    except ImportError as exc:
+
+        # Fail once when the tesseract binary is missing instead of decoding
+        # every image only to fail per image.
+        pytesseract.get_tesseract_version()
+    except Exception as exc:
         if matches:
             errors.append({"path": "", "error": f"OCR engine dependencies unavailable after sidecar search: {exc}"})
             return matches, errors
@@ -1291,8 +1455,10 @@ def search_ocr(
         path = Path(str(candidate.get("path", "")))
         if path.suffix.lower() not in IMAGE_EXTS:
             continue
+        if scan is not None and not scan.tick():
+            break
         try:
-            image = cv2.imread(str(path))
+            image = imread_unicode_safe(cv2, path)
             if image is None:
                 raise OSError("image could not be decoded")
             text = pytesseract.image_to_string(image)
@@ -1355,7 +1521,9 @@ def normalize_keywords(keywords: Sequence[str], *, search_mode: str) -> list[str
         keyword = str(item or "").strip()
         if not keyword:
             continue
-        normalized = keyword if mode == "regex" else keyword.lower()
+        # Regex patterns get NFC only: casefolding would rewrite escapes
+        # (``\D`` -> ``\d``); case is handled by re.IGNORECASE.
+        normalized = normalize_nfc(keyword) if mode == "regex" else normalize_search_text(keyword)
         if normalized in seen:
             continue
         seen.add(normalized)
@@ -1382,11 +1550,11 @@ def build_keyword_match_plan(
         entry: dict[str, object] = {
             "keyword": keyword,
             "mode": mode,
-            "lower": keyword if mode == "regex" else keyword.lower(),
+            "lower": normalize_nfc(keyword) if mode == "regex" else normalize_search_text(keyword),
         }
         if mode == "regex":
             try:
-                entry["regex"] = re.compile(keyword, flags=re.IGNORECASE | re.MULTILINE)
+                entry["regex"] = re.compile(normalize_nfc(keyword), flags=re.IGNORECASE | re.MULTILINE)
             except re.error:
                 entry["regex"] = None
         elif mode == "fuzzy":
@@ -1407,6 +1575,7 @@ def match_keywords(
 ) -> list[str]:
     entries = list(plan) if plan is not None else build_keyword_match_plan(keywords, search_options=search_options)
     lower: str | None = None
+    nfc_text: str | None = None
     tokens: set[str] | None = None
     matched: list[str] = []
     for entry in entries:
@@ -1414,7 +1583,11 @@ def match_keywords(
         mode = str(entry["mode"])
         if mode == "regex":
             pattern = entry.get("regex")
-            if pattern is not None and pattern.search(text):
+            if pattern is None:
+                continue
+            if nfc_text is None:
+                nfc_text = normalize_nfc(text)
+            if pattern.search(nfc_text):
                 matched.append(keyword)
             continue
         if mode == "fuzzy":
@@ -1427,14 +1600,14 @@ def match_keywords(
                 matched.append(keyword)
             continue
         if lower is None:
-            lower = text.lower()
+            lower = normalize_search_text(text)
         if str(entry["lower"]) in lower:
             matched.append(keyword)
             continue
         stems = entry.get("stems")
         if stems:
             if tokens is None:
-                tokens = set(tokenize_words(lower))
+                tokens = set(tokenize_folded_words(lower))
             if stems & tokens:
                 matched.append(keyword)
     return matched
@@ -1442,7 +1615,7 @@ def match_keywords(
 
 def regex_keyword_matches(text: str, pattern: str) -> bool:
     try:
-        return re.search(pattern, text, flags=re.IGNORECASE | re.MULTILINE) is not None
+        return re.search(normalize_nfc(pattern), normalize_nfc(text), flags=re.IGNORECASE | re.MULTILINE) is not None
     except re.error:
         return False
 
@@ -1452,7 +1625,7 @@ def exact_or_stem_matches(lower_text: str, keyword: str) -> bool:
         return True
     if not is_simple_word(keyword):
         return False
-    tokens = set(tokenize_words(lower_text))
+    tokens = set(tokenize_folded_words(lower_text))
     return any(stem in tokens for stem in keyword_stems(keyword))
 
 
@@ -1463,13 +1636,14 @@ def fuzzy_keyword_matches(
     max_distance: int,
     stems: object = None,
 ) -> bool:
-    lower = text.lower()
+    lower = normalize_search_text(text)
+    keyword = normalize_search_text(keyword)
     if exact_or_stem_matches(lower, keyword):
         return True
     if not is_simple_word(keyword):
         return False
     keyword_variants = stems if isinstance(stems, (set, frozenset)) else keyword_stems(keyword)
-    for token in tokenize_words(lower):
+    for token in tokenize_folded_words(lower):
         if abs(len(token) - len(keyword)) > max_distance + 1:
             continue
         if any(levenshtein_distance(token, variant, max_distance=max_distance) <= max_distance for variant in keyword_variants):
@@ -1635,7 +1809,7 @@ def search_core_accuracy_gates(
 
 
 def proximity_summary(text: str, keywords: Sequence[str], *, window: int) -> dict[str, object]:
-    tokens = tokenize_words(text.lower())
+    tokens = tokenize_words(text)
     if not tokens:
         return {"matched": False, "window": window}
     positions: dict[str, list[int]] = {}
@@ -1643,7 +1817,8 @@ def proximity_summary(text: str, keywords: Sequence[str], *, window: int) -> dic
         if not is_simple_word(keyword):
             continue
         stems = set(keyword_stems(keyword))
-        hits = [index for index, token in enumerate(tokens) if token == keyword or token in stems]
+        folded_keyword = normalize_search_text(keyword)
+        hits = [index for index, token in enumerate(tokens) if token == folded_keyword or token in stems]
         if hits:
             positions[keyword] = hits
     if len(positions) < 2:
@@ -1668,15 +1843,20 @@ def proximity_summary(text: str, keywords: Sequence[str], *, window: int) -> dic
 
 
 def tokenize_words(text: str) -> list[str]:
-    return re.findall(r"[\w가-힣]{2,}", text.lower())
+    return tokenize_folded_words(normalize_search_text(text))
+
+
+def tokenize_folded_words(folded_text: str) -> list[str]:
+    """Tokenize text that already went through ``normalize_search_text``."""
+    return re.findall(r"[\w가-힣]{2,}", folded_text)
 
 
 def is_simple_word(value: str) -> bool:
-    return re.fullmatch(r"[\w가-힣]{2,}", value.lower()) is not None
+    return re.fullmatch(r"[\w가-힣]{2,}", normalize_search_text(value)) is not None
 
 
 def keyword_stems(keyword: str) -> set[str]:
-    lower = keyword.lower()
+    lower = normalize_search_text(keyword)
     stems = {lower}
     for suffix in ("ing", "edly", "edly", "ed", "es", "s"):
         if len(lower) > len(suffix) + 3 and lower.endswith(suffix):
@@ -1736,7 +1916,7 @@ def filter_matches(
             continue
         if extensions and suffix not in extensions:
             continue
-        if path_fragment and path_fragment not in path.lower():
+        if path_fragment and path_fragment not in normalize_search_text(path):
             continue
         filtered.append(dict(match))
     return filtered
@@ -1837,6 +2017,17 @@ def iter_output_array(
     try:
         yield from iter_array_items(path, member)
     except (JsonStreamError, OSError):
+        return
+
+
+def iter_artifact_rows_safe(path: Path):
+    """Stream every row of a per-kind artifacts output (JSONL-backed or inline).
+
+    Damaged outputs degrade to zero rows, like ``iter_path_array``.
+    """
+    try:
+        yield from iter_artifact_output_rows(path)
+    except (JsonStreamError, OSError, ValueError):
         return
 
 

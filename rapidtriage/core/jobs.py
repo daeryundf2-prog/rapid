@@ -94,6 +94,7 @@ class RunRequest:
     known_good_hash_feeds: tuple[str, ...] = ()
     hide_known_good: bool = False
     known_good_max_hash_bytes: int = DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES
+    case_db: bool = True
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -114,6 +115,7 @@ class RunRequest:
             "known_good_hash_feeds": list(self.known_good_hash_feeds),
             "hide_known_good": self.hide_known_good,
             "known_good_max_hash_bytes": self.known_good_max_hash_bytes,
+            "case_db": self.case_db,
         }
 
     @classmethod
@@ -143,6 +145,7 @@ class RunRequest:
                 payload.get("known_good_max_hash_bytes"),
                 DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES,
             ),
+            case_db=bool(payload.get("case_db", True)),
         )
 
 
@@ -596,7 +599,7 @@ class RunJobStore:
             raise
         with self._lock:
             job.steps = update_step(job.steps, "triage", "completed", message="Triage workflow completed")
-            job.steps = update_step(job.steps, "persist", "completed", message="Run summary persisted")
+            job.steps = update_step(job.steps, "persist", "completed", message=persist_step_message(summary))
             job.steps = update_step(job.steps, "finalize", "completed", message="Run completed")
             job.status = "completed"
             job.summary = summary
@@ -1808,9 +1811,25 @@ def execute_run_request(request: RunRequest, *, run_id: str | None = None) -> di
             hide_known_good=request.hide_known_good,
             known_good_max_hash_bytes=request.known_good_max_hash_bytes,
             rule_set=rule_set,
+            case_db=request.case_db,
         )
     except (FileNotFoundError, OSError, RuleConfigError, RunModeError, ValueError):
         raise
+
+
+def persist_step_message(summary: Mapping[str, object]) -> str:
+    """Job ``persist`` step message: run summary plus the case DB index state."""
+    record = summary.get("case_db") if isinstance(summary, Mapping) else None
+    if not isinstance(record, Mapping):
+        return "Run summary persisted"
+    status = str(record.get("status") or "")
+    if status == "completed":
+        counts = record.get("counts") if isinstance(record.get("counts"), Mapping) else {}
+        total = sum(int(value) for value in counts.values() if isinstance(value, int))
+        return f"Run summary persisted; case DB search index built ({total} rows)"
+    if status == "failed":
+        return f"Run summary persisted; case DB index failed, search uses scan ({record.get('error') or 'error'})"
+    return "Run summary persisted; case DB index skipped, search uses scan"
 
 
 def default_run_output_dir(root: Path, mode: str, *, run_id: str | None = None) -> Path:

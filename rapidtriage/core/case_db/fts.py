@@ -8,6 +8,7 @@ import sqlite3
 from collections.abc import Mapping, Sequence
 
 from ..forensic_accuracy import build_accuracy_gate
+from ..textnorm import normalize_nfc
 from .constants import (
     FUNCTIONAL_SCALE_BATCH_ID,
     LARGE_SQLITE_FTS_GAP_ID,
@@ -33,7 +34,43 @@ __all__ = [
     "rebuild_case_db_search_indexes",
     "rebuild_external_content_fts",
     "rebuild_standalone_fts",
+    "sync_fts_row_nfc",
 ]
+
+# Unicode note: FTS5 ``unicode61`` folds case and strips diacritics but does not
+# compose Hangul jamo, so NFD Korean (macOS names/text) never matches an NFC
+# query unless both sides are NFC. Every FTS insert path stores NFC text and
+# build_fts_query NFCs the MATCH terms. Source tables keep their original
+# values, except indexed_document (the external-content table of
+# indexed_document_fts), which stores NFC so 'rebuild' and snippet() agree.
+
+
+def sync_fts_row_nfc(
+    connection: sqlite3.Connection,
+    fts_table: str,
+    rowid: int,
+    values: Mapping[str, str],
+) -> bool:
+    """Rewrite trigger-copied FTS columns in NFC when the source text is not NFC.
+
+    The ``*_fts_ai`` triggers copy source columns verbatim (SQLite has no NFC
+    function). Only rows with non-NFC text are touched; ASCII is skipped.
+    """
+    changed: dict[str, str] = {}
+    for column, value in values.items():
+        if not value or value.isascii():
+            continue
+        normalized = normalize_nfc(value)
+        if normalized != value:
+            changed[column] = normalized
+    if not changed:
+        return False
+    assignments = ", ".join(f"{column} = ?" for column in changed)
+    connection.execute(
+        f"UPDATE {fts_table} SET {assignments} WHERE rowid = ?",
+        (*changed.values(), rowid),
+    )
+    return True
 
 def case_db_search_index_health(connection: sqlite3.Connection, case_id: str) -> dict[str, object]:
     profiles = [
@@ -317,7 +354,10 @@ def rebuild_standalone_fts(
         column_sql = ", ".join(columns)
         inserted = 0
         for row in connection.execute(select_sql, (case_id,)).fetchall():
-            values = [row[column] for column in row.keys() if column != "id"]
+            values = [
+                normalize_nfc(value) if isinstance(value, str) else value
+                for value in (row[column] for column in row.keys() if column != "id")
+            ]
             connection.execute(
                 f"INSERT INTO {fts_table}(rowid, {column_sql}) VALUES (?, {placeholders})",
                 (row["id"], *values),

@@ -11,6 +11,7 @@ from typing import Any
 
 from ..docs import extract_text
 from ..submission import compute_hashes
+from ..textnorm import normalize_nfc, normalize_search_term, normalize_search_text
 from .base import (
     CaseDatabaseError,
 )
@@ -748,10 +749,12 @@ def build_fts_query(keywords: list[str]) -> str:
 
 
 def quote_fts_token(keyword: str) -> str:
-    escaped = keyword.replace('"', '""')
+    # NFC only: unicode61 folds case itself, and indexed text is stored NFC
+    # (see case_db/fts.py), so NFD Hangul queries and rows meet in one form.
+    escaped = normalize_nfc(keyword).replace('"', '""')
     return f'"{escaped}"'
 
 
 def matched_keywords(text: str, keywords: Iterable[str]) -> list[str]:
-    haystack = text.lower()
-    return [keyword for keyword in keywords if keyword.lower() in haystack]
+    haystack = normalize_search_text(text)
+    return [keyword for keyword in keywords if normalize_search_term(keyword) in haystack]
