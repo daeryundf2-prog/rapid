@@ -11,6 +11,7 @@
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "gen:schemas": "node scripts/gen-schemas.mjs",
+    "check:contrast": "node scripts/check-contrast.mjs",
     "e2e": "playwright test --config e2e/playwright.config.ts"
   },
   "dependencies": {

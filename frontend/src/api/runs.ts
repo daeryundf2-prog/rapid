@@ -139,3 +139,107 @@ export async function getRunArtifacts(runId: string, limit = 1000): Promise<Arti
   );
   return payload.artifacts ?? {};
 }
+
+/** Body of `POST /api/runs` — mirrors `RunCreateRequest` in rapidtriage/api/app/models.py. */
+export interface RunCreateBody {
+  root: string;
+  mode: string;
+  output_dir?: string | null;
+  input_kind?: string | null;
+  rules?: string | null;
+  dry_run?: boolean;
+  read_only?: boolean;
+  max_extract_size_bytes?: number;
+  max_file_count?: number;
+  memory_cap_bytes?: number;
+  e01_partition_start_sector?: number | null;
+  overwrite?: boolean;
+  resume?: boolean;
+  extract?: boolean;
+  known_good_hash_feeds?: string[];
+  hide_known_good?: boolean;
+  known_good_max_hash_bytes?: number;
+  wait?: boolean;
+}
+
+export function createRun(body: RunCreateBody): Promise<RunJob> {
+  return api<RunJob>("/api/runs", { method: "POST", body: JSON.stringify(body) });
+}
+
+/** `POST /api/runs/import` — `RunImportRequest`. */
+export function importRun(outputDir: string): Promise<RunJob> {
+  return api<RunJob>("/api/runs/import", { method: "POST", body: JSON.stringify({ output_dir: outputDir }) });
+}
+
+export async function deleteRun(runId: string): Promise<void> {
+  await api<unknown>(`/api/runs/${encodeURIComponent(runId)}`, { method: "DELETE" });
+}
+
+/** `POST /api/sample-case/run` — `SampleCaseRunRequest`. */
+export interface SampleCaseBody {
+  output_dir?: string | null;
+  mode?: string;
+  overwrite?: boolean;
+  read_only?: boolean;
+}
+
+export function runSampleCase(body: SampleCaseBody = {}): Promise<{ command: string; run: RunJob }> {
+  return api("/api/sample-case/run", { method: "POST", body: JSON.stringify(body) });
+}
+
+export interface DoctorCheck {
+  name: string;
+  category: string;
+  status: "ok" | "warn" | "error" | string;
+  summary: string;
+  details?: Record<string, unknown>;
+  remediation?: string;
+}
+
+export interface DoctorReport {
+  command: string;
+  status: string;
+  summary: { ok: number; warn: number; error: number; check_count: number };
+  checks: DoctorCheck[];
+}
+
+export function getDoctor(): Promise<DoctorReport> {
+  return api<DoctorReport>("/api/doctor");
+}
+
+export function getCollectProfiles(): Promise<{ profiles: string[] }> {
+  return api<{ profiles: string[] }>("/api/collect/profiles");
+}
+
+/** `POST /api/collect/plan` — `CollectPlanRequest` (preview only; not part of the run request). */
+export function planCollect(body: {
+  root: string;
+  profile: string;
+  input_kind?: string | null;
+}): Promise<Record<string, unknown>> {
+  return api("/api/collect/plan", { method: "POST", body: JSON.stringify(body) });
+}
+
+/**
+ * Query for `GET /api/runs/{id}/artifacts`.
+ * - `kind` (repeatable): page only those kinds.
+ * - `path_contains`: NFC case-insensitive substring on `path`, streamed; offset counts matches.
+ *   Per-kind `pagination` then has `filtered`, `scanned`, `truncated`, and `total: null`
+ *   unless the whole kind was scanned.
+ * - `sort`: unsupported; the response carries `sort_supported: false`.
+ */
+export interface ArtifactsQuery {
+  offset?: number;
+  limit?: number;
+  kind?: string[];
+  path_contains?: string;
+}
+
+export function artifactsQueryString(query: ArtifactsQuery): string {
+  const params = new URLSearchParams();
+  if (query.offset) params.set("offset", String(query.offset));
+  if (query.limit) params.set("limit", String(query.limit));
+  for (const kind of query.kind ?? []) params.append("kind", kind);
+  if (query.path_contains?.trim()) params.set("path_contains", query.path_contains.trim());
+  return params.toString();
+}

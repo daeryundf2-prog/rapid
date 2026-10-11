@@ -20,23 +20,26 @@ export interface RowRef {
   locator: string;
   /** Case-db primary key when the row has been persisted (review marks). */
   caseDbId?: number;
+  /** Search hits: the output the pointer belongs to ("files", "artifacts", "docs-index", ...). */
+  source?: string;
 }
 
 /** Serialise for the `row=` URL query parameter (and back). */
 export function encodeRowRef(ref: RowRef): string {
   return encodeURIComponent(
-    [ref.collection, ref.kind ?? "", ref.locator, ref.caseDbId ?? ""].join("|"),
+    [ref.collection, ref.kind ?? "", ref.locator, ref.caseDbId ?? "", ref.source ?? ""].join("|"),
   );
 }
 
 export function decodeRowRef(value: string | null): RowRef | null {
   if (!value) return null;
-  const [collection, kind, locator, caseDbId] = decodeURIComponent(value).split("|");
+  const [collection, kind, locator, caseDbId, source] = decodeURIComponent(value).split("|");
   if (!collection || !locator) return null;
   return {
     collection: collection as CollectionId,
     kind: kind || undefined,
     locator,
     caseDbId: caseDbId ? Number(caseDbId) : undefined,
+    source: source || undefined,
   };
 }

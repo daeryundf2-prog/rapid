@@ -7,6 +7,8 @@
  * supports offset/limit paging so the grid never loads a whole output file.
  */
 
+import type { RowRef } from "./rowRef";
+
 export type CollectionId =
   | "intake"
   | "search"
@@ -25,6 +27,12 @@ export interface CollectionRef {
   kind?: string;
   /** Review status filter when id === "review". */
   status?: ReviewStatus;
+  /**
+   * Artifact category (features/tree/categories.ts id) when id === "artifacts"
+   * and no kind is set: the grid shows every kind of that category
+   * (`kindsForCategory`). Route: `#/case/{run}/artifacts?category=<id>`.
+   */
+  category?: string;
 }
 
 export type ReviewStatus = "relevant" | "needs-review" | "excluded" | "include-in-report";
@@ -37,6 +45,15 @@ export interface CollectionQuery {
   /** Free text applied server-side where supported (path_contains / FTS), else client-side. */
   text?: string;
   extension?: string[];
+  /** Server-side path substring (artifacts path_contains); wins over the single-token text. */
+  pathContains?: string;
+  /** Inclusive ISO range on the row timestamp (server-side only where an API supports it, else client). */
+  timeRange?: { from?: string; to?: string };
+  reviewStatus?: ReviewStatus[];
+  tags?: string[];
+  artifactTypes?: string[];
+  /** Navigation category (tree) filter; interpreted by the collection. */
+  category?: string;
   sort?: { column: string; direction: "asc" | "desc" };
   /** Search-collection only. */
   search?: {
@@ -65,7 +82,7 @@ export interface CollectionPage<Row = GridRow> {
  * actions and the URL need.
  */
 export interface GridRow {
-  /** Stable within a run: `${collection}:${locator}` — see RowRef. */
+  /** Stable and unique within a run: `${collection}[:${kind}]:${locator}` — see RowRef. */
   rowKey: string;
   ref: RowRef;
   /** Primary label (file name, event summary, keyword hit…). */

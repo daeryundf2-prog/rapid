@@ -48,4 +48,9 @@ export const KEY_MAP = {
   viewerForward: "Alt+ArrowRight",
   help: "?",
   close: "Escape",
+  /** Explorer views (S9 ViewSwitch, plan X12). */
+  viewColumns: "Alt+Shift+1",
+  viewThumbnails: "Alt+Shift+2",
+  viewChat: "Alt+Shift+3",
+  viewHistogram: "Alt+Shift+4",
 } as const;

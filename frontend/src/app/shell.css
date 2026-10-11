@@ -1,3 +1,7 @@
+/* Console shell (S1): frame, top bar, status bar, palette, help, drawer,
+   shared controls. Feature panes bring their own CSS. Only tokens from
+   tokens.css are used here — no literal colours. */
+
 * {
   box-sizing: border-box;
 }
@@ -19,81 +23,475 @@ body {
 }
 
 code,
+kbd,
 .mono {
   font-family: var(--font-mono);
   font-size: 0.92em;
 }
 
-.workbench {
+kbd {
+  display: inline-block;
+  min-width: 1.6em;
+  padding: 0 var(--space-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--text);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.icon {
+  flex: none;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+/* --- frame ---------------------------------------------------------------- */
+
+.shell {
   display: flex;
   flex-direction: column;
   height: 100%;
 }
 
-.workbench-header {
+.shell-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.pane-frame {
+  height: 100%;
   display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: 0 var(--space-3);
-  height: 44px;
-  background: var(--bg-panel);
-  border-bottom: 1px solid var(--line);
-  flex: none;
-}
-
-.workbench-brand {
-  font-size: var(--fs-panel-title);
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.workbench-case-title {
-  color: var(--text-muted);
-  font-size: var(--fs-table-aux);
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  background: var(--bg);
 }
 
-.header-search {
-  margin-left: auto;
+.pane-frame:focus-visible {
+  outline-offset: -2px;
+}
+
+.resize-handle {
+  width: 4px;
+  background: transparent;
+  position: relative;
+}
+
+.resize-handle::after {
+  content: "";
+  position: absolute;
+  inset: 0 1px;
+  background: var(--line-subtle);
+}
+
+.resize-handle[data-resize-handle-state="hover"]::after,
+.resize-handle[data-resize-handle-state="drag"]::after,
+.resize-handle:focus-visible::after {
+  background: var(--accent);
+}
+
+/* --- top bar -------------------------------------------------------------- */
+
+.topbar {
+  position: relative;
+  z-index: 10; /* top-bar popovers paint above the panes */
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  height: 44px;
+  padding: 0 var(--space-3);
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--line-subtle);
+  flex: none;
 }
 
-.header-search input {
-  width: 260px;
+.brand {
+  font-size: var(--fs-panel-title);
+  font-weight: 700;
+  white-space: nowrap;
+  margin-right: var(--space-2);
+}
+
+.case-picker select,
+.global-search input {
   height: 28px;
   padding: 0 var(--space-2);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius);
   background: var(--bg);
   color: var(--text);
   font: inherit;
 }
 
-.header-search input::placeholder {
+.case-picker select {
+  max-width: 240px;
+}
+
+.topbar-search {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.global-search {
+  flex: 1;
+  max-width: 480px;
+  min-width: 160px;
+}
+
+.global-search form,
+.global-search input {
+  width: 100%;
+}
+
+.global-search {
+  display: block;
+}
+
+.global-search input::placeholder {
   color: var(--text-muted);
 }
 
-.workbench-body {
-  flex: 1;
-  min-height: 0;
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
 }
 
-.workbench-statusbar {
+/* --- buttons -------------------------------------------------------------- */
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 28px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-table-aux);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.button:hover {
+  border-color: var(--accent);
+}
+
+.button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
+.button.primary:hover {
+  background: var(--accent-hover);
+}
+
+.button.ghost {
+  background: transparent;
+  border-color: transparent;
+}
+
+.button.ghost:hover {
+  border-color: var(--line);
+}
+
+.button.icon-only {
+  width: 28px;
+  padding: 0;
+  justify-content: center;
+}
+
+.button[aria-disabled="true"] {
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.button[aria-disabled="true"]:hover {
+  border-color: var(--line);
+}
+
+/* --- status bar ----------------------------------------------------------- */
+
+.statusbar {
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  height: 28px;
   padding: 0 var(--space-3);
-  height: 26px;
   background: var(--bg-panel);
-  border-top: 1px solid var(--line);
-  font-size: var(--fs-aux);
+  border-top: 1px solid var(--line-subtle);
+  font-size: var(--fs-table-aux);
   color: var(--text-muted);
   flex: none;
+  white-space: nowrap;
+  overflow: hidden;
 }
+
+.statusbar .button {
+  height: 22px;
+  padding: 0 var(--space-2);
+}
+
+.status-run {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.status-progress {
+  width: 96px;
+  height: 6px;
+  accent-color: var(--accent);
+}
+
+.status-errors {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.statusbar-spacer {
+  flex: 1;
+}
+
+.status-notice {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.status-notice.error {
+  color: var(--danger);
+}
+
+.status-connection.error {
+  color: var(--danger);
+}
+
+/* --- overlays: palette, help, drawer --------------------------------------- */
+
+.overlay-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 800;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 12vh;
+  background: color-mix(in srgb, var(--scrim) 45%, transparent);
+}
+
+.palette,
+.help-dialog {
+  width: min(640px, calc(100vw - var(--space-6)));
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 12px 32px color-mix(in srgb, var(--scrim) 40%, transparent);
+  overflow: hidden;
+}
+
+.palette-input {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--line-subtle);
+  color: var(--text-muted);
+}
+
+.palette-input input {
+  flex: 1;
+  height: 32px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-panel-title);
+}
+
+.palette-input input:focus-visible {
+  outline: none;
+}
+
+.palette-input:focus-within {
+  box-shadow: inset 0 -2px 0 var(--focus);
+}
+
+.palette-list {
+  flex: 1;
+  overflow: auto;
+  padding: var(--space-1) 0;
+}
+
+.palette-group {
+  padding: var(--space-2) var(--space-3) var(--space-1);
+  font-size: var(--fs-aux);
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.palette-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--row-h);
+  padding: 0 var(--space-3);
+  cursor: pointer;
+}
+
+.palette-option.active {
+  background: var(--bg-selected);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.palette-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palette-option.disabled .palette-label {
+  color: var(--text-muted);
+}
+
+.palette-reason {
+  font-size: var(--fs-aux);
+  color: var(--text-muted);
+}
+
+.palette-empty {
+  padding: var(--space-4) var(--space-3);
+  color: var(--text-muted);
+}
+
+.palette-footer,
+.help-foot {
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--line-subtle);
+  font-size: var(--fs-aux);
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--line-subtle);
+}
+
+.dialog-head h2 {
+  margin: 0;
+  font-size: var(--fs-screen-title);
+}
+
+.help-dialog > p {
+  padding: var(--space-3);
+  margin: 0;
+}
+
+.help-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-table-aux);
+  overflow: auto;
+}
+
+.help-table th,
+.help-table td {
+  height: var(--row-h);
+  padding: 0 var(--space-3);
+  text-align: left;
+  border-bottom: 1px solid var(--line-subtle);
+}
+
+.help-table th {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.help-table td.muted {
+  color: var(--text-muted);
+}
+
+.drawer-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 600;
+  border: none;
+  background: color-mix(in srgb, var(--scrim) 35%, transparent);
+  cursor: pointer;
+}
+
+.drawer-handle {
+  position: absolute;
+  right: var(--space-3);
+  bottom: var(--space-3);
+  z-index: 500;
+}
+
+.viewer-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 700;
+  width: min(560px, 92%);
+  min-width: min(420px, 100%);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--line);
+  box-shadow: -8px 0 24px color-mix(in srgb, var(--scrim) 35%, transparent);
+  transform: translateX(0);
+  transition: transform var(--motion) ease-out;
+}
+
+.viewer-drawer[hidden] {
+  display: none;
+}
+
+.drawer-head {
+  display: flex;
+  justify-content: flex-end;
+  padding: var(--space-1);
+  border-bottom: 1px solid var(--line-subtle);
+  flex: none;
+}
+
+/* --- shared pane bits (legacy panes + feature fallbacks) ------------------ */
 
 .pane {
   height: 100%;
@@ -107,7 +505,7 @@ code,
   padding: var(--space-2) var(--space-3);
   font-size: var(--fs-panel-title);
   font-weight: 600;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--line-subtle);
   background: var(--bg-panel);
   flex: none;
   display: flex;
@@ -127,51 +525,15 @@ code,
   color: var(--text-muted);
   font-size: var(--fs-table-aux);
   text-align: center;
+  margin: 0;
 }
 
-.resize-handle {
-  width: 4px;
-  background: transparent;
-  position: relative;
-}
-
-.resize-handle::after {
-  content: "";
-  position: absolute;
-  inset: 0 1px;
-  background: var(--line);
-}
-
-.resize-handle[data-resize-handle-state="hover"]::after,
-.resize-handle[data-resize-handle-state="drag"]::after {
-  background: var(--accent);
-}
-
-.button {
-  height: 28px;
-  padding: 0 var(--space-3);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  background: var(--bg-raised);
-  color: var(--text);
-  font: inherit;
-  font-size: var(--fs-table-aux);
-  cursor: pointer;
-}
-
-.button:hover {
-  border-color: var(--accent);
-}
-
-.button.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--on-accent);
-  font-weight: 600;
-}
-
-.button.primary:hover {
-  background: var(--accent-hover);
+.pane-empty-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding-bottom: var(--space-4);
 }
 
 .badge {
@@ -206,61 +568,50 @@ code,
   background: var(--bg-raised);
 }
 
-.run-list {
+.token-gate {
   display: flex;
   flex-direction: column;
-  padding: var(--space-1);
-  gap: 2px;
-}
-
-.run-item {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: var(--space-2);
-  border: 1px solid transparent;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  min-height: var(--row-h-roomy);
-}
-
-.run-item:hover {
-  background: var(--bg-raised);
-}
-
-.run-item.selected {
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  border-color: var(--accent);
-}
-
-.run-item-kicker {
-  display: flex;
   align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  height: 100%;
+  padding: var(--space-5);
+}
+
+.token-gate form {
+  display: flex;
   gap: var(--space-2);
-  font-size: var(--fs-aux);
-  color: var(--text-muted);
 }
 
-.run-item-name {
-  font-weight: 600;
-  font-size: var(--fs-body);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.run-item-path {
+.token-gate input {
+  width: 320px;
+  height: 30px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  color: var(--text);
   font-family: var(--font-mono);
-  font-size: var(--fs-aux);
-  color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
+
+.token-gate p {
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
+  max-width: 420px;
+  text-align: center;
+}
+
+.error-banner {
+  margin: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius);
+  color: var(--danger);
+  font-size: var(--fs-table-aux);
+}
+
+/* Legacy v2 panes (item-table, detail-panel) — removed with those panes
+   once S2/S3 register the viewer/grid slots. */
 
 .data-table {
   width: 100%;
@@ -273,7 +624,7 @@ code,
   height: var(--row-h);
   padding: 0 var(--space-2);
   text-align: left;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--line-subtle);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -297,7 +648,7 @@ code,
 }
 
 .data-table tbody tr.selected {
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  background: var(--bg-selected);
 }
 
 .detail-grid {
@@ -317,6 +668,10 @@ code,
   overflow-wrap: anywhere;
 }
 
+.detail-row {
+  display: contents;
+}
+
 .count-chips {
   display: flex;
   flex-wrap: wrap;
@@ -329,7 +684,7 @@ code,
   flex-direction: column;
   min-width: 72px;
   padding: var(--space-2);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-subtle);
   border-radius: 6px;
   background: var(--bg-panel);
 }
@@ -343,145 +698,14 @@ code,
   color: var(--text-muted);
 }
 
-.token-gate {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-3);
-  height: 100%;
-  padding: var(--space-5);
-}
-
-.token-gate form {
-  display: flex;
-  gap: var(--space-2);
-}
-
-.token-gate input {
-  width: 320px;
-  height: 30px;
-  padding: 0 var(--space-2);
-  border: 1px solid var(--line);
-  border-radius: 4px;
+.provenance-block {
+  border-bottom: 1px solid var(--line-subtle);
   background: var(--bg-panel);
-  color: var(--text);
-  font-family: var(--font-mono);
 }
 
-.token-gate p {
-  color: var(--text-muted);
-  font-size: var(--fs-table-aux);
-  max-width: 420px;
-  text-align: center;
+.break-all {
+  word-break: break-all;
 }
-
-.error-banner {
-  margin: var(--space-3);
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--danger);
-  border-radius: 4px;
-  color: var(--danger);
-  font-size: var(--fs-table-aux);
-}
-
-/* --- evidence tree ----------------------------------------------------- */
-
-.tree-section {
-  border-top: 1px solid var(--line);
-  margin-top: var(--space-2);
-}
-
-.tree-section-title {
-  border-bottom: none;
-  font-size: var(--fs-table-aux);
-  color: var(--text-muted);
-  padding: var(--space-2) var(--space-3) 0;
-}
-
-.tree-toolbar {
-  display: flex;
-  justify-content: flex-end;
-  padding: var(--space-1) var(--space-3) 0;
-}
-
-.tree-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  font-size: var(--fs-aux);
-  color: var(--text-muted);
-  cursor: pointer;
-  user-select: none;
-}
-
-.tree-root,
-.tree-root ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.tree-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  height: var(--row-h);
-  padding-right: var(--space-2);
-  border-radius: 4px;
-}
-
-.tree-row:hover {
-  background: var(--bg-raised);
-}
-
-.tree-row.selected {
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-}
-
-.tree-row.empty {
-  opacity: 0.45;
-}
-
-.tree-disclosure {
-  width: 16px;
-  height: 16px;
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: var(--fs-aux);
-  flex: none;
-}
-
-.tree-disclosure-spacer {
-  width: 16px;
-  flex: none;
-}
-
-.tree-label {
-  flex: 1;
-  min-width: 0;
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  font-size: var(--fs-table-aux);
-  text-align: left;
-  cursor: pointer;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.tree-label:disabled {
-  cursor: default;
-  color: var(--text-muted);
-}
-
-/* --- virtualized item table -------------------------------------------- */
 
 .vtable {
   flex: 1;
@@ -500,7 +724,7 @@ code,
 .vtable-header {
   flex: none;
   background: var(--bg-panel);
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--line-subtle);
   font-weight: 600;
   color: var(--text-muted);
 }
@@ -518,7 +742,7 @@ code,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--line-subtle);
   min-width: 0;
 }
 
@@ -546,20 +770,71 @@ code,
 }
 
 .vtable-row.selected {
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  background: var(--bg-selected);
 }
 
-/* --- detail provenance -------------------------------------------------- */
+/* --- 접수 (intake) summary ------------------------------------------------- */
 
-.provenance-block {
-  border-bottom: 1px solid var(--line);
-  background: var(--bg-panel);
+.intake {
+  height: 100%;
+  overflow: auto;
+  padding: var(--space-3) var(--space-4) var(--space-5);
 }
 
-.detail-row {
-  display: contents;
+.intake-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
 }
 
-.break-all {
-  word-break: break-all;
+.intake-head h1 {
+  margin: 0;
+  font-size: var(--fs-case);
+}
+
+.intake-section {
+  margin-top: var(--space-4);
+}
+
+.intake-section h2 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--fs-panel-title);
+}
+
+.intake-stages {
+  margin: 0 0 var(--space-2);
+  padding-left: var(--space-5);
+  font-size: var(--fs-table-aux);
+}
+
+.intake-note {
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
+  margin: var(--space-1) 0;
+}
+
+button.count-chip {
+  font: inherit;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+button.count-chip:hover {
+  border-color: var(--accent);
+}
+
+/* Search options (S4) open as a dropdown under their button, above the panes. */
+.search-options-anchor {
+  position: relative;
+}
+
+.search-options-anchor > .search-options-popover {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  right: 0;
+  z-index: 650;
+  max-height: 70vh;
+  overflow: auto;
+  box-shadow: 0 12px 32px color-mix(in srgb, var(--scrim) 40%, transparent);
 }

@@ -90,3 +90,39 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   const contentType = response.headers.get("content-type") || "";
   return (contentType.includes("application/json") ? response.json() : response.text()) as Promise<T>;
 }
+
+/**
+ * Authenticated raw fetch for binary/streamed bodies (the token rides only in
+ * a header, so `<a href>`/`<img src>` cannot load originals). Non-2xx → ApiError.
+ */
+export async function apiResponse(path: string, init: { signal?: AbortSignal } = {}): Promise<Response> {
+  const token = authToken();
+  const response = await fetch(path, {
+    headers: token ? { "X-RapidTriage-Token": token } : {},
+    signal: init.signal,
+  });
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({ detail: response.statusText }));
+    const raw = (detail as { detail?: unknown }).detail ?? detail;
+    throw new ApiError(errorMessageFromDetail(raw), response.status, raw);
+  }
+  return response;
+}
+
+/** Fetch an authenticated file (the token header cannot ride on a plain link) and hand it to the browser as a download. */
+export async function downloadFile(path: string, fallbackName: string): Promise<string> {
+  const response = await apiResponse(path);
+  const disposition = response.headers.get("content-disposition") || "";
+  const match = disposition.match(/filename="?([^";]+)"?/i);
+  const filename = match?.[1] ? decodeURIComponent(match[1]) : fallbackName;
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+  return filename;
+}
