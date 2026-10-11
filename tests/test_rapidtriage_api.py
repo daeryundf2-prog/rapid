@@ -4469,10 +4469,18 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertFalse(nxt["pagination"]["truncated"])
             self.assertTrue(any("한글" in row["path"] for row in nxt["artifacts"] + page["artifacts"]))
 
-            sorted_response = client.get(
-                f"/api/runs/{run_id}/artifacts", params={"limit": 1, "sort": "timestamp:desc"}
+            self.assertEqual([row["record_index"] for row in only["artifacts"]["eventlog"]["artifacts"]], [0, 1, 2, 3])
+            self.assertTrue(all("record_index" in row for row in nxt["artifacts"]))
+
+            unscoped = client.get(f"/api/runs/{run_id}/artifacts", params={"limit": 1, "sort": "timestamp:desc"})
+            self.assertEqual(unscoped.status_code, 400)
+            self.assertEqual(unscoped.json(), {"detail": "sort requires exactly one kind"})
+            inline = client.get(
+                f"/api/runs/{run_id}/artifacts", params={"limit": 1, "kind": "browser", "sort": "timestamp"}
             ).json()
-            self.assertEqual(sorted_response["sort_supported"], False)
+            self.assertEqual(inline["sort_supported"], False)
+            self.assertEqual(inline["artifacts"]["browser"]["sort"]["status"], "unsupported")
+            self.assertEqual(inline["artifacts"]["browser"]["artifacts"][0]["record_index"], 0)
 
     def test_source_thumbnail_is_generated_cached_and_confined(self) -> None:
         try:

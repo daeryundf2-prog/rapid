@@ -12,6 +12,7 @@
  */
 
 import type { GridRow } from "../../contracts/collection";
+import { clipValue, flatValue } from "../../utils/flatValue";
 
 export type RecordGroupId = "core" | "source" | "validation" | "other";
 
@@ -66,25 +67,29 @@ const VALIDATION_PATTERN =
 
 export interface RecordField {
   key: string;
-  /** Flat text (search, copy, tests). */
+  /** Display text, clipped to MAX_VALUE_CHARS (with "…" when cut). */
   value: string;
+  /** Full flat text: search, copy and "전체 보기" use this, never `value`. */
+  full: string;
+  /** True when `value` is a clip of `full`. */
+  truncated: boolean;
   /** The original value, for structured rendering (nested objects, hash bundles, lists). */
   raw?: unknown;
+  /** The key is a direct `details` key (artifact rows): it can be promoted to a grid column. */
+  fromDetails?: boolean;
 }
 
 export type RecordGroups = Record<RecordGroupId, RecordField[]>;
 
-const MAX_VALUE_CHARS = 600;
-
+/** Clipped display text of a record value (see RecordField.full for the whole text). */
 export function formatValue(value: unknown): string {
-  if (value === null || value === undefined) return "";
-  if (typeof value === "string")
-    return value.length > MAX_VALUE_CHARS ? `${value.slice(0, MAX_VALUE_CHARS)}…` : value;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  if (Array.isArray(value) && value.every((item) => item === null || typeof item !== "object")) {
-    return formatValue(value.map((item) => String(item)).join(", "));
-  }
-  return formatValue(JSON.stringify(value));
+  return clipValue(flatValue(value));
+}
+
+export function makeRecordField(key: string, raw: unknown, fromDetails = false): RecordField {
+  const full = flatValue(raw);
+  const value = clipValue(full);
+  return { key, value, full, truncated: value !== full, raw, ...(fromDetails ? { fromDetails } : {}) };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -112,15 +117,16 @@ export function recordFields(row: GridRow | null): Record<string, unknown> {
 export function groupRecordFields(row: GridRow | null): RecordGroups {
   const groups: RecordGroups = { core: [], source: [], validation: [], other: [] };
   const fields = recordFields(row);
+  const details = row && isRecord(row.fields.details) ? row.fields.details : {};
+  const fromDetails = (key: string) => Object.hasOwn(details, key);
   for (const key of CORE_KEYS) {
-    const value = formatValue(fields[key]);
-    if (value !== "") groups.core.push({ key, value, raw: fields[key] });
+    const field = makeRecordField(key, fields[key], fromDetails(key));
+    if (field.full !== "") groups.core.push(field);
   }
   for (const [key, raw] of Object.entries(fields)) {
     if (CORE_KEYS.includes(key)) continue;
-    const value = formatValue(raw);
-    if (value === "") continue;
-    const field = { key, value, raw };
+    const field = makeRecordField(key, raw, fromDetails(key));
+    if (field.full === "") continue;
     if (SOURCE_PATTERN.test(key)) groups.source.push(field);
     else if (VALIDATION_PATTERN.test(key)) groups.validation.push(field);
     else groups.other.push(field);

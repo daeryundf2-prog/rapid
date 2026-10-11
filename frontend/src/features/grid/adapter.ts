@@ -22,7 +22,7 @@
 
 import { create } from "zustand";
 import { registerCommand as registerShellCommand } from "../../commands/registry";
-import type { CollectionQuery, CollectionRef, GridRow } from "../../contracts/collection";
+import type { CollectionQuery, CollectionRef, GridRow, ServerSort } from "../../contracts/collection";
 import type { Command } from "../../contracts/command";
 import type { RowRef } from "../../contracts/rowRef";
 import type { ViewerTarget } from "../../contracts/viewer";
@@ -36,6 +36,10 @@ export interface RouteState {
   /** Search-collection spec (keywords etc.), owned by the route/search UI. */
   search?: CollectionQuery["search"];
   rowRef: RowRef | null;
+  /** Server sort (artifacts of one kind; URL `sort=`). */
+  sort?: ServerSort;
+  /** Promoted record-field columns (artifacts of one kind; URL `cols=details.<key>,…`). */
+  cols?: string[];
 }
 
 export interface Toast {
@@ -55,6 +59,9 @@ interface LocalState {
   density: Density;
   toasts: Toast[];
   commands: Map<string, Command>;
+  /** Column ids the mounted grid currently shows (preset + visibility); null when no grid is mounted. */
+  visibleColumnIds: string[] | null;
+  setVisibleColumnIds: (ids: string[] | null) => void;
   setRoute: (patch: Partial<RouteState>) => void;
   select: (keys: string[]) => void;
   setFocused: (key: string | null) => void;
@@ -78,6 +85,8 @@ export const useGridLocalStore = create<LocalState>((set) => ({
   density: "default",
   toasts: [],
   commands: new Map(),
+  visibleColumnIds: null,
+  setVisibleColumnIds: (ids) => set({ visibleColumnIds: ids }),
   setRoute: (patch) => set((s) => ({ route: { ...s.route, ...patch } })),
   select: (keys) => set({ selectedKeys: new Set(keys) }),
   setFocused: (key) => set({ focusedRowKey: key }),
@@ -89,6 +98,15 @@ export const useGridLocalStore = create<LocalState>((set) => ({
   dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
 }));
 
+/** Stable setters (usable in effect deps). */
+function setRouteSort(sort: ServerSort | undefined): void {
+  useGridLocalStore.getState().setRoute({ sort });
+}
+
+function setRouteCols(cols: string[] | undefined): void {
+  useGridLocalStore.getState().setRoute({ cols: cols?.length ? cols : undefined });
+}
+
 export function useRoute() {
   const route = useGridLocalStore((s) => s.route);
   const setRoute = useGridLocalStore((s) => s.setRoute);
@@ -96,7 +114,10 @@ export function useRoute() {
     ...route,
     setQuery: (q: string) => setRoute({ q }),
     setRow: (rowRef: RowRef | null) => setRoute({ rowRef }),
-    navigate: (collection: CollectionRef, q = "") => setRoute({ collection, q, rowRef: null }),
+    setSort: setRouteSort,
+    setCols: setRouteCols,
+    navigate: (collection: CollectionRef, q = "") =>
+      setRoute({ collection, q, rowRef: null, sort: undefined, cols: undefined }),
   };
 }
 
@@ -152,6 +173,16 @@ export function registerCommand(command: Command): () => void {
     offShell?.();
     const map = store.getState().commands;
     if (map.get(command.id) === command) map.delete(command.id);
+  };
+}
+
+/** Register a command for the grid's own menus only (not the palette/shortcut registry). */
+export function registerLocalCommand(command: Command): () => void {
+  const map = useGridLocalStore.getState().commands;
+  map.set(command.id, command);
+  return () => {
+    const current = useGridLocalStore.getState().commands;
+    if (current.get(command.id) === command) current.delete(command.id);
   };
 }
 

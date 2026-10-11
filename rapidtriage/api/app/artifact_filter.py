@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import unicodedata
+from collections.abc import Iterable
 from pathlib import Path
 
-from ...core.artifact_profiles import iter_payload_records
+from .jsonl_records import iter_artifact_records
 
 ARTIFACT_PATH_FILTER_SCAN_CAP = 2_000_000
 
@@ -22,12 +23,16 @@ def filter_artifact_page(
     offset: int,
     limit: int,
     scan_cap: int = ARTIFACT_PATH_FILTER_SCAN_CAP,
+    rows_source: Iterable[tuple[int, dict[str, object]]] | None = None,
 ) -> dict[str, object]:
     """Page only rows whose ``path`` contains ``path_contains`` (NFC, case-insensitive).
 
     Streams the kind's rows; ``offset`` counts matches. Stops after ``limit``
     matches plus one lookahead row, or after ``scan_cap`` scanned rows
     (``truncated``: the total is then unknown and ``scanned`` reports the cost).
+    ``rows_source`` yields ``(record_index, row)`` in another order (server
+    sort); by default rows stream in JSONL order. Every returned row carries
+    its original ``record_index``.
     """
     needle = nfc_fold(path_contains)
     rows: list[object] = []
@@ -35,7 +40,9 @@ def filter_artifact_page(
     scanned = 0
     has_more = False
     exhausted = True
-    for row in iter_payload_records(payload, payload_path=payload_path):
+    if rows_source is None:
+        rows_source = iter_artifact_records(payload, payload_path=payload_path)
+    for record_index, row in rows_source:
         scanned += 1
         if needle in nfc_fold(row.get("path") or row.get("source_path")):
             if matched >= offset + limit:
@@ -43,7 +50,7 @@ def filter_artifact_page(
                 exhausted = False
                 break
             if matched >= offset:
-                rows.append(row)
+                rows.append({**row, "record_index": record_index})
             matched += 1
         if scanned >= scan_cap:
             exhausted = False

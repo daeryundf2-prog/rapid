@@ -159,3 +159,32 @@ describe("decoded record", () => {
     expect(groups.other.map((f) => f.key)).toEqual(["volume_candidate_count"]);
   });
 });
+
+describe("record long values (U-C3)", () => {
+  it("clips the display value at 600 chars but keeps the full text, and marks details keys", () => {
+    const long = "가".repeat(5000);
+    const groups = groupRecordFields({
+      rowKey: "artifacts:eventlog:/artifacts/1",
+      ref: { collection: "artifacts", kind: "eventlog", locator: "/artifacts/1" },
+      title: "t",
+      sourcePath: null,
+      timestamp: null,
+      artifactType: "eventlog-event",
+      provider: null,
+      sha256: null,
+      reviewStatus: null,
+      tags: [],
+      fields: { detail: "summary", details: { event_message: long, level: 4 } },
+    });
+    const message = groups.core.find((f) => f.key === "event_message");
+    expect(message?.truncated).toBe(true);
+    expect(message?.value).toHaveLength(601);
+    expect(message?.value.endsWith("…")).toBe(true);
+    expect(message?.full).toBe(long);
+    expect(message?.fromDetails).toBe(true);
+    const level = groups.core.find((f) => f.key === "level");
+    expect(level).toMatchObject({ value: "4", full: "4", truncated: false, fromDetails: true });
+    // `detail` is a grid summary field, not a details key: never promotable.
+    expect(groups.other.find((f) => f.key === "detail")?.fromDetails).toBeUndefined();
+  });
+});

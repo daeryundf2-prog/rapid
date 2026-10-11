@@ -2,7 +2,7 @@ import { useQueries, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiError } from "../../api/client";
 import type { RawPage } from "../../api/collections";
-import type { CollectionQuery, GridRow, ReviewStatus } from "../../contracts/collection";
+import type { CollectionQuery, GridRow, ReviewStatus, ServerSortState } from "../../contracts/collection";
 import { useTimezone } from "../../state/hooks";
 import {
   applyClientFilters,
@@ -68,6 +68,16 @@ export interface CollectionQueryResult {
   patchRows: (keys: string[], patch: (row: GridRow) => GridRow) => () => void;
   /** Category node scope (artifacts `?category=`): label + the run's kinds in it (null while unknown). */
   category: { id: string; label: string; kindCount: number | null } | null;
+  /** Server sort state of page 0 (artifacts of one kind with `query.sort`); null when not server-sorted. */
+  sortState: ServerSortState | null;
+}
+
+/** Re-request interval while the server builds a sort index (plan artifact-columns §4.2). */
+export const SORT_POLL_MS = 1000;
+
+/** The sort the server applies: artifacts of exactly one kind only. */
+export function serverSortOf(query: CollectionQuery): CollectionQuery["sort"] {
+  return query.ref.id === "artifacts" && query.ref.kind && query.sort ? query.sort : undefined;
 }
 
 /** Footer/filter status text for a category scope: "범주: 운영 체제 (5 유형)". */
@@ -104,6 +114,7 @@ export function collectionQueryKey(runId: string | null, query: CollectionQuery,
     def.source === "whole" ? (query.search ?? null) : null,
     def.source === "whole" ? (query.extension ?? null) : null,
     query.ref.id === "artifacts" ? query.pathContains?.trim() || serverPathFilter(query.text) || "" : "",
+    serverSortOf(query) ? `${query.sort?.key}:${query.sort?.order}` : "",
     pageSize,
   ] as const;
 }
@@ -145,6 +156,8 @@ export function useCollectionQuery(
       rawQuery.extension,
       rawQuery.limit,
       rawQuery.offset,
+      rawQuery.sort?.key,
+      rawQuery.sort?.order,
       filters,
     ],
   );
@@ -166,7 +179,10 @@ export function useCollectionQuery(
 
   // Page 0 always loads first; its `total` gates every later page (no speculative requests).
   const firstPass = def.source === "whole" ? [0] : wanted;
-  const gateTotal = queryClient.getQueryData<RawPage>([...baseKey, "page", 0])?.total ?? null;
+  const page0 = queryClient.getQueryData<RawPage>([...baseKey, "page", 0]);
+  // While the server builds a sort index, page 0 is polled and no later page is requested.
+  const gateTotal = page0?.sort?.status === "building" ? null : (page0?.total ?? null);
+  const sortBuilding = page0?.sort?.status === "building";
 
   const results = useQueries({
     queries: firstPass.map((p) => ({
@@ -176,10 +192,13 @@ export function useCollectionQuery(
       enabled:
         runId !== null &&
         (p === 0 ||
-          (gateTotal !== null
-            ? p * pageSize < gateTotal
-            : queryClient.getQueryData<RawPage>([...baseKey, "page", p - 1])?.hasMore === true)),
+          (!sortBuilding &&
+            (gateTotal !== null
+              ? p * pageSize < gateTotal
+              : queryClient.getQueryData<RawPage>([...baseKey, "page", p - 1])?.hasMore === true))),
       staleTime: 30_000,
+      refetchInterval: (q: { state: { data?: RawPage } }) =>
+        q.state.data?.sort?.status === "building" ? SORT_POLL_MS : false,
       // Client errors (4xx) will not fix themselves; server errors get one quick retry.
       retry: (count: number, error: Error) => count < 1 && !(error instanceof ApiError && error.status < 500),
       retryDelay: 300,
@@ -394,5 +413,6 @@ export function useCollectionQuery(
     scanned: lastData?.scanned,
     patchRows,
     category,
+    sortState: serverSortOf(query) ? (firstData?.sort ?? null) : null,
   };
 }

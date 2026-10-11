@@ -1,3 +1,4 @@
+import { announce } from "../../a11y/announcer";
 import { ApiError } from "../../api/client";
 import {
   type BookmarkBody,
@@ -11,6 +12,7 @@ import {
 import { extractRows, type RunExtractResult } from "../../api/extract";
 import type { GridRow, ReviewStatus } from "../../contracts/collection";
 import type { MarkAction } from "../../contracts/viewer";
+import { useAppStore } from "../../state/store";
 import { baseName, str } from "./columns/common";
 
 export type BatchAction = MarkAction | "tag" | "extract";
@@ -162,10 +164,26 @@ export function storeNotice(result: ApplyResult): string {
 // ---- case DB handle (ensure once per run) ----------------------------------
 
 const caseDbHandles = new Map<string, Promise<CaseDbHandle | null>>();
+/** Runs whose ensure call has settled (the handle is known; marks apply without waiting). */
+const settledRuns = new Set<string>();
 
 /** Forget cached handles (tests; a run re-import). */
 export function resetCaseDbHandles(): void {
   caseDbHandles.clear();
+  settledRuns.clear();
+}
+
+/** Shown while POST /case-db/ensure is still running (first import can take minutes). */
+export const CASE_DB_PREPARING_NOTICE = "케이스 DB 준비 중… 완료되면 표시가 적용됩니다";
+
+/** Immediate feedback for a mark that waits on the case DB: one polite sentence + the status-bar notice. */
+function notifyPreparing(): void {
+  announce(CASE_DB_PREPARING_NOTICE);
+  useAppStore.getState().showNotice(CASE_DB_PREPARING_NOTICE);
+}
+
+function apiReason(error: ApiError): string {
+  return error.message && error.message !== `HTTP ${error.status}` ? error.message : `HTTP ${error.status}`;
 }
 
 /**
@@ -177,10 +195,17 @@ function caseDbHandle(runId: string): Promise<CaseDbHandle | null> {
   const cached = caseDbHandles.get(runId);
   if (cached) return cached;
   const pending = ensureCaseDb(runId).then(
-    (handle) => handle,
+    (handle) => {
+      settledRuns.add(runId);
+      return handle;
+    },
     (error: unknown) => {
       caseDbHandles.delete(runId);
-      if (error instanceof ApiError && error.status < 500 && error.status !== 401) return null;
+      if (error instanceof ApiError && error.status < 500 && error.status !== 401) {
+        // Same fallback as before (case.json bookmarks), but say why.
+        announce(`케이스 DB를 만들 수 없습니다(${apiReason(error)}). ${BOOKMARK_FALLBACK_NOTICE}`);
+        return null;
+      }
       throw error;
     },
   );
@@ -259,7 +284,11 @@ async function applyBody(
   const targets = rows.map(reviewTargetOf);
   const unresolved = targets.filter((t) => t === null).length;
   if (unresolved > 0) throw new Error(`출처 위치를 알 수 없는 행이 ${unresolved}건 있습니다.`);
-  const handle = await caseDbHandle(runId);
+  // Queue on the (shared, cached) ensure promise: a mark made while the case DB is still being
+  // prepared is applied when it resolves, never dropped; the analyst hears that right away.
+  const pending = caseDbHandle(runId);
+  if (!settledRuns.has(runId)) notifyPreparing();
+  const handle = await pending;
   let store: ReviewStore;
   if (handle) {
     await postReviewBatch(handle, targets as ReviewBatchTarget[], mark, runId);

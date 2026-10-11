@@ -49,6 +49,18 @@ function eventMessage(details: Details): string {
   return clip(raw.replace(/^(?:\s*\w+=[^|]*\|)+\s*/, ""));
 }
 
+/**
+ * Registry cell kind label. The hive parser writes 0 / "nk" / "key" / "key-node" for key cells and
+ * 1 / "vk" / "value" / "value-node" for value cells; anything else is 기타.
+ */
+export function registryCellKindLabel(value: unknown): string {
+  if (value === undefined || value === null || value === "") return "";
+  const v = String(value).toLowerCase();
+  if (v === "0" || v === "nk" || v === "key" || v === "key-node") return "키";
+  if (v === "1" || v === "vk" || v === "value" || v === "value-node") return "값";
+  return "기타";
+}
+
 /** Summarise one artifact row by artifact_type; defaults to the path basename. */
 export function summarizeArtifact(
   artifactType: string | null,
@@ -78,6 +90,59 @@ export function summarizeArtifact(
     return {
       title: firstStr(details, ["referenced_file_name", "referenced_path"]) ?? name,
       detail: str(details.referenced_path),
+    };
+  }
+  if (type === "registry-hive-cell") {
+    const cellName = firstStr(details, ["name", "value_name"]);
+    const cellKind = registryCellKindLabel(details.cell_kind);
+    return {
+      title: [cellName, cellKind].filter(Boolean).join(" · ") || firstStr(details, ["hive_name"]) || name,
+      detail: str(details.hive_name),
+    };
+  }
+  if (type === "wer-report") {
+    const app = firstStr(details, ["application_name", "application_path"]);
+    const fault = str(details.fault_module_name);
+    return {
+      title: [app ? baseName(app) || app : null, fault].filter(Boolean).join(" · ") || name,
+      detail: str(details.report_id),
+    };
+  }
+  if (type.startsWith("windows-sam-")) {
+    const account = firstStr(details, ["user_name_candidate", "group_name_candidate", "user_name"]);
+    const rid = firstStr(details, ["rid_decimal", "alias_rid_decimal"]);
+    return {
+      title: account ?? (rid ? `RID ${rid}` : name),
+      detail: [rid ? `RID ${rid}` : "", str(details.candidate_role)].filter(Boolean).join(" · "),
+    };
+  }
+  if (type === "file-signature-mismatch") {
+    const detected = str(details.detected_signature_kind);
+    const expected = Array.isArray(details.expected_extensions)
+      ? details.expected_extensions.map(str).join(", ")
+      : str(details.expected_extensions);
+    return {
+      title: name || firstStr(details, ["file_name"]) || "",
+      detail: detected || expected ? `${detected || "?"} → ${expected || "?"}` : "",
+    };
+  }
+  if (type === "document-metadata-risk") {
+    return { title: name || firstStr(details, ["file_name"]) || "", detail: str(details.document_family) };
+  }
+  if (type.startsWith("kakaotalk-windows-")) {
+    const kind = str(details.candidate_kind);
+    const value = clip(str(details.candidate_value), 80);
+    return { title: kind || name, detail: value };
+  }
+  if (type === "cloud-message") {
+    const text = firstStr(details, ["message_text_preview", "message_text"]);
+    const ids = [str(details.chat_id), str(details.message_id)].filter(Boolean).join(" · ");
+    const what = [str(details.service), str(details.event_type)].filter(Boolean).join(" · ");
+    return {
+      title: text ? clip(text) : what || ids || name,
+      detail: [text ? what : "", str(details.cloud_family), text || what ? ids : ""]
+        .filter(Boolean)
+        .join(" · "),
     };
   }
   if (type.startsWith("registry-")) {
@@ -117,7 +182,7 @@ export function summarizeArtifact(
     const exe = firstStr(details, ["executable_path", "program_name", "decoded_name", "display_path"]);
     return { title: exe ? baseName(exe) || exe : name, detail: exe ?? "" };
   }
-  if (type.startsWith("mobile-message") || type === "cloud-message") {
+  if (type.startsWith("mobile-message")) {
     return {
       title: clip(firstStr(details, ["message_text_preview", "message_text"]) ?? name),
       detail: str(details.attachment_name),

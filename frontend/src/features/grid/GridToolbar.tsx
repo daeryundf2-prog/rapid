@@ -1,7 +1,16 @@
-import { type RefObject, useEffect, useId, useRef, useState } from "react";
+import { type RefObject, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useEscape } from "../../a11y/focus";
+import { DisabledReason } from "../../a11y/primitives";
+import type { GridRow } from "../../contracts/collection";
 import { FilterBar } from "../filters/FilterBar";
 import { setAxiomMode } from "./columns/axiom";
+import {
+  type DiscoveredField,
+  discoverFields,
+  FIELD_LABELS,
+  fieldMenuEntries,
+  UNSHAREABLE_FIELD_REASON,
+} from "./columns/fieldColumns";
 import { backendLabel, formatCount } from "./gridUtils";
 import { type ColumnSpec, DENSITY_LABELS, type Density, type GridPreset, PRESET_LABELS } from "./types";
 
@@ -20,11 +29,110 @@ export interface GridToolbarProps {
   visibility: Record<string, boolean>;
   onToggleColumn: (id: string, visible: boolean) => void;
   collectionLabel: string;
+  /** "레코드 필드 추가" section (artifacts of one kind): promote details keys to columns. */
+  fieldPicker?: FieldPickerProps;
+}
+
+export interface FieldPickerProps {
+  /** Every loaded row: the picker unions their details keys (only while it is open). */
+  rows: GridRow[];
+  /** The kind's default columns (their keys are not offered again). */
+  columns: ColumnSpec[];
+  /** Promoted details keys (in column order). */
+  promoted: string[];
+  onToggle: (key: string, on: boolean) => void;
+}
+
+/** Field list cap: the search narrows longer lists. */
+const FIELD_LIST_MAX = 150;
+
+function fieldDescription(field: DiscoveredField): string {
+  const fill =
+    field.count > 0
+      ? `불러온 행 중 ${field.count}행에 값 있음`
+      : field.present
+        ? "값이 모두 비어 있음"
+        : "불러온 행에 없음";
+  return field.list ? `${fill} · 목록 값(전체 정렬 불가)` : fill;
+}
+
+function FieldPicker({ rows, columns, promoted, onToggle }: FieldPickerProps) {
+  const [search, setSearch] = useState("");
+  const titleId = useId();
+  const descPrefix = useId();
+  // Computed only while the picker is open; memoised on the loaded rows' identity.
+  const fields = useMemo(() => discoverFields(rows, columns), [rows, columns]);
+  const entries = fieldMenuEntries(fields, promoted, search);
+  const shown = entries.slice(0, FIELD_LIST_MAX);
+  return (
+    <fieldset className="grid-fieldpicker" aria-labelledby={titleId}>
+      <legend id={titleId} className="grid-fieldpicker-title">
+        레코드 필드 추가
+      </legend>
+      <input
+        type="search"
+        className="grid-fieldpicker-search"
+        aria-label="필드 검색"
+        placeholder="필드 이름"
+        value={search}
+        onChange={(event) => setSearch(event.target.value)}
+      />
+      <div className="grid-fieldpicker-list">
+        {shown.length === 0 ? (
+          <p className="grid-note">
+            {search.trim() ? "일치하는 필드가 없습니다." : "불러온 행에 추가할 레코드 필드가 없습니다."}
+          </p>
+        ) : (
+          shown.map((field, index) => {
+            const label = FIELD_LABELS[field.key];
+            const descId = `${descPrefix}-${index}`;
+            const checkbox = (
+              <input
+                type="checkbox"
+                aria-label={field.key}
+                aria-describedby={descId}
+                checked={promoted.includes(field.key)}
+                onChange={(event) => {
+                  if (!field.unshareable) onToggle(field.key, event.target.checked);
+                }}
+              />
+            );
+            return (
+              // biome-ignore lint/a11y/noLabelWithoutControl: the checkbox may sit inside DisabledReason
+              <label
+                key={field.key}
+                className={`grid-popover-item${field.unshareable ? " is-unavailable" : ""}`}
+              >
+                {field.unshareable ? (
+                  <DisabledReason reason={UNSHAREABLE_FIELD_REASON}>{checkbox}</DisabledReason>
+                ) : (
+                  checkbox
+                )}
+                <span className="mono">{field.key}</span>
+                {label ? <span aria-hidden="true">{label}</span> : null}
+                <span className="grid-note" aria-hidden="true">
+                  {field.count > 0 ? `${field.count}행` : field.present ? "빈 값" : ""}
+                  {field.list ? " · 목록" : ""}
+                </span>
+                <span id={descId} hidden>
+                  {fieldDescription(field)}
+                </span>
+              </label>
+            );
+          })
+        )}
+        {entries.length > shown.length ? (
+          <p className="grid-note">{entries.length - shown.length}개 더 있음 · 검색으로 좁히세요.</p>
+        ) : null}
+      </div>
+    </fieldset>
+  );
 }
 
 export function GridToolbar(props: GridToolbarProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
   const { preset, onDensity } = props;
@@ -36,7 +144,12 @@ export function GridToolbar(props: GridToolbarProps) {
     return () => setAxiomMode(false);
   }, [preset]);
 
-  useEscape(() => setMenuOpen(false), menuOpen);
+  // Esc closes the column menu (shared Esc stack) and hands focus back to its button.
+  useEscape(() => {
+    const inside = menuRef.current?.contains(document.activeElement) ?? false;
+    setMenuOpen(false);
+    if (inside) menuButtonRef.current?.focus();
+  }, menuOpen);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -81,6 +194,7 @@ export function GridToolbar(props: GridToolbarProps) {
 
         <div className="grid-colmenu" ref={menuRef}>
           <button
+            ref={menuButtonRef}
             type="button"
             className="grid-btn"
             aria-expanded={menuOpen}
@@ -102,6 +216,7 @@ export function GridToolbar(props: GridToolbarProps) {
                   {column.header}
                 </label>
               ))}
+              {props.fieldPicker ? <FieldPicker {...props.fieldPicker} /> : null}
             </fieldset>
           ) : null}
         </div>

@@ -39,8 +39,31 @@ export interface ColumnSpec {
   value: (row: GridRow) => CellValue;
   /** Display text; defaults to String(value). Also the cell tooltip and the copy/filter text. */
   format?: (row: GridRow) => string;
+  /** Cell tooltip when it should differ from the display text (e.g. the raw value behind a label). */
+  tooltip?: (row: GridRow) => string;
   /** Rich cell content (chips, icons); falls back to the display text when absent. */
   render?: (row: GridRow) => ReactNode;
+  /**
+   * Server sort key (artifacts: `timestamp` | `details.<key>`). Only columns that read a
+   * single server-sortable value have one; artifact headers without it are disabled with a reason.
+   */
+  sortKey?: string;
+  /**
+   * Accessible name / tooltip of the sort button when the column shows one of several keys but the
+   * server sorts on one of them, e.g. "실행 파일 정렬 (executable_hint 기준)".
+   */
+  sortHint?: string;
+  /** Header reason when the column has no sortKey for a specific cause (e.g. list values). */
+  unsortableReason?: string;
+  /**
+   * The column shows the first of these details keys that is present; the grid sorts on the first one
+   * present in the loaded rows (with `sortHintFor(key)`), so the sorted key is the displayed key.
+   */
+  sortCandidates?: string[];
+  /** Hint for the candidate the grid picked (see `sortCandidates`). */
+  sortHintFor?: (key: string) => string;
+  /** `details` keys this column already shows (left out of the "레코드 필드 추가" list). */
+  fieldKeys?: string[];
 }
 
 export interface MapContext {

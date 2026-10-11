@@ -1,5 +1,6 @@
 import type { GridRow } from "../../contracts/collection";
 import type { RowRef } from "../../contracts/rowRef";
+import { flatValue, isScalarish } from "../../utils/flatValue";
 import type { CellValue, ColumnSpec } from "./types";
 
 /** Null/empty last; numbers numerically; strings with Korean-aware numeric collation. */
@@ -34,6 +35,13 @@ export function rowHaystack(row: GridRow): string {
   ];
   for (const value of Object.values(row.fields)) {
     if (typeof value === "string" || typeof value === "number") parts.push(String(value));
+  }
+  // Decoded artifact fields: the full (never clipped) text of every scalar / scalar-list value.
+  const details = row.fields.details;
+  if (typeof details === "object" && details !== null && !Array.isArray(details)) {
+    for (const value of Object.values(details)) {
+      if (isScalarish(value)) parts.push(flatValue(value));
+    }
   }
   const text = parts.join("\n").toLowerCase();
   haystacks.set(row, text);
