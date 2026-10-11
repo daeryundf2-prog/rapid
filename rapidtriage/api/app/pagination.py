@@ -2,18 +2,19 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 
 from fastapi import HTTPException
 
-from ...core.artifact_profiles import iter_payload_records, payload_record_count
+from ...core.artifact_profiles import payload_record_count
 from .constants import (
     PAGINATION_CURSOR_REPORT_GRADE_VALIDATION_PLAN_VERSION,
     PAGINATION_TRUSTED_DIFF_BLOCKER_78,
     PAGINATION_TRUSTED_TOOLS,
     VIEWER_WORKFLOW_GAP_IDS,
 )
+from .jsonl_records import iter_artifact_records
 from .viewer_core import (
     build_cursor_api_coverage_manifest,
     cursor_api_functional_profile,
@@ -501,14 +502,25 @@ def paginate_artifact_output(
 
     Run outputs keep only a row preview inline and the full row stream in
     ``records_path``; pages are read straight from that JSONL (rows are
-    ``artifact_type_profiles``-expanded) with ``total = record_count``.
+    ``artifact_type_profiles``-expanded, numbered by ``jsonl_records``) with
+    ``total = record_count``.
     Inline payloads page as before.
     """
-    if not (payload.get("records_path") or payload.get("records_file")):
-        return paginate_payload(payload, "artifacts", offset=offset, limit=limit, cursor=cursor)
+    if limit <= 0 or not (payload.get("records_path") or payload.get("records_file")):
+        page = paginate_payload(payload, "artifacts", offset=offset, limit=limit, cursor=cursor)
+        page = dict(page)
+        pagination = page.get("pagination") if limit > 0 else None
+        start = int(pagination["offset"]) if isinstance(pagination, dict) else 0
+        rows = page.get("artifacts")
+        if isinstance(rows, list):
+            page["artifacts"] = with_record_index(rows, start)
+        return page
 
     def window(start: int, count: int) -> list[object]:
-        return list(iter_payload_records(payload, payload_path=payload_path, offset=start, limit=count))
+        return [
+            {**row, "record_index": index}
+            for index, row in iter_artifact_records(payload, payload_path=payload_path, start=start, limit=count)
+        ]
 
     return paginate_payload(
         payload,
@@ -519,3 +531,14 @@ def paginate_artifact_output(
         row_window=window,
         window_total=payload_record_count(payload),
     )
+
+
+def with_record_index(rows: Iterable[object], start: int) -> list[object]:
+    """Copy rows adding ``record_index`` (original 0-based record number).
+
+    Rows may be shared with the output cache, so they are copied, not mutated.
+    """
+    return [
+        {**row, "record_index": start + position} if isinstance(row, dict) else row
+        for position, row in enumerate(rows)
+    ]

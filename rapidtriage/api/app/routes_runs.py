@@ -29,6 +29,7 @@ from ...core.jobs import (
 )
 from ...core.visible_capabilities import build_visible_capability_response
 from .artifact_filter import filter_artifact_page
+from .artifact_sort import SORT_ORDERS, paginate_sorted_artifact_output
 from .dashboard import (
     build_run_dashboard,
     notes_output_dir,
@@ -367,7 +368,18 @@ def build_runs_router(
         kind: list[str] = Query(default=[]),
         path_contains: str | None = Query(default=None),
         sort: str | None = Query(default=None),
+        order: str | None = Query(default=None),
+        locate: int | None = Query(default=None, ge=0),
     ) -> dict[str, object]:
+        """Page per-kind artifact rows; every row carries its JSONL ``record_index``.
+
+        ``sort`` (``timestamp`` | ``details.<name>``, optionally suffixed
+        ``:asc``/``:desc``; an explicit ``order`` wins over the suffix) sorts
+        the whole kind through an in-memory index built in the background (see
+        ``artifact_sort``); it requires exactly one ``kind``. ``order``
+        without ``sort`` is ignored. ``locate=<record_index>`` adds
+        ``sort.position`` (that record's 0-based position in the sorted order).
+        """
         job = get_job(store, run_id)
         if job.summary is None:
             raise HTTPException(status_code=409, detail="run is not completed")
@@ -375,6 +387,18 @@ def build_runs_router(
         if not isinstance(outputs, dict):
             raise HTTPException(status_code=409, detail="run has no outputs")
         wanted_kinds = {item.strip() for item in kind if item.strip()}
+        sort_key = sort.strip() if sort and sort.strip() else None
+        sort_order = (order or "").strip().lower() or None
+        if sort_key:
+            head, _, suffix = sort_key.rpartition(":")
+            if head and suffix.lower() in SORT_ORDERS:
+                sort_key = head
+                sort_order = sort_order or suffix.lower()
+            if len(wanted_kinds) != 1:
+                raise HTTPException(status_code=400, detail="sort requires exactly one kind")
+            sort_order = sort_order or "asc"
+            if sort_order not in SORT_ORDERS:
+                raise HTTPException(status_code=400, detail="order must be asc or desc")
         artifacts = {}
         for name in sorted(outputs):
             if name.startswith("artifacts_"):
@@ -382,6 +406,21 @@ def build_runs_router(
                     continue
                 try:
                     artifact_payload = store.read_output(run_id, name)
+                    if sort_key:
+                        artifacts[name.removeprefix("artifacts_")] = paginate_sorted_artifact_output(
+                            artifact_payload,
+                            run_id=run_id,
+                            kind=name.removeprefix("artifacts_"),
+                            payload_path=get_output_path(store, run_id, name),
+                            sort=sort_key,
+                            order=sort_order or "asc",
+                            offset=offset,
+                            limit=limit,
+                            cursor=cursor,
+                            path_contains=path_contains.strip() if path_contains and path_contains.strip() else None,
+                            locate=locate,
+                        )
+                        continue
                     if path_contains and path_contains.strip() and limit > 0:
                         artifacts[name.removeprefix("artifacts_")] = filter_artifact_page(
                             artifact_payload,
@@ -405,10 +444,13 @@ def build_runs_router(
                 except FileNotFoundError as exc:
                     raise HTTPException(status_code=404, detail=str(exc))
         response: dict[str, object] = {"artifacts": artifacts}
-        if sort:
-            # The per-kind JSONL stream is not timestamp-ordered; honouring a
-            # sort would need the whole file in memory, so it is not supported.
-            response["sort_supported"] = False
+        if sort_key:
+            statuses = [
+                page["sort"].get("status")
+                for page in artifacts.values()
+                if isinstance(page, dict) and isinstance(page.get("sort"), dict)
+            ]
+            response["sort_supported"] = bool(statuses) and all(status != "unsupported" for status in statuses)
         return response
 
 
