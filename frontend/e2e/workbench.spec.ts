@@ -3,54 +3,60 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 
+// Smoke tests for the redesigned console (Layout.tsx testids: workbench-shell, tree-region,
+// grid-region, viewer-region; viewer region is named "원본 뷰어"). Rewritten from the
+// pre-redesign three-pane selectors (case-queue-pane, .run-item, provenance-block, ...).
 const TOKEN = "e2e-token";
+const HEADERS = { "X-RapidTriage-Token": TOKEN };
+
+let runId = "";
 
 test.beforeAll(async ({ request }) => {
   const outputDir = mkdtempSync(join(tmpdir(), "rt-v2-e2e-sample-"));
   const response = await request.post("/api/sample-case/run", {
-    headers: { "X-RapidTriage-Token": TOKEN },
+    headers: HEADERS,
     data: { output_dir: outputDir, overwrite: true, read_only: true },
   });
   expect(response.status()).toBe(201);
+  const list = await request.get("/api/runs", { headers: HEADERS });
+  const body = (await list.json()) as { runs: Array<{ run_id: string }> };
+  runId = body.runs[0]?.run_id ?? "";
+  expect(runId).not.toBe("");
 });
 
-test("workbench shell renders three panes and loads the case list", async ({ page }) => {
-  await page.goto("/v2/#token=e2e-token");
+test("workbench shell renders the tree, grid and viewer regions and toggles theme", async ({ page }) => {
+  await page.goto(`/v2/#token=${TOKEN}`);
 
   // Token fragment must be captured and removed from the address bar.
   await expect(page).not.toHaveURL(/token=/);
 
   await expect(page.getByTestId("workbench-shell")).toBeVisible();
-  await expect(page.getByTestId("case-queue-pane")).toBeVisible();
-  await expect(page.getByTestId("item-table-pane")).toBeVisible();
-  await expect(page.getByTestId("detail-pane")).toBeVisible();
-
-  // Case list is populated from the API (sample run created in beforeAll).
-  await expect(page.getByTestId("status-run-count")).toContainText("케이스");
-  await expect(page.locator(".run-item").first()).toBeVisible();
+  await expect(page.getByTestId("tree-region")).toBeVisible();
+  await expect(page.getByTestId("grid-region")).toBeVisible();
+  await expect(page.getByTestId("statusbar")).toBeVisible();
 
   // Light/dark toggle flips the document theme attribute.
   await page.getByTestId("theme-toggle").click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", /light|dark/);
 });
 
-test("evidence tree drives the item table and detail provenance", async ({ page }) => {
-  await page.goto("/v2/#token=e2e-token");
+test("collection tree drives the grid and a row opens the viewer", async ({ page }) => {
+  await page.goto(`/v2/#token=${TOKEN}`);
+  await page.evaluate((run) => {
+    window.location.hash = `#/case/${run}/artifacts`;
+  }, runId);
   await expect(page.getByTestId("workbench-shell")).toBeVisible();
 
-  // Select the first case -> the evidence tree loads.
-  await page.locator(".run-item").first().click();
-  const tree = page.getByTestId("evidence-tree");
-  await expect(tree).toBeVisible();
-  await expect(tree.locator(".tree-row").first()).toBeVisible();
-
-  // Clicking a collection node swaps the center pane to that collection.
-  await tree.getByRole("button", { name: "아티팩트" }).click();
-  await expect(page.getByTestId("item-table-pane").locator(".pane-title")).toContainText("아티팩트");
-  const firstRow = page.locator(".vtable-row").first();
+  // The tree node for artifacts keeps the case context and the grid shows its rows.
+  const grid = page.getByRole("grid").first();
+  await expect(grid).toBeVisible();
+  const firstRow = page.locator('[role="grid"] [role="row"][aria-rowindex="2"]').first();
   await expect(firstRow).toBeVisible();
 
-  // Selecting a row shows its provenance block in the detail pane.
+  // Opening a row shows the viewer region with its mode tabs.
   await firstRow.click();
-  await expect(page.getByTestId("provenance-block")).toBeVisible();
+  await page.keyboard.press("Enter");
+  const viewer = page.getByRole("region", { name: "원본 뷰어" });
+  await expect(viewer).toBeVisible();
+  await expect(viewer.getByRole("tablist")).toBeVisible();
 });
