@@ -1,0 +1,117 @@
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 var(--space-2);
+  height: 20px;
+  border-radius: 10px;
+  font-size: var(--fs-table-aux, 12px);
+  font-weight: 600;
+  white-space: nowrap;
+  background: var(--chip-bg);
+  color: var(--chip-fg);
+}
+
+.status-chip[data-status="relevant"] {
+  --chip-bg: var(--status-relevant);
+  --chip-fg: var(--status-relevant-on);
+}
+.status-chip[data-status="bookmark"] {
+  --chip-bg: var(--status-bookmark);
+  --chip-fg: var(--status-bookmark-on);
+}
+.status-chip[data-status="excluded"] {
+  --chip-bg: var(--status-excluded);
+  --chip-fg: var(--status-excluded-on);
+}
+.status-chip[data-status="needs-review"] {
+  --chip-bg: var(--status-needs-review);
+  --chip-fg: var(--status-needs-review-on);
+}
+.status-chip[data-status="include-in-report"] {
+  --chip-bg: var(--status-report);
+  --chip-fg: var(--status-report-on);
+}
+
+/* Toggle buttons that carry a status (viewer mark buttons, batch bar): pressed = filled. */
+[data-status-button][aria-pressed="true"] {
+  background: var(--chip-bg);
+  color: var(--chip-fg);
+  border-color: var(--chip-bg);
+}
+[data-status-button="relevant"] {
+  --chip-bg: var(--status-relevant);
+  --chip-fg: var(--status-relevant-on);
+}
+[data-status-button="bookmark"] {
+  --chip-bg: var(--status-bookmark);
+  --chip-fg: var(--status-bookmark-on);
+}
+[data-status-button="excluded"] {
+  --chip-bg: var(--status-excluded);
+  --chip-fg: var(--status-excluded-on);
+}
+[data-status-button="needs-review"] {
+  --chip-bg: var(--status-needs-review);
+  --chip-fg: var(--status-needs-review-on);
+}
+[data-status-button="include-in-report"] {
+  --chip-bg: var(--status-report);
+  --chip-fg: var(--status-report-on);
+}
+[data-status-button]:not([aria-pressed="true"]) {
+  border-left: 3px solid var(--chip-bg);
+}
+
+.status-tz {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.status-tz select {
+  background: var(--bg-raised);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font: inherit;
+  max-width: 11rem;
+}
+
+.note-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--line);
+}
+.note-form textarea {
+  width: 100%;
+  min-height: 3.5rem;
+  background: var(--bg-raised);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font: inherit;
+}
+.note-form-actions {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.meta-notice {
+  margin: 0 0 var(--space-2);
+  padding: var(--space-2);
+  border-radius: 4px;
+  border: 1px solid var(--warn);
+  background: color-mix(in srgb, var(--warn) 18%, var(--bg-panel));
+  color: var(--text);
+}
+.meta-clock {
+  margin-left: var(--space-1);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
