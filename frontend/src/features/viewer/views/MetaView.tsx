@@ -1,4 +1,5 @@
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
+import { DisabledReason } from "../../../a11y/primitives";
 import type { SourceMetadata, SourcePreview } from "../../../api/viewer";
 import { runDisplayName } from "../../../app/collections";
 import type { GridRow, ReviewStatus } from "../../../contracts/collection";
@@ -6,15 +7,20 @@ import type { ViewerTarget } from "../../../contracts/viewer";
 import { Icon } from "../../../icons";
 import { parseHash } from "../../../router";
 import { useRoute, useRuns, useTimezone } from "../../../state/hooks";
+import { isScalarish } from "../../../utils/flatValue";
 import { formatTimestamp } from "../../../utils/time";
+import { useGridLocalStore } from "../../grid/adapter";
+import { defaultFieldHeaders } from "../../grid/columns/artifacts";
+import { FIELD_LABELS } from "../../grid/columns/fieldColumns";
 import { noteKey, useSessionNote } from "../../grid/sessionNotes";
+import { usePromotedFields } from "../../grid/usePromotedFields";
 import { dispatchCommand, setViewerTarget, useCommandContext, useViewerRouteMode } from "../adapter";
 import { locatorText } from "../citation";
 import { ROWS_FOR_SOURCE_COMMAND, writeClipboard } from "../commands";
 import { evidenceInfo, isSourceMissing, timelineWindowHash } from "../evidenceInfo";
 import {
-  formatValue,
   groupRecordFields,
+  makeRecordField,
   RECORD_GROUP_LABELS,
   type RecordField,
   type RecordGroups,
@@ -90,7 +96,9 @@ function NestedValue({ value, name }: { value: Record<string, unknown>; name: st
       {entries.map(([k, v]) => (
         <Fragment key={k}>
           <dt className="mono">{k}</dt>
-          <dd className="viewer-break">{formatValue(v) || "—"}</dd>
+          <dd className="viewer-break">
+            <ScalarText name={`${name}.${k}`} value={v} />
+          </dd>
         </Fragment>
       ))}
     </dl>
@@ -102,6 +110,13 @@ function NestedValue({ value, name }: { value: Record<string, unknown>; name: st
       {list}
     </details>
   );
+}
+
+/** A nested / list scalar: short text, or the same fold + full copy as top-level long values. */
+function ScalarText({ name, value }: { name: string; value: unknown }) {
+  const field = makeRecordField(name, value);
+  if (field.truncated) return <LongValue field={field} />;
+  return <>{field.value || "—"}</>;
 }
 
 function FieldValue({ field }: { field: RecordField }) {
@@ -118,7 +133,7 @@ function FieldValue({ field }: { field: RecordField }) {
               {isPlainObject(item) ? (
                 <NestedValue value={item} name={`${field.key}[${index}]`} />
               ) : (
-                formatValue(item)
+                <ScalarText name={`${field.key}[${index}]`} value={item} />
               )}
             </li>
           ))}
@@ -126,27 +141,146 @@ function FieldValue({ field }: { field: RecordField }) {
       </details>
     );
   }
-  // Scalars and arrays of scalars (comma list) use the flat text.
+  // Scalars and arrays of scalars (comma list) use the flat text; long ones fold (U-C3).
+  if (field.truncated) return <LongValue field={field} />;
   return <>{field.value}</>;
 }
 
-function FieldList({ fields }: { fields: RecordField[] }) {
+/**
+ * Toggle buttons keep keyboard focus across the re-render they cause (the meta view may
+ * re-render or re-create the button when the grid/viewer state updates): the clicked control's
+ * `data-focus-key` is remembered and focused again after the update.
+ */
+let pendingFocusKey: string | null = null;
+/** Bumped on every keepFocus(): effects re-run only when a focus request is pending. */
+let pendingFocusSeq = 0;
+
+function focusByKey(key: string): void {
+  for (const el of document.querySelectorAll<HTMLElement>("[data-focus-key]")) {
+    if (el.dataset.focusKey === key) {
+      if (document.activeElement !== el) el.focus();
+      return;
+    }
+  }
+}
+
+function keepFocus(key: string): void {
+  pendingFocusKey = key;
+  pendingFocusSeq += 1;
+}
+
+function useRestorePendingFocus(): void {
+  const seq = pendingFocusKey ? pendingFocusSeq : 0;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: seq marks a new pending focus request
+  useEffect(() => {
+    const key = pendingFocusKey;
+    if (!key) return;
+    focusByKey(key);
+    // A late update (store → bridge → viewer) may still re-create the control or move focus.
+    const timer = window.setTimeout(() => {
+      focusByKey(key);
+      if (pendingFocusKey === key) pendingFocusKey = null;
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [seq]);
+}
+
+/** A value longer than the clip: folded text + "전체 보기 (N자)" / "접기" + copy of the FULL value. */
+function LongValue({ field }: { field: RecordField }) {
+  const [open, setOpen] = useState(false);
+  useRestorePendingFocus();
+  const focusKey = `longvalue:${field.key}`;
+  const count = field.full.length.toLocaleString("ko-KR");
+  return (
+    <span className="meta-longvalue">
+      {open ? (
+        <pre className="viewer-break meta-longvalue-full">{field.full}</pre>
+      ) : (
+        <span>{field.value}</span>
+      )}
+      <span className="meta-longvalue-actions">
+        <button
+          type="button"
+          className="viewer-button"
+          aria-expanded={open}
+          aria-label={open ? `${field.key} 접기` : `${field.key} 전체 보기 (${count}자)`}
+          data-focus-key={focusKey}
+          onClick={() => {
+            keepFocus(focusKey);
+            setOpen((v) => !v);
+          }}
+        >
+          {open ? "접기" : `전체 보기 (${count}자)`}
+        </button>
+        <CopyButton text={field.full} label={field.key} />
+      </span>
+    </span>
+  );
+}
+
+interface ColumnToggle {
+  keys: string[];
+  toggle: (key: string) => void;
+  /** details key → header of the kind's default column that already shows it. */
+  defaults: Map<string, string>;
+}
+
+/** Details keys with scalar values can become grid columns (artifact rows of one kind). */
+function promotable(field: RecordField): boolean {
+  return field.fromDetails === true && isScalarish(field.raw);
+}
+
+function FieldList({ fields, columns }: { fields: RecordField[]; columns?: ColumnToggle }) {
+  useRestorePendingFocus();
   return (
     <dl className="viewer-dl">
-      {fields.map((field) => (
-        <Fragment key={field.key}>
-          <dt className="mono">{field.key}</dt>
-          <dd className="viewer-break">
-            <FieldValue field={field} />
-          </dd>
-        </Fragment>
-      ))}
+      {fields.map((field) => {
+        const shown = columns?.keys.includes(field.key) ?? false;
+        const name = FIELD_LABELS[field.key] ? `${field.key}(${FIELD_LABELS[field.key]})` : field.key;
+        return (
+          <Fragment key={field.key}>
+            <dt className="mono">{field.key}</dt>
+            <dd className="viewer-break meta-field">
+              <span className="meta-field-value">
+                <FieldValue field={field} />
+              </span>
+              {columns && field.fromDetails && columns.defaults.has(field.key) ? (
+                <DisabledReason reason={`기본 열 '${columns.defaults.get(field.key)}'에 이미 표시됩니다`}>
+                  <button
+                    type="button"
+                    className="meta-colbtn"
+                    aria-pressed={true}
+                    aria-label={`${columns.defaults.get(field.key)} 열로 표시 중`}
+                  >
+                    <Icon name="columns" />
+                  </button>
+                </DisabledReason>
+              ) : columns && promotable(field) ? (
+                <button
+                  type="button"
+                  className="meta-colbtn"
+                  aria-pressed={shown}
+                  aria-label={shown ? `${name} 열에서 제거` : `${name} 열로 표시`}
+                  title={shown ? "열에서 제거" : "열로 표시"}
+                  data-focus-key={`column:${field.key}`}
+                  onClick={() => {
+                    keepFocus(`column:${field.key}`);
+                    columns.toggle(field.key);
+                  }}
+                >
+                  <Icon name="columns" />
+                </button>
+              ) : null}
+            </dd>
+          </Fragment>
+        );
+      })}
     </dl>
   );
 }
 
 /** Decoded record first (F2): 핵심 · 출처 · 검증 open, 기타 collapsed. */
-function RecordSection({ groups }: { groups: RecordGroups }) {
+function RecordSection({ groups, columns }: { groups: RecordGroups; columns?: ColumnToggle }) {
   return (
     <section aria-labelledby="viewer-record-title" className="meta-record">
       <h3 className="viewer-subtitle" id="viewer-record-title">
@@ -156,7 +290,7 @@ function RecordSection({ groups }: { groups: RecordGroups }) {
         groups[id].length ? (
           <section key={id} aria-label={`레코드 ${RECORD_GROUP_LABELS[id]}`} className="meta-record-group">
             <h4>{RECORD_GROUP_LABELS[id]}</h4>
-            <FieldList fields={groups[id]} />
+            <FieldList fields={groups[id]} columns={columns} />
           </section>
         ) : null,
       )}
@@ -165,7 +299,7 @@ function RecordSection({ groups }: { groups: RecordGroups }) {
           <summary>
             {RECORD_GROUP_LABELS.other} {groups.other.length}개
           </summary>
-          <FieldList fields={groups.other} />
+          <FieldList fields={groups.other} columns={columns} />
         </details>
       ) : null}
     </section>
@@ -244,6 +378,22 @@ export function MetaView({
   const hashes = metadata?.hashes || {};
   const provenance = provenanceEntries(row);
   const grouped = groupRecordFields(row);
+  // "열로 표시" only on artifact rows of one kind (the grid can show that kind's fields as columns).
+  const artifactKind = row?.ref.collection === "artifacts" ? row.ref.kind : undefined;
+  const promotedFields = usePromotedFields(artifactKind);
+  const gridKind = useGridLocalStore((s) =>
+    s.route.collection.id === "artifacts" ? s.route.collection.kind : undefined,
+  );
+  const gridVisible = useGridLocalStore((s) => s.visibleColumnIds);
+  const visibleIds = gridKind === artifactKind ? gridVisible : null;
+  const defaultHeaders = useMemo(
+    () => defaultFieldHeaders(artifactKind, visibleIds),
+    [artifactKind, visibleIds],
+  );
+  const promoted = useMemo(
+    () => ({ ...promotedFields, defaults: defaultHeaders }),
+    [promotedFields, defaultHeaders],
+  );
   const groups =
     grouped.core.length + grouped.source.length + grouped.validation.length + grouped.other.length > 0
       ? grouped
@@ -255,7 +405,7 @@ export function MetaView({
           소스를 찾을 수 없습니다 — 원본 경로: <span className="mono viewer-break">{target.sourcePath}</span>
         </p>
       ) : null}
-      {groups ? <RecordSection groups={groups} /> : null}
+      {groups ? <RecordSection groups={groups} columns={artifactKind ? promoted : undefined} /> : null}
       <section aria-label="출처">
         <h3 className="viewer-subtitle">출처</h3>
         <dl className="viewer-dl">

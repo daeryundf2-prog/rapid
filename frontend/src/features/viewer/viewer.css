@@ -709,3 +709,64 @@
 .viewer-panel[hidden] {
   display: none;
 }
+
+/* Long record values + "열로 표시" (plan artifact-columns U-C1/U-C3) --- */
+
+.meta-field {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-1);
+}
+
+.meta-field-value {
+  flex: 1;
+  min-width: 0;
+}
+
+.meta-longvalue-actions {
+  display: inline-flex;
+  gap: var(--space-1);
+  margin-left: var(--space-1);
+  vertical-align: middle;
+}
+
+.meta-longvalue-full {
+  margin: 0 0 var(--space-1);
+  max-height: 360px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: var(--fs-table-aux);
+  color: var(--text);
+}
+
+.meta-colbtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.meta-colbtn:hover {
+  border-color: var(--line);
+  color: var(--text);
+}
+
+.meta-colbtn[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.meta-colbtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}

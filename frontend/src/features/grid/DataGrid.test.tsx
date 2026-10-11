@@ -231,11 +231,12 @@ describe("DataGrid keyboard", () => {
     expect(document.activeElement).toBe(screen.getByPlaceholderText(/필터/));
   });
 
-  it("Shift+F10 opens the row menu with the six grid.* commands; Esc closes it", async () => {
+  it("Shift+F10 opens the row menu with the six grid.* commands and the review items; Esc closes it", async () => {
     await renderFiles();
     rowAt(0).focus();
     fireEvent.keyDown(rowAt(0), { key: "F10", shiftKey: true });
     const menu = await screen.findByRole("menu", { name: "행 메뉴" });
+    expect(screen.getAllByRole("button", { name: "행 메뉴" })[0]?.getAttribute("aria-expanded")).toBe("true");
     const labels = within(menu)
       .getAllByRole("menuitem")
       .map((i) => i.textContent);
@@ -246,7 +247,15 @@ describe("DataGrid keyboard", () => {
       "인용 복사",
       "타임라인에서 보기",
       "같은 출처 행",
+      "관련 있음 표시",
+      "재검토 표시",
+      "제외 표시",
+      "보고서 포함 표시",
+      "북마크",
     ]);
+    // Review items are always listed and enabled for a row with a run-output locator.
+    const relevant = within(menu).getByRole("menuitem", { name: "관련 있음 표시" });
+    expect(relevant.getAttribute("aria-disabled")).toBeNull();
     fireEvent.keyDown(menu, { key: "Escape" });
     expect(screen.queryByRole("menu")).toBeNull();
   });
@@ -261,6 +270,21 @@ describe("DataGrid keyboard", () => {
     }
   });
 
+  it("a row-menu review item marks the menu's row (case-DB review-batch)", async () => {
+    const { calls } = await renderFiles();
+    rowAt(2).focus();
+    fireEvent.mouseDown(rowAt(2), { button: 0 });
+    fireEvent.keyDown(rowAt(2), { key: "F10", shiftKey: true });
+    const menu = await screen.findByRole("menu", { name: "행 메뉴" });
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "관련 있음 표시" }));
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith("/review-batch"))).toBe(true));
+    const batch = calls.find((c) => c.url.endsWith("/review-batch"));
+    expect(batch?.body).toMatchObject({
+      status: "relevant",
+      targets: [{ collection: "files", locator: "/candidates/2" }],
+    });
+  });
+
   it("the ⋯ row-menu button is a real, always-rendered button that opens the menu on click", async () => {
     await renderFiles();
     const buttons = screen.getAllByRole("button", { name: "행 메뉴" });
@@ -270,11 +294,28 @@ describe("DataGrid keyboard", () => {
     expect(button.hidden).toBe(false);
     expect(button.style.visibility).toBe("");
     expect(button.style.display).toBe("");
+    expect(button.getAttribute("aria-haspopup")).toBe("menu");
+    expect(button.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(button);
     const menu = await screen.findByRole("menu", { name: "행 메뉴" });
-    expect(within(menu).getAllByRole("menuitem")).toHaveLength(6);
+    expect(within(menu).getAllByRole("menuitem")).toHaveLength(11);
+    const trigger = screen.getAllByRole("button", { name: "행 메뉴" })[1] as HTMLButtonElement;
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(trigger.getAttribute("aria-controls")).toBe(menu.id);
+    expect(document.activeElement).toBe(within(menu).getAllByRole("menuitem")[0]);
+    // The same trigger toggles it closed again.
+    fireEvent.mouseDown(trigger);
+    expect(screen.queryByRole("menu")).not.toBeNull();
+    expect(trigger.isConnected).toBe(true);
+    fireEvent.click(trigger);
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(screen.getAllByRole("button", { name: "행 메뉴" })[1]?.getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+    fireEvent.click(screen.getAllByRole("button", { name: "행 메뉴" })[1] as HTMLButtonElement);
+    const reopened = await screen.findByRole("menu", { name: "행 메뉴" });
     expect(useGridLocalStore.getState().focusedRow?.rowKey).toBe("files:/candidates/1");
-    fireEvent.keyDown(menu, { key: "Escape" });
+    fireEvent.keyDown(reopened, { key: "Escape" });
     expect(screen.queryByRole("menu")).toBeNull();
   });
 });

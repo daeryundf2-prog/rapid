@@ -3,7 +3,7 @@ import type { RunExtractResult } from "../../api/extract";
 import type { CollectionRef, GridRow } from "../../contracts/collection";
 import type { Command, CommandContext } from "../../contracts/command";
 import type { ViewerMode, ViewerTarget } from "../../contracts/viewer";
-import { registerCommand } from "./adapter";
+import { registerCommand, registerLocalCommand } from "./adapter";
 import { baseName } from "./columns/common";
 import {
   applyNote,
@@ -12,6 +12,7 @@ import {
   EXTRACT_LIMIT,
   MARK_LABELS,
   optimisticPatch,
+  reviewTargetOf,
   storeNotice,
 } from "./reviewActions";
 
@@ -202,9 +203,72 @@ export function buildGridCommands(hostRef: { current: GridCommandHost }): Comman
   return commands;
 }
 
+/** Review items of the row menu (always listed; disabled with a reason when they cannot run). */
+export const ROW_MARK_ACTIONS: BatchAction[] = [
+  "relevant",
+  "needs-review",
+  "excluded",
+  "include-in-report",
+  "bookmark",
+];
+
+export function rowMarkCommandId(action: BatchAction): string {
+  return `grid.row.${action}`;
+}
+
+const ROW_MARK_LABELS: Partial<Record<BatchAction, string>> = {
+  relevant: "관련 있음 표시",
+  "needs-review": "재검토 표시",
+  excluded: "제외 표시",
+  "include-in-report": "보고서 포함 표시",
+  bookmark: "북마크",
+};
+
+/** Rows a row-menu mark applies to: the selection when it contains the focused row, else that row. */
+function menuRows(host: GridCommandHost): GridRow[] {
+  const row = host.getFocusedRow();
+  if (!row) return [];
+  const selected = host.getSelectedRows();
+  return selected.some((r) => r.rowKey === row.rowKey) ? selected : [row];
+}
+
+/** Row-menu review commands (grid-local: the R/X/I/B shortcuts stay the shell's review.mark.*). */
+export function buildRowMarkCommands(hostRef: { current: GridCommandHost }): Command[] {
+  const host = () => hostRef.current;
+  return ROW_MARK_ACTIONS.map(
+    (action): Command => ({
+      id: rowMarkCommandId(action),
+      label: ROW_MARK_LABELS[action] ?? MARK_LABELS[action],
+      group: "review",
+      icon: action === "bookmark" ? "bookmark" : "flag",
+      disabledReason: () => {
+        const h = host();
+        if (!h.runId) return "열린 케이스가 없습니다.";
+        const rows = menuRows(h);
+        if (rows.length === 0) return NO_ROW;
+        if (rows.some((r) => reviewTargetOf(r) === null))
+          return "출처 위치를 알 수 없는 행은 표시할 수 없습니다.";
+        return undefined;
+      },
+      run: async () => {
+        const h = host();
+        await runMark(h, menuRows(h), action);
+      },
+    }),
+  );
+}
+
 /** Apply a batch mark with optimistic update + rollback and a Korean error toast. */
 export async function runBatch(host: GridCommandHost, action: BatchAction, tag?: string): Promise<boolean> {
-  const rows = host.getSelectedRows();
+  return runMark(host, host.getSelectedRows(), action, tag);
+}
+
+async function runMark(
+  host: GridCommandHost,
+  rows: GridRow[],
+  action: BatchAction,
+  tag?: string,
+): Promise<boolean> {
   if (rows.length === 0 || !host.runId) return false;
   const rollback =
     action === "extract"
@@ -253,7 +317,10 @@ export function useGridCommands(host: GridCommandHost): void {
   const hostRef = useRef(host);
   hostRef.current = host;
   useEffect(() => {
-    const unregister = buildGridCommands(hostRef).map(registerCommand);
+    const unregister = [
+      ...buildGridCommands(hostRef).map(registerCommand),
+      ...buildRowMarkCommands(hostRef).map(registerLocalCommand),
+    ];
     return () => {
       for (const off of unregister) off();
     };

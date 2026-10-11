@@ -1,8 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import * as announcer from "../../a11y/announcer";
 import type { GridRow } from "../../contracts/collection";
+import { useAppStore } from "../../state/store";
 import { COLLECTIONS } from "./columns";
+import { buildRowMarkCommands, type GridCommandHost } from "./gridCommands";
 import {
   applyReviewAction,
+  CASE_DB_PREPARING_NOTICE,
   EXTRACT_LIMIT,
   onReviewApplied,
   optimisticPatch,
@@ -196,5 +200,95 @@ describe("optimisticPatch", () => {
     expect(optimisticPatch("include-in-report")(row).fields.includeInReport).toBe(true);
     expect(optimisticPatch("bookmark")(row).tags).toEqual(["북마크"]);
     expect(optimisticPatch("extract")(row)).toBe(row);
+  });
+});
+
+describe("case DB still being prepared (slow first import)", () => {
+  it("announces + shows the notice immediately, queues marks and applies them all when ensure resolves", async () => {
+    const announce = vi.spyOn(announcer, "announce");
+    let release: (r: Response) => void = () => {};
+    const ensure = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    const calls = installFetch({
+      "/case-db/ensure": () => ensure,
+      "/review-batch": () => jsonResponse({ updated_count: 1 }),
+    });
+    const first = applyReviewAction("r1", [fileRow(1)], "relevant");
+    const second = applyReviewAction("r1", [fileRow(2)], "bookmark");
+    expect(announce).toHaveBeenCalledWith(CASE_DB_PREPARING_NOTICE);
+    expect(useAppStore.getState().notice?.text).toBe(CASE_DB_PREPARING_NOTICE);
+    await Promise.resolve();
+    expect(calls.filter((c) => c.url.includes("review-batch"))).toHaveLength(0);
+    release(ENSURE());
+    await expect(first).resolves.toEqual({ applied: 1, store: "case-db" });
+    await expect(second).resolves.toEqual({ applied: 1, store: "case-db" });
+    expect(calls.filter((c) => c.url.includes("review-batch"))).toHaveLength(2);
+    // Once ready, later marks do not announce the preparing notice again.
+    announce.mockClear();
+    await applyReviewAction("r1", [fileRow(3)], "excluded");
+    expect(announce).not.toHaveBeenCalledWith(CASE_DB_PREPARING_NOTICE);
+    announce.mockRestore();
+  });
+
+  it("a 4xx ensure keeps the case.json fallback and announces the Korean reason", async () => {
+    const announce = vi.spyOn(announcer, "announce");
+    installFetch({
+      "/case-db/ensure": () => jsonResponse({ detail: "run output is read-only" }, 409),
+      "/bookmarks": () => jsonResponse({ ok: true }),
+    });
+    const result = await applyReviewAction("r1", [fileRow(1)], "relevant");
+    expect(result.store).toBe("bookmarks");
+    expect(announce).toHaveBeenCalledWith(expect.stringMatching(/^케이스 DB를 만들 수 없습니다\(.+\)\. /));
+    announce.mockRestore();
+  });
+});
+
+describe("row-menu review commands", () => {
+  const host = (over: Partial<GridCommandHost> = {}): { current: GridCommandHost } => ({
+    current: {
+      runId: "r1",
+      collection: { id: "files" },
+      getFocusedRow: () => fileRow(1),
+      getSelectedRows: () => [],
+      openRow: () => {},
+      setFilter: () => {},
+      navigate: () => {},
+      patchRows: () => () => {},
+      toast: () => {},
+      refetch: () => {},
+      showExtract: () => {},
+      openTagPrompt: () => {},
+      runIsActive: false,
+      ...over,
+    },
+  });
+  const ctx = {
+    runId: "r1",
+    collection: "files" as const,
+    selectedRowKeys: [],
+    focusedRowKey: null,
+    viewerHasTarget: false,
+    runIsActive: false,
+  };
+
+  it("always exist (관련/재검토/제외/보고서/북마크) and explain why they cannot run", () => {
+    const enabled = buildRowMarkCommands(host());
+    expect(enabled.map((c) => c.label)).toEqual([
+      "관련 있음 표시",
+      "재검토 표시",
+      "제외 표시",
+      "보고서 포함 표시",
+      "북마크",
+    ]);
+    expect(enabled.every((c) => c.disabledReason?.(ctx) === undefined)).toBe(true);
+    const noRun = buildRowMarkCommands(host({ runId: null }));
+    expect(noRun[0]?.disabledReason?.(ctx)).toBe("열린 케이스가 없습니다.");
+    const noRow = buildRowMarkCommands(host({ getFocusedRow: () => undefined }));
+    expect(noRow[0]?.disabledReason?.(ctx)).toBe("행을 먼저 선택하세요.");
+    const unknown = buildRowMarkCommands(
+      host({ getFocusedRow: () => ({ ...fileRow(1), ref: { collection: "search", locator: "hit-1" } }) }),
+    );
+    expect(unknown[4]?.disabledReason?.(ctx)).toBe("출처 위치를 알 수 없는 행은 표시할 수 없습니다.");
   });
 });

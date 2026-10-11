@@ -13,7 +13,7 @@
  */
 
 import { captureFragmentToken } from "./api/client";
-import type { CollectionId, ReviewStatus } from "./contracts/collection";
+import type { CollectionId, ReviewStatus, ServerSort } from "./contracts/collection";
 import { decodeRowRef, encodeRowRef, type RowRef } from "./contracts/rowRef";
 import type { ViewerMode } from "./contracts/viewer";
 
@@ -49,6 +49,24 @@ export interface Route {
   view?: ExplorerView;
   /** Artifact category node (X11, S7; collection === "artifacts", no kind), URL `category=`. */
   category?: string;
+  /** Server sort of one artifact kind, URL `sort=details.run_count:desc` (artifacts with a kind only). */
+  sort?: ServerSort;
+  /** Promoted record-field columns of one artifact kind, URL `cols=details.a,details.b`. */
+  cols?: string[];
+}
+
+/** `timestamp` or `details.<scalar key>` (plan artifact-columns §4.1). */
+export function isServerSortKey(key: string): boolean {
+  return key === "timestamp" || /^details\.[^\s,:]+$/.test(key);
+}
+
+/** `key:order` -> ServerSort; order defaults to asc. Null when the key is not a server sort key. */
+export function parseSortParam(value: string): ServerSort | null {
+  const colon = value.lastIndexOf(":");
+  const key = colon > 0 ? value.slice(0, colon) : value;
+  const rawOrder = colon > 0 ? value.slice(colon + 1).toLowerCase() : "asc";
+  if (!isServerSortKey(key) || (rawOrder !== "asc" && rawOrder !== "desc")) return null;
+  return { key, order: rawOrder };
 }
 
 /** Explorer views (S9 ViewSwitch). "columns" is the default DataGrid and is never written to the URL. */
@@ -144,7 +162,13 @@ export function parseHash(hash: string): Route {
     } else if (key === "category" && value && route.collection === "artifacts" && !route.kind) {
       route.category = safeDecode(value);
     } else if (key === "path" && value) route.path = safeDecode(value);
-    else if (key === "status" && value) {
+    else if (key === "sort" && value && route.collection === "artifacts" && route.kind) {
+      const sort = parseSortParam(safeDecode(value));
+      if (sort) route.sort = sort;
+    } else if (key === "cols" && value && route.collection === "artifacts" && route.kind) {
+      const list = listParam(value).filter((col) => col.startsWith("details.") && isServerSortKey(col));
+      if (list.length) route.cols = [...new Set(list)];
+    } else if (key === "status" && value) {
       const list = listParam(value).filter((v): v is ReviewStatus =>
         (REVIEW_STATUSES as readonly string[]).includes(v),
       );
@@ -186,6 +210,10 @@ export function serializeRoute(route: Route): string {
   if (route.path) query.push(`path=${encodeURIComponent(route.path)}`);
   if (route.tz) query.push(`tz=${encodeURIComponent(route.tz)}`);
   if (route.view && route.view !== "columns") query.push(`view=${route.view}`);
+  if (collection === "artifacts" && route.kind) {
+    if (route.sort) query.push(`sort=${encodeURIComponent(route.sort.key)}:${route.sort.order}`);
+    if (route.cols?.length) query.push(`cols=${route.cols.map(encodeURIComponent).join(",")}`);
+  }
   return query.length ? `${path}?${query.join("&")}` : path;
 }
 

@@ -4,8 +4,8 @@
 // grid footer shows. Mapping raw rows to GridRow lives in
 // features/grid/columns/<collection>.ts so the API layer stays shape-agnostic.
 
-import type { CollectionQuery } from "../contracts/collection";
-import { api } from "./client";
+import type { CollectionQuery, ServerSort, ServerSortState } from "../contracts/collection";
+import { ApiError, api } from "./client";
 import { type ArtifactsQuery, artifactsQueryString } from "./runs";
 
 export type RawRow = Record<string, unknown>;
@@ -24,6 +24,8 @@ export interface RawPage {
   scanned?: number;
   /** Artifact kinds the page was drawn from when a category restricted them (category nodes). */
   kinds?: string[];
+  /** Server sort state of a sorted artifacts page (building pages have no rows yet). */
+  sort?: ServerSortState;
 }
 
 const enc = encodeURIComponent;
@@ -79,6 +81,64 @@ interface ArtifactKindPage {
   record_count?: unknown;
   has_more?: unknown;
   pagination?: { has_more?: unknown; scanned?: unknown; truncated?: unknown; filtered?: unknown };
+  sort?: unknown;
+  sort_supported?: unknown;
+}
+
+/** Row locator index: the server's original JSONL `record_index` when present, else the page position. */
+function withLocator(row: RawRow, kind: string, fallback: number): RawRow {
+  const index =
+    typeof row.record_index === "number" && Number.isInteger(row.record_index) && row.record_index >= 0
+      ? row.record_index
+      : fallback;
+  return { ...row, _kind: kind, _index: index };
+}
+
+export const SORT_UNSUPPORTED_REASON = "서버가 이 열의 전체 정렬을 지원하지 않습니다.";
+
+/** Normalise a kind's `sort` object; a missing one with `sort_supported: false` means unsupported. */
+export function sortStateOf(page: ArtifactKindPage, requested: ServerSort): ServerSortState {
+  const raw = page.sort;
+  if (raw && typeof raw === "object") {
+    const obj = raw as Record<string, unknown>;
+    const status =
+      obj.status === "building" || obj.status === "unsupported" || obj.status === "ready"
+        ? obj.status
+        : "ready";
+    const progress = asNumber(obj.progress);
+    return {
+      key: typeof obj.key === "string" ? obj.key : requested.key,
+      order: obj.order === "desc" || obj.order === "asc" ? obj.order : requested.order,
+      status,
+      progress: progress === null ? (status === "ready" ? 1 : 0) : Math.max(0, Math.min(1, progress)),
+      ...(typeof obj.reason === "string" && obj.reason ? { reason: obj.reason } : {}),
+    };
+  }
+  if (page.sort_supported === false) {
+    return { ...requested, status: "unsupported", progress: 0, reason: SORT_UNSUPPORTED_REASON };
+  }
+  return { ...requested, status: "ready", progress: 1 };
+}
+
+/** Delay before the one automatic retry of a 409 (stale sort index: the file changed under it). */
+export const STALE_RETRY_MS = 500;
+
+function wait(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        reject(signal.reason);
+      },
+      { once: true },
+    );
+  });
 }
 
 async function artifactWindow(
@@ -86,10 +146,16 @@ async function artifactWindow(
   query: ArtifactsQuery,
   signal?: AbortSignal,
 ): Promise<Record<string, ArtifactKindPage>> {
-  const payload = await api<{ artifacts?: Record<string, ArtifactKindPage> }>(
-    `/api/runs/${enc(runId)}/artifacts?${artifactsQueryString({ ...query, offset: query.offset || undefined })}`,
-    { signal },
-  );
+  const url = `/api/runs/${enc(runId)}/artifacts?${artifactsQueryString({ ...query, offset: query.offset || undefined })}`;
+  let payload: { artifacts?: Record<string, ArtifactKindPage> };
+  try {
+    payload = await api<{ artifacts?: Record<string, ArtifactKindPage> }>(url, { signal });
+  } catch (error) {
+    // 409 = the server's sort index went stale (file changed / rebuilt): retry once, then surface it.
+    if (!(error instanceof ApiError) || error.status !== 409) throw error;
+    await wait(STALE_RETRY_MS, signal);
+    payload = await api<{ artifacts?: Record<string, ArtifactKindPage> }>(url, { signal });
+  }
   return payload.artifacts ?? {};
 }
 
@@ -127,11 +193,49 @@ function pageFlags(pages: ArtifactKindPage[]) {
 }
 
 /**
+ * Sorted position (0-based) of one record (`record_index`) of a server-sorted kind:
+ * `GET /artifacts?kind=&sort=&order=&locate=` → `sort.position`. Null while the index
+ * is building, when the record is out of range / filtered out, or the server cannot tell.
+ */
+export async function locateArtifactRow(
+  runId: string,
+  kind: string,
+  sort: ServerSort,
+  recordIndex: number,
+  signal?: AbortSignal,
+  pathContains?: string,
+): Promise<{ status: ServerSortState["status"]; position: number | null }> {
+  const window = await artifactWindow(
+    runId,
+    {
+      kind: [kind],
+      offset: 0,
+      limit: 1,
+      path_contains: pathContains?.trim() || undefined,
+      sort: sort.key,
+      order: sort.order,
+      locate: recordIndex,
+    },
+    signal,
+  );
+  const page = window[kind];
+  if (!page) return { status: "ready", position: null };
+  const state = sortStateOf(page, sort);
+  const raw =
+    page.sort && typeof page.sort === "object" ? (page.sort as Record<string, unknown>).position : null;
+  const position = typeof raw === "number" && Number.isInteger(raw) && raw >= 0 ? raw : null;
+  return { status: state.status, position: state.status === "ready" ? position : null };
+}
+
+/**
  * One window of the artifacts collection. A single kind = one `kind=` request
  * (server pages only that kind). `pathContains` is the server-side path filter:
  * offset then counts matches and `total` is null unless the kind was fully scanned.
- * Rows carry `_kind` and `_index` (the kind-local row index when unfiltered; with a
- * filter it is the match ordinal and the real pointer is not known to the API).
+ * Rows carry `_kind` and `_index`: the server's `record_index` (original JSONL index)
+ * when present, so locators survive sorting and filtering; older servers without it
+ * fall back to the page position (with a filter that is only the match ordinal).
+ * `sort` (one kind only) asks the server for a whole-kind sort; the page carries the
+ * sort state and has no rows while the server index is `building`.
  *
  * `restrictKinds` (category nodes, no `kind`) narrows the run's kinds — it gets
  * the run's kind list and returns the kinds to page; the page reports them in `kinds`.
@@ -144,6 +248,7 @@ export async function fetchArtifactsPage(
   signal?: AbortSignal,
   pathContains?: string,
   restrictKinds?: (available: readonly string[]) => string[],
+  sort?: ServerSort,
 ): Promise<RawPage> {
   const started = now();
   const filter = pathContains?.trim() || undefined;
@@ -153,12 +258,16 @@ export async function fetchArtifactsPage(
   if (kind) {
     const window = await artifactWindow(
       runId,
-      { kind: [kind], offset, limit, path_contains: filter },
+      { kind: [kind], offset, limit, path_contains: filter, sort: sort?.key, order: sort?.order },
       signal,
     );
     const page = window[kind];
     if (!page) return { rows: [], total: 0, offset, backend: "file", truncated: false, elapsedMs: 0 };
-    const rows = asRows(page.artifacts).map((row, i) => ({ ...row, _kind: kind, _index: offset + i }));
+    const sortState = sort ? sortStateOf(page, sort) : undefined;
+    const rows =
+      sortState?.status === "building"
+        ? []
+        : asRows(page.artifacts).map((row, i) => withLocator(row, kind, offset + i));
     return {
       rows,
       total: kindTotal(page),
@@ -166,6 +275,7 @@ export async function fetchArtifactsPage(
       backend: "file",
       ...pageFlags([page]),
       elapsedMs: Math.round(now() - started),
+      ...(sortState ? { sort: sortState } : {}),
     };
   }
   if (filter) {
@@ -173,8 +283,7 @@ export async function fetchArtifactsPage(
     const window = await artifactWindow(runId, { offset: 0, limit, path_contains: filter }, signal);
     const rows: RawRow[] = [];
     for (const k of Object.keys(window).sort()) {
-      for (const [i, row] of asRows(window[k]?.artifacts).entries())
-        rows.push({ ...row, _kind: k, _index: i });
+      for (const [i, row] of asRows(window[k]?.artifacts).entries()) rows.push(withLocator(row, k, i));
     }
     const flags = pageFlags(Object.values(window));
     return {
@@ -211,7 +320,7 @@ async function pageAcrossKinds(
       const local = start - base;
       const window = await artifactWindow(runId, { kind: [k], offset: local, limit: end - start }, signal);
       for (const [i, row] of asRows(window[k]?.artifacts).entries()) {
-        rows.push({ ...row, _kind: k, _index: local + i });
+        rows.push(withLocator(row, k, local + i));
       }
     }
     base += n;
@@ -246,8 +355,7 @@ async function fetchArtifactKindsPage(
     );
     const rows: RawRow[] = [];
     for (const k of kinds) {
-      for (const [i, row] of asRows(window[k]?.artifacts).entries())
-        rows.push({ ...row, _kind: k, _index: i });
+      for (const [i, row] of asRows(window[k]?.artifacts).entries()) rows.push(withLocator(row, k, i));
     }
     const flags = pageFlags(Object.values(window));
     return {

@@ -226,13 +226,20 @@ export function planCollect(body: {
  * - `path_contains`: NFC case-insensitive substring on `path`, streamed; offset counts matches.
  *   Per-kind `pagination` then has `filtered`, `scanned`, `truncated`, and `total: null`
  *   unless the whole kind was scanned.
- * - `sort`: unsupported; the response carries `sort_supported: false`.
+ * - `sort` (`timestamp` | `details.<key>`) + `order` (asc|desc): server sort of exactly one kind.
+ *   The kind object then carries `sort: {key, order, status, progress, reason?}`; while
+ *   `status === "building"` its `artifacts` is empty and the client polls (plan artifact-columns §4.1).
+ * - Every row carries `record_index` (0-based JSONL index), sorted or not.
  */
 export interface ArtifactsQuery {
   offset?: number;
   limit?: number;
   kind?: string[];
   path_contains?: string;
+  sort?: string;
+  order?: "asc" | "desc";
+  /** With `sort`: report the sorted position of this record_index as `sort.position`. */
+  locate?: number;
 }
 
 export function artifactsQueryString(query: ArtifactsQuery): string {
@@ -241,5 +248,10 @@ export function artifactsQueryString(query: ArtifactsQuery): string {
   if (query.limit) params.set("limit", String(query.limit));
   for (const kind of query.kind ?? []) params.append("kind", kind);
   if (query.path_contains?.trim()) params.set("path_contains", query.path_contains.trim());
+  if (query.sort) {
+    params.set("sort", query.sort);
+    params.set("order", query.order ?? "asc");
+    if (query.locate !== undefined) params.set("locate", String(query.locate));
+  }
   return params.toString();
 }

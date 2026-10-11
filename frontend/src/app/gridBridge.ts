@@ -66,6 +66,8 @@ export function gridRouteFromShell(): RouteState {
     q: isSearch ? (sameCollection(grid.collection, collection) ? grid.q : "") : (route.q ?? ""),
     search: isSearch ? searchSpec(route.q) : undefined,
     rowRef: route.row ?? null,
+    sort: route.sort,
+    cols: route.cols,
   };
 }
 
@@ -75,7 +77,9 @@ function gridRouteEqual(a: RouteState, b: RouteState): boolean {
     sameCollection(a.collection, b.collection) &&
     a.q === b.q &&
     JSON.stringify(a.search ?? null) === JSON.stringify(b.search ?? null) &&
-    rowKey(a.rowRef) === rowKey(b.rowRef)
+    rowKey(a.rowRef) === rowKey(b.rowRef) &&
+    JSON.stringify(a.sort ?? null) === JSON.stringify(b.sort ?? null) &&
+    JSON.stringify(a.cols ?? null) === JSON.stringify(b.cols ?? null)
   );
 }
 
@@ -101,7 +105,16 @@ export function connectGridToShell(): () => void {
   document.addEventListener("pointerdown", markTouched, true);
 
   const offApp = useAppStore.subscribe((state, prev) => {
-    if (collectionChanged(prev.route, state.route)) userTouchedGrid = false;
+    // A new collection, server order or filter re-resolves the focused row from `row=`:
+    // until the analyst moves again, automatic focus must not rewrite the URL row.
+    if (
+      collectionChanged(prev.route, state.route) ||
+      JSON.stringify(prev.route.sort ?? null) !== JSON.stringify(state.route.sort ?? null) ||
+      (prev.route.q ?? "") !== (state.route.q ?? "") ||
+      (prev.route.path ?? "") !== (state.route.path ?? "")
+    ) {
+      userTouchedGrid = false;
+    }
     if (state.route !== prev.route || state.density !== prev.density) pushShellToGrid();
   });
   const offSearch = useSearchState.subscribe((state, prev) => {
@@ -122,9 +135,22 @@ export function connectGridToShell(): () => void {
           q: grid.route.q || undefined,
         });
       }
-    } else if (grid.route.q !== prev.route.q && grid.route.collection.id !== "search") {
-      if ((app.route.q ?? "") !== grid.route.q) {
-        app.patchRoute({ q: grid.route.q || undefined }, { replace: true });
+    } else {
+      if (grid.route.q !== prev.route.q && grid.route.collection.id !== "search") {
+        if ((app.route.q ?? "") !== grid.route.q) {
+          app.patchRoute({ q: grid.route.q || undefined }, { replace: true });
+        }
+      }
+      // Server sort / promoted field columns (artifacts of one kind) ride in the URL.
+      if (grid.route.sort !== prev.route.sort || grid.route.cols !== prev.route.cols) {
+        const sort = grid.route.sort;
+        const cols = grid.route.cols?.length ? grid.route.cols : undefined;
+        if (
+          JSON.stringify(sort ?? null) !== JSON.stringify(useAppStore.getState().route.sort ?? null) ||
+          JSON.stringify(cols ?? null) !== JSON.stringify(useAppStore.getState().route.cols ?? null)
+        ) {
+          useAppStore.getState().patchRoute({ sort, cols }, { replace: true });
+        }
       }
     }
 

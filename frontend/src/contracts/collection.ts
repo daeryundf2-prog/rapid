@@ -35,6 +35,20 @@ export interface CollectionRef {
   category?: string;
 }
 
+/** Server sort key: `timestamp` or `details.<name>`; URL `sort=<key>:<order>`. */
+export interface ServerSort {
+  key: string;
+  order: "asc" | "desc";
+}
+
+/** `sort` object of an artifacts response (plan artifact-columns §4.1). */
+export interface ServerSortState extends ServerSort {
+  status: "ready" | "building" | "unsupported";
+  /** 0..1 while building. */
+  progress: number;
+  reason?: string;
+}
+
 export type ReviewStatus = "relevant" | "needs-review" | "excluded" | "include-in-report";
 
 /** Server-side query the grid sends; the hook maps it to the collection's API. */
@@ -54,7 +68,11 @@ export interface CollectionQuery {
   artifactTypes?: string[];
   /** Navigation category (tree) filter; interpreted by the collection. */
   category?: string;
-  sort?: { column: string; direction: "asc" | "desc" };
+  /**
+   * Server-side sort (artifacts of exactly one kind; `GET /artifacts?sort=&order=`).
+   * Other collections sort their loaded rows on the client and never send this.
+   */
+  sort?: ServerSort;
   /** Search-collection only. */
   search?: {
     keywords: string[];

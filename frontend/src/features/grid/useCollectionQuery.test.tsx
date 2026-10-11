@@ -1,9 +1,19 @@
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, configure, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetArtifactCountsCache } from "../../api/collections";
 import type { CollectionQuery } from "../../contracts/collection";
-import { filesHandler, installFetch, jsonResponse, queryWrapper, resetGridStore } from "./testSupport";
+import {
+  filesHandler,
+  installFetch,
+  jsonResponse,
+  queryWrapper,
+  resetGridStore,
+  sortedArtifactsHandler,
+} from "./testSupport";
 import { categoryScopeText, PAGE_SIZE, useCollectionQuery } from "./useCollectionQuery";
+
+// Async waits must not depend on machine speed (CI under load).
+configure({ asyncUtilTimeout: 5000 });
 
 const filesQuery: CollectionQuery = { ref: { id: "files" }, offset: 0, limit: PAGE_SIZE };
 
@@ -11,7 +21,10 @@ beforeEach(() => {
   resetGridStore();
   resetArtifactCountsCache();
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
 
 describe("useCollectionQuery paging", () => {
   it("fetches only the first page (250 rows) at first, with total and backend", async () => {
@@ -304,5 +317,108 @@ describe("useCollectionQuery paging", () => {
     expect(result.current.truncated).toBe(true);
     expect(result.current.scanned).toBe(2000000);
     expect(result.current.canLoadMore).toBe(true);
+  });
+});
+
+describe("useCollectionQuery server sort (artifact-columns §4.1)", () => {
+  const sortedQuery = (order: "asc" | "desc"): CollectionQuery => ({
+    ref: { id: "artifacts", kind: "windows-prefetch" },
+    offset: 0,
+    limit: PAGE_SIZE,
+    sort: { key: "details.run_count", order },
+  });
+
+  /** Advance the fake clock (and flush promises / react-query's batched notifications). */
+  const tick = (ms: number) =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+  // quickJsonResponse bodies resolve as plain promises: flushing at the same instant settles them.
+  const settle = async () => {
+    for (let i = 0; i < 5; i += 1) await tick(0);
+  };
+  const artifactCalls = (calls: { url: string }[]) => calls.filter((c) => c.url.includes("/artifacts"));
+
+  it("sends sort/order, re-requests exactly at 1000 ms while building, then pages in server order", async () => {
+    vi.useFakeTimers();
+    const calls = installFetch({ "/artifacts": sortedArtifactsHandler({ total: 30, buildPolls: 1 }) });
+    const { wrapper } = queryWrapper();
+    const { result } = renderHook(() => useCollectionQuery(sortedQuery("desc"), { runId: "run-1" }), {
+      wrapper,
+    });
+    await settle();
+    expect(result.current.sortState?.status).toBe("building");
+    expect(result.current.sortState?.progress).toBeCloseTo(0.5);
+    expect(result.current.loadedCount).toBe(0);
+    const first = new URL(calls[0]?.url ?? "", "http://x");
+    expect(first.searchParams.get("sort")).toBe("details.run_count");
+    expect(first.searchParams.get("order")).toBe("desc");
+    expect(first.searchParams.getAll("kind")).toEqual(["windows-prefetch"]);
+    expect(artifactCalls(calls)).toHaveLength(1);
+    await tick(999);
+    expect(artifactCalls(calls)).toHaveLength(1);
+    await tick(1);
+    await settle();
+    expect(artifactCalls(calls)).toHaveLength(2);
+    // The 1000 ms re-request went out (asserted above); its background result reaches the hook on
+    // React's own scheduler, so wait for the state (the clock no longer matters once ready).
+    await vi.waitFor(() => expect(result.current.sortState?.status).toBe("ready"));
+    expect(result.current.sortState?.status).toBe("ready");
+    // run_count = (i*7) % 30 → max 29 at i = 17; the locator is the ORIGINAL JSONL index.
+    expect(result.current.getRow(0)?.ref.locator).toBe("/artifacts/17");
+    expect(result.current.getRow(1)?.ref.locator).toBe("/artifacts/4");
+    // Ready: no further polling.
+    await tick(5000);
+    expect(artifactCalls(calls)).toHaveLength(2);
+  });
+
+  it("unmounting stops the building poll", async () => {
+    vi.useFakeTimers();
+    const calls = installFetch({ "/artifacts": sortedArtifactsHandler({ total: 30, buildPolls: 100 }) });
+    const { wrapper } = queryWrapper();
+    const { result, unmount } = renderHook(() => useCollectionQuery(sortedQuery("asc"), { runId: "run-1" }), {
+      wrapper,
+    });
+    await settle();
+    expect(result.current.sortState?.status).toBe("building");
+    await tick(1000);
+    expect(artifactCalls(calls)).toHaveLength(2);
+    unmount();
+    await tick(5000);
+    expect(artifactCalls(calls)).toHaveLength(2);
+  });
+
+  it("re-sorting twice quickly leaves exactly one poller (the last sort)", async () => {
+    vi.useFakeTimers();
+    const calls = installFetch({ "/artifacts": sortedArtifactsHandler({ total: 30, buildPolls: 100 }) });
+    const { wrapper } = queryWrapper();
+    const { result, rerender } = renderHook(
+      ({ order }: { order: "asc" | "desc" }) => useCollectionQuery(sortedQuery(order), { runId: "run-1" }),
+      { wrapper, initialProps: { order: "asc" as "asc" | "desc" } },
+    );
+    await settle();
+    expect(result.current.sortState?.order).toBe("asc");
+    rerender({ order: "desc" });
+    await settle();
+    expect(result.current.sortState?.order).toBe("desc");
+    rerender({ order: "asc" });
+    await settle();
+    expect(result.current.sortState?.order).toBe("asc");
+    const before = artifactCalls(calls).length;
+    await tick(3000);
+    await settle();
+    const polled = artifactCalls(calls).slice(before);
+    expect(polled).toHaveLength(3);
+    expect(polled.every((c) => c.url.includes("order=asc"))).toBe(true);
+  });
+
+  it("other collections and kind-less artifacts never send sort", async () => {
+    const calls = installFetch({ "/files": filesHandler(10) });
+    const { wrapper } = queryWrapper();
+    const q: CollectionQuery = { ...filesQuery, sort: { key: "timestamp", order: "asc" } };
+    const { result } = renderHook(() => useCollectionQuery(q, { runId: "run-1" }), { wrapper });
+    await waitFor(() => expect(result.current.total).toBe(10));
+    expect(calls[0]?.url).not.toContain("sort=");
+    expect(result.current.sortState).toBeNull();
   });
 });

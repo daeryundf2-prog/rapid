@@ -107,3 +107,52 @@ describe("#token= handoff", () => {
     expect(window.location.hash).toBe("");
   });
 });
+
+describe("artifact server sort and promoted columns in the URL", () => {
+  it("parses and serialises sort=<key>:<order> and cols= for one artifact kind", () => {
+    const hash =
+      "#/case/r1/artifacts/windows-prefetch?sort=details.run_count:desc&cols=details.run_count,details.last_run_at";
+    const route = parseHash(hash);
+    expect(route.sort).toEqual({ key: "details.run_count", order: "desc" });
+    expect(route.cols).toEqual(["details.run_count", "details.last_run_at"]);
+    expect(serializeRoute(route)).toBe(hash);
+    expect(parseHash(serializeRoute(route))).toEqual(route);
+    expect(parseHash("#/case/r1/artifacts/eventlog?sort=timestamp").sort).toEqual({
+      key: "timestamp",
+      order: "asc",
+    });
+  });
+
+  it("ignores invalid keys/orders and other collections", () => {
+    expect(parseHash("#/case/r1/artifacts/eventlog?sort=title:desc").sort).toBeUndefined();
+    expect(parseHash("#/case/r1/artifacts/eventlog?sort=details.x:sideways").sort).toBeUndefined();
+    expect(parseHash("#/case/r1/artifacts?sort=timestamp:asc").sort).toBeUndefined();
+    expect(parseHash("#/case/r1/files?sort=timestamp:asc&cols=details.a").sort).toBeUndefined();
+    expect(parseHash("#/case/r1/artifacts/eventlog?cols=title,details.a,details.a").cols).toEqual([
+      "details.a",
+    ]);
+    expect(
+      serializeRoute({
+        runId: "r1",
+        collection: "files",
+        sort: { key: "timestamp", order: "asc" },
+        cols: ["details.a"],
+      }),
+    ).toBe("#/case/r1/files");
+  });
+
+  it("sort / cols changes are not collection changes", () => {
+    const a = parseHash("#/case/r1/artifacts/eventlog");
+    const b = parseHash("#/case/r1/artifacts/eventlog?sort=timestamp:desc&cols=details.level");
+    expect(collectionChanged(a, b)).toBe(false);
+  });
+});
+
+describe("sort order case", () => {
+  it("parses the order case-insensitively", () => {
+    expect(parseHash("#/case/r1/artifacts/eventlog?sort=timestamp:DESC").sort).toEqual({
+      key: "timestamp",
+      order: "desc",
+    });
+  });
+});

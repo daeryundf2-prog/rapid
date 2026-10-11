@@ -64,3 +64,22 @@ describe("gridBridge automatic first row", () => {
     });
   });
 });
+
+describe("gridBridge server sort and promoted columns", () => {
+  it("grid sort / cols go to the URL and URL sort / cols come back to the grid", () => {
+    s().navigate({ runId: "r1", collection: "artifacts", kind: "windows-prefetch" });
+    useGridLocalStore.getState().setRoute({
+      sort: { key: "details.run_count", order: "desc" },
+      cols: ["details.run_count"],
+    });
+    expect(window.location.hash).toBe(
+      "#/case/r1/artifacts/windows-prefetch?sort=details.run_count:desc&cols=details.run_count",
+    );
+    s().navigate(parseHash("#/case/r1/artifacts/windows-prefetch?sort=timestamp:asc"));
+    expect(useGridLocalStore.getState().route.sort).toEqual({ key: "timestamp", order: "asc" });
+    expect(useGridLocalStore.getState().route.cols).toBeUndefined();
+    // Opening another kind drops both.
+    s().openCollection("artifacts", { kind: "eventlog" });
+    expect(useGridLocalStore.getState().route.sort).toBeUndefined();
+  });
+});
