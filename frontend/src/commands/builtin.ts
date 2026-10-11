@@ -1,0 +1,444 @@
+/**
+ * Built-in commands owned by the shell (S1): app, navigate, case lifecycle,
+ * viewer focus. Other streams register their own groups (grid, viewer,
+ * review, export) — see the S1 report for the ids reserved here.
+ */
+
+import type { QueryClient } from "@tanstack/react-query";
+import { announce, isTextEntry } from "../a11y";
+import { cancelRun, retryRun } from "../api/runControl";
+import { RUNS_QUERY_KEY, type RunWithProgress } from "../api/runsProgress";
+import { COLLECTION_NODES, runDisplayName } from "../app/collections";
+import type { Command, CommandContext } from "../contracts/command";
+import { DENSITIES, DENSITY_LABEL } from "../state/slices/prefs";
+import { anyRunActive, currentRun } from "../state/slices/runs";
+import { useAppStore } from "../state/store";
+import { NO_RUN_REASON } from "./reasons";
+import { registerCommands } from "./registry";
+import { reviewCommands } from "./review";
+
+export { NO_RUN_REASON };
+
+const needsRun = (ctx: CommandContext) => (ctx.runId ? undefined : NO_RUN_REASON);
+
+/** Ids of DOM landmarks the commands move focus to (Layout renders them). */
+export const MAIN_ID = "main";
+export const VIEWER_ID = "viewer";
+export const GLOBAL_SEARCH_ID = "global-search";
+
+function focusById(id: string, preferSelector?: string): void {
+  const run = () => {
+    const root = document.getElementById(id);
+    if (!root) return;
+    const preferred = preferSelector ? root.querySelector<HTMLElement>(preferSelector) : null;
+    const target = preferred ?? root;
+    if (!target.hasAttribute("tabindex") && target === root) target.setAttribute("tabindex", "-1");
+    target.focus();
+  };
+  // Let a just-opened drawer render before moving focus.
+  if (typeof window.requestAnimationFrame === "function") window.requestAnimationFrame(run);
+  else run();
+}
+
+/** Collections "같은 출처" filters in place; any other route falls back to files. */
+const ROWS_FOR_SOURCE_KEEP: ReadonlySet<string> = new Set(["files", "docs", "artifacts", "timeline"]);
+
+export const ROWS_FOR_SOURCE_INTAKE_REASON =
+  "접수 화면에는 행 목록이 없습니다. 파일·아티팩트 등 목록에서 행을 선택한 뒤 사용하세요";
+
+/** Focus the viewer: an element marked `data-viewer-focus` (S2's title) or the panel itself. */
+export function focusViewer(): void {
+  // The viewer (S2) also listens for the request and re-focuses once its tabs render.
+  useAppStore.getState().requestViewerFocus();
+  focusById(VIEWER_ID, "[data-viewer-focus]");
+}
+
+const GRID_ROW_SELECTOR = '[data-grid-focus], [role="row"][tabindex="0"]';
+
+/** Focus the grid area now: the roving row (`[data-grid-focus]` / tabindex=0 row) or `#main`. */
+export function focusMain(): void {
+  focusById(MAIN_ID, GRID_ROW_SELECTOR);
+}
+
+let cancelPendingGridFocus: (() => void) | null = null;
+
+const nextFrame = (fn: () => void): number =>
+  typeof window.requestAnimationFrame === "function"
+    ? window.requestAnimationFrame(fn)
+    : window.setTimeout(fn, 16);
+
+/** Keys the grid handles on its roving row; forwarded to it when pressed before focus landed. */
+const GRID_KEYS = new Set([
+  "j",
+  "k",
+  "ArrowDown",
+  "ArrowUp",
+  "Enter",
+  " ",
+  "Home",
+  "End",
+  "PageDown",
+  "PageUp",
+]);
+
+/**
+ * After navigating to a collection, move DOM focus to the grid's roving row as
+ * soon as the new page has rendered (so J / Enter work immediately, plan Q-A1);
+ * falls back to `#main`. Polls each animation frame (up to `timeoutMs`), only
+ * accepts a row of the previous collection once the grid has settled, verifies
+ * `document.activeElement`, and re-applies focus once if the virtualised row is
+ * re-mounted (or a closing overlay restores focus elsewhere) within `guardMs`.
+ *
+ * Grid keys (J/K/arrows/Enter/Space) pressed while focus is still on the page body
+ * keep the request alive and are forwarded to the row once it is ready. Cancelled
+ * when the analyst clicks, types into a field, or works a control outside `#main`.
+ */
+export function focusGridWhenReady(
+  options: { settleMs?: number; timeoutMs?: number; guardMs?: number } = {},
+): void {
+  const settleMs = options.settleMs ?? 800;
+  const timeoutMs = options.timeoutMs ?? 2000;
+  const guardMs = options.guardMs ?? 300;
+  cancelPendingGridFocus?.();
+  const main = () => document.getElementById(MAIN_ID);
+  const stale = main()?.querySelector<HTMLElement>(GRID_ROW_SELECTOR) ?? null;
+  const staleKey = stale?.dataset.rowKey ?? null;
+  const started = Date.now();
+  let done = false;
+  let focusedAt = 0;
+  let reapplied = false;
+
+  const focusEl = (el: HTMLElement): boolean => {
+    if (el === main() && !el.hasAttribute("tabindex")) el.setAttribute("tabindex", "-1");
+    el.focus({ preventScroll: false });
+    return document.activeElement === el;
+  };
+  const currentRow = (): HTMLElement | null => main()?.querySelector<HTMLElement>(GRID_ROW_SELECTOR) ?? null;
+  const readyTarget = (final: boolean): HTMLElement | null => {
+    const root = main();
+    if (!root) return null;
+    if (useAppStore.getState().route.collection === "intake") return root;
+    const row = currentRow();
+    if (!row?.isConnected) return final ? root : null;
+    const busy = root.querySelector('[role="grid"][aria-busy="true"]') !== null;
+    const fresh = row !== stale && row.dataset.rowKey !== staleKey;
+    const settled = !busy && Date.now() - started >= settleMs;
+    return fresh || settled || final ? row : null;
+  };
+  /** Focus outside the grid area (body, or an element a closing overlay restored focus to). */
+  const focusLost = (): boolean => {
+    const active = document.activeElement;
+    if (!active || active === document.body || !active.isConnected) return true;
+    return !main()?.contains(active);
+  };
+
+  const tick = () => {
+    if (done) return;
+    const now = Date.now();
+    if (focusedAt) {
+      // Guard window: the virtualiser may re-mount the row right after we focused it, or a
+      // closing dialog may hand focus back to its opener.
+      if (focusLost() && !reapplied) {
+        reapplied = true;
+        const row = currentRow();
+        if (row) focusEl(row);
+      }
+      if (now - focusedAt >= guardMs) finish();
+      else nextFrame(tick);
+      return;
+    }
+    const final = now - started >= timeoutMs;
+    const target = readyTarget(final);
+    if (target && focusEl(target)) {
+      focusedAt = now;
+      nextFrame(tick);
+      return;
+    }
+    if (final) finish();
+    else nextFrame(tick);
+  };
+
+  const onPointerDown = () => finish();
+  const onKeyDown = (event: KeyboardEvent) => {
+    const target = event.target;
+    const root = main();
+    const onPage =
+      target === document.body ||
+      target === document.documentElement ||
+      target === document ||
+      target === null;
+    if (isTextEntry(target) || (!onPage && !(target instanceof Node && root?.contains(target)))) {
+      finish();
+      return;
+    }
+    // Once focus has landed, any key is the analyst's own action (Enter may move focus to
+    // the viewer on purpose): stop guarding so we never pull focus back.
+    if (focusedAt) {
+      finish();
+      return;
+    }
+    if (!onPage) return;
+    const plain = !event.ctrlKey && !event.metaKey && !event.altKey;
+    const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+    if (!plain || !GRID_KEYS.has(key)) return;
+    // Focus is still on the page: land on the row now (if it is ready) and hand it the key.
+    const row = readyTarget(false);
+    if (!row || row === root || !focusEl(row)) return;
+    finish();
+    event.preventDefault();
+    row.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: event.key,
+        code: event.code,
+        shiftKey: event.shiftKey,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  };
+  function finish() {
+    if (done) return;
+    done = true;
+    document.removeEventListener("pointerdown", onPointerDown, true);
+    document.removeEventListener("keydown", onKeyDown, true);
+    if (cancelPendingGridFocus === finish) cancelPendingGridFocus = null;
+  }
+  cancelPendingGridFocus = finish;
+  document.addEventListener("pointerdown", onPointerDown, true);
+  document.addEventListener("keydown", onKeyDown, true);
+  // The palette / search input closes in the same tick; start on the next frame.
+  nextFrame(tick);
+}
+
+export function appCommands(): Command[] {
+  const store = useAppStore.getState;
+  return [
+    {
+      id: "app.palette",
+      label: "명령 팔레트",
+      group: "app",
+      shortcut: "Ctrl+K",
+      icon: "command",
+      run: () => store().setOverlay("palette", !store().paletteOpen),
+    },
+    {
+      id: "app.help",
+      label: "단축키 도움말",
+      group: "app",
+      shortcut: "?",
+      icon: "help",
+      run: () => {
+        store().setOverlay("palette", false);
+        store().setOverlay("help", true);
+      },
+    },
+    {
+      id: "app.close",
+      label: "닫기",
+      group: "app",
+      shortcut: "Escape",
+      icon: "close",
+      disabledReason: () => {
+        const s = store();
+        return s.paletteOpen || s.helpOpen || s.runDialogOpen || s.viewerDrawerOpen
+          ? undefined
+          : "닫을 창이 없습니다";
+      },
+      run: () => {
+        const wasDrawer =
+          store().viewerDrawerOpen && !store().paletteOpen && !store().helpOpen && !store().runDialogOpen;
+        store().closeTopOverlay();
+        if (wasDrawer) focusMain();
+      },
+    },
+    {
+      id: "app.theme.toggle",
+      label: "테마 전환 (다크/라이트)",
+      group: "app",
+      icon: "sun",
+      run: () => store().toggleTheme(),
+    },
+    {
+      id: "app.theme.system",
+      label: "테마: 시스템 설정 따르기",
+      group: "app",
+      icon: "monitor",
+      disabledReason: () => (store().theme === null ? "이미 시스템 설정을 따르고 있습니다" : undefined),
+      run: () => store().setTheme(null),
+    },
+    {
+      id: "app.density.cycle",
+      label: "행 밀도 전환",
+      group: "app",
+      icon: "density",
+      run: () => {
+        store().cycleDensity();
+        announce(`행 밀도: ${DENSITY_LABEL[store().density]}`);
+      },
+    },
+    ...DENSITIES.map(
+      (density): Command => ({
+        id: `app.density.${density}`,
+        label: `행 밀도: ${DENSITY_LABEL[density]}`,
+        group: "app",
+        icon: "density",
+        disabledReason: () => (store().density === density ? "현재 밀도입니다" : undefined),
+        run: () => store().setDensity(density),
+      }),
+    ),
+  ];
+}
+
+export function navigateCommands(): Command[] {
+  const store = useAppStore.getState;
+  return COLLECTION_NODES.map(
+    (node): Command => ({
+      id: `navigate.${node.id}`,
+      label: `이동: ${node.label}`,
+      group: "navigate",
+      icon: node.icon,
+      disabledReason: needsRun,
+      run: () => {
+        store().openCollection(node.id);
+        focusGridWhenReady();
+      },
+    }),
+  );
+}
+
+export function caseCommands(queryClient: QueryClient): Command[] {
+  const store = useAppStore.getState;
+  const refresh = () => queryClient.invalidateQueries({ queryKey: RUNS_QUERY_KEY });
+  return [
+    {
+      id: "case.run-dialog",
+      label: "실행/불러오기",
+      group: "case",
+      icon: "play",
+      disabledReason: () => (anyRunActive(store()) ? "실행 중 런이 있습니다" : undefined),
+      run: () => store().setOverlay("runDialog", true),
+    },
+    {
+      id: "case.cancel",
+      label: "런 취소",
+      group: "case",
+      icon: "stop",
+      disabledReason: (ctx) => needsRun(ctx) ?? (ctx.runIsActive ? undefined : "실행 중인 런이 아닙니다"),
+      run: async (ctx) => {
+        if (!ctx.runId) return;
+        await cancelRun(ctx.runId);
+        announce("런 취소를 요청했습니다");
+        await refresh();
+      },
+    },
+    {
+      id: "case.retry",
+      label: "런 다시 실행",
+      group: "case",
+      icon: "refresh",
+      disabledReason: (ctx) => {
+        const missing = needsRun(ctx);
+        if (missing) return missing;
+        const status = String(currentRun(store())?.status ?? "");
+        return status === "failed" || status === "cancelled"
+          ? undefined
+          : "실패하거나 취소된 런만 다시 실행할 수 있습니다";
+      },
+      run: async (ctx) => {
+        if (!ctx.runId) return;
+        await retryRun(ctx.runId);
+        announce("런을 다시 실행합니다");
+        await refresh();
+      },
+    },
+    {
+      id: "search.global",
+      label: "전체 검색",
+      group: "search",
+      icon: "search",
+      disabledReason: needsRun,
+      run: () => focusById(GLOBAL_SEARCH_ID),
+    },
+    {
+      id: "viewer.open",
+      label: "뷰어로 이동",
+      group: "viewer",
+      shortcut: "Enter",
+      icon: "panel-right",
+      disabledReason: (ctx) => (ctx.viewerHasTarget ? undefined : "선택된 행이 없습니다"),
+      run: () => {
+        if (store().viewerIsDrawer) store().setOverlay("viewerDrawer", true);
+        focusViewer();
+      },
+    },
+    {
+      id: "navigate.rows-for-source",
+      label: "같은 출처의 다른 행",
+      group: "navigate",
+      icon: "filter",
+      disabledReason: (ctx) => {
+        if (!ctx.runId) return NO_RUN_REASON;
+        // The intake dashboard has no row list: a viewer target there is a leftover from another
+        // route, so "같은 출처" has nothing to act on until a collection with rows is open.
+        if (store().route.collection === "intake") return ROWS_FOR_SOURCE_INTAKE_REASON;
+        const { viewerTarget: target, route } = store();
+        if (!target) return "뷰어에 표시된 행이 없습니다";
+        if (!target.sourcePath) return "원본 파일 경로가 없는 행입니다";
+        // Re-running it would change nothing (never a silent no-op, plan U3).
+        if (route.q === target.sourcePath && ROWS_FOR_SOURCE_KEEP.has(route.collection ?? "")) {
+          return "이미 이 원본에서 나온 행만 표시하고 있습니다";
+        }
+        return undefined;
+      },
+      run: () => {
+        const { viewerTarget, route } = store();
+        if (!viewerTarget?.sourcePath) return;
+        // Same collection filtered by the source path (server path_contains where the
+        // grid supports it, client filter otherwise); collections without paths fall back to files.
+        const current = route.collection;
+        const keep = ROWS_FOR_SOURCE_KEEP.has(current ?? "");
+        store().openCollection(keep && current ? current : "files", {
+          kind: current === "artifacts" ? route.kind : undefined,
+          q: viewerTarget.sourcePath,
+        });
+        focusGridWhenReady();
+      },
+    },
+    {
+      id: "export.report",
+      label: "보고서",
+      group: "export",
+      icon: "report",
+      disabledReason: needsRun,
+      run: () => {
+        store().openCollection("outputs");
+        focusGridWhenReady();
+      },
+    },
+  ];
+}
+
+/** Register every built-in command; returns the unregister function. */
+export function registerBuiltinCommands(queryClient: QueryClient): () => void {
+  return registerCommands([
+    ...appCommands(),
+    ...navigateCommands(),
+    ...caseCommands(queryClient),
+    ...reviewCommands(queryClient),
+  ]);
+}
+
+/** One "case.open.{runId}" command per known run (palette: 케이스 전환). */
+export function caseOpenCommands(runs: readonly RunWithProgress[]): Command[] {
+  const store = useAppStore.getState;
+  return runs.map(
+    (run): Command => ({
+      id: `case.open.${run.run_id}`,
+      label: `케이스 열기: ${runDisplayName(run)}`,
+      group: "case",
+      icon: "folder",
+      disabledReason: (ctx) => (ctx.runId === run.run_id ? "이미 열려 있는 케이스입니다" : undefined),
+      run: () => store().navigate({ runId: run.run_id, collection: "intake" }),
+    }),
+  );
+}

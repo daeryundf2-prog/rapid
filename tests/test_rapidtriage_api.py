@@ -4241,5 +4241,489 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 401)
 
 
+    def test_run_review_counts_reads_default_case_db_without_creating_it(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "case-root"
+            output_dir = Path(tmp_dir) / "run-out"
+            root.mkdir(parents=True, exist_ok=True)
+            build_run_fixture(root)
+            client = api_test_client(RunJobStore(), case_db_roots=[tmp_dir])
+            run_response = client.post(
+                "/api/runs",
+                json={"root": str(root), "mode": "fraud", "output_dir": str(output_dir), "read_only": True, "wait": True},
+            )
+            self.assertEqual(run_response.status_code, 202, run_response.text)
+            run_id = run_response.json()["run_id"]
+
+            before = client.get(f"/api/runs/{run_id}/review-counts")
+            self.assertEqual(before.status_code, 200, before.text)
+            self.assertEqual(before.json()["by_status"], {})
+            self.assertEqual(before.json()["report_candidates"], 0)
+            # The persist step's run case DB is canonical (case id from the output dir name).
+            self.assertEqual(before.json()["case_id"], "run-run-out")
+
+            ensure = client.post(f"/api/runs/{run_id}/case-db/ensure", json={})
+            self.assertEqual(ensure.status_code, 200, ensure.text)
+            self.assertEqual(ensure.json()["case_id"], "run-run-out")
+            self.assertFalse(ensure.json()["imported"])  # no second import of the same run
+            database = ensure.json()["database"]
+            for target_id, status, include in (("a", "relevant", True), ("b", "relevant", False), ("c", "excluded", False)):
+                marked = client.post(
+                    "/api/case-db/review",
+                    json={
+                        "database": database,
+                        "case_id": "run-run-out",
+                        "target_type": "document",
+                        "target_id": target_id,
+                        "status": status,
+                        "include_in_report": include,
+                    },
+                )
+                self.assertEqual(marked.status_code, 200, marked.text)
+
+            after = client.get(f"/api/runs/{run_id}/review-counts").json()
+            self.assertTrue(after["exists"])
+            self.assertEqual(after["by_status"], {"relevant": 2, "excluded": 1})
+            self.assertEqual(after["include_in_report"], 1)
+            self.assertEqual(after["report_candidates"], 1)
+            self.assertEqual(client.get("/api/runs/missing/review-counts").status_code, 404)
+
+    def test_review_batch_resolves_run_locators_and_review_map_round_trips(self) -> None:
+        from rapidtriage.api.app.run_review import RunLocatorIndex
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "case-root"
+            output_dir = Path(tmp_dir) / "run-out"
+            root.mkdir(parents=True, exist_ok=True)
+            build_run_fixture(root)
+            client = api_test_client(RunJobStore(), case_db_roots=[tmp_dir])
+            run_response = client.post(
+                "/api/runs",
+                json={"root": str(root), "mode": "fraud", "output_dir": str(output_dir), "read_only": True, "wait": True},
+            )
+            self.assertEqual(run_response.status_code, 202, run_response.text)
+            run_id = run_response.json()["run_id"]
+            empty_map = client.get(f"/api/runs/{run_id}/review-map").json()
+            self.assertEqual(empty_map["marks"], [])
+            handle = client.post(f"/api/runs/{run_id}/case-db/ensure", json={}).json()
+
+            files = client.get(f"/api/runs/{run_id}/files?offset=0&limit=3").json()["candidates"]
+            docs = client.get(f"/api/runs/{run_id}/docs?offset=0&limit=3").json()["results"]
+            events = client.get(f"/api/runs/{run_id}/timeline?offset=0&limit=3").json()["events"]
+            located = [
+                {"collection": "files", "locator": "/candidates/1"},
+                {"collection": "docs", "locator": "/results/1"},
+                {"collection": "timeline", "locator": "/events/2"},
+                {"collection": "indicators", "locator": "/indicators/1"},
+                {"collection": "artifacts", "kind": "browser", "locator": "/artifacts/0"},
+                {"collection": "artifacts", "kind": "eventlog", "locator": "/artifacts/1"},
+            ]
+
+            def batch(targets, **mark):
+                return client.post(
+                    "/api/case-db/review-batch",
+                    json={"database": handle["database"], "case_id": handle["case_id"], "run_id": run_id, "targets": targets, **mark},
+                )
+
+            marked = batch(located, status="relevant")
+            self.assertEqual(marked.status_code, 200, marked.text)
+            resolved = marked.json()["targets"]
+            self.assertEqual(
+                [target["target_type"] for target in resolved],
+                ["file_record", "indexed_document", "event", "artifact", "artifact", "artifact"],
+            )
+            connection = sqlite3.connect(handle["database"])
+            try:
+                ids = [int(target["target_id"]) for target in resolved]
+                self.assertEqual(connection.execute("SELECT path FROM file_record WHERE id = ?", (ids[0],)).fetchone()[0], files[1]["path"])
+                self.assertEqual(
+                    connection.execute("SELECT title FROM indexed_document WHERE id = ?", (ids[1],)).fetchone()[0],
+                    Path(docs[1]["path"]).name,
+                )
+                self.assertEqual(
+                    connection.execute("SELECT target, description FROM event WHERE id = ?", (ids[2],)).fetchone(),
+                    (events[2]["path"], events[2]["summary"]),
+                )
+                indicator = json.loads(connection.execute("SELECT data_json FROM artifact WHERE id = ?", (ids[3],)).fetchone()[0])
+                self.assertEqual(indicator["details"]["source_index"], 1)
+                for row_id, kind, row_index in ((ids[4], "browser", 0), (ids[5], "eventlog", 1)):
+                    stored = json.loads(connection.execute("SELECT data_json FROM artifact WHERE id = ?", (row_id,)).fetchone()[0])
+                    self.assertEqual(stored["source_locator"], {"output_name": f"artifacts_{kind}", "row_index": row_index})
+                # The bisection resolves every per-kind artifact row back to itself.
+                connection.row_factory = sqlite3.Row
+                index = RunLocatorIndex(connection, handle["case_id"], {})
+                rows = connection.execute(
+                    "SELECT id, json_extract(data_json, '$.source_locator.output_name') AS name, "
+                    "json_extract(data_json, '$.source_locator.row_index') AS row_index FROM artifact "
+                    "WHERE json_extract(data_json, '$.source_locator.output_name') IS NOT NULL"
+                ).fetchall()
+                self.assertGreater(len(rows), 10)
+                for row in rows:
+                    kind = str(row["name"]).removeprefix("artifacts_")
+                    self.assertEqual(
+                        index.resolve("artifacts", f"/artifacts/{row['row_index']}", kind), ("artifact", str(row["id"]))
+                    )
+                    self.assertEqual(
+                        index.locate("artifact", str(row["id"])),
+                        {"collection": "artifacts", "kind": kind, "locator": f"/artifacts/{row['row_index']}"},
+                    )
+            finally:
+                connection.close()
+
+            counts = client.get(f"/api/runs/{run_id}/review-counts").json()
+            self.assertEqual(counts["by_status"], {"relevant": 6})
+
+            # add_tags merges and keeps the status; a later status change keeps the tags.
+            self.assertEqual(batch(located[:1], add_tags=["북마크"]).status_code, 200)
+            self.assertEqual(batch(located[:1], status="needs-review").status_code, 200)
+            review_map_response = client.get(f"/api/runs/{run_id}/review-map")
+            self.assertEqual(review_map_response.status_code, 200, review_map_response.text)
+            review_map = review_map_response.json()
+            self.assertEqual(review_map["case_id"], handle["case_id"])
+            by_locator = {(m["collection"], m["kind"], m["locator"]): m for m in review_map["marks"]}
+            self.assertEqual(
+                set(by_locator),
+                {(t["collection"], t.get("kind", ""), t["locator"]) for t in located},
+            )
+            files_mark = by_locator[("files", "", "/candidates/1")]
+            self.assertEqual((files_mark["status"], files_mark["tags"]), ("needs-review", ["북마크"]))
+            self.assertEqual(files_mark["path"], files[1]["path"])
+
+            unresolved = batch([{"collection": "files", "locator": "/candidates/999999"}], status="relevant")
+            self.assertEqual(unresolved.status_code, 400)
+            self.assertIn("/candidates/999999", unresolved.text)
+            no_run = client.post(
+                "/api/case-db/review-batch",
+                json={"database": handle["database"], "case_id": handle["case_id"], "targets": located[:1], "status": "relevant"},
+            )
+            self.assertEqual(no_run.status_code, 400)
+            self.assertEqual(client.get("/api/runs/missing/review-map").status_code, 404)
+
+    def test_review_counts_requires_auth_token(self) -> None:
+        client = TestClient(create_app(RunJobStore(), auth_token=TEST_API_TOKEN))
+        self.assertEqual(client.get("/api/runs/x/review-counts").status_code, 401)
+
+    def _artifact_run_fixture(self, temp: str):
+        root = Path(temp) / "evidence"
+        run_dir = Path(temp) / "run"
+        root.mkdir()
+        run_dir.mkdir()
+        rows = [
+            {"artifact_type": "evtx", "path": str(root / ("windir" if index % 2 == 0 else "userdir") / f"f{index}.evtx")}
+            for index in range(10)
+        ]
+        rows[3]["path"] = str(root / "userdir" / "한글.EVTX")
+        records = run_dir / "records_eventlog.jsonl"
+        records.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+        outputs = {}
+        for kind, payload in (
+            ("eventlog", {"records_path": str(records), "record_count": 10, "artifacts": rows[:2]}),
+            ("browser", {"artifacts": [{"artifact_type": "history", "path": str(root / "b.sqlite")}]}),
+        ):
+            path = run_dir / f"artifacts_{kind}.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            outputs[f"artifacts_{kind}"] = str(path)
+        summary_path = run_dir / "rapidtriage-run-summary.json"
+        outputs["summary"] = str(summary_path)
+        summary_path.write_text(
+            json.dumps(
+                {
+                    "profile_version": "rapidtriage-run-summary-v1",
+                    "mode": "fraud",
+                    "root": str(root),
+                    "output_dir": str(run_dir),
+                    "outputs": outputs,
+                }
+            ),
+            encoding="utf-8",
+        )
+        store = RunJobStore()
+        job = store.import_completed_run(run_dir)
+        return root, run_dir, job.run_id, api_test_client(store)
+
+    def test_artifacts_kind_filter_and_path_contains_paging(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            _root, _run_dir, run_id, client = self._artifact_run_fixture(temp)
+            only = client.get(f"/api/runs/{run_id}/artifacts", params={"limit": 4, "kind": "eventlog"}).json()
+            self.assertEqual(list(only["artifacts"]), ["eventlog"])
+            self.assertEqual(only["artifacts"]["eventlog"]["pagination"]["total"], 10)
+            self.assertEqual(len(only["artifacts"]["eventlog"]["artifacts"]), 4)
+
+            both = client.get(f"/api/runs/{run_id}/artifacts", params={"limit": 4}).json()
+            self.assertEqual(sorted(both["artifacts"]), ["browser", "eventlog"])
+
+            page = client.get(
+                f"/api/runs/{run_id}/artifacts",
+                params={"limit": 2, "kind": "eventlog", "path_contains": "userdir"},
+            ).json()["artifacts"]["eventlog"]
+            self.assertEqual(len(page["artifacts"]), 2)
+            self.assertTrue(page["pagination"]["has_more"])
+            self.assertTrue(page["pagination"]["filtered"])
+            self.assertIsNone(page["pagination"]["total"])
+            nxt = client.get(
+                f"/api/runs/{run_id}/artifacts",
+                params={"limit": 10, "offset": 2, "kind": "eventlog", "path_contains": "USERDIR"},
+            ).json()["artifacts"]["eventlog"]
+            self.assertEqual(len(nxt["artifacts"]), 3)
+            self.assertEqual(nxt["pagination"]["total"], 5)
+            self.assertFalse(nxt["pagination"]["truncated"])
+            self.assertTrue(any("한글" in row["path"] for row in nxt["artifacts"] + page["artifacts"]))
+
+            sorted_response = client.get(
+                f"/api/runs/{run_id}/artifacts", params={"limit": 1, "sort": "timestamp:desc"}
+            ).json()
+            self.assertEqual(sorted_response["sort_supported"], False)
+
+    def test_source_thumbnail_is_generated_cached_and_confined(self) -> None:
+        try:
+            from PIL import Image
+        except ModuleNotFoundError:
+            self.skipTest("Pillow is required for thumbnail tests")
+        with tempfile.TemporaryDirectory() as temp:
+            root, run_dir, run_id, client = self._artifact_run_fixture(temp)
+            photo = root / "photo.jpg"
+            Image.new("RGB", (640, 320), (200, 40, 40)).save(photo, format="JPEG")
+
+            response = client.get(f"/api/runs/{run_id}/source-thumbnail", params={"path": str(photo), "size": 128})
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.headers["content-type"], "image/jpeg")
+            self.assertEqual(response.headers["cache-control"], "private, max-age=86400")
+            thumb_path = Path(temp) / "thumb.jpg"
+            thumb_path.write_bytes(response.content)
+            with Image.open(thumb_path) as thumb:
+                self.assertEqual(thumb.format, "JPEG")
+                self.assertEqual(max(thumb.size), 128)
+
+            digest = hashlib.sha256(str(photo.resolve()).encode("utf-8")).hexdigest()
+            cached = run_dir / "thumbs" / f"{digest}-128.jpg"
+            self.assertTrue(cached.is_file())
+            self.assertEqual(cached.read_bytes(), response.content)
+
+            # A second request is served from the cache file (marker bytes prove reuse).
+            cached.write_bytes(b"cached-thumbnail")
+            again = client.get(f"/api/runs/{run_id}/source-thumbnail", params={"path": str(photo), "size": 128})
+            self.assertEqual(again.status_code, 200)
+            self.assertEqual(again.content, b"cached-thumbnail")
+
+            default = client.get(f"/api/runs/{run_id}/source-thumbnail", params={"path": str(photo)})
+            self.assertEqual(default.status_code, 200)
+            self.assertTrue((run_dir / "thumbs" / f"{digest}-160.jpg").is_file())
+
+            outside = Path(temp) / "outside.jpg"
+            Image.new("RGB", (8, 8)).save(outside, format="JPEG")
+            # Traversal out of the evidence roots is refused (an absolute Windows path is
+            # re-mapped into the roots instead, which then 404s — never served either way).
+            denied = client.get(f"/api/runs/{run_id}/source-thumbnail", params={"path": "../outside.jpg"})
+            self.assertEqual(denied.status_code, 403)
+            absolute = client.get(f"/api/runs/{run_id}/source-thumbnail", params={"path": str(outside)})
+            self.assertIn(absolute.status_code, {403, 404})
+            self.assertEqual(len(list((run_dir / "thumbs").glob("*.jpg"))), 2)
+
+            text_file = root / "notes.txt"
+            text_file.write_text("not an image", encoding="utf-8")
+            not_image = client.get(f"/api/runs/{run_id}/source-thumbnail", params={"path": str(text_file)})
+            self.assertEqual(not_image.status_code, 415)
+            broken = root / "broken.png"
+            broken.write_bytes(b"not really a png")
+            undecodable = client.get(f"/api/runs/{run_id}/source-thumbnail", params={"path": str(broken)})
+            self.assertEqual(undecodable.status_code, 415)
+
+            too_big = client.get(f"/api/runs/{run_id}/source-thumbnail", params={"path": str(photo), "size": 513})
+            self.assertEqual(too_big.status_code, 422)
+            with patch("rapidtriage.api.app.thumbnail.THUMBNAIL_MAX_SOURCE_BYTES", 10):
+                oversized = client.get(
+                    f"/api/runs/{run_id}/source-thumbnail", params={"path": str(photo), "size": 64}
+                )
+            self.assertEqual(oversized.status_code, 413)
+
+    def test_artifacts_path_filter_reports_scan_truncation(self) -> None:
+        from rapidtriage.api.app.artifact_filter import filter_artifact_page
+
+        with tempfile.TemporaryDirectory() as temp:
+            _root, run_dir, _run_id, _client = self._artifact_run_fixture(temp)
+            payload = json.loads((run_dir / "artifacts_eventlog.json").read_text(encoding="utf-8"))
+            page = filter_artifact_page(
+                payload,
+                payload_path=run_dir / "artifacts_eventlog.json",
+                path_contains="zzz-none",
+                offset=0,
+                limit=5,
+                scan_cap=4,
+            )
+            self.assertTrue(page["pagination"]["truncated"])
+            self.assertEqual(page["pagination"]["scanned"], 4)
+            self.assertIsNone(page["pagination"]["total"])
+
+    def test_run_extract_copies_rows_builds_zip_and_rejects_outside_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root, run_dir, run_id, client = self._artifact_run_fixture(temp)
+            (root / "Users").mkdir()
+            target = root / "Users" / "a.txt"
+            target.write_text("hello", encoding="utf-8")
+            outside = Path(temp) / "secret.txt"
+            outside.write_text("nope", encoding="utf-8")
+
+            response = client.post(
+                f"/api/runs/{run_id}/extract",
+                json={"rows": [{"path": str(target), "locator": "/candidates/1"}], "output_name": "sel"},
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            manifest = response.json()
+            self.assertEqual(manifest["summary"]["extracted_count"], 1)
+            entry = manifest["entries"][0]
+            self.assertEqual(entry["sha256"], hashlib.sha256(b"hello").hexdigest())
+            self.assertTrue(Path(entry["extracted_path"]).is_file())
+            self.assertTrue(Path(entry["extracted_path"]).resolve().is_relative_to((run_dir / "extract").resolve()))
+            self.assertTrue(manifest["name"].startswith("sel-"))
+            self.assertEqual(manifest["download_url"], f"/api/runs/{run_id}/extract/{manifest['name']}/file")
+
+            download = client.get(manifest["download_url"])
+            self.assertEqual(download.status_code, 200)
+            self.assertEqual(download.headers["content-type"], "application/zip")
+            archive = Path(temp) / "dl.zip"
+            archive.write_bytes(download.content)
+            with zipfile.ZipFile(archive) as bundle:
+                names = bundle.namelist()
+            self.assertIn("rapidtriage-extract-manifest.json", names)
+            self.assertTrue(any(name.endswith("a.txt") for name in names))
+
+            denied = client.post(f"/api/runs/{run_id}/extract", json={"rows": [{"path": str(outside)}]})
+            self.assertEqual(denied.status_code, 403)
+            self.assertEqual(client.post(f"/api/runs/{run_id}/extract", json={"rows": []}).status_code, 422)
+            too_many = [{"path": str(target)}] * 501
+            self.assertEqual(client.post(f"/api/runs/{run_id}/extract", json={"rows": too_many}).status_code, 422)
+            bad_name = client.post(
+                f"/api/runs/{run_id}/extract", json={"rows": [{"path": str(target)}], "output_name": "../x"}
+            )
+            self.assertEqual(bad_name.status_code, 400)
+            self.assertEqual(client.get(f"/api/runs/{run_id}/extract/nope/file").status_code, 404)
+
+    def _dashboard_run_fixture(self, temp: str):
+        root = Path(temp) / "evidence"
+        run_dir = Path(temp) / "run"
+        root.mkdir()
+        run_dir.mkdir()
+        image = root / "case1.E01"
+        image.write_bytes(b"EVF" + bytes(61))
+        e01_path = run_dir / "rapidtriage-e01.json"
+        e01_path.write_text(
+            json.dumps(
+                {
+                    "command": "e01-extract",
+                    "source_path": str(image),
+                    "partition_start_sector": 2048,
+                    "source_integrity": {"path": str(image), "size": 123456789},
+                    "partition_selection": {
+                        "selected_start_sector": 2048,
+                        "partition_browser_rows": [
+                            {"partition_number": 1, "start_sector": 63, "size_bytes": 104857600,
+                             "filesystem_guess": "fat32", "description": "Win95 FAT32",
+                             "selected_for_recovery": False, "recommended_for_recovery": False},
+                            {"partition_number": 2, "start_sector": 2048, "size_bytes": 999511627776,
+                             "filesystem_guess": "ntfs", "description": "NTFS / exFAT",
+                             "selected_for_recovery": True, "recommended_for_recovery": True},
+                        ],
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        summary_path = run_dir / "rapidtriage-run-summary.json"
+        summary_path.write_text(
+            json.dumps(
+                {
+                    "profile_version": "rapidtriage-run-summary-v1",
+                    "mode": "fraud",
+                    "root": str(image),
+                    "output_dir": str(run_dir),
+                    "outputs": {"e01": str(e01_path), "summary": str(summary_path)},
+                }
+            ),
+            encoding="utf-8",
+        )
+        store = RunJobStore()
+        job = store.import_completed_run(run_dir)
+        return run_dir, job.run_id, api_test_client(store)
+
+    def test_run_dashboard_reports_profile_evidence_source_and_exports(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            run_dir, run_id, client = self._dashboard_run_fixture(temp)
+            empty = client.get(f"/api/runs/{run_id}/dashboard")
+            self.assertEqual(empty.status_code, 200, empty.text)
+            payload = empty.json()
+            self.assertTrue(payload["completed"])
+            self.assertEqual(payload["profile"]["mode"], "fraud")
+            self.assertIn("invoice", payload["profile"]["keywords"])
+            source = payload["evidence_source"]
+            self.assertEqual(source["name"], "case1.E01")
+            self.assertEqual(source["kind"], "image")
+            self.assertEqual(source["size_bytes"], 123456789)
+            self.assertEqual([p["number"] for p in source["partitions"]], [1, 2])
+            self.assertEqual(source["partitions"][1]["filesystem"], "ntfs")
+            self.assertTrue(source["partitions"][1]["selected"])
+            self.assertFalse(source["partitions"][0]["selected"])
+            self.assertEqual(source["selected_partition"], 2)
+            self.assertEqual(payload["exports"], [])
+
+            (run_dir / "rapidtriage-case-report.md").write_text("# r", encoding="utf-8")
+            (run_dir / "rapidtriage-case-report.pdf").write_bytes(b"%PDF")
+            extract = run_dir / "extract" / "sel-20261011T000000000000"
+            extract.mkdir(parents=True)
+            (extract / "rapidtriage-extract-manifest.json").write_text(
+                json.dumps({"summary": {"extracted_count": 3}}), encoding="utf-8"
+            )
+            exports = client.get(f"/api/runs/{run_id}/dashboard").json()["exports"]
+            by_type = {(entry["type"], entry["name"]) for entry in exports}
+            self.assertIn(("case-report", "rapidtriage-case-report.md"), by_type)
+            self.assertIn(("case-report", "rapidtriage-case-report.pdf"), by_type)
+            extract_entry = next(entry for entry in exports if entry["type"] == "extract")
+            self.assertEqual(extract_entry["item_count"], 3)
+            self.assertEqual(extract_entry["status"], "zip 미생성")
+            self.assertEqual(
+                extract_entry["download_url"], f"/api/runs/{run_id}/extract/sel-20261011T000000000000/file"
+            )
+            pdf = next(entry for entry in exports if entry["name"].endswith(".pdf"))
+            self.assertEqual(pdf["download_url"], f"/api/runs/{run_id}/case-report/file/pdf")
+            self.assertEqual(client.get("/api/runs/missing/dashboard").status_code, 404)
+
+    def test_run_case_notes_round_trip_and_feed_the_case_report(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            run_dir, run_id, client = self._dashboard_run_fixture(temp)
+            initial = client.get(f"/api/runs/{run_id}/case-notes")
+            self.assertEqual(initial.status_code, 200, initial.text)
+            self.assertEqual(initial.json()["examiner"], "")
+            self.assertFalse(initial.json()["exists"])
+
+            saved = client.put(
+                f"/api/runs/{run_id}/case-notes",
+                json={"examiner": "  홍길동 ", "summary": "법인 계좌 이체 경위 확인"},
+            )
+            self.assertEqual(saved.status_code, 200, saved.text)
+            self.assertEqual(saved.json()["examiner"], "홍길동")
+            stored = json.loads((run_dir / "rapidtriage-case-notes.json").read_text(encoding="utf-8"))
+            self.assertEqual(stored["summary"], "법인 계좌 이체 경위 확인")
+            again = client.get(f"/api/runs/{run_id}/case-notes").json()
+            self.assertTrue(again["exists"])
+            self.assertEqual(again["examiner"], "홍길동")
+            self.assertTrue(again["updated_at"])
+
+            report = client.post(f"/api/runs/{run_id}/case-report", json={})
+            self.assertEqual(report.status_code, 200, report.text)
+            self.assertIn("분석자: 홍길동", report.json()["markdown"])
+            self.assertIn("법인 계좌 이체 경위 확인", report.json()["markdown"])
+            explicit = client.post(f"/api/runs/{run_id}/case-report", json={"investigator": "김분석"})
+            self.assertIn("분석자: 김분석", explicit.json()["markdown"])
+
+            too_long = client.put(f"/api/runs/{run_id}/case-notes", json={"examiner": "x" * 201})
+            self.assertEqual(too_long.status_code, 422)
+            self.assertEqual(client.get("/api/runs/missing/case-notes").status_code, 404)
+
+    def test_case_notes_and_dashboard_require_auth_token(self) -> None:
+        client = TestClient(create_app(RunJobStore(), auth_token=TEST_API_TOKEN))
+        self.assertEqual(client.get("/api/runs/x/case-notes").status_code, 401)
+        self.assertEqual(client.put("/api/runs/x/case-notes", json={}).status_code, 401)
+        self.assertEqual(client.get("/api/runs/x/dashboard").status_code, 401)
+
+
 if __name__ == "__main__":
     unittest.main()

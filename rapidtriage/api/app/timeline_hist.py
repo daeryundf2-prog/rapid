@@ -22,6 +22,10 @@ ISO_FORMATS = (
 HISTOGRAM_VERSION = "timeline-histogram-v1"
 MIN_BUCKETS = 24
 MAX_BUCKETS = 240
+HARD_MAX_BUCKETS = 2000
+EPOCH = dt.datetime(1970, 1, 1, tzinfo=dt.timezone.utc)
+DEFAULT_WINDOW_START = dt.datetime(1980, 1, 1, tzinfo=dt.timezone.utc)
+DEFAULT_WINDOW_END = dt.datetime(2100, 1, 1, tzinfo=dt.timezone.utc)
 MAX_SOURCE_ROWS = 12
 
 
@@ -47,7 +51,10 @@ def parse_event_timestamp(value: object) -> dt.datetime | None:
         return None
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=dt.timezone.utc)
-    return parsed.astimezone(dt.timezone.utc)
+    try:
+        return parsed.astimezone(dt.timezone.utc)
+    except (OverflowError, ValueError, OSError):
+        return None
 
 
 def choose_bucket_seconds(span_seconds: float) -> int:
@@ -64,6 +71,8 @@ def build_timeline_histogram(
     payload: Mapping[str, object],
     *,
     max_source_rows: int = MAX_SOURCE_ROWS,
+    window_start: dt.datetime = DEFAULT_WINDOW_START,
+    window_end: dt.datetime = DEFAULT_WINDOW_END,
 ) -> dict[str, object]:
     """Aggregate timeline events into time x source density buckets."""
     events = payload.get("events")
@@ -72,6 +81,9 @@ def build_timeline_histogram(
 
     parsed_events: list[tuple[dt.datetime, str]] = []
     unparsed = 0
+    out_of_range = 0
+    oor_min: dt.datetime | None = None
+    oor_max: dt.datetime | None = None
     for event in events:
         if not isinstance(event, Mapping):
             unparsed += 1
@@ -80,11 +92,23 @@ def build_timeline_histogram(
         if timestamp is None:
             unparsed += 1
             continue
+        if not window_start <= timestamp < window_end:
+            out_of_range += 1
+            oor_min = timestamp if oor_min is None else min(oor_min, timestamp)
+            oor_max = timestamp if oor_max is None else max(oor_max, timestamp)
+            continue
         source = str(event.get("source") or event.get("event_type") or "unknown")
         parsed_events.append((timestamp, source))
 
+    oor_info: dict[str, object] = {
+        "out_of_range_count": out_of_range,
+        "out_of_range_min": oor_min.isoformat() if oor_min else None,
+        "out_of_range_max": oor_max.isoformat() if oor_max else None,
+    }
+
     if not parsed_events:
         return {
+            **oor_info,
             "profile_version": HISTOGRAM_VERSION,
             "total_events": len(events),
             "parsed_events": 0,
@@ -102,22 +126,22 @@ def build_timeline_histogram(
     span = max((end - start).total_seconds(), 1)
     bucket_seconds = choose_bucket_seconds(span)
 
-    epoch_start = int(start.timestamp())
-    # Align buckets to wall-clock boundaries for readability.
-    epoch_start -= epoch_start % bucket_seconds
-    needed = int((end.timestamp() - epoch_start) // bucket_seconds) + 1
+    start_s = int((start - EPOCH).total_seconds())
+    end_s = int((end - EPOCH).total_seconds())
+    epoch_start = start_s - start_s % bucket_seconds
+    needed = (end_s - epoch_start) // bucket_seconds + 1
     if needed > MAX_BUCKETS:
         # Widen the bucket so every event index fits within the grid.
-        bucket_seconds = int((end.timestamp() - epoch_start) // MAX_BUCKETS) + 1
-        epoch_start -= epoch_start % bucket_seconds
-        needed = int((end.timestamp() - epoch_start) // bucket_seconds) + 1
-    bucket_count = min(max(needed, MIN_BUCKETS), MAX_BUCKETS)
+        bucket_seconds = (end_s - epoch_start) // MAX_BUCKETS + 1
+        epoch_start = start_s - start_s % bucket_seconds
+        needed = (end_s - epoch_start) // bucket_seconds + 1
+    bucket_count = min(max(needed, MIN_BUCKETS), HARD_MAX_BUCKETS)
 
     source_totals: dict[str, int] = {}
     grid: dict[tuple[int, str], int] = {}
     counts = [0] * bucket_count
     for timestamp, source in parsed_events:
-        index = int((timestamp.timestamp() - epoch_start) // bucket_seconds)
+        index = (int((timestamp - EPOCH).total_seconds()) - epoch_start) // bucket_seconds
         if index < 0 or index >= bucket_count:
             continue
         source_totals[source] = source_totals.get(source, 0) + 1
@@ -129,8 +153,8 @@ def build_timeline_histogram(
 
     buckets = []
     for index in range(bucket_count):
-        bucket_start = dt.datetime.fromtimestamp(epoch_start + index * bucket_seconds, tz=dt.timezone.utc)
-        bucket_end = dt.datetime.fromtimestamp(epoch_start + (index + 1) * bucket_seconds, tz=dt.timezone.utc)
+        bucket_start = EPOCH + dt.timedelta(seconds=epoch_start + index * bucket_seconds)
+        bucket_end = EPOCH + dt.timedelta(seconds=epoch_start + (index + 1) * bucket_seconds)
         by_source = {
             source: grid[(index, source)]
             for source in source_names
@@ -150,14 +174,15 @@ def build_timeline_histogram(
         )
 
     return {
+        **oor_info,
         "profile_version": HISTOGRAM_VERSION,
         "total_events": len(events),
         "parsed_events": len(parsed_events),
         "unparsed_events": unparsed,
         "bucket_seconds": bucket_seconds,
         "bucket_count": bucket_count,
-        "range_start": dt.datetime.fromtimestamp(epoch_start, tz=dt.timezone.utc).isoformat(),
-        "range_end": dt.datetime.fromtimestamp(epoch_start + bucket_count * bucket_seconds, tz=dt.timezone.utc).isoformat(),
+        "range_start": (EPOCH + dt.timedelta(seconds=epoch_start)).isoformat(),
+        "range_end": (EPOCH + dt.timedelta(seconds=epoch_start + bucket_count * bucket_seconds)).isoformat(),
         "max_bucket_count": max(counts) if counts else 0,
         "sources": [{"name": name, "count": count} for name, count in top_sources],
         "buckets": buckets,

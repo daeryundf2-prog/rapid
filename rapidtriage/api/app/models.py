@@ -29,6 +29,16 @@ class RunCreateRequest(BaseModel):
     wait: bool = False
 
 
+class RunExtractRow(BaseModel):
+    path: str = Field(..., min_length=1)
+    locator: str | None = None
+
+
+class RunExtractRequest(BaseModel):
+    rows: list[RunExtractRow] = Field(..., min_length=1, max_length=500)
+    output_name: str | None = Field(default=None, max_length=64)
+
+
 class RunImportRequest(BaseModel):
     output_dir: str = Field(..., min_length=1)
 
@@ -119,7 +129,12 @@ class CaseDbReviewRequest(BaseModel):
 class CaseDbReviewBatchRequest(BaseModel):
     database: str = Field(..., min_length=1)
     case_id: str = Field(..., min_length=1)
+    # Each target is ``{target_type, target_id}`` (case-DB row) or a run-output
+    # locator ``{collection, kind?, locator}`` resolved against ``run_id``.
     targets: list[dict[str, str]] = Field(..., min_length=1)
+    run_id: str | None = None
+    # Merged into each target's existing tags (``tags`` replaces them).
+    add_tags: list[str] | None = None
     status: str | None = None
     verification_status: str | None = None
     tags: list[str] | None = None
@@ -174,3 +189,8 @@ class CollectPlanRequest(BaseModel):
     root: str = Field(..., min_length=1)
     profile: str = "intrusion"
     input_kind: str | None = None
+
+
+class RunCaseNotesRequest(BaseModel):
+    examiner: str = Field("", max_length=200)
+    summary: str = Field("", max_length=20000)

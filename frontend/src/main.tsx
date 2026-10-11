@@ -2,11 +2,16 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./app/App";
-import { initTheme } from "./state/ui";
+import { registerAppSlots } from "./app/registerSlots";
+import { captureLaunchToken } from "./router";
+import { initPrefs } from "./state/slices/prefs";
 import "./tokens/tokens.css";
 import "./app/shell.css";
 
-initTheme();
+// `#token=` launch fragment → session storage; any route sharing the fragment is kept.
+captureLaunchToken();
+initPrefs();
+registerAppSlots();
 
 const queryClient = new QueryClient({
   defaultOptions: {

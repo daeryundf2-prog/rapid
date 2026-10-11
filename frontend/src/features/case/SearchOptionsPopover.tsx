@@ -1,0 +1,217 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { ensureCaseDb, saveSearch } from "../../api/caseDb";
+import { listKeywordPacks, SEARCH_SOURCES } from "../../api/keywordPacks";
+import { ErrorText } from "./ErrorText";
+import { ReasonButton } from "./ReasonButton";
+import { useSearchState } from "./searchState";
+import "./case.css";
+
+function toggle(list: string[], value: string, on: boolean): string[] {
+  return on ? [...list.filter((v) => v !== value), value] : list.filter((v) => v !== value);
+}
+
+/**
+ * Compact search-options popover for S1's top-bar search. Mount it next to the
+ * search input: `<SearchOptionsButton runId={runId} />`. Options live in
+ * `useSearchState` and are turned into a request with `searchPath()`.
+ */
+export function SearchOptionsButton({ runId }: { runId: string | null }) {
+  const open = useSearchState((s) => s.popoverOpen);
+  const setOpen = useSearchState((s) => s.setPopoverOpen);
+  return (
+    <span className="search-options-anchor">
+      <ReasonButton
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        reason={runId ? undefined : "열린 케이스가 없습니다"}
+        onClick={() => setOpen(!open)}
+      >
+        검색 옵션
+      </ReasonButton>
+      {open && runId && <SearchOptionsPopover runId={runId} onClose={() => setOpen(false)} />}
+    </span>
+  );
+}
+
+export function SearchOptionsPopover({ runId, onClose }: { runId: string; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const options = useSearchState((s) => s.options);
+  const keywords = useSearchState((s) => s.keywords);
+  const patch = useSearchState((s) => s.patchOptions);
+  const reset = useSearchState((s) => s.resetOptions);
+  const [saveName, setSaveName] = useState("");
+  const packs = useQuery({ queryKey: ["keyword-packs"], queryFn: listKeywordPacks, retry: false });
+
+  const save = useMutation({
+    mutationFn: async () => {
+      const db = await ensureCaseDb(runId);
+      return saveSearch({
+        database: db.database,
+        case_id: db.case_id,
+        name: saveName.trim(),
+        keywords,
+        limit: options.limit,
+        sources: options.sources,
+        created_by: "web-ui",
+      });
+    },
+    onSuccess: () => {
+      setSaveName("");
+      void queryClient.invalidateQueries({ queryKey: ["saved-searches", runId] });
+      void queryClient.invalidateQueries({ queryKey: ["review-counts", runId] });
+    },
+  });
+
+  const saveReason = !keywords.length
+    ? "저장할 검색어가 없습니다. 먼저 검색어를 입력하세요."
+    : !saveName.trim()
+      ? "검색 이름을 입력하세요."
+      : undefined;
+
+  return (
+    <div
+      className="search-options-popover"
+      role="dialog"
+      aria-label="검색 옵션"
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.stopPropagation();
+          onClose();
+        }
+      }}
+    >
+      <div className="case-field">
+        <label htmlFor="so-mode">검색 방식</label>
+        <select
+          id="so-mode"
+          value={options.mode}
+          onChange={(e) => patch({ mode: e.target.value as "exact" | "fuzzy" | "regex" })}
+        >
+          <option value="exact">정확히 일치</option>
+          <option value="fuzzy">유사 일치</option>
+          <option value="regex">정규식</option>
+        </select>
+      </div>
+      {options.mode === "fuzzy" && (
+        <div className="case-field">
+          <label htmlFor="so-fuzzy">허용 편집 거리 (0-2)</label>
+          <input
+            id="so-fuzzy"
+            type="number"
+            min={0}
+            max={2}
+            value={options.fuzzyDistance}
+            onChange={(e) => patch({ fuzzyDistance: Math.min(2, Math.max(0, Number(e.target.value) || 0)) })}
+          />
+        </div>
+      )}
+      <fieldset className="case-field">
+        <legend>검색 범위</legend>
+        {SEARCH_SOURCES.map((source) => (
+          <label key={source.id}>
+            <input
+              type="checkbox"
+              checked={options.sources.includes(source.id)}
+              onChange={(e) => patch({ sources: toggle(options.sources, source.id, e.target.checked) })}
+            />{" "}
+            {source.label}
+          </label>
+        ))}
+      </fieldset>
+      <div className="case-field">
+        <label htmlFor="so-ext">확장자 (쉼표로 구분)</label>
+        <input
+          id="so-ext"
+          type="text"
+          value={options.extensions.join(",")}
+          onChange={(e) =>
+            patch({
+              extensions: e.target.value
+                .split(",")
+                .map((v) => v.trim())
+                .filter(Boolean),
+            })
+          }
+        />
+      </div>
+      <div className="case-field">
+        <label htmlFor="so-path">경로 포함 문자열</label>
+        <input
+          id="so-path"
+          type="text"
+          value={options.pathContains}
+          onChange={(e) => patch({ pathContains: e.target.value })}
+        />
+      </div>
+      <div className="case-field">
+        <label htmlFor="so-prox">근접 검색 창 (0 = 사용 안 함)</label>
+        <input
+          id="so-prox"
+          type="number"
+          min={0}
+          max={100}
+          value={options.proximityWindow}
+          onChange={(e) =>
+            patch({ proximityWindow: Math.min(100, Math.max(0, Number(e.target.value) || 0)) })
+          }
+        />
+      </div>
+      <label>
+        <input type="checkbox" checked={options.ocr} onChange={(e) => patch({ ocr: e.target.checked })} /> OCR
+        텍스트 포함
+      </label>
+      <label>
+        <input
+          type="checkbox"
+          checked={options.hideKnownGood}
+          onChange={(e) => patch({ hideKnownGood: e.target.checked })}
+        />{" "}
+        known-good 숨기기
+      </label>
+      <fieldset className="case-field">
+        <legend>키워드 팩</legend>
+        {packs.isPending && <span aria-busy="true">불러오는 중…</span>}
+        {packs.isError && <span className="case-error">키워드 팩을 불러오지 못했습니다.</span>}
+        {packs.data?.length === 0 && <span className="case-reason">사용 가능한 키워드 팩이 없습니다.</span>}
+        {packs.data?.map((pack) => (
+          <label key={pack.name}>
+            <input
+              type="checkbox"
+              checked={options.keywordPacks.includes(pack.name)}
+              onChange={(e) =>
+                patch({ keywordPacks: toggle(options.keywordPacks, pack.name, e.target.checked) })
+              }
+            />{" "}
+            {pack.label || pack.name}
+          </label>
+        ))}
+      </fieldset>
+      <div className="case-field">
+        <label htmlFor="so-save-name">현재 검색 저장</label>
+        <input
+          id="so-save-name"
+          type="text"
+          value={saveName}
+          placeholder="검색 이름"
+          onChange={(e) => setSaveName(e.target.value)}
+        />
+        {save.error && (
+          <ErrorText>{save.error instanceof Error ? save.error.message : "저장하지 못했습니다."}</ErrorText>
+        )}
+        {save.isSuccess && <p>검색을 저장했습니다.</p>}
+      </div>
+      <div className="case-actions">
+        <button type="button" className="button" onClick={reset}>
+          기본값
+        </button>
+        <ReasonButton reason={saveReason} onClick={() => save.mutate()}>
+          저장
+        </ReasonButton>
+        <button type="button" className="button primary" onClick={onClose}>
+          닫기
+        </button>
+      </div>
+    </div>
+  );
+}

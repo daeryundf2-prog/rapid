@@ -102,6 +102,10 @@
     "/api/runs/{run_id}/case-db/ensure": {
       "post": "ensure_run_case_db_api_runs__run_id__case_db_ensure_post"
     },
+    "/api/runs/{run_id}/case-notes": {
+      "get": "get_run_case_notes_api_runs__run_id__case_notes_get",
+      "put": "put_run_case_notes_api_runs__run_id__case_notes_put"
+    },
     "/api/runs/{run_id}/case-report": {
       "post": "create_case_report_api_runs__run_id__case_report_post"
     },
@@ -114,11 +118,20 @@
     "/api/runs/{run_id}/columnar-artifacts": {
       "get": "get_run_columnar_artifacts_api_runs__run_id__columnar_artifacts_get"
     },
+    "/api/runs/{run_id}/dashboard": {
+      "get": "get_run_dashboard_api_runs__run_id__dashboard_get"
+    },
     "/api/runs/{run_id}/docs": {
       "get": "get_run_docs_api_runs__run_id__docs_get"
     },
     "/api/runs/{run_id}/docs-index-search": {
       "get": "search_run_docs_index_api_runs__run_id__docs_index_search_get"
+    },
+    "/api/runs/{run_id}/extract": {
+      "post": "extract_run_rows_api_runs__run_id__extract_post"
+    },
+    "/api/runs/{run_id}/extract/{name}/file": {
+      "get": "download_run_extract_api_runs__run_id__extract__name__file_get"
     },
     "/api/runs/{run_id}/files": {
       "get": "get_run_files_api_runs__run_id__files_get"
@@ -149,6 +162,12 @@
     },
     "/api/runs/{run_id}/retry": {
       "post": "retry_run_api_runs__run_id__retry_post"
+    },
+    "/api/runs/{run_id}/review-counts": {
+      "get": "run_review_counts_api_runs__run_id__review_counts_get"
+    },
+    "/api/runs/{run_id}/review-map": {
+      "get": "run_review_map_api_runs__run_id__review_map_get"
     },
     "/api/runs/{run_id}/reviewer-bundle": {
       "post": "create_reviewer_bundle_api_runs__run_id__reviewer_bundle_post"
@@ -194,6 +213,9 @@
     },
     "/api/runs/{run_id}/source-sqlite-wal-preview": {
       "get": "source_sqlite_wal_preview_api_runs__run_id__source_sqlite_wal_preview_get"
+    },
+    "/api/runs/{run_id}/source-thumbnail": {
+      "get": "source_thumbnail_api_runs__run_id__source_thumbnail_get"
     },
     "/api/runs/{run_id}/submission-manifest": {
       "get": "get_submission_manifest_api_runs__run_id__submission_manifest_get"

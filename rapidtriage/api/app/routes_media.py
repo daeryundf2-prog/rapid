@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import mimetypes
 import sqlite3
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import (
     FileResponse,
+    Response,
 )
 
 from ...core.jobs import RunJobStore
@@ -23,6 +25,7 @@ from .email import (
     build_email_attachment_package,
 )
 from .helpers import (
+    get_job,
     is_image_preview_candidate,
     is_sqlite_candidate,
     parse_source_preview_archive_request,
@@ -47,6 +50,9 @@ from .runops import (
 from .sqlite import (
     build_sqlite_table_page,
 )
+from .thumbnail import THUMBNAIL_DEFAULT_SIZE, THUMBNAIL_MAX_SIZE, cached_thumbnail
+
+THUMBNAIL_CACHE_CONTROL = "private, max-age=86400"
 
 
 def build_media_router(
@@ -58,6 +64,25 @@ def build_media_router(
     def download_source_file(run_id: str, path: str = Query(..., min_length=1)) -> FileResponse:
         source_path = resolve_allowed_source_file(store, run_id, path)
         return FileResponse(source_path, filename=source_path.name)
+
+
+    @router.get("/api/runs/{run_id}/source-thumbnail")
+    def source_thumbnail(
+        run_id: str,
+        path: str = Query(..., min_length=1),
+        size: int = Query(THUMBNAIL_DEFAULT_SIZE, ge=16, le=THUMBNAIL_MAX_SIZE),
+    ) -> Response:
+        source_path = resolve_allowed_source_file(store, run_id, path)
+        if not is_image_preview_candidate(source_path):
+            raise HTTPException(status_code=415, detail="source file is not a supported image")
+        summary = get_job(store, run_id).summary or {}
+        output_value = summary.get("output_dir")
+        output_dir = Path(output_value) if isinstance(output_value, str) and output_value else None
+        cache_path, data = cached_thumbnail(source_path, size, output_dir)
+        headers = {"Cache-Control": THUMBNAIL_CACHE_CONTROL}
+        if cache_path is not None:
+            return FileResponse(cache_path, media_type="image/jpeg", headers=headers)
+        return Response(content=data or b"", media_type="image/jpeg", headers=headers)
 
 
     @router.get("/api/runs/{run_id}/source-preview")

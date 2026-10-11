@@ -59,6 +59,7 @@ from .constants import (
     STAGE10_CAPABILITY_SPECS,
     VIRTUAL_TABLE_ROW_LIMIT,
 )
+from .dashboard import apply_case_notes_to_report_metadata
 from .email import (
     build_email_preview,
     first_email_attachment_count,
@@ -654,11 +655,13 @@ def build_run_case_report(
         include_all=request.include_all,
         max_items=request.max_items,
     )
+    # 접수 dashboard case notes fill an empty 분석자 / 범위 (explicit request fields win).
+    metadata = apply_case_notes_to_report_metadata(dict(model_to_dict(request)), case_path.parent)
     return build_case_report_markdown(
         run_summary=job.summary,
         case_payload=case_payload,
         submission_manifest=manifest,
-        metadata=model_to_dict(request),
+        metadata=metadata,
     )
 
 

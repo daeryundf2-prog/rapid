@@ -1,144 +1,66 @@
-import { useQuery } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
-import {
-  Group,
-  type GroupImperativeHandle,
-  Panel,
-  Separator,
-  useDefaultLayout,
-} from "react-resizable-panels";
-import { ApiError, captureFragmentToken } from "../api/client";
-import { listRuns } from "../api/runs";
-import { RunDetailPane } from "../features/detail-panel/RunDetailPane";
-import { CaseQueuePane } from "../features/evidence-tree/CaseQueuePane";
-import { CollectionTablePane } from "../features/item-table/CollectionTablePane";
-import { RunTablePane } from "../features/item-table/RunTablePane";
-import { systemTheme, useUiStore } from "../state/ui";
+import { useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo } from "react";
+import { LiveRegion } from "../a11y";
+import { ApiError } from "../api/client";
+import { RUNS_QUERY_KEY, useRunsPoll } from "../api/runsProgress";
+import { caseOpenCommands, registerBuiltinCommands } from "../commands/builtin";
+import { registerCommands } from "../commands/registry";
+import { CaseFeature } from "../features/case/CaseFeature";
+import { useReviewInvalidation } from "../features/grid/reviewMap";
+import { Layout } from "../shell/Layout";
+import { useShortcuts } from "../shortcuts";
+import { useRoute } from "../state/hooks";
+import { systemTheme } from "../state/slices/prefs";
+import { useAppStore } from "../state/store";
 import { TokenGate } from "./TokenGate";
 
+function useSystemThemeListener(): void {
+  const setSystemTheme = useAppStore((s) => s.setSystemTheme);
+  useEffect(() => {
+    if (!window.matchMedia) return;
+    const list = window.matchMedia("(prefers-color-scheme: light)");
+    const onChange = () => setSystemTheme(systemTheme());
+    onChange();
+    list.addEventListener?.("change", onChange);
+    return () => list.removeEventListener?.("change", onChange);
+  }, [setSystemTheme]);
+}
+
+/** Shell root: commands, key map, runs poller, token gate, layout. */
 export function App() {
-  const theme = useUiStore((s) => s.theme);
-  const toggleTheme = useUiStore((s) => s.toggleTheme);
-  const selectedRunId = useUiStore((s) => s.selectedRunId);
-  const selectedNode = useUiStore((s) => s.selectedNode);
-  const [tokenVersion, setTokenVersion] = useState(0);
-  const tableFilter = useUiStore((s) => s.tableFilter);
-  const setTableFilter = useUiStore((s) => s.setTableFilter);
-  const searchRef = useRef<HTMLInputElement>(null);
+  const queryClient = useQueryClient();
+  const runsQuery = useRunsPoll();
+  const { route } = useRoute();
+  useShortcuts();
+  useSystemThemeListener();
+  useReviewInvalidation();
 
-  useEffect(() => {
-    if (captureFragmentToken()) {
-      setTokenVersion((v) => v + 1);
-    }
-  }, []);
+  useEffect(() => registerBuiltinCommands(queryClient), [queryClient]);
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        searchRef.current?.focus();
-        searchRef.current?.select();
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
-
-  const layout = useDefaultLayout({
-    id: "rapidtriage-workbench",
-    storage: window.localStorage,
-    panelIds: ["queue", "items", "detail"],
-    onlySaveAfterUserInteractions: true,
-  });
-  const groupRef = useRef<GroupImperativeHandle>(null);
-  const savedLayout = layout.defaultLayout;
-  // Apply the saved (or default) layout once after mount: the library's
-  // defaultLayout prop is read before child panels register, so an
-  // imperative setLayout is the reliable path.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: mount-only initialization
-  useEffect(() => {
-    const target =
-      savedLayout && (savedLayout.queue ?? 0) + (savedLayout.detail ?? 0) > 0
-        ? savedLayout
-        : { queue: 20, items: 48, detail: 32 };
-    groupRef.current?.setLayout(target);
-  }, []);
-
-  const runsQuery = useQuery({
-    queryKey: ["runs", tokenVersion],
-    queryFn: listRuns,
-    refetchInterval: 5000,
-  });
+  // One "case.open.{id}" palette entry per run; re-register only when the run list changes.
+  const runs = runsQuery.data;
+  const runKey = (runs ?? []).map((r) => `${r.run_id}:${r.request?.root ?? ""}`).join("|");
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on run ids/names, not poll identity
+  const caseCommands = useMemo(() => caseOpenCommands(runs ?? []), [runKey]);
+  useEffect(() => registerCommands(caseCommands), [caseCommands]);
 
   const unauthorized =
     runsQuery.isError && runsQuery.error instanceof ApiError && runsQuery.error.status === 401;
 
   if (unauthorized) {
     return (
-      <div className="workbench" data-testid="workbench-shell">
-        <TokenGate onSaved={() => setTokenVersion((v) => v + 1)} />
+      <div className="shell" data-testid="workbench-shell">
+        <TokenGate onSaved={() => void queryClient.invalidateQueries({ queryKey: RUNS_QUERY_KEY })} />
+        <LiveRegion />
       </div>
     );
   }
 
-  const runs = runsQuery.data ?? [];
-  const failedCount = runs.filter((r) => r.status === "failed").length;
-  const activeTheme = theme ?? systemTheme();
-
   return (
-    <div className="workbench" data-testid="workbench-shell">
-      <header className="workbench-header">
-        <span className="workbench-brand">RapidForensic</span>
-        <span className="workbench-case-title">
-          {selectedRunId ? `케이스 ${selectedRunId}` : "케이스를 선택하세요"}
-        </span>
-        <div className="header-search">
-          <input
-            ref={searchRef}
-            type="search"
-            placeholder="표 필터 (Ctrl+K)"
-            aria-label="표 필터"
-            value={tableFilter}
-            onChange={(event) => setTableFilter(event.target.value)}
-          />
-          <button
-            type="button"
-            className="button"
-            onClick={toggleTheme}
-            title="테마 전환"
-            data-testid="theme-toggle"
-          >
-            {activeTheme === "dark" ? "라이트" : "다크"}
-          </button>
-        </div>
-      </header>
-      <div className="workbench-body">
-        <Group
-          orientation="horizontal"
-          groupRef={groupRef}
-          onLayoutChanged={layout.onLayoutChanged}
-          style={{ height: "100%" }}
-        >
-          <Panel id="queue" defaultSize="20%" minSize="160px" collapsible>
-            <CaseQueuePane runs={runs} />
-          </Panel>
-          <Separator className="resize-handle" />
-          <Panel id="items" defaultSize="48%" minSize="240px">
-            {selectedNode ? <CollectionTablePane node={selectedNode} /> : <RunTablePane runs={runs} />}
-          </Panel>
-          <Separator className="resize-handle" />
-          <Panel id="detail" defaultSize="32%" minSize="200px" collapsible>
-            <RunDetailPane />
-          </Panel>
-        </Group>
-      </div>
-      <footer className="workbench-statusbar">
-        <span data-testid="status-run-count">케이스 {runs.length}건</span>
-        {failedCount > 0 && <span>실패 {failedCount}건</span>}
-        {runsQuery.isError && <span>목록을 불러오지 못했습니다</span>}
-        {runsQuery.isPending && <span>불러오는 중…</span>}
-        <span style={{ marginLeft: "auto" }}>v2 workbench</span>
-      </footer>
-    </div>
+    <>
+      <Layout />
+      <CaseFeature runId={route.runId} />
+      <LiveRegion />
+    </>
   );
 }

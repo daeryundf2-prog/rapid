@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import json
+import re
+import zipfile
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -14,6 +17,7 @@ from fastapi.responses import (
 )
 
 from ...core.columnar_store import query_columnar_artifact_records
+from ...core.extract import DEFAULT_EXTRACT_MANIFEST_NAME, ExtractError, run_extract
 from ...core.indicators import (
     IndicatorSummaryError,
     build_indicator_ti_enrichment_package,
@@ -21,9 +25,18 @@ from ...core.indicators import (
 from ...core.jobs import (
     RunJobStore,
     RunRequest,
+    run_output_dir,
 )
 from ...core.visible_capabilities import build_visible_capability_response
+from .artifact_filter import filter_artifact_page
+from .dashboard import (
+    build_run_dashboard,
+    notes_output_dir,
+    read_case_notes,
+    write_case_notes,
+)
 from .helpers import (
+    allowed_source_roots,
     default_case_path,
     enrich_summary_counts,
     get_job,
@@ -35,7 +48,9 @@ from .helpers import (
     validate_run_evidence_source,
 )
 from .models import (
+    RunCaseNotesRequest,
     RunCreateRequest,
+    RunExtractRequest,
     RunImportRequest,
 )
 from .pagination import (
@@ -50,6 +65,8 @@ from .timeline_hist import build_timeline_histogram
 from .tree import build_run_issues, build_run_tree
 
 ACTIVE_RUN_STATUSES = frozenset({"queued", "running"})
+EXTRACT_ZIP_MAX_BYTES = 2 * 1024 * 1024 * 1024
+EXTRACT_NAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
 
 def compact_run_progress(progress: Mapping[str, object] | None) -> dict[str, object] | None:
@@ -263,6 +280,32 @@ def build_runs_router(
         return build_run_tree(store, run_id)
 
 
+    @router.get("/api/runs/{run_id}/dashboard")
+    def get_run_dashboard(run_id: str) -> dict[str, object]:
+        """접수 dashboard: run profile keywords, evidence source + partitions, export history."""
+        return build_run_dashboard(store, run_id, get_job(store, run_id))
+
+
+    @router.get("/api/runs/{run_id}/case-notes")
+    def get_run_case_notes(run_id: str) -> dict[str, object]:
+        job = get_job(store, run_id)
+        return {"run_id": run_id, **read_case_notes(notes_output_dir(job))}
+
+
+    @router.put("/api/runs/{run_id}/case-notes")
+    def put_run_case_notes(run_id: str, request: RunCaseNotesRequest) -> dict[str, object]:
+        job = get_job(store, run_id)
+        try:
+            saved = write_case_notes(
+                notes_output_dir(job),
+                examiner=request.examiner.strip(),
+                summary=request.summary.strip(),
+            )
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=str(exc))
+        return {"run_id": run_id, **saved}
+
+
     @router.get("/api/runs/{run_id}/issues")
     def get_run_issues(run_id: str) -> dict[str, object]:
         return build_run_issues(store, run_id)
@@ -321,6 +364,9 @@ def build_runs_router(
         offset: int = Query(0, ge=0),
         limit: int = Query(0, ge=0, le=1000),
         cursor: str | None = Query(default=None),
+        kind: list[str] = Query(default=[]),
+        path_contains: str | None = Query(default=None),
+        sort: str | None = Query(default=None),
     ) -> dict[str, object]:
         job = get_job(store, run_id)
         if job.summary is None:
@@ -328,11 +374,23 @@ def build_runs_router(
         outputs = job.summary.get("outputs")
         if not isinstance(outputs, dict):
             raise HTTPException(status_code=409, detail="run has no outputs")
+        wanted_kinds = {item.strip() for item in kind if item.strip()}
         artifacts = {}
         for name in sorted(outputs):
             if name.startswith("artifacts_"):
+                if wanted_kinds and name.removeprefix("artifacts_") not in wanted_kinds:
+                    continue
                 try:
                     artifact_payload = store.read_output(run_id, name)
+                    if path_contains and path_contains.strip() and limit > 0:
+                        artifacts[name.removeprefix("artifacts_")] = filter_artifact_page(
+                            artifact_payload,
+                            payload_path=get_output_path(store, run_id, name),
+                            path_contains=path_contains.strip(),
+                            offset=offset,
+                            limit=limit,
+                        )
+                        continue
                     artifacts[name.removeprefix("artifacts_")] = paginate_artifact_output(
                         artifact_payload,
                         payload_path=get_output_path(store, run_id, name),
@@ -346,7 +404,87 @@ def build_runs_router(
                     raise HTTPException(status_code=403, detail=str(exc))
                 except FileNotFoundError as exc:
                     raise HTTPException(status_code=404, detail=str(exc))
-        return {"artifacts": artifacts}
+        response: dict[str, object] = {"artifacts": artifacts}
+        if sort:
+            # The per-kind JSONL stream is not timestamp-ordered; honouring a
+            # sort would need the whole file in memory, so it is not supported.
+            response["sort_supported"] = False
+        return response
+
+
+    @router.post("/api/runs/{run_id}/extract")
+    def extract_run_rows(run_id: str, request: RunExtractRequest) -> dict[str, Any]:
+        job = get_job(store, run_id)
+        if job.summary is None:
+            raise HTTPException(status_code=409, detail="run is not completed")
+        roots = allowed_source_roots(job.summary)
+        items: list[dict[str, object]] = []
+        for row in request.rows:
+            try:
+                resolved = Path(row.path).expanduser().resolve()
+            except OSError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+            if not any(resolved.is_relative_to(root) for root in roots):
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"path is outside the run's allowed source roots: {row.path}",
+                )
+            item: dict[str, object] = {"path": str(resolved)}
+            if row.locator:
+                item["locator"] = row.locator
+            items.append(item)
+        name = dt.datetime.now().strftime("%Y%m%dT%H%M%S%f")
+        if request.output_name:
+            if not EXTRACT_NAME_PATTERN.fullmatch(request.output_name):
+                raise HTTPException(
+                    status_code=400,
+                    detail="output_name may only contain letters, digits, '.', '_' and '-'",
+                )
+            name = f"{request.output_name}-{name}"
+        output_dir = run_output_dir(job.summary)
+        target = output_dir / "extract" / name
+        run_request = job.request
+        try:
+            manifest = run_extract(
+                output_dir,
+                target,
+                payload={"command": "files", "candidates": items},
+                read_only=bool(run_request and run_request.read_only),
+                max_extract_size_bytes=int(run_request.max_extract_size_bytes) if run_request else 0,
+                max_file_count=int(run_request.max_file_count) if run_request else 0,
+            )
+        except ExtractError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=str(exc))
+        (target / DEFAULT_EXTRACT_MANIFEST_NAME).write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        manifest["name"] = name
+        manifest["download_url"] = f"/api/runs/{run_id}/extract/{name}/file"
+        return manifest
+
+
+    @router.get("/api/runs/{run_id}/extract/{name}/file")
+    def download_run_extract(run_id: str, name: str) -> FileResponse:
+        job = get_job(store, run_id)
+        if job.summary is None:
+            raise HTTPException(status_code=409, detail="run is not completed")
+        if not EXTRACT_NAME_PATTERN.fullmatch(name):
+            raise HTTPException(status_code=400, detail="invalid extract name")
+        base = run_output_dir(job.summary) / "extract"
+        folder = base / name
+        if not folder.is_dir():
+            raise HTTPException(status_code=404, detail="extract not found")
+        files = [p for p in sorted(folder.rglob("*")) if p.is_file() and not p.is_symlink()]
+        if sum(p.stat().st_size for p in files) > EXTRACT_ZIP_MAX_BYTES:
+            raise HTTPException(status_code=413, detail="extract is larger than the 2 GB zip limit")
+        archive = base / f"{name}.zip"
+        if not archive.is_file():
+            with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
+                for path in files:
+                    bundle.write(path, path.relative_to(folder).as_posix())
+        return FileResponse(archive, filename=archive.name, media_type="application/zip")
 
 
     @router.get("/api/runs/{run_id}/columnar-artifacts")
