@@ -57,7 +57,8 @@ def build_api_snapshot() -> dict:
 def write_snapshot(path: Path) -> dict:
     snapshot = build_api_snapshot()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(snapshot, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    # newline="\n": the repo is byte-stable (`* -text`), so never write CRLF on Windows.
+    path.write_text(json.dumps(snapshot, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
     return snapshot
 
 

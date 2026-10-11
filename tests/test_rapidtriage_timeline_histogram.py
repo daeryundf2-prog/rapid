@@ -53,6 +53,28 @@ class TimelineHistogramTests(unittest.TestCase):
         self.assertEqual(per_source, 3)
         self.assertEqual(result["max_bucket_count"], max(b["count"] for b in result["buckets"]))
 
+    def test_out_of_range_timestamps_are_excluded(self) -> None:
+        payload = {
+            "events": [
+                {"timestamp": "1628-03-01T00:00:00Z", "source": "lnk"},
+                {"timestamp": "9999-12-31T23:59:59Z", "source": "lnk"},
+                {"timestamp": "2024-01-01T10:00:00Z", "source": "files"},
+                {"timestamp": "2024-06-01T10:00:00Z", "source": "files"},
+            ]
+        }
+        result = build_timeline_histogram(payload)
+        self.assertEqual(result["out_of_range_count"], 2)
+        self.assertTrue(result["out_of_range_min"].startswith("1628"))
+        self.assertTrue(result["out_of_range_max"].startswith("9999"))
+        self.assertEqual(result["parsed_events"], 2)
+        self.assertEqual(sum(b["count"] for b in result["buckets"]), 2)
+        self.assertLessEqual(result["bucket_count"], 2000)
+
+    def test_only_out_of_range_returns_empty_with_count(self) -> None:
+        result = build_timeline_histogram({"events": [{"timestamp": "1628-03-01T00:00:00Z"}]})
+        self.assertEqual(result["out_of_range_count"], 1)
+        self.assertEqual(result["buckets"], [])
+
     def test_empty_timeline_returns_empty_profile(self) -> None:
         result = build_timeline_histogram({"events": []})
         self.assertEqual(result["parsed_events"], 0)

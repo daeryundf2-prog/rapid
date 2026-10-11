@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from collections.abc import Callable
 from pathlib import Path
 
@@ -49,6 +50,12 @@ from .models import (
     RunCaseDbEnsureRequest,
     SampleCaseRunRequest,
 )
+from .run_review import (
+    RunLocatorIndex,
+    canonical_run_case,
+    review_map_entries,
+    split_batch_targets,
+)
 
 
 def build_case_db_router(
@@ -78,6 +85,65 @@ def build_case_db_router(
             raise HTTPException(status_code=400, detail=str(exc))
 
 
+    @router.get("/api/runs/{run_id}/review-counts")
+    def run_review_counts(run_id: str) -> dict[str, object]:
+        """Read-only review tallies for the console tree and the report gate.
+
+        Reads the run's canonical case DB (``rapidtriage-case.db``; the
+        persisted run case, or ``run-<run_id>`` from ``/case-db/ensure``) and
+        the case-review JSON without creating either.
+        """
+        job = get_job(store, run_id)
+        if job.summary is None:
+            raise HTTPException(status_code=409, detail="run is not completed")
+        output_dir = run_output_dir(job.summary)
+        database_path, case_id = canonical_run_case(job.summary, run_id)
+        by_status: dict[str, int] = {}
+        db_include = 0
+        db_exists = database_path.is_file()
+        if db_exists:
+            try:
+                connection = sqlite3.connect(f"{database_path.as_uri()}?mode=ro", uri=True)
+                try:
+                    for status, include, count in connection.execute(
+                        "SELECT status, include_in_report, COUNT(*) FROM review_mark WHERE case_id = ? GROUP BY status, include_in_report",
+                        (case_id,),
+                    ):
+                        by_status[str(status)] = by_status.get(str(status), 0) + int(count)
+                        if include:
+                            db_include += int(count)
+                finally:
+                    connection.close()
+            except sqlite3.Error:
+                by_status = {}
+                db_include = 0
+        bookmarks = 0
+        bookmarks_in_report = 0
+        case_json = output_dir / "rapidtriage-case.json"
+        if case_json.is_file():
+            try:
+                payload = json.loads(case_json.read_text(encoding="utf-8"))
+                items = payload.get("bookmarks") if isinstance(payload, dict) else None
+                if isinstance(items, list):
+                    bookmarks = len(items)
+                    bookmarks_in_report = sum(
+                        1 for item in items if isinstance(item, dict) and item.get("include_in_report")
+                    )
+            except (OSError, json.JSONDecodeError):
+                pass
+        return {
+            "command": "case-db.review-counts",
+            "run_id": run_id,
+            "database": str(database_path),
+            "case_id": case_id,
+            "exists": db_exists,
+            "by_status": by_status,
+            "include_in_report": db_include,
+            "case_json": {"bookmarks": bookmarks, "include_in_report": bookmarks_in_report},
+            "report_candidates": db_include + bookmarks_in_report,
+        }
+
+
     @router.post("/api/case-db/import-run")
     def import_run_to_case_db(request: CaseDbImportRunRequest) -> dict[str, object]:
         try:
@@ -93,8 +159,9 @@ def build_case_db_router(
         if job.summary is None:
             raise HTTPException(status_code=409, detail="run is not completed")
         output_dir = run_output_dir(job.summary)
-        database_path = Path(request.database).expanduser().resolve() if request.database else output_dir / "rapidtriage-case.db"
-        case_id = request.case_id or f"run-{run_id}"
+        default_database, default_case_id = canonical_run_case(job.summary, run_id)
+        database_path = Path(request.database).expanduser().resolve() if request.database else default_database
+        case_id = request.case_id or (default_case_id if not request.database else f"run-{run_id}")
         case_name = request.name or f"rapidtriage run {run_id}"
         try:
             database = open_request_case_database(database_path)
@@ -173,13 +240,138 @@ def build_case_db_router(
             raise HTTPException(status_code=400, detail=str(exc))
 
 
+    def _resolve_run_locators(
+        database: CaseDatabase,
+        case_id: str,
+        run_id: str | None,
+        located: list[dict[str, str]],
+    ) -> list[dict[str, str]]:
+        """``{collection, kind?, locator}`` targets -> case-DB ``{target_type, target_id}``."""
+        if not run_id:
+            raise HTTPException(status_code=400, detail="locator targets require run_id")
+        job = get_job(store, run_id)
+        if job.summary is None:
+            raise HTTPException(status_code=409, detail="run is not completed")
+        outputs = job.summary.get("outputs")
+        resolved: list[dict[str, str]] = []
+        unresolved: list[str] = []
+        with database.connect() as connection:
+            index = RunLocatorIndex(connection, case_id, outputs if isinstance(outputs, dict) else {})
+            for target in located:
+                collection = target.get("collection") or target.get("source") or ""
+                locator = target.get("locator") or target.get("pointer") or ""
+                hit = index.resolve(collection, locator, target.get("kind") or "")
+                if hit is None:
+                    unresolved.append(f"{collection}:{target.get('kind') or ''}:{locator}")
+                else:
+                    resolved.append({"target_type": hit[0], "target_id": hit[1]})
+        if unresolved:
+            raise HTTPException(
+                status_code=400,
+                detail=f"case DB has no row for run locator(s): {', '.join(unresolved[:10])}",
+            )
+        return resolved
+
+
+    @router.get("/api/runs/{run_id}/review-map")
+    def run_review_map(run_id: str, limit: int = Query(5000, ge=1, le=50000)) -> dict[str, object]:
+        """Every review mark of the run's canonical case with its run-output locator.
+
+        Read-only (never creates the DB). The console overlays ``status``/
+        ``tags``/``note`` on grid rows by ``collection|kind|locator`` and lists
+        the marks on the review board.
+        """
+        job = get_job(store, run_id)
+        if job.summary is None:
+            raise HTTPException(status_code=409, detail="run is not completed")
+        database_path, case_id = canonical_run_case(job.summary, run_id)
+        payload: dict[str, object] = {
+            "command": "case-db.review-map",
+            "run_id": run_id,
+            "database": str(database_path),
+            "case_id": case_id,
+            "exists": database_path.is_file(),
+            "marks": [],
+            "truncated": False,
+        }
+        if not database_path.is_file():
+            return payload
+        outputs = job.summary.get("outputs")
+        try:
+            connection = sqlite3.connect(f"{database_path.as_uri()}?mode=ro", uri=True)
+            connection.row_factory = sqlite3.Row
+            try:
+                marks, truncated = review_map_entries(
+                    connection, case_id, outputs if isinstance(outputs, dict) else {}, limit=limit
+                )
+            finally:
+                connection.close()
+        except sqlite3.Error as exc:
+            payload["error"] = str(exc)
+            return payload
+        payload["marks"] = marks
+        payload["truncated"] = truncated
+        return payload
+
+
+    def _mark_preserving_tags(
+        database: CaseDatabase,
+        request: CaseDbReviewBatchRequest,
+        targets: list[dict[str, str]],
+    ) -> dict[str, object]:
+        """Console marks: omitted ``tags`` keep the row's tags; ``add_tags`` merges."""
+        reviewer = resolve_request_reviewer(request.reviewer)
+        marks: list[dict[str, object]] = []
+        for target in targets:
+            tags: list[str] | None = list(request.tags) if request.tags is not None else None
+            if request.add_tags:
+                try:
+                    existing = database.get_review_mark(
+                        request.case_id, target_type=target["target_type"], target_id=target["target_id"]
+                    ).get("tags", [])
+                except CaseDatabaseError:
+                    existing = []
+                merged = [str(tag) for tag in (tags if tags is not None else existing or [])]
+                tags = merged + [tag for tag in request.add_tags if tag not in merged]
+            marks.append(
+                database.mark_review(
+                    case_id=request.case_id,
+                    target_type=target["target_type"],
+                    target_id=target["target_id"],
+                    status=request.status,
+                    verification_status=request.verification_status,
+                    tags=tags,
+                    note=request.note,
+                    reviewer=reviewer,
+                    assignee=request.assignee,
+                    priority=request.priority,
+                    due_at=request.due_at,
+                    include_in_report=request.include_in_report,
+                )
+            )
+        return {
+            "command": "case-review-batch",
+            "database": str(database.path),
+            "case_id": request.case_id,
+            "run_id": request.run_id,
+            "updated_count": len(marks),
+            "targets": targets,
+            "marks": marks,
+        }
+
+
     @router.post("/api/case-db/review-batch")
     def mark_case_db_reviews_batch(request: CaseDbReviewBatchRequest) -> dict[str, object]:
         try:
             database = open_request_case_database(request.database)
+            targets, located = split_batch_targets(request.targets)
+            if located:
+                targets.extend(_resolve_run_locators(database, request.case_id, request.run_id, located))
+            if request.run_id or request.add_tags:
+                return _mark_preserving_tags(database, request, targets)
             return database.mark_reviews_batch(
                 case_id=request.case_id,
-                targets=request.targets,
+                targets=targets,
                 status=request.status,
                 verification_status=request.verification_status,
                 tags=request.tags,

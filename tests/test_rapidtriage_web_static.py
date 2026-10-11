@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import os
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from rapidtriage.core.visible_capabilities import (
     CAPABILITY_GROUPS,
@@ -1003,6 +1005,73 @@ class RapidTriageWebStaticTests(unittest.TestCase):
         # Windows analysts can switch drives — the picker renders root chips.
         self.assertIn("data-picker-roots", intake_js)
         self.assertIn("renderPathPickerRoots", intake_js)
+
+
+HAS_FASTAPI = True
+try:
+    from fastapi.testclient import TestClient
+except ModuleNotFoundError as exc:
+    if exc.name == "fastapi":
+        HAS_FASTAPI = False
+    else:
+        raise
+
+if HAS_FASTAPI:
+    from rapidtriage.api.app.factory import create_app
+    from rapidtriage.core.jobs import RunJobStore
+
+
+@unittest.skipUnless(HAS_FASTAPI, "fastapi is required for console switch tests")
+class RapidTriageConsoleSwitchTests(unittest.TestCase):
+    TOKEN = "console-switch-test-token"
+
+    def _client(self, mode: str | None) -> TestClient:
+        env = {"RAPIDTRIAGE_CONSOLE": mode} if mode is not None else {}
+        with mock.patch.dict(os.environ, env, clear=False):
+            if mode is None:
+                os.environ.pop("RAPIDTRIAGE_CONSOLE", None)
+            app = create_app(RunJobStore(), auth_token=self.TOKEN)
+        return TestClient(app, headers={"X-RapidTriage-Token": self.TOKEN})
+
+    def test_default_mode_serves_v1_at_root_and_v2_at_v2(self) -> None:
+        client = self._client(None)
+        root = client.get("/")
+        self.assertEqual(root.status_code, 200)
+        self.assertIn("RapidForensic Analyst Console", root.text)
+        self.assertNotIn('<div id="root"></div>', root.text)
+        v2 = client.get("/v2/")
+        self.assertEqual(v2.status_code, 200)
+        self.assertIn('<div id="root"></div>', v2.text)
+        self.assertEqual(client.get("/legacy/").status_code, 404)
+
+    def test_v1_mode_explicit_matches_default(self) -> None:
+        client = self._client("v1")
+        self.assertIn("RapidForensic Analyst Console", client.get("/").text)
+        self.assertEqual(client.get("/legacy/").status_code, 404)
+
+    def test_v2_mode_serves_bundle_at_root_and_v1_at_legacy(self) -> None:
+        client = self._client("v2")
+        root = client.get("/")
+        self.assertEqual(root.status_code, 200)
+        self.assertIn('<div id="root"></div>', root.text)
+        self.assertNotIn("RapidForensic Analyst Console", root.text)
+        legacy = client.get("/legacy/")
+        self.assertEqual(legacy.status_code, 200)
+        self.assertIn("RapidForensic Analyst Console", legacy.text)
+        v2 = client.get("/v2/")
+        self.assertEqual(v2.status_code, 200)
+        self.assertIn('<div id="root"></div>', v2.text)
+
+    def test_invalid_mode_is_rejected(self) -> None:
+        with mock.patch.dict(os.environ, {"RAPIDTRIAGE_CONSOLE": "v3"}):
+            with self.assertRaises(RuntimeError):
+                create_app(RunJobStore(), auth_token=self.TOKEN)
+
+    def test_v2_mode_keeps_api_auth_gate(self) -> None:
+        client = self._client("v2")
+        unauthenticated = TestClient(client.app)
+        response = unauthenticated.get("/api/forensic-capabilities")
+        self.assertEqual(response.status_code, 401)
 
 
 if __name__ == "__main__":
