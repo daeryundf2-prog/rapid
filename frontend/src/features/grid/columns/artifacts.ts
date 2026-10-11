@@ -261,6 +261,10 @@ export const KIND_COLUMNS: Record<string, KindColumnDef[]> = {
   // 앱/앱 경로/오류 모듈/이벤트 시각 stay promotable but are not defaults until the WER parser
   // decodes UTF-16 .wer files (their keys are garbled today; QA run-subset7).
   "windows-system": [
+    { header: "앱", keys: ["application_name"], width: 180 },
+    { header: "앱 경로", keys: ["application_path"], width: 320 },
+    { header: "오류 모듈", keys: ["fault_module_name"], width: 160 },
+    { header: "이벤트 시각", keys: ["event_time"], width: 170 },
     { header: "보고서 ID", keys: ["report_id"], width: 220, mono: true },
     { header: "크기", keys: ["source_size"], width: 100, bytes: true },
     { header: "수정", keys: ["modified_at"], width: 170 },

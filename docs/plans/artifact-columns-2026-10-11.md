@@ -75,7 +75,7 @@ AXIOM은 아티팩트 유형마다 전용 열을 주고(“Run count”, “Last
 | windows-shellbags (리뷰 조정) | 경로 후보 `shellbag_path_candidates[0]` (목록, 정렬 불가); 키 경로 `source_key_path`; 마지막 기록 `key_last_written_at`; 신뢰도 `parser_confidence` |
 | recent-files (QA 조정) | 대상 경로 `target_path`; 대상 수정 `target_modified_at`; 대상 크기 `target_file_size`; 파싱 상태 `lnk_parse_status`; 작업 폴더 `working_dir` (인수 `command_line_arguments`는 기본에서 제외, 승격 가능) |
 | windows-execution | 실행 경로 `executable_path`; 프로그램 `program_name`; 게시자 `publisher`; 버전 `version`; SHA-1 `sha1`; 키 기록 `key_last_written_at` |
-| windows-system (QA 조정) | 보고서 ID `report_id`; 크기 `source_size`; 수정 `modified_at` (+ 시각 열). 앱/앱 경로/오류 모듈/이벤트 시각은 WER UTF-16 파서 버그 수정 전까지 기본에서 제외(승격 가능) |
+| windows-system (QA 조정 → 2026-10-12 복원) | 앱 `application_name`; 앱 경로 `application_path`; 오류 모듈 `fault_module_name`; 이벤트 시각 `event_time`; 보고서 ID `report_id`; 크기 `source_size`; 수정 `modified_at` (+ 시각 열). WER UTF-16 디코딩을 고쳐 네 열을 기본으로 되돌림 |
 | windows-os-account (QA 조정) | 계정 `user_name_candidate`,`user_name`,`group_name_candidate`; 역할 `candidate_role`,`account_type_hint`; RID `rid_decimal`,`alias_rid_decimal` (툴팁에 `rid_hex`); 마지막 기록 `last_written_at` (프로필 경로 `profile_path`는 기본에서 제외, 승격 가능) |
 | windows-filesystem (리뷰 조정) | 감지 서명 `detected_signature_kind`; 기대 확장자 `expected_extensions` (목록, 정렬 불가); 크기 `source_size`; 수정 `modified_at`; 위험 `risk_flags` (목록, 정렬 불가) |
 | media-image (리뷰 조정) | 이름 `entry_name`; 크기 `width`×`height`; 형식 `source_format`; 용량 `source_size`; 유사 묶음 `similarity_bucket` (수정 `modified_at`·분류 `visual_classification`은 파서가 쓰지 않아 제외) |
@@ -127,7 +127,7 @@ AXIOM은 아티팩트 유형마다 전용 열을 주고(“Run count”, “Last
 | windows-shellbags | 경로 후보 50 · 키 경로 50 · 마지막 기록 50 · 신뢰도 50 |
 | recent-files | 대상 경로 38 · 대상 수정 36 · 대상 크기 38 · 파싱 상태 50 · 작업 폴더 26 |
 | windows-execution | 실행 경로 49 · 프로그램 49 · 게시자 45 · 버전 47 · SHA-1 49 · 키 기록 49 |
-| windows-system | 보고서 ID 50 · 크기 50 · 수정 50 |
+| windows-system | 앱 60 · 앱 경로 60 · 오류 모듈 60 · 이벤트 시각 60 · 보고서 ID 50 · 크기 50 · 수정 50 (앱 4열은 파서 수정 후 bsh-subset에서 `collect_wer_reports` 직접 수집 60행 기준, 2026-10-12) |
 | windows-os-account | 계정 27 · 역할 50 · RID 49 · 마지막 기록 49 |
 | windows-filesystem | 감지 서명 50 · 기대 확장자 50 · 크기 50 · 수정 50 · 위험 50 |
 | media-image | 이름 50 · 크기 49 · 형식 50 · 용량 50 · 유사 묶음 49 |
@@ -142,7 +142,7 @@ AXIOM은 아티팩트 유형마다 전용 열을 주고(“Run count”, “Last
 |---|---|---|
 | Q-C1 | 통과 | prefetch에서 `referenced_extension` 승격 → 열 생성, URL `cols=details.referenced_extension`, localStorage `rapidtriage.grid.fieldColumns.artifacts.windows-prefetch`, Esc 후 포커스 "열 선택" 복귀. 1차 검증에서 빈 값만 있는 키(`volume_device_path` 245/250 빈 문자열)가 목록에서 빠지던 결함 → "빈 값" 표기로 수정 |
 | Q-C2 | 통과 | 메타 탭 `coverage_status 열로 표시` → `aria-pressed=true`, 라벨 "열에서 제거", URL 갱신; 재클릭 시 제거. 기본 열과 겹치는 키는 "열로 표시 중"(표시 중일 때만) |
-| Q-C3 | 통과(조정) | 위 채움률 표. 1차 검증에서 registry 값 유형 30/35 빈 칸, LNK 인수 35/35, WER 4열 35/35, 계정 프로필 경로 34/35 → 기본 열 조정. WER은 파서 UTF-16 디코딩 결함(별도 작업) |
+| Q-C3 | 통과(조정) | 위 채움률 표. 1차 검증에서 registry 값 유형 30/35 빈 칸, LNK 인수 35/35, WER 4열 35/35, 계정 프로필 경로 34/35 → 기본 열 조정. WER 4열은 파서 UTF-16 디코딩을 고친 뒤 복원(2026-10-12) |
 | Q-C4 | 통과 | registry-hive-strings `extracted_strings` 2,972자: "전체 보기 (2,972자)" → `aria-expanded=true`, `<pre>` 2,972자, "접기", "extracted_strings 복사". 1차 검증의 토글 후 포커스 유실 → 수정 |
 | Q-C5 | 통과 | prefetch 51,785행 `details.referenced_extension` ▲: 상태줄 "생성 중 … 0%" → 약 6 s 후 "정렬: … (전체 51,785건)", 첫 행 record_index 31/36/6875(`.0`), 반복 요청 동일 순서. eventlog 216k행은 B 측정 참조 |
 | Q-C6 | 통과 | 정렬 상태에서 행 31에 R → `POST /api/case-db/review-batch` 200(8802 로그), 정렬 해제 후 `row=/artifacts/31` 딥링크에서 같은 행(aria-rowindex 33)에 "관련 있음" 표시 |
@@ -154,7 +154,7 @@ AXIOM은 아티팩트 유형마다 전용 열을 주고(“Run count”, “Last
 
 추가로 발견·수정한 결함(1차 통합): 정렬 전환 시 이전 위치 인덱스의 행이 뷰어로 조용히 발행되고 `row=`가 바뀌는 문제; 케이스 DB 가져오기(`/case-db/ensure`, 영구화 이전 런은 수 분) 동안 R 키가 무반응 → 즉시 안내·대기열 적용; 행 메뉴에 리뷰 항목 누락; e2e Q-A3 행 메뉴 `aria-expanded` 회귀.
 
-알려진 제한: (1) 코어 `case.py`의 북마크 locator는 비어 있지 않은 모든 줄을 세고, API `record_index`는 `{`로 시작하는 줄만 센다 — 객체가 아닌 JSONL 줄이 있는 파일에서만 어긋나며 런 작성기는 객체만 쓴다. (2) 다중 키 열은 첫 키 기준 정렬이며 뒤 키로 채워진 행은 결측으로 뒤에 온다(힌트로 표시). (3) WER 리포트 필드는 파서 수정 전까지 비어 있다.
+알려진 제한: (1) 코어 `case.py`의 북마크 locator는 비어 있지 않은 모든 줄을 세고, API `record_index`는 `{`로 시작하는 줄만 센다 — 객체가 아닌 JSONL 줄이 있는 파일에서만 어긋나며 런 작성기는 객체만 쓴다. (2) 다중 키 열은 첫 키 기준 정렬이며 뒤 키로 채워진 행은 결측으로 뒤에 온다(힌트로 표시). (3) WER 리포트 필드는 2026-10-12 파서 수정으로 채워진다.
 
 ### B 측정 (2026-10-11, `C:\rapid-qa\run-subset7` eventlog JSONL 231 MB, 216,234행)
 
