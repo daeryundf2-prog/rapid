@@ -72,3 +72,7 @@ RapidTriage is a local triage and review tool, not a full commercial forensic su
 - `/api/case-db/*` endpoints only open or create databases under allowed case-db roots: run output directories known to the job store, the server working directory, `~/.rapidtriage`, and extra roots listed in `RAPIDTRIAGE_CASE_DB_ROOTS` (separated by the platform path separator — `:` on POSIX, `;` on Windows). Out-of-root paths are rejected with HTTP 403. Set `RAPIDTRIAGE_CASE_DB_UNRESTRICTED=1` to restore the previous unrestricted behavior.
 - `/api/case-catalog*` endpoints accept a `catalog` path that is confined to the same allowed case-db roots. There is no separate `RAPIDTRIAGE_CATALOG_ROOTS` variable — catalog JSON files are case-management state, so they share `RAPIDTRIAGE_CASE_DB_ROOTS` and `RAPIDTRIAGE_CASE_DB_UNRESTRICTED`. Out-of-root catalog paths are rejected with HTTP 403.
 - Do not expose RapidTriage directly to the internet.
+
+## Web Console
+
+- `RAPIDTRIAGE_CONSOLE=v1|v2` (default `v1`) selects the console served at `/`: `v1` keeps the legacy console at `/` and the v2 bundle at `/v2`; `v2` serves the v2 bundle at `/` and keeps the v1 console at `/legacy` for one release before it is removed. Token, Host, and Origin gates are unchanged in both modes.
