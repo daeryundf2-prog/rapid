@@ -111,6 +111,25 @@ def _row_path_key(value: object) -> str:
     return text.strip("/")
 
 
+def _row_path_keys(value: object) -> list[str]:
+    """``_row_path_key`` of ``value`` as given and, for an absolute path, of its resolved form.
+
+    Rows record paths as their walk saw them (resolved roots), older rows and
+    callers may spell the same file through a symlinked directory or a
+    Windows 8.3 short name: both spellings must find the same stored result.
+    """
+    keys = [_row_path_key(value)]
+    text = str(value or "")
+    if text and os.path.isabs(text):
+        try:
+            resolved = _row_path_key(Path(text).resolve())
+        except (OSError, RuntimeError, ValueError):
+            resolved = None
+        if resolved is not None and resolved not in keys:
+            keys.append(resolved)
+    return keys
+
+
 # --- carve ----------------------------------------------------------------------
 
 
@@ -1376,7 +1395,8 @@ def _ocr_index(rows_path: Path, row_count: int) -> dict[str, dict[str, object]]:
             break
         details = row.get("details") if isinstance(row, Mapping) else None
         if isinstance(details, Mapping) and details.get("source_path"):
-            index[_row_path_key(details["source_path"])] = dict(details)
+            for path_key in _row_path_keys(details["source_path"]):
+                index[path_key] = dict(details)
     with _OCR_INDEX_LOCK:
         _OCR_INDEX_CACHE[key] = index
         while len(_OCR_INDEX_CACHE) > OCR_INDEX_CACHE_MAX_ENTRIES:
@@ -1399,14 +1419,15 @@ def find_ocr_result(
     image viewer calls this before reporting "no OCR sidecar", so a batch OCR
     is never repeated for the same image.
     """
-    key = _row_path_key(source_path)
+    keys = _row_path_keys(source_path)
     if states is None:
         states = ANALYSIS_RUNNER.list_states(output_dir)
     for state in states:
         if state.get("kind") != "ocr-batch" or state.get("status") not in {"completed", "cancelled", "running"}:
             continue
         rows_path = analyses_root(output_dir) / str(state.get("analysis_id")) / ROWS_FILE_NAME
-        found = _ocr_index(rows_path, int(state.get("row_count") or 0)).get(key)
+        index = _ocr_index(rows_path, int(state.get("row_count") or 0))
+        found = next((index[key] for key in keys if key in index), None)
         if found is None:
             continue
         if found.get("status") == "failed" and not include_failed:

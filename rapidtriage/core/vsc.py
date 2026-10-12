@@ -113,6 +113,19 @@ def _within_roots(path: Path, roots: Sequence[Path]) -> bool:
     return any(path == root or path.is_relative_to(root) for root in roots)
 
 
+def _lexical_and_resolved_forms(paths: Iterable[Path]) -> list[Path]:
+    """``abspath`` and ``resolve()`` forms of ``paths`` (deduplicated, unresolvable ones kept lexical)."""
+    forms: list[Path] = []
+    for path in paths:
+        candidates = [Path(os.path.abspath(path))]
+        try:
+            candidates.append(Path(path).resolve())
+        except (OSError, RuntimeError, ValueError):
+            pass
+        forms.extend(form for form in candidates if form not in forms)
+    return forms
+
+
 def path_within_roots(path: Path, roots: Sequence[Path]) -> bool:
     """Lexical check first (no filesystem call on a path outside ``roots``), then the resolved path."""
     if not _within_roots(Path(os.path.abspath(path)), roots):
@@ -180,7 +193,10 @@ def discover_vsc_snapshot_roots(
     search_roots = [current.parent, current / "System Volume Information", current / "VSS", current / "vss"]
     plan, excluded = _discovery_walk_plan(search_roots, max_depth=max_depth, allowed_roots=allowed_roots)
 
-    excluded_trees = [Path(os.path.abspath(path)) for path in exclude_dirs]
+    # Candidates come from walking the resolved ``current`` root: compare them with
+    # the resolved form too (a temp dir behind a symlink or a Windows 8.3 short
+    # name otherwise never matches), keeping the lexical form as given.
+    excluded_trees = _lexical_and_resolved_forms(exclude_dirs)
 
     def allowed(path: Path) -> bool:
         nonlocal excluded

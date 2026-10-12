@@ -235,6 +235,10 @@ class AnalysisApiTests(unittest.TestCase):
         (self.evidence / "notes.txt").write_bytes(JPEG)  # excluded by ext=.bin
         (self.evidence / "disk.E01").write_bytes(b"EVF\x09\x0d\x0a\xff\x00" + bytes(64))
         (self.evidence / "photo.png").write_bytes(tiny_png())
+        # The run summary keeps the temp dir's own spelling (macOS /var -> /private/var,
+        # Windows 8.3 short names on CI); analysis rows record the resolved paths their
+        # walk saw, so expected row paths use this form.
+        self.evidence_real = self.evidence.resolve()
         self.media_records = self.base / "media-records.jsonl"
         self.media_records.write_text(
             json.dumps({"artifact_type": "image", "path": str(self.evidence / "photo.png"), "details": {}}) + "\n",
@@ -338,7 +342,7 @@ class AnalysisApiTests(unittest.TestCase):
         self.assertEqual(first["details"]["signature_kind"], "jpeg")
         self.assertEqual(first["details"]["offset"], 100)
         self.assertEqual(first["details"]["length"], len(JPEG))
-        self.assertEqual(first["path"], str(self.evidence / "blob1.bin"))
+        self.assertEqual(first["path"], str(self.evidence_real / "blob1.bin"))
         for key in ("source_path", "sha256", "confidence", "notes", "extracted_path"):
             self.assertIn(key, first["details"])
         sorted_page = self.rows(str(created["analysis_id"]), limit=10, sort="details.offset", order="desc", locate=0)
@@ -1396,7 +1400,7 @@ class AnalysisApiTests(unittest.TestCase):
                 ordered = sorted_rows()
                 self.assertEqual(ordered["sort"]["status"], "unsupported", ordered["sort"])
                 self.assertIn("실행 중", ordered["sort"]["reason"])
-                self.assertEqual([row["path"] for row in ordered["rows"]], [str(self.evidence / "blob1.bin")])
+                self.assertEqual([row["path"] for row in ordered["rows"]], [str(self.evidence_real / "blob1.bin")])
                 context.write_state()
             keys = artifact_sort.SORT_INDEX_CACHE.cached_keys()
             self.assertFalse([key for key in keys if str(key[1]).startswith("analysis:")], keys)
@@ -1437,7 +1441,7 @@ class AnalysisApiTests(unittest.TestCase):
         self.assertLess(time.monotonic() - started, 30)
         self.assertEqual(state["status"], "completed", state)
         paths = {row["path"] for row in self.rows(state["analysis_id"], limit=100)["rows"]}
-        self.assertEqual(paths, {str(self.evidence / "blob1.bin"), str(self.evidence / "blob2.bin")})
+        self.assertEqual(paths, {str(self.evidence_real / "blob1.bin"), str(self.evidence_real / "blob2.bin")})
         self.assertEqual(state["summary"]["source_file_count"], 2)
         self.assertGreaterEqual(state["summary"]["skipped_link_count"], 2)
         self.assertGreaterEqual(state["summary"]["pruned_output_dir_count"], 1)
@@ -2142,9 +2146,15 @@ class AnalysisApiTests(unittest.TestCase):
             first = deleted[0]
             other = next(row for row in rows if row["record_index"] != first["record_index"])
             plain = self.client.get(url, params={"path": first["path"]})
-            # Without the row reference: the QA 404, now in Korean.
-            self.assertEqual(plain.status_code, 404, plain.text)
-            self.assertEqual(plain.json()["detail"]["message"], "허용된 증거 루트에서 원본 파일을 찾을 수 없습니다")
+            # Without the row reference the snapshot file is never served, with a Korean reason.
+            # Windows maps a drive-letter path into the run roots too (the QA 404: no such file
+            # there); POSIX has no such mapping, so the path is plainly outside the roots (403).
+            if os.name == "nt":
+                self.assertEqual(plain.status_code, 404, plain.text)
+                self.assertEqual(plain.json()["detail"]["message"], "허용된 증거 루트에서 원본 파일을 찾을 수 없습니다")
+            else:
+                self.assertEqual(plain.status_code, 403, plain.text)
+                self.assertTrue(plain.json()["detail"]["message"].startswith("원본 파일이 허용된 증거 루트 밖에 있습니다"), plain.text)
             ref = {"analysis_id": state["analysis_id"], "locator": f"/rows/{first['record_index']}"}
             opened = self.client.get(url, params={"path": first["path"], **ref})
             self.assertEqual(opened.status_code, 200, opened.text)

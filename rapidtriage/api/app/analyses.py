@@ -1244,7 +1244,11 @@ def resolve_analysis_row_source(
             root = scope.resolve_input_path(value, label="분석 입력 루트")
         except HTTPException:
             continue  # no longer an allowed input root: never served
-        roots.extend(form for form in _root_forms([root, str(root)]) if form not in roots)
+        # The option as stored (lexical) and as resolved now: a row path spelled like
+        # the option (a temp dir behind a symlink, a Windows 8.3 short name) is then
+        # still walked by ``precheck_links`` from its own root, so a link inside it is
+        # reported as a link instead of as an unrelated outside path.
+        roots.extend(form for form in _root_forms([value, root, str(root)]) if form not in roots)
     if not roots:
         raise HTTPException(status_code=403, detail=f"원본 파일이 허용된 증거 루트와 {ANALYSIS_SOURCE_SCOPE} 밖에 있습니다: {lexical}")
     resolved = confine_path(lexical, roots, label="원본 파일", scope=ANALYSIS_SOURCE_SCOPE)
