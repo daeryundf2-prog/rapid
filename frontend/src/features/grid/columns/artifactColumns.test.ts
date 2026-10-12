@@ -163,9 +163,19 @@ describe("kind default columns (§4.3) and sort keys", () => {
     expect(headers("windows-execution")).toEqual(
       expect.arrayContaining(["실행 경로", "프로그램", "게시자", "버전", "SHA-1", "키 기록"]),
     );
-    expect(headers("windows-system")).toEqual(expect.arrayContaining(["보고서 ID", "크기", "수정", "시각"]));
-    // Empty until the WER parser decodes UTF-16 (QA): not defaults, still promotable.
-    expect(headers("windows-system")).not.toEqual(expect.arrayContaining(["앱"]));
+    // WER Report.wer is decoded as UTF-16 since 2026-10-12, so the app fields are defaults again.
+    expect(headers("windows-system")).toEqual(
+      expect.arrayContaining([
+        "앱",
+        "앱 경로",
+        "오류 모듈",
+        "이벤트 시각",
+        "보고서 ID",
+        "크기",
+        "수정",
+        "시각",
+      ]),
+    );
     expect(headers("recent-files")).not.toEqual(expect.arrayContaining(["인수"]));
     expect(headers("windows-os-account")).toEqual(
       expect.arrayContaining(["계정", "RID", "역할", "마지막 기록"]),

@@ -5955,12 +5955,34 @@ def unique_preserve_order(values: list[str]) -> list[str]:
     return unique
 
 
+def decode_text_auto(data: bytes) -> str:
+    """Decode a small text file whose encoding is unknown.
+
+    Windows writes many triage sources (``Report.wer``, ``*.ini`` under
+    ``WER``, PowerShell transcripts) as UTF-16 LE with a BOM; some tooling drops
+    the BOM. A BOM wins; otherwise NUL bytes interleaved on odd (or even)
+    positions mean UTF-16 LE (BE); everything else is UTF-8 with replacement.
+    """
+    if data.startswith(b"\xef\xbb\xbf"):
+        return data[3:].decode("utf-8", errors="replace")
+    if data.startswith(b"\xff\xfe"):
+        return data[2:].decode("utf-16-le", errors="replace")
+    if data.startswith(b"\xfe\xff"):
+        return data[2:].decode("utf-16-be", errors="replace")
+    sample = data[:4096]
+    if len(sample) >= 4 and sample.count(b"\x00") * 3 >= len(sample):
+        odd_nuls = sample[1::2].count(b"\x00")
+        even_nuls = sample[0::2].count(b"\x00")
+        return data.decode("utf-16-le" if odd_nuls >= even_nuls else "utf-16-be", errors="replace")
+    return data.decode("utf-8", errors="replace")
+
+
 def read_lines(path: Path, *, limit: int) -> list[str]:
     try:
-        text = path.read_text(encoding="utf-8", errors="replace")
+        data = path.read_bytes()
     except OSError:
         return []
-    return text.splitlines()[:limit]
+    return decode_text_auto(data).splitlines()[:limit]
 
 
 def read_bounded_text(path: Path, *, limit: int) -> str:
@@ -5974,9 +5996,11 @@ def read_bounded_text(path: Path, *, limit: int) -> str:
 
 def preview_text(path: Path, *, limit: int = 600) -> str:
     try:
-        return path.read_text(encoding="utf-8", errors="replace")[:limit]
+        data = path.read_bytes()
     except OSError:
         return ""
+    # Decode a bounded prefix (UTF-16 needs twice the bytes per character).
+    return decode_text_auto(data[: max(limit * 4, 4096)])[:limit]
 
 
 def safe_child_names(path: Path, *, limit: int = 25) -> list[str]:
