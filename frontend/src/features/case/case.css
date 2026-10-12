@@ -129,14 +129,9 @@
   border-radius: 6px;
 }
 
+/* Surface, border, shadow and motion come from the shared .popover (controls.css). */
 .search-options-popover {
-  display: grid;
-  gap: var(--space-2);
   min-inline-size: 280px;
-  padding: var(--space-3);
-  background: var(--bg-panel);
-  border: 1px solid var(--line);
-  border-radius: 6px;
 }
 
 /* --- landing (visual-polish S10 / U-V6) ------------------------------------ */

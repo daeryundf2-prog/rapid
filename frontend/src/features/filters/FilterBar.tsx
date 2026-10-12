@@ -439,7 +439,7 @@ export function FilterBar(props: FilterBarProps) {
                   aria-label={`${chipLabel(chip)} 필터 제거`}
                   onClick={() => removeFilterChip(chip)}
                 >
-                  <Icon name="close" size={12} />
+                  <Icon name="close" />
                 </button>
               </li>
             ))}

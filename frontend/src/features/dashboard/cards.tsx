@@ -19,6 +19,7 @@ import { RUN_MODE_LABEL } from "../../app/collections";
 import { StatusBadge } from "../../components/Badge";
 import type { ReviewStatus } from "../../contracts/collection";
 import { Icon } from "../../icons";
+import { stepNameLabel } from "../stages/stepLabels";
 import { formatBytes, partitionLabel } from "../tree/model";
 import { CardEmpty } from "./Card";
 import {
@@ -191,7 +192,7 @@ export function ProcessingCard({
             {stages.map((stage, index) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: stage names can repeat across resumes
               <tr key={`${stage.stage}-${index}`}>
-                <td className="mono">{stage.stage}</td>
+                <td title={stage.stage}>{stepNameLabel(stage.stage)}</td>
                 <td>
                   <span className={`badge ${stage.state === "done" ? "ok" : "info"}`}>
                     {stage.state === "done" ? "완료" : "진행 중"}
@@ -275,7 +276,7 @@ export function EvidenceCard({
   return (
     <div className="dash-evidence">
       <p className="dash-evidence-name">
-        <Icon name={source.kind === "folder" ? "folder" : "hard-drive"} size={18} />
+        <Icon name={source.kind === "folder" ? "folder" : "hard-drive"} />
         <span className="mono break-all">{source.name}</span>
         {items !== undefined ? <span className="badge muted">{n(items)}</span> : null}
       </p>
@@ -384,7 +385,7 @@ export function CategoryCard({
                 aria-label={`${bar.category.label} ${n(bar.count)}건 열기`}
               >
                 <span className="dash-bar-label">
-                  <Icon name={bar.category.icon} size={14} />
+                  <Icon name={bar.category.icon} />
                   {bar.category.label}
                 </span>
                 <span className="dash-bar-track" aria-hidden="true">
@@ -514,7 +515,7 @@ export function KeywordCard({
             : result?.isError
               ? "오류"
               : enabled
-                ? "…"
+                ? null
                 : "—";
           return (
             <tr key={row.id}>
@@ -525,13 +526,18 @@ export function KeywordCard({
                   onClick={() => onOpen(row)}
                   aria-label={`${row.label} 검색 열기`}
                 >
-                  <Icon name="search" size={14} />
+                  <Icon name="search" />
                   {row.label}
                 </button>
               </td>
               <td className="dash-note">{row.source === "profile" ? "런 모드" : "저장 검색"}</td>
               <td className="num" title={result?.isError ? String(result.error?.message ?? "") : undefined}>
-                {count}
+                {count ?? (
+                  <span className="dash-pending" title="불러오는 중">
+                    <Icon name="spinner" className="dash-spin" />
+                    <span className="sr-only">불러오는 중</span>
+                  </span>
+                )}
               </td>
             </tr>
           );
@@ -626,7 +632,7 @@ export function StartCard({ onGo }: { onGo: (target: "search" | "artifacts" | "r
       {items.map((item) => (
         <li key={item.target}>
           <button type="button" className="dash-start-item" onClick={() => onGo(item.target)}>
-            <Icon name={item.icon} size={20} />
+            <Icon name={item.icon} />
             <span>
               <b>{item.label}</b>
               <span className="dash-note">{item.hint}</span>

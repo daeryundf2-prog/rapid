@@ -15,7 +15,7 @@ import { encodeRowRef, type RowRef } from "../contracts/rowRef";
 import type { ViewerTarget } from "../contracts/viewer";
 import { useSearchState } from "../features/case/searchState";
 import { type RouteState, useGridLocalStore } from "../features/grid/adapter";
-import { collectionChanged } from "../router";
+import { collectionChanged, stageHasViewer, stageOf } from "../router";
 import { useAppStore } from "../state/store";
 
 function rowKey(ref: RowRef | null | undefined): string {
@@ -129,7 +129,16 @@ export function connectGridToShell(): () => void {
     // Grid navigation ("타임라인에서 보기", "같은 출처 행") or filter typing.
     if (!sameCollection(grid.route.collection, prev.route.collection)) {
       const ref = grid.route.collection;
-      if (!sameCollection(ref, gridRouteFromShell().collection)) {
+      if (
+        ref.id === "review" &&
+        prev.route.collection.id === "review" &&
+        app.route.collection === "review" &&
+        ref.status !== app.route.status
+      ) {
+        // 검토 toolbar 리뷰 상태: a patch of the same page, so tags / time / types / ext / path
+        // filters stay (openCollection would start a clean route — review B2-5).
+        app.patchRoute({ status: ref.status, row: undefined });
+      } else if (!sameCollection(ref, gridRouteFromShell().collection)) {
         app.openCollection(ref.id, {
           kind: ref.kind,
           status: ref.status,
@@ -188,7 +197,9 @@ export function connectGridToShell(): () => void {
     if (grid.density !== prev.density && grid.density !== app.density) app.setDensity(grid.density);
 
     // Enter on a row: open (drawer) + focus the viewer.
-    if (grid.viewerFocusRequests > prev.viewerFocusRequests) {
+    // Never on a stage without a mounted viewer (접수·처리·보고): the drawer overlay would
+    // otherwise pop open later, when the user returns to 탐색.
+    if (grid.viewerFocusRequests > prev.viewerFocusRequests && stageHasViewer(stageOf(app.route))) {
       const s = useAppStore.getState();
       if (s.viewerIsDrawer) s.setOverlay("viewerDrawer", true);
       focusViewer();

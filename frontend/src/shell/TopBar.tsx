@@ -137,25 +137,16 @@ function RunDialogPlaceholder({ onClose }: { onClose: () => void }) {
 }
 
 /**
- * The search-options dropdown (S4) is transient: it closes when the route
- * changes and on a pointer press outside it, so it never lingers over the panes.
+ * The search-options dropdown (S4) is transient: it closes when the route changes (a press
+ * outside is handled by the shared Popover), so it never lingers over the panes.
  */
 function useSearchOptionsDismissal(): void {
-  const open = useSearchState((s) => s.popoverOpen);
   const routeKey = useAppStore((s) => `${s.route.runId}|${s.route.collection}|${s.route.kind ?? ""}`);
   // biome-ignore lint/correctness/useExhaustiveDependencies: close on every route change
   useEffect(() => {
     useSearchState.getState().setPopoverOpen(false);
   }, [routeKey]);
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (event: PointerEvent) => {
-      if (event.target instanceof Element && event.target.closest(".search-options-anchor")) return;
-      useSearchState.getState().setPopoverOpen(false);
-    };
-    document.addEventListener("pointerdown", onDown, true);
-    return () => document.removeEventListener("pointerdown", onDown, true);
-  }, [open]);
+  // A press outside, Tab trapping and Esc are the shared Popover's (SearchOptionsPopover).
 }
 
 /**

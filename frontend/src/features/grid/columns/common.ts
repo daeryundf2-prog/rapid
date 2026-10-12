@@ -5,6 +5,7 @@ import { currentRun } from "../../../state/slices/runs";
 import { useAppStore } from "../../../state/store";
 import { formatTimestamp } from "../../../utils/time";
 import type { CellValue, ColumnSpec } from "../types";
+import { pathCell } from "./PathCell";
 import { reviewStatusCell } from "./StatusCells";
 
 /** Effective display timezone (URL tz > preference > evidence > local); useCollectionQuery re-renders the grid on change. */
@@ -151,7 +152,15 @@ export const col = {
     };
   },
   path(width = 360, presets: ColumnSpec["presets"] = ["analysis", "source"]): ColumnSpec {
-    return { id: "path", header: "경로", width, minWidth: 120, presets, value: (r) => r.sourcePath };
+    return {
+      id: "path",
+      header: "경로",
+      width,
+      minWidth: 100,
+      presets,
+      value: (r) => r.sourcePath,
+      render: (r) => pathCell(r.sourcePath),
+    };
   },
   timestamp(width = 170, presets: ColumnSpec["presets"] = ["analysis", "compact"]): ColumnSpec {
     return {

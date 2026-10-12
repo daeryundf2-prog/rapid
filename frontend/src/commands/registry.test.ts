@@ -127,12 +127,18 @@ describe("built-in commands", () => {
     // One per COLLECTION_NODES entry (incl. 분석 작업).
     expect(getCommands("navigate")).toHaveLength(11);
     expect(await runCommand("navigate.files")).toEqual({ ok: false, reason: NO_RUN_REASON });
-    expect(await runCommand("viewer.open")).toEqual({ ok: false, reason: "선택된 행이 없습니다" });
+    // No case open: the landing page mounts no viewer.
+    expect(await runCommand("viewer.open")).toEqual({ ok: false, reason: "이 단계에는 뷰어가 없습니다" });
     expect(await runCommand("case.cancel")).toEqual({ ok: false, reason: NO_RUN_REASON });
     useAppStore.getState().navigate({ runId: "r1", collection: "intake" });
     useAppStore.getState().setRuns([{ run_id: "r1", status: "completed" }]);
     expect(await runCommand("case.cancel")).toEqual({ ok: false, reason: "실행 중인 런이 아닙니다" });
     expect(await runCommand("navigate.review")).toEqual({ ok: true });
+    // 검토 has a viewer; 보고 (two columns) does not: viewer.open says so (review B2-2).
+    expect(await runCommand("viewer.open")).toEqual({ ok: false, reason: "선택된 행이 없습니다" });
+    useAppStore.getState().navigate({ runId: "r1", collection: "outputs" });
+    expect(await runCommand("viewer.open")).toEqual({ ok: false, reason: "이 단계에는 뷰어가 없습니다" });
+    useAppStore.getState().navigate({ runId: "r1", collection: "review" });
     expect(window.location.hash).toBe("#/case/r1/review/board");
     expect(await runCommand("app.density.default")).toEqual({ ok: false, reason: "현재 밀도입니다" });
     expect(await runCommand("app.help")).toEqual({ ok: true });

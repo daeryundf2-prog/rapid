@@ -1,4 +1,5 @@
 import type { StateCreator } from "zustand";
+import { pushToast } from "../../components/toastStore";
 import type { AppState } from "../store";
 
 export type OverlayName = "palette" | "help" | "runDialog" | "viewerDrawer";
@@ -13,7 +14,7 @@ export interface OverlaySlice {
   viewerDrawerOpen: boolean;
   /** True while the layout renders the viewer as a drawer (< 1200 px). */
   viewerIsDrawer: boolean;
-  /** Last command feedback (disabled reason / failure) shown in the status bar. */
+  /** Last command feedback (disabled reason / failure); shown as a toast (U-V7). */
   notice: { text: string; tone: "info" | "error"; at: number } | null;
   showNotice: (text: string, tone?: "info" | "error") => void;
   clearNotice: () => void;
@@ -44,7 +45,10 @@ export const createOverlaySlice: StateCreator<AppState, [], [], OverlaySlice> = 
   viewerDrawerOpen: false,
   viewerIsDrawer: false,
   notice: null,
-  showNotice: (text, tone = "info") => set({ notice: { text, tone, at: Date.now() } }),
+  showNotice: (text, tone = "info") => {
+    set({ notice: { text, tone, at: Date.now() } });
+    pushToast(text, tone);
+  },
   clearNotice: () => set({ notice: null }),
   setOverlay: (name, open) => {
     const flag = FLAG[name];

@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useId, useRef, useState } from "react";
+import { type RefObject, useId, useRef, useState } from "react";
 import { ensureCaseDb, saveSearch } from "../../api/caseDb";
 import { listKeywordPacks, SEARCH_SOURCES } from "../../api/keywordPacks";
+import { Popover } from "../../components/Popover";
 import { Icon } from "../../icons";
 import { ErrorText } from "./ErrorText";
 import { ReasonButton } from "./ReasonButton";
@@ -41,6 +42,7 @@ export function SearchOptionsButton({ runId }: { runId: string | null }) {
         <SearchOptionsPopover
           id={popoverId}
           runId={runId}
+          triggerRef={triggerRef}
           onClose={() => {
             setOpen(false);
             triggerRef.current?.focus();
@@ -51,20 +53,22 @@ export function SearchOptionsButton({ runId }: { runId: string | null }) {
   );
 }
 
+/**
+ * The options panel sits on the shared Popover (review B2-9): first option focused on open,
+ * Tab / Shift+Tab stay inside, Esc returns to the trigger, a press outside — including on
+ * another popover's trigger — closes it.
+ */
 export function SearchOptionsPopover({
   runId,
   onClose,
   id,
+  triggerRef,
 }: {
   runId: string;
   onClose: () => void;
-  id?: string;
+  id: string;
+  triggerRef: RefObject<HTMLElement | null>;
 }) {
-  const panelRef = useRef<HTMLDivElement>(null);
-  // Opening lands on the first option, like the other popovers.
-  useEffect(() => {
-    panelRef.current?.querySelector<HTMLElement>("select, input, button")?.focus();
-  }, []);
   const queryClient = useQueryClient();
   const options = useSearchState((s) => s.options);
   const keywords = useSearchState((s) => s.keywords);
@@ -100,19 +104,14 @@ export function SearchOptionsPopover({
       : undefined;
 
   return (
-    <div
-      ref={panelRef}
+    <Popover
       id={id}
+      open
+      onClose={onClose}
+      triggerRef={triggerRef}
+      label="검색 옵션"
+      align="end"
       className="search-options-popover"
-      role="dialog"
-      aria-label="검색 옵션"
-      onKeyDown={(event) => {
-        if (event.key === "Escape") {
-          event.preventDefault();
-          event.stopPropagation();
-          onClose();
-        }
-      }}
     >
       <div className="case-field">
         <label htmlFor="so-mode">검색 방식</label>
@@ -245,6 +244,6 @@ export function SearchOptionsPopover({
           닫기
         </button>
       </div>
-    </div>
+    </Popover>
   );
 }

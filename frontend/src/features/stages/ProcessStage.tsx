@@ -37,8 +37,11 @@ import {
 } from "../analysis/kinds";
 import { useAnalyses } from "../analysis/store";
 import { formatCount } from "../grid/gridUtils";
+import { stepNameLabel, stepStatusLabel, stepWarningLabel } from "./stepLabels";
 import "../analysis/analysis.css";
 import "./stages.css";
+
+export { stepNameLabel, stepStatusLabel, stepWarningLabel } from "./stepLabels";
 
 function elapsedOf(
   run: { created_at?: string; updated_at?: string; finished_at?: string | null; status?: unknown },
@@ -107,76 +110,6 @@ export function disambiguatedRunNames(runs: readonly RunLike[], timezone: string
   return out;
 }
 
-/** Korean labels of run summary step statuses (processing plan table). */
-const STEP_STATUS_LABEL: Record<string, string> = {
-  completed: "완료",
-  complete: "완료",
-  ok: "완료",
-  executed: "실행됨",
-  skipped: "건너뜀",
-  failed: "실패",
-  error: "오류",
-  running: "실행 중",
-  queued: "대기",
-  pending: "대기",
-  cancelled: "취소됨",
-  canceled: "취소됨",
-  partial: "일부 완료",
-  missing: "없음",
-  blocked: "차단됨",
-  unavailable: "사용할 수 없음",
-  timeout: "시간 초과",
-  not_run: "미실행",
-  warning: "경고",
-  warn: "경고",
-  notice: "알림",
-  info: "정보",
-  none: "이상 없음",
-  failed_isolated: "일부 실패(격리됨)",
-  unknown: "알 수 없음",
-  "operator-exercise": "분석관 확인 필요",
-};
-
-/** Korean status of a plan step; an unknown one still reads as Korean ("상태 미상(xyz)"). */
-export function stepStatusLabel(status: string): string {
-  const known = STEP_STATUS_LABEL[status] ?? STEP_STATUS_LABEL[status.toLowerCase()];
-  if (known) return known;
-  const lower = status.toLowerCase();
-  if (lower.includes("warn")) return "경고";
-  if (lower.includes("fail") || lower.includes("error")) return "실패";
-  return `상태 미상(${status})`;
-}
-
-/** Korean names of the run pipeline steps (core/run/steps.py `name`). */
-const STEP_NAME_LABEL: Record<string, string> = {
-  manifest: "증거 목록(매니페스트)",
-  docs: "문서 텍스트 추출",
-  "docs-index": "문서 색인",
-  files: "파일 목록",
-  "docs-extract": "문서 추출",
-  "files-extract": "파일 추출",
-  timeline: "타임라인",
-  indicators: "지표(IOC) 요약",
-  "silent-failure-detector": "누락 위험 점검",
-  triage: "분류",
-  prepare: "준비",
-  finalize: "마무리",
-};
-
-/** Korean name of a plan step (`artifacts-<kind>` → "아티팩트 수집: <kind>"); unknown ids stay as-is. */
-export function stepNameLabel(name: string): string {
-  const known = STEP_NAME_LABEL[name] ?? STEP_NAME_LABEL[name.toLowerCase()];
-  if (known) return known;
-  if (name.startsWith("artifacts-")) return `아티팩트 수집: ${name.slice("artifacts-".length)}`;
-  return name;
-}
-
-/** Korean warning level of a plan step (`warning_level`); "" for none. */
-export function stepWarningLabel(level: string): string {
-  if (!level || level === "none") return "";
-  return stepStatusLabel(level);
-}
-
 /** "완료 · 10-12 21:37 · 35건" — the compact last-run line of a 처리 panel card. */
 export function lastRunShort(job: AnalysisState | undefined, timezone: string): string {
   if (!job) return "아직 실행하지 않았습니다";
@@ -199,14 +132,13 @@ function PanelRunButton({ kind, label }: { kind: string; label: string }) {
     <DisabledReason reason={disabledReason}>
       <button
         type="button"
-        className="button process-card-run"
+        className="icon-btn process-card-run"
         aria-label={`${label} 실행`}
         title={disabledReason ? undefined : command.label}
         data-command={command.id}
         onClick={() => void run()}
       >
-        <Icon name="play" size={14} />
-        <span>실행</span>
+        <Icon name="play" />
       </button>
     </DisabledReason>
   );
@@ -253,7 +185,7 @@ export function ProcessPanel() {
                     aria-current={current ? "page" : undefined}
                     aria-label={`${node.label}, ${state}`}
                   >
-                    <Icon name={nodeStateIcon(failed ? "failed" : (last?.status ?? null))} size={14} />
+                    <Icon name={nodeStateIcon(failed ? "failed" : (last?.status ?? null))} />
                     <span className="process-card-title">{node.label}</span>
                     <span className="badge muted">{state}</span>
                   </a>
@@ -347,7 +279,14 @@ const STEP_COUNT_KEYS: ReadonlyArray<[string, string]> = [
 export function stepCountText(step: Record<string, unknown>): string {
   for (const [key, noun] of STEP_COUNT_KEYS) {
     const value = step[key];
-    if (typeof value === "number" && Number.isFinite(value)) return `${noun} ${formatCount(value)}`;
+    // Older summaries write counts as strings ("4770"): read those too.
+    const count =
+      typeof value === "number"
+        ? value
+        : typeof value === "string" && /^\d+$/.test(value.trim())
+          ? Number(value)
+          : Number.NaN;
+    if (Number.isFinite(count)) return `${noun} ${formatCount(count)}`;
   }
   return "";
 }
@@ -491,7 +430,7 @@ function AnalysisCard({
       data-testid={`analysis-card-${node.id}`}
     >
       <h3 id={titleId}>
-        <Icon name={nodeStateIcon(last ? (isAllFailed(last) ? "failed" : last.status) : null)} size={14} />
+        <Icon name={nodeStateIcon(last ? (isAllFailed(last) ? "failed" : last.status) : null)} />
         {node.label}
       </h3>
       <p className="analysis-desc">{node.description}</p>

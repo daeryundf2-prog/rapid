@@ -273,7 +273,127 @@ export const META_LABELS: Record<string, string> = {
   ntfs: "NTFS 정보",
   ntfsJoinId: "NTFS 조인 분석",
   ntfsJoinReason: "NTFS 조인 사유",
+  // Keys inside nested groups (검증 매트릭스 · 격차 · 차단 요인 · 클라우드 항목 …).
+  status: "상태",
+  state: "상태",
+  result: "결과",
+  passed: "통과",
+  blockers: "차단 요인",
+  blocker_id: "차단 요인 ID",
+  commercial_blockers: "상용 차단 요인",
+  gap_id: "격차 ID",
+  field: "필드",
+  structure: "구조",
+  label: "라벨",
+  severity: "심각도",
+  suspicion_level: "의심 수준",
+  evidence: "근거",
+  evidence_refs: "근거 참조",
+  primary_evidence: "주요 근거",
+  source: "출처",
+  source_refs: "출처 참조",
+  citation_refs: "인용 참조",
+  parse_status: "파싱 상태",
+  validation_status: "검증 상태",
+  next_validation_step: "다음 검증 단계",
+  required_before_report: "보고 전 필요",
+  required_tools: "필요 도구",
+  report_grade_ready: "보고서 등급 준비됨",
+  ready_for_court_report: "법정 보고서 준비됨",
+  translation_required: "번역 필요",
+  reportability_decision: "보고 가능성 판단",
+  decision: "판단",
+  allowed_use: "허용 용도",
+  item_number: "항목 번호",
+  index: "순번",
+  goal: "목표",
+  summary: "요약",
+  suffix: "접미사",
+  type_hint: "유형 힌트",
+  viewer: "뷰어",
+  cloud_family: "클라우드 계열",
+  provider_family: "공급자 계열",
+  product_family: "제품 계열",
+  service: "서비스",
 };
+
+/**
+ * Korean readings of enum-like record VALUES (visual-polish B2 #5): booleans and the status /
+ * severity / decision tokens parsers write. The raw value stays the tooltip; a token with no
+ * reading is shown raw in mono.
+ */
+export const META_VALUE_LABELS: Record<string, string> = {
+  true: "예",
+  false: "아니요",
+  yes: "예",
+  no: "아니요",
+  none: "없음",
+  unknown: "알 수 없음",
+  missing: "없음",
+  "not-present": "없음",
+  "not-attached": "첨부 안 됨",
+  low: "낮음",
+  medium: "중간",
+  high: "높음",
+  critical: "심각",
+  info: "정보",
+  warning: "경고",
+  warn: "경고",
+  error: "오류",
+  ok: "정상",
+  pass: "통과",
+  passed: "통과",
+  fail: "실패",
+  failed: "실패",
+  completed: "완료",
+  complete: "완료",
+  partial: "일부",
+  skipped: "건너뜀",
+  blocked: "차단됨",
+  parsed: "파싱됨",
+  "parse-failed": "파싱 실패",
+  validated: "검증됨",
+  "validation-required": "검증 필요",
+  "required-not-run": "필요(미실행)",
+  "not-run": "미실행",
+  candidate: "후보",
+  "review-only": "검토 전용",
+  "triage-review": "선별 검토",
+  available: "사용 가능",
+  unavailable: "사용할 수 없음",
+  present: "있음",
+  enabled: "켜짐",
+  disabled: "꺼짐",
+};
+
+/** Suffixes whose reading carries over to `<family>-<suffix>` tokens ("shellbags-validation-required"). */
+const VALUE_SUFFIX_LABELS: Array<[string, string]> = [
+  ["validation-required", "검증 필요"],
+  ["decoding-required", "해석 필요"],
+  ["diff-required", "비교 검증 필요"],
+  ["review-required", "검토 필요"],
+];
+
+/** A raw token parsers write (`kebab-case` / `snake_case` / one lower-case word): shown in mono. */
+export function isRawToken(value: string): boolean {
+  return /^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/.test(value) && value.length <= 64;
+}
+
+/**
+ * Korean reading of a scalar record value, or null when it has none (the caller shows the raw
+ * value; a raw token in mono). Booleans always read 예 / 아니요.
+ */
+export function metaValueLabel(value: unknown): string | null {
+  if (typeof value === "boolean") return value ? "예" : "아니요";
+  if (typeof value !== "string") return null;
+  const direct = META_VALUE_LABELS[value] ?? META_VALUE_LABELS[value.toLowerCase()];
+  if (direct) return direct;
+  if (!isRawToken(value)) return null;
+  for (const [suffix, label] of VALUE_SUFFIX_LABELS) {
+    if (value.endsWith(`-${suffix}`)) return label;
+  }
+  return null;
+}
 
 /** Families of parser manifests / profiles: `<prefix>_<suffix>`. Longest prefix wins. */
 const PREFIX_LABELS: Record<string, string> = {
@@ -415,4 +535,21 @@ export function metaLabel(key: string): string | null {
     if (base) return `${base} 수`;
   }
   return familyLabel(key);
+}
+
+/**
+ * Labels for the keys of ONE section (review B2-8): keys that share a label (timestamp / time →
+ * 시각, user / user_name → 사용자 …) read "라벨 (raw_key)" so the visible text tells them apart
+ * — a tooltip alone is not accessible. null = no label (the raw key is shown).
+ */
+export function sectionLabels(keys: readonly string[]): Map<string, string | null> {
+  const labels = new Map(keys.map((key) => [key, metaLabel(key)] as const));
+  const uses = new Map<string, number>();
+  for (const label of labels.values()) if (label) uses.set(label, (uses.get(label) ?? 0) + 1);
+  return new Map(
+    [...labels].map(([key, label]) => [
+      key,
+      label && (uses.get(label) ?? 0) > 1 ? `${label} (${key})` : label,
+    ]),
+  );
 }

@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { pushToast } from "../../components/toastStore";
 
 export type CaseDialogName = "run" | "import" | "picker" | "doctor" | "report" | "delete";
 
@@ -22,5 +23,9 @@ export const useCaseDialogs = create<CaseDialogState>((set) => ({
   openDialog: (name) => set({ open: name }),
   confirmDelete: (runId) => set({ open: "delete", deleteRunId: runId }),
   close: () => set({ open: null, deleteRunId: null }),
-  setNotice: (notice, assertive = false) => set({ notice, noticeAssertive: assertive }),
+  setNotice: (notice, assertive = false) => {
+    set({ notice, noticeAssertive: assertive });
+    // Shown in the shell's toast stack (U-V7); CaseFeature announces it.
+    if (notice) pushToast(notice, assertive ? "error" : "info");
+  },
 }));

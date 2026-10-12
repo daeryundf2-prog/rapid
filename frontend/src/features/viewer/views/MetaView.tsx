@@ -35,7 +35,7 @@ import {
   type RecordField,
   type RecordGroups,
 } from "../record";
-import { metaLabel } from "./metaLabels";
+import { isRawToken, metaLabel, metaValueLabel, sectionLabels } from "./metaLabels";
 
 export const REVIEW_LABELS: Record<ReviewStatus, string> = {
   relevant: "관련 있음",
@@ -68,8 +68,8 @@ function isHashBundle(value: Record<string, unknown>): boolean {
 }
 
 /** A record key: its Korean label (raw key as tooltip), or the raw key in mono when it has none. */
-function KeyTerm({ name }: { name: string }) {
-  const label = metaLabel(name);
+function KeyTerm({ name, label: given }: { name: string; label?: string | null }) {
+  const label = given === undefined ? metaLabel(name) : given;
   return label ? (
     <dt title={name} data-key={name}>
       {label}
@@ -99,8 +99,22 @@ function CopyButton({ text, label }: { text: string; label: string }) {
   );
 }
 
-/** One level of a nested object as key/value rows (deeper values stay compact text). */
-function NestedValue({ value, name }: { value: Record<string, unknown>; name: string }) {
+/** Nested groups deeper than this render their values as compact text. */
+const NESTED_MAX_DEPTH = 3;
+
+/**
+ * A nested object as key/value rows: keys get their Korean label at every level (raw key as
+ * tooltip, unknown keys in mono), values their Korean reading (예/아니요, 검증 필요 …).
+ */
+function NestedValue({
+  value,
+  name,
+  depth = 1,
+}: {
+  value: Record<string, unknown>;
+  name: string;
+  depth?: number;
+}) {
   if (isHashBundle(value)) {
     return (
       <dl className="viewer-dl viewer-dl-nested">
@@ -116,13 +130,14 @@ function NestedValue({ value, name }: { value: Record<string, unknown>; name: st
     );
   }
   const entries = Object.entries(value);
+  const labels = sectionLabels(entries.map(([k]) => k));
   const list = (
     <dl className="viewer-dl viewer-dl-nested">
       {entries.map(([k, v]) => (
         <Fragment key={k}>
-          <KeyTerm name={k} />
+          <KeyTerm name={k} label={labels.get(k)} />
           <dd className="viewer-break">
-            <ScalarText name={`${name}.${k}`} value={v} />
+            <NestedEntry name={`${name}.${k}`} value={v} depth={depth} />
           </dd>
         </Fragment>
       ))}
@@ -137,38 +152,71 @@ function NestedValue({ value, name }: { value: Record<string, unknown>; name: st
   );
 }
 
+/** One value inside a nested group: a deeper group (to NESTED_MAX_DEPTH), a list, or a scalar. */
+function NestedEntry({ name, value, depth }: { name: string; value: unknown; depth: number }) {
+  if (depth < NESTED_MAX_DEPTH && isPlainObject(value)) {
+    return <NestedValue value={value} name={name} depth={depth + 1} />;
+  }
+  if (depth < NESTED_MAX_DEPTH && Array.isArray(value) && value.some(isPlainObject)) {
+    return <NestedList name={name} items={value} depth={depth + 1} />;
+  }
+  return <ScalarText name={name} value={value} />;
+}
+
+/** A list holding objects: folded "N개 항목", one nested group per item. */
+function NestedList({ name, items, depth }: { name: string; items: unknown[]; depth: number }) {
+  return (
+    <details className="viewer-details">
+      <summary>{items.length}개 항목</summary>
+      <ol className="viewer-nested-list">
+        {items.map((item, index) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: read-only snapshot of a record array
+          <li key={index}>
+            {isPlainObject(item) ? (
+              <NestedValue value={item} name={`${name}[${index}]`} depth={depth} />
+            ) : (
+              <ScalarText name={`${name}[${index}]`} value={item} />
+            )}
+          </li>
+        ))}
+      </ol>
+    </details>
+  );
+}
+
+/**
+ * A scalar's reading: its Korean label (raw value as tooltip), a raw parser token in mono, or
+ * the plain text. Exported for tests.
+ */
+export function ScalarReading({ raw, text }: { raw: unknown; text: string }) {
+  const label = metaValueLabel(raw);
+  if (label) {
+    return (
+      <span className="meta-value-label" title={String(raw)} data-raw={String(raw)}>
+        {label}
+      </span>
+    );
+  }
+  if (typeof raw === "string" && isRawToken(raw)) return <span className="mono">{text}</span>;
+  return <>{text || "—"}</>;
+}
+
 /** A nested / list scalar: short text, or the same fold + full copy as top-level long values. */
 function ScalarText({ name, value }: { name: string; value: unknown }) {
   const field = makeRecordField(name, value);
   if (field.truncated) return <LongValue field={field} />;
-  return <>{field.value || "—"}</>;
+  return <ScalarReading raw={value} text={field.value} />;
 }
 
 function FieldValue({ field }: { field: RecordField }) {
   const { raw } = field;
   if (isPlainObject(raw)) return <NestedValue value={raw} name={field.key} />;
   if (Array.isArray(raw) && raw.some((item) => typeof item === "object" && item !== null)) {
-    return (
-      <details className="viewer-details">
-        <summary>{raw.length}개 항목</summary>
-        <ol className="viewer-nested-list">
-          {raw.map((item, index) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: read-only snapshot of a record array
-            <li key={index}>
-              {isPlainObject(item) ? (
-                <NestedValue value={item} name={`${field.key}[${index}]`} />
-              ) : (
-                <ScalarText name={`${field.key}[${index}]`} value={item} />
-              )}
-            </li>
-          ))}
-        </ol>
-      </details>
-    );
+    return <NestedList name={field.key} items={raw} depth={1} />;
   }
   // Scalars and arrays of scalars (comma list) use the flat text; long ones fold (U-C3).
   if (field.truncated) return <LongValue field={field} />;
-  return <>{field.value}</>;
+  return <ScalarReading raw={raw} text={field.value} />;
 }
 
 /**
@@ -255,8 +303,18 @@ function promotable(field: RecordField): boolean {
   return field.fromDetails === true && isScalarish(field.raw);
 }
 
-function FieldList({ fields, columns }: { fields: RecordField[]; columns?: ColumnToggle }) {
+function FieldList({
+  fields,
+  columns,
+  labels: given,
+}: {
+  fields: RecordField[];
+  columns?: ColumnToggle;
+  /** Labels computed over the whole record (so groups never repeat one label); default: this list. */
+  labels?: Map<string, string | null>;
+}) {
   useRestorePendingFocus();
+  const labels = given ?? sectionLabels(fields.map((field) => field.key));
   return (
     <dl className="viewer-dl">
       {fields.map((field) => {
@@ -264,7 +322,7 @@ function FieldList({ fields, columns }: { fields: RecordField[]; columns?: Colum
         const name = FIELD_LABELS[field.key] ? `${field.key}(${FIELD_LABELS[field.key]})` : field.key;
         return (
           <Fragment key={field.key}>
-            <KeyTerm name={field.key} />
+            <KeyTerm name={field.key} label={labels.get(field.key)} />
             <dd className="viewer-break meta-field">
               <span className="meta-field-value">
                 <FieldValue field={field} />
@@ -314,6 +372,11 @@ function RecordSection({ groups, columns }: { groups: RecordGroups; columns?: Co
     groups[id].filter((field) => metaLabel(field.key) === null),
   );
   const other = labelled(groups.other);
+  // One label map for the whole 레코드 section: "시각" in 핵심 and "시각" under 기타 would read
+  // the same, so shared labels carry their raw key everywhere in the record (review B2-8).
+  const labels = sectionLabels(
+    (["core", "source", "validation", "other"] as const).flatMap((id) => groups[id].map((f) => f.key)),
+  );
   return (
     <section aria-labelledby="viewer-record-title" className="meta-record">
       <h3 className="viewer-subtitle" id="viewer-record-title">
@@ -324,7 +387,7 @@ function RecordSection({ groups, columns }: { groups: RecordGroups; columns?: Co
         return fields.length ? (
           <section key={id} aria-label={`레코드 ${RECORD_GROUP_LABELS[id]}`} className="meta-record-group">
             <h4>{RECORD_GROUP_LABELS[id]}</h4>
-            <FieldList fields={fields} columns={columns} />
+            <FieldList fields={fields} columns={columns} labels={labels} />
           </section>
         ) : null;
       })}
@@ -333,7 +396,7 @@ function RecordSection({ groups, columns }: { groups: RecordGroups; columns?: Co
           <summary>
             {RECORD_GROUP_LABELS.other} {other.length}개
           </summary>
-          <FieldList fields={other} columns={columns} />
+          <FieldList fields={other} columns={columns} labels={labels} />
         </details>
       ) : null}
       {raw.length ? (
@@ -349,7 +412,9 @@ function RecordSection({ groups, columns }: { groups: RecordGroups; columns?: Co
 function provenanceEntries(row: GridRow | null): Array<[string, string]> {
   if (!row) return [];
   const out: Array<[string, string]> = [];
-  if (row.artifactType) out.push(["아티팩트 유형", row.artifactType]);
+  // Output-file rows reuse artifactType for their kind (보고 종류 filter): call it 종류 there.
+  if (row.artifactType)
+    out.push([row.ref.collection === "outputs" ? "종류" : "아티팩트 유형", row.artifactType]);
   if (row.provider) out.push(["수집기(provider)", row.provider]);
   if (row.timestamp) out.push(["행 시각", row.timestamp]);
   const record = row.fields.artifact_record;

@@ -5,6 +5,7 @@ import type { GridRow, ReviewStatus } from "../../contracts/collection";
 import { Icon } from "../../icons";
 import { FilterBar, type FilterBarVariant } from "../filters/FilterBar";
 import { useToolbarLead } from "../views/toolbarSlot";
+import { lockedColumnId } from "./columns";
 import { setAxiomMode } from "./columns/axiom";
 import {
   type DiscoveredField,
@@ -167,16 +168,17 @@ export function ColumnMenu(props: ColumnMenuProps) {
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const popoverId = useId();
-  const { preset, onDensity } = props;
+  const { preset } = props;
 
-  // AXIOM preset: two-line titles (DataGrid sets `data-preset` on the root for the CSS; the
-  // comfortable row height is chosen when the preset is picked).
+  // AXIOM preset: two-line titles (DataGrid sets `data-preset` on the root for the CSS and
+  // gives the preset at least the 32px row without touching the density preference).
   useEffect(() => {
     setAxiomMode(preset === "axiom");
     return () => setAxiomMode(false);
   }, [preset]);
 
   const filterCount = props.columnFilters?.count ?? 0;
+  const locked = lockedColumnId(props.columns);
   return (
     <span className="popover-anchor grid-colmenu">
       <button
@@ -192,7 +194,6 @@ export function ColumnMenu(props: ColumnMenuProps) {
         onClick={() => setOpen((value) => !value)}
       >
         <Icon name="columns" />
-        <span aria-hidden="true">열</span>
         {filterCount ? (
           <span className="filter-count" aria-hidden="true">
             {filterCount}
@@ -216,7 +217,6 @@ export function ColumnMenu(props: ColumnMenuProps) {
               onChange={(event) => {
                 const next = event.target.value as GridPreset;
                 props.onPreset(next);
-                if (next === "axiom") onDensity("comfortable");
               }}
             >
               {(Object.keys(PRESET_LABELS) as GridPreset[]).map((id) => (
@@ -258,12 +258,12 @@ export function ColumnMenu(props: ColumnMenuProps) {
 
         <fieldset className="popover-section grid-popover" aria-label="표시할 열">
           <legend className="popover-title">표시할 열</legend>
-          {props.columns.map((column, index) => (
+          {props.columns.map((column) => (
             <label key={column.id} className="grid-popover-item">
               <input
                 type="checkbox"
                 checked={props.visibility[column.id] !== false}
-                disabled={index === 0}
+                disabled={column.id === locked}
                 onChange={(event) => props.onToggleColumn(column.id, event.target.checked)}
               />
               {column.header}

@@ -113,7 +113,7 @@ export function History({
                 <td>{kindLabel(job.kind)}</td>
                 <td>
                   <span className={`analysis-state is-${isAllFailed(job) ? "failed" : job.status}`}>
-                    <Icon name={nodeStateIcon(isAllFailed(job) ? "failed" : job.status)} size={12} />
+                    <Icon name={nodeStateIcon(isAllFailed(job) ? "failed" : job.status)} />
                     {jobStatusLabel(job)}
                   </span>
                   {outcome(job) ? <span className="analysis-error-text"> · {outcome(job)}</span> : null}
@@ -161,7 +161,7 @@ function Overview({ runId }: { runId: string }) {
                 className="stage-link"
                 href={serializeRoute({ runId, collection: "analysis", kind: node.id })}
               >
-                <Icon name={nodeStateIcon(last?.status ?? null)} size={14} />
+                <Icon name={nodeStateIcon(last?.status ?? null)} />
                 {node.label}
               </a>
               <span className="analysis-desc">
@@ -203,7 +203,7 @@ function NodePane({ runId, node, routedId }: { runId: string; node: AnalysisNode
         {/* The header describes the job whose rows are shown: an older selected job (a capped
             compare, say) gets its own summary / truncated reason, and the newest one a short line. */}
         <p className="analysis-last" data-testid="analysis-last">
-          <Icon name={nodeStateIcon((viewingOlder ? selected : last)?.status ?? null)} size={14} />
+          <Icon name={nodeStateIcon((viewingOlder ? selected : last)?.status ?? null)} />
           {unavailable
             ? "이 서버는 분석 작업을 지원하지 않습니다"
             : viewingOlder

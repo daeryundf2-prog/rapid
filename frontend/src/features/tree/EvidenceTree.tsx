@@ -249,7 +249,7 @@ export function EvidenceTree({ runId }: { runId: string }) {
               aria-current={isSelected ? "page" : undefined}
               aria-disabled={node.disabledReason ? true : undefined}
               title={node.disabledReason}
-              className={`case-tree-item${isSelected ? " selected" : ""}${node.disabledReason ? " disabled" : ""}`}
+              className={`case-tree-item${isSelected ? " selected" : ""}${node.disabledReason ? " disabled" : ""}${node.count === 0 ? " is-empty" : ""}`}
               style={{ paddingInlineStart: `calc(var(--space-2) + ${level - 1} * var(--space-4))` }}
               onFocus={() => setFocusedId(node.id)}
               onClick={(event) => {
@@ -266,12 +266,12 @@ export function EvidenceTree({ runId }: { runId: string }) {
                     toggle(node.id, !isOpen);
                   }}
                 >
-                  {isOpen ? "▾" : "▸"}
+                  <Icon name={isOpen ? "chevron-down" : "chevron-right"} />
                 </span>
               ) : (
                 <span className="case-tree-twisty" aria-hidden="true" />
               )}
-              {node.icon ? <Icon name={node.icon} size={14} className="case-tree-icon" /> : null}
+              {node.icon ? <Icon name={node.icon} className="case-tree-icon" /> : null}
               <span className="case-tree-label">{node.label}</span>
               {node.marker ? (
                 <span className="case-tree-marker" aria-hidden="true">
@@ -279,7 +279,10 @@ export function EvidenceTree({ runId }: { runId: string }) {
                 </span>
               ) : null}
               {node.count !== undefined && (
-                <span className={`badge muted${node.strongCount ? " strong" : ""}`} aria-hidden="true">
+                <span
+                  className={`badge muted${node.strongCount && node.count !== 0 ? " strong" : ""}`}
+                  aria-hidden="true"
+                >
                   {typeof node.count === "number" ? node.count.toLocaleString("ko-KR") : node.count}
                 </span>
               )}
@@ -289,7 +292,7 @@ export function EvidenceTree({ runId }: { runId: string }) {
       </ul>
       {loading ? (
         <p className="case-tree-loading" role="status">
-          <Icon name="spinner" size={14} className="spin" />
+          <Icon name="spinner" className="spin" />
           건수와 아티팩트 목록을 불러오는 중…
         </p>
       ) : null}

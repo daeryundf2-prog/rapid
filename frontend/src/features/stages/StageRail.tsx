@@ -24,7 +24,7 @@ function RailButton({ stage, current }: { stage: Stage; current: boolean }) {
             void run();
           }}
         >
-          <Icon name={def.icon} size={18} />
+          <Icon name={def.icon} />
           <span className="stage-rail-label">{def.label}</span>
         </button>
       </DisabledReason>

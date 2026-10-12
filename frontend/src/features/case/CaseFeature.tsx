@@ -58,9 +58,6 @@ export function CaseFeature({ runId }: { runId: string | null }) {
       {open === "delete" && deleteRunId && (
         <DeleteCaseDialog runId={deleteRunId} currentRunId={runId} onClose={close} onNotice={setNotice} />
       )}
-      <div className="case-notice" hidden={!notice}>
-        {notice}
-      </div>
     </>
   );
 }

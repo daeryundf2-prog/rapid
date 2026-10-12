@@ -10,6 +10,7 @@ import {
 } from "@tanstack/react-table/legacy";
 import { defaultRangeExtractor, type Range, useVirtualizer } from "@tanstack/react-virtual";
 import {
+  type CSSProperties,
   memo,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
@@ -28,13 +29,14 @@ import { getRunTree } from "../../api/runs";
 import type { CollectionRef, GridRow } from "../../contracts/collection";
 import type { CommandContext } from "../../contracts/command";
 import { Icon } from "../../icons";
+import { runCommandId } from "../analysis/commands";
 import { setColumnFilter } from "../filters/columnFilters";
 import type { FilterBarVariant } from "../filters/FilterBar";
 import { useFilterStore } from "../filters/filterStore";
 import { useDensity, useGridLocalStore, useRoute, useSelection, useToast, useViewerTarget } from "./adapter";
 import { BatchBar } from "./BatchBar";
 import { ColumnFilterRow } from "./ColumnFilterRow";
-import { collectionDef, presetColumnIds } from "./columns";
+import { collectionDef, lockedColumnId, presetColumnIds } from "./columns";
 import { isRecord } from "./columns/common";
 import {
   colsToKeys,
@@ -48,11 +50,13 @@ import {
 } from "./columns/fieldColumns";
 import { ntfsJoinOf } from "./columns/files";
 import { EmptyHintLink } from "./EmptyHintLink";
+import { GridEmpty, type GridEmptyState } from "./GridEmpty";
 import { ColumnMenu, GridFooter, GridToolbar } from "./GridToolbar";
 import { buildViewerTarget, type GridCommandHost, runBatch, runNote, useGridCommands } from "./gridCommands";
 import {
   compareValues,
   displayText,
+  fitColumnWidths,
   formatCount,
   indexFromRef,
   matchesFilter,
@@ -77,9 +81,14 @@ type SortingState = { id: string; desc: boolean }[];
 type VisibilityState = Record<string, boolean>;
 type ColumnSizingState = Record<string, number>;
 
-const SELECT_COL_WIDTH = 60;
-/** Width kept free at the header's right end for the column-menu button. */
-const HEAD_TOOLS_WIDTH = 56;
+/** Checkbox 16 + gap 4 + row-menu button 20 + padding 2×8. */
+const SELECT_COL_WIDTH = 56;
+/** Width kept free at the header's right end for the column-menu icon button (28 + padding). */
+const HEAD_TOOLS_WIDTH = 40;
+/** The header row is 32px at every density (visual-polish U-V4); rows follow the density. */
+const HEADER_HEIGHT = 32;
+/** Columns that give up width when the pane is narrow (항목 also takes the slack when it is wide). */
+const SHRINKABLE_COLUMNS = new Set(["title", "path"]);
 const EMPTY_ROWS: GridRow[] = [];
 const PRESETS: readonly GridPreset[] = ["analysis", "compact", "source", "axiom"];
 /** AXIOM preset (X13): the tag/status chip column is pinned right after the select cell. */
@@ -115,8 +124,8 @@ function readPreset(fallback: GridPreset): GridPreset {
 
 function visibilityFor(columns: ColumnSpec[], preset: GridPreset): VisibilityState {
   const visible = new Set(presetColumnIds(columns, preset));
-  const first = columns[0]?.id;
-  return Object.fromEntries(columns.map((c) => [c.id, c.id === first || visible.has(c.id)]));
+  const locked = lockedColumnId(columns);
+  return Object.fromEntries(columns.map((c) => [c.id, c.id === locked || visible.has(c.id)]));
 }
 
 interface RowViewProps {
@@ -213,7 +222,16 @@ const RowView = memo(function RowView(props: RowViewProps) {
             style={{ width: widths[i], left: lefts[i] }}
             title={spec.tooltip ? spec.tooltip(row) : text}
           >
-            {spec.render ? spec.render(row) : text}
+            {spec.render ? (
+              spec.render(row)
+            ) : text ? (
+              <span className="grid-cell-text">{text}</span>
+            ) : (
+              // Empty value: a muted dash, never a blank cell (visual-polish B2 #2).
+              <span className="grid-cell-empty" aria-hidden="true">
+                —
+              </span>
+            )}
           </div>
         );
       })}
@@ -299,12 +317,17 @@ export function DataGrid(props: DataGridProps = {}) {
     ];
   }, [baseColumns, candidateSig, promotedKeys, listSig]);
   const { density, setDensity } = useDensity();
-  const rowHeight = DENSITY_ROW_HEIGHT[density];
   const selection = useSelection();
   const viewer = useViewerTarget();
   const toast = useToast();
 
   const [preset, setPreset] = useState<GridPreset>(() => readPreset(props.initialPreset ?? "analysis"));
+  // AXIOM's two-line titles need at least the roomy 32px row; that is a property of the preset,
+  // not a change of the global density preference (review nit).
+  const rowHeight = Math.max(
+    DENSITY_ROW_HEIGHT[density],
+    preset === "axiom" ? DENSITY_ROW_HEIGHT.comfortable : 0,
+  );
   const [visibility, setVisibility] = useState<VisibilityState>(() => visibilityFor(baseColumns, preset));
   const [sorting, setSorting] = useState<SortingState>([]);
   const columnFilters = useFilterStore((s) => s.filters.columns);
@@ -332,6 +355,19 @@ export function DataGrid(props: DataGridProps = {}) {
   const [sortNotice, setSortNotice] = useState<string | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Visible grid width (for fitColumnWidths); 0 until measured (and in jsdom).
+  const [paneWidth, setPaneWidth] = useState(0);
+  /** Rendered height of the floating batch bar (0 = hidden); the rows keep that much room free. */
+  const [batchHeight, setBatchHeight] = useState(0);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const measure = () => setPaneWidth(el.clientWidth);
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    measure();
+    return () => observer.disconnect();
+  }, []);
   /** Ids of the hidden sort-key hints ("실행 파일 정렬 (executable_hint 기준)"), referenced by aria-describedby. */
   const hintPrefix = useId();
   const filterRef = useRef<HTMLInputElement>(null);
@@ -346,7 +382,7 @@ export function DataGrid(props: DataGridProps = {}) {
   useEffect(() => {
     setVisibility(visibilityFor(columns, preset));
   }, [collectionKey, preset]);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset only when the collection changes
+  // Reset only when the collection changes.
   useEffect(() => {
     setSorting([]);
     setSortNotice(null);
@@ -357,6 +393,9 @@ export function DataGrid(props: DataGridProps = {}) {
     // Focus is identified by the route's RowRef, never by a stale position: a new collection
     // starts unnavigated, so the automatic first-row focus never rewrites `row=`.
     userNavigated.current = false;
+    // The selection belongs to one grid: another collection / stage / run starts empty (a
+    // remount of the same grid — e.g. the layout switching to the drawer — keeps it).
+    useGridLocalStore.getState().enterSelectionScope(`${runId ?? ""}|${collectionKey}`);
   }, [collectionKey, runId]);
   // Server order / server path filter changed: positions mean other records now. Re-resolve the
   // focused row from the route's `row=` (locate= under a server sort), else fall back to row 0.
@@ -443,7 +482,17 @@ export function DataGrid(props: DataGridProps = {}) {
   const visibleColumns = table.getVisibleLeafColumns();
   const specById = useMemo(() => new Map(columns.map((c) => [c.id, c])), [columns]);
   const specs = visibleColumns.map((c) => specById.get(c.id)).filter((c): c is ColumnSpec => !!c);
-  const widths = visibleColumns.map((c) => c.getSize());
+  // 항목 flexes into the pane width and 항목 / 경로 shrink to their minimum before the grid
+  // scrolls sideways; widths the user dragged stay as dragged (visual-polish B2 #2).
+  const widths = fitColumnWidths(
+    visibleColumns.map((c) => c.getSize()),
+    {
+      grow: columnSizing.title === undefined ? specs.findIndex((s) => s.id === "title") : -1,
+      shrinkable: specs.map((s) => SHRINKABLE_COLUMNS.has(s.id) && columnSizing[s.id] === undefined),
+      mins: specs.map((s) => s.minWidth ?? 60),
+      available: paneWidth - SELECT_COL_WIDTH - HEAD_TOOLS_WIDTH,
+    },
+  );
   // Publish the shown column ids (the meta tab's "기본 열에 이미 표시됩니다" checks them).
   const visibleSig = specs.map((s) => s.id).join("\n");
   useEffect(() => {
@@ -496,6 +545,11 @@ export function DataGrid(props: DataGridProps = {}) {
     rangeExtractor,
     initialRect: { width: 1000, height: 600 },
   });
+  // A new row height (density, AXIOM preset) drops the cached row sizes.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure only when the height changes
+  useEffect(() => {
+    virtualizer.measure();
+  }, [rowHeight]);
   const virtualItems = virtualizer.getVirtualItems();
   // `range` excludes the always-rendered focused row, so jumping (End) does not request every page in between.
   const firstVisible = virtualizer.range?.startIndex ?? 0;
@@ -960,7 +1014,7 @@ export function DataGrid(props: DataGridProps = {}) {
         : routeSort && sortBuilding
           ? `전체 정렬 인덱스 생성 중 … ${Math.round((sortState?.progress ?? 0) * 100)}%`
           : routeSort && sortState?.status === "ready"
-            ? `정렬: ${sortedSpec?.header ?? routeSort.key} ${routeSort.order === "desc" ? "▼" : "▲"} (전체 ${
+            ? `정렬: ${sortedSpec?.header ?? routeSort.key} ${routeSort.order === "desc" ? "내림차순" : "오름차순"} (전체 ${
                 cq.total !== null ? formatCount(cq.total) : "-"
               }건)`
             : routeSort
@@ -1023,17 +1077,29 @@ export function DataGrid(props: DataGridProps = {}) {
   }
   const currentPage = Math.min(cq.pageCount ?? 1, Math.floor(firstVisible / cq.pageSize) + 1);
 
-  const emptyMessage = !runId
-    ? "케이스를 먼저 선택하세요."
+  const emptyState: GridEmptyState = !runId
+    ? {
+        icon: "folder",
+        text: "케이스를 먼저 선택하세요.",
+        action: { command: "case.switch", label: "케이스 열기" },
+      }
     : ref.id === "intake"
-      ? "접수 요약은 그리드가 아닌 요약 화면에서 확인합니다."
+      ? { icon: "inbox", text: "접수 요약은 그리드가 아닌 요약 화면에서 확인합니다." }
       : ref.id === "search" && !(route.search && route.search.keywords.length > 0)
-        ? "검색어를 입력하면 결과가 여기에 표시됩니다."
+        ? { icon: "search", text: "검색어를 입력하면 결과가 여기에 표시됩니다." }
         : sortBuilding
-          ? "전체 정렬 인덱스를 만드는 중입니다. 끝나면 정렬된 순서로 표시합니다."
-          : compactMode
-            ? "조건에 맞는 행이 없습니다. 불러온 행 안에서만 필터합니다."
-            : "표시할 행이 없습니다.";
+          ? { icon: "clock", text: "전체 정렬 인덱스를 만드는 중입니다. 끝나면 정렬된 순서로 표시합니다." }
+          : compactMode && needle
+            ? { icon: "filter", text: "조건에 맞는 행이 없습니다. 불러온 행 안에서만 필터합니다." }
+            : isAnalysis && ref.kind
+              ? {
+                  icon: "inbox",
+                  text: "이 노드에는 결과가 없습니다.",
+                  action: { command: runCommandId(ref.kind), label: "분석 실행" },
+                }
+              : compactMode
+                ? { icon: "filter", text: "조건에 맞는 행이 없습니다. 불러온 행 안에서만 필터합니다." }
+                : { icon: "inbox", text: "이 노드에는 표시할 행이 없습니다." };
 
   const serverFiltering =
     cq.serverColumnFilters || storeTypes.length > 0 || Boolean(storePath) || Boolean(serverPathFilter(q));
@@ -1044,12 +1110,13 @@ export function DataGrid(props: DataGridProps = {}) {
   // Stage toolbar (visual-polish S2): 검토 = review status + tag, 보고 = output kind; 탐색 = filter popover.
   const toolbarVariant: FilterBarVariant =
     ref.id === "review" ? "review" : ref.id === "outputs" ? "report" : "explore";
-  const kindOptions = useMemo(() => {
-    if (ref.id !== "outputs") return undefined;
-    const kinds = new Set<string>();
-    for (const row of cq.loadedRows) if (row.artifactType) kinds.add(row.artifactType);
-    return [...kinds].sort((a, b) => a.localeCompare(b, "ko"));
-  }, [ref.id, cq.loadedRows]);
+  // 종류 choices come from the UNFILTERED rows (useCollectionQuery → filter store typeOptions):
+  // picking one kind must not make the others disappear from the menu (review B2-4).
+  const typeOptions = useFilterStore((s) => s.typeOptions);
+  const kindOptions = useMemo(
+    () => (ref.id === "outputs" ? [...typeOptions].sort((a, b) => a.localeCompare(b, "ko")) : undefined),
+    [ref.id, typeOptions],
+  );
 
   return (
     <section
@@ -1058,6 +1125,8 @@ export function DataGrid(props: DataGridProps = {}) {
       data-density={density}
       data-preset={preset}
       data-batch={selectedKeys.size > 0 ? "" : undefined}
+      // Room under the last row = the bar's real height + its bottom offset (12) + 12 air.
+      style={batchHeight > 0 ? ({ "--batch-reserve": `${batchHeight + 24}px` } as CSSProperties) : undefined}
     >
       <GridToolbar
         filterRef={filterRef}
@@ -1093,7 +1162,7 @@ export function DataGrid(props: DataGridProps = {}) {
 
       <div className="grid-frame">
         {/* Column controls: one button at the right end of the header row (visual-polish S3). */}
-        <div className="grid-head-tools" style={{ height: rowHeight }}>
+        <div className="grid-head-tools" style={{ height: HEADER_HEIGHT }}>
           <ColumnMenu
             preset={preset}
             onPreset={(next) => {
@@ -1144,7 +1213,7 @@ export function DataGrid(props: DataGridProps = {}) {
           // select + first columns, so nothing scrolled "into view" lands underneath them.
           style={{
             scrollPaddingLeft: SELECT_COL_WIDTH + stickyWidth,
-            scrollPaddingTop: rowHeight + (filterRowShown ? rowHeight + 4 : 0),
+            scrollPaddingTop: HEADER_HEIGHT + (filterRowShown ? rowHeight + 4 : 0),
           }}
           onKeyDown={onKeyDown}
           onMouseDown={onRowMouseDown}
@@ -1156,7 +1225,7 @@ export function DataGrid(props: DataGridProps = {}) {
                 role="row"
                 aria-rowindex={1}
                 className="grid-row grid-header"
-                style={{ height: rowHeight }}
+                style={{ height: HEADER_HEIGHT }}
               >
                 <div
                   role="columnheader"
@@ -1197,9 +1266,9 @@ export function DataGrid(props: DataGridProps = {}) {
                           {spec.header}
                           <span aria-hidden="true" className="grid-sort-mark">
                             {sort === "ascending" ? (
-                              <Icon name="chevron-up" size={12} />
+                              <Icon name="chevron-up" />
                             ) : sort === "descending" ? (
-                              <Icon name="chevron-down" size={12} />
+                              <Icon name="chevron-down" />
                             ) : null}
                           </span>
                         </button>
@@ -1225,7 +1294,7 @@ export function DataGrid(props: DataGridProps = {}) {
                             ? (e) => {
                                 e.stopPropagation();
                                 const start = e.clientX;
-                                const startSize = column.getSize();
+                                const startSize = widths[i] ?? column.getSize();
                                 const min = spec.minWidth ?? 60;
                                 const move = (ev: MouseEvent) =>
                                   setColumnSizing((prev) => ({
@@ -1285,7 +1354,7 @@ export function DataGrid(props: DataGridProps = {}) {
               })}
             </div>
           </div>
-          {displayCount === 0 && !cq.isLoading ? <p className="grid-empty">{emptyMessage}</p> : null}
+          {displayCount === 0 && !cq.isLoading ? <GridEmpty state={emptyState} testId="grid-empty" /> : null}
           {displayCount === 0 && cq.isLoading && runId ? (
             // A typed / server-filtered page can scan for seconds: never a blank grid meanwhile.
             <p className="grid-empty grid-loading" data-testid="grid-loading">
@@ -1303,6 +1372,7 @@ export function DataGrid(props: DataGridProps = {}) {
           tagPromptOpen={tagPromptOpen}
           onTagPromptChange={setTagPromptOpen}
           onNote={runId ? (note) => void runNote(host, note) : undefined}
+          onHeight={setBatchHeight}
         />
       </div>
 
@@ -1369,16 +1439,6 @@ export function DataGrid(props: DataGridProps = {}) {
         }}
         onDisabled={(reason) => toast.show(reason, "info")}
       />
-      <div className="grid-toasts">
-        {toast.toasts.map((t) => (
-          <div key={t.id} className={`grid-toast is-${t.tone}`}>
-            <span>{t.message}</span>
-            <button type="button" className="grid-btn grid-btn-quiet" onClick={() => toast.dismiss(t.id)}>
-              닫기
-            </button>
-          </div>
-        ))}
-      </div>
     </section>
   );
 }

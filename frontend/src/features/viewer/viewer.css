@@ -267,10 +267,12 @@
   font-weight: 600;
 }
 
+/* Unavailable mode: dimmed (still ≥ 4.5:1), no strike-through — the line read as noise in the
+   light theme where --line is dark (B2 #10); the reason is the tab's tooltip. */
 .viewer-tab[aria-disabled="true"] {
   cursor: not-allowed;
-  text-decoration: line-through;
-  text-decoration-color: var(--line);
+  color: var(--text-subtle);
+  font-weight: 400;
 }
 
 /* Panel ------------------------------------------------------------------- */
@@ -282,18 +284,37 @@
   padding: var(--space-3);
 }
 
+/* Empty state (U-V6): icon + one sentence, centred in the pane. */
 .viewer-empty {
-  margin: var(--space-5) auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-6) auto;
+  padding: 0 var(--space-4);
   max-width: 36em;
   color: var(--text-muted);
   text-align: center;
+}
+
+.viewer-empty > p {
+  margin: 0;
+}
+
+.viewer-empty-icon {
+  display: inline-grid;
+  place-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--surface-2);
 }
 
 .viewer-empty kbd,
 .viewer kbd {
   padding: 0 var(--space-1);
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   background: var(--bg-raised);
   font-family: var(--font-mono);
   font-size: var(--fs-aux);
@@ -357,7 +378,8 @@
 
 .viewer-dl {
   display: grid;
-  grid-template-columns: max-content 1fr;
+  /* A long Korean label wraps instead of squeezing the value column (B2 #5). */
+  grid-template-columns: fit-content(40%) minmax(0, 1fr);
   gap: var(--space-1) var(--space-3);
   margin: 0;
 }
@@ -788,6 +810,13 @@
   padding-left: var(--space-2);
   border-left: 2px solid var(--line-subtle);
   font-size: var(--fs-table-aux);
+}
+
+/* A nested group (or its fold) takes the full width under its key, so deep levels never end
+   up in a one-word-wide value column. */
+.viewer-dl > dd:has(> .viewer-dl-nested, > .viewer-details) {
+  grid-column: 1 / -1;
+  padding-left: var(--space-3);
 }
 
 .viewer-nested-list {

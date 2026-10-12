@@ -19,6 +19,11 @@ export interface BatchBarProps {
   onTagPromptChange: (open: boolean) => void;
   /** Applies one note to every selected row (X5). The 메모 button is hidden when absent. */
   onNote?: (note: string) => void;
+  /**
+   * Reports the bar's rendered height (0 when hidden): it wraps and grows with the tag / note
+   * editors, and the grid reserves exactly that much room under its last row (review B2-7).
+   */
+  onHeight?: (px: number) => void;
 }
 
 /**
@@ -36,6 +41,7 @@ export function BatchBar({
   tagPromptOpen: promptOpen,
   onTagPromptChange: setPromptOpen,
   onNote,
+  onHeight,
 }: BatchBarProps) {
   const [tag, setTag] = useState("");
   const [noteOpen, setNoteOpen] = useState(false);
@@ -50,10 +56,28 @@ export function BatchBar({
     if (promptOpen) inputRef.current?.focus();
   }, [promptOpen]);
 
-  if (selectedCount === 0) return null;
+  const barRef = useRef<HTMLDivElement>(null);
+  const visible = selectedCount > 0;
+  const heightRef = useRef(onHeight);
+  heightRef.current = onHeight;
+  useEffect(() => {
+    const el = barRef.current;
+    if (!visible || !el) {
+      heightRef.current?.(0);
+      return;
+    }
+    const report = () => heightRef.current?.(el.offsetHeight);
+    report();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(report);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [visible]);
+
+  if (!visible) return null;
 
   return (
-    <div className="grid-batch" role="toolbar" aria-label="선택 항목 일괄 처리">
+    <div ref={barRef} className="grid-batch" role="toolbar" aria-label="선택 항목 일괄 처리">
       <strong className="grid-batch-count">선택 {formatCount(selectedCount)}건</strong>
       {BATCH_ACTIONS.map((action) => {
         const command = getRegisteredCommand(batchCommandId(action));

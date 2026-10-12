@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { metaLabel } from "./metaLabels";
+import { isRawToken, metaLabel, metaValueLabel, sectionLabels } from "./metaLabels";
 
 describe("meta key labels (visual-polish S5)", () => {
   it("labels provenance and verification keys in Korean", () => {
@@ -30,5 +30,44 @@ describe("meta key labels (visual-polish S5)", () => {
     expect(metaLabel("volume_label")).toBeNull();
     expect(metaLabel("browser_validation_checks")).toBeNull();
     expect(metaLabel("zz_unknown_manifest")).toBeNull();
+  });
+});
+
+describe("meta value readings (visual-polish B2 #5)", () => {
+  it("reads booleans and enum tokens in Korean", () => {
+    expect(metaValueLabel(false)).toBe("아니요");
+    expect(metaValueLabel(true)).toBe("예");
+    expect(metaValueLabel("false")).toBe("아니요");
+    expect(metaValueLabel("validation-required")).toBe("검증 필요");
+    expect(metaValueLabel("shellbags-validation-required")).toBe("검증 필요");
+    expect(metaValueLabel("native-ese-catalog-decoding-required")).toBe("해석 필요");
+    expect(metaValueLabel("critical")).toBe("심각");
+  });
+
+  it("leaves unknown values alone (raw tokens are shown in mono)", () => {
+    expect(metaValueLabel("microsoft-365")).toBeNull();
+    expect(metaValueLabel("C:/Users/x")).toBeNull();
+    expect(metaValueLabel(42)).toBeNull();
+    expect(isRawToken("microsoft-365")).toBe(true);
+    expect(isRawToken("cloud_family")).toBe(true);
+    expect(isRawToken("Hello world")).toBe(false);
+  });
+
+  it("labels the keys nested groups use", () => {
+    for (const key of ["status", "cloud_family", "service", "blockers", "severity", "passed"]) {
+      expect(metaLabel(key), key).not.toBeNull();
+    }
+  });
+});
+
+describe("sectionLabels (review B2-8)", () => {
+  it("spells out the raw key when two keys of one section share a label", () => {
+    const labels = sectionLabels(["timestamp", "time", "user", "user_name", "channel", "zz_raw"]);
+    expect(labels.get("timestamp")).toBe("시각 (timestamp)");
+    expect(labels.get("time")).toBe("시각 (time)");
+    expect(labels.get("user")).toBe("사용자 (user)");
+    expect(labels.get("user_name")).toBe("사용자 (user_name)");
+    expect(labels.get("channel")).toBe("채널");
+    expect(labels.get("zz_raw")).toBeNull();
   });
 });

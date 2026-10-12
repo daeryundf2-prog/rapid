@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useToastStore } from "../../components/toastStore";
 import type { GridRow } from "../../contracts/collection";
 import type { CommandContext } from "../../contracts/command";
 import { getRegisteredCommand, useGridLocalStore } from "./adapter";
@@ -427,7 +428,10 @@ describe("DataGrid batch commands", () => {
         { collection: "files", locator: "/candidates/1" },
       ],
     });
-    await waitFor(() => expect(screen.getByText(/관련: 2건 처리했습니다/)).toBeTruthy());
+    // Grid feedback goes to the shell toast stack (U-V7).
+    await waitFor(() =>
+      expect(useToastStore.getState().toasts.some((t) => /관련: 2건 처리했습니다/.test(t.text))).toBe(true),
+    );
     expect(within(rowAt(0)).getByText("관련 있음")).toBeTruthy();
   });
 
@@ -443,7 +447,12 @@ describe("DataGrid batch commands", () => {
     fireEvent.keyDown(rowAt(0), { key: " " });
     // Review column is not part of the files preset, so inspect the loaded row model through the toast path.
     fireEvent.click(screen.getByRole("button", { name: "제외" }));
-    await waitFor(() => expect(screen.getByText(/제외 처리에 실패했습니다\. case locked/)).toBeTruthy());
+    // Grid feedback goes to the shell toast stack (U-V7).
+    await waitFor(() =>
+      expect(
+        useToastStore.getState().toasts.some((t) => /제외 처리에 실패했습니다\. case locked/.test(t.text)),
+      ).toBe(true),
+    );
     expect(useGridLocalStore.getState().toasts.some((t) => t.tone === "error")).toBe(true);
   });
 
@@ -524,7 +533,10 @@ describe("DataGrid notes and AXIOM preset", () => {
         { collection: "files", locator: "/candidates/1" },
       ],
     });
-    await waitFor(() => expect(screen.getByText(/메모: 2건에 저장했습니다/)).toBeTruthy());
+    // Grid feedback goes to the shell toast stack (U-V7).
+    await waitFor(() =>
+      expect(useToastStore.getState().toasts.some((t) => /메모: 2건에 저장했습니다/.test(t.text))).toBe(true),
+    );
   });
 
   it("the persisted AXIOM preset pins the chip column after the select cell and renders status chips", async () => {
@@ -539,9 +551,9 @@ describe("DataGrid notes and AXIOM preset", () => {
     const chipCell = rowAt(0).querySelector<HTMLElement>('[data-col="tagstatus"]');
     const titleCell = rowAt(0).querySelector<HTMLElement>('[data-col="title"]');
     expect(chipCell?.classList.contains("grid-cell-first")).toBe(true);
-    expect(chipCell?.style.left).toBe("60px");
+    expect(chipCell?.style.left).toBe("56px");
     expect(titleCell?.classList.contains("grid-cell-first")).toBe(true);
-    expect(titleCell?.style.left).toBe("210px");
+    expect(titleCell?.style.left).toBe("206px");
 
     rowAt(0).focus();
     fireEvent.keyDown(rowAt(0), { key: " " });

@@ -61,6 +61,75 @@ describe("MetaView record values", () => {
   });
 });
 
+describe("MetaView nested labels and value readings (visual-polish B2 #5)", () => {
+  it("labels keys inside expanded groups and reads booleans / enums in Korean, recursively", () => {
+    show({
+      cloud_validation_matrix: {
+        status: "validation-required",
+        cloud_family: "microsoft-365",
+        service: "exchange",
+        blockers: [{ blocker_id: "b-1", severity: "high", passed: false }],
+        nested: { inner: { report_grade_ready: true } },
+      },
+      commercial_grade_ready: false,
+    });
+    const dts = Array.from(document.querySelectorAll("dt")).map((dt) => dt.textContent);
+    expect(dts).toContain("상태");
+    expect(dts).toContain("클라우드 계열");
+    expect(dts).toContain("서비스");
+    expect(dts).toContain("차단 요인");
+    expect(dts).toContain("심각도");
+    // Recursion: a group inside a group, and items inside a folded list, keep labels.
+    expect(dts).toContain("보고서 등급 준비됨");
+    expect(dts).toContain("차단 요인 ID");
+    const status = document.querySelector('[data-raw="validation-required"]');
+    expect(status?.textContent).toBe("검증 필요");
+    expect(status?.getAttribute("title")).toBe("validation-required");
+    expect(document.querySelector('[data-raw="false"]')?.textContent).toBe("아니요");
+    expect(document.querySelector('[data-raw="true"]')?.textContent).toBe("예");
+    expect(document.querySelector('[data-raw="high"]')?.textContent).toBe("높음");
+    // Unknown token: raw, in mono. Unknown key: raw, in mono.
+    const raw = screen.getByText("exchange");
+    expect(raw.className).toContain("mono");
+    expect(screen.getByText("inner").className).toContain("mono");
+  });
+});
+
+describe("MetaView label collisions (review B2-8)", () => {
+  it("shows the raw key next to labels two fields share, as visible text", () => {
+    show({ details: { application_name: "a.exe", app_name: "b.exe" } });
+    const dts = Array.from(document.querySelectorAll("dt")).map((dt) => dt.textContent);
+    expect(dts).toContain("앱 이름 (application_name)");
+    expect(dts).toContain("앱 이름 (app_name)");
+  });
+});
+
+describe("MetaView output rows (review nit)", () => {
+  it("labels an output file's kind 종류, not 아티팩트 유형", () => {
+    const out: GridRow = {
+      ...row({}),
+      rowKey: "outputs:output:report.md",
+      ref: { collection: "outputs", locator: "output:report.md" },
+      artifactType: "보고서",
+    };
+    render(
+      <MetaView
+        target={{ ref: out.ref, runId: "r1", sourcePath: "C:/o/report.md" }}
+        preview={null}
+        metadata={null}
+        metadataError={null}
+        hashBusy={false}
+        row={out}
+        sessionMarks={[]}
+        onComputeHash={() => {}}
+      />,
+    );
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("종류");
+    expect(text).not.toContain("아티팩트 유형");
+  });
+});
+
 describe("MetaView 증거 정보", () => {
   it("maps recovery source, deletion state, offset and evidence number", () => {
     show({

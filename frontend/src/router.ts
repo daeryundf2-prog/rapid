@@ -68,6 +68,19 @@ export function stageOf(route: Pick<Route, "collection">): Stage {
   return stageOfCollection(route.collection);
 }
 
+/**
+ * Stages whose centre lists rows the viewer previews (visual-polish S9). 접수·처리·보고 are
+ * two columns — left panel + page — and mount no viewer.
+ */
+export const VIEWER_STAGES: readonly Stage[] = ["explore", "review"];
+
+export function stageHasViewer(stage: Stage): boolean {
+  return VIEWER_STAGES.includes(stage);
+}
+
+/** Disabled reason of viewer commands on a stage without a viewer. */
+export const NO_VIEWER_REASON = "이 단계에는 뷰어가 없습니다";
+
 import { decodeRowRef, encodeRowRef, type RowRef } from "./contracts/rowRef";
 import type { ViewerMode } from "./contracts/viewer";
 

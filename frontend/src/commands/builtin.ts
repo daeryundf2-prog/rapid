@@ -10,6 +10,7 @@ import { cancelRun, retryRun } from "../api/runControl";
 import { RUNS_QUERY_KEY, type RunWithProgress } from "../api/runsProgress";
 import { COLLECTION_NODES, runDisplayName } from "../app/collections";
 import type { Command, CommandContext } from "../contracts/command";
+import { NO_VIEWER_REASON, stageHasViewer, stageOf } from "../router";
 import { DENSITIES, DENSITY_LABEL } from "../state/slices/prefs";
 import { anyRunActive, currentRun } from "../state/slices/runs";
 import { useAppStore } from "../state/store";
@@ -365,8 +366,15 @@ export function caseCommands(queryClient: QueryClient): Command[] {
       group: "viewer",
       shortcut: "Enter",
       icon: "panel-right",
-      disabledReason: (ctx) => (ctx.viewerHasTarget ? undefined : "선택된 행이 없습니다"),
+      disabledReason: (ctx) =>
+        // 접수·처리·보고 mount no viewer (S9): say so instead of silently doing nothing.
+        !stageHasViewer(stageOf(store().route))
+          ? NO_VIEWER_REASON
+          : ctx.viewerHasTarget
+            ? undefined
+            : "선택된 행이 없습니다",
       run: () => {
+        if (!stageHasViewer(stageOf(store().route))) return;
         if (store().viewerIsDrawer) store().setOverlay("viewerDrawer", true);
         focusViewer();
       },

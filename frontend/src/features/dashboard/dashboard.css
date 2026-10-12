@@ -123,17 +123,19 @@
   display: grid;
   min-inline-size: 140px;
   padding: var(--space-1);
-  background: var(--bg-raised);
-  border: 1px solid var(--line);
+  background: var(--surface-3);
+  border: 1px solid var(--line-subtle);
   border-radius: var(--radius);
-  box-shadow: 0 6px 18px color-mix(in srgb, var(--scrim) 35%, transparent);
+  box-shadow: var(--shadow-pop);
+  animation: rt-pop-in var(--motion) var(--ease);
 }
 
 .dash-menu [role="menuitem"] {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-1) var(--space-2);
+  min-height: var(--control-h);
+  padding: 0 var(--space-2);
   color: var(--text);
   background: none;
   border: 0;
@@ -369,4 +371,9 @@ textarea.dash-input {
 
 .dash-start-item .icon {
   color: var(--accent);
+}
+
+.dash-pending {
+  display: inline-flex;
+  color: var(--text-muted);
 }

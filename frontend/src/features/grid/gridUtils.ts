@@ -99,3 +99,43 @@ export function serverPathFilter(text: string | undefined): string | undefined {
   const t = text?.trim();
   return t && !/\s/.test(t) ? t : undefined;
 }
+
+/**
+ * Fit column widths to the visible grid width (visual-polish B2 #2): slack goes to the flexing
+ * column (항목), overflow is taken from the shrinkable columns (항목 · 경로) down to their minimum,
+ * in proportion to the room each has left. Columns the user resized stay as they are
+ * (`shrinkable` / `grow` false). `available` ≤ 0 (not measured yet) leaves the widths unchanged.
+ */
+export function fitColumnWidths(
+  widths: readonly number[],
+  options: { grow: number; shrinkable: readonly boolean[]; mins: readonly number[]; available: number },
+): number[] {
+  const out = [...widths];
+  const { grow, shrinkable, mins, available } = options;
+  if (!(available > 0) || out.length === 0) return out;
+  const total = out.reduce((sum, w) => sum + w, 0);
+  if (total < available) {
+    if (grow >= 0 && grow < out.length) out[grow] = (out[grow] ?? 0) + (available - total);
+    return out;
+  }
+  let excess = total - available;
+  const room = out.map((w, i) => (shrinkable[i] ? Math.max(0, w - (mins[i] ?? w)) : 0));
+  const totalRoom = room.reduce((sum, r) => sum + r, 0);
+  if (totalRoom <= 0 || excess <= 0) return out;
+  const take = Math.min(excess, totalRoom);
+  for (let i = 0; i < out.length; i++) {
+    const r = room[i] ?? 0;
+    if (r <= 0) continue;
+    const cut = Math.min(r, Math.round((take * r) / totalRoom));
+    out[i] = (out[i] ?? 0) - cut;
+    excess -= cut;
+  }
+  return out;
+}
+
+/** "C:\a\b\file.json" → ["C:\a\b\", "file.json"]: the head ellipsizes, the file name stays. */
+export function splitPathTail(path: string): [string, string] {
+  const cut = Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/"));
+  if (cut < 0 || cut === path.length - 1) return ["", path];
+  return [path.slice(0, cut + 1), path.slice(cut + 1)];
+}

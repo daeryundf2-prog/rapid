@@ -361,11 +361,14 @@ export const KIND_COLUMNS: Record<string, KindColumnDef[]> = {
  * S4: 시각 · 유형 · 항목 · 경로 · 선별. The summary text stays one click away in the column menu.
  */
 const defaultColumns = (): ColumnSpec[] => [
-  { ...timeColumn, width: 160 },
-  { ...typeColumn, width: 150 },
-  col.title("항목", 300),
-  col.path(360, ["analysis", "source"]),
-  col.review(),
+  // 1440px: tree 260 + viewer 440 leave the grid ≈ 676px; 항목 flexes and 경로 truncates in
+  // the middle so 시각 · 유형 · 항목 · 경로 · 선별 all fit (DataGrid fitColumnWidths).
+  // 시각 is in 출처 중심 too: a source review still needs the time (review B2-6).
+  { ...timeColumn, width: 140, presets: ["analysis", "compact", "source"] },
+  { ...typeColumn, width: 120 },
+  col.title("항목", 240),
+  col.path(220, ["analysis", "source"]),
+  { ...col.review(), width: 88 },
   quietDetailColumn,
   // 파서 moves to 출처 중심 here: the default shows exactly the five columns above.
   ...tail

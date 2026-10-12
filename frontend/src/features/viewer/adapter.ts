@@ -45,6 +45,7 @@ import type { GridRow } from "../../contracts/collection";
 import type { Command, CommandContext } from "../../contracts/command";
 import type { ViewerMode, ViewerTarget } from "../../contracts/viewer";
 import { useAppStore } from "../../state/store";
+import { resetViewerSession } from "./session";
 
 // ---------------------------------------------------------------------------
 // Tiny external store (no dependency on S1's zustand slices).
@@ -249,6 +250,7 @@ export async function dispatchCommand(id: string, ctx: CommandContext): Promise<
 
 /** Test helper: reset the local adapter between tests. */
 export function resetViewerAdapter(): void {
+  resetViewerSession();
   for (const off of shellOffs.values()) off();
   shellOffs.clear();
   commands.clear();

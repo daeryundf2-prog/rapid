@@ -4,6 +4,7 @@ import { authToken, clearAuthToken } from "../../api/client";
 import type { RunWithProgress } from "../../api/runsProgress";
 import { TokenGate } from "../../app/TokenGate";
 import { useAppStore } from "../../state/store";
+import { registerCaseCommands } from "./commands";
 import { LANDING_RECENT_COUNT, Landing } from "./Landing";
 
 afterEach(() => {
@@ -46,5 +47,16 @@ describe("landing card (visual-polish S10)", () => {
   it("with no cases says how to start", () => {
     render(<Landing />);
     expect(screen.getByText(/아직 케이스가 없습니다/)).toBeTruthy();
+  });
+
+  it("start actions carry their icons: open = folder, run = play, sample = package (B2 #6)", () => {
+    const unregister = registerCaseCommands({ reportCandidates: undefined });
+    render(<Landing />);
+    const icon = (testId: string) =>
+      screen.getByTestId(testId).querySelector("svg")?.getAttribute("data-icon");
+    expect(icon("landing-open")).toBe("folder");
+    expect(icon("landing-run")).toBe("play");
+    expect(icon("landing-sample")).toBe("package");
+    unregister();
   });
 });

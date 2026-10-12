@@ -268,7 +268,7 @@ export function ViewerToolbar({
             testId="viewer-review-menu"
           >
             <span>더보기</span>
-            <Icon name="chevron-down" size={14} />
+            <Icon name="chevron-down" />
           </MenuButton>
         </span>
         <MenuButton

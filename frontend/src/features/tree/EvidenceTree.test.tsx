@@ -159,6 +159,19 @@ describe("EvidenceTree (탐색 domain tree)", () => {
     await screen.findByText("패스워드");
   });
 
+  it("dims zero-count nodes (is-empty, no strong badge) — visual-polish B2 #6", async () => {
+    await renderTree();
+    const zero = screen
+      .getAllByRole("treeitem")
+      .filter((li) => li.querySelector(":scope > .badge")?.textContent === "0");
+    expect(zero.length).toBeGreaterThan(0);
+    for (const li of zero) {
+      expect(li.classList.contains("is-empty")).toBe(true);
+      expect(li.querySelector(":scope > .badge.strong")).toBeNull();
+    }
+    expect(item("이벤트 로그").classList.contains("is-empty")).toBe(false);
+  });
+
   it("uses a roving tabindex: exactly one tab stop", async () => {
     await renderTree();
     const stops = screen.getAllByRole("treeitem").filter((el) => el.getAttribute("tabindex") === "0");

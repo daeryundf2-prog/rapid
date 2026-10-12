@@ -135,8 +135,8 @@ describe("artifacts header sort (server, whole kind)", () => {
     expect(sortCalls("asc")).toHaveLength(1);
     await tick(1);
     expect(sortCalls("asc")).toHaveLength(2);
-    await vi.waitFor(() => expect(status().textContent).toBe("정렬: 실행 횟수 ▲ (전체 30건)"));
-    expect(announceMock).toHaveBeenCalledWith("정렬: 실행 횟수 ▲ (전체 30건)");
+    await vi.waitFor(() => expect(status().textContent).toBe("정렬: 실행 횟수 오름차순 (전체 30건)"));
+    expect(announceMock).toHaveBeenCalledWith("정렬: 실행 횟수 오름차순 (전체 30건)");
     expect(header("실행 횟수").getAttribute("aria-sort")).toBe("ascending");
     await vi.waitFor(() => expect(titleOf(0)).toBe("APP0.EXE"));
 
@@ -146,7 +146,7 @@ describe("artifacts header sort (server, whole kind)", () => {
     expect(sortCalls("desc")).toHaveLength(1);
     await tick(1000);
     expect(sortCalls("desc")).toHaveLength(2);
-    await vi.waitFor(() => expect(status().textContent).toBe("정렬: 실행 횟수 ▼ (전체 30건)"));
+    await vi.waitFor(() => expect(status().textContent).toBe("정렬: 실행 횟수 내림차순 (전체 30건)"));
     await vi.waitFor(() => expect(titleOf(0)).toBe("APP17.EXE"));
     expect(rowAt(0).getAttribute("data-row-key")).toBe(`artifacts:${KIND}:/artifacts/17`);
     const sorted = calls.filter((c) => c.url.includes("sort=details.run_count"));

@@ -164,11 +164,6 @@ export function StatusBar() {
       ) : null}
       <Slot name="status-extra" />
       <span className="statusbar-spacer" />
-      {notice ? (
-        <span className={`status-notice ${notice.tone}`} data-testid="status-notice">
-          {notice.text}
-        </span>
-      ) : null}
       <TimezoneControl />
       <span className={`status-connection ${runsStatus}`} data-testid="status-connection">
         {runsStatus === "error" ? "연결 끊김" : runsStatus === "loading" ? "연결 중…" : "연결됨"}

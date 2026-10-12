@@ -488,6 +488,23 @@ describe("Viewer — history and navigation", () => {
     await waitFor(() => expect(live()).toBe("다음 대상이 없습니다."));
   });
 
+  it("keeps Alt+←/→ history and the chosen tab across a remount (stage switch, review B2-3)", async () => {
+    routes(preview({ preview_type: "text", extension: ".txt", text: "hi" }));
+    const first = render(<Viewer />);
+    act(() => setViewerTarget(target({ ref: { collection: "files", locator: "/candidates/1" } })));
+    act(() => setViewerTarget(target({ ref: { collection: "files", locator: "/candidates/2" } })));
+    await waitFor(() => expect(screen.getByRole("tab", { name: /헥스/ })).toBeTruthy());
+    fireEvent.click(screen.getByRole("tab", { name: /헥스/ }));
+    expect(screen.getByRole("tab", { name: /헥스/ }).getAttribute("aria-selected")).toBe("true");
+    first.unmount(); // 탐색 → 처리 (two columns, no viewer)
+    render(<Viewer />); // … and back to 탐색
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { name: /헥스/ }).getAttribute("aria-selected")).toBe("true"),
+    );
+    fireEvent.keyDown(region(), { key: "ArrowLeft", altKey: true });
+    expect(getViewerTarget()?.ref.locator).toBe("/candidates/1");
+  });
+
   it("'같은 출처의 다른 행' emits navigate.rows-for-source when a handler is registered", async () => {
     await show({ preview_type: "text", extension: ".txt", text: "hi" });
     // It lives in the "⋯" 원본 동작 menu (visual-polish S5).

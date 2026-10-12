@@ -49,11 +49,14 @@
 }
 
 .grid-colmenu-button {
+  position: relative;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: var(--space-1);
-  height: 22px;
-  padding: 0 var(--space-1);
+  width: var(--control-h);
+  height: var(--control-h);
+  padding: 0;
   border: 0;
   border-radius: var(--radius);
   background: transparent;
@@ -107,8 +110,9 @@
   padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
   background: var(--bg-raised);
   border: 1px solid var(--line);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px color-mix(in srgb, var(--scrim) 40%, transparent);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-pop);
+  animation: rt-pop-in var(--motion) var(--ease);
 }
 
 .grid-batch-count {
@@ -125,12 +129,12 @@
 .grid-filter input,
 .grid-select select,
 .grid-tag-prompt input {
-  height: 28px;
+  height: var(--control-h);
   padding: 0 var(--space-2);
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius);
   font: inherit;
 }
 
@@ -147,12 +151,12 @@
 }
 
 .grid-btn {
-  height: 28px;
+  height: var(--control-h);
   padding: 0 var(--space-3);
   background: var(--bg-raised);
   color: var(--text);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius);
   font: inherit;
   cursor: pointer;
 }
@@ -218,11 +222,12 @@
   position: relative;
 }
 
+/* Row rules are the subtle line; the header keeps the strong one (visual-polish U-V4). */
 .grid-row {
   display: flex;
   align-items: stretch;
   width: 100%;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--line-subtle);
   background: var(--bg);
 }
 
@@ -235,14 +240,17 @@
 
 .grid-header {
   position: relative;
+  box-sizing: border-box;
   background: var(--bg-panel);
   color: var(--text-muted);
   font-size: var(--fs-table-aux);
+  font-weight: 500;
   border-bottom: 1px solid var(--line);
 }
 
+/* Selected row: surface-2 + a 2px accent bar on the left edge (sticky select cell). */
 .grid-row.is-selected {
-  background: color-mix(in srgb, var(--accent) 18%, var(--bg));
+  background: var(--bg-selected);
 }
 
 .grid-row:hover:not(.is-selected) {
@@ -290,7 +298,44 @@
   position: sticky;
   z-index: 2;
   background: inherit;
-  border-right: 1px solid var(--line);
+  border-right: 1px solid var(--line-subtle);
+}
+
+/* Plain text cells ellipsize (a bare text node in the flex cell would just clip). */
+.grid-cell-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Empty value: a muted dash (never "···" or a blank that reads as a missing column). */
+.grid-cell-empty {
+  color: var(--text-subtle);
+}
+
+/* 경로: middle truncation — the folder part ellipsizes, the file name stays whole. */
+.grid-path {
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.grid-path-head {
+  flex: 0 1 auto;
+  min-width: 1.2em; /* room for the "…" itself */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+
+.grid-path-tail {
+  flex: 0 0 auto;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .grid-header .grid-cell-select,
@@ -303,6 +348,11 @@
 
 .grid-hcell {
   position: relative;
+}
+
+/* Selected row accent bar (after the sticky select-cell rules it refines). */
+.grid-row.is-selected > .grid-cell-select {
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .grid-sort {
@@ -356,7 +406,7 @@
   background: transparent;
   color: var(--text-muted);
   border: 0;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   opacity: 0.45;
 }
@@ -386,10 +436,33 @@
   border-radius: 4px;
 }
 
+/* Empty state (U-V6): icon + one sentence + the next action, centred under the header. */
 .grid-empty {
-  padding: var(--space-5);
+  position: absolute;
+  inset: 32px 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0;
+  padding: var(--space-6) var(--space-4);
   color: var(--text-muted);
   text-align: center;
+}
+
+.grid-empty-icon {
+  display: inline-grid;
+  place-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--text-muted);
+}
+
+.grid-empty-text {
+  margin: 0;
+  max-width: 44ch;
 }
 
 .grid-error {
@@ -431,48 +504,30 @@
   display: grid;
   min-width: 180px;
   padding: var(--space-1);
-  background: var(--bg-panel);
-  border: 1px solid var(--line);
-  border-radius: 4px;
+  background: var(--surface-3);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-pop);
+  animation: rt-pop-in var(--motion) var(--ease);
 }
 
 .grid-menu-item {
-  padding: var(--space-1) var(--space-3);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--control-h);
+  padding: 0 var(--space-3);
   text-align: left;
   background: transparent;
   color: var(--text);
   border: 0;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   font: inherit;
   cursor: pointer;
 }
 
 .grid-menu-item:hover:not([aria-disabled="true"]) {
   background: var(--bg-raised);
-}
-
-.grid-toasts {
-  position: absolute;
-  right: var(--space-3);
-  bottom: var(--space-6);
-  z-index: 50;
-  display: grid;
-  gap: var(--space-2);
-}
-
-.grid-toast {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
-  background: var(--bg-raised);
-  border: 1px solid var(--line);
-  border-left: 3px solid var(--info);
-  border-radius: 4px;
-}
-
-.grid-toast.is-error {
-  border-left-color: var(--danger);
 }
 
 .grid-extract {
@@ -567,13 +622,13 @@
 }
 
 .grid-fieldpicker-search {
-  height: 28px;
+  height: var(--control-h);
   max-width: 320px;
   padding: 0 var(--space-2);
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius);
 }
 
 .grid-fieldpicker-search:focus-visible {
@@ -601,7 +656,7 @@
 
 /* Column header filters (plan analysis-workbench-p1 §4). */
 .grid-colfilter-row .grid-cell {
-  padding: 2px var(--space-1);
+  padding: var(--space-1);
 }
 
 .grid-colfilter-pair {
@@ -615,12 +670,12 @@
   flex: 1;
   min-width: 0;
   width: 100%;
-  height: 22px;
+  height: 24px;
   padding: 0 var(--space-1);
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   font: inherit;
   font-size: var(--fs-table-aux);
 }
@@ -682,10 +737,12 @@
 }
 
 /* Rows can scroll clear of the floating bar while a selection exists. */
+/* --batch-reserve is the measured bar height + offsets (DataGrid / BatchBar onHeight): the bar
+   wraps and grows with the tag / note editors, so a fixed reserve could hide the last rows. */
 .grid-root[data-batch] .grid-scroll {
-  scroll-padding-bottom: 64px;
+  scroll-padding-bottom: var(--batch-reserve, 64px);
 }
 
 .grid-root[data-batch] .grid-body {
-  margin-bottom: 64px;
+  margin-bottom: var(--batch-reserve, 64px);
 }

@@ -3,11 +3,12 @@ import { Group, type GroupImperativeHandle, Panel, Separator } from "react-resiz
 import { SkipLink, useEscape } from "../a11y";
 import { focusMain, MAIN_ID, VIEWER_ID } from "../commands/builtin";
 import { CommandButton } from "../commands/CommandButton";
+import { ToastRegion } from "../components/ToastRegion";
 import { Landing } from "../features/case/Landing";
 import { StageRail } from "../features/stages/StageRail";
 import { STAGE_DEFS, STAGE_HEADING_ID } from "../features/stages/stages";
 import { Icon } from "../icons";
-import { type Stage, stageOf } from "../router";
+import { stageHasViewer, stageOf } from "../router";
 import { usePanelLayout } from "../state/hooks";
 import { useAppStore } from "../state/store";
 import { CommandPalette } from "./CommandPalette";
@@ -20,7 +21,13 @@ import { TopBar } from "./TopBar";
 export const DRAWER_QUERY = "(max-width: 1199.98px)";
 /** Panel ids are DOM ids too: keep them distinct from the landmark ids (#main, #viewer). */
 const PANEL = { tree: "pane-tree", grid: "pane-grid", viewer: "pane-viewer" } as const;
-const DEFAULT_LAYOUT = { [PANEL.tree]: 20, [PANEL.grid]: 45, [PANEL.viewer]: 35 };
+/**
+ * Default pane widths (visual-polish B2 #2): the tree and the viewer have fixed pixel widths, the
+ * grid takes the rest — at 1440px that leaves ≈ 676px for 시각 · 유형 · 항목 · 경로 · 선별.
+ * Every pane stays resizable; a dragged layout is saved (percentages) and restored.
+ */
+export const TREE_DEFAULT = "260px";
+export const VIEWER_DEFAULT = "440px";
 
 export function useMediaQuery(query: string): boolean {
   const get = () =>
@@ -64,21 +71,13 @@ function ViewerSlot({ drawer }: { drawer: boolean }) {
   return <Slot name="viewer" drawer={drawer} fallback={<p className="pane-empty">선택된 행이 없습니다</p>} />;
 }
 
-/**
- * Stages whose centre lists rows the viewer previews (visual-polish S9). 접수·처리·보고 are
- * two columns — left panel + page — and reserve no viewer space.
- */
-export const VIEWER_STAGES: readonly Stage[] = ["explore", "review"];
-
-export function stageHasViewer(stage: Stage): boolean {
-  return VIEWER_STAGES.includes(stage);
-}
+export { stageHasViewer, VIEWER_STAGES } from "../router";
 
 /** 접수·처리·보고: left panel + page, no viewer column. */
 function TwoPanes({ narrow }: { narrow: boolean }) {
   return (
     <Group id="rapidtriage-console-2col" orientation="horizontal" style={{ height: "100%" }}>
-      <Panel id={PANEL.tree} defaultSize={narrow ? "28%" : "20%"} minSize="240px" maxSize="320px">
+      <Panel id={PANEL.tree} defaultSize={narrow ? "28%" : TREE_DEFAULT} minSize="240px" maxSize="320px">
         <TreePane />
       </Panel>
       <Separator className="resize-handle" />
@@ -101,12 +100,11 @@ function LandingPane() {
 function WidePanes() {
   const [saved, setSaved] = usePanelLayout();
   const groupRef = useRef<GroupImperativeHandle>(null);
-  // The library reads `defaultLayout` before panels register; apply the saved
-  // layout imperatively once after mount (same approach as the v2 workbench).
+  // The library reads `defaultLayout` before panels register; apply a saved (dragged) layout
+  // imperatively once after mount. Without one the panels' pixel defaults apply.
   // biome-ignore lint/correctness/useExhaustiveDependencies: mount-only initialisation
   useEffect(() => {
-    const target = saved?.[PANEL.tree] && saved[PANEL.grid] && saved[PANEL.viewer] ? saved : DEFAULT_LAYOUT;
-    groupRef.current?.setLayout(target);
+    if (saved?.[PANEL.tree] && saved[PANEL.grid] && saved[PANEL.viewer]) groupRef.current?.setLayout(saved);
   }, []);
   return (
     <Group
@@ -118,15 +116,15 @@ function WidePanes() {
       }}
       style={{ height: "100%" }}
     >
-      <Panel id={PANEL.tree} defaultSize="20%" minSize="240px" maxSize="320px">
+      <Panel id={PANEL.tree} defaultSize={TREE_DEFAULT} minSize="240px" maxSize="320px">
         <TreePane />
       </Panel>
       <Separator className="resize-handle" />
-      <Panel id={PANEL.grid} defaultSize="45%" minSize="320px">
+      <Panel id={PANEL.grid} minSize="320px">
         <GridPane />
       </Panel>
       <Separator className="resize-handle" />
-      <Panel id={PANEL.viewer} defaultSize="35%" minSize="420px">
+      <Panel id={PANEL.viewer} defaultSize={VIEWER_DEFAULT} minSize="420px">
         <aside
           id={VIEWER_ID}
           tabIndex={-1}
@@ -230,6 +228,7 @@ export function Layout() {
         </div>
       </div>
       <StatusBar />
+      <ToastRegion />
       <CommandPalette />
       <HelpOverlay />
     </div>

@@ -34,10 +34,11 @@ import {
   type ViewerController,
   writeClipboard,
 } from "./commands";
-import { TargetHistory, targetKey } from "./history";
+import { targetKey } from "./history";
 import { ModeTabs, panelId, tabId, VIEWER_PANEL_ID } from "./ModeTabs";
 import { resolveModes } from "./modes";
 import { recordByteRange } from "./record";
+import { viewerSession } from "./session";
 import { type AsyncState, errorText, useAsync } from "./useAsync";
 import { ViewerToolbar } from "./ViewerToolbar";
 import { DocumentView } from "./views/DocumentView";
@@ -170,14 +171,18 @@ export function Viewer() {
     [target, preview, previewState],
   );
   const { mode: routeMode, setMode: setRouteMode } = useViewerRouteMode();
-  const [userMode, setUserMode] = useState<{ key: string; mode: ViewerMode } | null>(null);
+  // The chosen tab lives in the viewer session so a remount (stage switch) keeps it.
+  const [userMode, setUserModeState] = useState(() => viewerSession().userMode);
+  const setUserMode = useCallback((value: { key: string; mode: ViewerMode } | null) => {
+    viewerSession().userMode = value;
+    setUserModeState(value);
+  }, []);
   // URL `mode=` restores the tab for the first target; later rows auto-select again.
-  const restoredMode = useRef(false);
   // biome-ignore lint/correctness/useExhaustiveDependencies: runs once per target key
   useEffect(() => {
     if (!key) return;
-    if (!restoredMode.current) {
-      restoredMode.current = true;
+    if (!viewerSession().restoredMode) {
+      viewerSession().restoredMode = true;
       if (routeMode) setUserMode({ key, mode: routeMode });
       return;
     }
@@ -194,12 +199,13 @@ export function Viewer() {
       if (key) setUserMode({ key, mode });
       setRouteMode(mode);
     },
-    [key, setRouteMode],
+    [key, setRouteMode, setUserMode],
   );
 
   // ---- history ------------------------------------------------------------
-  const history = useRef(new TargetHistory());
-  const historyRows = useRef(new Map<string, typeof row>());
+  // Alt+←/→ history survives a remount of the viewer (review B2-3): it lives in the session.
+  const history = useRef(viewerSession().history);
+  const historyRows = useRef(viewerSession().rows);
   const [, bumpHistory] = useReducer((value: number) => value + 1, 0);
   useEffect(() => {
     if (!target) return;
@@ -467,9 +473,14 @@ export function Viewer() {
         tabIndex={0}
       >
         {!target ? (
-          <p className="viewer-empty">
-            그리드에서 행을 선택하면 원본이 여기에 표시됩니다 — <kbd>Enter</kbd> 키로 뷰어로 이동하세요.
-          </p>
+          <div className="viewer-empty">
+            <span className="viewer-empty-icon" aria-hidden="true">
+              <Icon name="eye" />
+            </span>
+            <p>
+              그리드에서 행을 선택하면 원본이 여기에 표시됩니다 — <kbd>Enter</kbd> 키로 뷰어로 이동하세요.
+            </p>
+          </div>
         ) : (
           <ViewerBody
             target={target}
