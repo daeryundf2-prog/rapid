@@ -192,6 +192,35 @@
   gap: var(--space-2);
 }
 
+/* A default column the responsive layout hid: "폭 부족으로 숨김 — 표시" (pins it on). */
+.grid-popover-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.grid-popover-show {
+  border: 0;
+  padding: 0 var(--space-1);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--fs-table-aux);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.grid-popover-show:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+
+.grid-popover-show:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 .grid-tag-prompt {
   display: inline-flex;
   gap: var(--space-1);

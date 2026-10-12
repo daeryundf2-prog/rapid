@@ -14,7 +14,7 @@ import {
   fieldMenuEntries,
   UNSHAREABLE_FIELD_REASON,
 } from "./columns/fieldColumns";
-import { backendLabel, formatCount } from "./gridUtils";
+import { AUTO_HIDE_LABEL, type AutoHideReason, backendLabel, formatCount } from "./gridUtils";
 import { type ColumnSpec, DENSITY_LABELS, type Density, type GridPreset, PRESET_LABELS } from "./types";
 
 export interface GridToolbarProps {
@@ -39,6 +39,11 @@ export interface ColumnMenuProps {
   columns: ColumnSpec[];
   visibility: Record<string, boolean>;
   onToggleColumn: (id: string, visible: boolean) => void;
+  /**
+   * Default columns the responsive layout keeps off screen (too narrow / no values on this page):
+   * listed unchecked with "폭 부족으로 숨김 — 표시"; showing one pins it.
+   */
+  autoHidden?: ReadonlyMap<string, AutoHideReason>;
   collectionLabel: string;
   /** "레코드 필드 추가" section (artifacts of one kind): promote details keys to columns. */
   fieldPicker?: FieldPickerProps;
@@ -258,17 +263,34 @@ export function ColumnMenu(props: ColumnMenuProps) {
 
         <fieldset className="popover-section grid-popover" aria-label="표시할 열">
           <legend className="popover-title">표시할 열</legend>
-          {props.columns.map((column) => (
-            <label key={column.id} className="grid-popover-item">
-              <input
-                type="checkbox"
-                checked={props.visibility[column.id] !== false}
-                disabled={column.id === locked}
-                onChange={(event) => props.onToggleColumn(column.id, event.target.checked)}
-              />
-              {column.header}
-            </label>
-          ))}
+          {props.columns.map((column) => {
+            const auto = props.autoHidden?.get(column.id);
+            const item = (
+              <label key={column.id} className="grid-popover-item">
+                <input
+                  type="checkbox"
+                  checked={props.visibility[column.id] !== false && !auto}
+                  disabled={column.id === locked}
+                  onChange={(event) => props.onToggleColumn(column.id, event.target.checked)}
+                />
+                {column.header}
+              </label>
+            );
+            if (!auto) return item;
+            return (
+              <div key={column.id} className="grid-popover-row" data-testid={`grid-autohidden-${column.id}`}>
+                {item}
+                <button
+                  type="button"
+                  className="grid-popover-show"
+                  aria-label={`${column.header} 표시 (${AUTO_HIDE_LABEL[auto]})`}
+                  onClick={() => props.onToggleColumn(column.id, true)}
+                >
+                  {AUTO_HIDE_LABEL[auto]} — 표시
+                </button>
+              </div>
+            );
+          })}
         </fieldset>
         {props.fieldPicker ? <FieldPicker {...props.fieldPicker} /> : null}
       </Popover>

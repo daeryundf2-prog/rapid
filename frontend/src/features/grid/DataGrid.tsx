@@ -54,12 +54,14 @@ import { GridEmpty, type GridEmptyState } from "./GridEmpty";
 import { ColumnMenu, GridFooter, GridToolbar } from "./GridToolbar";
 import { buildViewerTarget, type GridCommandHost, runBatch, runNote, useGridCommands } from "./gridCommands";
 import {
+  type AutoHideReason,
   compareValues,
   displayText,
   fitColumnWidths,
   formatCount,
   indexFromRef,
   matchesFilter,
+  priorityHiddenColumns,
   resultSentence,
   serverPathFilter,
 } from "./gridUtils";
@@ -87,8 +89,6 @@ const SELECT_COL_WIDTH = 56;
 const HEAD_TOOLS_WIDTH = 40;
 /** The header row is 32px at every density (visual-polish U-V4); rows follow the density. */
 const HEADER_HEIGHT = 32;
-/** Columns that give up width when the pane is narrow (항목 also takes the slack when it is wide). */
-const SHRINKABLE_COLUMNS = new Set(["title", "path"]);
 const EMPTY_ROWS: GridRow[] = [];
 const PRESETS: readonly GridPreset[] = ["analysis", "compact", "source", "axiom"];
 /** AXIOM preset (X13): the tag/status chip column is pinned right after the select cell. */
@@ -344,6 +344,8 @@ export function DataGrid(props: DataGridProps = {}) {
     [patchFilters],
   );
   const [columnSizing, setColumnSizing] = useState<ColumnSizingState>({});
+  /** Default columns the user showed explicitly: never hidden for width / missing values. */
+  const [pinnedColumns, setPinnedColumns] = useState<ReadonlySet<string>>(() => new Set());
   const [focusIdx, setFocusIdx] = useState(0);
   const [menuAnchor, setMenuAnchor] = useState<Anchor>(null);
   /** Row index whose menu is open (trigger aria-expanded / aria-controls). */
@@ -381,6 +383,7 @@ export function DataGrid(props: DataGridProps = {}) {
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset only when the collection or preset changes
   useEffect(() => {
     setVisibility(visibilityFor(columns, preset));
+    setPinnedColumns(new Set());
   }, [collectionKey, preset]);
   // Reset only when the collection changes.
   useEffect(() => {
@@ -451,6 +454,48 @@ export function DataGrid(props: DataGridProps = {}) {
     return [...lead, ...columns.filter((c) => !lead.includes(c))];
   }, [columns, preset]);
 
+  // Responsive default layout (분석 기본 preset only): 시각 goes when no loaded row has a time,
+  // then the lowest-priority columns go while their minimum widths exceed the grid width.
+  const widthPriority = preset === "analysis" ? def.widthPriority?.(ref) : undefined;
+  const loadedRows = cq.loadedRows;
+  const noTimes = useMemo(
+    () => loadedRows.length > 0 && !loadedRows.some((row) => row.timestamp),
+    [loadedRows],
+  );
+  const autoHidden = useMemo(() => {
+    const out = new Map<string, AutoHideReason>();
+    if (!widthPriority) return out;
+    if (noTimes && widthPriority.includes("timestamp") && !pinnedColumns.has("timestamp"))
+      out.set("timestamp", "empty");
+    const shown = orderedColumns
+      .filter((c) => visibility[c.id] !== false && !out.has(c.id))
+      .map((c) => ({ id: c.id, min: columnSizing[c.id] ?? c.minWidth ?? c.width }));
+    const hidden = priorityHiddenColumns(shown, {
+      priority: widthPriority,
+      available: paneWidth - SELECT_COL_WIDTH - HEAD_TOOLS_WIDTH,
+      keep: pinnedColumns,
+    });
+    for (const id of hidden) out.set(id, "width");
+    return out;
+  }, [widthPriority, noTimes, pinnedColumns, orderedColumns, visibility, columnSizing, paneWidth]);
+  const tableVisibility = useMemo(() => {
+    if (autoHidden.size === 0) return visibility;
+    const next = { ...visibility };
+    for (const id of autoHidden.keys()) next[id] = false;
+    return next;
+  }, [visibility, autoHidden]);
+  const toggleColumn = useCallback((id: string, visible: boolean) => {
+    // Showing a column is explicit: it stays on screen however narrow the grid gets.
+    setPinnedColumns((prev) => {
+      if (prev.has(id) === visible) return prev;
+      const next = new Set(prev);
+      if (visible) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+    setVisibility((prev) => ({ ...prev, [id]: visible }));
+  }, []);
+
   const tableColumns = useMemo<LegacyColumnDef<GridRow>[]>(
     () =>
       orderedColumns.map((spec) => ({
@@ -468,7 +513,7 @@ export function DataGrid(props: DataGridProps = {}) {
   const table = useLegacyTable<GridRow>({
     data: compactMode ? filtered : EMPTY_ROWS,
     columns: tableColumns,
-    state: { sorting, columnVisibility: visibility, columnSizing },
+    state: { sorting, columnVisibility: tableVisibility, columnSizing },
     onSortingChange: setSorting,
     onColumnVisibilityChange: setVisibility,
     onColumnSizingChange: setColumnSizing,
@@ -482,14 +527,12 @@ export function DataGrid(props: DataGridProps = {}) {
   const visibleColumns = table.getVisibleLeafColumns();
   const specById = useMemo(() => new Map(columns.map((c) => [c.id, c])), [columns]);
   const specs = visibleColumns.map((c) => specById.get(c.id)).filter((c): c is ColumnSpec => !!c);
-  // 항목 flexes into the pane width and 항목 / 경로 shrink to their minimum before the grid
-  // scrolls sideways; widths the user dragged stay as dragged (visual-polish B2 #2).
+  // 항목 flexes into the pane width; nothing shrinks (a narrow grid hides default columns by
+  // priority instead, see autoHidden). Widths the user dragged stay as dragged.
   const widths = fitColumnWidths(
     visibleColumns.map((c) => c.getSize()),
     {
       grow: columnSizing.title === undefined ? specs.findIndex((s) => s.id === "title") : -1,
-      shrinkable: specs.map((s) => SHRINKABLE_COLUMNS.has(s.id) && columnSizing[s.id] === undefined),
-      mins: specs.map((s) => s.minWidth ?? 60),
       available: paneWidth - SELECT_COL_WIDTH - HEAD_TOOLS_WIDTH,
     },
   );
@@ -1177,7 +1220,8 @@ export function DataGrid(props: DataGridProps = {}) {
             onDensity={setDensity}
             columns={columns}
             visibility={visibility}
-            onToggleColumn={(id, visible) => setVisibility((prev) => ({ ...prev, [id]: visible }))}
+            onToggleColumn={toggleColumn}
+            autoHidden={autoHidden}
             collectionLabel={def.label}
             columnFilters={
               ref.id === "intake"

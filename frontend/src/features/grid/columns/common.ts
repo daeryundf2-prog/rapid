@@ -156,7 +156,8 @@ export const col = {
       id: "path",
       header: "경로",
       width,
-      minWidth: 100,
+      // The middle truncation (folder … file name) needs room: never narrower than 200px.
+      minWidth: 200,
       presets,
       value: (r) => r.sourcePath,
       render: (r) => pathCell(r.sourcePath),

@@ -89,6 +89,12 @@ export interface CollectionDef {
   columns: ColumnSpec[];
   /** Kind-aware column set (e.g. eventlog adds 이벤트ID/채널/메시지); defaults to `columns`. */
   columnsFor?: (ref: CollectionRef) => ColumnSpec[];
+  /**
+   * Responsive default layout: the column ids in priority order (highest first) for the default
+   * ("분석 기본") preset. While the columns' minimum widths (`minWidth`) exceed the grid width the
+   * lowest-priority ones are hidden (열 menu: "폭 부족으로 숨김 — 표시"). Undefined = no hiding.
+   */
+  widthPriority?: (ref: CollectionRef) => readonly string[] | undefined;
   /** Map one raw API row to the normalised GridRow. `index` is the global row index. */
   mapRow: (raw: RawRow, index: number, ctx: MapContext) => GridRow;
   /** "paged" = server offset/limit; "whole" = one response, paged on the client. */

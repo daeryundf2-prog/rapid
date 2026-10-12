@@ -9,7 +9,7 @@
  * guarded by an equality check, so the two subscriptions cannot loop.
  */
 
-import { focusViewer, MAIN_ID } from "../commands/builtin";
+import { expandViewerPane, focusViewer, MAIN_ID } from "../commands/builtin";
 import type { CollectionQuery, CollectionRef } from "../contracts/collection";
 import { encodeRowRef, type RowRef } from "../contracts/rowRef";
 import type { ViewerTarget } from "../contracts/viewer";
@@ -202,6 +202,7 @@ export function connectGridToShell(): () => void {
     if (grid.viewerFocusRequests > prev.viewerFocusRequests && stageHasViewer(stageOf(app.route))) {
       const s = useAppStore.getState();
       if (s.viewerIsDrawer) s.setOverlay("viewerDrawer", true);
+      else expandViewerPane();
       focusViewer();
     }
   });

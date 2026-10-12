@@ -7,6 +7,7 @@ import {
   type SourceMetadata,
   type SourcePreview,
 } from "../../api/viewer";
+import { collapseViewerPane } from "../../commands/builtin";
 import type { Command } from "../../contracts/command";
 import type { MarkAction, ViewerMode, ViewerTarget } from "../../contracts/viewer";
 import { Icon } from "../../icons";
@@ -74,7 +75,7 @@ export function targetTitle(
   return rowTitle || target.ref.locator;
 }
 
-export function Viewer() {
+export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
   const target = useViewerTarget();
   const row = useViewerRowContext();
   const focusSeq = useViewerFocusRequest();
@@ -446,6 +447,19 @@ export function Viewer() {
             run: () => void dispatchCommand(ROWS_FOR_SOURCE_COMMAND, ctx),
           }}
         />
+        {/* Wide layout only: the drawer has its own close button (Esc). */}
+        {drawer ? null : (
+          <button
+            type="button"
+            className="viewer-icon-button"
+            aria-label="뷰어 접기"
+            title="뷰어 접기"
+            data-testid="viewer-collapse"
+            onClick={collapseViewerPane}
+          >
+            <Icon name="chevron-right" />
+          </button>
+        )}
       </div>
       <ModeTabs modes={modes} active={activeMode} onSelect={selectMode} />
       {/* Inactive modes get an empty, hidden panel so every tab's aria-controls resolves to a

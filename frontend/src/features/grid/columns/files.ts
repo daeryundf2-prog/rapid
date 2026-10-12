@@ -95,12 +95,16 @@ export function isDirectoryRaw(raw: Record<string, unknown>, path: string | null
   return path !== null && /[\\/]$/.test(path);
 }
 
+/** Files default layout, highest priority first: 이름 > 수정 > 크기 > 선별 > 경로 > NTFS 생성. */
+export const FILES_PRIORITY = ["title", "timestamp", "size", "review", "path", "ntfsCreated"] as const;
+
 export const filesCollection: CollectionDef = {
   id: "files",
   label: "파일",
   source: "paged",
   fetch: (runId, query, signal) =>
     fetchFilesPage(runId, query.offset, query.limit, signal, query.ref.category || undefined),
+  widthPriority: () => FILES_PRIORITY,
   mapRow: (raw, position, ctx) => {
     // A category-filtered page is not candidate-ordered: keep the candidate's own index.
     const own = typeof raw.candidate_index === "number" ? raw.candidate_index : raw.record_index;
@@ -137,17 +141,24 @@ export const filesCollection: CollectionDef = {
       },
     );
   },
-  // Default layout (visual-polish S4): 이름 · 경로 · 크기 · 수정 · NTFS 생성 · 선별.
+  // Default layout (visual-polish S4): 이름 · 경로 · 크기 · 수정 · NTFS 생성 · 선별. Default width =
+  // minimum width; 이름 takes the slack and a narrow grid hides columns by FILES_PRIORITY.
   columns: [
-    col.title("이름", 240),
-    col.path(340, ["analysis", "source"]),
-    col.field("size", "크기", 90, ["analysis", "compact"], (r) => (r.fields.size as number | null) ?? null, {
+    { ...col.title("이름", 220), minWidth: 220 },
+    col.path(200, ["analysis", "source"]),
+    col.field("size", "크기", 80, ["analysis", "compact"], (r) => (r.fields.size as number | null) ?? null, {
       align: "right",
+      minWidth: 80,
       format: (r) => formatBytes(r.fields.size),
     }),
-    { ...col.timestamp(160), header: "수정" },
-    { ...ntfsTime("ntfsCreated", "NTFS 생성", "created_at"), presets: ["analysis", "source"] },
-    col.review(),
+    { ...col.timestamp(150), header: "수정", minWidth: 150 },
+    {
+      ...ntfsTime("ntfsCreated", "NTFS 생성", "created_at"),
+      width: 150,
+      minWidth: 150,
+      presets: ["analysis", "source"],
+    },
+    { ...col.review(), width: 88, minWidth: 88 },
     col.field("extension", "확장자", 80, ["compact"], (r) => fieldStr(r, "extension")),
     col.field("categories", "분류", 160, ["compact"], (r) => fieldStr(r, "categories")),
     col.field("recovery", "복구 유형", 100, ["source"], (r) => fieldStr(r, "recovery")),

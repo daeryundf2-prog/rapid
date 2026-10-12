@@ -11,6 +11,7 @@ import { RUNS_QUERY_KEY, type RunWithProgress } from "../api/runsProgress";
 import { COLLECTION_NODES, runDisplayName } from "../app/collections";
 import type { Command, CommandContext } from "../contracts/command";
 import { NO_VIEWER_REASON, stageHasViewer, stageOf } from "../router";
+import { viewerPaneCollapsed } from "../state/slices/overlays";
 import { DENSITIES, DENSITY_LABEL } from "../state/slices/prefs";
 import { anyRunActive, currentRun } from "../state/slices/runs";
 import { useAppStore } from "../state/store";
@@ -26,6 +27,8 @@ const needsRun = (ctx: CommandContext) => (ctx.runId ? undefined : NO_RUN_REASON
 export const MAIN_ID = "main";
 export const VIEWER_ID = "viewer";
 export const GLOBAL_SEARCH_ID = "global-search";
+/** The collapsed viewer rail's expand button (뷰어 접기 lands focus here). */
+export const VIEWER_EXPAND_ID = "viewer-expand";
 
 function focusById(id: string, preferSelector?: string): void {
   const run = () => {
@@ -52,6 +55,25 @@ export function focusViewer(): void {
   // The viewer (S2) also listens for the request and re-focuses once its tabs render.
   useAppStore.getState().requestViewerFocus();
   focusById(VIEWER_ID, "[data-viewer-focus]");
+}
+
+/**
+ * Show the wide viewer pane when it is the collapsed rail (viewer.open, Enter on a row, the rail's
+ * button). With a selected row the pane goes back to "auto"; without one it stays open until
+ * the analyst collapses it. No-op in the drawer layout.
+ */
+export function expandViewerPane(): void {
+  const s = useAppStore.getState();
+  if (s.viewerIsDrawer || !viewerPaneCollapsed(s)) return;
+  s.setViewerPane(s.route.row ? "auto" : "open");
+}
+
+/** 뷰어 접기: collapse the wide viewer to its rail for this session; focus moves to the rail. */
+export function collapseViewerPane(): void {
+  const s = useAppStore.getState();
+  if (s.viewerIsDrawer) return;
+  s.setViewerPane("collapsed");
+  focusById(VIEWER_EXPAND_ID);
 }
 
 const GRID_ROW_SELECTOR = '[data-grid-focus], [role="row"][tabindex="0"]';
@@ -376,6 +398,7 @@ export function caseCommands(queryClient: QueryClient): Command[] {
       run: () => {
         if (!stageHasViewer(stageOf(store().route))) return;
         if (store().viewerIsDrawer) store().setOverlay("viewerDrawer", true);
+        else expandViewerPane();
         focusViewer();
       },
     },

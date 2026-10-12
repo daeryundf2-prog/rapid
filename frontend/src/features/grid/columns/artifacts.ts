@@ -361,20 +361,29 @@ export const KIND_COLUMNS: Record<string, KindColumnDef[]> = {
  * S4: 시각 · 유형 · 항목 · 경로 · 선별. The summary text stays one click away in the column menu.
  */
 const defaultColumns = (): ColumnSpec[] => [
-  // 1440px: tree 260 + viewer 440 leave the grid ≈ 676px; 항목 flexes and 경로 truncates in
-  // the middle so 시각 · 유형 · 항목 · 경로 · 선별 all fit (DataGrid fitColumnWidths).
+  // Default width = minimum width: 항목 takes the slack (DataGrid fitColumnWidths); a narrow
+  // grid hides 경로 → 선별 → 시각 → 유형 instead of truncating everything (ARTIFACT_PRIORITY).
   // 시각 is in 출처 중심 too: a source review still needs the time (review B2-6).
-  { ...timeColumn, width: 140, presets: ["analysis", "compact", "source"] },
-  { ...typeColumn, width: 120 },
-  col.title("항목", 240),
-  col.path(220, ["analysis", "source"]),
-  { ...col.review(), width: 88 },
+  { ...timeColumn, width: 140, minWidth: 140, presets: ["analysis", "compact", "source"] },
+  // 130px: the colour dot + ~14 characters ("cloud-messaging") without an ellipsis.
+  { ...typeColumn, width: 130, minWidth: 130 },
+  { ...col.title("항목", 220), minWidth: 220 },
+  col.path(200, ["analysis", "source"]),
+  { ...col.review(), width: 88, minWidth: 88 },
   quietDetailColumn,
   // 파서 moves to 출처 중심 here: the default shows exactly the five columns above.
   ...tail
     .filter((column) => column.id !== "path")
     .map((column): ColumnSpec => (column.id === "provider" ? { ...column, presets: ["source"] } : column)),
 ];
+
+/** Generic artifact layout, highest priority first: 항목 > 유형 > 시각 > 선별 > 경로. */
+export const ARTIFACT_PRIORITY = ["title", "type", "timestamp", "review", "path"] as const;
+
+/** Only the generic layout is responsive; kind layouts keep their own columns. */
+export function artifactWidthPriority(kind: string | undefined): readonly string[] | undefined {
+  return kind && (kind === "eventlog" || KIND_COLUMNS[kind]) ? undefined : ARTIFACT_PRIORITY;
+}
 
 /** Default column set of one artifact kind (plan §4.3); other kinds keep the generic set. */
 export function artifactColumnsForKind(kind: string | undefined): ColumnSpec[] {
@@ -462,6 +471,7 @@ export const artifactsCollection: CollectionDef = {
   },
   columns: defaultColumns(),
   columnsFor: (ref) => artifactColumnsForKind(ref.kind),
+  widthPriority: (ref) => artifactWidthPriority(ref.kind),
   locate: (runId, ref, sort, recordIndex, signal) =>
     ref.kind
       ? locateArtifactRow(runId, ref.kind, sort, recordIndex, signal)
