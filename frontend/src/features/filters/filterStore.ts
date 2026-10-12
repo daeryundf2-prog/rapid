@@ -37,6 +37,8 @@ export interface FilterReport {
   truncated: boolean;
   /** Navigation scope line (category nodes: "범주: 운영 체제 (5 유형)"). */
   scope?: string;
+  /** Server-filtered count (`matched`); null = not known yet ("n건 이상"). */
+  matched?: number | null;
 }
 
 interface FilterStoreState {

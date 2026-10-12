@@ -13,6 +13,12 @@ export interface CommandButtonProps {
   className?: string;
   /** Extra attributes for tests / e2e. */
   testId?: string;
+  /**
+   * Also print the disabled reason as visible helper text beside the button (not only the
+   * hover/focus tooltip). The sentence is already the button's description, so the visible
+   * copy is aria-hidden.
+   */
+  showReason?: boolean;
 }
 
 /**
@@ -27,6 +33,7 @@ export function CommandButton({
   variant = "default",
   className,
   testId,
+  showReason,
 }: CommandButtonProps) {
   const { command: cmd, disabledReason, run } = useCommandState(command);
   const text = label ?? cmd?.label ?? command;
@@ -39,8 +46,10 @@ export function CommandButton({
   ]
     .filter(Boolean)
     .join(" ");
-  return (
-    <DisabledReason reason={disabledReason}>
+  const button = (
+    // With `showReason` the reason is printed below; a hover/focus box would draw it twice in
+    // a second style (the 처리 card's 비교 reason looked like a button, 추출's like text).
+    <DisabledReason reason={disabledReason} tooltip={!showReason}>
       <button
         type="button"
         className={classes}
@@ -57,5 +66,14 @@ export function CommandButton({
         {iconOnly ? null : <span>{text}</span>}
       </button>
     </DisabledReason>
+  );
+  if (!showReason || !disabledReason) return button;
+  return (
+    <span className="command-with-reason">
+      {button}
+      <span className="disabled-reason-text" aria-hidden="true" data-testid="command-disabled-reason">
+        {disabledReason}
+      </span>
+    </span>
   );
 }

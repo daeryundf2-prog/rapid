@@ -20,6 +20,27 @@ const COLLECTION_LABELS: Record<string, string> = {
   indicators: "IOC",
 };
 
+/** Korean names of case-DB review target types (fallback summary when the server has no label). */
+const TARGET_TYPE_LABELS: Record<string, string> = {
+  analysis_row: "분석 결과",
+  file_record: "파일",
+  event: "타임라인 이벤트",
+  indexed_document: "문서",
+  artifact: "아티팩트",
+};
+
+/** "분석 결과 3 (2a942078)" for `analysis_row 20261012T112630-2a942078/2`, never the raw id. */
+export function reviewTargetFallback(targetType: string, targetId: string, index: number): string {
+  const label = TARGET_TYPE_LABELS[targetType] ?? "검토 항목";
+  if (targetType === "analysis_row") {
+    const [job = "", row = ""] = targetId.split("/");
+    const short = job.split("-").pop()?.slice(0, 8) ?? "";
+    const n = /^\d+$/.test(row) ? ` ${Number(row) + 1}` : "";
+    return `${label}${n}${short ? ` (${short})` : ""}`;
+  }
+  return /^\d+$/.test(targetId) ? `${label} #${targetId}` : `${label} ${index + 1}`;
+}
+
 /**
  * A case-DB review mark (GET /review-map). The ref carries the case-db id and
  * `fields.targetType`, so re-marking on the board posts the row id directly;
@@ -38,7 +59,11 @@ function mapCaseDbMark(raw: RawRow, index: number) {
   return makeRow(
     ref,
     {
-      title: strOrNull(raw.title) ?? strOrNull(raw.preview) ?? `${targetType} ${targetId || index}`,
+      title:
+        strOrNull(raw.label) ??
+        strOrNull(raw.title) ??
+        strOrNull(raw.preview) ??
+        reviewTargetFallback(targetType, targetId, index),
       sourcePath: strOrNull(raw.path),
       timestamp: strOrNull(raw.timestamp) ?? strOrNull(raw.updated_at),
       artifactType: strOrNull(raw.target_kind) ?? (COLLECTION_LABELS[collection] || null),

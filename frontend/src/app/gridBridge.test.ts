@@ -44,14 +44,30 @@ describe("gridBridge automatic first row", () => {
     publish(row("/candidates/0"));
     expect(s().viewerTarget?.ref.locator).toBe("/candidates/0");
     expect(s().viewerRow?.rowKey).toBe("files:/candidates/0");
-    expect(window.location.hash).toBe("#/case/r1/files");
+    expect(window.location.hash).toBe("#/case/r1/explore/files");
+  });
+
+  it("a click on the auto-focused first row is a user action: row= is written", () => {
+    s().navigate({ runId: "r1", collection: "files" });
+    const first = row("/candidates/0");
+    publish(first);
+    expect(window.location.hash).toBe("#/case/r1/explore/files");
+    const main = document.createElement("main");
+    main.id = "main";
+    const rowEl = document.createElement("div");
+    main.appendChild(rowEl);
+    document.body.appendChild(main);
+    rowEl.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    publish(first); // the grid republishes the same row on mousedown
+    expect(parseHash(window.location.hash).row).toEqual({ collection: "files", locator: "/candidates/0" });
+    main.remove();
   });
 
   it("does not let row 0 clobber a pending deep link, then accepts the restored row", () => {
     window.history.replaceState(
       null,
       "",
-      "/v2/#/case/r1/files?row=files%7C%7C%2Fcandidates%2F9%7C&mode=meta",
+      "/v2/#/case/r1/explore/files?row=files%7C%7C%2Fcandidates%2F9%7C&mode=meta",
     );
     s().syncRouteFromLocation(parseHash(window.location.hash));
     publish(row("/candidates/0"));
@@ -73,9 +89,9 @@ describe("gridBridge server sort and promoted columns", () => {
       cols: ["details.run_count"],
     });
     expect(window.location.hash).toBe(
-      "#/case/r1/artifacts/windows-prefetch?sort=details.run_count:desc&cols=details.run_count",
+      "#/case/r1/explore/artifacts/windows-prefetch?sort=details.run_count:desc&cols=details.run_count",
     );
-    s().navigate(parseHash("#/case/r1/artifacts/windows-prefetch?sort=timestamp:asc"));
+    s().navigate(parseHash("#/case/r1/explore/artifacts/windows-prefetch?sort=timestamp:asc"));
     expect(useGridLocalStore.getState().route.sort).toEqual({ key: "timestamp", order: "asc" });
     expect(useGridLocalStore.getState().route.cols).toBeUndefined();
     // Opening another kind drops both.

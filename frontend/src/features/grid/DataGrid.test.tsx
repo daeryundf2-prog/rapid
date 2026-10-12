@@ -231,7 +231,7 @@ describe("DataGrid keyboard", () => {
     expect(document.activeElement).toBe(screen.getByPlaceholderText(/필터/));
   });
 
-  it("Shift+F10 opens the row menu with the six grid.* commands and the review items; Esc closes it", async () => {
+  it("Shift+F10 opens the row menu with the seven grid.* commands and the review items; Esc closes it", async () => {
     await renderFiles();
     rowAt(0).focus();
     fireEvent.keyDown(rowAt(0), { key: "F10", shiftKey: true });
@@ -247,6 +247,7 @@ describe("DataGrid keyboard", () => {
       "인용 복사",
       "타임라인에서 보기",
       "같은 출처 행",
+      "선택 행 OCR 실행",
       "관련 있음 표시",
       "재검토 표시",
       "제외 표시",
@@ -298,7 +299,7 @@ describe("DataGrid keyboard", () => {
     expect(button.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(button);
     const menu = await screen.findByRole("menu", { name: "행 메뉴" });
-    expect(within(menu).getAllByRole("menuitem")).toHaveLength(11);
+    expect(within(menu).getAllByRole("menuitem")).toHaveLength(12);
     const trigger = screen.getAllByRole("button", { name: "행 메뉴" })[1] as HTMLButtonElement;
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
     expect(trigger.getAttribute("aria-controls")).toBe(menu.id);

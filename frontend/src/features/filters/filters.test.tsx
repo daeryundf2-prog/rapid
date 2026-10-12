@@ -84,20 +84,25 @@ describe("histogram event and setTimeRange", () => {
 describe("server vs client partition", () => {
   const f = (over: Partial<FilterState>): FilterState => ({ ...EMPTY_FILTERS, ...over });
 
-  it("artifacts: path and a single type go to the API", () => {
+  it("artifacts: path and types go to the API (artifact_type=, plan analysis-workbench-p1 U-P1-5)", () => {
     const plan = partitionFilters(
       { id: "artifacts" },
-      f({ path: "Users", types: ["eventlog"], tags: ["x"] }),
+      f({ path: "Users", types: ["web-server-log", "webshell-source-candidate"], tags: ["x"] }),
     );
-    expect(plan.server).toEqual({ path: "Users", kind: "eventlog" });
+    expect(plan.server).toEqual({
+      path: "Users",
+      artifactTypes: ["web-server-log", "webshell-source-candidate"],
+    });
     expect(plan.serverLabels).toEqual(["유형", "경로"]);
     expect(plan.clientLabels).toEqual(["태그"]);
     const q = applyFiltersToQuery(
-      { ref: { id: "artifacts" }, offset: 0, limit: 250 },
-      f({ path: "Users", types: ["eventlog"] }),
+      { ref: { id: "artifacts", kind: "windows-system" }, offset: 0, limit: 250 },
+      f({ path: "Users", types: ["web-server-log"] }),
     );
     expect(q.pathContains).toBe("Users");
-    expect(q.ref.kind).toBe("eventlog");
+    expect(q.artifactTypes).toEqual(["web-server-log"]);
+    // The kind stays the routed one: a type is not a kind.
+    expect(q.ref.kind).toBe("windows-system");
   });
 
   it("search: extension is server-side; timeline: time range is client-side", () => {

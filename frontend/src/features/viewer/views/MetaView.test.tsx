@@ -100,7 +100,7 @@ describe("MetaView 증거 정보", () => {
 
   it("builds the ±1h timeline window", () => {
     const hash = timelineWindowHash("r1", "2026-03-01T12:00:00Z") ?? "";
-    expect(hash).toContain("#/case/r1/timeline?");
+    expect(hash).toContain("#/case/r1/explore/timeline?");
     expect(decodeURIComponent(hash)).toContain("from=2026-03-01T11:00:00.000Z");
     expect(decodeURIComponent(hash)).toContain("to=2026-03-01T13:00:00.000Z");
   });
@@ -228,5 +228,55 @@ describe("MetaView long values and 열로 표시 (artifact-columns U-C1/U-C3)", 
   it("is absent for fields that are not record (details) keys", () => {
     show({ level: 4 });
     expect(screen.queryByRole("button", { name: /열로 표시/ })).toBeNull();
+  });
+});
+
+describe("MetaView NTFS provenance (plan analysis-workbench-p1 U-P1-3)", () => {
+  const fileRow = (fields: Record<string, unknown>): GridRow => ({
+    ...row(fields),
+    rowKey: "files:/candidates/0",
+    ref: { collection: "files", locator: "/candidates/0" },
+  });
+  const showFile = (fields: Record<string, unknown>) =>
+    render(
+      <MetaView
+        target={{ ref: fileRow(fields).ref, runId: "r1", sourcePath: "C:/e/a.txt" }}
+        preview={null}
+        metadata={null}
+        metadataError={null}
+        hashBusy={false}
+        row={fileRow(fields)}
+        sessionMarks={[]}
+        onComputeHash={() => {}}
+      />,
+    );
+
+  it("before an NTFS-meta analysis: 출처 says how to fill it and links to the run command", () => {
+    showFile({ ntfs: null, filesystem: null, sourceImage: null, ntfsJoinId: null });
+    const hint = screen.getByTestId("ntfs-hint");
+    expect(hint.textContent).toContain("NTFS 메타 분석을 실행하면 채워집니다");
+    const link = screen.getByRole("button", { name: /NTFS 메타 분석 실행|실행/ });
+    expect(link.getAttribute("data-command")).toBe("analysis.run.ntfs-meta");
+    expect(screen.getByText("파일 시스템")).toBeTruthy();
+  });
+
+  it("after the join: file system, source image, MFT entry and NTFS times are listed", () => {
+    showFile({
+      ntfs: {
+        entry_number: 77,
+        created_at: "2025-01-02T03:04:05Z",
+        accessed_at: null,
+        mft_modified_at: null,
+        in_use: true,
+      },
+      filesystem: "NTFS",
+      sourceImage: "C:/rapid-qa/BSH.E01",
+      ntfsJoinId: "a1",
+    });
+    expect(screen.queryByTestId("ntfs-hint")).toBeNull();
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("MFT 엔트리77");
+    expect(text).toContain("소스 이미지 경로C:/rapid-qa/BSH.E01");
+    expect(text).toContain("MFT 사용 중예");
   });
 });

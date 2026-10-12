@@ -94,11 +94,11 @@ describe("history", () => {
 
 describe("misc", () => {
   it("reads q= keywords from the hash route", () => {
-    expect(parseHighlightTerms("#/case/r1/search?q=powershell%20mimikatz&row=x")).toEqual([
+    expect(parseHighlightTerms("#/case/r1/explore/search?q=powershell%20mimikatz&row=x")).toEqual([
       "powershell",
       "mimikatz",
     ]);
-    expect(parseHighlightTerms("#/case/r1/files")).toEqual([]);
+    expect(parseHighlightTerms("#/case/r1/explore/files")).toEqual([]);
   });
 
   it("parses cue timestamps", () => {

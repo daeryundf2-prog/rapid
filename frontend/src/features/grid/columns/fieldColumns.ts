@@ -29,6 +29,8 @@ export function keysToCols(keys: readonly string[]): string[] {
 }
 
 export function fieldColumnsStorageKey(kind: string): string {
+  // "analysis:<kind>" scopes analysis job columns apart from artifact kinds.
+  if (kind.startsWith("analysis:")) return `rapidtriage.grid.fieldColumns.analysis.${kind.slice(9)}`;
   return `rapidtriage.grid.fieldColumns.artifacts.${kind}`;
 }
 

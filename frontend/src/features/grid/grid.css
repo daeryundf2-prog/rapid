@@ -507,3 +507,62 @@
 .grid-popover-item.is-unavailable {
   color: var(--text-muted);
 }
+
+/* Column header filters (plan analysis-workbench-p1 §4). */
+.grid-colfilter-row .grid-cell {
+  padding: 2px var(--space-1);
+}
+
+.grid-colfilter-pair {
+  display: flex;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+}
+
+.grid-colfilter-input {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  height: 22px;
+  padding: 0 var(--space-1);
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  font: inherit;
+  font-size: var(--fs-table-aux);
+}
+
+.grid-colfilter-input::placeholder {
+  color: var(--text-muted);
+}
+
+.grid-colfilter-input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.grid-colfilter-input:focus-visible,
+.grid-hint-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* "→ 실행" link in the header of a column an analysis job fills. */
+.grid-hint-link {
+  flex: none;
+  margin-left: var(--space-1);
+  padding: 0 2px;
+  background: transparent;
+  border: 0;
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--fs-table-aux);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.grid-hint-link[aria-disabled="true"] {
+  color: var(--text-muted);
+  cursor: not-allowed;
+}

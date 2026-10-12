@@ -15,7 +15,20 @@ import type { MarkAction } from "../../contracts/viewer";
 import { useAppStore } from "../../state/store";
 import { baseName, str } from "./columns/common";
 
-export type BatchAction = MarkAction | "tag" | "extract";
+export type BatchAction = MarkAction | "tag" | "extract" | UnmarkAction;
+
+/**
+ * Undo of a pressed review toggle: "clear-review" puts the status back to the case DB's
+ * `unreviewed` (core/case.py REVIEW_STATUSES); "remove-from-report" clears include_in_report.
+ */
+export type UnmarkAction = "clear-review" | "remove-from-report";
+
+/** The undo of a pressed mark (bookmark tags are not removed here). */
+export function unmarkActionOf(action: string): UnmarkAction | null {
+  if (action === "relevant" || action === "needs-review" || action === "excluded") return "clear-review";
+  if (action === "include-in-report") return "remove-from-report";
+  return null;
+}
 
 export const MARK_LABELS: Record<BatchAction, string> = {
   relevant: "관련",
@@ -25,6 +38,8 @@ export const MARK_LABELS: Record<BatchAction, string> = {
   bookmark: "북마크",
   tag: "태그",
   extract: "추출",
+  "clear-review": "선별 해제",
+  "remove-from-report": "보고서 포함 해제",
 };
 
 /** Max rows per extract request (API limit). */
@@ -77,6 +92,10 @@ function markBody(action: BatchAction, tag?: string): MarkPayload {
       return { review_status: "excluded", status: "excluded", include_in_report: false };
     case "include-in-report":
       return { include_in_report: true };
+    case "clear-review":
+      return { review_status: "unreviewed", status: "unreviewed" };
+    case "remove-from-report":
+      return { include_in_report: false };
     case "tag":
       return { tags: tag ? [tag] : [] };
     default:
@@ -98,6 +117,17 @@ export function optimisticPatch(action: BatchAction, tag?: string): (row: GridRo
           reviewStatus: row.reviewStatus ?? "include-in-report",
           fields: { ...row.fields, includeInReport: true },
         };
+      case "clear-review":
+        return {
+          ...row,
+          reviewStatus: row.fields.includeInReport === true ? "include-in-report" : null,
+        };
+      case "remove-from-report":
+        return {
+          ...row,
+          reviewStatus: row.reviewStatus === "include-in-report" ? null : row.reviewStatus,
+          fields: { ...row.fields, includeInReport: false },
+        };
       case "tag":
         return tag && !row.tags.includes(tag) ? { ...row, tags: [...row.tags, tag] } : row;
       case "bookmark":
@@ -116,6 +146,12 @@ function isCaseDbRow(row: GridRow): boolean {
 export function reviewLocatorTarget(
   row: GridRow,
 ): { collection: string; kind: string; locator: string } | null {
+  // Analysis result rows: the case DB maps `{collection:"analysis", kind:<analysis_id>, locator:"/rows/<n>"}`.
+  if (row.ref.collection === "analysis") {
+    return row.ref.kind && row.ref.locator.startsWith("/rows/")
+      ? { collection: "analysis", kind: row.ref.kind, locator: row.ref.locator }
+      : null;
+  }
   const target = bookmarkTarget(row);
   if (!target) return null;
   if (target.source.startsWith("artifacts:")) {
@@ -268,6 +304,10 @@ function caseDbMark(action: BatchAction, tag?: string): ReviewMarkBody {
       return { status: "excluded", include_in_report: false };
     case "include-in-report":
       return { include_in_report: true };
+    case "clear-review":
+      return { status: "unreviewed" };
+    case "remove-from-report":
+      return { include_in_report: false };
     case "tag":
       return { add_tags: tag ? [tag] : [] };
     default:

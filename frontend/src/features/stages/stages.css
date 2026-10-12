@@ -1,0 +1,280 @@
+/* Stage rail (console-ia §3). Token colours only (contrast gate). */
+.stage-rail {
+  flex: none;
+  width: 60px;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--line-subtle);
+  overflow-y: auto;
+}
+
+.stage-rail ul {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-1) 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stage-rail li > .disabled-reason {
+  width: 100%;
+}
+
+.stage-rail-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  padding: var(--space-2) 0;
+  background: transparent;
+  border: 0;
+  border-left: 3px solid transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--fs-table-aux);
+  cursor: pointer;
+}
+
+.stage-rail-item:hover {
+  color: var(--text);
+  background: var(--bg-raised);
+}
+
+.stage-rail-item.is-current {
+  color: var(--text);
+  border-left-color: var(--accent);
+  background: var(--bg-raised);
+  font-weight: 600;
+}
+
+.stage-rail-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.stage-rail-item[aria-disabled="true"] {
+  cursor: not-allowed;
+}
+
+.stage-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  overflow-y: auto;
+  height: 100%;
+  color: var(--text);
+}
+
+.stage-panel h2 {
+  margin: var(--space-1) 0 0;
+  font-size: var(--fs-table-aux);
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.stage-panel ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stage-link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-1);
+  border-radius: 3px;
+  color: var(--text);
+  text-decoration: none;
+  font-size: var(--fs-table-aux);
+}
+
+.stage-link:hover {
+  background: var(--bg-raised);
+}
+
+.stage-link[aria-current="page"] {
+  background: var(--bg-raised);
+  font-weight: 600;
+}
+
+.stage-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.stage-link .badge {
+  margin-left: auto;
+}
+
+.stage-link .badge ~ .badge {
+  margin-left: 0;
+}
+
+/* The wrapper only groups the name for tests / text; its parts are the link's flex items. */
+.stage-link-name {
+  display: contents;
+}
+
+.stage-link:has(.stage-link-detail) {
+  flex-wrap: wrap;
+}
+
+/* Run list: the shared name ellipsizes on line 1; the start time · short id that tells runs
+   apart has line 2 to itself, so "bsh-subset · 2026-…" rows never look identical. */
+.stage-link-title,
+.stage-link-detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stage-link-detail {
+  order: 1;
+  flex-basis: 100%;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.stage-link-sep {
+  display: none;
+}
+
+.stage-more {
+  align-self: flex-start;
+  font-size: var(--fs-table-aux);
+}
+
+.stage-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  height: 100%;
+  overflow-y: auto;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.stage-page h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.stage-page h3 {
+  margin: 0 0 var(--space-1);
+  font-size: 0.9rem;
+}
+
+.stage-section {
+  border: 1px solid var(--line-subtle);
+  border-radius: 4px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-panel);
+}
+
+.stage-dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px var(--space-3);
+  margin: 0;
+  font-size: var(--fs-table-aux);
+}
+
+.stage-dl dt {
+  color: var(--text-muted);
+}
+
+.stage-dl dd {
+  margin: 0;
+}
+
+.analysis-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: var(--space-2);
+}
+
+.analysis-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  border: 1px solid var(--line-subtle);
+  border-radius: 4px;
+  padding: var(--space-2);
+  background: var(--bg-panel);
+}
+
+.analysis-card.is-selected {
+  border-color: var(--accent);
+  /* The selected card shows its history table: give it the whole row. */
+  grid-column: 1 / -1;
+}
+
+/* Grid items default to min-width:auto and grew past the page; the history table then
+   lost 소요/건수 on the right. Keep the card in its track and scroll the table instead. */
+.analysis-card {
+  min-width: 0;
+}
+
+.analysis-result-links {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px var(--space-2);
+}
+
+.analysis-card .analysis-history-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.analysis-card h3 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+/* 보고 page: the history stays short; the outputs grid takes the rest (one scroll area, no nesting). */
+.stage-page.is-report {
+  overflow: hidden;
+}
+
+.stage-page.is-report > .stage-section {
+  flex: none;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.stage-report-grid {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.stage-report-grid > .grid-root {
+  flex: 1;
+  min-height: 0;
+}
+
+.stage-heading {
+  margin: 0;
+  padding: var(--space-2) var(--space-2) 0;
+  font-size: var(--fs-table-aux);
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.stage-heading:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}

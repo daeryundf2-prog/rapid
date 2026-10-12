@@ -1,5 +1,7 @@
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { parseHash } from "../../router";
+import { useAppStore } from "../../state/store";
 import { mockFetch, renderWithQuery } from "../case/testUtils";
 import { getRegisteredCommands } from "./adapter";
 import { buildTreeCommands } from "./commands";
@@ -31,6 +33,21 @@ function routes() {
           count: 120,
           collection: "artifacts",
           children: [
+            {
+              id: "artifacts-group:system",
+              label: "시스템",
+              count: 7,
+              children: [
+                {
+                  id: "artifacts:windows-system",
+                  label: "Windows 시스템",
+                  count: 7,
+                  collection: "artifacts",
+                  kind: "windows-system",
+                  artifact_type_counts: { "webshell-source-candidate": 2, "web-server-log": 5 },
+                },
+              ],
+            },
             {
               id: "artifacts-group:event-log",
               label: "이벤트 로그",
@@ -103,6 +120,8 @@ function routes() {
 
 beforeEach(() => {
   window.location.hash = "";
+  // A route left by the previous test would pre-expand its domain.
+  useAppStore.getState().syncRouteFromLocation(parseHash(""));
   mockFetch(routes());
 });
 afterEach(() => {
@@ -112,28 +131,31 @@ afterEach(() => {
 
 async function renderTree() {
   renderWithQuery(<EvidenceTree runId="r1" />);
-  await screen.findByText("운영 체제");
+  await screen.findByText("이벤트 로그");
   await screen.findByText("case1.E01");
+  await waitFor(() => expect(item("이벤트 로그").textContent).toContain("100"));
 }
 
-const item = (name: string) => screen.getByRole("treeitem", { name: new RegExp(name) });
+const item = (name: string) => screen.getByRole("treeitem", { name: new RegExp(`^${name}`) });
 
-describe("EvidenceTree", () => {
-  it("renders a tree with levels, expansion state and live counts", async () => {
+describe("EvidenceTree (탐색 domain tree)", () => {
+  it("renders 증거 소스, 전체 보기 and collapsed domains with levels and counts", async () => {
     await renderTree();
     expect(screen.getByRole("tree", { name: "케이스 탐색 트리" })).toBeTruthy();
-    expect(item("접수").getAttribute("aria-level")).toBe("1");
-    expect(item("운영 체제").getAttribute("aria-level")).toBe("2");
-    expect(item("운영 체제").getAttribute("aria-expanded")).toBe("false");
-    expect(item("운영 체제").querySelector(".badge.strong")?.textContent).toBe("100");
-    expect(screen.queryByText("EVTX")).toBeNull();
-    fireEvent.click(item("운영 체제").querySelector(".case-tree-twisty") as Element);
-    expect(item("EVTX").getAttribute("aria-level")).toBe("3");
-    expect(item("EVTX").querySelector("svg[data-icon='list']")).toBeTruthy();
-    expect(item("아티팩트").getAttribute("aria-expanded")).toBe("true");
-    expect(item("파일/미디어").getAttribute("aria-expanded")).toBeNull();
-    expect(item("파일/미디어").textContent).toContain("30");
-    expect(item("리뷰보드").textContent).toContain("2");
+    expect(item("증거 소스").getAttribute("aria-level")).toBe("1");
+    expect(item("전체 보기").getAttribute("aria-expanded")).toBe("true");
+    expect(item("전체 파일").getAttribute("aria-level")).toBe("2");
+    expect(item("전체 파일").textContent).toContain("30");
+    expect(item("이벤트 로그").getAttribute("aria-level")).toBe("1");
+    expect(item("이벤트 로그").getAttribute("aria-expanded")).toBe("false");
+    expect(item("이벤트 로그").querySelector(".badge.strong")?.textContent).toBe("100");
+    expect(screen.queryByText("EVTX 전체")).toBeNull();
+    fireEvent.click(item("이벤트 로그").querySelector(".case-tree-twisty") as Element);
+    expect(item("EVTX 전체").getAttribute("aria-level")).toBe("2");
+    // No workflow nodes: 접수 / 리뷰보드 / 산출물 / 분석 작업 are rail stages.
+    for (const gone of ["접수", "리뷰보드", "산출물", "분석 작업"]) {
+      expect(screen.queryByRole("treeitem", { name: new RegExp(`^${gone}`) })).toBeNull();
+    }
     await screen.findByText("패스워드");
   });
 
@@ -145,96 +167,96 @@ describe("EvidenceTree", () => {
 
   it("moves with arrows, Home and End", async () => {
     await renderTree();
-    item("접수").focus();
+    item("전체 보기").focus();
     fireEvent.keyDown(document.activeElement as Element, { key: "ArrowDown" });
-    expect(document.activeElement).toBe(item("검색 결과"));
+    expect(document.activeElement).toBe(item("전체 파일"));
     fireEvent.keyDown(document.activeElement as Element, { key: "End" });
-    expect(document.activeElement).toBe(item("산출물"));
+    expect(document.activeElement).toBe(item("위치·여행"));
     fireEvent.keyDown(document.activeElement as Element, { key: "Home" });
     expect(document.activeElement).toBe(item("증거 소스"));
     fireEvent.keyDown(document.activeElement as Element, { key: "ArrowUp" });
     expect(document.activeElement).toBe(item("증거 소스"));
   });
 
-  it("collapses with ArrowLeft, expands with ArrowRight, and steps to the child / parent", async () => {
+  it("expands with ArrowRight, steps to the child, and back to the parent with ArrowLeft", async () => {
     await renderTree();
-    item("아티팩트").focus();
-    fireEvent.keyDown(document.activeElement as Element, { key: "ArrowLeft" });
-    expect(item("아티팩트").getAttribute("aria-expanded")).toBe("false");
-    expect(screen.queryByText("운영 체제")).toBeNull();
+    item("이벤트 로그").focus();
     fireEvent.keyDown(document.activeElement as Element, { key: "ArrowRight" });
-    expect(item("아티팩트").getAttribute("aria-expanded")).toBe("true");
+    expect(item("이벤트 로그").getAttribute("aria-expanded")).toBe("true");
     fireEvent.keyDown(document.activeElement as Element, { key: "ArrowRight" });
-    expect(document.activeElement).toBe(item("운영 체제"));
-    fireEvent.keyDown(document.activeElement as Element, { key: "ArrowRight" });
-    fireEvent.keyDown(document.activeElement as Element, { key: "ArrowRight" });
-    expect(document.activeElement).toBe(item("EVTX"));
+    expect(document.activeElement).toBe(item("EVTX 전체"));
     fireEvent.keyDown(document.activeElement as Element, { key: "ArrowLeft" });
-    expect(document.activeElement).toBe(item("운영 체제"));
+    expect(document.activeElement).toBe(item("이벤트 로그"));
     fireEvent.keyDown(document.activeElement as Element, { key: "ArrowLeft" });
-    fireEvent.keyDown(document.activeElement as Element, { key: "ArrowLeft" });
-    expect(document.activeElement).toBe(item("아티팩트"));
+    expect(item("이벤트 로그").getAttribute("aria-expanded")).toBe("false");
   });
 
   it("jumps by type-ahead", async () => {
     await renderTree();
-    item("접수").focus();
-    fireEvent.keyDown(document.activeElement as Element, { key: "타" });
-    expect(document.activeElement).toBe(item("타임라인"));
+    item("증거 소스").focus();
+    fireEvent.keyDown(document.activeElement as Element, { key: "메" });
+    expect(document.activeElement).toBe(item("메신저·메일"));
   });
 
-  it("Enter navigates to #/case/{run}/{collection}[/{kind}]", async () => {
+  it("Enter opens a domain node in 탐색 and marks it selected", async () => {
     await renderTree();
-    item("운영 체제").focus();
-    fireEvent.keyDown(document.activeElement as Element, { key: "Enter" });
-    expect(window.location.hash).toBe("#/case/r1/artifacts?category=operating-system");
-    await waitFor(() => expect(item("운영 체제").getAttribute("aria-selected")).toBe("true"));
-    expect(item("아티팩트").getAttribute("aria-selected")).toBe("false");
+    item("이벤트 로그").focus();
     fireEvent.keyDown(document.activeElement as Element, { key: "ArrowRight" });
-    item("EVTX").focus();
+    item("EVTX 전체").focus();
     fireEvent.keyDown(document.activeElement as Element, { key: "Enter" });
-    expect(window.location.hash).toBe("#/case/r1/artifacts/eventlog");
-    await waitFor(() => expect(item("EVTX").getAttribute("aria-selected")).toBe("true"));
-    item("리뷰보드").focus();
-    fireEvent.keyDown(document.activeElement as Element, { key: " " });
-    expect(window.location.hash).toBe("#/case/r1/review");
+    expect(window.location.hash).toBe("#/case/r1/explore/artifacts/eventlog");
+    await waitFor(() => expect(item("EVTX 전체").getAttribute("aria-selected")).toBe("true"));
   });
 
-  it("clicking a node navigates; empty data nodes stay put and explain why", async () => {
+  it("a typed node sends its artifact types (침해사고 › 웹셸 → artifact_type=)", async () => {
     await renderTree();
-    fireEvent.click(item("파일/미디어"));
-    expect(window.location.hash).toBe("#/case/r1/files");
+    fireEvent.click(item("침해사고").querySelector(".case-tree-twisty") as Element);
+    fireEvent.click(item("웹셸"));
+    expect(window.location.hash).toBe(
+      "#/case/r1/explore/artifacts/windows-system?types=webshell-source-candidate",
+    );
+    await waitFor(() => expect(item("웹셸").getAttribute("aria-selected")).toBe("true"));
+    expect(item("웹 서버 로그").getAttribute("aria-selected")).toBe("false");
+  });
+
+  it("clicking a view navigates; empty nodes stay put and explain why", async () => {
+    await renderTree();
+    fireEvent.click(item("전체 파일"));
+    expect(window.location.hash).toBe("#/case/r1/explore/files");
     expect(item("문서/메일").getAttribute("aria-disabled")).toBe("true");
     fireEvent.click(item("문서/메일"));
-    expect(window.location.hash).toBe("#/case/r1/files");
+    expect(window.location.hash).toBe("#/case/r1/explore/files");
     expect(document.querySelector(".case-tree-reason")?.textContent).toBe(
       "docs-index 산출물이 없는 런입니다",
     );
+    fireEvent.click(item("파일시스템").querySelector(".case-tree-twisty") as Element);
+    // Analysis result nodes always open their pane (never-ran state shown there).
+    expect(item("복구/카빙").getAttribute("aria-disabled")).toBeNull();
+    expect(item("복구/카빙").getAttribute("aria-label")).toContain("미실행");
+    fireEvent.click(item("복구/카빙"));
+    expect(window.location.hash).toBe("#/case/r1/explore/analysis/carve");
   });
 
   it("lists the evidence source with partitions; only the recovered partition opens files", async () => {
     await renderTree();
-    expect(item("증거 소스").getAttribute("aria-level")).toBe("1");
     expect(item("case1.E01").getAttribute("aria-label")).toBe("case1.E01, 150건");
     fireEvent.click(item("case1.E01").querySelector(".case-tree-twisty") as Element);
     const ntfs = item("파티션 2");
     expect(ntfs.getAttribute("aria-label")).toContain("선택됨");
-    expect(ntfs.getAttribute("aria-level")).toBe("3");
     fireEvent.click(item("파티션 1"));
-    expect(window.location.hash).not.toBe("#/case/r1/files");
     expect(document.querySelector(".case-tree-reason")?.textContent).toContain("선택되지 않았습니다");
     fireEvent.click(ntfs);
-    expect(window.location.hash).toBe("#/case/r1/files");
-    // The 파일/미디어 node owns the files route; evidence shortcuts never render as selected.
-    await waitFor(() => expect(item("파일/미디어").getAttribute("aria-selected")).toBe("true"));
+    expect(window.location.hash).toBe("#/case/r1/explore/files");
+    // 전체 파일 owns the files route (first match); evidence shortcuts never render as selected.
+    await waitFor(() => expect(item("전체 파일").getAttribute("aria-selected")).toBe("true"));
     expect(ntfs.getAttribute("aria-selected")).toBe("false");
   });
 
-  it("opens a saved search into the 검색 결과 node", async () => {
+  it("opens a saved search into the 검색 결과 view", async () => {
     await renderTree();
     const saved = await screen.findByRole("treeitem", { name: /패스워드/ });
     fireEvent.click(saved);
-    expect(window.location.hash).toBe("#/case/r1/search");
+    expect(window.location.hash).toBe("#/case/r1/explore/search");
   });
 });
 
@@ -244,7 +266,7 @@ describe("tree commands", () => {
     const commands = buildTreeCommands("r1", model);
     const ids = commands.map((c) => c.id);
     expect(ids).toContain("tree.goto.timeline");
-    expect(ids).toContain("tree.goto.review.relevant");
+    expect(ids).toContain("tree.goto.domain.incident.ir-webshell");
     expect(ids).toContain("tree.focus");
     const ctx = {
       runId: "r1",
@@ -259,6 +281,10 @@ describe("tree commands", () => {
     );
     expect(commands.find((c) => c.id === "tree.goto.files")?.disabledReason?.({ ...ctx, runId: null })).toBe(
       "열린 케이스가 없습니다",
+    );
+    void commands.find((c) => c.id === "tree.goto.domain.incident.ir-webshell")?.run(ctx);
+    expect(window.location.hash).toBe(
+      "#/case/r1/explore/artifacts/windows-system?types=webshell-source-candidate",
     );
     expect(getRegisteredCommands()).toBeDefined();
   });

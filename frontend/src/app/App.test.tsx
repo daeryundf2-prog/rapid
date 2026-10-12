@@ -146,6 +146,6 @@ describe("App shell", () => {
     const input = screen.getByLabelText("전체 검색어");
     fireEvent.change(input, { target: { value: "powershell" } });
     fireEvent.submit(input);
-    expect(window.location.hash).toBe("#/case/run-aaaaaaaa/search?q=powershell");
+    expect(window.location.hash).toBe("#/case/run-aaaaaaaa/explore/search?q=powershell");
   });
 });

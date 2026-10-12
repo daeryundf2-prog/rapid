@@ -2,8 +2,10 @@ import { useQueries, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiError } from "../../api/client";
 import type { RawPage } from "../../api/collections";
+import type { TreeNode } from "../../api/runs";
 import type { CollectionQuery, GridRow, ReviewStatus, ServerSortState } from "../../contracts/collection";
 import { useTimezone } from "../../state/hooks";
+import { applyColumnFilters } from "../filters/columnFilters";
 import {
   applyClientFilters,
   applyFiltersToQuery,
@@ -16,9 +18,10 @@ import { useFilterStore } from "../filters/filterStore";
 import { categoryInfo, isArtifactCategoryId } from "../tree/categories";
 import { useRoute } from "./adapter";
 import { collectionDef } from "./columns";
+import { promotedColumn } from "./columns/fieldColumns";
 import { serverPathFilter } from "./gridUtils";
 import { overlayReview, useReviewMap } from "./reviewMap";
-import type { CollectionDef } from "./types";
+import type { CollectionDef, ColumnSpec } from "./types";
 
 /** Server page size (plan: 250). */
 export const PAGE_SIZE = 250;
@@ -31,6 +34,30 @@ export interface CollectionQueryOptions {
    * filter options / the filter report (so it cannot clobber the main query's).
    */
   passive?: boolean;
+  /**
+   * Server-known artifact types (exact `artifact_type` values from `/tree`
+   * artifact_type_counts) offered by the 유형 menu besides the loaded rows' types. The
+   * server's `artifact_type=` match is exact (case-sensitive), so options are never re-cased.
+   */
+  typeOptions?: readonly string[];
+}
+
+const NO_TYPES: readonly string[] = [];
+
+/** Exact artifact types of the run tree's artifact kind nodes (one kind when `kind` is set). */
+export function artifactTypesOfTree(nodes: readonly TreeNode[] | undefined, kind?: string): string[] {
+  const found = new Set<string>();
+  const visit = (list: readonly TreeNode[] | undefined) => {
+    for (const node of list ?? []) {
+      if (node.collection === "artifacts" && node.kind && (!kind || node.kind === kind)) {
+        for (const type of Object.keys(node.artifact_type_counts ?? {})) if (type) found.add(type);
+        if (node.artifact_type) found.add(node.artifact_type);
+      }
+      visit(node.children);
+    }
+  };
+  visit(nodes);
+  return [...found].sort();
 }
 
 export interface CollectionQueryResult {
@@ -70,14 +97,39 @@ export interface CollectionQueryResult {
   category: { id: string; label: string; kindCount: number | null } | null;
   /** Server sort state of page 0 (artifacts of one kind with `query.sort`); null when not server-sorted. */
   sortState: ServerSortState | null;
+  /** Page-level facts of page 0 (files: `ntfs_join`). */
+  pageMeta: Record<string, unknown> | undefined;
+  /** Column header filters applied to loaded rows only (status line "열 필터: n건 / 불러온 m행 기준"). */
+  clientColumnFilters: boolean;
+  /** Column header filters the API applied (경로 / 유형 / 확장자 columns). */
+  serverColumnFilters: boolean;
+  /**
+   * Server-filtered match count (`matched`): a number once the server scanned to the end,
+   * null while unknown (more pages / scan cap), undefined when the server did not filter.
+   */
+  serverMatched: number | null | undefined;
+}
+
+/** Grid column by id for column filters: the collection's columns, else a promoted `f:<key>` column. */
+export function columnResolver(
+  def: CollectionDef,
+  ref: CollectionQuery["ref"],
+): (col: string) => ColumnSpec | undefined {
+  const columns = def.columnsFor?.(ref) ?? def.columns;
+  const byId = new Map(columns.map((c) => [c.id, c]));
+  return (col) =>
+    byId.get(col) ?? (col.startsWith("f:") && col.length > 2 ? promotedColumn(col.slice(2)) : undefined);
 }
 
 /** Re-request interval while the server builds a sort index (plan artifact-columns §4.2). */
 export const SORT_POLL_MS = 1000;
 
-/** The sort the server applies: artifacts of exactly one kind only. */
+/** The sort the server applies: artifacts of exactly one kind, or one analysis job's rows. */
 export function serverSortOf(query: CollectionQuery): CollectionQuery["sort"] {
-  return query.ref.id === "artifacts" && query.ref.kind && query.sort ? query.sort : undefined;
+  if (!query.sort) return undefined;
+  if (query.ref.id === "artifacts" && query.ref.kind) return query.sort;
+  if (query.ref.id === "analysis" && query.ref.analysisId) return query.sort;
+  return undefined;
 }
 
 /** Footer/filter status text for a category scope: "범주: 운영 체제 (5 유형)". */
@@ -91,7 +143,7 @@ const mappedPages = new WeakMap<RawPage, GridRow[]>();
 function mapPage(def: CollectionDef, page: RawPage, ref: CollectionQuery["ref"]): GridRow[] {
   const cached = mappedPages.get(page);
   if (cached) return cached;
-  const rows = page.rows.map((raw, i) => def.mapRow(raw, page.offset + i, { ref }));
+  const rows = page.rows.map((raw, i) => def.mapRow(raw, page.offset + i, { ref, page }));
   mappedPages.set(page, rows);
   return rows;
 }
@@ -110,10 +162,16 @@ export function collectionQueryKey(runId: string | null, query: CollectionQuery,
     runId,
     query.ref.id,
     query.ref.kind ?? "",
-    query.ref.id === "artifacts" && !query.ref.kind ? (query.ref.category ?? "") : "",
+    (query.ref.id === "artifacts" && !query.ref.kind) || query.ref.id === "files"
+      ? (query.ref.category ?? "")
+      : "",
     def.source === "whole" ? (query.search ?? null) : null,
     def.source === "whole" ? (query.extension ?? null) : null,
-    query.ref.id === "artifacts" ? query.pathContains?.trim() || serverPathFilter(query.text) || "" : "",
+    query.ref.id === "analysis" ? (query.ref.analysisId ?? "") : "",
+    query.ref.id === "artifacts" || query.ref.id === "analysis"
+      ? query.pathContains?.trim() || serverPathFilter(query.text) || ""
+      : "",
+    query.ref.id === "artifacts" ? (query.artifactTypes ?? []).join(",") : "",
     serverSortOf(query) ? `${query.sort?.key}:${query.sort?.order}` : "",
     pageSize,
   ] as const;
@@ -127,6 +185,7 @@ const REVIEW_OVERLAY_COLLECTIONS: ReadonlySet<string> = new Set([
   "timeline",
   "indicators",
   "search",
+  "analysis",
 ]);
 
 /** Pages auto-loaded while client-side filters are active (they only see loaded rows). */
@@ -142,15 +201,18 @@ export function useCollectionQuery(
   const setReport = useFilterStore((s) => s.setReport);
   useTimezone(); // timestamp cells format in the display timezone; re-render rows when it changes
   const setOptions = useFilterStore((s) => s.setOptions);
+  // The run's known artifact types (`/tree`): a 유형 column text selects those containing it.
+  const serverTypes = options.typeOptions ?? NO_TYPES;
   // Server-capable filters (path_contains, kind=, extension) fold into the query; the rest stay client-side.
   // biome-ignore lint/correctness/useExhaustiveDependencies: rawQuery fields are listed individually
   const query = useMemo(
-    () => applyFiltersToQuery(rawQuery, filters),
+    () => applyFiltersToQuery(rawQuery, filters, serverTypes),
     [
       rawQuery.ref.id,
       rawQuery.ref.kind,
       rawQuery.ref.status,
       rawQuery.ref.category,
+      rawQuery.ref.analysisId,
       rawQuery.text,
       rawQuery.search,
       rawQuery.extension,
@@ -159,9 +221,13 @@ export function useCollectionQuery(
       rawQuery.sort?.key,
       rawQuery.sort?.order,
       filters,
+      serverTypes,
     ],
   );
-  const plan = useMemo(() => partitionFilters(rawQuery.ref, filters), [rawQuery.ref, filters]);
+  const plan = useMemo(
+    () => partitionFilters(rawQuery.ref, filters, serverTypes),
+    [rawQuery.ref, filters, serverTypes],
+  );
   const clientFiltering = plan.clientLabels.length > 0;
   const route = useRoute();
   const runId = options.runId !== undefined ? options.runId : route.runId;
@@ -252,10 +318,14 @@ export function useCollectionQuery(
 
   // Client-side filters see loaded rows only; the grid then treats the result like a whole collection.
   const clientFilters = useMemo(() => clientOnlyFilters(filters, plan), [filters, plan]);
-  const loadedRows = useMemo(
-    () => (clientFiltering ? applyClientFilters(unfilteredRows, clientFilters) : unfilteredRows),
-    [clientFiltering, unfilteredRows, clientFilters],
-  );
+  const resolveColumn = useMemo(() => columnResolver(def, rawQuery.ref), [def, rawQuery.ref]);
+  const loadedRows = useMemo(() => {
+    if (!clientFiltering) return unfilteredRows;
+    const rows = applyClientFilters(unfilteredRows, clientFilters);
+    return clientFilters.columns.length
+      ? applyColumnFilters(rows, clientFilters.columns, resolveColumn)
+      : rows;
+  }, [clientFiltering, unfilteredRows, clientFilters, resolveColumn]);
 
   const serverTotal =
     def.source === "whole" ? (firstData ? (mappedByPage.get(0)?.length ?? 0) : null) : total0;
@@ -330,14 +400,16 @@ export function useCollectionQuery(
 
   useEffect(() => {
     if (passive) return;
-    const types = new Set<string>();
+    // Server-known types first: a 유형 filter narrows the loaded rows to the picked types,
+    // and the menu must still offer the others.
+    const types = new Set<string>(serverTypes);
     const tags = new Set<string>();
     for (const row of unfilteredRows) {
       if (row.artifactType) types.add(row.artifactType);
       for (const tag of row.tags) tags.add(tag);
     }
     setOptions([...types].sort().slice(0, 200), [...tags].sort().slice(0, 200));
-  }, [unfilteredRows, setOptions, passive]);
+  }, [unfilteredRows, serverTypes, setOptions, passive]);
 
   const categoryId = query.ref.id === "artifacts" && !query.ref.kind ? query.ref.category : undefined;
   const categoryKinds = firstData?.kinds?.length ?? null;
@@ -354,6 +426,17 @@ export function useCollectionQuery(
   );
 
   const truncatedFlag = pageData.some((d) => d?.truncated === true);
+  // `matched` of the latest loaded page (cross-kind / filtered pages report it; the count is
+  // final only once a page reached the end).
+  const metaMatched = [...pageData].reverse().find((d) => d?.meta && "matched" in d.meta)?.meta?.matched;
+  const serverMatched: number | null | undefined =
+    metaMatched === undefined
+      ? plan.serverLabels.length && firstData
+        ? (serverTotal ?? null)
+        : undefined
+      : typeof metaMatched === "number"
+        ? metaMatched
+        : null;
   const capped = clientFiltering && def.source === "paged" && canLoadMore;
   const filtering = hasActiveFilters(filters);
   useEffect(() => {
@@ -370,6 +453,7 @@ export function useCollectionQuery(
       serverTotal,
       capped,
       truncated: truncatedFlag,
+      ...(serverMatched !== undefined ? { matched: serverMatched } : {}),
       ...(category ? { scope: categoryScopeText(category) } : {}),
     });
   }, [
@@ -381,6 +465,7 @@ export function useCollectionQuery(
     serverTotal,
     capped,
     truncatedFlag,
+    serverMatched,
     setReport,
     passive,
   ]);
@@ -414,5 +499,9 @@ export function useCollectionQuery(
     patchRows,
     category,
     sortState: serverSortOf(query) ? (firstData?.sort ?? null) : null,
+    pageMeta: firstData?.meta,
+    clientColumnFilters: plan.clientColumns.length > 0,
+    serverColumnFilters: plan.serverColumns.length > 0,
+    serverMatched,
   };
 }

@@ -87,8 +87,9 @@ export function resultSentence(count: number, backend: string, elapsedMs: number
  * URL `row=` can be resolved to a server page. Null when the locator carries none.
  */
 export function indexFromRef(ref: RowRef): number | null {
-  if (!["files", "docs", "timeline", "indicators", "artifacts"].includes(ref.collection)) return null;
-  if (ref.collection === "artifacts" && !ref.kind) return null;
+  if (!["files", "docs", "timeline", "indicators", "artifacts", "analysis"].includes(ref.collection))
+    return null;
+  if ((ref.collection === "artifacts" || ref.collection === "analysis") && !ref.kind) return null;
   const match = /\/(\d+)$/.exec(ref.locator);
   return match?.[1] ? Number(match[1]) : null;
 }

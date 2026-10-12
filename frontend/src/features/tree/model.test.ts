@@ -3,7 +3,8 @@ import type { ReviewCounts } from "../../api/caseDb";
 import type { EvidenceSource } from "../../api/dashboard";
 import type { RunSummary, RunTree } from "../../api/runs";
 import { formatRoute, parseRoute, sameRoute } from "./adapter";
-import { artifactKindNodes, buildTreeModel, flattenVisible } from "./model";
+import { DOMAINS } from "./domains";
+import { artifactKindNodes, buildTreeModel, flattenVisible, NO_DATA_REASON, reviewCount } from "./model";
 
 const summary = (over: Record<string, number> = {}): RunSummary => ({
   summary: {
@@ -100,9 +101,10 @@ const review: ReviewCounts = {
 };
 
 describe("routes", () => {
-  it("round-trips #/case/{run}/{collection}[/{kind}]", () => {
+  it("round-trips #/case/{run}/{stage}/{view}[/{kind}] and still reads legacy links", () => {
     const route = { runId: "abc", collection: "artifacts" as const, kind: "eventlog" };
-    expect(formatRoute(route)).toBe("#/case/abc/artifacts/eventlog");
+    expect(formatRoute(route)).toBe("#/case/abc/explore/artifacts/eventlog");
+    expect(parseRoute("#/case/abc/explore/artifacts/eventlog")).toEqual(route);
     expect(parseRoute("#/case/abc/artifacts/eventlog")).toEqual(route);
     expect(parseRoute("#/case/abc/review/needs-review")).toEqual({
       runId: "abc",
@@ -121,76 +123,156 @@ describe("routes", () => {
   });
 });
 
-describe("tree model", () => {
-  it("lists the plan 4.2 nodes in order with counts and artifact kinds", () => {
+describe("tree model (탐색 domain tree, console-ia §4)", () => {
+  it("lists 증거 소스, the 전체 보기 views and the 15 forensic domains (16 with 증거 소스)", () => {
     const model = buildTreeModel({ summary: summary(), tree, review, saved: [] });
-    expect(model.map((n) => n.label)).toEqual([
-      "증거 소스",
-      "접수",
-      "검색 결과",
-      "파일/미디어",
-      "문서/메일",
-      "아티팩트",
-      "타임라인",
-      "IOC/위험",
-      "리뷰보드",
-      "산출물",
+    expect(model.map((n) => n.label)).toEqual(["증거 소스", "전체 보기", ...DOMAINS.map((d) => d.label)]);
+    expect(DOMAINS).toHaveLength(15);
+    // Workflow places are rail stages, not tree nodes.
+    const ids = flattenVisible(model, new Set(model.map((n) => n.id))).map((f) => f.node.id);
+    for (const gone of ["intake", "review", "outputs", "analyses"]) expect(ids).not.toContain(gone);
+    const views = model.find((n) => n.id === "views");
+    expect(views?.children?.map((c) => [c.label, c.count])).toEqual([
+      ["전체 파일", 30],
+      ["전체 아티팩트", 120],
+      ["전체 타임라인", 0],
+      ["문서/메일", 4],
+      ["검색 결과", undefined],
+      ["IOC/위험", 3],
     ]);
-    expect(model.map((n) => n.count)).toEqual([undefined, 2, undefined, 30, 4, 120, 0, 3, 4, 9]);
-    const artifacts = model.find((n) => n.id === "artifacts");
-    // X11: 아티팩트 → category (bold summed count) → kind (route unchanged).
-    expect(artifacts?.children?.map((c) => [c.label, c.count, c.route.category, c.strongCount])).toEqual([
-      ["웹 관련", 20, "web", true],
-      ["운영 체제", 100, "operating-system", true],
-    ]);
-    const os = artifacts?.children?.find((c) => c.id === "artifacts-category:operating-system");
-    expect(os?.children?.map((c) => [c.label, c.count, c.route.kind, c.icon])).toEqual([
-      ["EVTX", 100, "eventlog", "list"],
-    ]);
-    expect(artifacts?.children?.[0]?.children?.[0]?.route).toEqual({
-      collection: "artifacts",
-      kind: "browser",
+  });
+
+  it("maps each node to its request (kind / artifact_type / ext / analysis) with /tree counts", () => {
+    const model = buildTreeModel({ summary: summary(), tree });
+    const node = (id: string) =>
+      model.flatMap((n) => n.children ?? []).find((c) => c.id === id) as ReturnType<typeof model.find>;
+    expect(node("domain:eventlog:evt-all")).toMatchObject({
+      count: 100,
+      target: { collection: "artifacts", kind: "eventlog" },
+    });
+    expect(node("domain:web:web-all")).toMatchObject({ count: 20 });
+    // A kind the run lacks is dimmed with a reason.
+    expect(node("domain:cloud:cloud-export")).toMatchObject({ count: 0, disabledReason: NO_DATA_REASON });
+    // Typed node: the per-type counts of /tree (eventlog has type children, so 0 is known).
+    expect(node("domain:incident:ir-webshell")).toMatchObject({
+      count: 0,
+      target: { collection: "artifacts", kind: "windows-system", types: ["webshell-source-candidate"] },
+      disabledReason: NO_DATA_REASON,
+    });
+    // File types use the server category filter (GET /files?category=), not client extensions.
+    expect(node("domain:filesystem:fs-documents")?.target).toEqual({
+      collection: "files",
+      category: "documents",
+    });
+    // Analysis result nodes are never disabled; a never-ran job only shows its marker.
+    expect(node("domain:filesystem:fs-carve")).toMatchObject({
+      target: { collection: "analysis", kind: "carve" },
+      disabledReason: undefined,
+      marker: "미실행",
     });
   });
 
-  it("skips zero-count and artifact_type nodes", () => {
-    expect(artifactKindNodes(tree).map((n) => n.kind)).toEqual(["eventlog", "browser"]);
+  it("every typed node carries its kind (one kind per request, so paging works)", () => {
+    for (const domain of DOMAINS) {
+      for (const node of domain.nodes) {
+        if (node.target.types?.length) expect(node.target.kind, `${domain.id}/${node.id}`).toBeTruthy();
+      }
+    }
   });
 
-  it("review board children carry state counts from case-db", () => {
-    const model = buildTreeModel({ summary: summary(), tree, review });
-    const board = model.find((n) => n.id === "review");
-    expect(board?.children?.map((c) => [c.label, c.count, c.route.status])).toEqual([
-      ["관련 있음", 3, "relevant"],
-      ["재검토", 0, "needs-review"],
-      ["제외", 1, "excluded"],
-      ["보고서 포함", 2, "include-in-report"],
-    ]);
+  it("typed counts come from the kind node's artifact_type_counts", () => {
+    const withTypes: RunTree = {
+      run_id: "r1",
+      root: {},
+      nodes: [
+        {
+          id: "artifacts:windows-system",
+          label: "Windows 시스템",
+          count: 9,
+          collection: "artifacts",
+          kind: "windows-system",
+          artifact_type_counts: { "web-server-log": 5, "wer-report": 4 },
+        },
+        {
+          id: "artifacts:windows-registry",
+          label: "레지스트리",
+          count: 3,
+          collection: "artifacts",
+          kind: "windows-registry",
+        },
+      ],
+    };
+    const model = buildTreeModel({ summary: summary(), tree: withTypes });
+    const node = (id: string) => model.flatMap((n) => n.children ?? []).find((c) => c.id === id);
+    expect(node("domain:incident:ir-weblog")).toMatchObject({ count: 5, disabledReason: undefined });
+    expect(node("domain:incident:ir-webshell")).toMatchObject({ count: 0, disabledReason: NO_DATA_REASON });
+    expect(node("domain:os:os-wer")?.count).toBe(4);
+    // A kind without per-type counts: unknown, not zero; a missing kind: no data.
+    expect(node("domain:registry:reg-recovery")?.count).toBe("—");
+    expect(node("domain:execution:exec-srum")).toMatchObject({ count: 0, disabledReason: NO_DATA_REASON });
   });
 
-  it("disables empty data nodes with a Korean reason once counts are loaded", () => {
+  it("analysis result nodes take the newest completed job's row count and show running state", () => {
+    const job = (kind: string, status: string, row_count: number) => ({
+      analysis_id: `${kind}-${status}`,
+      kind,
+      status,
+      options: {},
+      created_at: "",
+      progress: { done: 0, total: null, unit: "", message: "", percent: null },
+      row_count,
+    });
+    const model = buildTreeModel({
+      tree,
+      analyses: [
+        job("carve", "running", 1),
+        job("carve", "completed", 12),
+        job("ntfs-meta", "failed", 0),
+      ] as never,
+    });
+    const fs = model.find((n) => n.id === "domain:filesystem");
+    const carve = fs?.children?.find((c) => c.id === "domain:filesystem:fs-carve");
+    expect(carve).toMatchObject({ count: 12, marker: "실행 중", disabledReason: undefined });
+    const mft = fs?.children?.find((c) => c.id === "domain:filesystem:fs-mft");
+    expect(mft?.marker).toBe("실패");
+    expect(mft?.disabledReason).toBeUndefined();
+  });
+
+  it("disables empty views with a Korean reason once counts are loaded", () => {
     const model = buildTreeModel({ summary: summary(), tree });
-    expect(model.find((n) => n.id === "timeline")?.disabledReason).toBe(
+    const views = model.find((n) => n.id === "views");
+    expect(views?.children?.find((n) => n.id === "timeline")?.disabledReason).toBe(
       "이 런에는 타임라인 산출물이 없습니다",
     );
-    expect(model.find((n) => n.id === "files")?.disabledReason).toBeUndefined();
+    expect(views?.children?.find((n) => n.id === "files")?.disabledReason).toBeUndefined();
     const before = buildTreeModel({});
-    expect(before.every((n) => n.disabledReason === undefined)).toBe(true);
-  });
-
-  it("shows live provider progress on the intake node while a run is active", () => {
-    const model = buildTreeModel({ live: { active: true, completed: 17, total: 24 } });
-    expect(model.find((n) => n.id === "intake")?.count).toBe("17/24");
+    expect(
+      before
+        .flatMap((n) => n.children ?? [])
+        .filter((n) => n.target?.collection === "artifacts")
+        .every((n) => n.disabledReason === undefined),
+    ).toBe(true);
   });
 
   it("flattens only expanded branches", () => {
     const model = buildTreeModel({ summary: summary(), tree, review });
-    const collapsed = flattenVisible(model, new Set());
-    expect(collapsed).toHaveLength(10);
-    const open = flattenVisible(model, new Set(["artifacts"]));
-    expect(open.filter((f) => f.level === 2).map((f) => f.node.label)).toEqual(["웹 관련", "운영 체제"]);
-    const deep = flattenVisible(model, new Set(["artifacts", "artifacts-category:operating-system"]));
-    expect(deep.filter((f) => f.level === 3).map((f) => f.node.label)).toEqual(["EVTX"]);
+    expect(flattenVisible(model, new Set())).toHaveLength(17);
+    const open = flattenVisible(model, new Set(["domain:eventlog"]));
+    expect(open.filter((f) => f.level === 2).map((f) => f.node.label)).toEqual([
+      "EVTX 전체",
+      "로그온 세션",
+      "방화벽 로그",
+    ]);
+  });
+
+  it("artifactKindNodes skips zero-count and artifact_type nodes", () => {
+    expect(artifactKindNodes(tree).map((n) => n.kind)).toEqual(["eventlog", "browser"]);
+  });
+
+  it("review counts for the 검토 panel", () => {
+    expect(reviewCount(review, "relevant")).toBe(3);
+    expect(reviewCount(review, "include-in-report")).toBe(2);
+    expect(reviewCount(undefined, "relevant")).toBeUndefined();
   });
 });
 
@@ -256,7 +338,7 @@ describe("evidence source node (X2/X17)", () => {
 describe("category routes", () => {
   it("round-trips ?category= on the artifacts node", () => {
     const route = { runId: "abc", collection: "artifacts" as const, category: "web" };
-    expect(formatRoute(route)).toBe("#/case/abc/artifacts?category=web");
+    expect(formatRoute(route)).toBe("#/case/abc/explore/artifacts?category=web");
     expect(parseRoute("#/case/abc/artifacts?category=web")).toEqual(route);
     expect(sameRoute(route, { runId: "abc", collection: "artifacts" })).toBe(false);
     expect(parseRoute("#/case/abc/artifacts/eventlog?category=web")).toEqual({

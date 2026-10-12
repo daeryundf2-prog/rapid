@@ -53,4 +53,10 @@ export const KEY_MAP = {
   viewThumbnails: "Alt+Shift+2",
   viewChat: "Alt+Shift+3",
   viewHistogram: "Alt+Shift+4",
+  /** Stage rail (console-ia §3): 접수 · 처리 · 탐색 · 검토 · 보고. */
+  stageIntake: "Alt+1",
+  stageProcess: "Alt+2",
+  stageExplore: "Alt+3",
+  stageReview: "Alt+4",
+  stageReport: "Alt+5",
 } as const;

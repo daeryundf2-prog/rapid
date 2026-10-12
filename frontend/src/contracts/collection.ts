@@ -18,7 +18,11 @@ export type CollectionId =
   | "timeline"
   | "indicators"
   | "review"
-  | "outputs";
+  | "outputs"
+  /** Analysis jobs (plan analysis-workbench-p1 §4): `#/case/{run}/analysis/{kind}?id=`. */
+  | "analysis"
+  /** 처리 stage page (runs + analysis cards, console-ia §3): `#/case/{run}/process[/{node}]`. */
+  | "process";
 
 /** Artifact kinds nest under "artifacts" (one child node per kind). */
 export interface CollectionRef {
@@ -33,6 +37,22 @@ export interface CollectionRef {
    * (`kindsForCategory`). Route: `#/case/{run}/artifacts?category=<id>`.
    */
   category?: string;
+  /**
+   * Analysis job whose result rows the grid shows (id === "analysis"; `kind` is then the
+   * job's API kind, e.g. "carve", which picks the columns).
+   */
+  analysisId?: string;
+}
+
+/**
+ * One column header filter (URL `cf=`, router.ts). `op` ":" = contains (text) or
+ * `from..to` (time columns); ">" = minimum (inclusive); "<" = maximum (inclusive).
+ */
+export interface ColumnFilter {
+  /** Grid column id (ColumnSpec.id, e.g. "path", "size", "f:run_count"). */
+  col: string;
+  op: ":" | ">" | "<";
+  value: string;
 }
 
 /** Server sort key: `timestamp` or `details.<name>`; URL `sort=<key>:<order>`. */
@@ -65,6 +85,7 @@ export interface CollectionQuery {
   timeRange?: { from?: string; to?: string };
   reviewStatus?: ReviewStatus[];
   tags?: string[];
+  /** Artifact types; the artifacts API filters them server-side (`artifact_type=`, repeated). */
   artifactTypes?: string[];
   /** Navigation category (tree) filter; interpreted by the collection. */
   category?: string;

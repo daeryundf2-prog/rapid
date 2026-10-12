@@ -29,17 +29,17 @@ describe("route slice", () => {
   it("navigate pushes a hash entry; patchRoute merges and clears undefined keys", () => {
     const before = window.history.length;
     s().navigate({ runId: "r1", collection: "files", q: "x" });
-    expect(window.location.hash).toBe("#/case/r1/files?q=x");
+    expect(window.location.hash).toBe("#/case/r1/explore/files?q=x");
     expect(window.history.length).toBe(before + 1);
     s().patchRoute({ q: undefined }, { replace: true });
-    expect(window.location.hash).toBe("#/case/r1/files");
+    expect(window.location.hash).toBe("#/case/r1/explore/files");
     expect(window.history.length).toBe(before + 1);
     expect(s().route).toEqual({ runId: "r1", collection: "files" });
   });
 
   it("syncRouteFromLocation (back/forward) follows the hash without writing it", () => {
     s().navigate({ runId: "r1", collection: "files" });
-    window.history.replaceState(null, "", "/v2/#/case/r1/docs");
+    window.history.replaceState(null, "", "/v2/#/case/r1/explore/docs");
     s().syncRouteFromLocation(parseHash(window.location.hash));
     expect(s().route.collection).toBe("docs");
   });
@@ -56,7 +56,9 @@ describe("route slice", () => {
   });
 
   it("restores a viewer target from a refreshed URL", () => {
-    s().syncRouteFromLocation(parseHash("#/case/r1/files?row=files%7C%7C%2Fcandidates%2F3%7C&mode=hex"));
+    s().syncRouteFromLocation(
+      parseHash("#/case/r1/explore/files?row=files%7C%7C%2Fcandidates%2F3%7C&mode=hex"),
+    );
     expect(s().viewerTarget).toEqual({
       ref: { collection: "files", kind: undefined, locator: "/candidates/3", caseDbId: undefined },
       runId: "r1",
@@ -110,7 +112,7 @@ describe("automatic selection", () => {
   it("syncUrl:false loads the viewer without writing row=, and survives filter changes", () => {
     s().navigate({ runId: "r1", collection: "files" });
     s().setViewerTarget(target("/candidates/0"), { syncUrl: false });
-    expect(window.location.hash).toBe("#/case/r1/files");
+    expect(window.location.hash).toBe("#/case/r1/explore/files");
     s().patchRoute({ q: "x" }, { replace: true });
     expect(s().viewerTarget?.ref.locator).toBe("/candidates/0");
     s().setViewerTarget(target("/candidates/1"));

@@ -99,10 +99,12 @@ describe("view= route parameter", () => {
       expect(hash).toContain(`view=${view}`);
       expect(parseHash(hash).view).toBe(view);
     }
-    expect(serializeRoute({ runId: "r", collection: "files", view: "columns" })).toBe("#/case/r/files");
-    expect(parseHash("#/case/r/files?view=columns").view).toBeUndefined();
-    expect(parseHash("#/case/r/files?view=worldmap").view).toBeUndefined();
-    const full = "#/case/r/artifacts/mobile-export?q=%ED%9A%8C%EC%9D%98&view=chat";
+    expect(serializeRoute({ runId: "r", collection: "files", view: "columns" })).toBe(
+      "#/case/r/explore/files",
+    );
+    expect(parseHash("#/case/r/explore/files?view=columns").view).toBeUndefined();
+    expect(parseHash("#/case/r/explore/files?view=worldmap").view).toBeUndefined();
+    const full = "#/case/r/explore/artifacts/mobile-export?q=%ED%9A%8C%EC%9D%98&view=chat";
     expect(serializeRoute(parseHash(full))).toBe(full);
   });
 

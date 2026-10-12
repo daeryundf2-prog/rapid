@@ -17,6 +17,8 @@ export interface OpenCollectionOptions extends NavigateOptions {
   q?: string;
   /** Run to open; defaults to the current run. */
   runId?: string;
+  /** Analysis job (collection === "analysis", `id=`). */
+  analysisId?: string;
 }
 
 export interface RouteSlice {
@@ -97,7 +99,8 @@ export const createRouteSlice: StateCreator<AppState, [], [], RouteSlice> = (set
     if (!runId) return;
     const sameRun = runId === current.runId;
     const next: Route = { runId, collection };
-    if (collection === "artifacts" && options.kind) next.kind = options.kind;
+    if ((collection === "artifacts" || collection === "analysis") && options.kind) next.kind = options.kind;
+    if (collection === "analysis" && options.analysisId) next.analysisId = options.analysisId;
     else if (collection === "artifacts" && options.category) next.category = options.category;
     if (collection === "review" && options.status) next.status = options.status;
     if (options.q) next.q = options.q;

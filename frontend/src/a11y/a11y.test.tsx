@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useRef, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { announce, resetAnnouncer } from "./announcer";
+import { ANNOUNCE_HOLD_MS, announce, resetAnnouncer } from "./announcer";
 import { useEscape, useFocusTrap, useRestoreFocus } from "./focus";
 import { DisabledReason, LiveRegion, SkipLink } from "./primitives";
 import { type RovingOptions, useRovingTabindex } from "./useRovingTabindex";
@@ -309,6 +309,26 @@ describe("announce / LiveRegion", () => {
     const text = (screen.getByRole("status").textContent ?? "").trim();
     expect(text.length).toBeLessThanOrEqual(200);
     expect(text.startsWith("a b x")).toBe(true);
+  });
+
+  it("keeps a held stage sentence from being overwritten by a later polite one", () => {
+    render(<LiveRegion />);
+    const status = screen.getByRole("status");
+    act(() => {
+      announce("단계: 처리", { hold: true });
+      vi.advanceTimersByTime(100);
+      announce("1,234건 · sqlite · 12ms"); // grid result count, would have replaced the stage sentence
+      vi.advanceTimersByTime(60);
+    });
+    expect(status.textContent?.trim()).toBe("단계: 처리");
+    act(() => {
+      vi.advanceTimersByTime(700); // still inside the hold window
+    });
+    expect(status.textContent?.trim()).toBe("단계: 처리");
+    act(() => {
+      vi.advanceTimersByTime(ANNOUNCE_HOLD_MS);
+    });
+    expect(status.textContent?.trim()).toBe("1,234건 · sqlite · 12ms");
   });
 
   it("does not replace its region elements between announcements", () => {

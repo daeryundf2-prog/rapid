@@ -5,8 +5,10 @@ import { ApiError } from "../api/client";
 import { RUNS_QUERY_KEY, useRunsPoll } from "../api/runsProgress";
 import { caseOpenCommands, registerBuiltinCommands } from "../commands/builtin";
 import { registerCommands } from "../commands/registry";
+import { AnalysisFeature } from "../features/analysis/AnalysisFeature";
 import { CaseFeature } from "../features/case/CaseFeature";
 import { useReviewInvalidation } from "../features/grid/reviewMap";
+import { registerStageCommands } from "../features/stages/stages";
 import { Layout } from "../shell/Layout";
 import { useShortcuts } from "../shortcuts";
 import { useRoute } from "../state/hooks";
@@ -36,6 +38,7 @@ export function App() {
   useReviewInvalidation();
 
   useEffect(() => registerBuiltinCommands(queryClient), [queryClient]);
+  useEffect(() => registerStageCommands(), []);
 
   // One "case.open.{id}" palette entry per run; re-register only when the run list changes.
   const runs = runsQuery.data;
@@ -60,6 +63,7 @@ export function App() {
     <>
       <Layout />
       <CaseFeature runId={route.runId} />
+      <AnalysisFeature runId={route.runId} />
       <LiveRegion />
     </>
   );

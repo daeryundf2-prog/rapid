@@ -112,9 +112,15 @@ export function SkipLink({
 export function DisabledReason({
   reason,
   children,
+  tooltip = true,
 }: {
   reason?: string | null;
   children: ReactElement<Record<string, unknown>>;
+  /**
+   * false: the caller prints the reason as visible text next to the control (CommandButton
+   * `showReason`), so no hover/focus box repeats it.
+   */
+  tooltip?: boolean;
 }) {
   const descriptionId = useId();
   const [shown, setShown] = useState(false);
@@ -148,7 +154,7 @@ export function DisabledReason({
       <span id={descriptionId} hidden>
         {reason}
       </span>
-      {shown ? (
+      {shown && tooltip ? (
         // aria-hidden: the same sentence is already the control's description.
         <span
           role="tooltip"

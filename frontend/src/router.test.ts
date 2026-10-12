@@ -12,7 +12,7 @@ import {
 describe("parseHash / serializeRoute", () => {
   it("parses the full route shape", () => {
     const route = parseHash(
-      "#/case/run-1/artifacts/eventlog?q=powershell%20exe&row=artifacts%7Ceventlog%7Cartifacts_eventlog%3Arow%3A12%7C&mode=hex",
+      "#/case/run-1/explore/artifacts/eventlog?q=powershell%20exe&row=artifacts%7Ceventlog%7Cartifacts_eventlog%3Arow%3A12%7C&mode=hex",
     );
     expect(route).toEqual({
       runId: "run-1",
@@ -55,16 +55,16 @@ describe("parseHash / serializeRoute", () => {
   it("defaults and ignores what does not belong", () => {
     expect(parseHash("#/case/r")).toEqual({ runId: "r", collection: "intake" });
     expect(parseHash("#/case/r/bogus").collection).toBe("intake");
-    expect(parseHash("#/case/r/files/eventlog").kind).toBeUndefined();
+    expect(parseHash("#/case/r/explore/files/eventlog").kind).toBeUndefined();
     expect(parseHash("#/case/r/review/bogus").status).toBeUndefined();
-    expect(parseHash("#/case/r/files?mode=nope&row=").mode).toBeUndefined();
+    expect(parseHash("#/case/r/explore/files?mode=nope&row=").mode).toBeUndefined();
     expect(parseHash("#token=abc")).toEqual({ runId: null, collection: null });
     expect(parseHash("")).toEqual({ runId: null, collection: null });
     expect(parseHash("#/other/x")).toEqual({ runId: null, collection: null });
   });
 
   it("drops mode without a row and serialises an empty route to #/", () => {
-    expect(serializeRoute({ runId: "r", collection: "files", mode: "hex" })).toBe("#/case/r/files");
+    expect(serializeRoute({ runId: "r", collection: "files", mode: "hex" })).toBe("#/case/r/explore/files");
     expect(serializeRoute({ runId: null, collection: "files" })).toBe("#/");
   });
 
@@ -89,15 +89,15 @@ describe("#token= handoff", () => {
 
   it("strips only the token and keeps the route", () => {
     expect(stripTokenFromHash("#token=abc")).toBe("");
-    expect(stripTokenFromHash("#/case/r/files?token=abc&q=x")).toBe("#/case/r/files?q=x");
-    expect(stripTokenFromHash("#/case/r/files?token=abc")).toBe("#/case/r/files");
+    expect(stripTokenFromHash("#/case/r/explore/files?token=abc&q=x")).toBe("#/case/r/explore/files?q=x");
+    expect(stripTokenFromHash("#/case/r/explore/files?token=abc")).toBe("#/case/r/explore/files");
   });
 
   it("stores the token and leaves the routed hash in the address bar", () => {
-    window.history.replaceState(null, "", "/v2/#/case/run-9/docs?token=t0k&q=x");
+    window.history.replaceState(null, "", "/v2/#/case/run-9/explore/docs?token=t0k&q=x");
     expect(captureLaunchToken()).toBe(true);
     expect(authToken()).toBe("t0k");
-    expect(window.location.hash).toBe("#/case/run-9/docs?q=x");
+    expect(window.location.hash).toBe("#/case/run-9/explore/docs?q=x");
     expect(parseHash(window.location.hash)).toEqual({ runId: "run-9", collection: "docs", q: "x" });
   });
 
@@ -111,24 +111,24 @@ describe("#token= handoff", () => {
 describe("artifact server sort and promoted columns in the URL", () => {
   it("parses and serialises sort=<key>:<order> and cols= for one artifact kind", () => {
     const hash =
-      "#/case/r1/artifacts/windows-prefetch?sort=details.run_count:desc&cols=details.run_count,details.last_run_at";
+      "#/case/r1/explore/artifacts/windows-prefetch?sort=details.run_count:desc&cols=details.run_count,details.last_run_at";
     const route = parseHash(hash);
     expect(route.sort).toEqual({ key: "details.run_count", order: "desc" });
     expect(route.cols).toEqual(["details.run_count", "details.last_run_at"]);
     expect(serializeRoute(route)).toBe(hash);
     expect(parseHash(serializeRoute(route))).toEqual(route);
-    expect(parseHash("#/case/r1/artifacts/eventlog?sort=timestamp").sort).toEqual({
+    expect(parseHash("#/case/r1/explore/artifacts/eventlog?sort=timestamp").sort).toEqual({
       key: "timestamp",
       order: "asc",
     });
   });
 
   it("ignores invalid keys/orders and other collections", () => {
-    expect(parseHash("#/case/r1/artifacts/eventlog?sort=title:desc").sort).toBeUndefined();
-    expect(parseHash("#/case/r1/artifacts/eventlog?sort=details.x:sideways").sort).toBeUndefined();
-    expect(parseHash("#/case/r1/artifacts?sort=timestamp:asc").sort).toBeUndefined();
-    expect(parseHash("#/case/r1/files?sort=timestamp:asc&cols=details.a").sort).toBeUndefined();
-    expect(parseHash("#/case/r1/artifacts/eventlog?cols=title,details.a,details.a").cols).toEqual([
+    expect(parseHash("#/case/r1/explore/artifacts/eventlog?sort=title:desc").sort).toBeUndefined();
+    expect(parseHash("#/case/r1/explore/artifacts/eventlog?sort=details.x:sideways").sort).toBeUndefined();
+    expect(parseHash("#/case/r1/explore/artifacts?sort=timestamp:asc").sort).toBeUndefined();
+    expect(parseHash("#/case/r1/explore/files?sort=timestamp:asc&cols=details.a").sort).toBeUndefined();
+    expect(parseHash("#/case/r1/explore/artifacts/eventlog?cols=title,details.a,details.a").cols).toEqual([
       "details.a",
     ]);
     expect(
@@ -138,19 +138,19 @@ describe("artifact server sort and promoted columns in the URL", () => {
         sort: { key: "timestamp", order: "asc" },
         cols: ["details.a"],
       }),
-    ).toBe("#/case/r1/files");
+    ).toBe("#/case/r1/explore/files");
   });
 
   it("sort / cols changes are not collection changes", () => {
-    const a = parseHash("#/case/r1/artifacts/eventlog");
-    const b = parseHash("#/case/r1/artifacts/eventlog?sort=timestamp:desc&cols=details.level");
+    const a = parseHash("#/case/r1/explore/artifacts/eventlog");
+    const b = parseHash("#/case/r1/explore/artifacts/eventlog?sort=timestamp:desc&cols=details.level");
     expect(collectionChanged(a, b)).toBe(false);
   });
 });
 
 describe("sort order case", () => {
   it("parses the order case-insensitively", () => {
-    expect(parseHash("#/case/r1/artifacts/eventlog?sort=timestamp:DESC").sort).toEqual({
+    expect(parseHash("#/case/r1/explore/artifacts/eventlog?sort=timestamp:DESC").sort).toEqual({
       key: "timestamp",
       order: "desc",
     });

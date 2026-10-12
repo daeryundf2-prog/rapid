@@ -21,6 +21,8 @@ export interface SlotProps {
   viewer: { drawer: boolean };
   "run-dialog": { open: boolean; onClose: () => void };
   "case-picker": Record<never, never>;
+  /** Extra status-bar chips (analysis job progress). */
+  "status-extra": Record<never, never>;
 }
 
 export type SlotName = keyof SlotProps;

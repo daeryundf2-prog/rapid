@@ -1,6 +1,7 @@
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef } from "react";
 import "./case.css";
 
+const FIELD = "input:not([disabled]):not([type='hidden']), select:not([disabled]), textarea:not([disabled])";
 const FOCUSABLE =
   "a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])";
 
@@ -21,8 +22,12 @@ export function Modal({
 
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
-    const first = ref.current?.querySelector<HTMLElement>(FOCUSABLE);
-    (first ?? ref.current)?.focus();
+    // Start on the first form field (not the header's 닫기 button); no field → first focusable.
+    const root = ref.current;
+    const first =
+      root?.querySelector<HTMLElement>(".case-modal-body")?.querySelector<HTMLElement>(FIELD) ??
+      root?.querySelector<HTMLElement>(FOCUSABLE);
+    (first ?? root)?.focus();
     return () => previous?.focus?.();
   }, []);
 

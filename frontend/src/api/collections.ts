@@ -26,6 +26,8 @@ export interface RawPage {
   kinds?: string[];
   /** Server sort state of a sorted artifacts page (building pages have no rows yet). */
   sort?: ServerSortState;
+  /** Page-level facts beyond paging (files: `ntfs_join`, plan analysis-workbench-p1 §3.3). */
+  meta?: Record<string, unknown>;
 }
 
 const enc = encodeURIComponent;
@@ -49,25 +51,68 @@ async function jsonPaged(
   offset: number,
   limit: number,
   signal?: AbortSignal,
+  category?: string,
 ): Promise<RawPage> {
   const started = now();
+  const filter = category ? `&category=${enc(category)}` : "";
   const payload = await api<Record<string, unknown>>(
-    `/api/runs/${enc(runId)}/${endpoint}?offset=${offset}&limit=${limit}`,
+    `/api/runs/${enc(runId)}/${endpoint}?offset=${offset}&limit=${limit}${filter}`,
     { signal },
   );
   const rows = asRows(payload[key]);
-  return {
+  const meta: Record<string, unknown> = {};
+  // Files rows are joined with the newest NTFS-meta analysis; `null` = never ran (absent = old server).
+  if ("ntfs_join" in payload) meta.ntfs_join = payload.ntfs_join;
+  const base = {
     rows,
-    total: asNumber(payload.total) ?? rows.length,
     offset,
     backend: "file",
-    truncated: false,
     elapsedMs: Math.round(now() - started),
+    ...(Object.keys(meta).length ? { meta } : {}),
   };
+  const pagination =
+    payload.pagination && typeof payload.pagination === "object" && !Array.isArray(payload.pagination)
+      ? (payload.pagination as Record<string, unknown>)
+      : {};
+  if (category && ("matched" in payload || "truncated" in pagination)) {
+    // A category-filtered files page (artifact_filter.filter_files_by_category) counts its
+    // matches: `matched` is exact, or null when the scan hit its cap (`pagination.truncated`).
+    // Its top-level `total` is the copied UNFILTERED payload total — never show that.
+    const truncated = pagination.truncated === true;
+    const matched = truncated ? null : (asNumber(payload.matched) ?? asNumber(pagination.matched));
+    const scanned = asNumber(pagination.scanned);
+    return {
+      ...base,
+      total: matched,
+      truncated,
+      hasMore: pagination.has_more === true || payload.has_more === true,
+      ...(scanned !== null ? { scanned } : {}),
+    };
+  }
+  // paginate_payload (api/app/pagination.py) puts the collection size in `pagination.total`;
+  // the outputs themselves (files, indicators) carry no top-level `total`. Falling back to the
+  // page length capped the grid at one page ("총 250건") while the tree counted thousands.
+  const total = asNumber(pagination.total) ?? asNumber(payload.total) ?? asNumber(payload.record_count);
+  const hasMore =
+    pagination.has_more === true ||
+    payload.has_more === true ||
+    (total !== null && offset + rows.length < total);
+  if (total === null) {
+    // No count at all (very old server): page on while full pages keep coming.
+    const more = hasMore || rows.length >= limit;
+    return { ...base, total: more ? null : offset + rows.length, truncated: false, hasMore: more };
+  }
+  return { ...base, total, truncated: false, hasMore };
 }
 
-export const fetchFilesPage = (runId: string, offset: number, limit: number, signal?: AbortSignal) =>
-  jsonPaged(runId, "files", "candidates", offset, limit, signal);
+/** `GET /files` (optionally `category=<id>`: documents, images, archives, databases, emails, …). */
+export const fetchFilesPage = (
+  runId: string,
+  offset: number,
+  limit: number,
+  signal?: AbortSignal,
+  category?: string,
+) => jsonPaged(runId, "files", "candidates", offset, limit, signal, category);
 export const fetchDocsPage = (runId: string, offset: number, limit: number, signal?: AbortSignal) =>
   jsonPaged(runId, "docs", "results", offset, limit, signal);
 export const fetchTimelinePage = (runId: string, offset: number, limit: number, signal?: AbortSignal) =>
@@ -80,9 +125,171 @@ interface ArtifactKindPage {
   total?: unknown;
   record_count?: unknown;
   has_more?: unknown;
-  pagination?: { has_more?: unknown; scanned?: unknown; truncated?: unknown; filtered?: unknown };
+  pagination?: {
+    has_more?: unknown;
+    scanned?: unknown;
+    truncated?: unknown;
+    filtered?: unknown;
+    matched?: unknown;
+  };
   sort?: unknown;
   sort_supported?: unknown;
+  /** Filtered count of the kind (null while the filter scan stopped early). */
+  matched?: unknown;
+}
+
+/** `cross_kind` block of a typed request over 0 / 2+ kinds (cursor paging, `after=`). */
+interface CrossKindBlock {
+  kinds?: unknown;
+  order?: unknown;
+  record_count?: unknown;
+  matched?: unknown;
+  has_more?: unknown;
+  next_offset?: unknown;
+  next_after?: unknown;
+  scanned?: unknown;
+  truncated?: unknown;
+}
+
+/** `after=` cursors per filtered cross-kind listing: offset → cursor that resumes there. */
+const crossKindCursors = new Map<string, Map<number, string>>();
+
+export function resetCrossKindCursors(): void {
+  crossKindCursors.clear();
+}
+
+async function crossKindRequest(
+  runId: string,
+  query: ArtifactsQuery & { after?: string },
+  signal?: AbortSignal,
+): Promise<{ artifacts?: Record<string, ArtifactKindPage>; cross_kind?: CrossKindBlock }> {
+  const params = new URLSearchParams(
+    artifactsQueryString({ ...query, offset: query.after ? undefined : query.offset || undefined }),
+  );
+  if (query.after) params.set("after", query.after);
+  return api(`/api/runs/${enc(runId)}/artifacts?${params}`, { signal });
+}
+
+/** Requests per page while short / truncated windows are followed (scan cap per request). */
+export const CROSS_KIND_MAX_REQUESTS = 200;
+const CROSS_KIND_MAX_LIMIT = 1000;
+
+/** Matches consumed before the cursor: the `<matched>` of `<kind>:<record_index>:<matched>`. */
+function cursorPosition(after: string): number | null {
+  const tail = after.slice(after.lastIndexOf(":") + 1);
+  return /^\d+$/.test(tail) ? Number(tail) : null;
+}
+
+/**
+ * One page of a type-filtered listing across kinds (all kinds, or a category's kinds): the
+ * server pages the matches as one collection (`cross_kind`). The page starts at the nearest
+ * stored cursor at or before `offset` and follows `next_after` — never an offset rescan —
+ * through short or truncated windows (a scan-capped window may return 0 rows) until it holds
+ * `limit` rows or the scan is exhausted. Rows are exactly the matches at positions
+ * [offset, offset + rows.length).
+ */
+async function fetchCrossKindPage(
+  runId: string,
+  kinds: string[] | undefined,
+  offset: number,
+  limit: number,
+  signal: AbortSignal | undefined,
+  filter: string | undefined,
+  types: string[],
+  started: number,
+): Promise<RawPage> {
+  if (kinds?.length === 1) {
+    // One kind: the ordinary kind page (offset paging, `matched`).
+    const kind = kinds[0] as string;
+    const window = await artifactWindow(
+      runId,
+      { kind: [kind], offset, limit, path_contains: filter, artifact_type: types },
+      signal,
+    );
+    const page = window[kind] ?? {};
+    return {
+      rows: asRows(page.artifacts).map((row, i) => withLocator(row, kind, offset + i)),
+      total: kindTotal(page),
+      offset,
+      backend: "file",
+      ...pageFlags([page]),
+      elapsedMs: Math.round(now() - started),
+      kinds,
+    };
+  }
+  const key = JSON.stringify([runId, kinds ?? null, filter ?? "", [...types].sort()]);
+  const cursors = crossKindCursors.get(key) ?? new Map<number, string>();
+  crossKindCursors.set(key, cursors);
+  let pos = 0;
+  let after: string | undefined;
+  for (const [known, cursor] of cursors) {
+    if (known <= offset && known >= pos) {
+      pos = known;
+      after = cursor;
+    }
+  }
+  const rows: RawRow[] = [];
+  let scanned = 0;
+  let truncated = false;
+  let exhausted = false;
+  let matched: number | null = null;
+  for (let request = 0; request < CROSS_KIND_MAX_REQUESTS; request += 1) {
+    const want = Math.min(CROSS_KIND_MAX_LIMIT, Math.max(1, offset - pos + (limit - rows.length)));
+    const payload = await crossKindRequest(
+      runId,
+      { kind: kinds, offset: 0, limit: want, path_contains: filter, artifact_type: types, after },
+      signal,
+    );
+    const cross = payload.cross_kind ?? {};
+    const window = payload.artifacts ?? {};
+    const byKind = new Map<string, Map<number, RawRow>>();
+    for (const [k, page] of Object.entries(window)) {
+      const index = new Map<number, RawRow>();
+      for (const row of asRows(page.artifacts)) {
+        if (typeof row.record_index === "number") index.set(row.record_index, row);
+      }
+      byKind.set(k, index);
+    }
+    const order = Array.isArray(cross.order) ? cross.order : [];
+    order.forEach((entry, i) => {
+      if (!Array.isArray(entry)) return;
+      const [k, recordIndex] = entry as [unknown, unknown];
+      if (typeof k !== "string" || typeof recordIndex !== "number") return;
+      const position = pos + i;
+      const row = byKind.get(k)?.get(recordIndex);
+      if (row && position >= offset && rows.length < limit) rows.push(withLocator(row, k, recordIndex));
+    });
+    scanned += asNumber(cross.scanned) ?? 0;
+    truncated = cross.truncated === true;
+    const nextAfter = typeof cross.next_after === "string" && cross.next_after ? cross.next_after : null;
+    const nextPos = (nextAfter ? cursorPosition(nextAfter) : null) ?? pos + order.length;
+    if (nextAfter) cursors.set(nextPos, nextAfter);
+    pos = nextPos;
+    after = nextAfter ?? undefined;
+    if (!nextAfter) {
+      exhausted = true;
+      matched = asNumber(cross.matched) ?? pos;
+      break;
+    }
+    if (rows.length >= limit) break;
+  }
+  return {
+    rows,
+    // The filtered count once the scan reached the end; otherwise unknown (paging continues).
+    total: exhausted ? matched : null,
+    offset,
+    backend: "file",
+    hasMore: !exhausted,
+    truncated: !exhausted && rows.length < limit,
+    scanned: scanned || undefined,
+    elapsedMs: Math.round(now() - started),
+    meta: {
+      matched: exhausted ? matched : null,
+      crossKind: true,
+      ...(truncated ? { lastWindowTruncated: true } : {}),
+    },
+    ...(kinds ? { kinds } : {}),
+  };
 }
 
 /** Row locator index: the server's original JSONL `record_index` when present, else the page position. */
@@ -160,6 +367,8 @@ async function artifactWindow(
 }
 
 function kindTotal(page: ArtifactKindPage): number | null {
+  // A filtered page counts its matches (`matched`; null while the scan stopped early).
+  if (page.pagination?.filtered === true) return asNumber(page.matched ?? page.pagination.matched);
   const direct = asNumber(page.total) ?? asNumber(page.record_count);
   if (direct !== null) return direct;
   return page.pagination?.filtered === true ? null : asRows(page.artifacts).length;
@@ -182,6 +391,7 @@ async function artifactKindCounts(runId: string, signal?: AbortSignal): Promise<
 
 export function resetArtifactCountsCache(): void {
   countsCache.clear();
+  crossKindCursors.clear();
 }
 
 function pageFlags(pages: ArtifactKindPage[]) {
@@ -249,16 +459,26 @@ export async function fetchArtifactsPage(
   pathContains?: string,
   restrictKinds?: (available: readonly string[]) => string[],
   sort?: ServerSort,
+  artifactTypes?: readonly string[],
 ): Promise<RawPage> {
   const started = now();
   const filter = pathContains?.trim() || undefined;
+  const types = artifactTypes?.length ? [...artifactTypes] : undefined;
   if (!kind && restrictKinds) {
-    return fetchArtifactKindsPage(runId, restrictKinds, offset, limit, signal, filter, started);
+    return fetchArtifactKindsPage(runId, restrictKinds, offset, limit, signal, filter, started, types);
   }
   if (kind) {
     const window = await artifactWindow(
       runId,
-      { kind: [kind], offset, limit, path_contains: filter, sort: sort?.key, order: sort?.order },
+      {
+        kind: [kind],
+        offset,
+        limit,
+        path_contains: filter,
+        artifact_type: types,
+        sort: sort?.key,
+        order: sort?.order,
+      },
       signal,
     );
     const page = window[kind];
@@ -278,9 +498,14 @@ export async function fetchArtifactsPage(
       ...(sortState ? { sort: sortState } : {}),
     };
   }
+  if (types) return fetchCrossKindPage(runId, undefined, offset, limit, signal, filter, types, started);
   if (filter) {
     // All kinds + path filter: per-kind matches from the first window only.
-    const window = await artifactWindow(runId, { offset: 0, limit, path_contains: filter }, signal);
+    const window = await artifactWindow(
+      runId,
+      { offset: 0, limit, path_contains: filter, artifact_type: types },
+      signal,
+    );
     const rows: RawRow[] = [];
     for (const k of Object.keys(window).sort()) {
       for (const [i, row] of asRows(window[k]?.artifacts).entries()) rows.push(withLocator(row, k, i));
@@ -338,6 +563,7 @@ async function fetchArtifactKindsPage(
   signal: AbortSignal | undefined,
   filter: string | undefined,
   started: number,
+  types?: string[],
 ): Promise<RawPage> {
   const all = await artifactKindCounts(runId, signal);
   const allowed = new Set(restrict(all.map(([k]) => k)));
@@ -346,11 +572,12 @@ async function fetchArtifactKindsPage(
   if (kinds.length === 0) {
     return { rows: [], total: 0, offset, backend: "file", truncated: false, elapsedMs: 0, kinds };
   }
+  if (types) return fetchCrossKindPage(runId, kinds, offset, limit, signal, filter, types, started);
   if (filter) {
     // Path filter: one request with every category kind (repeatable kind=), first window only.
     const window = await artifactWindow(
       runId,
-      { kind: kinds, offset: 0, limit, path_contains: filter },
+      { kind: kinds, offset: 0, limit, path_contains: filter, artifact_type: types },
       signal,
     );
     const rows: RawRow[] = [];
@@ -417,6 +644,18 @@ export async function fetchSearchRows(
  * followed by any case.json bookmarks (fallback store when no case DB could be
  * created). Whole collection, client paged. Rows carry `_store`.
  */
+/**
+ * A case-DB mark that no longer says anything: a toggled-off status (`unreviewed`, or empty)
+ * with no tags, note or report flag. The board (and its count) leaves it out.
+ */
+export function isClearedReviewMark(raw: RawRow): boolean {
+  const status = typeof raw.status === "string" ? raw.status.trim() : "";
+  if (status && status !== "unreviewed") return false;
+  if (raw.include_in_report === true) return false;
+  if (Array.isArray(raw.tags) && raw.tags.some((tag) => String(tag ?? "").trim())) return false;
+  return !(typeof raw.note === "string" && raw.note.trim());
+}
+
 export async function fetchReviewRows(runId: string, signal?: AbortSignal): Promise<RawPage> {
   const started = now();
   const [map, casePayload] = await Promise.all([
@@ -426,7 +665,9 @@ export async function fetchReviewRows(runId: string, signal?: AbortSignal): Prom
     }).catch(() => ({ case: null })),
   ]);
   const rows = [
-    ...asRows(map.marks).map((row) => ({ ...row, _store: "case-db" })),
+    ...asRows(map.marks)
+      .filter((row) => !isClearedReviewMark(row))
+      .map((row) => ({ ...row, _store: "case-db" })),
     ...asRows(casePayload.case?.bookmarks).map((row) => ({ ...row, _store: "bookmarks" })),
   ];
   return {

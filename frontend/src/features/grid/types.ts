@@ -64,10 +64,22 @@ export interface ColumnSpec {
   sortHintFor?: (key: string) => string;
   /** `details` keys this column already shows (left out of the "레코드 필드 추가" list). */
   fieldKeys?: string[];
+  /**
+   * Column header filter input (plan analysis-workbench-p1 §4): "text" = contains, "time" =
+   * from/to, "number" = min/max, "none" = no input. Default: `timestamp` → time, right-aligned → number.
+   */
+  filterKind?: "text" | "time" | "number" | "none";
+  /**
+   * The column is filled by an analysis job that has not run yet (e.g. files NTFS columns):
+   * the header says so and links to the job's run command.
+   */
+  emptyHint?: { text: string; command: string; commandLabel: string };
 }
 
 export interface MapContext {
   ref: CollectionRef;
+  /** The raw page the row came from (page-level facts such as files `ntfs_join`). */
+  page?: RawPage;
 }
 
 export interface CollectionDef {
@@ -87,4 +99,15 @@ export interface CollectionDef {
     query: import("../../contracts/collection").CollectionQuery,
     signal?: AbortSignal,
   ) => Promise<RawPage>;
+  /**
+   * Server-sorted collections: sorted position of one record (`locate=`), for `row=` deep links.
+   * Defined by collections whose rows' locator index is a server record index.
+   */
+  locate?: (
+    runId: string,
+    ref: CollectionRef,
+    sort: import("../../contracts/collection").ServerSort,
+    recordIndex: number,
+    signal?: AbortSignal,
+  ) => Promise<{ status: "ready" | "building" | "unsupported"; position: number | null }>;
 }

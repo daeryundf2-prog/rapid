@@ -324,7 +324,14 @@ export function FilterStatus(props: { report: FilterReport | null; active: boole
     parts.push(
       `불러온 ${report.loaded.toLocaleString("ko-KR")}행에서만 적용: ${report.clientLabels.join("·")}`,
     );
-  parts.push(`결과 ${report.shown.toLocaleString("ko-KR")}건`);
+  // Server filters only: the server's own count (`matched`), or "n건 이상" while it is not final.
+  if (!report.clientLabels.length && report.matched !== undefined) {
+    parts.push(
+      report.matched === null
+        ? `결과 ${report.loaded.toLocaleString("ko-KR")}건 이상`
+        : `결과 ${report.matched.toLocaleString("ko-KR")}건`,
+    );
+  } else parts.push(`결과 ${report.shown.toLocaleString("ko-KR")}건`);
   return (
     <p className="filter-status" role="status">
       {parts.join(" · ")}

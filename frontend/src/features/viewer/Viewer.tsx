@@ -57,10 +57,19 @@ function baseName(path: string): string {
   return parts[parts.length - 1] || path;
 }
 
-function targetTitle(target: ViewerTarget, preview: SourcePreview | null): string {
+/**
+ * Viewer heading: the file name, else the row's own title (a cross-case indicator, an NTFS
+ * record) — a bare locator ("/rows/0") only when the row has no title at all.
+ */
+export function targetTitle(
+  target: ViewerTarget,
+  preview: SourcePreview | null,
+  row?: { title?: string; ref?: { locator: string } } | null,
+): string {
   if (preview?.name) return preview.name;
   if (target.sourcePath) return baseName(target.sourcePath);
-  return target.ref.locator;
+  const rowTitle = row && row.ref?.locator === target.ref.locator ? row.title?.trim() : "";
+  return rowTitle || target.ref.locator;
 }
 
 export function Viewer() {
@@ -73,7 +82,8 @@ export function Viewer() {
 
   const runId = target?.runId ?? "";
   const path = target?.sourcePath ?? null;
-  const fileKey = target && path ? `${runId}|${path}` : null;
+  // Directory rows have no content to preview: request nothing (older servers 404 on them).
+  const fileKey = target && path && !target.isDirectory ? `${runId}|${path}` : null;
   const key = target ? targetKey(target) : null;
 
   const previewState = useAsync<SourcePreview>(fileKey, (signal) =>
@@ -138,6 +148,8 @@ export function Viewer() {
     if (!target) return;
     if (!path) {
       announce(`원본 파일이 없는 행입니다: ${target.ref.locator}`);
+    } else if (target.isDirectory) {
+      announce(`디렉터리입니다: ${path}`);
     } else if (previewState.status === "ok") {
       announce(`원본 로드됨: ${previewState.data.name}`);
     } else if (previewState.status === "error") {
@@ -374,7 +386,7 @@ export function Viewer() {
   };
 
   const busy = previewState.status === "loading";
-  const title = target ? targetTitle(target, preview) : "원본 뷰어";
+  const title = target ? targetTitle(target, preview, row) : "원본 뷰어";
 
   return (
     <section
@@ -532,7 +544,18 @@ function ViewerBody(props: ViewerBodyProps) {
     );
   }
   if (mode === "hex" && !preview && previewState.status === "error") {
-    if (!metadata) return <p className="viewer-note">파일 크기를 확인하는 중…</p>;
+    if (!metadata) {
+      // The size comes from source-metadata: when that failed too (a 404 for a deleted
+      // snapshot file), say so — never an endless "확인하는 중".
+      if (props.metadataError) {
+        return (
+          <p className="viewer-error" data-testid="viewer-hex-error">
+            원본을 불러오지 못했습니다: {previewState.error} · 파일 정보: {props.metadataError}
+          </p>
+        );
+      }
+      return <p className="viewer-note">파일 크기를 확인하는 중…</p>;
+    }
     return (
       <HexView
         key={hexKey}

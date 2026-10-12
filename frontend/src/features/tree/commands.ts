@@ -1,5 +1,7 @@
 import { useEffect } from "react";
+import { focusGridWhenReady } from "../../commands/builtin";
 import type { Command } from "../../contracts/command";
+import { useAppStore } from "../../state/store";
 import { navigate, registerCommand } from "./adapter";
 import type { TreeModelNode } from "./model";
 import { useTreeModel } from "./useTreeModel";
@@ -15,7 +17,7 @@ export function buildTreeCommands(runId: string | null, model: TreeModelNode[]):
   const commands: Command[] = [];
   const visit = (nodes: TreeModelNode[], parentLabel?: string) => {
     for (const node of nodes) {
-      if (!node.id.startsWith("search:saved:")) {
+      if (!node.id.startsWith("search:saved:") && !node.toggleOnly) {
         const label = parentLabel ? `${parentLabel} › ${node.label}` : node.label;
         commands.push({
           id: idOf(node),
@@ -23,8 +25,17 @@ export function buildTreeCommands(runId: string | null, model: TreeModelNode[]):
           group: "navigate",
           disabledReason: (ctx) => (ctx.runId ? node.disabledReason : NO_CASE),
           run: (ctx) => {
+            // Saved searches open themselves; domain nodes navigate with their filters.
+            if (node.activate) {
+              node.activate();
+              return;
+            }
             const target = ctx.runId ?? runId;
-            if (target) navigate({ runId: target, ...node.route });
+            if (!target) return;
+            if (node.target) {
+              useAppStore.getState().navigate({ runId: target, ...node.target });
+              focusGridWhenReady();
+            } else navigate({ runId: target, ...node.route });
           },
         });
       }

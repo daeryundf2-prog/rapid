@@ -17,7 +17,7 @@ export type ReviewMap = ReadonlyMap<string, ReviewMapMark>;
 export const reviewMapKey = (runId: string | null) => ["review-map", runId] as const;
 
 export function reviewKey(collection: string, kind: string, locator: string): string {
-  return `${collection}|${collection === "artifacts" ? kind : ""}|${locator}`;
+  return `${collection}|${collection === "artifacts" || collection === "analysis" ? kind : ""}|${locator}`;
 }
 
 export function buildReviewMap(marks: readonly ReviewMapMark[]): ReviewMap {
@@ -43,7 +43,11 @@ export function overlayReview(row: GridRow, map: ReviewMap | undefined): GridRow
   if (!mark) return row;
   return {
     ...row,
-    reviewStatus: toReviewStatus(mark.status, mark.include_in_report) ?? row.reviewStatus,
+    // An explicit `unreviewed` mark (a cleared toggle) clears the row's status too.
+    reviewStatus:
+      mark.status === "unreviewed"
+        ? toReviewStatus(null, mark.include_in_report)
+        : (toReviewStatus(mark.status, mark.include_in_report) ?? row.reviewStatus),
     tags: mark.tags.length > 0 ? mark.tags : row.tags,
     fields: {
       ...row.fields,

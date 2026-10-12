@@ -31,6 +31,8 @@ export interface GridToolbarProps {
   collectionLabel: string;
   /** "레코드 필드 추가" section (artifacts of one kind): promote details keys to columns. */
   fieldPicker?: FieldPickerProps;
+  /** "열 필터" toggle: shows the column header filter row (plan analysis-workbench-p1 §4). */
+  columnFilters?: { open: boolean; count: number; onToggle: () => void };
 }
 
 export interface FieldPickerProps {
@@ -221,6 +223,18 @@ export function GridToolbar(props: GridToolbarProps) {
           ) : null}
         </div>
 
+        {props.columnFilters ? (
+          <button
+            type="button"
+            className="grid-btn"
+            aria-pressed={props.columnFilters.open}
+            data-testid="grid-colfilter-toggle"
+            onClick={props.columnFilters.onToggle}
+          >
+            열 필터{props.columnFilters.count ? ` (${props.columnFilters.count})` : ""}
+          </button>
+        ) : null}
+
         <label className="grid-select">
           <span>밀도</span>
           <select value={props.density} onChange={(event) => props.onDensity(event.target.value as Density)}>
@@ -271,7 +285,15 @@ export function GridFooter(props: GridFooterProps) {
       <span>
         {props.pageCount !== null ? `페이지 ${props.page}/${formatCount(props.pageCount)}` : "페이지 -"}
       </span>
-      <span>총 {props.total !== null ? `${formatCount(props.total)}건` : "알 수 없음"}</span>
+      <span data-testid="grid-footer-total">
+        총{" "}
+        {props.total !== null ? `${formatCount(props.total)}건` : props.loading ? "세는 중…" : "알 수 없음"}
+      </span>
+      {props.loading ? (
+        <span className="grid-note" data-testid="grid-footer-loading">
+          불러오는 중…
+        </span>
+      ) : null}
       {props.backend ? (
         <span>
           {backendLabel(props.backend)} {seconds}

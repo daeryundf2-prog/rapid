@@ -1,5 +1,7 @@
 // biome-ignore-all lint/a11y/useSemanticElements: virtualized ARIA grid; rows are positioned divs, not a <table>
 // biome-ignore-all lint/a11y/useFocusableInteractive: roving tabindex; only the focused row is focusable by design
+
+import { useQuery } from "@tanstack/react-query";
 import {
   getCoreRowModel,
   getSortedRowModel,
@@ -21,12 +23,15 @@ import {
 import { announce } from "../../a11y";
 import { DisabledReason } from "../../a11y/primitives";
 import { ApiError, downloadFile } from "../../api/client";
-import { locateArtifactRow } from "../../api/collections";
 import type { RunExtractResult } from "../../api/extract";
+import { getRunTree } from "../../api/runs";
 import type { CollectionRef, GridRow } from "../../contracts/collection";
 import type { CommandContext } from "../../contracts/command";
+import { setColumnFilter } from "../filters/columnFilters";
+import { useFilterStore } from "../filters/filterStore";
 import { useDensity, useGridLocalStore, useRoute, useSelection, useToast, useViewerTarget } from "./adapter";
 import { BatchBar } from "./BatchBar";
+import { ColumnFilterRow } from "./ColumnFilterRow";
 import { collectionDef, presetColumnIds } from "./columns";
 import { isRecord } from "./columns/common";
 import {
@@ -39,6 +44,8 @@ import {
   toggleFieldCol,
   writeStoredFieldColumns,
 } from "./columns/fieldColumns";
+import { ntfsJoinOf } from "./columns/files";
+import { EmptyHintLink } from "./EmptyHintLink";
 import { GridFooter, GridToolbar } from "./GridToolbar";
 import { buildViewerTarget, type GridCommandHost, runBatch, runNote, useGridCommands } from "./gridCommands";
 import {
@@ -52,7 +59,13 @@ import {
 } from "./gridUtils";
 import { RowMenu } from "./RowMenu";
 import { type CellValue, type ColumnSpec, DENSITY_ROW_HEIGHT, type GridPreset } from "./types";
-import { categoryScopeText, PAGE_SIZE, SORT_POLL_MS, useCollectionQuery } from "./useCollectionQuery";
+import {
+  artifactTypesOfTree,
+  categoryScopeText,
+  PAGE_SIZE,
+  SORT_POLL_MS,
+  useCollectionQuery,
+} from "./useCollectionQuery";
 import "./grid.css";
 
 interface RowValueReader {
@@ -71,6 +84,7 @@ const AXIOM_PINNED = "tagstatus";
 /** Header-sort reasons on the artifacts grid (server sort only; no silent "loaded rows only" sort). */
 export const SORT_COLUMN_REASON = "이 열은 전체 정렬을 지원하지 않습니다";
 export const SORT_KIND_REASON = "유형을 하나 선택하면 전체 정렬할 수 있습니다";
+export const SORT_ANALYSIS_REASON = "분석 결과를 선택하면 전체 정렬할 수 있습니다";
 /** A sorted deep link re-asks for the row's position while the index builds (1 s apart). */
 export const LOCATE_MAX_TRIES = 60;
 
@@ -118,6 +132,8 @@ interface RowViewProps {
   /** Id of the row menu element (trigger aria-controls). */
   menuId: string;
   onToggle: (index: number, checked: boolean) => void;
+  /** aria-rowindex of data row 0 (2, or 3 under the column filter row). */
+  ariaRowOffset: number;
 }
 
 const RowView = memo(function RowView(props: RowViewProps) {
@@ -127,7 +143,7 @@ const RowView = memo(function RowView(props: RowViewProps) {
     return (
       <div
         role="row"
-        aria-rowindex={index + 2}
+        aria-rowindex={index + props.ariaRowOffset}
         aria-busy="true"
         className="grid-row grid-row-loading"
         style={style}
@@ -149,7 +165,7 @@ const RowView = memo(function RowView(props: RowViewProps) {
   return (
     <div
       role="row"
-      aria-rowindex={index + 2}
+      aria-rowindex={index + props.ariaRowOffset}
       aria-selected={selected}
       tabIndex={focused ? 0 : -1}
       data-index={index}
@@ -209,20 +225,38 @@ export function DataGrid(props: DataGridProps = {}) {
   const columnKey = `${ref.id}:${ref.kind ?? ""}`;
   // biome-ignore lint/correctness/useExhaustiveDependencies: columns only depend on the collection/kind
   const baseColumns = useMemo(() => def.columnsFor?.(ref) ?? def.columns, [def, columnKey]);
-  // Artifacts are sorted by the server (whole kind), never client-side over the loaded pages.
-  const serverSorted = ref.id === "artifacts";
-  const artifactKind = serverSorted ? ref.kind : undefined;
+  // Artifacts (and analysis job rows) are sorted by the server (whole kind / whole job), never
+  // client-side over the loaded pages.
+  const isAnalysis = ref.id === "analysis";
+  const serverSorted = ref.id === "artifacts" || isAnalysis;
+  /** The kind whose columns / sort / promoted fields apply; for analysis only once a job is selected. */
+  const artifactKind =
+    ref.id === "artifacts" ? ref.kind : isAnalysis && ref.analysisId ? ref.kind : undefined;
+  /** Promoted-column storage scope ("analysis:<kind>" keeps analysis kinds apart from artifact kinds). */
+  const fieldScope = artifactKind ? (isAnalysis ? `analysis:${artifactKind}` : artifactKind) : undefined;
+  /** RowRef.kind of this grid's rows: the artifact kind, or the analysis job id. */
+  const rowKindOfGrid = isAnalysis ? ref.analysisId : ref.kind;
   const routeSort = artifactKind ? route.sort : undefined;
   // Promoted record-field columns (URL `cols=`, else the kind's stored set); kept across presets.
-  const promotedCols = useMemo(
-    () => effectiveFieldCols(route.cols, artifactKind),
-    [route.cols, artifactKind],
-  );
+  const promotedCols = useMemo(() => effectiveFieldCols(route.cols, fieldScope), [route.cols, fieldScope]);
   const promotedKeys = useMemo(() => colsToKeys(promotedCols), [promotedCols]);
   const q = route.q;
+  // Shared with the tree (same query key): the run's artifact types (exact server values) for the
+  // 유형 menu and the 유형(정확히) suggestions — loaded rows alone shrink once a 유형 filter applies.
+  const runTree = useQuery({
+    queryKey: ["run-tree", runId],
+    queryFn: () => getRunTree(runId as string),
+    enabled: Boolean(runId) && ref.id === "artifacts",
+    retry: false,
+    staleTime: 30_000,
+  });
+  const treeTypes = useMemo(
+    () => (ref.id === "artifacts" ? artifactTypesOfTree(runTree.data?.nodes, ref.kind) : []),
+    [ref.id, ref.kind, runTree.data],
+  );
   const cq = useCollectionQuery(
     { ref, offset: 0, limit: PAGE_SIZE, text: q || undefined, search: route.search, sort: routeSort },
-    { runId },
+    { runId, typeOptions: treeTypes },
   );
   // Promoted keys holding lists in the loaded rows: shown, but not server-sortable.
   const listSig = useMemo(
@@ -269,6 +303,19 @@ export function DataGrid(props: DataGridProps = {}) {
   const [preset, setPreset] = useState<GridPreset>(() => readPreset(props.initialPreset ?? "analysis"));
   const [visibility, setVisibility] = useState<VisibilityState>(() => visibilityFor(baseColumns, preset));
   const [sorting, setSorting] = useState<SortingState>([]);
+  const columnFilters = useFilterStore((s) => s.filters.columns);
+  const storeTypes = useFilterStore((s) => s.filters.types);
+  const storePath = useFilterStore((s) => s.filters.path);
+  const patchFilters = useFilterStore((s) => s.patchFilters);
+  const [filterRowOpen, setFilterRowOpen] = useState(() => (columnFilters?.length ?? 0) > 0);
+  const filterRowShown = filterRowOpen && ref.id !== "intake";
+  const onColumnFilter = useCallback(
+    (col: string, op: "<" | ">" | ":", value: string) => {
+      const current = useFilterStore.getState().filters.columns ?? [];
+      patchFilters({ columns: setColumnFilter(current, col, op, value) });
+    },
+    [patchFilters],
+  );
   const [columnSizing, setColumnSizing] = useState<ColumnSizingState>({});
   const [focusIdx, setFocusIdx] = useState(0);
   const [menuAnchor, setMenuAnchor] = useState<Anchor>(null);
@@ -290,7 +337,7 @@ export function DataGrid(props: DataGridProps = {}) {
   const restoredRow = useRef(false);
 
   // Preset / collection change resets the column model and view state.
-  const collectionKey = `${ref.id}:${ref.kind ?? ""}:${ref.status ?? ""}:${ref.category ?? ""}`;
+  const collectionKey = `${ref.id}:${ref.kind ?? ""}:${ref.status ?? ""}:${ref.category ?? ""}:${ref.analysisId ?? ""}`;
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset only when the collection or preset changes
   useEffect(() => {
     setVisibility(visibilityFor(columns, preset));
@@ -325,22 +372,22 @@ export function DataGrid(props: DataGridProps = {}) {
   // A shared link without `cols=` gets the kind's stored promoted columns written into the URL.
   const { setCols, setSort } = route;
   useEffect(() => {
-    if (!artifactKind || route.cols?.length) return;
-    const stored = readStoredFieldColumns(artifactKind);
+    if (!artifactKind || !fieldScope || isAnalysis || route.cols?.length) return;
+    const stored = readStoredFieldColumns(fieldScope);
     // Only for the kind still on screen (a fast kind switch must not carry one kind's columns over).
     if (stored?.length && useGridLocalStore.getState().route.collection.kind === artifactKind)
       setCols(stored);
-  }, [artifactKind, route.cols, setCols]);
+  }, [artifactKind, fieldScope, isAnalysis, route.cols, setCols]);
   const toggleField = useCallback(
     (key: string, on: boolean) => {
-      if (!artifactKind) return;
+      if (!fieldScope) return;
       const next = toggleFieldCol(promotedCols, key, on);
-      writeStoredFieldColumns(artifactKind, next);
+      writeStoredFieldColumns(fieldScope, next);
       setCols(next);
       // A column hidden earlier through the checkbox list comes back when promoted again.
       if (on) setVisibility((prev) => ({ ...prev, [fieldColumnId(key)]: true }));
     },
-    [artifactKind, promotedCols, setCols],
+    [fieldScope, promotedCols, setCols],
   );
 
   const needle = q.trim();
@@ -502,25 +549,24 @@ export function DataGrid(props: DataGridProps = {}) {
   const sortReady = cq.sortState?.status === "ready";
   const serverPath = serverSorted ? serverPathFilter(q) : undefined;
   const locateTarget =
-    routeSort &&
-    artifactKind &&
-    route.rowRef?.collection === "artifacts" &&
-    route.rowRef.kind === artifactKind
+    routeSort && artifactKind && route.rowRef?.collection === ref.id && route.rowRef.kind === rowKindOfGrid
       ? indexFromRef(route.rowRef)
       : null;
   // With a server path filter the sorted position of a record is not a page position: no locate.
   const locateKey =
     locateTarget !== null && routeSort && !serverPath
-      ? `${runId}|${artifactKind}|${routeSort.key}:${routeSort.order}|${locateTarget}`
+      ? `${runId}|${rowKindOfGrid}|${routeSort.key}:${routeSort.order}|${locateTarget}`
       : null;
   const [located, setLocated] = useState<{ key: string; position: number | null } | null>(null);
+  const locateRow = def.locate;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `ref` is identified by locateKey
   useEffect(() => {
     if (!locateKey || !sortReady || restoredRow.current || !runId || !artifactKind || !routeSort) return;
-    if (locateTarget === null || located?.key === locateKey) return;
+    if (locateTarget === null || located?.key === locateKey || !locateRow) return;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const attempt = (n: number) => {
-      locateArtifactRow(runId, artifactKind, routeSort, locateTarget, controller.signal)
+      locateRow(runId, ref, routeSort, locateTarget, controller.signal)
         .then((result) => {
           if (controller.signal.aborted) return;
           // The index may be rebuilding (evicted, restarted server): ask again, bounded.
@@ -539,7 +585,7 @@ export function DataGrid(props: DataGridProps = {}) {
       controller.abort();
       if (timer !== undefined) clearTimeout(timer);
     };
-  }, [locateKey, sortReady, runId, artifactKind, routeSort, locateTarget, located]);
+  }, [locateKey, sortReady, runId, artifactKind, routeSort, locateTarget, located, locateRow]);
 
   // Deep link: restore `row=` (focus + scroll) once, resolving the server page from the locator.
   useEffect(() => {
@@ -719,7 +765,8 @@ export function DataGrid(props: DataGridProps = {}) {
 
   const onRowMouseDown = (event: ReactMouseEvent<HTMLDivElement>) => {
     const rowEl = (event.target as HTMLElement).closest<HTMLElement>("[data-index]");
-    if (!rowEl || (event.target as HTMLElement).closest("input, button")) return;
+    // In-cell links (cross-case 케이스) navigate on their own; they do not select the row.
+    if (!rowEl || (event.target as HTMLElement).closest("input, button, a[href]")) return;
     const index = Number(rowEl.dataset.index);
     const row = getDisplayRow(index);
     if (!row || event.button !== 0) return;
@@ -829,15 +876,20 @@ export function DataGrid(props: DataGridProps = {}) {
     el?.focus();
   }, []);
 
-  const announcement = useMemo(() => {
-    if (cq.isLoading || !runId) return "";
-    return resultSentence(compactMode ? displayCount : (cq.total ?? displayCount), cq.backend, cq.elapsedMs);
-  }, [cq.isLoading, runId, compactMode, displayCount, cq.total, cq.backend, cq.elapsedMs]);
-
-  // Only S5's announce() creates live regions: one sentence per result change.
+  // One polite sentence per result of a query the analyst asked for (collection, filters, sort).
+  // Background refetches (job polling, review overlays) that only change the count stay silent,
+  // and the elapsed time is not part of the key.
+  const resultCount = compactMode ? displayCount : (cq.total ?? displayCount);
+  const filterSig = useFilterStore((s) => JSON.stringify(s.filters));
+  const querySig = `${runId}|${collectionKey}|${q}|${routeSort ? `${routeSort.key}:${routeSort.order}` : ""}|${filterSig}`;
+  const announcedFor = useRef("");
+  const elapsedRef = useRef(cq.elapsedMs);
+  elapsedRef.current = cq.elapsedMs;
   useEffect(() => {
-    if (announcement) announce(announcement);
-  }, [announcement]);
+    if (cq.isLoading || !runId || announcedFor.current === querySig) return;
+    announcedFor.current = querySig;
+    announce(resultSentence(resultCount, cq.backend, elapsedRef.current));
+  }, [cq.isLoading, runId, querySig, resultCount, cq.backend]);
 
   const lastToast = toast.toasts.at(-1);
   useEffect(() => {
@@ -855,7 +907,7 @@ export function DataGrid(props: DataGridProps = {}) {
   };
   const sortReason = (spec: ColumnSpec): string | null => {
     if (!serverSorted) return null;
-    if (!artifactKind) return SORT_KIND_REASON;
+    if (!artifactKind) return isAnalysis ? SORT_ANALYSIS_REASON : SORT_KIND_REASON;
     return spec.sortKey ? null : (spec.unsortableReason ?? SORT_COLUMN_REASON);
   };
   const cycleSort = (spec: ColumnSpec) => {
@@ -923,7 +975,45 @@ export function DataGrid(props: DataGridProps = {}) {
     if (sortAnnouncement) announce(sortAnnouncement);
   }, [sortAnnouncement]);
 
-  const rowCountAria = (compactMode ? displayCount : (cq.total ?? -1)) + 1;
+  // 유형(정확히) suggestions: the run's artifact types (`/tree` artifact_type_counts) + loaded rows.
+  const typeSuggestions = useMemo(() => {
+    if (ref.id !== "artifacts" || !filterRowShown) return [];
+    const found = new Set<string>(treeTypes);
+    for (const row of cq.loadedRows) if (row.artifactType) found.add(row.artifactType);
+    return [...found].sort();
+  }, [ref.id, filterRowShown, treeTypes, cq.loadedRows]);
+  /** Header row (+ the column filter row when shown) precede the data rows in aria-rowindex. */
+  const headRows = filterRowShown ? 2 : 1;
+  const rowCountAria = (compactMode ? displayCount : (cq.total ?? -1)) + headRows;
+  // Files NTFS columns: until an NTFS-meta analysis is joined their headers link to running it.
+  const ntfsJoin = ref.id === "files" ? ntfsJoinOf(cq.pageMeta) : null;
+  const hintsActive = ref.id === "files" && !cq.isLoading && ntfsJoin === null;
+  const statusLines: { id: string; text: string }[] = [];
+  if (cq.clientColumnFilters) {
+    statusLines.push({
+      id: "colfilter",
+      text: `열 필터: ${formatCount(cq.total ?? 0)}건 / 불러온 ${formatCount(cq.loadedCount)}행 기준`,
+    });
+  } else if (cq.serverColumnFilters && cq.serverMatched !== undefined) {
+    statusLines.push({
+      id: "colfilter",
+      text:
+        cq.serverMatched === null
+          ? `열 필터: ${formatCount(cq.loadedCount)}건 이상 (서버 필터, 계속 불러오는 중)`
+          : `열 필터: ${formatCount(cq.serverMatched)}건 (서버 필터)`,
+    });
+  }
+  if (ntfsJoin) {
+    const analysis = (ntfsJoin.analysis_id ?? "").slice(0, 8);
+    statusLines.push({
+      id: "ntfs",
+      // The join counts the current page only (backend `ntfs_join`): say so. A not-joined
+      // status (too_large / no_volume_prefix / skipped) says why instead of "0행 일치".
+      text: ntfsJoin.joined
+        ? `NTFS 메타: 이 페이지 ${formatCount(ntfsJoin.matched)}/${formatCount(ntfsJoin.total)}행 일치 (분석 ${analysis})`
+        : `NTFS 메타: 조인하지 않음 — ${ntfsJoin.reason} (분석 ${analysis})`,
+    });
+  }
   const currentPage = Math.min(cq.pageCount ?? 1, Math.floor(firstVisible / cq.pageSize) + 1);
 
   const emptyMessage = !runId
@@ -937,6 +1027,12 @@ export function DataGrid(props: DataGridProps = {}) {
           : compactMode
             ? "조건에 맞는 행이 없습니다. 불러온 행 안에서만 필터합니다."
             : "표시할 행이 없습니다.";
+
+  const serverFiltering =
+    cq.serverColumnFilters || storeTypes.length > 0 || Boolean(storePath) || Boolean(serverPathFilter(q));
+  const loadingMessage = serverFiltering
+    ? "서버에서 조건에 맞는 행을 찾는 중입니다 … (큰 유형은 수 초 걸릴 수 있습니다)"
+    : "목록을 불러오는 중입니다 …";
 
   return (
     <section
@@ -965,6 +1061,15 @@ export function DataGrid(props: DataGridProps = {}) {
         visibility={visibility}
         onToggleColumn={(id, visible) => setVisibility((prev) => ({ ...prev, [id]: visible }))}
         collectionLabel={def.label}
+        columnFilters={
+          ref.id === "intake"
+            ? undefined
+            : {
+                open: filterRowShown,
+                count: columnFilters?.length ?? 0,
+                onToggle: () => setFilterRowOpen((open) => !open),
+              }
+        }
         fieldPicker={
           artifactKind
             ? {
@@ -993,6 +1098,12 @@ export function DataGrid(props: DataGridProps = {}) {
         </p>
       ) : null}
 
+      {statusLines.map((line) => (
+        <p key={line.id} className="grid-sortstatus" data-testid={`grid-${line.id}-status`}>
+          {line.text}
+        </p>
+      ))}
+
       {cq.error ? (
         <div className="grid-error" role="alert">
           <span>목록을 불러오지 못했습니다. {cq.error.message}</span>
@@ -1013,7 +1124,10 @@ export function DataGrid(props: DataGridProps = {}) {
         aria-busy={cq.isLoading}
         // Keep scrollIntoView / focus reveal clear of the sticky header row and the sticky
         // select + first columns, so nothing scrolled "into view" lands underneath them.
-        style={{ scrollPaddingLeft: SELECT_COL_WIDTH + stickyWidth, scrollPaddingTop: rowHeight }}
+        style={{
+          scrollPaddingLeft: SELECT_COL_WIDTH + stickyWidth,
+          scrollPaddingTop: rowHeight + (filterRowShown ? rowHeight + 4 : 0),
+        }}
         onKeyDown={onKeyDown}
         onMouseDown={onRowMouseDown}
         onContextMenu={onContextMenu}
@@ -1033,11 +1147,18 @@ export function DataGrid(props: DataGridProps = {}) {
                 if (!spec) return null;
                 const sort = sortOf(spec);
                 const reason = sortReason(spec);
+                const hint = hintsActive ? spec.emptyHint : undefined;
+                const hintId = `${hintPrefix}-empty-${spec.id}`;
+                const describedBy =
+                  [spec.sortHint ? `${hintPrefix}-${spec.id}` : "", hint ? hintId : ""]
+                    .filter(Boolean)
+                    .join(" ") || undefined;
                 return (
                   <div
                     key={column.id}
                     role="columnheader"
                     aria-sort={sort}
+                    aria-label={hint ? spec.header : undefined}
                     data-col={column.id}
                     className={`grid-cell grid-hcell${lefts[i] !== undefined ? " grid-cell-first" : ""}`}
                     style={{ width: widths[i], left: lefts[i] }}
@@ -1046,8 +1167,8 @@ export function DataGrid(props: DataGridProps = {}) {
                       <button
                         type="button"
                         className="grid-sort"
-                        aria-describedby={spec.sortHint ? `${hintPrefix}-${spec.id}` : undefined}
-                        title={reason ? undefined : spec.sortHint}
+                        aria-describedby={describedBy}
+                        title={reason ? undefined : (spec.sortHint ?? hint?.text)}
                         onClick={() => cycleSort(spec)}
                       >
                         {spec.header}
@@ -1060,6 +1181,14 @@ export function DataGrid(props: DataGridProps = {}) {
                       <span id={`${hintPrefix}-${spec.id}`} hidden>
                         {spec.sortHint}
                       </span>
+                    ) : null}
+                    {hint ? (
+                      <>
+                        <span id={hintId} hidden>
+                          {hint.text}
+                        </span>
+                        <EmptyHintLink hint={hint} hintId={hintId} />
+                      </>
                     ) : null}
                     <div
                       aria-hidden="true"
@@ -1090,6 +1219,19 @@ export function DataGrid(props: DataGridProps = {}) {
                 );
               })}
             </div>
+            {filterRowShown ? (
+              <ColumnFilterRow
+                specs={specs}
+                widths={widths}
+                lefts={lefts}
+                selectWidth={SELECT_COL_WIDTH}
+                height={rowHeight + 4}
+                rowIndex={2}
+                filters={columnFilters ?? []}
+                onChange={onColumnFilter}
+                suggestions={typeSuggestions.length ? { type: typeSuggestions } : undefined}
+              />
+            ) : null}
           </div>
           <div role="rowgroup" className="grid-body" style={{ height: virtualizer.getTotalSize() }}>
             {virtualItems.map((item) => {
@@ -1110,12 +1252,19 @@ export function DataGrid(props: DataGridProps = {}) {
                   menuOpen={menuAnchor !== null && menuRow === item.index}
                   menuId={menuId}
                   onToggle={onToggleCheckbox}
+                  ariaRowOffset={headRows + 1}
                 />
               );
             })}
           </div>
         </div>
         {displayCount === 0 && !cq.isLoading ? <p className="grid-empty">{emptyMessage}</p> : null}
+        {displayCount === 0 && cq.isLoading && runId ? (
+          // A typed / server-filtered page can scan for seconds: never a blank grid meanwhile.
+          <p className="grid-empty grid-loading" data-testid="grid-loading">
+            {loadingMessage}
+          </p>
+        ) : null}
       </div>
 
       <GridFooter

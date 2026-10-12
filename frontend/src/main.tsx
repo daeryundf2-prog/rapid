@@ -3,13 +3,15 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./app/App";
 import { registerAppSlots } from "./app/registerSlots";
-import { captureLaunchToken } from "./router";
+import { canonicalizeHash, captureLaunchToken } from "./router";
 import { initPrefs } from "./state/slices/prefs";
 import "./tokens/tokens.css";
 import "./app/shell.css";
 
 // `#token=` launch fragment → session storage; any route sharing the fragment is kept.
 captureLaunchToken();
+// Legacy `#/case/{run}/{collection}` links → `#/case/{run}/{stage}/{view}` (console-ia §3).
+canonicalizeHash();
 initPrefs();
 registerAppSlots();
 

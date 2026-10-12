@@ -18,6 +18,12 @@ const COLLECTIONS = [
   "indicators",
   "review",
   "outputs",
+  // Stages (console-ia §3, Q-IA-5): 처리 page + a selected card, analysis results, 검토 / 보고.
+  "process",
+  "process/carve",
+  "explore/analysis/carve",
+  "review/board/relevant",
+  "report/outputs",
 ] as const;
 
 let runId = "";

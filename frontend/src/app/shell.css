@@ -72,6 +72,15 @@ kbd {
   position: relative;
   flex: 1;
   min-height: 0;
+  display: flex;
+}
+
+/* Panes beside the stage rail (console-ia §3); the drawer viewer stays positioned in here. */
+.shell-panes {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
 }
 
 .pane-frame {
@@ -225,13 +234,39 @@ kbd {
   justify-content: center;
 }
 
-.button[aria-disabled="true"] {
-  color: var(--text-muted);
+.button[aria-disabled="true"],
+.button:disabled {
+  color: var(--disabled-text);
   cursor: not-allowed;
+}
+
+/* A disabled primary drops the accent fill: muted text on the accent was ≈1.4:1
+   (--disabled-text on --disabled-bg is in the contrast gate test). */
+.button.primary[aria-disabled="true"],
+.button.primary:disabled,
+.button.primary[aria-disabled="true"]:hover {
+  background: var(--disabled-bg);
+  border-color: var(--line);
+  color: var(--disabled-text);
 }
 
 .button[aria-disabled="true"]:hover {
   border-color: var(--line);
+}
+
+/* Visible "why disabled" line next to a disabled action (not only on hover/focus). */
+.command-with-reason {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  max-width: 100%;
+}
+
+.disabled-reason-text {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
 }
 
 /* --- status bar ----------------------------------------------------------- */

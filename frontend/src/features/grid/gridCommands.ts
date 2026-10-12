@@ -3,8 +3,12 @@ import type { RunExtractResult } from "../../api/extract";
 import type { CollectionRef, GridRow } from "../../contracts/collection";
 import type { Command, CommandContext } from "../../contracts/command";
 import type { ViewerMode, ViewerTarget } from "../../contracts/viewer";
+import { useAppStore } from "../../state/store";
+import { runDisabledReason } from "../analysis/commands";
+import { caseRoute, otherCaseIds } from "../analysis/crossCase";
+import { useAnalysisStore } from "../analysis/store";
 import { registerCommand, registerLocalCommand } from "./adapter";
-import { baseName } from "./columns/common";
+import { baseName, isRecord } from "./columns/common";
 import {
   applyNote,
   applyReviewAction,
@@ -39,12 +43,16 @@ export function buildViewerTarget(runId: string, row: GridRow, mode?: ViewerMode
   const highlight = row.fields.highlight as ViewerTarget["highlight"] | undefined;
   // Artifact rows open on the decoded record first (meta) unless a mode was asked for.
   const isArtifact = row.ref.collection === "artifacts" || row.ref.locator.startsWith("/artifacts/");
-  const preferred = mode ?? (isArtifact ? "meta" : undefined);
+  // Rows may ask for a mode (analysis carve hits open their source in hex at the offset).
+  const rowMode =
+    typeof row.fields.viewerMode === "string" ? (row.fields.viewerMode as ViewerMode) : undefined;
+  const preferred = mode ?? rowMode ?? (isArtifact ? "meta" : undefined);
   return {
     ref: row.ref,
     runId,
     sourcePath: row.sourcePath,
-    ...(preferred ? { preferredMode: preferred } : {}),
+    ...(row.fields.isDirectory === true ? { isDirectory: true, preferredMode: "meta" as const } : {}),
+    ...(preferred && row.fields.isDirectory !== true ? { preferredMode: preferred } : {}),
     ...(highlight ? { highlight } : {}),
   };
 }
@@ -82,6 +90,48 @@ export const BATCH_ACTIONS: BatchAction[] = [
   "tag",
   "extract",
 ];
+
+export const OPEN_OTHER_CASE_COMMAND = "grid.openOtherCase";
+export const NO_OTHER_CASE_REASON = "다른 케이스에 나타난 지표 행이 아닙니다.";
+
+/** Other runs a cross-case result row points at (empty for every other row). */
+export function otherCasesOf(row: GridRow, runId: string | null): string[] {
+  if (row.ref.collection !== "analysis" || row.fields.kind !== "cross-case") return [];
+  return otherCaseIds(isRecord(row.fields.details) ? row.fields.details : {}, runId);
+}
+
+/** "선택 행 OCR 실행" (plan analysis-workbench-p1 §3.2 ocr-batch `target.locators`). */
+export const OCR_SELECTED_COMMAND = "grid.ocrSelected";
+export const OCR_NO_IMAGE_REASON = "선택한 행에 이미지가 없습니다.";
+export const OCR_COLLECTION_REASON = "파일·아티팩트 목록에서만 선택 행 OCR을 실행할 수 있습니다.";
+export const OCR_MAX_IMAGES = 1000;
+export const OCR_TOO_MANY_REASON = "한 번에 1,000장까지 OCR할 수 있습니다";
+/** The media collector's decoded-picture type (`media-image-unreadable` / video / audio rows are not OCR input). */
+const IMAGE_ARTIFACT_TYPES = new Set(["media-image"]);
+
+const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "bmp", "tif", "tiff", "webp", "heic"]);
+
+/**
+ * OCR locator of an image row: files → `/candidates/<n>`, media-image artifacts →
+ * `/artifacts/<n>`; null for anything else.
+ */
+export function ocrLocatorOf(row: GridRow): string | null {
+  const extOf = (value: string | null | undefined) =>
+    /\.([A-Za-z0-9]+)$/.exec(value ?? "")?.[1]?.toLowerCase() ?? "";
+  if (row.ref.collection === "artifacts") {
+    if (row.ref.kind !== "media-image" || !/^\/artifacts\/\d+$/.test(row.ref.locator)) return null;
+    // Only picture rows: an image artifact type, or an image file extension.
+    const type = row.artifactType ?? "";
+    const pictured = type ? IMAGE_ARTIFACT_TYPES.has(type) : IMAGE_EXTENSIONS.has(extOf(row.sourcePath));
+    return pictured ? row.ref.locator : null;
+  }
+  if (row.ref.collection !== "files" || !/^\/candidates\/\d+$/.test(row.ref.locator)) return null;
+  const field = typeof row.fields.extension === "string" ? row.fields.extension : "";
+  const ext = (field || /\.([A-Za-z0-9]+)$/.exec(row.sourcePath ?? row.title)?.[1] || "")
+    .replace(/^\./, "")
+    .toLowerCase();
+  return IMAGE_EXTENSIONS.has(ext) ? row.ref.locator : null;
+}
 
 export function batchCommandId(action: BatchAction): string {
   return `grid.batch.${action}`;
@@ -170,7 +220,62 @@ export function buildGridCommands(hostRef: { current: GridCommandHost }): Comman
         if (row?.sourcePath) host().setFilter(row.sourcePath);
       },
     },
+    {
+      // Cross-case result rows: open the (first) other case the indicator occurs in.
+      id: OPEN_OTHER_CASE_COMMAND,
+      label: "다른 케이스에서 열기",
+      group: "grid",
+      icon: "external",
+      disabledReason: () => {
+        const row = focused();
+        if (!row) return NO_ROW;
+        return otherCasesOf(row, host().runId).length ? undefined : NO_OTHER_CASE_REASON;
+      },
+      run: () => {
+        const row = focused();
+        if (!row) return;
+        const [first] = otherCasesOf(row, host().runId);
+        const details = isRecord(row.fields.details) ? row.fields.details : {};
+        if (first) useAppStore.getState().navigate(caseRoute(details, first));
+      },
+    },
   ];
+
+  const ocrRows = (): GridRow[] => {
+    const h = host();
+    const selected = h.getSelectedRows();
+    if (selected.length) return selected;
+    const row = focused();
+    return row ? [row] : [];
+  };
+  commands.push({
+    id: OCR_SELECTED_COMMAND,
+    label: "선택 행 OCR 실행",
+    group: "grid",
+    icon: "image",
+    disabledReason: (ctx) => {
+      const h = host();
+      if (!h.runId) return "열린 케이스가 없습니다.";
+      if (h.collection.id !== "files" && h.collection.id !== "artifacts") return OCR_COLLECTION_REASON;
+      const rows = ocrRows();
+      if (rows.length === 0) return NO_SELECTION;
+      const images = new Set(rows.map(ocrLocatorOf).filter((l): l is string => l !== null));
+      if (images.size === 0) return OCR_NO_IMAGE_REASON;
+      if (images.size > OCR_MAX_IMAGES) return OCR_TOO_MANY_REASON;
+      return runDisabledReason("ocr-batch", { runId: ctx.runId ?? h.runId });
+    },
+    run: () => {
+      const locators = [
+        ...new Set(
+          ocrRows()
+            .map(ocrLocatorOf)
+            .filter((l): l is string => l !== null),
+        ),
+      ];
+      if (locators.length)
+        useAnalysisStore.getState().openDialog({ kind: "ocr-batch", preset: { locators } });
+    },
+  });
 
   for (const action of BATCH_ACTIONS) {
     commands.push({

@@ -1,11 +1,13 @@
-import { fetchArtifactsPage } from "../../../api/collections";
+import { fetchArtifactsPage, locateArtifactRow } from "../../../api/collections";
 import { clipValue, flatValue } from "../../../utils/flatValue";
+import { formatTimestamp } from "../../../utils/time";
 import { kindsForCategory } from "../../tree/categories";
 import { serverPathFilter } from "../gridUtils";
 import type { CollectionDef, ColumnSpec } from "../types";
 import { recordHighlight, registryCellKindLabel, summarizeArtifact } from "./artifactSummary";
 import {
   col,
+  currentTimezone,
   fieldStr,
   formatBytes,
   isRecord,
@@ -16,6 +18,7 @@ import {
   str,
   strOrNull,
 } from "./common";
+import { typeChipCell } from "./StatusCells";
 
 /** Row time = first of these details keys. Same order as the server's `sort=timestamp` (plan §4.1). */
 export const TIME_KEYS = [
@@ -51,7 +54,10 @@ export const SORT_LIST_REASON = "목록 값은 전체 정렬을 지원하지 않
 /** eventlog message keys in display order (the summary shows the first present one). */
 export const EVENT_MESSAGE_KEYS = ["message", "rendered_message", "event_message"];
 
-const typeColumn = col.field("type", "유형", 160, ["analysis", "compact"], (r) => r.artifactType);
+/** 유형: a chip (the web-log node filters on it server-side, `artifact_type=`). */
+const typeColumn = col.field("type", "유형", 160, ["analysis", "compact"], (r) => r.artifactType, {
+  render: typeChipCell,
+});
 const eventColumns = [
   col.field("eventId", "이벤트ID", 90, ["analysis", "compact"], (r) => fieldStr(r, "eventId"), {
     sortKey: "details.event_id",
@@ -108,6 +114,10 @@ export interface KindColumnDef {
   bytes?: boolean;
   mono?: boolean;
   number?: boolean;
+  /** ISO timestamp: shown in the display timezone, filtered from/to. */
+  time?: boolean;
+  /** Presets the column is visible in (default analysis + axiom). */
+  presets?: ColumnSpec["presets"];
 }
 
 function detailsOf(row: { fields: Record<string, unknown> }): Record<string, unknown> {
@@ -122,7 +132,8 @@ function firstValue(details: Record<string, unknown>, keys: string[]): unknown {
   return undefined;
 }
 
-function kindColumn(def: KindColumnDef): ColumnSpec {
+/** Column over one (or the first present of several) `details` keys; server-sorted on the first key. */
+export function kindColumn(def: KindColumnDef): ColumnSpec {
   const read = (row: { fields: Record<string, unknown> }) =>
     def.get ? def.get(detailsOf(row)) : firstValue(detailsOf(row), def.keys);
   const sortable = !def.unsortable && !def.list;
@@ -133,8 +144,13 @@ function kindColumn(def: KindColumnDef): ColumnSpec {
     header: def.header,
     width: def.width ?? 150,
     minWidth: 60,
-    presets: ["analysis", "axiom"],
+    presets: def.presets ?? ["analysis", "axiom"],
     ...(def.mono ? { mono: true } : {}),
+    ...(def.time
+      ? { filterKind: "time" as const }
+      : def.number || def.bytes
+        ? { filterKind: "number" as const }
+        : {}),
     ...(def.number || def.bytes ? { align: "right" as const } : {}),
     ...(sortable ? { sortKey: `details.${first}` } : {}),
     ...(named ? { sortHint: `${def.header} 정렬 (${first} 기준)` } : {}),
@@ -148,6 +164,9 @@ function kindColumn(def: KindColumnDef): ColumnSpec {
       const v = read(row);
       if (def.display) return def.display(v, detailsOf(row));
       if (def.bytes && typeof v === "number") return formatBytes(v);
+      if (def.time && (typeof v === "string" || typeof v === "number")) {
+        return formatTimestamp(v, currentTimezone());
+      }
       return clipValue(flatValue(v), 300);
     },
     ...(def.tooltip
@@ -389,6 +408,7 @@ export const artifactsCollection: CollectionDef = {
         ? (available) => kindsForCategory(query.ref.category as string, available)
         : undefined,
       query.ref.kind ? query.sort : undefined,
+      query.artifactTypes,
     ),
   mapRow: (raw, index, ctx) => {
     const details = isRecord(raw.details) ? raw.details : {};
@@ -431,6 +451,10 @@ export const artifactsCollection: CollectionDef = {
   },
   columns: defaultColumns(),
   columnsFor: (ref) => artifactColumnsForKind(ref.kind),
+  locate: (runId, ref, sort, recordIndex, signal) =>
+    ref.kind
+      ? locateArtifactRow(runId, ref.kind, sort, recordIndex, signal)
+      : Promise.resolve({ status: "ready", position: null }),
 };
 
 /** details key → header of the kind's DEFAULT column that already shows it (meta tab "열로 표시"). */

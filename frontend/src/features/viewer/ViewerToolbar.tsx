@@ -3,7 +3,13 @@ import { announce, DisabledReason } from "../../a11y";
 import { isChipStatus } from "../../components/StatusChip";
 import "../../components/status.css";
 import type { Command, CommandContext } from "../../contracts/command";
-import { applyNote, storeNotice } from "../grid/reviewActions";
+import {
+  applyNote,
+  applyReviewAction,
+  MARK_LABELS,
+  storeNotice,
+  unmarkActionOf,
+} from "../grid/reviewActions";
 import { noteKey, setSessionNote } from "../grid/sessionNotes";
 import { useViewerRowContext, useViewerTarget } from "./adapter";
 import { markDisabledReason, targetAsGridRow } from "./citation";
@@ -31,7 +37,13 @@ function ToolbarButton({ command, ctx, label, tabStop, status, pressed, onRun }:
         data-status-button={status}
         aria-pressed={status ? Boolean(pressed) : undefined}
         title={
-          reason ? undefined : command.shortcut ? `${command.label} (${command.shortcut})` : command.label
+          reason
+            ? undefined
+            : pressed && status && status !== "bookmark"
+              ? `${command.label} — 다시 누르면 해제합니다`
+              : command.shortcut
+                ? `${command.label} (${command.shortcut})`
+                : command.label
         }
         tabIndex={tabStop ? 0 : -1}
         onClick={() => onRun(command)}
@@ -99,7 +111,11 @@ export function ViewerToolbar({ sourceCommands, markCommands, ctx, onRun }: View
   const target = useViewerTarget();
   const row = useViewerRowContext();
   const [noteOpen, setNoteOpen] = useState(false);
-  const [applied, setApplied] = useState<{ key: string; actions: string[] }>({ key: "", actions: [] });
+  const [applied, setApplied] = useState<{ key: string; actions: string[]; cleared: string[] }>({
+    key: "",
+    actions: [],
+    cleared: [],
+  });
   const key = target ? noteKey(target.runId, target.ref) : "";
   const noteReason = target ? markDisabledReason(target, "relevant") : "뷰어에 표시된 행이 없습니다.";
   const buttons = () =>
@@ -111,20 +127,58 @@ export function ViewerToolbar({ sourceCommands, markCommands, ctx, onRun }: View
 
   const isPressed = (action: string): boolean => {
     if (applied.key === key && applied.actions.includes(action)) return true;
+    if (applied.key === key && applied.cleared.includes(action)) return false;
     if (!row) return false;
-    return action === "bookmark" ? row.tags.includes("북마크") : row.reviewStatus === action;
+    if (action === "bookmark") return row.tags.includes("북마크");
+    if (action === "include-in-report") {
+      return row.fields.includeInReport === true || row.reviewStatus === "include-in-report";
+    }
+    return row.reviewStatus === action;
+  };
+
+  /** A pressed review toggle un-presses: status back to `unreviewed` / out of the report. */
+  const unmark = async (action: string) => {
+    const undo = unmarkActionOf(action);
+    if (!target || !undo) return;
+    try {
+      const result = await applyReviewAction(target.runId, [targetAsGridRow(target)], undo);
+      setApplied((prev) => {
+        const base = prev.key === key ? prev : { actions: [], cleared: [] };
+        const exclusive = ["relevant", "needs-review", "excluded"];
+        const clears = undo === "clear-review" ? exclusive : [action];
+        return {
+          key,
+          actions: base.actions.filter((a) => !clears.includes(a)),
+          cleared: [...base.cleared.filter((a) => !clears.includes(a)), ...clears],
+        };
+      });
+      announce(`표시 해제됨: ${MARK_LABELS[undo]}${storeNotice(result)}`);
+    } catch (error) {
+      announce(`표시 해제 실패: ${error instanceof Error ? error.message : String(error)}`);
+    }
   };
 
   const run = (command: Command) => {
+    const markAction = command.id.startsWith(MARK_PREFIX) ? command.id.slice(MARK_PREFIX.length) : "";
+    if (markAction && !command.disabledReason?.(ctx) && unmarkActionOf(markAction) && isPressed(markAction)) {
+      void unmark(markAction);
+      return;
+    }
     onRun(command);
-    if (command.id.startsWith(MARK_PREFIX) && !command.disabledReason?.(ctx)) {
-      const action = command.id.slice(MARK_PREFIX.length);
+    if (markAction && !command.disabledReason?.(ctx)) {
+      const action = markAction;
       setApplied((prev) => {
-        const base = prev.key === key ? prev.actions : [];
+        const base = prev.key === key ? prev : { actions: [], cleared: [] };
         // Review statuses are exclusive; bookmark / include-in-report accumulate.
         const exclusive = ["relevant", "needs-review", "excluded"];
-        const kept = exclusive.includes(action) ? base.filter((a) => !exclusive.includes(a)) : base;
-        return { key, actions: [...kept.filter((a) => a !== action), action] };
+        const kept = exclusive.includes(action)
+          ? base.actions.filter((a) => !exclusive.includes(a))
+          : base.actions;
+        return {
+          key,
+          actions: [...kept.filter((a) => a !== action), action],
+          cleared: base.cleared.filter((a) => a !== action),
+        };
       });
     }
   };

@@ -11,7 +11,18 @@ import { api, apiResponse } from "./client";
 // Shapes
 // ---------------------------------------------------------------------------
 
-export type PreviewType = "text" | "json" | "xml" | "image" | "sqlite" | "email" | "media" | "hex" | "binary";
+export type PreviewType =
+  | "text"
+  | "json"
+  | "xml"
+  | "image"
+  | "sqlite"
+  | "email"
+  | "media"
+  | "hex"
+  | "binary"
+  /** A directory (runops.build_directory_preview): no content preview. */
+  | "directory";
 
 export interface HexRow {
   offset: number;
@@ -67,6 +78,9 @@ export interface SqlitePreviewPayload {
 export interface ImageSidecar {
   text?: string;
   source_path?: string;
+  /** "analysis" = stored by a 처리-stage OCR 일괄 job (reused, never re-run here). */
+  source?: string;
+  analysis_id?: string;
 }
 
 export interface ImagePreviewPayload {
@@ -173,6 +187,8 @@ export interface SourcePreview {
   mime_type: string;
   download_url?: string;
   preview_type: PreviewType;
+  /** Directory targets (`preview_type: "directory"`, size null). */
+  is_directory?: boolean;
   text?: string;
   truncated?: boolean;
   message?: string;
@@ -201,6 +217,8 @@ export interface SourceMetadata {
   mime_type: string;
   hashes: { md5?: string; sha1?: string; sha256?: string };
   hash_status: "not-requested" | "computed" | string;
+  /** Directory targets (runops.build_directory_metadata): size null, no hashes. */
+  is_directory?: boolean;
 }
 
 /** `GET /api/runs/{run}/source-hex-range` (hex.build_hex_range_citation_package). */

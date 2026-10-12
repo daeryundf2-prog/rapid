@@ -140,23 +140,39 @@
 
 /* Mode tabs --------------------------------------------------------------- */
 
+/* Compact strip: all eight mode tabs fit a 1280px layout's viewer pane (~424px). */
 .viewer-tabs {
   display: flex;
-  gap: var(--space-1);
-  padding: 0 var(--space-3);
+  gap: 0;
+  padding: 0 var(--space-1);
   border-bottom: 1px solid var(--line);
   overflow-x: auto;
 }
 
+/* A narrow viewer scrolls the tab strip; labels never wrap a glyph per line ("원/본"). */
+.viewer-tabs > * {
+  flex: none;
+}
+
 .viewer-tab {
+  flex: none;
+  white-space: nowrap;
   height: var(--row-h-roomy);
-  padding: 0 var(--space-3);
+  padding: 0 var(--space-2);
   border: 0;
   border-bottom: 2px solid transparent;
   background: none;
   color: var(--text-muted);
   font: inherit;
   cursor: pointer;
+}
+
+/* 메타 (provenance) stays in view even when a narrower pane scrolls the strip. */
+.viewer-tabs > [data-mode="meta"],
+.viewer-tabs > :has(> [data-mode="meta"]) {
+  position: sticky;
+  right: 0;
+  background: var(--bg-panel);
 }
 
 .viewer-tab[aria-selected="true"] {
@@ -767,6 +783,25 @@
 }
 
 .meta-colbtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Cross-case 다른 케이스 links (meta tab) and the grid 케이스 cell. */
+.meta-case-links,
+.meta-case-links ul {
+  margin: 0;
+  padding-left: var(--space-3);
+  font-size: var(--fs-table-aux);
+}
+
+.meta-link,
+.grid-case-link {
+  color: var(--accent);
+}
+
+.meta-link:focus-visible,
+.grid-case-link:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
