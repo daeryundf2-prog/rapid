@@ -8,8 +8,6 @@
   font-size: var(--fs-table-aux, 12px);
   font-weight: 600;
   white-space: nowrap;
-  background: var(--chip-bg);
-  color: var(--chip-fg);
 }
 
 .status-chip[data-status="relevant"] {
@@ -69,10 +67,8 @@
   gap: var(--space-1);
 }
 .status-tz select {
-  background: var(--bg-raised);
   color: var(--text);
   border: 1px solid var(--line);
-  border-radius: 4px;
   font: inherit;
   max-width: 11rem;
 }

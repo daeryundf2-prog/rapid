@@ -59,6 +59,7 @@ export const ICON_PATHS = {
   tag: ["M3 12V3h9l9 9-9 9z", "M7.5 7.5h.01"],
   filter: ["M3 5h18l-7 8v6l-4 2v-8z"],
   columns: ["M3 4h18v16H3z", "M9 4v16M15 4v16"],
+  "bar-chart": ["M4 20h16", "M7 16v-5M12 16V6M17 16v-8"],
   density: ["M4 6h16M4 10h16M4 14h16M4 18h16"],
   clock: [circle(12, 12, 9), "M12 7v5l3 2"],
   shield: ["M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z", "M12 8v4M12 15h.01"],

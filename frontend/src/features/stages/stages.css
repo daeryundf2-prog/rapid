@@ -151,6 +151,136 @@
   font-size: var(--fs-table-aux);
 }
 
+/* 처리 panel analysis cards (visual-polish S8): state · last run · run, ahead of the run list. */
+.stage-panel ul.process-cards {
+  gap: var(--space-1);
+}
+
+.process-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  align-items: center;
+  column-gap: var(--space-2);
+  row-gap: 2px;
+  padding: var(--space-2);
+  border: 1px solid var(--line-subtle);
+  border-radius: 6px;
+  background: var(--bg-panel);
+}
+
+.process-card.is-current {
+  border-color: var(--accent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.process-card-link {
+  grid-column: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  color: var(--text);
+  text-decoration: none;
+  font-size: var(--fs-table-aux);
+  font-weight: 600;
+}
+
+.process-card-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.process-card-link:hover .process-card-title {
+  text-decoration: underline;
+}
+
+.process-card-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.process-card-link > .badge.muted {
+  margin-left: auto;
+  font-weight: 500;
+}
+
+.process-card[data-state="failed"] .process-card-link .icon {
+  color: var(--danger);
+}
+
+.process-card[data-state="completed"] .process-card-link .icon {
+  color: var(--ok);
+}
+
+.process-card[data-state="running"] .process-card-link .icon,
+.process-card[data-state="queued"] .process-card-link .icon {
+  color: var(--accent);
+}
+
+.process-card-last {
+  grid-column: 1;
+  color: var(--text-muted);
+  font-size: var(--fs-aux);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.process-card-run {
+  height: 26px;
+  padding: 0 var(--space-2);
+}
+
+.process-cards .process-card > .disabled-reason,
+.process-cards .process-card > .process-card-run {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
+/* 처리 계획: the full step table, no inner height cap (visual-polish S8). */
+.process-plan-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  margin-bottom: var(--space-1);
+}
+
+.process-plan-tally {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
+  font-variant-numeric: tabular-nums;
+}
+
+.process-plan-wrap {
+  overflow-x: auto;
+}
+
+.process-plan-table td.is-right,
+.process-plan-table th.is-right {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.process-plan-table tr[data-status="warning"] td:nth-child(2) {
+  color: var(--warn);
+}
+
+.process-plan-table tr[data-status="failed"] td:nth-child(2) {
+  color: var(--danger);
+}
+
+.process-plan-note {
+  color: var(--text-muted);
+  white-space: normal;
+}
+
 .stage-page {
   display: flex;
   flex-direction: column;

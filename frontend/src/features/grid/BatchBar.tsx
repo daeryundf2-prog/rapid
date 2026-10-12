@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { isChipStatus } from "../../components/StatusChip";
 import "../../components/status.css";
 import type { CommandContext } from "../../contracts/command";
+import { Icon } from "../../icons";
 import { getRegisteredCommand } from "./adapter";
 import { BATCH_ACTIONS, batchCommandId, OCR_SELECTED_COMMAND } from "./gridCommands";
 import { formatCount } from "./gridUtils";
@@ -21,8 +22,10 @@ export interface BatchBarProps {
 }
 
 /**
- * Appears while selection > 0. Every button is a `grid.batch.*` Command; the
- * ones that cannot run stay focusable with `aria-disabled` and a reason.
+ * Appears while selection > 0 — the one place review actions live (visual-polish S6). It
+ * floats over the bottom of the grid, so its appearance never shifts the rows. Every button
+ * is a `grid.batch.*` Command; the ones that cannot run stay focusable with `aria-disabled`
+ * and a reason.
  */
 export function BatchBar({
   selectedCount,
@@ -60,7 +63,7 @@ export function BatchBar({
           <button
             key={action}
             type="button"
-            className="grid-btn"
+            className={action === "relevant" ? "grid-btn is-primary" : "grid-btn"}
             data-command={batchCommandId(action)}
             data-status-button={isChipStatus(action) ? action : undefined}
             aria-disabled={reason ? true : undefined}
@@ -181,8 +184,9 @@ export function BatchBar({
           </div>
         </form>
       ) : null}
-      <button type="button" className="grid-btn grid-btn-quiet" onClick={onClear}>
-        선택 해제
+      <button type="button" className="grid-btn grid-btn-quiet grid-batch-clear" onClick={onClear}>
+        <Icon name="close" />
+        <span>선택 해제</span>
       </button>
     </div>
   );

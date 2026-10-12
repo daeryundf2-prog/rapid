@@ -35,6 +35,7 @@ import {
   type RecordField,
   type RecordGroups,
 } from "../record";
+import { metaLabel } from "./metaLabels";
 
 export const REVIEW_LABELS: Record<ReviewStatus, string> = {
   relevant: "관련 있음",
@@ -66,6 +67,20 @@ function isHashBundle(value: Record<string, unknown>): boolean {
   );
 }
 
+/** A record key: its Korean label (raw key as tooltip), or the raw key in mono when it has none. */
+function KeyTerm({ name }: { name: string }) {
+  const label = metaLabel(name);
+  return label ? (
+    <dt title={name} data-key={name}>
+      {label}
+    </dt>
+  ) : (
+    <dt className="mono" data-key={name}>
+      {name}
+    </dt>
+  );
+}
+
 function CopyButton({ text, label }: { text: string; label: string }) {
   const [copied, setCopied] = useState(false);
   return (
@@ -91,7 +106,7 @@ function NestedValue({ value, name }: { value: Record<string, unknown>; name: st
       <dl className="viewer-dl viewer-dl-nested">
         {Object.entries(value).map(([k, v]) => (
           <Fragment key={k}>
-            <dt className="mono">{k}</dt>
+            <KeyTerm name={k} />
             <dd className="mono viewer-break">
               {String(v)} <CopyButton text={String(v)} label={`${name}.${k}`} />
             </dd>
@@ -105,7 +120,7 @@ function NestedValue({ value, name }: { value: Record<string, unknown>; name: st
     <dl className="viewer-dl viewer-dl-nested">
       {entries.map(([k, v]) => (
         <Fragment key={k}>
-          <dt className="mono">{k}</dt>
+          <KeyTerm name={k} />
           <dd className="viewer-break">
             <ScalarText name={`${name}.${k}`} value={v} />
           </dd>
@@ -249,7 +264,7 @@ function FieldList({ fields, columns }: { fields: RecordField[]; columns?: Colum
         const name = FIELD_LABELS[field.key] ? `${field.key}(${FIELD_LABELS[field.key]})` : field.key;
         return (
           <Fragment key={field.key}>
-            <dt className="mono">{field.key}</dt>
+            <KeyTerm name={field.key} />
             <dd className="viewer-break meta-field">
               <span className="meta-field-value">
                 <FieldValue field={field} />
@@ -289,27 +304,42 @@ function FieldList({ fields, columns }: { fields: RecordField[]; columns?: Colum
   );
 }
 
-/** Decoded record first (F2): 핵심 · 출처 · 검증 open, 기타 collapsed. */
+/**
+ * Decoded record first (F2): 핵심 · 출처 · 검증 open, 기타 collapsed — each with Korean labels.
+ * Keys without a label (internal field names) are folded under "원시 필드" (visual-polish S5).
+ */
 function RecordSection({ groups, columns }: { groups: RecordGroups; columns?: ColumnToggle }) {
+  const labelled = (fields: RecordField[]) => fields.filter((field) => metaLabel(field.key) !== null);
+  const raw = (["core", "source", "validation", "other"] as const).flatMap((id) =>
+    groups[id].filter((field) => metaLabel(field.key) === null),
+  );
+  const other = labelled(groups.other);
   return (
     <section aria-labelledby="viewer-record-title" className="meta-record">
       <h3 className="viewer-subtitle" id="viewer-record-title">
         레코드
       </h3>
-      {(["core", "source", "validation"] as const).map((id) =>
-        groups[id].length ? (
+      {(["core", "source", "validation"] as const).map((id) => {
+        const fields = labelled(groups[id]);
+        return fields.length ? (
           <section key={id} aria-label={`레코드 ${RECORD_GROUP_LABELS[id]}`} className="meta-record-group">
             <h4>{RECORD_GROUP_LABELS[id]}</h4>
-            <FieldList fields={groups[id]} columns={columns} />
+            <FieldList fields={fields} columns={columns} />
           </section>
-        ) : null,
-      )}
-      {groups.other.length ? (
+        ) : null;
+      })}
+      {other.length ? (
         <details className="viewer-details meta-record-group">
           <summary>
-            {RECORD_GROUP_LABELS.other} {groups.other.length}개
+            {RECORD_GROUP_LABELS.other} {other.length}개
           </summary>
-          <FieldList fields={groups.other} columns={columns} />
+          <FieldList fields={other} columns={columns} />
+        </details>
+      ) : null}
+      {raw.length ? (
+        <details className="viewer-details meta-record-group meta-raw" data-testid="meta-raw-fields">
+          <summary>원시 필드 {raw.length}개</summary>
+          <FieldList fields={raw} columns={columns} />
         </details>
       ) : null}
     </section>
@@ -327,7 +357,8 @@ function provenanceEntries(row: GridRow | null): Array<[string, string]> {
     for (const [key, value] of Object.entries(record as Record<string, unknown>)) {
       if (value === null || value === undefined || value === "") continue;
       if (typeof value === "object") continue;
-      out.push([`artifact_record.${key}`, String(value)]);
+      const label = key === "artifact_id" ? "아티팩트 ID" : metaLabel(key);
+      out.push([label ? `레코드 ${label}` : `artifact_record.${key}`, String(value)]);
       if (out.length > 24) break;
     }
   }

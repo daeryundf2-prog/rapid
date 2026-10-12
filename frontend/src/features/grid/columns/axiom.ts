@@ -71,12 +71,17 @@ function axiomColumns(columns: ColumnSpec[]): ColumnSpec[] {
       return axiomActive ? `${first}\n${axiomSubtitle(row)}` : first;
     },
   };
-  const rest = columns
-    .filter((c) => c.id !== "title")
-    .map((c) =>
-      AXIOM_KEEP.has(c.id) ? { ...c, presets: [...new Set([...c.presets, "axiom" as const])] } : c,
-    );
-  return [twoLine, TAG_STATUS_COLUMN, ...rest];
+  const tagged = (c: ColumnSpec): ColumnSpec =>
+    AXIOM_KEEP.has(c.id) ? { ...c, presets: [...new Set([...c.presets, "axiom" as const])] } : c;
+  // The title keeps its place in the collection's own order (artifacts lead with 시각 · 유형,
+  // visual-polish S4); the AXIOM preset itself moves title + chip column to the front (DataGrid).
+  const at = columns.indexOf(title);
+  return [
+    ...columns.slice(0, at).map(tagged),
+    twoLine,
+    TAG_STATUS_COLUMN,
+    ...columns.slice(at + 1).map(tagged),
+  ];
 }
 
 /** Add the AXIOM preset to a collection (title first, chip column second). */

@@ -30,7 +30,28 @@ export function tagStatusCell(row: GridRow): ReactNode {
   );
 }
 
-/** 유형 column: the artifact type as a neutral chip (text only; tokens --text on --bg-raised). */
+/** Number of `--tag-N` colour tokens (tokens.css). */
+const TYPE_COLOURS = 8;
+
+/** Deterministic colour slot (1..8) of an artifact type: the same type always gets the same dot. */
+export function typeColourIndex(type: string): number {
+  let hash = 0;
+  for (let i = 0; i < type.length; i += 1) hash = (hash * 31 + type.charCodeAt(i)) >>> 0;
+  return (hash % TYPE_COLOURS) + 1;
+}
+
+/** 유형 column (visual-polish S4): a colour dot + the type text, not a pill chip. */
 export function typeChipCell(row: GridRow): ReactNode {
-  return row.artifactType ? <span className="grid-tag-chip grid-type-chip">{row.artifactType}</span> : null;
+  if (!row.artifactType) return null;
+  return (
+    <span className="grid-type">
+      <span
+        className="grid-type-dot"
+        aria-hidden="true"
+        data-type-colour={typeColourIndex(row.artifactType)}
+        style={{ background: `var(--tag-${typeColourIndex(row.artifactType)})` }}
+      />
+      <span className="grid-type-text">{row.artifactType}</span>
+    </span>
+  );
 }

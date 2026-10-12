@@ -14,51 +14,83 @@ const UI = 3;
 
 /** [label, foreground token, background token, minimum ratio, kind] */
 const STATUSES = ["relevant", "bookmark", "excluded", "needs-review", "report"];
-const bgs = ["--bg", "--bg-panel", "--bg-raised"];
+// Forensic Slate surfaces (U-V1): app bg, panels, raised controls, popovers/toasts.
+const SURFACES = ["--surface-0", "--surface-1", "--surface-2", "--surface-3"];
+const ROWS = [...SURFACES, "--bg-selected"];
 const PAIRS = [
-  ...bgs.map((b) => ["text", "--text", b, TEXT, "text"]),
-  ...bgs.map((b) => ["muted text", "--text-muted", b, TEXT, "text"]),
-  ...bgs.map((b) => ["accent (links)", "--accent", b, TEXT, "text"]),
-  ...bgs.map((b) => ["focus ring", "--accent", b, UI, "ui"]),
-  ...["--accent", "--accent-hover", "--accent-active"].map((b) => [
+  ...ROWS.map((b) => ["text", "--text", b, TEXT, "text"]),
+  ...ROWS.map((b) => ["muted text", "--text-muted", b, TEXT, "text"]),
+  ...ROWS.map((b) => ["subtle text (placeholders, hints)", "--text-subtle", b, TEXT, "text"]),
+  ...SURFACES.map((b) => ["accent (links)", "--accent", b, TEXT, "text"]),
+  ...ROWS.map((b) => ["focus ring / selected-row bar", "--focus", b, UI, "ui"]),
+  ...["--accent", "--accent-hover", "--accent-active", "--danger"].map((b) => [
     "on-accent text",
     "--on-accent",
     b,
     TEXT,
     "text",
   ]),
-  ...["--bg", "--bg-panel"].map((b) => ["border/line", "--line", b, UI, "ui"]),
+  ["disabled text", "--disabled-text", "--disabled-bg", TEXT, "text"],
+  ...SURFACES.map((b) => ["border/line (controls)", "--line", b, UI, "ui"]),
   ...["--ok", "--warn", "--danger", "--info", "--deleted"].flatMap((f) =>
-    ["--bg", "--bg-panel"].map((b) => [`status ${f.slice(2)}`, f, b, TEXT, "text"]),
+    ROWS.map((b) => [`status ${f.slice(2)}`, f, b, TEXT, "text"]),
   ),
   ...STATUSES.flatMap((n) => [
-    ...bgs.map((b) => [`status-${n} (UI colour)`, `--status-${n}`, b, UI, "ui"]),
+    ...ROWS.map((b) => [`status-${n} (dot / UI colour)`, `--status-${n}`, b, UI, "ui"]),
     ["status chip text", `--status-${n}-on`, `--status-${n}`, TEXT, "text"],
   ]),
-  ...[1, 2, 3, 4, 5, 6, 7, 8].flatMap((n) =>
-    ["--bg", "--bg-panel"].map((b) => [`tag-${n}`, `--tag-${n}`, b, UI, "ui"]),
-  ),
+  ...[1, 2, 3, 4, 5, 6, 7, 8].flatMap((n) => ROWS.map((b) => [`tag-${n}`, `--tag-${n}`, b, UI, "ui"])),
 ];
 
 function stripComments(s) {
   return s.replace(/\/\*[\s\S]*?\*\//g, "");
 }
 
+/** Theme of one rule: `@media print` → print, `:not([data-theme])` → light-os, `[data-theme="light"]` → light, else dark. */
+function themeOf(selector, ancestors) {
+  if (ancestors.some((a) => /^@media\s+print\b/.test(a))) return "print";
+  if (selector.includes(":not([data-theme])")) return "light-os";
+  if (selector.includes('data-theme="light"')) return "light";
+  return "dark";
+}
+
+/**
+ * Custom properties per theme. Base `:root` aliases (values that are only `var(--x)`)
+ * cascade into every theme as they do in the browser; literal colours do not —
+ * each theme block must define all of its own. Themes with no block are omitted.
+ */
 export function parseThemes(css) {
-  const themes = { dark: {}, light: {}, "light-os": {} };
-  const re = /([^{}]+)\{([^{}]*)\}/g;
-  for (let m = re.exec(stripComments(css)); m; m = re.exec(stripComments(css))) {
-    const selector = m[1].trim();
-    if (selector.startsWith("@")) continue;
-    let theme = "dark";
-    if (selector.includes(":not([data-theme])")) theme = "light-os";
-    else if (selector.includes('data-theme="light"')) theme = "light";
-    for (const decl of m[2].split(";")) {
-      const i = decl.indexOf(":");
-      if (i < 0) continue;
-      const name = decl.slice(0, i).trim();
-      if (name.startsWith("--")) themes[theme][name] = decl.slice(i + 1).trim();
+  const raw = {};
+  const stack = [];
+  let buf = "";
+  for (const ch of stripComments(css)) {
+    if (ch === "{") {
+      stack.push(buf.trim());
+      buf = "";
+    } else if (ch === "}") {
+      const selector = stack.pop() ?? "";
+      if (!selector.startsWith("@")) {
+        const theme = themeOf(selector, stack);
+        for (const decl of buf.split(";")) {
+          const i = decl.indexOf(":");
+          if (i < 0) continue;
+          const name = decl.slice(0, i).trim();
+          if (!name.startsWith("--")) continue;
+          raw[theme] ??= {};
+          raw[theme][name] = decl.slice(i + 1).trim();
+        }
+      }
+      buf = "";
+    } else {
+      buf += ch;
     }
+  }
+  const aliases = Object.fromEntries(
+    Object.entries(raw.dark ?? {}).filter(([, v]) => /^var\(--[\w-]+\)$/.test(v)),
+  );
+  const themes = {};
+  for (const name of ["dark", "light", "light-os", "print"]) {
+    if (raw[name]) themes[name] = name === "dark" ? raw[name] : { ...aliases, ...raw[name] };
   }
   return themes;
 }
@@ -94,9 +126,20 @@ export function contrast(fg, bg) {
 
 function main() {
   const themes = parseThemes(readFileSync(cssPath, "utf8"));
-  // light-os (prefers-color-scheme block) inherits nothing from dark; it must be complete.
+  // Every non-dark theme must redefine every literal colour token of the dark theme.
   let failures = 0;
   let missing = 0;
+  const colours = Object.entries(themes.dark ?? {})
+    .filter(([, v]) => /^#[0-9a-f]{3,8}$/i.test(v))
+    .map(([k]) => k);
+  for (const [theme, vars] of Object.entries(themes)) {
+    for (const name of colours) {
+      if (!/^#[0-9a-f]{3,8}$/i.test(vars[name] ?? "")) {
+        missing++;
+        console.log(`MISSING  ${theme}: ${name} is not redefined (theme blocks must be complete)`);
+      }
+    }
+  }
   for (const [theme, vars] of Object.entries(themes)) {
     console.log(`\n== ${theme} ==`);
     console.log("status  ratio  min   kind  pair");

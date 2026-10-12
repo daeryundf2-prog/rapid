@@ -3,10 +3,14 @@ import { announce, useEscape, useFocusTrap } from "../a11y";
 import { COLLECTION_LABEL, RUN_MODE_LABEL, runDisplayName } from "../app/collections";
 import { focusGridWhenReady, GLOBAL_SEARCH_ID, NO_RUN_REASON } from "../commands/builtin";
 import { CommandButton } from "../commands/CommandButton";
+import { useCommandState } from "../commands/registry";
 import { SearchOptionsButton } from "../features/case/SearchOptionsPopover";
 import { useSearchState } from "../features/case/searchState";
+import { Icon } from "../icons";
+import { keyLabel } from "../shortcuts";
 import { useRoute, useRuns } from "../state/hooks";
 import { useAppStore } from "../state/store";
+import { Brand } from "./BrandMark";
 import { Slot } from "./slots";
 
 /** Default case picker (S4 may register a richer "case-picker" slot). */
@@ -70,6 +74,7 @@ function GlobalSearch() {
   return (
     <search className="global-search" aria-label="전체 검색">
       <form onSubmit={onSubmit}>
+        <Icon name="search" className="global-search-icon" />
         <input
           id={GLOBAL_SEARCH_ID}
           type="search"
@@ -84,7 +89,29 @@ function GlobalSearch() {
           {route.runId ? `${COLLECTION_LABEL.search}로 이동합니다` : NO_RUN_REASON}
         </span>
       </form>
+      {/* Search options live inside the search field (visual-polish S7). */}
+      <SearchOptionsButton runId={route.runId} />
     </search>
+  );
+}
+
+/** ⌘K / Ctrl K: opens the command palette; the key hint is part of the button. */
+function PaletteButton() {
+  const { disabledReason, run } = useCommandState("app.palette");
+  return (
+    <button
+      type="button"
+      className="topbar-palette"
+      data-command="app.palette"
+      data-testid="palette-button"
+      aria-label="명령 팔레트"
+      aria-keyshortcuts="Control+K"
+      title={disabledReason ?? `명령 팔레트 (${keyLabel("Ctrl+K")})`}
+      onClick={() => void run()}
+    >
+      <Icon name="command" />
+      <kbd>{keyLabel("Ctrl+K")}</kbd>
+    </button>
   );
 }
 
@@ -131,27 +158,34 @@ function useSearchOptionsDismissal(): void {
   }, [open]);
 }
 
-/** Top bar (plan §4.1 / §4.3): case · run/import · global search · review board · report · theme · help. */
+/**
+ * Top bar (visual-polish S7): brand mark · case (+ run/import) · global search with its
+ * options folded in · ⌘K — and only theme + help on the right. The review board and the
+ * report are rail stages; density lives in the grid's column menu.
+ */
 export function TopBar() {
   const runDialogOpen = useAppStore((s) => s.runDialogOpen);
-  const runId = useAppStore((s) => s.route.runId);
   useSearchOptionsDismissal();
   const setOverlay = useAppStore((s) => s.setOverlay);
   return (
     <header className="topbar" data-testid="topbar">
-      <span className="brand">RapidForensic</span>
-      <Slot name="case-picker" fallback={<CasePickerFallback />} />
-      <CommandButton command="case.run-dialog" testId="run-dialog-button" />
+      <Brand />
+      <div className="topbar-case">
+        <Slot name="case-picker" fallback={<CasePickerFallback />} />
+        <CommandButton
+          command="case.run-dialog"
+          iconOnly
+          variant="ghost"
+          label="실행/불러오기"
+          testId="run-dialog-button"
+        />
+      </div>
       <div className="topbar-search">
         <GlobalSearch />
-        <SearchOptionsButton runId={runId} />
-        <CommandButton command="app.palette" label="명령 팔레트" testId="palette-button" />
+        <PaletteButton />
       </div>
       <div className="topbar-actions">
-        <CommandButton command="navigate.review" label="리뷰보드" testId="review-board-button" />
-        <CommandButton command="export.report" label="보고서" testId="report-button" />
         <CommandButton command="app.theme.toggle" iconOnly variant="ghost" testId="theme-toggle" />
-        <CommandButton command="app.density.cycle" iconOnly variant="ghost" testId="density-toggle" />
         <CommandButton command="app.help" iconOnly variant="ghost" testId="help-button" />
       </div>
       <Slot

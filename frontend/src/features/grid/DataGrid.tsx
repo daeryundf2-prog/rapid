@@ -27,7 +27,9 @@ import type { RunExtractResult } from "../../api/extract";
 import { getRunTree } from "../../api/runs";
 import type { CollectionRef, GridRow } from "../../contracts/collection";
 import type { CommandContext } from "../../contracts/command";
+import { Icon } from "../../icons";
 import { setColumnFilter } from "../filters/columnFilters";
+import type { FilterBarVariant } from "../filters/FilterBar";
 import { useFilterStore } from "../filters/filterStore";
 import { useDensity, useGridLocalStore, useRoute, useSelection, useToast, useViewerTarget } from "./adapter";
 import { BatchBar } from "./BatchBar";
@@ -46,7 +48,7 @@ import {
 } from "./columns/fieldColumns";
 import { ntfsJoinOf } from "./columns/files";
 import { EmptyHintLink } from "./EmptyHintLink";
-import { GridFooter, GridToolbar } from "./GridToolbar";
+import { ColumnMenu, GridFooter, GridToolbar } from "./GridToolbar";
 import { buildViewerTarget, type GridCommandHost, runBatch, runNote, useGridCommands } from "./gridCommands";
 import {
   compareValues,
@@ -76,6 +78,8 @@ type VisibilityState = Record<string, boolean>;
 type ColumnSizingState = Record<string, number>;
 
 const SELECT_COL_WIDTH = 60;
+/** Width kept free at the header's right end for the column-menu button. */
+const HEAD_TOOLS_WIDTH = 56;
 const EMPTY_ROWS: GridRow[] = [];
 const PRESETS: readonly GridPreset[] = ["analysis", "compact", "source", "axiom"];
 /** AXIOM preset (X13): the tag/status chip column is pinned right after the select cell. */
@@ -195,7 +199,7 @@ const RowView = memo(function RowView(props: RowViewProps) {
             props.onMenuButton(index, event.currentTarget);
           }}
         >
-          ⋯
+          <Icon name="more" />
         </button>
       </div>
       {specs.map((spec, i) => {
@@ -403,7 +407,9 @@ export function DataGrid(props: DataGridProps = {}) {
   const orderedColumns = useMemo(() => {
     if (preset !== "axiom") return columns;
     const pinned = columns.find((c) => c.id === AXIOM_PINNED);
-    return pinned ? [pinned, ...columns.filter((c) => c !== pinned)] : columns;
+    const title = columns.find((c) => c.id === "title");
+    const lead = [pinned, title].filter((c): c is ColumnSpec => Boolean(c));
+    return [...lead, ...columns.filter((c) => !lead.includes(c))];
   }, [columns, preset]);
 
   const tableColumns = useMemo<LegacyColumnDef<GridRow>[]>(
@@ -445,7 +451,8 @@ export function DataGrid(props: DataGridProps = {}) {
     setVisibleColumnIds(visibleSig ? visibleSig.split("\n") : []);
   }, [visibleSig]);
   useEffect(() => () => useGridLocalStore.getState().setVisibleColumnIds(null), []);
-  const totalWidth = SELECT_COL_WIDTH + widths.reduce((sum, w) => sum + w, 0);
+  // + room for the column-menu button over the header's right end (the last column scrolls clear of it).
+  const totalWidth = SELECT_COL_WIDTH + widths.reduce((sum, w) => sum + w, 0) + HEAD_TOOLS_WIDTH;
   // Sticky columns: the first data column, plus the title after a pinned AXIOM chip column.
   const stickyCount = preset === "axiom" && specs[0]?.id === AXIOM_PINNED && specs.length > 1 ? 2 : 1;
   const lefts: (number | undefined)[] = [];
@@ -1034,62 +1041,33 @@ export function DataGrid(props: DataGridProps = {}) {
     ? "서버에서 조건에 맞는 행을 찾는 중입니다 … (큰 유형은 수 초 걸릴 수 있습니다)"
     : "목록을 불러오는 중입니다 …";
 
+  // Stage toolbar (visual-polish S2): 검토 = review status + tag, 보고 = output kind; 탐색 = filter popover.
+  const toolbarVariant: FilterBarVariant =
+    ref.id === "review" ? "review" : ref.id === "outputs" ? "report" : "explore";
+  const kindOptions = useMemo(() => {
+    if (ref.id !== "outputs") return undefined;
+    const kinds = new Set<string>();
+    for (const row of cq.loadedRows) if (row.artifactType) kinds.add(row.artifactType);
+    return [...kinds].sort((a, b) => a.localeCompare(b, "ko"));
+  }, [ref.id, cq.loadedRows]);
+
   return (
     <section
       className="grid-root"
       aria-label={`${def.label} 그리드`}
       data-density={density}
       data-preset={preset}
+      data-batch={selectedKeys.size > 0 ? "" : undefined}
     >
       <GridToolbar
         filterRef={filterRef}
         query={q}
         onQuery={route.setQuery}
         onReturnToGrid={returnToGrid}
-        preset={preset}
-        onPreset={(next) => {
-          setPreset(next);
-          try {
-            window.localStorage.setItem("rapidtriage.grid.preset", next);
-          } catch {
-            // Preset simply does not persist.
-          }
-        }}
-        density={density}
-        onDensity={setDensity}
-        columns={columns}
-        visibility={visibility}
-        onToggleColumn={(id, visible) => setVisibility((prev) => ({ ...prev, [id]: visible }))}
-        collectionLabel={def.label}
-        columnFilters={
-          ref.id === "intake"
-            ? undefined
-            : {
-                open: filterRowShown,
-                count: columnFilters?.length ?? 0,
-                onToggle: () => setFilterRowOpen((open) => !open),
-              }
-        }
-        fieldPicker={
-          artifactKind
-            ? {
-                rows: cq.loadedRows,
-                columns: baseColumns,
-                promoted: promotedKeys,
-                onToggle: toggleField,
-              }
-            : undefined
-        }
-      />
-      <BatchBar
-        selectedCount={selectedKeys.size}
-        context={context}
-        onDisabled={(reason) => toast.show(reason, "info")}
-        onClear={() => setSelectionKeys([])}
-        onTag={(tag) => void runBatch(host, "tag", tag)}
-        tagPromptOpen={tagPromptOpen}
-        onTagPromptChange={setTagPromptOpen}
-        onNote={runId ? (note) => void runNote(host, note) : undefined}
+        variant={toolbarVariant}
+        reviewStatus={ref.id === "review" ? ref.status : undefined}
+        onReviewStatus={(status) => route.navigate({ id: "review", ...(status ? { status } : {}) }, q)}
+        kindOptions={kindOptions}
       />
 
       {serverSorted ? (
@@ -1113,158 +1091,219 @@ export function DataGrid(props: DataGridProps = {}) {
         </div>
       ) : null}
 
-      <div
-        ref={scrollRef}
-        className="grid-scroll"
-        role="grid"
-        aria-label={`${def.label} 목록`}
-        aria-rowcount={rowCountAria}
-        aria-colcount={specs.length + 1}
-        aria-multiselectable="true"
-        aria-busy={cq.isLoading}
-        // Keep scrollIntoView / focus reveal clear of the sticky header row and the sticky
-        // select + first columns, so nothing scrolled "into view" lands underneath them.
-        style={{
-          scrollPaddingLeft: SELECT_COL_WIDTH + stickyWidth,
-          scrollPaddingTop: rowHeight + (filterRowShown ? rowHeight + 4 : 0),
-        }}
-        onKeyDown={onKeyDown}
-        onMouseDown={onRowMouseDown}
-        onContextMenu={onContextMenu}
-      >
-        <div className="grid-inner" style={{ width: totalWidth }}>
-          <div role="rowgroup" className="grid-head">
-            <div role="row" aria-rowindex={1} className="grid-row grid-header" style={{ height: rowHeight }}>
+      <div className="grid-frame">
+        {/* Column controls: one button at the right end of the header row (visual-polish S3). */}
+        <div className="grid-head-tools" style={{ height: rowHeight }}>
+          <ColumnMenu
+            preset={preset}
+            onPreset={(next) => {
+              setPreset(next);
+              try {
+                window.localStorage.setItem("rapidtriage.grid.preset", next);
+              } catch {
+                // Preset simply does not persist.
+              }
+            }}
+            density={density}
+            onDensity={setDensity}
+            columns={columns}
+            visibility={visibility}
+            onToggleColumn={(id, visible) => setVisibility((prev) => ({ ...prev, [id]: visible }))}
+            collectionLabel={def.label}
+            columnFilters={
+              ref.id === "intake"
+                ? undefined
+                : {
+                    open: filterRowShown,
+                    count: columnFilters?.length ?? 0,
+                    onToggle: () => setFilterRowOpen((open) => !open),
+                  }
+            }
+            fieldPicker={
+              artifactKind
+                ? {
+                    rows: cq.loadedRows,
+                    columns: baseColumns,
+                    promoted: promotedKeys,
+                    onToggle: toggleField,
+                  }
+                : undefined
+            }
+          />
+        </div>
+        <div
+          ref={scrollRef}
+          className="grid-scroll"
+          role="grid"
+          aria-label={`${def.label} 목록`}
+          aria-rowcount={rowCountAria}
+          aria-colcount={specs.length + 1}
+          aria-multiselectable="true"
+          aria-busy={cq.isLoading}
+          // Keep scrollIntoView / focus reveal clear of the sticky header row and the sticky
+          // select + first columns, so nothing scrolled "into view" lands underneath them.
+          style={{
+            scrollPaddingLeft: SELECT_COL_WIDTH + stickyWidth,
+            scrollPaddingTop: rowHeight + (filterRowShown ? rowHeight + 4 : 0),
+          }}
+          onKeyDown={onKeyDown}
+          onMouseDown={onRowMouseDown}
+          onContextMenu={onContextMenu}
+        >
+          <div className="grid-inner" style={{ width: totalWidth }}>
+            <div role="rowgroup" className="grid-head">
               <div
-                role="columnheader"
-                className="grid-cell grid-cell-select"
-                style={{ width: SELECT_COL_WIDTH }}
+                role="row"
+                aria-rowindex={1}
+                className="grid-row grid-header"
+                style={{ height: rowHeight }}
               >
-                <span className="sr-only">선택</span>
-              </div>
-              {visibleColumns.map((column, i) => {
-                const spec = specs[i];
-                if (!spec) return null;
-                const sort = sortOf(spec);
-                const reason = sortReason(spec);
-                const hint = hintsActive ? spec.emptyHint : undefined;
-                const hintId = `${hintPrefix}-empty-${spec.id}`;
-                const describedBy =
-                  [spec.sortHint ? `${hintPrefix}-${spec.id}` : "", hint ? hintId : ""]
-                    .filter(Boolean)
-                    .join(" ") || undefined;
-                return (
-                  <div
-                    key={column.id}
-                    role="columnheader"
-                    aria-sort={sort}
-                    aria-label={hint ? spec.header : undefined}
-                    data-col={column.id}
-                    className={`grid-cell grid-hcell${lefts[i] !== undefined ? " grid-cell-first" : ""}`}
-                    style={{ width: widths[i], left: lefts[i] }}
-                  >
-                    <DisabledReason reason={reason}>
-                      <button
-                        type="button"
-                        className="grid-sort"
-                        aria-describedby={describedBy}
-                        title={reason ? undefined : (spec.sortHint ?? hint?.text)}
-                        onClick={() => cycleSort(spec)}
-                      >
-                        {spec.header}
-                        <span aria-hidden="true" className="grid-sort-mark">
-                          {sort === "ascending" ? "▲" : sort === "descending" ? "▼" : ""}
-                        </span>
-                      </button>
-                    </DisabledReason>
-                    {spec.sortHint ? (
-                      <span id={`${hintPrefix}-${spec.id}`} hidden>
-                        {spec.sortHint}
-                      </span>
-                    ) : null}
-                    {hint ? (
-                      <>
-                        <span id={hintId} hidden>
-                          {hint.text}
-                        </span>
-                        <EmptyHintLink hint={hint} hintId={hintId} />
-                      </>
-                    ) : null}
+                <div
+                  role="columnheader"
+                  className="grid-cell grid-cell-select"
+                  style={{ width: SELECT_COL_WIDTH }}
+                >
+                  <span className="sr-only">선택</span>
+                </div>
+                {visibleColumns.map((column, i) => {
+                  const spec = specs[i];
+                  if (!spec) return null;
+                  const sort = sortOf(spec);
+                  const reason = sortReason(spec);
+                  const hint = hintsActive ? spec.emptyHint : undefined;
+                  const hintId = `${hintPrefix}-empty-${spec.id}`;
+                  const describedBy =
+                    [spec.sortHint ? `${hintPrefix}-${spec.id}` : "", hint ? hintId : ""]
+                      .filter(Boolean)
+                      .join(" ") || undefined;
+                  return (
                     <div
-                      aria-hidden="true"
-                      className="grid-resizer"
-                      onMouseDown={
-                        column.getCanResize()
-                          ? (e) => {
-                              e.stopPropagation();
-                              const start = e.clientX;
-                              const startSize = column.getSize();
-                              const min = spec.minWidth ?? 60;
-                              const move = (ev: MouseEvent) =>
-                                setColumnSizing((prev) => ({
-                                  ...prev,
-                                  [column.id]: Math.max(min, startSize + ev.clientX - start),
-                                }));
-                              const up = () => {
-                                document.removeEventListener("mousemove", move);
-                                document.removeEventListener("mouseup", up);
-                              };
-                              document.addEventListener("mousemove", move);
-                              document.addEventListener("mouseup", up);
-                            }
-                          : undefined
-                      }
-                    />
-                  </div>
-                );
-              })}
-            </div>
-            {filterRowShown ? (
-              <ColumnFilterRow
-                specs={specs}
-                widths={widths}
-                lefts={lefts}
-                selectWidth={SELECT_COL_WIDTH}
-                height={rowHeight + 4}
-                rowIndex={2}
-                filters={columnFilters ?? []}
-                onChange={onColumnFilter}
-                suggestions={typeSuggestions.length ? { type: typeSuggestions } : undefined}
-              />
-            ) : null}
-          </div>
-          <div role="rowgroup" className="grid-body" style={{ height: virtualizer.getTotalSize() }}>
-            {virtualItems.map((item) => {
-              const row = getDisplayRow(item.index);
-              return (
-                <RowView
-                  key={row ? row.rowKey : `loading:${item.index}`}
-                  row={row}
-                  index={item.index}
-                  top={item.start}
-                  height={item.size}
-                  selected={!!row && selectedKeys.has(row.rowKey)}
-                  focused={item.index === clampedFocus}
+                      key={column.id}
+                      role="columnheader"
+                      aria-sort={sort}
+                      aria-label={hint ? spec.header : undefined}
+                      data-col={column.id}
+                      className={`grid-cell grid-hcell${lefts[i] !== undefined ? " grid-cell-first" : ""}`}
+                      style={{ width: widths[i], left: lefts[i] }}
+                    >
+                      <DisabledReason reason={reason}>
+                        <button
+                          type="button"
+                          className="grid-sort"
+                          aria-describedby={describedBy}
+                          title={reason ? undefined : (spec.sortHint ?? hint?.text)}
+                          onClick={() => cycleSort(spec)}
+                        >
+                          {spec.header}
+                          <span aria-hidden="true" className="grid-sort-mark">
+                            {sort === "ascending" ? (
+                              <Icon name="chevron-up" size={12} />
+                            ) : sort === "descending" ? (
+                              <Icon name="chevron-down" size={12} />
+                            ) : null}
+                          </span>
+                        </button>
+                      </DisabledReason>
+                      {spec.sortHint ? (
+                        <span id={`${hintPrefix}-${spec.id}`} hidden>
+                          {spec.sortHint}
+                        </span>
+                      ) : null}
+                      {hint ? (
+                        <>
+                          <span id={hintId} hidden>
+                            {hint.text}
+                          </span>
+                          <EmptyHintLink hint={hint} hintId={hintId} />
+                        </>
+                      ) : null}
+                      <div
+                        aria-hidden="true"
+                        className="grid-resizer"
+                        onMouseDown={
+                          column.getCanResize()
+                            ? (e) => {
+                                e.stopPropagation();
+                                const start = e.clientX;
+                                const startSize = column.getSize();
+                                const min = spec.minWidth ?? 60;
+                                const move = (ev: MouseEvent) =>
+                                  setColumnSizing((prev) => ({
+                                    ...prev,
+                                    [column.id]: Math.max(min, startSize + ev.clientX - start),
+                                  }));
+                                const up = () => {
+                                  document.removeEventListener("mousemove", move);
+                                  document.removeEventListener("mouseup", up);
+                                };
+                                document.addEventListener("mousemove", move);
+                                document.addEventListener("mouseup", up);
+                              }
+                            : undefined
+                        }
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+              {filterRowShown ? (
+                <ColumnFilterRow
                   specs={specs}
                   widths={widths}
                   lefts={lefts}
-                  onMenuButton={onMenuButton}
-                  menuOpen={menuAnchor !== null && menuRow === item.index}
-                  menuId={menuId}
-                  onToggle={onToggleCheckbox}
-                  ariaRowOffset={headRows + 1}
+                  selectWidth={SELECT_COL_WIDTH}
+                  height={rowHeight + 4}
+                  rowIndex={2}
+                  filters={columnFilters ?? []}
+                  onChange={onColumnFilter}
+                  suggestions={typeSuggestions.length ? { type: typeSuggestions } : undefined}
                 />
-              );
-            })}
+              ) : null}
+            </div>
+            <div role="rowgroup" className="grid-body" style={{ height: virtualizer.getTotalSize() }}>
+              {virtualItems.map((item) => {
+                const row = getDisplayRow(item.index);
+                return (
+                  <RowView
+                    key={row ? row.rowKey : `loading:${item.index}`}
+                    row={row}
+                    index={item.index}
+                    top={item.start}
+                    height={item.size}
+                    selected={!!row && selectedKeys.has(row.rowKey)}
+                    focused={item.index === clampedFocus}
+                    specs={specs}
+                    widths={widths}
+                    lefts={lefts}
+                    onMenuButton={onMenuButton}
+                    menuOpen={menuAnchor !== null && menuRow === item.index}
+                    menuId={menuId}
+                    onToggle={onToggleCheckbox}
+                    ariaRowOffset={headRows + 1}
+                  />
+                );
+              })}
+            </div>
           </div>
+          {displayCount === 0 && !cq.isLoading ? <p className="grid-empty">{emptyMessage}</p> : null}
+          {displayCount === 0 && cq.isLoading && runId ? (
+            // A typed / server-filtered page can scan for seconds: never a blank grid meanwhile.
+            <p className="grid-empty grid-loading" data-testid="grid-loading">
+              {loadingMessage}
+            </p>
+          ) : null}
         </div>
-        {displayCount === 0 && !cq.isLoading ? <p className="grid-empty">{emptyMessage}</p> : null}
-        {displayCount === 0 && cq.isLoading && runId ? (
-          // A typed / server-filtered page can scan for seconds: never a blank grid meanwhile.
-          <p className="grid-empty grid-loading" data-testid="grid-loading">
-            {loadingMessage}
-          </p>
-        ) : null}
+        {/* The batch bar floats over the bottom of the grid: selecting never moves the rows. */}
+        <BatchBar
+          selectedCount={selectedKeys.size}
+          context={context}
+          onDisabled={(reason) => toast.show(reason, "info")}
+          onClear={() => setSelectionKeys([])}
+          onTag={(tag) => void runBatch(host, "tag", tag)}
+          tagPromptOpen={tagPromptOpen}
+          onTagPromptChange={setTagPromptOpen}
+          onNote={runId ? (note) => void runNote(host, note) : undefined}
+        />
       </div>
 
       <GridFooter

@@ -18,7 +18,6 @@ body {
   color: var(--text);
   font-family: var(--font-ui);
   font-size: var(--fs-body);
-  line-height: 1.45;
   overflow: hidden;
 }
 
@@ -118,13 +117,14 @@ kbd {
 
 /* --- top bar -------------------------------------------------------------- */
 
+/* One 48px row (visual-polish S7 / U-V4): brand · case · search · ⌘K · theme/help. */
 .topbar {
   position: relative;
   z-index: 10; /* top-bar popovers paint above the panes */
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  height: 44px;
+  gap: var(--space-3);
+  height: 48px;
   padding: 0 var(--space-3);
   background: var(--bg-panel);
   border-bottom: 1px solid var(--line-subtle);
@@ -132,19 +132,39 @@ kbd {
 }
 
 .brand {
-  font-size: var(--fs-panel-title);
-  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
   white-space: nowrap;
-  margin-right: var(--space-2);
+  flex: none;
+}
+
+.brand-mark {
+  flex: none;
+  display: block;
+}
+
+.brand-word {
+  font-size: var(--fs-panel-title);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.brand-word-strong {
+  font-weight: 700;
+}
+
+.topbar-case {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: none;
 }
 
 .case-picker select,
 .global-search input {
-  height: 28px;
   padding: 0 var(--space-2);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--bg);
   color: var(--text);
   font: inherit;
 }
@@ -157,102 +177,122 @@ kbd {
   flex: 1;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: var(--space-2);
   min-width: 0;
 }
 
 .global-search {
+  position: relative;
+  display: flex;
+  align-items: center;
   flex: 1;
-  max-width: 480px;
+  max-width: 560px;
   min-width: 160px;
 }
 
-.global-search form,
-.global-search input {
-  width: 100%;
+.global-search form {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  min-width: 0;
 }
 
-.global-search {
-  display: block;
+.global-search input {
+  width: 100%;
+  padding-left: calc(var(--space-2) + 22px);
+  padding-right: 36px;
+}
+
+.global-search-icon {
+  position: absolute;
+  left: var(--space-2);
+  color: var(--text-muted);
+  pointer-events: none;
 }
 
 .global-search input::placeholder {
   color: var(--text-muted);
 }
 
-.topbar-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
+/* Search options: an icon button at the end of the search field. */
+.global-search .search-options-anchor {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
 }
 
-/* --- buttons -------------------------------------------------------------- */
-
-.button {
+.search-options-trigger {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-1);
-  height: 28px;
-  padding: 0 var(--space-3);
-  border: 1px solid var(--line);
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
   border-radius: var(--radius);
-  background: var(--bg-raised);
-  color: var(--text);
-  font: inherit;
-  font-size: var(--fs-table-aux);
-  white-space: nowrap;
+  background: transparent;
+  color: var(--text-muted);
   cursor: pointer;
 }
 
-.button:hover {
-  border-color: var(--accent);
+.search-options-trigger:hover,
+.search-options-trigger[aria-expanded="true"] {
+  background: var(--bg-raised);
+  color: var(--text);
 }
 
-.button.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--on-accent);
-  font-weight: 600;
-}
-
-.button.primary:hover {
-  background: var(--accent-hover);
-}
-
-.button.ghost {
-  background: transparent;
-  border-color: transparent;
-}
-
-.button.ghost:hover {
-  border-color: var(--line);
-}
-
-.button.icon-only {
-  width: 28px;
-  padding: 0;
-  justify-content: center;
-}
-
-.button[aria-disabled="true"],
-.button:disabled {
+.search-options-trigger[aria-disabled="true"] {
   color: var(--disabled-text);
   cursor: not-allowed;
 }
 
-/* A disabled primary drops the accent fill: muted text on the accent was ≈1.4:1
-   (--disabled-text on --disabled-bg is in the contrast gate test). */
-.button.primary[aria-disabled="true"],
-.button.primary:disabled,
-.button.primary[aria-disabled="true"]:hover {
-  background: var(--disabled-bg);
-  border-color: var(--line);
-  color: var(--disabled-text);
+/* The reason is the trigger's tooltip + description; no loose text inside the top bar. */
+.global-search .search-options-anchor > .case-reason {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
-.button[aria-disabled="true"]:hover {
+.topbar-palette {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 32px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  cursor: pointer;
+  flex: none;
+}
+
+.topbar-palette:hover {
+  color: var(--text);
   border-color: var(--line);
 }
+
+.topbar-palette kbd {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: var(--fs-aux);
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: none;
+}
+
+/* --- buttons: controls.css (.button .primary/.secondary/.ghost/.danger, .icon-btn) --- */
 
 /* Visible "why disabled" line next to a disabled action (not only on hover/focus). */
 .command-with-reason {
@@ -294,15 +334,36 @@ kbd {
 .status-run {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-3);
   min-width: 0;
   overflow: hidden;
 }
 
+/* One run fact group ("런 … · 완료 · 오류 0"), then the run actions behind a divider. */
+.status-group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.status-sep {
+  color: var(--line);
+}
+
+.status-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.status-actions {
+  gap: var(--space-1);
+  padding-left: var(--space-3);
+  border-left: 1px solid var(--line-subtle);
+}
+
 .status-progress {
   width: 96px;
-  height: 6px;
-  accent-color: var(--accent);
 }
 
 .status-errors {
@@ -603,39 +664,6 @@ kbd {
   background: var(--bg-raised);
 }
 
-.token-gate {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-3);
-  height: 100%;
-  padding: var(--space-5);
-}
-
-.token-gate form {
-  display: flex;
-  gap: var(--space-2);
-}
-
-.token-gate input {
-  width: 320px;
-  height: 30px;
-  padding: 0 var(--space-2);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--bg-panel);
-  color: var(--text);
-  font-family: var(--font-mono);
-}
-
-.token-gate p {
-  color: var(--text-muted);
-  font-size: var(--fs-table-aux);
-  max-width: 420px;
-  text-align: center;
-}
-
 .error-banner {
   margin: var(--space-3);
   padding: var(--space-2) var(--space-3);
@@ -859,11 +887,7 @@ button.count-chip:hover {
   border-color: var(--accent);
 }
 
-/* Search options (S4) open as a dropdown under their button, above the panes. */
-.search-options-anchor {
-  position: relative;
-}
-
+/* Search options (S4) open as a dropdown under their trigger (inside the search field, S7). */
 .search-options-anchor > .search-options-popover {
   position: absolute;
   top: calc(100% + var(--space-1));

@@ -1,4 +1,4 @@
-import { type ButtonHTMLAttributes, useId } from "react";
+import { type ButtonHTMLAttributes, type Ref, useId } from "react";
 
 /**
  * Button that stays focusable but inert while `reason` is set (U3): the reason
@@ -9,13 +9,15 @@ export function ReasonButton({
   onClick,
   children,
   className = "button",
+  ref,
   ...rest
-}: { reason?: string } & ButtonHTMLAttributes<HTMLButtonElement>) {
+}: { reason?: string; ref?: Ref<HTMLButtonElement> } & ButtonHTMLAttributes<HTMLButtonElement>) {
   const id = useId();
   return (
     <>
       <button
         {...rest}
+        ref={ref}
         type={rest.type ?? "button"}
         className={className}
         aria-disabled={reason ? true : undefined}

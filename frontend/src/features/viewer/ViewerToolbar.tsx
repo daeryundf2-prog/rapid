@@ -1,8 +1,20 @@
-import { type KeyboardEvent, useEffect, useRef, useState } from "react";
+/**
+ * Viewer actions (visual-polish S5/S6) — one cluster at the right of the viewer header:
+ *  - "관련 있음": the one review action kept as a primary toggle (the batch bar owns the rest);
+ *  - a status dot: the row's current review status;
+ *  - "더보기": 재검토 · 제외 · 보고서 포함 · 북마크 · 메모;
+ *  - "⋯" (원본 동작): 원본 열기 · 해시 복사 · 경로 복사 · 인용 복사 · 같은 출처의 다른 행.
+ * Every entry is a view of a registered Command (same ids as before), so the palette, the key
+ * map and these menus run the same code.
+ */
+
+import { useEffect, useRef, useState } from "react";
 import { announce, DisabledReason } from "../../a11y";
-import { isChipStatus } from "../../components/StatusChip";
+import { MenuButton, type MenuItem } from "../../components/MenuButton";
+import { STATUS_META } from "../../components/StatusChip";
 import "../../components/status.css";
 import type { Command, CommandContext } from "../../contracts/command";
+import { Icon } from "../../icons";
 import {
   applyNote,
   applyReviewAction,
@@ -14,54 +26,17 @@ import { noteKey, setSessionNote } from "../grid/sessionNotes";
 import { useViewerRowContext, useViewerTarget } from "./adapter";
 import { markDisabledReason, targetAsGridRow } from "./citation";
 
-interface ToolbarButtonProps {
-  command: Command;
-  ctx: CommandContext;
-  label?: string;
-  tabStop?: boolean;
-  /** Review status this button sets; pressed = already applied (filled with the status colour). */
-  status?: string;
-  pressed?: boolean;
-  onRun: (command: Command) => void;
-}
-
-function ToolbarButton({ command, ctx, label, tabStop, status, pressed, onRun }: ToolbarButtonProps) {
-  const reason = command.disabledReason?.(ctx);
-  const text = label ?? command.label;
-  return (
-    <DisabledReason reason={reason}>
-      <button
-        type="button"
-        className="viewer-tool"
-        data-command={command.id}
-        data-status-button={status}
-        aria-pressed={status ? Boolean(pressed) : undefined}
-        title={
-          reason
-            ? undefined
-            : pressed && status && status !== "bookmark"
-              ? `${command.label} — 다시 누르면 해제합니다`
-              : command.shortcut
-                ? `${command.label} (${command.shortcut})`
-                : command.label
-        }
-        tabIndex={tabStop ? 0 : -1}
-        onClick={() => onRun(command)}
-      >
-        {text}
-      </button>
-    </DisabledReason>
-  );
-}
-
 interface ViewerToolbarProps {
   sourceCommands: Command[];
   markCommands: Command[];
   ctx: CommandContext;
   onRun: (command: Command) => void;
+  /** "같은 출처의 다른 행": its reason when it cannot run, and the action. */
+  rowsForSource: { reason?: string; run: () => void };
 }
 
 const MARK_PREFIX = "viewer.mark.";
+const EXCLUSIVE = ["relevant", "needs-review", "excluded"];
 
 /** Inline 메모 form: textarea + 저장/취소, Esc cancels. */
 function NoteForm({ onSave, onCancel }: { onSave: (text: string) => void; onCancel: () => void }) {
@@ -105,9 +80,13 @@ function NoteForm({ onSave, onCancel }: { onSave: (text: string) => void; onCanc
   );
 }
 
-/** role=toolbar with one tab stop (the first button); ←/→/Home/End move between buttons. */
-export function ViewerToolbar({ sourceCommands, markCommands, ctx, onRun }: ViewerToolbarProps) {
-  const ref = useRef<HTMLDivElement>(null);
+export function ViewerToolbar({
+  sourceCommands,
+  markCommands,
+  ctx,
+  onRun,
+  rowsForSource,
+}: ViewerToolbarProps) {
   const target = useViewerTarget();
   const row = useViewerRowContext();
   const [noteOpen, setNoteOpen] = useState(false);
@@ -116,10 +95,9 @@ export function ViewerToolbar({ sourceCommands, markCommands, ctx, onRun }: View
     actions: [],
     cleared: [],
   });
+  const moreRef = useRef<HTMLSpanElement>(null);
   const key = target ? noteKey(target.runId, target.ref) : "";
   const noteReason = target ? markDisabledReason(target, "relevant") : "뷰어에 표시된 행이 없습니다.";
-  const buttons = () =>
-    Array.from(ref.current?.querySelectorAll<HTMLButtonElement>("button.viewer-tool") ?? []);
 
   // A different row closes the form.
   // biome-ignore lint/correctness/useExhaustiveDependencies: close on target change only
@@ -144,8 +122,7 @@ export function ViewerToolbar({ sourceCommands, markCommands, ctx, onRun }: View
       const result = await applyReviewAction(target.runId, [targetAsGridRow(target)], undo);
       setApplied((prev) => {
         const base = prev.key === key ? prev : { actions: [], cleared: [] };
-        const exclusive = ["relevant", "needs-review", "excluded"];
-        const clears = undo === "clear-review" ? exclusive : [action];
+        const clears = undo === "clear-review" ? EXCLUSIVE : [action];
         return {
           key,
           actions: base.actions.filter((a) => !clears.includes(a)),
@@ -170,9 +147,8 @@ export function ViewerToolbar({ sourceCommands, markCommands, ctx, onRun }: View
       setApplied((prev) => {
         const base = prev.key === key ? prev : { actions: [], cleared: [] };
         // Review statuses are exclusive; bookmark / include-in-report accumulate.
-        const exclusive = ["relevant", "needs-review", "excluded"];
-        const kept = exclusive.includes(action)
-          ? base.actions.filter((a) => !exclusive.includes(a))
+        const kept = EXCLUSIVE.includes(action)
+          ? base.actions.filter((a) => !EXCLUSIVE.includes(a))
           : base.actions;
         return {
           key,
@@ -190,64 +166,120 @@ export function ViewerToolbar({ sourceCommands, markCommands, ctx, onRun }: View
       setSessionNote(key, text.trim());
       setNoteOpen(false);
       announce(`메모를 저장했습니다.${storeNotice(result)}`);
-      ref.current?.querySelector<HTMLButtonElement>('[data-command="viewer.note"]')?.focus();
+      moreRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
     } catch (error) {
       announce(`메모 저장 실패: ${error instanceof Error ? error.message : String(error)}`);
     }
   };
 
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.altKey) return;
-    const list = buttons();
-    const index = list.indexOf(document.activeElement as HTMLButtonElement);
-    let next = -1;
-    if (event.key === "ArrowRight") next = index + 1;
-    else if (event.key === "ArrowLeft") next = index - 1;
-    else if (event.key === "Home") next = 0;
-    else if (event.key === "End") next = list.length - 1;
-    else return;
-    event.preventDefault();
-    const target = list[(next + list.length) % list.length];
-    target?.focus();
-  };
+  const markOf = (command: Command) => command.id.slice(MARK_PREFIX.length);
+  const relevant = markCommands.find((command) => markOf(command) === "relevant");
+  const others = markCommands.filter((command) => markOf(command) !== "relevant");
+  const relevantReason = relevant?.disabledReason?.(ctx);
+  const relevantPressed = isPressed("relevant");
+
+  // The status dot: the current exclusive status, else 보고서 포함 / 북마크, else 미검토.
+  const current =
+    EXCLUSIVE.find((action) => isPressed(action)) ??
+    (isPressed("include-in-report") ? "include-in-report" : isPressed("bookmark") ? "bookmark" : null);
+  const currentLabel = current ? STATUS_META[current as keyof typeof STATUS_META].label : "미검토";
+
+  const reviewItems: MenuItem[] = [
+    ...others.map((command) => {
+      const action = markOf(command);
+      return {
+        id: command.id,
+        label: command.label.replace(/^표시: /, ""),
+        command: command.id,
+        status: action,
+        checked: isPressed(action),
+        disabledReason: command.disabledReason?.(ctx),
+        onSelect: () => run(command),
+      };
+    }),
+    {
+      id: "viewer.note",
+      label: "메모…",
+      command: "viewer.note",
+      separator: true,
+      disabledReason: noteReason,
+      onSelect: () => setNoteOpen(true),
+    },
+  ];
+
+  const sourceItems: MenuItem[] = [
+    ...sourceCommands.map((command) => ({
+      id: command.id,
+      label: command.label,
+      command: command.id,
+      disabledReason: command.disabledReason?.(ctx),
+      onSelect: () => run(command),
+    })),
+    {
+      id: "navigate.rows-for-source",
+      label: "같은 출처의 다른 행",
+      command: "navigate.rows-for-source",
+      separator: true,
+      disabledReason: rowsForSource.reason,
+      onSelect: rowsForSource.run,
+    },
+  ];
 
   return (
     <>
-      <div ref={ref} className="viewer-toolbar" role="toolbar" aria-label="원본 동작" onKeyDown={onKeyDown}>
-        <div className="viewer-tool-group">
-          {sourceCommands.map((command, index) => (
-            <ToolbarButton key={command.id} command={command} ctx={ctx} tabStop={index === 0} onRun={run} />
-          ))}
-        </div>
-        <div className="viewer-tool-group">
-          {markCommands.map((command) => {
-            const action = command.id.startsWith(MARK_PREFIX) ? command.id.slice(MARK_PREFIX.length) : "";
-            const status = action === "bookmark" || isChipStatus(action) ? action : undefined;
-            return (
-              <ToolbarButton
-                key={command.id}
-                command={command}
-                ctx={ctx}
-                label={command.label.replace(/^표시: /, "")}
-                status={status}
-                pressed={status ? isPressed(status) : false}
-                onRun={run}
-              />
-            );
-          })}
-          <DisabledReason reason={noteReason}>
+      <div className="viewer-actions">
+        {relevant ? (
+          <DisabledReason reason={relevantReason}>
             <button
               type="button"
-              className="viewer-tool"
-              data-command="viewer.note"
-              aria-expanded={noteOpen}
-              tabIndex={-1}
-              onClick={() => setNoteOpen((open) => !open)}
+              className="viewer-primary"
+              data-command={relevant.id}
+              data-status-button="relevant"
+              aria-pressed={relevantPressed}
+              title={
+                relevantReason
+                  ? undefined
+                  : relevantPressed
+                    ? "관련 있음 — 다시 누르면 해제합니다"
+                    : `${relevant.label}${relevant.shortcut ? ` (${relevant.shortcut})` : ""}`
+              }
+              onClick={() => run(relevant)}
             >
-              메모
+              {relevantPressed ? <Icon name="check" /> : <Icon name="flag" />}
+              <span>관련 있음</span>
             </button>
           </DisabledReason>
-        </div>
+        ) : null}
+        <span
+          className="viewer-status"
+          role="img"
+          aria-label={`리뷰 상태: ${currentLabel}`}
+          title={`리뷰 상태: ${currentLabel}`}
+          data-testid="viewer-review-status"
+        >
+          <span className="status-dot" data-status={current ?? undefined} />
+        </span>
+        <span ref={moreRef} className="viewer-review-more">
+          <MenuButton
+            label="리뷰 더보기"
+            items={reviewItems}
+            triggerClassName="viewer-tool-trigger"
+            onDisabled={(reason) => announce(reason)}
+            testId="viewer-review-menu"
+          >
+            <span>더보기</span>
+            <Icon name="chevron-down" size={14} />
+          </MenuButton>
+        </span>
+        <MenuButton
+          label="원본 동작"
+          items={sourceItems}
+          triggerClassName="viewer-icon-button"
+          onDisabled={(reason) => announce(reason)}
+          testId="viewer-source-menu"
+        >
+          <Icon name="more" />
+        </MenuButton>
       </div>
       {noteOpen && target ? (
         <NoteForm onSave={(text) => void saveNote(text)} onCancel={() => setNoteOpen(false)} />

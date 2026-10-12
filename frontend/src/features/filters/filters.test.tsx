@@ -1,5 +1,5 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GridRow } from "../../contracts/collection";
 import { parseHash, serializeRoute } from "../../router";
 import { useAppStore } from "../../state/store";
@@ -33,6 +33,7 @@ beforeEach(() => {
   useFilterStore.setState({ filters: EMPTY_FILTERS, report: null });
 });
 afterEach(() => {
+  cleanup();
   window.location.hash = "";
 });
 
@@ -159,6 +160,7 @@ describe("chips", () => {
 
   it("FilterBar adds a status chip, removes it, and resets", () => {
     render(<FilterBar filterRef={{ current: null }} query="" onQuery={() => {}} onReturnToGrid={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /^필터/ }));
     fireEvent.click(screen.getByRole("button", { name: "상태 필터: 재검토" }));
     expect(useFilterStore.getState().filters.statuses).toEqual(["needs-review"]);
     fireEvent.click(screen.getByRole("button", { name: /상태 재검토 필터 제거/ }));
@@ -170,19 +172,145 @@ describe("chips", () => {
   });
 });
 
+describe("one-line filter bar (visual-polish S1/S2)", () => {
+  const bar = (props: Partial<Parameters<typeof FilterBar>[0]> = {}) =>
+    render(
+      <FilterBar
+        filterRef={{ current: null }}
+        query=""
+        onQuery={() => {}}
+        onReturnToGrid={() => {}}
+        {...props}
+      />,
+    );
+
+  it("keeps every condition in the 필터 popover; applied ones show as chips on the one line", () => {
+    bar();
+    const search = document.querySelector("search.filter-bar") as HTMLElement;
+    // One line: search + 필터 button, no time inputs until the popover opens.
+    expect(within(search).queryByLabelText("시작 시각")).toBeNull();
+    const trigger = screen.getByRole("button", { name: /^필터/ });
+    expect(trigger.getAttribute("aria-haspopup")).toBe("dialog");
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(trigger);
+    const popover = screen.getByRole("dialog", { name: "필터 조건" });
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(trigger.getAttribute("aria-controls")).toBe(popover.id);
+    for (const group of ["시간 범위", "아티팩트 유형", "태그·상태"])
+      expect(within(popover).getByRole("group", { name: group })).toBeTruthy();
+    expect(within(popover).getByLabelText("시작 시각")).toBeTruthy();
+    expect(within(popover).getByLabelText("종료 시각")).toBeTruthy();
+    for (const field of ["태그", "확장자", "경로 포함"])
+      expect(within(popover).getByLabelText(field)).toBeTruthy();
+    fireEvent.click(within(popover).getByRole("button", { name: "상태 필터: 제외" }));
+    fireEvent.click(within(popover).getByRole("button", { name: "30일" }));
+    // The trigger counts the applied conditions; each is a removable chip.
+    expect(trigger.textContent).toContain("2");
+    const chips = screen.getByRole("list", { name: "적용된 필터" });
+    expect(within(chips).getAllByRole("listitem")).toHaveLength(2);
+  });
+
+  it("popover keyboard: opening focuses the first control, Tab cycles inside, Esc closes and returns focus", () => {
+    bar();
+    const trigger = screen.getByRole("button", { name: /^필터/ });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const popover = screen.getByRole("dialog", { name: "필터 조건" });
+    const first = within(popover).getByRole("button", { name: "오늘" });
+    expect(document.activeElement).toBe(first);
+    const close = within(popover).getByRole("button", { name: "닫기" });
+    close.focus();
+    fireEvent.keyDown(close, { key: "Tab" });
+    expect(document.activeElement).toBe(first);
+    fireEvent.keyDown(first, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(close);
+    fireEvent.keyDown(close, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "필터 조건" })).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("a pointer press outside closes the popover without moving focus", () => {
+    bar();
+    fireEvent.click(screen.getByRole("button", { name: /^필터/ }));
+    expect(screen.getByRole("dialog", { name: "필터 조건" })).toBeTruthy();
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByRole("dialog", { name: "필터 조건" })).toBeNull();
+  });
+
+  it("검토 toolbar: review status + tag + search, no time range or 필터 popover", () => {
+    const onReviewStatus = vi.fn();
+    bar({ variant: "review", reviewStatus: "relevant", onReviewStatus });
+    expect(screen.queryByRole("button", { name: /^필터/ })).toBeNull();
+    expect(screen.queryByLabelText("시작 시각")).toBeNull();
+    const status = screen.getByRole("combobox", { name: "리뷰 상태" }) as HTMLSelectElement;
+    expect(status.value).toBe("relevant");
+    fireEvent.change(status, { target: { value: "excluded" } });
+    expect(onReviewStatus).toHaveBeenCalledWith("excluded");
+    fireEvent.change(status, { target: { value: "" } });
+    expect(onReviewStatus).toHaveBeenLastCalledWith(undefined);
+    const tag = screen.getByLabelText("태그");
+    fireEvent.change(tag, { target: { value: "악성" } });
+    fireEvent.keyDown(tag, { key: "Enter" });
+    expect(useFilterStore.getState().filters.tags).toEqual(["악성"]);
+    expect(screen.getByRole("button", { name: "태그 악성 필터 제거" })).toBeTruthy();
+  });
+
+  it("보고 toolbar: export kind + search; the kind is the type filter, shown as 종류", () => {
+    bar({ variant: "report", kindOptions: ["보고서", "아티팩트"] });
+    expect(screen.queryByRole("button", { name: /^필터/ })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "리뷰 상태" })).toBeNull();
+    const kind = screen.getByRole("combobox", { name: "종류" }) as HTMLSelectElement;
+    expect(Array.from(kind.options).map((o) => o.textContent)).toEqual(["전체", "보고서", "아티팩트"]);
+    fireEvent.change(kind, { target: { value: "아티팩트" } });
+    expect(useFilterStore.getState().filters.types).toEqual(["아티팩트"]);
+    expect(useAppStore.getState().route.types).toEqual(["아티팩트"]);
+    expect(screen.getByRole("button", { name: "종류 아티팩트 필터 제거" })).toBeTruthy();
+    fireEvent.change(kind, { target: { value: "" } });
+    expect(useFilterStore.getState().filters.types).toEqual([]);
+  });
+
+  it("outputs carry their kind so the 종류 filter applies to the loaded rows", () => {
+    const rows = [
+      "artifacts_browser",
+      "report",
+      "files",
+      "docs_extract_manifest",
+      "case_db",
+      "fingerprint",
+    ].map((name, index) =>
+      COLLECTIONS.outputs.mapRow({ name, path: `C:/o/${name}.json` }, index, { ref: { id: "outputs" } }),
+    );
+    expect(rows.map((r) => r.artifactType)).toEqual([
+      "아티팩트",
+      "보고서",
+      "목록·색인",
+      "추출",
+      "케이스 DB",
+      "처리 기록",
+    ]);
+    const kept = applyClientFilters(rows, { ...EMPTY_FILTERS, types: ["보고서"] }).map((r) => r.title);
+    expect(kept).toEqual(["report"]);
+  });
+});
+
 describe("AXIOM preset columns", () => {
   afterEach(() => setAxiomMode(false));
 
-  it("puts title first, a tag/status column second, and renders two lines", () => {
+  it("adds the tag/status column right after the title (kept in place) and renders two lines", () => {
+    // The title keeps its place in the collection order (visual-polish S4: 시각 leads the timeline);
+    // the AXIOM preset moves chip + title to the front in the grid (DataGrid orderedColumns).
     const cols = COLLECTIONS.timeline.columns;
-    expect(cols[0]?.id).toBe("title");
-    expect(cols[1]?.id).toBe("tagstatus");
-    expect(presetColumnIds(cols, "axiom")).toEqual(["title", "tagstatus", "timestamp", "path"]);
+    const at = cols.findIndex((c) => c.id === "title");
+    expect(cols[at + 1]?.id).toBe("tagstatus");
+    expect(new Set(presetColumnIds(cols, "axiom"))).toEqual(
+      new Set(["title", "tagstatus", "timestamp", "path"]),
+    );
     const r = row({ title: "로그온", artifactType: "evtx", reviewStatus: "relevant", tags: ["증거"] });
-    const spec = cols[0];
+    const spec = cols[at];
     expect(spec && displayText(spec, r)).toBe("로그온");
     setAxiomMode(true);
     expect(spec && displayText(spec, r)).toBe("로그온\nevtx");
-    expect(cols[1] && displayText(cols[1], r)).toBe("● 관련 있음 · #증거");
+    expect(cols[at + 1] && displayText(cols[at + 1] as (typeof cols)[number], r)).toBe("● 관련 있음 · #증거");
   });
 });

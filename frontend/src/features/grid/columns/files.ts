@@ -137,19 +137,21 @@ export const filesCollection: CollectionDef = {
       },
     );
   },
+  // Default layout (visual-polish S4): 이름 · 경로 · 크기 · 수정 · NTFS 생성 · 선별.
   columns: [
-    col.title("이름", 260),
-    col.review(),
-    col.field("extension", "확장자", 80, ["analysis", "compact"], (r) => fieldStr(r, "extension")),
+    col.title("이름", 240),
+    col.path(340, ["analysis", "source"]),
     col.field("size", "크기", 90, ["analysis", "compact"], (r) => (r.fields.size as number | null) ?? null, {
       align: "right",
       format: (r) => formatBytes(r.fields.size),
     }),
-    col.timestamp(170),
-    col.field("categories", "분류", 160, ["analysis"], (r) => fieldStr(r, "categories")),
+    { ...col.timestamp(160), header: "수정" },
+    { ...ntfsTime("ntfsCreated", "NTFS 생성", "created_at"), presets: ["analysis", "source"] },
+    col.review(),
+    col.field("extension", "확장자", 80, ["compact"], (r) => fieldStr(r, "extension")),
+    col.field("categories", "분류", 160, ["compact"], (r) => fieldStr(r, "categories")),
     col.field("recovery", "복구 유형", 100, ["source"], (r) => fieldStr(r, "recovery")),
-    ntfsTime("ntfsCreated", "생성", "created_at"),
-    ntfsTime("ntfsAccessed", "접근", "accessed_at"),
+    ntfsTime("ntfsAccessed", "NTFS 접근", "accessed_at"),
     col.field(
       "ntfsEntry",
       "MFT 엔트리",
@@ -167,7 +169,6 @@ export const filesCollection: CollectionDef = {
     col.field("sourceImage", "소스 이미지 경로", 280, ["source"], (r) => strOrNull(r.fields.sourceImage), {
       emptyHint: ntfsHint,
     }),
-    col.path(420),
     col.sha256(),
   ],
 };

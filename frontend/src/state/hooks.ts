@@ -8,7 +8,7 @@ import { useShallow } from "zustand/react/shallow";
 import type { CollectionId } from "../contracts/collection";
 import type { ViewerMode, ViewerTarget } from "../contracts/viewer";
 import type { ExplorerView, Route } from "../router";
-import type { Density, PanelLayout, Theme } from "./slices/prefs";
+import { type Density, effectiveTheme, type PanelLayout, type Theme } from "./slices/prefs";
 import type { NavigateOptions, OpenCollectionOptions } from "./slices/route";
 import { currentRun } from "./slices/runs";
 import { type AppState, useAppStore } from "./store";
@@ -117,7 +117,7 @@ export function useTheme(): ThemeApi {
   return useAppStore(
     useShallow((s: AppState) => ({
       theme: s.theme,
-      effectiveTheme: s.theme ?? s.systemTheme,
+      effectiveTheme: effectiveTheme(s.theme),
       setTheme: s.setTheme,
       toggleTheme: s.toggleTheme,
     })),

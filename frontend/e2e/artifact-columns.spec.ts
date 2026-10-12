@@ -69,7 +69,7 @@ test("promote a record field, sort it on the server (building → ready), first 
   const firstRow = page.locator('[role="grid"] [role="row"][aria-rowindex="2"]').first();
   await expect(firstRow).toBeVisible();
 
-  await page.getByRole("button", { name: "열 선택" }).click();
+  await page.getByRole("button", { name: "열 설정" }).click();
   const search = page.getByRole("searchbox", { name: "필드 검색" });
   test.skip((await search.count()) === 0, "served bundle predates the field picker — rebuild static first");
   // A field the default columns do not already show: the picker offers exactly those.

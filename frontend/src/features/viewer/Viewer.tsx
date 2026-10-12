@@ -9,6 +9,7 @@ import {
 } from "../../api/viewer";
 import type { Command } from "../../contracts/command";
 import type { MarkAction, ViewerMode, ViewerTarget } from "../../contracts/viewer";
+import { Icon } from "../../icons";
 import { storeNotice } from "../grid/reviewActions";
 import {
   dispatchCommand,
@@ -397,6 +398,7 @@ export function Viewer() {
       tabIndex={-1}
       onKeyDown={onKeyDown}
     >
+      {/* One header line (visual-polish S5): history · title · review + action menus; then one tab row. */}
       <div className="viewer-header">
         <div className="viewer-nav">
           <DisabledReason reason={history.current.canBack() ? undefined : "이전에 본 대상이 없습니다."}>
@@ -407,7 +409,7 @@ export function Viewer() {
               title={history.current.canBack() ? "이전 대상 (Alt+←)" : undefined}
               onClick={() => runCommand(byId(VIEWER_COMMAND_IDS.back))}
             >
-              ←
+              <Icon name="arrow-left" />
             </button>
           </DisabledReason>
           <DisabledReason reason={history.current.canForward() ? undefined : "다음 대상이 없습니다."}>
@@ -418,7 +420,7 @@ export function Viewer() {
               title={history.current.canForward() ? "다음 대상 (Alt+→)" : undefined}
               onClick={() => runCommand(byId(VIEWER_COMMAND_IDS.forward))}
             >
-              →
+              <Icon name="arrow-right" />
             </button>
           </DisabledReason>
         </div>
@@ -428,23 +430,17 @@ export function Viewer() {
           </h2>
           {target?.sourcePath ? <p className="viewer-path mono">{target.sourcePath}</p> : null}
         </div>
-        <DisabledReason reason={rowsForSourceReason}>
-          <button
-            type="button"
-            className="viewer-button"
-            title={rowsForSourceReason ? undefined : "이 원본에서 나온 다른 행을 그리드에 표시합니다."}
-            onClick={() => void dispatchCommand(ROWS_FOR_SOURCE_COMMAND, ctx)}
-          >
-            같은 출처의 다른 행
-          </button>
-        </DisabledReason>
+        <ViewerToolbar
+          sourceCommands={sourceCommands}
+          markCommands={markCommands}
+          ctx={ctx}
+          onRun={runCommand}
+          rowsForSource={{
+            reason: rowsForSourceReason,
+            run: () => void dispatchCommand(ROWS_FOR_SOURCE_COMMAND, ctx),
+          }}
+        />
       </div>
-      <ViewerToolbar
-        sourceCommands={sourceCommands}
-        markCommands={markCommands}
-        ctx={ctx}
-        onRun={runCommand}
-      />
       <ModeTabs modes={modes} active={activeMode} onSelect={selectMode} />
       {/* Inactive modes get an empty, hidden panel so every tab's aria-controls resolves to a
           tabpanel labelled by that tab; only the active mode renders content. */}

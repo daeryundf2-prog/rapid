@@ -356,13 +356,21 @@ export const KIND_COLUMNS: Record<string, KindColumnDef[]> = {
   ],
 };
 
+/**
+ * Generic artifact layout (all artifacts, category nodes, kinds without a layout), visual-polish
+ * S4: 시각 · 유형 · 항목 · 경로 · 선별. The summary text stays one click away in the column menu.
+ */
 const defaultColumns = (): ColumnSpec[] => [
-  col.title("항목", 320),
+  { ...timeColumn, width: 160 },
+  { ...typeColumn, width: 150 },
+  col.title("항목", 300),
+  col.path(360, ["analysis", "source"]),
   col.review(),
-  typeColumn,
-  detailColumn,
-  timeColumn,
-  ...tail,
+  quietDetailColumn,
+  // 파서 moves to 출처 중심 here: the default shows exactly the five columns above.
+  ...tail
+    .filter((column) => column.id !== "path")
+    .map((column): ColumnSpec => (column.id === "provider" ? { ...column, presets: ["source"] } : column)),
 ];
 
 /** Default column set of one artifact kind (plan §4.3); other kinds keep the generic set. */

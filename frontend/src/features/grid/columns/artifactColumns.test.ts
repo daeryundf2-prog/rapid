@@ -199,17 +199,26 @@ describe("kind default columns (§4.3) and sort keys", () => {
     expect(headers("generic-documents")).toEqual(
       expect.arrayContaining(["항목 수", "암호화 항목", "크기", "수정", "위험"]),
     );
+    // Kinds without a layout use the generic one (visual-polish S4): 시각 · 유형 · 항목 · 경로 · 선별 first.
     expect(headers("browser")).toEqual([
-      "항목",
-      "선별",
-      "유형",
-      "내용",
       "시각",
+      "유형",
+      "항목",
+      "경로",
+      "선별",
+      "내용",
       "파서",
       "탐지 규칙",
       "지원",
-      "경로",
       "SHA-256",
+    ]);
+    const generic = artifactColumnsForKind("browser");
+    expect(generic.filter((c) => c.presets.includes("analysis")).map((c) => c.header)).toEqual([
+      "시각",
+      "유형",
+      "항목",
+      "경로",
+      "선별",
     ]);
   });
 

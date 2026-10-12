@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { ensureCaseDb, saveSearch } from "../../api/caseDb";
 import { listKeywordPacks, SEARCH_SOURCES } from "../../api/keywordPacks";
+import { Icon } from "../../icons";
 import { ErrorText } from "./ErrorText";
 import { ReasonButton } from "./ReasonButton";
 import { useSearchState } from "./searchState";
@@ -19,22 +20,51 @@ function toggle(list: string[], value: string, on: boolean): string[] {
 export function SearchOptionsButton({ runId }: { runId: string | null }) {
   const open = useSearchState((s) => s.popoverOpen);
   const setOpen = useSearchState((s) => s.setPopoverOpen);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverId = useId();
   return (
     <span className="search-options-anchor">
+      {/* Folded into the search field (visual-polish S7): an icon button at the input's end. */}
       <ReasonButton
+        ref={triggerRef}
+        className="search-options-trigger"
+        aria-label="검색 옵션"
         aria-expanded={open}
         aria-haspopup="dialog"
+        aria-controls={open && runId ? popoverId : undefined}
         reason={runId ? undefined : "열린 케이스가 없습니다"}
         onClick={() => setOpen(!open)}
       >
-        검색 옵션
+        <Icon name="filter" />
       </ReasonButton>
-      {open && runId && <SearchOptionsPopover runId={runId} onClose={() => setOpen(false)} />}
+      {open && runId && (
+        <SearchOptionsPopover
+          id={popoverId}
+          runId={runId}
+          onClose={() => {
+            setOpen(false);
+            triggerRef.current?.focus();
+          }}
+        />
+      )}
     </span>
   );
 }
 
-export function SearchOptionsPopover({ runId, onClose }: { runId: string; onClose: () => void }) {
+export function SearchOptionsPopover({
+  runId,
+  onClose,
+  id,
+}: {
+  runId: string;
+  onClose: () => void;
+  id?: string;
+}) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  // Opening lands on the first option, like the other popovers.
+  useEffect(() => {
+    panelRef.current?.querySelector<HTMLElement>("select, input, button")?.focus();
+  }, []);
   const queryClient = useQueryClient();
   const options = useSearchState((s) => s.options);
   const keywords = useSearchState((s) => s.keywords);
@@ -71,11 +101,14 @@ export function SearchOptionsPopover({ runId, onClose }: { runId: string; onClos
 
   return (
     <div
+      ref={panelRef}
+      id={id}
       className="search-options-popover"
       role="dialog"
       aria-label="검색 옵션"
       onKeyDown={(event) => {
         if (event.key === "Escape") {
+          event.preventDefault();
           event.stopPropagation();
           onClose();
         }

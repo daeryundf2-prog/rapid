@@ -24,25 +24,102 @@
   border: 0;
 }
 
-/* Toolbar / batch bar ------------------------------------------------- */
+/* Grid frame: header tools + scroll area + floating batch bar ---------- */
 
-.grid-toolbar,
+.grid-frame {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The column-menu button sits over the right end of the sticky header row (visual-polish S3). */
+.grid-head-tools {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  padding: 0 var(--space-2) 0 var(--space-1);
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--line);
+  box-shadow: -8px 0 8px -8px color-mix(in srgb, var(--scrim) 30%, transparent);
+}
+
+.grid-colmenu-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 22px;
+  padding: 0 var(--space-1);
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--fs-table-aux);
+  cursor: pointer;
+}
+
+.grid-colmenu-button:hover,
+.grid-colmenu-button[aria-expanded="true"] {
+  background: var(--bg-raised);
+  color: var(--text);
+}
+
+.grid-colmenu-popover {
+  width: 320px;
+}
+
+.grid-colmenu-selects {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+}
+
+.grid-colfilter-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  align-self: flex-start;
+}
+
+.grid-colfilter-toggle[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Floating batch bar (visual-polish §0): overlays the grid bottom instead of pushing rows down. */
 .grid-batch {
+  position: absolute;
+  left: 50%;
+  bottom: var(--space-3);
+  z-index: 30;
+  transform: translateX(-50%);
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  background: var(--bg-panel);
-  border-bottom: 1px solid var(--line);
-}
-
-.grid-batch {
+  gap: var(--space-1);
+  width: max-content;
+  max-width: calc(100% - var(--space-4));
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
   background: var(--bg-raised);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--scrim) 40%, transparent);
 }
 
 .grid-batch-count {
   margin-right: var(--space-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.grid-batch-clear {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
 }
 
 .grid-filter input,
@@ -96,22 +173,13 @@
   margin-left: auto;
 }
 
-/* The column chooser is an inline disclosure panel (wraps onto its own toolbar
-   row) rather than an overlay, so it never covers the grid header. */
-.grid-colmenu {
-  display: contents;
-}
-
+/* "표시할 열": checkbox list inside the column menu popover. */
 .grid-popover {
-  flex-basis: 100%;
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1) var(--space-3);
-  margin: 0;
-  padding: var(--space-2);
-  background: var(--bg-panel);
-  border: 1px solid var(--line);
-  border-radius: 4px;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 220px;
+  overflow: auto;
 }
 
 .grid-popover-item {
@@ -279,6 +347,9 @@
    flex:none keeps it inside the sticky select cell so the next sticky cell cannot cover it. */
 .grid-rowmenu-btn {
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 20px;
   height: 20px;
   padding: 0;
@@ -436,6 +507,26 @@
   white-space: nowrap;
 }
 
+/* 유형: colour dot + text (visual-polish S4). */
+.grid-type {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.grid-type-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.grid-type-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* Server sort + record-field columns (plan artifact-columns) ----------- */
 
 .grid-hcell > .disabled-reason {
@@ -565,4 +656,36 @@
 .grid-hint-link[aria-disabled="true"] {
   color: var(--text-muted);
   cursor: not-allowed;
+}
+
+/* Column menu + floating batch bar overrides (visual-polish S3 / §0) --------- */
+
+.grid-colmenu-selects .grid-select {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.grid-batch .grid-btn {
+  border-color: transparent;
+  background: transparent;
+}
+
+.grid-batch .grid-btn:hover:not([aria-disabled="true"]) {
+  border-color: var(--line);
+}
+
+.grid-batch .grid-btn.is-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
+/* Rows can scroll clear of the floating bar while a selection exists. */
+.grid-root[data-batch] .grid-scroll {
+  scroll-padding-bottom: 64px;
+}
+
+.grid-root[data-batch] .grid-body {
+  margin-bottom: 64px;
 }

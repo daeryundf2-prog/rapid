@@ -1,0 +1,133 @@
+/* Anchored popovers and menus (visual-polish S1/S3/S5/S7). Structure only; tokens from tokens.css. */
+
+.popover-anchor,
+.menu-anchor {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.popover,
+.menu {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  z-index: 650;
+  /* Surface, border, shadow and motion come from controls.css (.popover). */
+  font-size: var(--fs-table-aux);
+}
+
+.popover {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: max-content;
+  min-width: 260px;
+  max-width: min(420px, calc(100vw - var(--space-6)));
+  max-height: min(70vh, 560px);
+  overflow: auto;
+  padding: var(--space-3);
+}
+
+.popover:focus-visible {
+  outline: none;
+}
+
+.popover-start {
+  left: 0;
+}
+
+.popover-end {
+  right: 0;
+}
+
+.popover-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.popover-section + .popover-section {
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line-subtle);
+}
+
+.popover-title {
+  margin: 0 0 var(--space-1);
+  padding: 0;
+  color: var(--text-muted);
+  font-size: var(--fs-aux);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.popover-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.popover-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+/* Menus ------------------------------------------------------------------ */
+
+.popover.menu {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 180px;
+  padding: var(--space-1);
+}
+
+.menu-row {
+  display: contents;
+}
+
+.menu-sep {
+  height: 1px;
+  margin: var(--space-1) 0;
+  border: 0;
+  background: var(--line-subtle);
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 28px;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.menu-item:hover:not([aria-disabled="true"]),
+.menu-item:focus-visible {
+  background: var(--bg-raised);
+}
+
+.menu-item[aria-disabled="true"] {
+  color: var(--disabled-text);
+  cursor: not-allowed;
+}
+
+.menu-item-label {
+  flex: 1;
+}
+
+.menu-item-check {
+  color: var(--accent);
+}

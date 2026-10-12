@@ -68,21 +68,47 @@ function RunProgress({ run }: { run: RunWithProgress }) {
     announced.current = sentence;
   }, [status, stage, name]);
 
+  // "런 682636ce… · 완료 · 오류 0", then the run actions as their own group (visual-polish §0).
   return (
     <div className="status-run" data-testid="status-run">
-      <span className="mono" title={run.run_id}>
-        런 {run.run_id.slice(0, 8)}…
+      <span className="status-group">
+        <span className="mono" title={run.run_id}>
+          런 {run.run_id.slice(0, 8)}…
+        </span>
+        <StatusSep />
+        <StatusBadge status={String(run.status)} />
+        {text ? (
+          <>
+            <StatusSep />
+            <span className="status-text">{text}</span>
+          </>
+        ) : null}
+        {active && total > 0 ? (
+          <progress className="status-progress" max={total} value={done} aria-label="provider 진행률" />
+        ) : null}
+        {active && Number.isFinite(started) ? (
+          <>
+            <StatusSep />
+            <span>{formatElapsed(now - started)} 경과</span>
+          </>
+        ) : null}
+        <StatusSep />
+        <span className={errors > 0 ? "status-errors" : undefined}>오류 {errors}</span>
       </span>
-      <StatusBadge status={String(run.status)} />
-      {text ? <span>{text}</span> : null}
-      {active && total > 0 ? (
-        <progress className="status-progress" max={total} value={done} aria-label="provider 진행률" />
-      ) : null}
-      {active && Number.isFinite(started) ? <span>{formatElapsed(now - started)} 경과</span> : null}
-      <span className={errors > 0 ? "status-errors" : undefined}>오류 {errors}</span>
-      <CommandButton command="case.cancel" label="취소" variant="ghost" testId="run-cancel" />
-      <CommandButton command="case.retry" label="재시도" variant="ghost" testId="run-retry" />
+      <span className="status-group status-actions">
+        <CommandButton command="case.cancel" label="취소" variant="ghost" testId="run-cancel" />
+        <CommandButton command="case.retry" label="재시도" variant="ghost" testId="run-retry" />
+      </span>
     </div>
+  );
+}
+
+/** Visual separator between status-bar facts (not read out). */
+function StatusSep() {
+  return (
+    <span className="status-sep" aria-hidden="true">
+      ·
+    </span>
   );
 }
 

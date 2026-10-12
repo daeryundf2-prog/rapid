@@ -341,6 +341,55 @@ describe("DataGrid filter", () => {
   });
 });
 
+describe("grid chrome (visual-polish S3 / §0)", () => {
+  it("column controls are one 열 설정 button over the header's right end, outside the ARIA grid", async () => {
+    await renderFiles(20);
+    const button = screen.getByRole("button", { name: "열 설정" });
+    expect(button.closest('[role="grid"]')).toBeNull();
+    expect(button.closest(".grid-head-tools")).toBeTruthy();
+    // No separate column toolbar row any more.
+    expect(screen.queryByRole("toolbar", { name: /그리드 도구/ })).toBeNull();
+    button.focus();
+    fireEvent.click(button);
+    const popover = screen.getByRole("dialog", { name: "열 설정" });
+    expect(within(popover).getByRole("combobox", { name: "열 구성" })).toBeTruthy();
+    expect(within(popover).getByRole("combobox", { name: "밀도" })).toBeTruthy();
+    expect(within(popover).getByRole("group", { name: "표시할 열" })).toBeTruthy();
+    expect(within(popover).getByTestId("grid-colfilter-toggle")).toBeTruthy();
+    expect(document.activeElement).toBe(within(popover).getByRole("combobox", { name: "열 구성" }));
+    fireEvent.change(within(popover).getByRole("combobox", { name: "밀도" }), {
+      target: { value: "compact" },
+    });
+    expect(screen.getByRole("region", { name: /그리드$/ }).getAttribute("data-density")).toBe("compact");
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "열 설정" })).toBeNull();
+    expect(document.activeElement).toBe(button);
+  });
+
+  it("the batch bar floats over the grid: selecting does not insert a row above the grid", async () => {
+    await renderFiles(20);
+    const grid = screen.getByRole("grid");
+    const before = grid.previousElementSibling;
+    rowAt(0).focus();
+    fireEvent.keyDown(rowAt(0), { key: " " });
+    const bar = screen.getByRole("toolbar", { name: "선택 항목 일괄 처리" });
+    // Rendered after the scroll area inside the grid frame (absolutely positioned), never above it.
+    expect(grid.previousElementSibling).toBe(before);
+    expect(bar.parentElement?.classList.contains("grid-frame")).toBe(true);
+    expect(grid.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole("region", { name: /그리드$/ }).hasAttribute("data-batch")).toBe(true);
+    // 관련 is the one primary review action.
+    expect(within(bar).getByRole("button", { name: "관련" }).classList.contains("is-primary")).toBe(true);
+  });
+
+  it("the row menu trigger is an icon button (no text glyph)", async () => {
+    await renderFiles(5);
+    const trigger = within(rowAt(0)).getByRole("button", { name: "행 메뉴" });
+    expect(trigger.textContent).toBe("");
+    expect(trigger.querySelector("svg[data-icon='more']")).toBeTruthy();
+  });
+});
+
 describe("DataGrid batch commands", () => {
   it("hides the batch bar with 0 selection and every grid.batch.* command is disabled with a reason", async () => {
     await renderFiles();
@@ -481,6 +530,7 @@ describe("DataGrid notes and AXIOM preset", () => {
   it("the persisted AXIOM preset pins the chip column after the select cell and renders status chips", async () => {
     window.localStorage.setItem("rapidtriage.grid.preset", "axiom");
     await renderFiles(20);
+    fireEvent.click(screen.getByRole("button", { name: "열 설정" }));
     expect((screen.getByRole("combobox", { name: "열 구성" }) as HTMLSelectElement).value).toBe("axiom");
     expect(screen.getByRole("region", { name: /그리드$/ }).getAttribute("data-preset")).toBe("axiom");
     const headers = screen.getAllByRole("columnheader");

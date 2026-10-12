@@ -235,14 +235,30 @@ test("prefers-reduced-motion removes animation and transitions", async ({ page }
   expect(offenders).toEqual([]);
 });
 
-test("color scheme follows prefers-color-scheme unless the user chose a theme", async ({ page }) => {
+test("dark is the default whatever the OS; a chosen light theme is applied and persists (U-V1)", async ({
+  page,
+}) => {
+  const background = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  const themeAttr = () => page.evaluate(() => document.documentElement.dataset.theme ?? null);
   await page.emulateMedia({ colorScheme: "light" });
   await openRoute(page, "files");
-  const bg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  await page.evaluate(() => window.localStorage.removeItem("rapidtriage.v2.theme"));
+  await page.reload();
+  // No stored choice: dark, even on a light OS.
+  expect(await themeAttr()).toBeNull();
+  const bgDefault = await background();
   await page.emulateMedia({ colorScheme: "dark" });
   await page.reload();
-  const bgDark = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
-  expect(bg).not.toBe(bgDark);
+  expect(await background()).toBe(bgDefault);
+  // Choosing light applies it at once and survives a reload.
+  await page.getByTestId("theme-toggle").click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  const bgLight = await background();
+  expect(bgLight).not.toBe(bgDefault);
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  expect(await background()).toBe(bgLight);
+  await page.evaluate(() => window.localStorage.removeItem("rapidtriage.v2.theme"));
 });
 
 test("Q-A1: keyboard-only loop (palette search, J x3, Enter, hex mode, R, review board)", async ({

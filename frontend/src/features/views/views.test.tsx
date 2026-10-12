@@ -17,6 +17,7 @@ import { HistogramView } from "./HistogramView";
 import { barsFromRows, barsFromTree, rangeOf, rebucket, type TimelineHistogramPayload } from "./histogram";
 import { loadThumbBlob, THUMB_CONCURRENCY, THUMB_SIZE, ThumbnailView } from "./ThumbnailView";
 import { createLimiter, gridMove, isImageRow, sortThumbs } from "./thumbnails";
+import { useToolbarLead } from "./toolbarSlot";
 
 let restoreLayout: () => void = () => {};
 
@@ -117,8 +118,19 @@ describe("view= route parameter", () => {
   });
 });
 
+/** Stand-in for the DataGrid: renders the toolbar lead (the view switch) on its own toolbar line. */
+function GridStub() {
+  const lead = useToolbarLead();
+  return (
+    <div>
+      <div data-testid="grid-stub-toolbar">{lead}</div>
+      GRID
+    </div>
+  );
+}
+
 describe("ViewSwitch", () => {
-  function routeTo(collection: "files" | "timeline", view?: "thumbnails" | "histogram") {
+  function routeTo(collection: "files" | "timeline" | "review", view?: "thumbnails" | "histogram") {
     act(() => useAppStore.getState().navigate({ runId: "run-1", collection, ...(view ? { view } : {}) }));
   }
 
@@ -128,10 +140,13 @@ describe("ViewSwitch", () => {
     routeTo("timeline");
     renderQ(
       <ViewSwitch>
-        <div>GRID</div>
+        <GridStub />
       </ViewSwitch>,
     );
     expect(screen.getByText("GRID")).toBeTruthy();
+    // Column view: the switch rides the grid's toolbar line (visual-polish S1), not a row of its own.
+    const bar = screen.getByRole("toolbar", { name: "보기 전환" });
+    expect(bar.closest('[data-testid="grid-stub-toolbar"]')).toBeTruthy();
     const thumbs = screen.getByRole("button", { name: "썸네일 보기" });
     expect(thumbs.getAttribute("aria-disabled")).toBe("true");
     expect(thumbs.getAttribute("data-disabled-reason")).toMatch(/파일 노드/);
@@ -141,6 +156,19 @@ describe("ViewSwitch", () => {
     expect(useAppStore.getState().route.view).toBe("histogram");
     expect(window.location.hash).toContain("view=histogram");
     expect(screen.queryByText("GRID")).toBeNull();
+    // Other views keep the switch on a row of their own.
+    expect(screen.getByRole("toolbar", { name: "보기 전환" }).closest(".view-switch-row")).toBeTruthy();
+  });
+
+  it("a node with only the column view (리뷰보드) shows no switch (visual-polish S2)", () => {
+    routeTo("review");
+    renderQ(
+      <ViewSwitch>
+        <GridStub />
+      </ViewSwitch>,
+    );
+    expect(screen.getByText("GRID")).toBeTruthy();
+    expect(screen.queryByRole("toolbar", { name: "보기 전환" })).toBeNull();
   });
 
   it("switches views with Alt+Shift+1–4 and drops an unavailable view= from the URL", () => {

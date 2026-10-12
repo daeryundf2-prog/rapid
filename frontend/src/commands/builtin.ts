@@ -260,10 +260,10 @@ export function appCommands(): Command[] {
     },
     {
       id: "app.theme.system",
-      label: "테마: 시스템 설정 따르기",
+      label: "테마: 기본(다크)으로 되돌리기",
       group: "app",
       icon: "monitor",
-      disabledReason: () => (store().theme === null ? "이미 시스템 설정을 따르고 있습니다" : undefined),
+      disabledReason: () => (store().theme === null ? "이미 기본 테마(다크)입니다" : undefined),
       run: () => store().setTheme(null),
     },
     {

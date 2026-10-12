@@ -90,52 +90,138 @@
   white-space: nowrap;
 }
 
+/* ←/→ and ⋯: borderless icon buttons (visual-polish §0). */
 .viewer-icon-button {
-  width: var(--row-h);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
   padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.viewer-icon-button:hover:not([aria-disabled="true"]),
+.viewer-icon-button[aria-expanded="true"] {
+  background: var(--bg-raised);
+  color: var(--text);
 }
 
 .viewer-button:hover,
-.viewer-tool:hover,
-.viewer-icon-button:hover {
+.viewer-tool:hover {
   border-color: var(--accent);
 }
 
 .viewer-button:disabled,
 .viewer-button[aria-disabled="true"],
-.viewer-tool[aria-disabled="true"],
-.viewer-icon-button[aria-disabled="true"] {
+.viewer-tool[aria-disabled="true"] {
   color: var(--text-muted);
   border-style: dashed;
   cursor: not-allowed;
 }
 
+.viewer-icon-button[aria-disabled="true"] {
+  color: var(--disabled-text);
+  cursor: not-allowed;
+}
+
 .viewer-button:disabled:hover,
 .viewer-button[aria-disabled="true"]:hover,
-.viewer-tool[aria-disabled="true"]:hover,
-.viewer-icon-button[aria-disabled="true"]:hover {
+.viewer-tool[aria-disabled="true"]:hover {
   border-color: var(--line);
 }
 
-/* Toolbar ----------------------------------------------------------------- */
+/* Header actions (visual-polish S5/S6): 관련 있음 · status dot · 더보기 · ⋯ ------- */
 
-.viewer-toolbar {
-  display: flex;
+.viewer-header {
   flex-wrap: wrap;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  border-bottom: 1px solid var(--line);
 }
 
-.viewer-tool-group {
+.viewer-header > .note-form {
+  flex-basis: 100%;
+  padding: var(--space-2) 0 0;
+  border-bottom: 0;
+}
+
+.viewer-actions {
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
   gap: var(--space-1);
+  flex: none;
 }
 
-.viewer-tool-group + .viewer-tool-group {
-  padding-left: var(--space-2);
-  border-left: 1px solid var(--line);
+.viewer-primary,
+.viewer-tool-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 28px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-table-aux);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.viewer-primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
+.viewer-primary[aria-pressed="true"] {
+  border-color: var(--status-relevant);
+  background: var(--status-relevant);
+  color: var(--status-relevant-on);
+}
+
+.viewer-primary[aria-disabled="true"] {
+  border-color: var(--line);
+  background: var(--disabled-bg);
+  color: var(--disabled-text);
+  cursor: not-allowed;
+}
+
+/* The primary carries data-status-button for the shared colours, but no left status stripe. */
+.viewer-primary[data-status-button]:not([aria-pressed="true"]) {
+  border-left-width: 1px;
+  border-left-color: var(--accent);
+}
+
+.viewer-primary[aria-disabled="true"][data-status-button]:not([aria-pressed="true"]) {
+  border-left-color: var(--line);
+}
+
+.viewer-tool-trigger {
+  border-color: transparent;
+  color: var(--text-muted);
+}
+
+.viewer-tool-trigger:hover,
+.viewer-tool-trigger[aria-expanded="true"] {
+  background: var(--bg-raised);
+  color: var(--text);
+}
+
+.viewer-primary:focus-visible,
+.viewer-tool-trigger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.viewer-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 28px;
 }
 
 /* Mode tabs --------------------------------------------------------------- */

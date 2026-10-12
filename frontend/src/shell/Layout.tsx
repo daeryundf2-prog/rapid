@@ -3,10 +3,11 @@ import { Group, type GroupImperativeHandle, Panel, Separator } from "react-resiz
 import { SkipLink, useEscape } from "../a11y";
 import { focusMain, MAIN_ID, VIEWER_ID } from "../commands/builtin";
 import { CommandButton } from "../commands/CommandButton";
+import { Landing } from "../features/case/Landing";
 import { StageRail } from "../features/stages/StageRail";
 import { STAGE_DEFS, STAGE_HEADING_ID } from "../features/stages/stages";
 import { Icon } from "../icons";
-import { stageOf } from "../router";
+import { type Stage, stageOf } from "../router";
 import { usePanelLayout } from "../state/hooks";
 import { useAppStore } from "../state/store";
 import { CommandPalette } from "./CommandPalette";
@@ -61,6 +62,40 @@ function GridPane() {
 
 function ViewerSlot({ drawer }: { drawer: boolean }) {
   return <Slot name="viewer" drawer={drawer} fallback={<p className="pane-empty">선택된 행이 없습니다</p>} />;
+}
+
+/**
+ * Stages whose centre lists rows the viewer previews (visual-polish S9). 접수·처리·보고 are
+ * two columns — left panel + page — and reserve no viewer space.
+ */
+export const VIEWER_STAGES: readonly Stage[] = ["explore", "review"];
+
+export function stageHasViewer(stage: Stage): boolean {
+  return VIEWER_STAGES.includes(stage);
+}
+
+/** 접수·처리·보고: left panel + page, no viewer column. */
+function TwoPanes({ narrow }: { narrow: boolean }) {
+  return (
+    <Group id="rapidtriage-console-2col" orientation="horizontal" style={{ height: "100%" }}>
+      <Panel id={PANEL.tree} defaultSize={narrow ? "28%" : "20%"} minSize="240px" maxSize="320px">
+        <TreePane />
+      </Panel>
+      <Separator className="resize-handle" />
+      <Panel id={PANEL.grid} minSize="320px">
+        <GridPane />
+      </Panel>
+    </Group>
+  );
+}
+
+/** No case open (visual-polish S10): the landing card is the page's main content. */
+function LandingPane() {
+  return (
+    <main id={MAIN_ID} tabIndex={-1} className="pane-frame landing-frame" aria-label="시작">
+      <Landing />
+    </main>
+  );
 }
 
 function WidePanes() {
@@ -157,22 +192,42 @@ function NarrowPanes() {
 }
 
 /**
- * The console frame (plan §4.1): top bar, fixed 3-pane body, status bar.
+ * The console frame (plan §4.1, visual-polish S9/S10): top bar, stage rail, body, status bar.
+ * The body is the landing card without a case, two columns on 접수·처리·보고 and three
+ * (tree · grid · viewer) on 탐색·검토.
  * Landmarks: banner (top bar) · navigation (tree) · main (grid, #main) ·
- * complementary (viewer, #viewer) · contentinfo (status bar).
+ * complementary (viewer, #viewer, 탐색·검토 only) · contentinfo (status bar).
  */
 export function Layout() {
   const drawer = useMediaQuery(DRAWER_QUERY);
   const setViewerIsDrawer = useAppStore((s) => s.setViewerIsDrawer);
   useEffect(() => setViewerIsDrawer(drawer), [drawer, setViewerIsDrawer]);
+  const hasCase = useAppStore((s) => Boolean(s.route.runId));
+  const withViewer = useAppStore((s) => stageHasViewer(stageOf(s.route)));
+  const columns = !hasCase ? "landing" : withViewer ? "three" : "two";
 
   return (
-    <div className="shell" data-testid="workbench-shell" data-layout={drawer ? "drawer" : "wide"}>
+    <div
+      className="shell"
+      data-testid="workbench-shell"
+      data-layout={drawer ? "drawer" : "wide"}
+      data-columns={columns}
+    >
       <SkipLink target={MAIN_ID} />
       <TopBar />
       <div className="shell-body">
         <StageRail />
-        <div className="shell-panes">{drawer ? <NarrowPanes /> : <WidePanes />}</div>
+        <div className="shell-panes">
+          {columns === "landing" ? (
+            <LandingPane />
+          ) : columns === "two" ? (
+            <TwoPanes narrow={drawer} />
+          ) : drawer ? (
+            <NarrowPanes />
+          ) : (
+            <WidePanes />
+          )}
+        </div>
       </div>
       <StatusBar />
       <CommandPalette />
