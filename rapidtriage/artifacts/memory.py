@@ -115,7 +115,11 @@ class MemoryVolatilityProvider:
         return True
 
     def collect(self, root: Path) -> Iterable[ArtifactRecord]:
-        for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
+        yield from self.collect_files(sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()))
+
+    def collect_files(self, paths: Iterable[Path]) -> Iterable[ArtifactRecord]:
+        """Records of already-walked ``paths`` (callers with their own, e.g. link-safe, walk)."""
+        for path in paths:
             if not path.is_file():
                 continue
             suffix = path.suffix.lower()

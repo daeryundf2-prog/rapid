@@ -24,6 +24,7 @@ from ...core.crash import (
 from ...core.doctor import run_doctor
 from ...core.enterprise import build_enterprise_policy
 from ...core.evidence import identify_evidence, supported_evidence_formats
+from ...core.jobs import RunJobStore
 from ...core.keyword_packs import (
     keyword_pack_library_assessment,
     list_keyword_packs,
@@ -43,7 +44,7 @@ from .viewer_core import (
 )
 
 
-def build_meta_router() -> APIRouter:
+def build_meta_router(store: RunJobStore | None = None) -> APIRouter:
     router = APIRouter()
 
     @router.get("/api/health")
@@ -132,7 +133,19 @@ def build_meta_router() -> APIRouter:
     def browse_filesystem(
         path: str | None = Query(default=None, max_length=4096),
         show_hidden: bool = Query(False),
+        scope: str | None = Query(
+            default=None,
+            max_length=32,
+            description="analysis-input | analysis-output: 분석 대화상자용 — run_id 런의 허용 입력/출력 루트 안만 나열 (없으면 예전처럼 전체 파일 시스템)",
+        ),
+        run_id: str | None = Query(default=None, max_length=128),
     ) -> dict[str, object]:
+        if scope:
+            if store is None:
+                raise HTTPException(status_code=400, detail="이 서버에서는 분석 찾아보기를 쓸 수 없습니다")
+            from .analyses import browse_analysis_scope
+
+            return browse_analysis_scope(store, run_id=run_id, scope_name=scope.strip(), path=path, show_hidden=show_hidden)
         try:
             return browse_directory(path, show_hidden=show_hidden)
         except BrowseError as exc:

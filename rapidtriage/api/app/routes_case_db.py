@@ -51,11 +51,19 @@ from .models import (
     SampleCaseRunRequest,
 )
 from .run_review import (
+    ACTIVE_MARK_SQL,
     RunLocatorIndex,
     canonical_run_case,
     review_map_entries,
     split_batch_targets,
 )
+
+
+def _summary_output_dir(summary: dict[str, object]) -> Path | None:
+    try:
+        return run_output_dir(summary)
+    except RuntimeError:
+        return None
 
 
 def build_case_db_router(
@@ -95,20 +103,27 @@ def build_case_db_router(
         """
         job = get_job(store, run_id)
         if job.summary is None:
-            raise HTTPException(status_code=409, detail="run is not completed")
+            raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
         output_dir = run_output_dir(job.summary)
         database_path, case_id = canonical_run_case(job.summary, run_id)
         by_status: dict[str, int] = {}
         db_include = 0
+        cleared = 0
         db_exists = database_path.is_file()
         if db_exists:
             try:
                 connection = sqlite3.connect(f"{database_path.as_uri()}?mode=ro", uri=True)
                 try:
-                    for status, include, count in connection.execute(
-                        "SELECT status, include_in_report, COUNT(*) FROM review_mark WHERE case_id = ? GROUP BY status, include_in_report",
+                    # Cleared marks (back to defaults) stay in the DB for the audit
+                    # trail but are not review items: counted apart, never in by_status.
+                    for status, include, active, count in connection.execute(
+                        f"SELECT status, include_in_report, {ACTIVE_MARK_SQL} AS active, COUNT(*) FROM review_mark "
+                        "WHERE case_id = ? GROUP BY status, include_in_report, active",
                         (case_id,),
                     ):
+                        if not active:
+                            cleared += int(count)
+                            continue
                         by_status[str(status)] = by_status.get(str(status), 0) + int(count)
                         if include:
                             db_include += int(count)
@@ -117,6 +132,7 @@ def build_case_db_router(
             except sqlite3.Error:
                 by_status = {}
                 db_include = 0
+                cleared = 0
         bookmarks = 0
         bookmarks_in_report = 0
         case_json = output_dir / "rapidtriage-case.json"
@@ -138,6 +154,7 @@ def build_case_db_router(
             "case_id": case_id,
             "exists": db_exists,
             "by_status": by_status,
+            "cleared": cleared,
             "include_in_report": db_include,
             "case_json": {"bookmarks": bookmarks, "include_in_report": bookmarks_in_report},
             "report_candidates": db_include + bookmarks_in_report,
@@ -157,7 +174,7 @@ def build_case_db_router(
     def ensure_run_case_db(run_id: str, request: RunCaseDbEnsureRequest) -> dict[str, object]:
         job = get_job(store, run_id)
         if job.summary is None:
-            raise HTTPException(status_code=409, detail="run is not completed")
+            raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
         output_dir = run_output_dir(job.summary)
         default_database, default_case_id = canonical_run_case(job.summary, run_id)
         database_path = Path(request.database).expanduser().resolve() if request.database else default_database
@@ -248,15 +265,20 @@ def build_case_db_router(
     ) -> list[dict[str, str]]:
         """``{collection, kind?, locator}`` targets -> case-DB ``{target_type, target_id}``."""
         if not run_id:
-            raise HTTPException(status_code=400, detail="locator targets require run_id")
+            raise HTTPException(status_code=400, detail="로케이터 대상에는 run_id가 필요합니다")
         job = get_job(store, run_id)
         if job.summary is None:
-            raise HTTPException(status_code=409, detail="run is not completed")
+            raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
         outputs = job.summary.get("outputs")
         resolved: list[dict[str, str]] = []
         unresolved: list[str] = []
         with database.connect() as connection:
-            index = RunLocatorIndex(connection, case_id, outputs if isinstance(outputs, dict) else {})
+            index = RunLocatorIndex(
+                connection,
+                case_id,
+                outputs if isinstance(outputs, dict) else {},
+                output_dir=_summary_output_dir(job.summary),
+            )
             for target in located:
                 collection = target.get("collection") or target.get("source") or ""
                 locator = target.get("locator") or target.get("pointer") or ""
@@ -268,7 +290,7 @@ def build_case_db_router(
         if unresolved:
             raise HTTPException(
                 status_code=400,
-                detail=f"case DB has no row for run locator(s): {', '.join(unresolved[:10])}",
+                detail=f"케이스 DB에 이 런 로케이터에 해당하는 행이 없습니다: {', '.join(unresolved[:10])}",
             )
         return resolved
 
@@ -283,7 +305,7 @@ def build_case_db_router(
         """
         job = get_job(store, run_id)
         if job.summary is None:
-            raise HTTPException(status_code=409, detail="run is not completed")
+            raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
         database_path, case_id = canonical_run_case(job.summary, run_id)
         payload: dict[str, object] = {
             "command": "case-db.review-map",
@@ -302,7 +324,11 @@ def build_case_db_router(
             connection.row_factory = sqlite3.Row
             try:
                 marks, truncated = review_map_entries(
-                    connection, case_id, outputs if isinstance(outputs, dict) else {}, limit=limit
+                    connection,
+                    case_id,
+                    outputs if isinstance(outputs, dict) else {},
+                    limit=limit,
+                    output_dir=_summary_output_dir(job.summary),
                 )
             finally:
                 connection.close()

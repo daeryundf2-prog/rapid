@@ -216,6 +216,8 @@ def handle_vsc_compare(args: argparse.Namespace, parser: argparse.ArgumentParser
                 f"Snapshots: {summary['snapshot_count']}  "
                 f"Deleted: {summary['deleted']}  Added: {summary['added']}  Modified: {summary['modified']}"
             )
+            if any((item.get("summary") or {}).get("truncated") for item in payload["comparisons"]):
+                print("Warning: change records exceeded --max-records; counts are complete, the record listing is truncated")
         return 0
 
 
@@ -309,6 +311,8 @@ def handle_vsc_extract(args: argparse.Namespace, parser: argparse.ArgumentParser
                 f"Selected: {summary['selected_count']}  "
                 f"Copied: {summary['copied_count']}  Skipped: {summary['skipped_count']}"
             )
+            if summary.get("selection_truncated"):
+                print("Warning: selected changes exceeded --max-records; raise it (0 = unlimited) to extract all changes")
         return 0
 
 

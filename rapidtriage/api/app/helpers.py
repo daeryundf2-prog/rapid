@@ -86,7 +86,7 @@ def get_job(store: RunJobStore, run_id: str):
     try:
         return store.get(run_id)
     except KeyError:
-        raise HTTPException(status_code=404, detail="run not found")
+        raise HTTPException(status_code=404, detail="런을 찾을 수 없습니다")
 
 
 def job_output_dir(job: RunJob) -> Path | None:
@@ -180,7 +180,7 @@ def get_named_output(store: RunJobStore, run_id: str, output_name: str) -> dict[
     try:
         return store.read_output(run_id, output_name)
     except KeyError:
-        raise HTTPException(status_code=404, detail="run output not found")
+        raise HTTPException(status_code=404, detail="런 출력을 찾을 수 없습니다")
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     except PermissionError as exc:
@@ -216,7 +216,7 @@ def get_output_path(store: RunJobStore, run_id: str, output_name: str) -> Path:
     try:
         return store.output_path(run_id, output_name)
     except KeyError:
-        raise HTTPException(status_code=404, detail="run output not found")
+        raise HTTPException(status_code=404, detail="런 출력을 찾을 수 없습니다")
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     except PermissionError as exc:
@@ -225,22 +225,49 @@ def get_output_path(store: RunJobStore, run_id: str, output_name: str) -> Path:
         raise HTTPException(status_code=404, detail=str(exc))
 
 
-def resolve_allowed_source_file(store: RunJobStore, run_id: str, raw_path: str) -> Path:
+SOURCE_NOT_FOUND_MESSAGE = "허용된 증거 루트에서 원본 파일을 찾을 수 없습니다"
+SOURCE_OUTSIDE_MESSAGE = "원본 파일이 허용된 증거 루트 밖에 있습니다"
+
+
+def resolve_allowed_source_file(
+    store: RunJobStore,
+    run_id: str,
+    raw_path: str,
+    *,
+    allow_directory: bool = False,
+    analysis_id: str | None = None,
+    locator: str | None = None,
+) -> Path:
+    """The source file under the run's allowed roots (404/403 otherwise).
+
+    ``allow_directory`` (source-metadata/source-preview) also accepts a
+    directory, so a files-grid directory row gets a well-formed answer.
+    ``analysis_id`` + ``locator`` (``/rows/<n>``) name an analysis result row:
+    a path outside the run roots is then served only when it is that row's
+    own path inside the analysis's validated input roots
+    (``analyses.resolve_analysis_row_source``).
+    """
     job = get_job(store, run_id)
     if job.summary is None:
-        raise HTTPException(status_code=409, detail="run is not completed")
+        raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
     allowed_roots = allowed_source_roots(job.summary)
     candidates = candidate_source_paths(raw_path, allowed_roots)
     scoped_candidates = [candidate for candidate in candidates if any(is_relative_to(candidate, root) for root in allowed_roots)]
     for candidate in scoped_candidates:
-        if candidate.is_file():
+        if candidate.is_file() or (allow_directory and candidate.is_dir()):
             return candidate
+    if analysis_id:
+        from .analyses import resolve_analysis_row_source
+
+        return resolve_analysis_row_source(
+            store, run_id, raw_path, analysis_id=analysis_id, locator=locator or "", allow_directory=allow_directory
+        )
     diagnostics = source_path_resolution_diagnostics(raw_path, allowed_roots)
     if scoped_candidates:
         raise HTTPException(
             status_code=404,
             detail={
-                "message": "source file not found in allowed evidence roots",
+                "message": SOURCE_NOT_FOUND_MESSAGE,
                 "source_path_resolution": diagnostics,
             },
         )
@@ -248,7 +275,7 @@ def resolve_allowed_source_file(store: RunJobStore, run_id: str, raw_path: str) 
     raise HTTPException(
         status_code=403,
         detail={
-            "message": f"source file is outside allowed evidence roots: {candidate}",
+            "message": f"{SOURCE_OUTSIDE_MESSAGE}: {candidate}",
             "source_path_resolution": diagnostics,
         },
     )
@@ -582,7 +609,7 @@ def dt_from_epoch(value: float) -> str:
 def default_case_path(store: RunJobStore, run_id: str) -> Path:
     job = get_job(store, run_id)
     if job.summary is None:
-        raise HTTPException(status_code=409, detail="run is not completed")
+        raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
     output_dir = job.summary.get("output_dir")
     if not isinstance(output_dir, str) or not output_dir:
         raise HTTPException(status_code=409, detail="run summary does not include output_dir")

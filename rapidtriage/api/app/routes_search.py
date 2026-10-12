@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ...core.docs import query_docs_index
 from ...core.jobs import RunJobStore
@@ -16,6 +16,7 @@ from ...core.keyword_packs import (
     resolve_keyword_packs,
 )
 from ...core.search import SearchError, run_unified_search
+from .analyses import AnalysisRowRef, analysis_row_ref
 from .helpers import (
     get_job,
     get_output_path,
@@ -39,6 +40,7 @@ def build_search_router(
     def search_source_file(
         run_id: str,
         path: str = Query(..., min_length=1),
+        row_ref: AnalysisRowRef = Depends(analysis_row_ref),
         keyword: list[str] = Query(..., min_length=1),
         limit: int = Query(100, ge=1, le=500),
         context: int = Query(120, ge=20, le=500),
@@ -47,7 +49,7 @@ def build_search_router(
     ) -> dict[str, object]:
         archive_request = parse_source_preview_archive_request(path)
         if archive_request:
-            source_path = resolve_allowed_source_file(store, run_id, archive_request["archive_path"])
+            source_path = resolve_allowed_source_file(store, run_id, archive_request["archive_path"], **row_ref)
             return build_archived_source_search(
                 source_path,
                 archive_request["entry_name"],
@@ -57,7 +59,7 @@ def build_search_router(
                 sqlite_resume_token=sqlite_resume_token,
                 file_resume_token=file_resume_token,
             )
-        source_path = resolve_allowed_source_file(store, run_id, path)
+        source_path = resolve_allowed_source_file(store, run_id, path, **row_ref)
         return build_source_search(
             source_path,
             keyword,
@@ -165,7 +167,7 @@ def build_search_router(
     ) -> dict[str, object]:
         job = get_job(store, run_id)
         if job.summary is None:
-            raise HTTPException(status_code=409, detail="run is not completed")
+            raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
         try:
             selected_pack_names = [name.strip() for name in keyword_pack if name.strip()]
             keywords = resolve_keyword_packs(keyword, pack_names=selected_pack_names)

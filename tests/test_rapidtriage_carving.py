@@ -130,6 +130,27 @@ class RapidTriageCarvingTests(unittest.TestCase):
             self.assertEqual(entry["offset"], len(filler))
             self.assertEqual(entry["status"], "footer-validated")
 
+    def test_candidates_in_later_chunks_are_found_after_an_early_candidate(self) -> None:
+        # Building a candidate reads its carve window; the chunk scan must resume
+        # where it was, not after that window (which skipped the rest of the file
+        # and shifted every later offset).
+        from unittest.mock import patch
+
+        from rapidtriage.core import carving
+
+        jpeg = b"\xff\xd8\xff\xe0" + b"\x00\x10JFIF\x00" + b"\x11" * 64 + b"\xff\xd9"
+        chunk = 8192
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "case"
+            root.mkdir()
+            blob = b"".join(b"\x00" * 100 + jpeg + b"\x00" * (chunk - 100 - len(jpeg)) for _ in range(6))
+            (root / "multi.bin").write_bytes(blob)
+            with patch.object(carving, "SCAN_CHUNK_BYTES", chunk):
+                payload = run_bounded_carving(root, Path(tmp_dir) / "carve", max_candidates=50)
+            offsets = [entry["offset"] for entry in payload["entries"]]
+            self.assertEqual(offsets, [index * chunk + 100 for index in range(6)])
+            self.assertEqual(payload["summary"]["scanned_byte_count"], len(blob))
+
     def test_resume_continues_from_checkpoint(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir) / "case"

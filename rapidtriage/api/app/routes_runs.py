@@ -28,7 +28,14 @@ from ...core.jobs import (
     run_output_dir,
 )
 from ...core.visible_capabilities import build_visible_capability_response
-from .artifact_filter import filter_artifact_page
+from .analyses import run_scope
+from .analysis_kinds import cross_case_eligibility
+from .artifact_filter import (
+    annotate_page_counts,
+    filter_across_kinds,
+    filter_artifact_page,
+    filter_files_by_category,
+)
 from .artifact_sort import SORT_ORDERS, paginate_sorted_artifact_output
 from .dashboard import (
     build_run_dashboard,
@@ -36,6 +43,7 @@ from .dashboard import (
     read_case_notes,
     write_case_notes,
 )
+from .files_ntfs import join_files_page
 from .helpers import (
     allowed_source_roots,
     default_case_path,
@@ -57,6 +65,7 @@ from .models import (
 from .pagination import (
     paginate_artifact_output,
     paginate_payload,
+    with_record_index,
 )
 from .runops import (
     build_run_output_preview,
@@ -66,6 +75,7 @@ from .timeline_hist import build_timeline_histogram
 from .tree import build_run_issues, build_run_tree
 
 ACTIVE_RUN_STATUSES = frozenset({"queued", "running"})
+FILTER_LIMIT_MESSAGE = "필터는 limit>0에서만 지원합니다"
 EXTRACT_ZIP_MAX_BYTES = 2 * 1024 * 1024 * 1024
 EXTRACT_NAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
@@ -154,6 +164,8 @@ def build_runs_router(
         runs = []
         for job in store.list():
             row = job.to_dict()
+            # Cross-case dialog filter (plan P1 §3.2 cross-case): one stat, no DB open.
+            row.update(cross_case_eligibility(job))
             if job.status in ACTIVE_RUN_STATUSES:
                 # Compact live progress for the run card (full payload on
                 # GET /api/runs/{run_id}); finished runs skip the file read.
@@ -167,7 +179,9 @@ def build_runs_router(
         payload = get_job_payload(store, run_id, include_summary=True)
         # Live per-provider progress (rapidtriage-run-progress.json); null
         # until the run has written it.
-        payload["progress"] = run_progress_payload(get_job(store, run_id))
+        job = get_job(store, run_id)
+        payload["progress"] = run_progress_payload(job)
+        payload.update(cross_case_eligibility(job))
         return payload
 
 
@@ -176,7 +190,7 @@ def build_runs_router(
         try:
             store.remove(run_id)
         except KeyError:
-            raise HTTPException(status_code=404, detail="run not found")
+            raise HTTPException(status_code=404, detail="런을 찾을 수 없습니다")
 
 
     @router.post("/api/runs/{run_id}/cancel")
@@ -184,7 +198,7 @@ def build_runs_router(
         try:
             return store.cancel(run_id).to_dict(include_summary=True)
         except KeyError:
-            raise HTTPException(status_code=404, detail="run not found")
+            raise HTTPException(status_code=404, detail="런을 찾을 수 없습니다")
 
 
     @router.post("/api/runs/{run_id}/retry", status_code=202)
@@ -192,7 +206,7 @@ def build_runs_router(
         try:
             return store.retry(run_id).to_dict(include_summary=True)
         except KeyError:
-            raise HTTPException(status_code=404, detail="run not found")
+            raise HTTPException(status_code=404, detail="런을 찾을 수 없습니다")
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc))
 
@@ -201,7 +215,7 @@ def build_runs_router(
     def get_run_summary(run_id: str) -> dict[str, object]:
         job = get_job(store, run_id)
         if job.summary is None:
-            raise HTTPException(status_code=409, detail="run is not completed")
+            raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
         try:
             case_path = default_case_path(store, run_id)
         except HTTPException:
@@ -213,7 +227,7 @@ def build_runs_router(
     def get_run_capabilities(run_id: str) -> dict[str, object]:
         job = get_job(store, run_id)
         if job.summary is None:
-            raise HTTPException(status_code=409, detail="run is not completed")
+            raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
         # Completed run outputs are immutable; reuse the response until any
         # artifacts output (or the summary) changes on disk.
         cache_key = capability_response_cache_key(run_id, job.summary)
@@ -234,7 +248,7 @@ def build_runs_router(
     def get_run_viewer_workflow_validation(run_id: str) -> dict[str, object]:
         job = get_job(store, run_id)
         if job.summary is None:
-            raise HTTPException(status_code=409, detail="run is not completed")
+            raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
         return build_run_viewer_workflow_validation(store, run_id, job.summary)
 
 
@@ -243,7 +257,7 @@ def build_runs_router(
         try:
             return store.read_output(run_id, output_name)
         except KeyError:
-            raise HTTPException(status_code=404, detail="run output not found")
+            raise HTTPException(status_code=404, detail="런 출력을 찾을 수 없습니다")
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc))
         except PermissionError as exc:
@@ -263,7 +277,7 @@ def build_runs_router(
         try:
             return {"files": store.output_files(run_id)}
         except KeyError:
-            raise HTTPException(status_code=404, detail="run not found")
+            raise HTTPException(status_code=404, detail="런을 찾을 수 없습니다")
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc))
         except PermissionError as exc:
@@ -370,8 +384,27 @@ def build_runs_router(
         sort: str | None = Query(default=None),
         order: str | None = Query(default=None),
         locate: int | None = Query(default=None, ge=0),
+        artifact_type: list[str] = Query(default=[]),
+        after: str | None = Query(default=None),
     ) -> dict[str, object]:
         """Page per-kind artifact rows; every row carries its JSONL ``record_index``.
+
+        ``artifact_type`` (repeatable) keeps only rows of those types: a
+        streaming filter (with ``limit > 0``) composable with ``kind``,
+        ``sort`` and ``path_contains``; its pagination reports
+        ``scanned``/``truncated`` like ``path_contains``. Every kind page
+        reports ``record_count`` (unfiltered) and ``matched`` (filtered count,
+        exact when the scan reached the end of the kind, else ``null``).
+
+        With ``artifact_type`` and/or ``path_contains`` and zero or several
+        ``kind`` (no ``sort``),
+        ``offset``/``limit`` page the matches across kinds as one collection
+        (kind order: as requested, else alphabetical), scanning at most
+        ``CROSS_KIND_SCAN_CAP`` rows per request; the response adds
+        ``cross_kind`` = ``{kinds, offset, limit, returned, order, record_count,
+        matched, has_more, next_offset, next_after, scanned, truncated}`` and
+        each kind page holds only its rows of that window. Pass
+        ``after=<next_after>`` to continue behind the last consumed row.
 
         ``sort`` (``timestamp`` | ``details.<name>``, optionally suffixed
         ``:asc``/``:desc``; an explicit ``order`` wins over the suffix) sorts
@@ -382,11 +415,15 @@ def build_runs_router(
         """
         job = get_job(store, run_id)
         if job.summary is None:
-            raise HTTPException(status_code=409, detail="run is not completed")
+            raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
         outputs = job.summary.get("outputs")
         if not isinstance(outputs, dict):
             raise HTTPException(status_code=409, detail="run has no outputs")
         wanted_kinds = {item.strip() for item in kind if item.strip()}
+        wanted_types = frozenset(item.strip() for item in artifact_type if item.strip()) or None
+        needle = path_contains.strip() if path_contains and path_contains.strip() else None
+        if (wanted_types or needle) and limit <= 0:
+            raise HTTPException(status_code=400, detail=FILTER_LIMIT_MESSAGE)
         sort_key = sort.strip() if sort and sort.strip() else None
         sort_order = (order or "").strip().lower() or None
         if sort_key:
@@ -399,13 +436,26 @@ def build_runs_router(
             sort_order = sort_order or "asc"
             if sort_order not in SORT_ORDERS:
                 raise HTTPException(status_code=400, detail="order must be asc or desc")
+        if (wanted_types or needle) and not sort_key and len(wanted_kinds) != 1 and limit > 0:
+            return _artifacts_across_kinds(
+                run_id,
+                outputs,
+                kinds=list(dict.fromkeys(item.strip() for item in kind if item.strip())),
+                path_contains=needle,
+                artifact_types=wanted_types,
+                offset=offset,
+                limit=limit,
+                after=after,
+            )
         artifacts = {}
+        kind_payloads: dict[str, dict[str, object]] = {}
         for name in sorted(outputs):
             if name.startswith("artifacts_"):
                 if wanted_kinds and name.removeprefix("artifacts_") not in wanted_kinds:
                     continue
                 try:
                     artifact_payload = store.read_output(run_id, name)
+                    kind_payloads[name.removeprefix("artifacts_")] = artifact_payload
                     if sort_key:
                         artifacts[name.removeprefix("artifacts_")] = paginate_sorted_artifact_output(
                             artifact_payload,
@@ -417,17 +467,19 @@ def build_runs_router(
                             offset=offset,
                             limit=limit,
                             cursor=cursor,
-                            path_contains=path_contains.strip() if path_contains and path_contains.strip() else None,
+                            path_contains=needle,
                             locate=locate,
+                            artifact_types=wanted_types,
                         )
                         continue
-                    if path_contains and path_contains.strip() and limit > 0:
+                    if (needle or wanted_types) and limit > 0:
                         artifacts[name.removeprefix("artifacts_")] = filter_artifact_page(
                             artifact_payload,
                             payload_path=get_output_path(store, run_id, name),
-                            path_contains=path_contains.strip(),
+                            path_contains=needle,
                             offset=offset,
                             limit=limit,
+                            artifact_types=wanted_types,
                         )
                         continue
                     artifacts[name.removeprefix("artifacts_")] = paginate_artifact_output(
@@ -443,6 +495,9 @@ def build_runs_router(
                     raise HTTPException(status_code=403, detail=str(exc))
                 except FileNotFoundError as exc:
                     raise HTTPException(status_code=404, detail=str(exc))
+        for kind_name, page in artifacts.items():
+            if isinstance(page, dict) and kind_name in kind_payloads:
+                annotate_page_counts(page, kind_payloads[kind_name], filtered=bool(needle or wanted_types) and limit > 0)
         response: dict[str, object] = {"artifacts": artifacts}
         if sort_key:
             statuses = [
@@ -454,11 +509,48 @@ def build_runs_router(
         return response
 
 
+    def _artifacts_across_kinds(
+        run_id: str,
+        outputs: dict[str, object],
+        *,
+        kinds: list[str],
+        path_contains: str | None,
+        artifact_types: frozenset[str] | None,
+        offset: int,
+        limit: int,
+        after: str | None,
+    ) -> dict[str, object]:
+        available = [name.removeprefix("artifacts_") for name in sorted(outputs) if name.startswith("artifacts_")]
+        ordered = [item for item in kinds if item in available] if kinds else available
+        sources = []
+        for item in ordered:
+            name = f"artifacts_{item}"
+            try:
+                sources.append((item, store.read_output(run_id, name), get_output_path(store, run_id, name)))
+            except RuntimeError as exc:
+                raise HTTPException(status_code=409, detail=str(exc))
+            except PermissionError as exc:
+                raise HTTPException(status_code=403, detail=str(exc))
+            except FileNotFoundError as exc:
+                raise HTTPException(status_code=404, detail=str(exc))
+        try:
+            return filter_across_kinds(
+                sources,
+                path_contains=path_contains,
+                artifact_types=artifact_types,
+                offset=offset,
+                limit=limit,
+                after=after,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+
     @router.post("/api/runs/{run_id}/extract")
     def extract_run_rows(run_id: str, request: RunExtractRequest) -> dict[str, Any]:
         job = get_job(store, run_id)
         if job.summary is None:
-            raise HTTPException(status_code=409, detail="run is not completed")
+            raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
         roots = allowed_source_roots(job.summary)
         items: list[dict[str, object]] = []
         for row in request.rows:
@@ -511,7 +603,7 @@ def build_runs_router(
     def download_run_extract(run_id: str, name: str) -> FileResponse:
         job = get_job(store, run_id)
         if job.summary is None:
-            raise HTTPException(status_code=409, detail="run is not completed")
+            raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
         if not EXTRACT_NAME_PATTERN.fullmatch(name):
             raise HTTPException(status_code=400, detail="invalid extract name")
         base = run_output_dir(job.summary) / "extract"
@@ -548,7 +640,7 @@ def build_runs_router(
         """
         job = get_job(store, run_id)
         if job.summary is None:
-            raise HTTPException(status_code=409, detail="run is not completed")
+            raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
         try:
             path = get_output_path(store, run_id, "columnar_artifacts")
         except HTTPException as exc:
@@ -577,9 +669,44 @@ def build_runs_router(
         offset: int = Query(0, ge=0),
         limit: int = Query(0, ge=0, le=1000),
         cursor: str | None = Query(default=None),
+        category: list[str] = Query(default=[]),
     ) -> dict[str, object]:
+        """Paged file candidates joined with the newest ``ntfs-meta`` analysis.
+
+        Every row gains ``ntfs`` (``entry_number``, ``created_at``,
+        ``accessed_at``, ``mft_modified_at``, ``in_use``) or ``null``,
+        ``filesystem`` (``"NTFS"`` when joined) and ``source_image``; the page
+        reports ``ntfs_join = {analysis_id|null, status: joined|no_analysis|
+        no_volume_prefix|too_large|skipped, matched, total, analysis_total|null,
+        volume_prefix|null, prefix_method|null, partition|null, reason?}``
+        (``matched``/``total`` over this page's rows only; ``analysis_total`` =
+        all rows of the joined analysis; ``partition`` = its partition start
+        sector; ``reason`` = Korean explanation when not joined).
+
+        ``category`` (repeatable) keeps rows whose ``categories`` list holds
+        any of them; ``offset``/``limit`` then count matches and the page
+        reports ``record_count``, ``matched``, ``scanned``, ``truncated``.
+        Every row carries ``record_index``: its position in the files output
+        (locator ``/candidates/<record_index>``), filtered or not.
+        """
         payload = get_named_output(store, run_id, "files")
-        return paginate_payload(payload, "candidates", offset=offset, limit=limit, cursor=cursor)
+        wanted = frozenset(item.strip() for item in category if item.strip())
+        if wanted:
+            if limit <= 0:
+                raise HTTPException(status_code=400, detail=FILTER_LIMIT_MESSAGE)
+            page = filter_files_by_category(payload, wanted, offset=offset, limit=limit)
+        else:
+            page = dict(paginate_payload(payload, "candidates", offset=offset, limit=limit, cursor=cursor))
+            pagination = page.get("pagination") if limit > 0 and isinstance(page.get("pagination"), dict) else {}
+            rows = page.get("candidates") if isinstance(page.get("candidates"), list) else []
+            # ``record_index`` = position in rapidtriage-files.json (locator ``/candidates/<n>``).
+            page["candidates"] = with_record_index(rows, int(pagination.get("offset") or 0))
+        try:
+            scope = run_scope(store, run_id, require_ready=False)
+        except HTTPException:
+            scope = None  # no usable output dir: serve the rows without the NTFS join
+        candidates = payload.get("candidates") if isinstance(payload.get("candidates"), list) else []
+        return join_files_page(scope, page, candidates)
 
 
     @router.get("/api/runs/{run_id}/docs")
