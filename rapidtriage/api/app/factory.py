@@ -114,9 +114,9 @@ def create_app(
         if v2_dir.is_dir():
             api.mount("/v2", StaticFiles(directory=v2_dir, html=True), name="rapidtriage-v2")
 
-        # RAPIDTRIAGE_CONSOLE=v1 (default): v1 console at "/", v2 bundle at "/v2".
-        # RAPIDTRIAGE_CONSOLE=v2: v2 bundle at "/", v1 console kept at "/legacy" for one release.
-        console_mode = (os.environ.get("RAPIDTRIAGE_CONSOLE") or "v1").strip().lower()
+        # RAPIDTRIAGE_CONSOLE=v2 (default): v2 bundle at "/", v1 console kept at "/legacy" for one release.
+        # RAPIDTRIAGE_CONSOLE=v1: legacy v1 console at "/", v2 bundle at "/v2".
+        console_mode = (os.environ.get("RAPIDTRIAGE_CONSOLE") or "v2").strip().lower()
         if console_mode not in {"v1", "v2"}:
             raise RuntimeError(f"RAPIDTRIAGE_CONSOLE must be 'v1' or 'v2', got {console_mode!r}")
         if console_mode == "v2" and v2_dir.is_dir():
