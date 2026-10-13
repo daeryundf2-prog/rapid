@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { chipToneOf, ToneChip } from "./ToneChip";
 
 export type BadgeTone = "ok" | "warn" | "danger" | "info" | "muted";
 
@@ -30,6 +31,7 @@ export function Badge({ tone, children }: { tone: BadgeTone; children: ReactNode
   return <span className={`badge ${tone}`}>{children}</span>;
 }
 
+/** A run's state as the shared dot + text chip (review #24), the same one tables and cards use. */
 export function StatusBadge({ status }: { status: string }) {
-  return <Badge tone={statusTone(status)}>{statusLabel(status)}</Badge>;
+  return <ToneChip tone={chipToneOf(status)}>{statusLabel(status)}</ToneChip>;
 }

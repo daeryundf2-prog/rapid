@@ -52,11 +52,14 @@ describe("batch bar reserve (review B2-7)", () => {
     installFetch({ "/files": filesHandler(40) });
     renderWithClient(<DataGrid />);
     await waitFor(() => expect(rows().length).toBeGreaterThan(0));
-    const key = rows()[0]?.getAttribute("data-row-key") as string;
-    act(() => useGridLocalStore.getState().select([key]));
+    const keys = rows()
+      .slice(0, 2)
+      .map((row) => row.getAttribute("data-row-key") as string);
+    act(() => useGridLocalStore.getState().select(keys));
     const root = document.querySelector(".grid-root") as HTMLElement;
-    // mockLayout() gives every element a 600px offsetHeight: the bar "wrapped" to 600px.
-    await waitFor(() => expect(root.style.getPropertyValue("--batch-reserve")).toBe("624px"));
+    // mockLayout() gives every element a 600px offsetHeight: the bar "grew" to 600px (an editor
+    // open); the reserve is that height + its 12px offset + 2px, never less than 52px (review #2).
+    await waitFor(() => expect(root.style.getPropertyValue("--batch-reserve")).toBe("614px"));
     act(() => useGridLocalStore.getState().select([]));
     await waitFor(() => expect(root.style.getPropertyValue("--batch-reserve")).toBe(""));
   });

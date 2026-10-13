@@ -33,6 +33,7 @@ body {
 }
 
 :root {
+  --field-edge: color-mix(in srgb, var(--line) 50%, transparent);
   scrollbar-color: color-mix(in srgb, var(--text-subtle) 45%, transparent) transparent;
 }
 
@@ -57,9 +58,11 @@ body {
   height: var(--control-h);
   min-width: 0;
   padding: 0 var(--space-2);
-  border: 1px solid var(--line);
+  /* Filled fields (review #15): a surface-2 fill carries the shape; the edge is a 50% line
+     (never fully transparent, so a field on surface-2 / surface-3 still has an outline). */
+  border: 1px solid var(--field-edge);
   border-radius: var(--radius);
-  background-color: var(--surface-0);
+  background-color: var(--surface-2);
   color: var(--text);
   font: inherit;
   font-size: var(--fs-body);
@@ -69,7 +72,7 @@ body {
 }
 
 :where(input:hover:not(:disabled), select:hover:not(:disabled), textarea:hover:not(:disabled)) {
-  border-color: var(--text-subtle);
+  border-color: var(--line);
 }
 
 :where(input:focus-visible, select:focus-visible, textarea:focus-visible) {
@@ -426,11 +429,15 @@ input[type="radio"]:disabled:checked {
   height: var(--control-h);
 }
 
+/* Disabled (review #4): an outline, never a fill — an enabled button is filled (surface-2 /
+   accent), a disabled one is a dashed outline on the bare surface with --disabled-text, so the
+   two never read alike (on dark, --disabled-bg equals the enabled surface-2 fill). */
 .button:is(:disabled, [aria-disabled="true"]),
 .button:is(.primary, .danger, .ghost):is(:disabled, [aria-disabled="true"]),
 .icon-btn:is(:disabled, [aria-disabled="true"]) {
-  border-color: var(--line-subtle);
-  background: var(--disabled-bg);
+  border-color: var(--line);
+  border-style: dashed;
+  background: transparent;
   color: var(--disabled-text);
   font-weight: 500;
   cursor: not-allowed;
@@ -515,7 +522,7 @@ input[type="radio"]:disabled:checked {
   height: 22px;
   padding: 0 var(--space-2);
   border: 1px solid var(--line-subtle);
-  border-radius: 11px;
+  border-radius: var(--radius-sm);
   background: var(--surface-2);
   color: var(--text);
   font-size: var(--fs-table-aux);
@@ -602,10 +609,28 @@ button.chip:hover {
   height: 20px;
   padding: 0 var(--space-2) 0 6px;
   border: 1px solid var(--line-subtle);
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   background: var(--surface-2);
   color: var(--text);
   font-weight: 500;
+}
+
+/* Job / run / file states (components/ToneChip): the dot follows the state's tone. */
+.status-chip.ok {
+  --dot: var(--ok);
+}
+.status-chip.danger {
+  --dot: var(--danger);
+}
+.status-chip.warn {
+  --dot: var(--warn);
+}
+.status-chip.info {
+  --dot: var(--info);
+}
+
+.status-chip.tone-chip {
+  font-weight: 400;
 }
 
 .status-chip::before,
@@ -616,6 +641,63 @@ button.chip:hover {
   height: 8px;
   border-radius: 50%;
   background: var(--dot, var(--text-muted));
+}
+
+/* --- skeleton (review #11): surface-2 bars, 1.2s shimmer; reduced motion stops it --- */
+
+.skeleton,
+.grid-skeleton {
+  display: block;
+  width: 60%;
+  height: 8px;
+  border-radius: var(--radius-sm);
+  /* 1.2s shimmer (review #11); prefers-reduced-motion stops it (tokens.css). */
+  background:
+    linear-gradient(
+      90deg,
+      var(--surface-2) 0%,
+      color-mix(in srgb, var(--surface-2) 60%, var(--surface-3)) 50%,
+      var(--surface-2) 100%
+    )
+    0 0 / 200% 100%;
+  animation: rt-shimmer 1.2s linear infinite;
+}
+
+@keyframes rt-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+/* --- path (review #9): parent folder, middle ellipsis, mono --------------------- */
+
+.mid-path {
+  display: inline-flex;
+  gap: var(--space-1);
+  min-width: 0;
+  max-width: 100%;
+  font-family: var(--font-mono);
+  font-size: var(--fs-aux);
+  white-space: nowrap;
+}
+
+.mid-path-head {
+  flex: 0 1 auto;
+  min-width: 1.5em; /* room for the "…" itself */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-subtle);
+}
+
+.mid-path-tail {
+  flex: 0 0 auto;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-muted);
 }
 
 /* --- toast (U-V7: one kind, bottom-right) ------------------------------------- */
@@ -694,7 +776,7 @@ button.chip:hover {
 
 .popover {
   border: 1px solid var(--line-subtle);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   background: var(--surface-3);
   box-shadow: var(--shadow-pop);
   color: var(--text);

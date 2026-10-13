@@ -210,15 +210,16 @@ describe("one-line filter bar (visual-polish S1/S2)", () => {
     expect(within(chips).getAllByRole("listitem")).toHaveLength(2);
   });
 
-  it("popover keyboard: opening focuses the first control, Tab cycles inside, Esc closes and returns focus", () => {
+  it("popover keyboard: opening focuses the heading (not 오늘), Tab cycles inside, Esc closes and returns focus", () => {
     bar();
     const trigger = screen.getByRole("button", { name: /^필터/ });
     trigger.focus();
     fireEvent.click(trigger);
     const popover = screen.getByRole("dialog", { name: "필터 조건" });
+    // Review #10: focus lands on the popover heading so the first preset is not pre-armed.
+    expect(document.activeElement).toBe(within(popover).getByRole("heading", { name: "필터 조건" }));
     const first = within(popover).getByRole("button", { name: "오늘" });
-    expect(document.activeElement).toBe(first);
-    const close = within(popover).getByRole("button", { name: "닫기" });
+    const close = within(popover).getByRole("button", { name: /^적용/ });
     close.focus();
     fireEvent.keyDown(close, { key: "Tab" });
     expect(document.activeElement).toBe(first);

@@ -12,11 +12,14 @@ export function Modal({
   onClose,
   children,
   wide = false,
+  footer,
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
   wide?: boolean;
+  /** Action row under a hairline (review #4): 취소 + the one primary action, right-aligned. */
+  footer?: ReactNode;
 }) {
   const titleId = useId();
   const ref = useRef<HTMLDivElement>(null);
@@ -70,6 +73,7 @@ export function Modal({
           </button>
         </header>
         <div className="case-modal-body">{children}</div>
+        {footer ? <footer className="case-modal-footer">{footer}</footer> : null}
       </div>
     </div>
   );

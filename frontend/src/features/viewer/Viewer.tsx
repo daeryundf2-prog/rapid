@@ -8,6 +8,7 @@ import {
   type SourcePreview,
 } from "../../api/viewer";
 import { collapseViewerPane } from "../../commands/builtin";
+import { MiddlePath } from "../../components/MiddlePath";
 import type { Command } from "../../contracts/command";
 import type { MarkAction, ViewerMode, ViewerTarget } from "../../contracts/viewer";
 import { Icon } from "../../icons";
@@ -435,7 +436,12 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
           <h2 className="viewer-title" title={target?.sourcePath ?? undefined}>
             {title}
           </h2>
-          {target?.sourcePath ? <p className="viewer-path mono">{target.sourcePath}</p> : null}
+          {/* Parent folder, middle-ellipsized (review #6); the full path is the tooltip. */}
+          {target?.sourcePath ? (
+            <p className="viewer-path">
+              <MiddlePath path={target.sourcePath} />
+            </p>
+          ) : null}
         </div>
         <ViewerToolbar
           sourceCommands={sourceCommands}

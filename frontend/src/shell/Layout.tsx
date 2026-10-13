@@ -115,8 +115,13 @@ function LandingPane() {
   );
 }
 
-/** The collapsed viewer: a 36px rail with a vertical "뷰어" label; the button expands the pane. */
+/**
+ * The collapsed viewer (review #19): an icon-only rail (panel-right-open) with a tooltip; a dot
+ * on the icon says a row is selected and waiting in the viewer.
+ */
 function ViewerRail() {
+  const hasRow = useAppStore((s) => Boolean(s.route.row));
+  const label = hasRow ? "뷰어 펼치기 (선택한 행 있음)" : "뷰어 펼치기";
   return (
     <div className="viewer-rail" data-testid="viewer-rail">
       <button
@@ -124,17 +129,19 @@ function ViewerRail() {
         id={VIEWER_EXPAND_ID}
         className="viewer-rail-button"
         aria-label="뷰어 펼치기"
+        aria-description={hasRow ? "선택한 행이 있습니다" : undefined}
         aria-expanded={false}
-        title="뷰어 펼치기"
+        title={label}
+        data-has-row={hasRow ? "" : undefined}
         onClick={() => {
           expandViewerPane();
           // Focus follows into the viewer once it renders (the rail button goes away).
           focusViewer();
         }}
       >
-        <Icon name="chevron-left" />
-        <span className="viewer-rail-label" aria-hidden="true">
-          뷰어
+        <span className="viewer-rail-icon">
+          <Icon name="panel-right-open" />
+          {hasRow ? <span className="viewer-rail-dot" aria-hidden="true" /> : null}
         </span>
       </button>
     </div>

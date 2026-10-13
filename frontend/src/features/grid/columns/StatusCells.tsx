@@ -30,11 +30,18 @@ export function tagStatusCell(row: GridRow): ReactNode {
   );
 }
 
-/** Number of `--tag-N` colour tokens (tokens.css). */
-const TYPE_COLOURS = 8;
+/** `--tag-1` … `--tag-7` colour real types; `--tag-8` (the muted one) is reserved for "other". */
+const TYPE_COLOURS = 7;
+export const OTHER_TYPE_COLOUR = 8;
+/** Catch-all type names that get the reserved "other" colour (review #9). */
+const OTHER_TYPES = new Set(["other", "others", "unknown", "misc", "generic", "기타", "알 수 없음"]);
 
-/** Deterministic colour slot (1..8) of an artifact type: the same type always gets the same dot. */
+/**
+ * Deterministic colour slot of an artifact type: the same type always gets the same dot, real
+ * types spread over tag-1…7, and catch-all types ("other", "unknown", 기타) take tag-8.
+ */
 export function typeColourIndex(type: string): number {
+  if (OTHER_TYPES.has(type.trim().toLowerCase())) return OTHER_TYPE_COLOUR;
   let hash = 0;
   for (let i = 0; i < type.length; i += 1) hash = (hash * 31 + type.charCodeAt(i)) >>> 0;
   return (hash % TYPE_COLOURS) + 1;

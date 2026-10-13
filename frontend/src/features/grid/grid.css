@@ -32,6 +32,8 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
+  /* The batch bar folds its tools into ⋯ when the grid (not the window) is narrow. */
+  container: grid-frame / inline-size;
 }
 
 /* The column-menu button sits over the right end of the sticky header row (visual-polish S3). */
@@ -44,7 +46,7 @@
   align-items: center;
   padding: 0 var(--space-2) 0 var(--space-1);
   background: var(--bg-panel);
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--line-subtle);
   box-shadow: -8px 0 8px -8px color-mix(in srgb, var(--scrim) 30%, transparent);
 }
 
@@ -94,7 +96,8 @@
   color: var(--accent);
 }
 
-/* Floating batch bar (visual-polish §0): overlays the grid bottom instead of pushing rows down. */
+/* Floating batch bar (visual-polish §0, review #2): overlays the grid bottom instead of
+   pushing rows down; one line (nowrap), editors open underneath inside the same panel. */
 .grid-batch {
   position: absolute;
   left: 50%;
@@ -102,28 +105,71 @@
   z-index: 30;
   transform: translateX(-50%);
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: stretch;
   gap: var(--space-1);
   width: max-content;
   max-width: calc(100% - var(--space-4));
   padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
-  background: var(--bg-raised);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
+  background: var(--surface-3);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow-pop);
   animation: rt-pop-in var(--motion) var(--ease);
 }
 
+.grid-batch-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: var(--space-1);
+  white-space: nowrap;
+}
+
 .grid-batch-count {
+  min-width: 6ch;
   margin-right: var(--space-2);
+  font-size: var(--fs-table-aux);
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
-.grid-batch-clear {
+.grid-batch-group {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-1);
+  gap: 2px;
+}
+
+/* Review marks | tools. */
+.grid-batch-divider {
+  flex: none;
+  width: 1px;
+  height: 16px;
+  margin: 0 var(--space-1);
+  background: var(--line-subtle);
+}
+
+.grid-batch-more {
+  display: none;
+}
+
+.grid-batch-clear {
+  margin-left: var(--space-1);
+}
+
+@container grid-frame (max-width: 900px) {
+  .grid-batch-tools {
+    display: none;
+  }
+
+  .grid-batch-more {
+    display: inline-flex;
+  }
+}
+
+/* The primary keeps its accent edge (no status stripe); the ghost marks keep theirs. */
+.grid-batch .button.primary[data-status-button] {
+  border-left: 1px solid var(--accent);
 }
 
 .grid-filter input,
@@ -131,10 +177,6 @@
 .grid-tag-prompt input {
   height: var(--control-h);
   padding: 0 var(--space-2);
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
   font: inherit;
 }
 
@@ -165,8 +207,7 @@
   border-color: var(--accent);
 }
 
-.grid-btn[aria-disabled="true"],
-.grid-menu-item[aria-disabled="true"] {
+.grid-btn[aria-disabled="true"] {
   color: var(--text-muted);
   cursor: not-allowed;
   opacity: 0.7;
@@ -274,22 +315,26 @@
   color: var(--text-muted);
   font-size: var(--fs-table-aux);
   font-weight: 500;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--line-subtle);
 }
 
-/* Selected row: surface-2 + a 2px accent bar on the left edge (sticky select cell). */
+/* Selection / hover / focus (review #1): three distinct signals that never stack into a box.
+   Selected = the accent tint (--bg-selected, shared with the tree) + a 2px accent bar on the
+   whole row; hover = a 4% text tint; the 1px accent outline is for keyboard focus only. */
 .grid-row.is-selected {
   background: var(--bg-selected);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
-.grid-row:hover:not(.is-selected) {
-  background: var(--bg-raised);
+/* Cells inherit the row background; the tint is painted on the row and the sticky cells
+   repeat it over an opaque base so scrolled cells never show through. */
+.grid-body .grid-row:hover:not(.is-selected) {
+  background: linear-gradient(var(--bg-hover), var(--bg-hover)), var(--bg);
 }
 
-.grid-row:focus-visible,
-.grid-row.is-focused:focus {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
+.grid-row:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
 }
 
 .grid-cell {
@@ -343,30 +388,6 @@
   color: var(--text-subtle);
 }
 
-/* 경로: middle truncation — the folder part ellipsizes, the file name stays whole. */
-.grid-path {
-  display: flex;
-  min-width: 0;
-  max-width: 100%;
-}
-
-.grid-path-head {
-  flex: 0 1 auto;
-  min-width: 1.2em; /* room for the "…" itself */
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text-muted);
-}
-
-.grid-path-tail {
-  flex: 0 0 auto;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .grid-header .grid-cell-select,
 .grid-header .grid-cell-first {
   /* Must stay sticky: `.grid-hcell { position: relative }` below would otherwise win, and
@@ -379,7 +400,7 @@
   position: relative;
 }
 
-/* Selected row accent bar (after the sticky select-cell rules it refines). */
+/* The accent bar must stay on top of the sticky select cell, which covers the row's own edge. */
 .grid-row.is-selected > .grid-cell-select {
   box-shadow: inset 2px 0 0 var(--accent);
 }
@@ -421,8 +442,8 @@
   background: var(--accent);
 }
 
-/* The ⋯ row-menu button is always rendered and hit-testable (U3): it is only dimmed until the
-   row is hovered/focused — never visibility/display toggled, never pointer-events:none — and
+/* The ⋯ row-menu button is always rendered and hit-testable (U3): it is transparent until the
+   row is hovered/focused (review #9) — never visibility/display toggled, never pointer-events:none — and
    flex:none keeps it inside the sticky select cell so the next sticky cell cannot cover it. */
 .grid-rowmenu-btn {
   flex: none;
@@ -437,12 +458,18 @@
   border: 0;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  opacity: 0.45;
+  opacity: 0;
+}
+
+.grid-rowmenu-btn:hover {
+  background: var(--bg-raised);
+  color: var(--text);
 }
 
 .grid-row:hover .grid-rowmenu-btn,
 .grid-row:focus-within .grid-rowmenu-btn,
-.grid-row.is-focused .grid-rowmenu-btn,
+.grid-row:focus-visible .grid-rowmenu-btn,
+.grid-rowmenu-btn[aria-expanded="true"],
 .grid-rowmenu-btn:focus-visible {
   opacity: 1;
 }
@@ -455,14 +482,6 @@
 
 .grid-row-loading .grid-cell {
   background: transparent;
-}
-
-.grid-skeleton {
-  display: block;
-  width: 60%;
-  height: 8px;
-  background: var(--bg-raised);
-  border-radius: 4px;
 }
 
 /* Empty state (U-V6): icon + one sentence + the next action, centred under the header. */
@@ -531,28 +550,19 @@
   position: fixed;
   z-index: 40;
   display: grid;
-  min-width: 180px;
+  min-width: 220px;
   padding: var(--space-1);
   background: var(--surface-3);
   border: 1px solid var(--line-subtle);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow-pop);
   animation: rt-pop-in var(--motion) var(--ease);
 }
 
+/* Row menu items share the menu-item anatomy (popover.css, review #13). */
 .grid-menu-item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
   min-height: var(--control-h);
-  padding: 0 var(--space-3);
-  text-align: left;
-  background: transparent;
-  color: var(--text);
-  border: 0;
-  border-radius: var(--radius-sm);
-  font: inherit;
-  cursor: pointer;
+  padding: 0 var(--space-2);
 }
 
 .grid-menu-item:hover:not([aria-disabled="true"]) {
@@ -584,7 +594,7 @@
   height: 20px;
   padding: 0 var(--space-2);
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   background: var(--bg-raised);
   color: var(--text);
   font-size: var(--fs-table-aux);
@@ -654,15 +664,6 @@
   height: var(--control-h);
   max-width: 320px;
   padding: 0 var(--space-2);
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-}
-
-.grid-fieldpicker-search:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
 }
 
 .grid-fieldpicker-list {
@@ -701,16 +702,9 @@
   width: 100%;
   height: 24px;
   padding: 0 var(--space-1);
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   font: inherit;
   font-size: var(--fs-table-aux);
-}
-
-.grid-colfilter-input::placeholder {
-  color: var(--text-muted);
 }
 
 .grid-colfilter-input[aria-invalid="true"] {
@@ -749,29 +743,56 @@
   align-items: stretch;
 }
 
-.grid-batch .grid-btn {
-  border-color: transparent;
-  background: transparent;
-}
-
-.grid-batch .grid-btn:hover:not([aria-disabled="true"]) {
-  border-color: var(--line);
-}
-
-.grid-batch .grid-btn.is-primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--on-accent);
-  font-weight: 600;
-}
-
-/* Rows can scroll clear of the floating bar while a selection exists. */
-/* --batch-reserve is the measured bar height + offsets (DataGrid / BatchBar onHeight): the bar
-   wraps and grows with the tag / note editors, so a fixed reserve could hide the last rows. */
+/* Rows can scroll clear of the floating bar while it shows: 52px for the one-line bar,
+   --batch-reserve (DataGrid, from BatchBar onHeight) once a tag / note editor makes it taller. */
 .grid-root[data-batch] .grid-scroll {
-  scroll-padding-bottom: var(--batch-reserve, 64px);
+  scroll-padding-bottom: var(--batch-reserve, 52px);
 }
 
-.grid-root[data-batch] .grid-body {
-  margin-bottom: var(--batch-reserve, 64px);
+.grid-root[data-batch] .grid-inner {
+  padding-bottom: var(--batch-reserve, 52px);
+}
+
+.grid-batch .grid-tag-prompt,
+.grid-batch .note-form {
+  padding: var(--space-1) var(--space-1) var(--space-1) 0;
+  border: 0;
+  border-top: 1px solid var(--line-subtle);
+}
+
+/* First-page loading: 8 skeleton rows under the header (review #11). */
+.grid-skeleton-rows {
+  position: absolute;
+  inset: 32px 0 auto;
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
+}
+
+.grid-skeleton-row {
+  display: grid;
+  grid-template-columns: 3fr 1fr 2fr;
+  align-items: center;
+  gap: var(--space-4);
+  height: var(--row-h);
+  padding: 0 var(--space-3) 0 64px;
+  border-bottom: 1px solid var(--line-subtle);
+}
+
+/* Error card (review #11): replaces the empty state, centred like it. */
+.grid-error-card {
+  position: absolute;
+  inset: 32px 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0;
+  padding: var(--space-6) var(--space-4);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.grid-error-card .grid-empty-icon {
+  color: var(--danger);
 }

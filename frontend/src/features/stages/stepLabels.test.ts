@@ -45,5 +45,7 @@ describe("stepCountText (review nit)", () => {
     expect(stepCountText({ candidate_count: "4770" })).toBe("후보 4,770");
     expect(stepCountText({ artifact_count: 12 })).toBe("아티팩트 12");
     expect(stepCountText({ candidate_count: "n/a" })).toBe("");
-  });
+    // The dynamic import transforms the whole 처리 stage graph (≈3.5 s alone); under a loaded
+    // parallel run it can pass the default 5 s, so it gets its own budget.
+  }, 20_000);
 });

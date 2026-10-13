@@ -153,9 +153,29 @@ export function priorityHiddenColumns(
   return hidden;
 }
 
-/** "C:\a\b\file.json" → ["C:\a\b\", "file.json"]: the head ellipsizes, the file name stays. */
-export function splitPathTail(path: string): [string, string] {
-  const cut = Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/"));
-  if (cut < 0 || cut === path.length - 1) return ["", path];
-  return [path.slice(0, cut + 1), path.slice(cut + 1)];
+/** A cell value that shows nothing (null, "", whitespace, an empty list). */
+function isEmptyValue(value: unknown): boolean {
+  if (value === null || value === undefined) return true;
+  if (typeof value === "string") return value.trim() === "";
+  if (Array.isArray(value)) return value.length === 0;
+  return false;
+}
+
+/**
+ * Default columns with no value in any loaded row (review #9; generalises "시각 goes when no
+ * row has a time"): ids among `candidates` whose every loaded row is empty — never the ones in
+ * `keep` (shown by the user), never a column with an empty-state hint (its header explains the
+ * blank, e.g. NTFS 생성 → 실행), and nothing at all before a row has loaded.
+ */
+export function emptyColumnIds(
+  columns: readonly ColumnSpec[],
+  rows: readonly GridRow[],
+  options: { candidates: readonly string[]; keep?: ReadonlySet<string> },
+): string[] {
+  if (rows.length === 0) return [];
+  const wanted = new Set(options.candidates);
+  return columns
+    .filter((c) => wanted.has(c.id) && !options.keep?.has(c.id) && !c.emptyHint)
+    .filter((c) => rows.every((row) => isEmptyValue(c.value(row)) && displayText(c, row).trim() === ""))
+    .map((c) => c.id);
 }

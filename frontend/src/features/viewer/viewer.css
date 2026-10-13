@@ -42,7 +42,7 @@
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--line-subtle);
 }
 
 .viewer-nav {
@@ -64,13 +64,13 @@
   white-space: nowrap;
 }
 
+/* Parent folder under the title (review #6): the shared middle-ellipsis path, mono 11px subtle. */
 .viewer-path {
+  display: flex;
   margin: 0;
-  color: var(--text-muted);
+  min-width: 0;
+  color: var(--text-subtle);
   font-size: var(--fs-aux);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* Buttons ----------------------------------------------------------------- */
@@ -122,8 +122,10 @@
   cursor: not-allowed;
 }
 
-.viewer-icon-button[aria-disabled="true"] {
-  color: var(--disabled-text);
+.viewer-icon-button[aria-disabled="true"],
+.viewer-icon-button:disabled {
+  color: var(--text-muted);
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
@@ -216,12 +218,12 @@
   outline-offset: 1px;
 }
 
+/* Review status as a chip (dot + text) beside the primary action (review #6). */
 .viewer-status {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 28px;
+  font-size: var(--fs-aux);
+  white-space: nowrap;
 }
 
 /* Mode tabs --------------------------------------------------------------- */
@@ -269,10 +271,13 @@
 
 /* Unavailable mode: dimmed (still ≥ 4.5:1), no strike-through — the line read as noise in the
    light theme where --line is dark (B2 #10); the reason is the tab's tooltip. */
+/* Not applicable to this row (review #6): every tab stays in the strip (one tablist, stable
+   e2e names), but the inapplicable ones recede to 45%; the reason is the tooltip. */
 .viewer-tab[aria-disabled="true"] {
   cursor: not-allowed;
-  color: var(--text-subtle);
+  color: var(--text-muted);
   font-weight: 400;
+  opacity: 0.45;
 }
 
 /* Panel ------------------------------------------------------------------- */
@@ -365,9 +370,40 @@
   overflow-wrap: anywhere;
 }
 
+/* Folds (review #3): no native ▶ marker — the shared chevron, aligned with the text line. */
 .viewer-details summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0;
+  line-height: var(--lh);
+  list-style: none;
   cursor: pointer;
   color: var(--text-muted);
+}
+
+.viewer-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.viewer-details summary::before {
+  content: "";
+  flex: none;
+  width: 14px;
+  height: 14px;
+  background: currentColor;
+  mask:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 6l6 6-6 6'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  transition: transform var(--motion) var(--ease);
+}
+
+.viewer-details[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.viewer-details summary:hover {
+  color: var(--text);
 }
 
 .viewer-hit {
@@ -378,14 +414,17 @@
 
 .viewer-dl {
   display: grid;
-  /* A long Korean label wraps instead of squeezing the value column (B2 #5). */
-  grid-template-columns: fit-content(40%) minmax(0, 1fr);
+  /* One fixed key column in every group (review #3), so values line up across 출처 / 파일 /
+     해시 …; a long Korean label wraps at word boundaries instead of squeezing the values. */
+  grid-template-columns: 8.5rem minmax(0, 1fr);
   gap: var(--space-1) var(--space-3);
   margin: 0;
 }
 
 .viewer-dl dt {
   color: var(--text-muted);
+  word-break: keep-all;
+  overflow-wrap: anywhere;
 }
 
 .viewer-dl dd {
@@ -492,10 +531,6 @@
   width: 12em;
   height: var(--row-h);
   padding: 0 var(--space-2);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  background: var(--bg);
-  color: var(--text);
   font-family: var(--font-mono);
 }
 
@@ -582,7 +617,7 @@
   padding: 0 var(--space-2);
   height: var(--row-h-dense);
   border: 1px solid var(--warn);
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: var(--bg-raised);
   color: var(--text);
   font-family: var(--font-mono);
@@ -794,15 +829,24 @@
 .meta-record {
   margin-bottom: var(--space-3);
   padding-bottom: var(--space-2);
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--line-subtle);
 }
 
-.meta-record-group h4,
-.meta-record-group summary {
-  margin: var(--space-2) 0 var(--space-1);
-  color: var(--text-muted);
-  font-size: var(--fs-table-aux);
+.meta-record > .viewer-subtitle {
+  font-size: var(--fs-body);
   font-weight: 600;
+}
+
+/* Group headings (핵심 · 출처 · 검증 · folds): small caps-like labels over a hairline. */
+.meta-record-group h4,
+.meta-record-group > summary {
+  margin: var(--space-2) 0 var(--space-1);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--line-subtle);
+  color: var(--text-subtle);
+  font-size: var(--fs-aux);
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
 /* Nested record values (one level), hash bundles with copy. */
@@ -814,7 +858,7 @@
 
 /* A nested group (or its fold) takes the full width under its key, so deep levels never end
    up in a one-word-wide value column. */
-.viewer-dl > dd:has(> .viewer-dl-nested, > .viewer-details) {
+.viewer-dl > dd:has(.viewer-dl-nested, .viewer-details) {
   grid-column: 1 / -1;
   padding-left: var(--space-3);
 }
@@ -824,16 +868,45 @@
   padding-left: var(--space-4);
 }
 
-.viewer-copy {
-  margin-left: var(--space-1);
-  padding: 0 var(--space-1);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--bg-raised);
-  color: var(--text);
-  font: inherit;
+/* Hashes (review #3): one mono 11px line, ellipsized (full value = tooltip); the 20×20 copy
+   button appears on row hover / focus and confirms by swapping its icon for a check. */
+.meta-hash {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.meta-hash-text {
+  min-width: 0;
+  overflow: hidden;
   font-size: var(--fs-aux);
-  cursor: pointer;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta-copy.icon-btn {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-sm);
+  opacity: 0;
+}
+
+.meta-copy[data-copied] {
+  color: var(--ok);
+}
+
+.meta-hash-dd:hover .meta-copy,
+.meta-hash-dd:focus-within .meta-copy,
+.meta-copy[data-copied] {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .meta-copy.icon-btn {
+    opacity: 1;
+  }
 }
 
 /* Inactive mode panels stay in the DOM (tab wiring) but must never display. */
@@ -885,6 +958,20 @@
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
+  /* "열로 표시" only shows on its row's hover / focus (review #3); always hit-testable. */
+  opacity: 0;
+}
+
+dd:hover .meta-colbtn,
+dd:focus-within .meta-colbtn,
+.meta-colbtn:focus-visible {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .meta-colbtn {
+    opacity: 1;
+  }
 }
 
 .meta-colbtn:hover {

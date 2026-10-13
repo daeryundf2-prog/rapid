@@ -115,23 +115,22 @@ kbd {
   background: var(--bg-panel);
 }
 
+/* Icon-only rail button (review #19): the whole 36px strip is the hit area, the icon sits on top. */
 .viewer-rail-button {
   flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--space-2);
   padding: var(--space-2) 0;
   border: 0;
   background: transparent;
   color: var(--text-muted);
   font: inherit;
-  font-size: var(--fs-table-aux);
   cursor: pointer;
 }
 
 .viewer-rail-button:hover {
-  background: var(--bg-raised);
+  background: var(--bg-hover);
   color: var(--text);
 }
 
@@ -140,9 +139,23 @@ kbd {
   outline-offset: -2px;
 }
 
-.viewer-rail-label {
-  writing-mode: vertical-rl;
-  letter-spacing: 0.1em;
+.viewer-rail-icon {
+  position: relative;
+  display: inline-grid;
+  place-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius);
+}
+
+.viewer-rail-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
 }
 
 .resize-handle {
@@ -162,6 +175,25 @@ kbd {
 .resize-handle[data-resize-handle-state="drag"]::after,
 .resize-handle:focus-visible::after {
   background: var(--accent);
+}
+
+/* Light theme surface tiers (review #23): navigation (stage rail, tree) sits on surface-0,
+   the working panes (grid, viewer) on white surface-1, split by 1px line-subtle dividers. */
+:root[data-theme="light"] .stage-rail,
+:root[data-theme="light"] [data-testid="tree-region"] {
+  background: var(--surface-0);
+}
+
+/* The grid paints its rows with --bg: re-point it at white inside the working panes. */
+:root[data-theme="light"] [data-testid="grid-region"],
+:root[data-theme="light"] [data-testid="viewer-region"] {
+  --bg: var(--surface-1);
+  background: var(--surface-1);
+}
+
+:root[data-theme="light"] .resize-handle::after {
+  inset: 0 auto 0 0;
+  width: 1px;
 }
 
 /* --- top bar -------------------------------------------------------------- */
@@ -211,15 +243,114 @@ kbd {
   flex: none;
 }
 
-.case-picker select,
 .global-search input {
   padding: 0 var(--space-2);
-  color: var(--text);
   font: inherit;
+  font-size: var(--fs-body);
 }
 
-.case-picker select {
-  max-width: 240px;
+/* Case combobox (review #5): trigger + 420px popover, search on top, two-line rows. */
+.case-picker-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 280px;
+  height: var(--control-h);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--field-edge);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-body);
+  cursor: pointer;
+}
+
+.case-picker-trigger:hover,
+.case-picker-trigger[aria-expanded="true"] {
+  border-color: var(--line);
+}
+
+.case-picker-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.case-picker-chevron {
+  color: var(--text-muted);
+}
+
+.case-picker-popover {
+  width: 420px;
+  min-width: 0;
+  max-width: calc(100vw - var(--space-6));
+  gap: var(--space-2);
+  padding: var(--space-2);
+}
+
+.case-picker-search {
+  width: 100%;
+}
+
+.case-picker-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.case-picker-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 6px var(--space-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.case-picker-option.active {
+  background: var(--bg-selected);
+}
+
+.case-picker-option.is-current {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.case-picker-option-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.case-picker-option-name {
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--fs-body);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.case-picker-option-meta {
+  overflow: hidden;
+  color: var(--text-subtle);
+  font-size: var(--fs-aux);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.case-picker-option-meta .mono {
+  font-size: inherit;
+}
+
+.case-picker-empty {
+  margin: 0;
+  padding: var(--space-3) var(--space-2);
+  color: var(--text-muted);
 }
 
 .topbar-search {
@@ -258,10 +389,6 @@ kbd {
   left: var(--space-2);
   color: var(--text-muted);
   pointer-events: none;
-}
-
-.global-search input::placeholder {
-  color: var(--text-muted);
 }
 
 /* Search options: an icon button at the end of the search field. */
@@ -328,6 +455,8 @@ kbd {
 }
 
 .topbar-palette kbd {
+  min-width: 0;
+  padding: 0;
   border: 0;
   background: transparent;
   color: inherit;
@@ -360,6 +489,7 @@ kbd {
 
 /* --- status bar ----------------------------------------------------------- */
 
+/* Status bar (review #8): mono at the aux size, facts split by 1px rules, not "·". */
 .statusbar {
   display: flex;
   align-items: center;
@@ -368,11 +498,16 @@ kbd {
   padding: 0 var(--space-3);
   background: var(--bg-panel);
   border-top: 1px solid var(--line-subtle);
-  font-size: var(--fs-table-aux);
+  font-family: var(--font-mono);
+  font-size: var(--fs-aux);
   color: var(--text-muted);
   flex: none;
   white-space: nowrap;
   overflow: hidden;
+}
+
+.statusbar .mono {
+  font-size: inherit;
 }
 
 .statusbar .button {
@@ -397,7 +532,21 @@ kbd {
 }
 
 .status-sep {
-  color: var(--line);
+  flex: none;
+  width: 1px;
+  height: 14px;
+  background: var(--line-subtle);
+}
+
+.status-connection-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-connection-wrap > .status-dot {
+  width: 6px;
+  height: 6px;
 }
 
 .status-text {
@@ -448,7 +597,7 @@ kbd {
   justify-content: center;
   align-items: flex-start;
   padding-top: 12vh;
-  background: color-mix(in srgb, var(--scrim) 45%, transparent);
+  background: color-mix(in srgb, var(--scrim) 40%, transparent);
 }
 
 .palette,
@@ -457,10 +606,10 @@ kbd {
   max-height: 70vh;
   display: flex;
   flex-direction: column;
-  background: var(--bg-panel);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  box-shadow: 0 12px 32px color-mix(in srgb, var(--scrim) 40%, transparent);
+  background: var(--surface-3);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop);
   overflow: hidden;
 }
 
@@ -518,12 +667,25 @@ kbd {
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
+/* Labels are 400; only the characters the query matched are 600 (review #12). */
 .palette-label {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-weight: 400;
+}
+
+.palette-hit {
+  font-weight: 600;
+}
+
+/* Every option keeps the 16px icon slot, with or without a glyph. */
+.palette-option > .icon {
+  width: 16px;
+  height: 16px;
+  color: var(--text-muted);
 }
 
 .palette-option.disabled .palette-label {
@@ -585,10 +747,6 @@ kbd {
 .help-table th {
   color: var(--text-muted);
   font-weight: 600;
-}
-
-.help-table td.muted {
-  color: var(--text-muted);
 }
 
 .drawer-scrim {
@@ -686,7 +844,7 @@ kbd {
   align-items: center;
   height: 18px;
   padding: 0 6px;
-  border-radius: 9px;
+  border-radius: var(--radius-sm);
   font-size: var(--fs-aux);
   font-weight: 600;
   white-space: nowrap;
@@ -797,7 +955,7 @@ kbd {
   min-width: 72px;
   padding: var(--space-2);
   border: 1px solid var(--line-subtle);
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--bg-panel);
 }
 
@@ -945,4 +1103,8 @@ button.count-chip:hover {
   max-height: 70vh;
   overflow: auto;
   box-shadow: 0 12px 32px color-mix(in srgb, var(--scrim) 40%, transparent);
+}
+
+.help-table tr.muted td {
+  color: var(--text-muted);
 }

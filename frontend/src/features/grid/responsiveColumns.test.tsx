@@ -88,13 +88,18 @@ describe("responsive default columns (files, 분석 기본)", () => {
     expect(hasHeader("크기")).toBe(false);
   });
 
-  it("shows every default column when the grid is wide enough", async () => {
+  it("shows every default column with values when the grid is wide enough", async () => {
     restoreWidth = mockGridWidth(1200);
     await renderFiles();
-    for (const name of ["이름", "경로", "크기", "수정", "NTFS 생성", "선별"])
-      expect(hasHeader(name)).toBe(true);
+    for (const name of ["이름", "경로", "크기", "수정", "NTFS 생성"]) expect(hasHeader(name)).toBe(true);
+    // No loaded row carries a review mark: 선별 is held back like an empty 시각 (review #9).
+    expect(hasHeader("선별")).toBe(false);
     const menu = openColumnMenu();
-    expect(within(menu).queryByText(/숨김 — 표시/)).toBeNull();
+    expect(within(menu).queryByText(/폭 부족으로 숨김/)).toBeNull();
+    const review = within(menu).getByTestId("grid-autohidden-review");
+    expect(review.textContent).toContain("값이 없어 숨김 — 표시");
+    fireEvent.click(within(review).getByRole("button", { name: "선별 표시 (값이 없어 숨김)" }));
+    await waitFor(() => expect(hasHeader("선별")).toBe(true));
   });
 
   it("hides 수정 when no loaded row has a time, with the same 열 menu hint", async () => {

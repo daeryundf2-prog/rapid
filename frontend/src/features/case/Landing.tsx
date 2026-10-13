@@ -9,6 +9,7 @@ import { setAuthToken } from "../../api/client";
 import { RUN_MODE_LABEL, runDisplayName } from "../../app/collections";
 import { CommandButton } from "../../commands/CommandButton";
 import { StatusBadge } from "../../components/Badge";
+import { MiddlePath } from "../../components/MiddlePath";
 import { serializeRoute } from "../../router";
 import { BrandMark } from "../../shell/BrandMark";
 import { keyLabel } from "../../shortcuts";
@@ -82,11 +83,17 @@ function RecentCases() {
                   href={serializeRoute({ runId: run.run_id, collection: "intake" })}
                   title={run.request?.root ?? run.run_id}
                 >
-                  <span className="landing-case-name">{runDisplayName(run)}</span>
-                  <span className="landing-case-meta">
-                    {[mode, when, run.run_id.slice(0, 8)].filter(Boolean).join(" · ")}
+                  <span className="landing-case-line">
+                    <span className="landing-case-name">{runDisplayName(run)}</span>
+                    <span className="landing-case-meta">
+                      {[mode, when, run.run_id.slice(0, 8)].filter(Boolean).join(" · ")}
+                    </span>
                   </span>
                   <StatusBadge status={String(run.status)} />
+                  {/* The evidence path on the second line (review #21). */}
+                  {run.request?.root ? (
+                    <MiddlePath path={run.request.root} whole className="landing-case-path" />
+                  ) : null}
                 </a>
               </li>
             );
@@ -134,10 +141,13 @@ export function Landing({
             <RecentCases />
           </>
         )}
-        <p className="landing-keys">
-          <kbd>{keyLabel("Ctrl+K")}</kbd> 명령 팔레트 <span aria-hidden="true">·</span> <kbd>?</kbd> 단축키
-          도움말
-        </p>
+        {/* Key hints only once the console is usable (not on the token card, review #21). */}
+        {tokenRequired ? null : (
+          <p className="landing-keys">
+            <kbd>{keyLabel("Ctrl+K")}</kbd> 명령 팔레트 <span aria-hidden="true">·</span> <kbd>?</kbd> 단축키
+            도움말
+          </p>
+        )}
       </section>
     </div>
   );

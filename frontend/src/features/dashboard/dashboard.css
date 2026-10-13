@@ -84,6 +84,7 @@
   margin: 0;
   overflow: hidden;
   font-size: var(--fs-panel-title);
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -150,6 +151,14 @@
   background: var(--bg-selected);
 }
 
+/* Loading shells (review #11): skeleton lines (.skeleton, controls.css) in the final card. */
+.dash-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+}
+
 .dash-loading {
   display: flex;
   align-items: center;
@@ -213,10 +222,6 @@
 .dash-input {
   inline-size: 100%;
   padding: var(--space-1) var(--space-2);
-  color: var(--text);
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
   font: inherit;
 }
 

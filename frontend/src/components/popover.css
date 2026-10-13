@@ -40,6 +40,12 @@
   right: 0;
 }
 
+/* Opens upwards (menus on a bar at the bottom of a pane, e.g. the batch bar's ⋯). */
+.popover-above {
+  top: auto;
+  bottom: calc(100% + var(--space-1));
+}
+
 .popover-section {
   display: flex;
   flex-direction: column;
@@ -98,17 +104,22 @@
   background: var(--line-subtle);
 }
 
+/* Menu items (review #13): 13px/400, a 16px leading slot (icon / status dot / empty) so every
+   label starts at the same x, an optional right-aligned key hint, and a disabled item's reason
+   on an 11px line under its label. */
 .menu-item {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  height: 28px;
+  min-height: 28px;
   padding: 0 var(--space-2);
   border: 0;
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text);
   font: inherit;
+  font-size: var(--fs-body);
+  font-weight: 400;
   text-align: left;
   white-space: nowrap;
   cursor: pointer;
@@ -124,10 +135,52 @@
   cursor: not-allowed;
 }
 
-.menu-item-label {
+.menu-item-lead {
+  flex: none;
+  display: inline-grid;
+  place-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--text-muted);
+}
+
+.menu-item-text {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding-block: 5px;
+  line-height: var(--lh);
+}
+
+.menu-item-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.menu-item-reason {
+  color: var(--text-subtle);
+  font-size: var(--fs-aux);
+  white-space: normal;
+  max-width: 32ch;
 }
 
 .menu-item-check {
   color: var(--accent);
+}
+
+.menu-item-kbd {
+  margin-left: var(--space-3);
+  border: 0;
+  background: transparent;
+  color: var(--text-subtle);
+  font-size: var(--fs-aux);
+}
+
+.menu-heading {
+  padding: var(--space-1) var(--space-2) 2px calc(var(--space-2) + 16px + var(--space-2));
+  color: var(--text-subtle);
+  font-size: var(--fs-aux);
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }

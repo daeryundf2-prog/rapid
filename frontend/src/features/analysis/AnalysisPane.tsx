@@ -9,6 +9,7 @@ import { useMemo } from "react";
 import type { AnalysisState } from "../../api/analyses";
 import { isAnalysisActive } from "../../api/analyses";
 import { CommandButton } from "../../commands/CommandButton";
+import { chipToneOf, ToneChip } from "../../components/ToneChip";
 import type { CollectionRef } from "../../contracts/collection";
 import { Icon } from "../../icons";
 import { serializeRoute } from "../../router";
@@ -112,10 +113,9 @@ export function History({
                 </td>
                 <td>{kindLabel(job.kind)}</td>
                 <td>
-                  <span className={`analysis-state is-${isAllFailed(job) ? "failed" : job.status}`}>
-                    <Icon name={nodeStateIcon(isAllFailed(job) ? "failed" : job.status)} />
+                  <ToneChip tone={chipToneOf(isAllFailed(job) ? "failed" : job.status)}>
                     {jobStatusLabel(job)}
-                  </span>
+                  </ToneChip>
                   {outcome(job) ? <span className="analysis-error-text"> · {outcome(job)}</span> : null}
                   {job.error ? <span className="analysis-error-text"> · {job.error}</span> : null}
                 </td>

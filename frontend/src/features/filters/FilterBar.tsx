@@ -25,6 +25,7 @@ import {
 } from "./filterModel";
 import { type FilterReport, useFilterStore } from "./filterStore";
 import "./filters.css";
+import { typeOptionsFor } from "./typeLabels";
 
 const STATUS_ORDER: ReviewStatus[] = ["relevant", "needs-review", "excluded", "include-in-report"];
 const COMMIT_DEBOUNCE_MS = 250;
@@ -128,18 +129,20 @@ function FilterPopoverBody({ tagListId }: { tagListId: string }) {
   const typeOptions = useFilterStore((s) => s.typeOptions);
   const tagOptions = useFilterStore((s) => s.tagOptions);
   const patch = useFilterStore((s) => s.patchFilters);
+  const typeCounts = useFilterStore((s) => s.typeCounts);
+  const [typeQuery, setTypeQuery] = useState("");
   const preset = activePreset(filters);
   const types = [...new Set([...typeOptions, ...filters.types])].sort((a, b) => a.localeCompare(b, "ko"));
+  const shownTypes = typeOptionsFor(types, typeCounts, typeQuery);
   return (
     <>
       <fieldset className="popover-section" aria-label="시간 범위">
         <legend className="popover-title">시간 범위</legend>
-        <div className="popover-row filter-segment">
+        <div className="segmented filter-segment">
           {(Object.keys(TIME_PRESET_LABELS) as TimePreset[]).map((id) => (
             <button
               key={id}
               type="button"
-              className="grid-btn filter-toggle"
               aria-pressed={preset === id}
               onClick={() =>
                 preset === id ? patch({ from: undefined, to: undefined }) : patch(presetRange(id))
@@ -149,6 +152,7 @@ function FilterPopoverBody({ tagListId }: { tagListId: string }) {
             </button>
           ))}
         </div>
+        {/* One column (review #10): a datetime field needs the popover's full width. */}
         <div className="filter-range">
           <label className="filter-field is-stacked">
             <span className="filter-range-label">시작</span>
@@ -176,15 +180,40 @@ function FilterPopoverBody({ tagListId }: { tagListId: string }) {
       <fieldset className="popover-section" aria-label="아티팩트 유형">
         <legend className="popover-title">유형</legend>
         {types.length === 0 ? <span className="filter-empty">불러온 행에 유형이 없습니다.</span> : null}
+        {types.length > 0 ? (
+          <input
+            type="search"
+            className="filter-type-search"
+            aria-label="유형 검색"
+            placeholder="유형 검색"
+            value={typeQuery}
+            onChange={(event) => setTypeQuery(event.target.value)}
+          />
+        ) : null}
+        {/* Korean name 13px + id in mono 11px, the loaded-row count right-aligned (review #10). */}
         <div className="filter-checklist">
-          {types.map((type) => (
-            <label key={type} className="grid-popover-item">
+          {types.length > 0 && shownTypes.length === 0 ? (
+            <span className="filter-empty">일치하는 유형이 없습니다.</span>
+          ) : null}
+          {shownTypes.map((type) => (
+            <label key={type.id} className="filter-type-option">
               <input
                 type="checkbox"
-                checked={filters.types.includes(type)}
-                onChange={() => patch({ types: toggle(filters.types, type) })}
+                checked={filters.types.includes(type.id)}
+                onChange={() => patch({ types: toggle(filters.types, type.id) })}
               />
-              <span className="mono">{type}</span>
+              <span className="filter-type-text">
+                {type.label ? <span className="filter-type-label">{type.label}</span> : null}
+                <span className="filter-type-id mono">{type.id}</span>
+              </span>
+              {type.count !== undefined ? (
+                <span
+                  className="filter-type-count"
+                  title={`불러온 행 ${type.count.toLocaleString("ko-KR")}개`}
+                >
+                  {type.count.toLocaleString("ko-KR")}
+                </span>
+              ) : null}
             </label>
           ))}
         </div>
@@ -192,12 +221,11 @@ function FilterPopoverBody({ tagListId }: { tagListId: string }) {
 
       <fieldset className="popover-section" aria-label="태그·상태">
         <legend className="popover-title">상태</legend>
-        <div className="popover-row">
+        <div className="segmented filter-status-grid">
           {STATUS_ORDER.map((status) => (
             <button
               key={status}
               type="button"
-              className="grid-btn filter-toggle"
               aria-pressed={filters.statuses.includes(status)}
               aria-label={`상태 필터: ${REVIEW_LABELS[status]}`}
               onClick={() => patch({ statuses: toggle(filters.statuses, status) })}
@@ -354,18 +382,44 @@ export function FilterBar(props: FilterBarProps) {
               // Opens leftwards from the button: the grid pane clips anything past its right edge.
               align="end"
               className="filter-popover"
+              // Opening lands on the heading, not on "오늘" (review #10): one Tab reaches the presets.
+              initialFocus=".filter-popover-title"
             >
+              <h2 className="filter-popover-title" tabIndex={-1}>
+                필터 조건
+              </h2>
               <FilterPopoverBody tagListId={tagListId} />
-              <div className="popover-actions">
+              {/* Sticky footer (review #10): conditions apply as they change (URL stays the
+                  source of truth); 적용 (N) closes with the count, 초기화 clears them. */}
+              <div className="popover-actions filter-popover-footer">
                 <button
                   type="button"
-                  className="grid-btn"
+                  className="button ghost"
+                  onClick={() =>
+                    setFilters({
+                      ...filters,
+                      from: undefined,
+                      to: undefined,
+                      statuses: [],
+                      types: [],
+                      tags: [],
+                      ext: [],
+                      path: "",
+                    })
+                  }
+                >
+                  초기화
+                </button>
+                <button
+                  type="button"
+                  className="button primary"
+                  data-testid="filter-apply"
                   onClick={() => {
                     setPopoverOpen(false);
                     triggerRef.current?.focus();
                   }}
                 >
-                  닫기
+                  적용{count ? ` (${count})` : ""}
                 </button>
               </div>
             </Popover>

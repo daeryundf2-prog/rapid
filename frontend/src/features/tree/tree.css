@@ -23,13 +23,32 @@
   color: var(--text-muted);
 }
 
-.case-tree-item:hover {
-  background: var(--bg-raised);
+/* Same selected / hover tokens as the grid rows (review #1). */
+.case-tree-item:hover:not(.selected) {
+  background: var(--bg-hover);
 }
 
 .case-tree-item.selected {
-  background: var(--bg-raised);
+  background: var(--bg-selected);
   box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* Top-level nodes (증거 소스 · 전체 보기 · the domains) read as section headers (review #7). */
+.case-tree-item[aria-level="1"] {
+  height: 24px;
+  margin-top: var(--space-2);
+  color: var(--text-subtle);
+  font-size: var(--fs-aux);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.case-tree-item[aria-level="1"]:first-child {
+  margin-top: 0;
+}
+
+.case-tree-item[aria-level="1"]:hover:not(.selected) {
+  color: var(--text);
 }
 
 .case-tree-item.disabled {
@@ -60,8 +79,11 @@
   font-size: var(--fs-aux);
 }
 
+/* Twisty (16) + icon (16) slots are always reserved so leaves never out-dent their parent. */
 .case-tree-icon {
   flex: none;
+  inline-size: 16px;
+  block-size: 16px;
   color: var(--text-muted);
 }
 
@@ -82,9 +104,20 @@
   font-size: var(--fs-aux);
 }
 
-.case-tree-item .badge.strong {
-  font-weight: 700;
-  color: var(--text);
+/* Counts: one plain style (review #7) — no pill, tabular figures, 0 dimmer than the rest. */
+.case-tree-item .badge {
+  height: auto;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--text-muted);
+  font-size: var(--fs-aux);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.case-tree-item.is-empty .badge {
+  color: var(--text-subtle);
 }
 
 .case-tree-loading {
@@ -113,22 +146,11 @@
 }
 
 .case-tree-search {
+  box-sizing: border-box;
+  width: calc(100% - 2 * var(--space-2));
   margin: var(--space-2);
   height: var(--control-h);
   padding: 0 var(--space-2);
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
   font: inherit;
-  font-size: var(--fs-table-aux);
-}
-
-.case-tree-search::placeholder {
-  color: var(--text-muted);
-}
-
-.case-tree-search:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  font-size: var(--fs-body);
 }

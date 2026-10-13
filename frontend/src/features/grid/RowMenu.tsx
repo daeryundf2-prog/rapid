@@ -1,6 +1,8 @@
 import { Fragment, useEffect, useRef } from "react";
 import { useEscape } from "../../a11y/focus";
-import type { CommandContext } from "../../contracts/command";
+import { type CommandContext, KEY_MAP } from "../../contracts/command";
+import { Icon, isIconName } from "../../icons";
+import { keyLabel } from "../../shortcuts";
 import { getRegisteredCommand } from "./adapter";
 
 /** Row-menu entries in order; each is a registered `grid.*` Command. */
@@ -28,6 +30,26 @@ export const ROW_MENU_REVIEW_IDS = [
   "grid.row.include-in-report",
   "grid.row.bookmark",
 ] as const;
+
+/** Keys a row-menu entry mirrors (review #13): Enter opens, R / X / I / B mark the row. */
+const ROW_MENU_KEYS: Record<string, { command?: string; fallback: string }> = {
+  "grid.openSource": { fallback: KEY_MAP.openViewer },
+  "grid.row.relevant": { command: "review.mark.relevant", fallback: KEY_MAP.markRelevant },
+  "grid.row.excluded": { command: "review.mark.excluded", fallback: KEY_MAP.markExcluded },
+  "grid.row.needs-review": { command: "review.mark.needs-review", fallback: KEY_MAP.markNeedsReview },
+  "grid.row.bookmark": { command: "review.mark.bookmark", fallback: KEY_MAP.bookmark },
+};
+
+/**
+ * The key hint of a row-menu entry: the command's own shortcut, else the registered command it
+ * mirrors (the shell's review.mark.*), else the KEY_MAP key; undefined when it has none.
+ */
+export function rowMenuShortcut(id: string, ownShortcut?: string): string | undefined {
+  if (ownShortcut) return ownShortcut;
+  const entry = ROW_MENU_KEYS[id];
+  if (!entry) return undefined;
+  return (entry.command ? getRegisteredCommand(entry.command)?.shortcut : undefined) ?? entry.fallback;
+}
 
 export interface RowMenuProps {
   /** Element id, referenced by the trigger's aria-controls. */
@@ -104,14 +126,16 @@ export function RowMenu({ id, anchor, context, onClose, onDisabled }: RowMenuPro
     >
       {[...items, ...reviewItems].map((command, index) => {
         const reason = command.disabledReason?.(context);
+        const shortcut = rowMenuShortcut(command.id, command.shortcut);
         return (
           <Fragment key={command.id}>
             {index === items.length && items.length > 0 ? <hr className="grid-menu-sep" /> : null}
             <button
               type="button"
               role="menuitem"
-              className="grid-menu-item"
+              className="grid-menu-item menu-item"
               aria-disabled={reason ? true : undefined}
+              aria-keyshortcuts={shortcut}
               title={reason}
               data-disabled-reason={reason || undefined}
               data-command={command.id}
@@ -124,7 +148,23 @@ export function RowMenu({ id, anchor, context, onClose, onDisabled }: RowMenuPro
                 void command.run(context);
               }}
             >
-              {command.label}
+              {/* 16px lead slot (icon or empty), label + 11px reason line, right-aligned key. */}
+              <span className="menu-item-lead" aria-hidden="true">
+                {isIconName(command.icon) ? <Icon name={command.icon} /> : null}
+              </span>
+              <span className="menu-item-text">
+                <span className="menu-item-label">{command.label}</span>
+                {reason ? (
+                  <span className="menu-item-reason" aria-hidden="true">
+                    {reason}
+                  </span>
+                ) : null}
+              </span>
+              {shortcut ? (
+                <span className="menu-item-kbd" aria-hidden="true">
+                  {keyLabel(shortcut)}
+                </span>
+              ) : null}
             </button>
           </Fragment>
         );

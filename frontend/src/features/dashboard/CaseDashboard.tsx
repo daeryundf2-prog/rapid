@@ -68,16 +68,25 @@ export function CaseDashboard({ runId }: { runId: string }) {
   );
 
   if (detail.isPending) {
+    // The final card shells in their final order, skeleton lines inside (review #11): nothing
+    // jumps when the data arrives.
+    const shells = CARD_IDS.filter((id) => !layout.hidden.includes(id));
     return (
       <div className="dash" data-testid="intake-pane" aria-busy="true">
         <div className="dash-grid">
-          {["processing", "evidence", "categories"].map((id) => (
-            <section key={id} className="dash-card" aria-label={CARD_META[id as CardId].title}>
+          {shells.map((id, index) => (
+            <section key={id} className="dash-card" aria-label={CARD_META[id].title}>
               <div className="dash-card-head">
-                <h2 className="dash-card-title-static">{CARD_META[id as CardId].title}</h2>
+                {/* Not a heading yet: the loaded card's own h2 replaces it (one outline). */}
+                <span className="dash-card-title-static">{CARD_META[id].title}</span>
               </div>
               <div className="dash-card-body">
-                <CardLoading label="케이스 정보를 불러오는 중…" />
+                {index === 0 ? <p className="visually-hidden">케이스 정보를 불러오는 중…</p> : null}
+                <div className="dash-skeleton" aria-hidden="true">
+                  <span className="skeleton" style={{ width: "60%" }} />
+                  <span className="skeleton" style={{ width: "30%" }} />
+                  <span className="skeleton" style={{ width: "45%" }} />
+                </div>
               </div>
             </section>
           ))}

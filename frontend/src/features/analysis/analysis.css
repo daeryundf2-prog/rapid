@@ -134,27 +134,87 @@
   align-self: flex-start;
 }
 
-.analysis-caution {
-  margin: 0 0 var(--space-2);
-  padding: var(--space-2);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  background: var(--bg-raised);
-  color: var(--text);
-  font-size: var(--fs-table-aux);
+/* Run dialogs (review #4) -------------------------------------------------- */
+
+.analysis-form {
+  display: grid;
+  gap: var(--space-4); /* 16px between fields */
 }
 
+/* Caution: a warn bar on the left + icon on a 10% warn tint; only the title is bold. */
+.analysis-caution {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--radius-sm);
+  background: var(--caution-bg);
+  color: var(--text);
+  font-size: var(--fs-table-aux);
+  font-weight: 400;
+}
+
+.analysis-caution > p {
+  margin: 0;
+}
+
+.analysis-caution strong {
+  font-weight: 600;
+}
+
+.analysis-caution-icon {
+  margin-top: 1px;
+  color: var(--warn);
+}
+
+/* Option groups ("찾을 서명" …): a plain group under its label, no box. */
 .analysis-field fieldset,
 fieldset.analysis-field {
-  border: 1px solid var(--line-subtle);
-  border-radius: 4px;
-  padding: var(--space-1) var(--space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
 }
 
 .analysis-choices {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-1) var(--space-3);
+  gap: var(--space-2) var(--space-3);
+}
+
+.analysis-choices > label,
+.analysis-field > label:has(> input[type="checkbox"]) {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+  font-size: var(--fs-body);
+  font-weight: 400;
+}
+
+.analysis-number {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.analysis-number-input {
+  width: 120px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.analysis-unit {
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
+}
+
+.analysis-input-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
 }
 
 /* Status-bar chip */

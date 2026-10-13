@@ -95,21 +95,24 @@ function RunProgress({ run }: { run: RunWithProgress }) {
         <StatusSep />
         <span className={errors > 0 ? "status-errors" : undefined}>오류 {errors}</span>
       </span>
-      <span className="status-group status-actions">
-        <CommandButton command="case.cancel" label="취소" variant="ghost" testId="run-cancel" />
-        <CommandButton command="case.retry" label="재시도" variant="ghost" testId="run-retry" />
-      </span>
+      {/* Run actions only when they apply (review #8): 취소 while running, 재시도 after a failure. */}
+      {active || status === "failed" ? (
+        <span className="status-group status-actions">
+          {active ? (
+            <CommandButton command="case.cancel" label="취소" variant="ghost" testId="run-cancel" />
+          ) : null}
+          {status === "failed" ? (
+            <CommandButton command="case.retry" label="재시도" variant="ghost" testId="run-retry" />
+          ) : null}
+        </span>
+      ) : null}
     </div>
   );
 }
 
-/** Visual separator between status-bar facts (not read out). */
+/** Visual separator between status-bar facts (not read out): a 1px × 14px rule (review #8). */
 function StatusSep() {
-  return (
-    <span className="status-sep" aria-hidden="true">
-      ·
-    </span>
-  );
+  return <span className="status-sep" aria-hidden="true" />;
 }
 
 const TZ_OPTIONS: ReadonlyArray<[string, string]> = [
@@ -165,8 +168,15 @@ export function StatusBar() {
       <Slot name="status-extra" />
       <span className="statusbar-spacer" />
       <TimezoneControl />
-      <span className={`status-connection ${runsStatus}`} data-testid="status-connection">
-        {runsStatus === "error" ? "연결 끊김" : runsStatus === "loading" ? "연결 중…" : "연결됨"}
+      <StatusSep />
+      <span className="status-connection-wrap">
+        <span
+          className={`status-dot ${runsStatus === "error" ? "danger" : runsStatus === "loading" ? "" : "ok"}`}
+          aria-hidden="true"
+        />
+        <span className={`status-connection ${runsStatus}`} data-testid="status-connection">
+          {runsStatus === "error" ? "연결 끊김" : runsStatus === "loading" ? "연결 중…" : "연결됨"}
+        </span>
       </span>
     </footer>
   );

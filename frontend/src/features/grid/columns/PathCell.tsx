@@ -1,18 +1,11 @@
 import type { ReactNode } from "react";
-import { splitPathTail } from "../gridUtils";
+import { MiddlePath } from "../../../components/MiddlePath";
 
 /**
- * 경로 cell (visual-polish B2 #2): truncates in the middle — the folder part ellipsizes, the file
- * name stays whole. The text content is the full path (copy / filter / tooltip unchanged).
+ * 경로 cell (review #9): the parent folder with the shared middle ellipsis (the 항목 column
+ * already names the file). The cell's value / tooltip / filter text stay the full path.
  */
 export function pathCell(path: string | null): ReactNode {
   if (!path) return null;
-  const [head, tail] = splitPathTail(path);
-  if (!head) return path;
-  return (
-    <span className="grid-path">
-      <span className="grid-path-head">{head}</span>
-      <span className="grid-path-tail">{tail}</span>
-    </span>
-  );
+  return <MiddlePath path={path} />;
 }

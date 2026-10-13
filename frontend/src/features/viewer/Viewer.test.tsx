@@ -61,18 +61,18 @@ function routes(previewBody: unknown, extra: Record<string, Handler> = {}) {
 const region = () => screen.getByRole("region", { name: "원본 뷰어" });
 const tab = (name: string) => screen.getByRole("tab", { name });
 const live = () => (screen.getByTestId("live-polite").textContent ?? "").trim();
-/** Menu holding each viewer command (visual-polish S5/S6): "⋯" 원본 동작 and the review 더보기. */
+/** Menu holding each viewer command (review #6): one "⋯" 더보기 menu with 리뷰 / 원본 sections. */
 const MENU_OF: Record<string, string> = {
-  "viewer.open-original": "원본 동작",
-  "viewer.hash": "원본 동작",
-  "viewer.copy-path": "원본 동작",
-  "viewer.cite": "원본 동작",
-  "navigate.rows-for-source": "원본 동작",
-  "viewer.mark.needs-review": "리뷰 더보기",
-  "viewer.mark.excluded": "리뷰 더보기",
-  "viewer.mark.include-in-report": "리뷰 더보기",
-  "viewer.mark.bookmark": "리뷰 더보기",
-  "viewer.note": "리뷰 더보기",
+  "viewer.open-original": "더보기",
+  "viewer.hash": "더보기",
+  "viewer.copy-path": "더보기",
+  "viewer.cite": "더보기",
+  "navigate.rows-for-source": "더보기",
+  "viewer.mark.needs-review": "더보기",
+  "viewer.mark.excluded": "더보기",
+  "viewer.mark.include-in-report": "더보기",
+  "viewer.mark.bookmark": "더보기",
+  "viewer.note": "더보기",
 };
 /** The control of a viewer command, opening the menu that holds it first. */
 const tool = (id: string) => {
@@ -507,8 +507,8 @@ describe("Viewer — history and navigation", () => {
 
   it("'같은 출처의 다른 행' emits navigate.rows-for-source when a handler is registered", async () => {
     await show({ preview_type: "text", extension: ".txt", text: "hi" });
-    // It lives in the "⋯" 원본 동작 menu (visual-polish S5).
-    fireEvent.click(screen.getByRole("button", { name: "원본 동작" }));
+    // It lives in the one "⋯" 더보기 menu (review #6).
+    fireEvent.click(screen.getByRole("button", { name: "더보기" }));
     const button = screen.getByRole("menuitem", { name: "같은 출처의 다른 행" });
     expect(button.getAttribute("aria-disabled")).toBe("true");
     const run = vi.fn();

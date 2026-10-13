@@ -271,14 +271,19 @@ export function EvidenceTree({ runId }: { runId: string }) {
               ) : (
                 <span className="case-tree-twisty" aria-hidden="true" />
               )}
-              {node.icon ? <Icon name={node.icon} className="case-tree-icon" /> : null}
+              {node.icon ? (
+                <Icon name={node.icon} className="case-tree-icon" />
+              ) : (
+                <span className="case-tree-icon" aria-hidden="true" />
+              )}
               <span className="case-tree-label">{node.label}</span>
               {node.marker ? (
                 <span className="case-tree-marker" aria-hidden="true">
                   {node.marker}
                 </span>
               ) : null}
-              {node.count !== undefined && (
+              {/* Counts stay hidden until the first load settles (review #11): no "—" flicker. */}
+              {node.count !== undefined && !loading && (
                 <span
                   className={`badge muted${node.strongCount && node.count !== 0 ? " strong" : ""}`}
                   aria-hidden="true"

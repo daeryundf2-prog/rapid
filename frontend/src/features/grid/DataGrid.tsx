@@ -34,7 +34,7 @@ import { setColumnFilter } from "../filters/columnFilters";
 import type { FilterBarVariant } from "../filters/FilterBar";
 import { useFilterStore } from "../filters/filterStore";
 import { useDensity, useGridLocalStore, useRoute, useSelection, useToast, useViewerTarget } from "./adapter";
-import { BatchBar } from "./BatchBar";
+import { BatchBar, batchBarState } from "./BatchBar";
 import { ColumnFilterRow } from "./ColumnFilterRow";
 import { collectionDef, lockedColumnId, presetColumnIds } from "./columns";
 import { isRecord } from "./columns/common";
@@ -57,6 +57,7 @@ import {
   type AutoHideReason,
   compareValues,
   displayText,
+  emptyColumnIds,
   fitColumnWidths,
   formatCount,
   indexFromRef,
@@ -90,6 +91,8 @@ const HEAD_TOOLS_WIDTH = 40;
 /** The header row is 32px at every density (visual-polish U-V4); rows follow the density. */
 const HEADER_HEIGHT = 32;
 const EMPTY_ROWS: GridRow[] = [];
+/** Skeleton rows while the first page loads (review #11). */
+const SKELETON_ROWS = [1, 2, 3, 4, 5, 6, 7, 8];
 const PRESETS: readonly GridPreset[] = ["analysis", "compact", "source", "axiom"];
 /** AXIOM preset (X13): the tag/status chip column is pinned right after the select cell. */
 const AXIOM_PINNED = "tagstatus";
@@ -454,19 +457,25 @@ export function DataGrid(props: DataGridProps = {}) {
     return [...lead, ...columns.filter((c) => !lead.includes(c))];
   }, [columns, preset]);
 
-  // Responsive default layout (분석 기본 preset only): 시각 goes when no loaded row has a time,
-  // then the lowest-priority columns go while their minimum widths exceed the grid width.
+  // Responsive default layout (분석 기본 preset only): a default column with no value in any
+  // loaded row goes (시각, 선별 … — review #9), then the lowest-priority columns go while their
+  // minimum widths exceed the grid width. 항목 (the first priority id) always stays.
   const widthPriority = preset === "analysis" ? def.widthPriority?.(ref) : undefined;
   const loadedRows = cq.loadedRows;
-  const noTimes = useMemo(
-    () => loadedRows.length > 0 && !loadedRows.some((row) => row.timestamp),
-    [loadedRows],
+  const emptyIds = useMemo(
+    () =>
+      widthPriority
+        ? emptyColumnIds(orderedColumns, loadedRows, {
+            candidates: widthPriority.slice(1),
+            keep: pinnedColumns,
+          })
+        : [],
+    [widthPriority, orderedColumns, loadedRows, pinnedColumns],
   );
   const autoHidden = useMemo(() => {
     const out = new Map<string, AutoHideReason>();
     if (!widthPriority) return out;
-    if (noTimes && widthPriority.includes("timestamp") && !pinnedColumns.has("timestamp"))
-      out.set("timestamp", "empty");
+    for (const id of emptyIds) out.set(id, "empty");
     const shown = orderedColumns
       .filter((c) => visibility[c.id] !== false && !out.has(c.id))
       .map((c) => ({ id: c.id, min: columnSizing[c.id] ?? c.minWidth ?? c.width }));
@@ -477,7 +486,7 @@ export function DataGrid(props: DataGridProps = {}) {
     });
     for (const id of hidden) out.set(id, "width");
     return out;
-  }, [widthPriority, noTimes, pinnedColumns, orderedColumns, visibility, columnSizing, paneWidth]);
+  }, [widthPriority, emptyIds, pinnedColumns, orderedColumns, visibility, columnSizing, paneWidth]);
   const tableVisibility = useMemo(() => {
     if (autoHidden.size === 0) return visibility;
     const next = { ...visibility };
@@ -948,6 +957,16 @@ export function DataGrid(props: DataGridProps = {}) {
     () => [...selectedKeys].map((key) => rowsByKey.get(key)).filter((r): r is GridRow => !!r),
     [selectedKeys, rowsByKey],
   );
+  // Rows on screen: the filtered/sorted rows (compact mode) or every loaded page.
+  const displayKeys = useMemo(
+    () => (compactMode ? new Set(displayRows.map((r) => r.rowKey)) : null),
+    [compactMode, displayRows],
+  );
+  const batch = batchBarState(
+    selectedKeys,
+    (key) => (displayKeys ? displayKeys.has(key) : rowsByKey.has(key)),
+    tagPromptOpen,
+  );
 
   const host: GridCommandHost = {
     runId,
@@ -1167,9 +1186,13 @@ export function DataGrid(props: DataGridProps = {}) {
       aria-label={`${def.label} 그리드`}
       data-density={density}
       data-preset={preset}
-      data-batch={selectedKeys.size > 0 ? "" : undefined}
-      // Room under the last row = the bar's real height + its bottom offset (12) + 12 air.
-      style={batchHeight > 0 ? ({ "--batch-reserve": `${batchHeight + 24}px` } as CSSProperties) : undefined}
+      data-batch={batch.visible ? "" : undefined}
+      // Room under the last row: 52px for the one-line bar (review #2), more while an editor is open.
+      style={
+        batch.visible && batchHeight > 0
+          ? ({ "--batch-reserve": `${Math.max(52, batchHeight + 14)}px` } as CSSProperties)
+          : undefined
+      }
     >
       <GridToolbar
         filterRef={filterRef}
@@ -1194,7 +1217,7 @@ export function DataGrid(props: DataGridProps = {}) {
         </p>
       ))}
 
-      {cq.error ? (
+      {cq.error && displayCount > 0 ? (
         <div className="grid-error" role="alert">
           <span>목록을 불러오지 못했습니다. {cq.error.message}</span>
           <button type="button" className="grid-btn" onClick={cq.refetch}>
@@ -1398,17 +1421,39 @@ export function DataGrid(props: DataGridProps = {}) {
               })}
             </div>
           </div>
-          {displayCount === 0 && !cq.isLoading ? <GridEmpty state={emptyState} testId="grid-empty" /> : null}
+          {/* One state at a time (review #11): the error card replaces the empty state. */}
+          {displayCount === 0 && !cq.isLoading && !cq.error ? (
+            <GridEmpty state={emptyState} testId="grid-empty" />
+          ) : null}
           {displayCount === 0 && cq.isLoading && runId ? (
-            // A typed / server-filtered page can scan for seconds: never a blank grid meanwhile.
-            <p className="grid-empty grid-loading" data-testid="grid-loading">
-              {loadingMessage}
-            </p>
+            // A typed / server-filtered page can scan for seconds: never a blank grid meanwhile —
+            // eight skeleton rows under the header; the sentence goes to the footer.
+            <div className="grid-skeleton-rows" data-testid="grid-loading" aria-hidden="true">
+              {SKELETON_ROWS.map((n) => (
+                <div key={n} className="grid-skeleton-row">
+                  <span className="grid-skeleton" style={{ width: "60%" }} />
+                  <span className="grid-skeleton" style={{ width: "30%" }} />
+                  <span className="grid-skeleton" style={{ width: "45%" }} />
+                </div>
+              ))}
+            </div>
+          ) : null}
+          {cq.error && displayCount === 0 ? (
+            <div className="grid-error-card" role="alert">
+              <span className="grid-empty-icon" aria-hidden="true">
+                <Icon name="alert" />
+              </span>
+              <p className="grid-empty-text">목록을 불러오지 못했습니다. {cq.error.message}</p>
+              <button type="button" className="button" onClick={cq.refetch}>
+                다시 시도
+              </button>
+            </div>
           ) : null}
         </div>
         {/* The batch bar floats over the bottom of the grid: selecting never moves the rows. */}
         <BatchBar
-          selectedCount={selectedKeys.size}
+          selectedCount={batch.count}
+          visible={batch.visible}
           context={context}
           onDisabled={(reason) => toast.show(reason, "info")}
           onClear={() => setSelectionKeys([])}
@@ -1436,6 +1481,7 @@ export function DataGrid(props: DataGridProps = {}) {
         scanned={cq.scanned}
         onLoadMore={loadMore}
         loading={cq.isFetching}
+        loadingText={displayCount === 0 && cq.isLoading ? loadingMessage : undefined}
         scope={cq.category ? categoryScopeText(cq.category) : undefined}
       />
       {extractResult ? (

@@ -57,6 +57,16 @@
   cursor: not-allowed;
 }
 
+/* Landing (no case): the whole rail recedes until a case is open (review #14). */
+.stage-rail[data-disabled] .stage-rail-item {
+  opacity: 0.4;
+}
+
+.stage-rail[data-disabled] .stage-rail-item:hover {
+  background: transparent;
+  color: var(--text-muted);
+}
+
 .stage-panel {
   display: flex;
   flex-direction: column;
@@ -166,6 +176,9 @@
   align-items: center;
   column-gap: var(--space-2);
   row-gap: var(--space-1);
+  /* Every card is the same 58px (review #11): one title line, one ellipsized meta line. */
+  box-sizing: border-box;
+  height: 58px;
   padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
   border: 1px solid var(--line-subtle);
   border-radius: var(--radius);
@@ -180,7 +193,7 @@
 .process-card-link {
   grid-column: 1;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: var(--space-1);
   min-width: 0;
   color: var(--text);
@@ -192,13 +205,10 @@
 .process-card-title {
   flex: 1;
   min-width: 0;
-  word-break: keep-all;
-  overflow-wrap: anywhere;
-  line-height: 16px;
-}
-
-.process-card-link > .icon {
-  flex: none;
+  overflow: hidden;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .process-card-link:hover .process-card-title {
@@ -211,32 +221,20 @@
   border-radius: 2px;
 }
 
-.process-card-link > .badge.muted {
+.process-card-link > .status-chip {
   flex: none;
   margin-left: auto;
-  font-weight: 500;
-}
-
-.process-card[data-state="failed"] .process-card-link .icon {
-  color: var(--danger);
-}
-
-.process-card[data-state="completed"] .process-card-link .icon {
-  color: var(--ok);
-}
-
-.process-card[data-state="running"] .process-card-link .icon,
-.process-card[data-state="queued"] .process-card-link .icon {
-  color: var(--accent);
 }
 
 .process-card-last {
   grid-column: 1;
-  padding-left: 20px; /* under the name, past the 16px state icon + gap */
+  min-width: 0;
+  overflow: hidden;
   color: var(--text-muted);
   font-size: var(--fs-aux);
   font-variant-numeric: tabular-nums;
-  word-break: keep-all; /* wrap between "·" parts, never inside "10,003건" */
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .process-card-run {
@@ -343,7 +341,7 @@
   flex-direction: column;
   gap: var(--space-1);
   border: 1px solid var(--line-subtle);
-  border-radius: 4px;
+  border-radius: var(--radius);
   padding: var(--space-2);
   background: var(--bg-panel);
 }

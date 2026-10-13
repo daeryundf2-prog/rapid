@@ -7,7 +7,8 @@
 
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { useEscape } from "../a11y/focus";
-import { Icon } from "../icons";
+import { Icon, type IconName } from "../icons";
+import { keyLabel } from "../shortcuts";
 import "./popover.css";
 
 export interface MenuItem {
@@ -21,9 +22,15 @@ export interface MenuItem {
   command?: string;
   /** Colour hint for review-status items (status dot). */
   status?: string;
+  /** Leading glyph; the 16px slot is reserved either way so every label lines up (review #13). */
+  icon?: IconName;
+  /** Key hint shown right-aligned (registry notation, e.g. "R", "Enter"). */
+  shortcut?: string;
   onSelect: () => void;
   /** Rule above the item. */
   separator?: boolean;
+  /** Section heading above the item (e.g. "리뷰", "원본"); implies a rule unless it is first. */
+  section?: string;
 }
 
 export interface MenuButtonProps {
@@ -38,6 +45,8 @@ export interface MenuButtonProps {
   /** Extra trigger attributes for tests. */
   testId?: string;
   title?: string;
+  /** Open upwards (a bar at the bottom of a pane). */
+  placement?: "below" | "above";
 }
 
 export function MenuButton({
@@ -49,6 +58,7 @@ export function MenuButton({
   onDisabled,
   testId,
   title,
+  placement = "below",
 }: MenuButtonProps) {
   const [open, setOpen] = useState(false);
   const menuId = useId();
@@ -143,7 +153,7 @@ export function MenuButton({
           id={menuId}
           role="menu"
           aria-label={label}
-          className={`popover menu popover-${align}`}
+          className={`popover menu popover-${align}${placement === "above" ? " popover-above" : ""}`}
           onKeyDown={onMenuKeyDown}
         >
           {items.map((item, index) => {
@@ -151,6 +161,7 @@ export function MenuButton({
             const common = {
               type: "button" as const,
               "aria-disabled": item.disabledReason ? true : undefined,
+              "aria-keyshortcuts": item.shortcut ? item.shortcut.replace("Ctrl", "Control") : undefined,
               "aria-describedby": item.disabledReason ? reasonId : undefined,
               "data-disabled-reason": item.disabledReason || undefined,
               "data-command": item.command,
@@ -168,16 +179,37 @@ export function MenuButton({
             };
             const content = (
               <>
-                {item.status ? (
-                  <span className="status-dot" data-status={item.status} aria-hidden="true" />
-                ) : null}
-                <span className="menu-item-label">{item.label}</span>
+                <span className="menu-item-lead" aria-hidden="true">
+                  {item.status ? (
+                    <span className="status-dot" data-status={item.status} />
+                  ) : item.icon ? (
+                    <Icon name={item.icon} />
+                  ) : null}
+                </span>
+                <span className="menu-item-text">
+                  <span className="menu-item-label">{item.label}</span>
+                  {item.disabledReason ? (
+                    <span className="menu-item-reason" aria-hidden="true">
+                      {item.disabledReason}
+                    </span>
+                  ) : null}
+                </span>
                 {item.checked ? <Icon name="check" className="menu-item-check" /> : null}
+                {item.shortcut ? (
+                  <span className="menu-item-kbd" aria-hidden="true">
+                    {keyLabel(item.shortcut)}
+                  </span>
+                ) : null}
               </>
             );
             return (
               <div key={item.id} className="menu-row" role="none">
-                {item.separator ? <hr className="menu-sep" /> : null}
+                {(item.separator || item.section) && index > 0 ? <hr className="menu-sep" /> : null}
+                {item.section ? (
+                  <div className="menu-heading" aria-hidden="true">
+                    {item.section}
+                  </div>
+                ) : null}
                 {item.checked === undefined ? (
                   <button role="menuitem" {...common}>
                     {content}

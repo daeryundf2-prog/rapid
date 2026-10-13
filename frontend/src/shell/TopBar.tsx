@@ -1,6 +1,6 @@
 import { type FormEvent, useEffect, useId, useRef, useState } from "react";
 import { announce, useEscape, useFocusTrap } from "../a11y";
-import { COLLECTION_LABEL, RUN_MODE_LABEL, runDisplayName } from "../app/collections";
+import { COLLECTION_LABEL } from "../app/collections";
 import { focusGridWhenReady, GLOBAL_SEARCH_ID, NO_RUN_REASON } from "../commands/builtin";
 import { CommandButton } from "../commands/CommandButton";
 import { useCommandState } from "../commands/registry";
@@ -8,39 +8,15 @@ import { SearchOptionsButton } from "../features/case/SearchOptionsPopover";
 import { useSearchState } from "../features/case/searchState";
 import { Icon } from "../icons";
 import { keyLabel } from "../shortcuts";
-import { useRoute, useRuns } from "../state/hooks";
+import { useRoute } from "../state/hooks";
 import { useAppStore } from "../state/store";
 import { Brand } from "./BrandMark";
+import { CasePickerCombobox } from "./CasePickerCombobox";
 import { Slot } from "./slots";
 
-/** Default case picker (S4 may register a richer "case-picker" slot). */
+/** Default case picker (S4 may register a richer "case-picker" slot): the case combobox (review #5). */
 export function CasePickerFallback() {
-  const { runs } = useRuns();
-  const { route, navigate } = useRoute();
-  const id = useId();
-  return (
-    <div className="case-picker">
-      <label htmlFor={id} className="visually-hidden">
-        케이스
-      </label>
-      <select
-        id={id}
-        value={route.runId ?? ""}
-        data-testid="case-picker"
-        onChange={(event) => {
-          const runId = event.target.value;
-          navigate(runId ? { runId, collection: "intake" } : { runId: null, collection: null });
-        }}
-      >
-        <option value="">{runs.length ? "케이스 선택…" : "케이스 없음"}</option>
-        {runs.map((run) => (
-          <option key={run.run_id} value={run.run_id}>
-            {runDisplayName(run)} · {RUN_MODE_LABEL[run.request?.mode ?? ""] ?? run.request?.mode ?? "케이스"}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
+  return <CasePickerCombobox />;
 }
 
 function GlobalSearch() {
@@ -95,7 +71,7 @@ function GlobalSearch() {
   );
 }
 
-/** ⌘K / Ctrl K: opens the command palette; the key hint is part of the button. */
+/** ⌘K (Mac) / Ctrl K: opens the command palette; the key hint is the button's face (review #14). */
 function PaletteButton() {
   const { disabledReason, run } = useCommandState("app.palette");
   return (
@@ -109,7 +85,6 @@ function PaletteButton() {
       title={disabledReason ?? `명령 팔레트 (${keyLabel("Ctrl+K")})`}
       onClick={() => void run()}
     >
-      <Icon name="command" />
       <kbd>{keyLabel("Ctrl+K")}</kbd>
     </button>
   );
@@ -156,6 +131,8 @@ function useSearchOptionsDismissal(): void {
  */
 export function TopBar() {
   const runDialogOpen = useAppStore((s) => s.runDialogOpen);
+  // Landing (no case open): nothing to search yet, so the search field is not offered (review #14).
+  const hasCase = useAppStore((s) => Boolean(s.route.runId));
   useSearchOptionsDismissal();
   const setOverlay = useAppStore((s) => s.setOverlay);
   return (
@@ -163,16 +140,10 @@ export function TopBar() {
       <Brand />
       <div className="topbar-case">
         <Slot name="case-picker" fallback={<CasePickerFallback />} />
-        <CommandButton
-          command="case.run-dialog"
-          iconOnly
-          variant="ghost"
-          label="실행/불러오기"
-          testId="run-dialog-button"
-        />
+        <CommandButton command="case.run-dialog" variant="ghost" label="실행" testId="run-dialog-button" />
       </div>
       <div className="topbar-search">
-        <GlobalSearch />
+        {hasCase ? <GlobalSearch /> : null}
         <PaletteButton />
       </div>
       <div className="topbar-actions">

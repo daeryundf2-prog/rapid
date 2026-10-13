@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ARTIFACT_PRIORITY } from "./columns/artifacts";
 import { FILES_PRIORITY } from "./columns/files";
-import { fitColumnWidths, priorityHiddenColumns, splitPathTail } from "./gridUtils";
+import { fitColumnWidths, priorityHiddenColumns } from "./gridUtils";
 
 describe("fitColumnWidths (항목 flexes; nothing shrinks)", () => {
   const base = [140, 130, 220, 200, 88]; // 시각 · 유형 · 항목 · 경로 · 선별
@@ -71,14 +71,5 @@ describe("priorityHiddenColumns (responsive default columns)", () => {
   it("skips priority ids that are not visible (hidden by the user)", () => {
     const noPath = artifacts.filter((c) => c.id !== "path");
     expect(hide(noPath, 576)).toEqual(["review"]);
-  });
-});
-
-describe("splitPathTail (경로 truncates in the middle)", () => {
-  it("keeps the file name whole", () => {
-    expect(splitPathTail("C:\\a\\b\\messages.json")).toEqual(["C:\\a\\b\\", "messages.json"]);
-    expect(splitPathTail("/var/log/syslog")).toEqual(["/var/log/", "syslog"]);
-    expect(splitPathTail("file.txt")).toEqual(["", "file.txt"]);
-    expect(splitPathTail("C:\\dir\\")).toEqual(["", "C:\\dir\\"]);
   });
 });

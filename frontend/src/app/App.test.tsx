@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetAppStore, useAppStore } from "../state/store";
 import { App } from "./App";
@@ -109,6 +109,9 @@ describe("App shell", () => {
 
   it("top bar: brand mark, case, search with its options inside, ⌘K, then only theme + help (S7)", () => {
     renderApp();
+    // The global search is offered once a case is open (review #14).
+    expect(screen.getByTestId("topbar").querySelector(".global-search")).toBeNull();
+    act(() => useAppStore.getState().navigate({ runId: "run-aaaaaaaa", collection: "files" }));
     const topbar = screen.getByTestId("topbar");
     expect(topbar.querySelector(".brand .brand-mark")).toBeTruthy();
     expect(topbar.textContent).toContain("RapidForensic");
@@ -159,14 +162,21 @@ describe("App shell", () => {
 
   it("routes from the case picker and shows run progress with cancel/retry state", async () => {
     renderApp();
-    const picker = (await screen.findByTestId("case-picker")) as HTMLSelectElement;
-    await waitFor(() => expect(picker.options.length).toBe(2));
-    fireEvent.change(picker, { target: { value: "run-aaaaaaaa" } });
+    // The case picker is a combobox popover (review #5): open it, then pick the case row.
+    const picker = await screen.findByTestId("case-picker");
+    await waitFor(() => expect(picker.textContent).toContain("케이스 선택"));
+    fireEvent.click(picker);
+    const search = screen.getByRole("combobox", { name: "케이스 검색" });
+    expect(document.activeElement).toBe(search);
+    const options = within(screen.getByRole("listbox", { name: "케이스" })).getAllByRole("option");
+    expect(options).toHaveLength(1);
+    fireEvent.keyDown(search, { key: "Enter" });
     expect(window.location.hash).toBe("#/case/run-aaaaaaaa/intake");
     const status = await screen.findByTestId("status-run");
     expect(status.textContent).toContain("provider 3/8");
     expect(status.textContent).toContain("오류 1");
-    expect(screen.getByTestId("run-retry").getAttribute("aria-disabled")).toBe("true");
+    // 취소 / 재시도 only show when they apply (review #8): a running run offers 취소 only.
+    expect(screen.queryByTestId("run-retry")).toBeNull();
     expect(screen.getByTestId("run-cancel").getAttribute("aria-disabled")).toBeNull();
     // 접수 dashboard (S7) replaces the grid on the intake node.
     await waitFor(() => expect(screen.getByTestId("intake-pane").textContent).toContain("registry"));

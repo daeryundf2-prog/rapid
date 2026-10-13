@@ -14,6 +14,7 @@ import { RUN_MODE_LABEL, runDisplayName } from "../../app/collections";
 import { CommandButton } from "../../commands/CommandButton";
 import { useCommandState } from "../../commands/registry";
 import { StatusBadge, statusLabel } from "../../components/Badge";
+import { chipToneOf, ToneChip } from "../../components/ToneChip";
 import { Icon } from "../../icons";
 import { serializeRoute } from "../../router";
 import { formatElapsed, progressText as runProgressText } from "../../shell/StatusBar";
@@ -185,9 +186,9 @@ export function ProcessPanel() {
                     aria-current={current ? "page" : undefined}
                     aria-label={`${node.label}, ${state}`}
                   >
-                    <Icon name={nodeStateIcon(failed ? "failed" : (last?.status ?? null))} />
+                    {/* State as a dot + text chip (review #11): no leading status glyph. */}
                     <span className="process-card-title">{node.label}</span>
-                    <span className="badge muted">{state}</span>
+                    <ToneChip tone={chipToneOf(failed ? "failed" : (last?.status ?? null))}>{state}</ToneChip>
                   </a>
                   <span className="process-card-last">
                     {lastRunShort(nodeJobs.find(isAnalysisActive) ?? last, timezone)}
@@ -368,8 +369,16 @@ function StepList({ runId }: { runId: string }) {
                   <tr key={index} data-status={text(step.status) || undefined}>
                     <td title={id || undefined}>{id ? stepNameLabel(id) : `단계 ${index + 1}`}</td>
                     <td>
-                      {status || "—"}
-                      {warning && warning !== status ? ` · ${warning}` : ""}
+                      {/* Step state as the shared dot + text chip (review #24). */}
+                      {status ? (
+                        <ToneChip
+                          tone={warning && warning !== status ? "warn" : chipToneOf(text(step.status))}
+                        >
+                          {`${status}${warning && warning !== status ? ` · ${warning}` : ""}`}
+                        </ToneChip>
+                      ) : (
+                        "—"
+                      )}
                     </td>
                     <td className="is-right">{stepCountText(step) || "—"}</td>
                     <td className="process-plan-note" title={messages.join("\n") || undefined}>

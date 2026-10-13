@@ -81,21 +81,44 @@ function KeyTerm({ name, label: given }: { name: string; label?: string | null }
   );
 }
 
+/**
+ * 20×20 copy icon button (review #3): shown on row hover / focus; a successful copy swaps the
+ * icon for a check for a moment — the row's width never changes.
+ */
 function CopyButton({ text, label }: { text: string; label: string }) {
   const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(timer);
+  }, [copied]);
   return (
     <button
       type="button"
-      className="viewer-copy"
+      className="icon-btn meta-copy"
       aria-label={`${label} 복사`}
+      title={copied ? "복사됨" : `${label} 복사`}
+      data-copied={copied ? "" : undefined}
       onClick={() => {
         writeClipboard(text)
           .then(() => setCopied(true))
           .catch(() => setCopied(false));
       }}
     >
-      {copied ? "복사됨" : "복사"}
+      <Icon name={copied ? "check" : "copy"} size={14} />
     </button>
+  );
+}
+
+/** A hash: mono 11px on one line, ellipsized, the full value as tooltip, then the copy button. */
+function HashValue({ value, label }: { value: string; label: string }) {
+  return (
+    <span className="meta-hash">
+      <span className="meta-hash-text mono" title={value}>
+        {value}
+      </span>
+      <CopyButton text={value} label={label} />
+    </span>
   );
 }
 
@@ -121,8 +144,8 @@ function NestedValue({
         {Object.entries(value).map(([k, v]) => (
           <Fragment key={k}>
             <KeyTerm name={k} />
-            <dd className="mono viewer-break">
-              {String(v)} <CopyButton text={String(v)} label={`${name}.${k}`} />
+            <dd className="meta-hash-dd">
+              <HashValue value={String(v)} label={`${name}.${k}`} />
             </dd>
           </Fragment>
         ))}
@@ -746,11 +769,17 @@ export function MetaView({
           {hashes.sha256 ? (
             <dl className="viewer-dl">
               <dt>SHA-256</dt>
-              <dd className="mono viewer-break">{hashes.sha256}</dd>
+              <dd className="meta-hash-dd">
+                <HashValue value={hashes.sha256} label="SHA-256" />
+              </dd>
               <dt>SHA-1</dt>
-              <dd className="mono viewer-break">{hashes.sha1 ?? "—"}</dd>
+              <dd className="meta-hash-dd">
+                {hashes.sha1 ? <HashValue value={hashes.sha1} label="SHA-1" /> : "—"}
+              </dd>
               <dt>MD5</dt>
-              <dd className="mono viewer-break">{hashes.md5 ?? "—"}</dd>
+              <dd className="meta-hash-dd">
+                {hashes.md5 ? <HashValue value={hashes.md5} label="MD5" /> : "—"}
+              </dd>
             </dl>
           ) : (
             <p className="viewer-note">

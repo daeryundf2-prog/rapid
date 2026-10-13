@@ -16,7 +16,13 @@ const UI = 3;
 const STATUSES = ["relevant", "bookmark", "excluded", "needs-review", "report"];
 // Forensic Slate surfaces (U-V1): app bg, panels, raised controls, popovers/toasts.
 const SURFACES = ["--surface-0", "--surface-1", "--surface-2", "--surface-3"];
-const ROWS = [...SURFACES, "--bg-selected"];
+// Derived tints (tokens.css aliases, color-mix of theme tokens): the selected row / tree item, and
+// the hover tint composited over the surfaces it is used on (grid = surface-0, tree = surface-1).
+// `--x@--y` = token --x painted over --y.
+const HOVERS = ["--bg-hover@--surface-0", "--bg-hover@--surface-1"];
+const ROWS = [...SURFACES, "--bg-selected", ...HOVERS];
+// Dialog caution box (tokens.css --caution-bg): body text, its title and the warn icon.
+const CAUTION = "--caution-bg";
 const PAIRS = [
   ...ROWS.map((b) => ["text", "--text", b, TEXT, "text"]),
   ...ROWS.map((b) => ["muted text", "--text-muted", b, TEXT, "text"]),
@@ -31,6 +37,11 @@ const PAIRS = [
     "text",
   ]),
   ["disabled text", "--disabled-text", "--disabled-bg", TEXT, "text"],
+  // Disabled outlined buttons (controls.css) sit on the bare surface, not on a fill.
+  ...SURFACES.map((b) => ["disabled text (outlined button)", "--disabled-text", b, TEXT, "text"]),
+  ["caution text", "--text", CAUTION, TEXT, "text"],
+  ["caution muted text", "--text-muted", CAUTION, TEXT, "text"],
+  ["caution icon / bar", "--warn", CAUTION, UI, "ui"],
   ...SURFACES.map((b) => ["border/line (controls)", "--line", b, UI, "ui"]),
   ...["--ok", "--warn", "--danger", "--info", "--deleted"].flatMap((f) =>
     ROWS.map((b) => [`status ${f.slice(2)}`, f, b, TEXT, "text"]),
@@ -86,7 +97,7 @@ export function parseThemes(css) {
     }
   }
   const aliases = Object.fromEntries(
-    Object.entries(raw.dark ?? {}).filter(([, v]) => /^var\(--[\w-]+\)$/.test(v)),
+    Object.entries(raw.dark ?? {}).filter(([, v]) => /^var\(--[\w-]+\)$/.test(v) || /^color-mix\(/.test(v)),
   );
   const themes = {};
   for (const name of ["dark", "light", "light-os", "print"]) {
@@ -95,12 +106,65 @@ export function parseThemes(css) {
   return themes;
 }
 
-function resolveToken(vars, name, depth = 0) {
-  const v = vars[name];
-  if (v === undefined || depth > 10) return undefined;
+/** Split "a, b(c, d), e" at top-level commas. */
+function splitArgs(text) {
+  const out = [];
+  let depth = 0;
+  let cur = "";
+  for (const ch of text) {
+    if (ch === "(") depth++;
+    if (ch === ")") depth--;
+    if (ch === "," && depth === 0) {
+      out.push(cur.trim());
+      cur = "";
+    } else cur += ch;
+  }
+  if (cur.trim()) out.push(cur.trim());
+  return out;
+}
+
+/** A colour expression → { rgb, alpha }: hex, var(--x), `transparent`, color-mix(in srgb, A p%, B). */
+function resolveColor(vars, expr, depth = 0) {
+  if (expr === undefined || depth > 10) return undefined;
+  const v = expr.trim();
+  if (v === "transparent") return { rgb: [0, 0, 0], alpha: 0 };
+  if (/^#[0-9a-f]{3,8}$/i.test(v)) return { rgb: hexToRgb(v), alpha: 1 };
   const ref = /^var\((--[\w-]+)\)$/.exec(v);
-  if (ref) return resolveToken(vars, ref[1], depth + 1);
-  return v;
+  if (ref) return resolveColor(vars, vars[ref[1]], depth + 1);
+  const mix = /^color-mix\(\s*in srgb\s*,([\s\S]*)\)$/.exec(v);
+  if (mix) {
+    const parts = splitArgs(mix[1]).map((part) => {
+      const pct = /\s+(\d+(?:\.\d+)?)%$/.exec(part);
+      return { color: pct ? part.slice(0, pct.index) : part, pct: pct ? Number(pct[1]) / 100 : undefined };
+    });
+    if (parts.length !== 2) return undefined;
+    const [a, b] = parts;
+    const pa = a.pct ?? (b.pct !== undefined ? 1 - b.pct : 0.5);
+    const ca = resolveColor(vars, a.color, depth + 1);
+    const cb = resolveColor(vars, b.color, depth + 1);
+    if (!ca || !cb) return undefined;
+    // CSS Color 5: premultiplied interpolation in sRGB.
+    const alpha = ca.alpha * pa + cb.alpha * (1 - pa);
+    if (alpha === 0) return { rgb: [0, 0, 0], alpha: 0 };
+    const rgb = [0, 1, 2].map((i) => (ca.rgb[i] * ca.alpha * pa + cb.rgb[i] * cb.alpha * (1 - pa)) / alpha);
+    return { rgb, alpha };
+  }
+  return undefined;
+}
+
+function toHex(rgb) {
+  return `#${rgb.map((c) => Math.round(c).toString(16).padStart(2, "0")).join("")}`;
+}
+
+/** Token (or `--x@--base`: token --x painted over --base) → opaque hex. */
+function resolveToken(vars, name) {
+  const [token, base] = name.split("@");
+  const color = resolveColor(vars, `var(${token})`);
+  if (!color) return undefined;
+  if (color.alpha >= 1) return toHex(color.rgb);
+  const under = base ? resolveColor(vars, `var(${base})`) : undefined;
+  if (!under) return undefined;
+  return toHex(color.rgb.map((c, i) => c * color.alpha + under.rgb[i] * (1 - color.alpha)));
 }
 
 export function hexToRgb(hex) {

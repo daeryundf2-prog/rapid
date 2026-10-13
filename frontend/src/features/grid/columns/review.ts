@@ -123,7 +123,8 @@ export const reviewCollection: CollectionDef = {
     col.field("report", "보고서", 80, ["analysis", "compact"], (r) =>
       r.fields.includeInReport ? "포함" : "",
     ),
-    col.timestamp(170, ["analysis", "source"]),
+    // 시각 never narrower than its 15 characters + padding (review #9: no clipped seconds).
+    { ...col.timestamp(170, ["analysis", "source"]), minWidth: 150 },
     col.path(420, ["source"]),
     col.field("pointer", "위치", 160, ["source"], (r) => fieldStr(r, "pointer"), { mono: true }),
   ],

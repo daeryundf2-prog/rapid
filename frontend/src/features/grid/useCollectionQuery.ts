@@ -404,11 +404,15 @@ export function useCollectionQuery(
     // and the menu must still offer the others.
     const types = new Set<string>(serverTypes);
     const tags = new Set<string>();
+    const counts: Record<string, number> = {};
     for (const row of unfilteredRows) {
-      if (row.artifactType) types.add(row.artifactType);
+      if (row.artifactType) {
+        types.add(row.artifactType);
+        counts[row.artifactType] = (counts[row.artifactType] ?? 0) + 1;
+      }
       for (const tag of row.tags) tags.add(tag);
     }
-    setOptions([...types].sort().slice(0, 200), [...tags].sort().slice(0, 200));
+    setOptions([...types].sort().slice(0, 200), [...tags].sort().slice(0, 200), counts);
   }, [unfilteredRows, serverTypes, setOptions, passive]);
 
   const categoryId = query.ref.id === "artifacts" && !query.ref.kind ? query.ref.category : undefined;

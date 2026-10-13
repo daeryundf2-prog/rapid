@@ -1,20 +1,21 @@
 /**
- * Viewer actions (visual-polish S5/S6) — one cluster at the right of the viewer header:
+ * Viewer actions (visual-polish S5/S6, review #6) — one cluster at the right of the viewer header:
  *  - "관련 있음": the one review action kept as a primary toggle (the batch bar owns the rest);
- *  - a status dot: the row's current review status;
- *  - "더보기": 재검토 · 제외 · 보고서 포함 · 북마크 · 메모;
- *  - "⋯" (원본 동작): 원본 열기 · 해시 복사 · 경로 복사 · 인용 복사 · 같은 출처의 다른 행.
+ *  - a status chip (dot + text): the row's current review status;
+ *  - one "⋯" menu (더보기) with two sections — 리뷰: 재검토 · 제외 · 보고서 포함 · 북마크 · 메모,
+ *    and 원본: 원본 열기 · 해시 복사 · 경로 복사 · 인용 복사 · 같은 출처의 다른 행.
  * Every entry is a view of a registered Command (same ids as before), so the palette, the key
- * map and these menus run the same code.
+ * map and this menu run the same code; key hints come from the registry.
  */
 
 import { useEffect, useRef, useState } from "react";
 import { announce, DisabledReason } from "../../a11y";
+import { getCommand } from "../../commands/registry";
 import { MenuButton, type MenuItem } from "../../components/MenuButton";
 import { STATUS_META } from "../../components/StatusChip";
 import "../../components/status.css";
 import type { Command, CommandContext } from "../../contracts/command";
-import { Icon } from "../../icons";
+import { Icon, isIconName } from "../../icons";
 import {
   applyNote,
   applyReviewAction,
@@ -69,10 +70,10 @@ function NoteForm({ onSave, onCancel }: { onSave: (text: string) => void; onCanc
         />
       </label>
       <div className="note-form-actions">
-        <button type="submit" className="viewer-button" disabled={!text.trim()}>
+        <button type="submit" className="button primary" disabled={!text.trim()}>
           저장
         </button>
-        <button type="button" className="viewer-button" onClick={onCancel}>
+        <button type="button" className="button ghost" onClick={onCancel}>
           취소
         </button>
       </div>
@@ -184,8 +185,12 @@ export function ViewerToolbar({
     (isPressed("include-in-report") ? "include-in-report" : isPressed("bookmark") ? "bookmark" : null);
   const currentLabel = current ? STATUS_META[current as keyof typeof STATUS_META].label : "미검토";
 
+  /** The key that marks the row (R / X / I / B): the viewer command's own, else the shell's review.mark.*. */
+  const markShortcut = (command: Command, action: string) =>
+    command.shortcut ?? getCommand(`review.mark.${action}`)?.shortcut;
+
   const reviewItems: MenuItem[] = [
-    ...others.map((command) => {
+    ...others.map((command, index) => {
       const action = markOf(command);
       return {
         id: command.id,
@@ -193,7 +198,9 @@ export function ViewerToolbar({
         command: command.id,
         status: action,
         checked: isPressed(action),
+        shortcut: markShortcut(command, action),
         disabledReason: command.disabledReason?.(ctx),
+        section: index === 0 ? "리뷰" : undefined,
         onSelect: () => run(command),
       };
     }),
@@ -201,25 +208,28 @@ export function ViewerToolbar({
       id: "viewer.note",
       label: "메모…",
       command: "viewer.note",
-      separator: true,
+      icon: "message",
       disabledReason: noteReason,
       onSelect: () => setNoteOpen(true),
     },
   ];
 
   const sourceItems: MenuItem[] = [
-    ...sourceCommands.map((command) => ({
+    ...sourceCommands.map((command, index) => ({
       id: command.id,
       label: command.label,
       command: command.id,
+      icon: isIconName(command.icon) ? command.icon : undefined,
+      shortcut: command.shortcut,
       disabledReason: command.disabledReason?.(ctx),
+      section: index === 0 ? "원본" : undefined,
       onSelect: () => run(command),
     })),
     {
       id: "navigate.rows-for-source",
       label: "같은 출처의 다른 행",
       command: "navigate.rows-for-source",
-      separator: true,
+      icon: "list",
       disabledReason: rowsForSource.reason,
       onSelect: rowsForSource.run,
     },
@@ -250,36 +260,28 @@ export function ViewerToolbar({
             </button>
           </DisabledReason>
         ) : null}
+        {/* Status as a chip with text (review #6), not a bare dot. */}
         <span
-          className="viewer-status"
+          className="status-chip viewer-status"
+          data-status={current ?? undefined}
           role="img"
           aria-label={`리뷰 상태: ${currentLabel}`}
           title={`리뷰 상태: ${currentLabel}`}
           data-testid="viewer-review-status"
         >
-          <span className="status-dot" data-status={current ?? undefined} />
+          {currentLabel}
         </span>
-        <span ref={moreRef} className="viewer-review-more">
+        <span ref={moreRef} className="viewer-actions-more">
           <MenuButton
-            label="리뷰 더보기"
-            items={reviewItems}
-            triggerClassName="viewer-tool-trigger"
+            label="더보기"
+            items={[...reviewItems, ...sourceItems]}
+            triggerClassName="viewer-icon-button"
             onDisabled={(reason) => announce(reason)}
-            testId="viewer-review-menu"
+            testId="viewer-actions-menu"
           >
-            <span>더보기</span>
-            <Icon name="chevron-down" />
+            <Icon name="more" />
           </MenuButton>
         </span>
-        <MenuButton
-          label="원본 동작"
-          items={sourceItems}
-          triggerClassName="viewer-icon-button"
-          onDisabled={(reason) => announce(reason)}
-          testId="viewer-source-menu"
-        >
-          <Icon name="more" />
-        </MenuButton>
       </div>
       {noteOpen && target ? (
         <NoteForm onSave={(text) => void saveNote(text)} onCancel={() => setNoteOpen(false)} />

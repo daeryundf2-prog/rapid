@@ -292,10 +292,11 @@ describe("처리 stage cards (5, 7, 10, 12)", () => {
   });
 
   it("CSS: disabled primary drops the accent fill; cards and history tables do not overflow", () => {
-    // Button variants live in controls.css (visual-polish U-V3); a disabled primary uses the disabled fill.
+    // Button variants live in controls.css (visual-polish U-V3); a disabled primary drops the
+    // accent fill for a dashed outline (review #4: disabled never looks like an enabled button).
     const controls = readFileSync(join(process.cwd(), "src/tokens/controls.css"), "utf8");
     expect(controls).toMatch(
-      /\.button:is\(\.primary[^)]*\):is\(:disabled, \[aria-disabled="true"\]\)[^{]*\{[^}]*background: var\(--disabled-bg\)/,
+      /\.button:is\(\.primary[^)]*\):is\(:disabled, \[aria-disabled="true"\]\)[^{]*\{[^}]*border-style: dashed;[^}]*background: transparent/,
     );
     const shell = readFileSync(join(process.cwd(), "src/app/shell.css"), "utf8");
     expect(shell).toMatch(/\.disabled-reason-text \{/);

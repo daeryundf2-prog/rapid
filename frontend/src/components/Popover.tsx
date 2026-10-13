@@ -87,7 +87,9 @@ export function Popover({
     const first = tabbables[0] as HTMLElement;
     const last = tabbables[tabbables.length - 1] as HTMLElement;
     const active = document.activeElement;
-    if (event.shiftKey && (active === first || active === root)) {
+    // Focus may start on a non-tabbable heading (initialFocus): Shift+Tab from it wraps too.
+    const outside = !tabbables.includes(active as HTMLElement);
+    if (event.shiftKey && (active === first || active === root || outside)) {
       event.preventDefault();
       last.focus();
     } else if (!event.shiftKey && active === last) {

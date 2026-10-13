@@ -1,7 +1,7 @@
 import { type KeyboardEvent, useId, useMemo, useRef, useState } from "react";
 import { announce, useEscape, useFocusTrap } from "../a11y";
 import { focusGridWhenReady } from "../commands/builtin";
-import { fuzzyScore } from "../commands/fuzzy";
+import { fuzzyMatchIndexes, fuzzyScore } from "../commands/fuzzy";
 import { disabledReasonOf, runCommand, useCommandContext, useCommands } from "../commands/registry";
 import type { Command, CommandGroup } from "../contracts/command";
 import { Icon, isIconName } from "../icons";
@@ -91,6 +91,33 @@ export function buildPaletteGroups(
   // Free-text actions come last so Enter on a matching command never turns into a search.
   if (extra.length) groups.push({ id: "free-text", label: "전체 검색", items: extra });
   return groups;
+}
+
+/** The label with the characters the query matched in bold (review #12); plain text otherwise. */
+function HighlightedLabel({ label, query }: { label: string; query: string }) {
+  const hits = new Set(fuzzyMatchIndexes(query, label));
+  if (hits.size === 0) return <>{label}</>;
+  const parts: { text: string; hit: boolean }[] = [];
+  for (let i = 0; i < label.length; i += 1) {
+    const hit = hits.has(i);
+    const last = parts.at(-1);
+    if (last && last.hit === hit) last.text += label[i];
+    else parts.push({ text: label[i] ?? "", hit });
+  }
+  return (
+    <>
+      {parts.map((part, i) =>
+        part.hit ? (
+          // biome-ignore lint/suspicious/noArrayIndexKey: parts are positional
+          <b key={i} className="palette-hit">
+            {part.text}
+          </b>
+        ) : (
+          part.text
+        ),
+      )}
+    </>
+  );
 }
 
 /** Ctrl K command palette (plan U2): the keyboard entry point to every command. */
@@ -256,9 +283,11 @@ function PaletteDialog() {
                       {item.icon && isIconName(item.icon) ? (
                         <Icon name={item.icon} />
                       ) : (
-                        <span className="icon" />
+                        <span className="icon palette-icon-slot" aria-hidden="true" />
                       )}
-                      <span className="palette-label">{item.label}</span>
+                      <span className="palette-label">
+                        <HighlightedLabel label={item.label} query={query} />
+                      </span>
                       {item.disabledReason ? (
                         <span className="palette-reason">{item.disabledReason}</span>
                       ) : null}

@@ -1,10 +1,11 @@
 /* Design tokens — the only palette/scale in the v2 console ("Forensic Slate",
    visual-polish plan U-V1/U-V2/U-V8).
-   Colour budget: ≤ 40 per theme (here 39): 4 surfaces, 1 selected, 2 lines,
+   Colour budget: ≤ 40 per theme (here 38): 4 surfaces, 2 lines,
    3 text, 4 accent (accent / hover / active / on-accent), 2 disabled, 1 scrim,
    4 semantic status, 5 review statuses + 5 "on" foregrounds, 8 tags.
    Aliases (--bg, --bg-panel, --bg-raised, --focus, --deleted) point at those
-   tokens and add no colours; components written before U-V1 keep working.
+   tokens and add no colours (--bg-selected / --bg-hover are color-mix tints);
+   components written before U-V1 keep working.
    Dark is the default regardless of the OS setting; light applies only when
    the user chose it ([data-theme="light"], persisted by state/slices/prefs.ts).
    Printing always uses the light palette (ink). Every theme block is complete
@@ -45,8 +46,10 @@
   /* Controls (U-V3): 28 default / 32 roomy, radius 6. */
   --control-h: 28px;
   --control-h-roomy: 32px;
-  --radius: 6px;
+  /* Radius scale (review #16): sm 4 chips/badges, 6 controls/cards, lg 10 dialogs/popovers/landing. */
   --radius-sm: 4px;
+  --radius: 6px;
+  --radius-lg: 10px;
 
   /* Focus + motion (U-V8). */
   --focus-width: 2px;
@@ -71,7 +74,6 @@
   --surface-1: #141920; /* panels, bars */
   --surface-2: #1b222b; /* raised: buttons, hover, inputs-in-bars */
   --surface-3: #232c37; /* popovers, menus, toasts */
-  --bg-selected: #1a3150;
   --line: #68778a; /* control borders (≥ 3:1) */
   --line-subtle: #262f3a; /* dividers, row rules */
   --text: #e6eaef;
@@ -123,7 +125,6 @@
   --surface-1: #ffffff;
   --surface-2: #eaeef3;
   --surface-3: #ffffff;
-  --bg-selected: #dbe8fb;
   --line: #737f8c;
   --line-subtle: #dde2e8;
   --text: #121820;
@@ -131,6 +132,9 @@
   --text-subtle: #5a6572;
   --disabled-bg: #eaeef3;
   --disabled-text: #4f5a66;
+  /* Light rows sit on surface-1 (white, review #23): the 12% accent tint goes over that surface
+     (over surface-0 the info/accent text on a selected row lands at 4.50:1, under the gate). */
+  --bg-selected: color-mix(in srgb, var(--accent) 12%, var(--surface-1));
 
   --accent: #1a63c2;
   --accent-hover: #1757aa;
@@ -176,7 +180,6 @@
     --surface-1: #ffffff;
     --surface-2: #eaeef3;
     --surface-3: #ffffff;
-    --bg-selected: #dbe8fb;
     --line: #737f8c;
     --line-subtle: #dde2e8;
     --text: #121820;
@@ -184,6 +187,7 @@
     --text-subtle: #5a6572;
     --disabled-bg: #eaeef3;
     --disabled-text: #4f5a66;
+    --bg-selected: color-mix(in srgb, var(--accent) 12%, var(--surface-1));
     --accent: #1a63c2;
     --accent-hover: #1757aa;
     --accent-active: #134a91;
@@ -215,8 +219,14 @@
   }
 }
 
-/* Aliases — same values, older names (no new colours). */
+/* Aliases — same values, older names (no new colours). Derived tints are colour-mix of
+   theme tokens (no literal colour of their own; scripts/check-contrast.mjs resolves them):
+   selected row/tree item = accent 12% over surface-0; hover = text 4% over whatever is below. */
 :root {
+  --bg-selected: color-mix(in srgb, var(--accent) 12%, var(--surface-0));
+  --bg-hover: color-mix(in srgb, var(--text) 4%, transparent);
+  /* Caution box in dialogs (review #4): 10% warn over the dialog surface. */
+  --caution-bg: color-mix(in srgb, var(--warn) 10%, var(--surface-1));
   --bg: var(--surface-0);
   --bg-panel: var(--surface-1);
   --bg-raised: var(--surface-2);

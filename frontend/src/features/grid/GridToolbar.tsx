@@ -317,6 +317,8 @@ export interface GridFooterProps {
   canLoadMore: boolean;
   onLoadMore: () => void;
   loading: boolean;
+  /** Sentence shown while the first page loads (the grid itself shows skeleton rows). */
+  loadingText?: string;
   /** Scope line for category nodes ("범주: 운영 체제 (5 유형)"). */
   scope?: string;
 }
@@ -339,7 +341,7 @@ export function GridFooter(props: GridFooterProps) {
       </span>
       {props.loading ? (
         <span className="grid-note" data-testid="grid-footer-loading">
-          불러오는 중…
+          {props.loadingText ?? "불러오는 중…"}
         </span>
       ) : null}
       {props.backend ? (
