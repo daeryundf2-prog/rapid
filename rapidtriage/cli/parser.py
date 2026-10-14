@@ -850,6 +850,18 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--keyword-pack", action="append", help="Add a built-in keyword pack such as credentials, execution, network, browser-ai, windows-ir")
     search.add_argument("--keyword-pack-file", action="append", help="JSON keyword pack file containing a keywords list")
 
+    search_index = sub.add_parser(
+        "search-index",
+        help="Build or update the run search index (rapidtriage-search.db) used by the console search page",
+        description="Build (full) or update (incremental, analysis rows only) <run output>/rapidtriage-search.db",
+    )
+    search_index.add_argument("run_output", help="Run output directory or rapidtriage-run-summary.json")
+    search_index.add_argument("--mode", choices=["full", "incremental"], default="full", help="full rebuild or per-analysis update")
+    search_index.add_argument("--analysis-id", action="append", help="Analysis id to (re)index in incremental mode (repeatable; default: all)")
+    search_index.add_argument("--output", help="Index path (default: <run output>/rapidtriage-search.db)")
+    search_index.add_argument("--run-id", help="Run id recorded in the index meta (default: output directory name)")
+    search_index.add_argument("--json", action="store_true", help="Print the build summary as JSON")
+
     source_read = sub.add_parser(
         "source-read",
         help="Read a source file from a completed run with bounded preview, hashes, and forensic caveats",

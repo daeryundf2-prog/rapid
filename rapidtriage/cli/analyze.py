@@ -103,6 +103,43 @@ def handle_timeline_export(args: argparse.Namespace, parser: argparse.ArgumentPa
 
 
 
+def handle_search_index(args: argparse.Namespace, parser: argparse.ArgumentParser, rule_set) -> int:
+        """Build/update ``rapidtriage-search.db`` for a run (the API builds it itself after a run completes)."""
+        from ..core.jobs import resolve_run_summary_path
+        from ..core.search_index.build import BuildHooks, build_search_index
+
+        try:
+            summary_path = resolve_run_summary_path(Path(args.run_output))
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            parser.error(f"run summary not readable: {exc}")
+        output_dir = Path(str(summary.get("output_dir") or summary_path.parent)).expanduser().resolve()
+        quiet = bool(args.json)
+
+        def progress(message: str) -> None:
+            if not quiet:
+                print(message, flush=True)
+
+        try:
+            result = build_search_index(
+                output_dir,
+                summary,
+                run_id=args.run_id or output_dir.name,
+                index_path=Path(args.output).expanduser().resolve() if args.output else None,
+                mode=args.mode,
+                analysis_ids=args.analysis_id or [],
+                hooks=BuildHooks(advance=progress),
+            )
+        except (OSError, ValueError) as exc:
+            parser.error(str(exc))
+        if args.json:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        else:
+            print(f"Documents: {result['doc_count']}  DB bytes: {result['db_bytes']}  Elapsed: {result['elapsed_s']}s  Tokenizer: {result.get('tokenizer')}")
+        return 0
+
+
+
 def handle_search(args: argparse.Namespace, parser: argparse.ArgumentParser, rule_set) -> int:
         run_output = Path(args.run_output).expanduser().resolve()
         output = Path(args.output).expanduser().resolve()
@@ -391,6 +428,7 @@ HANDLERS = {
     "timeline": handle_timeline,
     "timeline-export": handle_timeline_export,
     "search": handle_search,
+    "search-index": handle_search_index,
     "source-read": handle_source_read,
     "source-search": handle_source_search,
     "ocr-queue": handle_ocr_queue,

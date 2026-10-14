@@ -4,11 +4,12 @@ import builtins
 import datetime as dt
 import hashlib
 import json
+import logging
 import os
 import threading
 import uuid
 from collections import Counter, OrderedDict
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -334,7 +335,26 @@ class RunJobStore:
         self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="rapidtriage-run")
         self._lock = threading.Lock()
         self._state_path = state_path.expanduser().resolve() if state_path is not None else None
+        # name -> hook(store, job) called after a run is written ``completed`` (best effort).
+        self._completion_hooks: dict[str, Callable[[RunJobStore, RunJob], None]] = {}
         self._load_state()
+
+    def set_completion_hook(self, name: str, hook: Callable[[RunJobStore, RunJob], None] | None) -> None:
+        """Register (or with ``None`` remove) a named hook run after each completed run."""
+        with self._lock:
+            if hook is None:
+                self._completion_hooks.pop(name, None)
+            else:
+                self._completion_hooks[name] = hook
+
+    def _run_completion_hooks(self, job: RunJob) -> None:
+        with self._lock:
+            hooks = list(self._completion_hooks.values())
+        for hook in hooks:
+            try:
+                hook(self, job)
+            except Exception:  # a hook never changes the run outcome
+                logging.getLogger(__name__).exception("run completion hook failed for %s", job.run_id)
 
     def submit(self, request: RunRequest, *, retry_of_run_id: str | None = None, retry_attempt: int = 0) -> RunJob:
         run_id = uuid.uuid4().hex[:12]
@@ -610,6 +630,7 @@ class RunJobStore:
         # Outputs were just (re)written by run_triage_mode — drop any stale
         # cached payloads for this run, e.g. a retry over the same output_dir.
         _invalidate_summary_outputs(summary)
+        self._run_completion_hooks(job)
         return summary
 
     def _mark_step(self, run_id: str, name: str, status: str, *, message: str = "") -> None:

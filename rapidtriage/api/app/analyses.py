@@ -1102,7 +1102,23 @@ class AnalysisRunner:
                     progress["message"] = "완료"
             state["finished_at"] = now
             state["elapsed_s"] = elapsed_seconds(state.get("started_at"), now)
+            completed = state["status"] == "completed"
         context.write_state(terminal=True)
+        if completed:
+            run_completion_hooks(context)
+
+
+# Called (best effort) after an analysis is written ``completed``; the search
+# index registers its incremental update here (``search_index_service``).
+COMPLETION_HOOKS: list[Callable[[AnalysisContext], None]] = []
+
+
+def run_completion_hooks(context: AnalysisContext) -> None:
+    for hook in COMPLETION_HOOKS:
+        try:
+            hook(context)
+        except Exception:  # a hook never changes the analysis outcome
+            LOGGER.exception("analysis completion hook failed for %s", context.state.get("analysis_id"))
 
 
 def elapsed_seconds(started_at: object, finished_at: str | None) -> float | None:

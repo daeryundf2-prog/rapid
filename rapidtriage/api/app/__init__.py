@@ -731,4 +731,5 @@ __all__ = [
     "write_submission_audit",
 ]
 
-app = create_app()
+# The served app builds the search index after each run (RAPIDTRIAGE_SEARCH_AUTO_INDEX=0 turns it off).
+app = create_app(auto_search_index=True)
