@@ -118,7 +118,7 @@ export interface Route {
   notes?: boolean;
   /** Explorer view over the collection (X12, S9), URL `view=`; absent = "columns". */
   view?: ExplorerView;
-  /** Artifact category node (X11, S7; artifacts without a kind) or files category (`GET /files?category=`), or docs `matched` (일치만, `GET /docs?matched=1`), URL `category=`. */
+  /** Artifact category node (X11, S7; artifacts without a kind) or files category (`GET /files?category=`), or docs `matched` (일치만, plain `GET /docs`), URL `category=`. */
   category?: string;
   /** Server sort of one artifact kind, URL `sort=details.run_count:desc` (artifacts with a kind only). */
   sort?: ServerSort;

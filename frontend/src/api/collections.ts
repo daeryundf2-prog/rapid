@@ -132,10 +132,21 @@ export function docsRowsKey(
 
 /** Docs route value of the "일치만" toggle (`#/case/{run}/explore/docs?category=matched`). */
 export const DOCS_MATCHED = "matched";
+/** Docs route value for the non-matching documents (`all=1&matched=0`). */
+export const DOCS_UNMATCHED = "unmatched";
+
+/** Which `/docs` list is requested: every document, the keyword matches only, or the non-matches. */
+export type DocsView = "all" | "matched" | "unmatched";
+
+/** Query suffix per view: `all=1` pages `candidates`; plain `/docs` pages `results` (matches). */
+export function docsViewQuery(view: DocsView): string {
+  if (view === "matched") return "";
+  return view === "unmatched" ? "&all=1&matched=0" : "&all=1";
+}
 
 /**
- * `GET /docs`: every document candidate (`candidates`, parser-quality r1), or only the keyword
- * matches with `matched=1`. A server that still pages only `results` (the matches) is read as
+ * `GET /docs`: every document candidate (`all=1` pages `candidates`), the non-matches
+ * (`all=1&matched=0`), or only the keyword matches (plain request, pages `results`). A server that still pages only `results` (the matches) is read as
  * before; `meta.docs_rows` says which list the rows came from ("candidates" | "results").
  */
 export async function fetchDocsPage(
@@ -143,11 +154,11 @@ export async function fetchDocsPage(
   offset: number,
   limit: number,
   signal?: AbortSignal,
-  matchedOnly = false,
+  view: DocsView = "all",
 ): Promise<RawPage> {
   const started = now();
   const payload = await api<Record<string, unknown>>(
-    `/api/runs/${enc(runId)}/docs?offset=${offset}&limit=${limit}${matchedOnly ? "&matched=1" : ""}`,
+    `/api/runs/${enc(runId)}/docs?offset=${offset}&limit=${limit}${docsViewQuery(view)}`,
     { signal },
   );
   const pagination =
@@ -157,7 +168,9 @@ export async function fetchDocsPage(
   const key = docsRowsKey(payload, pagination);
   const rows = asRows(payload[key]);
   const total =
-    (matchedOnly ? (asNumber(payload.matched) ?? asNumber(pagination.matched)) : null) ??
+    (view === "matched"
+      ? (asNumber(payload.matched_count) ?? asNumber(payload.matched) ?? asNumber(pagination.matched))
+      : null) ??
     asNumber(pagination.total) ??
     asNumber(payload.total) ??
     asNumber(payload.record_count);

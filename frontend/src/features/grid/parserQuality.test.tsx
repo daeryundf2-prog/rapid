@@ -104,10 +104,10 @@ describe("timeline 시각 종류", () => {
 describe("docs collection (every document, 일치만 toggle)", () => {
   const rows = () => screen.queryAllByRole("row").filter((r) => r.hasAttribute("data-index"));
 
-  it("lists candidates by default, shows 본문 / 일치, and the toggle asks for matched=1", async () => {
+  it("lists candidates by default, shows 본문 / 일치, and the toggle drops all=1 (plain results)", async () => {
     const calls = installFetch({
       "/docs": (url) =>
-        url.searchParams.get("matched") === "1"
+        url.searchParams.get("all") !== "1"
           ? jsonResponse({
               candidates: [
                 { path: "C:/d/a.hwp", kind: "hwp", matched: true, record_index: 4, text_status: "ok" },
@@ -140,7 +140,7 @@ describe("docs collection (every document, 일치만 toggle)", () => {
     act(() => useGridLocalStore.getState().setRoute({ runId: "run-1", collection: { id: "docs" } }));
     renderWithClient(<DataGrid />);
     await waitFor(() => expect(rows().length).toBe(3));
-    expect(calls.some((c) => c.url.includes("/docs") && !c.url.includes("matched=1"))).toBe(true);
+    expect(calls.some((c) => c.url.includes("/docs") && c.url.includes("all=1"))).toBe(true);
     const text = rows().map((r) => r.textContent ?? "");
     expect(text[1]).toContain("암호화");
     expect(text[2]).toContain("이미지만");
@@ -151,8 +151,33 @@ describe("docs collection (every document, 일치만 toggle)", () => {
     fireEvent.click(toggle);
     expect(useGridLocalStore.getState().route.collection).toEqual({ id: "docs", category: "matched" });
     await waitFor(() => expect(rows().length).toBe(1));
-    expect(calls.some((c) => c.url.includes("matched=1"))).toBe(true);
+    expect(calls.some((c) => c.url.includes("/docs") && !c.url.includes("all=1"))).toBe(true);
+    expect(calls.every((c) => !c.url.includes("matched=1"))).toBe(true);
     expect(screen.getByTestId("docs-matched-toggle").getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("requests all=1, plain results, or all=1&matched=0 per view", async () => {
+    const calls = installFetch({
+      "/docs": () => jsonResponse({ candidates: [], pagination: { collection: "candidates", total: 0 } }),
+    });
+    const docsUrl = () => calls.map((c) => c.url).filter((u) => u.includes("/docs"));
+    await docsCollection.fetch("run-1", { offset: 0, limit: 50, ref: { id: "docs" } } as never);
+    await docsCollection.fetch("run-1", {
+      offset: 0,
+      limit: 50,
+      ref: { id: "docs", category: "matched" },
+    } as never);
+    await docsCollection.fetch("run-1", {
+      offset: 0,
+      limit: 50,
+      ref: { id: "docs", category: "unmatched" },
+    } as never);
+    const [all, matched, unmatched] = docsUrl();
+    expect(all).toContain("all=1");
+    expect(all).not.toContain("matched=");
+    expect(matched).not.toContain("all=");
+    expect(matched).not.toContain("matched=");
+    expect(unmatched).toContain("all=1&matched=0");
   });
 
   it("renders a results-only page (candidates omitted as []) as ordinary grid rows", async () => {

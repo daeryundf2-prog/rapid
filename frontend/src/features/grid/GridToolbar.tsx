@@ -33,7 +33,7 @@ export interface GridToolbarProps {
   extra?: ReactNode;
 }
 
-/** 문서 toolbar: list every document, or only the keyword matches (`GET /docs?matched=1`). */
+/** 문서 toolbar: list every document, or only the keyword matches (plain `GET /docs`; every document is `all=1`). */
 export function DocsMatchedToggle({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
   return (
     <button

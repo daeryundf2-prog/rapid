@@ -1,4 +1,4 @@
-import { DOCS_MATCHED, fetchDocsPage } from "../../../api/collections";
+import { DOCS_MATCHED, DOCS_UNMATCHED, fetchDocsPage } from "../../../api/collections";
 import type { CollectionDef } from "../types";
 import { baseName, col, fieldStr, formatBytes, joinList, makeRef, makeRow, str, strOrNull } from "./common";
 
@@ -29,7 +29,17 @@ export const docsCollection: CollectionDef = {
   label: "문서",
   source: "paged",
   fetch: (runId, query, signal) =>
-    fetchDocsPage(runId, query.offset, query.limit, signal, query.ref.category === DOCS_MATCHED),
+    fetchDocsPage(
+      runId,
+      query.offset,
+      query.limit,
+      signal,
+      query.ref.category === DOCS_MATCHED
+        ? "matched"
+        : query.ref.category === DOCS_UNMATCHED
+          ? "unmatched"
+          : "all",
+    ),
   mapRow: (raw, position, ctx) => {
     const path = strOrNull(raw.path);
     // `candidates` rows (every document) vs the older `results` list (matches only).
