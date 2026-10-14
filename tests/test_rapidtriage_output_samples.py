@@ -277,6 +277,13 @@ def normalize_payload(payload: Any, root: Path) -> Any:
             if key == "source_file_ctime" and isinstance(value, str):
                 normalized[normalized_key] = "<HOST_CTIME>"
                 continue
+            # Raw optional-dependency import exception text (e.g. the
+            # deepfake_lens ImportError) differs per environment and per test
+            # order; skip_reason stays a stable sentence, only the detail is
+            # masked.
+            if key == "import_error_detail" and isinstance(value, str):
+                normalized[normalized_key] = "<IMPORT_ERROR_DETAIL>"
+                continue
             # Tool-discovery paths (e.g. shutil.which("deepfake-lens")) are
             # machine-dependent: the value differs per host and is empty when
             # the optional tool is not installed. Mask them so checked-in

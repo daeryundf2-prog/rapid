@@ -34,13 +34,17 @@ SYNTHETIC_MEDIA_SCORE_GUIDANCE = (
 
 _IMPORT_ERRORS: dict[str, str] = {}
 
+SYNTHETIC_MEDIA_SKIP_REASON = (
+    "선택 의존성 deepfake_lens 모듈을 가져오지 못해 합성 미디어 선별을 건너뛰었습니다."
+)
+
 
 def deepfake_lens_module():
     """Return the imported deepfake_lens module or None when unavailable.
 
     The real import exception text is kept (``deepfake_lens_import_error``) so
-    the status record says *why* the optional dependency is missing instead of
-    a generic "not importable" line.
+    the status record's ``import_error_detail`` says *why* the optional
+    dependency is missing; ``skip_reason`` itself stays a stable sentence.
     """
     try:
         module = importlib.import_module(DEEPFAKE_LENS_MODULE)
@@ -235,7 +239,10 @@ def build_unavailable_record(root: Path) -> ArtifactRecord:
         candidate_count = sum(1 for _ in iter_synthetic_media_candidates(root))
     except OSError:
         candidate_count = -1
-    reason = f"선택 의존성 deepfake_lens 모듈을 가져오지 못해 합성 미디어 선별을 건너뛰었습니다 ({import_error})."
+    # skip_reason/reason stay one stable sentence (they are aggregated into
+    # per-provider skip_reasons counts); the environment-specific exception
+    # text lives only in import_error_detail.
+    reason = SYNTHETIC_MEDIA_SKIP_REASON
     return ArtifactRecord(
         provider=SyntheticMediaProvider.name,
         artifact_type="synthetic-media-scan-status",
@@ -252,7 +259,7 @@ def build_unavailable_record(root: Path) -> ArtifactRecord:
             "scan_status": "skipped-optional-dependency",
             "skip_reason": reason,
             "reason": reason,
-            "import_error": import_error,
+            "import_error_detail": import_error,
             "unscanned_candidate_count": candidate_count,
             "deepfake_lens_cli_path": deepfake_lens_cli_path(),
             "install_hint": (

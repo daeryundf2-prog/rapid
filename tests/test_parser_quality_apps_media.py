@@ -434,8 +434,11 @@ class SyntheticMediaImportErrorTests(unittest.TestCase):
         self.assertEqual(details["status"], "skipped")
         self.assertEqual(details["collection_status"], "skipped")
         self.assertEqual(details["scan_status"], "skipped-optional-dependency")
-        self.assertIn("ModuleNotFoundError: import of deepfake_lens halted", details["import_error"])
-        self.assertIn(details["import_error"], details["skip_reason"])
+        self.assertIn("ModuleNotFoundError: import of deepfake_lens halted", details["import_error_detail"])
+        # The exception text stays out of the aggregated, stable skip_reason.
+        self.assertEqual(details["skip_reason"], synthetic_media.SYNTHETIC_MEDIA_SKIP_REASON)
+        self.assertEqual(details["reason"], details["skip_reason"])
+        self.assertNotIn("ModuleNotFoundError", details["skip_reason"])
         self.assertTrue(HANGUL_RE.search(details["skip_reason"]))
         self.assertEqual(details["unscanned_candidate_count"], 1)
 
@@ -445,7 +448,7 @@ class SyntheticMediaImportErrorTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp_dir, patch.object(synthetic_media.importlib, "import_module", boom):
             records = list(SyntheticMediaProvider().collect(Path(tmp_dir)))
-        self.assertEqual(records[0].details["import_error"], "OSError: DLL load failed while importing _onnx")
+        self.assertEqual(records[0].details["import_error_detail"], "OSError: DLL load failed while importing _onnx")
 
 
 if __name__ == "__main__":
