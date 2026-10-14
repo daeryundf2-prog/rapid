@@ -5560,6 +5560,40 @@ def decode_mounted_device_data(raw: bytes) -> dict[str, object]:
     return {"data_kind": "unknown", "data_hex": raw[:64].hex()}
 
 
+def match_usbstor_to_usb(
+    serial_core: str,
+    container_id: str,
+    usb_by_serial: Mapping[str, Mapping[str, str]],
+    usb_by_parent_prefix: Mapping[str, Mapping[str, str]],
+    usb_by_container: Mapping[str, Sequence[Mapping[str, str]]],
+    *,
+    full_serial: str = "",
+) -> tuple[Mapping[str, str], str]:
+    """Join a USBSTOR instance to its Enum\\USB parent: ``(usb_entry, join_method)``.
+
+    Order: exact serial, truncated serial prefix (USBSTOR clips long serials), the USB
+    instance's ParentIdPrefix (OS-generated ``7&...&0`` serials), then a ContainerID shared by
+    exactly one VID/PID. ``join_method`` is ``""`` when nothing matched.
+    """
+    serial_lower = serial_core.lower()
+    if serial_lower in usb_by_serial:
+        return usb_by_serial[serial_lower], "serial"
+    if len(serial_lower) >= 16:
+        prefixed = [entry for name, entry in usb_by_serial.items() if name.startswith(serial_lower)]
+        if len({(entry["vid"], entry["pid"]) for entry in prefixed}) == 1:
+            return prefixed[0], "serial-prefix"
+    for prefix in (full_serial.lower(), serial_lower):
+        if prefix and prefix in usb_by_parent_prefix:
+            return usb_by_parent_prefix[prefix], "parent-id-prefix"
+    candidates = list(usb_by_container.get(container_id.lower(), [])) if container_id else []
+    storage = [entry for entry in candidates if entry.get("usb_service", "").lower() in {"usbstor", "uaspstor"}]
+    candidates = storage or candidates
+    if candidates and len({(entry["vid"], entry["pid"]) for entry in candidates}) == 1:
+        usbstor_first = sorted(candidates, key=lambda entry: entry.get("usb_service", "").lower() != "usbstor")
+        return usbstor_first[0], "container-id"
+    return {}, ""
+
+
 def usb_and_mounted_device_records(context: NativeHiveRowContext, ccs: str) -> Iterable[ArtifactRecord]:
     hive = context.hive
     mounted_key = hive.open_key("MountedDevices")
@@ -5583,20 +5617,29 @@ def usb_and_mounted_device_records(context: NativeHiveRowContext, ccs: str) -> I
         for interface in hive.subkeys(class_key) if class_key is not None else []:
             device_class_times.setdefault(str(interface.name).lower(), []).append((class_guid, interface.last_written_at))
     usb_by_serial: dict[str, dict[str, str]] = {}
+    usb_by_parent_prefix: dict[str, dict[str, str]] = {}
+    usb_by_container: dict[str, list[dict[str, str]]] = {}
     usb_root = hive.open_key(f"{ccs}\\Enum\\USB")
     for vid_pid in hive.subkeys(usb_root) if usb_root is not None else []:
         vid_match = re.search(r"VID_([0-9A-Fa-f]{4})", str(vid_pid.name))
         pid_match = re.search(r"PID_([0-9A-Fa-f]{4})", str(vid_pid.name))
         for instance in hive.subkeys(vid_pid):
-            usb_by_serial.setdefault(
-                str(instance.name).lower(),
-                {
-                    "vid": vid_match.group(1).upper() if vid_match else "",
-                    "pid": pid_match.group(1).upper() if pid_match else "",
-                    "usb_key_path": context.key_path(f"{ccs}\\Enum\\USB\\{vid_pid.name}\\{instance.name}"),
-                    "usb_key_last_written_at": instance.last_written_at,
-                },
-            )
+            instance_values = hive.values_dict(instance)
+            entry = {
+                "vid": vid_match.group(1).upper() if vid_match else "",
+                "pid": pid_match.group(1).upper() if pid_match else "",
+                "usb_key_path": context.key_path(f"{ccs}\\Enum\\USB\\{vid_pid.name}\\{instance.name}"),
+                "usb_key_last_written_at": instance.last_written_at,
+                "usb_instance_id": str(instance.name),
+                "usb_service": registry_text(instance_values.get("Service")),
+            }
+            usb_by_serial.setdefault(str(instance.name).lower(), entry)
+            parent_prefix = registry_text(instance_values.get("ParentIdPrefix")).lower()
+            if parent_prefix:
+                usb_by_parent_prefix.setdefault(parent_prefix, entry)
+            container = registry_text(instance_values.get("ContainerID")).lower()
+            if container and "&mi_" not in str(vid_pid.name).lower():
+                usb_by_container.setdefault(container, []).append(entry)
     usbstor = hive.open_key(f"{ccs}\\Enum\\USBSTOR")
     matched_mounts: dict[str, str] = {}
     for device_class in hive.subkeys(usbstor) if usbstor is not None else []:
@@ -5623,7 +5666,10 @@ def usb_and_mounted_device_records(context: NativeHiveRowContext, ccs: str) -> I
             interface_times = sorted(
                 {stamp for name, rows in device_class_times.items() if needle in name for _guid, stamp in rows}
             )
-            usb = usb_by_serial.get(serial_core.lower(), {})
+            container_id = registry_text(values.get("ContainerID"))
+            usb, usb_join_method = match_usbstor_to_usb(
+                serial_core, container_id, usb_by_serial, usb_by_parent_prefix, usb_by_container, full_serial=serial
+            )
             friendly = registry_text(values.get("FriendlyName"))
             timestamp = times.get("last_arrival_at") or times.get("first_install_at") or ""
             yield context.row(
@@ -5637,10 +5683,12 @@ def usb_and_mounted_device_records(context: NativeHiveRowContext, ccs: str) -> I
                     "serial_number": serial,
                     "serial_is_os_generated": len(serial) > 1 and serial[1] == "&",
                     "friendly_name": friendly,
-                    "container_id": registry_text(values.get("ContainerID")),
+                    "container_id": container_id,
                     "driver": registry_text(values.get("Driver")),
                     "vid": usb.get("vid", ""),
                     "pid": usb.get("pid", ""),
+                    "usb_join_method": usb_join_method,
+                    "usb_instance_id": usb.get("usb_instance_id", ""),
                     "usb_key_path": usb.get("usb_key_path", ""),
                     "usb_key_last_written_at": usb.get("usb_key_last_written_at", ""),
                     "first_install_at": times.get("first_install_at", ""),

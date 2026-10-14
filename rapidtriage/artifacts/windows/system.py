@@ -1806,6 +1806,7 @@ def activity_style_row_details(
         "timestamp": sample.get("normalized_time"),
         "timestamp_source": sample.get("time_column") or "sqlite_timeline_candidate",
         "time_parse_status": sample.get("time_parse_status"),
+        "secondary_times": dict(sample.get("secondary_times") or {}) if isinstance(sample.get("secondary_times"), Mapping) else {},
         "app_preview": sample.get("app_preview", {}),
         "text_preview": sample.get("text_preview", {}),
         "decoded_text_hint": decoded_text_hint,
@@ -2349,6 +2350,27 @@ def safe_sqlite_identifier(value: str) -> bool:
     return bool(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,127}", value))
 
 
+# Event-time preference for timeline samples: arrival/creation/start first, then generic
+# time/date and update columns; expiry/expiration columns are future deadlines (a
+# notification's ExpiryTime is typically days after it arrived) and are never the event time.
+SQLITE_TIME_COLUMN_PRIORITY = (
+    ("arrival", "created", "creation", "start", "lastmodified", "lastupdated"),
+    ("time", "date"),
+    ("updated", "modified"),
+)
+SQLITE_DEADLINE_TIME_TOKENS = ("expiry", "expiration", "expires", "deadline")
+
+
+def sqlite_time_column_rank(column: str) -> int:
+    lowered = column.lower()
+    if any(token in lowered for token in SQLITE_DEADLINE_TIME_TOKENS):
+        return len(SQLITE_TIME_COLUMN_PRIORITY) + 1
+    for rank, tokens in enumerate(SQLITE_TIME_COLUMN_PRIORITY):
+        if any(token in lowered for token in tokens):
+            return rank
+    return len(SQLITE_TIME_COLUMN_PRIORITY)
+
+
 def sqlite_table_semantic_profile(table_name: str, columns: list[str]) -> dict[str, object]:
     lowered_name = table_name.lower()
     lowered_columns = {column.lower(): column for column in columns}
@@ -2358,11 +2380,14 @@ def sqlite_table_semantic_profile(table_name: str, columns: list[str]) -> dict[s
         for lowered, original in lowered_columns.items()
         if any(token in lowered for token in ("title", "text", "payload", "message", "body", "display", "description"))
     ]
-    time_columns = [
-        original
-        for lowered, original in lowered_columns.items()
-        if any(token in lowered for token in ("time", "date", "created", "updated", "modified", "expiry", "expiration"))
-    ]
+    time_columns = sorted(
+        (
+            original
+            for lowered, original in lowered_columns.items()
+            if any(token in lowered for token in ("time", "date", "created", "updated", "modified", "expiry", "expiration"))
+        ),
+        key=sqlite_time_column_rank,
+    )
     id_columns = [original for lowered, original in lowered_columns.items() if lowered in {"id", "activityid", "notificationid"} or lowered.endswith("id")]
     if "activity" in lowered_name:
         family = "activity"
@@ -2441,6 +2466,13 @@ def sqlite_normalized_timeline_samples(
     app_column = first_semantic_column(profile, "app_columns")
     text_column = first_semantic_column(profile, "text_columns")
     time_column = first_semantic_column(profile, "time_columns")
+    if time_column and sqlite_time_column_rank(time_column) > len(SQLITE_TIME_COLUMN_PRIORITY):
+        time_column = None  # only a deadline column (ExpiryTime): no event time
+    deadline_columns = [
+        str(column)
+        for column in profile.get("time_columns") or []
+        if sqlite_time_column_rank(str(column)) > len(SQLITE_TIME_COLUMN_PRIORITY)
+    ]
     id_column = first_semantic_column(profile, "id_columns")
     if not any((app_column, text_column, time_column, id_column)):
         return []
@@ -2485,6 +2517,15 @@ def sqlite_normalized_timeline_samples(
                 "time_preview": redact_scalar_preview(time_value),
                 "normalized_time": normalized_time.get("iso8601"),
                 "time_parse_status": normalized_time.get("parse_status"),
+                "secondary_times": {
+                    column: {
+                        "label": "expiry",
+                        "normalized_time": normalize_sqlite_time_value(row[column]).get("iso8601"),
+                        "note_ko": "만료 예정 시각(이벤트 발생 시각 아님)",
+                    }
+                    for column in deadline_columns
+                    if column in row_keys and row[column] not in (None, "", 0)
+                },
                 "row_hash": row_digest,
                 "source_locator": {
                     "viewer": "sqlite",

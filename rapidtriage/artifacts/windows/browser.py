@@ -6857,6 +6857,23 @@ BROWSER_SENSITIVE_FIELD_RE = re.compile(
     r"pass|pwd|passwd|pin(?:code|_?no)?$|cvc|cvv|card|ccnum|cc-?number|ssn|social|주민|계좌|비밀|암호|otp|token|secret|security",
     re.IGNORECASE,
 )
+# Personal-data form fields (names, phone numbers, addresses, e-mail, birth dates, resident /
+# business registration numbers, bank accounts, cards): masked like secrets, sha256 kept.
+BROWSER_PERSONAL_FIELD_RE = re.compile(
+    r"name|이름|성명|성함|(?:자|인|주)명|phone|tel(?:no)?|tlno|mtno|mobile|cell|(?<![a-z])hp(?![a-z])|휴대|핸드폰|전화|연락처"
+    r"|아이디|userid|loginid"
+    r"|addr|주소|zip|postcode|postal|우편|e-?mail|메일|birth|생년|생일|(?<![a-z])dob(?![a-z])"
+    r"|rrn|jumin|resident|주민|외국인등록|사업자|bizno|계좌|acct|account|bank|은행|카드|passport|여권",
+    re.IGNORECASE,
+)
+BROWSER_PERSONAL_VALUE_RES = (
+    re.compile(r"^\d{6}-?[1-8]\d{6}$"),  # 주민/외국인등록번호
+    re.compile(r"^(?:\+?82-?)?0\d{1,2}[- ]?\d{3,4}[- ]?\d{4}$"),  # 전화번호
+    re.compile(r"^\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?\d{3,4}$"),  # 카드번호
+    re.compile(r"^\d{3}-\d{2}-\d{5}$"),  # 사업자등록번호
+    re.compile(r"^\d{2,6}-\d{2,6}-\d{2,8}(?:-\d{1,4})?$"),  # 계좌번호
+    re.compile(r"^[^@\s]{1,64}@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$"),  # e-mail
+)
 SNSS_MAGIC = b"SNSS"
 MAX_SNSS_FILE_BYTES = 64 * 1024 * 1024
 BROWSER_NULL_FILL_RATIO = 0.5
@@ -6937,10 +6954,18 @@ def browser_pii_value(field_name: str, value: object) -> dict[str, object]:
     as other redacted SQLite values); fields that look like secrets are masked."""
 
     text = "" if value is None else (value.hex() if isinstance(value, bytes) else str(value))
-    sensitive = bool(BROWSER_SENSITIVE_FIELD_RE.search(field_name or ""))
+    mask_reason = ""
+    if BROWSER_SENSITIVE_FIELD_RE.search(field_name or ""):
+        mask_reason = "secret-field-name"
+    elif BROWSER_PERSONAL_FIELD_RE.search(field_name or ""):
+        mask_reason = "personal-field-name"
+    elif any(pattern.search(text.strip()) for pattern in BROWSER_PERSONAL_VALUE_RES):
+        mask_reason = "personal-value-pattern"
+    sensitive = bool(mask_reason)
     return {
         "value_preview": "[마스킹됨]" if sensitive else text[:BROWSER_PII_PREVIEW_CHARS],
         "value_masked": sensitive,
+        "mask_reason": mask_reason,
         "value_truncated": (not sensitive) and len(text) > BROWSER_PII_PREVIEW_CHARS,
         "value_length": len(text),
         "value_sha256": hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest() if text else "",
@@ -7796,7 +7821,12 @@ def chromium_extension_rows(context: BrowserRowContext, profile_dir: Path, error
         entries = extensions.get("settings") if isinstance(extensions, Mapping) else None
         if isinstance(entries, Mapping):
             for extension_id, entry in entries.items():
-                if isinstance(entry, Mapping) and str(extension_id) not in settings:
+                if not isinstance(entry, Mapping):
+                    continue
+                known = settings.get(str(extension_id))
+                # A Secure Preferences stub (state/permissions only) must not hide a fuller
+                # Preferences entry that still carries the manifest.
+                if known is None or (not isinstance(known.get("manifest"), Mapping) and isinstance(entry.get("manifest"), Mapping)):
                     settings[str(extension_id)] = entry
                     settings_source[str(extension_id)] = str(path.resolve())
     manifests: dict[str, tuple[Path, Mapping[str, object]]] = {}
@@ -7858,6 +7888,18 @@ def chromium_extension_rows(context: BrowserRowContext, profile_dir: Path, error
                     "settings_source": settings_source.get(extension_id, ""),
                     "settings_keys": sorted(str(key) for key in entry),
                     "settings_residual_only": bool(entry) and not manifest and install_raw is None,
+                    "name_source": (
+                        "extensions-dir-manifest"
+                        if manifest_path
+                        else "preferences-embedded-manifest"
+                        if manifest
+                        else "unavailable-settings-stub"
+                    ),
+                    "name_unavailable_reason": (
+                        ""
+                        if manifest
+                        else "Preferences/Secure Preferences에 manifest가 없고 Extensions 폴더에도 해당 ID가 없습니다(상태 값만 남은 항목)."
+                    ),
                 },
             )
         )

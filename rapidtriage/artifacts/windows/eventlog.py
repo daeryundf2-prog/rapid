@@ -77,6 +77,23 @@ EVENTLOG_TRIAGE_PROJECTION_VERSION = "eventlog-triage-projection-v1"
 # characters; EventData keeps at most this many fields/values; native rows
 # with no decoded EventData keep this many recovered strings instead.
 EVENTLOG_TRIAGE_TEXT_MAX_CHARS = 512
+# Forensic payload fields (PowerShell 4104 ScriptBlockText / 4103 Payload, 4688 / Sysmon
+# CommandLine, 7045 ImagePath) keep their full text in triage up to this hard safety cap;
+# a cut is always disclosed with ``<field>_truncated`` / ``event_data_truncated_fields``.
+EVENTLOG_TRIAGE_PAYLOAD_MAX_CHARS = 64 * 1024
+EVENTLOG_PAYLOAD_EVENT_DATA_KEYS = frozenset(
+    {
+        "scriptblocktext",
+        "payload",
+        "contextinfo",
+        "commandline",
+        "processcommandline",
+        "parentcommandline",
+        "imagepath",
+        "servicefilename",
+    }
+)
+EVENTLOG_PAYLOAD_PIVOT_KEYS = frozenset({"command_line", "parent_command_line", "script_block_text", "service_file_name"})
 EVENTLOG_TRIAGE_EVENT_DATA_MAX_ITEMS = 64
 EVENTLOG_TRIAGE_STRING_MAX_ITEMS = 16
 EVENTLOG_TRIAGE_STRING_MAX_CHARS = 128
@@ -114,6 +131,7 @@ EVENTLOG_TRIAGE_IDENTITY_KEYS = (
     "evtx_recovery_status",
     "evtx_allocation_status",
     "evtx_record_state",
+    "evtx_record_id_position",
     "evtx_decoder_version",
     "event_label_ko",
     "event_id_qualifiers",
@@ -177,6 +195,7 @@ EVENTLOG_TRIAGE_PIVOT_KEYS = (
     "caution_labels",
     "matched_rules",
     "ioc_hits",
+    "event_data_invalid_keys",
 )
 EVENTLOG_TRIAGE_OMITTED_BLOCKS = (
     "data (native EVTX: duplicate of top-level fields)",
@@ -649,9 +668,11 @@ CHANNEL_FAMILY_HINTS = (
     ("wlan", "wlan"),
     ("printservice", "print"),
     ("bitsclient", "bits"),
+    # LocalSessionManager logs console and remote sessions alike: its channel family is
+    # "session"; only rdp-* categories (non-LOCAL source address) are remote-access.
+    ("localsessionmanager", "session"),
     ("terminalservices", "remote-access"),
     ("remoteconnectionmanager", "remote-access"),
-    ("localsessionmanager", "remote-access"),
     ("taskscheduler", "persistence"),
     ("defender", "defender"),
     ("firewall", "firewall"),
@@ -1773,6 +1794,7 @@ class WindowsEventLogProvider:
         content are identical to the former list-based collection.
         """
         triage = self.record_detail == EVENTLOG_RECORD_DETAIL_TRIAGE
+        truncation_by_file: dict[str, Counter[str]] = defaultdict(Counter)
         logon_inputs: list[ArtifactRecord] = []
         summary = EventlogSummaryAccumulator()
         seen: set[Path] = set()
@@ -1790,8 +1812,11 @@ class WindowsEventLogProvider:
                         logon_inputs.append(logon_session_input_record(record))
                     if triage:
                         record = triage_eventlog_record(record)
+                        count_triage_truncation(truncation_by_file[str(record.path)], record.details)
                 elif triage and record.artifact_type == "eventlog-detection":
                     record = triage_eventlog_record(record)
+                elif record.artifact_type == "eventlog-file" and isinstance(record.details, dict):
+                    record.details.update(triage_truncation_fields(truncation_by_file.get(str(record.path))))
                 summary.add(record)
                 return record
 
@@ -1997,6 +2022,8 @@ def collect_native_evtx_events(
             file_header = native_evtx_file_header(blob)
             declared_chunks = read_u16(blob, 42)
             live_ids = native_evtx_live_record_ids(blob, declared_chunks)
+            first_live_id = min(live_ids) if live_ids else 0
+            last_live_id = max(live_ids) if live_ids else 0
             recovered_ids: set[int] = set()
             context = NativeEvtxFileContext(
                 path=path,
@@ -2102,11 +2129,38 @@ def collect_native_evtx_events(
                         counters=counters,
                         chunk=chunk,
                     )
+                    if slot.state != EVTX_RECORD_STATE_LIVE and isinstance(record.details, dict):
+                        position = evtx_record_id_position(record_id, first_live_id, last_live_id)
+                        record.details["evtx_record_id_position"] = position
+                        if position == EVTX_RECORD_ID_STALE_BELOW_FIRST:
+                            bump("stale_below_first_record_count")
                     source_index += 1
                     yield record
                 counters["template_parse_count"] = counters.get("template_parse_count", 0) + decoder.template_parse_count
     except OSError:
         return
+
+
+EVTX_RECORD_ID_STALE_BELOW_FIRST = "stale-below-first"
+EVTX_RECORD_ID_WITHIN_LIVE = "within-live-range"
+EVTX_RECORD_ID_ABOVE_LAST = "above-last-live"
+
+
+def evtx_record_id_position(record_id: int, first_live_id: int, last_live_id: int) -> str:
+    """Where a recovered (slack/inactive) record id sits relative to the live record id range.
+
+    ``stale-below-first``: older than the oldest live record (ring-buffer residue already
+    overwritten in the live log), distinguishable from in-range deleted/slack copies.
+    """
+    if not first_live_id:
+        return "no-live-records"
+    if not record_id:
+        return "unknown"
+    if record_id < first_live_id:
+        return EVTX_RECORD_ID_STALE_BELOW_FIRST
+    if record_id > last_live_id:
+        return EVTX_RECORD_ID_ABOVE_LAST
+    return EVTX_RECORD_ID_WITHIN_LIVE
 
 
 @dataclasses.dataclass
@@ -2164,11 +2218,48 @@ def native_evtx_slack_duplicate_record(
     return event_record(context.path, "eventlog-record-candidate", details)
 
 
+_EVENT_DATA_KEY_BAD_CHARS_RE = re.compile(r"[\x00-\x1f\x7f\ufffd\uffff]")
+
+
+def valid_event_data_key(name: str) -> bool:
+    """EventData ``Name`` attribute check: provider names may hold spaces/punctuation
+    ("Error Code", "CurrentTime(UTC)"), but never control/replacement characters or
+    binary-length garbage decoded from slack."""
+    return bool(name) and len(name) <= 128 and name.isprintable() and not _EVENT_DATA_KEY_BAD_CHARS_RE.search(name)
+
+
+def sanitize_event_data_keys(event_data: Mapping[str, object]) -> tuple[dict[str, object], list[str], dict[str, str]]:
+    """Map invalid EventData key names to ``data_N`` (N = field position).
+
+    Returns ``(fields, invalid_keys, renamed)``: ``invalid_keys`` lists the ``data_N`` names that
+    replaced invalid keys (``key_invalid``), ``renamed`` maps original -> replacement.
+    """
+    fields: dict[str, object] = {}
+    invalid: list[str] = []
+    renamed: dict[str, str] = {}
+    for position, (key, value) in enumerate(event_data.items()):
+        name = str(key)
+        if not valid_event_data_key(name):
+            replacement = f"data_{position}"
+            while replacement in event_data or replacement in fields:
+                replacement += "_"
+            renamed[name] = replacement
+            invalid.append(replacement)
+            name = replacement
+        fields[name] = value
+    return fields, invalid, renamed
+
+
 def native_evtx_decoded_parts(decoded: Mapping[str, object], *, render_xml: bool = True) -> dict[str, object]:
     """Legacy-compatible ``binxml`` / promoted-field blocks from a decoded record."""
     system_fields = dict(decoded.get("system_fields") or {})
-    event_data = dict(decoded.get("event_data") or {})
-    sequence = list(decoded.get("event_data_sequence") or [])
+    event_data, invalid_keys, renamed = sanitize_event_data_keys(dict(decoded.get("event_data") or {}))
+    sequence = [
+        {**item, "name": renamed.get(str(item.get("name") or ""), str(item.get("name") or ""))}
+        if isinstance(item, Mapping)
+        else item
+        for item in list(decoded.get("event_data_sequence") or [])
+    ]
     source = str(decoded.get("event_data_source") or "")
     value_fields: list[dict[str, object]] = []
     for key, value in system_fields.items():
@@ -2228,6 +2319,7 @@ def native_evtx_decoded_parts(decoded: Mapping[str, object], *, render_xml: bool
     promoted = {
         "system_fields": system_fields,
         "event_data_fields": event_data,
+        "event_data_invalid_keys": invalid_keys,
         "event_data_sequence": sequence[:200],
         "event_data_values_by_name": values_by_name,
         "user_data_fields": user_data_fields,
@@ -2385,6 +2477,8 @@ def build_native_evtx_event_record(
         "evtx_binxml": binxml,
         "binxml_system_fields": dict(system_fields),
         "binxml_event_data_fields": dict(binxml_promoted.get("event_data_fields") or {}),
+        "event_data_invalid_keys": list(binxml_promoted.get("event_data_invalid_keys") or []),
+        "event_data_key_invalid": bool(binxml_promoted.get("event_data_invalid_keys")),
         "binxml_event_data_sequence": list(binxml_promoted.get("event_data_sequence") or []),
         "binxml_event_data_values_by_name": dict(binxml_promoted.get("event_data_values_by_name") or {}),
         "binxml_user_data_fields": dict(binxml_promoted.get("user_data_fields") or {}),
@@ -8034,6 +8128,7 @@ def build_eventlog_file_record(
                 "native_inactive_chunk_record_count": int(stats.get(f"{EVTX_RECORD_STATE_INACTIVE}_record_count", 0)),
                 "native_unchunked_record_count": int(stats.get(f"{EVTX_RECORD_STATE_UNCHUNKED}_record_count", 0)),
                 "native_slack_duplicate_count": int(stats.get("slack_duplicate_count", 0)),
+                "stale_below_first_record_count": int(stats.get("stale_below_first_record_count", 0)),
                 "native_decoded_record_count": decoded,
                 "native_fallback_record_count": fallback,
                 "native_decode_error_count": int(stats.get("decode_error_count", 0)),
@@ -8167,18 +8262,31 @@ def _bounded_text(value: object, limit: int = EVENTLOG_TRIAGE_TEXT_MAX_CHARS) ->
     return text[:limit], True
 
 
-def _bounded_event_data(data: Mapping[str, object]) -> tuple[dict[str, object], bool]:
+def _bounded_event_data(data: Mapping[str, object]) -> tuple[dict[str, object], bool, list[str]]:
+    """Bounded EventData: ``(fields, truncated, truncated_field_names)``.
+
+    Payload fields (``EVENTLOG_PAYLOAD_EVENT_DATA_KEYS``) keep up to
+    ``EVENTLOG_TRIAGE_PAYLOAD_MAX_CHARS``; other values are cut to the preview cap.
+    """
     bounded: dict[str, object] = {}
     truncated = len(data) > EVENTLOG_TRIAGE_EVENT_DATA_MAX_ITEMS
+    cut_fields: list[str] = []
     for key in list(data)[:EVENTLOG_TRIAGE_EVENT_DATA_MAX_ITEMS]:
         value = data[key]
         if isinstance(value, (Mapping, list)):
             value = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
         if isinstance(value, str):
-            value, cut = _bounded_text(value)
-            truncated = truncated or cut
+            limit = (
+                EVENTLOG_TRIAGE_PAYLOAD_MAX_CHARS
+                if str(key).lower() in EVENTLOG_PAYLOAD_EVENT_DATA_KEYS
+                else EVENTLOG_TRIAGE_TEXT_MAX_CHARS
+            )
+            value, cut = _bounded_text(value, limit)
+            if cut:
+                truncated = True
+                cut_fields.append(str(key))
         bounded[str(key)] = value
-    return bounded, truncated
+    return bounded, truncated, cut_fields
 
 
 def _native_event_data_values(binxml: Mapping[str, object]) -> list[str]:
@@ -8209,14 +8317,18 @@ def triage_eventlog_details(details: Mapping[str, object]) -> dict[str, object]:
         if value not in (None, "", [], {}):
             slim[key] = value
     for key, value in list(slim.items()):
-        # Partially decoded native fields can carry kilobytes of garbage.
-        if isinstance(value, str) and len(value) > EVENTLOG_TRIAGE_TEXT_MAX_CHARS:
-            slim[key] = value[:EVENTLOG_TRIAGE_TEXT_MAX_CHARS]
+        # Partially decoded native fields can carry kilobytes of garbage; payload pivots
+        # (command lines, script blocks, service image paths) keep up to the payload cap.
+        limit = EVENTLOG_TRIAGE_PAYLOAD_MAX_CHARS if key in EVENTLOG_PAYLOAD_PIVOT_KEYS else EVENTLOG_TRIAGE_TEXT_MAX_CHARS
+        if isinstance(value, str) and len(value) > limit:
+            slim[key] = value[:limit]
             slim[f"{key}_truncated"] = True
     raw_preview = str(details.get("raw_preview") or "")
     command_line = str(details.get("command_line") or "")
     if command_line and command_line != raw_preview:
-        slim["command_line"] = _bounded_text(command_line)[0]
+        slim["command_line"], command_line_cut = _bounded_text(command_line, EVENTLOG_TRIAGE_PAYLOAD_MAX_CHARS)
+        if command_line_cut:
+            slim["command_line_truncated"] = True
     rule = details.get("rule")
     if isinstance(rule, Mapping) and (rule.get("title") or rule.get("id")):
         slim["rule"] = dict(rule)
@@ -8234,10 +8346,12 @@ def triage_eventlog_details(details: Mapping[str, object]) -> dict[str, object]:
         raw = details.get("data")
         event_data = raw if isinstance(raw, Mapping) else {}
     if event_data:
-        bounded, truncated = _bounded_event_data(event_data)
+        bounded, truncated, cut_fields = _bounded_event_data(event_data)
         slim["event_data"] = bounded
         if truncated:
             slim["event_data_truncated"] = True
+        if cut_fields:
+            slim["event_data_truncated_fields"] = cut_fields
     elif is_native:
         binxml = details.get("evtx_binxml") if isinstance(details.get("evtx_binxml"), Mapping) else {}
         values = _native_event_data_values(binxml)
@@ -8277,6 +8391,41 @@ def triage_eventlog_details(details: Mapping[str, object]) -> dict[str, object]:
         "per_file_context_row": "eventlog-file",
     }
     return slim
+
+
+def count_triage_truncation(counter: Counter[str], details: Mapping[str, object]) -> None:
+    """Per-file tally of triage text cuts (rows, payload rows, field names)."""
+    cut_keys = [key for key, value in details.items() if key.endswith("_truncated") and value is True]
+    if not cut_keys:
+        return
+    counter["__rows__"] += 1
+    fields = [str(name) for name in details.get("event_data_truncated_fields") or []]
+    payload = any(name.lower() in EVENTLOG_PAYLOAD_EVENT_DATA_KEYS for name in fields) or any(
+        key.removesuffix("_truncated") in EVENTLOG_PAYLOAD_PIVOT_KEYS for key in cut_keys
+    )
+    if payload:
+        counter["__payload_rows__"] += 1
+    for key in cut_keys:
+        if key == "event_data_truncated" and fields:
+            continue
+        counter[key.removesuffix("_truncated")] += 1
+    for name in fields:
+        counter[f"event_data.{name}"] += 1
+
+
+def triage_truncation_fields(counter: Counter[str] | None) -> dict[str, object]:
+    """``eventlog-file`` row keys disclosing triage text truncation for that file."""
+    counter = counter or Counter()
+    fields = Counter({key: value for key, value in counter.items() if not key.startswith("__")})
+    return {
+        "text_truncated_rows": counter["__rows__"],
+        "payload_truncated_rows": counter["__payload_rows__"],
+        "text_truncated_field_counts": counter_items(fields),
+        "triage_text_limits": {
+            "preview_max_chars": EVENTLOG_TRIAGE_TEXT_MAX_CHARS,
+            "payload_max_chars": EVENTLOG_TRIAGE_PAYLOAD_MAX_CHARS,
+        },
+    }
 
 
 def triage_eventlog_detection_details(details: Mapping[str, object]) -> dict[str, object]:
@@ -8770,6 +8919,8 @@ class EventlogSummaryAccumulator:
         self.last_timestamp: str | None = None
         self.record_ids_by_channel: dict[str, set[int]] = defaultdict(set)
         self.high_risk: dict[str, list[dict[str, object]]] = {"event": [], "detection": []}
+        self.truncated_files: dict[str, int] = {}
+        self.truncated_fields: Counter[str] = Counter()
 
     def _inc(self, counter: str, group: str, value: str) -> None:
         if value:
@@ -8797,6 +8948,16 @@ class EventlogSummaryAccumulator:
         artifact_type = record.artifact_type
         if artifact_type == "eventlog-file":
             self.counts["inventory"] += 1
+            if isinstance(record.details, Mapping):
+                truncated_rows = int(record.details.get("text_truncated_rows") or 0)
+                self.counts["text_truncated_rows"] += truncated_rows
+                self.counts["payload_truncated_rows"] += int(record.details.get("payload_truncated_rows") or 0)
+                self.counts["stale_below_first_record_count"] += int(record.details.get("stale_below_first_record_count") or 0)
+                if truncated_rows:
+                    self.truncated_files[str(record.details.get("source_path") or record.path)] = truncated_rows
+                for item in record.details.get("text_truncated_field_counts") or []:
+                    if isinstance(item, Mapping):
+                        self.truncated_fields[str(item.get("value") or "")] += int(item.get("count") or 0)
             return
         if not isinstance(record.details, Mapping):
             return
@@ -9027,6 +9188,17 @@ class EventlogSummaryAccumulator:
             "timestamp_status_counts": counter_items(self._merged("timestamp_status_counts")),
             "timestamp_out_of_range_count": self.counts["timestamp_out_of_range"],
             "slack_duplicate_row_count": self.counts["slack_duplicate"],
+            "text_truncated_rows": self.counts["text_truncated_rows"],
+            "payload_truncated_rows": self.counts["payload_truncated_rows"],
+            "text_truncated_files": [
+                {"source_path": source, "text_truncated_rows": count} for source, count in sorted(self.truncated_files.items())
+            ],
+            "text_truncated_field_counts": counter_items(self.truncated_fields),
+            "triage_text_limits": {
+                "preview_max_chars": EVENTLOG_TRIAGE_TEXT_MAX_CHARS,
+                "payload_max_chars": EVENTLOG_TRIAGE_PAYLOAD_MAX_CHARS,
+            },
+            "stale_below_first_record_count": self.counts["stale_below_first_record_count"],
             "native_capabilities": NATIVE_EVTX_CAPABILITIES,
             "native_report_grade_blockers": NATIVE_EVTX_REPORT_GRADE_BLOCKERS,
             "detection_level_counts": counter_items(self._merged("detection_level_counts")),
@@ -9363,7 +9535,7 @@ def inferred_event_family(category: str, channel_family_value: str) -> str:
         return family
     if channel_family_value in {"powershell", "sysmon"}:
         return "execution"
-    if channel_family_value in {"remote-access", "wmi", "defender", "firewall"}:
+    if channel_family_value in {"remote-access", "wmi", "defender", "firewall", "session"}:
         return channel_family_value
     return family
 

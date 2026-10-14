@@ -124,9 +124,19 @@ OID_PREFIXES = (
     "2.5.",
     "2.16.840.",
     "2.23.",
+    "2.25.",
 )
+# Text right before a dotted quad that marks it as a product/file version, not an address.
+VERSION_CONTEXT_RE = re.compile(r"(?:version|\bver|\bv)[\s:=\"'(]*$", re.IGNORECASE)
 PRINTF_CONVERSION_RE = re.compile(r"%(?:ll|l|h|I64|I32|z)?[sdiuxXSpc]")
-ENVIRONMENT_ASSIGNMENT_RE = re.compile(r"(?:^|[\x00\s])[A-Za-z_][A-Za-z0-9_()]{1,40}=[^\x00=]*$")
+# Environment entries in process memory may carry one header byte (e.g. ``\x8cComSpec=...``)
+# between the NUL terminator of the previous entry and the variable name.
+ENVIRONMENT_ASSIGNMENT_RE = re.compile(
+    r"(?:^|[\x00\s])[\x01-\x1f\x7f-\xff]?[A-Za-z_][A-Za-z0-9_()]{1,40}=[^\x00=]*$"
+)
+# UTF-16LE high bytes 0xD8-0xDF (surrogates) are remapped to the private-use 0xE0 page before
+# decoding, so every 2 raw bytes decode to exactly one character (offset = base + 2 * index).
+UTF16_SURROGATE_HIGH_BYTES = bytes.maketrans(bytes(range(0xD8, 0xE0)), b"\xe0" * 8)
 ENVIRONMENT_VARIABLE_NAMES = ("COMPUTERNAME", "USERNAME", "USERDOMAIN", "LOGONSERVER", "USERPROFILE")
 ENVIRONMENT_ANSI_RE = re.compile(rb"(?<![A-Za-z_])(" + b"|".join(name.encode("ascii") for name in ENVIRONMENT_VARIABLE_NAMES) + rb")=([^\x00\r\n]{1,96})\x00")
 ENVIRONMENT_TEXT_RE = re.compile(r"(?<![A-Za-z_])(" + "|".join(ENVIRONMENT_VARIABLE_NAMES) + r")=([^\x00\r\n]{1,96})\x00")
@@ -225,7 +235,7 @@ def collect_memory_dump_indicators(path: Path) -> ArtifactRecord:
             "pivots_truncated": len(pivots) >= MEMORY_DUMP_PIVOT_LIMIT,
             "indicator_filtering": {
                 "printf_template_urls": "dropped",
-                "asn1_oid_and_version_like_dotted_quads": "dropped-or-low-confidence",
+                "asn1_oid_and_version_like_dotted_quads": "dropped (OID arcs, major.minor.build.rev versions)",
                 "environment_block_paths": "dropped (e.g. ComSpec=...\\cmd.exe)",
                 "ansi_decoding": "utf-8, then cp949",
             },
@@ -557,7 +567,7 @@ def collect_utf16_process_candidates(
     pivots: list[dict[str, object]],
     seen: set[tuple[str, str, int]],
 ) -> None:
-    text = data.decode("utf-16le", errors="ignore")
+    text, base = utf16_aligned_text(data, data_offset)
     emitted = 0
     for match in PROCESS_NAME_TEXT_RE.finditer(text):
         if emitted >= MEMORY_DUMP_PROCESS_CANDIDATE_LIMIT or len(pivots) >= MEMORY_DUMP_PIVOT_LIMIT:
@@ -585,11 +595,25 @@ def collect_utf16_process_candidates(
                 ensure_ascii=False,
                 sort_keys=True,
             ),
-            offset=data_offset + (match.start() * 2),
+            offset=base + (match.start() * 2),
             evidence_strength="triage",
             sensitive=False,
         )
         emitted += 1
+
+
+def utf16_aligned_text(data: bytes, data_offset: int) -> tuple[str, int]:
+    """Decode ``data`` as UTF-16LE from the first even absolute offset, one char per 2 bytes.
+
+    Returns ``(text, base)`` where the raw offset of ``text[i]`` is ``base + 2 * i``. Lone or
+    paired surrogates are remapped (never dropped), so match offsets stay byte-exact.
+    """
+    skip = data_offset & 1
+    body = bytearray(data[skip:])
+    if len(body) & 1:
+        del body[-1]
+    body[1::2] = bytes(body[1::2]).translate(UTF16_SURROGATE_HIGH_BYTES)
+    return bytes(body).decode("utf-16le"), data_offset + skip
 
 
 def collect_memory_pivots(
@@ -609,10 +633,9 @@ def collect_memory_pivots(
             evidence_strength="strong",
             sensitive=True,
         )
-    lowered = data.lower()
-    latin_text = data.decode("latin-1", errors="ignore")
+    latin_text = data.decode("latin-1")
     for term in MEMORY_SUSPICIOUS_TERMS:
-        index = first_non_environment_index(lowered.decode("latin-1"), term.lower(), latin_text)
+        index = first_non_environment_index(term, latin_text)
         if index >= 0:
             add_memory_pivot(
                 pivots,
@@ -644,7 +667,8 @@ def collect_memory_pivots(
         value = match.group(0).decode("ascii", errors="ignore")
         before = data[max(0, match.start() - 1) : match.start()].decode("latin-1")
         after = data[match.end() : match.end() + 2].decode("latin-1")
-        strength = ipv4_indicator_strength(value, before, after)
+        context = data[max(0, match.start() - 48) : match.start()].decode("latin-1")
+        strength = ipv4_indicator_strength(value, before, after, context=context)
         if strength:
             add_memory_pivot(
                 pivots,
@@ -664,32 +688,31 @@ def collect_utf16_memory_pivots(
     pivots: list[dict[str, object]],
     seen: set[tuple[str, str, int]],
 ) -> None:
-    text = data.decode("utf-16le", errors="ignore")
-    lowered = text.lower()
+    text, base = utf16_aligned_text(data, data_offset)
     for match in BITLOCKER_RECOVERY_KEY_TEXT_RE.finditer(text):
         add_memory_pivot(
             pivots,
             seen,
             pivot_type="bitlocker-recovery-key",
             value=match.group(0),
-            offset=data_offset + (match.start() * 2),
+            offset=base + (match.start() * 2),
             evidence_strength="strong",
             sensitive=True,
         )
     for term in MEMORY_SUSPICIOUS_TERMS:
-        index = first_non_environment_index(lowered, term.lower(), text)
+        index = first_non_environment_index(term, text)
         if index >= 0:
             add_memory_pivot(
                 pivots,
                 seen,
                 pivot_type="suspicious-string",
                 value=term,
-                offset=data_offset + (index * 2),
+                offset=base + (index * 2),
                 evidence_strength="triage" if term in MEMORY_HIGH_SIGNAL_TERMS else "weak",
                 sensitive=False,
             )
     for match in ENVIRONMENT_TEXT_RE.finditer(text):
-        add_environment_pivot(pivots, seen, match.group(1), match.group(2), data_offset + match.start() * 2, "utf-16le")
+        add_environment_pivot(pivots, seen, match.group(1), match.group(2), base + match.start() * 2, "utf-16le")
     for match in URL_TEXT_RE.finditer(text):
         if is_printf_template(match.group(0)):
             continue
@@ -699,7 +722,7 @@ def collect_utf16_memory_pivots(
             seen,
             pivot_type="url",
             value=match.group(0).rstrip(".,);]"),
-            offset=data_offset + (match.start() * 2),
+            offset=base + (match.start() * 2),
             evidence_strength="triage",
             sensitive=False,
             context_preview=context,
@@ -707,14 +730,19 @@ def collect_utf16_memory_pivots(
         )
     for match in IP_TEXT_RE.finditer(text):
         value = match.group(0)
-        strength = ipv4_indicator_strength(value, text[max(0, match.start() - 1) : match.start()], text[match.end() : match.end() + 2])
+        strength = ipv4_indicator_strength(
+            value,
+            text[max(0, match.start() - 1) : match.start()],
+            text[match.end() : match.end() + 2],
+            context=text[max(0, match.start() - 48) : match.start()],
+        )
         if strength:
             add_memory_pivot(
                 pivots,
                 seen,
                 pivot_type="ip",
                 value=value,
-                offset=data_offset + (match.start() * 2),
+                offset=base + (match.start() * 2),
                 evidence_strength=strength,
                 sensitive=False,
             )
@@ -841,15 +869,16 @@ def is_environment_block_value(text: str, index: int) -> bool:
     return bool(ENVIRONMENT_ASSIGNMENT_RE.search(window))
 
 
-def first_non_environment_index(lowered: str, term: str, text: str) -> int:
-    start = 0
-    while True:
-        index = lowered.find(term, start)
-        if index < 0:
-            return -1
-        if not is_environment_block_value(text, index):
-            return index
-        start = index + len(term)
+def first_non_environment_index(term: str, text: str) -> int:
+    """First case-insensitive ``term`` index in ``text`` outside an environment-block entry.
+
+    The search runs on ``text`` itself (not ``text.lower()``, whose length can differ for some
+    characters), so the returned index is valid for ``text`` and its byte offset.
+    """
+    for match in re.finditer(re.escape(term), text, re.IGNORECASE):
+        if not is_environment_block_value(text, match.start()):
+            return match.start()
+    return -1
 
 
 def decode_ansi_memory_text(raw: bytes) -> str:
@@ -857,6 +886,12 @@ def decode_ansi_memory_text(raw: bytes) -> str:
     pieces: list[str] = []
     for segment in raw.split(b"\x00"):
         if not segment:
+            pieces.append(" ")
+            continue
+        if len(segment) > 1 and (segment[0] < 0x20 or segment[0] >= 0x7F) and segment[1:].isascii():
+            # A header byte before an ASCII string (``\x8cComSpec=``) must not pair with the
+            # first letter into a cp949 double-byte character ("똂omSpec=").
+            pieces.append(segment[1:].decode("ascii"))
             pieces.append(" ")
             continue
         for encoding in ("utf-8", "cp949"):
@@ -930,13 +965,15 @@ def environment_variables_from_pivots(pivots: Sequence[Mapping[str, object]]) ->
     return values
 
 
-def ipv4_indicator_strength(value: str, before: str, after: str) -> str:
-    """'' to drop, 'weak' for version-like quads, 'triage' for plausible addresses."""
+def ipv4_indicator_strength(value: str, before: str, after: str, *, context: str = "") -> str:
+    """'' to drop (OIDs, version strings), 'weak' for low-confidence quads, 'triage' for plausible addresses."""
     if before and (before.isdigit() or before in ".vV"):
         return ""
     if after[:1].isdigit() or (after[:1] == "." and after[1:2].isdigit()):
         return ""
     if not valid_ipv4(value) or any(value.startswith(prefix) for prefix in OID_PREFIXES):
+        return ""
+    if context and VERSION_CONTEXT_RE.search(context.replace("\x00", "")):
         return ""
     address = ipaddress.ip_address(value)
     if (
@@ -951,8 +988,8 @@ def ipv4_indicator_strength(value: str, before: str, after: str) -> str:
         return ""
     octets = [int(part) for part in value.split(".")]
     if octets[0] < 10 and 0 in octets[1:]:
-        # e.g. "2.25.0.24": far more often a product/file version than an address.
-        return "weak"
+        # major.minor.build.rev such as "2.25.0.24" / "2.0.0.0": a product/file version string.
+        return ""
     return "triage"
 
 
@@ -1180,20 +1217,31 @@ def memory_dump_recommendation(flags: list[str]) -> str:
     return "No high-value bounded memory indicators were found; run Volatility/Volatility3 for full process, handle, network, and malfind analysis."
 
 
+# MINIDUMP_STREAM_TYPE (minidumpapiset.h).
 MINIDUMP_STREAM_NAMES = {
+    0: "Unused",
     3: "ThreadList",
     4: "ModuleList",
     5: "MemoryList",
     6: "Exception",
     7: "SystemInfo",
+    8: "ThreadExList",
     9: "Memory64List",
-    14: "HandleData",
+    10: "CommentA",
+    11: "CommentW",
+    12: "HandleData",
+    13: "FunctionTable",
+    14: "UnloadedModuleList",
     15: "MiscInfo",
     16: "MemoryInfoList",
     17: "ThreadInfoList",
+    18: "HandleOperationList",
+    19: "Token",
+    20: "JavaScriptData",
     21: "SystemMemoryInfo",
     22: "ProcessVmCounters",
-    24: "ThreadName",
+    23: "IptTrace",
+    24: "ThreadNames",
 }
 MINIDUMP_ARCHITECTURES = {0: "x86", 5: "ARM", 6: "IA64", 9: "AMD64", 12: "ARM64", 0xFFFF: "unknown"}
 MINIDUMP_PRODUCT_TYPES = {1: "workstation", 2: "domain-controller", 3: "server"}

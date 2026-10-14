@@ -138,11 +138,13 @@ STRING_DATA_FIELDS = (
     (0x00000020, "command_line_arguments"),
     (0x00000040, "icon_location"),
 )
+# Path scans stop at any control character (e.g. the 0x1A count prefix of the next StringData
+# string), so two adjacent strings never fuse into one "D:\\exe\\\x1aD:\\..." target.
 WINDOWS_PATH_RE = re.compile(
-    rb"(?:[A-Za-z]:\\[^\x00\r\n\t\"<>|]{2,}|\\\\[A-Za-z0-9_. -]+\\[^\x00\r\n\t\"<>|]{2,})"
+    rb"(?:[A-Za-z]:\\[^\x00-\x1f\x7f\"<>|]{2,}|\\\\[A-Za-z0-9_. -]+\\[^\x00-\x1f\x7f\"<>|]{2,})"
 )
 UTF16_WINDOWS_PATH_RE = re.compile(
-    rb"(?:(?:[A-Za-z]\x00:\x00\\\x00)|(?:\\\x00\\\x00[A-Za-z0-9_. -]+(?:\x00[A-Za-z0-9_. -]+)*\x00\\\x00))(?:[^\x00]\x00){2,}"
+    rb"(?:(?:[A-Za-z]\x00:\x00\\\x00)|(?:\\\x00\\\x00[A-Za-z0-9_. -]+(?:\x00[A-Za-z0-9_. -]+)*\x00\\\x00))(?:[^\x00-\x1f\x7f]\x00){2,}"
 )
 
 
@@ -380,15 +382,19 @@ def parse_lnk_metadata_from_bytes(data: bytes) -> dict[str, object]:
         for block in extra_data_blocks
         if isinstance(block.get("property_store_data"), dict)
     ]
+    id_list_path = lnk_id_list_path(data, link_flags)
     target_path = first_non_empty(
         link_info.get("full_path"),
         string_data.get("relative_path"),
+        id_list_path,
         next(iter(embedded_paths), ""),
     )
     if link_info.get("full_path"):
         target_path_source = f"link-info:{link_info.get('full_path_source', '')}"
     elif string_data.get("relative_path"):
         target_path_source = "string-data:relative-path"
+    elif id_list_path:
+        target_path_source = "link-target-id-list"
     elif embedded_paths:
         target_path_source = "embedded-path-string-scan"
     else:
@@ -504,6 +510,46 @@ def parse_lnk_metadata_from_bytes(data: bytes) -> dict[str, object]:
         "commercial_grade_ready": False,
         "commercial_grade_blockers": report_grade["blockers"],
     }
+
+
+def lnk_id_list_path(data: bytes, link_flags: int) -> str:
+    """Absolute target path rebuilt from the LinkTargetIDList (drive volume item + file entries).
+
+    Used when LinkInfo is absent. Returns ``""`` unless the list starts at a drive letter and
+    every following item is a file-system entry with a decodable name.
+    """
+    if not (link_flags & 0x00000001) or len(data) < LNK_HEADER_SIZE + 2:
+        return ""
+    from .shellbags import decode_shell_item_entry
+
+    end = LNK_HEADER_SIZE + 2 + read_u16(data, LNK_HEADER_SIZE)
+    if end > len(data):
+        return ""
+    offset = LNK_HEADER_SIZE + 2
+    parts: list[str] = []
+    while offset + 2 <= end and len(parts) < MAX_LNK_SHELL_ITEMS:
+        size = read_u16(data, offset)
+        if size == 0:
+            break
+        if size < 3 or offset + size > end:
+            return ""
+        entry = decode_shell_item_entry(data[offset : offset + size])
+        kind = str(entry.get("item_kind") or "")
+        name = str(entry.get("name") or "")
+        offset += size
+        if not parts:
+            if kind == "root":
+                continue  # "My Computer" root before the drive
+            if kind != "volume" or not re.fullmatch(r"[A-Za-z]:\\", name):
+                return ""
+            parts.append(name)
+            continue
+        if kind not in {"file", "directory"} or not name or name.startswith("<") or re.search(r"[\x00-\x1f]", name):
+            return ""
+        parts.append(name)
+    if len(parts) < 2:
+        return ""
+    return parts[0] + "\\".join(parts[1:])
 
 
 def parse_lnk_shell_item_metadata(data: bytes, link_flags: int) -> dict[str, object]:
@@ -782,12 +828,17 @@ KNOWN_FOLDER_NAMES = {
 
 
 def parse_lnk_tracker_data_block(block_data: bytes) -> dict[str, object]:
-    machine_id = decode_text(block_data[0x10:0x20].split(b"\x00", 1)[0], "cp1252") if len(block_data) >= 0x20 else ""
+    # NetBIOS machine name in the writer's ANSI code page (cp949 on Korean systems: 진료실1),
+    # decoded exactly like DestList hostnames.
+    machine_id, machine_id_encoding = (
+        decode_destlist_hostname(block_data[0x10:0x20]) if len(block_data) >= 0x20 else ("", "empty")
+    )
     droid_file = format_guid_le(block_data[0x30:0x40])
     birth_droid_file = format_guid_le(block_data[0x50:0x60])
     return {
         "parse_status": "parsed-candidate" if len(block_data) >= 0x60 else "truncated-candidate",
         "machine_id": machine_id,
+        "machine_id_encoding": machine_id_encoding,
         "droid_volume_identifier": format_guid_le(block_data[0x20:0x30]),
         "droid_file_identifier": droid_file,
         "birth_droid_volume_identifier": format_guid_le(block_data[0x40:0x50]),

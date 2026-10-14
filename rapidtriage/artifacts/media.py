@@ -11,6 +11,7 @@ import mmap
 import os
 import re
 import struct
+from collections import Counter
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from pathlib import Path
 
@@ -887,7 +888,48 @@ def heif_structure(buf: bytes) -> dict[str, object]:
             exif_range = (tiff_start, size)
             break
         index = buf.find(b"Exif\x00\x00", index + 1, limit)
-    return {"status": status, "image_end_offset": end_offset, "exif_range": exif_range, "exif_locator_strategy": "heif-signature-scan"}
+    result: dict[str, object] = {
+        "status": status,
+        "image_end_offset": end_offset,
+        "exif_range": exif_range,
+        "exif_locator_strategy": "heif-signature-scan",
+    }
+    result.update(heif_ispe_dimensions(buf, boxes))
+    return result
+
+
+def heif_ispe_dimensions(buf: bytes, boxes: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    """Image size from ``meta/iprp/ipco/ispe`` (ImageSpatialExtentsProperty), no decoder needed.
+
+    A HEIC carries one ``ispe`` per item (tiles, thumbnails, the grid/primary image); the
+    largest extent is the full image. Returns ``{}`` when no ``ispe`` is present.
+    """
+    meta = next((box for box in boxes if box.get("type") == "meta" and box.get("parse_status") == "bounded"), None)
+    if meta is None:
+        return {}
+    start = int(meta["payload_offset"]) + 4  # FullBox version/flags
+    end = int(meta["offset"]) + int(meta["size"])
+    extents: list[tuple[int, int]] = []
+    for iprp in iter_bmff_boxes(buf, start, end, limit=256):
+        if iprp.get("type") != "iprp" or iprp.get("parse_status") != "bounded":
+            continue
+        iprp_end = int(iprp["offset"]) + int(iprp["size"])
+        for ipco in iter_bmff_boxes(buf, int(iprp["payload_offset"]), iprp_end, limit=256):
+            if ipco.get("type") != "ipco" or ipco.get("parse_status") != "bounded":
+                continue
+            ipco_end = int(ipco["offset"]) + int(ipco["size"])
+            for prop in iter_bmff_boxes(buf, int(ipco["payload_offset"]), ipco_end, limit=4096):
+                if prop.get("type") != "ispe" or int(prop.get("payload_size") or 0) < 12:
+                    continue
+                payload = int(prop["payload_offset"]) + 4
+                width = int.from_bytes(buf[payload : payload + 4], "big")
+                height = int.from_bytes(buf[payload + 4 : payload + 8], "big")
+                if width and height:
+                    extents.append((width, height))
+    if not extents:
+        return {}
+    width, height = max(extents, key=lambda item: item[0] * item[1])
+    return {"ispe_width": width, "ispe_height": height, "ispe_count": len(extents)}
 
 
 def classify_trailer(buf: bytes, start: int) -> str:
@@ -968,7 +1010,7 @@ def scan_image_structure(path: Path) -> dict[str, object]:
             result["structure_status"] = "content-not-image"
             return result
         result["structure_status"] = structure.get("status")
-        for key in ("segments", "chunk_count", "frame_count"):
+        for key in ("segments", "chunk_count", "frame_count", "ispe_width", "ispe_height", "ispe_count"):
             if key in structure:
                 result[key] = structure[key]
         end_offset = structure.get("image_end_offset")
@@ -1681,13 +1723,13 @@ def read_prefix_tail(path: Path, *, prefix_limit: int, tail_limit: int) -> tuple
 
 
 def shannon_entropy(blob: bytes) -> float:
+    """Byte entropy (bits/byte, 4 decimals). Counting runs in C (``Counter``); the sum keeps
+    ascending byte-value order so results equal the former per-byte loop exactly."""
     if not blob:
         return 0.0
-    counts = [0] * 256
-    for byte in blob:
-        counts[byte] += 1
+    counts = Counter(blob)
     length = len(blob)
-    return round(-sum((count / length) * math.log2(count / length) for count in counts if count), 4)
+    return round(-sum((counts[byte] / length) * math.log2(counts[byte] / length) for byte in sorted(counts)), 4)
 
 
 def embedded_payload_signature_candidates(
@@ -1779,7 +1821,8 @@ def steganography_suspicion_profile(
     if signature_candidates:
         reasons.append("embedded-signature-after-image-end")
     prefix_entropy = shannon_entropy(prefix)
-    tail_entropy = shannon_entropy(tail)
+    # Files within the tail window share one buffer (``tail is prefix``): computed once.
+    tail_entropy = prefix_entropy if tail is prefix else shannon_entropy(tail)
     if trailing_data_bytes and tail_entropy >= 7.85:
         reasons.append("high-entropy-trailing-window")
     if signature_candidates:
@@ -2000,9 +2043,17 @@ def build_image_record(path: Path) -> ArtifactRecord:
         )
         if decode_error:
             details["decode_error"] = decode_error
+        if structure.get("ispe_width") and structure.get("ispe_height"):
+            # HEIF without a pixel decoder: the container's ispe property still gives the size.
+            details["width"] = int(structure["ispe_width"])  # type: ignore[call-overload]
+            details["height"] = int(structure["ispe_height"])  # type: ignore[call-overload]
+            details["dimension_source"] = "heif-ispe"
         # Unsupported-but-valid containers (HEIC/AVIF without a plugin) are not
         # "unreadable": they keep the image type and say why pixels are missing.
         artifact_type = "media-image" if decode_status == "decoder-unsupported-format" else "media-image-unreadable"
+        details["coverage_status"] = (
+            "container-metadata-only" if artifact_type == "media-image" else "unreadable-image-content"
+        )
     else:
         height, width = image.shape[:2]
         perceptual_hash = average_hash(image)
@@ -2014,6 +2065,8 @@ def build_image_record(path: Path) -> ArtifactRecord:
                 "parser_confidence": 0.86,
                 "width": int(width),
                 "height": int(height),
+                "dimension_source": "decoded-pixels",
+                "coverage_status": "decoded-image",
                 "channel_count": int(image.shape[2]) if len(image.shape) == 3 else 1,
                 "perceptual_hash": perceptual_hash,
                 "similarity_bucket": perceptual_hash[:8],

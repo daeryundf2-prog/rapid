@@ -418,7 +418,7 @@ class EdgeProfileRowsTests(unittest.TestCase):
         self.assertTrue(login["password_stored"])
         card = types["browser-credit-card"][0].details
         self.assertEqual("**** **** **** 4242", card["card_number_masked"])
-        self.assertEqual("홍길동", card["name_on_card"])
+        self.assertEqual("[마스킹됨]", card["name_on_card"])  # personal name: masked (parser-quality r2)
         autofill = {r.details["field_name"]: r.details for r in types["browser-autofill"]}
         self.assertEqual("alice01", autofill["usrId"]["value_preview"])
         self.assertEqual("[마스킹됨]", autofill["userPassword"]["value_preview"])

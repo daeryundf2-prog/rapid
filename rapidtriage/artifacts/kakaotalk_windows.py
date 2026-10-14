@@ -70,8 +70,10 @@ KAKAO_APP_DB_NAMES = {
     "wpi_v2.edb",
 }
 KAKAO_APP_DB_PREFIXES = ("chatlogs_",)
+KAKAO_DEVICEINFO_KEY_SUFFIX = "kakaotalk\\deviceinfo"
+# Bare "deviceinfo" is dropped: it hits SetupDiEnumDeviceInfo and other generic Windows strings.
+# The KakaoTalk DeviceInfo key is still caught via "kakaotalk" and its hdd_/sys_uuid value names.
 KAKAO_TERMS = (
-    "deviceinfo",
     "hdd_model",
     "hdd_serial",
     "kakaotalk.exe",
@@ -1653,6 +1655,29 @@ def parse_hive_vk(blob: bytes, payload: bytes) -> dict[str, object] | None:
     }
 
 
+# Hangul-ASCII-Hangul interleaving ("똕W7똕W7") is FAT/FILETIME bytes read as text.
+BINARY_TEXT_INTERLEAVE_RE = re.compile(r"[가-힣][A-Za-z0-9#%()$+,]{1,2}[가-힣]")
+BINARY_TEXT_RUN_RE = re.compile(r"[A-Za-z0-9]{3,}|[가-힣]{2,}")
+
+
+def is_plausible_binary_value_text(text: str) -> bool:
+    """Text carved from a binary registry value: reject byte noise decoded as cp949/UTF-16.
+
+    Rejects control characters, CJK ideographs / private-use characters (cp949 Hanja and
+    UTF-16 noise), Hangul-ASCII interleaving, and strings without one real run (3+ Latin
+    letters/digits or 2+ Hangul syllables).
+    """
+    if not text or not all(ch.isprintable() for ch in text):
+        return False
+    for ch in text:
+        code = ord(ch)
+        if 0x3400 <= code <= 0x9FFF or 0xE000 <= code <= 0xFAFF or code >= 0xFFF0:
+            return False
+    if BINARY_TEXT_INTERLEAVE_RE.search(text):
+        return False
+    return bool(BINARY_TEXT_RUN_RE.search(text))
+
+
 def decode_registry_value_strings(value_type: int, data: bytes) -> list[tuple[str, str]]:
     """Strings carried by one registry value, decoded inside that value's own data boundary."""
     strings: list[tuple[str, str]] = []
@@ -1674,7 +1699,7 @@ def decode_registry_value_strings(value_type: int, data: bytes) -> list[tuple[st
     for match in ANSI_RUN_RE.finditer(data):
         text, encoding = decode_ansi_registry_text(match.group(0))
         text = text.strip()
-        if len(text) >= 4 and "�" not in text and all(ch.isprintable() for ch in text):
+        if len(text) >= 4 and "�" not in text and is_plausible_binary_value_text(text):
             found.append((match.start(), text, encoding))
             if not text.isascii():
                 ansi_spans.append((match.start(), match.end()))
@@ -1690,7 +1715,7 @@ def decode_registry_value_strings(value_type: int, data: bytes) -> list[tuple[st
         # A lone Hangul syllable inside Latin noise is almost always binary data, not text.
         if hangul == 1 and len(text) > 1:
             continue
-        if len(text) >= 3 and all(ch.isprintable() for ch in text):
+        if len(text) >= 3 and is_plausible_binary_value_text(text):
             found.append((match.start(), text, "utf-16le"))
     seen: set[str] = set()
     for _offset, text, encoding in sorted(found, key=lambda item: item[0]):
@@ -1786,6 +1811,10 @@ def collect_native_hive_kakao_traces(path: Path, source_hashes: Mapping[str, str
     distinct_paths: set[str] = set()
     for key in sorted(walked["keys"], key=lambda item: int(item["cell_offset"])):
         matched = matched_kakao_terms(str(key["name"]))
+        if not matched and str(key["key_path"]).lower().endswith(KAKAO_DEVICEINFO_KEY_SUFFIX):
+            # Software\Kakao\KakaoTalk\DeviceInfo (hdd_model/hdd_serial/sys_uuid): the leaf alone
+            # is generic, so it is matched through its KakaoTalk parent.
+            matched = [KAKAO_DEVICEINFO_KEY_SUFFIX]
         if not matched:
             continue
         dedupe = ("key", str(key["key_path"]).lower(), "")
