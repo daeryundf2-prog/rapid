@@ -104,8 +104,8 @@ export interface RunDisclosures {
     excluded_category_counts?: Record<string, number>;
   };
   collection_notes?: Record<string, string[]>;
-  /** Row-level truncation per artifact kind (timeline summary `input_row_truncation`). */
-  input_row_truncation?: Record<string, RowTruncation> | null;
+  /** Run-level row truncation (core/run/summary.py `summarize_input_row_truncation`). */
+  input_row_truncation?: InputRowTruncation | null;
   [key: string]: unknown;
 }
 
@@ -128,6 +128,14 @@ export interface DocsSizeCaps {
   binary_rejected_count?: number;
   truncated?: boolean;
   note?: string;
+}
+
+/** `disclosures.input_row_truncation`: run totals plus the per-step (`artifacts-<kind>`) breakdown. */
+export interface InputRowTruncation {
+  payload_truncated_rows?: number;
+  preview_truncated_rows?: number;
+  level?: "none" | "notice" | "warning" | string;
+  by_step?: Record<string, RowTruncation>;
 }
 
 /**

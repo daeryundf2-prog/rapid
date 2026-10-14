@@ -105,7 +105,14 @@ export function sizeCapsLine(caps: DocsSizeCaps): { text: string; tone: Disclosu
  */
 export function rowTruncationOf(summary: RunSummary | undefined): Record<string, RowTruncation> {
   const direct = summary?.disclosures?.input_row_truncation;
-  if (direct && typeof direct === "object") return direct;
+  if (direct && typeof direct === "object" && direct.by_step && typeof direct.by_step === "object") {
+    const byKind: Record<string, RowTruncation> = {};
+    for (const [name, value] of Object.entries(direct.by_step)) {
+      if (!name || !value || typeof value !== "object" || Array.isArray(value)) continue;
+      byKind[name.replace(/^artifacts-/, "")] = value;
+    }
+    return byKind;
+  }
   const out: Record<string, RowTruncation> = {};
   for (const step of summary?.steps ?? []) {
     const value = step?.row_truncation;
@@ -116,6 +123,19 @@ export function rowTruncationOf(summary: RunSummary | undefined): Record<string,
   return out;
 }
 
+/** Run-level totals of `input_row_truncation` (headline counts + level), null when absent. */
+export function rowTruncationTotalsOf(
+  summary: RunSummary | undefined,
+): { payload: number; preview: number; level: string } | null {
+  const d = summary?.disclosures?.input_row_truncation;
+  if (!d || typeof d !== "object" || typeof d.by_step !== "object" || !d.by_step) return null;
+  return {
+    payload: num(d.payload_truncated_rows),
+    preview: num(d.preview_truncated_rows),
+    level: String(d.level ?? ""),
+  };
+}
+
 const sumValues = (record: Record<string, number> | undefined) =>
   Object.values(record ?? {}).reduce((total, value) => total + num(value), 0);
 
@@ -124,7 +144,10 @@ const sumValues = (record: Record<string, number> | undefined) =>
  * of the original value) are a warning; display-preview cuts (`preview_only_rows`, record value
  * kept) are a notice (info).
  */
-export function rowTruncationItems(truncation: Record<string, RowTruncation>): DisclosureItem[] {
+export function rowTruncationItems(
+  truncation: Record<string, RowTruncation>,
+  totals?: { payload: number; preview: number; level: string } | null,
+): DisclosureItem[] {
   const payload: string[] = [];
   const preview: string[] = [];
   for (const [kind, entry] of Object.entries(truncation)) {
@@ -139,19 +162,29 @@ export function rowTruncationItems(truncation: Record<string, RowTruncation>): D
     }
   }
   const out: DisclosureItem[] = [];
-  if (payload.length) {
+  const showPayload = totals ? totals.level === "warning" || totals.payload > 0 : payload.length > 0;
+  const showPreview = totals ? totals.preview > 0 : preview.length > 0;
+  if (showPayload) {
+    const head = totals ? `원문 값 일부만 보존된 행 총 ${n(totals.payload)}건` : "원문 값 일부만 보존된 행";
     out.push({
       id: "row-truncation",
       label: "행 절단(원문 일부)",
-      text: `원문 값 일부만 보존된 행: ${payload.join(" · ")}`,
+      text: totals
+        ? `${head}${payload.length ? ` — ${payload.join(" · ")}` : ""}`
+        : `${head}: ${payload.join(" · ")}`,
       tone: "warn",
     });
   }
-  if (preview.length) {
+  if (showPreview) {
+    const head = totals
+      ? `표시용 미리보기만 잘림 총 ${n(totals.preview)}건(원본 레코드 값은 보존)`
+      : "표시용 미리보기만 잘림(원본 레코드 값은 보존)";
     out.push({
       id: "row-preview-truncation",
       label: "미리보기 절단",
-      text: `표시용 미리보기만 잘림(원본 레코드 값은 보존): ${preview.join(" · ")}`,
+      text: totals
+        ? `${head}${preview.length ? ` — ${preview.join(" · ")}` : ""}`
+        : `${head}: ${preview.join(" · ")}`,
       tone: "info",
     });
   }
@@ -271,7 +304,7 @@ export function disclosureItems(summary: RunSummary | undefined): DisclosureItem
     out.push({ id: "docs-size-caps", label: "문서 크기 상한", ...sizeCapsLine(d.documents.size_caps) });
   }
 
-  out.push(...rowTruncationItems(rowTruncationOf(summary)));
+  out.push(...rowTruncationItems(rowTruncationOf(summary), rowTruncationTotalsOf(summary)));
 
   if (num(d.files?.excluded_file_count) > 0) {
     out.push({

@@ -7,7 +7,9 @@ import {
   disclosureDigest,
   disclosureItems,
   profileLine,
+  rowTruncationItems,
   rowTruncationOf,
+  rowTruncationTotalsOf,
   runWarnings,
   sizeCapsLine,
 } from "./disclosures";
@@ -142,10 +144,36 @@ describe("공개 사항 r2: cap_policy, row truncation, docs size caps, profile 
       tone: "info",
       text: "표시용 미리보기만 잘림(원본 레코드 값은 보존): windows-prefetch 12행",
     });
-    // The server's own block wins over the steps.
-    expect(
-      rowTruncationOf({ disclosures: { input_row_truncation: { email: { rows_with_truncation: 1 } } } }),
-    ).toEqual({ email: { rows_with_truncation: 1 } });
+    // The server's own block wins over the steps; `artifacts-` is stripped from by_step names.
+    const server: RunSummary = {
+      disclosures: {
+        input_row_truncation: {
+          payload_truncated_rows: 4,
+          preview_truncated_rows: 0,
+          level: "warning",
+          by_step: { "artifacts-email": { rows_with_truncation: 4 } },
+        },
+      },
+    };
+    expect(rowTruncationOf(server)).toEqual({ email: { rows_with_truncation: 4 } });
+    expect(rowTruncationItems(rowTruncationOf(server), rowTruncationTotalsOf(server))).toEqual([
+      expect.objectContaining({
+        id: "row-truncation",
+        tone: "warn",
+        text: "원문 값 일부만 보존된 행 총 4건 — email 4행",
+      }),
+    ]);
+    const none: RunSummary = {
+      disclosures: {
+        input_row_truncation: {
+          payload_truncated_rows: 0,
+          preview_truncated_rows: 0,
+          level: "none",
+          by_step: {},
+        },
+      },
+    };
+    expect(rowTruncationItems(rowTruncationOf(none), rowTruncationTotalsOf(none))).toEqual([]);
   });
 
   it("docs size caps and the r2 profile label", () => {

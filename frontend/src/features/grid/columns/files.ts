@@ -200,6 +200,8 @@ export const MATCH_METHOD_LABELS: Readonly<Record<string, string>> = {
   mft_ref: "MFT 참조",
   "entry-number": "MFT 엔트리 번호",
   "name-size": "이름·크기",
+  "path-fold": "경로 일치(대소문자 무시)",
+  none: "일치 없음",
 };
 
 /** `match_method` of a row, or of its NTFS join. */
@@ -387,7 +389,7 @@ export const filesCollection: CollectionDef = {
     col.field("matchMethod", "일치 방식", 110, ["source"], (r) => strOrNull(r.fields.matchMethod), {
       format: (r) => {
         const method = strOrNull(r.fields.matchMethod);
-        return method ? (MATCH_METHOD_LABELS[method] ?? method) : "";
+        return method ? (MATCH_METHOD_LABELS[method] ?? method) : "—";
       },
       tooltip: (r) => str(r.fields.matchMethod),
     }),

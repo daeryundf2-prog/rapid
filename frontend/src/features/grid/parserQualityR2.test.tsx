@@ -213,6 +213,11 @@ describe("files deletion_state, match_method, signature (parser-quality r2)", ()
     });
     expect(column(filesCollection.columns, "matchMethod").format?.(row)).toBe("상대 경로");
     expect(mapFile({ path: "C:/y", match_method: "mft-ref" }).fields.matchMethod).toBe("mft-ref");
+    const methodCell = (raw: Record<string, unknown>) =>
+      column(filesCollection.columns, "matchMethod").format?.(mapFile({ path: "C:/z", ...raw }));
+    expect(methodCell({ match_method: "path-fold" })).toBe("경로 일치(대소문자 무시)");
+    expect(methodCell({ match_method: "none" })).toBe("일치 없음");
+    expect(methodCell({ match_method: null })).toBe("—");
     const sig = column(filesCollection.columns, "signature");
     expect(sig.format?.(row)).toBe("불일치");
     expect(sig.tooltip?.(row)).toBe("확장자와 다른 헤더 서명 · 감지 zip · 기대 pdf");
