@@ -13,18 +13,21 @@ import stat as stat_module
 import sys
 import threading
 import zipfile
-from collections.abc import Iterable, Mapping, Sequence
+from collections import Counter
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path, PurePosixPath
 from typing import NamedTuple
 
 from .extraction_failures import (
     ADS_SOURCE_ID,
+    FLS_LISTING_NAME,
     LONG_PATH_SOURCE_ID,
     ZERO_BYTE_SOURCE_ID,
     SidecarFile,
     extraction_stage_for_root,
     iso_to_epoch,
     iter_extraction_sidecar_files,
+    iter_fls_listing,
     load_extraction_inode_index,
     normalize_relative_key,
 )
@@ -56,6 +59,7 @@ DEFAULT_FILE_CATEGORIES: tuple[str, ...] = (
     "memory-dumps",
     "vehicle-images",
     "images",
+    "other",
 )
 DEDUPLICATE_CONTENT_GAP_ID = "#77"
 DENISTING_GAP_ID = "visible-denisting"
@@ -397,246 +401,192 @@ FUZZY_TEXT_EXTENSIONS = {
     ".log",
 }
 
+# Category tables (parser-quality r1, finding Major 4). Membership is decided
+# by extension tables, a few exact file names, and content magic for
+# ambiguous or extension-less files. Path keywords never qualify a file on
+# their own: they were substring matches on the absolute path ("ReportArchive"
+# made archives, "Documents" made documents), so a path segment is recorded
+# as a supporting reason only. ``qualifying_path_segments`` (exact segments of
+# the path relative to the evidence root) qualify only for export-shaped
+# categories whose contents are folder trees (mobile/vehicle exports).
 CATEGORY_RULES: dict[str, dict[str, tuple[str, ...]]] = {
     "documents": {
         "extensions": (
-            ".txt",
-            ".pdf",
-            ".doc",
-            ".docx",
-            ".docm",
-            ".rtf",
-            ".odt",
-            ".ods",
-            ".xls",
-            ".xlsx",
-            ".xlsm",
-            ".ppt",
-            ".pptx",
-            ".pptm",
-            ".csv",
-            ".tsv",
-            ".md",
-            ".json",
-            ".jsonl",
-            ".xml",
-            ".html",
-            ".htm",
-            ".yaml",
-            ".yml",
-            ".ini",
-            ".cfg",
-            ".conf",
-            ".log",
+            ".txt", ".pdf", ".doc", ".dot", ".docx", ".docm", ".dotx", ".rtf",
+            ".odt", ".ods", ".odp", ".xls", ".xlt", ".xlsx", ".xlsm", ".xlsb",
+            ".ppt", ".pps", ".pptx", ".pptm", ".ppsx",
+            ".hwp", ".hwpx", ".hwt", ".cell", ".show", ".nxl",
+            ".csv", ".tsv", ".md", ".json", ".jsonl", ".xml", ".html", ".htm",
+            ".yaml", ".yml", ".ini", ".cfg", ".conf", ".log",
         ),
-        "name_keywords": ("report", "note", "notes", "memo", "document", "evidence", "invoice", "letter"),
-        "path_keywords": ("document", "documents", "desktop", "downloads", "evidence", "report"),
+        "names": (),
+        "magics": (),
+        "path_segments": ("documents", "desktop", "downloads", "문서", "바탕 화면", "다운로드"),
+        "qualifying_path_segments": (),
     },
     "archives": {
         "extensions": (
-            ".zip",
-            ".7z",
-            ".rar",
-            ".rar5",
-            ".tar",
-            ".gz",
-            ".gzip",
-            ".tgz",
-            ".bz2",
-            ".xz",
-            ".zst",
-            ".cpio",
-            ".dar",
-            ".hpak",
-            ".crash",
-            ".cab",
-            ".iso",
-            ".dmg",
-            ".wim",
-            ".swm",
-            ".z00",
-            ".z01",
-            ".7z001",
+            ".zip", ".7z", ".rar", ".tar", ".gz", ".gzip", ".tgz", ".bz2", ".tbz2",
+            ".xz", ".txz", ".zst", ".lz", ".lzma", ".cpio", ".cab", ".alz", ".egg",
+            ".z00", ".z01", ".7z001", ".zipx", ".wim", ".swm",
         ),
-        "name_keywords": ("archive", "backup", "compressed", "bundle"),
-        "path_keywords": ("archive", "archives", "backup", "backups", "compressed"),
+        "names": (),
+        "magics": ("zip-archive", "7z", "rar", "gzip", "bzip2", "xz", "cab", "zstd"),
+        "path_segments": ("archive", "archives", "backup", "backups"),
+        "qualifying_path_segments": (),
     },
     "databases": {
         "extensions": (
-            ".db",
-            ".db3",
-            ".sqlite",
-            ".sqlite3",
-            ".mdb",
-            ".accdb",
-            ".edb",
-            ".sdf",
-            ".ldb",
-            ".wal",
-            ".sqlite-wal",
-            ".sqlite-shm",
-            ".plist",
-            ".dat",
+            ".db", ".db3", ".sqlite", ".sqlite3", ".sqlitedb", ".mdb", ".accdb", ".edb",
+            ".sdf", ".wal", ".sqlite-wal", ".sqlite-shm", ".db-wal", ".db-shm", ".plist",
         ),
-        "name_keywords": ("database", "sqlite"),
-        "path_keywords": ("database", "databases", "sqlite"),
+        "names": (),
+        "magics": ("sqlite", "ese-database"),
+        "path_segments": ("database", "databases"),
+        "qualifying_path_segments": (),
     },
     "executables": {
         "extensions": (
-            ".exe",
-            ".dll",
-            ".sys",
-            ".msi",
-            ".bat",
-            ".cmd",
-            ".ps1",
-            ".sh",
-            ".com",
-            ".scr",
-            ".bin",
-            ".jar",
-            ".apk",
-            ".appimage",
-            ".vbs",
-            ".js",
-            ".jse",
-            ".wsf",
-            ".hta",
-            ".py",
-            ".pl",
-            ".rb",
-            ".elf",
-            ".so",
-            ".dylib",
-            ".service",
-            ".lnk",
+            ".exe", ".dll", ".sys", ".msi", ".msp", ".bat", ".cmd", ".ps1", ".psm1",
+            ".sh", ".com", ".scr", ".cpl", ".ocx", ".jar", ".apk", ".appimage",
+            ".vbs", ".vbe", ".js", ".jse", ".wsf", ".hta", ".py", ".pl", ".rb",
+            ".elf", ".so", ".dylib", ".msix", ".appx",
         ),
-        "name_keywords": ("setup", "install", "run", "launcher", "dropper"),
-        "path_keywords": ("bin", "sbin", "program files", "startup", "launchagents", "launchdaemons"),
+        "names": (),
+        "magics": ("windows-pe", "elf", "mach-o"),
+        "path_segments": ("bin", "sbin", "program files", "program files (x86)", "startup"),
+        "qualifying_path_segments": (),
     },
     "emails": {
-        "extensions": (
-            ".eml",
-            ".msg",
-            ".mbox",
-            ".pst",
-            ".ost",
-            ".olm",
-            ".nsf",
-        ),
-        "name_keywords": ("mail", "email", "message", "inbox", "outbox", "sent", "archive"),
-        "path_keywords": ("mail", "email", "outlook", "thunderbird", "inbox", "sent", "messages"),
+        "extensions": (".eml", ".msg", ".pst", ".ost", ".mbox"),
+        "names": (),
+        "magics": (),
+        "path_segments": ("mail", "outlook", "thunderbird"),
+        "qualifying_path_segments": (),
     },
     "disk-images": {
         "extensions": (
-            ".e01",
-            ".ex01",
-            ".aff",
-            ".aff4",
-            ".aff4-l",
-            ".ad1",
-            ".l01",
-            ".lx01",
-            ".bif",
-            ".bin",
-            ".dd",
-            ".dmp",
-            ".fip",
-            ".ima",
-            ".raw",
-            ".img",
-            ".mfd",
-            ".mem",
-            ".vfd",
-            ".000",
-            ".0000",
-            ".0001",
-            ".00001",
-            ".001",
-            ".vdi",
-            ".vhd",
-            ".vhdx",
-            ".vmdk",
-            ".xva",
-            ".qcow",
-            ".qcow2",
+            ".e01", ".ex01", ".s01", ".aff", ".aff4", ".ad1", ".l01", ".lx01", ".dd",
+            ".raw", ".img", ".001", ".iso", ".dmg", ".vdi", ".vhd", ".vhdx", ".vmdk",
+            ".xva", ".qcow", ".qcow2", ".vfd", ".ima",
         ),
-        "name_keywords": ("forensic-image", "disk-image", "drive-image", "volume-image"),
-        "path_keywords": ("forensic-images", "disk-images", "drive-images", "volume-images"),
+        "names": (),
+        "magics": ("ewf", "vhdx", "vmdk-sparse", "qcow"),
+        "path_segments": ("forensic-images", "disk-images"),
+        "qualifying_path_segments": (),
     },
     "mobile-images": {
-        "extensions": (
-            ".ab",
-            ".aff4",
-            ".aff4-l",
-            ".ad1",
-            ".bif",
-            ".bin",
-            ".dd",
-            ".dmp",
-            ".e01",
-            ".ex01",
-            ".fip",
-            ".ima",
-            ".img",
-            ".l01",
-            ".lx01",
-            ".mfd",
-            ".mem",
-            ".raw",
-            ".ufd",
-            ".ufdx",
-            ".vfd",
-        ),
-        "name_keywords": ("mobile-image", "phone-image", "ios-backup", "android-backup", "cellebrite", "graykey"),
-        "path_keywords": ("mobile-images", "phone-images", "ios-backups", "android-backups", "cellebrite", "graykey"),
+        "extensions": (".ab", ".ufd", ".ufdr", ".ufdx"),
+        "names": (),
+        "magics": (),
+        "path_segments": ("mobile-images", "ios-backups", "android-backups", "cellebrite", "graykey"),
+        "qualifying_path_segments": ("mobile-images", "ios-backups", "android-backups", "cellebrite", "graykey"),
     },
     "memory-dumps": {
-        "extensions": (
-            ".bif",
-            ".bin",
-            ".crash",
-            ".dd",
-            ".dmg",
-            ".dmp",
-            ".elf",
-            ".flp",
-            ".hpak",
-            ".ima",
-            ".img",
-            ".mdf",
-            ".mem",
-            ".raw",
-            ".vfd",
-            ".vmem",
-            ".vmsn",
-            ".vmss",
-        ),
-        "name_keywords": ("memory", "memdump", "ram", "dumpit", "volatility", "vmem"),
-        "path_keywords": ("memory", "memdump", "ram", "dumpit", "volatility", "memory-dumps"),
+        "extensions": (".dmp", ".mdmp", ".hdmp", ".vmem", ".vmsn", ".vmss", ".mem", ".lime"),
+        "names": ("hiberfil.sys", "pagefile.sys", "swapfile.sys", "memory.dmp"),
+        "magics": ("minidump", "windows-crash-dump", "hibernation-file"),
+        "path_segments": ("memory-dumps", "memdump"),
+        "qualifying_path_segments": (),
     },
     "vehicle-images": {
         "extensions": (".ivo",),
-        "name_keywords": ("vehicle", "ive", "route", "trackpoint", "waypoint"),
-        "path_keywords": ("vehicle", "vehicles", "ive", "routes", "trackpoints", "waypoints"),
+        "names": (),
+        "magics": (),
+        "path_segments": ("vehicle", "vehicles", "trackpoints", "waypoints"),
+        "qualifying_path_segments": ("vehicle", "vehicles"),
     },
     "images": {
         "extensions": (
-            ".jpg",
-            ".jpeg",
-            ".png",
-            ".gif",
-            ".bmp",
-            ".tif",
-            ".tiff",
-            ".heic",
-            ".webp",
+            ".jpg", ".jpeg", ".jfif", ".jpe", ".png", ".gif", ".bmp", ".tif", ".tiff",
+            ".heic", ".heif", ".avif", ".webp", ".ico", ".dng", ".cr2", ".nef", ".arw",
         ),
-        "name_keywords": ("photo", "image", "screenshot", "scan", "camera", "picture"),
-        "path_keywords": ("pictures", "photos", "dcim", "camera", "images", "screenshots"),
+        "names": (),
+        "magics": ("jpeg", "png", "gif"),
+        "path_segments": ("pictures", "photos", "dcim", "camera", "screenshots"),
+        "qualifying_path_segments": (),
+    },
+    # Every allocated file that no other table claims. Selecting it makes the
+    # inventory complete; leaving it out is disclosed as an exclusion reason.
+    "other": {
+        "extensions": (),
+        "names": (),
+        "magics": (),
+        "path_segments": (),
+        "qualifying_path_segments": (),
     },
 }
 ALL_FILE_CATEGORIES: tuple[str, ...] = tuple(CATEGORY_RULES)
+OTHER_CATEGORY = "other"
+# Magic signatures used for category membership (id, offset, bytes). Office
+# Open XML / ODF / HWPX / JAR / APK are ZIP containers: the zip magic only
+# qualifies "archives" when the extension is not a known container format.
+CATEGORY_MAGICS: tuple[tuple[str, int, bytes], ...] = (
+    ("zip-archive", 0, b"PK\x03\x04"),
+    ("7z", 0, b"7z\xbc\xaf\x27\x1c"),
+    ("rar", 0, b"Rar!\x1a\x07"),
+    ("gzip", 0, b"\x1f\x8b\x08"),
+    ("bzip2", 0, b"BZh"),
+    ("xz", 0, b"\xfd7zXZ\x00"),
+    ("cab", 0, b"MSCF\x00\x00\x00\x00"),
+    ("zstd", 0, b"\x28\xb5\x2f\xfd"),
+    ("sqlite", 0, b"SQLite format 3\x00"),
+    ("ese-database", 4, b"\xef\xcd\xab\x89"),
+    ("windows-pe", 0, b"MZ"),
+    ("elf", 0, b"\x7fELF"),
+    ("mach-o", 0, b"\xcf\xfa\xed\xfe"),
+    ("mach-o", 0, b"\xce\xfa\xed\xfe"),
+    ("minidump", 0, b"MDMP"),
+    ("windows-crash-dump", 0, b"PAGEDU64"),
+    ("windows-crash-dump", 0, b"PAGEDUMP"),
+    ("hibernation-file", 0, b"HIBR"),
+    ("hibernation-file", 0, b"hibr"),
+    ("hibernation-file", 0, b"WAKE"),
+    ("hibernation-file", 0, b"RSTR"),
+    ("ewf", 0, b"EVF\x09\x0d\x0a\xff\x00"),
+    ("ewf", 0, b"EVF2\r\n\x81\x00"),
+    ("vhdx", 0, b"vhdxfile"),
+    ("vmdk-sparse", 0, b"KDMV"),
+    ("qcow", 0, b"QFI\xfb"),
+    ("jpeg", 0, b"\xff\xd8\xff"),
+    ("png", 0, b"\x89PNG\r\n\x1a\n"),
+    ("gif", 0, b"GIF8"),
+)
+ZIP_CONTAINER_EXTENSIONS = frozenset(
+    {
+        ".docx", ".docm", ".dotx", ".xlsx", ".xlsm", ".xlsb", ".pptx", ".pptm", ".ppsx", ".odt", ".ods",
+        ".odp", ".hwpx", ".jar", ".apk", ".msix", ".appx", ".epub", ".kmz", ".xpi", ".crx", ".nupkg",
+        ".whl", ".ipa", ".aab", ".vsix", ".3mf",
+    }
+)
+# Extensions whose header is probed for category membership because the
+# extension alone is ambiguous (or there is none). Known extensions are never
+# re-categorized by magic (signature mismatches are reported separately).
+MAGIC_PROBE_EXTENSIONS = frozenset({"", ".bin", ".dat", ".tmp", ".raw", ".img", ".001", ".dd", ".bak", ".old"})
+CATEGORY_MAGIC_HEADER_BYTES = 16
+WINDOWS_FILE_ATTRIBUTE_NAMES: tuple[tuple[int, str], ...] = (
+    (0x1, "readonly"),
+    (0x2, "hidden"),
+    (0x4, "system"),
+    (0x20, "archive"),
+    (0x100, "temporary"),
+    (0x200, "sparse"),
+    (0x400, "reparse-point"),
+    (0x800, "compressed"),
+    (0x1000, "offline"),
+    (0x2000, "not-content-indexed"),
+    (0x4000, "encrypted"),
+)
+# Where file times in files.json come from (``time_origin``):
+#   filesystem        - stat of the original filesystem (live system, mounted image)
+#   acquisition-copy  - stat of an extracted copy: host times are the copy/extraction
+#                       times, kept as ``source_file_*`` and never used as events
+#   listing           - filesystem times read from an image listing (fls/MFT)
+TIME_ORIGIN_FILESYSTEM = "filesystem"
+TIME_ORIGIN_ACQUISITION_COPY = "acquisition-copy"
+TIME_ORIGIN_LISTING = "listing"
+FILESYSTEM_TIME_INPUT_KINDS = frozenset({"live", "mounted-image"})
+EXCLUSION_CATEGORY_NOT_SELECTED = "category-not-selected"
 
 
 class FileScanError(ValueError):
@@ -667,6 +617,8 @@ def run_files_scan(
     modified_after_dt = parse_modified_bound(modified_after)
     modified_before_dt = parse_modified_bound(modified_before)
 
+    time_origin = file_time_origin_for_input_kind(input_root.kind)
+    exclusions: dict[str, object] = {}
     candidates, scanned_files = scan_file_candidates(
         input_root.root_path,
         categories=selected_categories,
@@ -676,6 +628,8 @@ def run_files_scan(
         modified_after=modified_after_dt,
         modified_before=modified_before_dt,
         limit=limit,
+        time_origin=time_origin,
+        exclusions=exclusions,
     )
 
     known_good_index = load_known_good_hash_feeds(known_good_hash_feeds or [])
@@ -696,9 +650,15 @@ def run_files_scan(
         for category in candidate.categories:
             category_counts[category] = category_counts.get(category, 0) + 1
 
-    modified_values = [candidate.modified_at for candidate in visible_candidates]
-    duplicate_groups = build_duplicate_content_groups(visible_candidates)
-    fuzzy_text_groups = build_fuzzy_text_duplicate_groups(visible_candidates)
+    # Only filesystem times describe the evidence; acquisition-copy host
+    # times are summarized separately (source_file_mtime range).
+    modified_values = [candidate.fs_modified_at for candidate in visible_candidates if candidate.fs_modified_at]
+    copy_mtime_values = [candidate.source_file_mtime for candidate in visible_candidates if candidate.source_file_mtime]
+    duplicate_stats: dict[str, object] = {}
+    fuzzy_stats: dict[str, object] = {}
+    duplicate_groups = build_duplicate_content_groups(visible_candidates, stats=duplicate_stats)
+    fuzzy_text_groups = build_fuzzy_text_duplicate_groups(visible_candidates, stats=fuzzy_stats)
+    time_provenance = build_file_time_provenance(visible_candidates, time_origin=time_origin, input_kind=input_root.kind)
     duplicate_content_manifest = build_duplicate_content_manifest(
         duplicate_groups,
         fuzzy_text_groups=fuzzy_text_groups,
@@ -728,6 +688,26 @@ def run_files_scan(
             "category_counts": category_counts,
             "newest_modified_at": max(modified_values) if modified_values else None,
             "oldest_modified_at": min(modified_values) if modified_values else None,
+            "time_origin": time_origin,
+            "source_file_mtime_range": {
+                "oldest": min(copy_mtime_values) if copy_mtime_values else None,
+                "newest": max(copy_mtime_values) if copy_mtime_values else None,
+            },
+            "excluded_file_count": int(exclusions.get("total") or 0),
+            "exclusion_reason_counts": dict(exclusions.get("reasons") or {}),
+            "excluded_category_counts": dict(exclusions.get("category_not_selected") or {}),
+            "limit_reached": bool(exclusions.get("limit_reached")),
+            "attribute_counts": dict(Counter(name for candidate in visible_candidates for name in candidate.attributes)),
+            "deleted_flag_counts": {
+                "deleted": sum(1 for candidate in visible_candidates if candidate.is_deleted is True),
+                "allocated": sum(1 for candidate in visible_candidates if candidate.is_deleted is False),
+                "unknown": sum(1 for candidate in visible_candidates if candidate.is_deleted is None),
+            },
+            "duplicate_hash_profile": duplicate_stats,
+            "duplicate_groups_truncated": bool(duplicate_stats.get("truncated")),
+            "fuzzy_text_duplicate_profile": fuzzy_stats,
+            "fuzzy_text_duplicates_truncated": bool(fuzzy_stats.get("truncated")),
+            "mismatch_candidates_truncated": bool(signature_profile.get("mismatch_candidates_truncated")),
             "duplicate_group_count": len(duplicate_groups),
             "duplicate_file_count": sum(int(group["file_count"]) for group in duplicate_groups),
             "fuzzy_text_duplicate_group_count": len(fuzzy_text_groups),
@@ -750,6 +730,8 @@ def run_files_scan(
                 SIGNATURE_MISMATCH_GAP_ID,
             ],
         },
+        "time_provenance": time_provenance,
+        "file_exclusions": exclusions,
         "known_good_suppression_profile": known_good_profile,
         "known_good_suppressed_candidates": known_good_result["suppressed_candidates"],
         "file_signature_profile": signature_profile,
@@ -779,6 +761,34 @@ def run_files_scan(
     return payload
 
 
+def build_file_time_provenance(
+    candidates: Sequence[FileCandidate],
+    *,
+    time_origin: str,
+    input_kind: str,
+) -> dict[str, object]:
+    """Disclosure block: where ``modified_at`` / ``fs_*`` / ``source_file_*`` come from."""
+    origin_counts = Counter(candidate.modified_at_origin or "unknown" for candidate in candidates)
+    with_fs = sum(1 for candidate in candidates if candidate.fs_modified_at)
+    if time_origin == TIME_ORIGIN_ACQUISITION_COPY:
+        note = (
+            "증거가 추출 사본(폴더 입력)이므로 호스트 파일 시각은 취득·복사 시각입니다. "
+            "source_file_mtime/ctime/atime에만 기록하고 타임라인 이벤트로 쓰지 않습니다. "
+            "원본 파일시스템 시각은 fs_* 필드(이미지 목록·NTFS 메타 분석이 제공할 때)에만 있습니다."
+        )
+    else:
+        note = "라이브/마운트 파일시스템의 stat 시각을 fs_* 필드로 기록합니다."
+    return {
+        "input_kind": input_kind,
+        "time_origin": time_origin,
+        "modified_at_origin_counts": dict(sorted(origin_counts.items())),
+        "fs_time_candidate_count": with_fs,
+        "timeline_uses": "fs_* only",
+        "timezone": "UTC",
+        "note": note,
+    }
+
+
 def scan_file_candidates(
     root: Path,
     *,
@@ -789,7 +799,15 @@ def scan_file_candidates(
     modified_after: dt.datetime | None,
     modified_before: dt.datetime | None,
     limit: int,
+    time_origin: str = TIME_ORIGIN_ACQUISITION_COPY,
+    exclusions: dict[str, object] | None = None,
 ) -> tuple[list[FileCandidate], int]:
+    """Walk ``root`` and return profile-matched candidates plus the scanned count.
+
+    ``exclusions`` (optional, filled in place) receives the disclosure of
+    every scanned file that did not become a candidate:
+    ``{"total": n, "reasons": {reason: n}, "category_not_selected": {category: n}}``.
+    """
     candidates: list[FileCandidate] = []
     scanned_files = 0
     pending = [root]
@@ -797,23 +815,48 @@ def scan_file_candidates(
     # recoveries) written by the extraction gap stage; plain folders do not.
     extraction_stage = extraction_stage_for_root(root)
     inode_index = load_extraction_inode_index(root) if extraction_stage is not None else {}
+    listing_times = load_listing_time_index(root) if extraction_stage is not None else {}
     on_disk_keys: set[str] | None = set() if extraction_stage is not None else None
     root_text = str(root)
+    reason_counts: Counter[str] = Counter()
+    not_selected_counts: Counter[str] = Counter()
+    selected = set(categories)
 
-    def passes_filters(candidate: FileCandidate) -> bool:
+    def filter_reason(candidate: FileCandidate) -> str | None:
         if normalized_path_mismatch(candidate.path, path_contains):
-            return False
+            return "path-filter"
         if normalized_name_mismatch(candidate.name, name_contains):
-            return False
+            return "name-filter"
         if extensions and candidate.extension not in extensions:
-            return False
-        modified_dt = _naive_local_datetime(candidate.modified_epoch)
+            return "extension-filter"
+        # Date filters use the filesystem time when one is known; an
+        # acquisition copy's host time is the copy time.
+        epoch = iso_to_epoch(candidate.fs_modified_at) if candidate.fs_modified_at else candidate.modified_epoch
+        modified_dt = _naive_local_datetime(epoch)
         if modified_after and modified_dt < modified_after:
-            return False
+            return "modified-filter"
         if modified_before and modified_dt > modified_before:
-            return False
-        return True
+            return "modified-filter"
+        return None
 
+    def classify_and_build(path: Path, entry_stat: os.stat_result) -> FileCandidate | None:
+        classification = classify_file_categories(path, root=root)
+        candidate = build_file_candidate(
+            path,
+            entry_stat,
+            categories,
+            root=root,
+            time_origin=time_origin,
+            classification=classification,
+        )
+        if candidate is None:
+            reason_counts[EXCLUSION_CATEGORY_NOT_SELECTED] += 1
+            for category in classification[0]:
+                if category not in selected:
+                    not_selected_counts[category] += 1
+        return candidate
+
+    limit_reached = False
     while pending:
         current = pending.pop()
         try:
@@ -829,29 +872,38 @@ def scan_file_candidates(
                             continue
                         entry_stat = entry.stat(follow_symlinks=False)
                     except (FileNotFoundError, PermissionError, OSError):
+                        reason_counts["stat-error"] += 1
                         continue
                     scanned_files += 1
+                    if limit_reached:
+                        reason_counts["limit"] += 1
+                        continue
                     relative_key = ""
                     if on_disk_keys is not None:
                         relative_key = normalize_relative_key(entry.path[len(root_text) :])
                         on_disk_keys.add(relative_key)
-                    candidate = build_file_candidate(Path(entry.path), entry_stat, categories)
+                    candidate = classify_and_build(Path(entry.path), entry_stat)
                     if candidate is None:
                         continue
-                    if not passes_filters(candidate):
+                    reason = filter_reason(candidate)
+                    if reason is not None:
+                        reason_counts[reason] += 1
                         continue
                     if inode_index:
                         inode = inode_index.get(relative_key)
                         if inode is not None:
                             candidate.recovery["mft_ref"] = inode
+                            listing = listing_times.get(inode)
+                            if listing:
+                                apply_listing_times(candidate, listing)
                     candidates.append(candidate)
                     if limit and len(candidates) >= limit:
-                        candidates.sort(key=lambda item: (-item.modified_epoch, item.path))
-                        return candidates, scanned_files
+                        limit_reached = True
         except (FileNotFoundError, NotADirectoryError, PermissionError):
+            reason_counts["directory-unreadable"] += 1
             continue
 
-    if extraction_stage is not None:
+    if extraction_stage is not None and not limit_reached:
         on_disk_inodes = {inode_index[key] for key in on_disk_keys or () if key in inode_index}
         for sidecar in iter_extraction_sidecar_files(root):
             if sidecar.source_id == ZERO_BYTE_SOURCE_ID:
@@ -862,13 +914,29 @@ def scan_file_candidates(
                 if normalize_relative_key(sidecar.relative_path) in (on_disk_keys or ()):
                     continue
             candidate = build_sidecar_file_candidate(root, sidecar, categories)
-            if candidate is None or not passes_filters(candidate):
+            if candidate is None:
+                reason_counts[EXCLUSION_CATEGORY_NOT_SELECTED] += 1
+                continue
+            reason = filter_reason(candidate)
+            if reason is not None:
+                reason_counts[reason] += 1
                 continue
             candidates.append(candidate)
             if limit and len(candidates) >= limit:
                 break
 
     candidates.sort(key=lambda item: (-item.modified_epoch, item.path))
+    if exclusions is not None:
+        exclusions.clear()
+        exclusions.update(
+            {
+                "total": sum(count for reason, count in reason_counts.items() if reason not in {"stat-error", "directory-unreadable"}),
+                "reasons": dict(sorted(reason_counts.items())),
+                "category_not_selected": dict(sorted(not_selected_counts.items())),
+                "selected_categories": list(categories),
+                "limit_reached": limit_reached,
+            }
+        )
     return candidates, scanned_files
 
 
@@ -903,9 +971,13 @@ def build_sidecar_file_candidate(root: Path, sidecar: SidecarFile, categories: S
     path = root.joinpath(*relative.split("/"))
     modified_epoch = max(0.0, iso_to_epoch(sidecar.modified_at))
     pseudo_stat = os.stat_result((stat_module.S_IFREG | 0o644, 0, 0, 1, 0, 0, sidecar.size, modified_epoch, modified_epoch, modified_epoch))
-    candidate = build_file_candidate(path, pseudo_stat, categories)
+    candidate = build_file_candidate(path, pseudo_stat, categories, root=root, time_origin=TIME_ORIGIN_LISTING)
     if candidate is None:
         return None
+    # Listing rows carry the filesystem's own MAC times (no host copy exists
+    # for zero-byte rows; recovered content files have copy times only).
+    candidate.source_file_mtime = candidate.source_file_atime = candidate.source_file_ctime = None
+    apply_listing_times(candidate, dict(sidecar.timestamps))
     confidence = "medium" if sidecar.name_lossy or sidecar.source_id == ZERO_BYTE_SOURCE_ID else "high"
     extra: dict[str, object] = {
         "mft_ref": sidecar.inode,
@@ -1651,8 +1723,9 @@ def apply_file_signature_profile(
     unrecognized_known_extension_count = 0
     read_error_count = 0
 
+    expected_by_extension, sniff = _shared_signature_rules()
     for candidate, payload in zip(candidates, candidate_payloads):
-        expected = sorted(EXPECTED_SIGNATURES_BY_EXTENSION.get(candidate.extension, set()))
+        expected = sorted(expected_by_extension.get(candidate.extension, set()))
         signature = {
             "status": "not-applicable",
             "detected": None,
@@ -1666,7 +1739,7 @@ def apply_file_signature_profile(
         checked_count += 1
         try:
             with Path(candidate.path).open("rb") as handle:
-                header = handle.read(MAX_SIGNATURE_HEADER_BYTES)
+                header = handle.read(SHARED_SIGNATURE_SCAN_BYTES if sniff is not None else MAX_SIGNATURE_HEADER_BYTES)
         except OSError as exc:
             read_error_count += 1
             payload["file_signature"] = {
@@ -1675,7 +1748,7 @@ def apply_file_signature_profile(
                 "error": exc.__class__.__name__,
             }
             continue
-        detected = detect_file_signature(header)
+        detected = _sniff_signature(header, sniff)
         if detected is None:
             unrecognized_known_extension_count += 1
             payload["file_signature"] = {
@@ -1732,7 +1805,8 @@ def apply_file_signature_profile(
         "mismatch_candidates_truncated": mismatch_candidates_truncated,
         "max_header_bytes": MAX_SIGNATURE_HEADER_BYTES,
         "known_signature_count": len(SIGNATURE_RULES),
-        "known_extensions": sorted(EXPECTED_SIGNATURES_BY_EXTENSION),
+        "known_extensions": sorted(expected_by_extension),
+        "signature_table": "rapidtriage.artifacts.windows.filesystem" if sniff is not None else "core.files",
         "policy": {
             "scope": "bounded first-bytes magic signature check during file inventory",
             "default_behavior": "flag mismatch but keep the file visible",
@@ -1752,6 +1826,35 @@ def apply_file_signature_profile(
     }
 
 
+SHARED_SIGNATURE_SCAN_BYTES = 4096
+
+
+def _shared_signature_rules() -> tuple[Mapping[str, object], object]:
+    """Expected kinds per extension + sniffer shared with windows-filesystem (W3).
+
+    files.json and the ``file-signature-mismatch`` artifact then agree on
+    kind names and coverage (``.pf``/``.lnk`` included, extension-less files
+    skipped). Falls back to the local table when the provider is absent.
+    """
+    try:
+        from ..artifacts.windows.filesystem import (
+            SIGNATURE_EXPECTED_KINDS_BY_EXTENSION,
+            sniff_content_kind,
+        )
+    except ImportError:  # pragma: no cover - provider package always ships with core
+        return EXPECTED_SIGNATURES_BY_EXTENSION, None
+    return SIGNATURE_EXPECTED_KINDS_BY_EXTENSION, sniff_content_kind
+
+
+def _sniff_signature(header: bytes, sniff: object) -> str | None:
+    if sniff is None:
+        return detect_file_signature(header)
+    result = sniff(header)  # type: ignore[operator]
+    if not isinstance(result, Mapping) or result.get("basis") != "magic":
+        return None
+    return str(result.get("kind") or "") or None
+
+
 def detect_file_signature(header: bytes) -> str | None:
     for rule in SIGNATURE_RULES:
         for magic in rule["magics"]:  # type: ignore[union-attr]
@@ -1760,40 +1863,178 @@ def detect_file_signature(header: bytes) -> str | None:
     return None
 
 
-def build_file_candidate(path: Path, entry_stat: os.stat_result, categories: Sequence[str]) -> FileCandidate | None:
-    extension = path.suffix.lower()
-    filename = normalize_search_text(path.name)
-    path_text = normalize_search_text(str(path))
-    matched_categories: list[str] = []
-    reasons: dict[str, list[str]] = {}
+def file_time_origin_for_input_kind(input_kind: str | None) -> str:
+    """``filesystem`` for live/mounted roots, else ``acquisition-copy``.
 
-    for category in categories:
-        rule = CATEGORY_RULES[category]
-        category_reasons: list[str] = []
-        if extension and extension in rule["extensions"]:
-            category_reasons.append(f"extension:{extension}")
-        name_keyword = first_contains(filename, rule["name_keywords"])
-        if name_keyword:
-            category_reasons.append(f"name:{name_keyword}")
-        path_keyword = first_contains(path_text, rule["path_keywords"])
-        if path_keyword:
-            category_reasons.append(f"path:{path_keyword}")
-        if category == "executables" and entry_stat.st_mode & EXECUTABLE_BITS:
-            category_reasons.append("mode:executable")
-        if not category_reasons:
-            continue
-        matched_categories.append(category)
-        reasons[category] = category_reasons
+    A folder, extracted E01/disk/archive tree or VSC copy carries the host
+    times of the copy, not of the original filesystem object.
+    """
+    return TIME_ORIGIN_FILESYSTEM if str(input_kind or "") in FILESYSTEM_TIME_INPUT_KINDS else TIME_ORIGIN_ACQUISITION_COPY
 
-    if not matched_categories:
+
+def _epoch_to_iso(epoch: float | None) -> str | None:
+    """Host stat epoch -> ISO UTC (``+00:00``), pre-1970 safe on Windows."""
+    if epoch is None:
+        return None
+    try:
+        return dt.datetime.fromtimestamp(float(epoch), tz=dt.timezone.utc).isoformat()
+    except (OverflowError, OSError, ValueError, TypeError):
+        pass
+    try:
+        return (_UNIX_EPOCH + dt.timedelta(seconds=float(epoch))).isoformat()
+    except (OverflowError, ValueError, TypeError):
         return None
 
-    return FileCandidate(
+
+_UNIX_EPOCH = dt.datetime(1970, 1, 1, tzinfo=dt.timezone.utc)
+
+
+def _stat_birth_epoch(entry_stat: os.stat_result) -> float | None:
+    birth = getattr(entry_stat, "st_birthtime", None)
+    if isinstance(birth, (int, float)):
+        return float(birth)
+    if os.name == "nt":
+        # Before Python 3.12 st_ctime is the creation time on Windows.
+        return float(entry_stat.st_ctime)
+    return None
+
+
+def file_attribute_names(entry_stat: os.stat_result) -> list[str]:
+    raw = getattr(entry_stat, "st_file_attributes", None)
+    if not isinstance(raw, int):
+        return []
+    return [name for bit, name in WINDOWS_FILE_ATTRIBUTE_NAMES if raw & bit]
+
+
+def relative_path_segments(path: Path, root: Path | None) -> tuple[str, ...]:
+    """Directory segments of ``path`` relative to ``root`` (casefolded NFC).
+
+    Without a root (or outside it) no segment is reported, so the evidence
+    root's own folder names never categorize files.
+    """
+    if root is None:
+        return ()
+    try:
+        relative = path.relative_to(root)
+    except ValueError:
+        return ()
+    return tuple(normalize_search_text(part) for part in relative.parts[:-1])
+
+
+def detect_category_magic(header: bytes, extension: str) -> str | None:
+    for magic_id, offset, magic in CATEGORY_MAGICS:
+        if header[offset : offset + len(magic)] == magic:
+            if magic_id == "zip-archive" and extension in ZIP_CONTAINER_EXTENSIONS:
+                return None
+            return magic_id
+    return None
+
+
+def probe_category_magic(path: Path, extension: str) -> str | None:
+    """Content magic of ``path`` for category membership (``None`` when unknown).
+
+    ``MZ`` alone is two bytes (V8 code-cache and random blobs start with it),
+    so a PE needs ``e_lfanew`` pointing at a ``PE`` signature header.
+    """
+    try:
+        with open(path, "rb") as handle:
+            header = handle.read(CATEGORY_MAGIC_HEADER_BYTES)
+            magic_id = detect_category_magic(header, extension) if header else None
+            if magic_id == "windows-pe":
+                handle.seek(0x3C)
+                raw = handle.read(4)
+                lfanew = int.from_bytes(raw, "little") if len(raw) == 4 else 0
+                if lfanew < 0x40 or lfanew > 0x10000:
+                    return None
+                handle.seek(lfanew)
+                if handle.read(4) != b"PE\x00\x00":
+                    return None
+            return magic_id
+    except OSError:
+        return None
+
+
+_KNOWN_CATEGORY_EXTENSIONS = frozenset(
+    extension for rule in CATEGORY_RULES.values() for extension in rule["extensions"]
+)
+
+
+def classify_file_categories(
+    path: Path,
+    *,
+    root: Path | None,
+    magic_probe: Callable[[Path, str], str | None] | None = None,
+) -> tuple[list[str], dict[str, list[str]], str | None]:
+    """Categories a file belongs to across every table, with reasons.
+
+    Returns ``(categories, reasons, magic_id)``; ``categories`` is
+    ``["other"]`` when no table claims the file. The header is read only for
+    extensions that are ambiguous or unknown (``MAGIC_PROBE_EXTENSIONS``).
+    """
+    extension = path.suffix.lower()
+    name = normalize_search_text(path.name)
+    segments = relative_path_segments(path, root)
+    segment_set = set(segments)
+    magic_id: str | None = None
+    if extension in MAGIC_PROBE_EXTENSIONS or extension not in _KNOWN_CATEGORY_EXTENSIONS:
+        magic_id = (magic_probe or probe_category_magic)(path, extension)
+    matched: list[str] = []
+    reasons: dict[str, list[str]] = {}
+    for category, rule in CATEGORY_RULES.items():
+        if category == OTHER_CATEGORY:
+            continue
+        qualifying: list[str] = []
+        if extension and extension in rule["extensions"]:
+            qualifying.append(f"extension:{extension}")
+        if name in rule["names"]:
+            qualifying.append(f"name:{name}")
+        if magic_id and magic_id in rule["magics"]:
+            qualifying.append(f"magic:{magic_id}")
+        segment = next((item for item in rule["qualifying_path_segments"] if item in segment_set), None)
+        if segment:
+            qualifying.append(f"path-segment:{segment}")
+        if not qualifying:
+            continue
+        supporting = [f"path-segment:{item}" for item in rule["path_segments"] if item in segment_set and item != segment]
+        matched.append(category)
+        reasons[category] = [*qualifying, *supporting[:2]]
+    if not matched:
+        matched = [OTHER_CATEGORY]
+        reasons[OTHER_CATEGORY] = [f"extension:{extension}" if extension else "extension:none"]
+        if magic_id:
+            reasons[OTHER_CATEGORY].append(f"magic:{magic_id}")
+    return matched, reasons, magic_id
+
+
+def build_file_candidate(
+    path: Path,
+    entry_stat: os.stat_result,
+    categories: Sequence[str],
+    *,
+    root: Path | None = None,
+    time_origin: str = TIME_ORIGIN_ACQUISITION_COPY,
+    classification: tuple[list[str], dict[str, list[str]], str | None] | None = None,
+) -> FileCandidate | None:
+    """FileCandidate for ``path`` when it belongs to a selected category.
+
+    ``time_origin`` decides what the host stat times mean: ``filesystem``
+    times become ``fs_*`` (and ``modified_at``); an ``acquisition-copy``
+    keeps them as ``source_file_*`` only (``modified_at`` stays the host
+    mtime for compatibility, flagged by ``modified_at_origin``).
+    """
+    all_categories, all_reasons, _magic = classification or classify_file_categories(path, root=root)
+    selected = set(categories)
+    matched_categories = [category for category in all_categories if category in selected]
+    if not matched_categories:
+        return None
+    reasons = {category: all_reasons[category] for category in matched_categories}
+    mtime_iso = _epoch_to_iso(entry_stat.st_mtime)
+    candidate = FileCandidate(
         path=str(path),
         name=path.name,
-        extension=extension,
+        extension=path.suffix.lower(),
         size=entry_stat.st_size,
-        modified_at=dt.datetime.fromtimestamp(entry_stat.st_mtime, tz=dt.timezone.utc).isoformat(),
+        modified_at=mtime_iso or "",
         modified_epoch=entry_stat.st_mtime,
         categories=matched_categories,
         reasons=reasons,
@@ -1809,6 +2050,93 @@ def build_file_candidate(path: Path, entry_stat: os.stat_result, categories: Seq
             ),
         ),
     )
+    if root is not None:
+        try:
+            candidate.relative_path = path.relative_to(root).as_posix()
+        except ValueError:
+            candidate.relative_path = ""
+    candidate.attributes = file_attribute_names(entry_stat)
+    candidate.time_origin = time_origin
+    if time_origin == TIME_ORIGIN_FILESYSTEM:
+        candidate.fs_modified_at = mtime_iso
+        candidate.fs_accessed_at = _epoch_to_iso(entry_stat.st_atime)
+        candidate.fs_created_at = _epoch_to_iso(_stat_birth_epoch(entry_stat))
+        if os.name != "nt":
+            candidate.fs_changed_at = _epoch_to_iso(entry_stat.st_ctime)
+        candidate.modified_at_origin = TIME_ORIGIN_FILESYSTEM
+        candidate.attributes_origin = TIME_ORIGIN_FILESYSTEM if candidate.attributes else ""
+        candidate.is_deleted = False
+    else:
+        candidate.source_file_mtime = mtime_iso
+        candidate.source_file_atime = _epoch_to_iso(entry_stat.st_atime)
+        birth = _stat_birth_epoch(entry_stat)
+        candidate.source_file_ctime = _epoch_to_iso(birth if birth is not None else entry_stat.st_ctime)
+        candidate.modified_at_origin = TIME_ORIGIN_ACQUISITION_COPY
+        candidate.attributes_origin = "host-copy" if candidate.attributes else ""
+    return candidate
+
+
+def apply_listing_times(candidate: FileCandidate, listing: Mapping[str, object]) -> None:
+    """Fill ``fs_*`` / ``is_deleted`` / ``attributes`` from an image listing row (fls/MFT).
+
+    ``listing`` keys: ``mtime``/``atime``/``ctime``/``crtime`` (fls), the
+    ``$STANDARD_INFORMATION`` times ``si_modified_at``/``si_accessed_at``/
+    ``si_mft_modified_at``/``si_created_at`` (an NTFS join entry), or merged
+    ``modified_at``/``accessed_at``/``changed_at``/``mft_modified_at``/
+    ``created_at``; ``$FILE_NAME`` times (``fn_*``) are the last fallback.
+    Deletion comes from ``deleted``/``is_deleted`` (bool) or ``in_use``
+    (``is_deleted = not in_use``); ``attributes`` (list of names) replaces
+    the candidate's host attributes. ``modified_at`` then reflects the
+    filesystem time.
+    """
+    def pick(*keys: str) -> str | None:
+        for key in keys:
+            value = listing.get(key)
+            if isinstance(value, str) and value:
+                return value
+        return None
+
+    modified = pick("mtime", "si_modified_at", "modified_at", "fn_modified_at")
+    candidate.fs_modified_at = modified
+    candidate.fs_accessed_at = pick("atime", "si_accessed_at", "accessed_at", "fn_accessed_at")
+    candidate.fs_changed_at = pick("ctime", "si_mft_modified_at", "changed_at", "mft_modified_at", "fn_mft_modified_at")
+    candidate.fs_created_at = pick("crtime", "si_created_at", "created_at", "fn_created_at")
+    if modified:
+        candidate.modified_at = modified
+        candidate.modified_at_origin = TIME_ORIGIN_LISTING
+    deleted = listing.get("deleted")
+    if not isinstance(deleted, bool):
+        deleted = listing.get("is_deleted")
+    if not isinstance(deleted, bool) and isinstance(listing.get("in_use"), bool):
+        deleted = not listing["in_use"]
+    if isinstance(deleted, bool):
+        candidate.is_deleted = deleted
+    attributes = listing.get("attributes")
+    if isinstance(attributes, list) and all(isinstance(item, str) for item in attributes):
+        candidate.attributes = list(attributes)
+        candidate.attributes_origin = TIME_ORIGIN_LISTING
+
+
+def load_listing_time_index(root: Path) -> dict[int, dict[str, object]]:
+    """inode -> listing times/deleted from the E01 stage ``fls-rpl.txt`` (if any)."""
+    stage = extraction_stage_for_root(root)
+    if stage is None:
+        return {}
+    listing_path = stage / FLS_LISTING_NAME
+    if not listing_path.is_file():
+        return {}
+    index: dict[int, dict[str, object]] = {}
+    try:
+        for entry in iter_fls_listing(listing_path):
+            if not entry.is_regular or entry.is_ads:
+                continue
+            existing = index.get(entry.inode)
+            if existing is not None and existing.get("deleted") is False:
+                continue  # an allocated name wins over a deleted one for the same inode
+            index[entry.inode] = {**entry.timestamps(), "deleted": bool(entry.deleted)}
+    except OSError:
+        return {}
+    return index
 
 
 def normalize_categories(categories: Sequence[str] | None) -> list[str]:
@@ -1886,22 +2214,40 @@ def build_duplicate_content_groups(
     candidates: Sequence[FileCandidate],
     *,
     max_hash_bytes: int = 50 * 1024 * 1024,
-    max_files_to_hash: int = 500,
+    max_files_to_hash: int = 0,
+    max_groups: int = 0,
+    stats: dict[str, object] | None = None,
 ) -> list[dict[str, object]]:
+    """Hash-identical groups among same-size candidates.
+
+    ``max_files_to_hash``/``max_groups`` default to 0 (no cap); files larger
+    than ``max_hash_bytes`` are not hashed. Every skip is disclosed through
+    ``stats`` (``truncated``, ``skipped_large_file_count``, ...).
+    """
     size_buckets: dict[int, list[FileCandidate]] = {}
     for candidate in candidates:
+        if int(candidate.size) <= 0:
+            continue  # empty files are all "identical"; not a useful group
         size_buckets.setdefault(int(candidate.size), []).append(candidate)
     hash_buckets: dict[str, list[FileCandidate]] = {}
     hashed_count = 0
+    skipped_large = 0
+    skipped_cap = 0
+    hash_errors = 0
     for size, bucket in size_buckets.items():
-        if len(bucket) < 2 or size > max_hash_bytes:
+        if len(bucket) < 2:
+            continue
+        if size > max_hash_bytes:
+            skipped_large += len(bucket)
             continue
         for candidate in bucket:
-            if hashed_count >= max_files_to_hash:
-                break
+            if max_files_to_hash and hashed_count >= max_files_to_hash:
+                skipped_cap += 1
+                continue
             try:
                 sha256 = compute_hashes_cached(Path(candidate.path))["sha256"]
             except OSError:
+                hash_errors += 1
                 continue
             hash_buckets.setdefault(sha256, []).append(candidate)
             hashed_count += 1
@@ -1938,8 +2284,22 @@ def build_duplicate_content_groups(
                 },
             }
         )
-        if len(groups) >= 50:
-            break
+    total_groups = len(groups)
+    if max_groups and total_groups > max_groups:
+        groups = groups[:max_groups]
+    if stats is not None:
+        stats.update(
+            {
+                "hashed_file_count": hashed_count,
+                "skipped_large_file_count": skipped_large,
+                "skipped_cap_file_count": skipped_cap,
+                "hash_error_count": hash_errors,
+                "max_hash_bytes": max_hash_bytes,
+                "max_files_to_hash": max_files_to_hash,
+                "group_count_before_cap": total_groups,
+                "truncated": bool(skipped_cap or (max_groups and total_groups > max_groups)),
+            }
+        )
     return groups
 
 
@@ -1949,12 +2309,17 @@ def build_fuzzy_text_duplicate_groups(
     max_files: int = 200,
     max_text_bytes: int = 256 * 1024,
     min_similarity: float = 0.82,
+    stats: dict[str, object] | None = None,
 ) -> list[dict[str, object]]:
+    # Pairwise comparison is O(n^2): the first ``max_files`` eligible text
+    # files are compared and the remainder is disclosed via ``stats``.
     text_items = []
+    eligible = 0
     for candidate in candidates:
-        if len(text_items) >= max_files:
-            break
         if candidate.extension not in FUZZY_TEXT_EXTENSIONS or int(candidate.size) <= 0 or int(candidate.size) > max_text_bytes:
+            continue
+        eligible += 1
+        if len(text_items) >= max_files:
             continue
         try:
             normalized = normalized_text_for_duplicate_candidate(Path(candidate.path), max_text_bytes=max_text_bytes)
@@ -2035,8 +2400,15 @@ def build_fuzzy_text_duplicate_groups(
                 },
             }
         )
-        if len(groups) >= 50:
-            break
+    if stats is not None:
+        stats.update(
+            {
+                "eligible_text_file_count": eligible,
+                "compared_text_file_count": len(text_items),
+                "max_files": max_files,
+                "truncated": eligible > max_files,
+            }
+        )
     return groups
 
 

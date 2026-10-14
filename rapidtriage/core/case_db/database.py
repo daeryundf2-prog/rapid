@@ -115,6 +115,7 @@ from .schema import (
     assert_supported_existing_schema_version,
     ensure_case_exists,
     get_schema_version,
+    insert_document_trigram_row,
     list_tables,
 )
 from .search import (
@@ -162,6 +163,7 @@ def recorded_candidate_hashes(row: Mapping[str, object]) -> dict[str, str]:
 # transaction (bounded journal/page-cache growth; a failure keeps the rows
 # committed so far).
 IMPORT_COMMIT_INTERVAL = 20000
+CASE_SEARCH_STABLE_WINDOW = 500
 
 
 def commit_periodically(connection: sqlite3.Connection, count: int, citations: CitationAllocator) -> None:
@@ -240,6 +242,11 @@ class CaseDatabase:
         deletes and rebuilds, never a case DB an examiner relies on."""
         self.path = path.expanduser().resolve()
         self.bulk_load = bulk_load
+        # Link maps filled by an import (reset per ``import_run_outputs``) so
+        # the ``_import_*`` steps also work when called on their own.
+        self._file_ids: dict[str, int] = {}
+        self._artifact_ids: dict[tuple[str, int], int] = {}
+        self._hash_record_count = 0
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -507,6 +514,11 @@ class CaseDatabase:
             self.create_case(case_id=case_id, name=case_name, case_root=case_root)
 
         evidence_source_id = self._insert_evidence_source(case_id, summary, hash_source=hash_files)
+        # Parser-quality r1: rows link to each other (file_record <- artifact /
+        # indexed_document / event, artifact <- event) through these maps.
+        self._file_ids = {}
+        self._artifact_ids = {}
+        self._hash_record_count = 0
         counts = {
             "evidence_source_count": 1,
             "file_record_count": self._import_files(case_id, evidence_source_id, outputs, hash_files=hash_files),
@@ -515,6 +527,8 @@ class CaseDatabase:
             "indicator_count": self._import_indicators(case_id, evidence_source_id, outputs),
             "event_count": self._import_timeline(case_id, evidence_source_id, outputs),
         }
+        counts["hash_record_count"] = self._hash_record_count
+        counts.update(self._link_counts(case_id))
         audit_id = self.add_audit_event(
             case_id=case_id,
             action="run.imported",
@@ -649,8 +663,12 @@ class CaseDatabase:
         page_offset = decode_case_search_cursor(cursor, expected_scope=cursor_scope) if cursor else 0
         page_size = max(0, int(limit))
         retrieval_limit = page_offset + page_size + 1 if page_size else 0
-        query_limit = retrieval_limit or limit
-        scan_candidate_limit = case_search_scan_candidate_limit(query_limit)
+        # Matches are re-ranked by review priority across sources, so every
+        # page must be cut from the same candidate pool: fetch at least a
+        # fixed window per source (a per-page limit made page 2 re-rank a
+        # different pool and repeat page 1's row).
+        query_limit = max(retrieval_limit, CASE_SEARCH_STABLE_WINDOW) if retrieval_limit else limit
+        scan_candidate_limit = case_search_scan_candidate_limit(retrieval_limit or limit)
         with self.connect() as connection:
             apply_schema(connection)
             if connection.execute("SELECT 1 FROM case_record WHERE case_id = ?", (normalized_case_id,)).fetchone() is None:
@@ -1591,14 +1609,16 @@ class CaseDatabase:
                 hashes = hash_existing_file(path) if hash_files else recorded_candidate_hashes(row)
                 recovery = recovery_record_from_payload(row)
                 candidate_kind = str(recovery.get("candidate_kind") or "")
+                times = file_record_times(row)
+                deleted = row.get("is_deleted") is True or is_deleted_candidate_kind(candidate_kind)
                 cursor = connection.execute(
                     """
                     INSERT INTO file_record (
                         citation_id, case_id, evidence_source_id, path, normalized_path, extension,
-                        size_bytes, modified_at, hash_md5, hash_sha1, hash_sha256,
-                        is_deleted, is_recovered, source_offset
+                        mime_type, size_bytes, created_at, modified_at, accessed_at, changed_at,
+                        hash_md5, hash_sha1, hash_sha256, is_deleted, is_recovered, source_offset
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         citations.next(),
@@ -1607,16 +1627,40 @@ class CaseDatabase:
                         path,
                         normalize_path_for_db(path),
                         str(row.get("extension") or ""),
+                        file_record_mime_type(row),
                         optional_int(row.get("size")),
-                        optional_str(row.get("modified_at")),
+                        times["created_at"],
+                        times["modified_at"],
+                        times["accessed_at"],
+                        times["changed_at"],
                         hashes.get("md5"),
                         hashes.get("sha1"),
                         hashes.get("sha256"),
-                        1 if is_deleted_candidate_kind(candidate_kind) else 0,
+                        1 if deleted else 0,
                         1 if is_recovered_candidate_kind(candidate_kind) else 0,
                         optional_int(recovery.get("source_offset")),
                     ),
                 )
+                file_id = int(cursor.lastrowid)
+                self._file_ids.setdefault(normalize_path_for_db(path), file_id)
+                for algorithm, value in hashes.items():
+                    connection.execute(
+                        """
+                        INSERT INTO hash_record (
+                            citation_id, case_id, target_type, target_id, hash_scope, algorithm, value, calculated_at
+                        )
+                        VALUES (?, ?, 'file_record', ?, 'file-content', ?, ?, ?)
+                        """,
+                        (
+                            next_citation_id_for_connection(connection, case_id, "hash"),
+                            case_id,
+                            str(file_id),
+                            algorithm,
+                            value,
+                            now_iso(),
+                        ),
+                    )
+                    self._hash_record_count += 1
                 sync_fts_row_nfc(
                     connection,
                     "file_record_fts",
@@ -1659,15 +1703,16 @@ class CaseDatabase:
                 cursor = connection.execute(
                     """
                     INSERT INTO indexed_document (
-                        citation_id, case_id, evidence_source_id, source_type, field_name,
+                        citation_id, case_id, evidence_source_id, file_record_id, source_type, field_name,
                         title, body, language, indexed_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         citations.next(),
                         case_id,
                         evidence_source_id,
+                        self._file_id_for(str(path)),
                         "document",
                         kind,
                         title,
@@ -1680,6 +1725,7 @@ class CaseDatabase:
                     "INSERT INTO indexed_document_fts(rowid, title, body) VALUES (?, ?, ?)",
                     (int(cursor.lastrowid), title, body),
                 )
+                insert_document_trigram_row(connection, int(cursor.lastrowid), title, body)
                 if extraction_error:
                     connection.execute(
                         """
@@ -1736,15 +1782,16 @@ class CaseDatabase:
                     cursor = connection.execute(
                         """
                         INSERT INTO artifact (
-                            citation_id, case_id, evidence_source_id, artifact_type, parser_name,
+                            citation_id, case_id, evidence_source_id, file_record_id, artifact_type, parser_name,
                             parser_version, title, summary, data_json, confidence, created_at
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             citations.next(),
                             case_id,
                             evidence_source_id,
+                            self._file_id_for(str(row.get("path") or details.get("source_path") or "")),
                             artifact_type,
                             str(details.get("parser") or row.get("provider") or name),
                             str(details.get("parser_version") or ""),
@@ -1756,9 +1803,30 @@ class CaseDatabase:
                         ),
                     )
                     sync_artifact_fts_nfc(connection, int(cursor.lastrowid), title, summary, data_json)
+                    self._artifact_ids[(name, int(row_index))] = int(cursor.lastrowid)
                     count += 1
                     commit_periodically(connection, count, citations)
         return count
+
+    def _file_id_for(self, path: str) -> int | None:
+        if not path:
+            return None
+        return self._file_ids.get(normalize_path_for_db(path))
+
+    def _link_counts(self, case_id: str) -> dict[str, int]:
+        with self.connect() as connection:
+            def count(sql: str) -> int:
+                row = connection.execute(sql, (case_id,)).fetchone()
+                return int(row[0]) if row else 0
+
+            return {
+                "event_with_artifact_id_count": count("SELECT count(*) FROM event WHERE case_id = ? AND artifact_id IS NOT NULL"),
+                "event_with_file_record_id_count": count("SELECT count(*) FROM event WHERE case_id = ? AND file_record_id IS NOT NULL"),
+                "artifact_with_file_record_id_count": count("SELECT count(*) FROM artifact WHERE case_id = ? AND file_record_id IS NOT NULL"),
+                "indexed_document_with_file_record_id_count": count(
+                    "SELECT count(*) FROM indexed_document WHERE case_id = ? AND file_record_id IS NOT NULL"
+                ),
+            }
 
     def _import_timeline(self, case_id: str, evidence_source_id: int, outputs: Mapping[str, object]) -> int:
         rows = iter_output_member(outputs, "timeline", "events")
@@ -1770,21 +1838,35 @@ class CaseDatabase:
                 timestamp = str(row.get("timestamp") or "")
                 if not timestamp:
                     continue
+                details = row.get("details") if isinstance(row.get("details"), Mapping) else {}
+                source_record = details.get("source_record") if isinstance(details.get("source_record"), Mapping) else {}
+                artifact_id = None
+                if source_record.get("output") and source_record.get("row_index") is not None:
+                    artifact_id = self._artifact_ids.get(
+                        (str(source_record.get("output")), int(source_record.get("row_index") or 0))
+                    )
+                event_path = str(row.get("path") or "")
+                file_record_id = self._file_id_for(event_path) or self._file_id_for(
+                    str(details.get("target_path") or details.get("source_path") or "")
+                )
                 cursor = connection.execute(
                     """
                     INSERT INTO event (
-                        citation_id, case_id, evidence_source_id, event_type, timestamp,
-                        timestamp_kind, action, target, description, source, confidence
+                        citation_id, case_id, evidence_source_id, artifact_id, file_record_id, event_type, timestamp,
+                        timestamp_kind, timezone, action, target, description, source, confidence
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         citations.next(),
                         case_id,
                         evidence_source_id,
+                        artifact_id,
+                        file_record_id,
                         str(row.get("event_type") or ""),
                         timestamp,
                         str(row.get("timestamp_kind") or ""),
+                        str(row.get("timezone") or ""),
                         str(row.get("event_type") or ""),
                         str(row.get("path") or ""),
                         str(row.get("summary") or ""),
@@ -1995,6 +2077,7 @@ class CaseDatabase:
                     "INSERT INTO indexed_document_fts(rowid, title, body) VALUES (?, ?, ?)",
                     (int(doc_cursor.lastrowid), normalize_nfc(title), index_body),
                 )
+                insert_document_trigram_row(connection, int(doc_cursor.lastrowid), normalize_nfc(title), index_body)
                 artifact_count += 1
                 indexed_document_count += 1
         return {
@@ -2099,6 +2182,49 @@ def review_changed_fields(previous_review: Mapping[str, object], current_review:
         for field in tracked
         if previous_review.get(field) != current_review.get(field)
     ]
+
+
+_FILE_TIME_ORIGINS_WITH_EVIDENCE_TIMES = {"filesystem", "listing"}
+
+
+def file_record_times(row: Mapping[str, object]) -> dict[str, str | None]:
+    """Filesystem times of a files.json candidate (never acquisition-copy times).
+
+    ``fs_*`` win; a legacy candidate without provenance keeps ``modified_at``;
+    an acquisition copy's host time stays out of ``file_record``.
+    """
+    origin = str(row.get("modified_at_origin") or "")
+    legacy = "modified_at_origin" not in row and "time_origin" not in row
+    modified = row.get("fs_modified_at")
+    if not modified and (legacy or origin in _FILE_TIME_ORIGINS_WITH_EVIDENCE_TIMES):
+        modified = row.get("modified_at")
+    return {
+        "created_at": optional_str(row.get("fs_created_at")),
+        "modified_at": optional_str(modified),
+        "accessed_at": optional_str(row.get("fs_accessed_at")),
+        "changed_at": optional_str(row.get("fs_changed_at")),
+    }
+
+
+def file_record_mime_type(row: Mapping[str, object]) -> str:
+    import mimetypes
+
+    signature = row.get("file_signature") if isinstance(row.get("file_signature"), Mapping) else {}
+    detected = str(signature.get("detected") or "")
+    by_signature = {
+        "pdf": "application/pdf",
+        "jpeg": "image/jpeg",
+        "png": "image/png",
+        "gif": "image/gif",
+        "windows-pe": "application/vnd.microsoft.portable-executable",
+        "ole-cfb": "application/x-ole-storage",
+        "zip-ooxml": "application/zip",
+        "sqlite": "application/vnd.sqlite3",
+    }
+    if detected in by_signature:
+        return by_signature[detected]
+    guessed, _encoding = mimetypes.guess_type(str(row.get("name") or row.get("path") or ""), strict=False)
+    return guessed or ""
 
 
 def open_case_database(path: Path) -> CaseDatabase:

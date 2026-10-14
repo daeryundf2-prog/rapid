@@ -23,6 +23,16 @@
     "command": {
       "const": "run"
     },
+    "warnings": {
+      "type": "array",
+      "description": "Every step warning (caps/truncations, silent-failure verdicts, skipped providers); same rows as processing.warnings.",
+      "items": {"type": "object", "additionalProperties": true}
+    },
+    "disclosures": {
+      "type": "object",
+      "description": "Report-facing limits: time origin, timezone, registry context, missing tools, caps, exclusions (parser-quality r1).",
+      "additionalProperties": true
+    },
     "mode": {
       "enum": [
         "seizure",
@@ -1004,6 +1014,9 @@
               "type": "integer"
             },
             "indicators": {
+              "type": "integer"
+            },
+            "document_candidates": {
               "type": "integer"
             }
           }

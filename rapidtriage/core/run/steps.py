@@ -10,9 +10,12 @@ from ..extract import extract_manifest_disabled
 
 __all__ = [
     "annotate_step",
+    "apply_cap_disclosures",
+    "apply_silent_failure_verdicts",
     "build_extract_step",
     "build_silent_failure_step",
     "build_step_rows",
+    "collect_cap_disclosures",
     "count_skip_reasons",
     "docs_index_warning_level",
     "docs_index_warning_messages",
@@ -106,25 +109,40 @@ def build_step_rows(
     ]
     for kind, payload in artifact_payloads.items():
         artifact_count = artifact_count_by_kind[kind]
-        parser_error_count = int(payload.get("summary", {}).get("parser_error_count", 0))
-        rows.append(
-            mark_reused_step(
-                annotate_step(
-                {
-                    "name": f"artifacts-{kind}",
-                    "status": "failed_isolated" if parser_error_count else "completed",
-                    "output": str(outputs[f"artifacts_{kind}"]),
-                    "artifact_count": artifact_count,
-                    "parser_error_count": parser_error_count,
-                },
-                warning_level="failed" if parser_error_count else ("notice" if artifact_count == 0 else "none"),
-                warning_messages=[f"{kind} parser reported {parser_error_count} isolated error(s)."]
-                if parser_error_count
-                else ([f"No {kind} artifact rows were collected."] if artifact_count == 0 else []),
-                ),
-                reused_outputs,
-            )
-        )
+        kind_summary = payload.get("summary", {}) if isinstance(payload.get("summary"), Mapping) else {}
+        parser_error_count = int(kind_summary.get("parser_error_count", 0))
+        skipped = str(kind_summary.get("collection_status") or "") == "skipped"
+        notes = [str(item) for item in kind_summary.get("collection_notes") or [] if str(item)]
+        skip_reasons = kind_summary.get("skip_reasons") if isinstance(kind_summary.get("skip_reasons"), Mapping) else {}
+        messages: list[str]
+        if parser_error_count:
+            level = "failed"
+            messages = [f"{kind} parser reported {parser_error_count} isolated error(s)."]
+        elif skipped:
+            level = "notice"
+            reasons = ", ".join(f"{reason} ({count})" for reason, count in skip_reasons.items()) or "의존성 없음"
+            messages = [f"{kind} 수집 건너뜀: {reasons}"]
+        elif artifact_count == 0:
+            level = "notice"
+            messages = [f"No {kind} artifact rows were collected."]
+        else:
+            level = "none"
+            messages = []
+        messages.extend(f"{kind}: {note}" for note in notes)
+        if notes and level == "none":
+            level = "notice"
+        row = {
+            "name": f"artifacts-{kind}",
+            "status": "failed_isolated" if parser_error_count else ("skipped" if skipped else "completed"),
+            "output": str(outputs[f"artifacts_{kind}"]),
+            "artifact_count": artifact_count,
+            "parser_error_count": parser_error_count,
+        }
+        if notes:
+            row["collection_notes"] = notes
+        if skip_reasons:
+            row["skip_reasons"] = dict(skip_reasons)
+        rows.append(mark_reused_step(annotate_step(row, warning_level=level, warning_messages=messages), reused_outputs))
     docs_extract_step = build_extract_step(
         "docs-extract",
         outputs["docs_extract_manifest"],
@@ -180,7 +198,104 @@ def build_step_rows(
             ),
         ]
     )
-    return [mark_reused_step(row, reused_outputs) for row in rows]
+    rows = [mark_reused_step(row, reused_outputs) for row in rows]
+    payload_by_step: dict[str, Mapping[str, object]] = {
+        "docs": docs_payload,
+        "files": files_payload,
+        "timeline": timeline_payload,
+        "indicators": indicators_payload,
+        **{f"artifacts-{kind}": payload for kind, payload in artifact_payloads.items()},
+    }
+    apply_cap_disclosures(rows, payload_by_step)
+    return rows
+
+
+# --- cap / truncation disclosure (parser-quality r1) -------------------------
+
+_CAP_SCAN_MAX_DEPTH = 4
+# Keys that are row arrays (large) or per-row data: never walked for flags.
+_CAP_SCAN_SKIP_KEYS = frozenset(
+    {"artifacts", "candidates", "results", "events", "indicators", "entries", "skipped", "ioc_scanner_hits", "artifact_type_profiles"}
+)
+
+
+def collect_cap_disclosures(payload: Mapping[str, object]) -> list[str]:
+    """Dotted paths of every ``*_truncated``/``truncated`` flag set, partial
+    collection status and disclosed cap in a stage payload (not its rows)."""
+    found: list[str] = []
+
+    def walk(value: object, path: str, depth: int) -> None:
+        if depth > _CAP_SCAN_MAX_DEPTH or not isinstance(value, Mapping):
+            return
+        for key, item in value.items():
+            name = str(key)
+            if name in _CAP_SCAN_SKIP_KEYS:
+                continue
+            dotted = f"{path}.{name}" if path else name
+            if (name == "truncated" or name.endswith("_truncated") or name == "limit_reached") and item is True:
+                found.append(dotted)
+            elif name == "collection_status" and item == "partial":
+                found.append(f"{dotted}=partial")
+            elif isinstance(item, Mapping):
+                walk(item, dotted, depth + 1)
+
+    walk(payload, "", 0)
+    return sorted(set(found))
+
+
+def apply_cap_disclosures(rows: list[dict[str, object]], payload_by_step: Mapping[str, Mapping[str, object]]) -> None:
+    """Promote every disclosed cap/truncation to ``warning_level=warning``."""
+    for row in rows:
+        payload = payload_by_step.get(str(row.get("name") or ""))
+        if not isinstance(payload, Mapping):
+            continue
+        caps = collect_cap_disclosures(payload)
+        if not caps:
+            continue
+        row["cap_disclosures"] = caps
+        row["truncated"] = True
+        messages = row.setdefault("warning_messages", [])
+        if isinstance(messages, list):
+            shown = ", ".join(caps[:6]) + (f" 외 {len(caps) - 6}건" if len(caps) > 6 else "")
+            messages.append(f"상한/절단 적용 — 결과가 전수가 아님: {shown}")
+        row["warning_level"] = highest_warning_level([str(row.get("warning_level") or "none"), "warning"])
+
+
+_SILENT_CHECK_STEPS: tuple[tuple[str, str], ...] = (
+    ("artifact-yield-", "artifacts-"),
+    ("parser-errors-", "artifacts-"),
+    ("files-scanned", "files"),
+    ("documents-indexed", "docs"),
+    ("keyword-search-yield", "docs"),
+    ("timeline-yield", "timeline"),
+    ("docs-extract-yield", "docs-extract"),
+    ("files-extract-yield", "files-extract"),
+    ("target-inventory-truncated", "silent-failure-detector"),
+)
+
+
+def apply_silent_failure_verdicts(rows: list[dict[str, object]], report: Mapping[str, object]) -> None:
+    """Copy warning/failed silent-failure checks onto the step they concern."""
+    by_name = {str(row.get("name") or ""): row for row in rows}
+    checks = report.get("checks") if isinstance(report.get("checks"), list) else []
+    for check in checks:
+        if not isinstance(check, Mapping) or check.get("level") not in {"warning", "failed"}:
+            continue
+        check_id = str(check.get("id") or "")
+        step_name = ""
+        for prefix, target in _SILENT_CHECK_STEPS:
+            if check_id.startswith(prefix):
+                step_name = target + check_id[len(prefix) :] if target.endswith("-") else target
+                break
+        row = by_name.get(step_name)
+        if row is None:
+            continue
+        message = f"무응답 실패 점검 {check_id} [{check.get('level')}]: {check.get('message')} ({check.get('detail')})"
+        messages = row.setdefault("warning_messages", [])
+        if isinstance(messages, list) and message not in messages:
+            messages.append(message)
+        row.setdefault("silent_failure_checks", []).append(check_id)  # type: ignore[union-attr]
+        row["warning_level"] = highest_warning_level([str(row.get("warning_level") or "none"), str(check.get("level"))])
 
 
 def build_silent_failure_step(report: Mapping[str, object]) -> dict[str, object]:

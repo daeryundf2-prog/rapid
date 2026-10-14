@@ -75,9 +75,22 @@ def remove_case_db_files(db_path: Path) -> None:
 
 
 def run_case_id(output_dir: Path) -> str:
-    """Deterministic case id for a run-local case DB (from the output dir name)."""
+    """Deterministic case id for a run-local case DB (from the output dir name).
+
+    One ``run-`` prefix only: ``run-subset7`` stays ``run-subset7`` (it was
+    ``run-run-subset7``). :func:`legacy_run_case_ids` lists the older form so
+    readers can still find a DB built before the change.
+    """
     slug = re.sub(r"[^a-z0-9]+", "-", output_dir.name.lower()).strip("-")
-    return f"run-{slug}" if slug else "run"
+    if not slug or slug == "run":
+        return "run"
+    return slug if slug.startswith("run-") else f"run-{slug}"
+
+
+def legacy_run_case_ids(output_dir: Path) -> list[str]:
+    slug = re.sub(r"[^a-z0-9]+", "-", output_dir.name.lower()).strip("-")
+    legacy = f"run-{slug}" if slug else "run"
+    return [legacy] if legacy != run_case_id(output_dir) else []
 
 
 def build_run_case_db(

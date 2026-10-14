@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 
 from ..reporting import (
@@ -14,6 +15,8 @@ __all__ = [
     "append_extract_rows",
     "append_related_document_rows",
     "append_timeline_rows",
+    "apply_report_disclosures",
+    "build_disclosure_section",
     "build_key_hit_rows",
     "build_markdown_report",
 ]
@@ -40,7 +43,102 @@ def build_markdown_report(
         timeline_payload=timeline_payload,
         indicators_payload=indicators_payload,
     )
-    return render_run_markdown_report(report_context)
+    return apply_report_disclosures(render_run_markdown_report(report_context), summary_payload)
+
+
+_DOC_MATCH_LINE_RE = re.compile(r"^- Document matches: (\d+)$", re.MULTILINE)
+
+
+def apply_report_disclosures(markdown: str, summary_payload: Mapping[str, object]) -> str:
+    """Insert the parser-quality disclosure section and demote "Document matches".
+
+    The keyword-hit count is not a headline: the overview shows document
+    candidates and how many had text, with matches as a detail.
+    """
+    disclosures = summary_payload.get("disclosures") if isinstance(summary_payload.get("disclosures"), Mapping) else {}
+    documents = disclosures.get("documents") if isinstance(disclosures.get("documents"), Mapping) else {}
+
+    def doc_line(match: re.Match[str]) -> str:
+        return (
+            f"- 문서 후보: {documents.get('candidate_count', '?')}"
+            f" (텍스트 추출 {documents.get('indexed_with_text_count', '?')}, 암호화 {documents.get('encrypted_count', '?')},"
+            f" 키워드 일치 {match.group(1)})"
+        )
+
+    markdown = _DOC_MATCH_LINE_RE.sub(doc_line, markdown, count=1)
+    markdown = _DOC_MATCH_LINE_RE.sub(lambda match: f"- 문서 키워드 일치(후보 중): {match.group(1)}", markdown)
+    markdown = markdown.replace("Deep - uncapped extraction", "Deep - extraction without size limits")
+    section = build_disclosure_section(disclosures)
+    anchor = "\n## Mode profile"
+    if anchor in markdown:
+        return markdown.replace(anchor, "\n" + section + anchor, 1)
+    return markdown.rstrip("\n") + "\n\n" + section
+
+
+def build_disclosure_section(disclosures: Mapping[str, object]) -> str:
+    lines = ["## 처리 한계·공개 사항 / Disclosures", ""]
+    timezone = disclosures.get("timezone") if isinstance(disclosures.get("timezone"), Mapping) else {}
+    evidence_tz = timezone.get("evidence_timezone") if isinstance(timezone, Mapping) else None
+    lines.append("- 시각 저장 기준: UTC (ISO 8601, +00:00)")
+    if isinstance(evidence_tz, Mapping) and evidence_tz:
+        lines.append(
+            f"- 증거 시스템 시간대: `{evidence_tz.get('name') or evidence_tz.get('label')}`"
+            f" (UTC 오프셋 {evidence_tz.get('utc_offset') or evidence_tz.get('bias_minutes')}, 레지스트리 TimeZoneInformation)"
+        )
+    else:
+        lines.append("- 증거 시스템 시간대: 레지스트리에서 확인되지 않음")
+    note = str(disclosures.get("acquisition_copy_note") or "")
+    if note:
+        lines.append(f"- 취득 사본 시각: {note}")
+    registry = disclosures.get("registry_context") if isinstance(disclosures.get("registry_context"), Mapping) else {}
+    labels = {
+        "computer_name": "컴퓨터 이름",
+        "os_version": "OS 버전",
+        "current_control_set": "현재 ControlSet",
+        "last_shutdown_at": "마지막 종료 시각",
+        "transaction_log_disclosures": "하이브 트랜잭션 로그",
+        "cap_disclosure": "레지스트리 상한",
+    }
+    for key, label in labels.items():
+        if registry.get(key) not in (None, "", [], {}):
+            lines.append(f"- {label}: `{registry.get(key)}`")
+    tools = disclosures.get("missing_tools") if isinstance(disclosures.get("missing_tools"), Mapping) else {}
+    missing = [f"{name} — {info.get('note')}" for name, info in tools.items() if isinstance(info, Mapping) and not info.get("available")]
+    lines.append("- 누락 도구: " + ("; ".join(missing) if missing else "없음"))
+    caps = disclosures.get("caps") if isinstance(disclosures.get("caps"), Mapping) else {}
+    if caps:
+        lines.append("- 상한/절단 적용 단계 (결과가 전수가 아님):")
+        for step, flags in caps.items():
+            shown = ", ".join(str(item) for item in list(flags)[:8])
+            lines.append(f"  - `{step}`: {shown}")
+    else:
+        lines.append("- 상한/절단 적용 단계: 없음")
+    excluded = disclosures.get("timeline_excluded") if isinstance(disclosures.get("timeline_excluded"), Mapping) else {}
+    if excluded:
+        lines.append(
+            f"- 타임라인 제외: 범위 밖 시각 {excluded.get('out_of_range', 0)}건, 중복 {excluded.get('duplicates', 0)}건,"
+            f" 사본 시각만 있는 파일 {excluded.get('copy_time_candidates', 0)}건"
+        )
+    indicators = disclosures.get("indicators") if isinstance(disclosures.get("indicators"), Mapping) else {}
+    if indicators:
+        lines.append(
+            f"- {indicators.get('display_label') or '지표'}: {indicators.get('rule_status_message') or ''}"
+            f" (상한 전 {indicators.get('total_before_cap')}건, 절단 {bool(indicators.get('truncated'))})"
+        )
+    files = disclosures.get("files") if isinstance(disclosures.get("files"), Mapping) else {}
+    if files.get("excluded_file_count"):
+        lines.append(
+            f"- 파일 후보 제외: {files.get('excluded_file_count')}건 (사유 {dict(files.get('exclusion_reason_counts') or {})},"
+            f" 범주 {dict(files.get('excluded_category_counts') or {})})"
+        )
+    documents = disclosures.get("documents") if isinstance(disclosures.get("documents"), Mapping) else {}
+    if documents.get("text_status_counts"):
+        lines.append(f"- 문서 텍스트 추출 상태: {dict(documents.get('text_status_counts') or {})}")
+    notes = disclosures.get("collection_notes") if isinstance(disclosures.get("collection_notes"), Mapping) else {}
+    for kind, items in notes.items():
+        lines.append(f"- `{kind}` 수집 메모: {'; '.join(str(item) for item in items)}")
+    lines.append("")
+    return "\n".join(lines)
 
 
 def build_key_hit_rows(

@@ -10,6 +10,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from ..forensic_accuracy import build_accuracy_gate
+from ..textnorm import normalize_nfc
 from .base import (
     CaseDatabaseError,
 )
@@ -32,6 +33,7 @@ from .helpers import (
     optional_int,
     optional_str,
     parse_json_object,
+    quote_fts_token,
     stable_payload_sha256,
 )
 from .review import (
@@ -39,6 +41,7 @@ from .review import (
     review_mark_to_dict,
     source_citation_package_hash,
 )
+from .schema import DOCUMENT_TRIGRAM_TABLE, document_trigram_available
 
 __all__ = [
     "artifact_fts_has_rows",
@@ -77,6 +80,25 @@ def search_indexed_documents(
     keywords: list[str],
     limit: int,
 ) -> list[dict[str, object]]:
+    """Document hits: trigram substring index for 3+ character keywords (Korean
+    particles attached), unicode61 prefix terms for shorter ones."""
+    if document_trigram_available(connection):
+        long_terms = [keyword for keyword in keywords if len(normalize_nfc(keyword.strip())) >= 3]
+        short_terms = [keyword for keyword in keywords if keyword not in long_terms]
+        results: list[dict[str, object]] = []
+        seen: set[str] = set()
+        if long_terms:
+            for row in _document_rows(connection, case_id, DOCUMENT_TRIGRAM_TABLE, build_fts_query(long_terms), limit):
+                if row["target_id"] not in seen:
+                    seen.add(str(row["target_id"]))
+                    results.append(_document_match(row, keywords))
+        if short_terms:
+            prefix_query = " OR ".join(f"{quote_fts_token(keyword)}*" for keyword in short_terms)
+            for row in _document_rows(connection, case_id, "indexed_document_fts", prefix_query, limit):
+                if row["target_id"] not in seen:
+                    seen.add(str(row["target_id"]))
+                    results.append(_document_match(row, keywords))
+        return results[:limit] if limit else results
     query = build_fts_query(keywords)
     rows = connection.execute(
         """
@@ -109,6 +131,56 @@ def search_indexed_documents(
         }
         for row in rows
     ]
+
+
+def _document_rows(
+    connection: sqlite3.Connection,
+    case_id: str,
+    fts_table: str,
+    query: str,
+    limit: int,
+) -> list[dict[str, object]]:
+    rows = connection.execute(
+        f"""
+        SELECT
+            indexed_document.citation_id,
+            indexed_document.id,
+            indexed_document.source_type,
+            indexed_document.field_name,
+            indexed_document.title,
+            snippet({fts_table}, 1, '[', ']', ' ... ', 16) AS snippet
+        FROM {fts_table}
+        JOIN indexed_document ON {fts_table}.rowid = indexed_document.id
+        WHERE indexed_document.case_id = ?
+          AND {fts_table} MATCH ?
+        ORDER BY rank
+        LIMIT ?
+        """,
+        (case_id, query, limit or -1),
+    ).fetchall()
+    return [
+        {
+            "citation_id": str(row["citation_id"]),
+            "target_id": str(row["id"]),
+            "title": str(row["title"]),
+            "kind": str(row["field_name"]),
+            "snippet": str(row["snippet"]),
+        }
+        for row in rows
+    ]
+
+
+def _document_match(row: Mapping[str, object], keywords: list[str]) -> dict[str, object]:
+    return {
+        "source": "documents",
+        "citation_id": str(row["citation_id"]),
+        "target_type": "indexed_document",
+        "target_id": str(row["target_id"]),
+        "title": str(row["title"]),
+        "kind": str(row["kind"]),
+        "matched_keywords": matched_keywords(str(row["snippet"]), keywords),
+        "preview": str(row["snippet"]),
+    }
 
 
 def case_document_extraction_errors(

@@ -97,6 +97,63 @@
         },
         "ioc_hit_count": {
           "type": "integer"
+        },
+        "timestamp_kind_counts": {
+          "type": "object"
+        },
+        "timezone": {
+          "type": "object"
+        },
+        "file_time_origin": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "time_policy": {
+          "type": "object"
+        },
+        "out_of_range_excluded_count": {
+          "type": "integer"
+        },
+        "out_of_range_reason_counts": {
+          "type": "object"
+        },
+        "out_of_range_by_event_type": {
+          "type": "object"
+        },
+        "out_of_range_samples": {
+          "type": "array"
+        },
+        "unparseable_timestamp_count": {
+          "type": "integer"
+        },
+        "unparseable_by_field": {
+          "type": "object"
+        },
+        "duplicate_events_removed": {
+          "type": "integer"
+        },
+        "duplicate_events_by_type": {
+          "type": "object"
+        },
+        "eventlog_detections_merged": {
+          "type": "integer"
+        },
+        "unmapped_artifact_type_counts": {
+          "type": "object"
+        },
+        "excluded_artifact_type_counts": {
+          "type": "object"
+        },
+        "acquisition_copy_time_candidates_not_emitted": {
+          "type": "integer"
+        },
+        "legacy_file_time_events": {
+          "type": "integer"
+        },
+        "valid_range": {
+          "type": "object"
         }
       }
     },
@@ -172,6 +229,24 @@
                 }
               }
             }
+          },
+          "timestamp_kind": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "timezone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "record_key": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       }

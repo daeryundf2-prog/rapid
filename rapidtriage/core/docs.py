@@ -7,6 +7,7 @@ import json
 import os
 import platform
 import re
+import struct
 import zipfile
 import zlib
 from collections import Counter
@@ -19,7 +20,21 @@ from typing import Protocol
 from xml.etree import ElementTree as ET
 
 from ..artifacts import all_providers, collect_cached
-from .files import RUN_OUTPUT_DIR_PREFIX
+from .doc_text import (
+    OLE_SIGNATURE,
+    DocumentText,
+    TextTooLarge,
+    extract_doc_text,
+    extract_hwp_text,
+    extract_hwpx_text,
+    extract_pdf_document_text,
+    extract_ppt_text,
+    extract_xls_text,
+)
+from .doc_text import (
+    finalize as finalize_document_text,
+)
+from .files import RUN_OUTPUT_DIR_PREFIX, file_time_origin_for_input_kind
 from .input_root import InputRoot, resolve_input_root
 from .json_safe import json_default
 from .models import DocumentCandidate, DocumentMatch
@@ -28,10 +43,17 @@ from .safe_xml import safe_xml_fromstring
 from .textnorm import locate_normalized, normalize_nfc, normalize_search_text
 
 SUPPORTED_DOC_EXTS = {
+    ".cell",
     ".cfg",
     ".conf",
     ".csv",
+    ".doc",
     ".docx",
+    ".hwp",
+    ".hwpx",
+    ".show",
+    ".xls",
+    ".ppt",
     ".eml",
     ".htm",
     ".html",
@@ -74,6 +96,15 @@ TEXT_EXTS = {
 }
 HTML_EXTS = {"htm", "html"}
 OFFICE_OPEN_XML_EXTS = {"docx", "pptx", "xlsx"}
+# Hancom Office 2014+ .cell/.show are OOXML containers (older ones are OLE).
+HANCOM_OOXML_KINDS = {"cell": "xlsx", "show": "pptx"}
+NATIVE_BINARY_EXTRACTORS = {
+    "hwp": extract_hwp_text,
+    "hwpx": extract_hwpx_text,
+    "doc": extract_doc_text,
+    "xls": extract_xls_text,
+    "ppt": extract_ppt_text,
+}
 OPEN_DOCUMENT_EXTS = {"odp", "ods", "odt"}
 DOCS_INDEX_TOKEN_PATTERN = re.compile(r"[\w@./:-]{2,}", flags=re.UNICODE)
 # v2: index terms are NFC + casefold (v1 used str.lower(), so NFD text indexed
@@ -86,8 +117,8 @@ MAX_ZIP_TEXT_MEMBER_COUNT = 2_000
 MAX_PDF_STREAM_DECOMPRESSED_BYTES = 10_000_000
 
 
-class TextExtractionTooLarge(ValueError):
-    pass
+# One exception type for docs.py and the native extractors (doc_text).
+TextExtractionTooLarge = TextTooLarge
 BOUNDED_MAIL_CONTAINER_SCAN_LIMIT = 2 * 1024 * 1024
 MANIFEST_COLLECT_MAX_WORKERS = 8
 
@@ -102,6 +133,7 @@ class ManifestProgress(Protocol):
 
 def scan_document_candidates(root: InputRoot | Path, limit: int = 0) -> list[DocumentCandidate]:
     input_root = resolve_input_root(root)
+    origin = file_time_origin_for_input_kind(input_root.kind)
     candidates: list[DocumentCandidate] = []
     for dirpath, dirnames, files in os.walk(input_root.root_path):
         dirnames[:] = [name for name in dirnames if not name.startswith(RUN_OUTPUT_DIR_PREFIX)]
@@ -120,6 +152,7 @@ def scan_document_candidates(root: InputRoot | Path, limit: int = 0) -> list[Doc
                     kind=suffix.lstrip("."),
                     size=stat.st_size,
                     modified_at=dt.datetime.fromtimestamp(stat.st_mtime, tz=dt.timezone.utc).isoformat(),
+                    modified_at_origin=origin,
                 )
             )
             if limit and len(candidates) >= limit:
@@ -337,27 +370,43 @@ def run_docs_search(
     matches: list[DocumentMatch] = []
     text_by_path: dict[str, str] = {}
     extraction_errors: list[dict[str, object]] = []
+    status_counts: Counter[str] = Counter()
+    method_counts: Counter[str] = Counter()
     for candidate in candidates:
         extraction_error = ""
         try:
-            text = extract_text(Path(candidate.path), candidate.kind)
+            result = extract_document_text(Path(candidate.path), candidate.kind)
         except TextExtractionTooLarge as exc:
-            text = ""
+            result = DocumentText("", status="too-large", reason=f"{exc}")
             extraction_error = f"{type(exc).__name__}: {exc}"
             extraction_errors.append(
                 document_extraction_error(candidate, "input-too-large", exc, recoverable=True)
             )
-        except (OSError, UnicodeError, zipfile.BadZipFile, ET.ParseError, ValueError) as exc:
-            text = ""
+        except (OSError, UnicodeError, zipfile.BadZipFile, ET.ParseError, ValueError, struct.error, IndexError, KeyError) as exc:
+            result = DocumentText("", status="error", reason=f"{type(exc).__name__}: {exc}")
             extraction_error = f"{type(exc).__name__}: {exc}"
             extraction_errors.append(
                 document_extraction_error(candidate, "text-extraction-failed", exc, recoverable=True)
             )
+        text = result.text
+        candidate.text_status = result.status
+        candidate.extraction_method = result.method
+        candidate.text_length = len(text)
+        candidate.encrypted = result.encrypted
+        candidate.text_reason = result.reason
+        status_counts[result.status] += 1
+        if result.method:
+            method_counts[result.method] += 1
+        if result.status in {"encrypted", "binary-rejected", "unsupported"} and not extraction_error:
+            # Not an exception, but the document was not (fully) indexed: say so.
+            extraction_error = f"{result.status}: {result.reason}"
         text_by_path[candidate.path] = text
         if text_sink is not None:
             text_sink(candidate.path, text, extraction_error)
         haystack = normalize_search_text(text) if normalized else ""
         matched = [keyword for keyword in normalized if keyword in haystack]
+        candidate.matched = bool(matched)
+        candidate.matched_keywords = list(matched)
         if not matched:
             continue
         matches.append(
@@ -377,6 +426,16 @@ def run_docs_search(
             "candidate_count": len(candidates),
             "match_count": len(matches),
             "supported_extensions": sorted(SUPPORTED_DOC_EXTS),
+            "text_status_counts": dict(sorted(status_counts.items())),
+            "extraction_method_counts": dict(sorted(method_counts.items())),
+            "indexed_with_text_count": sum(1 for item in candidates if item.text_length > 0),
+            "encrypted_count": sum(1 for item in candidates if item.encrypted),
+            "zero_text_count": sum(1 for item in candidates if item.text_length == 0),
+            "zero_text_reason_counts": dict(
+                Counter(item.text_reason or item.text_status for item in candidates if item.text_length == 0).most_common(30)
+            ),
+            "ocr_available": False,
+            "listing_contract": "candidates lists every document; matched=true rows are the keyword hits (results)",
         },
         "manifest": build_manifest_summary(
             manifest if manifest is not None else build_manifest(input_root, normalized)
@@ -667,6 +726,42 @@ def write_result(payload: dict[str, object], output: Path, *, indent: int | None
         handle.write("\n")
 
 
+def extract_document_text(
+    path: Path,
+    kind: str,
+    *,
+    max_input_bytes: int = MAX_EXTRACT_TEXT_BYTES,
+) -> DocumentText:
+    """Text plus status (ok/encrypted/no-text/binary-rejected/unsupported).
+
+    Native binary formats (HWP/HWPX/DOC/XLS/PPT, PDF) go through
+    ``core.doc_text``; the other kinds wrap :func:`extract_text`. An OOXML
+    file that is an OLE container is an encrypted Office document.
+    """
+    kind = kind.lower()
+    if max_input_bytes > 0 and path.stat().st_size > max_input_bytes:
+        raise TextExtractionTooLarge(f"{kind} file exceeds text extraction size limit")
+    if kind in NATIVE_BINARY_EXTRACTORS:
+        return NATIVE_BINARY_EXTRACTORS[kind](path)
+    if kind == "pdf":
+        return extract_pdf_document_text(path)
+    if kind in OFFICE_OPEN_XML_EXTS or kind in HANCOM_OOXML_KINDS or kind in OPEN_DOCUMENT_EXTS:
+        with path.open("rb") as handle:
+            head = handle.read(8)
+        if head == OLE_SIGNATURE:
+            if kind in HANCOM_OOXML_KINDS:
+                legacy = extract_xls_text if kind == "cell" else extract_ppt_text
+                return legacy(path)
+            return finalize_document_text("", method="ooxml", encrypted=True, empty_reason="암호화된 Office 문서(OLE EncryptionInfo 컨테이너)")
+        if not head.startswith(b"PK"):
+            return DocumentText("", status="unsupported", method="ooxml", reason="ZIP/OLE 헤더 없음")
+        effective = HANCOM_OOXML_KINDS.get(kind, kind)
+        text = extract_text(path, effective, max_input_bytes=max_input_bytes)
+        return finalize_document_text(text, method=f"{effective}-xml")
+    text = extract_text(path, kind, max_input_bytes=max_input_bytes)
+    return finalize_document_text(text, method=f"{kind}-text")
+
+
 def extract_text(
     path: Path,
     kind: str,
@@ -679,6 +774,10 @@ def extract_text(
 ) -> str:
     if max_input_bytes > 0 and path.stat().st_size > max_input_bytes:
         raise TextExtractionTooLarge(f"{kind} file exceeds text extraction size limit")
+    if kind in NATIVE_BINARY_EXTRACTORS:
+        return NATIVE_BINARY_EXTRACTORS[kind](path).text
+    if kind in HANCOM_OOXML_KINDS:
+        kind = HANCOM_OOXML_KINDS[kind]
     if kind in TEXT_EXTS:
         return path.read_text(encoding="utf-8", errors="ignore")
     if kind == "eml":
@@ -707,6 +806,9 @@ def extract_text(
             max_member_count=max_archive_member_count,
         )
     if kind == "pdf":
+        native = extract_pdf_document_text(path, max_stream_bytes=max_pdf_stream_decompressed_bytes)
+        if native.status in {"ok", "encrypted", "no-text", "binary-rejected"}:
+            return native.text
         return _extract_pdf_text(path, max_stream_decompressed_bytes=max_pdf_stream_decompressed_bytes)
     if kind == "rtf":
         return _extract_rtf_text(path)

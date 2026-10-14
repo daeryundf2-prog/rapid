@@ -49,6 +49,16 @@ class DocumentCandidate:
     kind: str
     size: int
     modified_at: str
+    # Parser-quality r1: extraction outcome per candidate (docs collection
+    # lists every candidate; ``matched`` filters the keyword hits).
+    text_status: str = ""
+    extraction_method: str = ""
+    text_length: int = 0
+    encrypted: bool = False
+    text_reason: str = ""
+    matched: bool = False
+    matched_keywords: list[str] = field(default_factory=list)
+    modified_at_origin: str = ""
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -65,6 +75,24 @@ class FileCandidate:
     categories: list[str]
     reasons: dict[str, list[str]]
     recovery: dict[str, object] = field(default_factory=dict)
+    # Parser-quality r1 (time provenance): ``modified_at`` is the filesystem
+    # time when one is known (``fs_*``), else the host time of the scanned
+    # object with ``modified_at_origin`` saying which. Host times of an
+    # extracted copy are kept as ``source_file_*`` (``time_origin``
+    # "acquisition-copy") and are never timeline events.
+    relative_path: str = ""
+    time_origin: str = ""
+    modified_at_origin: str = ""
+    source_file_mtime: str | None = None
+    source_file_ctime: str | None = None
+    source_file_atime: str | None = None
+    fs_modified_at: str | None = None
+    fs_created_at: str | None = None
+    fs_accessed_at: str | None = None
+    fs_changed_at: str | None = None
+    attributes: list[str] = field(default_factory=list)
+    attributes_origin: str = ""
+    is_deleted: bool | None = None
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)

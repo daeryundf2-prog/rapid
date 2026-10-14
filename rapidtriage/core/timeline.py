@@ -1,15 +1,35 @@
+"""Unified timeline from files/docs/artifact outputs (parser-quality r1).
+
+Events come only from timestamps the evidence itself records, through the
+explicit :data:`TIMELINE_FIELD_MAP` (``artifact_type -> [(field, label)]``).
+Host times of an extracted copy (``files.json`` ``source_file_*``, artifact
+``modified_at``/``timestamp`` taken from ``stat``) are acquisition-copy
+times and never become events. Every event carries a semantic
+``timestamp_kind`` label and ``timezone`` (storage is UTC). Events are
+deduplicated on ``(source record, timestamp, kind)``; values before
+1980-01-01 or after now + 1 day are excluded and counted, not dropped
+silently.
+
+Adding a field is one line in :data:`TIMELINE_FIELD_MAP`. A path is a dotted
+key path; ``name[]`` iterates a list of objects and ``name[*]`` a list of
+timestamps (numbered labels: ``run-1`` ... ``run-8``).
+"""
+
 from __future__ import annotations
 
 import datetime as dt
 import json
+import re
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
+from typing import NamedTuple
 
 from .artifact_profiles import iter_payload_records
 from .artifacts import SUPPORTED_ARTIFACT_KINDS, run_artifact_collection
 from .docs import scan_document_candidates
 from .files import run_files_scan
+from .filetime import MIN_PLAUSIBLE, parse_iso_utc
 from .input_root import resolve_input_root
 from .rules import RuleSet, annotate_timeline_payload
 
@@ -18,16 +38,286 @@ class TimelineError(ValueError):
     """Raised when timeline inputs are missing or invalid."""
 
 
-TIMESTAMP_EVENT_NAMES: dict[str, str] = {
-    "accessed_at": "accessed",
-    "created_at": "created",
-    "ended_at": "ended",
-    "last_visited_at": "last-visited",
-    "modified_at": "modified",
-    "started_at": "started",
-    "timestamp": "observed",
-    "visited_at": "visited",
+class TimelineField(NamedTuple):
+    """One artifact field that is a timeline event.
+
+    ``label`` is the semantic kind (created/modified/accessed/event/run/
+    last-written/visited/...); ``event_type`` overrides the default
+    ``artifact-<type>-<label>``; ``timezone`` describes the source value
+    (``UTC`` unless the format is local wall-clock time, e.g. EXIF).
+    """
+
+    path: str
+    label: str
+    event_type: str | None = None
+    timezone: str = "UTC"
+
+
+F = TimelineField
+_BROWSER_FIELDS: tuple[TimelineField, ...] = (
+    F("visited_at", "visited"),
+    F("last_visited_at", "last-visited"),
+    F("history[].visited_at", "visited"),
+    F("history[].last_visited_at", "last-visited"),
+    F("downloads[].started_at", "download-started"),
+    F("downloads[].ended_at", "download-ended"),
+    F("started_at", "download-started"),
+    F("ended_at", "download-ended"),
+)
+
+# artifact_type -> fields that are evidence timestamps. Types not listed emit
+# no events (their unmapped timestamp-like fields are counted in the summary).
+TIMELINE_FIELD_MAP: dict[str, tuple[TimelineField, ...]] = {
+    # --- execution -------------------------------------------------------
+    "prefetch-file": (
+        F("last_run_times[*]", "run"),
+        *(F(f"run_time_{index}", f"run-{index}") for index in range(1, 9)),
+        F("volume_created_at", "volume-created"),
+    ),
+    "prefetch-invalid-content": (),
+    "amcache-schema-row": (
+        F("key_last_written_at", "last-written"),
+        F("link_date_raw", "link-time"),
+        F("compile_time", "compile-time"),
+        F("decoded_values.InstallDate", "installed", timezone="local-unknown"),
+    ),
+    "amcache-entry": (F("key_last_written_at", "last-written"),),
+    "shimcache-schema-entry": (F("timestamp", "file-modified"), F("key_last_written_at", "last-written")),
+    "shimcache-entry": (F("key_last_written_at", "last-written"),),
+    "bam-schema-entry": (F("timestamp", "run"), F("key_last_written_at", "last-written")),
+    "userassist-schema-entry": (F("timestamp", "run"), F("key_last_written_at", "last-written")),
+    "srum-row-candidate": (F("normalized_time", "event"),),
+    "srum-network-usage": (F("timestamp", "srum-record"),),
+    "srum-app-usage": (F("timestamp", "srum-record"),),
+    "bam-entry": (F("timestamp", "run"),),
+    # --- filesystem ------------------------------------------------------
+    "mft-record": (
+        F("attributes[].standard_information.timestamps.created_at", "si-created"),
+        F("attributes[].standard_information.timestamps.modified_at", "si-modified"),
+        F("attributes[].standard_information.timestamps.mft_modified_at", "si-mft-modified"),
+        F("attributes[].standard_information.timestamps.accessed_at", "si-accessed"),
+        F("attributes[].file_name.timestamps.created_at", "fn-created"),
+        F("attributes[].file_name.timestamps.modified_at", "fn-modified"),
+    ),
+    "usn-record": (F("timestamp", "usn-change"),),
+    # --- registry --------------------------------------------------------
+    "registry-deleted-cell-candidate": (F("last_written_at", "last-written-recovered"),),
+    "registry-key-recovery-candidate": (F("last_written_at", "last-written-recovered"),),
+    "registry-user-activity": (F("last_written_at", "last-written"),),
+    "shellbag-native-candidate": (F("key_last_written_at", "last-written"),),
+    "shellbag-entry": (
+        F("key_last_written_at", "last-written"),
+        F("item_created_at", "item-created"),
+        F("item_modified_at", "item-modified"),
+        F("item_accessed_at", "item-accessed"),
+    ),
+    "registry-hive": (F("native_header.last_written_at", "hive-last-written"),),
+    "windows-sam-group-candidate": (F("last_written_at", "last-written"),),
+    "windows-sam-account-candidate": (
+        F("last_written_at", "last-written"),
+        F("last_logon_at", "last-logon"),
+        F("password_last_set_at", "password-set"),
+        F("last_failed_logon_at", "last-failed-logon"),
+        F("created_at", "account-created"),
+    ),
+    "windows-sam-account": (),
+    "windows-sam-group": (F("last_written_at", "last-written"),),
+    "registry-persistence-entry": (F("key_last_written_at", "last-written"),),
+    "windows-installed-program": (F("install_date", "installed", timezone="local-unknown"), F("key_last_written_at", "last-written")),
+    "windows-profile-list-entry": (F("key_last_written_at", "last-written"),),
+    "windows-os-version": (F("install_time", "os-installed"),),
+    "windows-account-lifecycle": (
+        F("last_logon_at", "last-logon"),
+        F("password_last_set_at", "password-set"),
+        F("created_at", "account-created"),
+    ),
+    "windows-usb-device": (
+        F("first_install_at", "first-install"),
+        F("last_arrival_at", "last-arrival"),
+        F("last_removal_at", "last-removal"),
+        F("key_last_written_at", "last-written"),
+    ),
+    "windows-mounted-device": (F("key_last_written_at", "last-written"),),
+    "windows-service-config": (F("key_last_written_at", "last-written"),),
+    # --- file usage ------------------------------------------------------
+    "shell-shortcut": (
+        F("target_created_at", "target-created"),
+        F("target_modified_at", "target-modified"),
+        F("target_accessed_at", "target-accessed"),
+    ),
+    "recent-shortcut-invalid-content": (),
+    "shell-shortcut-invalid-content": (),
+    "recent-shortcut": (
+        F("target_created_at", "target-created"),
+        F("target_modified_at", "target-modified"),
+        F("target_accessed_at", "target-accessed"),
+    ),
+    "jumplist-automatic": (
+        F("destinations[].target_created_at", "target-created"),
+        F("destinations[].target_modified_at", "target-modified"),
+        F("destinations[].target_accessed_at", "target-accessed"),
+        F("destinations[].destlist_last_modified_at", "destlist-last-modified"),
+        F("destlist_entries[].last_modified_at", "destlist-last-modified"),
+    ),
+    "jumplist-entry": (
+        F("timestamp", "destlist-last-modified"),
+        F("target_created_at", "target-created"),
+        F("target_modified_at", "target-modified"),
+        F("target_accessed_at", "target-accessed"),
+        F("destlist_last_modified_at", "destlist-last-modified"),
+    ),
+    "jumplist-custom": (
+        F("destinations[].target_created_at", "target-created"),
+        F("destinations[].target_modified_at", "target-modified"),
+        F("destinations[].target_accessed_at", "target-accessed"),
+    ),
+    "recycle-bin-entry": (F("deleted_at", "deleted"),),
+    # --- event logs ------------------------------------------------------
+    # eventlog-event / eventlog-detection use eventlog_detail_event (below).
+    "eventlog-logon-session": (F("started_at", "logon"), F("ended_at", "logoff")),
+    # --- system ----------------------------------------------------------
+    "wer-report": (F("event_time", "event"),),
+    # Minidump header times only; module TimeDateStamps are build hashes, not events.
+    "crash-dump-indicators": (F("dump_time", "crash"), F("process_create_time", "process-created")),
+    "memory-minidump": (F("dump_time", "crash"), F("process_create_time", "process-created")),
+    "notification-row-candidate": (F("normalized_time", "notification"),),
+    "webshell-source-candidate": (F("normalized_time", "event"),),
+    "task-scheduler-task": (F("registration_date", "registered", timezone="local-unknown"),),
+    "windows-search-index-entry": (
+        F("created_at", "indexed-created"),
+        F("modified_at", "indexed-modified"),
+        F("accessed_at", "indexed-accessed"),
+    ),
+    "windows-filesystem-usn": (),
+    "usn-journal-inventory": (
+        F(
+            "timeline_review_candidates[].timestamp",
+            "observed",
+            event_type="artifact-usn-journal-inventory-timeline-review-candidate-observed",
+        ),
+        F(
+            "usn_replay_inventory_profile.bounded_state_replay_preview.transitions[].timestamp",
+            "observed",
+            event_type="artifact-usn-journal-inventory-usn-state-transition-observed",
+        ),
+    ),
+    # --- browser / web ---------------------------------------------------
+    "browser-history": _BROWSER_FIELDS,
+    "browser-history-downloads": _BROWSER_FIELDS,
+    "browser-history-visit": _BROWSER_FIELDS,
+    "browser-visit": (F("timestamp", "visited"), *_BROWSER_FIELDS),
+    # Rows without evidence time (browser rows otherwise use the row-level
+    # timestamp/timestamp_kind contract).
+    "browser-top-site": (),
+    "browser-acquisition-anomaly": (),
+    "browser-parse-error": (),
+    "browser-ai-usage": (F("ai_usage[].last_visited_at", "ai-usage-visited"),),
+    "browser-download": _BROWSER_FIELDS,
+    "browser-cookie": (F("created_at", "cookie-created"), F("last_accessed_at", "cookie-accessed")),
+    "browser-login": (F("created_at", "login-created"), F("last_used_at", "login-used")),
+    "browser-bookmark": (F("created_at", "bookmark-added"),),
+    "browser-extension": (F("install_time", "installed"),),
+    "macos-quarantine-event": (F("started_at", "download-started"), F("ended_at", "download-ended")),
+    # --- apps / media ----------------------------------------------------
+    "cloud-export-archive": (
+        F("cloud_archive_manifest.entry_manifest[].modified_at", "archive-entry-modified", timezone="local-unknown"),
+    ),
+    "mobile-message": (F("message_timestamp", "message"), F("sent_at", "message"), F("edited_at", "edited")),
+    "cloud-message": (F("message_timestamp", "message"), F("sent_at", "message")),
+    # media-image/media-video evidence times come through the row-level
+    # timestamp/timestamp_kind contract (EXIF DateTimeOriginal, mp4 mvhd).
+    "media-image": (F("exif_gps_profile.gps_datetime_utc_candidate", "gps-fix"),),
+    "media-image-unreadable": (F("exif_gps_profile.gps_datetime_utc_candidate", "gps-fix"),),
+    "media-video": (),
+    "sticky-note": (F("created_at", "note-created"), F("updated_at", "note-updated")),
 }
+# Rows that only aggregate other rows (their times duplicate the source rows)
+# and per-reference rows of a parent artifact never emit events.
+TIMELINE_EXCLUDED_TYPES: frozenset[str] = frozenset(
+    {
+        "prefetch-reference",
+        "registry-hive-cell",
+        # Bulk key inventory (hundreds of thousands of rows): key LastWrite
+        # times surface through the semantic registry rows instead (W2).
+        "registry-key-tree-node",
+        "shellbag-hive-summary",
+        "registry-summary",
+        "eventlog-summary",
+        "windows-execution-summary",
+        "mobile-correlation-summary",
+        "kakaotalk-windows-correlation-summary",
+        "synthetic-media-scan-status",
+    }
+)
+EVENTLOG_TYPES = frozenset({"eventlog-event", "eventlog-detection"})
+# Record identity used for dedupe: first present field wins.
+RECORD_IDENTITY_FIELDS: tuple[str, ...] = (
+    "record_id",
+    "cell_offset",
+    "entry_offset",
+    "value_cell_offset",
+    "key_path",
+    "target_path",
+    "executable_path",
+    "url",
+    "rowid",
+    "entry_name",
+)
+TIMESTAMP_LIKE_KEY_RE = re.compile(r"(_at|_time|^timestamp|_timestamp|_date)$")
+CONTEXT_EXCLUDED_KEY_RE = re.compile(r"(_hash|_sha256|_hashes|_fingerprint)$")
+MAX_CONTEXT_VALUE_LENGTH = 512
+_NON_ISO_FORMATS = ("%m/%d/%Y %H:%M:%S", "%Y:%m:%d %H:%M:%S", "%Y:%m:%d %H:%M:%SZ", "%Y-%m-%d %H:%M:%S")
+FILE_EVENT_FIELDS: tuple[tuple[str, str], ...] = (
+    ("fs_created_at", "created"),
+    ("fs_modified_at", "modified"),
+    ("fs_accessed_at", "accessed"),
+    ("fs_changed_at", "mft-changed"),
+)
+# Kept for compatibility with older imports; the generic walker is gone.
+TIMESTAMP_EVENT_NAMES: dict[str, str] = {
+    field.path.rsplit(".", 1)[-1].replace("[*]", "").replace("[]", ""): field.label
+    for fields in TIMELINE_FIELD_MAP.values()
+    for field in fields
+}
+
+
+class TimelineStats:
+    """Counters disclosed in ``timeline.json`` summary."""
+
+    def __init__(self, *, now: dt.datetime | None = None) -> None:
+        self.now = now or dt.datetime.now(dt.timezone.utc)
+        self.out_of_range: Counter[str] = Counter()
+        self.out_of_range_by_type: Counter[str] = Counter()
+        self.out_of_range_samples: list[dict[str, object]] = []
+        self.unparseable: Counter[str] = Counter()
+        self.duplicates: Counter[str] = Counter()
+        self.merged_detections = 0
+        self.unmapped_types: Counter[str] = Counter()
+        self.excluded_types: Counter[str] = Counter()
+        self.copy_time_candidates = 0
+        self.legacy_file_time_events = 0
+        self.evidence_timezone: dict[str, object] | None = None
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "out_of_range_excluded_count": sum(self.out_of_range.values()),
+            "out_of_range_reason_counts": dict(self.out_of_range),
+            "out_of_range_by_event_type": dict(self.out_of_range_by_type.most_common(50)),
+            "out_of_range_samples": self.out_of_range_samples,
+            "unparseable_timestamp_count": sum(self.unparseable.values()),
+            "unparseable_by_field": dict(self.unparseable.most_common(50)),
+            "duplicate_events_removed": sum(self.duplicates.values()),
+            "duplicate_events_by_type": dict(self.duplicates.most_common(50)),
+            "eventlog_detections_merged": self.merged_detections,
+            "unmapped_artifact_type_counts": dict(self.unmapped_types.most_common(100)),
+            "excluded_artifact_type_counts": dict(self.excluded_types.most_common(100)),
+            "acquisition_copy_time_candidates_not_emitted": self.copy_time_candidates,
+            "legacy_file_time_events": self.legacy_file_time_events,
+            "valid_range": {
+                "min": MIN_PLAUSIBLE.isoformat(),
+                "max": (self.now + dt.timedelta(days=1)).isoformat(),
+            },
+        }
 
 
 def run_timeline(
@@ -48,34 +338,43 @@ def run_timeline(
     if root is None and not normalized_files and not normalized_docs and not normalized_artifacts:
         raise TimelineError("timeline requires a ROOT or at least one --files, --docs, or --artifacts input")
 
-    events: list[dict[str, object]] = []
+    stats = TimelineStats()
+    builder = TimelineBuilder(stats)
+    file_times: dict[str, str] = {}
+    file_time_origin = ""
     if normalized_files:
         for input_path in normalized_files:
             payload = load_input_payload(input_path, expected_command="files", input_payloads=input_payloads)
-            events.extend(extract_file_events(payload, input_path))
+            file_time_origin = file_time_origin or str(_summary(payload).get("time_origin") or "")
+            builder.extend(extract_file_events(payload, input_path, stats=stats, file_times=file_times))
     else:
         payload = run_files_scan(input_root, rule_set=rule_set)
-        events.extend(extract_file_events(payload, Path("generated:files")))
+        file_time_origin = str(_summary(payload).get("time_origin") or "")
+        builder.extend(extract_file_events(payload, Path("generated:files"), stats=stats, file_times=file_times))
 
     if normalized_docs:
         for input_path in normalized_docs:
             payload = load_input_payload(input_path, expected_command="docs", input_payloads=input_payloads)
-            events.extend(extract_docs_events(payload, input_path))
+            builder.extend(extract_docs_events(payload, input_path, file_times=file_times))
     else:
-        events.extend(extract_document_candidate_events(scan_document_candidates(input_root), Path("generated:docs")))
+        builder.extend(
+            extract_document_candidate_events(scan_document_candidates(input_root), Path("generated:docs"), file_times=file_times)
+        )
 
     if normalized_artifacts:
         for input_path in normalized_artifacts:
             payload = load_input_payload(input_path, expected_command="artifacts", input_payloads=input_payloads)
-            events.extend(extract_artifact_events(payload, input_path))
+            builder.extend(extract_artifact_events(payload, input_path, stats=stats))
     else:
         for kind in SUPPORTED_ARTIFACT_KINDS:
             payload = run_artifact_collection(input_root, kind=kind, rule_set=rule_set)
-            events.extend(extract_artifact_events(payload, Path(f"generated:artifacts:{kind}")))
+            builder.extend(extract_artifact_events(payload, Path(f"generated:artifacts:{kind}"), stats=stats))
 
+    events = builder.events()
     events.sort(key=event_sort_key)
     event_type_counts = Counter(str(event["event_type"]) for event in events)
     source_counts = Counter(str(event["source"]) for event in events)
+    kind_counts = Counter(str(event.get("timestamp_kind") or "") for event in events)
     timestamps = [str(event["timestamp"]) for event in events]
 
     payload = {
@@ -92,14 +391,99 @@ def run_timeline(
             "event_count": len(events),
             "source_counts": dict(source_counts),
             "event_type_counts": dict(event_type_counts),
+            "timestamp_kind_counts": dict(kind_counts),
             "earliest_event_at": timestamps[0] if timestamps else None,
             "latest_event_at": timestamps[-1] if timestamps else None,
+            "timezone": build_timezone_disclosure(stats.evidence_timezone),
+            "file_time_origin": file_time_origin or "unknown",
+            "time_policy": {
+                "event_sources": "아티팩트 내부 시각(TIMELINE_FIELD_MAP)과 파일시스템 fs_* 시각만 사용",
+                "acquisition_copy_times": "취득 사본의 호스트 시각(source_file_*·사본 stat)은 이벤트로 쓰지 않음",
+                "dedupe_key": "(source record, timestamp, kind)",
+            },
+            **stats.as_dict(),
         },
         "events": events,
     }
     if rule_set is not None:
         annotate_timeline_payload(payload, rule_set)
     return payload
+
+
+def _summary(payload: Mapping[str, object]) -> Mapping[str, object]:
+    summary = payload.get("summary")
+    return summary if isinstance(summary, Mapping) else {}
+
+
+class TimelineBuilder:
+    """Collects events, dropping duplicates of ``(source record, timestamp, kind)``.
+
+    An ``eventlog-detection`` for the same record/time as its
+    ``eventlog-event`` is merged into that event (``details.detections``)
+    instead of becoming a second event.
+    """
+
+    def __init__(self, stats: TimelineStats) -> None:
+        self.stats = stats
+        self._events: list[dict[str, object]] = []
+        self._index: dict[tuple[str, str, str], int] = {}
+
+    def extend(self, events: Iterable[dict[str, object]]) -> None:
+        for event in events:
+            self.add(event)
+
+    def add(self, event: dict[str, object]) -> None:
+        record_key = event.get("record_key")
+        if not record_key:
+            self._events.append(event)
+            return
+        key = (str(record_key), str(event.get("timestamp")), str(event.get("timestamp_kind")))
+        existing_index = self._index.get(key)
+        if existing_index is None:
+            self._index[key] = len(self._events)
+            self._events.append(event)
+            return
+        existing = self._events[existing_index]
+        if _merge_eventlog_detection(existing, event):
+            self.stats.merged_detections += 1
+            return
+        self.stats.duplicates[str(event.get("event_type"))] += 1
+
+    def events(self) -> list[dict[str, object]]:
+        return self._events
+
+
+def _merge_eventlog_detection(existing: dict[str, object], incoming: dict[str, object]) -> bool:
+    existing_details = existing.get("details") if isinstance(existing.get("details"), dict) else {}
+    incoming_details = incoming.get("details") if isinstance(incoming.get("details"), dict) else {}
+    pair = {existing_details.get("artifact_type"), incoming_details.get("artifact_type")}
+    if pair != EVENTLOG_TYPES:
+        return False
+    if incoming_details.get("artifact_type") == "eventlog-event":
+        # The detection arrived first: keep it as the merged row but adopt the
+        # event's category/type so the timeline still shows the event.
+        detection = dict(existing_details)
+        existing["event_type"] = incoming["event_type"]
+        existing["summary"] = incoming["summary"]
+        existing["details"] = {**incoming_details, "detections": [_detection_brief(detection)]}
+        return True
+    detections = existing_details.setdefault("detections", [])
+    if isinstance(detections, list):
+        detections.append(_detection_brief(incoming_details))
+    existing_details["has_detection"] = True
+    return True
+
+
+def _detection_brief(details: Mapping[str, object]) -> dict[str, object]:
+    rule = details.get("rule")
+    brief: dict[str, object] = {}
+    if isinstance(rule, Mapping):
+        brief["rule_id"] = rule.get("id")
+        brief["rule_title"] = rule.get("title") or rule.get("name")
+    for key in ("risk_score", "risk_flags", "source_record"):
+        if details.get(key) not in (None, "", []):
+            brief[key] = details.get(key)
+    return brief
 
 
 def normalize_input_paths(paths: Sequence[Path] | None) -> list[Path]:
@@ -148,69 +532,168 @@ def validate_input_payload(
     return payload
 
 
-def extract_file_events(payload: Mapping[str, object], input_path: Path) -> list[dict[str, object]]:
+# --- timestamp normalization ----------------------------------------------
+
+
+def parse_event_timestamp(value: object) -> dt.datetime | None:
+    """ISO (``Z``/offset/naive = UTC) or the few non-ISO artifact formats."""
+    parsed = parse_iso_utc(value)
+    if parsed is not None:
+        return parsed
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    for pattern in _NON_ISO_FORMATS:
+        try:
+            moment = dt.datetime.strptime(text, pattern)
+        except ValueError:
+            continue
+        return moment.replace(tzinfo=dt.timezone.utc)
+    return None
+
+
+def normalize_event_timestamp(
+    value: object,
+    *,
+    stats: TimelineStats | None,
+    event_type: str,
+    field_path: str,
+) -> str | None:
+    """UTC ISO text for ``value``; ``None`` when missing, unparseable or out of range."""
+    if value in (None, "", 0):
+        return None
+    parsed = parse_event_timestamp(value)
+    if parsed is None:
+        if stats is not None:
+            stats.unparseable[field_path] += 1
+        return None
+    if stats is not None:
+        reason = ""
+        if parsed < MIN_PLAUSIBLE:
+            reason = "before-1980"
+        elif parsed > stats.now + dt.timedelta(days=1):
+            reason = "after-now-plus-1d"
+        if reason:
+            stats.out_of_range[reason] += 1
+            stats.out_of_range_by_type[event_type] += 1
+            if len(stats.out_of_range_samples) < 20:
+                stats.out_of_range_samples.append({"event_type": event_type, "field": field_path, "value": str(value)})
+            return None
+    text = str(value).strip() if isinstance(value, str) else ""
+    if text and _is_utc_iso_text(text):
+        return text.replace("Z", "+00:00") if text.endswith("Z") else text
+    return parsed.isoformat()
+
+
+def _is_utc_iso_text(text: str) -> bool:
+    return len(text) >= 19 and text[4] == "-" and text[10] == "T" and (text.endswith("+00:00") or text.endswith("Z"))
+
+
+# --- files / docs ------------------------------------------------------------
+
+
+def extract_file_events(
+    payload: Mapping[str, object],
+    input_path: Path,
+    *,
+    stats: TimelineStats | None = None,
+    file_times: dict[str, str] | None = None,
+) -> list[dict[str, object]]:
+    """Events for filesystem (``fs_*``) times only.
+
+    Acquisition-copy host times (``source_file_*``, or ``modified_at`` with
+    ``modified_at_origin == "acquisition-copy"``) are counted, never
+    emitted. A legacy payload without provenance fields still yields its
+    ``modified_at`` event flagged ``time_origin: unknown-legacy``.
+    """
     events: list[dict[str, object]] = []
     for candidate in payload.get("candidates", []):
         if not isinstance(candidate, dict):
             continue
-        timestamp = coerce_utc_timestamp(
-            candidate.get("modified_epoch"),
-            fallback=candidate.get("modified_at"),
-        )
-        if timestamp is None:
-            continue
         path = str(candidate.get("path", ""))
         name = str(candidate.get("name") or Path(path).name)
-        events.append(
-            {
-                "timestamp": timestamp,
-                "source": "files",
-                "event_type": "file-modified",
-                "path": path,
-                "input_file": str(input_path),
-                "summary": f"File candidate modified: {name}",
-                "details": {
-                    "name": candidate.get("name"),
-                    "extension": candidate.get("extension"),
-                    "size": candidate.get("size"),
-                    "categories": list(candidate.get("categories", [])),
-                    "reasons": dict(candidate.get("reasons", {})),
-                },
-            }
-        )
+        fields: list[tuple[str, str, object]] = [
+            (field, label, candidate.get(field)) for field, label in FILE_EVENT_FIELDS if candidate.get(field)
+        ]
+        origin = str(candidate.get("time_origin") or "")
+        legacy = "modified_at_origin" not in candidate and "time_origin" not in candidate
+        if not fields:
+            if legacy and candidate.get("modified_at"):
+                fields = [("modified_at", "modified", candidate.get("modified_at"))]
+                if stats is not None:
+                    stats.legacy_file_time_events += 1
+            elif stats is not None and (candidate.get("source_file_mtime") or origin == "acquisition-copy"):
+                stats.copy_time_candidates += 1
+        for field, label, raw in fields:
+            event_type = f"file-{label}"
+            timestamp = normalize_event_timestamp(raw, stats=stats, event_type=event_type, field_path=f"files.{field}")
+            if timestamp is None:
+                continue
+            if file_times is not None and field in {"fs_modified_at", "modified_at"}:
+                file_times[path] = timestamp
+            events.append(
+                {
+                    "timestamp": timestamp,
+                    "timestamp_kind": label,
+                    "timezone": "UTC",
+                    "source": "files",
+                    "event_type": event_type,
+                    "path": path,
+                    "input_file": str(input_path),
+                    "summary": f"파일 {label}: {name}",
+                    "details": {
+                        "name": candidate.get("name"),
+                        "extension": candidate.get("extension"),
+                        "size": candidate.get("size"),
+                        "categories": list(candidate.get("categories", [])),
+                        "field": field,
+                        "time_origin": "unknown-legacy" if legacy else (candidate.get("modified_at_origin") or origin),
+                        "is_deleted": candidate.get("is_deleted"),
+                    },
+                    "record_key": f"file:{path}",
+                }
+            )
     return events
 
 
-def extract_document_candidate_events(candidates: Sequence[object], input_path: Path) -> list[dict[str, object]]:
+def extract_document_candidate_events(
+    candidates: Sequence[object],
+    input_path: Path,
+    *,
+    file_times: Mapping[str, str] | None = None,
+) -> list[dict[str, object]]:
+    """Document candidates have no evidence time of their own; only a known
+    filesystem time of the same path (from files.json) is used."""
     events: list[dict[str, object]] = []
     for candidate in candidates:
-        if not hasattr(candidate, "path"):
+        path = str(getattr(candidate, "path", "") or "")
+        timestamp = (file_times or {}).get(path)
+        if not path or not timestamp:
             continue
-        path = str(getattr(candidate, "path", ""))
-        if not path:
-            continue
-        timestamp = path_timestamp_to_utc(path, fallback=getattr(candidate, "modified_at", None))
-        if timestamp is None:
-            continue
-        kind = str(getattr(candidate, "kind", ""))
         events.append(
             {
                 "timestamp": timestamp,
+                "timestamp_kind": "modified",
+                "timezone": "UTC",
                 "source": "docs",
                 "event_type": "document-modified",
                 "path": path,
                 "input_file": str(input_path),
-                "summary": f"Document candidate modified: {Path(path).name}",
-                "details": {
-                    "kind": kind,
-                    "size": getattr(candidate, "size", None),
-                },
+                "summary": f"문서 수정: {Path(path).name}",
+                "details": {"kind": str(getattr(candidate, "kind", "")), "size": getattr(candidate, "size", None)},
+                "record_key": f"doc:{path}",
             }
         )
     return events
 
 
-def extract_docs_events(payload: Mapping[str, object], input_path: Path) -> list[dict[str, object]]:
+def extract_docs_events(
+    payload: Mapping[str, object],
+    input_path: Path,
+    *,
+    file_times: Mapping[str, str] | None = None,
+) -> list[dict[str, object]]:
+    """Keyword hits placed at the document's filesystem modified time (when known)."""
     events: list[dict[str, object]] = []
     candidates_by_path = {
         str(candidate.get("path")): candidate
@@ -221,15 +704,17 @@ def extract_docs_events(payload: Mapping[str, object], input_path: Path) -> list
         if not isinstance(result, dict):
             continue
         path = str(result.get("path", ""))
-        candidate = candidates_by_path.get(path, {})
-        timestamp = path_timestamp_to_utc(path, fallback=candidate.get("modified_at"))
+        timestamp = (file_times or {}).get(path)
         if timestamp is None:
             continue
+        candidate = candidates_by_path.get(path, {})
         matched_keywords = [str(keyword) for keyword in result.get("matched_keywords", [])]
         kind = str(result.get("kind", candidate.get("kind", "")))
         events.append(
             {
                 "timestamp": timestamp,
+                "timestamp_kind": "modified",
+                "timezone": "UTC",
                 "source": "docs",
                 "event_type": "document-keyword-hit",
                 "path": path,
@@ -253,50 +738,191 @@ def build_document_summary(path: str, matched_keywords: Sequence[str]) -> str:
     return f"Document keyword hit: {label}"
 
 
-def extract_artifact_events(payload: Mapping[str, object], input_path: Path) -> list[dict[str, object]]:
+# --- artifacts ---------------------------------------------------------------
+
+
+def extract_artifact_events(
+    payload: Mapping[str, object],
+    input_path: Path,
+    *,
+    stats: TimelineStats | None = None,
+) -> list[dict[str, object]]:
     events: list[dict[str, object]] = []
     kind = str(payload.get("kind", ""))
     # JSONL-backed run payloads keep only a preview inline; stream every row
-    # (profile-expanded) from ``records_path`` instead.
-    for artifact in iter_payload_records(payload, payload_path=input_path):
+    # (profile-expanded) from ``records_path`` instead. ``row_index`` matches
+    # the case DB's ``/artifacts/<row_index>`` locator.
+    for row_index, artifact in enumerate(iter_payload_records(payload, payload_path=input_path)):
         artifact_type = str(artifact.get("artifact_type", "artifact"))
         artifact_path = str(artifact.get("path", ""))
         provider = str(artifact.get("provider", ""))
         details = artifact.get("details")
         if not isinstance(details, dict):
             continue
-        for detail_event in iter_artifact_detail_events(artifact_type, details):
+        if stats is not None and stats.evidence_timezone is None:
+            stats.evidence_timezone = detect_evidence_timezone(artifact_type, details)
+        source_record = {"kind": kind, "row_index": row_index, "output": f"artifacts_{kind}" if kind else ""}
+        for detail_event in iter_artifact_detail_events(artifact_type, details, stats=stats):
+            event_type = str(detail_event["event_type"])
+            timestamp = normalize_event_timestamp(
+                detail_event["timestamp"],
+                stats=stats,
+                event_type=event_type,
+                field_path=f"{artifact_type}.{detail_event['field_path']}",
+            )
+            if timestamp is None:
+                continue
+            context = detail_event["context"]
+            identity = detail_event.get("identity") or _record_identity(details) or f"row={row_index}"
             events.append(
                 {
-                    "timestamp": detail_event["timestamp"],
+                    "timestamp": timestamp,
+                    "timestamp_kind": detail_event["timestamp_kind"],
+                    "timezone": detail_event.get("timezone") or "UTC",
                     "source": "artifacts",
-                    "event_type": detail_event["event_type"],
+                    "event_type": event_type,
                     "path": artifact_path,
                     "input_file": str(input_path),
-                    "summary": build_artifact_summary(artifact_type, artifact_path, detail_event["context"]),
+                    "summary": build_artifact_summary(artifact_type, artifact_path, context),
                     "details": {
                         "kind": kind,
                         "provider": provider,
                         "artifact_type": artifact_type,
                         "field_path": detail_event["field_path"],
-                        **detail_event["context"],
+                        "source_record": source_record,
+                        **context,
                     },
+                    "record_key": f"{artifact_path}|{identity}|{detail_event.get('element_identity', '')}",
                 }
             )
     return events
 
 
-def iter_artifact_detail_events(artifact_type: str, details: Mapping[str, object]) -> Iterable[dict[str, object]]:
-    if artifact_type in {"eventlog-event", "eventlog-detection"}:
+def _record_identity(details: Mapping[str, object]) -> str:
+    for key in RECORD_IDENTITY_FIELDS:
+        value = details.get(key)
+        if value not in (None, "", []):
+            return f"{key}={value}"
+    return ""
+
+
+def iter_artifact_detail_events(
+    artifact_type: str,
+    details: Mapping[str, object],
+    *,
+    stats: TimelineStats | None = None,
+) -> Iterable[dict[str, object]]:
+    if artifact_type in TIMELINE_EXCLUDED_TYPES:
+        if stats is not None:
+            stats.excluded_types[artifact_type] += 1
+        return
+    if artifact_type in EVENTLOG_TYPES:
         event = eventlog_detail_event(artifact_type, details)
         if event is not None:
             yield event
+        return
+    fields = TIMELINE_FIELD_MAP.get(artifact_type)
+    explicit = explicit_row_timestamp(details)
+    if fields is None and explicit is None and not details.get("timeline_events"):
+        if stats is not None and any(TIMESTAMP_LIKE_KEY_RE.search(str(key)) for key in details):
+            stats.unmapped_types[artifact_type] += 1
+        return
+    base_context = collect_scalar_context(details, skip_keys=set())
+    if explicit is not None:
+        # Row-level contract (W5): ``timestamp`` + ``timestamp_kind`` (+ label /
+        # timezone) declares an evidence time; a mapped ``timestamp`` field is
+        # then not emitted twice. ``source_file_mtime`` is never read.
+        value, kind, timezone = explicit
+        yield {
+            "timestamp": value,
+            "timestamp_kind": kind,
+            "timezone": timezone,
+            "event_type": f"artifact-{artifact_type}-{kind}",
+            "field_path": "details.timestamp",
+            "element_identity": "",
+            "context": base_context,
+        }
+    for position, item in enumerate(details.get("timeline_events") or ()):
+        # Row-level list contract (W2): [{timestamp, timestamp_kind|kind|label, ...}].
+        if not isinstance(item, Mapping):
+            continue
+        kind = item.get("timestamp_kind") or item.get("kind") or item.get("label") or item.get("timestamp_label")
+        if item.get("timestamp") in (None, "", 0) or not isinstance(kind, str) or not kind:
+            continue
+        label = normalize_kind_label(kind)
+        yield {
+            "timestamp": item.get("timestamp"),
+            "timestamp_kind": label,
+            "timezone": str(item.get("timestamp_timezone") or item.get("timezone") or "UTC"),
+            "event_type": f"artifact-{artifact_type}-{label}",
+            "field_path": f"details.timeline_events[{position}].timestamp",
+            "element_identity": f"timeline_events:{position}",
+            "context": {**base_context, **collect_scalar_context(item, skip_keys={"timestamp"})},
+        }
+    for field in fields or ():
+        if explicit is not None and field.path == "timestamp":
+            continue
+        for value, element, element_identity, label in _resolve_field(details, field):
+            context = base_context if element is None else collect_scalar_context(element, skip_keys=set())
+            yield {
+                "timestamp": value,
+                "timestamp_kind": label,
+                "timezone": field.timezone,
+                "event_type": field.event_type or f"artifact-{artifact_type}-{label}",
+                "field_path": f"details.{field.path}",
+                "element_identity": element_identity,
+                "context": context,
+            }
+
+
+def explicit_row_timestamp(details: Mapping[str, object]) -> tuple[object, str, str] | None:
+    """``(timestamp, kind, timezone)`` when a row declares its own evidence time."""
+    value = details.get("timestamp")
+    kind = details.get("timestamp_kind") or details.get("timestamp_label")
+    if value in (None, "", 0) or not isinstance(kind, str) or not kind.strip():
+        return None
+    timezone = details.get("timestamp_timezone")
+    return value, normalize_kind_label(kind), str(timezone) if isinstance(timezone, str) and timezone else "UTC"
+
+
+def normalize_kind_label(kind: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", kind.strip().lower()).strip("-") or "observed"
+
+
+def _resolve_field(
+    details: Mapping[str, object],
+    field: TimelineField,
+) -> Iterable[tuple[object, Mapping[str, object] | None, str, str]]:
+    """Yield ``(value, list element or None, element identity, label)`` for a field path."""
+    parts = field.path.split(".")
+
+    def walk(node: object, index: int, element: Mapping[str, object] | None, identity: str) -> Iterable[tuple]:
+        if index == len(parts):
+            if node not in (None, "", 0):
+                yield node, element, identity, field.label
             return
-    yield from _walk_artifact_detail_values(
-        artifact_type=artifact_type,
-        value=details,
-        path_parts=("details",),
-    )
+        part = parts[index]
+        if part.endswith("[*]"):
+            values = node.get(part[:-3]) if isinstance(node, Mapping) else None
+            if isinstance(values, list):
+                for position, value in enumerate(values, start=1):
+                    if value not in (None, "", 0):
+                        # identity omits the position: the label carries it, so
+                        # last_run_times[0] and run_time_1 dedupe to one event.
+                        yield value, element, identity, f"{field.label}-{position}"
+            return
+        if part.endswith("[]"):
+            items = node.get(part[:-2]) if isinstance(node, Mapping) else None
+            if isinstance(items, list):
+                for position, item in enumerate(items):
+                    if isinstance(item, Mapping):
+                        item_identity = _record_identity(item) or f"[{position}]"
+                        yield from walk(item, index + 1, item, f"{identity}/{part[:-2]}:{item_identity}")
+            return
+        child = node.get(part) if isinstance(node, Mapping) else None
+        yield from walk(child, index + 1, element, identity)
+
+    yield from walk(details, 0, None, "")
 
 
 def eventlog_detail_event(artifact_type: str, details: Mapping[str, object]) -> dict[str, object] | None:
@@ -312,7 +938,6 @@ def eventlog_detail_event(artifact_type: str, details: Mapping[str, object]) -> 
             "coverage_status",
             "reportability",
             "source_path",
-            "source_hashes",
             "record_id",
             "event_id",
             "event_category",
@@ -325,11 +950,13 @@ def eventlog_detail_event(artifact_type: str, details: Mapping[str, object]) -> 
             "user_name",
             "target_user_name",
             "subject_user_name",
+            "logon_type",
             "source_ip",
             "destination_ip",
             "process_name",
             "command_line",
             "script_block_text",
+            "service_name",
             "risk_score",
             "risk_flags",
             "rule",
@@ -337,46 +964,16 @@ def eventlog_detail_event(artifact_type: str, details: Mapping[str, object]) -> 
     )
     return {
         "timestamp": timestamp,
+        "timestamp_kind": "event",
+        "timezone": "UTC",
         "event_type": f"eventlog-{category}" if artifact_type == "eventlog-event" else "eventlog-detection",
-        "field_path": "details.event_created_at",
+        "field_path": "details.event_created_at" if details.get("event_created_at") else "details.timestamp",
+        "identity": f"record_id={details.get('record_id')}" if details.get("record_id") not in (None, "") else "",
         "context": {
             **context,
-            "timestamp_kind": "event-created",
             "timeline_family": family or category,
         },
     }
-
-
-def _walk_artifact_detail_values(
-    *,
-    artifact_type: str,
-    value: object,
-    path_parts: Sequence[str],
-) -> Iterable[dict[str, object]]:
-    if isinstance(value, dict):
-        for key, item in value.items():
-            if key in TIMESTAMP_EVENT_NAMES and isinstance(item, str) and item:
-                context = collect_scalar_context(value, skip_keys={key})
-                yield {
-                    "timestamp": item,
-                    "event_type": build_artifact_event_type(artifact_type, path_parts, key),
-                    "field_path": ".".join((*path_parts, key)),
-                    "context": context,
-                }
-            else:
-                yield from _walk_artifact_detail_values(
-                    artifact_type=artifact_type,
-                    value=item,
-                    path_parts=(*path_parts, key),
-                )
-        return
-    if isinstance(value, list):
-        for index, item in enumerate(value):
-            yield from _walk_artifact_detail_values(
-                artifact_type=artifact_type,
-                value=item,
-                path_parts=(*path_parts, f"[{index}]"),
-            )
 
 
 def collect_scalar_context(value: Mapping[str, object], *, skip_keys: set[str]) -> dict[str, object]:
@@ -384,6 +981,10 @@ def collect_scalar_context(value: Mapping[str, object], *, skip_keys: set[str]) 
     for key, item in value.items():
         if key in skip_keys or isinstance(item, (dict, list)):
             continue
+        if CONTEXT_EXCLUDED_KEY_RE.search(str(key)):
+            continue
+        if isinstance(item, str) and len(item) > MAX_CONTEXT_VALUE_LENGTH:
+            item = item[:MAX_CONTEXT_VALUE_LENGTH] + "…"
         context[key] = item
     return context
 
@@ -398,34 +999,65 @@ def collect_selected_context(value: Mapping[str, object], keys: Sequence[str]) -
     return context
 
 
-def build_artifact_event_type(artifact_type: str, path_parts: Sequence[str], timestamp_key: str) -> str:
-    section = ""
-    for part in reversed(path_parts):
-        if part in {"details"} or part.startswith("["):
-            continue
-        section = singularize(part)
-        break
-    if "bounded_state_replay_preview" in path_parts and section == "transitions":
-        section = "usn-state-transition"
-    parts = ["artifact", artifact_type]
-    if section and section not in {"artifact", artifact_type}:
-        parts.append(section)
-    parts.append(TIMESTAMP_EVENT_NAMES.get(timestamp_key, normalize_token(timestamp_key)))
-    return "-".join(parts)
+# --- timezone disclosure -----------------------------------------------------
+
+TIMEZONE_KEYS: tuple[str, ...] = (
+    "evidence_timezone",
+    "time_zone_key_name",
+    "timezone_key_name",
+    "time_zone_name",
+    "timezone_name",
+    "standard_name",
+    "timezone",
+    "time_zone",
+)
+TIMEZONE_BIAS_KEYS: tuple[str, ...] = ("bias_minutes", "active_time_bias_minutes", "utc_offset_minutes", "bias")
 
 
-def singularize(value: str) -> str:
-    overrides = {
-        "ai_usage": "ai-usage",
-        "downloads": "download",
-        "internet_usage": "internet-usage",
-        "timeline_review_candidates": "timeline-review-candidate",
+def detect_evidence_timezone(artifact_type: str, details: Mapping[str, object]) -> dict[str, object] | None:
+    """Evidence time zone from a registry/system summary row (W2 TimeZoneInformation)."""
+    if not (artifact_type.startswith(("registry", "windows-system", "windows-timezone", "windows-os")) or "timezone" in artifact_type):
+        return None
+    structured = details.get("timezone")
+    if isinstance(structured, Mapping) and structured:
+        # registry-summary.details.timezone (W2): {utc_offset, bias, key_name, label}
+        name = structured.get("key_name") or structured.get("time_zone_key_name") or structured.get("label") or structured.get("standard_name")
+        bias = structured.get("bias") if isinstance(structured.get("bias"), int) else structured.get("bias_minutes")
+        return {
+            "name": name,
+            "label": structured.get("label"),
+            "utc_offset": structured.get("utc_offset"),
+            "bias_minutes": bias,
+            "artifact_type": artifact_type,
+            "source_path": details.get("source_path"),
+        }
+    candidates: list[Mapping[str, object]] = [details]
+    for key in ("time_zone_information", "timezone_information", "timezone_info"):
+        nested = details.get(key)
+        if isinstance(nested, Mapping):
+            candidates.insert(0, nested)
+    for mapping in candidates:
+        name = next((mapping.get(key) for key in TIMEZONE_KEYS if isinstance(mapping.get(key), str) and mapping.get(key)), None)
+        if name:
+            bias = next((mapping.get(key) for key in TIMEZONE_BIAS_KEYS if isinstance(mapping.get(key), int)), None)
+            return {"name": name, "bias_minutes": bias, "artifact_type": artifact_type, "source_path": details.get("source_path")}
+    return None
+
+
+def build_timezone_disclosure(evidence_timezone: Mapping[str, object] | None) -> dict[str, object]:
+    return {
+        "storage": "UTC",
+        "display": "UTC (ISO 8601 +00:00)",
+        "evidence_timezone": dict(evidence_timezone) if evidence_timezone else None,
+        "evidence_timezone_status": "registry-reported" if evidence_timezone else "not-reported",
+        "note": (
+            "모든 이벤트 시각은 UTC로 저장합니다. timezone=local-unknown 이벤트(EXIF·ZIP DOS 시각 등)는 "
+            "원본이 지역 시각이라 UTC 변환이 검증되지 않았습니다."
+        ),
     }
-    return overrides.get(value, value)
 
 
-def normalize_token(value: str) -> str:
-    return value.strip().lower().replace("_", "-")
+# --- summaries / report ------------------------------------------------------
 
 
 def field_label(name: str, value: object) -> str:
@@ -433,7 +1065,7 @@ def field_label(name: str, value: object) -> str:
 
 
 def build_artifact_summary(artifact_type: str, artifact_path: str, context: Mapping[str, object]) -> str:
-    if artifact_type in {"eventlog-event", "eventlog-detection"}:
+    if artifact_type in EVENTLOG_TYPES:
         label = "EventLog detection" if artifact_type == "eventlog-detection" else "EventLog event"
         bits = [
             field_label("id", context.get("event_id")),
@@ -456,12 +1088,16 @@ def build_artifact_summary(artifact_type: str, artifact_path: str, context: Mapp
         return f"Artifact event: {artifact_type} {context['source_url']}"
     if context.get("target_path"):
         return f"Artifact event: {artifact_type} {context['target_path']}"
-    if "entry_name" in context:
-        return f"Artifact event: {artifact_type} {context['entry_name']}"
+    if context.get("executable_path"):
+        return f"Artifact event: {artifact_type} {context['executable_path']}"
+    if context.get("key_path"):
+        return f"Artifact event: {artifact_type} {context['key_path']}"
     if "timeline_type" in context and str(context.get("timeline_type") or "").startswith("usn-"):
         label = str(context.get("event_label") or context.get("timeline_type") or "USN timeline candidate")
         path = str(context.get("path_candidate") or context.get("file_name") or "")
         return f"{label} {path}".strip()
+    if "entry_name" in context:
+        return f"Artifact event: {artifact_type} {context['entry_name']}"
     label = Path(artifact_path).name or artifact_path or artifact_type
     return f"Artifact event: {artifact_type} {label}"
 
@@ -479,41 +1115,26 @@ def event_sort_key(event: Mapping[str, object]) -> tuple[float, str, str, str]:
 def timestamp_to_epoch(value: str) -> float:
     if not value:
         return float("-inf")
-    try:
-        parsed = dt.datetime.fromisoformat(value)
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=dt.timezone.utc)
-        return parsed.timestamp()
-    except ValueError:
+    parsed = parse_iso_utc(value)
+    if parsed is None:
         return float("-inf")
+    return (parsed - dt.datetime(1970, 1, 1, tzinfo=dt.timezone.utc)).total_seconds()
 
 
 def coerce_utc_timestamp(value: object, *, fallback: object = None) -> str | None:
-    if isinstance(value, (float, int)):
+    if isinstance(value, (float, int)) and not isinstance(value, bool):
         return dt.datetime.fromtimestamp(float(value), dt.timezone.utc).isoformat()
-    if isinstance(fallback, str) and fallback:
-        try:
-            parsed = dt.datetime.fromisoformat(fallback)
-        except ValueError:
-            return None
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=dt.timezone.utc)
-        return parsed.astimezone(dt.timezone.utc).isoformat()
-    return None
-
-
-def path_timestamp_to_utc(path: str, *, fallback: object = None) -> str | None:
-    try:
-        stat_result = Path(path).stat()
-    except (FileNotFoundError, PermissionError, OSError):
-        return coerce_utc_timestamp(None, fallback=fallback)
-    return dt.datetime.fromtimestamp(stat_result.st_mtime, dt.timezone.utc).isoformat()
+    parsed = parse_iso_utc(fallback)
+    return parsed.isoformat() if parsed is not None else None
 
 
 def build_timeline_report(payload: Mapping[str, object]) -> str:
     inputs = payload.get("inputs", {})
     summary = payload.get("summary", {})
     events = payload.get("events", [])
+    summary = summary if isinstance(summary, Mapping) else {}
+    timezone = summary.get("timezone") if isinstance(summary.get("timezone"), Mapping) else {}
+    evidence_tz = timezone.get("evidence_timezone") if isinstance(timezone, Mapping) else None
 
     lines = [
         "# rapidtriage timeline report",
@@ -523,9 +1144,33 @@ def build_timeline_report(payload: Mapping[str, object]) -> str:
         f"- Earliest event: `{summary.get('earliest_event_at')}`",
         f"- Latest event: `{summary.get('latest_event_at')}`",
         "",
+        "## 시각 기준 / Time basis",
+        "",
+        "- 저장 시간대: UTC (모든 이벤트 시각은 UTC ISO 8601)",
+        (
+            f"- 증거 시스템 시간대: `{evidence_tz.get('name')}` (bias {evidence_tz.get('bias_minutes')} min, 레지스트리 보고)"
+            if isinstance(evidence_tz, Mapping)
+            else "- 증거 시스템 시간대: 보고되지 않음 (레지스트리 TimeZoneInformation 없음)"
+        ),
+        f"- 파일 시각 출처: `{summary.get('file_time_origin', 'unknown')}`",
+        "- 취득 사본 시각(호스트 mtime/ctime/atime)은 증거 시각이 아니므로 이벤트로 넣지 않았습니다"
+        f" (사본 시각만 있는 파일 후보 {summary.get('acquisition_copy_time_candidates_not_emitted', 0)}건).",
+        f"- 범위 밖 시각 제외: {summary.get('out_of_range_excluded_count', 0)}건 (1980-01-01 이전 또는 현재+1일 이후)",
+        f"- 해석 불가 시각: {summary.get('unparseable_timestamp_count', 0)}건",
+        f"- 중복 제거: {summary.get('duplicate_events_removed', 0)}건, 탐지-이벤트 병합: {summary.get('eventlog_detections_merged', 0)}건",
+        "",
         "## Inputs",
         "",
     ]
+    unmapped = summary.get("unmapped_artifact_type_counts")
+    if isinstance(unmapped, Mapping) and unmapped:
+        insert_at = lines.index("## Inputs")
+        lines[insert_at:insert_at] = [
+            "### 타임라인 매핑이 없는 아티팩트 유형 (시각 필드 있음, 이벤트 미생성)",
+            "",
+            *[f"- `{name}`: {count}" for name, count in sorted(unmapped.items())],
+            "",
+        ]
 
     if isinstance(inputs, dict):
         for key in ("files", "docs", "artifacts"):
@@ -553,8 +1198,10 @@ def build_timeline_report(payload: Mapping[str, object]) -> str:
                 continue
             caveat = timeline_report_caveat(event)
             suffix = f" — {caveat}" if caveat else ""
+            kind = event.get("timestamp_kind")
+            kind_text = f" [{kind}]" if kind else ""
             lines.append(
-                f"- `{event.get('timestamp')}` `{event.get('source')}` `{event.get('event_type')}` "
+                f"- `{event.get('timestamp')}`{kind_text} `{event.get('source')}` `{event.get('event_type')}` "
                 f"`{event.get('path')}` — {event.get('summary')}{suffix}"
             )
     else:
@@ -568,6 +1215,8 @@ def timeline_report_caveat(event: Mapping[str, object]) -> str:
     if not isinstance(details, Mapping):
         return ""
     bits: list[str] = []
+    if event.get("timezone") and event.get("timezone") != "UTC":
+        bits.append(f"timezone={event.get('timezone')}")
     if details.get("validation_required") is True:
         bits.append("validation required")
     reportability = details.get("reportability")
