@@ -2017,15 +2017,15 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertGreaterEqual(summary_payload["summary"]["timeline_event_count"], 1)
             counts = summary_payload["summary"]["counts"]
             self.assertEqual(counts["outputs"], len(summary_payload["outputs"]))
+            # parser-quality r3: only warning/failed items are issues; notices are counted apart.
+            warning_levels = [str(item.get("level")) for item in summary_payload["processing"]["warnings"]]
+            step_warnings = sum(1 for level in warning_levels if level in ("warning", "failed"))
             self.assertEqual(
                 counts["validation_issues"],
-                summary_payload["processing"]["warning_count"]
-                + sum(int(step.get("parser_error_count") or 0) for step in summary_payload["steps"]),
+                step_warnings + sum(int(step.get("parser_error_count") or 0) for step in summary_payload["steps"]),
             )
-            self.assertEqual(
-                counts["validation_issue_breakdown"]["step_warnings"],
-                summary_payload["processing"]["warning_count"],
-            )
+            self.assertEqual(counts["validation_issue_breakdown"]["step_warnings"], step_warnings)
+            self.assertEqual(counts["validation_notices"], warning_levels.count("notice"))
             self.assertEqual(
                 counts["docs"], summary_payload["summary"]["document_match_count"]
             )
