@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import os
 import sqlite3
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
@@ -178,6 +179,10 @@ def commit_periodically(connection: sqlite3.Connection, count: int, citations: C
         connection.commit()
 
 
+# Distinct unresolved paths remembered by ``_file_id_for`` per import.
+RESOLVED_PATH_CACHE_LIMIT = 200_000
+
+
 class CitationAllocator:
     """Citation ids for a bulk import from one ``citation_sequence`` read.
 
@@ -251,6 +256,7 @@ class CaseDatabase:
         # Link maps filled by an import (reset per ``import_run_outputs``) so
         # the ``_import_*`` steps also work when called on their own.
         self._file_ids: dict[str, int] = {}
+        self._resolved_path_keys: dict[str, str] = {}
         self._artifact_ids: dict[tuple[str, int], int] = {}
         self._hash_record_count = 0
 
@@ -526,6 +532,7 @@ class CaseDatabase:
         # Parser-quality r1: rows link to each other (file_record <- artifact /
         # indexed_document / event, artifact <- event) through these maps.
         self._file_ids = {}
+        self._resolved_path_keys = {}
         self._artifact_ids = {}
         self._hash_record_count = 0
         counts = {
@@ -1841,7 +1848,21 @@ class CaseDatabase:
     def _file_id_for(self, path: str) -> int | None:
         if not path:
             return None
-        return self._file_ids.get(normalize_path_for_db(path))
+        found = self._file_ids.get(normalize_path_for_db(path))
+        if found is not None:
+            return found
+        # Files rows carry resolved paths; an event/artifact path may still use
+        # an unresolved alias (macOS /var -> /private/var, Windows 8.3 short
+        # names such as RUNNER~1). Resolve once per distinct path.
+        resolved = self._resolved_path_keys.get(path)
+        if resolved is None:
+            try:
+                resolved = normalize_path_for_db(os.path.realpath(path))
+            except (OSError, ValueError):
+                resolved = ""
+            if len(self._resolved_path_keys) < RESOLVED_PATH_CACHE_LIMIT:
+                self._resolved_path_keys[path] = resolved
+        return self._file_ids.get(resolved) if resolved else None
 
     def _link_counts(self, case_id: str) -> dict[str, int]:
         with self.connect() as connection:

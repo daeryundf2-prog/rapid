@@ -26,6 +26,8 @@ from rapidtriage.core.artifact_store import (
     ARTIFACT_ID_SCHEME,
     attach_artifact_record_contracts,
 )
+from rapidtriage.core.case_db import CaseDatabase
+from rapidtriage.core.case_db.helpers import normalize_path_for_db
 from rapidtriage.core.docs import run_docs_search
 from rapidtriage.core.indicators import build_indicator_summary, url_indicator_status
 from rapidtriage.core.reporting import (
@@ -352,6 +354,20 @@ class MinorFixTests(unittest.TestCase):
         self.assertIn("scheduled parser kinds=2", policy["worker_limit_source"])
         self.assertTrue(policy["worker_limit_source"].endswith("= 2"))
         self.assertNotIn("min(4", policy["worker_limit_source"])
+
+    def test_case_db_links_events_through_unresolved_path_aliases(self) -> None:
+        # Files rows hold resolved paths; CI temp dirs reach the same file
+        # through aliases (macOS /var -> /private/var, Windows RUNNER~1).
+        with tempfile.TemporaryDirectory() as tmp:
+            root = (Path(tmp) / "evidence").resolve()
+            (root / "Users").mkdir(parents=True)
+            (root / "Users" / "notes.txt").write_text("hello", encoding="utf-8")
+            database = CaseDatabase(Path(tmp) / "case.db")
+            database.initialize()
+            database._file_ids = {normalize_path_for_db(str(root / "Users" / "notes.txt")): 7}
+            alias = str(root / "Users" / ".." / "Users" / "notes.txt")
+            self.assertEqual(database._file_id_for(alias), 7)
+            self.assertIsNone(database._file_id_for(str(root / "Users" / "missing.txt")))
 
 
 if __name__ == "__main__":
