@@ -37,9 +37,12 @@ import {
   STATUS_LABEL,
 } from "../analysis/kinds";
 import { useAnalyses } from "../analysis/store";
+import { DisclosuresCard } from "../dashboard/cards";
+import { disclosureDigest, disclosureItems, runWarnings } from "../dashboard/disclosures";
 import { formatCount } from "../grid/gridUtils";
 import { stepNameLabel, stepStatusLabel, stepWarningLabel } from "./stepLabels";
 import "../analysis/analysis.css";
+import "../dashboard/dashboard.css";
 import "./stages.css";
 
 export { stepNameLabel, stepStatusLabel, stepWarningLabel } from "./stepLabels";
@@ -321,6 +324,8 @@ function StepList({ runId }: { runId: string }) {
     retry: false,
   });
   const steps = (summary.data?.steps ?? []) as Array<Record<string, unknown>>;
+  const disclosures = disclosureItems(summary.data);
+  const warnings = runWarnings(summary.data);
   const text = (v: unknown) => (typeof v === "string" || typeof v === "number" ? String(v) : "");
   const timed = steps.some((step) => text(step.elapsed_s ?? step.duration_s ?? step.elapsed) !== "");
   const tally = new Map<string, number>();
@@ -338,6 +343,12 @@ function StepList({ runId }: { runId: string }) {
           </p>
         ) : null}
       </div>
+      {disclosures.length || warnings.length ? (
+        <details className="process-plan-disclosures" data-testid="process-disclosures">
+          <summary>{disclosureDigest(summary.data)}</summary>
+          <DisclosuresCard items={disclosures} warnings={warnings} />
+        </details>
+      ) : null}
       {steps.length === 0 ? (
         <p className="analysis-desc">
           {summary.isPending ? "단계 목록을 불러오는 중…" : "기록된 처리 단계가 없습니다."}

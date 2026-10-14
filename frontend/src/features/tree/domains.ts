@@ -32,7 +32,28 @@ export interface DomainNodeDef {
   label: string;
   target: DomainTarget;
   icon?: IconName;
+  /**
+   * Rows that are not evidence records (`*-string-candidate` pivots): the node stays listed but
+   * dimmed with NON_EVIDENCE_NOTE, and its count never adds to the domain total.
+   */
+  nonEvidence?: boolean;
+  /**
+   * Cross-listing of a type whose primary node lives in another domain (자동 실행/지속성 also
+   * under 침해사고): same request, not the type's primary node.
+   */
+  crossRef?: boolean;
+  /**
+   * Bulk / auxiliary rows (레지스트리 키 트리, Prefetch 참조 경로, 브라우저 수집 오류): listed and
+   * openable, but left out of the domain total so the main counts are evidence records.
+   */
+  detail?: boolean;
+  /** Korean names of the node's types when it maps several (유형 filter list). */
+  typeLabels?: Readonly<Record<string, string>>;
 }
+
+/** Tooltip of a non-evidence node (string pivots the parser could not tie to a record). */
+export const NON_EVIDENCE_NOTE =
+  "문자열 후보 — 레코드 구조로 해석되지 않은 문자열 피벗입니다. 증거 레코드가 아니므로 개수 합계에서 뺍니다.";
 
 export interface DomainDef {
   id: string;
@@ -50,15 +71,60 @@ const run = (analysis: AnalysisNodeId): DomainTarget => ({
   analysis,
 });
 
-/** The 16 domains of console-ia §4 (증거 소스 is the evidence node built from the dashboard). */
+/**
+ * The 15 forensic domains of console-ia §4 (증거 소스 is the evidence node built from the
+ * dashboard). Domain ids match the server tree groups (`artifacts-group:<domain>`, api/app/tree.py
+ * ARTIFACT_DOMAIN_TABLE): a kind whose types the server routes to another domain shows there as
+ * `artifacts:<kind>@<domain>`; counts come from every kind node of the kind (model.ts).
+ *
+ * Every evidence type of the parser-quality r1 data model has exactly one primary node here
+ * (domainMapping.test.ts); `crossRef` nodes repeat a type in a second domain.
+ */
 export const DOMAINS: readonly DomainDef[] = [
   {
     id: "os",
     label: "운영체제·계정",
     icon: "cpu",
     nodes: [
-      { id: "os-accounts", label: "사용자·그룹(SAM)", target: a("windows-os-account") },
+      {
+        id: "os-accounts",
+        label: "사용자·그룹(SAM)",
+        target: a("windows-os-account", [
+          "windows-sam-account",
+          "windows-sam-group",
+          "windows-sam-account-candidate",
+          "windows-sam-group-candidate",
+        ]),
+        typeLabels: {
+          "windows-sam-account": "SAM 계정",
+          "windows-sam-group": "SAM 그룹",
+          "windows-sam-account-candidate": "SAM 계정(reg 내보내기)",
+          "windows-sam-group-candidate": "SAM 그룹(reg 내보내기)",
+        },
+      },
       { id: "os-system", label: "시스템 정보(Windows)", target: a("windows-system") },
+      {
+        id: "os-sysinfo",
+        label: "시스템 정보(레지스트리)",
+        target: a("windows-registry", [
+          "windows-timezone",
+          "windows-computer-name",
+          "windows-os-version",
+          "windows-control-set",
+          "windows-network-interface",
+          "windows-profile-list-entry",
+          "windows-installed-program",
+        ]),
+        typeLabels: {
+          "windows-timezone": "시간대",
+          "windows-computer-name": "컴퓨터 이름",
+          "windows-os-version": "OS 버전",
+          "windows-control-set": "ControlSet",
+          "windows-network-interface": "네트워크 인터페이스",
+          "windows-profile-list-entry": "사용자 프로필 목록",
+          "windows-installed-program": "설치 프로그램(레지스트리)",
+        },
+      },
       { id: "os-linux", label: "Linux 시스템", target: a("linux-system") },
       { id: "os-macos", label: "macOS 시스템", target: a("macos-system") },
       { id: "os-installed", label: "설치 프로그램(Windows)", target: a("windows-system", ["uwp-package"]) },
@@ -68,6 +134,11 @@ export const DOMAINS: readonly DomainDef[] = [
       {
         id: "os-services",
         label: "서비스(Windows)",
+        target: a("windows-registry", ["windows-service-config"]),
+      },
+      {
+        id: "os-services-export",
+        label: "서비스(reg 내보내기)",
         target: a("windows-os-account", ["windows-service-config"]),
       },
       {
@@ -83,19 +154,62 @@ export const DOMAINS: readonly DomainDef[] = [
     label: "실행 흔적",
     icon: "play",
     nodes: [
-      { id: "exec-prefetch", label: "Prefetch", target: a("windows-prefetch") },
+      { id: "exec-prefetch", label: "Prefetch", target: a("windows-prefetch", ["prefetch-file"]) },
+      {
+        id: "exec-prefetch-invalid",
+        label: "손상/비정상 Prefetch",
+        target: a("windows-prefetch", ["prefetch-invalid-content"]),
+      },
+      {
+        id: "exec-prefetch-refs",
+        label: "Prefetch 참조 경로",
+        target: a("windows-prefetch", ["prefetch-reference"]),
+        detail: true,
+      },
       { id: "exec-all", label: "실행 흔적 전체", target: a("windows-execution") },
       {
         id: "exec-amcache",
         label: "Amcache/ShimCache",
-        target: a("windows-execution", ["amcache-entry", "shimcache-entry"]),
+        target: a("windows-execution", ["amcache-schema-row", "shimcache-schema-entry"]),
+        typeLabels: { "amcache-schema-row": "Amcache", "shimcache-schema-entry": "ShimCache" },
       },
       {
         id: "exec-bam",
         label: "UserAssist/BAM",
-        target: a("windows-execution", ["bam-entry", "userassist-schema-entry"]),
+        target: a("windows-execution", ["bam-schema-entry", "userassist-schema-entry"]),
+        typeLabels: { "bam-schema-entry": "BAM", "userassist-schema-entry": "UserAssist" },
       },
-      { id: "exec-lnk", label: "Jump List/LNK", target: a("recent-files") },
+      {
+        id: "exec-strings",
+        label: "문자열 후보(증거 아님)",
+        target: a("windows-execution", [
+          "amcache-string-candidate",
+          "shimcache-string-candidate",
+          "bam-string-candidate",
+        ]),
+        nonEvidence: true,
+      },
+      {
+        id: "exec-lnk",
+        label: "LNK/Jump List",
+        target: a("recent-files", ["recent-shortcut", "shell-shortcut", "jumplist-entry"]),
+        typeLabels: {
+          "recent-shortcut": "최근 항목 바로가기",
+          "shell-shortcut": "바탕화면·시작 메뉴 바로가기",
+          "jumplist-entry": "Jump List 항목",
+        },
+      },
+      {
+        id: "exec-jumplist-files",
+        label: "Jump List 파일",
+        target: a("recent-files", ["jumplist-automatic", "jumplist-custom"]),
+        detail: true,
+      },
+      {
+        id: "exec-lnk-invalid",
+        label: "비정상 바로가기",
+        target: a("recent-files", ["recent-shortcut-invalid-content", "shell-shortcut-invalid-content"]),
+      },
       { id: "exec-search-index", label: "Windows 검색 색인", target: a("windows-search-index") },
       {
         id: "exec-powershell",
@@ -120,6 +234,7 @@ export const DOMAINS: readonly DomainDef[] = [
       { id: "fs-archives", label: "압축", target: files("archives") },
       { id: "fs-databases", label: "데이터베이스", target: files("databases") },
       { id: "fs-emails", label: "이메일 파일", target: files("emails") },
+      { id: "fs-other", label: "기타", target: files("other") },
       { id: "fs-mft", label: "MFT/USN", target: run("ntfs-meta") },
       { id: "fs-carve", label: "복구/카빙", target: run("carve") },
       { id: "fs-vsc", label: "볼륨 섀도우", target: run("vsc") },
@@ -134,6 +249,12 @@ export const DOMAINS: readonly DomainDef[] = [
         label: "NTFS 레코드(런)",
         target: a("windows-filesystem", ["mft-record", "usn-record", "ntfs-logfile-transaction-candidate"]),
       },
+      {
+        id: "fs-strings",
+        label: "문자열 후보(증거 아님)",
+        target: a("windows-filesystem", ["full-path-string-candidate"]),
+        nonEvidence: true,
+      },
     ],
   },
   {
@@ -141,8 +262,28 @@ export const DOMAINS: readonly DomainDef[] = [
     label: "레지스트리",
     icon: "database",
     nodes: [
-      { id: "reg-hives", label: "하이브", target: a("windows-registry") },
-      { id: "reg-shellbags", label: "ShellBags", target: a("windows-shellbags") },
+      {
+        id: "reg-persistence",
+        label: "자동 실행/지속성",
+        target: a("windows-registry", ["registry-persistence-entry"]),
+      },
+      {
+        id: "reg-activity",
+        label: "사용자 활동(검색어·최근 문서·입력 경로)",
+        target: a("windows-registry", ["registry-user-activity"]),
+      },
+      {
+        id: "reg-shellbags",
+        label: "ShellBags",
+        target: a("windows-shellbags", ["shellbag-entry", "shellbag-hive-summary"]),
+        typeLabels: { "shellbag-entry": "ShellBags 항목", "shellbag-hive-summary": "ShellBags 하이브 요약" },
+      },
+      {
+        id: "reg-keytree",
+        label: "키 트리",
+        target: a("windows-registry", ["registry-key-tree-node"]),
+        detail: true,
+      },
       {
         id: "reg-recovery",
         label: "셀 복구",
@@ -152,6 +293,12 @@ export const DOMAINS: readonly DomainDef[] = [
           "registry-value-recovery-candidate",
         ]),
       },
+      {
+        id: "reg-strings",
+        label: "문자열 후보(증거 아님)",
+        target: a("windows-registry", ["registry-hive-string-candidate"]),
+        nonEvidence: true,
+      },
     ],
   },
   {
@@ -159,8 +306,16 @@ export const DOMAINS: readonly DomainDef[] = [
     label: "이벤트 로그",
     icon: "list",
     nodes: [
-      { id: "evt-all", label: "EVTX 전체", target: a("eventlog") },
+      { id: "evt-all", label: "전체 이벤트 로그(EVTX·ETL)", target: a("eventlog") },
+      { id: "evt-events", label: "EVTX 이벤트", target: a("eventlog", ["eventlog-event"]) },
+      { id: "evt-detections", label: "탐지 규칙 일치", target: a("eventlog", ["eventlog-detection"]) },
       { id: "evt-logon", label: "로그온 세션", target: a("eventlog", ["eventlog-logon-session"]) },
+      {
+        id: "evt-slack",
+        label: "슬랙 복구 레코드",
+        target: a("eventlog", ["eventlog-record-candidate"]),
+      },
+      { id: "evt-etl", label: "ETL 추적 파일", target: a("eventlog", ["etl-trace-file"]) },
       { id: "evt-firewall", label: "방화벽 로그", target: a("windows-system", ["firewall-log"]) },
     ],
   },
@@ -170,12 +325,50 @@ export const DOMAINS: readonly DomainDef[] = [
     icon: "globe",
     nodes: [
       { id: "web-all", label: "브라우저 전체", target: a("browser") },
-      { id: "web-history", label: "히스토리", target: a("browser", ["browser-history"]) },
-      { id: "web-downloads", label: "다운로드", target: a("browser", ["browser-history-downloads"]) },
+      {
+        id: "web-history",
+        label: "히스토리",
+        target: a("browser", ["browser-history", "browser-visit"]),
+        typeLabels: { "browser-history": "방문 URL", "browser-visit": "방문 기록" },
+      },
+      { id: "web-downloads", label: "다운로드", target: a("browser", ["browser-download"]) },
       {
         id: "web-downloads-macos",
         label: "다운로드(macOS)",
         target: a("macos-system", ["macos-browser-history-downloads"]),
+      },
+      { id: "web-search", label: "검색어", target: a("browser", ["browser-search"]) },
+      { id: "web-cookies", label: "쿠키", target: a("browser", ["browser-cookie"]) },
+      { id: "web-logins", label: "저장된 로그인", target: a("browser", ["browser-login"]) },
+      {
+        id: "web-autofill",
+        label: "자동완성",
+        target: a("browser", ["browser-autofill", "browser-credit-card", "browser-autofill-address"]),
+        typeLabels: {
+          "browser-autofill": "자동완성 항목",
+          "browser-credit-card": "저장된 카드(메타데이터)",
+          "browser-autofill-address": "저장된 주소",
+        },
+      },
+      {
+        id: "web-bookmarks",
+        label: "북마크",
+        target: a("browser", ["browser-bookmark", "browser-omnibox-shortcut", "browser-top-site"]),
+        typeLabels: {
+          "browser-bookmark": "북마크",
+          "browser-omnibox-shortcut": "주소창 바로가기",
+          "browser-top-site": "자주 가는 사이트",
+        },
+      },
+      { id: "web-sessions", label: "세션", target: a("browser", ["browser-session-tab"]) },
+      { id: "web-extensions", label: "확장", target: a("browser", ["browser-extension"]) },
+      { id: "web-profile", label: "프로필 계정", target: a("browser", ["browser-profile-account"]) },
+      {
+        id: "web-anomaly",
+        label: "이상/오류",
+        target: a("browser", ["browser-acquisition-anomaly", "browser-parse-error"]),
+        detail: true,
+        typeLabels: { "browser-acquisition-anomaly": "취득 이상", "browser-parse-error": "파싱 오류" },
       },
       { id: "web-cache", label: "캐시(WebCache)", target: a("browser", ["webcachev01-ese-file"]) },
       {
@@ -190,7 +383,8 @@ export const DOMAINS: readonly DomainDef[] = [
     label: "메신저·메일",
     icon: "message",
     nodes: [
-      { id: "msg-kakao", label: "카카오톡(Windows)", target: a("kakaotalk-windows") },
+      // The Windows provider reads registry DeviceInfo / user-id traces, not the (encrypted) chat DB.
+      { id: "msg-kakao", label: "카카오톡(Windows) 레지스트리 흔적", target: a("kakaotalk-windows") },
       { id: "msg-kakao-mac", label: "카카오톡(macOS)", target: a("kakaotalk-macos") },
       {
         id: "msg-mobile",
@@ -212,12 +406,25 @@ export const DOMAINS: readonly DomainDef[] = [
     label: "미디어·문서",
     icon: "image",
     nodes: [
-      { id: "media-images", label: "이미지 갤러리", target: a("media-image") },
+      { id: "media-all", label: "미디어 전체", target: a("media-image") },
+      {
+        id: "media-images",
+        label: "이미지",
+        target: a("media-image", ["media-image", "media-image-unreadable"]),
+        typeLabels: { "media-image": "이미지", "media-image-unreadable": "읽을 수 없는 이미지" },
+      },
+      { id: "media-video", label: "동영상", target: a("media-image", ["media-video"]) },
+      { id: "media-audio", label: "오디오", target: a("media-image", ["media-audio"]) },
       { id: "media-ocr", label: "OCR 텍스트", target: run("ocr-batch") },
       {
         id: "media-doc-risk",
         label: "문서 메타데이터 위험",
         target: a("generic-documents", ["document-metadata-risk"]),
+      },
+      {
+        id: "media-doc-lock",
+        label: "문서 잠금 파일(편집자)",
+        target: a("generic-documents", ["document-lock-owner"]),
       },
       { id: "media-documents", label: "문서 전체", target: a("generic-documents") },
       { id: "media-synthetic", label: "합성 미디어", target: a("synthetic-media") },
@@ -248,9 +455,15 @@ export const DOMAINS: readonly DomainDef[] = [
         target: a("windows-system", ["usb-setupapi-device-install-candidate"]),
       },
       {
+        id: "dev-usb-registry",
+        label: "USB·마운트 장치(레지스트리)",
+        target: a("windows-registry", ["windows-usb-device", "windows-mounted-device"]),
+        typeLabels: { "windows-usb-device": "USB 장치", "windows-mounted-device": "마운트된 장치" },
+      },
+      {
         id: "dev-usb-mounted",
-        label: "마운트된 장치",
-        target: a("windows-os-account", ["windows-mounted-device"]),
+        label: "USB·마운트 장치(reg 내보내기)",
+        target: a("windows-os-account", ["windows-mounted-device", "windows-usb-device"]),
       },
       { id: "dev-rdp", label: "RDP", target: a("windows-remote-access") },
       {
@@ -290,6 +503,19 @@ export const DOMAINS: readonly DomainDef[] = [
     nodes: [
       { id: "ir-webshell", label: "웹셸", target: a("windows-system", ["webshell-source-candidate"]) },
       { id: "ir-weblog", label: "웹 서버 로그", target: a("windows-system", ["web-server-log"]) },
+      {
+        id: "ir-persistence",
+        label: "자동 실행/지속성",
+        target: a("windows-registry", ["registry-persistence-entry"]),
+        crossRef: true,
+      },
+      {
+        id: "ir-detections",
+        label: "이벤트 로그 탐지",
+        target: a("eventlog", ["eventlog-detection"]),
+        crossRef: true,
+      },
+      // Label from the indicators summary `display_label` ("지표 후보" while no rule applied).
       { id: "ir-ioc", label: "IOC 일치", target: { collection: "indicators" } },
       { id: "ir-cross-case", label: "교차 케이스 지표", target: run("cross-case") },
       {
@@ -304,7 +530,30 @@ export const DOMAINS: readonly DomainDef[] = [
     label: "메모리",
     icon: "layers",
     nodes: [
-      { id: "mem-volatility", label: "Volatility 정규화", target: a("memory-volatility") },
+      {
+        id: "mem-volatility",
+        label: "Volatility 정규화",
+        target: a("memory-volatility", [
+          "memory-process",
+          "memory-network",
+          "memory-cmdline",
+          "memory-malfind",
+          "memory-artifact",
+        ]),
+      },
+      {
+        id: "mem-dump",
+        label: "메모리 덤프 지표",
+        target: a("memory-volatility", ["memory-dump-indicators", "disk-memory-file-indicators"]),
+      },
+      // MDMP / WER crash dumps (stream header: time, PID, exception, modules), not Volatility.
+      { id: "mem-crash", label: "크래시 덤프", target: a("memory-volatility", ["crash-dump-indicators"]) },
+      {
+        id: "mem-strings",
+        label: "문자열 후보(증거 아님)",
+        target: a("memory-volatility", ["process-string-candidate"]),
+        nonEvidence: true,
+      },
       { id: "mem-import", label: "메모리 분석 가져오기", target: run("memory-import") },
     ],
   },

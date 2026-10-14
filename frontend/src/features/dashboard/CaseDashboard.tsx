@@ -16,6 +16,7 @@ import { Card, CardEmpty, CardError, CardLoading, useCardLayout } from "./Card";
 import {
   CaseNotesCard,
   CategoryCard,
+  DisclosuresCard,
   EvidenceCard,
   ExportsCard,
   KeywordCard,
@@ -23,6 +24,7 @@ import {
   ReviewCard,
   StartCard,
 } from "./cards";
+import { disclosureItems, runWarnings } from "./disclosures";
 import { categoryBars, keywordRows, reviewSummary, stageRows } from "./model";
 import { useDashboardData } from "./useDashboardData";
 import "./dashboard.css";
@@ -32,6 +34,7 @@ export const CARD_IDS = [
   "evidence",
   "categories",
   "processing",
+  "disclosures",
   "review",
   "keywords",
   "exports",
@@ -44,6 +47,7 @@ const CARD_META: Record<CardId, { title: string; icon: IconName }> = {
   evidence: { title: "증거 소스", icon: "hard-drive" },
   categories: { title: "아티팩트 범주", icon: "layers" },
   processing: { title: "케이스 처리 세부", icon: "clock" },
+  disclosures: { title: "공개 사항", icon: "alert" },
   review: { title: "태그 및 리뷰 상태", icon: "tag" },
   keywords: { title: "키워드 일치", icon: "search" },
   exports: { title: "내보내기/보고서 이력", icon: "download" },
@@ -193,6 +197,30 @@ export function CaseDashboard({ runId }: { runId: string }) {
                 if (completed) go("outputs");
               }}
             />
+          </Card>
+        ) : null}
+
+        {visible("disclosures") ? (
+          <Card
+            {...cardProps("disclosures", () => void summary.refetch())}
+            meta={
+              completed && summary.data
+                ? (() => {
+                    const warn = disclosureItems(summary.data).filter((item) => item.tone === "warn").length;
+                    return warn ? `확인 필요 ${warn}` : undefined;
+                  })()
+                : undefined
+            }
+          >
+            {!completed ? (
+              <CardEmpty title="공개 사항">{WAIT_FOR_RUN}</CardEmpty>
+            ) : summary.isPending ? (
+              <CardLoading />
+            ) : summary.isError ? (
+              <CardError error={summary.error} />
+            ) : (
+              <DisclosuresCard items={disclosureItems(summary.data)} warnings={runWarnings(summary.data)} />
+            )}
           </Card>
         ) : null}
 

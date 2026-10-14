@@ -15,6 +15,8 @@ function labels(): Map<string, string> {
     for (const node of domain.nodes) {
       const types = node.target.types;
       if (types?.length === 1 && types[0] && !out.has(types[0])) out.set(types[0], node.label);
+      for (const [type, label] of Object.entries(node.typeLabels ?? {}))
+        if (!out.has(type)) out.set(type, label);
     }
   }
   cache = out;

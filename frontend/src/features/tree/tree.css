@@ -23,6 +23,12 @@
   color: var(--text-muted);
 }
 
+/* Non-evidence nodes (문자열 후보): openable, but read as secondary. */
+.case-tree-item.is-dimmed:not(.selected) {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
 /* Same selected / hover tokens as the grid rows (review #1). */
 .case-tree-item:hover:not(.selected) {
   background: var(--bg-hover);

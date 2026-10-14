@@ -75,8 +75,9 @@ describe("domain tree review fixes", () => {
   it("parent totals count each kind once; typed subsets and other views do not add (6)", () => {
     const model = buildTreeModel({ tree, summary: { summary: { counts: { files: 30 } as never } } });
     const incident = model.find((n) => n.id === "domain:incident");
-    // 웹셸 / 웹 서버 로그 are typed subsets of windows-system: no parent total from them.
-    expect(incident?.count).toBeUndefined();
+    // Parser-quality r1: a kind with only typed nodes in a domain counts its typed evidence nodes
+    // (웹셸 0 + 웹 서버 로그 5 + BITS 0); a kind-wide node elsewhere does not leak in.
+    expect(incident?.count).toBe(5);
     const os = model.find((n) => n.id === "domain:os");
     // windows-system (9) once, although WER (4) is a typed child of it.
     expect(os?.count).toBe(9);

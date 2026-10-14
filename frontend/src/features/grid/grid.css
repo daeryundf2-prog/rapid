@@ -388,6 +388,12 @@
   color: var(--text-subtle);
 }
 
+/* Acquisition-copy host time (files 수정): shown, but not as an evidence time. */
+.grid-cell-copytime {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
 .grid-header .grid-cell-select,
 .grid-header .grid-cell-first {
   /* Must stay sticky: `.grid-hcell { position: relative }` below would otherwise win, and

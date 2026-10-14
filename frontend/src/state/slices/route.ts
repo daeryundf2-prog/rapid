@@ -101,7 +101,11 @@ export const createRouteSlice: StateCreator<AppState, [], [], RouteSlice> = (set
     const next: Route = { runId, collection };
     if ((collection === "artifacts" || collection === "analysis") && options.kind) next.kind = options.kind;
     if (collection === "analysis" && options.analysisId) next.analysisId = options.analysisId;
-    else if (collection === "artifacts" && options.category) next.category = options.category;
+    else if (
+      (collection === "artifacts" || collection === "files" || collection === "docs") &&
+      options.category
+    )
+      next.category = options.category;
     if (collection === "review" && options.status) next.status = options.status;
     if (options.q) next.q = options.q;
     if (sameRun && current.row) {

@@ -211,6 +211,30 @@
   cursor: pointer;
 }
 
+.dash-disclosure-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.dash-disclosure {
+  display: grid;
+  grid-template-columns: minmax(96px, max-content) 1fr;
+  gap: var(--space-2);
+  align-items: baseline;
+}
+
+.dash-disclosure dt,
+.dash-disclosure dd {
+  margin: 0;
+}
+
+.dash-disclosure dd {
+  color: var(--text);
+  font-size: var(--fs-table-aux);
+  overflow-wrap: anywhere;
+}
+
 .dash-issues {
   max-block-size: 200px;
   margin: var(--space-1) 0 0;

@@ -105,6 +105,8 @@ export interface FilterBarProps {
   kindOptions?: string[];
   /** Controls placed before the search field (the view switch of the column view). */
   lead?: ReactNode;
+  /** Collection-specific controls after the search field (문서: "일치만"). */
+  extra?: ReactNode;
 }
 
 function toggle<T extends string>(list: T[], value: T): T[] {
@@ -349,6 +351,8 @@ export function FilterBar(props: FilterBarProps) {
             }}
           />
         </label>
+
+        {props.extra}
 
         {variant === "explore" ? (
           <span className="popover-anchor">

@@ -24,6 +24,7 @@ import {
 import { announce } from "../../a11y";
 import { DisabledReason } from "../../a11y/primitives";
 import { ApiError, downloadFile } from "../../api/client";
+import { DOCS_MATCHED } from "../../api/collections";
 import type { RunExtractResult } from "../../api/extract";
 import { getRunTree } from "../../api/runs";
 import type { CollectionRef, GridRow } from "../../contracts/collection";
@@ -51,7 +52,7 @@ import {
 import { ntfsJoinOf } from "./columns/files";
 import { EmptyHintLink } from "./EmptyHintLink";
 import { GridEmpty, type GridEmptyState } from "./GridEmpty";
-import { ColumnMenu, GridFooter, GridToolbar } from "./GridToolbar";
+import { ColumnMenu, DocsMatchedToggle, GridFooter, GridToolbar } from "./GridToolbar";
 import { buildViewerTarget, type GridCommandHost, runBatch, runNote, useGridCommands } from "./gridCommands";
 import {
   type AutoHideReason,
@@ -1203,6 +1204,14 @@ export function DataGrid(props: DataGridProps = {}) {
         reviewStatus={ref.id === "review" ? ref.status : undefined}
         onReviewStatus={(status) => route.navigate({ id: "review", ...(status ? { status } : {}) }, q)}
         kindOptions={kindOptions}
+        extra={
+          ref.id === "docs" ? (
+            <DocsMatchedToggle
+              on={ref.category === DOCS_MATCHED}
+              onChange={(on) => route.navigate({ id: "docs", ...(on ? { category: DOCS_MATCHED } : {}) }, q)}
+            />
+          ) : undefined
+        }
       />
 
       {serverSorted ? (

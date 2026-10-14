@@ -162,7 +162,7 @@ export function collectionQueryKey(runId: string | null, query: CollectionQuery,
     runId,
     query.ref.id,
     query.ref.kind ?? "",
-    (query.ref.id === "artifacts" && !query.ref.kind) || query.ref.id === "files"
+    (query.ref.id === "artifacts" && !query.ref.kind) || query.ref.id === "files" || query.ref.id === "docs"
       ? (query.ref.category ?? "")
       : "",
     def.source === "whole" ? (query.search ?? null) : null,

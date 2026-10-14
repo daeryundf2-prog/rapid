@@ -118,7 +118,7 @@ export interface Route {
   notes?: boolean;
   /** Explorer view over the collection (X12, S9), URL `view=`; absent = "columns". */
   view?: ExplorerView;
-  /** Artifact category node (X11, S7; artifacts without a kind) or files category (`GET /files?category=`), URL `category=`. */
+  /** Artifact category node (X11, S7; artifacts without a kind) or files category (`GET /files?category=`), or docs `matched` (일치만, `GET /docs?matched=1`), URL `category=`. */
   category?: string;
   /** Server sort of one artifact kind, URL `sort=details.run_count:desc` (artifacts with a kind only). */
   sort?: ServerSort;
@@ -298,7 +298,9 @@ export function parseHash(hash: string): Route {
     } else if (
       key === "category" &&
       value &&
-      ((route.collection === "artifacts" && !route.kind) || route.collection === "files")
+      ((route.collection === "artifacts" && !route.kind) ||
+        route.collection === "files" ||
+        route.collection === "docs")
     ) {
       route.category = safeDecode(value);
     } else if (key === "path" && value) route.path = safeDecode(value);
@@ -360,7 +362,10 @@ export function serializeRoute(route: Route): string {
       }
   }
   const query: string[] = [];
-  if (((collection === "artifacts" && !route.kind) || collection === "files") && route.category) {
+  if (
+    ((collection === "artifacts" && !route.kind) || collection === "files" || collection === "docs") &&
+    route.category
+  ) {
     query.push(`category=${encodeURIComponent(route.category)}`);
   }
   if (collection === "analysis" && route.analysisId) query.push(`id=${encodeURIComponent(route.analysisId)}`);

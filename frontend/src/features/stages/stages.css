@@ -263,6 +263,21 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* 공개 사항 digest under the plan heading (parser-quality r1). */
+.process-plan-disclosures {
+  margin-block: var(--space-2);
+}
+
+.process-plan-disclosures > summary {
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
+  cursor: pointer;
+}
+
+.process-plan-disclosures[open] > summary {
+  margin-block-end: var(--space-2);
+}
+
 .process-plan-wrap {
   overflow-x: auto;
 }

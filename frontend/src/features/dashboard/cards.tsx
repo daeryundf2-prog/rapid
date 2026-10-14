@@ -14,14 +14,16 @@ import {
   getKeywordHitCount,
   saveCaseNotes,
 } from "../../api/dashboard";
-import type { CanonicalCounts, ItemRow } from "../../api/runs";
+import type { CanonicalCounts, ItemRow, RunWarning } from "../../api/runs";
 import { RUN_MODE_LABEL } from "../../app/collections";
 import { StatusBadge } from "../../components/Badge";
+import { ToneChip } from "../../components/ToneChip";
 import type { ReviewStatus } from "../../contracts/collection";
 import { Icon } from "../../icons";
 import { stepNameLabel } from "../stages/stepLabels";
 import { formatBytes, partitionLabel } from "../tree/model";
 import { CardEmpty } from "./Card";
+import type { DisclosureItem } from "./disclosures";
 import {
   type CategoryBar,
   evidenceItemCount,
@@ -641,5 +643,51 @@ export function StartCard({ onGo }: { onGo: (target: "search" | "artifacts" | "r
         </li>
       ))}
     </ul>
+  );
+}
+
+// --- 공개 사항 ---------------------------------------------------------------
+
+/**
+ * 공개 사항 (parser-quality r1): what this run could not do or did not do in full — missing
+ * tools, caps, the evidence timezone, acquisition-copy times — plus the step warnings.
+ */
+export function DisclosuresCard({ items, warnings }: { items: DisclosureItem[]; warnings: RunWarning[] }) {
+  if (!items.length && !warnings.length) {
+    return (
+      <CardEmpty title="공개 사항">
+        이 런의 요약에는 공개 사항이 없습니다 (이전 버전에서 처리한 런일 수 있습니다).
+      </CardEmpty>
+    );
+  }
+  return (
+    <div className="dash-disclosures" data-testid="disclosures-card">
+      {items.length ? (
+        <dl className="dash-disclosure-list">
+          {items.map((item) => (
+            <div key={item.id} className="dash-disclosure" data-tone={item.tone}>
+              <dt>
+                <ToneChip tone={item.tone === "warn" ? "warn" : ""}>{item.label}</ToneChip>
+              </dt>
+              <dd>{item.text}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+      {warnings.length ? (
+        <details className="dash-details">
+          <summary>단계 경고 {n(warnings.length)}건</summary>
+          <ul className="dash-issues">
+            {warnings.slice(0, 100).map((warning, index) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: static read-only list
+              <li key={index}>
+                <span className="mono">{warning.step ? stepNameLabel(String(warning.step)) : ""}</span>{" "}
+                {String(warning.message ?? "")}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+    </div>
   );
 }

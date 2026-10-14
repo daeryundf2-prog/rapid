@@ -16,6 +16,7 @@ import {
   str,
   strOrNull,
 } from "./common";
+import { COPY_TIME_TITLE, deletedCell, modifiedCell } from "./FileCells";
 
 /** Shown on the NTFS columns while no NTFS-meta analysis has been joined (plan U-P1-3). */
 export const NTFS_EMPTY_HINT = "NTFS 메타 분석을 실행하면 채워집니다";
@@ -95,6 +96,67 @@ export function isDirectoryRaw(raw: Record<string, unknown>, path: string | null
   return path !== null && /[\\/]$/.test(path);
 }
 
+/** Korean names of the files output categories (core/files.py DEFAULT_FILE_CATEGORIES). */
+export const FILE_CATEGORY_LABELS: Readonly<Record<string, string>> = {
+  documents: "문서",
+  images: "이미지",
+  archives: "압축",
+  databases: "데이터베이스",
+  emails: "이메일",
+  "mobile-images": "모바일 이미지",
+  executables: "실행 파일",
+  "memory-dumps": "메모리 덤프",
+  "disk-images": "디스크 이미지",
+  "vehicle-images": "차량 이미지",
+  other: "기타",
+};
+
+export function fileCategoryLabel(category: string): string {
+  return FILE_CATEGORY_LABELS[category] ?? category;
+}
+
+/** Where the 수정 time of a files row comes from (`modified_at_origin`, core/files.py). */
+export const MODIFIED_ORIGIN_LABELS: Readonly<Record<string, string>> = {
+  filesystem: "파일시스템 시각",
+  listing: "이미지 목록(fls/MFT) 시각",
+  "acquisition-copy": "취득 사본 시각",
+  "ntfs-si": "NTFS $SI 수정 시각(조인)",
+};
+
+export interface ModifiedTime {
+  value: string | null;
+  /** `filesystem` | `listing` | `acquisition-copy` | `ntfs-si` | null (old outputs: unknown). */
+  origin: string | null;
+}
+
+/**
+ * The 수정 time of a files row: `fs_modified_at` (the evidence filesystem's own time) when
+ * present; for an acquisition copy the NTFS join's `$SI` modified time when joined, else the
+ * copy's host mtime flagged `acquisition-copy`; otherwise `modified_at`.
+ */
+export function modifiedTimeOf(raw: Record<string, unknown>): ModifiedTime {
+  const origin = strOrNull(raw.modified_at_origin);
+  const fs = strOrNull(raw.fs_modified_at);
+  if (fs) return { value: fs, origin: origin && origin !== "acquisition-copy" ? origin : "filesystem" };
+  const ntfs = isRecord(raw.ntfs) ? raw.ntfs : {};
+  const si = strOrNull(ntfs.si_modified_at);
+  if (origin === "acquisition-copy") {
+    if (si) return { value: si, origin: "ntfs-si" };
+    return { value: strOrNull(raw.modified_at), origin };
+  }
+  return { value: strOrNull(raw.modified_at), origin };
+}
+
+/** 수정 / 시각 출처 tooltip: the time plus where it comes from. */
+export function modifiedTooltip(row: { fields: Record<string, unknown> }): string {
+  const value = strOrNull(row.fields.modifiedAt);
+  const origin = strOrNull(row.fields.modifiedOrigin);
+  if (origin === "acquisition-copy") return COPY_TIME_TITLE;
+  const text = value ? formatTimestamp(value, currentTimezone()) : "";
+  const hint = origin ? (MODIFIED_ORIGIN_LABELS[origin] ?? origin) : "";
+  return [text, hint].filter(Boolean).join(" · ");
+}
+
 /** Files default layout, highest priority first: 이름 > 수정 > 크기 > 선별 > 경로 > NTFS 생성. */
 export const FILES_PRIORITY = ["title", "timestamp", "size", "review", "path", "ntfsCreated"] as const;
 
@@ -113,19 +175,38 @@ export const filesCollection: CollectionDef = {
     const recovery = isRecord(raw.recovery) ? raw.recovery : {};
     const hashes = isRecord(raw.hashes) ? raw.hashes : {};
     const join = ntfsJoinOf(ctx?.page?.meta);
+    const modified = modifiedTimeOf(raw);
+    const ntfs = isRecord(raw.ntfs) ? raw.ntfs : null;
+    const deleted =
+      typeof raw.is_deleted === "boolean"
+        ? raw.is_deleted
+        : typeof ntfs?.is_deleted === "boolean"
+          ? ntfs.is_deleted
+          : null;
     return makeRow(
       makeRef("files", `/candidates/${index}`),
       {
         title: strOrNull(raw.name) ?? (baseName(path) || `파일 ${index + 1}`),
         sourcePath: path,
-        timestamp: strOrNull(raw.modified_at),
+        // A copy's host mtime is not an evidence time: it never feeds time filters / views.
+        timestamp: modified.origin === "acquisition-copy" ? null : modified.value,
         artifactType: strOrNull(raw.extension),
         sha256: sha256Of(raw.sha256, hashes.sha256),
       },
       {
         extension: str(raw.extension),
         size: typeof raw.size === "number" ? raw.size : null,
-        categories: joinList(raw.categories),
+        categories: Array.isArray(raw.categories)
+          ? raw.categories
+              .map((c) => fileCategoryLabel(str(c)))
+              .filter(Boolean)
+              .join(", ")
+          : joinList(raw.categories),
+        modifiedAt: modified.value,
+        modifiedOrigin: modified.origin,
+        isDeleted: deleted,
+        siModified: strOrNull(ntfs?.si_modified_at),
+        attributes: Array.isArray(ntfs?.attributes) ? joinList(ntfs?.attributes) : str(ntfs?.attributes),
         recovery: str(recovery.candidate_kind),
         knownGood: str(raw.known_good_status),
         // NTFS provenance (plan analysis-workbench-p1 §3.3): null until an NTFS-meta analysis is joined.
@@ -151,7 +232,24 @@ export const filesCollection: CollectionDef = {
       minWidth: 80,
       format: (r) => formatBytes(r.fields.size),
     }),
-    { ...col.timestamp(150), header: "수정", minWidth: 150 },
+    {
+      id: "timestamp",
+      header: "수정",
+      width: 150,
+      minWidth: 150,
+      presets: ["analysis", "compact"],
+      filterKind: "time",
+      value: (r) => strOrNull(r.fields.modifiedAt),
+      format: (r) => {
+        const value = strOrNull(r.fields.modifiedAt);
+        return value ? formatTimestamp(value, currentTimezone()) : "";
+      },
+      tooltip: (r) => modifiedTooltip(r),
+      render: (r) => {
+        const value = strOrNull(r.fields.modifiedAt);
+        return modifiedCell(r, value ? formatTimestamp(value, currentTimezone()) : "");
+      },
+    },
     {
       ...ntfsTime("ntfsCreated", "NTFS 생성", "created_at"),
       width: 150,
@@ -162,6 +260,28 @@ export const filesCollection: CollectionDef = {
     col.field("extension", "확장자", 80, ["compact"], (r) => fieldStr(r, "extension")),
     col.field("categories", "분류", 160, ["compact"], (r) => fieldStr(r, "categories")),
     col.field("recovery", "복구 유형", 100, ["source"], (r) => fieldStr(r, "recovery")),
+    col.field("modifiedOrigin", "시각 출처", 130, ["source"], (r) => strOrNull(r.fields.modifiedOrigin), {
+      format: (r) => {
+        const origin = strOrNull(r.fields.modifiedOrigin);
+        return origin ? (MODIFIED_ORIGIN_LABELS[origin] ?? origin) : "";
+      },
+      tooltip: (r) => modifiedTooltip(r),
+    }),
+    ntfsTime("ntfsSiModified", "NTFS $SI 수정", "si_modified_at"),
+    col.field(
+      "deleted",
+      "삭제",
+      80,
+      ["source"],
+      (r) => (typeof r.fields.isDeleted === "boolean" ? r.fields.isDeleted : null),
+      {
+        format: (r) => (r.fields.isDeleted === true ? "삭제됨" : r.fields.isDeleted === false ? "할당" : ""),
+        render: deletedCell,
+      },
+    ),
+    col.field("attributes", "파일 속성", 160, ["source"], (r) => strOrNull(r.fields.attributes), {
+      emptyHint: ntfsHint,
+    }),
     ntfsTime("ntfsAccessed", "NTFS 접근", "accessed_at"),
     col.field(
       "ntfsEntry",

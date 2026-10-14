@@ -113,8 +113,52 @@ export const fetchFilesPage = (
   signal?: AbortSignal,
   category?: string,
 ) => jsonPaged(runId, "files", "candidates", offset, limit, signal, category);
-export const fetchDocsPage = (runId: string, offset: number, limit: number, signal?: AbortSignal) =>
-  jsonPaged(runId, "docs", "results", offset, limit, signal);
+/** Docs route value of the "일치만" toggle (`#/case/{run}/explore/docs?category=matched`). */
+export const DOCS_MATCHED = "matched";
+
+/**
+ * `GET /docs`: every document candidate (`candidates`, parser-quality r1), or only the keyword
+ * matches with `matched=1`. A server that still pages only `results` (the matches) is read as
+ * before; `meta.docs_rows` says which list the rows came from ("candidates" | "results").
+ */
+export async function fetchDocsPage(
+  runId: string,
+  offset: number,
+  limit: number,
+  signal?: AbortSignal,
+  matchedOnly = false,
+): Promise<RawPage> {
+  const started = now();
+  const payload = await api<Record<string, unknown>>(
+    `/api/runs/${enc(runId)}/docs?offset=${offset}&limit=${limit}${matchedOnly ? "&matched=1" : ""}`,
+    { signal },
+  );
+  const key = Array.isArray(payload.candidates) ? "candidates" : "results";
+  const rows = asRows(payload[key]);
+  const pagination =
+    payload.pagination && typeof payload.pagination === "object" && !Array.isArray(payload.pagination)
+      ? (payload.pagination as Record<string, unknown>)
+      : {};
+  const total =
+    (matchedOnly ? (asNumber(payload.matched) ?? asNumber(pagination.matched)) : null) ??
+    asNumber(pagination.total) ??
+    asNumber(payload.total) ??
+    asNumber(payload.record_count);
+  const hasMore =
+    pagination.has_more === true ||
+    payload.has_more === true ||
+    (total !== null ? offset + rows.length < total : rows.length >= limit);
+  return {
+    rows,
+    offset,
+    backend: "file",
+    elapsedMs: Math.round(now() - started),
+    total: total ?? (hasMore ? null : offset + rows.length),
+    truncated: pagination.truncated === true,
+    hasMore,
+    meta: { docs_rows: key },
+  };
+}
 export const fetchTimelinePage = (runId: string, offset: number, limit: number, signal?: AbortSignal) =>
   jsonPaged(runId, "timeline", "events", offset, limit, signal);
 export const fetchIndicatorsPage = (runId: string, offset: number, limit: number, signal?: AbortSignal) =>

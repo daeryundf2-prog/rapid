@@ -248,8 +248,8 @@ export function EvidenceTree({ runId }: { runId: string }) {
               aria-selected={isSelected}
               aria-current={isSelected ? "page" : undefined}
               aria-disabled={node.disabledReason ? true : undefined}
-              title={node.disabledReason}
-              className={`case-tree-item${isSelected ? " selected" : ""}${node.disabledReason ? " disabled" : ""}${node.count === 0 ? " is-empty" : ""}`}
+              title={node.disabledReason ?? node.note}
+              className={`case-tree-item${isSelected ? " selected" : ""}${node.disabledReason ? " disabled" : ""}${node.count === 0 ? " is-empty" : ""}${node.dimmed ? " is-dimmed" : ""}`}
               style={{ paddingInlineStart: `calc(var(--space-2) + ${level - 1} * var(--space-4))` }}
               onFocus={() => setFocusedId(node.id)}
               onClick={(event) => {

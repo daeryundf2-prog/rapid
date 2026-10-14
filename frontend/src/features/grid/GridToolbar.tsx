@@ -1,4 +1,4 @@
-import { type RefObject, useEffect, useId, useMemo, useRef, useState } from "react";
+import { type ReactNode, type RefObject, useEffect, useId, useMemo, useRef, useState } from "react";
 import { DisabledReason } from "../../a11y/primitives";
 import { Popover } from "../../components/Popover";
 import type { GridRow, ReviewStatus } from "../../contracts/collection";
@@ -29,6 +29,27 @@ export interface GridToolbarProps {
   reviewStatus?: ReviewStatus;
   onReviewStatus?: (status: ReviewStatus | undefined) => void;
   kindOptions?: string[];
+  /** Collection-specific toolbar controls (문서: "일치만"). */
+  extra?: ReactNode;
+}
+
+/** 문서 toolbar: list every document, or only the keyword matches (`GET /docs?matched=1`). */
+export function DocsMatchedToggle({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      className="grid-btn"
+      aria-pressed={on}
+      data-testid="docs-matched-toggle"
+      title={
+        on ? "키워드 일치 문서만 표시 중 — 누르면 전체 문서" : "전체 문서 표시 중 — 누르면 키워드 일치 문서만"
+      }
+      onClick={() => onChange(!on)}
+    >
+      <Icon name="filter" />
+      <span>일치만</span>
+    </button>
+  );
 }
 
 export interface ColumnMenuProps {
@@ -161,6 +182,7 @@ export function GridToolbar(props: GridToolbarProps) {
       onReviewStatus={props.onReviewStatus}
       kindOptions={props.kindOptions}
       lead={lead}
+      extra={props.extra}
     />
   );
 }
