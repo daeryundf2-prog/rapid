@@ -101,7 +101,8 @@ class FilesScanRecoveryTests(unittest.TestCase):
             recovery = candidates[0]["recovery"]
             self.assertEqual(recovery["schema"], "candidate-kind-v1")
             self.assertEqual(recovery["candidate_kind"], "existing")
-            self.assertEqual(recovery["deletion_state"], "allocated")
+            # r2: a folder (acquisition-copy) input does not say whether the original was allocated.
+            self.assertEqual(recovery["deletion_state"], "unknown")
             self.assertEqual(recovery["confidence"], "high")
             self.assertEqual(recovery["source_path"], candidates[0]["path"])
             self.assertEqual(payload["summary"]["candidate_kind_counts"], {"existing": 1})
@@ -115,7 +116,8 @@ class FilesScanRecoveryTests(unittest.TestCase):
 
             recovery = payload["candidates"][0]["recovery"]
             self.assertEqual(recovery["candidate_kind"], "existing")
-            self.assertEqual(recovery["deletion_state"], "allocated")
+            # r2: a folder (acquisition-copy) input does not say whether the original was allocated.
+            self.assertEqual(recovery["deletion_state"], "unknown")
 
 
 class CarvingRecoveryTests(unittest.TestCase):

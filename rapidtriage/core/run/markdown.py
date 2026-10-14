@@ -125,6 +125,9 @@ def build_disclosure_section(disclosures: Mapping[str, object]) -> str:
             f"- {indicators.get('display_label') or '지표'}: {indicators.get('rule_status_message') or ''}"
             f" (상한 전 {indicators.get('total_before_cap')}건, 절단 {bool(indicators.get('truncated'))})"
         )
+        cap_policy = indicators.get("cap_policy") if isinstance(indicators.get("cap_policy"), Mapping) else {}
+        if cap_policy.get("note"):
+            lines.append(f"- 지표 상한: {cap_policy.get('note')}")
     files = disclosures.get("files") if isinstance(disclosures.get("files"), Mapping) else {}
     if files.get("excluded_file_count"):
         lines.append(
@@ -134,6 +137,16 @@ def build_disclosure_section(disclosures: Mapping[str, object]) -> str:
     documents = disclosures.get("documents") if isinstance(disclosures.get("documents"), Mapping) else {}
     if documents.get("text_status_counts"):
         lines.append(f"- 문서 텍스트 추출 상태: {dict(documents.get('text_status_counts') or {})}")
+    size_caps = documents.get("size_caps") if isinstance(documents.get("size_caps"), Mapping) else {}
+    if size_caps.get("too_large_count") or size_caps.get("binary_rejected_count"):
+        lines.append(f"- 문서 크기 상한: {size_caps.get('note')}")
+    row_truncation = disclosures.get("input_row_truncation") if isinstance(disclosures.get("input_row_truncation"), Mapping) else {}
+    if row_truncation.get("payload_truncated_rows") or row_truncation.get("preview_truncated_rows"):
+        steps = ", ".join(f"`{name}`" for name in (row_truncation.get("by_step") or {}))
+        lines.append(
+            f"- 행 단위 절단: 원문 일부만 보존 {row_truncation.get('payload_truncated_rows', 0)}건,"
+            f" 표시용 미리보기만 절단 {row_truncation.get('preview_truncated_rows', 0)}건 ({steps})"
+        )
     notes = disclosures.get("collection_notes") if isinstance(disclosures.get("collection_notes"), Mapping) else {}
     for kind, items in notes.items():
         lines.append(f"- `{kind}` 수집 메모: {'; '.join(str(item) for item in items)}")

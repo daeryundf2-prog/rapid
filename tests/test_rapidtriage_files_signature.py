@@ -38,12 +38,13 @@ class FileSignatureMismatchTests(unittest.TestCase):
 
         self.assertEqual(payload["summary"]["candidate_count"], 1)
         self.assertEqual(payload["summary"]["signature_checked_count"], 1)
-        self.assertEqual(payload["summary"]["signature_mismatch_count"], 0)
+        # r2: same rule as the windows-filesystem artifact: a known extension
+        # without its signature is a mismatch ("expected signature missing").
+        self.assertEqual(payload["summary"]["signature_mismatch_count"], 1)
         self.assertEqual(payload["summary"]["signature_unrecognized_known_extension_count"], 1)
-        self.assertEqual(
-            payload["candidates"][0]["file_signature"]["status"],
-            "unrecognized-header-for-known-extension",
-        )
+        signature = payload["candidates"][0]["file_signature"]
+        self.assertEqual(signature["status"], "extension-signature-mismatch")
+        self.assertEqual(signature["mismatch_direction"], "extension-expected-signature-missing")
 
 
 if __name__ == "__main__":

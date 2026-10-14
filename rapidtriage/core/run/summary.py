@@ -345,6 +345,8 @@ def build_run_disclosures(
             "encrypted_count": docs_summary.get("encrypted_count"),
             "zero_text_count": docs_summary.get("zero_text_count"),
             "text_status_counts": docs_summary.get("text_status_counts", {}),
+            # Text-extraction byte caps (core/docs.py build_docs_size_cap_disclosure).
+            "size_caps": dict(docs_summary["size_caps"]) if isinstance(docs_summary.get("size_caps"), Mapping) else None,
         },
         "indicators": {
             "display_label": indicator_summary.get("display_label"),
@@ -352,6 +354,8 @@ def build_run_disclosures(
             "total_before_cap": indicator_summary.get("total_before_cap"),
             "truncated": indicator_summary.get("truncated"),
             "rule_status_message": indicator_summary.get("rule_status_message"),
+            # Indicator cap (core/indicators.py indicator_cap_policy).
+            "cap_policy": dict(indicator_summary["cap_policy"]) if isinstance(indicator_summary.get("cap_policy"), Mapping) else None,
         },
         "files": {
             "excluded_file_count": files_summary.get("excluded_file_count"),
@@ -359,6 +363,39 @@ def build_run_disclosures(
             "excluded_category_counts": files_summary.get("excluded_category_counts", {}),
         },
         "collection_notes": collection_notes,
+        "input_row_truncation": summarize_input_row_truncation(steps),
+    }
+
+
+def _count_values(value: object) -> int:
+    if not isinstance(value, Mapping):
+        return 0
+    return sum(int(item) for item in value.values() if isinstance(item, int) and not isinstance(item, bool))
+
+
+def summarize_input_row_truncation(steps: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    """Aggregate of the per-step ``row_truncation`` (core/run/steps.py).
+
+    ``payload_truncated_rows`` counts rows whose stored value is only part of
+    the original (plus ``*_truncated_rows``/``*_truncated_count`` counters);
+    any payload cut is ``level=warning``. ``preview_truncated_rows`` counts
+    display-preview cuts only (record value kept): ``level=notice``.
+    """
+    by_step: dict[str, dict[str, object]] = {}
+    payload_rows = 0
+    preview_rows = 0
+    for step in steps:
+        disclosure = step.get("row_truncation")
+        if not isinstance(disclosure, Mapping):
+            continue
+        by_step[str(step.get("name") or "")] = dict(disclosure)
+        payload_rows += int(disclosure.get("rows_with_truncation") or 0) + _count_values(disclosure.get("count_fields"))
+        preview_rows += int(disclosure.get("preview_only_rows") or 0) + _count_values(disclosure.get("preview_count_fields"))
+    return {
+        "payload_truncated_rows": payload_rows,
+        "preview_truncated_rows": preview_rows,
+        "level": "warning" if payload_rows else ("notice" if preview_rows else "none"),
+        "by_step": by_step,
     }
 
 
@@ -1180,8 +1217,9 @@ def infer_processing_profile_label(
     if max_extract_size_bytes or max_file_count:
         return "Standard - bounded extraction"
     if caps_applied:
-        # Parser/stage caps were hit: never call such a run "uncapped".
-        return "Deep - extraction without size limits (parser caps disclosed)"
+        # Parser/stage/row caps were hit: never call such a run "without size
+        # limits" (parser-quality r2).
+        return "Deep - parser/stage caps applied (disclosed)"
     return "Deep - extraction without size limits"
 
 

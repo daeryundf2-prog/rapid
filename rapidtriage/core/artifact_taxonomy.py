@@ -69,6 +69,14 @@ KNOWN_DYNAMIC_ARTIFACT_TYPES = {
     "windows-sam-account",
     "windows-sam-group",
     "document-lock-owner",
+    # Parser-quality r2: Amcache extended inventory sections.
+    "amcache-driver-binary",
+    "amcache-driver-package",
+    "amcache-device-pnp",
+    "amcache-device-container",
+    "amcache-application-shortcut",
+    "amcache-device-census",
+    "amcache-inventory-row",
 }
 
 

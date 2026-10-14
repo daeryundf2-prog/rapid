@@ -24,6 +24,7 @@ from .doc_text import (
     OLE_SIGNATURE,
     DocumentText,
     TextTooLarge,
+    decode_text_bytes,
     extract_doc_text,
     extract_hwp_text,
     extract_hwpx_text,
@@ -436,6 +437,7 @@ def run_docs_search(
             ),
             "ocr_available": False,
             "listing_contract": "candidates lists every document; matched=true rows are the keyword hits (results)",
+            "size_caps": build_docs_size_cap_disclosure(candidates),
         },
         "manifest": build_manifest_summary(
             manifest if manifest is not None else build_manifest(input_root, normalized)
@@ -463,6 +465,28 @@ def run_docs_search(
             "term_count": index_payload["summary"]["term_count"],
         }
     return payload
+
+
+def build_docs_size_cap_disclosure(candidates: Sequence[DocumentCandidate]) -> dict[str, object]:
+    """Text-extraction size caps and the documents they stopped (``too-large``)."""
+    too_large = [item for item in candidates if item.text_status == "too-large"]
+    binary = [item for item in candidates if item.text_status == "binary-rejected"]
+    return {
+        "max_input_bytes": MAX_EXTRACT_TEXT_BYTES,
+        "max_archive_member_bytes": MAX_ZIP_TEXT_MEMBER_BYTES,
+        "max_archive_total_bytes": MAX_ZIP_TEXT_TOTAL_BYTES,
+        "max_pdf_stream_decompressed_bytes": MAX_PDF_STREAM_DECOMPRESSED_BYTES,
+        "too_large_count": len(too_large),
+        "too_large_samples": [
+            {"path": item.path, "size": item.size, "reason": item.text_reason} for item in too_large[:20]
+        ],
+        "binary_rejected_count": len(binary),
+        "truncated": bool(too_large),
+        "note": (
+            f"크기 상한 초과 문서 {len(too_large)}건은 본문을 추출·색인하지 않았습니다(파일 {MAX_EXTRACT_TEXT_BYTES // 1_000_000} MB, "
+            f"압축 멤버 {MAX_ZIP_TEXT_MEMBER_BYTES // 1_000_000} MB 상한). 비인쇄 문자 비율 초과 {len(binary)}건도 색인하지 않았습니다."
+        ),
+    }
 
 
 def document_extraction_error(
@@ -602,6 +626,33 @@ def query_docs_index(index_path: Path, keywords: Sequence[str], *, limit: int = 
     return result
 
 
+MAX_SUBSTRING_EXPANSIONS_PER_TERM = 20000
+
+
+def expand_index_query_terms(
+    query_terms: Sequence[str],
+    terms: Mapping[str, object],
+    *,
+    max_expansions: int = MAX_SUBSTRING_EXPANSIONS_PER_TERM,
+) -> tuple[dict[str, list[str]], bool]:
+    """Indexed tokens containing each query term (the term itself first)."""
+    expansions: dict[str, list[str]] = {}
+    truncated = False
+    vocabulary = list(terms) if isinstance(terms, Mapping) else []
+    for term in query_terms:
+        if not term:
+            continue
+        found = [term] if term in terms else []
+        for indexed in vocabulary:
+            if indexed != term and term in indexed:
+                if len(found) >= max_expansions:
+                    truncated = True
+                    break
+                found.append(indexed)
+        expansions[term] = found
+    return expansions, truncated
+
+
 def search_docs_index_payload(
     index_payload: Mapping[str, object],
     keywords: Sequence[str],
@@ -617,10 +668,16 @@ def search_docs_index_payload(
     }
     terms = index_payload.get("terms") if isinstance(index_payload.get("terms"), dict) else {}
     scored: dict[int, dict[str, object]] = {}
+    # Parser-quality r2: the index stores whole tokens only ("근로계약서를"),
+    # so a query term is also matched inside longer indexed tokens
+    # (substring over the vocabulary; Korean particles/compounds).
+    expansions, expansion_truncated = expand_index_query_terms(query_terms, terms)
     for term in query_terms:
-        posting_rows = terms.get(term, []) if isinstance(terms, dict) else []
-        if not isinstance(posting_rows, list):
-            continue
+        posting_rows: list[object] = []
+        for indexed_term in expansions.get(term, [term]):
+            rows = terms.get(indexed_term, []) if isinstance(terms, dict) else []
+            if isinstance(rows, list):
+                posting_rows.extend(rows)
         for posting in posting_rows:
             if not isinstance(posting, dict):
                 continue
@@ -637,7 +694,12 @@ def search_docs_index_payload(
                 },
             )
             row["score"] = int(row["score"]) + count
-            row["matched_terms"].append({"term": term, "count": count})
+            matched = row["matched_terms"]
+            existing = next((item for item in matched if item["term"] == term), None)
+            if existing is None:
+                matched.append({"term": term, "count": count})
+            else:
+                existing["count"] = int(existing["count"]) + count
 
     ranked = sorted(
         scored.values(),
@@ -692,6 +754,14 @@ def search_docs_index_payload(
         "truncated": len(ranked) > len(results),
         "missing_terms": [term for term in query_terms if term not in found_terms],
         "stores_full_text": False,
+        "match_mode": "token+substring",
+        "substring_expanded_terms": {term: len(expansions.get(term, [])) for term in query_terms},
+        "substring_expansion_truncated": expansion_truncated,
+        "recall_note": (
+            "색인은 단어(토큰) 단위입니다: 질의어는 색인 토큰 안의 부분 문자열로도 찾습니다(예: '계약' → '근로계약서를'). "
+            "토큰 경계를 넘는 구절은 찾지 못하며, 원문 확인은 문서 검색(docs/source-search)으로 하십시오."
+            + (" 부분 일치 확장이 상한에 걸려 일부 토큰을 보지 않았습니다." if expansion_truncated else "")
+        ),
     }
     output_core = {
         "command": "docs-index-search",
@@ -779,7 +849,7 @@ def extract_text(
     if kind in HANCOM_OOXML_KINDS:
         kind = HANCOM_OOXML_KINDS[kind]
     if kind in TEXT_EXTS:
-        return path.read_text(encoding="utf-8", errors="ignore")
+        return decode_text_bytes(path.read_bytes())
     if kind == "eml":
         return _extract_eml_text(path)
     if kind == "mbox":
@@ -789,7 +859,7 @@ def extract_text(
     if kind in {"ost", "pst"}:
         return _extract_bounded_container_text(path)
     if kind in HTML_EXTS:
-        return _strip_markup(path.read_text(encoding="utf-8", errors="ignore"))
+        return _strip_markup(decode_text_bytes(path.read_bytes()))
     if kind in OFFICE_OPEN_XML_EXTS:
         return _extract_office_open_xml_text(
             path,

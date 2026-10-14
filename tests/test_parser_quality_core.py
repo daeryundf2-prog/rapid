@@ -373,7 +373,9 @@ class TimelineMappingTests(unittest.TestCase):
         self.assertEqual(summary["eventlog_detections_merged"], 1)
         merged = next(event for event in payload["events"] if event["event_type"] == "eventlog-logon-success")
         self.assertEqual(merged["details"]["detections"][0]["rule_id"], "R1")
-        self.assertEqual(summary["out_of_range_reason_counts"], {"before-1980": 1, "after-now-plus-1d": 1})
+        # r2: the Amcache link date (PE TimeDateStamp, 2104) is a build stamp, not an event.
+        self.assertEqual(summary["out_of_range_reason_counts"], {"before-1980": 1})
+        self.assertEqual(summary["build_stamp_fields_not_emitted"], {"amcache-schema-row.link_date_raw": 1})
         self.assertEqual(summary["timezone"]["storage"], "UTC")
         self.assertTrue(all(event["timezone"] for event in payload["events"]))
         self.assertTrue(all(event["timestamp_kind"] for event in payload["events"]))

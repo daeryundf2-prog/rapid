@@ -154,6 +154,66 @@
         },
         "valid_range": {
           "type": "object"
+        },
+        "label_variants_merged": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "label_variants_merged_by_type": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "cross_record_merges": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "key_level_events_collapsed": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "key_level_events_collapsed_by_type": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "aggregate_rows_not_emitted": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "build_stamp_fields_not_emitted": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "build_stamp_note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "offset_timezone_relabelled_utc": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "input_row_truncation": {
+          "type": [
+            "object",
+            "null"
+          ]
         }
       }
     },
@@ -167,7 +227,6 @@
           "source",
           "event_type",
           "path",
-          "input_file",
           "summary",
           "details"
         ],
@@ -245,6 +304,12 @@
           "record_key": {
             "type": [
               "string",
+              "null"
+            ]
+          },
+          "labels": {
+            "type": [
+              "array",
               "null"
             ]
           }

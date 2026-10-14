@@ -32,7 +32,10 @@
       ],
       "properties": {
         "max_indicators": {
-          "type": "integer"
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "max_sources_per_indicator": {
           "type": "integer"
@@ -116,7 +119,10 @@
           "type": "boolean"
         },
         "max_indicators": {
-          "type": "integer"
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "type_counts_before_cap": {
           "type": "object"
@@ -168,6 +174,12 @@
         },
         "ioc_scanner_truncated": {
           "type": "boolean"
+        },
+        "cap_policy": {
+          "type": [
+            "object",
+            "null"
+          ]
         }
       }
     },
