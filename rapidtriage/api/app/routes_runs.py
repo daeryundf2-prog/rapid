@@ -32,6 +32,7 @@ from .analyses import run_scope
 from .analysis_kinds import cross_case_eligibility
 from .artifact_filter import (
     annotate_page_counts,
+    files_page_base,
     filter_across_kinds,
     filter_artifact_page,
     filter_files_by_category,
@@ -672,8 +673,16 @@ def build_runs_router(
         limit: int = Query(0, ge=0, le=1000),
         cursor: str | None = Query(default=None),
         category: list[str] = Query(default=[]),
+        scope: str = Query("candidates", pattern="^(candidates|inventory)$"),
     ) -> dict[str, object]:
-        """Paged file candidates joined with the newest ``ntfs-meta`` analysis.
+        """Paged file rows joined with the newest ``ntfs-meta`` analysis.
+
+        ``scope`` picks the files-output list: ``candidates`` (default; files
+        of the selected categories) or ``inventory`` (every other scanned file,
+        incl. ``other``, parser-quality r2). The page holds only that list,
+        under its own key, and reports ``scope``, ``candidate_count`` and
+        ``inventory_count`` (``null`` when the output has no inventory: run
+        before r2 or inventory disabled; ``inventory_note`` then says so).
 
         Every row gains ``ntfs`` (``entry_number``, ``created_at``,
         ``accessed_at``, ``mft_modified_at``, ``in_use``) or ``null``,
@@ -683,32 +692,47 @@ def build_runs_router(
         volume_prefix|null, prefix_method|null, partition|null, reason?}``
         (``matched``/``total`` over this page's rows only; ``analysis_total`` =
         all rows of the joined analysis; ``partition`` = its partition start
-        sector; ``reason`` = Korean explanation when not joined).
+        sector; ``reason`` = Korean explanation when not joined). The deletion
+        state (``recovery.deletion_state`` of candidates, ``deletion_state`` of
+        inventory rows) follows the row's final ``is_deleted``.
 
         ``category`` (repeatable) keeps rows whose ``categories`` list holds
-        any of them; ``offset``/``limit`` then count matches and the page
+        any of them (an inventory row without categories counts as
+        ``other``); ``offset``/``limit`` then count matches and the page
         reports ``record_count``, ``matched``, ``scanned``, ``truncated``.
-        Every row carries ``record_index``: its position in the files output
-        (locator ``/candidates/<record_index>``), filtered or not.
+        Every row carries ``record_index``: its position in that list of the
+        files output (locator ``/candidates/<n>`` or ``/inventory/<n>``),
+        filtered or not.
         """
         payload = get_named_output(store, run_id, "files")
+        collection = scope
         wanted = frozenset(item.strip() for item in category if item.strip())
         if wanted:
             if limit <= 0:
                 raise HTTPException(status_code=400, detail=FILTER_LIMIT_MESSAGE)
-            page = filter_files_by_category(payload, wanted, offset=offset, limit=limit)
+            page = filter_files_by_category(payload, wanted, offset=offset, limit=limit, collection=collection)
         else:
-            page = dict(paginate_payload(payload, "candidates", offset=offset, limit=limit, cursor=cursor))
+            page = dict(paginate_payload(files_page_base(payload, collection), collection, offset=offset, limit=limit, cursor=cursor))
             pagination = page.get("pagination") if limit > 0 and isinstance(page.get("pagination"), dict) else {}
-            rows = page.get("candidates") if isinstance(page.get("candidates"), list) else []
-            # ``record_index`` = position in rapidtriage-files.json (locator ``/candidates/<n>``).
-            page["candidates"] = with_record_index(rows, int(pagination.get("offset") or 0))
-        try:
-            scope = run_scope(store, run_id, require_ready=False)
-        except HTTPException:
-            scope = None  # no usable output dir: serve the rows without the NTFS join
+            rows = page.get(collection) if isinstance(page.get(collection), list) else []
+            # ``record_index`` = position in that list of rapidtriage-files.json (locator ``/<scope>/<n>``).
+            page[collection] = with_record_index(rows, int(pagination.get("offset") or 0))
         candidates = payload.get("candidates") if isinstance(payload.get("candidates"), list) else []
-        return join_files_page(scope, page, candidates)
+        inventory = payload.get("inventory") if isinstance(payload.get("inventory"), list) else None
+        page["scope"] = collection
+        page["candidate_count"] = len(candidates)
+        page["inventory_count"] = len(inventory) if inventory is not None else None
+        if inventory is None:
+            page["inventory_note"] = (
+                "이 런의 files 출력에 inventory가 없습니다(parser-quality r2 이전 런이거나 inventory 기록 비활성). "
+                "선택 범주 밖 파일(기타 포함)은 후보 목록에 없습니다."
+            )
+        try:
+            run = run_scope(store, run_id, require_ready=False)
+        except HTTPException:
+            run = None  # no usable output dir: serve the rows without the NTFS join
+        # Volume-prefix detection samples the scope's own full list.
+        return join_files_page(run, page, (inventory or []) if collection == "inventory" else candidates, collection=collection)
 
 
     @router.get("/api/runs/{run_id}/docs")

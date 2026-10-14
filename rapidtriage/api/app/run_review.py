@@ -9,6 +9,11 @@ DB row id). The case DB import keeps the run-output order:
 * ``file_record`` / ``event`` / ``indexed_document`` (``source_type =
   'document'``) rows are inserted in output order, so ``id - first_id`` is the
   output ordinal (the same convention ``core/search_fts.py`` uses);
+* files ``/inventory/<n>`` (parser-quality r2): the import appends inventory
+  rows after the candidates but skips one whose path is already imported
+  (also a candidate), so inventory ordinals do not map to ids. They resolve
+  by PATH (``normalized_path``, indexed): the candidate's row when that path
+  is a candidate, else the inventory's own row;
 * ``artifact`` rows from per-kind outputs carry ``source_locator``
   (``output_name`` + ``row_index``) in ``data_json``, inserted in
   ``(output_name, row_index)`` order;
@@ -27,6 +32,7 @@ import sqlite3
 from collections.abc import Iterable, Iterator, Mapping
 from pathlib import Path
 
+from ...core.case_db.helpers import normalize_path_for_db
 from ...core.case_db.review import load_review_target_match
 from ...core.json_stream import JsonStreamError, iter_array_items
 from ...core.run.persist import CASE_DB_FILE_NAME, legacy_run_case_ids, run_case_id
@@ -154,6 +160,7 @@ class RunLocatorIndex:
         self._first: dict[str, int | None] = {}
         self._docs_results: list[str] | None = None
         self._docs_candidates: list[str] | None = None
+        self._file_candidate_count: int | None = None
 
     # -- helpers ------------------------------------------------------------
 
@@ -186,6 +193,39 @@ class RunLocatorIndex:
             self._docs_results = [str(row.get("path") or "") for row in _stream_rows(docs, "results")]
             self._docs_candidates = [str(row.get("path") or "") for row in _stream_rows(docs, "candidates")]
         return self._docs_results, self._docs_candidates
+
+    def _inventory_path(self, index: int) -> str:
+        """Path of files ``inventory[index]`` (streamed, stops at the row)."""
+        if index < 0:
+            return ""
+        for position, row in enumerate(_stream_rows(self._output_path("files"), "inventory")):
+            if position == index:
+                return str(row.get("path") or "")
+        return ""
+
+    def _inventory_index(self, normalized_path: str) -> int | None:
+        """First files ``inventory`` position whose path normalizes to ``normalized_path``."""
+        for position, row in enumerate(_stream_rows(self._output_path("files"), "inventory")):
+            if normalize_path_for_db(str(row.get("path") or "")) == normalized_path:
+                return position
+        return None
+
+    def _candidate_count(self) -> int:
+        """Files candidates imported before the inventory rows (the import skips non-objects)."""
+        if self._file_candidate_count is None:
+            self._file_candidate_count = sum(1 for _ in _stream_rows(self._output_path("files"), "candidates"))
+        return self._file_candidate_count
+
+    def _file_id_by_path(self, path: str) -> int | None:
+        """Lowest ``file_record`` id with that path: the candidate's row before the inventory's."""
+        if not path:
+            return None
+        row = self.connection.execute(
+            "SELECT id FROM file_record WHERE case_id = ? AND normalized_path = ? AND evidence_source_id = ? "
+            "ORDER BY id LIMIT 1",
+            (self.case_id, normalize_path_for_db(path), self.evidence_source_id),
+        ).fetchone()
+        return int(row[0]) if row is not None else None
 
     def _artifact_key(self, row_id: int) -> tuple[str, int] | None:
         row = self.connection.execute(
@@ -269,6 +309,10 @@ class RunLocatorIndex:
             return None
         collection, kind = normalize_collection(collection, kind)
         if collection == "files":
+            inventory_index = _ordinal(locator, "/inventory/")
+            if inventory_index is not None:
+                row_id = self._file_id_by_path(self._inventory_path(inventory_index))
+                return ("file_record", str(row_id)) if row_id is not None else None
             ordinal = _ordinal(locator, "/candidates/")
             first = self._first_id("file_record")
             if ordinal is None or first is None or not self._exists("file_record", first + ordinal):
@@ -329,7 +373,16 @@ class RunLocatorIndex:
             first = self._first_id("file_record")
             if first is None or not self._exists("file_record", row_id):
                 return None
-            return {"collection": "files", "kind": "", "locator": f"/candidates/{row_id - first}"}
+            ordinal = row_id - first
+            if ordinal >= self._candidate_count():
+                # An inventory-only row (appended after the candidates). A
+                # row not found in the inventory (pre-r2 output, a DB built
+                # without the files output) keeps the candidate ordinal.
+                stored = self.connection.execute("SELECT normalized_path FROM file_record WHERE id = ?", (row_id,)).fetchone()
+                index = self._inventory_index(str(stored[0] or "")) if stored is not None else None
+                if index is not None:
+                    return {"collection": "files", "kind": "", "locator": f"/inventory/{index}"}
+            return {"collection": "files", "kind": "", "locator": f"/candidates/{ordinal}"}
         if target_type == "event":
             first = self._first_id("event")
             if first is None or not self._exists("event", row_id):

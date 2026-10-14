@@ -2,7 +2,16 @@
 
 ``GET /api/runs/{id}/files`` rows gain ``ntfs`` (MFT entry + timestamps),
 ``filesystem`` and ``source_image``; a joined row whose own ``is_deleted``
-is unknown (``null``) takes ``not ntfs.in_use``.
+is unknown (``null``) takes ``not ntfs.in_use``. The page serves either the
+``candidates`` or the ``inventory`` list (``?scope=``); both are joined alike.
+
+* **Deletion state.** After the join every row's deletion state agrees with
+  its final ``is_deleted`` (``True`` -> ``deleted``, ``False`` ->
+  ``allocated``, ``null`` -> ``unknown``): ``recovery.deletion_state`` on
+  candidates, top-level ``deletion_state`` on inventory rows. Only the three
+  plain states are rewritten -- a specific recovery state (e.g.
+  ``unallocated-candidate``) is kept, and with ``is_deleted`` unknown a
+  ``deleted`` already recorded by the scan is kept, never downgraded.
 
 * **Times.** ``ntfs`` keeps ``$STANDARD_INFORMATION`` (``si_*``) and
   ``$FILE_NAME`` (``fn_*``) times apart; ``created_at``/``modified_at``/
@@ -56,6 +65,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePath
 
+from ...core.files import deletion_state_for
 from .analyses import ANALYSIS_RUNNER, ROWS_FILE_NAME, RunScope, analyses_root
 from .jsonl_records import parse_record_line
 
@@ -91,6 +101,16 @@ _AMBIGUOUS_DELETED = b"\x00"
 FULL_PATH_STATUS = "reconstructed-bounded-parent-cache"
 _NONE_TIME = -(2**63)
 _EPOCH = dt.datetime(1970, 1, 1, tzinfo=dt.timezone.utc)
+
+
+# Per-row ``match_method`` of the join: the index holds only NFC + casefolded
+# volume-relative path keys (:func:`ntfs_path_key`), so every hit is a folded
+# path match; "none" = joined page, no MFT record at that path; ``None`` = no
+# join ran (no analysis / no volume prefix / too large / skipped). There is no
+# case-exact comparison, so "path-exact" is never emitted. The volume-prefix
+# detection method stays page-level in ``ntfs_join.prefix_method``.
+MATCH_METHOD_PATH_FOLD = "path-fold"
+MATCH_METHOD_NONE = "none"
 
 
 def ntfs_path_key(value: object) -> str:
@@ -344,23 +364,52 @@ def latest_parsed_ntfs_analysis(scope: RunScope) -> Mapping[str, object] | None:
     return None
 
 
+PLAIN_DELETION_STATES = frozenset({"allocated", "deleted", "unknown"})
+
+
+def _deletion_state(current: object, is_deleted: object) -> object:
+    """Deletion state agreeing with ``is_deleted`` (see module doc); ``current`` when it must stay."""
+    if current not in (None, "") and current not in PLAIN_DELETION_STATES:
+        return current  # specific recovery state
+    if not isinstance(is_deleted, bool):
+        return current if current == "deleted" else deletion_state_for(None)
+    return deletion_state_for(is_deleted)
+
+
+def sync_row_deletion_state(row: dict[str, object]) -> dict[str, object]:
+    """``row`` (an owned copy) with its deletion state following ``is_deleted``."""
+    is_deleted = row.get("is_deleted")
+    recovery = row.get("recovery")
+    if isinstance(recovery, Mapping):
+        state = _deletion_state(recovery.get("deletion_state"), is_deleted)
+        if recovery.get("deletion_state") != state:
+            row["recovery"] = {**recovery, "deletion_state": state}  # recovery may be shared with the cache
+    if "deletion_state" in row or row.get("inventory_only"):
+        row["deletion_state"] = _deletion_state(row.get("deletion_state"), is_deleted)
+    return row
+
+
 def _null_fields(row: Mapping[str, object], source_image: str | None) -> dict[str, object]:
-    return {**row, "ntfs": None, "filesystem": None, "source_image": source_image}
+    return sync_row_deletion_state({**row, "ntfs": None, "filesystem": None, "source_image": source_image})
 
 
 def join_files_page(
     scope: RunScope | None,
     page: dict[str, object],
     all_candidates: Sequence[object] = (),
+    *,
+    collection: str = "candidates",
 ) -> dict[str, object]:
-    """Return ``page`` (a copy) with ``ntfs``/``filesystem``/``source_image`` per candidate and ``ntfs_join``.
+    """Return ``page`` (a copy) with ``ntfs``/``filesystem``/``source_image`` per row of
+    ``page[collection]`` (``candidates`` or ``inventory``) and ``ntfs_join``.
 
     ``ntfs_join = {analysis_id, status, matched, total, analysis_total,
     volume_prefix, prefix_method, partition, reason?}``; ``matched``/``total``
     count this page's rows only. ``scope=None`` (no usable run output dir)
-    skips the join.
+    skips the join. ``all_candidates`` = the collection's full list (volume
+    prefix detection). Deletion states follow ``is_deleted`` (module doc).
     """
-    rows = page.get("candidates")
+    rows = page.get(collection)
     rows = rows if isinstance(rows, list) else []
     join: dict[str, object] = {
         "analysis_id": None,
@@ -429,15 +478,17 @@ def join_files_page(
             if parts:
                 entry = index.lookup(ntfs_path_key("/".join(parts)))
         if entry is None:
-            joined.append(_null_fields(row, source_image))
+            nulled = _null_fields(row, source_image)
+            nulled["match_method"] = MATCH_METHOD_NONE if index is not None else None
+            joined.append(nulled)
             continue
         matched += 1
-        merged = {**row, "ntfs": entry, "filesystem": "NTFS", "source_image": source_image}
+        merged = {**row, "ntfs": entry, "filesystem": "NTFS", "source_image": source_image, "match_method": MATCH_METHOD_PATH_FOLD}
         if merged.get("is_deleted") is None:
             merged["is_deleted"] = entry["is_deleted"]
-        joined.append(merged)
+        joined.append(sync_row_deletion_state(merged))
     join["matched"] = matched
     result = dict(page)
-    result["candidates"] = joined
+    result[collection] = joined
     result["ntfs_join"] = join
     return result
