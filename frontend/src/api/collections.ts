@@ -113,6 +113,23 @@ export const fetchFilesPage = (
   signal?: AbortSignal,
   category?: string,
 ) => jsonPaged(runId, "files", "candidates", offset, limit, signal, category);
+/**
+ * Which list a `/docs` page holds. The paged collection names itself (`pagination.collection`);
+ * servers that page `results` still carry `candidates` as an EMPTY list (`omitted_fields`), so a
+ * mere array is not enough to pick it.
+ */
+export function docsRowsKey(
+  payload: Record<string, unknown>,
+  pagination: Record<string, unknown>,
+): "candidates" | "results" {
+  if (pagination.collection === "candidates" || pagination.collection === "results")
+    return pagination.collection;
+  const omitted = Array.isArray(payload.omitted_fields) ? payload.omitted_fields : [];
+  if (omitted.includes("candidates")) return "results";
+  if (Array.isArray(payload.candidates) && payload.candidates.length > 0) return "candidates";
+  return Array.isArray(payload.results) ? "results" : "candidates";
+}
+
 /** Docs route value of the "일치만" toggle (`#/case/{run}/explore/docs?category=matched`). */
 export const DOCS_MATCHED = "matched";
 
@@ -133,12 +150,12 @@ export async function fetchDocsPage(
     `/api/runs/${enc(runId)}/docs?offset=${offset}&limit=${limit}${matchedOnly ? "&matched=1" : ""}`,
     { signal },
   );
-  const key = Array.isArray(payload.candidates) ? "candidates" : "results";
-  const rows = asRows(payload[key]);
   const pagination =
     payload.pagination && typeof payload.pagination === "object" && !Array.isArray(payload.pagination)
       ? (payload.pagination as Record<string, unknown>)
       : {};
+  const key = docsRowsKey(payload, pagination);
+  const rows = asRows(payload[key]);
   const total =
     (matchedOnly ? (asNumber(payload.matched) ?? asNumber(pagination.matched)) : null) ??
     asNumber(pagination.total) ??

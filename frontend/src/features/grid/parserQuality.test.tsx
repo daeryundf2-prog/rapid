@@ -155,6 +155,30 @@ describe("docs collection (every document, 일치만 toggle)", () => {
     expect(screen.getByTestId("docs-matched-toggle").getAttribute("aria-pressed")).toBe("true");
   });
 
+  it("renders a results-only page (candidates omitted as []) as ordinary grid rows", async () => {
+    // paginate_payload(..., "results", omit_fields=("candidates", ...)) keeps `candidates: []`.
+    installFetch({
+      "/docs": () =>
+        jsonResponse({
+          results: [
+            { path: "C:/d/a.pdf", kind: "pdf", matched_keywords: ["계약"] },
+            { path: "C:/d/b.hwp", kind: "hwp", matched_keywords: ["송금"] },
+          ],
+          candidates: [],
+          omitted_fields: ["candidates", "manifest"],
+          pagination: { collection: "results", offset: 0, total: 2, has_more: false },
+        }),
+    });
+    act(() => useGridLocalStore.getState().setRoute({ runId: "run-1", collection: { id: "docs" } }));
+    renderWithClient(<DataGrid />);
+    await waitFor(() => expect(rows().length).toBe(2));
+    const all = rows();
+    expect(all.every((r) => r.getAttribute("aria-busy") !== "true")).toBe(true);
+    expect(all.every((r) => r.hasAttribute("aria-selected") && r.hasAttribute("aria-rowindex"))).toBe(true);
+    expect(all.filter((r) => r.tabIndex === 0)).toHaveLength(1);
+    expect(all.map((r) => r.getAttribute("data-row-key"))).toEqual(["docs:/results/0", "docs:/results/1"]);
+  });
+
   it("reads an older server's results list and bookmarks candidates as docs", () => {
     const old = docsCollection.mapRow({ path: "C:/d/a.pdf", matched_keywords: ["x"] }, 2, {
       ref: { id: "docs" },

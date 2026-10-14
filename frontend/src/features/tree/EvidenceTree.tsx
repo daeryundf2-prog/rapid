@@ -296,7 +296,9 @@ export function EvidenceTree({ runId }: { runId: string }) {
         })}
       </ul>
       {loading ? (
-        <p className="case-tree-loading" role="status">
+        // Not a live region: the shell's single polite region (announce()) carries status text,
+        // and a second polite region while the tree loads broke the one-region rule.
+        <p className="case-tree-loading">
           <Icon name="spinner" className="spin" />
           건수와 아티팩트 목록을 불러오는 중…
         </p>
