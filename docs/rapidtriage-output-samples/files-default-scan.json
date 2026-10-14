@@ -1204,9 +1204,7 @@
   "root": "<ROOT>",
   "signature_mismatch_candidates": [],
   "summary": {
-    "attribute_counts": {
-      "archive": 4
-    },
+    "attribute_counts": "<HOST_ATTRIBUTE_COUNTS>",
     "candidate_count": 4,
     "candidate_kind_counts": {
       "existing": 4

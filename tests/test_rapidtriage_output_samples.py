@@ -338,6 +338,16 @@ def canonicalize_files(payload: dict[str, Any]) -> dict[str, Any]:
         if isinstance(candidate, dict) and candidate.get("attributes_origin") in {"host-copy", ""}:
             candidate["attributes"] = "<HOST_ATTRIBUTES>"
             candidate["attributes_origin"] = "<HOST_ATTRIBUTES_ORIGIN>"
+    # summary.attribute_counts tallies the same host-copy attributes masked
+    # above (Windows {"archive": N}, POSIX {}); mask it only when every
+    # candidate's attributes came from the host copy, so image/listing
+    # attribute counts stay compared.
+    summary = canonical.get("summary")
+    if isinstance(summary, dict) and "attribute_counts" in summary and all(
+        isinstance(candidate, dict) and candidate.get("attributes_origin") == "<HOST_ATTRIBUTES_ORIGIN>"
+        for candidate in canonical["candidates"]
+    ):
+        summary["attribute_counts"] = "<HOST_ATTRIBUTE_COUNTS>"
     canonical["core_accuracy_gates"] = compact_core_accuracy_gates(canonical.get("core_accuracy_gates"))
     canonical["hash_cache_manifest"] = compact_hash_cache_manifest(canonical.get("hash_cache_manifest"))
     canonical["duplicate_content_manifest"] = compact_duplicate_content_manifest(
