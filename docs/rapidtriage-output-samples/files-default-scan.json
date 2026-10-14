@@ -20,6 +20,12 @@
       "fs_changed_at": null,
       "fs_created_at": null,
       "fs_modified_at": null,
+      "hash_scope": "file-content",
+      "hashes": {
+        "md5": "10893fd7cff66dca193f658ca9438d15",
+        "sha1": "fb467bb25be45fcf0c84c03ce5801abd5a28c1fd",
+        "sha256": "8dcc7e601606217f3b754766511182a916b17e9a26a94c9d887104eba92e9bb2"
+      },
       "is_deleted": null,
       "known_good_status": "not-configured",
       "modified_at": "2024-02-03T04:05:07+00:00",
@@ -37,7 +43,7 @@
         "candidate_kind": "existing",
         "commercial_claim_allowed": false,
         "confidence": "high",
-        "deletion_state": "allocated",
+        "deletion_state": "unknown",
         "limitations": [
           "Allocated filesystem object observed during scan; byte-level content integrity is not verified unless a hash profile ran."
         ],
@@ -93,7 +99,7 @@
         "candidate_kind": "existing",
         "commercial_claim_allowed": false,
         "confidence": "high",
-        "deletion_state": "allocated",
+        "deletion_state": "unknown",
         "limitations": [
           "Allocated filesystem object observed during scan; byte-level content integrity is not verified unless a hash profile ran."
         ],
@@ -122,15 +128,17 @@
       ],
       "extension": ".sqlite",
       "file_signature": {
-        "detected": null,
+        "detected": "text",
         "expected": [
           "sqlite"
         ],
-        "mismatch": false,
+        "mismatch": true,
+        "mismatch_direction": "extension-expected-signature-missing",
         "risk_flags": [
-          "signature-unrecognized"
+          "extension-signature-mismatch",
+          "signature-mismatch:extension-expected-signature-missing"
         ],
-        "status": "unrecognized-header-for-known-extension"
+        "status": "extension-signature-mismatch"
       },
       "fs_accessed_at": null,
       "fs_changed_at": null,
@@ -153,7 +161,7 @@
         "candidate_kind": "existing",
         "commercial_claim_allowed": false,
         "confidence": "high",
-        "deletion_state": "allocated",
+        "deletion_state": "unknown",
         "limitations": [
           "Allocated filesystem object observed during scan; byte-level content integrity is not verified unless a hash profile ran."
         ],
@@ -194,6 +202,12 @@
       "fs_changed_at": null,
       "fs_created_at": null,
       "fs_modified_at": null,
+      "hash_scope": "file-content",
+      "hashes": {
+        "md5": "20879c987e2f9a916e578386d499f629",
+        "sha1": "c7b33ddcc42361fdb847036fc07e880b81935d5d",
+        "sha256": "9f2981a7cc4d40a2a409dc895de64253acd819d7c0011c8e80b86fe899464e31"
+      },
       "is_deleted": null,
       "known_good_status": "not-configured",
       "modified_at": "2024-02-03T04:05:09+00:00",
@@ -211,7 +225,7 @@
         "candidate_kind": "existing",
         "commercial_claim_allowed": false,
         "confidence": "high",
-        "deletion_state": "allocated",
+        "deletion_state": "unknown",
         "limitations": [
           "Allocated filesystem object observed during scan; byte-level content integrity is not verified unless a hash profile ran."
         ],
@@ -608,17 +622,27 @@
       "Header-only checks do not validate full file integrity or embedded payloads.",
       "Known extension coverage is intentionally conservative to avoid noisy false positives."
     ],
-    "max_header_bytes": 64,
+    "max_header_bytes": 4096,
     "mismatch_candidates_truncated": false,
-    "mismatch_count": 0,
+    "mismatch_count": 1,
+    "mismatch_direction_counts": {
+      "extension-expected-signature-missing": 1
+    },
     "policy": {
       "default_behavior": "flag mismatch but keep the file visible",
       "legal_review_note": "Signature mismatch is an anti-forensic indicator, not standalone proof of malicious intent.",
       "scope": "bounded first-bytes magic signature check during file inventory"
     },
+    "population": {
+      "candidate_count": 4,
+      "inventory_count": 0,
+      "inventory_mismatch_count": 0,
+      "note": "후보 파일만 검사했습니다(inventory 미기록): windows-filesystem 아티팩트는 입력 전체 파일을 검사하므로 수치가 더 클 수 있습니다.",
+      "skip_counts": {}
+    },
     "profile": "file-signature-mismatch-v1",
-    "profile_hash": "bbda849287276aa096da39456e9134a6a99bdf3c3c24e618659354f076375120",
-    "profile_version": "file-signature-mismatch-v1",
+    "profile_hash": "0e684bb6292dcef3c22ba712f5f76c7463f8b967852ccf372ba572acfd5adee5",
+    "profile_version": "file-signature-mismatch-v2",
     "read_error_count": 0,
     "signature_table": "rapidtriage.artifacts.windows.filesystem",
     "unrecognized_known_extension_count": 1
@@ -1202,7 +1226,34 @@
     "visible_candidate_count": 4
   },
   "root": "<ROOT>",
-  "signature_mismatch_candidates": [],
+  "signature_mismatch_candidates": [
+    {
+      "detected": "text",
+      "expected": [
+        "sqlite"
+      ],
+      "extension": ".sqlite",
+      "forensic_review": {
+        "reason": "file extension does not match detected header signature",
+        "report_use_warning": "Confirm with a second parser or manual hex review before report-grade use.",
+        "status": "needs-review"
+      },
+      "mismatch_direction": "extension-expected-signature-missing",
+      "modified_at": "2024-02-03T04:05:08+00:00",
+      "name": "records.sqlite",
+      "path": "<ROOT>/records.sqlite",
+      "risk_flags": [
+        "extension-signature-mismatch",
+        "signature-mismatch:extension-expected-signature-missing"
+      ],
+      "size": 15,
+      "source_viewer_locator": {
+        "path": "<ROOT>/records.sqlite",
+        "source": "files",
+        "viewer": "file-header"
+      }
+    }
+  ],
   "summary": {
     "attribute_counts": "<HOST_ATTRIBUTE_COUNTS>",
     "candidate_count": 4,
@@ -1258,6 +1309,10 @@
       "truncated": false
     },
     "fuzzy_text_duplicates_truncated": false,
+    "hashed_candidate_count": 2,
+    "inventory_category_counts": null,
+    "inventory_count": null,
+    "inventory_note": null,
     "known_good_feed_count": 0,
     "known_good_hash_count": 0,
     "known_good_hash_skipped_large_count": 0,
@@ -1272,7 +1327,14 @@
     "raw_candidate_count": 4,
     "scanned_file_count": 4,
     "signature_checked_count": 3,
-    "signature_mismatch_count": 0,
+    "signature_mismatch_count": 1,
+    "signature_population": {
+      "candidate_count": 4,
+      "inventory_count": 0,
+      "inventory_mismatch_count": 0,
+      "note": "후보 파일만 검사했습니다(inventory 미기록): windows-filesystem 아티팩트는 입력 전체 파일을 검사하므로 수치가 더 클 수 있습니다.",
+      "skip_counts": {}
+    },
     "signature_unrecognized_known_extension_count": 1,
     "source_file_mtime_range": {
       "newest": "2024-02-03T04:05:09+00:00",

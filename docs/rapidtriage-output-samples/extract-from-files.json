@@ -13,7 +13,7 @@
         "candidate_kind": "existing",
         "commercial_claim_allowed": false,
         "confidence": "high",
-        "deletion_state": "allocated",
+        "deletion_state": "unknown",
         "limitations": [
           "Allocated filesystem object observed during scan; byte-level content integrity is not verified unless a hash profile ran."
         ],
