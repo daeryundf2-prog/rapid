@@ -3,8 +3,9 @@
 * ``/files`` NTFS join: ``$SI``/``$FN`` times, ``is_deleted``, attributes;
   ``apply_listing_times`` accepts the join entry; rows keep
   ``modified_at_origin``/``fs_modified_at``.
-* ``/docs`` pages ``candidates`` with a ``matched`` filter
-  (``matched=1`` = the previous ``results`` contract) and reports
+* ``/docs`` keeps the previous contract by default (pages ``results``);
+  ``all=1`` pages ``candidates`` with an optional ``matched`` filter;
+  ``matched=0`` without ``all=1`` is a 400; every view reports
   ``candidate_count``/``matched_count``.
 * ``run_review.canonical_run_case`` finds a case DB persisted under the
   older ``run-run-<slug>`` id.
@@ -201,25 +202,37 @@ DOCS_PAYLOAD: dict[str, object] = {
 
 @unittest.skipUnless(HAS_FASTAPI, "fastapi not installed")
 class DocsPageContractTests(unittest.TestCase):
-    def test_default_pages_every_candidate_with_counts(self) -> None:
-        page = docs_page(DOCS_PAYLOAD, matched=None, offset=1, limit=1)
+    def test_default_keeps_previous_results_contract_with_counts(self) -> None:
+        page = docs_page(DOCS_PAYLOAD, offset=0, limit=10)
+        self.assertEqual(page["pagination"]["collection"], "results")
+        self.assertEqual(page["results"], DOCS_PAYLOAD["results"])
+        self.assertEqual(page["candidates"], [])  # omitted, as before r1
+        self.assertIn("candidates", page["omitted_fields"])
+        self.assertEqual((page["candidate_count"], page["matched_count"]), (3, 1))
+        self.assertEqual(docs_page(DOCS_PAYLOAD, matched=True, offset=0, limit=10), page)
+        whole = docs_page(DOCS_PAYLOAD, offset=0, limit=0)
+        self.assertEqual(whole["results"], DOCS_PAYLOAD["results"])
+        self.assertEqual((whole["candidate_count"], whole["matched_count"]), (3, 1))
+        self.assertNotIn("candidate_count", DOCS_PAYLOAD)  # the cached payload is not mutated
+
+    def test_matched_zero_requires_all(self) -> None:
+        with self.assertRaisesRegex(ValueError, "all=1이 필요합니다"):
+            docs_page(DOCS_PAYLOAD, matched=False, offset=0, limit=10)
+
+    def test_all_pages_every_candidate_with_record_index(self) -> None:
+        page = docs_page(DOCS_PAYLOAD, all_candidates=True, offset=1, limit=1)
         self.assertEqual(page["pagination"]["collection"], "candidates")
         self.assertEqual(page["pagination"]["total"], 3)
         self.assertEqual([row["path"] for row in page["candidates"]], ["/e/b.hwp"])
         self.assertEqual(page["candidates"][0]["record_index"], 1)
         self.assertEqual((page["candidate_count"], page["matched_count"]), (3, 1))
         self.assertIn("results", page["omitted_fields"])
-
-    def test_matched_filters_and_matched_one_keeps_previous_contract(self) -> None:
-        unmatched = docs_page(DOCS_PAYLOAD, matched=False, offset=0, limit=10)
+        unmatched = docs_page(DOCS_PAYLOAD, all_candidates=True, matched=False, offset=0, limit=10)
         self.assertEqual([row["record_index"] for row in unmatched["candidates"]], [1, 2])
         self.assertEqual(unmatched["pagination"]["total"], 2)
-        previous = docs_page(DOCS_PAYLOAD, matched=True, offset=0, limit=10)
-        self.assertEqual(previous["pagination"]["collection"], "results")
-        self.assertEqual(previous["results"], DOCS_PAYLOAD["results"])
-        self.assertIn("candidates", previous["omitted_fields"])
-        self.assertEqual((previous["candidate_count"], previous["matched_count"]), (3, 1))
-        whole = docs_page(DOCS_PAYLOAD, matched=None, offset=0, limit=0)
+        hits = docs_page(DOCS_PAYLOAD, all_candidates=True, matched=True, offset=0, limit=10)
+        self.assertEqual([row["record_index"] for row in hits["candidates"]], [0])
+        whole = docs_page(DOCS_PAYLOAD, all_candidates=True, offset=0, limit=0)
         self.assertEqual(len(whole["candidates"]), 3)
         self.assertEqual(whole["results"], DOCS_PAYLOAD["results"])
 
@@ -228,9 +241,9 @@ class DocsPageContractTests(unittest.TestCase):
             "candidates": [{"path": "/e/a.txt"}, {"path": "/e/b.txt"}],
             "results": [{"path": "/e/a.txt"}],
         }
-        page = docs_page(legacy, matched=True, offset=0, limit=5)
+        page = docs_page(legacy, offset=0, limit=5)
         self.assertEqual(page["results"], [{"path": "/e/a.txt"}])
-        unmatched = docs_page(legacy, matched=False, offset=0, limit=5)
+        unmatched = docs_page(legacy, all_candidates=True, matched=False, offset=0, limit=5)
         self.assertEqual([row["path"] for row in unmatched["candidates"]], ["/e/b.txt"])
 
 

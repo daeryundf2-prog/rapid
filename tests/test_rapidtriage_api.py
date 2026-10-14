@@ -3225,12 +3225,20 @@ class RapidTriageApiTests(unittest.TestCase):
                 has_more=False,
             )
             self.assertEqual(manual_manifest["manifest_hash"], last_page["pagination"]["pagination_manifest"]["manifest_hash"])
-            paged_docs_response = client.get(f"/api/runs/{run_id}/docs", params={"offset": 0, "limit": 1, "matched": 1})
+            paged_docs_response = client.get(f"/api/runs/{run_id}/docs", params={"offset": 0, "limit": 1})
             self.assertEqual(paged_docs_response.status_code, 200)
             paged_docs = paged_docs_response.json()
             self.assertEqual(paged_docs["pagination"]["collection"], "results")
             self.assertLessEqual(len(paged_docs["results"]), 1)
             self.assertIn("candidates", paged_docs["omitted_fields"])
+            self.assertIn("candidate_count", paged_docs)
+            self.assertIn("matched_count", paged_docs)
+            needs_all = client.get(f"/api/runs/{run_id}/docs", params={"offset": 0, "limit": 1, "matched": 0})
+            self.assertEqual(needs_all.status_code, 400)
+            self.assertIn("all=1이 필요합니다", needs_all.json()["detail"])
+            all_unmatched = client.get(f"/api/runs/{run_id}/docs", params={"limit": 5, "all": 1, "matched": 0})
+            self.assertEqual(all_unmatched.status_code, 200)
+            self.assertEqual(all_unmatched.json()["pagination"]["collection"], "candidates")
             self.assertTrue((output_dir / "rapidtriage-run-summary.json").is_file())
 
             persisted = json.loads((output_dir / "rapidtriage-run-summary.json").read_text(encoding="utf-8"))
@@ -4310,9 +4318,9 @@ class RapidTriageApiTests(unittest.TestCase):
             handle = client.post(f"/api/runs/{run_id}/case-db/ensure", json={}).json()
 
             files = client.get(f"/api/runs/{run_id}/files?offset=0&limit=3").json()["candidates"]
-            docs = client.get(f"/api/runs/{run_id}/docs?offset=0&limit=3&matched=1").json()["results"]
-            # The docs grid pages every candidate (parser-quality r1); its locators are /candidates/<n>.
-            doc_candidates = client.get(f"/api/runs/{run_id}/docs?offset=0&limit=1000").json()["candidates"]
+            docs = client.get(f"/api/runs/{run_id}/docs?offset=0&limit=3").json()["results"]
+            # ``all=1`` pages every candidate (parser-quality r1); its locators are /candidates/<n>.
+            doc_candidates = client.get(f"/api/runs/{run_id}/docs?offset=0&limit=1000&all=1").json()["candidates"]
             doc_candidate_index = next(row["record_index"] for row in doc_candidates if row["path"] == docs[1]["path"])
             events = client.get(f"/api/runs/{run_id}/timeline?offset=0&limit=3").json()["events"]
             located = [
