@@ -234,7 +234,8 @@ class WindowsSystemArtifactsProvider:
         yield from collect_bits_qmgr_artifacts(root)
         yield from collect_setupapi_usb_artifacts(root)
         yield from collect_wifi_profile_artifacts(root)
-        yield from collect_third_party_remote_control_artifacts(root)
+        # Third-party remote-control rows are owned by the windows-remote-access
+        # provider (remote_access.py); emitting them here too duplicated every row.
         yield from collect_windows_recall_artifacts(root)
         yield from collect_zone_identifier_ads(root)
         yield from collect_explorer_cache_artifacts(root)
@@ -291,59 +292,6 @@ def collect_print_spooler_artifacts(root: Path) -> Iterable[ArtifactRecord]:
                     "spl-shd-full-binary-structure-decoder-required",
                     "printer-driver-spool-fixture-required",
                     "print-eventlog-correlation-required",
-                ],
-            },
-        )
-
-
-def collect_third_party_remote_control_artifacts(root: Path) -> Iterable[ArtifactRecord]:
-    for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
-        if not path.is_file():
-            continue
-        product = remote_control_product_for_path(path)
-        if not product:
-            continue
-        stat_result = path.stat()
-        blob = read_prefix(path, REMOTE_CONTROL_SCAN_LIMIT)
-        strings = unique_strings([*extract_ascii_strings(blob), *extract_utf16_strings(blob)])
-        urls = regex_candidates(strings, URL_RE)[:20]
-        ips = sorted(set(IP_RE.findall(" ".join(strings))))[:20]
-        session_profile = remote_control_session_profile(product, strings, urls, ips)
-        yield ArtifactRecord(
-            provider=WindowsSystemArtifactsProvider.name,
-            artifact_type="third-party-remote-control-artifact",
-            path=str(path.resolve()),
-            supported=True,
-            details={
-                **source_details(path, "third-party-remote-control"),
-                "source_hashes": {"sha256": compute_sha256(path)},
-                "product": product,
-                "size": stat_result.st_size,
-                "modified_at": isoformat_from_timestamp(stat_result.st_mtime),
-                "timestamp": isoformat_from_timestamp(stat_result.st_mtime),
-                "timestamp_source": "remote_control_file_modified_at",
-                "scan_bytes": len(blob),
-                "extracted_string_count": len(strings),
-                "string_samples": strings[:40],
-                "url_candidates": urls,
-                "ip_candidates": ips,
-                "remote_control_session_profile": session_profile,
-                "session_candidates": session_profile["session_candidates"],
-                "remote_id_candidates": session_profile["remote_id_candidates"],
-                "file_transfer_indicators": session_profile["file_transfer_indicators"],
-                "coverage_status": "remote-control-session-pivot-inventory"
-                if session_profile["session_candidates"]
-                else "remote-control-file-inventory",
-                "reportability": "triage",
-                "parser_confidence": "medium",
-                "risk_flags": remote_control_risk_flags(product, session_profile),
-                "validation_required": True,
-                "validation_guidance": "Third-party remote-control file is parsed for bounded session, peer, IP/URL, and transfer pivots. Validate session start/end, peer identity, file transfer logs, and account attribution with product-specific parsers before report-grade use.",
-                "commercial_grade_ready": False,
-                "commercial_grade_blockers": [
-                    "full-product-specific-session-state-decoder-required",
-                    "remote-peer-attribution-validation-required",
-                    "file-transfer-log-validation-required",
                 ],
             },
         )
@@ -2605,10 +2553,14 @@ def normalize_sqlite_time_value(value: object) -> dict[str, object]:
     if parsed:
         return parsed
     try:
-        normalized = text.replace("Z", "+00:00")
-        return {"iso8601": dt.datetime.fromisoformat(normalized).astimezone(dt.timezone.utc).isoformat(), "parse_status": "iso8601"}
+        moment = dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError:
         return {"iso8601": None, "parse_status": "unrecognized"}
+    if moment.tzinfo is None:
+        # No offset in the source: the source timezone is unknown, so the value
+        # is kept as written (never shifted by the analysis host's timezone).
+        return {"iso8601": moment.isoformat(), "parse_status": "iso8601-naive", "timezone": "unknown"}
+    return {"iso8601": moment.astimezone(dt.timezone.utc).isoformat(), "parse_status": "iso8601", "timezone": "utc"}
 
 
 def parse_numeric_timestamp(text: str) -> dict[str, object] | None:
@@ -4301,7 +4253,7 @@ def collect_wer_reports(root: Path) -> Iterable[ArtifactRecord]:
     if users.is_dir():
         candidates.extend(path for path in iter_evidence_paths(users, "Report.wer") if path.is_file() and "WER" in str(path))
     for path in sorted(set(candidates), key=lambda item: str(item).lower()):
-        fields = parse_key_value_file(path)
+        fields = parse_key_value_file(path, limit=None)
         stat_result = path.stat()
         normalized = normalized_wer_report(path, fields)
         yield ArtifactRecord(
@@ -4317,7 +4269,8 @@ def collect_wer_reports(root: Path) -> Iterable[ArtifactRecord]:
                 "bucket": fields.get("Bucket", fields.get("Response.BucketId", "")),
                 **normalized,
                 "fields": fields,
-                "modified_at": isoformat_from_timestamp(stat_result.st_mtime),
+                # Host mtime of the acquired copy: provenance only, never an event.
+                "source_file_mtime": isoformat_from_timestamp(stat_result.st_mtime),
                 "source_hashes": {"sha256": compute_sha256(path)},
                 "raw_preview": preview_text(path),
             }),
@@ -5809,10 +5762,40 @@ def windows_path_category(command: str, working_directory: str = "") -> str:
     return "other"
 
 
+WER_SIGNATURE_NAMES = {
+    "application_name": ("응용 프로그램 이름", "application name", "appname"),
+    "application_version": ("응용 프로그램 버전", "application version", "appversion"),
+    "application_timestamp": ("응용 프로그램 타임스탬프", "application timestamp", "apptimestamp"),
+    "fault_module_name": ("오류 모듈 이름", "fault module name", "modname"),
+    "fault_module_version": ("오류 모듈 버전", "fault module version", "modversion"),
+    "fault_module_timestamp": ("오류 모듈 타임스탬프", "fault module timestamp", "modtimestamp"),
+    "exception_code": ("예외 코드", "exception code"),
+    "exception_offset": ("예외 오프셋", "exception offset", "offset"),
+    "package_full_name": ("패키지 전체 이름", "package full name"),
+}
+
+
+def wer_signature_fields(fields: Mapping[str, str]) -> dict[str, str]:
+    """Problem-signature values keyed by their (localized) Sig[n].Name, not by position."""
+    by_name: dict[str, str] = {}
+    for index in range(32):
+        name = fields.get(f"Sig[{index}].Name", "").strip().lower()
+        if name:
+            by_name.setdefault(name, fields.get(f"Sig[{index}].Value", ""))
+    result: dict[str, str] = {}
+    for key, names in WER_SIGNATURE_NAMES.items():
+        for name in names:
+            if by_name.get(name):
+                result[key] = by_name[name]
+                break
+    return result
+
+
 def normalized_wer_report(path: Path, fields: dict[str, str]) -> dict[str, object]:
-    app_name = first_field(fields, "AppName", "ApplicationName", "Sig[0].Value", "FriendlyEventName")
-    module_name = first_field(fields, "FaultModuleName", "FaultingModule", "Sig[3].Value")
-    exception_code = first_field(fields, "ExceptionCode", "Exception Code", "Sig[6].Value")
+    signature = wer_signature_fields(fields)
+    app_name = first_field(fields, "AppName", "ApplicationName") or signature.get("application_name", "") or first_field(fields, "FriendlyEventName")
+    module_name = first_field(fields, "FaultModuleName", "FaultingModule") or signature.get("fault_module_name", "")
+    exception_code = first_field(fields, "ExceptionCode", "Exception Code") or signature.get("exception_code", "")
     event_time_raw = first_field(fields, "EventTime", "ReportTime")
     event_time = wer_time_to_iso(event_time_raw)
     report_id = first_field(fields, "ReportIdentifier", "ReportId", "CabId") or path.parent.name
@@ -5842,8 +5825,20 @@ def normalized_wer_report(path: Path, fields: dict[str, str]) -> dict[str, objec
         "fault_module_path": first_field(fields, "FaultModulePath", "ModulePath"),
         "exception_code": exception_code,
         "event_time": event_time,
+        "event_time_raw": event_time_raw,
+        "event_time_encoding": "filetime-utc" if event_time_raw.strip().isdigit() and int(event_time_raw.strip()) > 10_000_000_000 else "text",
         "timestamp": event_time or "",
         "timestamp_source": "wer_event_time" if event_time else "missing_wer_event_time",
+        "timestamp_kind": "event" if event_time else "",
+        "upload_time": wer_time_to_iso(first_field(fields, "UploadTime")),
+        "event_type_name": first_field(fields, "EventType"),
+        "friendly_event_name": first_field(fields, "FriendlyEventName"),
+        "signature_application_name": signature.get("application_name", ""),
+        "application_version": signature.get("application_version", ""),
+        "fault_module_version": signature.get("fault_module_version", ""),
+        "exception_offset": signature.get("exception_offset", ""),
+        "package_full_name": signature.get("package_full_name", ""),
+        "loaded_module_count": sum(1 for key in fields if key.startswith("LoadedModule[")),
         "bucket_id": bucket,
         "cab_id": first_field(fields, "CabId"),
         "problem_signature": wer_problem_signature(fields),
@@ -5940,7 +5935,9 @@ def wer_time_to_iso(value: str) -> str:
     except ValueError:
         return ""
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=dt.timezone.utc)
+        # Text times without an offset are not documented as UTC: keep them
+        # naive (timezone unknown) instead of assuming UTC or the host zone.
+        return parsed.isoformat()
     return parsed.astimezone(dt.timezone.utc).isoformat()
 
 
@@ -5977,7 +5974,7 @@ def decode_text_auto(data: bytes) -> str:
     return data.decode("utf-8", errors="replace")
 
 
-def read_lines(path: Path, *, limit: int) -> list[str]:
+def read_lines(path: Path, *, limit: int | None) -> list[str]:
     try:
         data = path.read_bytes()
     except OSError:
@@ -6024,9 +6021,9 @@ def parse_firewall_log(path: Path) -> list[dict[str, str]]:
     return rows
 
 
-def parse_key_value_file(path: Path) -> dict[str, str]:
+def parse_key_value_file(path: Path, *, limit: int | None = 300) -> dict[str, str]:
     fields: dict[str, str] = {}
-    for line in read_lines(path, limit=300):
+    for line in read_lines(path, limit=limit):
         stripped = line.strip()
         if not stripped or stripped.startswith("[") or "=" not in stripped:
             continue
@@ -6169,3 +6166,158 @@ def regex_candidates(strings: list[str], pattern: re.Pattern[str]) -> list[str]:
             if candidate not in candidates:
                 candidates.append(candidate)
     return candidates
+
+
+MINIDUMP_SIGNATURE = b"MDMP"
+MINIDUMP_STREAM_TYPES = {
+    3: "ThreadListStream",
+    4: "ModuleListStream",
+    5: "MemoryListStream",
+    6: "ExceptionStream",
+    7: "SystemInfoStream",
+    9: "Memory64ListStream",
+    12: "HandleDataStream",
+    14: "UnloadedModuleListStream",
+    15: "MiscInfoStream",
+    16: "MemoryInfoListStream",
+    17: "ThreadInfoListStream",
+    21: "SystemMemoryInfoStream",
+    22: "ProcessVmCountersStream",
+}
+MINIDUMP_ARCHITECTURES = {0: "x86", 5: "arm", 6: "ia64", 9: "x64", 12: "arm64", 0xFFFF: "unknown"}
+MINIDUMP_MAX_MODULES = 4096
+
+
+def parse_minidump_header(data: bytes) -> dict[str, object]:
+    """Decode MINIDUMP_HEADER and the core streams of a user-mode minidump.
+
+    Shared helper (stdlib only) so every provider that emits minidump rows
+    (``artifacts/memory.py``) reports the same header data. Reads only fixed
+    structures; never string-scans. ``data`` may be the whole file or a
+    prefix; streams outside the buffer are reported as ``out-of-buffer``.
+    """
+    if len(data) < 32 or data[:4] != MINIDUMP_SIGNATURE:
+        return {"minidump_parse_status": "not-minidump"}
+    version = read_u32_le(data, 4)
+    stream_count = read_u32_le(data, 8)
+    directory_rva = read_u32_le(data, 12)
+    time_date_stamp = read_u32_le(data, 20)
+    flags = int.from_bytes(data[24:32], "little")
+    result: dict[str, object] = {
+        "minidump_parse_status": "parsed",
+        "minidump_version": version & 0xFFFF,
+        "minidump_implementation_version": version >> 16,
+        "minidump_stream_count": stream_count,
+        "minidump_flags_hex": f"0x{flags:016x}",
+        "minidump_time_date_stamp": time_date_stamp,
+        "minidump_created_at": (UNIX_EPOCH + dt.timedelta(seconds=time_date_stamp)).isoformat() if time_date_stamp else "",
+        "minidump_streams": [],
+    }
+    streams: list[dict[str, object]] = []
+    for index in range(min(stream_count, 4096)):
+        base = directory_rva + index * 12
+        if base + 12 > len(data):
+            result["minidump_directory_status"] = "out-of-buffer"
+            break
+        stream_type = read_u32_le(data, base)
+        size = read_u32_le(data, base + 4)
+        rva = read_u32_le(data, base + 8)
+        streams.append(
+            {
+                "type": stream_type,
+                "name": MINIDUMP_STREAM_TYPES.get(stream_type, f"stream-{stream_type}"),
+                "size": size,
+                "rva": rva,
+                "in_buffer": rva + size <= len(data),
+            }
+        )
+    result["minidump_streams"] = streams
+    for stream in streams:
+        if not stream["in_buffer"] or not stream["size"]:
+            continue
+        rva, size, stream_type = int(stream["rva"]), int(stream["size"]), int(stream["type"])
+        if stream_type == 7 and size >= 32:
+            architecture = read_u16_le(data, rva)
+            major, minor, build = read_u32_le(data, rva + 8), read_u32_le(data, rva + 12), read_u32_le(data, rva + 16)
+            result.update(
+                {
+                    "minidump_processor_architecture": MINIDUMP_ARCHITECTURES.get(architecture, f"0x{architecture:04x}"),
+                    "minidump_processor_count": data[rva + 6],
+                    "minidump_product_type": data[rva + 7],
+                    "minidump_os_version": f"{major}.{minor}.{build}",
+                    "minidump_os_platform_id": read_u32_le(data, rva + 20),
+                    "minidump_csd_version": read_minidump_string(data, read_u32_le(data, rva + 24)),
+                }
+            )
+        elif stream_type == 15 and size >= 24:
+            misc_flags = read_u32_le(data, rva + 4)
+            if misc_flags & 0x1:
+                result["minidump_process_id"] = read_u32_le(data, rva + 8)
+            if misc_flags & 0x2:
+                create_time = read_u32_le(data, rva + 12)
+                result["minidump_process_create_time"] = (
+                    (UNIX_EPOCH + dt.timedelta(seconds=create_time)).isoformat() if create_time else ""
+                )
+                result["minidump_process_user_time_s"] = read_u32_le(data, rva + 16)
+                result["minidump_process_kernel_time_s"] = read_u32_le(data, rva + 20)
+        elif stream_type == 6 and size >= 168:
+            result.update(
+                {
+                    "minidump_exception_thread_id": read_u32_le(data, rva),
+                    "minidump_exception_code": f"0x{read_u32_le(data, rva + 8):08X}",
+                    "minidump_exception_flags": read_u32_le(data, rva + 12),
+                    "minidump_exception_address": f"0x{int.from_bytes(data[rva + 24 : rva + 32], 'little'):016X}",
+                }
+            )
+        elif stream_type == 3 and size >= 4:
+            result["minidump_thread_count"] = read_u32_le(data, rva)
+        elif stream_type == 4 and size >= 4:
+            count = read_u32_le(data, rva)
+            modules: list[dict[str, object]] = []
+            for module_index in range(min(count, MINIDUMP_MAX_MODULES)):
+                base = rva + 4 + module_index * 108
+                if base + 108 > len(data):
+                    break
+                version_ms = read_u32_le(data, base + 24 + 8)
+                version_ls = read_u32_le(data, base + 24 + 12)
+                stamp = read_u32_le(data, base + 16)
+                modules.append(
+                    {
+                        "name": read_minidump_string(data, read_u32_le(data, base + 20)),
+                        "base_of_image": f"0x{int.from_bytes(data[base : base + 8], 'little'):016X}",
+                        "size_of_image": read_u32_le(data, base + 8),
+                        "checksum": read_u32_le(data, base + 12),
+                        # PE TimeDateStamp; reproducible Windows builds store a hash here, not a time.
+                        "time_date_stamp": stamp,
+                        "file_version": (
+                            f"{version_ms >> 16}.{version_ms & 0xFFFF}.{version_ls >> 16}.{version_ls & 0xFFFF}"
+                            if read_u32_le(data, base + 24) == 0xFEEF04BD
+                            else ""
+                        ),
+                    }
+                )
+            result["minidump_module_count"] = count
+            result["minidump_modules"] = modules
+            result["minidump_modules_truncated"] = count > len(modules)
+    return result
+
+
+def read_minidump_string(data: bytes, rva: int) -> str:
+    """MINIDUMP_STRING: u32 byte length + UTF-16LE buffer."""
+    if not rva or rva + 4 > len(data):
+        return ""
+    length = read_u32_le(data, rva)
+    if length > 0x10000 or rva + 4 + length > len(data):
+        return ""
+    return data[rva + 4 : rva + 4 + length].decode("utf-16le", errors="replace")
+
+
+def read_u32_le(data: bytes, offset: int) -> int:
+    return int.from_bytes(data[offset : offset + 4], "little") if 0 <= offset and offset + 4 <= len(data) else 0
+
+
+def read_u16_le(data: bytes, offset: int) -> int:
+    return int.from_bytes(data[offset : offset + 2], "little") if 0 <= offset and offset + 2 <= len(data) else 0
+
+
+UNIX_EPOCH = dt.datetime(1970, 1, 1, tzinfo=dt.timezone.utc)

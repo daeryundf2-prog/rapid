@@ -8,6 +8,8 @@ from ...core.audit import compute_sha256
 from ...core.models import ArtifactRecord
 from .._walk import iter_evidence_paths
 from .common import isoformat_from_timestamp, iter_windows_user_homes
+from .prefetch import prefetch_header_hints
+from .recent_files import parse_lnk_metadata_from_bytes
 from .system import (
     IP_RE,
     REMOTE_CONTROL_SCAN_LIMIT,
@@ -72,9 +74,9 @@ def collect_rdp_config_files(root: Path) -> Iterable[ArtifactRecord]:
                     "screen_mode": fields.get("screen mode id", ""),
                     "gateway_hostname": fields.get("gatewayhostname", ""),
                     "fields": fields,
-                    "modified_at": isoformat_from_timestamp(stat_result.st_mtime),
-                    "timestamp": isoformat_from_timestamp(stat_result.st_mtime),
-                    "timestamp_source": "rdp_file_modified_at",
+                    "source_file_mtime": isoformat_from_timestamp(stat_result.st_mtime),
+                    "timestamp": "",
+                    "timestamp_source": "none-rdp-file-modified-at-is-acquisition-copy-time",
                 },
             )
 
@@ -100,9 +102,9 @@ def collect_rdp_cache_files(root: Path) -> Iterable[ArtifactRecord]:
                     "cache_parse_status": "image-signature-pivots",
                     "thumbnail_candidate_count": len(thumbnail_candidates),
                     "thumbnail_candidates": thumbnail_candidates,
-                    "modified_at": isoformat_from_timestamp(stat_result.st_mtime),
-                    "timestamp": isoformat_from_timestamp(stat_result.st_mtime),
-                    "timestamp_source": "rdp_cache_modified_at",
+                    "source_file_mtime": isoformat_from_timestamp(stat_result.st_mtime),
+                    "timestamp": "",
+                    "timestamp_source": "none-rdp-cache-modified-at-is-acquisition-copy-time",
                     "note": "RDP cache file inventoried with bounded image signature pivots for remote-access thumbnail review; validate important screenshots with a dedicated RDP cache decoder.",
                 },
             )
@@ -129,7 +131,19 @@ def collect_rdp_registry_exports(root: Path) -> Iterable[ArtifactRecord]:
             )
 
 
+REMOTE_CONTROL_TEXT_SUFFIXES = {".log", ".txt", ".trace", ".toml", ".conf", ".ini", ".cfg", ".json", ".xml", ".csv"}
+TEMPLATE_PROFILE_PARTS = {"default", "default user"}
+
+
 def collect_third_party_remote_control_artifacts(root: Path) -> Iterable[ArtifactRecord]:
+    """Third-party remote-control pivots (single owner: windows-remote-access).
+
+    The row time comes from the artifact itself: Prefetch run times, LNK
+    target times, or a timestamp written inside a text log. The acquired
+    copy's host mtime is kept only as ``source_file_mtime``. Session
+    candidates are only extracted from text logs; shortcuts and Prefetch
+    files show installation/execution, not sessions.
+    """
     for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
         if not path.is_file():
             continue
@@ -137,47 +151,122 @@ def collect_third_party_remote_control_artifacts(root: Path) -> Iterable[Artifac
         if not product:
             continue
         stat_result = path.stat()
-        blob = read_prefix(path, REMOTE_CONTROL_SCAN_LIMIT)
-        strings = unique_strings([*extract_ascii_strings(blob), *extract_utf16_strings(blob)])
-        urls = regex_candidates(strings, URL_RE)[:20]
-        ips = sorted(set(IP_RE.findall(" ".join(strings))))[:20]
-        session_profile = remote_control_session_profile(product, strings, urls, ips)
+        suffix = path.suffix.lower()
+        lowered_parts = {part.lower() for part in path.parts}
+        profile_template = bool(lowered_parts & TEMPLATE_PROFILE_PARTS) and "users" in lowered_parts
+        details: dict[str, object] = {
+            **source_details(path, "third-party-remote-control"),
+            "product": product,
+            "size": stat_result.st_size,
+            "source_file_mtime": isoformat_from_timestamp(stat_result.st_mtime),
+            "profile_template": profile_template,
+            "reportability": "triage",
+            "validation_required": True,
+            "commercial_grade_ready": False,
+            "commercial_grade_blockers": [
+                "full-product-specific-session-state-decoder-required",
+                "remote-peer-attribution-validation-required",
+                "file-transfer-log-validation-required",
+            ],
+        }
+        risk_flags = [f"remote-control:{product}"]
+        empty_profile = remote_control_session_profile(product, [], [], [])
+        if suffix == ".pf":
+            header = prefetch_header_hints(path)
+            if header.get("binary_format_detected"):
+                run_times = list(header.get("last_run_times") or [])
+                details.update(
+                    {
+                        "artifact_role": "execution-prefetch",
+                        "coverage_status": "remote-control-execution-evidence",
+                        "parser_confidence": "high",
+                        "executable_name": header.get("header_executable_name", ""),
+                        "run_count": header.get("run_count", 0),
+                        "last_run_times": run_times,
+                        "timestamp": run_times[0] if run_times else "",
+                        "timestamp_source": "prefetch_last_run_time" if run_times else "missing_prefetch_run_time",
+                        "timestamp_kind": "run",
+                    }
+                )
+                risk_flags.append("remote-control-executed")
+            else:
+                details.update(
+                    {
+                        "artifact_role": "prefetch-invalid-content",
+                        "coverage_status": "remote-control-file-inventory",
+                        "parser_confidence": "low",
+                        "timestamp": "",
+                        "timestamp_source": "none-prefetch-invalid-content",
+                    }
+                )
+            session_profile = empty_profile
+        elif suffix == ".lnk":
+            lnk = parse_lnk_metadata_from_bytes(read_prefix(path, REMOTE_CONTROL_SCAN_LIMIT))
+            times = {key: lnk.get(key, "") for key in ("target_created_at", "target_accessed_at", "target_modified_at")}
+            stamp_key = next((key for key in ("target_accessed_at", "target_modified_at", "target_created_at") if times[key]), "")
+            details.update(
+                {
+                    "artifact_role": "shortcut-template" if profile_template else "shortcut",
+                    "coverage_status": "remote-control-installation-shortcut",
+                    "parser_confidence": "medium",
+                    "lnk_parse_status": lnk.get("lnk_parse_status", ""),
+                    "target_path": lnk.get("target_path", ""),
+                    **times,
+                    "timestamp": times[stamp_key] if stamp_key else "",
+                    "timestamp_source": stamp_key or "missing_lnk_target_times",
+                    "timestamp_kind": f"lnk-target-{stamp_key.split('_')[1]}" if stamp_key else "",
+                }
+            )
+            risk_flags.append("remote-control-installed-shortcut")
+            if profile_template:
+                risk_flags.append("default-profile-template")
+            session_profile = empty_profile
+        else:
+            blob = read_prefix(path, REMOTE_CONTROL_SCAN_LIMIT)
+            strings = unique_strings([*extract_ascii_strings(blob), *extract_utf16_strings(blob)])
+            urls = regex_candidates(strings, URL_RE)[:20]
+            ips = sorted(set(IP_RE.findall(" ".join(strings))))[:20]
+            is_text = suffix in REMOTE_CONTROL_TEXT_SUFFIXES
+            session_profile = remote_control_session_profile(product, strings, urls, ips) if is_text else empty_profile
+            log_times = list(session_profile.get("timestamp_candidates") or [])
+            details.update(
+                {
+                    "artifact_role": "log" if is_text else "binary-file",
+                    "coverage_status": "remote-control-session-pivot-inventory"
+                    if session_profile["session_candidates"]
+                    else "remote-control-file-inventory",
+                    "parser_confidence": "medium",
+                    "scan_bytes": len(blob),
+                    "extracted_string_count": len(strings),
+                    "string_samples": strings[:40],
+                    "url_candidates": urls,
+                    "ip_candidates": ips,
+                    # Log text timestamps carry no offset: kept as written, timezone unknown.
+                    "timestamp": log_times[0] if log_times else "",
+                    "timestamp_source": "remote_control_log_text" if log_times else "none-no-artifact-time",
+                    "timestamp_kind": "event" if log_times else "",
+                    "timezone": "unknown" if log_times else "",
+                }
+            )
+        details.update(
+            {
+                "remote_control_session_profile": session_profile,
+                "session_candidates": session_profile["session_candidates"],
+                "remote_id_candidates": session_profile["remote_id_candidates"],
+                "file_transfer_indicators": session_profile["file_transfer_indicators"],
+                "risk_flags": [*risk_flags, *remote_control_risk_flags(product, session_profile)[1:]],
+                "validation_guidance": (
+                    "원격 제어 도구 흔적입니다. Prefetch는 실행, 바로가기는 설치 흔적이며 세션 근거가 아닙니다. "
+                    "세션 시작/종료·상대방·파일 전송은 제품별 로그 파서로 확인한 뒤 보고서에 사용하십시오."
+                ),
+            }
+        )
         yield ArtifactRecord(
             provider=WindowsRemoteAccessProvider.name,
             artifact_type="third-party-remote-control-artifact",
             path=str(path.resolve()),
             supported=True,
-            details={
-                **source_details(path, "third-party-remote-control"),
-                "product": product,
-                "size": stat_result.st_size,
-                "modified_at": isoformat_from_timestamp(stat_result.st_mtime),
-                "timestamp": isoformat_from_timestamp(stat_result.st_mtime),
-                "timestamp_source": "remote_control_file_modified_at",
-                "scan_bytes": len(blob),
-                "extracted_string_count": len(strings),
-                "string_samples": strings[:40],
-                "url_candidates": urls,
-                "ip_candidates": ips,
-                "remote_control_session_profile": session_profile,
-                "session_candidates": session_profile["session_candidates"],
-                "remote_id_candidates": session_profile["remote_id_candidates"],
-                "file_transfer_indicators": session_profile["file_transfer_indicators"],
-                "coverage_status": "remote-control-session-pivot-inventory"
-                if session_profile["session_candidates"]
-                else "remote-control-file-inventory",
-                "reportability": "triage",
-                "parser_confidence": "medium",
-                "risk_flags": remote_control_risk_flags(product, session_profile),
-                "validation_required": True,
-                "validation_guidance": "Third-party remote-control file is parsed for bounded session, peer, IP/URL, and transfer pivots. Validate session start/end, peer identity, file transfer logs, and account attribution with product-specific parsers before report-grade use.",
-                "commercial_grade_ready": False,
-                "commercial_grade_blockers": [
-                    "full-product-specific-session-state-decoder-required",
-                    "remote-peer-attribution-validation-required",
-                    "file-transfer-log-validation-required",
-                ],
-            },
+            details=details,
         )
 
 

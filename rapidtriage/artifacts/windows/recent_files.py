@@ -7,7 +7,7 @@ import re
 import struct
 import uuid
 from collections.abc import Iterable, Mapping, Sequence
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from ...core.forensic_accuracy import build_accuracy_gate
@@ -17,10 +17,11 @@ from .common import (
     isoformat_from_timestamp,
     iter_windows_user_homes,
 )
+from .filesystem import CONTENT_KIND_LABELS_KO, sniff_content_kind
 
 RECENT_ROOT = ("AppData", "Roaming", "Microsoft", "Windows", "Recent")
 PARSER_VERSION = "windows-recent-files-v8"
-MAX_JUMPLIST_EMBEDDED_LNKS = 50
+MAX_JUMPLIST_INLINE_DESTINATIONS = 256
 MAX_OLE_STREAMS = 128
 MAX_OLE_STREAM_BYTES = 8 * 1024 * 1024
 MAX_LNK_EXTRA_DATA_BLOCKS = 64
@@ -157,42 +158,166 @@ class WindowsRecentFilesProvider:
     def collect(self, root: Path) -> Iterable[ArtifactRecord]:
         for user_root in iter_windows_user_homes(root):
             recent_root = user_root.joinpath(*RECENT_ROOT)
-            if not recent_root.is_dir():
-                continue
-            for artifact_type, pattern, extra_parts in RECENT_PATTERNS:
-                scan_root = recent_root.joinpath(*extra_parts)
-                if not scan_root.is_dir():
-                    continue
-                for candidate in sorted(scan_root.glob(pattern), key=lambda item: item.name.lower()):
-                    if not candidate.is_file():
+            if recent_root.is_dir():
+                for artifact_type, pattern, extra_parts in RECENT_PATTERNS:
+                    scan_root = recent_root.joinpath(*extra_parts)
+                    if not scan_root.is_dir():
                         continue
-                    stat_result = candidate.stat()
-                    yield ArtifactRecord(
-                        provider=self.name,
-                        artifact_type=artifact_type,
-                        path=str(candidate.resolve()),
-                        supported=self.supported(),
-                        details={
-                            "parser": "windows-recent-files",
-                            "parser_version": PARSER_VERSION,
-                            "user": user_root.name,
-                            "entry_name": candidate.name,
-                            "entry_hint": candidate.stem,
-                            "size": stat_result.st_size,
-                            "modified_at": isoformat_from_timestamp(stat_result.st_mtime),
-                            **recent_file_metadata(candidate, artifact_type),
-                        },
-                    )
+                    for candidate in sorted(scan_root.glob(pattern), key=lambda item: item.name.lower()):
+                        if not candidate.is_file():
+                            continue
+                        yield from self._records_for(candidate, artifact_type, user_root, "recent")
+            # Shortcuts outside Recent (Desktop, Start Menu, SendTo, Quick
+            # Launch, WinX ...) are the same Shell Link format, scoped with a
+            # ``location`` label so they are not mistaken for recent-file use.
+            for candidate in iter_profile_shortcuts(user_root, recent_root):
+                yield from self._records_for(candidate, "shell-shortcut", user_root, shortcut_location(candidate, user_root))
+        program_data_start = root / "ProgramData" / "Microsoft" / "Windows" / "Start Menu"
+        if program_data_start.is_dir():
+            for candidate in sorted(program_data_start.rglob("*.lnk"), key=lambda item: str(item).lower()):
+                if candidate.is_file():
+                    yield from self._records_for(candidate, "shell-shortcut", None, "all-users-start-menu")
+
+    def _records_for(
+        self, candidate: Path, artifact_type: str, user_root: Path | None, location: str
+    ) -> Iterable[ArtifactRecord]:
+        stat_result = candidate.stat()
+        metadata = recent_file_metadata(candidate, artifact_type)
+        entries = metadata.pop("_jumplist_entries", None)
+        effective_type = artifact_type
+        if artifact_type in {"recent-shortcut", "shell-shortcut"} and metadata.get("lnk_parse_status") == "unsupported-header":
+            effective_type = f"{artifact_type}-invalid-content"
+            metadata.update(lnk_invalid_content_details(candidate))
+        user_name = user_root.name if user_root is not None else ""
+        details: dict[str, object] = {
+            "parser": "windows-recent-files",
+            "parser_version": PARSER_VERSION,
+            "user": user_name,
+            "location": location,
+            "profile_template": user_name.lower() in TEMPLATE_PROFILE_NAMES,
+            "entry_name": candidate.name,
+            "entry_hint": candidate.stem,
+            "size": stat_result.st_size,
+            # Host mtime of the acquired copy: provenance only, never an event.
+            "source_file_mtime": isoformat_from_timestamp(stat_result.st_mtime),
+            **metadata,
+        }
+        if effective_type != artifact_type:
+            details["artifact_type"] = effective_type
+        if effective_type in {"recent-shortcut", "shell-shortcut"}:
+            details.update(lnk_row_timestamp(details))
+        yield ArtifactRecord(
+            provider=self.name,
+            artifact_type=effective_type,
+            path=str(candidate.resolve()),
+            supported=self.supported(),
+            details=details,
+        )
+        for index, entry in enumerate(entries or []):
+            yield ArtifactRecord(
+                provider=self.name,
+                artifact_type="jumplist-entry",
+                path=str(candidate.resolve()),
+                supported=self.supported(),
+                details={
+                    "parser": "windows-recent-files",
+                    "parser_version": PARSER_VERSION,
+                    "artifact_type": "jumplist-entry",
+                    "user": user_name,
+                    "location": location,
+                    "jumplist_kind": "automatic" if artifact_type == "jumplist-automatic" else "custom",
+                    "application_id_hash": candidate.stem.split(".", 1)[0],
+                    "source_path": str(candidate.resolve()),
+                    "source_hashes": metadata.get("source_hashes", {}),
+                    "source_index": index,
+                    "coverage_status": "decoded-destlist-entry" if entry.get("destlist_entry_present") else "embedded-lnk-stream",
+                    "reportability": "triage",
+                    **entry,
+                },
+            )
+
+
+TEMPLATE_PROFILE_NAMES = {"default", "default user", "all users"}
+
+
+def iter_profile_shortcuts(user_root: Path, recent_root: Path) -> Iterable[Path]:
+    recent_prefix = str(recent_root).lower()
+    for candidate in sorted(user_root.rglob("*.lnk"), key=lambda item: str(item).lower()):
+        if str(candidate).lower().startswith(recent_prefix):
+            continue
+        if candidate.is_file():
+            yield candidate
+
+
+SHORTCUT_LOCATION_MARKERS = (
+    ("\\microsoft\\windows\\sendto\\", "sendto"),
+    ("\\microsoft\\windows\\start menu\\", "start-menu"),
+    ("\\internet explorer\\quick launch\\user pinned\\taskbar\\", "taskbar-pinned"),
+    ("\\internet explorer\\quick launch\\", "quick-launch"),
+    ("\\microsoft\\windows\\winx\\", "winx-menu"),
+    ("\\desktop\\", "desktop"),
+    ("\\documents\\", "documents"),
+    ("\\downloads\\", "downloads"),
+    ("\\favorites\\", "favorites"),
+    ("\\links\\", "links"),
+)
+
+
+def shortcut_location(path: Path, user_root: Path) -> str:
+    relative = "\\" + str(path.relative_to(user_root)).replace("/", "\\").lower()
+    for marker, label in SHORTCUT_LOCATION_MARKERS:
+        if marker in relative:
+            return label
+    return "other-profile"
+
+
+def lnk_row_timestamp(details: Mapping[str, object]) -> dict[str, object]:
+    for key, kind in (
+        ("target_accessed_at", "lnk-target-accessed"),
+        ("target_modified_at", "lnk-target-modified"),
+        ("target_created_at", "lnk-target-created"),
+    ):
+        if details.get(key):
+            return {"timestamp": details[key], "timestamp_source": key, "timestamp_kind": kind}
+    return {"timestamp": "", "timestamp_source": "missing_lnk_target_times", "timestamp_kind": ""}
+
+
+def lnk_invalid_content_details(path: Path) -> dict[str, object]:
+    try:
+        with path.open("rb") as handle:
+            prefix = handle.read(4096)
+    except OSError:
+        prefix = b""
+    content = sniff_content_kind(prefix)
+    kind = str(content["kind"])
+    label = CONTENT_KIND_LABELS_KO.get(kind, kind)
+    return {
+        "lnk_parse_status": "invalid-content",
+        "detected_content_kind": kind,
+        "detected_content_label": label,
+        "detected_content_basis": content["basis"],
+        "content_entropy": content["entropy"],
+        "content_zero_ratio": content["zero_ratio"],
+        "header_hex": prefix[:16].hex(),
+        "target_path": "",
+        "embedded_paths": [],
+        "risk_flags": ["lnk-invalid-content", "signature-extension-mismatch"],
+        "reportability": "excluded-from-recent-file-evidence",
+        "note": (
+            f"확장자는 바로가기(.lnk)이지만 내용이 Shell Link 구조가 아닙니다({label}). "
+            "최근 사용 파일 근거로 쓰지 않으며, 클러스터 재할당 잔존물인지 MFT/USN으로 확인하십시오."
+        ),
+    }
 
 
 def recent_file_metadata(path: Path, artifact_type: str) -> dict[str, object]:
     base = {"source_hashes": file_hashes(path)}
-    if artifact_type == "recent-shortcut":
-        return {**base, **parse_lnk_metadata(path)}
+    if artifact_type in {"recent-shortcut", "shell-shortcut"}:
+        return {**base, **parse_lnk_metadata(path, artifact_type)}
     return {**base, **jump_list_metadata(path, artifact_type)}
 
 
-def parse_lnk_metadata(path: Path) -> dict[str, object]:
+def parse_lnk_metadata(path: Path, artifact_type: str = "recent-shortcut") -> dict[str, object]:
     try:
         data = path.read_bytes()
     except OSError:
@@ -204,7 +329,7 @@ def parse_lnk_metadata(path: Path) -> dict[str, object]:
         {
             "source_path": source_path,
             "source_hashes": source_hashes,
-            "artifact_type": "recent-shortcut",
+            "artifact_type": artifact_type,
         }
     )
     if metadata.get("lnk_parse_status") == "parsed":
@@ -260,6 +385,14 @@ def parse_lnk_metadata_from_bytes(data: bytes) -> dict[str, object]:
         string_data.get("relative_path"),
         next(iter(embedded_paths), ""),
     )
+    if link_info.get("full_path"):
+        target_path_source = f"link-info:{link_info.get('full_path_source', '')}"
+    elif string_data.get("relative_path"):
+        target_path_source = "string-data:relative-path"
+    elif embedded_paths:
+        target_path_source = "embedded-path-string-scan"
+    else:
+        target_path_source = ""
     paths = sorted({item for item in [target_path, *embedded_paths] if item})
     validation_checks = {
         "has_valid_header": True,
@@ -298,6 +431,25 @@ def parse_lnk_metadata_from_bytes(data: bytes) -> dict[str, object]:
         "show_command": read_u32(data, 0x3C),
         "hot_key": read_u16(data, 0x40),
         "target_path": target_path,
+        "target_path_source": target_path_source,
+        "volume_serial_number": link_info.get("volume_serial_number", ""),
+        "drive_type": link_info.get("drive_type", ""),
+        "drive_type_name": link_info.get("drive_type_name", ""),
+        "volume_label": link_info.get("volume_label", ""),
+        "local_base_path": link_info.get("local_base_path", ""),
+        "common_path_suffix": link_info.get("common_path_suffix", ""),
+        "net_name": link_info.get("net_name", ""),
+        "device_name": link_info.get("device_name", ""),
+        "tracker_machine_id": tracker_data.get("machine_id", ""),
+        "tracker_droid_file_mac_address": tracker_data.get("droid_file_mac_address", ""),
+        "known_folder_ids": [
+            {"id": block.get("known_folder_id", ""), "name": block.get("known_folder_name", "")}
+            for block in extra_data_blocks
+            if block.get("known_folder_id")
+        ],
+        "environment_target": next(
+            (str(block.get("environment_target")) for block in extra_data_blocks if block.get("environment_target")), ""
+        ),
         "embedded_paths": paths,
         "description": string_data.get("description", ""),
         "relative_path": string_data.get("relative_path", ""),
@@ -432,7 +584,8 @@ def parse_lnk_extra_data(data: bytes, offset: int) -> tuple[list[dict[str, objec
     tracker_data: dict[str, object] = {}
     while offset + 4 <= len(data) and len(blocks) < MAX_LNK_EXTRA_DATA_BLOCKS:
         block_size = read_u32(data, offset)
-        if block_size == 0:
+        if block_size < 4:
+            # TerminalBlock (size < 4) ends the ExtraData section.
             break
         if block_size < 8 or offset + block_size > len(data):
             blocks.append(
@@ -461,6 +614,19 @@ def parse_lnk_extra_data(data: bytes, offset: int) -> tuple[list[dict[str, objec
             block_summary["tracker_data"] = tracker_data
         elif signature == 0xA0000009:
             block_summary["property_store_data"] = parse_lnk_property_store_data_block(block_data)
+        elif signature == 0xA000000B and block_size >= 0x1C:
+            folder_id = format_guid_le(block_data[8:24])
+            block_summary["known_folder_id"] = folder_id
+            block_summary["known_folder_name"] = KNOWN_FOLDER_NAMES.get(folder_id.lower(), "")
+            block_summary["known_folder_idlist_offset"] = read_u32(block_data, 24)
+        elif signature == 0xA0000005 and block_size >= 0x10:
+            block_summary["special_folder_id"] = read_u32(block_data, 8)
+            block_summary["special_folder_idlist_offset"] = read_u32(block_data, 12)
+        elif signature in (0xA0000001, 0xA0000007, 0xA0000006) and block_size >= 0x314:
+            ansi_value = read_c_string(block_data, 8, "lnk-ansi")
+            unicode_value = read_c_string(block_data, 268, "utf-16le")
+            key = {0xA0000001: "environment_target", 0xA0000007: "icon_environment_target", 0xA0000006: "darwin_data"}[signature]
+            block_summary[key] = unicode_value or ansi_value
         blocks.append(block_summary)
         offset += block_size
     return blocks, tracker_data
@@ -476,29 +642,183 @@ def parse_lnk_property_store_data_block(block_data: bytes) -> dict[str, object]:
         guid_text = format_guid_le(chunk)
         if guid_text and guid_text not in [item["guid"] for item in guid_candidates]:
             guid_candidates.append({"relative_offset": offset + 8, "guid": guid_text})
+    properties, storage_count = decode_serialized_property_storage(payload)
     return {
         "parse_status": "parsed-candidate" if len(block_data) >= 12 else "truncated-candidate",
         "declared_block_size": read_u32(block_data, 0) if len(block_data) >= 4 else len(block_data),
         "payload_size": len(payload),
+        "storage_count": storage_count,
+        "properties": properties,
+        "property_count": len(properties),
         "embedded_paths": extract_windows_paths(payload),
         "string_candidates": extract_property_store_string_candidates(payload),
         "guid_candidates": guid_candidates,
-        "validation_status": "candidate-requires-property-store-schema-validation",
+        "validation_status": "decoded-serialized-property-storage" if properties else "candidate-requires-property-store-schema-validation",
         "reportability": "review-only",
     }
 
 
+PROPERTY_STORE_NAMED_FORMAT = "d5cdd505-2e9c-101b-9397-08002b2cf9ae"
+PROPERTY_STORE_MAX_VALUES = 256
+
+
+def decode_serialized_property_storage(payload: bytes) -> tuple[list[dict[str, object]], int]:
+    """MS-PROPSTORE serialized property storage (``1SPS``) with typed values."""
+    properties: list[dict[str, object]] = []
+    storages = 0
+    offset = 0
+    while offset + 24 <= len(payload) and len(properties) < PROPERTY_STORE_MAX_VALUES:
+        storage_size = read_u32(payload, offset)
+        if storage_size == 0:
+            break
+        if storage_size < 24 or offset + storage_size > len(payload) or payload[offset + 4 : offset + 8] != b"1SPS":
+            break
+        storages += 1
+        format_id = format_guid_le(payload[offset + 8 : offset + 24])
+        cursor = offset + 24
+        end = offset + storage_size
+        named = format_id.lower() == PROPERTY_STORE_NAMED_FORMAT
+        while cursor + 4 <= end and len(properties) < PROPERTY_STORE_MAX_VALUES:
+            value_size = read_u32(payload, cursor)
+            if value_size == 0 or cursor + value_size > end:
+                break
+            value_blob = payload[cursor : cursor + value_size]
+            if named:
+                name_size = read_u32(value_blob, 4)
+                name = value_blob[9 : 9 + name_size].decode("utf-16le", errors="replace").rstrip("\x00")
+                typed = value_blob[9 + name_size :]
+                key = f"{format_id}/{name}"
+                property_id: object = name
+            else:
+                property_id = read_u32(value_blob, 4)
+                typed = value_blob[9:]
+                key = f"{format_id}/{property_id}"
+            value_type, value = decode_typed_property_value(typed)
+            properties.append(
+                {
+                    "format_id": format_id,
+                    "property_id": property_id,
+                    "key": key,
+                    "name": PROPERTY_KEY_NAMES.get(key.lower(), ""),
+                    "value_type": value_type,
+                    "value": value,
+                }
+            )
+            cursor += value_size
+        offset += storage_size
+    return properties, storages
+
+
+def decode_typed_property_value(typed: bytes) -> tuple[str, object]:
+    if len(typed) < 4:
+        return "truncated", ""
+    vt = read_u16(typed, 0)
+    body = typed[4:]
+    if vt == 0x1F:  # VT_LPWSTR
+        chars = read_u32(body, 0)
+        return "VT_LPWSTR", body[4 : 4 + chars * 2].decode("utf-16le", errors="replace").rstrip("\x00")
+    if vt == 0x1E:  # VT_LPSTR
+        size = read_u32(body, 0)
+        return "VT_LPSTR", decode_lnk_ansi(body[4 : 4 + size])
+    if vt == 0x08:  # VT_BSTR
+        size = read_u32(body, 0)
+        return "VT_BSTR", body[4 : 4 + size].decode("utf-16le", errors="replace").rstrip("\x00")
+    if vt == 0x40:  # VT_FILETIME
+        return "VT_FILETIME", windows_filetime_to_iso(read_u64(body, 0))
+    if vt == 0x48:  # VT_CLSID
+        return "VT_CLSID", format_guid_le(body[:16])
+    if vt in (0x13, 0x17):
+        return "VT_UI4", read_u32(body, 0)
+    if vt in (0x03, 0x16):
+        return "VT_I4", struct.unpack_from("<i", body, 0)[0] if len(body) >= 4 else 0
+    if vt == 0x15:
+        return "VT_UI8", read_u64(body, 0)
+    if vt == 0x14:
+        return "VT_I8", struct.unpack_from("<q", body, 0)[0] if len(body) >= 8 else 0
+    if vt == 0x12:
+        return "VT_UI2", read_u16(body, 0)
+    if vt == 0x0B:
+        return "VT_BOOL", read_u16(body, 0) != 0
+    return f"VT_0x{vt:04X}", body[:32].hex()
+
+
+PROPERTY_KEY_NAMES = {
+    "b725f130-47ef-101a-a5f1-02608c9eebac/10": "System.ItemNameDisplay",
+    "b725f130-47ef-101a-a5f1-02608c9eebac/12": "System.Size",
+    "b725f130-47ef-101a-a5f1-02608c9eebac/14": "System.DateModified",
+    "b725f130-47ef-101a-a5f1-02608c9eebac/15": "System.DateCreated",
+    "b725f130-47ef-101a-a5f1-02608c9eebac/16": "System.DateAccessed",
+    "b725f130-47ef-101a-a5f1-02608c9eebac/4": "System.ItemTypeText",
+    "28636aa6-953d-11d2-b5d6-00c04fd918d0/30": "System.ParsingPath",
+    "e3e0584c-b788-4a5a-bb20-7f5a44c9acdd/6": "System.ItemFolderPathDisplay",
+    "9f4c2855-9f79-4b39-a8d0-e1d42de1d5f3/5": "System.AppUserModel.ID",
+    "446d16b1-8dad-4870-a748-402ea43d788c/100": "System.ThumbnailCacheId",
+    "f29f85e0-4ff9-1068-ab91-08002b27b3d9/2": "System.Title",
+    "f29f85e0-4ff9-1068-ab91-08002b27b3d9/4": "System.Author",
+}
+KNOWN_FOLDER_NAMES = {
+    "b4bfcc3a-db2c-424c-b029-7fe99a87c641": "Desktop",
+    "fdd39ad0-238f-46af-adb4-6c85480369c7": "Documents",
+    "374de290-123f-4565-9164-39c4925e467b": "Downloads",
+    "33e28130-4e1e-4676-835a-98395c3bc3bb": "Pictures",
+    "4bd8d571-6d19-48d3-be97-422220080e43": "Music",
+    "18989b1d-99b5-455b-841c-ab7c74e4ddfc": "Videos",
+    "905e63b6-c1bf-494e-b29c-65b732d3d21a": "ProgramFiles",
+    "7c5a40ef-a0fb-4bfc-874a-c0f2e0b9fa8e": "ProgramFilesX86",
+    "1ac14e77-02e7-4e5d-b744-2eb1ae5198b7": "System",
+    "f38bf404-1d43-42f2-9305-67de0b28fc23": "Windows",
+    "a77f5d77-2e2b-44c3-a6a2-aba601054a51": "Programs",
+    "625b53c3-ab48-4ec1-ba1f-a1ef4146fc19": "StartMenu",
+    "8983036c-27c0-404b-8f08-102d10dcfd74": "SendTo",
+    "ae50c081-ebd2-438a-8655-8a092e34987a": "Recent",
+    "5e6c858f-0e22-4760-9afe-ea3317b67173": "Profile",
+    "3eb685db-65f9-4cf6-a03a-e3ef65729f3d": "RoamingAppData",
+    "f1b32785-6fba-4fcf-9d55-7b8e7f157091": "LocalAppData",
+    "62ab5d82-fdc1-4dc3-a9dd-070d1d495d97": "ProgramData",
+    "c4aa340d-f20f-4863-afef-f87ef2e6ba25": "PublicDesktop",
+    "ed4824af-dce4-45a8-81e2-fc7965083634": "PublicDocuments",
+    "1777f761-68ad-4d8a-87bd-30b759fa33dd": "Favorites",
+}
+
+
 def parse_lnk_tracker_data_block(block_data: bytes) -> dict[str, object]:
-    machine_id = decode_text(block_data[0x10:0x20], "cp1252") if len(block_data) >= 0x20 else ""
+    machine_id = decode_text(block_data[0x10:0x20].split(b"\x00", 1)[0], "cp1252") if len(block_data) >= 0x20 else ""
+    droid_file = format_guid_le(block_data[0x30:0x40])
+    birth_droid_file = format_guid_le(block_data[0x50:0x60])
     return {
         "parse_status": "parsed-candidate" if len(block_data) >= 0x60 else "truncated-candidate",
         "machine_id": machine_id,
         "droid_volume_identifier": format_guid_le(block_data[0x20:0x30]),
-        "droid_file_identifier": format_guid_le(block_data[0x30:0x40]),
+        "droid_file_identifier": droid_file,
         "birth_droid_volume_identifier": format_guid_le(block_data[0x40:0x50]),
-        "birth_droid_file_identifier": format_guid_le(block_data[0x50:0x60]),
+        "birth_droid_file_identifier": birth_droid_file,
+        "droid_file_mac_address": uuid_v1_mac(block_data[0x30:0x40]),
+        "droid_file_timestamp": uuid_v1_time(block_data[0x30:0x40]),
+        "birth_droid_file_mac_address": uuid_v1_mac(block_data[0x50:0x60]),
+        "birth_droid_file_timestamp": uuid_v1_time(block_data[0x50:0x60]),
         "validation_status": "candidate-requires-known-answer-corpus",
     }
+
+
+def uuid_v1_mac(raw: bytes) -> str:
+    if len(raw) != 16:
+        return ""
+    value = uuid.UUID(bytes_le=raw)
+    if value.version != 1:
+        return ""
+    return ":".join(f"{byte:02x}" for byte in value.node.to_bytes(6, "big"))
+
+
+def uuid_v1_time(raw: bytes) -> str:
+    """UUID v1 timestamp (100 ns since 1582-10-15) -> ISO-8601 UTC."""
+    if len(raw) != 16:
+        return ""
+    value = uuid.UUID(bytes_le=raw)
+    if value.version != 1:
+        return ""
+    # 1582-10-15 -> 1601-01-01 is 18 years + leap days = 5748192000000000 ticks.
+    filetime = value.time - 5_748_192_000_000_000
+    return windows_filetime_to_iso(filetime) if filetime > 0 else ""
 
 
 def extract_property_store_string_candidates(data: bytes) -> list[str]:
@@ -548,7 +868,8 @@ def parse_lnk_string_data(data: bytes, link_flags: int) -> tuple[dict[str, str],
     return strings, offset
 
 
-def parse_lnk_link_info(data: bytes, link_flags: int) -> dict[str, str]:
+def parse_lnk_link_info(data: bytes, link_flags: int) -> dict[str, object]:
+    """MS-SHLLINK 2.3 LinkInfo: VolumeID, LocalBasePath, network link, suffix."""
     if not (link_flags & 0x00000002):
         return {}
     offset = LNK_HEADER_SIZE
@@ -559,34 +880,115 @@ def parse_lnk_link_info(data: bytes, link_flags: int) -> dict[str, str]:
         return {"parse_status": "invalid-link-info", "offset": offset, "size": size}
     block = data[offset : offset + size]
     header_size = read_u32(block, 4)
+    link_info_flags = read_u32(block, 8)
+    volume_id_offset = read_u32(block, 12)
     local_base_path_offset = read_u32(block, 16)
+    network_link_offset = read_u32(block, 20)
     common_path_suffix_offset = read_u32(block, 24)
-    result: dict[str, str] = {
+    has_volume = bool(link_info_flags & 0x1)
+    has_network = bool(link_info_flags & 0x2)
+    result: dict[str, object] = {
         "parse_status": "parsed",
-        "offset": str(offset),
-        "size": str(size),
-        "header_size": str(header_size),
-        "local_base_path_offset": str(local_base_path_offset),
-        "common_path_suffix_offset": str(common_path_suffix_offset),
-        "local_base_path": read_c_string(block, local_base_path_offset, "lnk-ansi"),
+        "offset": offset,
+        "size": size,
+        "header_size": header_size,
+        "link_info_flags": link_info_flags,
+        "has_volume_id_and_local_base_path": has_volume,
+        "has_common_network_relative_link": has_network,
+        "local_base_path_offset": local_base_path_offset,
+        "common_path_suffix_offset": common_path_suffix_offset,
+        "local_base_path": read_c_string(block, local_base_path_offset, "lnk-ansi") if has_volume else "",
         "common_path_suffix": read_c_string(block, common_path_suffix_offset, "lnk-ansi"),
     }
+    if has_volume and volume_id_offset:
+        result.update(parse_lnk_volume_id(block, volume_id_offset))
     if header_size >= 0x24:
-        result["local_base_path_unicode_offset"] = str(read_u32(block, 28))
-        result["common_path_suffix_unicode_offset"] = str(read_u32(block, 36))
-        result["local_base_path_unicode"] = read_c_string(block, int(result["local_base_path_unicode_offset"]), "utf-16le")
-        result["common_path_suffix_unicode"] = read_c_string(block, int(result["common_path_suffix_unicode_offset"]), "utf-16le")
+        unicode_base_offset = read_u32(block, 28)
+        unicode_suffix_offset = read_u32(block, 32)
+        result["local_base_path_unicode_offset"] = unicode_base_offset
+        result["common_path_suffix_unicode_offset"] = unicode_suffix_offset
+        result["local_base_path_unicode"] = read_c_string(block, unicode_base_offset, "utf-16le") if has_volume else ""
+        result["common_path_suffix_unicode"] = read_c_string(block, unicode_suffix_offset, "utf-16le")
         if result["local_base_path_unicode"]:
             result["local_base_path"] = result["local_base_path_unicode"]
         if result["common_path_suffix_unicode"]:
             result["common_path_suffix"] = result["common_path_suffix_unicode"]
-    # MS-SHLLINK: the target's full path is reconstructed by appending
-    # CommonPathSuffix to LocalBasePath. Writers that already embed the
-    # complete path in LocalBasePath are handled by the suffix check.
-    result["full_path"] = join_lnk_base_suffix(
-        result["local_base_path"], result["common_path_suffix"]
-    )
+    if has_network and network_link_offset:
+        result.update(parse_lnk_network_link(block, network_link_offset))
+    # MS-SHLLINK: the target's full path is LocalBasePath + CommonPathSuffix,
+    # or NetName (\\server\share) + "\" + CommonPathSuffix for network links.
+    # Writers that already embed the complete path are handled by the suffix check.
+    local_base = str(result["local_base_path"])
+    suffix = str(result["common_path_suffix"])
+    if local_base:
+        result["full_path"] = join_lnk_base_suffix(local_base, suffix)
+        result["full_path_source"] = "local-base-path+common-path-suffix"
+    elif result.get("net_name"):
+        result["full_path"] = join_lnk_base_suffix(str(result["net_name"]), suffix)
+        result["full_path_source"] = "net-name+common-path-suffix"
+    else:
+        result["full_path"] = suffix
+        result["full_path_source"] = "common-path-suffix-only" if suffix else ""
     return result
+
+
+def parse_lnk_volume_id(block: bytes, offset: int) -> dict[str, object]:
+    size = read_u32(block, offset)
+    if size < 0x10 or offset + size > len(block):
+        return {"volume_id_parse_status": "invalid-volume-id"}
+    volume = block[offset : offset + size]
+    drive_type = read_u32(volume, 4)
+    serial = read_u32(volume, 8)
+    label_offset = read_u32(volume, 12)
+    if label_offset == 0x14:
+        label = read_c_string(volume, read_u32(volume, 16), "utf-16le")
+        label_encoding = "utf-16le"
+    else:
+        label = read_c_string(volume, label_offset, "lnk-ansi") if label_offset else ""
+        label_encoding = "ansi"
+    return {
+        "volume_id_parse_status": "parsed",
+        "drive_type": drive_type,
+        "drive_type_name": LNK_DRIVE_TYPES.get(drive_type, f"unknown-{drive_type}"),
+        "volume_serial_number": f"{serial:08X}",
+        "volume_label": label,
+        "volume_label_encoding": label_encoding,
+    }
+
+
+def parse_lnk_network_link(block: bytes, offset: int) -> dict[str, object]:
+    size = read_u32(block, offset)
+    if size < 0x14 or offset + size > len(block):
+        return {"network_link_parse_status": "invalid-common-network-relative-link"}
+    link = block[offset : offset + size]
+    flags = read_u32(link, 4)
+    net_name_offset = read_u32(link, 8)
+    device_name_offset = read_u32(link, 12)
+    provider_type = read_u32(link, 16)
+    net_name = read_c_string(link, net_name_offset, "lnk-ansi")
+    device_name = read_c_string(link, device_name_offset, "lnk-ansi") if flags & 0x1 else ""
+    if net_name_offset > 0x14 and size >= 0x1C:
+        net_name = read_c_string(link, read_u32(link, 20), "utf-16le") or net_name
+        if flags & 0x1:
+            device_name = read_c_string(link, read_u32(link, 24), "utf-16le") or device_name
+    return {
+        "network_link_parse_status": "parsed",
+        "network_link_flags": flags,
+        "net_name": net_name,
+        "device_name": device_name,
+        "network_provider_type": f"0x{provider_type:08X}" if flags & 0x2 else "",
+    }
+
+
+LNK_DRIVE_TYPES = {
+    0: "unknown",
+    1: "no-root-dir",
+    2: "removable",
+    3: "fixed",
+    4: "remote",
+    5: "cdrom",
+    6: "ramdisk",
+}
 
 
 def join_lnk_base_suffix(base: str, suffix: str) -> str:
@@ -605,7 +1007,8 @@ def jump_list_metadata(path: Path, artifact_type: str) -> dict[str, object]:
     ole_streams = parse_ole_compound_streams(data) if data.startswith(CFB_SIGNATURE) else []
     destinations = extract_jumplist_destinations(data, ole_streams)
     destlist_metadata = parse_destlist_metadata(ole_streams)
-    enrich_destinations_with_destlist_candidates(destinations, destlist_metadata.get("destlist_entry_candidates", []))
+    destlist_entries_all = list(destlist_metadata.pop("destlist_entries_all", None) or [])
+    enrich_destinations_with_destlist_candidates(destinations, destlist_entries_all)
     embedded_paths = sorted(
         {
             item
@@ -628,6 +1031,7 @@ def jump_list_metadata(path: Path, artifact_type: str) -> dict[str, object]:
         }
         for stream in ole_streams[:MAX_OLE_STREAMS]
     ]
+    stream_summaries_truncated = len(ole_streams) > MAX_OLE_STREAMS
     validation_checks = jumplist_validation_checks(data, ole_streams, destinations, destlist_metadata)
     report_grade = recent_report_grade_assessment(
         recent_validation_matrix(validation_checks),
@@ -663,10 +1067,13 @@ def jump_list_metadata(path: Path, artifact_type: str) -> dict[str, object]:
         "ole_parse_status": "parsed" if ole_streams else "not-ole" if not data.startswith(CFB_SIGNATURE) else "no-streams",
         "ole_stream_count": len(ole_streams),
         "ole_streams": stream_summaries,
+        "ole_streams_truncated": stream_summaries_truncated,
         "embedded_paths": embedded_paths,
         "destination_count": len(destinations),
         "destination_stream_count": len({str(destination.get("stream_path") or "") for destination in destinations if destination.get("stream_path")}),
-        "destinations": destinations,
+        "destinations": destinations[:MAX_JUMPLIST_INLINE_DESTINATIONS],
+        "destinations_truncated": len(destinations) > MAX_JUMPLIST_INLINE_DESTINATIONS,
+        "destinations_total": len(destinations),
         "jumplist_evidence": evidence,
         "validation_checks": validation_checks,
         "core_accuracy_gates": core_accuracy_gates,
@@ -714,7 +1121,93 @@ def jump_list_metadata(path: Path, artifact_type: str) -> dict[str, object]:
     details["jumplist_analyst_review_profile"] = jumplist_analyst_review_profile(details)
     details["jumplist_destlist_depth_manifest"] = jumplist_destlist_depth_manifest(details)
     details["jumplist_destlist_depth_manifest_hash"] = details["jumplist_destlist_depth_manifest"]["manifest_sha256"]
+    details["_jumplist_entries"] = jumplist_entry_payloads(artifact_type, destlist_entries_all, destinations)
     return details
+
+
+# (source key, row key) pairs for ``jumplist-entry`` rows.
+JUMPLIST_ENTRY_DESTLIST_FIELDS = (
+    ("entry_number", "destlist_entry_number"),
+    ("lnk_stream_name", "lnk_stream_name"),
+    ("lnk_stream_present", "lnk_stream_present"),
+    ("destlist_version", "destlist_version"),
+    ("layout_status", "destlist_layout_status"),
+    ("entry_offset", "destlist_entry_offset"),
+    ("path", "destlist_path"),
+    ("hostname", "destlist_hostname"),
+    ("hostname_encoding", "destlist_hostname_encoding"),
+    ("hostname_raw_hex", "destlist_hostname_raw_hex"),
+    ("last_modified_at", "destlist_last_modified_at"),
+    ("last_modified_filetime", "destlist_last_modified_filetime"),
+    ("pin_status", "destlist_pin_status"),
+    ("pinned", "destlist_pinned"),
+    ("access_count", "destlist_access_count"),
+    ("access_count_float_v1", "destlist_access_count_float_v1"),
+    ("volume_droid", "destlist_volume_droid"),
+    ("file_droid", "destlist_file_droid"),
+    ("birth_volume_droid", "destlist_birth_volume_droid"),
+    ("birth_file_droid", "destlist_birth_file_droid"),
+    ("file_droid_mac_address", "destlist_file_droid_mac_address"),
+    ("file_droid_timestamp", "destlist_file_droid_timestamp"),
+    ("checksum_hex", "destlist_checksum_hex"),
+    ("entry_sha256", "destlist_entry_sha256"),
+)
+JUMPLIST_ENTRY_LNK_FIELDS = (
+    ("target_path", "target_path"),
+    ("target_created_at", "target_created_at"),
+    ("target_accessed_at", "target_accessed_at"),
+    ("target_modified_at", "target_modified_at"),
+    ("target_file_size", "target_file_size"),
+    ("working_dir", "working_dir"),
+    ("command_line_arguments", "command_line_arguments"),
+    ("volume_serial_number", "volume_serial_number"),
+    ("drive_type_name", "drive_type_name"),
+    ("volume_label", "volume_label"),
+    ("net_name", "net_name"),
+    ("tracker_machine_id", "tracker_machine_id"),
+    ("has_tracker_data", "has_tracker_data"),
+    ("stream_name", "lnk_stream_name"),
+    ("stream_sha256", "lnk_stream_sha256"),
+    ("lnk_offset", "lnk_offset"),
+)
+
+
+def jumplist_entry_payloads(
+    artifact_type: str,
+    destlist_entries: Sequence[Mapping[str, object]],
+    destinations: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    """One payload per DestList entry (joined to its LNK stream by entry
+    number = hex stream name), plus LNK streams without a DestList entry and
+    custom-destination LNKs. No cap: every entry becomes a ``jumplist-entry`` row."""
+    by_stream = {str(item.get("stream_name") or ""): item for item in destinations if item.get("stream_name")}
+    used_streams: set[str] = set()
+    payloads: list[dict[str, object]] = []
+    for entry in destlist_entries:
+        if entry.get("layout_status") is None:
+            continue  # legacy heuristic candidates are not emitted as rows
+        payload: dict[str, object] = {"destlist_entry_present": True}
+        payload.update({target: entry.get(source) for source, target in JUMPLIST_ENTRY_DESTLIST_FIELDS if source in entry})
+        stream_name = str(entry.get("lnk_stream_name") or "")
+        destination = by_stream.get(stream_name)
+        if destination:
+            used_streams.add(stream_name)
+            payload.update({target: destination.get(source) for source, target in JUMPLIST_ENTRY_LNK_FIELDS})
+        payload["timestamp"] = str(entry.get("last_modified_at") or "")
+        payload["timestamp_source"] = "destlist_entry_last_modified" if payload["timestamp"] else "missing_destlist_time"
+        payload["timestamp_kind"] = "last-access"
+        payloads.append(payload)
+    for destination in destinations:
+        stream_name = str(destination.get("stream_name") or "")
+        if stream_name in used_streams:
+            continue
+        payload = {"destlist_entry_present": False}
+        payload.update({target: destination.get(source) for source, target in JUMPLIST_ENTRY_LNK_FIELDS})
+        payload["timestamp"] = ""
+        payload["timestamp_source"] = "none-lnk-target-times-are-target-file-metadata"
+        payload["timestamp_kind"] = ""
+        payloads.append(payload)
+    return payloads
 
 
 def jumplist_evidence(
@@ -1411,11 +1904,130 @@ def extract_jumplist_destinations(
             if not isinstance(stream_data, bytes):
                 continue
             append_lnk_destinations(destinations, stream_data, stream=stream)
-            if len(destinations) >= MAX_JUMPLIST_EMBEDDED_LNKS:
-                break
     if not ole_streams or not destinations:
         append_lnk_destinations(destinations, data)
-    return destinations[:MAX_JUMPLIST_EMBEDDED_LNKS]
+    return destinations
+
+
+DESTLIST_V1_FIXED_SIZE = 0x72
+DESTLIST_V3_FIXED_SIZE = 0x82
+DESTLIST_V3_TRAILER_SIZE = 4
+DESTLIST_MAX_PATH_CHARS = 32768
+
+
+def decode_destlist_hostname(raw: bytes) -> tuple[str, str]:
+    """NetBIOS name (16 bytes ANSI). Korean systems write cp949 (e.g. 진료실1)."""
+    value = raw.split(b"\x00", 1)[0]
+    if not value:
+        return "", "empty"
+    try:
+        return value.decode("ascii"), "ascii"
+    except UnicodeDecodeError:
+        pass
+    for encoding in LNK_ANSI_CODEPAGES:
+        try:
+            return value.decode(encoding), encoding
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return value.decode("cp1252", errors="replace"), "cp1252-replace"
+
+
+def parse_destlist_entries_strict(
+    data: bytes,
+    version: int,
+    source: Mapping[str, object],
+    lnk_stream_names: set[str],
+) -> list[dict[str, object]] | None:
+    """Decode every DestList entry with the version's documented layout.
+
+    v1 (Windows 7/8): fixed 0x72 bytes, path length u16 at 0x70.
+    v3+ (Windows 10/11): fixed 0x82 bytes (access count u32 at 0x74), path
+    length u16 at 0x80, UTF-16 path, then a 4-byte trailer.
+    Returns ``None`` when the stream does not follow the layout so callers can
+    fall back to the legacy candidate scan (and say so).
+    """
+    if version == 1:
+        fixed_size, trailer, layout_name = DESTLIST_V1_FIXED_SIZE, 0, "win7-win8-fixed114"
+    elif version >= 2:
+        fixed_size, trailer, layout_name = DESTLIST_V3_FIXED_SIZE, DESTLIST_V3_TRAILER_SIZE, "win10-plus-fixed130"
+    else:
+        return None
+    entries: list[dict[str, object]] = []
+    offset = DESTLIST_HEADER_SIZE
+    while offset + fixed_size <= len(data):
+        path_chars = read_u16(data, offset + fixed_size - 2)
+        path_end = offset + fixed_size + path_chars * 2
+        entry_end = path_end + trailer
+        if path_chars > DESTLIST_MAX_PATH_CHARS or entry_end > len(data):
+            return None
+        raw_path = data[offset + fixed_size : path_end]
+        path = raw_path.decode("utf-16le", errors="replace")
+        if "\x00" in path:
+            return None
+        entry_number = read_u32(data, offset + 0x58)
+        stream_name = f"{entry_number:x}"
+        hostname, hostname_encoding = decode_destlist_hostname(data[offset + 0x48 : offset + 0x58])
+        last_modified_filetime = read_u64(data, offset + 0x64)
+        pin_status = struct.unpack_from("<i", data, offset + 0x6C)[0]
+        entry_bytes = data[offset:entry_end]
+        linked = stream_name in lnk_stream_names
+        entry: dict[str, object] = {
+            **source,
+            "index": len(entries),
+            "entry_offset": offset,
+            "entry_size_candidate": entry_end - offset,
+            "layout_candidate": layout_name,
+            "layout_status": f"decoded-destlist-v{version}",
+            "fixed_header_size_candidate": fixed_size,
+            "destlist_version": version,
+            "checksum_hex": f"{read_u64(data, offset):016x}",
+            "volume_droid": format_guid_le(data[offset + 0x08 : offset + 0x18]),
+            "file_droid": format_guid_le(data[offset + 0x18 : offset + 0x28]),
+            "birth_volume_droid": format_guid_le(data[offset + 0x28 : offset + 0x38]),
+            "birth_file_droid": format_guid_le(data[offset + 0x38 : offset + 0x48]),
+            "file_droid_mac_address": uuid_v1_mac(data[offset + 0x18 : offset + 0x28]),
+            "file_droid_timestamp": uuid_v1_time(data[offset + 0x18 : offset + 0x28]),
+            "hostname": hostname,
+            "hostname_encoding": hostname_encoding,
+            "hostname_raw_hex": data[offset + 0x48 : offset + 0x58].split(b"\x00", 1)[0].hex(),
+            "entry_number": entry_number,
+            "lnk_stream_name": stream_name,
+            "lnk_stream_present": linked,
+            "last_modified_at": windows_filetime_to_iso(last_modified_filetime),
+            "last_modified_filetime": last_modified_filetime,
+            "pin_status": pin_status,
+            "pinned": pin_status != -1,
+            "path": path,
+            "path_char_count": path_chars,
+            # Legacy candidate keys kept for consumers of the v1 schema.
+            "path_candidate": path,
+            "path_char_count_candidate": path_chars,
+            "entry_id_candidate": entry_number,
+            "entry_id_candidate_offset": 0x58,
+            "pin_status_candidate": pin_status,
+            "pin_status_candidate_offset": 0x6C,
+            "hostname_candidates": [{"offset": 0x48, "hostname_candidate": hostname}] if hostname else [],
+            "filetime_candidates": (
+                [{"offset": 0x64, "timestamp_candidate": windows_filetime_to_iso(last_modified_filetime)}]
+                if last_modified_filetime
+                else []
+            ),
+            "matched_lnk_stream_candidates": (
+                [{"field_offset": 0x58, "field_value": entry_number, "stream_name_candidate": stream_name}] if linked else []
+            ),
+            "validation_status": "candidate-linked-lnk-stream" if linked else "candidate-unlinked",
+            "parser_confidence": 0.9 if linked else 0.8,
+            "entry_sha256": sha256_bytes(entry_bytes),
+        }
+        if version >= 2:
+            entry["access_count"] = read_u32(data, offset + 0x74)
+            entry["unknown_u32_0x70"] = read_u32(data, offset + 0x70)
+            entry["trailer_hex"] = data[path_end:entry_end].hex()
+        else:
+            entry["access_count_float_v1"] = round(struct.unpack_from("<f", data, offset + 0x60)[0], 3)
+        entries.append(entry)
+        offset = entry_end
+    return entries
 
 
 def parse_destlist_metadata(ole_streams: Sequence[dict[str, object]]) -> dict[str, object]:
@@ -1454,6 +2066,7 @@ def parse_destlist_metadata(ole_streams: Sequence[dict[str, object]]) -> dict[st
     header_candidates: list[dict[str, object]] = []
     entry_candidates: list[dict[str, object]] = []
     declared_counts: list[int] = []
+    layout_statuses: list[str] = []
     parse_status = "unsupported-or-empty"
     for stream in destlist_streams:
         stream_data = stream.get("data")
@@ -1468,7 +2081,15 @@ def parse_destlist_metadata(ole_streams: Sequence[dict[str, object]]) -> dict[st
         declared_count = int(header.get("declared_entry_count_candidate") or 0)
         if declared_count:
             declared_counts.append(declared_count)
-        entries = parse_destlist_entry_candidates(stream_data, source, lnk_stream_names, declared_count)
+        strict_entries = parse_destlist_entries_strict(
+            stream_data, int(header.get("version_candidate") or 0), source, lnk_stream_names
+        )
+        if strict_entries is not None:
+            entries = strict_entries
+            layout_statuses.append(f"decoded-destlist-v{int(header.get('version_candidate') or 0)}")
+        else:
+            entries = parse_destlist_entry_candidates(stream_data, source, lnk_stream_names, declared_count)
+            layout_statuses.append("legacy-heuristic-candidates")
         entry_candidates.extend(entries)
         if entries or header:
             parse_status = "parsed-candidate"
@@ -1490,10 +2111,16 @@ def parse_destlist_metadata(ole_streams: Sequence[dict[str, object]]) -> dict[st
         "destlist_streams": stream_summaries,
         "destlist_header_candidates": header_candidates,
         "destlist_declared_entry_count_candidates": declared_counts,
+        "destlist_layout_status": layout_statuses[0] if len(set(layout_statuses)) == 1 else ",".join(layout_statuses),
         "destlist_entry_candidate_count": len(entry_candidates),
+        # Inline lists are capped (disclosed below); every entry is also
+        # emitted as its own ``jumplist-entry`` row by the provider.
         "destlist_entry_candidates": entry_candidates[:MAX_DESTLIST_ENTRIES],
+        "destlist_entry_candidates_truncated": len(entry_candidates) > MAX_DESTLIST_ENTRIES,
+        "destlist_entries_all": entry_candidates,
         "destlist_unlinked_entry_candidate_count": len(unlinked_entry_candidates),
         "destlist_unlinked_entry_candidates": unlinked_entry_candidates[:MAX_DESTLIST_ENTRIES],
+        "destlist_unlinked_entry_candidates_truncated": len(unlinked_entry_candidates) > MAX_DESTLIST_ENTRIES,
         "destlist_deleted_or_unlinked_entry_review_status": (
             "candidate-review-only-not-recovered"
             if unlinked_entry_candidates
@@ -1520,7 +2147,9 @@ def parse_destlist_header_candidate(data: bytes, source: dict[str, object]) -> d
         "header_size_candidate": DESTLIST_HEADER_SIZE,
         "version_candidate": read_u32(data, 0),
         "declared_entry_count_candidate": read_u32(data, 4),
-        "pinned_entry_count_candidate": read_u32(data, 8),
+        "pinned_entry_count_candidate": struct.unpack_from("<i", data, 8)[0] if len(data) >= 12 else 0,
+        "last_entry_number": read_u32(data, 16),
+        "last_revision_number": read_u32(data, 24),
         "unknown_header_u32_0c": read_u32(data, 12),
         "last_entry_id_candidate": read_u64(data, 16),
         "raw_header_sha256": sha256_bytes(data[:DESTLIST_HEADER_SIZE]),
@@ -2452,6 +3081,12 @@ def append_lnk_destinations(
             "link_flag_names": metadata.get("link_flag_names", []),
             "has_tracker_data": bool(metadata.get("tracker_data")),
             "extra_data_block_count": len(metadata.get("extra_data_blocks", [])),
+            "target_file_size": metadata.get("target_file_size", 0),
+            "volume_serial_number": metadata.get("volume_serial_number", ""),
+            "drive_type_name": metadata.get("drive_type_name", ""),
+            "volume_label": metadata.get("volume_label", ""),
+            "net_name": metadata.get("net_name", ""),
+            "tracker_machine_id": metadata.get("tracker_machine_id", ""),
         }
         if stream:
             destination.update(
@@ -2468,8 +3103,6 @@ def append_lnk_destinations(
             destination.update({"stream_name": "container-scan", "stream_path": "", "stream_sha256": sha256_bytes(data)})
         destinations.append(destination)
         seen.add(dedupe_key)
-        if len(destinations) >= MAX_JUMPLIST_EMBEDDED_LNKS:
-            break
 
 
 def parse_ole_compound_streams(data: bytes) -> list[dict[str, object]]:
@@ -2487,6 +3120,19 @@ def parse_ole_compound_streams(data: bytes) -> list[dict[str, object]]:
         for index in range(109)
         if read_u32(data, 0x4C + index * 4) not in (CFB_FREESECT, CFB_ENDOFCHAIN)
     ]
+    # Extended DIFAT chain (files with more than 109 FAT sectors).
+    difat_sector = read_u32(data, 0x44)
+    visited_difat: set[int] = set()
+    while difat_sector not in (CFB_FREESECT, CFB_ENDOFCHAIN) and difat_sector not in visited_difat:
+        visited_difat.add(difat_sector)
+        sector = cfb_sector(data, sector_size, difat_sector)
+        if not sector:
+            break
+        for offset in range(0, sector_size - 4, 4):
+            value = read_u32(sector, offset)
+            if value not in (CFB_FREESECT, CFB_ENDOFCHAIN):
+                difat_entries.append(value)
+        difat_sector = read_u32(sector, sector_size - 4)
     fat = build_cfb_fat(data, sector_size, difat_entries)
     if not fat:
         return []
@@ -2501,8 +3147,6 @@ def parse_ole_compound_streams(data: bytes) -> list[dict[str, object]]:
 
     streams: list[dict[str, object]] = []
     for entry_index, path_parts in walk_cfb_directory(entries, int(root.get("child_id", CFB_ENDOFCHAIN)), ()):
-        if len(streams) >= MAX_OLE_STREAMS:
-            break
         entry = entries[entry_index]
         if entry["type"] != 2:
             continue
@@ -2586,6 +3230,12 @@ def parse_cfb_directory_entries(directory_data: bytes) -> list[dict[str, object]
         name_len = read_u16(entry, 64)
         object_type = entry[66]
         if object_type not in (1, 2, 5) or name_len < 2:
+            # Keep unused slots so list indices stay equal to directory
+            # entry IDs (sibling/child links are IDs, not list positions).
+            entries.append(
+                {"name": "", "type": 0, "left_id": CFB_FREESECT, "right_id": CFB_FREESECT,
+                 "child_id": CFB_FREESECT, "start_sector": CFB_ENDOFCHAIN, "size": 0}
+            )
             continue
         raw_name = entry[: min(64, name_len - 2)]
         entries.append(
@@ -2625,10 +3275,11 @@ def walk_cfb_directory(
 
 def cfb_sector(data: bytes, sector_size: int, sector_id: int) -> bytes:
     start = 512 + sector_id * sector_size
-    end = start + sector_size
-    if sector_id < 0 or end > len(data):
+    if sector_id < 0 or start >= len(data):
         return b""
-    return data[start:end]
+    # A short final sector is returned as-is: Jump Lists are commonly written
+    # (and acquired) without padding the last sector to the sector size.
+    return data[start : start + sector_size]
 
 
 def find_lnk_offsets(data: bytes) -> Iterable[int]:
@@ -2678,14 +3329,24 @@ def read_c_string(data: bytes, offset: int, encoding: str) -> str:
 
 
 def decode_lnk_ansi(data: bytes) -> str:
-    # MS-SHLLINK ANSI strings use the writer's system codepage, not a fixed
-    # encoding. mbcs resolves to the host ANSI codepage on Windows (e.g.
-    # cp949 on Korean systems); elsewhere fall back to cp1252.
-    encoding = "mbcs" if os.name == "nt" else "cp1252"
+    # MS-SHLLINK ANSI strings use the *writer's* system codepage. The evidence
+    # codepage is tried first (Korean cp949 for this tool's casework), then the
+    # analysis host's ANSI codepage, then cp1252, so results do not depend on
+    # the analyst workstation locale.
+    raw = data.strip(b"\x00")
     try:
-        return data.decode(encoding, errors="ignore").strip("\x00\r\n\t ")
-    except LookupError:
-        return decode_text(data, "cp1252")
+        return raw.decode("ascii").strip("\x00\r\n\t ")
+    except UnicodeDecodeError:
+        pass
+    for encoding in (*LNK_ANSI_CODEPAGES, "mbcs" if os.name == "nt" else "cp1252"):
+        try:
+            return raw.decode(encoding).strip("\x00\r\n\t ")
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return decode_text(raw, "cp1252")
+
+
+LNK_ANSI_CODEPAGES = ("cp949",)
 
 
 def decode_text(data: bytes, encoding: str) -> str:
@@ -2713,13 +3374,16 @@ def format_guid_le(data: bytes) -> str:
 
 
 def windows_filetime_to_iso(value: int) -> str:
+    """FILETIME -> ISO-8601 UTC with integer arithmetic (no float, pre-1970 safe)."""
     if value <= 0:
         return ""
     try:
-        seconds = (value - 116444736000000000) / 10_000_000
-        return datetime.fromtimestamp(seconds, tz=timezone.utc).isoformat()
-    except (OSError, OverflowError, ValueError):
+        return (FILETIME_EPOCH + timedelta(microseconds=value // 10)).isoformat()
+    except OverflowError:
         return ""
+
+
+FILETIME_EPOCH = datetime(1601, 1, 1, tzinfo=timezone.utc)
 
 
 def plausible_filetime_to_iso(value: int) -> str:
