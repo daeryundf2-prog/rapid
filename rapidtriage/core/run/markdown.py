@@ -90,6 +90,9 @@ def build_disclosure_section(disclosures: Mapping[str, object]) -> str:
     note = str(disclosures.get("acquisition_copy_note") or "")
     if note:
         lines.append(f"- 취득 사본 시각: {note}")
+    atime_note = str(disclosures.get("atime_note") or "")
+    if atime_note:
+        lines.append(f"- 마지막 접근 시각: {atime_note}")
     registry = disclosures.get("registry_context") if isinstance(disclosures.get("registry_context"), Mapping) else {}
     labels = {
         "computer_name": "컴퓨터 이름",

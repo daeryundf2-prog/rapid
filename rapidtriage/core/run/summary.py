@@ -214,10 +214,13 @@ def build_run_summary(
             # Canonical counters — the UI must read every headline number from
             # this block instead of re-deriving counts with local formulas.
             "counts": {
-                "validation_issues": int(processing_summary.get("warning_count") or 0)
+                # Only warning-level items are issues; notices are counted apart.
+                "validation_issues": count_warning_levels(processing_summary.get("warnings") or [])[0]
                 + sum(int(step.get("parser_error_count") or 0) for step in step_rows),
+                "validation_notices": count_warning_levels(processing_summary.get("warnings") or [])[1],
                 "validation_issue_breakdown": {
-                    "step_warnings": int(processing_summary.get("warning_count") or 0),
+                    "step_warnings": count_warning_levels(processing_summary.get("warnings") or [])[0],
+                    "step_notices": count_warning_levels(processing_summary.get("warnings") or [])[1],
                     "parser_errors": sum(int(step.get("parser_error_count") or 0) for step in step_rows),
                 },
                 "outputs": len(outputs),
@@ -325,6 +328,7 @@ def build_run_disclosures(
             if files_summary.get("time_origin") == "acquisition-copy"
             else ""
         ),
+        "atime_note": ACCESS_TIME_NOTE,
         "timezone": dict(timezone),
         "registry_context": registry_context,
         "missing_tools": detect_missing_tools(),
@@ -409,13 +413,19 @@ def derive_counts(payload: Mapping[str, object]) -> dict[str, object]:
     steps = [step for step in payload.get("steps", []) if isinstance(step, Mapping)] if isinstance(payload.get("steps"), list) else []
     outputs = payload.get("outputs") if isinstance(payload.get("outputs"), Mapping) else {}
     artifact_groups = inner.get("artifacts") if isinstance(inner.get("artifacts"), Mapping) else {}
-    step_warnings = int(processing.get("warning_count") or 0)
+    warning_rows = processing.get("warnings") if isinstance(processing.get("warnings"), list) else None
+    if warning_rows is not None:
+        step_warnings, step_notices = count_warning_levels(warning_rows)
+    else:
+        step_warnings, step_notices = int(processing.get("warning_count") or 0), 0
     parser_errors = sum(int(step.get("parser_error_count") or 0) for step in steps)
     indicators_step = next((step for step in steps if step.get("name") == "indicators"), {})
     return {
         "validation_issues": step_warnings + parser_errors,
+        "validation_notices": step_notices,
         "validation_issue_breakdown": {
             "step_warnings": step_warnings,
+            "step_notices": step_notices,
             "parser_errors": parser_errors,
         },
         "outputs": len(outputs),
@@ -430,6 +440,25 @@ def derive_counts(payload: Mapping[str, object]) -> dict[str, object]:
         "review_items": 0,
         "indicators": int(indicators_step.get("indicator_count") or 0),
     }
+
+
+def count_warning_levels(warnings: Sequence[object]) -> tuple[int, int]:
+    """``(warnings, notices)``: processing items at ``warning``/``failed``
+    level are validation issues; ``notice`` items are disclosures only."""
+    issues = notices = 0
+    for item in warnings:
+        level = str(item.get("level") or "") if isinstance(item, Mapping) else ""
+        if level in ("warning", "failed"):
+            issues += 1
+        elif level == "notice":
+            notices += 1
+    return issues, notices
+
+
+ACCESS_TIME_NOTE = (
+    "source_file_atime(마지막 접근 시각)은 호스트에서 마지막 접근 시각 갱신이 켜져 있으면 "
+    "이 도구가 파일을 읽은 시각을 반영할 수 있으므로 사용자 행위 증거로 쓰지 마십시오."
+)
 
 
 def build_processing_summary(
@@ -1304,6 +1333,8 @@ def summarize_file_candidates(candidates: object, *, limit: int) -> list[dict[st
                 "extension": candidate.get("extension"),
                 "size": candidate.get("size"),
                 "modified_at": candidate.get("modified_at"),
+                "fs_modified_at": candidate.get("fs_modified_at"),
+                "modified_at_origin": candidate.get("modified_at_origin") or candidate.get("time_origin"),
             }
         )
     return items
@@ -1324,6 +1355,8 @@ def summarize_large_file_candidates(candidates: object, *, limit: int) -> list[d
                 "categories": list(candidate.get("categories", [])),
                 "size": candidate.get("size"),
                 "modified_at": candidate.get("modified_at"),
+                "fs_modified_at": candidate.get("fs_modified_at"),
+                "modified_at_origin": candidate.get("modified_at_origin") or candidate.get("time_origin"),
             }
         )
     return items
@@ -1346,6 +1379,8 @@ def collect_preferred_candidates(candidates: object, *, preferred_locations: Seq
                 "categories": list(candidate.get("categories", [])),
                 "size": candidate.get("size"),
                 "modified_at": candidate.get("modified_at"),
+                "fs_modified_at": candidate.get("fs_modified_at"),
+                "modified_at_origin": candidate.get("modified_at_origin") or candidate.get("time_origin"),
             }
         )
     return selected

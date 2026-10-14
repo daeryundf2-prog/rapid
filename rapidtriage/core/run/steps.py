@@ -230,6 +230,29 @@ def _row_truncation_message(kind: str, disclosure: Mapping[str, object]) -> str:
     return f"{kind}: 행 단위 절단 {rows}행 — 원문 일부만 보존됨 ({', '.join(parts)})"
 
 
+SCAN_CAP_FLAGS = frozenset({"scan_capped", "capped"})
+
+
+def _scan_coverage_message(kind: str, coverage: Mapping[str, object]) -> str:
+    unscanned = int(coverage.get("unscanned") or 0)
+    total = int(coverage.get("candidates") or 0)
+    if coverage.get("reason") == "cpu-time-budget":
+        budget = coverage.get("cpu_budget_seconds")
+        reason = f"CPU 시간 예산{f' {budget:g}초' if isinstance(budget, (int, float)) else ''} 소진"
+    else:
+        reason = f"파일 수 상한 {coverage.get('max_files')}개" if coverage.get("max_files") else "스캔 상한"
+    return f"{kind}: 후보 {total}개 중 {unscanned}개 파일 미선별 ({reason})"
+
+
+def _without_scan_cap_flags(disclosure: Mapping[str, object]) -> dict[str, object]:
+    flags = disclosure.get("flag_counts") if isinstance(disclosure.get("flag_counts"), Mapping) else {}
+    kept = {name: count for name, count in flags.items() if str(name).rsplit(".", 1)[-1] not in SCAN_CAP_FLAGS}
+    rows = int(disclosure.get("rows_with_truncation") or 0)
+    if not kept:
+        rows = 0
+    return {**disclosure, "flag_counts": kept, "rows_with_truncation": rows}
+
+
 def apply_row_truncation_warnings(
     rows: list[dict[str, object]],
     *,
@@ -254,6 +277,11 @@ def apply_row_truncation_warnings(
         if row is None or not isinstance(disclosure, Mapping):
             continue
         row["row_truncation"] = dict(disclosure)
+        coverage = disclosure.get("scan_coverage") if isinstance(disclosure.get("scan_coverage"), Mapping) else None
+        if coverage:
+            # A capped scan is "N of M files not scanned", not a truncated row.
+            _add_step_warning(row, _scan_coverage_message(str(kind), coverage), cap=f"scan-coverage:{kind}")
+            disclosure = _without_scan_cap_flags(disclosure)
         if int(disclosure.get("rows_with_truncation") or 0) or disclosure.get("count_fields"):
             _add_step_warning(row, _row_truncation_message(str(kind), disclosure), cap=f"row-truncation:{kind}")
         elif int(disclosure.get("preview_only_rows") or 0) or disclosure.get("preview_count_fields"):

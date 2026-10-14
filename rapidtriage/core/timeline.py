@@ -56,6 +56,10 @@ class TimelineField(NamedTuple):
     (``UTC`` unless the format is local wall-clock time, e.g. EXIF).
     ``scope="key"`` marks a registry key time shared by every entry of the
     key (ShimCache/UserAssist/BAM value lists): one event per key.
+    ``scope="inventory"`` marks per-subkey LastWrite times that an inventory
+    rewrite sets in bulk (Amcache InventoryDriverBinary/DevicePnp/...): one
+    event per (hive, section) at the dominant rewrite time; the per-key time
+    distribution stays in the event details.
     """
 
     path: str
@@ -94,20 +98,19 @@ TIMELINE_FIELD_MAP: dict[str, tuple[TimelineField, ...]] = {
         F("decoded_values.InstallDate", "installed", timezone="local-unknown"),
     ),
     "amcache-entry": (F("key_last_written_at", "last-written"),),
-    # Amcache extended inventory (R2-A): key LastWrite is the only event time
-    # (``secondary_timestamps`` stay row fields).
-    **{
-        name: (F("key_last_written_at", "last-written"),)
-        for name in (
-            "amcache-driver-binary",
-            "amcache-driver-package",
-            "amcache-device-pnp",
-            "amcache-device-container",
-            "amcache-application-shortcut",
-            "amcache-device-census",
-            "amcache-inventory-row",
-        )
-    },
+    # Amcache extended inventory (R2-A/R3): the subkey LastWrite is rewritten
+    # in bulk by the inventory task, so it is one event per (hive, section)
+    # (``scope="inventory"``); link/install/driver dates
+    # (``secondary_timestamps``) stay row fields.
+    **{name: (F("key_last_written_at", "last-written", scope="inventory"),) for name in (
+        "amcache-driver-binary",
+        "amcache-driver-package",
+        "amcache-device-pnp",
+        "amcache-device-container",
+        "amcache-application-shortcut",
+        "amcache-device-census",
+        "amcache-inventory-row",
+    )},
     "shimcache-schema-entry": (F("timestamp", "file-modified"), F("key_last_written_at", "last-written", scope="key")),
     "shimcache-entry": (F("key_last_written_at", "last-written", scope="key"),),
     "bam-schema-entry": (F("timestamp", "run"), F("key_last_written_at", "last-written", scope="key")),
@@ -366,6 +369,9 @@ class TimelineStats:
         self.row_preview_flags: dict[str, Counter[str]] = {}
         self.row_preview_counts: dict[str, Counter[str]] = {}
         self.row_preview_rows: Counter[str] = Counter()
+        # Capped scans that say how many candidates they skipped
+        # (synthetic-media ``unscanned_candidate_count``): kind -> coverage.
+        self.scan_coverage: dict[str, dict[str, object]] = {}
         self.out_of_range: Counter[str] = Counter()
         self.out_of_range_by_type: Counter[str] = Counter()
         self.out_of_range_samples: list[dict[str, object]] = []
@@ -426,6 +432,18 @@ class TimelineStats:
         """
         flagged = False
         previewed = False
+        unscanned = details.get("unscanned_candidate_count")
+        if details.get("scan_capped") is True and isinstance(unscanned, int) and unscanned > 0:
+            scanned = int(details.get("scan_file_count") or 0)
+            skipped = int(details.get("skipped_oversize_count") or 0)
+            self.scan_coverage[kind] = {
+                "unscanned": unscanned,
+                "scanned": scanned,
+                "candidates": scanned + skipped + unscanned,
+                "reason": str(details.get("scan_cap_reason") or "max-files"),
+                "max_files": details.get("max_files"),
+                "cpu_budget_seconds": details.get("scan_cpu_budget_seconds"),
+            }
         for key, value in details.items():
             name = str(key)
             if value is True and (name.endswith("_truncated") or name in ("truncated", "scan_capped", "capped")):
@@ -452,10 +470,15 @@ class TimelineStats:
 
     def row_truncation_disclosure(self) -> dict[str, object]:
         kinds = sorted(
-            set(self.row_truncation_flags) | set(self.row_truncation_counts) | set(self.row_preview_flags) | set(self.row_preview_counts)
+            set(self.row_truncation_flags)
+            | set(self.row_truncation_counts)
+            | set(self.row_preview_flags)
+            | set(self.row_preview_counts)
+            | set(self.scan_coverage)
         )
         return {
             kind: {
+                **({"scan_coverage": dict(self.scan_coverage[kind])} if kind in self.scan_coverage else {}),
                 "rows_with_truncation": self.row_truncation_rows.get(kind, 0),
                 "flag_counts": dict(self.row_truncation_flags.get(kind, Counter()).most_common(20)),
                 "count_fields": dict(self.row_truncation_counts.get(kind, Counter()).most_common(20)),
@@ -555,6 +578,10 @@ def run_timeline(
                 "acquisition_copy_times": "취득 사본의 호스트 시각(source_file_*·사본 stat)은 이벤트로 쓰지 않음",
                 "dedupe_key": "(source record, timestamp): 같은 레코드·같은 시각의 라벨 변형은 labels[]로 한 이벤트",
                 "key_level_times": "ShimCache/UserAssist/BAM 키 LastWrite는 키당 한 이벤트",
+                "inventory_key_times": (
+                    "Amcache 인벤토리(드라이버·장치·바로 가기·DeviceCensus) 하위 키 LastWrite는 인벤토리 재작성 시각이므로 "
+                    "하이브·섹션당 한 이벤트(가장 많은 키가 가진 시각)로 묶고 키별 시각 분포는 details에 둠"
+                ),
                 "aggregate_rows": "행별 아티팩트 시각을 복사한 집계 행(browser-history-downloads, logon-session 등)은 이벤트로 쓰지 않음",
                 "build_stamps": BUILD_STAMP_NOTE,
                 "local_unknown": "timezone=local-unknown 시각은 오프셋 없이(+00:00 미부착) 원문 벽시계 시각으로 저장",
@@ -1010,6 +1037,7 @@ def extract_artifact_events(
     stats: TimelineStats | None = None,
 ) -> list[dict[str, object]]:
     events: list[dict[str, object]] = []
+    inventory = InventoryKeyTimes()
     kind = str(payload.get("kind", ""))
     present_types = _payload_artifact_types(payload)
     # JSONL-backed run payloads keep only a preview inline; stream every row
@@ -1048,6 +1076,18 @@ def extract_artifact_events(
             if normalized is None:
                 continue
             timestamp, timezone, source_timezone = normalized
+            if detail_event.get("scope") == "inventory":
+                inventory.add(
+                    artifact_type=artifact_type,
+                    details=details,
+                    detail_event=detail_event,
+                    timestamp=timestamp,
+                    timezone=timezone,
+                    kind=kind,
+                    provider=provider,
+                    source_record=source_record,
+                )
+                continue
             context = compact_event_context(detail_event["context"], event_path=artifact_path)
             identity = detail_event.get("identity") or _record_identity(details) or f"row={row_index}"
             element_identity = str(detail_event.get("element_identity") or "")
@@ -1081,7 +1121,127 @@ def extract_artifact_events(
                 if stats is not None:
                     stats.label_merges[event_type] += len(event["labels"]) - 1
             events.append(event)
+    events.extend(inventory.events(stats))
     return events
+
+
+class _InventoryGroup:
+    __slots__ = ("event_type", "field_path", "first_value", "kind", "provider", "sample_key", "source_record", "times", "timestamp_kind", "timezone")
+
+    def __init__(
+        self,
+        *,
+        event_type: str,
+        timestamp_kind: str,
+        field_path: str,
+        timezone: str,
+        kind: str,
+        provider: str,
+        source_record: dict[str, object],
+    ) -> None:
+        self.event_type = event_type
+        self.timestamp_kind = timestamp_kind
+        self.field_path = field_path
+        self.timezone = timezone
+        self.kind = kind
+        self.provider = provider
+        self.source_record = source_record
+        self.times: Counter[str] = Counter()
+        self.first_value: dict[str, str] = {}
+        self.sample_key: dict[str, str] = {}
+
+
+class InventoryKeyTimes:
+    """One event per (hive, section, artifact type) for ``scope="inventory"``
+    key times: the instant most keys share (the inventory rewrite; ties go to
+    the latest), with the per-key time distribution in ``details``."""
+
+    MAX_LISTED_TIMES = 10
+
+    def __init__(self) -> None:
+        self._groups: dict[tuple[str, str, str], _InventoryGroup] = {}
+
+    def add(
+        self,
+        *,
+        artifact_type: str,
+        details: Mapping[str, object],
+        detail_event: Mapping[str, object],
+        timestamp: str,
+        timezone: str,
+        kind: str,
+        provider: str,
+        source_record: Mapping[str, object],
+    ) -> None:
+        source_path = str(details.get("source_path") or "")
+        section = str(details.get("section") or artifact_type)
+        key = (source_path, section, artifact_type)
+        group = self._groups.get(key)
+        if group is None:
+            group = _InventoryGroup(
+                event_type=str(detail_event["event_type"]),
+                timestamp_kind=str(detail_event["timestamp_kind"]),
+                field_path=str(detail_event["field_path"]),
+                timezone=timezone,
+                kind=kind,
+                provider=provider,
+                source_record=dict(source_record),
+            )
+            self._groups[key] = group
+        second = _instant_key(timestamp)[:19]
+        group.times[second] += 1
+        group.first_value.setdefault(second, timestamp)
+        group.sample_key.setdefault(second, str(details.get("key_name") or details.get("key_path") or ""))
+
+    def events(self, stats: TimelineStats | None) -> list[dict[str, object]]:
+        output: list[dict[str, object]] = []
+        for (source_path, section, artifact_type), group in self._groups.items():
+            times = group.times
+            first_value = group.first_value
+            sample_key = group.sample_key
+            dominant = max(times.items(), key=lambda item: (item[1], item[0]))[0]
+            key_count = sum(times.values())
+            event_type = group.event_type
+            if stats is not None and key_count > 1:
+                stats.key_level_collapsed[event_type] += key_count - 1
+            ordered = sorted(times)
+            listed = sorted(times.most_common(self.MAX_LISTED_TIMES), key=lambda item: item[0])
+            output.append(
+                {
+                    "timestamp": first_value[dominant],
+                    "timestamp_kind": group.timestamp_kind,
+                    "timezone": group.timezone,
+                    "source": "artifacts",
+                    "event_type": event_type,
+                    "path": source_path,
+                    "summary": _short(
+                        f"{artifact_type}: {section} 인벤토리 키 {key_count}개 최종 수정(대표 시각, 서로 다른 시각 {len(times)}개)",
+                        MAX_SUMMARY_LENGTH,
+                    ),
+                    "details": {
+                        "kind": group.kind,
+                        "provider": group.provider,
+                        "artifact_type": artifact_type,
+                        "field_path": group.field_path,
+                        "source_record": group.source_record,
+                        "scope": "inventory",
+                        "section": section,
+                        "source_path": source_path,
+                        "key_count": key_count,
+                        "keys_at_timestamp": times[dominant],
+                        "distinct_key_times": len(times),
+                        "key_time_min": first_value[ordered[0]],
+                        "key_time_max": first_value[ordered[-1]],
+                        "key_times": [
+                            {"timestamp": first_value[second], "key_count": count, "sample_key": _short(sample_key[second], 160)}
+                            for second, count in listed
+                        ],
+                        "key_times_truncated": len(times) > self.MAX_LISTED_TIMES,
+                        "note": "인벤토리 하위 키 LastWrite(재작성 시각) — 설치·연결·실행 시각 아님",
+                    },
+                }
+            )
+        return output
 
 
 def _payload_artifact_types(payload: Mapping[str, object]) -> set[str]:
@@ -1161,6 +1321,20 @@ def iter_artifact_detail_events(
             continue
         for value, element, element_identity, label in _resolve_field(details, field):
             canonical = canonical_label(label, artifact_type)
+            if field.scope == "inventory":
+                mapped.append(
+                    {
+                        "timestamp": value,
+                        "timestamp_kind": canonical,
+                        "timezone": field.timezone,
+                        "event_type": field.event_type or f"artifact-{artifact_type}-{canonical}",
+                        "field_path": f"details.{field.path}",
+                        "element_identity": "",
+                        "scope": "inventory",
+                        "context": {},
+                    }
+                )
+                continue
             if field.scope == "key":
                 # One registry key LastWrite shared by every value of the key.
                 key_name = str(details.get("source_key") or details.get("key_path") or details.get("source_key_path") or "key")
@@ -1190,7 +1364,15 @@ def iter_artifact_detail_events(
                     "context": context,
                 }
             )
-    row_events: list[dict[str, object]] = [entry for entry in mapped if entry.get("scope") != "key" and not entry.get("element_identity")]
+    row_events: list[dict[str, object]] = [
+        entry for entry in mapped if entry.get("scope") not in ("key", "inventory") and not entry.get("element_identity")
+    ]
+    if explicit is not None and any(
+        entry.get("scope") == "inventory" and _instant(entry["timestamp"]) == _instant(explicit[0]) for entry in mapped
+    ):
+        # Amcache inventory rows restate the key LastWrite as the row
+        # ``timestamp``: it is the collapsed inventory event, not a row event.
+        explicit = None
     if explicit is not None:
         # Row-level contract (W5): ``timestamp`` + ``timestamp_kind`` (+ label /
         # timezone) declares an evidence time. When a mapped row-level field

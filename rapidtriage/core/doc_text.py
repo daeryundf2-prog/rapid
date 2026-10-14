@@ -197,9 +197,22 @@ def clean_extracted_text(text: str) -> str:
     return _BLANK_LINES_RE.sub("\n\n", text).strip()
 
 
+# Binary-text salvage (dropping glyph-id/binary lines and indexing the rest)
+# is for container formats whose text is decoded from structured streams:
+# PDF content streams, HWP/HWPX sections, OLE Word/Excel/PowerPoint and
+# OOXML parts. Plain files read as text (``<ext>-text``: log/ini/xml/csv/
+# json/txt ...) are never salvaged: a LevelDB/ESE ``.log`` or a SQLite file
+# with a text extension stays ``binary-rejected``.
+SALVAGE_METHOD_PREFIXES: tuple[str, ...] = ("pdf", "hwp", "doc-", "xls-", "ppt-", "docx-", "xlsx-", "pptx-")
+
+
+def salvage_allowed(method: str) -> bool:
+    return method.startswith(SALVAGE_METHOD_PREFIXES) and not method.endswith("-text")
+
+
 def finalize(text: str, *, method: str, encrypted: bool = False, empty_reason: str = "", warnings: list[str] | None = None) -> DocumentText:
     ratio = printable_ratio(text)
-    if text and ratio < 1.0 - MAX_BINARY_RATIO:
+    if text and ratio < 1.0 - MAX_BINARY_RATIO and salvage_allowed(method):
         salvaged = salvage_text(text)
         if salvaged is not None:
             kept, removed = salvaged

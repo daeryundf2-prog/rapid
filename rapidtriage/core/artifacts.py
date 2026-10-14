@@ -14,6 +14,7 @@ from .artifact_profiles import (
     iter_payload_records,
 )
 from .artifact_store import (
+    ArtifactIdAllocator,
     adapt_artifact_row,
     artifact_record_contract_summary,
     attach_artifact_record_contracts,
@@ -280,6 +281,7 @@ def stream_artifact_collection(
     record_count = 0
     parser_errors: list[dict[str, str]] = []
     collection_status = "completed"
+    id_allocator = ArtifactIdAllocator()
     try:
         with raw_path.open("w", encoding="utf-8", newline="\n", buffering=_STREAM_BUFFER_BYTES) as raw:
             for index, item in enumerate(collector.collect(input_root.root_path), start=1):  # type: ignore[attr-defined]
@@ -293,6 +295,7 @@ def stream_artifact_collection(
                     provider_name=str(provider["name"] or kind),
                     root=input_root.root_path,
                     include_fields=False,
+                    id_allocator=id_allocator,
                 )
                 if error is None:
                     valid_count += 1

@@ -239,10 +239,26 @@ def is_evidence_hash_field(pointer: str, field_key: str) -> bool:
     return bool(EVIDENCE_HASH_POINTER_RE.search(pointer))
 
 
+LOOPBACK_URL_HOSTS = frozenset({"localhost", "localhost.localdomain", "ip6-localhost"})
+
+
 def url_indicator_status(url: str) -> str:
-    host = (urlparse(url).hostname or "").lower()
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
     if not host:
         return "no-host"
+    try:
+        parsed.port  # noqa: B018 - raises ValueError on a malformed host:port
+    except ValueError:
+        # HTTP.sys URL-group registrations such as http://127.0.0.1:4567:127.0.0.1/...
+        return "malformed-netloc"
+    if host in LOOPBACK_URL_HOSTS:
+        return "loopback-host"
+    try:
+        if ipaddress.ip_address(host.strip("[]")).is_loopback:
+            return "loopback-host"
+    except ValueError:
+        pass
     if "%" in host or "{" in url[:16] or re.search(r"%[sdux]", url):
         return "format-template"
     if host in NON_INDICATOR_URL_HOSTS:
@@ -806,9 +822,13 @@ def add_indicator(
     *,
     max_sources_per_indicator: int,
 ) -> None:
-    key = (indicator_type, value)
+    # URLs keep their original case in ``value``; the dedupe/compare key is
+    # the case-folded form (``value_fold``). Other types are already folded.
+    key = (indicator_type, indicator_compare_key(indicator_type, value))
     if key not in accumulator:
         accumulator[key] = {"type": indicator_type, "value": value, "count": 0, "sources": []}
+        if indicator_type == "url":
+            accumulator[key]["value_fold"] = key[1]
     record = accumulator[key]
     record["count"] = int(record["count"]) + 1
     sources = record["sources"]
@@ -1180,6 +1200,7 @@ def finalize_indicator(
     indicator = {
         "type": str(record.get("type", "")),
         "value": str(record.get("value", "")),
+        **({"value_fold": str(record.get("value_fold") or "")} if record.get("value_fold") else {}),
         "count": int(record.get("count", 0)),
         "classification": classify_indicator(str(record.get("type", "")), str(record.get("value", ""))),
         "risk_flags": indicator_risk_flags(str(record.get("type", "")), str(record.get("value", ""))),
@@ -2074,7 +2095,7 @@ def normalize_feed_type(value: str) -> str:
 def normalize_feed_value(indicator_type: str, value: str) -> str:
     text = value.strip()
     if indicator_type == "url":
-        return normalize_url(text)
+        return indicator_compare_key("url", normalize_url(text))
     if indicator_type == "domain":
         return text.lower().strip(".")
     if indicator_type in {"md5", "sha1", "sha256"}:
@@ -2132,13 +2153,24 @@ def match_indicator_rules(indicator: Mapping[str, object], rule_set: RuleSet | N
     if indicator_type == "ip" and classify_indicator(indicator_type, value) in {"private", "loopback"}:
         return []  # private addresses are flagged, never rule-matched
     for rule in rule_set.rules:
-        if indicator_type == "domain" and any(value == item or value.endswith(f".{item}") for item in rule.domains) or indicator_type == "url" and any(item in value for item in rule.urls) or indicator_type in {"md5", "sha1", "sha256"} and indicator_type == "sha256" and value in rule.hashes:
+        if (
+            (indicator_type == "domain" and any(value == item or value.endswith(f".{item}") for item in rule.domains))
+            or (indicator_type == "url" and any(item.lower() in value for item in rule.urls))
+            or (indicator_type in {"md5", "sha1", "sha256"} and value in rule.hashes)
+        ):
             matched.append(rule.id)
     return sorted(set(matched))
 
 
 def normalize_url(value: str) -> str:
-    return value.strip().rstrip(".,);]").lower()
+    """Trim trailing punctuation; the original case is kept (paths and
+    queries are case-sensitive). :func:`indicator_compare_key` folds."""
+    return value.strip().rstrip(".,);]")
+
+
+def indicator_compare_key(indicator_type: str, value: str) -> str:
+    """Dedupe/compare key: URLs case-folded, other types as normalized."""
+    return value.lower() if indicator_type == "url" else value
 
 
 def valid_ipv4(value: str) -> bool:

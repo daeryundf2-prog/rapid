@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from collections.abc import (
     Mapping,
     Sequence,
 )
 from pathlib import Path
 
-from ..docs import manifest_collect_workers
+from ..docs import MANIFEST_COLLECT_MAX_WORKERS, manifest_collect_workers
 from ..forensic_accuracy import build_accuracy_gate
 from .constants import (
     PARALLEL_PARSER_SCHEDULER_GAP_ID,
@@ -33,6 +34,16 @@ __all__ = [
 def artifact_scheduler_workers(kinds: Sequence[str]) -> int:
     # Same bounded policy as the manifest stage's parallel provider collection.
     return manifest_collect_workers(len(tuple(kinds)))
+
+
+def artifact_scheduler_worker_source(kinds: Sequence[str], max_workers: int) -> str:
+    """How ``cpu_worker_limit`` was derived (same formula as
+    :func:`artifact_scheduler_workers`), with the values of this run."""
+    scheduled = len(tuple(kinds))
+    cpu_count = os.cpu_count() or 4
+    return (
+        f"min({MANIFEST_COLLECT_MAX_WORKERS}, cpu_count={cpu_count}, scheduled parser kinds={scheduled}) = {max_workers}"
+    )
 
 
 def parallel_parser_scheduler_assessment(
@@ -353,7 +364,7 @@ def build_parser_scheduler_manifest(
     ] == list(kinds)[: len(sorted_events)]
     resource_policy = {
         "cpu_worker_limit": max_workers,
-        "worker_limit_source": "min(4, scheduled parser kinds)",
+        "worker_limit_source": artifact_scheduler_worker_source(kinds, max_workers),
         "io_policy": "each parser writes one deterministic JSON output after collection",
         "backpressure_policy": "bounded local futures equal to scheduled parser kinds and max_workers",
         "backpressure_window": max_workers,

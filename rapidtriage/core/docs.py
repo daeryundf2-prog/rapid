@@ -348,6 +348,27 @@ def build_manifest_summary(manifest_payload: Mapping[str, object]) -> dict[str, 
     return summary
 
 
+# Keyword hits that only occur inside Windows shell boilerplate: desktop.ini
+# ``[.ShellClassInfo]`` sections and ``shell32.dll`` resource references
+# match a "shell" mode keyword without any user content.
+DOCS_NOISE_TOKENS: dict[str, tuple[str, ...]] = {
+    "shell-class-info": (".shellclassinfo", "shellclassinfo", "shell32.dll", "shell32"),
+}
+
+
+def keyword_noise_hint(haystack: str, keywords: Sequence[str]) -> str:
+    """Noise hint name when every matched keyword occurs only inside noise tokens."""
+    if not keywords:
+        return ""
+    for hint, tokens in DOCS_NOISE_TOKENS.items():
+        stripped = haystack
+        for token in tokens:
+            stripped = stripped.replace(token, " ")
+        if stripped != haystack and not any(keyword in stripped for keyword in keywords):
+            return hint
+    return ""
+
+
 def run_docs_search(
     root: InputRoot | Path,
     keywords: Sequence[str],
@@ -417,6 +438,7 @@ def run_docs_search(
                 matched_keywords=matched,
                 preview=build_preview(text, matched[0]),
                 size=candidate.size,
+                noise_hint=keyword_noise_hint(haystack, matched),
             )
         )
     payload = {

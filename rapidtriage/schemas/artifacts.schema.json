@@ -205,6 +205,9 @@
         "adapter_version": {
           "type": "string"
         },
+        "artifact_id_scheme": {
+          "type": "string"
+        },
         "record_count": {
           "type": "integer"
         },

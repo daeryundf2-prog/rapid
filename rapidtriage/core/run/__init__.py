@@ -83,6 +83,7 @@ from ..files import (
     enable_evidence_path_cache,
     run_files_scan,
 )
+from ..filetime import parse_iso_utc
 from ..forensic_accuracy import build_accuracy_gate
 from ..incremental import (
     EVIDENCE_DELTA_MANIFEST_NAME,
@@ -506,13 +507,22 @@ RUN_MAX_INDICATORS: int | None = None
 def timeline_reference_time(
     fingerprint: Mapping[str, object],
     run_started_at: dt.datetime,
+    files_payload: Mapping[str, object] | None = None,
 ) -> tuple[dt.datetime, str]:
     """Upper bound reference for timeline plausibility (+1 day is added).
 
-    The newest input mtime is the acquisition/copy time when the input
-    fingerprint covered every file (no evidence time can be later than the
-    files that hold it); a truncated fingerprint may have missed newer
-    files, so the run start is used then.
+    No evidence time can be later than the newest file that holds it, so the
+    acquisition time is anchored, in order, to
+
+    1. ``acquisition``: the newest input mtime of a complete (untruncated)
+       run fingerprint;
+    2. ``acquisition-listing``: the newest ``source_file_mtime`` of the files
+       stage listing (candidates + inventory) of an acquisition copy when that
+       scan was not capped (``limit_reached`` false);
+    3. ``run-start``: the run start otherwise (a truncated listing may have
+       missed newer files).
+
+    The chosen basis is recorded as the timeline ``valid_range.max_basis``.
     """
     summary = fingerprint.get("summary") if isinstance(fingerprint.get("summary"), Mapping) else {}
     latest = summary.get("latest_mtime_epoch") if isinstance(summary, Mapping) else None
@@ -523,7 +533,29 @@ def timeline_reference_time(
             acquired = None
         if acquired is not None and acquired <= run_started_at:
             return acquired, "acquisition"
+    listed = files_listing_latest_mtime(files_payload)
+    if listed is not None and listed <= run_started_at:
+        return listed, "acquisition-listing"
     return run_started_at, "run-start"
+
+
+def files_listing_latest_mtime(files_payload: Mapping[str, object] | None) -> dt.datetime | None:
+    """Newest acquisition-copy ``source_file_mtime`` of an uncapped files listing."""
+    if not isinstance(files_payload, Mapping):
+        return None
+    summary = files_payload.get("summary") if isinstance(files_payload.get("summary"), Mapping) else {}
+    if not isinstance(summary, Mapping) or summary.get("limit_reached") or summary.get("time_origin") != "acquisition-copy":
+        return None
+    latest: dt.datetime | None = None
+    for key in ("candidates", "inventory"):
+        rows = files_payload.get(key)
+        for row in rows if isinstance(rows, list) else ():
+            if not isinstance(row, Mapping):
+                continue
+            parsed = parse_iso_utc(row.get("source_file_mtime"))
+            if parsed is not None and (latest is None or parsed > latest):
+                latest = parsed
+    return latest
 
 
 def _run_triage_stages(
@@ -971,7 +1003,7 @@ def _run_triage_stages(
     finish_stage("extract")
 
     progress.begin_stage("timeline")
-    timeline_reference = timeline_reference_time(current_fingerprint, run_started_at)
+    timeline_reference = timeline_reference_time(current_fingerprint, run_started_at, files_payload)
 
     timeline_payload, reused = load_or_build_json(
         timeline_path,

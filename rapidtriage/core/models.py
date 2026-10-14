@@ -105,6 +105,13 @@ class DocumentMatch:
     matched_keywords: list[str]
     preview: str
     size: int
+    # Set when every keyword occurrence sits in a known noise token
+    # (``desktop.ini`` ``[.ShellClassInfo]``/``shell32.dll`` for "shell"):
+    # a legitimate substring hit the report groups apart.
+    noise_hint: str = ""
 
     def to_dict(self) -> dict[str, object]:
-        return asdict(self)
+        payload = asdict(self)
+        if not self.noise_hint:
+            payload.pop("noise_hint")
+        return payload
