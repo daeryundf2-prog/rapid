@@ -1059,6 +1059,8 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             root = Path(tmp_dir)
             archive_path = root / "takeout-archive.zip"
             with zipfile.ZipFile(archive_path, "w") as archive:
+                # Export-root signature: every Takeout archive carries archive_browser.html.
+                archive.writestr("Takeout/archive_browser.html", "<html>Takeout</html>")
                 archive.writestr(
                     "Takeout/Mail/All mail Including Spam and Trash.mbox",
                     "\n".join(
@@ -3018,7 +3020,9 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             )
             self.assertGreaterEqual(export["timezone_validation"]["timezone_report_grade_ready_slot_count"], 7)
             self.assertGreaterEqual(export["timezone_validation"]["timezone_report_grade_blocking_slot_count"], 6)
-            self.assertIn(
+            # Parser-quality r1: every imported event now records its timezone
+            # (UTC storage), so source-timezone completeness no longer blocks.
+            self.assertNotIn(
                 "source-timezone-completeness",
                 {slot["slot_id"] for slot in export["timezone_validation"]["timezone_report_grade_validation_plan"]["blocking_slots"]},
             )

@@ -5,6 +5,7 @@ import json
 import shutil
 import tempfile
 import unittest
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -113,6 +114,7 @@ from rapidtriage.artifacts.windows.system import (
 )
 from rapidtriage.cli import main
 from tests.windows_artifact_fixtures import (
+    build_minimal_lnk,
     build_minimal_registry_hive,
     build_minimal_shellbags_registry_hive,
     build_minimal_usn_journal,
@@ -4258,122 +4260,29 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             (hive_path.parent / "UsrClass.dat.LOG1").write_bytes(bytes(transaction_log))
 
             records = list(WindowsShellbagsProvider().collect(Path(tmp_dir)))
-            native = [record for record in records if record.artifact_type == "shellbag-native-candidate"]
-
-            self.assertTrue(native)
-            key_tree = next(record for record in native if record.details["candidate_source"] == "native-key-tree")
-            self.assertEqual(key_tree.details["shellbag_section"], "bagmru")
-            self.assertIn("0", key_tree.details["node_id_candidates"])
-            self.assertIn("42", key_tree.details["bag_id_candidates"])
-            self.assertTrue(key_tree.details["timestamp_candidates"])
-            self.assertEqual(key_tree.details["shellbag_evidence"]["key_evidence"]["shellbag_section"], "bagmru")
-            self.assertEqual(
-                key_tree.details["shellbag_evidence"]["relationship_evidence"]["bag_node_relationship_status"],
-                "candidate-from-key-path-and-values",
-            )
-            relationship_profile = key_tree.details["shellbag_relationship_profile"]
-            self.assertEqual(relationship_profile["profile_version"], "shellbag-relationship-profile-v1")
-            self.assertEqual(relationship_profile["shellbag_section"], "bagmru")
-            self.assertIn("0", relationship_profile["numeric_node_segments"])
-            self.assertIn("42", relationship_profile["bag_id_candidates"])
-            self.assertEqual(len(relationship_profile["relationship_hash"]), 64)
-            self.assertIn("42", key_tree.details["shellbag_evidence"]["relationship_evidence"]["bag_id_candidates"])
-            self.assertIn("0", key_tree.details["shellbag_evidence"]["relationship_evidence"]["node_id_candidates"])
-            self.assertEqual(
-                key_tree.details["shellbag_evidence"]["relationship_evidence"]["relationship_profile_hash"],
-                relationship_profile["relationship_hash"],
-            )
-            self.assertEqual(
-                key_tree.details["shellbag_evidence"]["activity_evidence"]["primary_timestamp"],
-                "2024-04-02T03:04:05+00:00",
-            )
-            self.assertEqual(key_tree.details["forensic_review"]["gap_id"], "#15")
-            self.assertIn("ShellBags", key_tree.details["forensic_review"]["artifact_goal"])
-            self.assertTrue(key_tree.details["validation_checks"]["regf_header_valid"])
-            self.assertFalse(key_tree.details["validation_checks"]["binary_shell_item_decoding_available"])
-            self.assertTrue(key_tree.details["validation_checks"]["transaction_log_context_recorded"])
-            self.assertTrue(key_tree.details["validation_checks"]["transaction_log_input_present"])
-            self.assertEqual(key_tree.details["registry_transaction_log_evidence"]["recognized_log_count"], 1)
-            self.assertEqual(
-                key_tree.details["registry_transaction_replay_profile"]["transaction_log_status"],
-                "present-not-replayed",
-            )
-            self.assertEqual(
-                key_tree.details["shellbag_evidence"]["key_evidence"]["transaction_log_status"],
-                "present-not-replayed",
-            )
-            self.assertFalse(key_tree.details["commercial_grade_ready"])
-            self.assertIn("#15", key_tree.details["shellbag_report_grade_assessment"]["commercial_gap_ids"])
-            self.assertTrue(key_tree.details["shellbag_native_capabilities"]["binary_shell_item_decode"])
-            self.assertIn("requires_dedicated_shellbags_parser", key_tree.details["validation_checks"])
-            shellbag_gate = key_tree.details["core_accuracy_gates"][0]
-            self.assertEqual(shellbag_gate["gap_id"], "#15")
-            self.assertIn("BagMRU/Bags relationship", shellbag_gate["satisfied_checks"])
-            self.assertIn("timestamp source labeling", shellbag_gate["satisfied_checks"])
-            self.assertIn("UsrClass/NTUSER correlation", shellbag_gate["satisfied_checks"])
-            self.assertIn("transaction log context recorded", shellbag_gate["satisfied_checks"])
-            self.assertIn("deleted/slack validation warning", shellbag_gate["satisfied_checks"])
-            self.assertIn("relationship lineage profile", shellbag_gate["satisfied_checks"])
-            self.assertIn("shell item binary decoding", shellbag_gate["missing_required_checks"])
-            shellbag_uplift = key_tree.details["commercial_uplift_evidence"]
-            self.assertEqual(shellbag_uplift["batch_id"], "commercial-uplift-011-015")
-            self.assertEqual(shellbag_uplift["item_numbers"], [15])
-            self.assertEqual(
-                shellbag_uplift["reportability_decision"]["decision"],
-                "do-not-report-folder-access-as-final",
-            )
-            self.assertEqual(
-                shellbag_uplift["reportability_decision"]["allowed_use"],
-                "folder-view-history-triage-pivot",
-            )
-            self.assertEqual(shellbag_uplift["qc_prep_item_numbers"], [30])
-            self.assertIn("regf-header-valid", shellbag_uplift["passed_validation_matrix_ids"])
-            self.assertIn("binary-shell-item-decoding-available", shellbag_uplift["failed_validation_matrix_ids"])
-            self.assertTrue(
-                shellbag_uplift["large_data_controls"]["transaction_log_replay_required_for_commercial_claims"]
-            )
-            shellbag_manifest = key_tree.details["shellbag_depth_manifest"]
-            self.assertEqual(shellbag_manifest["manifest_version"], "shellbag-depth-manifest-v1")
-            self.assertEqual(shellbag_manifest["gap_id"], "#15")
-            self.assertEqual(shellbag_manifest["qc_prep_item_number"], 30)
-            self.assertIn("native NTUSER/UsrClass key-tree and string-pivot candidates", shellbag_manifest["qc_prep_contract"]["implemented"])
-            self.assertEqual(shellbag_manifest["source"]["user_hive_scope"], "usrclass")
-            self.assertEqual(shellbag_manifest["row_identity"]["shellbag_section"], "bagmru")
-            self.assertIn("42", shellbag_manifest["bag_relationship"]["bag_id_candidates"])
-            self.assertEqual(
-                shellbag_manifest["bag_relationship"]["relationship_profile_hash"],
-                relationship_profile["relationship_hash"],
-            )
-            self.assertIn("0", shellbag_manifest["bag_relationship"]["numeric_node_segments"])
-            self.assertFalse(shellbag_manifest["bag_relationship"]["bag_node_relationship_validated"])
-            self.assertEqual(
-                shellbag_manifest["activity_timestamps"]["primary_timestamp"],
-                "2024-04-02T03:04:05+00:00",
-            )
-            self.assertTrue(shellbag_manifest["binary_payload"]["binary_shell_item_decode_capability"])
-            self.assertEqual(
-                shellbag_manifest["transaction_and_deleted_state"]["transaction_log_status"],
-                "present-not-replayed",
-            )
-            self.assertFalse(
-                shellbag_manifest["transaction_and_deleted_state"]["deleted_slack_validation_available"],
-            )
-            self.assertEqual(
-                shellbag_manifest["reportability"]["allowed_use"],
-                "folder-view-history-triage-pivot",
-            )
-            shellbag_review_profile = key_tree.details["shellbag_analyst_review_profile"]
-            self.assertEqual(shellbag_review_profile["profile_version"], "shellbag-analyst-review-profile-v1")
-            self.assertEqual(shellbag_review_profile["source_field_values"]["shellbag_section"], "bagmru")
-            self.assertEqual(shellbag_review_profile["source_field_values"]["user_hive_scope"], "usrclass")
-            self.assertIn("ShellBagsExplorer/SBECmd", shellbag_review_profile["correlation_targets"])
-            self.assertIn("final shell-item path semantics", shellbag_review_profile["not_proof_of"])
-            self.assertIn("trusted ShellBags parser diff is required", shellbag_review_profile["commercial_blockers"])
-            self.assertFalse(shellbag_manifest["reportability"]["folder_access_final"])
-            self.assertEqual(
-                key_tree.details["shellbag_depth_manifest_hash"],
-                shellbag_manifest["manifest_sha256"],
-            )
+            # Parser-quality r1: the structural BagMRU decode replaces the old
+            # key-tree/string "shellbag-native-candidate" rows.
+            types = {record.artifact_type for record in records}
+            self.assertNotIn("shellbag-native-candidate", types)
+            self.assertEqual(types, {"shellbag-entry", "shellbag-hive-summary"})
+            root = next(record for record in records if record.artifact_type == "shellbag-entry")
+            self.assertEqual(root.details["candidate_source"], "native-bagmru-decode")
+            self.assertEqual(root.details["shellbag_section"], "bagmru")
+            self.assertTrue(root.details["bagmru_root"])
+            self.assertEqual(root.details["user_hive_scope"], "usrclass")
+            self.assertEqual(root.details["hive_mount"], r"HKCU\Software\Classes")
+            self.assertEqual(root.details["source_key_path"], "BagMRU")
+            self.assertEqual(root.details["key_path"], r"HKCU\Software\Classes\BagMRU")
+            self.assertEqual(root.details["timestamp"], "2024-04-02T03:04:05+00:00")
+            self.assertEqual(root.details["timestamp_label"], "last_written")
+            self.assertEqual(root.details["transaction_log_status"], "present-not-replayed")
+            self.assertFalse(root.details["commercial_grade_ready"])
+            self.assertIn("trusted ShellBags parser diff is required", root.details["commercial_grade_blockers"])
+            summary = next(record for record in records if record.artifact_type == "shellbag-hive-summary")
+            self.assertEqual(summary.details["coverage_status"], "native-bagmru-full-walk")
+            self.assertEqual(summary.details["bagmru_roots"], [r"HKCU\Software\Classes\BagMRU"])
+            self.assertIsNone(summary.details["row_cap"])
+            self.assertEqual(summary.details["transaction_log_status"], "present-not-replayed")
 
     def test_shellbags_native_bagmru_decode_emits_shell_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -4388,11 +4297,13 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
 
             self.assertTrue(entries)
             root = next(record for record in entries if record.details["bagmru_root"])
-            self.assertEqual(root.details["source_key_path"], "Shell\\BagMRU")
+            # The fixture's root nk is named "Shell"; the hive root's own name is
+            # never a path component (parser-quality r1), so BagMRU sits at the top.
+            self.assertEqual(root.details["source_key_path"], "BagMRU")
             child = next(record for record in entries if not record.details["bagmru_root"])
             self.assertEqual(child.details["shell_path"], "My Computer")
             self.assertEqual(child.details["slot_name"], "0")
-            self.assertEqual(child.details["shellitem"]["decode_method"], "guid")
+            self.assertEqual(child.details["shellitem"]["decode_method"], "known-folder-guid")  # My Computer CLSID resolves as a known folder
             self.assertGreater(child.details["shellitem_value_cell_offset"], 0)
             self.assertTrue(child.details["validation_checks"]["shellitem_decoded"])
             self.assertFalse(child.details["commercial_grade_ready"])
@@ -4467,55 +4378,33 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             hive_inventory = next(record for record in records if record.artifact_type == "registry-hive")
             key_tree_nodes = [record for record in records if record.artifact_type == "registry-key-tree-node"]
             run_key = next(record for record in key_tree_nodes if record.details["name"] == "Run")
-            self.assertEqual(run_key.details["key_path"], "HKEY_CURRENT_USER\\Software\\Run")
-            self.assertEqual(run_key.details["key_path_confidence"], "parent-chain")
-            self.assertEqual(run_key.details["key_path_components"], ["Software", "Run"])
-            self.assertEqual(run_key.details["key_depth"], 2)
-            self.assertEqual(run_key.details["key_tree_path_evidence"]["full_path"], "HKEY_CURRENT_USER\\Software\\Run")
-            self.assertEqual(run_key.details["key_tree_path_evidence"]["path_confidence"], "parent-chain")
-            self.assertTrue(run_key.details["key_tree_path_evidence"]["root_reachable"])
+            # Parser-quality r1: key paths come from the tree walk under the hive
+            # mount (the root nk's own name is never a path component), and
+            # key-tree rows carry only the walk facts (no per-row profiles).
+            root_key = next(record for record in key_tree_nodes if record.details["is_root_key"])
+            self.assertEqual(root_key.details["key_path"], "HKCU")
+            self.assertEqual(root_key.details["key_depth"], 0)
+            self.assertEqual(run_key.details["key_path"], "HKCU\\Run")
+            self.assertEqual(run_key.details["hive_mount"], "HKCU")
+            self.assertEqual(run_key.details["key_path_confidence"], "tree-walk")
+            self.assertEqual(run_key.details["key_depth"], 1)
             self.assertTrue(run_key.details["root_reachable"])
             self.assertFalse(run_key.details["is_root_key"])
-            self.assertTrue(run_key.details["parent_link_consistency"])
-            self.assertEqual(
-                run_key.details["registry_key_tree_relationships"]["ancestor_cell_offsets"],
-                run_key.details["key_ancestry_cell_offsets"],
-            )
-            self.assertFalse(run_key.details["key_tree_path_evidence"]["cycle_detected"])
-            self.assertEqual(len(run_key.details["key_ancestry_cell_offsets"]), 2)
+            self.assertEqual(run_key.details["parent_cell_offset"], root_key.details["cell_offset"])
             self.assertEqual(run_key.details["value_names"], ["SecurityUpdater"])
-            self.assertEqual(run_key.details["linked_value_count"], 1)
-            self.assertEqual(run_key.details["missing_value_cell_offsets"], [])
-            self.assertEqual(
-                run_key.details["registry_subkey_list_profile"]["profile_version"],
-                "registry-subkey-list-profile-v1",
-            )
-            self.assertEqual(run_key.details["registry_subkey_list_profile"]["list_validation_status"], "resolved")
-            self.assertEqual(run_key.details["registry_subkey_list_profile"]["stable"]["status"], "not-declared")
-            self.assertEqual(run_key.details["registry_value_list_profile"]["status"], "resolved")
-            self.assertEqual(run_key.details["registry_value_list_profile"]["declared_value_count"], 1)
-            self.assertEqual(run_key.details["registry_value_list_profile"]["decoded_value_count"], 1)
-            self.assertEqual(len(run_key.details["registry_value_list_profile"]["cell_sha256"]), 64)
-            reconstruction = run_key.details["registry_key_tree_reconstruction_profile"]
-            self.assertEqual(
-                reconstruction["profile_version"],
-                "registry-key-tree-reconstruction-profile-v1",
-            )
-            self.assertEqual(reconstruction["reconstruction_status"], "bounded-node-reconstructed")
-            self.assertTrue(reconstruction["root_reachable"])
-            self.assertTrue(reconstruction["parent_child_backlinks_consistent"])
-            self.assertTrue(reconstruction["subkey_lists_resolved"])
-            self.assertTrue(reconstruction["value_list_resolved"])
-            self.assertFalse(reconstruction["validation_required"])
-            self.assertFalse(run_key.details["validation_required"])
-            self.assertFalse(run_key.details["commercial_grade_ready"])
-            self.assertEqual(
-                run_key.details["registry_report_grade_assessment"]["status"],
-                "triage-validated-report-grade-blocked",
-            )
-            self.assertIn("#4", run_key.details["registry_report_grade_assessment"]["commercial_gap_ids"])
-            self.assertTrue(run_key.details["registry_native_capabilities"]["parent_chain_path_reconstruction"])
-            self.assertFalse(run_key.details["registry_native_capabilities"]["transaction_log_replay"])
+            self.assertEqual(run_key.details["value_count"], 1)
+            self.assertEqual(run_key.details["last_written_at"], "2024-04-01T04:05:06+00:00")
+            self.assertEqual(run_key.details["allocation_status"], "allocated")
+            self.assertEqual(run_key.details["transaction_log_status"], "present-not-replayed")
+            for heavy in (
+                "registry_key_tree_reconstruction_profile",
+                "registry_transaction_log_evidence",
+                "registry_report_citation_manifest",
+                "registry_analyst_review_profile",
+                "core_accuracy_gates",
+                "commercial_uplift_evidence",
+            ):
+                self.assertNotIn(heavy, run_key.details)
             self.assertEqual(
                 hive_inventory.details["registry_transaction_log_evidence"]["status"],
                 "present-not-replayed",
@@ -4535,184 +4424,13 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                 "transaction-log-replay-or-second-parser-diff-required",
                 hive_inventory.details["registry_transaction_replay_profile"]["blockers"],
             )
-            self.assertEqual(run_key.details["registry_transaction_log_evidence"]["present_count"], 1)
-            self.assertEqual(run_key.details["registry_transaction_log_evidence"]["recognized_log_count"], 1)
-            self.assertEqual(run_key.details["registry_transaction_log_evidence"]["unrecognized_log_count"], 0)
-            self.assertFalse(run_key.details["registry_transaction_log_evidence"]["transaction_log_replay_applied"])
-            self.assertEqual(run_key.details["registry_transaction_log_evidence"]["replay_policy"], "detect-and-disclose-only")
-            self.assertIn("NTUSER.DAT.LOG1", run_key.details["registry_transaction_log_evidence"]["expected_log_names"])
-            self.assertIn("not replayed", run_key.details["registry_transaction_log_evidence"]["impact_statement"])
-            self.assertEqual(
-                run_key.details["registry_transaction_log_evidence"]["present_logs"][0]["header"]["signature"],
-                "HvLE",
-            )
-            self.assertEqual(
-                run_key.details["registry_transaction_log_evidence"]["present_logs"][0]["signature_status"],
-                "recognized-transaction-log",
-            )
-            self.assertTrue(
-                run_key.details["registry_transaction_log_evidence"]["present_logs"][0]["replay_readiness"][
-                    "candidate_for_future_replay"
-                ]
-            )
-            self.assertEqual(
-                run_key.details["registry_transaction_log_evidence"]["replay_inputs"][
-                    "recognized_replay_input_count"
-                ],
-                1,
-            )
-            self.assertTrue(
-                run_key.details["registry_transaction_log_evidence"]["replay_inputs"][
-                    "ready_for_future_internal_replay"
-                ]
-            )
-            self.assertEqual(
-                run_key.details["registry_transaction_log_evidence"]["transaction_context_quality"]["level"],
-                "recognized-logs-present",
-            )
-            self.assertEqual(
-                run_key.details["registry_transaction_replay_profile"]["transaction_log_status"],
-                "present-not-replayed",
-            )
-            self.assertEqual(
-                run_key.details["registry_transaction_replay_profile"]["replay_validation_status"],
-                "recognized-logs-replay-validation-required",
-            )
-            self.assertTrue(
-                run_key.details["registry_transaction_replay_profile"]["ready_for_internal_replay_preflight"]
-            )
-            self.assertEqual(len(run_key.details["registry_transaction_replay_profile"]["replay_validation_profile_hash"]), 64)
-            self.assertEqual(run_key.details["registry_transaction_replay_profile"]["recognized_replay_input_count"], 1)
-            self.assertFalse(run_key.details["registry_transaction_replay_profile"]["complete_log_pair_present"])
-            self.assertEqual(
-                run_key.details["registry_transaction_replay_profile"]["transaction_context_quality"],
-                "recognized-logs-present",
-            )
-            replay_validation = run_key.details["registry_transaction_log_evidence"]["replay_validation_profile"]
-            self.assertEqual(replay_validation["profile_version"], "registry-transaction-replay-validation-v1")
-            self.assertEqual(replay_validation["validation_status"], "recognized-logs-replay-validation-required")
-            self.assertEqual(replay_validation["hive_sequence"]["primary"], 7)
-            self.assertEqual(replay_validation["hive_sequence"]["secondary"], 7)
-            self.assertFalse(replay_validation["hive_sequence"]["dirty"])
-            self.assertIn("matches-hive-sequence", replay_validation["sequence_relations"])
-            self.assertIn("transaction-log-sequence-diff-required", replay_validation["blockers"])
-            self.assertIn(
-                "complete-log-pair-or-explicit-missing-log-proof-required",
-                replay_validation["blockers"],
-            )
-            self.assertEqual(
-                run_key.details["registry_transaction_log_evidence"]["replay_validation_profile_hash"],
-                stable_registry_json_sha256(replay_validation),
-            )
-            self.assertEqual(
-                run_key.details["registry_transaction_log_evidence"]["present_logs"][0]["name"],
-                "NTUSER.DAT.LOG1",
-            )
-            validation_matrix = {item["id"]: item for item in run_key.details["registry_validation_matrix"]}
-            self.assertTrue(validation_matrix["regf-header"]["passed"])
-            self.assertTrue(validation_matrix["parent-chain"]["passed"])
-            self.assertTrue(validation_matrix["root-reachability"]["passed"])
-            self.assertTrue(validation_matrix["child-parent-backlinks"]["passed"])
-            self.assertTrue(validation_matrix["value-list-resolution"]["passed"])
-            self.assertTrue(validation_matrix["transaction-log-context-recorded"]["passed"])
-            self.assertEqual(validation_matrix["transaction-log-context-recorded"]["detail"], "present-not-replayed")
-            key_gate = run_key.details["core_accuracy_gates"][0]
-            self.assertEqual(key_gate["gap_id"], "#4")
-            self.assertIn("root-cell reachability", key_gate["satisfied_checks"])
-            self.assertIn("parent-child backlink consistency", key_gate["satisfied_checks"])
-            self.assertIn("transaction-log replay disclosure", key_gate["satisfied_checks"])
-            self.assertEqual(key_gate["missing_required_checks"], ["trusted registry key-tree diff pass"])
-            self.assertIn("source file or export hash", key_gate["minimum_evidence"])
-            self.assertFalse(key_gate["commercial_grade_ready"])
-            key_uplift = run_key.details["commercial_uplift_evidence"]
-            self.assertEqual(key_uplift["batch_id"], "commercial-uplift-001-005")
-            self.assertEqual(key_uplift["item_numbers"], [4])
-            self.assertEqual(key_uplift["implementation_track"], "native-parser-depth")
-            self.assertIn("root-reachability", key_uplift["passed_validation_matrix_ids"])
-            key_blocker_categories = {
-                row["blocker"]: row["category"] for row in key_uplift["commercial_blocker_analysis"]
-            }
-            self.assertEqual(
-                key_blocker_categories["transaction-log-replay-not-implemented"],
-                "internal_implementation",
-            )
-            self.assertEqual(
-                key_blocker_categories["deleted-cell-known-answer-corpus-validation-required"],
-                "external_validation",
-            )
-            self.assertEqual(key_uplift["large_data_controls"]["reader"], "bounded-hbin-cell-scan")
-            self.assertTrue(
-                key_uplift["large_data_controls"]["transaction_log_replay_required_for_commercial_claims"]
-            )
-            self.assertEqual(key_uplift["key_tree_diff"]["status"], "not-attached")
-            key_depth = run_key.details["registry_native_depth_readiness_profile"]
-            self.assertEqual(key_depth["profile_version"], "registry-native-depth-readiness-v1")
-            self.assertEqual(key_depth["family"], "key-tree")
-            self.assertEqual(key_depth["artifact_scope"], "key-tree-node")
-            self.assertFalse(key_depth["commercial_grade_ready"])
-            self.assertTrue(key_depth["decoded_components"]["parent_chain_path_reconstruction"])
-            self.assertTrue(key_depth["decoded_components"]["value_list_linking"])
-            self.assertFalse(key_depth["decoded_components"]["transaction_log_replay"])
-            self.assertEqual(key_depth["validation_summary"]["transaction_log_status"], "present-not-replayed")
-            self.assertEqual(
-                key_depth["validation_summary"]["transaction_replay_validation_status"],
-                "recognized-logs-replay-validation-required",
-            )
-            self.assertEqual(
-                key_depth["validation_summary"]["transaction_replay_validation_hash"],
-                run_key.details["registry_transaction_log_evidence"]["replay_validation_profile_hash"],
-            )
-            self.assertEqual(
-                key_depth["registry_key_tree_reconstruction_profile"]["reconstruction_status"],
-                "bounded-node-reconstructed",
-            )
-            self.assertIn("source_sha256", key_depth["source_citation_requirements"])
-            key_manifest = run_key.details["registry_report_citation_manifest"]
-            self.assertEqual(key_manifest["manifest_version"], "registry-report-citation-manifest-v1")
-            self.assertEqual(key_manifest["artifact_type"], "registry-key-tree-node")
-            self.assertEqual(key_manifest["row_identity"]["key_path"], "HKEY_CURRENT_USER\\Software\\Run")
-            self.assertEqual(key_manifest["row_identity"]["linked_subkey_count"], 0)
-            self.assertEqual(key_manifest["row_identity"]["linked_value_count"], 1)
-            self.assertEqual(key_manifest["row_identity"]["value_names"], ["SecurityUpdater"])
-            self.assertTrue(key_manifest["row_identity"]["parent_link_consistency"])
-            self.assertEqual(key_manifest["validation_summary"]["transaction_log_status"], "present-not-replayed")
-            self.assertEqual(
-                key_manifest["reportability"]["allowed_use"],
-                "registry-native-triage-review-pivot",
-            )
-            self.assertFalse(key_manifest["reportability"]["ready_for_court_report"])
-            self.assertEqual(len(key_manifest["manifest_sha256"]), 64)
-            self.assertEqual(
-                run_key.details["registry_report_citation_manifest_hash"],
-                key_manifest["manifest_sha256"],
-            )
-            key_citation_kinds = {item["kind"] for item in key_manifest["citation_refs"]}
-            self.assertIn("registry-hive-source", key_citation_kinds)
-            self.assertIn("registry-cell-offset", key_citation_kinds)
-            self.assertIn("registry-key-path", key_citation_kinds)
-            self.assertIn("registry-transaction-log-context", key_citation_kinds)
-            transaction_citation = next(
-                item for item in key_manifest["citation_refs"] if item["kind"] == "registry-transaction-log-context"
-            )
-            self.assertEqual(
-                transaction_citation["replay_validation_status"],
-                "recognized-logs-replay-validation-required",
-            )
-            self.assertEqual(len(transaction_citation["replay_validation_profile_hash"]), 64)
-            key_review = run_key.details["registry_analyst_review_profile"]
-            self.assertEqual(key_review["profile_version"], "registry-analyst-review-profile-v1")
-            self.assertEqual(key_review["catalog_key"], "persistence")
-            self.assertEqual(key_review["source_field_values"]["key_path"], "HKEY_CURRENT_USER\\Software\\Run")
-            self.assertIn("prefetch", key_review["correlation_targets"])
-            self.assertIn("transaction-log-present-not-replayed", key_review["commercial_blockers"])
-
             value_recovery = next(
                 record
                 for record in records
                 if record.artifact_type == "registry-value-recovery-candidate"
                 and record.details["name"] == "SecurityUpdater"
             )
-            self.assertEqual(value_recovery.details["parent_key_path_candidate"], "HKEY_CURRENT_USER\\Software\\Run")
+            self.assertEqual(value_recovery.details["parent_key_path_candidate"], "HKCU\\Run")
             self.assertEqual(value_recovery.details["parent_key_confidence"], "key-value-list")
             self.assertGreater(value_recovery.details["parent_key_cell_offset"], 0)
             self.assertEqual(value_recovery.details["decoded_data_preview"], "1")
@@ -4868,7 +4586,7 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertGreater(value_manifest["row_identity"]["cell_size"], 0)
             self.assertEqual(
                 value_manifest["row_identity"]["parent_key_path_candidate"],
-                "HKEY_CURRENT_USER\\Software\\Run",
+                "HKCU\\Run",
             )
             value_citation_kinds = {item["kind"] for item in value_manifest["citation_refs"]}
             self.assertIn("registry-value-or-name", value_citation_kinds)
@@ -4877,7 +4595,7 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertIn("registry-deleted-cell-cross-tool-diff-required", value_manifest["reportability"]["blockers"])
             value_review = value_recovery.details["registry_analyst_review_profile"]
             self.assertEqual(value_review["catalog_key"], "deleted-cell")
-            self.assertEqual(value_review["source_field_values"]["parent_key_path_candidate"], "HKEY_CURRENT_USER\\Software\\Run")
+            self.assertEqual(value_review["source_field_values"]["parent_key_path_candidate"], "HKCU\\Run")
             self.assertIn("registry-explorer-diff", value_review["correlation_targets"])
             self.assertTrue(value_review["validation_required"])
             key_recovery = next(
@@ -5391,6 +5109,12 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir) / "windows_artifacts"
             shutil.copytree(FIXTURE_ROOT, root)
+            # The repo fixture's Case Notes.lnk is plain text (recent-shortcut-invalid-content);
+            # write a real Shell Link so the manifest still covers LNK parsing.
+            lnk_path = root / "Users" / "alice" / "AppData" / "Roaming" / "Microsoft" / "Windows" / "Recent" / "Case Notes.lnk"
+            lnk_path.write_bytes(
+                build_minimal_lnk(r"C:\Users\alice\Documents\Case Notes.docx", datetime(2024, 3, 5, 6, 7, 8, tzinfo=timezone.utc))
+            )
             ntuser = root / "Users" / "alice" / "NTUSER.DAT"
             ntuser.write_bytes(
                 build_minimal_registry_hive(
@@ -5452,11 +5176,19 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             providers = {item["name"]: item for item in payload["providers"]}
 
             browser_provider = providers["windows-browser-artifacts"]
-            self.assertEqual(len(browser_provider["artifacts"]), 3)
+            # Parser-quality r1: one profile summary row (``history_count``) per
+            # History/places file plus one row per URL / visit / download.
+            self.assertEqual(len(browser_provider["artifacts"]), 10)
+            self.assertEqual(
+                Counter(artifact["artifact_type"] for artifact in browser_provider["artifacts"]),
+                Counter({"browser-history": 5, "browser-history-downloads": 2, "browser-download": 2, "browser-visit": 1}),
+            )
             browser_keys = {
                 (artifact["details"]["browser"], artifact["details"]["profile"]): artifact
                 for artifact in browser_provider["artifacts"]
+                if "history_count" in artifact["details"]
             }
+            self.assertEqual(len(browser_keys), 3)
             chrome = browser_keys[("chrome", "Default")]
             self.assertEqual(chrome["details"]["history_count"], 2)
             self.assertEqual(chrome["details"]["download_count"], 1)
@@ -5559,7 +5291,8 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             registry_provider = providers["windows-registry"]
             registry_types = {artifact["artifact_type"] for artifact in registry_provider["artifacts"]}
             self.assertIn("registry-hive", registry_types)
-            self.assertIn("registry-hive-cell", registry_types)
+            # Parser-quality r1: the full nk/vk walk replaces per-cell rows.
+            self.assertNotIn("registry-hive-cell", registry_types)
             self.assertIn("registry-key-tree-node", registry_types)
             self.assertIn("registry-key-recovery-candidate", registry_types)
             self.assertIn("registry-deleted-cell-candidate", registry_types)
@@ -5580,27 +5313,13 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             )
             self.assertIn("hive-pivot:currentversion\\run", hive_strings["details"]["risk_flags"])
             self.assertIn(r"C:\Users\alice\AppData\Roaming\SecurityUpdater.exe", hive_strings["details"]["path_candidates"])
-            hive_cells = [artifact for artifact in registry_provider["artifacts"] if artifact["artifact_type"] == "registry-hive-cell"]
-            self.assertGreaterEqual(len(hive_cells), 4)
-            self.assertTrue(any(artifact["details"]["cell_kind"] == "key-node" for artifact in hive_cells))
-            updater_value = next(artifact for artifact in hive_cells if artifact["details"]["name"] == "SecurityUpdater")
-            self.assertEqual(updater_value["details"]["allocation_status"], "free-or-deleted-candidate")
-            self.assertEqual(updater_value["details"]["cell_scan_method"], "hbin-walk")
-            self.assertGreater(updater_value["details"]["hbin_offset"], 0)
-            updater_locator = updater_value["details"]["source_viewer_locator"]
-            self.assertEqual(updater_locator["profile_version"], "registry-record-source-viewer-locator-v1")
-            self.assertEqual(updater_locator["qc_prep_item"], 8)
-            self.assertEqual(updater_locator["viewer"], "registry-record")
-            self.assertEqual(updater_locator["value_name"], "SecurityUpdater")
-            self.assertEqual(updater_locator["cell_offset"], updater_value["details"]["cell_offset"])
-            self.assertTrue(updater_locator["deleted_or_recovered_candidate"])
-            self.assertEqual(len(updater_locator["source_sha256"]), 64)
-            self.assertIn("LOG1/LOG2 transaction replay status", updater_locator["validation_warning"])
-            self.assertIn("deleted-or-free-cell-candidate", updater_value["details"]["risk_flags"])
             key_tree_nodes = [
                 artifact for artifact in registry_provider["artifacts"] if artifact["artifact_type"] == "registry-key-tree-node"
             ]
             self.assertTrue(any(artifact["details"]["key_path"].endswith("\\Run") for artifact in key_tree_nodes))
+            # Hive mounts: NTUSER keys under HKCU (HKU\<SID> when the SID is known), never a "ROOT" segment.
+            self.assertTrue(all(artifact["details"]["key_path"].startswith(("HKCU", "HKU\\", "HKLM\\")) for artifact in key_tree_nodes))
+            self.assertFalse(any("\\ROOT\\" in artifact["details"]["key_path"] for artifact in key_tree_nodes))
             self.assertTrue(all("cell_offset" in artifact["details"] for artifact in key_tree_nodes))
             deleted_cells = [
                 artifact for artifact in registry_provider["artifacts"] if artifact["artifact_type"] == "registry-deleted-cell-candidate"
@@ -5702,25 +5421,22 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertTrue(userassist["details"]["registry_user_activity_profile"]["normalized_activity_schema"]["safe_for_search_index"])
             typed_url = next(artifact for artifact in user_activity if artifact["details"]["user_activity_category"] == "browser-typed-url")
             self.assertEqual(typed_url["details"]["decoded_values"]["url1"]["typed_value"], "https://example.test/login")
-            hive_shellbag = next(
-                artifact
-                for artifact in user_activity
-                if artifact["details"]["coverage_status"] == "native-hive-string-pivot"
-                and artifact["details"]["user_activity_category"] == "shellbag"
-            )
-            self.assertTrue(hive_shellbag["details"]["validation_required"])
-            self.assertEqual(hive_shellbag["details"]["registry_user_activity_profile"]["current_decode_level"], "native-hive-string-pivot")
-            self.assertEqual(
-                hive_shellbag["details"]["registry_user_activity_profile"]["reportability_decision"]["decision"],
-                "do-not-report-as-final-user-activity",
+            # Hive string pivots no longer become user-activity rows (structural
+            # BagMRU/WordWheelQuery/RecentDocs decoding replaces them).
+            self.assertFalse(
+                [artifact for artifact in user_activity if artifact["details"]["coverage_status"] == "native-hive-string-pivot"]
             )
             usb_key = next(artifact for artifact in registry_provider["artifacts"] if artifact["artifact_type"] == "registry-usb")
             self.assertEqual(usb_key["details"]["usb_device"]["serial_hint"], "1234567890")
             summary = next(artifact for artifact in registry_provider["artifacts"] if artifact["artifact_type"] == "registry-summary")
-            self.assertEqual(summary["details"]["key_count"], 7)
+            self.assertEqual(summary["details"]["key_count"], 11)  # 7 exported .reg keys + 4 native hive keys
             self.assertEqual(summary["details"]["hive_file_count"], 2)
             self.assertEqual(summary["details"]["hive_string_row_count"], 2)
-            self.assertGreaterEqual(summary["details"]["hive_cell_row_count"], 4)
+            self.assertEqual(summary["details"]["hive_cell_row_count"], 0)
+            self.assertEqual(
+                summary["details"]["key_count"],
+                summary["details"]["exported_key_count"] + summary["details"]["native_key_count"],
+            )
             self.assertGreaterEqual(summary["details"]["key_tree_node_count"], 2)
             self.assertGreaterEqual(summary["details"]["deleted_cell_candidate_count"], 2)
             self.assertGreaterEqual(summary["details"]["key_recovery_candidate_count"], 2)
@@ -5729,8 +5445,10 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertEqual(summary["details"]["persistence_entries"][0]["value_name"], "SecurityUpdater")
             self.assertEqual(summary["details"]["usb_devices"][0]["friendly_name"], "Test USB Device")
             self.assertTrue(summary["details"]["hive_string_hits"])
-            self.assertTrue(summary["details"]["hive_cell_hits"])
-            self.assertTrue(summary["details"]["key_tree_nodes"])
+            self.assertEqual(summary["details"]["hive_cell_hits"], [])
+            # Native key-tree rows are counted per hive, not kept in the summary preview (memory).
+            self.assertEqual(summary["details"]["key_tree_nodes"], [])
+            self.assertTrue(summary["details"]["key_tree_node_counts_by_hive"])
             self.assertTrue(summary["details"]["deleted_cell_candidates"])
             self.assertTrue(summary["details"]["key_recovery_candidates"])
             self.assertTrue(summary["details"]["value_recovery_candidates"])
@@ -5739,10 +5457,9 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             status_counts = {
                 item["value"]: item["count"] for item in summary["details"]["native_report_grade_status_counts"]
             }
-            self.assertGreaterEqual(
-                status_counts["triage-validated-report-grade-blocked"],
-                2,
-            )
+            # Key-tree rows no longer carry per-row report-grade profiles; only
+            # recovery candidates do.
+            self.assertNotIn("triage-validated-report-grade-blocked", status_counts)
             self.assertIn(
                 {"value": "recovery-candidate-validation-required", "count": 4},
                 summary["details"]["native_report_grade_status_counts"],
@@ -5762,13 +5479,16 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             execution_provider = providers["windows-execution"]
             execution_types = {artifact["artifact_type"] for artifact in execution_provider["artifacts"]}
             self.assertIn("amcache-hive", execution_types)
-            self.assertIn("amcache-entry", execution_types)
+            # String-blob Amcache fixture: no schema rows, so only string candidates
+            # (never ``amcache-entry``) come from the hive (parser-quality r1).
+            self.assertNotIn("amcache-entry", execution_types)
             native_amcache = next(
                 artifact
                 for artifact in execution_provider["artifacts"]
-                if artifact["artifact_type"] == "amcache-entry"
+                if artifact["artifact_type"] == "amcache-string-candidate"
                 and artifact["details"]["source_format"] == "amcache-hive"
             )
+            self.assertEqual(native_amcache["details"]["evidence_class"], "string-candidate-not-evidence")
             self.assertEqual(native_amcache["details"]["amcache_row_cluster_evidence"]["cluster_status"], "bounded-nearby-string-cluster")
             self.assertGreaterEqual(native_amcache["details"]["source_offset"], 0)
             self.assertIn("bounded Amcache row-cluster provenance", native_amcache["details"]["core_accuracy_gates"][0]["satisfied_checks"])

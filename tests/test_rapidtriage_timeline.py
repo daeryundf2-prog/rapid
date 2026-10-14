@@ -97,11 +97,17 @@ class RapidTriageTimelineTests(unittest.TestCase):
             event_times = [self._event_timestamp(event) for event in events]
             self.assertEqual(event_times, sorted(event_times), "timeline events must be chronological")
 
+            # Parser-quality r1: a folder input is an acquisition copy, so the
+            # host mtimes of files/docs are copy times and never events.
             event_sources = {self._event_source(event) for event in events}
-            self.assertTrue({"files", "docs", "artifacts"}.issubset(event_sources))
+            self.assertIn("artifacts", event_sources)
+            self.assertNotIn("files", event_sources)
+            self.assertNotIn("docs", event_sources)
+            self.assertGreaterEqual(payload["summary"]["acquisition_copy_time_candidates_not_emitted"], 5)
+            self.assertEqual(payload["summary"]["timezone"]["storage"], "UTC")
 
             event_paths = {self._event_path(event) for event in events if self._event_path(event)}
-            self.assertIn(str(fixture["note"].resolve()), event_paths)
+            self.assertNotIn(str(fixture["note"].resolve()), event_paths)
             self.assertTrue(
                 any(path.endswith("Incident Notes.docx.lnk") for path in event_paths),
                 "expected a recent-files artifact event in the timeline output",
@@ -113,7 +119,8 @@ class RapidTriageTimelineTests(unittest.TestCase):
 
             report_text = report.read_text(encoding="utf-8").lower()
             self.assertIn("timeline", report_text)
-            self.assertIn("incident-notes.txt", report_text)
+            self.assertNotIn("incident-notes.txt", report_text)
+            self.assertIn("utc", report_text)
             self.assertIn("browser", report_text)
 
     def test_usn_timeline_review_candidates_become_artifact_events(self) -> None:

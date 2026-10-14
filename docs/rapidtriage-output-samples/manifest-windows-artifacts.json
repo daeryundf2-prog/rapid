@@ -9,68 +9,7 @@
       "description": "Cross-platform document candidates discovered from the filesystem",
       "target_platform": "any",
       "supported": true,
-      "artifacts": [
-        {
-          "provider": "generic-documents",
-          "artifact_type": "document-pattern",
-          "path": "<ROOT>",
-          "supported": true,
-          "details": {
-            "extension": ".docx"
-          }
-        },
-        {
-          "provider": "generic-documents",
-          "artifact_type": "document-pattern",
-          "path": "<ROOT>",
-          "supported": true,
-          "details": {
-            "extension": ".pdf"
-          }
-        },
-        {
-          "provider": "generic-documents",
-          "artifact_type": "document-pattern",
-          "path": "<ROOT>",
-          "supported": true,
-          "details": {
-            "extension": ".txt"
-          }
-        },
-        {
-          "provider": "generic-documents",
-          "artifact_type": "local-llm-artifact",
-          "path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Terminal Server Client/Cache/Cache0000.bin",
-          "supported": true,
-          "details": {
-            "parser": "local-llm-inventory",
-            "parser_version": "generic-documents-v4",
-            "source_path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Terminal Server Client/Cache/Cache0000.bin",
-            "source_hashes": {
-              "md5": "da7f6376c1c3652e03ce7c57aed2cda0",
-              "sha1": "bcc3ba4de1061cee51cf426f8d832c6519ca611c",
-              "sha256": "be45a509d05e772aa8200d8a922c64a197020bb5ccf6d52913ebf11c27f78e7f"
-            },
-            "product_hint": "Local LLM model file",
-            "artifact_role": "model-file",
-            "model_name_hint": "Cache0000",
-            "source_size": 16,
-            "modified_at": "2024-03-05T06:07:12+00:00",
-            "coverage_status": "local-llm-file-inventory",
-            "validation_required": true,
-            "commercial_grade_ready": false,
-            "commercial_grade_blockers": [
-              "application-version-and-schema-not-verified",
-              "prompt-history-db-parser-not-complete",
-              "model-download-provenance-not-validated"
-            ],
-            "risk_flags": [
-              "local-ai-artifact",
-              "local-model-file"
-            ]
-          }
-        }
-      ]
+      "artifacts": []
     },
     {
       "name": "android-apk-artifacts",
@@ -137,10 +76,15 @@
             "parser_version": "synthetic-media-deepfake-lens-v1",
             "coverage_status": "provider-unavailable",
             "reportability": "inventory-only",
+            "status": "skipped",
+            "collection_status": "skipped",
             "scan_status": "skipped-optional-dependency",
-            "reason": "deepfake_lens python module is not importable in this environment",
+            "skip_reason": "선택 의존성 deepfake_lens 모듈을 가져오지 못해 합성 미디어 선별을 건너뛰었습니다 (ImportError: deepfake_lens (원인 미상)).",
+            "reason": "선택 의존성 deepfake_lens 모듈을 가져오지 못해 합성 미디어 선별을 건너뛰었습니다 (ImportError: deepfake_lens (원인 미상)).",
+            "import_error": "ImportError: deepfake_lens (원인 미상)",
+            "unscanned_candidate_count": 0,
             "deepfake_lens_cli_path": "<TOOL_PATH>",
-            "install_hint": "Install the deepfake-lens toolkit (pip install deepfake-lens or a checkout on PYTHONPATH) to enable synthetic-media screening.",
+            "install_hint": "합성 미디어 선별을 쓰려면 deepfake-lens 도구를 설치하세요 (pip install deepfake-lens 또는 PYTHONPATH에 체크아웃 추가).",
             "score_semantics": "prioritization-score-not-truth-label",
             "validation_required": false
           }
@@ -174,6 +118,184 @@
       "target_platform": "windows",
       "supported": true,
       "artifacts": [
+        {
+          "provider": "windows-browser-artifacts",
+          "artifact_type": "browser-download",
+          "path": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History",
+          "supported": true,
+          "details": {
+            "parser": "browser-profile-rows-v1",
+            "parser_version": "windows-browser-v9",
+            "coverage_status": "parsed",
+            "user": "alice",
+            "browser": "chrome",
+            "profile": "Default",
+            "timestamp": "2026-04-08T16:01:00+00:00",
+            "timestamp_kind": "download-started",
+            "timestamp_timezone": "UTC",
+            "source_path": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History",
+            "source_table": "downloads",
+            "source_row_id": 1,
+            "source_url": "https://download.example.com/report.zip",
+            "target_path": "C:\\Users\\alice\\Downloads\\report.zip",
+            "tab_url": "https://portal.example.com/downloads",
+            "total_bytes": 4096,
+            "state": 1,
+            "started_at": "2026-04-08T16:01:00+00:00",
+            "ended_at": "2026-04-08T16:02:00+00:00",
+            "current_path": "C:\\Users\\alice\\Downloads\\report.zip",
+            "received_bytes": 0,
+            "state_name": "COMPLETE",
+            "danger_type": null,
+            "danger_type_name": "",
+            "interrupt_reason": null,
+            "referrer": "",
+            "tab_referrer_url": "",
+            "site_url": "",
+            "url_chain": [
+              "https://download.example.com/report.zip"
+            ],
+            "mime_type": "",
+            "original_mime_type": "",
+            "opened": null,
+            "last_accessed_at": null,
+            "guid": "",
+            "by_extension_id": "",
+            "by_extension_name": "",
+            "http_method": "",
+            "server_last_modified": ""
+          }
+        },
+        {
+          "provider": "windows-browser-artifacts",
+          "artifact_type": "browser-download",
+          "path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Edge/User Data/Profile 1/History",
+          "supported": true,
+          "details": {
+            "parser": "browser-profile-rows-v1",
+            "parser_version": "windows-browser-v9",
+            "coverage_status": "parsed",
+            "user": "alice",
+            "browser": "edge",
+            "profile": "Profile 1",
+            "timestamp": "2026-04-07T09:10:00+00:00",
+            "timestamp_kind": "download-started",
+            "timestamp_timezone": "UTC",
+            "source_path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Edge/User Data/Profile 1/History",
+            "source_table": "downloads",
+            "source_row_id": 1,
+            "source_url": "https://contoso.example/recent",
+            "target_path": "C:\\Users\\alice\\Downloads\\briefing.pdf",
+            "tab_url": "https://contoso.example/recent",
+            "total_bytes": 8192,
+            "state": 1,
+            "started_at": "2026-04-07T09:10:00+00:00",
+            "ended_at": "2026-04-07T09:11:00+00:00",
+            "current_path": "C:\\Users\\alice\\Downloads\\briefing.pdf",
+            "received_bytes": 0,
+            "state_name": "COMPLETE",
+            "danger_type": null,
+            "danger_type_name": "",
+            "interrupt_reason": null,
+            "referrer": "",
+            "tab_referrer_url": "",
+            "site_url": "",
+            "url_chain": [],
+            "mime_type": "",
+            "original_mime_type": "",
+            "opened": null,
+            "last_accessed_at": null,
+            "guid": "",
+            "by_extension_id": "",
+            "by_extension_name": "",
+            "http_method": "",
+            "server_last_modified": ""
+          }
+        },
+        {
+          "provider": "windows-browser-artifacts",
+          "artifact_type": "browser-history",
+          "path": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History",
+          "supported": true,
+          "details": {
+            "parser": "browser-profile-rows-v1",
+            "parser_version": "windows-browser-v9",
+            "coverage_status": "parsed",
+            "user": "alice",
+            "browser": "chrome",
+            "profile": "Default",
+            "timestamp": "2026-04-08T16:05:00+00:00",
+            "timestamp_kind": "last-visited",
+            "timestamp_timezone": "UTC",
+            "source_path": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History",
+            "source_table": "urls",
+            "source_row_id": 2,
+            "row_kind": "url",
+            "url": "https://download.example.com/report.zip",
+            "title": "Evidence Download",
+            "domain": "download.example.com",
+            "visit_count": 2,
+            "typed_count": 0,
+            "hidden": false,
+            "last_visit_time_raw": 13420137900000000
+          }
+        },
+        {
+          "provider": "windows-browser-artifacts",
+          "artifact_type": "browser-history",
+          "path": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History",
+          "supported": true,
+          "details": {
+            "parser": "browser-profile-rows-v1",
+            "parser_version": "windows-browser-v9",
+            "coverage_status": "parsed",
+            "user": "alice",
+            "browser": "chrome",
+            "profile": "Default",
+            "timestamp": "2026-04-09T10:30:00+00:00",
+            "timestamp_kind": "last-visited",
+            "timestamp_timezone": "UTC",
+            "source_path": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History",
+            "source_table": "urls",
+            "source_row_id": 1,
+            "row_kind": "url",
+            "url": "https://example.com/case",
+            "title": "Case Portal",
+            "domain": "example.com",
+            "visit_count": 4,
+            "typed_count": 0,
+            "hidden": false,
+            "last_visit_time_raw": 13420204200000000
+          }
+        },
+        {
+          "provider": "windows-browser-artifacts",
+          "artifact_type": "browser-history",
+          "path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Edge/User Data/Profile 1/History",
+          "supported": true,
+          "details": {
+            "parser": "browser-profile-rows-v1",
+            "parser_version": "windows-browser-v9",
+            "coverage_status": "parsed",
+            "user": "alice",
+            "browser": "edge",
+            "profile": "Profile 1",
+            "timestamp": "2026-04-07T09:15:00+00:00",
+            "timestamp_kind": "last-visited",
+            "timestamp_timezone": "UTC",
+            "source_path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Edge/User Data/Profile 1/History",
+            "source_table": "urls",
+            "source_row_id": 1,
+            "row_kind": "url",
+            "url": "https://contoso.example/recent",
+            "title": "Recent Activity",
+            "domain": "contoso.example",
+            "visit_count": 7,
+            "typed_count": 0,
+            "hidden": false,
+            "last_visit_time_raw": 13420026900000000
+          }
+        },
         {
           "provider": "windows-browser-artifacts",
           "artifact_type": "browser-history",
@@ -582,7 +704,8 @@
                 ],
                 "transition_metadata_count": 0,
                 "timestamp_source_count": 1,
-                "bounded_to_max_rows": false
+                "bounded_to_max_rows": false,
+                "unified_timeline_truncated": false
               },
               "integrity": {
                 "sorted_descending": true,
@@ -1212,6 +1335,33 @@
         },
         {
           "provider": "windows-browser-artifacts",
+          "artifact_type": "browser-history",
+          "path": "<ROOT>/Users/alice/AppData/Roaming/Mozilla/Firefox/Profiles/default-release/places.sqlite",
+          "supported": true,
+          "details": {
+            "parser": "browser-profile-rows-v1",
+            "parser_version": "windows-browser-v9",
+            "coverage_status": "parsed",
+            "user": "alice",
+            "browser": "firefox",
+            "profile": "default-release",
+            "timestamp": "2026-04-06T08:00:00+00:00",
+            "timestamp_kind": "last-visited",
+            "timestamp_timezone": "UTC",
+            "source_path": "<ROOT>/Users/alice/AppData/Roaming/Mozilla/Firefox/Profiles/default-release/places.sqlite",
+            "source_table": "moz_places",
+            "source_row_id": 1,
+            "row_kind": "url",
+            "url": "https://support.mozilla.org/kb/download-firefox",
+            "title": "Firefox Support",
+            "domain": "support.mozilla.org",
+            "visit_count": 3,
+            "typed_count": 0,
+            "hidden": false
+          }
+        },
+        {
+          "provider": "windows-browser-artifacts",
           "artifact_type": "browser-history-downloads",
           "path": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History",
           "supported": true,
@@ -1313,7 +1463,10 @@
                   "hash_scope": "individual-source-files; database hash excludes WAL",
                   "wal_included": false,
                   "stability_check": "before-after fingerprints and copy hashes; not atomic live acquisition",
-                  "shm_policy": "rebuilt only in private working directory"
+                  "shm_policy": "rebuilt only in private working directory",
+                  "journal_status": "absent",
+                  "journal_reason": "",
+                  "journal_policy": "hot only when magic d9d505f920a163d7 and page records present; otherwise ignored, never copied"
                 }
               },
               {
@@ -1363,7 +1516,10 @@
                   "hash_scope": "individual-source-files; database hash excludes WAL",
                   "wal_included": false,
                   "stability_check": "before-after fingerprints and copy hashes; not atomic live acquisition",
-                  "shm_policy": "rebuilt only in private working directory"
+                  "shm_policy": "rebuilt only in private working directory",
+                  "journal_status": "absent",
+                  "journal_reason": "",
+                  "journal_policy": "hot only when magic d9d505f920a163d7 and page records present; otherwise ignored, never copied"
                 }
               }
             ],
@@ -1378,6 +1534,27 @@
                 "state": 1,
                 "started_at": "2026-04-08T16:01:00+00:00",
                 "ended_at": "2026-04-08T16:02:00+00:00",
+                "current_path": "C:\\Users\\alice\\Downloads\\report.zip",
+                "received_bytes": 0,
+                "state_name": "COMPLETE",
+                "danger_type": null,
+                "danger_type_name": "",
+                "interrupt_reason": null,
+                "referrer": "",
+                "tab_referrer_url": "",
+                "site_url": "",
+                "url_chain": [
+                  "https://download.example.com/report.zip"
+                ],
+                "mime_type": "",
+                "original_mime_type": "",
+                "opened": null,
+                "last_accessed_at": null,
+                "guid": "",
+                "by_extension_id": "",
+                "by_extension_name": "",
+                "http_method": "",
+                "server_last_modified": "",
                 "sqlite_snapshot": {
                   "profile_version": "sqlite-working-snapshot-v1",
                   "source_path": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History",
@@ -1413,7 +1590,10 @@
                   "hash_scope": "individual-source-files; database hash excludes WAL",
                   "wal_included": false,
                   "stability_check": "before-after fingerprints and copy hashes; not atomic live acquisition",
-                  "shm_policy": "rebuilt only in private working directory"
+                  "shm_policy": "rebuilt only in private working directory",
+                  "journal_status": "absent",
+                  "journal_reason": "",
+                  "journal_policy": "hot only when magic d9d505f920a163d7 and page records present; otherwise ignored, never copied"
                 }
               }
             ],
@@ -1877,7 +2057,8 @@
                 ],
                 "transition_metadata_count": 0,
                 "timestamp_source_count": 3,
-                "bounded_to_max_rows": false
+                "bounded_to_max_rows": false,
+                "unified_timeline_truncated": false
               },
               "integrity": {
                 "sorted_descending": true,
@@ -2604,7 +2785,10 @@
                   "hash_scope": "individual-source-files; database hash excludes WAL",
                   "wal_included": false,
                   "stability_check": "before-after fingerprints and copy hashes; not atomic live acquisition",
-                  "shm_policy": "rebuilt only in private working directory"
+                  "shm_policy": "rebuilt only in private working directory",
+                  "journal_status": "absent",
+                  "journal_reason": "",
+                  "journal_policy": "hot only when magic d9d505f920a163d7 and page records present; otherwise ignored, never copied"
                 }
               }
             ],
@@ -2619,6 +2803,25 @@
                 "state": 1,
                 "started_at": "2026-04-07T09:10:00+00:00",
                 "ended_at": "2026-04-07T09:11:00+00:00",
+                "current_path": "C:\\Users\\alice\\Downloads\\briefing.pdf",
+                "received_bytes": 0,
+                "state_name": "COMPLETE",
+                "danger_type": null,
+                "danger_type_name": "",
+                "interrupt_reason": null,
+                "referrer": "",
+                "tab_referrer_url": "",
+                "site_url": "",
+                "url_chain": [],
+                "mime_type": "",
+                "original_mime_type": "",
+                "opened": null,
+                "last_accessed_at": null,
+                "guid": "",
+                "by_extension_id": "",
+                "by_extension_name": "",
+                "http_method": "",
+                "server_last_modified": "",
                 "sqlite_snapshot": {
                   "profile_version": "sqlite-working-snapshot-v1",
                   "source_path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Edge/User Data/Profile 1/History",
@@ -2654,7 +2857,10 @@
                   "hash_scope": "individual-source-files; database hash excludes WAL",
                   "wal_included": false,
                   "stability_check": "before-after fingerprints and copy hashes; not atomic live acquisition",
-                  "shm_policy": "rebuilt only in private working directory"
+                  "shm_policy": "rebuilt only in private working directory",
+                  "journal_status": "absent",
+                  "journal_reason": "",
+                  "journal_policy": "hot only when magic d9d505f920a163d7 and page records present; otherwise ignored, never copied"
                 }
               }
             ],
@@ -3061,7 +3267,8 @@
                 ],
                 "transition_metadata_count": 0,
                 "timestamp_source_count": 2,
-                "bounded_to_max_rows": false
+                "bounded_to_max_rows": false,
+                "unified_timeline_truncated": false
               },
               "integrity": {
                 "sorted_descending": true,
@@ -3687,6 +3894,37 @@
               "report_guidance": "Use browser rows as activity and storage review pivots. Final URL/download/storage conclusions require source citation, trusted parser diff, and scope-controlled handling for sensitive stores."
             }
           }
+        },
+        {
+          "provider": "windows-browser-artifacts",
+          "artifact_type": "browser-visit",
+          "path": "<ROOT>/Users/alice/AppData/Roaming/Mozilla/Firefox/Profiles/default-release/places.sqlite",
+          "supported": true,
+          "details": {
+            "parser": "browser-profile-rows-v1",
+            "parser_version": "windows-browser-v9",
+            "coverage_status": "parsed",
+            "user": "alice",
+            "browser": "firefox",
+            "profile": "default-release",
+            "timestamp": "2026-04-06T08:00:00+00:00",
+            "timestamp_kind": "visited",
+            "timestamp_timezone": "UTC",
+            "source_path": "<ROOT>/Users/alice/AppData/Roaming/Mozilla/Firefox/Profiles/default-release/places.sqlite",
+            "source_table": "moz_historyvisits",
+            "source_row_id": 1,
+            "url": "https://support.mozilla.org/kb/download-firefox",
+            "title": "Firefox Support",
+            "url_id": 1,
+            "domain": "support.mozilla.org",
+            "from_visit": 0,
+            "from_url": "",
+            "transition": 1,
+            "transition_core": "LINK",
+            "transition_qualifiers": [],
+            "visit_duration_micros": null,
+            "url_resolved": true
+          }
         }
       ]
     },
@@ -3705,10 +3943,12 @@
             "parser": "windows-recent-files",
             "parser_version": "windows-recent-files-v8",
             "user": "alice",
+            "location": "recent",
+            "profile_template": false,
             "entry_name": "5f7b5f1e01b83767.automaticDestinations-ms",
             "entry_hint": "5f7b5f1e01b83767",
             "size": 324,
-            "modified_at": "2024-03-05T06:08:09+00:00",
+            "source_file_mtime": "2024-03-05T06:08:09+00:00",
             "source_hashes": {
               "sha256": "ae143e19a1ddda24e8396b307d423f857ba63cbfcf31cbb4537c1e36d0c22eee"
             },
@@ -3726,6 +3966,7 @@
             "ole_parse_status": "not-ole",
             "ole_stream_count": 0,
             "ole_streams": [],
+            "ole_streams_truncated": false,
             "embedded_paths": [
               "C:\\Users\\alice\\Documents\\Case Notes.docx",
               "C:\\Users\\alice\\Documents\\Case Notes.docx\u0018C:\\Users\\alice\\Documents"
@@ -3754,11 +3995,19 @@
                 ],
                 "has_tracker_data": true,
                 "extra_data_block_count": 1,
+                "target_file_size": 4096,
+                "volume_serial_number": "",
+                "drive_type_name": "",
+                "volume_label": "",
+                "net_name": "",
+                "tracker_machine_id": "ALICE-PC",
                 "stream_name": "container-scan",
                 "stream_path": "",
                 "stream_sha256": "ae143e19a1ddda24e8396b307d423f857ba63cbfcf31cbb4537c1e36d0c22eee"
               }
             ],
+            "destinations_truncated": false,
+            "destinations_total": 1,
             "jumplist_evidence": {
               "container": {
                 "application_id_hash": "5f7b5f1e01b83767",
@@ -4328,10 +4577,12 @@
             "parser": "windows-recent-files",
             "parser_version": "windows-recent-files-v8",
             "user": "alice",
+            "location": "recent",
+            "profile_template": false,
             "entry_name": "9b9cdc69c1c24e2b.customDestinations-ms",
             "entry_hint": "9b9cdc69c1c24e2b",
             "size": 322,
-            "modified_at": "2024-03-05T06:09:10+00:00",
+            "source_file_mtime": "2024-03-05T06:09:10+00:00",
             "source_hashes": {
               "sha256": "c04f2f402446ea24335c08475374b0167bc59f82017cb8c64ef9cf95f2eb382d"
             },
@@ -4349,6 +4600,7 @@
             "ole_parse_status": "not-ole",
             "ole_stream_count": 0,
             "ole_streams": [],
+            "ole_streams_truncated": false,
             "embedded_paths": [
               "C:\\Users\\alice\\Downloads\\installer.exe",
               "C:\\Users\\alice\\Downloads\\installer.exe\u0018C:\\Users\\alice\\Documents"
@@ -4377,11 +4629,19 @@
                 ],
                 "has_tracker_data": true,
                 "extra_data_block_count": 1,
+                "target_file_size": 4096,
+                "volume_serial_number": "",
+                "drive_type_name": "",
+                "volume_label": "",
+                "net_name": "",
+                "tracker_machine_id": "ALICE-PC",
                 "stream_name": "container-scan",
                 "stream_path": "",
                 "stream_sha256": "c04f2f402446ea24335c08475374b0167bc59f82017cb8c64ef9cf95f2eb382d"
               }
             ],
+            "destinations_truncated": false,
+            "destinations_total": 1,
             "jumplist_evidence": {
               "container": {
                 "application_id_hash": "9b9cdc69c1c24e2b",
@@ -4944,6 +5204,90 @@
         },
         {
           "provider": "windows-recent-files",
+          "artifact_type": "jumplist-entry",
+          "path": "<ROOT>/Users/alice/AppData/Roaming/Microsoft/Windows/Recent/AutomaticDestinations/5f7b5f1e01b83767.automaticDestinations-ms",
+          "supported": true,
+          "details": {
+            "parser": "windows-recent-files",
+            "parser_version": "windows-recent-files-v8",
+            "artifact_type": "jumplist-entry",
+            "user": "alice",
+            "location": "recent",
+            "jumplist_kind": "automatic",
+            "application_id_hash": "5f7b5f1e01b83767",
+            "source_path": "<ROOT>/Users/alice/AppData/Roaming/Microsoft/Windows/Recent/AutomaticDestinations/5f7b5f1e01b83767.automaticDestinations-ms",
+            "source_hashes": {
+              "sha256": "ae143e19a1ddda24e8396b307d423f857ba63cbfcf31cbb4537c1e36d0c22eee"
+            },
+            "source_index": 0,
+            "coverage_status": "embedded-lnk-stream",
+            "reportability": "triage",
+            "destlist_entry_present": false,
+            "target_path": "C:\\Users\\alice\\Documents\\Case Notes.docx",
+            "target_created_at": "2024-03-05T06:08:09+00:00",
+            "target_accessed_at": "2024-03-05T06:08:09+00:00",
+            "target_modified_at": "2024-03-05T06:08:09+00:00",
+            "target_file_size": 4096,
+            "working_dir": "C:\\Users\\alice\\Documents",
+            "command_line_arguments": "",
+            "volume_serial_number": "",
+            "drive_type_name": "",
+            "volume_label": "",
+            "net_name": "",
+            "tracker_machine_id": "ALICE-PC",
+            "has_tracker_data": true,
+            "lnk_stream_name": "container-scan",
+            "lnk_stream_sha256": "ae143e19a1ddda24e8396b307d423f857ba63cbfcf31cbb4537c1e36d0c22eee",
+            "lnk_offset": 14,
+            "timestamp": "",
+            "timestamp_source": "none-lnk-target-times-are-target-file-metadata",
+            "timestamp_kind": ""
+          }
+        },
+        {
+          "provider": "windows-recent-files",
+          "artifact_type": "jumplist-entry",
+          "path": "<ROOT>/Users/alice/AppData/Roaming/Microsoft/Windows/Recent/CustomDestinations/9b9cdc69c1c24e2b.customDestinations-ms",
+          "supported": true,
+          "details": {
+            "parser": "windows-recent-files",
+            "parser_version": "windows-recent-files-v8",
+            "artifact_type": "jumplist-entry",
+            "user": "alice",
+            "location": "recent",
+            "jumplist_kind": "custom",
+            "application_id_hash": "9b9cdc69c1c24e2b",
+            "source_path": "<ROOT>/Users/alice/AppData/Roaming/Microsoft/Windows/Recent/CustomDestinations/9b9cdc69c1c24e2b.customDestinations-ms",
+            "source_hashes": {
+              "sha256": "c04f2f402446ea24335c08475374b0167bc59f82017cb8c64ef9cf95f2eb382d"
+            },
+            "source_index": 0,
+            "coverage_status": "embedded-lnk-stream",
+            "reportability": "triage",
+            "destlist_entry_present": false,
+            "target_path": "C:\\Users\\alice\\Downloads\\installer.exe",
+            "target_created_at": "2024-03-05T06:09:10+00:00",
+            "target_accessed_at": "2024-03-05T06:09:10+00:00",
+            "target_modified_at": "2024-03-05T06:09:10+00:00",
+            "target_file_size": 4096,
+            "working_dir": "C:\\Users\\alice\\Documents",
+            "command_line_arguments": "",
+            "volume_serial_number": "",
+            "drive_type_name": "",
+            "volume_label": "",
+            "net_name": "",
+            "tracker_machine_id": "ALICE-PC",
+            "has_tracker_data": true,
+            "lnk_stream_name": "container-scan",
+            "lnk_stream_sha256": "c04f2f402446ea24335c08475374b0167bc59f82017cb8c64ef9cf95f2eb382d",
+            "lnk_offset": 16,
+            "timestamp": "",
+            "timestamp_source": "none-lnk-target-times-are-target-file-metadata",
+            "timestamp_kind": ""
+          }
+        },
+        {
+          "provider": "windows-recent-files",
           "artifact_type": "recent-shortcut",
           "path": "<ROOT>/Users/alice/AppData/Roaming/Microsoft/Windows/Recent/Case Notes.lnk",
           "supported": true,
@@ -4951,10 +5295,12 @@
             "parser": "windows-recent-files",
             "parser_version": "windows-recent-files-v8",
             "user": "alice",
+            "location": "recent",
+            "profile_template": false,
             "entry_name": "Case Notes.lnk",
             "entry_hint": "Case Notes",
             "size": 310,
-            "modified_at": "2024-03-05T06:07:08+00:00",
+            "source_file_mtime": "2024-03-05T06:07:08+00:00",
             "source_hashes": {
               "sha256": "9acc17da47c5d23d5d4c6307982fe7726fa5714d1fb26f5ae429d06b0a463f8d"
             },
@@ -4978,6 +5324,19 @@
             "show_command": 1,
             "hot_key": 0,
             "target_path": "C:\\Users\\alice\\Documents\\Case Notes.docx",
+            "target_path_source": "string-data:relative-path",
+            "volume_serial_number": "",
+            "drive_type": "",
+            "drive_type_name": "",
+            "volume_label": "",
+            "local_base_path": "",
+            "common_path_suffix": "",
+            "net_name": "",
+            "device_name": "",
+            "tracker_machine_id": "ALICE-PC",
+            "tracker_droid_file_mac_address": "",
+            "known_folder_ids": [],
+            "environment_target": "",
             "embedded_paths": [
               "C:\\Users\\alice\\Documents\\Case Notes.docx",
               "C:\\Users\\alice\\Documents\\Case Notes.docx\u0018C:\\Users\\alice\\Documents"
@@ -5007,6 +5366,10 @@
                   "droid_file_identifier": "87654321-09ba-dcfe-1032-547698badcfe",
                   "birth_droid_volume_identifier": "89abcdef-4567-0123-1032-547698badcfe",
                   "birth_droid_file_identifier": "0df0ad0b-1234-5678-aabb-ccddeeff0011",
+                  "droid_file_mac_address": "",
+                  "droid_file_timestamp": "",
+                  "birth_droid_file_mac_address": "",
+                  "birth_droid_file_timestamp": "",
                   "validation_status": "candidate-requires-known-answer-corpus"
                 }
               }
@@ -5018,6 +5381,10 @@
               "droid_file_identifier": "87654321-09ba-dcfe-1032-547698badcfe",
               "birth_droid_volume_identifier": "89abcdef-4567-0123-1032-547698badcfe",
               "birth_droid_file_identifier": "0df0ad0b-1234-5678-aabb-ccddeeff0011",
+              "droid_file_mac_address": "",
+              "droid_file_timestamp": "",
+              "birth_droid_file_mac_address": "",
+              "birth_droid_file_timestamp": "",
               "validation_status": "candidate-requires-known-answer-corpus"
             },
             "property_store_blocks": [],
@@ -5800,7 +6167,10 @@
               ],
               "manifest_sha256": "<DYNAMIC_MANIFEST_HASH>"
             },
-            "lnk_metadata_depth_manifest_hash": "<DYNAMIC_MANIFEST_HASH>"
+            "lnk_metadata_depth_manifest_hash": "<DYNAMIC_MANIFEST_HASH>",
+            "timestamp": "2024-03-05T06:07:08+00:00",
+            "timestamp_source": "target_accessed_at",
+            "timestamp_kind": "lnk-target-accessed"
           }
         }
       ]
@@ -5818,7 +6188,7 @@
           "supported": true,
           "details": {
             "parser": "windows-user-profile-inventory",
-            "parser_version": "windows-os-account-v10",
+            "parser_version": "windows-os-account-v11",
             "coverage_status": "parsed",
             "reportability": "triage",
             "source_path": "<ROOT>/Users/alice",
@@ -5847,7 +6217,7 @@
           "supported": false,
           "details": {
             "parser": "windows-srum-ese-inventory",
-            "parser_version": "windows-execution-v14",
+            "parser_version": "windows-execution-v15",
             "coverage_status": "ese-header-string-scan",
             "reportability": "inventory-only",
             "source_path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
@@ -6200,7 +6570,7 @@
             },
             "srum_report_citation_manifest": {
               "manifest_version": "srum-report-citation-manifest-v1",
-              "parser_version": "windows-execution-v14",
+              "parser_version": "windows-execution-v15",
               "artifact_type": "srum-database-file",
               "source": {
                 "path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
@@ -6935,7 +7305,7 @@
           "supported": true,
           "details": {
             "parser": "windows-srum-ese-string-pivot",
-            "parser_version": "windows-execution-v14",
+            "parser_version": "windows-execution-v15",
             "coverage_status": "native-ese-string-pivot",
             "reportability": "triage",
             "source_path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
@@ -7126,7 +7496,7 @@
             },
             "srum_report_citation_manifest": {
               "manifest_version": "srum-report-citation-manifest-v1",
-              "parser_version": "windows-execution-v14",
+              "parser_version": "windows-execution-v15",
               "artifact_type": "srum-database-pivot",
               "source": {
                 "path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
@@ -7675,7 +8045,7 @@
           "supported": true,
           "details": {
             "parser": "windows-srum-ese-string-pivot",
-            "parser_version": "windows-execution-v14",
+            "parser_version": "windows-execution-v15",
             "coverage_status": "native-ese-string-pivot",
             "reportability": "triage",
             "source_path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
@@ -7866,7 +8236,7 @@
             },
             "srum_report_citation_manifest": {
               "manifest_version": "srum-report-citation-manifest-v1",
-              "parser_version": "windows-execution-v14",
+              "parser_version": "windows-execution-v15",
               "artifact_type": "srum-database-pivot",
               "source": {
                 "path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
@@ -8415,7 +8785,7 @@
           "supported": true,
           "details": {
             "parser": "windows-srum-ese-string-pivot",
-            "parser_version": "windows-execution-v14",
+            "parser_version": "windows-execution-v15",
             "coverage_status": "native-ese-string-pivot",
             "reportability": "triage",
             "source_path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
@@ -8606,7 +8976,7 @@
             },
             "srum_report_citation_manifest": {
               "manifest_version": "srum-report-citation-manifest-v1",
-              "parser_version": "windows-execution-v14",
+              "parser_version": "windows-execution-v15",
               "artifact_type": "srum-database-pivot",
               "source": {
                 "path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
@@ -9152,7 +9522,7 @@
           "supported": true,
           "details": {
             "parser": "windows-srum-ese-string-pivot",
-            "parser_version": "windows-execution-v14",
+            "parser_version": "windows-execution-v15",
             "coverage_status": "native-ese-string-pivot",
             "reportability": "triage",
             "source_path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
@@ -9343,7 +9713,7 @@
             },
             "srum_report_citation_manifest": {
               "manifest_version": "srum-report-citation-manifest-v1",
-              "parser_version": "windows-execution-v14",
+              "parser_version": "windows-execution-v15",
               "artifact_type": "srum-database-pivot",
               "source": {
                 "path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
@@ -9889,7 +10259,7 @@
           "supported": true,
           "details": {
             "parser": "windows-srum-ese-row-candidate",
-            "parser_version": "windows-execution-v14",
+            "parser_version": "windows-execution-v15",
             "coverage_status": "native-ese-string-row-candidate",
             "reportability": "review",
             "source_path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
@@ -10141,7 +10511,7 @@
             },
             "srum_report_citation_manifest": {
               "manifest_version": "srum-report-citation-manifest-v1",
-              "parser_version": "windows-execution-v14",
+              "parser_version": "windows-execution-v15",
               "artifact_type": "srum-row-candidate",
               "source": {
                 "path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
@@ -10761,7 +11131,7 @@
           "supported": true,
           "details": {
             "parser": "windows-srum-ese-table-candidate",
-            "parser_version": "windows-execution-v14",
+            "parser_version": "windows-execution-v15",
             "coverage_status": "native-ese-table-string-candidate",
             "reportability": "triage",
             "source_path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
@@ -10950,7 +11320,7 @@
             },
             "srum_report_citation_manifest": {
               "manifest_version": "srum-report-citation-manifest-v1",
-              "parser_version": "windows-execution-v14",
+              "parser_version": "windows-execution-v15",
               "artifact_type": "srum-table-candidate",
               "source": {
                 "path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
@@ -11473,7 +11843,7 @@
           "supported": true,
           "details": {
             "parser": "windows-srum-ese-table-candidate",
-            "parser_version": "windows-execution-v14",
+            "parser_version": "windows-execution-v15",
             "coverage_status": "native-ese-table-string-candidate",
             "reportability": "triage",
             "source_path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
@@ -11653,7 +12023,7 @@
             },
             "srum_report_citation_manifest": {
               "manifest_version": "srum-report-citation-manifest-v1",
-              "parser_version": "windows-execution-v14",
+              "parser_version": "windows-execution-v15",
               "artifact_type": "srum-table-candidate",
               "source": {
                 "path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
@@ -12175,7 +12545,7 @@
           "supported": true,
           "details": {
             "parser": "windows-srum-ese-table-candidate",
-            "parser_version": "windows-execution-v14",
+            "parser_version": "windows-execution-v15",
             "coverage_status": "native-ese-table-string-candidate",
             "reportability": "triage",
             "source_path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
@@ -12357,7 +12727,7 @@
             },
             "srum_report_citation_manifest": {
               "manifest_version": "srum-report-citation-manifest-v1",
-              "parser_version": "windows-execution-v14",
+              "parser_version": "windows-execution-v15",
               "artifact_type": "srum-table-candidate",
               "source": {
                 "path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
@@ -12879,7 +13249,7 @@
           "supported": true,
           "details": {
             "parser": "windows-execution-summary",
-            "parser_version": "windows-execution-v14",
+            "parser_version": "windows-execution-v15",
             "coverage_status": "mapped",
             "reportability": "triage",
             "source_path": "<ROOT>",
@@ -13312,80 +13682,6 @@
               "trusted-ads-parser-or-extraction-log-diff-required"
             ]
           }
-        },
-        {
-          "provider": "windows-filesystem",
-          "artifact_type": "file-signature-mismatch",
-          "path": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History",
-          "supported": true,
-          "details": {
-            "parser": "windows-file-signature-mismatch",
-            "parser_version": "windows-filesystem-v9",
-            "coverage_status": "bounded-magic-header-check",
-            "reportability": "triage",
-            "source_path": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History",
-            "source_format": "filesystem-file",
-            "source_hashes": {
-              "sha256": "779f16740b6777f0df5007d78f4f412772a50aaa4d746ccee92293b94510aa6c"
-            },
-            "source_size": 16384,
-            "modified_at": "2024-03-05T06:00:00+00:00",
-            "actual_extension": "",
-            "detected_signature_kind": "sqlite",
-            "signature_hex": "53514c69746520666f726d6174203300",
-            "expected_extensions": [
-              ".db",
-              ".sqlite",
-              ".sqlite3"
-            ],
-            "risk_flags": [
-              "signature-extension-mismatch"
-            ],
-            "validation_required": true,
-            "validation_guidance": "Magic-header mismatch is a triage lead. Validate with a full file-type parser and user/action timeline before reporting concealment intent.",
-            "commercial_grade_ready": false,
-            "commercial_grade_blockers": [
-              "full-file-type-parser-validation-required",
-              "false-positive-extension-policy-required"
-            ]
-          }
-        },
-        {
-          "provider": "windows-filesystem",
-          "artifact_type": "file-signature-mismatch",
-          "path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Edge/User Data/Profile 1/History",
-          "supported": true,
-          "details": {
-            "parser": "windows-file-signature-mismatch",
-            "parser_version": "windows-filesystem-v9",
-            "coverage_status": "bounded-magic-header-check",
-            "reportability": "triage",
-            "source_path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Edge/User Data/Profile 1/History",
-            "source_format": "filesystem-file",
-            "source_hashes": {
-              "sha256": "da647054cafa048475860030861135cdd6222712c1befd0f4e851677e6533639"
-            },
-            "source_size": 12288,
-            "modified_at": "2024-03-05T06:00:00+00:00",
-            "actual_extension": "",
-            "detected_signature_kind": "sqlite",
-            "signature_hex": "53514c69746520666f726d6174203300",
-            "expected_extensions": [
-              ".db",
-              ".sqlite",
-              ".sqlite3"
-            ],
-            "risk_flags": [
-              "signature-extension-mismatch"
-            ],
-            "validation_required": true,
-            "validation_guidance": "Magic-header mismatch is a triage lead. Validate with a full file-type parser and user/action timeline before reporting concealment intent.",
-            "commercial_grade_ready": false,
-            "commercial_grade_blockers": [
-              "full-file-type-parser-validation-required",
-              "false-positive-extension-policy-required"
-            ]
-          }
         }
       ]
     },
@@ -13472,6 +13768,10 @@
             "local_file": "",
             "event_created_at": "2024-04-01T12:34:56.000000+00:00",
             "timestamp": "2024-04-01T12:34:56.000000+00:00",
+            "timestamp_status": "ok",
+            "evtx_record_state": "",
+            "logon_id": "",
+            "event_label_ko": "로그온 성공",
             "rule": {
               "title": "Remote interactive logon",
               "id": "RT-EVTX-RDP-LOGON",
@@ -13535,6 +13835,7 @@
               "family:authentication"
             ],
             "event_description": "Authentication success",
+            "event_label_ko": "로그온 성공",
             "event_semantics_profile": {
               "profile_version": "eventlog-analyst-semantics-v1",
               "event_id": "4624",
@@ -13688,10 +13989,12 @@
             "computer": "WIN-CASE01",
             "user_sid": "",
             "user_name": "alice",
+            "user_name_source": "TargetUserName",
             "subject_user_name": "",
             "target_user_name": "alice",
             "target_domain_name": "",
             "logon_type": "10",
+            "logon_id": "",
             "source_ip": "10.0.0.5",
             "source_port": "",
             "destination_ip": "",
@@ -13699,6 +14002,7 @@
             "destination_port": "",
             "service_name": "",
             "service_file_name": "",
+            "service_account_name": "",
             "process_id": "",
             "thread_id": "",
             "process_name": "",
@@ -13770,6 +14074,9 @@
               "<ROOT>/Windows/System32/winevt/Logs/Security.xml": "3280198506b93b1d8c90fed52b92c8740c1b0ebb493bbe0d86d40941bad6f906"
             },
             "session_key": "WIN-CASE01|alice|10.0.0.5|10",
+            "session_key_basis": "fallback-pivots",
+            "session_occurrence": 0,
+            "logon_id": "",
             "session_status": "open-or-not-observed",
             "user_name": "alice",
             "target_domain_name": "",
@@ -13802,8 +14109,9 @@
                 "source_index": 0
               }
             ],
+            "events_truncated": false,
             "timestamp": "2024-04-01T12:34:56.000000+00:00",
-            "timestamp_source": "first_correlated_logon_event",
+            "timestamp_source": "logon-event",
             "risk_flags": [
               "logon-session",
               "rdp-logon-session",
@@ -13814,6 +14122,7 @@
               "has_logon_event": true,
               "has_logoff_event": false,
               "has_logon_id_or_fallback_key": true,
+              "keyed_by_target_user_and_logon_id": false,
               "session_duration_available": false,
               "cross_artifact_correlation_available": false
             },
@@ -13926,6 +14235,10 @@
             "native_boundary_status_counts": [],
             "native_report_grade_status_counts": [],
             "native_chunk_integrity_counts": [],
+            "native_record_state_counts": [],
+            "timestamp_status_counts": [],
+            "timestamp_out_of_range_count": 0,
+            "slack_duplicate_row_count": 0,
             "native_capabilities": {
               "record_header": true,
               "file_header": true,
@@ -14015,7 +14328,9 @@
               "Binary EVTX rows include partial native record scans when recoverable; native_binxml_status_counts shows whether BinXML field decoding is complete.",
               "eventlog-record-candidate rows and evtx_recovery_context mark slack/deleted/corrupt candidates that require independent validation.",
               "eventlog-chunk rows expose native chunk bounds and checksum observations so recovery candidates can be reviewed against chunk slack/structure.",
-              "Use message_rendering.validation_required and external parser exports to separate built-in fallback messages from report-grade provider resource rendering."
+              "Use message_rendering.validation_required and external parser exports to separate built-in fallback messages from report-grade provider resource rendering.",
+              "first_event_at/last_event_at and record_sequence_gaps exclude out-of-range timestamps (before 1980 or later than collection time + 1 day) and slack/inactive-chunk recoveries; see timestamp_status_counts and native_record_state_counts.",
+              "시각 범위(1980년 이전 또는 수집 시각+1일 이후)를 벗어난 타임스탬프와 슬랙/비활성 청크 복구 레코드는 최초/최종 시각과 레코드 ID 간격 통계에서 제외했습니다."
             ]
           }
         }
@@ -14023,7 +14338,7 @@
     },
     {
       "name": "windows-registry",
-      "description": "Windows Registry .reg export artifacts",
+      "description": "Windows Registry hives (native full walk) and .reg exports",
       "target_platform": "windows",
       "supported": true,
       "artifacts": [
@@ -14034,7 +14349,7 @@
           "supported": true,
           "details": {
             "parser": "windows-registry-reg-export",
-            "parser_version": "registry-normalized-v13",
+            "parser_version": "registry-native-walk-v14",
             "coverage_status": "mapped",
             "reportability": "triage",
             "source_path": "<ROOT>/Users/alice/NTUSER-shellbags.reg",
@@ -14101,7 +14416,7 @@
           "supported": true,
           "details": {
             "parser": "windows-registry-reg-export",
-            "parser_version": "registry-normalized-v13",
+            "parser_version": "registry-native-walk-v14",
             "coverage_status": "mapped",
             "reportability": "triage",
             "source_path": "<ROOT>/Windows/System32/config/rdp.reg",
@@ -14166,7 +14481,7 @@
           "supported": true,
           "details": {
             "parser": "windows-registry-reg-export",
-            "parser_version": "registry-normalized-v13",
+            "parser_version": "registry-native-walk-v14",
             "coverage_status": "mapped",
             "reportability": "triage",
             "source_path": "<ROOT>/Windows/System32/config/software.reg",
@@ -14243,17 +14558,21 @@
           "supported": true,
           "details": {
             "parser": "windows-registry-summary",
-            "parser_version": "registry-normalized-v13",
+            "parser_version": "registry-native-walk-v14",
             "coverage_status": "summarized",
             "reportability": "triage",
             "source_path": "<ROOT>",
             "source_format": "summary",
             "record_count": 6,
             "key_count": 4,
+            "exported_key_count": 4,
+            "native_key_count": 0,
+            "native_value_count": 0,
             "hive_file_count": 0,
             "hive_string_row_count": 0,
             "hive_cell_row_count": 0,
             "key_tree_node_count": 0,
+            "key_tree_node_counts_by_hive": {},
             "deleted_cell_candidate_count": 0,
             "key_recovery_candidate_count": 0,
             "value_recovery_candidate_count": 0,
@@ -14307,6 +14626,11 @@
               "value_list_linking": true,
               "deleted_free_cell_candidate_labeling": true,
               "inline_value_preview": true,
+              "full_native_tree_walk": true,
+              "big_data_value_decode": true,
+              "key_comp_name_flag_decode": true,
+              "semantic_system_ntuser_software_plugins": true,
+              "transaction_log_newer_sequence_disclosure": true,
               "transaction_log_replay": false,
               "security_descriptor_decode": false,
               "full_binary_value_decode": false,
@@ -14388,6 +14712,25 @@
                 "parent_id_prefix": ""
               }
             ],
+            "computer_name": "",
+            "timezone": {},
+            "current_control_set": "",
+            "last_shutdown_at": "",
+            "os_version": {},
+            "hives": [],
+            "transaction_log_disclosures": [],
+            "summary_list_limit": 100,
+            "summary_list_totals": {
+              "hive_string_hits": 0,
+              "hive_cell_hits": 0,
+              "key_tree_nodes": 0,
+              "deleted_cell_candidates": 0,
+              "key_recovery_candidates": 0,
+              "value_recovery_candidates": 0,
+              "user_activity_entries": 2,
+              "suspicious_entries": 3
+            },
+            "cap_disclosure": "요약 목록(hive_string_hits·key_tree_nodes·deleted_cell_candidates·recovery·user_activity_entries·suspicious_entries)은 미리보기로 최대 100개만 담고 총계는 summary_list_totals에 기록합니다. persistence_entries·usb_devices·hives는 전수입니다. 하이브 키/값 해석에는 읽기·셀 상한이 없습니다.",
             "suspicious_entries": [
               {
                 "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
@@ -14422,7 +14765,8 @@
               }
             ],
             "summary_notes": [
-              "Registry hive rows use native regf header parsing, bounded string scanning, hbin-aware nk/vk cell walking when possible, best-effort key-tree rows, and separate deleted/free key/value recovery candidate rows; report-grade deleted-value testimony still requires validation with a dedicated hive parser.",
+              "Registry hives are walked natively from the root cell (nk/vk/lf/lh/li/ri/db, no read or cell cap); key paths use the logical mount (HKLM\\SYSTEM, HKU\\<SID>, HKU\\<SID>_Classes) and never repeat the root key name.",
+              "Free (deleted) nk/vk cells are listed as recovery candidates over the whole hive; transaction logs are detected and disclosed, never replayed.",
               "Run-key command hints are triage pivots, not proof that a program executed."
             ]
           }
@@ -14434,7 +14778,7 @@
           "supported": true,
           "details": {
             "parser": "windows-registry-reg-export",
-            "parser_version": "registry-normalized-v13",
+            "parser_version": "registry-native-walk-v14",
             "coverage_status": "mapped",
             "reportability": "triage",
             "source_path": "<ROOT>/Windows/System32/config/software.reg",
@@ -14504,7 +14848,7 @@
           "supported": true,
           "details": {
             "parser": "windows-registry-user-hive-activity",
-            "parser_version": "registry-normalized-v13",
+            "parser_version": "registry-native-walk-v14",
             "coverage_status": "mapped-reg-export",
             "reportability": "review",
             "source_path": "<ROOT>/Users/alice/NTUSER-shellbags.reg",
@@ -14763,7 +15107,7 @@
           "supported": true,
           "details": {
             "parser": "windows-registry-user-hive-activity",
-            "parser_version": "registry-normalized-v13",
+            "parser_version": "registry-native-walk-v14",
             "coverage_status": "mapped-reg-export",
             "reportability": "review",
             "source_path": "<ROOT>/Windows/System32/config/software.reg",
@@ -14999,9 +15343,9 @@
             "cache_parse_status": "image-signature-pivots",
             "thumbnail_candidate_count": 0,
             "thumbnail_candidates": [],
-            "modified_at": "2024-03-05T06:07:12+00:00",
-            "timestamp": "2024-03-05T06:07:12+00:00",
-            "timestamp_source": "rdp_cache_modified_at",
+            "source_file_mtime": "2024-03-05T06:07:12+00:00",
+            "timestamp": "",
+            "timestamp_source": "none-rdp-cache-modified-at-is-acquisition-copy-time",
             "note": "RDP cache file inventoried with bounded image signature pivots for remote-access thumbnail review; validate important screenshots with a dedicated RDP cache decoder."
           }
         },
@@ -15030,9 +15374,9 @@
               "username": "CORP\\alice",
               "gatewayhostname": "rd-gateway.example"
             },
-            "modified_at": "2024-03-05T06:07:11+00:00",
-            "timestamp": "2024-03-05T06:07:11+00:00",
-            "timestamp_source": "rdp_file_modified_at"
+            "source_file_mtime": "2024-03-05T06:07:11+00:00",
+            "timestamp": "",
+            "timestamp_source": "none-rdp-file-modified-at-is-acquisition-copy-time"
           }
         },
         {
@@ -24219,7 +24563,7 @@
           "supported": true,
           "details": {
             "parser": "windows-shellbags-reg-export",
-            "parser_version": "registry-normalized-v13",
+            "parser_version": "registry-native-walk-v14",
             "coverage_status": "mapped-reg-export",
             "reportability": "review",
             "source_path": "<ROOT>/Users/alice/NTUSER-shellbags.reg",
@@ -24478,7 +24822,7 @@
           "supported": true,
           "details": {
             "parser": "windows-shellbags-reg-export",
-            "parser_version": "registry-normalized-v13",
+            "parser_version": "registry-native-walk-v14",
             "coverage_status": "mapped",
             "reportability": "triage",
             "source_path": "<ROOT>/Users/alice/NTUSER-shellbags.reg",
@@ -24631,7 +24975,7 @@
                 "referenced_file_name": "POWERSHELL.EXE",
                 "referenced_extension": ".exe",
                 "volume_device_path": "\\DEVICE\\HARDDISKVOLUME3",
-                "source": "bounded_utf16_path_string",
+                "source": "filename_string",
                 "confidence": "candidate"
               }
             ],
@@ -24741,14 +25085,49 @@
               "declared_sections_within_file": false,
               "full_file_metrics_decoded": false,
               "full_volume_table_decoded": false,
-              "commercial_validation_required": true
+              "commercial_validation_required": true,
+              "run_count_consistent_with_run_times": false
+            },
+            "run_count_offset": 208,
+            "run_count_layout_rule": "v30-metrics-offset-0x0-unrecognized-default-0xd0",
+            "run_count_cross_check": {
+              "nonzero_run_time_count": 2,
+              "run_time_slots": 8,
+              "selected_offset_hex": "0xd0",
+              "selected_value": 3,
+              "alternate_offset_hex": "0xc8",
+              "alternate_value": 0,
+              "consistent": false
+            },
+            "file_information_layout": "v30-unrecognized",
+            "last_run_filetimes": [
+              133564362110000000,
+              133562597500000000
+            ],
+            "run_time_1": "2024-04-01T09:10:11+00:00",
+            "run_time_2": "2024-03-30T08:09:10+00:00",
+            "header_executable_name_may_be_truncated": false,
+            "header_prefetch_hash": "00000000",
+            "referenced_path_source": "utf16-string-scan-fallback",
+            "file_metrics_count": 0,
+            "file_metrics_decoded_count": 0,
+            "volumes": [],
+            "volume_count": 0,
+            "volume_information_status": "not-declared",
+            "prefetch_decode_coverage": {
+              "file_information": "decoded",
+              "file_metrics": "not-decoded",
+              "filename_strings": "utf16-string-scan-fallback",
+              "volume_information": "not-declared",
+              "trace_chains": "not-decoded"
             },
             "prefetch_hash": "12345678",
             "entry_name": "POWERSHELL.EXE-12345678.pf",
             "size": 512,
-            "modified_at": "2024-03-05T06:13:14+00:00",
-            "timestamp": "2024-03-05T06:13:14+00:00",
-            "timestamp_source": "prefetch_file_modified_at",
+            "source_file_mtime": "2024-03-05T06:13:14+00:00",
+            "timestamp": "2024-04-01T09:10:11+00:00",
+            "timestamp_source": "prefetch_last_run_time",
+            "timestamp_kind": "run",
             "evidence_strength": "execution-indicator",
             "validation_required": true,
             "core_accuracy_gates": [
@@ -24814,9 +25193,9 @@
               "prefetch-trusted-parser-diff-required"
             ],
             "commercial_readiness_blockers": [
-              "Full file metrics array decoding and MFT file-reference extraction are not implemented.",
-              "Volume information is surfaced as bounded string/path candidates, not decoded from the authoritative volume table.",
-              "Trace chains, directory strings, and file information sections are not fully version-validated.",
+              "Full file metrics array decoding (load-order paths, MFT references) is native but not yet diffed against a PECmd known-answer corpus.",
+              "Volume information (device path, serial, creation time, directory strings) is decoded natively but not yet corpus-validated.",
+              "Trace chains are not decoded; file information layouts are validated only for the observed v17/23/26/30/31 variants.",
               "Known-answer corpus validation across malformed, compressed, and cross-version Prefetch files is incomplete."
             ],
             "prefetch_validation_matrix": [
@@ -25105,7 +25484,8 @@
                 "compressed_prefetch_detected",
                 "declared_sections_within_file",
                 "full_file_metrics_decoded",
-                "full_volume_table_decoded"
+                "full_volume_table_decoded",
+                "run_count_consistent_with_run_times"
               ],
               "report_grade_ready": false,
               "commercial_blockers": [
@@ -25211,7 +25591,7 @@
                     "referenced_file_name": "POWERSHELL.EXE",
                     "referenced_extension": ".exe",
                     "volume_device_path": "\\DEVICE\\HARDDISKVOLUME3",
-                    "source": "bounded_utf16_path_string",
+                    "source": "filename_string",
                     "confidence": "candidate"
                   }
                 ],
@@ -25348,9 +25728,9 @@
                 "diff run counts, timestamps, paths, and volume data against PECmd or trusted known-answer corpus",
                 "correlate execution claim with Amcache, BAM/DAM, SRUM, EVTX, MFT, or USN evidence"
               ],
-              "manifest_sha256": "ac631d3056540160a4be2469d9ecd5709b3b262aaa41eee7b0fe5d64a84fc05e"
+              "manifest_sha256": "<DYNAMIC_MANIFEST_HASH>"
             },
-            "prefetch_execution_depth_manifest_hash": "ac631d3056540160a4be2469d9ecd5709b3b262aaa41eee7b0fe5d64a84fc05e"
+            "prefetch_execution_depth_manifest_hash": "<DYNAMIC_MANIFEST_HASH>"
           }
         },
         {
@@ -25380,8 +25760,9 @@
             "volume_device_path": "\\DEVICE\\HARDDISKVOLUME3",
             "run_count": 3,
             "last_run_at": "2024-04-01T09:10:11+00:00",
-            "timestamp": "2024-04-01T09:10:11+00:00",
-            "timestamp_source": "prefetch_last_run_at",
+            "timestamp": "",
+            "timestamp_source": "none-reference-row-see-prefetch-file-run-times",
+            "load_order_index": 0,
             "evidence_strength": "prefetch-file-reference",
             "validation_required": true,
             "core_accuracy_gates": [
@@ -25447,9 +25828,9 @@
               "prefetch-trusted-parser-diff-required"
             ],
             "commercial_readiness_blockers": [
-              "Full file metrics array decoding and MFT file-reference extraction are not implemented.",
-              "Volume information is surfaced as bounded string/path candidates, not decoded from the authoritative volume table.",
-              "Trace chains, directory strings, and file information sections are not fully version-validated.",
+              "Full file metrics array decoding (load-order paths, MFT references) is native but not yet diffed against a PECmd known-answer corpus.",
+              "Volume information (device path, serial, creation time, directory strings) is decoded natively but not yet corpus-validated.",
+              "Trace chains are not decoded; file information layouts are validated only for the observed v17/23/26/30/31 variants.",
               "Known-answer corpus validation across malformed, compressed, and cross-version Prefetch files is incomplete."
             ],
             "prefetch_validation_matrix": [
@@ -25761,9 +26142,9 @@
               },
               "section_bounds_status": "",
               "reportability_decision": "report-only-with-execution-correlation",
-              "manifest_sha256": "072eb8a1ad28cb08fc0fe2e4f9e5d53cfc630343e746633e43d402a6511f133c"
+              "manifest_sha256": "<DYNAMIC_MANIFEST_HASH>"
             },
-            "prefetch_execution_depth_manifest_hash": "072eb8a1ad28cb08fc0fe2e4f9e5d53cfc630343e746633e43d402a6511f133c"
+            "prefetch_execution_depth_manifest_hash": "<DYNAMIC_MANIFEST_HASH>"
           }
         }
       ]
@@ -27697,8 +28078,20 @@
             "fault_module_path": "C:\\Users\\alice\\AppData\\Roaming\\evil.dll",
             "exception_code": "c0000005",
             "event_time": "2026-04-26T01:04:05+00:00",
+            "event_time_raw": "134216390450000000",
+            "event_time_encoding": "filetime-utc",
             "timestamp": "2026-04-26T01:04:05+00:00",
             "timestamp_source": "wer_event_time",
+            "timestamp_kind": "event",
+            "upload_time": "",
+            "event_type_name": "APPCRASH",
+            "friendly_event_name": "",
+            "signature_application_name": "powershell.exe",
+            "application_version": "",
+            "fault_module_version": "",
+            "exception_offset": "",
+            "package_full_name": "",
+            "loaded_module_count": 0,
             "bucket_id": "123456789",
             "cab_id": "",
             "problem_signature": [
@@ -27959,7 +28352,7 @@
               "Sig[6].Name": "Exception Code",
               "Sig[6].Value": "c0000005"
             },
-            "modified_at": "2024-03-05T06:17:18+00:00",
+            "source_file_mtime": "2024-03-05T06:17:18+00:00",
             "source_hashes": {
               "sha256": "83260608bb0ab69fd0500bc550a6d55a26881c92c36dd12f3b35cd13f2c01b36"
             },

@@ -137,7 +137,10 @@ class RapidTriageRuleEngineTests(unittest.TestCase):
             self.assertPayloadHasIoc(artifacts_payload, "https://download.example/tools/installer.exe")
 
             self.assertPayloadHasRule(timeline_payload, "browser-download-ioc")
-            self.assertPayloadHasIoc(timeline_payload, "malicious.example")
+            # Parser-quality r1: document keyword hits are timeline events only at
+            # a filesystem time; this folder input has copy times only, so the
+            # credential document (malicious.example) is not on the timeline.
+            self.assertPayloadHasIoc(timeline_payload, "download.example")
 
             self.assertPayloadHasRule(summary_payload, "downloads-exe-sha256")
             self.assertPayloadHasRule(summary_payload, "credential-url-hit")

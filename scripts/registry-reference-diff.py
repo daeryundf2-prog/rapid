@@ -67,17 +67,17 @@ def _canon_ts(value: object) -> str:
 
 
 def _canon_rapid_key(path: str) -> str:
-    # Rapid emits "<HIVE_HINT>\<root key name>\A\B" — strip both the hive
-    # hint prefix and the root key's own name so paths are root-relative.
+    # Rapid (parser-quality r1) emits the mount plus the key path without a
+    # root key name: "HKLM\<HIVE>\A\B", "HKU\<SID>\A\B" or "HKCU\A\B".
+    # Strip only the mount so paths are root-relative like regipy's.
     parts = [p for p in str(path or "").replace("/", "\\").split("\\") if p]
     if not parts:
         return ""
-    if parts[0].upper() in {"HKEY_CURRENT_USER", "HKCU"}:
+    head = parts[0].upper()
+    if head in {"HKEY_CURRENT_USER", "HKCU"}:
         parts = parts[1:]
-    elif parts[0].upper() in {"HKEY_LOCAL_MACHINE", "HKLM"} and len(parts) > 1:
+    elif head in {"HKEY_LOCAL_MACHINE", "HKLM", "HKEY_USERS", "HKU"}:
         parts = parts[2:]
-    if parts:
-        parts = parts[1:]  # root key name
     return "\\".join(parts).lower()
 
 

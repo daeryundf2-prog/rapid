@@ -84,7 +84,8 @@ class SyntheticMediaProviderTests(unittest.TestCase):
             with patch.dict(sys.modules, {"deepfake_lens": None}):
                 payload = run_artifact_collection(root, kind="synthetic-media")
 
-            self.assertEqual(payload["summary"]["collection_status"], "completed")
+            # Parser-quality r1: an all-skipped provider reports "skipped".
+            self.assertEqual(payload["summary"]["collection_status"], "skipped")
             self.assertFalse(payload["provider"]["supported"])
             self.assertEqual(payload["summary"]["artifact_count"], 1)
 

@@ -1,28 +1,35 @@
 {
   "candidates": [
     {
+      "attributes": "<HOST_ATTRIBUTES>",
+      "attributes_origin": "<HOST_ATTRIBUTES_ORIGIN>",
       "categories": [
         "archives"
       ],
       "extension": ".zip",
       "file_signature": {
-        "detected": "zip-container",
+        "detected": "zip-ooxml",
         "expected": [
-          "zip-container"
+          "zip-ooxml"
         ],
         "mismatch": false,
         "risk_flags": [],
         "status": "signature-matches-extension"
       },
+      "fs_accessed_at": null,
+      "fs_changed_at": null,
+      "fs_created_at": null,
+      "fs_modified_at": null,
+      "is_deleted": null,
       "known_good_status": "not-configured",
       "modified_at": "2024-02-03T04:05:07+00:00",
+      "modified_at_origin": "acquisition-copy",
       "modified_epoch": 1706933107.0,
       "name": "bundle.zip",
       "path": "<ROOT>/bundle.zip",
       "reasons": {
         "archives": [
-          "extension:.zip",
-          "name:bundle"
+          "extension:.zip"
         ]
       },
       "recovery": {
@@ -44,9 +51,16 @@
         "subtype": null,
         "validation_status": "unverified"
       },
-      "size": 4
+      "relative_path": "bundle.zip",
+      "size": 4,
+      "source_file_atime": "2024-02-03T04:05:07+00:00",
+      "source_file_ctime": "<HOST_CTIME>",
+      "source_file_mtime": "2024-02-03T04:05:07+00:00",
+      "time_origin": "acquisition-copy"
     },
     {
+      "attributes": "<HOST_ATTRIBUTES>",
+      "attributes_origin": "<HOST_ATTRIBUTES_ORIGIN>",
       "categories": [
         "documents"
       ],
@@ -58,15 +72,20 @@
         "risk_flags": [],
         "status": "not-applicable"
       },
+      "fs_accessed_at": null,
+      "fs_changed_at": null,
+      "fs_created_at": null,
+      "fs_modified_at": null,
+      "is_deleted": null,
       "known_good_status": "not-configured",
       "modified_at": "2024-02-03T04:05:06+00:00",
+      "modified_at_origin": "acquisition-copy",
       "modified_epoch": 1706933106.0,
       "name": "notes.txt",
       "path": "<ROOT>/notes.txt",
       "reasons": {
         "documents": [
-          "extension:.txt",
-          "name:note"
+          "extension:.txt"
         ]
       },
       "recovery": {
@@ -88,9 +107,16 @@
         "subtype": null,
         "validation_status": "unverified"
       },
-      "size": 14
+      "relative_path": "notes.txt",
+      "size": 14,
+      "source_file_atime": "2024-02-03T04:05:06+00:00",
+      "source_file_ctime": "<HOST_CTIME>",
+      "source_file_mtime": "2024-02-03T04:05:06+00:00",
+      "time_origin": "acquisition-copy"
     },
     {
+      "attributes": "<HOST_ATTRIBUTES>",
+      "attributes_origin": "<HOST_ATTRIBUTES_ORIGIN>",
       "categories": [
         "databases"
       ],
@@ -106,16 +132,20 @@
         ],
         "status": "unrecognized-header-for-known-extension"
       },
+      "fs_accessed_at": null,
+      "fs_changed_at": null,
+      "fs_created_at": null,
+      "fs_modified_at": null,
+      "is_deleted": null,
       "known_good_status": "not-configured",
       "modified_at": "2024-02-03T04:05:08+00:00",
+      "modified_at_origin": "acquisition-copy",
       "modified_epoch": 1706933108.0,
       "name": "records.sqlite",
       "path": "<ROOT>/records.sqlite",
       "reasons": {
         "databases": [
-          "extension:.sqlite",
-          "name:sqlite",
-          "path:sqlite"
+          "extension:.sqlite"
         ]
       },
       "recovery": {
@@ -137,9 +167,16 @@
         "subtype": null,
         "validation_status": "unverified"
       },
-      "size": 15
+      "relative_path": "records.sqlite",
+      "size": 15,
+      "source_file_atime": "2024-02-03T04:05:08+00:00",
+      "source_file_ctime": "<HOST_CTIME>",
+      "source_file_mtime": "2024-02-03T04:05:08+00:00",
+      "time_origin": "acquisition-copy"
     },
     {
+      "attributes": "<HOST_ATTRIBUTES>",
+      "attributes_origin": "<HOST_ATTRIBUTES_ORIGIN>",
       "categories": [
         "executables"
       ],
@@ -153,8 +190,14 @@
         "risk_flags": [],
         "status": "signature-matches-extension"
       },
+      "fs_accessed_at": null,
+      "fs_changed_at": null,
+      "fs_created_at": null,
+      "fs_modified_at": null,
+      "is_deleted": null,
       "known_good_status": "not-configured",
       "modified_at": "2024-02-03T04:05:09+00:00",
+      "modified_at_origin": "acquisition-copy",
       "modified_epoch": 1706933109.0,
       "name": "tool.exe",
       "path": "<ROOT>/tool.exe",
@@ -182,7 +225,12 @@
         "subtype": null,
         "validation_status": "unverified"
       },
-      "size": 4
+      "relative_path": "tool.exe",
+      "size": 4,
+      "source_file_atime": "2024-02-03T04:05:09+00:00",
+      "source_file_ctime": "<HOST_CTIME>",
+      "source_file_mtime": "2024-02-03T04:05:09+00:00",
+      "time_origin": "acquisition-copy"
     }
   ],
   "command": "files",
@@ -496,6 +544,25 @@
       "trusted_tool": null
     }
   },
+  "file_exclusions": {
+    "category_not_selected": {},
+    "limit_reached": false,
+    "reasons": {},
+    "selected_categories": [
+      "documents",
+      "archives",
+      "databases",
+      "executables",
+      "emails",
+      "disk-images",
+      "mobile-images",
+      "memory-dumps",
+      "vehicle-images",
+      "images",
+      "other"
+    ],
+    "total": 0
+  },
   "file_signature_profile": {
     "capability_id": "file-system-signature-mismatch",
     "checked_count": 3,
@@ -505,21 +572,24 @@
     ],
     "known_extensions": [
       ".7z",
-      ".apk",
-      ".com",
-      ".db",
+      ".cpl",
       ".dll",
       ".doc",
       ".docx",
+      ".evtx",
       ".exe",
       ".gif",
-      ".gz",
-      ".gzip",
-      ".jar",
+      ".hwp",
+      ".hwpx",
+      ".jpe",
       ".jpeg",
       ".jpg",
+      ".lnk",
       ".msg",
+      ".msi",
+      ".ocx",
       ".pdf",
+      ".pf",
       ".png",
       ".ppt",
       ".pptx",
@@ -528,7 +598,6 @@
       ".sqlite",
       ".sqlite3",
       ".sys",
-      ".tgz",
       ".xls",
       ".xlsx",
       ".zip"
@@ -548,9 +617,10 @@
       "scope": "bounded first-bytes magic signature check during file inventory"
     },
     "profile": "file-signature-mismatch-v1",
-    "profile_hash": "cc6c59e69a121ccb23e80ec24ce90197146e19a231e9915ed739749dd5ea1fe2",
+    "profile_hash": "bbda849287276aa096da39456e9134a6a99bdf3c3c24e618659354f076375120",
     "profile_version": "file-signature-mismatch-v1",
     "read_error_count": 0,
+    "signature_table": "rapidtriage.artifacts.windows.filesystem",
     "unrecognized_known_extension_count": 1
   },
   "filters": {
@@ -564,7 +634,8 @@
       "mobile-images",
       "memory-dumps",
       "vehicle-images",
-      "images"
+      "images",
+      "other"
     ],
     "extensions": [],
     "hide_known_good": false,
@@ -1133,6 +1204,9 @@
   "root": "<ROOT>",
   "signature_mismatch_candidates": [],
   "summary": {
+    "attribute_counts": {
+      "archive": 4
+    },
     "candidate_count": 4,
     "candidate_kind_counts": {
       "existing": 4
@@ -1147,6 +1221,7 @@
       "images": 0,
       "memory-dumps": 0,
       "mobile-images": 0,
+      "other": 0,
       "vehicle-images": 0
     },
     "commercial_gap_ids": [
@@ -1155,10 +1230,36 @@
       "visible-denisting",
       "visible-file-signature-mismatch"
     ],
+    "deleted_flag_counts": {
+      "allocated": 0,
+      "deleted": 0,
+      "unknown": 4
+    },
     "duplicate_file_count": 0,
     "duplicate_group_count": 0,
+    "duplicate_groups_truncated": false,
+    "duplicate_hash_profile": {
+      "group_count_before_cap": 0,
+      "hash_error_count": 0,
+      "hashed_file_count": 2,
+      "max_files_to_hash": 0,
+      "max_hash_bytes": 52428800,
+      "skipped_cap_file_count": 0,
+      "skipped_large_file_count": 0,
+      "truncated": false
+    },
+    "excluded_category_counts": {},
+    "excluded_file_count": 0,
+    "exclusion_reason_counts": {},
     "fuzzy_text_duplicate_file_count": 0,
     "fuzzy_text_duplicate_group_count": 0,
+    "fuzzy_text_duplicate_profile": {
+      "compared_text_file_count": 0,
+      "eligible_text_file_count": 1,
+      "max_files": 200,
+      "truncated": false
+    },
+    "fuzzy_text_duplicates_truncated": false,
     "known_good_feed_count": 0,
     "known_good_hash_count": 0,
     "known_good_hash_skipped_large_count": 0,
@@ -1166,12 +1267,30 @@
     "known_good_nsrl_rds_feed_count": 0,
     "known_good_nsrl_rds_row_count": 0,
     "known_good_suppressed_count": 0,
-    "newest_modified_at": "2024-02-03T04:05:09+00:00",
-    "oldest_modified_at": "2024-02-03T04:05:06+00:00",
+    "limit_reached": false,
+    "mismatch_candidates_truncated": false,
+    "newest_modified_at": null,
+    "oldest_modified_at": null,
     "raw_candidate_count": 4,
     "scanned_file_count": 4,
     "signature_checked_count": 3,
     "signature_mismatch_count": 0,
-    "signature_unrecognized_known_extension_count": 1
+    "signature_unrecognized_known_extension_count": 1,
+    "source_file_mtime_range": {
+      "newest": "2024-02-03T04:05:09+00:00",
+      "oldest": "2024-02-03T04:05:06+00:00"
+    },
+    "time_origin": "acquisition-copy"
+  },
+  "time_provenance": {
+    "fs_time_candidate_count": 0,
+    "input_kind": "folder",
+    "modified_at_origin_counts": {
+      "acquisition-copy": 4
+    },
+    "note": "증거가 추출 사본(폴더 입력)이므로 호스트 파일 시각은 취득·복사 시각입니다. source_file_mtime/ctime/atime에만 기록하고 타임라인 이벤트로 쓰지 않습니다. 원본 파일시스템 시각은 fs_* 필드(이미지 목록·NTFS 메타 분석이 제공할 때)에만 있습니다.",
+    "time_origin": "acquisition-copy",
+    "timeline_uses": "fs_* only",
+    "timezone": "UTC"
   }
 }
