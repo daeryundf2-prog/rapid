@@ -17,22 +17,13 @@ from .common import build_forensic_review, iter_windows_user_homes
 from .ese import ESE_SCAN_READ_SIZE, build_ese_string_pivots, probe_ese_database
 from .os_account import decode_reg_export
 from .registry import (
-    HIVE_BIN_HEADER_SIZE,
-    MAX_HIVE_CELL_SIZE,
-    align_registry_cell_size,
-    iter_registry_hbin_descriptors,
-    parse_registry_cell_candidate,
-    read_i32,
-    read_u16,
+    filetime_to_iso_ticks,
     read_u32,
-    registry_relative_to_file_offset,
-    registry_subkey_offsets_for_key,
-    registry_value_data_preview,
-    registry_value_offsets_for_key,
 )
 from .srum_ese import analyze_srudb_native, iter_srudb_schema_rows
 
-PARSER_VERSION = "windows-execution-v14"
+PARSER_VERSION = "windows-execution-v15"
+STRING_CANDIDATE_LIMIT = 100
 REGISTRY_EXPORT_EXT = ".reg"
 SRUM_IMPORT_SUFFIXES = {".csv", ".json", ".jsonl", ".ndjson"}
 AMCACHE_HIVE_NAME = "AMCACHE.HVE"
@@ -40,19 +31,14 @@ SYSTEM_HIVE_NAME = "SYSTEM"
 MAX_NATIVE_AMCACHE_SCAN_BYTES = 64 * 1024 * 1024
 MAX_NATIVE_SRUM_SCHEMA_ROWS = 20_000
 AMCACHE_INVENTORY_SECTIONS = ("InventoryApplicationFile", "File", "InventoryApplication", "Programs")
-MAX_AMCACHE_SCHEMA_CELLS = 400_000
-MAX_AMCACHE_SCHEMA_ROWS = 20_000
 AMCACHE_ROW_CLUSTER_WINDOW_BYTES = 4096
 MAX_NATIVE_SHIMCACHE_SCAN_BYTES = 64 * 1024 * 1024
 SHIMCACHE_ROW_CLUSTER_WINDOW_BYTES = 4096
 SHIMCACHE_WIN8_STATS_SIZE = 0x80
 SHIMCACHE_WIN10_STATS_SIZE = 0x30
 SHIMCACHE_ENTRY_META_LEN = 12
-SHIMCACHE_MAX_VALUE_BYTES = 32 * 1024 * 1024
 SHIMCACHE_MAX_ENTRIES = 8192
 NTUSER_HIVE_NAME = "NTUSER.DAT"
-MAX_NATIVE_USERASSIST_SCAN_BYTES = 64 * 1024 * 1024
-USERASSIST_MAX_VALUE_BYTES = 64 * 1024
 USERASSIST_GUID_PATH_MAPPINGS = {
     "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}": r"%SYSTEM32%",
     "{6D809377-6AF0-444B-8957-A3773F02200E}": r"%PROGRAMFILES%",
@@ -63,7 +49,7 @@ USERASSIST_GUID_PATH_MAPPINGS = {
     "{A77F5D77-2E2B-44C3-A6A2-ABA601054A51}": r"%AppData%\Roaming\Microsoft\Windows\Start Menu\Programs",
     "{D65231B0-B2F1-4857-A4CE-A8E7C6EA7D27}": r"%WINDIR%\SysWOW64",
 }
-USERASSIST_METADATA_NAMES = {"UEME_CTLSESSION"}
+USERASSIST_METADATA_NAMES = {"UEME_CTLSESSION", "UEME_CTLCUACOUNT:CTOR"}
 MAX_NATIVE_BAM_DAM_SCAN_BYTES = 64 * 1024 * 1024
 BAM_DAM_ROW_CLUSTER_WINDOW_BYTES = 4096
 POWERSHELL_HISTORY = ("AppData", "Roaming", "Microsoft", "Windows", "PowerShell", "PSReadLine", "ConsoleHost_history.txt")
@@ -714,8 +700,9 @@ def build_native_shimcache_records(path: Path) -> Iterable[ArtifactRecord]:
         return
 
     source_hashes = file_hashes(path)
-    schema_rows, schema_decode_profile = decode_shimcache_schema(blob)
-    occurrences = list(iter_registry_like_string_occurrences(blob))
+    schema_rows, schema_decode_profile = decode_shimcache_schema(path)
+    # String pivots are a fallback only: skipped when the structural decode produced rows.
+    occurrences = [] if schema_rows else list(iter_registry_like_string_occurrences(blob))
     appcompat_markers = [
         item
         for item in occurrences
@@ -738,7 +725,7 @@ def build_native_shimcache_records(path: Path) -> Iterable[ArtifactRecord]:
         "native_binary_layout_decoding_available": False,
         "correlation_targets": execution_correlation_targets("shimcache-entry"),
     }
-    for index, cluster in enumerate(clusters[:100]):
+    for index, cluster in enumerate([] if schema_rows else clusters[:STRING_CANDIDATE_LIMIT]):
         executable_path = str(cluster.get("executable_path") or "")
         timestamp_candidates = [
             str(value) for value in cluster.get("timestamp_candidates", []) if str(value)
@@ -817,11 +804,18 @@ def build_native_shimcache_records(path: Path) -> Iterable[ArtifactRecord]:
         )
         yield ArtifactRecord(
             provider=WindowsExecutionProvider.name,
-            artifact_type="shimcache-entry",
+            artifact_type="shimcache-string-candidate",
             path=str(path.resolve()),
             supported=True,
             details={
                 "parser": "windows-shimcache-native-system-hive-scan",
+                "severity": "none",
+                "label": "문자열 후보 — 증거 아님",
+                "evidence_class": "string-candidate-not-evidence",
+                "string_candidate_total": len(clusters),
+                "string_candidate_limit": STRING_CANDIDATE_LIMIT,
+                "string_candidate_truncated": len(clusters) > STRING_CANDIDATE_LIMIT,
+                "string_candidate_note": "구조 디코드 행이 없을 때만 내보내는 문자열 피벗입니다. 타임라인·실행 증거로 쓰지 않습니다.",
                 "parser_version": PARSER_VERSION,
                 "coverage_status": "native-system-hive-string-pivot",
                 "reportability": "review",
@@ -834,7 +828,7 @@ def build_native_shimcache_records(path: Path) -> Iterable[ArtifactRecord]:
                 "source_encoding": cluster.get("source_encoding", ""),
                 "cache_order": cluster.get("cache_order", index),
                 "executable_path": executable_path,
-                "timestamp": timestamp,
+                "timestamp_candidate": timestamp,
                 "timestamp_source": "native-shimcache-nearby-string-timestamp-candidate" if timestamp else "not_available_native_string_pivot",
                 "nearby_metadata_candidates": cluster.get("nearby_metadata_candidates", []),
                 "shimcache_evidence": shimcache_entry_evidence(
@@ -906,38 +900,6 @@ def build_native_shimcache_records(path: Path) -> Iterable[ArtifactRecord]:
                 "raw_preview": executable_path,
             },
         )
-
-
-def registry_value_data_bytes(blob: bytes, value_cell: Mapping[str, object], *, max_size: int) -> bytes:
-    value_size = int(value_cell.get("value_data_size") or 0)
-    if value_size <= 0 or value_size > max_size:
-        return b""
-    if value_cell.get("value_data_inline"):
-        return int(value_cell.get("value_data_relative_offset") or 0).to_bytes(4, "little")[:value_size]
-    data_offset = int(value_cell.get("value_data_offset") or 0)
-    data_start = data_offset + 4
-    if data_offset <= 0 or data_start >= len(blob):
-        return b""
-    if blob[data_start : data_start + 2] == b"db" and value_size > 0x3FD8:
-        segment_count = read_u16(blob, data_start + 2)
-        list_offset = registry_relative_to_file_offset(read_u32(blob, data_start + 4)) + 4
-        if segment_count <= 0 or list_offset + 4 * segment_count > len(blob):
-            return b""
-        parts: list[bytes] = []
-        remaining = value_size
-        for index in range(segment_count):
-            segment_offset = registry_relative_to_file_offset(read_u32(blob, list_offset + 4 * index)) + 4
-            take = min(0x3FD8, remaining)
-            if segment_offset <= 4 or segment_offset + take > len(blob):
-                break
-            parts.append(blob[segment_offset : segment_offset + take])
-            remaining -= take
-            if remaining <= 0:
-                break
-        return b"".join(parts)
-    if data_start + value_size > len(blob):
-        return b""
-    return blob[data_start : data_start + value_size]
 
 
 def decode_shimcache_value_data(data: bytes) -> tuple[list[dict[str, object]], dict[str, object]]:
@@ -1020,58 +982,15 @@ def decode_shimcache_value_data(data: bytes) -> tuple[list[dict[str, object]], d
     return entries, profile
 
 
-def decode_shimcache_schema(blob: bytes) -> tuple[list[dict[str, object]], dict[str, object]]:
-    profile: dict[str, object] = {"decode_status": "no-cells", "values_seen": 0, "cell_count": 0}
-    if len(blob) < 4096 or not blob.startswith(b"regf"):
-        profile["decode_status"] = "not-regf"
-        return [], profile
-    cells = iter_amcache_hive_cells(blob)
-    profile["cell_count"] = len(cells)
-    if not cells:
-        return [], profile
-    rows: list[dict[str, object]] = []
-    for offset, node in cells.items():
-        if node.get("cell_kind") != "key-node" or str(node.get("name") or "").lower() != "appcompatcache":
-            continue
-        parent = cells.get(int(node.get("parent_cell_offset") or 0)) or {}
-        control_set = ""
-        if str(parent.get("name") or "").lower() == "session manager":
-            ancestor = parent
-            for _ in range(8):
-                ancestor = cells.get(int(ancestor.get("parent_cell_offset") or 0)) or {}
-                name = str(ancestor.get("name") or "")
-                if not name:
-                    break
-                if name.lower().startswith("controlset") or name.lower() in {"currentcontrolset", "clone"}:
-                    control_set = name
-                    break
-        for value_offset in registry_value_offsets_for_key(blob, node):
-            value_cell = cells.get(value_offset)
-            if value_cell is None or str(value_cell.get("name") or "").lower() != "appcompatcache":
-                continue
-            profile["values_seen"] += 1
-            data = registry_value_data_bytes(blob, value_cell, max_size=SHIMCACHE_MAX_VALUE_BYTES)
-            entries, value_profile = decode_shimcache_value_data(data)
-            profile[f"decode_{profile['values_seen']}"] = value_profile
-            for entry in entries:
-                rows.append(
-                    {
-                        "control_set": control_set,
-                        "key_cell_offset": offset,
-                        "value_cell_offset": value_offset,
-                        "value_format": value_profile.get("format", ""),
-                        "cache_order": entry.get("cache_order", 0),
-                        "entry_offset": entry.get("entry_offset", 0),
-                        "executable_path": entry.get("path", ""),
-                        "last_mod_date": entry.get("last_mod_date", ""),
-                        "exec_flag": entry.get("exec_flag", ""),
-                        "key_last_written_at": str(node.get("last_written_at") or ""),
-                    }
-                )
-    profile["decode_status"] = "decoded" if rows else "no-decodable-rows"
-    profile["schema_row_count"] = len(rows)
-    return rows, profile
-
+def decode_shimcache_schema(blob: object) -> tuple[list[dict[str, object]], dict[str, object]]:
+    hive = native_hive_from(blob)
+    if hive is None:
+        return [], {"decode_status": "not-regf"}
+    try:
+        return decode_shimcache_schema_native(hive)
+    finally:
+        if hive is not blob:
+            hive.close()  # type: ignore[attr-defined]
 
 def build_shimcache_schema_entry_record(
     path: Path,
@@ -1127,6 +1046,8 @@ def build_shimcache_schema_entry_record(
             "executable_path": executable_path,
             "timestamp": timestamp,
             "timestamp_source": "native-shimcache-entry-filetime" if timestamp else "not_present_in_entry",
+            "timestamp_label": "file_last_modified" if timestamp else "",
+            "timestamp_semantics": "ShimCache 항목의 파일 최종 수정 시각(실행 시각 아님)",
             "exec_flag": row.get("exec_flag", ""),
             "key_last_written_at": row.get("key_last_written_at", ""),
             "native_binary_layout_decoding_available": True,
@@ -1180,8 +1101,9 @@ def build_native_bam_dam_records(path: Path) -> Iterable[ArtifactRecord]:
         return
 
     source_hashes = file_hashes(path)
-    schema_rows, schema_decode_profile = decode_bam_dam_schema(blob)
-    occurrences = list(iter_registry_like_string_occurrences(blob))
+    schema_rows, schema_decode_profile = decode_bam_dam_schema(path)
+    # String pivots are a fallback only: skipped when the structural decode produced rows.
+    occurrences = [] if schema_rows else list(iter_registry_like_string_occurrences(blob))
     markers = [
         item
         for item in occurrences
@@ -1194,7 +1116,7 @@ def build_native_bam_dam_records(path: Path) -> Iterable[ArtifactRecord]:
     for index, schema_row in enumerate(schema_rows):
         yield build_bam_dam_schema_entry_record(path, source_hashes, schema_row, index)
 
-    for index, cluster in enumerate(clusters[:100]):
+    for index, cluster in enumerate([] if schema_rows else clusters[:STRING_CANDIDATE_LIMIT]):
         executable_path = str(cluster.get("executable_path") or "")
         timestamp_candidates = [
             str(value) for value in cluster.get("timestamp_candidates", []) if str(value)
@@ -1276,11 +1198,18 @@ def build_native_bam_dam_records(path: Path) -> Iterable[ArtifactRecord]:
         )
         yield ArtifactRecord(
             provider=WindowsExecutionProvider.name,
-            artifact_type="bam-entry",
+            artifact_type="bam-string-candidate",
             path=str(path.resolve()),
             supported=True,
             details={
                 "parser": "windows-bam-dam-native-system-hive-scan",
+                "severity": "none",
+                "label": "문자열 후보 — 증거 아님",
+                "evidence_class": "string-candidate-not-evidence",
+                "string_candidate_total": len(clusters),
+                "string_candidate_limit": STRING_CANDIDATE_LIMIT,
+                "string_candidate_truncated": len(clusters) > STRING_CANDIDATE_LIMIT,
+                "string_candidate_note": "구조 디코드 행이 없을 때만 내보내는 문자열 피벗입니다. 타임라인·실행 증거로 쓰지 않습니다.",
                 "parser_version": PARSER_VERSION,
                 "coverage_status": "native-system-hive-string-pivot",
                 "reportability": "review",
@@ -1294,7 +1223,7 @@ def build_native_bam_dam_records(path: Path) -> Iterable[ArtifactRecord]:
                 "executable_path": executable_path,
                 "device_path": executable_path if executable_path.lower().startswith("\\device\\") else "",
                 "user_sid": user_sid,
-                "timestamp": timestamp,
+                "timestamp_candidate": timestamp,
                 "timestamp_source": "native-bam-dam-nearby-string-timestamp-candidate" if timestamp else "not_available_native_string_pivot",
                 "nearby_metadata_candidates": cluster.get("nearby_metadata_candidates", []),
                 "bam_dam_evidence": bam_dam_entry_evidence(
@@ -1362,84 +1291,15 @@ def build_native_bam_dam_records(path: Path) -> Iterable[ArtifactRecord]:
         )
 
 
-def decode_bam_dam_schema(blob: bytes) -> tuple[list[dict[str, object]], dict[str, object]]:
-    profile: dict[str, object] = {"decode_status": "no-cells", "sid_keys_seen": 0, "cell_count": 0}
-    if len(blob) < 4096 or not blob.startswith(b"regf"):
-        profile["decode_status"] = "not-regf"
-        return [], profile
-    cells = iter_amcache_hive_cells(blob)
-    profile["cell_count"] = len(cells)
-    if not cells:
-        return [], profile
-
-    def _ancestor_names(node: Mapping[str, object]) -> list[str]:
-        names: list[str] = []
-        cursor = node
-        for _ in range(8):
-            cursor = cells.get(int(cursor.get("parent_cell_offset") or 0)) or {}
-            name = str(cursor.get("name") or "")
-            if not name:
-                break
-            names.append(name)
-        return names
-
-    rows: list[dict[str, object]] = []
-    for node in cells.values():
-        if node.get("cell_kind") != "key-node" or str(node.get("name") or "").lower() != "usersettings":
-            continue
-        ancestors = _ancestor_names(node)
-        lowered = [name.lower() for name in ancestors]
-        service = ""
-        if "bam" in lowered:
-            service = "bam"
-        elif "dam" in lowered:
-            service = "dam"
-        else:
-            continue
-        control_set = next((name for name in ancestors if name.lower().startswith("controlset")), "")
-        for sid_offset in registry_subkey_offsets_for_key(blob, node):
-            sid_key = cells.get(sid_offset)
-            if sid_key is None:
-                continue
-            sid = str(sid_key.get("name") or "")
-            if not sid.startswith("S-1-"):
-                continue
-            profile["sid_keys_seen"] += 1
-            sequence_number = ""
-            version = ""
-            for value_offset in registry_value_offsets_for_key(blob, sid_key):
-                value_cell = cells.get(value_offset)
-                if value_cell is None:
-                    continue
-                name = str(value_cell.get("name") or "")
-                lowered_name = name.lower()
-                data = registry_value_data_bytes(blob, value_cell, max_size=SHIMCACHE_MAX_VALUE_BYTES)
-                if lowered_name == "sequencenumber":
-                    sequence_number = str(int.from_bytes(data[:4], "little")) if len(data) >= 4 else ""
-                    continue
-                if lowered_name == "version":
-                    version = str(int.from_bytes(data[:4], "little")) if len(data) >= 4 else ""
-                    continue
-                timestamp = filetime_to_iso(int.from_bytes(data[:8], "little")) if len(data) >= 8 else ""
-                rows.append(
-                    {
-                        "service": service,
-                        "control_set": control_set,
-                        "user_sid": sid,
-                        "sid_key_cell_offset": sid_offset,
-                        "value_cell_offset": value_offset,
-                        "executable_path": name,
-                        "timestamp": timestamp,
-                        "sequence_number": sequence_number,
-                        "version": version,
-                        "key_last_written_at": str(sid_key.get("last_written_at") or ""),
-                        "value_data_size": int(value_cell.get("value_data_size") or 0),
-                    }
-                )
-    profile["decode_status"] = "decoded" if rows else "no-decodable-rows"
-    profile["schema_row_count"] = len(rows)
-    return rows, profile
-
+def decode_bam_dam_schema(blob: object) -> tuple[list[dict[str, object]], dict[str, object]]:
+    hive = native_hive_from(blob)
+    if hive is None:
+        return [], {"decode_status": "not-regf"}
+    try:
+        return decode_bam_dam_schema_native(hive)
+    finally:
+        if hive is not blob:
+            hive.close()  # type: ignore[attr-defined]
 
 def build_bam_dam_schema_entry_record(
     path: Path,
@@ -1498,6 +1358,7 @@ def build_bam_dam_schema_entry_record(
             "device_path": executable_path if executable_path.lower().startswith("\\device\\") else "",
             "timestamp": timestamp,
             "timestamp_source": "native-bam-dam-value-filetime" if timestamp else "not_present_in_value",
+            "timestamp_label": "last_execution" if timestamp else "",
             "sequence_number": row.get("sequence_number", ""),
             "version": row.get("version", ""),
             "key_last_written_at": row.get("key_last_written_at", ""),
@@ -1545,91 +1406,23 @@ def collect_native_userassist_ntuser_hives(root: Path) -> Iterable[ArtifactRecor
 
 
 def build_native_userassist_records(path: Path) -> Iterable[ArtifactRecord]:
-    try:
-        stat_result = path.stat()
-        with path.open("rb") as handle:
-            blob = handle.read(min(stat_result.st_size, MAX_NATIVE_USERASSIST_SCAN_BYTES))
-    except OSError:
+    if not path.is_file():
         return
     source_hashes = file_hashes(path)
-    rows, profile = decode_userassist_schema(blob)
+    rows, profile = decode_userassist_schema(path)
     for index, row in enumerate(rows):
         yield build_userassist_schema_entry_record(path, source_hashes, row, index)
 
 
-def decode_userassist_schema(blob: bytes) -> tuple[list[dict[str, object]], dict[str, object]]:
-    profile: dict[str, object] = {"decode_status": "no-cells", "count_keys_seen": 0, "cell_count": 0}
-    if len(blob) < 4096 or not blob.startswith(b"regf"):
-        profile["decode_status"] = "not-regf"
-        return [], profile
-    cells = iter_amcache_hive_cells(blob)
-    profile["cell_count"] = len(cells)
-    if not cells:
-        return [], profile
-
-    rows: list[dict[str, object]] = []
-    for offset, node in cells.items():
-        if node.get("cell_kind") != "key-node" or str(node.get("name") or "").lower() != "count":
-            continue
-        parent = cells.get(int(node.get("parent_cell_offset") or 0)) or {}
-        guid = str(parent.get("name") or "")
-        grandparent = cells.get(int(parent.get("parent_cell_offset") or 0)) or {}
-        if not (guid.startswith("{") and str(grandparent.get("name") or "").lower() == "userassist"):
-            continue
-        profile["count_keys_seen"] += 1
-        for value_offset in registry_value_offsets_for_key(blob, node):
-            value_cell = cells.get(value_offset)
-            if value_cell is None:
-                continue
-            raw_name = str(value_cell.get("name") or "")
-            decoded_name = decode_userassist_name(raw_name)
-            if decoded_name.upper() in USERASSIST_METADATA_NAMES:
-                continue
-            display_name = decoded_name
-            lowered_name = display_name.lower()
-            for guid_token, mapped in USERASSIST_GUID_PATH_MAPPINGS.items():
-                if guid_token.lower() in lowered_name:
-                    position = lowered_name.index(guid_token.lower())
-                    display_name = display_name[:position] + mapped + display_name[position + len(guid_token) :]
-                    break
-            data = registry_value_data_bytes(blob, value_cell, max_size=USERASSIST_MAX_VALUE_BYTES)
-            entry: dict[str, object] = {
-                "guid": guid,
-                "count_key_cell_offset": offset,
-                "value_cell_offset": value_offset,
-                "raw_value_name": raw_name,
-                "decoded_name": decoded_name,
-                "display_path": display_name,
-                "key_last_written_at": str(node.get("last_written_at") or ""),
-                "value_data_size": int(value_cell.get("value_data_size") or 0),
-            }
-            if len(data) == 72:
-                entry.update(
-                    {
-                        "layout": "win7",
-                        "session_id": int.from_bytes(data[0:4], "little"),
-                        "run_counter": int.from_bytes(data[4:8], "little"),
-                        "focus_count": int.from_bytes(data[8:12], "little"),
-                        "total_focus_time_ms": int.from_bytes(data[12:16], "little"),
-                        "timestamp": filetime_to_iso(int.from_bytes(data[60:68], "little")),
-                    }
-                )
-            elif len(data) == 16:
-                entry.update(
-                    {
-                        "layout": "winxp",
-                        "session_id": int.from_bytes(data[0:4], "little"),
-                        "run_counter": int.from_bytes(data[4:8], "little"),
-                        "timestamp": filetime_to_iso(int.from_bytes(data[8:16], "little")),
-                    }
-                )
-            else:
-                entry["layout"] = "unrecognized"
-            rows.append(entry)
-    profile["decode_status"] = "decoded" if rows else "no-decodable-rows"
-    profile["schema_row_count"] = len(rows)
-    return rows, profile
-
+def decode_userassist_schema(blob: object) -> tuple[list[dict[str, object]], dict[str, object]]:
+    hive = native_hive_from(blob)
+    if hive is None:
+        return [], {"decode_status": "not-regf"}
+    try:
+        return decode_userassist_schema_native(hive)
+    finally:
+        if hive is not blob:
+            hive.close()  # type: ignore[attr-defined]
 
 def build_userassist_schema_entry_record(
     path: Path,
@@ -1646,7 +1439,7 @@ def build_userassist_schema_entry_record(
         "has_run_counter": row.get("run_counter") is not None,
         "has_timestamp": bool(timestamp),
         "has_source_offset": bool(row.get("value_cell_offset")),
-        "layout_recognized": row.get("layout") in {"win7", "winxp"},
+        "layout_recognized": row.get("layout") in {"win7-plus", "winxp"},
         "requires_correlation": True,
         "requires_second_parser_validation": True,
         "native_binary_layout_decoding_available": True,
@@ -1681,12 +1474,16 @@ def build_userassist_schema_entry_record(
             "executable_path": executable_path,
             "display_path": display_path,
             "layout": row.get("layout", ""),
+            "layout_label": row.get("layout_label", ""),
+            "known_folder_guid": row.get("known_folder_guid", ""),
+            "known_folder_resolved": bool(row.get("known_folder_resolved")),
             "session_id": row.get("session_id", ""),
             "run_counter": row.get("run_counter", ""),
             "focus_count": row.get("focus_count", ""),
             "total_focus_time_ms": row.get("total_focus_time_ms", ""),
             "timestamp": timestamp,
             "timestamp_source": "native-userassist-value-filetime" if timestamp else "not_present_in_value",
+            "timestamp_label": "last_run" if timestamp else "",
             "key_last_written_at": row.get("key_last_written_at", ""),
             "value_data_size": row.get("value_data_size", 0),
             "native_binary_layout_decoding_available": True,
@@ -1718,92 +1515,15 @@ def build_userassist_schema_entry_record(
     )
 
 
-def iter_amcache_hive_cells(blob: bytes, *, max_cells: int = MAX_AMCACHE_SCHEMA_CELLS) -> dict[int, dict[str, object]]:
-    # hbin-walk nk/vk parse for schema decoding — deliberately not bounded by
-    # the record-emission MAX_HIVE_CELL_RECORDS cap.
-    cells: dict[int, dict[str, object]] = {}
-    for hbin in iter_registry_hbin_descriptors(blob):
-        hbin_offset = int(hbin.get("hbin_offset") or 0)
-        cursor = hbin_offset + HIVE_BIN_HEADER_SIZE
-        hbin_end = int(hbin.get("hbin_end_offset") or 0)
-        while cursor + 8 <= hbin_end and len(cells) < max_cells:
-            cell_size_raw = read_i32(blob, cursor)
-            cell_size = abs(cell_size_raw)
-            if cell_size < 8 or cell_size > MAX_HIVE_CELL_SIZE:
-                break
-            if cursor + cell_size > hbin_end:
-                break
-            signature = blob[cursor + 4 : cursor + 6]
-            candidate = parse_registry_cell_candidate(
-                blob,
-                cursor,
-                cursor + 4,
-                cell_size,
-                cell_size_raw,
-                signature,
-                scan_method="hbin-walk",
-                hbin_offset=hbin_offset,
-            )
-            if candidate is not None:
-                cells[cursor] = candidate
-            cursor += align_registry_cell_size(cell_size)
-    return cells
-
-
-def decode_amcache_schema_rows(blob: bytes) -> tuple[list[dict[str, object]], dict[str, object]]:
-    profile: dict[str, object] = {"decode_status": "no-cells", "sections": {}, "cell_count": 0}
-    if len(blob) < 4096 or not blob.startswith(b"regf"):
-        profile["decode_status"] = "not-regf"
-        return [], profile
-    cells = iter_amcache_hive_cells(blob)
-    profile["cell_count"] = len(cells)
-    if not cells:
-        return [], profile
-    wanted = {name.lower(): name for name in AMCACHE_INVENTORY_SECTIONS}
-    section_nodes = {
-        str(node.get("name") or "").lower(): node
-        for node in cells.values()
-        if node.get("cell_kind") == "key-node"
-        and str(node.get("name") or "").lower() in wanted
-    }
-    rows: list[dict[str, object]] = []
-    for lower_name, node in section_nodes.items():
-        subkey_offsets = registry_subkey_offsets_for_key(blob, node)
-        decoded = 0
-        for offset in subkey_offsets:
-            subkey = cells.get(offset)
-            if not subkey:
-                continue
-            values: dict[str, str] = {}
-            for value_offset in registry_value_offsets_for_key(blob, subkey):
-                value_cell = cells.get(value_offset)
-                if value_cell is None:
-                    continue
-                name = str(value_cell.get("name") or "") or "(default)"
-                values[name] = registry_value_data_preview(blob, value_cell)
-            if not values:
-                continue
-            decoded += 1
-            if len(rows) < MAX_AMCACHE_SCHEMA_ROWS:
-                rows.append(
-                    {
-                        "section": wanted[lower_name],
-                        "key_name": str(subkey.get("name") or ""),
-                        "cell_offset": offset,
-                        "last_written_at": str(subkey.get("last_written_at") or ""),
-                        "allocation_status": str(subkey.get("allocation_status") or ""),
-                        "values": values,
-                    }
-                )
-        profile["sections"][wanted[lower_name]] = {
-            "declared_subkeys": int(node.get("subkey_count") or 0),
-            "decoded_subkey_offsets": len(subkey_offsets),
-            "decoded_rows": decoded,
-        }
-    profile["decode_status"] = "decoded" if rows else "no-decodable-rows"
-    profile["schema_row_count"] = len(rows)
-    return rows, profile
-
+def decode_amcache_schema_rows(blob: object) -> tuple[list[dict[str, object]], dict[str, object]]:
+    hive = native_hive_from(blob)
+    if hive is None:
+        return [], {"decode_status": "not-regf"}
+    try:
+        return decode_amcache_schema_rows_native(hive)
+    finally:
+        if hive is not blob:
+            hive.close()  # type: ignore[attr-defined]
 
 def amcache_schema_row_fields(row: Mapping[str, object]) -> dict[str, str]:
     values = row.get("values") if isinstance(row.get("values"), Mapping) else {}
@@ -1870,6 +1590,10 @@ def build_amcache_schema_row_record(
             "allocation_status": row.get("allocation_status", ""),
             "key_last_written_at": row.get("last_written_at", ""),
             **fields,
+            "link_date": amcache_link_date_iso(fields["link_date_raw"]),
+            "timestamp": row.get("last_written_at", ""),
+            "timestamp_label": "last_written",
+            "timestamp_semantics": "Amcache 항목 키 최종 수정 시각(최초 기록·갱신) — 실행 시각이 아닙니다.",
             "decoded_value_count": len(row.get("values") or {}),
             "decoded_values": dict(row.get("values") or {}),
             "native_schema_decoding_available": True,
@@ -1908,8 +1632,9 @@ def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
     except OSError:
         return
     source_hashes = file_hashes(path)
-    schema_rows, schema_decode_profile = decode_amcache_schema_rows(blob)
-    occurrences = list(iter_registry_like_string_occurrences(blob))
+    schema_rows, schema_decode_profile = decode_amcache_schema_rows(path)
+    # String pivots are a fallback only: skipped when the structural decode produced rows.
+    occurrences = [] if schema_rows else list(iter_registry_like_string_occurrences(blob))
     strings = list(unique_preserve_order(item["text"] for item in occurrences))
     amcache_clusters = collect_amcache_candidate_clusters(occurrences)
     path_candidates = [
@@ -1920,6 +1645,16 @@ def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
     if not path_candidates:
         path_candidates = [value for value in strings if looks_like_executable_path(value)][:100]
     sha1_candidates = sorted(set(re.findall(r"(?i)\b[0-9a-f]{40}\b", "\n".join(strings))))[:100]
+    if schema_rows and not path_candidates:
+        path_candidates = [
+            str(amcache_schema_row_fields(row).get("executable_path") or "")
+            for row in schema_rows
+            if amcache_schema_row_fields(row).get("executable_path")
+        ][:100]
+    if schema_rows and not sha1_candidates:
+        sha1_candidates = sorted(
+            {str(amcache_schema_row_fields(row).get("sha1") or "") for row in schema_rows} - {""}
+        )[:100]
     hive_validation_checks = {
         "has_path_candidates": bool(path_candidates),
         "has_sha1_candidates": bool(sha1_candidates),
@@ -2063,7 +1798,7 @@ def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
     for index, schema_row in enumerate(schema_rows):
         yield build_amcache_schema_row_record(path, source_hashes, schema_row, index)
     clusters_by_path = {normalize_execution_path(str(cluster.get("executable_path") or "")): cluster for cluster in amcache_clusters}
-    for index, candidate in enumerate(path_candidates[:100]):
+    for index, candidate in enumerate([] if schema_rows else path_candidates[:STRING_CANDIDATE_LIMIT]):
         cluster = clusters_by_path.get(normalize_execution_path(candidate), {})
         cluster_sha1_candidates = [
             str(value) for value in cluster.get("sha1_candidates", []) if str(value)
@@ -2149,11 +1884,18 @@ def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
         )
         yield ArtifactRecord(
             provider=WindowsExecutionProvider.name,
-            artifact_type="amcache-entry",
+            artifact_type="amcache-string-candidate",
             path=str(path.resolve()),
             supported=True,
             details={
                 "parser": "windows-amcache-native-hive-scan",
+                "severity": "none",
+                "label": "문자열 후보 — 증거 아님",
+                "evidence_class": "string-candidate-not-evidence",
+                "string_candidate_total": len(path_candidates),
+                "string_candidate_limit": STRING_CANDIDATE_LIMIT,
+                "string_candidate_truncated": len(path_candidates) > STRING_CANDIDATE_LIMIT,
+                "string_candidate_note": "구조 디코드 행이 없을 때만 내보내는 문자열 피벗입니다. 타임라인·실행 증거로 쓰지 않습니다.",
                 "parser_version": PARSER_VERSION,
                 "coverage_status": "native-hive-string-pivot",
                 "reportability": "review",
@@ -2190,7 +1932,7 @@ def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
                 "amcache_row_manifest": entry_manifest,
                 "amcache_row_manifest_hash": entry_manifest["manifest_sha256"],
                 "amcache_report_citation_manifest": entry_citation_manifest,
-                "timestamp": timestamp,
+                "timestamp_candidate": timestamp,
                 "timestamp_source": timestamp_source,
                 "source_offset": cluster.get("source_offset", 0) if isinstance(cluster, Mapping) else 0,
                 "source_encoding": cluster.get("source_encoding", "") if isinstance(cluster, Mapping) else "",
@@ -7041,13 +6783,7 @@ def parse_hex_bytes(value: str) -> bytes:
 
 
 def filetime_to_iso(value: int) -> str:
-    if value <= 0:
-        return ""
-    try:
-        base = dt.datetime(1601, 1, 1, tzinfo=dt.timezone.utc)
-        return (base + dt.timedelta(microseconds=value / 10)).isoformat()
-    except (OverflowError, ValueError):
-        return ""
+    return filetime_to_iso_ticks(value)
 
 
 def file_hashes(path: Path) -> dict[str, str]:
@@ -7067,3 +6803,236 @@ def path_modified_at(path: Path) -> str:
     except OSError:
         return ""
     return dt.datetime.fromtimestamp(modified, tz=dt.timezone.utc).isoformat()
+
+
+# ---------------------------------------------------------------------------
+# Structural decoders over the native hive walk (no scan/cell/row caps; only
+# live keys are read, so deleted cells no longer inflate or duplicate rows).
+# ---------------------------------------------------------------------------
+
+USERASSIST_LAYOUT_LABELS = {
+    "win7-plus": "Windows 7 이상(72바이트 레코드, Windows 10/11 포함)",
+    "winxp": "Windows XP/Vista(16바이트 레코드)",
+    "unrecognized": "인식하지 못한 레이아웃",
+}
+
+
+def native_hive_from(blob_or_path: object) -> object:
+    from .registry import NativeRegistryHive
+
+    if isinstance(blob_or_path, Path):
+        return NativeRegistryHive.open(blob_or_path)
+    if isinstance(blob_or_path, (bytes, bytearray)):
+        return NativeRegistryHive.from_bytes(bytes(blob_or_path))
+    return blob_or_path
+
+
+def native_control_sets(hive: object) -> list[object]:
+    root = hive.root  # type: ignore[attr-defined]
+    if root is None:
+        return []
+    return [key for key in hive.subkeys(root) if str(key.name).lower().startswith("controlset")]  # type: ignore[attr-defined]
+
+
+def decode_shimcache_schema_native(hive: object) -> tuple[list[dict[str, object]], dict[str, object]]:
+    profile: dict[str, object] = {"decode_status": "no-key", "values_seen": 0, "reader": "native-regf-tree-walk"}
+    rows: list[dict[str, object]] = []
+    for control_set in native_control_sets(hive):
+        node = hive.open_key(r"Control\Session Manager\AppCompatCache", start=control_set)  # type: ignore[attr-defined]
+        if node is None:
+            continue
+        value = hive.value(node, "AppCompatCache")  # type: ignore[attr-defined]
+        if value is None:
+            continue
+        profile["values_seen"] = int(profile["values_seen"]) + 1
+        entries, value_profile = decode_shimcache_value_data(hive.value_bytes(value))  # type: ignore[attr-defined]
+        profile[f"decode_{control_set.name}"] = value_profile  # type: ignore[attr-defined]
+        for entry in entries:
+            rows.append(
+                {
+                    "control_set": str(control_set.name),  # type: ignore[attr-defined]
+                    "key_cell_offset": 4096 + int(node.offset or 0),  # type: ignore[attr-defined]
+                    "value_cell_offset": 4096 + int(value.offset or 0),  # type: ignore[attr-defined]
+                    "value_format": value_profile.get("format", ""),
+                    "cache_order": entry.get("cache_order", 0),
+                    "entry_offset": entry.get("entry_offset", 0),
+                    "executable_path": entry.get("path", ""),
+                    "last_mod_date": entry.get("last_mod_date", ""),
+                    "exec_flag": entry.get("exec_flag", ""),
+                    "key_last_written_at": node.last_written_at,  # type: ignore[attr-defined]
+                }
+            )
+    profile["decode_status"] = "decoded" if rows else "no-decodable-rows"
+    profile["schema_row_count"] = len(rows)
+    return rows, profile
+
+
+def decode_bam_dam_schema_native(hive: object) -> tuple[list[dict[str, object]], dict[str, object]]:
+    profile: dict[str, object] = {"decode_status": "no-key", "sid_keys_seen": 0, "reader": "native-regf-tree-walk"}
+    rows: list[dict[str, object]] = []
+    for control_set in native_control_sets(hive):
+        for service in ("bam", "dam"):
+            for relative in (f"Services\\{service}\\State\\UserSettings", f"Services\\{service}\\UserSettings"):
+                user_settings = hive.open_key(relative, start=control_set)  # type: ignore[attr-defined]
+                if user_settings is None:
+                    continue
+                for sid_key in hive.subkeys(user_settings):  # type: ignore[attr-defined]
+                    sid = str(sid_key.name)
+                    if not sid.startswith("S-1-"):
+                        continue
+                    profile["sid_keys_seen"] = int(profile["sid_keys_seen"]) + 1
+                    values = hive.values(sid_key)  # type: ignore[attr-defined]
+                    meta = {str(v.name).lower(): hive.value_data(v) for v in values}  # type: ignore[attr-defined]
+                    for value in values:
+                        name = str(value.name)
+                        if name.lower() in {"sequencenumber", "version"}:
+                            continue
+                        data = hive.value_bytes(value)  # type: ignore[attr-defined]
+                        rows.append(
+                            {
+                                "service": service,
+                                "control_set": str(control_set.name),  # type: ignore[attr-defined]
+                                "user_sid": sid,
+                                "sid_key_cell_offset": 4096 + int(sid_key.offset or 0),
+                                "value_cell_offset": 4096 + int(value.offset or 0),
+                                "executable_path": name,
+                                "timestamp": filetime_to_iso(int.from_bytes(data[:8], "little")) if len(data) >= 8 else "",
+                                "sequence_number": str(meta.get("sequencenumber", "")),
+                                "version": str(meta.get("version", "")),
+                                "key_last_written_at": sid_key.last_written_at,
+                                "value_data_size": int(value.data_size or 0),
+                            }
+                        )
+    profile["decode_status"] = "decoded" if rows else "no-decodable-rows"
+    profile["schema_row_count"] = len(rows)
+    return rows, profile
+
+
+def resolve_userassist_known_folder(name: str) -> tuple[str, str]:
+    lowered = name.lower()
+    for guid, mapped in USERASSIST_GUID_PATH_MAPPINGS.items():
+        position = lowered.find(guid.lower())
+        if position >= 0:
+            return name[:position] + mapped + name[position + len(guid) :], guid
+    return name, ""
+
+
+def decode_userassist_schema_native(hive: object) -> tuple[list[dict[str, object]], dict[str, object]]:
+    profile: dict[str, object] = {"decode_status": "no-key", "count_keys_seen": 0, "reader": "native-regf-tree-walk"}
+    rows: list[dict[str, object]] = []
+    base = hive.open_key(r"Software\Microsoft\Windows\CurrentVersion\Explorer\UserAssist")  # type: ignore[attr-defined]
+    if base is None:
+        # Re-rooted or partial hives: locate any live key named UserAssist.
+        base = next(
+            (key for _parts, key in hive.iter_keys() if str(key.name).casefold() == "userassist"),  # type: ignore[attr-defined]
+            None,
+        )
+        profile["key_location"] = "searched" if base is not None else "not-found"
+    for guid_key in hive.subkeys(base) if base is not None else []:  # type: ignore[attr-defined]
+        count_key = hive.subkey(guid_key, "Count")  # type: ignore[attr-defined]
+        if count_key is None:
+            continue
+        profile["count_keys_seen"] = int(profile["count_keys_seen"]) + 1
+        for value in hive.values(count_key):  # type: ignore[attr-defined]
+            raw_name = str(value.name)
+            decoded_name = decode_userassist_name(raw_name)
+            if decoded_name.upper() in USERASSIST_METADATA_NAMES:
+                continue
+            display_name, folder_guid = resolve_userassist_known_folder(decoded_name)
+            data = hive.value_bytes(value)  # type: ignore[attr-defined]
+            entry: dict[str, object] = {
+                "guid": str(guid_key.name),
+                "count_key_cell_offset": 4096 + int(count_key.offset or 0),
+                "value_cell_offset": 4096 + int(value.offset or 0),
+                "raw_value_name": raw_name,
+                "decoded_name": decoded_name,
+                "display_path": display_name,
+                "known_folder_guid": folder_guid,
+                "known_folder_resolved": bool(folder_guid),
+                "key_last_written_at": count_key.last_written_at,
+                "value_data_size": int(value.data_size or 0),
+            }
+            if len(data) == 72:
+                entry.update(
+                    {
+                        "layout": "win7-plus",
+                        "session_id": int.from_bytes(data[0:4], "little"),
+                        "run_counter": int.from_bytes(data[4:8], "little"),
+                        "focus_count": int.from_bytes(data[8:12], "little"),
+                        "total_focus_time_ms": int.from_bytes(data[12:16], "little"),
+                        "timestamp": filetime_to_iso(int.from_bytes(data[60:68], "little")),
+                    }
+                )
+            elif len(data) == 16:
+                entry.update(
+                    {
+                        "layout": "winxp",
+                        "session_id": int.from_bytes(data[0:4], "little"),
+                        "run_counter": int.from_bytes(data[4:8], "little"),
+                        "timestamp": filetime_to_iso(int.from_bytes(data[8:16], "little")),
+                    }
+                )
+            else:
+                entry["layout"] = "unrecognized"
+            entry["layout_label"] = USERASSIST_LAYOUT_LABELS.get(str(entry["layout"]), "")
+            rows.append(entry)
+    profile["decode_status"] = "decoded" if rows else "no-decodable-rows"
+    profile["schema_row_count"] = len(rows)
+    return rows, profile
+
+
+def decode_amcache_schema_rows_native(hive: object) -> tuple[list[dict[str, object]], dict[str, object]]:
+    from .registry import registry_value_text
+
+    profile: dict[str, object] = {"decode_status": "no-key", "sections": {}, "reader": "native-regf-tree-walk"}
+    rows: list[dict[str, object]] = []
+    root = hive.open_key("Root")  # type: ignore[attr-defined]
+    if root is None:
+        profile["decode_status"] = "no-root-key"
+        return rows, profile
+    for section in AMCACHE_INVENTORY_SECTIONS:
+        node = hive.subkey(root, section)  # type: ignore[attr-defined]
+        if node is None:
+            continue
+        entries = list(hive.subkeys(node))  # type: ignore[attr-defined]
+        if section == "File":
+            # Legacy (Windows 8) layout: Root\File\<volume GUID>\<file id>.
+            entries = [entry for volume in entries for entry in hive.subkeys(volume)]  # type: ignore[attr-defined]
+        decoded = 0
+        for entry in entries:
+            values = {
+                (str(value.name) or "(default)"): registry_value_text(hive.value_data(value))  # type: ignore[attr-defined]
+                for value in hive.values(entry)  # type: ignore[attr-defined]
+            }
+            if not values:
+                continue
+            decoded += 1
+            rows.append(
+                {
+                    "section": section,
+                    "key_name": str(entry.name),
+                    "cell_offset": 4096 + int(entry.offset or 0),
+                    "last_written_at": entry.last_written_at,
+                    "allocation_status": "allocated",
+                    "values": values,
+                }
+            )
+        profile["sections"][section] = {  # type: ignore[index]
+            "declared_subkeys": int(node.subkey_count or 0),
+            "decoded_subkey_offsets": len(entries),
+            "decoded_rows": decoded,
+        }
+    profile["decode_status"] = "decoded" if rows else "no-decodable-rows"
+    profile["schema_row_count"] = len(rows)
+    profile["row_cap"] = None
+    return rows, profile
+
+
+def amcache_link_date_iso(value: str) -> str:
+    text = str(value or "").strip()
+    for pattern in ("%m/%d/%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return dt.datetime.strptime(text, pattern).replace(tzinfo=dt.timezone.utc).isoformat()
+        except ValueError:
+            continue
+    return ""

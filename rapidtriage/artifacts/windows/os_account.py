@@ -15,11 +15,12 @@ from .._walk import iter_evidence_paths
 from .common import build_forensic_review
 from .registry import (
     MAX_HIVE_CELL_SCAN_BYTES,
+    filetime_to_iso_ticks,
     iter_registry_cell_candidates,
     parse_registry_hive_header,
 )
 
-PARSER_VERSION = "windows-os-account-v10"
+PARSER_VERSION = "windows-os-account-v11"
 USER_PROFILE_ROOT = "Users"
 REGISTRY_EXPORT_EXT = ".reg"
 SAM_HIVE_NAME = "SAM"
@@ -240,6 +241,12 @@ def collect_registry_export_hints(root: Path) -> Iterable[ArtifactRecord]:
 
 def collect_sam_hive_candidates(root: Path) -> Iterable[ArtifactRecord]:
     for path in candidate_sam_hive_paths(root):
+        native_records, structure_found = collect_native_sam_records(path)
+        if structure_found:
+            # The decoded F/V/C rows replace the name-pattern cell candidates (which
+            # duplicated every key name and picked up unrelated cells as "accounts").
+            yield from native_records
+            continue
         try:
             stat_result = path.stat()
             with path.open("rb") as handle:
@@ -3137,13 +3144,7 @@ def parse_hex_bytes(value: str) -> bytes:
 
 
 def filetime_to_iso(value: int) -> str:
-    if value <= 0:
-        return ""
-    try:
-        base = dt.datetime(1601, 1, 1, tzinfo=dt.timezone.utc)
-        return (base + dt.timedelta(microseconds=value / 10)).isoformat()
-    except (OverflowError, ValueError):
-        return ""
+    return filetime_to_iso_ticks(value)
 
 
 def decode_reg_expand_sz(value: str) -> str:
@@ -3182,3 +3183,353 @@ def file_hashes(path: Path) -> dict[str, str]:
     except OSError:
         return {}
     return {"sha256": digest.hexdigest()}
+
+
+# ---------------------------------------------------------------------------
+# Native SAM decode over the full hive walk (F/V/C values, Names mapping).
+# ---------------------------------------------------------------------------
+
+SAM_F_TIMESTAMP_FIELDS = (
+    ("last_logon_at", 0x08, "마지막 로그온"),
+    ("password_last_set_at", 0x18, "암호 마지막 설정"),
+    ("account_expires_at", 0x20, "계정 만료"),
+    ("last_failed_logon_at", 0x28, "마지막 로그온 실패"),
+)
+SAM_V_FIELDS = (
+    ("user_name", 0x0C),
+    ("full_name", 0x18),
+    ("comment", 0x24),
+    ("user_comment", 0x30),
+    ("home_directory", 0x48),
+    ("home_directory_drive", 0x54),
+    ("logon_script", 0x60),
+    ("profile_path", 0x6C),
+    ("workstations", 0x78),
+)
+SAM_ACB_FLAGS = {
+    0x0001: ("ACB_DISABLED", "계정 사용 안 함"),
+    0x0002: ("ACB_HOMDIRREQ", "홈 디렉터리 필요"),
+    0x0004: ("ACB_PWNOTREQ", "암호 필요 없음"),
+    0x0008: ("ACB_TEMPDUP", "임시 중복 계정"),
+    0x0010: ("ACB_NORMAL", "일반 사용자 계정"),
+    0x0020: ("ACB_MNS", "MNS 로그온 계정"),
+    0x0040: ("ACB_DOMTRUST", "도메인 트러스트 계정"),
+    0x0080: ("ACB_WSTRUST", "워크스테이션 트러스트 계정"),
+    0x0100: ("ACB_SVRTRUST", "서버 트러스트 계정"),
+    0x0200: ("ACB_PWNOEXP", "암호 만료 없음"),
+    0x0400: ("ACB_AUTOLOCK", "계정 잠김"),
+    0x0800: ("ACB_ENC_TXT_PWD_ALLOWED", "암호화된 텍스트 암호 허용"),
+    0x1000: ("ACB_SMARTCARD_REQUIRED", "스마트카드 필요"),
+    0x2000: ("ACB_TRUSTED_FOR_DELEGATION", "위임 신뢰"),
+    0x4000: ("ACB_NOT_DELEGATED", "위임 불가"),
+    0x8000: ("ACB_USE_DES_KEY_ONLY", "DES 키만 사용"),
+}
+SAM_WELL_KNOWN_RIDS = {
+    500: "기본 제공 Administrator",
+    501: "기본 제공 Guest",
+    503: "DefaultAccount",
+    504: "WDAGUtilityAccount",
+}
+SAM_NEVER_FILETIME = 0x7FFFFFFFFFFFFFFF
+
+
+def sam_filetime(raw: bytes, offset: int) -> str:
+    if offset + 8 > len(raw):
+        return ""
+    value = int.from_bytes(raw[offset : offset + 8], "little")
+    if value in (0, SAM_NEVER_FILETIME):
+        return ""
+    return filetime_to_iso(value)
+
+
+def decode_native_sam_f(raw: bytes) -> dict[str, object]:
+    result: dict[str, object] = {"f_size": len(raw)}
+    for field, offset, _label in SAM_F_TIMESTAMP_FIELDS:
+        result[field] = sam_filetime(raw, offset)
+    if len(raw) >= 0x44:
+        acb = int.from_bytes(raw[0x38:0x3A], "little")
+        result.update(
+            {
+                "f_rid": int.from_bytes(raw[0x30:0x34], "little"),
+                "primary_group_rid": int.from_bytes(raw[0x34:0x38], "little"),
+                "acb_flags": acb,
+                "acb_flags_hex": f"0x{acb:04x}",
+                "acb_flag_names": [name for bit, (name, _ko) in SAM_ACB_FLAGS.items() if acb & bit],
+                "acb_flag_labels_ko": [label for bit, (_name, label) in SAM_ACB_FLAGS.items() if acb & bit],
+                "account_disabled": bool(acb & 0x0001),
+                "account_locked": bool(acb & 0x0400),
+                "password_not_required": bool(acb & 0x0004),
+                "password_never_expires": bool(acb & 0x0200),
+                "country_code": int.from_bytes(raw[0x3C:0x3E], "little"),
+                "code_page": int.from_bytes(raw[0x3E:0x40], "little"),
+                "failed_logon_count": int.from_bytes(raw[0x40:0x42], "little"),
+                "logon_count": int.from_bytes(raw[0x42:0x44], "little"),
+            }
+        )
+    return result
+
+
+def decode_native_sam_v(raw: bytes) -> dict[str, object]:
+    result: dict[str, object] = {"v_size": len(raw)}
+    for field, descriptor in SAM_V_FIELDS:
+        if descriptor + 8 > len(raw):
+            result[field] = ""
+            continue
+        offset = int.from_bytes(raw[descriptor : descriptor + 4], "little") + SAM_V_DATA_BASE_OFFSET
+        length = int.from_bytes(raw[descriptor + 4 : descriptor + 8], "little")
+        text = ""
+        if length and offset + length <= len(raw):
+            text = raw[offset : offset + length].decode("utf-16-le", errors="replace").rstrip("\x00")
+        result[field] = text
+    for field, descriptor in (("lm_hash_present", 0x9C), ("nt_hash_present", 0xA8)):
+        length = int.from_bytes(raw[descriptor + 4 : descriptor + 8], "little") if descriptor + 8 <= len(raw) else 0
+        result[field] = length > 4
+    return result
+
+
+def decode_sid(raw: bytes) -> str:
+    if len(raw) < 8:
+        return ""
+    count = raw[1]
+    if len(raw) < 8 + 4 * count:
+        return ""
+    authority = int.from_bytes(raw[2:8], "big")
+    parts = [str(int.from_bytes(raw[8 + 4 * index : 12 + 4 * index], "little")) for index in range(count)]
+    return "-".join(["S", str(raw[0]), str(authority), *parts])
+
+
+def decode_sid_list(raw: bytes, count: int) -> list[str]:
+    sids: list[str] = []
+    cursor = 0
+    for _ in range(count):
+        if cursor + 8 > len(raw):
+            break
+        size = 8 + 4 * raw[cursor + 1]
+        sid = decode_sid(raw[cursor : cursor + size])
+        if not sid:
+            break
+        sids.append(sid)
+        cursor += size
+    return sids
+
+
+def decode_sam_alias_c(raw: bytes) -> dict[str, object]:
+    """Builtin/Account Aliases\\<RID>\\C: name, comment, member SIDs (data base 0x34)."""
+    if len(raw) < 0x34:
+        return {}
+
+    def field(offset_at: int, length_at: int) -> bytes:
+        offset = int.from_bytes(raw[offset_at : offset_at + 4], "little") + 0x34
+        length = int.from_bytes(raw[length_at : length_at + 4], "little")
+        return raw[offset : offset + length] if length and offset + length <= len(raw) else b""
+
+    member_count = int.from_bytes(raw[0x30:0x34], "little")
+    return {
+        "rid": int.from_bytes(raw[0:4], "little"),
+        "group_name": field(0x10, 0x14).decode("utf-16-le", errors="replace"),
+        "comment": field(0x1C, 0x20).decode("utf-16-le", errors="replace"),
+        "member_count": member_count,
+        "member_sids": decode_sid_list(field(0x28, 0x2C), member_count),
+    }
+
+
+def decode_sam_group_c(raw: bytes) -> dict[str, object]:
+    """Domains\\Account\\Groups\\<RID>\\C: name, comment, member RIDs (data base 0x44)."""
+    if len(raw) < 0x44:
+        return {}
+
+    def field(offset_at: int, length_at: int) -> bytes:
+        offset = int.from_bytes(raw[offset_at : offset_at + 4], "little") + 0x44
+        length = int.from_bytes(raw[length_at : length_at + 4], "little")
+        return raw[offset : offset + length] if length and offset + length <= len(raw) else b""
+
+    member_count = int.from_bytes(raw[0x40:0x44], "little")
+    members_offset = int.from_bytes(raw[0x38:0x3C], "little") + 0x44
+    members = raw[members_offset : members_offset + 4 * member_count]
+    member_rids = [int.from_bytes(members[i : i + 4], "little") for i in range(0, len(members) - 3, 4)]
+    return {
+        "rid": int.from_bytes(raw[4:8], "little"),
+        "group_name": field(0x20, 0x24).decode("utf-16-le", errors="replace"),
+        "comment": field(0x2C, 0x30).decode("utf-16-le", errors="replace"),
+        "member_count": member_count,
+        "member_rids": member_rids,
+    }
+
+
+def sam_domain_sid(hive: object) -> str:
+    account = hive.open_key(r"SAM\Domains\Account")  # type: ignore[attr-defined]
+    value = hive.value(account, "V") if account is not None else None  # type: ignore[attr-defined]
+    if value is None:
+        return ""
+    raw = hive.value_bytes(value)  # type: ignore[attr-defined]
+    marker = raw.rfind(b"\x01\x04\x00\x00\x00\x00\x00\x05\x15\x00\x00\x00")
+    return decode_sid(raw[marker : marker + 24]) if marker >= 0 else ""
+
+
+def collect_native_sam_records(path: Path) -> tuple[list[ArtifactRecord], bool]:
+    """Decode SAM accounts and groups natively; returns (records, structure_found)."""
+    from .registry import NativeRegistryHive
+
+    hive = NativeRegistryHive.open(path)
+    if hive is None:
+        return [], False
+    try:
+        users_key = hive.open_key(r"SAM\Domains\Account\Users")
+        if users_key is None:
+            return [], False
+        source_hashes = file_hashes(path)
+        source_path = str(path.resolve())
+        domain_sid = sam_domain_sid(hive)
+        names_by_rid: dict[int, tuple[str, str]] = {}
+        names_key = hive.subkey(users_key, "Names")
+        for name_key in hive.subkeys(names_key) if names_key is not None else []:
+            default = hive.value(name_key, "")
+            if default is not None:
+                names_by_rid[int(default.value_type or 0)] = (str(name_key.name), name_key.last_written_at)
+        accounts: list[dict[str, object]] = []
+        for rid_key in hive.subkeys(users_key):
+            name = str(rid_key.name)
+            if not is_rid_key_name(name):
+                continue
+            rid = int(name, 16)
+            values = {str(value.name): hive.value_bytes(value) for value in hive.values(rid_key)}
+            f_fields = decode_native_sam_f(values.get("F", b""))
+            v_fields = decode_native_sam_v(values.get("V", b""))
+            names_entry = names_by_rid.get(rid, ("", ""))
+            accounts.append(
+                {
+                    "rid": rid,
+                    "rid_hex": name.upper(),
+                    "sid": f"{domain_sid}-{rid}" if domain_sid else "",
+                    "user_name": str(v_fields.get("user_name") or names_entry[0]),
+                    "names_key_name": names_entry[0],
+                    "names_key_last_written_at": names_entry[1],
+                    "rid_key_last_written_at": rid_key.last_written_at,
+                    "well_known_account_ko": SAM_WELL_KNOWN_RIDS.get(rid, ""),
+                    **v_fields,
+                    **f_fields,
+                    "key_path": f"HKLM\\SAM\\SAM\\Domains\\Account\\Users\\{name}",
+                    "key_cell_offset": 4096 + int(rid_key.offset or 0),
+                }
+            )
+        sid_to_name = {str(item["sid"]): str(item["user_name"]) for item in accounts if item.get("sid")}
+        groups: list[dict[str, object]] = []
+        for scope, relative, decoder in (
+            ("builtin-alias", r"SAM\Domains\Builtin\Aliases", decode_sam_alias_c),
+            ("account-alias", r"SAM\Domains\Account\Aliases", decode_sam_alias_c),
+            ("account-group", r"SAM\Domains\Account\Groups", decode_sam_group_c),
+        ):
+            container = hive.open_key(relative)
+            for group_key in hive.subkeys(container) if container is not None else []:
+                if not is_rid_key_name(str(group_key.name)):
+                    continue
+                value = hive.value(group_key, "C")
+                decoded = decoder(hive.value_bytes(value)) if value is not None else {}
+                if not decoded:
+                    continue
+                rid = int(str(group_key.name), 16)
+                if scope == "builtin-alias":
+                    group_sid = f"S-1-5-32-{rid}"
+                else:
+                    group_sid = f"{domain_sid}-{rid}" if domain_sid else ""
+                member_sids = list(decoded.get("member_sids") or [])
+                if scope == "account-group" and domain_sid:
+                    member_sids = [f"{domain_sid}-{member}" for member in decoded.get("member_rids") or []]
+                groups.append(
+                    {
+                        **decoded,
+                        "group_scope": scope,
+                        "group_scope_ko": {
+                            "builtin-alias": "기본 제공 로컬 그룹(Builtin)",
+                            "account-alias": "로컬 그룹(Account\\Aliases)",
+                            "account-group": "계정 도메인 그룹(Account\\Groups)",
+                        }[scope],
+                        "rid": rid,
+                        "rid_hex": str(group_key.name).upper(),
+                        "group_sid": group_sid,
+                        "member_sids": member_sids,
+                        "member_names": [sid_to_name.get(sid, "") for sid in member_sids],
+                        "key_path": f"HKLM\\SAM\\{relative}\\{group_key.name}",
+                        "key_last_written_at": group_key.last_written_at,
+                    }
+                )
+        memberships: dict[str, list[str]] = {}
+        for group in groups:
+            for sid in group.get("member_sids") or []:
+                memberships.setdefault(str(sid), []).append(str(group.get("group_name") or ""))
+        records: list[ArtifactRecord] = []
+        for account in accounts:
+            member_of = sorted(memberships.get(str(account.get("sid") or ""), []))
+            last_logon = str(account.get("last_logon_at") or "")
+            details = {
+                "parser": "windows-sam-native-hive",
+                "parser_version": PARSER_VERSION,
+                "coverage_status": "native-sam-fv-decoded",
+                "reportability": "review",
+                "label": "로컬 사용자 계정(SAM)",
+                "source_path": source_path,
+                "source_format": "registry-hive",
+                "source_hashes": source_hashes,
+                "hive_name": path.name,
+                **account,
+                "group_memberships": member_of,
+                "admin_member": "Administrators" in member_of,
+                "timestamp": last_logon,
+                "timestamp_label": "last_logon" if last_logon else "",
+                "timeline_events": [
+                    {"kind": field, "label_ko": label, "timestamp": account[field]}
+                    for field, _offset, label in SAM_F_TIMESTAMP_FIELDS
+                    if account.get(field)
+                ],
+                "field_labels_ko": {
+                    "user_name": "사용자 이름",
+                    "full_name": "전체 이름",
+                    "comment": "설명",
+                    "rid": "RID",
+                    "last_logon_at": "마지막 로그온",
+                    "password_last_set_at": "암호 마지막 설정",
+                    "last_failed_logon_at": "마지막 로그온 실패",
+                    "logon_count": "로그온 횟수",
+                    "failed_logon_count": "로그온 실패 횟수",
+                    "acb_flag_labels_ko": "계정 플래그",
+                    "group_memberships": "소속 그룹",
+                },
+                "secret_material": "해시·암호 값은 출력하지 않습니다(존재 여부만 표시).",
+                "raw_preview": f"{account.get('user_name')} (RID {account.get('rid')}) 로그온 {account.get('logon_count', '')}회",
+            }
+            records.append(
+                ArtifactRecord(
+                    provider=WindowsOsAccountProvider.name,
+                    artifact_type="windows-sam-account",
+                    path=source_path,
+                    supported=True,
+                    details=details,
+                )
+            )
+        for group in groups:
+            records.append(
+                ArtifactRecord(
+                    provider=WindowsOsAccountProvider.name,
+                    artifact_type="windows-sam-group",
+                    path=source_path,
+                    supported=True,
+                    details={
+                        "parser": "windows-sam-native-hive",
+                        "parser_version": PARSER_VERSION,
+                        "coverage_status": "native-sam-c-decoded",
+                        "reportability": "review",
+                        "label": "로컬 그룹(SAM)",
+                        "source_path": source_path,
+                        "source_format": "registry-hive",
+                        "source_hashes": source_hashes,
+                        "hive_name": path.name,
+                        **group,
+                        "privileged_group": is_privileged_group_name(str(group.get("group_name") or "")),
+                        "timestamp": "",
+                        "raw_preview": f"{group.get('group_name')} 구성원 {group.get('member_count', 0)}명",
+                    },
+                )
+            )
+        return records, True
+    finally:
+        hive.close()

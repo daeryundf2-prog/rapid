@@ -1,36 +1,24 @@
 from __future__ import annotations
 
-import hashlib
-import json
+import datetime as dt
 import re
+from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 from .._walk import iter_evidence_paths
-from .common import build_forensic_review
-from .execution import registry_value_data_bytes
 from .registry import (
-    MAX_HIVE_CELL_SCAN_BYTES,
-    MAX_HIVE_STRING_SCAN_BYTES,
-    build_registry_key_tree_records,
+    HIVE_BIN_BASE_OFFSET,
     candidate_registry_hive_paths,
     collect_reg_export,
-    extract_utf16le_strings,
     file_hashes,
     hive_hint_from_path,
-    iter_registry_cell_candidates,
-    parse_registry_hive_header,
-    registry_subkey_offsets_for_key,
     registry_transaction_log_evidence,
-    registry_transaction_replay_profile,
-    registry_value_data_preview,
-    registry_value_offsets_for_key,
 )
-from .shellitem import decode_shellitem
 
-PARSER_VERSION = "windows-shellbags-native-v4"
+PARSER_VERSION = "windows-shellbags-native-v5"
 SHELLBAG_USER_HIVES = {"NTUSER.DAT", "USRCLASS.DAT"}
 SHELLBAG_BLOCKERS = [
     "binary shell item payload decoding is not report-grade yet",
@@ -40,11 +28,11 @@ SHELLBAG_BLOCKERS = [
     "trusted ShellBags parser diff is required",
 ]
 SHELLBAG_TRUSTED_TOOLS = {"shellbagsexplorer", "sbecmd", "recmd", "registryexplorer", "regripper"}
-QC_PREP_SHELLBAG_ITEM = 30
 SHELLBAG_CAPABILITIES = {
     "reg_export_shellbag_key_mapping": True,
-    "native_user_hive_key_tree_candidates": True,
-    "native_string_pivot_candidates": True,
+    "native_user_hive_key_tree_candidates": False,
+    "native_string_pivot_candidates": False,
+    "native_full_bagmru_walk": True,
     "bag_id_candidate_extraction": True,
     "node_id_candidate_extraction": True,
     "key_last_write_timestamp_hint": True,
@@ -53,11 +41,6 @@ SHELLBAG_CAPABILITIES = {
     "transaction_log_replay": False,
     "deleted_slack_shellbag_validation": False,
 }
-MAX_NATIVE_SHELLBAG_CANDIDATES = 200
-MAX_SHELLBAG_CELL_RECORDS = 1_000_000
-MAX_SHELLBAG_DECODE_DEPTH = 64
-MAX_SHELLBAG_DECODE_ENTRIES = 50_000
-MAX_SHELLBAG_VALUE_BYTES = 4 * 1024 * 1024
 
 
 class WindowsShellbagsProvider:
@@ -70,7 +53,8 @@ class WindowsShellbagsProvider:
         return True
 
     def collect(self, root: Path) -> Iterable[ArtifactRecord]:
-        emitted = 0
+        from .registry import RegistryCollectionContext
+
         for path in sorted(iter_evidence_paths(root, "*.reg"), key=lambda item: str(item).lower()):
             if not path.is_file():
                 continue
@@ -87,937 +71,11 @@ class WindowsShellbagsProvider:
                     supported=True,
                     details=details,
                 )
+        context = RegistryCollectionContext(root)
         for path in candidate_registry_hive_paths(root):
             if path.name.upper() not in SHELLBAG_USER_HIVES:
                 continue
-            for record in collect_native_shellbag_hive(path):
-                if emitted >= MAX_NATIVE_SHELLBAG_CANDIDATES:
-                    return
-                emitted += 1
-                yield record
-
-
-def collect_native_shellbag_hive(path: Path) -> Iterable[ArtifactRecord]:
-    try:
-        stat_result = path.stat()
-        with path.open("rb") as handle:
-            header = handle.read(4096)
-            handle.seek(0)
-            blob = handle.read(min(stat_result.st_size, max(MAX_HIVE_STRING_SCAN_BYTES, MAX_HIVE_CELL_SCAN_BYTES)))
-    except OSError:
-        return
-
-    metadata = parse_registry_hive_header(header)
-    transaction_log_evidence = registry_transaction_log_evidence(path)
-    source_hashes = file_hashes(path)
-    cell_candidates = iter_registry_cell_candidates(blob, record_limit=MAX_SHELLBAG_CELL_RECORDS)
-    value_by_offset = {
-        int(candidate.get("cell_offset") or 0): candidate
-        for candidate in cell_candidates
-        if candidate.get("cell_kind") == "value"
-    }
-    emitted_paths: set[str] = set()
-
-    for key_tree_record in build_registry_key_tree_records(path, blob, cell_candidates, metadata, source_hashes):
-        key_details = key_tree_record.details
-        source_key_path = str(key_details.get("key_path") or "")
-        if not is_shellbag_source(source_key_path):
-            continue
-        value_offsets = [
-            int(offset)
-            for offset in key_details.get("value_cell_offsets", [])
-            if isinstance(offset, int) or str(offset).isdigit()
-        ]
-        value_previews = {
-            str(value_by_offset[offset].get("name") or ""): registry_value_data_preview(blob, value_by_offset[offset])
-            for offset in value_offsets
-            if offset in value_by_offset
-        }
-        emitted_paths.add(source_key_path.lower())
-        yield build_native_shellbag_record(
-            path,
-            metadata,
-            source_hashes,
-            candidate_source="native-key-tree",
-            source_key_path=source_key_path,
-            value_names=[str(value) for value in key_details.get("value_names", [])],
-            value_previews=value_previews,
-            key_last_written_at=str(key_details.get("last_written_at") or ""),
-            transaction_log_evidence=transaction_log_evidence,
-            key_path_confidence=str(key_details.get("key_path_confidence") or ""),
-            cell_offset=int(key_details.get("cell_offset") or 0),
-            hbin_offset=int(key_details.get("hbin_offset") or 0),
-            allocation_status=str(key_details.get("allocation_status") or ""),
-        )
-
-    yield from iter_native_shellbag_entries(
-        path,
-        blob,
-        cell_candidates,
-        source_hashes,
-        transaction_log_evidence,
-    )
-
-    for string_index, value in enumerate(extract_utf16le_strings(blob)):
-        if not is_shellbag_source(value):
-            continue
-        if value.lower() in emitted_paths:
-            continue
-        yield build_native_shellbag_record(
-            path,
-            metadata,
-            source_hashes,
-            candidate_source="native-string-pivot",
-            source_key_path=value,
-            value_names=[],
-            value_previews={},
-            key_last_written_at="",
-            transaction_log_evidence=transaction_log_evidence,
-            key_path_confidence="string-pivot",
-            cell_offset=0,
-            hbin_offset=0,
-            allocation_status="unknown",
-            string_index=string_index,
-        )
-
-
-def build_native_shellbag_record(
-    path: Path,
-    metadata: Mapping[str, object],
-    source_hashes: Mapping[str, str],
-    *,
-    candidate_source: str,
-    source_key_path: str,
-    value_names: Sequence[str],
-    value_previews: Mapping[str, str],
-    key_last_written_at: str,
-    transaction_log_evidence: Mapping[str, object],
-    key_path_confidence: str,
-    cell_offset: int,
-    hbin_offset: int,
-    allocation_status: str,
-    string_index: int | None = None,
-) -> ArtifactRecord:
-    section = shellbag_section(source_key_path)
-    bag_ids = shellbag_bag_id_candidates(source_key_path, value_names, value_previews, section)
-    node_ids = shellbag_node_id_candidates(source_key_path, value_names, section)
-    path_candidates = shellbag_path_candidates(source_key_path, value_previews.values())
-    timestamp_candidates = shellbag_timestamp_candidates(key_last_written_at, metadata)
-    relationship_profile = shellbag_relationship_profile(
-        source_key_path=source_key_path,
-        section=section,
-        bag_ids=bag_ids,
-        node_ids=node_ids,
-        value_names=value_names,
-        value_previews=value_previews,
-        cell_offset=cell_offset,
-        hbin_offset=hbin_offset,
-        allocation_status=allocation_status,
-    )
-    checks = shellbag_validation_checks(
-        metadata,
-        candidate_source=candidate_source,
-        source_key_path=source_key_path,
-        key_last_written_at=key_last_written_at,
-        bag_ids=bag_ids,
-        node_ids=node_ids,
-        transaction_log_evidence=transaction_log_evidence,
-    )
-    confidence = shellbag_candidate_confidence(checks, key_path_confidence, candidate_source)
-    report_grade = shellbag_report_grade_assessment(
-        shellbag_validation_matrix(checks),
-        validation_required=True,
-        extra_blockers=SHELLBAG_BLOCKERS,
-    )
-    details: dict[str, object] = {
-        "parser": "windows-shellbags-native-hive",
-        "parser_version": PARSER_VERSION,
-        "coverage_status": "native-hive-key-tree-candidate"
-        if candidate_source == "native-key-tree"
-        else "native-hive-string-candidate",
-        "reportability": "review",
-        "source_path": str(path.resolve()),
-        "source_format": "registry-hive",
-        "source_hashes": dict(source_hashes),
-        "hive_name": path.name,
-        "hive_hint": hive_hint_from_path(path),
-        "user_hive_scope": "ntuser" if path.name.upper() == "NTUSER.DAT" else "usrclass",
-        "candidate_source": candidate_source,
-        "source_key_path": source_key_path,
-        "shellbag_section": section,
-        "shellbag_path_candidates": path_candidates,
-        "bag_id_candidates": bag_ids,
-        "node_id_candidates": node_ids,
-        "value_names": sorted(value_names),
-        "value_previews": dict(sorted(value_previews.items())),
-        "timestamp_candidates": timestamp_candidates,
-        "shellbag_relationship_profile": relationship_profile,
-        "registry_transaction_log_evidence": dict(transaction_log_evidence),
-        "registry_transaction_replay_profile": registry_transaction_replay_profile(
-            transaction_log_evidence,
-            dirty=bool(metadata.get("dirty")),
-        ),
-        "shellbag_evidence": shellbag_evidence(
-            source_key_path=source_key_path,
-            section=section,
-            bag_ids=bag_ids,
-            node_ids=node_ids,
-            path_candidates=path_candidates,
-            timestamp_candidates=timestamp_candidates,
-            value_names=value_names,
-            candidate_source=candidate_source,
-            allocation_status=allocation_status,
-            transaction_log_evidence=transaction_log_evidence,
-            cell_offset=cell_offset,
-            hbin_offset=hbin_offset,
-            relationship_profile=relationship_profile,
-        ),
-        "key_last_written_at": key_last_written_at,
-        "key_path_confidence": key_path_confidence,
-        "cell_offset": cell_offset,
-        "hbin_offset": hbin_offset,
-        "allocation_status": allocation_status,
-        "parser_confidence": confidence,
-        "evidence_strength": "registry-hive-shellbag-key-tree-candidate"
-        if candidate_source == "native-key-tree"
-        else "registry-hive-shellbag-string-candidate",
-        "validation_required": True,
-        "validation_guidance": (
-            "Native ShellBags candidates expose key paths, bag/node IDs, and timestamp hints from bounded "
-            "registry hive parsing. Validate folder shell-item payload decoding, transaction logs, and bag/node "
-            "relationships with a dedicated ShellBags parser before report-grade use."
-        ),
-        "validation_checks": checks,
-        "core_accuracy_gates": shellbag_core_accuracy_gates(
-            {
-                "source_path": str(path.resolve()),
-                "source_hashes": dict(source_hashes),
-                "hive_name": path.name,
-                "user_hive_scope": "ntuser" if path.name.upper() == "NTUSER.DAT" else "usrclass",
-                "candidate_source": candidate_source,
-                "source_key_path": source_key_path,
-                "shellbag_section": section,
-                "bag_id_candidates": bag_ids,
-                "node_id_candidates": node_ids,
-                "path_candidates": path_candidates,
-                "timestamp_candidates": timestamp_candidates,
-                "shellbag_relationship_profile": relationship_profile,
-                "allocation_status": allocation_status,
-                "cell_offset": cell_offset,
-                "hbin_offset": hbin_offset,
-                "validation_checks": checks,
-            }
-        ),
-        "shellbag_validation_matrix": shellbag_validation_matrix(checks),
-        "shellbag_report_grade_assessment": report_grade,
-        "shellbag_native_capabilities": SHELLBAG_CAPABILITIES,
-        "commercial_uplift_evidence": shellbag_commercial_uplift_evidence(
-            {
-                "source_path": str(path.resolve()),
-                "source_hashes": dict(source_hashes),
-                "candidate_source": candidate_source,
-                "source_key_path": source_key_path,
-                "shellbag_section": section,
-                "cell_offset": cell_offset,
-                "hbin_offset": hbin_offset,
-                "allocation_status": allocation_status,
-                "shellbag_validation_matrix": shellbag_validation_matrix(checks),
-                "shellbag_report_grade_assessment": report_grade,
-            }
-        ),
-        "forensic_review": build_forensic_review(
-            gap_id="#15",
-            artifact_goal="ShellBags folder view history evidence",
-            primary_evidence=[
-                f"section={section}",
-                f"bags={len(bag_ids)}",
-                f"nodes={len(node_ids)}",
-                f"timestamps={len(timestamp_candidates)}",
-            ],
-            validation_required=True,
-            report_grade_assessment=report_grade,
-            commercial_grade_ready=False,
-            caveats=[
-                "Binary shell item payload decoding is not complete.",
-                "Bag/node relationships and transaction logs require external validation.",
-            ],
-        ),
-        "commercial_grade_ready": False,
-        "commercial_grade_blockers": report_grade["blockers"],
-        "risk_flags": ["folder-view-history", "native-shellbag-candidate", "user-activity:shellbag"],
-        "risk_score": 45 if candidate_source == "native-key-tree" else 30,
-        "raw_preview": source_key_path[:2000],
-    }
-    details["shellbag_analyst_review_profile"] = shellbag_analyst_review_profile(details)
-    details["shellbag_depth_manifest"] = shellbag_depth_manifest(details)
-    details["shellbag_depth_manifest_hash"] = details["shellbag_depth_manifest"]["manifest_sha256"]
-    if string_index is not None:
-        details["string_index"] = string_index
-    return ArtifactRecord(
-        provider=WindowsShellbagsProvider.name,
-        artifact_type="shellbag-native-candidate",
-        path=str(path.resolve()),
-        supported=bool(metadata.get("regf_valid")),
-        details=details,
-    )
-
-
-def shellbag_evidence(
-    *,
-    source_key_path: str,
-    section: str,
-    bag_ids: Sequence[str],
-    node_ids: Sequence[str],
-    path_candidates: Sequence[str],
-    timestamp_candidates: Sequence[Mapping[str, object]],
-    value_names: Sequence[str],
-    candidate_source: str,
-    allocation_status: str,
-    transaction_log_evidence: Mapping[str, object],
-    cell_offset: int,
-    hbin_offset: int,
-    relationship_profile: Mapping[str, object],
-) -> dict[str, object]:
-    return {
-        "key_evidence": {
-            "source_key_path": source_key_path,
-            "shellbag_section": section,
-            "candidate_source": candidate_source,
-            "allocation_status": allocation_status,
-            "cell_offset": cell_offset,
-            "hbin_offset": hbin_offset,
-            "transaction_log_status": str(transaction_log_evidence.get("status") or ""),
-            "transaction_log_replay_applied": bool(transaction_log_evidence.get("transaction_log_replay_applied")),
-        },
-        "relationship_evidence": {
-            "bag_id_candidates": list(bag_ids),
-            "node_id_candidates": list(node_ids),
-            "bag_node_relationship_status": "candidate-from-key-path-and-values",
-            "value_names": sorted(value_names),
-            "relationship_profile": dict(relationship_profile),
-            "relationship_profile_hash": str(relationship_profile.get("relationship_hash") or ""),
-        },
-        "activity_evidence": {
-            "path_candidates": list(path_candidates),
-            "timestamp_candidates": [dict(item) for item in timestamp_candidates],
-            "primary_timestamp": str(timestamp_candidates[0].get("timestamp") or "") if timestamp_candidates else "",
-            "primary_timestamp_source": str(timestamp_candidates[0].get("source") or "") if timestamp_candidates else "",
-        },
-        "report_limitations": [
-            "binary shell item payloads are not decoded",
-            "BagMRU/Bags relationship is candidate-level only",
-            "transaction logs and deleted shellbag slack are not replayed",
-        ],
-    }
-
-
-def shellbag_relationship_profile(
-    *,
-    source_key_path: str,
-    section: str,
-    bag_ids: Sequence[str],
-    node_ids: Sequence[str],
-    value_names: Sequence[str],
-    value_previews: Mapping[str, str],
-    cell_offset: int,
-    hbin_offset: int,
-    allocation_status: str,
-) -> dict[str, object]:
-    parts = shellbag_key_parts(source_key_path)
-    lowered = [part.lower() for part in parts]
-    root_index = next((index for index, part in enumerate(lowered) if part in {"bagmru", "bags"}), -1)
-    key_segments = parts[root_index + 1 :] if root_index >= 0 else []
-    numeric_key_segments = [part for part in key_segments if part.isdigit()]
-    numeric_value_names = [str(value) for value in value_names if str(value).isdigit()]
-    numeric_value_previews = [
-        str(value)
-        for value in value_previews.values()
-        if str(value).isdigit()
-    ]
-    numeric_node_segments = sorted(
-        {str(value) for value in [*numeric_key_segments, *numeric_value_names, *node_ids] if str(value)}
-    )
-    value_numeric_candidates = sorted(
-        {str(value) for value in [*numeric_value_names, *numeric_value_previews] if str(value)}
-    )
-    parent_node_path = "\\".join(key_segments[:-1]) if len(key_segments) > 1 else ""
-    profile_payload: dict[str, object] = {
-        "profile_version": "shellbag-relationship-profile-v1",
-        "source_key_path": source_key_path,
-        "shellbag_section": section,
-        "normalized_key_parts": parts,
-        "shellbag_root_index": root_index,
-        "node_path_segments": key_segments,
-        "numeric_node_segments": numeric_node_segments,
-        "node_depth": len(key_segments),
-        "parent_node_path": parent_node_path,
-        "bag_id_candidates": list(bag_ids),
-        "node_id_candidates": list(node_ids),
-        "value_numeric_candidates": value_numeric_candidates,
-        "value_names": sorted(str(value) for value in value_names),
-        "cell_offset": cell_offset,
-        "hbin_offset": hbin_offset,
-        "allocation_status": allocation_status,
-        "relationship_status": "candidate-key-lineage-not-shellitem-decoded",
-        "relationship_validated": False,
-        "commercial_blockers": [
-            "binary-shell-item-decoding-required",
-            "dedicated-shellbags-parser-diff-required",
-            "transaction-log-replay-required",
-        ],
-    }
-    profile_payload["relationship_hash"] = shellbag_stable_sha256(profile_payload)
-    return profile_payload
-
-
-def shellbag_key_parts(source_key_path: str) -> list[str]:
-    return [part.strip() for part in source_key_path.replace("/", "\\").split("\\") if part.strip()]
-
-
-def shellbag_stable_sha256(value: object) -> str:
-    return hashlib.sha256(
-        json.dumps(value, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
-
-
-def shellbag_depth_manifest(details: Mapping[str, object]) -> dict[str, object]:
-    hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
-    checks = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
-    evidence = details.get("shellbag_evidence") if isinstance(details.get("shellbag_evidence"), Mapping) else {}
-    relationship = (
-        evidence.get("relationship_evidence")
-        if isinstance(evidence.get("relationship_evidence"), Mapping)
-        else {}
-    )
-    relationship_profile = (
-        details.get("shellbag_relationship_profile")
-        if isinstance(details.get("shellbag_relationship_profile"), Mapping)
-        else {}
-    )
-    activity = evidence.get("activity_evidence") if isinstance(evidence.get("activity_evidence"), Mapping) else {}
-    report_grade = (
-        details.get("shellbag_report_grade_assessment")
-        if isinstance(details.get("shellbag_report_grade_assessment"), Mapping)
-        else {}
-    )
-    transaction = (
-        details.get("registry_transaction_replay_profile")
-        if isinstance(details.get("registry_transaction_replay_profile"), Mapping)
-        else {}
-    )
-    reportability = shellbag_reportability_decision(report_grade, details)
-    source = {
-        "source_path": str(details.get("source_path") or ""),
-        "source_sha256": str(hashes.get("sha256") or ""),
-        "source_format": str(details.get("source_format") or ""),
-        "hive_name": str(details.get("hive_name") or ""),
-        "user_hive_scope": str(details.get("user_hive_scope") or ""),
-        "cell_offset": details.get("cell_offset", ""),
-        "hbin_offset": details.get("hbin_offset", ""),
-    }
-    row_identity = {
-        "candidate_source": str(details.get("candidate_source") or ""),
-        "source_key_path": str(details.get("source_key_path") or ""),
-        "shellbag_section": str(details.get("shellbag_section") or ""),
-        "bag_id_candidates": list(details.get("bag_id_candidates") or []),
-        "node_id_candidates": list(details.get("node_id_candidates") or []),
-        "allocation_status": str(details.get("allocation_status") or ""),
-    }
-    manifest_payload = {
-        "manifest_version": "shellbag-depth-manifest-v1",
-        "parser_version": PARSER_VERSION,
-        "commercial_batch_id": "commercial-uplift-011-015",
-        "item_number": 15,
-        "qc_prep_item_number": QC_PREP_SHELLBAG_ITEM,
-        "qc_prep_item_goal": "Deepen ShellBags binary shell item decoding, BagMRU/Bags relationship, transaction logs, and deleted/slack checks.",
-        "gap_id": "#15",
-        "artifact_type": "shellbag-native-candidate",
-        "qc_prep_contract": {
-            "implemented": [
-                "reg-export ShellBags key mapping",
-                "native NTUSER/UsrClass key-tree and string-pivot candidates",
-                "BagMRU/Bags bag/node ID candidate extraction",
-                "cell/hbin offset, allocation state, timestamp, and transaction-log status disclosure",
-                "trusted ShellBagsExplorer/SBECmd-style diff helper",
-            ],
-            "usable_outputs": ["shellbag-key", "shellbag-native-candidate"],
-            "validated_by_current_tests": [
-                "native hive ShellBags candidate fixture",
-                "BagMRU/Bags relationship candidate manifest",
-                "trusted ShellBags diff pass",
-                "cell-offset mismatch blocking",
-            ],
-            "not_report_grade_until": [
-                "binary shell item payloads are decoded and validated",
-                "BagMRU/Bags relationships are diffed against a dedicated parser",
-                "LOG1/LOG2 transaction logs are replayed or absence documented",
-                "deleted/slack ShellBag candidates pass known-answer validation",
-            ],
-        },
-        "source": source,
-        "row_identity": row_identity,
-        "row_identity_hash": shellbag_stable_sha256(row_identity),
-        "key_tree_decoding": {
-            "regf_header_valid": bool(checks.get("regf_header_valid")),
-            "key_path_contains_shellbags_root": bool(checks.get("key_path_contains_shellbags_root")),
-            "candidate_source": str(details.get("candidate_source") or ""),
-            "key_path_confidence": str(details.get("key_path_confidence") or ""),
-            "value_names": list(details.get("value_names") or [])[:50],
-            "path_candidates": list(details.get("shellbag_path_candidates") or [])[:50],
-        },
-        "bag_relationship": {
-            "shellbag_section": str(details.get("shellbag_section") or ""),
-            "bag_id_candidates": list(relationship.get("bag_id_candidates") or details.get("bag_id_candidates") or []),
-            "node_id_candidates": list(relationship.get("node_id_candidates") or details.get("node_id_candidates") or []),
-            "relationship_status": str(relationship.get("bag_node_relationship_status") or ""),
-            "relationship_profile_version": str(relationship_profile.get("profile_version") or ""),
-            "relationship_profile_hash": str(
-                relationship_profile.get("relationship_hash")
-                or relationship.get("relationship_profile_hash")
-                or ""
-            ),
-            "node_path_segments": list(relationship_profile.get("node_path_segments") or [])[:50],
-            "numeric_node_segments": list(relationship_profile.get("numeric_node_segments") or [])[:50],
-            "node_depth": int(relationship_profile.get("node_depth") or 0),
-            "parent_node_path": str(relationship_profile.get("parent_node_path") or ""),
-            "bag_node_relationship_validated": bool(SHELLBAG_CAPABILITIES["bag_node_relationship_validation"]),
-        },
-        "activity_timestamps": {
-            "timestamp_candidates": [dict(item) for item in details.get("timestamp_candidates") or [] if isinstance(item, Mapping)][:25],
-            "primary_timestamp": str(activity.get("primary_timestamp") or ""),
-            "primary_timestamp_source": str(activity.get("primary_timestamp_source") or ""),
-            "timestamp_source_labeling_available": bool(checks.get("has_timestamp_candidate")),
-        },
-        "binary_payload": {
-            "binary_shell_item_decoding_available": bool(checks.get("binary_shell_item_decoding_available")),
-            "binary_shell_item_decode_capability": bool(SHELLBAG_CAPABILITIES["binary_shell_item_decode"]),
-            "safe_indexing_mode": "key-path-value-preview-only",
-            "blocker": "shellbag-binary-shell-item-decode-required",
-        },
-        "transaction_and_deleted_state": {
-            "transaction_log_status": str(transaction.get("transaction_log_status") or ""),
-            "transaction_log_replay_applied": bool(transaction.get("transaction_log_replay_applied")),
-            "transaction_log_replay_capability": bool(SHELLBAG_CAPABILITIES["transaction_log_replay"]),
-            "deleted_slack_validation_available": bool(SHELLBAG_CAPABILITIES["deleted_slack_shellbag_validation"]),
-            "allocation_status": str(details.get("allocation_status") or ""),
-            "blockers": [
-                "shellbag-transaction-log-replay-required",
-                "shellbag-deleted-slack-validation-required",
-            ],
-        },
-        "citation_refs": [
-            {
-                "kind": "shellbag-source-hive",
-                "source_path": str(details.get("source_path") or ""),
-                "source_sha256": str(hashes.get("sha256") or ""),
-            },
-            {
-                "kind": "shellbag-key-path",
-                "source_key_path": str(details.get("source_key_path") or ""),
-                "cell_offset": details.get("cell_offset", ""),
-                "hbin_offset": details.get("hbin_offset", ""),
-            },
-            {
-                "kind": "shellbag-bag-node-candidates",
-                "bag_id_candidates": list(details.get("bag_id_candidates") or []),
-                "node_id_candidates": list(details.get("node_id_candidates") or []),
-                "relationship_profile_hash": str(relationship_profile.get("relationship_hash") or ""),
-            },
-            {
-                "kind": "shellbag-timestamp-candidates",
-                "timestamp_candidates": [dict(item) for item in details.get("timestamp_candidates") or [] if isinstance(item, Mapping)][:10],
-            },
-            {
-                "kind": "shellbag-transaction-log-state",
-                "transaction_log_status": str(transaction.get("transaction_log_status") or ""),
-                "transaction_log_replay_applied": bool(transaction.get("transaction_log_replay_applied")),
-            },
-        ],
-        "reportability": {
-            "allowed_use": reportability["allowed_use"],
-            "decision": reportability["decision"],
-            "report_grade_ready": bool(report_grade.get("report_grade_ready")),
-            "commercial_grade_ready": False,
-            "folder_access_final": False,
-            "blockers": reportability["blockers"],
-        },
-        "required_before_commercial_grade": [
-            "decode and validate binary shell-item payloads",
-            "validate BagMRU/Bags relationships against ShellBagsExplorer/SBECmd output",
-            "replay LOG1/LOG2 transaction logs or document absence",
-            "validate deleted/slack ShellBag candidates before testimony",
-        ],
-    }
-    manifest_payload["manifest_sha256"] = shellbag_stable_sha256(manifest_payload)
-    return manifest_payload
-
-
-def shellbag_analyst_review_profile(details: Mapping[str, object]) -> dict[str, object]:
-    report_grade = (
-        details.get("shellbag_report_grade_assessment")
-        if isinstance(details.get("shellbag_report_grade_assessment"), Mapping)
-        else {}
-    )
-    validation_checks = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
-    source_values = {
-        "source_key_path": str(details.get("source_key_path") or ""),
-        "shellbag_section": str(details.get("shellbag_section") or ""),
-        "user_hive_scope": str(details.get("user_hive_scope") or ""),
-        "bag_id_candidates": list(details.get("bag_id_candidates") or [])[:25],
-        "node_id_candidates": list(details.get("node_id_candidates") or [])[:25],
-        "timestamp_candidates": list(details.get("timestamp_candidates") or [])[:10],
-    }
-    failed_checks = sorted(str(key) for key, value in validation_checks.items() if not bool(value))
-    blockers = sorted(set(str(item) for item in report_grade.get("blockers", []) if str(item)) | set(SHELLBAG_BLOCKERS))
-    return {
-        "profile_version": "shellbag-analyst-review-profile-v1",
-        "artifact_type": "shellbag-native-candidate",
-        "severity": "medium",
-        "summary": "ShellBags folder-view-history pivot with key, BagMRU/Bags, and timestamp context.",
-        "evidence_interpretation": "folder view/access-related registry state candidate; shell item payload and transaction history still need validation",
-        "not_proof_of": ["user opened a folder at a precise time", "final shell-item path semantics", "deleted/slack recovery fact"],
-        "analyst_questions": [
-            "Does ShellBagsExplorer/SBECmd confirm the same key, bag ID, node ID, and timestamp?",
-            "Does NTUSER/UsrClass correlation support the same folder-view history?",
-            "Are transaction logs or deleted cells needed before reporting this folder access?",
-        ],
-        "primary_pivots": [
-            "source_key_path",
-            "shellbag_section",
-            "user_hive_scope",
-            "bag_id_candidates",
-            "node_id_candidates",
-            "timestamp_candidates",
-        ],
-        "source_field_values": {key: value for key, value in source_values.items() if value not in ("", None, [], {})},
-        "correlation_targets": ["Registry key tree", "MFT", "USN", "JumpList", "Recent files", "ShellBagsExplorer/SBECmd"],
-        "risk_tags": sorted(set([str(item) for item in details.get("risk_flags") or []] + ["folder-view-history"])),
-        "validation_required": bool(report_grade.get("status") != "report-grade-ready" or failed_checks),
-        "failed_validation_checks": failed_checks,
-        "report_grade_ready": bool(report_grade.get("report_grade_ready")),
-        "commercial_blockers": blockers,
-        "report_guidance": (
-            "Use ShellBags as folder-view-history review pivots. Final folder-access claims require shell-item payload "
-            "decoding, transaction/deleted-state validation, and trusted parser diff evidence."
-        ),
-    }
-
-
-def _shellbag_entry_record(
-    path: Path,
-    blob: bytes,
-    source_hashes: Mapping[str, str],
-    transaction_log_evidence: Mapping[str, object],
-    *,
-    node_cell: Mapping[str, object],
-    value_cells: Mapping[int, Mapping[str, object]],
-    source_key_path: str,
-    node_key_path: str,
-    shell_path: str,
-    slot_name: str,
-    depth: int,
-    bagmru_root: bool,
-    decoded: Mapping[str, object],
-    item_cell: Mapping[str, object] | None,
-) -> ArtifactRecord:
-    node_slot = None
-    for value_offset in registry_value_offsets_for_key(blob, node_cell):
-        value_cell = value_cells.get(value_offset)
-        if value_cell is None or str(value_cell.get("name") or "") != "NodeSlot":
-            continue
-        raw = registry_value_data_bytes(blob, value_cell, max_size=MAX_SHELLBAG_VALUE_BYTES)
-        if len(raw) >= 4:
-            node_slot = int.from_bytes(raw[:4], "little")
-    return ArtifactRecord(
-        provider="windows-shellbags",
-        artifact_type="shellbag-entry",
-        path=str(path),
-        supported=True,
-        details={
-            "parser": "windows-shellbags-native-hive",
-            "parser_version": PARSER_VERSION,
-            "coverage_status": "native-bagmru-shellitem-decode",
-            "reportability": "review",
-            "source_path": str(path.resolve()),
-            "source_format": "registry-hive",
-            "source_hashes": dict(source_hashes),
-            "hive_name": path.name,
-            "hive_hint": hive_hint_from_path(path),
-            "user_hive_scope": "ntuser" if path.name.upper() == "NTUSER.DAT" else "usrclass",
-            "candidate_source": "native-bagmru-decode",
-            "source_key_path": source_key_path,
-            "node_key_path": node_key_path,
-            "shellbag_section": shellbag_section(source_key_path),
-            "shell_path": shell_path,
-            "slot_name": slot_name,
-            "node_slot": node_slot,
-            "bagmru_root": bagmru_root,
-            "depth": depth,
-            "shellitem": dict(decoded),
-            "shellitem_value_cell_offset": int(item_cell.get("cell_offset") or 0)
-            if item_cell is not None
-            else 0,
-            "key_cell_offset": int(node_cell.get("cell_offset") or 0),
-            "key_last_written_at": str(node_cell.get("last_written_at") or ""),
-            "registry_transaction_log_evidence": dict(transaction_log_evidence),
-            "validation_checks": {
-                "key_cell_parsed": True,
-                "shellitem_value_present": bagmru_root or item_cell is not None,
-                "shellitem_decoded": bagmru_root
-                or (bool(str(decoded.get("name") or ""))
-                    and str(decoded.get("decode_method") or "") != "unresolved"),
-            },
-            "commercial_grade_ready": False,
-            "commercial_grade_blockers": list(SHELLBAG_BLOCKERS),
-        },
-    )
-
-
-def _shellbag_key_cell_path(
-    key_cells: Mapping[int, Mapping[str, object]],
-    cell: Mapping[str, object],
-) -> str:
-    parts: list[str] = []
-    seen: set[int] = set()
-    current: Mapping[str, object] | None = cell
-    while current is not None:
-        offset = int(current.get("cell_offset") or 0)
-        if offset in seen:
-            break
-        seen.add(offset)
-        name = str(current.get("name") or "")
-        if name:
-            parts.append(name)
-        current = key_cells.get(int(current.get("parent_cell_offset") or 0))
-    return "\\".join(reversed(parts))
-
-
-def iter_native_shellbag_entries(
-    path: Path,
-    blob: bytes,
-    cell_candidates: Sequence[Mapping[str, object]],
-    source_hashes: Mapping[str, str],
-    transaction_log_evidence: Mapping[str, object],
-) -> Iterable[ArtifactRecord]:
-    """Walk BagMRU key trees and decode each node's shellitem into a path."""
-    key_cells = {
-        int(candidate.get("cell_offset") or 0): candidate
-        for candidate in cell_candidates
-        if candidate.get("cell_kind") == "key-node"
-    }
-    value_cells = {
-        int(candidate.get("cell_offset") or 0): candidate
-        for candidate in cell_candidates
-        if candidate.get("cell_kind") == "value"
-    }
-    emitted = 0
-    for root_cell in sorted(key_cells.values(), key=lambda item: int(item.get("cell_offset") or 0)):
-        if emitted >= MAX_SHELLBAG_DECODE_ENTRIES:
-            return
-        if str(root_cell.get("name") or "").lower() != "bagmru":
-            continue
-        source_key_path = _shellbag_key_cell_path(key_cells, root_cell)
-        if not is_shellbag_source(source_key_path):
-            continue
-        yield _shellbag_entry_record(
-            path,
-            blob,
-            source_hashes,
-            transaction_log_evidence,
-            node_cell=root_cell,
-            value_cells=value_cells,
-            source_key_path=source_key_path,
-            node_key_path=source_key_path,
-            shell_path="",
-            slot_name="",
-            depth=0,
-            bagmru_root=True,
-            decoded={},
-            item_cell=None,
-        )
-        emitted += 1
-        queue: list[tuple[Mapping[str, object], str, int, str]] = [
-            (root_cell, "", 0, source_key_path)
-        ]
-        while queue and emitted < MAX_SHELLBAG_DECODE_ENTRIES:
-            node_cell, parent_shell_path, depth, node_key_path = queue.pop(0)
-            if depth > MAX_SHELLBAG_DECODE_DEPTH:
-                continue
-            value_by_name: dict[str, Mapping[str, object]] = {}
-            for value_offset in registry_value_offsets_for_key(blob, node_cell):
-                value_cell = value_cells.get(value_offset)
-                if value_cell is not None:
-                    value_by_name[str(value_cell.get("name") or "")] = value_cell
-            for child_offset in registry_subkey_offsets_for_key(blob, node_cell):
-                child_cell = key_cells.get(child_offset)
-                if child_cell is None:
-                    continue
-                slot_name = str(child_cell.get("name") or "")
-                item_cell = value_by_name.get(slot_name)
-                item_blob = (
-                    registry_value_data_bytes(blob, item_cell, max_size=MAX_SHELLBAG_VALUE_BYTES)
-                    if item_cell is not None
-                    else b""
-                )
-                decoded = decode_shellitem(item_blob) if item_blob else {}
-                item_name = (str(decoded.get("name") or "") or f"<slot-{slot_name}>").rstrip("\\")
-                child_shell_path = (
-                    f"{parent_shell_path}\\{item_name}" if parent_shell_path else item_name
-                )
-                child_key_path = f"{node_key_path}\\{slot_name}"
-                yield _shellbag_entry_record(
-                    path,
-                    blob,
-                    source_hashes,
-                    transaction_log_evidence,
-                    node_cell=child_cell,
-                    value_cells=value_cells,
-                    source_key_path=source_key_path,
-                    node_key_path=child_key_path,
-                    shell_path=child_shell_path,
-                    slot_name=slot_name,
-                    depth=depth + 1,
-                    bagmru_root=False,
-                    decoded=decoded,
-                    item_cell=item_cell,
-                )
-                emitted += 1
-                queue.append((child_cell, child_shell_path, depth + 1, child_key_path))
-
-
-def is_shellbag_source(value: str) -> bool:
-    normalized = value.lower().replace("/", "\\")
-    parts = [part for part in normalized.split("\\") if part]
-    return "bagmru" in parts or ("bags" in parts and "shell" in parts)
-
-
-def shellbag_section(source_key_path: str) -> str:
-    normalized = source_key_path.lower().replace("/", "\\")
-    parts = [part for part in normalized.split("\\") if part]
-    if "bagmru" in parts:
-        return "bagmru"
-    if "bags" in parts:
-        return "bags"
-    return "unknown"
-
-
-def shellbag_bag_id_candidates(
-    source_key_path: str,
-    value_names: Sequence[str],
-    value_previews: Mapping[str, str],
-    section: str,
-) -> list[str]:
-    candidates: set[str] = set()
-    parts = [part for part in source_key_path.replace("/", "\\").split("\\") if part]
-    if section == "bags":
-        candidates.update(part for part in parts if part.isdigit())
-    node_slot = value_previews.get("NodeSlot", "")
-    if node_slot.isdigit():
-        candidates.add(node_slot)
-    for value in value_names:
-        if value.lower() not in {"nodeslot", "bagid"}:
-            continue
-        preview = value_previews.get(value, "")
-        if preview.isdigit():
-            candidates.add(preview)
-    return sorted(candidates, key=lambda item: (len(item), item))
-
-
-def shellbag_node_id_candidates(source_key_path: str, value_names: Sequence[str], section: str) -> list[str]:
-    candidates: set[str] = set()
-    parts = [part for part in source_key_path.replace("/", "\\").split("\\") if part]
-    if section == "bagmru":
-        candidates.update(part for part in parts if part.isdigit())
-        candidates.update(value for value in value_names if value.isdigit())
-    return sorted(candidates, key=lambda item: (len(item), item))
-
-
-def shellbag_path_candidates(source_key_path: str, values: Iterable[str]) -> list[str]:
-    candidates: set[str] = set()
-    for value in [source_key_path, *list(values)]:
-        if re.search(r"(?i)[a-z]:\\", value) or value.startswith("\\\\"):
-            candidates.add(value)
-        if is_shellbag_source(value):
-            candidates.add(value)
-    return sorted(candidates)
-
-
-def shellbag_timestamp_candidates(key_last_written_at: str, metadata: Mapping[str, object]) -> list[dict[str, object]]:
-    candidates: list[dict[str, object]] = []
-    if key_last_written_at:
-        candidates.append(
-            {
-                "timestamp": key_last_written_at,
-                "source": "registry_key_last_write",
-                "confidence": "candidate",
-            }
-        )
-    hive_timestamp = str(metadata.get("last_written_at") or "")
-    if hive_timestamp:
-        candidates.append(
-            {
-                "timestamp": hive_timestamp,
-                "source": "hive_header_last_write",
-                "confidence": "context",
-            }
-        )
-    return candidates
-
-
-def shellbag_validation_checks(
-    metadata: Mapping[str, object],
-    *,
-    candidate_source: str,
-    source_key_path: str,
-    key_last_written_at: str,
-    bag_ids: Sequence[str],
-    node_ids: Sequence[str],
-    transaction_log_evidence: Mapping[str, object],
-) -> dict[str, object]:
-    return {
-        "regf_header_valid": bool(metadata.get("regf_valid")),
-        "native_key_tree_candidate": candidate_source == "native-key-tree",
-        "native_string_pivot_candidate": candidate_source == "native-string-pivot",
-        "key_path_contains_shellbags_root": is_shellbag_source(source_key_path),
-        "has_key_last_write_timestamp": bool(key_last_written_at),
-        "has_bag_id_candidate": bool(bag_ids),
-        "has_node_id_candidate": bool(node_ids),
-        "transaction_log_context_recorded": bool(transaction_log_evidence.get("status")),
-        "transaction_log_input_present": int(transaction_log_evidence.get("present_count") or 0) > 0,
-        "binary_shell_item_decoding_available": False,
-        "transaction_log_replay_available": False,
-        "deleted_shellbag_validation_available": False,
-        "requires_dedicated_shellbags_parser": True,
-    }
-
-
-def shellbag_validation_matrix(checks: Mapping[str, object]) -> list[dict[str, object]]:
-    labels = {
-        "regf_header_valid": ("Registry hive header", "critical"),
-        "native_key_tree_candidate": ("Native key tree candidate", "high"),
-        "native_string_pivot_candidate": ("Native string pivot candidate", "medium"),
-        "key_path_contains_shellbags_root": ("ShellBags key path", "high"),
-        "has_key_last_write_timestamp": ("Key last-write timestamp", "medium"),
-        "has_bag_id_candidate": ("Bag ID candidate", "medium"),
-        "has_node_id_candidate": ("Node ID candidate", "medium"),
-        "transaction_log_context_recorded": ("Transaction-log context recorded", "medium"),
-        "transaction_log_input_present": ("Transaction-log input present", "medium"),
-        "binary_shell_item_decoding_available": ("Binary shell item decode", "critical"),
-        "transaction_log_replay_available": ("Transaction log replay", "critical"),
-        "deleted_shellbag_validation_available": ("Deleted ShellBag validation", "critical"),
-        "requires_dedicated_shellbags_parser": ("Dedicated ShellBags parser", "critical"),
-    }
-    matrix: list[dict[str, object]] = []
-    for key, value in checks.items():
-        if key == "transaction_log_input_present":
-            continue
-        label, severity = labels.get(key, (key.replace("_", " "), "medium"))
-        negative_requirement = key.startswith("requires_")
-        passed = bool(value)
-        if negative_requirement:
-            passed = not bool(value)
-        matrix.append({"id": key.replace("_", "-"), "label": label, "passed": passed, "severity": severity, "detail": value})
-    return matrix
+            yield from collect_native_shellbag_hive(path, context=context)
 
 
 def shellbag_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[str, object]]:
@@ -1059,101 +117,6 @@ def shellbag_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[str
     if trusted_diff.get("status") == "pass":
         satisfied.append("trusted ShellBags parser diff pass")
     return [build_accuracy_gate(15, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
-
-
-def shellbag_report_grade_assessment(
-    validation_matrix: list[dict[str, object]],
-    *,
-    validation_required: bool,
-    extra_blockers: Sequence[str],
-) -> dict[str, object]:
-    failed = [str(item.get("id")) for item in validation_matrix if not item.get("passed")]
-    blockers = set(extra_blockers)
-    blockers.update(f"validation-check-failed:{item}" for item in failed)
-    if validation_required:
-        blockers.add("shellbags-validation-required")
-    return {
-        "report_grade_ready": False,
-        "status": "validation-required" if failed else "triage-validated-report-grade-blocked",
-        "blockers": sorted(blockers),
-        "validated_strengths": [str(item.get("id")) for item in validation_matrix if item.get("passed")],
-        "commercial_gap_ids": ["#15"],
-        "next_validation_step": "Validate ShellBag binary shell-item payloads, bag/node relationships, transaction logs, and deleted/slack candidates with a dedicated parser before report-grade use.",
-    }
-
-
-def shellbag_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[str, object]:
-    matrix = details.get("shellbag_validation_matrix") if isinstance(details.get("shellbag_validation_matrix"), list) else []
-    report_grade = (
-        details.get("shellbag_report_grade_assessment")
-        if isinstance(details.get("shellbag_report_grade_assessment"), Mapping)
-        else {}
-    )
-    hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
-    trusted_diff = (
-        details.get("shellbag_trusted_diff")
-        if isinstance(details.get("shellbag_trusted_diff"), Mapping)
-        else {"status": "not-attached"}
-    )
-    reportability_decision = shellbag_reportability_decision(report_grade, details)
-    return {
-        "batch_id": "commercial-uplift-011-015",
-        "item_numbers": [15],
-        "qc_prep_item_numbers": [QC_PREP_SHELLBAG_ITEM],
-        "implementation_track": "native-parser-depth",
-        "objective": "Expose ShellBags key-tree evidence, offset provenance, shell-item decoding blockers, and transaction-log gaps for #15 / QC-prep #30.",
-        "source_refs": [
-            f"source_path:{details.get('source_path', '')}",
-            f"source_sha256:{hashes.get('sha256', '')}",
-            f"cell_offset:{details.get('cell_offset', '')}",
-            f"hbin_offset:{details.get('hbin_offset', '')}",
-            f"section:{details.get('shellbag_section', '')}",
-        ],
-        "passed_validation_matrix_ids": [
-            str(item.get("id")) for item in matrix if isinstance(item, Mapping) and item.get("passed")
-        ],
-        "failed_validation_matrix_ids": [
-            str(item.get("id")) for item in matrix if isinstance(item, Mapping) and not item.get("passed")
-        ],
-        "report_grade_status": str(report_grade.get("status") or ""),
-        "reportability_decision": reportability_decision,
-        "commercial_blockers": list(report_grade.get("blockers") or []),
-        "shellbag_trusted_diff": trusted_diff,
-        "large_data_controls": {
-            "bounded_hive_scan": True,
-            "max_hive_scan_bytes": MAX_HIVE_CELL_SCAN_BYTES,
-            "allocation_status": str(details.get("allocation_status") or ""),
-            "shell_item_binary_decode_required_for_commercial_claims": True,
-            "transaction_log_replay_required_for_commercial_claims": True,
-        },
-        "next_internal_step": "Finish Shell Item binary decoding, BagMRU/Bags relationship validation, and transaction-log replay.",
-        "external_evidence_required": True,
-    }
-
-
-def shellbag_reportability_decision(
-    report_grade: Mapping[str, object],
-    details: Mapping[str, object],
-) -> dict[str, object]:
-    blockers = set(str(item) for item in report_grade.get("blockers") or [])
-    blockers.add("shellbag-binary-shell-item-decode-required")
-    blockers.add("shellbag-transaction-log-replay-required")
-    blockers.add("shellbags-trusted-diff-required")
-    return {
-        "profile_version": "shellbag-reportability-decision-v1",
-        "commercial_gap_id": "#15",
-        "qc_prep_item_number": QC_PREP_SHELLBAG_ITEM,
-        "decision": "do-not-report-folder-access-as-final",
-        "allowed_use": "folder-view-history-triage-pivot",
-        "blockers": sorted(blockers),
-        "source_location_available": bool(details.get("cell_offset") not in (None, "") or details.get("source_hashes")),
-        "required_before_report": [
-            "binary shell-item payload decoded and validated",
-            "BagMRU/Bags relationship diffed against dedicated parser",
-            "transaction logs replayed or explicit absence documented",
-            "deleted/slack ShellBag candidates validated before testimony",
-        ],
-    }
 
 
 def build_shellbag_trusted_diff(
@@ -1366,22 +329,706 @@ def normalized_int_text(value: object) -> str:
         return normalized_diff_value(text)
 
 
-def shellbag_candidate_confidence(
-    checks: Mapping[str, object],
-    key_path_confidence: str,
-    candidate_source: str,
-) -> float:
-    score = 0.3
-    if checks.get("regf_header_valid"):
-        score += 0.12
-    if candidate_source == "native-key-tree":
-        score += 0.12
-    if key_path_confidence == "parent-chain":
-        score += 0.1
-    if checks.get("has_key_last_write_timestamp"):
-        score += 0.08
-    if checks.get("has_bag_id_candidate"):
-        score += 0.06
-    if checks.get("has_node_id_candidate"):
-        score += 0.06
-    return round(min(score, 0.74), 2)
+# ---------------------------------------------------------------------------
+# Native ShellBags: BagMRU walk over the full hive + shell item decoding.
+# ---------------------------------------------------------------------------
+
+SHELLBAG_BAGMRU_PARENT_NAMES = {"shell", "shellnoroam"}
+SHELL_ITEM_BEEF0004 = b"\x04\x00\xef\xbe"
+SHELL_ITEM_KNOWN_GUIDS = {
+    "20d04fe0-3aea-1069-a2d8-08002b30309d": "My Computer",
+    "59031a47-3f72-44a7-89c5-5595fe6b30ee": "Users",
+    "031e4825-7b94-4dc3-b131-e946b44c8dd5": "Libraries",
+    "f02c1a0d-be21-4350-88b0-7367fc96ef3c": "Network",
+    "208d2c60-3aea-1069-a2d7-08002b30309d": "My Network Places",
+    "679f85cb-0220-4080-b29b-5540cc05aab6": "Quick Access",
+    "21ec2020-3aea-1069-a2dd-08002b30309d": "Control Panel",
+    "26ee0668-a00a-44d7-9371-beb064c98683": "Control Panel",
+    "2227a280-3aea-1069-a2de-08002b30309d": "Printers",
+    "645ff040-5081-101b-9f08-00aa002f954e": "Recycle Bin",
+    "450d8fba-ad25-11d0-98a8-0800361b1103": "My Documents",
+    "b4bfcc3a-db2c-424c-b029-7fe99a87c641": "Desktop",
+    "fdd39ad0-238f-46af-adb4-6c85480369c7": "Documents",
+    "d3162b92-9365-467a-956b-92703aca08af": "Documents",
+    "33e28130-4e1e-4676-835a-98395c3bc3bb": "Pictures",
+    "24ad3ad4-a569-4530-98e1-ab02f9417aa8": "Pictures",
+    "4bd8d571-6d19-48d3-be97-422220080e43": "Music",
+    "3dfdf296-dbec-4fb4-81d1-6a3438bcf4de": "Music",
+    "18989b1d-99b5-455b-841c-ab7c74e4ddfc": "Videos",
+    "f86fa3ab-70d2-4fc7-9c99-fcbf05467f3a": "Videos",
+    "374de290-123f-4565-9164-39c4925e467b": "Downloads",
+    "088e3905-0323-4b02-9826-5d99428e115f": "Downloads",
+    "0762d272-c50a-4bb0-a382-697dcd729b80": "Users",
+    "1ac14e77-02e7-4e5d-b744-2eb1ae5198b7": "System32",
+    "f38bf404-1d43-42f2-9305-67de0b28fc23": "Windows",
+    "905e63b6-c1bf-494e-b29c-65b732d3d21a": "Program Files",
+    "7c5a40ef-a0fb-4bfc-874a-c0f2e0b9fa8e": "Program Files (x86)",
+    "6d809377-6af0-444b-8957-a3773f02200e": "Program Files",
+    "62ab5d82-fdc1-4dc3-a9dd-070d1d495d97": "ProgramData",
+    "a39193cc-55b8-4244-aa44-e9bc5db04762": "ProgramData",
+    "b6ebfb86-6907-413c-9af7-4fc2abf07cc5": "Public",
+    "9339a431-9b4a-432e-a46b-95d20c17ea11": "Common AppData",
+    "5e6c858f-0e22-4760-9afe-ea3317b67173": "User Profile",
+    "a8cdff1c-4878-43be-b5fd-f8091c1c60d0": "Documents",
+    "e88865ea-0e1c-4e20-9aa6-edcd0212c87c": "Gallery",
+    "f874310e-b6b7-47dc-bc84-b9e6b38f5903": "Home",
+    "018d5c66-4533-4307-9b53-224de2ed1fe6": "OneDrive",
+    "a0953c92-50dc-43bf-be83-3742fed03c9c": "Videos",
+    "7b0db17d-9cd2-4a93-9733-46cc89022e7c": "Documents Library",
+    "2112ab0a-c86a-4ffe-a368-0de96e47012e": "Music Library",
+    "a990ae9f-a03b-4e80-94bc-9912d7504104": "Pictures Library",
+    "491e922f-5643-4af4-a7eb-4e7a138d8174": "Videos Library",
+    "3080f90d-d7ad-11d9-bd98-0000947b0257": "Desktop",
+    "35786d3c-b075-49b9-88dd-029876e11c01": "Portable Devices",
+    "9113a02d-00a3-46b9-bc5f-9c04daddd5d7": "Device Center",
+    "871c5380-42a0-1069-a2ea-08002b30309d": "Internet Explorer",
+    "e17d4fc0-5564-11d1-83f2-00a0c90dc849": "Search Results",
+    "9343812e-1c37-4a49-a12e-4b2d810d956b": "Search Home",
+    "04731b67-d933-450a-90e6-4acd2e9408fe": "Search Folder",
+    "1cf1260c-4dd0-4ebb-811f-33c572699fde": "Music",
+    "3add1653-eb32-4cb0-bbd7-dfa0abb5acca": "Pictures",
+    "a0c69a99-21c8-4671-8703-7934162fcf1d": "Music",
+    "b3690e58-e961-423b-b687-386ebfd83239": "Pictures",
+    "f3364ba0-65b9-11ce-a9ba-00aa004ae837": "Shell File System Folder",
+}
+
+
+def shell_item_guid_name(raw: bytes) -> tuple[str, str]:
+    import uuid
+
+    if len(raw) < 16:
+        return "", ""
+    try:
+        guid = str(uuid.UUID(bytes_le=bytes(raw[:16]))).lower()
+    except ValueError:
+        return "", ""
+    return guid, SHELL_ITEM_KNOWN_GUIDS.get(guid, "")
+
+
+def shell_item_ansi(raw: bytes) -> str:
+    end = raw.find(b"\x00")
+    if end >= 0:
+        raw = raw[:end]
+    if not raw:
+        return ""
+    try:
+        return raw.decode("cp949")
+    except UnicodeDecodeError:
+        return raw.decode("cp1252", errors="replace")
+
+
+def shell_item_utf16(raw: bytes) -> str:
+    cursor = 0
+    while cursor + 1 < len(raw):
+        if raw[cursor] == 0 and raw[cursor + 1] == 0:
+            break
+        cursor += 2
+    return raw[:cursor].decode("utf-16-le", errors="replace")
+
+
+def shell_item_dos_datetime(date_value: int, time_value: int) -> str:
+    """FAT date/time from a shell item; Explorer stores these in UTC."""
+    if not date_value:
+        return ""
+    try:
+        moment = dt.datetime(
+            1980 + (date_value >> 9),
+            (date_value >> 5) & 0x0F,
+            date_value & 0x1F,
+            time_value >> 11,
+            (time_value >> 5) & 0x3F,
+            (time_value & 0x1F) * 2,
+            tzinfo=dt.timezone.utc,
+        )
+    except ValueError:
+        return ""
+    return moment.isoformat()
+
+
+def shell_item_longest_utf16(raw: bytes, *, min_chars: int = 2) -> str:
+    best = ""
+    for alignment in (0, 1):
+        run: list[str] = []
+        for index in range(alignment, len(raw) - 1, 2):
+            code = raw[index] | (raw[index + 1] << 8)
+            if 0x20 <= code < 0xD800 or 0xE000 <= code < 0xFFFE:
+                run.append(chr(code))
+                continue
+            if len(run) >= min_chars and len(run) > len(best):
+                best = "".join(run)
+            run = []
+        if len(run) >= min_chars and len(run) > len(best):
+            best = "".join(run)
+    return best.strip()
+
+
+def split_shell_item_list(blob: bytes, *, limit: int = 4096) -> list[bytes]:
+    items: list[bytes] = []
+    cursor = 0
+    while cursor + 2 <= len(blob) and len(items) < limit:
+        size = int.from_bytes(blob[cursor : cursor + 2], "little")
+        if size == 0:
+            break
+        if size < 3 or cursor + size > len(blob):
+            items.append(blob[cursor:])
+            break
+        items.append(blob[cursor : cursor + size])
+        cursor += size
+    return items
+
+
+def decode_beef0004_block(item: bytes) -> dict[str, object]:
+    index = item.find(SHELL_ITEM_BEEF0004)
+    if index < 4:
+        return {}
+    block = item[index - 4 :]
+    if len(block) < 0x14:
+        return {}
+    version = int.from_bytes(block[2:4], "little")
+    result: dict[str, object] = {
+        "extension_version": version,
+        "created_at": shell_item_dos_datetime(
+            int.from_bytes(block[8:10], "little"), int.from_bytes(block[10:12], "little")
+        ),
+        "accessed_at": shell_item_dos_datetime(
+            int.from_bytes(block[12:14], "little"), int.from_bytes(block[14:16], "little")
+        ),
+    }
+    if version >= 7 and len(block) >= 0x1C:
+        reference = int.from_bytes(block[0x14:0x1C], "little")
+        result["mft_entry"] = reference & 0xFFFFFFFFFFFF
+        result["mft_sequence"] = reference >> 48
+    if version >= 9:
+        name_offset = 0x2E
+    elif version >= 8:
+        name_offset = 0x2A
+    elif version >= 7:
+        name_offset = 0x26
+    elif version >= 3:
+        name_offset = 0x14
+    else:
+        name_offset = 0
+    if name_offset and name_offset < len(block):
+        long_name = shell_item_utf16(block[name_offset:])
+        if long_name:
+            result["long_name"] = long_name
+    return result
+
+
+def decode_shell_item_entry(item: bytes) -> dict[str, object]:
+    """Decode one SHITEMID into kind/name/times; never raises."""
+    if len(item) < 3:
+        return {"item_kind": "truncated", "name": "", "item_type": 0, "decode_method": "truncated"}
+    item_type = item[2]
+    result: dict[str, object] = {"item_type": item_type, "item_type_hex": f"0x{item_type:02x}", "size": len(item)}
+    signature = item[6:10] if len(item) >= 10 else b""
+    if item_type == 0x1F and signature == b"\xd5\xdf\xa3\x23":
+        name, method, embedded = shell_item_users_property_view_name(item)
+        result.update(item_kind="users-property-view", decode_method=method if name else "unresolved")
+        result["name"] = name or "<사용자 속성 보기>"
+        if embedded:
+            result["embedded_path"] = embedded
+        return result
+    if item_type == 0x01 and len(item) >= 12 and item[4:8] == b"\x84\x21\xde\x39":
+        category = int.from_bytes(item[8:12], "little")
+        result.update(
+            item_kind="control-panel-category",
+            category_id=category,
+            name=CONTROL_PANEL_CATEGORIES.get(category, f"<제어판 범주 {category}>"),
+            decode_method="control-panel-category",
+        )
+        return result
+    if item_type == 0x1F and len(item) > 20:
+        drive = re.search(rb"\x2f([A-Za-z]):\\", item)
+        guid, known = shell_item_guid_name(item[4:20])
+        if drive and not known:
+            # Root item wrapping a drive (removable/portable volume): name the volume.
+            letter = drive.group(1).decode("ascii").upper()
+            result.update(item_kind="volume", name=f"{letter}:\\", decode_method="root-embedded-drive", guid=guid)
+            return result
+    if item_type == 0x1F:
+        guid, known = shell_item_guid_name(item[4:20])
+        result.update(item_kind="root", guid=guid, sort_index=item[3] if len(item) > 3 else 0)
+        result["name"] = known or (f"{{{guid}}}" if guid else "<root>")
+        result["decode_method"] = "known-folder-guid" if known else "guid"
+        return result
+    if 0x20 <= item_type <= 0x2F:
+        text = shell_item_ansi(item[3:]) if len(item) > 3 else ""
+        if len(text) >= 2 and text[1] == ":":
+            result.update(item_kind="volume", name=text.rstrip("\\") + "\\", decode_method="drive-letter")
+            return result
+        guid, known = shell_item_guid_name(item[4:20]) if len(item) >= 20 else ("", "")
+        result.update(item_kind="volume", guid=guid, decode_method="volume-guid" if guid else "unresolved")
+        result["name"] = known or (f"{{{guid}}}" if guid else "<volume>")
+        return result
+    if 0x30 <= item_type <= 0x3F or item_type == 0xB1:
+        return decode_shell_file_entry(item, result)
+    if 0x40 <= item_type <= 0x4F or item_type == 0xC3:
+        flags = item[3] if len(item) > 3 else 0
+        name = shell_item_ansi(item[5:]) if len(item) > 5 else ""
+        result.update(item_kind="network", name=name or "<네트워크>", network_flags=flags, decode_method="network-ansi")
+        if name.startswith("\\\\"):
+            result["network_path"] = name
+        return result
+    if item_type == 0x71:
+        guid, known = shell_item_guid_name(item[14:30]) if len(item) >= 30 else ("", "")
+        if not guid:
+            guid, known = shell_item_guid_name(item[4:20])
+        result.update(item_kind="control-panel", guid=guid, decode_method="control-panel-guid")
+        result["name"] = known or (f"{{{guid}}}" if guid else "<제어판>")
+        return result
+    if item_type == 0x61:
+        name = shell_item_longest_utf16(item[4:], min_chars=4) or shell_item_ansi(item[8:])
+        result.update(item_kind="uri", name=name or "<URI>", decode_method="uri-string")
+        return result
+    if item_type == 0x74 or signature == b"CFSF" or item[4:8] == b"CFSF":
+        result.update(item_kind="delegate")
+        block = decode_beef0004_block(item)
+        if block:
+            result.update(block)
+        name = str(block.get("long_name") or "") if block else ""
+        if not name:
+            name = shell_item_ansi(item[0x18:]) if len(item) > 0x18 else ""
+        result["name"] = name or "<위임 항목>"
+        result["decode_method"] = "delegate-beef0004" if block.get("long_name") else "delegate-ansi"
+        return result
+    block = decode_beef0004_block(item)
+    if block.get("long_name"):
+        result.update(block)
+        result.update(item_kind="other", name=str(block["long_name"]), decode_method="beef0004")
+        return result
+    name = shell_item_property_store_name(item)
+    if not name:
+        fallback = shell_item_longest_utf16(item[3:], min_chars=3)
+        name = fallback if is_plausible_shell_text(fallback) else ""
+    result.update(
+        item_kind="other",
+        name=name or f"<셸 항목 0x{item_type:02x}>",
+        decode_method="utf16-scan" if name else "unsupported-type",
+    )
+    return result
+
+
+def decode_shell_file_entry(item: bytes, result: dict[str, object]) -> dict[str, object]:
+    item_type = int(result.get("item_type") or 0)
+    is_directory = bool(item_type & 0x01)
+    unicode_name = bool(item_type & 0x04)
+    file_size = int.from_bytes(item[4:8], "little") if len(item) >= 8 else 0
+    modified = (
+        shell_item_dos_datetime(int.from_bytes(item[8:10], "little"), int.from_bytes(item[10:12], "little"))
+        if len(item) >= 12
+        else ""
+    )
+    attributes = int.from_bytes(item[12:14], "little") if len(item) >= 14 else 0
+    short_name = shell_item_utf16(item[14:]) if unicode_name else shell_item_ansi(item[14:])
+    block = decode_beef0004_block(item)
+    long_name = str(block.get("long_name") or "")
+    result.update(
+        item_kind="directory" if is_directory or attributes & 0x10 else "file",
+        short_name=short_name,
+        long_name=long_name,
+        name=long_name or short_name or f"<파일 항목 0x{item_type:02x}>",
+        file_size=file_size,
+        file_attributes=attributes,
+        modified_at=modified,
+        decode_method="beef0004-long-name" if long_name else ("short-name" if short_name else "unresolved"),
+    )
+    for key in ("created_at", "accessed_at", "mft_entry", "mft_sequence", "extension_version"):
+        if key in block:
+            result[key] = block[key]
+    return result
+
+
+SHELL_PROPERTY_FMTID_ITEM = "b725f130-47ef-101a-a5f1-02608c9eebac"
+SHELL_PROPERTY_FMTID_NAMED = "d5cdd505-2e9c-101b-9397-08002b2cf9ae"
+SHELL_PROPERTY_JUNK_STRINGS = {"autolist", "item", "items"}
+CONTROL_PANEL_CATEGORIES = {
+    0: "모든 제어판 항목",
+    1: "모양 및 개인 설정",
+    2: "하드웨어 및 소리",
+    3: "네트워크 및 인터넷",
+    4: "소리, 음성 및 오디오 장치",
+    5: "시스템 및 보안",
+    6: "시계, 언어 및 국가별 옵션",
+    7: "접근성",
+    8: "프로그램",
+    9: "사용자 계정",
+    10: "보안 센터",
+    11: "모바일 PC",
+}
+
+
+def shell_item_property_strings(item: bytes) -> list[tuple[str, int, str]]:
+    """(fmtid, property id, text) for every VT_LPWSTR in embedded 1SPS stores."""
+    found: list[tuple[str, int, str]] = []
+    cursor = item.find(b"1SPS")
+    while cursor >= 4:
+        storage_size = int.from_bytes(item[cursor - 4 : cursor], "little")
+        end = min(len(item), cursor - 4 + storage_size) if storage_size else len(item)
+        fmtid, _known = shell_item_guid_name(item[cursor + 4 : cursor + 20])
+        entry = cursor + 20
+        while fmtid != SHELL_PROPERTY_FMTID_NAMED and entry + 13 <= end:
+            value_size = int.from_bytes(item[entry : entry + 4], "little")
+            if value_size < 13 or entry + value_size > end:
+                break
+            property_id = int.from_bytes(item[entry + 4 : entry + 8], "little")
+            payload = entry + 9
+            value_type = int.from_bytes(item[payload : payload + 2], "little")
+            if value_type == 0x1F and payload + 8 <= entry + value_size:
+                text = shell_item_utf16(item[payload + 8 : entry + value_size]).strip()
+                if text:
+                    found.append((fmtid, property_id, text))
+            entry += value_size
+        cursor = item.find(b"1SPS", cursor + 4)
+    return found
+
+
+def shell_item_property_store_name(item: bytes) -> str:
+    """System.ItemNameDisplay ({B725F130-...},10) from embedded property stores, if any."""
+    for fmtid, property_id, text in shell_item_property_strings(item):
+        if fmtid == SHELL_PROPERTY_FMTID_ITEM and property_id == 10 and is_plausible_shell_text(text):
+            return text
+    return ""
+
+
+def is_plausible_shell_text(text: str) -> bool:
+    if not text or text.casefold() in SHELL_PROPERTY_JUNK_STRINGS:
+        return False
+    lowered = text.casefold()
+    if lowered.startswith(("prop", "autolist")):
+        return False
+    good = sum(
+        1
+        for char in text
+        if 0x20 <= ord(char) < 0x7F or 0xAC00 <= ord(char) <= 0xD7A3 or 0x3131 <= ord(char) <= 0x318E
+    )
+    return good / len(text) >= 0.9
+
+
+def shell_item_embedded_path(item: bytes) -> str:
+    """Path of an IDList embedded in a users-property-view item (e.g. a UNC share)."""
+    cursor = item.find(b"\x14\x00\x1f", 8)
+    while cursor >= 0:
+        chain = split_shell_item_list(item[cursor:])
+        if chain and all(len(part) >= 3 for part in chain):
+            names = [str(decode_shell_item_entry(part).get("name") or "") for part in chain]
+            path = join_shell_path(names)
+            if path:
+                return path
+        cursor = item.find(b"\x14\x00\x1f", cursor + 1)
+    return ""
+
+
+def shell_item_users_property_view_name(item: bytes) -> tuple[str, str, str]:
+    display = shell_item_property_store_name(item)
+    if display:
+        return display, "property-store-item-name", shell_item_embedded_path(item)
+    candidates = []
+    for alignment in (0, 1):
+        run: list[str] = []
+        for index in range(alignment, len(item) - 1, 2):
+            code = item[index] | (item[index + 1] << 8)
+            if 0x20 <= code < 0xD800 or 0xE000 <= code < 0xFFFE:
+                run.append(chr(code))
+                continue
+            if len(run) >= 3:
+                candidates.append("".join(run).strip())
+            run = []
+    candidates = [text for text in candidates if is_plausible_shell_text(text)]
+    embedded = shell_item_embedded_path(item)
+    if candidates:
+        return max(candidates, key=len), "utf16-display-string", embedded
+    return embedded, "embedded-idlist", embedded
+
+
+def decode_shell_item_list(blob: bytes) -> tuple[str, list[dict[str, object]]]:
+    """Decode an IDList (PIDL) into a joined path plus per-item decodes."""
+    items = [decode_shell_item_entry(item) for item in split_shell_item_list(blob)]
+    return join_shell_path([str(item.get("name") or "") for item in items]), items
+
+
+def join_shell_path(names: Sequence[str]) -> str:
+    path = ""
+    for name in names:
+        if not name:
+            continue
+        if name.startswith("\\\\") or not path:
+            path = name
+        elif path.endswith("\\"):
+            path += name
+        else:
+            path += "\\" + name
+    return path
+
+
+def parse_mru_list_ex(raw: object) -> list[int]:
+    if not isinstance(raw, (bytes, bytearray)):
+        return []
+    order: list[int] = []
+    for index in range(0, len(raw) - 3, 4):
+        value = int.from_bytes(raw[index : index + 4], "little")
+        if value == 0xFFFFFFFF:
+            break
+        order.append(value)
+    return order
+
+
+def collect_native_shellbag_hive(path: Path, *, context: object = None) -> Iterable[ArtifactRecord]:
+    """Walk every Shell/ShellNoRoam BagMRU tree of a user hive and decode each slot."""
+    from .registry import (
+        NativeRegistryHive,
+        RegistryCollectionContext,
+        registry_hive_mount,
+        registry_transaction_disclosure,
+    )
+
+    hive = NativeRegistryHive.open(path)
+    if hive is None:
+        return
+    try:
+        source_hashes = file_hashes(path)
+        transaction_log_evidence = registry_transaction_log_evidence(path, hive_metadata=hive.header)
+        disclosure = registry_transaction_disclosure(transaction_log_evidence)
+        mount = registry_hive_mount(
+            path,
+            hive,
+            context if isinstance(context, RegistryCollectionContext) else RegistryCollectionContext(None),
+        )
+        roots: list[tuple[tuple[str, ...], object]] = []
+        bags_key_count = 0
+        for components, key in hive.iter_keys():
+            name = str(key.name or "").casefold()
+            parent_name = components[-2].casefold() if len(components) >= 2 else str(hive.root.name or "").casefold()
+            if parent_name in SHELLBAG_BAGMRU_PARENT_NAMES:
+                if name == "bagmru":
+                    roots.append((components, key))
+                elif name == "bags":
+                    bags_key_count += sum(1 for _ in hive.iter_keys(key)) - 1
+        entry_count = 0
+        kind_counts: Counter[str] = Counter()
+        for components, root_key in roots:
+            for record in iter_bagmru_entries(
+                path,
+                hive,
+                root_key,
+                components,
+                mount=mount,
+                source_hashes=source_hashes,
+                transaction_disclosure=disclosure,
+            ):
+                if not record.details.get("bagmru_root"):
+                    entry_count += 1
+                    kind_counts[str(record.details.get("item_kind") or "")] += 1
+                yield record
+        yield ArtifactRecord(
+            provider="windows-shellbags",
+            artifact_type="shellbag-hive-summary",
+            path=str(path.resolve()),
+            supported=True,
+            details={
+                "parser": "windows-shellbags-native-hive",
+                "parser_version": PARSER_VERSION,
+                "coverage_status": "native-bagmru-full-walk",
+                "reportability": "triage",
+                "label": "ShellBags 하이브 요약",
+                "source_path": str(path.resolve()),
+                "source_format": "registry-hive",
+                "source_hashes": dict(source_hashes),
+                "hive_name": path.name,
+                "hive_mount": mount["mount"],
+                "user_sid": mount["user_sid"],
+                "bagmru_roots": [mount["mount"] + "\\" + "\\".join(parts) for parts, _ in roots],
+                "shellbag_entry_count": entry_count,
+                "item_kind_counts": dict(sorted(kind_counts.items())),
+                "bags_view_settings_key_count_excluded": bags_key_count,
+                "bags_exclusion_note": "Bags\\* 하위 키는 폴더 보기 설정(창 크기·정렬)이라 증거 행에서 제외하고 개수만 기록합니다.",
+                "row_cap": None,
+                "transaction_log_status": disclosure["status"],
+                "transaction_log_disclosure": disclosure["message_ko"],
+                "walk_errors": dict(hive.errors),
+                "raw_preview": f"{path.name}: BagMRU {entry_count}개",
+            },
+        )
+    finally:
+        hive.close()
+
+
+def iter_bagmru_entries(
+    path: Path,
+    hive: object,
+    root_key: object,
+    root_components: tuple[str, ...],
+    *,
+    mount: Mapping[str, str],
+    source_hashes: Mapping[str, str],
+    transaction_disclosure: Mapping[str, str],
+) -> Iterable[ArtifactRecord]:
+    mount_prefix = str(mount.get("mount") or path.name)
+    root_relative = "\\".join(root_components)
+    source_key_path = root_relative
+    yield _shellbag_entry_record(
+        path,
+        source_hashes,
+        mount=mount,
+        transaction_disclosure=transaction_disclosure,
+        source_key_path=source_key_path,
+        node_key_path=source_key_path,
+        full_key_path=f"{mount_prefix}\\{root_relative}",
+        key=root_key,
+        node_slot=_node_slot(hive, root_key),
+        shell_path="",
+        slot_name="",
+        depth=0,
+        bagmru_root=True,
+        decoded={},
+        mru_position=None,
+        item_value=None,
+        parent_items=[],
+    )
+    stack: list[tuple[object, str, int, str, list[dict[str, object]]]] = [(root_key, "", 0, root_relative, [])]
+    visited: set[int] = set()
+    while stack:
+        node, parent_shell_path, depth, node_relative, parent_items = stack.pop()
+        offset = int(getattr(node, "offset", 0) or 0)
+        if offset in visited:
+            continue
+        visited.add(offset)
+        values = {str(value.name): value for value in hive.values(node)}  # type: ignore[attr-defined]
+        mru_value = values.get("MRUListEx")
+        order = parse_mru_list_ex(hive.value_bytes(mru_value)) if mru_value is not None else []  # type: ignore[attr-defined]
+        positions = {slot: position for position, slot in enumerate(order)}
+        children = []
+        for child in hive.subkeys(node):  # type: ignore[attr-defined]
+            slot_name = str(child.name)
+            item_value = values.get(slot_name)
+            raw = hive.value_bytes(item_value) if item_value is not None else b""  # type: ignore[attr-defined]
+            items = split_shell_item_list(raw)
+            decoded = decode_shell_item_entry(items[0]) if items else {}
+            item_name = str(decoded.get("name") or "") or f"<슬롯 {slot_name}>"
+            shell_path = join_shell_path([parent_shell_path, item_name])
+            slot_number = int(slot_name) if slot_name.isdigit() else None
+            child_relative = f"{node_relative}\\{slot_name}"
+            yield _shellbag_entry_record(
+                path,
+                source_hashes,
+                mount=mount,
+                transaction_disclosure=transaction_disclosure,
+                source_key_path=source_key_path,
+                node_key_path=child_relative,
+                full_key_path=f"{mount_prefix}\\{child_relative}",
+                key=child,
+                node_slot=_node_slot(hive, child),
+                shell_path=shell_path,
+                slot_name=slot_name,
+                depth=depth + 1,
+                bagmru_root=False,
+                decoded=decoded,
+                mru_position=positions.get(slot_number) if slot_number is not None else None,
+                item_value=item_value,
+                parent_items=parent_items,
+            )
+            children.append((child, shell_path, depth + 1, child_relative, [*parent_items, decoded]))
+        stack.extend(reversed(children))
+
+
+def _node_slot(hive: object, key: object) -> int | None:
+    value = hive.value(key, "NodeSlot")  # type: ignore[attr-defined]
+    if value is None:
+        return None
+    data = hive.value_data(value)  # type: ignore[attr-defined]
+    return data if isinstance(data, int) else None
+
+
+def _shellbag_entry_record(
+    path: Path,
+    source_hashes: Mapping[str, str],
+    *,
+    mount: Mapping[str, str],
+    transaction_disclosure: Mapping[str, str],
+    source_key_path: str,
+    node_key_path: str,
+    full_key_path: str,
+    key: object,
+    node_slot: int | None,
+    shell_path: str,
+    slot_name: str,
+    depth: int,
+    bagmru_root: bool,
+    decoded: Mapping[str, object],
+    mru_position: int | None,
+    item_value: object,
+    parent_items: Sequence[Mapping[str, object]],
+) -> ArtifactRecord:
+    key_last_written_at = str(getattr(key, "last_written_at", "") or "")
+    volume = next(
+        (str(item.get("name") or "") for item in [*parent_items, decoded] if item.get("item_kind") == "volume"),
+        "",
+    )
+    network = next(
+        (str(item.get("name") or "") for item in [*parent_items, decoded] if item.get("item_kind") == "network"),
+        "",
+    )
+    decoded_ok = bagmru_root or (
+        bool(decoded) and str(decoded.get("decode_method") or "") not in {"unresolved", "unsupported-type", "truncated"}
+    )
+    details: dict[str, object] = {
+        "parser": "windows-shellbags-native-hive",
+        "parser_version": PARSER_VERSION,
+        "coverage_status": "native-bagmru-shellitem-decode",
+        "reportability": "review",
+        "label": "ShellBags 루트" if bagmru_root else "ShellBags 폴더 기록",
+        "source_path": str(path.resolve()),
+        "source_format": "registry-hive",
+        "source_hashes": dict(source_hashes),
+        "hive_name": path.name,
+        "hive_hint": hive_hint_from_path(path),
+        "hive_mount": str(mount.get("mount") or ""),
+        "user_sid": str(mount.get("user_sid") or ""),
+        "user_hive_scope": "ntuser" if path.name.upper() == "NTUSER.DAT" else "usrclass",
+        "candidate_source": "native-bagmru-decode",
+        "source_key_path": source_key_path,
+        "node_key_path": node_key_path,
+        "key_path": full_key_path,
+        "shellbag_section": "bagmru",
+        "shell_path": shell_path,
+        "slot_name": slot_name,
+        "node_slot": node_slot,
+        "mru_position": mru_position,
+        "mru_position_note": "MRUListEx 순서(0 = 해당 폴더에서 가장 최근)",
+        "bagmru_root": bagmru_root,
+        "depth": depth,
+        "item_kind": str(decoded.get("item_kind") or ("root-key" if bagmru_root else "")),
+        "item_name": str(decoded.get("name") or ""),
+        "volume": volume,
+        "network_location": network,
+        "shellitem": dict(decoded),
+        "shellitem_value_cell_offset": (HIVE_BIN_BASE_OFFSET + int(getattr(item_value, "offset", 0) or 0))
+        if item_value is not None
+        else 0,
+        "key_cell_offset": HIVE_BIN_BASE_OFFSET + int(getattr(key, "offset", 0) or 0),
+        "key_last_written_at": key_last_written_at,
+        "timestamp": key_last_written_at,
+        "timestamp_label": "last_written",
+        "timestamp_semantics": "BagMRU 노드 키 최종 수정 시각(해당 폴더의 하위 목록·보기 기록 갱신)",
+        "item_modified_at": str(decoded.get("modified_at") or ""),
+        "item_created_at": str(decoded.get("created_at") or ""),
+        "item_accessed_at": str(decoded.get("accessed_at") or ""),
+        "item_time_note": "셸 항목 내부 FAT 시각(2초 단위, UTC) — 탐색 당시 폴더의 MAC 값",
+        "transaction_log_status": transaction_disclosure.get("status", ""),
+        "transaction_log_disclosure": transaction_disclosure.get("message_ko", ""),
+        "validation_checks": {
+            "key_cell_parsed": True,
+            "shellitem_value_present": bagmru_root or item_value is not None,
+            "shellitem_decoded": decoded_ok,
+        },
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": list(SHELLBAG_BLOCKERS),
+        "raw_preview": shell_path or full_key_path,
+    }
+    return ArtifactRecord(
+        provider="windows-shellbags",
+        artifact_type="shellbag-entry",
+        path=str(path.resolve()),
+        supported=True,
+        details=details,
+    )
