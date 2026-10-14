@@ -18,7 +18,7 @@ Fill this file before a real Windows T1 E01/Ex01 execution. Do not enter secrets
 | `rapid_commit` | `c1c5be0ea7f68f4b1d04894ed8191ad2a2f71d85` (tag v0.2.0) | yes | Baseline for this staging run. |
 | `acquisition_tool` | `<pending>` | yes | `ewfacquire`/`ftkimager` absent on host at staging time; E01 acquisition blocked until an approved tool is installed. |
 | `ex01_capable_tool` | `<pending>` | conditional | Same blocker as acquisition tool. |
-| `trusted_tool_paths` | `C:\Users\Daeryun\rapid-forensic-corpus\tools\` (EvtxECmd 2026.5.0, LECmd 2026.5.0, JLECmd 2026.5.0, RECmd 2026.5.0, PECmd 2026.5.0, MFTECmd 2026.5.0, SrumECmd 2026.5.0) | yes | Downloaded from download.ericzimmermanstools.com/net9; RECmd/PECmd/MFTECmd/SrumECmd awaiting admin-gated artifacts (hives, Prefetch, MFT, SRUDB). |
+| `trusted_tool_paths` | `C:\Users\Daeryun\rapid-forensic-corpus\tools\` (EvtxECmd v2026.5 (build 0), LECmd v2026.5 (build 0), JLECmd v2026.5 (build 0), RECmd v2026.5 (build 0), PECmd v2026.5 (build 0), MFTECmd v2026.5 (build 0), SrumECmd v2026.5 (build 0)) | yes | Downloaded from download.ericzimmermanstools.com/net9; RECmd/PECmd/MFTECmd/SrumECmd awaiting admin-gated artifacts (hives, Prefetch, MFT, SRUDB). |
 | `retention_policy` | Synthetic fixtures retained while T1 evidence is approved; dispose per operator policy | yes | Mirrored in `manifests/t1-source-tree-manifest.json`. |
 | `license_restrictions` | Synthetic-only corpus; no vendor outputs collected yet; vendor-license review pending before trusted tool exports | yes | To be re-filled when trusted tools are installed. |
 | `evidence_storage_access_control` | Single-operator local host; external corpus directory is user-profile scoped; formal ACL record pending | yes | Must be re-recorded for shared storage. |
@@ -50,7 +50,7 @@ Fill this file before a real Windows T1 E01/Ex01 execution. Do not enter secrets
 
 - Trusted tools staged under `<external_corpus_root>/tools/` (Zimmerman net9
   builds): EvtxECmd, LECmd, JLECmd, RECmd, PECmd, MFTECmd, SrumECmd — all
-  2026.5.0. Only EvtxECmd/LECmd/JLECmd were executable against non-admin
+  v2026.5 (build 0). Only EvtxECmd/LECmd/JLECmd were executable against non-admin
   artifacts so far.
 - Host artifacts staged under `source-artifacts/` (wevtutil epl exports of
   System/Application full + 24h channels, 197 LNK, 339 JumpList containers),

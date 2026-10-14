@@ -812,7 +812,7 @@ GUI 표기 방식:
 
 1. 이번 반영은 “사용자에게 숨기지 않는 capability 노출” 단계다. 상용급 parser 완료를 의미하지 않는다.
 2. `목록화` 항목은 parser 구현, fixture, trusted-tool diff, FP/FN 문서가 있어야 `부분 구현` 또는 `사용 가능`으로 올릴 수 있다.
-3. VSS/APFS snapshot, FDE unlock, ETL, $LogFile, WebCacheV01, Recall DB/snapshot, BITS, SPL/SHD, AnyDesk/TeamViewer/RustDesk는 실제 Windows/macOS 샘플 기반 검증이 필요하다.
+3. VSS/APFS snapshot, FDE unlock, ETL, `$LogFile`, WebCacheV01, Recall DB/snapshot, BITS, SPL/SHD, AnyDesk/TeamViewer/RustDesk는 실제 Windows/macOS 샘플 기반 검증이 필요하다.
 4. YARA/IOC, De-NISTing, Super Timeline은 대용량 성능과 UI cursor pagination이 같이 검증돼야 한다.
 5. Deepfake/steganography는 법정 표현이 특히 민감하므로 “탐지”가 아니라 “의심 후보” wording, 모델 버전, 오탐 경고를 강제해야 한다.
 
@@ -999,7 +999,7 @@ GUI 표기 방식:
 
 1. `$SIA/$FNA` 불일치는 강한 단서지만 단독으로 “의도적 시간 조작”을 확정하지 않는다.
 2. NTFS 정상 동작, copy/move, archive extraction, legacy timestamp propagation으로도 일부 divergence가 생길 수 있다.
-3. 보고서 확정에는 USN/$LogFile/execution artifact와 신뢰 도구 diff가 필요하다.
+3. 보고서 확정에는 `USN/$LogFile/execution` artifact와 신뢰 도구 diff가 필요하다.
 
 ## 30. 2026-05-14 구현 반영: RecentDocs/Clipboard/MUICache 사용자 활동 보강
 
@@ -1084,7 +1084,7 @@ GUI 노출 계약:
 
 ## 33. 2026-05-14 구현 반영: 모바일 위치/건강/스크린타임 export row 보강
 
-모바일 vendor export는 메시지/파일/브라우저 중심으로 잘 보였지만, 위치/건강/스크린타임 row가 별도 artifact로 분리되지 않아 알리바이와 기기 조작 가능성 검토가 GUI에서 묻혔다. 이번 라운드에서는 vendor CSV/JSON/JSONL import mapper에 위치, 건강/피트니스, 스크린타임/디지털 웰빙 row를 추가했다.
+모바일 vendor export는 메시지/파일/브라우저 중심으로 잘 보였지만, 위치/건강/스크린타임 row가 별도 artifact로 분리되지 않아 알리바이와 기기 변조 징후 여부 검토가 GUI에서 묻혔다. 이번 라운드에서는 vendor CSV/JSON/JSONL import mapper에 위치, 건강/피트니스, 스크린타임/디지털 웰빙 row를 추가했다.
 
 부분 구현으로 승격한 capability:
 
@@ -1129,7 +1129,7 @@ GUI 노출 계약:
 
 1. EXIF GPS는 파일에 기록된 metadata 후보일 뿐이며, 사용자가 실제 위치에 있었다는 단독 증거가 아니다.
 2. trailing data는 hidden payload의 후보일 뿐이며, 정상 metadata/도구 잔여물일 수도 있다.
-3. AI/편집 도구 metadata 문자열은 생성/조작 가능성의 단서이지 deepfake 판정이 아니다.
+3. AI/편집 도구 metadata 문자열은 생성/변조 징후 여부의 단서이지 deepfake 판정이 아니다.
 4. 보고서에 쓰려면 원본 hash, offset, 수동 확인, 외부 검증 도구 결과, 오탐 검토가 함께 있어야 한다.
 
 ## 35. 2026-05-14 구현 반영: 증거 입력 단계 복원/암호화/카빙 프로필
