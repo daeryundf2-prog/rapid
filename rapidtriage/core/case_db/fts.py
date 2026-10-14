@@ -278,7 +278,7 @@ def rebuild_case_db_search_indexes(connection: sqlite3.Connection, case_id: str)
             fts_table="artifact_fts",
             columns=("title", "summary", "metadata"),
             select_sql="""
-                SELECT id, title, summary, data_json
+                SELECT id, title, summary, rt_artifact_data(data_json, data_blob, data_codec) AS data_json
                 FROM artifact
                 WHERE case_id = ?
                 ORDER BY id ASC

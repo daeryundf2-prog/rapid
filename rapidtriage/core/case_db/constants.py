@@ -11,6 +11,10 @@ __all__ = [
     "ACQUISITION_METADATA_REPORT_GRADE_VALIDATION_PLAN_VERSION",
     "ACQUISITION_METADATA_TRUSTED_DIFF_BLOCKER_96",
     "ACQUISITION_QUALITY_TRUSTED_TOOLS",
+    "ARTIFACT_FTS_COMPRESSED_INSERT_TRIGGER_SQL",
+    "ARTIFACT_FTS_COMPRESSED_SQL",
+    "ARTIFACT_FTS_LEGACY_SQL",
+    "ARTIFACT_FTS_SOURCE_VIEW",
     "CASE_DB_SEARCH_MIN_SCAN_ROWS",
     "CASE_DB_SEARCH_SCAN_OVERSAMPLE",
     "CASE_DB_SEARCH_SCAN_ROW_LIMIT",
@@ -66,6 +70,7 @@ __all__ = [
     "REVIEW_WORKFLOW_TRUSTED_DIFF_BLOCKER",
     "REVIEW_WORKFLOW_TRUSTED_TOOLS",
     "SCHEMA_SQL",
+    "SCHEMA_SQL_COMPRESSED_ARTIFACTS",
     "SCHEMA_VERSION",
     "SOURCE_PROVENANCE_GAP_ID",
     "SOURCE_PROVENANCE_REPORT_GRADE_BLOCKERS",
@@ -468,7 +473,7 @@ REVIEW_TARGET_TABLES = {
 }
 
 
-SCHEMA_SQL = """
+_SCHEMA_SQL_TEMPLATE = """
 CREATE TABLE IF NOT EXISTS schema_info (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -617,43 +622,14 @@ CREATE TABLE IF NOT EXISTS artifact (
     data_json TEXT NOT NULL DEFAULT '{}',
     confidence REAL,
     created_at TEXT NOT NULL,
+    data_blob BLOB,
+    data_codec TEXT NOT NULL DEFAULT '',
     FOREIGN KEY (case_id) REFERENCES case_record(case_id) ON DELETE CASCADE,
     FOREIGN KEY (evidence_source_id) REFERENCES evidence_source(id) ON DELETE SET NULL,
     FOREIGN KEY (file_record_id) REFERENCES file_record(id) ON DELETE SET NULL
 );
 
-CREATE VIRTUAL TABLE IF NOT EXISTS artifact_fts USING fts5(
-    title,
-    summary,
-    metadata
-);
-
-CREATE TRIGGER IF NOT EXISTS artifact_fts_ai AFTER INSERT ON artifact BEGIN
-    INSERT INTO artifact_fts(rowid, title, summary, metadata)
-    VALUES (
-        new.id,
-        new.title,
-        new.summary,
-        new.data_json
-    );
-END;
-
-CREATE TRIGGER IF NOT EXISTS artifact_fts_ad AFTER DELETE ON artifact BEGIN
-    DELETE FROM artifact_fts WHERE rowid = old.id;
-END;
-
-CREATE TRIGGER IF NOT EXISTS artifact_fts_au AFTER UPDATE ON artifact BEGIN
-    DELETE FROM artifact_fts WHERE rowid = old.id;
-    INSERT INTO artifact_fts(rowid, title, summary, metadata)
-    VALUES (
-        new.id,
-        new.title,
-        new.summary,
-        new.data_json
-    );
-END;
-
-CREATE TABLE IF NOT EXISTS event (
+__ARTIFACT_FTS__CREATE TABLE IF NOT EXISTS event (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     citation_id TEXT NOT NULL UNIQUE,
     case_id TEXT NOT NULL,
@@ -885,3 +861,113 @@ CREATE INDEX IF NOT EXISTS idx_audit_event_case_time ON audit_event(case_id, tim
 CREATE INDEX IF NOT EXISTS idx_report_item_case_section ON report_item(case_id, section, order_index);
 CREATE INDEX IF NOT EXISTS idx_job_case_status ON job(case_id, status);
 """
+
+
+# Artifact full-text layout of a case DB (parser-quality r2).
+#
+# legacy: artifact_fts keeps its own copy of title/summary/data_json (FTS5
+#   content table) and the triggers copy the source columns verbatim.
+# compressed (fresh run-persist DBs): artifact rows may store data_json
+#   zlib-compressed in data_blob (data_codec = 'zlib', data_json keeps only the
+#   source_locator stub), and artifact_fts is an external-content index over
+#   the artifact_fts_source view, so the text is stored once. The view and
+#   triggers call rt_nfc / rt_artifact_fts_text, which
+#   schema.register_case_db_functions defines on every CaseDatabase
+#   connection; MATCH/rank queries on artifact_fts need no functions.
+ARTIFACT_FTS_LEGACY_SQL = """CREATE VIRTUAL TABLE IF NOT EXISTS artifact_fts USING fts5(
+    title,
+    summary,
+    metadata
+);
+
+CREATE TRIGGER IF NOT EXISTS artifact_fts_ai AFTER INSERT ON artifact BEGIN
+    INSERT INTO artifact_fts(rowid, title, summary, metadata)
+    VALUES (
+        new.id,
+        new.title,
+        new.summary,
+        new.data_json
+    );
+END;
+
+CREATE TRIGGER IF NOT EXISTS artifact_fts_ad AFTER DELETE ON artifact BEGIN
+    DELETE FROM artifact_fts WHERE rowid = old.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS artifact_fts_au AFTER UPDATE ON artifact BEGIN
+    DELETE FROM artifact_fts WHERE rowid = old.id;
+    INSERT INTO artifact_fts(rowid, title, summary, metadata)
+    VALUES (
+        new.id,
+        new.title,
+        new.summary,
+        new.data_json
+    );
+END;
+
+"""
+ARTIFACT_FTS_COMPRESSED_SQL = """CREATE VIEW IF NOT EXISTS artifact_fts_source AS
+SELECT
+    id,
+    rt_nfc(title) AS title,
+    rt_nfc(summary) AS summary,
+    rt_artifact_fts_text(data_json, data_blob, data_codec) AS metadata
+FROM artifact;
+
+CREATE VIRTUAL TABLE IF NOT EXISTS artifact_fts USING fts5(
+    title,
+    summary,
+    metadata,
+    content='artifact_fts_source',
+    content_rowid='id'
+);
+
+__ARTIFACT_FTS_INSERT_TRIGGER__;
+
+CREATE TRIGGER IF NOT EXISTS artifact_fts_ad AFTER DELETE ON artifact BEGIN
+    INSERT INTO artifact_fts(artifact_fts, rowid, title, summary, metadata)
+    VALUES (
+        'delete',
+        old.id,
+        rt_nfc(old.title),
+        rt_nfc(old.summary),
+        rt_artifact_fts_text(old.data_json, old.data_blob, old.data_codec)
+    );
+END;
+
+CREATE TRIGGER IF NOT EXISTS artifact_fts_au AFTER UPDATE ON artifact BEGIN
+    INSERT INTO artifact_fts(artifact_fts, rowid, title, summary, metadata)
+    VALUES (
+        'delete',
+        old.id,
+        rt_nfc(old.title),
+        rt_nfc(old.summary),
+        rt_artifact_fts_text(old.data_json, old.data_blob, old.data_codec)
+    );
+    INSERT INTO artifact_fts(rowid, title, summary, metadata)
+    VALUES (
+        new.id,
+        rt_nfc(new.title),
+        rt_nfc(new.summary),
+        rt_artifact_fts_text(new.data_json, new.data_blob, new.data_codec)
+    );
+END;
+
+"""
+# The bulk run import drops this trigger, inserts artifact + artifact_fts rows
+# itself in batches (it already holds the NFC text) and re-creates it.
+ARTIFACT_FTS_COMPRESSED_INSERT_TRIGGER_SQL = """CREATE TRIGGER IF NOT EXISTS artifact_fts_ai AFTER INSERT ON artifact BEGIN
+    INSERT INTO artifact_fts(rowid, title, summary, metadata)
+    VALUES (
+        new.id,
+        rt_nfc(new.title),
+        rt_nfc(new.summary),
+        rt_artifact_fts_text(new.data_json, new.data_blob, new.data_codec)
+    );
+END"""
+ARTIFACT_FTS_COMPRESSED_SQL = ARTIFACT_FTS_COMPRESSED_SQL.replace(
+    "__ARTIFACT_FTS_INSERT_TRIGGER__", ARTIFACT_FTS_COMPRESSED_INSERT_TRIGGER_SQL
+)
+ARTIFACT_FTS_SOURCE_VIEW = "artifact_fts_source"
+SCHEMA_SQL = _SCHEMA_SQL_TEMPLATE.replace("__ARTIFACT_FTS__", ARTIFACT_FTS_LEGACY_SQL)
+SCHEMA_SQL_COMPRESSED_ARTIFACTS = _SCHEMA_SQL_TEMPLATE.replace("__ARTIFACT_FTS__", ARTIFACT_FTS_COMPRESSED_SQL)

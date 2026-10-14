@@ -14,7 +14,7 @@ from pathlib import Path
 
 from .case_db.base import CaseDatabaseError, normalize_identifier
 from .case_db.helpers import parse_json_object
-from .case_db.schema import get_schema_version
+from .case_db.schema import artifact_row_data_json, get_schema_version
 from .docs import write_result
 
 __all__ = [
@@ -130,7 +130,7 @@ def _file_record_node(row: Mapping[str, object]) -> dict[str, object]:
 
 
 def _artifact_node(row: Mapping[str, object]) -> dict[str, object]:
-    data = parse_json_object(str(row["data_json"] or "{}"))
+    data = parse_json_object(artifact_row_data_json(row) or "{}")
     facet: dict[str, object] = {
         "@type": "rapidtriage:ArtifactFacet",
         "rapidtriage:artifactType": str(row["artifact_type"]),

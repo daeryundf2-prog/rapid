@@ -11,6 +11,7 @@ outputs in memory nor extracts documents a second time.
 from __future__ import annotations
 
 import datetime as dt
+import gc
 import json
 import re
 import time
@@ -125,6 +126,12 @@ def build_run_case_db(
         if docs_text_spool is not None and docs_text_spool.is_file()
         else None
     )
+    # The import allocates millions of short-lived rows; in a run process
+    # holding large live object graphs every cyclic-GC pass walks all of them
+    # (refcounting still frees the rows), so the collector is paused for the
+    # import and restored afterwards.
+    gc_was_enabled = gc.isenabled()
+    gc.disable()
     try:
         remove_case_db_files(db_path)
         database = CaseDatabase(db_path, bulk_load=True)
@@ -159,6 +166,8 @@ def build_run_case_db(
             }
         )
     finally:
+        if gc_was_enabled:
+            gc.enable()
         if document_texts is not None:
             document_texts.close()  # releases the spool handle (Windows unlink)
         if docs_text_spool is not None:
