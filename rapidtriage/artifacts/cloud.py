@@ -9,6 +9,7 @@ import json
 import re
 import zipfile
 from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from email import policy
 from pathlib import Path
 
@@ -235,23 +236,110 @@ CLOUD_PROVIDER_PROFILES = {
 }
 
 
+CLOUD_NO_EXPORT_ROOT_NOTICE = "클라우드 내보내기 루트 없음"
+# Browser profiles, extension trees and application caches are never a
+# provider export, whatever their JSON keys look like.
+CLOUD_EXCLUDED_SEGMENTS = {"appdata", "user data"}
+CLOUD_ZIP_DOS_TIMEZONE = "local-unknown"
+CLOUD_SIGNATURE_HEAD_BYTES = 64 * 1024
+CLOUD_DIRECTORY_SIGNATURE_NAMES = {"archive_browser.html", "manifest.xml", "users.json", "channels.json"}
+TAKEOUT_SPLIT_ARCHIVE_RE = re.compile(r"^takeout-\d{8}t\d{6}z-\d+\.zip$", re.IGNORECASE)
+ICLOUD_EXPORT_SEGMENT_RE = re.compile(
+    r"^(icloud photos part \d+ of \d+|apple id account and device information"
+    r"|icloud (contacts|calendars and reminders|notes|drive|mail)( part \d+ of \d+)?)$",
+    re.IGNORECASE,
+)
+CLOUD_COLLECT_PROVIDER_FAMILY = {
+    "google": ("google", "google-takeout"),
+    "gmail": ("google", "gmail-takeout"),
+    "microsoft": ("microsoft-365", "microsoft-365"),
+    "m365": ("microsoft-365", "microsoft-365"),
+    "microsoft-365": ("microsoft-365", "microsoft-365"),
+    "apple": ("apple-icloud", "apple-icloud-export"),
+    "icloud": ("apple-icloud", "apple-icloud-export"),
+    "slack": ("collaboration-saas", "slack"),
+    "dropbox": ("collaboration-saas", "dropbox"),
+}
+
+
+@dataclass(frozen=True)
+class CloudExportScope:
+    """A detected provider export root (directory, archive, or self-describing file)."""
+
+    path: Path
+    family: str
+    service: str
+    signature: str
+
+    def hint_for(self, candidate: Path | str) -> str:
+        """Root-relative hint prefixed by the export service (never absolute)."""
+
+        if isinstance(candidate, str):
+            return f"{self.service}/{candidate}"
+        try:
+            relative = candidate.relative_to(self.path)
+        except ValueError:
+            return f"{self.service}/{candidate.name}"
+        return f"{self.service}/{self.path.name}/{relative.as_posix()}"
+
+    def contains(self, candidate: Path) -> bool:
+        try:
+            candidate.relative_to(self.path)
+        except ValueError:
+            return False
+        return True
+
+    def to_details(self, walk_root: Path | None) -> dict[str, object]:
+        relative = str(self.path)
+        if walk_root is not None:
+            try:
+                relative = self.path.relative_to(walk_root).as_posix() or "."
+            except ValueError:
+                relative = str(self.path)
+        return {
+            "cloud_export_root": relative,
+            "cloud_export_root_signature": self.signature,
+            "cloud_export_provider_family": self.family,
+        }
+
+
 class CloudExportProvider:
     collector_kind = "cloud-export"
     name = "cloud-export-artifacts"
     description = "Cloud account export normalization for Google Takeout-style activity/location and account JSON"
     target_platform = "cloud"
 
+    def __init__(self) -> None:
+        self.collection_notes: list[str] = []
+        self.export_roots: list[dict[str, object]] = []
+
     def supported(self) -> bool:
         return True
 
     def collect(self, root: Path) -> Iterable[ArtifactRecord]:
-        for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
-            if path.is_file() and path.suffix.lower() in CLOUD_JSON_SUFFIXES:
-                yield from collect_cloud_json(path)
-            elif path.is_file() and path.suffix.lower() in CLOUD_CSV_SUFFIXES:
-                yield from collect_cloud_csv(path)
-            elif path.is_file() and path.suffix.lower() in CLOUD_ARCHIVE_SUFFIXES:
-                yield from collect_cloud_archive(path)
+        wanted_suffixes = CLOUD_JSON_SUFFIXES | CLOUD_CSV_SUFFIXES | CLOUD_ARCHIVE_SUFFIXES
+        files = sorted(
+            (
+                path
+                for path in iter_evidence_paths(root, "*")
+                if (path.suffix.lower() in wanted_suffixes or path.name.lower() in CLOUD_DIRECTORY_SIGNATURE_NAMES)
+                and path.is_file()
+                and not cloud_path_excluded(root, path)
+            ),
+            key=lambda item: str(item).lower(),
+        )
+        roots = detect_cloud_export_roots(root, files)
+        self.export_roots = [scope.to_details(root) for scope in roots]
+        self.collection_notes = [] if roots else [CLOUD_NO_EXPORT_ROOT_NOTICE]
+        for path in files:
+            suffix = path.suffix.lower()
+            scope = cloud_scope_for_path(path, roots)
+            if suffix in CLOUD_JSON_SUFFIXES:
+                yield from collect_cloud_json(path, scope=scope, walk_root=root)
+            elif suffix in CLOUD_CSV_SUFFIXES:
+                yield from collect_cloud_csv(path, scope=scope, walk_root=root)
+            elif suffix in CLOUD_ARCHIVE_SUFFIXES:
+                yield from collect_cloud_archive(path, scope=scope, walk_root=root)
         yield from collect_ai_service_export_artifacts(
             root,
             provider=self.name,
@@ -259,22 +347,228 @@ class CloudExportProvider:
         )
 
 
-def collect_cloud_archive(path: Path) -> Iterable[ArtifactRecord]:
-    source_hashes = compute_hashes(path)
-    yield build_record(
-        path,
-        artifact_type="cloud-export-archive",
-        source_index=0,
-        source_hashes=source_hashes,
-        details=normalize_cloud_archive(path, source_hashes=source_hashes),
+def cloud_path_excluded(walk_root: Path, path: Path) -> bool:
+    try:
+        parts = path.relative_to(walk_root).parts
+    except ValueError:
+        parts = path.parts
+    return any(part.lower() in CLOUD_EXCLUDED_SEGMENTS for part in parts[:-1])
+
+
+def _read_head_bytes(path: Path, size: int = CLOUD_SIGNATURE_HEAD_BYTES) -> bytes:
+    try:
+        with path.open("rb") as handle:
+            return handle.read(size)
+    except OSError:
+        return b""
+
+
+def is_edrm_manifest_bytes(head: bytes) -> bool:
+    lowered = head.lower()
+    return b"edrm" in lowered or b"datainterchangetype" in lowered
+
+
+def is_purview_results_header(head: bytes) -> bool:
+    first_line = head.split(b"\n", 1)[0].decode("utf-8-sig", errors="replace").lower()
+    return "location" in first_line and any(
+        token in first_line for token in ("original path", "item identity", "document id", "immutable id")
     )
-    yield from collect_cloud_archive_embedded_rows(path, source_hashes=source_hashes)
+
+
+def _rapidtriage_cloud_collect_scope(path: Path) -> CloudExportScope | None:
+    responses_dir = path.parent
+    if responses_dir.name.lower() != "responses":
+        return None
+    manifest = responses_dir.parent / "rapidtriage-cloud-collect.json"
+    if not manifest.is_file():
+        return None
+    payload = load_json(manifest)
+    provider = ""
+    if isinstance(payload, Mapping):
+        scope_profile = payload.get("cloud_api_provider_scope_profile")
+        provider = str(
+            payload.get("provider")
+            or (scope_profile.get("provider") if isinstance(scope_profile, Mapping) else "")
+            or ""
+        ).strip().lower()
+    family, service = CLOUD_COLLECT_PROVIDER_FAMILY.get(provider, ("cloud-export", "cloud-api-collect"))
+    return CloudExportScope(responses_dir, family, service, "rapidtriage-cloud-collect:rapidtriage-cloud-collect.json")
+
+
+def _directory_signature(walk_root: Path, path: Path) -> CloudExportScope | None:
+    name = path.name.lower()
+    parent = path.parent
+    if name == "archive_browser.html":
+        return CloudExportScope(parent, "google", "google-takeout", "google-takeout:archive_browser.html")
+    if name == "manifest.xml":
+        if is_edrm_manifest_bytes(_read_head_bytes(path)):
+            return CloudExportScope(parent, "microsoft-365", "microsoft-365", "m365-purview-export:Manifest.xml")
+        return None
+    if name.endswith(".csv") and name.startswith(("export summary", "export_summary")):
+        return CloudExportScope(parent, "microsoft-365", "microsoft-365", f"m365-purview-export:{path.name}")
+    if name.endswith(".csv") and (name in {"results.csv", "items.csv"} or name.startswith("items_0")):
+        if is_purview_results_header(_read_head_bytes(path, 8192)):
+            return CloudExportScope(parent, "microsoft-365", "microsoft-365", f"m365-purview-export:{path.name}")
+    if name == "users.json" and (parent / "channels.json").is_file():
+        return CloudExportScope(parent, "collaboration-saas", "slack", "slack-workspace-export:users.json+channels.json")
+    if name.endswith(".json"):
+        scope = _rapidtriage_cloud_collect_scope(path)
+        if scope is not None:
+            return scope
+    try:
+        parts = path.relative_to(walk_root).parts
+    except ValueError:
+        parts = path.parts
+    for index, part in enumerate(parts[:-1]):
+        if ICLOUD_EXPORT_SEGMENT_RE.match(part):
+            export_root = walk_root.joinpath(*parts[:index]) if index else walk_root
+            return CloudExportScope(export_root, "apple-icloud", "apple-icloud-export", f"apple-privacy-export:{part}")
+    return None
+
+
+def detect_cloud_export_roots(walk_root: Path, files: Iterable[Path]) -> list[CloudExportScope]:
+    scopes: dict[str, CloudExportScope] = {}
+    for path in files:
+        scope = _directory_signature(walk_root, path)
+        if scope is not None:
+            scopes.setdefault(str(scope.path).lower(), scope)
+    return sorted(scopes.values(), key=lambda item: (len(item.path.parts), str(item.path).lower()))
+
+
+def cloud_scope_for_path(path: Path, scopes: Sequence[CloudExportScope]) -> CloudExportScope | None:
+    best: CloudExportScope | None = None
+    for scope in scopes:
+        if scope.contains(path) and (best is None or len(scope.path.parts) >= len(best.path.parts)):
+            best = scope
+    return best
+
+
+def _read_zip_head(archive: zipfile.ZipFile, name: str, size: int = CLOUD_SIGNATURE_HEAD_BYTES) -> bytes:
+    try:
+        with archive.open(name) as handle:
+            return handle.read(size)
+    except (KeyError, OSError, RuntimeError, zipfile.BadZipFile):
+        return b""
+
+
+def _zip_json_rows_have_key(archive: zipfile.ZipFile, name: str, key: str) -> bool:
+    try:
+        info = archive.getinfo(name)
+    except KeyError:
+        return False
+    if info.file_size > CLOUD_ARCHIVE_PARSE_ENTRY_MAX_BYTES:
+        return False
+    payload = load_json_bytes(_read_zip_head(archive, name, CLOUD_ARCHIVE_PARSE_ENTRY_MAX_BYTES))
+    rows = payload if isinstance(payload, list) else []
+    return any(isinstance(row, Mapping) and key in row for row in rows[:5])
+
+
+def cloud_archive_signature(path: Path, archive: zipfile.ZipFile, names: Sequence[str]) -> CloudExportScope | None:
+    """Return the provider export signature found inside a ZIP, if any."""
+
+    normalized = [name.replace("\\", "/") for name in names]
+    root_level = {name.lower(): name for name in normalized if "/" not in name}
+    if any(name.lower().rsplit("/", 1)[-1] == "archive_browser.html" for name in normalized):
+        return CloudExportScope(path, "google", "google-takeout", "google-takeout:archive_browser.html")
+    if TAKEOUT_SPLIT_ARCHIVE_RE.match(path.name) and any(name.startswith("Takeout/") for name in normalized):
+        return CloudExportScope(path, "google", "google-takeout", "google-takeout:split-archive-name")
+    for name in normalized:
+        base = name.rsplit("/", 1)[-1].lower()
+        if base == "manifest.xml":
+            if is_edrm_manifest_bytes(_read_zip_head(archive, name)):
+                return CloudExportScope(path, "microsoft-365", "microsoft-365", "m365-purview-export:Manifest.xml")
+        elif base.endswith(".csv") and base.startswith(("export summary", "export_summary")):
+            return CloudExportScope(path, "microsoft-365", "microsoft-365", f"m365-purview-export:{base}")
+        elif base in {"results.csv", "items.csv"} or (base.startswith("items_0") and base.endswith(".csv")):
+            if is_purview_results_header(_read_zip_head(archive, name, 8192)):
+                return CloudExportScope(path, "microsoft-365", "microsoft-365", f"m365-purview-export:{base}")
+    for name in normalized:
+        for part in name.split("/")[:-1]:
+            if ICLOUD_EXPORT_SEGMENT_RE.match(part):
+                return CloudExportScope(path, "apple-icloud", "apple-icloud-export", f"apple-privacy-export:{part}")
+    if {"users.json", "channels.json"} <= set(root_level):
+        return CloudExportScope(path, "collaboration-saas", "slack", "slack-workspace-export:users.json+channels.json")
+    if "conversations.json" in root_level and (
+        set(root_level) & {"chat.html", "user.json", "message_feedback.json"}
+        or _zip_json_rows_have_key(archive, root_level["conversations.json"], "mapping")
+    ):
+        return CloudExportScope(path, "ai-service", "openai-chatgpt-export", "openai-chatgpt-export:conversations.json")
+    return None
+
+
+def scoped_cloud_service(
+    service: str,
+    scope: CloudExportScope | None,
+    row: Mapping[str, object] | None = None,
+) -> str:
+    """Keep a row's service inside the detected provider family."""
+
+    if scope is None or scope.family == "iaas-cloud":
+        return service
+    if row is not None:
+        keys = {normalize_key(key) for key in row}
+        if is_iaas_audit_row("", keys, row) or is_m365_unified_audit_row(keys):
+            # Rows identified by their own audit schema keep their provider.
+            return service
+    lowered = service.lower()
+    if scope.family == "google":
+        return service if lowered.startswith(("google", "gmail")) else scope.service
+    if scope.family == "microsoft-365":
+        return service if lowered.startswith("microsoft") or lowered in {"sharepoint", "exchange-online"} else scope.service
+    if scope.family == "apple-icloud":
+        return service if lowered.startswith(("apple", "icloud")) else scope.service
+    return scope.service
+
+
+def with_cloud_scope(record: ArtifactRecord, scope: CloudExportScope, walk_root: Path | None) -> ArtifactRecord:
+    record.details.update(scope.to_details(walk_root))
+    return record
+
+
+def collect_cloud_archive(
+    path: Path,
+    *,
+    scope: CloudExportScope | None = None,
+    walk_root: Path | None = None,
+) -> Iterable[ArtifactRecord]:
+    """Inventory a ZIP only when it carries a provider export signature.
+
+    Unknown-provider ZIPs (payslips, scanned documents, certificate bundles)
+    produce no row at all.
+    """
+
+    archive_scope: CloudExportScope | None = None
+    try:
+        with zipfile.ZipFile(path) as archive:
+            names = [info.filename for info in archive.infolist() if not info.is_dir()]
+            archive_scope = cloud_archive_signature(path, archive, names)
+    except (OSError, RuntimeError, zipfile.BadZipFile, zipfile.LargeZipFile):
+        archive_scope = None
+    if archive_scope is None and scope is not None:
+        archive_scope = CloudExportScope(path, scope.family, scope.service, f"inherited:{scope.signature}")
+    if archive_scope is None:
+        return
+    source_hashes = compute_hashes(path)
+    yield with_cloud_scope(
+        build_record(
+            path,
+            artifact_type="cloud-export-archive",
+            source_index=0,
+            source_hashes=source_hashes,
+            details=normalize_cloud_archive(path, source_hashes=source_hashes, scope=archive_scope),
+        ),
+        archive_scope,
+        walk_root,
+    )
+    for record in collect_cloud_archive_embedded_rows(path, source_hashes=source_hashes, scope=archive_scope):
+        yield with_cloud_scope(record, archive_scope, walk_root)
 
 
 def collect_cloud_archive_embedded_rows(
     path: Path,
     *,
     source_hashes: Mapping[str, str],
+    scope: CloudExportScope,
 ) -> Iterable[ArtifactRecord]:
     """Parse small, reviewable provider-export rows without extracting the ZIP."""
 
@@ -295,7 +589,8 @@ def collect_cloud_archive_embedded_rows(
                     data = archive.read(info)
                 except (RuntimeError, OSError, zipfile.BadZipFile):
                     continue
-                if product == "gmail" and suffix == ".mbox":
+                entry_hint = scope.hint_for(info.filename)
+                if product == "gmail" and suffix == ".mbox" and scope.family == "google":
                     parsed_entries += 1
                     for message_index, row in enumerate(extract_mbox_message_rows(data)):
                         row = {
@@ -308,12 +603,14 @@ def collect_cloud_archive_embedded_rows(
                                 row_index_key="archive_message_index",
                             ),
                         }
+                        details = normalize_cloud_mail(row, source_path=entry_hint)
+                        details["service"] = scoped_cloud_service(str(details.get("service") or ""), scope, row)
                         yield build_record(
                             path,
                             artifact_type="cloud-mail",
                             source_index=(archive_index * CLOUD_ARCHIVE_MBOX_MESSAGE_LIMIT) + message_index + 1,
                             source_hashes=source_hashes,
-                            details=normalize_cloud_mail(row, source_path=f"{path.resolve()}::{info.filename}"),
+                            details=details,
                         )
                     continue
                 if suffix == ".csv":
@@ -325,7 +622,8 @@ def collect_cloud_archive_embedded_rows(
                         path,
                         rows,
                         source_hashes=source_hashes,
-                        source_path=f"{path.resolve()}::{info.filename}",
+                        source_path=entry_hint,
+                        scope=scope,
                         source_index_base=(archive_index * CLOUD_ARCHIVE_CSV_ROW_LIMIT) + 1,
                         row_context=cloud_archive_row_context(
                             info,
@@ -344,7 +642,8 @@ def collect_cloud_archive_embedded_rows(
                     path,
                     payload,
                     source_hashes=source_hashes,
-                    source_path=f"{path.resolve()}::{info.filename}",
+                    source_path=entry_hint,
+                    scope=scope,
                     source_index_base=(archive_index * CLOUD_ARCHIVE_JSON_ROW_LIMIT) + 1,
                     archive_context=cloud_archive_row_context(
                         info,
@@ -354,7 +653,7 @@ def collect_cloud_archive_embedded_rows(
                         row_index_key="archive_json_row_index",
                     ),
                 )
-    except (OSError, zipfile.BadZipFile, zipfile.LargeZipFile):
+    except (OSError, RuntimeError, zipfile.BadZipFile, zipfile.LargeZipFile):
         return
 
 
@@ -373,6 +672,7 @@ def cloud_archive_row_context(
         "archive_entry_crc32": f"{info.CRC:08x}",
         "archive_entry_size": int(info.file_size),
         "archive_entry_modified_at": zip_datetime_iso(info),
+        "archive_entry_modified_at_timezone": CLOUD_ZIP_DOS_TIMEZONE,
         row_index_key: row_index,
     }
 
@@ -443,10 +743,11 @@ def collect_cloud_tabular_rows(
     source_path: str,
     source_index_base: int,
     row_context: Mapping[str, object],
+    scope: CloudExportScope | None = None,
 ) -> Iterable[ArtifactRecord]:
     if not rows:
         return
-    detected = detect_row_export_type(source_path.lower(), rows[0])
+    detected = detect_row_export_type(source_path.lower(), rows[0], family=scope.family if scope else "")
     normalizers = {
         "cloud-mail": ("cloud-mail", normalize_cloud_mail),
         "cloud-file": ("cloud-file", normalize_cloud_file),
@@ -459,6 +760,7 @@ def collect_cloud_tabular_rows(
     artifact_type, normalizer = normalizers[detected]
     for index, row in enumerate(rows):
         details = normalizer(row, source_path=source_path)
+        details["service"] = scoped_cloud_service(str(details.get("service") or ""), scope, row)
         details = with_cloud_row_context(details, row_context=row_context, row_index=index)
         yield build_record(
             path,
@@ -477,8 +779,9 @@ def collect_cloud_json_payload(
     source_path: str,
     source_index_base: int = 0,
     archive_context: Mapping[str, object] | None = None,
+    scope: CloudExportScope | None = None,
 ) -> Iterable[ArtifactRecord]:
-    detected = detect_export_type(Path(source_path), payload)
+    detected = detect_export_type(source_path, payload, family=scope.family if scope else "")
     if detected == "google-location":
         rows = extract_google_location_rows(payload)[:CLOUD_ARCHIVE_JSON_ROW_LIMIT if archive_context else None]
         for index, row in enumerate(rows):
@@ -509,6 +812,7 @@ def collect_cloud_json_payload(
         return
     if detected == "cloud-account":
         details = normalize_account(payload if isinstance(payload, Mapping) else {}, source_path=source_path)
+        details["service"] = scoped_cloud_service(str(details.get("service") or ""), scope)
         if archive_context:
             details = with_cloud_archive_context(details, archive_context=archive_context, row_index=0)
         yield build_record(
@@ -532,6 +836,7 @@ def collect_cloud_json_payload(
     rows = extract_list_or_single_rows(payload)[:CLOUD_ARCHIVE_JSON_ROW_LIMIT if archive_context else None]
     for index, row in enumerate(rows):
         details = normalizer(row, source_path=source_path)
+        details["service"] = scoped_cloud_service(str(details.get("service") or ""), scope, row)
         if archive_context:
             details = with_cloud_archive_context(details, archive_context=archive_context, row_index=index)
         yield build_record(
@@ -544,30 +849,88 @@ def collect_cloud_json_payload(
     return
 
 
-def collect_cloud_json(path: Path) -> Iterable[ArtifactRecord]:
+def self_describing_cloud_scope(path: Path, artifact_type: str, row: Mapping[str, object], hint: str) -> CloudExportScope:
+    """Scope for a standalone audit log identified by its own record schema."""
+
+    if artifact_type == "cloud-iaas-audit":
+        provider = infer_iaas_provider(hint, row)
+        return CloudExportScope(path, "iaas-cloud", provider, f"{provider}:record-schema")
+    return CloudExportScope(path, "microsoft-365", "microsoft-365-audit", "m365-unified-audit-log:record-schema")
+
+
+def _relative_hint(path: Path, walk_root: Path | None) -> str:
+    if walk_root is not None:
+        try:
+            return path.relative_to(walk_root).as_posix()
+        except ValueError:
+            pass
+    return path.name
+
+
+def collect_cloud_json(
+    path: Path,
+    *,
+    scope: CloudExportScope | None = None,
+    walk_root: Path | None = None,
+) -> Iterable[ArtifactRecord]:
     payload = load_json(path)
     if payload is None:
         return
+    if scope is None:
+        # Outside an export root only self-describing audit-log schemas count.
+        hint = _relative_hint(path, walk_root)
+        detected = detect_export_type(hint, payload, family="")
+        rows = extract_list_or_single_rows(payload)
+        if not detected or not rows:
+            return
+        scope = self_describing_cloud_scope(path, detected, rows[0], hint)
+        source_path = hint
+    else:
+        source_path = scope.hint_for(path)
     source_hashes = compute_hashes(path)
-    yield from collect_cloud_json_payload(path, payload, source_hashes=source_hashes, source_path=str(path.resolve()))
+    for record in collect_cloud_json_payload(
+        path, payload, source_hashes=source_hashes, source_path=source_path, scope=scope
+    ):
+        yield with_cloud_scope(record, scope, walk_root)
 
 
-def collect_cloud_csv(path: Path) -> Iterable[ArtifactRecord]:
+def collect_cloud_csv(
+    path: Path,
+    *,
+    scope: CloudExportScope | None = None,
+    walk_root: Path | None = None,
+) -> Iterable[ArtifactRecord]:
     rows = load_csv_rows(path, limit=CLOUD_CSV_ROW_LIMIT)
     if not rows:
         return
+    if scope is None:
+        hint = _relative_hint(path, walk_root)
+        detected = detect_row_export_type(hint.lower(), rows[0], family="")
+        if not detected:
+            return
+        scope = self_describing_cloud_scope(path, detected, rows[0], hint)
+        source_path = hint
+    else:
+        source_path = scope.hint_for(path)
     source_hashes = compute_hashes(path)
-    yield from collect_cloud_tabular_rows(
+    for record in collect_cloud_tabular_rows(
         path,
         rows,
         source_hashes=source_hashes,
-        source_path=str(path.resolve()),
+        source_path=source_path,
         source_index_base=0,
         row_context={"source_format": "csv", "csv_row_index": 0},
-    )
+        scope=scope,
+    ):
+        yield with_cloud_scope(record, scope, walk_root)
 
 
-def normalize_cloud_archive(path: Path, *, source_hashes: Mapping[str, str]) -> dict[str, object]:
+def normalize_cloud_archive(
+    path: Path,
+    *,
+    source_hashes: Mapping[str, str],
+    scope: CloudExportScope,
+) -> dict[str, object]:
     source_path = str(path.resolve())
     entry_manifest: list[dict[str, object]] = []
     product_counts: dict[str, int] = {}
@@ -606,6 +969,7 @@ def normalize_cloud_archive(path: Path, *, source_hashes: Mapping[str, str]) -> 
                         "compressed_size": int(info.compress_size),
                         "crc32": f"{info.CRC:08x}",
                         "modified_at": zip_datetime_iso(info),
+                        "modified_at_timezone": CLOUD_ZIP_DOS_TIMEZONE,
                         "json_candidate": suffix == ".json",
                         "csv_candidate": suffix == ".csv",
                     }
@@ -613,8 +977,9 @@ def normalize_cloud_archive(path: Path, *, source_hashes: Mapping[str, str]) -> 
     except (OSError, zipfile.BadZipFile, zipfile.LargeZipFile) as exc:
         archive_error = str(exc)
 
-    service = cloud_archive_service_from_counts(provider_counts, source_path)
+    service = scope.service
     entry_count = sum(product_counts.values())
+    embedded_candidate_count = sum(suffix_counts.get(item, 0) for item in (".mbox", ".json", ".csv"))
     json_entry_count = suffix_counts.get(".json", 0)
     csv_entry_count = suffix_counts.get(".csv", 0)
     archive_manifest = build_cloud_archive_manifest(
@@ -654,6 +1019,12 @@ def normalize_cloud_archive(path: Path, *, source_hashes: Mapping[str, str]) -> 
         "archive_total_uncompressed_size": total_uncompressed,
         "archive_total_compressed_size": total_compressed,
         "archive_manifest_truncated": truncated,
+        "archive_entry_manifest_limit": CLOUD_ARCHIVE_ENTRY_LIMIT,
+        "archive_embedded_parse_candidate_count": embedded_candidate_count,
+        "archive_embedded_parse_entry_limit": CLOUD_ARCHIVE_PARSE_ENTRY_LIMIT,
+        "archive_embedded_parse_truncated": embedded_candidate_count > CLOUD_ARCHIVE_PARSE_ENTRY_LIMIT,
+        "archive_entry_time_basis": "zip-dos-local-time",
+        "archive_entry_timezone": CLOUD_ZIP_DOS_TIMEZONE,
         "archive_error": archive_error,
         "product_counts": dict(sorted(product_counts.items())),
         "provider_counts": dict(sorted(provider_counts.items())),
@@ -994,56 +1365,157 @@ def load_csv_rows_bytes(data: bytes, *, limit: int) -> list[Mapping[str, object]
     return rows
 
 
-def detect_export_type(path: Path, payload: object) -> str:
-    lowered = str(path).lower()
+CLOUD_HINT_WORD_RE = re.compile(r"[^0-9a-z]+")
+CLOUD_MAIL_SENDER_KEYS = {"from", "sender", "senderemailaddress", "fromaddress", "senderaddress", "fromemail"}
+CLOUD_MAIL_RECIPIENT_KEYS = {"to", "torecipients", "recipients", "cc", "bcc", "ccrecipients", "bccrecipients", "toaddress"}
+CLOUD_MAIL_TIME_KEYS = {"date", "sentdatetime", "receiveddatetime", "senttime", "receivedtime", "internaldate"}
+CLOUD_MAIL_ID_KEYS = {"messageid", "internetmessageid"}
+CLOUD_MESSAGE_CONTAINER_KEYS = {"chatid", "channelid", "teamid", "conversationid", "threadts", "roomid"}
+CLOUD_MESSAGE_TEXT_KEYS = {"messagetext", "body", "bodycontent", "text", "content"}
+CLOUD_FILE_ID_KEYS = {
+    "fileid",
+    "weburl",
+    "downloadurl",
+    "mimetype",
+    "driveitemid",
+    "alternatelink",
+    "parentreference",
+    "webviewlink",
+    "md5checksum",
+}
+CLOUD_FILE_NAME_KEYS = {"name", "filename", "title", "displayname"}
+CLOUD_FILE_STATE_KEYS = {"id", "size", "modifiedtime", "createdtime", "lastmodifieddatetime", "createddatetime"}
+CLOUD_AUDIT_OPERATION_KEYS = {"operation", "operations", "activity", "action", "activitydisplayname"}
+CLOUD_AUDIT_TIME_KEYS = {"creationtime", "creationdate", "time", "timestamp", "createddatetime", "activitydatetime"}
+CLOUD_AUDIT_ACTOR_KEYS = {"userid", "userids", "actor", "user", "userprincipalname", "initiatedby", "ipaddress", "clientip"}
+M365_UAL_DETAIL_KEYS = {
+    "auditdata",
+    "recordtype",
+    "workload",
+    "clientip",
+    "objectid",
+    "resultstatus",
+    "organizationid",
+    "userkey",
+    "recordid",
+}
+CLOUD_ACCOUNT_IDENTITY_KEYS = {"email", "emailaddress", "primaryemail", "appleid", "accountid", "accountemail"}
+CLOUD_ACCOUNT_PROFILE_KEYS = {
+    "name",
+    "fullname",
+    "displayname",
+    "firstname",
+    "lastname",
+    "phone",
+    "phonenumber",
+    "created",
+    "creationtime",
+    "createdtime",
+    "birthday",
+}
+
+
+def cloud_hint_words(source_hint: str) -> set[str]:
+    return {word for word in CLOUD_HINT_WORD_RE.split(str(source_hint).lower()) if word}
+
+
+def is_m365_unified_audit_row(keys: set[str]) -> bool:
+    """Microsoft 365 unified audit log export record (self-describing schema)."""
+
+    return bool(
+        keys & {"creationtime", "creationdate"}
+        and keys & {"operation", "operations"}
+        and keys & {"userid", "userids"}
+        and keys & M365_UAL_DETAIL_KEYS
+    )
+
+
+def detect_export_type(source_hint: str | Path, payload: object, *, family: str = "") -> str:
+    """Classify a provider-export JSON payload by structural keys.
+
+    ``family`` is the detected export-root family. Without one only
+    self-describing audit-log schemas are accepted; generic keys such as
+    ``name``/``message`` never classify a file on their own.
+    """
+
+    hint = str(source_hint).lower()
+    words = cloud_hint_words(hint)
     if isinstance(payload, Mapping):
-        if "locations" in payload and isinstance(payload["locations"], list):
-            return "google-location"
+        locations = payload.get("locations")
+        if family == "google" and isinstance(locations, list):
+            sample = [item for item in locations[:5] if isinstance(item, Mapping)]
+            if any({normalize_key(key) for key in item} & {"latitudee7", "timestampms", "timestamp"} for item in sample):
+                return "google-location"
         rows = extract_list_or_single_rows(payload)
         if rows:
-            row_type = detect_row_export_type(lowered, rows[0])
+            row_type = detect_row_export_type(hint, rows[0], family=family)
             if row_type:
                 return row_type
-            if "activity" in lowered or any(
-                ("time" in item or "timestamp" in item) and ("title" in item or "products" in item)
-                for item in rows[:5]
-                if isinstance(item, Mapping)
-            ):
+            if family == "google" and is_takeout_activity_rows(rows, words):
                 return "google-activity"
-        account_keys = {"account", "apple id", "email", "phone", "full_name", "name", "created"}
-        if account_keys.intersection({str(key).lower() for key in payload.keys()}):
+        if family and is_cloud_account_payload(payload):
             return "cloud-account"
     if isinstance(payload, list) and payload and all(isinstance(item, Mapping) for item in payload[:5]):
-        row_type = detect_row_export_type(lowered, payload[0])
+        row_type = detect_row_export_type(hint, payload[0], family=family)
         if row_type:
             return row_type
-        if "my activity" in lowered or "takeout" in lowered or any("time" in item or "timestamp" in item for item in payload[:5] if isinstance(item, Mapping)):
+        if family == "google" and is_takeout_activity_rows(payload, words):
             return "google-activity"
     return ""
 
 
-def detect_row_export_type(source_hint: str, row: Mapping[str, object]) -> str:
+def is_takeout_activity_rows(rows: Sequence[object], words: set[str]) -> bool:
+    """Google My Activity rows: time + title + (products/header/titleUrl)."""
+
+    for item in rows[:5]:
+        if not isinstance(item, Mapping):
+            continue
+        keys = {normalize_key(key) for key in item}
+        if "time" in keys and "title" in keys and keys & {"products", "header", "titleurl"}:
+            return True
+        if "activity" in words and keys & {"time", "timestamp"} and "title" in keys:
+            return True
+    return False
+
+
+def is_cloud_account_payload(payload: Mapping[str, object]) -> bool:
+    keys = {normalize_key(key) for key in payload}
+    identity = keys & CLOUD_ACCOUNT_IDENTITY_KEYS
+    if not identity or not keys & CLOUD_ACCOUNT_PROFILE_KEYS:
+        return False
+    if identity & {"appleid", "accountid"}:
+        return True
+    return any("@" in optional_text(value) for key, value in payload.items() if normalize_key(key) in identity)
+
+
+def detect_row_export_type(source_hint: str, row: Mapping[str, object], *, family: str = "") -> str:
     keys = {normalize_key(key) for key in row}
     if is_iaas_audit_row(source_hint, keys, row):
         return "cloud-iaas-audit"
-    if (
-        "gmail" in source_hint
-        or "/mail/" in source_hint
-        or keys.intersection({"messageid", "internetmessageid"})
-        or ("subject" in keys and keys.intersection({"to", "torecipients", "senderemailaddress"}))
+    if is_m365_unified_audit_row(keys):
+        return "cloud-audit"
+    if not family:
+        return ""
+    words = cloud_hint_words(source_hint)
+    has_subject = "subject" in keys
+    sender = keys & CLOUD_MAIL_SENDER_KEYS
+    recipients = keys & CLOUD_MAIL_RECIPIENT_KEYS
+    if (has_subject and (sender or recipients) and (keys & CLOUD_MAIL_TIME_KEYS or keys & CLOUD_MAIL_ID_KEYS or (sender and recipients))) or (
+        keys & CLOUD_MAIL_ID_KEYS and (has_subject or sender)
     ):
         return "cloud-mail"
-    if any(token in source_hint for token in ("teams", "chat", "messages")) or keys.intersection(
-        {"chatid", "channelid", "teamid", "messagetext", "bodycontent"}
-    ):
+    if has_subject and words & {"mail", "gmail", "mailbox", "exchange"}:
+        return "cloud-mail"
+    if (keys & CLOUD_MESSAGE_CONTAINER_KEYS and keys & CLOUD_MESSAGE_TEXT_KEYS) or keys & {"messagetext", "bodycontent"}:
         return "cloud-message"
-    if any(token in source_hint for token in ("drive", "onedrive", "icloud", "photos", "files")) or keys.intersection(
-        {"filename", "fileid", "weburl", "downloadurl", "owner", "owners", "size", "mimeType".lower()}
-    ):
+    if family == "collaboration-saas" and "ts" in keys and "text" in keys and keys & {"user", "userprofile", "botid"}:
+        return "cloud-message"
+    name_keys = keys & CLOUD_FILE_NAME_KEYS
+    if name_keys and keys & CLOUD_FILE_ID_KEYS:
         return "cloud-file"
-    if any(token in source_hint for token in ("audit", "security", "signin", "sign-in")) or keys.intersection(
-        {"operation", "activity", "actor", "useragent", "ipaddress", "clientip"}
-    ):
+    if name_keys and keys & CLOUD_FILE_STATE_KEYS and words & {"drive", "onedrive", "photos", "sharepoint", "files"}:
+        return "cloud-file"
+    if keys & CLOUD_AUDIT_OPERATION_KEYS and keys & CLOUD_AUDIT_TIME_KEYS and keys & CLOUD_AUDIT_ACTOR_KEYS:
         return "cloud-audit"
     return ""
 
@@ -1833,8 +2305,14 @@ def normalize_cloud_message(row: Mapping[str, object], *, source_path: str) -> d
 
 def normalize_cloud_audit(row: Mapping[str, object], *, source_path: str) -> dict[str, object]:
     operation = optional_text(first_value(row, ("operation", "activity", "eventName", "action", "Operation")))
+    service = service_from_path(
+        source_path,
+        default="microsoft-365-audit" if "microsoft" in source_path.lower() or "m365" in source_path.lower() else "cloud-audit",
+    )
+    if is_m365_unified_audit_row({normalize_key(key) for key in row}) and not service.startswith("microsoft"):
+        service = "microsoft-365-audit"
     return {
-        "service": service_from_path(source_path, default="microsoft-365-audit" if "microsoft" in source_path.lower() or "m365" in source_path.lower() else "cloud-audit"),
+        "service": service,
         "event_type": "audit",
         "timestamp": normalize_timestamp(first_value(row, ("creationTime", "createdDateTime", "time", "timestamp", "date"))),
         "operation": operation,
@@ -1915,33 +2393,35 @@ def normalize_cloud_iaas_audit(row: Mapping[str, object], *, source_path: str) -
 
 
 def is_iaas_audit_row(source_hint: str, keys: set[str], row: Mapping[str, object]) -> bool:
-    if any(token in source_hint for token in ("cloudtrail", "aws", "azure", "entra", "gcp", "googlecloud", "google cloud")):
+    """IaaS audit records are identified by their own schema, never by path tokens."""
+
+    del source_hint  # path tokens ("aws", "azure", ...) are not evidence of a schema
+    if {"eventsource", "eventname", "eventtime"} <= keys:
         return True
-    if keys.intersection({"eventsource", "eventname", "eventtime", "awsregion", "sourceipaddress", "recipientaccountid"}):
+    if "operationname" in keys and keys & {"resourceid", "subscriptionid", "calleripaddress", "caller"} and keys & {
+        "time",
+        "eventtimestamp",
+        "submissiontimestamp",
+    }:
         return True
-    if keys.intersection({"operationname", "calleripaddress", "subscriptionid", "resourceid"}):
-        return True
-    if "protopayload" in keys or nested_value(row, ("protoPayload", "methodName")):
+    proto = row.get("protoPayload") if isinstance(row.get("protoPayload"), Mapping) else None
+    if proto is None:
+        proto = next((value for key, value in row.items() if normalize_key(key) == "protopayload"), None)
+    if isinstance(proto, Mapping) and proto.get("methodName") and proto.get("serviceName"):
         return True
     return False
 
 
 def infer_iaas_provider(source_path: str, row: Mapping[str, object]) -> str:
-    lowered = source_path.lower().replace("_", "-")
-    if "cloudtrail" in lowered or "/aws" in lowered or "\\aws" in lowered or "aws-" in lowered:
-        return "aws-cloudtrail"
-    if "azure" in lowered or "entra" in lowered or "operationname" in {normalize_key(key) for key in row}:
-        return "azure-activity-log"
-    if (
-        "gcp" in lowered
-        or "googlecloud" in lowered
-        or "google cloud" in lowered
-        or "google-cloud" in lowered
-        or nested_value(row, ("protoPayload", "methodName"))
-    ):
-        return "gcp-audit-log"
     keys = {normalize_key(key) for key in row}
     if keys.intersection({"eventsource", "awsregion", "recipientaccountid"}):
+        return "aws-cloudtrail"
+    if "operationname" in keys:
+        return "azure-activity-log"
+    if nested_value(row, ("protoPayload", "methodName")):
+        return "gcp-audit-log"
+    lowered = source_path.lower().replace("_", "-")
+    if "cloudtrail" in lowered:
         return "aws-cloudtrail"
     return "iaas-cloud-audit"
 
@@ -2043,21 +2523,15 @@ def cloud_archive_provider_for_product(product: str, name: str) -> str:
     return "unknown"
 
 
-def cloud_archive_service_from_counts(provider_counts: Mapping[str, int], source_path: str) -> str:
-    known = {provider: count for provider, count in provider_counts.items() if provider != "unknown"}
-    if known:
-        provider = max(sorted(known), key=lambda item: known[item])
-        return {
-            "google": "google-takeout",
-            "microsoft-365": "microsoft-365",
-            "apple-icloud": "apple-icloud-export",
-        }.get(provider, "cloud-export")
-    return service_from_path(source_path, default="cloud-export")
-
-
 def zip_datetime_iso(info: zipfile.ZipInfo) -> str:
+    """ZIP DOS times are writer-local wall-clock time: emit naive ISO only.
+
+    Callers publish ``*_timezone: "local-unknown"`` next to the value; the
+    value is never presented as UTC.
+    """
+
     try:
-        return dt.datetime(*info.date_time, tzinfo=dt.timezone.utc).isoformat()
+        return dt.datetime(*info.date_time).isoformat()
     except (TypeError, ValueError):
         return ""
 

@@ -32,12 +32,27 @@ SYNTHETIC_MEDIA_SCORE_GUIDANCE = (
 )
 
 
+_IMPORT_ERRORS: dict[str, str] = {}
+
+
 def deepfake_lens_module():
-    """Return the imported deepfake_lens module or None when unavailable."""
+    """Return the imported deepfake_lens module or None when unavailable.
+
+    The real import exception text is kept (``deepfake_lens_import_error``) so
+    the status record says *why* the optional dependency is missing instead of
+    a generic "not importable" line.
+    """
     try:
-        return importlib.import_module(DEEPFAKE_LENS_MODULE)
-    except Exception:
+        module = importlib.import_module(DEEPFAKE_LENS_MODULE)
+    except Exception as exc:  # optional dependency: any import failure is a skip
+        _IMPORT_ERRORS[DEEPFAKE_LENS_MODULE] = f"{type(exc).__name__}: {exc}"[:500]
         return None
+    _IMPORT_ERRORS.pop(DEEPFAKE_LENS_MODULE, None)
+    return module
+
+
+def deepfake_lens_import_error() -> str:
+    return _IMPORT_ERRORS.get(DEEPFAKE_LENS_MODULE, "")
 
 
 def deepfake_lens_cli_path() -> str:
@@ -66,10 +81,13 @@ class SyntheticMediaProvider:
         skipped_oversize = 0
         failed = 0
         capped = False
+        unscanned = 0
         for path in candidates:
             if scanned + skipped_oversize >= SYNTHETIC_MEDIA_MAX_FILES:
+                # Keep counting so the cap is disclosed with the real remainder.
                 capped = True
-                break
+                unscanned += 1
+                continue
             resolved = path.resolve()
             try:
                 size = resolved.stat().st_size
@@ -89,6 +107,7 @@ class SyntheticMediaProvider:
             skipped_oversize=skipped_oversize,
             failed=failed,
             capped=capped,
+            unscanned=unscanned,
         )
 
 
@@ -211,6 +230,12 @@ def build_error_record(path: Path, *, error: str) -> ArtifactRecord:
 
 
 def build_unavailable_record(root: Path) -> ArtifactRecord:
+    import_error = deepfake_lens_import_error() or "ImportError: deepfake_lens (원인 미상)"
+    try:
+        candidate_count = sum(1 for _ in iter_synthetic_media_candidates(root))
+    except OSError:
+        candidate_count = -1
+    reason = f"선택 의존성 deepfake_lens 모듈을 가져오지 못해 합성 미디어 선별을 건너뛰었습니다 ({import_error})."
     return ArtifactRecord(
         provider=SyntheticMediaProvider.name,
         artifact_type="synthetic-media-scan-status",
@@ -221,12 +246,18 @@ def build_unavailable_record(root: Path) -> ArtifactRecord:
             "parser_version": PARSER_VERSION,
             "coverage_status": "provider-unavailable",
             "reportability": "inventory-only",
+            # Not a completed scan: the step is skipped and says why.
+            "status": "skipped",
+            "collection_status": "skipped",
             "scan_status": "skipped-optional-dependency",
-            "reason": "deepfake_lens python module is not importable in this environment",
+            "skip_reason": reason,
+            "reason": reason,
+            "import_error": import_error,
+            "unscanned_candidate_count": candidate_count,
             "deepfake_lens_cli_path": deepfake_lens_cli_path(),
             "install_hint": (
-                "Install the deepfake-lens toolkit (pip install deepfake-lens or a "
-                "checkout on PYTHONPATH) to enable synthetic-media screening."
+                "합성 미디어 선별을 쓰려면 deepfake-lens 도구를 설치하세요 "
+                "(pip install deepfake-lens 또는 PYTHONPATH에 체크아웃 추가)."
             ),
             "score_semantics": SYNTHETIC_MEDIA_SCORE_SEMANTICS,
             "validation_required": False,
@@ -241,7 +272,14 @@ def build_scan_summary_record(
     skipped_oversize: int,
     failed: int,
     capped: bool,
+    unscanned: int = 0,
 ) -> ArtifactRecord:
+    if capped:
+        scan_status = "partial"
+    elif failed:
+        scan_status = "completed_with_errors"
+    else:
+        scan_status = "completed"
     return ArtifactRecord(
         provider=SyntheticMediaProvider.name,
         artifact_type="synthetic-media-scan-summary",
@@ -252,11 +290,15 @@ def build_scan_summary_record(
             "parser_version": PARSER_VERSION,
             "coverage_status": "deepfake-lens-scan-summary",
             "reportability": "triage",
-            "scan_status": "completed",
+            "scan_status": scan_status,
             "scan_file_count": scanned,
             "scan_error_count": failed,
             "skipped_oversize_count": skipped_oversize,
             "scan_capped": capped,
+            "unscanned_candidate_count": unscanned,
+            "scan_cap_note": (
+                f"상한 {SYNTHETIC_MEDIA_MAX_FILES}개 초과로 {unscanned}개 파일은 선별하지 않았습니다." if capped else ""
+            ),
             "max_files": SYNTHETIC_MEDIA_MAX_FILES,
             "max_file_bytes": SYNTHETIC_MEDIA_MAX_FILE_BYTES,
             "text_bytes": SYNTHETIC_MEDIA_TEXT_BYTES,

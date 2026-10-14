@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import contextlib
 import hashlib
 import json
 import re
@@ -13,6 +12,7 @@ from pathlib import Path
 from ..core.forensic_accuracy import build_accuracy_gate
 from ..core.models import ArtifactRecord
 from ..core.safe_xml import UnsafeXmlError, safe_xml_fromstring
+from ..core.sqlite_snapshot import open_sqlite_snapshot
 from ..core.submission import compute_hashes
 from ._walk import iter_evidence_paths
 from .review import build_forensic_review
@@ -1388,8 +1388,12 @@ def build_android_sqlite_schema_inventory(path: Path) -> dict[str, object]:
     tables: list[dict[str, object]] = []
     opened = False
     error = ""
+    provenance: dict[str, object] = {}
     try:
-        with contextlib.closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True)) as connection:
+        # Evidence is never opened in place: the snapshot copies the database
+        # (and WAL) into a private directory so no -wal/-shm sidecar can be
+        # created next to the evidence file.
+        with open_sqlite_snapshot(path, provenance=provenance) as connection:
             opened = True
             for table_name in android_sqlite_table_names(connection)[:MAX_ANDROID_SQLITE_TABLES]:
                 columns = android_sqlite_columns(connection, table_name)[:MAX_ANDROID_SQLITE_COLUMNS]
@@ -1413,6 +1417,7 @@ def build_android_sqlite_schema_inventory(path: Path) -> dict[str, object]:
         "values_redacted": True,
         "read_policy": "schema-and-counts-only",
         "sqlite_error": error,
+        "sqlite_snapshot_provenance": provenance,
         "validation_status": "inventory-ready" if opened else "review-required",
     }
 

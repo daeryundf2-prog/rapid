@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import contextlib
 import plistlib
 import sqlite3
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 
 from ...core.models import ArtifactRecord
+from ...core.sqlite_snapshot import open_sqlite_snapshot
 from ...core.submission import compute_hashes
 from .._walk import iter_evidence_paths
 from .constants import (
@@ -15,6 +15,7 @@ from .constants import (
     MAX_SQLITE_TABLES,
     MOBILE_EXPORT_SUFFIXES,
     PARSER_VERSION,
+    VENDOR_HINTS,
 )
 from .correlation import (
     build_mobile_correlation_summary,
@@ -103,6 +104,12 @@ from .normalize import (
     normalize_ios_backup_file,
     normalize_mobile_row,
 )
+from .roots import (
+    NO_MOBILE_ACQUISITION_NOTICE,
+    MobileAcquisitionRoot,
+    detect_mobile_acquisition_roots,
+    root_for_path,
+)
 from .vendor import (
     build_mobile_schema_compatibility_matrix,
     build_mobile_vendor_export_report_grade_validation_plan,
@@ -121,23 +128,56 @@ class MobileExportProvider:
     def supported(self) -> bool:
         return True
 
+    def __init__(self) -> None:
+        self.collection_notes: list[str] = []
+        self.acquisition_roots: list[dict[str, object]] = []
+
     def collect(self, root: Path) -> Iterable[ArtifactRecord]:
-        for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
-            if not path.is_file():
+        files = sorted(
+            (path for path in iter_evidence_paths(root, "*") if path.is_file()),
+            key=lambda item: str(item).lower(),
+        )
+        roots = detect_mobile_acquisition_roots(root, files)
+        self.acquisition_roots = [item.to_details(root) for item in roots]
+        if not roots:
+            # No acquisition signature: no rows at all (never a placeholder row).
+            self.collection_notes = [NO_MOBILE_ACQUISITION_NOTICE]
+            return
+        self.collection_notes = []
+        for path in files:
+            acquisition_root = root_for_path(path, roots)
+            if acquisition_root is None or acquisition_root.single_file:
                 continue
-            if is_ios_keychain_candidate(path):
-                yield collect_ios_keychain_inventory(path)
-            elif is_ios_backup_metadata_file(path):
-                yield from collect_ios_backup_metadata(path)
-            elif is_chat_app_database_candidate(path):
-                yield collect_chat_app_database_inventory(path)
-            elif path.suffix.lower() in MOBILE_EXPORT_SUFFIXES:
-                yield from collect_mobile_export(path)
+            hint = acquisition_root.relative_hint(path)
+            root_details = acquisition_root.to_details(root)
+            for record in self._collect_file(path, hint, acquisition_root):
+                record.details.update(root_details)
+                yield record
+
+    @staticmethod
+    def _collect_file(path: Path, hint: Path, acquisition_root: MobileAcquisitionRoot) -> Iterable[ArtifactRecord]:
+        if is_ios_keychain_candidate(hint):
+            yield collect_ios_keychain_inventory(path)
+        elif (
+            acquisition_root.kind == "ios-backup"
+            and path.parent == acquisition_root.path
+            and is_ios_backup_metadata_file(path)
+        ):
+            yield from collect_ios_backup_metadata(path)
+        elif is_chat_app_database_candidate(hint):
+            yield collect_chat_app_database_inventory(path, hint=hint)
+        elif path.suffix.lower() in MOBILE_EXPORT_SUFFIXES:
+            yield from collect_mobile_export(
+                path,
+                hint=hint,
+                source_tool=acquisition_root.source_tool if acquisition_root.source_tool in VENDOR_HINTS else "",
+            )
 
 
-def collect_mobile_export(path: Path) -> Iterable[ArtifactRecord]:
+def collect_mobile_export(path: Path, *, hint: Path | None = None, source_tool: str = "") -> Iterable[ArtifactRecord]:
+    hint_path = hint if hint is not None else Path(path.name)
     source_hashes = compute_hashes(path)
-    source_tool = detect_source_tool(path)
+    source_tool = source_tool or detect_source_tool(hint_path)
     rows = load_rows(path)
     source_format = source_format_for(path)
     vendor_manifest_profile = build_vendor_export_manifest_profile(
@@ -154,13 +194,13 @@ def collect_mobile_export(path: Path) -> Iterable[ArtifactRecord]:
         if emitted >= MAX_ROWS_PER_SOURCE:
             break
         normalized = normalize_keys(row)
-        artifact_type = detect_artifact_type(normalized, path)
+        artifact_type = detect_artifact_type(normalized, hint_path)
         if not artifact_type:
             continue
         detected_types.add(artifact_type)
         detected_type_counts[artifact_type] = detected_type_counts.get(artifact_type, 0) + 1
         emitted += 1
-        details = normalize_mobile_row(artifact_type, normalized, path)
+        details = normalize_mobile_row(artifact_type, normalized, hint_path)
         normalized_details.append(
             {
                 "artifact_type": artifact_type,
@@ -632,8 +672,8 @@ def build_record(
     )
 
 
-def collect_chat_app_database_inventory(path: Path) -> ArtifactRecord:
-    service = detect_chat_service({}, path) or "Mobile chat app"
+def collect_chat_app_database_inventory(path: Path, *, hint: Path | None = None) -> ArtifactRecord:
+    service = detect_chat_service({}, hint if hint is not None else Path(path.name)) or "Mobile chat app"
     source_hashes = compute_hashes(path)
     table_summaries: list[dict[str, object]] = []
     validation: dict[str, object] = {
@@ -644,9 +684,10 @@ def collect_chat_app_database_inventory(path: Path) -> ArtifactRecord:
         "decryption_attempted": False,
         "app_schema_validated": False,
     }
+    snapshot_provenance: dict[str, object] = {}
     try:
-        with contextlib.closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True)) as connection:
-            connection.row_factory = sqlite3.Row
+        # Private working copy: evidence is never opened in place (no -wal/-shm).
+        with open_sqlite_snapshot(path, provenance=snapshot_provenance) as connection:
             validation["opened_readonly"] = True
             profile_tables = chat_profile_message_tables(service)
             for table_name in sqlite_table_names(connection)[:MAX_SQLITE_TABLES]:
@@ -688,6 +729,7 @@ def collect_chat_app_database_inventory(path: Path) -> ArtifactRecord:
             "service": service,
             "service_family": service_family(service),
             "database_name": path.name,
+            "sqlite_snapshot_provenance": snapshot_provenance,
             "table_summaries": table_summaries,
             **kakaotalk_database_review_payload(service, table_summaries),
             **whatsapp_database_review_payload(service, table_summaries),
@@ -729,9 +771,10 @@ def collect_ios_manifest_db(path: Path) -> Iterable[ArtifactRecord]:
         "files_table_present": False,
         "row_limit": MAX_IOS_BACKUP_FILES,
     }
+    snapshot_provenance: dict[str, object] = {}
     try:
-        with contextlib.closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True)) as connection:
-            connection.row_factory = sqlite3.Row
+        # Private working copy: evidence is never opened in place (no -wal/-shm).
+        with open_sqlite_snapshot(path, provenance=snapshot_provenance) as connection:
             validation["opened_readonly"] = True
             columns = sqlite_columns(connection, "Files")
             validation["files_table_present"] = bool(columns)
@@ -789,6 +832,7 @@ def collect_ios_manifest_db(path: Path) -> Iterable[ArtifactRecord]:
             "event_type": "ios-backup-source",
             "timestamp": "",
             "row_count": emitted,
+            "sqlite_snapshot_provenance": snapshot_provenance,
             "ios_backup_scope_profile": scope_profile,
             "ios_backup_root_profile": root_profile,
             "ios_backup_deep_parser_manifest": deep_parser_manifest,
@@ -851,8 +895,10 @@ def collect_ios_keychain_inventory(path: Path) -> ArtifactRecord:
         "secrets_extracted": False,
         "values_redacted": True,
     }
+    snapshot_provenance: dict[str, object] = {}
     try:
-        with contextlib.closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True)) as connection:
+        # Private working copy: evidence is never opened in place (no -wal/-shm).
+        with open_sqlite_snapshot(path, provenance=snapshot_provenance) as connection:
             validation["opened_readonly"] = True
             for table_name in sqlite_table_names(connection)[:MAX_SQLITE_TABLES]:
                 columns = sqlite_columns(connection, table_name)[:50]
@@ -899,6 +945,7 @@ def collect_ios_keychain_inventory(path: Path) -> ArtifactRecord:
         details={
             "event_type": "ios-keychain-inventory",
             "timestamp": "",
+            "sqlite_snapshot_provenance": snapshot_provenance,
             "table_summaries": table_summaries,
             "ios_keychain_scope_profile": keychain_scope_profile,
             "ios_keychain_authority_gate": keychain_authority_gate,

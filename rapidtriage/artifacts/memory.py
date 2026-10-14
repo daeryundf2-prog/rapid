@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import datetime as dt
 import hashlib
 import ipaddress
 import json
+import mmap
 import re
+import struct
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from urllib.parse import parse_qsl, unquote_plus, urlparse
@@ -12,7 +15,7 @@ from ..core.models import ArtifactRecord
 from ..core.submission import compute_hashes
 from ._walk import iter_evidence_paths
 
-PARSER_VERSION = "memory-volatility-v3"
+PARSER_VERSION = "memory-volatility-v4"
 MEMORY_OUTPUT_SUFFIXES = {".json", ".jsonl", ".ndjson"}
 MEMORY_DUMP_SUFFIXES = {".dmp", ".hpak", ".mem", ".raw", ".vmem", ".vmsn", ".vmss"}
 MEMORY_DUMP_GENERIC_SUFFIXES = {".bin"}
@@ -50,6 +53,15 @@ SUSPICIOUS_PROCESS_NAMES = {
     "certutil.exe",
     "bitsadmin.exe",
 }
+# Credential-theft / anti-forensics tooling: a hit is a real indicator.
+MEMORY_HIGH_SIGNAL_TERMS = (
+    "mimikatz",
+    "sekurlsa",
+    "procdump",
+    "nanodump",
+    "vssadmin delete shadows",
+    "bcdedit /set",
+)
 MEMORY_SUSPICIOUS_TERMS = (
     "mimikatz",
     "sekurlsa",
@@ -99,6 +111,25 @@ URL_TEXT_RE = re.compile(r"https?://[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]{4,240}"
 IP_RE = re.compile(rb"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 IP_TEXT_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 PROCESS_NAME_TEXT_RE = re.compile(r"\b[A-Za-z0-9_.-]{1,64}\.exe\b", re.IGNORECASE)
+# ASN.1 object identifiers (X.509 / crypto tables) that look like dotted quads.
+OID_PREFIXES = (
+    "0.9.2342.",
+    "1.2.840.",
+    "1.2.410.",
+    "1.3.6.",
+    "1.3.14.",
+    "1.3.36.",
+    "1.3.101.",
+    "1.3.132.",
+    "2.5.",
+    "2.16.840.",
+    "2.23.",
+)
+PRINTF_CONVERSION_RE = re.compile(r"%(?:ll|l|h|I64|I32|z)?[sdiuxXSpc]")
+ENVIRONMENT_ASSIGNMENT_RE = re.compile(r"(?:^|[\x00\s])[A-Za-z_][A-Za-z0-9_()]{1,40}=[^\x00=]*$")
+ENVIRONMENT_VARIABLE_NAMES = ("COMPUTERNAME", "USERNAME", "USERDOMAIN", "LOGONSERVER", "USERPROFILE")
+ENVIRONMENT_ANSI_RE = re.compile(rb"(?<![A-Za-z_])(" + b"|".join(name.encode("ascii") for name in ENVIRONMENT_VARIABLE_NAMES) + rb")=([^\x00\r\n]{1,96})\x00")
+ENVIRONMENT_TEXT_RE = re.compile(r"(?<![A-Za-z_])(" + "|".join(ENVIRONMENT_VARIABLE_NAMES) + r")=([^\x00\r\n]{1,96})\x00")
 LOCAL_NETWORKS = tuple(
     ipaddress.ip_network(value)
     for value in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "::1/128")
@@ -169,6 +200,9 @@ def collect_memory_dump_indicators(path: Path) -> ArtifactRecord:
     memory_file_kind = classify_memory_file(path)
     web_recovery_profile = build_memory_web_recovery_profile(pivots, memory_file_kind=memory_file_kind)
     flags = build_memory_dump_flags(pivots=pivots, file_size=file_size, scan_ranges=scan_ranges)
+    minidump = parse_minidump(path)
+    if minidump and minidump.get("status") == "parsed":
+        flags.append("minidump-header-parsed")
     return ArtifactRecord(
         provider=MemoryVolatilityProvider.name,
         artifact_type=memory_artifact_type(memory_file_kind),
@@ -187,6 +221,17 @@ def collect_memory_dump_indicators(path: Path) -> ArtifactRecord:
             "scan_ranges": [{"start": start, "end": end} for start, end in scan_ranges],
             "scan_truncated": scanned_bytes(scan_ranges) < file_size,
             "indicator_pivots": pivots,
+            "pivot_limit": MEMORY_DUMP_PIVOT_LIMIT,
+            "pivots_truncated": len(pivots) >= MEMORY_DUMP_PIVOT_LIMIT,
+            "indicator_filtering": {
+                "printf_template_urls": "dropped",
+                "asn1_oid_and_version_like_dotted_quads": "dropped-or-low-confidence",
+                "environment_block_paths": "dropped (e.g. ComSpec=...\\cmd.exe)",
+                "ansi_decoding": "utf-8, then cp949",
+            },
+            "environment_variables": environment_variables_from_pivots(pivots),
+            **minidump_top_level_fields(minidump),
+            "minidump": minidump or {},
             "web_recovery_profile": web_recovery_profile,
             "risk_flags": flags,
             "risk_score": score_memory_dump_risk(flags, pivots),
@@ -476,9 +521,11 @@ def collect_memory_process_candidates(
         if emitted >= MEMORY_DUMP_PROCESS_CANDIDATE_LIMIT or len(pivots) >= MEMORY_DUMP_PIVOT_LIMIT:
             return
         process_name = match.group(0)
+        if is_environment_block_value(text, match.start()):
+            continue
         start = max(0, match.start() - 96)
         end = min(len(text), match.end() + 220)
-        context = printable_preview(text[start:end])
+        context = printable_preview(decode_ansi_memory_text(data[start:end]))
         indicators = command_line_indicators(context)
         if process_name.lower() not in SUSPICIOUS_PROCESS_NAMES and not indicators:
             continue
@@ -516,6 +563,8 @@ def collect_utf16_process_candidates(
         if emitted >= MEMORY_DUMP_PROCESS_CANDIDATE_LIMIT or len(pivots) >= MEMORY_DUMP_PIVOT_LIMIT:
             return
         process_name = match.group(0)
+        if is_environment_block_value(text, match.start()):
+            continue
         start = max(0, match.start() - 96)
         end = min(len(text), match.end() + 220)
         context = printable_preview(text[start:end])
@@ -561,9 +610,9 @@ def collect_memory_pivots(
             sensitive=True,
         )
     lowered = data.lower()
+    latin_text = data.decode("latin-1", errors="ignore")
     for term in MEMORY_SUSPICIOUS_TERMS:
-        encoded = term.encode("utf-8").lower()
-        index = lowered.find(encoded)
+        index = first_non_environment_index(lowered.decode("latin-1"), term.lower(), latin_text)
         if index >= 0:
             add_memory_pivot(
                 pivots,
@@ -571,11 +620,14 @@ def collect_memory_pivots(
                 pivot_type="suspicious-string",
                 value=term,
                 offset=data_offset + index,
-                evidence_strength="triage",
+                evidence_strength="triage" if term in MEMORY_HIGH_SIGNAL_TERMS else "weak",
                 sensitive=False,
             )
+    collect_environment_pivots(data, data_offset, pivots, seen)
     for match in URL_RE.finditer(data):
         value = trim_indicator(match.group(0)).decode("latin-1", errors="ignore")
+        if is_printf_template(value):
+            continue
         context = byte_context_preview(data, match.start(), match.end())
         add_memory_pivot(
             pivots,
@@ -590,14 +642,17 @@ def collect_memory_pivots(
         )
     for match in IP_RE.finditer(data):
         value = match.group(0).decode("ascii", errors="ignore")
-        if valid_ipv4(value):
+        before = data[max(0, match.start() - 1) : match.start()].decode("latin-1")
+        after = data[match.end() : match.end() + 2].decode("latin-1")
+        strength = ipv4_indicator_strength(value, before, after)
+        if strength:
             add_memory_pivot(
                 pivots,
                 seen,
                 pivot_type="ip",
                 value=value,
                 offset=data_offset + match.start(),
-                evidence_strength="triage",
+                evidence_strength=strength,
                 sensitive=False,
             )
     collect_utf16_memory_pivots(data, data_offset, pivots, seen)
@@ -622,7 +677,7 @@ def collect_utf16_memory_pivots(
             sensitive=True,
         )
     for term in MEMORY_SUSPICIOUS_TERMS:
-        index = lowered.find(term.lower())
+        index = first_non_environment_index(lowered, term.lower(), text)
         if index >= 0:
             add_memory_pivot(
                 pivots,
@@ -630,10 +685,14 @@ def collect_utf16_memory_pivots(
                 pivot_type="suspicious-string",
                 value=term,
                 offset=data_offset + (index * 2),
-                evidence_strength="triage",
+                evidence_strength="triage" if term in MEMORY_HIGH_SIGNAL_TERMS else "weak",
                 sensitive=False,
             )
+    for match in ENVIRONMENT_TEXT_RE.finditer(text):
+        add_environment_pivot(pivots, seen, match.group(1), match.group(2), data_offset + match.start() * 2, "utf-16le")
     for match in URL_TEXT_RE.finditer(text):
+        if is_printf_template(match.group(0)):
+            continue
         context = text_context_preview(text, match.start(), match.end())
         add_memory_pivot(
             pivots,
@@ -648,14 +707,15 @@ def collect_utf16_memory_pivots(
         )
     for match in IP_TEXT_RE.finditer(text):
         value = match.group(0)
-        if valid_ipv4(value):
+        strength = ipv4_indicator_strength(value, text[max(0, match.start() - 1) : match.start()], text[match.end() : match.end() + 2])
+        if strength:
             add_memory_pivot(
                 pivots,
                 seen,
                 pivot_type="ip",
                 value=value,
                 offset=data_offset + (match.start() * 2),
-                evidence_strength="triage",
+                evidence_strength=strength,
                 sensitive=False,
             )
 
@@ -764,6 +824,136 @@ def redact_secret(value: str) -> str:
 
 def compute_text_sha256(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def is_printf_template(value: str) -> bool:
+    """``http://%s/jk?c=%u`` style format strings are code constants, not visited URLs."""
+    for match in PRINTF_CONVERSION_RE.finditer(value):
+        following = value[match.start() + 1 : match.start() + 3]
+        if not re.fullmatch(r"[0-9A-Fa-f]{2}", following):
+            return True
+    return False
+
+
+def is_environment_block_value(text: str, index: int) -> bool:
+    """True when ``index`` falls inside a ``NAME=value`` environment-block entry such as ``ComSpec=...``."""
+    window = text[max(0, index - 300) : index]
+    return bool(ENVIRONMENT_ASSIGNMENT_RE.search(window))
+
+
+def first_non_environment_index(lowered: str, term: str, text: str) -> int:
+    start = 0
+    while True:
+        index = lowered.find(term, start)
+        if index < 0:
+            return -1
+        if not is_environment_block_value(text, index):
+            return index
+        start = index + len(term)
+
+
+def decode_ansi_memory_text(raw: bytes) -> str:
+    """ANSI memory strings: UTF-8, then the Korean ANSI code page (cp949), never latin-1 mojibake."""
+    pieces: list[str] = []
+    for segment in raw.split(b"\x00"):
+        if not segment:
+            pieces.append(" ")
+            continue
+        for encoding in ("utf-8", "cp949"):
+            try:
+                pieces.append(segment.decode(encoding))
+                break
+            except UnicodeDecodeError:
+                continue
+        else:
+            pieces.append(segment.decode("cp949", errors="replace").replace("\ufffd", " "))
+        pieces.append(" ")
+    return "".join(pieces)
+
+
+def add_environment_pivot(
+    pivots: list[dict[str, object]],
+    seen: set[tuple[str, str, int]],
+    name: str,
+    value: str,
+    offset: int,
+    encoding: str,
+) -> None:
+    cleaned = value.strip()
+    if not cleaned or not cleaned.isprintable():
+        return
+    key = ("environment-variable", f"{name.upper()}={cleaned}".lower(), -1)
+    if key in seen:
+        return
+    seen.add(key)
+    add_memory_pivot(
+        pivots,
+        seen,
+        pivot_type="environment-variable",
+        value=f"{name.upper()}={cleaned}",
+        offset=offset,
+        evidence_strength="context",
+        sensitive=False,
+    )
+    if pivots and pivots[-1].get("type") == "environment-variable":
+        pivots[-1]["encoding"] = encoding
+
+
+def collect_environment_pivots(
+    data: bytes,
+    data_offset: int,
+    pivots: list[dict[str, object]],
+    seen: set[tuple[str, str, int]],
+) -> None:
+    for match in ENVIRONMENT_ANSI_RE.finditer(data):
+        raw = match.group(2)
+        for encoding in ("utf-8", "cp949"):
+            try:
+                value = raw.decode(encoding)
+                break
+            except UnicodeDecodeError:
+                continue
+        else:
+            continue
+        add_environment_pivot(pivots, seen, match.group(1).decode("ascii"), value, data_offset + match.start(), encoding)
+
+
+def environment_variables_from_pivots(pivots: Sequence[Mapping[str, object]]) -> dict[str, list[str]]:
+    values: dict[str, list[str]] = {}
+    for pivot in pivots:
+        if pivot.get("type") != "environment-variable":
+            continue
+        name, _sep, value = str(pivot.get("value") or "").partition("=")
+        bucket = values.setdefault(name, [])
+        if value not in bucket:
+            bucket.append(value)
+    return values
+
+
+def ipv4_indicator_strength(value: str, before: str, after: str) -> str:
+    """'' to drop, 'weak' for version-like quads, 'triage' for plausible addresses."""
+    if before and (before.isdigit() or before in ".vV"):
+        return ""
+    if after[:1].isdigit() or (after[:1] == "." and after[1:2].isdigit()):
+        return ""
+    if not valid_ipv4(value) or any(value.startswith(prefix) for prefix in OID_PREFIXES):
+        return ""
+    address = ipaddress.ip_address(value)
+    if (
+        address.is_unspecified
+        or address.is_loopback
+        or address.is_multicast
+        or address.is_reserved
+        or address.is_link_local
+        or value.startswith("0.")
+        or value == "255.255.255.255"
+    ):
+        return ""
+    octets = [int(part) for part in value.split(".")]
+    if octets[0] < 10 and 0 in octets[1:]:
+        # e.g. "2.25.0.24": far more often a product/file version than an address.
+        return "weak"
+    return "triage"
 
 
 def valid_ipv4(value: str) -> bool:
@@ -929,9 +1119,20 @@ def build_memory_dump_flags(
             flags.append("bitlocker-recovery-key-candidate")
     if "process-candidate" in pivot_types:
         flags.append("process-string-candidate")
+    if any(
+        pivot.get("type") == "process-candidate"
+        and isinstance(pivot.get("value"), Mapping)
+        and pivot["value"].get("command_line_indicators")
+        for pivot in pivots
+    ):
+        flags.append("process-command-line-indicator")
     if "suspicious-string" in pivot_types:
         flags.append("suspicious-memory-string")
-    if "url" in pivot_types or "ip" in pivot_types:
+    if any(pivot.get("type") == "suspicious-string" and pivot.get("evidence_strength") == "triage" for pivot in pivots):
+        flags.append("credential-or-antiforensics-tool-string")
+    if "url" in pivot_types or any(
+        pivot.get("type") == "ip" and pivot.get("evidence_strength") == "triage" for pivot in pivots
+    ):
         flags.append("network-indicator")
     if "private-browsing-context" in url_categories:
         flags.append("private-browsing-url-candidate")
@@ -945,18 +1146,24 @@ def build_memory_dump_flags(
 
 
 def score_memory_dump_risk(flags: list[str], pivots: list[dict[str, object]]) -> int:
+    """Risk from real indicators only: weak/context pivots (LOLBin names, version-like quads,
+    environment variables, header parse) carry no weight."""
     weights = {
         "bitlocker-recovery-key-validated": 55,
         "bitlocker-recovery-key-candidate": 45,
-        "process-string-candidate": 15,
-        "suspicious-memory-string": 20,
-        "network-indicator": 15,
+        "process-command-line-indicator": 25,
+        "credential-or-antiforensics-tool-string": 30,
+        "network-indicator": 10,
         "private-browsing-url-candidate": 18,
         "ai-service-url-candidate": 16,
         "search-query-url-candidate": 12,
-        "bounded-scan-truncated": 0,
     }
-    return min(sum(weights.get(flag, 5) for flag in flags) + min(20, len(pivots)), 100)
+    strong_pivots = [
+        pivot
+        for pivot in pivots
+        if pivot.get("evidence_strength") in {"strong", "triage"} and pivot.get("type") not in {"process-candidate", "suspicious-string"}
+    ]
+    return min(sum(weights.get(flag, 0) for flag in flags) + min(10, len(strong_pivots)), 100)
 
 
 def memory_dump_recommendation(flags: list[str]) -> str:
@@ -971,3 +1178,224 @@ def memory_dump_recommendation(flags: list[str]) -> str:
     if "suspicious-memory-string" in flags or "network-indicator" in flags:
         return "Review memory string pivots with Volatility process/network output before reporting."
     return "No high-value bounded memory indicators were found; run Volatility/Volatility3 for full process, handle, network, and malfind analysis."
+
+
+MINIDUMP_STREAM_NAMES = {
+    3: "ThreadList",
+    4: "ModuleList",
+    5: "MemoryList",
+    6: "Exception",
+    7: "SystemInfo",
+    9: "Memory64List",
+    14: "HandleData",
+    15: "MiscInfo",
+    16: "MemoryInfoList",
+    17: "ThreadInfoList",
+    21: "SystemMemoryInfo",
+    22: "ProcessVmCounters",
+    24: "ThreadName",
+}
+MINIDUMP_ARCHITECTURES = {0: "x86", 5: "ARM", 6: "IA64", 9: "AMD64", 12: "ARM64", 0xFFFF: "unknown"}
+MINIDUMP_PRODUCT_TYPES = {1: "workstation", 2: "domain-controller", 3: "server"}
+MINIDUMP_MODULE_SIZE = 108
+MINIDUMP_EXCEPTION_NAMES = {
+    0x80000003: "EXCEPTION_BREAKPOINT",
+    0xC0000005: "EXCEPTION_ACCESS_VIOLATION",
+    0xC0000008: "STATUS_INVALID_HANDLE",
+    0xC000001D: "EXCEPTION_ILLEGAL_INSTRUCTION",
+    0xC0000094: "EXCEPTION_INT_DIVIDE_BY_ZERO",
+    0xC00000FD: "EXCEPTION_STACK_OVERFLOW",
+    0xC0000374: "STATUS_HEAP_CORRUPTION",
+    0xC0000409: "STATUS_STACK_BUFFER_OVERRUN",
+    0xE06D7363: "CPP_EH_EXCEPTION",
+    0x4000001F: "STATUS_WX86_BREAKPOINT",
+}
+
+
+def unix_seconds_to_iso(value: int) -> str:
+    if not value:
+        return ""
+    try:
+        return dt.datetime.fromtimestamp(int(value), tz=dt.timezone.utc).isoformat()
+    except (OverflowError, OSError, ValueError):
+        return ""
+
+
+def read_minidump_string(data: bytes | mmap.mmap, rva: int) -> str:
+    if not rva or rva + 4 > len(data):
+        return ""
+    length = struct.unpack_from("<I", data, rva)[0]
+    if length > 0x10000 or rva + 4 + length > len(data):
+        return ""
+    return bytes(data[rva + 4 : rva + 4 + length]).decode("utf-16le", errors="replace")
+
+
+def fixed_file_version(ms: int, ls: int) -> str:
+    return f"{ms >> 16}.{ms & 0xFFFF}.{ls >> 16}.{ls & 0xFFFF}"
+
+
+def parse_minidump(path: Path) -> dict[str, object] | None:
+    """Parse an MDMP header and its stream directory (no memory ranges are read)."""
+    try:
+        with path.open("rb") as handle:
+            head = handle.read(32)
+            if len(head) < 32 or head[:4] != b"MDMP":
+                return None
+            with mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ) as data:
+                return parse_minidump_bytes(data)
+    except (OSError, ValueError):
+        return None
+    except struct.error:
+        return {"status": "minidump-header-truncated"}
+
+
+def parse_minidump_bytes(data: bytes | mmap.mmap) -> dict[str, object]:
+    _signature, version, stream_count, directory_rva, _checksum, time_date_stamp, flags = struct.unpack_from(
+        "<4sIIIIIQ", data, 0
+    )
+    streams: dict[int, tuple[int, int]] = {}
+    directory: list[dict[str, object]] = []
+    for index in range(min(stream_count, 4096)):
+        position = directory_rva + index * 12
+        if position + 12 > len(data):
+            break
+        stream_type, size, rva = struct.unpack_from("<III", data, position)
+        if stream_type == 0:
+            continue
+        streams.setdefault(stream_type, (size, rva))
+        directory.append({"type": stream_type, "name": MINIDUMP_STREAM_NAMES.get(stream_type, str(stream_type)), "size": size})
+    result: dict[str, object] = {
+        "status": "parsed",
+        "signature": "MDMP",
+        "version": version & 0xFFFF,
+        "implementation_version": version >> 16,
+        "flags": f"0x{flags:x}",
+        "time_date_stamp": time_date_stamp,
+        "dump_time": unix_seconds_to_iso(time_date_stamp),
+        "dump_time_label": "minidump-written (UTC)",
+        "stream_count": stream_count,
+        "streams": directory,
+    }
+    if 7 in streams:
+        result["system_info"] = parse_minidump_system_info(data, streams[7][1])
+    if 15 in streams:
+        result["misc_info"] = parse_minidump_misc_info(data, *streams[15])
+    if 6 in streams:
+        result["exception"] = parse_minidump_exception(data, streams[6][1])
+    if 4 in streams:
+        modules = parse_minidump_modules(data, streams[4][1])
+        result["modules"] = modules
+        result["module_count"] = len(modules)
+        result["module_timestamp_note"] = (
+            "모듈 TimeDateStamp는 PE 링크 시각이며, Windows 10 이후 재현 가능 빌드에서는 해시 값이라 실제 시각이 아닐 수 있습니다."
+        )
+    return result
+
+
+def parse_minidump_system_info(data: bytes | mmap.mmap, rva: int) -> dict[str, object]:
+    architecture, level, revision, processors, product_type = struct.unpack_from("<HHHBB", data, rva)
+    major, minor, build, platform_id, csd_rva = struct.unpack_from("<IIIII", data, rva + 8)
+    return {
+        "processor_architecture": MINIDUMP_ARCHITECTURES.get(architecture, str(architecture)),
+        "processor_level": level,
+        "processor_revision": revision,
+        "processor_count": processors,
+        "product_type": MINIDUMP_PRODUCT_TYPES.get(product_type, str(product_type)),
+        "os_version": f"{major}.{minor}.{build}",
+        "os_build": build,
+        "platform_id": platform_id,
+        "service_pack": read_minidump_string(data, csd_rva),
+    }
+
+
+def parse_minidump_misc_info(data: bytes | mmap.mmap, size: int, rva: int) -> dict[str, object]:
+    if size < 24 or rva + 24 > len(data):
+        return {}
+    _size, flags, pid, create_time, user_time, kernel_time = struct.unpack_from("<IIIIII", data, rva)
+    info: dict[str, object] = {"flags": f"0x{flags:x}"}
+    if flags & 0x1:
+        info["process_id"] = pid
+    if flags & 0x2:
+        info["process_create_time"] = unix_seconds_to_iso(create_time)
+        info["process_user_time_seconds"] = user_time
+        info["process_kernel_time_seconds"] = kernel_time
+    # MINIDUMP_MISC_INFO_3: TimeZoneId (u32) at 0x38 then TIME_ZONE_INFORMATION (Bias i32 first).
+    if flags & 0x40 and size >= 232 and rva + 0x40 <= len(data):
+        info["time_zone_id"] = struct.unpack_from("<I", data, rva + 0x38)[0]
+        info["time_zone_bias_minutes"] = struct.unpack_from("<i", data, rva + 0x3C)[0]
+        info["time_zone_standard_name"] = (
+            bytes(data[rva + 0x40 : rva + 0x80]).decode("utf-16le", errors="replace").split("\0", 1)[0]
+        )
+    # MINIDUMP_MISC_INFO_4: BuildString WCHAR[260] at 0xE8.
+    if flags & 0x100 and size >= 0xE8 + 520 and rva + 0xE8 + 520 <= len(data):
+        info["build_string"] = bytes(data[rva + 0xE8 : rva + 0xE8 + 520]).decode("utf-16le", errors="replace").split("\0", 1)[0]
+    return info
+
+
+def parse_minidump_exception(data: bytes | mmap.mmap, rva: int) -> dict[str, object]:
+    thread_id = struct.unpack_from("<I", data, rva)[0]
+    code, exception_flags, _record, address, parameter_count = struct.unpack_from("<IIQQI", data, rva + 8)
+    return {
+        "thread_id": thread_id,
+        "exception_code": f"0x{code:08x}",
+        "exception_name": MINIDUMP_EXCEPTION_NAMES.get(code, ""),
+        "exception_flags": f"0x{exception_flags:x}",
+        "exception_address": f"0x{address:x}",
+        "parameter_count": parameter_count,
+    }
+
+
+def parse_minidump_modules(data: bytes | mmap.mmap, rva: int) -> list[dict[str, object]]:
+    count = struct.unpack_from("<I", data, rva)[0]
+    modules: list[dict[str, object]] = []
+    for index in range(min(count, 65536)):
+        position = rva + 4 + index * MINIDUMP_MODULE_SIZE
+        if position + MINIDUMP_MODULE_SIZE > len(data):
+            break
+        base, image_size, checksum, timestamp, name_rva = struct.unpack_from("<QIIII", data, position)
+        fixed = struct.unpack_from("<13I", data, position + 24)
+        module: dict[str, object] = {
+            "name": read_minidump_string(data, name_rva),
+            "base_address": f"0x{base:x}",
+            "image_size": image_size,
+            "checksum": f"0x{checksum:08x}",
+            "timestamp": timestamp,
+            "timestamp_iso": unix_seconds_to_iso(timestamp),
+        }
+        if fixed[0] == 0xFEEF04BD:
+            module["file_version"] = fixed_file_version(fixed[2], fixed[3])
+            module["product_version"] = fixed_file_version(fixed[4], fixed[5])
+        modules.append(module)
+    return modules
+
+
+def minidump_top_level_fields(minidump: Mapping[str, object] | None) -> dict[str, object]:
+    if not minidump or minidump.get("status") != "parsed":
+        return {}
+    fields: dict[str, object] = {
+        "timestamp": minidump.get("dump_time", ""),
+        "timestamp_label": "minidump-written",
+        "dump_time": minidump.get("dump_time", ""),
+    }
+    misc = minidump.get("misc_info") if isinstance(minidump.get("misc_info"), Mapping) else {}
+    system = minidump.get("system_info") if isinstance(minidump.get("system_info"), Mapping) else {}
+    exception = minidump.get("exception") if isinstance(minidump.get("exception"), Mapping) else {}
+    modules = minidump.get("modules") if isinstance(minidump.get("modules"), list) else []
+    if misc.get("process_id") is not None:
+        fields["pid"] = misc["process_id"]
+    if misc.get("process_create_time"):
+        fields["process_create_time"] = misc["process_create_time"]
+    if system:
+        fields["processor_architecture"] = system.get("processor_architecture", "")
+        fields["os_version"] = system.get("os_version", "")
+    if exception:
+        fields["exception_code"] = exception.get("exception_code", "")
+        fields["exception_name"] = exception.get("exception_name", "")
+        fields["exception_address"] = exception.get("exception_address", "")
+        fields["exception_thread_id"] = exception.get("thread_id", "")
+    if modules:
+        main_module = str(modules[0].get("name") or "")
+        fields["process_image_path"] = main_module
+        fields["process_name"] = main_module.replace("/", "\\").rsplit("\\", 1)[-1]
+        fields["module_count"] = len(modules)
+    return fields
