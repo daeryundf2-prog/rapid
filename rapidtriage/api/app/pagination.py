@@ -542,3 +542,50 @@ def with_record_index(rows: Iterable[object], start: int) -> list[object]:
         {**row, "record_index": start + position} if isinstance(row, dict) else row
         for position, row in enumerate(rows)
     ]
+
+
+def _doc_is_matched(row: object, result_paths: frozenset[str]) -> bool:
+    """``matched`` of a docs candidate (pre-r1 rows: membership in ``results``)."""
+    if not isinstance(row, Mapping):
+        return False
+    value = row.get("matched")
+    if isinstance(value, bool):
+        return value
+    return str(row.get("path") or "") in result_paths
+
+
+def docs_page(
+    payload: Mapping[str, object],
+    *,
+    matched: bool | None,
+    offset: int,
+    limit: int,
+    cursor: str | None = None,
+) -> dict[str, object]:
+    """``/docs`` page: ``candidates`` (optionally by ``matched``) or, for ``matched=True``, ``results``.
+
+    Always reports ``candidate_count`` and ``matched_count``. Candidate rows
+    carry ``record_index`` (position in the docs output ``candidates``).
+    """
+    candidates = payload.get("candidates")
+    candidates = candidates if isinstance(candidates, list) else []
+    results = payload.get("results")
+    results = results if isinstance(results, list) else []
+    result_paths = frozenset(str(row.get("path") or "") for row in results if isinstance(row, Mapping))
+    counts = {"candidate_count": len(candidates), "matched_count": len(results)}
+    if matched is True:
+        page = dict(paginate_payload(dict(payload), "results", offset=offset, limit=limit, cursor=cursor, omit_fields=("candidates", "manifest")))
+        page.update(counts)
+        return page
+    indexed = [
+        {**row, "record_index": index} if isinstance(row, dict) else row
+        for index, row in enumerate(candidates)
+        if matched is None or _doc_is_matched(row, result_paths) == matched
+    ]
+    view = {**payload, "candidates": indexed}
+    if limit <= 0:
+        view.update(counts)
+        return view
+    page = dict(paginate_payload(view, "candidates", offset=offset, limit=limit, cursor=cursor, omit_fields=("results", "manifest")))
+    page.update(counts)
+    return page

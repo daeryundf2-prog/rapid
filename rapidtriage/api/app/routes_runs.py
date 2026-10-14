@@ -63,6 +63,7 @@ from .models import (
     RunImportRequest,
 )
 from .pagination import (
+    docs_page,
     paginate_artifact_output,
     paginate_payload,
     with_record_index,
@@ -715,9 +716,20 @@ def build_runs_router(
         offset: int = Query(0, ge=0),
         limit: int = Query(0, ge=0, le=1000),
         cursor: str | None = Query(default=None),
+        matched: bool | None = Query(default=None),
     ) -> dict[str, object]:
+        """Paged document listing.
+
+        Default: pages ``candidates`` (every document the docs step saw, each
+        with ``matched``/``text_status``/``extraction_method``…).
+        ``matched=0`` keeps the candidates without a keyword hit;
+        ``matched=1`` keeps the previous contract (pages ``results``, the
+        keyword hits). Every page reports ``candidate_count`` (all
+        candidates) and ``matched_count`` (keyword hits). ``limit=0``
+        returns the whole payload.
+        """
         payload = get_named_output(store, run_id, "docs")
-        return paginate_payload(payload, "results", offset=offset, limit=limit, cursor=cursor, omit_fields=("candidates", "manifest"))
+        return docs_page(payload, matched=matched, offset=offset, limit=limit, cursor=cursor)
 
 
     @router.get("/api/runs/{run_id}/report", response_class=PlainTextResponse)

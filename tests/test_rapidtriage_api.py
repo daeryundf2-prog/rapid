@@ -3225,7 +3225,7 @@ class RapidTriageApiTests(unittest.TestCase):
                 has_more=False,
             )
             self.assertEqual(manual_manifest["manifest_hash"], last_page["pagination"]["pagination_manifest"]["manifest_hash"])
-            paged_docs_response = client.get(f"/api/runs/{run_id}/docs", params={"offset": 0, "limit": 1})
+            paged_docs_response = client.get(f"/api/runs/{run_id}/docs", params={"offset": 0, "limit": 1, "matched": 1})
             self.assertEqual(paged_docs_response.status_code, 200)
             paged_docs = paged_docs_response.json()
             self.assertEqual(paged_docs["pagination"]["collection"], "results")
@@ -4262,11 +4262,11 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(before.json()["by_status"], {})
             self.assertEqual(before.json()["report_candidates"], 0)
             # The persist step's run case DB is canonical (case id from the output dir name).
-            self.assertEqual(before.json()["case_id"], "run-run-out")
+            self.assertEqual(before.json()["case_id"], "run-out")
 
             ensure = client.post(f"/api/runs/{run_id}/case-db/ensure", json={})
             self.assertEqual(ensure.status_code, 200, ensure.text)
-            self.assertEqual(ensure.json()["case_id"], "run-run-out")
+            self.assertEqual(ensure.json()["case_id"], "run-out")
             self.assertFalse(ensure.json()["imported"])  # no second import of the same run
             database = ensure.json()["database"]
             for target_id, status, include in (("a", "relevant", True), ("b", "relevant", False), ("c", "excluded", False)):
@@ -4274,7 +4274,7 @@ class RapidTriageApiTests(unittest.TestCase):
                     "/api/case-db/review",
                     json={
                         "database": database,
-                        "case_id": "run-run-out",
+                        "case_id": "run-out",
                         "target_type": "document",
                         "target_id": target_id,
                         "status": status,
@@ -4310,11 +4310,14 @@ class RapidTriageApiTests(unittest.TestCase):
             handle = client.post(f"/api/runs/{run_id}/case-db/ensure", json={}).json()
 
             files = client.get(f"/api/runs/{run_id}/files?offset=0&limit=3").json()["candidates"]
-            docs = client.get(f"/api/runs/{run_id}/docs?offset=0&limit=3").json()["results"]
+            docs = client.get(f"/api/runs/{run_id}/docs?offset=0&limit=3&matched=1").json()["results"]
+            # The docs grid pages every candidate (parser-quality r1); its locators are /candidates/<n>.
+            doc_candidates = client.get(f"/api/runs/{run_id}/docs?offset=0&limit=1000").json()["candidates"]
+            doc_candidate_index = next(row["record_index"] for row in doc_candidates if row["path"] == docs[1]["path"])
             events = client.get(f"/api/runs/{run_id}/timeline?offset=0&limit=3").json()["events"]
             located = [
                 {"collection": "files", "locator": "/candidates/1"},
-                {"collection": "docs", "locator": "/results/1"},
+                {"collection": "docs", "locator": f"/candidates/{doc_candidate_index}"},
                 {"collection": "timeline", "locator": "/events/2"},
                 {"collection": "indicators", "locator": "/indicators/1"},
                 {"collection": "artifacts", "kind": "browser", "locator": "/artifacts/0"},
@@ -4390,6 +4393,15 @@ class RapidTriageApiTests(unittest.TestCase):
             files_mark = by_locator[("files", "", "/candidates/1")]
             self.assertEqual((files_mark["status"], files_mark["tags"]), ("needs-review", ["북마크"]))
             self.assertEqual(files_mark["path"], files[1]["path"])
+            # Docs marks map back to /candidates/<n> and, for keyword hits, also name the
+            # /results/<n> locator; a legacy /results/<n> target resolves to the same row.
+            docs_mark = by_locator[("docs", "", f"/candidates/{doc_candidate_index}")]
+            self.assertEqual(docs_mark["results_locator"], "/results/1")
+            legacy_docs = batch([{"collection": "docs", "locator": "/results/1"}], status="relevant")
+            self.assertEqual(legacy_docs.status_code, 200, legacy_docs.text)
+            self.assertEqual(legacy_docs.json()["targets"][0]["target_id"], resolved[1]["target_id"])
+            beyond = batch([{"collection": "docs", "locator": f"/candidates/{len(doc_candidates)}"}], status="relevant")
+            self.assertEqual(beyond.status_code, 400)
 
             unresolved = batch([{"collection": "files", "locator": "/candidates/999999"}], status="relevant")
             self.assertEqual(unresolved.status_code, 400)

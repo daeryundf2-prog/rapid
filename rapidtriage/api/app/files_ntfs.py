@@ -1,13 +1,23 @@
 """Files-row provenance from the newest NTFS metadata analysis (plan P1 §3.3).
 
 ``GET /api/runs/{id}/files`` rows gain ``ntfs`` (MFT entry + timestamps),
-``filesystem`` and ``source_image``.
+``filesystem`` and ``source_image``; a joined row whose own ``is_deleted``
+is unknown (``null``) takes ``not ntfs.in_use``.
+
+* **Times.** ``ntfs`` keeps ``$STANDARD_INFORMATION`` (``si_*``) and
+  ``$FILE_NAME`` (``fn_*``) times apart; ``created_at``/``modified_at``/
+  ``accessed_at``/``mft_modified_at`` are the merged values the analysis
+  wrote (``$SI``, falling back to ``$FN``). Rows of an analysis written
+  before the split carry ``si_*``/``fn_*`` ``null`` (except ``fn_created_at``/
+  ``fn_modified_at``, which older rows already had) -- a merged time is never
+  relabelled as ``$SI``. ``attributes`` = ``$SI`` file-attribute names
+  (``null`` when the analysis row has none).
 
 * **Index.** The newest completed ``ntfs-meta`` analysis's ``rows.jsonl`` is
   read once per (run, analysis, file size/mtime) -- single-flight: concurrent
   requests wait for the one build -- into a compact map
-  ``blake2b-64(casefold NFC volume path) -> packed (entry_number, created,
-  accessed, mft_modified, in_use)``. One index per run is kept (a newer
+  ``blake2b-64(casefold NFC volume path) -> packed (entry_number, merged /
+  $SI / $FN times, file attributes, in_use)``. One index per run is kept (a newer
   analysis evicts the older one). USN lines are skipped by a byte check
   before ``json.loads``. When the estimated size exceeds ``INDEX_MAX_BYTES``
   the join answers ``status="too_large"`` instead of building.
@@ -49,16 +59,32 @@ from pathlib import Path, PurePath
 from .analyses import ANALYSIS_RUNNER, ROWS_FILE_NAME, RunScope, analyses_root
 from .jsonl_records import parse_record_line
 
-NTFS_ENTRY_KEYS = ("entry_number", "created_at", "accessed_at", "mft_modified_at", "in_use")
+# Time fields packed per entry: merged (as written by the analysis), $SI, $FN.
+TIME_FIELDS = (
+    "created_at",
+    "modified_at",
+    "accessed_at",
+    "mft_modified_at",
+    "si_created_at",
+    "si_modified_at",
+    "si_accessed_at",
+    "si_mft_modified_at",
+    "fn_created_at",
+    "fn_modified_at",
+    "fn_accessed_at",
+    "fn_mft_modified_at",
+)
+NTFS_ENTRY_KEYS = ("entry_number", *TIME_FIELDS, "in_use", "is_deleted", "attributes")
 SENTINELS = frozenset({"windows", "users", "$mft"})
 MAX_PREFIX_DEPTH = 3
 PREFIX_SAMPLE_ROWS = 200_000
 INDEX_CACHE_MAX_RUNS = 4
 INDEX_MAX_BYTES = 512 * 1024 * 1024
-# dict slot + int key + bytes value (33-byte payload), measured on CPython 3.12.
-INDEX_BYTES_PER_ENTRY = 200
+# dict slot + int key + bytes value (113-byte payload): ~234 bytes measured on CPython 3.12.
+INDEX_BYTES_PER_ENTRY = 240
 USN_LINE_MARKER = b'"source": "usn"'
-_PACK = struct.Struct("<qqqq?")
+# entry_number, TIME_FIELDS..., file attributes (-1 = unknown), in_use
+_PACK = struct.Struct("<q" + "q" * len(TIME_FIELDS) + "q?")
 # Placeholders for keys shared by several rows of the same class.
 _AMBIGUOUS_IN_USE = b"\x01"
 _AMBIGUOUS_DELETED = b"\x00"
@@ -92,6 +118,21 @@ def _us_to_time(value: int) -> str | None:
     return None if value == _NONE_TIME else (_EPOCH + dt.timedelta(microseconds=value)).isoformat()
 
 
+def _attribute_names(value: int) -> list[str] | None:
+    if value < 0:
+        return None
+    from ...artifacts.windows.filesystem import NTFS_FILE_ATTRIBUTE_NAMES
+
+    return [name for flag, name in NTFS_FILE_ATTRIBUTE_NAMES.items() if value & flag]
+
+
+def _attribute_flags(details: Mapping[str, object]) -> int:
+    value = details.get("file_attributes")
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return -1
+    return value
+
+
 @dataclass
 class NtfsIndex:
     key: tuple[str, str, int, int]
@@ -103,14 +144,13 @@ class NtfsIndex:
         packed = self.entries.get(_hash_key(path_key))
         if packed is None or len(packed) != _PACK.size:
             return None  # absent or ambiguous
-        entry, created, accessed, mft_modified, in_use = _PACK.unpack(packed)
-        return {
-            "entry_number": entry,
-            "created_at": _us_to_time(created),
-            "accessed_at": _us_to_time(accessed),
-            "mft_modified_at": _us_to_time(mft_modified),
-            "in_use": in_use,
-        }
+        values = _PACK.unpack(packed)
+        in_use = bool(values[-1])
+        entry: dict[str, object] = {"entry_number": values[0]}
+        for name, value in zip(TIME_FIELDS, values[1:-2]):
+            entry[name] = _us_to_time(value)
+        entry.update({"in_use": in_use, "is_deleted": not in_use, "attributes": _attribute_names(values[-2])})
+        return entry
 
 
 def _merge_entry(existing: bytes | None, packed: bytes, in_use: bool) -> bytes:
@@ -121,7 +161,7 @@ def _merge_entry(existing: bytes | None, packed: bytes, in_use: bool) -> bytes:
         return existing
     if existing == _AMBIGUOUS_DELETED:
         return packed if in_use else existing
-    existing_in_use = _PACK.unpack(existing)[4]
+    existing_in_use = bool(_PACK.unpack(existing)[-1])
     if in_use and existing_in_use:
         return _AMBIGUOUS_IN_USE
     if in_use:
@@ -151,9 +191,8 @@ def build_ntfs_index(key: tuple[str, str, int, int], rows_path: Path) -> NtfsInd
             in_use = bool(details.get("in_use"))
             packed = _PACK.pack(
                 int(details.get("entry_number") or 0),
-                _time_to_us(details.get("created_at")),
-                _time_to_us(details.get("accessed_at")),
-                _time_to_us(details.get("mft_modified_at")),
+                *(_time_to_us(details.get(name)) for name in TIME_FIELDS),
+                _attribute_flags(details),
                 in_use,
             )
             entries[hashed] = _merge_entry(entries.get(hashed), packed, in_use)
@@ -393,7 +432,10 @@ def join_files_page(
             joined.append(_null_fields(row, source_image))
             continue
         matched += 1
-        joined.append({**row, "ntfs": entry, "filesystem": "NTFS", "source_image": source_image})
+        merged = {**row, "ntfs": entry, "filesystem": "NTFS", "source_image": source_image}
+        if merged.get("is_deleted") is None:
+            merged["is_deleted"] = entry["is_deleted"]
+        joined.append(merged)
     join["matched"] = matched
     result = dict(page)
     result["candidates"] = joined
