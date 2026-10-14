@@ -5,7 +5,14 @@
  * plan header. Pure data shaping; no React.
  */
 
-import type { RunDisclosures, RunSummary, RunWarning } from "../../api/runs";
+import type {
+  DocsSizeCaps,
+  IndicatorCapPolicy,
+  RowTruncation,
+  RunDisclosures,
+  RunSummary,
+  RunWarning,
+} from "../../api/runs";
 
 export type DisclosureTone = "warn" | "info";
 
@@ -30,6 +37,125 @@ const n = (value: number) => value.toLocaleString("ko-KR");
 
 function num(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+/** Processing profile labels (core/run/summary.py infer_processing_profile_label) → Korean. */
+const PROFILE_LABELS: Record<string, { text: string; tone: DisclosureTone }> = {
+  "Dry run - no extraction": { text: "시험 실행 — 추출 없음", tone: "info" },
+  "Fast first pass - read-only": { text: "빠른 1차 처리 — 읽기 전용", tone: "info" },
+  "Standard - bounded extraction": { text: "표준 — 추출 크기·개수 상한 적용", tone: "warn" },
+  "Deep - extraction without size limits": { text: "정밀 — 크기 상한 없이 추출", tone: "info" },
+  // parser-quality r2: a run whose parser / stage / row caps were hit is never "without limits".
+  "Deep - parser/stage caps applied (disclosed)": {
+    text: "정밀 — 파서·단계 상한 적용(공개 사항 참조)",
+    tone: "warn",
+  },
+  // r1 wording of the same case.
+  "Deep - extraction without size limits (parser caps disclosed)": {
+    text: "정밀 — 파서·단계 상한 적용(공개 사항 참조)",
+    tone: "warn",
+  },
+};
+
+/** Korean line of `processing.profile_label` (unknown labels are shown as sent). */
+export function profileLine(label: string): { text: string; tone: DisclosureTone } {
+  return PROFILE_LABELS[label] ?? { text: label, tone: "info" };
+}
+
+/** 지표 상한 line from the indicators `cap_policy` ("상한 없음" / "상한 N개"). */
+export function capPolicyLine(policy: IndicatorCapPolicy): { text: string; tone: DisclosureTone } | null {
+  if (policy.mode === "uncapped" || (policy.mode !== "capped" && !policy.max_indicators)) {
+    const kept = typeof policy.kept === "number" ? ` — 지표 후보 ${n(policy.kept)}건 모두 기록` : "";
+    return { text: `상한 없음${kept}`, tone: "info" };
+  }
+  const max = num(policy.max_indicators);
+  if (!max) return null;
+  const kept = num(policy.kept);
+  const total = num(policy.total_before_cap);
+  if (total > kept) {
+    return { text: `상한 ${n(max)}개 — 전체 ${n(total)}건 중 ${n(kept)}건만 기록`, tone: "warn" };
+  }
+  return { text: `상한 ${n(max)}개 (도달하지 않음)`, tone: "info" };
+}
+
+const mb = (bytes: unknown) => `${Math.round(num(bytes) / 1_000_000).toLocaleString("ko-KR")} MB`;
+
+/** 문서 크기 상한 line from the docs `size_caps` (byte caps of text extraction). */
+export function sizeCapsLine(caps: DocsSizeCaps): { text: string; tone: DisclosureTone } {
+  const limits = [
+    num(caps.max_input_bytes) ? `파일 ${mb(caps.max_input_bytes)}` : "",
+    num(caps.max_archive_member_bytes) ? `압축 멤버 ${mb(caps.max_archive_member_bytes)}` : "",
+    num(caps.max_archive_total_bytes) ? `압축 합계 ${mb(caps.max_archive_total_bytes)}` : "",
+  ].filter(Boolean);
+  const tooLarge = num(caps.too_large_count);
+  const binary = num(caps.binary_rejected_count);
+  const effects = [
+    tooLarge ? `초과 ${n(tooLarge)}건 본문 미추출` : "초과 문서 없음",
+    binary ? `비인쇄 문자 비율 초과 ${n(binary)}건 미색인` : "",
+  ].filter(Boolean);
+  return {
+    text: `${limits.length ? `${limits.join(" · ")} — ` : ""}${effects.join(" · ")}`,
+    tone: tooLarge || binary ? "warn" : "info",
+  };
+}
+
+/**
+ * Row-level truncation per artifact kind: `disclosures.input_row_truncation` when the server sends
+ * it, else the steps' `row_truncation` (`artifacts-<kind>` steps, core/run/steps.py).
+ */
+export function rowTruncationOf(summary: RunSummary | undefined): Record<string, RowTruncation> {
+  const direct = summary?.disclosures?.input_row_truncation;
+  if (direct && typeof direct === "object") return direct;
+  const out: Record<string, RowTruncation> = {};
+  for (const step of summary?.steps ?? []) {
+    const value = step?.row_truncation;
+    const name = typeof step?.name === "string" ? step.name : "";
+    if (!name || !value || typeof value !== "object" || Array.isArray(value)) continue;
+    out[name.replace(/^artifacts-/, "")] = value as RowTruncation;
+  }
+  return out;
+}
+
+const sumValues = (record: Record<string, number> | undefined) =>
+  Object.values(record ?? {}).reduce((total, value) => total + num(value), 0);
+
+/**
+ * 행 절단 lines: payload cuts (`rows_with_truncation` / `count_fields`, the record keeps only part
+ * of the original value) are a warning; display-preview cuts (`preview_only_rows`, record value
+ * kept) are a notice (info).
+ */
+export function rowTruncationItems(truncation: Record<string, RowTruncation>): DisclosureItem[] {
+  const payload: string[] = [];
+  const preview: string[] = [];
+  for (const [kind, entry] of Object.entries(truncation)) {
+    if (!entry || typeof entry !== "object") continue;
+    const rows = num(entry.rows_with_truncation);
+    const counted = sumValues(entry.count_fields);
+    if (rows || counted) payload.push(rows ? `${kind} ${n(rows)}행` : `${kind} ${n(counted)}건`);
+    const previewRows = num(entry.preview_only_rows);
+    const previewCounted = sumValues(entry.preview_count_fields);
+    if (previewRows || previewCounted) {
+      preview.push(previewRows ? `${kind} ${n(previewRows)}행` : `${kind} ${n(previewCounted)}건`);
+    }
+  }
+  const out: DisclosureItem[] = [];
+  if (payload.length) {
+    out.push({
+      id: "row-truncation",
+      label: "행 절단(원문 일부)",
+      text: `원문 값 일부만 보존된 행: ${payload.join(" · ")}`,
+      tone: "warn",
+    });
+  }
+  if (preview.length) {
+    out.push({
+      id: "row-preview-truncation",
+      label: "미리보기 절단",
+      text: `표시용 미리보기만 잘림(원본 레코드 값은 보존): ${preview.join(" · ")}`,
+      tone: "info",
+    });
+  }
+  return out;
 }
 
 /** Disclosure lines of a run (empty when the summary predates them). */
@@ -105,7 +231,14 @@ export function disclosureItems(summary: RunSummary | undefined): DisclosureItem
     });
   }
 
+  const profile = summary?.processing?.profile_label;
+  if (typeof profile === "string" && profile) {
+    out.push({ id: "profile", label: "처리 프로필", ...profileLine(profile) });
+  }
+
   const indicators = d.indicators;
+  const capPolicy = indicators?.cap_policy ? capPolicyLine(indicators.cap_policy) : null;
+  if (capPolicy) out.push({ id: "indicator-cap", label: "지표 상한", ...capPolicy });
   if (indicators && (indicators.rule_status_message || indicators.truncated)) {
     out.push({
       id: "indicators",
@@ -134,6 +267,12 @@ export function disclosureItems(summary: RunSummary | undefined): DisclosureItem
     });
   }
 
+  if (d.documents?.size_caps && typeof d.documents.size_caps === "object") {
+    out.push({ id: "docs-size-caps", label: "문서 크기 상한", ...sizeCapsLine(d.documents.size_caps) });
+  }
+
+  out.push(...rowTruncationItems(rowTruncationOf(summary)));
+
   if (num(d.files?.excluded_file_count) > 0) {
     out.push({
       id: "files-excluded",
@@ -160,6 +299,11 @@ export function runWarnings(summary: RunSummary | undefined): RunWarning[] {
   return Array.isArray(list) ? list.filter((w) => w && typeof w === "object" && w.message) : [];
 }
 
+/** A `level: "notice"` step message (preview-only truncation): disclosed, not a warning. */
+export function isNotice(warning: RunWarning): boolean {
+  return warning.level === "notice";
+}
+
 /** One-line digest for the 처리 plan header ("공개 사항: 누락 도구 2 · 상한 3단계 · 경고 4건"). */
 export function disclosureDigest(summary: RunSummary | undefined): string {
   const items = disclosureItems(summary);
@@ -168,7 +312,8 @@ export function disclosureDigest(summary: RunSummary | undefined): string {
   const warn = items.filter((item) => item.tone === "warn").map((item) => item.label);
   const parts = [
     warn.length ? `확인 필요: ${warn.join(", ")}` : "제한 사항 없음",
-    warnings.length ? `경고 ${n(warnings.length)}건` : "",
+    warnings.some((w) => !isNotice(w)) ? `경고 ${n(warnings.filter((w) => !isNotice(w)).length)}건` : "",
+    warnings.some(isNotice) ? `알림 ${n(warnings.filter(isNotice).length)}건` : "",
   ].filter(Boolean);
   return `공개 사항 — ${parts.join(" · ")}`;
 }

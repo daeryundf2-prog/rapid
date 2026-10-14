@@ -25,11 +25,43 @@ export function modifiedCell(row: GridRow, text: string): ReactNode {
   return <span className="grid-cell-text">{text}</span>;
 }
 
-/** 삭제 cell: a "삭제됨" chip for deleted entries, "할당" for allocated ones, empty when unknown. */
-export function deletedCell(row: GridRow): ReactNode {
-  const deleted = row.fields.isDeleted;
-  if (deleted === true) return <ToneChip tone="danger">삭제됨</ToneChip>;
-  if (deleted === false) return <span className="grid-cell-text">할당</span>;
+/** Title of an "unknown" 삭제 value: the scan could not tell allocated from deleted. */
+export const DELETION_UNKNOWN_TITLE = "삭제 여부 확인 불가 — 파일시스템 목록·MFT 정보가 없습니다";
+
+/**
+ * 삭제 cell from `deletion_state`: a "삭제됨" danger chip, a neutral "할당" chip, a muted
+ * "알 수 없음" (not a deletion claim); empty when the server says nothing.
+ */
+export function deletionCell(row: GridRow): ReactNode {
+  const state = row.fields.deletion;
+  if (state === "deleted") return <ToneChip tone="danger">삭제됨</ToneChip>;
+  if (state === "allocated") return <ToneChip tone="">할당</ToneChip>;
+  if (state === "unknown") {
+    return (
+      <span className="grid-cell-empty" data-testid="files-deletion-unknown" title={DELETION_UNKNOWN_TITLE}>
+        알 수 없음
+      </span>
+    );
+  }
+  return (
+    <span className="grid-cell-empty" aria-hidden="true">
+      —
+    </span>
+  );
+}
+
+/** 시그니처 cell: a warn "불일치" chip (direction in the title), plain "일치", empty when unchecked. */
+export function signatureCell(row: GridRow): ReactNode {
+  const sig = row.fields.signature as { state?: string | null; direction?: string | null } | undefined;
+  if (sig?.state === "mismatch") {
+    return (
+      <ToneChip tone="warn" testId="files-signature-mismatch">
+        불일치
+      </ToneChip>
+    );
+  }
+  if (sig?.state === "match") return <span className="grid-cell-text">일치</span>;
+  if (sig?.state === "read-error") return <span className="grid-cell-empty">읽기 오류</span>;
   return (
     <span className="grid-cell-empty" aria-hidden="true">
       —

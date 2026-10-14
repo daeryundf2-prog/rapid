@@ -1,8 +1,9 @@
 import type { AnalysisState, AnalysisStatus } from "../../api/analyses";
 import type { ReviewCounts, SavedSearch } from "../../api/caseDb";
+import { filesInventoryCategory } from "../../api/collections";
 import type { EvidencePartition, EvidenceSource } from "../../api/dashboard";
 import type { CanonicalCounts, RunSummary, RunTree, TreeNode } from "../../api/runs";
-import type { CollectionId, ReviewStatus } from "../../contracts/collection";
+import type { CollectionId, ColumnFilter, ReviewStatus } from "../../contracts/collection";
 import type { IconName } from "../../icons";
 import {
   ANALYSIS_NODES,
@@ -16,6 +17,14 @@ import { groupByCategory, kindIcon } from "./categories";
 import { DOMAINS, type DomainNodeDef, type DomainTarget, NON_EVIDENCE_NOTE, targetKey } from "./domains";
 
 export type RouteTail = Omit<CaseRoute, "runId">;
+
+/** Route a domain node opens: the tail plus its server / loaded-row filters. */
+export type DomainRoute = RouteTail & {
+  types?: string[];
+  ext?: string[];
+  cols?: string[];
+  cf?: ColumnFilter[];
+};
 
 export interface TreeModelNode {
   /** Unique, stable id (also the DOM key). */
@@ -37,8 +46,8 @@ export interface TreeModelNode {
   noSelect?: boolean;
   /** Short marker after the label ("선택됨"). */
   marker?: string;
-  /** Domain nodes: the full route to open (kind + `types=` / `ext=` filters). */
-  target?: RouteTail & { types?: string[]; ext?: string[] };
+  /** Domain nodes: the full route to open (kind + `types=` / `ext=` / `cols=` / `cf=` filters). */
+  target?: DomainRoute;
   /** Domain nodes: selected when the current route has this key (`targetKey`). */
   selectKey?: string;
   /** Group headers (domains, 전체 보기): click / Enter expands or collapses; never navigates. */
@@ -335,6 +344,9 @@ export function domainNodeCount(target: DomainTarget, input: TreeModelInput): Do
           : nodeStateLabel(status);
     return { count, marker: stateMarker, icon: status === "completed" ? undefined : nodeStateIcon(status) };
   }
+  if (target.collection === "files" && target.fileScope && !target.fileCategory) {
+    return inventoryTotal(input);
+  }
   if (target.collection === "files" && !target.fileCategory) return known(counts?.files, Boolean(counts));
   if (target.collection === "docs") return known(docsCount(input), Boolean(counts) || Boolean(tree));
   if (target.collection === "indicators") return known(counts?.indicators, Boolean(counts));
@@ -351,6 +363,10 @@ export function domainNodeCount(target: DomainTarget, input: TreeModelInput): Do
     // The run has no records of this kind at all.
     if (!kindNode) return known(0, true);
     const zero = zeroReason(kindNode);
+    if (target.countField) {
+      const value = (kindNode as unknown as Record<string, unknown>)[target.countField];
+      return typeof value === "number" ? known(value, true, zero) : { count: UNKNOWN_COUNT };
+    }
     if (!target.types?.length) return known(kindNode.count, true, zero);
     const perType = kindNode.artifact_type_counts;
     if (perType && typeof perType === "object") {
@@ -374,6 +390,22 @@ export function domainNodeCount(target: DomainTarget, input: TreeModelInput): Do
     return kindNode.count === 0 ? known(0, true, zero) : { count: UNKNOWN_COUNT };
   }
   return { count: undefined };
+}
+
+/** Why 전체 파일(인벤토리) is empty on a run whose files output predates the inventory. */
+export const NO_INVENTORY_REASON =
+  "이 런의 파일 출력에는 인벤토리가 없습니다 — 선택한 범주의 후보만 기록되었습니다";
+
+/**
+ * 전체 파일(인벤토리) count: every scanned file = the candidates (`files` node count) plus the
+ * inventory-only rows (`files.inventory_count`, files outside the selected categories).
+ */
+export function inventoryTotal(input: Pick<TreeModelInput, "summary" | "tree">): DomainCount {
+  if (!input.tree) return { count: undefined };
+  const node = findServerNode(input.tree, "files");
+  if (typeof node?.inventory_count !== "number") return { count: 0, disabledReason: NO_INVENTORY_REASON };
+  const candidates = node.count ?? input.summary?.summary?.counts?.files ?? 0;
+  return known(candidates + node.inventory_count, true);
 }
 
 const SKIP_STATUS_LABEL: Record<string, string> = {
@@ -407,17 +439,33 @@ function known(count: number | undefined, loaded: boolean, emptyReason = NO_DATA
 }
 
 /** Full route of a domain node (the tree navigates with it; `types=` / `ext=` ride in the URL). */
-export function domainRoute(target: DomainTarget): RouteTail & { types?: string[]; ext?: string[] } {
-  const route: RouteTail & { types?: string[]; ext?: string[] } = { collection: target.collection };
+export function domainRoute(target: DomainTarget): DomainRoute {
+  const route: DomainRoute = { collection: target.collection };
   if (target.kind) route.kind = target.kind;
-  if (target.fileCategory) route.category = target.fileCategory;
+  if (target.fileScope) route.category = filesInventoryCategory(target.fileCategory);
+  else if (target.fileCategory) route.category = target.fileCategory;
   if (target.types?.length) route.types = [...target.types];
   if (target.ext?.length) route.ext = [...target.ext];
+  if (target.cols?.length) route.cols = [...target.cols];
+  if (target.cf?.length) route.cf = target.cf.map((filter) => ({ ...filter }));
   return route;
 }
 
 /**
- * Domain header count: evidence records, each kind once. A kind with a kind-wide node in the
+ * A files category node whose server node exists only in the inventory (`files:<id>` with
+ * `inventory_only`, a category the scan did not select) opens the inventory scope.
+ */
+function effectiveTarget(target: DomainTarget, tree: RunTree | undefined): DomainTarget {
+  if (target.collection !== "files" || !target.fileCategory || target.fileScope) return target;
+  const node = findServerNode(tree, `files:${target.fileCategory}`);
+  return node?.inventory_only || node?.source === "inventory"
+    ? { ...target, fileScope: "inventory" }
+    : target;
+}
+
+/**
+ * Domain header count (over the flattened nodes, sub-nodes included; groups, catch-alls and
+ * column-filtered views never add): evidence records, each kind once. A kind with a kind-wide node in the
  * domain counts that node minus its `nonEvidence` / `detail` typed nodes (string candidates,
  * Prefetch reference paths, the registry key tree never inflate the header); a kind with only
  * typed nodes counts the sum of its typed evidence nodes. Non-artifact nodes (files, analyses,
@@ -435,6 +483,8 @@ export function domainTotal(
     const count = counts[index];
     const t = node.target;
     if (t.collection !== "artifacts" || !t.kind || typeof count !== "number") return;
+    // Catch-alls span domains, groups repeat their leaves, filtered views repeat their types.
+    if (node.catchAll || node.children?.length || t.cf?.length) return;
     anyKnown = true;
     if (!t.types?.length) wide.set(t.kind, count);
     else if (node.nonEvidence || node.detail) excluded.set(t.kind, (excluded.get(t.kind) ?? 0) + count);
@@ -447,13 +497,23 @@ export function domainTotal(
   return total;
 }
 
+/** Tooltip of a column-filtered node: the filter is applied to the loaded rows. */
+function filteredNote(target: DomainTarget): string {
+  const filters = (target.cf ?? []).map((f) => `${f.col.replace(/^f:/, "")} ${f.op} ${f.value}`).join(", ");
+  return `불러온 행에 열 필터 적용: ${filters}`;
+}
+
 function domainNodes(input: TreeModelInput): TreeModelNode[] {
   return DOMAINS.map<TreeModelNode>((domain) => {
-    const children = domain.nodes.map<TreeModelNode>((node) => {
-      const state = domainNodeCount(node.target, input);
-      const route = domainRoute(node.target);
+    const flat: Array<{ def: DomainNodeDef; count: number | string | undefined }> = [];
+    const toModel = (node: DomainNodeDef): TreeModelNode => {
+      const target = effectiveTarget(node.target, input.tree);
+      const state = domainNodeCount(target, input);
+      flat.push({ def: node, count: state.count });
+      const route = domainRoute(target);
       const label =
         node.target.collection === "indicators" ? indicatorsLabel(input.tree, node.label) : node.label;
+      const children = node.children?.map(toModel);
       return {
         id: `domain:${domain.id}:${node.id}`,
         label,
@@ -464,16 +524,19 @@ function domainNodes(input: TreeModelInput): TreeModelNode[] {
           ...(route.category ? { category: route.category } : {}),
         },
         target: route,
-        selectKey: targetKey(node.target),
+        selectKey: targetKey(target),
         disabledReason: state.disabledReason,
         marker: state.marker,
         icon: state.icon ?? node.icon,
+        ...(children?.length ? { children } : {}),
         ...(node.nonEvidence ? { dimmed: true, note: NON_EVIDENCE_NOTE } : {}),
+        ...(target.cf?.length && !node.nonEvidence ? { note: filteredNote(target) } : {}),
       };
-    });
+    };
+    const children = domain.nodes.map(toModel);
     const total = domainTotal(
-      domain.nodes,
-      children.map((child) => child.count),
+      flat.map((entry) => entry.def),
+      flat.map((entry) => entry.count),
     );
     const anyKnown = total !== undefined;
     return {

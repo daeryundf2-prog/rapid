@@ -10,7 +10,8 @@
  * count is known to be 0 is dimmed with a reason, an unknown count shows "—".
  */
 
-import type { CollectionId } from "../../contracts/collection";
+import { filesInventoryCategory } from "../../api/collections";
+import type { CollectionId, ColumnFilter } from "../../contracts/collection";
 import type { IconName } from "../../icons";
 import type { AnalysisNodeId } from "../analysis/kinds";
 
@@ -23,6 +24,20 @@ export interface DomainTarget {
   ext?: string[];
   /** Server files category (`GET /files?category=<id>`, route `category=`; `/tree` node `files:<id>`). */
   fileCategory?: string;
+  /**
+   * Files listing scope: "inventory" = every scanned file incl. the categories the scan did not
+   * select (`GET /files?scope=inventory`, route `category=inventory[:<id>]`). Default: candidates.
+   */
+  fileScope?: "inventory";
+  /** Promoted record-field columns opened with the node (route `cols=details.<key>`). */
+  cols?: string[];
+  /**
+   * Column filters on the loaded rows (route `cf=`): a filtered view of its types, never their
+   * primary node, and left out of the domain total.
+   */
+  cf?: ColumnFilter[];
+  /** Count from this numeric field of the kind's `/tree` node instead of the per-type counts. */
+  countField?: string;
   /** Analysis results node (collection "analysis"). */
   analysis?: AnalysisNodeId;
 }
@@ -49,6 +64,16 @@ export interface DomainNodeDef {
   detail?: boolean;
   /** Korean names of the node's types when it maps several (유형 filter list). */
   typeLabels?: Readonly<Record<string, string>>;
+  /**
+   * Kind-wide catch-all ("… 전체"): reaches every type of the kind (also ones without a typed
+   * node), but never adds to the domain total — the kind's types are spread over several domains.
+   */
+  catchAll?: boolean;
+  /**
+   * Sub-nodes (실행 흔적 › Amcache › 드라이버 …). A node with children is a group: its target is
+   * the union of its evidence children; only the leaves are primary nodes and count in the total.
+   */
+  children?: DomainNodeDef[];
 }
 
 /** Tooltip of a non-evidence node (string pivots the parser could not tie to a record). */
@@ -65,11 +90,36 @@ export interface DomainDef {
 const a = (kind: string, types?: string[]): DomainTarget =>
   types ? { collection: "artifacts", kind, types } : { collection: "artifacts", kind };
 const files = (category: string): DomainTarget => ({ collection: "files", fileCategory: category });
+const inventory = (category?: string): DomainTarget => ({
+  collection: "files",
+  fileScope: "inventory",
+  ...(category ? { fileCategory: category } : {}),
+});
 const run = (analysis: AnalysisNodeId): DomainTarget => ({
   collection: "analysis",
   kind: analysis,
   analysis,
 });
+
+/** EVTX recovered-record position detail (eventlog.py `evtx_record_id_position`). */
+export const EVTX_RECORD_ID_POSITION = "evtx_record_id_position";
+export const EVTX_STALE_BELOW_FIRST = "stale-below-first";
+
+/** Amcache inventory types (execution.py AMCACHE_EXTENDED_SECTIONS, parser-quality r2) → Korean. */
+export const AMCACHE_TYPE_LABELS: Readonly<Record<string, string>> = {
+  "amcache-schema-row": "응용 프로그램 파일",
+  "amcache-driver-binary": "드라이버 바이너리",
+  "amcache-driver-package": "드라이버 패키지",
+  "amcache-device-pnp": "PnP 장치",
+  "amcache-device-container": "장치 컨테이너",
+  "amcache-application-shortcut": "응용 프로그램 바로 가기",
+  "amcache-device-census": "DeviceCensus 시스템 정보",
+};
+const AMCACHE_EVIDENCE_TYPES = Object.keys(AMCACHE_TYPE_LABELS);
+
+function pickLabels(labels: Readonly<Record<string, string>>, types: string[]): Record<string, string> {
+  return Object.fromEntries(types.map((type) => [type, labels[type] ?? type]));
+}
 
 /**
  * The 15 forensic domains of console-ia §4 (증거 소스 is the evidence node built from the
@@ -101,6 +151,17 @@ export const DOMAINS: readonly DomainDef[] = [
           "windows-sam-account-candidate": "SAM 계정(reg 내보내기)",
           "windows-sam-group-candidate": "SAM 그룹(reg 내보내기)",
         },
+      },
+      {
+        id: "os-accounts-all",
+        label: "OS 계정 전체(하이브·reg 내보내기)",
+        target: a("windows-os-account"),
+        catchAll: true,
+      },
+      {
+        id: "os-profiles",
+        label: "사용자 프로필",
+        target: a("windows-os-account", ["windows-user-profile"]),
       },
       { id: "os-system", label: "시스템 정보(Windows)", target: a("windows-system") },
       {
@@ -147,6 +208,49 @@ export const DOMAINS: readonly DomainDef[] = [
         target: a("linux-system", ["linux-systemd-service"]),
       },
       { id: "os-wer", label: "WER", target: a("windows-system", ["wer-report"]) },
+      {
+        id: "os-notifications",
+        label: "알림·활동 기록",
+        target: a("windows-system", [
+          "notification-database",
+          "notification-row-candidate",
+          "activities-cache-db",
+          "activities-cache-row-candidate",
+        ]),
+        typeLabels: {
+          "notification-database": "알림 DB",
+          "notification-row-candidate": "알림 행 후보",
+          "activities-cache-db": "활동 기록 DB(ActivitiesCache)",
+          "activities-cache-row-candidate": "활동 기록 행 후보",
+        },
+      },
+      {
+        id: "os-thumbcache",
+        label: "썸네일·아이콘 캐시",
+        target: a("windows-system", [
+          "thumbnail-cache-file",
+          "icon-cache-file",
+          "thumbnail-cache-entry-candidate",
+          "icon-cache-entry-candidate",
+          "thumbnail-cache-media-candidate",
+          "icon-cache-media-candidate",
+        ]),
+        typeLabels: {
+          "thumbnail-cache-file": "썸네일 캐시 파일",
+          "icon-cache-file": "아이콘 캐시 파일",
+          "thumbnail-cache-entry-candidate": "썸네일 캐시 항목 후보",
+          "icon-cache-entry-candidate": "아이콘 캐시 항목 후보",
+          "thumbnail-cache-media-candidate": "썸네일 캐시 이미지 후보",
+          "icon-cache-media-candidate": "아이콘 캐시 이미지 후보",
+        },
+      },
+      {
+        // The server tree routes DeviceCensus to 운영체제 (api/app/tree.py); primary: 실행 흔적 › Amcache.
+        id: "os-amcache-census",
+        label: "Amcache 시스템 정보(DeviceCensus)",
+        target: a("windows-execution", ["amcache-device-census"]),
+        crossRef: true,
+      },
     ],
   },
   {
@@ -169,9 +273,50 @@ export const DOMAINS: readonly DomainDef[] = [
       { id: "exec-all", label: "실행 흔적 전체", target: a("windows-execution") },
       {
         id: "exec-amcache",
-        label: "Amcache/ShimCache",
-        target: a("windows-execution", ["amcache-schema-row", "shimcache-schema-entry"]),
-        typeLabels: { "amcache-schema-row": "Amcache", "shimcache-schema-entry": "ShimCache" },
+        label: "Amcache",
+        target: a("windows-execution", AMCACHE_EVIDENCE_TYPES),
+        typeLabels: AMCACHE_TYPE_LABELS,
+        children: [
+          {
+            id: "exec-amcache-files",
+            label: "응용 프로그램 파일",
+            target: a("windows-execution", ["amcache-schema-row"]),
+          },
+          {
+            id: "exec-amcache-drivers",
+            label: "드라이버",
+            target: a("windows-execution", ["amcache-driver-binary", "amcache-driver-package"]),
+            typeLabels: pickLabels(AMCACHE_TYPE_LABELS, ["amcache-driver-binary", "amcache-driver-package"]),
+          },
+          {
+            id: "exec-amcache-devices",
+            label: "장치",
+            target: a("windows-execution", ["amcache-device-pnp", "amcache-device-container"]),
+            typeLabels: pickLabels(AMCACHE_TYPE_LABELS, ["amcache-device-pnp", "amcache-device-container"]),
+          },
+          {
+            id: "exec-amcache-shortcuts",
+            label: "바로가기",
+            target: a("windows-execution", ["amcache-application-shortcut"]),
+          },
+          {
+            id: "exec-amcache-census",
+            label: "센서스",
+            target: a("windows-execution", ["amcache-device-census"]),
+          },
+          {
+            id: "exec-amcache-hive",
+            label: "하이브 파일",
+            target: a("windows-execution", ["amcache-hive", "amcache-inventory-row"]),
+            detail: true,
+            typeLabels: { "amcache-hive": "Amcache 하이브", "amcache-inventory-row": "기타 인벤토리 행" },
+          },
+        ],
+      },
+      {
+        id: "exec-shimcache",
+        label: "ShimCache",
+        target: a("windows-execution", ["shimcache-schema-entry"]),
       },
       {
         id: "exec-bam",
@@ -229,12 +374,14 @@ export const DOMAINS: readonly DomainDef[] = [
     icon: "hard-drive",
     nodes: [
       { id: "fs-all", label: "전체 파일", target: { collection: "files" } },
+      { id: "fs-inventory", label: "전체 파일(인벤토리)", target: inventory() },
       { id: "fs-documents", label: "문서", target: files("documents") },
       { id: "fs-images", label: "이미지", target: files("images") },
       { id: "fs-archives", label: "압축", target: files("archives") },
       { id: "fs-databases", label: "데이터베이스", target: files("databases") },
       { id: "fs-emails", label: "이메일 파일", target: files("emails") },
-      { id: "fs-other", label: "기타", target: files("other") },
+      // Files outside the selected scan categories: inventory rows only (no hash / content scan).
+      { id: "fs-other", label: "기타 (스캔 제외)", target: inventory("other") },
       { id: "fs-mft", label: "MFT/USN", target: run("ntfs-meta") },
       { id: "fs-carve", label: "복구/카빙", target: run("carve") },
       { id: "fs-vsc", label: "볼륨 섀도우", target: run("vsc") },
@@ -254,6 +401,12 @@ export const DOMAINS: readonly DomainDef[] = [
         label: "문자열 후보(증거 아님)",
         target: a("windows-filesystem", ["full-path-string-candidate"]),
         nonEvidence: true,
+      },
+      {
+        id: "fs-artifacts-all",
+        label: "파일시스템 아티팩트 전체",
+        target: a("windows-filesystem"),
+        catchAll: true,
       },
     ],
   },
@@ -299,6 +452,18 @@ export const DOMAINS: readonly DomainDef[] = [
         target: a("windows-registry", ["registry-hive-string-candidate"]),
         nonEvidence: true,
       },
+      {
+        id: "reg-hives",
+        label: "하이브 파일·요약",
+        target: a("windows-registry", ["registry-hive", "registry-hive-strings", "registry-summary"]),
+        detail: true,
+        typeLabels: {
+          "registry-hive": "하이브 파일",
+          "registry-hive-strings": "하이브 문자열 묶음",
+          "registry-summary": "레지스트리 요약",
+        },
+      },
+      { id: "reg-all", label: "레지스트리 전체", target: a("windows-registry"), catchAll: true },
     ],
   },
   {
@@ -314,6 +479,25 @@ export const DOMAINS: readonly DomainDef[] = [
         id: "evt-slack",
         label: "슬랙 복구 레코드",
         target: a("eventlog", ["eventlog-record-candidate"]),
+      },
+      {
+        // Recovered records whose id is below the first live record (ring-buffer residue the live
+        // log already overwrote): eventlog.py `evtx_record_id_position = "stale-below-first"`.
+        id: "evt-stale",
+        label: "오래된 레코드(첫 레코드 이전)",
+        target: {
+          ...a("eventlog", ["eventlog-event", "eventlog-record-candidate"]),
+          cols: [`details.${EVTX_RECORD_ID_POSITION}`],
+          cf: [{ col: `f:${EVTX_RECORD_ID_POSITION}`, op: ":", value: EVTX_STALE_BELOW_FIRST }],
+          countField: "stale_below_first_record_count",
+        },
+      },
+      {
+        id: "evt-files",
+        label: "EVTX 파일·요약",
+        target: a("eventlog", ["eventlog-file", "eventlog-summary"]),
+        detail: true,
+        typeLabels: { "eventlog-file": "EVTX 파일", "eventlog-summary": "이벤트 로그 요약" },
       },
       { id: "evt-etl", label: "ETL 추적 파일", target: a("eventlog", ["etl-trace-file"]) },
       { id: "evt-firewall", label: "방화벽 로그", target: a("windows-system", ["firewall-log"]) },
@@ -372,6 +556,33 @@ export const DOMAINS: readonly DomainDef[] = [
       },
       { id: "web-cache", label: "캐시(WebCache)", target: a("browser", ["webcachev01-ese-file"]) },
       {
+        id: "web-ai",
+        label: "AI 서비스 사용",
+        target: a("browser", ["browser-ai-usage", "browser-ai-conversation"]),
+        typeLabels: { "browser-ai-usage": "AI 서비스 방문", "browser-ai-conversation": "AI 대화 후보" },
+      },
+      {
+        id: "web-storage",
+        label: "저장소 인벤토리",
+        target: a("browser", [
+          "browser-storage-inventory",
+          "browser-cache-inventory",
+          "browser-cookie-store-inventory",
+          "browser-credential-store-inventory",
+          "browser-extension-inventory",
+          "browser-session-storage-inventory",
+          "browser-sync-inventory",
+        ]),
+        detail: true,
+      },
+      {
+        // One aggregate row per profile (history + downloads); the timeline uses the rows' own times.
+        id: "web-history-downloads",
+        label: "히스토리·다운로드 집계",
+        target: a("browser", ["browser-history-downloads"]),
+        detail: true,
+      },
+      {
         id: "web-cloud-sync",
         label: "클라우드 저장소 동기화",
         target: a("browser", ["desktop-cloud-sync-db", "desktop-cloud-sync-row-candidate"]),
@@ -385,6 +596,28 @@ export const DOMAINS: readonly DomainDef[] = [
     nodes: [
       // The Windows provider reads registry DeviceInfo / user-id traces, not the (encrypted) chat DB.
       { id: "msg-kakao", label: "카카오톡(Windows) 레지스트리 흔적", target: a("kakaotalk-windows") },
+      {
+        id: "msg-kakao-candidates",
+        label: "카카오톡(Windows) 후보",
+        target: a("kakaotalk-windows", [
+          "kakaotalk-windows-user-id-candidate",
+          "kakaotalk-windows-app-database",
+          "kakaotalk-windows-source-candidate",
+          "kakaotalk-windows-crypto-material-candidate",
+        ]),
+        typeLabels: {
+          "kakaotalk-windows-user-id-candidate": "사용자 ID 후보",
+          "kakaotalk-windows-app-database": "앱 DB",
+          "kakaotalk-windows-source-candidate": "원본 후보",
+          "kakaotalk-windows-crypto-material-candidate": "암호 자료 후보",
+        },
+      },
+      {
+        id: "msg-kakao-summary",
+        label: "카카오톡(Windows) 상관 요약",
+        target: a("kakaotalk-windows", ["kakaotalk-windows-correlation-summary"]),
+        detail: true,
+      },
       { id: "msg-kakao-mac", label: "카카오톡(macOS)", target: a("kakaotalk-macos") },
       {
         id: "msg-mobile",
@@ -426,8 +659,28 @@ export const DOMAINS: readonly DomainDef[] = [
         label: "문서 잠금 파일(편집자)",
         target: a("generic-documents", ["document-lock-owner"]),
       },
+      {
+        id: "media-archives",
+        label: "압축 파일 목록",
+        target: a("generic-documents", ["archive-file-inventory"]),
+      },
       { id: "media-documents", label: "문서 전체", target: a("generic-documents") },
       { id: "media-synthetic", label: "합성 미디어", target: a("synthetic-media") },
+      {
+        id: "media-synthetic-status",
+        label: "합성 미디어 스캔 상태",
+        target: a("synthetic-media", [
+          "synthetic-media-scan-status",
+          "synthetic-media-scan-summary",
+          "synthetic-media-scan-error",
+        ]),
+        detail: true,
+        typeLabels: {
+          "synthetic-media-scan-status": "스캔 상태",
+          "synthetic-media-scan-summary": "스캔 요약",
+          "synthetic-media-scan-error": "스캔 오류",
+        },
+      },
     ],
   },
   {
@@ -477,6 +730,13 @@ export const DOMAINS: readonly DomainDef[] = [
         target: a("windows-system", ["third-party-remote-control-artifact"]),
       },
       { id: "dev-wifi", label: "Wi-Fi 프로필", target: a("windows-system", ["wifi-profile"]) },
+      {
+        // The server tree routes these to 연결 장치 (api/app/tree.py); primary: 실행 흔적 › Amcache › 장치.
+        id: "dev-amcache",
+        label: "Amcache 장치(PnP·컨테이너)",
+        target: a("windows-execution", ["amcache-device-pnp", "amcache-device-container"]),
+        crossRef: true,
+      },
     ],
   },
   {
@@ -555,6 +815,7 @@ export const DOMAINS: readonly DomainDef[] = [
         nonEvidence: true,
       },
       { id: "mem-import", label: "메모리 분석 가져오기", target: run("memory-import") },
+      { id: "mem-all", label: "메모리 전체", target: a("memory-volatility"), catchAll: true },
     ],
   },
   {
@@ -568,16 +829,25 @@ export const DOMAINS: readonly DomainDef[] = [
   },
 ];
 
+/** Every node of the table, sub-nodes included (pre-order: a group before its children). */
+export function flattenDomainNodes(nodes: readonly DomainNodeDef[]): DomainNodeDef[] {
+  return nodes.flatMap((node) => [node, ...flattenDomainNodes(node.children ?? [])]);
+}
+
 /** Selection key of a target (and of a route): collection | kind | types | ext. */
 export function targetKey(
   target: Pick<DomainTarget, "collection" | "kind" | "types" | "ext"> & {
     category?: string;
     fileCategory?: string;
+    fileScope?: "inventory";
   },
 ): string {
+  const filesCategory = target.fileScope
+    ? filesInventoryCategory(target.fileCategory)
+    : (target.fileCategory ?? target.category ?? "");
   return [
     target.collection,
-    target.collection === "files" ? (target.fileCategory ?? target.category ?? "") : "",
+    target.collection === "files" ? filesCategory : "",
     target.kind ?? "",
     [...(target.types ?? [])].sort().join(","),
     [...(target.ext ?? [])].sort().join(","),

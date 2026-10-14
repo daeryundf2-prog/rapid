@@ -23,7 +23,7 @@ import { Icon } from "../../icons";
 import { stepNameLabel } from "../stages/stepLabels";
 import { formatBytes, partitionLabel } from "../tree/model";
 import { CardEmpty } from "./Card";
-import type { DisclosureItem } from "./disclosures";
+import { type DisclosureItem, isNotice } from "./disclosures";
 import {
   type CategoryBar,
   evidenceItemCount,
@@ -648,6 +648,15 @@ export function StartCard({ onGo }: { onGo: (target: "search" | "artifacts" | "r
 
 // --- 공개 사항 ---------------------------------------------------------------
 
+/** "단계 경고 N건" (+ " · 알림 M건" for notice-level messages: preview-only truncation). */
+function warningsSummary(warnings: RunWarning[]): string {
+  const notices = warnings.filter(isNotice).length;
+  const real = warnings.length - notices;
+  return [real ? `단계 경고 ${n(real)}건` : "", notices ? `알림 ${n(notices)}건` : ""]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 /**
  * 공개 사항 (parser-quality r1): what this run could not do or did not do in full — missing
  * tools, caps, the evidence timezone, acquisition-copy times — plus the step warnings.
@@ -676,12 +685,13 @@ export function DisclosuresCard({ items, warnings }: { items: DisclosureItem[]; 
       ) : null}
       {warnings.length ? (
         <details className="dash-details">
-          <summary>단계 경고 {n(warnings.length)}건</summary>
+          <summary>{warningsSummary(warnings)}</summary>
           <ul className="dash-issues">
             {warnings.slice(0, 100).map((warning, index) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: static read-only list
-              <li key={index}>
+              <li key={index} data-level={warning.level || undefined}>
                 <span className="mono">{warning.step ? stepNameLabel(String(warning.step)) : ""}</span>{" "}
+                {isNotice(warning) ? "(알림) " : ""}
                 {String(warning.message ?? "")}
               </li>
             ))}

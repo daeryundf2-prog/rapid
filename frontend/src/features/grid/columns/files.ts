@@ -16,7 +16,13 @@ import {
   str,
   strOrNull,
 } from "./common";
-import { COPY_TIME_TITLE, deletedCell, modifiedCell } from "./FileCells";
+import {
+  COPY_TIME_TITLE,
+  DELETION_UNKNOWN_TITLE,
+  deletionCell,
+  modifiedCell,
+  signatureCell,
+} from "./FileCells";
 
 /** Shown on the NTFS columns while no NTFS-meta analysis has been joined (plan U-P1-3). */
 export const NTFS_EMPTY_HINT = "NTFS 메타 분석을 실행하면 채워집니다";
@@ -157,6 +163,105 @@ export function modifiedTooltip(row: { fields: Record<string, unknown> }): strin
   return [text, hint].filter(Boolean).join(" · ");
 }
 
+/** `deletion_state` of a files / inventory row (core/files.py deletion_state_for). */
+export type DeletionState = "deleted" | "allocated" | "unknown";
+
+export const DELETION_STATE_LABELS: Readonly<Record<DeletionState, string>> = {
+  deleted: "삭제됨",
+  allocated: "할당",
+  unknown: "알 수 없음",
+};
+
+/**
+ * Deletion state of a row: `deletion_state` (inventory rows) / `recovery.deletion_state`
+ * (parser-quality r2: unknown | allocated | deleted, agreeing with `is_deleted`), else the
+ * `is_deleted` flag of the row or its NTFS join. null = the server says nothing.
+ */
+export function deletionStateOf(raw: Record<string, unknown>): DeletionState | null {
+  const recovery = isRecord(raw.recovery) ? raw.recovery : {};
+  const state = str(raw.deletion_state ?? recovery.deletion_state);
+  if (state === "deleted" || state === "allocated" || state === "unknown") return state;
+  const ntfs = isRecord(raw.ntfs) ? raw.ntfs : null;
+  const flag =
+    typeof raw.is_deleted === "boolean"
+      ? raw.is_deleted
+      : typeof ntfs?.is_deleted === "boolean"
+        ? ntfs.is_deleted
+        : null;
+  return flag === null ? null : flag ? "deleted" : "allocated";
+}
+
+/** How a row was matched to its NTFS / inventory record (`match_method`) → Korean. */
+export const MATCH_METHOD_LABELS: Readonly<Record<string, string>> = {
+  "relative-path": "상대 경로",
+  path: "경로",
+  "full-path": "전체 경로",
+  "mft-ref": "MFT 참조",
+  mft_ref: "MFT 참조",
+  "entry-number": "MFT 엔트리 번호",
+  "name-size": "이름·크기",
+};
+
+/** `match_method` of a row, or of its NTFS join. */
+export function matchMethodOf(raw: Record<string, unknown>): string | null {
+  const ntfs = isRecord(raw.ntfs) ? raw.ntfs : {};
+  return strOrNull(raw.match_method) ?? strOrNull(ntfs.match_method);
+}
+
+/** Direction of a signature mismatch (`mismatch_direction`, shared with `file-signature-mismatch`). */
+export const MISMATCH_DIRECTION_LABELS: Readonly<Record<string, string>> = {
+  "magic-not-expected-for-extension": "확장자와 다른 헤더 서명",
+  "extension-expected-signature-missing": "확장자에 맞는 서명 없음",
+};
+
+export function mismatchDirectionLabel(direction: string): string {
+  return MISMATCH_DIRECTION_LABELS[direction] ?? direction;
+}
+
+export interface FileSignature {
+  /** "mismatch" | "match" | "read-error" | null (not checked / not applicable). */
+  state: "mismatch" | "match" | "read-error" | null;
+  direction: string | null;
+  detected: string | null;
+  expected: string;
+}
+
+/**
+ * `file_signature` of a files row (core/files.py apply_file_signature_profile, aligned with the
+ * `file-signature-mismatch` artifact): `mismatch` + `mismatch_direction` decide the state.
+ */
+export function fileSignatureOf(raw: Record<string, unknown>): FileSignature {
+  const sig = isRecord(raw.file_signature) ? raw.file_signature : {};
+  const status = str(sig.status);
+  const direction = strOrNull(sig.mismatch_direction);
+  const mismatch = sig.mismatch === true || Boolean(direction) || status === "extension-signature-mismatch";
+  const state = mismatch
+    ? "mismatch"
+    : status === "signature-matches-extension"
+      ? "match"
+      : status === "read-error"
+        ? "read-error"
+        : null;
+  return { state, direction, detected: strOrNull(sig.detected), expected: joinList(sig.expected) };
+}
+
+export function signatureTooltip(sig: FileSignature): string {
+  if (!sig.state) return "";
+  return [
+    sig.direction ? mismatchDirectionLabel(sig.direction) : "",
+    sig.detected ? `감지 ${sig.detected}` : "",
+    sig.expected ? `기대 ${sig.expected}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+export const SIGNATURE_STATE_LABELS: Readonly<Record<string, string>> = {
+  mismatch: "불일치",
+  match: "일치",
+  "read-error": "읽기 오류",
+};
+
 /** Files default layout, highest priority first: 이름 > 수정 > 크기 > 선별 > 경로 > NTFS 생성. */
 export const FILES_PRIORITY = ["title", "timestamp", "size", "review", "path", "ntfsCreated"] as const;
 
@@ -172,19 +277,19 @@ export const filesCollection: CollectionDef = {
     const own = typeof raw.candidate_index === "number" ? raw.candidate_index : raw.record_index;
     const index = typeof own === "number" && Number.isInteger(own) && own >= 0 ? own : position;
     const path = strOrNull(raw.path);
+    // Inventory rows (files outside the selected categories, `scope=inventory`) live in `inventory`.
+    const inventoryOnly = raw.inventory_only === true;
     const recovery = isRecord(raw.recovery) ? raw.recovery : {};
     const hashes = isRecord(raw.hashes) ? raw.hashes : {};
     const join = ntfsJoinOf(ctx?.page?.meta);
     const modified = modifiedTimeOf(raw);
     const ntfs = isRecord(raw.ntfs) ? raw.ntfs : null;
-    const deleted =
-      typeof raw.is_deleted === "boolean"
-        ? raw.is_deleted
-        : typeof ntfs?.is_deleted === "boolean"
-          ? ntfs.is_deleted
-          : null;
+    const deletion = deletionStateOf(raw);
+    const deleted = deletion === "deleted" ? true : deletion === "allocated" ? false : null;
+    const signature = fileSignatureOf(raw);
+    const categories = Array.isArray(raw.categories) ? raw.categories.map(str).filter(Boolean) : [];
     return makeRow(
-      makeRef("files", `/candidates/${index}`),
+      makeRef("files", `/${inventoryOnly ? "inventory" : "candidates"}/${index}`),
       {
         title: strOrNull(raw.name) ?? (baseName(path) || `파일 ${index + 1}`),
         sourcePath: path,
@@ -197,14 +302,17 @@ export const filesCollection: CollectionDef = {
         extension: str(raw.extension),
         size: typeof raw.size === "number" ? raw.size : null,
         categories: Array.isArray(raw.categories)
-          ? raw.categories
-              .map((c) => fileCategoryLabel(str(c)))
-              .filter(Boolean)
-              .join(", ")
-          : joinList(raw.categories),
+          ? // An inventory row without a selected category is "other" (core/files.py OTHER_CATEGORY).
+            (categories.length || !inventoryOnly ? categories : ["other"]).map(fileCategoryLabel).join(", ")
+          : joinList(raw.categories) || (inventoryOnly ? fileCategoryLabel("other") : ""),
         modifiedAt: modified.value,
         modifiedOrigin: modified.origin,
         isDeleted: deleted,
+        deletion,
+        inventoryOnly,
+        inventoryReason: strOrNull(raw.inventory_reason),
+        matchMethod: matchMethodOf(raw),
+        signature,
         siModified: strOrNull(ntfs?.si_modified_at),
         attributes: Array.isArray(ntfs?.attributes) ? joinList(ntfs?.attributes) : str(ntfs?.attributes),
         recovery: str(recovery.candidate_kind),
@@ -268,15 +376,35 @@ export const filesCollection: CollectionDef = {
       tooltip: (r) => modifiedTooltip(r),
     }),
     ntfsTime("ntfsSiModified", "NTFS $SI 수정", "si_modified_at"),
+    col.field("deleted", "삭제", 96, ["source"], (r) => strOrNull(r.fields.deletion), {
+      format: (r) => {
+        const state = r.fields.deletion as DeletionState | null | undefined;
+        return state ? DELETION_STATE_LABELS[state] : "";
+      },
+      tooltip: (r) => (r.fields.deletion === "unknown" ? DELETION_UNKNOWN_TITLE : ""),
+      render: deletionCell,
+    }),
+    col.field("matchMethod", "일치 방식", 110, ["source"], (r) => strOrNull(r.fields.matchMethod), {
+      format: (r) => {
+        const method = strOrNull(r.fields.matchMethod);
+        return method ? (MATCH_METHOD_LABELS[method] ?? method) : "";
+      },
+      tooltip: (r) => str(r.fields.matchMethod),
+    }),
     col.field(
-      "deleted",
-      "삭제",
-      80,
+      "signature",
+      "시그니처",
+      110,
       ["source"],
-      (r) => (typeof r.fields.isDeleted === "boolean" ? r.fields.isDeleted : null),
+      (r) => (r.fields.signature as FileSignature | undefined)?.state ?? null,
       {
-        format: (r) => (r.fields.isDeleted === true ? "삭제됨" : r.fields.isDeleted === false ? "할당" : ""),
-        render: deletedCell,
+        format: (r) =>
+          SIGNATURE_STATE_LABELS[(r.fields.signature as FileSignature | undefined)?.state ?? ""] ?? "",
+        tooltip: (r) => {
+          const sig = r.fields.signature as FileSignature | undefined;
+          return sig ? signatureTooltip(sig) : "";
+        },
+        render: signatureCell,
       },
     ),
     col.field("attributes", "파일 속성", 160, ["source"], (r) => strOrNull(r.fields.attributes), {

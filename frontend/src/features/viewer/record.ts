@@ -26,6 +26,8 @@ export const RECORD_GROUP_LABELS: Record<RecordGroupId, string> = {
 /** Display order inside 핵심. */
 const CORE_KEYS = [
   "timestamp",
+  // Timeline events: every time kind of the event (labels[], primary first).
+  "timeKinds",
   "event_time",
   "last_run_at",
   "modified_at",

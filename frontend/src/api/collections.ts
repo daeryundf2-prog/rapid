@@ -52,17 +52,25 @@ async function jsonPaged(
   limit: number,
   signal?: AbortSignal,
   category?: string,
+  scope?: string,
 ): Promise<RawPage> {
   const started = now();
-  const filter = category ? `&category=${enc(category)}` : "";
+  const filter = `${scope ? `&scope=${enc(scope)}` : ""}${category ? `&category=${enc(category)}` : ""}`;
   const payload = await api<Record<string, unknown>>(
     `/api/runs/${enc(runId)}/${endpoint}?offset=${offset}&limit=${limit}${filter}`,
     { signal },
   );
-  const rows = asRows(payload[key]);
+  // `scope=inventory` pages may name their list `inventory` or keep `candidates`.
+  const rows = asRows(
+    key === "inventory" && !Array.isArray(payload.inventory) ? payload.candidates : payload[key],
+  );
   const meta: Record<string, unknown> = {};
   // Files rows are joined with the newest NTFS-meta analysis; `null` = never ran (absent = old server).
   if ("ntfs_join" in payload) meta.ntfs_join = payload.ntfs_join;
+  // Files pages (parser-quality r2): candidates vs. every scanned file (`scope=inventory`).
+  for (const key of ["scope", "inventory_count", "candidate_count"] as const) {
+    if (key in payload) meta[key] = payload[key];
+  }
   const base = {
     rows,
     offset,
@@ -112,7 +120,40 @@ export const fetchFilesPage = (
   limit: number,
   signal?: AbortSignal,
   category?: string,
-) => jsonPaged(runId, "files", "candidates", offset, limit, signal, category);
+) => {
+  const route = parseFilesCategory(category);
+  return jsonPaged(runId, "files", route.rowsKey, offset, limit, signal, route.category, route.scope);
+};
+
+/**
+ * Route `category=` value of the files inventory (parser-quality r2): `inventory` = every scanned
+ * file (`GET /files?scope=inventory`), `inventory:<id>` = one category of it (`other` = files
+ * outside the selected scan categories). Any other value is a candidates category.
+ */
+export const FILES_INVENTORY = "inventory";
+
+export function filesInventoryCategory(category?: string): string {
+  return category ? `${FILES_INVENTORY}:${category}` : FILES_INVENTORY;
+}
+
+export interface FilesRouteCategory {
+  /** `scope=` sent to `/files`; undefined = the default candidates scope. */
+  scope?: "inventory";
+  /** `category=` sent to `/files`. */
+  category?: string;
+  /** Response list holding the rows. */
+  rowsKey: "candidates" | "inventory";
+}
+
+export function parseFilesCategory(value: string | undefined): FilesRouteCategory {
+  if (!value) return { rowsKey: "candidates" };
+  if (value === FILES_INVENTORY) return { scope: "inventory", rowsKey: "inventory" };
+  if (value.startsWith(`${FILES_INVENTORY}:`)) {
+    const category = value.slice(FILES_INVENTORY.length + 1);
+    return { scope: "inventory", rowsKey: "inventory", ...(category ? { category } : {}) };
+  }
+  return { category: value, rowsKey: "candidates" };
+}
 /**
  * Which list a `/docs` page holds. The paged collection names itself (`pagination.collection`);
  * servers that page `results` still carry `candidates` as an EMPTY list (`omitted_fields`), so a

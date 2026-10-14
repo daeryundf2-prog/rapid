@@ -185,14 +185,20 @@ export function EvidenceTree({ runId }: { runId: string }) {
   }, [model, routeKey]);
   const selected = (node: TreeModelNode) => node.id === selectedId;
 
-  // Open the domain that holds the selected node (deep links, 결과 보기 →).
+  // Open the domain (and group, e.g. 실행 흔적 › Amcache) that holds the selected node (deep links, 결과 보기 →).
   useEffect(() => {
     if (!selectedId) return;
-    for (const parent of model) {
-      if (parent.children?.some((child) => child.id === selectedId)) {
-        setExpanded((prev) => (prev.has(parent.id) ? prev : new Set([...prev, parent.id])));
+    const ancestors = (nodes: TreeModelNode[], trail: string[]): string[] | null => {
+      for (const node of nodes) {
+        if (node.id === selectedId) return trail;
+        const hit = node.children ? ancestors(node.children, [...trail, node.id]) : null;
+        if (hit) return hit;
       }
-    }
+      return null;
+    };
+    const open = ancestors(model, []) ?? [];
+    if (!open.length) return;
+    setExpanded((prev) => (open.every((id) => prev.has(id)) ? prev : new Set([...prev, ...open])));
   }, [model, selectedId]);
 
   return (

@@ -86,6 +86,8 @@ export interface RunDisclosures {
     encrypted_count?: number | null;
     zero_text_count?: number | null;
     text_status_counts?: Record<string, number>;
+    /** Text-extraction size caps (core/docs.py build_docs_size_cap_disclosure, parser-quality r2). */
+    size_caps?: DocsSizeCaps | null;
   };
   indicators?: {
     display_label?: string | null;
@@ -93,6 +95,8 @@ export interface RunDisclosures {
     total_before_cap?: number | null;
     truncated?: boolean | null;
     rule_status_message?: string | null;
+    /** Indicator cap disclosure (core/indicators.py indicator_cap_policy, parser-quality r2). */
+    cap_policy?: IndicatorCapPolicy | null;
   };
   files?: {
     excluded_file_count?: number | null;
@@ -100,7 +104,44 @@ export interface RunDisclosures {
     excluded_category_counts?: Record<string, number>;
   };
   collection_notes?: Record<string, string[]>;
+  /** Row-level truncation per artifact kind (timeline summary `input_row_truncation`). */
+  input_row_truncation?: Record<string, RowTruncation> | null;
   [key: string]: unknown;
+}
+
+/** `cap_policy` of the indicators summary: "uncapped" (상한 없음) or "capped" at `max_indicators`. */
+export interface IndicatorCapPolicy {
+  mode?: "uncapped" | "capped" | string;
+  max_indicators?: number | null;
+  kept?: number;
+  total_before_cap?: number;
+  note?: string;
+}
+
+/** docs summary `size_caps`: the byte caps of text extraction and the documents they stopped. */
+export interface DocsSizeCaps {
+  max_input_bytes?: number;
+  max_archive_member_bytes?: number;
+  max_archive_total_bytes?: number;
+  max_pdf_stream_decompressed_bytes?: number;
+  too_large_count?: number;
+  binary_rejected_count?: number;
+  truncated?: boolean;
+  note?: string;
+}
+
+/**
+ * Row-level truncation of one artifact kind (core/timeline.py `input_row_truncation`, mirrored on
+ * the step as `row_truncation`): payload cuts (`rows_with_truncation`, `count_fields`) are warnings;
+ * display-preview cuts (`preview_only_rows`) keep the record value and are notices.
+ */
+export interface RowTruncation {
+  rows_with_truncation?: number;
+  flag_counts?: Record<string, number>;
+  count_fields?: Record<string, number>;
+  preview_only_rows?: number;
+  preview_flag_counts?: Record<string, number>;
+  preview_count_fields?: Record<string, number>;
 }
 
 export async function listRuns(): Promise<RunListItem[]> {
@@ -149,6 +190,17 @@ export interface TreeNode {
   match_count?: number;
   /** `indicators` node: detection rules applied (0 = the label is "지표 후보"). */
   rule_count?: number;
+  /**
+   * `files` node (parser-quality r2): scanned files outside the selected categories, kept as
+   * lightweight inventory rows (`files.json` `inventory`, listed by `GET /files?scope=inventory`).
+   */
+  inventory_count?: number;
+  /** `files:<category>` nodes: the category exists only in the inventory (e.g. "other"). */
+  inventory_only?: boolean;
+  /** `files:<category>` nodes: "inventory" when counted from the inventory rows. */
+  source?: string;
+  /** `artifacts:eventlog`: recovered records older than the first live record id (not sent by tree.py yet). */
+  stale_below_first_record_count?: number;
   children?: TreeNode[];
 }
 

@@ -18,6 +18,7 @@ import {
   str,
   strOrNull,
 } from "./common";
+import { mismatchDirectionLabel } from "./files";
 import { typeChipCell } from "./StatusCells";
 
 /** Row time = first of these details keys. Same order as the server's `sort=timestamp` (plan §4.1). */
@@ -307,6 +308,14 @@ export const KIND_COLUMNS: Record<string, KindColumnDef[]> = {
   "windows-filesystem": [
     { header: "감지 서명", keys: ["detected_signature_kind"], width: 130 },
     { header: "기대 확장자", keys: ["expected_extensions"], width: 140, list: true },
+    // Same `mismatch_direction` as files.json `file_signature` (files 시그니처 column).
+    {
+      header: "불일치 방향",
+      keys: ["mismatch_direction"],
+      width: 170,
+      display: (value) => (typeof value === "string" ? mismatchDirectionLabel(value) : ""),
+      tooltip: (d) => (typeof d.mismatch_direction === "string" ? d.mismatch_direction : ""),
+    },
     { header: "크기", keys: ["source_size"], width: 100, bytes: true },
     { header: "수정", keys: ["modified_at"], width: 170 },
     { header: "위험", keys: ["risk_flags"], width: 220, list: true },

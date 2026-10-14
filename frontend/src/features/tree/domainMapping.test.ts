@@ -1,19 +1,22 @@
 import { describe, expect, it } from "vitest";
 import type { RunTree, TreeNode } from "../../api/runs";
 import { artifactTypeLabel } from "../filters/typeLabels";
-import { DOMAINS, type DomainNodeDef, NON_EVIDENCE_NOTE } from "./domains";
+import { DOMAINS, type DomainNodeDef, flattenDomainNodes, NON_EVIDENCE_NOTE, targetKey } from "./domains";
 import {
   artifactKindNodes,
   buildTreeModel,
   docsCount,
   domainNodeCount,
   domainTotal,
+  inventoryTotal,
   mergedKindNode,
   NO_DATA_REASON,
+  NO_INVENTORY_REASON,
+  type TreeModelNode,
   zeroReason,
 } from "./model";
 
-// Evidence types of the parser-quality r1 data model, per emitting kind (rapid-parsers branch:
+// Evidence types of the parser-quality r1 + r2 data model, per emitting kind (rapid-parsers branch:
 // artifacts/windows/*.py, browser.py, generic.py, media.py, memory.py; api/app/tree.py).
 const EVIDENCE: Record<string, string[]> = {
   "windows-execution": [
@@ -21,6 +24,13 @@ const EVIDENCE: Record<string, string[]> = {
     "shimcache-schema-entry",
     "bam-schema-entry",
     "userassist-schema-entry",
+    // r2: Amcache extended inventory sections (execution.py AMCACHE_EXTENDED_SECTIONS).
+    "amcache-driver-binary",
+    "amcache-driver-package",
+    "amcache-device-pnp",
+    "amcache-device-container",
+    "amcache-application-shortcut",
+    "amcache-device-census",
   ],
   "windows-prefetch": ["prefetch-file", "prefetch-invalid-content"],
   "recent-files": [
@@ -50,6 +60,23 @@ const EVIDENCE: Record<string, string[]> = {
     "windows-sam-group",
     "windows-mounted-device",
     "windows-service-config",
+    "windows-user-profile",
+  ],
+  "windows-system": [
+    "notification-database",
+    "notification-row-candidate",
+    "activities-cache-db",
+    "activities-cache-row-candidate",
+    "thumbnail-cache-file",
+    "icon-cache-file",
+    "thumbnail-cache-entry-candidate",
+    "icon-cache-entry-candidate",
+  ],
+  "kakaotalk-windows": [
+    "kakaotalk-windows-user-id-candidate",
+    "kakaotalk-windows-app-database",
+    "kakaotalk-windows-source-candidate",
+    "kakaotalk-windows-crypto-material-candidate",
   ],
   "windows-shellbags": ["shellbag-entry", "shellbag-hive-summary"],
   browser: [
@@ -70,11 +97,49 @@ const EVIDENCE: Record<string, string[]> = {
     "browser-profile-account",
     "browser-acquisition-anomaly",
     "browser-parse-error",
+    "browser-ai-usage",
+    "browser-ai-conversation",
+    "browser-storage-inventory",
+    "browser-history-downloads",
   ],
-  "generic-documents": ["document-metadata-risk", "document-lock-owner"],
+  "generic-documents": ["document-metadata-risk", "document-lock-owner", "archive-file-inventory"],
   "media-image": ["media-image", "media-video", "media-audio"],
   "memory-volatility": ["crash-dump-indicators"],
-  eventlog: ["eventlog-detection", "eventlog-event", "etl-trace-file"],
+  eventlog: ["eventlog-detection", "eventlog-event", "etl-trace-file", "eventlog-file", "eventlog-summary"],
+  "synthetic-media": ["synthetic-media-scan-status", "synthetic-media-scan-summary"],
+};
+
+/** r2 types (and kinds) that must be reachable from the tree: a typed node or the kind's catch-all. */
+const REACHABLE: Record<string, string[]> = {
+  "windows-registry": [
+    "registry-hive",
+    "registry-hive-strings",
+    "registry-summary",
+    "registry-key",
+    "registry-usb",
+  ],
+  "windows-os-account": [
+    "windows-user-profile",
+    "windows-os-account-summary",
+    "windows-privilege-assignment",
+  ],
+  eventlog: ["eventlog-file", "eventlog-summary", "eventlog-chunk"],
+  "generic-documents": ["archive-file-inventory", "sticky-note"],
+  "windows-execution": ["amcache-hive", "amcache-inventory-row", "srum-schema-row"],
+  browser: [
+    "browser-history-downloads",
+    "browser-ai-usage",
+    "browser-storage-inventory",
+    "browser-sync-inventory",
+  ],
+  "windows-system": ["thumbnail-cache-media-candidate", "notification-row-candidate", "print-spooler-job"],
+  "windows-filesystem": ["mft-file", "usn-journal-file"],
+  "synthetic-media": ["synthetic-media-image", "synthetic-media-scan-error"],
+  "kakaotalk-windows": [
+    "kakaotalk-windows-crypto-material-candidate",
+    "kakaotalk-windows-correlation-summary",
+  ],
+  "memory-volatility": ["memory-process", "process-string-candidate"],
 };
 
 const NON_EVIDENCE: Record<string, string[]> = {
@@ -82,7 +147,10 @@ const NON_EVIDENCE: Record<string, string[]> = {
   "windows-registry": ["registry-hive-string-candidate"],
 };
 
-/** Types the r1 round removed or renamed: no node may still request them. */
+/**
+ * Types the r1 round removed or renamed: no node may still request them. (browser-history-downloads
+ * is emitted again in r2 as the per-profile aggregate row: a detail node.)
+ */
 const REMOVED = [
   "amcache-entry",
   "shimcache-entry",
@@ -90,19 +158,33 @@ const REMOVED = [
   "userassist-entry",
   "shellbag-native-candidate",
   "document-pattern",
-  "browser-history-downloads",
 ];
 
+/** Every node, sub-nodes included. */
 const allNodes = (): Array<DomainNodeDef & { domain: string }> =>
-  DOMAINS.flatMap((domain) => domain.nodes.map((node) => ({ ...node, domain: domain.id })));
+  DOMAINS.flatMap((domain) =>
+    flattenDomainNodes(domain.nodes).map((node) => ({ ...node, domain: domain.id })),
+  );
 
+/** Leaf nodes that are a type's home: not a cross-listing, a group or a column-filtered view. */
 function primaryNodes(kind: string, type: string) {
   return allNodes().filter(
     (node) =>
       node.target.collection === "artifacts" &&
       node.target.kind === kind &&
       node.target.types?.includes(type) &&
-      !node.crossRef,
+      !node.crossRef &&
+      !node.children?.length &&
+      !node.target.cf?.length,
+  );
+}
+
+function reachingNodes(kind: string, type: string) {
+  return allNodes().filter(
+    (node) =>
+      node.target.collection === "artifacts" &&
+      node.target.kind === kind &&
+      (!node.target.types?.length || node.target.types.includes(type)),
   );
 }
 
@@ -132,6 +214,72 @@ describe("domain mapping table (parser-quality r1)", () => {
         expect(node.nonEvidence, node.id).toBe(true);
       }
     }
+  });
+
+  for (const [kind, types] of Object.entries(REACHABLE)) {
+    it(`${kind}: every r2 type is reachable (typed node or kind-wide node)`, () => {
+      for (const type of types)
+        expect(reachingNodes(kind, type).length, `${kind}/${type}`).toBeGreaterThan(0);
+    });
+  }
+
+  it("places the six Amcache types under 실행 흔적 › Amcache (드라이버/장치/바로가기/센서스)", () => {
+    const amcache = DOMAINS.find((d) => d.id === "execution")?.nodes.find((n) => n.id === "exec-amcache");
+    expect(amcache?.label).toBe("Amcache");
+    expect(amcache?.children?.map((c) => [c.label, c.target.types])).toEqual([
+      ["응용 프로그램 파일", ["amcache-schema-row"]],
+      ["드라이버", ["amcache-driver-binary", "amcache-driver-package"]],
+      ["장치", ["amcache-device-pnp", "amcache-device-container"]],
+      ["바로가기", ["amcache-application-shortcut"]],
+      ["센서스", ["amcache-device-census"]],
+      ["하이브 파일", ["amcache-hive", "amcache-inventory-row"]],
+    ]);
+    // The group requests the union of its evidence leaves; ShimCache has its own node.
+    expect(amcache?.target.types).toEqual(
+      (amcache?.children ?? []).filter((c) => !c.detail).flatMap((c) => c.target.types ?? []),
+    );
+    for (const type of amcache?.target.types ?? []) {
+      expect(primaryNodes("windows-execution", type)[0]?.domain).toBe("execution");
+    }
+    // The server tree routes PnP/container to 연결 장치 and DeviceCensus to 운영체제: cross-listed there.
+    const cross = allNodes().filter((n) => n.crossRef && n.target.kind === "windows-execution");
+    expect(cross.map((n) => [n.domain, n.target.types])).toEqual([
+      ["os", ["amcache-device-census"]],
+      ["devices", ["amcache-device-pnp", "amcache-device-container"]],
+    ]);
+  });
+
+  it("windows-network-interface lives under 시스템 정보 (server routes it to os now)", () => {
+    const nodes = primaryNodes("windows-registry", "windows-network-interface");
+    expect(nodes.map((n) => `${n.domain}/${n.id}`)).toEqual(["os/os-sysinfo"]);
+    const devices = DOMAINS.find((d) => d.id === "devices")?.nodes ?? [];
+    expect(devices.some((n) => n.target.types?.includes("windows-network-interface"))).toBe(false);
+  });
+
+  it("파일시스템 lists the inventory (전체 파일(인벤토리), 기타 (스캔 제외)) as scope=inventory routes", () => {
+    const fs = DOMAINS.find((d) => d.id === "filesystem")?.nodes ?? [];
+    const inv = fs.find((n) => n.id === "fs-inventory");
+    const other = fs.find((n) => n.id === "fs-other");
+    expect(inv).toMatchObject({
+      label: "전체 파일(인벤토리)",
+      target: { collection: "files", fileScope: "inventory" },
+    });
+    expect(other).toMatchObject({
+      label: "기타 (스캔 제외)",
+      target: { collection: "files", fileScope: "inventory", fileCategory: "other" },
+    });
+    expect(targetKey(other?.target ?? { collection: "files" })).toBe("files|inventory:other|||");
+    expect(targetKey({ collection: "files", category: "inventory:other" })).toBe("files|inventory:other|||");
+  });
+
+  it("오래된 레코드 is a column-filtered eventlog view on evtx_record_id_position", () => {
+    const stale = allNodes().find((n) => n.id === "evt-stale");
+    expect(stale?.domain).toBe("eventlog");
+    expect(stale?.target).toMatchObject({
+      kind: "eventlog",
+      cols: ["details.evtx_record_id_position"],
+      cf: [{ col: "f:evtx_record_id_position", op: ":", value: "stale-below-first" }],
+    });
   });
 
   it("removed junk types are no longer requested", () => {
@@ -260,6 +408,135 @@ const routedTree: RunTree = {
     { id: "indicators", label: "지표 후보", count: 7, collection: "indicators", rule_count: 0 },
   ],
 };
+
+describe("r2 tree: inventory, Amcache sub-nodes, stale records", () => {
+  const r2Tree: RunTree = {
+    run_id: "r2",
+    root: {},
+    nodes: [
+      {
+        id: "files",
+        label: "파일",
+        count: 10,
+        collection: "files",
+        inventory_count: 90,
+        children: [
+          { id: "files:documents", label: "문서", count: 10, collection: "files", category: "documents" },
+          {
+            id: "files:other",
+            label: "기타",
+            count: 70,
+            collection: "files",
+            category: "other",
+            source: "inventory",
+            inventory_only: true,
+          },
+          {
+            id: "files:images",
+            label: "이미지",
+            count: 20,
+            collection: "files",
+            category: "images",
+            source: "inventory",
+            inventory_only: true,
+          },
+        ],
+      },
+      {
+        id: "artifacts",
+        label: "아티팩트",
+        count: 30,
+        children: [
+          kindNode("artifacts:windows-execution", "windows-execution", 20, {
+            artifact_type_counts: {
+              "amcache-schema-row": 5,
+              "amcache-driver-binary": 3,
+              "amcache-driver-package": 1,
+              "amcache-device-pnp": 4,
+              "amcache-device-container": 2,
+              "amcache-application-shortcut": 2,
+              "amcache-device-census": 1,
+              "amcache-hive": 1,
+              "shimcache-schema-entry": 1,
+            },
+          }),
+          kindNode("artifacts:eventlog", "eventlog", 10, {
+            artifact_type_counts: { "eventlog-event": 8, "eventlog-record-candidate": 2 },
+            stale_below_first_record_count: 2,
+          }),
+        ],
+      },
+    ],
+  };
+  const model = buildTreeModel({ tree: r2Tree });
+  const find = (id: string): TreeModelNode | undefined => {
+    const visit = (nodes: TreeModelNode[]): TreeModelNode | undefined => {
+      for (const n of nodes) {
+        if (n.id === id) return n;
+        const hit = n.children ? visit(n.children) : undefined;
+        if (hit) return hit;
+      }
+      return undefined;
+    };
+    return visit(model);
+  };
+
+  it("기타 (스캔 제외) counts the inventory node and opens scope=inventory", () => {
+    expect(find("domain:filesystem:fs-other")).toMatchObject({
+      label: "기타 (스캔 제외)",
+      count: 70,
+      route: { collection: "files", category: "inventory:other" },
+      selectKey: "files|inventory:other|||",
+    });
+    expect(find("domain:filesystem:fs-inventory")).toMatchObject({
+      count: 100,
+      route: { collection: "files", category: "inventory" },
+    });
+    // A selected-category node whose server node is inventory-only opens the inventory too.
+    expect(find("domain:filesystem:fs-images")?.route).toEqual({
+      collection: "files",
+      category: "inventory:images",
+    });
+    expect(find("domain:filesystem:fs-documents")?.route).toEqual({
+      collection: "files",
+      category: "documents",
+    });
+    // Old outputs (no inventory): dimmed with a reason.
+    expect(inventoryTotal({ tree: routedTree })).toEqual({ count: 0, disabledReason: NO_INVENTORY_REASON });
+  });
+
+  it("Amcache group counts its evidence leaves; sub-nodes count their types", () => {
+    const amcache = find("domain:execution:exec-amcache");
+    expect(amcache?.count).toBe(18);
+    expect(amcache?.children?.map((c) => [c.label, c.count])).toEqual([
+      ["응용 프로그램 파일", 5],
+      ["드라이버", 4],
+      ["장치", 6],
+      ["바로가기", 2],
+      ["센서스", 1],
+      ["하이브 파일", 1],
+    ]);
+    expect(find("domain:devices:dev-amcache")?.count).toBe(6);
+    // 실행 흔적 total = the kind-wide node (20) minus the detail 하이브 파일 row (1): the group and
+    // its leaves never add twice.
+    expect(find("domain:execution")?.count).toBe(19);
+  });
+
+  it("오래된 레코드 takes the kind node's stale count and never adds to the eventlog total", () => {
+    const stale = find("domain:eventlog:evt-stale");
+    expect(stale).toMatchObject({ count: 2 });
+    expect(stale?.target?.cf).toEqual([
+      { col: "f:evtx_record_id_position", op: ":", value: "stale-below-first" },
+    ]);
+    expect(stale?.note).toContain("evtx_record_id_position");
+    expect(find("domain:eventlog")?.count).toBe(10);
+    const unknown = domainNodeCount(
+      { collection: "artifacts", kind: "windows-execution", countField: "stale_below_first_record_count" },
+      { tree: r2Tree },
+    );
+    expect(unknown.count).toBe("—");
+  });
+});
 
 describe("domain counts over the r1 tree (routed kind nodes, zero reasons)", () => {
   const model = buildTreeModel({ tree: routedTree });

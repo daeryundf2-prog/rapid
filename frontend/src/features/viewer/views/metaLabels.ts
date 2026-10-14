@@ -17,6 +17,10 @@ export const META_LABELS: Record<string, string> = {
   // 핵심
   timestamp: "시각",
   time: "시각",
+  // Timeline rows (grid fields): the event's time kinds, Korean (`labels[]`, primary first) and raw.
+  timeKinds: "시각 종류",
+  tsKind: "대표 시각 종류(원문)",
+  tsLabels: "시각 종류(원문)",
   event_time: "이벤트 시각",
   last_run_at: "최근 실행",
   last_run_times: "실행 시각 목록",
