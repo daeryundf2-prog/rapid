@@ -668,7 +668,8 @@ def collect_memory_pivots(
         before = data[max(0, match.start() - 1) : match.start()].decode("latin-1")
         after = data[match.end() : match.end() + 2].decode("latin-1")
         context = data[max(0, match.start() - 48) : match.start()].decode("latin-1")
-        strength = ipv4_indicator_strength(value, before, after, context=context)
+        following = data[match.end() : match.end() + 48].decode("latin-1")
+        strength = ipv4_indicator_strength(value, before, after, context=context, following=following)
         if strength:
             add_memory_pivot(
                 pivots,
@@ -735,6 +736,7 @@ def collect_utf16_memory_pivots(
             text[max(0, match.start() - 1) : match.start()],
             text[match.end() : match.end() + 2],
             context=text[max(0, match.start() - 48) : match.start()],
+            following=text[match.end() : match.end() + 48],
         )
         if strength:
             add_memory_pivot(
@@ -965,9 +967,24 @@ def environment_variables_from_pivots(pivots: Sequence[Mapping[str, object]]) ->
     return values
 
 
-def ipv4_indicator_strength(value: str, before: str, after: str, *, context: str = "") -> str:
-    """'' to drop (OIDs, version strings), 'weak' for low-confidence quads, 'triage' for plausible addresses."""
+# Device-instance text (``PCI\\VEN_8086&DEV_0680``, ``vid&00020b05_pid&8502``,
+# ``HID\\VID_046D&PID_C52B``): a dotted quad next to it is a driver/firmware
+# version or ID fragment, not an address.
+DEVICE_ID_CONTEXT_RE = re.compile(r"(?:\b|_|&)(?:vid|pid|ven|dev|subsys|rev)[_&][0-9a-f]{2,}", re.IGNORECASE)
+DEVICE_ID_NEAR_CHARS = 16
+
+
+def ipv4_indicator_strength(value: str, before: str, after: str, *, context: str = "", following: str = "") -> str:
+    """'' to drop (OIDs, version strings, device-id neighbours), 'weak' for
+    low-confidence quads, 'triage' for plausible addresses. ``context`` is the
+    text before the match, ``following`` the text after it; a device-id token
+    within ``DEVICE_ID_NEAR_CHARS`` characters (NULs ignored) drops the match."""
     if before and (before.isdigit() or before in ".vV"):
+        return ""
+    preceding_text = context.replace("\x00", "")[-DEVICE_ID_NEAR_CHARS:]
+    following_text = following.replace("\x00", "")[:DEVICE_ID_NEAR_CHARS]
+    near = f"{preceding_text} {following_text}"
+    if DEVICE_ID_CONTEXT_RE.search(near):
         return ""
     if after[:1].isdigit() or (after[:1] == "." and after[1:2].isdigit()):
         return ""

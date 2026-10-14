@@ -6869,11 +6869,44 @@ BROWSER_PERSONAL_FIELD_RE = re.compile(
 BROWSER_PERSONAL_VALUE_RES = (
     re.compile(r"^\d{6}-?[1-8]\d{6}$"),  # 주민/외국인등록번호
     re.compile(r"^(?:\+?82-?)?0\d{1,2}[- ]?\d{3,4}[- ]?\d{4}$"),  # 전화번호
+    re.compile(r"^(?:\+?82\s*-?\s*)?0\d{1,2}\s*-\s*\d{3,4}\s*-\s*\d{4}$"),  # 전화번호 (010 - 1234 - 5678)
     re.compile(r"^\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?\d{3,4}$"),  # 카드번호
     re.compile(r"^\d{3}-\d{2}-\d{5}$"),  # 사업자등록번호
     re.compile(r"^\d{2,6}-\d{2,6}-\d{2,8}(?:-\d{1,4})?$"),  # 계좌번호
     re.compile(r"^[^@\s]{1,64}@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$"),  # e-mail
+    re.compile(r"^(?:19|20)\d{2}\s*[./-]\s*\d{1,2}\s*[./-]\s*\d{1,2}$"),  # 생년월일 (1983 / 05 / 18)
 )
+# Korean form-field naming conventions (HIRA/NHIS/hometax, WebSquare/Nexacro
+# ids): a field-name token (camelCase / ``_`` / digit split) equal to or
+# ending with one of these is personal data (name, resident/business
+# registration number, phone, address, e-mail, birth date, card, account).
+BROWSER_PERSONAL_FIELD_TOKENS = frozenset(
+    {
+        "nm", "fnm", "flnm", "patnm", "patnam", "chartnm", "sujinja", "rgno", "resno", "rrno", "bsno", "brno",
+        "bizno", "regno", "coorno", "corpno", "jumin", "ssn", "tel", "telno", "hp", "phone", "addr", "juso",
+        "email", "birth", "bday", "brthdy", "card", "acct", "account", "acctno",
+    }
+)
+BROWSER_PERSONAL_FIELD_SUFFIXES: tuple[str, ...] = (
+    "nm", "flnm", "patnm", "patnam", "chartnm", "rgno", "resno", "rrno", "bsno", "brno", "regno", "telno", "addr", "juso",
+)
+BROWSER_PERSONAL_FIELD_SUBSTRINGS: tuple[str, ...] = (
+    "sujinja", "jumin", "resno", "rgno", "bsno", "brno", "regno", "flnm", "patnm", "patnam", "chartnm", "bday", "birth",
+)
+_FIELD_TOKEN_RE = re.compile(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])|\d+")
+# Common Korean surnames; a 2-4 syllable all-Hangul value starting with one
+# is treated as a person name.
+KOREAN_SURNAMES = frozenset(
+    "김이박최정강조윤장임한오서신권황안송류유전홍고문양손배백허남심노하곽성차주우구민진나지엄원천방공현함변염여추도소석선설마길연위표명기반라왕금옥육인맹제모탁국어은편용예경봉사부가복태목형피두감음빈동온호범좌팽승간상갈단견당화창"
+)
+KOREAN_COMPOUND_SURNAMES = ("남궁", "황보", "제갈", "선우", "독고", "서문", "사공", "동방")
+_HANGUL_NAME_RE = re.compile(r"^[가-힣]{2,4}$")
+_RRN_FRONT_RE = re.compile(r"^(\d{2})(\d{2})(\d{2})$")
+_RRN_TAIL_RE = re.compile(r"^[1-8]\d{6}$")
+# Edge stores an empty/password form field as a sentinel value: no user data.
+BROWSER_PLACEHOLDER_VALUES = frozenset({"edge_default_dummy_empty_value", "edge_default_dummy_password_value"})
+BROWSER_MASKED_PREVIEW = "[마스킹됨]"
+BROWSER_PLACEHOLDER_PREVIEW = "[빈 값: Edge 자리표시자]"
 SNSS_MAGIC = b"SNSS"
 MAX_SNSS_FILE_BYTES = 64 * 1024 * 1024
 BROWSER_NULL_FILL_RATIO = 0.5
@@ -6949,27 +6982,98 @@ def chromium_transition_profile(value: object) -> dict[str, object]:
     }
 
 
-def browser_pii_value(field_name: str, value: object) -> dict[str, object]:
+def browser_field_tokens(field_name: str) -> list[str]:
+    """Lower-case tokens of a form-field name (camelCase, ``_``/``$``/``.``, digits split)."""
+    return [token.lower() for token in _FIELD_TOKEN_RE.findall(field_name or "") if not token.isdigit()]
+
+
+def is_personal_field_name(field_name: str) -> bool:
+    if BROWSER_PERSONAL_FIELD_RE.search(field_name or ""):
+        return True
+    folded = re.sub(r"[^a-z]", "", (field_name or "").lower())
+    if any(part in folded for part in BROWSER_PERSONAL_FIELD_SUBSTRINGS):
+        return True
+    for token in browser_field_tokens(field_name):
+        if token in BROWSER_PERSONAL_FIELD_TOKENS or (len(token) > 2 and token.endswith(BROWSER_PERSONAL_FIELD_SUFFIXES)):
+            return True
+    return False
+
+
+def looks_like_korean_name(text: str) -> bool:
+    value = text.strip()
+    if not _HANGUL_NAME_RE.match(value):
+        return False
+    if len(value) >= 3 and value[:2] in KOREAN_COMPOUND_SURNAMES:
+        return True
+    return value[0] in KOREAN_SURNAMES
+
+
+def looks_like_resident_number_part(text: str) -> bool:
+    """YYMMDD front half (valid month/day) or the 7-digit tail of a 주민등록번호."""
+    value = text.strip()
+    match = _RRN_FRONT_RE.match(value)
+    if match:
+        month, day = int(match.group(2)), int(match.group(3))
+        return 1 <= month <= 12 and 1 <= day <= 31
+    return bool(_RRN_TAIL_RE.match(value))
+
+
+def personal_value_reason(text: str) -> str:
+    value = text.strip()
+    if not value:
+        return ""
+    if any(pattern.search(value) for pattern in BROWSER_PERSONAL_VALUE_RES):
+        return "personal-value-pattern"
+    if looks_like_resident_number_part(value):
+        return "personal-value-resident-number"
+    if looks_like_korean_name(value):
+        return "personal-value-korean-name"
+    return ""
+
+
+def browser_pii_value(field_name: str, value: object, *, default_mask: bool = False) -> dict[str, object]:
     """Preview policy for user-entered form data (same 80-char preview + sha256
-    as other redacted SQLite values); fields that look like secrets are masked."""
+    as other redacted SQLite values).
+
+    Masked (``value_preview`` replaced; ``value_sha256``/``value_length`` kept
+    so equal values still match): secret- or personal-looking field names
+    (incl. Korean form conventions ``nm``/``flnm``/``rgno``/``resno``/``bsno``/
+    ``sujinja``/``jumin`` ...), values that look like a phone/card/account/
+    resident number, a YYMMDD or 7-digit resident-number fragment or a Korean
+    person name, and with ``default_mask`` (autofill/address rows) every other
+    user-entered value (``form-input-default``). Edge's empty/password
+    sentinel values carry no user data (``browser-placeholder``). The
+    unmasked value is never stored for a masked field.
+    """
 
     text = "" if value is None else (value.hex() if isinstance(value, bytes) else str(value))
-    mask_reason = ""
-    if BROWSER_SENSITIVE_FIELD_RE.search(field_name or ""):
+    placeholder = text.strip() in BROWSER_PLACEHOLDER_VALUES
+    if placeholder:
+        mask_reason = "browser-placeholder"
+    elif BROWSER_SENSITIVE_FIELD_RE.search(field_name or ""):
         mask_reason = "secret-field-name"
-    elif BROWSER_PERSONAL_FIELD_RE.search(field_name or ""):
+    elif is_personal_field_name(field_name):
         mask_reason = "personal-field-name"
-    elif any(pattern.search(text.strip()) for pattern in BROWSER_PERSONAL_VALUE_RES):
-        mask_reason = "personal-value-pattern"
+    else:
+        mask_reason = personal_value_reason(text)
+        if not mask_reason and default_mask and text.strip():
+            mask_reason = "form-input-default"
     sensitive = bool(mask_reason)
-    return {
-        "value_preview": "[마스킹됨]" if sensitive else text[:BROWSER_PII_PREVIEW_CHARS],
+    if not sensitive:
+        preview = text[:BROWSER_PII_PREVIEW_CHARS]
+    else:
+        preview = BROWSER_PLACEHOLDER_PREVIEW if placeholder else BROWSER_MASKED_PREVIEW
+    result: dict[str, object] = {
+        "value_preview": preview,
         "value_masked": sensitive,
         "mask_reason": mask_reason,
         "value_truncated": (not sensitive) and len(text) > BROWSER_PII_PREVIEW_CHARS,
         "value_length": len(text),
         "value_sha256": hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest() if text else "",
     }
+    if placeholder:
+        result["value_placeholder"] = True
+    return result
 
 
 def browser_row_record(
@@ -7359,7 +7463,7 @@ def chromium_web_data_reader(context: BrowserRowContext):
                         source_row_id=browser_int(row["source_rowid"]),
                         fields={
                             "field_name": name,
-                            **browser_pii_value(name, row["value"]),
+                            **browser_pii_value(name, row["value"], default_mask=True),
                             "use_count": browser_int(row["count"]) or 0,
                             "date_created": unix_seconds_to_iso(row["date_created"]),
                             "date_last_used": unix_seconds_to_iso(row["date_last_used"]),
@@ -7380,9 +7484,9 @@ def chromium_web_data_reader(context: BrowserRowContext):
             for row in connection.execute(f"SELECT rowid AS source_rowid, {select} FROM autofill_edge_field_values ORDER BY date_created, rowid"):
                 field_id = str(row["field_id"] or "")
                 label, domain = labels.get(field_id, ("", ""))
-                value = browser_pii_value(label or field_id, row["value"])
+                value = browser_pii_value(label or field_id, row["value"], default_mask=True)
                 if row["is_masked"] and not value["value_masked"]:
-                    value.update({"value_preview": "[마스킹됨]", "value_masked": True, "value_truncated": False})
+                    value.update({"value_preview": BROWSER_MASKED_PREVIEW, "value_masked": True, "value_truncated": False, "mask_reason": "browser-masked-flag"})
                 records.append(
                     browser_row_record(
                         context,
@@ -7428,7 +7532,7 @@ def chromium_web_data_reader(context: BrowserRowContext):
                         source_row_id=browser_int(row["source_rowid"]),
                         fields={
                             "guid": str(row["guid"] or ""),
-                            "name_on_card": browser_pii_value("holder_name", row["name_on_card"])["value_preview"],
+                            "name_on_card": browser_pii_value("holder_name", row["name_on_card"], default_mask=True)["value_preview"],
                             "nickname": str(row["nickname"] or ""),
                             "expiration_month": browser_int(row["expiration_month"]),
                             "expiration_year": browser_int(row["expiration_year"]),
@@ -7459,7 +7563,7 @@ def chromium_address_rows(context: BrowserRowContext, connection: sqlite3.Connec
                 type_id = browser_int(row["type"]) or 0
                 name = CHROMIUM_ADDRESS_TOKEN_TYPES.get(type_id, f"TYPE_{type_id}")
                 tokens.setdefault(str(row["guid"]), []).append(
-                    {"type": type_id, "field_name": name, **browser_pii_value(name, row["value"])}
+                    {"type": type_id, "field_name": name, **browser_pii_value(name, row["value"], default_mask=True)}
                 )
         select = select_columns(connection, "addresses", ("guid", "use_count", "use_date", "date_modified", "label", "record_type"))
         for row in connection.execute(f"SELECT rowid AS source_rowid, {select} FROM addresses ORDER BY rowid"):
@@ -7489,7 +7593,7 @@ def chromium_address_rows(context: BrowserRowContext, connection: sqlite3.Connec
         select = select_columns(connection, "autofill_profiles", wanted)
         for row in connection.execute(f"SELECT rowid AS source_rowid, {select} FROM autofill_profiles ORDER BY rowid"):
             fields = [
-                {"field_name": name, **browser_pii_value(name, row[name])}
+                {"field_name": name, **browser_pii_value(name, row[name], default_mask=True)}
                 for name in wanted[1:8]
                 if row[name] not in (None, "")
             ]

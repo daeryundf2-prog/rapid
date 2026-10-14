@@ -196,6 +196,7 @@ EVENTLOG_TRIAGE_PIVOT_KEYS = (
     "matched_rules",
     "ioc_hits",
     "event_data_invalid_keys",
+    "event_data_key_status",
 )
 EVENTLOG_TRIAGE_OMITTED_BLOCKS = (
     "data (native EVTX: duplicate of top-level fields)",
@@ -2228,8 +2229,17 @@ def valid_event_data_key(name: str) -> bool:
     return bool(name) and len(name) <= 128 and name.isprintable() and not _EVENT_DATA_KEY_BAD_CHARS_RE.search(name)
 
 
+_EMPTY_NAME_DUPLICATE_RE = re.compile(r"^_\d+$")
+
+
 def sanitize_event_data_keys(event_data: Mapping[str, object]) -> tuple[dict[str, object], list[str], dict[str, str]]:
     """Map invalid EventData key names to ``data_N`` (N = field position).
+
+    Invalid: control/replacement characters, empty, over-long, or a
+    de-duplicated empty name (``_2``). Such records come from templates whose
+    name offsets do not resolve to NameString headers (e.g. recycled-chunk
+    templates of Microsoft-Windows-Servicing event 2 in Setup.evtx); the row
+    is labelled ``event_data_key_status: template-undecoded``.
 
     Returns ``(fields, invalid_keys, renamed)``: ``invalid_keys`` lists the ``data_N`` names that
     replaced invalid keys (``key_invalid``), ``renamed`` maps original -> replacement.
@@ -2239,7 +2249,8 @@ def sanitize_event_data_keys(event_data: Mapping[str, object]) -> tuple[dict[str
     renamed: dict[str, str] = {}
     for position, (key, value) in enumerate(event_data.items()):
         name = str(key)
-        if not valid_event_data_key(name):
+        # ``_2``/``_3`` are de-duplicated empty names (``_evtx_unique_key``).
+        if not valid_event_data_key(name) or _EMPTY_NAME_DUPLICATE_RE.match(name):
             replacement = f"data_{position}"
             while replacement in event_data or replacement in fields:
                 replacement += "_"
@@ -2479,6 +2490,7 @@ def build_native_evtx_event_record(
         "binxml_event_data_fields": dict(binxml_promoted.get("event_data_fields") or {}),
         "event_data_invalid_keys": list(binxml_promoted.get("event_data_invalid_keys") or []),
         "event_data_key_invalid": bool(binxml_promoted.get("event_data_invalid_keys")),
+        **({"event_data_key_status": "template-undecoded"} if binxml_promoted.get("event_data_invalid_keys") else {}),
         "binxml_event_data_sequence": list(binxml_promoted.get("event_data_sequence") or []),
         "binxml_event_data_values_by_name": dict(binxml_promoted.get("event_data_values_by_name") or {}),
         "binxml_user_data_fields": dict(binxml_promoted.get("user_data_fields") or {}),
