@@ -48,11 +48,22 @@ describe("viewer header (review #6)", () => {
     expect(triggers).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "더보기" }));
     const menu = screen.getByRole("menu", { name: "더보기" });
-    expect([...menu.querySelectorAll(".menu-heading")].map((h) => h.textContent)).toEqual(["리뷰", "원본"]);
+    expect([...menu.querySelectorAll(".menu-heading")].map((h) => h.textContent)).toEqual([
+      "리뷰",
+      "원본",
+      "피벗",
+    ]);
     const commands = [...menu.querySelectorAll<HTMLElement>("[data-command]")].map((i) => i.dataset.command);
-    // 리뷰 first (marks, then 메모…), then 원본 (source actions, then 같은 출처의 다른 행).
+    // 리뷰 first (marks, then 메모…), then 원본 (source actions, 같은 출처의 다른 행, 레코드 JSON),
+    // then 피벗 (viewer redesign §5).
     expect(commands.indexOf("viewer.note")).toBeLessThan(commands.indexOf("viewer.open-original"));
-    expect(commands.at(-1)).toBe("navigate.rows-for-source");
+    expect(commands.indexOf("navigate.rows-for-source")).toBeLessThan(
+      commands.indexOf("viewer.copyRecordJson"),
+    );
+    expect(commands.indexOf("viewer.copyRecordJson")).toBeLessThan(
+      commands.indexOf("viewer.pivot.same-user"),
+    );
+    expect(commands.at(-1)).toBe("viewer.pivot.source-artifact");
     // Every item keeps the 16px lead slot, so 메모… lines up with the status-dot items.
     for (const item of menu.querySelectorAll("[role^=menuitem]"))
       expect(item.querySelector(".menu-item-lead")).not.toBeNull();

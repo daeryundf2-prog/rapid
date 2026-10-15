@@ -16,6 +16,7 @@ import { STATUS_META } from "../../components/StatusChip";
 import "../../components/status.css";
 import type { Command, CommandContext } from "../../contracts/command";
 import { Icon, isIconName } from "../../icons";
+import { useRoute } from "../../state/hooks";
 import {
   applyNote,
   applyReviewAction,
@@ -26,6 +27,22 @@ import {
 import { noteKey, setSessionNote } from "../grid/sessionNotes";
 import { useViewerRowContext, useViewerTarget } from "./adapter";
 import { markDisabledReason, targetAsGridRow } from "./citation";
+import { writeClipboard } from "./commands";
+import { layoutFields } from "./fieldSheets";
+import { type PivotId, recordPivots } from "./pivots";
+
+/** Menu icons of the pivots. */
+const PIVOT_ICONS: Record<PivotId, MenuItem["icon"]> = {
+  "same-user": "filter",
+  "same-logon": "filter",
+  "same-hash": "filter",
+  "same-target": "filter",
+  "same-key": "filter",
+  "same-source": "filter",
+  "timeline-window": "clock",
+  "matched-event": "external",
+  "source-artifact": "external",
+};
 
 interface ViewerToolbarProps {
   sourceCommands: Command[];
@@ -90,6 +107,7 @@ export function ViewerToolbar({
 }: ViewerToolbarProps) {
   const target = useViewerTarget();
   const row = useViewerRowContext();
+  const { route, navigate } = useRoute();
   const [noteOpen, setNoteOpen] = useState(false);
   const [applied, setApplied] = useState<{ key: string; actions: string[]; cleared: string[] }>({
     key: "",
@@ -235,6 +253,39 @@ export function ViewerToolbar({
     },
   ];
 
+  // Pivots (viewer redesign §5): the same list as the grid row menu, each with its reason.
+  const pivotItems: MenuItem[] = recordPivots(target ? row : null, target?.runId ?? "", route.tz).map(
+    (pivot, index) => ({
+      id: `viewer.pivot.${pivot.id}`,
+      label: pivot.value
+        ? `${pivot.label}: ${pivot.value.length > 40 ? `${pivot.value.slice(0, 39)}…` : pivot.value}`
+        : pivot.label,
+      command: `viewer.pivot.${pivot.id}`,
+      icon: PIVOT_ICONS[pivot.id],
+      disabledReason: pivot.reason,
+      section: index === 0 ? "피벗" : undefined,
+      onSelect: () => {
+        if (pivot.route) navigate(pivot.route);
+      },
+    }),
+  );
+  const copyJsonItem: MenuItem = {
+    id: "viewer.copyRecordJson",
+    label: "레코드 JSON 복사",
+    command: "viewer.copyRecordJson",
+    icon: "copy",
+    disabledReason: row ? undefined : "뷰어에 표시된 레코드가 없습니다.",
+    onSelect: () => {
+      if (!row) return;
+      const details = row.fields.details;
+      const record = details && typeof details === "object" ? details : layoutFields(row);
+      writeClipboard(JSON.stringify(record, null, 2)).then(
+        () => announce("레코드 JSON을 복사했습니다."),
+        (error: unknown) => announce(`복사 실패: ${error instanceof Error ? error.message : String(error)}`),
+      );
+    },
+  };
+
   return (
     <>
       <div className="viewer-actions">
@@ -274,7 +325,7 @@ export function ViewerToolbar({
         <span ref={moreRef} className="viewer-actions-more">
           <MenuButton
             label="더보기"
-            items={[...reviewItems, ...sourceItems]}
+            items={[...reviewItems, ...sourceItems, copyJsonItem, ...pivotItems]}
             triggerClassName="viewer-icon-button"
             onDisabled={(reason) => announce(reason)}
             testId="viewer-actions-menu"

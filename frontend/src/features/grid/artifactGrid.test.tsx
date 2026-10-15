@@ -286,12 +286,12 @@ describe("record-field columns (열 설정 › 레코드 필드 추가)", () => 
                 },
                 {
                   artifact_type: "prefetch-reference",
-                  details: { referenced_path: "C:/a", volume_device_path: "DEVICEHARDDISKVOLUME3" },
+                  details: { referenced_path: "C:/a", referenced_extension: ".DLL" },
                   record_index: 1,
                 },
                 {
                   artifact_type: "prefetch-reference",
-                  details: { referenced_path: "C:/b", volume_device_path: "" },
+                  details: { referenced_path: "C:/b", referenced_extension: "" },
                   record_index: 2,
                 },
               ],
@@ -303,10 +303,12 @@ describe("record-field columns (열 설정 › 레코드 필드 추가)", () => 
     await waitFor(() => expect(rows().length).toBe(3));
     fireEvent.click(screen.getByRole("button", { name: "열 설정" }));
     expect(picker().getByRole("checkbox", { name: "prefetch_version" })).toBeTruthy();
-    fireEvent.change(screen.getByRole("searchbox", { name: "필드 검색" }), { target: { value: "vol" } });
-    const box = picker().getByRole("checkbox", { name: "volume_device_path" });
+    fireEvent.change(screen.getByRole("searchbox", { name: "필드 검색" }), {
+      target: { value: "extension" },
+    });
+    const box = picker().getByRole("checkbox", { name: "referenced_extension" });
     fireEvent.click(box);
-    expect(useGridLocalStore.getState().route.cols).toEqual(["details.volume_device_path"]);
+    expect(useGridLocalStore.getState().route.cols).toEqual(["details.referenced_extension"]);
   });
 
   it("restores the kind's stored columns into the route; promoted columns survive preset changes", async () => {

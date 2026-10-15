@@ -1,7 +1,7 @@
 /**
  * Korean labels for artifact record keys (visual-polish S5). The 메타 tab shows a known key by
- * its label (the raw key stays the tooltip); a key with no label is listed, folded, under
- * "원시 필드" — never shown as the main reading.
+ * its label (the raw key stays the tooltip); a key with no label gets a humanised label
+ * (fieldSheets.humanizeKey) and is still listed — never hidden.
  *
  * Keys collected from the run-subset7 artifact JSONL rows (`details`) — provenance
  * (source_path · source_index · source_hashes …), verification (confidence · risk_flags ·
@@ -62,7 +62,24 @@ export const META_LABELS: Record<string, string> = {
   // 출처
   source_path: "원본 경로",
   source_index: "원본 순번",
-  source_hashes: "원본 해시",
+  source_hashes: "컨테이너 파일 해시",
+  source_hashes_by_file: "컨테이너 파일 해시(파일별)",
+  utf16le_strings: "UTF-16LE 문자열",
+  utf16le_strings_hidden: "숨긴 깨진 문자열 수",
+  timestamp_100ns: "시각(100ns 정밀)",
+  timestamp_filetime: "시각(FILETIME 원문)",
+  timestamp_kind: "시각 종류",
+  timestamp_timezone: "시각 시간대",
+  timestamp_source: "시각 출처",
+  timestamp_status: "시각 상태",
+  source_file_mtime: "취득 사본 수정 시각(원본 아님)",
+  source_row_id: "원본 행 ID",
+  source_table: "원본 테이블",
+  sourceRecord: "원본 레코드 위치",
+  evtx_record_state: "EVTX 레코드 상태",
+  evtx_record_id_position: "레코드 번호 위치",
+  event_data_key_status: "EventData 이름 상태",
+  coverage_status: "해석 범위 상태",
   source_record_id: "원본 레코드 ID",
   source_size: "원본 크기",
   source_offset: "원본 오프셋",
@@ -113,7 +130,6 @@ export const META_LABELS: Record<string, string> = {
   validation_guidance: "검증 안내",
   validation_required: "검증 필요",
   reportability: "보고 가능성",
-  coverage_status: "적용 범위 상태",
   evidence_strength: "증거 강도",
   cloud_validation_matrix: "클라우드 검증 매트릭스",
   artifact_record_contract: "아티팩트 레코드 계약",
@@ -368,6 +384,43 @@ export const META_VALUE_LABELS: Record<string, string> = {
   present: "있음",
   enabled: "켜짐",
   disabled: "꺼짐",
+  // Parser status / reportability tokens (viewer redesign §4).
+  mapped: "매핑됨",
+  unmapped: "매핑 안 됨",
+  reportable: "보고 가능",
+  "not-reportable": "보고 불가",
+  triage: "선별용",
+  "triage-only": "선별 전용",
+  detected: "탐지됨",
+  "not-detected": "탐지 안 됨",
+  "parsed-common-header": "공통 헤더 해석",
+  "parsed-header": "헤더 해석",
+  "parsed-full": "전체 해석",
+  "header-only": "헤더만",
+  "excluded-from-recent-file-evidence": "최근 파일 증거에서 제외",
+  "unsupported-header": "지원하지 않는 헤더",
+  "invalid-content": "내용 불일치",
+  "inventory-candidate": "목록 후보",
+  inventory: "목록",
+  "native-parsed": "네이티브 해석",
+  native: "네이티브",
+  decoded: "해석됨",
+  "not-decoded": "해석 안 됨",
+  "template-undecoded": "템플릿 이름 미해석",
+  slack: "슬랙 영역",
+  "stale-below-first": "첫 레코드 이전(오래된 잔존)",
+  allocated: "할당됨",
+  unallocated: "미할당",
+  recovered: "복구됨",
+  carved: "카빙",
+  truncated: "잘림",
+  capped: "상한 도달",
+  "metadata-only": "메타데이터만",
+  "string-candidate": "문자열 후보",
+  "host-copy": "취득 사본(원본 아님)",
+  "acquisition-copy": "취득 사본(원본 아님)",
+  filesystem: "파일 시스템",
+  listing: "목록(fls/MFT)",
 };
 
 /** Suffixes whose reading carries over to `<family>-<suffix>` tokens ("shellbags-validation-required"). */
@@ -526,7 +579,7 @@ function familyLabel(key: string): string | null {
   return null;
 }
 
-/** Korean label of a record key, or null when there is none (the key goes under 원시 필드). */
+/** Korean label of a record key, or null when there is none (the caller humanises the key). */
 export function metaLabel(key: string): string | null {
   const direct = META_LABELS[key] ?? FIELD_LABELS[key];
   if (direct) return direct;

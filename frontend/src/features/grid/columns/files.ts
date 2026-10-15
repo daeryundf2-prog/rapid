@@ -1,5 +1,5 @@
 import { fetchFilesPage } from "../../../api/collections";
-import { formatTimestamp } from "../../../utils/time";
+import { formatGridTime } from "../../../utils/time";
 import type { CollectionDef, ColumnSpec } from "../types";
 import {
   baseName,
@@ -85,7 +85,7 @@ function ntfsTime(id: string, header: string, key: string): ColumnSpec {
     format: (r) => {
       const value = ntfsOf(r)[key];
       return typeof value === "string" || typeof value === "number"
-        ? formatTimestamp(value, currentTimezone())
+        ? formatGridTime(value, currentTimezone())
         : "";
     },
     filterKind: "time",
@@ -158,7 +158,7 @@ export function modifiedTooltip(row: { fields: Record<string, unknown> }): strin
   const value = strOrNull(row.fields.modifiedAt);
   const origin = strOrNull(row.fields.modifiedOrigin);
   if (origin === "acquisition-copy") return COPY_TIME_TITLE;
-  const text = value ? formatTimestamp(value, currentTimezone()) : "";
+  const text = value ? formatGridTime(value, currentTimezone()) : "";
   const hint = origin ? (MODIFIED_ORIGIN_LABELS[origin] ?? origin) : "";
   return [text, hint].filter(Boolean).join(" · ");
 }
@@ -352,12 +352,12 @@ export const filesCollection: CollectionDef = {
       value: (r) => strOrNull(r.fields.modifiedAt),
       format: (r) => {
         const value = strOrNull(r.fields.modifiedAt);
-        return value ? formatTimestamp(value, currentTimezone()) : "";
+        return value ? formatGridTime(value, currentTimezone()) : "";
       },
       tooltip: (r) => modifiedTooltip(r),
       render: (r) => {
         const value = strOrNull(r.fields.modifiedAt);
-        return modifiedCell(r, value ? formatTimestamp(value, currentTimezone()) : "");
+        return modifiedCell(r, value ? formatGridTime(value, currentTimezone()) : "");
       },
     },
     {

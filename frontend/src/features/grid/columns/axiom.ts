@@ -90,6 +90,6 @@ export function withAxiom(def: CollectionDef): CollectionDef {
   return {
     ...def,
     columns: axiomColumns(def.columns),
-    columnsFor: columnsFor ? (ref) => axiomColumns(columnsFor(ref)) : undefined,
+    columnsFor: columnsFor ? (ref, types) => axiomColumns(columnsFor(ref, types)) : undefined,
   };
 }

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { StatusChip } from "../../../components/StatusChip";
 import type { GridRow } from "../../../contracts/collection";
+import { artifactTypeLabel } from "../../filters/typeLabels";
 
 /** Tags that map onto a fixed status colour (X3); every other tag renders as a neutral chip. */
 const TAG_STATUS: Record<string, "bookmark"> = { 북마크: "bookmark", bookmark: "bookmark" };
@@ -58,7 +59,10 @@ export function typeChipCell(row: GridRow): ReactNode {
         data-type-colour={typeColourIndex(row.artifactType)}
         style={{ background: `var(--tag-${typeColourIndex(row.artifactType)})` }}
       />
-      <span className="grid-type-text">{row.artifactType}</span>
+      {/* Korean type name (review: evidence-first viewer §7); the id stays the tooltip. */}
+      <span className="grid-type-text" data-type={row.artifactType}>
+        {artifactTypeLabel(row.artifactType) ?? row.artifactType}
+      </span>
     </span>
   );
 }

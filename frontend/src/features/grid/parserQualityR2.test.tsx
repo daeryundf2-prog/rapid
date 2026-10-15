@@ -65,10 +65,10 @@ describe("timeline labels[] (parser-quality r2: one event per record and instant
 
   it("a single-kind event renders just its label (labels absent or one entry)", () => {
     const row = mapEvent({ ...merged, labels: undefined, timestamp_kind: "run-2" });
-    expect(column(timelineCollection.columns, "tsKind").format?.(row)).toBe("실행 2");
+    expect(column(timelineCollection.columns, "tsKind").format?.(row)).toBe("실행 2회차");
     render(<div>{column(timelineCollection.columns, "tsKind").render?.(row)}</div>);
     expect(screen.queryByTestId("timeline-time-kinds")).toBeNull();
-    expect(screen.getByText("실행 2")).toBeTruthy();
+    expect(screen.getByText("실행 2회차")).toBeTruthy();
     // labels[] without timestamp_kind still names the primary.
     expect(mapEvent({ timestamp: "x", labels: ["visited", "last-visited"] }).fields.tsKind).toBe("visited");
   });

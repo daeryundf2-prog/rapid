@@ -38,6 +38,7 @@ import { useDensity, useGridLocalStore, useRoute, useSelection, useToast, useVie
 import { BatchBar, batchBarState } from "./BatchBar";
 import { ColumnFilterRow } from "./ColumnFilterRow";
 import { collectionDef, lockedColumnId, presetColumnIds } from "./columns";
+import { artifactTypeFamily } from "./columns/artifacts";
 import { isRecord } from "./columns/common";
 import {
   colsToKeys,
@@ -248,9 +249,12 @@ export function DataGrid(props: DataGridProps = {}) {
   const runId = props.runId !== undefined ? props.runId : route.runId;
   const ref = props.collection ?? route.collection;
   const def = collectionDef(ref.id);
-  const columnKey = `${ref.id}:${ref.kind ?? ""}`;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: columns only depend on the collection/kind
-  const baseColumns = useMemo(() => def.columnsFor?.(ref) ?? def.columns, [def, columnKey]);
+  // A 유형 filter of one artifact-type family (다운로드 · USB · SAM …) picks that family's columns.
+  const filterTypes = useFilterStore((s) => s.filters.types);
+  const typeFamily = ref.id === "artifacts" ? (artifactTypeFamily(filterTypes) ?? "") : "";
+  const columnKey = `${ref.id}:${ref.kind ?? ""}:${typeFamily}`;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: columns only depend on the collection/kind/type family
+  const baseColumns = useMemo(() => def.columnsFor?.(ref, filterTypes) ?? def.columns, [def, columnKey]);
   // Artifacts (and analysis job rows) are sorted by the server (whole kind / whole job), never
   // client-side over the loaded pages.
   const isAnalysis = ref.id === "analysis";
@@ -388,7 +392,7 @@ export function DataGrid(props: DataGridProps = {}) {
   useEffect(() => {
     setVisibility(visibilityFor(columns, preset));
     setPinnedColumns(new Set());
-  }, [collectionKey, preset]);
+  }, [collectionKey, preset, typeFamily]);
   // Reset only when the collection changes.
   useEffect(() => {
     setSorting([]);

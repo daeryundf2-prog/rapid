@@ -12,6 +12,7 @@ import { MiddlePath } from "../../components/MiddlePath";
 import type { Command } from "../../contracts/command";
 import type { MarkAction, ViewerMode, ViewerTarget } from "../../contracts/viewer";
 import { Icon } from "../../icons";
+import { currentTimezone } from "../grid/columns/common";
 import { storeNotice } from "../grid/reviewActions";
 import {
   dispatchCommand,
@@ -270,7 +271,7 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
       if (!target) return;
       try {
         const sha = target.sourcePath ? await ensureSha256().catch(() => null) : null;
-        await writeClipboard(buildCitation({ ...target, highlight }, sha));
+        await writeClipboard(buildCitation({ ...target, highlight }, sha, row, currentTimezone()));
         announce("인용을 복사했습니다.");
       } catch (error) {
         announce(`인용 복사 실패: ${errorText(error)}`);

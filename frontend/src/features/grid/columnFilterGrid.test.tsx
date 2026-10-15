@@ -257,7 +257,9 @@ describe("column header filters (plan analysis-workbench-p1 U-P1-4)", () => {
     expect(params.getAll("kind")).toEqual(["windows-system"]);
     expect(params.getAll("artifact_type")).toEqual(["web-server-log", "webshell-source-candidate"]);
     const typeCell = (dataRows()[0] as HTMLElement).querySelector('[data-col="type"] .grid-type-text');
-    expect(typeCell?.textContent).toBe("web-server-log");
+    // The chip reads the Korean type name; the exact artifact_type stays on the element / tooltip.
+    expect(typeCell?.textContent).toBe("웹 서버 로그");
+    expect(typeCell?.getAttribute("data-type")).toBe("web-server-log");
     expect(screen.getByRole("button", { name: "유형 web-server-log 필터 제거" })).toBeTruthy();
   });
 

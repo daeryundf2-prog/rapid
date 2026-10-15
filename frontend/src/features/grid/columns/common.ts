@@ -3,7 +3,7 @@ import type { RowRef } from "../../../contracts/rowRef";
 import { runEvidenceTimezone } from "../../../state/hooks";
 import { currentRun } from "../../../state/slices/runs";
 import { useAppStore } from "../../../state/store";
-import { formatTimestamp } from "../../../utils/time";
+import { evidenceTimeTooltip, formatGridTime } from "../../../utils/time";
 import type { CellValue, ColumnSpec } from "../types";
 import { pathCell } from "./PathCell";
 import { reviewStatusCell } from "./StatusCells";
@@ -170,7 +170,9 @@ export const col = {
       width,
       presets,
       value: (r) => r.timestamp,
-      format: (r) => (r.timestamp ? formatTimestamp(r.timestamp, currentTimezone()) : ""),
+      format: (r) => (r.timestamp ? formatGridTime(r.timestamp, currentTimezone()) : ""),
+      // Full evidence reading (local · zone · UTC · FILETIME) on hover.
+      tooltip: (r) => (r.timestamp ? evidenceTimeTooltip(r.timestamp, currentTimezone()) : ""),
     };
   },
   review(): ColumnSpec {

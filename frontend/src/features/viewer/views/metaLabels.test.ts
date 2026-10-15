@@ -5,7 +5,7 @@ describe("meta key labels (visual-polish S5)", () => {
   it("labels provenance and verification keys in Korean", () => {
     expect(metaLabel("source_path")).toBe("원본 경로");
     expect(metaLabel("source_index")).toBe("원본 순번");
-    expect(metaLabel("source_hashes")).toBe("원본 해시");
+    expect(metaLabel("source_hashes")).toBe("컨테이너 파일 해시");
     expect(metaLabel("confidence")).toBe("신뢰도");
     expect(metaLabel("risk_flags")).toBe("위험 표시");
     expect(metaLabel("core_accuracy_gates")).toBe("핵심 정확도 게이트");

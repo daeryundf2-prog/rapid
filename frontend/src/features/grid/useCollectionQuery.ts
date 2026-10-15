@@ -114,8 +114,9 @@ export interface CollectionQueryResult {
 export function columnResolver(
   def: CollectionDef,
   ref: CollectionQuery["ref"],
+  types?: readonly string[],
 ): (col: string) => ColumnSpec | undefined {
-  const columns = def.columnsFor?.(ref) ?? def.columns;
+  const columns = def.columnsFor?.(ref, types) ?? def.columns;
   const byId = new Map(columns.map((c) => [c.id, c]));
   return (col) =>
     byId.get(col) ?? (col.startsWith("f:") && col.length > 2 ? promotedColumn(col.slice(2)) : undefined);
@@ -318,7 +319,10 @@ export function useCollectionQuery(
 
   // Client-side filters see loaded rows only; the grid then treats the result like a whole collection.
   const clientFilters = useMemo(() => clientOnlyFilters(filters, plan), [filters, plan]);
-  const resolveColumn = useMemo(() => columnResolver(def, rawQuery.ref), [def, rawQuery.ref]);
+  const resolveColumn = useMemo(
+    () => columnResolver(def, rawQuery.ref, rawQuery.artifactTypes),
+    [def, rawQuery.ref, rawQuery.artifactTypes],
+  );
   const loadedRows = useMemo(() => {
     if (!clientFiltering) return unfilteredRows;
     const rows = applyClientFilters(unfilteredRows, clientFilters);

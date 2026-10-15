@@ -61,7 +61,7 @@ describe("record-field columns: discovery and promotion", () => {
           artifact_type: "prefetch-reference",
           details: {
             referenced_path: `C:/x${i}`,
-            volume_device_path: i === 0 ? "DEVICEHARDDISKVOLUME3" : "",
+            referenced_extension: i === 0 ? ".DLL" : "",
           },
           _kind: "windows-prefetch",
           _index: i + 1,
@@ -70,8 +70,8 @@ describe("record-field columns: discovery and promotion", () => {
         { ref: { id: "artifacts", kind: "windows-prefetch" } },
       );
     const fields = discoverFields([file, ref(0), ref(1), ref(2)], artifactColumnsForKind("windows-prefetch"));
-    expect(fields.find((f) => f.key === "volume_device_path")).toEqual({
-      key: "volume_device_path",
+    expect(fields.find((f) => f.key === "referenced_extension")).toEqual({
+      key: "referenced_extension",
       count: 1,
       present: 3,
     });
@@ -80,7 +80,7 @@ describe("record-field columns: discovery and promotion", () => {
       count: 1,
       present: 1,
     });
-    expect(fieldMenuEntries(fields, [], "vol").map((f) => f.key)).toEqual(["volume_device_path"]);
+    expect(fieldMenuEntries(fields, [], "extension").map((f) => f.key)).toEqual(["referenced_extension"]);
   });
 
   it("menu entries add promoted keys absent from the loaded rows and filter by key or Korean label", () => {
@@ -149,16 +149,24 @@ describe("kind default columns (§4.3) and sort keys", () => {
       expect.arrayContaining(["이벤트ID", "채널", "메시지", "레벨", "컴퓨터", "사용자", "시각", "유형"]),
     );
     expect(headers("windows-prefetch")).toEqual(
-      expect.arrayContaining(["실행 파일", "실행 횟수", "최근 실행", "참조 경로", "파싱 상태"]),
+      expect.arrayContaining(["실행 파일", "실행 횟수", "최근 실행", "볼륨", "참조 경로", "파싱 상태"]),
     );
     expect(headers("windows-registry")).toEqual(
-      expect.arrayContaining(["하이브", "셀 종류", "이름", "세부", "마지막 기록", "셀 오프셋"]),
+      expect.arrayContaining(["키 경로", "값 이름", "값 종류", "마지막 기록", "하이브", "셀 오프셋"]),
     );
     expect(headers("windows-shellbags")).toEqual(
-      expect.arrayContaining(["경로 후보", "키 경로", "마지막 기록", "신뢰도"]),
+      expect.arrayContaining(["경로", "MRU", "키 기록 시각", "키 경로", "신뢰도"]),
     );
     expect(headers("recent-files")).toEqual(
-      expect.arrayContaining(["대상 경로", "대상 수정", "대상 크기", "파싱 상태", "작업 폴더"]),
+      expect.arrayContaining([
+        "대상",
+        "대상 수정",
+        "볼륨 시리얼",
+        "머신 ID",
+        "대상 크기",
+        "파싱 상태",
+        "작업 폴더",
+      ]),
     );
     expect(headers("windows-execution")).toEqual(
       expect.arrayContaining(["실행 경로", "프로그램", "게시자", "버전", "SHA-1", "키 기록"]),
@@ -178,7 +186,7 @@ describe("kind default columns (§4.3) and sort keys", () => {
     );
     expect(headers("recent-files")).not.toEqual(expect.arrayContaining(["인수"]));
     expect(headers("windows-os-account")).toEqual(
-      expect.arrayContaining(["계정", "RID", "역할", "마지막 기록"]),
+      expect.arrayContaining(["계정", "RID", "마지막 로그온", "로그온 수", "역할", "마지막 기록"]),
     );
     expect(headers("windows-filesystem")).toEqual(
       expect.arrayContaining(["감지 서명", "기대 확장자", "크기", "수정", "위험"]),
@@ -199,8 +207,11 @@ describe("kind default columns (§4.3) and sort keys", () => {
     expect(headers("generic-documents")).toEqual(
       expect.arrayContaining(["항목 수", "암호화 항목", "크기", "수정", "위험"]),
     );
+    // Browser: the visit columns (viewer redesign §7) — URL · 제목 · 방문 수 · 전환.
+    expect(headers("browser")).toEqual(expect.arrayContaining(["URL", "제목", "방문 수", "전환", "시각"]));
     // Kinds without a layout use the generic one (visual-polish S4): 시각 · 유형 · 항목 · 경로 · 선별 first.
-    expect(headers("browser")).toEqual([
+    const generic = artifactColumnsForKind("android-apk");
+    expect(generic.map((c) => c.header)).toEqual([
       "시각",
       "유형",
       "항목",
@@ -212,7 +223,6 @@ describe("kind default columns (§4.3) and sort keys", () => {
       "지원",
       "SHA-256",
     ]);
-    const generic = artifactColumnsForKind("browser");
     expect(generic.filter((c) => c.presets.includes("analysis")).map((c) => c.header)).toEqual([
       "시각",
       "유형",
@@ -225,7 +235,9 @@ describe("kind default columns (§4.3) and sort keys", () => {
   it("kind columns sort on their first details key (multi-key ones say which); computed ones do not", () => {
     // List-valued columns (live data) and computed ones carry no sortKey.
     const unsortable = new Set([
-      "d:shellbag_path_candidates",
+      "d:shell_path",
+      "d:volume_device_path",
+      "d:trigger_types",
       "d:value_type",
       "d:expected_extensions",
       "d:risk_flags",
@@ -234,13 +246,13 @@ describe("kind default columns (§4.3) and sort keys", () => {
       for (const column of artifactColumnsForKind(kind)) {
         if (!column.id.startsWith("d:")) continue;
         const first = column.fieldKeys?.[0];
-        if (kind === "windows-registry" && column.header === "세부") {
+        if (kind === "windows-registry" && column.header === "값 종류") {
           expect(column.sortKey).toBeUndefined();
           continue;
         }
         if (unsortable.has(column.id)) {
           expect(column.sortKey, `${kind}/${column.id}`).toBeUndefined();
-          if (column.id !== "d:value_type") {
+          if (column.id === "d:expected_extensions" || column.id === "d:risk_flags") {
             expect(column.unsortableReason, `${kind}/${column.id}`).toBe(SORT_LIST_REASON);
           }
           continue;
@@ -270,28 +282,33 @@ describe("kind default columns (§4.3) and sort keys", () => {
     expect(eventlog.find((c) => c.id === "channel")?.sortKey).toBeUndefined();
   });
 
-  it("registry: 셀 종류 is a Korean label with the raw value as tooltip; 세부 fits key and value cells", () => {
+  it("registry: 키 경로 · 값 이름 · 값 종류 · 마지막 기록; 값 종류 fits key and value cells", () => {
     const cols = new Map(artifactColumnsForKind("windows-registry").map((c) => [c.header, c]));
-    const kindCol = cols.get("셀 종류");
-    const detail = cols.get("세부");
+    const visible = artifactColumnsForKind("windows-registry")
+      .filter((c) => c.id.startsWith("d:") && c.presets.includes("analysis"))
+      .map((c) => c.header);
+    expect(visible).toEqual(["키 경로", "값 이름", "값 종류", "마지막 기록"]);
+    const kind = cols.get("값 종류");
     const value = artifactRow({ cell_kind: 1, value_type: 1, value_data_size: 24 }, "windows-registry");
     const key = artifactRow({ cell_kind: 0, subkey_count: 2, value_count: 5 }, "windows-registry");
-    const named = artifactRow({ cell_kind: "key-node" }, "windows-registry");
-    expect(kindCol?.format?.(value)).toBe("값");
-    expect(kindCol?.tooltip?.(value)).toBe("1");
-    expect(kindCol?.format?.(key)).toBe("키");
-    expect(kindCol?.format?.(named)).toBe("키");
-    expect(kindCol?.format?.(artifactRow({ cell_kind: "sk" }, "windows-registry"))).toBe("기타");
-    expect(kindCol?.sortKey).toBe("details.cell_kind");
-    expect(detail?.format?.(value)).toBe("REG_SZ · 24 B");
-    expect(detail?.format?.(key)).toBe("하위키 2 · 값 5");
+    expect(kind?.format?.(value)).toBe("REG_SZ · 24 B");
+    expect(kind?.format?.(key)).toBe("하위키 2 · 값 5");
+    expect(kind?.sortKey).toBeUndefined();
+    const reg = artifactRow(
+      { key: "HKLM\\SOFTWARE\\Run", last_written_at: "2025-01-02T03:04:05Z" },
+      "windows-registry",
+    );
+    expect(cols.get("키 경로")?.format?.(reg)).toBe("HKLM\\SOFTWARE\\Run");
+    expect(cols.get("마지막 기록")?.filterKind).toBe("time");
   });
 
-  it("os-account: 역할 second, RID tooltip carries rid_hex", () => {
-    const cols = artifactColumnsForKind("windows-os-account").filter((c) => c.id.startsWith("d:"));
-    expect(cols.map((c) => c.header)).toEqual(["계정", "역할", "RID", "마지막 기록"]);
+  it("os-account (SAM): 계정 · RID · 마지막 로그온 · 로그온 수; RID tooltip carries rid_hex", () => {
+    const cols = artifactColumnsForKind("windows-os-account").filter(
+      (c) => c.id.startsWith("d:") && c.presets.includes("analysis"),
+    );
+    expect(cols.map((c) => c.header)).toEqual(["계정", "RID", "마지막 로그온", "로그온 수"]);
     const row = artifactRow({ rid_decimal: 500, rid_hex: "0x1f4" }, "windows-os-account");
-    expect(cols[2]?.tooltip?.(row)).toBe("500 (0x1f4)");
+    expect(cols[1]?.tooltip?.(row)).toBe("500 (0x1f4)");
   });
 
   it("kind columns read details (first non-empty key, list element, width×height, bytes)", () => {

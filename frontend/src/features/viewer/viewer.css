@@ -1007,3 +1007,146 @@ dd:focus-within .meta-colbtn,
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
+
+/* Record view, evidence first (viewer redesign) -------------------------------- */
+
+/* Warnings above everything: tone by left rule + tinted panel (text stays --text). */
+.meta-banners {
+  display: grid;
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+}
+
+.meta-banner {
+  margin: 0;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--info);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--info) 10%, var(--bg-panel));
+  color: var(--text);
+  font-size: var(--fs-table-aux);
+}
+
+.meta-banner[data-tone="warning"] {
+  border-left-color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 14%, var(--bg-panel));
+}
+
+.meta-banner[data-tone="danger"] {
+  border-left-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, var(--bg-panel));
+}
+
+.meta-sheet-label {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.meta-record-actions {
+  display: inline-flex;
+  margin-left: var(--space-1);
+  vertical-align: middle;
+}
+
+.meta-record-actions .meta-copy.icon-btn,
+.meta-xml-actions .meta-copy.icon-btn {
+  opacity: 1;
+}
+
+/* Per-field copy on hover / focus (same affordance as hashes). */
+.meta-field:hover .meta-copy,
+.meta-field:focus-within .meta-copy {
+  opacity: 1;
+}
+
+/* Evidence times: local (zone) · UTC, kind chip, ±5분. */
+.meta-time {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.meta-time-zone,
+.meta-time-utc {
+  color: var(--text-muted);
+}
+
+.meta-time-kind {
+  padding: 0 var(--space-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: var(--fs-aux);
+}
+
+.meta-tl-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 0;
+  padding: 0 var(--space-1);
+  font-size: var(--fs-aux);
+}
+
+.meta-coded,
+.meta-sid-name {
+  color: var(--text);
+}
+
+/* EventData / registry values. */
+.meta-kv {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-table-aux);
+}
+
+.meta-kv-cell {
+  padding: 2px var(--space-1);
+  border-bottom: 1px solid var(--line-subtle);
+  text-align: left;
+  vertical-align: top;
+}
+
+.meta-kv-head {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.meta-kv-name {
+  width: 40%;
+  color: var(--text-muted);
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+
+.meta-xml,
+.meta-hexdump {
+  margin: var(--space-1) 0;
+  padding: var(--space-2);
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-table-aux);
+  white-space: pre;
+}
+
+.meta-binary-strings {
+  margin: var(--space-1) 0;
+  padding-left: var(--space-4);
+}
+
+.meta-governance {
+  margin-top: var(--space-3);
+}
+
+/* An expected field the record does not carry (e.g. 로그온 ID on a 4624). */
+.meta-missing {
+  color: var(--text-muted);
+  font-style: italic;
+}

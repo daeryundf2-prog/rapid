@@ -92,8 +92,8 @@ describe("timeline 시각 종류", () => {
     const map = (raw: Record<string, unknown>) =>
       timelineCollection.mapRow(raw, 0, { ref: { id: "timeline" } });
     const row = map({ timestamp: "2024-01-01T00:00:00Z", timestamp_kind: "run-3", source: "artifacts" });
-    expect(timestampKindLabel("run-3")).toBe("실행 3");
-    expect(column(timelineCollection.columns, "tsKind").format?.(row)).toBe("실행 3");
+    expect(timestampKindLabel("run-3")).toBe("실행 3회차");
+    expect(column(timelineCollection.columns, "tsKind").format?.(row)).toBe("실행 3회차");
     expect(column(timelineCollection.columns, "timestamp").tooltip?.(row)).toContain("시각 종류: 실행 3");
     expect(column(timelineCollection.columns, "tsKind").presets).toEqual(["source"]);
     expect(map({ ts_kind: "modified" }).fields.tsKind).toBe("modified");

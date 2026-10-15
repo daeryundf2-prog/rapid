@@ -574,34 +574,29 @@ describe("Viewer — decoded artifact rows (F2)", () => {
     expect(tab("메타").getAttribute("aria-selected")).toBe("true");
     const panel = screen.getByRole("tabpanel");
     const firstHeading = panel.querySelector("h3");
-    expect(firstHeading?.textContent).toBe("레코드");
+    expect(firstHeading?.textContent).toMatch(/^레코드 · 이벤트 로그/);
+    // Banners first: the parser's caution label is a warning above the fields.
+    const banners = screen.getByTestId("record-banners");
+    expect(banners.textContent).toContain("파서 주의 표시");
+    expect(
+      banners.compareDocumentPosition(firstHeading as Node) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     const core = screen.getByRole("region", { name: "레코드 핵심" });
     const terms = Array.from(core.querySelectorAll("dt"));
-    expect(terms.slice(0, 6).map((dt) => dt.getAttribute("data-key"))).toEqual([
-      "timestamp",
-      "event_id",
-      "record_id",
-      "channel",
-      "provider_name",
-      "computer",
-    ]);
-    // Known keys read in Korean (visual-polish S5); the raw key stays the tooltip.
-    expect(terms.slice(0, 6).map((dt) => dt.textContent)).toEqual([
-      "시각",
-      "이벤트 ID",
-      "레코드 ID",
-      "채널",
-      "공급자 이름",
-      "컴퓨터",
-    ]);
-    expect(terms[1]?.getAttribute("title")).toBe("event_id");
+    // Event Log field sheet order (AXIOM-style): 이벤트 ID · 제공자 · 채널 · 컴퓨터 … 레코드 ID.
+    const keys = terms.map((dt) => dt.getAttribute("data-key"));
+    expect(keys.slice(0, 4)).toEqual(["event_id", "provider_name", "channel", "computer"]);
+    expect(keys).toContain("record_id");
+    expect(keys.indexOf("record_id")).toBeGreaterThan(keys.indexOf("computer"));
+    expect(terms.slice(0, 4).map((dt) => dt.textContent)).toEqual(["이벤트 ID", "제공자", "채널", "컴퓨터"]);
+    expect(terms[0]?.getAttribute("title")).toContain("event_id");
     expect(core.textContent).toContain("application");
     const source = screen.getByRole("region", { name: "레코드 출처" });
     expect(source.textContent).toContain("EVTX 레코드 오프셋4608");
     expect(source.textContent).toContain("EVTX 레코드 SHA-256");
-    expect(screen.getByRole("region", { name: "레코드 검증" }).textContent).toContain("주의 표시");
-    const other = panel.querySelector("details.meta-record-group") as HTMLDetailsElement;
-    expect(other.open).toBe(false);
+    // No "검증" group above the evidence any more; unknown keys are visible, not folded.
+    expect(screen.queryByRole("region", { name: "레코드 검증" })).toBeNull();
+    const other = screen.getByRole("region", { name: "레코드 기타 필드" });
     expect(other.textContent).toContain("이벤트 데이터");
   });
 

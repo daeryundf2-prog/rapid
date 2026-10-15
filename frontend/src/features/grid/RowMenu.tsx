@@ -22,6 +22,19 @@ export const ROW_MENU_COMMAND_IDS = [
  */
 export const ROW_MENU_CONTEXTUAL_IDS = ["grid.openOtherCase"] as const;
 
+/** Record pivots (viewer redesign §5), listed after a separator; disabled with a reason when absent. */
+export const ROW_MENU_PIVOT_IDS = [
+  "grid.pivot.same-user",
+  "grid.pivot.same-logon",
+  "grid.pivot.same-hash",
+  "grid.pivot.same-target",
+  "grid.pivot.same-key",
+  "grid.pivot.same-source",
+  "grid.pivot.timeline-window",
+  "grid.pivot.matched-event",
+  "grid.pivot.source-artifact",
+] as const;
+
 /** Review items, always listed after a separator (disabled with a reason when they cannot run). */
 export const ROW_MENU_REVIEW_IDS = [
   "grid.row.relevant",
@@ -90,6 +103,7 @@ export function RowMenu({ id, anchor, context, onClose, onDisabled }: RowMenuPro
     ...registered(ROW_MENU_CONTEXTUAL_IDS).filter((command) => !command.disabledReason?.(context)),
     ...registered(ROW_MENU_COMMAND_IDS),
   ];
+  const pivotItems = registered(ROW_MENU_PIVOT_IDS);
   const reviewItems = registered(ROW_MENU_REVIEW_IDS);
 
   const move = (delta: number, from: HTMLElement) => {
@@ -124,12 +138,14 @@ export function RowMenu({ id, anchor, context, onClose, onDisabled }: RowMenuPro
         }
       }}
     >
-      {[...items, ...reviewItems].map((command, index) => {
+      {[...items, ...pivotItems, ...reviewItems].map((command, index) => {
         const reason = command.disabledReason?.(context);
         const shortcut = rowMenuShortcut(command.id, command.shortcut);
         return (
           <Fragment key={command.id}>
-            {index === items.length && items.length > 0 ? <hr className="grid-menu-sep" /> : null}
+            {(index === items.length || index === items.length + pivotItems.length) && index > 0 ? (
+              <hr className="grid-menu-sep" />
+            ) : null}
             <button
               type="button"
               role="menuitem"
