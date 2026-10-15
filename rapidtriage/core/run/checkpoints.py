@@ -92,6 +92,10 @@ def write_run_checkpoints(
     resume_disabled_reason: str,
     checkpoints: Sequence[Mapping[str, object]],
 ) -> None:
+    # Stage checkpoints are recorded right before the stage output is written,
+    # so ``exists``/``size_bytes`` were stale (exists=False for written
+    # outputs, contradicting missing_output_stages). Re-read them from disk.
+    checkpoints = [refresh_checkpoint_output_state(item) for item in checkpoints]
     status_counts = Counter(str(item.get("status") or "unknown") for item in checkpoints)
     integrity_profile = checkpoint_integrity_profile(checkpoints)
     decision_manifest = checkpoint_resume_decision_manifest(
@@ -187,6 +191,17 @@ def write_run_checkpoints(
         "checkpoints": [dict(item) for item in checkpoints],
     }
     write_result(payload, path)
+
+
+def refresh_checkpoint_output_state(record: Mapping[str, object]) -> dict[str, object]:
+    refreshed = dict(record)
+    output = str(record.get("output") or "")
+    path = Path(output) if output else None
+    exists = bool(path is not None and path.is_file())
+    refreshed["exists"] = exists
+    refreshed["size_bytes"] = path.stat().st_size if exists and path is not None else None
+    refreshed["row_hash"] = checkpoint_record_hash(refreshed)
+    return refreshed
 
 
 def checkpoint_record_hash(record: Mapping[str, object]) -> str:

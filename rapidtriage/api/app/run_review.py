@@ -1,7 +1,7 @@
 """Run-output locator <-> case-DB row resolution for console review marks.
 
 The console grid addresses rows by the run-output locator the paged run APIs
-emit (``/candidates/3``, ``/results/2``, ``/events/7``, ``/indicators/1``,
+emit (``/candidates/3`` -- files and docs --, ``/results/2``, ``/events/7``, ``/indicators/1``,
 ``artifacts_<kind>`` + ``/artifacts/12``). Review marks live in the run's
 case DB (``review_mark``), keyed by ``target_type`` + ``target_id`` (the case
 DB row id). The case DB import keeps the run-output order:
@@ -29,7 +29,7 @@ from pathlib import Path
 
 from ...core.case_db.review import load_review_target_match
 from ...core.json_stream import JsonStreamError, iter_array_items
-from ...core.run.persist import CASE_DB_FILE_NAME, run_case_id
+from ...core.run.persist import CASE_DB_FILE_NAME, legacy_run_case_ids, run_case_id
 
 ARTIFACT_LOCATOR_KEY = "source_locator"
 # Analysis-workbench result rows (plan P1 §3.3) are not imported into the case
@@ -67,7 +67,9 @@ def canonical_run_case(summary: Mapping[str, object], run_id: str) -> tuple[Path
     The persist step builds ``<output_dir>/rapidtriage-case.db`` with case id
     ``run_case_id(output_dir)``; ``/case-db/ensure`` creates ``run-<run_id>``
     when no persisted case exists. Prefer an existing ``run-<run_id>`` case
-    (older ensure calls), then the persisted case, else ``run-<run_id>``.
+    (older ensure calls), then the persisted case, then a case persisted
+    under an older id form (:func:`legacy_run_case_ids`, e.g.
+    ``run-run-subset7``), else ``run-<run_id>``.
     """
     output_dir = Path(str(summary.get("output_dir") or "")).expanduser().resolve()
     database = output_dir / CASE_DB_FILE_NAME
@@ -75,6 +77,8 @@ def canonical_run_case(summary: Mapping[str, object], run_id: str) -> tuple[Path
     if not database.is_file():
         return database, legacy
     persisted = run_case_id(output_dir)
+    older = legacy_run_case_ids(output_dir)
+    wanted = (legacy, persisted, *older)
     try:
         connection = sqlite3.connect(f"{database.as_uri()}?mode=ro", uri=True)
     except sqlite3.Error:
@@ -83,7 +87,7 @@ def canonical_run_case(summary: Mapping[str, object], run_id: str) -> tuple[Path
         rows = {
             str(row[0])
             for row in connection.execute(
-                "SELECT case_id FROM case_record WHERE case_id IN (?, ?)", (legacy, persisted)
+                f"SELECT case_id FROM case_record WHERE case_id IN ({', '.join('?' for _ in wanted)})", wanted
             )
         }
     except sqlite3.Error:
@@ -94,6 +98,9 @@ def canonical_run_case(summary: Mapping[str, object], run_id: str) -> tuple[Path
         return database, legacy
     if persisted in rows:
         return database, persisted
+    for case_id in older:
+        if case_id in rows:
+            return database, case_id
     return database, legacy
 
 
@@ -274,15 +281,22 @@ class RunLocatorIndex:
                 return None
             return "event", str(first + ordinal)
         if collection == "docs":
-            index = _ordinal(locator, "/results/")
-            if index is None:
-                return None
+            # ``/candidates/<n>``: the docs listing (every document, parser-quality r1);
+            # ``/results/<n>``: the keyword hits (``/docs?matched=1``).
             results, candidates = self._docs_lists()
-            path = results[index] if index < len(results) else ""
-            if not path or path not in candidates:
+            ordinal = _ordinal(locator, "/candidates/")
+            if ordinal is None:
+                index = _ordinal(locator, "/results/")
+                if index is None:
+                    return None
+                path = results[index] if index < len(results) else ""
+                if not path or path not in candidates:
+                    return None
+                ordinal = candidates.index(path)
+            elif ordinal >= len(candidates):
                 return None
             first = self._first_id("indexed_document", " AND source_type = 'document'")
-            row_id = None if first is None else first + candidates.index(path)
+            row_id = None if first is None else first + ordinal
             if row_id is None or not self._exists("indexed_document", row_id, " AND source_type = 'document'"):
                 return None
             return "indexed_document", str(row_id)
@@ -328,9 +342,12 @@ class RunLocatorIndex:
             results, candidates = self._docs_lists()
             ordinal = row_id - first
             path = candidates[ordinal] if 0 <= ordinal < len(candidates) else ""
-            if not path or path not in results:
+            if not path:
                 return None
-            return {"collection": "docs", "kind": "", "locator": f"/results/{results.index(path)}"}
+            location = {"collection": "docs", "kind": "", "locator": f"/candidates/{ordinal}"}
+            if path in results:
+                location["results_locator"] = f"/results/{results.index(path)}"
+            return location
         if target_type == "artifact":
             row = self.connection.execute(
                 "SELECT parser_name, data_json FROM artifact WHERE id = ? AND evidence_source_id = ?",

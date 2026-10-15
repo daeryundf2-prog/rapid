@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import base64
+import contextlib
+import datetime as dt
 import hashlib
 import io
 import json
 import math
+import mmap
+import os
 import re
-from collections.abc import Iterable, Mapping, Sequence
+import struct
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from pathlib import Path
 
 from ._walk import iter_evidence_paths
@@ -26,8 +31,53 @@ from ..core.image_io import imread_unicode_safe
 from ..core.models import ArtifactRecord
 from ..core.submission import compute_hashes
 
-PARSER_VERSION = "media-image-v4"
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
+PARSER_VERSION = "media-image-v5"
+IMAGE_EXTENSIONS = {
+    ".jpg",
+    ".jpeg",
+    ".jpe",
+    ".jfif",
+    ".png",
+    ".bmp",
+    ".gif",
+    ".tif",
+    ".tiff",
+    ".webp",
+    ".heic",
+    ".heif",
+    ".avif",
+}
+# Extension -> expected content format (compared against the magic-based
+# ``sniff_image_format`` result to flag renamed files).
+EXTENSION_FORMATS = {
+    ".jpg": "jpeg",
+    ".jpeg": "jpeg",
+    ".jpe": "jpeg",
+    ".jfif": "jpeg",
+    ".png": "png",
+    ".bmp": "bmp",
+    ".gif": "gif",
+    ".tif": "tiff",
+    ".tiff": "tiff",
+    ".webp": "webp",
+    ".heic": "heic",
+    ".heif": "heif",
+    ".avif": "avif",
+}
+FORMAT_FAMILIES = {"heic": "heif", "heif": "heif"}
+# Formats the bundled decoders (OpenCV, Pillow fallback) can turn into pixels.
+DECODABLE_IMAGE_FORMATS = {"jpeg", "png", "bmp", "gif", "tiff", "webp"}
+HEIC_BRANDS = {"heic", "heix", "hevc", "hevx", "heim", "heis"}
+HEIF_GENERIC_BRANDS = {"mif1", "msf1", "mif2"}
+AVIF_BRANDS = {"avif", "avis"}
+MP4_EPOCH = dt.datetime(1904, 1, 1, tzinfo=dt.timezone.utc)
+MP4_MOOV_MAX_BYTES = 64 * 1024 * 1024
+MP4_TOP_LEVEL_BOX_LIMIT = 100_000
+MP4_BOX_INVENTORY_LIMIT = 40
+EXIF_MAX_IFD_ENTRIES = 1024
+EXIF_MAX_VALUE_BYTES = 1024 * 1024
+HEIF_EXIF_SCAN_BYTES = 8 * 1024 * 1024
+TIFF_TYPE_SIZES = {1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 6: 1, 7: 1, 8: 2, 9: 4, 10: 8, 11: 4, 12: 8}
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".wmv", ".m4v", ".webm", ".3gp"}
 AUDIO_EXTENSIONS = {".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".wma", ".amr"}
 THUMBNAIL_MAX_DIMENSION = 128
@@ -238,7 +288,8 @@ def build_media_av_record(path: Path, *, media_kind: str) -> ArtifactRecord:
         "entry_name": resolved.name,
         "media_kind": media_kind,
         "hashes": compute_hashes(resolved),
-        "modified_at": stat_result.st_mtime,
+        # Host mtime of the acquired copy, not an artifact event (never a timeline time).
+        "source_file_mtime": iso_utc_from_epoch(stat_result.st_mtime),
         "parser_confidence": 0.62,
         "parser_confidence_basis": "extension and bounded transcript sidecar inventory",
         "coverage_status": "media-file-inventory",
@@ -277,6 +328,7 @@ def build_media_av_record(path: Path, *, media_kind: str) -> ArtifactRecord:
             "codec-metadata-sidecar-must-be-provenanced-or-regenerated-by-trusted-tool",
         ],
     }
+    details.update(media_container_timestamp_fields(container_profile))
     return ArtifactRecord(
         provider=MediaImageProvider.name,
         artifact_type=f"media-{media_kind}",
@@ -286,111 +338,45 @@ def build_media_av_record(path: Path, *, media_kind: str) -> ArtifactRecord:
     )
 
 
+def media_container_timestamp_fields(container_profile: Mapping[str, object]) -> dict[str, object]:
+    """Top-level ``timestamp`` from the container's own clock (mvhd creation)."""
+    mvhd = container_profile.get("mvhd_profile")
+    if not isinstance(mvhd, Mapping):
+        return {}
+    fields: dict[str, object] = {}
+    creation = str(mvhd.get("creation_time") or "")
+    modification = str(mvhd.get("modification_time") or "")
+    if creation:
+        fields.update(
+            {
+                "timestamp": creation,
+                "timestamp_kind": "mp4-mvhd-creation",
+                "timestamp_label": "created",
+                "timestamp_timezone": "UTC",
+                "timestamp_note": "MP4/MOV mvhd 생성 시각(1904 기준 초, 규격상 UTC). 장치가 현지 시각을 기록했을 수 있어 검증이 필요합니다.",
+            }
+        )
+    if modification:
+        fields["container_modified_time"] = modification
+    duration = mvhd.get("estimated_duration_seconds")
+    if isinstance(duration, (int, float)):
+        fields["duration_seconds"] = duration
+    return fields
+
+
 def media_container_profile(path: Path, *, media_kind: str) -> dict[str, object]:
     blob = read_prefix(path, 4096)
     suffix = path.suffix.lower()
     if media_kind == "audio" and blob.startswith(b"RIFF") and blob[8:12] == b"WAVE":
         return wav_container_profile(blob)
-    if media_kind == "video" and len(blob) >= 12 and blob[4:8] == b"ftyp":
-        return mp4_container_profile(blob, suffix=suffix)
+    if is_bmff_header(blob):
+        return mp4_file_profile(path, media_kind=media_kind)
     return {
         "profile_version": "media-container-profile-v1",
         "media_kind": media_kind,
         "container_hint": suffix.lstrip("."),
         "parse_status": "signature-not-recognized",
         "scan_bytes": len(blob),
-    }
-
-
-def mp4_container_profile(blob: bytes, *, suffix: str) -> dict[str, object]:
-    major_brand = blob[8:12].decode("ascii", errors="replace") if len(blob) >= 12 else ""
-    compatible_brands: list[str] = []
-    for offset in range(16, min(len(blob), 64), 4):
-        brand = blob[offset : offset + 4]
-        if len(brand) == 4 and all(32 <= byte <= 126 for byte in brand):
-            compatible_brands.append(brand.decode("ascii", errors="replace"))
-    box_inventory = mp4_box_inventory(blob)
-    mvhd_profile = mp4_mvhd_duration_profile(blob)
-    return {
-        "profile_version": "media-container-profile-v1",
-        "media_kind": "video",
-        "container_hint": "mp4-family" if suffix in {".mp4", ".m4v", ".mov"} else suffix.lstrip("."),
-        "parse_status": "ftyp-header-parsed",
-        "major_brand": major_brand,
-        "compatible_brands": compatible_brands[:12],
-        "box_inventory": box_inventory,
-        "box_count": len(box_inventory),
-        "mvhd_profile": mvhd_profile,
-        "scan_bytes": len(blob),
-    }
-
-
-def mp4_box_inventory(blob: bytes, *, limit: int = 40) -> list[dict[str, object]]:
-    boxes: list[dict[str, object]] = []
-    offset = 0
-    while offset + 8 <= len(blob) and len(boxes) < limit:
-        size = int.from_bytes(blob[offset : offset + 4], "big", signed=False)
-        box_type = blob[offset + 4 : offset + 8].decode("ascii", errors="replace")
-        header_size = 8
-        if size == 1 and offset + 16 <= len(blob):
-            size = int.from_bytes(blob[offset + 8 : offset + 16], "big", signed=False)
-            header_size = 16
-        elif size == 0:
-            size = len(blob) - offset
-        if size < header_size or offset + size > len(blob):
-            boxes.append(
-                {
-                    "offset": offset,
-                    "type": box_type,
-                    "size": size,
-                    "header_size": header_size,
-                    "parse_status": "truncated-or-invalid",
-                }
-            )
-            break
-        boxes.append(
-            {
-                "offset": offset,
-                "type": box_type,
-                "size": size,
-                "header_size": header_size,
-                "payload_offset": offset + header_size,
-                "payload_size": size - header_size,
-                "parse_status": "bounded",
-            }
-        )
-        offset += size
-    return boxes
-
-
-def mp4_mvhd_duration_profile(blob: bytes) -> dict[str, object]:
-    offset = blob.find(b"mvhd")
-    if offset < 4:
-        return {"status": "not-found"}
-    box_start = offset - 4
-    box_size = int.from_bytes(blob[box_start:offset], "big", signed=False)
-    if box_size < 24 or box_start + box_size > len(blob):
-        return {"status": "truncated-or-invalid", "box_offset": box_start, "box_size": box_size}
-    version = blob[offset + 4]
-    body = offset + 8
-    if version == 0 and body + 16 <= len(blob):
-        timescale = int.from_bytes(blob[body + 8 : body + 12], "big", signed=False)
-        duration = int.from_bytes(blob[body + 12 : body + 16], "big", signed=False)
-    elif version == 1 and body + 28 <= len(blob):
-        timescale = int.from_bytes(blob[body + 16 : body + 20], "big", signed=False)
-        duration = int.from_bytes(blob[body + 20 : body + 28], "big", signed=False)
-    else:
-        return {"status": "unsupported-version", "version": version, "box_offset": box_start}
-    seconds = round(duration / timescale, 6) if timescale else None
-    return {
-        "status": "parsed" if seconds is not None else "timescale-zero",
-        "box_offset": box_start,
-        "box_size": box_size,
-        "version": version,
-        "timescale": timescale,
-        "duration_units": duration,
-        "estimated_duration_seconds": seconds,
-        "validation_status": "triage-container-metadata",
     }
 
 
@@ -642,6 +628,847 @@ def parse_float(value: object) -> float | None:
         return None
 
 
+# ---------------------------------------------------------------------------
+# Native (stdlib) container sniffing, JPEG/PNG/WebP/GIF/BMP/HEIF structure,
+# TIFF/EXIF IFD walking and ISO-BMFF (MP4/MOV) box parsing. Every offset read
+# from the file is bounds-checked against the buffer before it is followed.
+# ---------------------------------------------------------------------------
+
+
+def iso_utc_from_epoch(value: float) -> str:
+    try:
+        return dt.datetime.fromtimestamp(value, tz=dt.timezone.utc).isoformat()
+    except (OverflowError, OSError, ValueError):
+        return ""
+
+
+def fourcc_text(raw: bytes) -> str:
+    return raw.decode("latin-1")
+
+
+def parse_ftyp_box(blob: bytes) -> dict[str, object] | None:
+    """Parse an ``ftyp`` box at offset 0 honoring its declared size."""
+    if len(blob) < 16 or blob[4:8] != b"ftyp":
+        return None
+    size = int.from_bytes(blob[0:4], "big")
+    header = 8
+    if size == 1:
+        size = int.from_bytes(blob[8:16], "big")
+        header = 16
+    elif size == 0:
+        size = len(blob)
+    if size < header + 8:
+        return {"status": "truncated-or-invalid", "box_size": size, "major_brand": "", "minor_version": None, "compatible_brands": []}
+    end = min(size, len(blob))
+    major = fourcc_text(blob[header : header + 4])
+    minor = int.from_bytes(blob[header + 4 : header + 8], "big")
+    compatible = [fourcc_text(blob[offset : offset + 4]) for offset in range(header + 8, end - 3, 4)]
+    return {
+        "status": "parsed" if size <= len(blob) else "truncated-in-scan-window",
+        "box_size": size,
+        "major_brand": major,
+        "minor_version": minor,
+        "compatible_brands": compatible,
+    }
+
+
+def heif_brand_format(ftyp: Mapping[str, object] | None) -> str:
+    if not ftyp:
+        return ""
+    major = str(ftyp.get("major_brand") or "")
+    compatible = [str(item) for item in ftyp.get("compatible_brands") or []]
+    if major in AVIF_BRANDS:
+        return "avif"
+    if major in HEIC_BRANDS:
+        return "heic"
+    if major in HEIF_GENERIC_BRANDS:
+        if any(brand in HEIC_BRANDS for brand in compatible):
+            return "heic"
+        if any(brand in AVIF_BRANDS for brand in compatible):
+            return "avif"
+        return "heif"
+    if any(brand in HEIC_BRANDS for brand in compatible):
+        return "heic"
+    if any(brand in AVIF_BRANDS for brand in compatible):
+        return "avif"
+    return ""
+
+
+def sniff_image_format(header: bytes) -> str:
+    """Content (magic) based image format; ``""`` when not a known image."""
+    if header.startswith(b"\xff\xd8\xff"):
+        return "jpeg"
+    if header.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if header.startswith((b"GIF87a", b"GIF89a")):
+        return "gif"
+    if header.startswith(b"RIFF") and header[8:12] == b"WEBP":
+        return "webp"
+    if header.startswith((b"II*\x00", b"MM\x00*")):
+        return "tiff"
+    if header.startswith(b"BM") and len(header) >= 26 and header[6:10] == b"\x00\x00\x00\x00":
+        return "bmp"
+    if header[4:8] == b"ftyp":
+        return heif_brand_format(parse_ftyp_box(header))
+    return ""
+
+
+def format_family(name: str) -> str:
+    return FORMAT_FAMILIES.get(name, name)
+
+
+@contextlib.contextmanager
+def mapped_file(path: Path) -> Iterator[bytes]:
+    """Read-only memory map of ``path`` (``b""`` for empty/unreadable files)."""
+    handle = None
+    mapped = None
+    try:
+        try:
+            handle = path.open("rb")
+            if os.fstat(handle.fileno()).st_size > 0:
+                mapped = mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ)
+        except (OSError, ValueError):
+            mapped = None
+        yield mapped if mapped is not None else b""  # type: ignore[misc]
+    finally:
+        if mapped is not None:
+            mapped.close()
+        if handle is not None:
+            handle.close()
+
+
+def jpeg_structure(buf: bytes) -> dict[str, object]:
+    size = len(buf)
+    pos = 2
+    exif_range: tuple[int, int] | None = None
+    segments: list[str] = []
+    end_offset: int | None = None
+    status = "eoi-missing"
+    while pos + 4 <= size:
+        if buf[pos] != 0xFF:
+            status = "marker-sync-lost"
+            break
+        marker = buf[pos + 1]
+        if marker == 0xFF:
+            pos += 1
+            continue
+        if marker == 0xD9:
+            end_offset = pos + 2
+            status = "parsed"
+            break
+        if marker == 0x01 or 0xD0 <= marker <= 0xD7:
+            pos += 2
+            continue
+        length = int.from_bytes(buf[pos + 2 : pos + 4], "big")
+        if length < 2 or pos + 2 + length > size:
+            status = "segment-truncated"
+            break
+        if marker == 0xE1 and exif_range is None and buf[pos + 4 : pos + 10] == b"Exif\x00\x00":
+            exif_range = (pos + 10, pos + 2 + length)
+        if len(segments) < 64:
+            segments.append(f"FF{marker:02X}")
+        if marker == 0xDA:
+            # Entropy-coded data never contains FF D9 (FF is byte-stuffed), so
+            # the first FF D9 after the first SOS is the primary image's EOI.
+            index = buf.find(b"\xff\xd9", pos + 2 + length)
+            if index >= 0:
+                end_offset = index + 2
+                status = "parsed"
+            break
+        pos += 2 + length
+    return {"status": status, "image_end_offset": end_offset, "exif_range": exif_range, "segments": segments}
+
+
+def png_structure(buf: bytes) -> dict[str, object]:
+    size = len(buf)
+    pos = 8
+    exif_range: tuple[int, int] | None = None
+    end_offset: int | None = None
+    status = "iend-missing"
+    chunk_count = 0
+    while pos + 12 <= size:
+        length = int.from_bytes(buf[pos : pos + 4], "big")
+        chunk_type = buf[pos + 4 : pos + 8]
+        chunk_end = pos + 12 + length
+        if chunk_end > size:
+            status = "chunk-truncated"
+            break
+        chunk_count += 1
+        if chunk_type == b"eXIf" and exif_range is None:
+            exif_range = (pos + 8, pos + 8 + length)
+        if chunk_type == b"IEND":
+            end_offset = chunk_end
+            status = "parsed"
+            break
+        pos = chunk_end
+    return {"status": status, "image_end_offset": end_offset, "exif_range": exif_range, "chunk_count": chunk_count}
+
+
+def webp_structure(buf: bytes) -> dict[str, object]:
+    size = len(buf)
+    riff_size = int.from_bytes(buf[4:8], "little") if size >= 8 else 0
+    declared_end = riff_size + 8 + (riff_size & 1)
+    end = min(size, declared_end)
+    pos = 12
+    exif_range: tuple[int, int] | None = None
+    while pos + 8 <= end:
+        chunk_type = buf[pos : pos + 4]
+        length = int.from_bytes(buf[pos + 4 : pos + 8], "little")
+        data_end = pos + 8 + length
+        if data_end > end:
+            break
+        if chunk_type == b"EXIF" and exif_range is None:
+            start = pos + 8
+            if buf[start : start + 6] == b"Exif\x00\x00":
+                start += 6
+            exif_range = (start, data_end)
+        pos = data_end + (length & 1)
+    status = "parsed" if declared_end <= size else "riff-truncated"
+    return {"status": status, "image_end_offset": min(size, declared_end), "exif_range": exif_range}
+
+
+def gif_structure(buf: bytes) -> dict[str, object]:
+    size = len(buf)
+    if size < 13:
+        return {"status": "header-truncated", "image_end_offset": None, "exif_range": None}
+    pos = 13
+    flags = buf[10]
+    if flags & 0x80:
+        pos += 3 * (2 ** ((flags & 0x07) + 1))
+
+    def skip_sub_blocks(offset: int) -> int:
+        while offset < size:
+            block = buf[offset]
+            offset += 1
+            if block == 0:
+                return offset
+            offset += block
+        return -1
+
+    frame_count = 0
+    while pos < size:
+        introducer = buf[pos]
+        if introducer == 0x3B:
+            return {"status": "parsed", "image_end_offset": pos + 1, "exif_range": None, "frame_count": frame_count}
+        if introducer == 0x21 and pos + 2 <= size:
+            pos = skip_sub_blocks(pos + 2)
+        elif introducer == 0x2C and pos + 10 <= size:
+            local_flags = buf[pos + 9]
+            pos += 10
+            if local_flags & 0x80:
+                pos += 3 * (2 ** ((local_flags & 0x07) + 1))
+            pos = skip_sub_blocks(pos + 1)
+            frame_count += 1
+        else:
+            return {"status": "block-sync-lost", "image_end_offset": None, "exif_range": None, "frame_count": frame_count}
+        if pos < 0:
+            break
+    return {"status": "trailer-missing", "image_end_offset": None, "exif_range": None, "frame_count": frame_count}
+
+
+def heif_structure(buf: bytes) -> dict[str, object]:
+    size = len(buf)
+    boxes = iter_bmff_boxes(buf, 0, size, limit=4096)
+    end_offset = None
+    status = "parsed"
+    if boxes and boxes[-1].get("parse_status") != "bounded":
+        status = "box-truncated"
+    elif boxes:
+        last = boxes[-1]
+        end_offset = int(last["offset"]) + int(last["size"])
+    exif_range: tuple[int, int] | None = None
+    # Exif item payloads start with a 4-byte TIFF-header offset followed by
+    # "Exif\0\0" and a TIFF header; locate it by signature inside the meta/mdat.
+    limit = min(size, HEIF_EXIF_SCAN_BYTES)
+    index = buf.find(b"Exif\x00\x00", 0, limit)
+    while index >= 0:
+        tiff_start = index + 6
+        if buf[tiff_start : tiff_start + 4] in (b"II*\x00", b"MM\x00*"):
+            exif_range = (tiff_start, size)
+            break
+        index = buf.find(b"Exif\x00\x00", index + 1, limit)
+    return {"status": status, "image_end_offset": end_offset, "exif_range": exif_range, "exif_locator_strategy": "heif-signature-scan"}
+
+
+def classify_trailer(buf: bytes, start: int) -> str:
+    size = len(buf)
+    if start >= size:
+        return ""
+    if buf[size - 4 : size] == b"SEFT":
+        return "samsung-seft"
+    head = buf[start : start + 16]
+    if head.startswith(b"\xff\xd8\xff"):
+        return "appended-jpeg"
+    if head.startswith(b"PK\x03\x04"):
+        return "zip-local-file-header"
+    first = buf[start : min(size, start + 4096)]
+    last = buf[max(start, size - 4096) : size]
+    if not first.strip(b"\x00") and not last.strip(b"\x00"):
+        return "zero-padding"
+    return "unknown"
+
+
+KNOWN_BENIGN_TRAILERS = {"samsung-seft", "appended-jpeg", "zero-padding"}
+TRAILER_NOTES = {
+    "samsung-seft": "삼성 카메라 SEFT 메타데이터 트레일러(EOI 뒤 부가 데이터)입니다. 이미지 손상이 아닙니다.",
+    "appended-jpeg": "EOI 뒤에 JPEG 스트림이 덧붙어 있습니다(MPF 보조 이미지·심도 맵 등). 별도 검토 대상입니다.",
+    "zero-padding": "EOI 뒤가 0으로 채워져 있습니다(복구·복사 과정의 패딩 가능성).",
+    "zip-local-file-header": "EOI 뒤에 ZIP 헤더가 있습니다. 숨김 데이터 여부를 검토하세요.",
+    "unknown": "EOI 뒤에 알 수 없는 데이터가 있습니다. 검토가 필요합니다.",
+}
+
+
+def scan_image_structure(path: Path) -> dict[str, object]:
+    """Magic-based format, end-of-image offset, trailer and EXIF block location."""
+    result: dict[str, object] = {
+        "content_format": "",
+        "structure_status": "not-scanned",
+        "image_end_offset": None,
+        "trailing_data_bytes": 0,
+        "trailer_signature": "",
+        "exif_locator": "",
+        "exif": None,
+    }
+    with mapped_file(path) as buf:
+        size = len(buf)
+        result["file_size"] = size
+        if not size:
+            result["structure_status"] = "empty-or-unreadable"
+            return result
+        header = bytes(buf[:512])
+        content_format = sniff_image_format(header)
+        result["content_format"] = content_format
+        if header[4:8] == b"ftyp":
+            ftyp = parse_ftyp_box(header)
+            if ftyp:
+                result["ftyp_major_brand"] = ftyp.get("major_brand")
+                result["ftyp_compatible_brands"] = ftyp.get("compatible_brands")
+        structure: dict[str, object]
+        locator = ""
+        if content_format == "jpeg":
+            structure, locator = jpeg_structure(buf), "jpeg-app1-exif"
+        elif content_format == "png":
+            structure, locator = png_structure(buf), "png-exif-chunk"
+        elif content_format == "webp":
+            structure, locator = webp_structure(buf), "webp-exif-chunk"
+        elif content_format == "gif":
+            structure = gif_structure(buf)
+        elif content_format in {"heic", "heif", "avif"}:
+            structure, locator = heif_structure(buf), "heif-signature-scan"
+        elif content_format == "tiff":
+            structure, locator = {"status": "parsed", "image_end_offset": None, "exif_range": (0, size)}, "tiff-header"
+        elif content_format == "bmp":
+            declared = int.from_bytes(header[2:6], "little")
+            structure = {
+                "status": "parsed" if 26 <= declared <= size else "size-field-mismatch",
+                "image_end_offset": declared if 26 <= declared <= size else None,
+                "exif_range": None,
+            }
+        else:
+            result["structure_status"] = "content-not-image"
+            return result
+        result["structure_status"] = structure.get("status")
+        for key in ("segments", "chunk_count", "frame_count"):
+            if key in structure:
+                result[key] = structure[key]
+        end_offset = structure.get("image_end_offset")
+        if isinstance(end_offset, int):
+            result["image_end_offset"] = end_offset
+            trailing = max(0, size - end_offset)
+            result["trailing_data_bytes"] = trailing
+            if trailing:
+                signature = classify_trailer(buf, end_offset)
+                result["trailer_signature"] = signature
+                result["trailer_note"] = TRAILER_NOTES.get(signature, TRAILER_NOTES["unknown"])
+        exif_range = structure.get("exif_range")
+        if isinstance(exif_range, tuple):
+            result["exif_locator"] = locator
+            result["exif"] = parse_tiff_exif(buf, exif_range[0], exif_range[1])
+    return result
+
+
+def exif_decode_text(raw: bytes) -> str:
+    raw = raw.split(b"\x00", 1)[0]
+    for encoding in ("utf-8", "cp949"):
+        try:
+            return raw.decode(encoding).strip()
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("latin-1").strip()
+
+
+class TiffReader:
+    """Bounds-checked TIFF/EXIF IFD reader over ``buf[start:end]``."""
+
+    def __init__(self, buf: bytes, start: int, end: int) -> None:
+        self.buf = buf
+        self.start = start
+        self.length = max(0, min(end, len(buf)) - start)
+        self.notes: list[str] = []
+        order = bytes(buf[start : start + 2])
+        self.endian = "<" if order == b"II" else (">" if order == b"MM" else "")
+
+    def raw(self, offset: int, size: int) -> bytes | None:
+        if offset < 0 or size < 0 or offset + size > self.length:
+            return None
+        return bytes(self.buf[self.start + offset : self.start + offset + size])
+
+    def u16(self, offset: int) -> int | None:
+        data = self.raw(offset, 2)
+        return struct.unpack(self.endian + "H", data)[0] if data is not None else None
+
+    def u32(self, offset: int) -> int | None:
+        data = self.raw(offset, 4)
+        return struct.unpack(self.endian + "I", data)[0] if data is not None else None
+
+    def valid_header(self) -> bool:
+        return bool(self.endian) and self.u16(2) == 42
+
+    def read_ifd(self, offset: int, label: str) -> dict[int, tuple[int, int, int]]:
+        entries: dict[int, tuple[int, int, int]] = {}
+        count = self.u16(offset) if offset >= 8 else None
+        if count is None:
+            self.notes.append(f"{label}-offset-out-of-range")
+            return entries
+        available = max(0, (self.length - offset - 2) // 12)
+        if count > available:
+            self.notes.append(f"{label}-entries-truncated")
+            count = available
+        if count > EXIF_MAX_IFD_ENTRIES:
+            self.notes.append(f"{label}-entry-count-capped")
+            count = EXIF_MAX_IFD_ENTRIES
+        for index in range(count):
+            entry = offset + 2 + 12 * index
+            data = self.raw(entry, 8)
+            if data is None:
+                break
+            tag, value_type, value_count = struct.unpack(self.endian + "HHI", data)
+            entries.setdefault(tag, (value_type, value_count, entry + 8))
+        return entries
+
+    def value(self, entry: tuple[int, int, int] | None) -> object | None:
+        if entry is None:
+            return None
+        value_type, count, field = entry
+        unit = TIFF_TYPE_SIZES.get(value_type)
+        if not unit or count <= 0:
+            return None
+        total = unit * count
+        if total > EXIF_MAX_VALUE_BYTES:
+            self.notes.append("value-too-large")
+            return None
+        offset = field if total <= 4 else self.u32(field)
+        data = self.raw(offset, total) if offset is not None else None
+        if data is None:
+            self.notes.append("value-offset-out-of-range")
+            return None
+        endian = self.endian
+        if value_type == 2:
+            return exif_decode_text(data)
+        if value_type in (1, 7):
+            return data if value_type == 7 else list(data)
+        if value_type == 3:
+            return list(struct.unpack(f"{endian}{count}H", data))
+        if value_type == 4:
+            return list(struct.unpack(f"{endian}{count}I", data))
+        if value_type == 6:
+            return list(struct.unpack(f"{endian}{count}b", data))
+        if value_type == 8:
+            return list(struct.unpack(f"{endian}{count}h", data))
+        if value_type == 9:
+            return list(struct.unpack(f"{endian}{count}i", data))
+        if value_type in (5, 10):
+            fmt = "I" if value_type == 5 else "i"
+            values = struct.unpack(f"{endian}{count * 2}{fmt}", data)
+            return [(values[index], values[index + 1]) for index in range(0, len(values), 2)]
+        if value_type == 11:
+            return list(struct.unpack(f"{endian}{count}f", data))
+        if value_type == 12:
+            return list(struct.unpack(f"{endian}{count}d", data))
+        return None
+
+
+def exif_scalar(value: object) -> object:
+    if isinstance(value, list) and len(value) == 1:
+        return value[0]
+    return value
+
+
+EXIF_IFD0_TAGS = {0x010F: "make", 0x0110: "model", 0x0131: "software", 0x0132: "datetime", 0x0112: "orientation"}
+EXIF_SUB_IFD_TAGS = {
+    0x9003: "datetime_original",
+    0x9004: "datetime_digitized",
+    0x9010: "offset_time",
+    0x9011: "offset_time_original",
+    0x9012: "offset_time_digitized",
+    0x9291: "subsec_time_original",
+    0x9292: "subsec_time_digitized",
+    0xA433: "lens_make",
+    0xA434: "lens_model",
+    0xA002: "pixel_x_dimension",
+    0xA003: "pixel_y_dimension",
+}
+EXIF_GPS_TAGS = {
+    1: "latitude_ref",
+    2: "latitude",
+    3: "longitude_ref",
+    4: "longitude",
+    5: "altitude_ref",
+    6: "altitude",
+    7: "timestamp",
+    16: "img_direction_ref",
+    17: "img_direction",
+    18: "map_datum",
+    29: "datestamp",
+}
+
+
+def parse_tiff_exif(buf: bytes, start: int, end: int) -> dict[str, object]:
+    reader = TiffReader(buf, start, end)
+    if not reader.valid_header():
+        return {"status": "invalid-tiff-header", "notes": ["tiff-header-invalid"]}
+    ifd0_offset = reader.u32(4) or 0
+    ifd0 = reader.read_ifd(ifd0_offset, "ifd0")
+    fields: dict[str, object] = {}
+    for tag, name in EXIF_IFD0_TAGS.items():
+        value = reader.value(ifd0.get(tag))
+        if value is not None:
+            fields[name] = exif_scalar(value)
+    visited = {ifd0_offset}
+    exif_pointer = exif_scalar(reader.value(ifd0.get(0x8769)))
+    sub_ifd: dict[int, tuple[int, int, int]] = {}
+    if isinstance(exif_pointer, int) and exif_pointer not in visited:
+        visited.add(exif_pointer)
+        sub_ifd = reader.read_ifd(exif_pointer, "exif-ifd")
+    for tag, name in EXIF_SUB_IFD_TAGS.items():
+        entry = sub_ifd.get(tag) or (ifd0.get(tag) if tag in (0x9003, 0x9004) else None)
+        if entry is not None and tag not in sub_ifd:
+            reader.notes.append(f"{name}-found-in-ifd0")
+        value = reader.value(entry)
+        if value is not None:
+            fields[name] = exif_scalar(value)
+    gps_pointer = exif_scalar(reader.value(ifd0.get(0x8825)))
+    gps: dict[str, object] = {}
+    has_gps_ifd = False
+    if isinstance(gps_pointer, int) and gps_pointer not in visited:
+        visited.add(gps_pointer)
+        gps_ifd = reader.read_ifd(gps_pointer, "gps-ifd")
+        has_gps_ifd = bool(gps_ifd)
+        for tag, name in EXIF_GPS_TAGS.items():
+            value = reader.value(gps_ifd.get(tag))
+            if value is not None:
+                gps[name] = value
+    return {
+        "status": "parsed",
+        "byte_order": "little-endian" if reader.endian == "<" else "big-endian",
+        "ifd0_entry_count": len(ifd0),
+        "exif_ifd_present": bool(sub_ifd),
+        "gps_ifd_present": has_gps_ifd,
+        "fields": fields,
+        "gps": gps,
+        "notes": sorted(set(reader.notes)),
+    }
+
+
+EXIF_DATETIME_RE = re.compile(r"^\s*(\d{4})[:\-](\d{2})[:\-](\d{2})[ T](\d{2}):(\d{2}):(\d{2})")
+EXIF_OFFSET_RE = re.compile(r"^[+-]\d{2}:\d{2}$")
+
+
+def exif_datetime_iso(value: object, *, subsec: object = "", offset: object = "") -> str:
+    """EXIF ``YYYY:MM:DD HH:MM:SS`` -> ISO-8601 (naive unless an offset is given)."""
+    match = EXIF_DATETIME_RE.match(exif_text(value))
+    if not match:
+        return ""
+    try:
+        parsed = dt.datetime(*(int(part) for part in match.groups()))
+    except ValueError:
+        return ""
+    if parsed.year < 1900:
+        return ""
+    text = parsed.isoformat()
+    subsec_text = exif_text(subsec)
+    if subsec_text.isdigit():
+        text += "." + subsec_text[:6]
+    offset_text = exif_text(offset)
+    if EXIF_OFFSET_RE.match(offset_text):
+        text += offset_text
+    return text
+
+
+def gps_iso_timestamp(datestamp: object, timestamp: object) -> str:
+    date_match = re.match(r"^\s*(\d{4})[:\-](\d{2})[:\-](\d{2})", exif_text(datestamp))
+    if not date_match or not isinstance(timestamp, Sequence) or isinstance(timestamp, (str, bytes)) or len(timestamp) < 3:
+        return ""
+    hour = rational_to_float(timestamp[0])
+    minute = rational_to_float(timestamp[1])
+    second = rational_to_float(timestamp[2])
+    if hour is None or minute is None or second is None:
+        return ""
+    whole = int(second)
+    micro = int(round((second - whole) * 1_000_000))
+    try:
+        parsed = dt.datetime(
+            *(int(part) for part in date_match.groups()),
+            int(hour),
+            int(minute),
+            whole,
+            min(micro, 999_999),
+            tzinfo=dt.timezone.utc,
+        )
+    except ValueError:
+        return ""
+    return parsed.isoformat().replace("+00:00", "Z")
+
+
+def build_native_exif_profile(structure: Mapping[str, object], *, label: str) -> dict[str, object] | None:
+    """Profile from the native EXIF block, or None when the file has no EXIF."""
+    exif = structure.get("exif")
+    if not isinstance(exif, Mapping):
+        return None
+    profile = base_exif_profile()
+    profile["parser"] = "native-tiff-exif"
+    profile["exif_locator"] = structure.get("exif_locator")
+    if exif.get("status") != "parsed":
+        profile.update({"status": "parse-failed", "error": "invalid TIFF header in EXIF block", "parse_notes": exif.get("notes") or []})
+        return profile
+    fields = exif.get("fields") if isinstance(exif.get("fields"), Mapping) else {}
+    gps = exif.get("gps") if isinstance(exif.get("gps"), Mapping) else {}
+    datetime_original = exif_text(fields.get("datetime_original"))
+    datetime_digitized = exif_text(fields.get("datetime_digitized"))
+    datetime_file = exif_text(fields.get("datetime"))
+    offset_original = exif_text(fields.get("offset_time_original"))
+    has_entries = bool(exif.get("ifd0_entry_count")) or bool(exif.get("exif_ifd_present")) or bool(exif.get("gps_ifd_present"))
+    if not has_entries:
+        # An APP1/eXIf block with an empty IFD0 carries no metadata.
+        profile.update({"status": "no-exif", "exif_block_present": True, "exif_block_empty": True, "field_presence": {}})
+        return profile
+    profile.update(
+        {
+            "has_exif": True,
+            "exif_block_present": True,
+            "byte_order": exif.get("byte_order"),
+            "parse_notes": list(exif.get("notes") or []),
+            "make": exif_text(fields.get("make")),
+            "model": exif_text(fields.get("model")),
+            "software": exif_text(fields.get("software")),
+            "lens_make": exif_text(fields.get("lens_make")),
+            "lens_model": exif_text(fields.get("lens_model")),
+            "orientation": fields.get("orientation") if isinstance(fields.get("orientation"), int) else None,
+            "offset_time_original": offset_original if EXIF_OFFSET_RE.match(offset_original) else "",
+            "image_datetime_original": datetime_original,
+            "image_datetime_digitized": datetime_digitized,
+            "image_datetime": datetime_file,
+            "datetime_original_iso": exif_datetime_iso(
+                datetime_original, subsec=fields.get("subsec_time_original"), offset=offset_original
+            ),
+            "datetime_digitized_iso": exif_datetime_iso(
+                datetime_digitized, subsec=fields.get("subsec_time_digitized"), offset=fields.get("offset_time_digitized")
+            ),
+            "datetime_iso": exif_datetime_iso(datetime_file, offset=fields.get("offset_time")),
+        }
+    )
+    if not exif.get("gps_ifd_present"):
+        profile.update(
+            {
+                "status": "no-gps-ifd",
+                "field_presence": {"datetime": bool(datetime_original or datetime_digitized or datetime_file), "gps": False},
+            }
+        )
+        return profile
+    apply_gps_fields(profile, gps, label=label)
+    return profile
+
+
+def base_exif_profile() -> dict[str, object]:
+    return {
+        "profile_version": "exif-gps-profile-v2",
+        "status": "not-run",
+        "has_exif": False,
+        "has_gps": False,
+        "candidate_only": True,
+        "validation_status": "exif-metadata-unvalidated",
+        "not_proof_of": [
+            "user physical location",
+            "image authenticity",
+            "device clock accuracy",
+        ],
+        "report_blockers": [
+            "exiftool-or-native-tool-diff-required",
+            "device-clock-and-timezone-correlation-required",
+            "image-editing-and-metadata-tampering-review-required",
+            "offline-map-viewer-validation-required",
+        ],
+    }
+
+
+def apply_gps_fields(profile: dict[str, object], gps: Mapping[str, object], *, label: str) -> None:
+    lat_ref = exif_scalar(gps.get("latitude_ref"))
+    lon_ref = exif_scalar(gps.get("longitude_ref"))
+    latitude = gps_coordinate_to_decimal(gps.get("latitude"), lat_ref, axis="latitude")
+    longitude = gps_coordinate_to_decimal(gps.get("longitude"), lon_ref, axis="longitude")
+    altitude = gps_altitude_to_meters(exif_scalar(gps.get("altitude")), exif_scalar(gps.get("altitude_ref")))
+    direction = rational_to_float(exif_scalar(gps.get("img_direction")))
+    gps_time_text = gps_timestamp_to_text(gps.get("timestamp"))
+    gps_date_text = exif_text(gps.get("datestamp"))
+    gps_datetime_utc = f"{gps_date_text} {gps_time_text}Z" if gps_date_text and gps_time_text else ""
+    has_gps = latitude is not None and longitude is not None
+    datetime_present = bool(profile.get("image_datetime_original") or profile.get("image_datetime_digitized") or profile.get("image_datetime"))
+    profile.update(
+        {
+            "status": "parsed" if has_gps else "gps-ifd-without-complete-coordinate",
+            "has_gps": has_gps,
+            "latitude": latitude,
+            "longitude": longitude,
+            "altitude_meters": altitude,
+            "coordinate_ref": {"latitude_ref": exif_text(lat_ref), "longitude_ref": exif_text(lon_ref)},
+            "gps_datestamp": gps_date_text,
+            "gps_time_of_day": gps_time_text,
+            "gps_timestamp": gps_iso_timestamp(gps_date_text, gps.get("timestamp")),
+            "gps_datetime_utc_candidate": gps_datetime_utc,
+            "gps_img_direction_degrees": round(float(direction), 3) if direction is not None else None,
+            "gps_img_direction_ref": exif_text(exif_scalar(gps.get("img_direction_ref"))),
+            "gps_map_datum": exif_text(gps.get("map_datum")),
+            "field_presence": {
+                "gps_ifd": True,
+                "latitude": latitude is not None,
+                "longitude": longitude is not None,
+                "altitude": altitude is not None,
+                "gps_datetime": bool(gps_datetime_utc),
+                "image_datetime": datetime_present,
+                "direction": direction is not None,
+            },
+            "map_marker": {
+                "status": "ready" if has_gps else "not-ready",
+                "latitude": latitude,
+                "longitude": longitude,
+                "label": label,
+                "source": "exif-gps",
+                "precision_status": "device-reported-unvalidated",
+            },
+        }
+    )
+
+
+def iter_bmff_boxes(buf: bytes, start: int, end: int, *, limit: int) -> list[dict[str, object]]:
+    """Walk sibling ISO-BMFF boxes in ``buf[start:end]`` honoring 64-bit and 0 sizes."""
+    boxes: list[dict[str, object]] = []
+    offset = start
+    end = min(end, len(buf))
+    while offset + 8 <= end and len(boxes) < limit:
+        size = int.from_bytes(buf[offset : offset + 4], "big")
+        box_type = fourcc_text(bytes(buf[offset + 4 : offset + 8]))
+        header_size = 8
+        if size == 1:
+            if offset + 16 > end:
+                boxes.append({"offset": offset, "type": box_type, "size": size, "header_size": 16, "parse_status": "truncated-or-invalid"})
+                break
+            size = int.from_bytes(buf[offset + 8 : offset + 16], "big")
+            header_size = 16
+        elif size == 0:
+            size = end - offset
+        if size < header_size or offset + size > end or not all(32 <= ord(ch) <= 126 for ch in box_type):
+            boxes.append({"offset": offset, "type": box_type, "size": size, "header_size": header_size, "parse_status": "truncated-or-invalid"})
+            break
+        boxes.append(
+            {
+                "offset": offset,
+                "type": box_type,
+                "size": size,
+                "header_size": header_size,
+                "payload_offset": offset + header_size,
+                "payload_size": size - header_size,
+                "parse_status": "bounded",
+            }
+        )
+        offset += size
+    return boxes
+
+
+def mp4_time_iso(seconds: int) -> str:
+    if seconds <= 0:
+        return ""
+    try:
+        value = MP4_EPOCH + dt.timedelta(seconds=seconds)
+    except OverflowError:
+        return ""
+    if value > dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=1):
+        return ""
+    return value.isoformat().replace("+00:00", "Z")
+
+
+def parse_mvhd_payload(payload: bytes, *, box_offset: int, box_size: int) -> dict[str, object]:
+    if len(payload) < 4:
+        return {"status": "truncated-or-invalid", "box_offset": box_offset, "box_size": box_size}
+    version = payload[0]
+    if version == 0 and len(payload) >= 20:
+        creation, modification, timescale, duration = struct.unpack(">IIII", payload[4:20])
+    elif version == 1 and len(payload) >= 32:
+        creation, modification = struct.unpack(">QQ", payload[4:20])
+        timescale = int.from_bytes(payload[20:24], "big")
+        duration = int.from_bytes(payload[24:32], "big")
+    else:
+        return {"status": "unsupported-version", "version": version, "box_offset": box_offset}
+    seconds = round(duration / timescale, 6) if timescale else None
+    return {
+        "status": "parsed" if seconds is not None else "timescale-zero",
+        "box_offset": box_offset,
+        "box_size": box_size,
+        "version": version,
+        "creation_time_raw": creation,
+        "modification_time_raw": modification,
+        "creation_time": mp4_time_iso(creation),
+        "modification_time": mp4_time_iso(modification),
+        "time_basis": "mp4-1904-epoch-utc-by-spec",
+        "timescale": timescale,
+        "duration_units": duration,
+        "estimated_duration_seconds": seconds,
+        "validation_status": "triage-container-metadata",
+    }
+
+
+def mp4_file_profile(path: Path, *, media_kind: str) -> dict[str, object]:
+    suffix = path.suffix.lower()
+    with mapped_file(path) as buf:
+        size = len(buf)
+        boxes = iter_bmff_boxes(buf, 0, size, limit=MP4_TOP_LEVEL_BOX_LIMIT)
+        ftyp = parse_ftyp_box(bytes(buf[:4096])) or {}
+        mvhd: dict[str, object] = {"status": "not-found"}
+        moov = next((box for box in boxes if box.get("type") == "moov" and box.get("parse_status") == "bounded"), None)
+        if moov is not None:
+            moov_start = int(moov["payload_offset"])
+            moov_end = moov_start + min(int(moov["payload_size"]), MP4_MOOV_MAX_BYTES)
+            children = iter_bmff_boxes(buf, moov_start, moov_end, limit=4096)
+            child = next((box for box in children if box.get("type") == "mvhd" and box.get("parse_status") == "bounded"), None)
+            if child is not None:
+                payload = bytes(buf[int(child["payload_offset"]) : int(child["payload_offset"]) + min(int(child["payload_size"]), 256)])
+                mvhd = parse_mvhd_payload(payload, box_offset=int(child["offset"]), box_size=int(child["size"]))
+            elif any(box.get("parse_status") != "bounded" for box in children):
+                mvhd = {"status": "moov-children-truncated"}
+    truncated = bool(boxes) and boxes[-1].get("parse_status") != "bounded"
+    return {
+        "profile_version": "media-container-profile-v2",
+        "media_kind": media_kind,
+        "container_hint": "mp4-family" if suffix in {".mp4", ".m4v", ".mov", ".m4a", ".3gp"} else suffix.lstrip("."),
+        "parse_status": "ftyp-header-parsed" if ftyp else "bmff-boxes-parsed",
+        "major_brand": ftyp.get("major_brand", ""),
+        "minor_version": ftyp.get("minor_version"),
+        "compatible_brands": list(ftyp.get("compatible_brands") or []),
+        "ftyp_box_size": ftyp.get("box_size"),
+        "box_inventory": boxes[:MP4_BOX_INVENTORY_LIMIT],
+        "box_count": len(boxes),
+        "box_inventory_truncated": len(boxes) > MP4_BOX_INVENTORY_LIMIT,
+        "box_walk_status": "truncated-or-invalid-box" if truncated else "complete",
+        "box_walk_limit_reached": len(boxes) >= MP4_TOP_LEVEL_BOX_LIMIT,
+        "mvhd_profile": mvhd,
+        "file_size": size,
+    }
+
+
+def is_bmff_header(blob: bytes) -> bool:
+    return len(blob) >= 8 and blob[4:8] in {b"ftyp", b"moov", b"mdat", b"wide", b"free", b"skip", b"pnot"}
+
+
+
 def exif_text(value: object) -> str:
     if value is None:
         return ""
@@ -716,123 +1543,87 @@ def gps_timestamp_to_text(value: object) -> str:
     return f"{int(hour):02d}:{int(minute):02d}:{second:06.3f}".rstrip("0").rstrip(".")
 
 
-def extract_exif_gps_profile(path: Path) -> dict[str, object]:
-    profile: dict[str, object] = {
-        "profile_version": "exif-gps-profile-v1",
-        "status": "pillow-unavailable" if Image is None else "not-run",
-        "has_exif": False,
-        "has_gps": False,
-        "candidate_only": True,
-        "validation_status": "exif-metadata-unvalidated",
-        "not_proof_of": [
-            "user physical location",
-            "image authenticity",
-            "device clock accuracy",
-        ],
-        "report_blockers": [
-            "exiftool-or-native-tool-diff-required",
-            "device-clock-and-timezone-correlation-required",
-            "image-editing-and-metadata-tampering-review-required",
-            "offline-map-viewer-validation-required",
-        ],
-    }
+def extract_exif_gps_profile(path: Path, structure: Mapping[str, object] | None = None) -> dict[str, object]:
+    """EXIF/GPS profile parsed natively (JPEG APP1, PNG eXIf, WebP EXIF, TIFF, HEIF).
+
+    Pillow is only a fallback for containers the native locator did not find an
+    EXIF block in; it never overrides a natively parsed block.
+    """
+    if structure is None:
+        structure = scan_image_structure(path)
+    native = build_native_exif_profile(structure, label=path.name)
+    if native is not None:
+        return native
+    fallback = pillow_exif_gps_profile(path)
+    if fallback is not None and fallback.get("has_exif"):
+        return fallback
+    profile = base_exif_profile()
+    profile.update({"parser": "native-tiff-exif", "status": "no-exif", "field_presence": {}})
+    return profile
+
+
+def pillow_exif_gps_profile(path: Path) -> dict[str, object] | None:
     if Image is None:
-        return profile
+        return None
     try:
         with Image.open(path) as image:
             exif = image.getexif() if hasattr(image, "getexif") else {}
             if not exif:
-                profile.update({"status": "no-exif", "field_presence": {}})
-                return profile
-            profile["has_exif"] = True
-            datetime_original = exif_mapping_get(exif, 36867, "DateTimeOriginal")
-            datetime_digitized = exif_mapping_get(exif, 36868, "DateTimeDigitized")
-            datetime_file = exif_mapping_get(exif, 306, "DateTime")
+                return None
+            sub_ifd: Mapping[object, object] = {}
             gps_ifd: Mapping[object, object] = {}
-            try:
-                if hasattr(exif, "get_ifd"):
-                    gps_candidate = exif.get_ifd(34853)
-                    if isinstance(gps_candidate, Mapping):
-                        gps_ifd = gps_candidate
-            except (KeyError, TypeError, ValueError, OSError):
-                gps_ifd = {}
-            if not gps_ifd:
-                gps_raw = exif_mapping_get(exif, 34853, "GPSInfo")
-                if isinstance(gps_raw, Mapping):
-                    gps_ifd = gps_raw
+            if hasattr(exif, "get_ifd"):
+                for pointer in (0x8769, 0x8825):
+                    try:
+                        candidate = exif.get_ifd(pointer)
+                    except (KeyError, TypeError, ValueError, OSError):
+                        candidate = {}
+                    if isinstance(candidate, Mapping):
+                        if pointer == 0x8769:
+                            sub_ifd = candidate
+                        else:
+                            gps_ifd = candidate
+            if not gps_ifd and isinstance(exif_mapping_get(exif, 34853), Mapping):
+                gps_ifd = exif_mapping_get(exif, 34853)  # type: ignore[assignment]
+
+            def lookup(tag: int) -> object | None:
+                value = exif_mapping_get(sub_ifd, tag)
+                return value if value is not None else exif_mapping_get(exif, tag)
+
+            profile = base_exif_profile()
+            datetime_original = exif_text(lookup(36867))
+            offset_original = exif_text(lookup(0x9011))
+            profile.update(
+                {
+                    "parser": "pillow-fallback",
+                    "has_exif": True,
+                    "make": exif_text(exif_mapping_get(exif, 0x010F)),
+                    "model": exif_text(exif_mapping_get(exif, 0x0110)),
+                    "software": exif_text(exif_mapping_get(exif, 0x0131)),
+                    "lens_model": exif_text(lookup(0xA434)),
+                    "offset_time_original": offset_original if EXIF_OFFSET_RE.match(offset_original) else "",
+                    "image_datetime_original": datetime_original,
+                    "image_datetime_digitized": exif_text(lookup(36868)),
+                    "image_datetime": exif_text(exif_mapping_get(exif, 306)),
+                    "datetime_original_iso": exif_datetime_iso(datetime_original, offset=offset_original),
+                }
+            )
             if not gps_ifd:
                 profile.update(
                     {
                         "status": "no-gps-ifd",
-                        "image_datetime_original": exif_text(datetime_original),
-                        "image_datetime_digitized": exif_text(datetime_digitized),
-                        "image_datetime": exif_text(datetime_file),
-                        "field_presence": {"datetime": bool(datetime_original or datetime_digitized or datetime_file), "gps": False},
+                        "field_presence": {
+                            "datetime": bool(profile["image_datetime_original"] or profile["image_datetime_digitized"] or profile["image_datetime"]),
+                            "gps": False,
+                        },
                     }
                 )
                 return profile
-            lat_ref = exif_mapping_get(gps_ifd, 1, "GPSLatitudeRef")
-            lat_value = exif_mapping_get(gps_ifd, 2, "GPSLatitude")
-            lon_ref = exif_mapping_get(gps_ifd, 3, "GPSLongitudeRef")
-            lon_value = exif_mapping_get(gps_ifd, 4, "GPSLongitude")
-            altitude_ref = exif_mapping_get(gps_ifd, 5, "GPSAltitudeRef")
-            altitude_value = exif_mapping_get(gps_ifd, 6, "GPSAltitude")
-            direction_ref = exif_mapping_get(gps_ifd, 16, "GPSImgDirectionRef")
-            direction_value = exif_mapping_get(gps_ifd, 17, "GPSImgDirection")
-            map_datum = exif_mapping_get(gps_ifd, 18, "GPSMapDatum")
-            gps_datestamp = exif_mapping_get(gps_ifd, 29, "GPSDateStamp")
-            gps_timestamp = exif_mapping_get(gps_ifd, 7, "GPSTimeStamp")
-            latitude = gps_coordinate_to_decimal(lat_value, lat_ref, axis="latitude")
-            longitude = gps_coordinate_to_decimal(lon_value, lon_ref, axis="longitude")
-            altitude = gps_altitude_to_meters(altitude_value, altitude_ref)
-            direction = rational_to_float(direction_value)
-            gps_time_text = gps_timestamp_to_text(gps_timestamp)
-            gps_date_text = exif_text(gps_datestamp)
-            gps_datetime_utc = f"{gps_date_text} {gps_time_text}Z" if gps_date_text and gps_time_text else ""
-            has_gps = latitude is not None and longitude is not None
-            profile.update(
-                {
-                    "status": "parsed" if has_gps else "gps-ifd-without-complete-coordinate",
-                    "has_gps": has_gps,
-                    "latitude": latitude,
-                    "longitude": longitude,
-                    "altitude_meters": altitude,
-                    "coordinate_ref": {
-                        "latitude_ref": exif_text(lat_ref),
-                        "longitude_ref": exif_text(lon_ref),
-                    },
-                    "gps_datestamp": gps_date_text,
-                    "gps_timestamp": gps_time_text,
-                    "gps_datetime_utc_candidate": gps_datetime_utc,
-                    "gps_img_direction_degrees": round(float(direction), 3) if direction is not None else None,
-                    "gps_img_direction_ref": exif_text(direction_ref),
-                    "gps_map_datum": exif_text(map_datum),
-                    "image_datetime_original": exif_text(datetime_original),
-                    "image_datetime_digitized": exif_text(datetime_digitized),
-                    "image_datetime": exif_text(datetime_file),
-                    "field_presence": {
-                        "gps_ifd": True,
-                        "latitude": latitude is not None,
-                        "longitude": longitude is not None,
-                        "altitude": altitude is not None,
-                        "gps_datetime": bool(gps_datetime_utc),
-                        "image_datetime": bool(datetime_original or datetime_digitized or datetime_file),
-                        "direction": direction is not None,
-                    },
-                    "map_marker": {
-                        "status": "ready" if has_gps else "not-ready",
-                        "latitude": latitude,
-                        "longitude": longitude,
-                        "label": path.name,
-                        "source": "exif-gps",
-                        "precision_status": "device-reported-unvalidated",
-                    },
-                }
-            )
+            gps = {name: gps_ifd[tag] for tag, name in EXIF_GPS_TAGS.items() if tag in gps_ifd}
+            apply_gps_fields(profile, gps, label=path.name)
             return profile
-    except (OSError, AttributeError, TypeError, ValueError) as exc:
-        profile.update({"status": "parse-failed", "error": str(exc)[:160]})
-        return profile
+    except (OSError, AttributeError, TypeError, ValueError):
+        return None
 
 
 def exif_gps_map_review_profile(profile: Mapping[str, object], *, source_path: Path) -> dict[str, object]:
@@ -899,31 +1690,6 @@ def shannon_entropy(blob: bytes) -> float:
     return round(-sum((count / length) * math.log2(count / length) for count in counts if count), 4)
 
 
-def detect_image_end_offset(path: Path, *, file_size: int, prefix: bytes, tail: bytes, tail_offset: int) -> int | None:
-    suffix = path.suffix.lower()
-    if suffix == ".png":
-        marker = b"IEND\xaeB`\x82"
-        tail_index = tail.rfind(marker)
-        if tail_index >= 0:
-            return tail_offset + tail_index + len(marker)
-        prefix_index = prefix.rfind(marker)
-        if prefix_index >= 0:
-            return prefix_index + len(marker)
-    if suffix in {".jpg", ".jpeg"}:
-        marker = b"\xff\xd9"
-        tail_index = tail.rfind(marker)
-        if tail_index >= 0:
-            return tail_offset + tail_index + len(marker)
-        prefix_index = prefix.rfind(marker)
-        if prefix_index >= 0:
-            return prefix_index + len(marker)
-    if suffix == ".webp" and prefix.startswith(b"RIFF") and prefix[8:12] == b"WEBP" and len(prefix) >= 8:
-        return min(file_size, int.from_bytes(prefix[4:8], "little", signed=False) + 8)
-    if suffix == ".bmp" and prefix.startswith(b"BM") and len(prefix) >= 6:
-        return min(file_size, int.from_bytes(prefix[2:6], "little", signed=False))
-    return None
-
-
 def embedded_payload_signature_candidates(
     *,
     prefix: bytes,
@@ -944,6 +1710,9 @@ def embedded_payload_signature_candidates(
                 if index < 0:
                     break
                 absolute_offset = base_offset + index
+                if label == "portable-executable-header" and not looks_like_pe_header(blob, index):
+                    start = index + 1
+                    continue
                 if image_end_offset is None:
                     after_image_end = absolute_offset >= 32
                 else:
@@ -963,7 +1732,24 @@ def embedded_payload_signature_candidates(
     return candidates
 
 
-def steganography_suspicion_profile(path: Path, *, width: int | None, height: int | None) -> dict[str, object]:
+def looks_like_pe_header(blob: bytes, index: int) -> bool:
+    """``MZ`` alone is two bytes and appears by chance; require the PE pointer."""
+    pointer_offset = index + 0x3C
+    if pointer_offset + 4 > len(blob):
+        return False
+    pe_offset = index + int.from_bytes(blob[pointer_offset : pointer_offset + 4], "little")
+    return 0 < pe_offset - index < 4096 and blob[pe_offset : pe_offset + 4] == b"PE\x00\x00"
+
+
+def steganography_suspicion_profile(
+    path: Path,
+    *,
+    width: int | None,
+    height: int | None,
+    structure: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    if structure is None:
+        structure = scan_image_structure(path)
     file_size, prefix, tail, tail_offset = read_prefix_tail(
         path,
         prefix_limit=MEDIA_SUSPICION_PREFIX_BYTES,
@@ -977,8 +1763,10 @@ def steganography_suspicion_profile(path: Path, *, width: int | None, height: in
             "validation_status": "not-run",
             "candidate_only": True,
         }
-    image_end_offset = detect_image_end_offset(path, file_size=file_size, prefix=prefix, tail=tail, tail_offset=tail_offset)
+    end_value = structure.get("image_end_offset")
+    image_end_offset = end_value if isinstance(end_value, int) else None
     trailing_data_bytes = max(0, file_size - image_end_offset) if image_end_offset is not None else 0
+    trailer_signature = str(structure.get("trailer_signature") or "")
     signature_candidates = embedded_payload_signature_candidates(
         prefix=prefix,
         tail=tail,
@@ -994,12 +1782,20 @@ def steganography_suspicion_profile(path: Path, *, width: int | None, height: in
     tail_entropy = shannon_entropy(tail)
     if trailing_data_bytes and tail_entropy >= 7.85:
         reasons.append("high-entropy-trailing-window")
-    suspicion_level = "high" if signature_candidates else ("medium" if trailing_data_bytes else "none")
+    if signature_candidates:
+        suspicion_level = "high"
+    elif trailing_data_bytes and trailer_signature in KNOWN_BENIGN_TRAILERS:
+        suspicion_level = "low"
+        reasons.append(f"known-trailer:{trailer_signature}")
+    elif trailing_data_bytes:
+        suspicion_level = "medium"
+    else:
+        suspicion_level = "none"
     return {
         "profile_version": "steganography-suspicion-profile-v1",
         "status": "completed",
         "scan_strategy": "bounded-prefix-tail-signature-scan",
-        "source_format": path.suffix.lower().lstrip("."),
+        "source_format": str(structure.get("content_format") or path.suffix.lower().lstrip(".")),
         "file_size": file_size,
         "width": width,
         "height": height,
@@ -1009,6 +1805,7 @@ def steganography_suspicion_profile(path: Path, *, width: int | None, height: in
         "image_end_offset": image_end_offset,
         "trailing_data_present": trailing_data_bytes > 0,
         "trailing_data_bytes": trailing_data_bytes,
+        "trailer_signature": trailer_signature,
         "embedded_signature_candidates": signature_candidates,
         "suspicion_level": suspicion_level,
         "suspicion_reasons": reasons,
@@ -1162,8 +1959,10 @@ def build_image_record(path: Path) -> ArtifactRecord:
         "source_size": stat_result.st_size,
         "entry_name": resolved.name,
         "hashes": compute_hashes(resolved),
+        # Host mtime of the acquired copy, not an artifact event (never a timeline time).
+        "source_file_mtime": iso_utc_from_epoch(stat_result.st_mtime),
         "parser_confidence": 0.72,
-        "parser_confidence_basis": "extension, file signature, bounded decoder/OCR sidecar validation",
+        "parser_confidence_basis": "content signature, native container/EXIF parse, bounded decoder/OCR sidecar validation",
         "commercial_grade_ready": False,
         "commercial_gap_ids": ["#56", "#58", "#59"],
         "media_native_capabilities": dict(MEDIA_NATIVE_CAPABILITIES),
@@ -1183,26 +1982,35 @@ def build_image_record(path: Path) -> ArtifactRecord:
     details["korean_ocr_translation_report_grade_validation_plan_hash"] = details[
         "korean_ocr_translation_report_grade_validation_plan"
     ]["validation_plan_sha256"]
-    if not has_plausible_image_signature(resolved):
-        image = None
-    else:
-        image = imread_unicode_safe(cv2, resolved, cv2.IMREAD_UNCHANGED)
+    structure = scan_image_structure(resolved)
+    details.update(image_format_fields(resolved, structure))
+    content_format = str(structure.get("content_format") or "")
+    image, decoder, decode_error = decode_image(resolved, content_format)
     if image is None:
+        decode_status, decode_reason = undecoded_reason(content_format, structure, decode_error)
         details.update(
             {
                 "decoded": False,
-                "parser_confidence": 0.35,
+                "decode_status": decode_status,
+                "decode_reason": decode_reason,
+                "parser_confidence": 0.35 if decode_status != "decoder-unsupported-format" else 0.6,
                 "ocr_candidate": True,
-                "note": "Image extension detected, but OpenCV could not decode the file.",
+                "note": decode_reason,
             }
         )
-        artifact_type = "media-image-unreadable"
+        if decode_error:
+            details["decode_error"] = decode_error
+        # Unsupported-but-valid containers (HEIC/AVIF without a plugin) are not
+        # "unreadable": they keep the image type and say why pixels are missing.
+        artifact_type = "media-image" if decode_status == "decoder-unsupported-format" else "media-image-unreadable"
     else:
         height, width = image.shape[:2]
         perceptual_hash = average_hash(image)
         details.update(
             {
                 "decoded": True,
+                "decode_status": "decoded",
+                "decoder": decoder,
                 "parser_confidence": 0.86,
                 "width": int(width),
                 "height": int(height),
@@ -1225,9 +2033,11 @@ def build_image_record(path: Path) -> ArtifactRecord:
         resolved,
         width=parse_int(details.get("width")),
         height=parse_int(details.get("height")),
+        structure=structure,
     )
     authenticity_profile = media_authenticity_profile(resolved, classification=classification)
-    exif_gps_profile = extract_exif_gps_profile(resolved)
+    exif_gps_profile = extract_exif_gps_profile(resolved, structure)
+    details.update(image_exif_top_level_fields(exif_gps_profile))
     details["steganography_suspicion_profile"] = steganography_profile
     details["media_authenticity_profile"] = authenticity_profile
     details["exif_gps_profile"] = exif_gps_profile
@@ -1249,6 +2059,127 @@ def build_image_record(path: Path) -> ArtifactRecord:
         supported=True,
         details=details,
     )
+
+
+def image_format_fields(path: Path, structure: Mapping[str, object]) -> dict[str, object]:
+    extension_format = EXTENSION_FORMATS.get(path.suffix.lower(), "")
+    content_format = str(structure.get("content_format") or "")
+    mismatch = bool(content_format and extension_format and format_family(content_format) != format_family(extension_format))
+    fields: dict[str, object] = {
+        "content_format": content_format or "unknown",
+        "extension_format": extension_format,
+        "extension_mismatch": mismatch,
+        "container_structure_status": structure.get("structure_status"),
+        "image_end_offset": structure.get("image_end_offset"),
+        "trailing_data_bytes": structure.get("trailing_data_bytes") or 0,
+    }
+    if mismatch:
+        fields["extension_mismatch_note"] = (
+            f"확장자는 {extension_format}이지만 파일 내용(시그니처)은 {content_format}입니다. 이름 변경 여부를 검토하세요."
+        )
+    if structure.get("trailer_signature"):
+        fields["trailer_signature"] = structure["trailer_signature"]
+        fields["trailer_note"] = structure.get("trailer_note", "")
+    for key in ("ftyp_major_brand", "ftyp_compatible_brands"):
+        if key in structure:
+            fields[key] = structure[key]
+    return fields
+
+
+def decode_image(path: Path, content_format: str) -> tuple[object | None, str, str]:
+    """Decode pixels by content (not extension); OpenCV first, then Pillow."""
+    if content_format not in DECODABLE_IMAGE_FORMATS:
+        return None, "", ""
+    error = ""
+    try:
+        image = imread_unicode_safe(cv2, path, cv2.IMREAD_UNCHANGED)
+    except Exception as exc:  # decoder errors are recorded, never fatal
+        image = None
+        error = f"{type(exc).__name__}: {exc}"[:200]
+    if image is not None:
+        return image, "pillow" if isinstance(cv2, PillowCv2Compat) else "opencv", ""
+    if Image is not None and not isinstance(cv2, PillowCv2Compat):
+        pillow_image, pillow_error = pillow_decode_as_bgr(path)
+        if pillow_image is not None:
+            return pillow_image, "pillow", ""
+        error = error or pillow_error
+    return None, "", error or "decoder returned no image"
+
+
+def pillow_decode_as_bgr(path: Path) -> tuple[object | None, str]:
+    try:
+        import numpy as np
+    except ImportError:
+        return None, "numpy unavailable for Pillow fallback"
+    try:
+        with Image.open(path) as handle:
+            handle.load()
+            bands = handle.getbands()
+            if "A" in bands:
+                mode = "RGBA"
+            elif handle.mode in {"1", "L"}:
+                mode = "L"
+            else:
+                mode = "RGB"
+            array = np.asarray(handle.convert(mode))
+    except Exception as exc:  # Pillow raises many decoder-specific errors
+        return None, f"{type(exc).__name__}: {exc}"[:200]
+    if array.ndim == 3 and array.shape[2] == 3:
+        array = np.ascontiguousarray(array[:, :, ::-1])
+    elif array.ndim == 3 and array.shape[2] == 4:
+        array = np.ascontiguousarray(array[:, :, [2, 1, 0, 3]])
+    return array, ""
+
+
+def undecoded_reason(content_format: str, structure: Mapping[str, object], error: str) -> tuple[str, str]:
+    if not content_format:
+        status = str(structure.get("structure_status") or "")
+        if status == "empty-or-unreadable":
+            return "empty-or-unreadable", "파일이 비어 있거나 읽을 수 없습니다."
+        return "content-not-image", "이미지 확장자이지만 파일 내용이 알려진 이미지 시그니처와 일치하지 않습니다."
+    if content_format not in DECODABLE_IMAGE_FORMATS:
+        return (
+            "decoder-unsupported-format",
+            f"{content_format.upper()} 컨테이너는 정상 인식했으나 내장 디코더가 이 형식을 지원하지 않아 픽셀(pHash·썸네일)을 만들지 않았습니다.",
+        )
+    detail = f" ({error})" if error else ""
+    return "decode-failed", f"{content_format.upper()} 시그니처는 맞지만 디코더가 픽셀을 복원하지 못했습니다(손상·절단 가능성){detail}."
+
+
+def image_exif_top_level_fields(profile: Mapping[str, object]) -> dict[str, object]:
+    """Top-level review fields; ``timestamp`` is DateTimeOriginal only (never host mtime)."""
+    fields: dict[str, object] = {}
+    for source_key, target_key in (
+        ("make", "exif_make"),
+        ("model", "exif_model"),
+        ("software", "exif_software"),
+        ("lens_model", "exif_lens_model"),
+        ("image_datetime_original", "exif_datetime_original"),
+        ("image_datetime_digitized", "exif_datetime_digitized"),
+        ("gps_timestamp", "gps_timestamp"),
+    ):
+        value = profile.get(source_key)
+        if value:
+            fields[target_key] = value
+    if profile.get("has_gps"):
+        fields["gps_latitude"] = profile.get("latitude")
+        fields["gps_longitude"] = profile.get("longitude")
+    original_iso = str(profile.get("datetime_original_iso") or "")
+    if original_iso:
+        offset = str(profile.get("offset_time_original") or "")
+        fields.update(
+            {
+                "timestamp": original_iso,
+                "timestamp_kind": "exif-datetime-original",
+                "timestamp_label": "created",
+                "timestamp_timezone": offset or "exif-local",
+                "timestamp_note": (
+                    "EXIF DateTimeOriginal(촬영 시각). "
+                    + (f"OffsetTimeOriginal {offset} 적용." if offset else "장치 현지 시각이며 시간대 정보가 없습니다.")
+                ),
+            }
+        )
+    return fields
 
 
 def find_transcript_sidecars(path: Path) -> list[dict[str, object]]:
@@ -2203,26 +3134,3 @@ def build_thumbnail_preview(image) -> dict[str, object]:
         preview["available"] = False
         preview["reason"] = "thumbnail-exceeds-inline-limit"
     return preview
-
-
-def has_plausible_image_signature(path: Path) -> bool:
-    try:
-        with path.open("rb") as handle:
-            header = handle.read(32)
-            if path.suffix.lower() in {".jpg", ".jpeg"}:
-                handle.seek(-2, 2)
-                tail = handle.read(2)
-    except OSError:
-        return False
-    suffix = path.suffix.lower()
-    if suffix in {".jpg", ".jpeg"}:
-        return header.startswith(b"\xff\xd8") and tail == b"\xff\xd9"
-    if suffix == ".png":
-        return header.startswith(b"\x89PNG\r\n\x1a\n") and header[12:16] == b"IHDR"
-    if suffix == ".bmp":
-        return header.startswith(b"BM")
-    if suffix in {".tif", ".tiff"}:
-        return header.startswith((b"II*\x00", b"MM\x00*"))
-    if suffix == ".webp":
-        return header.startswith(b"RIFF") and header[8:12] == b"WEBP"
-    return True

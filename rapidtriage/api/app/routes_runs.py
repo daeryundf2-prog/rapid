@@ -63,6 +63,8 @@ from .models import (
     RunImportRequest,
 )
 from .pagination import (
+    DOCS_MATCHED_REQUIRES_ALL,
+    docs_page,
     paginate_artifact_output,
     paginate_payload,
     with_record_index,
@@ -715,9 +717,26 @@ def build_runs_router(
         offset: int = Query(0, ge=0),
         limit: int = Query(0, ge=0, le=1000),
         cursor: str | None = Query(default=None),
+        all_candidates: bool = Query(default=False, alias="all"),
+        matched: bool | None = Query(default=None),
     ) -> dict[str, object]:
+        """Paged document listing.
+
+        Default: pages ``results`` (the keyword hits), exactly the pre-r1
+        contract, so shipped clients keep working. ``all=1`` pages
+        ``candidates`` instead (every document the docs step saw, each with
+        ``record_index``/``matched``/``text_status``…); with ``all=1``,
+        ``matched=0``/``matched=1`` filter those candidates. ``matched=0``
+        without ``all=1`` is a 400. Every page reports ``candidate_count``
+        (all candidates) and ``matched_count`` (keyword hits). ``limit=0``
+        returns the whole payload.
+        """
+        if matched is False and not all_candidates:
+            raise HTTPException(status_code=400, detail=DOCS_MATCHED_REQUIRES_ALL)
         payload = get_named_output(store, run_id, "docs")
-        return paginate_payload(payload, "results", offset=offset, limit=limit, cursor=cursor, omit_fields=("candidates", "manifest"))
+        return docs_page(
+            payload, all_candidates=all_candidates, matched=matched, offset=offset, limit=limit, cursor=cursor
+        )
 
 
     @router.get("/api/runs/{run_id}/report", response_class=PlainTextResponse)

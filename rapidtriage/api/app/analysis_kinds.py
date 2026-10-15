@@ -890,8 +890,20 @@ def parse_mft_file(ctx: AnalysisContext, mft_path: Path, nodes: _NodeView, recor
                             "modified_at": si_times.get("modified_at") or fn_times.get("modified_at"),
                             "mft_modified_at": si_times.get("mft_modified_at") or fn_times.get("mft_modified_at"),
                             "accessed_at": si_times.get("accessed_at") or fn_times.get("accessed_at"),
+                            # $STANDARD_INFORMATION and $FILE_NAME times kept apart
+                            # (the merged fields above prefer $SI and fall back to $FN).
+                            "si_created_at": si_times.get("created_at"),
+                            "si_modified_at": si_times.get("modified_at"),
+                            "si_mft_modified_at": si_times.get("mft_modified_at"),
+                            "si_accessed_at": si_times.get("accessed_at"),
                             "fn_created_at": fn_times.get("created_at"),
                             "fn_modified_at": fn_times.get("modified_at"),
+                            "fn_mft_modified_at": fn_times.get("mft_modified_at"),
+                            "fn_accessed_at": fn_times.get("accessed_at"),
+                            "file_attributes": si.get("file_attributes") if si else file_name.get("file_attributes"),
+                            "attributes": list(si.get("file_attribute_names") or [])
+                            if si
+                            else list(file_name.get("file_attribute_names") or []),
                             "record_offset": base + offset,
                             "flags": record.get("flags"),
                             "validation_status": record.get("validation_status"),

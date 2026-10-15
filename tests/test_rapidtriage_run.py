@@ -35,6 +35,7 @@ from rapidtriage.core.run import (
     parser_crash_isolation_assessment,
     run_triage_mode,
 )
+from rapidtriage.core.run.markdown import apply_report_disclosures
 from rapidtriage.core.run_workflow import (
     RUN_WORKFLOW_STAGE_ORDER,
     build_run_workflow_contract,
@@ -1799,7 +1800,10 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertIn("powershell-history-command", timeline_text)
             self.assertIn("prefetch-file", timeline_text)
             self.assertIn("mft-record", timeline_text)
-            self.assertIn("artifact-shellbag-native-candidate", timeline_text)
+            # Parser-quality r1: shellbag-native-candidate is gone (W2: shellbag-entry
+            # rows carry their own timestamp contract; this fixture's hives yield
+            # only shellbag-hive-summary rows, which are not timeline events).
+            self.assertNotIn("artifact-shellbag-native-candidate", timeline_text)
 
             self.assertEqual(
                 main(["search", str(output_dir), "-k", "powershell", "--no-ocr", "--output", str(search_output)]),
@@ -1879,8 +1883,10 @@ class RapidTriageRunTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-        cloud_dir = root / "Users" / "alice" / "Cloud"
+        cloud_dir = root / "Users" / "alice" / "Cloud" / "Takeout"
         cloud_dir.mkdir(parents=True, exist_ok=True)
+        # Export-root signature for the Google Takeout fixture.
+        (cloud_dir / "archive_browser.html").write_text("<html>Takeout</html>", encoding="utf-8")
         (cloud_dir / "google-activity.json").write_text(
             '[{"title":"Visited ChatGPT","time":"2024-05-01T10:00:00Z","products":["Search"]}]',
             encoding="utf-8",
@@ -1888,6 +1894,8 @@ class RapidTriageRunTests(unittest.TestCase):
 
         mobile_dir = root / "Users" / "alice" / "Mobile"
         mobile_dir.mkdir(parents=True, exist_ok=True)
+        # Acquisition-root signature for the Cellebrite UFED fixture.
+        (mobile_dir / "Phone.ufd").write_text("[General]\nVersion=7.66\n", encoding="utf-8")
         (mobile_dir / "messages.csv").write_text(
             "service,chat_id,sender,text,timestamp\n"
             "WhatsApp,room1,Alice,hello from mobile chat,2024-05-01T11:00:00Z\n",
@@ -2105,7 +2113,11 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertIn("indicator_summary", report_context)
             self.assertIn("workflow", report_context)
             self.assertTrue(report_context["workflow"]["available"])
-            self.assertEqual(render_run_markdown_report(report_context), report_text)
+            # build_markdown_report = render + parser-quality disclosure section.
+            self.assertEqual(apply_report_disclosures(render_run_markdown_report(report_context), summary_payload), report_text)
+            self.assertIn("## 처리 한계·공개 사항 / Disclosures", report_text)
+            self.assertNotIn("uncapped", report_text)
+            self.assertNotIn("- Document matches:", report_text)
             self.assertIn(mode, report_text.lower())
             self.assertIn("case overview", report_text.lower())
             self.assertIn("workflow analyst checklist", report_text.lower())

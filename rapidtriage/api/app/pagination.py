@@ -542,3 +542,62 @@ def with_record_index(rows: Iterable[object], start: int) -> list[object]:
         {**row, "record_index": start + position} if isinstance(row, dict) else row
         for position, row in enumerate(rows)
     ]
+
+
+def _doc_is_matched(row: object, result_paths: frozenset[str]) -> bool:
+    """``matched`` of a docs candidate (pre-r1 rows: membership in ``results``)."""
+    if not isinstance(row, Mapping):
+        return False
+    value = row.get("matched")
+    if isinstance(value, bool):
+        return value
+    return str(row.get("path") or "") in result_paths
+
+
+DOCS_MATCHED_REQUIRES_ALL = "matched=0 필터는 all=1이 필요합니다 (기본 목록은 키워드 적중 results만 반환합니다)"
+
+
+def docs_page(
+    payload: Mapping[str, object],
+    *,
+    all_candidates: bool = False,
+    matched: bool | None = None,
+    offset: int,
+    limit: int,
+    cursor: str | None = None,
+) -> dict[str, object]:
+    """``/docs`` page.
+
+    Default (``all_candidates=False``): pages ``results`` (the keyword hits)
+    exactly as before r1, so existing clients keep working; ``matched=True``
+    is the same view and ``matched=False`` raises ``ValueError`` (needs
+    ``all=1``). ``all_candidates=True``: pages ``candidates`` (every document
+    the docs step saw, each with ``record_index`` = position in the docs
+    output ``candidates``, ``matched`` and ``text_status``), optionally
+    filtered by ``matched``. Every view reports ``candidate_count`` and
+    ``matched_count``.
+    """
+    candidates = payload.get("candidates")
+    candidates = candidates if isinstance(candidates, list) else []
+    results = payload.get("results")
+    results = results if isinstance(results, list) else []
+    counts = {"candidate_count": len(candidates), "matched_count": len(results)}
+    if not all_candidates:
+        if matched is False:
+            raise ValueError(DOCS_MATCHED_REQUIRES_ALL)
+        page = dict(paginate_payload(dict(payload), "results", offset=offset, limit=limit, cursor=cursor, omit_fields=("candidates", "manifest")))
+        page.update(counts)
+        return page
+    result_paths = frozenset(str(row.get("path") or "") for row in results if isinstance(row, Mapping))
+    indexed = [
+        {**row, "record_index": index} if isinstance(row, dict) else row
+        for index, row in enumerate(candidates)
+        if matched is None or _doc_is_matched(row, result_paths) == matched
+    ]
+    view = {**payload, "candidates": indexed}
+    if limit <= 0:
+        view.update(counts)
+        return view
+    page = dict(paginate_payload(view, "candidates", offset=offset, limit=limit, cursor=cursor, omit_fields=("results", "manifest")))
+    page.update(counts)
+    return page

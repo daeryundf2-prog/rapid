@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+import re
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 
 from .constants import (
@@ -36,55 +37,74 @@ def first_mobile_alias(row: Mapping[str, object], *aliases: str) -> object:
     return ""
 
 
+_HINT_WORD_RE = re.compile(r"[^0-9a-z]+")
+
+
+def _hint_words(path: Path) -> set[str]:
+    """Split a (root-relative) hint path into lowercase word tokens.
+
+    Tokens are matched as whole words (or their plural) so ``app`` never
+    matches ``AppData`` and ``message`` never matches arbitrary substrings.
+    """
+
+    return {word for word in _HINT_WORD_RE.split(str(path).lower()) if word}
+
+
+def _hint_has(words: set[str], tokens: Iterable[str]) -> bool:
+    return any(token in words or f"{token}s" in words for token in tokens)
+
+
 def detect_artifact_type(row: Mapping[str, object], path: Path) -> str:
-    source_hint = str(path).lower()
+    """Classify a normalized row.
+
+    ``path`` must be a hint path relative to the detected acquisition root;
+    path tokens are matched as whole words, never as absolute-path substrings.
+    """
+
+    words = _hint_words(path)
     keys = set(row)
     if keys.intersection(MESSAGE_KEYS) and (
         keys.intersection({"sender", "from", "fromphone", "recipient", "to", "tophone", "direction"})
         or keys.intersection(CHAT_KEYS)
-        or any(token in source_hint for token in ("sms", "message", "chat", "conversation", "imessage", "whatsapp"))
+        or _hint_has(words, ("sms", "message", "chat", "conversation", "imessage", "whatsapp"))
         or detect_chat_service(row, path)
     ):
         return "mobile-message"
-    # Screen-time classification runs before the generic app branch: loose
-    # path tokens such as "app" otherwise match user directories like
-    # Windows AppData and swallow screen-time rows.
-    if keys.intersection(SCREEN_TIME_KEYS) and any(
-        token in source_hint for token in ("screentime", "screen_time", "digital", "wellbeing", "appusage", "app_usage")
+    # Screen-time classification runs before the generic app branch.
+    if keys.intersection(SCREEN_TIME_KEYS) and (
+        _hint_has(words, ("screentime", "digital", "wellbeing", "appusage"))
+        or {"screen", "time"} <= words
+        or {"app", "usage"} <= words
     ):
         return "mobile-screen-time"
     if keys.intersection(APP_KEYS) and (
         keys.intersection({"package", "packagename", "bundleid", "bundleidentifier"})
-        or any(token in source_hint for token in ("app", "application", "installed"))
+        or _hint_has(words, ("app", "application", "installed"))
     ):
         return "mobile-app"
     if keys.intersection(BROWSER_KEYS) and (
         any(key in keys for key in ("url", "uri", "downloadurl"))
-        or any(token in source_hint for token in ("browser", "history", "safari", "chrome", "edge", "firefox"))
+        or _hint_has(words, ("browser", "history", "safari", "chrome", "edge", "firefox"))
     ):
         return "mobile-browser"
     if keys.intersection(LOCATION_KEYS) and (
         keys.intersection({"latitude", "longitude", "latitudee7", "longitudee7", "lat", "lon", "lng"})
-        or any(token in source_hint for token in ("location", "gps", "geofence", "map"))
+        or _hint_has(words, ("location", "gps", "geofence", "map"))
     ):
         return "mobile-location"
-    if keys.intersection(HEALTH_KEYS) and any(
-        token in source_hint for token in ("health", "fitness", "steps", "workout", "activity", "sleep")
-    ):
+    if keys.intersection(HEALTH_KEYS) and _hint_has(words, ("health", "fitness", "steps", "workout", "activity", "sleep")):
         return "mobile-health"
     if keys.intersection(CALL_KEYS):
         return "mobile-call"
     if keys.intersection(CONTACT_KEYS) and any(key in keys for key in ("phone", "phonenumber", "email", "displayname", "fullname")):
         return "mobile-contact"
-    if "call" in source_hint and any(key in keys for key in ("phone", "phonenumber", "number", "date", "timestamp")):
+    if _hint_has(words, ("call",)) and any(key in keys for key in ("phone", "phonenumber", "number", "date", "timestamp")):
         return "mobile-call"
-    if keys.intersection(ACCOUNT_KEYS) and any(
-        token in source_hint for token in ("account", "profile", "user", "owner", "identity")
-    ):
+    if keys.intersection(ACCOUNT_KEYS) and _hint_has(words, ("account", "profile", "user", "owner", "identity")):
         return "mobile-account"
     if keys.intersection(MEDIA_KEYS) and (
         any(key in keys for key in ("mediapath", "mediafilename", "attachment", "mime", "mimetype"))
-        or any(token in source_hint for token in ("media", "photo", "image", "video", "camera", "dcim"))
+        or _hint_has(words, ("media", "photo", "image", "video", "camera", "dcim"))
     ):
         return "mobile-media"
     if keys.intersection(FILE_KEYS) and any(key in keys for key in ("filepath", "path", "originalpath", "logicalpath", "filename")):
@@ -107,6 +127,21 @@ def mobile_decimal_location(value: object) -> float | None:
     return None
 
 
+def _chat_alias_patterns() -> list[tuple[str, re.Pattern[str]]]:
+    patterns: list[tuple[str, re.Pattern[str]]] = []
+    for profile in CHAT_APP_PROFILES:
+        aliases = [str(alias).lower() for alias in profile.get("aliases", ()) if str(alias)]
+        if not aliases:
+            continue
+        # Whole-token matching: "line" must not match "online"/"deadline".
+        alternation = "|".join(re.escape(alias) for alias in aliases)
+        patterns.append((str(profile["service"]), re.compile(rf"(?<![0-9a-z])(?:{alternation})(?![0-9a-z])")))
+    return patterns
+
+
+_CHAT_ALIAS_PATTERNS = _chat_alias_patterns()
+
+
 def detect_chat_service(row: Mapping[str, object], path: Path) -> str:
     haystack_parts = [str(path).lower()]
     for value in row.values():
@@ -114,10 +149,9 @@ def detect_chat_service(row: Mapping[str, object], path: Path) -> str:
             continue
         haystack_parts.append(optional_text(value).lower())
     haystack = " ".join(haystack_parts)
-    for profile in CHAT_APP_PROFILES:
-        aliases = profile.get("aliases", ())
-        if any(str(alias).lower() in haystack for alias in aliases):
-            return str(profile["service"])
+    for service, pattern in _CHAT_ALIAS_PATTERNS:
+        if pattern.search(haystack):
+            return service
     return ""
 
 

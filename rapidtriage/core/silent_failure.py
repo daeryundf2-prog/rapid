@@ -76,6 +76,17 @@ def build_silent_failure_report(
     checks.extend(build_artifact_gap_checks(target_inventory, artifact_payloads))
     checks.extend(build_parser_error_checks(artifact_payloads))
     checks.extend(build_extract_gap_checks(docs_extract_payload, files_extract_payload, safety))
+    if target_inventory["truncated"]:
+        # The target inventory itself is capped: zero-yield checks above only
+        # saw the first MAX_TARGET_SCAN_FILES files (parser-quality r1).
+        checks.append(
+            make_check(
+                "target-inventory-truncated",
+                "warning",
+                f"scanned_file_count={target_inventory['scanned_file_count']}, max_files={MAX_TARGET_SCAN_FILES}",
+                f"대상 파일 목록이 {MAX_TARGET_SCAN_FILES}개에서 잘렸습니다: 이후 파일의 산출물 누락은 점검되지 않았습니다.",
+            )
+        )
 
     risk_checks = [item for item in checks if item["level"] in {"warning", "failed"}]
     status = "pass"

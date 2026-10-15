@@ -53,6 +53,251 @@ IOC_TI_REPORT_GRADE_VALIDATION_BLOCKERS = [
 ]
 
 
+# --- evidence field policy (parser-quality r1, finding C5) ------------------
+# Indicators are extracted only from evidence-derived values. Subtrees that
+# hold tool provenance (manifests, validation plans, accuracy gates, hash
+# blocks the tool computed, review profiles that copy primary fields) are
+# skipped; so are leaf keys naming tool identities (row/manifest hashes,
+# artifact ids, output paths).
+PROVENANCE_SUBTREE_KEYS: frozenset[str] = frozenset(
+    {
+        "core_accuracy_gates",
+        "commercial_uplift_evidence",
+        "forensic_review",
+        "source_hashes",
+        "hashes",
+        "artifact_record",
+        "profile_ref",
+        "validation_checks",
+        "options",
+        "filters",
+        "inputs",
+        "manifest",
+        "index",
+        "ioc_hits",
+        "matched_rules",
+        "hash_cache_manifest",
+        "hash_cache_assessment",
+        "duplicate_content_groups",
+        "fuzzy_text_duplicate_groups",
+        "known_good_suppressed_candidates",
+        "known_good_match",
+        "file_signature",
+        "signature_mismatch_candidates",
+        "time_provenance",
+        "file_exclusions",
+        "recovery",
+        "source_viewer_locator",
+        "commercial_grade_blockers",
+        "parser_errors",
+        "time_policy",
+        "redacted_row_samples",
+        "redaction",
+        "field_hashes",
+    }
+)
+PROVENANCE_SUBTREE_SUFFIXES: tuple[str, ...] = (
+    "_manifest",
+    "_validation_plan",
+    "_assessment",
+    "_profile",
+    "_gates",
+    "_matrix",
+    "_capabilities",
+    "_citation",
+    "_locator",
+    "_trusted_diffs",
+    "_trusted_diff",
+)
+PROVENANCE_LEAF_KEYS: frozenset[str] = frozenset(
+    {
+        "input_file",
+        "records_path",
+        "records_file",
+        "output",
+        "output_path",
+        "artifacts_output",
+        "run_summary",
+        "root",
+        "case_id",
+        "citation_id",
+        "artifact_id",
+        "record_key",
+        "group_id",
+        "profile_version",
+        "manifest_version",
+        "parser_version",
+        "generated_at",
+    }
+)
+PROVENANCE_LEAF_RE = re.compile(r"(_sha256|_sha1|_md5|_hash|_hashes|_fingerprint|_digest|_row_hash|_id_hash)$")
+# Leaf keys whose values are hashes recorded *inside* the evidence (Amcache
+# SHA-1, Sysmon Hashes=, file-id). Hash tokens elsewhere count only when the
+# whole value is the hash ("standalone").
+EVIDENCE_HASH_KEYS: frozenset[str] = frozenset(
+    {"sha1", "sha256", "md5", "file_id", "fileid", "file_hash", "hash_value", "hashes_value", "imphash", "hashes"}
+)
+# Leaf-key words that make a dotted quad an IP even when every octet <= 9.
+IP_CONTEXT_KEY_RE = re.compile(r"(ip|addr|address|host|remote|source|destination|dest|peer|client|server|gateway|dns)", re.IGNORECASE)
+IP_CONTEXT_TEXT_RE = re.compile(r"(?i)(?:\bip\b|ipv4|address|addr|host|remote|server|client|gateway|dns|src|dst)\W{0,3}$")
+# Bulk inventory rows with no evidence indicator content of their own
+# (registry key tree: names/offsets; their values surface in semantic rows).
+INDICATOR_EXCLUDED_ARTIFACT_TYPES: frozenset[str] = frozenset(
+    {"registry-key-tree-node", "registry-hive-cell"}
+)
+# Outputs not scanned: the timeline re-copies artifact fields (double counting).
+INDICATOR_SCANNED_OUTPUTS = ("docs", "files")
+
+
+def is_provenance_subtree(key: str) -> bool:
+    # ``source_hashes*`` (incl. ``source_hashes_by_file``) are hashes the tool
+    # computed over evidence files, keyed by host path.
+    return key in PROVENANCE_SUBTREE_KEYS or key.endswith(PROVENANCE_SUBTREE_SUFFIXES) or key.startswith("source_hash")
+
+
+def is_provenance_leaf(key: str) -> bool:
+    if key in PROVENANCE_LEAF_KEYS:
+        return True
+    if key in EVIDENCE_HASH_KEYS:
+        return False
+    return bool(PROVENANCE_LEAF_RE.search(key))
+
+
+def pointer_field_key(pointer: str) -> str:
+    """Leaf field name of a JSON pointer (``/a/b/0`` -> ``b``)."""
+    for part in reversed(pointer.split("/")):
+        if part and not part.isdigit():
+            return part.replace("~1", "/").replace("~0", "~")
+    return ""
+
+
+VERSION_FIELD_RE = re.compile(r"(version|oid|build|revision|release|link_date)", re.IGNORECASE)
+NAME_LIKE_FIELD_RE = re.compile(r"(name|path|file|dir|folder|guid|uuid|hex|offset|sid|key|cursor|id$|title|label|preview|raw|data|sha|md5|hash)", re.IGNORECASE)
+HASH_LABEL_RE = re.compile(r"(?i)(sha256|sha-256|sha1|sha-1|md5|imphash|hash)\s*[=:]\s*$")
+EMPTY_OR_PLACEHOLDER_HASHES = frozenset(
+    {
+        "d41d8cd98f00b204e9800998ecf8427e",
+        "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    }
+)
+# XML namespace / schema URLs and printf templates are not network indicators.
+NON_INDICATOR_URL_HOSTS = frozenset(
+    {
+        "schemas.microsoft.com",
+        "schemas.openxmlformats.org",
+        "schemas.xmlsoap.org",
+        "www.w3.org",
+        "w3.org",
+        "purl.org",
+        "ns.adobe.com",
+        "ns.microsoft.com",
+        "www.hancom.co.kr",
+        "schemas.android.com",
+        "xml.org",
+    }
+)
+# Evidence-recorded hash fields sit directly under a row's details (Amcache
+# SHA-1/FileId, Sysmon Hashes); the same key nested deeper (ole_streams[].sha256,
+# redacted samples) is a hash the tool computed.
+EVIDENCE_HASH_POINTER_RE = re.compile(r"/details/(?:decoded_values/|event_data/|values/)?[^/]+$")
+
+
+def is_evidence_hash_field(pointer: str, field_key: str) -> bool:
+    key = field_key.lower()
+    if key not in EVIDENCE_HASH_KEYS and not key.endswith(("_sha1", "_md5", "_sha256")):
+        return False
+    if key not in EVIDENCE_HASH_KEYS and is_provenance_leaf(field_key):
+        return False
+    return bool(EVIDENCE_HASH_POINTER_RE.search(pointer))
+
+
+def url_indicator_status(url: str) -> str:
+    host = (urlparse(url).hostname or "").lower()
+    if not host:
+        return "no-host"
+    if "%" in host or "{" in url[:16] or re.search(r"%[sdux]", url):
+        return "format-template"
+    if host in NON_INDICATOR_URL_HOSTS:
+        return "xml-namespace"
+    return "accept"
+
+
+def is_version_like_ipv4(text: str, start: int, end: int) -> bool:
+    """Dotted runs longer than four groups, ``v1.2.3.4`` and path segments."""
+    before = text[max(0, start - 2) : start]
+    after = text[end : end + 2]
+    if (len(before) == 2 and before[1] == "." and before[0].isdigit()) or (after[:1] == "." and after[1:2].isdigit()):
+        return True  # part of a longer dotted sequence (10.0.19041.1)
+    previous = text[start - 1] if start > 0 else ""
+    if previous and (previous.isalnum() or previous in "-_@+~"):
+        return True  # app-1.0.0.30, v1.2.3.4
+    following = text[end] if end < len(text) else ""
+    if following and (following.isalnum() or following in "-_"):
+        return True
+    if previous and previous in "\\/":
+        # Path segment (``...\1.15.0.1\...``); a UNC host (``\\10.0.0.5\``) is not.
+        unc = start >= 2 and text[start - 2] in "\\/" and (start == 2 or text[start - 3] not in "\\/:")
+        if not unc and not text[: start - 1].endswith(("://", ":/")):
+            return True
+    return False
+
+
+def ipv4_indicator_status(text: str, match: re.Match[str], field_key: str) -> str:
+    """``accept``, ``private`` or a rejection reason for an IPv4 candidate token.
+
+    Version strings are the dominant false positive (``1.0.0.30`` in paths,
+    ``Version`` values, OIDs). A dotted quad needs a non-version shape: no
+    version-like field, no path-segment/affix position, at least one octet
+    above 9, no trailing ``.0``, and — without an IP context word in the
+    field name or just before the token — no zero octet in a low-first-octet
+    address. Private/loopback addresses are kept but flagged (never
+    rule-matched).
+    """
+    value = match.group(0)
+    if not valid_ipv4(value):
+        return "invalid"
+    parts = value.split(".")
+    octets = [int(part) for part in parts]
+    if any(len(part) > 1 and part.startswith("0") for part in parts):
+        return "leading-zero"
+    if octets[0] in (0, 255) or value.endswith(".255.255") or value == "255.255.255.255":
+        return "unspecified-or-broadcast"
+    if VERSION_FIELD_RE.search(field_key):
+        return "version-like"
+    if is_version_like_ipv4(text, match.start(), match.end()):
+        return "version-like"
+    has_context = bool(IP_CONTEXT_KEY_RE.search(field_key)) or bool(IP_CONTEXT_TEXT_RE.search(text[: match.start()]))
+    if not has_context:
+        if max(octets) <= 9 or octets[3] == 0:
+            return "version-like"
+        if 0 in octets and octets[0] < 30:
+            return "version-like"
+        if octets[0] <= 2 and octets[1] <= 39:
+            return "oid-like"  # X.509/ASN.1 object identifiers (2.5.4.10, 1.3.36.3)
+        if match.start() == 0 and match.end() == len(text) and NAME_LIKE_FIELD_RE.search(field_key):
+            return "name-like"  # a file/directory name that happens to be a dotted quad
+    address = ipaddress.ip_address(value)
+    if address.is_private or address.is_loopback or address.is_link_local:
+        return "private"
+    return "accept"
+
+
+SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2, "info": 3}
+INDICATOR_LABEL_NO_RULES = "지표 후보"
+INDICATOR_LABEL_WITH_RULES = "지표"
+INDICATOR_FIELD_POLICY_NOTE = (
+    "증거 유래 필드(경로·URL·호스트·IP·명령줄·레지스트리 값·증거 내부 해시)만 스캔합니다. "
+    "도구 출처 필드(manifest/validation plan/row hash/source_hashes/artifact id)와 타임라인 사본은 제외합니다."
+)
+YARA_STATUS = {
+    "engine_available": False,
+    "native_yara_engine_integration": False,
+    "string_rule_import": True,
+    "message": "YARA 엔진 없음: .yar 파일은 문자열 규칙(yara-lite)으로만 가져오며 condition/정규식/모듈은 평가하지 않습니다.",
+}
+
+
 class IndicatorSummaryError(ValueError):
     """Raised when indicator summary input cannot be loaded."""
 
@@ -80,6 +325,7 @@ def build_indicator_summary(
     accumulator: dict[tuple[str, str], dict[str, object]] = {}
     scanner_accumulator: dict[tuple[str, str, str], dict[str, object]] = {}
     source_counts: Counter[str] = Counter()
+    rejections: Counter[str] = Counter()
     for output_name, output_path in iter_run_json_outputs(outputs):
         source = {
             "output": output_name,
@@ -95,6 +341,7 @@ def build_indicator_summary(
                 scanner_accumulator,
                 source=source,
                 max_sources_per_indicator=max_sources_per_indicator,
+                rejections=rejections,
             )
             continue
         payload = (output_payloads or {}).get(output_name)
@@ -111,6 +358,7 @@ def build_indicator_summary(
                 scanner_accumulator,
                 source=source,
                 max_sources_per_indicator=max_sources_per_indicator,
+                rejections=rejections,
             )
             continue
         collect_ioc_scanner_hits_from_payload(
@@ -129,6 +377,7 @@ def build_indicator_summary(
                     **context,
                 },
                 max_sources_per_indicator=max_sources_per_indicator,
+                rejections=rejections,
             )
 
     enrichment, ti_feed_sources = load_ti_feeds(ti_feeds or [])
@@ -136,9 +385,13 @@ def build_indicator_summary(
         finalize_indicator(record, rule_set=rule_set, enrichment=enrichment)
         for record in accumulator.values()
     ]
-    indicators.sort(key=lambda item: (-int(item["count"]), str(item["type"]), str(item["value"])))
+    indicators.sort(key=lambda item: (SEVERITY_ORDER.get(str(item.get("severity")), 9), -int(item["count"]), str(item["type"]), str(item["value"])))
+    total_before_cap = len(indicators)
+    type_counts_before_cap = Counter(str(item["type"]) for item in indicators)
     if max_indicators:
         indicators = indicators[:max_indicators]
+    truncated = len(indicators) < total_before_cap
+    sources_truncated_count = sum(1 for item in indicators if int(item.get("count") or 0) > len(item.get("sources") or []))
     indicators = attach_ioc_ti_indicator_manifests(indicators)
     ioc_scanner_hits = finalize_ioc_scanner_hits(scanner_accumulator, limit=max_indicators)
     ioc_scanner_manifest = build_ioc_scanner_manifest(
@@ -188,12 +441,33 @@ def build_indicator_summary(
         },
         "summary": {
             "indicator_count": len(indicators),
+            "total_before_cap": total_before_cap,
+            "truncated": truncated,
+            "max_indicators": max_indicators,
+            "type_counts_before_cap": dict(type_counts_before_cap),
+            "sources_truncated_indicator_count": sources_truncated_count,
+            "max_sources_per_indicator": max_sources_per_indicator,
+            "severity_counts": dict(Counter(str(item.get("severity") or "") for item in indicators)),
+            "rejected_token_counts": dict(sorted(rejections.items())),
+            "scanned_outputs": sorted(source_counts),
+            "field_policy": INDICATOR_FIELD_POLICY_NOTE,
+            "rule_count": rule_set.rule_count if rule_set else 0,
+            "rules_loaded": bool(rule_set and rule_set.rule_count),
+            "display_label": INDICATOR_LABEL_WITH_RULES if rule_set and rule_set.rule_count else INDICATOR_LABEL_NO_RULES,
+            "rule_status_message": (
+                f"규칙 {rule_set.rule_count}개 적용 ({rule_set.format})"
+                if rule_set and rule_set.rule_count
+                else "적용된 탐지 규칙 0개: 아래 항목은 규칙 일치가 아닌 '지표 후보'(증거에서 추출한 URL·도메인·IP·해시)입니다."
+            ),
+            "yara": dict(YARA_STATUS),
             "type_counts": dict(type_counts),
             "source_output_counts": dict(source_counts),
             "matched_rule_counts": dict(rule_counts),
             "matched_indicator_count": sum(1 for item in indicators if item.get("matched_rules")),
             "ioc_scanner_hit_count": sum(int(item.get("count") or 0) for item in ioc_scanner_hits),
             "ioc_scanner_row_count": len(ioc_scanner_hits),
+            "ioc_scanner_row_count_before_cap": len(scanner_accumulator),
+            "ioc_scanner_truncated": len(ioc_scanner_hits) < len(scanner_accumulator),
             "ioc_scanner_rule_count": len(scanner_rule_counts),
             "enriched_indicator_count": sum(1 for item in indicators if item.get("ti_enrichment")),
             "ti_feed_count": len(ti_feed_sources),
@@ -247,7 +521,7 @@ def load_run_summary(run_output: Path | Mapping[str, object]) -> Mapping[str, ob
 def iter_run_json_outputs(outputs: Mapping[str, object]) -> Iterable[tuple[str, Path]]:
     for name, raw_path in sorted(outputs.items()):
         output_name = str(name)
-        if not output_name.startswith("artifacts_") and output_name not in {"docs", "files", "timeline"}:
+        if not output_name.startswith("artifacts_") and output_name not in INDICATOR_SCANNED_OUTPUTS:
             continue
         path = Path(str(raw_path)).expanduser().resolve()
         if path.is_file():
@@ -262,6 +536,7 @@ def collect_indicators_from_artifact_records(
     *,
     source: Mapping[str, str],
     max_sources_per_indicator: int,
+    rejections: Counter[str] | None = None,
 ) -> None:
     """Scan a JSONL-backed per-kind payload one row at a time.
 
@@ -277,8 +552,11 @@ def collect_indicators_from_artifact_records(
             accumulator,
             source={**source, "pointer": pointer, **context},
             max_sources_per_indicator=max_sources_per_indicator,
+            rejections=rejections,
         )
     for index, row in enumerate(iter_payload_records(payload, payload_path=payload_path, expand=False)):
+        if str(row.get("artifact_type") or "") in INDICATOR_EXCLUDED_ARTIFACT_TYPES:
+            continue
         row_pointer = f"/artifacts/{index}"
         nested_hits.extend(iter_ioc_hit_contexts(row, pointer=row_pointer, include_root=False))
         for pointer, value, context in iter_scalar_contexts(row, row_pointer):
@@ -287,6 +565,7 @@ def collect_indicators_from_artifact_records(
                 accumulator,
                 source={**source, "pointer": pointer, **context},
                 max_sources_per_indicator=max_sources_per_indicator,
+                rejections=rejections,
             )
     hit_contexts = nested_hits or list(iter_ioc_hit_contexts(head, pointer="", include_root=True))
     for pointer, hit, context in hit_contexts:
@@ -312,11 +591,14 @@ def iter_scalar_contexts(value: object, pointer: str = "") -> Iterable[tuple[str
     if isinstance(value, Mapping):
         context = context_from_mapping(value)
         for key, item in value.items():
-            child_pointer = f"{pointer}/{escape_pointer(str(key))}"
+            key_text = str(key)
+            child_pointer = f"{pointer}/{escape_pointer(key_text)}"
             if isinstance(item, (Mapping, list)):
+                if is_provenance_subtree(key_text):
+                    continue
                 yield from iter_scalar_contexts(item, child_pointer)
                 continue
-            if item is None:
+            if item is None or is_provenance_leaf(key_text):
                 continue
             text = str(item)
             if text and len(text) <= MAX_SCALAR_LENGTH:
@@ -346,20 +628,51 @@ def collect_indicators_from_text(
     *,
     source: Mapping[str, str],
     max_sources_per_indicator: int,
+    rejections: Counter[str] | None = None,
 ) -> None:
     for raw_url in URL_RE.findall(text):
         url = normalize_url(raw_url)
         if not url:
             continue
+        url_status = url_indicator_status(url)
+        if url_status != "accept":
+            if rejections is not None:
+                rejections[f"url:{url_status}"] += 1
+            continue
         add_indicator(accumulator, "url", url, source, max_sources_per_indicator=max_sources_per_indicator)
         host = urlparse(url).hostname
         if host:
             add_indicator(accumulator, "domain", host.lower(), source, max_sources_per_indicator=max_sources_per_indicator)
-    for raw_ip in IP_RE.findall(text):
-        if not valid_ipv4(raw_ip):
+    pointer = str(source.get("pointer") or "")
+    field_key = pointer_field_key(pointer)
+    for match in IP_RE.finditer(text):
+        status = ipv4_indicator_status(text, match, field_key)
+        if status not in {"accept", "private"}:
+            if rejections is not None:
+                rejections[f"ip:{status}"] += 1
             continue
-        add_indicator(accumulator, "ip", raw_ip, source, max_sources_per_indicator=max_sources_per_indicator)
-    for raw_hash in HASH_RE.findall(text):
+        add_indicator(accumulator, "ip", match.group(0), source, max_sources_per_indicator=max_sources_per_indicator)
+    hash_field = is_evidence_hash_field(pointer, field_key)
+    name_like_field = bool(NAME_LIKE_FIELD_RE.search(field_key))
+    stripped = text.strip().lower()
+    for match in HASH_RE.finditer(text):
+        raw_hash = match.group(0)
+        lowered = raw_hash.lower()
+        if lowered in EMPTY_OR_PLACEHOLDER_HASHES or len(set(lowered)) <= 2:
+            if rejections is not None:
+                rejections["hash:empty-or-placeholder"] += 1
+            continue
+        labeled = (
+            not name_like_field
+            and "/" not in field_key
+            and "\\" not in field_key
+            and bool(HASH_LABEL_RE.search(text[max(0, match.start() - 8) : match.start()]))
+        )
+        standalone = stripped == lowered and not name_like_field
+        if not (hash_field or labeled or standalone):
+            if rejections is not None:
+                rejections["hash:not-hash-field"] += 1
+            continue
         add_indicator(
             accumulator,
             hash_type(raw_hash),
@@ -396,6 +709,7 @@ def collect_indicators_from_stream(
     *,
     source: Mapping[str, str],
     max_sources_per_indicator: int,
+    rejections: Counter[str] | None = None,
 ) -> None:
     """Collect indicators and scanner IOC hits from an output too large to load.
 
@@ -419,6 +733,7 @@ def collect_indicators_from_stream(
                     accumulator,
                     source={**source, "pointer": pointer, **context},
                     max_sources_per_indicator=max_sources_per_indicator,
+                    rejections=rejections,
                 )
             elif kind == "ioc_root":
                 _, pointer, hit, context = event
@@ -470,7 +785,10 @@ def _iter_stream_events(
     for key, child in node.members():
         if isinstance(child, Scalar):
             scalars[key] = child.value
-            scalar_order.append(key)
+            if not is_provenance_leaf(str(key)):
+                scalar_order.append(key)
+        elif key != "ioc_hits" and is_provenance_subtree(str(key)):
+            continue  # lazy child is skipped by the members() cursor
         elif key == "ioc_hits" and isinstance(child, LazyArray):
             for index, hit in enumerate(child.items()):
                 hit_pointer = f"{pointer}/ioc_hits/{index}"
@@ -756,11 +1074,31 @@ def finalize_indicator(
     matched_rules = match_indicator_rules(indicator, rule_set)
     if matched_rules:
         indicator["matched_rules"] = matched_rules
+        indicator["rule_provenance"] = [
+            {"rule_id": rule_id, "rule_set": rule_set.path if rule_set else "", "format": rule_set.format if rule_set else ""}
+            for rule_id in matched_rules
+        ]
     enrichment_hit = lookup_ti_enrichment(indicator, enrichment or {})
     if enrichment_hit:
         indicator["ti_enrichment"] = dict(enrichment_hit)
         indicator["risk_flags"] = sorted(set(indicator["risk_flags"]) | {"ti-enriched"})
+    indicator["severity"] = indicator_severity(indicator)
     return indicator
+
+
+def indicator_severity(indicator: Mapping[str, object]) -> str:
+    """``high`` (rule/TI hit), ``medium`` (global IP, cleartext/IP-host URL), ``low``, ``info``."""
+    if indicator.get("matched_rules") or indicator.get("ti_enrichment"):
+        return "high"
+    classification = str(indicator.get("classification") or "")
+    if classification in {"private", "loopback", "reserved", "non-global"}:
+        return "info"
+    flags = set(indicator.get("risk_flags") or [])
+    if flags & {"global-ip", "url-ip-host", "cleartext-url"}:
+        return "medium"
+    if str(indicator.get("type")) in {"md5", "sha1", "sha256"}:
+        return "info"
+    return "low"
 
 
 def load_ti_feeds(paths: Sequence[Path]) -> tuple[dict[tuple[str, str], dict[str, object]], list[dict[str, object]]]:
@@ -1675,6 +2013,8 @@ def match_indicator_rules(indicator: Mapping[str, object], rule_set: RuleSet | N
     indicator_type = str(indicator.get("type", ""))
     value = str(indicator.get("value", "")).lower()
     matched: list[str] = []
+    if indicator_type == "ip" and classify_indicator(indicator_type, value) in {"private", "loopback"}:
+        return []  # private addresses are flagged, never rule-matched
     for rule in rule_set.rules:
         if indicator_type == "domain" and any(value == item or value.endswith(f".{item}") for item in rule.domains) or indicator_type == "url" and any(item in value for item in rule.urls) or indicator_type in {"md5", "sha1", "sha256"} and indicator_type == "sha256" and value in rule.hashes:
             matched.append(rule.id)

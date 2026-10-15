@@ -68,6 +68,8 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             root = Path(tmp_dir)
             archive_path = root / "takeout-archive.zip"
             with zipfile.ZipFile(archive_path, "w") as archive:
+                # Export-root signature: every Takeout archive carries archive_browser.html.
+                archive.writestr("Takeout/archive_browser.html", "<html>Takeout</html>")
                 archive.writestr(
                     "Takeout/Mail/messages.json",
                     json.dumps(
@@ -138,7 +140,7 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             self.assertEqual(details["source_format"], "zip")
             self.assertEqual(details["service"], "google-takeout")
             self.assertEqual(details["cloud_family"], "google")
-            self.assertEqual(details["archive_entry_count"], 5)
+            self.assertEqual(details["archive_entry_count"], 6)
             self.assertEqual(details["archive_json_entry_count"], 3)
             self.assertEqual(details["archive_csv_entry_count"], 1)
             self.assertTrue(details["validation_checks"]["archive_opened"])
@@ -173,7 +175,7 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             )
             self.assertEqual(
                 uplift["functional_priority_profile"]["implemented_controls"]["cloud_archive_entry_count"],
-                5,
+                6,
             )
             self.assertIn(
                 "cloud-provider-archive-manifest-emitted",
@@ -195,7 +197,7 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             self.assertEqual(mail_details["normalized_thread_subject"], "Invoice password from MBOX")
             self.assertEqual(mail_details["gmail_thread_profile"]["profile_version"], "gmail-takeout-thread-profile-v1")
             self.assertEqual(mail_details["gmail_thread_profile"]["thread_link_status"], "single-message-or-root")
-            self.assertEqual(mail_details["archive_entry_index"], 3)
+            self.assertEqual(mail_details["archive_entry_index"], 4)
             self.assertEqual(mail_details["archive_message_index"], 0)
             self.assertIn("provider-archive-embedded-mail", mail_details["risk_flags"])
             self.assertTrue(mail_details["validation_checks"]["archive_embedded_row"])
@@ -1181,6 +1183,18 @@ class RapidTriageCloudExportTests(unittest.TestCase):
 
 
 def write_cloud_export_fixtures(root: Path) -> None:
+    # Export-root signatures: Takeout archive_browser.html, Purview EDRM
+    # Manifest.xml, an iCloud privacy-export segment, Slack users+channels.
+    (root / "Takeout").mkdir(parents=True)
+    (root / "Takeout" / "archive_browser.html").write_text("<html>Takeout</html>", encoding="utf-8")
+    (root / "Microsoft 365").mkdir(parents=True)
+    (root / "Microsoft 365" / "Manifest.xml").write_text(
+        '<?xml version="1.0"?><Root DataInterchangeType="Update" Description="EDRM"><Batch/></Root>',
+        encoding="utf-8",
+    )
+    (root / "Slack").mkdir(parents=True)
+    (root / "Slack" / "users.json").write_text("[]", encoding="utf-8")
+    (root / "Slack" / "channels.json").write_text("[]", encoding="utf-8")
     location = root / "Takeout" / "Location History" / "Records.json"
     location.parent.mkdir(parents=True)
     location.write_text(
@@ -1221,7 +1235,7 @@ def write_cloud_export_fixtures(root: Path) -> None:
         encoding="utf-8",
     )
 
-    icloud_photo = root / "Apple" / "iCloud Photos" / "photos.json"
+    icloud_photo = root / "Apple" / "iCloud Photos Part 1 of 1" / "photos.json"
     icloud_photo.parent.mkdir(parents=True)
     icloud_photo.write_text(
         json.dumps(
@@ -1258,7 +1272,7 @@ def write_cloud_export_fixtures(root: Path) -> None:
     )
 
     onedrive = root / "Microsoft 365" / "OneDrive" / "files.json"
-    onedrive.parent.mkdir(parents=True)
+    onedrive.parent.mkdir(parents=True, exist_ok=True)
     onedrive.write_text(
         json.dumps(
             [
@@ -1293,7 +1307,7 @@ def write_cloud_export_fixtures(root: Path) -> None:
     )
 
     teams = root / "Microsoft 365" / "Teams" / "messages.json"
-    teams.parent.mkdir(parents=True)
+    teams.parent.mkdir(parents=True, exist_ok=True)
     teams.write_text(
         json.dumps(
             [
@@ -1324,7 +1338,7 @@ def write_cloud_export_fixtures(root: Path) -> None:
     )
 
     audit = root / "Microsoft 365" / "Audit" / "audit.json"
-    audit.parent.mkdir(parents=True)
+    audit.parent.mkdir(parents=True, exist_ok=True)
     audit.write_text(
         json.dumps(
             [
@@ -1341,7 +1355,7 @@ def write_cloud_export_fixtures(root: Path) -> None:
     )
 
     slack = root / "Slack" / "messages.json"
-    slack.parent.mkdir(parents=True)
+    slack.parent.mkdir(parents=True, exist_ok=True)
     slack.write_text(
         json.dumps(
             [

@@ -187,6 +187,48 @@
         },
         "ioc_hit_count": {
           "type": "integer"
+        },
+        "time_origin": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_file_mtime_range": {
+          "type": "object"
+        },
+        "excluded_file_count": {
+          "type": "integer"
+        },
+        "exclusion_reason_counts": {
+          "type": "object"
+        },
+        "excluded_category_counts": {
+          "type": "object"
+        },
+        "limit_reached": {
+          "type": "boolean"
+        },
+        "attribute_counts": {
+          "type": "object"
+        },
+        "deleted_flag_counts": {
+          "type": "object"
+        },
+        "duplicate_hash_profile": {
+          "type": "object"
+        },
+        "duplicate_groups_truncated": {
+          "type": "boolean"
+        },
+        "fuzzy_text_duplicate_profile": {
+          "type": "object"
+        },
+        "fuzzy_text_duplicates_truncated": {
+          "type": "boolean"
+        },
+        "mismatch_candidates_truncated": {
+          "type": "boolean"
         }
       }
     },
@@ -318,34 +360,68 @@
                 ]
               },
               "subtype": {
-                "type": ["string", "null"]
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "confidence": {
-                "enum": ["high", "medium", "low", "unknown"]
+                "enum": [
+                  "high",
+                  "medium",
+                  "low",
+                  "unknown"
+                ]
               },
               "validation_status": {
-                "enum": ["unverified", "validated", "partial", "rejected"]
+                "enum": [
+                  "unverified",
+                  "validated",
+                  "partial",
+                  "rejected"
+                ]
               },
               "deletion_state": {
-                "type": ["string", "null"]
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "source_id": {
-                "type": ["string", "null"]
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "source_path": {
-                "type": ["string", "null"]
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "source_record_id": {
-                "type": ["string", "null"]
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "source_offset": {
-                "type": ["integer", "null"]
+                "type": [
+                  "integer",
+                  "null"
+                ]
               },
               "boundary_method": {
-                "type": ["string", "null"]
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "signature_type": {
-                "type": ["string", "null"]
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "limitations": {
                 "type": "array",
@@ -360,6 +436,106 @@
                 "type": "boolean"
               }
             }
+          },
+          "relative_path": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "time_origin": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "modified_at_origin": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source_file_mtime": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source_file_ctime": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source_file_atime": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "fs_modified_at": {
+            "type": [
+              "string",
+              "integer",
+              "number",
+              "boolean",
+              "object",
+              "array",
+              "null"
+            ]
+          },
+          "fs_created_at": {
+            "type": [
+              "string",
+              "integer",
+              "number",
+              "boolean",
+              "object",
+              "array",
+              "null"
+            ]
+          },
+          "fs_accessed_at": {
+            "type": [
+              "string",
+              "integer",
+              "number",
+              "boolean",
+              "object",
+              "array",
+              "null"
+            ]
+          },
+          "fs_changed_at": {
+            "type": [
+              "string",
+              "integer",
+              "number",
+              "boolean",
+              "object",
+              "array",
+              "null"
+            ]
+          },
+          "attributes": {
+            "type": "array"
+          },
+          "attributes_origin": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "is_deleted": {
+            "type": [
+              "string",
+              "integer",
+              "number",
+              "boolean",
+              "object",
+              "array",
+              "null"
+            ]
           }
         }
       }
@@ -598,6 +774,12 @@
           }
         }
       }
+    },
+    "time_provenance": {
+      "type": "object"
+    },
+    "file_exclusions": {
+      "type": "object"
     }
   }
 }

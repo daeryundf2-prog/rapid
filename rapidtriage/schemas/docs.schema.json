@@ -57,6 +57,33 @@
         },
         "skipped_document_count": {
           "type": "integer"
+        },
+        "text_status_counts": {
+          "type": "object"
+        },
+        "extraction_method_counts": {
+          "type": "object"
+        },
+        "indexed_with_text_count": {
+          "type": "integer"
+        },
+        "encrypted_count": {
+          "type": "integer"
+        },
+        "zero_text_count": {
+          "type": "integer"
+        },
+        "zero_text_reason_counts": {
+          "type": "object"
+        },
+        "ocr_available": {
+          "type": "boolean"
+        },
+        "listing_contract": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     },
@@ -209,6 +236,42 @@
           "modified_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "text_status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "extraction_method": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "text_length": {
+            "type": "integer"
+          },
+          "encrypted": {
+            "type": "boolean"
+          },
+          "text_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "matched": {
+            "type": "boolean"
+          },
+          "matched_keywords": {
+            "type": "array"
+          },
+          "modified_at_origin": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       }

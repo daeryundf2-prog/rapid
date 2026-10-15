@@ -1231,6 +1231,12 @@ def build_minimal_userassist_registry_hive(
             external_data_relative_offset=data_relative_offset,
             external_data_size=len(value_data),
         )
+    # Real subkey lists (UserAssist -> {GUID} -> Count) so a regf tree walk
+    # reaches the Count values (parser-quality r1: no string-scan fallback).
+    root_list_relative_offset = data_cursor
+    root_list_cell = build_registry_subkey_list_cell([guid_relative_offset])
+    guid_list_relative_offset = root_list_relative_offset + len(root_list_cell)
+    guid_list_cell = build_registry_subkey_list_cell([count_relative_offset])
 
     cell_payload = b"".join(
         [
@@ -1239,7 +1245,7 @@ def build_minimal_userassist_registry_hive(
                 timestamp,
                 allocated=True,
                 stable_subkey_count=1,
-                stable_subkey_list_relative_offset=0,
+                stable_subkey_list_relative_offset=root_list_relative_offset,
             ),
             build_registry_nk_cell(
                 guid_name,
@@ -1247,6 +1253,7 @@ def build_minimal_userassist_registry_hive(
                 allocated=True,
                 parent_relative_offset=root_relative_offset,
                 stable_subkey_count=1,
+                stable_subkey_list_relative_offset=guid_list_relative_offset,
             ),
             build_registry_nk_cell(
                 "Count",
@@ -1259,6 +1266,8 @@ def build_minimal_userassist_registry_hive(
             build_registry_value_list_cell(vk_offsets),
             *vk_cells,
             *data_cells,
+            root_list_cell,
+            guid_list_cell,
         ]
     )
     hbin = bytearray(4096)

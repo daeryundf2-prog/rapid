@@ -2456,6 +2456,9 @@ def write_mobile_export_fixtures(root: Path) -> None:
 
     xry = root / "XRY" / "contacts_calls.json"
     xry.parent.mkdir(parents=True)
+    # Acquisition-root signatures: XRY extraction file, GrayKey export
+    # metadata sidecar, AXIOM case database, Android data/data tree.
+    (xry.parent / "extraction.xry").write_bytes(b"XRY")
     xry.write_text(
         json.dumps(
             {
@@ -2468,6 +2471,7 @@ def write_mobile_export_fixtures(root: Path) -> None:
 
     graykey = root / "GrayKey" / "apps_files.json"
     graykey.parent.mkdir(parents=True)
+    (graykey.parent / "export-metadata.json").write_text(json.dumps({"vendor_tool": "GrayKey"}), encoding="utf-8")
     graykey.write_text(
         json.dumps(
             [
@@ -2480,6 +2484,7 @@ def write_mobile_export_fixtures(root: Path) -> None:
 
     axiom = root / "AXIOM" / "accounts_browser_media.json"
     axiom.parent.mkdir(parents=True)
+    (axiom.parent / "Case.mfdb").write_bytes(b"")
     axiom.write_text(
         json.dumps(
             [
@@ -2628,8 +2633,8 @@ def write_mobile_export_fixtures(root: Path) -> None:
         encoding="utf-8",
     )
 
-    whatsapp_db = root / "WhatsApp" / "msgstore.db"
-    whatsapp_db.parent.mkdir()
+    whatsapp_db = root / "Android" / "data" / "data" / "com.whatsapp" / "databases" / "msgstore.db"
+    whatsapp_db.parent.mkdir(parents=True)
     with contextlib.closing(sqlite3.connect(whatsapp_db)) as connection:
         connection.execute("CREATE TABLE messages (_id INTEGER, key_remote_jid TEXT, from_me INTEGER, data TEXT, timestamp INTEGER)")
         connection.execute("INSERT INTO messages VALUES (?, ?, ?, ?, ?)", (1, "15550100@s.whatsapp.net", 0, "redacted", 1777180000000))

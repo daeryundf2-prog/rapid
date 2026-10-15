@@ -225,7 +225,17 @@ class SqliteSnapshotTests(unittest.TestCase):
     def test_hot_journal_rejected_and_empty_journal_preserved(self) -> None:
         self.make_database(wal=False)
         journal = Path(str(self.path) + "-journal")
-        journal.write_bytes(bytes.fromhex("d9d505f920a163d7") + bytes(1024))
+        # Hot = journal magic and a page-record count (nRec, big-endian) > 0;
+        # a zeroed nRec is a committed/finished journal (parser-quality r1).
+        header = (
+            bytes.fromhex("d9d505f920a163d7")
+            + (1).to_bytes(4, "big")  # nRec
+            + (0x1234).to_bytes(4, "big")  # checksum nonce
+            + (1).to_bytes(4, "big")  # initial page count
+            + (512).to_bytes(4, "big")  # sector size
+            + (4096).to_bytes(4, "big")  # page size
+        )
+        journal.write_bytes(header + bytes(1024 - len(header)) + bytes(4096 + 8))
         before = self.inventory()
         with mock.patch.object(sqlite_snapshot.sqlite3, "connect") as connect:
             with self.assertRaisesRegex(sqlite_snapshot.SqliteSnapshotError, "hot journal"):

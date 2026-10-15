@@ -82,3 +82,14 @@ RapidTriage is a local triage and review tool, not a full commercial forensic su
 - Promoted record-field columns (`cols=` in the URL, per-kind localStorage) are limited to keys without whitespace, `,` or `:`. Meta-tab values longer than 600 characters are folded behind "전체 보기"; copy and search use the full text.
 - WER `Report.wer` files (UTF-16 LE with BOM) and the other small key/value sources read by the windows-system provider are decoded with BOM / NUL-interleave detection, so `wer-report` rows carry app, path, fault module and event time; the windows-system default columns show them.
 - `/case-db/ensure` on a run recorded before the persist step imports the whole run into the case DB synchronously (minutes for large runs); review marks made meanwhile are queued and applied when it completes, with a status notice.
+
+<!-- parser-quality-r1 W4 (core): begin -->
+## Parser-quality r1: core limits (W4)
+
+- Folder inputs are acquisition copies: file host times are copy times. They are kept as `source_file_*` and are not timeline events; filesystem times appear only when a listing (E01 `fls-rpl.txt`) or the NTFS metadata join provides them. The API files join (`api/app/files_ntfs.py`) still adds `$SI`/`$FN` times per page; it is not written back into files.json.
+- Timeline coverage is the explicit `TIMELINE_FIELD_MAP` plus the row-level timestamp contracts; artifact types with timestamp-like fields but no mapping are listed in `summary.unmapped_artifact_type_counts` (no event). `registry-key-tree-node` (bulk key inventory) is excluded. EXIF / ZIP DOS times are local wall-clock (`timezone: local-unknown`). PE link times (Amcache `link_date_raw`) are build stamps and may be arbitrary (reproducible builds).
+- Indicator extraction caps at 1,000 rows by default (`summary.truncated`, `total_before_cap`); per-indicator sources cap at 10. YARA is not an engine here: `.yar` files import as string rules only. With no rule loaded the output is labelled `지표 후보`.
+- Document text: encrypted/DRM documents (HWP password or distribution, encrypted OOXML, PDF `/Encrypt`) are flagged, not decrypted; HWP `PrvText` preview text is indexed when the body is encrypted. Image-only PDFs need OCR (no Tesseract integration in this step). CID fonts without ToUnicode yield no text. Text over 20 % non-printable is rejected (`binary-rejected`). Fuzzy text duplicate grouping compares the first 200 eligible text files (`fuzzy_text_duplicates_truncated`).
+- The docs API (`GET /api/runs/{id}/docs`) still pages `results` (keyword hits); listing every candidate needs the route to page `candidates` with a `matched` filter.
+- The silent-failure target inventory stops at 20,000 files and then reports `target-inventory-truncated`.
+<!-- parser-quality-r1 W4 (core): end -->

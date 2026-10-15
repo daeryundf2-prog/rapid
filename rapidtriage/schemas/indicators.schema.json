@@ -108,6 +108,66 @@
         },
         "commercial_grade_ready": {
           "type": "boolean"
+        },
+        "total_before_cap": {
+          "type": "integer"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "max_indicators": {
+          "type": "integer"
+        },
+        "type_counts_before_cap": {
+          "type": "object"
+        },
+        "sources_truncated_indicator_count": {
+          "type": "integer"
+        },
+        "max_sources_per_indicator": {
+          "type": "integer"
+        },
+        "severity_counts": {
+          "type": "object"
+        },
+        "rejected_token_counts": {
+          "type": "object"
+        },
+        "scanned_outputs": {
+          "type": "array"
+        },
+        "field_policy": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rule_count": {
+          "type": "integer"
+        },
+        "rules_loaded": {
+          "type": "boolean"
+        },
+        "display_label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rule_status_message": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "yara": {
+          "type": "object"
+        },
+        "ioc_scanner_row_count_before_cap": {
+          "type": "integer"
+        },
+        "ioc_scanner_truncated": {
+          "type": "boolean"
         }
       }
     },
@@ -407,6 +467,15 @@
                 "type": "string"
               }
             }
+          },
+          "severity": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rule_provenance": {
+            "type": "array"
           }
         }
       }

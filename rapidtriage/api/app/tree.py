@@ -22,23 +22,116 @@ from .helpers import default_case_path, enrich_summary_counts, get_job, get_outp
 
 SUMMARY_SCAN_BYTES = 65536
 
-# Plan section 6-2 artifact grouping: (group_id, Korean label, kind ids).
-ARTIFACT_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
-    ("os-account", "운영체제·계정", ("windows-os-account",)),
-    ("event-log", "이벤트 로그", ("eventlog",)),
-    ("registry", "레지스트리", ("windows-registry", "windows-shellbags")),
-    ("execution", "실행 흔적", ("windows-execution", "windows-prefetch", "windows-search-index")),
-    ("file-usage", "파일 사용", ("recent-files",)),
-    ("remote-access", "원격 접속", ("windows-remote-access",)),
-    ("browser", "브라우저", ("browser",)),
-    ("messaging-mail", "메신저·메일", ("email", "kakaotalk-windows", "kakaotalk-macos", "mobile-export")),
-    ("cloud", "클라우드 내보내기", ("cloud-export",)),
-    ("mobile", "모바일", ("android-apk",)),
-    ("media", "미디어", ("media-image", "synthetic-media")),
-    ("documents", "문서", ("generic-documents",)),
-    ("memory", "메모리", ("memory-volatility",)),
-    ("filesystem-system", "파일시스템·시스템", ("windows-filesystem", "windows-system", "linux-system", "macos-system")),
+# Evidence-tree domains, aligned with frontend/src/features/tree/domains.ts
+# (one table): (domain id, Korean label, artifact kind, artifact types).
+# ``None`` types = the kind's default domain; a row with types routes those
+# types of the kind to another domain (the kind then appears in both, the
+# secondary node id is ``artifacts:<kind>@<domain>``).
+DOMAIN_LABELS: dict[str, str] = {
+    "os": "운영체제·계정",
+    "execution": "실행 흔적",
+    "filesystem": "파일시스템",
+    "registry": "레지스트리",
+    "eventlog": "이벤트 로그",
+    "web": "웹·브라우저",
+    "messaging": "메신저·메일",
+    "cloud": "클라우드",
+    "media": "미디어·문서",
+    "mobile": "모바일",
+    "devices": "연결 장치·원격",
+    "anti-forensics": "안티 포렌식",
+    "incident": "침해사고",
+    "memory": "메모리",
+    "location": "위치·여행",
+}
+ARTIFACT_DOMAIN_TABLE: tuple[tuple[str, str, tuple[str, ...] | None], ...] = (
+    # --- kind defaults ----------------------------------------------------
+    ("os", "windows-os-account", None),
+    ("os", "windows-system", None),
+    ("os", "linux-system", None),
+    ("os", "macos-system", None),
+    ("execution", "windows-prefetch", None),
+    ("execution", "windows-execution", None),
+    ("execution", "windows-search-index", None),
+    ("execution", "recent-files", None),
+    ("filesystem", "windows-filesystem", None),
+    ("registry", "windows-registry", None),
+    ("registry", "windows-shellbags", None),
+    ("eventlog", "eventlog", None),
+    ("web", "browser", None),
+    ("messaging", "email", None),
+    ("messaging", "kakaotalk-windows", None),
+    ("messaging", "kakaotalk-macos", None),
+    ("cloud", "cloud-export", None),
+    ("media", "media-image", None),
+    ("media", "synthetic-media", None),
+    ("media", "generic-documents", None),
+    ("mobile", "mobile-export", None),
+    ("mobile", "android-apk", None),
+    ("devices", "windows-remote-access", None),
+    ("memory", "memory-volatility", None),
+    # --- type routing -----------------------------------------------------
+    ("devices", "windows-os-account", ("windows-mounted-device", "windows-usb-device")),
+    ("devices", "windows-registry", ("windows-mounted-device", "windows-usb-device", "windows-network-interface")),
+    (
+        "devices",
+        "windows-system",
+        ("usb-setupapi-device-install-candidate", "third-party-remote-control-artifact", "wifi-profile"),
+    ),
+    (
+        "os",
+        "windows-registry",
+        (
+            "windows-service-config",
+            "windows-timezone",
+            "windows-computer-name",
+            "windows-control-set",
+            "windows-os-version",
+            "windows-profile-list-entry",
+            "windows-installed-program",
+            "windows-sam-account",
+            "windows-sam-group",
+        ),
+    ),
+    ("eventlog", "windows-system", ("firewall-log",)),
+    (
+        "incident",
+        "windows-system",
+        ("web-server-log", "webshell-source-candidate", "bits-qmgr-transfer-candidate", "bits-qmgr-sqlite-job-candidate"),
+    ),
+    ("anti-forensics", "windows-system", ("defender-policy-artifact", "defender-support-log")),
+    ("anti-forensics", "windows-filesystem", ("ads-stream-candidate", "zone-identifier")),
+    ("messaging", "mobile-export", ("mobile-message", "mobile-chat-database")),
+    ("location", "mobile-export", ("mobile-location",)),
+    ("location", "cloud-export", ("cloud-location",)),
+    ("web", "macos-system", ("macos-browser-history-downloads",)),
 )
+# Rows that are pivots/strings, not evidence records (W2 ``*-string-candidate``).
+NON_EVIDENCE_TYPE_SUFFIXES: tuple[str, ...] = ("-string-candidate",)
+# Kept for callers that enumerate groups (derived from the table).
+ARTIFACT_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = tuple(
+    (
+        domain,
+        DOMAIN_LABELS[domain],
+        tuple(kind for row_domain, kind, types in ARTIFACT_DOMAIN_TABLE if row_domain == domain and types is None),
+    )
+    for domain in DOMAIN_LABELS
+)
+
+
+def artifact_type_domain(kind: str, artifact_type: str) -> str:
+    """Domain of one artifact type of a kind (routing rows win over defaults)."""
+    default = "other"
+    for domain, row_kind, types in ARTIFACT_DOMAIN_TABLE:
+        if row_kind != kind:
+            continue
+        if types is None:
+            if default == "other":
+                default = domain
+        elif artifact_type in types:
+            return domain
+    return default
+
 
 # Plan P1 §3.3 "분석 작업" nodes: (node key, Korean label, analysis kinds).
 # ``web-logs`` runs no analysis: it links to the windows-system kind filtered
@@ -62,6 +155,11 @@ FILE_CATEGORY_LABELS: dict[str, str] = {
     "databases": "데이터베이스",
     "emails": "이메일",
     "mobile-images": "모바일 이미지",
+    "executables": "실행 파일",
+    "memory-dumps": "메모리 덤프",
+    "disk-images": "디스크 이미지",
+    "vehicle-images": "차량 이미지",
+    "other": "기타",
 }
 
 KIND_LABELS: dict[str, str] = {
@@ -209,69 +307,7 @@ def build_run_tree(store: RunJobStore, run_id: str) -> dict[str, Any]:
             kind_summaries[kind] = {}
 
     artifacts_total = int(counts.get("artifacts") or 0)
-    artifact_groups: list[dict[str, Any]] = []
-    grouped_kinds: set[str] = set()
-    for group_id, group_label, kinds in ARTIFACT_GROUPS:
-        kind_nodes: list[dict[str, Any]] = []
-        group_count = 0
-        for kind in kinds:
-            if kind not in kind_summaries:
-                continue
-            grouped_kinds.add(kind)
-            kind_summary = kind_summaries[kind]
-            kind_count = int(kind_summary.get("artifact_count") or 0)
-            group_count += kind_count
-            type_counts = kind_summary.get("artifact_type_counts")
-            type_children: list[dict[str, Any]] = []
-            if isinstance(type_counts, dict):
-                for artifact_type, count in sorted(type_counts.items()):
-                    if not isinstance(count, int):
-                        continue
-                    type_children.append(
-                        _node(
-                            f"artifacts:{kind}:{artifact_type}",
-                            artifact_type,
-                            count,
-                            collection="artifacts",
-                            kind=kind,
-                            artifact_type=artifact_type,
-                        )
-                    )
-            kind_nodes.append(
-                _node(
-                    f"artifacts:{kind}",
-                    KIND_LABELS.get(kind, kind),
-                    kind_count,
-                    children=type_children or None,
-                    collection="artifacts",
-                    kind=kind,
-                    artifact_type_counts=_type_counts(kind_summary),
-                )
-            )
-        if kind_nodes:
-            artifact_groups.append(
-                _node(f"artifacts-group:{group_id}", group_label, group_count, children=kind_nodes)
-            )
-    # Kinds not covered by the declared groups still surface under "기타".
-    other_nodes: list[dict[str, Any]] = []
-    other_count = 0
-    for kind, kind_summary in sorted(kind_summaries.items()):
-        if kind in grouped_kinds:
-            continue
-        kind_count = int(kind_summary.get("artifact_count") or 0)
-        other_count += kind_count
-        other_nodes.append(
-            _node(
-                f"artifacts:{kind}",
-                KIND_LABELS.get(kind, kind),
-                kind_count,
-                collection="artifacts",
-                kind=kind,
-                artifact_type_counts=_type_counts(kind_summary),
-            )
-        )
-    if other_nodes:
-        artifact_groups.append(_node("artifacts-group:other", "기타", other_count, children=other_nodes))
+    artifact_groups = build_artifact_domain_groups(kind_summaries)
     if artifacts_total or artifact_groups:
         nodes.append(
             _node("artifacts", "아티팩트", artifacts_total, children=artifact_groups, collection="artifacts")
@@ -281,14 +317,43 @@ def build_run_tree(store: RunJobStore, run_id: str) -> dict[str, Any]:
 
     # --- 문서 / 타임라인 / 지표 / 리뷰 선별 / 검증 이슈 -----------------------
     docs_count = int(counts.get("docs") or 0)
-    if docs_count:
-        nodes.append(_node("docs", "문서", docs_count, collection="docs"))
+    document_candidates = int(counts.get("document_candidates") or 0)
+    if docs_count or document_candidates:
+        # count = keyword matches (what GET /docs pages today);
+        # candidate_count = every document candidate (all are listed once the
+        # docs route pages ``candidates`` with a matched filter).
+        nodes.append(
+            _node(
+                "docs",
+                "문서",
+                docs_count,
+                collection="docs",
+                candidate_count=document_candidates,
+                match_count=docs_count,
+            )
+        )
     timeline_count = int(counts.get("timeline_events") or 0)
     if timeline_count:
         nodes.append(_node("timeline", "타임라인", timeline_count, collection="timeline"))
     indicator_count = int(counts.get("indicators") or 0)
     if indicator_count:
-        nodes.append(_node("indicators", "지표", indicator_count, collection="indicators"))
+        try:
+            indicator_summary = read_output_summary(get_output_path(store, run_id, "indicators"))
+        except HTTPException:
+            indicator_summary = {}
+        # "지표 후보" when no detection rule was applied (parser-quality r1).
+        indicator_label = str(indicator_summary.get("display_label") or "지표 후보")
+        nodes.append(
+            _node(
+                "indicators",
+                indicator_label,
+                indicator_count,
+                collection="indicators",
+                rule_count=int(indicator_summary.get("rule_count") or 0),
+                truncated=bool(indicator_summary.get("truncated")),
+                total_before_cap=indicator_summary.get("total_before_cap"),
+            )
+        )
 
     bookmark_count = _case_bookmark_count(store, run_id)
     nodes.append(_node("review", "리뷰 선별", bookmark_count, collection="review"))
@@ -306,6 +371,88 @@ def build_run_tree(store: RunJobStore, run_id: str) -> dict[str, Any]:
         },
         "nodes": nodes,
     }
+
+
+def build_artifact_domain_groups(kind_summaries: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """Domain -> kind -> artifact_type nodes from :data:`ARTIFACT_DOMAIN_TABLE`."""
+    placement: dict[str, dict[str, dict[str, int]]] = {}
+    kind_order: dict[str, list[str]] = {}
+    for kind, kind_summary in sorted(kind_summaries.items()):
+        type_counts = _type_counts(kind_summary)
+        default = artifact_type_domain(kind, "")
+        if not type_counts:
+            placement.setdefault(default, {}).setdefault(kind, {})
+            kind_order.setdefault(default, []).append(kind)
+            continue
+        for artifact_type, count in type_counts.items():
+            domain = artifact_type_domain(kind, artifact_type)
+            bucket = placement.setdefault(domain, {})
+            if kind not in bucket:
+                kind_order.setdefault(domain, []).append(kind)
+            bucket.setdefault(kind, {})[artifact_type] = count
+    groups: list[dict[str, Any]] = []
+    for domain in [*DOMAIN_LABELS, "other"]:
+        bucket = placement.get(domain)
+        if not bucket:
+            continue
+        kind_nodes: list[dict[str, Any]] = []
+        group_count = 0
+        for kind in kind_order.get(domain, []):
+            kind_summary = kind_summaries.get(kind) or {}
+            types = bucket[kind]
+            primary = artifact_type_domain(kind, "") == domain
+            kind_count = int(kind_summary.get("artifact_count") or 0) if primary and len(placement_domains(placement, kind)) == 1 else sum(types.values())
+            group_count += kind_count
+            type_children = [
+                _node(
+                    f"artifacts:{kind}:{artifact_type}",
+                    artifact_type,
+                    count,
+                    collection="artifacts",
+                    kind=kind,
+                    artifact_type=artifact_type,
+                    domain=domain,
+                    **({"non_evidence": True} if artifact_type.endswith(NON_EVIDENCE_TYPE_SUFFIXES) else {}),
+                )
+                for artifact_type, count in sorted(types.items())
+            ]
+            extra: dict[str, Any] = {}
+            notes = kind_summary.get("collection_notes")
+            if isinstance(notes, list) and notes:
+                extra["collection_notes"] = [str(item) for item in notes]
+            # Forwarded as-is (also "completed") so the console can say
+            # "제공자 건너뜀(사유)" from skip_reasons / skipped_row_count.
+            if kind_summary.get("collection_status"):
+                extra["collection_status"] = str(kind_summary.get("collection_status"))
+            skip_reasons = kind_summary.get("skip_reasons")
+            if isinstance(skip_reasons, dict) and skip_reasons:
+                extra["skip_reasons"] = {str(reason): int(count) for reason, count in skip_reasons.items() if isinstance(count, int)}
+            if isinstance(kind_summary.get("skipped_row_count"), int):
+                extra["skipped_row_count"] = int(kind_summary["skipped_row_count"])
+            kind_nodes.append(
+                _node(
+                    f"artifacts:{kind}" if primary else f"artifacts:{kind}@{domain}",
+                    KIND_LABELS.get(kind, kind),
+                    kind_count,
+                    children=type_children or None,
+                    collection="artifacts",
+                    kind=kind,
+                    domain=domain,
+                    # whole-kind counts on the primary node (existing contract);
+                    # domain_artifact_type_counts = the types placed here.
+                    artifact_type_counts=_type_counts(kind_summary) if primary else dict(sorted(types.items())),
+                    domain_artifact_type_counts=dict(sorted(types.items())),
+                    **extra,
+                )
+            )
+        groups.append(
+            _node(f"artifacts-group:{domain}", DOMAIN_LABELS.get(domain, "기타"), group_count, children=kind_nodes)
+        )
+    return groups
+
+
+def placement_domains(placement: dict[str, dict[str, dict[str, int]]], kind: str) -> list[str]:
+    return [domain for domain, bucket in placement.items() if kind in bucket]
 
 
 def _analysis_brief(state: dict[str, Any] | None) -> dict[str, Any] | None:

@@ -6,7 +6,7 @@ import hashlib
 import json
 import os
 from collections.abc import Iterable, Mapping, Sequence
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path, PureWindowsPath
 
 from ...core.artifact_profiles import cap_list_field
@@ -14,6 +14,7 @@ from ...core.audit import compute_sha256
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 from .common import build_forensic_review, isoformat_from_timestamp
+from .filesystem import CONTENT_KIND_LABELS_KO, sniff_content_kind
 
 PREFETCH_ROOT = ("Windows", "Prefetch")
 PARSER_VERSION = "prefetch-inventory-v9"
@@ -96,9 +97,9 @@ PREFETCH_SECTION_ENTRY_SIZE_HINTS = {
     "trace_chains": {17: 8, 23: 8, 26: 8, 30: 8, 31: 8},
 }
 PREFETCH_COMMERCIAL_BLOCKERS = [
-    "Full file metrics array decoding and MFT file-reference extraction are not implemented.",
-    "Volume information is surfaced as bounded string/path candidates, not decoded from the authoritative volume table.",
-    "Trace chains, directory strings, and file information sections are not fully version-validated.",
+    "Full file metrics array decoding (load-order paths, MFT references) is native but not yet diffed against a PECmd known-answer corpus.",
+    "Volume information (device path, serial, creation time, directory strings) is decoded natively but not yet corpus-validated.",
+    "Trace chains are not decoded; file information layouts are validated only for the observed v17/23/26/30/31 variants.",
     "Known-answer corpus validation across malformed, compressed, and cross-version Prefetch files is incomplete.",
 ]
 PREFETCH_NATIVE_CAPABILITIES = {
@@ -146,6 +147,10 @@ class WindowsPrefetchProvider:
                 continue
             stat_result = path.stat()
             header = prefetch_header_hints(path)
+            if not header.get("binary_format_detected"):
+                yield build_prefetch_invalid_content_record(path, header, stat_result)
+                continue
+            all_referenced_paths = list(header.pop("referenced_paths_all", None) or header.get("referenced_paths") or [])
             filename_executable_hint = executable_hint(path.name)
             header_executable_name = str(header.get("header_executable_name") or "")
             source_hashes = {"sha256": compute_sha256(path)}
@@ -181,9 +186,11 @@ class WindowsPrefetchProvider:
                     "prefetch_hash": prefetch_hash_hint(path.name),
                     "entry_name": path.name,
                     "size": stat_result.st_size,
-                    "modified_at": isoformat_from_timestamp(stat_result.st_mtime),
-                    "timestamp": isoformat_from_timestamp(stat_result.st_mtime),
-                    "timestamp_source": "prefetch_file_modified_at",
+                    # Host mtime of the acquired copy is provenance only, never an event.
+                    "source_file_mtime": isoformat_from_timestamp(stat_result.st_mtime),
+                    "timestamp": header.get("last_run_at", ""),
+                    "timestamp_source": "prefetch_last_run_time" if header.get("last_run_at") else "missing_prefetch_run_time",
+                    "timestamp_kind": "run",
                     "evidence_strength": "execution-indicator",
                     "validation_required": True,
                     "core_accuracy_gates": core_accuracy_gates,
@@ -227,8 +234,69 @@ class WindowsPrefetchProvider:
                     "note": "Prefetch triage parser uses version-specific common-header offsets plus bounded native candidates; validate critical findings with a dedicated parser such as PECmd.",
                 }),
             )
-            for index, referenced_path in enumerate(header.get("referenced_paths") or []):
+            for index, referenced_path in enumerate(all_referenced_paths):
                 yield build_prefetch_reference_record(path, str(referenced_path), index, header, source_hashes)
+
+
+def build_prefetch_invalid_content_record(path: Path, header: Mapping[str, object], stat_result: os.stat_result) -> ArtifactRecord:
+    """A ``.pf`` file whose content is not Prefetch (SCCA/valid MAM).
+
+    Typical on acquired images where the Prefetch directory entry survives but
+    its clusters were reallocated (JPEG, PE, JSON, zeros ...). The row is kept
+    for provenance but carries no executable hint, run count or run time and
+    is excluded from execution summaries.
+    """
+    try:
+        with path.open("rb") as handle:
+            prefix = handle.read(4096)
+    except OSError:
+        prefix = b""
+    content = sniff_content_kind(prefix)
+    decompression = header.get("prefetch_decompression") if isinstance(header.get("prefetch_decompression"), Mapping) else {}
+    content_kind = str(content["kind"])
+    if content_kind == "windows-prefetch-mam":
+        content_kind = "mam-decompression-failed"
+        content_label = "MAM 압축 해제 실패(손상)"
+    else:
+        content_label = CONTENT_KIND_LABELS_KO.get(content_kind, content_kind)
+    source_path = resolved_path_text(path)
+    return ArtifactRecord(
+        provider=WindowsPrefetchProvider.name,
+        artifact_type="prefetch-invalid-content",
+        path=source_path,
+        supported=True,
+        details={
+            "parser": "windows-prefetch-inventory",
+            "parser_version": PARSER_VERSION,
+            "artifact_type": "prefetch-invalid-content",
+            "coverage_status": "invalid-content",
+            "reportability": "excluded-from-execution-evidence",
+            "parser_confidence": "high",
+            "source_path": source_path,
+            "source_format": "pf",
+            "source_hashes": {"sha256": compute_sha256(path)},
+            "entry_name": path.name,
+            "size": stat_result.st_size,
+            "source_file_mtime": isoformat_from_timestamp(stat_result.st_mtime),
+            "prefetch_parse_status": "invalid-content",
+            "binary_format_detected": False,
+            "detected_content_kind": content_kind,
+            "detected_content_label": content_label,
+            "detected_content_basis": content["basis"],
+            "content_entropy": content["entropy"],
+            "content_zero_ratio": content["zero_ratio"],
+            "header_hex": prefix[:16].hex(),
+            "prefetch_decompression": dict(decompression),
+            "execution_evidence": False,
+            "risk_flags": ["prefetch-invalid-content", "signature-extension-mismatch"],
+            "validation_required": True,
+            "note": (
+                "파일명은 Prefetch(.pf)이지만 내용이 SCCA/MAM Prefetch 구조가 아닙니다"
+                f"({content_label}). 실행 근거·실행 횟수·실행 시각으로 쓰지 않으며, "
+                "파일명에서 실행 파일명을 추정하지 않습니다. 클러스터 재할당 잔존물인지 MFT/USN으로 확인하십시오."
+            ),
+        },
+    )
 
 
 def executable_hint(name: str) -> str:
@@ -299,25 +367,41 @@ def prefetch_header_hints(path: Path) -> dict[str, object]:
     if not is_scca:
         return hints
     hints["declared_file_size"] = read_u32(parse_blob, 0x0C)
-    run_count_offset = version_metadata.get("run_count_offset")
-    last_run_offset = version_metadata.get("last_run_time_offset")
-    last_run_slots = int(version_metadata.get("last_run_time_slots") or 0)
-    if run_count_offset is not None:
-        hints["run_count"] = read_u32(parse_blob, int(run_count_offset))
-    if last_run_offset is not None:
-        run_times = prefetch_run_times(parse_blob, int(last_run_offset), slots=last_run_slots)
-        hints["last_run_times"] = run_times
-        hints["last_run_at"] = run_times[0] if run_times else ""
-    strings = extract_utf16le_strings(parse_blob[: min(len(parse_blob), MAX_PREFETCH_SCAN_BYTES)])
-    fixed_header_name = read_prefetch_executable_name(parse_blob)
-    executable_names = [item for item in strings if ".exe" in item.lower()]
-    if fixed_header_name:
-        hints["header_executable_name"] = fixed_header_name
-    elif executable_names:
-        hints["header_executable_name"] = executable_names[0]
-    referenced_paths = referenced_prefetch_paths(strings)
-    volume_candidates = prefetch_volume_candidates(referenced_paths)
-    file_reference_candidates = prefetch_file_reference_candidates(referenced_paths)
+    decoded = decode_scca_structure(parse_blob, prefetch_version)
+    version_metadata = dict(version_metadata)
+    if decoded["run_count_offset"] is not None:
+        version_metadata["run_count_offset"] = decoded["run_count_offset"]
+        version_metadata["run_count_offset_hex"] = hex(int(decoded["run_count_offset"]))
+    hints["prefetch_version_metadata"] = version_metadata
+    hints["run_count"] = decoded["run_count"]
+    hints["run_count_offset"] = decoded["run_count_offset"]
+    hints["run_count_layout_rule"] = decoded["run_count_layout_rule"]
+    hints["run_count_cross_check"] = decoded["run_count_cross_check"]
+    hints["file_information_layout"] = decoded["file_information_layout"]
+    run_times = list(decoded["run_times"])
+    hints["last_run_times"] = run_times
+    hints["last_run_filetimes"] = list(decoded["run_filetimes"])
+    hints["last_run_at"] = run_times[0] if run_times else ""
+    for index, value in enumerate(run_times[:8], start=1):
+        hints[f"run_time_{index}"] = value
+    hints["header_executable_name"] = decoded["header_executable_name"]
+    hints["header_executable_name_may_be_truncated"] = decoded["header_executable_name_may_be_truncated"]
+    hints["header_prefetch_hash"] = decoded["header_prefetch_hash"]
+    referenced_paths = list(decoded["referenced_paths"])
+    hints["referenced_path_source"] = decoded["referenced_path_source"]
+    hints["file_metrics_count"] = decoded["file_metrics_count"]
+    hints["file_metrics_decoded_count"] = decoded["file_metrics_decoded_count"]
+    if decoded["volumes"]:
+        volume_candidates = prefetch_volume_candidates_from_table(decoded["volumes"], referenced_paths)
+    else:
+        volume_candidates = prefetch_volume_candidates(referenced_paths)
+    hints["volumes"] = decoded["volumes"]
+    hints["volume_count"] = len(decoded["volumes"])
+    hints["volume_information_status"] = decoded["volume_information_status"]
+    file_reference_candidates = prefetch_file_reference_candidates(referenced_paths, decoded["file_metrics"])
+    # Every referenced path becomes its own ``prefetch-reference`` row (no cap);
+    # only the inline list on the file row is capped and disclosed.
+    hints["referenced_paths_all"] = referenced_paths
     hints["referenced_paths"] = list(referenced_paths)
     cap_list_field(hints, "referenced_paths", MAX_REFERENCED_PATHS)
     hints["referenced_path_count"] = len(referenced_paths)
@@ -326,6 +410,13 @@ def prefetch_header_hints(path: Path) -> dict[str, object]:
     hints["file_reference_candidates"] = list(file_reference_candidates)
     cap_list_field(hints, "file_reference_candidates", MAX_FILE_REFERENCE_CANDIDATES)
     hints["file_reference_candidate_count"] = len(file_reference_candidates)
+    hints["prefetch_decode_coverage"] = {
+        "file_information": "decoded" if decoded["run_count_offset"] is not None else "unsupported-version",
+        "file_metrics": "decoded" if decoded["file_metrics_decoded_count"] else "not-decoded",
+        "filename_strings": decoded["referenced_path_source"],
+        "volume_information": decoded["volume_information_status"],
+        "trace_chains": "not-decoded",
+    }
     hints["prefetch_validation_checks"] = prefetch_validation_checks(
         is_scca=is_scca,
         prefetch_version=prefetch_version,
@@ -338,8 +429,252 @@ def prefetch_header_hints(path: Path) -> dict[str, object]:
         compression_probe=compression_probe,
         section_bounds_profile=section_bounds_profile,
     )
+    hints["prefetch_validation_checks"]["run_count_consistent_with_run_times"] = bool(
+        decoded["run_count_cross_check"].get("consistent")
+    )
+    hints["prefetch_validation_checks"]["compressed_prefetch_decompressed"] = bool(decompressed)
     hints["parser_confidence"] = "medium" if version_metadata["supported_common_layout"] else "low"
     return hints
+
+
+# File-information layouts. Version 30/31 has two observed variants that are
+# told apart by the file metrics array offset (= end of file information):
+#   0x130 (file information 224 bytes): run count at 0xD0
+#   0x128 / 0x12C (212/216 bytes):      run count at 0xC8
+# Both keep the eight last-run FILETIMEs at 0x80.
+PREFETCH_V30_RUN_COUNT_BY_METRICS_OFFSET = {0x128: 0xC8, 0x12C: 0xC8, 0x130: 0xD0}
+PREFETCH_FILE_METRICS_ENTRY_SIZE = {17: 20, 23: 32, 26: 32, 30: 32, 31: 32}
+PREFETCH_VOLUME_ENTRY_SIZE = {17: 40, 23: 104, 26: 104, 30: 96, 31: 96}
+PREFETCH_HEADER_NAME_CHARS = 29  # 60-byte UTF-16 field: 29 characters + NUL
+
+
+def decode_scca_structure(blob: bytes, version: int) -> dict[str, object]:
+    layout = PREFETCH_VERSION_LAYOUTS.get(version) or {}
+    metrics_offset = read_u32(blob, 0x54)
+    metrics_count = read_u32(blob, 0x58)
+    filename_offset = read_u32(blob, 0x64)
+    filename_size = read_u32(blob, 0x68)
+    volume_offset = read_u32(blob, 0x6C)
+    volume_count = read_u32(blob, 0x70)
+    volume_size = read_u32(blob, 0x74)
+
+    raw_name = blob[0x10:0x4C].decode("utf-16le", errors="replace")
+    header_name = raw_name.split("\x00", 1)[0].strip()
+    result: dict[str, object] = {
+        "header_executable_name": header_name,
+        "header_executable_name_may_be_truncated": len(header_name) >= PREFETCH_HEADER_NAME_CHARS,
+        "header_prefetch_hash": f"{read_u32(blob, 0x4C):08X}" if len(blob) >= 0x50 else "",
+        "run_count": 0,
+        "run_count_offset": None,
+        "run_count_layout_rule": "unsupported-version",
+        "run_count_cross_check": {},
+        "file_information_layout": "",
+        "run_times": [],
+        "run_filetimes": [],
+        "file_metrics": [],
+        "file_metrics_count": metrics_count,
+        "file_metrics_decoded_count": 0,
+        "referenced_paths": [],
+        "referenced_path_source": "not-decoded",
+        "volumes": [],
+        "volume_information_status": "not-decoded",
+    }
+    if not layout:
+        return result
+
+    run_slots = int(layout["last_run_time_slots"])
+    run_time_offset = int(layout["last_run_time_offset"])
+    filetimes = [read_u64(blob, run_time_offset + index * 8) for index in range(run_slots)]
+    nonzero_filetimes = [value for value in filetimes if value]
+    result["run_filetimes"] = nonzero_filetimes
+    result["run_times"] = [text for text in (filetime_to_iso(value) for value in nonzero_filetimes) if text]
+
+    if version in (30, 31):
+        selected = PREFETCH_V30_RUN_COUNT_BY_METRICS_OFFSET.get(metrics_offset)
+        if selected is None:
+            selected = 0xD0
+            rule = f"v{version}-metrics-offset-0x{metrics_offset:x}-unrecognized-default-0xd0"
+            info_layout = f"v{version}-unrecognized"
+        else:
+            rule = f"v{version}-metrics-offset-0x{metrics_offset:x}-run-count-0x{selected:x}"
+            info_layout = f"v{version}-file-information-{metrics_offset - 0x54}-bytes"
+        alternate = 0xC8 if selected == 0xD0 else 0xD0
+    else:
+        selected = int(layout["run_count_offset"])
+        rule = f"v{version}-fixed-0x{selected:x}"
+        info_layout = str(layout["layout_name"])
+        alternate = None
+    run_count = read_u32(blob, selected)
+    cross_check: dict[str, object] = {
+        "nonzero_run_time_count": len(nonzero_filetimes),
+        "run_time_slots": run_slots,
+        "selected_offset_hex": hex(selected),
+        "selected_value": run_count,
+    }
+    consistent = run_count >= len(nonzero_filetimes) and (len(nonzero_filetimes) == run_slots or run_count == len(nonzero_filetimes))
+    if alternate is not None:
+        alternate_value = read_u32(blob, alternate)
+        cross_check["alternate_offset_hex"] = hex(alternate)
+        cross_check["alternate_value"] = alternate_value
+        alternate_consistent = alternate_value >= len(nonzero_filetimes) and (
+            len(nonzero_filetimes) == run_slots or alternate_value == len(nonzero_filetimes)
+        )
+        if not consistent and alternate_consistent and 0 < alternate_value <= MAX_REASONABLE_RUN_COUNT:
+            cross_check["switched_to_alternate"] = True
+            rule = f"{rule}-cross-check-switched-0x{alternate:x}"
+            selected, run_count, consistent = alternate, alternate_value, True
+    cross_check["consistent"] = consistent
+    result.update(
+        {
+            "run_count": run_count,
+            "run_count_offset": selected,
+            "run_count_layout_rule": rule,
+            "run_count_cross_check": cross_check,
+            "file_information_layout": info_layout,
+        }
+    )
+
+    # Filename strings, in file-metrics (load) order. Each metrics entry names
+    # its string by (offset, character count) inside the filename section.
+    filename_section = b""
+    if filename_offset and filename_size and filename_offset + filename_size <= len(blob):
+        filename_section = blob[filename_offset : filename_offset + filename_size]
+    entry_size = PREFETCH_FILE_METRICS_ENTRY_SIZE.get(version, 0)
+    metrics: list[dict[str, object]] = []
+    if (
+        filename_section
+        and entry_size
+        and metrics_offset
+        and metrics_count
+        and metrics_offset + metrics_count * entry_size <= len(blob)
+    ):
+        name_field = 8 if version == 17 else 12
+        for index in range(metrics_count):
+            base = metrics_offset + index * entry_size
+            name_offset = read_u32(blob, base + name_field)
+            name_chars = read_u32(blob, base + name_field + 4)
+            if not name_chars or name_offset + name_chars * 2 > len(filename_section):
+                continue
+            entry: dict[str, object] = {
+                "index": index,
+                "path": filename_section[name_offset : name_offset + name_chars * 2].decode("utf-16le", errors="replace"),
+                "flags": read_u32(blob, base + name_field + 8),
+            }
+            if version != 17:
+                reference = read_u64(blob, base + 24)
+                if reference:
+                    entry["mft_entry"] = reference & 0xFFFFFFFFFFFF
+                    entry["mft_sequence"] = reference >> 48
+            metrics.append(entry)
+    if metrics:
+        result["file_metrics"] = metrics
+        result["file_metrics_decoded_count"] = len(metrics)
+        result["referenced_paths"] = [str(item["path"]) for item in metrics]
+        result["referenced_path_source"] = "file-metrics-filename-strings"
+    elif filename_section:
+        names = [item for item in filename_section.decode("utf-16le", errors="replace").split("\x00") if item]
+        result["referenced_paths"] = names[:metrics_count] if metrics_count else names
+        result["referenced_path_source"] = "filename-strings-section"
+    else:
+        strings = extract_utf16le_strings(blob[: min(len(blob), MAX_PREFETCH_SCAN_BYTES)])
+        result["referenced_paths"] = referenced_prefetch_paths(strings)
+        result["referenced_path_source"] = "utf16-string-scan-fallback"
+
+    volume_entry_size = PREFETCH_VOLUME_ENTRY_SIZE.get(version, 0)
+    if volume_offset and volume_count and volume_entry_size:
+        section_end = volume_offset + volume_size if volume_size else len(blob)
+        if volume_offset + volume_count * volume_entry_size > min(section_end, len(blob)):
+            result["volume_information_status"] = "declared-out-of-bounds"
+        else:
+            result["volumes"] = [
+                decode_prefetch_volume(blob, volume_offset, index, volume_entry_size, min(section_end, len(blob)))
+                for index in range(volume_count)
+            ]
+            result["volume_information_status"] = "decoded"
+    elif not volume_count:
+        result["volume_information_status"] = "not-declared"
+    return result
+
+
+def decode_prefetch_volume(blob: bytes, section_offset: int, index: int, entry_size: int, section_end: int) -> dict[str, object]:
+    base = section_offset + index * entry_size
+    device_offset = read_u32(blob, base)
+    device_chars = read_u32(blob, base + 4)
+    created = read_u64(blob, base + 8)
+    serial = read_u32(blob, base + 16)
+    file_reference_offset = read_u32(blob, base + 20)
+    file_reference_size = read_u32(blob, base + 24)
+    directory_offset = read_u32(blob, base + 28)
+    directory_count = read_u32(blob, base + 32)
+    device_start = section_offset + device_offset
+    device_path = ""
+    if device_chars and device_start + device_chars * 2 <= section_end:
+        device_path = blob[device_start : device_start + device_chars * 2].decode("utf-16le", errors="replace")
+    directories: list[str] = []
+    cursor = section_offset + directory_offset
+    for _ in range(directory_count if directory_offset else 0):
+        if cursor + 2 > section_end:
+            break
+        length = read_u16(blob, cursor)
+        cursor += 2
+        if cursor + length * 2 > section_end:
+            break
+        directories.append(blob[cursor : cursor + length * 2].decode("utf-16le", errors="replace"))
+        cursor += (length + 1) * 2
+    file_reference_count = 0
+    if file_reference_offset and file_reference_size >= 8:
+        file_reference_count = read_u32(blob, section_offset + file_reference_offset + 4)
+    return {
+        "volume_index": index,
+        "volume_device_path": device_path,
+        "volume_serial_number": f"{serial:08X}",
+        "volume_created_at": filetime_to_iso(created),
+        "volume_created_filetime": created,
+        "directory_string_count": directory_count,
+        "directory_strings_decoded": len(directories),
+        "directory_strings": directories,
+        "file_reference_count": file_reference_count,
+        "source": "volume_information_section",
+    }
+
+
+def prefetch_volume_candidates_from_table(
+    volumes: Sequence[Mapping[str, object]], referenced_paths: Sequence[str]
+) -> list[dict[str, object]]:
+    candidates = []
+    for volume in volumes:
+        device_path = str(volume.get("volume_device_path") or "")
+        upper = device_path.upper()
+        samples = [path for path in referenced_paths if upper and path.upper().startswith(upper)]
+        candidates.append(
+            {
+                "volume_device_path": device_path,
+                "volume_serial_number": volume.get("volume_serial_number", ""),
+                "volume_created_at": volume.get("volume_created_at", ""),
+                "source": "volume_information_section",
+                "confidence": "decoded",
+                "referenced_path_count": len(samples),
+                "sample_referenced_paths": samples[:5],
+            }
+        )
+    return candidates
+
+
+def filetime_to_iso(value: int) -> str:
+    """FILETIME (100 ns since 1601) -> ISO-8601 UTC using integer arithmetic.
+
+    No float/fromtimestamp: pre-1970 values and sub-second precision survive
+    (100 ns remainders are truncated to microseconds, the datetime limit).
+    """
+    if value <= 0:
+        return ""
+    try:
+        return (FILETIME_EPOCH + timedelta(microseconds=value // 10)).isoformat()
+    except OverflowError:
+        return ""
+
+
+FILETIME_EPOCH = datetime(1601, 1, 1, tzinfo=timezone.utc)
 
 
 def decompress_mam_prefetch(blob: bytes) -> tuple[bytes, dict[str, object]]:
@@ -604,8 +939,11 @@ def build_prefetch_reference_record(
             "volume_device_path": prefetch_volume_device_path(referenced_path),
             "run_count": header.get("run_count", 0),
             "last_run_at": header.get("last_run_at", ""),
-            "timestamp": header.get("last_run_at", ""),
-            "timestamp_source": "prefetch_last_run_at",
+            # Reference rows are not separate events: the run time lives on the
+            # prefetch-file row (run_time_1..8).
+            "timestamp": "",
+            "timestamp_source": "none-reference-row-see-prefetch-file-run-times",
+            "load_order_index": index,
             "evidence_strength": "prefetch-file-reference",
             "validation_required": True,
             "core_accuracy_gates": core_accuracy_gates,
@@ -647,15 +985,6 @@ def build_prefetch_reference_record(
     )
 
 
-def prefetch_run_times(blob: bytes, offset: int, *, slots: int) -> list[str]:
-    values = []
-    for index in range(max(0, slots)):
-        timestamp = windows_filetime_to_iso(read_u64(blob, offset + (index * 8)))
-        if timestamp:
-            values.append(timestamp)
-    return values
-
-
 def referenced_prefetch_paths(strings: list[str]) -> list[str]:
     paths = []
     for item in strings:
@@ -666,7 +995,7 @@ def referenced_prefetch_paths(strings: list[str]) -> list[str]:
         if lowered.endswith(".exe") and ":" not in text and not text.startswith("\\"):
             continue
         paths.append(text)
-    return sorted(dict.fromkeys(paths))
+    return paths
 
 
 def prefetch_volume_candidates(referenced_paths: list[str]) -> list[dict[str, object]]:
@@ -692,21 +1021,28 @@ def prefetch_volume_candidates(referenced_paths: list[str]) -> list[dict[str, ob
     return list(candidates.values())
 
 
-def prefetch_file_reference_candidates(referenced_paths: list[str]) -> list[dict[str, object]]:
+def prefetch_file_reference_candidates(
+    referenced_paths: list[str], file_metrics: Sequence[Mapping[str, object]] = ()
+) -> list[dict[str, object]]:
+    metrics_by_index = list(file_metrics)
     candidates = []
-    for index, path in enumerate(referenced_paths[:MAX_CANDIDATES]):
+    for index, path in enumerate(referenced_paths):
         windows_path = PureWindowsPath(path)
-        candidates.append(
-            {
-                "candidate_index": index,
-                "referenced_path": path,
-                "referenced_file_name": windows_path.name,
-                "referenced_extension": windows_path.suffix.lower(),
-                "volume_device_path": prefetch_volume_device_path(path),
-                "source": "bounded_utf16_path_string",
-                "confidence": "candidate",
-            }
-        )
+        candidate: dict[str, object] = {
+            "candidate_index": index,
+            "referenced_path": path,
+            "referenced_file_name": windows_path.name,
+            "referenced_extension": windows_path.suffix.lower(),
+            "volume_device_path": prefetch_volume_device_path(path),
+            "source": "file_metrics_entry" if metrics_by_index else "filename_string",
+            "confidence": "decoded" if metrics_by_index else "candidate",
+        }
+        if index < len(metrics_by_index):
+            metric = metrics_by_index[index]
+            if "mft_entry" in metric:
+                candidate["mft_entry"] = metric["mft_entry"]
+                candidate["mft_sequence"] = metric["mft_sequence"]
+        candidates.append(candidate)
     return candidates
 
 
@@ -717,7 +1053,7 @@ def prefetch_volume_device_path(path: str) -> str:
         start = upper_path.index(marker)
         end = path.find("\\", start + len(marker))
         return path[start:] if end == -1 else path[start:end]
-    volume_marker = "\\?\\VOLUME{"
+    volume_marker = "\\VOLUME{"
     if volume_marker in upper_path:
         start = upper_path.index(volume_marker)
         end = path.find("\\", start + len(volume_marker))
@@ -1477,14 +1813,7 @@ def normalize_prefetch_list_item(value: object) -> str:
 def read_prefetch_executable_name(blob: bytes) -> str:
     if len(blob) < 0x12:
         return ""
-    raw_name = blob[0x10:0x80]
-    terminator = raw_name.find(b"\x00\x00")
-    if terminator >= 0:
-        raw_name = raw_name[: terminator + (terminator % 2)]
-    name = raw_name.decode("utf-16le", errors="ignore").strip("\x00").strip()
-    if name.lower().endswith((".exe", ".dll", ".scr", ".com")):
-        return name
-    return ""
+    return blob[0x10:0x4C].decode("utf-16le", errors="replace").split("\x00", 1)[0].strip()
 
 
 def extract_utf16le_strings(blob: bytes, *, min_chars: int = 4) -> list[str]:
@@ -1505,13 +1834,7 @@ def extract_utf16le_strings(blob: bytes, *, min_chars: int = 4) -> list[str]:
 
 
 def windows_filetime_to_iso(value: int) -> str:
-    if value <= 0:
-        return ""
-    try:
-        seconds = (value - 116444736000000000) / 10_000_000
-        return datetime.fromtimestamp(seconds, tz=timezone.utc).isoformat()
-    except (OSError, OverflowError, ValueError):
-        return ""
+    return filetime_to_iso(value)
 
 
 def parse_iso_datetime(value: str) -> datetime | None:
@@ -1522,6 +1845,12 @@ def parse_iso_datetime(value: str) -> datetime | None:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=timezone.utc)
     return parsed
+
+
+def read_u16(blob: bytes, offset: int) -> int:
+    if offset < 0 or offset + 2 > len(blob):
+        return 0
+    return int.from_bytes(blob[offset : offset + 2], "little")
 
 
 def read_u32(blob: bytes, offset: int) -> int:

@@ -440,7 +440,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
 
             payload = json.loads(output.read_text(encoding="utf-8"))
             session = next(item for item in payload["artifacts"] if item["artifact_type"] == "eventlog-logon-session")
-            self.assertEqual(session["details"]["session_key"], "WIN11-CASE|0x12345")
+            self.assertEqual(session["details"]["session_key"], "WIN11-CASE|alice|0x12345")
             self.assertEqual(session["details"]["session_status"], "closed")
             self.assertEqual(session["details"]["user_name"], "alice")
             self.assertEqual(session["details"]["logon_type"], "10")
@@ -3133,10 +3133,23 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("windows-execution-summary", artifact_types)
             amcache_rows = [item for item in artifacts if item["artifact_type"] == "amcache-entry"]
             bam = next(item for item in artifacts if item["artifact_type"] == "bam-entry")
+            # Parser-quality r1: this SYSTEM fixture is a string blob, not a real
+            # key tree, so its BAM/ShimCache pivots are string candidates (no
+            # ``*-entry`` rows, no severity); structurally decoded hives emit
+            # ``bam-schema-entry``/``shimcache-schema-entry`` instead
+            # (tests/test_parser_quality_registry.py).
+            native_scan_formats = {"system-hive-native-bam-dam-scan", "system-hive-native-shimcache-scan", "amcache-hive"}
+            self.assertFalse(
+                [
+                    item
+                    for item in artifacts
+                    if item["artifact_type"].endswith("-entry") and item["details"].get("source_format") in native_scan_formats
+                ]
+            )
             native_bam = next(
                 item
                 for item in artifacts
-                if item["artifact_type"] == "bam-entry"
+                if item["artifact_type"] == "bam-string-candidate"
                 and item["details"].get("source_format") == "system-hive-native-bam-dam-scan"
                 and item["details"].get("executable_path", "").endswith("evil.exe")
             )
@@ -3144,9 +3157,12 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             native_shimcache = next(
                 item
                 for item in artifacts
-                if item["artifact_type"] == "shimcache-entry"
+                if item["artifact_type"] == "shimcache-string-candidate"
                 and item["details"].get("source_format") == "system-hive-native-shimcache-scan"
             )
+            for candidate in (native_bam, native_shimcache):
+                self.assertEqual(candidate["details"]["evidence_class"], "string-candidate-not-evidence")
+                self.assertEqual(candidate["details"]["severity"], "none")
             ps_rows = [item for item in artifacts if item["artifact_type"] == "powershell-history-command"]
             srum_rows = [item for item in artifacts if item["artifact_type"] == "srum-network-usage"]
             srum_database_rows = [item for item in artifacts if item["artifact_type"] == "srum-database-file"]
@@ -3155,7 +3171,8 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertTrue(any("suspicious-command:powershell -enc" in row["details"]["risk_flags"] for row in ps_rows))
             self.assertTrue(any("vssadmin delete shadows" in row["details"]["command_line"] for row in ps_rows))
             self.assertEqual(ps_rows[0]["details"]["source_path"], str(fixture.powershell_history.resolve()))
-            self.assertTrue(any(row["details"]["source_path"] == str(fixture.amcache_hive.resolve()) for row in amcache_rows))
+            amcache_hive_candidates = [item for item in artifacts if item["artifact_type"] == "amcache-string-candidate"]
+            self.assertTrue(any(row["details"]["source_path"] == str(fixture.amcache_hive.resolve()) for row in amcache_hive_candidates))
             self.assertTrue(any(row["details"]["executable_path"].endswith(r"Example\app.exe") for row in amcache_rows))
             exported_amcache = next(row for row in amcache_rows if row["details"]["source_format"] == "reg")
             self.assertEqual(exported_amcache["details"]["program_name"], "Example App")
@@ -3269,10 +3286,12 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             )
             native_amcache_entry = next(
                 item
-                for item in amcache_rows
-                if item["details"]["source_format"] == "amcache-hive"
+                for item in artifacts
+                if item["artifact_type"] == "amcache-string-candidate"
+                and item["details"]["source_format"] == "amcache-hive"
                 and item["details"]["executable_path"].endswith(r"Example\app.exe")
             )
+            self.assertEqual(native_amcache_entry["details"]["evidence_class"], "string-candidate-not-evidence")
             native_manifest = native_amcache_entry["details"]["amcache_report_citation_manifest"]
             self.assertEqual(native_manifest["source"]["format"], "amcache-hive")
             self.assertIn(
@@ -3373,7 +3392,9 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertTrue(bam_uplift["large_data_controls"]["native_binary_layout_required_for_commercial_claims"])
             self.assertTrue(native_bam["details"]["executable_path"].endswith("evil.exe"))
             self.assertEqual(native_bam["details"]["user_sid"], "S-1-5-21-1000")
-            self.assertEqual(native_bam["details"]["timestamp"], "2024-04-01T06:07:08+00:00")
+            # String candidates expose ``timestamp_candidate`` only (never a timeline ``timestamp``).
+            self.assertNotIn("timestamp", native_bam["details"])
+            self.assertEqual(native_bam["details"]["timestamp_candidate"], "2024-04-01T06:07:08+00:00")
             self.assertEqual(
                 native_bam["details"]["bam_dam_evidence"]["native_scan_status"],
                 "bounded-path-sid-cluster",
@@ -3480,7 +3501,8 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertTrue(native_shimcache["details"]["executable_path"].endswith("legacy.exe"))
             self.assertEqual(native_shimcache["details"]["cache_order"], 0)
             self.assertGreaterEqual(native_shimcache["details"]["source_offset"], 0)
-            self.assertEqual(native_shimcache["details"]["timestamp"], "2024-04-01T03:04:05+00:00")
+            self.assertNotIn("timestamp", native_shimcache["details"])
+            self.assertEqual(native_shimcache["details"].get("timestamp_candidate"), "2024-04-01T03:04:05+00:00")
             self.assertEqual(
                 native_shimcache["details"]["shimcache_evidence"]["native_scan_status"],
                 "bounded-path-cluster",
@@ -3722,7 +3744,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             rows = [item for item in payload["artifacts"] if item["artifact_type"] == "userassist-schema-entry"]
 
             self.assertEqual(len(rows), 3)
-            win7 = next(row for row in rows if row["details"]["layout"] == "win7")
+            win7 = next(row for row in rows if row["details"]["layout"] == "win7-plus")
             self.assertEqual(
                 win7["details"]["decoded_name"],
                 "{9E3995AB-1F9C-4F13-B827-48B24B6C7174}\\TaskBar\\File Explorer.lnk",
@@ -4982,7 +5004,13 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             payload = json.loads(output.read_text(encoding="utf-8"))
             artifacts = payload["artifacts"]
             spooler = next(item for item in artifacts if item["artifact_type"] == "print-spooler-job")
-            remote = next(item for item in artifacts if item["artifact_type"] == "third-party-remote-control-artifact")
+            # Parser-quality r1: third-party remote-control traces belong to the
+            # windows-remote-access kind only (windows-system no longer duplicates them).
+            self.assertNotIn("third-party-remote-control-artifact", {item["artifact_type"] for item in artifacts})
+            remote_output = root / "windows-remote-access.json"
+            self.assertEqual(main(["artifacts", str(root), "--kind", "windows-remote-access", "--output", str(remote_output)]), 0)
+            remote_artifacts = json.loads(remote_output.read_text(encoding="utf-8"))["artifacts"]
+            remote = next(item for item in remote_artifacts if item["artifact_type"] == "third-party-remote-control-artifact")
 
             self.assertEqual(spooler["details"]["spooler_file_kind"], "shd")
             self.assertEqual(spooler["details"]["coverage_status"], "spooler-metadata-pivot-inventory")

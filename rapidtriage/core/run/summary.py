@@ -48,6 +48,7 @@ from .scheduler import (
     parser_scheduler_report_grade_validation_plan,
 )
 from .steps import (
+    apply_silent_failure_verdicts,
     build_silent_failure_step,
     build_step_rows,
     highest_warning_level,
@@ -140,6 +141,7 @@ def build_run_summary(
         timeline_payload=timeline_payload,
         safety=safety,
     )
+    apply_silent_failure_verdicts(step_rows, silent_failure)
     step_rows.append(build_silent_failure_step(silent_failure))
     processing_summary = build_processing_summary(step_rows, safety=safety)
     workflow_contract = build_run_workflow_contract(
@@ -180,6 +182,17 @@ def build_run_summary(
         "steps": step_rows,
         "workflow": workflow_contract,
         "processing": processing_summary,
+        # Every step warning (caps/truncations, silent-failure verdicts,
+        # skipped providers) in one list for the report and the issues node.
+        "warnings": list(processing_summary.get("warnings") or []),
+        "disclosures": build_run_disclosures(
+            files_payload=files_payload,
+            docs_payload=docs_payload,
+            timeline_payload=timeline_payload,
+            indicators_payload=indicators_payload,
+            artifact_payloads=artifact_payloads,
+            steps=step_rows,
+        ),
         "silent_failure_detection": silent_failure,
         "summary": {
             "document_candidate_count": int(docs_payload.get("summary", {}).get("candidate_count", 0)),
@@ -212,6 +225,7 @@ def build_run_summary(
                     int(entry.get("artifact_count") or 0) for entry in artifact_summary.values()
                 ),
                 "docs": int(docs_payload.get("summary", {}).get("match_count", 0)),
+                "document_candidates": int(docs_payload.get("summary", {}).get("candidate_count", 0)),
                 "files": int(files_payload.get("summary", {}).get("candidate_count", 0)),
                 "timeline_events": int(timeline_payload.get("summary", {}).get("event_count", 0)),
                 # Review state lives in the case file and changes after the run
@@ -241,6 +255,111 @@ def build_run_summary(
         payload["summary"]["matched_rule_count"] = int(annotation_summary["matched_rule_count"])
         payload["summary"]["ioc_hit_count"] = int(annotation_summary["ioc_hit_count"])
     return payload
+
+
+REGISTRY_CONTEXT_KEYS = (
+    "computer_name",
+    "os_version",
+    "current_control_set",
+    "last_shutdown_at",
+    "timezone",
+    "transaction_log_disclosures",
+    "cap_disclosure",
+)
+MISSING_TOOL_NOTES = {
+    "yara": "YARA 엔진 없음: .yar 규칙은 문자열 규칙으로만 적용(condition·정규식·모듈 미평가)",
+    "tesseract": "Tesseract OCR 없음: 이미지 전용 PDF·이미지 텍스트는 색인되지 않음",
+    "sleuthkit": "Sleuth Kit(fls/icat) 없음: 폴더 입력은 파일시스템 목록·삭제 파일 정보 없이 분석",
+}
+
+
+def detect_missing_tools() -> dict[str, dict[str, object]]:
+    import importlib.util
+    import shutil
+
+    yara_module = importlib.util.find_spec("yara") is not None
+    tools = {
+        "yara": yara_module or shutil.which("yara") is not None,
+        "tesseract": shutil.which("tesseract") is not None,
+        "sleuthkit": shutil.which("fls") is not None and shutil.which("icat") is not None,
+    }
+    return {
+        name: {"available": available, "note": "" if available else MISSING_TOOL_NOTES[name]}
+        for name, available in tools.items()
+    }
+
+
+def build_run_disclosures(
+    *,
+    files_payload: Mapping[str, object],
+    docs_payload: Mapping[str, object],
+    timeline_payload: Mapping[str, object],
+    indicators_payload: Mapping[str, object],
+    artifact_payloads: Mapping[str, Mapping[str, object]],
+    steps: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    """Report-facing limits of this run (parser-quality r1, plan section 2)."""
+    files_summary = files_payload.get("summary") if isinstance(files_payload.get("summary"), Mapping) else {}
+    docs_summary = docs_payload.get("summary") if isinstance(docs_payload.get("summary"), Mapping) else {}
+    timeline_summary = timeline_payload.get("summary") if isinstance(timeline_payload.get("summary"), Mapping) else {}
+    indicator_summary = indicators_payload.get("summary") if isinstance(indicators_payload.get("summary"), Mapping) else {}
+    registry_context: dict[str, object] = {}
+    collection_notes: dict[str, list[str]] = {}
+    for kind, payload in artifact_payloads.items():
+        summary = payload.get("summary") if isinstance(payload.get("summary"), Mapping) else {}
+        notes = summary.get("collection_notes")
+        if isinstance(notes, list) and notes:
+            collection_notes[kind] = [str(item) for item in notes]
+        if kind == "windows-registry" and not registry_context:
+            for row in payload.get("artifacts") or []:
+                if isinstance(row, Mapping) and row.get("artifact_type") == "registry-summary":
+                    details = row.get("details") if isinstance(row.get("details"), Mapping) else {}
+                    registry_context = {key: details.get(key) for key in REGISTRY_CONTEXT_KEYS if details.get(key) not in (None, "", [], {})}
+                    break
+    timezone = timeline_summary.get("timezone") if isinstance(timeline_summary.get("timezone"), Mapping) else {}
+    return {
+        "time_origin": files_summary.get("time_origin"),
+        "acquisition_copy_note": (
+            "폴더(추출 사본) 입력: 파일의 호스트 수정·생성·접근 시각은 취득/복사 시각이므로 "
+            "source_file_* 로만 기록하고 타임라인 이벤트로 쓰지 않았습니다."
+            if files_summary.get("time_origin") == "acquisition-copy"
+            else ""
+        ),
+        "timezone": dict(timezone),
+        "registry_context": registry_context,
+        "missing_tools": detect_missing_tools(),
+        "caps": {
+            str(step.get("name")): list(step.get("cap_disclosures") or [])
+            for step in steps
+            if step.get("cap_disclosures")
+        },
+        "timeline_excluded": {
+            "out_of_range": timeline_summary.get("out_of_range_excluded_count", 0),
+            "duplicates": timeline_summary.get("duplicate_events_removed", 0),
+            "copy_time_candidates": timeline_summary.get("acquisition_copy_time_candidates_not_emitted", 0),
+        },
+        "documents": {
+            "candidate_count": docs_summary.get("candidate_count", 0),
+            "match_count": docs_summary.get("match_count", 0),
+            "indexed_with_text_count": docs_summary.get("indexed_with_text_count"),
+            "encrypted_count": docs_summary.get("encrypted_count"),
+            "zero_text_count": docs_summary.get("zero_text_count"),
+            "text_status_counts": docs_summary.get("text_status_counts", {}),
+        },
+        "indicators": {
+            "display_label": indicator_summary.get("display_label"),
+            "rule_count": indicator_summary.get("rule_count", 0),
+            "total_before_cap": indicator_summary.get("total_before_cap"),
+            "truncated": indicator_summary.get("truncated"),
+            "rule_status_message": indicator_summary.get("rule_status_message"),
+        },
+        "files": {
+            "excluded_file_count": files_summary.get("excluded_file_count"),
+            "exclusion_reason_counts": files_summary.get("exclusion_reason_counts", {}),
+            "excluded_category_counts": files_summary.get("excluded_category_counts", {}),
+        },
+        "collection_notes": collection_notes,
+    }
 
 
 def derive_counts(payload: Mapping[str, object]) -> dict[str, object]:
@@ -341,6 +460,7 @@ def build_processing_summary(
         dry_run=dry_run,
         max_extract_size_bytes=max_extract_size,
         max_file_count=max_file_count,
+        caps_applied=any(step.get("truncated") for step in steps),
     )
     streaming_boundary = build_streaming_parser_boundary_manifest(
         steps,
@@ -1051,6 +1171,7 @@ def infer_processing_profile_label(
     dry_run: bool,
     max_extract_size_bytes: int,
     max_file_count: int,
+    caps_applied: bool = False,
 ) -> str:
     if dry_run:
         return "Dry run - no extraction"
@@ -1058,7 +1179,10 @@ def infer_processing_profile_label(
         return "Fast first pass - read-only"
     if max_extract_size_bytes or max_file_count:
         return "Standard - bounded extraction"
-    return "Deep - uncapped extraction"
+    if caps_applied:
+        # Parser/stage caps were hit: never call such a run "uncapped".
+        return "Deep - extraction without size limits (parser caps disclosed)"
+    return "Deep - extraction without size limits"
 
 
 def manifest_provider_artifact_count(provider: Mapping[str, object]) -> int:

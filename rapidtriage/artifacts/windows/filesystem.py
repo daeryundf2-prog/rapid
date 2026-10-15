@@ -4,6 +4,7 @@ import csv
 import datetime as dt
 import hashlib
 import json
+import math
 import os
 import re
 import subprocess
@@ -74,7 +75,6 @@ NTFS_LOGFILE_OPERATION_KEYWORDS = {
     "security": ("security", "acl", "sacl", "dacl", "owner", "permission"),
 }
 SIGNATURE_SCAN_LIMIT = 4096
-SIGNATURE_SCAN_FILE_LIMIT = 5000
 USN_RECORD_SCAN_LIMIT = 5000
 _USN_NONZERO_BYTE = re.compile(rb"[^\x00]")
 USN_LARGE_RECORD_THRESHOLD = 512
@@ -788,22 +788,85 @@ def decode_recycle_original_path(blob: bytes) -> str:
 
 
 def collect_signature_mismatch_artifacts(root: Path) -> Iterable[ArtifactRecord]:
-    scanned = 0
+    """Scan every evidence file's header (streaming, no file-count cap).
+
+    Two mismatch directions are reported:
+
+    * ``magic-not-expected-for-extension`` - a recognised magic (JPEG, PE, ...)
+      sits behind an extension that expects a different format;
+    * ``extension-expected-signature-missing`` - a strict extension (``.pf``,
+      ``.lnk``, ``.jpg``, ``.exe`` ...) whose content does not carry the
+      expected structure (zero-filled, random, foreign text ...).
+
+    Extensionless files are skipped (no expectation to compare against) and
+    counted; the scan totals ride on every mismatch row as
+    ``signature_scan_summary`` so the scope is disclosed without adding a row
+    to clean evidence sets. Mismatch rows are buffered (they are few) until the
+    totals are known.
+    """
+    stats = {
+        "files_seen": 0,
+        "files_scanned": 0,
+        "skipped_extensionless": 0,
+        "skipped_recycle_bin_index_or_data": 0,
+        "skipped_extension_without_rule": 0,
+        "skipped_empty": 0,
+        "skipped_office_owner_lock_files": 0,
+        "skipped_appledouble_resource_forks": 0,
+        "mismatch_count": 0,
+    }
+    by_extension: dict[str, int] = {}
+    pending: list[ArtifactRecord] = []
     for path in sorted((item for item in iter_evidence_paths(root, "*") if item.is_file()), key=lambda item: str(item).lower()):
+        stats["files_seen"] += 1
         if path.name.startswith("$I") or path.name.startswith("$R"):
+            stats["skipped_recycle_bin_index_or_data"] += 1
             continue
-        scanned += 1
-        if scanned > SIGNATURE_SCAN_FILE_LIMIT:
-            break
-        detected = detect_file_signature(read_prefix(path, SIGNATURE_SCAN_LIMIT))
-        if not detected:
-            continue
-        expected_extensions = set(detected["expected_extensions"])
         actual_extension = path.suffix.lower()
-        if actual_extension in expected_extensions:
+        if not actual_extension:
+            stats["skipped_extensionless"] += 1
             continue
+        if path.name.startswith("~$"):
+            # Office owner/lock files reuse the document extension but hold the
+            # editing user's name, never the document format.
+            stats["skipped_office_owner_lock_files"] += 1
+            continue
+        if path.name.startswith("._"):
+            # macOS AppleDouble resource-fork companions (``._name.pdf``).
+            stats["skipped_appledouble_resource_forks"] += 1
+            continue
+        expected_kinds = SIGNATURE_EXPECTED_KINDS_BY_EXTENSION.get(actual_extension)
+        blob = read_prefix(path, SIGNATURE_SCAN_LIMIT)
+        if not blob:
+            stats["skipped_empty"] += 1
+            continue
+        stats["files_scanned"] += 1
+        content = sniff_content_kind(blob)
+        detected_kind = str(content["kind"])
+        mismatch_direction = ""
+        if expected_kinds is not None:
+            if detected_kind not in expected_kinds:
+                mismatch_direction = (
+                    "magic-not-expected-for-extension"
+                    if content["basis"] == "magic"
+                    else "extension-expected-signature-missing"
+                )
+        elif content["basis"] == "magic" and detected_kind in SIGNATURE_STRICT_MAGIC_KINDS:
+            # An extension without a rule carrying a strong magic (a PE or JPEG
+            # renamed to ``.txt``) is flagged only for executable/image/document
+            # kinds; containers such as SQLite/OLE/ZIP live behind countless
+            # application-specific extensions and are not mismatches.
+            if actual_extension not in SIGNATURE_TOLERATED_EXTENSIONS.get(detected_kind, frozenset()):
+                mismatch_direction = "magic-not-expected-for-extension"
+        if not mismatch_direction:
+            if expected_kinds is None:
+                stats["skipped_extension_without_rule"] += 1
+            continue
+        stats["mismatch_count"] += 1
+        by_extension[actual_extension] = by_extension.get(actual_extension, 0) + 1
         stat_result = path.stat()
-        yield ArtifactRecord(
+        expected_sorted = sorted(expected_kinds) if expected_kinds is not None else []
+        record = ArtifactRecord(
             provider=WindowsFilesystemProvider.name,
             artifact_type="file-signature-mismatch",
             path=str(path.resolve()),
@@ -811,20 +874,30 @@ def collect_signature_mismatch_artifacts(root: Path) -> Iterable[ArtifactRecord]
             details={
                 "parser": "windows-file-signature-mismatch",
                 "parser_version": PARSER_VERSION,
-                "coverage_status": "bounded-magic-header-check",
+                "coverage_status": "full-scan-magic-header-check",
                 "reportability": "triage",
                 "source_path": str(path.resolve()),
                 "source_format": "filesystem-file",
                 "source_hashes": file_hashes(path),
                 "source_size": stat_result.st_size,
-                "modified_at": dt.datetime.fromtimestamp(stat_result.st_mtime, dt.timezone.utc).isoformat(),
+                "source_file_mtime": dt.datetime.fromtimestamp(stat_result.st_mtime, dt.timezone.utc).isoformat(),
                 "actual_extension": actual_extension,
-                "detected_signature_kind": detected["kind"],
-                "signature_hex": detected["signature_hex"],
-                "expected_extensions": sorted(expected_extensions),
-                "risk_flags": ["signature-extension-mismatch"],
+                "detected_signature_kind": detected_kind,
+                "detected_content_basis": content["basis"],
+                "detected_content_label": CONTENT_KIND_LABELS_KO.get(detected_kind, detected_kind),
+                "signature_hex": content["signature_hex"],
+                "header_hex": blob[:16].hex(),
+                "content_entropy": content["entropy"],
+                "content_zero_ratio": content["zero_ratio"],
+                "expected_extensions": sorted(SIGNATURE_EXTENSIONS_BY_KIND.get(detected_kind, ())),
+                "expected_signature_kinds": expected_sorted,
+                "mismatch_direction": mismatch_direction,
+                "risk_flags": ["signature-extension-mismatch", f"signature-mismatch:{mismatch_direction}"],
                 "validation_required": True,
-                "validation_guidance": "Magic-header mismatch is a triage lead. Validate with a full file-type parser and user/action timeline before reporting concealment intent.",
+                "validation_guidance": (
+                    "확장자와 파일 내용(매직 헤더/구조)이 일치하지 않습니다. 재할당된 클러스터에 덮어쓴 잔존물, "
+                    "의도적 위장, 손상 중 무엇인지 전체 파서와 MFT/USN 타임라인으로 확인한 뒤 보고서에 사용하십시오."
+                ),
                 "commercial_grade_ready": False,
                 "commercial_grade_blockers": [
                     "full-file-type-parser-validation-required",
@@ -832,6 +905,187 @@ def collect_signature_mismatch_artifacts(root: Path) -> Iterable[ArtifactRecord]
                 ],
             },
         )
+        pending.append(record)
+    summary = {
+        "scan_bytes_per_file": SIGNATURE_SCAN_LIMIT,
+        "file_count_cap": None,
+        **stats,
+        "mismatch_count_by_extension": dict(sorted(by_extension.items())),
+        "checked_extensions": sorted(SIGNATURE_EXPECTED_KINDS_BY_EXTENSION),
+        "note": (
+            "모든 증거 파일의 앞부분을 검사했습니다(파일 수 상한 없음). 확장자 없는 파일은 비교 기준이 없어 제외하고 "
+            "개수만 공개합니다. 코어 files 단계의 불일치 수는 분류 대상 파일 중 인식된 서명이 다른 경우만 셉니다."
+        ),
+    }
+    for record in pending:
+        record.details["signature_scan_summary"] = summary
+        yield record
+
+
+CONTENT_MAGIC_RULES: tuple[tuple[str, int, tuple[bytes, ...]], ...] = (
+    ("windows-prefetch-scca", 4, (b"SCCA",)),
+    ("windows-prefetch-mam", 0, (b"MAM\x04", b"MAM\x84")),
+    ("windows-shell-link", 0, (b"\x4c\x00\x00\x00\x01\x14\x02\x00\x00\x00\x00\x00\xc0\x00\x00\x00\x00\x00\x00\x46",)),
+    ("jpeg", 0, (b"\xff\xd8\xff",)),
+    ("png", 0, (b"\x89PNG\r\n\x1a\n",)),
+    ("gif", 0, (b"GIF87a", b"GIF89a")),
+    ("pdf", 0, (b"%PDF",)),
+    ("windows-pe", 0, (b"MZ",)),
+    ("ole-cfb", 0, (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1",)),
+    ("hwp-v3", 0, (b"HWP Document File",)),
+    ("zip-ooxml", 0,(b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08")),
+    ("rar", 0, (b"Rar!\x1a\x07\x00", b"Rar!\x1a\x07\x01\x00")),
+    ("7zip", 0, (b"7z\xbc\xaf\x27\x1c",)),
+    ("gzip", 0, (b"\x1f\x8b\x08",)),
+    ("sqlite", 0, (b"SQLite format 3\x00",)),
+    ("windows-registry-hive", 0, (b"regf",)),
+    ("windows-evtx", 0, (b"ElfFile\x00",)),
+    ("windows-minidump", 0, (b"MDMP",)),
+    ("webp", 8, (b"WEBP",)),
+)
+CONTENT_KIND_LABELS_KO = {
+    "windows-prefetch-scca": "Prefetch(SCCA)",
+    "windows-prefetch-mam": "압축 Prefetch(MAM)",
+    "windows-shell-link": "바로가기(LNK)",
+    "jpeg": "JPEG 이미지",
+    "png": "PNG 이미지",
+    "gif": "GIF 이미지",
+    "webp": "WebP 이미지",
+    "pdf": "PDF 문서",
+    "windows-pe": "실행 파일(PE)",
+    "ole-cfb": "OLE 복합 문서",
+    "hwp-v3": "한글 3.0 문서",
+    "zip-ooxml": "ZIP/OOXML 컨테이너",
+    "rar": "RAR 압축",
+    "7zip": "7z 압축",
+    "gzip": "gzip 압축",
+    "sqlite": "SQLite 데이터베이스",
+    "windows-registry-hive": "레지스트리 하이브",
+    "windows-evtx": "이벤트 로그(EVTX)",
+    "windows-minidump": "미니덤프(MDMP)",
+    "zero-filled": "0으로 채워진 내용",
+    "mostly-zero": "대부분 0인 내용",
+    "text": "텍스트",
+    "high-entropy-binary": "고엔트로피(무작위/암호화/압축) 데이터",
+    "binary-unknown": "식별되지 않은 바이너리",
+    "empty": "빈 파일",
+}
+SIGNATURE_EXPECTED_KINDS_BY_EXTENSION: dict[str, frozenset[str]] = {
+    ".pf": frozenset({"windows-prefetch-scca", "windows-prefetch-mam"}),
+    ".lnk": frozenset({"windows-shell-link"}),
+    ".jpg": frozenset({"jpeg"}),
+    ".jpeg": frozenset({"jpeg"}),
+    ".jpe": frozenset({"jpeg"}),
+    ".png": frozenset({"png"}),
+    ".gif": frozenset({"gif"}),
+    ".pdf": frozenset({"pdf"}),
+    ".exe": frozenset({"windows-pe"}),
+    ".dll": frozenset({"windows-pe"}),
+    ".sys": frozenset({"windows-pe"}),
+    ".scr": frozenset({"windows-pe"}),
+    ".cpl": frozenset({"windows-pe"}),
+    ".ocx": frozenset({"windows-pe"}),
+    ".docx": frozenset({"zip-ooxml", "ole-cfb"}),  # OLE = encrypted OOXML package
+    ".xlsx": frozenset({"zip-ooxml", "ole-cfb"}),  # OLE = encrypted OOXML package
+    ".pptx": frozenset({"zip-ooxml", "ole-cfb"}),  # OLE = encrypted OOXML package
+    ".zip": frozenset({"zip-ooxml"}),
+    ".hwpx": frozenset({"zip-ooxml"}),
+    ".doc": frozenset({"ole-cfb"}),
+    ".xls": frozenset({"ole-cfb"}),
+    ".ppt": frozenset({"ole-cfb"}),
+    ".msg": frozenset({"ole-cfb"}),
+    ".msi": frozenset({"ole-cfb"}),
+    ".hwp": frozenset({"ole-cfb", "hwp-v3"}),
+    ".rar": frozenset({"rar"}),
+    ".7z": frozenset({"7zip"}),
+    ".evtx": frozenset({"windows-evtx"}),
+    ".sqlite": frozenset({"sqlite"}),
+    ".sqlite3": frozenset({"sqlite"}),
+}
+SIGNATURE_EXTENSIONS_BY_KIND: dict[str, tuple[str, ...]] = {}
+for _extension, _kinds in SIGNATURE_EXPECTED_KINDS_BY_EXTENSION.items():
+    for _kind in _kinds:
+        SIGNATURE_EXTENSIONS_BY_KIND[_kind] = (*SIGNATURE_EXTENSIONS_BY_KIND.get(_kind, ()), _extension)
+# Magic kinds strong enough to flag behind an extension that has no rule.
+SIGNATURE_STRICT_MAGIC_KINDS = frozenset({"windows-pe", "jpeg", "png", "gif", "pdf", "windows-shell-link"})
+SIGNATURE_TOLERATED_EXTENSIONS: dict[str, frozenset[str]] = {
+    # PE images routinely carry these extensions (drivers, MUI, setup stubs, caches).
+    "windows-pe": frozenset(
+        {
+            ".mui", ".efi", ".drv", ".tlb", ".ax", ".acm", ".tsp", ".com", ".winmd", ".node", ".pyd", ".bin",
+            ".dat", ".tmp", ".old", ".bak", ".mun", ".ime", ".fon", ".rll", ".flt", ".ds", ".api", ".x3d",
+        }
+    ),
+    "jpeg": frozenset({".jfif", ".thm", ".tmp", ".bin", ".dat", ".cache"}),
+    "png": frozenset({".ico", ".tmp", ".bin", ".dat", ".cache", ".apng"}),
+    "gif": frozenset({".tmp", ".bin", ".dat", ".cache"}),
+    "pdf": frozenset({".ai", ".tmp", ".bin", ".dat"}),
+    "windows-shell-link": frozenset({".tmp", ".bin", ".dat"}),
+}
+
+
+def sniff_content_kind(blob: bytes) -> dict[str, object]:
+    """Name the content kind of a file prefix (magic first, then heuristics).
+
+    Shared by the signature scan, Prefetch (``prefetch-invalid-content``) and
+    Recent LNK (``recent-shortcut-invalid-content``) so all three report the
+    same kind names.
+    """
+    sample = blob[:SIGNATURE_SCAN_LIMIT]
+    length = len(sample)
+    if not length:
+        return {"kind": "empty", "basis": "heuristic", "signature_hex": "", "entropy": 0.0, "zero_ratio": 0.0}
+    zero_ratio = round(sample.count(0) / length, 4)
+    for kind, offset, magics in CONTENT_MAGIC_RULES:
+        for magic in magics:
+            if sample[offset : offset + len(magic)] == magic:
+                return {
+                    "kind": kind,
+                    "basis": "magic",
+                    "signature_hex": magic.hex(),
+                    "entropy": byte_entropy(sample),
+                    "zero_ratio": zero_ratio,
+                }
+    pdf_offset = sample.find(b"%PDF-", 0, 1024)
+    if pdf_offset > 0:
+        # PDF readers accept the header anywhere in the first 1 KiB.
+        return {"kind": "pdf", "basis": "magic", "signature_hex": b"%PDF-".hex(), "entropy": byte_entropy(sample), "zero_ratio": zero_ratio}
+    entropy = byte_entropy(sample)
+    if zero_ratio == 1.0:
+        kind = "zero-filled"
+    elif zero_ratio >= 0.9:
+        kind = "mostly-zero"
+    elif looks_like_text(sample):
+        kind = "text"
+    elif entropy >= 7.2:
+        kind = "high-entropy-binary"
+    else:
+        kind = "binary-unknown"
+    return {"kind": kind, "basis": "heuristic", "signature_hex": "", "entropy": entropy, "zero_ratio": zero_ratio}
+
+
+def byte_entropy(sample: bytes) -> float:
+    if not sample:
+        return 0.0
+    counts = [0] * 256
+    for value in sample:
+        counts[value] += 1
+    total = len(sample)
+    entropy = -sum((count / total) * math.log2(count / total) for count in counts if count)
+    return round(entropy, 3)
+
+
+def looks_like_text(sample: bytes) -> bool:
+    if sample.startswith((b"\xef\xbb\xbf", b"\xff\xfe", b"\xfe\xff")):
+        return True
+    high_bytes = sample[1::2]
+    if len(sample) >= 8 and high_bytes.count(0) >= len(high_bytes) * 0.9 and sample[0::2].count(0) < len(high_bytes) * 0.1:
+        # UTF-16LE text: the high bytes of ASCII code units are zero.
+        return True
+    if sample.count(0):
+        return False
+    printable = sum(1 for value in sample if value in (9, 10, 13) or 32 <= value < 127 or value >= 0x80)
+    return printable / len(sample) >= 0.97
 
 
 def detect_file_signature(blob: bytes) -> dict[str, object] | None:

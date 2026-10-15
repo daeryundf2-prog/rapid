@@ -239,6 +239,28 @@ def load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+# ``scripts/update-output-samples.py`` sets this to rewrite each expected
+# sample from the test's normalized ``actual`` before comparing.
+UPDATE_SAMPLES_ENV = "RAPIDTRIAGE_UPDATE_OUTPUT_SAMPLES"
+
+
+def write_sample(path: Path, payload: Any) -> None:
+    # Keep each sample's existing key style (some are stored key-sorted) so diffs stay reviewable.
+    sort_keys = False
+    if path.is_file():
+        existing = load_json(path)
+        sort_keys = isinstance(existing, dict) and list(existing) == sorted(existing)
+    text = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=sort_keys) + "\n"
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
+def expected_sample(name: str, actual: Any) -> Any:
+    path = SAMPLES_DIR / name
+    if os.environ.get(UPDATE_SAMPLES_ENV) == "1":
+        write_sample(path, actual)
+    return load_json(path)
+
+
 def normalize_payload(payload: Any, root: Path) -> Any:
     root_text = str(root.resolve())
     if isinstance(payload, dict):
@@ -250,6 +272,17 @@ def normalize_payload(payload: Any, root: Path) -> Any:
                 continue
             if key == "platform" and isinstance(value, str):
                 normalized[normalized_key] = "<PLATFORM>"
+                continue
+            # Host birth/ctime of the scanned copy cannot be pinned with utime.
+            if key == "source_file_ctime" and isinstance(value, str):
+                normalized[normalized_key] = "<HOST_CTIME>"
+                continue
+            # Raw optional-dependency import exception text (e.g. the
+            # deepfake_lens ImportError) differs per environment and per test
+            # order; skip_reason stays a stable sentence, only the detail is
+            # masked.
+            if key == "import_error_detail" and isinstance(value, str):
+                normalized[normalized_key] = "<IMPORT_ERROR_DETAIL>"
                 continue
             # Tool-discovery paths (e.g. shutil.which("deepfake-lens")) are
             # machine-dependent: the value differs per host and is empty when
@@ -307,6 +340,21 @@ def canonicalize_docs(payload: dict[str, Any]) -> dict[str, Any]:
 def canonicalize_files(payload: dict[str, Any]) -> dict[str, Any]:
     canonical = dict(payload)
     canonical["candidates"] = sorted(canonical["candidates"], key=lambda item: item["path"])
+    for candidate in canonical["candidates"]:
+        # Host-copy attributes differ per OS (Windows "archive" vs POSIX none).
+        if isinstance(candidate, dict) and candidate.get("attributes_origin") in {"host-copy", ""}:
+            candidate["attributes"] = "<HOST_ATTRIBUTES>"
+            candidate["attributes_origin"] = "<HOST_ATTRIBUTES_ORIGIN>"
+    # summary.attribute_counts tallies the same host-copy attributes masked
+    # above (Windows {"archive": N}, POSIX {}); mask it only when every
+    # candidate's attributes came from the host copy, so image/listing
+    # attribute counts stay compared.
+    summary = canonical.get("summary")
+    if isinstance(summary, dict) and "attribute_counts" in summary and all(
+        isinstance(candidate, dict) and candidate.get("attributes_origin") == "<HOST_ATTRIBUTES_ORIGIN>"
+        for candidate in canonical["candidates"]
+    ):
+        summary["attribute_counts"] = "<HOST_ATTRIBUTE_COUNTS>"
     canonical["core_accuracy_gates"] = compact_core_accuracy_gates(canonical.get("core_accuracy_gates"))
     canonical["hash_cache_manifest"] = compact_hash_cache_manifest(canonical.get("hash_cache_manifest"))
     canonical["duplicate_content_manifest"] = compact_duplicate_content_manifest(
@@ -591,7 +639,7 @@ class RapidTriageOutputSamplesTests(unittest.TestCase):
             self.assertEqual(main(["docs", str(root), "-k", "secret", "-k", "keyword", "--output", str(output)]), 0)
 
             actual = canonicalize_docs(normalize_payload(load_json(output), root))
-            expected = load_json(SAMPLES_DIR / "docs-keyword-search.json")
+            expected = expected_sample("docs-keyword-search.json", actual)
             self.assertEqual(actual, expected)
             self.assertTrue(all("artifacts" not in provider for provider in actual["manifest"]["providers"]))
             self.assertTrue(all("artifact_count" in provider for provider in actual["manifest"]["providers"]))
@@ -617,7 +665,7 @@ class RapidTriageOutputSamplesTests(unittest.TestCase):
             self.assertEqual(main(["files", str(root), "--output", str(output)]), 0)
 
             actual = canonicalize_files(normalize_payload(load_json(output), root))
-            expected = load_json(SAMPLES_DIR / "files-default-scan.json")
+            expected = expected_sample("files-default-scan.json", actual)
             self.assertEqual(actual, expected)
 
     def test_extract_files_sample_matches_contract_fixture(self) -> None:
@@ -655,7 +703,7 @@ class RapidTriageOutputSamplesTests(unittest.TestCase):
             )
 
             actual = canonicalize_extract(normalize_payload(load_json(manifest_json), root))
-            expected = load_json(SAMPLES_DIR / "extract-from-files.json")
+            expected = expected_sample("extract-from-files.json", actual)
             self.assertEqual(actual, expected)
 
     def test_extract_docs_sample_matches_contract_fixture(self) -> None:
@@ -680,7 +728,7 @@ class RapidTriageOutputSamplesTests(unittest.TestCase):
             actual = canonicalize_extract(
                 normalize_payload(load_json(extract_dir / "rapidtriage-extract-manifest.json"), root)
             )
-            expected = load_json(SAMPLES_DIR / "extract-from-docs.json")
+            expected = expected_sample("extract-from-docs.json", actual)
             self.assertEqual(actual, expected)
 
     def test_manifest_windows_sample_matches_fixture(self) -> None:
@@ -696,7 +744,7 @@ class RapidTriageOutputSamplesTests(unittest.TestCase):
             self.assertEqual(main(["manifest", str(root), "--output", str(output)]), 0)
 
             actual = canonicalize_manifest(normalize_payload(load_json(output), root))
-            expected = canonicalize_manifest(load_json(SAMPLES_DIR / "manifest-windows-artifacts.json"))
+            expected = canonicalize_manifest(expected_sample("manifest-windows-artifacts.json", actual))
             self.assertEqual(actual, expected)
 
     def test_repo_windows_fixture_still_matches_documented_collector_shape(self) -> None:
@@ -710,10 +758,15 @@ class RapidTriageOutputSamplesTests(unittest.TestCase):
             browser = providers["windows-browser-artifacts"]
             recent = providers["windows-recent-files"]
 
-            self.assertEqual({artifact["artifact_type"] for artifact in browser["artifacts"]}, {"browser-history", "browser-history-downloads"})
+            self.assertEqual(
+                {artifact["artifact_type"] for artifact in browser["artifacts"]},
+                {"browser-history", "browser-history-downloads", "browser-download", "browser-visit"},
+            )
+            # The repo fixture's Case Notes.lnk is plain text, so it is reported as
+            # non-LNK content (parser-quality r1) instead of a decoded shortcut.
             self.assertEqual(
                 {artifact["artifact_type"] for artifact in recent["artifacts"]},
-                {"recent-shortcut", "jumplist-automatic", "jumplist-custom"},
+                {"recent-shortcut-invalid-content", "jumplist-automatic", "jumplist-custom"},
             )
 
 

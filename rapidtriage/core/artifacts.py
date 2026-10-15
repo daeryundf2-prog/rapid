@@ -108,10 +108,15 @@ def run_artifact_collection(
             }
         )
     artifact_type_counts = Counter()
+    skip_reasons: Counter[str] = Counter()
     for artifact in artifacts:
         artifact_type = artifact.get("artifact_type")
         if artifact_type:
             artifact_type_counts[str(artifact_type)] += 1
+        observe_skipped_row(artifact, skip_reasons)
+        observe_parser_error_row(artifact, parser_errors, kind=kind)
+    if collection_status == "completed" and artifacts and sum(skip_reasons.values()) == len(artifacts):
+        collection_status = "skipped"
 
     collector_kind = str(getattr(collector, "collector_kind", kind))
     payload = {
@@ -128,8 +133,10 @@ def run_artifact_collection(
         "summary": {
             "artifact_count": len(artifacts),
             "artifact_type_counts": dict(artifact_type_counts),
-            "parser_error_count": len(parser_errors),
+            "parser_error_count": count_parser_errors(parser_errors),
             "collection_status": collection_status,
+            **collector_disclosure(collector),
+            **skipped_row_summary(skip_reasons),
         },
         "parser_errors": parser_errors,
         "artifacts": artifacts,
@@ -145,6 +152,67 @@ def run_artifact_collection(
     if rule_set is not None:
         annotate_artifacts_payload(payload, rule_set)
     return finalize_artifact_payload(payload, records_path=records_path, preview_limit=preview_limit)
+
+
+def observe_skipped_row(row: object, skip_reasons: Counter[str]) -> None:
+    """Count rows a provider marked ``skipped`` (missing dependency etc.)."""
+    if not isinstance(row, dict):
+        return
+    details = row.get("details") if isinstance(row.get("details"), dict) else {}
+    status = details.get("collection_status") or details.get("status") or row.get("collection_status")
+    if status == "skipped":
+        skip_reasons[str(details.get("skip_reason") or row.get("skip_reason") or "skipped")] += 1
+
+
+MAX_ROW_PARSER_ERRORS_LISTED = 200
+
+
+def observe_parser_error_row(row: object, parser_errors: list[dict[str, object]], *, kind: str) -> None:
+    """Provider rows flagged ``parser_error: true`` (e.g. browser-parse-error)
+    count as parser errors, not only collector exceptions (parser-quality r1)."""
+    if not isinstance(row, dict):
+        return
+    details = row.get("details") if isinstance(row.get("details"), dict) else {}
+    if row.get("parser_error") is not True and details.get("parser_error") is not True:
+        return
+    entry: dict[str, object] = {
+        "kind": kind,
+        "collector": str(row.get("provider") or kind),
+        "error_type": str(details.get("error_type") or row.get("artifact_type") or "parser-error-row"),
+        "message": str(details.get("error") or details.get("message") or details.get("reason") or "parser_error row"),
+        "path": str(row.get("path") or ""),
+        "source": "row",
+    }
+    if len([item for item in parser_errors if item.get("source") == "row"]) < MAX_ROW_PARSER_ERRORS_LISTED:
+        parser_errors.append(entry)
+    else:
+        parser_errors[-1]["truncated_row_errors"] = int(parser_errors[-1].get("truncated_row_errors") or 0) + 1
+
+
+def count_parser_errors(parser_errors: list[dict[str, object]]) -> int:
+    return len(parser_errors) + sum(int(item.get("truncated_row_errors") or 0) for item in parser_errors)
+
+
+def skipped_row_summary(skip_reasons: Counter[str]) -> dict[str, object]:
+    if not skip_reasons:
+        return {}
+    return {"skipped_row_count": sum(skip_reasons.values()), "skip_reasons": dict(skip_reasons)}
+
+
+def collector_disclosure(collector: object) -> dict[str, object]:
+    """Provider self-disclosure set during ``collect()`` (parser-quality r1).
+
+    ``collection_notes`` (Korean reasons, e.g. why a provider found nothing),
+    ``export_roots`` / ``acquisition_roots`` (recognized export signatures)
+    and a row-level ``skipped`` status (missing dependency) surface in the
+    kind summary so a 0-row provider explains itself.
+    """
+    disclosure: dict[str, object] = {}
+    for key in ("collection_notes", "export_roots", "acquisition_roots"):
+        value = getattr(collector, key, None)
+        if isinstance(value, (list, tuple)) and value:
+            disclosure[key] = [str(item) for item in value]
+    return disclosure
 
 
 def _provider_header(collector: object) -> dict[str, object]:
@@ -205,6 +273,7 @@ def stream_artifact_collection(
     builder = StreamingProfileBuilder()
     annotator = StreamingArtifactAnnotator(rule_set) if rule_set is not None else None
     type_counts: Counter[str] = Counter()
+    skip_reasons: Counter[str] = Counter()
     contract_errors: list[dict[str, object]] = []
     valid_count = 0
     invalid_count = 0
@@ -237,6 +306,8 @@ def stream_artifact_collection(
                     artifact_type = adapted.get("artifact_type")
                     if artifact_type:
                         type_counts[str(artifact_type)] += 1
+                    observe_skipped_row(adapted, skip_reasons)
+                    observe_parser_error_row(adapted, parser_errors, kind=kind)
                     builder.observe(adapted)
                 raw.write(_dump_row(adapted) + "\n")
                 record_count += 1
@@ -254,6 +325,7 @@ def stream_artifact_collection(
         record_count = valid_count = invalid_count = 0
         contract_errors = []
         type_counts = Counter()
+        skip_reasons = Counter()
         builder = StreamingProfileBuilder()
         annotator = StreamingArtifactAnnotator(rule_set) if rule_set is not None else None
         raw_path.write_text("", encoding="utf-8")
@@ -291,8 +363,14 @@ def stream_artifact_collection(
         "summary": {
             "artifact_count": record_count,
             "artifact_type_counts": dict(type_counts),
-            "parser_error_count": len(parser_errors),
-            "collection_status": collection_status,
+            "parser_error_count": count_parser_errors(parser_errors),
+            "collection_status": (
+                "skipped"
+                if collection_status == "completed" and record_count and sum(skip_reasons.values()) == record_count
+                else collection_status
+            ),
+            **collector_disclosure(collector),
+            **skipped_row_summary(skip_reasons),
             "artifact_record_contract_valid_count": valid_count,
             "artifact_record_contract_invalid_count": invalid_count,
         },

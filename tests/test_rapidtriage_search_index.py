@@ -134,12 +134,15 @@ class SearchIndexRunTests(unittest.TestCase):
             self.assertIn(KOREAN_NAME, names, form)
 
     def test_filters_and_limit_are_applied_in_the_index(self) -> None:
-        payload = self.search(["persistence"], sources=["files"], extensions=[".bat"], path_contains="desktop")
+        # Parser-quality r1: categories come from extension tables, so the
+        # fraud profile (no executables) no longer takes Desktop\*.bat in via
+        # the "desktop" path keyword; the image on the Desktop is a candidate.
+        payload = self.search(["screen"], sources=["files"], extensions=[".png"], path_contains="desktop")
         self.assertEqual(payload["backend"], "fts")
         self.assertTrue(payload["matches"])
         for match in payload["matches"]:
             self.assertEqual(match["source"], "files")
-            self.assertTrue(match["path"].lower().endswith(".bat"))
+            self.assertTrue(match["path"].lower().endswith(".png"))
             self.assertIn("desktop", match["path"].lower())
         self.assertEqual(set(payload["scanned"]), {"files"})
         limited = self.search(["powershell"], limit=1)

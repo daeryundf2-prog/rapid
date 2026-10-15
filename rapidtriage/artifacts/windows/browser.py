@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 import hashlib
 import json
 import re
@@ -103,7 +104,6 @@ QC_PREP_AI_TRANSCRIPT_CONTRACT = {
         "trusted ChatGPT/Claude/Gemini/Perplexity/Copilot export diffs",
     ],
 }
-MAX_USAGE_ROWS = 500
 MAX_AI_STORAGE_FILES = 80
 MAX_AI_STORAGE_FILE_BYTES = 5 * 1024 * 1024
 MAX_AI_CONVERSATION_ROWS = 200
@@ -305,11 +305,22 @@ class WindowsBrowserArtifactsProvider:
                 user_data_root = user_root.joinpath(*relative_parts)
                 if not user_data_root.is_dir():
                     continue
+                yield from chromium_local_state_rows(
+                    provider=self.name, user=user_name, browser=browser_name, user_data_root=user_data_root
+                )
                 for profile_dir in sorted(user_data_root.iterdir(), key=lambda item: item.name.lower()):
                     if not profile_dir.is_dir():
                         continue
                     history_path = profile_dir / "History"
-                    if not history_path.is_file():
+                    history_rows: list[dict[str, object]] = []
+                    download_rows: list[dict[str, object]] = []
+                    if history_path.is_file():
+                        # Snapshot/SQLite failures are reported as browser-parse-error
+                        # rows by collect_chromium_profile_rows below.
+                        history_rows, download_rows = extract_chromium_history_and_downloads(history_path)
+                    if not history_rows and not download_rows:
+                        # An unreadable or empty History must not hide the rest of
+                        # the profile: keep the storage-only inventory.
                         yield from build_browser_storage_only_artifacts(
                             provider=self.name,
                             user=user_name,
@@ -317,19 +328,23 @@ class WindowsBrowserArtifactsProvider:
                             profile=profile_dir.name,
                             profile_dir=profile_dir,
                         )
-                        continue
-                    history_rows, download_rows = extract_chromium_history_and_downloads(history_path)
-                    if not history_rows and not download_rows:
-                        continue
-                    yield from build_browser_artifacts(
+                    else:
+                        yield from build_browser_artifacts(
+                            provider=self.name,
+                            artifact_type="browser-history-downloads",
+                            user=user_name,
+                            browser=browser_name,
+                            profile=profile_dir.name,
+                            source_path=history_path,
+                            history_rows=history_rows,
+                            download_rows=download_rows,
+                        )
+                    yield from collect_chromium_profile_rows(
                         provider=self.name,
-                        artifact_type="browser-history-downloads",
                         user=user_name,
                         browser=browser_name,
                         profile=profile_dir.name,
-                        source_path=history_path,
-                        history_rows=history_rows,
-                        download_rows=download_rows,
+                        profile_dir=profile_dir,
                     )
 
             firefox_root = user_root.joinpath(*FIREFOX_PROFILE_ROOT)
@@ -342,17 +357,19 @@ class WindowsBrowserArtifactsProvider:
                 if not places_path.is_file():
                     continue
                 history_rows = extract_firefox_history(places_path)
-                if not history_rows:
-                    continue
-                yield from build_browser_artifacts(
-                    provider=self.name,
-                    artifact_type="browser-history",
-                    user=user_name,
-                    browser="firefox",
-                    profile=profile_dir.name,
-                    source_path=places_path,
-                    history_rows=history_rows,
-                    download_rows=[],
+                if history_rows:
+                    yield from build_browser_artifacts(
+                        provider=self.name,
+                        artifact_type="browser-history",
+                        user=user_name,
+                        browser="firefox",
+                        profile=profile_dir.name,
+                        source_path=places_path,
+                        history_rows=history_rows,
+                        download_rows=[],
+                    )
+                yield from collect_firefox_profile_rows(
+                    provider=self.name, user=user_name, profile=profile_dir.name, places_path=places_path
                 )
         yield from collect_webcachev01_artifacts(root)
         yield from collect_desktop_cloud_sync_db_artifacts(root)
@@ -3019,7 +3036,8 @@ def build_browser_timeline_depth_manifest(
             "source_table_counts": source_table_counts,
             "transition_metadata_count": transition_count,
             "timestamp_source_count": sum(1 for row in unified_timeline if row.get("timestamp")),
-            "bounded_to_max_rows": len(unified_timeline) >= MAX_BROWSER_TIMELINE_ROWS,
+            "bounded_to_max_rows": False,
+            "unified_timeline_truncated": False,
         },
         "integrity": {
             "sorted_descending": bool(timeline_integrity_profile.get("sorted_descending")),
@@ -6073,7 +6091,7 @@ def build_unified_browser_timeline(
 ) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     ai_urls = {str(row.get("url") or ""): row for row in ai_rows}
-    for index, row in enumerate(history_rows[:MAX_BROWSER_TIMELINE_ROWS]):
+    for index, row in enumerate(history_rows):
         url = str(row.get("url") or "")
         ai_row = ai_urls.get(url, {})
         rows.append(
@@ -6099,7 +6117,7 @@ def build_unified_browser_timeline(
                 "validation_status": "normalized-candidate",
             }
         )
-    for index, row in enumerate(download_rows[:MAX_BROWSER_TIMELINE_ROWS]):
+    for index, row in enumerate(download_rows):
         source_url = str(row.get("source_url") or row.get("tab_url") or "")
         row_source_path = Path(str(row.get("source_path") or source_path))
         row_source_hashes = row.get("source_hashes") if isinstance(row.get("source_hashes"), Mapping) else source_hashes
@@ -6129,7 +6147,8 @@ def build_unified_browser_timeline(
                 "validation_status": "normalized-candidate",
             }
         )
-    return sorted(rows, key=lambda item: str(item.get("timestamp") or ""), reverse=True)[:MAX_BROWSER_TIMELINE_ROWS]
+    # Uncapped (parser-quality-r1): every URL/download row is in the timeline.
+    return sorted(rows, key=lambda item: str(item.get("timestamp") or ""), reverse=True)
 
 
 def browser_timeline_integrity_profile(timeline: Sequence[Mapping[str, object]]) -> dict[str, object]:
@@ -6351,7 +6370,7 @@ def deduplicate_conversation_rows(rows: Sequence[Mapping[str, object]]) -> list[
 
 def summarize_internet_usage(history_rows: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
     usage_rows: list[dict[str, object]] = []
-    for index, row in enumerate(history_rows[:MAX_USAGE_ROWS]):
+    for index, row in enumerate(history_rows):
         url = str(row.get("url") or "")
         parsed = safe_parse_url(url)
         if not parsed.scheme.startswith("http") or not parsed.netloc:
@@ -6376,7 +6395,7 @@ def summarize_internet_usage(history_rows: Sequence[Mapping[str, object]]) -> li
 
 def extract_ai_usage(history_rows: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
     ai_rows: list[dict[str, object]] = []
-    for index, row in enumerate(history_rows[:MAX_USAGE_ROWS]):
+    for index, row in enumerate(history_rows):
         url = str(row.get("url") or "")
         title = str(row.get("title") or "")
         service = detect_ai_service(url, title)
@@ -6501,7 +6520,9 @@ def file_hashes(path: Path) -> dict[str, str]:
     return {name: digest.hexdigest() for name, digest in digests.items()}
 
 
-def extract_chromium_history_and_downloads(history_db: Path) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+def extract_chromium_history_and_downloads(
+    history_db: Path, *, errors: list[dict[str, object]] | None = None
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     provenance: dict[str, object] = {}
     try:
         with open_sqlite_snapshot(history_db, provenance=provenance) as connection:
@@ -6563,7 +6584,16 @@ def extract_chromium_history_and_downloads(history_db: Path) -> tuple[list[dict[
             for row in [*history_rows, *download_rows]:
                 row["sqlite_snapshot"] = provenance
             return history_rows, download_rows
-    except (sqlite3.DatabaseError, OSError):
+    except (sqlite3.DatabaseError, OSError) as exc:
+        if errors is not None:
+            errors.append(
+                {
+                    "source_path": str(history_db),
+                    "reason": "SQLite 스냅숏/질의 실패",
+                    "error_type": type(exc).__name__,
+                    "error_message": str(exc),
+                }
+            )
         return [], []
 
 
@@ -6584,15 +6614,23 @@ def extract_chromium_downloads(connection: sqlite3.Connection) -> list[dict[str,
         ):
             chain_urls.setdefault(int(row["id"]), str(row["url"]))
 
+    chain_all: dict[int, list[str]] = {}
+    if sqlite_table_exists(connection, "downloads_url_chains"):
+        for row in connection.execute(
+            "SELECT id, url FROM downloads_url_chains WHERE url IS NOT NULL AND url != '' ORDER BY id ASC, chain_index ASC"
+        ):
+            chain_all.setdefault(int(row["id"]), []).append(str(row["url"]))
     select_columns = [
         "id",
-        column_or_null(columns, "target_path"),
-        column_or_null(columns, "current_path"),
-        column_or_null(columns, "tab_url"),
-        column_or_null(columns, "total_bytes"),
-        column_or_null(columns, "state"),
-        column_or_null(columns, "start_time"),
-        column_or_null(columns, "end_time"),
+        *(
+            column_or_null(columns, name)
+            for name in (
+                "target_path", "current_path", "tab_url", "total_bytes", "state", "start_time", "end_time",
+                "received_bytes", "referrer", "tab_referrer_url", "site_url", "danger_type", "interrupt_reason",
+                "mime_type", "original_mime_type", "opened", "last_access_time", "guid", "by_ext_id", "by_ext_name",
+                "http_method", "last_modified",
+            )
+        ),
     ]
     order_column = "start_time" if "start_time" in columns else "id"
     query = f"SELECT {', '.join(select_columns)} FROM downloads ORDER BY {order_column} DESC, id ASC"
@@ -6612,12 +6650,37 @@ def extract_chromium_downloads(connection: sqlite3.Connection) -> list[dict[str,
                 "state": int(row["state"] or 0),
                 "started_at": isoformat_from_webkit_micros(row["start_time"]),
                 "ended_at": isoformat_from_webkit_micros(row["end_time"]),
+                "current_path": str(row["current_path"] or ""),
+                "received_bytes": int(row["received_bytes"] or 0),
+                "state_name": CHROMIUM_DOWNLOAD_STATES.get(int(row["state"] or 0), ""),
+                "danger_type": browser_int(row["danger_type"]),
+                "danger_type_name": (
+                    CHROMIUM_DOWNLOAD_DANGER.get(browser_int(row["danger_type"]) or 0, "")
+                    if row["danger_type"] is not None
+                    else ""
+                ),
+                "interrupt_reason": browser_int(row["interrupt_reason"]),
+                "referrer": str(row["referrer"] or ""),
+                "tab_referrer_url": str(row["tab_referrer_url"] or ""),
+                "site_url": str(row["site_url"] or ""),
+                "url_chain": chain_all.get(download_id, []),
+                "mime_type": str(row["mime_type"] or ""),
+                "original_mime_type": str(row["original_mime_type"] or ""),
+                "opened": bool(row["opened"]) if row["opened"] is not None else None,
+                "last_accessed_at": isoformat_from_webkit_micros(row["last_access_time"]),
+                "guid": str(row["guid"] or ""),
+                "by_extension_id": str(row["by_ext_id"] or ""),
+                "by_extension_name": str(row["by_ext_name"] or ""),
+                "http_method": str(row["http_method"] or ""),
+                "server_last_modified": str(row["last_modified"] or ""),
             }
         )
     return rows
 
 
-def extract_firefox_history(places_db: Path) -> list[dict[str, object]]:
+def extract_firefox_history(
+    places_db: Path, *, errors: list[dict[str, object]] | None = None
+) -> list[dict[str, object]]:
     try:
         with open_sqlite_snapshot(places_db) as connection:
             if not sqlite_table_exists(connection, "moz_places"):
@@ -6654,7 +6717,16 @@ def extract_firefox_history(places_db: Path) -> list[dict[str, object]]:
                     }
                 )
             return history_rows
-    except (sqlite3.DatabaseError, OSError):
+    except (sqlite3.DatabaseError, OSError) as exc:
+        if errors is not None:
+            errors.append(
+                {
+                    "source_path": str(places_db),
+                    "reason": "SQLite 스냅숏/질의 실패",
+                    "error_type": type(exc).__name__,
+                    "error_message": str(exc),
+                }
+            )
         return []
 
 
@@ -6674,3 +6746,1335 @@ def column_or_null(columns: set[str], name: str) -> str:
     if name in columns:
         return name
     return f"NULL AS {name}"
+
+
+# ---------------------------------------------------------------------------
+# parser-quality-r1: per-row Chromium/Firefox profile parsers.
+#
+# The profile summary records above stay as they are; these helpers expand the
+# profile into one ArtifactRecord per visit, URL, download, search term,
+# cookie, saved login, autofill entry, bookmark, shortcut, top site, session
+# navigation and extension.  Every row carries a top-level ``timestamp`` (the
+# artifact's own time, never a host mtime) plus ``timestamp_kind``.  Secret
+# values (cookie values, passwords, card numbers, CVCs, tokens) are never read
+# into a row; only their presence is recorded.
+# ---------------------------------------------------------------------------
+
+BROWSER_ROW_PARSER = "browser-profile-rows-v1"
+CHROMIUM_TRANSITION_CORE = {
+    0: "LINK",
+    1: "TYPED",
+    2: "AUTO_BOOKMARK",
+    3: "AUTO_SUBFRAME",
+    4: "MANUAL_SUBFRAME",
+    5: "GENERATED",
+    6: "AUTO_TOPLEVEL",
+    7: "FORM_SUBMIT",
+    8: "RELOAD",
+    9: "KEYWORD",
+    10: "KEYWORD_GENERATED",
+}
+CHROMIUM_TRANSITION_QUALIFIERS = (
+    (0x00800000, "BLOCKED"),
+    (0x01000000, "FORWARD_BACK"),
+    (0x02000000, "FROM_ADDRESS_BAR"),
+    (0x04000000, "HOME_PAGE"),
+    (0x08000000, "FROM_API"),
+    (0x10000000, "CHAIN_START"),
+    (0x20000000, "CHAIN_END"),
+    (0x40000000, "CLIENT_REDIRECT"),
+    (0x80000000, "SERVER_REDIRECT"),
+)
+CHROMIUM_DOWNLOAD_STATES = {0: "IN_PROGRESS", 1: "COMPLETE", 2: "CANCELLED", 3: "INTERRUPTED_LEGACY", 4: "INTERRUPTED"}
+CHROMIUM_DOWNLOAD_DANGER = {
+    0: "NOT_DANGEROUS",
+    1: "DANGEROUS_FILE",
+    2: "DANGEROUS_URL",
+    3: "DANGEROUS_CONTENT",
+    4: "MAYBE_DANGEROUS_CONTENT",
+    5: "UNCOMMON_CONTENT",
+    6: "USER_VALIDATED",
+    7: "DANGEROUS_HOST",
+    8: "POTENTIALLY_UNWANTED",
+    9: "ALLOWLISTED_BY_POLICY",
+    10: "ASYNC_SCANNING",
+    11: "BLOCKED_PASSWORD_PROTECTED",
+    12: "BLOCKED_TOO_LARGE",
+    13: "SENSITIVE_CONTENT_WARNING",
+    14: "SENSITIVE_CONTENT_BLOCK",
+    15: "DEEP_SCANNED_SAFE",
+    16: "DEEP_SCANNED_OPENED_DANGEROUS",
+    17: "PROMPT_FOR_SCANNING",
+    18: "BLOCKED_UNSUPPORTED_FILETYPE",
+    19: "DANGEROUS_ACCOUNT_COMPROMISE",
+}
+CHROMIUM_COOKIE_SAMESITE = {-1: "UNSPECIFIED", 0: "NO_RESTRICTION", 1: "LAX", 2: "STRICT"}
+CHROMIUM_EXTENSION_LOCATIONS = {
+    0: "INVALID",
+    1: "INTERNAL",
+    2: "EXTERNAL_PREF",
+    3: "EXTERNAL_REGISTRY",
+    4: "UNPACKED",
+    5: "COMPONENT",
+    6: "EXTERNAL_PREF_DOWNLOAD",
+    7: "EXTERNAL_POLICY_DOWNLOAD",
+    8: "COMMAND_LINE",
+    9: "EXTERNAL_POLICY",
+    10: "EXTERNAL_COMPONENT",
+}
+CHROMIUM_ADDRESS_TOKEN_TYPES = {
+    3: "NAME_FIRST",
+    4: "NAME_MIDDLE",
+    5: "NAME_LAST",
+    7: "NAME_FULL",
+    9: "EMAIL_ADDRESS",
+    14: "PHONE_HOME_WHOLE_NUMBER",
+    30: "ADDRESS_HOME_LINE1",
+    31: "ADDRESS_HOME_LINE2",
+    32: "ADDRESS_HOME_APT_NUM",
+    33: "ADDRESS_HOME_CITY",
+    34: "ADDRESS_HOME_STATE",
+    35: "ADDRESS_HOME_ZIP",
+    36: "ADDRESS_HOME_COUNTRY",
+    60: "COMPANY_NAME",
+    77: "ADDRESS_HOME_STREET_ADDRESS",
+    81: "ADDRESS_HOME_SORTING_CODE",
+    82: "ADDRESS_HOME_DEPENDENT_LOCALITY",
+}
+FIREFOX_VISIT_TYPES = {
+    1: "LINK",
+    2: "TYPED",
+    3: "BOOKMARK",
+    4: "EMBED",
+    5: "REDIRECT_PERMANENT",
+    6: "REDIRECT_TEMPORARY",
+    7: "DOWNLOAD",
+    8: "FRAMED_LINK",
+    9: "RELOAD",
+}
+BROWSER_PII_PREVIEW_CHARS = 80
+BROWSER_SENSITIVE_FIELD_RE = re.compile(
+    r"pass|pwd|passwd|pin(?:code|_?no)?$|cvc|cvv|card|ccnum|cc-?number|ssn|social|주민|계좌|비밀|암호|otp|token|secret|security",
+    re.IGNORECASE,
+)
+SNSS_MAGIC = b"SNSS"
+MAX_SNSS_FILE_BYTES = 64 * 1024 * 1024
+BROWSER_NULL_FILL_RATIO = 0.5
+SQLITE_HEADER = b"SQLite format 3\x00"
+WEBKIT_EPOCH = dt.datetime(1601, 1, 1, tzinfo=dt.timezone.utc)
+UNIX_EPOCH = dt.datetime(1970, 1, 1, tzinfo=dt.timezone.utc)
+
+
+class BrowserRowContext:
+    __slots__ = ("browser", "profile", "provider", "user")
+
+    def __init__(self, *, provider: str, user: str, browser: str, profile: str) -> None:
+        self.provider = provider
+        self.user = user
+        self.browser = browser
+        self.profile = profile
+
+
+def browser_int(value: object) -> int | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    try:
+        return int(str(value).strip())
+    except ValueError:
+        return None
+
+
+def webkit_micros_to_iso(value: object) -> str | None:
+    """WebKit/Chromium microseconds since 1601-01-01 UTC, integer math only."""
+
+    number = browser_int(value)
+    if number is None or number <= 0:
+        return None
+    try:
+        return (WEBKIT_EPOCH + dt.timedelta(microseconds=number)).isoformat()
+    except OverflowError:
+        return None
+
+
+def unix_micros_to_iso(value: object) -> str | None:
+    number = browser_int(value)
+    if number is None or number <= 0:
+        return None
+    try:
+        return (UNIX_EPOCH + dt.timedelta(microseconds=number)).isoformat()
+    except OverflowError:
+        return None
+
+
+def unix_seconds_to_iso(value: object) -> str | None:
+    number = browser_int(value)
+    if number is None or number <= 0:
+        return None
+    try:
+        return (UNIX_EPOCH + dt.timedelta(seconds=number)).isoformat()
+    except OverflowError:
+        return None
+
+
+def chromium_transition_profile(value: object) -> dict[str, object]:
+    number = browser_int(value)
+    if number is None:
+        return {"transition": None, "transition_core": "", "transition_qualifiers": []}
+    unsigned = number & 0xFFFFFFFF
+    return {
+        "transition": number,
+        "transition_core": CHROMIUM_TRANSITION_CORE.get(unsigned & 0xFF, f"UNKNOWN_{unsigned & 0xFF}"),
+        "transition_qualifiers": [name for mask, name in CHROMIUM_TRANSITION_QUALIFIERS if unsigned & mask],
+    }
+
+
+def browser_pii_value(field_name: str, value: object) -> dict[str, object]:
+    """Preview policy for user-entered form data (same 80-char preview + sha256
+    as other redacted SQLite values); fields that look like secrets are masked."""
+
+    text = "" if value is None else (value.hex() if isinstance(value, bytes) else str(value))
+    sensitive = bool(BROWSER_SENSITIVE_FIELD_RE.search(field_name or ""))
+    return {
+        "value_preview": "[마스킹됨]" if sensitive else text[:BROWSER_PII_PREVIEW_CHARS],
+        "value_masked": sensitive,
+        "value_truncated": (not sensitive) and len(text) > BROWSER_PII_PREVIEW_CHARS,
+        "value_length": len(text),
+        "value_sha256": hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest() if text else "",
+    }
+
+
+def browser_row_record(
+    context: BrowserRowContext,
+    artifact_type: str,
+    source_path: Path,
+    *,
+    timestamp: str | None,
+    timestamp_kind: str,
+    fields: Mapping[str, object],
+    source_table: str = "",
+    source_row_id: object = None,
+    timestamp_basis: str = "UTC",
+) -> ArtifactRecord:
+    details: dict[str, object] = {
+        "parser": BROWSER_ROW_PARSER,
+        "parser_version": PARSER_VERSION,
+        "coverage_status": "parsed",
+        "user": context.user,
+        "browser": context.browser,
+        "profile": context.profile,
+        "timestamp": timestamp,
+        "timestamp_kind": timestamp_kind if timestamp else "",
+        "timestamp_timezone": timestamp_basis if timestamp else "",
+        "source_path": str(source_path),
+        "source_table": source_table,
+        "source_row_id": source_row_id,
+    }
+    details.update(fields)
+    return ArtifactRecord(
+        provider=context.provider,
+        artifact_type=artifact_type,
+        path=str(source_path),
+        supported=True,
+        details=details,
+    )
+
+
+def browser_parse_error_record(
+    context: BrowserRowContext, source_path: Path, *, reason: str, error: BaseException | None = None
+) -> ArtifactRecord:
+    return ArtifactRecord(
+        provider=context.provider,
+        artifact_type="browser-parse-error",
+        path=str(source_path),
+        supported=True,
+        details={
+            "parser": BROWSER_ROW_PARSER,
+            "parser_version": PARSER_VERSION,
+            "coverage_status": "parser-error",
+            "parser_error": True,
+            "user": context.user,
+            "browser": context.browser,
+            "profile": context.profile,
+            "source_path": str(source_path),
+            "reason": reason,
+            "error_type": type(error).__name__ if error is not None else "",
+            "error_message": str(error) if error is not None else "",
+            "timestamp": None,
+            "timestamp_kind": "",
+        },
+    )
+
+
+def browser_acquisition_anomaly_record(
+    context: BrowserRowContext, source_path: Path, *, anomaly: str, reason: str, fields: Mapping[str, object]
+) -> ArtifactRecord:
+    return browser_row_record(
+        context,
+        "browser-acquisition-anomaly",
+        source_path,
+        timestamp=None,
+        timestamp_kind="",
+        fields={"anomaly": anomaly, "reason": reason, "coverage_status": "acquisition-anomaly", **fields},
+    )
+
+
+def null_fill_profile(path: Path) -> dict[str, object] | None:
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return None
+    if not data:
+        return {"size": 0, "null_bytes": 0, "null_ratio": 0.0, "null_filled": False}
+    null_bytes = data.count(0)
+    ratio = null_bytes / len(data)
+    return {
+        "size": len(data),
+        "null_bytes": null_bytes,
+        "null_ratio": round(ratio, 6),
+        "null_filled": ratio >= BROWSER_NULL_FILL_RATIO,
+        "data": data,
+    }
+
+
+def browser_sqlite_rows(
+    context: BrowserRowContext,
+    path: Path,
+    errors: list[ArtifactRecord],
+    reader,
+) -> list[ArtifactRecord]:
+    """Open an evidence SQLite through the private snapshot and run ``reader``.
+
+    Snapshot or SQLite failures are recorded as ``browser-parse-error`` rows
+    rather than silently returning an empty list."""
+
+    resolved = path.resolve()
+    try:
+        with path.open("rb") as handle:
+            header = handle.read(len(SQLITE_HEADER))
+    except OSError as exc:
+        errors.append(browser_parse_error_record(context, resolved, reason="파일을 읽을 수 없음", error=exc))
+        return []
+    if header != SQLITE_HEADER:
+        profile = null_fill_profile(path)
+        if profile and profile["null_filled"]:
+            errors.append(
+                browser_acquisition_anomaly_record(
+                    context,
+                    resolved,
+                    anomaly="null-filled-file",
+                    reason="SQLite 파일이 NULL 바이트로 채워져 있음(취득 이상 의심)",
+                    fields={key: value for key, value in profile.items() if key != "data"},
+                )
+            )
+        else:
+            errors.append(browser_parse_error_record(context, resolved, reason="SQLite 헤더가 아님"))
+        return []
+    try:
+        with open_sqlite_snapshot(path) as connection:
+            return reader(connection, resolved)
+    except (sqlite3.DatabaseError, OSError) as exc:
+        errors.append(
+            browser_parse_error_record(context, resolved, reason="SQLite 스냅숏/질의 실패", error=exc)
+        )
+        return []
+
+
+def select_columns(connection: sqlite3.Connection, table: str, wanted: Sequence[str]) -> str:
+    present = sqlite_table_columns(connection, table)
+    return ", ".join(name if name in present else f"NULL AS {name}" for name in wanted)
+
+
+def chromium_history_row_reader(context: BrowserRowContext):
+    def reader(connection: sqlite3.Connection, source: Path) -> list[ArtifactRecord]:
+        records: list[ArtifactRecord] = []
+        if not sqlite_table_exists(connection, "urls"):
+            return records
+        urls: dict[int, tuple[str, str]] = {}
+        url_select = select_columns(connection, "urls", ("id", "url", "title", "visit_count", "typed_count", "last_visit_time", "hidden"))
+        for row in connection.execute(f"SELECT {url_select} FROM urls ORDER BY id"):
+            url_id = int(row["id"])
+            url = str(row["url"] or "")
+            title = str(row["title"] or "")
+            urls[url_id] = (url, title)
+            records.append(
+                browser_row_record(
+                    context,
+                    "browser-history",
+                    source,
+                    timestamp=webkit_micros_to_iso(row["last_visit_time"]),
+                    timestamp_kind="last-visited",
+                    source_table="urls",
+                    source_row_id=url_id,
+                    fields={
+                        "row_kind": "url",
+                        "url": url,
+                        "title": title,
+                        "domain": normalize_host(safe_parse_url(url).netloc),
+                        "visit_count": browser_int(row["visit_count"]) or 0,
+                        "typed_count": browser_int(row["typed_count"]) or 0,
+                        "hidden": bool(row["hidden"]),
+                        "last_visit_time_raw": browser_int(row["last_visit_time"]),
+                    },
+                )
+            )
+        if sqlite_table_exists(connection, "visits"):
+            visit_select = select_columns(
+                connection,
+                "visits",
+                ("id", "url", "visit_time", "from_visit", "transition", "segment_id", "visit_duration", "opener_visit", "external_referrer_url", "app_id"),
+            )
+            visit_rows = list(connection.execute(f"SELECT {visit_select} FROM visits ORDER BY visit_time, id"))
+            visit_url = {int(row["id"]): browser_int(row["url"]) for row in visit_rows}
+            for row in visit_rows:
+                url_id = browser_int(row["url"])
+                url, title = urls.get(url_id or -1, ("", ""))
+                from_visit = browser_int(row["from_visit"]) or 0
+                from_url_id = visit_url.get(from_visit)
+                duration = browser_int(row["visit_duration"]) or 0
+                records.append(
+                    browser_row_record(
+                        context,
+                        "browser-visit",
+                        source,
+                        timestamp=webkit_micros_to_iso(row["visit_time"]),
+                        timestamp_kind="visited",
+                        source_table="visits",
+                        source_row_id=int(row["id"]),
+                        fields={
+                            "url": url,
+                            "title": title,
+                            "url_id": url_id,
+                            "domain": normalize_host(safe_parse_url(url).netloc),
+                            "visit_time_raw": browser_int(row["visit_time"]),
+                            "from_visit": from_visit,
+                            "from_url": urls.get(from_url_id or -1, ("", ""))[0] if from_visit else "",
+                            "opener_visit": browser_int(row["opener_visit"]) or 0,
+                            **chromium_transition_profile(row["transition"]),
+                            "visit_duration_micros": duration,
+                            "visit_duration_seconds": duration // 1_000_000,
+                            "segment_id": browser_int(row["segment_id"]),
+                            "external_referrer_url": str(row["external_referrer_url"] or ""),
+                            "app_id": str(row["app_id"] or ""),
+                            "url_resolved": url_id in urls,
+                        },
+                    )
+                )
+        if sqlite_table_exists(connection, "keyword_search_terms"):
+            term_select = select_columns(connection, "keyword_search_terms", ("keyword_id", "url_id", "term", "normalized_term"))
+            last_visit = {
+                int(row["id"]): browser_int(row["last_visit_time"])
+                for row in connection.execute("SELECT id, last_visit_time FROM urls")
+            }
+            for index, row in enumerate(connection.execute(f"SELECT rowid AS source_rowid, {term_select} FROM keyword_search_terms ORDER BY rowid")):
+                url_id = browser_int(row["url_id"])
+                url, title = urls.get(url_id or -1, ("", ""))
+                records.append(
+                    browser_row_record(
+                        context,
+                        "browser-search",
+                        source,
+                        timestamp=webkit_micros_to_iso(last_visit.get(url_id or -1)),
+                        timestamp_kind="search-url-last-visited",
+                        source_table="keyword_search_terms",
+                        source_row_id=browser_int(row["source_rowid"]) if row["source_rowid"] is not None else index,
+                        fields={
+                            "term": str(row["term"] or ""),
+                            "normalized_term": str(row["normalized_term"] or ""),
+                            "keyword_id": browser_int(row["keyword_id"]),
+                            "url_id": url_id,
+                            "url": url,
+                            "title": title,
+                            "search_engine_host": normalize_host(safe_parse_url(url).netloc),
+                        },
+                    )
+                )
+        if sqlite_table_exists(connection, "downloads"):
+            for download in extract_chromium_downloads(connection):
+                records.append(
+                    browser_row_record(
+                        context,
+                        "browser-download",
+                        source,
+                        timestamp=download.get("started_at"),
+                        timestamp_kind="download-started",
+                        source_table="downloads",
+                        source_row_id=download.get("source_row_id"),
+                        fields={key: value for key, value in download.items() if key not in {"source_table", "source_row_id"}},
+                    )
+                )
+        return records
+
+    return reader
+
+
+def chromium_cookie_reader(context: BrowserRowContext):
+    def reader(connection: sqlite3.Connection, source: Path) -> list[ArtifactRecord]:
+        if not sqlite_table_exists(connection, "cookies"):
+            return []
+        columns = sqlite_table_columns(connection, "cookies")
+        wanted = (
+            "creation_utc", "host_key", "top_frame_site_key", "name", "path", "expires_utc", "is_secure",
+            "is_httponly", "last_access_utc", "has_expires", "is_persistent", "priority", "samesite",
+            "source_scheme", "source_port", "last_update_utc", "source_type",
+        )
+        select = ", ".join(name if name in columns else f"NULL AS {name}" for name in wanted)
+        presence = []
+        for name in ("value", "encrypted_value"):
+            presence.append(f"length({name}) AS {name}_length" if name in columns else f"0 AS {name}_length")
+        records = []
+        for row in connection.execute(f"SELECT rowid AS source_rowid, {select}, {', '.join(presence)} FROM cookies ORDER BY creation_utc, rowid"):
+            samesite = browser_int(row["samesite"])
+            records.append(
+                browser_row_record(
+                    context,
+                    "browser-cookie",
+                    source,
+                    timestamp=webkit_micros_to_iso(row["creation_utc"]),
+                    timestamp_kind="created",
+                    source_table="cookies",
+                    source_row_id=browser_int(row["source_rowid"]),
+                    fields={
+                        "host": str(row["host_key"] or ""),
+                        "name": str(row["name"] or ""),
+                        "path": str(row["path"] or ""),
+                        "top_frame_site_key": str(row["top_frame_site_key"] or ""),
+                        "created_at": webkit_micros_to_iso(row["creation_utc"]),
+                        "last_accessed_at": webkit_micros_to_iso(row["last_access_utc"]),
+                        "last_updated_at": webkit_micros_to_iso(row["last_update_utc"]),
+                        "expires_at": webkit_micros_to_iso(row["expires_utc"]),
+                        "session_cookie": not bool(row["has_expires"]) if row["has_expires"] is not None else not bool(row["expires_utc"]),
+                        "is_secure": bool(row["is_secure"]),
+                        "is_httponly": bool(row["is_httponly"]),
+                        "is_persistent": bool(row["is_persistent"]),
+                        "samesite": CHROMIUM_COOKIE_SAMESITE.get(samesite, str(samesite)) if samesite is not None else "",
+                        "priority": browser_int(row["priority"]),
+                        "source_scheme": browser_int(row["source_scheme"]),
+                        "source_port": browser_int(row["source_port"]),
+                        "value_present": bool((row["value_length"] or 0) or (row["encrypted_value_length"] or 0)),
+                        "value_encrypted": bool(row["encrypted_value_length"] or 0),
+                        "value_policy": "쿠키 값은 수집하지 않음(존재 여부만 기록)",
+                    },
+                )
+            )
+        return records
+
+    return reader
+
+
+def chromium_login_reader(context: BrowserRowContext):
+    def reader(connection: sqlite3.Connection, source: Path) -> list[ArtifactRecord]:
+        if not sqlite_table_exists(connection, "logins"):
+            return []
+        columns = sqlite_table_columns(connection, "logins")
+        wanted = (
+            "origin_url", "action_url", "username_element", "username_value", "password_element", "signon_realm",
+            "date_created", "blacklisted_by_user", "scheme", "password_type", "times_used", "display_name",
+            "federation_url", "date_last_used", "date_password_modified", "date_synced",
+        )
+        select = ", ".join(name if name in columns else f"NULL AS {name}" for name in wanted)
+        password_length = "length(password_value) AS password_length" if "password_value" in columns else "0 AS password_length"
+        row_id = "id" if "id" in columns else "rowid"
+        records = []
+        for row in connection.execute(f"SELECT {row_id} AS source_rowid, {select}, {password_length} FROM logins ORDER BY date_created, {row_id}"):
+            records.append(
+                browser_row_record(
+                    context,
+                    "browser-login",
+                    source,
+                    timestamp=webkit_micros_to_iso(row["date_created"]),
+                    timestamp_kind="created",
+                    source_table="logins",
+                    source_row_id=browser_int(row["source_rowid"]),
+                    fields={
+                        "origin": str(row["origin_url"] or ""),
+                        "action_url": str(row["action_url"] or ""),
+                        "signon_realm": str(row["signon_realm"] or ""),
+                        "username": str(row["username_value"] or ""),
+                        "username_element": str(row["username_element"] or ""),
+                        "password_element": str(row["password_element"] or ""),
+                        "display_name": str(row["display_name"] or ""),
+                        "federation_url": str(row["federation_url"] or ""),
+                        "date_created": webkit_micros_to_iso(row["date_created"]),
+                        "date_last_used": webkit_micros_to_iso(row["date_last_used"]),
+                        "date_password_modified": webkit_micros_to_iso(row["date_password_modified"]),
+                        "date_synced": webkit_micros_to_iso(row["date_synced"]),
+                        "times_used": browser_int(row["times_used"]) or 0,
+                        "blacklisted_by_user": bool(row["blacklisted_by_user"]),
+                        "scheme": browser_int(row["scheme"]),
+                        "password_type": browser_int(row["password_type"]),
+                        "password_stored": bool(row["password_length"] or 0),
+                        "password_policy": "비밀번호 값은 수집·복호화하지 않음(저장 여부만 기록)",
+                    },
+                )
+            )
+        return records
+
+    return reader
+
+
+def chromium_web_data_reader(context: BrowserRowContext):
+    def reader(connection: sqlite3.Connection, source: Path) -> list[ArtifactRecord]:
+        records: list[ArtifactRecord] = []
+        if sqlite_table_exists(connection, "autofill"):
+            select = select_columns(connection, "autofill", ("name", "value", "count", "date_created", "date_last_used"))
+            for row in connection.execute(f"SELECT rowid AS source_rowid, {select} FROM autofill ORDER BY date_created, rowid"):
+                name = str(row["name"] or "")
+                records.append(
+                    browser_row_record(
+                        context,
+                        "browser-autofill",
+                        source,
+                        timestamp=unix_seconds_to_iso(row["date_created"]),
+                        timestamp_kind="created",
+                        source_table="autofill",
+                        source_row_id=browser_int(row["source_rowid"]),
+                        fields={
+                            "field_name": name,
+                            **browser_pii_value(name, row["value"]),
+                            "use_count": browser_int(row["count"]) or 0,
+                            "date_created": unix_seconds_to_iso(row["date_created"]),
+                            "date_last_used": unix_seconds_to_iso(row["date_last_used"]),
+                        },
+                    )
+                )
+        if sqlite_table_exists(connection, "autofill_edge_field_values"):
+            # Edge keeps per-form-field autofill values in its own tables; the
+            # human label comes from autofill_edge_field_client_info.
+            labels: dict[str, tuple[str, str]] = {}
+            if sqlite_table_exists(connection, "autofill_edge_field_client_info"):
+                info_select = select_columns(connection, "autofill_edge_field_client_info", ("field_id", "label", "domain_value"))
+                for row in connection.execute(f"SELECT {info_select} FROM autofill_edge_field_client_info"):
+                    labels[str(row["field_id"] or "")] = (str(row["label"] or ""), str(row["domain_value"] or ""))
+            select = select_columns(
+                connection, "autofill_edge_field_values", ("field_id", "value", "count", "date_created", "date_last_used", "is_masked")
+            )
+            for row in connection.execute(f"SELECT rowid AS source_rowid, {select} FROM autofill_edge_field_values ORDER BY date_created, rowid"):
+                field_id = str(row["field_id"] or "")
+                label, domain = labels.get(field_id, ("", ""))
+                value = browser_pii_value(label or field_id, row["value"])
+                if row["is_masked"] and not value["value_masked"]:
+                    value.update({"value_preview": "[마스킹됨]", "value_masked": True, "value_truncated": False})
+                records.append(
+                    browser_row_record(
+                        context,
+                        "browser-autofill",
+                        source,
+                        timestamp=unix_seconds_to_iso(row["date_created"]),
+                        timestamp_kind="created",
+                        source_table="autofill_edge_field_values",
+                        source_row_id=browser_int(row["source_rowid"]),
+                        fields={
+                            "field_name": label,
+                            "field_id": field_id,
+                            "domain": domain,
+                            **value,
+                            "use_count": browser_int(row["count"]) or 0,
+                            "date_created": unix_seconds_to_iso(row["date_created"]),
+                            "date_last_used": unix_seconds_to_iso(row["date_last_used"]),
+                            "browser_masked_flag": bool(row["is_masked"]),
+                        },
+                    )
+                )
+        masked_cards: dict[str, Mapping[str, object]] = {}
+        if sqlite_table_exists(connection, "masked_credit_cards"):
+            columns = sqlite_table_columns(connection, "masked_credit_cards")
+            if "id" in columns and "last_four" in columns:
+                for row in connection.execute("SELECT id, last_four FROM masked_credit_cards"):
+                    masked_cards[str(row["id"])] = {"last_four": str(row["last_four"] or "")}
+        if sqlite_table_exists(connection, "credit_cards"):
+            columns = sqlite_table_columns(connection, "credit_cards")
+            wanted = ("guid", "name_on_card", "expiration_month", "expiration_year", "date_modified", "origin", "use_count", "use_date", "nickname", "billing_address_id")
+            select = ", ".join(name if name in columns else f"NULL AS {name}" for name in wanted)
+            number_length = "length(card_number_encrypted) AS number_length" if "card_number_encrypted" in columns else "0 AS number_length"
+            for row in connection.execute(f"SELECT rowid AS source_rowid, {select}, {number_length} FROM credit_cards ORDER BY rowid"):
+                last_four = str(masked_cards.get(str(row["guid"]), {}).get("last_four") or "")
+                records.append(
+                    browser_row_record(
+                        context,
+                        "browser-credit-card",
+                        source,
+                        timestamp=unix_seconds_to_iso(row["date_modified"]),
+                        timestamp_kind="modified",
+                        source_table="credit_cards",
+                        source_row_id=browser_int(row["source_rowid"]),
+                        fields={
+                            "guid": str(row["guid"] or ""),
+                            "name_on_card": browser_pii_value("holder_name", row["name_on_card"])["value_preview"],
+                            "nickname": str(row["nickname"] or ""),
+                            "expiration_month": browser_int(row["expiration_month"]),
+                            "expiration_year": browser_int(row["expiration_year"]),
+                            "card_number_masked": f"**** **** **** {last_four}" if last_four else "****",
+                            "card_number_stored": bool(row["number_length"] or 0),
+                            "card_number_policy": "카드 번호는 수집·복호화하지 않음(마스킹)",
+                            "origin": str(row["origin"] or ""),
+                            "use_count": browser_int(row["use_count"]) or 0,
+                            "use_date": unix_seconds_to_iso(row["use_date"]),
+                            "date_modified": unix_seconds_to_iso(row["date_modified"]),
+                        },
+                    )
+                )
+        records.extend(chromium_address_rows(context, connection, source))
+        return records
+
+    return reader
+
+
+def chromium_address_rows(context: BrowserRowContext, connection: sqlite3.Connection, source: Path) -> list[ArtifactRecord]:
+    records: list[ArtifactRecord] = []
+    if sqlite_table_exists(connection, "addresses"):
+        tokens: dict[str, list[dict[str, object]]] = {}
+        if sqlite_table_exists(connection, "address_type_tokens"):
+            for row in connection.execute("SELECT guid, type, value FROM address_type_tokens ORDER BY guid, type"):
+                if row["value"] in (None, ""):
+                    continue
+                type_id = browser_int(row["type"]) or 0
+                name = CHROMIUM_ADDRESS_TOKEN_TYPES.get(type_id, f"TYPE_{type_id}")
+                tokens.setdefault(str(row["guid"]), []).append(
+                    {"type": type_id, "field_name": name, **browser_pii_value(name, row["value"])}
+                )
+        select = select_columns(connection, "addresses", ("guid", "use_count", "use_date", "date_modified", "label", "record_type"))
+        for row in connection.execute(f"SELECT rowid AS source_rowid, {select} FROM addresses ORDER BY rowid"):
+            guid = str(row["guid"] or "")
+            records.append(
+                browser_row_record(
+                    context,
+                    "browser-autofill-address",
+                    source,
+                    timestamp=unix_seconds_to_iso(row["date_modified"]),
+                    timestamp_kind="modified",
+                    source_table="addresses",
+                    source_row_id=browser_int(row["source_rowid"]),
+                    fields={
+                        "guid": guid,
+                        "label": str(row["label"] or ""),
+                        "record_type": browser_int(row["record_type"]),
+                        "use_count": browser_int(row["use_count"]) or 0,
+                        "use_date": unix_seconds_to_iso(row["use_date"]),
+                        "date_modified": unix_seconds_to_iso(row["date_modified"]),
+                        "address_fields": tokens.get(guid, []),
+                    },
+                )
+            )
+    elif sqlite_table_exists(connection, "autofill_profiles"):
+        wanted = ("guid", "company_name", "street_address", "dependent_locality", "city", "state", "zipcode", "country_code", "date_modified", "use_count", "use_date")
+        select = select_columns(connection, "autofill_profiles", wanted)
+        for row in connection.execute(f"SELECT rowid AS source_rowid, {select} FROM autofill_profiles ORDER BY rowid"):
+            fields = [
+                {"field_name": name, **browser_pii_value(name, row[name])}
+                for name in wanted[1:8]
+                if row[name] not in (None, "")
+            ]
+            records.append(
+                browser_row_record(
+                    context,
+                    "browser-autofill-address",
+                    source,
+                    timestamp=unix_seconds_to_iso(row["date_modified"]),
+                    timestamp_kind="modified",
+                    source_table="autofill_profiles",
+                    source_row_id=browser_int(row["source_rowid"]),
+                    fields={
+                        "guid": str(row["guid"] or ""),
+                        "use_count": browser_int(row["use_count"]) or 0,
+                        "use_date": unix_seconds_to_iso(row["use_date"]),
+                        "date_modified": unix_seconds_to_iso(row["date_modified"]),
+                        "address_fields": fields,
+                    },
+                )
+            )
+    return records
+
+
+def chromium_shortcut_reader(context: BrowserRowContext):
+    def reader(connection: sqlite3.Connection, source: Path) -> list[ArtifactRecord]:
+        if not sqlite_table_exists(connection, "omni_box_shortcuts"):
+            return []
+        select = select_columns(
+            connection,
+            "omni_box_shortcuts",
+            ("id", "text", "fill_into_edit", "url", "contents", "description", "transition", "type", "keyword", "last_access_time", "number_of_hits"),
+        )
+        records = []
+        for row in connection.execute(f"SELECT {select} FROM omni_box_shortcuts ORDER BY last_access_time, id"):
+            records.append(
+                browser_row_record(
+                    context,
+                    "browser-omnibox-shortcut",
+                    source,
+                    timestamp=webkit_micros_to_iso(row["last_access_time"]),
+                    timestamp_kind="last-accessed",
+                    source_table="omni_box_shortcuts",
+                    source_row_id=str(row["id"] or ""),
+                    fields={
+                        "typed_text": str(row["text"] or ""),
+                        "fill_into_edit": str(row["fill_into_edit"] or ""),
+                        "url": str(row["url"] or ""),
+                        "contents": str(row["contents"] or ""),
+                        "description": str(row["description"] or ""),
+                        "keyword": str(row["keyword"] or ""),
+                        "number_of_hits": browser_int(row["number_of_hits"]) or 0,
+                        **chromium_transition_profile(row["transition"]),
+                    },
+                )
+            )
+        return records
+
+    return reader
+
+
+def chromium_top_sites_reader(context: BrowserRowContext):
+    def reader(connection: sqlite3.Connection, source: Path) -> list[ArtifactRecord]:
+        if not sqlite_table_exists(connection, "top_sites"):
+            return []
+        select = select_columns(connection, "top_sites", ("url", "url_rank", "title"))
+        return [
+            browser_row_record(
+                context,
+                "browser-top-site",
+                source,
+                timestamp=None,
+                timestamp_kind="",
+                source_table="top_sites",
+                source_row_id=browser_int(row["source_rowid"]),
+                fields={
+                    "url": str(row["url"] or ""),
+                    "title": str(row["title"] or ""),
+                    "url_rank": browser_int(row["url_rank"]),
+                    "timestamp_note": "Top Sites에는 시각 정보가 없음",
+                },
+            )
+            for row in connection.execute(f"SELECT rowid AS source_rowid, {select} FROM top_sites ORDER BY url_rank, rowid")
+        ]
+
+    return reader
+
+
+def read_profile_json(
+    context: BrowserRowContext, path: Path, errors: list[ArtifactRecord]
+) -> Mapping[str, object] | None:
+    profile = null_fill_profile(path)
+    resolved = path.resolve()
+    if profile is None:
+        errors.append(browser_parse_error_record(context, resolved, reason="파일을 읽을 수 없음"))
+        return None
+    if profile["null_filled"]:
+        errors.append(
+            browser_acquisition_anomaly_record(
+                context,
+                resolved,
+                anomaly="null-filled-file",
+                reason=f"{path.name} 파일이 NULL 바이트로 채워져 있음(취득 이상 의심)",
+                fields={key: value for key, value in profile.items() if key != "data"},
+            )
+        )
+        return None
+    data = profile.get("data") or b""
+    try:
+        payload = json.loads(bytes(data).decode("utf-8-sig"))
+    except (UnicodeDecodeError, ValueError) as exc:
+        errors.append(browser_parse_error_record(context, resolved, reason="JSON 파싱 실패", error=exc))
+        return None
+    return payload if isinstance(payload, Mapping) else None
+
+
+def chromium_bookmark_rows(context: BrowserRowContext, path: Path, errors: list[ArtifactRecord]) -> list[ArtifactRecord]:
+    payload = read_profile_json(context, path, errors)
+    if payload is None:
+        return []
+    roots = payload.get("roots")
+    if not isinstance(roots, Mapping):
+        return []
+    source = path.resolve()
+    records: list[ArtifactRecord] = []
+
+    def walk(node: object, folder: list[str], root_name: str) -> None:
+        if not isinstance(node, Mapping):
+            return
+        if node.get("type") == "url":
+            added = webkit_micros_to_iso(node.get("date_added"))
+            records.append(
+                browser_row_record(
+                    context,
+                    "browser-bookmark",
+                    source,
+                    timestamp=added,
+                    timestamp_kind="added",
+                    source_table=f"roots.{root_name}",
+                    source_row_id=str(node.get("id") or ""),
+                    fields={
+                        "name": str(node.get("name") or ""),
+                        "url": str(node.get("url") or ""),
+                        "folder": "/".join(folder),
+                        "date_added": added,
+                        "date_last_used": webkit_micros_to_iso(node.get("date_last_used")),
+                        "guid": str(node.get("guid") or ""),
+                    },
+                )
+            )
+            return
+        name = str(node.get("name") or "")
+        children = node.get("children")
+        if isinstance(children, list):
+            for child in children:
+                walk(child, [*folder, name] if name else folder, root_name)
+
+    for root_name, node in roots.items():
+        walk(node, [], str(root_name))
+    return records
+
+
+def snss_read_string(data: bytes, offset: int, end: int, *, wide: bool) -> tuple[str, int] | None:
+    if offset + 4 > end:
+        return None
+    length = int.from_bytes(data[offset : offset + 4], "little", signed=True)
+    offset += 4
+    if length < 0:
+        return None
+    byte_length = length * 2 if wide else length
+    if offset + byte_length > end:
+        return None
+    raw = data[offset : offset + byte_length]
+    offset += (byte_length + 3) & ~3
+    text = raw.decode("utf-16-le" if wide else "utf-8", errors="replace")
+    return text, offset
+
+
+def snss_parse_navigation(payload: bytes) -> dict[str, object] | None:
+    """Decode a SerializedNavigationEntry pickle (UpdateTabNavigation)."""
+
+    if len(payload) < 16:
+        return None
+    pickle_size = int.from_bytes(payload[0:4], "little")
+    end = min(len(payload), 4 + pickle_size)
+    tab_id = int.from_bytes(payload[4:8], "little", signed=True)
+    index = int.from_bytes(payload[8:12], "little", signed=True)
+    url_part = snss_read_string(payload, 12, end, wide=False)
+    if url_part is None:
+        return None
+    url, offset = url_part
+    if not re.match(r"^[a-z][a-z0-9+.-]*:", url):
+        return None
+    title_part = snss_read_string(payload, offset, end, wide=True)
+    title = ""
+    timestamp = None
+    if title_part is not None:
+        title, offset = title_part
+        state = snss_read_string(payload, offset, end, wide=False)
+        if state is not None:
+            offset = state[1]
+            if offset + 8 <= end:
+                transition = int.from_bytes(payload[offset : offset + 4], "little")
+                offset += 8  # transition + type_mask
+                referrer = snss_read_string(payload, offset, end, wide=False)
+                if referrer is not None and offset + 4 <= end:
+                    offset = referrer[1] + 4  # referrer policy
+                    original = snss_read_string(payload, offset, end, wide=False)
+                    if original is not None:
+                        offset = original[1] + 4  # is_overriding_user_agent
+                        if offset + 8 <= end:
+                            raw_time = int.from_bytes(payload[offset : offset + 8], "little", signed=True)
+                            candidate = webkit_micros_to_iso(raw_time)
+                            if candidate and "2000-01-01" <= candidate[:10] <= "2100-12-31":
+                                timestamp = candidate
+                return {
+                    "tab_id": tab_id,
+                    "navigation_index": index,
+                    "url": url,
+                    "title": title,
+                    "timestamp": timestamp,
+                    **chromium_transition_profile(transition),
+                }
+    return {"tab_id": tab_id, "navigation_index": index, "url": url, "title": title, "timestamp": timestamp}
+
+
+def chromium_session_rows(context: BrowserRowContext, profile_dir: Path, errors: list[ArtifactRecord]) -> list[ArtifactRecord]:
+    candidates: list[Path] = []
+    sessions_dir = profile_dir / "Sessions"
+    if sessions_dir.is_dir():
+        candidates.extend(sorted(path for path in sessions_dir.iterdir() if path.is_file()))
+    for legacy in ("Current Session", "Last Session", "Current Tabs", "Last Tabs"):
+        if (profile_dir / legacy).is_file():
+            candidates.append(profile_dir / legacy)
+    records: list[ArtifactRecord] = []
+    for path in candidates:
+        source = path.resolve()
+        try:
+            if path.stat().st_size > MAX_SNSS_FILE_BYTES:
+                errors.append(browser_parse_error_record(context, source, reason="세션 파일이 너무 큼(파싱 생략)"))
+                continue
+            data = path.read_bytes()
+        except OSError as exc:
+            errors.append(browser_parse_error_record(context, source, reason="세션 파일을 읽을 수 없음", error=exc))
+            continue
+        if data[:4] != SNSS_MAGIC:
+            continue
+        name = path.name
+        kind = name.split("_", 1)[0] if "_" in name else name
+        file_created = webkit_micros_to_iso(name.rsplit("_", 1)[1]) if "_" in name else None
+        seen: dict[tuple[int, int, str], dict[str, object]] = {}
+        offset = 8
+        command_count = 0
+        while offset + 2 <= len(data):
+            size = int.from_bytes(data[offset : offset + 2], "little")
+            if size == 0 or offset + 2 + size > len(data):
+                break
+            command_id = data[offset + 2]
+            payload = data[offset + 3 : offset + 2 + size]
+            offset += 2 + size
+            command_count += 1
+            if command_id not in (1, 6):
+                continue
+            navigation = snss_parse_navigation(payload)
+            if navigation is None:
+                continue
+            navigation["command_id"] = command_id
+            key = (int(navigation["tab_id"]), int(navigation["navigation_index"]), str(navigation["url"]))
+            seen[key] = navigation
+        for (tab_id, index, url), navigation in seen.items():
+            records.append(
+                browser_row_record(
+                    context,
+                    "browser-session-tab",
+                    source,
+                    timestamp=navigation.get("timestamp"),
+                    timestamp_kind="navigated",
+                    source_table=f"snss:{kind}",
+                    source_row_id=f"{tab_id}:{index}",
+                    fields={
+                        "session_file": name,
+                        "session_kind": kind,
+                        "session_file_created_at": file_created,
+                        "tab_id": tab_id,
+                        "navigation_index": index,
+                        "url": url,
+                        "title": navigation.get("title") or "",
+                        "transition_core": navigation.get("transition_core", ""),
+                        "command_id": navigation.get("command_id"),
+                        "snss_command_count": command_count,
+                        "parse_note": "SNSS 탐색 항목(마지막 갱신 기준 중복 제거)",
+                    },
+                )
+            )
+    return records
+
+
+def resolve_extension_message(value: object, extension_dir: Path, default_locale: str) -> str:
+    text = str(value or "")
+    match = re.fullmatch(r"__MSG_(\w+)__", text)
+    if not match:
+        return text
+    key = match.group(1).lower()
+    locales = [default_locale, "ko", "en", "en_US"] if default_locale else ["ko", "en", "en_US"]
+    for locale in locales:
+        messages = extension_dir / "_locales" / locale / "messages.json"
+        try:
+            payload = json.loads(messages.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(payload, Mapping):
+            for name, entry in payload.items():
+                if str(name).lower() == key and isinstance(entry, Mapping):
+                    return str(entry.get("message") or text)
+    return text
+
+
+def chromium_extension_rows(context: BrowserRowContext, profile_dir: Path, errors: list[ArtifactRecord]) -> list[ArtifactRecord]:
+    settings: dict[str, Mapping[str, object]] = {}
+    settings_source: dict[str, str] = {}
+    for name in ("Secure Preferences", "Preferences"):
+        path = profile_dir / name
+        if not path.is_file():
+            continue
+        # Preferences anomalies (null fill, bad JSON) are reported once by
+        # chromium_preferences_rows, so they go to a throwaway sink here.
+        payload = read_profile_json(context, path, errors if name == "Secure Preferences" else [])
+        extensions = payload.get("extensions") if isinstance(payload, Mapping) else None
+        entries = extensions.get("settings") if isinstance(extensions, Mapping) else None
+        if isinstance(entries, Mapping):
+            for extension_id, entry in entries.items():
+                if isinstance(entry, Mapping) and str(extension_id) not in settings:
+                    settings[str(extension_id)] = entry
+                    settings_source[str(extension_id)] = str(path.resolve())
+    manifests: dict[str, tuple[Path, Mapping[str, object]]] = {}
+    extensions_dir = profile_dir / "Extensions"
+    if extensions_dir.is_dir():
+        for manifest_path in sorted(extensions_dir.glob("*/*/manifest.json")):
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
+            except (OSError, ValueError) as exc:
+                errors.append(browser_parse_error_record(context, manifest_path.resolve(), reason="확장 manifest.json 파싱 실패", error=exc))
+                continue
+            if isinstance(manifest, Mapping):
+                manifests[manifest_path.parent.parent.name] = (manifest_path, manifest)
+    records: list[ArtifactRecord] = []
+    for extension_id in sorted(set(settings) | set(manifests)):
+        entry = settings.get(extension_id, {})
+        manifest_path, manifest = manifests.get(extension_id, (None, {}))
+        if not manifest and isinstance(entry.get("manifest"), Mapping):
+            manifest = entry["manifest"]  # type: ignore[assignment]
+        extension_dir = manifest_path.parent if manifest_path else profile_dir
+        default_locale = str(manifest.get("default_locale") or "") if isinstance(manifest, Mapping) else ""
+        permissions: list[str] = []
+        for key in ("permissions", "optional_permissions", "host_permissions"):
+            value = manifest.get(key) if isinstance(manifest, Mapping) else None
+            if isinstance(value, list):
+                permissions.extend(str(item) for item in value if isinstance(item, str))
+        active = entry.get("active_permissions")
+        active_api = [str(item) for item in active.get("api", [])] if isinstance(active, Mapping) and isinstance(active.get("api"), list) else []
+        install_raw = entry.get("first_install_time") or entry.get("install_time")
+        location = browser_int(entry.get("location"))
+        source = manifest_path.resolve() if manifest_path else Path(settings_source.get(extension_id) or profile_dir)
+        records.append(
+            browser_row_record(
+                context,
+                "browser-extension",
+                source,
+                timestamp=webkit_micros_to_iso(install_raw),
+                timestamp_kind="installed",
+                source_table="extensions.settings" if entry else "manifest.json",
+                source_row_id=extension_id,
+                fields={
+                    "extension_id": extension_id,
+                    "name": resolve_extension_message(manifest.get("name") if isinstance(manifest, Mapping) else "", extension_dir, default_locale),
+                    "version": str(manifest.get("version") or "") if isinstance(manifest, Mapping) else "",
+                    "description": resolve_extension_message(manifest.get("description") if isinstance(manifest, Mapping) else "", extension_dir, default_locale)[:300],
+                    "manifest_version": browser_int(manifest.get("manifest_version")) if isinstance(manifest, Mapping) else None,
+                    "permissions": sorted(set(permissions)),
+                    "active_api_permissions": sorted(set(active_api)),
+                    "install_time": webkit_micros_to_iso(install_raw),
+                    "last_update_time": webkit_micros_to_iso(entry.get("last_update_time")),
+                    "from_webstore": bool(entry.get("from_webstore")) if "from_webstore" in entry else None,
+                    "location": location,
+                    "location_name": CHROMIUM_EXTENSION_LOCATIONS.get(location, "") if location is not None else "",
+                    "state": browser_int(entry.get("state")),
+                    "disable_reasons": entry.get("disable_reasons") if isinstance(entry.get("disable_reasons"), (int, list)) else None,
+                    "was_installed_by_default": bool(entry.get("was_installed_by_default")),
+                    "on_disk": manifest_path is not None,
+                    "manifest_path": str(manifest_path.resolve()) if manifest_path else "",
+                    "settings_source": settings_source.get(extension_id, ""),
+                    "settings_keys": sorted(str(key) for key in entry),
+                    "settings_residual_only": bool(entry) and not manifest and install_raw is None,
+                },
+            )
+        )
+    return records
+
+
+def chromium_account_fields(payload: Mapping[str, object]) -> list[dict[str, object]]:
+    accounts: list[dict[str, object]] = []
+    info = payload.get("account_info")
+    if isinstance(info, list):
+        for entry in info:
+            if isinstance(entry, Mapping):
+                accounts.append(
+                    {
+                        "email": str(entry.get("email") or ""),
+                        "full_name": str(entry.get("full_name") or ""),
+                        "account_id": str(entry.get("account_id") or entry.get("gaia") or ""),
+                        "account_source": "account_info",
+                    }
+                )
+    google = payload.get("google")
+    services = google.get("services") if isinstance(google, Mapping) else None
+    if isinstance(services, Mapping):
+        username = services.get("last_username") or services.get("username")
+        if username:
+            accounts.append({"email": str(username), "full_name": "", "account_id": str(services.get("last_gaia_id") or ""), "account_source": "google.services"})
+    return accounts
+
+
+def chromium_preferences_rows(context: BrowserRowContext, profile_dir: Path, errors: list[ArtifactRecord]) -> list[ArtifactRecord]:
+    path = profile_dir / "Preferences"
+    if not path.is_file():
+        return []
+    payload = read_profile_json(context, path, errors)
+    if payload is None:
+        return []
+    source = path.resolve()
+    profile = payload.get("profile") if isinstance(payload.get("profile"), Mapping) else {}
+    sync = payload.get("sync") if isinstance(payload.get("sync"), Mapping) else {}
+    accounts = chromium_account_fields(payload)
+    created = webkit_micros_to_iso(profile.get("creation_time")) if isinstance(profile, Mapping) else None
+    return [
+        browser_row_record(
+            context,
+            "browser-profile-account",
+            source,
+            timestamp=created,
+            timestamp_kind="profile-created",
+            source_table="Preferences",
+            source_row_id="profile",
+            fields={
+                "profile_name": str(profile.get("name") or "") if isinstance(profile, Mapping) else "",
+                "accounts": accounts,
+                "account_emails": sorted({str(item["email"]) for item in accounts if item.get("email")}),
+                "sync_has_setup_completed": sync.get("has_setup_completed") if isinstance(sync, Mapping) else None,
+                "sync_requested": sync.get("requested") if isinstance(sync, Mapping) else None,
+                "sync_keep_everything_synced": sync.get("keep_everything_synced") if isinstance(sync, Mapping) else None,
+                "profile_exit_type": str(profile.get("exit_type") or "") if isinstance(profile, Mapping) else "",
+            },
+        )
+    ]
+
+
+def chromium_local_state_rows(
+    *, provider: str, user: str, browser: str, user_data_root: Path
+) -> list[ArtifactRecord]:
+    path = user_data_root / "Local State"
+    context = BrowserRowContext(provider=provider, user=user, browser=browser, profile="")
+    if not path.is_file():
+        return []
+    errors: list[ArtifactRecord] = []
+    payload = read_profile_json(context, path, errors)
+    if payload is None:
+        return errors
+    profile = payload.get("profile")
+    cache = profile.get("info_cache") if isinstance(profile, Mapping) else None
+    records: list[ArtifactRecord] = []
+    if isinstance(cache, Mapping):
+        for profile_dir_name, entry in cache.items():
+            if not isinstance(entry, Mapping):
+                continue
+            row_context = BrowserRowContext(provider=provider, user=user, browser=browser, profile=str(profile_dir_name))
+            active = webkit_micros_to_iso(entry.get("active_time")) if isinstance(entry.get("active_time"), (int, str)) else None
+            if active is None and isinstance(entry.get("active_time"), float):
+                active = (UNIX_EPOCH + dt.timedelta(seconds=float(entry["active_time"]))).isoformat()
+            records.append(
+                browser_row_record(
+                    row_context,
+                    "browser-profile-account",
+                    path.resolve(),
+                    timestamp=active,
+                    timestamp_kind="profile-last-active",
+                    source_table="Local State:profile.info_cache",
+                    source_row_id=str(profile_dir_name),
+                    fields={
+                        "profile_name": str(entry.get("name") or entry.get("shortcut_name") or ""),
+                        "account_emails": [str(entry["user_name"])] if entry.get("user_name") else [],
+                        "gaia_name": str(entry.get("gaia_name") or ""),
+                        "gaia_id": str(entry.get("gaia_id") or ""),
+                        "edge_account_type": entry.get("edge_account_type"),
+                        "is_using_default_name": entry.get("is_using_default_name"),
+                    },
+                )
+            )
+    return records
+
+
+def first_existing(paths: Sequence[Path]) -> Path | None:
+    for path in paths:
+        if path.is_file():
+            return path
+    return None
+
+
+def collect_chromium_profile_rows(
+    *, provider: str, user: str, browser: str, profile: str, profile_dir: Path
+) -> list[ArtifactRecord]:
+    context = BrowserRowContext(provider=provider, user=user, browser=browser, profile=profile)
+    records: list[ArtifactRecord] = []
+    errors: list[ArtifactRecord] = []
+    history = profile_dir / "History"
+    if history.is_file():
+        records.extend(browser_sqlite_rows(context, history, errors, chromium_history_row_reader(context)))
+    cookies = first_existing([profile_dir / "Network" / "Cookies", profile_dir / "Cookies"])
+    if cookies is not None:
+        records.extend(browser_sqlite_rows(context, cookies, errors, chromium_cookie_reader(context)))
+    for name in ("Login Data", "Login Data For Account"):
+        if (profile_dir / name).is_file():
+            records.extend(browser_sqlite_rows(context, profile_dir / name, errors, chromium_login_reader(context)))
+    for name in ("Web Data", "Account Web Data"):
+        if (profile_dir / name).is_file():
+            records.extend(browser_sqlite_rows(context, profile_dir / name, errors, chromium_web_data_reader(context)))
+    if (profile_dir / "Shortcuts").is_file():
+        records.extend(browser_sqlite_rows(context, profile_dir / "Shortcuts", errors, chromium_shortcut_reader(context)))
+    if (profile_dir / "Top Sites").is_file():
+        records.extend(browser_sqlite_rows(context, profile_dir / "Top Sites", errors, chromium_top_sites_reader(context)))
+    if (profile_dir / "Bookmarks").is_file():
+        records.extend(chromium_bookmark_rows(context, profile_dir / "Bookmarks", errors))
+    records.extend(chromium_session_rows(context, profile_dir, errors))
+    records.extend(chromium_extension_rows(context, profile_dir, errors))
+    records.extend(chromium_preferences_rows(context, profile_dir, errors))
+    records.extend(errors)
+    return records
+
+
+def firefox_places_reader(context: BrowserRowContext):
+    def reader(connection: sqlite3.Connection, source: Path) -> list[ArtifactRecord]:
+        records: list[ArtifactRecord] = []
+        if not sqlite_table_exists(connection, "moz_places"):
+            return records
+        places: dict[int, tuple[str, str]] = {}
+        select = select_columns(connection, "moz_places", ("id", "url", "title", "visit_count", "typed", "hidden", "last_visit_date"))
+        for row in connection.execute(f"SELECT {select} FROM moz_places ORDER BY id"):
+            place_id = int(row["id"])
+            url = str(row["url"] or "")
+            title = str(row["title"] or "")
+            places[place_id] = (url, title)
+            records.append(
+                browser_row_record(
+                    context,
+                    "browser-history",
+                    source,
+                    timestamp=unix_micros_to_iso(row["last_visit_date"]),
+                    timestamp_kind="last-visited",
+                    source_table="moz_places",
+                    source_row_id=place_id,
+                    fields={
+                        "row_kind": "url",
+                        "url": url,
+                        "title": title,
+                        "domain": normalize_host(safe_parse_url(url).netloc),
+                        "visit_count": browser_int(row["visit_count"]) or 0,
+                        "typed_count": browser_int(row["typed"]) or 0,
+                        "hidden": bool(row["hidden"]),
+                    },
+                )
+            )
+        if sqlite_table_exists(connection, "moz_historyvisits"):
+            select = select_columns(connection, "moz_historyvisits", ("id", "place_id", "visit_date", "visit_type", "from_visit"))
+            visits = list(connection.execute(f"SELECT {select} FROM moz_historyvisits ORDER BY visit_date, id"))
+            visit_place = {int(row["id"]): browser_int(row["place_id"]) for row in visits}
+            for row in visits:
+                place_id = browser_int(row["place_id"])
+                url, title = places.get(place_id or -1, ("", ""))
+                from_visit = browser_int(row["from_visit"]) or 0
+                visit_type = browser_int(row["visit_type"])
+                records.append(
+                    browser_row_record(
+                        context,
+                        "browser-visit",
+                        source,
+                        timestamp=unix_micros_to_iso(row["visit_date"]),
+                        timestamp_kind="visited",
+                        source_table="moz_historyvisits",
+                        source_row_id=int(row["id"]),
+                        fields={
+                            "url": url,
+                            "title": title,
+                            "url_id": place_id,
+                            "domain": normalize_host(safe_parse_url(url).netloc),
+                            "from_visit": from_visit,
+                            "from_url": places.get(visit_place.get(from_visit) or -1, ("", ""))[0] if from_visit else "",
+                            "transition": visit_type,
+                            "transition_core": FIREFOX_VISIT_TYPES.get(visit_type or -1, ""),
+                            "transition_qualifiers": [],
+                            "visit_duration_micros": None,
+                            "url_resolved": place_id in places,
+                        },
+                    )
+                )
+        return records
+
+    return reader
+
+
+def collect_firefox_profile_rows(*, provider: str, user: str, profile: str, places_path: Path) -> list[ArtifactRecord]:
+    context = BrowserRowContext(provider=provider, user=user, browser="firefox", profile=profile)
+    errors: list[ArtifactRecord] = []
+    records = browser_sqlite_rows(context, places_path, errors, firefox_places_reader(context))
+    return [*records, *errors]

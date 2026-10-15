@@ -13,7 +13,7 @@ from ...core.models import ArtifactRecord
 from ...core.recovery import build_recovery_record
 from .._walk import iter_evidence_paths
 
-PARSER_VERSION = "registry-normalized-v13"
+PARSER_VERSION = "registry-native-walk-v14"
 REGISTRY_EXPORT_PATTERN = re.compile(r"^\[(?P<key>.+)]$")
 REGISTRY_VALUE_PATTERN = re.compile(r'^(?P<name>@|"[^"]+")=(?P<value>.*)$')
 REGISTRY_HIVE_SIGNATURE = b"regf"
@@ -48,7 +48,6 @@ HIVE_PIVOT_TERMS = SUSPICIOUS_VALUE_TERMS + (
     "typedurls",
     "userassist",
 )
-USER_HIVE_NAMES = {"NTUSER.DAT", "USRCLASS.DAT"}
 USER_ACTIVITY_KEY_PATTERNS: tuple[tuple[str, str, str], ...] = (
     ("userassist", "execution", "UserAssist execution/activity"),
     ("typedurls", "browser-typed-url", "Typed browser URL"),
@@ -82,6 +81,11 @@ REGISTRY_NATIVE_CAPABILITIES = {
     "value_list_linking": True,
     "deleted_free_cell_candidate_labeling": True,
     "inline_value_preview": True,
+    "full_native_tree_walk": True,
+    "big_data_value_decode": True,
+    "key_comp_name_flag_decode": True,
+    "semantic_system_ntuser_software_plugins": True,
+    "transaction_log_newer_sequence_disclosure": True,
     "transaction_log_replay": False,
     "security_descriptor_decode": False,
     "full_binary_value_decode": False,
@@ -259,33 +263,42 @@ REGISTRY_ANALYST_REVIEW_CATALOG = {
 class WindowsRegistryProvider:
     collector_kind = "windows-registry"
     name = "windows-registry"
-    description = "Windows Registry .reg export artifacts"
+    description = "Windows Registry hives (native full walk) and .reg exports"
     target_platform = "windows"
 
     def supported(self) -> bool:
         return True
 
     def collect(self, root: Path) -> Iterable[ArtifactRecord]:
-        records: list[ArtifactRecord] = []
+        summary_records: list[ArtifactRecord] = []
+        key_tree_counts: Counter[str] = Counter()
         for path in sorted(iter_evidence_paths(root, "*.reg"), key=lambda item: str(item).lower()):
             if not path.is_file():
                 continue
-            records.extend(collect_reg_export(path))
-        for path in candidate_registry_hive_paths(root):
-            records.extend(collect_registry_hive(path))
-        yield from records
-        summary = build_registry_summary(root, records)
+            for record in collect_reg_export(path):
+                summary_records.append(record)
+                yield record
+        context = RegistryCollectionContext(root)
+        for path in candidate_native_registry_hive_paths(root):
+            for record in collect_registry_hive(path, context=context):
+                if record.artifact_type == "registry-key-tree-node":
+                    key_tree_counts[str(record.details.get("hive_mount") or record.path)] += 1
+                else:
+                    summary_records.append(record)
+                yield record
+        summary = build_registry_summary(root, summary_records, key_tree_counts=key_tree_counts)
         if summary is not None:
             yield summary
 
 
-def candidate_registry_hive_paths(root: Path) -> Iterable[Path]:
+def candidate_registry_hive_paths(root: Path, *, names: set[str] | None = None) -> Iterable[Path]:
+    wanted = names if names is not None else REGISTRY_NATIVE_HIVE_NAMES
     seen: set[Path] = set()
     for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
         if not path.is_file():
             continue
         name = path.name.upper()
-        if name not in REGISTRY_HIVE_NAMES:
+        if name not in wanted:
             continue
         resolved = path.resolve()
         if resolved in seen:
@@ -332,37 +345,119 @@ def collect_reg_export(path: Path) -> Iterable[ArtifactRecord]:
             yield activity
 
 
-def collect_registry_hive(path: Path) -> Iterable[ArtifactRecord]:
+def collect_registry_hive(
+    path: Path,
+    *,
+    context: RegistryCollectionContext | None = None,
+    include_key_tree: bool = True,
+) -> Iterable[ArtifactRecord]:
+    """Full native walk of one hive: key tree rows, typed plugin rows, free-cell candidates, inventory."""
     try:
         stat_result = path.stat()
-        with path.open("rb") as handle:
-            header = handle.read(4096)
-            handle.seek(0)
-            scan_blob = handle.read(min(stat_result.st_size, max(MAX_HIVE_STRING_SCAN_BYTES, MAX_HIVE_CELL_SCAN_BYTES)))
     except OSError:
         return
-
     source_hashes = file_hashes(path)
-    metadata = parse_registry_hive_header(header)
-    transaction_log_evidence = registry_transaction_log_evidence(path)
-    replay_validation_profile = registry_transaction_replay_validation_profile(metadata, transaction_log_evidence)
-    transaction_log_evidence["replay_validation_profile"] = replay_validation_profile
-    transaction_log_evidence["replay_validation_profile_hash"] = stable_registry_json_sha256(replay_validation_profile)
-    metadata["transaction_log_evidence"] = transaction_log_evidence
-    yield build_registry_hive_record(path, stat_result.st_size, metadata, source_hashes)
-
-    strings = extract_utf16le_strings(scan_blob)
-    if strings:
-        yield build_registry_hive_strings_record(path, strings, metadata, source_hashes)
-        yield from build_registry_user_activity_from_hive_strings(path, strings, metadata, source_hashes)
-    cell_candidates = iter_registry_cell_candidates(scan_blob)
-    for candidate in cell_candidates:
-        yield build_registry_hive_cell_record(path, candidate, metadata, source_hashes)
-        if candidate.get("allocation_status") == "free-or-deleted-candidate":
+    hive = NativeRegistryHive.open(path)
+    if hive is None:
+        try:
+            with path.open("rb") as handle:
+                header = handle.read(4096)
+        except OSError:
+            return
+        metadata = parse_registry_hive_header(header)
+        metadata["transaction_log_evidence"] = registry_transaction_log_evidence(path, hive_metadata=metadata)
+        yield build_registry_hive_record(path, stat_result.st_size, metadata, source_hashes)
+        return
+    try:
+        metadata: dict[str, object] = dict(hive.header)
+        transaction_log_evidence = registry_transaction_log_evidence(path, hive_metadata=metadata)
+        replay_validation_profile = registry_transaction_replay_validation_profile(metadata, transaction_log_evidence)
+        transaction_log_evidence["replay_validation_profile"] = replay_validation_profile
+        transaction_log_evidence["replay_validation_profile_hash"] = stable_registry_json_sha256(replay_validation_profile)
+        metadata["transaction_log_evidence"] = transaction_log_evidence
+        disclosure = registry_transaction_disclosure(transaction_log_evidence)
+        mount = registry_hive_mount(path, hive, context)
+        row_context = NativeHiveRowContext(path, hive, mount, source_hashes, disclosure)
+        key_count = 0
+        value_count = 0
+        if include_key_tree:
+            for components, key in hive.iter_keys():
+                values = hive.values(key)
+                key_count += 1
+                value_count += len(values)
+                yield build_native_key_tree_record(
+                    row_context,
+                    components,
+                    key,
+                    [str(value.name) or "(default)" for value in values],
+                )
+        walk_errors = dict(hive.errors)
+        semantic_counts: Counter[str] = Counter()
+        for record in registry_native_semantic_records(row_context):
+            semantic_counts[record.artifact_type] += 1
+            yield record
+        scan_end = min(stat_result.st_size, MAX_HIVE_STRING_SCAN_BYTES)
+        strings = extract_utf16le_strings(bytes(hive._data[:scan_end]))
+        if strings:
+            strings_record = build_registry_hive_strings_record(path, strings, metadata, source_hashes)
+            strings_record.details["scan_truncated"] = stat_result.st_size > MAX_HIVE_STRING_SCAN_BYTES
+            strings_record.details["string_limit_reached"] = len(strings) >= MAX_HIVE_STRINGS
+            strings_record.details["string_limit"] = MAX_HIVE_STRINGS
+            strings_record.details["cap_disclosure"] = (
+                f"문자열 스캔은 앞 {MAX_HIVE_STRING_SCAN_BYTES // (1024 * 1024)}MB·최대 {MAX_HIVE_STRINGS}개로 제한된 "
+                "보조 피벗입니다(키/값 해석은 전체 트리 순회 결과를 사용)."
+            )
+            strings_record.details["evidence_strength"] = "string-candidate-not-evidence"
+            yield strings_record
+        free_candidates, allocator_stats = iter_registry_free_cell_candidates(hive)
+        recovery_candidates = [*free_candidates, *native_parent_key_candidates(hive, free_candidates)]
+        for candidate in free_candidates:
             yield build_registry_deleted_cell_record(path, candidate, metadata, source_hashes)
-    yield from build_registry_key_tree_records(path, scan_blob, cell_candidates, metadata, source_hashes)
-    yield from build_registry_key_recovery_records(path, cell_candidates, metadata, source_hashes)
-    yield from build_registry_value_recovery_records(path, scan_blob, cell_candidates, metadata, source_hashes)
+        yield from build_registry_key_recovery_records(
+            path, recovery_candidates, metadata, source_hashes, mount=row_context.mount
+        )
+        yield from build_registry_value_recovery_records(
+            path, hive._data, recovery_candidates, metadata, source_hashes, mount=row_context.mount
+        )
+        metadata["native_walk"] = {
+            "reader": "native-regf-tree-walk",
+            "key_count": key_count if include_key_tree else None,
+            "value_count": value_count if include_key_tree else None,
+            "walk_errors": walk_errors,
+            "post_walk_lookup_errors": {
+                key: count - walk_errors.get(key, 0) for key, count in hive.errors.items() if count - walk_errors.get(key, 0)
+            },
+            "allocator_stats": allocator_stats,
+            "allocated_unreachable_nk_count": max(0, int(allocator_stats.get("allocated_nk", 0)) - key_count)
+            if include_key_tree
+            else None,
+            "free_cell_candidate_count": len(free_candidates),
+            "semantic_row_counts": dict(sorted(semantic_counts.items())),
+            "read_cap_bytes": None,
+            "cell_cap": None,
+        }
+        record = build_registry_hive_record(path, stat_result.st_size, metadata, source_hashes)
+        record.details.update(
+            {
+                "coverage_status": "native-hive-full-walk",
+                "parser_confidence": 0.9,
+                "hive_mount": row_context.mount,
+                "user_sid": row_context.user_sid,
+                "user_sid_source": mount.get("user_sid_source", ""),
+                "root_key_name": mount.get("root_key_name", ""),
+                "key_count": key_count,
+                "value_count": value_count,
+                "native_walk": metadata["native_walk"],
+                "transaction_log_disclosure": disclosure["message_ko"],
+                "transaction_log_disclosure_status": disclosure["status"],
+            }
+        )
+        record.details["native_header"] = {
+            key: value for key, value in metadata.items() if key not in {"native_walk"}
+        }
+        yield record
+    finally:
+        hive.close()
 
 
 def parse_registry_hive_header(header: bytes) -> dict[str, object]:
@@ -472,81 +567,6 @@ def build_registry_hive_strings_record(
             "risk_flags": sorted({flag for item in suspicious for flag in item.get("risk_flags", [])}),
             "risk_score": min(100, len(suspicious) * 10),
             "raw_preview": " ".join(strings[:20])[:2000],
-        },
-    )
-
-
-def build_registry_hive_cell_record(
-    path: Path,
-    candidate: Mapping[str, object],
-    metadata: Mapping[str, object],
-    source_hashes: Mapping[str, str],
-) -> ArtifactRecord:
-    name = str(candidate.get("name") or "")
-    risk_flags = registry_cell_risk_flags(candidate)
-    recovery_evidence = registry_recovery_evidence(candidate, "deleted-or-free-cell")
-    recovery_identity_profile = registry_recovery_identity_profile(candidate, recovery_evidence)
-    return ArtifactRecord(
-        provider=WindowsRegistryProvider.name,
-        artifact_type="registry-hive-cell",
-        path=str(path.resolve()),
-        supported=bool(metadata.get("regf_valid")),
-        details={
-            "parser": "windows-registry-hive-cell-scan",
-            "parser_version": PARSER_VERSION,
-            "coverage_status": "native-hive-cell-scan",
-            "reportability": "triage",
-            "source_path": str(path.resolve()),
-            "source_format": "registry-hive",
-            "source_hashes": dict(source_hashes),
-            "source_viewer_locator": registry_record_source_viewer_locator(
-                source_path=str(path.resolve()),
-                source_hashes=source_hashes,
-                hive_name=path.name,
-                hive_hint=hive_hint_from_path(path),
-                key_path="",
-                value_name=name if candidate.get("cell_kind") == "value" else "",
-                cell_offset=candidate.get("cell_offset", 0),
-                cell_relative_offset=candidate.get("cell_relative_offset", 0),
-                hbin_offset=candidate.get("hbin_offset", 0),
-                allocation_status=candidate.get("allocation_status", ""),
-                transaction_log_evidence=metadata.get("transaction_log_evidence")
-                if isinstance(metadata.get("transaction_log_evidence"), Mapping)
-                else {},
-                deleted_or_recovered=bool(candidate.get("allocation_status") == "free-or-deleted-candidate"),
-            ),
-            "hive_name": path.name,
-            "hive_hint": hive_hint_from_path(path),
-            "parser_confidence": 0.58 if metadata.get("regf_valid") else 0.25,
-            "evidence_strength": "registry-hive-cell-candidate",
-            "scan_limit_bytes": MAX_HIVE_CELL_SCAN_BYTES,
-            "cell_index": candidate.get("cell_index", 0),
-            "cell_kind": candidate.get("cell_kind", ""),
-            "cell_signature": candidate.get("cell_signature", ""),
-            "cell_offset": candidate.get("cell_offset", 0),
-            "cell_relative_offset": candidate.get("cell_relative_offset", 0),
-            "cell_scan_method": candidate.get("cell_scan_method", ""),
-            "hbin_offset": candidate.get("hbin_offset", 0),
-            "cell_size": candidate.get("cell_size", 0),
-            "allocation_status": candidate.get("allocation_status", ""),
-            "flags": candidate.get("flags", 0),
-            "name": name,
-            "name_encoding": candidate.get("name_encoding", ""),
-            "last_written_at": candidate.get("last_written_at", ""),
-            "parent_cell_offset": candidate.get("parent_cell_offset", 0),
-            "subkey_count": candidate.get("subkey_count", 0),
-            "stable_subkey_list_offset": candidate.get("stable_subkey_list_offset", 0),
-            "volatile_subkey_list_offset": candidate.get("volatile_subkey_list_offset", 0),
-            "value_count": candidate.get("value_count", 0),
-            "value_list_offset": candidate.get("value_list_offset", 0),
-            "value_type": candidate.get("value_type", ""),
-            "value_data_size": candidate.get("value_data_size", 0),
-            "value_data_offset": candidate.get("value_data_offset", 0),
-            "value_data_inline": candidate.get("value_data_inline", False),
-            "risk_flags": risk_flags,
-            "registry_recovery_identity_profile": recovery_identity_profile,
-            "risk_score": min(100, len(risk_flags) * 20 + (20 if candidate.get("allocation_status") == "free-or-deleted-candidate" else 0)),
-            "raw_preview": f"{candidate.get('cell_kind', 'cell')} {name}".strip(),
         },
     )
 
@@ -691,296 +711,15 @@ def registry_record_source_viewer_locator(
     }
 
 
-def build_registry_key_tree_records(
-    path: Path,
-    blob: bytes,
-    candidates: Sequence[Mapping[str, object]],
-    metadata: Mapping[str, object],
-    source_hashes: Mapping[str, str],
-) -> Iterable[ArtifactRecord]:
-    key_nodes = [candidate for candidate in candidates if candidate.get("cell_kind") == "key-node"]
-    if not key_nodes:
-        return
-    key_by_offset = {int(candidate.get("cell_offset") or 0): candidate for candidate in key_nodes}
-    value_by_offset = {
-        int(candidate.get("cell_offset") or 0): candidate
-        for candidate in candidates
-        if candidate.get("cell_kind") == "value"
-    }
-    root_cell_offset = registry_relative_to_file_offset(int(metadata.get("root_cell_offset") or 0))
-    for index, key_node in enumerate(key_nodes):
-        value_offsets = registry_value_offsets_for_key(blob, key_node)
-        value_cells = [value_by_offset[offset] for offset in value_offsets if offset in value_by_offset]
-        missing_value_offsets = [offset for offset in value_offsets if offset not in value_by_offset]
-        subkey_offsets = registry_subkey_offsets_for_key(blob, key_node)
-        subkey_names = [
-            str(key_by_offset[offset].get("name") or "")
-            for offset in subkey_offsets
-            if offset in key_by_offset and key_by_offset[offset].get("name")
-        ]
-        missing_subkey_offsets = [offset for offset in subkey_offsets if offset not in key_by_offset]
-        key_path, path_confidence = registry_key_path_for_node(key_node, key_by_offset, root_cell_offset=root_cell_offset)
-        full_key_path = f"{hive_hint_from_path(path)}\\{key_path}" if key_path else hive_hint_from_path(path)
-        path_evidence = registry_key_path_evidence(
-            hive_hint_from_path(path),
-            key_node,
-            key_by_offset,
-            key_path,
-            path_confidence,
-            root_cell_offset=root_cell_offset,
-        )
-        relationship_profile = registry_key_tree_relationship_profile(
-            key_node,
-            key_by_offset,
-            subkey_offsets,
-            root_cell_offset,
-        )
-        subkey_list_profile = registry_subkey_list_profile_for_key(
-            blob,
-            key_node,
-            decoded_offsets=subkey_offsets,
-            missing_offsets=missing_subkey_offsets,
-        )
-        value_list_profile = registry_value_list_profile_for_key(
-            blob,
-            key_node,
-            decoded_offsets=value_offsets,
-            missing_offsets=missing_value_offsets,
-        )
-        reconstruction_profile = registry_key_tree_reconstruction_profile(
-            key_node=key_node,
-            path_evidence=path_evidence,
-            relationship_profile=relationship_profile,
-            subkey_list_profile=subkey_list_profile,
-            value_list_profile=value_list_profile,
-        )
-        allocation_status = str(key_node.get("allocation_status") or "")
-        validation_flags = registry_key_tree_validation_flags(
-            key_node,
-            path_confidence,
-            missing_subkey_offsets,
-            missing_value_offsets,
-            relationship_profile,
-        )
-        validation_required = bool(validation_flags)
-        risk_flags = registry_cell_risk_flags(key_node)
-        validation_matrix = registry_key_tree_validation_matrix(
-            key_node,
-            path_confidence,
-            missing_subkey_offsets,
-            missing_value_offsets,
-            bool(metadata.get("regf_valid")),
-            relationship_profile,
-            metadata.get("transaction_log_evidence") if isinstance(metadata.get("transaction_log_evidence"), Mapping) else {},
-        )
-        report_grade_assessment = registry_report_grade_assessment(
-            validation_matrix,
-            validation_required=validation_required,
-            recovery_candidate=False,
-            extra_blockers=["native-key-tree-broad-corpus-validation-required"],
-            gap_ids=["#4"],
-        )
-        report_citation_manifest = registry_report_citation_manifest(
-            artifact_type="registry-key-tree-node",
-            source_path=str(path.resolve()),
-            source_hashes=dict(source_hashes),
-            row_identity={
-                "hive_name": path.name,
-                "hive_hint": hive_hint_from_path(path),
-                "key_path": f"{hive_hint_from_path(path)}\\{key_path}" if key_path else hive_hint_from_path(path),
-                "name": key_node.get("name", ""),
-                "cell_offset": key_node.get("cell_offset", 0),
-                "cell_relative_offset": key_node.get("cell_relative_offset", 0),
-                "hbin_offset": key_node.get("hbin_offset", 0),
-                "allocation_status": allocation_status,
-                "last_written_at": key_node.get("last_written_at", ""),
-                "parent_cell_offset": key_node.get("parent_cell_offset", 0),
-                "value_count": key_node.get("value_count", 0),
-                "subkey_count": key_node.get("subkey_count", 0),
-                "linked_subkey_count": len(subkey_names),
-                "linked_value_count": len(value_cells),
-                "subkey_names": sorted(subkey_names),
-                "value_names": sorted(str(value.get("name") or "") for value in value_cells if value.get("name")),
-                "root_reachable": relationship_profile["root_reachable"],
-                "parent_link_consistency": relationship_profile["parent_link_consistency"],
-            },
-            validation_matrix=validation_matrix,
-            report_grade_assessment=report_grade_assessment,
-            transaction_log_evidence=metadata.get("transaction_log_evidence")
-            if isinstance(metadata.get("transaction_log_evidence"), Mapping)
-            else {},
-            citation_scope="key-tree",
-        )
-        core_accuracy_gates = registry_core_accuracy_gates(
-            gap_ids=["#4"],
-            validation_matrix=validation_matrix,
-            details={
-                "source_path": str(path.resolve()),
-                "source_hashes": dict(source_hashes),
-                "cell_offset": key_node.get("cell_offset", 0),
-                "key_path": f"{hive_hint_from_path(path)}\\{key_path}" if key_path else hive_hint_from_path(path),
-                "last_written_at": key_node.get("last_written_at", ""),
-                "allocation_status": allocation_status,
-                "value_list_offset": key_node.get("value_list_offset", 0),
-                "parent_link_consistency": relationship_profile["parent_link_consistency"],
-                "root_reachable": relationship_profile["root_reachable"],
-            },
-        )
-        yield ArtifactRecord(
-            provider=WindowsRegistryProvider.name,
-            artifact_type="registry-key-tree-node",
-            path=str(path.resolve()),
-            supported=bool(metadata.get("regf_valid")),
-            details={
-                "parser": "windows-registry-hive-key-tree",
-                "parser_version": PARSER_VERSION,
-                "coverage_status": "native-hive-key-tree-partial",
-                "reportability": "review",
-                "source_path": str(path.resolve()),
-                "source_format": "registry-hive",
-                "source_hashes": dict(source_hashes),
-                "source_viewer_locator": registry_record_source_viewer_locator(
-                    source_path=str(path.resolve()),
-                    source_hashes=source_hashes,
-                    hive_name=path.name,
-                    hive_hint=hive_hint_from_path(path),
-                    key_path=f"{hive_hint_from_path(path)}\\{key_path}" if key_path else hive_hint_from_path(path),
-                    cell_offset=key_node.get("cell_offset", 0),
-                    cell_relative_offset=key_node.get("cell_relative_offset", 0),
-                    hbin_offset=key_node.get("hbin_offset", 0),
-                    allocation_status=allocation_status,
-                    transaction_log_evidence=metadata.get("transaction_log_evidence")
-                    if isinstance(metadata.get("transaction_log_evidence"), Mapping)
-                    else {},
-                ),
-                "hive_name": path.name,
-                "hive_hint": hive_hint_from_path(path),
-                "parser_confidence": registry_key_tree_confidence(key_node, path_confidence, bool(metadata.get("regf_valid"))),
-                "evidence_strength": "registry-hive-key-tree-node",
-                "tree_node_index": index,
-                "key_path": f"{hive_hint_from_path(path)}\\{key_path}" if key_path else hive_hint_from_path(path),
-                "key_path_confidence": path_confidence,
-                "key_path_components": path_evidence["relative_components"],
-                "key_depth": path_evidence["relative_depth"],
-                "key_ancestry_cell_offsets": path_evidence["ancestry_cell_offsets"],
-                "key_tree_path_evidence": path_evidence,
-                "registry_key_tree_relationships": relationship_profile,
-                "registry_subkey_list_profile": subkey_list_profile,
-                "registry_value_list_profile": value_list_profile,
-                "registry_key_tree_reconstruction_profile": reconstruction_profile,
-                "registry_transaction_log_evidence": dict(metadata.get("transaction_log_evidence") or {}),
-                "registry_transaction_replay_profile": registry_transaction_replay_profile(
-                    metadata.get("transaction_log_evidence") if isinstance(metadata.get("transaction_log_evidence"), Mapping) else {},
-                    dirty=bool(metadata.get("dirty")),
-                ),
-                "root_cell_offset": root_cell_offset,
-                "is_root_key": relationship_profile["is_root_key"],
-                "root_reachable": relationship_profile["root_reachable"],
-                "parent_link_consistency": relationship_profile["parent_link_consistency"],
-                "name": key_node.get("name", ""),
-                "name_encoding": key_node.get("name_encoding", ""),
-                "cell_offset": key_node.get("cell_offset", 0),
-                "cell_relative_offset": key_node.get("cell_relative_offset", 0),
-                "cell_scan_method": key_node.get("cell_scan_method", ""),
-                "hbin_offset": key_node.get("hbin_offset", 0),
-                "cell_size": key_node.get("cell_size", 0),
-                "allocation_status": allocation_status,
-                "parent_cell_offset": key_node.get("parent_cell_offset", 0),
-                "subkey_count": key_node.get("subkey_count", 0),
-                "stable_subkey_list_offset": key_node.get("stable_subkey_list_offset", 0),
-                "volatile_subkey_list_offset": key_node.get("volatile_subkey_list_offset", 0),
-                "subkey_cell_offsets": subkey_offsets,
-                "subkey_names": sorted(subkey_names),
-                "linked_subkey_count": len(subkey_names),
-                "missing_subkey_cell_offsets": missing_subkey_offsets,
-                "value_count": key_node.get("value_count", 0),
-                "value_list_offset": key_node.get("value_list_offset", 0),
-                "value_names": sorted(str(value.get("name") or "") for value in value_cells if value.get("name")),
-                "value_cell_offsets": value_offsets,
-                "linked_value_count": len(value_cells),
-                "missing_value_cell_offsets": missing_value_offsets,
-                "last_written_at": key_node.get("last_written_at", ""),
-                "validation_required": validation_required,
-                "validation_flags": validation_flags,
-                "registry_validation_matrix": validation_matrix,
-                "registry_report_grade_assessment": report_grade_assessment,
-                "registry_report_citation_manifest": report_citation_manifest,
-                "registry_report_citation_manifest_hash": report_citation_manifest["manifest_sha256"],
-                "registry_native_depth_readiness_profile": registry_native_depth_readiness_profile(
-                    family="key-tree",
-                    artifact_scope="key-tree-node",
-                    details={
-                        "source_path": str(path.resolve()),
-                        "source_hashes": dict(source_hashes),
-                        "hive_name": path.name,
-                        "hive_hint": hive_hint_from_path(path),
-                        "cell_offset": key_node.get("cell_offset", 0),
-                        "key_path": f"{hive_hint_from_path(path)}\\{key_path}" if key_path else hive_hint_from_path(path),
-                        "name": key_node.get("name", ""),
-                        "key_path_confidence": path_confidence,
-                        "subkey_cell_offsets": subkey_offsets,
-                        "value_cell_offsets": value_offsets,
-                        "registry_subkey_list_profile": subkey_list_profile,
-                        "registry_value_list_profile": value_list_profile,
-                        "registry_key_tree_reconstruction_profile": reconstruction_profile,
-                        "registry_validation_matrix": validation_matrix,
-                        "registry_report_grade_assessment": report_grade_assessment,
-                        "registry_transaction_log_evidence": dict(metadata.get("transaction_log_evidence") or {}),
-                        "registry_native_capabilities": REGISTRY_NATIVE_CAPABILITIES,
-                    },
-                ),
-                "registry_analyst_review_profile": registry_analyst_review_profile(
-                    artifact_type="registry-key-tree-node",
-                    category="persistence"
-                    if "\\run" in full_key_path.lower() or any("persistence" in flag for flag in risk_flags)
-                    else "key-tree",
-                    source_format="registry-hive",
-                    hive_name=path.name,
-                    hive_hint=hive_hint_from_path(path),
-                    key_path=full_key_path,
-                    name=str(key_node.get("name") or ""),
-                    value_names=sorted(str(value.get("name") or "") for value in value_cells if value.get("name")),
-                    risk_flags=risk_flags,
-                    validation_required=validation_required or not report_grade_assessment["report_grade_ready"],
-                    transaction_log_evidence=metadata.get("transaction_log_evidence")
-                    if isinstance(metadata.get("transaction_log_evidence"), Mapping)
-                    else {},
-                    report_grade_assessment=report_grade_assessment,
-                    source_values={
-                        "subkey_names": sorted(subkey_names),
-                        "cell_offset": key_node.get("cell_offset", 0),
-                        "last_written_at": key_node.get("last_written_at", ""),
-                    },
-                ),
-                "core_accuracy_gates": core_accuracy_gates,
-                "commercial_uplift_evidence": registry_commercial_uplift_evidence(
-                    gap_ids=["#4"],
-                    details={
-                        "source_path": str(path.resolve()),
-                        "source_hashes": dict(source_hashes),
-                        "cell_offset": key_node.get("cell_offset", 0),
-                        "registry_validation_matrix": validation_matrix,
-                        "registry_report_grade_assessment": report_grade_assessment,
-                        "recovery_profile": {},
-                    },
-                ),
-                "registry_native_capabilities": REGISTRY_NATIVE_CAPABILITIES,
-                "commercial_grade_ready": report_grade_assessment["report_grade_ready"],
-                "commercial_grade_blockers": report_grade_assessment["blockers"],
-                "validation_guidance": "Native key-tree reconstruction walks hbin cells and nk parent/subkey/value-list metadata where recoverable; validate important paths with a second registry parser and hive transaction-log context.",
-                "risk_flags": risk_flags,
-                "risk_score": min(100, 20 + len(risk_flags) * 20),
-                "raw_preview": f"{hive_hint_from_path(path)}\\{key_path}" if key_path else str(key_node.get("name") or ""),
-            },
-        )
-
-
 def build_registry_key_recovery_records(
     path: Path,
     candidates: Sequence[Mapping[str, object]],
     metadata: Mapping[str, object],
     source_hashes: Mapping[str, str],
+    *,
+    mount: str | None = None,
 ) -> Iterable[ArtifactRecord]:
+    path_prefix = mount or hive_hint_from_path(path)
     transaction_log_evidence = (
         metadata.get("transaction_log_evidence")
         if isinstance(metadata.get("transaction_log_evidence"), Mapping)
@@ -995,7 +734,7 @@ def build_registry_key_recovery_records(
         if candidate.get("cell_kind") != "key-node" or candidate.get("allocation_status") != "free-or-deleted-candidate":
             continue
         key_path, path_confidence = registry_key_path_for_node(candidate, key_by_offset)
-        recovered_key_path = f"{hive_hint_from_path(path)}\\{key_path}" if key_path else hive_hint_from_path(path)
+        recovered_key_path = f"{path_prefix}\\{key_path}" if key_path else path_prefix
         risk_flags = registry_cell_risk_flags(candidate)
         validation_matrix = registry_key_tree_validation_matrix(
             candidate,
@@ -1038,7 +777,7 @@ def build_registry_key_recovery_records(
             row_identity={
                 "hive_name": path.name,
                 "hive_hint": hive_hint_from_path(path),
-                "key_path_candidate": f"{hive_hint_from_path(path)}\\{key_path}" if key_path else hive_hint_from_path(path),
+                "key_path_candidate": f"{path_prefix}\\{key_path}" if key_path else path_prefix,
                 "name": candidate.get("name", ""),
                 "cell_offset": candidate.get("cell_offset", 0),
                 "cell_relative_offset": candidate.get("cell_relative_offset", 0),
@@ -1129,7 +868,7 @@ def build_registry_key_recovery_records(
                         "hive_name": path.name,
                         "hive_hint": hive_hint_from_path(path),
                         "cell_offset": candidate.get("cell_offset", 0),
-                        "key_path_candidate": f"{hive_hint_from_path(path)}\\{key_path}" if key_path else hive_hint_from_path(path),
+                        "key_path_candidate": f"{path_prefix}\\{key_path}" if key_path else path_prefix,
                         "name": candidate.get("name", ""),
                         "allocation_status": candidate.get("allocation_status", ""),
                         "candidate_kind": "deleted-or-free-key-cell",
@@ -1177,7 +916,7 @@ def build_registry_key_recovery_records(
                 "commercial_grade_blockers": report_grade_assessment["blockers"],
                 "validation_guidance": "Recovered free nk cells can be stale or partially overwritten; validate with hive allocator state, transaction logs, and a second parser before testimony.",
                 "candidate_kind": "deleted-or-free-key-cell",
-                "key_path_candidate": f"{hive_hint_from_path(path)}\\{key_path}" if key_path else hive_hint_from_path(path),
+                "key_path_candidate": f"{path_prefix}\\{key_path}" if key_path else path_prefix,
                 "key_path_confidence": path_confidence,
                 "name": candidate.get("name", ""),
                 "last_written_at": candidate.get("last_written_at", ""),
@@ -1204,7 +943,10 @@ def build_registry_value_recovery_records(
     candidates: Sequence[Mapping[str, object]],
     metadata: Mapping[str, object],
     source_hashes: Mapping[str, str],
+    *,
+    mount: str | None = None,
 ) -> Iterable[ArtifactRecord]:
+    path_prefix = mount or hive_hint_from_path(path)
     transaction_log_evidence = (
         metadata.get("transaction_log_evidence")
         if isinstance(metadata.get("transaction_log_evidence"), Mapping)
@@ -1227,7 +969,7 @@ def build_registry_value_recovery_records(
         parent_path = ""
         if parent is not None:
             parent_key_path, _ = registry_key_path_for_node(parent, key_by_offset)
-            parent_path = f"{hive_hint_from_path(path)}\\{parent_key_path}" if parent_key_path else hive_hint_from_path(path)
+            parent_path = f"{path_prefix}\\{parent_key_path}" if parent_key_path else path_prefix
         decoded_data = registry_value_data_preview(blob, candidate)
         validation_matrix = registry_value_recovery_validation_matrix(
             candidate,
@@ -2767,88 +2509,15 @@ def build_registry_user_activity_from_reg(
     )
 
 
-def build_registry_user_activity_from_hive_strings(
-    path: Path,
-    strings: Sequence[str],
-    metadata: Mapping[str, object],
-    source_hashes: Mapping[str, str],
-) -> Iterable[ArtifactRecord]:
-    if path.name.upper() not in USER_HIVE_NAMES:
-        return
-    emitted: set[tuple[str, str]] = set()
-    for index, value in enumerate(strings):
-        classification = classify_user_activity_key(value)
-        if classification is None:
-            continue
-        key = (classification["category"], value)
-        if key in emitted:
-            continue
-        emitted.add(key)
-        normalized_rows = build_normalized_user_activity_rows(
-            key=value,
-            classification=classification,
-            decoded_values={},
-            source_format="registry-hive",
-        )
-        risk_flags = user_activity_risk_flags(classification["category"], value, {})
-        yield ArtifactRecord(
-            provider=WindowsRegistryProvider.name,
-            artifact_type="registry-user-activity",
-            path=str(path.resolve()),
-            supported=bool(metadata.get("regf_valid")),
-            details={
-                "parser": "windows-registry-user-hive-activity",
-                "parser_version": PARSER_VERSION,
-                "coverage_status": "native-hive-string-pivot",
-                "reportability": "triage",
-                "source_path": str(path.resolve()),
-                "source_format": "registry-hive",
-                "source_hashes": dict(source_hashes),
-                "hive_name": path.name,
-                "hive_hint": hive_hint_from_path(path),
-                "user_hive_scope": "ntuser" if path.name.upper() == "NTUSER.DAT" else "usrclass",
-                "user_activity_category": classification["category"],
-                "activity_label": classification["label"],
-                "string_index": index,
-                "string_value": value,
-                "normalized_activity_rows": normalized_rows,
-                "normalized_activity_row_count": len(normalized_rows),
-                "registry_user_activity_profile": registry_user_activity_profile(
-                    source_format="registry-hive",
-                    key=value,
-                    classification=classification,
-                    decoded_values={},
-                    normalized_rows=normalized_rows,
-                    metadata=metadata,
-                ),
-                "registry_analyst_review_profile": registry_analyst_review_profile(
-                    artifact_type="registry-user-activity",
-                    category=classification["category"],
-                    source_format="registry-hive",
-                    hive_name=path.name,
-                    hive_hint=hive_hint_from_path(path),
-                    key_path=value,
-                    normalized_rows=normalized_rows,
-                    risk_flags=risk_flags,
-                    validation_required=True,
-                    transaction_log_evidence=metadata.get("transaction_log_evidence")
-                    if isinstance(metadata.get("transaction_log_evidence"), Mapping)
-                    else {},
-                ),
-                "parser_confidence": 0.52 if metadata.get("regf_valid") else 0.25,
-                "evidence_strength": "registry-hive-string-candidate",
-                "risk_flags": risk_flags,
-                "risk_score": min(100, 10 + len(risk_flags) * 20),
-                "validation_required": True,
-                "validation_guidance": "Native NTUSER/UsrClass string pivots identify likely user-activity keys only; validate with a full registry hive parser before final testimony.",
-                "raw_preview": value[:1000],
-            },
-        )
-
-
-def build_registry_summary(root: Path, records: Sequence[ArtifactRecord]) -> ArtifactRecord | None:
-    if not records:
+def build_registry_summary(
+    root: Path,
+    records: Sequence[ArtifactRecord],
+    *,
+    key_tree_counts: Mapping[str, int] | None = None,
+) -> ArtifactRecord | None:
+    if not records and not key_tree_counts:
         return None
+    native_facts = registry_native_summary_facts(records)
     hive_counts: Counter[str] = Counter()
     artifact_type_counts: Counter[str] = Counter()
     source_format_counts: Counter[str] = Counter()
@@ -3035,11 +2704,19 @@ def build_registry_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
         "source_path": str(root.resolve()),
         "source_format": "summary",
         "record_count": len(records),
-        "key_count": sum(1 for record in records if record.artifact_type in {"registry-key", "registry-run-key", "registry-usb"}),
+        "key_count": native_facts["native_key_count"]
+        + sum(1 for record in records if record.artifact_type in {"registry-key", "registry-run-key", "registry-usb"}),
+        "exported_key_count": sum(
+            1 for record in records if record.artifact_type in {"registry-key", "registry-run-key", "registry-usb"}
+        ),
+        "native_key_count": native_facts["native_key_count"],
+        "native_value_count": native_facts["native_value_count"],
         "hive_file_count": sum(1 for record in records if record.artifact_type == "registry-hive"),
         "hive_string_row_count": sum(1 for record in records if record.artifact_type == "registry-hive-strings"),
         "hive_cell_row_count": sum(1 for record in records if record.artifact_type == "registry-hive-cell"),
-        "key_tree_node_count": sum(1 for record in records if record.artifact_type == "registry-key-tree-node"),
+        "key_tree_node_count": sum(1 for record in records if record.artifact_type == "registry-key-tree-node")
+        + sum((key_tree_counts or {}).values()),
+        "key_tree_node_counts_by_hive": dict(sorted((key_tree_counts or {}).items())),
         "deleted_cell_candidate_count": sum(1 for record in records if record.artifact_type == "registry-deleted-cell-candidate"),
         "key_recovery_candidate_count": sum(1 for record in records if record.artifact_type == "registry-key-recovery-candidate"),
         "value_recovery_candidate_count": sum(1 for record in records if record.artifact_type == "registry-value-recovery-candidate"),
@@ -3079,15 +2756,39 @@ def build_registry_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
             user_activity_entries,
             key=lambda item: (str(item.get("user_activity_category") or ""), str(item.get("key") or "")),
         )[:100],
-        "persistence_entries": persistence_entries[:100],
-        "usb_devices": usb_devices[:100],
+        "persistence_entries": [*persistence_entries, *native_facts["persistence_entries"]],
+        "usb_devices": [*usb_devices, *native_facts["usb_devices"]],
+        "computer_name": native_facts["computer_name"],
+        "timezone": native_facts["timezone"],
+        "current_control_set": native_facts["current_control_set"],
+        "last_shutdown_at": native_facts["last_shutdown_at"],
+        "os_version": native_facts["os_version"],
+        "hives": native_facts["hives"],
+        "transaction_log_disclosures": native_facts["transaction_log_disclosures"],
+        "summary_list_limit": 100,
+        "summary_list_totals": {
+            "hive_string_hits": len(hive_string_hits),
+            "hive_cell_hits": len(hive_cell_hits),
+            "key_tree_nodes": len(key_tree_nodes) + sum((key_tree_counts or {}).values()),
+            "deleted_cell_candidates": len(deleted_cell_candidates),
+            "key_recovery_candidates": len(key_recovery_candidates),
+            "value_recovery_candidates": len(value_recovery_candidates),
+            "user_activity_entries": len(user_activity_entries),
+            "suspicious_entries": len(suspicious_entries),
+        },
+        "cap_disclosure": (
+            "요약 목록(hive_string_hits·key_tree_nodes·deleted_cell_candidates·recovery·user_activity_entries·"
+            "suspicious_entries)은 미리보기로 최대 100개만 담고 총계는 summary_list_totals에 기록합니다. "
+            "persistence_entries·usb_devices·hives는 전수입니다. 하이브 키/값 해석에는 읽기·셀 상한이 없습니다."
+        ),
         "suspicious_entries": sorted(
             suspicious_entries,
             key=lambda item: int(item.get("risk_score") or 0),
             reverse=True,
         )[:100],
         "summary_notes": [
-            "Registry hive rows use native regf header parsing, bounded string scanning, hbin-aware nk/vk cell walking when possible, best-effort key-tree rows, and separate deleted/free key/value recovery candidate rows; report-grade deleted-value testimony still requires validation with a dedicated hive parser.",
+            "Registry hives are walked natively from the root cell (nk/vk/lf/lh/li/ri/db, no read or cell cap); key paths use the logical mount (HKLM\\SYSTEM, HKU\\<SID>, HKU\\<SID>_Classes) and never repeat the root key name.",
+            "Free (deleted) nk/vk cells are listed as recovery candidates over the whole hive; transaction logs are detected and disclosed, never replayed.",
             "Run-key command hints are triage pivots, not proof that a program executed.",
         ],
     }
@@ -3679,7 +3380,7 @@ def parse_registry_nk_cell(
     name_length = read_u16(blob, signature_offset + 0x48)
     name_start = signature_offset + 0x4C
     name_end = min(name_start + name_length, cell_offset + cell_size)
-    name, encoding = decode_registry_cell_name(blob[name_start:name_end], compressed=True)
+    name, encoding = decode_registry_cell_name(blob[name_start:name_end], compressed=bool(flags & REGF_KEY_COMP_NAME))
     if not is_plausible_registry_cell_name(name) and not last_written_at:
         return None
     return {
@@ -3757,16 +3458,6 @@ def registry_hbin_offset_for_cell(cell_offset: int) -> int:
     return HIVE_BIN_BASE_OFFSET + ((cell_offset - HIVE_BIN_BASE_OFFSET) // 4096) * 4096
 
 
-def registry_subkey_offsets_for_key(blob: bytes, key_node: Mapping[str, object]) -> list[int]:
-    offsets: list[int] = []
-    for list_offset in (
-        int(key_node.get("stable_subkey_list_offset") or 0),
-        int(key_node.get("volatile_subkey_list_offset") or 0),
-    ):
-        offsets.extend(registry_subkey_offsets_from_list(blob, list_offset, depth=0))
-    return sorted(set(offsets))
-
-
 def registry_subkey_offsets_from_list(blob: bytes, list_offset: int, *, depth: int) -> list[int]:
     if list_offset <= 0 or list_offset + 8 > len(blob) or depth > 4:
         return []
@@ -3807,118 +3498,6 @@ def registry_subkey_offsets_from_list(blob: bytes, list_offset: int, *, depth: i
     return offsets
 
 
-def registry_subkey_list_profile_for_key(
-    blob: bytes,
-    key_node: Mapping[str, object],
-    *,
-    decoded_offsets: Sequence[int],
-    missing_offsets: Sequence[int],
-) -> dict[str, object]:
-    stable = registry_subkey_list_cell_profile(
-        blob,
-        int(key_node.get("stable_subkey_list_offset") or 0),
-        declared_count=int(key_node.get("stable_subkey_count") or 0),
-        list_kind="stable",
-    )
-    volatile = registry_subkey_list_cell_profile(
-        blob,
-        int(key_node.get("volatile_subkey_list_offset") or 0),
-        declared_count=int(key_node.get("volatile_subkey_count") or 0),
-        list_kind="volatile",
-    )
-    observed_lists = [item for item in (stable, volatile) if item["status"] != "not-declared"]
-    decoded = sorted(set(int(offset) for offset in decoded_offsets))
-    missing = sorted(set(int(offset) for offset in missing_offsets))
-    return {
-        "profile_version": "registry-subkey-list-profile-v1",
-        "stable": stable,
-        "volatile": volatile,
-        "observed_list_count": len(observed_lists),
-        "decoded_subkey_cell_offsets": decoded,
-        "decoded_subkey_count": len(decoded),
-        "missing_subkey_cell_offsets": missing,
-        "declared_subkey_count": int(key_node.get("subkey_count") or 0),
-        "list_validation_status": "resolved" if not missing else "missing-linked-subkey-cells",
-    }
-
-
-def registry_subkey_list_cell_profile(
-    blob: bytes,
-    list_offset: int,
-    *,
-    declared_count: int,
-    list_kind: str,
-    depth: int = 0,
-) -> dict[str, object]:
-    if declared_count <= 0 and list_offset <= 0:
-        return {
-            "profile_version": "registry-subkey-list-cell-profile-v1",
-            "list_kind": list_kind,
-            "status": "not-declared",
-            "declared_count": declared_count,
-            "list_offset": 0,
-            "list_relative_offset": 0,
-            "signature": "",
-            "decoded_offsets": [],
-            "nested_list_offsets": [],
-            "blockers": [],
-        }
-    if list_offset <= 0 or list_offset + 8 > len(blob):
-        return {
-            "profile_version": "registry-subkey-list-cell-profile-v1",
-            "list_kind": list_kind,
-            "status": "missing-or-out-of-range",
-            "declared_count": declared_count,
-            "list_offset": list_offset,
-            "list_relative_offset": registry_file_to_relative_offset(list_offset),
-            "signature": "",
-            "decoded_offsets": [],
-            "nested_list_offsets": [],
-            "blockers": ["subkey-list-cell-not-readable"],
-        }
-    cell_size = abs(read_i32(blob, list_offset))
-    signature = blob[list_offset + 4 : list_offset + 6]
-    count = read_u16(blob, list_offset + 6)
-    valid_bounds = cell_size >= 8 and list_offset + cell_size <= len(blob)
-    decoded_offsets = registry_subkey_offsets_from_list(blob, list_offset, depth=depth) if valid_bounds else []
-    nested_offsets: list[int] = []
-    if signature == b"ri" and valid_bounds:
-        cursor = list_offset + 8
-        for _ in range(min(count, 8192)):
-            if cursor + 4 > list_offset + cell_size:
-                break
-            nested = registry_relative_to_file_offset(read_u32(blob, cursor))
-            if nested:
-                nested_offsets.append(nested)
-            cursor += 4
-    blockers: list[str] = []
-    if not valid_bounds:
-        blockers.append("subkey-list-cell-bounds-invalid")
-    if signature not in {b"lf", b"lh", b"li", b"ri"}:
-        blockers.append("subkey-list-signature-unsupported")
-    if count != declared_count and declared_count:
-        blockers.append("subkey-list-count-mismatch")
-    status = "decoded" if not blockers else "decoded-with-warnings" if decoded_offsets else "unresolved"
-    return {
-        "profile_version": "registry-subkey-list-cell-profile-v1",
-        "list_kind": list_kind,
-        "status": status,
-        "declared_count": declared_count,
-        "list_offset": list_offset,
-        "list_relative_offset": registry_file_to_relative_offset(list_offset),
-        "cell_size": cell_size,
-        "signature": signature.decode("ascii", errors="replace"),
-        "entry_count": count,
-        "decoded_offsets": sorted(set(decoded_offsets)),
-        "decoded_offset_count": len(set(decoded_offsets)),
-        "nested_list_offsets": sorted(set(nested_offsets)),
-        "cell_sha256": hashlib.sha256(blob[list_offset : min(len(blob), list_offset + cell_size)]).hexdigest()
-        if valid_bounds
-        else "",
-        "blockers": blockers,
-    }
-
-
 def registry_value_offsets_for_key(blob: bytes, key_node: Mapping[str, object]) -> list[int]:
     value_count = int(key_node.get("value_count") or 0)
     value_list_offset = int(key_node.get("value_list_offset") or 0)
@@ -3935,93 +3514,6 @@ def registry_value_offsets_for_key(blob: bytes, key_node: Mapping[str, object]) 
         if file_offset:
             offsets.append(file_offset)
     return offsets
-
-
-def registry_value_list_profile_for_key(
-    blob: bytes,
-    key_node: Mapping[str, object],
-    *,
-    decoded_offsets: Sequence[int],
-    missing_offsets: Sequence[int],
-) -> dict[str, object]:
-    value_count = int(key_node.get("value_count") or 0)
-    value_list_offset = int(key_node.get("value_list_offset") or 0)
-    decoded = sorted(set(int(offset) for offset in decoded_offsets))
-    missing = sorted(set(int(offset) for offset in missing_offsets))
-    expected_size = value_count * 4
-    valid_bounds = bool(value_count > 0 and value_list_offset > 0 and value_list_offset + expected_size <= len(blob))
-    blockers: list[str] = []
-    if value_count > 4096:
-        blockers.append("value-list-count-too-large")
-    if value_count and not valid_bounds:
-        blockers.append("value-list-cell-not-readable")
-    if missing:
-        blockers.append("value-list-missing-linked-value-cells")
-    if value_count and len(decoded) != value_count:
-        blockers.append("value-list-count-mismatch")
-    if not value_count:
-        status = "not-declared"
-    elif not blockers:
-        status = "resolved"
-    elif decoded:
-        status = "resolved-with-warnings"
-    else:
-        status = "unresolved"
-    return {
-        "profile_version": "registry-value-list-profile-v1",
-        "status": status,
-        "declared_value_count": value_count,
-        "value_list_offset": value_list_offset,
-        "value_list_relative_offset": registry_file_to_relative_offset(value_list_offset),
-        "expected_value_list_bytes": expected_size,
-        "bounds_valid": valid_bounds,
-        "decoded_value_cell_offsets": decoded,
-        "decoded_value_count": len(decoded),
-        "missing_value_cell_offsets": missing,
-        "cell_sha256": hashlib.sha256(blob[value_list_offset : value_list_offset + expected_size]).hexdigest()
-        if valid_bounds
-        else "",
-        "blockers": sorted(set(blockers)),
-    }
-
-
-def registry_key_tree_reconstruction_profile(
-    *,
-    key_node: Mapping[str, object],
-    path_evidence: Mapping[str, object],
-    relationship_profile: Mapping[str, object],
-    subkey_list_profile: Mapping[str, object],
-    value_list_profile: Mapping[str, object],
-) -> dict[str, object]:
-    resolved_subkeys = subkey_list_profile.get("list_validation_status") == "resolved"
-    value_status = str(value_list_profile.get("status") or "")
-    resolved_values = value_status in {"not-declared", "resolved"}
-    blockers: list[str] = []
-    if not path_evidence.get("root_reachable"):
-        blockers.append("root-not-reachable-from-parent-chain")
-    if relationship_profile.get("missing_child_backlink_cell_offsets"):
-        blockers.append("child-parent-backlink-mismatch")
-    blockers.extend(str(item) for item in subkey_list_profile.get("stable", {}).get("blockers", []) or [])
-    blockers.extend(str(item) for item in subkey_list_profile.get("volatile", {}).get("blockers", []) or [])
-    blockers.extend(str(item) for item in value_list_profile.get("blockers", []) or [])
-    return {
-        "profile_version": "registry-key-tree-reconstruction-profile-v1",
-        "cell_offset": key_node.get("cell_offset", 0),
-        "name": key_node.get("name", ""),
-        "path_confidence": path_evidence.get("path_confidence", ""),
-        "root_reachable": bool(path_evidence.get("root_reachable")),
-        "parent_chain_depth": len(path_evidence.get("ancestry_cell_offsets", []) or []),
-        "parent_child_backlinks_consistent": not bool(
-            relationship_profile.get("missing_child_backlink_cell_offsets")
-        ),
-        "subkey_lists_resolved": resolved_subkeys,
-        "value_list_resolved": resolved_values,
-        "decoded_subkey_count": subkey_list_profile.get("decoded_subkey_count", 0),
-        "decoded_value_count": value_list_profile.get("decoded_value_count", 0),
-        "reconstruction_status": "bounded-node-reconstructed" if not blockers else "bounded-node-reconstructed-with-warnings",
-        "validation_required": bool(blockers),
-        "blockers": sorted(set(blockers)),
-    }
 
 
 def registry_value_parent_map(
@@ -4060,125 +3552,6 @@ def registry_key_path_for_node(
     return "\\".join(names), confidence
 
 
-def registry_key_path_evidence(
-    hive_hint: str,
-    key_node: Mapping[str, object],
-    key_by_offset: Mapping[int, Mapping[str, object]],
-    key_path: str,
-    path_confidence: str,
-    *,
-    root_cell_offset: int = 0,
-) -> dict[str, object]:
-    current = key_node
-    seen: set[int] = set()
-    offsets_from_leaf: list[int] = []
-    missing_parent_offset = 0
-    cycle_detected = False
-    max_depth_reached = False
-    for depth in range(33):
-        cell_offset = int(current.get("cell_offset") or 0)
-        if cell_offset in seen:
-            cycle_detected = True
-            break
-        seen.add(cell_offset)
-        offsets_from_leaf.append(cell_offset)
-        parent_offset = int(current.get("parent_cell_offset") or 0)
-        if not parent_offset:
-            break
-        if parent_offset in seen:
-            cycle_detected = True
-            break
-        parent = key_by_offset.get(parent_offset)
-        if parent is None:
-            missing_parent_offset = parent_offset
-            break
-        current = parent
-        max_depth_reached = depth == 32
-    components = [component for component in key_path.split("\\") if component]
-    root_reachable = bool(root_cell_offset and (root_cell_offset in offsets_from_leaf or int(key_node.get("cell_offset") or 0) == root_cell_offset))
-    return {
-        "hive_hint": hive_hint,
-        "full_path": f"{hive_hint}\\{key_path}" if key_path else hive_hint,
-        "relative_path": key_path,
-        "relative_components": components,
-        "relative_depth": len(components),
-        "path_confidence": path_confidence,
-        "ancestry_cell_offsets": list(reversed(offsets_from_leaf)),
-        "root_cell_offset": root_cell_offset,
-        "root_reachable": root_reachable,
-        "missing_parent_cell_offset": missing_parent_offset,
-        "cycle_detected": cycle_detected,
-        "max_depth_reached": max_depth_reached,
-    }
-
-
-def registry_key_tree_relationship_profile(
-    key_node: Mapping[str, object],
-    key_by_offset: Mapping[int, Mapping[str, object]],
-    subkey_offsets: Sequence[int],
-    root_cell_offset: int,
-) -> dict[str, object]:
-    cell_offset = int(key_node.get("cell_offset") or 0)
-    parent_offset = int(key_node.get("parent_cell_offset") or 0)
-    is_root_key = bool(root_cell_offset and cell_offset == root_cell_offset)
-    ancestry_offsets = registry_key_ancestry_offsets(key_node, key_by_offset)
-    root_reachable = is_root_key or (root_cell_offset in ancestry_offsets)
-    child_backlinks: list[dict[str, object]] = []
-    missing_backlinks: list[int] = []
-    for offset in subkey_offsets:
-        child = key_by_offset.get(offset)
-        if child is None:
-            continue
-        child_parent = int(child.get("parent_cell_offset") or 0)
-        linked = child_parent == cell_offset
-        child_backlinks.append(
-            {
-                "child_cell_offset": offset,
-                "child_name": str(child.get("name") or ""),
-                "child_parent_cell_offset": child_parent,
-                "parent_backlink_confirmed": linked,
-            }
-        )
-        if not linked:
-            missing_backlinks.append(offset)
-    parent_link_consistency = is_root_key or bool(parent_offset and parent_offset in key_by_offset)
-    return {
-        "profile_version": "registry-key-tree-relationships-v1",
-        "root_cell_offset": root_cell_offset,
-        "cell_offset": cell_offset,
-        "is_root_key": is_root_key,
-        "root_reachable": root_reachable,
-        "parent_cell_offset": parent_offset,
-        "parent_link_consistency": parent_link_consistency,
-        "ancestor_cell_offsets": ancestry_offsets,
-        "child_backlink_count": len(child_backlinks),
-        "child_backlinks": child_backlinks[:100],
-        "missing_child_backlink_cell_offsets": missing_backlinks,
-        "relationship_validation_required": bool(missing_backlinks or (not root_reachable and root_cell_offset)),
-    }
-
-
-def registry_key_ancestry_offsets(
-    key_node: Mapping[str, object],
-    key_by_offset: Mapping[int, Mapping[str, object]],
-) -> list[int]:
-    current = key_node
-    seen: set[int] = set()
-    offsets: list[int] = []
-    for _ in range(33):
-        cell_offset = int(current.get("cell_offset") or 0)
-        if not cell_offset or cell_offset in seen:
-            break
-        seen.add(cell_offset)
-        offsets.append(cell_offset)
-        parent_offset = int(current.get("parent_cell_offset") or 0)
-        parent = key_by_offset.get(parent_offset)
-        if parent is None:
-            break
-        current = parent
-    return list(reversed(offsets))
-
-
 def nearest_preceding_key(
     value_cell: Mapping[str, object],
     key_by_offset: Mapping[int, Mapping[str, object]],
@@ -4193,31 +3566,11 @@ def nearest_preceding_key(
     return key_by_offset[nearest_offset]
 
 
-def registry_key_tree_validation_flags(
-    key_node: Mapping[str, object],
-    path_confidence: str,
-    missing_subkey_offsets: Sequence[int],
-    missing_value_offsets: Sequence[int],
-    relationship_profile: Mapping[str, object] | None = None,
-) -> list[str]:
-    flags: list[str] = []
-    relationship_profile = relationship_profile or {}
-    if key_node.get("allocation_status") != "allocated":
-        flags.append("deleted-or-free-key-cell")
-    if path_confidence not in {"parent-chain", "root-cell"}:
-        flags.append(f"path-confidence:{path_confidence}")
-    if missing_subkey_offsets:
-        flags.append("subkey-list-has-unresolved-cells")
-    if missing_value_offsets:
-        flags.append("value-list-has-unresolved-cells")
-    if relationship_profile.get("root_cell_offset") and not relationship_profile.get("root_reachable"):
-        flags.append("root-cell-not-reachable")
-    if relationship_profile.get("missing_child_backlink_cell_offsets"):
-        flags.append("subkey-parent-backlink-mismatch")
-    return flags
-
-
-def registry_transaction_log_evidence(path: Path) -> dict[str, object]:
+def registry_transaction_log_evidence(
+    path: Path,
+    *,
+    hive_metadata: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     candidates = registry_transaction_log_candidates(path)
     present: list[dict[str, object]] = []
     missing: list[str] = []
@@ -4242,7 +3595,9 @@ def registry_transaction_log_evidence(path: Path) -> dict[str, object]:
                     "replay_readiness": registry_transaction_log_replay_readiness(header, stat.st_size),
                 }
             )
-        else:
+        elif candidate.name.upper().endswith((".LOG1", ".LOG2")) and candidate.name.upper() not in {
+            name.upper() for name in missing
+        }:
             missing.append(candidate.name)
     if present:
         status = "present-not-replayed"
@@ -4252,7 +3607,23 @@ def registry_transaction_log_evidence(path: Path) -> dict[str, object]:
     valid_log_count = sum(1 for item in present if item.get("signature_status") == "recognized-transaction-log")
     invalid_log_count = len(present) - valid_log_count
     replay_inputs = registry_transaction_replay_inputs(present)
+    hive_secondary = int((hive_metadata or {}).get("sequence_secondary") or 0)
+    hive_primary = int((hive_metadata or {}).get("sequence_primary") or 0)
+    newer_sequences: list[int] = []
+    if hive_metadata is not None:
+        threshold = hive_secondary or hive_primary
+        for item in present:
+            header = item.get("header") if isinstance(item.get("header"), Mapping) else {}
+            for sequence in header.get("log_entry_sequences") or []:
+                if isinstance(sequence, int) and threshold and sequence >= threshold:
+                    newer_sequences.append(sequence)
+    newer_sequences = sorted(set(newer_sequences))
     return {
+        "hive_sequence_primary": hive_primary,
+        "hive_sequence_secondary": hive_secondary,
+        "newer_sequence_not_replayed": bool(newer_sequences),
+        "newer_log_entry_count": len(newer_sequences),
+        "newer_sequence_range": [newer_sequences[0], newer_sequences[-1]] if newer_sequences else [],
         "profile_version": "registry-transaction-log-evidence-v1",
         "status": status,
         "transaction_log_replay_applied": False,
@@ -4288,12 +3659,17 @@ def registry_transaction_log_evidence(path: Path) -> dict[str, object]:
 
 
 def registry_transaction_log_candidates(path: Path) -> list[Path]:
-    return [
-        path.with_name(f"{path.name}.LOG1"),
-        path.with_name(f"{path.name}.LOG2"),
-        path.with_name(f"{path.name}.log1"),
-        path.with_name(f"{path.name}.log2"),
-    ]
+    expected = [path.with_name(f"{path.name}.LOG1"), path.with_name(f"{path.name}.LOG2")]
+    wanted = {f"{path.name}.log".casefold(), f"{path.name}.log1".casefold(), f"{path.name}.log2".casefold()}
+    try:
+        actual = sorted(
+            (child for child in path.parent.iterdir() if child.name.casefold() in wanted),
+            key=lambda item: item.name.casefold(),
+        )
+    except OSError:
+        actual = []
+    present_names = {child.name.casefold() for child in actual}
+    return [*actual, *(item for item in expected if item.name.casefold() not in present_names)]
 
 
 def parse_registry_transaction_log_header(path: Path) -> dict[str, object]:
@@ -4315,21 +3691,50 @@ def parse_registry_transaction_log_header(path: Path) -> dict[str, object]:
         }
     signature = header[:4]
     signature_text = signature.decode("ascii", errors="replace")
-    recognized = signature in {b"HvLE", b"HvLG", b"regf"}
-    likely_version = "windows-registry-transaction-log" if signature in {b"HvLE", b"HvLG"} else "legacy-or-hive-like"
-    if not recognized:
-        likely_version = "unknown"
+    entries: dict[str, object] = {"log_entry_count": 0, "log_entry_sequences": []}
+    log_format = "unknown"
+    file_type = read_u32(header, 28) if signature == b"regf" else 0
+    marker = b""
+    if signature == b"regf":
+        # Modern logs (Windows 8.1+) start with a base-block copy (file type 6) followed by
+        # HvLE log entries at offset 512; legacy logs carry a DIRT dirty vector there.
+        try:
+            with path.open("rb") as handle:
+                handle.seek(512)
+                marker = handle.read(4)
+        except OSError:
+            marker = b""
+        if marker == b"HvLE":
+            log_format = "new-hvle"
+            entries = parse_registry_transaction_log_entries(path)
+        elif marker == b"DIRT":
+            log_format = "legacy-dirt"
+        else:
+            log_format = "base-block-only"
+    elif signature in {b"HvLE", b"HvLG"}:
+        log_format = "hvle-at-offset-0"
+    recognized = log_format in {"new-hvle", "legacy-dirt", "hvle-at-offset-0"}
+    if recognized:
+        signature_status = "recognized-transaction-log"
+    elif signature == b"regf":
+        signature_status = "hive-like-header"
+    else:
+        signature_status = "unrecognized"
     return {
-        "profile_version": "registry-transaction-log-header-v1",
+        "profile_version": "registry-transaction-log-header-v2",
         "signature": signature_text,
         "signature_hex": signature.hex(),
-        "signature_status": "recognized-transaction-log" if signature in {b"HvLE", b"HvLG"} else ("hive-like-header" if signature == b"regf" else "unrecognized"),
+        "signature_status": signature_status,
         "read_error": "",
         "header_size_observed": len(header),
-        "likely_log_version": likely_version,
+        "likely_log_version": "windows-registry-transaction-log" if recognized else "unknown",
+        "log_format": log_format,
+        "log_file_type": file_type,
         "sequence_number": read_u32(header, 4),
         "hive_sequence_hint": read_u32(header, 8),
         "flags": read_u32(header, 12),
+        "replay_applied": False,
+        **entries,
     }
 
 
@@ -5096,14 +4501,7 @@ def decode_utf16le_string(blob: bytes) -> str:
 
 
 def filetime_to_iso(value: int) -> str:
-    if value <= 0:
-        return ""
-    try:
-        base = dt.datetime(1601, 1, 1, tzinfo=dt.timezone.utc)
-        moment = base + dt.timedelta(microseconds=value // 10)
-    except (OverflowError, TypeError, ValueError):
-        return ""
-    return moment.isoformat()
+    return filetime_to_iso_ticks(value)
 
 
 def read_u32(blob: bytes, offset: int) -> int:
@@ -5143,3 +4541,1816 @@ def file_hashes(path: Path) -> dict[str, str]:
     except OSError:
         return {}
     return {"sha256": digest.hexdigest()}
+
+
+# ---------------------------------------------------------------------------
+# Native regf reader: full nk/vk/lf/lh/li/ri/db walk over a memory-mapped hive.
+#
+# The reader follows the live key tree from the base-block root cell, so key and
+# value counts equal what a dedicated hive parser reports (no read or cell cap).
+# Names honour the KEY_COMP_NAME / VALUE_COMP_NAME flags (Latin-1 when set,
+# UTF-16LE otherwise -- Korean key names are UTF-16LE). Transaction logs are
+# never replayed; ``registry_transaction_log_evidence`` discloses newer log
+# sequences instead.
+# ---------------------------------------------------------------------------
+
+FILETIME_TICKS_PER_SECOND = 10_000_000
+FILETIME_EPOCH = dt.datetime(1601, 1, 1, tzinfo=dt.timezone.utc)
+FILETIME_MAX_TICKS = (
+    int((dt.datetime(9999, 12, 31, 23, 59, 59, tzinfo=dt.timezone.utc) - FILETIME_EPOCH).total_seconds())
+    * FILETIME_TICKS_PER_SECOND
+)
+REGF_BIG_DATA_SEGMENT_SIZE = 16344
+REGF_KEY_COMP_NAME = 0x0020
+REGF_VALUE_COMP_NAME = 0x0001
+REGF_MAX_SUBKEY_LIST_DEPTH = 8
+REGISTRY_NATIVE_HIVE_NAMES = REGISTRY_HIVE_NAMES | {"DRIVERS", "ELAM", "BBI", "BCD-TEMPLATE", "USERDIFF"}
+REGISTRY_MACHINE_MOUNTS = {
+    "SYSTEM": "HKLM\\SYSTEM",
+    "SOFTWARE": "HKLM\\SOFTWARE",
+    "SAM": "HKLM\\SAM",
+    "SECURITY": "HKLM\\SECURITY",
+    "COMPONENTS": "HKLM\\COMPONENTS",
+    "DRIVERS": "HKLM\\DRIVERS",
+    "ELAM": "HKLM\\ELAM",
+    "BBI": "HKLM\\BBI",
+    "BCD-TEMPLATE": "HKLM\\BCD-Template",
+    "USERDIFF": "HKLM\\USERDIFF",
+    "DEFAULT": "HKU\\.DEFAULT",
+}
+REGISTRY_SID_PATTERN = re.compile(r"^S-1-\d+(?:-\d+)+$", re.IGNORECASE)
+
+
+def filetime_to_iso_ticks(value: object) -> str:
+    """FILETIME (100 ns ticks since 1601-01-01 UTC) to ISO-8601 with integer math.
+
+    Whole seconds render without a fraction; otherwise all seven 100 ns digits
+    are kept (``datetime`` arithmetic alone would round to microseconds).
+    """
+    try:
+        ticks = int(value)  # type: ignore[call-overload]
+    except (TypeError, ValueError):
+        return ""
+    if ticks <= 0 or ticks > FILETIME_MAX_TICKS:
+        return ""
+    seconds, fraction = divmod(ticks, FILETIME_TICKS_PER_SECOND)
+    moment = FILETIME_EPOCH + dt.timedelta(seconds=seconds)
+    text = (
+        f"{moment.year:04d}-{moment.month:02d}-{moment.day:02d}T"
+        f"{moment.hour:02d}:{moment.minute:02d}:{moment.second:02d}"
+    )
+    if fraction:
+        text += f".{fraction:07d}"
+    return text + "+00:00"
+
+
+class NativeRegistryKey:
+    __slots__ = (
+        "allocated",
+        "flags",
+        "last_written_filetime",
+        "name",
+        "name_encoding",
+        "offset",
+        "parent_offset",
+        "subkey_count",
+        "subkey_list_offset",
+        "value_count",
+        "value_list_offset",
+    )
+
+    def __init__(self, **fields: object) -> None:
+        for slot in self.__slots__:
+            setattr(self, slot, fields.get(slot))
+
+    @property
+    def last_written_at(self) -> str:
+        return filetime_to_iso_ticks(self.last_written_filetime)
+
+
+class NativeRegistryValue:
+    __slots__ = ("data_offset", "data_size", "flags", "inline", "name", "name_encoding", "offset", "value_type")
+
+    def __init__(self, **fields: object) -> None:
+        for slot in self.__slots__:
+            setattr(self, slot, fields.get(slot))
+
+
+class NativeRegistryHive:
+    """Read-only regf reader over ``mmap`` (bytes for in-memory blobs)."""
+
+    def __init__(self, data: object, *, path: Path | None = None, handle: object = None) -> None:
+        self._data = data
+        self._handle = handle
+        self.path = path
+        self.size = len(data)  # type: ignore[arg-type]
+        self.header = parse_registry_hive_header(bytes(data[:4096]))  # type: ignore[index]
+        hbin_size = int(self.header.get("hbin_data_size") or 0)
+        self.hbin_end = min(self.size, HIVE_BIN_BASE_OFFSET + hbin_size) if hbin_size else self.size
+        self.minor_version = int(self.header.get("minor_version") or 0)
+        self.errors: Counter[str] = Counter()
+        self._root: NativeRegistryKey | None = None
+
+    @classmethod
+    def open(cls, path: Path) -> NativeRegistryHive | None:
+        import mmap
+
+        try:
+            handle = path.open("rb")
+        except OSError:
+            return None
+        try:
+            head = handle.read(4096)
+            if len(head) < 512 or not head.startswith(REGISTRY_HIVE_SIGNATURE):
+                handle.close()
+                return None
+            handle.seek(0)
+            try:
+                data: object = mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ)
+            except (OSError, ValueError):
+                data = handle.read()
+        except OSError:
+            handle.close()
+            return None
+        return cls(data, path=path, handle=handle)
+
+    @classmethod
+    def from_bytes(cls, blob: bytes) -> NativeRegistryHive | None:
+        if len(blob) < 512 or not blob.startswith(REGISTRY_HIVE_SIGNATURE):
+            return None
+        return cls(blob)
+
+    def close(self) -> None:
+        closer = getattr(self._data, "close", None)
+        if callable(closer):
+            closer()
+        if self._handle is not None:
+            self._handle.close()  # type: ignore[attr-defined]
+            self._handle = None
+
+    def __enter__(self) -> NativeRegistryHive:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
+    # -- primitive reads -------------------------------------------------
+    def _u16(self, offset: int) -> int:
+        return int.from_bytes(self._data[offset : offset + 2], "little")  # type: ignore[index]
+
+    def _u32(self, offset: int) -> int:
+        return int.from_bytes(self._data[offset : offset + 4], "little")  # type: ignore[index]
+
+    def _u64(self, offset: int) -> int:
+        return int.from_bytes(self._data[offset : offset + 8], "little")  # type: ignore[index]
+
+    def _cell(self, relative_offset: int) -> tuple[int, int, bool] | None:
+        """Return (data_start, data_length, allocated) for a cell, or None."""
+        if relative_offset in (0, 0xFFFFFFFF):
+            return None
+        if relative_offset % 8:
+            self.errors["misaligned-cell-offset"] += 1
+            return None
+        offset = HIVE_BIN_BASE_OFFSET + relative_offset
+        if offset + 8 > self.hbin_end:
+            self.errors["cell-offset-out-of-bounds"] += 1
+            return None
+        raw_size = int.from_bytes(self._data[offset : offset + 4], "little", signed=True)  # type: ignore[index]
+        size = abs(raw_size)
+        if size < 8 or offset + size > self.hbin_end:
+            self.errors["cell-size-invalid"] += 1
+            return None
+        if raw_size > 0:
+            self.errors["free-cell-referenced"] += 1
+        return offset + 4, size - 4, raw_size < 0
+
+    # -- keys -------------------------------------------------------------
+    @property
+    def root(self) -> NativeRegistryKey | None:
+        if self._root is None:
+            self._root = self.key_at(int(self.header.get("root_cell_offset") or 0))
+        return self._root
+
+    def key_at(self, relative_offset: int) -> NativeRegistryKey | None:
+        cell = self._cell(relative_offset)
+        if cell is None:
+            return None
+        start, length, allocated = cell
+        if length < 76 or self._data[start : start + 2] != b"nk":  # type: ignore[index]
+            self.errors["nk-signature-mismatch"] += 1
+            return None
+        flags = self._u16(start + 2)
+        name_length = self._u16(start + 72)
+        raw_name = bytes(self._data[start + 76 : start + 76 + min(name_length, length - 76)])  # type: ignore[index]
+        name, encoding = decode_native_registry_name(raw_name, compressed=bool(flags & REGF_KEY_COMP_NAME))
+        return NativeRegistryKey(
+            offset=relative_offset,
+            name=name,
+            name_encoding=encoding,
+            flags=flags,
+            last_written_filetime=self._u64(start + 4),
+            parent_offset=self._u32(start + 16),
+            subkey_count=self._u32(start + 20),
+            subkey_list_offset=self._u32(start + 28),
+            value_count=self._u32(start + 36),
+            value_list_offset=self._u32(start + 40),
+            allocated=allocated,
+        )
+
+    def _subkey_offsets(self, list_offset: int, depth: int = 0) -> list[int]:
+        if depth > REGF_MAX_SUBKEY_LIST_DEPTH:
+            self.errors["subkey-list-depth-exceeded"] += 1
+            return []
+        cell = self._cell(list_offset)
+        if cell is None:
+            return []
+        start, length, _allocated = cell
+        signature = bytes(self._data[start : start + 2])  # type: ignore[index]
+        count = self._u16(start + 2)
+        offsets: list[int] = []
+        if signature in (b"lf", b"lh"):
+            for index in range(min(count, (length - 4) // 8)):
+                offsets.append(self._u32(start + 4 + index * 8))
+        elif signature == b"li":
+            for index in range(min(count, (length - 4) // 4)):
+                offsets.append(self._u32(start + 4 + index * 4))
+        elif signature == b"ri":
+            for index in range(min(count, (length - 4) // 4)):
+                offsets.extend(self._subkey_offsets(self._u32(start + 4 + index * 4), depth + 1))
+        else:
+            self.errors["subkey-list-signature-unknown"] += 1
+        return offsets
+
+    def subkeys(self, key: NativeRegistryKey) -> list[NativeRegistryKey]:
+        if not key.subkey_count:
+            return []
+        children: list[NativeRegistryKey] = []
+        for offset in self._subkey_offsets(int(key.subkey_list_offset or 0)):
+            child = self.key_at(offset)
+            if child is not None:
+                children.append(child)
+        if len(children) != key.subkey_count:
+            self.errors["subkey-count-mismatch"] += 1
+        return children
+
+    def subkey(self, key: NativeRegistryKey, name: str) -> NativeRegistryKey | None:
+        wanted = name.casefold()
+        for child in self.subkeys(key):
+            if str(child.name).casefold() == wanted:
+                return child
+        return None
+
+    def open_key(self, relative_path: str, *, start: NativeRegistryKey | None = None) -> NativeRegistryKey | None:
+        current = start or self.root
+        for part in [segment for segment in relative_path.replace("/", "\\").split("\\") if segment]:
+            if current is None:
+                return None
+            current = self.subkey(current, part)
+        return current
+
+    def iter_keys(
+        self,
+        start: NativeRegistryKey | None = None,
+        components: tuple[str, ...] = (),
+    ) -> Iterable[tuple[tuple[str, ...], NativeRegistryKey]]:
+        """Depth-first walk yielding (root-relative name components, key)."""
+        first = start or self.root
+        if first is None:
+            return
+        visited: set[int] = set()
+        stack: list[tuple[tuple[str, ...], NativeRegistryKey]] = [(components, first)]
+        while stack:
+            parts, key = stack.pop()
+            offset = int(key.offset or 0)
+            if offset in visited:
+                self.errors["key-cycle-skipped"] += 1
+                continue
+            visited.add(offset)
+            yield parts, key
+            children = self.subkeys(key)
+            for child in reversed(children):
+                stack.append(((*parts, str(child.name)), child))
+
+    # -- values -----------------------------------------------------------
+    def values(self, key: NativeRegistryKey) -> list[NativeRegistryValue]:
+        count = int(key.value_count or 0)
+        if not count:
+            return []
+        cell = self._cell(int(key.value_list_offset or 0))
+        if cell is None:
+            return []
+        start, length, _allocated = cell
+        result: list[NativeRegistryValue] = []
+        for index in range(min(count, length // 4)):
+            value = self.value_at(self._u32(start + index * 4))
+            if value is not None:
+                result.append(value)
+        return result
+
+    def value_at(self, relative_offset: int) -> NativeRegistryValue | None:
+        cell = self._cell(relative_offset)
+        if cell is None:
+            return None
+        start, length, _allocated = cell
+        if length < 20 or self._data[start : start + 2] != b"vk":  # type: ignore[index]
+            self.errors["vk-signature-mismatch"] += 1
+            return None
+        name_length = self._u16(start + 2)
+        raw_size = self._u32(start + 4)
+        flags = self._u16(start + 16)
+        raw_name = bytes(self._data[start + 20 : start + 20 + min(name_length, length - 20)])  # type: ignore[index]
+        name, encoding = decode_native_registry_name(raw_name, compressed=bool(flags & REGF_VALUE_COMP_NAME))
+        return NativeRegistryValue(
+            offset=relative_offset,
+            name=name,
+            name_encoding=encoding,
+            value_type=self._u32(start + 12),
+            data_size=raw_size & 0x7FFFFFFF,
+            data_offset=self._u32(start + 8),
+            inline=bool(raw_size & 0x80000000),
+            flags=flags,
+        )
+
+    def value(self, key: NativeRegistryKey, name: str) -> NativeRegistryValue | None:
+        wanted = name.casefold()
+        for value in self.values(key):
+            if str(value.name).casefold() == wanted:
+                return value
+        return None
+
+    def value_bytes(self, value: NativeRegistryValue) -> bytes:
+        size = int(value.data_size or 0)
+        if value.inline:
+            return int(value.data_offset or 0).to_bytes(4, "little")[: min(size, 4)]
+        if size <= 0:
+            return b""
+        cell = self._cell(int(value.data_offset or 0))
+        if cell is None:
+            return b""
+        start, length, _allocated = cell
+        if (
+            size > REGF_BIG_DATA_SEGMENT_SIZE
+            and self.minor_version >= 4
+            and self._data[start : start + 2] == b"db"  # type: ignore[index]
+        ):
+            segment_count = self._u16(start + 2)
+            list_cell = self._cell(self._u32(start + 4))
+            if list_cell is None:
+                return b""
+            list_start, list_length, _ = list_cell
+            parts: list[bytes] = []
+            remaining = size
+            for index in range(min(segment_count, list_length // 4)):
+                segment = self._cell(self._u32(list_start + index * 4))
+                if segment is None:
+                    self.errors["big-data-segment-missing"] += 1
+                    break
+                segment_start, segment_length, _ = segment
+                take = min(remaining, segment_length, REGF_BIG_DATA_SEGMENT_SIZE)
+                parts.append(bytes(self._data[segment_start : segment_start + take]))  # type: ignore[index]
+                remaining -= take
+                if remaining <= 0:
+                    break
+            return b"".join(parts)
+        return bytes(self._data[start : start + min(size, length)])  # type: ignore[index]
+
+    def value_data(self, value: NativeRegistryValue) -> object:
+        return decode_registry_value_data(int(value.value_type or 0), self.value_bytes(value))
+
+    def values_dict(self, key: NativeRegistryKey) -> dict[str, object]:
+        return {str(value.name): self.value_data(value) for value in self.values(key)}
+
+
+def decode_native_registry_name(raw: bytes, *, compressed: bool) -> tuple[str, str]:
+    if compressed:
+        return raw.decode("latin-1"), "latin-1"
+    return raw.decode("utf-16-le", errors="replace"), "utf-16le"
+
+
+def decode_registry_value_data(value_type: int, raw: bytes) -> object:
+    if value_type in (1, 2, 6):
+        return decode_registry_sz(raw)
+    if value_type == 7:
+        text = raw[: len(raw) - (len(raw) % 2)].decode("utf-16-le", errors="replace")
+        return [item for item in text.split("\x00") if item]
+    if value_type == 4:
+        return int.from_bytes(raw[:4], "little")
+    if value_type == 5:
+        return int.from_bytes(raw[:4], "big")
+    if value_type == 11:
+        return int.from_bytes(raw[:8], "little")
+    return raw
+
+
+def decode_registry_sz(raw: bytes) -> str:
+    even = raw[: len(raw) - (len(raw) % 2)]
+    for index in range(0, len(even), 2):
+        if even[index : index + 2] == b"\x00\x00":
+            even = even[:index]
+            break
+    return even.decode("utf-16-le", errors="replace")
+
+
+def registry_value_text(value: object) -> str:
+    if isinstance(value, bytes):
+        return value.hex()
+    if isinstance(value, list):
+        return "\n".join(str(item) for item in value)
+    return str(value)
+
+
+# ---------------------------------------------------------------------------
+# Hive mount resolution (HKLM\SYSTEM, HKU\<SID>, HKU\<SID>_Classes ...).
+# ---------------------------------------------------------------------------
+
+
+def find_child_case_insensitive(directory: Path, *names: str) -> Path | None:
+    current = directory
+    for name in names:
+        try:
+            match = next((child for child in current.iterdir() if child.name.casefold() == name.casefold()), None)
+        except OSError:
+            return None
+        if match is None:
+            return None
+        current = match
+    return current
+
+
+def registry_root_key_name(path: Path) -> str:
+    hive = NativeRegistryHive.open(path)
+    if hive is None:
+        return ""
+    try:
+        root = hive.root
+        return str(root.name) if root is not None else ""
+    finally:
+        hive.close()
+
+
+class RegistryCollectionContext:
+    """Per-collection cache: profile folder -> SID (UsrClass root name / ProfileList)."""
+
+    def __init__(self, root: Path | None) -> None:
+        self.root = root
+        self._profile_list: dict[str, str] | None = None
+
+    def _profile_list_sids(self) -> dict[str, str]:
+        if self._profile_list is not None:
+            return self._profile_list
+        self._profile_list = {}
+        if self.root is None:
+            return self._profile_list
+        software = find_child_case_insensitive(self.root, "Windows", "System32", "config", "SOFTWARE")
+        if software is None or not software.is_file():
+            return self._profile_list
+        hive = NativeRegistryHive.open(software)
+        if hive is None:
+            return self._profile_list
+        try:
+            profile_list = hive.open_key(r"Microsoft\Windows NT\CurrentVersion\ProfileList")
+            for key in hive.subkeys(profile_list) if profile_list is not None else []:
+                value = hive.value(key, "ProfileImagePath")
+                image = str(hive.value_data(value)) if value is not None else ""
+                folder = image.replace("/", "\\").rstrip("\\").rsplit("\\", 1)[-1]
+                if folder and REGISTRY_SID_PATTERN.match(str(key.name)):
+                    self._profile_list[folder.casefold()] = str(key.name)
+        finally:
+            hive.close()
+        return self._profile_list
+
+    def user_sid_for_hive(self, path: Path, root_name: str = "") -> tuple[str, str]:
+        name = path.name.upper()
+        if name == "USRCLASS.DAT":
+            if root_name.lower().endswith("_classes") and REGISTRY_SID_PATTERN.match(root_name[: -len("_classes")]):
+                return root_name[: -len("_classes")], "usrclass-root-key-name"
+        elif name == "NTUSER.DAT":
+            profile = path.parent
+            usrclass = find_child_case_insensitive(profile, "AppData", "Local", "Microsoft", "Windows", "UsrClass.dat")
+            if usrclass is not None and usrclass.is_file():
+                classes_root = registry_root_key_name(usrclass)
+                if classes_root.lower().endswith("_classes") and REGISTRY_SID_PATTERN.match(classes_root[:-8]):
+                    return classes_root[:-8], "sibling-usrclass-root-key-name"
+        else:
+            return "", ""
+        folder = registry_profile_folder(path)
+        sid = self._profile_list_sids().get(folder.casefold(), "") if folder else ""
+        return (sid, "software-profilelist") if sid else ("", "")
+
+
+def registry_profile_folder(path: Path) -> str:
+    """Profile folder name for Users\\<name>\\NTUSER.DAT or ...\\<name>\\AppData\\...\\UsrClass.dat."""
+    parents = list(path.parents)
+    index = 0 if path.name.upper() == "NTUSER.DAT" else 4
+    if index and [part.name.casefold() for part in parents[:4]] != ["windows", "microsoft", "local", "appdata"]:
+        return ""
+    if len(parents) > index + 1 and parents[index + 1].name.casefold() == "users":
+        return parents[index].name
+    return ""
+
+
+def registry_hive_mount(path: Path, hive: NativeRegistryHive, context: RegistryCollectionContext | None) -> dict[str, str]:
+    """Logical mount for root-relative key paths; the root key name is never repeated."""
+    root = hive.root
+    root_name = str(root.name) if root is not None else ""
+    upper = path.name.upper()
+    sid, sid_source = ("", "")
+    if upper in {"NTUSER.DAT", "USRCLASS.DAT"}:
+        sid, sid_source = (context or RegistryCollectionContext(None)).user_sid_for_hive(path, root_name)
+    if upper in REGISTRY_MACHINE_MOUNTS:
+        mount = REGISTRY_MACHINE_MOUNTS[upper]
+    elif upper == "NTUSER.DAT":
+        profile = registry_profile_folder(path)
+        mount = f"HKU\\{sid}" if sid else (f"HKU\\{profile}" if profile else "HKCU")
+    elif upper == "USRCLASS.DAT":
+        profile = registry_profile_folder(path)
+        if sid:
+            mount = f"HKU\\{sid}_Classes"
+        else:
+            mount = f"HKU\\{profile}_Classes" if profile else "HKCU\\Software\\Classes"
+    else:
+        mount = path.name
+    return {"mount": mount, "user_sid": sid, "user_sid_source": sid_source, "root_key_name": root_name}
+
+
+def candidate_native_registry_hive_paths(root: Path) -> Iterable[Path]:
+    return candidate_registry_hive_paths(root, names=REGISTRY_NATIVE_HIVE_NAMES)
+
+
+# ---------------------------------------------------------------------------
+# Transaction log disclosure (detect only; never replayed).
+# ---------------------------------------------------------------------------
+
+
+def parse_registry_transaction_log_entries(path: Path) -> dict[str, object]:
+    """Read the HvLE entry headers (sequence numbers) of a new-format log."""
+    sequences: list[int] = []
+    try:
+        with path.open("rb") as handle:
+            handle.seek(512)
+            offset = 512
+            while True:
+                head = handle.read(40)
+                if len(head) < 40 or head[:4] != b"HvLE":
+                    break
+                size = int.from_bytes(head[4:8], "little")
+                if size < 40 or size % 512:
+                    break
+                sequences.append(int.from_bytes(head[12:16], "little"))
+                offset += size
+                handle.seek(offset)
+    except OSError:
+        return {"log_entry_count": 0, "log_entry_sequences": []}
+    return {
+        "log_entry_count": len(sequences),
+        "log_entry_sequence_min": min(sequences) if sequences else 0,
+        "log_entry_sequence_max": max(sequences) if sequences else 0,
+        "log_entry_sequences": sequences,
+    }
+
+
+def registry_transaction_disclosure(evidence: Mapping[str, object]) -> dict[str, str]:
+    newer = int(evidence.get("newer_log_entry_count") or 0)
+    status = str(evidence.get("status") or "unknown")
+    if newer:
+        low, high = evidence.get("newer_sequence_range") or (0, 0)  # type: ignore[misc]
+        message = (
+            f"트랜잭션 로그(LOG1/LOG2)에 하이브 기록보다 새로운 시퀀스 {newer}개({low}–{high})가 있으나 "
+            "재생(replay)하지 않았습니다. 최근 키·값 변경이 결과에 반영되지 않았을 수 있습니다."
+        )
+        return {"status": "newer-sequence-not-replayed", "message_ko": message}
+    if status == "present-not-replayed":
+        return {
+            "status": status,
+            "message_ko": "트랜잭션 로그가 있으나 하이브보다 새로운 시퀀스는 없습니다(재생하지 않음).",
+        }
+    return {"status": status, "message_ko": "인접 트랜잭션 로그 없음 — 하이브 파일 상태 그대로 해석했습니다."}
+
+
+# ---------------------------------------------------------------------------
+# Semantic plugins over the native reader.
+# ---------------------------------------------------------------------------
+
+SERVICE_START_LABELS = {0: "부팅(Boot)", 1: "시스템(System)", 2: "자동(Auto)", 3: "수동(Manual)", 4: "사용 안 함(Disabled)"}
+SERVICE_TYPE_LABELS = {
+    0x1: "커널 드라이버",
+    0x2: "파일 시스템 드라이버",
+    0x4: "어댑터",
+    0x8: "인식기 드라이버",
+    0x10: "독립 프로세스 서비스",
+    0x20: "공유 프로세스 서비스",
+    0x50: "사용자 독립 프로세스 서비스",
+    0x60: "사용자 공유 프로세스 서비스",
+    0x110: "대화형 독립 프로세스 서비스",
+    0x120: "대화형 공유 프로세스 서비스",
+}
+USB_DEVICE_PROPERTY_GUID = "{83da6326-97a6-4088-9453-a1923f573b29}"
+USB_DEVICE_PROPERTY_FIELDS = {
+    0x64: "first_install_at",
+    0x65: "install_at",
+    0x66: "last_arrival_at",
+    0x67: "last_removal_at",
+}
+DEVICE_CLASS_DISK = "{53f56307-b6bf-11d0-94f2-00a0c91efb8b}"
+DEVICE_CLASS_VOLUME = "{53f5630d-b6bf-11d0-94f2-00a0c91efb8b}"
+TIME_ZONE_KO_LABELS = {
+    "Korea Standard Time": "대한민국 표준시(KST)",
+    "Tokyo Standard Time": "일본 표준시(JST)",
+    "China Standard Time": "중국 표준시(CST)",
+    "UTC": "협정 세계시(UTC)",
+    "Pacific Standard Time": "미국 태평양 표준시",
+}
+RUN_KEY_SUFFIXES = (
+    r"Microsoft\Windows\CurrentVersion\Run",
+    r"Microsoft\Windows\CurrentVersion\RunOnce",
+    r"Microsoft\Windows\CurrentVersion\RunOnceEx",
+    r"Microsoft\Windows\CurrentVersion\RunServices",
+    r"Microsoft\Windows\CurrentVersion\RunServicesOnce",
+    r"Microsoft\Windows\CurrentVersion\Policies\Explorer\Run",
+    r"Wow6432Node\Microsoft\Windows\CurrentVersion\Run",
+    r"Wow6432Node\Microsoft\Windows\CurrentVersion\RunOnce",
+)
+WINLOGON_PERSISTENCE_VALUES = ("Shell", "Userinit", "Taskman", "AppSetup", "GinaDLL", "VmApplet")
+WINDOWS_PERSISTENCE_VALUES = ("Load", "Run", "AppInit_DLLs")
+USER_ACTIVITY_KO_LABELS = {
+    "wordwheel-query": "탐색기 검색어(WordWheelQuery)",
+    "recent-document": "최근 문서(RecentDocs)",
+    "typed-path": "탐색기 주소 입력(TypedPaths)",
+    "typed-url": "IE/Edge 주소 입력(TypedURLs)",
+    "run-dialog-mru": "실행 창 기록(RunMRU)",
+    "file-dialog-mru": "열기/저장 대화상자(OpenSavePidlMRU)",
+    "file-dialog-folder-mru": "대화상자 최근 폴더(LastVisitedPidlMRU)",
+}
+
+
+class NativeHiveRowContext:
+    def __init__(
+        self,
+        path: Path,
+        hive: NativeRegistryHive,
+        mount: Mapping[str, str],
+        source_hashes: Mapping[str, str],
+        transaction_disclosure: Mapping[str, str],
+    ) -> None:
+        self.path = path
+        self.source_path = str(path.resolve())
+        self.hive = hive
+        self.mount = str(mount.get("mount") or path.name)
+        self.user_sid = str(mount.get("user_sid") or "")
+        self.source_hashes = dict(source_hashes)
+        self.transaction_disclosure = dict(transaction_disclosure)
+        self.hive_hint = hive_hint_from_path(path)
+
+    def key_path(self, relative: str) -> str:
+        relative = relative.strip("\\")
+        return f"{self.mount}\\{relative}" if relative else self.mount
+
+    def row(
+        self,
+        artifact_type: str,
+        *,
+        label: str,
+        relative_key: str,
+        key: NativeRegistryKey | None,
+        fields: Mapping[str, object],
+        timestamp: str = "",
+        timestamp_label: str = "",
+        raw_preview: str = "",
+        risk_flags: Sequence[str] = (),
+    ) -> ArtifactRecord:
+        key_last_written_at = key.last_written_at if key is not None else ""
+        details: dict[str, object] = {
+            "parser": "windows-registry-native-hive-plugin",
+            "parser_version": PARSER_VERSION,
+            "coverage_status": "native-hive-decoded",
+            "reportability": "review",
+            "label": label,
+            "source_path": self.source_path,
+            "source_format": "registry-hive",
+            "source_hashes": self.source_hashes,
+            "hive_name": self.path.name,
+            "hive_hint": self.hive_hint,
+            "hive_mount": self.mount,
+            "user_sid": self.user_sid,
+            "key_path": self.key_path(relative_key),
+            "key": self.key_path(relative_key),
+            "key_last_written_at": key_last_written_at,
+            "key_cell_offset": HIVE_BIN_BASE_OFFSET + int(key.offset or 0) if key is not None else 0,
+            **dict(fields),
+            "timestamp": timestamp,
+            "timestamp_label": timestamp_label if timestamp else "",
+            "transaction_log_status": self.transaction_disclosure.get("status", ""),
+            "risk_flags": sorted(set(risk_flags)),
+            "risk_score": min(100, 25 * len(set(risk_flags))),
+            "raw_preview": (raw_preview or self.key_path(relative_key))[:2000],
+        }
+        return ArtifactRecord(
+            provider=WindowsRegistryProvider.name,
+            artifact_type=artifact_type,
+            path=self.source_path,
+            supported=True,
+            details=details,
+        )
+
+
+def registry_signed_dword(value: object) -> int | None:
+    if not isinstance(value, int):
+        return None
+    return value - 0x100000000 if value & 0x80000000 else value
+
+
+def registry_unix_time_iso(value: object) -> str:
+    if not isinstance(value, int) or value <= 0:
+        return ""
+    try:
+        return dt.datetime.fromtimestamp(value, dt.timezone.utc).isoformat()
+    except (OverflowError, OSError, ValueError):
+        return ""
+
+
+def registry_filetime_from_bytes(raw: object) -> str:
+    if isinstance(raw, int):
+        return filetime_to_iso_ticks(raw)
+    if isinstance(raw, (bytes, bytearray)) and len(raw) >= 8:
+        return filetime_to_iso_ticks(int.from_bytes(raw[:8], "little"))
+    return ""
+
+
+def registry_text(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        return ", ".join(str(item) for item in value)
+    if isinstance(value, (bytes, bytearray)):
+        return decode_registry_sz(bytes(value))
+    return str(value)
+
+
+def registry_native_semantic_records(context: NativeHiveRowContext) -> Iterable[ArtifactRecord]:
+    upper = context.path.name.upper()
+    if upper == "SYSTEM":
+        yield from system_hive_records(context)
+    elif upper == "SOFTWARE":
+        yield from software_hive_records(context)
+    elif upper == "NTUSER.DAT":
+        yield from ntuser_hive_records(context)
+
+
+def resolve_current_control_set(hive: NativeRegistryHive) -> tuple[str, dict[str, object]]:
+    select = hive.open_key("Select")
+    values = hive.values_dict(select) if select is not None else {}
+    current = values.get("Current")
+    if isinstance(current, int) and current > 0:
+        name = f"ControlSet{current:03d}"
+        if hive.open_key(name) is not None:
+            return name, {"source": "Select\\Current", **{str(k): v for k, v in values.items() if isinstance(v, int)}}
+    root = hive.root
+    for child in hive.subkeys(root) if root is not None else []:
+        if str(child.name).lower().startswith("controlset"):
+            return str(child.name), {"source": "first-controlset-fallback"}
+    return "", {"source": "not-found"}
+
+
+def system_hive_records(context: NativeHiveRowContext) -> Iterable[ArtifactRecord]:
+    hive = context.hive
+    ccs, select_info = resolve_current_control_set(hive)
+    select_key = hive.open_key("Select")
+    shutdown_key = hive.open_key(f"{ccs}\\Control\\Windows") if ccs else None
+    shutdown_value = hive.value(shutdown_key, "ShutdownTime") if shutdown_key is not None else None
+    shutdown_at = registry_filetime_from_bytes(hive.value_bytes(shutdown_value)) if shutdown_value is not None else ""
+    yield context.row(
+        "windows-control-set",
+        label="현재 컨트롤 세트",
+        relative_key="Select",
+        key=select_key,
+        fields={
+            "current_control_set": ccs,
+            "resolution_source": select_info.get("source", ""),
+            "select_values": {k: v for k, v in select_info.items() if k != "source"},
+            "last_shutdown_at": shutdown_at,
+        },
+        timestamp=shutdown_at,
+        timestamp_label="shutdown",
+        raw_preview=f"CurrentControlSet = {ccs}" if ccs else "CurrentControlSet 미확인",
+    )
+    if not ccs:
+        return
+    name_key = hive.open_key(f"{ccs}\\Control\\ComputerName\\ComputerName")
+    active_key = hive.open_key(f"{ccs}\\Control\\ComputerName\\ActiveComputerName")
+    tcpip_key = hive.open_key(f"{ccs}\\Services\\Tcpip\\Parameters")
+    computer_name = registry_text(hive.values_dict(name_key).get("ComputerName")) if name_key is not None else ""
+    tcpip = hive.values_dict(tcpip_key) if tcpip_key is not None else {}
+    if name_key is not None or active_key is not None:
+        yield context.row(
+            "windows-computer-name",
+            label="컴퓨터 이름",
+            relative_key=f"{ccs}\\Control\\ComputerName\\ComputerName",
+            key=name_key,
+            fields={
+                "computer_name": computer_name,
+                "active_computer_name": registry_text(hive.values_dict(active_key).get("ComputerName"))
+                if active_key is not None
+                else "",
+                "tcpip_hostname": registry_text(tcpip.get("Hostname")),
+                "tcpip_domain": registry_text(tcpip.get("Domain")),
+                "current_control_set": ccs,
+            },
+            raw_preview=f"컴퓨터 이름: {computer_name}",
+        )
+    yield from timezone_records(context, ccs)
+    yield from service_records(context, ccs)
+    yield from network_interface_records(context, ccs)
+    yield from usb_and_mounted_device_records(context, ccs)
+
+
+def timezone_records(context: NativeHiveRowContext, ccs: str) -> Iterable[ArtifactRecord]:
+    hive = context.hive
+    relative = f"{ccs}\\Control\\TimeZoneInformation"
+    key = hive.open_key(relative)
+    if key is None:
+        return
+    values = hive.values_dict(key)
+    bias = registry_signed_dword(values.get("Bias"))
+    active_bias = registry_signed_dword(values.get("ActiveTimeBias"))
+    offset_minutes = -(active_bias if active_bias is not None else (bias or 0))
+    sign = "+" if offset_minutes >= 0 else "-"
+    utc_offset = f"{sign}{abs(offset_minutes) // 60:02d}:{abs(offset_minutes) % 60:02d}"
+    key_name = registry_text(values.get("TimeZoneKeyName"))
+    yield context.row(
+        "windows-timezone",
+        label="시간대 설정",
+        relative_key=relative,
+        key=key,
+        fields={
+            "time_zone_key_name": key_name,
+            "time_zone_label_ko": TIME_ZONE_KO_LABELS.get(key_name, key_name),
+            "standard_name": registry_text(values.get("StandardName")),
+            "daylight_name": registry_text(values.get("DaylightName")),
+            "bias_minutes": bias,
+            "active_time_bias_minutes": active_bias,
+            "standard_bias_minutes": registry_signed_dword(values.get("StandardBias")),
+            "daylight_bias_minutes": registry_signed_dword(values.get("DaylightBias")),
+            "dynamic_daylight_time_disabled": values.get("DynamicDaylightTimeDisabled"),
+            "utc_offset": utc_offset,
+            "utc_offset_minutes": offset_minutes,
+            "bias_semantics": "Bias = UTC − 현지시각(분). UTC 오프셋은 −ActiveTimeBias(없으면 −Bias)",
+        },
+        raw_preview=f"시간대: {key_name} (UTC{utc_offset})",
+    )
+
+
+def service_records(context: NativeHiveRowContext, ccs: str) -> Iterable[ArtifactRecord]:
+    hive = context.hive
+    services = hive.open_key(f"{ccs}\\Services")
+    if services is None:
+        return
+    for service in hive.subkeys(services):
+        values = hive.values_dict(service)
+        parameters = hive.subkey(service, "Parameters")
+        service_dll = registry_text(values.get("ServiceDll"))
+        if not service_dll and parameters is not None:
+            service_dll = registry_text(hive.values_dict(parameters).get("ServiceDll"))
+        start = values.get("Start") if isinstance(values.get("Start"), int) else None
+        service_type = values.get("Type") if isinstance(values.get("Type"), int) else None
+        image_path = registry_text(values.get("ImagePath"))
+        flags = service_risk_flags_native(image_path, service_dll, start)
+        name = str(service.name)
+        yield context.row(
+            "windows-service-config",
+            label="서비스 설정",
+            relative_key=f"{ccs}\\Services\\{name}",
+            key=service,
+            fields={
+                "service_name": name,
+                "display_name": registry_text(values.get("DisplayName")),
+                "image_path": image_path,
+                "service_dll": service_dll,
+                "start": start,
+                "start_label": SERVICE_START_LABELS.get(start, "") if start is not None else "",
+                "service_type": service_type,
+                "service_type_label": SERVICE_TYPE_LABELS.get(service_type, "") if service_type is not None else "",
+                "object_name": registry_text(values.get("ObjectName")),
+                "group": registry_text(values.get("Group")),
+                "description": registry_text(values.get("Description")),
+                "control_set": ccs,
+                "autostart": start in (0, 1, 2),
+            },
+            timestamp=service.last_written_at,
+            timestamp_label="last_written",
+            raw_preview=f"{name}: {image_path or service_dll}",
+            risk_flags=flags,
+        )
+
+
+def service_risk_flags_native(image_path: str, service_dll: str, start: int | None) -> list[str]:
+    flags = []
+    for candidate in (image_path, service_dll):
+        lowered = candidate.lower()
+        if not lowered:
+            continue
+        flags.extend(suspicious_value_flags(candidate))
+        system_like = any(
+            token in lowered
+            for token in ("\\windows\\", "system32\\", "\\systemroot\\", "%systemroot%", "\\program files", "\\driverstore\\")
+        )
+        if not system_like and start in (0, 1, 2):
+            flags.append("autostart-service-outside-system-dirs")
+    return sorted(set(flags))
+
+
+def network_interface_records(context: NativeHiveRowContext, ccs: str) -> Iterable[ArtifactRecord]:
+    hive = context.hive
+    interfaces = hive.open_key(f"{ccs}\\Services\\Tcpip\\Parameters\\Interfaces")
+    if interfaces is None:
+        return
+    connection_names: dict[str, str] = {}
+    network = hive.open_key(f"{ccs}\\Control\\Network\\{{4D36E972-E325-11CE-BFC1-08002BE10318}}")
+    for adapter in hive.subkeys(network) if network is not None else []:
+        connection = hive.subkey(adapter, "Connection")
+        if connection is not None:
+            connection_names[str(adapter.name).lower()] = registry_text(hive.values_dict(connection).get("Name"))
+    for interface in hive.subkeys(interfaces):
+        values = hive.values_dict(interface)
+        name = str(interface.name)
+        fields = {
+            "interface_guid": name,
+            "connection_name": connection_names.get(name.lower(), ""),
+            "dhcp_enabled": bool(values.get("EnableDHCP")) if isinstance(values.get("EnableDHCP"), int) else None,
+            "ip_address": registry_text(values.get("IPAddress")),
+            "subnet_mask": registry_text(values.get("SubnetMask")),
+            "default_gateway": registry_text(values.get("DefaultGateway")),
+            "name_server": registry_text(values.get("NameServer")),
+            "domain": registry_text(values.get("Domain")),
+            "dhcp_ip_address": registry_text(values.get("DhcpIPAddress")),
+            "dhcp_subnet_mask": registry_text(values.get("DhcpSubnetMask")),
+            "dhcp_server": registry_text(values.get("DhcpServer")),
+            "dhcp_default_gateway": registry_text(values.get("DhcpDefaultGateway")),
+            "dhcp_name_server": registry_text(values.get("DhcpNameServer")),
+            "dhcp_domain": registry_text(values.get("DhcpDomain")),
+            "lease_obtained_at": registry_unix_time_iso(values.get("LeaseObtainedTime")),
+            "lease_terminates_at": registry_unix_time_iso(values.get("LeaseTerminatesTime")),
+        }
+        address = fields["ip_address"] or fields["dhcp_ip_address"]
+        yield context.row(
+            "windows-network-interface",
+            label="네트워크 인터페이스",
+            relative_key=f"{ccs}\\Services\\Tcpip\\Parameters\\Interfaces\\{name}",
+            key=interface,
+            fields=fields,
+            timestamp=str(fields["lease_obtained_at"] or ""),
+            timestamp_label="dhcp_lease_obtained",
+            raw_preview=f"{name} {address}".strip(),
+        )
+
+
+def parse_usbstor_device_class(name: str) -> dict[str, str]:
+    parts = {}
+    for token in name.split("&"):
+        prefix, _, rest = token.partition("_")
+        if prefix in {"Ven", "Prod", "Rev"}:
+            parts[prefix.lower()] = rest.replace("_", " ").strip()
+        elif not parts:
+            parts["device_type"] = token
+    return {
+        "device_type": parts.get("device_type", ""),
+        "vendor": parts.get("ven", ""),
+        "product": parts.get("prod", ""),
+        "revision": parts.get("rev", ""),
+    }
+
+
+def usb_device_property_times(hive: NativeRegistryHive, instance: NativeRegistryKey) -> dict[str, str]:
+    times: dict[str, str] = {}
+    properties = hive.subkey(instance, "Properties")
+    group = hive.subkey(properties, USB_DEVICE_PROPERTY_GUID) if properties is not None else None
+    for prop in hive.subkeys(group) if group is not None else []:
+        try:
+            code = int(str(prop.name), 16)
+        except ValueError:
+            continue
+        field = USB_DEVICE_PROPERTY_FIELDS.get(code)
+        if field is None:
+            continue
+        candidates = [prop, *hive.subkeys(prop)]
+        for holder in candidates:
+            for value in hive.values(holder):
+                raw = hive.value_bytes(value)
+                if len(raw) == 8:
+                    times[field] = filetime_to_iso_ticks(int.from_bytes(raw, "little"))
+                    break
+            if field in times:
+                break
+    return times
+
+
+def decode_mounted_device_data(raw: bytes) -> dict[str, object]:
+    if raw.startswith(b"DMIO:ID:") and len(raw) >= 24:
+        import uuid
+
+        return {"data_kind": "gpt-partition-guid", "partition_guid": "{" + str(uuid.UUID(bytes_le=raw[8:24])) + "}"}
+    if len(raw) == 12:
+        return {
+            "data_kind": "mbr-disk-signature",
+            "disk_signature": raw[:4][::-1].hex(),
+            "partition_offset": int.from_bytes(raw[4:12], "little"),
+        }
+    text = decode_registry_sz(raw)
+    if text and all(ch.isprintable() for ch in text):
+        return {"data_kind": "device-path", "device_path": text}
+    return {"data_kind": "unknown", "data_hex": raw[:64].hex()}
+
+
+def usb_and_mounted_device_records(context: NativeHiveRowContext, ccs: str) -> Iterable[ArtifactRecord]:
+    hive = context.hive
+    mounted_key = hive.open_key("MountedDevices")
+    mounted: list[dict[str, object]] = []
+    for value in hive.values(mounted_key) if mounted_key is not None else []:
+        name = str(value.name)
+        decoded = decode_mounted_device_data(hive.value_bytes(value))
+        entry: dict[str, object] = {"mount_name": name, **decoded}
+        if name.lower().startswith("\\dosdevices\\"):
+            entry["mount_kind"] = "drive-letter"
+            entry["drive_letter"] = name[len("\\DosDevices\\") :]
+        elif name.lower().startswith("\\??\\volume"):
+            entry["mount_kind"] = "volume-guid"
+            entry["volume_guid"] = name[len("\\??\\Volume") :]
+        else:
+            entry["mount_kind"] = "other"
+        mounted.append(entry)
+    device_class_times: dict[str, list[tuple[str, str]]] = {}
+    for class_guid in (DEVICE_CLASS_DISK, DEVICE_CLASS_VOLUME):
+        class_key = hive.open_key(f"{ccs}\\Control\\DeviceClasses\\{class_guid}")
+        for interface in hive.subkeys(class_key) if class_key is not None else []:
+            device_class_times.setdefault(str(interface.name).lower(), []).append((class_guid, interface.last_written_at))
+    usb_by_serial: dict[str, dict[str, str]] = {}
+    usb_root = hive.open_key(f"{ccs}\\Enum\\USB")
+    for vid_pid in hive.subkeys(usb_root) if usb_root is not None else []:
+        vid_match = re.search(r"VID_([0-9A-Fa-f]{4})", str(vid_pid.name))
+        pid_match = re.search(r"PID_([0-9A-Fa-f]{4})", str(vid_pid.name))
+        for instance in hive.subkeys(vid_pid):
+            usb_by_serial.setdefault(
+                str(instance.name).lower(),
+                {
+                    "vid": vid_match.group(1).upper() if vid_match else "",
+                    "pid": pid_match.group(1).upper() if pid_match else "",
+                    "usb_key_path": context.key_path(f"{ccs}\\Enum\\USB\\{vid_pid.name}\\{instance.name}"),
+                    "usb_key_last_written_at": instance.last_written_at,
+                },
+            )
+    usbstor = hive.open_key(f"{ccs}\\Enum\\USBSTOR")
+    matched_mounts: dict[str, str] = {}
+    for device_class in hive.subkeys(usbstor) if usbstor is not None else []:
+        identity = parse_usbstor_device_class(str(device_class.name))
+        for instance in hive.subkeys(device_class):
+            serial = str(instance.name)
+            serial_core = re.sub(r"&\d+$", "", serial)
+            values = hive.values_dict(instance)
+            times = usb_device_property_times(hive, instance)
+            needle = f"#{serial.lower()}#"
+            drive_letters = sorted(
+                str(item.get("drive_letter"))
+                for item in mounted
+                if item.get("drive_letter") and needle in str(item.get("device_path") or "").lower()
+            )
+            volume_guids = sorted(
+                str(item.get("volume_guid"))
+                for item in mounted
+                if item.get("volume_guid") and needle in str(item.get("device_path") or "").lower()
+            )
+            for item in mounted:
+                if needle in str(item.get("device_path") or "").lower():
+                    matched_mounts[str(item["mount_name"])] = serial
+            interface_times = sorted(
+                {stamp for name, rows in device_class_times.items() if needle in name for _guid, stamp in rows}
+            )
+            usb = usb_by_serial.get(serial_core.lower(), {})
+            friendly = registry_text(values.get("FriendlyName"))
+            timestamp = times.get("last_arrival_at") or times.get("first_install_at") or ""
+            yield context.row(
+                "windows-usb-device",
+                label="USB 저장장치",
+                relative_key=f"{ccs}\\Enum\\USBSTOR\\{device_class.name}\\{serial}",
+                key=instance,
+                fields={
+                    **identity,
+                    "device_class_id": str(device_class.name),
+                    "serial_number": serial,
+                    "serial_is_os_generated": len(serial) > 1 and serial[1] == "&",
+                    "friendly_name": friendly,
+                    "container_id": registry_text(values.get("ContainerID")),
+                    "driver": registry_text(values.get("Driver")),
+                    "vid": usb.get("vid", ""),
+                    "pid": usb.get("pid", ""),
+                    "usb_key_path": usb.get("usb_key_path", ""),
+                    "usb_key_last_written_at": usb.get("usb_key_last_written_at", ""),
+                    "first_install_at": times.get("first_install_at", ""),
+                    "install_at": times.get("install_at", ""),
+                    "last_arrival_at": times.get("last_arrival_at", ""),
+                    "last_removal_at": times.get("last_removal_at", ""),
+                    "device_interface_last_written_at": interface_times,
+                    "drive_letters": drive_letters,
+                    "volume_guids": volume_guids,
+                    "timeline_events": [
+                        {"kind": field, "timestamp": times[field]}
+                        for field in ("first_install_at", "install_at", "last_arrival_at", "last_removal_at")
+                        if times.get(field)
+                    ],
+                    "control_set": ccs,
+                },
+                timestamp=timestamp,
+                timestamp_label="last_arrival" if times.get("last_arrival_at") else "first_install",
+                raw_preview=f"{friendly or device_class.name} [{serial}]",
+            )
+    for item in mounted:
+        name = str(item["mount_name"])
+        device_path = str(item.get("device_path") or "")
+        identity = {}
+        match = re.search(r"USBSTOR#([^#]+)#", device_path, re.IGNORECASE)
+        if match:
+            identity = parse_usbstor_device_class(match.group(1))
+        yield context.row(
+            "windows-mounted-device",
+            label="마운트된 장치",
+            relative_key="MountedDevices",
+            key=mounted_key,
+            fields={
+                **item,
+                "usb_serial_number": matched_mounts.get(name, ""),
+                "usb_vendor": identity.get("vendor", ""),
+                "usb_product": identity.get("product", ""),
+                "removable_usb": "usbstor#" in device_path.lower(),
+                "value_name": name,
+            },
+            raw_preview=f"{name} → {device_path or item.get('partition_guid') or item.get('disk_signature') or ''}",
+        )
+
+
+def software_hive_records(context: NativeHiveRowContext) -> Iterable[ArtifactRecord]:
+    hive = context.hive
+    version_key = hive.open_key(r"Microsoft\Windows NT\CurrentVersion")
+    if version_key is not None:
+        values = hive.values_dict(version_key)
+        yield context.row(
+            "windows-os-version",
+            label="운영체제 정보",
+            relative_key=r"Microsoft\Windows NT\CurrentVersion",
+            key=version_key,
+            fields={
+                "product_name": registry_text(values.get("ProductName")),
+                "display_version": registry_text(values.get("DisplayVersion")),
+                "edition_id": registry_text(values.get("EditionID")),
+                "current_build": registry_text(values.get("CurrentBuild") or values.get("CurrentBuildNumber")),
+                "ubr": values.get("UBR"),
+                "registered_owner": registry_text(values.get("RegisteredOwner")),
+                "registered_organization": registry_text(values.get("RegisteredOrganization")),
+                "install_date": registry_unix_time_iso(values.get("InstallDate")),
+                "install_time": registry_filetime_from_bytes(values.get("InstallTime")),
+            },
+            raw_preview=f"{registry_text(values.get('ProductName'))} {registry_text(values.get('DisplayVersion'))}",
+        )
+    profile_list = hive.open_key(r"Microsoft\Windows NT\CurrentVersion\ProfileList")
+    for profile in hive.subkeys(profile_list) if profile_list is not None else []:
+        values = hive.values_dict(profile)
+        high, low = values.get("LocalProfileLoadTimeHigh"), values.get("LocalProfileLoadTimeLow")
+        load_time = filetime_to_iso_ticks((high << 32) | low) if isinstance(high, int) and isinstance(low, int) else ""
+        yield context.row(
+            "windows-profile-list-entry",
+            label="사용자 프로필(ProfileList)",
+            relative_key=f"Microsoft\\Windows NT\\CurrentVersion\\ProfileList\\{profile.name}",
+            key=profile,
+            fields={
+                "sid": str(profile.name),
+                "profile_image_path": registry_text(values.get("ProfileImagePath")),
+                "state": values.get("State"),
+                "flags": values.get("Flags"),
+                "local_profile_load_time": load_time,
+            },
+            timestamp=load_time or profile.last_written_at,
+            timestamp_label="profile_load" if load_time else "last_written",
+            raw_preview=f"{profile.name} {registry_text(values.get('ProfileImagePath'))}",
+        )
+    yield from persistence_records(context, prefix="")
+    winlogon = hive.open_key(r"Microsoft\Windows NT\CurrentVersion\Winlogon")
+    if winlogon is not None:
+        yield from winlogon_records(context, r"Microsoft\Windows NT\CurrentVersion\Winlogon", winlogon)
+    for base in (r"Microsoft\Windows\CurrentVersion\Uninstall", r"Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall"):
+        yield from installed_program_records(context, base)
+
+
+def persistence_records(context: NativeHiveRowContext, *, prefix: str) -> Iterable[ArtifactRecord]:
+    hive = context.hive
+    for suffix in RUN_KEY_SUFFIXES:
+        relative = f"{prefix}{suffix}"
+        key = hive.open_key(relative)
+        if key is None:
+            continue
+        for value in hive.values(key):
+            command = registry_text(hive.value_data(value))
+            name = str(value.name) or "(default)"
+            yield context.row(
+                "registry-persistence-entry",
+                label="자동 실행(Run/RunOnce)",
+                relative_key=relative,
+                key=key,
+                fields={
+                    "persistence_category": suffix.rsplit("\\", 1)[-1],
+                    "value_name": name,
+                    "command": command,
+                    "executable_hint": executable_hint(command),
+                    "evidence_note": "자동 실행 등록은 실행 증거가 아닙니다(등록 사실).",
+                },
+                timestamp=key.last_written_at,
+                timestamp_label="last_written",
+                raw_preview=f"{name} = {command}",
+                risk_flags=suspicious_value_flags(command),
+            )
+
+
+def winlogon_records(context: NativeHiveRowContext, relative: str, key: NativeRegistryKey) -> Iterable[ArtifactRecord]:
+    values = context.hive.values_dict(key)
+    for name in WINLOGON_PERSISTENCE_VALUES:
+        if name not in values:
+            continue
+        command = registry_text(values[name])
+        yield context.row(
+            "registry-persistence-entry",
+            label="Winlogon 설정",
+            relative_key=relative,
+            key=key,
+            fields={
+                "persistence_category": "Winlogon",
+                "value_name": name,
+                "command": command,
+                "executable_hint": executable_hint(command),
+                "evidence_note": "Winlogon 값은 기본값(explorer.exe, userinit.exe)과 비교해 판단합니다.",
+            },
+            timestamp=key.last_written_at,
+            timestamp_label="last_written",
+            raw_preview=f"{name} = {command}",
+            risk_flags=suspicious_value_flags(command),
+        )
+
+
+def installed_program_records(context: NativeHiveRowContext, base: str) -> Iterable[ArtifactRecord]:
+    hive = context.hive
+    uninstall = hive.open_key(base)
+    for program in hive.subkeys(uninstall) if uninstall is not None else []:
+        values = hive.values_dict(program)
+        display_name = registry_text(values.get("DisplayName"))
+        yield context.row(
+            "windows-installed-program",
+            label="설치된 프로그램",
+            relative_key=f"{base}\\{program.name}",
+            key=program,
+            fields={
+                "program_key": str(program.name),
+                "display_name": display_name,
+                "display_version": registry_text(values.get("DisplayVersion")),
+                "publisher": registry_text(values.get("Publisher")),
+                "install_date": registry_text(values.get("InstallDate")),
+                "install_location": registry_text(values.get("InstallLocation")),
+                "install_source": registry_text(values.get("InstallSource")),
+                "uninstall_string": registry_text(values.get("UninstallString")),
+            },
+            timestamp=program.last_written_at,
+            timestamp_label="last_written",
+            raw_preview=display_name or str(program.name),
+        )
+
+
+NTUSER_EXPLORER = r"Software\Microsoft\Windows\CurrentVersion\Explorer"
+
+
+def ntuser_hive_records(context: NativeHiveRowContext) -> Iterable[ArtifactRecord]:
+    hive = context.hive
+    yield from persistence_records(context, prefix="Software\\")
+    winlogon = hive.open_key(r"Software\Microsoft\Windows NT\CurrentVersion\Winlogon")
+    if winlogon is not None:
+        yield from winlogon_records(context, r"Software\Microsoft\Windows NT\CurrentVersion\Winlogon", winlogon)
+    windows_key = hive.open_key(r"Software\Microsoft\Windows NT\CurrentVersion\Windows")
+    if windows_key is not None:
+        values = hive.values_dict(windows_key)
+        for name in WINDOWS_PERSISTENCE_VALUES:
+            command = registry_text(values.get(name))
+            if not command:
+                continue
+            yield context.row(
+                "registry-persistence-entry",
+                label="자동 실행(Windows\\Load/Run)",
+                relative_key=r"Software\Microsoft\Windows NT\CurrentVersion\Windows",
+                key=windows_key,
+                fields={"persistence_category": f"Windows\\{name}", "value_name": name, "command": command},
+                timestamp=windows_key.last_written_at,
+                timestamp_label="last_written",
+                raw_preview=f"{name} = {command}",
+                risk_flags=suspicious_value_flags(command),
+            )
+    yield from mru_string_records(context, f"{NTUSER_EXPLORER}\\WordWheelQuery", "wordwheel-query", recurse=True)
+    yield from recent_docs_records(context)
+    yield from numbered_string_records(context, f"{NTUSER_EXPLORER}\\TypedPaths", "typed-path", prefix="url")
+    yield from numbered_string_records(context, r"Software\Microsoft\Internet Explorer\TypedURLs", "typed-url", prefix="url")
+    yield from run_mru_records(context)
+    yield from open_save_records(context)
+    yield from last_visited_records(context)
+    yield from installed_program_records(context, r"Software\Microsoft\Windows\CurrentVersion\Uninstall")
+
+
+def activity_row(
+    context: NativeHiveRowContext,
+    *,
+    category: str,
+    relative_key: str,
+    key: NativeRegistryKey,
+    value_name: str,
+    activity_value: str,
+    mru_position: int | None,
+    extra: Mapping[str, object] | None = None,
+    timestamp: str = "",
+    timestamp_label: str = "",
+) -> ArtifactRecord:
+    is_latest = mru_position == 0
+    if not timestamp and is_latest:
+        timestamp, timestamp_label = key.last_written_at, "last_written_mru_head"
+    return context.row(
+        "registry-user-activity",
+        label=USER_ACTIVITY_KO_LABELS.get(category, category),
+        relative_key=relative_key,
+        key=key,
+        fields={
+            "user_activity_category": category,
+            "activity_label": USER_ACTIVITY_KO_LABELS.get(category, category),
+            "user_hive_scope": "ntuser",
+            "value_name": value_name,
+            "activity_value": activity_value,
+            "mru_position": mru_position,
+            "mru_position_note": "0 = 가장 최근(MRU 목록 첫 항목)",
+            "timestamp_semantics": "키 최종 수정 시각은 MRU 최상위(0번) 항목에만 해당합니다."
+            if timestamp_label == "last_written_mru_head"
+            else "",
+            **dict(extra or {}),
+        },
+        timestamp=timestamp,
+        timestamp_label=timestamp_label,
+        raw_preview=activity_value,
+    )
+
+
+def mru_positions(hive: NativeRegistryHive, key: NativeRegistryKey) -> dict[str, int]:
+    value = hive.value(key, "MRUListEx")
+    if value is not None:
+        raw = hive.value_bytes(value)
+        order = []
+        for index in range(0, len(raw) - 3, 4):
+            item = int.from_bytes(raw[index : index + 4], "little")
+            if item == 0xFFFFFFFF:
+                break
+            order.append(item)
+        return {str(item): position for position, item in enumerate(order)}
+    value = hive.value(key, "MRUList")
+    if value is not None:
+        text = registry_text(hive.value_data(value))
+        return {char: position for position, char in enumerate(text)}
+    return {}
+
+
+def mru_string_records(
+    context: NativeHiveRowContext, relative: str, category: str, *, recurse: bool
+) -> Iterable[ArtifactRecord]:
+    hive = context.hive
+    key = hive.open_key(relative)
+    if key is None:
+        return
+    targets = [(relative, key)]
+    if recurse:
+        targets.extend((f"{relative}\\{child.name}", child) for child in hive.subkeys(key))
+    for target_relative, target in targets:
+        positions = mru_positions(hive, target)
+        for value in hive.values(target):
+            name = str(value.name)
+            if not name.isdigit():
+                continue
+            text = decode_registry_sz(hive.value_bytes(value))
+            yield activity_row(
+                context,
+                category=category,
+                relative_key=target_relative,
+                key=target,
+                value_name=name,
+                activity_value=text,
+                mru_position=positions.get(name),
+                extra={"search_scope": str(target.name) if target is not key else ""},
+            )
+
+
+def recent_docs_records(context: NativeHiveRowContext) -> Iterable[ArtifactRecord]:
+    from .shellbags import decode_shell_item_list
+
+    hive = context.hive
+    relative = f"{NTUSER_EXPLORER}\\RecentDocs"
+    key = hive.open_key(relative)
+    if key is None:
+        return
+    for target_relative, target in [(relative, key), *((f"{relative}\\{c.name}", c) for c in hive.subkeys(key))]:
+        positions = mru_positions(hive, target)
+        for value in hive.values(target):
+            name = str(value.name)
+            if not name.isdigit():
+                continue
+            raw = hive.value_bytes(value)
+            text = decode_registry_sz(raw)
+            consumed = (len(text.encode("utf-16-le")) + 2) if text else 0
+            _path, items = decode_shell_item_list(raw[consumed:]) if consumed < len(raw) else ("", [])
+            lnk_name = next((str(item.get("name") or "") for item in items if item.get("name")), "")
+            yield activity_row(
+                context,
+                category="recent-document",
+                relative_key=target_relative,
+                key=target,
+                value_name=name,
+                activity_value=text,
+                mru_position=positions.get(name),
+                extra={
+                    "extension_scope": str(target.name) if target is not key else "",
+                    "lnk_name": lnk_name,
+                },
+            )
+
+
+def numbered_string_records(
+    context: NativeHiveRowContext, relative: str, category: str, *, prefix: str
+) -> Iterable[ArtifactRecord]:
+    hive = context.hive
+    key = hive.open_key(relative)
+    if key is None:
+        return
+    times_key = hive.open_key(relative + "Time") if category == "typed-url" else None
+    times = hive.values_dict(times_key) if times_key is not None else {}
+    for value in hive.values(key):
+        name = str(value.name)
+        if not name.lower().startswith(prefix) or not name[len(prefix) :].isdigit():
+            continue
+        position = int(name[len(prefix) :]) - 1
+        typed_time = registry_filetime_from_bytes(times.get(name)) if name in times else ""
+        yield activity_row(
+            context,
+            category=category,
+            relative_key=relative,
+            key=key,
+            value_name=name,
+            activity_value=registry_text(hive.value_data(value)),
+            mru_position=position,
+            timestamp=typed_time,
+            timestamp_label="typed_url_time" if typed_time else "",
+        )
+
+
+def run_mru_records(context: NativeHiveRowContext) -> Iterable[ArtifactRecord]:
+    hive = context.hive
+    relative = f"{NTUSER_EXPLORER}\\RunMRU"
+    key = hive.open_key(relative)
+    if key is None:
+        return
+    positions = mru_positions(hive, key)
+    for value in hive.values(key):
+        name = str(value.name)
+        if name == "MRUList":
+            continue
+        command = registry_text(hive.value_data(value))
+        yield activity_row(
+            context,
+            category="run-dialog-mru",
+            relative_key=relative,
+            key=key,
+            value_name=name,
+            activity_value=command.removesuffix("\\1"),
+            mru_position=positions.get(name),
+        )
+
+
+def open_save_records(context: NativeHiveRowContext) -> Iterable[ArtifactRecord]:
+    from .shellbags import decode_shell_item_list
+
+    hive = context.hive
+    relative = f"{NTUSER_EXPLORER}\\ComDlg32\\OpenSavePidlMRU"
+    key = hive.open_key(relative)
+    if key is None:
+        return
+    for extension in hive.subkeys(key):
+        positions = mru_positions(hive, extension)
+        for value in hive.values(extension):
+            name = str(value.name)
+            if not name.isdigit():
+                continue
+            path, _items = decode_shell_item_list(hive.value_bytes(value))
+            yield activity_row(
+                context,
+                category="file-dialog-mru",
+                relative_key=f"{relative}\\{extension.name}",
+                key=extension,
+                value_name=name,
+                activity_value=path,
+                mru_position=positions.get(name),
+                extra={"extension_scope": str(extension.name)},
+            )
+
+
+def last_visited_records(context: NativeHiveRowContext) -> Iterable[ArtifactRecord]:
+    from .shellbags import decode_shell_item_list
+
+    hive = context.hive
+    relative = f"{NTUSER_EXPLORER}\\ComDlg32\\LastVisitedPidlMRU"
+    key = hive.open_key(relative)
+    if key is None:
+        return
+    positions = mru_positions(hive, key)
+    for value in hive.values(key):
+        name = str(value.name)
+        if not name.isdigit():
+            continue
+        raw = hive.value_bytes(value)
+        program = decode_registry_sz(raw)
+        consumed = len(program.encode("utf-16-le")) + 2
+        folder, _items = decode_shell_item_list(raw[consumed:])
+        yield activity_row(
+            context,
+            category="file-dialog-folder-mru",
+            relative_key=relative,
+            key=key,
+            value_name=name,
+            activity_value=folder,
+            mru_position=positions.get(name),
+            extra={"program": program},
+        )
+
+
+# ---------------------------------------------------------------------------
+# Native key tree rows and free-cell (deleted) candidates.
+# ---------------------------------------------------------------------------
+
+
+def build_native_key_tree_record(
+    context: NativeHiveRowContext,
+    components: tuple[str, ...],
+    key: NativeRegistryKey,
+    value_names: Sequence[str],
+) -> ArtifactRecord:
+    relative = "\\".join(components)
+    key_path = context.key_path(relative)
+    return ArtifactRecord(
+        provider=WindowsRegistryProvider.name,
+        artifact_type="registry-key-tree-node",
+        path=context.source_path,
+        supported=True,
+        details={
+            "parser": "windows-registry-hive-key-tree",
+            "parser_version": PARSER_VERSION,
+            "coverage_status": "native-hive-key-tree",
+            "reportability": "triage",
+            "source_path": context.source_path,
+            "source_format": "registry-hive",
+            "source_hashes": context.source_hashes,
+            "hive_name": context.path.name,
+            "hive_hint": context.hive_hint,
+            "hive_mount": context.mount,
+            "user_sid": context.user_sid,
+            "key_path": key_path,
+            "key_depth": len(components),
+            "key_path_confidence": "tree-walk",
+            "is_root_key": not components,
+            "root_reachable": True,
+            "name": str(key.name),
+            "name_encoding": key.name_encoding,
+            "last_written_at": key.last_written_at,
+            "last_written_filetime": key.last_written_filetime,
+            "subkey_count": key.subkey_count,
+            "value_count": key.value_count,
+            "value_names": list(value_names),
+            "cell_offset": HIVE_BIN_BASE_OFFSET + int(key.offset or 0),
+            "parent_cell_offset": HIVE_BIN_BASE_OFFSET + int(key.parent_offset or 0) if components else 0,
+            "allocation_status": "allocated" if key.allocated else "free-cell-referenced",
+            "transaction_log_status": context.transaction_disclosure.get("status", ""),
+        },
+    )
+
+
+def iter_registry_free_cell_candidates(hive: NativeRegistryHive) -> tuple[list[dict[str, object]], dict[str, int]]:
+    """hbin walk over the whole hive; returns free nk/vk cells (no cap) and allocator stats."""
+    data = hive._data
+    candidates: list[dict[str, object]] = []
+    stats: Counter[str] = Counter()
+    offset = HIVE_BIN_BASE_OFFSET
+    end = hive.hbin_end
+    while offset + HIVE_BIN_HEADER_SIZE <= end:
+        if data[offset : offset + 4] != REGISTRY_HBIN_SIGNATURE:  # type: ignore[index]
+            stats["hbin-signature-gap"] += 1
+            offset += 4096
+            continue
+        hbin_size = int.from_bytes(data[offset + 8 : offset + 12], "little")  # type: ignore[index]
+        if hbin_size < 4096 or hbin_size % 4096:
+            stats["hbin-size-invalid"] += 1
+            offset += 4096
+            continue
+        stats["hbin_count"] += 1
+        hbin_end = min(end, offset + hbin_size)
+        cursor = offset + HIVE_BIN_HEADER_SIZE
+        while cursor + 8 <= hbin_end:
+            raw_size = int.from_bytes(data[cursor : cursor + 4], "little", signed=True)  # type: ignore[index]
+            size = abs(raw_size)
+            if size < 8 or cursor + size > hbin_end:
+                stats["cell-walk-break"] += 1
+                break
+            signature = bytes(data[cursor + 4 : cursor + 6])  # type: ignore[index]
+            if signature == b"nk":
+                stats["allocated_nk" if raw_size < 0 else "free_nk"] += 1
+            elif signature == b"vk":
+                stats["allocated_vk" if raw_size < 0 else "free_vk"] += 1
+            if raw_size > 0 and signature in (b"nk", b"vk"):
+                cell = bytes(data[cursor : cursor + size])  # type: ignore[index]
+                if signature == b"nk":
+                    candidate = parse_registry_nk_cell(cell, 0, 4, size, raw_size)
+                else:
+                    candidate = parse_registry_vk_cell(cell, 0, 4, size, raw_size)
+                if candidate is not None:
+                    candidate["cell_offset"] = cursor
+                    candidate["cell_relative_offset"] = cursor - HIVE_BIN_BASE_OFFSET
+                    candidate["cell_scan_method"] = "hbin-walk"
+                    candidate["hbin_offset"] = offset
+                    candidate["cell_index"] = len(candidates)
+                    if signature == b"nk":
+                        relative_parent = int(candidate.get("parent_cell_relative_offset") or 0)
+                        candidate["parent_cell_offset"] = registry_relative_to_file_offset(relative_parent)
+                        candidate["stable_subkey_list_offset"] = 0
+                        candidate["volatile_subkey_list_offset"] = 0
+                        candidate["value_list_offset"] = registry_relative_to_file_offset(
+                            int(candidate.get("value_list_relative_offset") or 0)
+                        )
+                    else:
+                        if not candidate.get("value_data_inline"):
+                            candidate["value_data_offset"] = registry_relative_to_file_offset(
+                                int(candidate.get("value_data_relative_offset") or 0)
+                            )
+                    candidates.append(candidate)
+            cursor += align_registry_cell_size(size)
+        offset += hbin_size
+    return candidates, dict(stats)
+
+
+def native_parent_key_candidates(
+    hive: NativeRegistryHive,
+    free_candidates: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    """Allocated ancestor nk cells for free key cells, root renamed to '' (mount replaces it)."""
+    root_offset = int(hive.header.get("root_cell_offset") or 0)
+    seen: set[int] = set()
+    ancestors: list[dict[str, object]] = []
+    for candidate in free_candidates:
+        relative = int(candidate.get("parent_cell_relative_offset") or 0) if candidate.get("cell_kind") == "key-node" else 0
+        depth = 0
+        while relative and relative not in seen and depth < 64:
+            key = hive.key_at(relative)
+            if key is None:
+                break
+            seen.add(relative)
+            ancestors.append(
+                {
+                    "cell_kind": "key-node",
+                    "cell_signature": "nk",
+                    "cell_offset": HIVE_BIN_BASE_OFFSET + relative,
+                    "cell_relative_offset": relative,
+                    "allocation_status": "allocated",
+                    "name": "" if relative == root_offset else str(key.name),
+                    "name_encoding": key.name_encoding,
+                    "last_written_at": key.last_written_at,
+                    "parent_cell_offset": 0 if relative == root_offset else HIVE_BIN_BASE_OFFSET + int(key.parent_offset or 0),
+                    "value_count": key.value_count,
+                    "value_list_offset": HIVE_BIN_BASE_OFFSET + int(key.value_list_offset or 0),
+                    "subkey_count": key.subkey_count,
+                    "cell_scan_method": "native-tree-ancestor",
+                    "hbin_offset": registry_hbin_offset_for_cell(HIVE_BIN_BASE_OFFSET + relative),
+                    "cell_size": 0,
+                }
+            )
+            if relative == root_offset:
+                break
+            relative = int(key.parent_offset or 0)
+            depth += 1
+    return ancestors
+
+
+SERVICE_PROCESS_TYPES = {0x10, 0x20, 0x50, 0x60, 0x110, 0x120}
+
+
+def registry_native_summary_facts(records: Sequence[ArtifactRecord]) -> dict[str, object]:
+    """Report-facing facts (computer name, TZ, CCS, USB, persistence) from native plugin rows."""
+    facts: dict[str, object] = {
+        "native_key_count": 0,
+        "native_value_count": 0,
+        "computer_name": "",
+        "timezone": {},
+        "current_control_set": "",
+        "last_shutdown_at": "",
+        "os_version": {},
+        "hives": [],
+        "transaction_log_disclosures": [],
+        "persistence_entries": [],
+        "usb_devices": [],
+    }
+    hives: list[dict[str, object]] = []
+    disclosures: list[dict[str, object]] = []
+    persistence: list[dict[str, object]] = []
+    usb_devices: list[dict[str, object]] = []
+    for record in records:
+        details = record.details
+        artifact_type = record.artifact_type
+        if artifact_type == "registry-hive" and details.get("native_walk"):
+            facts["native_key_count"] = int(facts["native_key_count"]) + int(details.get("key_count") or 0)
+            facts["native_value_count"] = int(facts["native_value_count"]) + int(details.get("value_count") or 0)
+            hives.append(
+                {
+                    "source_path": details.get("source_path", record.path),
+                    "hive_name": details.get("hive_name", ""),
+                    "hive_mount": details.get("hive_mount", ""),
+                    "root_key_name": details.get("root_key_name", ""),
+                    "key_count": details.get("key_count", 0),
+                    "value_count": details.get("value_count", 0),
+                    "transaction_log_status": details.get("transaction_log_disclosure_status", ""),
+                }
+            )
+            if details.get("transaction_log_disclosure_status") == "newer-sequence-not-replayed":
+                disclosures.append(
+                    {
+                        "hive_mount": details.get("hive_mount", ""),
+                        "source_path": details.get("source_path", record.path),
+                        "message_ko": details.get("transaction_log_disclosure", ""),
+                    }
+                )
+        elif artifact_type == "windows-computer-name" and not facts["computer_name"]:
+            facts["computer_name"] = str(details.get("computer_name") or details.get("active_computer_name") or "")
+        elif artifact_type == "windows-timezone" and not facts["timezone"]:
+            facts["timezone"] = {
+                "time_zone_key_name": details.get("time_zone_key_name", ""),
+                "time_zone_label_ko": details.get("time_zone_label_ko", ""),
+                "standard_name": details.get("standard_name", ""),
+                "bias_minutes": details.get("bias_minutes"),
+                "active_time_bias_minutes": details.get("active_time_bias_minutes"),
+                "utc_offset": details.get("utc_offset", ""),
+                "utc_offset_minutes": details.get("utc_offset_minutes"),
+                "source_key": details.get("key_path", ""),
+            }
+        elif artifact_type == "windows-control-set" and not facts["current_control_set"]:
+            facts["current_control_set"] = str(details.get("current_control_set") or "")
+            facts["last_shutdown_at"] = str(details.get("last_shutdown_at") or "")
+        elif artifact_type == "windows-os-version" and not facts["os_version"]:
+            facts["os_version"] = {
+                key: details.get(key)
+                for key in ("product_name", "display_version", "current_build", "edition_id", "install_date")
+            }
+        elif artifact_type == "registry-persistence-entry":
+            persistence.append(
+                {
+                    "category": details.get("persistence_category", ""),
+                    "key": details.get("key_path", ""),
+                    "value_name": details.get("value_name", ""),
+                    "command": details.get("command", ""),
+                    "key_last_written_at": details.get("key_last_written_at", ""),
+                    "user_sid": details.get("user_sid", ""),
+                    "risk_flags": list(details.get("risk_flags") or []),
+                }
+            )
+        elif artifact_type == "windows-service-config" and details.get("autostart"):
+            if details.get("service_type") in SERVICE_PROCESS_TYPES:
+                persistence.append(
+                    {
+                        "category": "service",
+                        "key": details.get("key_path", ""),
+                        "value_name": details.get("service_name", ""),
+                        "command": details.get("image_path", ""),
+                        "service_dll": details.get("service_dll", ""),
+                        "start_label": details.get("start_label", ""),
+                        "key_last_written_at": details.get("key_last_written_at", ""),
+                        "risk_flags": list(details.get("risk_flags") or []),
+                    }
+                )
+        elif artifact_type == "windows-usb-device":
+            usb_devices.append(
+                {
+                    "key": details.get("key_path", ""),
+                    "vendor": details.get("vendor", ""),
+                    "product": details.get("product", ""),
+                    "friendly_name": details.get("friendly_name", ""),
+                    "serial_number": details.get("serial_number", ""),
+                    "serial_hint": details.get("serial_number", ""),
+                    "vid": details.get("vid", ""),
+                    "pid": details.get("pid", ""),
+                    "first_install_at": details.get("first_install_at", ""),
+                    "last_arrival_at": details.get("last_arrival_at", ""),
+                    "last_removal_at": details.get("last_removal_at", ""),
+                    "drive_letters": list(details.get("drive_letters") or []),
+                    "volume_guids": list(details.get("volume_guids") or []),
+                }
+            )
+    facts["hives"] = hives
+    facts["transaction_log_disclosures"] = disclosures
+    facts["persistence_entries"] = persistence
+    facts["usb_devices"] = usb_devices
+    return facts

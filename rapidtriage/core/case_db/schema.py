@@ -15,12 +15,17 @@ from .constants import (
 )
 
 __all__ = [
+    "DOCUMENT_TRIGRAM_TABLE",
     "apply_schema",
     "assert_supported_existing_schema_version",
+    "document_trigram_available",
     "ensure_case_exists",
     "ensure_column",
+    "ensure_document_trigram_index",
     "get_schema_version",
+    "insert_document_trigram_row",
     "list_tables",
+    "sqlite_supports_trigram",
     "table_columns",
 ]
 
@@ -38,6 +43,7 @@ def apply_schema(connection: sqlite3.Connection) -> None:
         if set(REVIEW_MARK_MIGRATION_COLUMNS) <= review_mark_columns:
             return
     connection.executescript(SCHEMA_SQL)
+    ensure_document_trigram_index(connection)
     ensure_column(connection, "review_mark", "assignee", "TEXT NOT NULL DEFAULT ''")
     ensure_column(connection, "review_mark", "priority", "TEXT NOT NULL DEFAULT 'normal'")
     ensure_column(connection, "review_mark", "due_at", "TEXT NOT NULL DEFAULT ''")
@@ -50,6 +56,50 @@ def apply_schema(connection: sqlite3.Connection) -> None:
         """,
         (str(SCHEMA_VERSION),),
     )
+
+
+DOCUMENT_TRIGRAM_TABLE = "indexed_document_trigram"
+
+
+def sqlite_supports_trigram() -> bool:
+    """FTS5 ``trigram`` tokenizer ships with SQLite 3.34.0+."""
+    return sqlite3.sqlite_version_info >= (3, 34, 0)
+
+
+def ensure_document_trigram_index(connection: sqlite3.Connection) -> bool:
+    """Create the substring (trigram) index over indexed_document when supported.
+
+    unicode61 splits on whitespace, so Korean words with particles
+    ("계약서를") never match "계약서"; the trigram table matches any
+    substring of 3+ characters. It complements (does not replace)
+    ``indexed_document_fts``: 1-2 character queries still use unicode61
+    prefix terms.
+    """
+    if not sqlite_supports_trigram():
+        return False
+    try:
+        connection.execute(
+            f"CREATE VIRTUAL TABLE IF NOT EXISTS {DOCUMENT_TRIGRAM_TABLE} USING fts5("
+            "title, body, content='indexed_document', content_rowid='id', tokenize='trigram')"
+        )
+    except sqlite3.OperationalError:
+        return False
+    return True
+
+
+def document_trigram_available(connection: sqlite3.Connection) -> bool:
+    row = connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (DOCUMENT_TRIGRAM_TABLE,)
+    ).fetchone()
+    return row is not None
+
+
+def insert_document_trigram_row(connection: sqlite3.Connection, rowid: int, title: str, body: str) -> None:
+    if document_trigram_available(connection):
+        connection.execute(
+            f"INSERT INTO {DOCUMENT_TRIGRAM_TABLE}(rowid, title, body) VALUES (?, ?, ?)",
+            (rowid, title, body),
+        )
 
 
 def assert_supported_existing_schema_version(path: Path) -> None:

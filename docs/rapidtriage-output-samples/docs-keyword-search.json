@@ -6,13 +6,17 @@
     "candidate_count": 3,
     "match_count": 3,
     "supported_extensions": [
+      ".cell",
       ".cfg",
       ".conf",
       ".csv",
+      ".doc",
       ".docx",
       ".eml",
       ".htm",
       ".html",
+      ".hwp",
+      ".hwpx",
       ".ini",
       ".json",
       ".jsonl",
@@ -25,16 +29,33 @@
       ".odt",
       ".ost",
       ".pdf",
+      ".ppt",
       ".pptx",
       ".pst",
       ".rtf",
+      ".show",
       ".tsv",
       ".txt",
+      ".xls",
       ".xlsx",
       ".xml",
       ".yaml",
       ".yml"
-    ]
+    ],
+    "text_status_counts": {
+      "ok": 3
+    },
+    "extraction_method_counts": {
+      "docx-xml": 1,
+      "pdf-native": 1,
+      "txt-text": 1
+    },
+    "indexed_with_text_count": 3,
+    "encrypted_count": 0,
+    "zero_text_count": 0,
+    "zero_text_reason_counts": {},
+    "ocr_available": false,
+    "listing_contract": "candidates lists every document; matched=true rows are the keyword hits (results)"
   },
   "manifest": {
     "generated_at": "<GENERATED_AT>",
@@ -50,7 +71,7 @@
         "description": "Cross-platform document candidates discovered from the filesystem",
         "target_platform": "any",
         "supported": true,
-        "artifact_count": 4
+        "artifact_count": 2
       },
       {
         "name": "android-apk-artifacts",
@@ -173,7 +194,7 @@
       },
       {
         "name": "windows-registry",
-        "description": "Windows Registry .reg export artifacts",
+        "description": "Windows Registry hives (native full walk) and .reg exports",
         "target_platform": "windows",
         "supported": true,
         "artifact_count": 0
@@ -220,19 +241,49 @@
       "path": "<ROOT>/evidence.pdf",
       "kind": "pdf",
       "size": 467,
-      "modified_at": "2024-01-02T03:06:07+00:00"
+      "modified_at": "2024-01-02T03:06:07+00:00",
+      "text_status": "ok",
+      "extraction_method": "pdf-native",
+      "text_length": 21,
+      "encrypted": false,
+      "text_reason": "",
+      "matched": true,
+      "matched_keywords": [
+        "keyword"
+      ],
+      "modified_at_origin": "acquisition-copy"
     },
     {
       "path": "<ROOT>/note.txt",
       "kind": "txt",
       "size": 21,
-      "modified_at": "2024-01-02T03:04:05+00:00"
+      "modified_at": "2024-01-02T03:04:05+00:00",
+      "text_status": "ok",
+      "extraction_method": "txt-text",
+      "text_length": 21,
+      "encrypted": false,
+      "text_reason": "",
+      "matched": true,
+      "matched_keywords": [
+        "secret"
+      ],
+      "modified_at_origin": "acquisition-copy"
     },
     {
       "path": "<ROOT>/report.docx",
       "kind": "docx",
       "size": 476,
-      "modified_at": "2024-01-02T03:05:06+00:00"
+      "modified_at": "2024-01-02T03:05:06+00:00",
+      "text_status": "ok",
+      "extraction_method": "docx-xml",
+      "text_length": 29,
+      "encrypted": false,
+      "text_reason": "",
+      "matched": true,
+      "matched_keywords": [
+        "keyword"
+      ],
+      "modified_at_origin": "acquisition-copy"
     }
   ],
   "results": [

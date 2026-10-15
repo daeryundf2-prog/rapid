@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 import hashlib
 import re
 import sqlite3
@@ -7,6 +8,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 
 from ..core.models import ArtifactRecord
+from ..core.sqlite_snapshot import open_sqlite_snapshot
 from ..core.submission import compute_hashes
 from ._walk import iter_evidence_paths
 from .memory import MEMORY_DUMP_SCAN_LIMIT, build_scan_ranges, is_memory_dump_candidate
@@ -19,10 +21,12 @@ from .windows.registry import (
 )
 from .windows.search_index import WINDOWS_SEARCH_TABLE_MARKERS
 
-PARSER_VERSION = "kakaotalk-windows-correlation-v1"
+PARSER_VERSION = "kakaotalk-windows-correlation-v2"
 KAKAO_SCAN_LIMIT = 256 * 1024 * 1024
 KAKAO_CHUNK_SIZE = 1024 * 1024
 KAKAO_OVERLAP = 512
+# Per-source cap for the EDB and memory string scans (native hives are walked cell by
+# cell without a cap). Every capped row discloses ``candidates_truncated`` and the limit.
 KAKAO_CANDIDATE_LIMIT = 200
 KAKAO_APP_DB_LIMIT = 500
 KAKAO_APP_DB_NAMES = {
@@ -333,6 +337,7 @@ def collect_edb_kakao_candidates(path: Path) -> list[ArtifactRecord]:
         )
         if len(records) >= KAKAO_CANDIDATE_LIMIT:
             break
+    disclose_candidate_cap(records, total_hits=len(records))
     return records
 
 
@@ -361,26 +366,45 @@ def collect_registry_kakao_candidates(path: Path) -> list[ArtifactRecord]:
             )
             if len(records) >= KAKAO_CANDIDATE_LIMIT:
                 break
+        disclose_candidate_cap(records, total_hits=len(records))
         return records
 
-    for index, hit in enumerate(scan_binary_kakao_hits(path, limit=min(KAKAO_SCAN_LIMIT, 32 * 1024 * 1024))):
+    traces = collect_native_hive_kakao_traces(path, source_hashes)
+    if traces is not None:
+        return traces
+    # Not a parseable regf hive (e.g. a damaged copy): fall back to a disclosed byte scan.
+    scan_limit = min(KAKAO_SCAN_LIMIT, 32 * 1024 * 1024)
+    hits = scan_binary_kakao_hits(path, limit=scan_limit)
+    for index, hit in enumerate(hits):
         records.append(
             build_kakao_candidate_record(
                 path,
                 source_hashes,
                 source_family="registry",
-                source_subtype="native-hive-string",
+                source_subtype="native-hive-string-fallback",
                 source_index=index,
                 candidate_kind=classify_candidate(str(hit.get("value") or "")),
                 candidate_value=str(hit.get("value") or ""),
                 matched_terms=[str(hit.get("matched_term") or "")],
                 source_offset=int(hit.get("offset") or -1),
-                metadata={"encoding": hit.get("encoding", ""), "scan_status": "bounded-native-hive-string-scan"},
+                metadata={
+                    "encoding": hit.get("encoding", ""),
+                    "scan_status": "bounded-native-hive-string-scan-fallback",
+                    "evidence_nature": "registry-string-trace",
+                    "display_label": KAKAO_REGISTRY_TRACE_LABEL,
+                },
             )
         )
-        if len(records) >= KAKAO_CANDIDATE_LIMIT:
-            break
+    disclose_candidate_cap(records, total_hits=len(hits))
     return records
+
+
+def disclose_candidate_cap(records: Sequence[ArtifactRecord], *, total_hits: int) -> None:
+    truncated = total_hits >= KAKAO_CANDIDATE_LIMIT
+    for record in records:
+        record.details["candidates_truncated"] = truncated
+        record.details["candidate_limit"] = KAKAO_CANDIDATE_LIMIT
+        record.details["candidate_rows_emitted"] = len(records)
 
 
 def collect_registry_crypto_material(path: Path) -> list[ArtifactRecord]:
@@ -765,6 +789,7 @@ def collect_memory_kakao_candidates(path: Path) -> list[ArtifactRecord]:
         )
         if len(records) >= KAKAO_CANDIDATE_LIMIT:
             break
+    disclose_candidate_cap(records, total_hits=len(records))
     return records
 
 
@@ -829,6 +854,19 @@ def build_kakao_candidate_record(
             "evidence_strength": "kakaotalk-cross-source-presence-candidate",
             "validation_required": True,
             "validation_guidance": "This candidate indicates KakaoTalk-related Windows evidence in EDB, Registry, or memory. It is not decrypted chat testimony by itself.",
+            "evidence_nature": str(metadata.get("evidence_nature") or f"{source_family}-string-trace"),
+            "display_label": str(
+                metadata.get("display_label")
+                or {
+                    "windows-edb": "Windows 검색 색인 문자열 흔적(카카오톡 대화 내용 아님)",
+                    "memory-dump": "메모리 문자열 흔적(카카오톡 대화 내용 아님)",
+                }.get(source_family, KAKAO_REGISTRY_TRACE_LABEL)
+            ),
+            "registry_key_path": metadata.get("registry_key_path", ""),
+            "registry_value_name": metadata.get("registry_value_name", ""),
+            "registry_value_type": metadata.get("registry_value_type", ""),
+            "registry_key_last_written": metadata.get("registry_key_last_written", ""),
+            "decoded_strings": list(metadata.get("decoded_strings") or []),
             "kakaotalk_windows_analysis": {
                 "method": "edb-registry-memory-correlation",
                 "source_family": source_family,
@@ -1034,17 +1072,16 @@ def inspect_sqlite_database(path: Path) -> dict[str, object]:
     if not sqlite_header:
         return result
     try:
-        uri = f"{path.resolve().as_uri()}?mode=ro"
-        connection = sqlite3.connect(uri, uri=True)
-        try:
+        # Never open evidence in place: read a private snapshot copy (immutable working copy).
+        with open_sqlite_snapshot(path.resolve()) as connection:
             rows = connection.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").fetchall()
             table_names = [str(row[0]) for row in rows]
             result["table_names"] = table_names[:50]
             result["table_count"] = len(table_names)
+            result["table_names_truncated"] = len(table_names) > 50
             result["row_counts"] = sqlite_row_counts(connection, table_names[:20])
             result["open_status"] = "opened-read-only"
-        finally:
-            connection.close()
+            result["access_method"] = "sqlite-working-snapshot"
     except sqlite3.DatabaseError as exc:
         result["open_status"] = "sqlite-open-failed"
         result["error"] = str(exc)[:200]
@@ -1300,7 +1337,7 @@ def decode_binary_context(data: bytes, index: int, encoding: str) -> str:
     else:
         start = max(0, index - 120)
         end = min(len(data), index + 300)
-        text = data[start:end].decode("latin-1", errors="ignore")
+        text, _encoding = decode_ansi_registry_text(data[start:end].replace(b"\x00", b" "))
     return " ".join("".join(ch if ch.isprintable() else " " for ch in text).split())[:1000]
 
 
@@ -1477,3 +1514,356 @@ def normalize_candidate_value(value: str) -> str:
 
 def sorted_counts(counts: Mapping[str, int]) -> list[dict[str, object]]:
     return [{"value": value, "count": count} for value, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))]
+
+
+HIVE_BASE_BLOCK_SIZE = 0x1000
+HIVE_BIG_DATA_SEGMENT = 16344
+REGISTRY_VALUE_TYPE_NAMES = {
+    0: "REG_NONE",
+    1: "REG_SZ",
+    2: "REG_EXPAND_SZ",
+    3: "REG_BINARY",
+    4: "REG_DWORD",
+    5: "REG_DWORD_BIG_ENDIAN",
+    6: "REG_LINK",
+    7: "REG_MULTI_SZ",
+    8: "REG_RESOURCE_LIST",
+    9: "REG_FULL_RESOURCE_DESCRIPTOR",
+    10: "REG_RESOURCE_REQUIREMENTS_LIST",
+    11: "REG_QWORD",
+}
+REGISTRY_TEXT_VALUE_TYPES = {1, 2, 6, 7}
+REGISTRY_DECODED_STRING_LIMIT = 50
+UTF16_RUN_RE = re.compile(rb"(?:[\x20-\x7e]\x00|[\x00-\xff][\xac-\xd7]|[\x00-\xff]\x30){3,}")
+ANSI_RUN_RE = re.compile(rb"[\x20-\x7e\x81-\xfe]{4,}")
+KAKAO_REGISTRY_TRACE_LABEL = "레지스트리 문자열 흔적(카카오톡 대화 내용 아님)"
+
+
+class RegistryHiveError(ValueError):
+    pass
+
+
+def filetime_to_utc_iso(value: int) -> str:
+    if not value:
+        return ""
+    try:
+        moment = dt.datetime(1601, 1, 1, tzinfo=dt.timezone.utc) + dt.timedelta(microseconds=value // 10)
+    except OverflowError:
+        return ""
+    return moment.isoformat() if 1970 <= moment.year <= 2200 else ""
+
+
+def decode_ansi_registry_text(raw: bytes) -> tuple[str, str]:
+    """ANSI registry/binary text: UTF-8 first, then the Korean ANSI code page (cp949)."""
+    raw = raw.split(b"\x00", 1)[0]
+    for encoding in ("utf-8", "cp949"):
+        try:
+            return raw.decode(encoding), encoding
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("cp949", errors="replace"), "cp949-lossy"
+
+
+def iter_hive_cells(blob: bytes) -> Iterable[tuple[int, bool, bytes]]:
+    """Yield ``(relative_offset, allocated, cell_payload)`` for every cell in every hbin."""
+    offset = HIVE_BASE_BLOCK_SIZE
+    while offset + 0x20 <= len(blob):
+        if blob[offset : offset + 4] != b"hbin":
+            break
+        hbin_size = int.from_bytes(blob[offset + 8 : offset + 12], "little")
+        if hbin_size < 0x1000 or hbin_size % 0x1000 or offset + hbin_size > len(blob):
+            break
+        cell = offset + 0x20
+        end = offset + hbin_size
+        while cell + 4 <= end:
+            raw_size = int.from_bytes(blob[cell : cell + 4], "little", signed=True)
+            size = abs(raw_size)
+            if size < 8 or cell + size > end or size % 8:
+                break
+            yield cell - HIVE_BASE_BLOCK_SIZE, raw_size < 0, blob[cell + 4 : cell + size]
+            cell += size
+        offset = end
+
+
+def hive_cell_payload(blob: bytes, relative_offset: int) -> bytes:
+    absolute = HIVE_BASE_BLOCK_SIZE + relative_offset
+    if relative_offset < 0 or absolute + 4 > len(blob):
+        return b""
+    size = abs(int.from_bytes(blob[absolute : absolute + 4], "little", signed=True))
+    if size < 8 or absolute + size > len(blob):
+        return b""
+    return blob[absolute + 4 : absolute + size]
+
+
+def read_hive_value_data(blob: bytes, data_size_raw: int, data_offset: int) -> bytes:
+    if data_size_raw & 0x80000000:
+        size = data_size_raw & 0x7FFFFFFF
+        return data_offset.to_bytes(4, "little")[: min(size, 4)]
+    size = data_size_raw
+    if size <= 0:
+        return b""
+    payload = hive_cell_payload(blob, data_offset)
+    if payload[:2] == b"db" and size > HIVE_BIG_DATA_SEGMENT:
+        segment_count = int.from_bytes(payload[2:4], "little")
+        segment_list = hive_cell_payload(blob, int.from_bytes(payload[4:8], "little"))
+        chunks: list[bytes] = []
+        for index in range(segment_count):
+            pointer = segment_list[index * 4 : index * 4 + 4]
+            if len(pointer) < 4:
+                break
+            chunks.append(hive_cell_payload(blob, int.from_bytes(pointer, "little"))[:HIVE_BIG_DATA_SEGMENT])
+        return b"".join(chunks)[:size]
+    return payload[:size]
+
+
+def parse_hive_nk(payload: bytes) -> dict[str, object] | None:
+    if len(payload) < 0x4C or payload[:2] != b"nk":
+        return None
+    flags = int.from_bytes(payload[2:4], "little")
+    name_length = int.from_bytes(payload[0x48:0x4A], "little")
+    raw_name = payload[0x4C : 0x4C + name_length]
+    # KEY_COMP_NAME (0x20): name stored as Latin-1/ASCII bytes, otherwise UTF-16LE.
+    name = raw_name.decode("latin-1") if flags & 0x20 else raw_name.decode("utf-16le", errors="replace")
+    return {
+        "flags": flags,
+        "name": name,
+        "last_written": int.from_bytes(payload[4:12], "little"),
+        "parent": int.from_bytes(payload[0x10:0x14], "little"),
+        "value_count": int.from_bytes(payload[0x24:0x28], "little"),
+        "value_list": int.from_bytes(payload[0x28:0x2C], "little"),
+    }
+
+
+def parse_hive_vk(blob: bytes, payload: bytes) -> dict[str, object] | None:
+    if len(payload) < 0x14 or payload[:2] != b"vk":
+        return None
+    name_length = int.from_bytes(payload[2:4], "little")
+    data_size_raw = int.from_bytes(payload[4:8], "little")
+    data_offset = int.from_bytes(payload[8:12], "little")
+    value_type = int.from_bytes(payload[12:16], "little")
+    flags = int.from_bytes(payload[16:18], "little")
+    raw_name = payload[0x14 : 0x14 + name_length]
+    name = raw_name.decode("latin-1") if flags & 0x1 else raw_name.decode("utf-16le", errors="replace")
+    return {
+        "name": name,
+        "value_type": value_type,
+        "value_type_name": REGISTRY_VALUE_TYPE_NAMES.get(value_type, f"0x{value_type:x}"),
+        "data_size": data_size_raw & 0x7FFFFFFF,
+        "data": read_hive_value_data(blob, data_size_raw, data_offset),
+    }
+
+
+def decode_registry_value_strings(value_type: int, data: bytes) -> list[tuple[str, str]]:
+    """Strings carried by one registry value, decoded inside that value's own data boundary."""
+    strings: list[tuple[str, str]] = []
+    if value_type in REGISTRY_TEXT_VALUE_TYPES and len(data) >= 2 and len(data) % 2 == 0 and b"\x00" in data:
+        for part in data.decode("utf-16le", errors="replace").split("\x00"):
+            cleaned = part.strip()
+            if cleaned:
+                strings.append((cleaned, "utf-16le"))
+        if strings:
+            return strings
+    if value_type in REGISTRY_TEXT_VALUE_TYPES and data and b"\x00\x00" not in data:
+        text, encoding = decode_ansi_registry_text(data)
+        if text.strip():
+            return [(text.strip(), encoding)]
+    if value_type in {4, 5, 11}:
+        return []
+    found: list[tuple[int, str, str]] = []
+    ansi_spans: list[tuple[int, int]] = []
+    for match in ANSI_RUN_RE.finditer(data):
+        text, encoding = decode_ansi_registry_text(match.group(0))
+        text = text.strip()
+        if len(text) >= 4 and "�" not in text and all(ch.isprintable() for ch in text):
+            found.append((match.start(), text, encoding))
+            if not text.isascii():
+                ansi_spans.append((match.start(), match.end()))
+    for match in UTF16_RUN_RE.finditer(data):
+        if b"\0" not in match.group(0):
+            # NUL-free "UTF-16" runs are ANSI/cp949 bytes paired up by accident.
+            continue
+        text = match.group(0).decode("utf-16le", errors="ignore").strip()
+        if not text.isascii() and any(start < match.end() and match.start() < end for start, end in ansi_spans):
+            # The same bytes already decode as clean Korean ANSI text.
+            continue
+        hangul = sum(1 for ch in text if "가" <= ch <= "힣")
+        # A lone Hangul syllable inside Latin noise is almost always binary data, not text.
+        if hangul == 1 and len(text) > 1:
+            continue
+        if len(text) >= 3 and all(ch.isprintable() for ch in text):
+            found.append((match.start(), text, "utf-16le"))
+    seen: set[str] = set()
+    for _offset, text, encoding in sorted(found, key=lambda item: item[0]):
+        if text not in seen:
+            seen.add(text)
+            strings.append((text, encoding))
+    return strings
+
+
+def walk_registry_hive_values(blob: bytes) -> dict[str, object]:
+    if blob[:4] != b"regf" or len(blob) < HIVE_BASE_BLOCK_SIZE + 0x20:
+        raise RegistryHiveError("not a regf hive")
+    keys: dict[int, dict[str, object]] = {}
+    value_cells: dict[int, tuple[bool, bytes]] = {}
+    cell_count = 0
+    for relative, allocated, payload in iter_hive_cells(blob):
+        cell_count += 1
+        signature = payload[:2]
+        if signature == b"nk":
+            parsed = parse_hive_nk(payload)
+            if parsed is not None:
+                parsed["allocated"] = allocated
+                keys[relative] = parsed
+        elif signature == b"vk":
+            value_cells[relative] = (allocated, payload)
+    if not keys:
+        raise RegistryHiveError("no key cells")
+    owner: dict[int, int] = {}
+    for key_offset, key in keys.items():
+        count = int(key["value_count"])
+        if not count or count > 100_000:
+            continue
+        listing = hive_cell_payload(blob, int(key["value_list"]))
+        for index in range(min(count, len(listing) // 4)):
+            owner.setdefault(int.from_bytes(listing[index * 4 : index * 4 + 4], "little"), key_offset)
+    path_cache: dict[int, str] = {}
+
+    def key_path(offset: int) -> str:
+        if offset in path_cache:
+            return path_cache[offset]
+        parts: list[str] = []
+        current = offset
+        visited: set[int] = set()
+        while current in keys and current not in visited:
+            visited.add(current)
+            key = keys[current]
+            if int(key["flags"]) & 0x4:  # KEY_HIVE_ENTRY: the root key name is not part of the path
+                break
+            parts.append(str(key["name"]))
+            current = int(key["parent"])
+        path_cache[offset] = "\\".join(reversed(parts))
+        return path_cache[offset]
+
+    values: list[dict[str, object]] = []
+    for relative, (allocated, payload) in value_cells.items():
+        parsed = parse_hive_vk(blob, payload)
+        if parsed is None:
+            continue
+        key_offset = owner.get(relative)
+        key = keys.get(key_offset) if key_offset is not None else None
+        parsed.update(
+            {
+                "cell_offset": relative + HIVE_BASE_BLOCK_SIZE,
+                "cell_allocated": allocated,
+                "key_path": key_path(key_offset) if key_offset is not None else "",
+                "key_last_written": filetime_to_utc_iso(int(key["last_written"])) if key else "",
+            }
+        )
+        values.append(parsed)
+    key_rows = [
+        {
+            "cell_offset": offset + HIVE_BASE_BLOCK_SIZE,
+            "cell_allocated": bool(key["allocated"]),
+            "name": key["name"],
+            "key_path": key_path(offset),
+            "key_last_written": filetime_to_utc_iso(int(key["last_written"])),
+            "value_count": int(key["value_count"]),
+        }
+        for offset, key in keys.items()
+    ]
+    return {"keys": key_rows, "values": values, "cell_count": cell_count}
+
+
+def collect_native_hive_kakao_traces(path: Path, source_hashes: Mapping[str, str]) -> list[ArtifactRecord] | None:
+    """KakaoTalk traces from a native hive, one row per registry key/value (cell boundaries respected)."""
+    try:
+        blob = path.read_bytes()
+        walked = walk_registry_hive_values(blob)
+    except (OSError, RegistryHiveError):
+        return None
+    records: list[ArtifactRecord] = []
+    seen: set[tuple[str, str, str]] = set()
+    distinct_paths: set[str] = set()
+    for key in sorted(walked["keys"], key=lambda item: int(item["cell_offset"])):
+        matched = matched_kakao_terms(str(key["name"]))
+        if not matched:
+            continue
+        dedupe = ("key", str(key["key_path"]).lower(), "")
+        if dedupe in seen:
+            continue
+        seen.add(dedupe)
+        records.append(
+            build_kakao_candidate_record(
+                path,
+                source_hashes,
+                source_family="registry",
+                source_subtype="native-hive-key",
+                source_index=len(records),
+                candidate_kind="registry-key",
+                candidate_value=str(key["key_path"]),
+                matched_terms=matched,
+                source_offset=int(key["cell_offset"]),
+                metadata={
+                    "registry_key_path": key["key_path"],
+                    "registry_key_last_written": key["key_last_written"],
+                    "registry_value_count": key["value_count"],
+                    "cell_allocated": key["cell_allocated"],
+                    "scan_status": "native-hive-cell-walk",
+                    "evidence_nature": "registry-string-trace",
+                    "display_label": KAKAO_REGISTRY_TRACE_LABEL,
+                },
+            )
+        )
+    for value in sorted(walked["values"], key=lambda item: int(item["cell_offset"])):
+        strings = decode_registry_value_strings(int(value["value_type"]), bytes(value["data"]))
+        value_name = str(value["name"])
+        matched_strings = [(text, encoding) for text, encoding in strings if matched_kakao_terms(text)]
+        name_terms = matched_kakao_terms(value_name)
+        if not matched_strings and not name_terms:
+            continue
+        candidate_value = value_name if name_terms else matched_strings[0][0]
+        if name_terms and matched_strings:
+            candidate_value = f"{value_name} = {matched_strings[0][0]}"
+        elif name_terms and strings:
+            candidate_value = f"{value_name} = {strings[0][0]}"
+        dedupe = (str(value["key_path"]).lower(), value_name.lower(), normalize_candidate_value(candidate_value))
+        if dedupe in seen:
+            continue
+        seen.add(dedupe)
+        terms = sorted(set(name_terms).union(*(matched_kakao_terms(text) for text, _encoding in matched_strings)))
+        value_paths = sorted({path_value for text, _encoding in strings for path_value in extract_paths(text)})
+        distinct_paths.update(value_paths)
+        records.append(
+            build_kakao_candidate_record(
+                path,
+                source_hashes,
+                source_family="registry",
+                source_subtype="native-hive-value",
+                source_index=len(records),
+                candidate_kind=classify_candidate(candidate_value),
+                candidate_value=candidate_value,
+                matched_terms=terms,
+                source_offset=int(value["cell_offset"]),
+                metadata={
+                    "registry_key_path": value["key_path"],
+                    "registry_key_last_written": value["key_last_written"],
+                    "registry_value_name": value_name,
+                    "registry_value_type": value["value_type_name"],
+                    "registry_value_size": value["data_size"],
+                    "cell_allocated": value["cell_allocated"],
+                    "decoded_strings": [text for text, _encoding in strings[:REGISTRY_DECODED_STRING_LIMIT]],
+                    "decoded_string_encodings": sorted({encoding for _text, encoding in strings}),
+                    "decoded_string_count": len(strings),
+                    "decoded_strings_truncated": len(strings) > REGISTRY_DECODED_STRING_LIMIT,
+                    "value_path_candidates": value_paths,
+                    "scan_status": "native-hive-cell-walk",
+                    "evidence_nature": "registry-string-trace",
+                    "display_label": KAKAO_REGISTRY_TRACE_LABEL,
+                },
+            )
+        )
+    for record in records:
+        record.details["registry_trace_total"] = len(records)
+        record.details["registry_distinct_path_count"] = len(distinct_paths)
+        record.details["candidates_truncated"] = False
+    return records

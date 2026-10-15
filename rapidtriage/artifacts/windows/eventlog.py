@@ -113,14 +113,28 @@ EVENTLOG_TRIAGE_IDENTITY_KEYS = (
     "evtx_field_fidelity",
     "evtx_recovery_status",
     "evtx_allocation_status",
+    "evtx_record_state",
+    "evtx_decoder_version",
+    "event_label_ko",
+    "event_id_qualifiers",
+    "provider_guid",
+    "timestamp_status",
+    "timestamp_filetime",
+    "timestamp_100ns",
+    "event_data_source",
 )
 # Pivot fields kept only when non-empty (consumers read them with .get()).
 EVENTLOG_TRIAGE_PIVOT_KEYS = (
     "user_name",
+    "user_name_source",
     "subject_user_name",
     "target_user_name",
     "target_domain_name",
     "logon_type",
+    "logon_id",
+    "service_account_name",
+    "timestamp_raw_iso",
+    "evtx_decode_error",
     "source_ip",
     "source_port",
     "destination_ip",
@@ -181,8 +195,7 @@ EVTX_CHUNK_SIZE = 65536
 EVTX_CHUNK_HEADER_SIZE = 512
 EVTX_RECORD_MAGIC = b"**\x00\x00"
 EVTX_RECORD_HEADER_SIZE = 24
-MAX_NATIVE_EVTX_RECORDS = 10_000
-MAX_NATIVE_EVTX_CHUNKS = 4096
+# No record/chunk count caps: every chunk and record is walked (parser-quality r1 C1).
 MAX_NATIVE_EVTX_RECORD_SIZE = 16 * 1024 * 1024
 MAX_NATIVE_EVTX_STRINGS = 200
 MAX_NATIVE_EVTX_BINXML_TOKENS = 500
@@ -248,6 +261,7 @@ NATIVE_EVTX_CAPABILITIES = {
     ],
 }
 NATIVE_EVTX_GRAMMAR_PROFILE_VERSION = "evtx-binxml-grammar-coverage-v1"
+EVTX_FIELD_DECODED_STATUSES = frozenset({"basic-rendered", "template-substituted-partial", "decoded"})
 NATIVE_EVTX_VALIDATED_VALUE_TYPES = set(NATIVE_EVTX_CAPABILITIES["validated_value_types"])
 NATIVE_EVTX_TRIAGE_VALUE_TYPES = {
     "NullType",
@@ -260,96 +274,297 @@ NATIVE_EVTX_TRIAGE_VALUE_TYPES = {
     "ProcessingInstructionData",
 }
 
-EVENT_ID_CATEGORIES = {
-    "4624": ("logon-success", "Authentication success"),
-    "4625": ("logon-failure", "Authentication failure"),
-    "4634": ("logoff", "Account logoff"),
-    "4647": ("user-initiated-logoff", "User initiated logoff"),
-    "4648": ("explicit-credential-logon", "Explicit credential logon"),
-    "4616": ("system-time-changed", "System time changed"),
-    "4672": ("privileged-logon", "Special privileges assigned to new logon"),
-    "4688": ("process-created", "Process creation"),
-    "4697": ("service-installed", "Service installed"),
-    "4698": ("scheduled-task-created", "Scheduled task created"),
-    "4699": ("scheduled-task-deleted", "Scheduled task deleted"),
-    "4700": ("scheduled-task-enabled", "Scheduled task enabled"),
-    "4701": ("scheduled-task-disabled", "Scheduled task disabled"),
-    "4702": ("scheduled-task-updated", "Scheduled task updated"),
-    "4719": ("audit-policy-changed", "System audit policy changed"),
-    "4720": ("user-created", "User account created"),
-    "4722": ("user-enabled", "User account enabled"),
-    "4724": ("password-reset", "Password reset attempted"),
-    "4725": ("user-disabled", "User account disabled"),
-    "4726": ("user-deleted", "User account deleted"),
-    "4728": ("group-member-added", "Member added to global group"),
-    "4732": ("local-group-member-added", "Member added to local group"),
-    "4738": ("user-changed", "User account changed"),
-    "4739": ("domain-policy-changed", "Domain policy changed"),
-    "4740": ("account-locked", "User account locked"),
-    "4741": ("computer-created", "Computer account created"),
-    "4756": ("universal-group-member-added", "Member added to universal group"),
-    "4768": ("kerberos-tgt-request", "Kerberos TGT request"),
-    "4769": ("kerberos-service-ticket", "Kerberos service ticket request"),
-    "4771": ("kerberos-preauth-failure", "Kerberos pre-authentication failed"),
-    "4776": ("credential-validation", "Credential validation"),
-    "4778": ("rdp-session-reconnected", "Remote session reconnected"),
-    "4779": ("rdp-session-disconnected", "Remote session disconnected"),
-    "4800": ("workstation-locked", "Workstation locked"),
-    "4801": ("workstation-unlocked", "Workstation unlocked"),
-    "5140": ("network-share-accessed", "Network share object accessed"),
-    "5145": ("network-share-detailed-access", "Detailed file share access checked"),
-    "5156": ("firewall-connection-allowed", "Windows Filtering Platform permitted connection"),
-    "5158": ("firewall-bind-allowed", "Windows Filtering Platform permitted bind"),
-    "6416": ("external-device-recognized", "External device recognized"),
-    "1102": ("audit-log-cleared", "Audit log cleared"),
-    "104": ("system-log-cleared", "Event log cleared"),
-    "106": ("scheduled-task-registered", "Task Scheduler task registered"),
-    "140": ("scheduled-task-updated", "Task Scheduler task updated"),
-    "141": ("scheduled-task-deleted", "Task Scheduler task deleted"),
-    "200": ("scheduled-task-started", "Task Scheduler action started"),
-    "201": ("scheduled-task-completed", "Task Scheduler action completed"),
-    "1149": ("rdp-authentication-succeeded", "Terminal Services user authentication succeeded"),
-    "21": ("rdp-session-logon", "Terminal Services session logon"),
-    "24": ("rdp-session-disconnected", "Terminal Services session disconnected"),
-    "25": ("rdp-session-reconnected", "Terminal Services session reconnected"),
-    "1116": ("defender-malware-detected", "Microsoft Defender malware detected"),
-    "1117": ("defender-remediation-action", "Microsoft Defender remediation action"),
-    "5007": ("defender-config-changed", "Microsoft Defender configuration changed"),
-    "2004": ("firewall-rule-added", "Windows Firewall rule added"),
-    "2005": ("firewall-rule-modified", "Windows Firewall rule modified"),
-    "2006": ("firewall-rule-deleted", "Windows Firewall rule deleted"),
-    "5857": ("wmi-activity", "WMI provider started"),
-    "5858": ("wmi-activity-error", "WMI activity error"),
-    "5861": ("wmi-permanent-event", "WMI permanent event consumer activity"),
-    "7045": ("service-installed", "Service installed"),
-    "4103": ("powershell-module", "PowerShell module logging"),
-    "4104": ("powershell-script-block", "PowerShell script block"),
-    "1": ("sysmon-process-created", "Sysmon process creation"),
-    "3": ("sysmon-network-connection", "Sysmon network connection"),
-    "7": ("sysmon-image-loaded", "Sysmon image loaded"),
-    "11": ("sysmon-file-created", "Sysmon file created"),
-    "13": ("sysmon-registry-value-set", "Sysmon registry value set"),
-    "22": ("sysmon-dns-query", "Sysmon DNS query"),
-}
+# Event categories are keyed by (provider, EventID); exports without a
+# provider fall back to (channel, EventID). An EventID alone never selects a
+# category: 104 from Kernel-Cache, 1/3/22 from non-Sysmon providers, or 21/24
+# from non-TerminalServices providers stay generic "event" (parser-quality r1 C3).
+PROVIDER_SECURITY_AUDITING = "Microsoft-Windows-Security-Auditing"
+PROVIDER_EVENTLOG = "Microsoft-Windows-Eventlog"
+PROVIDER_SERVICE_CONTROL_MANAGER = "Service Control Manager"
+PROVIDER_TERMINAL_LSM = "Microsoft-Windows-TerminalServices-LocalSessionManager"
+PROVIDER_TERMINAL_RCM = "Microsoft-Windows-TerminalServices-RemoteConnectionManager"
+PROVIDER_SYSMON = "Microsoft-Windows-Sysmon"
+PROVIDER_FIREWALL = "Microsoft-Windows-Windows Firewall With Advanced Security"
+PROVIDER_DEFENDER = "Microsoft-Windows-Windows Defender"
+PROVIDER_WMI_ACTIVITY = "Microsoft-Windows-WMI-Activity"
+PROVIDER_POWERSHELL = "Microsoft-Windows-PowerShell"
+PROVIDER_TASK_SCHEDULER = "Microsoft-Windows-TaskScheduler"
 
-HIGH_RISK_EVENT_IDS = {
-    "1102",
-    "104",
-    "4672",
-    "4697",
-    "4698",
-    "4719",
-    "4720",
-    "4724",
-    "4726",
-    "4728",
-    "4732",
-    "4756",
-    "7045",
-    "4104",
-    "1116",
-    "5007",
-    "5861",
+EVENT_CATEGORY_TABLE: tuple[tuple[tuple[str, ...], tuple[str, ...], dict[str, tuple[str, str]]], ...] = (
+    (
+        (PROVIDER_SECURITY_AUDITING,),
+        ("Security",),
+        {
+            "4624": ("logon-success", "Authentication success"),
+            "4625": ("logon-failure", "Authentication failure"),
+            "4634": ("logoff", "Account logoff"),
+            "4647": ("user-initiated-logoff", "User initiated logoff"),
+            "4648": ("explicit-credential-logon", "Explicit credential logon"),
+            "4616": ("system-time-changed", "System time changed"),
+            "4672": ("privileged-logon", "Special privileges assigned to new logon"),
+            "4688": ("process-created", "Process creation"),
+            "4697": ("service-installed", "Service installed"),
+            "4698": ("scheduled-task-created", "Scheduled task created"),
+            "4699": ("scheduled-task-deleted", "Scheduled task deleted"),
+            "4700": ("scheduled-task-enabled", "Scheduled task enabled"),
+            "4701": ("scheduled-task-disabled", "Scheduled task disabled"),
+            "4702": ("scheduled-task-updated", "Scheduled task updated"),
+            "4719": ("audit-policy-changed", "System audit policy changed"),
+            "4720": ("user-created", "User account created"),
+            "4722": ("user-enabled", "User account enabled"),
+            "4724": ("password-reset", "Password reset attempted"),
+            "4725": ("user-disabled", "User account disabled"),
+            "4726": ("user-deleted", "User account deleted"),
+            "4728": ("group-member-added", "Member added to global group"),
+            "4732": ("local-group-member-added", "Member added to local group"),
+            "4738": ("user-changed", "User account changed"),
+            "4739": ("domain-policy-changed", "Domain policy changed"),
+            "4740": ("account-locked", "User account locked"),
+            "4741": ("computer-created", "Computer account created"),
+            "4756": ("universal-group-member-added", "Member added to universal group"),
+            "4768": ("kerberos-tgt-request", "Kerberos TGT request"),
+            "4769": ("kerberos-service-ticket", "Kerberos service ticket request"),
+            "4771": ("kerberos-preauth-failure", "Kerberos pre-authentication failed"),
+            "4776": ("credential-validation", "Credential validation"),
+            "4778": ("session-reconnected", "Session reconnected to a window station"),
+            "4779": ("session-disconnected", "Session disconnected from a window station"),
+            "4800": ("workstation-locked", "Workstation locked"),
+            "4801": ("workstation-unlocked", "Workstation unlocked"),
+            "5140": ("network-share-accessed", "Network share object accessed"),
+            "5145": ("network-share-detailed-access", "Detailed file share access checked"),
+            "5156": ("firewall-connection-allowed", "Windows Filtering Platform permitted connection"),
+            "5158": ("firewall-bind-allowed", "Windows Filtering Platform permitted bind"),
+            "6416": ("external-device-recognized", "External device recognized"),
+        },
+    ),
+    (
+        (PROVIDER_EVENTLOG,),
+        ("Security",),
+        {
+            "1102": ("audit-log-cleared", "Audit log cleared"),
+            "1100": ("eventlog-service-shutdown", "Event logging service shut down"),
+            "1104": ("security-log-full", "Security log is full"),
+        },
+    ),
+    ((PROVIDER_EVENTLOG,), ("System",), {"104": ("system-log-cleared", "Event log cleared")}),
+    (
+        (PROVIDER_SERVICE_CONTROL_MANAGER,),
+        ("System",),
+        {
+            "7045": ("service-installed", "Service installed"),
+            "7034": ("service-crashed", "Service terminated unexpectedly"),
+            "7036": ("service-state-changed", "Service entered a new state"),
+            "7040": ("service-start-type-changed", "Service start type changed"),
+        },
+    ),
+    (
+        (PROVIDER_TASK_SCHEDULER,),
+        ("Microsoft-Windows-TaskScheduler/Operational",),
+        {
+            "106": ("scheduled-task-registered", "Task Scheduler task registered"),
+            "140": ("scheduled-task-updated", "Task Scheduler task updated"),
+            "141": ("scheduled-task-deleted", "Task Scheduler task deleted"),
+            "200": ("scheduled-task-started", "Task Scheduler action started"),
+            "201": ("scheduled-task-completed", "Task Scheduler action completed"),
+        },
+    ),
+    (
+        (PROVIDER_TERMINAL_RCM,),
+        ("Microsoft-Windows-TerminalServices-RemoteConnectionManager/Operational",),
+        {"1149": ("rdp-authentication-succeeded", "Terminal Services user authentication succeeded")},
+    ),
+    (
+        (PROVIDER_TERMINAL_LSM,),
+        ("Microsoft-Windows-TerminalServices-LocalSessionManager/Operational",),
+        {
+            "21": ("rdp-session-logon", "Terminal Services session logon"),
+            "22": ("rdp-shell-start", "Terminal Services shell start"),
+            "23": ("rdp-session-logoff", "Terminal Services session logoff"),
+            "24": ("rdp-session-disconnected", "Terminal Services session disconnected"),
+            "25": ("rdp-session-reconnected", "Terminal Services session reconnected"),
+        },
+    ),
+    (
+        (PROVIDER_DEFENDER,),
+        ("Microsoft-Windows-Windows Defender/Operational",),
+        {
+            "1116": ("defender-malware-detected", "Microsoft Defender malware detected"),
+            "1117": ("defender-remediation-action", "Microsoft Defender remediation action"),
+            "5001": ("defender-realtime-protection-disabled", "Microsoft Defender real-time protection disabled"),
+            "5007": ("defender-config-changed", "Microsoft Defender configuration changed"),
+        },
+    ),
+    (
+        (PROVIDER_FIREWALL,),
+        ("Microsoft-Windows-Windows Firewall With Advanced Security/Firewall",),
+        {
+            "2004": ("firewall-rule-added", "Windows Firewall rule added"),
+            "2005": ("firewall-rule-modified", "Windows Firewall rule modified"),
+            "2006": ("firewall-rule-deleted", "Windows Firewall rule deleted"),
+            # Windows 11 22H2+ IDs for the same actions (RuleId/RuleName/ApplicationPath payload).
+            "2097": ("firewall-rule-added", "Windows Firewall rule added"),
+            "2099": ("firewall-rule-modified", "Windows Firewall rule modified"),
+            "2052": ("firewall-rule-deleted", "Windows Firewall rule deleted"),
+        },
+    ),
+    (
+        (PROVIDER_WMI_ACTIVITY,),
+        ("Microsoft-Windows-WMI-Activity/Operational",),
+        {
+            "5857": ("wmi-activity", "WMI provider started"),
+            "5858": ("wmi-activity-error", "WMI activity error"),
+            "5861": ("wmi-permanent-event", "WMI permanent event consumer activity"),
+        },
+    ),
+    (
+        (PROVIDER_POWERSHELL,),
+        ("Microsoft-Windows-PowerShell/Operational",),
+        {
+            "4103": ("powershell-module", "PowerShell module logging"),
+            "4104": ("powershell-script-block", "PowerShell script block"),
+        },
+    ),
+    (
+        (PROVIDER_SYSMON,),
+        ("Microsoft-Windows-Sysmon/Operational",),
+        {
+            "1": ("sysmon-process-created", "Sysmon process creation"),
+            "3": ("sysmon-network-connection", "Sysmon network connection"),
+            "7": ("sysmon-image-loaded", "Sysmon image loaded"),
+            "11": ("sysmon-file-created", "Sysmon file created"),
+            "13": ("sysmon-registry-value-set", "Sysmon registry value set"),
+            "22": ("sysmon-dns-query", "Sysmon DNS query"),
+        },
+    ),
+)
+
+
+def _event_category_index(position: int) -> dict[tuple[str, str], tuple[str, str]]:
+    index: dict[tuple[str, str], tuple[str, str]] = {}
+    for entry in EVENT_CATEGORY_TABLE:
+        for key in entry[position]:
+            normalized = re.sub(r"[^a-z0-9]", "", key.lower())
+            for event_id, value in entry[2].items():
+                index.setdefault((normalized, event_id), value)
+    return index
+
+
+EVENT_CATEGORY_BY_PROVIDER = _event_category_index(0)
+EVENT_CATEGORY_BY_CHANNEL = _event_category_index(1)
+EVENT_CATEGORY_DESCRIPTIONS = {
+    category: description for entry in EVENT_CATEGORY_TABLE for category, description in entry[2].values()
+}
+# Flat EventID view kept for backward compatibility (descriptions only); it
+# is never used to classify an event.
+EVENT_ID_CATEGORIES = {
+    event_id: value for entry in reversed(EVENT_CATEGORY_TABLE) for event_id, value in entry[2].items()
+}
+HIGH_RISK_EVENT_CATEGORIES = frozenset(
+    {
+        "audit-log-cleared",
+        "system-log-cleared",
+        "privileged-logon",
+        "service-installed",
+        "scheduled-task-created",
+        "audit-policy-changed",
+        "user-created",
+        "password-reset",
+        "user-deleted",
+        "group-member-added",
+        "local-group-member-added",
+        "universal-group-member-added",
+        "powershell-script-block",
+        "defender-malware-detected",
+        "defender-config-changed",
+        "defender-realtime-protection-disabled",
+        "wmi-permanent-event",
+    }
+)
+EVENT_CATEGORY_LABELS_KO = {
+    "event": "일반 이벤트",
+    "logon-success": "로그온 성공",
+    "logon-failure": "로그온 실패",
+    "logoff": "로그오프",
+    "user-initiated-logoff": "사용자 로그오프",
+    "explicit-credential-logon": "명시적 자격 증명 로그온",
+    "system-time-changed": "시스템 시각 변경",
+    "privileged-logon": "특수 권한 로그온",
+    "process-created": "프로세스 생성",
+    "service-installed": "서비스 설치",
+    "service-crashed": "서비스 비정상 종료",
+    "service-state-changed": "서비스 상태 변경",
+    "service-start-type-changed": "서비스 시작 유형 변경",
+    "scheduled-task-created": "예약 작업 생성",
+    "scheduled-task-deleted": "예약 작업 삭제",
+    "scheduled-task-enabled": "예약 작업 사용",
+    "scheduled-task-disabled": "예약 작업 사용 안 함",
+    "scheduled-task-updated": "예약 작업 변경",
+    "scheduled-task-registered": "예약 작업 등록",
+    "scheduled-task-started": "예약 작업 실행 시작",
+    "scheduled-task-completed": "예약 작업 실행 완료",
+    "audit-policy-changed": "감사 정책 변경",
+    "user-created": "계정 생성",
+    "user-enabled": "계정 사용",
+    "password-reset": "암호 재설정 시도",
+    "user-disabled": "계정 사용 안 함",
+    "user-deleted": "계정 삭제",
+    "group-member-added": "전역 그룹 구성원 추가",
+    "local-group-member-added": "로컬 그룹 구성원 추가",
+    "user-changed": "계정 변경",
+    "domain-policy-changed": "도메인 정책 변경",
+    "account-locked": "계정 잠금",
+    "computer-created": "컴퓨터 계정 생성",
+    "universal-group-member-added": "유니버설 그룹 구성원 추가",
+    "kerberos-tgt-request": "Kerberos TGT 요청",
+    "kerberos-service-ticket": "Kerberos 서비스 티켓 요청",
+    "kerberos-preauth-failure": "Kerberos 사전 인증 실패",
+    "credential-validation": "자격 증명 확인",
+    "session-reconnected": "세션 재연결",
+    "session-disconnected": "세션 연결 끊김",
+    "workstation-locked": "워크스테이션 잠금",
+    "workstation-unlocked": "워크스테이션 잠금 해제",
+    "network-share-accessed": "네트워크 공유 접근",
+    "network-share-detailed-access": "네트워크 공유 세부 접근",
+    "firewall-connection-allowed": "WFP 연결 허용",
+    "firewall-bind-allowed": "WFP 바인드 허용",
+    "external-device-recognized": "외부 장치 인식",
+    "audit-log-cleared": "보안 로그 삭제",
+    "system-log-cleared": "이벤트 로그 삭제",
+    "eventlog-service-shutdown": "이벤트 로그 서비스 종료",
+    "security-log-full": "보안 로그 가득 참",
+    "rdp-authentication-succeeded": "RDP 인증 성공",
+    "rdp-session-logon": "RDP 세션 로그온",
+    "rdp-shell-start": "RDP 셸 시작",
+    "rdp-session-logoff": "RDP 세션 로그오프",
+    "rdp-session-disconnected": "RDP 세션 연결 끊김",
+    "rdp-session-reconnected": "RDP 세션 재연결",
+    "local-session-logon": "로컬 세션 로그온",
+    "local-shell-start": "로컬 셸 시작",
+    "local-session-logoff": "로컬 세션 로그오프",
+    "local-session-disconnected": "로컬 세션 연결 끊김",
+    "local-session-reconnected": "로컬 세션 재연결",
+    "defender-malware-detected": "Defender 악성코드 탐지",
+    "defender-remediation-action": "Defender 조치",
+    "defender-realtime-protection-disabled": "Defender 실시간 보호 해제",
+    "defender-config-changed": "Defender 설정 변경",
+    "firewall-rule-added": "방화벽 규칙 추가",
+    "firewall-rule-modified": "방화벽 규칙 변경",
+    "firewall-rule-deleted": "방화벽 규칙 삭제",
+    "wmi-activity": "WMI 공급자 활동",
+    "wmi-activity-error": "WMI 활동 오류",
+    "wmi-permanent-event": "WMI 영구 이벤트",
+    "powershell-module": "PowerShell 모듈 로깅",
+    "powershell-script-block": "PowerShell 스크립트 블록",
+    "sysmon-process-created": "Sysmon 프로세스 생성",
+    "sysmon-network-connection": "Sysmon 네트워크 연결",
+    "sysmon-image-loaded": "Sysmon 이미지 로드",
+    "sysmon-file-created": "Sysmon 파일 생성",
+    "sysmon-registry-value-set": "Sysmon 레지스트리 값 설정",
+    "sysmon-dns-query": "Sysmon DNS 질의",
+    "usb-device-event": "USB/PnP 장치 이벤트",
+    "wlan-autoconfig-event": "무선랜 이벤트",
+    "print-service-event": "인쇄 이벤트",
+    "bits-client-event": "BITS 전송 이벤트",
 }
 EVENT_FAMILY_BY_CATEGORY = {
     "logon-success": "authentication",
@@ -362,6 +577,21 @@ EVENT_FAMILY_BY_CATEGORY = {
     "rdp-session-logon": "remote-access",
     "rdp-session-reconnected": "remote-access",
     "rdp-session-disconnected": "remote-access",
+    "rdp-session-logoff": "remote-access",
+    "rdp-shell-start": "remote-access",
+    "session-reconnected": "authentication",
+    "session-disconnected": "authentication",
+    "local-session-logon": "authentication",
+    "local-shell-start": "authentication",
+    "local-session-logoff": "authentication",
+    "local-session-disconnected": "authentication",
+    "local-session-reconnected": "authentication",
+    "service-crashed": "service",
+    "service-state-changed": "service",
+    "service-start-type-changed": "service",
+    "eventlog-service-shutdown": "defense-evasion",
+    "security-log-full": "logging",
+    "defender-realtime-protection-disabled": "defense-evasion",
     "process-created": "execution",
     "powershell-module": "execution",
     "powershell-script-block": "execution",
@@ -449,6 +679,7 @@ SUSPICIOUS_TERMS = (
 BUILTIN_EVENT_RULES = (
     {
         "id": "RT-EVTX-LOG-CLEARED",
+        "providers": {PROVIDER_EVENTLOG},
         "title": "Windows event log was cleared",
         "level": "high",
         "event_ids": {"1102", "104"},
@@ -459,6 +690,7 @@ BUILTIN_EVENT_RULES = (
     },
     {
         "id": "RT-EVTX-PS-ENCODED",
+        "providers": {PROVIDER_POWERSHELL, PROVIDER_SECURITY_AUDITING, PROVIDER_SYSMON},
         "title": "Suspicious encoded PowerShell activity",
         "level": "high",
         "event_ids": {"4103", "4104", "4688", "1"},
@@ -470,6 +702,7 @@ BUILTIN_EVENT_RULES = (
     },
     {
         "id": "RT-EVTX-RDP-LOGON",
+        "providers": {PROVIDER_SECURITY_AUDITING},
         "title": "Remote interactive logon",
         "level": "medium",
         "event_ids": {"4624"},
@@ -481,6 +714,7 @@ BUILTIN_EVENT_RULES = (
     },
     {
         "id": "RT-EVTX-FAILED-LOGON",
+        "providers": {PROVIDER_SECURITY_AUDITING},
         "title": "Failed account logon",
         "level": "low",
         "event_ids": {"4625"},
@@ -491,6 +725,7 @@ BUILTIN_EVENT_RULES = (
     },
     {
         "id": "RT-EVTX-PRIVILEGED-LOGON",
+        "providers": {PROVIDER_SECURITY_AUDITING},
         "title": "Privileged logon rights assigned",
         "level": "medium",
         "event_ids": {"4672"},
@@ -501,6 +736,7 @@ BUILTIN_EVENT_RULES = (
     },
     {
         "id": "RT-EVTX-SERVICE-INSTALLED",
+        "providers": {PROVIDER_SECURITY_AUDITING, PROVIDER_SERVICE_CONTROL_MANAGER},
         "title": "Service installation event",
         "level": "medium",
         "event_ids": {"4697", "7045"},
@@ -511,6 +747,7 @@ BUILTIN_EVENT_RULES = (
     },
     {
         "id": "RT-EVTX-SCHEDULED-TASK",
+        "providers": {PROVIDER_SECURITY_AUDITING},
         "title": "Scheduled task created or updated",
         "level": "medium",
         "event_ids": {"4698", "4702"},
@@ -521,6 +758,7 @@ BUILTIN_EVENT_RULES = (
     },
     {
         "id": "RT-EVTX-ACCOUNT-CREATED",
+        "providers": {PROVIDER_SECURITY_AUDITING},
         "title": "Windows account created",
         "level": "medium",
         "event_ids": {"4720"},
@@ -531,6 +769,7 @@ BUILTIN_EVENT_RULES = (
     },
     {
         "id": "RT-EVTX-GROUP-MEMBER-ADDED",
+        "providers": {PROVIDER_SECURITY_AUDITING},
         "title": "Security group membership changed",
         "level": "medium",
         "event_ids": {"4728", "4732"},
@@ -541,6 +780,7 @@ BUILTIN_EVENT_RULES = (
     },
     {
         "id": "RT-EVTX-SYSMON-NETWORK",
+        "providers": {PROVIDER_SYSMON},
         "title": "Sysmon network connection event",
         "level": "info",
         "event_ids": {"3"},
@@ -551,6 +791,7 @@ BUILTIN_EVENT_RULES = (
     },
     {
         "id": "RT-EVTX-EXPLICIT-CREDS",
+        "providers": {PROVIDER_SECURITY_AUDITING},
         "title": "Explicit credential logon",
         "level": "medium",
         "event_ids": {"4648"},
@@ -561,6 +802,7 @@ BUILTIN_EVENT_RULES = (
     },
     {
         "id": "RT-EVTX-SUSPICIOUS-PROCESS",
+        "providers": {PROVIDER_SECURITY_AUDITING, PROVIDER_SYSMON},
         "title": "Suspicious process creation command",
         "level": "high",
         "event_ids": {"4688", "1"},
@@ -572,6 +814,7 @@ BUILTIN_EVENT_RULES = (
     },
     {
         "id": "RT-EVTX-ACCOUNT-DELETED",
+        "providers": {PROVIDER_SECURITY_AUDITING},
         "title": "Windows account deleted",
         "level": "medium",
         "event_ids": {"4726"},
@@ -582,6 +825,7 @@ BUILTIN_EVENT_RULES = (
     },
     {
         "id": "RT-EVTX-ACCOUNT-DISABLED",
+        "providers": {PROVIDER_SECURITY_AUDITING},
         "title": "Windows account disabled",
         "level": "low",
         "event_ids": {"4725"},
@@ -592,6 +836,7 @@ BUILTIN_EVENT_RULES = (
     },
     {
         "id": "RT-EVTX-PASSWORD-RESET",
+        "providers": {PROVIDER_SECURITY_AUDITING},
         "title": "Password reset attempted",
         "level": "medium",
         "event_ids": {"4724"},
@@ -602,6 +847,7 @@ BUILTIN_EVENT_RULES = (
     },
     {
         "id": "RT-EVTX-ACCOUNT-LOCKED",
+        "providers": {PROVIDER_SECURITY_AUDITING},
         "title": "Account lockout",
         "level": "low",
         "event_ids": {"4740"},
@@ -612,6 +858,7 @@ BUILTIN_EVENT_RULES = (
     },
     {
         "id": "RT-EVTX-KERBEROS-PREAUTH-FAIL",
+        "providers": {PROVIDER_SECURITY_AUDITING},
         "title": "Kerberos pre-authentication failure",
         "level": "low",
         "event_ids": {"4771"},
@@ -622,6 +869,7 @@ BUILTIN_EVENT_RULES = (
     },
     {
         "id": "RT-EVTX-SYSTEM-TIME-CHANGED",
+        "providers": {PROVIDER_SECURITY_AUDITING},
         "title": "System time changed",
         "level": "medium",
         "event_ids": {"4616"},
@@ -632,6 +880,7 @@ BUILTIN_EVENT_RULES = (
     },
     {
         "id": "RT-EVTX-AUDIT-POLICY-CHANGED",
+        "providers": {PROVIDER_SECURITY_AUDITING},
         "title": "Audit policy changed",
         "level": "high",
         "event_ids": {"4719"},
@@ -642,12 +891,14 @@ BUILTIN_EVENT_RULES = (
     },
     {
         "id": "RT-EVTX-RDP-SESSION",
+        "providers": {PROVIDER_TERMINAL_LSM, PROVIDER_TERMINAL_RCM},
         "title": "Terminal Services RDP session activity",
         "level": "medium",
-        "event_ids": {"1149", "21", "22", "24", "25", "4778", "4779"},
+        "event_ids": {"1149", "21", "22", "24", "25"},
         "categories": {
             "rdp-authentication-succeeded",
             "rdp-session-logon",
+            "rdp-shell-start",
             "rdp-session-reconnected",
             "rdp-session-disconnected",
         },
@@ -657,6 +908,7 @@ BUILTIN_EVENT_RULES = (
     },
     {
         "id": "RT-EVTX-WMI-ACTIVITY",
+        "providers": {PROVIDER_WMI_ACTIVITY},
         "title": "WMI activity of interest",
         "level": "medium",
         "event_ids": {"5857", "5858", "5861"},
@@ -667,6 +919,7 @@ BUILTIN_EVENT_RULES = (
     },
     {
         "id": "RT-EVTX-DEFENDER-DETECTION",
+        "providers": {PROVIDER_DEFENDER},
         "title": "Microsoft Defender malware detection",
         "level": "high",
         "event_ids": {"1116", "1117"},
@@ -677,6 +930,7 @@ BUILTIN_EVENT_RULES = (
     },
     {
         "id": "RT-EVTX-DEFENDER-CONFIG",
+        "providers": {PROVIDER_DEFENDER},
         "title": "Microsoft Defender configuration changed",
         "level": "medium",
         "event_ids": {"5007"},
@@ -687,9 +941,10 @@ BUILTIN_EVENT_RULES = (
     },
     {
         "id": "RT-EVTX-FIREWALL-RULE-CHANGE",
+        "providers": {PROVIDER_FIREWALL},
         "title": "Windows Firewall rule changed",
         "level": "medium",
-        "event_ids": {"2004", "2005", "2006"},
+        "event_ids": {"2004", "2005", "2006", "2097", "2099", "2052"},
         "categories": {"firewall-rule-added", "firewall-rule-modified", "firewall-rule-deleted"},
         "mitre_tags": ["attack.defense-evasion", "attack.command-and-control"],
         "risk_flags": ["firewall-rule-change"],
@@ -697,6 +952,7 @@ BUILTIN_EVENT_RULES = (
     },
     {
         "id": "RT-EVTX-USB-DEVICE",
+        "providers": {PROVIDER_SECURITY_AUDITING},
         "title": "External device recognized",
         "level": "info",
         "event_ids": {"6416"},
@@ -743,6 +999,7 @@ BUILTIN_EVENT_RULES = (
     },
     {
         "id": "RT-EVTX-SHARE-ACCESS",
+        "providers": {PROVIDER_SECURITY_AUDITING},
         "title": "Network share access",
         "level": "info",
         "event_ids": {"5140", "5145"},
@@ -753,6 +1010,7 @@ BUILTIN_EVENT_RULES = (
     },
     {
         "id": "RT-EVTX-SYSMON-DNS",
+        "providers": {PROVIDER_SYSMON},
         "title": "Sysmon DNS query",
         "level": "info",
         "event_ids": {"22"},
@@ -763,6 +1021,7 @@ BUILTIN_EVENT_RULES = (
     },
     {
         "id": "RT-EVTX-SYSMON-REGISTRY",
+        "providers": {PROVIDER_SYSMON},
         "title": "Sysmon registry value set",
         "level": "medium",
         "event_ids": {"13"},
@@ -773,6 +1032,7 @@ BUILTIN_EVENT_RULES = (
     },
     {
         "id": "RT-EVTX-SYSMON-IMAGELOAD",
+        "providers": {PROVIDER_SYSMON},
         "title": "Sysmon image load",
         "level": "info",
         "event_ids": {"7"},
@@ -784,6 +1044,7 @@ BUILTIN_EVENT_RULES = (
     },
     {
         "id": "RT-EVTX-VSC-DELETION",
+        "providers": {PROVIDER_POWERSHELL, PROVIDER_SECURITY_AUDITING, PROVIDER_SYSMON},
         "title": "Volume shadow copy deletion command",
         "level": "critical",
         "event_ids": {"4103", "4104", "4688", "1"},
@@ -1525,7 +1786,7 @@ class WindowsEventLogProvider:
                             detection = triage_eventlog_record(detection)
                         detection_spool.write(json.dumps(dataclasses.asdict(detection), ensure_ascii=False, default=json_default))
                         detection_spool.write("\n")
-                    if str(record.details.get("event_id") or "") in LOGON_SESSION_EVENT_IDS:
+                    if is_logon_session_event(record.details):
                         logon_inputs.append(logon_session_input_record(record))
                     if triage:
                         record = triage_eventlog_record(record)
@@ -1566,6 +1827,7 @@ class WindowsEventLogProvider:
                             native_record_candidate_count=native_stats.get("candidate_count", 0),
                             native_chunk_count=native_stats.get("chunk_count", 0),
                             structure_rows=self.structure_rows,
+                            native_stats=native_stats,
                         )
                     )
                 elif suffix in ETL_SUFFIXES:
@@ -1705,7 +1967,16 @@ def collect_native_evtx_events(
     record_detail: str = EVENTLOG_RECORD_DETAIL_FULL,
     stats: dict[str, int] | None = None,
 ) -> Iterable[ArtifactRecord]:
-    """Yield native EVTX rows.
+    """Yield native EVTX rows, walking the file chunk by chunk (no record cap).
+
+    Every record of every chunk is visited in file order with one 64 KiB
+    chunk held in memory at a time. Live records (active chunks, header walk
+    up to the free-space offset) are decoded with the chunk BinXML decoder;
+    slack hits and records of inactive chunks are decoded too and labelled
+    (``evtx_record_state``). A slack/inactive copy of a live record id is a
+    duplicate, not an event: it is counted (``slack_duplicate_count``) and
+    only emitted as an ``eventlog-record-candidate`` structure row.
+    Regions without a chunk header fall back to the legacy record scan.
 
     ``structure_rows=False`` suppresses the ``eventlog-chunk`` and
     ``eventlog-record-candidate`` structural rows (still counted in
@@ -1714,207 +1985,512 @@ def collect_native_evtx_events(
     """
     counters = stats if stats is not None else {}
     full_detail = record_detail != EVENTLOG_RECORD_DETAIL_TRIAGE
+
+    def bump(key: str, amount: int = 1) -> None:
+        counters[key] = counters.get(key, 0) + amount
+
     try:
         with open_evtx_binary_view(path) as blob:
             if not blob_startswith(blob, EVTX_FILE_SIGNATURE):
                 return
-
             source_hashes = file_hashes(path)
-            for chunk_index, chunk in enumerate(iter_native_evtx_chunks(blob)):
-                counters["chunk_count"] = counters.get("chunk_count", 0) + 1
+            file_header = native_evtx_file_header(blob)
+            declared_chunks = read_u16(blob, 42)
+            live_ids = native_evtx_live_record_ids(blob, declared_chunks)
+            recovered_ids: set[int] = set()
+            context = NativeEvtxFileContext(
+                path=path,
+                blob=blob,
+                source_hashes=source_hashes,
+                file_header=file_header,
+                message_catalog=message_catalog,
+                full_detail=full_detail,
+                filetime_upper_bound=filetime_now_plus_one_day(),
+            )
+            source_index = 0
+            for kind, first, second in iter_native_evtx_regions(blob):
+                if kind == "gap":
+                    for candidate in iter_evtx_record_candidates(blob, start=first, end=second):
+                        if not candidate.parseable:
+                            bump("candidate_count")
+                            if structure_rows:
+                                yield native_evtx_record_candidate_record(path, source_index, source_hashes, blob, candidate)
+                            source_index += 1
+                            continue
+                        record = build_native_evtx_event_record(
+                            context,
+                            source_index=source_index,
+                            candidate=candidate,
+                            record_state=EVTX_RECORD_STATE_UNCHUNKED,
+                            decoded=None,
+                            decode_error="",
+                            chunk_header=None,
+                            counters=counters,
+                        )
+                        source_index += 1
+                        yield record
+                    continue
+                chunk_index, chunk_offset = first, second
+                chunk = bytes(blob[chunk_offset : chunk_offset + EVTX_CHUNK_SIZE])
+                active = chunk_index < declared_chunks
+                bump("chunk_count")
+                bump("active_chunk_count" if active else "inactive_chunk_count")
+                chunk_header = native_evtx_chunk_header(chunk, chunk_offset)
                 if structure_rows:
-                    yield native_evtx_chunk_record(path, chunk_index, source_hashes, blob, chunk)
-
-            previous_record_id: int | None = None
-            # Records are visited in file order, so consecutive records share
-            # a chunk: slice each chunk once and parse each of its template
-            # definitions once (the parse is a pure function of the bytes).
-            cached_chunk_offset = -1
-            chunk_data = b""
-            template_cache: dict[tuple[int, int], tuple[dict[int, str], dict[str, str], list[str]]] = {}
-            for source_index, candidate in enumerate(iter_evtx_record_candidates(blob)):
-                if not candidate.parseable:
-                    counters["candidate_count"] = counters.get("candidate_count", 0) + 1
-                    if structure_rows:
-                        yield native_evtx_record_candidate_record(path, source_index, source_hashes, blob, candidate)
-                    continue
-                offset = candidate.offset
-                record_blob = candidate.record_blob
-                record_id = read_u64(record_blob, 8)
-                timestamp = filetime_to_iso(read_u64(record_blob, 16))
-                payload = record_blob[EVTX_RECORD_HEADER_SIZE:]
-                binxml = parse_native_evtx_binxml(payload)
-                chunk_offset = (
-                    EVTX_FILE_HEADER_SIZE
-                    + ((offset - EVTX_FILE_HEADER_SIZE) // EVTX_CHUNK_SIZE) * EVTX_CHUNK_SIZE
-                    if offset >= EVTX_FILE_HEADER_SIZE
-                    else 0
-                )
-                if chunk_offset != cached_chunk_offset:
-                    chunk_data = blob[chunk_offset : min(len(blob), chunk_offset + EVTX_CHUNK_SIZE)]
-                    cached_chunk_offset = chunk_offset
-                    template_cache = {}
-                system_decode = decode_evtx_system_section(
-                    chunk_data,
-                    offset - chunk_offset,
-                    template_cache=template_cache,
-                )
-                decoded_fields = system_decode.get("value_fields")
-                if isinstance(decoded_fields, list) and decoded_fields:
-                    existing_fields = binxml.get("value_fields")
-                    binxml = {
-                        **binxml,
-                        "value_fields": [
-                            *decoded_fields,
-                            *(existing_fields if isinstance(existing_fields, list) else []),
-                        ],
-                    }
-                grammar_profile = native_evtx_binxml_grammar_coverage_profile(binxml)
-                binxml_promoted = native_evtx_promoted_fields(binxml)
-                extracted_strings = extract_utf16le_strings(payload)
-                binxml_strings = [str(item.get("text") or "") for item in binxml.get("value_fields", []) if item.get("text")]
-                searchable_strings = unique_texts([*binxml_strings, *extracted_strings])
-                native_indicators = merge_native_evtx_promoted_fields(
-                    native_evtx_indicators(searchable_strings, path),
-                    binxml_promoted,
-                )
-                integrity = native_evtx_record_integrity(record_blob, offset)
-                chunk_context = native_evtx_chunk_context(blob, offset, len(record_blob))
-                binxml_status = str(binxml.get("status") or NATIVE_EVTX_BINXML_STATUS)
-                recovery_context = native_evtx_recovery_context(candidate, integrity, chunk_context, binxml_status)
-                recovery_evidence = native_evtx_recovery_evidence(candidate, integrity, chunk_context, recovery_context, binxml_status)
-                recovery_validation_profile = native_evtx_recovery_validation_profile(recovery_context, recovery_evidence)
-                sequence = native_evtx_sequence(record_id, previous_record_id)
-                previous_record_id = record_id or previous_record_id
-                parameter_candidates = native_evtx_parameter_candidates(native_indicators, binxml)
-                raw_preview = str(binxml.get("rendered_preview") or "") or native_evtx_message_preview(native_indicators, searchable_strings)
-                field_fidelity = native_evtx_field_fidelity(binxml_status)
-                validation_required = native_evtx_validation_required(binxml_status, recovery_context)
-                validation_reasons = native_evtx_validation_reasons(binxml_status, recovery_context)
-                data = {
-                    "evtx_parse_status": "native-binary-partial",
-                    "evtx_reader_strategy": NATIVE_EVTX_READER_STRATEGY,
-                    "evtx_native_parse_scope": NATIVE_EVTX_PARSE_SCOPE,
-                    "evtx_binxml_status": binxml_status,
-                    "evtx_field_fidelity": field_fidelity,
-                    "evtx_validation_required": validation_required,
-                    "evtx_validation_reasons": validation_reasons,
-                    "evtx_validation_guidance": (
-                        "Use an EVTX-capable parser export such as EvtxECmd, Hayabusa, Chainsaw, or "
-                        "Velociraptor when report-grade Event/System/EventData field fidelity is required."
-                    ),
-                    "evtx_validation_checks": native_evtx_validation_checks(
-                        integrity,
-                        chunk_context,
-                        recovery_context,
-                        binxml,
-                    ),
-                    "evtx_validation_matrix": native_evtx_validation_matrix(
-                        integrity,
-                        chunk_context,
-                        recovery_context,
-                        binxml,
-                    ),
-                    "evtx_binxml": binxml,
-                    "evtx_binxml_grammar_coverage_profile": grammar_profile,
-                    "evtx_binxml_grammar_coverage_profile_hash": stable_eventlog_json_sha256(grammar_profile),
-                    "binxml_system_fields": dict(binxml_promoted.get("system_fields") or {}),
-                    "binxml_event_data_fields": dict(binxml_promoted.get("event_data_fields") or {}),
-                    "binxml_event_data_sequence": list(binxml_promoted.get("event_data_sequence") or []),
-                    "binxml_event_data_values_by_name": dict(binxml_promoted.get("event_data_values_by_name") or {}),
-                    "binxml_user_data_fields": dict(binxml_promoted.get("user_data_fields") or {}),
-                    "evtx_system_decode": {
-                        key: value
-                        for key, value in system_decode.items()
-                        if key != "value_fields"
-                    },
-                    "evtx_file_header": native_evtx_file_header(blob),
-                    "evtx_chunk_context": chunk_context,
-                    "evtx_record_offset": offset,
-                    "evtx_record_size": len(record_blob),
-                    "evtx_record_sha256": hashlib.sha256(record_blob).hexdigest(),
-                    "evtx_record_integrity": integrity,
-                    "evtx_recovery_context": recovery_context,
-                    "evtx_recovery_evidence": recovery_evidence,
-                    "evtx_recovery_validation_profile": recovery_validation_profile,
-                    "evtx_recovery_status": recovery_context["status"],
-                    "evtx_allocation_status": recovery_context["allocation_status"],
-                    "evtx_native_capabilities": NATIVE_EVTX_CAPABILITIES,
-                    "evtx_record_sequence": sequence,
-                    "validation_required": validation_required,
-                    "caution_labels": recovery_context["caution_labels"] if validation_required else [],
-                    "extracted_strings": searchable_strings[:MAX_NATIVE_EVTX_STRINGS],
-                    "extracted_string_count": len(searchable_strings),
-                    "native_indicators": native_indicators,
-                    "ProviderName": native_indicators.get("provider_name", ""),
-                    "Channel": native_indicators.get("channel", ""),
-                    "Computer": native_indicators.get("computer", ""),
-                    "CommandLine": native_indicators.get("command_line", ""),
-                    "SourceIp": native_indicators.get("source_ip", ""),
-                    "TargetUserName": native_indicators.get("user_name", ""),
-                    "parameter_candidates": parameter_candidates,
-                    "native_message_preview": raw_preview,
-                }
-                data.update(dict(binxml_promoted.get("flat_fields") or {}))
-                system_fields = binxml_promoted.get("system_fields") if isinstance(binxml_promoted.get("system_fields"), Mapping) else {}
-                provider_name = str(native_indicators.get("provider_name") or "")
-                channel = str(native_indicators.get("channel") or "")
-                computer = str(native_indicators.get("computer") or "")
-                event_created_at = str(system_fields.get("TimeCreated") or timestamp)
-                details = normalize_event_details(
-                    parser="windows-eventlog-evtx-native",
-                    source_format="evtx",
-                    source_path=path,
-                    source_index=source_index,
-                    source_hashes=source_hashes,
-                    provider_name=provider_name,
-                    event_id=str(system_fields.get("EventID") or ""),
-                    record_id=str(system_fields.get("EventRecordID") or record_id or ""),
-                    channel=channel,
-                    level=str(system_fields.get("Level") or ""),
-                    computer=computer,
-                    event_created_at=event_created_at,
-                    data=data,
-                    raw_preview=raw_preview,
-                    user_sid=str(system_fields.get("UserID") or ""),
-                    user_name=str(native_indicators.get("user_name") or ""),
-                    process_id=str(system_fields.get("ProcessID") or ""),
-                    thread_id=str(system_fields.get("ThreadID") or ""),
-                    process_name=str(native_indicators.get("process_name") or ""),
-                    command_line=str(native_indicators.get("command_line") or raw_preview),
-                    message_catalog=message_catalog,
-                )
-                details.update(data)
-                details["parser_confidence"] = native_evtx_confidence(details)
-                details["evtx_report_grade_assessment"] = native_evtx_report_grade_assessment(details)
-                counters["event_count"] = counters.get("event_count", 0) + 1
-                if not full_detail:
-                    details["commercial_grade_ready"] = details["evtx_report_grade_assessment"]["report_grade_ready"]
-                    details["commercial_grade_blockers"] = list(details["evtx_report_grade_assessment"]["blockers"])
-                    yield event_record(path, "eventlog-event", details)
-                    continue
-                details["evtx_record_provenance"] = native_evtx_record_provenance(details)
-                details["evtx_native_parse_profile"] = native_evtx_native_parse_profile(details)
-                details["evtx_message_rendering_profile"] = native_evtx_message_rendering_profile(details)
-                if native_evtx_should_emit_recovery_manifest(details):
-                    details["evtx_recovery_report_citation_manifest"] = native_evtx_recovery_report_citation_manifest(
-                        details
+                    chunk_row = native_evtx_chunk_record(
+                        path,
+                        chunk_index,
+                        source_hashes,
+                        blob,
+                        {
+                            "chunk_offset": chunk_offset,
+                            "chunk_blob": chunk,
+                            "declared_chunk_count": declared_chunks,
+                            "chunk_index": chunk_index,
+                        },
                     )
-                    details["evtx_recovery_report_citation_manifest_hash"] = details[
-                        "evtx_recovery_report_citation_manifest"
-                    ]["manifest_sha256"]
-                details["evtx_commercial_readiness_profile"] = native_evtx_commercial_readiness_profile(details)
-                details["core_accuracy_gates"] = native_evtx_core_accuracy_gates(details)
-                details["commercial_uplift_evidence"] = native_evtx_commercial_uplift_evidence(details)
-                details["evtx_report_citation_manifest"] = native_evtx_report_citation_manifest(details)
-                details["evtx_report_citation_manifest_hash"] = details["evtx_report_citation_manifest"][
-                    "manifest_sha256"
-                ]
-                details["commercial_grade_ready"] = details["evtx_report_grade_assessment"]["report_grade_ready"]
-                details["commercial_grade_blockers"] = list(details["evtx_report_grade_assessment"]["blockers"])
-                yield event_record(path, "eventlog-event", details)
+                    chunk_row.details["evtx_chunk_active"] = active
+                    yield chunk_row
+                decoder = EvtxChunkDecoder(chunk)
+                context.chunk_cache = None
+                for slot in iter_evtx_chunk_record_slots(chunk, active=active):
+                    absolute = chunk_offset + slot.relative_offset
+                    if not slot.parseable:
+                        bump("candidate_count")
+                        if structure_rows:
+                            preview = chunk[slot.relative_offset : slot.relative_offset + 4096]
+                            candidate = NativeEvtxRecordCandidate(
+                                absolute, slot.declared_size, preview, False, slot.reason, len(blob) - absolute
+                            )
+                            yield native_evtx_record_candidate_record(path, source_index, source_hashes, blob, candidate)
+                        source_index += 1
+                        continue
+                    record_blob = chunk[slot.relative_offset : slot.relative_offset + slot.declared_size]
+                    record_id = read_u64(record_blob, 8)
+                    if slot.state != EVTX_RECORD_STATE_LIVE:
+                        if record_id in live_ids or record_id in recovered_ids:
+                            bump("slack_duplicate_count")
+                            if structure_rows:
+                                yield native_evtx_slack_duplicate_record(
+                                    context,
+                                    source_index=source_index,
+                                    offset=absolute,
+                                    record_blob=record_blob,
+                                    record_state=slot.state,
+                                    duplicate_of_live=record_id in live_ids,
+                                )
+                            source_index += 1
+                            continue
+                        recovered_ids.add(record_id)
+                    candidate = NativeEvtxRecordCandidate(
+                        absolute, slot.declared_size, record_blob, True, slot.reason, len(blob) - absolute
+                    )
+                    decode_error = ""
+                    try:
+                        decoded: dict[str, object] | None = decoder.decode_record(slot.relative_offset, slot.declared_size)
+                    except (EvtxDecodeError, IndexError, struct.error, ValueError, RecursionError, UnicodeError) as exc:
+                        decoded = None
+                        decode_error = f"{type(exc).__name__}: {exc}"[:200]
+                    record = build_native_evtx_event_record(
+                        context,
+                        source_index=source_index,
+                        candidate=candidate,
+                        record_state=slot.state,
+                        decoded=decoded,
+                        decode_error=decode_error,
+                        chunk_header=chunk_header,
+                        counters=counters,
+                        chunk=chunk,
+                    )
+                    source_index += 1
+                    yield record
+                counters["template_parse_count"] = counters.get("template_parse_count", 0) + decoder.template_parse_count
     except OSError:
         return
+
+
+@dataclasses.dataclass
+class NativeEvtxFileContext:
+    path: Path
+    blob: bytes | mmap.mmap
+    source_hashes: Mapping[str, str]
+    file_header: Mapping[str, object]
+    message_catalog: Mapping[str, Mapping[str, Mapping[str, object]]] | None
+    full_detail: bool
+    filetime_upper_bound: int
+    previous_record_id: int | None = None
+    chunk_cache: object = None
+    legacy_chunk_offset: int = -1
+    legacy_chunk_data: bytes = b""
+    legacy_template_cache: dict = dataclasses.field(default_factory=dict)
+
+
+def native_evtx_slack_duplicate_record(
+    context: NativeEvtxFileContext,
+    *,
+    source_index: int,
+    offset: int,
+    record_blob: bytes,
+    record_state: str,
+    duplicate_of_live: bool,
+) -> ArtifactRecord:
+    record_id = read_u64(record_blob, 8)
+    filetime = read_u64(record_blob, 16)
+    timestamp_status = evtx_filetime_status(filetime, context.filetime_upper_bound)
+    details = {
+        "parser": "windows-eventlog-evtx-native-candidate",
+        "parser_version": PARSER_VERSION,
+        "coverage_status": "slack-duplicate-of-live-record" if duplicate_of_live else "slack-duplicate-of-recovered-record",
+        "reportability": "inventory-only",
+        "evidence_strength": "evtx-slack-copy",
+        "source_path": resolved_path_text(context.path),
+        "source_format": "evtx",
+        "source_index": source_index,
+        "record_id": str(record_id or ""),
+        "timestamp": "",
+        "timestamp_filetime": filetime,
+        "timestamp_100ns": filetime_to_iso_100ns(filetime),
+        "timestamp_status": timestamp_status,
+        "evtx_record_offset": offset,
+        "evtx_record_size": len(record_blob),
+        "evtx_record_sha256": hashlib.sha256(record_blob).hexdigest(),
+        "evtx_record_state": record_state,
+        "evtx_recovery_status": "slack-duplicate-of-live-record" if duplicate_of_live else "slack-duplicate-of-recovered-record",
+        "evtx_allocation_status": "slack-or-deleted-candidate" if record_state == EVTX_RECORD_STATE_SLACK else "inactive-chunk",
+        "duplicate_of_live_record": duplicate_of_live,
+        "validation_required": True,
+        "note_ko": "같은 레코드 ID의 정상(live) 레코드가 있어 이벤트로 세지 않은 슬랙 사본입니다.",
+    }
+    return event_record(context.path, "eventlog-record-candidate", details)
+
+
+def native_evtx_decoded_parts(decoded: Mapping[str, object], *, render_xml: bool = True) -> dict[str, object]:
+    """Legacy-compatible ``binxml`` / promoted-field blocks from a decoded record."""
+    system_fields = dict(decoded.get("system_fields") or {})
+    event_data = dict(decoded.get("event_data") or {})
+    sequence = list(decoded.get("event_data_sequence") or [])
+    source = str(decoded.get("event_data_source") or "")
+    value_fields: list[dict[str, object]] = []
+    for key, value in system_fields.items():
+        value_fields.append(
+            {
+                "element": key,
+                "element_path": f"Event/System/{key}",
+                "text": value,
+                "confidence": "binxml-template-substitution",
+            }
+        )
+    for item in sequence:
+        value_fields.append(
+            {
+                "element": str(item.get("name") or ""),
+                "element_path": str(item.get("path") or ""),
+                "text": str(item.get("value") or ""),
+                "value_type": str(item.get("value_type") or ""),
+                "confidence": "binxml-template-substitution",
+            }
+        )
+    values_by_name: dict[str, list[str]] = {}
+    for item in sequence:
+        values_by_name.setdefault(str(item.get("name") or ""), []).append(str(item.get("value") or ""))
+    user_data_fields = {f"UserData.{key}": value for key, value in event_data.items()} if source == "UserData" else {}
+    root = decoded.get("root")
+    if render_xml and isinstance(root, EvtxElement):
+        rendered = render_evtx_element_xml(root)
+    else:
+        # Triage rows drop the XML preview; a compact Name=Value preview is enough.
+        rendered = "; ".join(f"{key}={value}" for key, value in event_data.items() if value)[:2000]
+    template_ids = [f"chunk-template@0x{int(item):x}" for item in decoded.get("template_offsets") or []]
+    substitution_count = int(decoded.get("substitution_count") or 0)
+    binxml = {
+        "status": EVTX_DECODED_BINXML_STATUS,
+        "decoder_version": EVTX_NATIVE_DECODER_VERSION,
+        "version": {},
+        "token_counts": [],
+        "elements": [],
+        "value_fields": value_fields[:200],
+        "value_field_map": {str(item["element_path"]): [str(item["text"])] for item in value_fields if item.get("text")},
+        "decoded_value_type_counts": counter_items(Counter(str(item.get("value_type") or "unknown") for item in sequence)),
+        "template_values": [],
+        "template_ids": template_ids,
+        "template_value_count": substitution_count,
+        "template_substitution_count": substitution_count,
+        "rendered_preview": rendered,
+        "token_count": 0,
+        "unsupported_token_count": 0,
+        "warnings": [],
+    }
+    flat_fields: dict[str, str] = {}
+    for key, value in system_fields.items():
+        flat_fields.setdefault(key, value)
+    for key, value in event_data.items():
+        flat_fields.setdefault(key, value)
+    promoted = {
+        "system_fields": system_fields,
+        "event_data_fields": event_data,
+        "event_data_sequence": sequence[:200],
+        "event_data_values_by_name": values_by_name,
+        "user_data_fields": user_data_fields,
+        "flat_fields": flat_fields,
+    }
+    return {"binxml": binxml, "promoted": promoted, "rendered": rendered, "event_data_source": source}
+
+
+def build_native_evtx_event_record(
+    context: NativeEvtxFileContext,
+    *,
+    source_index: int,
+    candidate: NativeEvtxRecordCandidate,
+    record_state: str,
+    decoded: Mapping[str, object] | None,
+    decode_error: str,
+    chunk_header: Mapping[str, object] | None,
+    counters: dict[str, int],
+    chunk: bytes | None = None,
+) -> ArtifactRecord:
+    path = context.path
+    blob = context.blob
+    offset = candidate.offset
+    record_blob = candidate.record_blob
+    record_id = read_u64(record_blob, 8)
+    header_filetime = read_u64(record_blob, 16)
+    payload = record_blob[EVTX_RECORD_HEADER_SIZE:]
+    if decoded is not None:
+        parts = native_evtx_decoded_parts(decoded, render_xml=context.full_detail)
+        binxml = parts["binxml"]
+        binxml_promoted = parts["promoted"]
+        system_fields = binxml_promoted["system_fields"]
+        system_decode = {
+            "profile_version": "evtx-system-decode-v2",
+            "status": "decoded" if system_fields else "decoded-without-system-fields",
+            "system_fields": system_fields,
+            "event_data_fields": binxml_promoted["event_data_fields"],
+            "substitution_count": int(decoded.get("substitution_count") or 0),
+            "warnings": [],
+        }
+        searchable_strings = unique_texts(
+            [*system_fields.values(), *binxml_promoted["event_data_fields"].values()]
+        )
+        event_data = binxml_promoted["event_data_fields"]
+        native_indicators = {
+            "provider_name": str(system_fields.get("ProviderName") or ""),
+            "channel": str(system_fields.get("Channel") or "") or channel_hint_from_path(path),
+            "channel_hint_source": "binxml-system" if system_fields.get("Channel") else "filename",
+            "computer": str(system_fields.get("Computer") or ""),
+            "command_line": first_promoted_value(event_data, "CommandLine", "ProcessCommandLine", "ScriptBlockText"),
+            "process_name": first_promoted_value(event_data, "NewProcessName", "ProcessName", "Image"),
+            "source_ip": first_promoted_value(event_data, "IpAddress", "SourceAddress", "SourceIp", "SourceNetworkAddress"),
+            "string_count": len(searchable_strings),
+            "promoted_system_field_count": len(system_fields),
+            "promoted_event_data_field_count": len(event_data),
+            "field_source": "decoded-binxml",
+        }
+        raw_preview = str(parts["rendered"])[:2000]
+        system_raw = decoded.get("system_raw") if isinstance(decoded.get("system_raw"), Mapping) else {}
+        created_raw = system_raw.get("TimeCreated")
+        created_filetime = created_raw if isinstance(created_raw, int) and not isinstance(created_raw, bool) else header_filetime
+        counters["decoded_record_count"] = counters.get("decoded_record_count", 0) + 1
+        event_data_source = str(parts["event_data_source"])
+    else:
+        binxml = parse_native_evtx_binxml(payload)
+        chunk_data = chunk if chunk is not None else b""
+        relative = offset - int(chunk_header.get("chunk_offset") or 0) if chunk_header else -1
+        if chunk is None and offset >= EVTX_FILE_HEADER_SIZE:
+            chunk_offset = EVTX_FILE_HEADER_SIZE + ((offset - EVTX_FILE_HEADER_SIZE) // EVTX_CHUNK_SIZE) * EVTX_CHUNK_SIZE
+            if chunk_offset != context.legacy_chunk_offset:
+                context.legacy_chunk_data = bytes(blob[chunk_offset : min(len(blob), chunk_offset + EVTX_CHUNK_SIZE)])
+                context.legacy_chunk_offset = chunk_offset
+                context.legacy_template_cache = {}
+            chunk_data = context.legacy_chunk_data
+            relative = offset - chunk_offset
+        system_decode = (
+            decode_evtx_system_section(chunk_data, relative, template_cache=context.legacy_template_cache)
+            if chunk_data and relative >= 0
+            else {"profile_version": "evtx-system-decode-v1", "status": "not-attempted", "system_fields": {}, "value_fields": []}
+        )
+        decoded_fields = system_decode.get("value_fields")
+        if isinstance(decoded_fields, list) and decoded_fields:
+            existing_fields = binxml.get("value_fields")
+            binxml = {
+                **binxml,
+                "value_fields": [*decoded_fields, *(existing_fields if isinstance(existing_fields, list) else [])],
+            }
+        binxml_promoted = native_evtx_promoted_fields(binxml)
+        extracted_strings = extract_utf16le_strings(payload)
+        binxml_strings = [str(item.get("text") or "") for item in binxml.get("value_fields", []) if item.get("text")]
+        searchable_strings = unique_texts([*binxml_strings, *extracted_strings])
+        native_indicators = merge_native_evtx_promoted_fields(
+            native_evtx_indicators(searchable_strings, path),
+            binxml_promoted,
+        )
+        native_indicators["field_source"] = "legacy-token-scan"
+        raw_preview = str(binxml.get("rendered_preview") or "") or native_evtx_message_preview(native_indicators, searchable_strings)
+        created_filetime = header_filetime
+        counters["fallback_record_count"] = counters.get("fallback_record_count", 0) + 1
+        if decode_error:
+            counters["decode_error_count"] = counters.get("decode_error_count", 0) + 1
+        event_data_source = ""
+    system_fields = binxml_promoted.get("system_fields") if isinstance(binxml_promoted.get("system_fields"), Mapping) else {}
+    if chunk_header is not None:
+        chunk_context = native_evtx_chunk_context_from_header(chunk_header, offset, len(record_blob))
+    else:
+        chunk_context = native_evtx_chunk_context(blob, offset, len(record_blob))
+    grammar_profile = (
+        native_evtx_binxml_grammar_coverage_profile(binxml)
+        if context.full_detail or decoded is None
+        else {"profile_version": NATIVE_EVTX_GRAMMAR_PROFILE_VERSION, "status": "decoded-grammar-not-profiled-in-triage"}
+    )
+    integrity = native_evtx_record_integrity(record_blob, offset)
+    binxml_status = str(binxml.get("status") or NATIVE_EVTX_BINXML_STATUS)
+    recovery_context = native_evtx_recovery_context(candidate, integrity, chunk_context, binxml_status)
+    if record_state == EVTX_RECORD_STATE_INACTIVE and recovery_context["status"] == "recoverable-record":
+        recovery_context["status"] = "slack-or-deleted-record-candidate"
+        recovery_context["validation_required"] = True
+        labels = recovery_context.setdefault("caution_labels", [])
+        if isinstance(labels, list):
+            labels.extend(["inactive-chunk-record", "do-not-report-without-validation"])
+    recovery_evidence = native_evtx_recovery_evidence(candidate, integrity, chunk_context, recovery_context, binxml_status)
+    recovery_validation_profile = native_evtx_recovery_validation_profile(recovery_context, recovery_evidence)
+    timestamp_status = evtx_filetime_status(created_filetime, context.filetime_upper_bound)
+    if record_state in EVTX_SEQUENCED_RECORD_STATES:
+        sequence = native_evtx_sequence(record_id, context.previous_record_id)
+        context.previous_record_id = record_id or context.previous_record_id
+        counter_key = "live_record_count" if record_state == EVTX_RECORD_STATE_LIVE else f"{record_state}_record_count"
+        counters[counter_key] = counters.get(counter_key, 0) + 1
+    else:
+        sequence = {"status": f"not-sequenced-{record_state}", "previous_record_id": "", "gap": 0}
+        counters[f"{record_state}_record_count"] = counters.get(f"{record_state}_record_count", 0) + 1
+    if timestamp_status != "ok":
+        counters["timestamp_out_of_range_count"] = counters.get("timestamp_out_of_range_count", 0) + 1
+    parameter_candidates = native_evtx_parameter_candidates(native_indicators, binxml) if decoded is None else []
+    field_fidelity = EVTX_DECODED_FIELD_FIDELITY if decoded is not None else native_evtx_field_fidelity(binxml_status)
+    validation_required = native_evtx_validation_required(binxml_status, recovery_context)
+    validation_reasons = native_evtx_validation_reasons(binxml_status, recovery_context)
+    if timestamp_status != "ok":
+        validation_required = True
+        validation_reasons = [*validation_reasons, f"timestamp-{timestamp_status}"]
+    timestamp_iso = filetime_to_iso(created_filetime)
+    if decoded is None and system_fields.get("TimeCreated"):
+        timestamp_iso = str(system_fields.get("TimeCreated"))
+    event_created_at = timestamp_iso if timestamp_status == "ok" else ""
+    data: dict[str, object] = {
+        "evtx_parse_status": "native-binary-decoded" if decoded is not None else "native-binary-partial",
+        "evtx_reader_strategy": NATIVE_EVTX_READER_STRATEGY,
+        "evtx_native_parse_scope": NATIVE_EVTX_PARSE_SCOPE,
+        "evtx_decoder_version": EVTX_NATIVE_DECODER_VERSION if decoded is not None else "legacy-token-scan",
+        "evtx_decode_error": decode_error,
+        "evtx_record_state": record_state,
+        "evtx_binxml_status": binxml_status,
+        "evtx_field_fidelity": field_fidelity,
+        "evtx_binxml": binxml,
+        "binxml_system_fields": dict(system_fields),
+        "binxml_event_data_fields": dict(binxml_promoted.get("event_data_fields") or {}),
+        "binxml_event_data_sequence": list(binxml_promoted.get("event_data_sequence") or []),
+        "binxml_event_data_values_by_name": dict(binxml_promoted.get("event_data_values_by_name") or {}),
+        "binxml_user_data_fields": dict(binxml_promoted.get("user_data_fields") or {}),
+        "event_data_source": event_data_source,
+        "evtx_record_offset": offset,
+        "evtx_recovery_status": recovery_context["status"],
+        "evtx_allocation_status": recovery_context["allocation_status"],
+        "native_message_preview": raw_preview,
+        "ProviderName": native_indicators.get("provider_name", ""),
+        "Channel": native_indicators.get("channel", ""),
+        "Computer": native_indicators.get("computer", ""),
+    }
+    data.update(dict(binxml_promoted.get("flat_fields") or {}))
+    provider_name = str(native_indicators.get("provider_name") or "")
+    channel = str(native_indicators.get("channel") or "")
+    computer = str(native_indicators.get("computer") or "")
+    details = normalize_event_details(
+        parser="windows-eventlog-evtx-native",
+        source_format="evtx",
+        source_path=path,
+        source_index=source_index,
+        source_hashes=context.source_hashes,
+        provider_name=provider_name,
+        event_id=str(system_fields.get("EventID") or ""),
+        record_id=str(system_fields.get("EventRecordID") or record_id or ""),
+        channel=channel,
+        level=str(system_fields.get("Level") or ""),
+        computer=computer,
+        event_created_at=event_created_at,
+        data=data,
+        raw_preview=raw_preview,
+        user_sid=str(system_fields.get("UserID") or ""),
+        process_id=str(system_fields.get("ProcessID") or ""),
+        thread_id=str(system_fields.get("ThreadID") or ""),
+        task=str(system_fields.get("Task") or ""),
+        opcode=str(system_fields.get("Opcode") or ""),
+        keywords=str(system_fields.get("Keywords") or ""),
+        message_catalog=context.message_catalog,
+    )
+    details.update(data)
+    details.update(
+        {
+            "event_id_qualifiers": str(system_fields.get("EventIDQualifiers") or ""),
+            "provider_guid": str(system_fields.get("ProviderGuid") or ""),
+            "event_version": str(system_fields.get("Version") or ""),
+            "timestamp_filetime": created_filetime,
+            "timestamp_100ns": filetime_to_iso_100ns(created_filetime),
+            "timestamp_status": timestamp_status,
+            "timestamp_source": "System/TimeCreated" if created_filetime != header_filetime or decoded is not None else "record-header",
+            "record_header_filetime": header_filetime,
+            "evtx_chunk_active": record_state in {EVTX_RECORD_STATE_LIVE, EVTX_RECORD_STATE_SLACK},
+            "evtx_validation_required": validation_required,
+            "evtx_validation_reasons": validation_reasons,
+            "evtx_validation_guidance": (
+                "Use an EVTX-capable parser export such as EvtxECmd, Hayabusa, Chainsaw, or "
+                "Velociraptor when report-grade Event/System/EventData field fidelity is required."
+            ),
+            "evtx_validation_checks": native_evtx_validation_checks(integrity, chunk_context, recovery_context, binxml),
+            "evtx_validation_matrix": native_evtx_validation_matrix(integrity, chunk_context, recovery_context, binxml),
+            "evtx_binxml_grammar_coverage_profile": grammar_profile,
+            "evtx_binxml_grammar_coverage_profile_hash": stable_eventlog_json_sha256(grammar_profile),
+            "evtx_system_decode": {key: value for key, value in system_decode.items() if key != "value_fields"},
+            "evtx_file_header": dict(context.file_header),
+            "evtx_chunk_context": chunk_context,
+            "evtx_record_size": len(record_blob),
+            "evtx_record_sha256": hashlib.sha256(record_blob).hexdigest(),
+            "evtx_record_integrity": integrity,
+            "evtx_recovery_context": recovery_context,
+            "evtx_recovery_evidence": recovery_evidence,
+            "evtx_recovery_validation_profile": recovery_validation_profile,
+            "evtx_native_capabilities": NATIVE_EVTX_CAPABILITIES,
+            "evtx_record_sequence": sequence,
+            "validation_required": validation_required,
+            "caution_labels": list(recovery_context["caution_labels"]) if validation_required else [],
+            "extracted_strings": searchable_strings[:MAX_NATIVE_EVTX_STRINGS],
+            "extracted_string_count": len(searchable_strings),
+            "native_indicators": native_indicators,
+            "parameter_candidates": parameter_candidates,
+        }
+    )
+    if timestamp_status != "ok":
+        details["timestamp_raw_iso"] = timestamp_iso
+        details["caution_labels"] = [*details["caution_labels"], f"timestamp-{timestamp_status}"]
+    details["parser_confidence"] = native_evtx_confidence(details)
+    details["evtx_report_grade_assessment"] = native_evtx_report_grade_assessment(details)
+    counters["event_count"] = counters.get("event_count", 0) + 1
+    if not context.full_detail:
+        details["commercial_grade_ready"] = details["evtx_report_grade_assessment"]["report_grade_ready"]
+        details["commercial_grade_blockers"] = list(details["evtx_report_grade_assessment"]["blockers"])
+        return event_record(path, "eventlog-event", details)
+    details["evtx_record_provenance"] = native_evtx_record_provenance(details)
+    details["evtx_native_parse_profile"] = native_evtx_native_parse_profile(details)
+    details["evtx_message_rendering_profile"] = native_evtx_message_rendering_profile(details)
+    if native_evtx_should_emit_recovery_manifest(details):
+        details["evtx_recovery_report_citation_manifest"] = native_evtx_recovery_report_citation_manifest(details)
+        details["evtx_recovery_report_citation_manifest_hash"] = details["evtx_recovery_report_citation_manifest"][
+            "manifest_sha256"
+        ]
+    details["evtx_commercial_readiness_profile"] = native_evtx_commercial_readiness_profile(details)
+    details["core_accuracy_gates"] = native_evtx_core_accuracy_gates(details)
+    details["commercial_uplift_evidence"] = native_evtx_commercial_uplift_evidence(details)
+    details["evtx_report_citation_manifest"] = native_evtx_report_citation_manifest(details)
+    details["evtx_report_citation_manifest_hash"] = details["evtx_report_citation_manifest"]["manifest_sha256"]
+    details["commercial_grade_ready"] = details["evtx_report_grade_assessment"]["report_grade_ready"]
+    details["commercial_grade_blockers"] = list(details["evtx_report_grade_assessment"]["blockers"])
+    return event_record(path, "eventlog-event", details)
 
 
 def iter_evtx_record_blobs(blob: bytes) -> Iterable[tuple[int, bytes]]:
@@ -1929,7 +2505,7 @@ def iter_native_evtx_chunks(blob: bytes) -> Iterable[dict[str, object]]:
     declared_chunks = read_u16(blob, 42)
     offset = EVTX_FILE_HEADER_SIZE
     emitted = 0
-    while offset + len(EVTX_CHUNK_SIGNATURE) <= len(blob) and emitted < MAX_NATIVE_EVTX_CHUNKS:
+    while offset + len(EVTX_CHUNK_SIGNATURE) <= len(blob):
         chunk_blob = blob[offset : min(len(blob), offset + EVTX_CHUNK_SIZE)]
         if not blob_startswith(chunk_blob, EVTX_CHUNK_SIGNATURE):
             next_signature = blob.find(EVTX_CHUNK_SIGNATURE, offset + 1)
@@ -1947,11 +2523,15 @@ def iter_native_evtx_chunks(blob: bytes) -> Iterable[dict[str, object]]:
         offset += EVTX_CHUNK_SIZE
 
 
-def iter_evtx_record_candidates(blob: bytes) -> Iterable[NativeEvtxRecordCandidate]:
-    offset = 0
+def iter_evtx_record_candidates(
+    blob: bytes | mmap.mmap, *, start: int = 0, end: int | None = None
+) -> Iterable[NativeEvtxRecordCandidate]:
+    """Legacy magic scan of ``blob[start:end]`` (regions without a chunk header). No count cap."""
+    offset = start
     emitted = 0
-    while emitted < MAX_NATIVE_EVTX_RECORDS:
-        offset = blob.find(EVTX_RECORD_MAGIC, offset)
+    scan_end = len(blob) if end is None else min(end, len(blob))
+    while True:
+        offset = blob.find(EVTX_RECORD_MAGIC, offset, scan_end)
         if offset < 0:
             return
         declared_size = read_u32(blob, offset + 4)
@@ -2253,7 +2833,7 @@ def native_evtx_recovery_confidence_assessment(
         factors.append("chunk-signature-valid")
     else:
         penalties.append("chunk-signature-invalid")
-    if binxml_status in {"basic-rendered", "template-substituted-partial"}:
+    if binxml_status in EVTX_FIELD_DECODED_STATUSES:
         score += 0.1
         factors.append(f"binxml:{binxml_status}")
     elif binxml_status == "partial-tokenized":
@@ -2313,7 +2893,7 @@ def native_evtx_validation_reasons(binxml_status: str, recovery_context: Mapping
         for item in recovery_context.get("caution_labels", [])
         if str(item)
     ] if isinstance(recovery_context.get("caution_labels"), list) else []
-    if binxml_status not in {"basic-rendered", "template-substituted-partial"}:
+    if binxml_status not in EVTX_FIELD_DECODED_STATUSES:
         reasons.append(f"binxml-status:{binxml_status or 'unknown'}")
     return sorted(set(reasons))
 
@@ -2402,7 +2982,7 @@ def native_evtx_validation_matrix(
         {
             "id": "binxml-field-decode",
             "label": "BinXML field decode",
-            "passed": binxml_status in {"basic-rendered", "template-substituted-partial"},
+            "passed": binxml_status in EVTX_FIELD_DECODED_STATUSES,
             "severity": "high",
             "detail": binxml_status,
         },
@@ -2441,7 +3021,7 @@ def native_evtx_report_grade_assessment(details: Mapping[str, object]) -> dict[s
 
     if not checks.get("passes_basic_record_integrity"):
         blockers.append("record-integrity-not-proven")
-    if binxml_status not in {"basic-rendered", "template-substituted-partial"}:
+    if binxml_status not in EVTX_FIELD_DECODED_STATUSES:
         blockers.append("full-binxml-field-decoding-required")
     if not chunk.get("chunk_signature_valid"):
         blockers.append("chunk-boundary-not-validated")
@@ -2479,7 +3059,7 @@ def native_evtx_report_grade_assessment(details: Mapping[str, object]) -> dict[s
     report_grade_ready = not blockers
     if report_grade_ready:
         status = "report-grade-ready"
-    elif checks.get("passes_basic_record_integrity") and binxml_status in {"basic-rendered", "template-substituted-partial"}:
+    elif checks.get("passes_basic_record_integrity") and binxml_status in EVTX_FIELD_DECODED_STATUSES:
         status = "triage-validated-report-grade-blocked"
     else:
         status = "validation-required"
@@ -2593,7 +3173,7 @@ def native_evtx_binxml_grammar_coverage_profile(binxml: Mapping[str, object]) ->
         blockers.append("full-binxml-object-model-not-implemented")
     if unvalidated_value_types:
         blockers.append("binxml-value-type-validation-required")
-    if str(binxml.get("status") or "") not in {"basic-rendered", "template-substituted-partial"}:
+    if str(binxml.get("status") or "") not in EVTX_FIELD_DECODED_STATUSES:
         blockers.append("binxml-field-decode-incomplete")
 
     return {
@@ -2651,7 +3231,7 @@ def native_evtx_native_parse_profile(details: Mapping[str, object]) -> dict[str,
     )
     status = str(details.get("evtx_binxml_status") or "")
     remaining_blockers = ["trusted-tool-record-diff-required"]
-    if status not in {"basic-rendered", "template-substituted-partial"}:
+    if status not in EVTX_FIELD_DECODED_STATUSES:
         remaining_blockers.append("binxml-field-decode-incomplete")
     if not NATIVE_EVTX_CAPABILITIES.get("full_binxml_dom"):
         remaining_blockers.append("full-binxml-object-model-not-implemented")
@@ -2902,7 +3482,7 @@ def native_evtx_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[
         item1_checks.append("trusted-tool record-level diff pass")
     if (
         binxml_status
-        and binxml_status not in {"basic-rendered", "template-substituted-partial"}
+        and binxml_status not in EVTX_FIELD_DECODED_STATUSES
         and "unsupported grammar warning coverage" not in item1_checks
     ):
         item1_checks.append("unsupported grammar warning coverage")
@@ -2916,7 +3496,7 @@ def native_evtx_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[
         item2_checks.append("provider/template/source provenance")
     if message_diff.get("status") == "pass":
         item2_checks.append("trusted rendered-message diff pass")
-    if binxml_status not in {"basic-rendered", "template-substituted-partial"}:
+    if binxml_status not in EVTX_FIELD_DECODED_STATUSES:
         item2_checks.append("unresolved template warning")
     if message.get("limitations") or details.get("evtx_validation_guidance"):
         item2_checks.append("fallback-message limitation disclosure")
@@ -3025,8 +3605,8 @@ def native_evtx_commercial_uplift_evidence(details: Mapping[str, object]) -> dic
             list(report_grade.get("blockers") or [])
         ),
         "large_data_controls": {
-            "record_limit": MAX_NATIVE_EVTX_RECORDS,
-            "chunk_limit": MAX_NATIVE_EVTX_CHUNKS,
+            "record_limit": None,
+            "chunk_limit": None,
             "max_record_size_bytes": MAX_NATIVE_EVTX_RECORD_SIZE,
             "bounded_string_limit": MAX_NATIVE_EVTX_STRINGS,
             "bounded_binxml_token_limit": MAX_NATIVE_EVTX_BINXML_TOKENS,
@@ -4008,6 +4588,20 @@ def native_evtx_chunk_context(blob: bytes, record_offset: int, record_size: int 
     signature = blob[chunk_offset : chunk_offset + len(EVTX_CHUNK_SIGNATURE)]
     signature_valid = signature == EVTX_CHUNK_SIGNATURE
     header = native_evtx_chunk_header(blob[chunk_offset : min(len(blob), chunk_offset + EVTX_CHUNK_SIZE)], chunk_offset)
+    return native_evtx_chunk_context_from_header(header, record_offset, record_size, signature_valid=signature_valid)
+
+
+def native_evtx_chunk_context_from_header(
+    header: Mapping[str, object],
+    record_offset: int,
+    record_size: int = 0,
+    *,
+    signature_valid: bool | None = None,
+) -> dict[str, object]:
+    """Record-in-chunk boundary context from an already parsed chunk header (computed once per chunk)."""
+    chunk_offset = int(header.get("chunk_offset") or 0)
+    if signature_valid is None:
+        signature_valid = bool(header.get("signature_valid"))
     relative_offset = record_offset - chunk_offset
     relative_end_offset = relative_offset + max(record_size, 0)
     free_space_offset = int(header.get("free_space_offset") or 0)
@@ -4085,17 +4679,22 @@ def native_evtx_indicators(strings: Sequence[str], path: Path) -> dict[str, obje
     users = sorted(set(iter_user_candidates(strings)))
     urls = sorted(set(iter_url_candidates(strings)))
     paths = sorted(set(iter_path_candidates(strings)))
+    # Identity/process/command values guessed from raw strings are kept only
+    # as labelled ``*_candidate`` pivots; decoded BinXML fields replace them
+    # (``merge_native_evtx_promoted_fields``) and nothing promotes a guess.
     return {
         "provider_name": provider,
         "channel": channel,
         "channel_hint_source": "record-string" if first_native_channel(strings) else "filename",
         "computer": first_matching_string(strings, "WIN-", ".local"),
-        "command_line": command,
-        "process_name": process_path,
-        "source_ip": ip_addresses[0] if ip_addresses else "",
+        "command_line_candidate": command,
+        "process_name_candidate": process_path,
+        "source_ip_candidate": ip_addresses[0] if ip_addresses else "",
         "ip_addresses": ip_addresses[:20],
-        "user_name": users[0] if users else "",
+        "user_name_candidate": users[0] if users else "",
         "user_candidates": users[:20],
+        "candidate_label": "string-scan-guess-not-identity",
+        "candidate_label_ko": "문자열 추정값(신원·프로세스 필드로 쓰지 않음)",
         "url_candidates": urls[:20],
         "path_candidates": paths[:20],
         "string_count": len(strings),
@@ -4110,10 +4709,10 @@ def native_evtx_parameter_candidates(
         ("ProviderName", indicators.get("provider_name")),
         ("Channel", indicators.get("channel")),
         ("Computer", indicators.get("computer")),
-        ("CommandLine", indicators.get("command_line")),
-        ("ProcessName", indicators.get("process_name")),
-        ("SourceIp", indicators.get("source_ip")),
-        ("TargetUserName", indicators.get("user_name")),
+        ("CommandLine", indicators.get("command_line") or indicators.get("command_line_candidate")),
+        ("ProcessName", indicators.get("process_name") or indicators.get("process_name_candidate")),
+        ("SourceIp", indicators.get("source_ip") or indicators.get("source_ip_candidate")),
+        ("TargetUserName", indicators.get("user_name") or indicators.get("user_name_candidate")),
     )
     candidates = [
         {"name": name, "value": str(value), "confidence": "string-pivot"}
@@ -4299,7 +4898,7 @@ def merge_native_evtx_promoted_fields(
     native_evtx_prefer(output, "command_line", first_promoted_value(event_data, "CommandLine", "ProcessCommandLine", "ScriptBlockText"))
     native_evtx_prefer(output, "process_name", first_promoted_value(event_data, "NewProcessName", "ProcessName", "Image"))
     native_evtx_prefer(output, "source_ip", first_promoted_value(event_data, "IpAddress", "SourceAddress", "SourceIp", "SourceNetworkAddress"))
-    native_evtx_prefer(output, "user_name", first_promoted_value(event_data, "TargetUserName", "SubjectUserName", "User", "AccountName"))
+    native_evtx_prefer(output, "user_name", first_promoted_value(event_data, "TargetUserName", "SubjectUserName", "User"))
     output["promoted_system_field_count"] = len(system)
     output["promoted_event_data_field_count"] = len(event_data)
     return output
@@ -5214,6 +5813,820 @@ def decode_evtx_system_section(
     return result
 
 
+# ---------------------------------------------------------------------------
+# Chunk-scoped native EVTX walker and BinXML decoder (parser-quality r1 / W1)
+#
+# Records are walked chunk by chunk (one 64 KiB chunk in memory at a time,
+# no list of all records). Inside a chunk the BinXML of each record is
+# decoded into a small element tree: template definitions (token 0x0C) are
+# compiled once per chunk and cached by chunk offset, substitution arrays
+# (normal 0x0D / optional 0x0E) are applied with typed value decoding, and
+# nested BinXml values (type 0x21) are decoded recursively. System fields and
+# the EventData/UserData name->value map are then read from the tree only --
+# no string-scan heuristics feed identity fields.
+# ---------------------------------------------------------------------------
+
+EVTX_NATIVE_DECODER_VERSION = "evtx-chunk-binxml-decoder-v2"
+EVTX_DECODED_BINXML_STATUS = "decoded"
+EVTX_DECODED_FIELD_FIDELITY = "binxml-template-decoded"
+EVTX_RECORD_STATE_LIVE = "live"
+EVTX_RECORD_STATE_SLACK = "slack-recovered"
+EVTX_RECORD_STATE_INACTIVE = "inactive-chunk"
+EVTX_RECORD_STATE_UNCHUNKED = "outside-chunk"
+# Record states that form the file's record-id sequence (slack and inactive
+# chunk recoveries do not).
+EVTX_SEQUENCED_RECORD_STATES = frozenset({EVTX_RECORD_STATE_LIVE, EVTX_RECORD_STATE_UNCHUNKED})
+EVTX_BINXML_MAX_DEPTH = 12
+EVTX_BINXML_MAX_TOKENS = 200_000
+EVTX_TEMPLATE_MAX_SUBSTITUTIONS = 4096
+EVTX_FILETIME_EPOCH = dt.datetime(1601, 1, 1, tzinfo=dt.timezone.utc)
+# Slack/out-of-range guard: FILETIME values before 1980-01-01 or later than
+# "now + 1 day" are labelled and kept out of first/last/sequence statistics.
+EVTX_FILETIME_MIN_PLAUSIBLE = (dt.datetime(1980, 1, 1, tzinfo=dt.timezone.utc) - EVTX_FILETIME_EPOCH) // dt.timedelta(
+    microseconds=1
+) * 10
+EVTX_ENTITY_REFERENCES = {"amp": "&", "lt": "<", "gt": ">", "quot": '"', "apos": "'"}
+EVTX_FIXED_VALUE_SIZES = {
+    0x03: 1,
+    0x04: 1,
+    0x05: 2,
+    0x06: 2,
+    0x07: 4,
+    0x08: 4,
+    0x09: 8,
+    0x0A: 8,
+    0x0B: 4,
+    0x0C: 8,
+    0x0D: 4,
+    0x0F: 16,
+    0x11: 8,
+    0x12: 16,
+    0x14: 4,
+    0x15: 8,
+}
+EVTX_INT_VALUE_FORMATS = {
+    0x03: "<b",
+    0x04: "<B",
+    0x05: "<h",
+    0x06: "<H",
+    0x07: "<i",
+    0x08: "<I",
+    0x09: "<q",
+    0x0A: "<Q",
+}
+EVTX_SYSTEM_ATTRIBUTE_FIELDS = {
+    ("Provider", "Name"): "ProviderName",
+    ("Provider", "Guid"): "ProviderGuid",
+    ("Provider", "EventSourceName"): "ProviderEventSourceName",
+    ("EventID", "Qualifiers"): "EventIDQualifiers",
+    ("TimeCreated", "SystemTime"): "TimeCreated",
+    ("Correlation", "ActivityID"): "CorrelationActivityID",
+    ("Correlation", "RelatedActivityID"): "CorrelationRelatedActivityID",
+    ("Execution", "ProcessID"): "ProcessID",
+    ("Execution", "ThreadID"): "ThreadID",
+    ("Execution", "ProcessorID"): "ProcessorID",
+    ("Execution", "SessionID"): "SessionID",
+    ("Execution", "KernelTime"): "KernelTime",
+    ("Execution", "UserTime"): "UserTime",
+    ("Execution", "ProcessorTime"): "ProcessorTime",
+    ("Security", "UserID"): "UserID",
+}
+EVTX_SYSTEM_TEXT_FIELDS = {
+    "EventID": "EventID",
+    "Version": "Version",
+    "Level": "Level",
+    "Task": "Task",
+    "Opcode": "Opcode",
+    "Keywords": "Keywords",
+    "EventRecordID": "EventRecordID",
+    "Channel": "Channel",
+    "Computer": "Computer",
+    # Non-standard element spelling seen in synthetic/converted logs.
+    "ProviderName": "ProviderName",
+}
+
+
+class EvtxDecodeError(ValueError):
+    """BinXML structure could not be decoded (record falls back to the token scan)."""
+
+
+class EvtxValue(NamedTuple):
+    text: str
+    raw: object
+    value_type: int
+
+
+class EvtxElement:
+    __slots__ = ("attrs", "children", "name")
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.attrs: list[tuple[str, EvtxValue]] = []
+        self.children: list[EvtxElement | EvtxValue] = []
+
+    def attr(self, name: str) -> EvtxValue | None:
+        for key, value in self.attrs:
+            if key == name:
+                return value
+        return None
+
+    def child(self, name: str) -> EvtxElement | None:
+        for item in self.children:
+            if isinstance(item, EvtxElement) and item.name == name:
+                return item
+        return None
+
+    def elements(self) -> list[EvtxElement]:
+        return [item for item in self.children if isinstance(item, EvtxElement)]
+
+    def text_value(self) -> EvtxValue:
+        values = [item for item in self.children if isinstance(item, EvtxValue)]
+        if len(values) == 1:
+            return values[0]
+        return EvtxValue("".join(item.text for item in values), None, 0x01 if values else 0x00)
+
+
+class _EvtxTemplateElement:
+    __slots__ = ("attrs", "children", "name")
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.attrs: list[tuple[str, list[object]]] = []
+        self.children: list[object] = []
+
+
+class _EvtxSubstitution(NamedTuple):
+    index: int
+    value_type: int
+    optional: bool
+
+
+class _EvtxInstantiated(NamedTuple):
+    items: tuple[object, ...]
+    template_offset: int
+    substitution_count: int
+
+
+def filetime_to_iso_100ns(value: int) -> str:
+    """FILETIME -> ``YYYY-MM-DDTHH:MM:SS.fffffffZ`` with integer arithmetic (100 ns kept)."""
+    if value <= 0:
+        return ""
+    seconds, remainder = divmod(int(value), 10_000_000)
+    try:
+        moment = EVTX_FILETIME_EPOCH + dt.timedelta(seconds=seconds)
+    except (OverflowError, ValueError):
+        return ""
+    return f"{moment.year:04d}-{moment.month:02d}-{moment.day:02d}T{moment.hour:02d}:{moment.minute:02d}:{moment.second:02d}.{remainder:07d}Z"
+
+
+def filetime_now_plus_one_day() -> int:
+    now = dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=1)
+    return (now - EVTX_FILETIME_EPOCH) // dt.timedelta(microseconds=1) * 10
+
+
+def evtx_filetime_status(value: int, upper_bound: int) -> str:
+    if value <= 0:
+        return "missing"
+    if value < EVTX_FILETIME_MIN_PLAUSIBLE:
+        return "out-of-range-before-1980"
+    if value > upper_bound:
+        return "out-of-range-future"
+    return "ok"
+
+
+def _evtx_hex_upper(value: bytes) -> str:
+    return value.hex().upper()
+
+
+def _evtx_guid_text(value: bytes) -> str:
+    return "{" + format_guid_le(value).upper() + "}"
+
+
+def _evtx_systemtime_text(value: bytes) -> str:
+    if len(value) < 16:
+        return ""
+    year, month, _weekday, day, hour, minute, second, millisecond = struct.unpack_from("<8H", value)
+    try:
+        dt.datetime(year, month, day, hour, minute, second)
+    except ValueError:
+        return value.hex()
+    return f"{year:04d}-{month:02d}-{day:02d}T{hour:02d}:{minute:02d}:{second:02d}.{millisecond:03d}Z"
+
+
+def _evtx_ansi_text(value: bytes) -> str:
+    value = value.rstrip(b"\x00")
+    for encoding in ("cp949", "utf-8"):
+        try:
+            return value.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return value.decode("latin-1")
+
+
+def _evtx_utf16_text(value: bytes) -> str:
+    if len(value) % 2:
+        value = value[:-1]
+    return value.decode("utf-16le", errors="replace").rstrip("\x00")
+
+
+def _evtx_real_text(value: float) -> str:
+    text = repr(float(value))
+    return text.removesuffix(".0")
+
+
+class EvtxChunkDecoder:
+    """Decode BinXML records of one 64 KiB chunk (all offsets chunk-relative)."""
+
+    __slots__ = ("_names", "_templates", "_tokens", "chunk", "template_parse_count")
+
+    def __init__(self, chunk: bytes) -> None:
+        self.chunk = chunk
+        self._names: dict[int, tuple[str, int]] = {}
+        self._templates: dict[int, tuple[list[object], int]] = {}
+        self.template_parse_count = 0
+        self._tokens = 0
+
+    # -- primitives -------------------------------------------------------
+    def _u16(self, offset: int) -> int:
+        if offset < 0 or offset + 2 > len(self.chunk):
+            raise EvtxDecodeError(f"u16 out of bounds @{offset}")
+        return self.chunk[offset] | (self.chunk[offset + 1] << 8)
+
+    def _u32(self, offset: int) -> int:
+        if offset < 0 or offset + 4 > len(self.chunk):
+            raise EvtxDecodeError(f"u32 out of bounds @{offset}")
+        return int.from_bytes(self.chunk[offset : offset + 4], "little")
+
+    def _name(self, offset: int) -> tuple[str, int]:
+        cached = self._names.get(offset)
+        if cached is not None:
+            return cached
+        count = self._u16(offset + 6)
+        start = offset + 8
+        end = start + count * 2
+        if end + 2 > len(self.chunk):
+            raise EvtxDecodeError(f"name out of bounds @{offset}")
+        result = (self.chunk[start:end].decode("utf-16le", errors="replace"), 8 + count * 2 + 2)
+        self._names[offset] = result
+        return result
+
+    def value(self, offset: int, size: int, value_type: int, depth: int = 0) -> EvtxValue:
+        end = offset + size
+        if size < 0 or end > len(self.chunk):
+            raise EvtxDecodeError(f"value out of bounds @{offset}+{size}")
+        data = self.chunk[offset:end]
+        if value_type == 0x00:
+            return EvtxValue("", None, 0x00)
+        if value_type == 0x01:
+            text = _evtx_utf16_text(data)
+            return EvtxValue(text, text, 0x01)
+        if value_type == 0x02:
+            text = _evtx_ansi_text(data)
+            return EvtxValue(text, text, 0x02)
+        if value_type in EVTX_INT_VALUE_FORMATS:
+            width = EVTX_FIXED_VALUE_SIZES[value_type]
+            if len(data) < width:
+                raise EvtxDecodeError(f"short integer value @{offset}")
+            number = struct.unpack_from(EVTX_INT_VALUE_FORMATS[value_type], data)[0]
+            return EvtxValue(str(number), number, value_type)
+        if value_type == 0x0B and len(data) >= 4:
+            number = struct.unpack_from("<f", data)[0]
+            return EvtxValue(_evtx_real_text(number), number, value_type)
+        if value_type == 0x0C and len(data) >= 8:
+            number = struct.unpack_from("<d", data)[0]
+            return EvtxValue(_evtx_real_text(number), number, value_type)
+        if value_type == 0x0D and data:
+            flag = int.from_bytes(data[:4], "little") != 0
+            return EvtxValue("true" if flag else "false", flag, value_type)
+        if value_type == 0x0E:
+            return EvtxValue(_evtx_hex_upper(data), data.hex(), value_type)
+        if value_type == 0x0F and len(data) >= 16:
+            text = _evtx_guid_text(data[:16])
+            return EvtxValue(text, text, value_type)
+        if value_type == 0x10:
+            number = int.from_bytes(data[:8], "little") if data else 0
+            return EvtxValue(f"0x{number:x}", number, value_type)
+        if value_type == 0x11 and len(data) >= 8:
+            filetime = int.from_bytes(data[:8], "little")
+            return EvtxValue(filetime_to_iso_100ns(filetime), filetime, value_type)
+        if value_type == 0x12 and len(data) >= 16:
+            text = _evtx_systemtime_text(data[:16])
+            return EvtxValue(text, text, value_type)
+        if value_type == 0x13:
+            text = sid_to_string(data)
+            return EvtxValue(text, text, value_type)
+        if value_type == 0x14 and len(data) >= 4:
+            number = int.from_bytes(data[:4], "little")
+            return EvtxValue(f"0x{number:x}", number, value_type)
+        if value_type == 0x15 and len(data) >= 8:
+            number = int.from_bytes(data[:8], "little")
+            return EvtxValue(f"0x{number:x}", number, value_type)
+        if value_type == 0x21:
+            if depth >= EVTX_BINXML_MAX_DEPTH:
+                raise EvtxDecodeError("nested BinXml too deep")
+            try:
+                nodes = self._parse(offset, end, depth=depth + 1, stop_after_instance=True)[0]
+                items = self._instantiate(nodes, (), depth + 1)
+            except EvtxDecodeError:
+                return EvtxValue(_evtx_hex_upper(data), None, value_type)
+            # Text of a nested fragment is only computed when it lands in an attribute.
+            return EvtxValue("", tuple(items), value_type)
+        if value_type & 0x80:
+            return self._array_value(data, value_type & 0x7F)
+        return EvtxValue(_evtx_hex_upper(data), data.hex(), value_type)
+
+    def _array_value(self, data: bytes, item_type: int) -> EvtxValue:
+        if item_type == 0x01:
+            parts = _evtx_utf16_text(data).split("\x00") if data else []
+            if parts and parts[-1] == "":
+                parts.pop()
+            items = parts
+        elif item_type == 0x02:
+            items = [_evtx_ansi_text(part) for part in data.rstrip(b"\x00").split(b"\x00")] if data else []
+        else:
+            width = EVTX_FIXED_VALUE_SIZES.get(item_type, 0)
+            if item_type == 0x10:
+                width = 8 if len(data) % 8 == 0 else 4
+            if item_type == 0x13:
+                items = []
+                cursor = 0
+                while cursor + 8 <= len(data):
+                    length = 8 + data[cursor + 1] * 4
+                    items.append(sid_to_string(data[cursor : cursor + length]))
+                    cursor += length
+                return EvtxValue(", ".join(items), items, 0x80 | item_type)
+            if not width:
+                return EvtxValue(_evtx_hex_upper(data), data.hex(), 0x80 | item_type)
+            items = []
+            for cursor in range(0, len(data) - width + 1, width):
+                chunk_value = self._scalar_from_bytes(data[cursor : cursor + width], item_type)
+                items.append(chunk_value)
+        return EvtxValue(", ".join(items), items, 0x80 | item_type)
+
+    @staticmethod
+    def _scalar_from_bytes(data: bytes, item_type: int) -> str:
+        if item_type in EVTX_INT_VALUE_FORMATS:
+            return str(struct.unpack_from(EVTX_INT_VALUE_FORMATS[item_type], data)[0])
+        if item_type == 0x0B:
+            return _evtx_real_text(struct.unpack_from("<f", data)[0])
+        if item_type == 0x0C:
+            return _evtx_real_text(struct.unpack_from("<d", data)[0])
+        if item_type == 0x0D:
+            return "true" if int.from_bytes(data, "little") else "false"
+        if item_type == 0x0F:
+            return _evtx_guid_text(data)
+        if item_type == 0x11:
+            return filetime_to_iso_100ns(int.from_bytes(data, "little"))
+        if item_type == 0x12:
+            return _evtx_systemtime_text(data)
+        if item_type in {0x10, 0x14, 0x15}:
+            return f"0x{int.from_bytes(data, 'little'):x}"
+        return _evtx_hex_upper(data)
+
+    # -- token parser -----------------------------------------------------
+    def _parse(self, pos: int, end: int, *, depth: int, stop_after_instance: bool) -> tuple[list[object], int]:
+        chunk = self.chunk
+        end = min(end, len(chunk))
+        root = _EvtxTemplateElement("")
+        stack = [root]
+        attr_parts: list[object] | None = None
+        while pos < end:
+            self._tokens += 1
+            if self._tokens > EVTX_BINXML_MAX_TOKENS:
+                raise EvtxDecodeError("token budget exhausted")
+            token = chunk[pos]
+            kind = token & 0x0F
+            if kind == 0x00:
+                pos += 1
+                break
+            if kind == 0x0F:
+                pos += 4
+                continue
+            if kind == 0x01:
+                name_offset = self._u32(pos + 7)
+                after = pos + 11
+                name, name_length = self._name(name_offset)
+                if name_offset == after:
+                    # Inline NameStringNode precedes the attribute-list size.
+                    after += name_length
+                if token & 0x40:
+                    after += 4
+                element = _EvtxTemplateElement(name)
+                stack[-1].children.append(element)
+                stack.append(element)
+                attr_parts = None
+                pos = after
+                continue
+            if kind == 0x06:
+                name_offset = self._u32(pos + 1)
+                after = pos + 5
+                name, name_length = self._name(name_offset)
+                if name_offset == after:
+                    after += name_length
+                attr_parts = []
+                stack[-1].attrs.append((name, attr_parts))
+                pos = after
+                continue
+            if kind == 0x02:
+                attr_parts = None
+                pos += 1
+                continue
+            if kind in (0x03, 0x04):
+                attr_parts = None
+                if len(stack) > 1:
+                    stack.pop()
+                pos += 1
+                continue
+            target = attr_parts if attr_parts is not None else stack[-1].children
+            if kind == 0x05:
+                value_type = chunk[pos + 1] if pos + 1 < end else 0
+                if value_type == 0x01:
+                    count = self._u16(pos + 2)
+                    start = pos + 4
+                    target.append(self.value(start, count * 2, 0x01, depth))
+                    pos = start + count * 2
+                elif value_type in EVTX_FIXED_VALUE_SIZES:
+                    size = EVTX_FIXED_VALUE_SIZES[value_type]
+                    target.append(self.value(pos + 2, size, value_type, depth))
+                    pos += 2 + size
+                elif value_type == 0x13:
+                    size = 8 + (chunk[pos + 3] * 4 if pos + 3 < end else 0)
+                    target.append(self.value(pos + 2, size, value_type, depth))
+                    pos += 2 + size
+                else:
+                    count = self._u16(pos + 2)
+                    target.append(self.value(pos + 4, count, value_type, depth))
+                    pos += 4 + count
+                continue
+            if kind == 0x07:
+                count = self._u16(pos + 1)
+                target.append(self.value(pos + 3, count * 2, 0x01, depth))
+                pos += 3 + count * 2
+                continue
+            if kind == 0x08:
+                code_point = self._u16(pos + 1)
+                target.append(EvtxValue(chr(code_point), code_point, 0x01))
+                pos += 3
+                continue
+            if kind == 0x09:
+                name_offset = self._u32(pos + 1)
+                after = pos + 5
+                name, name_length = self._name(name_offset)
+                if name_offset == after:
+                    after += name_length
+                target.append(EvtxValue(EVTX_ENTITY_REFERENCES.get(name, f"&{name};"), name, 0x01))
+                pos = after
+                continue
+            if kind == 0x0A:
+                name_offset = self._u32(pos + 1)
+                after = pos + 5
+                _name, name_length = self._name(name_offset)
+                if name_offset == after:
+                    after += name_length
+                pos = after
+                continue
+            if kind == 0x0B:
+                count = self._u16(pos + 1)
+                pos += 3 + count * 2
+                continue
+            if kind == 0x0C:
+                instance, pos = self._template_instance(pos, depth)
+                target.append(instance)
+                if stop_after_instance and len(stack) == 1:
+                    break
+                continue
+            if kind in (0x0D, 0x0E):
+                if pos + 4 > end:
+                    raise EvtxDecodeError(f"truncated substitution @{pos}")
+                target.append(_EvtxSubstitution(self._u16(pos + 1), chunk[pos + 3], kind == 0x0E))
+                pos += 4
+                continue
+            raise EvtxDecodeError(f"unexpected token 0x{token:02x} @{pos}")
+        return root.children, pos
+
+    def _template(self, template_offset: int, depth: int) -> tuple[list[object], int]:
+        cached = self._templates.get(template_offset)
+        if cached is not None:
+            return cached
+        data_length = self._u32(template_offset + 20)
+        body = template_offset + 24
+        if data_length <= 0 or body + data_length > len(self.chunk):
+            raise EvtxDecodeError(f"template out of bounds @{template_offset}")
+        nodes, _ = self._parse(body, body + data_length, depth=depth, stop_after_instance=False)
+        result = (nodes, data_length)
+        self._templates[template_offset] = result
+        self.template_parse_count += 1
+        return result
+
+    def _template_instance(self, pos: int, depth: int) -> tuple[_EvtxInstantiated, int]:
+        template_offset = self._u32(pos + 6)
+        cursor = pos + 10
+        nodes, data_length = self._template(template_offset, depth)
+        if template_offset == cursor:
+            # Resident definition: the template is stored inline right here.
+            cursor = template_offset + 24 + data_length
+        count = self._u32(cursor)
+        if count > EVTX_TEMPLATE_MAX_SUBSTITUTIONS:
+            raise EvtxDecodeError(f"substitution count {count} @{cursor}")
+        cursor += 4
+        descriptors = []
+        for _ in range(count):
+            descriptors.append((self._u16(cursor), self.chunk[cursor + 2]))
+            cursor += 4
+        values: list[EvtxValue] = []
+        for size, value_type in descriptors:
+            values.append(self.value(cursor, size, value_type, depth))
+            cursor += size
+        items = self._instantiate(nodes, values, depth)
+        return _EvtxInstantiated(tuple(items), template_offset, count), cursor
+
+    # -- instantiation ----------------------------------------------------
+    def _resolve(self, part: object, values: Sequence[EvtxValue]) -> list[object]:
+        if isinstance(part, _EvtxSubstitution):
+            if part.index >= len(values):
+                return []
+            value = values[part.index]
+            if value.value_type == 0x00:
+                return []
+            if value.value_type == 0x21 and isinstance(value.raw, tuple):
+                return list(value.raw)
+            return [value]
+        if isinstance(part, _EvtxInstantiated):
+            return list(part.items)
+        return [part]
+
+    def _instantiate(self, nodes: Sequence[object], values: Sequence[EvtxValue], depth: int) -> list[object]:
+        output: list[object] = []
+        for node in nodes:
+            if isinstance(node, _EvtxTemplateElement):
+                element = EvtxElement(node.name)
+                for name, parts in node.attrs:
+                    resolved = []
+                    for part in parts:
+                        for item in self._resolve(part, values):
+                            if isinstance(item, EvtxValue):
+                                resolved.append(item)
+                            elif isinstance(item, EvtxElement):
+                                resolved.append(EvtxValue(" ".join(_evtx_flatten_text(item.children)), None, 0x01))
+                    if not resolved:
+                        # Optional/NULL substitution: the attribute is not rendered.
+                        continue
+                    element.attrs.append(
+                        (name, resolved[0] if len(resolved) == 1 else EvtxValue("".join(item.text for item in resolved), None, 0x01))
+                    )
+                element.children = self._instantiate(node.children, values, depth)
+                output.append(element)
+            else:
+                output.extend(self._resolve(node, values))
+        return output
+
+    # -- records ----------------------------------------------------------
+    def decode_record(self, record_offset: int, record_size: int) -> dict[str, object]:
+        self._tokens = 0
+        body_start = record_offset + EVTX_RECORD_HEADER_SIZE
+        body_end = record_offset + record_size - 4
+        nodes, _ = self._parse(body_start, body_end, depth=0, stop_after_instance=True)
+        template_offsets = [node.template_offset for node in nodes if isinstance(node, _EvtxInstantiated)]
+        substitution_count = sum(node.substitution_count for node in nodes if isinstance(node, _EvtxInstantiated))
+        roots = [item for item in self._instantiate(nodes, (), 0) if isinstance(item, EvtxElement)]
+        if not roots:
+            raise EvtxDecodeError("record has no root element")
+        decoded = extract_evtx_event_fields(roots[0])
+        decoded["template_offsets"] = template_offsets
+        decoded["substitution_count"] = substitution_count
+        decoded["root"] = roots[0]
+        return decoded
+
+
+def _evtx_flatten_text(items: Iterable[object]) -> list[str]:
+    texts: list[str] = []
+    for item in items:
+        if isinstance(item, EvtxValue):
+            if item.text:
+                texts.append(item.text)
+        elif isinstance(item, EvtxElement):
+            texts.extend(_evtx_flatten_text(item.children))
+    return texts
+
+
+def _evtx_leaf_fields(element: EvtxElement, output: list[tuple[str, EvtxValue]], prefix: str = "") -> None:
+    children = element.elements()
+    if not children:
+        value = element.text_value()
+        output.append((element.name, value))
+        return
+    for child in children:
+        _evtx_leaf_fields(child, output, prefix)
+
+
+def _evtx_unique_key(fields: Mapping[str, object], key: str) -> str:
+    if key not in fields:
+        return key
+    index = 2
+    while f"{key}_{index}" in fields:
+        index += 1
+    return f"{key}_{index}"
+
+
+def extract_evtx_event_fields(event: EvtxElement) -> dict[str, object]:
+    """System fields + ordered EventData/UserData map from a decoded record tree."""
+    system_fields: dict[str, str] = {}
+    system_raw: dict[str, object] = {}
+    system = event.child("System")
+    if system is not None:
+        for element in system.elements():
+            text_key = EVTX_SYSTEM_TEXT_FIELDS.get(element.name)
+            if text_key:
+                value = element.text_value()
+                if value.text or text_key not in system_fields:
+                    system_fields[text_key] = value.text
+                    system_raw[text_key] = value.raw
+            for attribute, value in element.attrs:
+                key = EVTX_SYSTEM_ATTRIBUTE_FIELDS.get((element.name, attribute))
+                if key:
+                    system_fields[key] = value.text
+                    system_raw[key] = value.raw
+    event_data: dict[str, str] = {}
+    sequence: list[dict[str, object]] = []
+    source = ""
+    section_names = ("EventData", "UserData", "ProcessingErrorData", "DebugData", "BinaryEventData")
+    for section_name in section_names:
+        section = event.child(section_name)
+        if section is None:
+            continue
+        source = source or section_name
+        pairs: list[tuple[str, EvtxValue, str]] = []
+        if section_name == "EventData":
+            unnamed = 0
+            for child in section.elements():
+                if child.name == "Data":
+                    name_value = child.attr("Name")
+                    if name_value is not None and name_value.text:
+                        key = name_value.text
+                    else:
+                        unnamed += 1
+                        key = f"data_{unnamed}"
+                    pairs.append((key, child.text_value(), f"Event/EventData/Data[{key}]"))
+                else:
+                    leaves: list[tuple[str, EvtxValue]] = []
+                    _evtx_leaf_fields(child, leaves)
+                    pairs.extend((name, value, f"Event/EventData/{name}") for name, value in leaves)
+        else:
+            leaves = []
+            for child in section.elements():
+                _evtx_leaf_fields(child, leaves)
+            if not section.elements():
+                leaves.append((section_name, section.text_value()))
+            pairs.extend((name, value, f"Event/{section_name}/{name}") for name, value in leaves)
+        for key, value, path in pairs:
+            unique = _evtx_unique_key(event_data, key)
+            event_data[unique] = value.text
+            sequence.append(
+                {
+                    "index": len(sequence),
+                    "name": unique,
+                    "value": value.text,
+                    "path": path,
+                    "section": section_name,
+                    "value_type": binxml_value_type_name(value.value_type),
+                    "confidence": "binxml-template-decoded",
+                }
+            )
+    return {
+        "system_fields": system_fields,
+        "system_raw": system_raw,
+        "event_data": event_data,
+        "event_data_sequence": sequence,
+        "event_data_source": source,
+        "root_name": event.name,
+    }
+
+
+def render_evtx_element_xml(element: EvtxElement, limit: int = 4000) -> str:
+    parts: list[str] = []
+    size = 0
+
+    def emit(text: str) -> bool:
+        nonlocal size
+        parts.append(text)
+        size += len(text)
+        return size < limit
+
+    def walk(node: EvtxElement) -> bool:
+        attrs = "".join(f' {name}="{html.escape(value.text, quote=True)}"' for name, value in node.attrs)
+        if not node.children:
+            return emit(f"<{node.name}{attrs}/>")
+        if not emit(f"<{node.name}{attrs}>"):
+            return False
+        for child in node.children:
+            if isinstance(child, EvtxElement):
+                if not walk(child):
+                    return False
+            elif not emit(html.escape(child.text, quote=False)):
+                return False
+        return emit(f"</{node.name}>")
+
+    walk(element)
+    return "".join(parts)[:limit]
+
+
+class EvtxRecordSlot(NamedTuple):
+    """One record position found while walking a chunk (chunk-relative offsets)."""
+
+    relative_offset: int
+    declared_size: int
+    parseable: bool
+    reason: str
+    state: str
+
+
+def native_evtx_chunk_free_space_offset(chunk: bytes) -> int:
+    free_space = read_u32(chunk, 48)
+    if not free_space:
+        legacy = read_u32(chunk, 44)
+        if legacy >= EVTX_CHUNK_HEADER_SIZE:
+            free_space = legacy
+    return free_space
+
+
+def iter_evtx_chunk_record_slots(chunk: bytes, *, active: bool) -> Iterable[EvtxRecordSlot]:
+    """Live records (header walk up to the free-space offset), then slack hits.
+
+    ``active`` is False for chunks past the file header's chunk count; their
+    records are labelled ``inactive-chunk``.
+    """
+    limit = min(len(chunk), EVTX_CHUNK_SIZE)
+    free_space = native_evtx_chunk_free_space_offset(chunk)
+    walk_end = min(free_space, limit) if free_space >= EVTX_CHUNK_HEADER_SIZE else EVTX_CHUNK_HEADER_SIZE
+    state = EVTX_RECORD_STATE_LIVE if active else EVTX_RECORD_STATE_INACTIVE
+    position = EVTX_CHUNK_HEADER_SIZE
+    while position + EVTX_RECORD_HEADER_SIZE <= walk_end:
+        if chunk[position : position + 4] != EVTX_RECORD_MAGIC:
+            break
+        size = read_u32(chunk, position + 4)
+        if size < EVTX_RECORD_HEADER_SIZE + 4 or position + size > limit:
+            break
+        yield EvtxRecordSlot(position, size, True, "record-size-plausible", state)
+        position += size
+    cursor = position
+    while True:
+        hit = chunk.find(EVTX_RECORD_MAGIC, cursor, limit)
+        if hit < 0 or hit + 8 > limit:
+            return
+        size = read_u32(chunk, hit + 4)
+        if size < EVTX_RECORD_HEADER_SIZE + 4:
+            yield EvtxRecordSlot(hit, size, False, "declared-size-too-small", EVTX_RECORD_STATE_SLACK)
+            cursor = hit + 4
+            continue
+        if hit + size > limit:
+            yield EvtxRecordSlot(hit, size, False, "record-extends-past-chunk", EVTX_RECORD_STATE_SLACK)
+            cursor = hit + 4
+            continue
+        if read_u32(chunk, hit + size - 4) != size:
+            yield EvtxRecordSlot(hit, size, False, "trailing-size-mismatch", EVTX_RECORD_STATE_SLACK)
+            cursor = hit + 4
+            continue
+        yield EvtxRecordSlot(hit, size, True, "record-size-plausible", EVTX_RECORD_STATE_SLACK)
+        cursor = hit + size
+
+
+def iter_native_evtx_regions(blob: bytes | mmap.mmap) -> Iterable[tuple[str, int, int]]:
+    """``("chunk", index, offset)`` for each ElfChnk slot, ``("gap", start, end)`` otherwise."""
+    offset = EVTX_FILE_HEADER_SIZE
+    index = 0
+    gap_start: int | None = None
+    total = len(blob)
+    while offset + len(EVTX_CHUNK_SIGNATURE) <= total:
+        if blob[offset : offset + 8] == EVTX_CHUNK_SIGNATURE:
+            if gap_start is not None:
+                yield ("gap", gap_start, offset)
+                gap_start = None
+            yield ("chunk", index, offset)
+        elif gap_start is None:
+            gap_start = offset
+        offset += EVTX_CHUNK_SIZE
+        index += 1
+    if gap_start is not None:
+        yield ("gap", gap_start, total)
+    elif offset < total and total > EVTX_FILE_HEADER_SIZE and offset > EVTX_FILE_HEADER_SIZE:
+        # Short trailing remainder smaller than a chunk signature.
+        return
+
+
+def native_evtx_live_record_ids(blob: bytes | mmap.mmap, declared_chunks: int) -> set[int]:
+    """Pass 1: record ids of live records (active chunks, header walk only)."""
+    live: set[int] = set()
+    for kind, index, offset in iter_native_evtx_regions(blob):
+        if kind != "chunk" or index >= declared_chunks:
+            continue
+        chunk = bytes(blob[offset : offset + EVTX_CHUNK_SIZE])
+        for slot in iter_evtx_chunk_record_slots(chunk, active=True):
+            if slot.state != EVTX_RECORD_STATE_LIVE:
+                break
+            live.add(read_u64(chunk, slot.relative_offset + 8))
+    return live
+
+
 def read_binxml_template_values(blob: bytes, offset: int) -> tuple[list[dict[str, object]], int, list[str]]:
     warnings: list[str] = []
     values: list[dict[str, object]] = []
@@ -5361,7 +6774,15 @@ def parse_nested_binxml_value(value_blob: bytes) -> dict[str, object]:
 
 
 def binxml_value_type_name(value_type: int) -> str:
-    names = {
+    name = _BINXML_VALUE_TYPE_NAMES.get(value_type)
+    if name is not None:
+        return name
+    if value_type & 0x80 and value_type & 0x7F in _BINXML_VALUE_TYPE_NAMES:
+        return f"{_BINXML_VALUE_TYPE_NAMES[value_type & 0x7F]}Array"
+    return f"UnknownType0x{value_type:02x}"
+
+
+_BINXML_VALUE_TYPE_NAMES = {
         0x00: "NullType",
         0x01: "StringType",
         0x02: "AnsiStringType",
@@ -5383,9 +6804,9 @@ def binxml_value_type_name(value_type: int) -> str:
         0x13: "SidType",
         0x14: "HexInt32Type",
         0x15: "HexInt64Type",
+        0x10: "SizeTType",
         0x21: "BinXmlType",
     }
-    return names.get(value_type, f"UnknownType0x{value_type:02x}")
 
 
 def format_guid_le(value: bytes) -> str:
@@ -5590,6 +7011,8 @@ def native_evtx_confidence(details: Mapping[str, object]) -> float:
         score += 0.05
     if details.get("evtx_binxml_status") in {"basic-rendered", "partial-tokenized"}:
         score += 0.05
+    if details.get("evtx_binxml_status") == "decoded":
+        score += 0.1
     recovery = details.get("evtx_recovery_context") if isinstance(details.get("evtx_recovery_context"), Mapping) else {}
     if recovery.get("status") in {"slack-or-deleted-record-candidate", "corrupt-record-candidate"}:
         score = min(score, float(recovery.get("confidence") or 0.6))
@@ -6083,7 +7506,7 @@ def event_semantics_profile(
 ) -> dict[str, object]:
     catalog_key = EVENT_SEMANTICS_ALIASES.get(category, category)
     catalog = EVENT_SEMANTICS_CATALOG.get(catalog_key, {})
-    severity = str(catalog.get("severity") or ("high" if event_id in HIGH_RISK_EVENT_IDS else "info"))
+    severity = str(catalog.get("severity") or ("high" if category in HIGH_RISK_EVENT_CATEGORIES else "info"))
     primary_pivots = [str(item) for item in catalog.get("primary_pivots", []) if str(item)]
     source_values: dict[str, str] = {}
     for pivot in primary_pivots:
@@ -6121,7 +7544,7 @@ def event_semantics_profile(
         "severity": severity,
         "summary": str(
             catalog.get("summary")
-            or EVENT_ID_CATEGORIES.get(event_id, (category, "Windows event of interest"))[1]
+            or EVENT_CATEGORY_DESCRIPTIONS.get(category)
             or "Windows event of interest"
         ),
         "analyst_questions": list(catalog.get("analyst_questions") or generic_event_questions(event_family)),
@@ -6218,14 +7641,16 @@ def normalize_event_details(
 ) -> dict[str, object]:
     normalized_event_id = normalize_event_id(event_id)
     pick_data_text = data_text_picker(data)
-    target_user_name = pick_data_text("TargetUserName", "TargetUser", "AccountName")
-    subject_user_name = pick_data_text("SubjectUserName", "SubjectUser")
+    identity = resolve_event_identity(provider_name, channel, normalized_event_id, pick_data_text)
+    target_user_name = identity["target_user_name"]
+    subject_user_name = identity["subject_user_name"]
     target_domain_name = pick_data_text("TargetDomainName", "AccountDomain")
     logon_type = pick_data_text("LogonType")
-    source_ip = pick_data_text("IpAddress", "SourceAddress", "SourceIp", "SourceNetworkAddress")
+    source_ip = identity["source_ip"] or pick_data_text("IpAddress", "SourceAddress", "SourceIp", "SourceNetworkAddress")
     source_port = pick_data_text("IpPort", "SourcePort")
     service_name = pick_data_text("ServiceName")
     service_file_name = pick_data_text("ServiceFileName", "ImagePath")
+    service_account_name = identity["service_account_name"]
     new_process_name = pick_data_text("NewProcessName", "ProcessName", "Image")
     parent_process_name = pick_data_text("ParentProcessName", "CreatorProcessName")
     parent_command_line = pick_data_text("ParentCommandLine", "ParentProcessCommandLine")
@@ -6255,18 +7680,21 @@ def normalize_event_details(
     local_file = pick_data_text("LocalFile", "LocalName", "FileName", "Path")
     if not user_sid:
         user_sid = pick_data_text("TargetUserSid", "SubjectUserSid", "UserSid")
+    user_name_source = "caller"
     if not user_name:
-        user_name = target_user_name or subject_user_name or pick_data_text("UserName", "User", "Owner")
+        user_name = identity["user_name"]
+        user_name_source = identity["user_name_source"]
     if not process_name:
         process_name = new_process_name
     if not command_line:
         command_line = pick_data_text("CommandLine", "ProcessCommandLine") or script_block_text
     category, description = event_category_for(normalized_event_id, channel, provider_name, data)
     channel_family_value = channel_family(channel)
+    logon_id = identity["logon_id"]
     event_family = inferred_event_family(category, channel_family_value)
     detected_terms = suspicious_terms(data, command_line)
     risk_flags = []
-    if normalized_event_id in HIGH_RISK_EVENT_IDS:
+    if category in HIGH_RISK_EVENT_CATEGORIES:
         risk_flags.append(f"high-value-event-id:{normalized_event_id}")
     if detected_terms:
         risk_flags.extend(f"suspicious-term:{term}" for term in detected_terms)
@@ -6372,6 +7800,7 @@ def normalize_event_details(
         "event_family": event_family,
         "event_tags": event_tags(normalized_event_id, category, event_family, channel_family_value, detected_terms),
         "event_description": description,
+        "event_label_ko": EVENT_CATEGORY_LABELS_KO.get(category, EVENT_CATEGORY_LABELS_KO["event"]),
         "event_semantics_profile": semantics_profile,
         "event_message": message_rendering.get("message") or "",
         "message_rendering": message_rendering,
@@ -6384,10 +7813,12 @@ def normalize_event_details(
         "computer": computer,
         "user_sid": user_sid,
         "user_name": user_name,
+        "user_name_source": user_name_source,
         "subject_user_name": subject_user_name,
         "target_user_name": target_user_name,
         "target_domain_name": target_domain_name,
         "logon_type": logon_type,
+        "logon_id": logon_id,
         "source_ip": source_ip,
         "source_port": source_port,
         "destination_ip": destination_ip,
@@ -6395,6 +7826,7 @@ def normalize_event_details(
         "destination_port": destination_port,
         "service_name": service_name,
         "service_file_name": service_file_name,
+        "service_account_name": service_account_name,
         "process_id": process_id,
         "thread_id": thread_id,
         "process_name": process_name,
@@ -6436,11 +7868,93 @@ def normalize_event_details(
             "mitre_tags": mitre_tags or [],
         },
         "risk_flags": risk_flags,
-        "risk_score": event_risk_score(normalized_event_id, detected_terms, bool(rule_title or rule_id)),
+        "risk_score": event_risk_score(category, detected_terms, bool(rule_title or rule_id)),
         "triage_recommendation": triage_recommendation(category, detected_terms),
         "data": dict(data),
         "raw_preview": raw_preview,
     }
+
+
+# Identity fields come from decoded/imported event fields only, chosen by
+# (provider, EventID) semantics. "-" and empty values are no identity.
+_IDENTITY_TARGET_EVENT_IDS = frozenset({"4624", "4625", "4634", "4647", "4768", "4769", "4771", "4776"})
+_IDENTITY_SUBJECT_EVENT_IDS = frozenset(
+    {
+        "4616", "4648", "4656", "4663", "4672", "4688", "4697", "4698", "4699", "4700", "4701", "4702",
+        "4719", "4720", "4722", "4724", "4725", "4726", "4728", "4732", "4738", "4740", "4741", "4756",
+        "4800", "4801", "5140", "5145", "6416", "1102", "104",
+    }
+)
+_IDENTITY_PLACEHOLDERS = frozenset({"", "-", "n/a", "null"})
+
+
+def _identity_value(value: str) -> str:
+    text = str(value or "").strip()
+    return "" if text.lower() in _IDENTITY_PLACEHOLDERS else text
+
+
+def resolve_event_identity(provider_name: str, channel: str, event_id: str, pick) -> dict[str, str]:
+    """user_name / target / subject / logon_id by event semantics (no string guessing)."""
+    provider = normalize_key(provider_name)
+    channel_key = normalize_key(channel)
+    target = _identity_value(pick("TargetUserName", "TargetUser"))
+    subject = _identity_value(pick("SubjectUserName", "SubjectUser"))
+    result = {
+        "user_name": "",
+        "user_name_source": "",
+        "target_user_name": target,
+        "subject_user_name": subject,
+        "logon_id": "",
+        "source_ip": "",
+        "service_account_name": "",
+    }
+    security = provider == normalize_key(PROVIDER_SECURITY_AUDITING) or (not provider and channel_key == "security")
+    eventlog = provider == normalize_key(PROVIDER_EVENTLOG)
+    if security or eventlog:
+        if event_id in {"4778", "4779"}:
+            account = _identity_value(pick("AccountName"))
+            result.update(user_name=account, user_name_source="AccountName", target_user_name=target or account)
+            result["logon_id"] = _identity_value(pick("LogonID", "LogonId"))
+            result["source_ip"] = _identity_value(pick("ClientAddress"))
+            return result
+        if event_id in _IDENTITY_TARGET_EVENT_IDS:
+            result.update(user_name=target, user_name_source="TargetUserName" if target else "")
+            result["logon_id"] = _identity_value(pick("TargetLogonId"))
+            return result
+        if event_id in _IDENTITY_SUBJECT_EVENT_IDS:
+            result.update(user_name=subject, user_name_source="SubjectUserName" if subject else "")
+            result["logon_id"] = _identity_value(pick("SubjectLogonId"))
+            return result
+    if provider == normalize_key(PROVIDER_SERVICE_CONTROL_MANAGER):
+        # 7045 AccountName is the service run-as account, not the actor.
+        result["service_account_name"] = _identity_value(pick("AccountName"))
+        result["target_user_name"] = target
+        return result
+    if provider == normalize_key(PROVIDER_TERMINAL_LSM):
+        user = _identity_value(pick("User", "UserData.User"))
+        result.update(user_name=user, user_name_source="User" if user else "")
+        address = _identity_value(pick("Address", "UserData.Address"))
+        result["source_ip"] = "" if address.upper() == "LOCAL" else address
+        return result
+    if provider == normalize_key(PROVIDER_TERMINAL_RCM):
+        user = _identity_value(pick("Param1", "UserData.Param1"))
+        domain = _identity_value(pick("Param2", "UserData.Param2"))
+        result.update(user_name=f"{domain}\\{user}" if user and domain else user, user_name_source="Param1" if user else "")
+        result["source_ip"] = _identity_value(pick("Param3", "UserData.Param3"))
+        return result
+    if provider == normalize_key(PROVIDER_SYSMON):
+        user = _identity_value(pick("User"))
+        result.update(user_name=user, user_name_source="User" if user else "")
+        return result
+    for key in ("TargetUserName", "SubjectUserName", "UserName", "User", "AccountName", "Owner"):
+        value = _identity_value(pick(key))
+        if value:
+            result.update(user_name=value, user_name_source=key)
+            break
+    if not result["target_user_name"] and result["user_name_source"] == "AccountName":
+        result["target_user_name"] = result["user_name"]
+    result["logon_id"] = _identity_value(pick("TargetLogonId", "LogonId", "SubjectLogonId"))
+    return result
 
 
 def eventlog_record_source_viewer_locator(
@@ -6503,11 +8017,39 @@ def build_eventlog_file_record(
     native_record_candidate_count: int = 0,
     native_chunk_count: int | None = None,
     structure_rows: bool = True,
+    native_stats: Mapping[str, int] | None = None,
 ) -> ArtifactRecord:
     stat_result = path.stat()
     extra: dict[str, object] = {}
     if native_chunk_count is not None:
         extra["native_chunk_count"] = native_chunk_count
+    stats = native_stats or {}
+    if native_stats is not None:
+        decoded = int(stats.get("decoded_record_count", 0))
+        fallback = int(stats.get("fallback_record_count", 0))
+        extra.update(
+            {
+                "native_live_record_count": int(stats.get("live_record_count", 0)),
+                "native_slack_recovered_record_count": int(stats.get(f"{EVTX_RECORD_STATE_SLACK}_record_count", 0)),
+                "native_inactive_chunk_record_count": int(stats.get(f"{EVTX_RECORD_STATE_INACTIVE}_record_count", 0)),
+                "native_unchunked_record_count": int(stats.get(f"{EVTX_RECORD_STATE_UNCHUNKED}_record_count", 0)),
+                "native_slack_duplicate_count": int(stats.get("slack_duplicate_count", 0)),
+                "native_decoded_record_count": decoded,
+                "native_fallback_record_count": fallback,
+                "native_decode_error_count": int(stats.get("decode_error_count", 0)),
+                "native_timestamp_out_of_range_count": int(stats.get("timestamp_out_of_range_count", 0)),
+                "native_active_chunk_count": int(stats.get("active_chunk_count", 0)),
+                "native_inactive_chunk_count": int(stats.get("inactive_chunk_count", 0)),
+                "native_template_parse_count": int(stats.get("template_parse_count", 0)),
+                "native_records_truncated": False,
+                "native_record_limit": None,
+                "native_decoder_version": EVTX_NATIVE_DECODER_VERSION,
+                "native_parse_note_ko": (
+                    "모든 청크와 레코드를 상한 없이 순회했습니다. 정상(live) 레코드와 슬랙·비활성 청크 복구 레코드는 "
+                    "evtx_record_state로 구분하며, 정상 레코드와 같은 ID의 슬랙 사본은 이벤트로 세지 않습니다."
+                ),
+            }
+        )
     if not structure_rows:
         # Chunk/record-candidate rows were counted but not emitted
         # (``--eventlog-structure-rows`` restores them).
@@ -6530,13 +8072,23 @@ def build_eventlog_file_record(
             "native_record_count": native_record_count,
             "native_record_candidate_count": native_record_candidate_count,
             "native_parse_status": (
-                "partial-record-scan"
+                (
+                    "complete-chunk-walk-decoded"
+                    if stats.get("decoded_record_count") and not stats.get("fallback_record_count")
+                    else "complete-chunk-walk-partial-decode"
+                    if stats.get("decoded_record_count")
+                    else "partial-record-scan"
+                )
                 if native_record_count
                 else ("candidate-record-scan" if native_record_candidate_count else "no-records-emitted")
             ),
             "native_parser_scope": NATIVE_EVTX_PARSE_SCOPE,
             "native_reader_strategy": NATIVE_EVTX_READER_STRATEGY,
-            "native_binxml_status": NATIVE_EVTX_BINXML_STATUS,
+            "native_binxml_status": (
+                EVTX_DECODED_BINXML_STATUS
+                if stats.get("decoded_record_count") and not stats.get("fallback_record_count")
+                else NATIVE_EVTX_BINXML_STATUS
+            ),
             "native_capabilities": NATIVE_EVTX_CAPABILITIES,
             "native_report_grade_blockers": NATIVE_EVTX_REPORT_GRADE_BLOCKERS,
             "native_validation_required": True,
@@ -6751,6 +8303,9 @@ def triage_eventlog_record(record: ArtifactRecord) -> ArtifactRecord:
 
 _LOGON_SESSION_INPUT_KEYS = (
     "event_id",
+    "provider_name",
+    "logon_id",
+    "user_name_source",
     "event_category",
     "record_id",
     "channel",
@@ -6786,130 +8341,189 @@ def logon_session_input_record(record: ArtifactRecord) -> ArtifactRecord:
     )
 
 
+def is_logon_session_event(details: Mapping[str, object]) -> bool:
+    """Security-Auditing logon/logoff/privilege/reconnect events (provider-keyed)."""
+    if str(details.get("event_id") or "") not in LOGON_SESSION_EVENT_IDS:
+        return False
+    provider = normalize_key(details.get("provider_name") or "")
+    if provider:
+        return provider == normalize_key(PROVIDER_SECURITY_AUDITING)
+    return normalize_key(details.get("channel") or "") == "security"
+
+
 def build_logon_session_records(root: Path, records: Sequence[ArtifactRecord]) -> list[ArtifactRecord]:
-    sessions: dict[str, dict[str, object]] = {}
+    """Logon sessions keyed by (computer, TargetUserName, TargetLogonId).
+
+    4624 opens a session and 4634/4647 close it; 4672 (SubjectUserName,
+    SubjectLogonId) and 4778/4779 (AccountName, LogonID) attach to the same
+    key. Logon IDs are reused (for example 0x3e7 after every boot), so a key's
+    events are split into one session per observed 4624 in time order.
+    Events without a logon id fall back to (computer, user, source, type).
+    """
+    groups: dict[str, dict[str, object]] = {}
     for record in records:
         if record.artifact_type != "eventlog-event" or not isinstance(record.details, Mapping):
             continue
         details = record.details
-        event_id = str(details.get("event_id") or "")
-        if event_id not in LOGON_SESSION_EVENT_IDS:
+        if not is_logon_session_event(details):
             continue
-        key = logon_session_key(details)
+        key, key_basis = logon_session_key_and_basis(details)
         if not key:
             continue
-        session = sessions.setdefault(
-            key,
-            {
-                "session_key": key,
-                "events": [],
-                "source_files": set(),
-                "source_hashes": {},
-            },
-        )
-        events = session["events"]
+        group = groups.setdefault(key, {"key_basis": key_basis, "events": []})
+        events = group["events"]
         if isinstance(events, list):
-            events.append(logon_session_event_ref(details))
-        source_files = session["source_files"]
-        if isinstance(source_files, set):
-            source_files.add(str(details.get("source_path") or record.path))
-        source_hashes = session["source_hashes"]
-        hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
-        if isinstance(source_hashes, dict) and hashes.get("sha256"):
-            source_hashes[str(details.get("source_path") or record.path)] = str(hashes.get("sha256"))
+            events.append(
+                (
+                    logon_session_event_ref(details),
+                    str(details.get("source_path") or record.path),
+                    str((details.get("source_hashes") or {}).get("sha256") or "")
+                    if isinstance(details.get("source_hashes"), Mapping)
+                    else "",
+                )
+            )
 
     session_records: list[ArtifactRecord] = []
-    for index, session in enumerate(sessions.values()):
-        events = sorted(
-            [event for event in session.get("events", []) if isinstance(event, Mapping)],
-            key=lambda item: str(item.get("timestamp") or ""),
+    for key, group in groups.items():
+        entries = sorted(
+            [entry for entry in group.get("events", []) if isinstance(entry, tuple)],
+            key=lambda item: (str(item[0].get("timestamp") or ""), int_text(item[0].get("record_id")) or 0),
         )
-        if not events:
-            continue
-        first = events[0]
-        last = events[-1]
-        event_ids = [str(event.get("event_id") or "") for event in events]
-        started = any(event_id == "4624" for event_id in event_ids)
-        ended = any(event_id in {"4634", "4647"} for event_id in event_ids)
-        duration_seconds = logon_session_duration_seconds(first.get("timestamp"), last.get("timestamp")) if started and ended else None
-        user_name = first_nonempty(event.get("user_name") for event in events)
-        logon_type = first_nonempty(event.get("logon_type") for event in events)
-        source_ip = first_nonempty(event.get("source_ip") for event in events)
-        risk_flags = logon_session_risk_flags(logon_type, source_ip, event_ids)
-        validation_checks = {
-            "has_logon_event": started,
-            "has_logoff_event": ended,
-            "has_logon_id_or_fallback_key": bool(session.get("session_key")),
-            "session_duration_available": duration_seconds is not None,
-            "cross_artifact_correlation_available": False,
-        }
-        session_records.append(
-            ArtifactRecord(
-                provider=WindowsEventLogProvider.name,
-                artifact_type="eventlog-logon-session",
-                path=str(root.resolve()),
-                supported=True,
-                details={
-                    "parser": "windows-eventlog-logon-session-builder",
-                    "parser_version": PARSER_VERSION,
-                    "coverage_status": "logon-events-correlated-by-logon-id-or-pivots",
-                    "reportability": "triage",
-                    "source_path": str(root.resolve()),
-                    "source_format": "eventlog-session-correlation",
-                    "source_index": index,
-                    "source_files": sorted(session.get("source_files") or []),
-                    "source_hashes_by_file": dict(session.get("source_hashes") or {}),
-                    "session_key": session.get("session_key"),
-                    "session_status": "closed" if started and ended else ("open-or-not-observed" if started else "logoff-without-observed-logon"),
-                    "user_name": user_name,
-                    "target_domain_name": first_nonempty(event.get("target_domain_name") for event in events),
-                    "logon_type": logon_type,
-                    "source_ip": source_ip,
-                    "workstation_name": first_nonempty(event.get("workstation_name") for event in events),
-                    "computer": first_nonempty(event.get("computer") for event in events),
-                    "started_at": first.get("timestamp") if started else "",
-                    "ended_at": last.get("timestamp") if ended else "",
-                    "duration_seconds": duration_seconds,
-                    "event_ids": event_ids,
-                    "event_count": len(events),
-                    "events": events[:100],
-                    "timestamp": first.get("timestamp") or "",
-                    "timestamp_source": "first_correlated_logon_event",
-                    "risk_flags": risk_flags,
-                    "validation_required": True,
-                    "validation_checks": validation_checks,
-                    "validation_guidance": (
-                        "Logon sessions are correlated from observed authentication events. Validate missing logoff, "
-                        "filtered exports, reused logon IDs, and RDP/network context before final timeline conclusions."
-                    ),
-                    "commercial_grade_ready": False,
-                    "commercial_grade_blockers": [
-                        "complete-security-channel-export-required",
-                        "session-reuse-and-filtered-export-validation-required",
-                        "rdp-network-process-correlation-required",
-                    ],
-                },
+        for occurrence, segment in enumerate(split_logon_session_segments(entries)):
+            session_records.append(
+                build_logon_session_record(root, key, str(group.get("key_basis") or ""), occurrence, segment, len(session_records))
             )
-        )
     return session_records
 
 
+def split_logon_session_segments(entries: Sequence[tuple[dict[str, object], str, str]]) -> list[list[tuple[dict[str, object], str, str]]]:
+    segments: list[list[tuple[dict[str, object], str, str]]] = []
+    current: list[tuple[dict[str, object], str, str]] = []
+    closed = False
+    for entry in entries:
+        event_id = str(entry[0].get("event_id") or "")
+        if event_id == "4624" and (current and (closed or any(str(item[0].get("event_id")) == "4624" for item in current))):
+            segments.append(current)
+            current = []
+            closed = False
+        current.append(entry)
+        if event_id in {"4634", "4647"}:
+            closed = True
+    if current:
+        segments.append(current)
+    return segments
+
+
+def build_logon_session_record(
+    root: Path,
+    key: str,
+    key_basis: str,
+    occurrence: int,
+    segment: Sequence[tuple[dict[str, object], str, str]],
+    index: int,
+) -> ArtifactRecord:
+    events = [entry[0] for entry in segment]
+    source_files = sorted({entry[1] for entry in segment if entry[1]})
+    source_hashes = {entry[1]: entry[2] for entry in segment if entry[1] and entry[2]}
+    event_ids = [str(event.get("event_id") or "") for event in events]
+    logon_events = [event for event in events if event.get("event_id") == "4624"]
+    logoff_events = [event for event in events if event.get("event_id") in {"4634", "4647"}]
+    started = bool(logon_events)
+    ended = bool(logoff_events)
+    started_at = str(logon_events[0].get("timestamp") or "") if started else ""
+    ended_at = str(logoff_events[-1].get("timestamp") or "") if ended else ""
+    duration_seconds = logon_session_duration_seconds(started_at, ended_at) if started and ended else None
+    primary = logon_events[0] if started else events[0]
+    user_name = str(primary.get("user_name") or "") or first_nonempty(event.get("user_name") for event in events)
+    logon_type = first_nonempty(event.get("logon_type") for event in logon_events) or first_nonempty(
+        event.get("logon_type") for event in events
+    )
+    source_ip = first_nonempty(event.get("source_ip") for event in logon_events) or first_nonempty(
+        event.get("source_ip") for event in events
+    )
+    risk_flags = logon_session_risk_flags(logon_type, source_ip, event_ids)
+    validation_checks = {
+        "has_logon_event": started,
+        "has_logoff_event": ended,
+        "has_logon_id_or_fallback_key": bool(key),
+        "keyed_by_target_user_and_logon_id": key_basis == "user-and-logon-id",
+        "session_duration_available": duration_seconds is not None,
+        "cross_artifact_correlation_available": False,
+    }
+    return ArtifactRecord(
+        provider=WindowsEventLogProvider.name,
+        artifact_type="eventlog-logon-session",
+        path=str(root.resolve()),
+        supported=True,
+        details={
+            "parser": "windows-eventlog-logon-session-builder",
+            "parser_version": PARSER_VERSION,
+            "coverage_status": "logon-events-correlated-by-logon-id-or-pivots",
+            "reportability": "triage",
+            "source_path": str(root.resolve()),
+            "source_format": "eventlog-session-correlation",
+            "source_index": index,
+            "source_files": source_files,
+            "source_hashes_by_file": source_hashes,
+            "session_key": key,
+            "session_key_basis": key_basis,
+            "session_occurrence": occurrence,
+            "logon_id": first_nonempty(event.get("logon_id") for event in events),
+            "session_status": "closed" if started and ended else ("open-or-not-observed" if started else "logoff-without-observed-logon"),
+            "user_name": user_name,
+            "target_domain_name": first_nonempty(event.get("target_domain_name") for event in events),
+            "logon_type": logon_type,
+            "source_ip": source_ip,
+            "workstation_name": first_nonempty(event.get("workstation_name") for event in events),
+            "computer": first_nonempty(event.get("computer") for event in events),
+            "started_at": started_at,
+            "ended_at": ended_at,
+            "duration_seconds": duration_seconds,
+            "event_ids": event_ids,
+            "event_count": len(events),
+            "events": events[:100],
+            "events_truncated": len(events) > 100,
+            "timestamp": started_at or str(events[0].get("timestamp") or ""),
+            "timestamp_source": "logon-event" if started else "first_correlated_logon_event",
+            "risk_flags": risk_flags,
+            "validation_required": True,
+            "validation_checks": validation_checks,
+            "validation_guidance": (
+                "Logon sessions are correlated from observed authentication events. Validate missing logoff, "
+                "filtered exports, reused logon IDs, and RDP/network context before final timeline conclusions."
+            ),
+            "commercial_grade_ready": False,
+            "commercial_grade_blockers": [
+                "complete-security-channel-export-required",
+                "session-reuse-and-filtered-export-validation-required",
+                "rdp-network-process-correlation-required",
+            ],
+        },
+    )
+
+
 def logon_session_key(details: Mapping[str, object]) -> str:
+    return logon_session_key_and_basis(details)[0]
+
+
+def logon_session_key_and_basis(details: Mapping[str, object]) -> tuple[str, str]:
     data = details.get("data") if isinstance(details.get("data"), Mapping) else {}
-    logon_id = first_data_text(data, "TargetLogonId", "LogonId", "SubjectLogonId")
+    logon_id = str(details.get("logon_id") or "") or first_data_text(data, "TargetLogonId", "LogonId", "SubjectLogonId")
     computer = str(details.get("computer") or "")
+    user = str(details.get("user_name") or details.get("target_user_name") or details.get("subject_user_name") or "")
     if logon_id:
-        return f"{computer}|{logon_id}".strip("|")
-    return "|".join(
+        return "|".join(item for item in (computer, user.casefold(), logon_id.lower()) if item), "user-and-logon-id"
+    key = "|".join(
         item
         for item in (
             computer,
-            str(details.get("user_name") or details.get("target_user_name") or details.get("subject_user_name") or ""),
+            user.casefold(),
             str(details.get("source_ip") or ""),
             str(details.get("logon_type") or ""),
         )
         if item
     )
+    return key, "fallback-pivots"
 
 
 def logon_session_event_ref(details: Mapping[str, object]) -> dict[str, object]:
@@ -6924,7 +8538,7 @@ def logon_session_event_ref(details: Mapping[str, object]) -> dict[str, object]:
         "user_name": details.get("user_name") or details.get("target_user_name") or details.get("subject_user_name") or "",
         "target_domain_name": details.get("target_domain_name") or "",
         "logon_type": details.get("logon_type") or "",
-        "logon_id": first_data_text(data, "TargetLogonId", "LogonId", "SubjectLogonId"),
+        "logon_id": str(details.get("logon_id") or "") or first_data_text(data, "TargetLogonId", "LogonId", "SubjectLogonId"),
         "source_ip": details.get("source_ip") or "",
         "workstation_name": details.get("workstation_name") or "",
         "source_path": details.get("source_path") or "",
@@ -6975,12 +8589,27 @@ def first_nonempty(values: Iterable[object]) -> str:
     return ""
 
 
+def _builtin_rules_by_category() -> dict[str, tuple[Mapping[str, object], ...]]:
+    index: dict[str, list[Mapping[str, object]]] = defaultdict(list)
+    for rule in BUILTIN_EVENT_RULES:
+        for category in rule.get("categories", ()):
+            index[str(category)].append(rule)
+    return {key: tuple(value) for key, value in index.items()}
+
+
+_BUILTIN_RULES_BY_CATEGORY = _builtin_rules_by_category()
+_BUILTIN_RULES_WITHOUT_CATEGORY = tuple(rule for rule in BUILTIN_EVENT_RULES if not rule.get("categories"))
+
+
 def build_builtin_detection_records(records: Sequence[ArtifactRecord]) -> list[ArtifactRecord]:
     detections: list[ArtifactRecord] = []
     for record in records:
         if record.artifact_type != "eventlog-event" or not isinstance(record.details, Mapping):
             continue
-        for rule in BUILTIN_EVENT_RULES:
+        category = str(record.details.get("event_category") or "")
+        candidates = (*_BUILTIN_RULES_BY_CATEGORY.get(category, ()), *_BUILTIN_RULES_WITHOUT_CATEGORY)
+        # Keep the declared rule order for rows matching several rules.
+        for rule in sorted(candidates, key=BUILTIN_EVENT_RULES.index) if len(candidates) > 1 else candidates:
             if builtin_rule_matches(rule, record.details):
                 detections.append(build_builtin_detection_record(record, rule))
     return detections
@@ -6989,6 +8618,12 @@ def build_builtin_detection_records(records: Sequence[ArtifactRecord]) -> list[A
 def builtin_rule_matches(rule: Mapping[str, object], details: Mapping[str, object]) -> bool:
     event_id = str(details.get("event_id") or "")
     category = str(details.get("event_category") or "")
+    providers = {normalize_key(item) for item in rule.get("providers", set())}
+    provider = normalize_key(details.get("provider_name") or "")
+    # Provider-keyed: a known provider must be one of the rule's providers;
+    # exports without a provider rely on the (channel, EventID) category.
+    if providers and provider and provider not in providers:
+        return False
     event_ids = {str(item) for item in rule.get("event_ids", set())}
     categories = {str(item) for item in rule.get("categories", set())}
     if event_ids and event_id not in event_ids:
@@ -7006,7 +8641,7 @@ def builtin_rule_matches(rule: Mapping[str, object], details: Mapping[str, objec
             str(details.get(key) or "")
             for key in ("command_line", "script_block_text", "process_name", "new_process_name", "raw_preview")
         ).lower()
-        haystack = f"{haystack} {json.dumps(details.get('data') or {}, ensure_ascii=False, sort_keys=True).lower()}"
+        haystack = f"{haystack} {json.dumps(decoded_event_fields(details.get('data') or {}), ensure_ascii=False, sort_keys=True, default=str).lower()}"
         if not any(term in haystack for term in terms):
             return False
 
@@ -7084,6 +8719,10 @@ def build_builtin_detection_record(source_record: ArtifactRecord, rule: Mapping[
         "local_file": details.get("local_file") or "",
         "event_created_at": details.get("event_created_at") or "",
         "timestamp": details.get("timestamp") or "",
+        "timestamp_status": details.get("timestamp_status") or "ok",
+        "evtx_record_state": details.get("evtx_record_state") or "",
+        "logon_id": details.get("logon_id") or "",
+        "event_label_ko": details.get("event_label_ko") or "",
         "rule": {
             "title": rule.get("title") or "",
             "id": rule.get("id") or "",
@@ -7240,9 +8879,18 @@ class EventlogSummaryAccumulator:
             if text.startswith("suspicious-term:"):
                 self._inc("risk_term_counts", "event", text.removeprefix("suspicious-term:"))
         self.source_paths.add(source_path)
-        if timestamp:
+        record_state = str(details.get("evtx_record_state") or "")
+        timestamp_status = str(details.get("timestamp_status") or "ok")
+        if record_state:
+            self._inc("native_record_state_counts", "event", record_state)
+        if timestamp_status != "ok":
+            self.counts["timestamp_out_of_range"] += 1
+            self._inc("timestamp_status_counts", "event", timestamp_status)
+        if timestamp and timestamp_status == "ok":
             self._timestamp(timestamp)
-        if record_id is not None:
+        # Sequence gaps only over live records with plausible timestamps;
+        # slack/inactive-chunk recoveries are not part of the live sequence.
+        if record_id is not None and (not record_state or record_state in EVTX_SEQUENCED_RECORD_STATES) and timestamp_status == "ok":
             self.record_ids_by_channel[channel].add(record_id)
         if int(details.get("risk_score") or 0) >= 40 or details.get("risk_flags"):
             self._high_risk(
@@ -7276,9 +8924,11 @@ class EventlogSummaryAccumulator:
         self._inc("parser_status_counts", "detection", str(details.get("coverage_status") or ""))
         self._inc("reportability_counts", "detection", str(details.get("reportability") or ""))
         self.source_paths.add(source_path)
-        if timestamp:
+        record_state = str(details.get("evtx_record_state") or "")
+        timestamp_status = str(details.get("timestamp_status") or "ok")
+        if timestamp and timestamp_status == "ok":
             self._timestamp(timestamp)
-        if record_id is not None:
+        if record_id is not None and (not record_state or record_state in EVTX_SEQUENCED_RECORD_STATES) and timestamp_status == "ok":
             self.record_ids_by_channel[channel].add(record_id)
         if int(details.get("risk_score") or 0) >= 40 or details.get("risk_flags"):
             self._high_risk(
@@ -7299,12 +8949,13 @@ class EventlogSummaryAccumulator:
             )
 
     def _add_candidate(self, record: ArtifactRecord) -> None:
+        # Record candidates (corrupt/slack-duplicate) are not events: they do
+        # not move first/last event times.
         details = record.details
         source_path = str(details.get("source_path") or record.path)
-        timestamp = str(details.get("timestamp") or "")
         self.source_paths.add(source_path)
-        if timestamp:
-            self._timestamp(timestamp)
+        if str(details.get("coverage_status") or "").startswith("slack-duplicate"):
+            self.counts["slack_duplicate"] += 1
         self._inc("parser_status_counts", "candidate", str(details.get("coverage_status") or ""))
         self._inc("reportability_counts", "candidate", str(details.get("reportability") or ""))
         self._inc("native_recovery_status_counts", "candidate", str(details.get("evtx_recovery_status") or "unknown"))
@@ -7372,6 +9023,10 @@ class EventlogSummaryAccumulator:
             "native_boundary_status_counts": counter_items(self._merged("native_boundary_status_counts")),
             "native_report_grade_status_counts": counter_items(self._merged("native_report_grade_status_counts")),
             "native_chunk_integrity_counts": counter_items(self._merged("native_chunk_integrity_counts")),
+            "native_record_state_counts": counter_items(self._merged("native_record_state_counts")),
+            "timestamp_status_counts": counter_items(self._merged("timestamp_status_counts")),
+            "timestamp_out_of_range_count": self.counts["timestamp_out_of_range"],
+            "slack_duplicate_row_count": self.counts["slack_duplicate"],
             "native_capabilities": NATIVE_EVTX_CAPABILITIES,
             "native_report_grade_blockers": NATIVE_EVTX_REPORT_GRADE_BLOCKERS,
             "detection_level_counts": counter_items(self._merged("detection_level_counts")),
@@ -7385,6 +9040,8 @@ class EventlogSummaryAccumulator:
                 "eventlog-record-candidate rows and evtx_recovery_context mark slack/deleted/corrupt candidates that require independent validation.",
                 "eventlog-chunk rows expose native chunk bounds and checksum observations so recovery candidates can be reviewed against chunk slack/structure.",
                 "Use message_rendering.validation_required and external parser exports to separate built-in fallback messages from report-grade provider resource rendering.",
+                "first_event_at/last_event_at and record_sequence_gaps exclude out-of-range timestamps (before 1980 or later than collection time + 1 day) and slack/inactive-chunk recoveries; see timestamp_status_counts and native_record_state_counts.",
+                "시각 범위(1980년 이전 또는 수집 시각+1일 이후)를 벗어난 타임스탬프와 슬랙/비활성 청크 복구 레코드는 최초/최종 시각과 레코드 ID 간격 통계에서 제외했습니다.",
             ],
         }
         return ArtifactRecord(
@@ -7634,14 +9291,27 @@ def split_tags(value: object) -> list[str]:
     return [item.strip() for item in re.split(r"[,;| ]+", text) if item.strip()]
 
 
+_STRUCTURAL_DATA_KEY_PREFIXES = ("evtx_", "binxml_", "native_", "extracted_", "parameter_")
+
+
+def decoded_event_fields(data: Mapping[str, object]) -> dict[str, object]:
+    """Event fields only: drops native parser bookkeeping (evtx_*/binxml_*/native_* blocks)."""
+    return {
+        str(key): value
+        for key, value in data.items()
+        if not str(key).startswith(_STRUCTURAL_DATA_KEY_PREFIXES) and str(key) != "event_data_source"
+    }
+
+
 def suspicious_terms(data: Mapping[str, object], command_line: str = "") -> list[str]:
-    haystack = f"{command_line}\n{json.dumps(data, ensure_ascii=False, sort_keys=True)}".lower()
+    fields = json.dumps(decoded_event_fields(data), ensure_ascii=False, sort_keys=True, default=str)
+    haystack = f"{command_line}\n{fields}".lower()
     return [term for term in SUSPICIOUS_TERMS if term in haystack]
 
 
-def event_risk_score(event_id: str, terms: list[str], has_rule: bool) -> int:
+def event_risk_score(category: str, terms: list[str], has_rule: bool) -> int:
     score = 0
-    if event_id in HIGH_RISK_EVENT_IDS:
+    if category in HIGH_RISK_EVENT_CATEGORIES:
         score += 40
     if terms:
         score += min(40, len(terms) * 15)
@@ -7656,7 +9326,22 @@ def event_category_for(
     provider_name: str = "",
     data: Mapping[str, object] | None = None,
 ) -> tuple[str, str]:
-    provider_or_channel = f"{normalize_key(provider_name)} {normalize_key(channel)}"
+    """(category, description) keyed by (provider, EventID); (channel, EventID) only without a provider."""
+    provider_key = normalize_key(provider_name)
+    channel_key = normalize_key(channel)
+    if provider_key:
+        found = EVENT_CATEGORY_BY_PROVIDER.get((provider_key, event_id))
+    else:
+        found = EVENT_CATEGORY_BY_CHANNEL.get((channel_key, event_id))
+    if found is not None:
+        category, description = found
+        if category.startswith("rdp-") and category != "rdp-authentication-succeeded":
+            address = first_data_text(data or {}, "Address", "UserData.Address")
+            if address.strip().upper() in {"", "LOCAL"}:
+                category = "local-" + category.removeprefix("rdp-")
+                description = description.replace("Terminal Services", "Local console")
+        return category, description
+    provider_or_channel = f"{provider_key} {channel_key}"
     if "kernelpnp" in provider_or_channel or "usbstor" in provider_or_channel:
         return "usb-device-event", "USB or Plug-and-Play device event"
     if "wlanautoconfig" in provider_or_channel:
@@ -7665,9 +9350,7 @@ def event_category_for(
         return "print-service-event", "PrintService document or queue event"
     if "bitsclient" in provider_or_channel:
         return "bits-client-event", "BITS Client transfer event"
-    if event_id == "22" and "terminalservices" in normalize_key(channel):
-        return "rdp-session-logon", "Terminal Services session logon"
-    return EVENT_ID_CATEGORIES.get(event_id, ("event", "Windows event log record"))
+    return "event", "Windows event log record"
 
 
 def event_family_for(category: str) -> str:

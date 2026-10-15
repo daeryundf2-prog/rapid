@@ -83,6 +83,21 @@
         },
         "artifact_record_contract_invalid_count": {
           "type": "integer"
+        },
+        "collection_notes": {
+          "type": "array"
+        },
+        "skipped_row_count": {
+          "type": "integer"
+        },
+        "skip_reasons": {
+          "type": "object"
+        },
+        "export_roots": {
+          "type": "array"
+        },
+        "acquisition_roots": {
+          "type": "array"
         }
       }
     },
@@ -234,6 +249,21 @@
           },
           "message": {
             "type": "string"
+          },
+          "path": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "truncated_row_errors": {
+            "type": "integer"
           }
         }
       }
