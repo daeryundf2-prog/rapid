@@ -134,7 +134,9 @@ class SearchIndexBuildTests(unittest.TestCase):
 
     def test_evidence_paths_and_flags(self) -> None:
         path, fold, ext = self.query("SELECT path, path_fold, ext FROM search_doc WHERE collection='files' AND locator='/candidates/1'")[0]
-        self.assertEqual(path, "\\Users\\bsh\\Downloads\\AnyDesk.exe")
+        # The run-root strip keeps the rest of the path byte-for-byte; the fixture stages files with
+        # the host separator (backslash on Windows, slash on POSIX), so compare separator-blind.
+        self.assertEqual(path.replace("/", "\\"), "\\Users\\bsh\\Downloads\\AnyDesk.exe")
         self.assertEqual(fold, "/users/bsh/downloads/anydesk.exe")
         self.assertEqual(ext, "exe")
         flags = {row[0]: (row[1], row[2]) for row in self.query("SELECT locator, deleted, sig_mismatch FROM search_doc WHERE collection='files'")}
