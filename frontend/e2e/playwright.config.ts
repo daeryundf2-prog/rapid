@@ -9,7 +9,7 @@ export default defineConfig({
     command: "node start-server.mjs",
     url: "http://127.0.0.1:8791/v2/",
     reuseExistingServer: !process.env.CI,
-    timeout: 60_000,
+    timeout: Number(process.env.PW_WEBSERVER_TIMEOUT_MS) || 60_000,
   },
   use: {
     baseURL: "http://127.0.0.1:8791",
