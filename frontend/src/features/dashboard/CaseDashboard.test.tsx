@@ -215,24 +215,24 @@ describe("CaseDashboard (접수)", () => {
   it("routes chart bars, review rows, shortcuts and 스캔 요약 보기 to tree nodes", async () => {
     await renderDashboard();
     fireEvent.click(await screen.findByRole("button", { name: "운영 체제 100건 열기" }));
-    expect(window.location.hash).toBe("#/case/r1/artifacts?category=operating-system");
+    expect(window.location.hash).toBe("#/case/r1/explore/artifacts?category=operating-system");
     expect(useAppStore.getState().route.category).toBe("operating-system");
 
     fireEvent.click(await screen.findByRole("button", { name: "관련 있음 2건 리뷰보드에서 열기" }));
-    expect(window.location.hash).toBe("#/case/r1/review/relevant");
+    expect(window.location.hash).toBe("#/case/r1/review/board/relevant");
     fireEvent.click(screen.getByRole("button", { name: /리뷰보드 항목\(북마크\)/ }));
-    expect(window.location.hash).toBe("#/case/r1/review");
+    expect(window.location.hash).toBe("#/case/r1/review/board");
 
     const start = card("시작할 곳");
     fireEvent.click(within(start).getByRole("button", { name: /전체 검색/ }));
-    expect(window.location.hash).toBe("#/case/r1/search");
+    expect(window.location.hash).toBe("#/case/r1/explore/search");
     fireEvent.click(within(start).getByRole("button", { name: /^아티팩트/ }));
-    expect(window.location.hash).toBe("#/case/r1/artifacts");
+    expect(window.location.hash).toBe("#/case/r1/explore/artifacts");
     fireEvent.click(within(start).getByRole("button", { name: /리뷰보드/ }));
-    expect(window.location.hash).toBe("#/case/r1/review");
+    expect(window.location.hash).toBe("#/case/r1/review/board");
 
     fireEvent.click(screen.getByRole("button", { name: /스캔 요약 보기/ }));
-    expect(window.location.hash).toBe("#/case/r1/outputs");
+    expect(window.location.hash).toBe("#/case/r1/report/outputs");
   });
 
   it("counts keyword hits one at a time and opens the search node", async () => {
@@ -249,9 +249,9 @@ describe("CaseDashboard (접수)", () => {
     expect(searches.every((c) => c.url.includes(`limit=${KEYWORD_COUNT_LIMIT}`))).toBe(true);
 
     fireEvent.click(within(keywords).getByRole("button", { name: "invoice 검색 열기" }));
-    expect(window.location.hash).toBe("#/case/r1/search?q=invoice");
+    expect(window.location.hash).toBe("#/case/r1/explore/search?q=invoice");
     fireEvent.click(within(keywords).getByRole("button", { name: "계좌 검색 열기" }));
-    expect(window.location.hash).toBe("#/case/r1/search?q=bank");
+    expect(window.location.hash).toBe("#/case/r1/explore/search?q=bank");
   });
 
   it("saves the case notes through PUT /case-notes", async () => {

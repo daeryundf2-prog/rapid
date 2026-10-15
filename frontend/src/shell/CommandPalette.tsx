@@ -106,7 +106,8 @@ function PaletteDialog() {
   const commands = useCommands();
   const ctx = useCommandContext();
   const [query, setQuery] = useState("");
-  const [active, setActive] = useState(0);
+  /** -1 = automatic: the first runnable option (a disabled match never captures Enter over a search). */
+  const [active, setActive] = useState(-1);
   const dialogRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const baseId = useId();
@@ -139,7 +140,11 @@ function PaletteDialog() {
   }, [commands, ctx, query, openCollection]);
 
   const flat = useMemo(() => groups.flatMap((g) => g.items), [groups]);
-  const activeIndex = flat.length === 0 ? -1 : Math.min(active, flat.length - 1);
+  const firstRunnable = Math.max(
+    0,
+    flat.findIndex((item) => !item.disabledReason),
+  );
+  const activeIndex = flat.length === 0 ? -1 : active < 0 ? firstRunnable : Math.min(active, flat.length - 1);
   const activeItem = activeIndex >= 0 ? flat[activeIndex] : undefined;
   const optionId = (key: string) => `${baseId}-opt-${key.replace(/[^\w-]/g, "_")}`;
 
@@ -217,7 +222,7 @@ function PaletteDialog() {
             value={query}
             onChange={(event) => {
               setQuery(event.target.value);
-              setActive(0);
+              setActive(-1);
             }}
             onKeyDown={onKeyDown}
           />

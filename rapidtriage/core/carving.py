@@ -363,6 +363,9 @@ def _scan_source(
     max_carve_bytes: int,
     remaining: int,
     signatures: Sequence[CarvingSignature],
+    check_cancel: Callable[[], None] | None = None,
+    on_entry: Callable[[dict[str, object]], None] | None = None,
+    count_rejected: bool = True,
 ) -> tuple[list[dict[str, object]], int]:
     """Scan one source in overlapping chunks; returns (entries, bytes_scanned).
 
@@ -370,13 +373,23 @@ def _scan_source(
     deferred to the next window so headers straddling chunk boundaries
     are not missed. Carving itself seeks to the candidate offset and
     reads a bounded window, so footers may live beyond the scan chunk.
+
+    Optional hooks (defaults keep the CLI behaviour): ``check_cancel`` is
+    called before every chunk read and every candidate (it raises to stop);
+    ``on_entry`` receives each entry as soon as it is built instead of the
+    returned list collecting it (so a cancelled scan keeps what it emitted);
+    ``count_rejected=False`` stops ``false-positive-rejected`` entries from
+    counting toward ``remaining``.
     """
     entries: list[dict[str, object]] = []
+    counted = 0
     scanned = 0
     tail = b""
     base = 0  # file offset of buffer[0]
     with path.open("rb") as handle:
         while True:
+            if check_cancel is not None:
+                check_cancel()
             chunk = handle.read(min(SCAN_CHUNK_BYTES, read_limit - scanned))
             if not chunk:
                 break
@@ -398,10 +411,16 @@ def _scan_source(
                     start_at = pos + 1
                     if offset >= emit_limit:
                         continue
-                    if len(entries) >= remaining:
+                    if counted >= remaining:
                         break
-                    entries.append(
-                        _build_candidate_entry(
+                    if check_cancel is not None:
+                        check_cancel()
+                    # Building a candidate seeks to its offset and reads its window;
+                    # the scan resumes from the chunk position afterwards (without
+                    # this, the next chunk read continued after the carve window).
+                    position = handle.tell()
+                    try:
+                        entry = _build_candidate_entry(
                             handle,
                             path=path,
                             file_size=read_limit,
@@ -411,7 +430,14 @@ def _scan_source(
                             extract=extract,
                             max_carve_bytes=max_carve_bytes,
                         )
-                    )
+                    finally:
+                        handle.seek(position)
+                    if count_rejected or entry.get("status") != STATUS_REJECTED:
+                        counted += 1
+                    if on_entry is not None:
+                        on_entry(entry)
+                    else:
+                        entries.append(entry)
             tail = buffer[-SCAN_OVERLAP_BYTES:]
             base = base + len(buffer) - len(tail)
             if eof:
@@ -430,9 +456,12 @@ def _build_candidate_entry(
     extract: bool,
     max_carve_bytes: int,
 ) -> dict[str, object]:
+    window_size = min(max_carve_bytes, file_size - offset)
     handle.seek(offset)
-    window = handle.read(min(max_carve_bytes, file_size - offset))
-    rejection = signature.validator(window[:HEADER_PROBE_BYTES]) if signature.validator else None
+    # Validate on the header probe first: a rejected candidate never reads its
+    # (up to max_carve_bytes) carve window.
+    probe = handle.read(min(HEADER_PROBE_BYTES, window_size))
+    rejection = signature.validator(probe) if signature.validator else None
     entry: dict[str, object] = {
         "source_path": str(path),
         "kind": signature.kind,
@@ -457,6 +486,8 @@ def _build_candidate_entry(
             }
         )
         return entry
+    handle.seek(offset)
+    window = handle.read(window_size)
     carved, end_offset, status, boundary_method = carve_candidate(
         window, 0, signature, max_carve_bytes=max_carve_bytes
     )

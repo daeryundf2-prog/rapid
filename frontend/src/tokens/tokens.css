@@ -70,6 +70,9 @@
   --line-subtle: var(--gray-600);
   --text: var(--gray-100);
   --text-muted: var(--gray-300);
+  /* Disabled controls (incl. primary): never muted text on the accent fill (≈1.4:1). */
+  --disabled-bg: var(--gray-700);
+  --disabled-text: var(--gray-200);
 
   --accent: #4d9fff;
   --accent-hover: #6fb1ff;
@@ -129,6 +132,8 @@
   --line-subtle: var(--gray-200);
   --text: var(--gray-900);
   --text-muted: var(--gray-500);
+  --disabled-bg: var(--gray-100);
+  --disabled-text: var(--gray-600);
 
   --accent: #1a64c4;
   --accent-hover: #1757aa;
@@ -188,6 +193,8 @@
     --line-subtle: var(--gray-200);
     --text: var(--gray-900);
     --text-muted: var(--gray-500);
+    --disabled-bg: var(--gray-100);
+    --disabled-text: var(--gray-600);
     --accent: #1a64c4;
     --accent-hover: #1757aa;
     --accent-active: #134a91;

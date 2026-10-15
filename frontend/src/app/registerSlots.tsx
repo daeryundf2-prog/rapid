@@ -6,10 +6,15 @@
 
 import { useEffect } from "react";
 import { CommandButton } from "../commands/CommandButton";
+import { AnalysisPane } from "../features/analysis/AnalysisPane";
+import { AnalysisProgressChip } from "../features/analysis/AnalysisProgressChip";
 import { useCaseDialogs } from "../features/case/dialogs";
 import { DataGrid } from "../features/grid/DataGrid";
+import { ProcessPage, ProcessPanel } from "../features/stages/ProcessStage";
+import { ReportPage, ReportPanel, ReviewPanel } from "../features/stages/ReviewReportStage";
 import { EvidenceTree } from "../features/tree/EvidenceTree";
 import { Viewer } from "../features/viewer/Viewer";
+import { stageOf } from "../router";
 import { registerSlot, type SlotProps } from "../shell/slots";
 import { useRoute } from "../state/hooks";
 import { connectGridToShell } from "./gridBridge";
@@ -20,7 +25,19 @@ import { connectViewerToShell } from "./viewerBridge";
 /** S4 tree for the routed case; an explicit empty state otherwise. */
 function TreeSlot() {
   const { route } = useRoute();
-  if (route.runId) return <EvidenceTree runId={route.runId} />;
+  if (route.runId) {
+    switch (stageOf(route)) {
+      case "process":
+        return <ProcessPanel />;
+      case "review":
+        return <ReviewPanel />;
+      case "report":
+        return <ReportPanel />;
+      default:
+        // 접수 and 탐색: the domain tree (증거 소스 first).
+        return <EvidenceTree runId={route.runId} />;
+    }
+  }
   return (
     <div className="pane-empty-block">
       <p className="pane-empty">열린 케이스가 없습니다.</p>
@@ -33,6 +50,10 @@ function TreeSlot() {
 /** 접수 shows the case summary; every other collection is the one DataGrid. */
 function GridSlot() {
   const { route } = useRoute();
+  // 분석 작업 nodes: header + history + the one DataGrid over the selected job's rows.
+  if (route.runId && route.collection === "analysis") return <AnalysisPane />;
+  if (route.runId && route.collection === "process") return <ProcessPage />;
+  if (route.runId && route.collection === "outputs") return <ReportPage />;
   return route.runId && route.collection === "intake" ? (
     <IntakePane />
   ) : (
@@ -63,4 +84,5 @@ export function registerAppSlots(): void {
   registerSlot("viewer", Viewer);
   connectViewerToShell();
   registerSlot("run-dialog", RunDialogBridge);
+  registerSlot("status-extra", AnalysisProgressChip);
 }

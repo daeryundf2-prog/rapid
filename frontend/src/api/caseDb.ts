@@ -75,6 +75,8 @@ export interface ReviewMapMark {
   collection: string;
   kind: string;
   locator: string;
+  /** Source row's display label (analysis rows: the row title), when the server knows it. */
+  label?: string;
   title?: string;
   path?: string;
   preview?: string;

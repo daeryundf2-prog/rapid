@@ -1,10 +1,19 @@
+import type { AnalysisState, AnalysisStatus } from "../../api/analyses";
 import type { ReviewCounts, SavedSearch } from "../../api/caseDb";
 import type { EvidencePartition, EvidenceSource } from "../../api/dashboard";
 import type { CanonicalCounts, RunSummary, RunTree, TreeNode } from "../../api/runs";
 import type { CollectionId, ReviewStatus } from "../../contracts/collection";
 import type { IconName } from "../../icons";
+import {
+  ANALYSIS_NODES,
+  isPartialResult,
+  latestForNode,
+  nodeStateIcon,
+  nodeStateLabel,
+} from "../analysis/kinds";
 import type { CaseRoute } from "./adapter";
 import { groupByCategory, kindIcon } from "./categories";
+import { DOMAINS, type DomainTarget, targetKey } from "./domains";
 
 export type RouteTail = Omit<CaseRoute, "runId">;
 
@@ -28,6 +37,12 @@ export interface TreeModelNode {
   noSelect?: boolean;
   /** Short marker after the label ("선택됨"). */
   marker?: string;
+  /** Domain nodes: the full route to open (kind + `types=` / `ext=` filters). */
+  target?: RouteTail & { types?: string[]; ext?: string[] };
+  /** Domain nodes: selected when the current route has this key (`targetKey`). */
+  selectKey?: string;
+  /** Group headers (domains, 전체 보기): click / Enter expands or collapses; never navigates. */
+  toggleOnly?: boolean;
 }
 
 export interface TreeModelInput {
@@ -39,6 +54,8 @@ export interface TreeModelInput {
   onOpenSavedSearch?: (search: SavedSearch) => void;
   /** `GET /api/runs/{id}/dashboard` evidence_source (X2/X17). */
   evidence?: EvidenceSource;
+  /** `GET /api/runs/{id}/analyses` (newest first); undefined while unknown. */
+  analyses?: AnalysisState[];
 }
 
 export const REVIEW_NODES: Array<{ status: ReviewStatus; label: string }> = [
@@ -171,12 +188,184 @@ export function evidenceNode(
   };
 }
 
+function findServerNode(tree: RunTree | undefined, id: string): TreeNode | undefined {
+  let found: TreeNode | undefined;
+  const visit = (node: TreeNode) => {
+    if (found) return;
+    if (node.id === id) found = node;
+    else for (const child of node.children ?? []) visit(child);
+  };
+  for (const node of tree?.nodes ?? []) visit(node);
+  return found;
+}
+
+const ANALYSIS_STATUSES: readonly AnalysisStatus[] = [
+  "queued",
+  "running",
+  "completed",
+  "failed",
+  "cancelled",
+];
+
+/** Newest job state of an analysis node from the server tree (`analysis:<node>`), null = never ran. */
+function serverAnalysisState(tree: RunTree | undefined, nodeId: string): AnalysisStatus | null {
+  const status = findServerNode(tree, `analysis:${nodeId}`)?.state?.status;
+  return status && (ANALYSIS_STATUSES as readonly string[]).includes(status)
+    ? (status as AnalysisStatus)
+    : null;
+}
+
+export const NO_DATA_REASON = "이 런에는 해당 데이터가 없습니다";
+/** Count of a node whose number the server tree cannot give yet (P4 adds them). */
+export const UNKNOWN_COUNT = "—";
+
+export interface DomainCount {
+  count: number | string | undefined;
+  disabledReason?: string;
+  marker?: string;
+  icon?: IconName;
+}
+
+/** Count / dimming of one domain node from `/tree`, the summary counts and the analysis jobs. */
+export function domainNodeCount(target: DomainTarget, input: TreeModelInput): DomainCount {
+  const tree = input.tree;
+  const counts = input.summary?.summary?.counts;
+  if (target.analysis) {
+    const node = ANALYSIS_NODES.find((n) => n.id === target.analysis);
+    const completed = input.analyses?.find(
+      (job) => (node?.kinds as string[] | undefined)?.includes(job.kind) && job.status === "completed",
+    );
+    const last = node ? latestForNode(input.analyses, node) : undefined;
+    const status = input.analyses ? (last?.status ?? null) : serverAnalysisState(tree, target.analysis);
+    const serverCount = findServerNode(tree, `analysis:${target.analysis}`)?.count;
+    // No completed job: a cancelled / failed one that still wrote rows counts (partial result).
+    const partial = completed
+      ? undefined
+      : input.analyses?.find(
+          (job) => (node?.kinds as string[] | undefined)?.includes(job.kind) && isPartialResult(job),
+        );
+    const count = completed
+      ? completed.row_count
+      : partial
+        ? partial.row_count
+        : !input.analyses && status === "completed"
+          ? serverCount
+          : undefined;
+    // Never disabled: the results pane explains a never-ran / running / failed job itself.
+    const stateMarker =
+      status === "completed"
+        ? undefined
+        : partial && last?.analysis_id === partial.analysis_id
+          ? `${nodeStateLabel(status)} · 부분 결과`
+          : nodeStateLabel(status);
+    return { count, marker: stateMarker, icon: status === "completed" ? undefined : nodeStateIcon(status) };
+  }
+  if (target.collection === "files" && !target.fileCategory) return known(counts?.files, Boolean(counts));
+  if (target.collection === "docs") return known(counts?.docs, Boolean(counts));
+  if (target.collection === "indicators") return known(counts?.indicators, Boolean(counts));
+  if (target.collection === "timeline") return known(counts?.timeline_events, Boolean(counts));
+  if (target.collection === "files" && target.fileCategory) {
+    const files = findServerNode(tree, "files");
+    if (!files?.children?.length) return { count: tree ? UNKNOWN_COUNT : undefined };
+    return known(findServerNode(tree, `files:${target.fileCategory}`)?.count ?? 0, true);
+  }
+  if (target.collection === "artifacts") {
+    if (!tree) return { count: undefined };
+    if (!target.kind) return { count: UNKNOWN_COUNT };
+    const kindNode = findServerNode(tree, `artifacts:${target.kind}`);
+    // The run has no records of this kind at all.
+    if (!kindNode) return known(0, true);
+    if (!target.types?.length) return known(kindNode.count, true);
+    const perType = kindNode.artifact_type_counts;
+    if (perType && typeof perType === "object") {
+      return known(
+        target.types.reduce((sum, type) => sum + (typeof perType[type] === "number" ? perType[type] : 0), 0),
+        true,
+      );
+    }
+    const typed = (kindNode.children ?? []).filter((child) => child.artifact_type);
+    if (typed.length) {
+      return known(
+        typed
+          .filter((child) => target.types?.includes(child.artifact_type as string))
+          .reduce((sum, c) => sum + c.count, 0),
+        true,
+      );
+    }
+    // Per-type counts unknown for this run: only an empty kind is known to be 0.
+    return kindNode.count === 0 ? known(0, true) : { count: UNKNOWN_COUNT };
+  }
+  return { count: undefined };
+}
+
+function known(count: number | undefined, loaded: boolean): DomainCount {
+  if (count === undefined) return { count: undefined };
+  return loaded && count === 0 ? { count, disabledReason: NO_DATA_REASON } : { count };
+}
+
+/** Full route of a domain node (the tree navigates with it; `types=` / `ext=` ride in the URL). */
+export function domainRoute(target: DomainTarget): RouteTail & { types?: string[]; ext?: string[] } {
+  const route: RouteTail & { types?: string[]; ext?: string[] } = { collection: target.collection };
+  if (target.kind) route.kind = target.kind;
+  if (target.fileCategory) route.category = target.fileCategory;
+  if (target.types?.length) route.types = [...target.types];
+  if (target.ext?.length) route.ext = [...target.ext];
+  return route;
+}
+
+function domainNodes(input: TreeModelInput): TreeModelNode[] {
+  return DOMAINS.map<TreeModelNode>((domain) => {
+    const children = domain.nodes.map<TreeModelNode>((node) => {
+      const state = domainNodeCount(node.target, input);
+      const route = domainRoute(node.target);
+      return {
+        id: `domain:${domain.id}:${node.id}`,
+        label: node.label,
+        count: state.count,
+        route: {
+          collection: route.collection,
+          ...(route.kind ? { kind: route.kind } : {}),
+          ...(route.category ? { category: route.category } : {}),
+        },
+        target: route,
+        selectKey: targetKey(node.target),
+        disabledReason: state.disabledReason,
+        marker: state.marker,
+        icon: state.icon ?? node.icon,
+      };
+    });
+    // Each kind counts once; typed subsets (artifact_type filters) and other views do not add.
+    const kindCounts = new Map<string, number>();
+    domain.nodes.forEach((node, index) => {
+      const count = children[index]?.count;
+      const t = node.target;
+      if (t.collection === "artifacts" && t.kind && !t.types?.length && typeof count === "number") {
+        kindCounts.set(t.kind, count);
+      }
+    });
+    const total = [...kindCounts.values()].reduce((sum, n) => sum + n, 0);
+    const anyKnown = kindCounts.size > 0;
+    return {
+      id: `domain:${domain.id}`,
+      label: domain.label,
+      icon: domain.icon,
+      count: anyKnown ? total : undefined,
+      strongCount: true,
+      route: children[0]?.route ?? { collection: "artifacts" },
+      noSelect: true,
+      toggleOnly: true,
+      children,
+    };
+  });
+}
+
+/**
+ * 탐색 stage tree (console-ia §3–§4): 증거 소스, the "전체 보기" views, then the 15 forensic
+ * domains. Workflow places (접수 · 처리 · 검토 · 보고) live on the stage rail, not here.
+ */
 export function buildTreeModel(input: TreeModelInput): TreeModelNode[] {
   const counts = input.summary?.summary?.counts;
   const loaded = Boolean(counts);
-  const live = input.live;
-
-  const kinds = categoryNodes(artifactKindNodes(input.tree));
 
   const saved = (input.saved ?? []).map<TreeModelNode>((search, index) => ({
     id: `search:saved:${index}:${search.name}`,
@@ -185,38 +374,35 @@ export function buildTreeModel(input: TreeModelInput): TreeModelNode[] {
     activate: () => input.onOpenSavedSearch?.(search),
   }));
 
-  const reviewChildren = REVIEW_NODES.map<TreeModelNode>(({ status, label }) => ({
-    id: `review:${status}`,
-    label,
-    count: reviewCount(input.review, status),
-    route: { collection: "review", status },
-  }));
+  const views: TreeModelNode = {
+    id: "views",
+    label: "전체 보기",
+    icon: "list",
+    route: { collection: "files" },
+    noSelect: true,
+    toggleOnly: true,
+    children: [
+      dataNode("files", "전체 파일", counts?.files, "이 런에는 파일 목록이 없습니다", loaded),
+      dataNode("artifacts", "전체 아티팩트", counts?.artifacts, "이 런에는 아티팩트가 없습니다", loaded),
+      dataNode(
+        "timeline",
+        "전체 타임라인",
+        counts?.timeline_events,
+        "이 런에는 타임라인 산출물이 없습니다",
+        loaded,
+      ),
+      dataNode("docs", "문서/메일", counts?.docs, "docs-index 산출물이 없는 런입니다", loaded),
+      {
+        id: "search",
+        label: "검색 결과",
+        route: { collection: "search" },
+        children: saved.length ? saved : undefined,
+      },
+      dataNode("indicators", "IOC/위험", counts?.indicators, "이 런에는 지표가 없습니다", loaded),
+    ],
+  };
 
-  const reviewTotal = input.review
-    ? Object.values(input.review.by_status ?? {}).reduce((sum, value) => sum + value, 0)
-    : undefined;
-
-  const intakeCount =
-    live?.active && live.total !== null ? `${live.completed ?? 0}/${live.total}` : counts?.validation_issues;
-
-  return [
-    evidenceNode(input.evidence, counts),
-    { id: "intake", label: "접수", count: intakeCount, route: { collection: "intake" } },
-    { id: "search", label: "검색 결과", route: { collection: "search" }, children: saved },
-    dataNode("files", "파일/미디어", counts?.files, "이 런에는 파일 목록이 없습니다", loaded),
-    dataNode("docs", "문서/메일", counts?.docs, "docs-index 산출물이 없는 런입니다", loaded),
-    dataNode("artifacts", "아티팩트", counts?.artifacts, "이 런에는 아티팩트가 없습니다", loaded, kinds),
-    dataNode("timeline", "타임라인", counts?.timeline_events, "이 런에는 타임라인 산출물이 없습니다", loaded),
-    dataNode("indicators", "IOC/위험", counts?.indicators, "이 런에는 지표가 없습니다", loaded),
-    {
-      id: "review",
-      label: "리뷰보드",
-      count: reviewTotal,
-      route: { collection: "review" },
-      children: reviewChildren,
-    },
-    { id: "outputs", label: "산출물", count: counts?.outputs, route: { collection: "outputs" } },
-  ];
+  return [evidenceNode(input.evidence, counts), views, ...domainNodes(input)];
 }
 
 export interface FlatNode {

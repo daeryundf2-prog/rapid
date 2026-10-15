@@ -3,6 +3,7 @@ import { useMemo } from "react";
 import { getReviewCounts, listSavedSearches } from "../../api/caseDb";
 import { getRunDashboard } from "../../api/dashboard";
 import { getRunSummary, getRunTree } from "../../api/runs";
+import { useAnalyses } from "../analysis/store";
 import { useSearchState } from "../case/searchState";
 import { navigate, useRunLive } from "./adapter";
 import { buildTreeModel, type TreeModelNode } from "./model";
@@ -53,8 +54,10 @@ export function useTreeData(runId: string | null) {
     enabled: Boolean(database && caseId),
     retry: false,
   });
+  const analyses = useAnalyses(runId);
   return {
     live,
+    analyses: analyses.unavailable || analyses.loading ? undefined : analyses.analyses,
     summary: summary.data,
     tree: tree.data,
     review: review.data,
@@ -82,12 +85,23 @@ export function useTreeState(runId: string | null): { model: TreeModelNode[]; lo
         saved: data.saved,
         live: data.live,
         evidence: data.evidence,
+        analyses: data.analyses,
         onOpenSavedSearch: (search) => {
           applySavedSearch(search);
           if (runId) navigate({ runId, collection: "search" });
         },
       }),
-    [data.summary, data.tree, data.review, data.saved, data.live, data.evidence, applySavedSearch, runId],
+    [
+      data.summary,
+      data.tree,
+      data.review,
+      data.saved,
+      data.live,
+      data.evidence,
+      data.analyses,
+      applySavedSearch,
+      runId,
+    ],
   );
   return { model, loading: data.loading };
 }

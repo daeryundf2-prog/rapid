@@ -9,6 +9,7 @@ import { useRuns, useTimezone } from "../state/hooks";
 import { isRunActive } from "../state/slices/runs";
 import { useAppStore } from "../state/store";
 import { tzOffsetLabel } from "../utils/time";
+import { Slot } from "./slots";
 
 const NOTICE_MS = 6000;
 
@@ -135,6 +136,7 @@ export function StatusBar() {
       {activeCount > 0 && (!currentRun || !isRunActive(currentRun)) ? (
         <span>실행 중 런 {activeCount}건</span>
       ) : null}
+      <Slot name="status-extra" />
       <span className="statusbar-spacer" />
       {notice ? (
         <span className={`status-notice ${notice.tone}`} data-testid="status-notice">

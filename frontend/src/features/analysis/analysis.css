@@ -1,0 +1,197 @@
+/* Analysis workbench (plan analysis-workbench-p1 §4). Colours are tokens only (contrast gate). */
+.analysis-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.analysis-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--line-subtle);
+  background: var(--bg-panel);
+}
+
+.analysis-head h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.analysis-desc,
+.analysis-help {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
+}
+
+.analysis-last {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0;
+  font-size: var(--fs-table-aux);
+}
+
+.analysis-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.analysis-history-wrap {
+  flex: none;
+  max-height: 160px;
+  overflow: auto;
+  border-bottom: 1px solid var(--line-subtle);
+}
+
+.analysis-history {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-table-aux);
+}
+
+.analysis-history th,
+.analysis-history td {
+  padding: 2px var(--space-2);
+  text-align: left;
+  border-bottom: 1px solid var(--line-subtle);
+  white-space: nowrap;
+}
+
+.analysis-history th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-panel);
+  color: var(--text-muted);
+  font-weight: normal;
+}
+
+.analysis-history .is-right {
+  text-align: right;
+}
+
+.analysis-history tr.is-selected td {
+  background: var(--bg-raised);
+}
+
+.analysis-history .grid-btn {
+  height: 22px;
+}
+
+.analysis-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.analysis-error-text {
+  color: var(--text-muted);
+  white-space: normal;
+}
+
+.analysis-failed {
+  margin: var(--space-1) var(--space-3);
+}
+
+.analysis-grid {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.analysis-grid > .grid-root {
+  flex: 1;
+  min-height: 0;
+}
+
+.analysis-overview {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.analysis-overview li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.analysis-overview .grid-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  align-self: flex-start;
+}
+
+.analysis-caution {
+  margin: 0 0 var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--text);
+  font-size: var(--fs-table-aux);
+}
+
+.analysis-field fieldset,
+fieldset.analysis-field {
+  border: 1px solid var(--line-subtle);
+  border-radius: 4px;
+  padding: var(--space-1) var(--space-2);
+}
+
+.analysis-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+}
+
+/* Status-bar chip */
+.status-analysis {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text);
+}
+
+.status-analysis-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.meta-hint {
+  margin: var(--space-1) 0 0;
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
+}
+
+.status-analysis .spin {
+  animation: analysis-spin 1s linear infinite;
+}
+
+@keyframes analysis-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-analysis .spin {
+    animation: none;
+  }
+}

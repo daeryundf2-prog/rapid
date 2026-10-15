@@ -3,7 +3,10 @@ import { Group, type GroupImperativeHandle, Panel, Separator } from "react-resiz
 import { SkipLink, useEscape } from "../a11y";
 import { focusMain, MAIN_ID, VIEWER_ID } from "../commands/builtin";
 import { CommandButton } from "../commands/CommandButton";
+import { StageRail } from "../features/stages/StageRail";
+import { STAGE_DEFS, STAGE_HEADING_ID } from "../features/stages/stages";
 import { Icon } from "../icons";
+import { stageOf } from "../router";
 import { usePanelLayout } from "../state/hooks";
 import { useAppStore } from "../state/store";
 import { CommandPalette } from "./CommandPalette";
@@ -34,8 +37,15 @@ export function useMediaQuery(query: string): boolean {
 }
 
 function TreePane() {
+  // The left panel follows the stage (console-ia §3): domain tree, runs, review lists, exports.
+  const label = useAppStore((s) => STAGE_DEFS[stageOf(s.route)].panelLabel);
+  const stage = useAppStore((s) => (s.route.runId ? STAGE_DEFS[stageOf(s.route)].label : ""));
   return (
-    <nav className="pane-frame" aria-label="탐색 트리" data-testid="tree-region">
+    <nav className="pane-frame" aria-label={label} data-testid="tree-region">
+      {/* Stage switches (rail / Alt+1..5) land focus here (console-ia §3, Q-IA-1). */}
+      <h1 id={STAGE_HEADING_ID} tabIndex={-1} className="stage-heading">
+        {stage || "케이스"}
+      </h1>
       <Slot name="tree" fallback={<p className="pane-empty">탐색 트리를 불러오는 중…</p>} />
     </nav>
   );
@@ -160,7 +170,10 @@ export function Layout() {
     <div className="shell" data-testid="workbench-shell" data-layout={drawer ? "drawer" : "wide"}>
       <SkipLink target={MAIN_ID} />
       <TopBar />
-      <div className="shell-body">{drawer ? <NarrowPanes /> : <WidePanes />}</div>
+      <div className="shell-body">
+        <StageRail />
+        <div className="shell-panes">{drawer ? <NarrowPanes /> : <WidePanes />}</div>
+      </div>
       <StatusBar />
       <CommandPalette />
       <HelpOverlay />

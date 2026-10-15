@@ -1,17 +1,22 @@
 from __future__ import annotations
 
 import os
+import re
 import secrets
-from collections.abc import Iterable
+from collections.abc import AsyncIterator, Iterable
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from ...core.case_db import open_case_database
 from ...core.crash import write_crash_report
 from ...core.jobs import RunJobStore, default_job_store
+from .analyses import ANALYSIS_RUNNER
 from .constants import MUTATING_METHODS
 from .helpers import (
     allowed_api_hosts,
@@ -20,6 +25,7 @@ from .helpers import (
     resolve_case_db_path,
     truthy_env,
 )
+from .routes_analyses import build_analyses_router, korean_body_errors
 from .routes_case_db import build_case_db_router
 from .routes_ioc import build_ioc_router
 from .routes_media import build_media_router
@@ -27,6 +33,8 @@ from .routes_meta import build_meta_router
 from .routes_reports import build_reports_router
 from .routes_runs import build_runs_router
 from .routes_search import build_search_router
+
+ANALYSIS_POST_PATH = re.compile(r"/api/runs/[^/]+/analyses")
 
 
 def create_app(
@@ -36,7 +44,24 @@ def create_app(
     case_db_roots: Iterable[str | Path] | None = None,
 ) -> FastAPI:
     store = job_store or default_job_store
-    api = FastAPI(title="rapidtriage local API", version="0.2.0")
+    # Identifies this app's analyses in the process-wide runner.
+    analysis_owner = object()
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        yield
+        # Shutdown: cancel this app's running analyses at their next unit, drop its queued ones.
+        ANALYSIS_RUNNER.shutdown(owner=analysis_owner)
+
+    api = FastAPI(title="rapidtriage local API", version="0.2.0", lifespan=lifespan)
+    api.state.analysis_owner = analysis_owner
+
+    @api.exception_handler(RequestValidationError)
+    async def korean_analysis_body_errors(request: Request, exc: RequestValidationError):
+        """Malformed ``POST /analyses`` bodies get Korean 422 messages; other routes keep FastAPI's."""
+        if request.method == "POST" and ANALYSIS_POST_PATH.fullmatch(request.url.path):
+            return JSONResponse(status_code=422, content={"detail": korean_body_errors(exc.errors())})
+        return await request_validation_exception_handler(request, exc)
     static_dir = Path(__file__).resolve().parent.parent.parent / "web" / "static"
     auth_disabled = truthy_env("RAPIDTRIAGE_DISABLE_AUTH") or require_auth is False
     if auth_disabled and (auth_token or os.environ.get("RAPIDTRIAGE_AUTH_TOKEN")):
@@ -99,9 +124,10 @@ def create_app(
                 },
             )
 
-    api.include_router(build_meta_router())
+    api.include_router(build_meta_router(store))
     api.include_router(build_case_db_router(store, open_request_case_database, resolve_request_catalog_path))
     api.include_router(build_runs_router(store))
+    api.include_router(build_analyses_router(store, owner=analysis_owner))
     api.include_router(build_ioc_router(store))
     api.include_router(build_media_router(store))
     api.include_router(build_search_router(store))
@@ -114,9 +140,9 @@ def create_app(
         if v2_dir.is_dir():
             api.mount("/v2", StaticFiles(directory=v2_dir, html=True), name="rapidtriage-v2")
 
-        # RAPIDTRIAGE_CONSOLE=v1 (default): v1 console at "/", v2 bundle at "/v2".
-        # RAPIDTRIAGE_CONSOLE=v2: v2 bundle at "/", v1 console kept at "/legacy" for one release.
-        console_mode = (os.environ.get("RAPIDTRIAGE_CONSOLE") or "v1").strip().lower()
+        # RAPIDTRIAGE_CONSOLE=v2 (default): v2 bundle at "/", v1 console kept at "/legacy" for one release.
+        # RAPIDTRIAGE_CONSOLE=v1: legacy v1 console at "/", v2 bundle at "/v2".
+        console_mode = (os.environ.get("RAPIDTRIAGE_CONSOLE") or "v2").strip().lower()
         if console_mode not in {"v1", "v2"}:
             raise RuntimeError(f"RAPIDTRIAGE_CONSOLE must be 'v1' or 'v2', got {console_mode!r}")
         if console_mode == "v2" and v2_dir.is_dir():

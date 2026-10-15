@@ -16,7 +16,8 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from ...core.jobs import RunJobStore, read_output_json
+from ...core.jobs import RunJobStore, read_output_json, run_output_dir
+from .analyses import ANALYSIS_RUNNER
 from .helpers import default_case_path, enrich_summary_counts, get_job, get_output_path
 
 SUMMARY_SCAN_BYTES = 65536
@@ -38,6 +39,21 @@ ARTIFACT_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("memory", "메모리", ("memory-volatility",)),
     ("filesystem-system", "파일시스템·시스템", ("windows-filesystem", "windows-system", "linux-system", "macos-system")),
 )
+
+# Plan P1 §3.3 "분석 작업" nodes: (node key, Korean label, analysis kinds).
+# ``web-logs`` runs no analysis: it links to the windows-system kind filtered
+# to WEB_LOG_ARTIFACT_TYPES (server ``artifact_type=`` filter).
+ANALYSIS_NODES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("carve", "카빙", ("carve",)),
+    ("vsc", "볼륨 섀도우", ("vsc-discover", "vsc-compare", "vsc-extract")),
+    ("ntfs-meta", "NTFS 메타(MFT/USN)", ("ntfs-meta",)),
+    ("ocr-batch", "OCR 일괄", ("ocr-batch",)),
+    ("memory-import", "메모리", ("memory-import",)),
+    ("web-logs", "웹 로그·웹셸", ()),
+    ("cross-case", "교차 케이스", ("cross-case",)),
+)
+WEB_LOG_KIND = "windows-system"
+WEB_LOG_ARTIFACT_TYPES: tuple[str, ...] = ("web-server-log", "webshell-source-candidate")
 
 FILE_CATEGORY_LABELS: dict[str, str] = {
     "documents": "문서",
@@ -115,6 +131,14 @@ def _node(node_id: str, label: str, count: int, children: list[dict[str, Any]] |
     return node
 
 
+def _type_counts(kind_summary: dict[str, Any]) -> dict[str, int]:
+    """``artifact_type -> count`` from a kind output's ``summary.artifact_type_counts`` (no row scan)."""
+    counts = kind_summary.get("artifact_type_counts")
+    if not isinstance(counts, dict):
+        return {}
+    return {str(name): int(value) for name, value in sorted(counts.items()) if isinstance(value, int)}
+
+
 def _case_bookmark_count(store: RunJobStore, run_id: str) -> int:
     try:
         case_path = default_case_path(store, run_id)
@@ -134,7 +158,7 @@ def build_run_tree(store: RunJobStore, run_id: str) -> dict[str, Any]:
     """Assemble the evidence tree for one completed run."""
     job = get_job(store, run_id)
     if job.summary is None:
-        raise HTTPException(status_code=409, detail="run is not completed")
+        raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
 
     try:
         case_path = default_case_path(store, run_id)
@@ -221,6 +245,7 @@ def build_run_tree(store: RunJobStore, run_id: str) -> dict[str, Any]:
                     children=type_children or None,
                     collection="artifacts",
                     kind=kind,
+                    artifact_type_counts=_type_counts(kind_summary),
                 )
             )
         if kind_nodes:
@@ -242,6 +267,7 @@ def build_run_tree(store: RunJobStore, run_id: str) -> dict[str, Any]:
                 kind_count,
                 collection="artifacts",
                 kind=kind,
+                artifact_type_counts=_type_counts(kind_summary),
             )
         )
     if other_nodes:
@@ -250,6 +276,8 @@ def build_run_tree(store: RunJobStore, run_id: str) -> dict[str, Any]:
         nodes.append(
             _node("artifacts", "아티팩트", artifacts_total, children=artifact_groups, collection="artifacts")
         )
+
+    nodes.append(build_analyses_node(summary, kind_summaries.get(WEB_LOG_KIND) or {}))
 
     # --- 문서 / 타임라인 / 지표 / 리뷰 선별 / 검증 이슈 -----------------------
     docs_count = int(counts.get("docs") or 0)
@@ -280,6 +308,76 @@ def build_run_tree(store: RunJobStore, run_id: str) -> dict[str, Any]:
     }
 
 
+def _analysis_brief(state: dict[str, Any] | None) -> dict[str, Any] | None:
+    if state is None:
+        return None
+    return {
+        "analysis_id": state.get("analysis_id"),
+        "kind": state.get("kind"),
+        "status": state.get("status"),
+        "finished_at": state.get("finished_at"),
+        "row_count": state.get("row_count"),
+    }
+
+
+def build_analyses_node(summary: dict[str, Any], web_log_summary: dict[str, Any]) -> dict[str, Any]:
+    """The "분석 작업" group: one node per analysis family.
+
+    ``latest`` is the newest analysis of the node's kinds (any status),
+    ``latest_completed`` the newest completed one; ``count`` is
+    ``latest_completed.row_count`` (0 when none). ``state`` aliases ``latest``.
+    Web logs link to the windows-system kind filtered by artifact type.
+    """
+    try:
+        states = ANALYSIS_RUNNER.list_states(run_output_dir(summary))
+    except RuntimeError:
+        states = []
+    children: list[dict[str, Any]] = []
+    for key, label, kinds in ANALYSIS_NODES:
+        if key == "web-logs":
+            type_counts = web_log_summary.get("artifact_type_counts")
+            type_counts = type_counts if isinstance(type_counts, dict) else {}
+            count = sum(int(type_counts.get(name) or 0) for name in WEB_LOG_ARTIFACT_TYPES)
+            children.append(
+                _node(
+                    f"analysis:{key}",
+                    label,
+                    count,
+                    collection="analysis",
+                    kind=key,
+                    analysis_kinds=[],
+                    latest=None,
+                    latest_completed=None,
+                    state=None,
+                    link={
+                        "collection": "artifacts",
+                        "kind": WEB_LOG_KIND,
+                        "artifact_types": list(WEB_LOG_ARTIFACT_TYPES),
+                        "node_ids": [f"artifacts:{WEB_LOG_KIND}:{name}" for name in WEB_LOG_ARTIFACT_TYPES],
+                    },
+                )
+            )
+            continue
+        latest = _analysis_brief(next((item for item in states if item.get("kind") in kinds), None))
+        completed = _analysis_brief(
+            next((item for item in states if item.get("kind") in kinds and item.get("status") == "completed"), None)
+        )
+        children.append(
+            _node(
+                f"analysis:{key}",
+                label,
+                int(completed["row_count"] or 0) if completed else 0,  # count source: latest_completed
+                collection="analysis",
+                kind=key,
+                analysis_kinds=list(kinds),
+                latest=latest,
+                latest_completed=completed,
+                state=latest,  # alias of ``latest`` kept for earlier clients
+            )
+        )
+    return _node("analyses", "분석 작업", len([item for item in states if item.get("kind")]), children=children, collection="analysis")
+
+
 def build_run_issues(store: RunJobStore, run_id: str) -> dict[str, Any]:
     """Normalize validation issues for the tree's "검증 이슈" collection.
 
@@ -289,7 +387,7 @@ def build_run_issues(store: RunJobStore, run_id: str) -> dict[str, Any]:
     """
     job = get_job(store, run_id)
     if job.summary is None:
-        raise HTTPException(status_code=409, detail="run is not completed")
+        raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
 
     rows: list[dict[str, Any]] = []
     processing = job.summary.get("processing")

@@ -65,7 +65,15 @@ export const REASONS = {
   notEmail: "EML/MBOX 메일 파일이 아닙니다.",
   notMedia: "오디오·비디오 파일이 아닙니다.",
   archiveHex: "ZIP 내부 항목은 헥스 미리보기를 제공하지 않습니다.",
+  directory: "디렉터리는 미리보기가 없습니다. 디렉터리 안의 파일을 선택하세요.",
 } as const;
+
+/** A directory target: flagged by its row, or answered as one by the preview API. */
+export function isDirectoryTarget(target: ViewerTarget | null, preview: SourcePreview | null): boolean {
+  return (
+    target?.isDirectory === true || preview?.is_directory === true || preview?.preview_type === "directory"
+  );
+}
 
 export interface ResolveInput {
   target: ViewerTarget | null;
@@ -127,6 +135,12 @@ export function resolveModes(input: ResolveInput): ResolvedModes {
   if (!target.sourcePath) {
     return {
       modes: MODE_ORDER.map((mode) => (mode === "meta" ? state("meta") : state(mode, REASONS.noPath))),
+      best: "meta",
+    };
+  }
+  if (isDirectoryTarget(target, preview)) {
+    return {
+      modes: MODE_ORDER.map((mode) => (mode === "meta" ? state("meta") : state(mode, REASONS.directory))),
       best: "meta",
     };
   }

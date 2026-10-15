@@ -18,6 +18,11 @@ export interface ViewerTarget {
   sourcePath: string | null;
   /** Hint from the row: lets the viewer pick a mode before metadata arrives. */
   preferredMode?: ViewerMode;
+  /**
+   * The row is a directory: the viewer requests no preview / metadata (they 404 or carry no
+   * content) and shows a directory info state instead.
+   */
+  isDirectory?: boolean;
   /** Byte offset / record locator to highlight (hex view, sqlite row). */
   highlight?: { offset?: number; length?: number; table?: string; rowid?: number };
 }

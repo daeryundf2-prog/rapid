@@ -1,5 +1,6 @@
 import type { CollectionId } from "../../../contracts/collection";
 import type { CollectionDef, ColumnSpec, GridPreset } from "../types";
+import { analysisCollection } from "./analysis";
 import { artifactsCollection } from "./artifacts";
 import { withAxiom } from "./axiom";
 import { docsCollection } from "./docs";
@@ -21,6 +22,9 @@ const BASE_COLLECTIONS: Record<CollectionId, CollectionDef> = {
   indicators: indicatorsCollection,
   review: reviewCollection,
   outputs: outputsCollection,
+  analysis: analysisCollection,
+  // The 처리 stage is a page (runs + analysis cards), not a grid: no rows, like 접수.
+  process: { ...intakeCollection, id: "process", label: "처리" },
 };
 
 /** Every collection also carries the AXIOM preset (two-line title + tag/status chip column). */

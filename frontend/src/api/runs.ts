@@ -76,6 +76,10 @@ export interface TreeNode {
   kind?: string;
   artifact_type?: string;
   category?: string;
+  /** Analysis nodes (`analysis:<kind>`): newest job state, null = never ran (plan analysis-workbench-p1 §3.3). */
+  state?: { status?: string; finished_at?: string | null } | null;
+  /** Kind nodes (`artifacts:<kind>`): records per artifact_type of that kind. */
+  artifact_type_counts?: Record<string, number>;
   children?: TreeNode[];
 }
 
@@ -240,6 +244,8 @@ export interface ArtifactsQuery {
   order?: "asc" | "desc";
   /** With `sort`: report the sorted position of this record_index as `sort.position`. */
   locate?: number;
+  /** Server-side artifact_type filter (repeated `artifact_type=`; plan analysis-workbench-p1 §3.3). */
+  artifact_type?: string[];
 }
 
 export function artifactsQueryString(query: ArtifactsQuery): string {
@@ -248,6 +254,7 @@ export function artifactsQueryString(query: ArtifactsQuery): string {
   if (query.limit) params.set("limit", String(query.limit));
   for (const kind of query.kind ?? []) params.append("kind", kind);
   if (query.path_contains?.trim()) params.set("path_contains", query.path_contains.trim());
+  for (const type of query.artifact_type ?? []) params.append("artifact_type", type);
   if (query.sort) {
     params.set("sort", query.sort);
     params.set("order", query.order ?? "asc");

@@ -1033,8 +1033,18 @@ class RapidTriageConsoleSwitchTests(unittest.TestCase):
             app = create_app(RunJobStore(), auth_token=self.TOKEN)
         return TestClient(app, headers={"X-RapidTriage-Token": self.TOKEN})
 
-    def test_default_mode_serves_v1_at_root_and_v2_at_v2(self) -> None:
+    def test_default_mode_serves_v2_at_root_and_v1_at_legacy(self) -> None:
         client = self._client(None)
+        root = client.get("/")
+        self.assertEqual(root.status_code, 200)
+        self.assertIn('<div id="root"></div>', root.text)
+        self.assertNotIn("RapidForensic Analyst Console", root.text)
+        legacy = client.get("/legacy/")
+        self.assertEqual(legacy.status_code, 200)
+        self.assertIn("RapidForensic Analyst Console", legacy.text)
+
+    def test_v1_mode_serves_legacy_at_root_and_bundle_at_v2(self) -> None:
+        client = self._client("v1")
         root = client.get("/")
         self.assertEqual(root.status_code, 200)
         self.assertIn("RapidForensic Analyst Console", root.text)
@@ -1042,11 +1052,6 @@ class RapidTriageConsoleSwitchTests(unittest.TestCase):
         v2 = client.get("/v2/")
         self.assertEqual(v2.status_code, 200)
         self.assertIn('<div id="root"></div>', v2.text)
-        self.assertEqual(client.get("/legacy/").status_code, 404)
-
-    def test_v1_mode_explicit_matches_default(self) -> None:
-        client = self._client("v1")
-        self.assertIn("RapidForensic Analyst Console", client.get("/").text)
         self.assertEqual(client.get("/legacy/").status_code, 404)
 
     def test_v2_mode_serves_bundle_at_root_and_v1_at_legacy(self) -> None:

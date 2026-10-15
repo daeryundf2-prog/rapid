@@ -97,7 +97,7 @@ describe("CommandPalette", () => {
     expect(options().at(-1)?.textContent).toContain("‘powershell’ 전체 검색");
     fireEvent.keyDown(input(), { key: "ArrowUp" });
     fireEvent.keyDown(input(), { key: "Enter" });
-    expect(window.location.hash).toBe("#/case/r1/search?q=powershell");
+    expect(window.location.hash).toBe("#/case/r1/explore/search?q=powershell");
   });
 
   it("closes on Escape and restores focus", () => {

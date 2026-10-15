@@ -84,6 +84,19 @@
       "delete": "delete_run_api_runs__run_id__delete",
       "get": "get_run_api_runs__run_id__get"
     },
+    "/api/runs/{run_id}/analyses": {
+      "get": "list_analyses_api_runs__run_id__analyses_get",
+      "post": "create_analysis_api_runs__run_id__analyses_post"
+    },
+    "/api/runs/{run_id}/analyses/{analysis_id}": {
+      "get": "get_analysis_api_runs__run_id__analyses__analysis_id__get"
+    },
+    "/api/runs/{run_id}/analyses/{analysis_id}/cancel": {
+      "post": "cancel_analysis_api_runs__run_id__analyses__analysis_id__cancel_post"
+    },
+    "/api/runs/{run_id}/analyses/{analysis_id}/rows": {
+      "get": "get_analysis_rows_api_runs__run_id__analyses__analysis_id__rows_get"
+    },
     "/api/runs/{run_id}/artifacts": {
       "get": "get_run_artifacts_api_runs__run_id__artifacts_get"
     },

@@ -11,7 +11,14 @@ export const ROW_MENU_COMMAND_IDS = [
   "grid.copyCitation",
   "grid.showInTimeline",
   "grid.sameSource",
+  "grid.ocrSelected",
 ] as const;
+
+/**
+ * Row-specific entries listed only when they apply to the focused row (no permanently
+ * disabled noise on every other row): cross-case rows → "다른 케이스에서 열기".
+ */
+export const ROW_MENU_CONTEXTUAL_IDS = ["grid.openOtherCase"] as const;
 
 /** Review items, always listed after a separator (disabled with a reason when they cannot run). */
 export const ROW_MENU_REVIEW_IDS = [
@@ -57,7 +64,10 @@ export function RowMenu({ id, anchor, context, onClose, onDisabled }: RowMenuPro
     ids
       .map((id) => getRegisteredCommand(id))
       .filter((command): command is NonNullable<typeof command> => !!command);
-  const items = registered(ROW_MENU_COMMAND_IDS);
+  const items = [
+    ...registered(ROW_MENU_CONTEXTUAL_IDS).filter((command) => !command.disabledReason?.(context)),
+    ...registered(ROW_MENU_COMMAND_IDS),
+  ];
   const reviewItems = registered(ROW_MENU_REVIEW_IDS);
 
   const move = (delta: number, from: HTMLElement) => {

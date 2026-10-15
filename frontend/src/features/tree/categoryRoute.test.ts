@@ -3,13 +3,15 @@ import { collectionChanged, parseHash, serializeRoute } from "../../router";
 
 describe("category route (X11)", () => {
   it("parses and serialises ?category= on the artifacts node only", () => {
-    const route = parseHash("#/case/r1/artifacts?category=web");
+    const route = parseHash("#/case/r1/explore/artifacts?category=web");
     expect(route).toMatchObject({ runId: "r1", collection: "artifacts", category: "web" });
-    expect(serializeRoute(route)).toBe("#/case/r1/artifacts?category=web");
-    expect(parseHash("#/case/r1/files?category=web").category).toBeUndefined();
-    expect(parseHash("#/case/r1/artifacts/eventlog?category=web").category).toBeUndefined();
+    expect(serializeRoute(route)).toBe("#/case/r1/explore/artifacts?category=web");
+    // Files take a category too (GET /files?category=<id>).
+    expect(parseHash("#/case/r1/explore/files?category=images").category).toBe("images");
+    expect(parseHash("#/case/r1/explore/timeline?category=web").category).toBeUndefined();
+    expect(parseHash("#/case/r1/explore/artifacts/eventlog?category=web").category).toBeUndefined();
     expect(serializeRoute({ runId: "r1", collection: "artifacts", kind: "eventlog", category: "web" })).toBe(
-      "#/case/r1/artifacts/eventlog",
+      "#/case/r1/explore/artifacts/eventlog",
     );
   });
 

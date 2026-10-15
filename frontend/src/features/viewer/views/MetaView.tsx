@@ -1,23 +1,33 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useId, useMemo, useState } from "react";
 import { DisabledReason } from "../../../a11y/primitives";
 import type { SourceMetadata, SourcePreview } from "../../../api/viewer";
 import { runDisplayName } from "../../../app/collections";
 import type { GridRow, ReviewStatus } from "../../../contracts/collection";
 import type { ViewerTarget } from "../../../contracts/viewer";
 import { Icon } from "../../../icons";
-import { parseHash } from "../../../router";
+import { parseHash, serializeRoute } from "../../../router";
 import { useRoute, useRuns, useTimezone } from "../../../state/hooks";
 import { isScalarish } from "../../../utils/flatValue";
 import { formatTimestamp } from "../../../utils/time";
+import {
+  caseHref,
+  caseLabel,
+  crossCaseOccurrences,
+  crossCaseRunIds,
+  occurrenceRoute,
+} from "../../analysis/crossCase";
 import { useGridLocalStore } from "../../grid/adapter";
 import { defaultFieldHeaders } from "../../grid/columns/artifacts";
 import { FIELD_LABELS } from "../../grid/columns/fieldColumns";
+import { NTFS_EMPTY_HINT, NTFS_RUN_COMMAND } from "../../grid/columns/files";
+import { EmptyHintLink } from "../../grid/EmptyHintLink";
 import { noteKey, useSessionNote } from "../../grid/sessionNotes";
 import { usePromotedFields } from "../../grid/usePromotedFields";
 import { dispatchCommand, setViewerTarget, useCommandContext, useViewerRouteMode } from "../adapter";
 import { locatorText } from "../citation";
 import { ROWS_FOR_SOURCE_COMMAND, writeClipboard } from "../commands";
 import { evidenceInfo, isSourceMissing, timelineWindowHash } from "../evidenceInfo";
+import { isDirectoryTarget } from "../modes";
 import {
   groupRecordFields,
   makeRecordField,
@@ -324,6 +334,48 @@ function provenanceEntries(row: GridRow | null): Array<[string, string]> {
   return out;
 }
 
+/**
+ * Files rows: NTFS provenance from the newest NTFS-meta analysis (plan analysis-workbench-p1
+ * U-P1-3). `joined` is false until such an analysis exists (the section then links to it).
+ */
+function ntfsProvenance(
+  row: GridRow | null,
+  formatTime: (value: number | string | undefined) => string,
+): { joined: boolean; reason: string | null; entries: Array<[string, string]> } | null {
+  if (row?.ref.collection !== "files") return null;
+  const record =
+    row.fields.ntfs && typeof row.fields.ntfs === "object"
+      ? (row.fields.ntfs as Record<string, unknown>)
+      : null;
+  const text = (value: unknown) =>
+    typeof value === "string" || typeof value === "number" ? String(value) : "";
+  const time = (value: unknown) =>
+    typeof value === "string" || typeof value === "number" ? formatTime(value) : "—";
+  const joined = typeof row.fields.ntfsJoinId === "string" && row.fields.ntfsJoinId !== "";
+  // An NTFS-meta analysis exists but the server did not join it (too_large / no_volume_prefix / skipped).
+  const reason =
+    !joined && typeof row.fields.ntfsJoinReason === "string" && row.fields.ntfsJoinReason
+      ? row.fields.ntfsJoinReason
+      : null;
+  const entries: Array<[string, string]> = [
+    ["파일 시스템", text(row.fields.filesystem) || "—"],
+    ["소스 이미지 경로", text(row.fields.sourceImage) || "—"],
+  ];
+  if (joined) {
+    entries.push(
+      ["MFT 엔트리", record ? text(record.entry_number) || "—" : "일치하는 MFT 레코드 없음"],
+      ["생성 시각(NTFS)", time(record?.created_at)],
+      ["접근 시각(NTFS)", time(record?.accessed_at)],
+      ["MFT 수정 시각", time(record?.mft_modified_at)],
+    );
+    if (record && typeof record.in_use === "boolean")
+      entries.push(["MFT 사용 중", record.in_use ? "예" : "아니오"]);
+  } else if (reason) {
+    entries.push(["NTFS 조인", reason]);
+  }
+  return { joined, reason, entries };
+}
+
 interface MetaViewProps {
   target: ViewerTarget;
   preview: SourcePreview | null;
@@ -333,6 +385,54 @@ interface MetaViewProps {
   row: GridRow | null;
   sessionMarks: string[];
   onComputeHash: () => void;
+}
+
+/** Cross-case result row: every case (run) the indicator occurs in, each a link to open it there. */
+function CrossCaseSection({ row, runId }: { row: GridRow | null; runId: string }) {
+  if (row?.ref.collection !== "analysis" || row.fields.kind !== "cross-case") return null;
+  const details = isPlainObject(row.fields.details) ? row.fields.details : {};
+  const occurrences = crossCaseOccurrences(details);
+  const indicator = typeof details.indicator === "string" ? details.indicator : null;
+  const others = crossCaseRunIds(details).filter((id) => id !== runId);
+  return (
+    <section aria-labelledby="viewer-crosscase-title" data-testid="cross-case-links">
+      <h3 className="viewer-subtitle" id="viewer-crosscase-title">
+        다른 케이스
+      </h3>
+      {others.length === 0 ? (
+        <p className="meta-hint">다른 케이스의 위치 정보가 없습니다.</p>
+      ) : (
+        <ul className="meta-case-links">
+          {others.map((id) => {
+            const hits = occurrences.filter((o) => o.runId === id);
+            return (
+              <li key={id}>
+                <a href={caseHref(details, id)} className="meta-link">
+                  {caseLabel(id)} 열기
+                </a>
+                {hits.length ? (
+                  <ul>
+                    {hits.map((hit, index) => (
+                      // biome-ignore lint/suspicious/noArrayIndexKey: occurrences have no id; order is stable
+                      <li key={index}>
+                        <a
+                          href={serializeRoute(occurrenceRoute(hit, indicator))}
+                          className="meta-link mono viewer-break"
+                        >
+                          {hit.path ?? hit.citationId ?? hit.caseScope ?? "위치"}
+                        </a>
+                        {hit.caseScope ? <span className="meta-hint"> · 범위 {hit.caseScope}</span> : null}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
+  );
 }
 
 export function MetaView({
@@ -354,7 +454,8 @@ export function MetaView({
   const note = sessionNote ?? (typeof row?.fields.note === "string" ? row.fields.note : "");
   const info = evidenceInfo(row);
   const formatTime = (value: number | string | undefined) => formatTimestamp(value, timezone);
-  const sourceMissing = Boolean(target.sourcePath) && isSourceMissing(metadataError);
+  const directory = isDirectoryTarget(target, preview) || metadata?.is_directory === true;
+  const sourceMissing = !directory && Boolean(target.sourcePath) && isSourceMissing(metadataError);
   const openHex = (offset: number) => {
     setViewerTarget({ ...target, highlight: { offset, length: 1 } }, row);
     setMode("hex");
@@ -377,6 +478,8 @@ export function MetaView({
   };
   const hashes = metadata?.hashes || {};
   const provenance = provenanceEntries(row);
+  const ntfs = ntfsProvenance(row, formatTime);
+  const ntfsHintId = useId();
   const grouped = groupRecordFields(row);
   // "열로 표시" only on artifact rows of one kind (the grid can show that kind's fields as columns).
   const artifactKind = row?.ref.collection === "artifacts" ? row.ref.kind : undefined;
@@ -405,7 +508,14 @@ export function MetaView({
           소스를 찾을 수 없습니다 — 원본 경로: <span className="mono viewer-break">{target.sourcePath}</span>
         </p>
       ) : null}
+      {directory ? (
+        <p className="meta-notice" data-testid="directory-info">
+          디렉터리입니다 — 미리보기와 해시가 없습니다. 디렉터리 안의 파일을 선택하세요. 경로:{" "}
+          <span className="mono viewer-break">{target.sourcePath}</span>
+        </p>
+      ) : null}
       {groups ? <RecordSection groups={groups} columns={artifactKind ? promoted : undefined} /> : null}
+      <CrossCaseSection row={row} runId={target.runId} />
       <section aria-label="출처">
         <h3 className="viewer-subtitle">출처</h3>
         <dl className="viewer-dl">
@@ -425,7 +535,24 @@ export function MetaView({
               <dd className="viewer-break">{value}</dd>
             </Fragment>
           ))}
+          {ntfs
+            ? ntfs.entries.map(([key, value]) => (
+                <Fragment key={key}>
+                  <dt>{key}</dt>
+                  <dd className="viewer-break">{value}</dd>
+                </Fragment>
+              ))
+            : null}
         </dl>
+        {ntfs && !ntfs.joined && !ntfs.reason ? (
+          <p className="meta-hint" data-testid="ntfs-hint">
+            <span id={ntfsHintId}>{NTFS_EMPTY_HINT}</span>{" "}
+            <EmptyHintLink
+              hint={{ text: NTFS_EMPTY_HINT, command: NTFS_RUN_COMMAND, commandLabel: "실행" }}
+              hintId={ntfsHintId}
+            />
+          </p>
+        ) : null}
       </section>
       <section aria-label="파일 정보">
         <h3 className="viewer-subtitle">파일</h3>

@@ -1,14 +1,17 @@
-"""Streaming path filter for per-kind artifact outputs (``GET /api/runs/{id}/artifacts``)."""
+"""Streaming path / artifact_type filter for per-kind artifact outputs (``GET /api/runs/{id}/artifacts``)."""
 
 from __future__ import annotations
 
 import unicodedata
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from pathlib import Path
 
+from ...core.artifact_profiles import payload_record_count
 from .jsonl_records import iter_artifact_records
 
 ARTIFACT_PATH_FILTER_SCAN_CAP = 2_000_000
+# Rows scanned per request by the all-kinds ``artifact_type=`` pager.
+CROSS_KIND_SCAN_CAP = 200_000
 
 
 def nfc_fold(value: object) -> str:
@@ -19,32 +22,43 @@ def filter_artifact_page(
     payload: dict[str, object],
     *,
     payload_path: Path,
-    path_contains: str,
+    path_contains: str | None,
     offset: int,
     limit: int,
     scan_cap: int = ARTIFACT_PATH_FILTER_SCAN_CAP,
     rows_source: Iterable[tuple[int, dict[str, object]]] | None = None,
+    artifact_types: Collection[str] | None = None,
+    record_limit: int | None = None,
 ) -> dict[str, object]:
-    """Page only rows whose ``path`` contains ``path_contains`` (NFC, case-insensitive).
+    """Page only rows whose ``path`` contains ``path_contains`` (NFC, case-insensitive)
+    and, when ``artifact_types`` is given, whose ``artifact_type`` is one of them.
 
     Streams the kind's rows; ``offset`` counts matches. Stops after ``limit``
     matches plus one lookahead row, or after ``scan_cap`` scanned rows
     (``truncated``: the total is then unknown and ``scanned`` reports the cost).
     ``rows_source`` yields ``(record_index, row)`` in another order (server
-    sort); by default rows stream in JSONL order. Every returned row carries
-    its original ``record_index``.
+    sort); by default rows stream in JSONL order, records ``0..record_limit-1``
+    only when ``record_limit`` is given. Every returned row carries its
+    original ``record_index``.
     """
-    needle = nfc_fold(path_contains)
+    needle = nfc_fold(path_contains) if path_contains else ""
+    wanted_types = frozenset(artifact_types) if artifact_types else None
+    matches = row_matcher(needle, wanted_types)
     rows: list[object] = []
     matched = 0
     scanned = 0
     has_more = False
     exhausted = True
     if rows_source is None:
-        rows_source = iter_artifact_records(payload, payload_path=payload_path)
+        rows_source = iter_artifact_records(payload, payload_path=payload_path, limit=record_limit)
     for record_index, row in rows_source:
+        if scanned >= scan_cap:
+            # Checked before scanning the next row (like ``filter_across_kinds``):
+            # a scan that ends exactly at the cap is complete, not truncated.
+            exhausted = False
+            break
         scanned += 1
-        if needle in nfc_fold(row.get("path") or row.get("source_path")):
+        if matches(row):
             if matched >= offset + limit:
                 has_more = True
                 exhausted = False
@@ -52,9 +66,6 @@ def filter_artifact_page(
             if matched >= offset:
                 rows.append({**row, "record_index": record_index})
             matched += 1
-        if scanned >= scan_cap:
-            exhausted = False
-            break
     end = offset + len(rows)
     page = dict(payload)
     page["artifacts"] = rows
@@ -68,8 +79,201 @@ def filter_artifact_page(
         "previous_offset": max(0, offset - limit) if offset > 0 else None,
         "has_more": has_more,
         "filtered": True,
-        "path_contains": path_contains,
+        "path_contains": path_contains or None,
+        "artifact_types": sorted(wanted_types) if wanted_types is not None else None,
         "scanned": scanned,
         "truncated": not exhausted and not has_more,
+    }
+    return page
+
+
+def row_matcher(needle: str, wanted_types: frozenset[str] | None):
+    """Predicate for the ``path_contains`` (pre-folded ``needle``) and ``artifact_type`` filters."""
+
+    def matches(row: Mapping[str, object]) -> bool:
+        if wanted_types is not None and str(row.get("artifact_type") or "") not in wanted_types:
+            return False
+        return not needle or needle in nfc_fold(row.get("path") or row.get("source_path"))
+
+    return matches
+
+
+def annotate_page_counts(page: dict[str, object], payload: Mapping[str, object], *, filtered: bool) -> dict[str, object]:
+    """Uniform count fields of one kind / analysis page (``/artifacts`` and ``/analyses/{id}/rows``).
+
+    * ``record_count`` -- unfiltered row total of the kind;
+    * ``matched`` -- rows matching ``path_contains``/``artifact_type``: exact
+      when the filter scan reached the end of the kind, ``null`` when it
+      stopped early (``truncated`` at the scan cap, or ``has_more`` after the
+      page's lookahead row); equals ``record_count`` without a filter.
+
+    ``pagination.scanned``/``truncated`` stay as the filter reports them.
+    """
+    record_count = payload_record_count(payload)
+    pagination = page.get("pagination") if isinstance(page.get("pagination"), dict) else None
+    if not filtered:
+        matched: int | None = record_count
+    elif pagination is not None and pagination.get("filtered"):
+        total = pagination.get("total")
+        matched = int(total) if isinstance(total, int) else None
+    else:
+        matched = None  # e.g. a sorted page whose index is still building
+    page["record_count"] = record_count
+    page["matched"] = matched
+    if pagination is not None:
+        pagination["matched"] = matched
+    return page
+
+
+def parse_cross_kind_after(token: str | None) -> tuple[str, int, int] | None:
+    """``<kind>:<record_index>:<matched>`` continuation token -> parts (``None`` when absent)."""
+    if not token:
+        return None
+    parts = token.rsplit(":", 2)
+    if len(parts) != 3 or not parts[0] or not parts[1].isdigit() or not parts[2].isdigit():
+        raise ValueError("after 값은 <kind>:<record_index>:<matched> 형식(숫자는 0 이상 정수)이어야 합니다")
+    return parts[0], int(parts[1]), int(parts[2])
+
+
+def filter_across_kinds(
+    sources: Sequence[tuple[str, dict[str, object], Path]],
+    *,
+    path_contains: str | None,
+    artifact_types: Collection[str] | None,
+    offset: int,
+    limit: int,
+    after: str | None = None,
+    scan_cap: int | None = None,
+) -> dict[str, object]:
+    """Page filtered rows across kinds (``sources`` order) as one collection.
+
+    Without ``after`` the first ``offset`` matches are skipped (rescanning
+    from the first kind); ``after`` (the previous page's ``next_after``)
+    resumes right behind the last consumed row instead, so deep pages stay
+    within ``scan_cap`` scanned rows per request. Returns
+    ``{"artifacts": {kind: {artifacts, record_count}}, "cross_kind": {...}}``;
+    ``cross_kind.order`` lists ``[kind, record_index]`` in page order.
+    """
+    scan_cap = CROSS_KIND_SCAN_CAP if scan_cap is None else scan_cap
+    needle = nfc_fold(path_contains) if path_contains else ""
+    wanted_types = frozenset(artifact_types) if artifact_types else None
+    matches = row_matcher(needle, wanted_types)
+    kinds = [kind for kind, _payload, _path in sources]
+    resume = parse_cross_kind_after(after)
+    start_pos, start_index, matched = 0, 0, 0
+    skip_until = offset
+    if resume is not None:
+        if resume[0] not in kinds:
+            raise ValueError(f"after 값이 이 요청에 없는 종류를 가리킵니다: {resume[0]}")
+        start_pos, start_index, matched = kinds.index(resume[0]), resume[1] + 1, resume[2]
+        skip_until = matched
+    base = skip_until
+    rows_by_kind: dict[str, list[object]] = {kind: [] for kind in kinds}
+    order: list[list[object]] = []
+    scanned = 0
+    has_more = False
+    exhausted = True
+    last: tuple[str, int] | None = None
+    for position in range(start_pos, len(sources)):
+        kind, payload, payload_path = sources[position]
+        first = start_index if position == start_pos else 0
+        for record_index, row in iter_artifact_records(payload, payload_path=payload_path, start=first):
+            if scanned >= scan_cap:
+                exhausted = False
+                break
+            scanned += 1
+            if matches(row):
+                if len(order) >= limit:
+                    has_more, exhausted = True, False
+                    break
+                if matched >= skip_until:
+                    rows_by_kind[kind].append({**row, "record_index": record_index})
+                    order.append([kind, record_index])
+                matched += 1
+            last = (kind, record_index)
+        if not exhausted:
+            break
+    next_after = f"{last[0]}:{last[1]}:{matched}" if not exhausted and last is not None else None
+    if not exhausted and last is None and resume is not None:
+        next_after = after
+    record_count = sum(payload_record_count(payload) for _kind, payload, _path in sources)
+    return {
+        "artifacts": {
+            kind: {"artifacts": rows_by_kind[kind], "record_count": payload_record_count(payload)}
+            for kind, payload, _path in sources
+        },
+        "cross_kind": {
+            "collection": "artifacts",
+            "kinds": kinds,
+            "offset": base,
+            "limit": limit,
+            "returned": len(order),
+            "order": order,
+            "record_count": record_count,
+            "matched": matched if exhausted else None,
+            "has_more": has_more or not exhausted,
+            "next_offset": base + len(order) if not exhausted else None,
+            "next_after": next_after,
+            "path_contains": path_contains or None,
+            "artifact_types": sorted(wanted_types) if wanted_types is not None else None,
+            "scanned": scanned,
+            "truncated": not exhausted and not has_more,
+        },
+    }
+
+
+def filter_files_by_category(
+    payload: Mapping[str, object],
+    categories: Collection[str],
+    *,
+    offset: int,
+    limit: int,
+    scan_cap: int = ARTIFACT_PATH_FILTER_SCAN_CAP,
+) -> dict[str, object]:
+    """Files page of candidates whose ``categories`` intersect ``categories``.
+
+    The candidates are already in memory, so the scan runs to the end (or
+    ``scan_cap``) and ``matched`` is exact unless ``truncated``. ``limit=0``
+    returns every match. Rows carry ``record_index`` = their position in the
+    files output (locator ``/candidates/<record_index>``).
+    """
+    wanted = frozenset(categories)
+    candidates = payload.get("candidates")
+    candidates = candidates if isinstance(candidates, list) else []
+    rows: list[object] = []
+    matched = 0
+    scanned = 0
+    exhausted = True
+    for record_index, row in enumerate(candidates):
+        if scanned >= scan_cap:
+            exhausted = False
+            break
+        scanned += 1
+        values = row.get("categories") if isinstance(row, Mapping) else None
+        if not isinstance(values, list) or wanted.isdisjoint(str(item) for item in values):
+            continue
+        if matched >= offset and (limit <= 0 or len(rows) < limit):
+            rows.append({**row, "record_index": record_index})
+        matched += 1
+    total = matched if exhausted else None
+    has_more = (offset + len(rows) < matched) if limit > 0 else False
+    page = {key: value for key, value in payload.items() if key != "candidates"}
+    page["candidates"] = rows
+    page["record_count"] = len(candidates)
+    page["matched"] = total
+    page["pagination"] = {
+        "collection": "candidates",
+        "offset": offset,
+        "limit": limit,
+        "returned": len(rows),
+        "total": total,
+        "matched": total,
+        "next_offset": offset + len(rows) if has_more else None,
+        "previous_offset": max(0, offset - limit) if offset > 0 and limit > 0 else None,
+        "has_more": has_more or not exhausted,
+        "filtered": True,
+        "categories": sorted(wanted),
+        "scanned": scanned,
+        "truncated": not exhausted,
     }
     return page

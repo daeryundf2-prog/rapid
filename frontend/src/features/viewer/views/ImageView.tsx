@@ -8,6 +8,7 @@ import {
   type SourcePreview,
 } from "../../../api/viewer";
 import { errorText, useAsync, useBlobUrl } from "../useAsync";
+import { latestOcrFailure } from "./ocrFailure";
 
 export const GALLERY_PAGE = 12;
 
@@ -62,6 +63,12 @@ export function ImageView({ runId, preview, onOpenPath }: ImageViewProps) {
   const ocrText = image.ocr_sidecar?.text || "";
   const translationText = image.translation_sidecar?.text || "";
   const sides = translation.status === "ok" ? translation.data.side_by_side_review || [] : [];
+  // No text to show: ask whether the newest OCR batch over this image failed (and why).
+  const noText = !ocrText && !translationText && sides.length === 0;
+  const failure = useAsync(noText ? `${runId}|${preview.path}|ocr-failure` : null, (signal) =>
+    latestOcrFailure(runId, preview.path, signal).catch(() => null),
+  );
+  const ocrFailure = failure.status === "ok" ? failure.data : null;
 
   return (
     <div className="image-view">
@@ -94,6 +101,11 @@ export function ImageView({ runId, preview, onOpenPath }: ImageViewProps) {
           ) : ocrText || translationText ? (
             <>
               {ocrText ? <pre className="viewer-pre">{ocrText}</pre> : null}
+              {ocrText && image.ocr_sidecar?.source === "analysis" ? (
+                <p className="viewer-note" data-testid="ocr-from-analysis">
+                  처리 단계 OCR 일괄 결과를 그대로 보여 줍니다(다시 OCR하지 않음).
+                </p>
+              ) : null}
               {translationText ? (
                 <>
                   <h4>번역</h4>
@@ -101,6 +113,13 @@ export function ImageView({ runId, preview, onOpenPath }: ImageViewProps) {
                 </>
               ) : null}
             </>
+          ) : ocrFailure ? (
+            <p className="viewer-error" data-testid="ocr-failed">
+              {ocrFailure.batch
+                ? "최근 OCR 일괄 작업이 실패했습니다"
+                : "최근 OCR 일괄에서 이 이미지를 읽지 못했습니다"}
+              {` (분석 ${ocrFailure.analysisId.slice(0, 8)}): ${ocrFailure.reason}`}
+            </p>
           ) : (
             <p className="viewer-note">이 이미지 옆에 OCR 사이드카가 없습니다.</p>
           )}

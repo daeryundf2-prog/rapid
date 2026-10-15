@@ -69,7 +69,13 @@ export function eventToShortcut(
   if (digit?.[1] && event.shiftKey && (event.altKey || event.ctrlKey || event.metaKey) && !/^\d$/.test(key)) {
     key = digit[1];
   }
-  const shiftedDigit = event.shiftKey && /^\d$/.test(key) && (event.altKey || event.ctrlKey || event.metaKey);
+  // Alt/Ctrl+digit shortcuts (stages, views) are the digit ROW only: Alt+NumPad digits are
+  // Windows Alt-codes, so a numpad digit keeps its physical name ("Alt+Numpad1" binds nothing).
+  const commandModified = event.altKey || event.ctrlKey || event.metaKey;
+  if (commandModified && /^\d$/.test(key) && event.code && !event.code.startsWith("Digit")) {
+    key = event.code;
+  }
+  const shiftedDigit = event.shiftKey && /^\d$/.test(key) && commandModified;
   const isLetter = key.length === 1 && /[a-z]/i.test(key);
   const isNamed = key.length > 1;
   const parts: string[] = [];
@@ -87,6 +93,13 @@ function hasCommandModifier(shortcut: string): boolean {
 }
 
 /**
+ * Global keys that still act while focus is inside a modal dialog: Escape (close) and
+ * Ctrl+K (the palette toggles itself closed). Everything else — stage switches (Alt+1~5),
+ * view switches, viewer history — would act on the page behind the dialog.
+ */
+const MODAL_SAFE_SHORTCUTS: ReadonlySet<string> = new Set(["Escape", "Ctrl+K"]);
+
+/**
  * Route one keydown to its command. Returns true when a command claimed the
  * key (the event is then preventDefault-ed).
  */
@@ -99,9 +112,15 @@ export function dispatchShortcut(event: KeyboardEvent): boolean {
 
   const target = event.target;
   const modified = hasCommandModifier(shortcut);
+  if (
+    !MODAL_SAFE_SHORTCUTS.has(shortcut) &&
+    target instanceof Element &&
+    target.closest('[aria-modal="true"]')
+  ) {
+    return false;
+  }
   if (!modified && shortcut !== "Escape") {
     if (isTextEntry(target)) return false;
-    if (target instanceof Element && target.closest('[aria-modal="true"]')) return false;
     if ((shortcut === "Enter" || shortcut === "Space") && isInteractiveTarget(target)) return false;
   }
 
@@ -146,6 +165,11 @@ export const KEY_DESCRIPTIONS: Record<keyof typeof KEY_MAP, string> = {
   viewThumbnails: "썸네일 보기",
   viewChat: "대화 보기",
   viewHistogram: "히스토그램 보기",
+  stageIntake: "단계: 접수",
+  stageProcess: "단계: 처리",
+  stageExplore: "단계: 탐색",
+  stageReview: "단계: 검토",
+  stageReport: "단계: 보고",
 };
 
 /** Human-readable key label ("Ctrl+K" → "Ctrl K", arrows as glyphs). */

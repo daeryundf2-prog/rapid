@@ -315,7 +315,7 @@ describe("Viewer — loading, modes, focus", () => {
   });
 
   it("highlights route keywords in document text", async () => {
-    window.location.hash = "#/case/run-1/docs?q=계약";
+    window.location.hash = "#/case/run-1/explore/docs?q=계약";
     await show({ preview_type: "text", extension: ".pdf", text: "이 계약은 무효\n다른 줄" });
     const hits = document.querySelectorAll("mark.viewer-hit");
     expect(Array.from(hits).map((h) => h.textContent)).toEqual(["계약"]);

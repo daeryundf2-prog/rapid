@@ -29,3 +29,8 @@ export function tagStatusCell(row: GridRow): ReactNode {
     </span>
   );
 }
+
+/** 유형 column: the artifact type as a neutral chip (text only; tokens --text on --bg-raised). */
+export function typeChipCell(row: GridRow): ReactNode {
+  return row.artifactType ? <span className="grid-tag-chip grid-type-chip">{row.artifactType}</span> : null;
+}

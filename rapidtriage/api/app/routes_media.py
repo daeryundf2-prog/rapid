@@ -6,7 +6,7 @@ import mimetypes
 import sqlite3
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import (
     FileResponse,
     Response,
@@ -14,6 +14,7 @@ from fastapi.responses import (
 
 from ...core.jobs import RunJobStore
 from ...core.sqlite_wal import SqliteWalPreviewError, build_sqlite_wal_preview
+from .analyses import AnalysisRowRef, analysis_row_ref
 from .constants import (
     HEX_RANGE_EXPORT_MAX_BYTES,
     IMAGE_GALLERY_DEFAULT_LIMIT,
@@ -44,6 +45,8 @@ from .media import (
 )
 from .runops import (
     build_archived_source_api_preview,
+    build_directory_metadata,
+    build_directory_preview,
     build_source_metadata,
     build_source_preview,
 )
@@ -55,14 +58,41 @@ from .thumbnail import THUMBNAIL_DEFAULT_SIZE, THUMBNAIL_MAX_SIZE, cached_thumbn
 THUMBNAIL_CACHE_CONTROL = "private, max-age=86400"
 
 
+def stored_ocr_sidecar(store: RunJobStore, run_id: str, source_path: Path) -> dict[str, object] | None:
+    """The newest ``ocr-batch`` analysis result for ``source_path`` as an OCR sidecar, or ``None``."""
+    from .analysis_kinds import find_ocr_result
+
+    summary = get_job(store, run_id).summary or {}
+    output_value = summary.get("output_dir")
+    if not isinstance(output_value, str) or not output_value:
+        return None
+    found = find_ocr_result(Path(output_value).expanduser().resolve(), source_path)
+    if found is None or found.get("status") == "failed":
+        return None
+    return {
+        "text": str(found.get("text") or ""),
+        "text_length": found.get("text_length"),
+        "language_hint": found.get("language"),
+        "confidence": found.get("confidence"),
+        "status": found.get("status"),
+        "source": "analysis",
+        "analysis_id": found.get("analysis_id"),
+        "source_path": str(source_path),
+    }
+
+
 def build_media_router(
     store: RunJobStore,
 ) -> APIRouter:
     router = APIRouter()
 
     @router.get("/api/runs/{run_id}/source-file")
-    def download_source_file(run_id: str, path: str = Query(..., min_length=1)) -> FileResponse:
-        source_path = resolve_allowed_source_file(store, run_id, path)
+    def download_source_file(
+        run_id: str,
+        path: str = Query(..., min_length=1),
+        row_ref: AnalysisRowRef = Depends(analysis_row_ref),
+    ) -> FileResponse:
+        source_path = resolve_allowed_source_file(store, run_id, path, **row_ref)
         return FileResponse(source_path, filename=source_path.name)
 
 
@@ -70,9 +100,10 @@ def build_media_router(
     def source_thumbnail(
         run_id: str,
         path: str = Query(..., min_length=1),
+        row_ref: AnalysisRowRef = Depends(analysis_row_ref),
         size: int = Query(THUMBNAIL_DEFAULT_SIZE, ge=16, le=THUMBNAIL_MAX_SIZE),
     ) -> Response:
-        source_path = resolve_allowed_source_file(store, run_id, path)
+        source_path = resolve_allowed_source_file(store, run_id, path, **row_ref)
         if not is_image_preview_candidate(source_path):
             raise HTTPException(status_code=415, detail="source file is not a supported image")
         summary = get_job(store, run_id).summary or {}
@@ -86,24 +117,38 @@ def build_media_router(
 
 
     @router.get("/api/runs/{run_id}/source-preview")
-    def preview_source_file(run_id: str, path: str = Query(..., min_length=1)) -> dict[str, object]:
+    def preview_source_file(
+        run_id: str,
+        path: str = Query(..., min_length=1),
+        row_ref: AnalysisRowRef = Depends(analysis_row_ref),
+    ) -> dict[str, object]:
         archive_request = parse_source_preview_archive_request(path)
         if archive_request:
-            source_path = resolve_allowed_source_file(store, run_id, archive_request["archive_path"])
+            source_path = resolve_allowed_source_file(store, run_id, archive_request["archive_path"], **row_ref)
             return build_archived_source_api_preview(run_id, source_path, archive_request["entry_name"])
-        source_path = resolve_allowed_source_file(store, run_id, path)
-        return build_source_preview(run_id, source_path)
+        source_path = resolve_allowed_source_file(store, run_id, path, allow_directory=True, **row_ref)
+        if source_path.is_dir():
+            return build_directory_preview(run_id, source_path)
+        payload = build_source_preview(run_id, source_path)
+        image = payload.get("image")
+        if isinstance(image, dict) and not (image.get("ocr_sidecar") or {}).get("text"):
+            stored = stored_ocr_sidecar(store, run_id, source_path)
+            if stored is not None:
+                # Reuse the OCR-batch analysis result instead of re-running OCR.
+                image["ocr_sidecar"] = stored
+        return payload
 
 
     @router.get("/api/runs/{run_id}/source-hex-range")
     def source_hex_range(
         run_id: str,
         path: str = Query(..., min_length=1),
+        row_ref: AnalysisRowRef = Depends(analysis_row_ref),
         offset: int = Query(0, ge=0),
         length: int = Query(256, ge=1, le=HEX_RANGE_EXPORT_MAX_BYTES),
         include_hashes: bool = False,
     ) -> dict[str, object]:
-        source_path = resolve_allowed_source_file(store, run_id, path)
+        source_path = resolve_allowed_source_file(store, run_id, path, **row_ref)
         return build_hex_range_citation_package(
             run_id=run_id,
             source_path=source_path,
@@ -117,6 +162,7 @@ def build_media_router(
     def source_sqlite_table(
         run_id: str,
         path: str = Query(..., min_length=1),
+        row_ref: AnalysisRowRef = Depends(analysis_row_ref),
         table: str = Query(..., min_length=1),
         offset: int = Query(0, ge=0),
         limit: int = Query(100, ge=1, le=SQLITE_TABLE_PAGE_MAX_ROWS),
@@ -125,7 +171,7 @@ def build_media_router(
         order_by: str | None = Query(default=None, min_length=1),
         descending: bool = False,
     ) -> dict[str, object]:
-        source_path = resolve_allowed_source_file(store, run_id, path)
+        source_path = resolve_allowed_source_file(store, run_id, path, **row_ref)
         if not is_sqlite_candidate(source_path):
             raise HTTPException(status_code=400, detail="source file is not a supported SQLite database")
         return build_sqlite_table_page(
@@ -145,9 +191,10 @@ def build_media_router(
     def source_sqlite_wal_preview(
         run_id: str,
         path: str = Query(..., min_length=1),
+        row_ref: AnalysisRowRef = Depends(analysis_row_ref),
         max_frames: int = Query(20, ge=1, le=100),
     ) -> dict[str, object]:
-        source_path = resolve_allowed_source_file(store, run_id, path)
+        source_path = resolve_allowed_source_file(store, run_id, path, **row_ref)
         if not is_sqlite_candidate(source_path):
             raise HTTPException(status_code=400, detail="source file is not a supported SQLite database")
         try:
@@ -170,11 +217,12 @@ def build_media_router(
     def source_email_attachment(
         run_id: str,
         path: str = Query(..., min_length=1),
+        row_ref: AnalysisRowRef = Depends(analysis_row_ref),
         message_index: int = Query(1, ge=1),
         attachment_index: int = Query(1, ge=1),
         include_content: bool = False,
     ) -> dict[str, object]:
-        source_path = resolve_allowed_source_file(store, run_id, path)
+        source_path = resolve_allowed_source_file(store, run_id, path, **row_ref)
         suffix = source_path.suffix.lower()
         if suffix not in {".eml", ".mbox"}:
             raise HTTPException(status_code=400, detail="source file is not a supported EML/MBOX email preview")
@@ -192,11 +240,12 @@ def build_media_router(
     def source_image_gallery(
         run_id: str,
         path: str = Query(..., min_length=1),
+        row_ref: AnalysisRowRef = Depends(analysis_row_ref),
         offset: int = Query(0, ge=0),
         limit: int = Query(IMAGE_GALLERY_DEFAULT_LIMIT, ge=1, le=IMAGE_GALLERY_MAX_ITEMS),
         similarity_bucket: str | None = Query(default=None, min_length=1),
     ) -> dict[str, object]:
-        source_path = resolve_allowed_source_file(store, run_id, path)
+        source_path = resolve_allowed_source_file(store, run_id, path, **row_ref)
         if not is_image_preview_candidate(source_path):
             raise HTTPException(status_code=400, detail="source file is not a supported image preview")
         return build_image_gallery_page(
@@ -212,11 +261,12 @@ def build_media_router(
     def source_media_cue(
         run_id: str,
         path: str = Query(..., min_length=1),
+        row_ref: AnalysisRowRef = Depends(analysis_row_ref),
         sidecar_index: int = Query(1, ge=1),
         cue_index: int = Query(1, ge=1),
         include_source_hashes: bool = False,
     ) -> dict[str, object]:
-        source_path = resolve_allowed_source_file(store, run_id, path)
+        source_path = resolve_allowed_source_file(store, run_id, path, **row_ref)
         mime_type = mimetypes.guess_type(source_path.name)[0] or ""
         if not mime_type.startswith(("audio/", "video/")):
             raise HTTPException(status_code=400, detail="source file is not a supported audio/video preview")
@@ -233,10 +283,11 @@ def build_media_router(
     def source_ocr_queue(
         run_id: str,
         path: str = Query(..., min_length=1),
+        row_ref: AnalysisRowRef = Depends(analysis_row_ref),
         max_items: int = Query(SOURCE_OCR_QUEUE_DEFAULT_MAX_ITEMS, ge=1, le=1000),
         retry_failures: bool = False,
     ) -> dict[str, object]:
-        source_path = resolve_allowed_source_file(store, run_id, path)
+        source_path = resolve_allowed_source_file(store, run_id, path, **row_ref)
         if not is_image_preview_candidate(source_path):
             raise HTTPException(status_code=400, detail="source file is not a supported image preview")
         return build_source_ocr_queue(
@@ -251,21 +302,31 @@ def build_media_router(
     def source_ocr_translation(
         run_id: str,
         path: str = Query(..., min_length=1),
+        row_ref: AnalysisRowRef = Depends(analysis_row_ref),
         include_text: bool = True,
     ) -> dict[str, object]:
-        source_path = resolve_allowed_source_file(store, run_id, path)
+        source_path = resolve_allowed_source_file(store, run_id, path, **row_ref)
         if not is_image_preview_candidate(source_path):
             raise HTTPException(status_code=400, detail="source file is not a supported image preview")
-        return build_source_ocr_translation_package(
+        package = build_source_ocr_translation_package(
             run_id=run_id,
             source_path=source_path,
             include_text=include_text,
         )
+        package["analysis_ocr"] = stored_ocr_sidecar(store, run_id, source_path)
+        return package
 
 
     @router.get("/api/runs/{run_id}/source-metadata")
-    def source_metadata(run_id: str, path: str = Query(..., min_length=1), hash: bool = False) -> dict[str, object]:
-        source_path = resolve_allowed_source_file(store, run_id, path)
+    def source_metadata(
+        run_id: str,
+        path: str = Query(..., min_length=1),
+        row_ref: AnalysisRowRef = Depends(analysis_row_ref),
+        hash: bool = False,
+    ) -> dict[str, object]:
+        source_path = resolve_allowed_source_file(store, run_id, path, allow_directory=True, **row_ref)
+        if source_path.is_dir():
+            return build_directory_metadata(source_path)
         return build_source_metadata(source_path, include_hashes=hash)
 
     return router

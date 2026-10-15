@@ -1,3 +1,4 @@
+import { create } from "zustand";
 import {
   caseReportFile,
   createCaseReport,
@@ -62,11 +63,38 @@ export function exportDisabledReason(
   return undefined;
 }
 
-/** Run one export and download its file; resolves with the saved file name. */
+export interface ExportRecord {
+  runId: string;
+  kind: ExportKind;
+  label: string;
+  fileName: string;
+  at: string;
+}
+
+/** Exports made in this session, newest first (보고 stage "내보내기 이력"). */
+export const useExportHistory = create<{ records: ExportRecord[]; add: (record: ExportRecord) => void }>(
+  (set) => ({
+    records: [],
+    add: (record) => set((s) => ({ records: [record, ...s.records].slice(0, 50) })),
+  }),
+);
+
+/** Run one export and download its file; resolves with the saved file name (recorded in the history). */
 export async function performExport(
   kind: ExportKind,
   runId: string,
   options: { format?: ReportFormat; meta?: Partial<ReportMeta> } = {},
+): Promise<string> {
+  const fileName = await runExport(kind, runId, options);
+  const label = EXPORT_ACTIONS.find((action) => action.kind === kind)?.label ?? kind;
+  useExportHistory.getState().add({ runId, kind, label, fileName, at: new Date().toISOString() });
+  return fileName;
+}
+
+async function runExport(
+  kind: ExportKind,
+  runId: string,
+  options: { format?: ReportFormat; meta?: Partial<ReportMeta> },
 ): Promise<string> {
   switch (kind) {
     case "case-report": {

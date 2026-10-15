@@ -3,7 +3,7 @@ import { isChipStatus } from "../../components/StatusChip";
 import "../../components/status.css";
 import type { CommandContext } from "../../contracts/command";
 import { getRegisteredCommand } from "./adapter";
-import { BATCH_ACTIONS, batchCommandId } from "./gridCommands";
+import { BATCH_ACTIONS, batchCommandId, OCR_SELECTED_COMMAND } from "./gridCommands";
 import { formatCount } from "./gridUtils";
 import { MARK_LABELS } from "./reviewActions";
 
@@ -77,6 +77,29 @@ export function BatchBar({
           </button>
         );
       })}
+      {(() => {
+        const command = getRegisteredCommand(OCR_SELECTED_COMMAND);
+        if (!command) return null;
+        const reason = command.disabledReason?.(context);
+        return (
+          <button
+            type="button"
+            className="grid-btn"
+            data-command={OCR_SELECTED_COMMAND}
+            aria-disabled={reason ? true : undefined}
+            title={reason}
+            onClick={() => {
+              if (reason) {
+                onDisabled(reason);
+                return;
+              }
+              void command.run(context);
+            }}
+          >
+            {command.label}
+          </button>
+        );
+      })()}
       {promptOpen ? (
         <form
           className="grid-tag-prompt"

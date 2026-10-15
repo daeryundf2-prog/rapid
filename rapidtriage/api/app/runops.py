@@ -616,7 +616,7 @@ def build_run_submission_manifest(
 ) -> dict[str, object]:
     job = get_job(store, run_id)
     if job.summary is None:
-        raise HTTPException(status_code=409, detail="run is not completed")
+        raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
     case_path = default_case_path(store, run_id)
     case_payload = load_case_payload_or_empty(case_path)
     try:
@@ -637,7 +637,7 @@ def build_run_case_report(
 ) -> str:
     job = get_job(store, run_id)
     if job.summary is None:
-        raise HTTPException(status_code=409, detail="run is not completed")
+        raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
     case_path = default_case_path(store, run_id)
     case_payload = load_case_payload_or_empty(case_path)
     manifest = build_run_submission_manifest(
@@ -668,7 +668,7 @@ def build_run_case_report(
 def build_run_validation_package(store: RunJobStore, run_id: str) -> dict[str, object]:
     job = get_job(store, run_id)
     if job.summary is None:
-        raise HTTPException(status_code=409, detail="run is not completed")
+        raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
     summary = job.summary
     output_dir = run_output_dir(summary)
     case_path = default_case_path(store, run_id)
@@ -1041,6 +1041,7 @@ def build_source_preview(run_id: str, source_path: Path, *, max_chars: int = 200
         "path": str(source_path),
         "name": source_path.name,
         "extension": suffix,
+        "is_directory": False,
         "size": stat.st_size,
         "modified_at": source_path.stat().st_mtime,
         "mime_type": mime_type,
@@ -1286,6 +1287,53 @@ def review_source_for_search_match(match: Mapping[str, object]) -> str:
     return ""
 
 
+DIRECTORY_PREVIEW_MESSAGE = "디렉터리는 미리보기가 없습니다. 디렉터리 안의 파일을 선택하세요."
+
+
+def build_directory_metadata(source_path: Path) -> dict[str, object]:
+    """``source-metadata`` for a directory: 200 with ``is_directory: true``, no size/hashes."""
+    stat = source_path.stat()
+    return {
+        "command": "source-metadata",
+        "path": str(source_path),
+        "name": source_path.name,
+        "extension": "",
+        "is_directory": True,
+        "size": None,
+        "modified_at": dt_from_epoch(stat.st_mtime),
+        "created_at": dt_from_epoch(getattr(stat, "st_birthtime", stat.st_ctime)),
+        "mime_type": "inode/directory",
+        "hashes": {},
+        "hash_status": "not-applicable-directory",
+    }
+
+
+def build_directory_preview(run_id: str, source_path: Path) -> dict[str, object]:
+    """``source-preview`` for a directory: 200, ``preview_type: "directory"``, no content preview."""
+    return {
+        "run_id": run_id,
+        "path": str(source_path),
+        "name": source_path.name,
+        "extension": "",
+        "is_directory": True,
+        "size": None,
+        "modified_at": source_path.stat().st_mtime,
+        "mime_type": "inode/directory",
+        "metadata_url": f"/api/runs/{run_id}/source-metadata?path={quote(str(source_path))}",
+        "preview_type": "directory",
+        "text": "",
+        "truncated": False,
+        "message": DIRECTORY_PREVIEW_MESSAGE,
+        "viewer_metadata": {
+            "source_format": "directory",
+            "strategy": "directory-no-preview",
+            "preview_status": "not-applicable",
+            "parser": "rapidtriage.source-viewer",
+            "parser_version": SOURCE_VIEWER_VERSION,
+        },
+    }
+
+
 def build_source_metadata(source_path: Path, *, include_hashes: bool) -> dict[str, object]:
     stat = source_path.stat()
     mime_type = mimetypes.guess_type(source_path.name)[0] or "application/octet-stream"
@@ -1294,6 +1342,7 @@ def build_source_metadata(source_path: Path, *, include_hashes: bool) -> dict[st
         "path": str(source_path),
         "name": source_path.name,
         "extension": source_path.suffix.lower(),
+        "is_directory": False,
         "size": stat.st_size,
         "modified_at": dt_from_epoch(stat.st_mtime),
         "created_at": dt_from_epoch(getattr(stat, "st_birthtime", stat.st_ctime)),

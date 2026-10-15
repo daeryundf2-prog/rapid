@@ -3,10 +3,20 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import os
 import shutil
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+
+from .link_safe_walk import WalkStats, iter_files_no_links, lstat_is_link
+
+# Optional cancellation hook of API callers: called every CANCEL_CHECK_EVERY
+# walked entries (and before each hashed or copied file); it aborts by raising.
+CancelCheck = Callable[[], None]
+CANCEL_CHECK_EVERY = 500
+# Run output folders (``rapidtriage-run*``) are never snapshot candidates.
+RUN_OUTPUT_DIR_PREFIX = "rapidtriage-run"
 
 
 class VscCompareError(ValueError):
@@ -99,18 +109,127 @@ def build_vsc_image_workflow_handoff(
     return payload
 
 
-def discover_vsc_snapshot_roots(current_root: Path, *, max_depth: int = 3) -> dict[str, object]:
+def _within_roots(path: Path, roots: Sequence[Path]) -> bool:
+    return any(path == root or path.is_relative_to(root) for root in roots)
+
+
+def _lexical_and_resolved_forms(paths: Iterable[Path]) -> list[Path]:
+    """``abspath`` and ``resolve()`` forms of ``paths`` (deduplicated, unresolvable ones kept lexical)."""
+    forms: list[Path] = []
+    for path in paths:
+        candidates = [Path(os.path.abspath(path))]
+        try:
+            candidates.append(Path(path).resolve())
+        except (OSError, RuntimeError, ValueError):
+            pass
+        forms.extend(form for form in candidates if form not in forms)
+    return forms
+
+
+def path_within_roots(path: Path, roots: Sequence[Path]) -> bool:
+    """Lexical check first (no filesystem call on a path outside ``roots``), then the resolved path."""
+    if not _within_roots(Path(os.path.abspath(path)), roots):
+        return False
+    try:
+        resolved = path.resolve()
+    except (OSError, RuntimeError, ValueError):
+        return False
+    return _within_roots(resolved, roots)
+
+
+def _discovery_walk_plan(
+    search_roots: Sequence[Path],
+    *,
+    max_depth: int,
+    allowed_roots: Sequence[Path] | None,
+) -> tuple[list[tuple[Path, int, bool]], int]:
+    """``[(start, start_depth, start_is_candidate)]`` and the number of search roots outside ``allowed_roots``.
+
+    Without ``allowed_roots`` every search root is walked. With them, a search
+    root outside every allowed root is never touched; only the allowed roots
+    lexically beneath it (within the walk depth) are walked instead, each as a
+    candidate itself plus its own subtree.
+    """
+    if allowed_roots is None:
+        return [(root, 0, False) for root in search_roots], 0
+    plan: list[tuple[Path, int, bool]] = []
+    excluded = 0
+    for search_root in search_roots:
+        if _within_roots(Path(os.path.abspath(search_root)), allowed_roots):
+            plan.append((search_root, 0, False))
+            continue
+        excluded += 1
+        for root in allowed_roots:
+            if root == search_root or not root.is_relative_to(search_root):
+                continue
+            level = len(root.relative_to(search_root).parts)
+            if level <= max_depth + 1:  # iter_candidate_snapshot_dirs yields max_depth + 1 levels
+                plan.append((root, level, True))
+    return plan, excluded
+
+
+def discover_vsc_snapshot_roots(
+    current_root: Path,
+    *,
+    max_depth: int = 3,
+    allowed_roots: Sequence[Path] | None = None,
+    check_cancel: CancelCheck | None = None,
+    skip_links: bool = False,
+    exclude_dirs: Sequence[Path] = (),
+) -> dict[str, object]:
+    """Score directories around ``current_root`` that look like mounted/exported snapshots.
+
+    ``allowed_roots`` (API callers) confines filesystem calls to those roots:
+    outside search roots and candidates are skipped before any stat, walk or
+    file count, the payload lists only what was walked, and
+    ``excluded_outside_roots`` counts the skipped search roots and candidates.
+    ``skip_links`` (API callers) never descends into or counts through
+    symlinks/junctions. Run output folders (``rapidtriage-run*``) and
+    ``exclude_dirs`` (with their subtrees) are never candidates.
+    """
     current = current_root.expanduser().resolve()
     if not current.is_dir():
         raise VscCompareError(f"Current root is not a directory: {current}")
     search_roots = [current.parent, current / "System Volume Information", current / "VSS", current / "vss"]
+    plan, excluded = _discovery_walk_plan(search_roots, max_depth=max_depth, allowed_roots=allowed_roots)
+
+    # Candidates come from walking the resolved ``current`` root: compare them with
+    # the resolved form too (a temp dir behind a symlink or a Windows 8.3 short
+    # name otherwise never matches), keeping the lexical form as given.
+    excluded_trees = _lexical_and_resolved_forms(exclude_dirs)
+
+    def allowed(path: Path) -> bool:
+        nonlocal excluded
+        if allowed_roots is None or path_within_roots(path, allowed_roots):
+            return True
+        excluded += 1
+        return False
+
+    def allowed_child(path: Path) -> bool:
+        # The tool's own outputs are never snapshots (nor walked for them).
+        return not is_run_output_dir(path, excluded_trees) and allowed(path)
+
     seen: set[Path] = set()
+    walked_roots: list[Path] = []
     candidates: list[dict[str, object]] = []
-    for search_root in search_roots:
-        if not search_root.is_dir() or search_root in seen:
+    for search_root, start_depth, start_is_candidate in plan:
+        if start_is_candidate and (search_root == current or current in search_root.parents):
+            continue  # the current root's own subtree is covered by its VSS search roots
+        if start_is_candidate and is_run_output_dir(search_root, excluded_trees):
+            continue  # e.g. the run output dir itself (an input root) is never a snapshot
+        if search_root in seen or not allowed(search_root) or not search_root.is_dir():
             continue
         seen.add(search_root)
-        for path in iter_candidate_snapshot_dirs(search_root, max_depth=max_depth):
+        walked_roots.append(search_root)
+        paths = iter_candidate_snapshot_dirs(
+            search_root,
+            max_depth=max_depth,
+            start_depth=start_depth,
+            allow=allowed_child,
+            check_cancel=check_cancel,
+            skip_links=skip_links,
+        )
+        for path in [search_root, *paths] if start_is_candidate else paths:
             if path == current or current in path.parents:
                 continue
             label = path.name
@@ -123,7 +242,9 @@ def discover_vsc_snapshot_roots(current_root: Path, *, max_depth: int = 3) -> di
                     "label": label,
                     "score": score,
                     "exists": path.is_dir(),
-                    "file_count_sample": count_files_bounded(path, limit=250),
+                    "file_count_sample": count_files_bounded(
+                        path, limit=250, check_cancel=check_cancel, skip_links=skip_links
+                    ),
                     "reason": vsc_snapshot_reason(path),
                 }
             )
@@ -137,12 +258,14 @@ def discover_vsc_snapshot_roots(current_root: Path, *, max_depth: int = 3) -> di
         "checklist_item": 8,
         "qc_gap_id": "#8",
         "current_root": str(current),
-        "search_roots": [str(path) for path in search_roots if path.is_dir()],
+        "search_roots": [str(path) for path in (search_roots if allowed_roots is None else walked_roots) if path.is_dir()],
         "snapshot_count": len(rows),
         "snapshots": rows,
         "direct_image_level_mount_supported": False,
         "operator_note": "Discovery is for mounted/exported VSC folders. Direct VSC mounting from E01/RAW remains an external workflow.",
     }
+    if allowed_roots is not None:
+        payload["excluded_outside_roots"] = excluded
     payload["image_workflow_handoff"] = build_vsc_image_workflow_handoff(
         current_root=current,
         source_kind="mounted-or-exported-windows-root",
@@ -154,8 +277,21 @@ def discover_vsc_snapshot_roots(current_root: Path, *, max_depth: int = 3) -> di
     return payload
 
 
-def iter_candidate_snapshot_dirs(root: Path, *, max_depth: int) -> Iterable[Path]:
-    pending: list[tuple[Path, int]] = [(root, 0)]
+def iter_candidate_snapshot_dirs(
+    root: Path,
+    *,
+    max_depth: int,
+    start_depth: int = 0,
+    allow: Callable[[Path], bool] | None = None,
+    check_cancel: CancelCheck | None = None,
+    skip_links: bool = False,
+) -> Iterable[Path]:
+    """Directories below ``root``; ``allow`` rejects a child before any filesystem call on it.
+
+    ``skip_links`` neither yields nor descends into symlinked/junction directories.
+    """
+    pending: list[tuple[Path, int]] = [(root, start_depth)]
+    walked = 0
     while pending:
         current, depth = pending.pop()
         if depth > max_depth:
@@ -165,6 +301,17 @@ def iter_candidate_snapshot_dirs(root: Path, *, max_depth: int) -> Iterable[Path
         except (OSError, PermissionError):
             continue
         for child in children:
+            walked += 1
+            if check_cancel is not None and walked % CANCEL_CHECK_EVERY == 0:
+                check_cancel()
+            if allow is not None and not allow(child):
+                continue
+            if skip_links:
+                try:
+                    if lstat_is_link(child):
+                        continue
+                except OSError:
+                    continue
             if not child.is_dir():
                 continue
             yield child
@@ -195,9 +342,18 @@ def vsc_snapshot_reason(path: Path) -> str:
     return "snapshot-name-candidate"
 
 
-def count_files_bounded(root: Path, *, limit: int) -> int:
+def is_run_output_dir(path: Path, excluded_trees: Sequence[Path] = ()) -> bool:
+    """A ``rapidtriage-run*`` folder, or a path inside one of ``excluded_trees`` (lexical only)."""
+    return path.name.lower().startswith(RUN_OUTPUT_DIR_PREFIX) or _within_roots(
+        Path(os.path.abspath(path)), excluded_trees
+    )
+
+
+def count_files_bounded(
+    root: Path, *, limit: int, check_cancel: CancelCheck | None = None, skip_links: bool = False
+) -> int:
     count = 0
-    for path in iter_regular_files(root):
+    for _path in iter_regular_files(root, check_cancel=check_cancel, skip_links=skip_links):
         count += 1
         if count >= limit:
             break
@@ -211,7 +367,25 @@ def compare_vsc_snapshots(
     compute_hashes: bool = False,
     case_sensitive: bool = False,
     max_records: int = 10000,
+    allowed_roots: Sequence[Path] | None = None,
+    check_cancel: CancelCheck | None = None,
+    skip_links: bool = False,
+    exclude_dirs: Sequence[Path] = (),
+    statuses: Iterable[str] | None = None,
 ) -> dict[str, object]:
+    """Index both sides and diff them; ``allowed_roots`` confines the embedded snapshot discovery.
+
+    ``skip_links`` (API callers) indexes no file reached through a symlink or
+    junction; each comparison summary then reports ``link_skipped_count``.
+
+    Status counts are exact over the whole change set; only the ``records``
+    listing is capped by ``max_records`` (0 = unlimited), filled deleted ->
+    modified -> added (path order within each), so additions never crowd
+    out deletions. ``truncated`` is true only when changes were left out of
+    the listing. ``statuses`` limits which changes are listed (counts stay
+    complete).
+    """
+    listed_statuses = set(statuses) if statuses is not None else None
     current = current_root.expanduser().resolve()
     snapshots = [path.expanduser().resolve() for path in snapshot_roots]
     if not current.is_dir():
@@ -222,21 +396,44 @@ def compare_vsc_snapshots(
         if not snapshot.is_dir():
             raise VscCompareError(f"Snapshot root is not a directory: {snapshot}")
 
-    current_index = build_file_index(current, compute_hashes=compute_hashes, case_sensitive=case_sensitive)
+    current_stats = WalkStats()
+    current_index = build_file_index(
+        current,
+        compute_hashes=compute_hashes,
+        case_sensitive=case_sensitive,
+        check_cancel=check_cancel,
+        skip_links=skip_links,
+        stats=current_stats,
+    )
     comparisons: list[dict[str, object]] = []
     totals = {"deleted": 0, "added": 0, "modified": 0, "unchanged": 0}
 
     for snapshot in snapshots:
-        snapshot_index = build_file_index(snapshot, compute_hashes=compute_hashes, case_sensitive=case_sensitive)
+        snapshot_stats = WalkStats()
+        snapshot_index = build_file_index(
+            snapshot,
+            compute_hashes=compute_hashes,
+            case_sensitive=case_sensitive,
+            check_cancel=check_cancel,
+            skip_links=skip_links,
+            stats=snapshot_stats,
+        )
+        counts: dict[str, int] = {"deleted": 0, "added": 0, "modified": 0, "unchanged": 0}
         records = compare_indexes(
             current_index,
             snapshot_index,
             snapshot_label=snapshot.name,
             max_records=max_records,
+            statuses=listed_statuses,
+            counts=counts,
         )
-        counts = status_counts(records)
         for key, value in counts.items():
             totals[key] = totals.get(key, 0) + value
+        listable = sum(
+            value
+            for key, value in counts.items()
+            if key != "unchanged" and (listed_statuses is None or key in listed_statuses)
+        )
         comparisons.append(
             {
                 "snapshot_root": str(snapshot),
@@ -246,13 +443,25 @@ def compare_vsc_snapshots(
                     "snapshot_file_count": len(snapshot_index),
                     **counts,
                     "record_count": len(records),
-                    "truncated": max_records > 0 and len(records) >= max_records,
+                    "change_count": listable,
+                    "truncated": len(records) < listable,
+                    **(
+                        {"link_skipped_count": current_stats.skipped_links + snapshot_stats.skipped_links}
+                        if skip_links
+                        else {}
+                    ),
                 },
                 "records": records,
             }
         )
 
-    discovery = discover_vsc_snapshot_roots(current)
+    discovery = discover_vsc_snapshot_roots(
+        current,
+        allowed_roots=allowed_roots,
+        check_cancel=check_cancel,
+        skip_links=skip_links,
+        exclude_dirs=exclude_dirs,
+    )
     return {
         "generated_at": dt.datetime.now().isoformat(),
         "tool": "rapidtriage-vsc-compare",
@@ -297,7 +506,20 @@ def extract_vsc_changes(
     max_file_count: int = 1000,
     max_total_bytes: int = 2 * 1024 * 1024 * 1024,
     overwrite: bool = False,
+    allowed_roots: Sequence[Path] | None = None,
+    check_cancel: CancelCheck | None = None,
+    skip_links: bool = False,
+    exclude_dirs: Sequence[Path] = (),
+    max_skipped_records: int | None = None,
 ) -> dict[str, object]:
+    """Copy the selected changes' files; selection comes from the selected statuses only.
+
+    ``max_records`` (0 = unlimited) caps the *selected* changes per snapshot
+    (deleted -> modified -> added), never a listing that unselected
+    additions filled first; ``summary.selection_truncated`` reports a cap
+    hit. ``max_skipped_records`` (API callers) bounds the ``skipped`` list
+    while ``summary.skipped_count``/``skipped_reason_counts`` stay exact.
+    """
     selected_statuses = {status.strip().lower() for status in statuses if status.strip()}
     allowed_statuses = {"deleted", "modified", "added"}
     if not selected_statuses or not selected_statuses.issubset(allowed_statuses):
@@ -310,9 +532,14 @@ def extract_vsc_changes(
         compute_hashes=compute_hashes,
         case_sensitive=case_sensitive,
         max_records=max_records,
+        allowed_roots=allowed_roots,
+        check_cancel=check_cancel,
+        skip_links=skip_links,
+        exclude_dirs=exclude_dirs,
+        statuses=selected_statuses,
     )
     copied: list[dict[str, object]] = []
-    skipped: list[dict[str, object]] = []
+    skipped = _BoundedSkips(max_skipped_records)
     copied_bytes = 0
     selected_count = 0
     for comparison_row in comparison["comparisons"]:
@@ -323,6 +550,8 @@ def extract_vsc_changes(
             status = str(record.get("status") or "")
             if status not in selected_statuses:
                 continue
+            if check_cancel is not None:
+                check_cancel()
             source = source_entry_for_vsc_extract(record)
             relative_path = str(record.get("relative_path") or "")
             selected_count += 1
@@ -389,8 +618,13 @@ def extract_vsc_changes(
             "snapshot_count": comparison["summary"]["snapshot_count"],
             "selected_count": selected_count,
             "copied_count": len(copied),
-            "skipped_count": len(skipped),
+            "skipped_count": skipped.count,
+            "skipped_reason_counts": dict(skipped.reasons),
+            "skipped_listed_count": len(skipped.items),
             "copied_bytes": copied_bytes,
+            "selection_truncated": any(
+                (row.get("summary") or {}).get("truncated") for row in comparison["comparisons"]
+            ),
         },
         "comparison_summary": comparison["summary"],
         "image_workflow_handoff": build_vsc_image_workflow_handoff(
@@ -401,7 +635,7 @@ def extract_vsc_changes(
             status="extract-complete",
         ),
         "copied": copied,
-        "skipped": skipped,
+        "skipped": skipped.items,
         "notes": [
             "deleted and modified records copy the snapshot-side file by default; added records copy the current-side file when selected.",
             "The manifest records source and destination SHA256 values for preservation review.",
@@ -443,9 +677,19 @@ def safe_path_part(value: str) -> str:
     return cleaned or "snapshot"
 
 
-def build_file_index(root: Path, *, compute_hashes: bool, case_sensitive: bool) -> dict[str, FileEntry]:
+def build_file_index(
+    root: Path,
+    *,
+    compute_hashes: bool,
+    case_sensitive: bool,
+    check_cancel: CancelCheck | None = None,
+    skip_links: bool = False,
+    stats: WalkStats | None = None,
+) -> dict[str, FileEntry]:
     index: dict[str, FileEntry] = {}
-    for path in iter_regular_files(root):
+    for path in iter_regular_files(root, check_cancel=check_cancel, skip_links=skip_links, stats=stats):
+        if compute_hashes and check_cancel is not None:
+            check_cancel()  # hashing one file can take long
         try:
             stat_result = path.stat()
         except (FileNotFoundError, PermissionError, OSError):
@@ -469,23 +713,55 @@ def compare_indexes(
     *,
     snapshot_label: str,
     max_records: int,
+    statuses: set[str] | None = None,
+    counts: dict[str, int] | None = None,
 ) -> list[dict[str, object]]:
-    records: list[dict[str, object]] = []
-    all_keys = sorted(set(current_index) | set(snapshot_index))
-    for key in all_keys:
+    """Change records: deleted, then modified, then added (path order within each).
+
+    Every key is classified (``counts`` receives exact per-status totals);
+    only the returned listing is capped at ``max_records`` (0 = unlimited),
+    so a cap never hides a deletion behind additions that sort earlier.
+    ``statuses`` restricts which changes are listed.
+    """
+    buckets: dict[str, list[dict[str, object]]] = {"deleted": [], "modified": [], "added": []}
+    for key in sorted(set(current_index) | set(snapshot_index)):
         current = current_index.get(key)
         snapshot = snapshot_index.get(key)
         if current is None and snapshot is not None:
-            records.append(change_record("deleted", snapshot_label, snapshot=snapshot, current=None))
+            status = "deleted"
         elif snapshot is None and current is not None:
-            records.append(change_record("added", snapshot_label, snapshot=None, current=current))
+            status = "added"
         elif current is not None and snapshot is not None and entries_differ(current, snapshot):
-            records.append(change_record("modified", snapshot_label, snapshot=snapshot, current=current))
+            status = "modified"
         else:
             continue
-        if max_records > 0 and len(records) >= max_records:
-            break
-    return records
+        if counts is not None:
+            counts[status] = counts.get(status, 0) + 1
+        if statuses is not None and status not in statuses:
+            continue
+        bucket = buckets[status]
+        if max_records > 0 and len(bucket) >= max_records:
+            continue  # this bucket alone already fills the listing
+        bucket.append(change_record(status, snapshot_label, snapshot=snapshot, current=current))
+    records = [*buckets["deleted"], *buckets["modified"], *buckets["added"]]
+    return records[:max_records] if max_records > 0 else records
+
+
+class _BoundedSkips:
+    """Skip rows of an extract: exact count and per-reason totals, listing bounded by ``limit``."""
+
+    def __init__(self, limit: int | None) -> None:
+        self.limit = limit
+        self.items: list[dict[str, object]] = []
+        self.count = 0
+        self.reasons: dict[str, int] = {}
+
+    def append(self, item: dict[str, object]) -> None:
+        self.count += 1
+        reason = str(item.get("reason") or "")
+        self.reasons[reason] = self.reasons.get(reason, 0) + 1
+        if self.limit is None or len(self.items) < self.limit:
+            self.items.append(item)
 
 
 def change_record(
@@ -532,8 +808,26 @@ def status_counts(records: Iterable[dict[str, object]]) -> dict[str, int]:
     return counts
 
 
-def iter_regular_files(root: Path) -> Iterable[Path]:
+def iter_regular_files(
+    root: Path,
+    *,
+    check_cancel: CancelCheck | None = None,
+    skip_links: bool = False,
+    stats: WalkStats | None = None,
+) -> Iterable[Path]:
+    """Regular files below ``root``.
+
+    The default (CLI) walk follows directory links as it always has.
+    ``skip_links`` (API callers) uses ``iter_files_no_links``: symlinked or
+    junction directories are never entered and linked files never yielded
+    (counted in ``stats.skipped_links``), so a link cannot leave ``root`` and
+    a junction loop cannot hang the walk.
+    """
+    if skip_links:
+        yield from iter_files_no_links(root, check_cancel=check_cancel, every=CANCEL_CHECK_EVERY, stats=stats)
+        return
     pending = [root]
+    walked = 0
     while pending:
         current = pending.pop()
         try:
@@ -541,6 +835,9 @@ def iter_regular_files(root: Path) -> Iterable[Path]:
         except (FileNotFoundError, NotADirectoryError, PermissionError, OSError):
             continue
         for entry in entries:
+            walked += 1
+            if check_cancel is not None and walked % CANCEL_CHECK_EVERY == 0:
+                check_cancel()  # every N walked entries, files or not
             try:
                 if entry.is_dir():
                     pending.append(entry)

@@ -124,7 +124,8 @@ describe("built-in commands", () => {
   it("register without key conflicts and explain why they are disabled", async () => {
     const client = { invalidateQueries: vi.fn() } as never;
     registerCommands([...appCommands(), ...navigateCommands(), ...caseCommands(client)]);
-    expect(getCommands("navigate")).toHaveLength(10);
+    // One per COLLECTION_NODES entry (incl. 분석 작업).
+    expect(getCommands("navigate")).toHaveLength(11);
     expect(await runCommand("navigate.files")).toEqual({ ok: false, reason: NO_RUN_REASON });
     expect(await runCommand("viewer.open")).toEqual({ ok: false, reason: "선택된 행이 없습니다" });
     expect(await runCommand("case.cancel")).toEqual({ ok: false, reason: NO_RUN_REASON });
@@ -132,7 +133,7 @@ describe("built-in commands", () => {
     useAppStore.getState().setRuns([{ run_id: "r1", status: "completed" }]);
     expect(await runCommand("case.cancel")).toEqual({ ok: false, reason: "실행 중인 런이 아닙니다" });
     expect(await runCommand("navigate.review")).toEqual({ ok: true });
-    expect(window.location.hash).toBe("#/case/r1/review");
+    expect(window.location.hash).toBe("#/case/r1/review/board");
     expect(await runCommand("app.density.default")).toEqual({ ok: false, reason: "현재 밀도입니다" });
     expect(await runCommand("app.help")).toEqual({ ok: true });
     expect(useAppStore.getState().helpOpen).toBe(true);

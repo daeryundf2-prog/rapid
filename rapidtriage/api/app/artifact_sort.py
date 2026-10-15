@@ -404,13 +404,17 @@ def probe_sort_key(
     key: str,
     profiles: Mapping[str, Mapping[str, object]] | None,
     rows: int = SORT_PROBE_ROWS,
+    *,
+    record_limit: int | None = None,
 ) -> None:
     """Raise ``SortUnsupported`` if one of the first ``rows`` records holds a non-scalar value.
 
     Cheap (about 1 MB read) so an obviously unsortable key answers
     ``unsupported`` at once; a non-scalar value appearing only later is still
-    caught by the full build.
+    caught by the full build. ``record_limit`` bounds it like ``build_sort_index``.
     """
+    if record_limit is not None:
+        rows = min(rows, record_limit)
     for index, _offset, row, _line in iter_jsonl_records(records_path):
         if index >= rows:
             return
@@ -437,8 +441,14 @@ def _scan(
     profiles: Mapping[str, Mapping[str, object]] | None,
     mode: str,
     progress: _Build | None,
+    *,
+    record_limit: int | None = None,
 ) -> tuple[SortKeyCollector, array, array, os.stat_result]:
-    """One pass in ``mode``; numbers records like ``jsonl_records.iter_jsonl_records``."""
+    """One pass in ``mode``; numbers records like ``jsonl_records.iter_jsonl_records``.
+
+    ``record_limit`` stops before record ``record_limit`` (rows past it, e.g.
+    a running analysis' unflushed tail, are not indexed).
+    """
     collector = SortKeyCollector(mode)
     offsets = array("q")
     max_records = sort_max_records()
@@ -457,6 +467,8 @@ def _scan(
             stripped = line.strip()
             if not stripped.startswith(b"{"):
                 continue
+            if record_limit is not None and index >= record_limit:
+                break
             if index >= max_records:
                 raise too_many_records(index + 1, max_records)
             offsets.append(start)
@@ -479,19 +491,24 @@ def build_sort_index(
     key: str,
     profiles: Mapping[str, Mapping[str, object]] | None,
     progress: _Build | None = None,
+    *,
+    record_limit: int | None = None,
 ) -> SortIndex:
     """Scan ``records_path`` and return the sorted index for ``key``.
 
     Numeric keys that turn out to hold text are rescanned once in text mode
     (progress restarts from 0). The index records the ``fstat`` of the handle
     it read, so it is cached under the revision it actually describes.
+    ``record_limit`` indexes only records ``0..record_limit-1``.
     """
     mode = _first_mode(key)
+    # Passed only when set, so the unbounded call keeps its historical shape.
+    bound = {} if record_limit is None else {"record_limit": record_limit}
     try:
-        collector, offsets, invalid, stat = _scan(records_path, key, profiles, mode, progress)
+        collector, offsets, invalid, stat = _scan(records_path, key, profiles, mode, progress, **bound)
     except _NeedsText:
         LOGGER.info("sort key %s of %s is not numeric; rescanning in text mode", key, records_path)
-        collector, offsets, invalid, stat = _scan(records_path, key, profiles, "text", progress)
+        collector, offsets, invalid, stat = _scan(records_path, key, profiles, "text", progress, **bound)
     if invalid:
         LOGGER.warning("%d invalid JSONL records in %s sort as missing", len(invalid), records_path)
     ascending, descending = collector.finish()
@@ -558,8 +575,10 @@ class SortIndexCache:
 
     @staticmethod
     def _drop_revisions(table: OrderedDict, cache_key: CacheKey) -> None:
-        # A rewritten file (new size/mtime) supersedes older revisions.
-        for stale in [k for k in table if k[:3] == cache_key[:3] and k != cache_key]:
+        # A rewritten file (new size/mtime) supersedes older revisions; so does
+        # another ``record_limit`` of the same kind (``<kind>#<n>``).
+        family = _revision_family(cache_key)
+        for stale in [k for k in table if _revision_family(k) == family and k != cache_key]:
             del table[stale]
 
     def _store_index(self, cache_key: CacheKey, index: SortIndex) -> None:
@@ -602,19 +621,24 @@ class SortIndexCache:
         key: str,
         records_path: Path,
         profiles: Mapping[str, Mapping[str, object]] | None,
+        record_limit: int | None = None,
     ) -> SortState:
         """Return the cached index, or start / report its background build.
 
         Repeated requests join the build in progress; it is never restarted.
+        ``record_limit`` indexes only the first records (cache kind
+        ``<kind>#<record_limit>``), e.g. the flushed rows of a running analysis.
         """
         stat = records_path.stat()
+        if record_limit is not None:
+            kind = f"{kind}#{record_limit}"
         cache_key: CacheKey = (run_id, kind, key, stat.st_size, stat.st_mtime_ns)
         with self._lock:
             state = self._cached_state(cache_key)
             if state is not None:
                 return state
         try:
-            probe_sort_key(records_path, key, profiles)
+            probe_sort_key(records_path, key, profiles, record_limit=record_limit)
         except SortUnsupported as exc:
             with self._lock:
                 self._store_unsupported(cache_key, str(exc), None)
@@ -630,7 +654,7 @@ class SortIndexCache:
             self._builds[cache_key] = build
             thread = threading.Thread(
                 target=self._run_build,
-                args=(cache_key, build, records_path, key, profiles),
+                args=(cache_key, build, records_path, key, profiles, record_limit),
                 name=f"rapidtriage-sort-{kind}",
                 daemon=True,
             )
@@ -648,6 +672,7 @@ class SortIndexCache:
         records_path: Path,
         key: str,
         profiles: Mapping[str, Mapping[str, object]] | None,
+        record_limit: int | None = None,
     ) -> None:
         index: SortIndex | None = None
         reason: str | None = None
@@ -655,7 +680,8 @@ class SortIndexCache:
         try:
             with self._slots:
                 build.running = True
-                index = build_sort_index(records_path, key, profiles, build)
+                bound = {} if record_limit is None else {"record_limit": record_limit}
+                index = build_sort_index(records_path, key, profiles, build, **bound)
         except SortUnsupported as exc:
             reason = str(exc)
         except Exception as exc:  # a failed build must not stay "building" forever
@@ -669,6 +695,12 @@ class SortIndexCache:
                 self._store_index((*cache_key[:3], index.size, index.mtime_ns), index)
             elif reason is not None:
                 self._store_unsupported(cache_key, reason, ttl)
+
+
+def _revision_family(cache_key: CacheKey) -> tuple[object, ...]:
+    """(run id, kind without ``#<record_limit>``, sort key): revisions of one sorted kind."""
+    run_id, kind, key = cache_key[:3]
+    return (run_id, str(kind).split("#", 1)[0], key)
 
 
 SORT_INDEX_CACHE = SortIndexCache()
@@ -766,18 +798,22 @@ def paginate_sorted_artifact_output(
     path_contains: str | None,
     locate: int | None = None,
     cache: SortIndexCache | None = None,
+    artifact_types: frozenset[str] | None = None,
+    record_limit: int | None = None,
 ) -> dict[str, object]:
     """One kind's artifacts page in whole-kind sorted order.
 
     The page carries ``sort`` = ``{key, order, status, progress, reason?,
     position?}``. ``building`` pages have no rows (the real ``total`` is kept)
     and the client polls; ``unsupported`` pages fall back to JSONL order.
+    ``record_limit`` confines every read (index, filter, fallback) to records
+    ``0..record_limit-1``.
     """
     cache = cache if cache is not None else SORT_INDEX_CACHE
     profiles = payload_profiles(payload)
     records_path = sort_records_path(payload, payload_path)
     key = sort.strip()
-    filtered = bool(path_contains)
+    filtered = bool(path_contains) or bool(artifact_types)
     try:
         key = parse_sort_key(sort)
         if records_path is None:
@@ -787,7 +823,9 @@ def paginate_sorted_artifact_output(
         max_records = sort_max_records()
         if payload_record_count(payload) > max_records:
             raise too_many_records(payload_record_count(payload), max_records)
-        state = cache.lookup(run_id=run_id, kind=kind, key=key, records_path=records_path, profiles=profiles)
+        state = cache.lookup(
+            run_id=run_id, kind=kind, key=key, records_path=records_path, profiles=profiles, record_limit=record_limit
+        )
     except SortUnsupported as exc:
         state = SortState("unsupported", 0.0, reason=str(exc))
 
@@ -807,9 +845,15 @@ def paginate_sorted_artifact_output(
                 "previous_offset": max(0, offset - limit) if offset > 0 else None,
                 "has_more": False,
             }
-        elif path_contains and limit > 0:
+        elif filtered and limit > 0:
             page = filter_artifact_page(
-                payload, payload_path=payload_path, path_contains=path_contains, offset=offset, limit=limit
+                payload,
+                payload_path=payload_path,
+                path_contains=path_contains,
+                offset=offset,
+                limit=limit,
+                artifact_types=artifact_types,
+                record_limit=record_limit,
             )
         else:
             page = paginate_artifact_output(
@@ -828,7 +872,7 @@ def paginate_sorted_artifact_output(
                 cache.evict(state.cache_key)
             raise
 
-    if path_contains:
+    if filtered:
         page = filter_artifact_page(
             payload,
             payload_path=payload_path,
@@ -837,6 +881,7 @@ def paginate_sorted_artifact_output(
             limit=limit,
             scan_cap=SORTED_FILTER_SCAN_CAP,
             rows_source=guarded(iter_sorted_rows(records_path, index, order, profiles)),
+            artifact_types=artifact_types,
         )
     else:
         ordered = index.order(order)

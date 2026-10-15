@@ -33,7 +33,8 @@ function sameCollection(a: CollectionRef, b: CollectionRef): boolean {
     a.id === b.id &&
     (a.kind ?? "") === (b.kind ?? "") &&
     (a.status ?? "") === (b.status ?? "") &&
-    (a.category ?? "") === (b.category ?? "")
+    (a.category ?? "") === (b.category ?? "") &&
+    (a.analysisId ?? "") === (b.analysisId ?? "")
   );
 }
 
@@ -57,6 +58,7 @@ export function gridRouteFromShell(): RouteState {
   if (route.kind) collection.kind = route.kind;
   if (route.status) collection.status = route.status;
   if (route.category) collection.category = route.category;
+  if (route.collection === "analysis" && route.analysisId) collection.analysisId = route.analysisId;
   const isSearch = collection.id === "search";
   const grid = useGridLocalStore.getState().route;
   return {
@@ -167,6 +169,10 @@ export function connectGridToShell(): () => void {
         // Auto-focus of row 0 before the grid restores the `row=` deep link: ignore it.
       } else if (targetKey(grid.target) !== targetKey(app.viewerTarget)) {
         app.setViewerTarget(grid.target, { row, syncUrl: userTouchedGrid });
+      } else if (userTouchedGrid && rowKey(app.route.row) !== rowKey(grid.target.ref)) {
+        // A click / key on the row the viewer already shows (the auto-focused first row) is the
+        // analyst's choice: mirror it into `row=` now.
+        app.setViewerTarget(app.viewerTarget, { row: row ?? app.viewerRow, syncUrl: true });
       } else if (row && row !== app.viewerRow) {
         app.setViewerTarget(app.viewerTarget, { row, syncUrl: false });
       }

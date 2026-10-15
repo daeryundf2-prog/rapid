@@ -19,6 +19,7 @@ import { focusGridWhenReady } from "../../commands/builtin";
 import { getCommands, registerCommand as registerShellCommand, useCommands } from "../../commands/registry";
 import type { CollectionId, ReviewStatus } from "../../contracts/collection";
 import type { Command } from "../../contracts/command";
+import { isCollectionId, isStage, parseHash, serializeRoute } from "../../router";
 import { isRunActive } from "../../state/slices/runs";
 import { useAppStore } from "../../state/store";
 
@@ -32,38 +33,24 @@ export interface CaseRoute {
   category?: string;
 }
 
-const COLLECTIONS: readonly CollectionId[] = [
-  "intake",
-  "search",
-  "files",
-  "docs",
-  "artifacts",
-  "timeline",
-  "indicators",
-  "review",
-  "outputs",
-];
-
-/** `#/case/{run}/{collection}[/{kind}][?category=…]` (other `?q=…&row=…` keys are ignored here). */
+/** Case route of a hash (stage form or legacy link); other `?q=…&row=…` keys are ignored here. */
 export function parseRoute(hash: string): CaseRoute | null {
-  const [path = "", query = ""] = hash.replace(/^#/, "").split("?");
-  const parts = path.split("/").filter(Boolean);
-  if (parts[0] !== "case" || !parts[1]) return null;
-  const collection = (parts[2] ?? "intake") as CollectionId;
-  if (!COLLECTIONS.includes(collection)) return null;
-  const rest = parts[3] ? decodeURIComponent(parts[3]) : undefined;
-  const route: CaseRoute = { runId: decodeURIComponent(parts[1]), collection };
-  if (collection === "review" && rest) route.status = rest as ReviewStatus;
-  else if (rest) route.kind = rest;
-  const category = new URLSearchParams(query).get("category");
-  if (collection === "artifacts" && !route.kind && category) route.category = category;
+  const raw = hash.replace(/^#/, "");
+  const segments = (raw.split("?")[0] ?? "").split("/").filter(Boolean);
+  if (segments[0] !== "case" || !segments[1]) return null;
+  // Unknown second segments (not a stage, not a collection) are not case routes.
+  if (segments[2] && !isStage(segments[2]) && !isCollectionId(segments[2])) return null;
+  const full = parseHash(hash);
+  if (!full.runId || !full.collection) return null;
+  const route: CaseRoute = { runId: full.runId, collection: full.collection };
+  if (full.kind) route.kind = full.kind;
+  if (full.status) route.status = full.status;
+  if (full.category) route.category = full.category;
   return route;
 }
 
 export function formatRoute(route: CaseRoute): string {
-  const tail = route.status ?? route.kind;
-  const base = `#/case/${encodeURIComponent(route.runId)}/${route.collection}${tail ? `/${encodeURIComponent(tail)}` : ""}`;
-  return route.category && !tail ? `${base}?category=${encodeURIComponent(route.category)}` : base;
+  return serializeRoute(route);
 }
 
 export function sameRoute(a: CaseRoute | null, b: CaseRoute): boolean {
