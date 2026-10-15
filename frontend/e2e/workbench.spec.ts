@@ -31,8 +31,14 @@ test("workbench shell renders the tree, grid and viewer regions and toggles them
   await expect(page).not.toHaveURL(/token=/);
 
   await expect(page.getByTestId("workbench-shell")).toBeVisible();
+  // No case open: the landing card (visual-polish S10); a case shows tree, grid and viewer.
+  await expect(page.getByTestId("landing")).toBeVisible();
+  await page.evaluate((run) => {
+    window.location.hash = `#/case/${run}/explore/files`;
+  }, runId);
   await expect(page.getByTestId("tree-region")).toBeVisible();
   await expect(page.getByTestId("grid-region")).toBeVisible();
+  await expect(page.getByTestId("viewer-region")).toBeVisible();
   await expect(page.getByTestId("statusbar")).toBeVisible();
 
   // Light/dark toggle flips the document theme attribute.

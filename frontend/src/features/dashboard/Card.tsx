@@ -179,7 +179,7 @@ export function Card({
           aria-controls={bodyId}
           onClick={() => onCollapsedChange(!collapsed)}
         >
-          <Icon name={collapsed ? "chevron-right" : "chevron-down"} size={14} />
+          <Icon name={collapsed ? "chevron-right" : "chevron-down"} />
           {icon ? <Icon name={icon} size={16} className="dash-card-icon" /> : null}
           <h2 id={headingId}>{title}</h2>
         </button>
@@ -198,7 +198,7 @@ export function CardLoading({ label = "불러오는 중…" }: { label?: string 
   return (
     // Not a live region: the shell's single polite region (announce()) carries status text.
     <p className="dash-loading">
-      <Icon name="spinner" size={14} className="dash-spin" />
+      <Icon name="spinner" className="dash-spin" />
       {label}
     </p>
   );

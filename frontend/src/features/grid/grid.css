@@ -24,36 +24,159 @@
   border: 0;
 }
 
-/* Toolbar / batch bar ------------------------------------------------- */
+/* Grid frame: header tools + scroll area + floating batch bar ---------- */
 
-.grid-toolbar,
-.grid-batch {
+.grid-frame {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  background: var(--bg-panel);
-  border-bottom: 1px solid var(--line);
+  flex-direction: column;
+  /* The batch bar folds its tools into ⋯ when the grid (not the window) is narrow. */
+  container: grid-frame / inline-size;
 }
 
-.grid-batch {
+/* The column-menu button sits over the right end of the sticky header row (visual-polish S3). */
+.grid-head-tools {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  padding: 0 var(--space-2) 0 var(--space-1);
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--line-subtle);
+  box-shadow: -8px 0 8px -8px color-mix(in srgb, var(--scrim) 30%, transparent);
+}
+
+.grid-colmenu-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  width: var(--control-h);
+  height: var(--control-h);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--fs-table-aux);
+  cursor: pointer;
+}
+
+.grid-colmenu-button:hover,
+.grid-colmenu-button[aria-expanded="true"] {
   background: var(--bg-raised);
+  color: var(--text);
+}
+
+.grid-colmenu-popover {
+  width: 320px;
+}
+
+.grid-colmenu-selects {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+}
+
+.grid-colfilter-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  align-self: flex-start;
+}
+
+.grid-colfilter-toggle[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Floating batch bar (visual-polish §0, review #2): overlays the grid bottom instead of
+   pushing rows down; one line (nowrap), editors open underneath inside the same panel. */
+.grid-batch {
+  position: absolute;
+  left: 50%;
+  bottom: var(--space-3);
+  z-index: 30;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-1);
+  width: max-content;
+  max-width: calc(100% - var(--space-4));
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
+  background: var(--surface-3);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop);
+  animation: rt-pop-in var(--motion) var(--ease);
+}
+
+.grid-batch-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: var(--space-1);
+  white-space: nowrap;
 }
 
 .grid-batch-count {
+  min-width: 6ch;
   margin-right: var(--space-2);
+  font-size: var(--fs-table-aux);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.grid-batch-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* Review marks | tools. */
+.grid-batch-divider {
+  flex: none;
+  width: 1px;
+  height: 16px;
+  margin: 0 var(--space-1);
+  background: var(--line-subtle);
+}
+
+.grid-batch-more {
+  display: none;
+}
+
+.grid-batch-clear {
+  margin-left: var(--space-1);
+}
+
+@container grid-frame (max-width: 900px) {
+  .grid-batch-tools {
+    display: none;
+  }
+
+  .grid-batch-more {
+    display: inline-flex;
+  }
+}
+
+/* The primary keeps its accent edge (no status stripe); the ghost marks keep theirs. */
+.grid-batch .button.primary[data-status-button] {
+  border-left: 1px solid var(--accent);
 }
 
 .grid-filter input,
 .grid-select select,
 .grid-tag-prompt input {
-  height: 28px;
+  height: var(--control-h);
   padding: 0 var(--space-2);
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--line);
-  border-radius: 4px;
   font: inherit;
 }
 
@@ -70,12 +193,12 @@
 }
 
 .grid-btn {
-  height: 28px;
+  height: var(--control-h);
   padding: 0 var(--space-3);
   background: var(--bg-raised);
   color: var(--text);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius);
   font: inherit;
   cursor: pointer;
 }
@@ -84,8 +207,7 @@
   border-color: var(--accent);
 }
 
-.grid-btn[aria-disabled="true"],
-.grid-menu-item[aria-disabled="true"] {
+.grid-btn[aria-disabled="true"] {
   color: var(--text-muted);
   cursor: not-allowed;
   opacity: 0.7;
@@ -96,28 +218,48 @@
   margin-left: auto;
 }
 
-/* The column chooser is an inline disclosure panel (wraps onto its own toolbar
-   row) rather than an overlay, so it never covers the grid header. */
-.grid-colmenu {
-  display: contents;
-}
-
+/* "표시할 열": checkbox list inside the column menu popover. */
 .grid-popover {
-  flex-basis: 100%;
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1) var(--space-3);
-  margin: 0;
-  padding: var(--space-2);
-  background: var(--bg-panel);
-  border: 1px solid var(--line);
-  border-radius: 4px;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 220px;
+  overflow: auto;
 }
 
 .grid-popover-item {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+}
+
+/* A default column the responsive layout hid: "폭 부족으로 숨김 — 표시" (pins it on). */
+.grid-popover-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.grid-popover-show {
+  border: 0;
+  padding: 0 var(--space-1);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--fs-table-aux);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.grid-popover-show:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+
+.grid-popover-show:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .grid-tag-prompt {
@@ -150,11 +292,12 @@
   position: relative;
 }
 
+/* Row rules are the subtle line; the header keeps the strong one (visual-polish U-V4). */
 .grid-row {
   display: flex;
   align-items: stretch;
   width: 100%;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--line-subtle);
   background: var(--bg);
 }
 
@@ -167,24 +310,31 @@
 
 .grid-header {
   position: relative;
+  box-sizing: border-box;
   background: var(--bg-panel);
   color: var(--text-muted);
   font-size: var(--fs-table-aux);
-  border-bottom: 1px solid var(--line);
+  font-weight: 500;
+  border-bottom: 1px solid var(--line-subtle);
 }
 
+/* Selection / hover / focus (review #1): three distinct signals that never stack into a box.
+   Selected = the accent tint (--bg-selected, shared with the tree) + a 2px accent bar on the
+   whole row; hover = a 4% text tint; the 1px accent outline is for keyboard focus only. */
 .grid-row.is-selected {
-  background: color-mix(in srgb, var(--accent) 18%, var(--bg));
+  background: var(--bg-selected);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
-.grid-row:hover:not(.is-selected) {
-  background: var(--bg-raised);
+/* Cells inherit the row background; the tint is painted on the row and the sticky cells
+   repeat it over an opaque base so scrolled cells never show through. */
+.grid-body .grid-row:hover:not(.is-selected) {
+  background: linear-gradient(var(--bg-hover), var(--bg-hover)), var(--bg);
 }
 
-.grid-row:focus-visible,
-.grid-row.is-focused:focus {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
+.grid-row:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
 }
 
 .grid-cell {
@@ -222,7 +372,26 @@
   position: sticky;
   z-index: 2;
   background: inherit;
-  border-right: 1px solid var(--line);
+  border-right: 1px solid var(--line-subtle);
+}
+
+/* Plain text cells ellipsize (a bare text node in the flex cell would just clip). */
+.grid-cell-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Empty value: a muted dash (never "···" or a blank that reads as a missing column). */
+.grid-cell-empty {
+  color: var(--text-subtle);
+}
+
+/* Acquisition-copy host time (files 수정): shown, but not as an evidence time. */
+.grid-cell-copytime {
+  color: var(--text-muted);
+  font-style: italic;
 }
 
 .grid-header .grid-cell-select,
@@ -235,6 +404,11 @@
 
 .grid-hcell {
   position: relative;
+}
+
+/* The accent bar must stay on top of the sticky select cell, which covers the row's own edge. */
+.grid-row.is-selected > .grid-cell-select {
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .grid-sort {
@@ -274,25 +448,34 @@
   background: var(--accent);
 }
 
-/* The ⋯ row-menu button is always rendered and hit-testable (U3): it is only dimmed until the
-   row is hovered/focused — never visibility/display toggled, never pointer-events:none — and
+/* The ⋯ row-menu button is always rendered and hit-testable (U3): it is transparent until the
+   row is hovered/focused (review #9) — never visibility/display toggled, never pointer-events:none — and
    flex:none keeps it inside the sticky select cell so the next sticky cell cannot cover it. */
 .grid-rowmenu-btn {
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 20px;
   height: 20px;
   padding: 0;
   background: transparent;
   color: var(--text-muted);
   border: 0;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  opacity: 0.45;
+  opacity: 0;
+}
+
+.grid-rowmenu-btn:hover {
+  background: var(--bg-raised);
+  color: var(--text);
 }
 
 .grid-row:hover .grid-rowmenu-btn,
 .grid-row:focus-within .grid-rowmenu-btn,
-.grid-row.is-focused .grid-rowmenu-btn,
+.grid-row:focus-visible .grid-rowmenu-btn,
+.grid-rowmenu-btn[aria-expanded="true"],
 .grid-rowmenu-btn:focus-visible {
   opacity: 1;
 }
@@ -307,18 +490,33 @@
   background: transparent;
 }
 
-.grid-skeleton {
-  display: block;
-  width: 60%;
-  height: 8px;
-  background: var(--bg-raised);
-  border-radius: 4px;
-}
-
+/* Empty state (U-V6): icon + one sentence + the next action, centred under the header. */
 .grid-empty {
-  padding: var(--space-5);
+  position: absolute;
+  inset: 32px 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0;
+  padding: var(--space-6) var(--space-4);
   color: var(--text-muted);
   text-align: center;
+}
+
+.grid-empty-icon {
+  display: inline-grid;
+  place-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--text-muted);
+}
+
+.grid-empty-text {
+  margin: 0;
+  max-width: 44ch;
 }
 
 .grid-error {
@@ -358,50 +556,23 @@
   position: fixed;
   z-index: 40;
   display: grid;
-  min-width: 180px;
+  min-width: 220px;
   padding: var(--space-1);
-  background: var(--bg-panel);
-  border: 1px solid var(--line);
-  border-radius: 4px;
+  background: var(--surface-3);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop);
+  animation: rt-pop-in var(--motion) var(--ease);
 }
 
+/* Row menu items share the menu-item anatomy (popover.css, review #13). */
 .grid-menu-item {
-  padding: var(--space-1) var(--space-3);
-  text-align: left;
-  background: transparent;
-  color: var(--text);
-  border: 0;
-  border-radius: 3px;
-  font: inherit;
-  cursor: pointer;
+  min-height: var(--control-h);
+  padding: 0 var(--space-2);
 }
 
 .grid-menu-item:hover:not([aria-disabled="true"]) {
   background: var(--bg-raised);
-}
-
-.grid-toasts {
-  position: absolute;
-  right: var(--space-3);
-  bottom: var(--space-6);
-  z-index: 50;
-  display: grid;
-  gap: var(--space-2);
-}
-
-.grid-toast {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
-  background: var(--bg-raised);
-  border: 1px solid var(--line);
-  border-left: 3px solid var(--info);
-  border-radius: 4px;
-}
-
-.grid-toast.is-error {
-  border-left-color: var(--danger);
 }
 
 .grid-extract {
@@ -429,11 +600,31 @@
   height: 20px;
   padding: 0 var(--space-2);
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   background: var(--bg-raised);
   color: var(--text);
   font-size: var(--fs-table-aux);
   white-space: nowrap;
+}
+
+/* 유형: colour dot + text (visual-polish S4). */
+.grid-type {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.grid-type-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.grid-type-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Server sort + record-field columns (plan artifact-columns) ----------- */
@@ -476,18 +667,9 @@
 }
 
 .grid-fieldpicker-search {
-  height: 28px;
+  height: var(--control-h);
   max-width: 320px;
   padding: 0 var(--space-2);
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-}
-
-.grid-fieldpicker-search:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
 }
 
 .grid-fieldpicker-list {
@@ -510,7 +692,7 @@
 
 /* Column header filters (plan analysis-workbench-p1 §4). */
 .grid-colfilter-row .grid-cell {
-  padding: 2px var(--space-1);
+  padding: var(--space-1);
 }
 
 .grid-colfilter-pair {
@@ -524,18 +706,11 @@
   flex: 1;
   min-width: 0;
   width: 100%;
-  height: 22px;
+  height: 24px;
   padding: 0 var(--space-1);
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--line);
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   font: inherit;
   font-size: var(--fs-table-aux);
-}
-
-.grid-colfilter-input::placeholder {
-  color: var(--text-muted);
 }
 
 .grid-colfilter-input[aria-invalid="true"] {
@@ -565,4 +740,65 @@
 .grid-hint-link[aria-disabled="true"] {
   color: var(--text-muted);
   cursor: not-allowed;
+}
+
+/* Column menu + floating batch bar overrides (visual-polish S3 / §0) --------- */
+
+.grid-colmenu-selects .grid-select {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+/* Rows can scroll clear of the floating bar while it shows: 52px for the one-line bar,
+   --batch-reserve (DataGrid, from BatchBar onHeight) once a tag / note editor makes it taller. */
+.grid-root[data-batch] .grid-scroll {
+  scroll-padding-bottom: var(--batch-reserve, 52px);
+}
+
+.grid-root[data-batch] .grid-inner {
+  padding-bottom: var(--batch-reserve, 52px);
+}
+
+.grid-batch .grid-tag-prompt,
+.grid-batch .note-form {
+  padding: var(--space-1) var(--space-1) var(--space-1) 0;
+  border: 0;
+  border-top: 1px solid var(--line-subtle);
+}
+
+/* First-page loading: 8 skeleton rows under the header (review #11). */
+.grid-skeleton-rows {
+  position: absolute;
+  inset: 32px 0 auto;
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
+}
+
+.grid-skeleton-row {
+  display: grid;
+  grid-template-columns: 3fr 1fr 2fr;
+  align-items: center;
+  gap: var(--space-4);
+  height: var(--row-h);
+  padding: 0 var(--space-3) 0 64px;
+  border-bottom: 1px solid var(--line-subtle);
+}
+
+/* Error card (review #11): replaces the empty state, centred like it. */
+.grid-error-card {
+  position: absolute;
+  inset: 32px 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0;
+  padding: var(--space-6) var(--space-4);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.grid-error-card .grid-empty-icon {
+  color: var(--danger);
 }

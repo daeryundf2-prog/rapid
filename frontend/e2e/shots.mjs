@@ -104,21 +104,22 @@ await shot("12-filterbar-chips");
 // Thumbnails are only enabled on file nodes (files collection); artifacts shows it disabled with a reason.
 await go(`#/case/${runId}/files`);
 await tryDo("thumbnails", async () => {
-  await page.locator("button", { hasText: "썸네일 보기" }).first().click();
+  await page.getByRole("button", { name: "썸네일 보기" }).first().click();
 });
 await shot("13-view-thumbnails");
 
 await tryDo("histogram", async () => {
-  await page.locator("button", { hasText: "히스토그램 보기" }).first().click();
+  await page.getByRole("button", { name: "히스토그램 보기" }).first().click();
 });
 await shot("14-view-histogram");
 
 await tryDo("axiom preset", async () => {
   await page
-    .locator("button", { hasText: "열 보기" })
+    .getByRole("button", { name: "열 보기" })
     .first()
     .click()
     .catch(() => {});
+  await page.getByRole("button", { name: "열 설정" }).click();
   await page.locator(".grid-select select").first().selectOption("axiom");
 });
 await shot("15-axiom-preset");

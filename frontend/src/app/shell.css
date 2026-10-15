@@ -18,7 +18,6 @@ body {
   color: var(--text);
   font-family: var(--font-ui);
   font-size: var(--fs-body);
-  line-height: 1.45;
   overflow: hidden;
 }
 
@@ -97,6 +96,68 @@ kbd {
   outline-offset: -2px;
 }
 
+/* Viewer pane (탐색·검토, wide): the viewer, or the 36px rail while collapsed. */
+.viewer-slot {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.viewer-slot[hidden] {
+  display: none;
+}
+
+.viewer-rail {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  background: var(--bg-panel);
+}
+
+/* Icon-only rail button (review #19): the whole 36px strip is the hit area, the icon sits on top. */
+.viewer-rail-button {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--space-2) 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.viewer-rail-button:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.viewer-rail-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.viewer-rail-icon {
+  position: relative;
+  display: inline-grid;
+  place-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius);
+}
+
+.viewer-rail-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
 .resize-handle {
   width: 4px;
   background: transparent;
@@ -116,15 +177,35 @@ kbd {
   background: var(--accent);
 }
 
+/* Light theme surface tiers (review #23): navigation (stage rail, tree) sits on surface-0,
+   the working panes (grid, viewer) on white surface-1, split by 1px line-subtle dividers. */
+:root[data-theme="light"] .stage-rail,
+:root[data-theme="light"] [data-testid="tree-region"] {
+  background: var(--surface-0);
+}
+
+/* The grid paints its rows with --bg: re-point it at white inside the working panes. */
+:root[data-theme="light"] [data-testid="grid-region"],
+:root[data-theme="light"] [data-testid="viewer-region"] {
+  --bg: var(--surface-1);
+  background: var(--surface-1);
+}
+
+:root[data-theme="light"] .resize-handle::after {
+  inset: 0 auto 0 0;
+  width: 1px;
+}
+
 /* --- top bar -------------------------------------------------------------- */
 
+/* One 48px row (visual-polish S7 / U-V4): brand · case · search · ⌘K · theme/help. */
 .topbar {
   position: relative;
   z-index: 10; /* top-bar popovers paint above the panes */
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  height: 44px;
+  gap: var(--space-3);
+  height: 48px;
   padding: 0 var(--space-3);
   background: var(--bg-panel);
   border-bottom: 1px solid var(--line-subtle);
@@ -132,127 +213,264 @@ kbd {
 }
 
 .brand {
-  font-size: var(--fs-panel-title);
-  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
   white-space: nowrap;
-  margin-right: var(--space-2);
+  flex: none;
 }
 
-.case-picker select,
+.brand-mark {
+  flex: none;
+  display: block;
+}
+
+.brand-word {
+  font-size: var(--fs-panel-title);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.brand-word-strong {
+  font-weight: 700;
+}
+
+.topbar-case {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: none;
+}
+
 .global-search input {
-  height: 28px;
   padding: 0 var(--space-2);
-  border: 1px solid var(--line);
+  font: inherit;
+  font-size: var(--fs-body);
+}
+
+/* Case combobox (review #5): trigger + 420px popover, search on top, two-line rows. */
+.case-picker-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 280px;
+  height: var(--control-h);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--field-edge);
   border-radius: var(--radius);
-  background: var(--bg);
+  background: var(--surface-2);
   color: var(--text);
   font: inherit;
+  font-size: var(--fs-body);
+  cursor: pointer;
 }
 
-.case-picker select {
-  max-width: 240px;
+.case-picker-trigger:hover,
+.case-picker-trigger[aria-expanded="true"] {
+  border-color: var(--line);
+}
+
+.case-picker-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.case-picker-chevron {
+  color: var(--text-muted);
+}
+
+.case-picker-popover {
+  width: 420px;
+  min-width: 0;
+  max-width: calc(100vw - var(--space-6));
+  gap: var(--space-2);
+  padding: var(--space-2);
+}
+
+.case-picker-search {
+  width: 100%;
+}
+
+.case-picker-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.case-picker-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 6px var(--space-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.case-picker-option.active {
+  background: var(--bg-selected);
+}
+
+.case-picker-option.is-current {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.case-picker-option-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.case-picker-option-name {
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--fs-body);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.case-picker-option-meta {
+  overflow: hidden;
+  color: var(--text-subtle);
+  font-size: var(--fs-aux);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.case-picker-option-meta .mono {
+  font-size: inherit;
+}
+
+.case-picker-empty {
+  margin: 0;
+  padding: var(--space-3) var(--space-2);
+  color: var(--text-muted);
 }
 
 .topbar-search {
   flex: 1;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: var(--space-2);
   min-width: 0;
 }
 
 .global-search {
+  position: relative;
+  display: flex;
+  align-items: center;
   flex: 1;
-  max-width: 480px;
+  max-width: 560px;
   min-width: 160px;
 }
 
-.global-search form,
+.global-search form {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
 .global-search input {
   width: 100%;
+  padding-left: calc(var(--space-2) + 22px);
+  padding-right: 36px;
 }
 
-.global-search {
-  display: block;
-}
-
-.global-search input::placeholder {
+.global-search-icon {
+  position: absolute;
+  left: var(--space-2);
   color: var(--text-muted);
+  pointer-events: none;
+}
+
+/* Search options: an icon button at the end of the search field. */
+.global-search .search-options-anchor {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.search-options-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.search-options-trigger:hover,
+.search-options-trigger[aria-expanded="true"] {
+  background: var(--bg-raised);
+  color: var(--text);
+}
+
+.search-options-trigger[aria-disabled="true"] {
+  color: var(--disabled-text);
+  cursor: not-allowed;
+}
+
+/* The reason is the trigger's tooltip + description; no loose text inside the top bar. */
+.global-search .search-options-anchor > .case-reason {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.topbar-palette {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 32px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  cursor: pointer;
+  flex: none;
+}
+
+.topbar-palette:hover {
+  color: var(--text);
+  border-color: var(--line);
+}
+
+.topbar-palette kbd {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: var(--fs-aux);
 }
 
 .topbar-actions {
   display: flex;
   align-items: center;
   gap: var(--space-1);
+  flex: none;
 }
 
-/* --- buttons -------------------------------------------------------------- */
-
-.button {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  height: 28px;
-  padding: 0 var(--space-3);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--bg-raised);
-  color: var(--text);
-  font: inherit;
-  font-size: var(--fs-table-aux);
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.button:hover {
-  border-color: var(--accent);
-}
-
-.button.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--on-accent);
-  font-weight: 600;
-}
-
-.button.primary:hover {
-  background: var(--accent-hover);
-}
-
-.button.ghost {
-  background: transparent;
-  border-color: transparent;
-}
-
-.button.ghost:hover {
-  border-color: var(--line);
-}
-
-.button.icon-only {
-  width: 28px;
-  padding: 0;
-  justify-content: center;
-}
-
-.button[aria-disabled="true"],
-.button:disabled {
-  color: var(--disabled-text);
-  cursor: not-allowed;
-}
-
-/* A disabled primary drops the accent fill: muted text on the accent was ≈1.4:1
-   (--disabled-text on --disabled-bg is in the contrast gate test). */
-.button.primary[aria-disabled="true"],
-.button.primary:disabled,
-.button.primary[aria-disabled="true"]:hover {
-  background: var(--disabled-bg);
-  border-color: var(--line);
-  color: var(--disabled-text);
-}
-
-.button[aria-disabled="true"]:hover {
-  border-color: var(--line);
-}
+/* --- buttons: controls.css (.button .primary/.secondary/.ghost/.danger, .icon-btn) --- */
 
 /* Visible "why disabled" line next to a disabled action (not only on hover/focus). */
 .command-with-reason {
@@ -271,6 +489,7 @@ kbd {
 
 /* --- status bar ----------------------------------------------------------- */
 
+/* Status bar (review #8): mono at the aux size, facts split by 1px rules, not "·". */
 .statusbar {
   display: flex;
   align-items: center;
@@ -279,11 +498,16 @@ kbd {
   padding: 0 var(--space-3);
   background: var(--bg-panel);
   border-top: 1px solid var(--line-subtle);
-  font-size: var(--fs-table-aux);
+  font-family: var(--font-mono);
+  font-size: var(--fs-aux);
   color: var(--text-muted);
   flex: none;
   white-space: nowrap;
   overflow: hidden;
+}
+
+.statusbar .mono {
+  font-size: inherit;
 }
 
 .statusbar .button {
@@ -294,15 +518,50 @@ kbd {
 .status-run {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-3);
   min-width: 0;
   overflow: hidden;
 }
 
+/* One run fact group ("런 … · 완료 · 오류 0"), then the run actions behind a divider. */
+.status-group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.status-sep {
+  flex: none;
+  width: 1px;
+  height: 14px;
+  background: var(--line-subtle);
+}
+
+.status-connection-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-connection-wrap > .status-dot {
+  width: 6px;
+  height: 6px;
+}
+
+.status-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.status-actions {
+  gap: var(--space-1);
+  padding-left: var(--space-3);
+  border-left: 1px solid var(--line-subtle);
+}
+
 .status-progress {
   width: 96px;
-  height: 6px;
-  accent-color: var(--accent);
 }
 
 .status-errors {
@@ -338,7 +597,7 @@ kbd {
   justify-content: center;
   align-items: flex-start;
   padding-top: 12vh;
-  background: color-mix(in srgb, var(--scrim) 45%, transparent);
+  background: color-mix(in srgb, var(--scrim) 40%, transparent);
 }
 
 .palette,
@@ -347,10 +606,10 @@ kbd {
   max-height: 70vh;
   display: flex;
   flex-direction: column;
-  background: var(--bg-panel);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  box-shadow: 0 12px 32px color-mix(in srgb, var(--scrim) 40%, transparent);
+  background: var(--surface-3);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop);
   overflow: hidden;
 }
 
@@ -408,12 +667,25 @@ kbd {
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
+/* Labels are 400; only the characters the query matched are 600 (review #12). */
 .palette-label {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-weight: 400;
+}
+
+.palette-hit {
+  font-weight: 600;
+}
+
+/* Every option keeps the 16px icon slot, with or without a glyph. */
+.palette-option > .icon {
+  width: 16px;
+  height: 16px;
+  color: var(--text-muted);
 }
 
 .palette-option.disabled .palette-label {
@@ -475,10 +747,6 @@ kbd {
 .help-table th {
   color: var(--text-muted);
   font-weight: 600;
-}
-
-.help-table td.muted {
-  color: var(--text-muted);
 }
 
 .drawer-scrim {
@@ -576,7 +844,7 @@ kbd {
   align-items: center;
   height: 18px;
   padding: 0 6px;
-  border-radius: 9px;
+  border-radius: var(--radius-sm);
   font-size: var(--fs-aux);
   font-weight: 600;
   white-space: nowrap;
@@ -601,39 +869,6 @@ kbd {
 .badge.muted {
   color: var(--text-muted);
   background: var(--bg-raised);
-}
-
-.token-gate {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-3);
-  height: 100%;
-  padding: var(--space-5);
-}
-
-.token-gate form {
-  display: flex;
-  gap: var(--space-2);
-}
-
-.token-gate input {
-  width: 320px;
-  height: 30px;
-  padding: 0 var(--space-2);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--bg-panel);
-  color: var(--text);
-  font-family: var(--font-mono);
-}
-
-.token-gate p {
-  color: var(--text-muted);
-  font-size: var(--fs-table-aux);
-  max-width: 420px;
-  text-align: center;
 }
 
 .error-banner {
@@ -720,7 +955,7 @@ kbd {
   min-width: 72px;
   padding: var(--space-2);
   border: 1px solid var(--line-subtle);
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--bg-panel);
 }
 
@@ -859,11 +1094,7 @@ button.count-chip:hover {
   border-color: var(--accent);
 }
 
-/* Search options (S4) open as a dropdown under their button, above the panes. */
-.search-options-anchor {
-  position: relative;
-}
-
+/* Search options (S4) open as a dropdown under their trigger (inside the search field, S7). */
 .search-options-anchor > .search-options-popover {
   position: absolute;
   top: calc(100% + var(--space-1));
@@ -872,4 +1103,8 @@ button.count-chip:hover {
   max-height: 70vh;
   overflow: auto;
   box-shadow: 0 12px 32px color-mix(in srgb, var(--scrim) 40%, transparent);
+}
+
+.help-table tr.muted td {
+  color: var(--text-muted);
 }

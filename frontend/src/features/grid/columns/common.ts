@@ -3,8 +3,9 @@ import type { RowRef } from "../../../contracts/rowRef";
 import { runEvidenceTimezone } from "../../../state/hooks";
 import { currentRun } from "../../../state/slices/runs";
 import { useAppStore } from "../../../state/store";
-import { formatTimestamp } from "../../../utils/time";
+import { evidenceTimeTooltip, formatGridTime } from "../../../utils/time";
 import type { CellValue, ColumnSpec } from "../types";
+import { pathCell } from "./PathCell";
 import { reviewStatusCell } from "./StatusCells";
 
 /** Effective display timezone (URL tz > preference > evidence > local); useCollectionQuery re-renders the grid on change. */
@@ -151,7 +152,16 @@ export const col = {
     };
   },
   path(width = 360, presets: ColumnSpec["presets"] = ["analysis", "source"]): ColumnSpec {
-    return { id: "path", header: "경로", width, minWidth: 120, presets, value: (r) => r.sourcePath };
+    return {
+      id: "path",
+      header: "경로",
+      width,
+      // The middle truncation (folder … file name) needs room: never narrower than 200px.
+      minWidth: 200,
+      presets,
+      value: (r) => r.sourcePath,
+      render: (r) => pathCell(r.sourcePath),
+    };
   },
   timestamp(width = 170, presets: ColumnSpec["presets"] = ["analysis", "compact"]): ColumnSpec {
     return {
@@ -160,7 +170,9 @@ export const col = {
       width,
       presets,
       value: (r) => r.timestamp,
-      format: (r) => (r.timestamp ? formatTimestamp(r.timestamp, currentTimezone()) : ""),
+      format: (r) => (r.timestamp ? formatGridTime(r.timestamp, currentTimezone()) : ""),
+      // Full evidence reading (local · zone · UTC · FILETIME) on hover.
+      tooltip: (r) => (r.timestamp ? evidenceTimeTooltip(r.timestamp, currentTimezone()) : ""),
     };
   },
   review(): ColumnSpec {

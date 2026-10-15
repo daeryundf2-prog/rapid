@@ -84,6 +84,7 @@
   margin: 0;
   overflow: hidden;
   font-size: var(--fs-panel-title);
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -123,17 +124,19 @@
   display: grid;
   min-inline-size: 140px;
   padding: var(--space-1);
-  background: var(--bg-raised);
-  border: 1px solid var(--line);
+  background: var(--surface-3);
+  border: 1px solid var(--line-subtle);
   border-radius: var(--radius);
-  box-shadow: 0 6px 18px color-mix(in srgb, var(--scrim) 35%, transparent);
+  box-shadow: var(--shadow-pop);
+  animation: rt-pop-in var(--motion) var(--ease);
 }
 
 .dash-menu [role="menuitem"] {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-1) var(--space-2);
+  min-height: var(--control-h);
+  padding: 0 var(--space-2);
   color: var(--text);
   background: none;
   border: 0;
@@ -146,6 +149,14 @@
 .dash-menu [role="menuitem"]:hover,
 .dash-menu [role="menuitem"]:focus-visible {
   background: var(--bg-selected);
+}
+
+/* Loading shells (review #11): skeleton lines (.skeleton, controls.css) in the final card. */
+.dash-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
 }
 
 .dash-loading {
@@ -200,6 +211,30 @@
   cursor: pointer;
 }
 
+.dash-disclosure-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.dash-disclosure {
+  display: grid;
+  grid-template-columns: minmax(96px, max-content) 1fr;
+  gap: var(--space-2);
+  align-items: baseline;
+}
+
+.dash-disclosure dt,
+.dash-disclosure dd {
+  margin: 0;
+}
+
+.dash-disclosure dd {
+  color: var(--text);
+  font-size: var(--fs-table-aux);
+  overflow-wrap: anywhere;
+}
+
 .dash-issues {
   max-block-size: 200px;
   margin: var(--space-1) 0 0;
@@ -211,10 +246,6 @@
 .dash-input {
   inline-size: 100%;
   padding: var(--space-1) var(--space-2);
-  color: var(--text);
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
   font: inherit;
 }
 
@@ -369,4 +400,9 @@ textarea.dash-input {
 
 .dash-start-item .icon {
   color: var(--accent);
+}
+
+.dash-pending {
+  display: inline-flex;
+  color: var(--text-muted);
 }

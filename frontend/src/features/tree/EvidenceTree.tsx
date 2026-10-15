@@ -185,14 +185,20 @@ export function EvidenceTree({ runId }: { runId: string }) {
   }, [model, routeKey]);
   const selected = (node: TreeModelNode) => node.id === selectedId;
 
-  // Open the domain that holds the selected node (deep links, 결과 보기 →).
+  // Open the domain (and group, e.g. 실행 흔적 › Amcache) that holds the selected node (deep links, 결과 보기 →).
   useEffect(() => {
     if (!selectedId) return;
-    for (const parent of model) {
-      if (parent.children?.some((child) => child.id === selectedId)) {
-        setExpanded((prev) => (prev.has(parent.id) ? prev : new Set([...prev, parent.id])));
+    const ancestors = (nodes: TreeModelNode[], trail: string[]): string[] | null => {
+      for (const node of nodes) {
+        if (node.id === selectedId) return trail;
+        const hit = node.children ? ancestors(node.children, [...trail, node.id]) : null;
+        if (hit) return hit;
       }
-    }
+      return null;
+    };
+    const open = ancestors(model, []) ?? [];
+    if (!open.length) return;
+    setExpanded((prev) => (open.every((id) => prev.has(id)) ? prev : new Set([...prev, ...open])));
   }, [model, selectedId]);
 
   return (
@@ -248,8 +254,8 @@ export function EvidenceTree({ runId }: { runId: string }) {
               aria-selected={isSelected}
               aria-current={isSelected ? "page" : undefined}
               aria-disabled={node.disabledReason ? true : undefined}
-              title={node.disabledReason}
-              className={`case-tree-item${isSelected ? " selected" : ""}${node.disabledReason ? " disabled" : ""}`}
+              title={node.disabledReason ?? node.note}
+              className={`case-tree-item${isSelected ? " selected" : ""}${node.disabledReason ? " disabled" : ""}${node.count === 0 ? " is-empty" : ""}${node.dimmed ? " is-dimmed" : ""}`}
               style={{ paddingInlineStart: `calc(var(--space-2) + ${level - 1} * var(--space-4))` }}
               onFocus={() => setFocusedId(node.id)}
               onClick={(event) => {
@@ -266,20 +272,28 @@ export function EvidenceTree({ runId }: { runId: string }) {
                     toggle(node.id, !isOpen);
                   }}
                 >
-                  {isOpen ? "▾" : "▸"}
+                  <Icon name={isOpen ? "chevron-down" : "chevron-right"} />
                 </span>
               ) : (
                 <span className="case-tree-twisty" aria-hidden="true" />
               )}
-              {node.icon ? <Icon name={node.icon} size={14} className="case-tree-icon" /> : null}
+              {node.icon ? (
+                <Icon name={node.icon} className="case-tree-icon" />
+              ) : (
+                <span className="case-tree-icon" aria-hidden="true" />
+              )}
               <span className="case-tree-label">{node.label}</span>
               {node.marker ? (
                 <span className="case-tree-marker" aria-hidden="true">
                   {node.marker}
                 </span>
               ) : null}
-              {node.count !== undefined && (
-                <span className={`badge muted${node.strongCount ? " strong" : ""}`} aria-hidden="true">
+              {/* Counts stay hidden until the first load settles (review #11): no "—" flicker. */}
+              {node.count !== undefined && !loading && (
+                <span
+                  className={`badge muted${node.strongCount && node.count !== 0 ? " strong" : ""}`}
+                  aria-hidden="true"
+                >
                   {typeof node.count === "number" ? node.count.toLocaleString("ko-KR") : node.count}
                 </span>
               )}
@@ -288,8 +302,10 @@ export function EvidenceTree({ runId }: { runId: string }) {
         })}
       </ul>
       {loading ? (
-        <p className="case-tree-loading" role="status">
-          <Icon name="spinner" size={14} className="spin" />
+        // Not a live region: the shell's single polite region (announce()) carries status text,
+        // and a second polite region while the tree loads broke the one-region rule.
+        <p className="case-tree-loading">
+          <Icon name="spinner" className="spin" />
           건수와 아티팩트 목록을 불러오는 중…
         </p>
       ) : null}

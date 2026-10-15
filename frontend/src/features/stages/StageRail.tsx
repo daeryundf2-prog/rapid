@@ -24,7 +24,7 @@ function RailButton({ stage, current }: { stage: Stage; current: boolean }) {
             void run();
           }}
         >
-          <Icon name={def.icon} size={18} />
+          <Icon name={def.icon} />
           <span className="stage-rail-label">{def.label}</span>
         </button>
       </DisabledReason>
@@ -35,8 +35,15 @@ function RailButton({ stage, current }: { stage: Stage; current: boolean }) {
 /** Vertical stage rail (console-ia §3): always visible, one button per stage, Alt+1..5 (Ctrl+1..5 is browser tab switching). */
 export function StageRail() {
   const stage = useAppStore((s) => (s.route.runId ? stageOf(s.route) : null));
+  // No case: every stage is disabled (each button says why); the rail recedes (review #14).
+  const hasCase = useAppStore((s) => Boolean(s.route.runId));
   return (
-    <nav className="stage-rail" aria-label="작업 단계" data-testid="stage-rail">
+    <nav
+      className="stage-rail"
+      aria-label="작업 단계"
+      data-testid="stage-rail"
+      data-disabled={hasCase ? undefined : ""}
+    >
       <ul>
         {STAGES.map((id) => (
           <RailButton key={id} stage={id} current={stage === id} />

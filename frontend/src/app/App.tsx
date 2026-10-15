@@ -12,21 +12,7 @@ import { registerStageCommands } from "../features/stages/stages";
 import { Layout } from "../shell/Layout";
 import { useShortcuts } from "../shortcuts";
 import { useRoute } from "../state/hooks";
-import { systemTheme } from "../state/slices/prefs";
-import { useAppStore } from "../state/store";
 import { TokenGate } from "./TokenGate";
-
-function useSystemThemeListener(): void {
-  const setSystemTheme = useAppStore((s) => s.setSystemTheme);
-  useEffect(() => {
-    if (!window.matchMedia) return;
-    const list = window.matchMedia("(prefers-color-scheme: light)");
-    const onChange = () => setSystemTheme(systemTheme());
-    onChange();
-    list.addEventListener?.("change", onChange);
-    return () => list.removeEventListener?.("change", onChange);
-  }, [setSystemTheme]);
-}
 
 /** Shell root: commands, key map, runs poller, token gate, layout. */
 export function App() {
@@ -34,7 +20,6 @@ export function App() {
   const runsQuery = useRunsPoll();
   const { route } = useRoute();
   useShortcuts();
-  useSystemThemeListener();
   useReviewInvalidation();
 
   useEffect(() => registerBuiltinCommands(queryClient), [queryClient]);

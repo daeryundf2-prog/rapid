@@ -11,16 +11,44 @@
   font-size: var(--fs-body);
 }
 
+/* Icon segment (visual-polish S1): sits on the filter-bar line in the column view, on its own
+   row in the other views. */
 .view-switch {
+  display: inline-flex;
+  flex: none;
+  gap: 0;
+  padding: 1px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+.view-switch-row {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1);
-  padding: var(--space-1) var(--space-3);
+  align-items: center;
+  padding: 6px var(--space-3);
   background: var(--bg-panel);
   border-bottom: 1px solid var(--line-subtle);
 }
 
-.view-switch-button,
+.view-switch-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: calc(var(--radius) - 1px);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.view-switch-button:hover:not([aria-disabled="true"]) {
+  color: var(--text);
+}
+
 .view-pane button:not(.view-link):not(.hist-bar):not(.hist-cat) {
   font: inherit;
   font-size: var(--fs-table-aux);
@@ -100,9 +128,7 @@
 .view-field select {
   font: inherit;
   color: var(--text);
-  background: var(--bg-raised);
   border: 1px solid var(--line-subtle);
-  border-radius: var(--radius);
 }
 
 .view-link {

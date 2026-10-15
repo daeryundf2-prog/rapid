@@ -30,7 +30,7 @@ export function AnalysisProgressChip() {
   return (
     <span className="status-analysis" data-testid="analysis-progress-chip">
       <span className="status-analysis-text">
-        <Icon name="spinner" size={12} className="spin" />
+        <Icon name="spinner" className="spin" />
         분석: {kindLabel(job.kind)}
         {more}
         {text ? ` · ${text}` : ""}

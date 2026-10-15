@@ -51,6 +51,8 @@ export function bookmarkTarget(row: GridRow): { source: string; pointer: string 
   // Search rows may carry "docs-index:/results/3"; the pointer is the part after the scheme.
   const pointer = raw.includes(":/") ? raw.slice(raw.indexOf(":/") + 1) : raw;
   if (!pointer.startsWith("/")) return reviewRowTarget(row);
+  // docs.json lists every document under `candidates` (parser-quality r1): same prefix as files.
+  if (row.ref.collection === "docs") return { source: "docs", pointer };
   if (pointer.startsWith("/candidates/")) return { source: "files", pointer };
   if (pointer.startsWith("/results/")) return { source: "docs", pointer };
   if (pointer.startsWith("/events/")) return { source: "timeline", pointer };

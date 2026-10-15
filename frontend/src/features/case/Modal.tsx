@@ -1,4 +1,5 @@
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef } from "react";
+import { Icon } from "../../icons";
 import "./case.css";
 
 const FIELD = "input:not([disabled]):not([type='hidden']), select:not([disabled]), textarea:not([disabled])";
@@ -11,11 +12,14 @@ export function Modal({
   onClose,
   children,
   wide = false,
+  footer,
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
   wide?: boolean;
+  /** Action row under a hairline (review #4): 취소 + the one primary action, right-aligned. */
+  footer?: ReactNode;
 }) {
   const titleId = useId();
   const ref = useRef<HTMLDivElement>(null);
@@ -64,11 +68,12 @@ export function Modal({
       >
         <header className="case-modal-header">
           <h2 id={titleId}>{title}</h2>
-          <button type="button" className="button" aria-label="닫기" onClick={onClose}>
-            ✕
+          <button type="button" className="icon-btn" aria-label="닫기" onClick={onClose}>
+            <Icon name="close" />
           </button>
         </header>
         <div className="case-modal-body">{children}</div>
+        {footer ? <footer className="case-modal-footer">{footer}</footer> : null}
       </div>
     </div>
   );

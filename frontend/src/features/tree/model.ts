@@ -1,8 +1,9 @@
 import type { AnalysisState, AnalysisStatus } from "../../api/analyses";
 import type { ReviewCounts, SavedSearch } from "../../api/caseDb";
+import { filesInventoryCategory } from "../../api/collections";
 import type { EvidencePartition, EvidenceSource } from "../../api/dashboard";
 import type { CanonicalCounts, RunSummary, RunTree, TreeNode } from "../../api/runs";
-import type { CollectionId, ReviewStatus } from "../../contracts/collection";
+import type { CollectionId, ColumnFilter, ReviewStatus } from "../../contracts/collection";
 import type { IconName } from "../../icons";
 import {
   ANALYSIS_NODES,
@@ -13,9 +14,17 @@ import {
 } from "../analysis/kinds";
 import type { CaseRoute } from "./adapter";
 import { groupByCategory, kindIcon } from "./categories";
-import { DOMAINS, type DomainTarget, targetKey } from "./domains";
+import { DOMAINS, type DomainNodeDef, type DomainTarget, NON_EVIDENCE_NOTE, targetKey } from "./domains";
 
 export type RouteTail = Omit<CaseRoute, "runId">;
+
+/** Route a domain node opens: the tail plus its server / loaded-row filters. */
+export type DomainRoute = RouteTail & {
+  types?: string[];
+  ext?: string[];
+  cols?: string[];
+  cf?: ColumnFilter[];
+};
 
 export interface TreeModelNode {
   /** Unique, stable id (also the DOM key). */
@@ -37,12 +46,16 @@ export interface TreeModelNode {
   noSelect?: boolean;
   /** Short marker after the label ("선택됨"). */
   marker?: string;
-  /** Domain nodes: the full route to open (kind + `types=` / `ext=` filters). */
-  target?: RouteTail & { types?: string[]; ext?: string[] };
+  /** Domain nodes: the full route to open (kind + `types=` / `ext=` / `cols=` / `cf=` filters). */
+  target?: DomainRoute;
   /** Domain nodes: selected when the current route has this key (`targetKey`). */
   selectKey?: string;
   /** Group headers (domains, 전체 보기): click / Enter expands or collapses; never navigates. */
   toggleOnly?: boolean;
+  /** Openable but dimmed (non-evidence string pivots); `note` says why. */
+  dimmed?: boolean;
+  /** Tooltip of an openable node (dimmed / skipped-provider explanations). */
+  note?: string;
 }
 
 export interface TreeModelInput {
@@ -71,15 +84,66 @@ export function reviewCount(review: ReviewCounts | undefined, status: ReviewStat
   return review.by_status?.[status] ?? 0;
 }
 
-/** Kind-level artifact nodes (skipping the grouping level), largest first. */
-export function artifactKindNodes(tree: RunTree | undefined): TreeNode[] {
+/** Every kind-level server node (`artifacts:<kind>` and routed `artifacts:<kind>@<domain>`). */
+function allKindNodes(tree: RunTree | undefined): TreeNode[] {
   const found: TreeNode[] = [];
   const visit = (node: TreeNode) => {
     if (node.collection === "artifacts" && node.kind && !node.artifact_type) found.push(node);
     for (const child of node.children ?? []) visit(child);
   };
   for (const node of tree?.nodes ?? []) visit(node);
-  return found
+  return found;
+}
+
+/**
+ * One merged node per kind: a kind whose types the server routes to several domains appears as
+ * `artifacts:<kind>` plus `artifacts:<kind>@<domain>`; the merged count is their sum (each node
+ * counts only the types placed in its domain once the kind is split).
+ */
+export function mergedKindNode(tree: RunTree | undefined, kind: string): TreeNode | undefined {
+  return mergeKindNodes(allKindNodes(tree).filter((node) => node.kind === kind));
+}
+
+function mergeKindNodes(nodes: TreeNode[]): TreeNode | undefined {
+  const [first] = nodes;
+  if (!first) return undefined;
+  const truePrimary = nodes.find((node) => node.id === `artifacts:${node.kind}`);
+  const primary = truePrimary ?? first;
+  if (nodes.length === 1) return primary;
+  // The primary node's artifact_type_counts are the whole kind's; without one, sum the domains.
+  let perType = truePrimary?.artifact_type_counts;
+  if (!perType) {
+    const sum: Record<string, number> = {};
+    let typed = false;
+    for (const node of nodes) {
+      const counts = node.domain_artifact_type_counts ?? node.artifact_type_counts;
+      if (!counts) continue;
+      typed = true;
+      for (const [type, count] of Object.entries(counts)) {
+        if (typeof count === "number") sum[type] = (sum[type] ?? 0) + count;
+      }
+    }
+    perType = typed ? sum : undefined;
+  }
+  return {
+    ...primary,
+    id: `artifacts:${primary.kind}`,
+    count: nodes.reduce((sum, node) => sum + (node.count ?? 0), 0),
+    ...(perType ? { artifact_type_counts: perType } : {}),
+    children: nodes.flatMap((node) => node.children ?? []),
+  };
+}
+
+/** Kind-level artifact nodes (skipping the grouping level), one per kind, largest first. */
+export function artifactKindNodes(tree: RunTree | undefined): TreeNode[] {
+  const byKind = new Map<string, TreeNode[]>();
+  for (const node of allKindNodes(tree)) {
+    const list = byKind.get(node.kind as string) ?? [];
+    list.push(node);
+    byKind.set(node.kind as string, list);
+  }
+  return [...byKind.values()]
+    .map((nodes) => mergeKindNodes(nodes) as TreeNode)
     .filter((node) => node.count > 0)
     .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
 }
@@ -216,6 +280,26 @@ function serverAnalysisState(tree: RunTree | undefined, nodeId: string): Analysi
 }
 
 export const NO_DATA_REASON = "이 런에는 해당 데이터가 없습니다";
+
+/**
+ * 문서/메일 count: every document candidate (the docs view lists all of them; "일치만" narrows to
+ * keyword matches). `/tree` `docs.candidate_count`, else the summary's `document_candidates`,
+ * else the match count of servers that only page matches.
+ */
+export function docsCount(input: Pick<TreeModelInput, "summary" | "tree">): number | undefined {
+  const node = findServerNode(input.tree, "docs");
+  if (typeof node?.candidate_count === "number") return node.candidate_count;
+  const counts = input.summary?.summary?.counts;
+  if (typeof counts?.document_candidates === "number") return counts.document_candidates;
+  return node?.count ?? counts?.docs;
+}
+
+/** Indicators label: the server's `display_label` ("지표 후보" while no detection rule applied). */
+export function indicatorsLabel(tree: RunTree | undefined, fallback: string): string {
+  const node = findServerNode(tree, "indicators");
+  if (!node) return fallback;
+  return node.label || (node.rule_count ? fallback : "지표 후보");
+}
 /** Count of a node whose number the server tree cannot give yet (P4 adds them). */
 export const UNKNOWN_COUNT = "—";
 
@@ -260,8 +344,11 @@ export function domainNodeCount(target: DomainTarget, input: TreeModelInput): Do
           : nodeStateLabel(status);
     return { count, marker: stateMarker, icon: status === "completed" ? undefined : nodeStateIcon(status) };
   }
+  if (target.collection === "files" && target.fileScope && !target.fileCategory) {
+    return inventoryTotal(input);
+  }
   if (target.collection === "files" && !target.fileCategory) return known(counts?.files, Boolean(counts));
-  if (target.collection === "docs") return known(counts?.docs, Boolean(counts));
+  if (target.collection === "docs") return known(docsCount(input), Boolean(counts) || Boolean(tree));
   if (target.collection === "indicators") return known(counts?.indicators, Boolean(counts));
   if (target.collection === "timeline") return known(counts?.timeline_events, Boolean(counts));
   if (target.collection === "files" && target.fileCategory) {
@@ -272,15 +359,21 @@ export function domainNodeCount(target: DomainTarget, input: TreeModelInput): Do
   if (target.collection === "artifacts") {
     if (!tree) return { count: undefined };
     if (!target.kind) return { count: UNKNOWN_COUNT };
-    const kindNode = findServerNode(tree, `artifacts:${target.kind}`);
+    const kindNode = mergedKindNode(tree, target.kind);
     // The run has no records of this kind at all.
     if (!kindNode) return known(0, true);
-    if (!target.types?.length) return known(kindNode.count, true);
+    const zero = zeroReason(kindNode);
+    if (target.countField) {
+      const value = (kindNode as unknown as Record<string, unknown>)[target.countField];
+      return typeof value === "number" ? known(value, true, zero) : { count: UNKNOWN_COUNT };
+    }
+    if (!target.types?.length) return known(kindNode.count, true, zero);
     const perType = kindNode.artifact_type_counts;
     if (perType && typeof perType === "object") {
       return known(
         target.types.reduce((sum, type) => sum + (typeof perType[type] === "number" ? perType[type] : 0), 0),
         true,
+        zero,
       );
     }
     const typed = (kindNode.children ?? []).filter((child) => child.artifact_type);
@@ -290,37 +383,140 @@ export function domainNodeCount(target: DomainTarget, input: TreeModelInput): Do
           .filter((child) => target.types?.includes(child.artifact_type as string))
           .reduce((sum, c) => sum + c.count, 0),
         true,
+        zero,
       );
     }
     // Per-type counts unknown for this run: only an empty kind is known to be 0.
-    return kindNode.count === 0 ? known(0, true) : { count: UNKNOWN_COUNT };
+    return kindNode.count === 0 ? known(0, true, zero) : { count: UNKNOWN_COUNT };
   }
   return { count: undefined };
 }
 
-function known(count: number | undefined, loaded: boolean): DomainCount {
+/** Why 전체 파일(인벤토리) is empty on a run whose files output predates the inventory. */
+export const NO_INVENTORY_REASON =
+  "이 런의 파일 출력에는 인벤토리가 없습니다 — 선택한 범주의 후보만 기록되었습니다";
+
+/**
+ * 전체 파일(인벤토리) count: every scanned file = the candidates (`files` node count) plus the
+ * inventory-only rows (`files.inventory_count`, files outside the selected categories).
+ */
+export function inventoryTotal(input: Pick<TreeModelInput, "summary" | "tree">): DomainCount {
+  if (!input.tree) return { count: undefined };
+  const node = findServerNode(input.tree, "files");
+  if (typeof node?.inventory_count !== "number") return { count: 0, disabledReason: NO_INVENTORY_REASON };
+  const candidates = node.count ?? input.summary?.summary?.counts?.files ?? 0;
+  return known(candidates + node.inventory_count, true);
+}
+
+const SKIP_STATUS_LABEL: Record<string, string> = {
+  skipped: "제공자 건너뜀",
+  "failed-isolated": "제공자 실패",
+  failed: "제공자 실패",
+  partial: "일부만 수집",
+};
+
+/**
+ * Why a 0-count node of this kind is empty: "데이터 없음" (NO_DATA_REASON, the provider ran and
+ * found nothing) or "제공자 건너뜀(사유)" from the kind's `collection_status` /
+ * `skip_reasons` / `collection_notes` (tree.py exposes the status only when not "completed").
+ */
+export function zeroReason(kindNode: TreeNode): string {
+  const status = kindNode.collection_status ?? "";
+  const label = SKIP_STATUS_LABEL[status];
+  if (!label) return NO_DATA_REASON;
+  const reasons = [
+    ...Object.keys(kindNode.skip_reasons ?? {}),
+    ...(kindNode.skip_reason ? [kindNode.skip_reason] : []),
+    ...(kindNode.collection_notes ?? []),
+  ].filter(Boolean);
+  const why = reasons.length ? reasons.slice(0, 2).join("; ") : "사유 미기재";
+  return status === "partial" ? `${NO_DATA_REASON} · ${label}(${why})` : `${label}(${why})`;
+}
+
+function known(count: number | undefined, loaded: boolean, emptyReason = NO_DATA_REASON): DomainCount {
   if (count === undefined) return { count: undefined };
-  return loaded && count === 0 ? { count, disabledReason: NO_DATA_REASON } : { count };
+  return loaded && count === 0 ? { count, disabledReason: emptyReason } : { count };
 }
 
 /** Full route of a domain node (the tree navigates with it; `types=` / `ext=` ride in the URL). */
-export function domainRoute(target: DomainTarget): RouteTail & { types?: string[]; ext?: string[] } {
-  const route: RouteTail & { types?: string[]; ext?: string[] } = { collection: target.collection };
+export function domainRoute(target: DomainTarget): DomainRoute {
+  const route: DomainRoute = { collection: target.collection };
   if (target.kind) route.kind = target.kind;
-  if (target.fileCategory) route.category = target.fileCategory;
+  if (target.fileScope) route.category = filesInventoryCategory(target.fileCategory);
+  else if (target.fileCategory) route.category = target.fileCategory;
   if (target.types?.length) route.types = [...target.types];
   if (target.ext?.length) route.ext = [...target.ext];
+  if (target.cols?.length) route.cols = [...target.cols];
+  if (target.cf?.length) route.cf = target.cf.map((filter) => ({ ...filter }));
   return route;
+}
+
+/**
+ * A files category node whose server node exists only in the inventory (`files:<id>` with
+ * `inventory_only`, a category the scan did not select) opens the inventory scope.
+ */
+function effectiveTarget(target: DomainTarget, tree: RunTree | undefined): DomainTarget {
+  if (target.collection !== "files" || !target.fileCategory || target.fileScope) return target;
+  const node = findServerNode(tree, `files:${target.fileCategory}`);
+  return node?.inventory_only || node?.source === "inventory"
+    ? { ...target, fileScope: "inventory" }
+    : target;
+}
+
+/**
+ * Domain header count (over the flattened nodes, sub-nodes included; groups, catch-alls and
+ * column-filtered views never add): evidence records, each kind once. A kind with a kind-wide node in the
+ * domain counts that node minus its `nonEvidence` / `detail` typed nodes (string candidates,
+ * Prefetch reference paths, the registry key tree never inflate the header); a kind with only
+ * typed nodes counts the sum of its typed evidence nodes. Non-artifact nodes (files, analyses,
+ * indicators) do not add. undefined = no artifact count known.
+ */
+export function domainTotal(
+  nodes: readonly DomainNodeDef[],
+  counts: ReadonlyArray<number | string | undefined>,
+): number | undefined {
+  const typed = new Map<string, number>();
+  const excluded = new Map<string, number>();
+  const wide = new Map<string, number>();
+  let anyKnown = false;
+  nodes.forEach((node, index) => {
+    const count = counts[index];
+    const t = node.target;
+    if (t.collection !== "artifacts" || !t.kind || typeof count !== "number") return;
+    // Catch-alls span domains, groups repeat their leaves, filtered views repeat their types.
+    if (node.catchAll || node.children?.length || t.cf?.length) return;
+    anyKnown = true;
+    if (!t.types?.length) wide.set(t.kind, count);
+    else if (node.nonEvidence || node.detail) excluded.set(t.kind, (excluded.get(t.kind) ?? 0) + count);
+    else typed.set(t.kind, (typed.get(t.kind) ?? 0) + count);
+  });
+  if (!anyKnown) return undefined;
+  let total = 0;
+  for (const [kind, count] of wide) total += Math.max(0, count - (excluded.get(kind) ?? 0));
+  for (const [kind, count] of typed) if (!wide.has(kind)) total += count;
+  return total;
+}
+
+/** Tooltip of a column-filtered node: the filter is applied to the loaded rows. */
+function filteredNote(target: DomainTarget): string {
+  const filters = (target.cf ?? []).map((f) => `${f.col.replace(/^f:/, "")} ${f.op} ${f.value}`).join(", ");
+  return `불러온 행에 열 필터 적용: ${filters}`;
 }
 
 function domainNodes(input: TreeModelInput): TreeModelNode[] {
   return DOMAINS.map<TreeModelNode>((domain) => {
-    const children = domain.nodes.map<TreeModelNode>((node) => {
-      const state = domainNodeCount(node.target, input);
-      const route = domainRoute(node.target);
+    const flat: Array<{ def: DomainNodeDef; count: number | string | undefined }> = [];
+    const toModel = (node: DomainNodeDef): TreeModelNode => {
+      const target = effectiveTarget(node.target, input.tree);
+      const state = domainNodeCount(target, input);
+      flat.push({ def: node, count: state.count });
+      const route = domainRoute(target);
+      const label =
+        node.target.collection === "indicators" ? indicatorsLabel(input.tree, node.label) : node.label;
+      const children = node.children?.map(toModel);
       return {
         id: `domain:${domain.id}:${node.id}`,
-        label: node.label,
+        label,
         count: state.count,
         route: {
           collection: route.collection,
@@ -328,28 +524,26 @@ function domainNodes(input: TreeModelInput): TreeModelNode[] {
           ...(route.category ? { category: route.category } : {}),
         },
         target: route,
-        selectKey: targetKey(node.target),
+        selectKey: targetKey(target),
         disabledReason: state.disabledReason,
         marker: state.marker,
         icon: state.icon ?? node.icon,
+        ...(children?.length ? { children } : {}),
+        ...(node.nonEvidence ? { dimmed: true, note: NON_EVIDENCE_NOTE } : {}),
+        ...(target.cf?.length && !node.nonEvidence ? { note: filteredNote(target) } : {}),
       };
-    });
-    // Each kind counts once; typed subsets (artifact_type filters) and other views do not add.
-    const kindCounts = new Map<string, number>();
-    domain.nodes.forEach((node, index) => {
-      const count = children[index]?.count;
-      const t = node.target;
-      if (t.collection === "artifacts" && t.kind && !t.types?.length && typeof count === "number") {
-        kindCounts.set(t.kind, count);
-      }
-    });
-    const total = [...kindCounts.values()].reduce((sum, n) => sum + n, 0);
-    const anyKnown = kindCounts.size > 0;
+    };
+    const children = domain.nodes.map(toModel);
+    const total = domainTotal(
+      flat.map((entry) => entry.def),
+      flat.map((entry) => entry.count),
+    );
+    const anyKnown = total !== undefined;
     return {
       id: `domain:${domain.id}`,
       label: domain.label,
       icon: domain.icon,
-      count: anyKnown ? total : undefined,
+      count: anyKnown ? (total as number) : undefined,
       strongCount: true,
       route: children[0]?.route ?? { collection: "artifacts" },
       noSelect: true,
@@ -391,14 +585,20 @@ export function buildTreeModel(input: TreeModelInput): TreeModelNode[] {
         "이 런에는 타임라인 산출물이 없습니다",
         loaded,
       ),
-      dataNode("docs", "문서/메일", counts?.docs, "docs-index 산출물이 없는 런입니다", loaded),
+      dataNode("docs", "문서/메일", docsCount(input), "docs-index 산출물이 없는 런입니다", loaded),
       {
         id: "search",
         label: "검색 결과",
         route: { collection: "search" },
         children: saved.length ? saved : undefined,
       },
-      dataNode("indicators", "IOC/위험", counts?.indicators, "이 런에는 지표가 없습니다", loaded),
+      dataNode(
+        "indicators",
+        indicatorsLabel(input.tree, "IOC/위험"),
+        counts?.indicators,
+        "이 런에는 지표가 없습니다",
+        loaded,
+      ),
     ],
   };
 

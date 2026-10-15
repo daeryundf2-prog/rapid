@@ -68,6 +68,19 @@ export function stageOf(route: Pick<Route, "collection">): Stage {
   return stageOfCollection(route.collection);
 }
 
+/**
+ * Stages whose centre lists rows the viewer previews (visual-polish S9). 접수·처리·보고 are
+ * two columns — left panel + page — and mount no viewer.
+ */
+export const VIEWER_STAGES: readonly Stage[] = ["explore", "review"];
+
+export function stageHasViewer(stage: Stage): boolean {
+  return VIEWER_STAGES.includes(stage);
+}
+
+/** Disabled reason of viewer commands on a stage without a viewer. */
+export const NO_VIEWER_REASON = "이 단계에는 뷰어가 없습니다";
+
 import { decodeRowRef, encodeRowRef, type RowRef } from "./contracts/rowRef";
 import type { ViewerMode } from "./contracts/viewer";
 
@@ -105,7 +118,7 @@ export interface Route {
   notes?: boolean;
   /** Explorer view over the collection (X12, S9), URL `view=`; absent = "columns". */
   view?: ExplorerView;
-  /** Artifact category node (X11, S7; artifacts without a kind) or files category (`GET /files?category=`), URL `category=`. */
+  /** Artifact category node (X11, S7; artifacts without a kind) or files category (`GET /files?category=`), or docs `matched` (일치만, plain `GET /docs`), URL `category=`. */
   category?: string;
   /** Server sort of one artifact kind, URL `sort=details.run_count:desc` (artifacts with a kind only). */
   sort?: ServerSort;
@@ -285,7 +298,9 @@ export function parseHash(hash: string): Route {
     } else if (
       key === "category" &&
       value &&
-      ((route.collection === "artifacts" && !route.kind) || route.collection === "files")
+      ((route.collection === "artifacts" && !route.kind) ||
+        route.collection === "files" ||
+        route.collection === "docs")
     ) {
       route.category = safeDecode(value);
     } else if (key === "path" && value) route.path = safeDecode(value);
@@ -347,7 +362,10 @@ export function serializeRoute(route: Route): string {
       }
   }
   const query: string[] = [];
-  if (((collection === "artifacts" && !route.kind) || collection === "files") && route.category) {
+  if (
+    ((collection === "artifacts" && !route.kind) || collection === "files" || collection === "docs") &&
+    route.category
+  ) {
     query.push(`category=${encodeURIComponent(route.category)}`);
   }
   if (collection === "analysis" && route.analysisId) query.push(`id=${encodeURIComponent(route.analysisId)}`);

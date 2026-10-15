@@ -4,12 +4,10 @@
   gap: 4px;
   padding: 0 var(--space-2);
   height: 20px;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   font-size: var(--fs-table-aux, 12px);
   font-weight: 600;
   white-space: nowrap;
-  background: var(--chip-bg);
-  color: var(--chip-fg);
 }
 
 .status-chip[data-status="relevant"] {
@@ -68,13 +66,21 @@
   align-items: center;
   gap: var(--space-1);
 }
+/* Quiet select in the 28px bar (review #8): 22px, no fill or border until hovered. */
 .status-tz select {
-  background: var(--bg-raised);
-  color: var(--text);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  font: inherit;
+  height: 22px;
   max-width: 11rem;
+  padding: 0 22px 0 var(--space-1);
+  border-color: transparent;
+  background-color: transparent;
+  background-position: right 4px center;
+  color: var(--text);
+  font: inherit;
+}
+
+.status-tz select:hover,
+.status-tz select:focus-visible {
+  background-color: var(--surface-2);
 }
 
 .note-form {
@@ -87,10 +93,6 @@
 .note-form textarea {
   width: 100%;
   min-height: 3.5rem;
-  background: var(--bg-raised);
-  color: var(--text);
-  border: 1px solid var(--line);
-  border-radius: 4px;
   font: inherit;
 }
 .note-form-actions {

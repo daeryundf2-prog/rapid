@@ -51,7 +51,15 @@ export function systemTheme(): Theme {
     : "dark";
 }
 
-/** `data-theme` only when the user chose one, so tokens.css can follow the OS otherwise. */
+/** The theme shown when the user has not chosen one: dark, whatever the OS says (visual-polish U-V1). */
+export const DEFAULT_THEME: Theme = "dark";
+
+/** Theme on screen: the user's choice, else dark. */
+export function effectiveTheme(theme: Theme | null): Theme {
+  return theme ?? DEFAULT_THEME;
+}
+
+/** `data-theme` only when the user chose one; without it tokens.css :root is the dark theme. */
 export function applyThemeAttribute(theme: Theme | null): void {
   if (theme) document.documentElement.dataset.theme = theme;
   else delete document.documentElement.dataset.theme;
@@ -62,9 +70,9 @@ export function applyDensityAttribute(density: Density): void {
 }
 
 export interface PrefsSlice {
-  /** Explicit user choice; null = follow prefers-color-scheme. */
+  /** Explicit user choice (persisted); null = the default dark theme. */
   theme: Theme | null;
-  /** Current OS preference (kept live by the shell's media listener). */
+  /** Current OS preference (kept live by the shell's media listener); informational only — it never picks the theme. */
   systemTheme: Theme;
   density: Density;
   panelLayout: PanelLayout | null;
@@ -95,8 +103,7 @@ export const createPrefsSlice: StateCreator<AppState, [], [], PrefsSlice> = (set
     set({ theme });
   },
   toggleTheme: () => {
-    const { theme, systemTheme: os } = get();
-    get().setTheme((theme ?? os) === "dark" ? "light" : "dark");
+    get().setTheme(effectiveTheme(get().theme) === "dark" ? "light" : "dark");
   },
   setSystemTheme: (theme) => set({ systemTheme: theme }),
   setDensity: (density) => {

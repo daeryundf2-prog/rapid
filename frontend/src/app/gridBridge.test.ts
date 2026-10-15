@@ -99,3 +99,36 @@ describe("gridBridge server sort and promoted columns", () => {
     expect(useGridLocalStore.getState().route.sort).toBeUndefined();
   });
 });
+
+describe("viewer only where a viewer is mounted (review B2-2)", () => {
+  it("Enter on a 보고 row neither focuses a viewer nor arms the drawer overlay", () => {
+    s().navigate({ runId: "r1", collection: "outputs" });
+    s().setViewerIsDrawer(true);
+    useGridLocalStore.getState().requestViewerFocus();
+    expect(s().viewerDrawerOpen).toBe(false);
+  });
+
+  it("Enter on a 탐색 row in drawer layout opens the drawer", () => {
+    s().navigate({ runId: "r1", collection: "files" });
+    s().setViewerIsDrawer(true);
+    useGridLocalStore.getState().requestViewerFocus();
+    expect(s().viewerDrawerOpen).toBe(true);
+  });
+});
+
+describe("검토 리뷰 상태 keeps the other filters (review B2-5)", () => {
+  it("changing the status patches the route instead of opening a clean one", () => {
+    s().navigate({
+      runId: "r1",
+      collection: "review",
+      tags: ["중요"],
+      from: "2026-01-01T00:00",
+      types: ["x"],
+    });
+    useGridLocalStore.getState().setRoute({ collection: { id: "review", status: "relevant" } });
+    expect(s().route.status).toBe("relevant");
+    expect(s().route.tags).toEqual(["중요"]);
+    expect(s().route.from).toBe("2026-01-01T00:00");
+    expect(s().route.types).toEqual(["x"]);
+  });
+});

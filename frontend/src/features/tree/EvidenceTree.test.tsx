@@ -136,7 +136,8 @@ async function renderTree() {
   await waitFor(() => expect(item("이벤트 로그").textContent).toContain("100"));
 }
 
-const item = (name: string) => screen.getByRole("treeitem", { name: new RegExp(`^${name}`) });
+const item = (name: string) =>
+  screen.getByRole("treeitem", { name: new RegExp(`^${name.replace(/[()[\]{}.*+?^$|\\]/g, "\\$&")}`) });
 
 describe("EvidenceTree (탐색 domain tree)", () => {
   it("renders 증거 소스, 전체 보기 and collapsed domains with levels and counts", async () => {
@@ -149,14 +150,27 @@ describe("EvidenceTree (탐색 domain tree)", () => {
     expect(item("이벤트 로그").getAttribute("aria-level")).toBe("1");
     expect(item("이벤트 로그").getAttribute("aria-expanded")).toBe("false");
     expect(item("이벤트 로그").querySelector(".badge.strong")?.textContent).toBe("100");
-    expect(screen.queryByText("EVTX 전체")).toBeNull();
+    expect(screen.queryByText("전체 이벤트 로그(EVTX·ETL)")).toBeNull();
     fireEvent.click(item("이벤트 로그").querySelector(".case-tree-twisty") as Element);
-    expect(item("EVTX 전체").getAttribute("aria-level")).toBe("2");
+    expect(item("전체 이벤트 로그(EVTX·ETL)").getAttribute("aria-level")).toBe("2");
     // No workflow nodes: 접수 / 리뷰보드 / 산출물 / 분석 작업 are rail stages.
     for (const gone of ["접수", "리뷰보드", "산출물", "분석 작업"]) {
       expect(screen.queryByRole("treeitem", { name: new RegExp(`^${gone}`) })).toBeNull();
     }
     await screen.findByText("패스워드");
+  });
+
+  it("dims zero-count nodes (is-empty, no strong badge) — visual-polish B2 #6", async () => {
+    await renderTree();
+    const zero = screen
+      .getAllByRole("treeitem")
+      .filter((li) => li.querySelector(":scope > .badge")?.textContent === "0");
+    expect(zero.length).toBeGreaterThan(0);
+    for (const li of zero) {
+      expect(li.classList.contains("is-empty")).toBe(true);
+      expect(li.querySelector(":scope > .badge.strong")).toBeNull();
+    }
+    expect(item("이벤트 로그").classList.contains("is-empty")).toBe(false);
   });
 
   it("uses a roving tabindex: exactly one tab stop", async () => {
@@ -184,7 +198,7 @@ describe("EvidenceTree (탐색 domain tree)", () => {
     fireEvent.keyDown(document.activeElement as Element, { key: "ArrowRight" });
     expect(item("이벤트 로그").getAttribute("aria-expanded")).toBe("true");
     fireEvent.keyDown(document.activeElement as Element, { key: "ArrowRight" });
-    expect(document.activeElement).toBe(item("EVTX 전체"));
+    expect(document.activeElement).toBe(item("전체 이벤트 로그(EVTX·ETL)"));
     fireEvent.keyDown(document.activeElement as Element, { key: "ArrowLeft" });
     expect(document.activeElement).toBe(item("이벤트 로그"));
     fireEvent.keyDown(document.activeElement as Element, { key: "ArrowLeft" });
@@ -202,10 +216,12 @@ describe("EvidenceTree (탐색 domain tree)", () => {
     await renderTree();
     item("이벤트 로그").focus();
     fireEvent.keyDown(document.activeElement as Element, { key: "ArrowRight" });
-    item("EVTX 전체").focus();
+    item("전체 이벤트 로그(EVTX·ETL)").focus();
     fireEvent.keyDown(document.activeElement as Element, { key: "Enter" });
     expect(window.location.hash).toBe("#/case/r1/explore/artifacts/eventlog");
-    await waitFor(() => expect(item("EVTX 전체").getAttribute("aria-selected")).toBe("true"));
+    await waitFor(() =>
+      expect(item("전체 이벤트 로그(EVTX·ETL)").getAttribute("aria-selected")).toBe("true"),
+    );
   });
 
   it("a typed node sends its artifact types (침해사고 › 웹셸 → artifact_type=)", async () => {

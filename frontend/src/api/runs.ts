@@ -33,6 +33,8 @@ export interface CanonicalCounts {
   outputs: number;
   artifacts: number;
   docs: number;
+  /** Every document candidate (`docs` = keyword matches); servers before parser-quality r1 omit it. */
+  document_candidates?: number;
   files: number;
   timeline_events: number;
   review_items: number;
@@ -53,6 +55,101 @@ export interface RunSummary {
   };
   outputs?: Record<string, string>;
   steps?: Array<Record<string, unknown>>;
+  /** Every step warning (caps, silent-failure verdicts, skipped providers), parser-quality r1. */
+  warnings?: RunWarning[];
+  /** Report-facing limits of the run (core/run/summary.py build_run_disclosures). */
+  disclosures?: RunDisclosures;
+}
+
+export interface RunWarning {
+  step?: string;
+  level?: string;
+  message?: string;
+  [key: string]: unknown;
+}
+
+export interface RunDisclosures {
+  time_origin?: string | null;
+  acquisition_copy_note?: string;
+  timezone?: {
+    evidence_timezone?: { name?: string; label?: string; utc_offset?: string; bias_minutes?: number } | null;
+    [key: string]: unknown;
+  };
+  registry_context?: Record<string, unknown>;
+  missing_tools?: Record<string, { available?: boolean; note?: string }>;
+  caps?: Record<string, string[]>;
+  timeline_excluded?: { out_of_range?: number; duplicates?: number; copy_time_candidates?: number };
+  documents?: {
+    candidate_count?: number;
+    match_count?: number;
+    indexed_with_text_count?: number | null;
+    encrypted_count?: number | null;
+    zero_text_count?: number | null;
+    text_status_counts?: Record<string, number>;
+    /** Text-extraction size caps (core/docs.py build_docs_size_cap_disclosure, parser-quality r2). */
+    size_caps?: DocsSizeCaps | null;
+  };
+  indicators?: {
+    display_label?: string | null;
+    rule_count?: number;
+    total_before_cap?: number | null;
+    truncated?: boolean | null;
+    rule_status_message?: string | null;
+    /** Indicator cap disclosure (core/indicators.py indicator_cap_policy, parser-quality r2). */
+    cap_policy?: IndicatorCapPolicy | null;
+  };
+  files?: {
+    excluded_file_count?: number | null;
+    exclusion_reason_counts?: Record<string, number>;
+    excluded_category_counts?: Record<string, number>;
+  };
+  collection_notes?: Record<string, string[]>;
+  /** Run-level row truncation (core/run/summary.py `summarize_input_row_truncation`). */
+  input_row_truncation?: InputRowTruncation | null;
+  [key: string]: unknown;
+}
+
+/** `cap_policy` of the indicators summary: "uncapped" (상한 없음) or "capped" at `max_indicators`. */
+export interface IndicatorCapPolicy {
+  mode?: "uncapped" | "capped" | string;
+  max_indicators?: number | null;
+  kept?: number;
+  total_before_cap?: number;
+  note?: string;
+}
+
+/** docs summary `size_caps`: the byte caps of text extraction and the documents they stopped. */
+export interface DocsSizeCaps {
+  max_input_bytes?: number;
+  max_archive_member_bytes?: number;
+  max_archive_total_bytes?: number;
+  max_pdf_stream_decompressed_bytes?: number;
+  too_large_count?: number;
+  binary_rejected_count?: number;
+  truncated?: boolean;
+  note?: string;
+}
+
+/** `disclosures.input_row_truncation`: run totals plus the per-step (`artifacts-<kind>`) breakdown. */
+export interface InputRowTruncation {
+  payload_truncated_rows?: number;
+  preview_truncated_rows?: number;
+  level?: "none" | "notice" | "warning" | string;
+  by_step?: Record<string, RowTruncation>;
+}
+
+/**
+ * Row-level truncation of one artifact kind (core/timeline.py `input_row_truncation`, mirrored on
+ * the step as `row_truncation`): payload cuts (`rows_with_truncation`, `count_fields`) are warnings;
+ * display-preview cuts (`preview_only_rows`) keep the record value and are notices.
+ */
+export interface RowTruncation {
+  rows_with_truncation?: number;
+  flag_counts?: Record<string, number>;
+  count_fields?: Record<string, number>;
+  preview_only_rows?: number;
+  preview_flag_counts?: Record<string, number>;
+  preview_count_fields?: Record<string, number>;
 }
 
 export async function listRuns(): Promise<RunListItem[]> {
@@ -78,8 +175,40 @@ export interface TreeNode {
   category?: string;
   /** Analysis nodes (`analysis:<kind>`): newest job state, null = never ran (plan analysis-workbench-p1 §3.3). */
   state?: { status?: string; finished_at?: string | null } | null;
-  /** Kind nodes (`artifacts:<kind>`): records per artifact_type of that kind. */
+  /**
+   * Kind nodes: records per artifact_type. On the primary node (`artifacts:<kind>`) the whole
+   * kind; on a routed node (`artifacts:<kind>@<domain>`) only the types placed in that domain.
+   */
   artifact_type_counts?: Record<string, number>;
+  /** Kind nodes (api/app/tree.py): the server domain id of the node's group. */
+  domain?: string;
+  /** Kind nodes: records per artifact_type placed in this node's domain. */
+  domain_artifact_type_counts?: Record<string, number>;
+  /** Kind nodes: the provider's `collection_status` when not "completed" (skipped / failed-isolated / partial). */
+  collection_status?: string;
+  /** Kind nodes: the provider's collection notes (why rows are missing or capped). */
+  collection_notes?: string[];
+  /** Kind nodes: skipped-row reasons (`skip_reasons`, summary of artifacts.py) — not exposed by tree.py yet. */
+  skip_reasons?: Record<string, number>;
+  skip_reason?: string;
+  /** Type nodes: rows that are string pivots, not evidence (`*-string-candidate`). */
+  non_evidence?: boolean;
+  /** `docs` node: every document candidate (count = keyword matches). */
+  candidate_count?: number;
+  match_count?: number;
+  /** `indicators` node: detection rules applied (0 = the label is "지표 후보"). */
+  rule_count?: number;
+  /**
+   * `files` node (parser-quality r2): scanned files outside the selected categories, kept as
+   * lightweight inventory rows (`files.json` `inventory`, listed by `GET /files?scope=inventory`).
+   */
+  inventory_count?: number;
+  /** `files:<category>` nodes: the category exists only in the inventory (e.g. "other"). */
+  inventory_only?: boolean;
+  /** `files:<category>` nodes: "inventory" when counted from the inventory rows. */
+  source?: string;
+  /** `artifacts:eventlog`: recovered records older than the first live record id (not sent by tree.py yet). */
+  stale_below_first_record_count?: number;
   children?: TreeNode[];
 }
 

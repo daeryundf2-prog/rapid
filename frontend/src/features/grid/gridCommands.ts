@@ -7,8 +7,10 @@ import { useAppStore } from "../../state/store";
 import { runDisabledReason } from "../analysis/commands";
 import { caseRoute, otherCaseIds } from "../analysis/crossCase";
 import { useAnalysisStore } from "../analysis/store";
+import { recordCitationParts } from "../viewer/citation";
+import { PIVOT_LABELS, PIVOT_ORDER, type PivotId, recordPivots } from "../viewer/pivots";
 import { registerCommand, registerLocalCommand } from "./adapter";
-import { baseName, isRecord } from "./columns/common";
+import { baseName, currentTimezone, isRecord } from "./columns/common";
 import {
   applyNote,
   applyReviewAction,
@@ -57,10 +59,14 @@ export function buildViewerTarget(runId: string, row: GridRow, mode?: ViewerMode
   };
 }
 
+/** Grid citation: path, locator, (container) sha256, then the record id and record time. */
 export function citationText(row: GridRow): string {
   const parts = [row.sourcePath ?? row.title, `[${row.ref.collection}:${row.ref.locator}]`];
-  if (row.sha256) parts.push(`sha256=${row.sha256}`);
-  if (row.timestamp) parts.push(row.timestamp);
+  if (row.sha256)
+    parts.push(`${row.ref.collection === "artifacts" ? "컨테이너 sha256" : "sha256"}=${row.sha256}`);
+  const record = recordCitationParts(row, currentTimezone());
+  if (record.length) parts.push(...record);
+  else if (row.timestamp) parts.push(row.timestamp);
   return parts.join(" ");
 }
 
@@ -305,7 +311,39 @@ export function buildGridCommands(hostRef: { current: GridCommandHost }): Comman
       },
     });
   }
+  // Pivots (viewer redesign §5): same list as the viewer "⋯" menu, on the focused row.
+  for (const id of PIVOT_ORDER) {
+    const pivotOf = () => {
+      const row = focused();
+      return row
+        ? recordPivots(row, host().runId ?? "", useAppStore.getState().route.tz).find((p) => p.id === id)
+        : undefined;
+    };
+    commands.push({
+      id: pivotCommandId(id),
+      label: PIVOT_LABELS[id],
+      group: "grid",
+      icon:
+        id === "timeline-window"
+          ? "clock"
+          : id === "matched-event" || id === "source-artifact"
+            ? "external"
+            : "filter",
+      disabledReason: () => {
+        if (!focused()) return NO_ROW;
+        return pivotOf()?.reason;
+      },
+      run: () => {
+        const route = pivotOf()?.route;
+        if (route) useAppStore.getState().navigate(route);
+      },
+    });
+  }
   return commands;
+}
+
+export function pivotCommandId(id: PivotId): string {
+  return `grid.pivot.${id}`;
 }
 
 /** Review items of the row menu (always listed; disabled with a reason when they cannot run). */

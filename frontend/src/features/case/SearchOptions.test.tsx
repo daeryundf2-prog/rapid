@@ -54,4 +54,19 @@ describe("SearchOptionsButton", () => {
       created_by: "web-ui",
     });
   });
+
+  it("is on the shared Popover: Tab wraps inside, a press outside closes it (review B2-9)", async () => {
+    mockFetch({ "GET /api/keyword-packs": { packs: [] } });
+    renderWithQuery(<SearchOptionsButton runId="r1" />);
+    fireEvent.click(screen.getByRole("button", { name: "검색 옵션" }));
+    const dialog = screen.getByRole("dialog", { name: "검색 옵션" });
+    expect(dialog.classList.contains("popover")).toBe(true);
+    expect(document.activeElement).toBe(screen.getByLabelText("검색 방식"));
+    const close = screen.getByRole("button", { name: "닫기" });
+    close.focus();
+    fireEvent.keyDown(close, { key: "Tab" });
+    expect(document.activeElement).toBe(screen.getByLabelText("검색 방식"));
+    fireEvent.pointerDown(document.body);
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
 });

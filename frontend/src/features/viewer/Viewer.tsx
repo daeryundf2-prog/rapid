@@ -7,8 +7,12 @@ import {
   type SourceMetadata,
   type SourcePreview,
 } from "../../api/viewer";
+import { collapseViewerPane } from "../../commands/builtin";
+import { MiddlePath } from "../../components/MiddlePath";
 import type { Command } from "../../contracts/command";
 import type { MarkAction, ViewerMode, ViewerTarget } from "../../contracts/viewer";
+import { Icon } from "../../icons";
+import { currentTimezone } from "../grid/columns/common";
 import { storeNotice } from "../grid/reviewActions";
 import {
   dispatchCommand,
@@ -33,10 +37,11 @@ import {
   type ViewerController,
   writeClipboard,
 } from "./commands";
-import { TargetHistory, targetKey } from "./history";
+import { targetKey } from "./history";
 import { ModeTabs, panelId, tabId, VIEWER_PANEL_ID } from "./ModeTabs";
 import { resolveModes } from "./modes";
 import { recordByteRange } from "./record";
+import { viewerSession } from "./session";
 import { type AsyncState, errorText, useAsync } from "./useAsync";
 import { ViewerToolbar } from "./ViewerToolbar";
 import { DocumentView } from "./views/DocumentView";
@@ -72,7 +77,7 @@ export function targetTitle(
   return rowTitle || target.ref.locator;
 }
 
-export function Viewer() {
+export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
   const target = useViewerTarget();
   const row = useViewerRowContext();
   const focusSeq = useViewerFocusRequest();
@@ -169,14 +174,18 @@ export function Viewer() {
     [target, preview, previewState],
   );
   const { mode: routeMode, setMode: setRouteMode } = useViewerRouteMode();
-  const [userMode, setUserMode] = useState<{ key: string; mode: ViewerMode } | null>(null);
+  // The chosen tab lives in the viewer session so a remount (stage switch) keeps it.
+  const [userMode, setUserModeState] = useState(() => viewerSession().userMode);
+  const setUserMode = useCallback((value: { key: string; mode: ViewerMode } | null) => {
+    viewerSession().userMode = value;
+    setUserModeState(value);
+  }, []);
   // URL `mode=` restores the tab for the first target; later rows auto-select again.
-  const restoredMode = useRef(false);
   // biome-ignore lint/correctness/useExhaustiveDependencies: runs once per target key
   useEffect(() => {
     if (!key) return;
-    if (!restoredMode.current) {
-      restoredMode.current = true;
+    if (!viewerSession().restoredMode) {
+      viewerSession().restoredMode = true;
       if (routeMode) setUserMode({ key, mode: routeMode });
       return;
     }
@@ -193,12 +202,13 @@ export function Viewer() {
       if (key) setUserMode({ key, mode });
       setRouteMode(mode);
     },
-    [key, setRouteMode],
+    [key, setRouteMode, setUserMode],
   );
 
   // ---- history ------------------------------------------------------------
-  const history = useRef(new TargetHistory());
-  const historyRows = useRef(new Map<string, typeof row>());
+  // Alt+←/→ history survives a remount of the viewer (review B2-3): it lives in the session.
+  const history = useRef(viewerSession().history);
+  const historyRows = useRef(viewerSession().rows);
   const [, bumpHistory] = useReducer((value: number) => value + 1, 0);
   useEffect(() => {
     if (!target) return;
@@ -261,7 +271,7 @@ export function Viewer() {
       if (!target) return;
       try {
         const sha = target.sourcePath ? await ensureSha256().catch(() => null) : null;
-        await writeClipboard(buildCitation({ ...target, highlight }, sha));
+        await writeClipboard(buildCitation({ ...target, highlight }, sha, row, currentTimezone()));
         announce("인용을 복사했습니다.");
       } catch (error) {
         announce(`인용 복사 실패: ${errorText(error)}`);
@@ -397,6 +407,7 @@ export function Viewer() {
       tabIndex={-1}
       onKeyDown={onKeyDown}
     >
+      {/* One header line (visual-polish S5): history · title · review + action menus; then one tab row. */}
       <div className="viewer-header">
         <div className="viewer-nav">
           <DisabledReason reason={history.current.canBack() ? undefined : "이전에 본 대상이 없습니다."}>
@@ -407,7 +418,7 @@ export function Viewer() {
               title={history.current.canBack() ? "이전 대상 (Alt+←)" : undefined}
               onClick={() => runCommand(byId(VIEWER_COMMAND_IDS.back))}
             >
-              ←
+              <Icon name="arrow-left" />
             </button>
           </DisabledReason>
           <DisabledReason reason={history.current.canForward() ? undefined : "다음 대상이 없습니다."}>
@@ -418,7 +429,7 @@ export function Viewer() {
               title={history.current.canForward() ? "다음 대상 (Alt+→)" : undefined}
               onClick={() => runCommand(byId(VIEWER_COMMAND_IDS.forward))}
             >
-              →
+              <Icon name="arrow-right" />
             </button>
           </DisabledReason>
         </div>
@@ -426,25 +437,37 @@ export function Viewer() {
           <h2 className="viewer-title" title={target?.sourcePath ?? undefined}>
             {title}
           </h2>
-          {target?.sourcePath ? <p className="viewer-path mono">{target.sourcePath}</p> : null}
+          {/* Parent folder, middle-ellipsized (review #6); the full path is the tooltip. */}
+          {target?.sourcePath ? (
+            <p className="viewer-path">
+              <MiddlePath path={target.sourcePath} />
+            </p>
+          ) : null}
         </div>
-        <DisabledReason reason={rowsForSourceReason}>
+        <ViewerToolbar
+          sourceCommands={sourceCommands}
+          markCommands={markCommands}
+          ctx={ctx}
+          onRun={runCommand}
+          rowsForSource={{
+            reason: rowsForSourceReason,
+            run: () => void dispatchCommand(ROWS_FOR_SOURCE_COMMAND, ctx),
+          }}
+        />
+        {/* Wide layout only: the drawer has its own close button (Esc). */}
+        {drawer ? null : (
           <button
             type="button"
-            className="viewer-button"
-            title={rowsForSourceReason ? undefined : "이 원본에서 나온 다른 행을 그리드에 표시합니다."}
-            onClick={() => void dispatchCommand(ROWS_FOR_SOURCE_COMMAND, ctx)}
+            className="viewer-icon-button"
+            aria-label="뷰어 접기"
+            title="뷰어 접기"
+            data-testid="viewer-collapse"
+            onClick={collapseViewerPane}
           >
-            같은 출처의 다른 행
+            <Icon name="chevron-right" />
           </button>
-        </DisabledReason>
+        )}
       </div>
-      <ViewerToolbar
-        sourceCommands={sourceCommands}
-        markCommands={markCommands}
-        ctx={ctx}
-        onRun={runCommand}
-      />
       <ModeTabs modes={modes} active={activeMode} onSelect={selectMode} />
       {/* Inactive modes get an empty, hidden panel so every tab's aria-controls resolves to a
           tabpanel labelled by that tab; only the active mode renders content. */}
@@ -471,9 +494,14 @@ export function Viewer() {
         tabIndex={0}
       >
         {!target ? (
-          <p className="viewer-empty">
-            그리드에서 행을 선택하면 원본이 여기에 표시됩니다 — <kbd>Enter</kbd> 키로 뷰어로 이동하세요.
-          </p>
+          <div className="viewer-empty">
+            <span className="viewer-empty-icon" aria-hidden="true">
+              <Icon name="eye" />
+            </span>
+            <p>
+              그리드에서 행을 선택하면 원본이 여기에 표시됩니다 — <kbd>Enter</kbd> 키로 뷰어로 이동하세요.
+            </p>
+          </div>
         ) : (
           <ViewerBody
             target={target}

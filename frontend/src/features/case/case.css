@@ -4,17 +4,20 @@
   z-index: 50;
   display: grid;
   place-items: center;
-  background: rgb(0 0 0 / 55%);
+  background: color-mix(in srgb, var(--scrim) 55%, transparent);
 }
 
 .case-modal {
+  display: flex;
+  flex-direction: column;
   inline-size: min(560px, 94vw);
   max-block-size: 90vh;
-  overflow: auto;
+  overflow: hidden;
   background: var(--bg-panel);
   color: var(--text);
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop);
   font-size: var(--fs-body);
 }
 
@@ -23,11 +26,12 @@
 }
 
 .case-modal-header {
+  flex: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: var(--space-3) var(--space-4);
-  border-block-end: 1px solid var(--line);
+  border-block-end: 1px solid var(--line-subtle);
 }
 
 .case-modal-header h2 {
@@ -35,12 +39,34 @@
   font-size: var(--fs-screen-title);
 }
 
+/* Only the body scrolls; the header and the footer stay put. */
 .case-modal-body {
+  flex: 1;
+  min-block-size: 0;
+  overflow: auto;
   display: grid;
-  gap: var(--space-3);
+  gap: var(--space-4); /* 16px between fields (review #4) */
   padding: var(--space-4);
 }
 
+/* A form that reuses the body class (실행 dialog) is not a second scroll area. */
+.case-modal-body .case-modal-body {
+  overflow: visible;
+}
+
+/* Footer (review #4): 취소 + the one primary action, right-aligned, under a hairline. */
+.case-modal-footer {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-block-start: 1px solid var(--line-subtle);
+}
+
+/* Field typography (review #4): label 12/500 text, helper 11/400 subtle 4px below. */
 .case-field {
   display: grid;
   gap: var(--space-1);
@@ -49,10 +75,40 @@
   margin: 0;
 }
 
-.case-field label,
-.case-field legend {
-  color: var(--text-muted);
+.case-field > label,
+.case-field > legend,
+.case-label {
+  padding: 0;
+  color: var(--text);
   font-size: var(--fs-table-aux);
+  font-weight: 500;
+}
+
+.case-field .analysis-help,
+.case-help {
+  margin: 0;
+  color: var(--text-subtle);
+  font-size: var(--fs-aux);
+  font-weight: 400;
+}
+
+.case-radio-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+}
+
+.case-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+  font-size: var(--fs-body);
+  cursor: pointer;
+}
+
+.case-option.is-unavailable {
+  color: var(--text-muted);
 }
 
 .case-field input[type="text"],
@@ -60,10 +116,6 @@
 .case-field select,
 .case-field textarea {
   padding: var(--space-1) var(--space-2);
-  color: var(--text);
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 4px;
   font: inherit;
 }
 
@@ -128,15 +180,201 @@
   padding: var(--space-2) var(--space-3);
   background: var(--bg-raised);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius);
 }
 
+/* Surface, border, shadow and motion come from the shared .popover (controls.css). */
 .search-options-popover {
-  display: grid;
-  gap: var(--space-2);
   min-inline-size: 280px;
-  padding: var(--space-3);
+}
+
+/* --- landing (visual-polish S10 / U-V6) ------------------------------------ */
+
+.landing-frame {
+  height: 100%;
+  overflow: auto;
+  background: var(--bg);
+}
+
+.landing {
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6) var(--space-4);
+}
+
+.landing-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  width: min(560px, 100%);
+  padding: var(--space-6);
   background: var(--bg-panel);
-  border: 1px solid var(--line);
-  border-radius: 6px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 16px 48px color-mix(in srgb, var(--scrim) 25%, transparent);
+}
+
+.landing-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.landing-title {
+  margin: 0;
+  font-size: var(--fs-screen-title);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.landing-sub {
+  margin: 2px 0 0;
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
+}
+
+.landing-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.landing-section-title {
+  margin: 0 0 var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--fs-aux);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.landing-cases {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.landing-cases li + li {
+  border-top: 1px solid var(--line-subtle);
+}
+
+.landing-case {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  column-gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.landing-case:hover {
+  background: var(--bg-raised);
+}
+
+.landing-case:focus-visible {
+  outline-offset: -2px;
+}
+
+.landing-case-line {
+  grid-column: 1;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.landing-case-name {
+  flex: 0 1 auto;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.landing-case-meta {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--fs-aux);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.landing-case > .status-chip {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+}
+
+.landing-case-path {
+  grid-column: 1;
+  margin-top: 2px;
+}
+
+.landing-note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
+}
+
+.landing-token {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.landing-token-row {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.landing-token-row input {
+  flex: 1;
+  min-width: 0;
+  height: var(--control-h-roomy);
+  font-family: var(--font-mono);
+}
+
+.landing-keys {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--fs-aux);
+}
+
+/* Dialogs that keep their action row inside the form (실행 · 불러오기 · 환경 점검): the last
+   row reads as the same footer — hairline, 12px 16px, roomy buttons — pinned to the bottom. */
+.case-modal-footer .button {
+  height: var(--control-h-roomy);
+  padding: 0 var(--space-4);
+}
+
+.case-modal-body > .case-actions:last-child {
+  position: sticky;
+  bottom: calc(-1 * var(--space-4));
+  margin: 0 calc(-1 * var(--space-4)) calc(-1 * var(--space-4));
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--line-subtle);
+  background: var(--bg-panel);
+}
+
+.case-modal-body > .case-actions:last-child .button {
+  height: var(--control-h-roomy);
+  padding: 0 var(--space-4);
+}
+
+/* The one disabled reason sits on its own line above the buttons, right-aligned. */
+.case-modal-footer > .case-reason {
+  order: -1;
+  flex-basis: 100%;
+  margin: 0;
+  text-align: end;
 }

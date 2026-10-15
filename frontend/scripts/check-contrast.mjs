@@ -14,61 +14,157 @@ const UI = 3;
 
 /** [label, foreground token, background token, minimum ratio, kind] */
 const STATUSES = ["relevant", "bookmark", "excluded", "needs-review", "report"];
-const bgs = ["--bg", "--bg-panel", "--bg-raised"];
+// Forensic Slate surfaces (U-V1): app bg, panels, raised controls, popovers/toasts.
+const SURFACES = ["--surface-0", "--surface-1", "--surface-2", "--surface-3"];
+// Derived tints (tokens.css aliases, color-mix of theme tokens): the selected row / tree item, and
+// the hover tint composited over the surfaces it is used on (grid = surface-0, tree = surface-1).
+// `--x@--y` = token --x painted over --y.
+const HOVERS = ["--bg-hover@--surface-0", "--bg-hover@--surface-1"];
+const ROWS = [...SURFACES, "--bg-selected", ...HOVERS];
+// Dialog caution box (tokens.css --caution-bg): body text, its title and the warn icon.
+const CAUTION = "--caution-bg";
 const PAIRS = [
-  ...bgs.map((b) => ["text", "--text", b, TEXT, "text"]),
-  ...bgs.map((b) => ["muted text", "--text-muted", b, TEXT, "text"]),
-  ...bgs.map((b) => ["accent (links)", "--accent", b, TEXT, "text"]),
-  ...bgs.map((b) => ["focus ring", "--accent", b, UI, "ui"]),
-  ...["--accent", "--accent-hover", "--accent-active"].map((b) => [
+  ...ROWS.map((b) => ["text", "--text", b, TEXT, "text"]),
+  ...ROWS.map((b) => ["muted text", "--text-muted", b, TEXT, "text"]),
+  ...ROWS.map((b) => ["subtle text (placeholders, hints)", "--text-subtle", b, TEXT, "text"]),
+  ...SURFACES.map((b) => ["accent (links)", "--accent", b, TEXT, "text"]),
+  ...ROWS.map((b) => ["focus ring / selected-row bar", "--focus", b, UI, "ui"]),
+  ...["--accent", "--accent-hover", "--accent-active", "--danger"].map((b) => [
     "on-accent text",
     "--on-accent",
     b,
     TEXT,
     "text",
   ]),
-  ...["--bg", "--bg-panel"].map((b) => ["border/line", "--line", b, UI, "ui"]),
+  ["disabled text", "--disabled-text", "--disabled-bg", TEXT, "text"],
+  // Disabled outlined buttons (controls.css) sit on the bare surface, not on a fill.
+  ...SURFACES.map((b) => ["disabled text (outlined button)", "--disabled-text", b, TEXT, "text"]),
+  ["caution text", "--text", CAUTION, TEXT, "text"],
+  ["caution muted text", "--text-muted", CAUTION, TEXT, "text"],
+  ["caution icon / bar", "--warn", CAUTION, UI, "ui"],
+  ...SURFACES.map((b) => ["border/line (controls)", "--line", b, UI, "ui"]),
   ...["--ok", "--warn", "--danger", "--info", "--deleted"].flatMap((f) =>
-    ["--bg", "--bg-panel"].map((b) => [`status ${f.slice(2)}`, f, b, TEXT, "text"]),
+    ROWS.map((b) => [`status ${f.slice(2)}`, f, b, TEXT, "text"]),
   ),
   ...STATUSES.flatMap((n) => [
-    ...bgs.map((b) => [`status-${n} (UI colour)`, `--status-${n}`, b, UI, "ui"]),
+    ...ROWS.map((b) => [`status-${n} (dot / UI colour)`, `--status-${n}`, b, UI, "ui"]),
     ["status chip text", `--status-${n}-on`, `--status-${n}`, TEXT, "text"],
   ]),
-  ...[1, 2, 3, 4, 5, 6, 7, 8].flatMap((n) =>
-    ["--bg", "--bg-panel"].map((b) => [`tag-${n}`, `--tag-${n}`, b, UI, "ui"]),
-  ),
+  ...[1, 2, 3, 4, 5, 6, 7, 8].flatMap((n) => ROWS.map((b) => [`tag-${n}`, `--tag-${n}`, b, UI, "ui"])),
 ];
 
 function stripComments(s) {
   return s.replace(/\/\*[\s\S]*?\*\//g, "");
 }
 
+/** Theme of one rule: `@media print` → print, `:not([data-theme])` → light-os, `[data-theme="light"]` → light, else dark. */
+function themeOf(selector, ancestors) {
+  if (ancestors.some((a) => /^@media\s+print\b/.test(a))) return "print";
+  if (selector.includes(":not([data-theme])")) return "light-os";
+  if (selector.includes('data-theme="light"')) return "light";
+  return "dark";
+}
+
+/**
+ * Custom properties per theme. Base `:root` aliases (values that are only `var(--x)`)
+ * cascade into every theme as they do in the browser; literal colours do not —
+ * each theme block must define all of its own. Themes with no block are omitted.
+ */
 export function parseThemes(css) {
-  const themes = { dark: {}, light: {}, "light-os": {} };
-  const re = /([^{}]+)\{([^{}]*)\}/g;
-  for (let m = re.exec(stripComments(css)); m; m = re.exec(stripComments(css))) {
-    const selector = m[1].trim();
-    if (selector.startsWith("@")) continue;
-    let theme = "dark";
-    if (selector.includes(":not([data-theme])")) theme = "light-os";
-    else if (selector.includes('data-theme="light"')) theme = "light";
-    for (const decl of m[2].split(";")) {
-      const i = decl.indexOf(":");
-      if (i < 0) continue;
-      const name = decl.slice(0, i).trim();
-      if (name.startsWith("--")) themes[theme][name] = decl.slice(i + 1).trim();
+  const raw = {};
+  const stack = [];
+  let buf = "";
+  for (const ch of stripComments(css)) {
+    if (ch === "{") {
+      stack.push(buf.trim());
+      buf = "";
+    } else if (ch === "}") {
+      const selector = stack.pop() ?? "";
+      if (!selector.startsWith("@")) {
+        const theme = themeOf(selector, stack);
+        for (const decl of buf.split(";")) {
+          const i = decl.indexOf(":");
+          if (i < 0) continue;
+          const name = decl.slice(0, i).trim();
+          if (!name.startsWith("--")) continue;
+          raw[theme] ??= {};
+          raw[theme][name] = decl.slice(i + 1).trim();
+        }
+      }
+      buf = "";
+    } else {
+      buf += ch;
     }
+  }
+  const aliases = Object.fromEntries(
+    Object.entries(raw.dark ?? {}).filter(([, v]) => /^var\(--[\w-]+\)$/.test(v) || /^color-mix\(/.test(v)),
+  );
+  const themes = {};
+  for (const name of ["dark", "light", "light-os", "print"]) {
+    if (raw[name]) themes[name] = name === "dark" ? raw[name] : { ...aliases, ...raw[name] };
   }
   return themes;
 }
 
-function resolveToken(vars, name, depth = 0) {
-  const v = vars[name];
-  if (v === undefined || depth > 10) return undefined;
+/** Split "a, b(c, d), e" at top-level commas. */
+function splitArgs(text) {
+  const out = [];
+  let depth = 0;
+  let cur = "";
+  for (const ch of text) {
+    if (ch === "(") depth++;
+    if (ch === ")") depth--;
+    if (ch === "," && depth === 0) {
+      out.push(cur.trim());
+      cur = "";
+    } else cur += ch;
+  }
+  if (cur.trim()) out.push(cur.trim());
+  return out;
+}
+
+/** A colour expression → { rgb, alpha }: hex, var(--x), `transparent`, color-mix(in srgb, A p%, B). */
+function resolveColor(vars, expr, depth = 0) {
+  if (expr === undefined || depth > 10) return undefined;
+  const v = expr.trim();
+  if (v === "transparent") return { rgb: [0, 0, 0], alpha: 0 };
+  if (/^#[0-9a-f]{3,8}$/i.test(v)) return { rgb: hexToRgb(v), alpha: 1 };
   const ref = /^var\((--[\w-]+)\)$/.exec(v);
-  if (ref) return resolveToken(vars, ref[1], depth + 1);
-  return v;
+  if (ref) return resolveColor(vars, vars[ref[1]], depth + 1);
+  const mix = /^color-mix\(\s*in srgb\s*,([\s\S]*)\)$/.exec(v);
+  if (mix) {
+    const parts = splitArgs(mix[1]).map((part) => {
+      const pct = /\s+(\d+(?:\.\d+)?)%$/.exec(part);
+      return { color: pct ? part.slice(0, pct.index) : part, pct: pct ? Number(pct[1]) / 100 : undefined };
+    });
+    if (parts.length !== 2) return undefined;
+    const [a, b] = parts;
+    const pa = a.pct ?? (b.pct !== undefined ? 1 - b.pct : 0.5);
+    const ca = resolveColor(vars, a.color, depth + 1);
+    const cb = resolveColor(vars, b.color, depth + 1);
+    if (!ca || !cb) return undefined;
+    // CSS Color 5: premultiplied interpolation in sRGB.
+    const alpha = ca.alpha * pa + cb.alpha * (1 - pa);
+    if (alpha === 0) return { rgb: [0, 0, 0], alpha: 0 };
+    const rgb = [0, 1, 2].map((i) => (ca.rgb[i] * ca.alpha * pa + cb.rgb[i] * cb.alpha * (1 - pa)) / alpha);
+    return { rgb, alpha };
+  }
+  return undefined;
+}
+
+function toHex(rgb) {
+  return `#${rgb.map((c) => Math.round(c).toString(16).padStart(2, "0")).join("")}`;
+}
+
+/** Token (or `--x@--base`: token --x painted over --base) → opaque hex. */
+function resolveToken(vars, name) {
+  const [token, base] = name.split("@");
+  const color = resolveColor(vars, `var(${token})`);
+  if (!color) return undefined;
+  if (color.alpha >= 1) return toHex(color.rgb);
+  const under = base ? resolveColor(vars, `var(${base})`) : undefined;
+  if (!under) return undefined;
+  return toHex(color.rgb.map((c, i) => c * color.alpha + under.rgb[i] * (1 - color.alpha)));
 }
 
 export function hexToRgb(hex) {
@@ -94,9 +190,20 @@ export function contrast(fg, bg) {
 
 function main() {
   const themes = parseThemes(readFileSync(cssPath, "utf8"));
-  // light-os (prefers-color-scheme block) inherits nothing from dark; it must be complete.
+  // Every non-dark theme must redefine every literal colour token of the dark theme.
   let failures = 0;
   let missing = 0;
+  const colours = Object.entries(themes.dark ?? {})
+    .filter(([, v]) => /^#[0-9a-f]{3,8}$/i.test(v))
+    .map(([k]) => k);
+  for (const [theme, vars] of Object.entries(themes)) {
+    for (const name of colours) {
+      if (!/^#[0-9a-f]{3,8}$/i.test(vars[name] ?? "")) {
+        missing++;
+        console.log(`MISSING  ${theme}: ${name} is not redefined (theme blocks must be complete)`);
+      }
+    }
+  }
   for (const [theme, vars] of Object.entries(themes)) {
     console.log(`\n== ${theme} ==`);
     console.log("status  ratio  min   kind  pair");

@@ -48,7 +48,8 @@ describe("MetaView record values", () => {
     const text = document.body.textContent ?? "";
     expect(text).not.toContain('{"md5"');
     expect(text).not.toContain('{"history_rows_present"');
-    expect(screen.getByText("history_rows_present")).toBeTruthy();
+    // Unknown nested keys read humanised, the raw key on the term (data-key / tooltip).
+    expect(document.querySelector('dt[data-key="history_rows_present"]')).toBeTruthy();
     expect(text).toContain("a, b");
     fireEvent.click(screen.getByRole("button", { name: "source_hashes.sha256 복사" }));
     expect(writeText).toHaveBeenCalledWith("a".repeat(64));
@@ -58,6 +59,75 @@ describe("MetaView record values", () => {
     const big = Object.fromEntries(Array.from({ length: 12 }, (_, i) => [`k${i}`, i]));
     show({ profile: big });
     expect(screen.getByText("12개 항목")).toBeTruthy();
+  });
+});
+
+describe("MetaView nested labels and value readings (visual-polish B2 #5)", () => {
+  it("labels keys inside expanded groups and reads booleans / enums in Korean, recursively", () => {
+    show({
+      cloud_validation_matrix: {
+        status: "validation-required",
+        cloud_family: "microsoft-365",
+        service: "exchange",
+        blockers: [{ blocker_id: "b-1", severity: "high", passed: false }],
+        nested: { inner: { report_grade_ready: true } },
+      },
+      commercial_grade_ready: false,
+    });
+    const dts = Array.from(document.querySelectorAll("dt")).map((dt) => dt.textContent);
+    expect(dts).toContain("상태");
+    expect(dts).toContain("클라우드 계열");
+    expect(dts).toContain("서비스");
+    expect(dts).toContain("차단 요인");
+    expect(dts).toContain("심각도");
+    // Recursion: a group inside a group, and items inside a folded list, keep labels.
+    expect(dts).toContain("보고서 등급 준비됨");
+    expect(dts).toContain("차단 요인 ID");
+    const status = document.querySelector('[data-raw="validation-required"]');
+    expect(status?.textContent).toBe("검증 필요");
+    expect(status?.getAttribute("title")).toBe("validation-required");
+    expect(document.querySelector('[data-raw="false"]')?.textContent).toBe("아니요");
+    expect(document.querySelector('[data-raw="true"]')?.textContent).toBe("예");
+    expect(document.querySelector('[data-raw="high"]')?.textContent).toBe("높음");
+    // Unknown token: raw, in mono. Unknown key: raw, in mono.
+    const raw = screen.getByText("exchange");
+    expect(raw.className).toContain("mono");
+    expect(screen.getByText("inner").className).toContain("mono");
+  });
+});
+
+describe("MetaView label collisions (review B2-8)", () => {
+  it("shows the raw key next to labels two fields share, as visible text", () => {
+    show({ details: { application_name: "a.exe", app_name: "b.exe" } });
+    const dts = Array.from(document.querySelectorAll("dt")).map((dt) => dt.textContent);
+    expect(dts).toContain("앱 이름 (application_name)");
+    expect(dts).toContain("앱 이름 (app_name)");
+  });
+});
+
+describe("MetaView output rows (review nit)", () => {
+  it("labels an output file's kind 종류, not 아티팩트 유형", () => {
+    const out: GridRow = {
+      ...row({}),
+      rowKey: "outputs:output:report.md",
+      ref: { collection: "outputs", locator: "output:report.md" },
+      artifactType: "보고서",
+    };
+    render(
+      <MetaView
+        target={{ ref: out.ref, runId: "r1", sourcePath: "C:/o/report.md" }}
+        preview={null}
+        metadata={null}
+        metadataError={null}
+        hashBusy={false}
+        row={out}
+        sessionMarks={[]}
+        onComputeHash={() => {}}
+      />,
+    );
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("종류");
+    expect(text).not.toContain("아티팩트 유형");
   });
 });
 
@@ -278,5 +348,136 @@ describe("MetaView NTFS provenance (plan analysis-workbench-p1 U-P1-3)", () => {
     expect(text).toContain("MFT 엔트리77");
     expect(text).toContain("소스 이미지 경로C:/rapid-qa/BSH.E01");
     expect(text).toContain("MFT 사용 중예");
+  });
+});
+
+describe("MetaView evidence-first record (viewer redesign)", () => {
+  const evtx = (details: Record<string, unknown>, type = "eventlog-event"): GridRow => ({
+    rowKey: "artifacts:eventlog:/artifacts/0",
+    ref: { collection: "artifacts", kind: "eventlog", locator: "/artifacts/0" },
+    title: "4624",
+    sourcePath: "C:/e/Security.evtx",
+    timestamp: "2024-04-01T12:34:56.000000+00:00",
+    artifactType: type,
+    provider: "windows-eventlog",
+    sha256: null,
+    reviewStatus: null,
+    tags: [],
+    fields: { details, artifact_record: { confidence: 0.9 } },
+  });
+  const render4624 = (details: Record<string, unknown>, type?: string) => {
+    const row = evtx(details, type);
+    return render(
+      <MetaView
+        target={{ ref: row.ref, runId: "r1", sourcePath: row.sourcePath }}
+        preview={null}
+        metadata={null}
+        metadataError={null}
+        hashBusy={false}
+        row={row}
+        sessionMarks={[]}
+        onComputeHash={() => {}}
+      />,
+    );
+  };
+  const LOGON = {
+    timestamp: "2024-04-01T12:34:56.000000+00:00",
+    event_id: "4624",
+    record_id: "1001",
+    provider_name: "Microsoft-Windows-Security-Auditing",
+    channel: "Security",
+    level: "0",
+    computer: "WIN-CASE01",
+    user_name: "alice",
+    logon_type: "10",
+    source_ip: "10.0.0.5",
+    event_data: { TargetUserName: "alice", IpAddress: "10.0.0.5", LogonType: "10", TargetLogonId: "0x3e7" },
+    coverage_status: "mapped",
+    reportability: "reportable",
+    commercial_grade_ready: false,
+    commercial_grade_blockers: ["needs trusted diff"],
+    validation_required: true,
+    unknown_new_field: "kept",
+  };
+
+  it("4624: 핵심 holds 로그온 유형 · 출발지 IP · 로그온 ID and the EventData table; no 상용 above evidence", () => {
+    render4624(LOGON);
+    const core = screen.getByRole("region", { name: "레코드 핵심" });
+    const text = core.textContent ?? "";
+    expect(text).toContain("로그온 유형10 — 원격 대화형(RDP)");
+    expect(text).toContain("출발지 IP10.0.0.5");
+    expect(text).toContain("로그온 ID0x3e7");
+    expect(text).toContain("레벨로그 항상(0)");
+    // Evidence time: local (zone) · UTC — whatever the test machine's zone is.
+    expect(text).toMatch(/생성 시각2024-04-01 \d{2}:34:56 \((UTC|[A-Z]{2,5}[+-]\d{2}:\d{2})\)/);
+    const table = screen.getByRole("table", { name: "EventData" });
+    expect(table.textContent).toContain("TargetLogonId");
+    // ±5분 next to the record time.
+    expect(screen.getByRole("button", { name: "생성 시각 타임라인 ±5분" })).toBeTruthy();
+    // Unknown keys are visible (기타 필드), governance is folded at the very bottom.
+    expect(screen.getByRole("region", { name: "레코드 기타 필드" }).textContent).toContain("kept");
+    const governance = screen.getByTestId("record-governance") as HTMLDetailsElement;
+    expect(governance.open).toBe(false);
+    expect(governance.textContent).toContain("내부 검증 정보(증거 아님)");
+    const view = document.querySelector(".meta-view") as HTMLElement;
+    expect(view.lastElementChild).toBe(governance);
+    const before = (view.textContent ?? "").split("내부 검증 정보(증거 아님)")[0] ?? "";
+    expect(before).not.toContain("상용");
+    // Record XML (reconstruction) and the 컨테이너 파일 해시 heading.
+    expect(screen.getByTestId("record-xml").textContent).toContain("디코딩된 레코드(재구성)");
+    expect(screen.getByRole("region", { name: "컨테이너 파일 해시" })).toBeTruthy();
+    // Per-field copy and the record JSON copy.
+    expect(screen.getByRole("button", { name: "출발지 IP 복사" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "레코드 JSON 복사" })).toBeTruthy();
+  });
+
+  it("detection: banners for record state, 탐지 심각도 apart from the event level", () => {
+    render4624(
+      {
+        ...LOGON,
+        evtx_record_state: "slack-recovered",
+        rule: { title: "Remote interactive logon", level: "medium", mitre_tags: ["attack.t1021.001"] },
+      },
+      "eventlog-detection",
+    );
+    const banners = screen.getByTestId("record-banners");
+    expect(banners.textContent).toContain("슬랙 영역에서 복구한 레코드");
+    const core = screen.getByRole("region", { name: "레코드 핵심" }).textContent ?? "";
+    expect(core).toContain("탐지 심각도중간(medium)");
+    expect(core).toContain("레벨로그 항상(0)");
+  });
+
+  it("registry .reg binary values open as a hex dump with UTF-16 strings; garbage strings are hidden", () => {
+    const row: GridRow = {
+      ...evtx({}),
+      ref: { collection: "artifacts", kind: "windows-registry", locator: "/artifacts/2" },
+      artifactType: "registry-user-activity",
+      fields: {
+        details: {
+          key: String.raw`HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\RecentDocs`,
+          values: { MRUListEx: "hex:43,00,3a,00,5c,00,57,00,69,00,6e,00,00,00" },
+          decoded_values: {
+            a: { binary_payload: { utf16le_strings: ["report.pdf", "\u4e00\u9fa5\ua000\u4e8c\u4e09"] } },
+          },
+        },
+      },
+    };
+    render(
+      <MetaView
+        target={{ ref: row.ref, runId: "r1", sourcePath: row.sourcePath }}
+        preview={null}
+        metadata={null}
+        metadataError={null}
+        hashBusy={false}
+        row={row}
+        sessionMarks={[]}
+        onComputeHash={() => {}}
+      />,
+    );
+    const panel = screen.getByTestId("binary-panel");
+    expect(panel.textContent).toContain("이진 값 14바이트");
+    expect(panel.textContent).toContain(String.raw`C:\Win`);
+    expect(screen.getByTestId("utf16-hidden").textContent).toContain("1개는 숨겼습니다");
+    expect(document.body.textContent).not.toContain("\u4e00\u9fa5\ua000");
   });
 });

@@ -1,16 +1,23 @@
-/* Design tokens — the only palette/scale in the v2 console (plan U10, §4.5).
-   Budget: ≤ 40 colours per theme (here 37: 10 grays, 3 surfaces, 2 lines,
-   2 text, 4 accent, 4 status, 8 tags, deleted, focus, scrim, selected),
-   6 spacings, 6 font sizes, 3 densities.
-   Dark is the default; light applies via [data-theme="light"] or, when the
-   user has not chosen, prefers-color-scheme. Every theme block is complete
+/* Design tokens — the only palette/scale in the v2 console ("Forensic Slate",
+   visual-polish plan U-V1/U-V2/U-V8).
+   Colour budget: ≤ 40 per theme (here 38): 4 surfaces, 2 lines,
+   3 text, 4 accent (accent / hover / active / on-accent), 2 disabled, 1 scrim,
+   4 semantic status, 5 review statuses + 5 "on" foregrounds, 8 tags.
+   Aliases (--bg, --bg-panel, --bg-raised, --focus, --deleted) point at those
+   tokens and add no colours (--bg-selected / --bg-hover are color-mix tints);
+   components written before U-V1 keep working.
+   Dark is the default regardless of the OS setting; light applies only when
+   the user chose it ([data-theme="light"], persisted by state/slices/prefs.ts).
+   Printing always uses the light palette (ink). Every theme block is complete
    (scripts/check-contrast.mjs checks each one on its own: text ≥ 4.5:1,
-   borders / focus / tags ≥ 3:1). Do not add colour tokens elsewhere. */
+   borders / focus / status dots / tags ≥ 3:1). Do not add colour tokens elsewhere. */
 
 :root {
   --font-ui:
-    "Pretendard", "Noto Sans KR", "Malgun Gothic", "Apple SD Gothic Neo", "Segoe UI", system-ui, sans-serif;
-  --font-mono: "D2Coding", "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+    "RapidForensic UI", "Pretendard Variable", "Pretendard", "Noto Sans KR", "Malgun Gothic",
+    "Apple SD Gothic Neo", "Segoe UI", system-ui, sans-serif;
+  --font-mono:
+    "JetBrains Mono Variable", "D2Coding", "Cascadia Mono", Consolas, "RapidForensic UI", monospace;
 
   /* 6 font sizes */
   --fs-aux: 0.6875rem; /* 11px — 보조 텍스트 */
@@ -19,6 +26,8 @@
   --fs-panel-title: 0.875rem; /* 14px — 패널 제목 */
   --fs-screen-title: 1rem; /* 16px — 화면 제목 */
   --fs-case: 1.25rem; /* 20px — 케이스명 */
+  --lh: 1.4;
+  --tracking-heading: -0.01em;
 
   /* 6 spacings */
   --space-1: 4px;
@@ -34,9 +43,19 @@
   --row-h-roomy: 32px;
   --row-h: var(--row-h-default);
 
-  --radius: 4px;
+  /* Controls (U-V3): 28 default / 32 roomy, radius 6. */
+  --control-h: 28px;
+  --control-h-roomy: 32px;
+  /* Radius scale (review #16): sm 4 chips/badges, 6 controls/cards, lg 10 dialogs/popovers/landing. */
+  --radius-sm: 4px;
+  --radius: 6px;
+  --radius-lg: 10px;
+
+  /* Focus + motion (U-V8). */
   --focus-width: 2px;
+  --focus-offset: 1px;
   --motion: 120ms;
+  --ease: ease-out;
 }
 
 :root[data-density="compact"] {
@@ -47,190 +66,179 @@
   --row-h: var(--row-h-roomy);
 }
 
-/* Dark theme (default). */
+/* Dark theme — the default, whatever the OS prefers. */
 :root,
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --gray-50: #f4f6f8;
-  --gray-100: #dde2e8;
-  --gray-200: #b9c2cc;
-  --gray-300: #93a0ae;
-  --gray-400: #6e7d8d;
-  --gray-500: #5f6e7d;
-  --gray-600: #3a4753;
-  --gray-700: #28313b;
-  --gray-800: #1a2129;
-  --gray-900: #10151b;
-
-  --bg: var(--gray-900);
-  --bg-panel: var(--gray-800);
-  --bg-raised: var(--gray-700);
-  --bg-selected: #1d3550;
-  --line: var(--gray-500);
-  --line-subtle: var(--gray-600);
-  --text: var(--gray-100);
-  --text-muted: var(--gray-300);
+  --surface-0: #0e1217; /* app background */
+  --surface-1: #141920; /* panels, bars */
+  --surface-2: #1b222b; /* raised: buttons, hover, inputs-in-bars */
+  --surface-3: #232c37; /* popovers, menus, toasts */
+  --line: #68778a; /* control borders (≥ 3:1) */
+  --line-subtle: #262f3a; /* dividers, row rules */
+  --text: #e6eaef;
+  --text-muted: #a6b0bc;
+  --text-subtle: #939fac; /* placeholders, hints — still ≥ 4.5:1 */
   /* Disabled controls (incl. primary): never muted text on the accent fill (≈1.4:1). */
-  --disabled-bg: var(--gray-700);
-  --disabled-text: var(--gray-200);
+  --disabled-bg: #1b222b;
+  --disabled-text: #9aa5b1;
 
-  --accent: #4d9fff;
-  --accent-hover: #6fb1ff;
-  --accent-active: #2f88f0;
+  --accent: #5aa2ff;
+  --accent-hover: #78b3ff;
+  --accent-active: #3d8ef5;
   --on-accent: #0b1117;
-  --focus: #4d9fff;
   --scrim: #000000;
 
-  --ok: #3fb96f;
-  --warn: #d9a32e;
-  --danger: #e05d5d;
-  --info: #4d9fff;
+  --ok: #45c07a;
+  --warn: #e0aa3e;
+  --danger: #f47676;
+  --info: #5aa2ff;
 
-  --tag-1: #e05d5d;
-  --tag-2: #d9a32e;
-  --tag-3: #3fb96f;
-  --tag-4: #3fa7b9;
-  --tag-5: #4d9fff;
-  --tag-6: #8f7ae0;
-  --tag-7: #c96ab8;
-  --tag-8: #9a8f7a;
-
-  --deleted: #e05d5d;
+  --tag-1: #f06b6b;
+  --tag-2: #e0aa3e;
+  --tag-3: #45c07a;
+  --tag-4: #3fb3c4;
+  --tag-5: #5aa2ff;
+  --tag-6: #9784ec;
+  --tag-7: #d276c2;
+  --tag-8: #a59a84;
 
   /* Review-status colours (X3): one meaning, one colour on every screen. */
-  --status-relevant: #ef6b6b;
+  --status-relevant: #f06b6b;
   --status-relevant-on: #0b1117;
-  --status-bookmark: #3fb96f;
+  --status-bookmark: #45c07a;
   --status-bookmark-on: #0b1117;
-  --status-excluded: #e8863a;
+  --status-excluded: #eb8c45;
   --status-excluded-on: #0b1117;
-  --status-needs-review: #5aa8ff;
+  --status-needs-review: #5aa2ff;
   --status-needs-review-on: #0b1117;
-  --status-report: #a58bf0;
+  --status-report: #a98ff2;
   --status-report-on: #0b1117;
+
+  --shadow-pop: 0 8px 24px rgb(0 0 0 / 0.45), 0 0 0 1px rgb(0 0 0 / 0.2);
 }
 
-/* Light theme (explicit choice). */
+/* Light theme (explicit user choice only). */
 :root[data-theme="light"] {
   color-scheme: light;
-  --gray-50: #f7f9fb;
-  --gray-100: #eceff3;
-  --gray-200: #d5dbe2;
-  --gray-300: #b3bdc8;
-  --gray-400: #808c99;
-  --gray-500: #58646f;
-  --gray-600: #47535f;
-  --gray-700: #333d47;
-  --gray-800: #222a33;
-  --gray-900: #141a21;
+  --surface-0: #f3f5f8;
+  --surface-1: #ffffff;
+  --surface-2: #eaeef3;
+  --surface-3: #ffffff;
+  --line: #737f8c;
+  --line-subtle: #dde2e8;
+  --text: #121820;
+  --text-muted: #4b5663;
+  --text-subtle: #5a6572;
+  --disabled-bg: #eaeef3;
+  --disabled-text: #4f5a66;
+  /* Light rows sit on surface-1 (white, review #23): the 12% accent tint goes over that surface
+     (over surface-0 the info/accent text on a selected row lands at 4.50:1, under the gate). */
+  --bg-selected: color-mix(in srgb, var(--accent) 12%, var(--surface-1));
 
-  --bg: var(--gray-50);
-  --bg-panel: #ffffff;
-  --bg-raised: var(--gray-100);
-  --bg-selected: #dce9fa;
-  --line: var(--gray-400);
-  --line-subtle: var(--gray-200);
-  --text: var(--gray-900);
-  --text-muted: var(--gray-500);
-  --disabled-bg: var(--gray-100);
-  --disabled-text: var(--gray-600);
-
-  --accent: #1a64c4;
+  --accent: #1a63c2;
   --accent-hover: #1757aa;
   --accent-active: #134a91;
   --on-accent: #ffffff;
-  --focus: #1a64c4;
   --scrim: #000000;
 
-  --ok: #1d7d47;
-  --warn: #8a610f;
-  --danger: #b83232;
-  --info: #1a64c4;
+  --ok: #176e3e;
+  --warn: #7c580d;
+  --danger: #b63131;
+  --info: #1a63c2;
 
-  --tag-1: #b83232;
-  --tag-2: #8a610f;
-  --tag-3: #1d7d47;
-  --tag-4: #187383;
-  --tag-5: #1a64c4;
+  --tag-1: #b63131;
+  --tag-2: #87600f;
+  --tag-3: #1b7a45;
+  --tag-4: #177283;
+  --tag-5: #1a63c2;
   --tag-6: #5f4bc0;
   --tag-7: #a03e8e;
   --tag-8: #6e6350;
 
-  --deleted: #b83232;
-
-  --status-relevant: #b83232;
+  --status-relevant: #b63131;
   --status-relevant-on: #ffffff;
-  --status-bookmark: #1d7d47;
+  --status-bookmark: #1b7a45;
   --status-bookmark-on: #ffffff;
-  --status-excluded: #a8530c;
+  --status-excluded: #a5520c;
   --status-excluded-on: #ffffff;
-  --status-needs-review: #1a64c4;
+  --status-needs-review: #1a63c2;
   --status-needs-review-on: #ffffff;
-  --status-report: #6f4bc0;
+  --status-report: #6c4bbf;
   --status-report-on: #ffffff;
+
+  --shadow-pop: 0 8px 24px rgb(16 24 32 / 0.14), 0 0 0 1px rgb(16 24 32 / 0.06);
 }
 
-/* OS preference applies only when the user has not chosen a theme.
-   Keep identical to the [data-theme="light"] block above. */
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme]) {
+/* Print always uses the light palette (white paper for surface-0). Keep the
+   other values identical to the light block above. */
+@media print {
+  :root,
+  :root[data-theme] {
     color-scheme: light;
-    --gray-50: #f7f9fb;
-    --gray-100: #eceff3;
-    --gray-200: #d5dbe2;
-    --gray-300: #b3bdc8;
-    --gray-400: #808c99;
-    --gray-500: #58646f;
-    --gray-600: #47535f;
-    --gray-700: #333d47;
-    --gray-800: #222a33;
-    --gray-900: #141a21;
-    --bg: var(--gray-50);
-    --bg-panel: #ffffff;
-    --bg-raised: var(--gray-100);
-    --bg-selected: #dce9fa;
-    --line: var(--gray-400);
-    --line-subtle: var(--gray-200);
-    --text: var(--gray-900);
-    --text-muted: var(--gray-500);
-    --disabled-bg: var(--gray-100);
-    --disabled-text: var(--gray-600);
-    --accent: #1a64c4;
+    --surface-0: #ffffff;
+    --surface-1: #ffffff;
+    --surface-2: #eaeef3;
+    --surface-3: #ffffff;
+    --line: #737f8c;
+    --line-subtle: #dde2e8;
+    --text: #121820;
+    --text-muted: #4b5663;
+    --text-subtle: #5a6572;
+    --disabled-bg: #eaeef3;
+    --disabled-text: #4f5a66;
+    --bg-selected: color-mix(in srgb, var(--accent) 12%, var(--surface-1));
+    --accent: #1a63c2;
     --accent-hover: #1757aa;
     --accent-active: #134a91;
     --on-accent: #ffffff;
-    --focus: #1a64c4;
     --scrim: #000000;
-    --ok: #1d7d47;
-    --warn: #8a610f;
-    --danger: #b83232;
-    --info: #1a64c4;
-    --tag-1: #b83232;
-    --tag-2: #8a610f;
-    --tag-3: #1d7d47;
-    --tag-4: #187383;
-    --tag-5: #1a64c4;
+    --ok: #176e3e;
+    --warn: #7c580d;
+    --danger: #b63131;
+    --info: #1a63c2;
+    --tag-1: #b63131;
+    --tag-2: #87600f;
+    --tag-3: #1b7a45;
+    --tag-4: #177283;
+    --tag-5: #1a63c2;
     --tag-6: #5f4bc0;
     --tag-7: #a03e8e;
     --tag-8: #6e6350;
-    --deleted: #b83232;
-    --status-relevant: #b83232;
+    --status-relevant: #b63131;
     --status-relevant-on: #ffffff;
-    --status-bookmark: #1d7d47;
+    --status-bookmark: #1b7a45;
     --status-bookmark-on: #ffffff;
-    --status-excluded: #a8530c;
+    --status-excluded: #a5520c;
     --status-excluded-on: #ffffff;
-    --status-needs-review: #1a64c4;
+    --status-needs-review: #1a63c2;
     --status-needs-review-on: #ffffff;
-    --status-report: #6f4bc0;
+    --status-report: #6c4bbf;
     --status-report-on: #ffffff;
+    --shadow-pop: none;
   }
 }
 
-/* Global focus ring (plan §4.4): visible for keyboard users only. */
+/* Aliases — same values, older names (no new colours). Derived tints are colour-mix of
+   theme tokens (no literal colour of their own; scripts/check-contrast.mjs resolves them):
+   selected row/tree item = accent 12% over surface-0; hover = text 4% over whatever is below. */
+:root {
+  --bg-selected: color-mix(in srgb, var(--accent) 12%, var(--surface-0));
+  --bg-hover: color-mix(in srgb, var(--text) 4%, transparent);
+  /* Caution box in dialogs (review #4): 10% warn over the dialog surface. */
+  --caution-bg: color-mix(in srgb, var(--warn) 10%, var(--surface-1));
+  --bg: var(--surface-0);
+  --bg-panel: var(--surface-1);
+  --bg-raised: var(--surface-2);
+  --bg-popover: var(--surface-3);
+  --focus: var(--accent);
+  --deleted: var(--danger);
+}
+
+/* Global focus ring (U-V8): 2px accent, offset 1px, keyboard users only. */
 :focus-visible {
   outline: var(--focus-width) solid var(--focus);
-  outline-offset: 2px;
+  outline-offset: var(--focus-offset);
 }
 
 :focus:not(:focus-visible) {

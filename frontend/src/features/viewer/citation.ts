@@ -4,12 +4,15 @@
 
 import type { GridRow } from "../../contracts/collection";
 import type { MarkAction, ViewerTarget } from "../../contracts/viewer";
+import { evidenceTime } from "../../utils/time";
+import { timestampKindLabel } from "../../utils/timeKinds";
 import {
   type ApplyResult,
   applyReviewAction,
   resetCaseDbHandles,
   reviewTargetOf,
 } from "../grid/reviewActions";
+import { layoutFields, recordIdentifier, recordLayout } from "./fieldSheets";
 import { formatOffset } from "./hex";
 
 export const MARK_LABELS: Record<MarkAction, string> = {
@@ -33,12 +36,46 @@ export function locatorText(target: ViewerTarget): string {
   return [ref.collection, ref.kind, ref.locator].filter(Boolean).join(":");
 }
 
-/** One-line citation: path + sha256 + locator + run id (+ byte range / sqlite row when highlighted). */
-export function buildCitation(target: ViewerTarget, sha256: string | null): string {
+/** The record's identifier and time for citations ("EventRecordID 1001", evidence-format time + kind). */
+export function recordCitationParts(row: GridRow | null | undefined, tz: string): string[] {
+  if (!row) return [];
+  const parts: string[] = [];
+  const id = recordIdentifier(row);
+  if (id) parts.push(`레코드=${id.label} ${id.value}`);
+  const layout = recordLayout(row);
+  const entry = layout.core.find((e) => e.format === "time" && evidenceTime(scalarOf(e.raw), tz) !== null);
+  const value = entry ? scalarOf(entry.raw) : row.timestamp;
+  const reading = evidenceTime(value, tz);
+  if (reading) {
+    const fields = layoutFields(row);
+    const own = entry?.key === "timestamp" ? (fields.timestamp_kind ?? fields.timestamp_label) : undefined;
+    const kind = typeof own === "string" && own ? own : (entry?.timeKind ?? "");
+    const kindText = kind ? `${entry?.label ?? timestampKindLabel(kind)}: ` : "";
+    parts.push(`시각=${kindText}${reading.text}`);
+  }
+  return parts;
+}
+
+function scalarOf(value: unknown): string | number | null {
+  return typeof value === "string" || typeof value === "number" ? value : null;
+}
+
+/**
+ * One-line citation: path + container sha256 + locator (+ record id + record time when the row is
+ * known) + run id (+ byte range / sqlite row when highlighted).
+ */
+export function buildCitation(
+  target: ViewerTarget,
+  sha256: string | null,
+  row?: GridRow | null,
+  tz = "utc",
+): string {
+  const isArtifact = target.ref.collection === "artifacts";
   const parts = [
     `원본=${target.sourcePath ?? "(원본 경로 없음)"}`,
-    `sha256=${sha256 || "미계산"}`,
+    `${row && isArtifact ? "컨테이너 sha256" : "sha256"}=${sha256 || "미계산"}`,
     `위치=${locatorText(target)}`,
+    ...recordCitationParts(row, tz),
     `런=${target.runId}`,
   ];
   const highlight = target.highlight;

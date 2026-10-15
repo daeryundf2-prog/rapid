@@ -11,6 +11,7 @@ import { announce } from "../../a11y";
 import { type AnalysisKind, fetchAnalysisRowsPage, startAnalysis } from "../../api/analyses";
 import { ApiError } from "../../api/client";
 import { runDisplayName } from "../../app/collections";
+import { Icon } from "../../icons";
 import { useRuns } from "../../state/hooks";
 import { useAppStore } from "../../state/store";
 import { BrowsePanel } from "../case/BrowsePanel";
@@ -369,14 +370,41 @@ function Field({ field, value, error, showError, onChange, onTouch, runId }: Fie
     );
   }
   const text = typeof value === "string" ? value : "";
+  if (field.type === "int") {
+    // Numbers (review #4): a 120px field with its unit after it, not a full-width text box.
+    return (
+      <div className="case-field analysis-field">
+        <label htmlFor={id}>{field.label}</label>
+        <span className="analysis-number">
+          <input
+            id={id}
+            type="text"
+            inputMode="numeric"
+            className="analysis-number-input"
+            value={text}
+            aria-describedby={describedBy}
+            aria-invalid={Boolean(visibleError)}
+            onBlur={onTouch}
+            onChange={(event) => onChange(event.target.value)}
+          />
+          {field.unit ? (
+            <span className="analysis-unit" aria-hidden="true">
+              {field.unit}
+            </span>
+          ) : null}
+        </span>
+        {help}
+        {errorLine}
+      </div>
+    );
+  }
   return (
     <div className="case-field analysis-field">
       <label htmlFor={id}>{field.label}</label>
-      <div className="case-actions" style={{ justifyContent: "stretch" }}>
+      <div className="analysis-input-row">
         <input
           id={id}
           type="text"
-          inputMode={field.type === "int" ? "numeric" : undefined}
           style={{ flex: 1 }}
           value={text}
           placeholder={field.type === "text" ? field.placeholder : undefined}
@@ -447,6 +475,7 @@ export function AnalysisDialog({
     ? "스냅샷 목록을 불러오는 중입니다"
     : (blocked ?? firstAnalysisError(errors));
   const label = kindLabel(kind);
+  const formId = useId();
 
   const start = useMutation({
     mutationFn: () => startAnalysis(runId, kind, buildAnalysisOptions(kind, form, { runId })),
@@ -464,10 +493,35 @@ export function AnalysisDialog({
   });
 
   return (
-    <Modal title={`${label} 실행`} onClose={onClose} wide>
+    <Modal
+      title={`${label} 실행`}
+      onClose={onClose}
+      wide
+      footer={
+        <>
+          <button type="button" className="button roomy" onClick={onClose}>
+            취소
+          </button>
+          <ReasonButton
+            className="button primary roomy"
+            type="submit"
+            form={formId}
+            reason={start.isPending ? "요청을 보내는 중입니다" : submitReason}
+            data-testid="analysis-submit"
+            // A blocked submit still reveals every field's message (pointer and keyboard).
+            onMouseDown={() => setAttempted(true)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") setAttempted(true);
+            }}
+          >
+            {label} 실행
+          </ReasonButton>
+        </>
+      }
+    >
       <form
-        className="case-modal-body analysis-form"
-        style={{ padding: 0 }}
+        id={formId}
+        className="analysis-form"
         noValidate
         onSubmit={(event) => {
           event.preventDefault();
@@ -475,9 +529,12 @@ export function AnalysisDialog({
           if (!submitReason && !start.isPending) start.mutate();
         }}
       >
-        <p className="analysis-caution" data-testid="analysis-caution">
-          <strong>예상 범위·주의</strong> {KIND_CAUTION[kind]}
-        </p>
+        <div className="analysis-caution" data-testid="analysis-caution">
+          <Icon name="alert" className="analysis-caution-icon" />
+          <p>
+            <strong>예상 범위·주의</strong> {KIND_CAUTION[kind]}
+          </p>
+        </div>
         {kind === "ocr-batch" ? (
           <p className="analysis-help" data-testid="analysis-target">
             대상:{" "}
@@ -511,24 +568,6 @@ export function AnalysisDialog({
           />
         ))}
         {start.error ? <ErrorText>{messageOf(start.error)}</ErrorText> : null}
-        <div className="case-actions">
-          <button type="button" className="button" onClick={onClose}>
-            취소
-          </button>
-          <ReasonButton
-            className="button primary"
-            type="submit"
-            reason={start.isPending ? "요청을 보내는 중입니다" : submitReason}
-            data-testid="analysis-submit"
-            // A blocked submit still reveals every field's message (pointer and keyboard).
-            onMouseDown={() => setAttempted(true)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") setAttempted(true);
-            }}
-          >
-            실행
-          </ReasonButton>
-        </div>
       </form>
     </Modal>
   );

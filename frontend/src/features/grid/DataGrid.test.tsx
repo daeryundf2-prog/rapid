@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useToastStore } from "../../components/toastStore";
 import type { GridRow } from "../../contracts/collection";
 import type { CommandContext } from "../../contracts/command";
 import { getRegisteredCommand, useGridLocalStore } from "./adapter";
@@ -237,9 +238,27 @@ describe("DataGrid keyboard", () => {
     fireEvent.keyDown(rowAt(0), { key: "F10", shiftKey: true });
     const menu = await screen.findByRole("menu", { name: "행 메뉴" });
     expect(screen.getAllByRole("button", { name: "행 메뉴" })[0]?.getAttribute("aria-expanded")).toBe("true");
-    const labels = within(menu)
-      .getAllByRole("menuitem")
-      .map((i) => i.textContent);
+    const items = within(menu).getAllByRole("menuitem");
+    const labels = items.map((i) => i.querySelector(".menu-item-label")?.textContent);
+    // Review #13: right-aligned key hints from the registry, and a disabled item's reason line.
+    const keys = Object.fromEntries(
+      items.map((i) => [
+        i.querySelector(".menu-item-label")?.textContent,
+        i.querySelector(".menu-item-kbd")?.textContent,
+      ]),
+    );
+    expect(keys).toMatchObject({
+      "원본 보기": "Enter",
+      "관련 있음 표시": "R",
+      "재검토 표시": "I",
+      "제외 표시": "X",
+      북마크: "B",
+    });
+    expect(keys["보고서 포함 표시"]).toBeUndefined();
+    const ocr = items.find((i) => i.dataset.command === "grid.ocrSelected");
+    expect(ocr?.querySelector(".menu-item-reason")?.textContent).toBe(
+      ocr?.getAttribute("data-disabled-reason"),
+    );
     expect(labels).toEqual([
       "원본 보기",
       "헥스로 보기",
@@ -248,6 +267,16 @@ describe("DataGrid keyboard", () => {
       "타임라인에서 보기",
       "같은 출처 행",
       "선택 행 OCR 실행",
+      // Record pivots (viewer redesign §5), each disabled with a reason when the row lacks the field.
+      "같은 사용자/SID",
+      "같은 로그온 ID",
+      "같은 해시",
+      "같은 대상 경로/실행 파일",
+      "같은 레지스트리 키",
+      "같은 출처 파일",
+      "타임라인 ±5분",
+      "탐지 → 원 이벤트 열기",
+      "원본 아티팩트 열기",
       "관련 있음 표시",
       "재검토 표시",
       "제외 표시",
@@ -261,14 +290,17 @@ describe("DataGrid keyboard", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
-  it("grid.css never hides the ⋯ row-menu button from hit-testing (dimmed only)", () => {
+  it("grid.css never hides the ⋯ row-menu button from hit-testing (transparent until hover/focus)", () => {
     const gridCss = readFileSync(join(process.cwd(), "src/features/grid/grid.css"), "utf8");
     const rules = [...gridCss.matchAll(/([^{}]*\.grid-rowmenu-btn[^{}]*)\{([^}]*)\}/g)];
     expect(rules.length).toBeGreaterThan(0);
     for (const [, , body] of rules) {
       expect(body).not.toMatch(/visibility\s*:\s*hidden|display\s*:\s*none|pointer-events\s*:\s*none/);
-      expect(body).not.toMatch(/opacity\s*:\s*0\s*;/);
     }
+    // Review #9: opacity 0 at rest, back to 1 on row hover / focus (always hit-testable, 20×20).
+    const shown = rules.find(([, selector]) => /\.grid-row:hover \.grid-rowmenu-btn/.test(selector ?? ""));
+    expect(shown?.[2]).toMatch(/opacity:\s*1/);
+    expect(shown?.[1]).toMatch(/:focus-within/);
   });
 
   it("a row-menu review item marks the menu's row (case-DB review-batch)", async () => {
@@ -299,7 +331,8 @@ describe("DataGrid keyboard", () => {
     expect(button.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(button);
     const menu = await screen.findByRole("menu", { name: "행 메뉴" });
-    expect(within(menu).getAllByRole("menuitem")).toHaveLength(12);
+    // 7 row actions + 9 pivots + 5 review marks (+ contextual entries that apply).
+    expect(within(menu).getAllByRole("menuitem")).toHaveLength(21);
     const trigger = screen.getAllByRole("button", { name: "행 메뉴" })[1] as HTMLButtonElement;
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
     expect(trigger.getAttribute("aria-controls")).toBe(menu.id);
@@ -341,6 +374,60 @@ describe("DataGrid filter", () => {
   });
 });
 
+describe("grid chrome (visual-polish S3 / §0)", () => {
+  it("column controls are one 열 설정 button over the header's right end, outside the ARIA grid", async () => {
+    await renderFiles(20);
+    const button = screen.getByRole("button", { name: "열 설정" });
+    expect(button.closest('[role="grid"]')).toBeNull();
+    expect(button.closest(".grid-head-tools")).toBeTruthy();
+    // No separate column toolbar row any more.
+    expect(screen.queryByRole("toolbar", { name: /그리드 도구/ })).toBeNull();
+    button.focus();
+    fireEvent.click(button);
+    const popover = screen.getByRole("dialog", { name: "열 설정" });
+    expect(within(popover).getByRole("combobox", { name: "열 구성" })).toBeTruthy();
+    expect(within(popover).getByRole("combobox", { name: "밀도" })).toBeTruthy();
+    expect(within(popover).getByRole("group", { name: "표시할 열" })).toBeTruthy();
+    expect(within(popover).getByTestId("grid-colfilter-toggle")).toBeTruthy();
+    expect(document.activeElement).toBe(within(popover).getByRole("combobox", { name: "열 구성" }));
+    fireEvent.change(within(popover).getByRole("combobox", { name: "밀도" }), {
+      target: { value: "compact" },
+    });
+    expect(screen.getByRole("region", { name: /그리드$/ }).getAttribute("data-density")).toBe("compact");
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "열 설정" })).toBeNull();
+    expect(document.activeElement).toBe(button);
+  });
+
+  it("the batch bar floats over the grid: selecting does not insert a row above the grid", async () => {
+    await renderFiles(20);
+    const grid = screen.getByRole("grid");
+    const before = grid.previousElementSibling;
+    rowAt(0).focus();
+    fireEvent.keyDown(rowAt(0), { key: " " });
+    // One row: the viewer and the row menu serve it, no bar (review #2).
+    expect(screen.queryByRole("toolbar", { name: "선택 항목 일괄 처리" })).toBeNull();
+    expect(screen.getByRole("region", { name: /그리드$/ }).hasAttribute("data-batch")).toBe(false);
+    fireEvent.keyDown(rowAt(0), { key: "ArrowDown", shiftKey: true });
+    const bar = screen.getByRole("toolbar", { name: "선택 항목 일괄 처리" });
+    // Rendered after the scroll area inside the grid frame (absolutely positioned), never above it.
+    expect(grid.previousElementSibling).toBe(before);
+    expect(bar.parentElement?.classList.contains("grid-frame")).toBe(true);
+    expect(grid.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole("region", { name: /그리드$/ }).hasAttribute("data-batch")).toBe(true);
+    // 관련 있음 is the one primary review action; the rest are ghost buttons.
+    expect(within(bar).getByRole("button", { name: "관련 있음" }).classList.contains("primary")).toBe(true);
+    expect(within(bar).getByRole("button", { name: "제외" }).classList.contains("ghost")).toBe(true);
+  });
+
+  it("the row menu trigger is an icon button (no text glyph)", async () => {
+    await renderFiles(5);
+    const trigger = within(rowAt(0)).getByRole("button", { name: "행 메뉴" });
+    expect(trigger.textContent).toBe("");
+    expect(trigger.querySelector("svg[data-icon='more']")).toBeTruthy();
+  });
+});
+
 describe("DataGrid batch commands", () => {
   it("hides the batch bar with 0 selection and every grid.batch.* command is disabled with a reason", async () => {
     await renderFiles();
@@ -369,7 +456,7 @@ describe("DataGrid batch commands", () => {
     const bar = screen.getByRole("toolbar", { name: "선택 항목 일괄 처리" });
     expect(within(bar).getByText("선택 2건")).toBeTruthy();
     expect(getRegisteredCommand("grid.batch.relevant")?.disabledReason?.(ctx())).toBeUndefined();
-    fireEvent.click(within(bar).getByRole("button", { name: "관련" }));
+    fireEvent.click(within(bar).getByRole("button", { name: "관련 있음" }));
     await waitFor(() => expect(calls.filter((c) => c.url.includes("/review-batch"))).toHaveLength(1));
     expect(calls.find((c) => c.url.includes("/review-batch"))?.body).toMatchObject({
       status: "relevant",
@@ -378,7 +465,10 @@ describe("DataGrid batch commands", () => {
         { collection: "files", locator: "/candidates/1" },
       ],
     });
-    await waitFor(() => expect(screen.getByText(/관련: 2건 처리했습니다/)).toBeTruthy());
+    // Grid feedback goes to the shell toast stack (U-V7).
+    await waitFor(() =>
+      expect(useToastStore.getState().toasts.some((t) => /관련: 2건 처리했습니다/.test(t.text))).toBe(true),
+    );
     expect(within(rowAt(0)).getByText("관련 있음")).toBeTruthy();
   });
 
@@ -392,20 +482,27 @@ describe("DataGrid batch commands", () => {
     await waitFor(() => expect(rows().length).toBeGreaterThan(0));
     rowAt(0).focus();
     fireEvent.keyDown(rowAt(0), { key: " " });
+    fireEvent.keyDown(rowAt(0), { key: "ArrowDown", shiftKey: true });
     // Review column is not part of the files preset, so inspect the loaded row model through the toast path.
     fireEvent.click(screen.getByRole("button", { name: "제외" }));
-    await waitFor(() => expect(screen.getByText(/제외 처리에 실패했습니다\. case locked/)).toBeTruthy());
+    // Grid feedback goes to the shell toast stack (U-V7).
+    await waitFor(() =>
+      expect(
+        useToastStore.getState().toasts.some((t) => /제외 처리에 실패했습니다\. case locked/.test(t.text)),
+      ).toBe(true),
+    );
     expect(useGridLocalStore.getState().toasts.some((t) => t.tone === "error")).toBe(true);
   });
 
   it("추출 is disabled (aria-disabled + reason) when the rows have no source path and clicking explains why", async () => {
     installFetch({
-      "/docs": () => jsonResponse({ results: [{ kind: "pdf" }], total: 1 }),
+      "/docs": () => jsonResponse({ results: [{ kind: "pdf" }, { kind: "pdf" }], total: 2 }),
     });
     useGridLocalStore.getState().setRoute({ collection: { id: "docs" } });
     renderWithClient(<DataGrid />);
-    await waitFor(() => expect(rows().length).toBe(1));
+    await waitFor(() => expect(rows().length).toBe(2));
     fireEvent.keyDown(rowAt(0), { key: " " });
+    fireEvent.keyDown(rowAt(0), { key: "ArrowDown", shiftKey: true });
     const extract = screen.getByRole("button", { name: "추출" });
     expect(extract.getAttribute("aria-disabled")).toBe("true");
     expect(extract.getAttribute("title")).toBe("원본 경로가 없는 행입니다.");
@@ -429,6 +526,7 @@ describe("DataGrid batch commands", () => {
     renderWithClient(<DataGrid />);
     await waitFor(() => expect(rows().length).toBe(5));
     fireEvent.keyDown(rowAt(0), { key: " " });
+    fireEvent.keyDown(rowAt(0), { key: "ArrowDown", shiftKey: true });
     fireEvent.click(screen.getByRole("button", { name: "추출" }));
     const panel = await screen.findByRole("status", { name: "추출 결과" });
     expect(panel.textContent).toContain("추출 1건 / 선택 1건");
@@ -441,6 +539,7 @@ describe("DataGrid batch commands", () => {
     const { calls } = await renderFiles();
     rowAt(0).focus();
     fireEvent.keyDown(rowAt(0), { key: " " });
+    fireEvent.keyDown(rowAt(0), { key: "ArrowDown", shiftKey: true });
     fireEvent.click(screen.getByRole("button", { name: "태그" }));
     const input = await screen.findByPlaceholderText("태그 이름");
     fireEvent.change(input, { target: { value: "증거" } });
@@ -475,12 +574,16 @@ describe("DataGrid notes and AXIOM preset", () => {
         { collection: "files", locator: "/candidates/1" },
       ],
     });
-    await waitFor(() => expect(screen.getByText(/메모: 2건에 저장했습니다/)).toBeTruthy());
+    // Grid feedback goes to the shell toast stack (U-V7).
+    await waitFor(() =>
+      expect(useToastStore.getState().toasts.some((t) => /메모: 2건에 저장했습니다/.test(t.text))).toBe(true),
+    );
   });
 
   it("the persisted AXIOM preset pins the chip column after the select cell and renders status chips", async () => {
     window.localStorage.setItem("rapidtriage.grid.preset", "axiom");
     await renderFiles(20);
+    fireEvent.click(screen.getByRole("button", { name: "열 설정" }));
     expect((screen.getByRole("combobox", { name: "열 구성" }) as HTMLSelectElement).value).toBe("axiom");
     expect(screen.getByRole("region", { name: /그리드$/ }).getAttribute("data-preset")).toBe("axiom");
     const headers = screen.getAllByRole("columnheader");
@@ -489,13 +592,15 @@ describe("DataGrid notes and AXIOM preset", () => {
     const chipCell = rowAt(0).querySelector<HTMLElement>('[data-col="tagstatus"]');
     const titleCell = rowAt(0).querySelector<HTMLElement>('[data-col="title"]');
     expect(chipCell?.classList.contains("grid-cell-first")).toBe(true);
-    expect(chipCell?.style.left).toBe("60px");
+    expect(chipCell?.style.left).toBe("56px");
     expect(titleCell?.classList.contains("grid-cell-first")).toBe(true);
-    expect(titleCell?.style.left).toBe("210px");
+    expect(titleCell?.style.left).toBe("206px");
 
+    // Two rows: the batch bar is for multi-selections (review #2).
     rowAt(0).focus();
     fireEvent.keyDown(rowAt(0), { key: " " });
-    fireEvent.click(screen.getByRole("button", { name: "관련" }));
+    fireEvent.keyDown(rowAt(0), { key: "ArrowDown", shiftKey: true });
+    fireEvent.click(screen.getByRole("button", { name: "관련 있음" }));
     await waitFor(() =>
       expect(
         rowAt(0).querySelector('[data-col="tagstatus"] .status-chip[data-status="relevant"]'),

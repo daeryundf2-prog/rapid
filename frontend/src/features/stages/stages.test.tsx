@@ -237,6 +237,74 @@ describe("처리 stage (Q-IA-3)", () => {
     // Every analysis kind has its card.
     expect(screen.getAllByTestId(/^analysis-card-/)).toHaveLength(6);
   });
+
+  it("panel cards show state, last run and a run button; the plan table reads counts and notes (S8)", async () => {
+    setRoute(`#/case/${RUN}/process`);
+    installFetch({
+      "/summary": () =>
+        jsonResponse({
+          steps: [
+            { name: "files", status: "completed", candidate_count: 4770, scanned_file_count: 19033 },
+            {
+              name: "docs-extract",
+              status: "skipped",
+              disabled: true,
+              disabled_reason: "extraction-disabled-by-default; rerun with --extract",
+            },
+            {
+              name: "artifacts-browser",
+              status: "completed",
+              artifact_count: 0,
+              warning_level: "notice",
+              warning_messages: ["No browser artifact rows were collected."],
+            },
+          ],
+        }),
+      "/analyses": () =>
+        jsonResponse({
+          analyses: [
+            job({
+              analysis_id: "c1",
+              kind: "carve",
+              status: "completed",
+              row_count: 35,
+              finished_at: "2026-10-12T12:37:17Z",
+            }),
+          ],
+        }),
+    });
+    off.push(registerAnalysisCommands(new QueryClient()));
+    renderWithClient(
+      <>
+        <ProcessPanel />
+        <ProcessPage />
+      </>,
+    );
+    const panel = screen.getByTestId("process-panel");
+    const card = await within(panel).findByTestId("process-analysis-carve");
+    await waitFor(() => expect(within(card).getByRole("link").getAttribute("aria-label")).toBe("카빙, 완료"));
+    expect(card.textContent).toContain("35건");
+    expect(within(panel).getByTestId("process-analysis-ocr-batch").textContent).toContain(
+      "아직 실행하지 않았습니다",
+    );
+    // Cards come before the run list, each with its own run button.
+    const order = within(panel)
+      .getAllByRole("heading")
+      .map((h) => h.textContent);
+    expect(order).toEqual(["추가 분석", "런"]);
+    fireEvent.click(within(card).getByRole("button", { name: "카빙 실행" }));
+    await waitFor(() => expect(useAnalysisStore.getState().dialog?.kind).toBe("carve"));
+
+    const table = await screen.findByRole("table", { name: "처리 단계" });
+    expect(table.textContent).toContain("후보 4,770");
+    expect(table.textContent).toContain("스캔 19,033");
+    expect(table.textContent).toContain("기본 설정에서 꺼짐");
+    expect(table.textContent).toContain("메시지 1건");
+    expect(table.textContent).not.toMatch(/disabled-by-default|No browser/);
+    expect(screen.getByText("3단계 · 완료 2 · 건너뜀 1")).toBeTruthy();
+    // No "P2" placeholder sentence any more: the table is the plan.
+    expect(screen.queryByText(/P2/)).toBeNull();
+  });
 });
 
 describe("검토 / 보고 stages (Q-IA-5)", () => {

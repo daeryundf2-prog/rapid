@@ -89,6 +89,7 @@ export function resetGridStore(): void {
     viewerFocusRequests: 0,
     density: "default",
     toasts: [],
+    selectionScope: null,
     commands: new Map(),
     visibleColumnIds: null,
   });

@@ -36,6 +36,14 @@ export function collectionDef(id: CollectionId): CollectionDef {
   return COLLECTIONS[id];
 }
 
+/**
+ * The column that can never be hidden: 항목 (`title`) when the layout has one, else the first
+ * column. Locking by position hid 항목 behind 시각 once 시각 led the generic layout (review B2-6).
+ */
+export function lockedColumnId(columns: readonly ColumnSpec[]): string | undefined {
+  return columns.find((c) => c.id === "title")?.id ?? columns[0]?.id;
+}
+
 export function presetColumnIds(columns: ColumnSpec[], preset: GridPreset): string[] {
   return columns.filter((c) => c.presets.includes(preset)).map((c) => c.id);
 }

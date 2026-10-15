@@ -59,6 +59,7 @@ export const ICON_PATHS = {
   tag: ["M3 12V3h9l9 9-9 9z", "M7.5 7.5h.01"],
   filter: ["M3 5h18l-7 8v6l-4 2v-8z"],
   columns: ["M3 4h18v16H3z", "M9 4v16M15 4v16"],
+  "bar-chart": ["M4 20h16", "M7 16v-5M12 16V6M17 16v-8"],
   density: ["M4 6h16M4 10h16M4 14h16M4 18h16"],
   clock: [circle(12, 12, 9), "M12 7v5l3 2"],
   shield: ["M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z", "M12 8v4M12 15h.01"],
@@ -75,6 +76,12 @@ export const ICON_PATHS = {
   ],
   more: ["M5 12h.01M12 12h.01M19 12h.01"],
   keyboard: ["M2 6h20v12H2z", "M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"],
+  /** Lucide panel-right-open: the collapsed viewer rail (review #19). */
+  "panel-right-open": [
+    "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z",
+    "M15 3v18",
+    "M10 15l-3-3 3-3",
+  ],
   "panel-right": ["M3 4h18v16H3z", "M15 4v16"],
   sidebar: ["M3 4h18v16H3z", "M9 4v16"],
   report: ["M6 3h8l4 4v14H6z", "M14 3v4h4", "M9 17v-3M12 17v-6M15 17v-4"],

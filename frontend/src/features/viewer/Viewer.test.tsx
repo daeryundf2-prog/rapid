@@ -61,7 +61,28 @@ function routes(previewBody: unknown, extra: Record<string, Handler> = {}) {
 const region = () => screen.getByRole("region", { name: "원본 뷰어" });
 const tab = (name: string) => screen.getByRole("tab", { name });
 const live = () => (screen.getByTestId("live-polite").textContent ?? "").trim();
-const tool = (id: string) => document.querySelector(`[data-command="${id}"]`) as HTMLButtonElement;
+/** Menu holding each viewer command (review #6): one "⋯" 더보기 menu with 리뷰 / 원본 sections. */
+const MENU_OF: Record<string, string> = {
+  "viewer.open-original": "더보기",
+  "viewer.hash": "더보기",
+  "viewer.copy-path": "더보기",
+  "viewer.cite": "더보기",
+  "navigate.rows-for-source": "더보기",
+  "viewer.mark.needs-review": "더보기",
+  "viewer.mark.excluded": "더보기",
+  "viewer.mark.include-in-report": "더보기",
+  "viewer.mark.bookmark": "더보기",
+  "viewer.note": "더보기",
+};
+/** The control of a viewer command, opening the menu that holds it first. */
+const tool = (id: string) => {
+  const selector = `[data-command="${id}"]`;
+  const shown = document.querySelector(selector);
+  if (shown) return shown as HTMLButtonElement;
+  const menu = MENU_OF[id];
+  if (menu) fireEvent.click(screen.getByRole("button", { name: menu }));
+  return document.querySelector(selector) as HTMLButtonElement;
+};
 
 async function show(
   previewBody: Record<string, unknown>,
@@ -467,9 +488,28 @@ describe("Viewer — history and navigation", () => {
     await waitFor(() => expect(live()).toBe("다음 대상이 없습니다."));
   });
 
+  it("keeps Alt+←/→ history and the chosen tab across a remount (stage switch, review B2-3)", async () => {
+    routes(preview({ preview_type: "text", extension: ".txt", text: "hi" }));
+    const first = render(<Viewer />);
+    act(() => setViewerTarget(target({ ref: { collection: "files", locator: "/candidates/1" } })));
+    act(() => setViewerTarget(target({ ref: { collection: "files", locator: "/candidates/2" } })));
+    await waitFor(() => expect(screen.getByRole("tab", { name: /헥스/ })).toBeTruthy());
+    fireEvent.click(screen.getByRole("tab", { name: /헥스/ }));
+    expect(screen.getByRole("tab", { name: /헥스/ }).getAttribute("aria-selected")).toBe("true");
+    first.unmount(); // 탐색 → 처리 (two columns, no viewer)
+    render(<Viewer />); // … and back to 탐색
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { name: /헥스/ }).getAttribute("aria-selected")).toBe("true"),
+    );
+    fireEvent.keyDown(region(), { key: "ArrowLeft", altKey: true });
+    expect(getViewerTarget()?.ref.locator).toBe("/candidates/1");
+  });
+
   it("'같은 출처의 다른 행' emits navigate.rows-for-source when a handler is registered", async () => {
     await show({ preview_type: "text", extension: ".txt", text: "hi" });
-    const button = screen.getByRole("button", { name: "같은 출처의 다른 행" });
+    // It lives in the one "⋯" 더보기 menu (review #6).
+    fireEvent.click(screen.getByRole("button", { name: "더보기" }));
+    const button = screen.getByRole("menuitem", { name: "같은 출처의 다른 행" });
     expect(button.getAttribute("aria-disabled")).toBe("true");
     const run = vi.fn();
     const events: unknown[] = [];
@@ -477,7 +517,7 @@ describe("Viewer — history and navigation", () => {
     act(() => {
       registerCommand({ id: "navigate.rows-for-source", label: "같은 출처 행", group: "navigate", run });
     });
-    const enabled = screen.getByRole("button", { name: "같은 출처의 다른 행" });
+    const enabled = screen.getByRole("menuitem", { name: "같은 출처의 다른 행" });
     expect(enabled.getAttribute("aria-disabled")).toBeNull();
     fireEvent.click(enabled);
     await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
@@ -534,25 +574,30 @@ describe("Viewer — decoded artifact rows (F2)", () => {
     expect(tab("메타").getAttribute("aria-selected")).toBe("true");
     const panel = screen.getByRole("tabpanel");
     const firstHeading = panel.querySelector("h3");
-    expect(firstHeading?.textContent).toBe("레코드");
+    expect(firstHeading?.textContent).toMatch(/^레코드 · 이벤트 로그/);
+    // Banners first: the parser's caution label is a warning above the fields.
+    const banners = screen.getByTestId("record-banners");
+    expect(banners.textContent).toContain("파서 주의 표시");
+    expect(
+      banners.compareDocumentPosition(firstHeading as Node) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     const core = screen.getByRole("region", { name: "레코드 핵심" });
-    const keys = Array.from(core.querySelectorAll("dt")).map((dt) => dt.textContent);
-    expect(keys.slice(0, 6)).toEqual([
-      "timestamp",
-      "event_id",
-      "record_id",
-      "channel",
-      "provider_name",
-      "computer",
-    ]);
+    const terms = Array.from(core.querySelectorAll("dt"));
+    // Event Log field sheet order (AXIOM-style): 이벤트 ID · 제공자 · 채널 · 컴퓨터 … 레코드 ID.
+    const keys = terms.map((dt) => dt.getAttribute("data-key"));
+    expect(keys.slice(0, 4)).toEqual(["event_id", "provider_name", "channel", "computer"]);
+    expect(keys).toContain("record_id");
+    expect(keys.indexOf("record_id")).toBeGreaterThan(keys.indexOf("computer"));
+    expect(terms.slice(0, 4).map((dt) => dt.textContent)).toEqual(["이벤트 ID", "제공자", "채널", "컴퓨터"]);
+    expect(terms[0]?.getAttribute("title")).toContain("event_id");
     expect(core.textContent).toContain("application");
     const source = screen.getByRole("region", { name: "레코드 출처" });
-    expect(source.textContent).toContain("evtx_record_offset4608");
-    expect(source.textContent).toContain("evtx_record_sha256");
-    expect(screen.getByRole("region", { name: "레코드 검증" }).textContent).toContain("caution_labels");
-    const other = panel.querySelector("details.meta-record-group") as HTMLDetailsElement;
-    expect(other.open).toBe(false);
-    expect(other.textContent).toContain("event_data_values");
+    expect(source.textContent).toContain("EVTX 레코드 오프셋4608");
+    expect(source.textContent).toContain("EVTX 레코드 SHA-256");
+    // No "검증" group above the evidence any more; unknown keys are visible, not folded.
+    expect(screen.queryByRole("region", { name: "레코드 검증" })).toBeNull();
+    const other = screen.getByRole("region", { name: "레코드 기타 필드" });
+    expect(other.textContent).toContain("이벤트 데이터");
   });
 
   it("opens hex at the record offset with the record range highlighted", async () => {

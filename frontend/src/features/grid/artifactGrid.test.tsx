@@ -135,8 +135,8 @@ describe("artifacts header sort (server, whole kind)", () => {
     expect(sortCalls("asc")).toHaveLength(1);
     await tick(1);
     expect(sortCalls("asc")).toHaveLength(2);
-    await vi.waitFor(() => expect(status().textContent).toBe("정렬: 실행 횟수 ▲ (전체 30건)"));
-    expect(announceMock).toHaveBeenCalledWith("정렬: 실행 횟수 ▲ (전체 30건)");
+    await vi.waitFor(() => expect(status().textContent).toBe("정렬: 실행 횟수 오름차순 (전체 30건)"));
+    expect(announceMock).toHaveBeenCalledWith("정렬: 실행 횟수 오름차순 (전체 30건)");
     expect(header("실행 횟수").getAttribute("aria-sort")).toBe("ascending");
     await vi.waitFor(() => expect(titleOf(0)).toBe("APP0.EXE"));
 
@@ -146,7 +146,7 @@ describe("artifacts header sort (server, whole kind)", () => {
     expect(sortCalls("desc")).toHaveLength(1);
     await tick(1000);
     expect(sortCalls("desc")).toHaveLength(2);
-    await vi.waitFor(() => expect(status().textContent).toBe("정렬: 실행 횟수 ▼ (전체 30건)"));
+    await vi.waitFor(() => expect(status().textContent).toBe("정렬: 실행 횟수 내림차순 (전체 30건)"));
     await vi.waitFor(() => expect(titleOf(0)).toBe("APP17.EXE"));
     expect(rowAt(0).getAttribute("data-row-key")).toBe(`artifacts:${KIND}:/artifacts/17`);
     const sorted = calls.filter((c) => c.url.includes("sort=details.run_count"));
@@ -174,7 +174,7 @@ describe("artifacts header sort (server, whole kind)", () => {
     const button = within(header("시각")).getByRole("button");
     expect(button.getAttribute("aria-disabled")).toBe("true");
     expect(button.getAttribute("data-disabled-reason")).toBe(SORT_KIND_REASON);
-    expect(screen.queryByRole("button", { name: "열 선택" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "열 설정" })).toBeTruthy();
   });
 });
 
@@ -236,10 +236,10 @@ describe("focus follows the RowRef under a server sort (locate=)", () => {
   });
 });
 
-describe("record-field columns (열 선택 › 레코드 필드 추가)", () => {
+describe("record-field columns (열 설정 › 레코드 필드 추가)", () => {
   it("search + check promotes a field: column appears, URL cols and the kind's storage are set; Esc returns focus", async () => {
     await renderArtifacts();
-    const menuButton = screen.getByRole("button", { name: "열 선택" });
+    const menuButton = screen.getByRole("button", { name: "열 설정" });
     fireEvent.click(menuButton);
     const search = screen.getByRole("searchbox", { name: "필드 검색" });
     // run_count is already a prefetch kind column: not offered.
@@ -286,12 +286,12 @@ describe("record-field columns (열 선택 › 레코드 필드 추가)", () => 
                 },
                 {
                   artifact_type: "prefetch-reference",
-                  details: { referenced_path: "C:/a", volume_device_path: "DEVICEHARDDISKVOLUME3" },
+                  details: { referenced_path: "C:/a", referenced_extension: ".DLL" },
                   record_index: 1,
                 },
                 {
                   artifact_type: "prefetch-reference",
-                  details: { referenced_path: "C:/b", volume_device_path: "" },
+                  details: { referenced_path: "C:/b", referenced_extension: "" },
                   record_index: 2,
                 },
               ],
@@ -301,12 +301,14 @@ describe("record-field columns (열 선택 › 레코드 필드 추가)", () => 
     });
     renderWithClient(<DataGrid />);
     await waitFor(() => expect(rows().length).toBe(3));
-    fireEvent.click(screen.getByRole("button", { name: "열 선택" }));
+    fireEvent.click(screen.getByRole("button", { name: "열 설정" }));
     expect(picker().getByRole("checkbox", { name: "prefetch_version" })).toBeTruthy();
-    fireEvent.change(screen.getByRole("searchbox", { name: "필드 검색" }), { target: { value: "vol" } });
-    const box = picker().getByRole("checkbox", { name: "volume_device_path" });
+    fireEvent.change(screen.getByRole("searchbox", { name: "필드 검색" }), {
+      target: { value: "extension" },
+    });
+    const box = picker().getByRole("checkbox", { name: "referenced_extension" });
     fireEvent.click(box);
-    expect(useGridLocalStore.getState().route.cols).toEqual(["details.volume_device_path"]);
+    expect(useGridLocalStore.getState().route.cols).toEqual(["details.referenced_extension"]);
   });
 
   it("restores the kind's stored columns into the route; promoted columns survive preset changes", async () => {
@@ -314,6 +316,7 @@ describe("record-field columns (열 선택 › 레코드 필드 추가)", () => 
     await renderArtifacts();
     await waitFor(() => expect(useGridLocalStore.getState().route.cols).toEqual(["details.volume_serial"]));
     expect(header("volume_serial")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "열 설정" }));
     fireEvent.change(screen.getByRole("combobox", { name: "열 구성" }), { target: { value: "compact" } });
     expect(header("volume_serial")).toBeTruthy();
     fireEvent.change(screen.getByRole("combobox", { name: "열 구성" }), { target: { value: "source" } });
@@ -379,7 +382,7 @@ describe("artifact-columns review fixes", () => {
 
   it("re-promoting a field the checkbox list had hidden shows it again", async () => {
     await renderArtifacts();
-    fireEvent.click(screen.getByRole("button", { name: "열 선택" }));
+    fireEvent.click(screen.getByRole("button", { name: "열 설정" }));
     fireEvent.click(picker().getByRole("checkbox", { name: "volume_serial" }));
     expect(hasHeader("volume_serial")).toBe(true);
     const shown = within(screen.getByRole("group", { name: "표시할 열" }));
@@ -399,7 +402,7 @@ describe("artifact-columns review fixes", () => {
     });
     renderWithClient(<DataGrid />);
     await waitFor(() => expect(rows().length).toBe(2));
-    fireEvent.click(screen.getByRole("button", { name: "열 선택" }));
+    fireEvent.click(screen.getByRole("button", { name: "열 설정" }));
     const bad = picker().getByRole("checkbox", { name: "bad key" });
     expect(bad.getAttribute("aria-disabled")).toBe("true");
     expect(bad.getAttribute("data-disabled-reason")).toBe(

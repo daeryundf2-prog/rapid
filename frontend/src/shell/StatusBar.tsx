@@ -68,22 +68,51 @@ function RunProgress({ run }: { run: RunWithProgress }) {
     announced.current = sentence;
   }, [status, stage, name]);
 
+  // "런 682636ce… · 완료 · 오류 0", then the run actions as their own group (visual-polish §0).
   return (
     <div className="status-run" data-testid="status-run">
-      <span className="mono" title={run.run_id}>
-        런 {run.run_id.slice(0, 8)}…
+      <span className="status-group">
+        <span className="mono" title={run.run_id}>
+          런 {run.run_id.slice(0, 8)}…
+        </span>
+        <StatusSep />
+        <StatusBadge status={String(run.status)} />
+        {text ? (
+          <>
+            <StatusSep />
+            <span className="status-text">{text}</span>
+          </>
+        ) : null}
+        {active && total > 0 ? (
+          <progress className="status-progress" max={total} value={done} aria-label="provider 진행률" />
+        ) : null}
+        {active && Number.isFinite(started) ? (
+          <>
+            <StatusSep />
+            <span>{formatElapsed(now - started)} 경과</span>
+          </>
+        ) : null}
+        <StatusSep />
+        <span className={errors > 0 ? "status-errors" : undefined}>오류 {errors}</span>
       </span>
-      <StatusBadge status={String(run.status)} />
-      {text ? <span>{text}</span> : null}
-      {active && total > 0 ? (
-        <progress className="status-progress" max={total} value={done} aria-label="provider 진행률" />
+      {/* Run actions only when they apply (review #8): 취소 while running, 재시도 after a failure. */}
+      {active || status === "failed" ? (
+        <span className="status-group status-actions">
+          {active ? (
+            <CommandButton command="case.cancel" label="취소" variant="ghost" testId="run-cancel" />
+          ) : null}
+          {status === "failed" ? (
+            <CommandButton command="case.retry" label="재시도" variant="ghost" testId="run-retry" />
+          ) : null}
+        </span>
       ) : null}
-      {active && Number.isFinite(started) ? <span>{formatElapsed(now - started)} 경과</span> : null}
-      <span className={errors > 0 ? "status-errors" : undefined}>오류 {errors}</span>
-      <CommandButton command="case.cancel" label="취소" variant="ghost" testId="run-cancel" />
-      <CommandButton command="case.retry" label="재시도" variant="ghost" testId="run-retry" />
     </div>
   );
+}
+
+/** Visual separator between status-bar facts (not read out): a 1px × 14px rule (review #8). */
+function StatusSep() {
+  return <span className="status-sep" aria-hidden="true" />;
 }
 
 const TZ_OPTIONS: ReadonlyArray<[string, string]> = [
@@ -138,14 +167,16 @@ export function StatusBar() {
       ) : null}
       <Slot name="status-extra" />
       <span className="statusbar-spacer" />
-      {notice ? (
-        <span className={`status-notice ${notice.tone}`} data-testid="status-notice">
-          {notice.text}
-        </span>
-      ) : null}
       <TimezoneControl />
-      <span className={`status-connection ${runsStatus}`} data-testid="status-connection">
-        {runsStatus === "error" ? "연결 끊김" : runsStatus === "loading" ? "연결 중…" : "연결됨"}
+      <StatusSep />
+      <span className="status-connection-wrap">
+        <span
+          className={`status-dot ${runsStatus === "error" ? "danger" : runsStatus === "loading" ? "" : "ok"}`}
+          aria-hidden="true"
+        />
+        <span className={`status-connection ${runsStatus}`} data-testid="status-connection">
+          {runsStatus === "error" ? "연결 끊김" : runsStatus === "loading" ? "연결 중…" : "연결됨"}
+        </span>
       </span>
     </footer>
   );

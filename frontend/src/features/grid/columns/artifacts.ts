@@ -1,6 +1,7 @@
 import { fetchArtifactsPage, locateArtifactRow } from "../../../api/collections";
 import { clipValue, flatValue } from "../../../utils/flatValue";
-import { formatTimestamp } from "../../../utils/time";
+import { formatGridTime } from "../../../utils/time";
+import { artifactTypeLabel } from "../../filters/typeLabels";
 import { kindsForCategory } from "../../tree/categories";
 import { serverPathFilter } from "../gridUtils";
 import type { CollectionDef, ColumnSpec } from "../types";
@@ -18,6 +19,7 @@ import {
   str,
   strOrNull,
 } from "./common";
+import { mismatchDirectionLabel } from "./files";
 import { typeChipCell } from "./StatusCells";
 
 /** Row time = first of these details keys. Same order as the server's `sort=timestamp` (plan §4.1). */
@@ -48,6 +50,9 @@ function firstOf(details: Record<string, unknown>, keys: string[]): string | nul
   return null;
 }
 
+/** An ISO 8601 date-time as the parsers write it ("2026-10-13T01:51:39.506937+00:00"). */
+const ISO_DATETIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?$/;
+
 /** Reason on headers of list-valued columns (the server sorts scalars only). */
 export const SORT_LIST_REASON = "목록 값은 전체 정렬을 지원하지 않습니다";
 
@@ -57,6 +62,12 @@ export const EVENT_MESSAGE_KEYS = ["message", "rendered_message", "event_message
 /** 유형: a chip (the web-log node filters on it server-side, `artifact_type=`). */
 const typeColumn = col.field("type", "유형", 160, ["analysis", "compact"], (r) => r.artifactType, {
   render: typeChipCell,
+  // The chip reads the Korean type name; the hover keeps the exact artifact_type id.
+  tooltip: (r) => {
+    const id = r.artifactType ?? "";
+    const label = id ? artifactTypeLabel(id) : null;
+    return label ? `${label} (${id})` : id;
+  },
 });
 const eventColumns = [
   col.field("eventId", "이벤트ID", 90, ["analysis", "compact"], (r) => fieldStr(r, "eventId"), {
@@ -164,8 +175,12 @@ export function kindColumn(def: KindColumnDef): ColumnSpec {
       const v = read(row);
       if (def.display) return def.display(v, detailsOf(row));
       if (def.bytes && typeof v === "number") return formatBytes(v);
-      if (def.time && (typeof v === "string" || typeof v === "number")) {
-        return formatTimestamp(v, currentTimezone());
+      // Time columns — and any ISO date-time value — read in the display zone (viewer redesign §2).
+      if (
+        (def.time && (typeof v === "string" || typeof v === "number")) ||
+        (typeof v === "string" && ISO_DATETIME.test(v))
+      ) {
+        return formatGridTime(v, currentTimezone());
       }
       return clipValue(flatValue(v), 300);
     },
@@ -216,58 +231,198 @@ export function registryCellDetail(details: Record<string, unknown>): string {
   return str(details.value_type);
 }
 
+/** "REG_SZ · 24 B" for value cells, else the value type / cell kind as written. */
+function registryValueKind(details: Record<string, unknown>): string {
+  const detail = registryCellDetail(details);
+  if (detail) return detail;
+  const t = details.value_type;
+  return typeof t === "number" ? (REG_VALUE_TYPES[t] ?? `유형 ${t}`) : flatValue(t);
+}
+
+/** First volume of a prefetch row: the reference's device path, else volumes[0] (device · serial). */
+function prefetchVolume(details: Record<string, unknown>): string {
+  if (typeof details.volume_device_path === "string" && details.volume_device_path) {
+    return details.volume_device_path;
+  }
+  const first = Array.isArray(details.volumes) ? details.volumes[0] : undefined;
+  if (!isRecord(first)) return "";
+  return [flatValue(first.volume_device_path), flatValue(first.volume_serial_number)]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+const SAM_COLUMNS: KindColumnDef[] = [
+  {
+    header: "계정",
+    keys: ["user_name", "user_name_candidate", "group_name", "group_name_candidate"],
+    width: 180,
+  },
+  {
+    header: "RID",
+    keys: ["rid", "rid_decimal", "alias_rid_decimal"],
+    width: 80,
+    number: true,
+    tooltip: (d) => {
+      const dec = flatValue(d.rid ?? d.rid_decimal ?? d.alias_rid_decimal);
+      const hex = flatValue(d.rid_hex || d.alias_rid_hex);
+      return [dec, hex ? `(${hex})` : "", flatValue(d.sid)].filter(Boolean).join(" ");
+    },
+  },
+  { header: "마지막 로그온", keys: ["last_logon_at"], width: 190, time: true },
+  { header: "로그온 수", keys: ["logon_count"], width: 90, number: true },
+  {
+    header: "역할",
+    keys: ["candidate_role", "account_type_hint", "well_known_account_ko"],
+    width: 140,
+    presets: [],
+  },
+  {
+    header: "마지막 기록",
+    keys: ["key_last_written_at", "last_written_at"],
+    width: 190,
+    time: true,
+    presets: [],
+  },
+];
+
+/**
+ * Column sets of artifact-type families (viewer redesign §7): used when the grid's 유형 filter
+ * selects types of one family only (tree nodes such as 다운로드 · USB · SAM 계정 · 예약 작업).
+ */
+export const TYPE_FAMILY_COLUMNS: Record<string, { types: readonly string[]; columns: KindColumnDef[] }> = {
+  "browser-visit": {
+    types: ["browser-visit", "browser-history"],
+    columns: [
+      { header: "URL", keys: ["url"], width: 360 },
+      { header: "제목", keys: ["title"], width: 220 },
+      { header: "방문 수", keys: ["visit_count"], width: 80, number: true },
+      { header: "전환", keys: ["transition_core", "transition"], width: 110 },
+    ],
+  },
+  "browser-download": {
+    types: ["browser-download"],
+    columns: [
+      { header: "URL", keys: ["source_url", "url", "tab_url"], width: 320 },
+      { header: "대상 경로", keys: ["target_path", "current_path"], width: 280 },
+      { header: "크기", keys: ["total_bytes", "received_bytes"], width: 100, bytes: true },
+      { header: "상태", keys: ["state_name", "state"], width: 100 },
+    ],
+  },
+  usb: {
+    types: ["windows-usb-device", "registry-usb"],
+    columns: [
+      { header: "장치명", keys: ["friendly_name", "product"], width: 220 },
+      { header: "시리얼", keys: ["serial_number", "usb_serial_number"], width: 180, mono: true },
+      {
+        header: "VID/PID",
+        keys: ["vid", "pid"],
+        width: 120,
+        mono: true,
+        get: (d) => [flatValue(d.vid), flatValue(d.pid)].filter(Boolean).join("/"),
+      },
+      { header: "마지막 연결", keys: ["last_arrival_at"], width: 190, time: true },
+    ],
+  },
+  sam: {
+    types: [
+      "windows-sam-account",
+      "windows-sam-account-candidate",
+      "windows-sam-group",
+      "windows-sam-group-candidate",
+    ],
+    columns: SAM_COLUMNS,
+  },
+  task: {
+    types: ["task-scheduler-task"],
+    columns: [
+      { header: "작업 경로", keys: ["task_uri"], width: 260 },
+      { header: "명령", keys: ["command", "command_line"], width: 280, mono: true },
+      { header: "작성자", keys: ["author"], width: 140 },
+      { header: "트리거", keys: ["trigger_types"], width: 160, list: true },
+    ],
+  },
+};
+
+/** The type family every selected type belongs to (one family only), else undefined. */
+export function artifactTypeFamily(types: readonly string[] | undefined): string | undefined {
+  if (!types?.length) return undefined;
+  for (const [family, def] of Object.entries(TYPE_FAMILY_COLUMNS)) {
+    if (types.every((type) => def.types.includes(type))) return family;
+  }
+  return undefined;
+}
+
 export const KIND_COLUMNS: Record<string, KindColumnDef[]> = {
   eventlog: [
     { header: "레벨", keys: ["level"], width: 80 },
     { header: "컴퓨터", keys: ["computer"], width: 160 },
     { header: "사용자", keys: ["user_name"], width: 140 },
   ],
+  // Prefetch: 실행 파일 · 실행 횟수 · 최근 실행 · 볼륨.
   "windows-prefetch": [
     { header: "실행 파일", keys: ["executable_hint", "header_executable_name"], width: 200 },
     { header: "실행 횟수", keys: ["run_count"], width: 90, number: true },
-    { header: "최근 실행", keys: ["last_run_at"], width: 170 },
-    { header: "참조 경로", keys: ["referenced_path"], width: 320 },
-    // prefetch-reference rows (most of the kind) carry coverage_status, not the parse status.
-    { header: "파싱 상태", keys: ["prefetch_parse_status", "coverage_status"], width: 120 },
-  ],
-  "windows-registry": [
-    { header: "하이브", keys: ["hive_name"], width: 120 },
+    { header: "최근 실행", keys: ["last_run_at"], width: 190, time: true },
     {
-      header: "셀 종류",
-      keys: ["cell_kind"],
-      width: 80,
-      display: (v) => registryCellKindLabel(v),
-      tooltip: (d) => flatValue(d.cell_kind),
+      header: "볼륨",
+      keys: ["volume_device_path", "volumes"],
+      width: 220,
+      get: prefetchVolume,
+      unsortable: true,
+      mono: true,
     },
-    { header: "이름", keys: ["name"], width: 200 },
+    { header: "참조 경로", keys: ["referenced_path"], width: 320, presets: [] },
+    // prefetch-reference rows (most of the kind) carry coverage_status, not the parse status.
+    { header: "파싱 상태", keys: ["prefetch_parse_status", "coverage_status"], width: 120, presets: [] },
+  ],
+  // Registry: 키 경로 · 값 이름 · 값 종류 · 마지막 기록 (the hive cell details stay one click away).
+  "windows-registry": [
     {
-      header: "세부",
-      keys: ["value_type", "value_data_size", "subkey_count", "value_count"],
-      width: 170,
-      get: registryCellDetail,
+      header: "키 경로",
+      keys: ["key", "key_path", "source_key_path", "usb_key_path"],
+      width: 320,
+      mono: true,
+    },
+    { header: "값 이름", keys: ["value_name", "name", "value_names"], width: 200 },
+    {
+      header: "값 종류",
+      keys: ["value_type", "cell_kind", "value_data_size", "subkey_count", "value_count"],
+      width: 150,
+      get: registryValueKind,
       unsortable: true,
     },
-    { header: "마지막 기록", keys: ["last_written_at"], width: 170 },
-    { header: "셀 오프셋", keys: ["cell_offset"], width: 100, number: true, mono: true },
+    {
+      header: "마지막 기록",
+      keys: ["key_last_written_at", "last_written_at", "usb_key_last_written_at"],
+      width: 190,
+      time: true,
+    },
+    { header: "하이브", keys: ["hive_name", "hive_hint"], width: 120, presets: [] },
+    { header: "셀 오프셋", keys: ["cell_offset"], width: 100, number: true, mono: true, presets: [] },
   ],
+  // ShellBags: 경로 · MRU · 키 기록 시각.
   "windows-shellbags": [
     {
-      header: "경로 후보",
-      keys: ["shellbag_path_candidates"],
-      width: 280,
-      get: firstOfList("shellbag_path_candidates"),
-      list: true,
+      header: "경로",
+      keys: ["shell_path", "folder_path", "shellbag_path_candidates"],
+      width: 320,
+      get: (d) => firstValue(d, ["shell_path", "folder_path"]) ?? firstOfList("shellbag_path_candidates")(d),
+      unsortable: true,
     },
-    { header: "키 경로", keys: ["source_key_path"], width: 260 },
-    { header: "마지막 기록", keys: ["key_last_written_at"], width: 170 },
-    { header: "신뢰도", keys: ["parser_confidence"], width: 90 },
+    { header: "MRU", keys: ["mru_position"], width: 70, number: true },
+    { header: "키 기록 시각", keys: ["key_last_written_at", "last_written_at"], width: 190, time: true },
+    { header: "키 경로", keys: ["key_path", "source_key_path", "key"], width: 260, presets: [] },
+    { header: "신뢰도", keys: ["parser_confidence"], width: 90, presets: [] },
   ],
+  // LNK / Jump List: 대상 · 대상 수정 · 볼륨 시리얼 · 머신 ID.
   "recent-files": [
-    { header: "대상 경로", keys: ["target_path"], width: 300 },
-    { header: "대상 수정", keys: ["target_modified_at"], width: 170 },
-    { header: "대상 크기", keys: ["target_file_size"], width: 100, bytes: true },
-    { header: "파싱 상태", keys: ["lnk_parse_status"], width: 120 },
-    { header: "작업 폴더", keys: ["working_dir"], width: 200 },
+    { header: "대상", keys: ["target_path", "destlist_path", "entry_hint"], width: 300 },
+    { header: "대상 수정", keys: ["target_modified_at"], width: 190, time: true },
+    { header: "볼륨 시리얼", keys: ["volume_serial_number"], width: 120, mono: true },
+    { header: "머신 ID", keys: ["tracker_machine_id", "destlist_hostname"], width: 140, mono: true },
+    { header: "대상 크기", keys: ["target_file_size"], width: 100, bytes: true, presets: [] },
+    { header: "파싱 상태", keys: ["lnk_parse_status"], width: 120, presets: [] },
+    { header: "작업 폴더", keys: ["working_dir"], width: 200, presets: [] },
   ],
   "windows-execution": [
     { header: "실행 경로", keys: ["executable_path"], width: 300 },
@@ -288,28 +443,29 @@ export const KIND_COLUMNS: Record<string, KindColumnDef[]> = {
     { header: "크기", keys: ["source_size"], width: 100, bytes: true },
     { header: "수정", keys: ["modified_at"], width: 170 },
   ],
-  "windows-os-account": [
-    { header: "계정", keys: ["user_name_candidate", "user_name", "group_name_candidate"], width: 180 },
-    { header: "역할", keys: ["candidate_role", "account_type_hint"], width: 160 },
-    {
-      header: "RID",
-      keys: ["rid_decimal", "alias_rid_decimal"],
-      width: 80,
-      number: true,
-      tooltip: (d) => {
-        const dec = flatValue(d.rid_decimal || d.alias_rid_decimal);
-        const hex = flatValue(d.rid_hex || d.alias_rid_hex);
-        return [dec, hex ? `(${hex})` : ""].filter(Boolean).join(" ");
-      },
-    },
-    { header: "마지막 기록", keys: ["last_written_at"], width: 170 },
-  ],
+  // Accounts (SAM): 계정 · RID · 마지막 로그온 · 로그온 수.
+  "windows-os-account": SAM_COLUMNS,
   "windows-filesystem": [
     { header: "감지 서명", keys: ["detected_signature_kind"], width: 130 },
     { header: "기대 확장자", keys: ["expected_extensions"], width: 140, list: true },
+    // Same `mismatch_direction` as files.json `file_signature` (files 시그니처 column).
+    {
+      header: "불일치 방향",
+      keys: ["mismatch_direction"],
+      width: 170,
+      display: (value) => (typeof value === "string" ? mismatchDirectionLabel(value) : ""),
+      tooltip: (d) => (typeof d.mismatch_direction === "string" ? d.mismatch_direction : ""),
+    },
     { header: "크기", keys: ["source_size"], width: 100, bytes: true },
     { header: "수정", keys: ["modified_at"], width: 170 },
     { header: "위험", keys: ["risk_flags"], width: 220, list: true },
+  ],
+  // Browser (all types): the visit columns; downloads etc. via the 유형 filter (TYPE_FAMILY_COLUMNS).
+  browser: [
+    { header: "URL", keys: ["url", "source_url", "tab_url"], width: 360 },
+    { header: "제목", keys: ["title"], width: 220 },
+    { header: "방문 수", keys: ["visit_count"], width: 80, number: true },
+    { header: "전환", keys: ["transition_core", "transition"], width: 110 },
   ],
   "media-image": [
     { header: "이름", keys: ["entry_name"], width: 200 },
@@ -356,19 +512,40 @@ export const KIND_COLUMNS: Record<string, KindColumnDef[]> = {
   ],
 };
 
+/**
+ * Generic artifact layout (all artifacts, category nodes, kinds without a layout), visual-polish
+ * S4: 시각 · 유형 · 항목 · 경로 · 선별. The summary text stays one click away in the column menu.
+ */
 const defaultColumns = (): ColumnSpec[] => [
-  col.title("항목", 320),
-  col.review(),
-  typeColumn,
-  detailColumn,
-  timeColumn,
-  ...tail,
+  // Default width = minimum width: 항목 takes the slack (DataGrid fitColumnWidths); a narrow
+  // grid hides 경로 → 선별 → 시각 → 유형 instead of truncating everything (ARTIFACT_PRIORITY).
+  // 시각 is in 출처 중심 too: a source review still needs the time (review B2-6).
+  { ...timeColumn, width: 140, minWidth: 140, presets: ["analysis", "compact", "source"] },
+  // 130px: the colour dot + ~14 characters ("cloud-messaging") without an ellipsis.
+  { ...typeColumn, width: 130, minWidth: 130 },
+  { ...col.title("항목", 220), minWidth: 220 },
+  col.path(200, ["analysis", "source"]),
+  { ...col.review(), width: 88, minWidth: 88 },
+  quietDetailColumn,
+  // 파서 moves to 출처 중심 here: the default shows exactly the five columns above.
+  ...tail
+    .filter((column) => column.id !== "path")
+    .map((column): ColumnSpec => (column.id === "provider" ? { ...column, presets: ["source"] } : column)),
 ];
 
+/** Generic artifact layout, highest priority first: 항목 > 유형 > 시각 > 선별 > 경로. */
+export const ARTIFACT_PRIORITY = ["title", "type", "timestamp", "review", "path"] as const;
+
+/** Only the generic layout is responsive; kind layouts keep their own columns. */
+export function artifactWidthPriority(kind: string | undefined): readonly string[] | undefined {
+  return kind && (kind === "eventlog" || KIND_COLUMNS[kind]) ? undefined : ARTIFACT_PRIORITY;
+}
+
 /** Default column set of one artifact kind (plan §4.3); other kinds keep the generic set. */
-export function artifactColumnsForKind(kind: string | undefined): ColumnSpec[] {
-  const defs = kind ? KIND_COLUMNS[kind] : undefined;
-  if (kind === "eventlog") {
+export function artifactColumnsForKind(kind: string | undefined, types?: readonly string[]): ColumnSpec[] {
+  const family = kind ? artifactTypeFamily(types) : undefined;
+  const defs = family ? TYPE_FAMILY_COLUMNS[family]?.columns : kind ? KIND_COLUMNS[kind] : undefined;
+  if (kind === "eventlog" && !family) {
     return [
       col.title("이벤트", 320),
       col.review(),
@@ -450,7 +627,8 @@ export const artifactsCollection: CollectionDef = {
     );
   },
   columns: defaultColumns(),
-  columnsFor: (ref) => artifactColumnsForKind(ref.kind),
+  columnsFor: (ref, types) => artifactColumnsForKind(ref.kind, types),
+  widthPriority: (ref) => artifactWidthPriority(ref.kind),
   locate: (runId, ref, sort, recordIndex, signal) =>
     ref.kind
       ? locateArtifactRow(runId, ref.kind, sort, recordIndex, signal)
@@ -461,10 +639,11 @@ export const artifactsCollection: CollectionDef = {
 export function defaultFieldHeaders(
   kind: string | undefined,
   visibleIds?: readonly string[] | null,
+  types?: readonly string[],
 ): Map<string, string> {
   const out = new Map<string, string>();
   const visible = visibleIds ? new Set(visibleIds) : null;
-  for (const column of artifactColumnsForKind(kind)) {
+  for (const column of artifactColumnsForKind(kind, types)) {
     // Only columns actually on screen (current preset + visibility); without a mounted grid the
     // analysis preset decides.
     const shown = visible ? visible.has(column.id) : column.presets.includes("analysis");

@@ -172,8 +172,16 @@ export const KEY_DESCRIPTIONS: Record<keyof typeof KEY_MAP, string> = {
   stageReport: "단계: 보고",
 };
 
-/** Human-readable key label ("Ctrl+K" → "Ctrl K", arrows as glyphs). */
-export function keyLabel(shortcut: string): string {
+/** Apple platform (review #14): only there does Ctrl+K read as the ⌘ glyph. */
+export function isMacPlatform(
+  platform: string = typeof navigator === "undefined" ? "" : navigator.platform,
+): boolean {
+  return /^(Mac|iPhone|iPad|iPod)/i.test(platform);
+}
+
+/** Human-readable key label ("Ctrl+K" → "Ctrl K", "⌘K" on a Mac; arrows as glyphs). */
+export function keyLabel(shortcut: string, mac: boolean = isMacPlatform()): string {
+  if (mac && shortcut.startsWith("Ctrl+")) return `⌘${keyLabel(shortcut.slice(5), false)}`;
   return shortcut
     .replace("ArrowLeft", "←")
     .replace("ArrowRight", "→")

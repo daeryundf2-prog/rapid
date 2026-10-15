@@ -28,6 +28,7 @@ export function buildCaseCommands(facts: CaseCommandFacts): Command[] {
       id: "case.switch",
       label: "케이스 전환/삭제…",
       group: "case",
+      icon: "folder",
       run: () => dialogs().openDialog("picker"),
     },
     {
@@ -42,6 +43,7 @@ export function buildCaseCommands(facts: CaseCommandFacts): Command[] {
       id: "case.import",
       label: "불러오기…",
       group: "case",
+      icon: "upload",
       disabledReason: (ctx) => (ctx.runIsActive ? RUN_ACTIVE_REASON : undefined),
       run: () => dialogs().openDialog("import"),
     },
@@ -49,6 +51,7 @@ export function buildCaseCommands(facts: CaseCommandFacts): Command[] {
       id: "case.sample",
       label: "샘플 케이스 실행",
       group: "case",
+      icon: "package",
       disabledReason: (ctx) => (ctx.runIsActive ? RUN_ACTIVE_REASON : undefined),
       run: async () => {
         try {

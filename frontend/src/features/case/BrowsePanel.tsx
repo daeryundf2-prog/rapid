@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { type BrowseScope, browseDirectory } from "../../api/browse";
+import { Icon } from "../../icons";
 import { ErrorText } from "./ErrorText";
 
 /** Server-side path picker over GET /api/browse. */
@@ -94,7 +95,7 @@ export function BrowsePanel({
                   filesOnly && entry.kind === "directory" ? undefined : onPick(entry.path)
                 }
               >
-                <span aria-hidden="true">{entry.kind === "directory" ? "▸" : "·"}</span>
+                <Icon name={entry.kind === "directory" ? "folder" : "file"} />
                 <span>{entry.name}</span>
                 {entry.evidence_candidate && entry.kind === "file" && (
                   <span className="badge info">증거</span>

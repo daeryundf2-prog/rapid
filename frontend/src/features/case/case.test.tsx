@@ -243,12 +243,15 @@ describe("ReportDialog / export commands", () => {
     mockFetch({ "GET /api/runs/r1/review-counts": review(0) });
     renderWithQuery(<ReportDialog runId="r1" runIsActive={false} onClose={() => undefined} />);
     await screen.findByText("보고 후보 0건");
-    const report = screen.getByRole("button", { name: "보고서 내보내기" });
-    expect(report.getAttribute("aria-disabled")).toBe("true");
-    expect(report.getAttribute("title")).toContain("보고 후보 0건");
-    expect(
-      screen.getByRole("button", { name: "검증 패키지 내보내기" }).getAttribute("aria-disabled"),
-    ).toBeNull();
+    // One radio group + one primary 내보내기 carrying the chosen kind's single reason (review #4).
+    const submit = screen.getByRole("button", { name: "내보내기" });
+    expect(screen.getByRole("radio", { name: "보고서" })).toHaveProperty("checked", true);
+    await waitFor(() => expect(submit.getAttribute("aria-disabled")).toBe("true"));
+    expect(submit.getAttribute("title")).toContain("보고 후보 0건");
+    expect(screen.getAllByTestId("disabled-reason")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("radio", { name: "검증 패키지" }));
+    expect(submit.getAttribute("aria-disabled")).toBeNull();
+    expect(screen.queryByLabelText("보고서 형식")).toBeNull();
   });
 
   it("creates the case report then downloads the chosen format", async () => {
@@ -266,7 +269,7 @@ describe("ReportDialog / export commands", () => {
     await screen.findByText("보고 후보 3건");
     fireEvent.change(screen.getByLabelText("보고서 형식"), { target: { value: "docx" } });
     fireEvent.change(screen.getByLabelText(/보고서 제목/), { target: { value: "최종" } });
-    fireEvent.click(screen.getByRole("button", { name: "보고서 내보내기" }));
+    fireEvent.click(screen.getByRole("button", { name: "내보내기" }));
     await waitFor(() => expect(calls.some((c) => c.url.endsWith("/case-report/file/docx"))).toBe(true));
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({
       template: "legal-handoff",

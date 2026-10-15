@@ -5,8 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="dark light" />
     <title>RapidForensic</title>
-    <script type="module" crossorigin src="/v2/assets/index-El4d-W3I.js"></script>
-    <link rel="stylesheet" crossorigin href="/v2/assets/index-DfP1WQxI.css">
+    <!-- Apply a stored light theme before first paint (no dark flash); keep the key in sync with
+         state/slices/prefs.ts THEME_KEY. Dark (no attribute) is the default. -->
+    <script id="theme-boot">
+      (() => {
+        try {
+          const t = localStorage.getItem("rapidtriage.v2.theme");
+          if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+        } catch {}
+      })();
+    </script>
+    <script type="module" crossorigin src="/v2/assets/index-EAaG3qNx.js"></script>
+    <link rel="stylesheet" crossorigin href="/v2/assets/index-CZXaPqoB.css">
   </head>
   <body>
     <div id="root"></div>

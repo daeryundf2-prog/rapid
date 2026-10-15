@@ -5,10 +5,11 @@ import { runDisplayName } from "../../../app/collections";
 import type { GridRow, ReviewStatus } from "../../../contracts/collection";
 import type { ViewerTarget } from "../../../contracts/viewer";
 import { Icon } from "../../../icons";
-import { parseHash, serializeRoute } from "../../../router";
+import { serializeRoute } from "../../../router";
 import { useRoute, useRuns, useTimezone } from "../../../state/hooks";
-import { isScalarish } from "../../../utils/flatValue";
-import { formatTimestamp } from "../../../utils/time";
+import { flatValue, isScalarish } from "../../../utils/flatValue";
+import { evidenceTime, evidenceTimeTooltip, parseInstant } from "../../../utils/time";
+import { timestampKindLabel } from "../../../utils/timeKinds";
 import {
   caseHref,
   caseLabel,
@@ -16,6 +17,7 @@ import {
   crossCaseRunIds,
   occurrenceRoute,
 } from "../../analysis/crossCase";
+import { useFilterStore } from "../../filters/filterStore";
 import { useGridLocalStore } from "../../grid/adapter";
 import { defaultFieldHeaders } from "../../grid/columns/artifacts";
 import { FIELD_LABELS } from "../../grid/columns/fieldColumns";
@@ -24,17 +26,26 @@ import { EmptyHintLink } from "../../grid/EmptyHintLink";
 import { noteKey, useSessionNote } from "../../grid/sessionNotes";
 import { usePromotedFields } from "../../grid/usePromotedFields";
 import { dispatchCommand, setViewerTarget, useCommandContext, useViewerRouteMode } from "../adapter";
+import { recordBanners } from "../banners";
+import { bytesOfHex, filterUtf16Strings, hexDump, utf16Strings } from "../binaryValue";
 import { locatorText } from "../citation";
 import { ROWS_FOR_SOURCE_COMMAND, writeClipboard } from "../commands";
-import { evidenceInfo, isSourceMissing, timelineWindowHash } from "../evidenceInfo";
-import { isDirectoryTarget } from "../modes";
+import { evidenceInfo, isSourceMissing } from "../evidenceInfo";
 import {
-  groupRecordFields,
-  makeRecordField,
-  RECORD_GROUP_LABELS,
-  type RecordField,
-  type RecordGroups,
-} from "../record";
+  bytesLabel,
+  eventLevelLabel,
+  hexLabel,
+  logonTypeLabel,
+  numberLabel,
+  severityLabel,
+} from "../fieldFormat";
+import { humanizeKey, layoutFields, type RecordLayout, recordLayout, type SheetEntry } from "../fieldSheets";
+import { isDirectoryTarget } from "../modes";
+import { TIMELINE_WINDOW_MS, timelineWindowRoute } from "../pivots";
+import { makeRecordField, type RecordField, recordByteRange } from "../record";
+import { eventRecordXml, hasEventRecord, RECONSTRUCTED_LABEL } from "../recordXml";
+import { isSid, useSidName } from "../sidNames";
+import { isRawToken, metaLabel, metaValueLabel, sectionLabels } from "./metaLabels";
 
 export const REVIEW_LABELS: Record<ReviewStatus, string> = {
   relevant: "관련 있음",
@@ -66,34 +77,88 @@ function isHashBundle(value: Record<string, unknown>): boolean {
   );
 }
 
+/** A record key: its Korean label (raw key as tooltip), or the raw key in mono when it has none. */
+function KeyTerm({ name, label: given }: { name: string; label?: string | null }) {
+  // Unknown keys read humanised (snake_case → words); a key that has no readable form stays raw mono.
+  const known = given === undefined ? metaLabel(name) : given;
+  const human = humanizeKey(name);
+  const label = known ?? (human !== name ? human : null);
+  return label ? (
+    <dt title={name} data-key={name}>
+      {label}
+    </dt>
+  ) : (
+    <dt className="mono" data-key={name}>
+      {name}
+    </dt>
+  );
+}
+
+/**
+ * 20×20 copy icon button (review #3): shown on row hover / focus; a successful copy swaps the
+ * icon for a check for a moment — the row's width never changes.
+ */
 function CopyButton({ text, label }: { text: string; label: string }) {
   const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(timer);
+  }, [copied]);
   return (
     <button
       type="button"
-      className="viewer-copy"
+      className="icon-btn meta-copy"
       aria-label={`${label} 복사`}
+      title={copied ? "복사됨" : `${label} 복사`}
+      data-copied={copied ? "" : undefined}
       onClick={() => {
         writeClipboard(text)
           .then(() => setCopied(true))
           .catch(() => setCopied(false));
       }}
     >
-      {copied ? "복사됨" : "복사"}
+      <Icon name={copied ? "check" : "copy"} size={14} />
     </button>
   );
 }
 
-/** One level of a nested object as key/value rows (deeper values stay compact text). */
-function NestedValue({ value, name }: { value: Record<string, unknown>; name: string }) {
+/** A hash: mono 11px on one line, ellipsized, the full value as tooltip, then the copy button. */
+function HashValue({ value, label }: { value: string; label: string }) {
+  return (
+    <span className="meta-hash">
+      <span className="meta-hash-text mono" title={value}>
+        {value}
+      </span>
+      <CopyButton text={value} label={label} />
+    </span>
+  );
+}
+
+/** Nested groups deeper than this render their values as compact text. */
+const NESTED_MAX_DEPTH = 3;
+
+/**
+ * A nested object as key/value rows: keys get their Korean label at every level (raw key as
+ * tooltip, unknown keys in mono), values their Korean reading (예/아니요, 검증 필요 …).
+ */
+function NestedValue({
+  value,
+  name,
+  depth = 1,
+}: {
+  value: Record<string, unknown>;
+  name: string;
+  depth?: number;
+}) {
   if (isHashBundle(value)) {
     return (
       <dl className="viewer-dl viewer-dl-nested">
         {Object.entries(value).map(([k, v]) => (
           <Fragment key={k}>
-            <dt className="mono">{k}</dt>
-            <dd className="mono viewer-break">
-              {String(v)} <CopyButton text={String(v)} label={`${name}.${k}`} />
+            <KeyTerm name={k} />
+            <dd className="meta-hash-dd">
+              <HashValue value={String(v)} label={`${name}.${k}`} />
             </dd>
           </Fragment>
         ))}
@@ -101,13 +166,14 @@ function NestedValue({ value, name }: { value: Record<string, unknown>; name: st
     );
   }
   const entries = Object.entries(value);
+  const labels = sectionLabels(entries.map(([k]) => k));
   const list = (
     <dl className="viewer-dl viewer-dl-nested">
       {entries.map(([k, v]) => (
         <Fragment key={k}>
-          <dt className="mono">{k}</dt>
+          <KeyTerm name={k} label={labels.get(k)} />
           <dd className="viewer-break">
-            <ScalarText name={`${name}.${k}`} value={v} />
+            <NestedEntry name={`${name}.${k}`} value={v} depth={depth} />
           </dd>
         </Fragment>
       ))}
@@ -122,38 +188,71 @@ function NestedValue({ value, name }: { value: Record<string, unknown>; name: st
   );
 }
 
+/** One value inside a nested group: a deeper group (to NESTED_MAX_DEPTH), a list, or a scalar. */
+function NestedEntry({ name, value, depth }: { name: string; value: unknown; depth: number }) {
+  if (depth < NESTED_MAX_DEPTH && isPlainObject(value)) {
+    return <NestedValue value={value} name={name} depth={depth + 1} />;
+  }
+  if (depth < NESTED_MAX_DEPTH && Array.isArray(value) && value.some(isPlainObject)) {
+    return <NestedList name={name} items={value} depth={depth + 1} />;
+  }
+  return <ScalarText name={name} value={value} />;
+}
+
+/** A list holding objects: folded "N개 항목", one nested group per item. */
+function NestedList({ name, items, depth }: { name: string; items: unknown[]; depth: number }) {
+  return (
+    <details className="viewer-details">
+      <summary>{items.length}개 항목</summary>
+      <ol className="viewer-nested-list">
+        {items.map((item, index) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: read-only snapshot of a record array
+          <li key={index}>
+            {isPlainObject(item) ? (
+              <NestedValue value={item} name={`${name}[${index}]`} depth={depth} />
+            ) : (
+              <ScalarText name={`${name}[${index}]`} value={item} />
+            )}
+          </li>
+        ))}
+      </ol>
+    </details>
+  );
+}
+
+/**
+ * A scalar's reading: its Korean label (raw value as tooltip), a raw parser token in mono, or
+ * the plain text. Exported for tests.
+ */
+export function ScalarReading({ raw, text }: { raw: unknown; text: string }) {
+  const label = metaValueLabel(raw);
+  if (label) {
+    return (
+      <span className="meta-value-label" title={String(raw)} data-raw={String(raw)}>
+        {label}
+      </span>
+    );
+  }
+  if (typeof raw === "string" && isRawToken(raw)) return <span className="mono">{text}</span>;
+  return <>{text || "—"}</>;
+}
+
 /** A nested / list scalar: short text, or the same fold + full copy as top-level long values. */
 function ScalarText({ name, value }: { name: string; value: unknown }) {
   const field = makeRecordField(name, value);
   if (field.truncated) return <LongValue field={field} />;
-  return <>{field.value || "—"}</>;
+  return <ScalarReading raw={value} text={field.value} />;
 }
 
 function FieldValue({ field }: { field: RecordField }) {
   const { raw } = field;
   if (isPlainObject(raw)) return <NestedValue value={raw} name={field.key} />;
   if (Array.isArray(raw) && raw.some((item) => typeof item === "object" && item !== null)) {
-    return (
-      <details className="viewer-details">
-        <summary>{raw.length}개 항목</summary>
-        <ol className="viewer-nested-list">
-          {raw.map((item, index) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: read-only snapshot of a record array
-            <li key={index}>
-              {isPlainObject(item) ? (
-                <NestedValue value={item} name={`${field.key}[${index}]`} />
-              ) : (
-                <ScalarText name={`${field.key}[${index}]`} value={item} />
-              )}
-            </li>
-          ))}
-        </ol>
-      </details>
-    );
+    return <NestedList name={field.key} items={raw} depth={1} />;
   }
   // Scalars and arrays of scalars (comma list) use the flat text; long ones fold (U-C3).
   if (field.truncated) return <LongValue field={field} />;
-  return <>{field.value}</>;
+  return <ScalarReading raw={raw} text={field.value} />;
 }
 
 /**
@@ -240,42 +339,337 @@ function promotable(field: RecordField): boolean {
   return field.fromDetails === true && isScalarish(field.raw);
 }
 
-function FieldList({ fields, columns }: { fields: RecordField[]; columns?: ColumnToggle }) {
+// ---------------------------------------------------------------------------
+// Record view (viewer redesign §1–§9): banners · 핵심 (field sheet) · EventData / values table ·
+// 원본 레코드 (reconstructed XML) · 출처 · 기타 필드 — and, at the very bottom of the meta view,
+// "내부 검증 정보(증거 아님)" folded.
+// ---------------------------------------------------------------------------
+
+/** The record's banners, above everything else (warnings an examiner must read first). */
+export function RecordBanners({ row }: { row: GridRow | null }) {
+  const banners = recordBanners(row);
+  if (!banners.length) return null;
+  return (
+    <div className="meta-banners" data-testid="record-banners">
+      {banners.map((banner) => (
+        <p
+          key={banner.id}
+          className="meta-banner"
+          data-tone={banner.tone}
+          data-banner={banner.id}
+          role={banner.tone === "danger" ? "alert" : "note"}
+          title={banner.keys.join(", ")}
+        >
+          <strong>{banner.title}</strong>
+          {banner.detail ? <span> — {banner.detail}</span> : null}
+        </p>
+      ))}
+    </div>
+  );
+}
+
+/** Sub-second-precise sibling of a time key (EVTX `timestamp_100ns`) and its raw FILETIME. */
+function preciseTime(
+  fields: Record<string, unknown>,
+  key: string,
+  raw: unknown,
+): { value: unknown; filetime?: unknown } {
+  const base = key === "event_created_at" || key === "time_created" ? "timestamp" : key;
+  const precise = fields[`${key}_100ns`] ?? fields[`${base}_100ns`];
+  const filetime = fields[`${key}_filetime`] ?? fields[`${base}_filetime`];
+  const a = parseInstant(typeof precise === "string" ? precise : null);
+  const b = parseInstant(typeof raw === "string" || typeof raw === "number" ? raw : null);
+  const same = a && b && Math.floor(a.getTime() / 1000) === Math.floor(b.getTime() / 1000);
+  return { value: same ? precise : raw, ...(filetime !== undefined ? { filetime } : {}) };
+}
+
+/** Kind chip of a time entry: the row's own `timestamp_kind` for `timestamp`, else the sheet's. */
+function timeKindOf(entry: SheetEntry, fields: Record<string, unknown>): string {
+  if (entry.key === "timestamp") {
+    const own = fields.timestamp_kind ?? fields.timestamp_label;
+    if (typeof own === "string" && own) return own;
+  }
+  return entry.timeKind ?? "";
+}
+
+/**
+ * One evidence time: "2025-05-29 23:25:26.427 (KST+09:00) · UTC 14:25:26.427", the time-kind
+ * chip, FILETIME in the tooltip and the "타임라인 ±5분" button.
+ */
+export function TimeValue({
+  value,
+  label,
+  kind,
+  filetime,
+  runId,
+}: {
+  value: unknown;
+  label: string;
+  kind?: string;
+  filetime?: unknown;
+  runId: string;
+}) {
+  const { timezone } = useTimezone();
+  const { route, navigate } = useRoute();
+  const input = typeof value === "string" || typeof value === "number" ? value : null;
+  const reading = evidenceTime(input, timezone);
+  if (!reading) return <ScalarReading raw={value} text={flatValue(value)} />;
+  const kindLabel = kind ? timestampKindLabel(kind) : "";
+  const windowRoute = timelineWindowRoute(runId, reading.iso, TIMELINE_WINDOW_MS, route.tz);
+  const raw = typeof filetime === "string" || typeof filetime === "number" ? filetime : null;
+  return (
+    <span className="meta-time" data-iso={reading.iso}>
+      <span className="meta-time-text" title={evidenceTimeTooltip(input, timezone, raw)}>
+        <span className="meta-time-local">{reading.local}</span>{" "}
+        <span className="meta-time-zone">({reading.zone})</span>
+        {reading.utc ? <span className="meta-time-utc"> · {reading.utc}</span> : null}
+      </span>
+      {kindLabel ? (
+        <span className="meta-time-kind" title={`시각 종류: ${kind}`}>
+          {kindLabel}
+        </span>
+      ) : null}
+      {windowRoute ? (
+        <button
+          type="button"
+          className="meta-clock meta-tl-button"
+          aria-label={`${label} 타임라인 ±5분`}
+          title="이 시각 전후 5분을 타임라인에서 보기"
+          onClick={() => navigate(windowRoute)}
+        >
+          <Icon name="clock" /> ±5분
+        </button>
+      ) : null}
+    </span>
+  );
+}
+
+/** A SID with its account name from this run's SAM rows (or the well-known name). */
+function SidValue({ sid, runId }: { sid: string; runId: string }) {
+  const name = useSidName(runId, sid);
+  return (
+    <span className="meta-sid">
+      <span className="mono">{sid}</span>
+      {name ? (
+        <span
+          className="meta-sid-name"
+          title={name.source === "sam" ? "이 런의 SAM 계정 행에서 확인" : "잘 알려진 SID"}
+        >
+          {" "}
+          ({name.name})
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+/** Registry binary data: hex dump + UTF-16LE strings (garbage strings hidden with a note). */
+export function BinaryPanel({ value, label }: { value: unknown; label: string }) {
+  const bytes = bytesOfHex(value);
+  if (!bytes) return <span className="mono viewer-break">{flatValue(value)}</span>;
+  const lines = hexDump(bytes);
+  const strings = utf16Strings(bytes);
+  return (
+    <details className="viewer-details meta-binary" data-testid="binary-panel">
+      <summary>
+        이진 값 {bytes.length.toLocaleString("ko-KR")}바이트
+        {strings.length ? ` · UTF-16 문자열 ${strings.length}개` : ""}
+      </summary>
+      {strings.length ? (
+        <ul className="meta-binary-strings" aria-label={`${label} UTF-16 문자열`}>
+          {strings.map((text, index) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: strings in byte order
+            <li key={index} className="mono">
+              {text}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="meta-hint">읽을 수 있는 UTF-16 문자열이 없습니다.</p>
+      )}
+      <pre className="meta-hexdump" title={`${label} 헥스 덤프`}>
+        {lines.map((line) => `${line.offset}  ${line.hex.padEnd(47, " ")}  ${line.ascii}`).join("\n")}
+      </pre>
+      {bytes.length > 4096 ? <p className="meta-hint">앞 4,096바이트만 표시합니다.</p> : null}
+    </details>
+  );
+}
+
+const BINARY_TEXT = /^hex(\([0-9a-f]+\))?:/i;
+
+/** Parser `utf16le_strings` inside a value: garbage (binary read as UTF-16) dropped and counted. */
+function cleanUtf16(value: unknown, depth = 0): { value: unknown; hidden: number } {
+  if (depth > 4) return { value, hidden: 0 };
+  if (Array.isArray(value)) {
+    let hidden = 0;
+    const out = value.map((item) => {
+      const cleaned = cleanUtf16(item, depth + 1);
+      hidden += cleaned.hidden;
+      return cleaned.value;
+    });
+    return { value: out, hidden };
+  }
+  if (!isPlainObject(value)) return { value, hidden: 0 };
+  let hidden = 0;
+  const out: Record<string, unknown> = {};
+  for (const [key, inner] of Object.entries(value)) {
+    if (key === "utf16le_strings" && Array.isArray(inner)) {
+      const filtered = filterUtf16Strings(inner);
+      out[key] = filtered.shown;
+      if (filtered.hidden) out.utf16le_strings_hidden = filtered.hidden;
+      hidden += filtered.hidden;
+      continue;
+    }
+    const cleaned = cleanUtf16(inner, depth + 1);
+    out[key] = cleaned.value;
+    hidden += cleaned.hidden;
+  }
+  return { value: out, hidden };
+}
+
+/** The value of one sheet entry, by format. */
+function EntryValue({
+  entry,
+  fields,
+  runId,
+}: {
+  entry: SheetEntry;
+  fields: Record<string, unknown>;
+  runId: string;
+}) {
+  const raw = entry.raw;
+  if (entry.missing) {
+    return (
+      <span className="meta-missing" data-missing="">
+        레코드에 없음
+      </span>
+    );
+  }
+  const scalar = typeof raw === "string" || typeof raw === "number" || typeof raw === "boolean";
+  const coded = (text: string) => (
+    <span className="meta-coded" title={flatValue(raw)} data-raw={flatValue(raw)}>
+      {text}
+    </span>
+  );
+  if (entry.format === "time" && scalar) {
+    const { value, filetime } = preciseTime(fields, entry.key, raw);
+    return (
+      <TimeValue
+        value={value}
+        label={entry.label}
+        kind={timeKindOf(entry, fields)}
+        filetime={filetime}
+        runId={runId}
+      />
+    );
+  }
+  if (scalar) {
+    switch (entry.format) {
+      case "eventLevel":
+        return coded(eventLevelLabel(raw));
+      case "logonType":
+        return coded(logonTypeLabel(raw));
+      case "detectionSeverity":
+        return coded(severityLabel(raw));
+      case "bytes":
+        return coded(bytesLabel(raw));
+      case "hex":
+        return coded(hexLabel(raw));
+      case "number":
+        return coded(numberLabel(raw));
+      case "sid":
+        return isSid(String(raw)) ? <SidValue sid={String(raw)} runId={runId} /> : String(raw);
+      case "mono":
+      case "url":
+      case "path": {
+        const field = makeRecordField(entry.key, raw);
+        if (field.truncated) return <LongValue field={field} />;
+        if (entry.key === "data_hex") return <BinaryPanel value={raw} label={entry.label} />;
+        return <span className="mono viewer-break">{field.value}</span>;
+      }
+      default:
+        break;
+    }
+  }
+  const cleaned = cleanUtf16(raw);
+  const field = makeRecordField(entry.key, cleaned.value, entry.fromDetails);
+  return (
+    <>
+      <FieldValue field={field} />
+      {cleaned.hidden ? (
+        <span className="meta-hint" data-testid="utf16-hidden">
+          {" "}
+          · 비인쇄 문자가 많은 UTF-16 문자열 {cleaned.hidden}개는 숨겼습니다(이진 데이터를 문자로 읽은 값).
+        </span>
+      ) : null}
+    </>
+  );
+}
+
+/** Copy text of an entry (full value; objects as JSON). */
+function entryText(entry: SheetEntry): string {
+  return flatValue(entry.raw);
+}
+
+/** A key/value list of sheet entries: label (raw key + aliases as tooltip), value, hover copy. */
+function EntryList({
+  entries,
+  fields,
+  runId,
+  columns,
+}: {
+  entries: SheetEntry[];
+  fields: Record<string, unknown>;
+  runId: string;
+  columns?: ColumnToggle;
+}) {
   useRestorePendingFocus();
   return (
     <dl className="viewer-dl">
-      {fields.map((field) => {
-        const shown = columns?.keys.includes(field.key) ?? false;
-        const name = FIELD_LABELS[field.key] ? `${field.key}(${FIELD_LABELS[field.key]})` : field.key;
+      {entries.map((entry) => {
+        const tooltip = [
+          entry.key,
+          entry.derived ? "(다른 필드에서 읽음)" : "",
+          entry.missing ? "(이 이벤트에 있어야 할 필드 — 파서 출력에 없음)" : "",
+          entry.aliases.length ? `같은 값: ${entry.aliases.join(", ")}` : "",
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        const shown = columns?.keys.includes(entry.key) ?? false;
+        const name = FIELD_LABELS[entry.key] ? `${entry.key}(${FIELD_LABELS[entry.key]})` : entry.key;
+        const fieldLike: RecordField = makeRecordField(entry.key, entry.raw, entry.fromDetails);
         return (
-          <Fragment key={field.key}>
-            <dt className="mono">{field.key}</dt>
-            <dd className="viewer-break meta-field">
+          <Fragment key={`${entry.label}:${entry.key}`}>
+            <dt title={tooltip} data-key={entry.key}>
+              {entry.label}
+            </dt>
+            <dd className="viewer-break meta-field" data-key={entry.key}>
               <span className="meta-field-value">
-                <FieldValue field={field} />
+                <EntryValue entry={entry} fields={fields} runId={runId} />
               </span>
-              {columns && field.fromDetails && columns.defaults.has(field.key) ? (
-                <DisabledReason reason={`기본 열 '${columns.defaults.get(field.key)}'에 이미 표시됩니다`}>
+              <CopyButton text={entryText(entry)} label={entry.label} />
+              {columns && entry.fromDetails && columns.defaults.has(entry.key) ? (
+                <DisabledReason reason={`기본 열 '${columns.defaults.get(entry.key)}'에 이미 표시됩니다`}>
                   <button
                     type="button"
                     className="meta-colbtn"
                     aria-pressed={true}
-                    aria-label={`${columns.defaults.get(field.key)} 열로 표시 중`}
+                    aria-label={`${columns.defaults.get(entry.key)} 열로 표시 중`}
                   >
                     <Icon name="columns" />
                   </button>
                 </DisabledReason>
-              ) : columns && promotable(field) ? (
+              ) : columns && promotable(fieldLike) ? (
                 <button
                   type="button"
                   className="meta-colbtn"
                   aria-pressed={shown}
                   aria-label={shown ? `${name} 열에서 제거` : `${name} 열로 표시`}
                   title={shown ? "열에서 제거" : "열로 표시"}
-                  data-focus-key={`column:${field.key}`}
+                  data-focus-key={`column:${entry.key}`}
                   onClick={() => {
-                    keepFocus(`column:${field.key}`);
-                    columns.toggle(field.key);
+                    keepFocus(`column:${entry.key}`);
+                    columns.toggle(entry.key);
                   }}
                 >
                   <Icon name="columns" />
@@ -289,45 +683,177 @@ function FieldList({ fields, columns }: { fields: RecordField[]; columns?: Colum
   );
 }
 
-/** Decoded record first (F2): 핵심 · 출처 · 검증 open, 기타 collapsed. */
-function RecordSection({ groups, columns }: { groups: RecordGroups; columns?: ColumnToggle }) {
+/** EventData / registry values: a name/value table, always visible under 핵심. */
+function ValueTable({ table }: { table: NonNullable<RecordLayout["table"]> }) {
   return (
-    <section aria-labelledby="viewer-record-title" className="meta-record">
+    <table className="meta-kv" aria-label={table.label}>
+      <thead>
+        <tr>
+          <th scope="col" className="meta-kv-cell meta-kv-head">
+            이름
+          </th>
+          <th scope="col" className="meta-kv-cell meta-kv-head">
+            값
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        {table.rows.map((item, index) => {
+          return (
+            // biome-ignore lint/suspicious/noArrayIndexKey: rows in record order (names may repeat)
+            <tr key={index}>
+              <th scope="row" className="mono meta-kv-cell meta-kv-name">
+                {item.name}
+              </th>
+              <td className="viewer-break meta-kv-cell">
+                {typeof item.value === "string" && BINARY_TEXT.test(item.value) ? (
+                  <BinaryPanel value={item.value} label={item.name} />
+                ) : isPlainObject(item.value) ? (
+                  <NestedValue value={item.value} name={`${table.key}.${item.name}`} />
+                ) : (
+                  <ScalarText name={`${table.key}.${item.name}`} value={item.value} />
+                )}
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
+/** "원본 레코드": the EVTX record rebuilt as Event XML (labelled as a reconstruction). */
+function RecordXml({
+  fields,
+  offset,
+  onOpenHex,
+}: {
+  fields: Record<string, unknown>;
+  offset: number | null;
+  onOpenHex: (offset: number) => void;
+}) {
+  const xml = eventRecordXml(fields);
+  return (
+    <details className="viewer-details meta-record-group" data-testid="record-xml">
+      <summary>원본 레코드 — {RECONSTRUCTED_LABEL}</summary>
+      <p className="meta-hint">
+        서버는 원본 XML을 보내지 않습니다. 파서가 해석한 System·EventData 값으로 Event XML을 재구성했습니다.
+        {offset !== null ? (
+          <>
+            {" "}
+            <button type="button" className="viewer-button mono" onClick={() => onOpenHex(offset)}>
+              헥스에서 레코드 보기 0x{offset.toString(16).toUpperCase()}
+            </button>
+          </>
+        ) : null}
+      </p>
+      <span className="meta-xml-actions">
+        <CopyButton text={xml} label="재구성 XML" />
+      </span>
+      <pre className="meta-xml">{xml}</pre>
+    </details>
+  );
+}
+
+/** Decoded record, evidence first: 핵심 · table · 원본 레코드 · 출처 · 기타 필드. */
+function RecordSection({
+  row,
+  layout,
+  runId,
+  columns,
+  onOpenHex,
+}: {
+  row: GridRow | null;
+  layout: RecordLayout;
+  runId: string;
+  columns?: ColumnToggle;
+  onOpenHex: (offset: number) => void;
+}) {
+  const fields = layoutFields(row);
+  const offset = recordByteRange(row)?.offset ?? null;
+  const json = JSON.stringify(isPlainObject(row?.fields.details) ? row?.fields.details : fields, null, 2);
+  return (
+    <section aria-labelledby="viewer-record-title" className="meta-record" data-sheet={layout.sheet.id}>
       <h3 className="viewer-subtitle" id="viewer-record-title">
         레코드
+        <span className="meta-sheet-label"> · {layout.sheet.label}</span>
+        <span className="meta-record-actions">
+          <CopyButton text={json} label="레코드 JSON" />
+        </span>
       </h3>
-      {(["core", "source", "validation"] as const).map((id) =>
-        groups[id].length ? (
-          <section key={id} aria-label={`레코드 ${RECORD_GROUP_LABELS[id]}`} className="meta-record-group">
-            <h4>{RECORD_GROUP_LABELS[id]}</h4>
-            <FieldList fields={groups[id]} columns={columns} />
-          </section>
-        ) : null,
-      )}
-      {groups.other.length ? (
-        <details className="viewer-details meta-record-group">
-          <summary>
-            {RECORD_GROUP_LABELS.other} {groups.other.length}개
-          </summary>
-          <FieldList fields={groups.other} columns={columns} />
-        </details>
+      {layout.core.length ? (
+        <section aria-label="레코드 핵심" className="meta-record-group">
+          <h4>핵심</h4>
+          <EntryList entries={layout.core} fields={fields} runId={runId} columns={columns} />
+        </section>
+      ) : null}
+      {layout.table ? (
+        <section
+          aria-label={`레코드 ${layout.table.label}`}
+          className="meta-record-group"
+          data-testid="record-table"
+        >
+          <h4>
+            {layout.table.label} {layout.table.rows.length}개
+          </h4>
+          <ValueTable table={layout.table} />
+        </section>
+      ) : null}
+      {hasEventRecord(row?.artifactType, fields) ? (
+        <RecordXml fields={fields} offset={offset} onOpenHex={onOpenHex} />
+      ) : null}
+      {layout.provenance.length ? (
+        <section aria-label="레코드 출처" className="meta-record-group">
+          <h4>출처</h4>
+          <EntryList entries={layout.provenance} fields={fields} runId={runId} columns={columns} />
+        </section>
+      ) : null}
+      {layout.other.length ? (
+        <section aria-label="레코드 기타 필드" className="meta-record-group" data-testid="record-other">
+          <h4>기타 필드 {layout.other.length}개</h4>
+          <EntryList entries={layout.other} fields={fields} runId={runId} columns={columns} />
+        </section>
       ) : null}
     </section>
+  );
+}
+
+/** Governance / validation keys: folded at the very bottom, never above evidence. */
+function GovernanceSection({
+  layout,
+  row,
+  runId,
+}: {
+  layout: RecordLayout;
+  row: GridRow | null;
+  runId: string;
+}) {
+  if (!layout.governance.length) return null;
+  return (
+    <details className="viewer-details meta-record-group meta-governance" data-testid="record-governance">
+      <summary>내부 검증 정보(증거 아님) {layout.governance.length}개</summary>
+      <p className="meta-hint">
+        파서·도구의 자체 점검 항목입니다. 레코드의 내용(증거)이 아니며 보고서의 근거로 쓰지 않습니다.
+      </p>
+      <EntryList entries={layout.governance} fields={layoutFields(row)} runId={runId} />
+    </details>
   );
 }
 
 function provenanceEntries(row: GridRow | null): Array<[string, string]> {
   if (!row) return [];
   const out: Array<[string, string]> = [];
-  if (row.artifactType) out.push(["아티팩트 유형", row.artifactType]);
+  // Output-file rows reuse artifactType for their kind (보고 종류 filter): call it 종류 there.
+  if (row.artifactType)
+    out.push([row.ref.collection === "outputs" ? "종류" : "아티팩트 유형", row.artifactType]);
   if (row.provider) out.push(["수집기(provider)", row.provider]);
-  if (row.timestamp) out.push(["행 시각", row.timestamp]);
   const record = row.fields.artifact_record;
   if (record && typeof record === "object") {
     for (const [key, value] of Object.entries(record as Record<string, unknown>)) {
       if (value === null || value === undefined || value === "") continue;
       if (typeof value === "object") continue;
-      out.push([`artifact_record.${key}`, String(value)]);
+      const label = key === "artifact_id" ? "아티팩트 ID" : metaLabel(key);
+      out.push([label ? `레코드 ${label}` : `artifact_record.${key}`, String(value)]);
       if (out.length > 24) break;
     }
   }
@@ -446,41 +972,34 @@ export function MetaView({
   onComputeHash,
 }: MetaViewProps) {
   const { timezone } = useTimezone();
-  const { route, navigate } = useRoute();
   const { currentRun } = useRuns();
   const ctx = useCommandContext();
   const { setMode } = useViewerRouteMode();
   const sessionNote = useSessionNote(noteKey(target.runId, target.ref));
   const note = sessionNote ?? (typeof row?.fields.note === "string" ? row.fields.note : "");
   const info = evidenceInfo(row);
-  const formatTime = (value: number | string | undefined) => formatTimestamp(value, timezone);
+  const formatTime = (value: number | string | undefined) => {
+    const reading = evidenceTime(value ?? null, timezone);
+    return reading ? reading.text : value === undefined || value === "" ? "—" : String(value);
+  };
   const directory = isDirectoryTarget(target, preview) || metadata?.is_directory === true;
   const sourceMissing = !directory && Boolean(target.sourcePath) && isSourceMissing(metadataError);
   const openHex = (offset: number) => {
     setViewerTarget({ ...target, highlight: { offset, length: 1 } }, row);
     setMode("hex");
   };
-  const clock = (label: string, value: number | string | undefined) => {
-    if (value === undefined || value === "") return null;
-    const hash = timelineWindowHash(target.runId, value, route.tz);
-    if (!hash) return null;
-    return (
-      <button
-        type="button"
-        className="meta-clock"
-        aria-label={`${label} 전후 1시간 타임라인 보기`}
-        title="이 시각 전후 1시간을 타임라인에서 보기"
-        onClick={() => navigate(parseHash(hash))}
-      >
-        <Icon name="clock" />
-      </button>
+  /** A time of the record/file: the evidence format + kind chip + "타임라인 ±5분". */
+  const time = (label: string, value: number | string | undefined | null, kind?: string) =>
+    value === undefined || value === null || value === "" ? (
+      "—"
+    ) : (
+      <TimeValue value={value} label={label} kind={kind} runId={target.runId} />
     );
-  };
   const hashes = metadata?.hashes || {};
   const provenance = provenanceEntries(row);
   const ntfs = ntfsProvenance(row, formatTime);
   const ntfsHintId = useId();
-  const grouped = groupRecordFields(row);
+  const layout = recordLayout(row);
   // "열로 표시" only on artifact rows of one kind (the grid can show that kind's fields as columns).
   const artifactKind = row?.ref.collection === "artifacts" ? row.ref.kind : undefined;
   const promotedFields = usePromotedFields(artifactKind);
@@ -489,20 +1008,22 @@ export function MetaView({
   );
   const gridVisible = useGridLocalStore((s) => s.visibleColumnIds);
   const visibleIds = gridKind === artifactKind ? gridVisible : null;
+  const filterTypes = useFilterStore((s) => s.filters.types);
   const defaultHeaders = useMemo(
-    () => defaultFieldHeaders(artifactKind, visibleIds),
-    [artifactKind, visibleIds],
+    () => defaultFieldHeaders(artifactKind, visibleIds, filterTypes),
+    [artifactKind, visibleIds, filterTypes],
   );
   const promoted = useMemo(
     () => ({ ...promotedFields, defaults: defaultHeaders }),
     [promotedFields, defaultHeaders],
   );
-  const groups =
-    grouped.core.length + grouped.source.length + grouped.validation.length + grouped.other.length > 0
-      ? grouped
-      : null;
+  const hasRecord =
+    layout.core.length + layout.provenance.length + layout.other.length + layout.governance.length > 0 ||
+    layout.table !== null;
+  const isArtifact = row?.ref.collection === "artifacts";
   return (
     <div className="meta-view">
+      <RecordBanners row={row} />
       {sourceMissing ? (
         <p className="meta-notice" role="alert" data-testid="source-missing">
           소스를 찾을 수 없습니다 — 원본 경로: <span className="mono viewer-break">{target.sourcePath}</span>
@@ -514,7 +1035,15 @@ export function MetaView({
           <span className="mono viewer-break">{target.sourcePath}</span>
         </p>
       ) : null}
-      {groups ? <RecordSection groups={groups} columns={artifactKind ? promoted : undefined} /> : null}
+      {hasRecord ? (
+        <RecordSection
+          row={row}
+          layout={layout}
+          runId={target.runId}
+          columns={artifactKind ? promoted : undefined}
+          onOpenHex={openHex}
+        />
+      ) : null}
       <CrossCaseSection row={row} runId={target.runId} />
       <section aria-label="출처">
         <h3 className="viewer-subtitle">출처</h3>
@@ -535,6 +1064,12 @@ export function MetaView({
               <dd className="viewer-break">{value}</dd>
             </Fragment>
           ))}
+          {row?.timestamp ? (
+            <>
+              <dt>행 시각</dt>
+              <dd>{time("행 시각", row.timestamp)}</dd>
+            </>
+          ) : null}
           {ntfs
             ? ntfs.entries.map(([key, value]) => (
                 <Fragment key={key}>
@@ -574,15 +1109,9 @@ export function MetaView({
           <dt>MIME</dt>
           <dd>{metadata?.mime_type ?? preview?.mime_type ?? "—"}</dd>
           <dt>수정 시각</dt>
-          <dd>
-            {formatTime(metadata?.modified_at ?? preview?.modified_at)}
-            {clock("수정 시각", metadata?.modified_at ?? preview?.modified_at)}
-          </dd>
+          <dd>{time("수정 시각", metadata?.modified_at ?? preview?.modified_at, "modified")}</dd>
           <dt>생성 시각</dt>
-          <dd>
-            {formatTime(metadata?.created_at)}
-            {clock("생성 시각", metadata?.created_at)}
-          </dd>
+          <dd>{time("생성 시각", metadata?.created_at, "created")}</dd>
         </dl>
         {metadataError ? (
           <p className="viewer-error">메타데이터를 불러오지 못했습니다: {metadataError}</p>
@@ -633,28 +1162,30 @@ export function MetaView({
             {target.runId}
             {currentRun ? ` · ${runDisplayName(currentRun)}` : ""}
           </dd>
-          {row?.timestamp ? (
-            <>
-              <dt>행 시각</dt>
-              <dd>
-                {formatTime(row.timestamp)}
-                {clock("행 시각", row.timestamp)}
-              </dd>
-            </>
-          ) : null}
         </dl>
       </section>
       {target.sourcePath ? (
-        <section aria-label="해시">
-          <h3 className="viewer-subtitle">해시</h3>
+        <section aria-label={isArtifact ? "컨테이너 파일 해시" : "파일 해시"}>
+          <h3 className="viewer-subtitle">{isArtifact ? "컨테이너 파일 해시" : "파일 해시"}</h3>
+          {isArtifact ? (
+            <p className="meta-hint">
+              레코드가 들어 있는 원본 파일 전체의 해시입니다(레코드 자체의 해시 아님).
+            </p>
+          ) : null}
           {hashes.sha256 ? (
             <dl className="viewer-dl">
               <dt>SHA-256</dt>
-              <dd className="mono viewer-break">{hashes.sha256}</dd>
+              <dd className="meta-hash-dd">
+                <HashValue value={hashes.sha256} label="SHA-256" />
+              </dd>
               <dt>SHA-1</dt>
-              <dd className="mono viewer-break">{hashes.sha1 ?? "—"}</dd>
+              <dd className="meta-hash-dd">
+                {hashes.sha1 ? <HashValue value={hashes.sha1} label="SHA-1" /> : "—"}
+              </dd>
               <dt>MD5</dt>
-              <dd className="mono viewer-break">{hashes.md5 ?? "—"}</dd>
+              <dd className="meta-hash-dd">
+                {hashes.md5 ? <HashValue value={hashes.md5} label="MD5" /> : "—"}
+              </dd>
             </dl>
           ) : (
             <p className="viewer-note">
@@ -714,6 +1245,7 @@ export function MetaView({
           ) : null}
         </dl>
       </section>
+      <GovernanceSection layout={layout} row={row} runId={target.runId} />
     </div>
   );
 }

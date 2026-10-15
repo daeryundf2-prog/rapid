@@ -44,6 +44,11 @@ function gridOn(collection: { id: "files" | "artifacts" | "analysis"; kind?: str
 }
 
 const dataRows = () => screen.queryAllByRole("row").filter((r) => r.hasAttribute("data-index"));
+/** Opens the header's 열 설정 popover (visual-polish S3) unless it is open. */
+const openColumnMenu = () => {
+  const button = screen.getByRole("button", { name: "열 설정" });
+  if (button.getAttribute("aria-expanded") !== "true") fireEvent.click(button);
+};
 const headerCell = (col: string) =>
   screen.getAllByRole("columnheader").find((h) => h.getAttribute("data-col") === col) as HTMLElement;
 
@@ -96,10 +101,11 @@ describe("files NTFS columns (plan analysis-workbench-p1 U-P1-3)", () => {
     offCommands = registerAnalysisCommands(new QueryClient());
     renderWithClient(<DataGrid />);
     await waitFor(() => expect(dataRows()).toHaveLength(3));
+    openColumnMenu();
     fireEvent.change(screen.getByRole("combobox", { name: "열 구성" }), { target: { value: "source" } });
     for (const [col, name] of [
-      ["ntfsCreated", "생성"],
-      ["ntfsAccessed", "접근"],
+      ["ntfsCreated", "NTFS 생성"],
+      ["ntfsAccessed", "NTFS 접근"],
       ["ntfsEntry", "MFT 엔트리"],
       ["filesystem", "파일 시스템"],
       ["sourceImage", "소스 이미지 경로"],
@@ -125,6 +131,7 @@ describe("files NTFS columns (plan analysis-workbench-p1 U-P1-3)", () => {
     installFetch({ "/files": filesPage(3, { analysis_id: "ntfs-123456789", matched: 1, total: 3 }, true) });
     renderWithClient(<DataGrid initialPreset="source" />);
     await waitFor(() => expect(dataRows()).toHaveLength(3));
+    openColumnMenu();
     fireEvent.change(screen.getByRole("combobox", { name: "열 구성" }), { target: { value: "source" } });
     expect(screen.getByTestId("grid-ntfs-status").textContent).toBe(
       "NTFS 메타: 이 페이지 1/3행 일치 (분석 ntfs-123)",
@@ -147,15 +154,19 @@ describe("column header filters (plan analysis-workbench-p1 U-P1-4)", () => {
     installFetch({ "/files": filesPage(10, null) });
     renderWithClient(<DataGrid />);
     await waitFor(() => expect(dataRows()).toHaveLength(10));
-    const toggle = screen.getByRole("button", { name: "열 필터" });
+    // The column-filter row toggle lives in the header's 열 설정 menu (visual-polish S3).
+    openColumnMenu();
+    const toggle = screen.getByRole("button", { name: "열 필터 행" });
     expect(toggle.getAttribute("aria-pressed")).toBe("false");
     fireEvent.click(toggle);
     expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.keyDown(toggle, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "열 설정" })).toBeNull();
     const filterRow = screen.getByTestId("grid-colfilter-row");
     expect(filterRow.getAttribute("aria-rowindex")).toBe("2");
     // Data rows follow the header + filter rows.
     expect(dataRows()[0]?.getAttribute("aria-rowindex")).toBe("3");
-    expect(within(filterRow).getByRole("textbox", { name: "시각 필터 (시작)" })).toBeTruthy();
+    expect(within(filterRow).getByRole("textbox", { name: "수정 필터 (시작)" })).toBeTruthy();
 
     vi.useFakeTimers();
     const min = within(filterRow).getByRole("textbox", { name: "크기 필터 (최소)" });
@@ -170,7 +181,9 @@ describe("column header filters (plan analysis-workbench-p1 U-P1-4)", () => {
     expect(parseHash(window.location.hash).cf).toEqual([{ col: "size", op: ">", value: "1005" }]);
     await waitFor(() => expect(dataRows()).toHaveLength(5));
     expect(screen.getByTestId("grid-colfilter-status").textContent).toBe("열 필터: 5건 / 불러온 10행 기준");
-    expect(screen.getByRole("button", { name: "열 필터 (1)" })).toBeTruthy();
+    openColumnMenu();
+    expect(screen.getByRole("button", { name: "열 필터 행 (1)" })).toBeTruthy();
+    fireEvent.keyDown(screen.getByRole("button", { name: "열 필터 행 (1)" }), { key: "Escape" });
 
     // Esc empties the input and drops the filter.
     fireEvent.keyDown(min, { key: "Escape" });
@@ -189,10 +202,10 @@ describe("column header filters (plan analysis-workbench-p1 U-P1-4)", () => {
     expect((within(row).getByRole("textbox", { name: "이름 필터" }) as HTMLInputElement).value).toBe(
       "file-1",
     );
-    expect((within(row).getByRole("textbox", { name: "시각 필터 (시작)" }) as HTMLInputElement).value).toBe(
+    expect((within(row).getByRole("textbox", { name: "수정 필터 (시작)" }) as HTMLInputElement).value).toBe(
       "2026-01-01",
     );
-    expect((within(row).getByRole("textbox", { name: "시각 필터 (끝)" }) as HTMLInputElement).value).toBe("");
+    expect((within(row).getByRole("textbox", { name: "수정 필터 (끝)" }) as HTMLInputElement).value).toBe("");
   });
 
   it("artifacts: 경로 → path_contains and 유형 → artifact_type on the request; server count in the status line", async () => {
@@ -243,8 +256,10 @@ describe("column header filters (plan analysis-workbench-p1 U-P1-4)", () => {
     const params = new URL(page.url, "http://x").searchParams;
     expect(params.getAll("kind")).toEqual(["windows-system"]);
     expect(params.getAll("artifact_type")).toEqual(["web-server-log", "webshell-source-candidate"]);
-    const typeCell = (dataRows()[0] as HTMLElement).querySelector('[data-col="type"] .grid-type-chip');
-    expect(typeCell?.textContent).toBe("web-server-log");
+    const typeCell = (dataRows()[0] as HTMLElement).querySelector('[data-col="type"] .grid-type-text');
+    // The chip reads the Korean type name; the exact artifact_type stays on the element / tooltip.
+    expect(typeCell?.textContent).toBe("웹 서버 로그");
+    expect(typeCell?.getAttribute("data-type")).toBe("web-server-log");
     expect(screen.getByRole("button", { name: "유형 web-server-log 필터 제거" })).toBeTruthy();
   });
 

@@ -188,7 +188,10 @@ describe("CaseDashboard (접수)", () => {
 
     const processing = card("케이스 처리 세부");
     expect(processing.textContent).toContain("r1");
-    expect(processing.textContent).toContain("fingerprint");
+    // Step ids read in Korean (shared stepLabels); the raw id stays the cell tooltip.
+    expect(processing.textContent).toContain("증거 지문(해시)");
+    expect(processing.textContent).not.toContain("fingerprint");
+    expect(processing.querySelector('td[title="fingerprint"]')?.textContent).toBe("증거 지문(해시)");
     expect(processing.textContent).toContain("1분 0초");
     expect(processing.textContent).toContain("registry");
 

@@ -259,8 +259,14 @@ describe("tree model (탐색 domain tree, console-ia §4)", () => {
     expect(flattenVisible(model, new Set())).toHaveLength(17);
     const open = flattenVisible(model, new Set(["domain:eventlog"]));
     expect(open.filter((f) => f.level === 2).map((f) => f.node.label)).toEqual([
-      "EVTX 전체",
+      "전체 이벤트 로그(EVTX·ETL)",
+      "EVTX 이벤트",
+      "탐지 규칙 일치",
       "로그온 세션",
+      "슬랙 복구 레코드",
+      "오래된 레코드(첫 레코드 이전)",
+      "EVTX 파일·요약",
+      "ETL 추적 파일",
       "방화벽 로그",
     ]);
   });

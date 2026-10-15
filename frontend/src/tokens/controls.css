@@ -1,0 +1,795 @@
+/* Control system (visual-polish plan U-V2 / U-V3 / U-V7 / U-V8).
+   Loaded after tokens.css and app/shell.css (src/main.tsx). Two layers:
+   1. Element defaults wrapped in :where() — zero specificity, so any feature
+      class (.grid-select, .filter-field input, …) still wins without !important.
+   2. Shared classes: .button (+ .primary / .secondary / .ghost / .danger / .roomy),
+      .icon-btn, .segmented, .chip, .status-dot, .status-chip, .progress-thin,
+      .toast-region / .toast, .popover, .num.
+   Colours come only from tokens.css. Icons are inline data-URI SVG (Lucide
+   geometry); masks take their colour from a token, so they follow the theme. */
+
+/* --- typography ------------------------------------------------------------ */
+
+body {
+  line-height: var(--lh);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+:where(h1, h2, h3, h4) {
+  letter-spacing: var(--tracking-heading);
+}
+
+/* Numbers line up in every table, grid cell, time stamp and mono run. */
+:where(td, th, [role="gridcell"], [role="columnheader"], [role="rowheader"], time, code, kbd, samp, .mono),
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+  color: var(--text);
+}
+
+:root {
+  --field-edge: color-mix(in srgb, var(--line) 50%, transparent);
+  scrollbar-color: color-mix(in srgb, var(--text-subtle) 45%, transparent) transparent;
+}
+
+/* --- text inputs, textarea, select ---------------------------------------- */
+
+:where(
+  input:not([type]),
+  input[type="text"],
+  input[type="search"],
+  input[type="number"],
+  input[type="password"],
+  input[type="email"],
+  input[type="url"],
+  input[type="tel"],
+  input[type="date"],
+  input[type="time"],
+  input[type="datetime-local"],
+  select,
+  textarea
+) {
+  appearance: none;
+  height: var(--control-h);
+  min-width: 0;
+  padding: 0 var(--space-2);
+  /* Filled fields (review #15): a surface-2 fill carries the shape; the edge is a 50% line
+     (never fully transparent, so a field on surface-2 / surface-3 still has an outline). */
+  border: 1px solid var(--field-edge);
+  border-radius: var(--radius);
+  background-color: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-body);
+  transition:
+    border-color var(--motion) var(--ease),
+    background-color var(--motion) var(--ease);
+}
+
+:where(input:hover:not(:disabled), select:hover:not(:disabled), textarea:hover:not(:disabled)) {
+  border-color: var(--line);
+}
+
+:where(input:focus-visible, select:focus-visible, textarea:focus-visible) {
+  border-color: var(--accent);
+}
+
+:where(input, textarea)::placeholder {
+  color: var(--text-subtle);
+  opacity: 1;
+}
+
+:where(input:disabled, select:disabled, textarea:disabled) {
+  background-color: var(--disabled-bg);
+  color: var(--disabled-text);
+  cursor: not-allowed;
+}
+
+:where(textarea) {
+  height: auto;
+  min-height: 64px;
+  padding: 6px var(--space-2);
+  line-height: var(--lh);
+  resize: vertical;
+}
+
+:where(input[type="number"]) {
+  font-variant-numeric: tabular-nums;
+}
+
+/* select: native element, custom chevron (16px, stroke 2). Deliberately (0,2,1):
+   a feature rule's `background:` shorthand must not wipe the chevron after
+   appearance: none removed the native arrow. Colours stay overridable above. */
+select:not([multiple]):not([size]) {
+  appearance: none;
+  padding-right: 28px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23a6b0bc' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 14px 14px;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+:root[data-theme="light"] select:not([multiple]):not([size]) {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%234b5663' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+
+@media print {
+  :root select:not([multiple]):not([size]) {
+    background-image: none;
+  }
+}
+
+:where(select[multiple], select[size]:not([size="1"])) {
+  height: auto;
+  padding: var(--space-1);
+}
+
+:where(select) option {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+/* date / time: keep the native picker, swap its glyph for a calendar icon. */
+:where(input[type="date"], input[type="time"], input[type="datetime-local"]) {
+  font-variant-numeric: tabular-nums;
+}
+
+:where(input[type="date"], input[type="datetime-local"])::-webkit-calendar-picker-indicator {
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  margin-left: var(--space-1);
+  background: var(--text-muted);
+  mask:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect width='18' height='18' x='3' y='4' rx='2'/%3E%3Cpath d='M16 2v4M8 2v4M3 10h18'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  cursor: pointer;
+}
+
+:where(input[type="date"], input[type="datetime-local"])::-webkit-calendar-picker-indicator:hover {
+  background: var(--text);
+}
+
+:where(input[type="search"])::-webkit-search-cancel-button {
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  background: var(--text-muted);
+  mask:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='M18 6 6 18M6 6l12 12'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  cursor: pointer;
+}
+
+/* --- checkbox / radio ------------------------------------------------------ */
+
+:where(input[type="checkbox"], input[type="radio"]) {
+  appearance: none;
+  position: relative;
+  flex: none;
+  display: inline-grid;
+  place-content: center;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-0);
+  vertical-align: -3px;
+  cursor: pointer;
+  transition:
+    background-color var(--motion) var(--ease),
+    border-color var(--motion) var(--ease);
+}
+
+:where(input[type="radio"]) {
+  border-radius: 50%;
+}
+
+:where(input[type="checkbox"]:hover:not(:disabled), input[type="radio"]:hover:not(:disabled)) {
+  border-color: var(--accent);
+}
+
+/* Checked state keeps normal specificity so a feature `background:` cannot hide it. */
+input[type="checkbox"]:checked,
+input[type="checkbox"]:indeterminate,
+input[type="radio"]:checked {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+input[type="checkbox"]::before {
+  content: "";
+  width: 12px;
+  height: 12px;
+  background: var(--on-accent);
+  mask:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  transform: scale(0);
+  transition: transform var(--motion) var(--ease);
+}
+
+input[type="checkbox"]:indeterminate::before {
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.5' stroke-linecap='round'%3E%3Cpath d='M5 12h14'/%3E%3C/svg%3E");
+}
+
+input[type="checkbox"]:checked::before,
+input[type="checkbox"]:indeterminate::before {
+  transform: scale(1);
+}
+
+input[type="radio"]:checked {
+  box-shadow: inset 0 0 0 3px var(--surface-0);
+}
+
+:where(input[type="checkbox"]:disabled, input[type="radio"]:disabled) {
+  border-color: var(--line-subtle);
+  background: var(--disabled-bg);
+  cursor: not-allowed;
+}
+
+input[type="checkbox"]:disabled:checked,
+input[type="checkbox"]:disabled:indeterminate,
+input[type="radio"]:disabled:checked {
+  background: var(--disabled-text);
+  border-color: var(--disabled-text);
+}
+
+/* --- progress ---------------------------------------------------------------- */
+
+:where(progress),
+.progress-thin {
+  appearance: none;
+  display: inline-block;
+  height: 4px;
+  border: 0;
+  border-radius: 2px;
+  background: var(--surface-3);
+  color: var(--accent);
+  overflow: hidden;
+  vertical-align: middle;
+}
+
+:where(progress)::-webkit-progress-bar {
+  background: var(--surface-3);
+  border-radius: 2px;
+}
+
+:where(progress)::-webkit-progress-value {
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width var(--motion) var(--ease);
+}
+
+:where(progress)::-moz-progress-bar {
+  background: var(--accent);
+  border-radius: 2px;
+}
+
+/* <div class="progress-thin"><span style="width: 42%"></span></div> (or --value: 42%) */
+.progress-thin > span {
+  display: block;
+  width: var(--value, 0%);
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width var(--motion) var(--ease);
+}
+
+.progress-thin.indeterminate > span {
+  width: 30%;
+  animation: rt-progress-slide 1.2s ease-in-out infinite;
+}
+
+.progress-label {
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes rt-progress-slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(340%);
+  }
+}
+
+/* --- buttons ------------------------------------------------------------------ */
+
+.button,
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: var(--control-h);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-table-aux);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background-color var(--motion) var(--ease),
+    border-color var(--motion) var(--ease),
+    color var(--motion) var(--ease);
+}
+
+.button svg,
+.icon-btn svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+
+/* secondary is the default; the class is accepted for clarity. */
+.button:hover:where(:not(:disabled, [aria-disabled="true"])) {
+  border-color: var(--line);
+  background: var(--surface-3);
+}
+
+.button:active:where(:not(:disabled, [aria-disabled="true"])) {
+  background: var(--surface-1);
+}
+
+.button.roomy {
+  height: var(--control-h-roomy);
+  padding: 0 var(--space-4);
+}
+
+.button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
+.button.primary:hover:where(:not(:disabled, [aria-disabled="true"])) {
+  border-color: var(--accent-hover);
+  background: var(--accent-hover);
+}
+
+.button.primary:active:where(:not(:disabled, [aria-disabled="true"])) {
+  border-color: var(--accent-active);
+  background: var(--accent-active);
+}
+
+.button.ghost,
+.icon-btn {
+  border-color: transparent;
+  background: transparent;
+}
+
+.button.ghost:hover:where(:not(:disabled, [aria-disabled="true"])),
+.icon-btn:hover:where(:not(:disabled, [aria-disabled="true"])) {
+  border-color: transparent;
+  background: var(--surface-2);
+}
+
+.button.ghost:active:where(:not(:disabled, [aria-disabled="true"])),
+.icon-btn:active:where(:not(:disabled, [aria-disabled="true"])) {
+  background: var(--surface-3);
+}
+
+.button.danger {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
+.button.danger:hover:where(:not(:disabled, [aria-disabled="true"])) {
+  background: color-mix(in srgb, var(--danger) 88%, var(--text));
+}
+
+/* Toggle buttons (aria-pressed) — status toggles keep status.css's fill. */
+.button[aria-pressed="true"]:not([data-status-button]),
+.icon-btn[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--bg-selected);
+  color: var(--text);
+}
+
+.button.icon-only {
+  width: var(--control-h);
+  padding: 0;
+}
+
+/* 32px square icon button (U-V3); .sm = 28px to sit in a 28px toolbar. */
+.icon-btn {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  color: var(--text-muted);
+}
+
+.icon-btn:hover:where(:not(:disabled, [aria-disabled="true"])) {
+  color: var(--text);
+}
+
+.icon-btn.sm {
+  width: var(--control-h);
+  height: var(--control-h);
+}
+
+/* Disabled (review #4): an outline, never a fill — an enabled button is filled (surface-2 /
+   accent), a disabled one is a dashed outline on the bare surface with --disabled-text, so the
+   two never read alike (on dark, --disabled-bg equals the enabled surface-2 fill). */
+.button:is(:disabled, [aria-disabled="true"]),
+.button:is(.primary, .danger, .ghost):is(:disabled, [aria-disabled="true"]),
+.icon-btn:is(:disabled, [aria-disabled="true"]) {
+  border-color: var(--line);
+  border-style: dashed;
+  background: transparent;
+  color: var(--disabled-text);
+  font-weight: 500;
+  cursor: not-allowed;
+}
+
+.button.ghost:disabled,
+.button.ghost[aria-disabled="true"],
+.icon-btn:disabled,
+.icon-btn[aria-disabled="true"] {
+  border-color: transparent;
+  background: transparent;
+}
+
+/* --- segmented control (columns / thumbnails / chat / histogram; viewer modes) --- */
+
+.segmented {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: var(--control-h);
+  padding: 2px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius);
+  background: var(--surface-0);
+}
+
+.segmented > button,
+.segmented > a,
+.segmented > [role="tab"],
+.segmented > [role="radio"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--fs-table-aux);
+  font-weight: 500;
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    background-color var(--motion) var(--ease),
+    color var(--motion) var(--ease);
+}
+
+.segmented > :hover {
+  color: var(--text);
+}
+
+.segmented > [aria-pressed="true"],
+.segmented > [aria-selected="true"],
+.segmented > [aria-checked="true"],
+.segmented > [aria-current="page"] {
+  border-color: var(--line);
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.segmented > :disabled,
+.segmented > [aria-disabled="true"] {
+  color: var(--disabled-text);
+  cursor: not-allowed;
+}
+
+.segmented svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* --- chips + status dots (U-V7: colour dot + text, not a bordered button) ----- */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  height: 22px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: var(--fs-table-aux);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+button.chip {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+button.chip:hover {
+  border-color: var(--line);
+}
+
+.chip[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--bg-selected);
+}
+
+.chip > .chip-remove {
+  display: inline-grid;
+  place-content: center;
+  width: 16px;
+  height: 16px;
+  margin-right: -4px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.chip > .chip-remove:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.status-dot {
+  flex: none;
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dot, var(--text-muted));
+}
+
+.status-dot.ok {
+  --dot: var(--ok);
+}
+.status-dot.warn {
+  --dot: var(--warn);
+}
+.status-dot.danger,
+.status-dot.error {
+  --dot: var(--danger);
+}
+.status-dot.info {
+  --dot: var(--info);
+}
+
+[data-status="relevant"] {
+  --dot: var(--status-relevant);
+}
+[data-status="bookmark"] {
+  --dot: var(--status-bookmark);
+}
+[data-status="excluded"] {
+  --dot: var(--status-excluded);
+}
+[data-status="needs-review"] {
+  --dot: var(--status-needs-review);
+}
+[data-status="include-in-report"] {
+  --dot: var(--status-report);
+}
+
+/* Existing <StatusChip> (components/status.css) renders as dot + text. */
+.status-chip {
+  gap: 6px;
+  height: 20px;
+  padding: 0 var(--space-2) 0 6px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  font-weight: 500;
+}
+
+/* Job / run / file states (components/ToneChip): the dot follows the state's tone. */
+.status-chip.ok {
+  --dot: var(--ok);
+}
+.status-chip.danger {
+  --dot: var(--danger);
+}
+.status-chip.warn {
+  --dot: var(--warn);
+}
+.status-chip.info {
+  --dot: var(--info);
+}
+
+.status-chip.tone-chip {
+  font-weight: 400;
+}
+
+.status-chip::before,
+.chip[data-status]::before {
+  content: "";
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dot, var(--text-muted));
+}
+
+/* --- skeleton (review #11): surface-2 bars, 1.2s shimmer; reduced motion stops it --- */
+
+.skeleton,
+.grid-skeleton {
+  display: block;
+  width: 60%;
+  height: 8px;
+  border-radius: var(--radius-sm);
+  /* 1.2s shimmer (review #11); prefers-reduced-motion stops it (tokens.css). */
+  background:
+    linear-gradient(
+      90deg,
+      var(--surface-2) 0%,
+      color-mix(in srgb, var(--surface-2) 60%, var(--surface-3)) 50%,
+      var(--surface-2) 100%
+    )
+    0 0 / 200% 100%;
+  animation: rt-shimmer 1.2s linear infinite;
+}
+
+@keyframes rt-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+/* --- path (review #9): parent folder, middle ellipsis, mono --------------------- */
+
+.mid-path {
+  display: inline-flex;
+  gap: var(--space-1);
+  min-width: 0;
+  max-width: 100%;
+  font-family: var(--font-mono);
+  font-size: var(--fs-aux);
+  white-space: nowrap;
+}
+
+.mid-path-head {
+  flex: 0 1 auto;
+  min-width: 1.5em; /* room for the "…" itself */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-subtle);
+}
+
+.mid-path-tail {
+  flex: 0 0 auto;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-muted);
+}
+
+/* --- toast (U-V7: one kind, bottom-right) ------------------------------------- */
+
+.toast-region {
+  position: fixed;
+  right: var(--space-4);
+  bottom: calc(28px + var(--space-3)); /* clears the 28px status bar */
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-2);
+  max-width: min(400px, calc(100vw - 2 * var(--space-4)));
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 240px;
+  max-width: 400px;
+  padding: 10px var(--space-3);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius);
+  background: var(--surface-3);
+  box-shadow: var(--shadow-pop);
+  color: var(--text);
+  font-size: var(--fs-body);
+  line-height: var(--lh);
+  pointer-events: auto;
+  animation: rt-pop-in var(--motion) var(--ease);
+}
+
+.toast > .status-dot {
+  margin-top: 6px;
+}
+
+.toast.ok {
+  --dot: var(--ok);
+}
+.toast.warn {
+  --dot: var(--warn);
+}
+.toast.error,
+.toast.danger {
+  --dot: var(--danger);
+}
+.toast.info {
+  --dot: var(--info);
+}
+
+.toast-body {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.toast-title {
+  font-weight: 600;
+}
+
+.toast-detail {
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
+}
+
+.toast > .icon-btn {
+  width: 20px;
+  height: 20px;
+  margin: 0 -4px 0 0;
+}
+
+/* --- popover surface + motion (U-V8: fade + 2px, 120ms ease-out) -------------- */
+
+.popover {
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-3);
+  box-shadow: var(--shadow-pop);
+  color: var(--text);
+  animation: rt-pop-in var(--motion) var(--ease);
+}
+
+@keyframes rt-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

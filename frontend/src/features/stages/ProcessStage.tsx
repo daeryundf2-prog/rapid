@@ -7,12 +7,14 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { announce } from "../../a11y";
+import { announce, DisabledReason } from "../../a11y";
 import { type AnalysisState, isAnalysisActive } from "../../api/analyses";
 import { getRunSummary } from "../../api/runs";
 import { RUN_MODE_LABEL, runDisplayName } from "../../app/collections";
 import { CommandButton } from "../../commands/CommandButton";
+import { useCommandState } from "../../commands/registry";
 import { StatusBadge, statusLabel } from "../../components/Badge";
+import { chipToneOf, ToneChip } from "../../components/ToneChip";
 import { Icon } from "../../icons";
 import { serializeRoute } from "../../router";
 import { formatElapsed, progressText as runProgressText } from "../../shell/StatusBar";
@@ -35,9 +37,15 @@ import {
   STATUS_LABEL,
 } from "../analysis/kinds";
 import { useAnalyses } from "../analysis/store";
+import { DisclosuresCard } from "../dashboard/cards";
+import { disclosureDigest, disclosureItems, runWarnings } from "../dashboard/disclosures";
 import { formatCount } from "../grid/gridUtils";
+import { stepNameLabel, stepStatusLabel, stepWarningLabel } from "./stepLabels";
 import "../analysis/analysis.css";
+import "../dashboard/dashboard.css";
 import "./stages.css";
+
+export { stepNameLabel, stepStatusLabel, stepWarningLabel } from "./stepLabels";
 
 function elapsedOf(
   run: { created_at?: string; updated_at?: string; finished_at?: string | null; status?: unknown },
@@ -63,7 +71,7 @@ export function useNow(active: boolean): number {
 }
 
 /** Runs listed before "더 보기" in the 처리 panel (the routed run is always listed). */
-export const RECENT_RUN_COUNT = 8;
+export const RECENT_RUN_COUNT = 5;
 
 type RunLike = { run_id: string; created_at?: string; request?: { root?: string; output_dir?: string } };
 
@@ -106,77 +114,44 @@ export function disambiguatedRunNames(runs: readonly RunLike[], timezone: string
   return out;
 }
 
-/** Korean labels of run summary step statuses (processing plan table). */
-const STEP_STATUS_LABEL: Record<string, string> = {
-  completed: "완료",
-  complete: "완료",
-  ok: "완료",
-  executed: "실행됨",
-  skipped: "건너뜀",
-  failed: "실패",
-  error: "오류",
-  running: "실행 중",
-  queued: "대기",
-  pending: "대기",
-  cancelled: "취소됨",
-  canceled: "취소됨",
-  partial: "일부 완료",
-  missing: "없음",
-  blocked: "차단됨",
-  unavailable: "사용할 수 없음",
-  timeout: "시간 초과",
-  not_run: "미실행",
-  warning: "경고",
-  warn: "경고",
-  notice: "알림",
-  info: "정보",
-  none: "이상 없음",
-  failed_isolated: "일부 실패(격리됨)",
-  unknown: "알 수 없음",
-  "operator-exercise": "분석관 확인 필요",
-};
-
-/** Korean status of a plan step; an unknown one still reads as Korean ("상태 미상(xyz)"). */
-export function stepStatusLabel(status: string): string {
-  const known = STEP_STATUS_LABEL[status] ?? STEP_STATUS_LABEL[status.toLowerCase()];
-  if (known) return known;
-  const lower = status.toLowerCase();
-  if (lower.includes("warn")) return "경고";
-  if (lower.includes("fail") || lower.includes("error")) return "실패";
-  return `상태 미상(${status})`;
+/** "완료 · 10-12 21:37 · 35건" — the compact last-run line of a 처리 panel card. */
+export function lastRunShort(job: AnalysisState | undefined, timezone: string): string {
+  if (!job) return "아직 실행하지 않았습니다";
+  const when = job.finished_at ?? job.started_at ?? job.created_at;
+  const parts = [isAllFailed(job) ? "전부 실패" : STATUS_LABEL[job.status]];
+  if (when) parts.push(formatTimestamp(when, timezone, { precision: "minute" }));
+  if (job.status === "completed" || job.status === "cancelled") parts.push(`${formatCount(job.row_count)}건`);
+  if (isAnalysisActive(job)) {
+    const progress = progressText(job);
+    if (progress) parts.push(progress);
+  }
+  return parts.join(" · ");
 }
 
-/** Korean names of the run pipeline steps (core/run/steps.py `name`). */
-const STEP_NAME_LABEL: Record<string, string> = {
-  manifest: "증거 목록(매니페스트)",
-  docs: "문서 텍스트 추출",
-  "docs-index": "문서 색인",
-  files: "파일 목록",
-  "docs-extract": "문서 추출",
-  "files-extract": "파일 추출",
-  timeline: "타임라인",
-  indicators: "지표(IOC) 요약",
-  "silent-failure-detector": "누락 위험 점검",
-  triage: "분류",
-  prepare: "준비",
-  finalize: "마무리",
-};
-
-/** Korean name of a plan step (`artifacts-<kind>` → "아티팩트 수집: <kind>"); unknown ids stay as-is. */
-export function stepNameLabel(name: string): string {
-  const known = STEP_NAME_LABEL[name] ?? STEP_NAME_LABEL[name.toLowerCase()];
-  if (known) return known;
-  if (name.startsWith("artifacts-")) return `아티팩트 수집: ${name.slice("artifacts-".length)}`;
-  return name;
+/** Run button of a panel card: the node's first analysis kind, opening its options dialog. */
+function PanelRunButton({ kind, label }: { kind: string; label: string }) {
+  const { command, disabledReason, run } = useCommandState(runCommandId(kind));
+  if (!command) return null;
+  return (
+    <DisabledReason reason={disabledReason}>
+      <button
+        type="button"
+        className="icon-btn process-card-run"
+        aria-label={`${label} 실행`}
+        title={disabledReason ? undefined : command.label}
+        data-command={command.id}
+        onClick={() => void run()}
+      >
+        <Icon name="play" />
+      </button>
+    </DisabledReason>
+  );
 }
 
-/** Korean warning level of a plan step (`warning_level`); "" for none. */
-export function stepWarningLabel(level: string): string {
-  if (!level || level === "none") return "";
-  return stepStatusLabel(level);
-}
-
-/** Left panel of the 처리 stage: 추가 분석 first, then the runs (recent N, "더 보기"). */
+/**
+ * Left panel of the 처리 stage (visual-polish S8): one card per analysis — state, last run,
+ * run button — first, then the recent runs (RECENT_RUN_COUNT, "더 보기").
+ */
 export function ProcessPanel() {
   const { route } = useRoute();
   const { runs } = useRuns();
@@ -193,24 +168,35 @@ export function ProcessPanel() {
   return (
     <div className="stage-panel" data-testid="process-panel">
       <h2 id="process-analyses-title">추가 분석</h2>
-      <ul aria-labelledby="process-analyses-title">
+      <ul aria-labelledby="process-analyses-title" className="process-cards">
         {runId
           ? ANALYSIS_NODES.map((node) => {
+              const nodeJobs = analyses.filter((job) => (node.kinds as string[]).includes(job.kind));
               const last = latestForNode(analyses, node);
               const current = route.collection === "process" && route.kind === node.id;
               const state = nodeStateLabel(last?.status ?? null);
+              const failed = last ? isAllFailed(last) : false;
               return (
-                <li key={node.id}>
+                <li
+                  key={node.id}
+                  className={`process-card${current ? " is-current" : ""}`}
+                  data-testid={`process-analysis-${node.id}`}
+                  data-state={failed ? "failed" : (last?.status ?? "none")}
+                >
                   <a
-                    className="stage-link"
+                    className="process-card-link"
                     href={serializeRoute({ runId, collection: "process", kind: node.id })}
                     aria-current={current ? "page" : undefined}
                     aria-label={`${node.label}, ${state}`}
                   >
-                    <Icon name={nodeStateIcon(last?.status ?? null)} size={14} />
-                    <span>{node.label}</span>
-                    <span className="badge muted">{state}</span>
+                    {/* State as a dot + text chip (review #11): no leading status glyph. */}
+                    <span className="process-card-title">{node.label}</span>
+                    <ToneChip tone={chipToneOf(failed ? "failed" : (last?.status ?? null))}>{state}</ToneChip>
                   </a>
+                  <span className="process-card-last">
+                    {lastRunShort(nodeJobs.find(isAnalysisActive) ?? last, timezone)}
+                  </span>
+                  <PanelRunButton kind={node.kinds[0] as string} label={node.label} />
                 </li>
               );
             })
@@ -277,34 +263,108 @@ export function ProcessPanel() {
   );
 }
 
-/** Existing step list of the run summary (the P2 group/task table takes this place). */
+/** Count fields of a summary step, in the order the 건수 column prefers them, with their noun. */
+const STEP_COUNT_KEYS: ReadonlyArray<[string, string]> = [
+  ["record_count", "행"],
+  ["artifact_count", "아티팩트"],
+  ["candidate_count", "후보"],
+  ["document_count", "문서"],
+  ["event_count", "이벤트"],
+  ["indicator_count", "지표"],
+  ["match_count", "일치"],
+  ["provider_count", "수집기"],
+  ["extracted_count", "추출"],
+  ["check_count", "점검"],
+  ["count", "건"],
+  ["output_count", "건"],
+];
+
+/** "후보 4,770" — the main count of a step, or "" when the step reports none. */
+export function stepCountText(step: Record<string, unknown>): string {
+  for (const [key, noun] of STEP_COUNT_KEYS) {
+    const value = step[key];
+    // Older summaries write counts as strings ("4770"): read those too.
+    const count =
+      typeof value === "number"
+        ? value
+        : typeof value === "string" && /^\d+$/.test(value.trim())
+          ? Number(value)
+          : Number.NaN;
+    if (Number.isFinite(count)) return `${noun} ${formatCount(count)}`;
+  }
+  return "";
+}
+
+/** 비고 of a step: off by default, parser errors, risk checks, reuse, notices. */
+export function stepNoteText(step: Record<string, unknown>): string {
+  const notes: string[] = [];
+  if (step.disabled === true) {
+    const reason = typeof step.disabled_reason === "string" ? step.disabled_reason : "";
+    notes.push(reason.includes("disabled-by-default") ? "기본 설정에서 꺼짐" : "꺼짐");
+  }
+  if (typeof step.parser_error_count === "number" && step.parser_error_count > 0)
+    notes.push(`파서 오류 ${formatCount(step.parser_error_count)}`);
+  if (typeof step.risk_check_count === "number" && step.risk_check_count > 0)
+    notes.push(`위험 점검 ${formatCount(step.risk_check_count)}건`);
+  if (typeof step.scanned_file_count === "number") notes.push(`스캔 ${formatCount(step.scanned_file_count)}`);
+  if (step.reused === true) notes.push("이전 결과 재사용");
+  const messages = Array.isArray(step.warning_messages) ? step.warning_messages.length : 0;
+  if (messages > 0) notes.push(`메시지 ${messages}건`);
+  return notes.join(" · ");
+}
+
+/**
+ * 처리 계획 (visual-polish S8): the run summary's steps as a full table in Korean — 단계 · 상태 ·
+ * 건수 · 비고 — with a status tally above it. It fills the page until the P2 group/task table.
+ */
 function StepList({ runId }: { runId: string }) {
   const summary = useQuery({
     queryKey: ["run-summary", runId],
     queryFn: () => getRunSummary(runId),
     retry: false,
   });
-  const steps = summary.data?.steps ?? [];
+  const steps = (summary.data?.steps ?? []) as Array<Record<string, unknown>>;
+  const disclosures = disclosureItems(summary.data);
+  const warnings = runWarnings(summary.data);
   const text = (v: unknown) => (typeof v === "string" || typeof v === "number" ? String(v) : "");
+  const timed = steps.some((step) => text(step.elapsed_s ?? step.duration_s ?? step.elapsed) !== "");
+  const tally = new Map<string, number>();
+  for (const step of steps) {
+    const label = text(step.status) ? stepStatusLabel(text(step.status)) : "상태 없음";
+    tally.set(label, (tally.get(label) ?? 0) + 1);
+  }
   return (
-    <section className="stage-section" aria-labelledby="process-plan-title">
-      <h3 id="process-plan-title">처리 계획</h3>
-      <p className="analysis-desc">
-        그룹·태스크 단위 계획표(취소·재실행)는 다음 단계(P2)에서 이 자리에 들어옵니다.
-      </p>
+    <section className="stage-section process-plan" aria-labelledby="process-plan-title">
+      <div className="process-plan-head">
+        <h3 id="process-plan-title">처리 계획</h3>
+        {steps.length ? (
+          <p className="process-plan-tally">
+            {[`${steps.length}단계`, ...[...tally].map(([label, n]) => `${label} ${n}`)].join(" · ")}
+          </p>
+        ) : null}
+      </div>
+      {disclosures.length || warnings.length ? (
+        <details className="process-plan-disclosures" data-testid="process-disclosures">
+          <summary>{disclosureDigest(summary.data)}</summary>
+          <DisclosuresCard items={disclosures} warnings={warnings} />
+        </details>
+      ) : null}
       {steps.length === 0 ? (
         <p className="analysis-desc">
           {summary.isPending ? "단계 목록을 불러오는 중…" : "기록된 처리 단계가 없습니다."}
         </p>
       ) : (
-        <div className="analysis-history-wrap">
-          <table className="analysis-history" aria-label="처리 단계">
+        <div className="process-plan-wrap">
+          <table className="analysis-history process-plan-table" aria-label="처리 단계">
             <thead>
               <tr>
                 <th scope="col">단계</th>
                 <th scope="col">상태</th>
-                <th scope="col">건수</th>
-                <th scope="col">소요</th>
+                <th scope="col" className="is-right">
+                  건수
+                </th>
+                <th scope="col">비고</th>
+                {timed ? <th scope="col">소요</th> : null}
               </tr>
             </thead>
             <tbody>
@@ -312,18 +372,30 @@ function StepList({ runId }: { runId: string }) {
                 const id = text(step.step ?? step.name ?? step.kind);
                 const status = text(step.status) ? stepStatusLabel(text(step.status)) : "";
                 const warning = stepWarningLabel(text(step.warning_level));
+                const messages = Array.isArray(step.warning_messages)
+                  ? step.warning_messages.filter((m): m is string => typeof m === "string")
+                  : [];
                 return (
                   // biome-ignore lint/suspicious/noArrayIndexKey: steps have no id; order is stable
-                  <tr key={index}>
+                  <tr key={index} data-status={text(step.status) || undefined}>
                     <td title={id || undefined}>{id ? stepNameLabel(id) : `단계 ${index + 1}`}</td>
                     <td>
-                      {status || "—"}
-                      {warning && warning !== status ? ` · ${warning}` : ""}
+                      {/* Step state as the shared dot + text chip (review #24). */}
+                      {status ? (
+                        <ToneChip
+                          tone={warning && warning !== status ? "warn" : chipToneOf(text(step.status))}
+                        >
+                          {`${status}${warning && warning !== status ? ` · ${warning}` : ""}`}
+                        </ToneChip>
+                      ) : (
+                        "—"
+                      )}
                     </td>
-                    <td className="is-right">
-                      {text(step.record_count ?? step.count ?? step.output_count) || "—"}
+                    <td className="is-right">{stepCountText(step) || "—"}</td>
+                    <td className="process-plan-note" title={messages.join("\n") || undefined}>
+                      {stepNoteText(step) || "—"}
                     </td>
-                    <td>{text(step.elapsed_s ?? step.duration_s ?? step.elapsed) || "—"}</td>
+                    {timed ? <td>{text(step.elapsed_s ?? step.duration_s ?? step.elapsed) || "—"}</td> : null}
                   </tr>
                 );
               })}
@@ -378,7 +450,7 @@ function AnalysisCard({
       data-testid={`analysis-card-${node.id}`}
     >
       <h3 id={titleId}>
-        <Icon name={nodeStateIcon(last ? (isAllFailed(last) ? "failed" : last.status) : null)} size={14} />
+        <Icon name={nodeStateIcon(last ? (isAllFailed(last) ? "failed" : last.status) : null)} />
         {node.label}
       </h3>
       <p className="analysis-desc">{node.description}</p>

@@ -52,27 +52,26 @@ function HelpDialog() {
             <tr>
               <th scope="col">키</th>
               <th scope="col">동작</th>
-              <th scope="col">현재 연결된 명령</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((row) => (
-              <tr key={row.name}>
+              // A key nothing is bound to right now is dimmed; its description says what it does.
+              <tr
+                key={row.name}
+                className={row.commands.length ? undefined : "muted"}
+                title={row.commands.length ? undefined : "해당 화면이 열려 있을 때 동작합니다"}
+              >
                 <td>
                   <kbd>{keyLabel(row.shortcut)}</kbd>
                 </td>
                 <td>{row.description}</td>
-                <td className={row.commands.length ? "" : "muted"}>
-                  {row.commands.length
-                    ? row.commands.map((c) => c.label).join(", ")
-                    : "해당 화면이 열려 있을 때 동작합니다"}
-                </td>
               </tr>
             ))}
           </tbody>
         </table>
         <p className="help-foot">
-          모든 동작은 <kbd>Ctrl K</kbd> 명령 팔레트에서도 찾을 수 있습니다.
+          모든 동작은 <kbd>{keyLabel("Ctrl+K")}</kbd> 명령 팔레트에서도 찾을 수 있습니다.
         </p>
       </div>
     </div>

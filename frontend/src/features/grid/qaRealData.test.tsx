@@ -25,6 +25,7 @@ import { clearCaseDbCache } from "../viewer/citation";
 import { resolveModes } from "../viewer/modes";
 import { installFetch as installViewerFetch, metadata, preview, target } from "../viewer/testSupport";
 import { targetTitle, Viewer } from "../viewer/Viewer";
+import { presetColumnIds } from "./columns";
 import { analysisCollection, analysisColumnsForKind } from "./columns/analysis";
 import { filesCollection } from "./columns/files";
 import { DataGrid } from "./DataGrid";
@@ -142,9 +143,12 @@ describe("loading state while a server filter scans (16)", () => {
       },
     });
     renderWithClient(<DataGrid />);
-    expect((await screen.findByTestId("grid-loading")).textContent).toContain("불러오는 중");
+    // Skeleton rows in the grid; the sentence sits in the footer (review #11).
+    expect((await screen.findByTestId("grid-loading")).querySelectorAll(".grid-skeleton-row")).toHaveLength(
+      8,
+    );
     expect(screen.getByTestId("grid-footer-total").textContent).toBe("총 세는 중…");
-    expect(screen.getByTestId("grid-footer-loading")).toBeTruthy();
+    expect(screen.getByTestId("grid-footer-loading").textContent).toContain("불러오는 중");
     release();
     await waitFor(() => expect(screen.queryByTestId("grid-loading")).toBeNull());
     expect(screen.getByTestId("grid-footer-total").textContent).toBe("총 3건");
@@ -152,14 +156,32 @@ describe("loading state while a server filter scans (16)", () => {
 });
 
 describe("files default preset (17)", () => {
-  it("the default (분석) preset already shows 경로; NTFS columns stay in 출처", async () => {
+  it("the default (분석) preset is 이름 · 경로 · 크기 · 수정 · NTFS 생성 · 선별 (visual-polish S4)", async () => {
     setRoute(`#/case/${RUN}/explore/files`);
     installFetch({ "/files": paginatedFiles(2) });
     renderWithClient(<DataGrid />);
     await waitFor(() => expect(screen.getAllByRole("columnheader").length).toBeGreaterThan(3));
-    const headers = screen.getAllByRole("columnheader").map((h) => h.textContent ?? "");
-    expect(headers.some((h) => h.startsWith("경로"))).toBe(true);
-    expect(filesCollection.columns.find((c) => c.id === "ntfsCreated")?.presets).toEqual(["source"]);
+    const cols = screen
+      .getAllByRole("columnheader")
+      .map((h) => h.getAttribute("data-col"))
+      .filter(Boolean);
+    expect(presetColumnIds(filesCollection.columns, "analysis")).toEqual([
+      "title",
+      "path",
+      "size",
+      "timestamp",
+      "ntfsCreated",
+      "review",
+    ]);
+    // No loaded row is reviewed yet: 선별 waits in the 열 menu ("값이 없어 숨김", review #9);
+    // NTFS 생성 stays (its header links to the analysis that fills it).
+    expect(cols).toEqual(["title", "path", "size", "timestamp", "ntfsCreated"]);
+    expect(filesCollection.columns.find((c) => c.id === "ntfsCreated")?.presets).toEqual([
+      "analysis",
+      "source",
+    ]);
+    // The other NTFS columns stay in 출처 중심.
+    expect(filesCollection.columns.find((c) => c.id === "ntfsAccessed")?.presets).toEqual(["source"]);
   });
 });
 
@@ -265,17 +287,23 @@ describe("pressed review toggles clear the mark (4)", () => {
       </>,
     );
     act(() => setViewerTarget(target({ sourcePath: row.sourcePath, ref: row.ref }), row));
-    const button = await waitFor(() => {
+    // 재검토 lives in the viewer's review 더보기 menu (visual-polish S6) as a checked item.
+    const item = () => {
+      if (!document.querySelector('[data-command="viewer.mark.needs-review"]'))
+        fireEvent.click(screen.getByRole("button", { name: "더보기" }));
       const el = document.querySelector<HTMLElement>('[data-command="viewer.mark.needs-review"]');
-      if (!el) throw new Error("no button");
+      if (!el) throw new Error("no menu item");
       return el;
-    });
-    expect(button.getAttribute("aria-pressed")).toBe("true");
+    };
+    const button = await waitFor(item);
+    expect(button.getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByTestId("viewer-review-status").getAttribute("aria-label")).toBe("리뷰 상태: 재검토");
     fireEvent.click(button);
     await waitFor(() => expect(calls.some((c) => c.url.pathname.endsWith("review-batch"))).toBe(true));
     const post = calls.find((c) => c.url.pathname.endsWith("review-batch"));
     expect(JSON.parse(String(post?.init?.body))).toMatchObject({ status: "unreviewed" });
-    await waitFor(() => expect(button.getAttribute("aria-pressed")).toBe("false"));
+    await waitFor(() => expect(item().getAttribute("aria-checked")).toBe("false"));
+    expect(screen.getByTestId("viewer-review-status").getAttribute("aria-label")).toBe("리뷰 상태: 미검토");
   });
 
   it("the grid overlay and optimistic patch clear the status", () => {

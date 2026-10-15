@@ -52,17 +52,25 @@ async function jsonPaged(
   limit: number,
   signal?: AbortSignal,
   category?: string,
+  scope?: string,
 ): Promise<RawPage> {
   const started = now();
-  const filter = category ? `&category=${enc(category)}` : "";
+  const filter = `${scope ? `&scope=${enc(scope)}` : ""}${category ? `&category=${enc(category)}` : ""}`;
   const payload = await api<Record<string, unknown>>(
     `/api/runs/${enc(runId)}/${endpoint}?offset=${offset}&limit=${limit}${filter}`,
     { signal },
   );
-  const rows = asRows(payload[key]);
+  // `scope=inventory` pages may name their list `inventory` or keep `candidates`.
+  const rows = asRows(
+    key === "inventory" && !Array.isArray(payload.inventory) ? payload.candidates : payload[key],
+  );
   const meta: Record<string, unknown> = {};
   // Files rows are joined with the newest NTFS-meta analysis; `null` = never ran (absent = old server).
   if ("ntfs_join" in payload) meta.ntfs_join = payload.ntfs_join;
+  // Files pages (parser-quality r2): candidates vs. every scanned file (`scope=inventory`).
+  for (const key of ["scope", "inventory_count", "candidate_count"] as const) {
+    if (key in payload) meta[key] = payload[key];
+  }
   const base = {
     rows,
     offset,
@@ -112,9 +120,116 @@ export const fetchFilesPage = (
   limit: number,
   signal?: AbortSignal,
   category?: string,
-) => jsonPaged(runId, "files", "candidates", offset, limit, signal, category);
-export const fetchDocsPage = (runId: string, offset: number, limit: number, signal?: AbortSignal) =>
-  jsonPaged(runId, "docs", "results", offset, limit, signal);
+) => {
+  const route = parseFilesCategory(category);
+  return jsonPaged(runId, "files", route.rowsKey, offset, limit, signal, route.category, route.scope);
+};
+
+/**
+ * Route `category=` value of the files inventory (parser-quality r2): `inventory` = every scanned
+ * file (`GET /files?scope=inventory`), `inventory:<id>` = one category of it (`other` = files
+ * outside the selected scan categories). Any other value is a candidates category.
+ */
+export const FILES_INVENTORY = "inventory";
+
+export function filesInventoryCategory(category?: string): string {
+  return category ? `${FILES_INVENTORY}:${category}` : FILES_INVENTORY;
+}
+
+export interface FilesRouteCategory {
+  /** `scope=` sent to `/files`; undefined = the default candidates scope. */
+  scope?: "inventory";
+  /** `category=` sent to `/files`. */
+  category?: string;
+  /** Response list holding the rows. */
+  rowsKey: "candidates" | "inventory";
+}
+
+export function parseFilesCategory(value: string | undefined): FilesRouteCategory {
+  if (!value) return { rowsKey: "candidates" };
+  if (value === FILES_INVENTORY) return { scope: "inventory", rowsKey: "inventory" };
+  if (value.startsWith(`${FILES_INVENTORY}:`)) {
+    const category = value.slice(FILES_INVENTORY.length + 1);
+    return { scope: "inventory", rowsKey: "inventory", ...(category ? { category } : {}) };
+  }
+  return { category: value, rowsKey: "candidates" };
+}
+/**
+ * Which list a `/docs` page holds. The paged collection names itself (`pagination.collection`);
+ * servers that page `results` still carry `candidates` as an EMPTY list (`omitted_fields`), so a
+ * mere array is not enough to pick it.
+ */
+export function docsRowsKey(
+  payload: Record<string, unknown>,
+  pagination: Record<string, unknown>,
+): "candidates" | "results" {
+  if (pagination.collection === "candidates" || pagination.collection === "results")
+    return pagination.collection;
+  const omitted = Array.isArray(payload.omitted_fields) ? payload.omitted_fields : [];
+  if (omitted.includes("candidates")) return "results";
+  if (Array.isArray(payload.candidates) && payload.candidates.length > 0) return "candidates";
+  return Array.isArray(payload.results) ? "results" : "candidates";
+}
+
+/** Docs route value of the "일치만" toggle (`#/case/{run}/explore/docs?category=matched`). */
+export const DOCS_MATCHED = "matched";
+/** Docs route value for the non-matching documents (`all=1&matched=0`). */
+export const DOCS_UNMATCHED = "unmatched";
+
+/** Which `/docs` list is requested: every document, the keyword matches only, or the non-matches. */
+export type DocsView = "all" | "matched" | "unmatched";
+
+/** Query suffix per view: `all=1` pages `candidates`; plain `/docs` pages `results` (matches). */
+export function docsViewQuery(view: DocsView): string {
+  if (view === "matched") return "";
+  return view === "unmatched" ? "&all=1&matched=0" : "&all=1";
+}
+
+/**
+ * `GET /docs`: every document candidate (`all=1` pages `candidates`), the non-matches
+ * (`all=1&matched=0`), or only the keyword matches (plain request, pages `results`). A server that still pages only `results` (the matches) is read as
+ * before; `meta.docs_rows` says which list the rows came from ("candidates" | "results").
+ */
+export async function fetchDocsPage(
+  runId: string,
+  offset: number,
+  limit: number,
+  signal?: AbortSignal,
+  view: DocsView = "all",
+): Promise<RawPage> {
+  const started = now();
+  const payload = await api<Record<string, unknown>>(
+    `/api/runs/${enc(runId)}/docs?offset=${offset}&limit=${limit}${docsViewQuery(view)}`,
+    { signal },
+  );
+  const pagination =
+    payload.pagination && typeof payload.pagination === "object" && !Array.isArray(payload.pagination)
+      ? (payload.pagination as Record<string, unknown>)
+      : {};
+  const key = docsRowsKey(payload, pagination);
+  const rows = asRows(payload[key]);
+  const total =
+    (view === "matched"
+      ? (asNumber(payload.matched_count) ?? asNumber(payload.matched) ?? asNumber(pagination.matched))
+      : null) ??
+    asNumber(pagination.total) ??
+    asNumber(payload.total) ??
+    asNumber(payload.record_count);
+  const hasMore =
+    pagination.has_more === true ||
+    payload.has_more === true ||
+    (total !== null ? offset + rows.length < total : rows.length >= limit);
+  return {
+    rows,
+    offset,
+    backend: "file",
+    elapsedMs: Math.round(now() - started),
+    total: total ?? (hasMore ? null : offset + rows.length),
+    truncated: pagination.truncated === true,
+    hasMore,
+    meta: { docs_rows: key },
+  };
+}
 export const fetchTimelinePage = (runId: string, offset: number, limit: number, signal?: AbortSignal) =>
   jsonPaged(runId, "timeline", "events", offset, limit, signal);
 export const fetchIndicatorsPage = (runId: string, offset: number, limit: number, signal?: AbortSignal) =>

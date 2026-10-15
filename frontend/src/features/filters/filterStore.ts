@@ -47,7 +47,9 @@ interface FilterStoreState {
   /** Artifact types / tags present in the loaded rows (filter bar choices). */
   typeOptions: string[];
   tagOptions: string[];
-  setOptions: (types: string[], tags: string[]) => void;
+  /** Loaded (unfiltered) rows per artifact type: the 유형 list's right-aligned counts. */
+  typeCounts: Record<string, number>;
+  setOptions: (types: string[], tags: string[], counts?: Record<string, number>) => void;
   setFilters: (next: FilterState) => void;
   patchFilters: (patch: Partial<FilterState>) => void;
   clearFilters: () => void;
@@ -63,14 +65,16 @@ export const useFilterStore = create<FilterStoreState>((set, get) => ({
   report: null,
   typeOptions: [],
   tagOptions: [],
-  setOptions: (types, tags) => {
+  typeCounts: {},
+  setOptions: (types, tags, counts = {}) => {
     const s = get();
     if (
       s.typeOptions.join("\u0000") === types.join("\u0000") &&
-      s.tagOptions.join("\u0000") === tags.join("\u0000")
+      s.tagOptions.join("\u0000") === tags.join("\u0000") &&
+      JSON.stringify(s.typeCounts) === JSON.stringify(counts)
     )
       return;
-    set({ typeOptions: types, tagOptions: tags });
+    set({ typeOptions: types, tagOptions: tags, typeCounts: counts });
   },
   setFilters: (next) => {
     const clean: FilterState = { ...next, ext: next.ext.map(normalizeExt).filter(Boolean) };

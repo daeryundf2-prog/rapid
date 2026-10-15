@@ -292,10 +292,13 @@ describe("처리 stage cards (5, 7, 10, 12)", () => {
   });
 
   it("CSS: disabled primary drops the accent fill; cards and history tables do not overflow", () => {
-    const shell = readFileSync(join(process.cwd(), "src/app/shell.css"), "utf8");
-    expect(shell).toMatch(
-      /\.button\.primary\[aria-disabled="true"\][^{]*\{[^}]*background: var\(--disabled-bg\)/,
+    // Button variants live in controls.css (visual-polish U-V3); a disabled primary drops the
+    // accent fill for a dashed outline (review #4: disabled never looks like an enabled button).
+    const controls = readFileSync(join(process.cwd(), "src/tokens/controls.css"), "utf8");
+    expect(controls).toMatch(
+      /\.button:is\(\.primary[^)]*\):is\(:disabled, \[aria-disabled="true"\]\)[^{]*\{[^}]*border-style: dashed;[^}]*background: transparent/,
     );
+    const shell = readFileSync(join(process.cwd(), "src/app/shell.css"), "utf8");
     expect(shell).toMatch(/\.disabled-reason-text \{/);
     const stages = readFileSync(join(process.cwd(), "src/features/stages/stages.css"), "utf8");
     expect(stages).toMatch(/\.analysis-card \{\s*min-width: 0;/);
@@ -323,14 +326,14 @@ describe("처리 left panel (8, 9)", () => {
       .map((h) => h.textContent);
     expect(headings).toEqual(["추가 분석", "런"]);
     const runs = within(panel).getByRole("list", { name: "런" });
-    // 8 recent + the routed run (index 30).
-    expect(within(runs).getAllByRole("link")).toHaveLength(9);
+    // 5 recent (visual-polish S8) + the routed run (index 30).
+    expect(within(runs).getAllByRole("link")).toHaveLength(6);
     const names = within(runs)
       .getAllByRole("link")
       .map((a) => a.querySelector(".stage-link-name")?.textContent);
     expect(new Set(names).size).toBe(names.length);
     expect(names[0]).toMatch(/^BSH\.E01 · 2026-10-01 \d\d:00 · r00aaaaa$/);
-    const more = within(panel).getByRole("button", { name: "더 보기 (33개 더)" });
+    const more = within(panel).getByRole("button", { name: "더 보기 (36개 더)" });
     expect(more.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(more);
     expect(within(runs).getAllByRole("link")).toHaveLength(42);

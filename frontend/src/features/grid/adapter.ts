@@ -22,6 +22,7 @@
 
 import { create } from "zustand";
 import { registerCommand as registerShellCommand } from "../../commands/registry";
+import { pushToast as pushGlobalToast, TOAST_MAX } from "../../components/toastStore";
 import type { CollectionQuery, CollectionRef, GridRow, ServerSort } from "../../contracts/collection";
 import type { Command } from "../../contracts/command";
 import type { RowRef } from "../../contracts/rowRef";
@@ -58,6 +59,10 @@ interface LocalState {
   viewerFocusRequests: number;
   density: Density;
   toasts: Toast[];
+  /** `run|collection` the current selection belongs to (a different grid clears it). */
+  selectionScope: string | null;
+  /** Clear the selection when `scope` differs from the selection's scope (review B2-1). */
+  enterSelectionScope: (scope: string) => void;
   commands: Map<string, Command>;
   /** Column ids the mounted grid currently shows (preset + visibility); null when no grid is mounted. */
   visibleColumnIds: string[] | null;
@@ -84,6 +89,13 @@ export const useGridLocalStore = create<LocalState>((set) => ({
   viewerFocusRequests: 0,
   density: "default",
   toasts: [],
+  selectionScope: null,
+  enterSelectionScope: (scope) =>
+    set((s) =>
+      s.selectionScope === scope
+        ? s
+        : { selectionScope: scope, selectedKeys: s.selectedKeys.size ? new Set<string>() : s.selectedKeys },
+    ),
   commands: new Map(),
   visibleColumnIds: null,
   setVisibleColumnIds: (ids) => set({ visibleColumnIds: ids }),
@@ -94,7 +106,12 @@ export const useGridLocalStore = create<LocalState>((set) => ({
   publishFocusedRow: (row, target) => set({ focusedRow: row, target, focusedRowKey: row?.rowKey ?? null }),
   requestViewerFocus: () => set((s) => ({ viewerFocusRequests: s.viewerFocusRequests + 1 })),
   setDensity: (density) => set({ density }),
-  pushToast: (message, tone) => set((s) => ({ toasts: [...s.toasts, { id: ++toastSeq, message, tone }] })),
+  // Grid feedback shows in the shell's one toast stack (U-V7); the local list keeps the last few
+  // for the grid's own announce() and tests.
+  pushToast: (message, tone) => {
+    pushGlobalToast(message, tone);
+    set((s) => ({ toasts: [...s.toasts, { id: ++toastSeq, message, tone }].slice(-TOAST_MAX) }));
+  },
   dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
 }));
 

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ViewerTarget } from "../contracts/viewer";
 import { parseHash } from "../router";
-import { DENSITY_KEY, PANELS_KEY, THEME_KEY } from "./slices/prefs";
+import { DEFAULT_THEME, DENSITY_KEY, effectiveTheme, initPrefs, PANELS_KEY, THEME_KEY } from "./slices/prefs";
 import { anyRunActive, currentRun } from "./slices/runs";
 import { rowKeyOf } from "./slices/selection";
 import { resetAppStore, useAppStore } from "./store";
@@ -121,7 +121,7 @@ describe("automatic selection", () => {
 });
 
 describe("prefs slice", () => {
-  it("persists an explicit theme under rapidtriage.v2.theme; null follows the OS", () => {
+  it("persists an explicit theme under rapidtriage.v2.theme; null is the default dark theme", () => {
     s().setTheme("light");
     expect(window.localStorage.getItem(THEME_KEY)).toBe("light");
     expect(document.documentElement.dataset.theme).toBe("light");
@@ -130,6 +130,24 @@ describe("prefs slice", () => {
     s().setTheme(null);
     expect(window.localStorage.getItem(THEME_KEY)).toBeNull();
     expect(document.documentElement.dataset.theme).toBeUndefined();
+  });
+
+  it("unset means dark whatever the OS says; toggling from unset chooses light and persists it (U-V1)", () => {
+    s().setTheme(null);
+    s().setSystemTheme("light"); // a light OS no longer picks the theme
+    expect(effectiveTheme(s().theme)).toBe("dark");
+    expect(DEFAULT_THEME).toBe("dark");
+    s().toggleTheme();
+    expect(s().theme).toBe("light");
+    expect(window.localStorage.getItem(THEME_KEY)).toBe("light");
+    expect(document.documentElement.dataset.theme).toBe("light");
+    // A reload applies the stored choice before first paint.
+    delete document.documentElement.dataset.theme;
+    initPrefs();
+    expect(document.documentElement.dataset.theme).toBe("light");
+    s().toggleTheme();
+    expect(s().theme).toBe("dark");
+    expect(window.localStorage.getItem(THEME_KEY)).toBe("dark");
   });
 
   it("cycles three densities and applies data-density", () => {

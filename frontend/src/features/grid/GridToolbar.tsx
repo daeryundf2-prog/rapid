@@ -1,8 +1,11 @@
-import { type RefObject, useEffect, useId, useMemo, useRef, useState } from "react";
-import { useEscape } from "../../a11y/focus";
+import { type ReactNode, type RefObject, useEffect, useId, useMemo, useRef, useState } from "react";
 import { DisabledReason } from "../../a11y/primitives";
-import type { GridRow } from "../../contracts/collection";
-import { FilterBar } from "../filters/FilterBar";
+import { Popover } from "../../components/Popover";
+import type { GridRow, ReviewStatus } from "../../contracts/collection";
+import { Icon } from "../../icons";
+import { FilterBar, type FilterBarVariant } from "../filters/FilterBar";
+import { useToolbarLead } from "../views/toolbarSlot";
+import { lockedColumnId } from "./columns";
 import { setAxiomMode } from "./columns/axiom";
 import {
   type DiscoveredField,
@@ -11,7 +14,7 @@ import {
   fieldMenuEntries,
   UNSHAREABLE_FIELD_REASON,
 } from "./columns/fieldColumns";
-import { backendLabel, formatCount } from "./gridUtils";
+import { AUTO_HIDE_LABEL, type AutoHideReason, backendLabel, formatCount } from "./gridUtils";
 import { type ColumnSpec, DENSITY_LABELS, type Density, type GridPreset, PRESET_LABELS } from "./types";
 
 export interface GridToolbarProps {
@@ -21,6 +24,35 @@ export interface GridToolbarProps {
   onQuery: (q: string) => void;
   /** Called when the filter input should hand focus back to the grid (Esc / Enter). */
   onReturnToGrid: () => void;
+  /** The stage's toolbar (visual-polish S2). */
+  variant?: FilterBarVariant;
+  reviewStatus?: ReviewStatus;
+  onReviewStatus?: (status: ReviewStatus | undefined) => void;
+  kindOptions?: string[];
+  /** Collection-specific toolbar controls (문서: "일치만"). */
+  extra?: ReactNode;
+}
+
+/** 문서 toolbar: list every document, or only the keyword matches (plain `GET /docs`; every document is `all=1`). */
+export function DocsMatchedToggle({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      className="grid-btn"
+      aria-pressed={on}
+      data-testid="docs-matched-toggle"
+      title={
+        on ? "키워드 일치 문서만 표시 중 — 누르면 전체 문서" : "전체 문서 표시 중 — 누르면 키워드 일치 문서만"
+      }
+      onClick={() => onChange(!on)}
+    >
+      <Icon name="filter" />
+      <span>일치만</span>
+    </button>
+  );
+}
+
+export interface ColumnMenuProps {
   preset: GridPreset;
   onPreset: (preset: GridPreset) => void;
   density: Density;
@@ -28,6 +60,11 @@ export interface GridToolbarProps {
   columns: ColumnSpec[];
   visibility: Record<string, boolean>;
   onToggleColumn: (id: string, visible: boolean) => void;
+  /**
+   * Default columns the responsive layout keeps off screen (too narrow / no values on this page):
+   * listed unchecked with "폭 부족으로 숨김 — 표시"; showing one pins it.
+   */
+  autoHidden?: ReadonlyMap<string, AutoHideReason>;
   collectionLabel: string;
   /** "레코드 필드 추가" section (artifacts of one kind): promote details keys to columns. */
   fieldPicker?: FieldPickerProps;
@@ -131,122 +168,155 @@ function FieldPicker({ rows, columns, promoted, onToggle }: FieldPickerProps) {
   );
 }
 
+/** The grid's toolbar line: the stage's filter bar (S1/S2) with the view switch in front. */
 export function GridToolbar(props: GridToolbarProps) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const menuButtonRef = useRef<HTMLButtonElement>(null);
-  const toolbarRef = useRef<HTMLDivElement>(null);
-  const menuId = useId();
-  const { preset, onDensity } = props;
+  const lead = useToolbarLead();
+  return (
+    <FilterBar
+      filterRef={props.filterRef}
+      query={props.query}
+      onQuery={props.onQuery}
+      onReturnToGrid={props.onReturnToGrid}
+      variant={props.variant}
+      reviewStatus={props.reviewStatus}
+      onReviewStatus={props.onReviewStatus}
+      kindOptions={props.kindOptions}
+      lead={lead}
+      extra={props.extra}
+    />
+  );
+}
 
-  // AXIOM preset: two-line titles (DataGrid sets `data-preset` on the root for the CSS; the
-  // comfortable row height is chosen when the preset is picked).
+/**
+ * Column controls folded into one button at the right end of the grid header (visual-polish
+ * S3): preset, the column picker (+ record fields), the column-filter row and the density.
+ */
+export function ColumnMenu(props: ColumnMenuProps) {
+  const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const popoverId = useId();
+  const { preset } = props;
+
+  // AXIOM preset: two-line titles (DataGrid sets `data-preset` on the root for the CSS and
+  // gives the preset at least the 32px row without touching the density preference).
   useEffect(() => {
     setAxiomMode(preset === "axiom");
     return () => setAxiomMode(false);
   }, [preset]);
 
-  // Esc closes the column menu (shared Esc stack) and hands focus back to its button.
-  useEscape(() => {
-    const inside = menuRef.current?.contains(document.activeElement) ?? false;
-    setMenuOpen(false);
-    if (inside) menuButtonRef.current?.focus();
-  }, menuOpen);
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onDown = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) setMenuOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [menuOpen]);
-
+  const filterCount = props.columnFilters?.count ?? 0;
+  const locked = lockedColumnId(props.columns);
   return (
-    <>
-      <FilterBar
-        filterRef={props.filterRef}
-        query={props.query}
-        onQuery={props.onQuery}
-        onReturnToGrid={props.onReturnToGrid}
-      />
-      <div
-        ref={toolbarRef}
-        className="grid-toolbar"
-        role="toolbar"
-        aria-label={`${props.collectionLabel} 그리드 도구`}
+    <span className="popover-anchor grid-colmenu">
+      <button
+        ref={buttonRef}
+        type="button"
+        className="grid-colmenu-button"
+        aria-label="열 설정"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-controls={open ? popoverId : undefined}
+        title={`${props.collectionLabel} 열 설정 — 구성·표시할 열·열 필터·밀도`}
+        data-testid="grid-column-menu"
+        onClick={() => setOpen((value) => !value)}
       >
-        <label className="grid-select">
-          <span>열 구성</span>
-          <select
-            value={props.preset}
-            onChange={(event) => {
-              const next = event.target.value as GridPreset;
-              props.onPreset(next);
-              if (next === "axiom") onDensity("comfortable");
-            }}
-          >
-            {(Object.keys(PRESET_LABELS) as GridPreset[]).map((id) => (
-              <option key={id} value={id}>
-                {PRESET_LABELS[id]}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <div className="grid-colmenu" ref={menuRef}>
-          <button
-            ref={menuButtonRef}
-            type="button"
-            className="grid-btn"
-            aria-expanded={menuOpen}
-            aria-controls={menuId}
-            onClick={() => setMenuOpen((open) => !open)}
-          >
-            열 선택
-          </button>
-          {menuOpen ? (
-            <fieldset id={menuId} className="grid-popover" aria-label="표시할 열">
-              {props.columns.map((column, index) => (
-                <label key={column.id} className="grid-popover-item">
-                  <input
-                    type="checkbox"
-                    checked={props.visibility[column.id] !== false}
-                    disabled={index === 0}
-                    onChange={(event) => props.onToggleColumn(column.id, event.target.checked)}
-                  />
-                  {column.header}
-                </label>
+        <Icon name="columns" />
+        {filterCount ? (
+          <span className="filter-count" aria-hidden="true">
+            {filterCount}
+          </span>
+        ) : null}
+      </button>
+      <Popover
+        id={popoverId}
+        open={open}
+        onClose={() => setOpen(false)}
+        triggerRef={buttonRef}
+        label="열 설정"
+        align="end"
+        className="grid-colmenu-popover"
+      >
+        <div className="popover-section grid-colmenu-selects">
+          <label className="grid-select">
+            <span>열 구성</span>
+            <select
+              value={props.preset}
+              onChange={(event) => {
+                const next = event.target.value as GridPreset;
+                props.onPreset(next);
+              }}
+            >
+              {(Object.keys(PRESET_LABELS) as GridPreset[]).map((id) => (
+                <option key={id} value={id}>
+                  {PRESET_LABELS[id]}
+                </option>
               ))}
-              {props.fieldPicker ? <FieldPicker {...props.fieldPicker} /> : null}
-            </fieldset>
-          ) : null}
+            </select>
+          </label>
+          <label className="grid-select">
+            <span>밀도</span>
+            <select
+              value={props.density}
+              onChange={(event) => props.onDensity(event.target.value as Density)}
+            >
+              {(Object.keys(DENSITY_LABELS) as Density[]).map((id) => (
+                <option key={id} value={id}>
+                  {DENSITY_LABELS[id]}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
 
         {props.columnFilters ? (
-          <button
-            type="button"
-            className="grid-btn"
-            aria-pressed={props.columnFilters.open}
-            data-testid="grid-colfilter-toggle"
-            onClick={props.columnFilters.onToggle}
-          >
-            열 필터{props.columnFilters.count ? ` (${props.columnFilters.count})` : ""}
-          </button>
+          <div className="popover-section">
+            <button
+              type="button"
+              className="grid-btn grid-colfilter-toggle"
+              aria-pressed={props.columnFilters.open}
+              data-testid="grid-colfilter-toggle"
+              onClick={props.columnFilters.onToggle}
+            >
+              <Icon name="filter" />
+              <span>열 필터 행{props.columnFilters.count ? ` (${props.columnFilters.count})` : ""}</span>
+            </button>
+          </div>
         ) : null}
 
-        <label className="grid-select">
-          <span>밀도</span>
-          <select value={props.density} onChange={(event) => props.onDensity(event.target.value as Density)}>
-            {(Object.keys(DENSITY_LABELS) as Density[]).map((id) => (
-              <option key={id} value={id}>
-                {DENSITY_LABELS[id]}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-    </>
+        <fieldset className="popover-section grid-popover" aria-label="표시할 열">
+          <legend className="popover-title">표시할 열</legend>
+          {props.columns.map((column) => {
+            const auto = props.autoHidden?.get(column.id);
+            const item = (
+              <label key={column.id} className="grid-popover-item">
+                <input
+                  type="checkbox"
+                  checked={props.visibility[column.id] !== false && !auto}
+                  disabled={column.id === locked}
+                  onChange={(event) => props.onToggleColumn(column.id, event.target.checked)}
+                />
+                {column.header}
+              </label>
+            );
+            if (!auto) return item;
+            return (
+              <div key={column.id} className="grid-popover-row" data-testid={`grid-autohidden-${column.id}`}>
+                {item}
+                <button
+                  type="button"
+                  className="grid-popover-show"
+                  aria-label={`${column.header} 표시 (${AUTO_HIDE_LABEL[auto]})`}
+                  onClick={() => props.onToggleColumn(column.id, true)}
+                >
+                  {AUTO_HIDE_LABEL[auto]} — 표시
+                </button>
+              </div>
+            );
+          })}
+        </fieldset>
+        {props.fieldPicker ? <FieldPicker {...props.fieldPicker} /> : null}
+      </Popover>
+    </span>
   );
 }
 
@@ -269,6 +339,8 @@ export interface GridFooterProps {
   canLoadMore: boolean;
   onLoadMore: () => void;
   loading: boolean;
+  /** Sentence shown while the first page loads (the grid itself shows skeleton rows). */
+  loadingText?: string;
   /** Scope line for category nodes ("범주: 운영 체제 (5 유형)"). */
   scope?: string;
 }
@@ -291,7 +363,7 @@ export function GridFooter(props: GridFooterProps) {
       </span>
       {props.loading ? (
         <span className="grid-note" data-testid="grid-footer-loading">
-          불러오는 중…
+          {props.loadingText ?? "불러오는 중…"}
         </span>
       ) : null}
       {props.backend ? (

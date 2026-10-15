@@ -5,6 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="dark light" />
     <title>RapidForensic</title>
+    <!-- Apply a stored light theme before first paint (no dark flash); keep the key in sync with
+         state/slices/prefs.ts THEME_KEY. Dark (no attribute) is the default. -->
+    <script id="theme-boot">
+      (() => {
+        try {
+          const t = localStorage.getItem("rapidtriage.v2.theme");
+          if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+        } catch {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
