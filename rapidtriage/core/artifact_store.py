@@ -29,6 +29,50 @@ REQUIRED_ARTIFACT_RECORD_FIELDS = {
 REQUIRED_SOURCE_FIELDS = {"case_id", "source_id", "source_path", "offset", "length", "hashes"}
 LEGACY_ADAPTER_VERSION = "legacy-artifact-contract-adapter-v1"
 ARTIFACT_RECORD_FIELDS_SOURCE = "details"
+# artifact_id = "artifact-" + sha256(content)[:24] (+ "-N" for the N-th
+# identical sibling in one output). Content = family, type, parser, source
+# path/offset and the row's details without position/run-volatile keys, so
+# inserting or removing another row never changes an id (r3; the r2 scheme
+# hashed the row position). See docs/rapidtriage-output-schemas.md.
+ARTIFACT_ID_SCHEME = "content-sha256-v2"
+ARTIFACT_ID_VOLATILE_DETAIL_KEYS = frozenset(
+    {
+        "source_index",
+        "row_index",
+        "record_index",
+        "output_index",
+        "artifact_record",
+        "generated_at",
+        "collected_at",
+        "scan_started_at",
+        "scan_completed_at",
+        "duration_ms",
+        "elapsed_ms",
+    }
+)
+
+
+class ArtifactIdAllocator:
+    """Per-output id allocator: the first row with given content gets the
+    plain content id, later identical rows ``-2``, ``-3`` ... in output order
+    (deterministic for a deterministic provider). Holds one 96-bit int per
+    distinct content (a few tens of MB for hundreds of thousands of rows)."""
+
+    __slots__ = ("_repeats", "_seen")
+
+    def __init__(self) -> None:
+        self._seen: set[int] = set()
+        self._repeats: dict[int, int] = {}
+
+    def allocate(self, digest: str) -> str:
+        base = f"artifact-{digest[:24]}"
+        key = int(digest[:24], 16)
+        if key not in self._seen:
+            self._seen.add(key)
+            return base
+        occurrence = self._repeats.get(key, 1) + 1
+        self._repeats[key] = occurrence
+        return f"{base}-{occurrence}"
 
 
 class ArtifactStoreError(ValueError):
@@ -248,6 +292,7 @@ def build_artifact_record_v1_from_legacy(
     case_id: str = "standalone-artifacts",
     source_id: str | None = None,
     include_fields: bool = True,
+    id_allocator: ArtifactIdAllocator | None = None,
 ) -> dict[str, object]:
     """Adapt existing collector rows into the normalized ArtifactRecordV1 contract.
 
@@ -302,7 +347,7 @@ def build_artifact_record_v1_from_legacy(
         "commercial_grade_blockers": blockers,
         "legal_limitations": legal_limitations,
     }
-    record_core["artifact_id"] = stable_artifact_id(record_core, index=index)
+    record_core["artifact_id"] = stable_artifact_id(record_core, details=details, allocator=id_allocator)
     if include_fields:
         record_core["fields"] = build_artifact_record_fields(
             row,
@@ -394,6 +439,7 @@ def attach_artifact_record_contracts(
     valid_count = 0
     invalid_count = 0
     contract_errors: list[dict[str, object]] = []
+    id_allocator = ArtifactIdAllocator()
     for index, row in enumerate(rows, start=1):
         adapted, errors = adapt_artifact_row(
             row,
@@ -403,6 +449,7 @@ def attach_artifact_record_contracts(
             root=root,
             case_id=case_id,
             include_fields=include_fields,
+            id_allocator=id_allocator,
         )
         adapted_rows.append(adapted)
         if errors is None:
@@ -434,6 +481,7 @@ def adapt_artifact_row(
     root: str | Path,
     case_id: str = "standalone-artifacts",
     include_fields: bool = True,
+    id_allocator: ArtifactIdAllocator | None = None,
 ) -> tuple[object, dict[str, object] | None]:
     """Attach the ArtifactRecordV1 (or envelope) to one row.
 
@@ -450,6 +498,7 @@ def adapt_artifact_row(
         index=index,
         case_id=case_id,
         source_id=kind,
+        id_allocator=id_allocator,
     )
     errors = validate_artifact_record(artifact_record)
     if not include_fields:
@@ -473,6 +522,7 @@ def artifact_record_contract_summary(
         "profile_version": "artifact-output-contract-v1",
         "schema": ARTIFACT_RECORD_SCHEMA,
         "adapter_version": LEGACY_ADAPTER_VERSION,
+        "artifact_id_scheme": ARTIFACT_ID_SCHEME,
         "record_count": record_count,
         "valid_count": valid_count,
         "invalid_count": invalid_count,
@@ -584,18 +634,36 @@ def artifact_filter_terms(artifact_type: str, details: Mapping[str, object]) -> 
     return sorted(terms)
 
 
-def stable_artifact_id(record_core: Mapping[str, Any], *, index: int) -> str:
+def artifact_content_digest(record_core: Mapping[str, Any], details: Mapping[str, object] | None = None) -> str:
+    """sha256 over the row content that identifies it (no row position)."""
     source = record_core.get("source") if isinstance(record_core.get("source"), Mapping) else {}
+    stable_details = {
+        str(key): value for key, value in (details or {}).items() if str(key) not in ARTIFACT_ID_VOLATILE_DETAIL_KEYS
+    }
     material = {
         "family": record_core.get("artifact_family"),
         "type": record_core.get("artifact_type"),
         "parser": record_core.get("parser"),
         "source_path": source.get("source_path"),
         "offset": source.get("offset"),
-        "index": index,
+        "details": stable_details,
     }
-    digest = hashlib.sha256(json.dumps(material, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
-    return f"artifact-{digest[:24]}"
+    encoded = json.dumps(material, ensure_ascii=False, sort_keys=True, default=json_default, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8", errors="surrogatepass")).hexdigest()
+
+
+def stable_artifact_id(
+    record_core: Mapping[str, Any],
+    *,
+    details: Mapping[str, object] | None = None,
+    allocator: ArtifactIdAllocator | None = None,
+) -> str:
+    """Content-derived id (``ARTIFACT_ID_SCHEME``); ``allocator`` adds the
+    ``-N`` suffix for repeated identical content within one output."""
+    digest = artifact_content_digest(record_core, details)
+    if allocator is None:
+        return f"artifact-{digest[:24]}"
+    return allocator.allocate(digest)
 
 
 def read_jsonl_artifacts(path: Path) -> Iterable[dict[str, object]]:

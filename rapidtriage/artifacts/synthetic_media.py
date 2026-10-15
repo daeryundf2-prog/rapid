@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import shutil
+import time
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 
@@ -24,6 +25,14 @@ SYNTHETIC_MEDIA_HASH_DEFER_BYTES = 512 * 1024 * 1024
 SYNTHETIC_MEDIA_TEXT_BYTES = 64 * 1024
 SYNTHETIC_MEDIA_METADATA_BYTES = 4 * 1024 * 1024
 SYNTHETIC_MEDIA_SIGNAL_LIMIT = 25
+# Parser-quality r2: per-collect CPU budget for deepfake_lens.analyze_file.
+# Measured with time.thread_time() (CPU of the collecting thread), so waiting
+# for the GIL under the threaded parser scheduler does not count and the cap
+# only trips on genuinely expensive inputs. When it trips, the remaining
+# candidates are counted as unscanned and the summary discloses
+# scan_capped / scan_cap_reason (the 512-file cap uses the same fields).
+SYNTHETIC_MEDIA_SCAN_CPU_BUDGET_SECONDS = 120.0
+SYNTHETIC_MEDIA_SCAN_BUDGET_REASON = "cpu-time-budget"
 SYNTHETIC_MEDIA_SCORE_SEMANTICS = "prioritization-score-not-truth-label"
 SYNTHETIC_MEDIA_SCORE_GUIDANCE = (
     "deepfake-lens score orders files for examiner review only. It is not an "
@@ -81,13 +90,20 @@ class SyntheticMediaProvider:
             yield build_unavailable_record(root)
             return
         candidates = iter_synthetic_media_candidates(root)
+        # shutil.which walks PATH x PATHEXT (~50 ms per call on Windows); it
+        # was called once per scanned file (26 of 52 s on run-subset8).
+        cli_path = deepfake_lens_cli_path()
         scanned = 0
         skipped_oversize = 0
         failed = 0
         capped = False
+        budget_exhausted = False
         unscanned = 0
+        cpu_started = time.thread_time()
         for path in candidates:
-            if scanned + skipped_oversize >= SYNTHETIC_MEDIA_MAX_FILES:
+            if not budget_exhausted and time.thread_time() - cpu_started > SYNTHETIC_MEDIA_SCAN_CPU_BUDGET_SECONDS:
+                budget_exhausted = True
+            if budget_exhausted or scanned + skipped_oversize >= SYNTHETIC_MEDIA_MAX_FILES:
                 # Keep counting so the cap is disclosed with the real remainder.
                 capped = True
                 unscanned += 1
@@ -101,7 +117,7 @@ class SyntheticMediaProvider:
                 skipped_oversize += 1
                 continue
             scanned += 1
-            record = scan_file_record(module, resolved)
+            record = scan_file_record(module, resolved, cli_path=cli_path)
             if record.details.get("scan_status") == "error":
                 failed += 1
             yield record
@@ -112,17 +128,21 @@ class SyntheticMediaProvider:
             failed=failed,
             capped=capped,
             unscanned=unscanned,
+            budget_exhausted=budget_exhausted,
         )
 
 
 def iter_synthetic_media_candidates(root: Path) -> Iterable[Path]:
     suffixes = SYNTHETIC_MEDIA_IMAGE_EXTENSIONS | SYNTHETIC_MEDIA_TEXT_EXTENSIONS
-    for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
-        if path.is_file() and path.suffix.lower() in suffixes:
+    # Suffix first (string check), then is_file(): same paths in the same
+    # order, without a stat() for every non-media evidence path.
+    matching = (path for path in iter_evidence_paths(root, "*") if path.suffix.lower() in suffixes)
+    for path in sorted(matching, key=lambda item: str(item).lower()):
+        if path.is_file():
             yield path
 
 
-def scan_file_record(module: object, path: Path) -> ArtifactRecord:
+def scan_file_record(module: object, path: Path, *, cli_path: str | None = None) -> ArtifactRecord:
     resolved = path.resolve()
     try:
         stat_result = resolved.stat()
@@ -138,7 +158,7 @@ def scan_file_record(module: object, path: Path) -> ArtifactRecord:
     except Exception as exc:
         return build_error_record(resolved, error=f"{type(exc).__name__}: {exc}")
     payload = scan_item_payload(item)
-    return build_scan_record(resolved, stat_size=stat_result.st_size, payload=payload)
+    return build_scan_record(resolved, stat_size=stat_result.st_size, payload=payload, cli_path=cli_path)
 
 
 def scan_item_payload(item: object) -> dict[str, object]:
@@ -152,7 +172,13 @@ def scan_item_payload(item: object) -> dict[str, object]:
     return {"status": "error", "error": "unrecognized deepfake_lens analyze_file result"}
 
 
-def build_scan_record(path: Path, *, stat_size: int, payload: Mapping[str, object]) -> ArtifactRecord:
+def build_scan_record(
+    path: Path,
+    *,
+    stat_size: int,
+    payload: Mapping[str, object],
+    cli_path: str | None = None,
+) -> ArtifactRecord:
     result = payload.get("result")
     result_payload = result if isinstance(result, Mapping) else {}
     signals = result_payload.get("signals")
@@ -174,7 +200,7 @@ def build_scan_record(path: Path, *, stat_size: int, payload: Mapping[str, objec
         "scan_kind": str(payload.get("kind") or ""),
         "scan_error": str(payload.get("error") or ""),
         "deepfake_lens_schema_version": DEEPFAKE_LENS_SCAN_JSON_SCHEMA_VERSION,
-        "deepfake_lens_cli_path": deepfake_lens_cli_path(),
+        "deepfake_lens_cli_path": deepfake_lens_cli_path() if cli_path is None else cli_path,
         "score": result_payload.get("score"),
         "band": str(result_payload.get("band") or ""),
         "band_label": str(result_payload.get("band_label") or ""),
@@ -280,6 +306,7 @@ def build_scan_summary_record(
     failed: int,
     capped: bool,
     unscanned: int = 0,
+    budget_exhausted: bool = False,
 ) -> ArtifactRecord:
     if capped:
         scan_status = "partial"
@@ -303,9 +330,7 @@ def build_scan_summary_record(
             "skipped_oversize_count": skipped_oversize,
             "scan_capped": capped,
             "unscanned_candidate_count": unscanned,
-            "scan_cap_note": (
-                f"상한 {SYNTHETIC_MEDIA_MAX_FILES}개 초과로 {unscanned}개 파일은 선별하지 않았습니다." if capped else ""
-            ),
+            "scan_cap_note": synthetic_media_scan_cap_note(capped, unscanned, budget_exhausted),
             "max_files": SYNTHETIC_MEDIA_MAX_FILES,
             "max_file_bytes": SYNTHETIC_MEDIA_MAX_FILE_BYTES,
             "text_bytes": SYNTHETIC_MEDIA_TEXT_BYTES,
@@ -314,8 +339,29 @@ def build_scan_summary_record(
             "score_semantics": SYNTHETIC_MEDIA_SCORE_SEMANTICS,
             "score_guidance": SYNTHETIC_MEDIA_SCORE_GUIDANCE,
             "validation_required": True,
+            # Only present when the CPU budget tripped, so uncapped output is
+            # unchanged.
+            **(
+                {
+                    "scan_cap_reason": SYNTHETIC_MEDIA_SCAN_BUDGET_REASON,
+                    "scan_cpu_budget_seconds": SYNTHETIC_MEDIA_SCAN_CPU_BUDGET_SECONDS,
+                }
+                if budget_exhausted
+                else {}
+            ),
         },
     )
+
+
+def synthetic_media_scan_cap_note(capped: bool, unscanned: int, budget_exhausted: bool) -> str:
+    if budget_exhausted:
+        return (
+            f"선별 CPU 시간 예산 {SYNTHETIC_MEDIA_SCAN_CPU_BUDGET_SECONDS:g}초를 넘어 "
+            f"{unscanned}개 파일은 선별하지 않았습니다."
+        )
+    if capped:
+        return f"상한 {SYNTHETIC_MEDIA_MAX_FILES}개 초과로 {unscanned}개 파일은 선별하지 않았습니다."
+    return ""
 
 
 def synthetic_media_source_hashes(path: Path, *, file_size: int) -> dict[str, str]:

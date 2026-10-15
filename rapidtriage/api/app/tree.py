@@ -72,7 +72,7 @@ ARTIFACT_DOMAIN_TABLE: tuple[tuple[str, str, tuple[str, ...] | None], ...] = (
     ("memory", "memory-volatility", None),
     # --- type routing -----------------------------------------------------
     ("devices", "windows-os-account", ("windows-mounted-device", "windows-usb-device")),
-    ("devices", "windows-registry", ("windows-mounted-device", "windows-usb-device", "windows-network-interface")),
+    ("devices", "windows-registry", ("windows-mounted-device", "windows-usb-device")),
     (
         "devices",
         "windows-system",
@@ -91,8 +91,14 @@ ARTIFACT_DOMAIN_TABLE: tuple[tuple[str, str, tuple[str, ...] | None], ...] = (
             "windows-installed-program",
             "windows-sam-account",
             "windows-sam-group",
+            # Network interface configuration is OS configuration (frontend
+            # domains.ts "os-sysinfo"), not a connected device.
+            "windows-network-interface",
         ),
     ),
+    # Amcache extended inventory (parser-quality r2): devices/drivers.
+    ("devices", "windows-execution", ("amcache-device-pnp", "amcache-device-container")),
+    ("os", "windows-execution", ("amcache-device-census",)),
     ("eventlog", "windows-system", ("firewall-log",)),
     (
         "incident",
@@ -290,9 +296,35 @@ def build_run_tree(store: RunJobStore, run_id: str) -> dict[str, Any]:
                     category=category,
                 )
             )
+    # Parser-quality r2: files outside the selected categories are inventoried
+    # (files.json ``inventory``; case DB file_record). "기타" = the "other"
+    # category of that inventory; selected-category nodes above stay candidates.
+    # Inventory nodes carry ``scope="inventory"``: their rows are paged by
+    # ``GET /files?scope=inventory&category=<category>``.
+    inventory_counts = files_summary.get("inventory_category_counts")
+    if isinstance(inventory_counts, dict):
+        known = {str(child.get("category")) for child in files_children}
+        for category, count in sorted(inventory_counts.items(), key=lambda item: (item[0] != "other", item[0])):
+            if not isinstance(count, int) or not count or str(category) in known:
+                continue
+            files_children.append(
+                _node(
+                    f"files:{category}",
+                    FILE_CATEGORY_LABELS.get(str(category), str(category)),
+                    count,
+                    collection="files",
+                    category=str(category),
+                    source="inventory",
+                    scope="inventory",
+                    inventory_only=True,
+                )
+            )
     if files_count or files_children:
+        files_extra: dict[str, Any] = {}
+        if isinstance(files_summary.get("inventory_count"), int):
+            files_extra["inventory_count"] = int(files_summary["inventory_count"])
         nodes.append(
-            _node("files", "파일", files_count, children=files_children, collection="files")
+            _node("files", "파일", files_count, children=files_children, collection="files", **files_extra)
         )
 
     # --- 아티팩트: group -> kind -> artifact_type ---------------------------
@@ -429,6 +461,13 @@ def build_artifact_domain_groups(kind_summaries: dict[str, dict[str, Any]]) -> l
                 extra["skip_reasons"] = {str(reason): int(count) for reason, count in skip_reasons.items() if isinstance(count, int)}
             if isinstance(kind_summary.get("skipped_row_count"), int):
                 extra["skipped_row_count"] = int(kind_summary["skipped_row_count"])
+            # eventlog: recovered records whose id is below the first live
+            # record (``evtx_record_id_position = "stale-below-first"``). The
+            # tree has no details-level sub-nodes, so only the count is sent;
+            # 0 is forwarded so the console can tell "none" from "old output".
+            stale = kind_summary.get("stale_below_first_record_count")
+            if primary and isinstance(stale, int) and not isinstance(stale, bool):
+                extra["stale_below_first_record_count"] = stale
             kind_nodes.append(
                 _node(
                     f"artifacts:{kind}" if primary else f"artifacts:{kind}@{domain}",

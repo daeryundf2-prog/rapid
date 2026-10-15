@@ -418,13 +418,15 @@ class EdgeProfileRowsTests(unittest.TestCase):
         self.assertTrue(login["password_stored"])
         card = types["browser-credit-card"][0].details
         self.assertEqual("**** **** **** 4242", card["card_number_masked"])
-        self.assertEqual("홍길동", card["name_on_card"])
+        self.assertEqual("[마스킹됨]", card["name_on_card"])  # personal name: masked (parser-quality r2)
         autofill = {r.details["field_name"]: r.details for r in types["browser-autofill"]}
-        self.assertEqual("alice01", autofill["usrId"]["value_preview"])
+        # parser-quality r3: autofill values are masked by default (sha256 kept).
+        self.assertEqual("[마스킹됨]", autofill["usrId"]["value_preview"])
+        self.assertEqual("form-input-default", autofill["usrId"]["mask_reason"])
         self.assertEqual("[마스킹됨]", autofill["userPassword"]["value_preview"])
         self.assertEqual("2024-02-15T09:52:57+00:00", autofill["usrId"]["timestamp"])
         self.assertEqual("[마스킹됨]", autofill["인증서 암호"]["value_preview"])
-        self.assertEqual("12345", autofill["면허번호"]["value_preview"])
+        self.assertEqual("[마스킹됨]", autofill["면허번호"]["value_preview"])
         self.assertEqual("hurb.or.kr", autofill["면허번호"]["domain"])
         address = types["browser-autofill-address"][0].details
         self.assertEqual({"EMAIL_ADDRESS", "ADDRESS_HOME_CITY"}, {item["field_name"] for item in address["address_fields"]})

@@ -25,6 +25,7 @@ and font streams skipped).
 
 from __future__ import annotations
 
+import hashlib
 import re
 import struct
 import zipfile
@@ -41,6 +42,7 @@ __all__ = [
     "OleError",
     "OleFile",
     "clean_extracted_text",
+    "decode_text_bytes",
     "extract_doc_text",
     "extract_hwp_text",
     "extract_hwpx_text",
@@ -87,15 +89,104 @@ _SPACE_RUN_RE = re.compile(r"[ \t]{2,}")
 _BLANK_LINES_RE = re.compile(r"\n{3,}")
 
 
+_REPLACEMENT_CHAR = "�"
+_NONCHARACTERS = "￾￿"
+
+
+def _is_binary_char(char: str) -> bool:
+    code = ord(char)
+    return (code < 32 and char not in "\n\r\t") or 0xE000 <= code <= 0xF8FF or char in _NONCHARACTERS
+
+
 def printable_ratio(text: str) -> float:
+    """Share of printable characters in decoded text.
+
+    U+FFFD (a decoder's replacement for one bad byte) is excluded from both
+    the count and the total: it marks lossy decoding, not binary content.
+    """
     if not text:
         return 1.0
-    bad = sum(
-        1
-        for char in text
-        if (ord(char) < 32 and char not in "\n\r\t") or 0xE000 <= ord(char) <= 0xF8FF or char in "�￾￿"
+    total = len(text) - text.count(_REPLACEMENT_CHAR)
+    if total <= 0:
+        return 0.0
+    bad = sum(1 for char in text if _is_binary_char(char))
+    return 1.0 - bad / total
+
+
+def decode_text_bytes(data: bytes) -> str:
+    """Decode a plain-text file: BOM (UTF-8/16/32), BOM-less UTF-16 (NUL in
+    every other byte: WER/setup logs), strict UTF-8, strict CP949 (Korean
+    ANSI), else UTF-8 with U+FFFD replacements (not counted as binary)."""
+    for bom, codec in (
+        (b"\xef\xbb\xbf", "utf-8-sig"),
+        (b"\xff\xfe\x00\x00", "utf-32"),
+        (b"\x00\x00\xfe\xff", "utf-32"),
+        (b"\xff\xfe", "utf-16"),
+        (b"\xfe\xff", "utf-16"),
+    ):
+        if data.startswith(bom):
+            return data.decode(codec, errors="replace")
+    sample = data[:8192]
+    if len(sample) >= 16:
+        even_nul = sample[0::2].count(0) / max(1, len(sample[0::2]))
+        odd_nul = sample[1::2].count(0) / max(1, len(sample[1::2]))
+        if odd_nul > 0.3 and even_nul < 0.05:
+            return data[: len(data) - len(data) % 2].decode("utf-16-le", errors="replace")
+        if even_nul > 0.3 and odd_nul < 0.05:
+            return data[: len(data) - len(data) % 2].decode("utf-16-be", errors="replace")
+    for codec in ("utf-8", "cp949"):
+        try:
+            return data.decode(codec)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("utf-8", errors="replace")
+
+
+MIN_SALVAGED_WORD_CHARS = 64
+MIN_SALVAGED_WORD_SHARE = 0.6
+
+
+def _is_word_char(char: str) -> bool:
+    code = ord(char)
+    return (
+        (char.isascii() and char.isalnum())
+        or 0xAC00 <= code <= 0xD7A3  # Hangul syllables
+        or 0x1100 <= code <= 0x11FF  # Hangul Jamo
+        or 0x3130 <= code <= 0x318F  # Hangul compatibility Jamo
+        or 0x4E00 <= code <= 0x9FFF  # CJK unified ideographs
+        or 0x3040 <= code <= 0x30FF  # kana
     )
-    return 1.0 - bad / len(text)
+
+
+def salvage_text(text: str) -> tuple[str, int] | None:
+    """Text with binary characters removed when the rest is real text.
+
+    PDF pages often mix decodable fonts with glyph-id runs of fonts without
+    a ToUnicode map; rejecting the whole document then loses the real text.
+    Line by line: a line is kept when it is mostly printable and mostly
+    letters/digits (Hangul, CJK, ASCII); the document is kept when at least
+    ``MIN_SALVAGED_WORD_CHARS`` such characters survive and they are the
+    majority of the kept non-space text. Returns ``(text, removed count)``.
+    """
+    kept_lines: list[str] = []
+    words_total = 0
+    visible_total = 0
+    for line in text.split("\n"):
+        bad = sum(1 for char in line if _is_binary_char(char) and char not in "\r\t")
+        clean = "".join(char for char in line if not _is_binary_char(char) and char != _REPLACEMENT_CHAR)
+        visible = [char for char in clean if not char.isspace()]
+        if not visible or (len(visible) == 1 and (visible[0].isascii() or not _is_word_char(visible[0]))):
+            continue  # empty or a lone glyph-id artifact ("K", "y")
+        words = sum(1 for char in visible if _is_word_char(char))
+        if bad > len(visible) * MAX_BINARY_RATIO or words < len(visible) * MIN_SALVAGED_WORD_SHARE:
+            continue
+        kept_lines.append(clean)
+        words_total += words
+        visible_total += len(visible)
+    if words_total < MIN_SALVAGED_WORD_CHARS or not visible_total or words_total / visible_total < MIN_SALVAGED_WORD_SHARE:
+        return None
+    kept = "\n".join(kept_lines)
+    return kept, max(0, len(text) - len(kept))
 
 
 def clean_extracted_text(text: str) -> str:
@@ -106,8 +197,30 @@ def clean_extracted_text(text: str) -> str:
     return _BLANK_LINES_RE.sub("\n\n", text).strip()
 
 
+# Binary-text salvage (dropping glyph-id/binary lines and indexing the rest)
+# is for container formats whose text is decoded from structured streams:
+# PDF content streams, HWP/HWPX sections, OLE Word/Excel/PowerPoint and
+# OOXML parts. Plain files read as text (``<ext>-text``: log/ini/xml/csv/
+# json/txt ...) are never salvaged: a LevelDB/ESE ``.log`` or a SQLite file
+# with a text extension stays ``binary-rejected``.
+SALVAGE_METHOD_PREFIXES: tuple[str, ...] = ("pdf", "hwp", "doc-", "xls-", "ppt-", "docx-", "xlsx-", "pptx-")
+
+
+def salvage_allowed(method: str) -> bool:
+    return method.startswith(SALVAGE_METHOD_PREFIXES) and not method.endswith("-text")
+
+
 def finalize(text: str, *, method: str, encrypted: bool = False, empty_reason: str = "", warnings: list[str] | None = None) -> DocumentText:
     ratio = printable_ratio(text)
+    if text and ratio < 1.0 - MAX_BINARY_RATIO and salvage_allowed(method):
+        salvaged = salvage_text(text)
+        if salvaged is not None:
+            kept, removed = salvaged
+            warnings = [
+                *(warnings or []),
+                f"비인쇄 문자 {removed}개(비율 {1.0 - ratio:.0%})를 제거하고 나머지 텍스트를 색인함",
+            ]
+            text, ratio = kept, 1.0
     if text and ratio < 1.0 - MAX_BINARY_RATIO:
         return DocumentText(
             "",
@@ -677,6 +790,8 @@ _PDF_ENDSTREAM_RE = re.compile(rb"\r?\n?endstream\s*$", re.DOTALL)
 class _PdfObject:
     dictionary: bytes
     stream: bytes | None
+    number: int = 0
+    generation: int = 0
 
 
 def _pdf_dict_value(dictionary: bytes, key: bytes) -> bytes | None:
@@ -718,22 +833,299 @@ def _pdf_ref(value: bytes | None) -> int | None:
     return int(match.group(1)) if match else None
 
 
+# --- PDF Standard security handler (empty user password) ---------------------
+#
+# Parser-quality r2: a PDF protected only by an owner password (permissions)
+# opens with the empty user password. Revisions 2-4 (RC4 40-128 bit, AESV2
+# AES-128-CBC) are decrypted natively; revision 5/6 (AES-256, SHA-2 key
+# derivation) and a non-empty user password stay ``encrypted``.
+
+_PDF_PASSWORD_PADDING = bytes.fromhex(
+    "28bf4e5e4e758a4164004e56fffa01082e2e00b6d0683e802f0ca9fe6453697a"
+)
+
+
+def _rc4(key: bytes, data: bytes) -> bytes:
+    state = list(range(256))
+    j = 0
+    key_length = len(key)
+    for i in range(256):
+        j = (j + state[i] + key[i % key_length]) & 0xFF
+        state[i], state[j] = state[j], state[i]
+    out = bytearray(len(data))
+    i = j = 0
+    for position, byte in enumerate(data):
+        i = (i + 1) & 0xFF
+        j = (j + state[i]) & 0xFF
+        state[i], state[j] = state[j], state[i]
+        out[position] = byte ^ state[(state[i] + state[j]) & 0xFF]
+    return bytes(out)
+
+
+def _aes_tables() -> tuple[list[int], list[int], tuple[list[int], list[int], list[int], list[int]]]:
+    sbox = [0] * 256
+    inverse = [0] * 256
+    p = q = 1
+    while True:
+        # p *= 3, q /= 3 in GF(2^8)
+        p = p ^ ((p << 1) & 0xFF) ^ (0x1B if p & 0x80 else 0)
+        q ^= q << 1
+        q ^= q << 2
+        q ^= q << 4
+        q &= 0xFF
+        if q & 0x80:
+            q ^= 0x09
+        value = q ^ (q << 1 | q >> 7) ^ (q << 2 | q >> 6) ^ (q << 3 | q >> 5) ^ (q << 4 | q >> 4)
+        value = (value ^ 0x63) & 0xFF
+        sbox[p] = value
+        inverse[value] = p
+        if p == 1:
+            break
+    sbox[0] = 0x63
+    inverse[0x63] = 0
+
+    def mul(a: int, b: int) -> int:
+        result = 0
+        while b:
+            if b & 1:
+                result ^= a
+            a = ((a << 1) ^ 0x1B) & 0xFF if a & 0x80 else a << 1
+            b >>= 1
+        return result
+
+    td0 = [0] * 256
+    for index in range(256):
+        s = inverse[index]
+        td0[index] = (mul(s, 14) << 24) | (mul(s, 9) << 16) | (mul(s, 13) << 8) | mul(s, 11)
+    td1 = [((value >> 8) | (value << 24)) & 0xFFFFFFFF for value in td0]
+    td2 = [((value >> 16) | (value << 16)) & 0xFFFFFFFF for value in td0]
+    td3 = [((value >> 24) | (value << 8)) & 0xFFFFFFFF for value in td0]
+    return sbox, inverse, (td0, td1, td2, td3)
+
+
+_AES_TABLES: tuple | None = None
+
+
+def _aes_decrypt_round_keys(key: bytes) -> list[list[int]]:
+    global _AES_TABLES
+    if _AES_TABLES is None:
+        _AES_TABLES = _aes_tables()
+    sbox, _inverse, (td0, td1, td2, td3) = _AES_TABLES
+    nk = len(key) // 4
+    rounds = nk + 6
+    words = [int.from_bytes(key[4 * i : 4 * i + 4], "big") for i in range(nk)]
+    rcon = 1
+    for i in range(nk, 4 * (rounds + 1)):
+        temp = words[i - 1]
+        if i % nk == 0:
+            temp = ((temp << 8) | (temp >> 24)) & 0xFFFFFFFF
+            temp = (sbox[temp >> 24] << 24) | (sbox[(temp >> 16) & 0xFF] << 16) | (sbox[(temp >> 8) & 0xFF] << 8) | sbox[temp & 0xFF]
+            temp ^= rcon << 24
+            rcon = ((rcon << 1) ^ 0x1B) & 0xFF if rcon & 0x80 else rcon << 1
+        elif nk > 6 and i % nk == 4:
+            temp = (sbox[temp >> 24] << 24) | (sbox[(temp >> 16) & 0xFF] << 16) | (sbox[(temp >> 8) & 0xFF] << 8) | sbox[temp & 0xFF]
+        words.append(words[i - nk] ^ temp)
+    round_keys = [words[4 * r : 4 * r + 4] for r in range(rounds + 1)]
+    round_keys.reverse()
+    # Equivalent inverse cipher: InvMixColumns on the middle round keys.
+    for r in range(1, rounds):
+        round_keys[r] = [
+            td0[sbox[word >> 24]] ^ td1[sbox[(word >> 16) & 0xFF]] ^ td2[sbox[(word >> 8) & 0xFF]] ^ td3[sbox[word & 0xFF]]
+            for word in round_keys[r]
+        ]
+    return round_keys
+
+
+def _aes_cbc_decrypt(key: bytes, data: bytes) -> bytes:
+    """AES-CBC with the IV in the first block and PKCS#5 padding (PDF AESV2/V3)."""
+    if len(data) < 32 or len(data) % 16:
+        data = data[: len(data) - len(data) % 16]
+        if len(data) < 32:
+            return b""
+    round_keys = _aes_decrypt_round_keys(key)
+    _sbox, inverse, (td0, td1, td2, td3) = _AES_TABLES  # type: ignore[misc]
+    rounds = len(round_keys) - 1
+    out = bytearray()
+    previous = data[:16]
+    for offset in range(16, len(data), 16):
+        block = data[offset : offset + 16]
+        k = round_keys[0]
+        s0 = int.from_bytes(block[0:4], "big") ^ k[0]
+        s1 = int.from_bytes(block[4:8], "big") ^ k[1]
+        s2 = int.from_bytes(block[8:12], "big") ^ k[2]
+        s3 = int.from_bytes(block[12:16], "big") ^ k[3]
+        for r in range(1, rounds):
+            k = round_keys[r]
+            t0 = td0[s0 >> 24] ^ td1[(s3 >> 16) & 0xFF] ^ td2[(s2 >> 8) & 0xFF] ^ td3[s1 & 0xFF] ^ k[0]
+            t1 = td0[s1 >> 24] ^ td1[(s0 >> 16) & 0xFF] ^ td2[(s3 >> 8) & 0xFF] ^ td3[s2 & 0xFF] ^ k[1]
+            t2 = td0[s2 >> 24] ^ td1[(s1 >> 16) & 0xFF] ^ td2[(s0 >> 8) & 0xFF] ^ td3[s3 & 0xFF] ^ k[2]
+            t3 = td0[s3 >> 24] ^ td1[(s2 >> 16) & 0xFF] ^ td2[(s1 >> 8) & 0xFF] ^ td3[s0 & 0xFF] ^ k[3]
+            s0, s1, s2, s3 = t0, t1, t2, t3
+        k = round_keys[rounds]
+        plain = bytearray(16)
+        for index, (state, a, b, c) in enumerate(((s0, s3, s2, s1), (s1, s0, s3, s2), (s2, s1, s0, s3), (s3, s2, s1, s0))):
+            word = (
+                (inverse[state >> 24] << 24)
+                | (inverse[(a >> 16) & 0xFF] << 16)
+                | (inverse[(b >> 8) & 0xFF] << 8)
+                | inverse[c & 0xFF]
+            ) ^ k[index]
+            plain[4 * index : 4 * index + 4] = word.to_bytes(4, "big")
+        out += bytes(x ^ y for x, y in zip(plain, previous))
+        previous = block
+    pad = out[-1] if out else 0
+    if 1 <= pad <= 16 and out[-pad:] == bytes([pad]) * pad:
+        del out[-pad:]
+    return bytes(out)
+
+
+def _pdf_string_at(dictionary: bytes, key: bytes) -> bytes | None:
+    """Raw bytes of a literal ``(...)`` or hex ``<...>`` string value of ``key``."""
+    match = re.search(rb"/" + re.escape(key) + rb"(?![A-Za-z0-9])\s*", dictionary)
+    if not match:
+        return None
+    start = match.end()
+    if dictionary[start : start + 1] == b"<" and dictionary[start : start + 2] != b"<<":
+        end = dictionary.find(b">", start)
+        return _pdf_string_bytes(dictionary[start : end + 1]) if end > start else None
+    if dictionary[start : start + 1] != b"(":
+        return None
+    depth = 0
+    index = start
+    while index < len(dictionary):
+        char = dictionary[index : index + 1]
+        if char == b"\\":
+            index += 2
+            continue
+        if char == b"(":
+            depth += 1
+        elif char == b")":
+            depth -= 1
+            if depth == 0:
+                return _pdf_literal_bytes(dictionary[start : index + 1])
+        index += 1
+    return None
+
+
+def _pdf_int(dictionary: bytes, key: bytes, default: int = 0) -> int:
+    value = _pdf_dict_value(dictionary, key)
+    try:
+        return int((value or b"").strip()) if value else default
+    except ValueError:
+        return default
+
+
+class _PdfSecurity:
+    """Standard security handler for R2-R4 with the empty user password."""
+
+    def __init__(self, key: bytes, *, aes: bool, revision: int) -> None:
+        self.key = key
+        self.aes = aes
+        self.revision = revision
+
+    def object_key(self, number: int, generation: int) -> bytes:
+        seed = self.key + number.to_bytes(4, "little")[:3] + generation.to_bytes(4, "little")[:2]
+        if self.aes:
+            seed += b"sAlT"
+        return hashlib.md5(seed).digest()[: min(len(self.key) + 5, 16)]
+
+    def decrypt(self, number: int, generation: int, data: bytes) -> bytes:
+        key = self.object_key(number, generation)
+        return _aes_cbc_decrypt(key, data) if self.aes else _rc4(key, data)
+
+
+def _pdf_file_id(data: bytes) -> bytes:
+    for match in reversed(list(re.finditer(rb"/ID\s*\[\s*", data))):
+        rest = data[match.end() : match.end() + 600]
+        token = re.match(rb"<[0-9A-Fa-f\s]*>|\((?:\\.|[^\\()])*\)", rest, re.DOTALL)
+        if token:
+            return _pdf_string_bytes(token.group(0))
+    return b""
+
+
+def open_pdf_security(data: bytes, encrypt_dictionary: bytes) -> tuple[_PdfSecurity | None, str]:
+    """``(handler, "")`` when the empty user password opens the file, else ``(None, reason)``."""
+    if b"/Standard" not in (_pdf_dict_value(encrypt_dictionary, b"Filter") or b""):
+        return None, "표준 보안 처리기 아님(공개키/사용자 정의 암호)"
+    version = _pdf_int(encrypt_dictionary, b"V")
+    revision = _pdf_int(encrypt_dictionary, b"R")
+    if revision >= 5 or version >= 5:
+        return None, f"AES-256 암호화(R{revision}): 본문 복호화 미지원"
+    owner = _pdf_string_at(encrypt_dictionary, b"O")
+    user = _pdf_string_at(encrypt_dictionary, b"U")
+    if owner is None or user is None:
+        return None, "암호 사전(O/U) 해석 실패"
+    permissions = _pdf_int(encrypt_dictionary, b"P") & 0xFFFFFFFF
+    length = _pdf_int(encrypt_dictionary, b"Length", 40) if revision >= 3 else 40
+    aes = False
+    if version == 4:
+        filters = _pdf_dict_value(encrypt_dictionary, b"CF") or b""
+        aes = b"AESV2" in filters
+        if b"AESV3" in filters:
+            return None, "AES-256 암호화(AESV3): 본문 복호화 미지원"
+        if b"/Identity" in (_pdf_dict_value(encrypt_dictionary, b"StmF") or b""):
+            return _PdfSecurity(b"", aes=False, revision=revision), ""
+        length = 128
+    key_length = max(5, min(16, length // 8))
+    file_id = _pdf_file_id(data)
+    seed = _PDF_PASSWORD_PADDING + owner[:32] + permissions.to_bytes(4, "little") + file_id
+    if revision >= 4 and b"false" in (_pdf_dict_value(encrypt_dictionary, b"EncryptMetadata") or b""):
+        seed += b"\xff\xff\xff\xff"
+    digest = hashlib.md5(seed).digest()
+    if revision >= 3:
+        for _ in range(50):
+            digest = hashlib.md5(digest[:key_length]).digest()
+    key = digest[:key_length]
+    if revision == 2:
+        valid = _rc4(key, _PDF_PASSWORD_PADDING) == user[:32]
+    else:
+        check = _rc4(key, hashlib.md5(_PDF_PASSWORD_PADDING + file_id).digest())
+        for round_index in range(1, 20):
+            check = _rc4(bytes(byte ^ round_index for byte in key), check)
+        valid = check == user[:16]
+    if not valid:
+        return None, "사용자 암호가 설정된 PDF: 본문 복호화 불가"
+    return _PdfSecurity(key, aes=aes, revision=revision), ""
+
+
 class _PdfDocument:
     def __init__(self, data: bytes, *, max_stream_bytes: int = MAX_DECOMPRESSED_STREAM_BYTES) -> None:
         self.data = data
         self.max_stream_bytes = max_stream_bytes
         self.objects: dict[int, _PdfObject] = {}
         self.warnings: list[str] = []
+        self.security: _PdfSecurity | None = None
+        self.security_reason = ""
         for match in _PDF_OBJ_RE.finditer(data):
             number = int(match.group(1))
+            generation = int(match.group(2))
             body = match.group(3)
             parts = _PDF_STREAM_SPLIT_RE.split(body, maxsplit=1)
             if len(parts) == 2:
                 dictionary, stream = parts[0], _PDF_ENDSTREAM_RE.sub(b"", parts[1])
-                self.objects[number] = _PdfObject(dictionary, stream)
+                self.objects[number] = _PdfObject(dictionary, stream, number, generation)
             else:
-                self.objects[number] = _PdfObject(body, None)
+                self.objects[number] = _PdfObject(body, None, number, generation)
+        if self.encrypted():
+            encrypt = _pdf_dict_value(self._trailer_region(), b"Encrypt") or b""
+            obj = self.get(_pdf_ref(encrypt))
+            dictionary = obj.dictionary if obj is not None else (encrypt if encrypt.startswith(b"<<") else b"")
+            if dictionary:
+                self.security, self.security_reason = open_pdf_security(data, dictionary)
+            else:
+                self.security_reason = "암호 사전을 찾지 못함"
         self._expand_object_streams()
+
+    def _trailer_region(self) -> bytes:
+        match = list(re.finditer(rb"/Encrypt\s+(\d+\s+\d+\s+R|<<)", self.data))
+        if not match:
+            return b""
+        start = match[-1].start()
+        return self.data[start : start + 4096]
+
+    def readable(self) -> bool:
+        """Not encrypted, or opened with the empty user password."""
+        return not self.encrypted() or self.security is not None
 
     def _expand_object_streams(self) -> None:
         for obj in list(self.objects.values()):
@@ -766,7 +1158,14 @@ class _PdfDocument:
             return None
         filters = _pdf_dict_value(obj.dictionary, b"Filter") or b""
         names = re.findall(rb"/([A-Za-z0-9]+)", filters)
+        if any(name not in (b"FlateDecode", b"Fl") for name in names):
+            return None  # DCT/JPX/CCITT/LZW: not a text stream
         data = obj.stream
+        if self.security is not None and self.security.key and obj.number and not re.search(rb"/Type\s*/XRef", obj.dictionary):
+            length = _pdf_int(obj.dictionary, b"Length", -1)
+            if 0 < length <= len(data):
+                data = data[:length]
+            data = self.security.decrypt(obj.number, obj.generation, data)
         for name in names:
             if name in (b"FlateDecode", b"Fl"):
                 try:
@@ -1098,8 +1497,16 @@ def extract_pdf_document_text(path: Path, *, max_stream_bytes: int = MAX_DECOMPR
     if not data.lstrip()[:5].startswith(b"%PDF"):
         return DocumentText("", status="unsupported", method="pdf-native", reason="PDF 헤더 없음")
     doc = _PdfDocument(data, max_stream_bytes=max_stream_bytes)
+    if not doc.readable():
+        return finalize(
+            "",
+            method="pdf-native",
+            encrypted=True,
+            empty_reason=f"암호화된 PDF(/Encrypt): {doc.security_reason or '본문 복호화 미지원'}",
+        )
     if doc.encrypted():
-        return finalize("", method="pdf-native", encrypted=True, empty_reason="암호화된 PDF(/Encrypt): 본문 복호화 미지원")
+        # Owner-password-only (permissions) PDF: opened with the empty user password.
+        doc.warnings.insert(0, "소유자 암호만 설정된 PDF: 빈 사용자 암호로 복호화해 본문을 추출함")
     default_font = _PdfFont(doc, b"")
     global_fonts = _pdf_global_font_map(doc)
     texts: list[str] = []

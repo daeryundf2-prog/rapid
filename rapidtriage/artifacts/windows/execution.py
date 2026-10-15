@@ -31,6 +31,17 @@ SYSTEM_HIVE_NAME = "SYSTEM"
 MAX_NATIVE_AMCACHE_SCAN_BYTES = 64 * 1024 * 1024
 MAX_NATIVE_SRUM_SCHEMA_ROWS = 20_000
 AMCACHE_INVENTORY_SECTIONS = ("InventoryApplicationFile", "File", "InventoryApplication", "Programs")
+# Further Amcache inventories (Windows 10+), emitted as their own row types. Value = (artifact_type, Korean label).
+AMCACHE_EXTENDED_SECTIONS: dict[str, tuple[str, str]] = {
+    "InventoryDriverBinary": ("amcache-driver-binary", "Amcache 드라이버 바이너리"),
+    "InventoryDriverPackage": ("amcache-driver-package", "Amcache 드라이버 패키지"),
+    "InventoryDevicePnp": ("amcache-device-pnp", "Amcache PnP 장치"),
+    "InventoryDeviceContainer": ("amcache-device-container", "Amcache 장치 컨테이너"),
+    "InventoryApplicationShortcut": ("amcache-application-shortcut", "Amcache 응용 프로그램 바로 가기"),
+    "DeviceCensus": ("amcache-device-census", "Amcache DeviceCensus 시스템 정보"),
+}
+# Values that are license secrets: shown masked (last group only).
+AMCACHE_MASKED_VALUE_NAMES = {"oa3xoriginalproductkey"}
 AMCACHE_ROW_CLUSTER_WINDOW_BYTES = 4096
 MAX_NATIVE_SHIMCACHE_SCAN_BYTES = 64 * 1024 * 1024
 SHIMCACHE_ROW_CLUSTER_WINDOW_BYTES = 4096
@@ -1624,6 +1635,171 @@ def build_amcache_schema_row_record(
     )
 
 
+def amcache_us_datetime_iso(value: str) -> str:
+    """``MM/DD/YYYY HH:MM:SS`` / ``MM-DD-YYYY`` Amcache strings -> ISO (UTC as recorded)."""
+    text = str(value or "").strip()
+    for pattern in ("%m/%d/%Y %H:%M:%S", "%m-%d-%Y", "%m/%d/%Y", "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            parsed = dt.datetime.strptime(text, pattern)
+        except ValueError:
+            continue
+        if pattern in ("%m-%d-%Y", "%m/%d/%Y"):
+            return parsed.date().isoformat()
+        return parsed.replace(tzinfo=dt.timezone.utc).isoformat()
+    return ""
+
+
+def amcache_masked_values(values: Mapping[str, object]) -> dict[str, str]:
+    masked: dict[str, str] = {}
+    for name, value in values.items():
+        text = str(value or "")
+        if name.lower() in AMCACHE_MASKED_VALUE_NAMES and text and text != "#":
+            text = "*****-" * 4 + text[-5:]
+        masked[name] = text
+    return masked
+
+
+def amcache_inventory_fields(section: str, key_name: str, values: Mapping[str, str]) -> dict[str, object]:
+    """Section-specific named fields plus labelled secondary timestamps for an extended inventory row."""
+
+    def get(name: str) -> str:
+        return str(values.get(name) or "")
+
+    if section == "InventoryDriverBinary":
+        link_seconds = get("DriverTimeStamp")
+        link_time = ""
+        if link_seconds.isdigit() and 0 < int(link_seconds) < 0xFFFFFFFF:
+            link_time = dt.datetime.fromtimestamp(int(link_seconds), tz=dt.timezone.utc).isoformat()
+        return {
+            "driver_path": key_name,
+            "driver_name": get("DriverName"),
+            "driver_version": get("DriverVersion"),
+            "driver_company": get("DriverCompany"),
+            "product_name": get("Product"),
+            "product_version": get("ProductVersion"),
+            "service": get("Service"),
+            "inf": get("Inf"),
+            "driver_signed": get("DriverSigned") == "1",
+            "driver_in_box": get("DriverInBox") == "1",
+            "driver_is_kernel_mode": get("DriverIsKernelMode") == "1",
+            "sha1": get("DriverId")[4:].lower() if len(get("DriverId")) == 44 else "",
+            "driver_last_write_time": amcache_us_datetime_iso(get("DriverLastWriteTime")),
+            "driver_link_time": link_time,
+        }
+    if section == "InventoryDriverPackage":
+        return {
+            "driver_package": key_name,
+            "inf": get("Inf"),
+            "provider": get("Provider"),
+            "driver_version": get("Version"),
+            "driver_date": get("Date"),
+            "device_class": get("Class"),
+            "hardware_ids": get("Hwids"),
+            "is_active": get("IsActive") == "1",
+        }
+    if section == "InventoryDevicePnp":
+        return {
+            "device_instance_id": key_name,
+            "device_model": get("Model"),
+            "manufacturer": get("Manufacturer"),
+            "description": get("Description"),
+            "device_class": get("Class"),
+            "enumerator": get("Enumerator"),
+            "driver_name": get("DriverName"),
+            "service": get("Service"),
+            "inf": get("Inf"),
+            "container_id": get("ContainerId"),
+            "parent_id": get("ParentId"),
+            "hardware_ids": get("HWID"),
+            "install_date": amcache_us_datetime_iso(get("InstallDate")),
+            "first_install_date": amcache_us_datetime_iso(get("FirstInstallDate")),
+            "driver_version_date": amcache_us_datetime_iso(get("DriverVerDate")),
+        }
+    if section == "InventoryDeviceContainer":
+        return {
+            "container_id": key_name,
+            "model_name": get("ModelName"),
+            "friendly_name": get("FriendlyName"),
+            "manufacturer": get("Manufacturer"),
+            "primary_category": get("PrimaryCategory"),
+            "categories": get("Categories"),
+            "is_connected": get("IsConnected") == "1",
+        }
+    if section == "InventoryApplicationShortcut":
+        return {
+            "shortcut_path": get("ShortcutPath"),
+            "shortcut_target_path": get("ShortcutTargetPath"),
+            "shortcut_aumid": get("ShortcutAumid"),
+            "program_id": get("ShortcutProgramId"),
+        }
+    if section == "DeviceCensus":
+        last_full_sync = get("lastFullSync")
+        return {
+            "census_category": key_name or "(root)",
+            "os_version": get("OsVersion"),
+            "last_full_sync_at": filetime_to_iso(int(last_full_sync)) if last_full_sync.isdigit() else "",
+            "os_oobe_at": amcache_us_datetime_iso(get("OSOOBEDateTime")),
+        }
+    return {}
+
+
+def build_amcache_inventory_record(
+    path: Path,
+    source_hashes: Mapping[str, str],
+    row: Mapping[str, object],
+    index: int,
+) -> ArtifactRecord:
+    """One Amcache extended-inventory row (driver binary/package, PnP device, device container,
+    application shortcut, DeviceCensus) with the key LastWrite as its labelled timestamp."""
+    section = str(row.get("section") or "")
+    artifact_type, label = AMCACHE_EXTENDED_SECTIONS.get(section, ("amcache-inventory-row", "Amcache 인벤토리"))
+    key_name = str(row.get("key_name") or "")
+    values = amcache_masked_values(row.get("values") if isinstance(row.get("values"), Mapping) else {})
+    fields = amcache_inventory_fields(section, key_name, values)
+    secondary_times = {
+        name: value
+        for name, value in fields.items()
+        if name.endswith(("_time", "_date", "_at")) and value
+    }
+    key_path = f"Root\\{section}" + (f"\\{key_name}" if key_name else "")
+    return ArtifactRecord(
+        provider=WindowsExecutionProvider.name,
+        artifact_type=artifact_type,
+        path=str(path.resolve()),
+        supported=True,
+        details={
+            "parser": "windows-amcache-inventory-row",
+            "parser_version": PARSER_VERSION,
+            "coverage_status": "native-schema-row",
+            "reportability": "review",
+            "label": label,
+            "source_path": str(path.resolve()),
+            "source_format": "amcache-hive",
+            "source_hashes": dict(source_hashes),
+            "source_index": index,
+            "section": section,
+            "key_name": key_name,
+            "key_path": key_path,
+            "cell_offset": row.get("cell_offset", 0),
+            "allocation_status": row.get("allocation_status", ""),
+            "key_last_written_at": row.get("last_written_at", ""),
+            **fields,
+            "secondary_timestamps": secondary_times,
+            "timestamp": row.get("last_written_at", ""),
+            "timestamp_label": "last_written",
+            "timestamp_semantics": "Amcache 인벤토리 키 최종 수정 시각(수집·갱신 시각) — 설치·연결·실행 시각이 아닙니다.",
+            "decoded_value_count": len(values),
+            "decoded_values": values,
+            "native_schema_decoding_available": True,
+            "validation_required": True,
+            "commercial_grade_ready": False,
+            "risk_flags": [],
+            "risk_score": 0,
+            "raw_preview": f"{section}\\{key_name}" if key_name else section,
+        },
+    )
+
+
 def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
     try:
         stat_result = path.stat()
@@ -1633,6 +1809,8 @@ def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
         return
     source_hashes = file_hashes(path)
     schema_rows, schema_decode_profile = decode_amcache_schema_rows(path)
+    extended_rows = [row for row in schema_rows if row.get("extended_inventory")]
+    schema_rows = [row for row in schema_rows if not row.get("extended_inventory")]
     # String pivots are a fallback only: skipped when the structural decode produced rows.
     occurrences = [] if schema_rows else list(iter_registry_like_string_occurrences(blob))
     strings = list(unique_preserve_order(item["text"] for item in occurrences))
@@ -1797,6 +1975,8 @@ def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
     )
     for index, schema_row in enumerate(schema_rows):
         yield build_amcache_schema_row_record(path, source_hashes, schema_row, index)
+    for index, extended_row in enumerate(extended_rows):
+        yield build_amcache_inventory_record(path, source_hashes, extended_row, index)
     clusters_by_path = {normalize_execution_path(str(cluster.get("executable_path") or "")): cluster for cluster in amcache_clusters}
     for index, candidate in enumerate([] if schema_rows else path_candidates[:STRING_CANDIDATE_LIMIT]):
         cluster = clusters_by_path.get(normalize_execution_path(candidate), {})
@@ -7022,8 +7202,44 @@ def decode_amcache_schema_rows_native(hive: object) -> tuple[list[dict[str, obje
             "decoded_subkey_offsets": len(entries),
             "decoded_rows": decoded,
         }
+    extended_count = 0
+    for section in AMCACHE_EXTENDED_SECTIONS:
+        node = hive.subkey(root, section)  # type: ignore[attr-defined]
+        if node is None:
+            continue
+        entries = list(hive.subkeys(node))  # type: ignore[attr-defined]
+        if section == "DeviceCensus":
+            entries = [node, *entries]  # root values (lastFullSync, OsVersion) + one row per category
+        decoded = 0
+        for entry in entries:
+            values = {
+                (str(value.name) or "(default)"): registry_value_text(hive.value_data(value))  # type: ignore[attr-defined]
+                for value in hive.values(entry)  # type: ignore[attr-defined]
+            }
+            if not values or set(values) <= {"WritePermissionsCheck", "ProviderVersion"}:
+                continue
+            decoded += 1
+            rows.append(
+                {
+                    "section": section,
+                    "key_name": "" if entry is node else str(entry.name),
+                    "cell_offset": 4096 + int(entry.offset or 0),
+                    "last_written_at": entry.last_written_at,
+                    "allocation_status": "allocated",
+                    "values": values,
+                    "extended_inventory": True,
+                }
+            )
+        extended_count += decoded
+        profile["sections"][section] = {  # type: ignore[index]
+            "declared_subkeys": int(node.subkey_count or 0),
+            "decoded_subkey_offsets": len(entries),
+            "decoded_rows": decoded,
+            "artifact_type": AMCACHE_EXTENDED_SECTIONS[section][0],
+        }
     profile["decode_status"] = "decoded" if rows else "no-decodable-rows"
-    profile["schema_row_count"] = len(rows)
+    profile["schema_row_count"] = len(rows) - extended_count
+    profile["extended_inventory_row_count"] = extended_count
     profile["row_cap"] = None
     return rows, profile
 

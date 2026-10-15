@@ -251,7 +251,10 @@ rule BrowserDownloadIOC {
                 {
                     "id": "browser-download-ioc",
                     "description": "Match browser download artifacts with IOC domains and URLs.",
-                    "artifact": ["browser-history-downloads"],
+                    # Parser-quality r2: the timeline carries the per-row ``browser-download``
+                    # event, not the aggregate ``browser-history-downloads`` row (which only
+                    # re-copies per-row times), so the rule names both.
+                    "artifact": ["browser-history-downloads", "browser-download"],
                     "domain": ["download.example"],
                     "url": ["https://download.example/tools/installer.exe"],
                 },
@@ -288,6 +291,7 @@ rules:
     description: Match browser download artifacts with IOC domains and URLs.
     artifact:
       - browser-history-downloads
+      - browser-download
     domain:
       - download.example
     url:

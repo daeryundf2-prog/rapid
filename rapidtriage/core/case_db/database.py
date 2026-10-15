@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import os
 import sqlite3
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
@@ -27,6 +28,10 @@ from .base import (
     default_citation_prefix,
     normalize_identifier,
     now_iso,
+)
+from .bulk_import import (
+    bulk_import_run_artifacts,
+    bulk_import_run_events,
 )
 from .constants import (
     ACQUISITION_HASH_GAP_ID,
@@ -112,11 +117,13 @@ from .review import (
 )
 from .schema import (
     apply_schema,
+    artifact_fts_is_external,
     assert_supported_existing_schema_version,
     ensure_case_exists,
     get_schema_version,
     insert_document_trigram_row,
     list_tables,
+    register_case_db_functions,
 )
 from .search import (
     attach_review_marks,
@@ -170,6 +177,10 @@ def commit_periodically(connection: sqlite3.Connection, count: int, citations: C
     if count % IMPORT_COMMIT_INTERVAL == 0:
         citations.flush()
         connection.commit()
+
+
+# Distinct unresolved paths remembered by ``_file_id_for`` per import.
+RESOLVED_PATH_CACHE_LIMIT = 200_000
 
 
 class CitationAllocator:
@@ -245,6 +256,7 @@ class CaseDatabase:
         # Link maps filled by an import (reset per ``import_run_outputs``) so
         # the ``_import_*`` steps also work when called on their own.
         self._file_ids: dict[str, int] = {}
+        self._resolved_path_keys: dict[str, str] = {}
         self._artifact_ids: dict[tuple[str, int], int] = {}
         self._hash_record_count = 0
 
@@ -253,9 +265,11 @@ class CaseDatabase:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(self.path)
         connection.row_factory = sqlite3.Row
+        # SQL functions of the compressed artifact layout (view/triggers).
+        register_case_db_functions(connection)
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("PRAGMA temp_store = MEMORY")
-        connection.execute("PRAGMA cache_size = -65536")
+        connection.execute("PRAGMA cache_size = -262144" if self.bulk_load else "PRAGMA cache_size = -65536")
         try:
             if self.bulk_load:
                 connection.execute("PRAGMA journal_mode = MEMORY")
@@ -280,7 +294,8 @@ class CaseDatabase:
     def initialize(self) -> dict[str, object]:
         assert_supported_existing_schema_version(self.path)
         with self.connect() as connection:
-            apply_schema(connection)
+            # A fresh bulk-load DB (run persist) gets the compressed artifact layout.
+            apply_schema(connection, compressed_artifacts=self.bulk_load)
             return {
                 "path": str(self.path),
                 "schema_version": get_schema_version(connection),
@@ -517,6 +532,7 @@ class CaseDatabase:
         # Parser-quality r1: rows link to each other (file_record <- artifact /
         # indexed_document / event, artifact <- event) through these maps.
         self._file_ids = {}
+        self._resolved_path_keys = {}
         self._artifact_ids = {}
         self._hash_record_count = 0
         counts = {
@@ -528,6 +544,8 @@ class CaseDatabase:
             "event_count": self._import_timeline(case_id, evidence_source_id, outputs),
         }
         counts["hash_record_count"] = self._hash_record_count
+        counts.update(getattr(self, "_indicator_disclosure", {}) or {})
+        counts["artifact_table_row_count"] = int(counts["artifact_count"]) + int(counts["indicator_count"])
         counts.update(self._link_counts(case_id))
         audit_id = self.add_audit_event(
             case_id=case_id,
@@ -1599,14 +1617,22 @@ class CaseDatabase:
         *,
         hash_files: bool = True,
     ) -> int:
-        rows = iter_output_member(outputs, "files", "candidates")
+        # Candidates first, then the lightweight inventory of every other
+        # scanned file (parser-quality r2): events/artifacts link to both;
+        # inventory rows are never hashed here (only recorded hashes).
+        rows = itertools.chain(
+            ((row, False) for row in iter_output_member(outputs, "files", "candidates")),
+            ((row, True) for row in iter_output_member(outputs, "files", "inventory")),
+        )
         count = 0
         with self.connect() as connection, CitationAllocator(connection, case_id, "file") as citations:
-            for row in rows:
+            for row, inventory_only in rows:
                 if not isinstance(row, Mapping):
                     continue
                 path = str(row.get("path") or "")
-                hashes = hash_existing_file(path) if hash_files else recorded_candidate_hashes(row)
+                if inventory_only and normalize_path_for_db(path) in self._file_ids:
+                    continue
+                hashes = hash_existing_file(path) if hash_files and not inventory_only else recorded_candidate_hashes(row)
                 recovery = recovery_record_from_payload(row)
                 candidate_kind = str(recovery.get("candidate_kind") or "")
                 times = file_record_times(row)
@@ -1757,6 +1783,17 @@ class CaseDatabase:
     def _import_artifacts(self, case_id: str, evidence_source_id: int, outputs: Mapping[str, object]) -> int:
         count = 0
         with self.connect() as connection, CitationAllocator(connection, case_id, "artifact") as citations:
+            if artifact_fts_is_external(connection):
+                # Compressed layout (fresh run-persist DB): batched load.
+                return bulk_import_run_artifacts(
+                    connection,
+                    citations,
+                    case_id=case_id,
+                    evidence_source_id=evidence_source_id,
+                    outputs=outputs,
+                    file_id_for=self._file_id_for,
+                    artifact_ids=self._artifact_ids,
+                )
             for output_name, raw_path in sorted(outputs.items()):
                 name = str(output_name)
                 if not name.startswith("artifacts_"):
@@ -1811,7 +1848,21 @@ class CaseDatabase:
     def _file_id_for(self, path: str) -> int | None:
         if not path:
             return None
-        return self._file_ids.get(normalize_path_for_db(path))
+        found = self._file_ids.get(normalize_path_for_db(path))
+        if found is not None:
+            return found
+        # Files rows carry resolved paths; an event/artifact path may still use
+        # an unresolved alias (macOS /var -> /private/var, Windows 8.3 short
+        # names such as RUNNER~1). Resolve once per distinct path.
+        resolved = self._resolved_path_keys.get(path)
+        if resolved is None:
+            try:
+                resolved = normalize_path_for_db(os.path.realpath(path))
+            except (OSError, ValueError):
+                resolved = ""
+            if len(self._resolved_path_keys) < RESOLVED_PATH_CACHE_LIMIT:
+                self._resolved_path_keys[path] = resolved
+        return self._file_ids.get(resolved) if resolved else None
 
     def _link_counts(self, case_id: str) -> dict[str, int]:
         with self.connect() as connection:
@@ -1832,6 +1883,16 @@ class CaseDatabase:
         rows = iter_output_member(outputs, "timeline", "events")
         count = 0
         with self.connect() as connection, CitationAllocator(connection, case_id, "event") as citations:
+            if self.bulk_load:
+                return bulk_import_run_events(
+                    connection,
+                    citations,
+                    case_id=case_id,
+                    evidence_source_id=evidence_source_id,
+                    rows=rows,
+                    file_id_for=self._file_id_for,
+                    artifact_ids=self._artifact_ids,
+                )
             for row in rows:
                 if not isinstance(row, Mapping):
                     continue
@@ -1893,6 +1954,14 @@ class CaseDatabase:
         payload = read_output(outputs, "indicators")
         indicator_rows = payload.get("indicators") if isinstance(payload, Mapping) else None
         scanner_rows = payload.get("ioc_scanner_hits") if isinstance(payload, Mapping) else None
+        indicator_summary = payload.get("summary") if isinstance(payload, Mapping) and isinstance(payload.get("summary"), Mapping) else {}
+        # Reconciles the DB artifact table with the run summary counts
+        # (indicator rows live in ``artifact`` next to parser rows).
+        self._indicator_disclosure = {
+            "indicator_row_count": len(indicator_rows) if isinstance(indicator_rows, list) else 0,
+            "ioc_scanner_row_count": len(scanner_rows) if isinstance(scanner_rows, list) else 0,
+            "indicator_total_before_cap": int(indicator_summary.get("total_before_cap") or 0),
+        }
         if not isinstance(indicator_rows, list) and not isinstance(scanner_rows, list):
             return 0
         count = 0

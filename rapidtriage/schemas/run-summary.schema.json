@@ -979,6 +979,9 @@
             "validation_issues": {
               "type": "integer"
             },
+            "validation_notices": {
+              "type": "integer"
+            },
             "validation_issue_breakdown": {
               "type": "object",
               "additionalProperties": false,
@@ -988,6 +991,9 @@
               ],
               "properties": {
                 "step_warnings": {
+                  "type": "integer"
+                },
+                "step_notices": {
                   "type": "integer"
                 },
                 "parser_errors": {
@@ -1139,6 +1145,18 @@
                   "string",
                   "null"
                 ]
+              },
+              "fs_modified_at": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "modified_at_origin": {
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             }
           }
@@ -1175,6 +1193,18 @@
                   "string",
                   "null"
                 ]
+              },
+              "fs_modified_at": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "modified_at_origin": {
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             }
           }
@@ -1207,6 +1237,18 @@
                 ]
               },
               "modified_at": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "fs_modified_at": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "modified_at_origin": {
                 "type": [
                   "string",
                   "null"

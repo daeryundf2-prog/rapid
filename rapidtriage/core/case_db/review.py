@@ -28,6 +28,7 @@ from .helpers import (
     parse_json_object,
     stable_payload_sha256,
 )
+from .schema import artifact_data_select_sql, artifact_row_data_json
 
 __all__ = [
     "_review_workflow_diff_key",
@@ -154,8 +155,8 @@ def load_review_target_match(
         }
     if target_type == "artifact":
         row = connection.execute(
-            """
-            SELECT citation_id, id, artifact_type, title, summary, data_json
+            f"""
+            SELECT citation_id, id, artifact_type, title, summary, {artifact_data_select_sql(connection)}
             FROM artifact
             WHERE case_id = ? AND id = ?
             """,
@@ -163,7 +164,7 @@ def load_review_target_match(
         ).fetchone()
         if row is None:
             return None
-        artifact_row = parse_json_object(row["data_json"])
+        artifact_row = parse_json_object(artifact_row_data_json(row))
         metadata = artifact_search_metadata(artifact_row)
         return {
             "source": artifact_match_source(str(row["artifact_type"])),

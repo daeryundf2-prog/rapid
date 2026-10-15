@@ -138,8 +138,35 @@ EVIDENCE_HASH_KEYS: frozenset[str] = frozenset(
     {"sha1", "sha256", "md5", "file_id", "fileid", "file_hash", "hash_value", "hashes_value", "imphash", "hashes"}
 )
 # Leaf-key words that make a dotted quad an IP even when every octet <= 9.
-IP_CONTEXT_KEY_RE = re.compile(r"(ip|addr|address|host|remote|source|destination|dest|peer|client|server|gateway|dns)", re.IGNORECASE)
-IP_CONTEXT_TEXT_RE = re.compile(r"(?i)(?:\bip\b|ipv4|address|addr|host|remote|server|client|gateway|dns|src|dst)\W{0,3}$")
+# Matched per word of the key (``script_block_text``/``description`` contain
+# "ip" as letters, not as a word).
+IP_CONTEXT_KEY_WORDS: frozenset[str] = frozenset(
+    {"ip", "ipv4", "ipaddress", "addr", "address", "host", "hostname", "remote", "source", "destination", "dest",
+     "peer", "client", "server", "gateway", "dns", "src", "dst", "nameserver", "servers"}
+)
+_KEY_WORD_RE = re.compile(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])|\d+")
+
+
+def field_key_words(field_key: str) -> set[str]:
+    """Lower-case words of a field key (``ClientAddress`` -> client, address)."""
+    return {word.lower() for word in _KEY_WORD_RE.findall(field_key)}
+
+
+def has_ip_context_key(field_key: str) -> bool:
+    return bool(field_key_words(field_key) & IP_CONTEXT_KEY_WORDS) or "ipaddress" in field_key.lower()
+
+
+# Hex blobs that are not hashes: SOCKADDR (ClientAddress/RemoteAddress),
+# transport/device descriptors, WER DynamicSig/bucket ids, raw Binary/Data.
+HASH_BLOB_FIELD_RE = re.compile(
+    r"(?i)(address|transport|dynamicsig|bucket|blob|binary|bytes|data$|^data|identity|device|cdb|sockaddr|buffer|payload)"
+)
+HASH_NAMED_FIELD_RE = re.compile(r"(?i)(sha1|sha256|sha-1|sha-256|md5|imphash|hash|digest|thumbprint|checksum)")
+HASH_ZERO_RUN = "0" * 8
+# "Version 1.0.0.0", "ModuleVersion = '3.0.0.0'": a dotted quad after a version word.
+VERSION_CONTEXT_RE = re.compile(r"(?i)(version|build|release|revision)\W{0,24}$")
+# Word-bounded: "SMSvcHost 3.0.0.0" is a service name + version, not "host 3.0.0.0".
+IP_CONTEXT_TEXT_RE = re.compile(r"(?i)\b(?:ip|ipv4|address|addr|host|remote|server|client|gateway|dns|src|dst)\W{0,3}$")
 # Bulk inventory rows with no evidence indicator content of their own
 # (registry key tree: names/offsets; their values surface in semantic rows).
 INDICATOR_EXCLUDED_ARTIFACT_TYPES: frozenset[str] = frozenset(
@@ -212,14 +239,63 @@ def is_evidence_hash_field(pointer: str, field_key: str) -> bool:
     return bool(EVIDENCE_HASH_POINTER_RE.search(pointer))
 
 
+LOOPBACK_URL_HOSTS = frozenset({"localhost", "localhost.localdomain", "ip6-localhost"})
+
+
 def url_indicator_status(url: str) -> str:
-    host = (urlparse(url).hostname or "").lower()
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
     if not host:
         return "no-host"
+    try:
+        parsed.port  # noqa: B018 - raises ValueError on a malformed host:port
+    except ValueError:
+        # HTTP.sys URL-group registrations such as http://127.0.0.1:4567:127.0.0.1/...
+        return "malformed-netloc"
+    if host in LOOPBACK_URL_HOSTS:
+        return "loopback-host"
+    try:
+        if ipaddress.ip_address(host.strip("[]")).is_loopback:
+            return "loopback-host"
+    except ValueError:
+        pass
     if "%" in host or "{" in url[:16] or re.search(r"%[sdux]", url):
         return "format-template"
     if host in NON_INDICATOR_URL_HOSTS:
         return "xml-namespace"
+    if host in ("*", "+") or url.split("://", 1)[-1][:1] in ("*", "+"):
+        # HTTP.sys URL reservations (http://+:80/, https://*:5358/): wildcard bindings.
+        return "wildcard-host"
+    return "accept"
+
+
+def _hostname_label(label: str) -> bool:
+    if label.startswith("-") or label.endswith("-"):
+        return False
+    return all(char.isalnum() or char in "-_" for char in label)
+
+
+def domain_indicator_status(host: str) -> str:
+    """``accept`` for a DNS hostname; bare IPs (an ``ip`` indicator), wildcard
+    bindings and labels that are not hostname-shaped are rejected."""
+    text = host.strip(".").lower()
+    if not text:
+        return "empty"
+    if text in ("*", "+") or "*" in text or "+" in text:
+        return "wildcard"
+    try:
+        ipaddress.ip_address(text.strip("[]"))
+    except ValueError:
+        pass
+    else:
+        return "ip-address"
+    if len(text) > 253 or "." not in text:
+        return "not-hostname"
+    labels = text.split(".")
+    if any(not label or len(label) > 63 or not _hostname_label(label) for label in labels):
+        return "not-hostname"
+    if labels[-1].isdigit():
+        return "not-hostname"
     return "accept"
 
 
@@ -267,7 +343,10 @@ def ipv4_indicator_status(text: str, match: re.Match[str], field_key: str) -> st
         return "version-like"
     if is_version_like_ipv4(text, match.start(), match.end()):
         return "version-like"
-    has_context = bool(IP_CONTEXT_KEY_RE.search(field_key)) or bool(IP_CONTEXT_TEXT_RE.search(text[: match.start()]))
+    before = text[max(0, match.start() - 48) : match.start()]
+    if VERSION_CONTEXT_RE.search(before):
+        return "version-like"  # "Version 1.0.0.0", "ModuleVersion = '1.0.0.0'"
+    has_context = has_ip_context_key(field_key) or bool(IP_CONTEXT_TEXT_RE.search(before))
     if not has_context:
         if max(octets) <= 9 or octets[3] == 0:
             return "version-like"
@@ -311,7 +390,7 @@ def build_indicator_summary(
     *,
     rule_set: RuleSet | None = None,
     ti_feeds: Sequence[Path] | None = None,
-    max_indicators: int = DEFAULT_MAX_INDICATORS,
+    max_indicators: int | None = DEFAULT_MAX_INDICATORS,
     max_sources_per_indicator: int = DEFAULT_MAX_SOURCES_PER_INDICATOR,
     output_payloads: Mapping[str, Mapping[str, object]] | None = None,
     streamed_outputs: Iterable[str] | None = None,
@@ -391,6 +470,7 @@ def build_indicator_summary(
     if max_indicators:
         indicators = indicators[:max_indicators]
     truncated = len(indicators) < total_before_cap
+    cap_policy = indicator_cap_policy(max_indicators, total_before_cap=total_before_cap, kept=len(indicators))
     sources_truncated_count = sum(1 for item in indicators if int(item.get("count") or 0) > len(item.get("sources") or []))
     indicators = attach_ioc_ti_indicator_manifests(indicators)
     ioc_scanner_hits = finalize_ioc_scanner_hits(scanner_accumulator, limit=max_indicators)
@@ -444,6 +524,7 @@ def build_indicator_summary(
             "total_before_cap": total_before_cap,
             "truncated": truncated,
             "max_indicators": max_indicators,
+            "cap_policy": cap_policy,
             "type_counts_before_cap": dict(type_counts_before_cap),
             "sources_truncated_indicator_count": sources_truncated_count,
             "max_sources_per_indicator": max_sources_per_indicator,
@@ -498,6 +579,30 @@ def build_indicator_summary(
             validation_plan=validation_plan,
         ),
         "indicators": indicators,
+    }
+
+
+def indicator_cap_policy(max_indicators: int | None, *, total_before_cap: int, kept: int) -> dict[str, object]:
+    """Disclosure of the indicator cap (``None``/``0`` = uncapped)."""
+    if not max_indicators:
+        return {
+            "mode": "uncapped",
+            "max_indicators": None,
+            "kept": kept,
+            "total_before_cap": total_before_cap,
+            "note": "상한 없음: 추출된 지표 후보를 모두 기록했습니다 (CLI `indicators --limit N`으로 상한 지정 가능).",
+        }
+    return {
+        "mode": "capped",
+        "max_indicators": int(max_indicators),
+        "kept": kept,
+        "total_before_cap": total_before_cap,
+        "note": (
+            f"상한 {int(max_indicators)}개 적용: 전체 {total_before_cap}개 중 {kept}개만 기록 "
+            "(심각도·출현 빈도 순)."
+            if kept < total_before_cap
+            else f"상한 {int(max_indicators)}개 (도달하지 않음)."
+        ),
     }
 
 
@@ -640,9 +745,12 @@ def collect_indicators_from_text(
                 rejections[f"url:{url_status}"] += 1
             continue
         add_indicator(accumulator, "url", url, source, max_sources_per_indicator=max_sources_per_indicator)
-        host = urlparse(url).hostname
-        if host:
-            add_indicator(accumulator, "domain", host.lower(), source, max_sources_per_indicator=max_sources_per_indicator)
+        host = (urlparse(url).hostname or "").lower()
+        domain_status = domain_indicator_status(host)
+        if domain_status == "accept":
+            add_indicator(accumulator, "domain", host, source, max_sources_per_indicator=max_sources_per_indicator)
+        elif rejections is not None:
+            rejections[f"domain:{domain_status}"] += 1
     pointer = str(source.get("pointer") or "")
     field_key = pointer_field_key(pointer)
     for match in IP_RE.finditer(text):
@@ -669,6 +777,16 @@ def collect_indicators_from_text(
             and bool(HASH_LABEL_RE.search(text[max(0, match.start() - 8) : match.start()]))
         )
         standalone = stripped == lowered and not name_like_field
+        if standalone and not hash_field:
+            # A bare hex value counts only in a field that may hold a hash:
+            # never in a binary-blob field (SOCKADDR ClientAddress, Transport,
+            # WER DynamicSig/bucket, Binary/Data), and an EventData value only
+            # under a hash-named field.
+            blob_reason = standalone_hash_blob_reason(pointer, field_key, lowered)
+            if blob_reason:
+                if rejections is not None:
+                    rejections[f"hash:{blob_reason}"] += 1
+                continue
         if not (hash_field or labeled or standalone):
             if rejections is not None:
                 rejections["hash:not-hash-field"] += 1
@@ -682,6 +800,20 @@ def collect_indicators_from_text(
         )
 
 
+EVENT_DATA_POINTER_PARTS: tuple[str, ...] = ("/event_data/", "/EventData/", "/fields/", "/values/")
+
+
+def standalone_hash_blob_reason(pointer: str, field_key: str, token: str) -> str:
+    """Why a whole-value hex token is a binary blob, not a hash ('' = hash-like)."""
+    if HASH_BLOB_FIELD_RE.search(field_key) and not HASH_NAMED_FIELD_RE.search(field_key):
+        return "binary-blob-field"
+    if HASH_ZERO_RUN in token:
+        return "binary-blob-zero-run"  # SOCKADDR / structure padding; a digest has no 8-zero run
+    if any(part in pointer for part in EVENT_DATA_POINTER_PARTS) and not HASH_NAMED_FIELD_RE.search(field_key):
+        return "event-data-not-hash-field"
+    return ""
+
+
 def add_indicator(
     accumulator: MutableMapping[tuple[str, str], dict[str, object]],
     indicator_type: str,
@@ -690,9 +822,13 @@ def add_indicator(
     *,
     max_sources_per_indicator: int,
 ) -> None:
-    key = (indicator_type, value)
+    # URLs keep their original case in ``value``; the dedupe/compare key is
+    # the case-folded form (``value_fold``). Other types are already folded.
+    key = (indicator_type, indicator_compare_key(indicator_type, value))
     if key not in accumulator:
         accumulator[key] = {"type": indicator_type, "value": value, "count": 0, "sources": []}
+        if indicator_type == "url":
+            accumulator[key]["value_fold"] = key[1]
     record = accumulator[key]
     record["count"] = int(record["count"]) + 1
     sources = record["sources"]
@@ -923,7 +1059,7 @@ def add_ioc_scanner_hit(
 def finalize_ioc_scanner_hits(
     accumulator: Mapping[tuple[str, str, str], Mapping[str, object]],
     *,
-    limit: int,
+    limit: int | None,
 ) -> list[dict[str, object]]:
     hits: list[dict[str, object]] = []
     for record in accumulator.values():
@@ -1064,6 +1200,7 @@ def finalize_indicator(
     indicator = {
         "type": str(record.get("type", "")),
         "value": str(record.get("value", "")),
+        **({"value_fold": str(record.get("value_fold") or "")} if record.get("value_fold") else {}),
         "count": int(record.get("count", 0)),
         "classification": classify_indicator(str(record.get("type", "")), str(record.get("value", ""))),
         "risk_flags": indicator_risk_flags(str(record.get("type", "")), str(record.get("value", ""))),
@@ -1495,7 +1632,7 @@ def build_ioc_ti_enrichment_manifest(
     *,
     indicators: Sequence[Mapping[str, object]],
     ti_feed_sources: Sequence[Mapping[str, object]],
-    max_indicators: int,
+    max_indicators: int | None,
     max_sources_per_indicator: int,
 ) -> dict[str, object]:
     indicator_rows = []
@@ -1559,7 +1696,7 @@ def build_ioc_ti_report_grade_validation_plan(
     indicators: Sequence[Mapping[str, object]],
     ti_feed_sources: Sequence[Mapping[str, object]],
     enrichment_manifest: Mapping[str, object],
-    max_indicators: int,
+    max_indicators: int | None,
     max_sources_per_indicator: int,
     trusted_diff: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
@@ -1832,7 +1969,7 @@ def ioc_ti_commercial_uplift_evidence(
     ti_feed_sources: Sequence[Mapping[str, object]],
     core_accuracy_gates: Sequence[Mapping[str, object]],
     assessment: Mapping[str, object],
-    max_indicators: int,
+    max_indicators: int | None,
     max_sources_per_indicator: int,
     enrichment_manifest: Mapping[str, object] | None = None,
     validation_plan: Mapping[str, object] | None = None,
@@ -1958,7 +2095,7 @@ def normalize_feed_type(value: str) -> str:
 def normalize_feed_value(indicator_type: str, value: str) -> str:
     text = value.strip()
     if indicator_type == "url":
-        return normalize_url(text)
+        return indicator_compare_key("url", normalize_url(text))
     if indicator_type == "domain":
         return text.lower().strip(".")
     if indicator_type in {"md5", "sha1", "sha256"}:
@@ -2016,13 +2153,24 @@ def match_indicator_rules(indicator: Mapping[str, object], rule_set: RuleSet | N
     if indicator_type == "ip" and classify_indicator(indicator_type, value) in {"private", "loopback"}:
         return []  # private addresses are flagged, never rule-matched
     for rule in rule_set.rules:
-        if indicator_type == "domain" and any(value == item or value.endswith(f".{item}") for item in rule.domains) or indicator_type == "url" and any(item in value for item in rule.urls) or indicator_type in {"md5", "sha1", "sha256"} and indicator_type == "sha256" and value in rule.hashes:
+        if (
+            (indicator_type == "domain" and any(value == item or value.endswith(f".{item}") for item in rule.domains))
+            or (indicator_type == "url" and any(item.lower() in value for item in rule.urls))
+            or (indicator_type in {"md5", "sha1", "sha256"} and value in rule.hashes)
+        ):
             matched.append(rule.id)
     return sorted(set(matched))
 
 
 def normalize_url(value: str) -> str:
-    return value.strip().rstrip(".,);]").lower()
+    """Trim trailing punctuation; the original case is kept (paths and
+    queries are case-sensitive). :func:`indicator_compare_key` folds."""
+    return value.strip().rstrip(".,);]")
+
+
+def indicator_compare_key(indicator_type: str, value: str) -> str:
+    """Dedupe/compare key: URLs case-folded, other types as normalized."""
+    return value.lower() if indicator_type == "url" else value
 
 
 def valid_ipv4(value: str) -> bool:

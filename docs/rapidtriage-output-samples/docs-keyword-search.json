@@ -55,7 +55,18 @@
     "zero_text_count": 0,
     "zero_text_reason_counts": {},
     "ocr_available": false,
-    "listing_contract": "candidates lists every document; matched=true rows are the keyword hits (results)"
+    "listing_contract": "candidates lists every document; matched=true rows are the keyword hits (results)",
+    "size_caps": {
+      "max_input_bytes": 50000000,
+      "max_archive_member_bytes": 10000000,
+      "max_archive_total_bytes": 50000000,
+      "max_pdf_stream_decompressed_bytes": 10000000,
+      "too_large_count": 0,
+      "too_large_samples": [],
+      "binary_rejected_count": 0,
+      "truncated": false,
+      "note": "크기 상한 초과 문서 0건은 본문을 추출·색인하지 않았습니다(파일 50 MB, 압축 멤버 10 MB 상한). 비인쇄 문자 비율 초과 0건도 색인하지 않았습니다."
+    }
   },
   "manifest": {
     "generated_at": "<GENERATED_AT>",

@@ -60,7 +60,9 @@ class RecordContext:
     hash_path: str | None = None
 
 
-HASH_RE = re.compile(r"\b[a-fA-F0-9]{64}\b")
+# Rule IOC hashes: MD5, SHA-1 or SHA-256 (indicator rows carry all three;
+# file content matching compares SHA-256 only).
+HASH_RE = re.compile(r"\b(?:[a-fA-F0-9]{32}|[a-fA-F0-9]{40}|[a-fA-F0-9]{64})\b")
 URL_RE = re.compile(r"https?://[^\s\]\[\)\(\}\{\"'<>]+", re.IGNORECASE)
 DOMAIN_LITERAL_RE = re.compile(
     r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$",
@@ -882,7 +884,7 @@ def normalize_hashes(value: object) -> list[str]:
         if not text:
             continue
         if not HASH_RE.fullmatch(text):
-            raise RuleConfigError(f"invalid SHA256 IOC value: {item!r}")
+            raise RuleConfigError(f"invalid MD5/SHA1/SHA256 IOC value: {item!r}")
         hashes.append(text)
     return hashes
 

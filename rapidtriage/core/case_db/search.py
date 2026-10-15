@@ -33,7 +33,6 @@ from .helpers import (
     optional_int,
     optional_str,
     parse_json_object,
-    quote_fts_token,
     stable_payload_sha256,
 )
 from .review import (
@@ -41,7 +40,12 @@ from .review import (
     review_mark_to_dict,
     source_citation_package_hash,
 )
-from .schema import DOCUMENT_TRIGRAM_TABLE, document_trigram_available
+from .schema import (
+    DOCUMENT_TRIGRAM_TABLE,
+    artifact_data_select_sql,
+    artifact_row_data_json,
+    document_trigram_available,
+)
 
 __all__ = [
     "artifact_fts_has_rows",
@@ -93,11 +97,13 @@ def search_indexed_documents(
                     seen.add(str(row["target_id"]))
                     results.append(_document_match(row, keywords))
         if short_terms:
-            prefix_query = " OR ".join(f"{quote_fts_token(keyword)}*" for keyword in short_terms)
-            for row in _document_rows(connection, case_id, "indexed_document_fts", prefix_query, limit):
-                if row["target_id"] not in seen:
-                    seen.add(str(row["target_id"]))
-                    results.append(_document_match(row, keywords))
+            # Parser-quality r2: trigram cannot match 1-2 character terms and
+            # unicode61 prefix terms miss them inside words ("근로계약서" for
+            # "계약"): scan the document bodies for the substring (bounded).
+            for match in _document_substring_matches(connection, case_id, short_terms, keywords, limit):
+                if match["target_id"] not in seen:
+                    seen.add(str(match["target_id"]))
+                    results.append(match)
         return results[:limit] if limit else results
     query = build_fts_query(keywords)
     rows = connection.execute(
@@ -131,6 +137,73 @@ def search_indexed_documents(
         }
         for row in rows
     ]
+
+
+# Documents scanned by the short-term substring fallback (newest rows past
+# the budget are not scanned; the match rows say so in ``recall_note``).
+DOCUMENT_SUBSTRING_SCAN_BUDGET = 200_000
+
+
+def _document_substring_matches(
+    connection: sqlite3.Connection,
+    case_id: str,
+    terms: list[str],
+    keywords: list[str],
+    limit: int,
+    *,
+    budget: int = DOCUMENT_SUBSTRING_SCAN_BUDGET,
+) -> list[dict[str, object]]:
+    total = connection.execute("SELECT count(*) FROM indexed_document WHERE case_id = ?", (case_id,)).fetchone()[0]
+    capped = int(total or 0) > budget
+    note = (
+        f"1~2글자 검색어는 문서 본문 부분 문자열 검사(최대 {budget}건)로 찾았습니다"
+        + (f": 전체 {total}건 중 {budget}건만 검사해 일부 누락될 수 있습니다." if capped else ".")
+    )
+    matches: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for term in terms:
+        needle = normalize_nfc(term.strip())
+        if not needle:
+            continue
+        lowered = needle.lower()
+        rows = connection.execute(
+            """
+            SELECT id, citation_id, field_name, title,
+                   substr(body, max(1, instr(lower(body), ?) - 40), 120) AS snippet
+            FROM (
+                SELECT id, citation_id, field_name, title, body
+                FROM indexed_document
+                WHERE case_id = ?
+                ORDER BY id
+                LIMIT ?
+            )
+            WHERE instr(lower(body), ?) > 0 OR instr(lower(title), ?) > 0
+            ORDER BY id
+            LIMIT ?
+            """,
+            (lowered, case_id, budget, lowered, lowered, limit or -1),
+        ).fetchall()
+        for row in rows:
+            target_id = str(row["id"])
+            if target_id in seen:
+                continue
+            seen.add(target_id)
+            snippet = str(row["snippet"] or row["title"] or "")
+            matches.append(
+                {
+                    "source": "documents",
+                    "citation_id": str(row["citation_id"]),
+                    "target_type": "indexed_document",
+                    "target_id": target_id,
+                    "title": str(row["title"]),
+                    "kind": str(row["field_name"]),
+                    "matched_keywords": matched_keywords(snippet, keywords) or [term],
+                    "preview": snippet,
+                    "match_method": "substring-scan",
+                    "recall_note": note,
+                }
+            )
+    return matches
 
 
 def _document_rows(
@@ -616,8 +689,8 @@ def search_artifacts_scan(
     scan_candidate_limit: int,
 ) -> list[dict[str, object]]:
     rows = connection.execute(
-        """
-        SELECT citation_id, id, artifact_type, title, summary, data_json
+        f"""
+        SELECT citation_id, id, artifact_type, title, summary, {artifact_data_select_sql(connection)}
         FROM artifact
         WHERE case_id = ?
         ORDER BY id ASC
@@ -627,11 +700,12 @@ def search_artifacts_scan(
     ).fetchall()
     matches = []
     for row in rows:
-        haystack = " ".join(str(row[key] or "") for key in ("artifact_type", "title", "summary", "data_json"))
+        data_json = artifact_row_data_json(row)
+        haystack = " ".join(str(value or "") for value in (row["artifact_type"], row["title"], row["summary"], data_json))
         hits = matched_keywords(haystack, keywords)
         if not hits:
             continue
-        artifact_row = parse_json_object(row["data_json"])
+        artifact_row = parse_json_object(data_json)
         metadata = artifact_search_metadata(artifact_row)
         matches.append(
             {
@@ -1151,14 +1225,14 @@ def search_artifacts_fts(
     query = build_fts_query(keywords)
     try:
         rows = connection.execute(
-            """
+            f"""
             SELECT
                 artifact.citation_id,
                 artifact.id,
                 artifact.artifact_type,
                 artifact.title,
                 artifact.summary,
-                artifact.data_json,
+                {artifact_data_select_sql(connection, "artifact")},
                 snippet(artifact_fts, 2, '[', ']', ' ... ', 18) AS snippet
             FROM artifact_fts
             JOIN artifact ON artifact_fts.rowid = artifact.id
@@ -1173,7 +1247,7 @@ def search_artifacts_fts(
         return []
     matches = []
     for row in rows:
-        artifact_row = parse_json_object(row["data_json"])
+        artifact_row = parse_json_object(artifact_row_data_json(row))
         metadata = artifact_search_metadata(artifact_row)
         preview = str(row["summary"] or row["snippet"] or row["artifact_type"])
         matches.append(

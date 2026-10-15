@@ -938,7 +938,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     indicators.add_argument("run_output", help="Run output directory or rapidtriage-run-summary.json")
     indicators.add_argument("--output", default="rapidtriage-indicators.json", help="JSON output path")
-    indicators.add_argument("--limit", type=int, default=1000, help="Maximum number of indicators to keep")
+    indicators.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="Maximum number of indicators to keep (default 0 = uncapped; the cap is disclosed in summary.cap_policy)",
+    )
     indicators.add_argument("--max-sources", type=int, default=10, help="Maximum source references per indicator")
     indicators.add_argument("--ti-feed", action="append", help="Local JSON/CSV/TXT threat-intel feed for offline IOC enrichment")
     indicators.add_argument("--json", action="store_true", help="Print JSON to stdout")

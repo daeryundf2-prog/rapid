@@ -222,47 +222,75 @@ def filter_across_kinds(
     }
 
 
+# Row collections of the files output: ``candidates`` (selected categories)
+# and ``inventory`` (every other scanned file, parser-quality r2).
+FILES_COLLECTIONS = ("candidates", "inventory")
+FILES_OTHER_CATEGORY = "other"
+
+
+def file_row_categories(row: object, collection: str) -> list[str]:
+    """``categories`` of a files row; an inventory row without any counts as ``other``
+    (the files summary's ``inventory_category_counts`` uses the same rule)."""
+    values = row.get("categories") if isinstance(row, Mapping) else None
+    if isinstance(values, list) and values:
+        return [str(item) for item in values]
+    if collection == "inventory" and isinstance(row, Mapping):
+        return [FILES_OTHER_CATEGORY]
+    return []
+
+
+def files_page_base(payload: Mapping[str, object], collection: str) -> dict[str, object]:
+    """``payload`` without the row collections, plus ``collection`` (never both lists)."""
+    page = {key: value for key, value in payload.items() if key not in FILES_COLLECTIONS}
+    rows = payload.get(collection)
+    page[collection] = rows if isinstance(rows, list) else []
+    return page
+
+
 def filter_files_by_category(
     payload: Mapping[str, object],
     categories: Collection[str],
     *,
     offset: int,
     limit: int,
+    collection: str = "candidates",
     scan_cap: int = ARTIFACT_PATH_FILTER_SCAN_CAP,
 ) -> dict[str, object]:
-    """Files page of candidates whose ``categories`` intersect ``categories``.
+    """Files page of ``collection`` rows whose ``categories`` intersect ``categories``.
 
-    The candidates are already in memory, so the scan runs to the end (or
-    ``scan_cap``) and ``matched`` is exact unless ``truncated``. ``limit=0``
-    returns every match. Rows carry ``record_index`` = their position in the
-    files output (locator ``/candidates/<record_index>``).
+    ``collection`` is ``candidates`` (default) or ``inventory``. The rows are
+    already in memory, so the scan runs to the end (or ``scan_cap``) and
+    ``matched`` is exact unless ``truncated``. ``limit=0`` returns every
+    match. Rows carry ``record_index`` = their position in that collection of
+    the files output (locator ``/<collection>/<record_index>``). The page
+    holds only ``collection``'s rows (the other list is dropped).
     """
     wanted = frozenset(categories)
-    candidates = payload.get("candidates")
-    candidates = candidates if isinstance(candidates, list) else []
+    source = payload.get(collection)
+    source = source if isinstance(source, list) else []
     rows: list[object] = []
     matched = 0
     scanned = 0
     exhausted = True
-    for record_index, row in enumerate(candidates):
+    for record_index, row in enumerate(source):
         if scanned >= scan_cap:
             exhausted = False
             break
         scanned += 1
-        values = row.get("categories") if isinstance(row, Mapping) else None
-        if not isinstance(values, list) or wanted.isdisjoint(str(item) for item in values):
+        values = file_row_categories(row, collection)
+        if not values or wanted.isdisjoint(values):
             continue
         if matched >= offset and (limit <= 0 or len(rows) < limit):
             rows.append({**row, "record_index": record_index})
         matched += 1
     total = matched if exhausted else None
     has_more = (offset + len(rows) < matched) if limit > 0 else False
-    page = {key: value for key, value in payload.items() if key != "candidates"}
-    page["candidates"] = rows
-    page["record_count"] = len(candidates)
+    page = files_page_base(payload, collection)
+    page[collection] = rows
+    page["record_count"] = len(source)
     page["matched"] = total
     page["pagination"] = {
-        "collection": "candidates",
+        "collection": collection,
         "offset": offset,
         "limit": limit,
         "returned": len(rows),

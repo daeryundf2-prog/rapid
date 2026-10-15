@@ -115,6 +115,23 @@ def write_run_checkpoints(
         integrity_profile=integrity_profile,
         decision_manifest=decision_manifest,
     )
+    # Per-stage gates were computed when the stage was recorded (before its
+    # output was written, before the file-level manifest/plan existed), so
+    # they listed checks this very file satisfies as missing. Recompute them
+    # against the refreshed record and this file's manifest/plan.
+    checkpoints = [
+        {
+            **item,
+            "core_accuracy_gates": checkpoint_resume_core_accuracy_gates(
+                checkpoints=[item],
+                resume_requested=resume_requested,
+                resume_effective=resume_effective,
+                decision_manifest_hash=decision_manifest["manifest_hash"],
+                validation_plan=validation_plan,
+            ),
+        }
+        for item in checkpoints
+    ]
     payload = {
         "command": "run-checkpoints",
         "generated_at": dt.datetime.now().isoformat(),

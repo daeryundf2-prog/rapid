@@ -84,6 +84,12 @@
             "string",
             "null"
           ]
+        },
+        "size_caps": {
+          "type": [
+            "object",
+            "null"
+          ]
         }
       }
     },

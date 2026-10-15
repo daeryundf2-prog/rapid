@@ -32,6 +32,11 @@ class RunProfile:
     scan_root_parts: tuple[str, ...] = ()
     preferred_locations: tuple[str, ...] = ()
     artifacts_kinds: tuple[str, ...] = ()
+    # Parser-quality r2: every scanned file (category "other" included) gets
+    # a lightweight inventory row (path/size/times/category/attributes) so
+    # events and artifacts link to a file_record; only the selected
+    # ``file_scan_categories`` are hashed/scanned as candidates.
+    inventory_all_files: bool = True
 
 
 RUN_PROFILES: dict[str, RunProfile] = {

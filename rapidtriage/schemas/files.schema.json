@@ -229,6 +229,36 @@
         },
         "mismatch_candidates_truncated": {
           "type": "boolean"
+        },
+        "signature_population": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "hashed_candidate_count": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "inventory_count": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "inventory_category_counts": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "inventory_note": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     },
@@ -536,6 +566,18 @@
               "array",
               "null"
             ]
+          },
+          "hashes": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "hash_scope": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       }
@@ -780,6 +822,12 @@
     },
     "file_exclusions": {
       "type": "object"
+    },
+    "inventory": {
+      "type": [
+        "array",
+        "null"
+      ]
     }
   }
 }

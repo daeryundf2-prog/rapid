@@ -83,6 +83,7 @@ from ..files import (
     enable_evidence_path_cache,
     run_files_scan,
 )
+from ..filetime import parse_iso_utc
 from ..forensic_accuracy import build_accuracy_gate
 from ..incremental import (
     EVIDENCE_DELTA_MANIFEST_NAME,
@@ -114,6 +115,7 @@ from ..silent_failure import build_silent_failure_report
 from ..timeline import (
     build_timeline_report,
     run_timeline,
+    write_timeline_result,
 )
 from ..virtual_disk import (
     VirtualDiskExtractionError,
@@ -497,6 +499,65 @@ def run_triage_mode(
     return summary_payload
 
 
+# Run-pipeline indicator cap: ``None`` = uncapped (the CLI ``indicators
+# --limit N`` caps explicitly). Disclosed in the indicators summary.
+RUN_MAX_INDICATORS: int | None = None
+
+
+def timeline_reference_time(
+    fingerprint: Mapping[str, object],
+    run_started_at: dt.datetime,
+    files_payload: Mapping[str, object] | None = None,
+) -> tuple[dt.datetime, str]:
+    """Upper bound reference for timeline plausibility (+1 day is added).
+
+    No evidence time can be later than the newest file that holds it, so the
+    acquisition time is anchored, in order, to
+
+    1. ``acquisition``: the newest input mtime of a complete (untruncated)
+       run fingerprint;
+    2. ``acquisition-listing``: the newest ``source_file_mtime`` of the files
+       stage listing (candidates + inventory) of an acquisition copy when that
+       scan was not capped (``limit_reached`` false);
+    3. ``run-start``: the run start otherwise (a truncated listing may have
+       missed newer files).
+
+    The chosen basis is recorded as the timeline ``valid_range.max_basis``.
+    """
+    summary = fingerprint.get("summary") if isinstance(fingerprint.get("summary"), Mapping) else {}
+    latest = summary.get("latest_mtime_epoch") if isinstance(summary, Mapping) else None
+    if isinstance(latest, (int, float)) and latest > 0 and not summary.get("truncated"):
+        try:
+            acquired = dt.datetime.fromtimestamp(float(latest), dt.timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            acquired = None
+        if acquired is not None and acquired <= run_started_at:
+            return acquired, "acquisition"
+    listed = files_listing_latest_mtime(files_payload)
+    if listed is not None and listed <= run_started_at:
+        return listed, "acquisition-listing"
+    return run_started_at, "run-start"
+
+
+def files_listing_latest_mtime(files_payload: Mapping[str, object] | None) -> dt.datetime | None:
+    """Newest acquisition-copy ``source_file_mtime`` of an uncapped files listing."""
+    if not isinstance(files_payload, Mapping):
+        return None
+    summary = files_payload.get("summary") if isinstance(files_payload.get("summary"), Mapping) else {}
+    if not isinstance(summary, Mapping) or summary.get("limit_reached") or summary.get("time_origin") != "acquisition-copy":
+        return None
+    latest: dt.datetime | None = None
+    for key in ("candidates", "inventory"):
+        rows = files_payload.get(key)
+        for row in rows if isinstance(rows, list) else ():
+            if not isinstance(row, Mapping):
+                continue
+            parsed = parse_iso_utc(row.get("source_file_mtime"))
+            if parsed is not None and (latest is None or parsed > latest):
+                latest = parsed
+    return latest
+
+
 def _run_triage_stages(
     input_root: InputRoot,
     image_result: E01ExtractionResult
@@ -539,6 +600,7 @@ def _run_triage_stages(
         [*profile.artifacts_kinds, *(provider_progress_key(provider) for provider in all_providers())]
     )
     progress.begin_stage("fingerprint")
+    run_started_at = dt.datetime.now(dt.timezone.utc)
     scan_root = resolve_scan_root(input_root.root_path, profile)
     scan_input_root = derive_child_input_root(input_root, scan_root)
     run_scan_limit = max(0, max_file_count)
@@ -840,6 +902,7 @@ def _run_triage_stages(
                 known_good_hash_feeds=known_good_hash_feeds,
                 hide_known_good=hide_known_good,
                 known_good_max_hash_bytes=known_good_max_hash_bytes,
+                inventory_all_files=profile.inventory_all_files,
             ),
         )
     else:
@@ -940,6 +1003,7 @@ def _run_triage_stages(
     finish_stage("extract")
 
     progress.begin_stage("timeline")
+    timeline_reference = timeline_reference_time(current_fingerprint, run_started_at, files_payload)
 
     timeline_payload, reused = load_or_build_json(
         timeline_path,
@@ -953,6 +1017,8 @@ def _run_triage_stages(
             docs_inputs=[docs_path],
             artifacts_inputs=list(artifact_outputs.values()),
             rule_set=rule_set,
+            reference_time=timeline_reference[0],
+            reference_basis=timeline_reference[1],
             input_payloads={
                 str(files_path.expanduser().resolve()): files_payload,
                 str(docs_path.expanduser().resolve()): docs_payload,
@@ -966,7 +1032,7 @@ def _run_triage_stages(
     if reused:
         reused_outputs.add("timeline")
     record_run_checkpoint(checkpoint_records, "timeline", timeline_path, reused=reused)
-    write_result(timeline_payload, timeline_path)
+    write_timeline_result(timeline_payload, timeline_path)
     timeline_report_path.write_text(build_timeline_report(timeline_payload), encoding="utf-8")
     finish_stage("timeline")
 
@@ -991,6 +1057,9 @@ def _run_triage_stages(
         producer=lambda: build_indicator_summary(
             {"outputs": {key: str(path) for key, path in provisional_outputs.items()}},
             rule_set=rule_set,
+            # Uncapped in a run (parser-quality r2): the CLI ``indicators
+            # --limit`` caps explicitly; the cap policy is disclosed.
+            max_indicators=RUN_MAX_INDICATORS,
             output_payloads={
                 "docs": docs_payload,
                 "files": files_payload,
@@ -1020,6 +1089,8 @@ def _run_triage_stages(
     else:
         docs_text_spool_path.unlink(missing_ok=True)
         case_db_record = skipped_case_db_record("disabled by --no-case-db")
+    if case_db_record.get("status") == "completed":
+        record_run_checkpoint(checkpoint_records, "persist", output_dir / CASE_DB_FILE_NAME, reused=False)
     finish_stage(
         "persist",
         {

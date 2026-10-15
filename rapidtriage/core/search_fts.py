@@ -28,6 +28,7 @@ import sqlite3
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
 
+from .case_db.schema import artifact_data_select_sql, artifact_row_data_json
 from .docs import build_preview
 from .json_stream import JsonStreamError, iter_array_items
 from .run.persist import CASE_DB_FILE_NAME
@@ -501,7 +502,7 @@ def _artifacts(connection: sqlite3.Connection, context: _SearchContext, scan: So
         operator = "=" if want_web else "!="
         filters = f" AND json_extract(a.data_json, '$.{ARTIFACT_SOURCE_LOCATOR_KEY}.output_name') {operator} ?"
     sql = (
-        f"SELECT a.id, a.artifact_type, a.data_json FROM {fts_from}artifact a"
+        f"SELECT a.id, a.artifact_type, {artifact_data_select_sql(connection, 'a')} FROM {fts_from}artifact a"
         f"{' ON a.id = f.rowid' if fts_from else ''} "
         f"WHERE {fts_where}a.evidence_source_id = ? AND a.parser_name != ?{filters} "
         f"ORDER BY {'f.rowid' if fts_from else 'a.id'}"
@@ -511,7 +512,7 @@ def _artifacts(connection: sqlite3.Connection, context: _SearchContext, scan: So
         sql_params.append(BROWSER_OUTPUT_NAME)
     for row in _iter_rows(connection, sql, sql_params, scan):
         try:
-            stored = json.loads(row["data_json"])
+            stored = json.loads(artifact_row_data_json(row))
         except (TypeError, ValueError):
             continue
         if not isinstance(stored, dict):
@@ -549,13 +550,14 @@ def _indicators(connection: sqlite3.Connection, context: _SearchContext, scan: S
     collector = context.collector
     fts_from, fts_where, params = _match_clause("artifact_fts", context.query)
     sql = (
-        f"SELECT a.id, a.data_json FROM {fts_from}artifact a{' ON a.id = f.rowid' if fts_from else ''} "
+        f"SELECT a.id, {artifact_data_select_sql(connection, 'a')} FROM {fts_from}artifact a"
+        f"{' ON a.id = f.rowid' if fts_from else ''} "
         f"WHERE {fts_where}a.evidence_source_id = ? AND a.parser_name = ? "
         f"ORDER BY {'f.rowid' if fts_from else 'a.id'}"
     )
     for row in _iter_rows(connection, sql, [*params, context.evidence_source_id, INDICATOR_PARSER_NAME], scan):
         try:
-            stored = json.loads(row["data_json"])
+            stored = json.loads(artifact_row_data_json(row))
         except (TypeError, ValueError):
             continue
         details = stored.get("details") if isinstance(stored, Mapping) else None

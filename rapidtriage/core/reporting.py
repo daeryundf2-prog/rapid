@@ -584,8 +584,11 @@ def build_processing_decision_rows(steps: object, processing: Mapping[str, objec
             rows.append(f"`{name}` skip reasons: {reasons}.")
         warning_messages = step.get("warning_messages")
         if isinstance(warning_messages, list):
+            # The step's own level word (notice/warning/failed), not "warning" for all.
+            level = str(step.get("warning_level") or "none")
+            level = "notice" if level == "none" else level
             for message in warning_messages[:3]:
-                rows.append(f"`{name}` warning: {message}")
+                rows.append(f"`{name}` {level}: {message}")
     return list(dict.fromkeys(rows))
 
 
@@ -726,13 +729,25 @@ def append_related_document_rows(lines: list[str], rows: object) -> None:
         lines.append("- none")
 
 
+def candidate_modified_text(item: Mapping[str, object]) -> str:
+    """Filesystem (evidence) modification time only; an acquisition-copy host
+    mtime is never printed as "modified"."""
+    fs_modified = item.get("fs_modified_at")
+    if fs_modified:
+        return f"modified={fs_modified}"
+    origin = str(item.get("modified_at_origin") or "")
+    if origin == "acquisition-copy" or "fs_modified_at" in item:
+        return "수정 시각: 취득 사본(원본 아님)"
+    return f"modified={item.get('modified_at')}"
+
+
 def append_candidate_rows(lines: list[str], rows: object) -> None:
     if isinstance(rows, list) and rows:
         for item in rows:
             if not isinstance(item, dict):
                 continue
             lines.append(
-                f"- `{item['path']}` categories={', '.join(item['categories'])} size={item['size']} modified={item['modified_at']}"
+                f"- `{item['path']}` categories={', '.join(item['categories'])} size={item['size']} {candidate_modified_text(item)}"
             )
     else:
         lines.append("- none")

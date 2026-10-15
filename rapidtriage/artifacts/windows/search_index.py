@@ -178,7 +178,7 @@ class WindowsSearchIndexProvider:
             records.extend(build_activity_style_row_records(inventory))
             seen.add(db_path.resolve())
 
-        for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
+        for path in sorted(iter_search_index_candidates(root), key=lambda item: str(item).lower()):
             if not path.is_file():
                 continue
             resolved = path.resolve()
@@ -211,6 +211,38 @@ class WindowsSearchIndexProvider:
         summary = build_search_index_summary(root, records)
         if summary is not None:
             yield summary
+
+
+def iter_search_index_candidates(root: Path) -> Iterable[Path]:
+    """Evidence paths that can yield a search-index record, by name only.
+
+    Parser-quality r2: the collector used to ``is_file()``/``resolve()``/
+    ``relative_to()`` every evidence path (19k stat + realpath calls on
+    run-subset8, 449 s under the threaded scheduler for 0 rows). Only
+    ``Windows.edb``/``Windows.db`` and export files whose suffix and relative
+    path match the export hints can produce rows, so everything else is
+    dropped with string checks before any filesystem call. The per-path
+    checks in ``collect`` are unchanged, so the yielded rows are identical.
+    """
+    root_text = str(root)
+    prefix_length = len(root_text.rstrip("\\/")) + 1
+    for path in iter_evidence_paths(root, "*"):
+        name = path.name.lower()
+        if name in ("windows.edb", "windows.db"):
+            yield path
+            continue
+        if path.suffix.lower() not in SUPPORTED_EXPORT_SUFFIXES:
+            continue
+        text = str(path)
+        if text.startswith(root_text):
+            lowered = text[prefix_length:].lower()
+        else:
+            try:
+                lowered = str(path.relative_to(root)).lower()
+            except ValueError:
+                lowered = text.lower()
+        if any(hint in lowered for hint in EXPORT_HINTS):
+            yield path
 
 
 def probe_edb_native_catalog(path: Path, *, max_bytes: int = 256 * 1024 * 1024) -> dict[str, object]:

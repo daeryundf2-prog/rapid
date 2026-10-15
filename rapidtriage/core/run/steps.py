@@ -11,6 +11,7 @@ from ..extract import extract_manifest_disabled
 __all__ = [
     "annotate_step",
     "apply_cap_disclosures",
+    "apply_row_truncation_warnings",
     "apply_silent_failure_verdicts",
     "build_extract_step",
     "build_silent_failure_step",
@@ -207,7 +208,111 @@ def build_step_rows(
         **{f"artifacts-{kind}": payload for kind, payload in artifact_payloads.items()},
     }
     apply_cap_disclosures(rows, payload_by_step)
+    apply_row_truncation_warnings(rows, timeline_payload=timeline_payload, docs_payload=docs_payload)
     return rows
+
+
+# --- row-level truncation (parser-quality r2) --------------------------------
+
+# Document text statuses that leave a document (partly) unindexed.
+DOCS_WARNING_TEXT_STATUSES: dict[str, str] = {
+    "too-large": "크기 상한 초과로 본문 미추출",
+    "binary-rejected": "비인쇄 문자 비율 초과로 본문 미색인",
+}
+
+
+def _row_truncation_message(kind: str, disclosure: Mapping[str, object]) -> str:
+    flags = disclosure.get("flag_counts") if isinstance(disclosure.get("flag_counts"), Mapping) else {}
+    counts = disclosure.get("count_fields") if isinstance(disclosure.get("count_fields"), Mapping) else {}
+    parts = [f"{name} {count}행" for name, count in list(flags.items())[:6]]
+    parts.extend(f"{name}={count}" for name, count in list(counts.items())[:4])
+    rows = int(disclosure.get("rows_with_truncation") or 0)
+    return f"{kind}: 행 단위 절단 {rows}행 — 원문 일부만 보존됨 ({', '.join(parts)})"
+
+
+SCAN_CAP_FLAGS = frozenset({"scan_capped", "capped"})
+
+
+def _scan_coverage_message(kind: str, coverage: Mapping[str, object]) -> str:
+    unscanned = int(coverage.get("unscanned") or 0)
+    total = int(coverage.get("candidates") or 0)
+    if coverage.get("reason") == "cpu-time-budget":
+        budget = coverage.get("cpu_budget_seconds")
+        reason = f"CPU 시간 예산{f' {budget:g}초' if isinstance(budget, (int, float)) else ''} 소진"
+    else:
+        reason = f"파일 수 상한 {coverage.get('max_files')}개" if coverage.get("max_files") else "스캔 상한"
+    return f"{kind}: 후보 {total}개 중 {unscanned}개 파일 미선별 ({reason})"
+
+
+def _without_scan_cap_flags(disclosure: Mapping[str, object]) -> dict[str, object]:
+    flags = disclosure.get("flag_counts") if isinstance(disclosure.get("flag_counts"), Mapping) else {}
+    kept = {name: count for name, count in flags.items() if str(name).rsplit(".", 1)[-1] not in SCAN_CAP_FLAGS}
+    rows = int(disclosure.get("rows_with_truncation") or 0)
+    if not kept:
+        rows = 0
+    return {**disclosure, "flag_counts": kept, "rows_with_truncation": rows}
+
+
+def apply_row_truncation_warnings(
+    rows: list[dict[str, object]],
+    *,
+    timeline_payload: Mapping[str, object],
+    docs_payload: Mapping[str, object],
+) -> None:
+    """Promote row-level truncation to ``warning_level=warning`` on its step.
+
+    Artifact rows disclose cuts with ``<field>_truncated: true`` (eventlog
+    text/event_data/script block/command line, prefetch inline reference
+    lists, jumplist streams), ``scan_capped`` (synthetic-media) or numeric
+    ``*_truncated_rows``/``*_truncated_count`` (eventlog-file rows); the
+    timeline pass counts them per kind (``input_row_truncation``). Documents
+    with ``too-large``/``binary-rejected`` text status are disclosed on the
+    docs step.
+    """
+    by_name = {str(row.get("name") or ""): row for row in rows}
+    timeline_summary = timeline_payload.get("summary") if isinstance(timeline_payload.get("summary"), Mapping) else {}
+    truncation = timeline_summary.get("input_row_truncation") if isinstance(timeline_summary, Mapping) else None
+    for kind, disclosure in (truncation.items() if isinstance(truncation, Mapping) else ()):
+        row = by_name.get(f"artifacts-{kind}")
+        if row is None or not isinstance(disclosure, Mapping):
+            continue
+        row["row_truncation"] = dict(disclosure)
+        coverage = disclosure.get("scan_coverage") if isinstance(disclosure.get("scan_coverage"), Mapping) else None
+        if coverage:
+            # A capped scan is "N of M files not scanned", not a truncated row.
+            _add_step_warning(row, _scan_coverage_message(str(kind), coverage), cap=f"scan-coverage:{kind}")
+            disclosure = _without_scan_cap_flags(disclosure)
+        if int(disclosure.get("rows_with_truncation") or 0) or disclosure.get("count_fields"):
+            _add_step_warning(row, _row_truncation_message(str(kind), disclosure), cap=f"row-truncation:{kind}")
+        elif int(disclosure.get("preview_only_rows") or 0) or disclosure.get("preview_count_fields"):
+            # Display previews only (EVTX message preview): disclosed, no warning.
+            message = (
+                f"{kind}: 표시용 미리보기 절단 {int(disclosure.get('preview_only_rows') or 0)}행 "
+                "(원본 레코드 값은 보존, 경고 아님)"
+            )
+            messages = row.setdefault("warning_messages", [])
+            if isinstance(messages, list) and message not in messages:
+                messages.append(message)
+            row["warning_level"] = highest_warning_level([str(row.get("warning_level") or "none"), "notice"])
+    docs_row = by_name.get("docs")
+    summary = docs_payload.get("summary") if isinstance(docs_payload.get("summary"), Mapping) else {}
+    status_counts = summary.get("text_status_counts") if isinstance(summary, Mapping) else None
+    if docs_row is not None and isinstance(status_counts, Mapping):
+        for status, label in DOCS_WARNING_TEXT_STATUSES.items():
+            count = int(status_counts.get(status) or 0)
+            if count:
+                _add_step_warning(docs_row, f"문서 {count}건: {label} ({status})", cap=f"docs:{status}")
+
+
+def _add_step_warning(row: dict[str, object], message: str, *, cap: str) -> None:
+    messages = row.setdefault("warning_messages", [])
+    if isinstance(messages, list) and message not in messages:
+        messages.append(message)
+    caps = row.setdefault("cap_disclosures", [])
+    if isinstance(caps, list) and cap not in caps:
+        caps.append(cap)
+    row["truncated"] = True
+    row["warning_level"] = highest_warning_level([str(row.get("warning_level") or "none"), "warning"])
 
 
 # --- cap / truncation disclosure (parser-quality r1) -------------------------

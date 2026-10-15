@@ -214,10 +214,13 @@ def build_run_summary(
             # Canonical counters — the UI must read every headline number from
             # this block instead of re-deriving counts with local formulas.
             "counts": {
-                "validation_issues": int(processing_summary.get("warning_count") or 0)
+                # Only warning-level items are issues; notices are counted apart.
+                "validation_issues": count_warning_levels(processing_summary.get("warnings") or [])[0]
                 + sum(int(step.get("parser_error_count") or 0) for step in step_rows),
+                "validation_notices": count_warning_levels(processing_summary.get("warnings") or [])[1],
                 "validation_issue_breakdown": {
-                    "step_warnings": int(processing_summary.get("warning_count") or 0),
+                    "step_warnings": count_warning_levels(processing_summary.get("warnings") or [])[0],
+                    "step_notices": count_warning_levels(processing_summary.get("warnings") or [])[1],
                     "parser_errors": sum(int(step.get("parser_error_count") or 0) for step in step_rows),
                 },
                 "outputs": len(outputs),
@@ -325,6 +328,7 @@ def build_run_disclosures(
             if files_summary.get("time_origin") == "acquisition-copy"
             else ""
         ),
+        "atime_note": ACCESS_TIME_NOTE,
         "timezone": dict(timezone),
         "registry_context": registry_context,
         "missing_tools": detect_missing_tools(),
@@ -345,6 +349,8 @@ def build_run_disclosures(
             "encrypted_count": docs_summary.get("encrypted_count"),
             "zero_text_count": docs_summary.get("zero_text_count"),
             "text_status_counts": docs_summary.get("text_status_counts", {}),
+            # Text-extraction byte caps (core/docs.py build_docs_size_cap_disclosure).
+            "size_caps": dict(docs_summary["size_caps"]) if isinstance(docs_summary.get("size_caps"), Mapping) else None,
         },
         "indicators": {
             "display_label": indicator_summary.get("display_label"),
@@ -352,6 +358,8 @@ def build_run_disclosures(
             "total_before_cap": indicator_summary.get("total_before_cap"),
             "truncated": indicator_summary.get("truncated"),
             "rule_status_message": indicator_summary.get("rule_status_message"),
+            # Indicator cap (core/indicators.py indicator_cap_policy).
+            "cap_policy": dict(indicator_summary["cap_policy"]) if isinstance(indicator_summary.get("cap_policy"), Mapping) else None,
         },
         "files": {
             "excluded_file_count": files_summary.get("excluded_file_count"),
@@ -359,6 +367,39 @@ def build_run_disclosures(
             "excluded_category_counts": files_summary.get("excluded_category_counts", {}),
         },
         "collection_notes": collection_notes,
+        "input_row_truncation": summarize_input_row_truncation(steps),
+    }
+
+
+def _count_values(value: object) -> int:
+    if not isinstance(value, Mapping):
+        return 0
+    return sum(int(item) for item in value.values() if isinstance(item, int) and not isinstance(item, bool))
+
+
+def summarize_input_row_truncation(steps: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    """Aggregate of the per-step ``row_truncation`` (core/run/steps.py).
+
+    ``payload_truncated_rows`` counts rows whose stored value is only part of
+    the original (plus ``*_truncated_rows``/``*_truncated_count`` counters);
+    any payload cut is ``level=warning``. ``preview_truncated_rows`` counts
+    display-preview cuts only (record value kept): ``level=notice``.
+    """
+    by_step: dict[str, dict[str, object]] = {}
+    payload_rows = 0
+    preview_rows = 0
+    for step in steps:
+        disclosure = step.get("row_truncation")
+        if not isinstance(disclosure, Mapping):
+            continue
+        by_step[str(step.get("name") or "")] = dict(disclosure)
+        payload_rows += int(disclosure.get("rows_with_truncation") or 0) + _count_values(disclosure.get("count_fields"))
+        preview_rows += int(disclosure.get("preview_only_rows") or 0) + _count_values(disclosure.get("preview_count_fields"))
+    return {
+        "payload_truncated_rows": payload_rows,
+        "preview_truncated_rows": preview_rows,
+        "level": "warning" if payload_rows else ("notice" if preview_rows else "none"),
+        "by_step": by_step,
     }
 
 
@@ -372,13 +413,19 @@ def derive_counts(payload: Mapping[str, object]) -> dict[str, object]:
     steps = [step for step in payload.get("steps", []) if isinstance(step, Mapping)] if isinstance(payload.get("steps"), list) else []
     outputs = payload.get("outputs") if isinstance(payload.get("outputs"), Mapping) else {}
     artifact_groups = inner.get("artifacts") if isinstance(inner.get("artifacts"), Mapping) else {}
-    step_warnings = int(processing.get("warning_count") or 0)
+    warning_rows = processing.get("warnings") if isinstance(processing.get("warnings"), list) else None
+    if warning_rows is not None:
+        step_warnings, step_notices = count_warning_levels(warning_rows)
+    else:
+        step_warnings, step_notices = int(processing.get("warning_count") or 0), 0
     parser_errors = sum(int(step.get("parser_error_count") or 0) for step in steps)
     indicators_step = next((step for step in steps if step.get("name") == "indicators"), {})
     return {
         "validation_issues": step_warnings + parser_errors,
+        "validation_notices": step_notices,
         "validation_issue_breakdown": {
             "step_warnings": step_warnings,
+            "step_notices": step_notices,
             "parser_errors": parser_errors,
         },
         "outputs": len(outputs),
@@ -393,6 +440,25 @@ def derive_counts(payload: Mapping[str, object]) -> dict[str, object]:
         "review_items": 0,
         "indicators": int(indicators_step.get("indicator_count") or 0),
     }
+
+
+def count_warning_levels(warnings: Sequence[object]) -> tuple[int, int]:
+    """``(warnings, notices)``: processing items at ``warning``/``failed``
+    level are validation issues; ``notice`` items are disclosures only."""
+    issues = notices = 0
+    for item in warnings:
+        level = str(item.get("level") or "") if isinstance(item, Mapping) else ""
+        if level in ("warning", "failed"):
+            issues += 1
+        elif level == "notice":
+            notices += 1
+    return issues, notices
+
+
+ACCESS_TIME_NOTE = (
+    "source_file_atime(마지막 접근 시각)은 호스트에서 마지막 접근 시각 갱신이 켜져 있으면 "
+    "이 도구가 파일을 읽은 시각을 반영할 수 있으므로 사용자 행위 증거로 쓰지 마십시오."
+)
 
 
 def build_processing_summary(
@@ -1180,8 +1246,9 @@ def infer_processing_profile_label(
     if max_extract_size_bytes or max_file_count:
         return "Standard - bounded extraction"
     if caps_applied:
-        # Parser/stage caps were hit: never call such a run "uncapped".
-        return "Deep - extraction without size limits (parser caps disclosed)"
+        # Parser/stage/row caps were hit: never call such a run "without size
+        # limits" (parser-quality r2).
+        return "Deep - parser/stage caps applied (disclosed)"
     return "Deep - extraction without size limits"
 
 
@@ -1266,6 +1333,8 @@ def summarize_file_candidates(candidates: object, *, limit: int) -> list[dict[st
                 "extension": candidate.get("extension"),
                 "size": candidate.get("size"),
                 "modified_at": candidate.get("modified_at"),
+                "fs_modified_at": candidate.get("fs_modified_at"),
+                "modified_at_origin": candidate.get("modified_at_origin") or candidate.get("time_origin"),
             }
         )
     return items
@@ -1286,6 +1355,8 @@ def summarize_large_file_candidates(candidates: object, *, limit: int) -> list[d
                 "categories": list(candidate.get("categories", [])),
                 "size": candidate.get("size"),
                 "modified_at": candidate.get("modified_at"),
+                "fs_modified_at": candidate.get("fs_modified_at"),
+                "modified_at_origin": candidate.get("modified_at_origin") or candidate.get("time_origin"),
             }
         )
     return items
@@ -1308,6 +1379,8 @@ def collect_preferred_candidates(candidates: object, *, preferred_locations: Seq
                 "categories": list(candidate.get("categories", [])),
                 "size": candidate.get("size"),
                 "modified_at": candidate.get("modified_at"),
+                "fs_modified_at": candidate.get("fs_modified_at"),
+                "modified_at_origin": candidate.get("modified_at_origin") or candidate.get("time_origin"),
             }
         )
     return selected

@@ -3968,8 +3968,8 @@
             "ole_streams": [],
             "ole_streams_truncated": false,
             "embedded_paths": [
-              "C:\\Users\\alice\\Documents\\Case Notes.docx",
-              "C:\\Users\\alice\\Documents\\Case Notes.docx\u0018C:\\Users\\alice\\Documents"
+              "C:\\Users\\alice\\Documents",
+              "C:\\Users\\alice\\Documents\\Case Notes.docx"
             ],
             "destination_count": 1,
             "destination_stream_count": 0,
@@ -3979,8 +3979,8 @@
                 "lnk_offset": 14,
                 "target_path": "C:\\Users\\alice\\Documents\\Case Notes.docx",
                 "embedded_paths": [
-                  "C:\\Users\\alice\\Documents\\Case Notes.docx",
-                  "C:\\Users\\alice\\Documents\\Case Notes.docx\u0018C:\\Users\\alice\\Documents"
+                  "C:\\Users\\alice\\Documents",
+                  "C:\\Users\\alice\\Documents\\Case Notes.docx"
                 ],
                 "target_created_at": "2024-03-05T06:08:09+00:00",
                 "target_accessed_at": "2024-03-05T06:08:09+00:00",
@@ -4602,8 +4602,8 @@
             "ole_streams": [],
             "ole_streams_truncated": false,
             "embedded_paths": [
-              "C:\\Users\\alice\\Downloads\\installer.exe",
-              "C:\\Users\\alice\\Downloads\\installer.exe\u0018C:\\Users\\alice\\Documents"
+              "C:\\Users\\alice\\Documents",
+              "C:\\Users\\alice\\Downloads\\installer.exe"
             ],
             "destination_count": 1,
             "destination_stream_count": 0,
@@ -4613,8 +4613,8 @@
                 "lnk_offset": 16,
                 "target_path": "C:\\Users\\alice\\Downloads\\installer.exe",
                 "embedded_paths": [
-                  "C:\\Users\\alice\\Downloads\\installer.exe",
-                  "C:\\Users\\alice\\Downloads\\installer.exe\u0018C:\\Users\\alice\\Documents"
+                  "C:\\Users\\alice\\Documents",
+                  "C:\\Users\\alice\\Downloads\\installer.exe"
                 ],
                 "target_created_at": "2024-03-05T06:09:10+00:00",
                 "target_accessed_at": "2024-03-05T06:09:10+00:00",
@@ -5338,8 +5338,8 @@
             "known_folder_ids": [],
             "environment_target": "",
             "embedded_paths": [
-              "C:\\Users\\alice\\Documents\\Case Notes.docx",
-              "C:\\Users\\alice\\Documents\\Case Notes.docx\u0018C:\\Users\\alice\\Documents"
+              "C:\\Users\\alice\\Documents",
+              "C:\\Users\\alice\\Documents\\Case Notes.docx"
             ],
             "description": "",
             "relative_path": "C:\\Users\\alice\\Documents\\Case Notes.docx",
@@ -5362,6 +5362,7 @@
                 "tracker_data": {
                   "parse_status": "parsed-candidate",
                   "machine_id": "ALICE-PC",
+                  "machine_id_encoding": "ascii",
                   "droid_volume_identifier": "12345678-1234-5678-90ab-cdef12345678",
                   "droid_file_identifier": "87654321-09ba-dcfe-1032-547698badcfe",
                   "birth_droid_volume_identifier": "89abcdef-4567-0123-1032-547698badcfe",
@@ -5377,6 +5378,7 @@
             "tracker_data": {
               "parse_status": "parsed-candidate",
               "machine_id": "ALICE-PC",
+              "machine_id_encoding": "ascii",
               "droid_volume_identifier": "12345678-1234-5678-90ab-cdef12345678",
               "droid_file_identifier": "87654321-09ba-dcfe-1032-547698badcfe",
               "birth_droid_volume_identifier": "89abcdef-4567-0123-1032-547698badcfe",
@@ -6060,8 +6062,8 @@
               "target_and_string_data": {
                 "target_path": "C:\\Users\\alice\\Documents\\Case Notes.docx",
                 "embedded_paths": [
-                  "C:\\Users\\alice\\Documents\\Case Notes.docx",
-                  "C:\\Users\\alice\\Documents\\Case Notes.docx\u0018C:\\Users\\alice\\Documents"
+                  "C:\\Users\\alice\\Documents",
+                  "C:\\Users\\alice\\Documents\\Case Notes.docx"
                 ],
                 "description": "",
                 "relative_path": "C:\\Users\\alice\\Documents\\Case Notes.docx",
@@ -14239,6 +14241,15 @@
             "timestamp_status_counts": [],
             "timestamp_out_of_range_count": 0,
             "slack_duplicate_row_count": 0,
+            "text_truncated_rows": 0,
+            "payload_truncated_rows": 0,
+            "text_truncated_files": [],
+            "text_truncated_field_counts": [],
+            "triage_text_limits": {
+              "preview_max_chars": 512,
+              "payload_max_chars": 65536
+            },
+            "stale_below_first_record_count": 0,
             "native_capabilities": {
               "record_header": true,
               "file_header": true,

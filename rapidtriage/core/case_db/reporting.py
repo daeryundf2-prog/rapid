@@ -41,6 +41,7 @@ from .review import (
     normalize_source_citation_package,
     source_citation_package_hash,
 )
+from .schema import artifact_data_select_sql, artifact_row_data_json
 from .search import (
     enrich_case_search_matches,
     merge_source_citation_package_into_reference,
@@ -290,8 +291,8 @@ def build_synthetic_media_summary(
     must never be presented as proof that media is or is not synthetic.
     """
     rows = connection.execute(
-        """
-        SELECT citation_id, artifact_type, data_json
+        f"""
+        SELECT citation_id, artifact_type, {artifact_data_select_sql(connection)}
         FROM artifact
         WHERE case_id = ? AND artifact_type LIKE 'synthetic-media-%'
         ORDER BY id ASC
@@ -311,7 +312,7 @@ def build_synthetic_media_summary(
     for row in rows:
         artifact_type = str(row["artifact_type"] or "")
         artifact_type_counts[artifact_type] = artifact_type_counts.get(artifact_type, 0) + 1
-        details = artifact_details(parse_json_object(row["data_json"]))
+        details = artifact_details(parse_json_object(artifact_row_data_json(row)))
         scan_status = str(details.get("scan_status") or "")
         if scan_status:
             scan_status_counts[scan_status] = scan_status_counts.get(scan_status, 0) + 1

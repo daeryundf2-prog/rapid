@@ -587,6 +587,25 @@ TIME_ORIGIN_ACQUISITION_COPY = "acquisition-copy"
 TIME_ORIGIN_LISTING = "listing"
 FILESYSTEM_TIME_INPUT_KINDS = frozenset({"live", "mounted-image"})
 EXCLUSION_CATEGORY_NOT_SELECTED = "category-not-selected"
+DELETION_STATE_UNKNOWN = "unknown"
+INVENTORY_NOTE = (
+    "선택되지 않은 범주(기타 포함)의 파일도 경로·크기·시각·범주·속성만 inventory에 기록합니다 "
+    "(해시·내용 스캔은 선택 범주만). 케이스 DB file_record와 이벤트·아티팩트 연결에 쓰입니다."
+)
+
+
+def deletion_state_for(is_deleted: bool | None) -> str:
+    """``recovery.deletion_state`` that agrees with ``is_deleted`` (None = unknown)."""
+    if is_deleted is True:
+        return "deleted"
+    if is_deleted is False:
+        return "allocated"
+    return DELETION_STATE_UNKNOWN
+
+
+def sync_deletion_state(candidate: FileCandidate) -> None:
+    if isinstance(candidate.recovery, dict):
+        candidate.recovery["deletion_state"] = deletion_state_for(candidate.is_deleted)
 
 
 class FileScanError(ValueError):
@@ -608,7 +627,10 @@ def run_files_scan(
     known_good_hash_feeds: Sequence[str | Path] | None = None,
     hide_known_good: bool = False,
     known_good_max_hash_bytes: int = DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES,
+    inventory_all_files: bool = False,
 ) -> dict[str, object]:
+    """Scan files; ``inventory_all_files`` also records every non-candidate
+    file in ``inventory`` (lightweight rows for the case DB file_record)."""
     input_root = resolve_input_root(root, kind=input_kind)
     selected_categories = normalize_categories(categories)
     normalized_name_filters = normalize_text_filters(name_contains)
@@ -619,6 +641,7 @@ def run_files_scan(
 
     time_origin = file_time_origin_for_input_kind(input_root.kind)
     exclusions: dict[str, object] = {}
+    inventory: list[dict[str, object]] | None = [] if inventory_all_files else None
     candidates, scanned_files = scan_file_candidates(
         input_root.root_path,
         categories=selected_categories,
@@ -630,6 +653,7 @@ def run_files_scan(
         limit=limit,
         time_origin=time_origin,
         exclusions=exclusions,
+        inventory=inventory,
     )
 
     known_good_index = load_known_good_hash_feeds(known_good_hash_feeds or [])
@@ -642,7 +666,7 @@ def run_files_scan(
     visible_candidates = known_good_result["visible_candidates"]
     candidate_payloads = known_good_result["candidate_payloads"]
     known_good_profile = known_good_result["profile"]
-    signature_result = apply_file_signature_profile(visible_candidates, candidate_payloads)
+    signature_result = apply_file_signature_profile(visible_candidates, candidate_payloads, inventory=inventory or ())
     signature_profile = signature_result["profile"]
 
     category_counts = {category: 0 for category in selected_categories}
@@ -656,7 +680,15 @@ def run_files_scan(
     copy_mtime_values = [candidate.source_file_mtime for candidate in visible_candidates if candidate.source_file_mtime]
     duplicate_stats: dict[str, object] = {}
     fuzzy_stats: dict[str, object] = {}
-    duplicate_groups = build_duplicate_content_groups(visible_candidates, stats=duplicate_stats)
+    hashes_by_path: dict[str, dict[str, str]] = {}
+    duplicate_groups = build_duplicate_content_groups(visible_candidates, stats=duplicate_stats, hashes_by_path=hashes_by_path)
+    # Hashes computed for duplicate detection are recorded on the candidate
+    # (case DB file_record/hash_record use them; nothing is hashed twice).
+    for candidate, candidate_payload in zip(visible_candidates, candidate_payloads):
+        hashes = hashes_by_path.get(candidate.path)
+        if hashes and not candidate_payload.get("hashes"):
+            candidate_payload["hashes"] = dict(hashes)
+            candidate_payload["hash_scope"] = "file-content"
     fuzzy_text_groups = build_fuzzy_text_duplicate_groups(visible_candidates, stats=fuzzy_stats)
     time_provenance = build_file_time_provenance(visible_candidates, time_origin=time_origin, input_kind=input_root.kind)
     duplicate_content_manifest = build_duplicate_content_manifest(
@@ -723,6 +755,15 @@ def run_files_scan(
             "signature_checked_count": signature_profile["checked_count"],
             "signature_mismatch_count": signature_profile["mismatch_count"],
             "signature_unrecognized_known_extension_count": signature_profile["unrecognized_known_extension_count"],
+            "signature_population": signature_profile.get("population"),
+            "hashed_candidate_count": sum(1 for item in candidate_payloads if item.get("hashes")),
+            "inventory_count": len(inventory) if inventory is not None else None,
+            "inventory_category_counts": (
+                dict(Counter(category for record in inventory for category in record.get("categories") or [OTHER_CATEGORY]))
+                if inventory is not None
+                else None
+            ),
+            "inventory_note": INVENTORY_NOTE if inventory is not None else None,
             "commercial_gap_ids": [
                 HASH_CACHE_GAP_ID,
                 DEDUPLICATE_CONTENT_GAP_ID,
@@ -756,6 +797,8 @@ def run_files_scan(
         "fuzzy_text_duplicate_groups": fuzzy_text_groups,
         "candidates": candidate_payloads,
     }
+    if inventory is not None:
+        payload["inventory"] = inventory
     if rule_set is not None:
         annotate_files_payload(payload, rule_set)
     return payload
@@ -801,12 +844,16 @@ def scan_file_candidates(
     limit: int,
     time_origin: str = TIME_ORIGIN_ACQUISITION_COPY,
     exclusions: dict[str, object] | None = None,
+    inventory: list[dict[str, object]] | None = None,
 ) -> tuple[list[FileCandidate], int]:
     """Walk ``root`` and return profile-matched candidates plus the scanned count.
 
     ``exclusions`` (optional, filled in place) receives the disclosure of
     every scanned file that did not become a candidate:
     ``{"total": n, "reasons": {reason: n}, "category_not_selected": {category: n}}``.
+    ``inventory`` (optional list, filled in place) receives a lightweight
+    record (path, size, times, all categories incl. ``other``, attributes,
+    deletion state) for every scanned file that is not a candidate.
     """
     candidates: list[FileCandidate] = []
     scanned_files = 0
@@ -839,7 +886,27 @@ def scan_file_candidates(
             return "modified-filter"
         return None
 
-    def classify_and_build(path: Path, entry_stat: os.stat_result) -> FileCandidate | None:
+    def add_inventory(path: Path, entry_stat: os.stat_result, classification, reason: str, relative_key: str) -> None:
+        if inventory is None:
+            return
+        record = build_file_candidate(
+            path,
+            entry_stat,
+            list(classification[0]) or [OTHER_CATEGORY],
+            root=root,
+            time_origin=time_origin,
+            classification=classification,
+        )
+        if record is None:
+            return
+        if inode_index:
+            inode = inode_index.get(relative_key)
+            listing = listing_times.get(inode) if inode is not None else None
+            if listing:
+                apply_listing_times(record, listing)
+        inventory.append(file_inventory_record(record, reason=reason))
+
+    def classify_and_build(path: Path, entry_stat: os.stat_result, relative_key: str = "") -> FileCandidate | None:
         classification = classify_file_categories(path, root=root)
         candidate = build_file_candidate(
             path,
@@ -854,8 +921,12 @@ def scan_file_candidates(
             for category in classification[0]:
                 if category not in selected:
                     not_selected_counts[category] += 1
+            add_inventory(path, entry_stat, classification, EXCLUSION_CATEGORY_NOT_SELECTED, relative_key)
+        else:
+            candidate_classification[candidate.path] = classification
         return candidate
 
+    candidate_classification: dict[str, object] = {}
     limit_reached = False
     while pending:
         current = pending.pop()
@@ -882,13 +953,17 @@ def scan_file_candidates(
                     if on_disk_keys is not None:
                         relative_key = normalize_relative_key(entry.path[len(root_text) :])
                         on_disk_keys.add(relative_key)
-                    candidate = classify_and_build(Path(entry.path), entry_stat)
+                    candidate = classify_and_build(Path(entry.path), entry_stat, relative_key)
                     if candidate is None:
                         continue
                     reason = filter_reason(candidate)
                     if reason is not None:
                         reason_counts[reason] += 1
+                        classification = candidate_classification.pop(candidate.path, None)
+                        if classification is not None:
+                            add_inventory(Path(entry.path), entry_stat, classification, reason, relative_key)
                         continue
+                    candidate_classification.pop(candidate.path, None)
                     if inode_index:
                         inode = inode_index.get(relative_key)
                         if inode is not None:
@@ -914,6 +989,12 @@ def scan_file_candidates(
                 if normalize_relative_key(sidecar.relative_path) in (on_disk_keys or ()):
                     continue
             candidate = build_sidecar_file_candidate(root, sidecar, categories)
+            if candidate is not None and candidate.is_deleted is None and sidecar.inode is not None:
+                # Deletion state comes from the fls listing of the same inode.
+                listing = listing_times.get(sidecar.inode)
+                if listing and isinstance(listing.get("deleted"), bool):
+                    candidate.is_deleted = bool(listing["deleted"])
+                    sync_deletion_state(candidate)
             if candidate is None:
                 reason_counts[EXCLUSION_CATEGORY_NOT_SELECTED] += 1
                 continue
@@ -938,6 +1019,41 @@ def scan_file_candidates(
             }
         )
     return candidates, scanned_files
+
+
+INVENTORY_RECORD_KEYS: tuple[str, ...] = (
+    "path",
+    "name",
+    "extension",
+    "size",
+    "relative_path",
+    "categories",
+    "time_origin",
+    "modified_at_origin",
+    "source_file_mtime",
+    "source_file_ctime",
+    "source_file_atime",
+    "fs_modified_at",
+    "fs_created_at",
+    "fs_accessed_at",
+    "fs_changed_at",
+    "attributes",
+    "attributes_origin",
+    "is_deleted",
+)
+
+
+def file_inventory_record(candidate: FileCandidate, *, reason: str) -> dict[str, object]:
+    """Lightweight inventory row for a scanned file that is not a candidate."""
+    data = candidate.to_dict()
+    record = {key: data.get(key) for key in INVENTORY_RECORD_KEYS}
+    record["inventory_only"] = True
+    record["inventory_reason"] = reason
+    record["deletion_state"] = deletion_state_for(candidate.is_deleted)
+    mft_ref = candidate.recovery.get("mft_ref") if isinstance(candidate.recovery, Mapping) else None
+    if mft_ref is not None:
+        record["mft_ref"] = mft_ref
+    return record
 
 
 def _naive_local_datetime(epoch: float) -> dt.datetime:
@@ -993,7 +1109,7 @@ def build_sidecar_file_candidate(root: Path, sidecar: SidecarFile, categories: S
     candidate.recovery = build_recovery_record(
         CANDIDATE_KIND_EXISTING,
         confidence=confidence,
-        deletion_state="allocated",
+        deletion_state=deletion_state_for(candidate.is_deleted),
         source_id=sidecar.source_id,
         source_path=sidecar.content_path or str(path),
         source_record_id=sidecar.inode,
@@ -1717,96 +1833,148 @@ def first_known_good_hash_match(
 def apply_file_signature_profile(
     candidates: Sequence[FileCandidate],
     candidate_payloads: Sequence[dict[str, object]],
+    *,
+    inventory: Sequence[dict[str, object]] = (),
 ) -> dict[str, object]:
+    """Extension/header signature check shared with ``windows-filesystem``.
+
+    Parser-quality r2: the rule set and the population match the
+    ``file-signature-mismatch`` artifact (same sniffer, same skips, same
+    mismatch directions: magic not expected for the extension, expected
+    signature missing, strong magic behind an extension without a rule), and
+    inventory rows (non-candidate files) are checked too, so both counts
+    agree on the same scan root. ``population`` discloses what was checked.
+    """
     checked_count = 0
     mismatch_candidates: list[dict[str, object]] = []
     unrecognized_known_extension_count = 0
     read_error_count = 0
+    skip_counts: Counter[str] = Counter()
+    direction_counts: Counter[str] = Counter()
 
-    expected_by_extension, sniff = _shared_signature_rules()
-    for candidate, payload in zip(candidates, candidate_payloads):
-        expected = sorted(expected_by_extension.get(candidate.extension, set()))
-        signature = {
+    rules = _shared_signature_rules_full()
+    expected_by_extension = rules["expected"]
+
+    def check(path_text: str, name: str, extension: str) -> dict[str, object] | None:
+        nonlocal checked_count, unrecognized_known_extension_count, read_error_count
+        expected = sorted(expected_by_extension.get(extension, set()))
+        signature: dict[str, object] = {
             "status": "not-applicable",
             "detected": None,
             "expected": expected,
             "mismatch": False,
             "risk_flags": [],
         }
-        if not expected:
-            payload["file_signature"] = signature
-            continue
-        checked_count += 1
+        skip = _signature_skip_reason(name, extension)
+        if skip:
+            skip_counts[skip] += 1
+            return signature
+        if not expected and rules["sniff"] is None:
+            return signature
         try:
-            with Path(candidate.path).open("rb") as handle:
-                header = handle.read(SHARED_SIGNATURE_SCAN_BYTES if sniff is not None else MAX_SIGNATURE_HEADER_BYTES)
+            with Path(path_text).open("rb") as handle:
+                header = handle.read(SHARED_SIGNATURE_SCAN_BYTES if rules["sniff"] is not None else MAX_SIGNATURE_HEADER_BYTES)
         except OSError as exc:
             read_error_count += 1
-            payload["file_signature"] = {
-                **signature,
-                "status": "read-error",
-                "error": exc.__class__.__name__,
-            }
-            continue
-        detected = _sniff_signature(header, sniff)
-        if detected is None:
+            return {**signature, "status": "read-error", "error": exc.__class__.__name__}
+        if not header:
+            skip_counts["empty"] += 1
+            return signature
+        detected, basis = _sniff_signature_with_basis(header, rules["sniff"])
+        direction = ""
+        if expected:
+            checked_count += 1
+            if detected not in expected:
+                direction = "magic-not-expected-for-extension" if basis == "magic" else "extension-expected-signature-missing"
+        elif basis == "magic" and detected in rules["strict"]:
+            checked_count += 1
+            if extension not in rules["tolerated"].get(detected, frozenset()):
+                direction = "magic-not-expected-for-extension"
+        else:
+            return signature
+        if not direction:
+            return {**signature, "status": "signature-matches-extension", "detected": detected}
+        if direction == "extension-expected-signature-missing":
             unrecognized_known_extension_count += 1
-            payload["file_signature"] = {
-                **signature,
-                "status": "unrecognized-header-for-known-extension",
-                "risk_flags": ["signature-unrecognized"],
-            }
-            continue
-        mismatch = detected not in expected
-        status = "extension-signature-mismatch" if mismatch else "signature-matches-extension"
-        risk_flags = ["extension-signature-mismatch"] if mismatch else []
-        payload["file_signature"] = {
+        direction_counts[direction] += 1
+        risk_flags = ["extension-signature-mismatch", f"signature-mismatch:{direction}"]
+        return {
             **signature,
-            "status": status,
+            "status": "extension-signature-mismatch",
             "detected": detected,
-            "mismatch": mismatch,
+            "mismatch": True,
+            "mismatch_direction": direction,
             "risk_flags": risk_flags,
         }
-        if mismatch:
-            mismatch_candidates.append(
-                {
-                    "path": candidate.path,
-                    "name": candidate.name,
-                    "extension": candidate.extension,
-                    "size": candidate.size,
-                    "modified_at": candidate.modified_at,
-                    "expected": expected,
-                    "detected": detected,
-                    "risk_flags": risk_flags,
-                    "source_viewer_locator": {
-                        "source": "files",
-                        "path": candidate.path,
-                        "viewer": "file-header",
-                    },
-                    "forensic_review": {
-                        "status": "needs-review",
-                        "reason": "file extension does not match detected header signature",
-                        "report_use_warning": "Confirm with a second parser or manual hex review before report-grade use.",
-                    },
-                }
-            )
+
+    def record_mismatch(path_text: str, name: str, extension: str, size: object, modified_at: object, signature: Mapping[str, object]) -> None:
+        mismatch_candidates.append(
+            {
+                "path": path_text,
+                "name": name,
+                "extension": extension,
+                "size": size,
+                "modified_at": modified_at,
+                "expected": signature.get("expected"),
+                "detected": signature.get("detected"),
+                "mismatch_direction": signature.get("mismatch_direction"),
+                "risk_flags": signature.get("risk_flags"),
+                "source_viewer_locator": {"source": "files", "path": path_text, "viewer": "file-header"},
+                "forensic_review": {
+                    "status": "needs-review",
+                    "reason": "file extension does not match detected header signature",
+                    "report_use_warning": "Confirm with a second parser or manual hex review before report-grade use.",
+                },
+            }
+        )
+
+    for candidate, payload in zip(candidates, candidate_payloads):
+        signature = check(candidate.path, candidate.name, candidate.extension)
+        payload["file_signature"] = signature
+        if signature and signature.get("mismatch"):
+            record_mismatch(candidate.path, candidate.name, candidate.extension, candidate.size, candidate.modified_at, signature)
+    inventory_mismatches = 0
+    for record in inventory:
+        path_text = str(record.get("path") or "")
+        name = str(record.get("name") or Path(path_text).name)
+        extension = str(record.get("extension") or Path(path_text).suffix.lower())
+        signature = check(path_text, name, extension)
+        if signature and signature.get("status") not in ("not-applicable",):
+            record["file_signature"] = signature
+        if signature and signature.get("mismatch"):
+            inventory_mismatches += 1
+            record_mismatch(path_text, name, extension, record.get("size"), record.get("source_file_mtime") or record.get("fs_modified_at"), signature)
 
     mismatch_candidates_truncated = len(mismatch_candidates) > 200
     mismatch_head = mismatch_candidates[:200]
     profile_core = {
         "profile": "file-signature-mismatch-v1",
-        "profile_version": "file-signature-mismatch-v1",
+        "profile_version": "file-signature-mismatch-v2",
         "capability_id": "file-system-signature-mismatch",
         "commercial_gap_ids": [SIGNATURE_MISMATCH_GAP_ID],
         "checked_count": checked_count,
         "mismatch_count": len(mismatch_candidates),
+        "mismatch_direction_counts": dict(sorted(direction_counts.items())),
         "unrecognized_known_extension_count": unrecognized_known_extension_count,
         "read_error_count": read_error_count,
         "mismatch_candidates_truncated": mismatch_candidates_truncated,
-        "max_header_bytes": MAX_SIGNATURE_HEADER_BYTES,
+        "max_header_bytes": SHARED_SIGNATURE_SCAN_BYTES if rules["sniff"] is not None else MAX_SIGNATURE_HEADER_BYTES,
         "known_signature_count": len(SIGNATURE_RULES),
         "known_extensions": sorted(expected_by_extension),
-        "signature_table": "rapidtriage.artifacts.windows.filesystem" if sniff is not None else "core.files",
+        "signature_table": "rapidtriage.artifacts.windows.filesystem" if rules["sniff"] is not None else "core.files",
+        "population": {
+            "candidate_count": len(candidate_payloads),
+            "inventory_count": len(inventory),
+            "inventory_mismatch_count": inventory_mismatches,
+            "skip_counts": dict(sorted(skip_counts.items())),
+            "note": (
+                "windows-filesystem 시그니처 아티팩트와 같은 규칙(sniff_content_kind·건너뛰기·불일치 방향)으로 "
+                "후보와 inventory(비후보 파일)를 모두 검사합니다. 스캔 루트가 입력 루트와 다르면(프로필 scan_root) "
+                "모집단이 달라 두 수치가 다를 수 있습니다."
+                if inventory
+                else "후보 파일만 검사했습니다(inventory 미기록): windows-filesystem 아티팩트는 입력 전체 파일을 검사하므로 수치가 더 클 수 있습니다."
+            ),
+        },
         "policy": {
             "scope": "bounded first-bytes magic signature check during file inventory",
             "default_behavior": "flag mismatch but keep the file visible",
@@ -1826,33 +1994,48 @@ def apply_file_signature_profile(
     }
 
 
-SHARED_SIGNATURE_SCAN_BYTES = 4096
+def _signature_skip_reason(name: str, extension: str) -> str:
+    """Files the ``windows-filesystem`` signature scan skips (same population)."""
+    if name.startswith(("$I", "$R")):
+        return "recycle-bin-index-or-data"
+    if not extension:
+        return "extensionless"
+    if name.startswith("~$"):
+        return "office-owner-lock-file"
+    if name.startswith("._"):
+        return "appledouble-resource-fork"
+    return ""
 
 
-def _shared_signature_rules() -> tuple[Mapping[str, object], object]:
-    """Expected kinds per extension + sniffer shared with windows-filesystem (W3).
-
-    files.json and the ``file-signature-mismatch`` artifact then agree on
-    kind names and coverage (``.pf``/``.lnk`` included, extension-less files
-    skipped). Falls back to the local table when the provider is absent.
-    """
+def _shared_signature_rules_full() -> dict[str, object]:
     try:
         from ..artifacts.windows.filesystem import (
             SIGNATURE_EXPECTED_KINDS_BY_EXTENSION,
+            SIGNATURE_STRICT_MAGIC_KINDS,
+            SIGNATURE_TOLERATED_EXTENSIONS,
             sniff_content_kind,
         )
     except ImportError:  # pragma: no cover - provider package always ships with core
-        return EXPECTED_SIGNATURES_BY_EXTENSION, None
-    return SIGNATURE_EXPECTED_KINDS_BY_EXTENSION, sniff_content_kind
+        return {"expected": EXPECTED_SIGNATURES_BY_EXTENSION, "sniff": None, "strict": frozenset(), "tolerated": {}}
+    return {
+        "expected": SIGNATURE_EXPECTED_KINDS_BY_EXTENSION,
+        "sniff": sniff_content_kind,
+        "strict": SIGNATURE_STRICT_MAGIC_KINDS,
+        "tolerated": SIGNATURE_TOLERATED_EXTENSIONS,
+    }
 
 
-def _sniff_signature(header: bytes, sniff: object) -> str | None:
+def _sniff_signature_with_basis(header: bytes, sniff: object) -> tuple[str | None, str]:
     if sniff is None:
-        return detect_file_signature(header)
+        detected = detect_file_signature(header)
+        return detected, "magic" if detected else "unknown"
     result = sniff(header)  # type: ignore[operator]
-    if not isinstance(result, Mapping) or result.get("basis") != "magic":
-        return None
-    return str(result.get("kind") or "") or None
+    if not isinstance(result, Mapping):
+        return None, "unknown"
+    return str(result.get("kind") or "") or None, str(result.get("basis") or "")
+
+
+SHARED_SIGNATURE_SCAN_BYTES = 4096
 
 
 def detect_file_signature(header: bytes) -> str | None:
@@ -2041,7 +2224,9 @@ def build_file_candidate(
         recovery=build_recovery_record(
             CANDIDATE_KIND_EXISTING,
             confidence="high",
-            deletion_state="allocated",
+            # Corrected below from is_deleted: an acquisition copy does not
+            # say whether the original was allocated (unknown).
+            deletion_state=DELETION_STATE_UNKNOWN,
             source_id="filesystem-scan",
             source_path=str(path),
             limitation=(
@@ -2073,6 +2258,7 @@ def build_file_candidate(
         candidate.source_file_ctime = _epoch_to_iso(birth if birth is not None else entry_stat.st_ctime)
         candidate.modified_at_origin = TIME_ORIGIN_ACQUISITION_COPY
         candidate.attributes_origin = "host-copy" if candidate.attributes else ""
+    sync_deletion_state(candidate)
     return candidate
 
 
@@ -2111,6 +2297,7 @@ def apply_listing_times(candidate: FileCandidate, listing: Mapping[str, object])
         deleted = not listing["in_use"]
     if isinstance(deleted, bool):
         candidate.is_deleted = deleted
+    sync_deletion_state(candidate)
     attributes = listing.get("attributes")
     if isinstance(attributes, list) and all(isinstance(item, str) for item in attributes):
         candidate.attributes = list(attributes)
@@ -2217,8 +2404,12 @@ def build_duplicate_content_groups(
     max_files_to_hash: int = 0,
     max_groups: int = 0,
     stats: dict[str, object] | None = None,
+    hashes_by_path: dict[str, dict[str, str]] | None = None,
 ) -> list[dict[str, object]]:
     """Hash-identical groups among same-size candidates.
+
+    ``hashes_by_path`` (optional) receives ``{md5, sha1, sha256}`` of every
+    file hashed here.
 
     ``max_files_to_hash``/``max_groups`` default to 0 (no cap); files larger
     than ``max_hash_bytes`` are not hashed. Every skip is disclosed through
@@ -2245,7 +2436,14 @@ def build_duplicate_content_groups(
                 skipped_cap += 1
                 continue
             try:
-                sha256 = compute_hashes_cached(Path(candidate.path))["sha256"]
+                computed = compute_hashes_cached(Path(candidate.path))
+                sha256 = computed["sha256"]
+                if hashes_by_path is not None:
+                    hashes_by_path[candidate.path] = {
+                        algorithm: str(computed[algorithm])
+                        for algorithm in ("md5", "sha1", "sha256")
+                        if computed.get(algorithm)
+                    }
             except OSError:
                 hash_errors += 1
                 continue

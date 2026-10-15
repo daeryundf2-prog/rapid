@@ -736,7 +736,7 @@ class MemoryMinidumpTests(unittest.TestCase):
         ips = {pivot["value"]: pivot["evidence_strength"] for pivot in pivots if pivot["type"] == "ip"}
         for noise in ("1.3.6.1", "2.5.4.10", "10.0.19041.1", "1.2.840.113"):
             self.assertNotIn(noise, ips)
-        self.assertEqual(ips.get("2.25.0.24"), "weak")
+        self.assertNotIn("2.25.0.24", ips)  # version string / UUID OID arc: dropped (round 2)
         self.assertFalse([pivot for pivot in pivots if pivot["type"] in {"process-candidate", "suspicious-string"}])
         self.assertEqual(details["environment_variables"]["COMPUTERNAME"], ["진료실1"])
         self.assertNotIn("network-indicator", details["risk_flags"])
@@ -757,7 +757,7 @@ class MemoryMinidumpTests(unittest.TestCase):
         self.assertEqual(ipv4_indicator_strength("1.2.3.4", "v", "\x00"), "")
         self.assertEqual(ipv4_indicator_strength("127.0.0.1", "", ""), "")
         self.assertEqual(ipv4_indicator_strength("0.0.0.0", "", ""), "")
-        self.assertEqual(ipv4_indicator_strength("2.24.0.31", "", ""), "weak")
+        self.assertEqual(ipv4_indicator_strength("2.24.0.31", "", ""), "")
         self.assertEqual(ipv4_indicator_strength("192.168.0.100", " ", " "), "triage")
         self.assertEqual(ipv4_indicator_strength("203.0.113.9", "", ""), "triage")
         self.assertTrue(is_printf_template("http://%s/jk?c=%u"))
