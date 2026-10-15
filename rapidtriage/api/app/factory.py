@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
@@ -16,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from ...core.case_db import open_case_database
 from ...core.crash import write_crash_report
 from ...core.jobs import RunJobStore, default_job_store
-from .analyses import ANALYSIS_RUNNER
+from .analyses import ANALYSIS_RUNNER, COMPLETION_HOOKS
 from .constants import MUTATING_METHODS
 from .helpers import (
     allowed_api_hosts,
@@ -33,8 +34,24 @@ from .routes_meta import build_meta_router
 from .routes_reports import build_reports_router
 from .routes_runs import build_runs_router
 from .routes_search import build_search_router
+from .routes_search_index import build_search_index_router
+from .search_index_service import (
+    auto_build_on_completion,
+    auto_incremental_after_analysis,
+)
 
 ANALYSIS_POST_PATH = re.compile(r"/api/runs/[^/]+/analyses")
+
+
+def _without_surrogates(value: object) -> object:
+    """``value`` with lone surrogates backslash-escaped so the JSON response can be encoded."""
+    if isinstance(value, str):
+        return value.encode("utf-8", "backslashreplace").decode("utf-8")
+    if isinstance(value, list):
+        return [_without_surrogates(item) for item in value]
+    if isinstance(value, dict):
+        return {str(_without_surrogates(key)): _without_surrogates(item) for key, item in value.items()}
+    return value
 
 
 def create_app(
@@ -42,6 +59,7 @@ def create_app(
     auth_token: str | None = None,
     require_auth: bool | None = None,
     case_db_roots: Iterable[str | Path] | None = None,
+    auto_search_index: bool = False,
 ) -> FastAPI:
     store = job_store or default_job_store
     # Identifies this app's analyses in the process-wide runner.
@@ -55,13 +73,26 @@ def create_app(
 
     api = FastAPI(title="rapidtriage local API", version="0.2.0", lifespan=lifespan)
     api.state.analysis_owner = analysis_owner
+    if auto_search_index:
+        # Search index (plan search §0 결정 1): full build when a run completes, incremental
+        # update when another analysis completes. The served app (module-level ``app``)
+        # turns this on; embedded/test apps opt in. Named hook: a later app replaces it.
+        store.set_completion_hook(
+            "search-index", lambda run_store, job: auto_build_on_completion(run_store, job, owner=analysis_owner)
+        )
+        if auto_incremental_after_analysis not in COMPLETION_HOOKS:
+            COMPLETION_HOOKS.append(auto_incremental_after_analysis)
 
     @api.exception_handler(RequestValidationError)
     async def korean_analysis_body_errors(request: Request, exc: RequestValidationError):
         """Malformed ``POST /analyses`` bodies get Korean 422 messages; other routes keep FastAPI's."""
         if request.method == "POST" and ANALYSIS_POST_PATH.fullmatch(request.url.path):
             return JSONResponse(status_code=422, content={"detail": korean_body_errors(exc.errors())})
-        return await request_validation_exception_handler(request, exc)
+        try:
+            return await request_validation_exception_handler(request, exc)
+        except UnicodeEncodeError:
+            # A lone surrogate in the body (valid JSON escape, invalid text) must stay a 422, not a 500.
+            return JSONResponse(status_code=422, content={"detail": _without_surrogates(jsonable_encoder(exc.errors()))})
     static_dir = Path(__file__).resolve().parent.parent.parent / "web" / "static"
     auth_disabled = truthy_env("RAPIDTRIAGE_DISABLE_AUTH") or require_auth is False
     if auth_disabled and (auth_token or os.environ.get("RAPIDTRIAGE_AUTH_TOKEN")):
@@ -131,6 +162,7 @@ def create_app(
     api.include_router(build_ioc_router(store))
     api.include_router(build_media_router(store))
     api.include_router(build_search_router(store))
+    api.include_router(build_search_index_router(store, owner=analysis_owner))
     api.include_router(build_reports_router(store))
 
     if static_dir.is_dir():

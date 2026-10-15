@@ -74,6 +74,7 @@ from .runops import (
     build_run_output_preview,
     build_run_viewer_workflow_validation,
 )
+from .search_index_service import search_index_available
 from .timeline_hist import build_timeline_histogram
 from .tree import build_run_issues, build_run_tree
 
@@ -169,6 +170,7 @@ def build_runs_router(
             row = job.to_dict()
             # Cross-case dialog filter (plan P1 §3.2 cross-case): one stat, no DB open.
             row.update(cross_case_eligibility(job))
+            row["search_index_available"] = search_index_available(job)
             if job.status in ACTIVE_RUN_STATUSES:
                 # Compact live progress for the run card (full payload on
                 # GET /api/runs/{run_id}); finished runs skip the file read.
@@ -185,6 +187,7 @@ def build_runs_router(
         job = get_job(store, run_id)
         payload["progress"] = run_progress_payload(job)
         payload.update(cross_case_eligibility(job))
+        payload["search_index_available"] = search_index_available(job)
         return payload
 
 

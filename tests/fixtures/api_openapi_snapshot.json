@@ -64,6 +64,14 @@
     "/api/forensic-capabilities": {
       "get": "get_forensic_capabilities_api_forensic_capabilities_get"
     },
+    "/api/hash-sets": {
+      "get": "get_hash_sets_api_hash_sets_get",
+      "post": "upload_hash_set_api_hash_sets_post"
+    },
+    "/api/hash-sets/{hash_set_id}": {
+      "delete": "remove_hash_set_api_hash_sets__hash_set_id__delete",
+      "get": "get_hash_set_api_hash_sets__hash_set_id__get"
+    },
     "/api/health": {
       "get": "health_api_health_get"
     },
@@ -190,6 +198,33 @@
     },
     "/api/runs/{run_id}/search": {
       "get": "search_run_api_runs__run_id__search_get"
+    },
+    "/api/runs/{run_id}/search/count": {
+      "post": "search_count_api_runs__run_id__search_count_post"
+    },
+    "/api/runs/{run_id}/search/hashes": {
+      "post": "search_hashes_api_runs__run_id__search_hashes_post"
+    },
+    "/api/runs/{run_id}/search/history": {
+      "get": "get_search_history_api_runs__run_id__search_history_get"
+    },
+    "/api/runs/{run_id}/search/index": {
+      "get": "get_search_index_api_runs__run_id__search_index_get"
+    },
+    "/api/runs/{run_id}/search/index/build": {
+      "post": "build_search_index_api_runs__run_id__search_index_build_post"
+    },
+    "/api/runs/{run_id}/search/query": {
+      "post": "search_query_api_runs__run_id__search_query_post"
+    },
+    "/api/runs/{run_id}/search/saved": {
+      "get": "list_saved_searches_api_runs__run_id__search_saved_get",
+      "post": "create_saved_search_api_runs__run_id__search_saved_post"
+    },
+    "/api/runs/{run_id}/search/saved/{saved_id}": {
+      "delete": "delete_saved_search_api_runs__run_id__search_saved__saved_id__delete",
+      "get": "get_saved_search_api_runs__run_id__search_saved__saved_id__get",
+      "put": "update_saved_search_api_runs__run_id__search_saved__saved_id__put"
     },
     "/api/runs/{run_id}/source-email-attachment": {
       "get": "source_email_attachment_api_runs__run_id__source_email_attachment_get"

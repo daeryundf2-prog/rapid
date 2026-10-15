@@ -14,7 +14,9 @@ Every runner calls an existing core function and only adapts its output to
   (``find_ocr_result``);
 * ``memory-import`` -- ``MemoryVolatilityProvider.collect`` on a directory;
 * ``cross-case`` -- ``core.cross_case.correlate_case_databases`` over run
-  case databases.
+  case databases;
+* ``search-index`` -- ``core.search_index.build.build_search_index`` (the run's
+  ``rapidtriage-search.db``; full or incremental per analysis).
 """
 
 from __future__ import annotations
@@ -1703,6 +1705,61 @@ def run_cross_case(ctx: AnalysisContext) -> None:
     )
 
 
+# --- search-index ---------------------------------------------------------------------------
+
+
+class SearchIndexOptions(_Options):
+    mode: Literal["full", "incremental"] = "full"
+    analysis_ids: list[str] = Field(default_factory=list, max_length=200)
+
+    @field_validator("analysis_ids")
+    @classmethod
+    def _analysis_ids(cls, value: list[str]) -> list[str]:
+        for item in value:
+            if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", item or ""):
+                raise ValueError(f"분석 id 형식이 아닙니다: {item!r}")
+        return value
+
+
+def run_search_index(ctx: AnalysisContext) -> None:
+    """Build (``full``) or update (``incremental``) ``rapidtriage-search.db`` (plan search §3.0).
+
+    One progress unit per output file / analysis; the build checks for
+    cancellation every 500 rows. No result rows: the summary carries
+    ``doc_count``, ``by_domain``, ``text_bytes``, ``db_bytes``, ``elapsed_s``,
+    ``skipped`` and ``tokenizer``.
+    """
+    from ...core.artifact_domains import artifact_type_domain
+    from ...core.search_index.build import (
+        BuildHooks,
+        IndexSwapFailed,
+        build_search_index,
+    )
+
+    options: SearchIndexOptions = ctx.options  # type: ignore[assignment]
+    hooks = BuildHooks(
+        set_total=lambda total: ctx.set_total(total, unit="출력 파일", message="색인할 출력 파일을 셌습니다"),
+        advance=lambda message: ctx.advance(message=message),
+        check_cancel=ctx.check_cancel,
+    )
+    try:
+        summary = build_search_index(
+            ctx.scope.output_dir,
+            ctx.scope.summary,
+            run_id=ctx.scope.run_id,
+            mode=options.mode,
+            analysis_ids=options.analysis_ids,
+            hooks=hooks,
+            domain_of=artifact_type_domain,
+            load_state=ANALYSIS_RUNNER.load_state,
+        )
+    except IndexSwapFailed as exc:
+        # The old index stays; ``summary.status = build-failed-swap`` feeds GET …/search/index.
+        ctx.summary.update(exc.summary)
+        raise AnalysisFailure(exc.reason) from exc
+    ctx.summary.update(summary)
+
+
 # --- shared -------------------------------------------------------------------------------
 
 
@@ -1798,6 +1855,8 @@ _COMMON_LABELS = {
     "volatility_output_dir": "Volatility 출력 디렉터리",
     "case_ids": "비교 케이스",
     "max_shared": "최대 공유 지표 수",
+    "mode": "색인 방식",
+    "analysis_ids": "분석 id",
 }
 
 KIND_RUNNERS: dict[str, AnalysisSpec] = {
@@ -1815,5 +1874,6 @@ KIND_RUNNERS: dict[str, AnalysisSpec] = {
             "memory-import", "메모리(Volatility 가져오기)", "출력 파일", MemoryImportOptions, run_memory_import, prepare_memory_import, _COMMON_LABELS
         ),
         AnalysisSpec("cross-case", "교차 케이스", "케이스 쌍", CrossCaseOptions, run_cross_case, prepare_cross_case, _COMMON_LABELS),
+        AnalysisSpec("search-index", "검색 색인", "출력 파일", SearchIndexOptions, run_search_index, None, _COMMON_LABELS),
     )
 }

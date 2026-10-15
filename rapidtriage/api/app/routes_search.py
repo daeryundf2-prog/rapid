@@ -191,6 +191,9 @@ def build_search_router(
                 expanded_keywords=keywords,
             )
             attach_search_result_source_actions(payload, run_id)
+            # v1 scan search stays for the global box when a run has no index (plan search §3.3).
+            payload["deprecated"] = True
+            payload["successor"] = f"/api/runs/{run_id}/search/query"
             return payload
         except (SearchError, KeywordPackError) as exc:
             raise HTTPException(status_code=400, detail=str(exc))
