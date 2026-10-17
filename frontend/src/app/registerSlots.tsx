@@ -42,6 +42,7 @@ function TreeSlot() {
   return (
     <div className="pane-empty-block">
       <p className="pane-empty">열린 케이스가 없습니다.</p>
+      <CommandButton command="case.create" label="케이스 만들기…" />
       <CommandButton command="case.switch" label="케이스 열기…" />
       <CommandButton command="case.run-dialog" />
     </div>

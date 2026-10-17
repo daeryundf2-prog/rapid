@@ -1,12 +1,23 @@
 import { runSampleCase } from "../../api/runs";
 import type { Command } from "../../contracts/command";
 import { navigate, registerCommand } from "../tree/adapter";
+import { caseLinkOf } from "./caseLink";
 import { useCaseDialogs } from "./dialogs";
 import { EXPORT_ACTIONS, exportDisabledReason, performExport } from "./exports";
 import { useSearchState } from "./searchState";
 
 export const RUN_ACTIVE_REASON = "실행 중 런이 있습니다";
 const NO_CASE = "열린 케이스가 없습니다";
+export const NOT_LINKED_REASON = "케이스에 연결되지 않은 런입니다";
+const CASE_LINK_LOADING = "케이스 정보를 불러오는 중입니다";
+
+/** Reason a case-scoped command cannot run for the open run (undefined = linked to a case). */
+function caseOfRunReason(runId: string | null): string | undefined {
+  if (!runId) return NO_CASE;
+  const link = caseLinkOf(runId);
+  if (link === undefined) return CASE_LINK_LOADING;
+  return link ? undefined : NOT_LINKED_REASON;
+}
 
 export interface CaseCommandFacts {
   /** include-in-report rows (case-db + case json); undefined until loaded. */
@@ -32,8 +43,64 @@ export function buildCaseCommands(facts: CaseCommandFacts): Command[] {
       run: () => dialogs().openDialog("picker"),
     },
     {
+      id: "case.create",
+      label: "케이스 만들기…",
+      group: "case",
+      icon: "inbox",
+      run: () => dialogs().openDialog("create"),
+    },
+    {
+      id: "case.link",
+      label: "케이스에 연결…",
+      group: "case",
+      icon: "link",
+      disabledReason: (ctx) => {
+        if (!ctx.runId) return NO_CASE;
+        const link = caseLinkOf(ctx.runId);
+        if (link === undefined) return CASE_LINK_LOADING;
+        return link ? `이미 케이스 ${link.caseNumber}에 연결된 런입니다` : undefined;
+      },
+      run: (ctx) => {
+        if (ctx.runId) dialogs().openDialog("link", { runId: ctx.runId });
+      },
+    },
+    {
+      id: "case.edit",
+      label: "사건 정보 편집…",
+      group: "case",
+      disabledReason: (ctx) => caseOfRunReason(ctx.runId),
+      run: (ctx) => {
+        const link = caseLinkOf(ctx.runId);
+        if (link) dialogs().openDialog("case-edit", { caseId: link.caseId });
+      },
+    },
+    {
+      id: "case.evidence.add",
+      label: "증거 추가…",
+      group: "case",
+      disabledReason: (ctx) => caseOfRunReason(ctx.runId),
+      run: (ctx) => {
+        const link = caseLinkOf(ctx.runId);
+        if (link) dialogs().openDialog("evidence-add", { caseId: link.caseId });
+      },
+    },
+    {
+      id: "case.run.add",
+      label: "런 추가…",
+      group: "case",
+      disabledReason: (ctx) => (ctx.runIsActive ? RUN_ACTIVE_REASON : caseOfRunReason(ctx.runId)),
+      run: (ctx) => {
+        const link = caseLinkOf(ctx.runId);
+        if (link)
+          dialogs().openDialog("run-add", {
+            caseId: link.caseId,
+            evidenceCitationId: link.evidenceCitationId,
+          });
+      },
+    },
+    {
       id: "case.run",
-      label: "실행…",
+      label: "케이스 없이 빠른 런…",
       group: "case",
       icon: "play",
       disabledReason: (ctx) => (ctx.runIsActive ? RUN_ACTIVE_REASON : undefined),

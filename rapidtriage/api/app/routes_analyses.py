@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
@@ -68,8 +69,13 @@ class AnalysisCreateRequest(BaseModel):
     options: dict[str, Any] = Field(default_factory=dict)
 
 
-def korean_body_errors(errors: list[dict[str, Any]]) -> list[dict[str, object]]:
-    """Request-body validation errors of ``POST /analyses`` -> ``[{loc, msg, type}]`` in Korean."""
+def korean_body_errors(
+    errors: list[dict[str, Any]], extra_labels: Mapping[str, str] | None = None
+) -> list[dict[str, object]]:
+    """Request-body validation errors of ``POST /analyses`` -> ``[{loc, msg, type}]`` in Korean.
+
+    ``extra_labels`` adds Korean field names for other routes (case intake).
+    """
     messages = {
         "json_invalid": "요청 본문이 올바른 JSON이 아닙니다",
         "model_attributes_type": "요청 본문은 JSON 객체여야 합니다",
@@ -79,8 +85,9 @@ def korean_body_errors(errors: list[dict[str, Any]]) -> list[dict[str, object]]:
         "string_type": "{topic} 문자열이어야 합니다",
         "string_too_short": "{subject} 비어 있습니다",
         "string_too_long": "{subject} 너무 깁니다",
+        "literal_error": "{field} 값이 허용된 값이 아닙니다",
     }
-    labels = {"kind": "분석 종류(kind)", "options": "옵션(options)"}
+    labels = {"kind": "분석 종류(kind)", "options": "옵션(options)", **dict(extra_labels or {})}
     result: list[dict[str, object]] = []
     for error in errors:
         loc = [str(part) for part in error.get("loc", ())]

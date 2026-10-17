@@ -1,15 +1,38 @@
 import { create } from "zustand";
 import { pushToast } from "../../components/toastStore";
 
-export type CaseDialogName = "run" | "import" | "picker" | "doctor" | "report" | "delete";
+export type CaseDialogName =
+  | "run"
+  | "import"
+  | "picker"
+  | "doctor"
+  | "report"
+  | "delete"
+  // Case intake (AXIOM adoption E1).
+  | "create"
+  | "link"
+  | "case-edit"
+  | "evidence-add"
+  | "run-add"
+  | "problems";
+
+/** What a case-intake dialog acts on (case / evidence / run problems reason). */
+export interface CaseDialogTarget {
+  caseId?: string;
+  evidenceCitationId?: string;
+  runId?: string;
+  reasonId?: string;
+  reasonLabel?: string;
+}
 
 interface CaseDialogState {
   open: CaseDialogName | null;
   /** run id the delete confirmation applies to. */
   deleteRunId: string | null;
+  target: CaseDialogTarget;
   notice: string;
   noticeAssertive: boolean;
-  openDialog: (name: CaseDialogName) => void;
+  openDialog: (name: CaseDialogName, target?: CaseDialogTarget) => void;
   confirmDelete: (runId: string) => void;
   close: () => void;
   setNotice: (message: string, assertive?: boolean) => void;
@@ -18,11 +41,12 @@ interface CaseDialogState {
 export const useCaseDialogs = create<CaseDialogState>((set) => ({
   open: null,
   deleteRunId: null,
+  target: {},
   notice: "",
   noticeAssertive: false,
-  openDialog: (name) => set({ open: name }),
+  openDialog: (name, target = {}) => set({ open: name, target }),
   confirmDelete: (runId) => set({ open: "delete", deleteRunId: runId }),
-  close: () => set({ open: null, deleteRunId: null }),
+  close: () => set({ open: null, deleteRunId: null, target: {} }),
   setNotice: (notice, assertive = false) => {
     set({ notice, noticeAssertive: assertive });
     // Shown in the shell's toast stack (U-V7); CaseFeature announces it.

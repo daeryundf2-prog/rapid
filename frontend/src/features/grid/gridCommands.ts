@@ -7,6 +7,7 @@ import { useAppStore } from "../../state/store";
 import { runDisabledReason } from "../analysis/commands";
 import { caseRoute, otherCaseIds } from "../analysis/crossCase";
 import { useAnalysisStore } from "../analysis/store";
+import { caseCitationParts } from "../case/caseLink";
 import { buildReviewToolGridCommands } from "../review/gridTools";
 import { recordCitationParts } from "../viewer/citation";
 import { PIVOT_LABELS, PIVOT_ORDER, type PivotId, recordPivots } from "../viewer/pivots";
@@ -63,9 +64,16 @@ export function buildViewerTarget(runId: string, row: GridRow, mode?: ViewerMode
   };
 }
 
-/** Grid citation: path, locator, (container) sha256, then the record id and record time. */
-export function citationText(row: GridRow): string {
-  const parts = [row.sourcePath ?? row.title, `[${row.ref.collection}:${row.ref.locator}]`];
+/**
+ * Grid citation: (사건 번호 · 증거 번호 when the run belongs to a case), path, locator, (container)
+ * sha256, then the record id and record time.
+ */
+export function citationText(row: GridRow, runId?: string | null): string {
+  const parts = [
+    ...caseCitationParts(runId),
+    row.sourcePath ?? row.title,
+    `[${row.ref.collection}:${row.ref.locator}]`,
+  ];
   if (row.sha256)
     parts.push(`${row.ref.collection === "artifacts" ? "컨테이너 sha256" : "sha256"}=${row.sha256}`);
   const record = recordCitationParts(row, currentTimezone());
@@ -201,10 +209,10 @@ export function buildGridCommands(hostRef: { current: GridCommandHost }): Comman
       group: "grid",
       icon: "quote",
       disabledReason: rowDisabled(false),
-      run: async () => {
+      run: async (ctx) => {
         const row = focused();
         if (!row) return;
-        await copyText(citationText(row));
+        await copyText(citationText(row, ctx.runId));
         host().toast("인용을 복사했습니다.", "info");
       },
     },

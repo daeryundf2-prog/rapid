@@ -6,6 +6,7 @@ import type { GridRow } from "../../contracts/collection";
 import type { MarkAction, ViewerTarget } from "../../contracts/viewer";
 import { evidenceTime } from "../../utils/time";
 import { timestampKindLabel } from "../../utils/timeKinds";
+import { caseCitationParts } from "../case/caseLink";
 import { derivedOriginOf } from "../derived/store";
 import { DERIVED_TABLE_LABELS } from "../derived/tables";
 import { flagCitation, rowFlags } from "../flags/flags";
@@ -75,6 +76,8 @@ export function buildCitation(
 ): string {
   const isArtifact = target.ref.collection === "artifacts";
   const parts = [
+    // 사건=… 증거=… first when the run belongs to a case (AXIOM adoption E1).
+    ...caseCitationParts(target.runId),
     `원본=${target.sourcePath ?? "(원본 경로 없음)"}`,
     `${row && isArtifact ? "컨테이너 sha256" : "sha256"}=${sha256 || "미계산"}`,
     `위치=${locatorText(target)}`,

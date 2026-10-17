@@ -462,7 +462,13 @@ def build_review_tools_router(
                     row = connection.execute("SELECT case_number FROM case_record WHERE case_id = ?", (case_id,)).fetchone()
                     payload["case_number"] = (str(row[0]) if row is not None and row[0] else None)
                 evidence_columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(evidence_source)")}
-                number = "evidence_number" if "evidence_number" in evidence_columns else "citation_id"
+                # Prefer the examiner-entered evidence number (case intake); fall back to the
+                # citation id for run-imported DBs where that column is empty.
+                number = (
+                    "COALESCE(NULLIF(evidence_number, ''), citation_id)"
+                    if "evidence_number" in evidence_columns
+                    else "citation_id"
+                )
                 row = connection.execute(
                     f"SELECT {number} AS number, display_name FROM evidence_source WHERE case_id = ? ORDER BY id DESC LIMIT 1",
                     (case_id,),

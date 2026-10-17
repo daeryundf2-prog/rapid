@@ -19,6 +19,7 @@ from .constants import (
     SCHEMA_SQL_COMPRESSED_ARTIFACTS,
     SCHEMA_VERSION,
 )
+from .intake import apply_intake_schema
 
 __all__ = [
     "ARTIFACT_DATA_CODEC_NONE",
@@ -63,6 +64,16 @@ def _apply_schema_extensions(connection: sqlite3.Connection) -> None:
         apply(connection)
 
 
+def _apply_schema_extensions_if_writable(connection: sqlite3.Connection) -> None:
+    """Apply extensions on an already-current DB without failing on read-only files."""
+    try:
+        _apply_schema_extensions(connection)
+    except sqlite3.OperationalError as exc:
+        if "readonly" in str(exc).lower() or "read-only" in str(exc).lower():
+            return
+        raise
+
+
 def apply_schema(connection: sqlite3.Connection, *, compressed_artifacts: bool = False) -> None:
     """Create or migrate the case DB schema.
 
@@ -80,7 +91,11 @@ def apply_schema(connection: sqlite3.Connection, *, compressed_artifacts: bool =
         }
         artifact_columns = {str(row["name"]) for row in connection.execute("PRAGMA table_info(artifact)")}
         if set(REVIEW_MARK_MIGRATION_COLUMNS) <= review_mark_columns and set(ARTIFACT_DATA_COLUMNS) <= artifact_columns:
-            _apply_schema_extensions(connection)
+            # Current schema: no core writes (read-only/ACL-locked run DBs keep opening). The case
+            # intake columns/tables are migrated by the workspace DB (ensure_intake_schema).
+            # Registered extensions (review tags/baselines) are idempotent and are applied only
+            # when the DB is writable; a read-only DB is left as is.
+            _apply_schema_extensions_if_writable(connection)
             return
     fresh = current_version == 0 and not connection.execute(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'artifact'"
@@ -93,6 +108,7 @@ def apply_schema(connection: sqlite3.Connection, *, compressed_artifacts: bool =
     ensure_column(connection, "review_mark", "priority", "TEXT NOT NULL DEFAULT 'normal'")
     ensure_column(connection, "review_mark", "due_at", "TEXT NOT NULL DEFAULT ''")
     ensure_column(connection, "review_mark", "source_citation_package_json", "TEXT NOT NULL DEFAULT '{}'")
+    apply_intake_schema(connection)
     connection.execute(
         """
         INSERT INTO schema_info (key, value)

@@ -378,3 +378,92 @@
   margin: 0;
   text-align: end;
 }
+
+/* --- case intake (AXIOM adoption E1): wizard, evidence items, case switcher tree ------------ */
+
+.wizard-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-2);
+  padding: 0;
+  list-style: none;
+  color: var(--text-muted);
+  font-size: var(--fs-aux);
+}
+
+.wizard-step {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.wizard-step.current {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.wizard-step-num {
+  display: inline-grid;
+  place-items: center;
+  inline-size: 1.5em;
+  block-size: 1.5em;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  font-variant-numeric: tabular-nums;
+}
+
+.wizard-step.current .wizard-step-num {
+  border-color: var(--accent);
+}
+
+.wizard-step-title,
+.wizard-summary-title {
+  margin: var(--space-2) 0;
+  font-size: var(--fs-aux);
+  font-weight: 600;
+}
+
+.wizard-panel {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.case-evidence {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.case-evidence-fields {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.case-tree,
+.case-tree ul {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.case-tree ul {
+  padding-inline-start: var(--space-4);
+  border-inline-start: 1px solid var(--line);
+}
+
+.case-tree-case,
+.case-tree-evidence,
+.case-tree-empty {
+  margin: var(--space-1) 0 0;
+}
+
+.case-tree-heading {
+  margin: var(--space-3) 0 var(--space-2);
+  font-size: var(--fs-aux);
+  font-weight: 600;
+}
