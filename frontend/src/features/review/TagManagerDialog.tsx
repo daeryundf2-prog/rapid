@@ -6,7 +6,7 @@
  * visible line + one assertive sentence (ErrorText); results go through the polite announcer.
  */
 
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { announce } from "../../a11y";
 import { type CaseTag, TAG_COLOR_LABELS, TAG_COLOR_TOKENS, type TagColorToken } from "../../api/reviewTools";
 import { ErrorText } from "../case/ErrorText";
@@ -71,8 +71,36 @@ export function TagManagerDialog({ runId, onClose }: { runId: string; onClose: (
   const shortcutId = useId();
   const descriptionId = useId();
   const authorId = useId();
+  // Focus: into the form when it opens; back to the control that opened it (else 새 태그) when the
+  // form or the delete confirmation closes, so Esc/저장 never drop focus on the page body.
+  const newButtonRef = useRef<HTMLButtonElement>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
+  const returnFocus = useRef<HTMLElement | null>(null);
+  const restoreFocus = useRef(false);
+  const formOpen = draft !== null;
+  const remember = () => {
+    returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  };
+  const closeForm = () => {
+    restoreFocus.current = true;
+    setDraft(null);
+  };
+  const closeConfirm = () => {
+    restoreFocus.current = true;
+    setConfirmDelete(null);
+  };
+  useEffect(() => {
+    if (formOpen) nameRef.current?.focus();
+  }, [formOpen]);
+  useEffect(() => {
+    if (!restoreFocus.current || draft || confirmDelete) return;
+    restoreFocus.current = false;
+    const target = returnFocus.current?.isConnected ? returnFocus.current : newButtonRef.current;
+    target?.focus();
+  }, [draft, confirmDelete]);
 
   const startEdit = (tag: CaseTag | null) => {
+    remember();
     setError(null);
     setConfirmDelete(null);
     setDraft(
@@ -112,12 +140,12 @@ export function TagManagerDialog({ runId, onClose }: { runId: string; onClose: (
     void run(async () => {
       if (draft.id === null) {
         const tag = await saveNewTag(runId, input);
-        setDraft(null);
+        closeForm();
         return `태그 '${tag.name}'을(를) 만들었습니다`;
       }
       const { name, ...rest } = input;
       const tag = await saveTagChanges(runId, draft.id, draft.system ? rest : { name, ...rest });
-      setDraft(null);
+      closeForm();
       return `태그 '${tag.name}'을(를) 저장했습니다`;
     });
   };
@@ -125,7 +153,7 @@ export function TagManagerDialog({ runId, onClose }: { runId: string; onClose: (
   const remove = (tag: CaseTag) => {
     void run(async () => {
       const removed = await removeTag(runId, tag.id);
-      setConfirmDelete(null);
+      closeConfirm();
       return `태그 '${tag.name}'을(를) 삭제했습니다. ${removed.toLocaleString("ko-KR")}개 행에서 뺐습니다`;
     });
   };
@@ -211,6 +239,7 @@ export function TagManagerDialog({ runId, onClose }: { runId: string; onClose: (
                     aria-label={`${tag.name} 태그 삭제`}
                     reason={tag.kind === "system" ? SYSTEM_TAG_REASON : undefined}
                     onClick={() => {
+                      remember();
                       setDraft(null);
                       setConfirmDelete(tag);
                     }}
@@ -231,7 +260,7 @@ export function TagManagerDialog({ runId, onClose }: { runId: string; onClose: (
               남습니다.
             </p>
             <div className="case-actions">
-              <button type="button" className="button" onClick={() => setConfirmDelete(null)}>
+              <button type="button" className="button" onClick={closeConfirm}>
                 취소
               </button>
               <ReasonButton
@@ -257,13 +286,14 @@ export function TagManagerDialog({ runId, onClose }: { runId: string; onClose: (
               if (event.key === "Escape") {
                 // Close the form, not the dialog.
                 event.stopPropagation();
-                setDraft(null);
+                closeForm();
               }
             }}
           >
             <div className="case-field">
               <label htmlFor={nameId}>이름</label>
               <input
+                ref={nameRef}
                 id={nameId}
                 type="text"
                 value={draft.name}
@@ -329,7 +359,7 @@ export function TagManagerDialog({ runId, onClose }: { runId: string; onClose: (
               />
             </div>
             <div className="case-actions">
-              <button type="button" className="button" onClick={() => setDraft(null)}>
+              <button type="button" className="button" onClick={closeForm}>
                 취소
               </button>
               <ReasonButton
@@ -345,6 +375,7 @@ export function TagManagerDialog({ runId, onClose }: { runId: string; onClose: (
         ) : (
           <div className="case-actions">
             <button
+              ref={newButtonRef}
               type="button"
               className="button primary"
               onClick={() => startEdit(null)}

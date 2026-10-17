@@ -35,11 +35,22 @@ if HAS_FASTAPI:
     from tests.test_rapidtriage_run import build_run_fixture
 
 
-def _insert_file(connection: sqlite3.Connection, case_id: str, path: str, md5: str | None) -> int:
+def _insert_file(
+    connection: sqlite3.Connection, case_id: str, path: str, md5: str | None, source: int | None = None
+) -> int:
     cursor = connection.execute(
-        "INSERT INTO file_record (citation_id, case_id, path, normalized_path, hash_md5, created_at) "
-        "VALUES (?, ?, ?, ?, ?, '2026-10-17T00:00:00+00:00')",
-        (f"F-{path}", case_id, path, path.lower(), md5),
+        "INSERT INTO file_record (citation_id, case_id, evidence_source_id, path, normalized_path, hash_md5, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, '2026-10-17T00:00:00+00:00')",
+        (f"F-{path}", case_id, source, path, path.lower(), md5),
+    )
+    return int(cursor.lastrowid or 0)
+
+
+def _insert_source(connection: sqlite3.Connection, case_id: str, name: str) -> int:
+    cursor = connection.execute(
+        "INSERT INTO evidence_source (citation_id, case_id, display_name, source_type, original_path, added_at) "
+        "VALUES (?, ?, ?, 'folder', ?, '2026-10-17T00:00:00+00:00')",
+        (f"S-{name}", case_id, name, f"C:/{name}"),
     )
     return int(cursor.lastrowid or 0)
 
@@ -203,6 +214,20 @@ class CaseTagCoreTests(unittest.TestCase):
                 )
             self.assertEqual(refused.exception.status, 422)
             self.assertIn("상한 3건", str(refused.exception))
+            # Same run only: an identical file of another evidence source (another run) is left alone.
+            run_a = _insert_source(connection, "CASE-E3", "run-a")
+            run_b = _insert_source(connection, "CASE-E3", "run-b")
+            in_a = [_insert_file(connection, "CASE-E3", f"C:/a{index}.jpg", "c" * 32, run_a) for index in range(2)]
+            _insert_file(connection, "CASE-E3", "C:/b0.jpg", "c" * 32, run_b)
+            scoped = apply_tag_ids(
+                connection,
+                "CASE-E3",
+                [{"target_type": "file_record", "target_id": str(in_a[0])}],
+                add_ids=[tag["id"]],
+                propagate_by_hash=True,
+                evidence_source_id=run_b,  # the fallback never overrides the target's own run
+            )
+            self.assertEqual({item["target_id"] for item in scoped["targets"]}, {str(i) for i in in_a})
             with self.assertRaises(ReviewToolError) as unknown:
                 apply_tag_ids(connection, "CASE-E3", [{"target_type": "file_record", "target_id": str(same[0])}], add_ids=[99999])
             self.assertEqual(unknown.exception.status, 404)

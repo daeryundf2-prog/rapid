@@ -193,11 +193,34 @@ describe("digit tag keys", () => {
     expect(dispatchShortcut(event)).toBe(true);
     await waitFor(() => expect(calls.some((c) => c.url === "/api/case-db/review-batch")).toBe(true));
     const batch = calls.find((c) => c.url === "/api/case-db/review-batch");
+    // By case_tag id, so a rename never re-creates the tag.
     expect(batch?.body).toMatchObject({
-      add_tags: ["DLP"],
+      case_id: "run-r1",
+      run_id: "r1",
+      tag_ids: [20],
       targets: [{ collection: "files", locator: "/candidates/2" }],
     });
+    expect(batch?.body).not.toHaveProperty("add_tags");
+    await waitFor(() => expect(announceMock).toHaveBeenCalledWith("태그 'DLP': 1건 처리했습니다"));
     row.remove();
+  });
+
+  it("pressing the key on a row that has the tag takes it off", async () => {
+    const { calls } = mockFetch(
+      caseRoutes([...SYSTEM, tag({ id: 20, name: "DLP", shortcut: 7 })], {
+        "POST /api/case-db/review-batch": { updated_count: 1 },
+      }),
+    );
+    useAppStore.getState().navigate({ runId: "r1", collection: "files" });
+    useAppStore.getState().setViewerTarget(target("/candidates/2"));
+    useAppStore.setState({
+      viewerRow: makeRow(makeRef("files", "/candidates/2"), { title: "file2.jpg", tags: ["dlp"] }),
+    });
+    expect(await runCommand("review.tagKey.7")).toEqual({ ok: true });
+    expect(calls.find((c) => c.url === "/api/case-db/review-batch")?.body).toMatchObject({
+      remove_tag_ids: [20],
+    });
+    expect(announceMock).toHaveBeenCalledWith("태그 'DLP' 해제: 1건 처리했습니다");
   });
 
   it("an unbound digit says why; without a case DB 1–5 still mean 우선순위 n", async () => {

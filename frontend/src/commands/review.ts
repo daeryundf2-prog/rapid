@@ -12,7 +12,12 @@ import { announce } from "../a11y";
 import { type Command, KEY_MAP } from "../contracts/command";
 import type { MarkAction, ViewerTarget } from "../contracts/viewer";
 import { applyReviewAction, type BatchAction, storeNotice } from "../features/grid/reviewActions";
-import { TAG_KEY_DIGITS, tagKeyReason, tagNameForKey } from "../features/review/tagKeys";
+import {
+  resolveTagKey,
+  TAG_KEY_DIGITS,
+  tagKeyReason,
+  toggleCaseTagOnContextRow,
+} from "../features/review/tagKeys";
 import { markDisabledReason, targetAsGridRow } from "../features/viewer/citation";
 import { useAppStore } from "../state/store";
 import { NO_RUN_REASON } from "./reasons";
@@ -86,8 +91,9 @@ export function reviewCommands(queryClient: QueryClient | null): Command[] {
     run: async () => {
       const target = reviewTarget();
       if (!target) throw new Error(NO_ROW_REASON);
-      const name = await tagNameForKey(target.runId, level);
-      await applyToContextRow(queryClient, "tag", `태그 '${name}'`, name);
+      const resolved = await resolveTagKey(target.runId, level);
+      if (resolved.tag) await toggleCaseTagOnContextRow(queryClient, resolved.tag);
+      else await applyToContextRow(queryClient, "tag", `태그 '${resolved.name}'`, resolved.name);
     },
   });
   const priorities = PRIORITY_LEVELS.map((level) => tagKey(level, `review.priority.${level}`));

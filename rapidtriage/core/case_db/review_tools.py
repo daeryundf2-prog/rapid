@@ -50,6 +50,13 @@ PROPAGATION_CAP = 10_000
 HASH_COLUMNS = ("hash_md5", "hash_sha1", "hash_sha256")
 _HASH_KEYS = {"md5": "hash_md5", "sha1": "hash_sha1", "sha256": "hash_sha256"}
 _HASH_LENGTHS = {"hash_md5": 32, "hash_sha1": 40, "hash_sha256": 64}
+# Review-target tables that carry ``evidence_source_id`` (the run a row belongs to).
+_SOURCE_TABLES = {
+    "file_record": "file_record",
+    "artifact": "artifact",
+    "indexed_document": "indexed_document",
+    "event": "event",
+}
 BASELINE_NAME_MAX = 80
 BASELINE_MAX_CATEGORIES = 2_000
 _UNSET = object()
@@ -556,22 +563,33 @@ def hash_propagation_targets(
 ) -> tuple[list[dict[str, str]], dict[str, object]]:
     """The targets plus every file row of the same run whose MD5/SHA-1/SHA-256 equals a target's.
 
+    "Same run" = the evidence sources the target rows come from (a case DB can hold several
+    runs' evidence); ``evidence_source_id`` is the fallback when no target names its source.
     Refuses (Korean, 422) when the result exceeds ``cap`` rows.
     """
     wanted: dict[str, set[str]] = {column: set() for column in HASH_COLUMNS}
     hashless = 0
+    sources: set[int] = set()
     for target in targets:
-        hashes = target_hashes(connection, str(target["target_type"]), str(target["target_id"]))
+        target_type, target_id = str(target["target_type"]), str(target["target_id"])
+        hashes = target_hashes(connection, target_type, target_id)
         if not hashes:
             hashless += 1
         for column, value in hashes.items():
             wanted[column].add(value)
+        table = _SOURCE_TABLES.get(target_type)
+        if table and target_id.isdigit():
+            row = connection.execute(f"SELECT evidence_source_id FROM {table} WHERE id = ?", (int(target_id),)).fetchone()
+            if row is not None and row[0] is not None:
+                sources.add(int(row[0]))
+    if not sources and evidence_source_id is not None:
+        sources.add(evidence_source_id)
     clauses: list[str] = []
     params: list[object] = [case_id]
     scope = ""
-    if evidence_source_id is not None:
-        scope = " AND evidence_source_id = ?"
-        params.append(evidence_source_id)
+    if sources:
+        scope = f" AND evidence_source_id IN ({', '.join('?' for _ in sources)})"
+        params.extend(sorted(sources))
     for column, values in wanted.items():
         if values:
             clauses.append(f"lower({column}) IN ({', '.join('?' for _ in values)})")

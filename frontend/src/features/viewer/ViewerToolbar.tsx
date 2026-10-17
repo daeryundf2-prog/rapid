@@ -240,7 +240,7 @@ export function ViewerToolbar({
         label: command?.label ?? id,
         command: id,
         icon: id === NOTE_PANEL_COMMAND ? "clock" : "tag",
-        disabledReason: command ? command.disabledReason?.(ctx) : "그리드가 열려 있을 때 쓸 수 있습니다",
+        disabledReason: command ? command.disabledReason?.(ctx) : "메인 창의 목록에서 쓸 수 있습니다",
         onSelect: () => void runCommand(id),
       };
     }),

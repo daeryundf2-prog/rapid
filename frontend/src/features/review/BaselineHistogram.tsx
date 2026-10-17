@@ -7,7 +7,7 @@
  */
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { type ReactNode, useId, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import { announce } from "../../a11y";
 import { getReviewCounts } from "../../api/caseDb";
 import {
@@ -118,6 +118,18 @@ export function BaselineHistogram({ runId, children }: { runId: string; children
     return Number.isInteger(raw) && raw > 0 ? raw : null;
   });
   const [naming, setNaming] = useState(false);
+  // Closing the name form (저장 · 취소 · Esc) hands focus back to the button that opened it.
+  const openerRef = useRef<HTMLButtonElement>(null);
+  const restoreFocus = useRef(false);
+  const closeNaming = () => {
+    restoreFocus.current = true;
+    setNaming(false);
+  };
+  useEffect(() => {
+    if (naming || !restoreFocus.current) return;
+    restoreFocus.current = false;
+    openerRef.current?.focus();
+  }, [naming]);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -156,7 +168,7 @@ export function BaselineHistogram({ runId, children }: { runId: string; children
       const handle = await tagHandle(runId);
       const { baseline } = await createHistogramBaseline(runId, handle.case_id, clean, currentReviewer());
       await queryClient.invalidateQueries({ queryKey: listKey });
-      setNaming(false);
+      closeNaming();
       setName("");
       setChosen(baseline.id);
       writeStored(baselineKey(runId), String(baseline.id));
@@ -207,7 +219,7 @@ export function BaselineHistogram({ runId, children }: { runId: string; children
             onKeyDown={(event) => {
               if (event.key === "Escape") {
                 event.stopPropagation();
-                setNaming(false);
+                closeNaming();
               }
             }}
           >
@@ -232,12 +244,12 @@ export function BaselineHistogram({ runId, children }: { runId: string; children
             >
               저장
             </ReasonButton>
-            <button type="button" className="button ghost" onClick={() => setNaming(false)}>
+            <button type="button" className="button ghost" onClick={closeNaming}>
               취소
             </button>
           </form>
         ) : (
-          <button type="button" className="view-link" onClick={() => setNaming(true)}>
+          <button ref={openerRef} type="button" className="view-link" onClick={() => setNaming(true)}>
             현재 건수를 기준선으로 저장…
           </button>
         )}
