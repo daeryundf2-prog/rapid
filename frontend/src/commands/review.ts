@@ -12,6 +12,7 @@ import { announce } from "../a11y";
 import { type Command, KEY_MAP } from "../contracts/command";
 import type { MarkAction, ViewerTarget } from "../contracts/viewer";
 import { applyReviewAction, type BatchAction, storeNotice } from "../features/grid/reviewActions";
+import { TAG_KEY_DIGITS, tagKeyReason, tagNameForKey } from "../features/review/tagKeys";
 import { markDisabledReason, targetAsGridRow } from "../features/viewer/citation";
 import { useAppStore } from "../state/store";
 import { NO_RUN_REASON } from "./reasons";
@@ -73,16 +74,25 @@ export function reviewCommands(queryClient: QueryClient | null): Command[] {
       run: () => applyToContextRow(queryClient, action, label),
     }),
   );
-  const priorities = PRIORITY_LEVELS.map(
-    (level): Command => ({
-      id: `review.priority.${level}`,
-      label: `${priorityTag(level)} 태그`,
-      group: "review",
-      shortcut: String(level),
-      icon: "tag",
-      disabledReason: (ctx) => reasonFor("relevant", ctx.runId),
-      run: () => applyToContextRow(queryClient, "tag", `${priorityTag(level)} 태그`, priorityTag(level)),
-    }),
+  // Digit keys (AXIOM E3): the case tag bound to the digit in 태그 관리 (1–5 default: 우선순위 n).
+  // Ids review.priority.1–5 are kept; 6–9 are review.tagKey.n.
+  const tagKey = (level: number, id: string): Command => ({
+    id,
+    label: `태그 단축키 ${level}`,
+    group: "review",
+    shortcut: String(level),
+    icon: "tag",
+    disabledReason: (ctx) => reasonFor("relevant", ctx.runId) ?? tagKeyReason(ctx.runId, level),
+    run: async () => {
+      const target = reviewTarget();
+      if (!target) throw new Error(NO_ROW_REASON);
+      const name = await tagNameForKey(target.runId, level);
+      await applyToContextRow(queryClient, "tag", `태그 '${name}'`, name);
+    },
+  });
+  const priorities = PRIORITY_LEVELS.map((level) => tagKey(level, `review.priority.${level}`));
+  const extraKeys = TAG_KEY_DIGITS.filter((level) => level > PRIORITY_LEVELS.length).map((level) =>
+    tagKey(level, `review.tagKey.${level}`),
   );
-  return [...marks, ...priorities];
+  return [...marks, ...priorities, ...extraKeys];
 }

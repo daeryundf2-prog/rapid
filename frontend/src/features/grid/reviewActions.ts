@@ -13,6 +13,7 @@ import { extractRows, type RunExtractResult } from "../../api/extract";
 import type { GridRow, ReviewStatus } from "../../contracts/collection";
 import type { MarkAction } from "../../contracts/viewer";
 import { useAppStore } from "../../state/store";
+import { currentReviewer } from "../review/author";
 import { baseName, str } from "./columns/common";
 
 export type BatchAction = MarkAction | "tag" | "extract" | UnmarkAction;
@@ -333,7 +334,9 @@ async function applyBody(
   const handle = await pending;
   let store: ReviewStore;
   if (handle) {
-    await postReviewBatch(handle, targets as ReviewBatchTarget[], mark, runId);
+    // The configured review author (AXIOM E3) rides on every mark; "web-ui" when unset.
+    const authored: ReviewMarkBody = { ...mark, reviewer: currentReviewer() };
+    await postReviewBatch(handle, targets as ReviewBatchTarget[], authored, runId);
     store = "case-db";
   } else {
     const bookmarkRows = rows.filter((r) => bookmarkTarget(r) !== null);
@@ -353,4 +356,21 @@ async function applyBody(
   }
   for (const listener of listeners) listener(runId, store);
   return { applied: rows.length, store };
+}
+
+// ---- review tools (AXIOM E3) ---------------------------------------------
+
+/**
+ * The run's case DB handle (POST /case-db/ensure once per run, shared with the marks above);
+ * null when the server says no case DB can be created for this run.
+ */
+export function ensureRunCaseDb(runId: string): Promise<CaseDbHandle | null> {
+  const pending = caseDbHandle(runId);
+  if (!settledRuns.has(runId)) notifyPreparing();
+  return pending;
+}
+
+/** Tell the listeners (review-map / review-counts invalidation) that marks of the run changed. */
+export function notifyReviewApplied(runId: string): void {
+  for (const listener of listeners) listener(runId, "case-db");
 }

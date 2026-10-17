@@ -7,6 +7,8 @@ import {
   type OcrQueue,
   type SourcePreview,
 } from "../../../api/viewer";
+import "../../review/review.css";
+import { useViewPrefs } from "../../review/viewPrefs";
 import { errorText, useAsync, useBlobUrl } from "../useAsync";
 import { latestOcrFailure } from "./ocrFailure";
 
@@ -69,12 +71,19 @@ export function ImageView({ runId, preview, onOpenPath }: ImageViewProps) {
     latestOcrFailure(runId, preview.path, signal).catch(() => null),
   );
   const ocrFailure = failure.status === "ok" ? failure.data : null;
+  // Examiner protection (AXIOM E3): the same 미디어 흐리게 preference as the gallery (Shift+B).
+  const blur = useViewPrefs((s) => s.mediaBlur);
 
   return (
-    <div className="image-view">
+    <div className="image-view" data-media-blur={blur ? "on" : undefined}>
       <div className="image-main">
         <figure className="image-figure">
-          <AuthImage runId={runId} path={preview.path} alt={preview.name} className="image-original" />
+          <AuthImage
+            runId={runId}
+            path={preview.path}
+            alt={preview.name}
+            className="image-original viewer-media-blurrable"
+          />
           <figcaption className="viewer-note">
             {image.width && image.height ? `${image.width}×${image.height}` : "크기 알 수 없음"}
             {image.decoded === false ? " · 디코딩 실패(메타데이터만)" : ""}

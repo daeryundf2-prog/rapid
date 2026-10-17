@@ -1,0 +1,289 @@
+/* Review tools (AXIOM E3): tag manager, note panel, tag nodes, classic split, media blur,
+   baseline histogram. Colours are tokens only (contrast gate: tag-1..8 ≥ 3:1 on surfaces). */
+
+.tag-swatch {
+  display: inline-block;
+  flex: none;
+  inline-size: 12px;
+  block-size: 12px;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 25%, transparent);
+}
+
+.tag-manager,
+.note-panel {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.tag-table {
+  inline-size: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-body);
+}
+
+.tag-table th,
+.tag-table td {
+  padding: var(--space-1) var(--space-2);
+  border-block-end: 1px solid var(--line-subtle);
+  text-align: start;
+  vertical-align: middle;
+}
+
+.tag-table thead th {
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
+  font-weight: 500;
+}
+
+.tag-table tbody th {
+  font-weight: 500;
+}
+
+.tag-table .num {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+.tag-name {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.tag-desc {
+  max-inline-size: 220px;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.tag-actions {
+  white-space: nowrap;
+  text-align: end;
+}
+
+.tag-form,
+.tag-confirm {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.tag-confirm p {
+  margin: 0;
+}
+
+/* --- note panel ------------------------------------------------------------ */
+
+.note-panel-form {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.note-history-title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--fs-panel-title);
+}
+
+.note-history {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.note-history-item {
+  padding: var(--space-2);
+  border-inline-start: 3px solid var(--line);
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+}
+
+.note-history-head,
+.note-history-body {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.note-history-head {
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
+}
+
+.note-history-old {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+/* --- 검토 tree: tag nodes ---------------------------------------------------- */
+
+.stage-link .tag-swatch {
+  margin-inline-end: var(--space-1);
+}
+
+.stage-tag-label {
+  display: inline-flex;
+  align-items: center;
+  min-inline-size: 0;
+}
+
+.stage-tag-key {
+  margin-inline-start: var(--space-1);
+  color: var(--text-muted);
+  font-size: var(--fs-aux);
+}
+
+/* --- classic split ------------------------------------------------------------ */
+
+.resize-handle.resize-handle-rows {
+  width: auto;
+  height: 4px;
+}
+
+.resize-handle.resize-handle-rows::after {
+  inset: 1px 0;
+}
+
+:root[data-theme="light"] .resize-handle.resize-handle-rows::after {
+  inset: 0 0 auto;
+  width: auto;
+  height: 1px;
+}
+
+/* --- media blur (examiner protection) ----------------------------------------- */
+
+.thumb-view[data-media-blur] .thumb-img,
+[data-media-blur="on"] .viewer-media-blurrable {
+  filter: blur(14px);
+  transition: filter var(--motion) var(--ease);
+}
+
+/* Hover or keyboard focus on a tile shows that one picture. */
+.thumb-view[data-media-blur] .thumb-tile:hover .thumb-img,
+.thumb-view[data-media-blur] .thumb-tile:focus-visible .thumb-img,
+[data-media-blur="on"] .viewer-media-blurrable:hover {
+  filter: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thumb-view[data-media-blur] .thumb-img {
+    transition: none;
+  }
+}
+
+.related-media {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.related-media-list {
+  max-block-size: 160px;
+  margin: 0;
+  padding: var(--space-1) var(--space-3);
+  overflow: auto;
+  font-size: var(--fs-table-aux);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.related-media-list li {
+  overflow-wrap: anywhere;
+}
+
+/* --- histogram baseline -------------------------------------------------------- */
+
+.hist-baseline-bar {
+  min-inline-size: 0;
+  margin: 0;
+  border: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.hist-baseline-form {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.hist-compare {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hist-compare-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 220px) 1fr auto;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-table-aux);
+}
+
+.hist-compare-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hist-compare-tracks {
+  display: grid;
+  gap: 2px;
+}
+
+.hist-compare-track {
+  block-size: 8px;
+  background: var(--surface-2);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.hist-compare-fill {
+  display: block;
+  block-size: 100%;
+}
+
+.hist-compare-fill.is-current {
+  background: var(--tag-5);
+}
+
+.hist-compare-fill.is-baseline {
+  background: var(--tag-8);
+}
+
+.hist-compare-delta {
+  min-inline-size: 7ch;
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.hist-compare-delta[data-sign="up"] {
+  color: var(--ok);
+}
+
+.hist-compare-delta[data-sign="down"] {
+  color: var(--danger);
+}
+
+.hist-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
+}
+
+.hist-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}

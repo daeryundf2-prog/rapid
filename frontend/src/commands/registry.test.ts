@@ -119,8 +119,11 @@ describe("registry", () => {
     ]) {
       expect(CANONICAL_KEYS.has(key)).toBe(true);
     }
-    // Viewer-window modes stop at 8 (viewer-families U-F2).
-    expect(CANONICAL_KEYS.has("9")).toBe(false);
+    // Viewer-window modes stop at 8 (viewer-families U-F2); 9 is a review-tag key (AXIOM E3, 1–9).
+    expect(CANONICAL_KEYS.has("9")).toBe(true);
+    expect(CANONICAL_KEYS.has("0")).toBe(false);
+    expect(CANONICAL_KEYS.has("`")).toBe(true);
+    expect(CANONICAL_KEYS.has("Shift+B")).toBe(true);
   });
 });
 

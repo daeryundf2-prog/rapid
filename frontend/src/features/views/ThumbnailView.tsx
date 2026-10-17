@@ -23,6 +23,8 @@ import { useRoute, useSelection, useViewerTarget } from "../grid/adapter";
 import { formatBytes, REVIEW_LABELS } from "../grid/columns/common";
 import { buildViewerTarget } from "../grid/gridCommands";
 import { PAGE_SIZE, useCollectionQuery } from "../grid/useCollectionQuery";
+import { MediaBlurToggle, RelatedMediaBadge } from "../review/MediaTools";
+import { useViewPrefs } from "../review/viewPrefs";
 import { errorText, useBlobUrl } from "../viewer/useAsync";
 import { SelectionBar } from "./SelectionBar";
 import {
@@ -271,6 +273,8 @@ export function ThumbnailView() {
     () => sorted.filter((r) => selectedKeys.has(r.rowKey)),
     [sorted, selectedKeys],
   );
+  // Examiner protection (AXIOM E3): blurred thumbnails, Shift+B / toolbar toggle, kept across reloads.
+  const mediaBlur = useViewPrefs((s) => s.mediaBlur);
 
   if (cq.error && cq.loadedCount === 0) {
     return (
@@ -296,8 +300,9 @@ export function ThumbnailView() {
     );
   }
 
+  const activeRow = sorted[activeIndex];
   return (
-    <div className="view-pane thumb-view">
+    <div className="view-pane thumb-view" data-media-blur={mediaBlur ? "" : undefined}>
       <div className="view-toolbar">
         <span className="view-count">
           이미지 {sorted.length.toLocaleString("ko-KR")}건 ({scanned.toLocaleString("ko-KR")}행 검사)
@@ -318,6 +323,14 @@ export function ThumbnailView() {
             더 불러오기
           </button>
         ) : null}
+        <MediaBlurToggle />
+        <RelatedMediaBadge
+          runId={runId ?? null}
+          path={activeRow?.sourcePath ?? null}
+          name={
+            activeRow ? (activeRow.sourcePath ?? activeRow.title).split(/[\\/]/).pop() || activeRow.title : ""
+          }
+        />
       </div>
       <SelectionBar runId={runId} rows={selectedRows} patchRows={cq.patchRows} onClear={() => select([])} />
       <div
