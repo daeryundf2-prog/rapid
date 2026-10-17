@@ -9,8 +9,10 @@ import { useId, useState } from "react";
 import {
   addEvidence,
   type CaseDetail,
+  type CasePatchBody,
   createCaseRun,
   getCase,
+  getProcessingSnapshot,
   getRunProblems,
   koCompare,
   linkCaseRun,
@@ -36,6 +38,7 @@ import {
   evidenceBody,
   firstError,
   newEvidenceDraft,
+  samePathText,
   validateCaseInfo,
   validateEvidenceDraft,
 } from "./wizardModel";
@@ -81,22 +84,37 @@ export function LinkCaseDialog({
   const [caseId, setCaseId] = useState("");
   const [evidenceId, setEvidenceId] = useState("");
   const [evidenceNumber, setEvidenceNumber] = useState("");
+  const [forceReason, setForceReason] = useState("");
+  // The run's evidence path (its request root): an existing evidence item must name the same path.
+  const run = useQuery({
+    queryKey: snapshotQueryKey(runId),
+    queryFn: () => getProcessingSnapshot(runId),
+    retry: false,
+  });
+  const runRoot = String(run.data?.snapshot.request?.root ?? "");
   const sorted = [...(cases.data ?? [])].sort((a, b) => koCompare(a.case_number, b.case_number));
   const chosen = sorted.find((item) => item.case_id === caseId);
   const evidence = [...(chosen?.evidence ?? [])].sort((a, b) =>
     koCompare(a.evidence_number, b.evidence_number),
   );
+  const chosenEvidence = evidence.find((item) => item.citation_id === evidenceId);
+  const pathDiffers = Boolean(chosenEvidence && run.data && !samePathText(runRoot, chosenEvidence.path));
   const reason = !caseId
     ? "연결할 케이스를 고르세요"
     : !evidenceId && !evidenceNumber.trim()
       ? "기존 증거를 고르거나 새 증거 번호를 입력하세요"
-      : undefined;
+      : evidenceId && run.isPending
+        ? "런 정보를 불러오는 중입니다"
+        : pathDiffers && !forceReason.trim()
+          ? "런 경로가 증거 경로와 다릅니다. 그래도 연결하려면 사유를 입력하세요"
+          : undefined;
   const link = useMutation({
     mutationFn: () =>
       linkCaseRun(caseId, {
         run_id: runId,
         evidence_citation_id: evidenceId || null,
         evidence_number: evidenceId ? null : evidenceNumber.trim(),
+        ...(pathDiffers ? { force: true, force_reason: forceReason.trim() } : {}),
       }),
     onSuccess: () => {
       invalidateCase(queryClient, caseId, runId);
@@ -165,6 +183,24 @@ export function LinkCaseDialog({
               ))}
             </select>
           </div>
+          {pathDiffers && chosenEvidence ? (
+            <div className="case-field" data-testid="link-force">
+              <p className="case-error">
+                런 경로가 증거 경로와 다릅니다 — 런:{" "}
+                <span className="mono break-all">{runRoot || "(없음)"}</span> · 증거{" "}
+                {chosenEvidence.evidence_number}:{" "}
+                <span className="mono break-all">{chosenEvidence.path}</span>
+              </p>
+              <label htmlFor={`${id}-force`}>강제 연결 사유 (감사 기록에 남음)</label>
+              <textarea
+                id={`${id}-force`}
+                rows={2}
+                maxLength={500}
+                value={forceReason}
+                onChange={(e) => setForceReason(e.target.value)}
+              />
+            </div>
+          ) : null}
           {!evidenceId ? (
             <div className="case-field">
               <label htmlFor={`${id}-number`}>새 증거 번호</label>
@@ -199,6 +235,27 @@ function infoFromCase(detail: CaseDetail): CaseInfoForm {
   };
 }
 
+const PATCH_KEYS: Array<[keyof CaseInfoForm, keyof CasePatchBody]> = [
+  ["caseNumber", "case_number"],
+  ["name", "name"],
+  ["caseType", "case_type"],
+  ["examiner", "examiner"],
+  ["requester", "requester"],
+  ["organization", "organization"],
+  ["description", "description"],
+];
+
+/** PATCH body with only the fields that differ from the loaded case (trimmed). */
+export function changedCaseFields(detail: CaseDetail, form: CaseInfoForm): CasePatchBody {
+  const before = infoFromCase(detail);
+  const body: Record<string, string> = {};
+  for (const [formKey, bodyKey] of PATCH_KEYS) {
+    const value = form[formKey].trim();
+    if (value !== before[formKey].trim()) body[bodyKey] = value;
+  }
+  return body as CasePatchBody;
+}
+
 const EDIT_FIELDS: Array<{ key: keyof CaseInfoForm; label: string; max: number }> = [
   { key: "caseNumber", label: "사건 번호", max: 100 },
   { key: "name", label: "사건명", max: 200 },
@@ -224,19 +281,12 @@ export function CaseEditDialog({
   const current = form ?? (detail.data ? infoFromCase(detail.data) : null);
   const errors = current ? validateCaseInfo({ ...current, caseRoot: "" }) : {};
   const reason = !current ? "사건 정보를 불러오는 중입니다" : firstError(errors);
+  const unchanged =
+    current && detail.data && Object.keys(changedCaseFields(detail.data, current)).length === 0;
+  const changes = current && detail.data ? changedCaseFields(detail.data, current) : {};
   const save = useMutation({
-    mutationFn: () => {
-      const value = current as CaseInfoForm;
-      return patchCase(caseId, {
-        case_number: value.caseNumber.trim(),
-        name: value.name.trim(),
-        case_type: value.caseType.trim(),
-        examiner: value.examiner.trim(),
-        requester: value.requester.trim(),
-        organization: value.organization.trim(),
-        description: value.description.trim(),
-      });
-    },
+    // Only the fields the examiner changed (a stale form never overwrites someone else's edit).
+    mutationFn: () => patchCase(caseId, changes),
     onSuccess: (saved) => {
       queryClient.setQueryData(caseQueryKey(caseId), saved);
       invalidateCase(queryClient, caseId);
@@ -257,7 +307,7 @@ export function CaseEditDialog({
           </button>
           <ReasonButton
             className="button primary"
-            reason={save.isPending ? PENDING : reason}
+            reason={save.isPending ? PENDING : (reason ?? (unchanged ? "바뀐 내용이 없습니다" : undefined))}
             onClick={() => save.mutate()}
           >
             저장
@@ -302,7 +352,8 @@ export function CaseEditDialog({
             />
           </div>
           <p className="case-reason">
-            인용 ID 접두({detail.data?.citation_prefix})는 이미 붙은 인용과 맞추기 위해 바뀌지 않습니다.
+            사건명을 비우면 사건 번호를 사건명으로 씁니다. 인용 ID 접두({detail.data?.citation_prefix})는 이미
+            붙은 인용과 맞추기 위해 바뀌지 않습니다.
           </p>
         </>
       ) : null}
@@ -399,12 +450,16 @@ export function AddRunDialog({
   const queryClient = useQueryClient();
   const id = useId();
   const detail = useCaseQuery(caseId);
-  const [evidenceId, setEvidenceId] = useState(evidenceCitationId ?? "");
+  const [picked, setEvidenceId] = useState(evidenceCitationId ?? "");
   const [form, setForm] = useState<RunForm>(DEFAULT_RUN_FORM);
   const [advanced, setAdvanced] = useState(false);
-  const evidence = [...(detail.data?.evidence ?? [])].sort((a, b) =>
+  const allEvidence = [...(detail.data?.evidence ?? [])].sort((a, b) =>
     koCompare(a.evidence_number, b.evidence_number),
   );
+  // Register-only evidence (e.g. a .zip export) cannot start a run: listed with its reason, not offered.
+  const evidence = allEvidence.filter((item) => item.runnable !== false);
+  const blocked = allEvidence.filter((item) => item.runnable === false);
+  const evidenceId = evidence.some((item) => item.citation_id === picked) ? picked : "";
   const chosen = evidence.find((item) => item.citation_id === evidenceId);
   const body = caseRunBody(form, evidenceId);
   const summary = summarizeRunRequest(body as unknown as Record<string, unknown>);
@@ -457,6 +512,18 @@ export function AddRunDialog({
           ))}
         </select>
       </div>
+      {blocked.length ? (
+        <div className="case-reason" data-testid="run-add-blocked">
+          <p>런을 시작할 수 없는 증거 (등록만):</p>
+          <ul>
+            {blocked.map((item) => (
+              <li key={item.citation_id}>
+                증거 {item.evidence_number} · {item.display_name} — {item.run_blocked_reason}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       <RunOptionsFields
         form={form}
         errors={validateRunForm({ ...form, root: "-" })}

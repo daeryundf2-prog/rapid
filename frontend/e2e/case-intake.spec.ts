@@ -77,7 +77,8 @@ test("Q-X1: 케이스 만들기 3단계 → 실행 → 접수 5 cards, kept afte
   await dialog.getByLabel("검사관").fill("홍길동");
   await dialog.getByLabel("의뢰처").fill("서울중앙지검");
   expect(await quickAudit(page)).toEqual([]);
-  await next.click();
+  // Enter in a one-line field moves on (review item 12: real browser, not only jsdom).
+  await dialog.getByLabel("의뢰처").press("Enter");
 
   // Step 2: add a second evidence item, delete it, keep one folder item.
   await expect(dialog.getByTestId("wizard-step-evidence")).toBeVisible();
@@ -118,7 +119,8 @@ test("Q-X1: 케이스 만들기 3단계 → 실행 → 접수 5 cards, kept afte
   // Focus returned to the page (not lost on body).
   expect(await page.evaluate(() => document.activeElement !== null)).toBe(true);
 
-  // Wait for the (tiny) run to finish so 처리 문제 fills.
+  // Wait for the (tiny) run to finish so 처리 문제 fills. It must COMPLETE: a failed run (e.g. the
+  // pre-run processing-snapshot.json breaking the run) is a regression, not an acceptable end state.
   await expect
     .poll(
       async () => {
@@ -127,7 +129,12 @@ test("Q-X1: 케이스 만들기 3단계 → 실행 → 접수 5 cards, kept afte
       },
       { timeout: 150_000, intervals: [1000] },
     )
-    .toMatch(/completed|failed/);
+    .toMatch(/^(completed|failed|cancelled)$/);
+  const finished = (await (await request.get(`/api/runs/${runId}`, { headers: HEADERS })).json()) as {
+    status: string;
+    error?: string | null;
+  };
+  expect(finished.status, finished.error ?? "").toBe("completed");
 
   const checkCards = async () => {
     const info = await cardOf(page, "사건 정보");
@@ -174,6 +181,46 @@ test("Q-X1: 케이스 만들기 3단계 → 실행 → 접수 5 cards, kept afte
   await page.keyboard.press("Escape");
   await expect(picker).toBeHidden();
   await expect(page.getByTestId("landing-open")).toBeFocused();
+});
+
+test("Q-X1 review: register-only evidence is pre-checked, saved and skipped", async ({ page }) => {
+  test.setTimeout(120_000);
+  const folder = evidenceFolder();
+  const zip = join(folder, "..", `${Date.now()}-export.zip`);
+  writeFileSync(zip, "PK\u0003\u0004 not a real archive", "utf8");
+  const caseNumber = `E2E-ZIP-${Date.now()}`;
+  await page.goto(`/v2/#token=${TOKEN}`);
+  await page.getByTestId("landing-create").click();
+  const dialog = page.getByRole("dialog", { name: "케이스 만들기" });
+  await dialog.getByLabel("사건 번호").fill(caseNumber);
+  await dialog.getByTestId("wizard-next").click();
+  await dialog.getByTestId("wizard-add-evidence").click();
+  const items = dialog.getByTestId("wizard-evidence");
+  await items.nth(0).getByLabel("증거 종류").selectOption("folder");
+  await items.nth(0).getByLabel("증거 경로").fill(folder);
+  await items.nth(1).getByLabel("증거 종류").selectOption("export");
+  await items.nth(1).getByLabel("증거 경로").fill(zip);
+  await dialog.getByTestId("wizard-next").click();
+  // The server pre-check marked the zip register-only before anything was saved.
+  await expect(dialog.getByTestId("wizard-step-options")).toBeVisible();
+  await expect(dialog.getByTestId("wizard-skipped")).toContainText("E-02");
+  await expect(dialog.getByTestId("wizard-submit")).toHaveText("실행 (런 1개)");
+  await dialog.getByTestId("wizard-submit").click();
+  await expect(page).toHaveURL(/#\/case\/[0-9a-f]+\/intake/);
+  const evidence = await cardOf(page, "증거 목록");
+  const zipRow = evidence.getByRole("row").filter({ has: page.getByRole("rowheader", { name: "E-02" }) });
+  await expect(zipRow.getByTestId("evidence-register-only")).toBeVisible();
+  await expect(zipRow.getByRole("button", { name: "증거 E-02 런 추가" })).toHaveAttribute(
+    "aria-disabled",
+    "true",
+  );
+  await expect(
+    evidence
+      .getByRole("row")
+      .filter({ has: page.getByRole("rowheader", { name: "E-01" }) })
+      .getByRole("button", { name: "증거 E-01 런 추가" }),
+  ).not.toHaveAttribute("aria-disabled", "true");
+  expect(await quickAudit(page)).toEqual([]);
 });
 
 test("Q-X2: a run without a case keeps working and offers 케이스에 연결", async ({ page, request }) => {

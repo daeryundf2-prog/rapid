@@ -35,6 +35,9 @@
       "get": "list_cases_api_cases_get",
       "post": "create_case_api_cases_post"
     },
+    "/api/cases/evidence-check": {
+      "post": "check_evidence_api_cases_evidence_check_post"
+    },
     "/api/cases/{case_id}": {
       "get": "get_case_api_cases__case_id__get",
       "patch": "patch_case_api_cases__case_id__patch"
@@ -42,6 +45,9 @@
     "/api/cases/{case_id}/evidence": {
       "get": "list_evidence_api_cases__case_id__evidence_get",
       "post": "add_evidence_api_cases__case_id__evidence_post"
+    },
+    "/api/cases/{case_id}/evidence/{citation_id}/hash": {
+      "post": "rehash_evidence_api_cases__case_id__evidence__citation_id__hash_post"
     },
     "/api/cases/{case_id}/histogram-baselines": {
       "get": "list_baselines_api_cases__case_id__histogram_baselines_get",

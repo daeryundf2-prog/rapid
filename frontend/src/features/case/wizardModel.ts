@@ -167,3 +167,37 @@ export function evidenceBody(draft: EvidenceDraft): EvidenceCreateBody {
 }
 
 export const WIZARD_STEPS = ["사건 정보", "증거 추가", "처리 옵션"] as const;
+
+/** Result of the evidence pre-check (`POST /api/cases/evidence-check`) for one draft. */
+export interface DraftCheck {
+  /** `draftCheckKey` the check was made for (a later edit of type or path makes it stale). */
+  for: string;
+  ok: boolean;
+  problem: string;
+  runnable: boolean;
+  reason: string;
+  /** The check itself failed (older server / network): the server still gates the run. */
+  unverified?: boolean;
+}
+
+export const draftCheckKey = (draft: EvidenceDraft): string => `${draft.sourceType}|${draft.path.trim()}`;
+
+/** Drafts that start a run: register-only evidence (runnable false) is saved but skipped. */
+export function runnableDrafts(drafts: EvidenceDraft[], checks: Record<string, DraftCheck>): EvidenceDraft[] {
+  return drafts.filter((draft) => checks[draft.key]?.runnable !== false);
+}
+
+/**
+ * One explicit output folder for several runs would make concurrent runs overwrite each other's
+ * summary, case DB and snapshot (the server also refuses it with 409).
+ */
+export function outputDirReason(outputDir: string, runCount: number): string | undefined {
+  if (!outputDir.trim() || runCount <= 1) return undefined;
+  return `출력 폴더를 지정하면 런 1개만 시작할 수 있습니다 (지금 ${runCount}개). 비우면 증거마다 따로 만듭니다.`;
+}
+
+/** Windows-style path identity for matching a saved evidence row (case and separator insensitive). */
+export function samePathText(a: string, b: string): boolean {
+  const norm = (value: string) => value.trim().replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
+  return norm(a) !== "" && norm(a) === norm(b);
+}

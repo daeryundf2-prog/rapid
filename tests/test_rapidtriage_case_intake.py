@@ -7,6 +7,8 @@ import json
 import os
 import sqlite3
 import tempfile
+import threading
+import time
 import unittest
 from contextlib import closing
 from pathlib import Path
@@ -23,12 +25,23 @@ except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
 
 from rapidtriage.core.case_db import CaseDatabase
 from rapidtriage.core.case_db.constants import SCHEMA_SQL
-from rapidtriage.core.case_db.intake import ensure_intake_schema, intake_schema_present
+from rapidtriage.core.case_db.intake import (
+    CaseConflictError,
+    case_integrity_conflict,
+    ensure_intake_schema,
+    intake_schema_present,
+)
 from rapidtriage.core.case_db.schema import register_case_db_functions
-from rapidtriage.core.jobs import RunJob, RunJobStore, RunRequest
+from rapidtriage.core.jobs import (
+    RunJob,
+    RunJobStore,
+    RunRequest,
+    default_run_output_dir,
+)
 
 if HAS_FASTAPI:
     from rapidtriage.api.app import create_app
+    from rapidtriage.api.app.case_workspace import CaseWorkspace
     from rapidtriage.api.app.run_problems import classify_warning
 
 TOKEN = "rapidtriage-test-token"
@@ -302,7 +315,17 @@ class CaseIntakeApiTests(unittest.TestCase):
         linked = self.client.post(link_url, json={"run_id": job.run_id, "evidence_number": "E-07"})
         self.assertEqual(linked.status_code, 201, linked.text)
         self.assertEqual(linked.json()["snapshot"]["snapshot"]["origin"], "linked-run")
-        self.assertTrue((run_dir / "processing-snapshot.json").is_file())
+        # The finished run's output folder is not written after the fact (review item 5): the
+        # snapshot file lives in the workspace and its path is in the audit.
+        self.assertFalse((run_dir / "processing-snapshot.json").exists())
+        workspace = self.client.app.state.case_workspace
+        snapshot_file = Path(linked.json()["snapshot_file"])
+        self.assertTrue(snapshot_file.is_file())
+        self.assertEqual(snapshot_file.parent, workspace.linked_snapshot_dir(job.run_id))
+        with closing(sqlite3.connect(workspace.path())) as connection:
+            params = json.loads(connection.execute(
+                "SELECT params_json FROM audit_event WHERE action = 'run.linked'").fetchone()[0])
+        self.assertEqual(params["snapshot_file"], str(snapshot_file))
         again = self.client.post(link_url, json={"run_id": job.run_id, "evidence_number": "E-08"})
         self.assertEqual(again.status_code, 409)
         self.assertIn("2026-고단-1234", again.json()["detail"])
@@ -428,6 +451,323 @@ class CaseIntakeApiTests(unittest.TestCase):
             dup = self.client.post(f"/api/cases/{case['case_id']}/evidence", json={
                 "evidence_number": "E-02", "source_type": "folder", "path": str(self.evidence_dir).upper()})
             self.assertEqual(dup.status_code, 409)
+
+    # --- adversarial review follow-ups (E1 fixer) ------------------------------------------
+
+    def add_folder_evidence(self, case: dict, number: str = "E-01", path: Path | None = None) -> dict:
+        response = self.client.post(f"/api/cases/{case['case_id']}/evidence", json={
+            "evidence_number": number, "source_type": "folder", "path": str(path or self.evidence_dir)})
+        self.assertEqual(response.status_code, 201, response.text)
+        return response.json()["evidence"]
+
+    def wait_for_job(self, run_id: str, timeout: float = 30.0) -> RunJob:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            job = self.store.get(run_id)
+            if job.status not in ("queued", "running"):
+                return job
+            time.sleep(0.05)
+        self.fail(f"run {run_id} did not finish")
+
+    def test_review1_explicit_output_dir_used_by_active_run_is_409(self) -> None:
+        case = self.create_case()
+        first = self.add_folder_evidence(case)
+        other_folder = self.temp / "evidence2"
+        other_folder.mkdir()
+        second = self.add_folder_evidence(case, "E-02", other_folder)
+        shared = self.temp / "shared-out"
+        busy = RunJob(run_id="busy0001", request=RunRequest(root=str(self.evidence_dir), mode="fraud",
+                                                             output_dir=str(shared)), status="running")
+        self.store._jobs[busy.run_id] = busy
+        url = f"/api/cases/{case['case_id']}/runs"
+        spelled = str(shared).upper() if os.name == "nt" else str(shared)
+        clash = self.client.post(url, json={"evidence_citation_id": second["citation_id"], "mode": "fraud",
+                                            "output_dir": spelled})
+        self.assertEqual(clash.status_code, 409, clash.text)
+        self.assertIn("같은 출력 폴더를 쓰는 런(busy0001)", clash.json()["detail"])
+        # A finished run in that folder does not block (only queued/running ones do).
+        busy.status = "completed"
+        with patch("rapidtriage.core.jobs.execute_run_request", side_effect=fake_execute):
+            ok = self.client.post(url, json={"evidence_citation_id": first["citation_id"], "mode": "fraud",
+                                             "output_dir": str(shared), "wait": True})
+        self.assertEqual(ok.status_code, 202, ok.text)
+
+    def test_review2_register_only_evidence_is_flagged_and_prechecked(self) -> None:
+        case = self.create_case()
+        export = self.temp / "export.zip"
+        export.write_bytes(b"PK\x03\x04 not really")
+        added = self.client.post(f"/api/cases/{case['case_id']}/evidence", json={
+            "evidence_number": "E-01", "source_type": "export", "path": str(export)})
+        self.assertEqual(added.status_code, 201, added.text)
+        self.assertFalse(added.json()["evidence"]["runnable"])
+        self.assertIn("등록만", added.json()["evidence"]["run_blocked_reason"])
+        folder = self.add_folder_evidence(case, "E-02")
+        self.assertTrue(folder["runnable"])
+        rows = {item["evidence_number"]: item for item in self.client.get(
+            f"/api/cases/{case['case_id']}/evidence").json()["evidence"]}
+        self.assertFalse(rows["E-01"]["runnable"])
+        self.assertTrue(rows["E-02"]["runnable"])
+        run = self.client.post(f"/api/cases/{case['case_id']}/runs", json={
+            "evidence_citation_id": rows["E-01"]["citation_id"], "mode": "fraud"})
+        self.assertEqual(run.status_code, 422)
+        self.assertIn("바로 처리할 수 없습니다", run.json()["detail"])
+        # The pre-check the wizard calls before anything is saved.
+        check = self.client.post("/api/cases/evidence-check", json={"path": str(export), "source_type": "export"})
+        self.assertEqual(check.status_code, 200, check.text)
+        self.assertEqual((check.json()["ok"], check.json()["runnable"]), (True, False))
+        self.assertIn("등록만", check.json()["run_blocked_reason"])
+        folder_check = self.client.post("/api/cases/evidence-check", json={
+            "path": str(self.evidence_dir), "source_type": "folder"}).json()
+        self.assertEqual((folder_check["ok"], folder_check["runnable"]), (True, True))
+        missing = self.client.post("/api/cases/evidence-check", json={
+            "path": str(self.temp / "nope"), "source_type": "folder"}).json()
+        self.assertFalse(missing["ok"])
+        self.assertIn("증거 경로가 없습니다", missing["problem"])
+        wrong_kind = self.client.post("/api/cases/evidence-check", json={
+            "path": str(export), "source_type": "folder"}).json()
+        self.assertIn("폴더 증거는 폴더 경로여야", wrong_kind["problem"])
+        relative = self.client.post("/api/cases/evidence-check", json={"path": "rel\\x"}).json()
+        self.assertIn("경로를 허용하지 않습니다", relative["problem"])
+
+    def test_review3_link_with_explicit_evidence_requires_same_path_or_audited_force(self) -> None:
+        case = self.create_case()
+        other_folder = self.temp / "evidence2"
+        other_folder.mkdir()
+        evidence = self.add_folder_evidence(case, "E-01", other_folder)
+        run_dir = self.temp / "old-run"
+        write_run(run_dir, self.evidence_dir)
+        job = self.store.import_completed_run(run_dir)
+        url = f"/api/cases/{case['case_id']}/runs/link"
+        wrong = self.client.post(url, json={"run_id": job.run_id, "evidence_citation_id": evidence["citation_id"]})
+        self.assertEqual(wrong.status_code, 422, wrong.text)
+        self.assertEqual(wrong.json()["detail"], "런 경로가 증거 경로와 다릅니다")
+        no_reason = self.client.post(url, json={"run_id": job.run_id, "evidence_citation_id": evidence["citation_id"],
+                                                "force": True, "force_reason": "  "})
+        self.assertEqual(no_reason.status_code, 422)
+        self.assertEqual(no_reason.json()["detail"], "강제 연결 사유를 입력하세요")
+        self.assertIsNone(self.client.app.state.case_workspace.intake.get_snapshot(job.run_id))
+        forced = self.client.post(url, json={"run_id": job.run_id, "evidence_citation_id": evidence["citation_id"],
+                                             "force": True, "force_reason": "증거 사본 경로로 처리함"})
+        self.assertEqual(forced.status_code, 201, forced.text)
+        self.assertEqual(forced.json()["snapshot"]["snapshot"]["forced_link"]["reason"], "증거 사본 경로로 처리함")
+        with closing(sqlite3.connect(self.client.app.state.case_workspace.path())) as connection:
+            params = json.loads(connection.execute(
+                "SELECT params_json FROM audit_event WHERE action = 'run.linked'").fetchone()[0])
+        self.assertTrue(params["forced"])
+        self.assertEqual(params["force_reason"], "증거 사본 경로로 처리함")
+        self.assertEqual(params["run_root"], str(self.evidence_dir))
+        # Same path (spelled differently) links without force.
+        run_dir2 = self.temp / "old-run2"
+        write_run(run_dir2, other_folder)
+        job2 = self.store.import_completed_run(run_dir2)
+        if os.name == "nt":
+            job2.request = RunRequest(root=str(other_folder).upper(), mode="fraud")
+        same = self.client.post(url, json={"run_id": job2.run_id, "evidence_citation_id": evidence["citation_id"]})
+        self.assertEqual(same.status_code, 201, same.text)
+
+    def test_review4_concurrent_case_insensitive_creates_yield_one_case(self) -> None:
+        intake = self.client.app.state.case_workspace.intake
+        for round_index in range(8):
+            numbers = (f"2026-ABC-{round_index}", f"2026-abc-{round_index}")
+            barrier = threading.Barrier(2)
+            outcomes: list[str] = []
+
+            def create(number: str, case_id: str, barrier: threading.Barrier, outcomes: list[str]) -> None:
+                barrier.wait()
+                try:
+                    intake.create_case(case_id=case_id, fields={"case_number": number}, case_root="", actor="t")
+                    outcomes.append("created")
+                except CaseConflictError as exc:
+                    outcomes.append(str(exc))
+
+            threads = [
+                threading.Thread(target=create, args=(number, f"case-r{round_index}-{i}", barrier, outcomes))
+                for i, number in enumerate(numbers)
+            ]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(30)
+            self.assertEqual(outcomes.count("created"), 1, outcomes)
+            self.assertIn("같은 사건 번호의 케이스가 이미 있습니다", [o for o in outcomes if o != "created"][0])
+        # Two numbers with one citation prefix (normalized) both succeed, with distinct prefixes.
+        barrier = threading.Barrier(2)
+        made: list[dict] = []
+
+        def create_prefix(number: str, index: int) -> None:
+            barrier.wait()
+            made.append(intake.create_case(case_id=f"case-p{index}", fields={"case_number": number},
+                                           case_root="", actor="t"))
+
+        threads = [threading.Thread(target=create_prefix, args=(n, i)) for i, n in enumerate(("P 1", "P-1"))]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(30)
+        self.assertEqual(len(made), 2)
+        self.assertEqual(len({item["citation_prefix"] for item in made}), 2)
+
+    def test_review4_unique_indexes_back_the_precheck(self) -> None:
+        self.create_case(case_number="2026-XYZ")
+        workspace = self.client.app.state.case_workspace
+        with closing(sqlite3.connect(workspace.path())) as connection:
+            with self.assertRaises(sqlite3.IntegrityError) as number_clash:
+                connection.execute(
+                    "INSERT INTO case_record (case_id, name, citation_prefix, created_at, updated_at, case_number) "
+                    "VALUES ('x1', 'x', 'OTHER', 't', 't', '2026-xyz')")
+            prefix = connection.execute("SELECT citation_prefix FROM case_record").fetchone()[0]
+            with self.assertRaises(sqlite3.IntegrityError) as prefix_clash:
+                connection.execute(
+                    "INSERT INTO case_record (case_id, name, citation_prefix, created_at, updated_at, case_number) "
+                    "VALUES ('x2', 'x', ?, 't', 't', 'different')", (prefix,))
+        self.assertIn("같은 사건 번호", str(case_integrity_conflict(number_clash.exception, "2026-xyz")))
+        self.assertIn("인용 ID 접두", str(case_integrity_conflict(prefix_clash.exception, "different")))
+
+    def test_review5_case_run_records_snapshot_file_in_audit(self) -> None:
+        case = self.create_case()
+        evidence = self.add_folder_evidence(case)
+        with patch("rapidtriage.core.jobs.execute_run_request", side_effect=fake_execute):
+            response = self.client.post(f"/api/cases/{case['case_id']}/runs", json={
+                "evidence_citation_id": evidence["citation_id"], "mode": "fraud", "wait": True})
+        self.assertEqual(response.status_code, 202, response.text)
+        with closing(sqlite3.connect(self.client.app.state.case_workspace.path())) as connection:
+            params = json.loads(connection.execute(
+                "SELECT params_json FROM audit_event WHERE action = 'run.created'").fetchone()[0])
+        self.assertEqual(params["snapshot_file"], response.json()["snapshot_file"])
+        self.assertIsNone(params["snapshot_file_error"])
+
+    def test_review7_restart_marks_hashing_interrupted_in_db_and_rehash_recomputes(self) -> None:
+        case = self.create_case()
+        export = self.temp / "export.bin"
+        export.write_bytes(b"bytes to hash")
+        workspace = self.client.app.state.case_workspace
+        stuck = workspace.intake.add_evidence(
+            case["case_id"], evidence_number="E-01", display_name="x", source_type="export", path=str(export),
+            size_bytes=1, hash_verify=True, hash_expected="", hash_status="hashing", hash_message="", actor="t")
+        self.client.close()
+        # A new server over the same workspace DB (the old hash worker is gone).
+        self.client, self.store = client_for(self.temp)
+        listed = self.client.get(f"/api/cases/{case['case_id']}/evidence").json()["evidence"]
+        self.assertEqual(listed[0]["hash_status"], "interrupted")
+        workspace = self.client.app.state.case_workspace
+        with closing(sqlite3.connect(workspace.path())) as connection:
+            stored = connection.execute("SELECT hash_status FROM evidence_source WHERE citation_id = ?",
+                                        (stuck["citation_id"],)).fetchone()[0]
+            audit = json.loads(connection.execute(
+                "SELECT params_json FROM audit_event WHERE action = 'evidence.hash' ORDER BY id DESC").fetchone()[0])
+        self.assertEqual(stored, "interrupted")
+        self.assertEqual(audit["status"], "interrupted")
+        url = f"/api/cases/{case['case_id']}/evidence/{stuck['citation_id']}/hash"
+        again = self.client.post(url, params={"actor": "김분석"})
+        self.assertEqual(again.status_code, 202, again.text)
+        self.assertEqual(again.json()["evidence"]["hash_status"], "hashing")
+        workspace.join_hash_jobs()
+        row = self.client.get(f"/api/cases/{case['case_id']}/evidence").json()["evidence"][0]
+        self.assertEqual(row["hash_status"], "computed")
+        self.assertEqual(row["hashes"]["md5"], hashlib.md5(b"bytes to hash").hexdigest())
+        folder = self.add_folder_evidence(case, "E-02")
+        not_file = self.client.post(f"/api/cases/{case['case_id']}/evidence/{folder['citation_id']}/hash")
+        self.assertEqual(not_file.status_code, 422)
+        self.assertEqual(self.client.post(f"/api/cases/{case['case_id']}/evidence/nope/hash").status_code, 404)
+
+    def test_review8_note_history_rejects_delete(self) -> None:
+        case = self.create_case()
+        self.client.post(f"/api/cases/{case['case_id']}/notes", json={"text": "기록"})
+        with closing(sqlite3.connect(self.client.app.state.case_workspace.path())) as connection:
+            with self.assertRaises(sqlite3.DatabaseError) as raised:
+                connection.execute("DELETE FROM case_note_history")
+            self.assertIn("append-only", str(raised.exception))
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM case_note_history").fetchone()[0], 1)
+
+    def test_review9_blank_name_falls_back_to_case_number(self) -> None:
+        case = self.create_case()
+        blank = self.client.patch(f"/api/cases/{case['case_id']}", json={"name": "   "})
+        self.assertEqual(blank.status_code, 200, blank.text)
+        self.assertEqual(blank.json()["case"]["name"], "2026-고단-1234")
+        both = self.client.patch(f"/api/cases/{case['case_id']}", json={"name": "", "case_number": "2026-새번호"})
+        self.assertEqual(both.json()["case"]["name"], "2026-새번호")
+
+    def test_review13_default_wait_false_case_run(self) -> None:
+        case = self.create_case(case_root=str(self.temp / "case-folder"))
+        evidence = self.add_folder_evidence(case)
+        with patch("rapidtriage.core.jobs.execute_run_request", side_effect=fake_execute):
+            response = self.client.post(f"/api/cases/{case['case_id']}/runs", json={
+                "evidence_citation_id": evidence["citation_id"], "mode": "fraud"})
+            self.assertEqual(response.status_code, 202, response.text)
+            payload = response.json()
+            run_id = payload["run"]["run_id"]
+            self.assertIn(payload["run"]["status"], ("queued", "running", "completed"))
+            job = self.wait_for_job(run_id)
+        self.assertEqual(job.status, "completed", job.error)
+        output_dir = Path(job.request.output_dir or "")
+        self.assertTrue(output_dir.name.startswith("E-01-rapidtriage-run-fraud-"))
+        # The pre-run snapshot file and the run summary share the run's own folder.
+        self.assertTrue(os.path.samefile(payload["snapshot_file"], output_dir / "processing-snapshot.json"))
+        self.assertTrue((output_dir / "processing-snapshot.json").is_file())
+        self.assertTrue((output_dir / "rapidtriage-run-summary.json").is_file())
+        runs = self.client.get(f"/api/cases/{case['case_id']}/runs").json()["runs"]
+        self.assertEqual([(item["run_id"], item["status"]) for item in runs], [(run_id, "completed")])
+
+    def test_review13_file_evidence_case_run(self) -> None:
+        case = self.create_case()
+        added = self.client.post(f"/api/cases/{case['case_id']}/evidence", json={
+            "evidence_number": "E-01", "source_type": "e01", "path": str(self.image)})
+        self.assertEqual(added.status_code, 201, added.text)
+        evidence = added.json()["evidence"]
+        if not evidence["runnable"]:
+            self.skipTest(f"E01 reader unavailable here: {evidence['run_blocked_reason']}")
+        def execute_default(request, *, run_id=None):
+            # Like the real run: no output folder given -> the default next to the evidence file.
+            output_dir = default_run_output_dir(Path(request.root), request.mode, run_id=run_id)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            return json.loads(write_run(output_dir, Path(request.root)).read_text(encoding="utf-8"))
+
+        with patch("rapidtriage.core.jobs.execute_run_request", side_effect=execute_default):
+            response = self.client.post(f"/api/cases/{case['case_id']}/runs", json={
+                "evidence_citation_id": evidence["citation_id"], "mode": "fraud", "wait": True})
+        self.assertEqual(response.status_code, 202, response.text)
+        run = response.json()["run"]
+        self.assertEqual(run["status"], "completed")
+        self.assertEqual(run["request"]["root"], str(self.image))
+        # No case folder: a file's run output goes next to the file.
+        snapshot_file = Path(response.json()["snapshot_file"])
+        self.assertTrue(os.path.samefile(snapshot_file.parent.parent, self.image.parent))
+        self.assertTrue(snapshot_file.parent.name.startswith("disk-rapidtriage-run-fraud-"))
+
+    def test_review13_recorded_zero_parser_errors_skip_opening_the_output(self) -> None:
+        run_dir = self.temp / "run0"
+        artifacts = run_dir / "artifacts"
+        artifacts.mkdir(parents=True)
+        browser = artifacts / "rapidtriage-artifacts-browser.json"
+        browser.write_text(json.dumps({"parser_errors": ["would be counted if opened"]}), encoding="utf-8")
+        email = artifacts / "rapidtriage-artifacts-email.json"
+        email.write_text(json.dumps({"parser_errors": ["email: bad mbox"]}), encoding="utf-8")
+        write_run(
+            run_dir, self.evidence_dir,
+            outputs={"summary": str(run_dir / "rapidtriage-run-summary.json"),
+                     "artifacts_browser": str(browser), "artifacts_email": str(email)},
+            steps=[{"name": "artifacts-browser", "status": "completed", "parser_error_count": 0},
+                   {"name": "artifacts-email", "status": "completed", "parser_error_count": 1}],
+        )
+        job = self.store.import_completed_run(run_dir)
+        from rapidtriage.api.app import run_problems
+
+        with patch.object(run_problems, "read_output_key", wraps=run_problems.read_output_key) as reader:
+            payload = self.client.get(f"/api/runs/{job.run_id}/problems").json()
+        opened = [Path(call.args[0]).name for call in reader.call_args_list]
+        self.assertEqual(opened, ["rapidtriage-artifacts-email.json"])
+        groups = {group["reason_id"]: group for group in payload["groups"]}
+        self.assertEqual(groups["parser-error"]["count"], 1)
+        self.assertEqual(groups["parser-error"]["items"][0]["message"], "email: bad mbox")
+
+    def test_review14_temp_workspace_fallback_logs_warning(self) -> None:
+        env = {key: value for key, value in os.environ.items() if key != "RAPIDTRIAGE_CASES_DB"}
+        with patch.dict(os.environ, env, clear=True):
+            workspace = CaseWorkspace(RunJobStore())
+            with self.assertLogs("rapidtriage.api.app.case_workspace", level="WARNING") as logs:
+                path = workspace.path()
+        self.assertIn("temporary DB", logs.output[0])
+        self.assertIn(str(path), logs.output[0])
 
     def test_routes_require_auth_token(self) -> None:
         bare = TestClient(create_app(RunJobStore(), auth_token=TOKEN, cases_db_path=self.temp / "x.db"))

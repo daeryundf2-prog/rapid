@@ -126,6 +126,7 @@ describe("CaseWizard (Q-X1)", () => {
         };
       },
       "POST /api/cases/case-1/runs": { run: { run_id: "run-new01", status: "queued" }, snapshot: {} },
+      "POST /api/cases/evidence-check": { ok: true, problem: "", runnable: true, run_blocked_reason: "" },
     });
     const onClose = vi.fn();
     const onNotice = vi.fn();
@@ -172,14 +173,17 @@ describe("CaseWizard (Q-X1)", () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled());
 
     const posts = calls.filter((call) => call.method === "POST");
+    // 다음 on the evidence step pre-checked the path before anything was saved.
     expect(posts.map((call) => call.url)).toEqual([
+      "/api/cases/evidence-check",
       "/api/cases",
       "/api/cases/case-1/evidence",
       "/api/cases/case-1/runs",
     ]);
-    expect(posts[0]?.body).toMatchObject({ case_number: "2026-고단-1234", examiner: "홍길동" });
-    expect(posts[1]?.body).toMatchObject({ evidence_number: "E-01", source_type: "e01", verify_hash: true });
-    expect(posts[2]?.body).toEqual(caseRunBody(DEFAULT_RUN_FORM, "C-EVID-000001"));
+    expect(posts[0]?.body).toEqual({ path: "D:\\ev\\a.E01", source_type: "e01" });
+    expect(posts[1]?.body).toMatchObject({ case_number: "2026-고단-1234", examiner: "홍길동" });
+    expect(posts[2]?.body).toMatchObject({ evidence_number: "E-01", source_type: "e01", verify_hash: true });
+    expect(posts[3]?.body).toEqual(caseRunBody(DEFAULT_RUN_FORM, "C-EVID-000001"));
     expect(onNotice).toHaveBeenCalledWith("케이스 2026-고단-1234를 만들고 런 1개를 시작했습니다.");
     expect(window.location.hash).toBe("#/case/run-new01/intake");
   });
