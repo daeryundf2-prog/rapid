@@ -128,20 +128,35 @@ class KakaoTalkWindowsProvider:
 
     def collect(self, root: Path) -> Iterable[ArtifactRecord]:
         records: list[ArtifactRecord] = []
-        for db_path in find_kakaotalk_app_databases(root):
+        app_databases = list(find_kakaotalk_app_databases(root))
+        for db_path in app_databases:
             records.append(collect_kakaotalk_app_database(db_path))
         for edb_path in find_windows_edb_files(root):
             records.extend(collect_edb_kakao_candidates(edb_path))
-        for registry_path in find_registry_sources(root):
+        registry_paths = list(find_registry_sources(root))
+        for registry_path in registry_paths:
             records.extend(collect_registry_crypto_material(registry_path))
             records.extend(collect_registry_user_id_candidates(registry_path))
             records.extend(collect_registry_kakao_candidates(registry_path))
-        for memory_path in find_memory_sources(root):
+        memory_paths = list(find_memory_sources(root))
+        for memory_path in memory_paths:
             records.extend(collect_memory_kakao_candidates(memory_path))
         yield from records
         summary = build_kakaotalk_windows_summary(root, records)
         if summary is not None:
             yield summary
+        # r2 M2: message rows (decrypt only with recovered key material), app inventory with
+        # the Korean reason when that is not possible, and shared-picture rows. Imported here:
+        # core.kakaotalk -> core.docs -> artifacts would be circular at module import time.
+        from .kakaotalk_messages import collect_kakaotalk_message_rows
+
+        yield from collect_kakaotalk_message_rows(
+            root,
+            app_databases=app_databases,
+            registry_paths=registry_paths,
+            memory_paths=memory_paths,
+            has_traces=bool(records),
+        )
 
 
 def find_windows_edb_files(root: Path) -> Iterable[Path]:
