@@ -388,6 +388,13 @@
   color: var(--text-subtle);
 }
 
+/* Derived column the parser cannot fill ("없음 — 사유", axiom-adoption §3.2). */
+.grid-cell-missing {
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* Acquisition-copy host time (files 수정): shown, but not as an evidence time. */
 .grid-cell-copytime {
   color: var(--text-muted);

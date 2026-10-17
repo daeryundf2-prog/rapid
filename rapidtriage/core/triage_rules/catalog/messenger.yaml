@@ -27,8 +27,10 @@ families:
     - conversation_id
     - chat_room
   - key: sender
+    semantic: person_sender
     label: 발화자
   - key: recipient
+    semantic: person_recipient
     label: 상대
     aliases:
     - participants
@@ -43,6 +45,7 @@ families:
     - body
     width: 320
   - key: attachment_name
+    semantic: attachment
     label: 첨부
     aliases:
     - media_reference
@@ -103,6 +106,7 @@ families:
     aliases:
     - candidate_kind
   - key: candidate_value
+    semantic: credential
     label: 후보 값
     format: mono
   - key: candidate_value_sha256

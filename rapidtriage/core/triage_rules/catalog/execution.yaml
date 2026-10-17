@@ -16,6 +16,7 @@ families:
     format: time
     ts_kind: event
   - key: executable_path
+    semantic: path
     label: 실행 파일 경로
     aliases:
     - decoded_name
@@ -47,6 +48,7 @@ families:
     - driver_version
     - product_version
   - key: sha1
+    semantic: hash
     label: SHA-1(파일)
     aliases:
     - file_id
@@ -79,11 +81,13 @@ families:
     label: 시퀀스
     format: number
   - key: user_sid
+    semantic: account
     label: 사용자 SID
     aliases:
     - sid
     format: sid
   - key: user_name
+    semantic: account
     label: 사용자
     aliases:
     - user
@@ -106,9 +110,11 @@ families:
   - key: control_set
     label: 컨트롤 세트 (ControlSet)
   - key: shortcut_target_path
+    semantic: path
     label: 바로 가기 대상
     format: path
   - key: device_instance_id
+    semantic: device
     label: 장치 ID
     aliases:
     - container_id
@@ -161,6 +167,7 @@ families:
   - key: last_run_times
     label: 실행 시각 목록(최대 8)
   - key: prefetch_hash
+    semantic: hash
     label: 프리페치 해시
     aliases:
     - header_prefetch_hash
@@ -207,6 +214,7 @@ families:
     format: time
     ts_kind: run
   - key: referenced_path
+    semantic: path
     label: 참조 경로
     format: path
   - key: referenced_file_name
@@ -237,11 +245,13 @@ families:
     format: time
     ts_kind: event
   - key: executable_path
+    semantic: path
     label: 앱
     aliases:
     - app_id
     format: path
   - key: user
+    semantic: account
     label: 사용자
   - key: bytes_sent
     label: 보낸 바이트

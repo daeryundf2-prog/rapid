@@ -124,7 +124,7 @@ describe("routes", () => {
 });
 
 describe("tree model (탐색 domain tree, console-ia §4)", () => {
-  it("lists 증거 소스, the 전체 보기 views and the 15 forensic domains (16 with 증거 소스)", () => {
+  it("lists 증거 소스, the 전체 보기 views, 통합 보기 and the 15 forensic domains", () => {
     const model = buildTreeModel({ summary: summary(), tree, review, saved: [] });
     // 특이사항 (U-F4) follows 전체 보기; with no flag set it is hidden by default (U-F7).
     expect(model.map((n) => n.label)).toEqual([
@@ -133,7 +133,9 @@ describe("tree model (탐색 domain tree, console-ia §4)", () => {
       "특이사항",
       ...DOMAINS.map((d) => d.label),
     ]);
-    expect(DOMAINS).toHaveLength(15);
+    // 통합 보기 (axiom-adoption §3.2) leads the 15 forensic domains.
+    expect(DOMAINS).toHaveLength(16);
+    expect(DOMAINS[0]?.label).toBe("통합 보기");
     // Workflow places are rail stages, not tree nodes.
     const ids = flattenVisible(model, new Set(model.map((n) => n.id))).map((f) => f.node.id);
     for (const gone of ["intake", "review", "outputs", "analyses"]) expect(ids).not.toContain(gone);
@@ -262,7 +264,7 @@ describe("tree model (탐색 domain tree, console-ia §4)", () => {
 
   it("flattens only expanded branches", () => {
     const model = buildTreeModel({ summary: summary(), tree, review });
-    expect(flattenVisible(model, new Set())).toHaveLength(18);
+    expect(flattenVisible(model, new Set())).toHaveLength(19);
     const open = flattenVisible(model, new Set(["domain:eventlog"]));
     expect(open.filter((f) => f.level === 2).map((f) => f.node.label)).toEqual([
       "전체 이벤트 로그(EVTX·ETL)",

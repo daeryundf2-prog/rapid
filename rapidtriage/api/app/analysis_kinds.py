@@ -19,7 +19,10 @@ Every runner calls an existing core function and only adapts its output to
   ``rapidtriage-search.db``; full or incremental per analysis);
 * ``triage-flags`` -- ``core.triage_rules.engine.run_triage_flags`` (특이사항
   rules over the run's outputs into ``flags.jsonl`` + ``summary.json``; one
-  progress unit per row source).
+  progress unit per row source);
+* ``derived`` -- ``core.derived.engine.run_derived`` (통합 보기 tables
+  ``<table>.jsonl`` + ``summary.json`` from the catalogue's semantic column tags;
+  one progress unit per row source).
 """
 
 from __future__ import annotations
@@ -1889,6 +1892,83 @@ def run_triage_flags_kind(ctx: AnalysisContext) -> None:
     )
 
 
+# --- derived (통합 보기) ----------------------------------------------------------------------
+
+
+class DerivedOptions(_Options):
+    include_analyses: bool = True
+
+
+def derived_inputs(scope: RunScope, *, include_analyses: bool, own_id: str | None = None):
+    """Engine inputs of a run: per-kind artifacts outputs, the files output and completed analyses with rows."""
+    from ...core.derived.engine import SKIPPED_ANALYSIS_KINDS
+    from ...core.triage_rules.engine import TriageInputs
+
+    outputs = scope.summary.get("outputs") if isinstance(scope.summary.get("outputs"), Mapping) else {}
+    artifacts: dict[str, Path] = {}
+    files_path: Path | None = None
+    for name in sorted(outputs):
+        try:
+            path = scope.store.output_path(scope.run_id, str(name))
+        except (KeyError, RuntimeError, PermissionError, FileNotFoundError, OSError):
+            continue
+        if str(name).startswith("artifacts_"):
+            artifacts[str(name).removeprefix("artifacts_")] = path
+        elif name == "files":
+            files_path = path
+    analyses: list[tuple[str, str, Path, int]] = []
+    if include_analyses:
+        for state in ANALYSIS_RUNNER.list_states(scope.output_dir):
+            analysis_id = str(state.get("analysis_id") or "")
+            kind = str(state.get("kind") or "")
+            row_count = int(state.get("row_count") or 0)
+            if (
+                analysis_id == own_id
+                or kind in SKIPPED_ANALYSIS_KINDS
+                or state.get("status") != "completed"
+                or row_count <= 0
+                or not ANALYSIS_ID_PATTERN.fullmatch(analysis_id)
+            ):
+                continue
+            analyses.append((analysis_id, kind, analyses_root(scope.output_dir) / analysis_id / ROWS_FILE_NAME, row_count))
+    return TriageInputs(output_dir=scope.output_dir, artifact_payloads=artifacts, files_path=files_path, analyses=analyses)
+
+
+def run_derived_kind(ctx: AnalysisContext) -> None:
+    """Derived engine (``core.derived``) over the run's outputs into ``analyses/<id>/<table>.jsonl`` + ``summary.json``.
+
+    One progress unit per row source; cancellation is checked between sources and every 2,000 rows.
+    No result rows: the tables are read by ``GET /api/runs/{id}/derived/{table}``.
+    """
+    from ...core.derived.engine import run_derived
+    from ...core.derived.stage import SUMMARY_STATE_KEYS
+    from ...core.triage_rules.engine import Progress
+
+    options: DerivedOptions = ctx.options  # type: ignore[assignment]
+    inputs = derived_inputs(ctx.scope, include_analyses=options.include_analyses, own_id=str(ctx.state.get("analysis_id")))
+    started: list[str] = []
+
+    def begin(kind: str, _index: int, count: int) -> None:
+        if not started:
+            ctx.set_total(count, message=f"행 소스 {count}개 읽기 시작")
+        else:
+            ctx.advance(message=f"{kind} 읽는 중")
+        started.append(kind)
+
+    def rows(kind: str, done: int) -> None:
+        ctx.set_message(f"{kind} {done:,}행 읽음")
+
+    summary = run_derived(
+        inputs,
+        ctx.directory,
+        source_label=f"analysis:{ctx.state.get('analysis_id')}",
+        progress=Progress(begin=begin, rows=rows, check_cancel=ctx.check_cancel),
+    )
+    if started:
+        ctx.advance(message="통합 보기 계산 완료")
+    ctx.summary.update({key: summary.get(key) for key in SUMMARY_STATE_KEYS})
+
+
 # --- shared -------------------------------------------------------------------------------
 
 
@@ -2008,5 +2088,6 @@ KIND_RUNNERS: dict[str, AnalysisSpec] = {
         AnalysisSpec("cross-case", "교차 케이스", "케이스 쌍", CrossCaseOptions, run_cross_case, prepare_cross_case, _COMMON_LABELS),
         AnalysisSpec("search-index", "검색 색인", "출력 파일", SearchIndexOptions, run_search_index, None, _COMMON_LABELS),
         AnalysisSpec("triage-flags", "특이사항", "행 소스", TriageFlagsOptions, run_triage_flags_kind, None, _COMMON_LABELS),
+        AnalysisSpec("derived", "통합 보기", "행 소스", DerivedOptions, run_derived_kind, None, _COMMON_LABELS),
     )
 }

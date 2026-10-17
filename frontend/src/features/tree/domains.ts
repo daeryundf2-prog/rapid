@@ -95,6 +95,7 @@ const inventory = (category?: string): DomainTarget => ({
   fileScope: "inventory",
   ...(category ? { fileCategory: category } : {}),
 });
+const derived = (table: string): DomainTarget => ({ collection: "derived", kind: table });
 const run = (analysis: AnalysisNodeId): DomainTarget => ({
   collection: "analysis",
   kind: analysis,
@@ -131,6 +132,20 @@ function pickLabels(labels: Readonly<Record<string, string>>, types: string[]): 
  * (domainMapping.test.ts); `crossRef` nodes repeat a type in a second domain.
  */
 export const DOMAINS: readonly DomainDef[] = [
+  {
+    // 통합 보기 (axiom-adoption §3.2): derived tables across every family (`/tree` node `derived:<table>`).
+    id: "derived",
+    label: "통합 보기",
+    icon: "link",
+    nodes: [
+      { id: "derived-people", label: "사람 식별자", target: derived("people") },
+      { id: "derived-devices", label: "장치 식별자", target: derived("devices") },
+      { id: "derived-paths", label: "접근 경로", target: derived("paths") },
+      { id: "derived-attachments", label: "첨부", target: derived("attachments") },
+      { id: "derived-credentials", label: "자격 증명/토큰", target: derived("credentials") },
+      { id: "derived-urls", label: "URL 분류", target: derived("urls") },
+    ],
+  },
   {
     id: "os",
     label: "운영체제·계정",

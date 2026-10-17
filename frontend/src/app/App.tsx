@@ -7,6 +7,7 @@ import { caseOpenCommands, registerBuiltinCommands } from "../commands/builtin";
 import { registerCommands } from "../commands/registry";
 import { AnalysisFeature } from "../features/analysis/AnalysisFeature";
 import { CaseFeature } from "../features/case/CaseFeature";
+import { DerivedFeature } from "../features/derived/DerivedFeature";
 import { useFamilyCatalogLoader } from "../features/flags/catalog";
 import { useReviewInvalidation } from "../features/grid/reviewMap";
 import { registerStageCommands } from "../features/stages/stages";
@@ -56,6 +57,7 @@ export function App() {
       <Layout />
       <CaseFeature runId={route.runId} />
       <AnalysisFeature runId={route.runId} />
+      <DerivedFeature runId={route.runId} />
       <LiveRegion />
     </>
   );

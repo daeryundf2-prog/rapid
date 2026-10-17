@@ -28,6 +28,7 @@ from .helpers import (
 )
 from .routes_analyses import build_analyses_router, korean_body_errors
 from .routes_case_db import build_case_db_router
+from .routes_derived import build_derived_router
 from .routes_flags import build_flags_router
 from .routes_ioc import build_ioc_router
 from .routes_media import build_media_router
@@ -165,6 +166,7 @@ def create_app(
     api.include_router(build_case_db_router(store, open_request_case_database, resolve_request_catalog_path))
     api.include_router(build_runs_router(store))
     api.include_router(build_flags_router(store))
+    api.include_router(build_derived_router(store))
     api.include_router(build_analyses_router(store, owner=analysis_owner))
     api.include_router(build_ioc_router(store))
     api.include_router(build_media_router(store))

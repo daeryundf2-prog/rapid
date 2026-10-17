@@ -90,8 +90,14 @@ export const KIND_LABEL: Record<AnalysisKind, string> = {
   "cross-case": "교차 케이스 상관 분석",
 };
 
+/** Server kinds that are not workbench nodes but still show up in the job list / announcements. */
+const OTHER_KIND_LABEL: Record<string, string> = {
+  "triage-flags": "특이사항",
+  derived: "통합 보기",
+};
+
 export function kindLabel(kind: string): string {
-  return (KIND_LABEL as Record<string, string>)[kind] ?? kind;
+  return (KIND_LABEL as Record<string, string>)[kind] ?? OTHER_KIND_LABEL[kind] ?? kind;
 }
 
 /** Dialog notes: expected scope and cautions ("예상 범위·주의"). */

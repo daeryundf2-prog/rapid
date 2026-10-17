@@ -44,6 +44,7 @@ export const EXPLORE_VIEWS: readonly CollectionId[] = [
   "indicators",
   "search",
   "analysis",
+  "derived",
 ];
 
 /** The stage a collection belongs to. */
@@ -211,6 +212,7 @@ export const COLLECTION_IDS: readonly CollectionId[] = [
   "outputs",
   "analysis",
   "process",
+  "derived",
 ];
 
 const REVIEW_STATUSES: readonly ReviewStatus[] = [
@@ -279,6 +281,8 @@ export function parseHash(hash: string): Route {
     sub = segments[3];
   }
   if (sub && (route.collection === "artifacts" || route.collection === "analysis")) route.kind = sub;
+  // 통합 보기: `{sub}` is the table (people, devices, paths, attachments, credentials, urls).
+  if (sub && route.collection === "derived") route.kind = sub;
   if (sub && route.collection === "review" && (REVIEW_STATUSES as readonly string[]).includes(sub)) {
     route.status = sub as ReviewStatus;
   }
@@ -369,6 +373,7 @@ export function serializeRoute(route: Route): string {
       if ((collection === "artifacts" || collection === "analysis") && route.kind) {
         path += `/${encodeURIComponent(route.kind)}`;
       }
+      if (collection === "derived" && route.kind) path += `/${encodeURIComponent(route.kind)}`;
   }
   const query: string[] = [];
   if (

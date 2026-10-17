@@ -25,21 +25,26 @@ families:
   - key: subject
     label: 주제
   - key: author
+    semantic: person
     label: 작성자
     aliases:
     - author_candidates
   - key: last_modified_by
+    semantic: person
     label: 마지막 수정자
   - key: lock_owner
+    semantic: account
     label: 잠금 소유자
     aliases:
     - lock_owner_ansi
   - key: lock_owner_host
+    semantic: device
     label: 잠금 호스트
   - key: company
     label: 회사
   aux_columns:
   - key: manager
+    semantic: person
     label: 관리자
   - key: application
     label: 작성 프로그램
@@ -73,6 +78,7 @@ families:
   - key: macro_profile
     label: 매크로
   - key: external_reference_candidates
+    semantic: url
     label: 외부 참조
   - key: risk_flags
     label: 위험 표시

@@ -11,6 +11,7 @@ families:
     ts_kind: modified
     width: 170
   - key: source_path
+    semantic: path
     label: 압축 파일
     format: path
   - key: archive_format

@@ -325,6 +325,10 @@ export interface DomainCount {
   neverRan?: boolean;
 }
 
+/** 통합 보기 node of a run without a derived set (older run, or the step failed). */
+export const NO_DERIVED_REASON =
+  "통합 보기 결과가 없습니다 — 명령 팔레트의 '통합 보기 다시 만들기'로 만드세요";
+
 /** U-F7 reason of an analysis node that never ran. */
 export const NEVER_RAN_REASON = "분석 안 됨 — 처리 단계에서 실행하면 결과가 여기에 나타납니다";
 
@@ -376,6 +380,12 @@ export function domainNodeCount(target: DomainTarget, input: TreeModelInput): Do
       icon: status === "completed" ? undefined : nodeStateIcon(status),
       ...(statusKnown && status === null && count === undefined ? { neverRan: true } : {}),
     };
+  }
+  if (target.collection === "derived") {
+    // 통합 보기: distinct values of the table (`/tree` `derived:<table>`); no set yet → hidden with the reason.
+    if (!tree) return { count: undefined };
+    const node = findServerNode(tree, `derived:${target.kind ?? ""}`);
+    return node ? known(node.count, true) : { count: 0, disabledReason: NO_DERIVED_REASON };
   }
   if (target.collection === "files" && target.fileScope && !target.fileCategory) {
     return inventoryTotal(input);
