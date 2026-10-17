@@ -7,7 +7,7 @@ import { useAppStore } from "../../state/store";
 import { runDisabledReason } from "../analysis/commands";
 import { caseRoute, otherCaseIds } from "../analysis/crossCase";
 import { useAnalysisStore } from "../analysis/store";
-import { caseCitationParts } from "../case/caseLink";
+import { caseCitationParts, citationDisabledReason, resolveCaseLink } from "../case/caseLink";
 import { buildReviewToolGridCommands } from "../review/gridTools";
 import { recordCitationParts } from "../viewer/citation";
 import { PIVOT_LABELS, PIVOT_ORDER, type PivotId, recordPivots } from "../viewer/pivots";
@@ -208,10 +208,12 @@ export function buildGridCommands(hostRef: { current: GridCommandHost }): Comman
       label: "인용 복사",
       group: "grid",
       icon: "quote",
-      disabledReason: rowDisabled(false),
+      // 사건=…/증거=… prefix: blocked until the run's case link is known (never copied without it).
+      disabledReason: (ctx) => rowDisabled(false)(ctx) ?? citationDisabledReason(ctx.runId),
       run: async (ctx) => {
         const row = focused();
         if (!row) return;
+        await resolveCaseLink(ctx.runId);
         await copyText(citationText(row, ctx.runId));
         host().toast("인용을 복사했습니다.", "info");
       },

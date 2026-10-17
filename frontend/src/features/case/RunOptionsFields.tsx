@@ -58,7 +58,7 @@ export function RunOptionsFields({
           checked={form.readOnly}
           onChange={(e) => onChange("readOnly", e.target.checked)}
         />{" "}
-        읽기 전용 (증거 폴더에 쓰지 않음)
+        읽기 전용 (증거 원본 파일을 바꾸지 않음)
       </label>
 
       <button

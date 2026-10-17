@@ -38,6 +38,9 @@ export interface CaseEvidence {
   hashes: Partial<Record<"md5" | "sha1" | "sha256", string>>;
   added_at: string | null;
   runs: CaseRunBrief[];
+  /** The run gate: folders always run; a file only when an adapter reads it directly (else 등록만). */
+  runnable?: boolean;
+  run_blocked_reason?: string;
 }
 
 export interface CaseInfo {
@@ -212,6 +215,37 @@ export async function listEvidence(caseId: string): Promise<CaseEvidence[]> {
   return (await api<{ evidence: CaseEvidence[] }>(`${caseUrl(caseId)}/evidence`)).evidence ?? [];
 }
 
+/** `POST /api/cases/evidence-check`: path policy, kind and whether a run can start (nothing is saved). */
+export interface EvidenceCheck {
+  ok: boolean;
+  problem: string;
+  runnable: boolean;
+  run_blocked_reason: string;
+}
+
+export async function checkEvidence(path: string, sourceType: EvidenceType): Promise<EvidenceCheck> {
+  const raw = await api<Partial<EvidenceCheck>>("/api/cases/evidence-check", {
+    method: "POST",
+    body: JSON.stringify({ path, source_type: sourceType }),
+  });
+  return {
+    ok: raw?.ok !== false,
+    problem: raw?.problem ?? "",
+    runnable: raw?.runnable !== false,
+    run_blocked_reason: raw?.run_blocked_reason ?? "",
+  };
+}
+
+/** `POST /api/cases/{id}/evidence/{eid}/hash`: hash a file evidence item (again). */
+export async function rehashEvidence(caseId: string, citationId: string, actor = ""): Promise<CaseEvidence> {
+  const query = actor ? `?actor=${enc(actor)}` : "";
+  return (
+    await api<{ evidence: CaseEvidence }>(`${caseUrl(caseId)}/evidence/${enc(citationId)}/hash${query}`, {
+      method: "POST",
+    })
+  ).evidence;
+}
+
 /** `POST /api/cases/{id}/runs` = RunCreateRequest + evidence_citation_id (root = the evidence path). */
 export type CaseRunBody = Omit<RunCreateBody, "root"> & { evidence_citation_id: string };
 
@@ -230,6 +264,9 @@ export interface CaseRunLinkBody {
   run_id: string;
   evidence_citation_id?: string | null;
   evidence_number?: string | null;
+  /** Link to evidence whose path differs from the run root; the reason goes to the audit. */
+  force?: boolean;
+  force_reason?: string;
 }
 
 export function linkCaseRun(caseId: string, body: CaseRunLinkBody): Promise<unknown> {

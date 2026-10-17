@@ -1,14 +1,25 @@
 /**
  * 케이스 만들기 (AXIOM adoption E1, plan §3.1): a 3-step modal — 사건 정보 / 증거 추가 N (해시 검증 토글)
  * / 처리 옵션 (the quick-run dialog's option fields + a summary built from the exact request body).
- * 실행 creates the case, adds each evidence item and starts one run per item, then opens the first
- * run's 접수 stage. A failure keeps what was already saved (the case, saved evidence) and retrying
- * continues from the failed call.
+ * 다음 on the evidence step pre-checks every path (`POST /api/cases/evidence-check`: path policy, kind,
+ * runnable). 실행 creates the case, adds each evidence item and starts one run per RUNNABLE item
+ * (register-only evidence, e.g. a .zip export, is saved and skipped with a notice), then opens the
+ * first run's 접수 stage. A failure keeps what was already saved (the case, saved evidence) and
+ * retrying continues from the failed call; an evidence 409 adopts the already-saved row.
  */
 
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useId, useRef, useState } from "react";
-import { addEvidence, type CaseRunBody, createCase, createCaseRun, koCompare } from "../../api/cases";
+import { type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
+import {
+  addEvidence,
+  type CaseEvidence,
+  type CaseRunBody,
+  checkEvidence,
+  createCase,
+  createCaseRun,
+  koCompare,
+  listEvidence,
+} from "../../api/cases";
 import { ApiError } from "../../api/client";
 import { navigate } from "../tree/adapter";
 import { ErrorText } from "./ErrorText";
@@ -22,6 +33,8 @@ import {
   CASE_TYPE_SUGGESTIONS,
   type CaseInfoForm,
   caseBody,
+  type DraftCheck,
+  draftCheckKey,
   EMPTY_CASE_INFO,
   EVIDENCE_TYPE_LABEL,
   type EvidenceDraft,
@@ -29,6 +42,9 @@ import {
   evidenceListReason,
   firstError,
   newEvidenceDraft,
+  outputDirReason,
+  runnableDrafts,
+  samePathText,
   validateCaseInfo,
   validateEvidenceDraft,
   WIZARD_STEPS,
@@ -48,6 +64,34 @@ export function caseRunBody(form: RunForm, evidenceCitationId: string): CaseRunB
 export function caseRunFormReason(form: RunForm): string | undefined {
   return firstRunFormError(validateRunForm({ ...form, root: "-" }));
 }
+
+/** Pre-check one draft; a failed check (older server, network) leaves the gate to the server. */
+async function checkDraft(draft: EvidenceDraft): Promise<DraftCheck> {
+  const key = draftCheckKey(draft);
+  try {
+    const result = await checkEvidence(draft.path.trim(), draft.sourceType);
+    return {
+      for: key,
+      ok: result.ok,
+      problem: result.problem,
+      runnable: result.runnable,
+      reason: result.run_blocked_reason,
+    };
+  } catch {
+    return { for: key, ok: true, problem: "", runnable: true, reason: "", unverified: true };
+  }
+}
+
+/**
+ * The saved row a 409 on 증거 추가 refers to (a retry after the first response was lost): the row
+ * with this path (the server keeps one row per path, so its number is the one citations must use),
+ * else null. A row with the same number but another path is a real conflict, not adopted.
+ */
+export function adoptableEvidence(rows: CaseEvidence[], draft: EvidenceDraft): CaseEvidence | null {
+  return rows.find((row) => samePathText(row.path, draft.path)) ?? null;
+}
+
+const INPUT_TYPES_WITHOUT_ENTER = new Set(["checkbox", "radio", "button", "submit", "reset", "file"]);
 
 interface Progress {
   caseId: string | null;
@@ -83,6 +127,8 @@ export function CaseWizard({
   const [runForm, setRunForm] = useState<RunForm>(DEFAULT_RUN_FORM);
   const [advanced, setAdvanced] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [checks, setChecks] = useState<Record<string, DraftCheck>>({});
   const [error, setError] = useState("");
   const [progress, setProgress] = useState<Progress>({
     caseId: null,
@@ -96,15 +142,37 @@ export function CaseWizard({
   const evidenceReason = evidenceListReason(drafts);
   const runErrors = validateRunForm({ ...runForm, root: "-" });
   const runReason = caseRunFormReason(runForm);
+  const sortedDrafts = [...drafts].sort((a, b) => koCompare(a.evidenceNumber, b.evidenceNumber));
+  // Pre-check results still valid for the draft as it is now (editing type/path makes them stale).
+  const freshChecks: Record<string, DraftCheck> = {};
+  for (const draft of drafts) {
+    const check = checks[draft.key];
+    if (check && check.for === draftCheckKey(draft)) freshChecks[draft.key] = check;
+  }
+  const checkProblem = drafts
+    .map((draft) => {
+      const check = freshChecks[draft.key];
+      return check && !check.ok ? `증거 ${draft.evidenceNumber.trim()}: ${check.problem}` : undefined;
+    })
+    .find(Boolean);
+  const uncheckedReason = drafts.some((draft) => !freshChecks[draft.key])
+    ? "증거 경로를 확인하지 않았습니다. 이전 단계에서 다음을 누르세요"
+    : undefined;
+  const toRun = runnableDrafts(sortedDrafts, freshChecks);
+  const registerOnly = sortedDrafts.filter((draft) => freshChecks[draft.key]?.runnable === false);
   const submitReason = busy
     ? "처리 중입니다"
-    : runIsActive
+    : runIsActive && toRun.length > 0
       ? "실행 중 런이 있습니다"
-      : (infoReason ?? evidenceReason ?? runReason);
+      : (infoReason ??
+        evidenceReason ??
+        uncheckedReason ??
+        checkProblem ??
+        runReason ??
+        outputDirReason(runForm.outputDir, toRun.length));
   const caseLocked = Boolean(progress.caseId);
   const previewBody = caseRunBody(runForm, "");
   const summary = summarizeRunRequest(previewBody as unknown as Record<string, unknown>);
-  const sortedDrafts = [...drafts].sort((a, b) => koCompare(a.evidenceNumber, b.evidenceNumber));
   const stepTitleId = `${baseId}-step-title`;
   const stepTitle = useRef<HTMLHeadingElement>(null);
   const shownStep = useRef(step);
@@ -135,11 +203,26 @@ export function CaseWizard({
       for (const draft of drafts) {
         if (state.evidence[draft.key]) continue;
         stage = `증거 ${draft.evidenceNumber.trim()} 추가`;
-        const saved = await addEvidence(caseId, evidenceBody(draft));
+        let saved: CaseEvidence;
+        try {
+          saved = await addEvidence(caseId, evidenceBody(draft));
+        } catch (failure) {
+          // A retry after a lost response: the row already exists — adopt it instead of failing forever.
+          if (!(failure instanceof ApiError && failure.status === 409)) throw failure;
+          const adopted = adoptableEvidence(await listEvidence(caseId), draft);
+          if (!adopted) throw failure;
+          saved = adopted;
+          if (adopted.evidence_number !== draft.evidenceNumber.trim()) {
+            // The server keeps one row per path; citations use that row's number.
+            setDrafts((list) =>
+              list.map((d) => (d.key === draft.key ? { ...d, evidenceNumber: adopted.evidence_number } : d)),
+            );
+          }
+        }
         state.evidence[draft.key] = saved.citation_id;
         setProgress({ ...state, evidence: { ...state.evidence } });
       }
-      for (const draft of sortedDrafts) {
+      for (const draft of toRun) {
         if (state.runs[draft.key]) continue;
         stage = `증거 ${draft.evidenceNumber.trim()} 런 시작`;
         const result = await createCaseRun(caseId, caseRunBody(runForm, state.evidence[draft.key] as string));
@@ -148,8 +231,16 @@ export function CaseWizard({
       }
       void queryClient.invalidateQueries({ queryKey: ["runs"] });
       void queryClient.invalidateQueries({ queryKey: ["cases"] });
-      const runIds = sortedDrafts.map((draft) => state.runs[draft.key]).filter(Boolean) as string[];
-      onNotice?.(`케이스 ${state.caseNumber}를 만들고 런 ${runIds.length}개를 시작했습니다.`);
+      const runIds = toRun.map((draft) => state.runs[draft.key]).filter(Boolean) as string[];
+      const skipped = registerOnly.map((draft) => draft.evidenceNumber.trim()).join(", ");
+      const skippedNote = registerOnly.length
+        ? ` 등록만 한 증거 ${registerOnly.length}개(${skipped})는 바로 처리할 수 없는 형식이라 런을 시작하지 않았습니다.`
+        : "";
+      onNotice?.(
+        runIds.length
+          ? `케이스 ${state.caseNumber}를 만들고 런 ${runIds.length}개를 시작했습니다.${skippedNote}`
+          : `케이스 ${state.caseNumber}를 만들었습니다.${skippedNote}`,
+      );
       onClose();
       if (runIds[0]) navigate({ runId: runIds[0], collection: "intake" });
     } catch (failure) {
@@ -160,16 +251,46 @@ export function CaseWizard({
     }
   };
 
+  const checkAll = async () => {
+    setChecking(true);
+    const results: Record<string, DraftCheck> = {};
+    for (const draft of drafts) {
+      const current = checks[draft.key];
+      results[draft.key] =
+        current && current.for === draftCheckKey(draft) && !current.unverified
+          ? current
+          : await checkDraft(draft);
+    }
+    setChecks(results);
+    setChecking(false);
+    if (Object.values(results).every((result) => result.ok)) setStep(2);
+  };
+
   const next = () => {
     if (step === 0) {
       setInfoTouched(true);
       if (!infoReason) setStep(1);
     } else if (step === 1) {
       setEvidenceAttempted(true);
-      if (!evidenceReason) setStep(2);
+      if (!evidenceReason && !checking && !checkProblem) void checkAll();
     }
   };
-  const nextReason = step === 0 ? infoReason : step === 1 ? evidenceReason : undefined;
+  const nextReason =
+    step === 0
+      ? infoReason
+      : step === 1
+        ? (evidenceReason ?? (checking ? "증거 경로를 확인하는 중입니다" : checkProblem))
+        : undefined;
+  /** Enter in a one-line field = 다음 (or 실행 on the last step); IME composition Enter is ignored. */
+  const onFormKeyDown = (event: KeyboardEvent<HTMLFormElement>) => {
+    if (event.key !== "Enter" || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) return;
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement) || INPUT_TYPES_WITHOUT_ENTER.has(target.type)) return;
+    event.preventDefault();
+    if (step < 2) next();
+    else void submit();
+  };
   const caseNumberError = infoTouched ? infoErrors.caseNumber : undefined;
 
   const footer = (
@@ -200,7 +321,7 @@ export function CaseWizard({
             onClick={() => void submit()}
             data-testid="wizard-submit"
           >
-            {busy ? "실행 중…" : `실행 (런 ${drafts.length}개)`}
+            {busy ? "실행 중…" : toRun.length ? `실행 (런 ${toRun.length}개)` : "케이스만 만들기 (런 없음)"}
           </ReasonButton>
         )}
       </div>
@@ -228,16 +349,22 @@ export function CaseWizard({
         {step + 1}단계 · {WIZARD_STEPS[step]}
       </h3>
 
-      {/* Enter in a field moves on (다음) or starts the runs on the last step; textareas keep Enter. */}
+      {/* Enter in a one-line field moves on (다음) or starts the runs on the last step (onFormKeyDown);
+          textareas, switches and buttons keep Enter. The hidden submit button keeps implicit
+          submission defined for assistive tech that submits the form directly. */}
       <form
         className="wizard-form"
         noValidate
+        onKeyDown={onFormKeyDown}
         onSubmit={(event) => {
           event.preventDefault();
           if (step < 2) next();
           else void submit();
         }}
       >
+        <button type="submit" hidden tabIndex={-1} aria-hidden="true">
+          {step < 2 ? "다음" : "실행"}
+        </button>
         {step === 0 ? (
           <section aria-labelledby={stepTitleId} className="wizard-panel" data-testid="wizard-step-info">
             {caseLocked ? (
@@ -319,7 +446,7 @@ export function CaseWizard({
               />
               <p id={`${baseId}-root-hint`} className={infoErrors.caseRoot ? "case-error" : "case-reason"}>
                 {infoErrors.caseRoot ??
-                  "지정하면 런 출력이 이 폴더 아래 증거 번호별로 만들어집니다. 비우면 증거 옆에 만듭니다."}
+                  "지정하면 런 출력이 이 폴더 아래 증거 번호별로 만들어집니다. 비우면 폴더 증거는 그 폴더 안에, 파일 증거는 파일 옆에 만듭니다 (그 위치에 쓸 수 있어야 합니다)."}
               </p>
             </div>
           </section>
@@ -331,10 +458,21 @@ export function CaseWizard({
             {drafts.map((draft, index) => {
               const saved = progress.evidence[draft.key];
               const label = draft.evidenceNumber.trim() || `${index + 1}번째`;
+              const check = freshChecks[draft.key];
               return (
                 <fieldset key={draft.key} className="case-evidence" data-testid="wizard-evidence">
                   <legend>증거 {label}</legend>
                   {saved ? <p className="case-reason">케이스에 저장됨 · {saved}</p> : null}
+                  {check && !check.ok ? (
+                    <p className="case-error" data-testid="wizard-evidence-problem">
+                      경로 확인: {check.problem}
+                    </p>
+                  ) : null}
+                  {check?.ok && !check.runnable ? (
+                    <p className="case-reason" data-testid="wizard-register-only">
+                      등록만: {check.reason}
+                    </p>
+                  ) : null}
                   <EvidenceFields
                     draft={draft}
                     errors={validateEvidenceDraft(draft, drafts)}
@@ -370,6 +508,7 @@ export function CaseWizard({
               증거 추가
             </button>
             {evidenceAttempted && evidenceReason ? <p className="case-error">{evidenceReason}</p> : null}
+            {checking ? <p aria-busy="true">증거 경로를 확인하는 중…</p> : null}
           </section>
         ) : null}
 
@@ -383,6 +522,18 @@ export function CaseWizard({
               onAdvancedChange={setAdvanced}
               idPrefix={`${baseId}-run`}
             />
+            {outputDirReason(runForm.outputDir, toRun.length) ? (
+              <p className="case-error" data-testid="wizard-output-dir-problem">
+                {outputDirReason(runForm.outputDir, toRun.length)}
+              </p>
+            ) : null}
+            {registerOnly.length ? (
+              <p className="case-reason" data-testid="wizard-skipped">
+                등록만 하는 증거 {registerOnly.length}개 (
+                {registerOnly.map((draft) => draft.evidenceNumber.trim()).join(", ")}) — 케이스에 저장하지만
+                런은 시작하지 않습니다.
+              </p>
+            ) : null}
             <h4 className="wizard-summary-title">요약</h4>
             <dl className="detail-grid" aria-label="사건 정보 요약">
               <dt>사건 번호</dt>
@@ -409,6 +560,7 @@ export function CaseWizard({
                   <th scope="col">종류</th>
                   <th scope="col">경로</th>
                   <th scope="col">해시 검증</th>
+                  <th scope="col">런</th>
                 </tr>
               </thead>
               <tbody>
@@ -419,6 +571,13 @@ export function CaseWizard({
                     <td className="mono break-all">{draft.path.trim()}</td>
                     <td>
                       {draft.verifyHash ? (draft.expectedHash.trim() ? "기대값 비교" : "계산") : "안 함"}
+                    </td>
+                    <td>
+                      {freshChecks[draft.key]?.runnable === false
+                        ? `등록만 — ${freshChecks[draft.key]?.reason ?? ""}`
+                        : freshChecks[draft.key]?.unverified
+                          ? "시작 (서버에서 확인)"
+                          : "시작"}
                     </td>
                   </tr>
                 ))}

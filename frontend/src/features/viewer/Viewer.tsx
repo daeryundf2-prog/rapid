@@ -13,6 +13,7 @@ import { MiddlePath } from "../../components/MiddlePath";
 import type { Command } from "../../contracts/command";
 import type { MarkAction, ViewerMode, ViewerTarget } from "../../contracts/viewer";
 import { Icon } from "../../icons";
+import { resolveCaseLink } from "../case/caseLink";
 import { FlagBanner } from "../flags/FlagCell";
 import { currentTimezone } from "../grid/columns/common";
 import { storeNotice } from "../grid/reviewActions";
@@ -274,6 +275,8 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
       if (!target) return;
       try {
         const sha = target.sourcePath ? await ensureSha256().catch(() => null) : null;
+        // The case prefix (사건/증거) must be known first (the viewer window loads it on demand).
+        await resolveCaseLink(target.runId);
         await writeClipboard(buildCitation({ ...target, highlight }, sha, row, currentTimezone()));
         announce("인용을 복사했습니다.");
       } catch (error) {

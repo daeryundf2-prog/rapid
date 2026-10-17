@@ -11,6 +11,7 @@ import { announce } from "../../a11y";
 import {
   addCaseNote,
   type CaseDetail,
+  type CaseEvidence,
   type CaseNotes,
   deleteCaseNote,
   getCase,
@@ -19,6 +20,7 @@ import {
   listCaseNotes,
   type ProcessingSnapshot,
   type RunProblems,
+  rehashEvidence,
 } from "../../api/cases";
 import { CommandButton } from "../../commands/CommandButton";
 import { StatusBadge } from "../../components/Badge";
@@ -146,6 +148,38 @@ export function CaseInfoCard({ detail }: { detail: CaseDetail }) {
 
 // --- 증거 목록 -------------------------------------------------------------------
 
+/** Hash statuses a file evidence item can be hashed (again) from: never asked, failed, cut by a restart. */
+const REHASH_FROM = new Set(["not-requested", "failed", "interrupted"]);
+
+/** "해시 계산" / "해시 다시 계산" for a file evidence item (POST …/evidence/{eid}/hash). */
+export function EvidenceHashButton({ caseId, item }: { caseId: string; item: CaseEvidence }) {
+  const client = useQueryClient();
+  const rehash = useMutation({
+    mutationFn: () => rehashEvidence(caseId, item.citation_id),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: caseQueryKey(caseId) });
+      announce(`증거 ${item.evidence_number} 해시 계산을 시작했습니다`);
+    },
+    onError: (error: unknown) =>
+      announce(`해시 계산 실패: ${error instanceof Error ? error.message : String(error)}`, {
+        politeness: "assertive",
+      }),
+  });
+  // Folder evidence (no size) is never hashed; a running hash cannot be restarted.
+  if (item.size_bytes === null || !REHASH_FROM.has(item.hash_status)) return null;
+  const label = item.hash_status === "not-requested" ? "해시 계산" : "해시 다시 계산";
+  return (
+    <ReasonButton
+      className="button ghost"
+      aria-label={`증거 ${item.evidence_number} ${label}`}
+      reason={rehash.isPending ? "요청 중입니다" : undefined}
+      onClick={() => rehash.mutate()}
+    >
+      {label}
+    </ReasonButton>
+  );
+}
+
 export function CaseEvidenceCard({ detail, currentRunId }: { detail: CaseDetail; currentRunId: string }) {
   const openDialog = useCaseDialogs((s) => s.openDialog);
   const evidence = [...detail.evidence].sort((a, b) => koCompare(a.evidence_number, b.evidence_number));
@@ -182,6 +216,7 @@ export function CaseEvidenceCard({ detail, currentRunId }: { detail: CaseDetail;
                   <ToneChip tone={HASH_TONE[item.hash_status] ?? ""} title={item.hash_message || undefined}>
                     {item.hash_status_label}
                   </ToneChip>
+                  <EvidenceHashButton caseId={detail.case_id} item={item} />
                 </td>
                 <td>
                   {item.runs.length === 0 ? (
@@ -209,16 +244,25 @@ export function CaseEvidenceCard({ detail, currentRunId }: { detail: CaseDetail;
                   )}
                 </td>
                 <td>
-                  <button
-                    type="button"
+                  {item.runnable === false ? (
+                    <span className="dash-note" data-testid="evidence-register-only">
+                      등록만
+                    </span>
+                  ) : null}
+                  <ReasonButton
                     className="button ghost"
                     aria-label={`증거 ${item.evidence_number} 런 추가`}
+                    reason={
+                      item.runnable === false
+                        ? item.run_blocked_reason || "바로 처리할 수 없는 증거입니다"
+                        : undefined
+                    }
                     onClick={() =>
                       openDialog("run-add", { caseId: detail.case_id, evidenceCitationId: item.citation_id })
                     }
                   >
                     런 추가
-                  </button>
+                  </ReasonButton>
                 </td>
               </tr>
             ))}

@@ -20,13 +20,24 @@ export interface RunCaseLink {
 interface CaseLinkState {
   /** runId → link; `null` = loaded, no case; missing key = unknown yet. */
   byRun: Record<string, RunCaseLink | null>;
+  /** runId → the snapshot query is in flight (citation copy waits for it). */
+  loading: Record<string, boolean>;
   setLink: (runId: string, link: RunCaseLink | null) => void;
+  setLoading: (runId: string, loading: boolean) => void;
 }
 
 export const useCaseLinks = create<CaseLinkState>((set) => ({
   byRun: {},
+  loading: {},
   setLink: (runId, link) => set((state) => ({ byRun: { ...state.byRun, [runId]: link } })),
+  setLoading: (runId, loading) =>
+    set((state) =>
+      Boolean(state.loading[runId]) === loading ? state : { loading: { ...state.loading, [runId]: loading } },
+    ),
 }));
+
+/** Disabled reason of citation copy while the run's case link is still loading. */
+export const CASE_LINK_LOADING_REASON = "케이스 정보를 불러오는 중입니다";
 
 export function linkFromSnapshot(snapshot: ProcessingSnapshot | undefined): RunCaseLink | null {
   if (snapshot?.source !== "case-db" || !snapshot.case_id) return null;
@@ -46,16 +57,58 @@ export const snapshotQueryKey = (runId: string) => ["processing-snapshot", runId
 /** Snapshot query for `runId`, mirrored into the link store. */
 export function useRunCaseLink(runId: string | null) {
   const setLink = useCaseLinks((s) => s.setLink);
+  const setLoading = useCaseLinks((s) => s.setLoading);
   const query = useQuery({
     queryKey: snapshotQueryKey(runId ?? ""),
     queryFn: () => getProcessingSnapshot(runId as string),
     enabled: Boolean(runId),
     retry: false,
   });
+  const waiting = Boolean(runId) && query.data === undefined && !query.isError;
+  useEffect(() => {
+    if (runId) setLoading(runId, waiting);
+  }, [runId, waiting, setLoading]);
   useEffect(() => {
     if (runId && query.data) setLink(runId, linkFromSnapshot(query.data));
-  }, [runId, query.data, setLink]);
+    // A failed snapshot read (run gone) must not keep citations "loading" forever: no case known.
+    else if (runId && query.isError) setLink(runId, null);
+  }, [runId, query.data, query.isError, setLink]);
   return query;
+}
+
+/**
+ * Citation copy is blocked while the open run's case link is loading, so a citation is never copied
+ * without its 사건/증거 prefix just because the snapshot query had not answered yet.
+ */
+export function citationDisabledReason(runId: string | null | undefined): string | undefined {
+  if (!runId || caseLinkOf(runId) !== undefined) return undefined;
+  // Nothing loading (e.g. the viewer window): the copy itself resolves the link first.
+  return useCaseLinks.getState().loading[runId] ? CASE_LINK_LOADING_REASON : undefined;
+}
+
+const pendingLinks = new Map<string, Promise<RunCaseLink | null>>();
+
+/**
+ * The run's case link, fetched when nothing has loaded it yet (the viewer window has no
+ * CaseFeature): citation builders await this before reading `caseCitationParts`.
+ */
+export async function resolveCaseLink(runId: string | null | undefined): Promise<RunCaseLink | null> {
+  if (!runId) return null;
+  const known = caseLinkOf(runId);
+  if (known !== undefined) return known;
+  let pending = pendingLinks.get(runId);
+  if (!pending) {
+    pending = getProcessingSnapshot(runId)
+      .then(linkFromSnapshot)
+      .catch(() => null)
+      .then((link) => {
+        useCaseLinks.getState().setLink(runId, link);
+        pendingLinks.delete(runId);
+        return link;
+      });
+    pendingLinks.set(runId, pending);
+  }
+  return pending;
 }
 
 /** Link of `runId` as known now (non-hook; commands and citations). */
