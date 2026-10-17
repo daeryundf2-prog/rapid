@@ -1,0 +1,169 @@
+# 웹메일·웹하드·파일 공유 업로드 후보 URL 패턴 (plan r2-communication-2026-10-17 §3.3 M3).
+#
+# 브라우저 캐시 항목(browser-cache-entry)·방문 기록(browser-history/browser-visit) URL이 아래 패턴에
+# 걸리면 web-upload-candidate 행이 된다. 패턴은 조사 우선순위를 돕는 단서이며 판단이 아니다.
+#
+# 한 패턴이 걸리는 조건: 호스트가 hosts 중 하나와 같거나 그 하위 도메인(또는 host_contains 토큰을 포함)이고,
+#   path_regex가 있으면 경로(+질의 문자열)에 맞고, query_keys가 있으면 그중 한 키가 질의에 있다.
+#   path_regex·query_keys가 모두 없으면 POST 요청(캐시 키의 업로드 id)일 때만 걸린다(post_only).
+# strength: strong(공개 문서로 확인된 업로드 엔드포인트) / medium(업로드·첨부 경로 휴리스틱) /
+#   weak(첨부 참조 — 업로드인지 열람인지 구분 불가). POST 캐시 항목은 한 단계 올린다(weak→medium, medium→strong).
+#   규칙 browser.webmail_upload / browser.filesharing_upload는 기본 medium 이상만 표시한다.
+# basis: documented(sources의 공개 API·도움말 문서) / heuristic(공개 문서 없음 — 서비스 도메인과 경로 토큰 기반).
+# 각 패턴의 sources는 서비스·엔드포인트 근거(https)다. 호스트는 소문자, 스킴·경로·포트 없이 적는다.
+version: 1
+patterns:
+- id: naver-mail-attach
+  service: naver-mail
+  label_ko: 네이버 메일 첨부 업로드
+  category: webmail
+  hosts: [mail.naver.com, bigfile.mail.naver.com, files.mail.naver.com]
+  path_regex: '(?i)(upload|attach|bigfile)'
+  strength: medium
+  basis: heuristic
+  sources:
+  - https://help.naver.com/
+  - https://mail.naver.com/
+- id: daum-mail-attach
+  service: daum-mail
+  label_ko: 다음 메일 첨부 업로드
+  category: webmail
+  hosts: [mail.daum.net, bigfile.mail.daum.net]
+  path_regex: '(?i)(upload|attach|bigfile)'
+  strength: medium
+  basis: heuristic
+  sources:
+  - https://cs.daum.net/
+  - https://mail.daum.net/
+- id: gmail-upload
+  service: gmail
+  label_ko: Gmail 첨부 업로드
+  category: webmail
+  hosts: [mail.google.com]
+  path_regex: '(?i)^/(upload|mail/u/\d+/upload)'
+  strength: medium
+  basis: heuristic
+  sources:
+  - https://support.google.com/mail/answer/6584
+- id: gmail-attachment-ref
+  service: gmail
+  label_ko: Gmail 첨부 참조(attid)
+  category: webmail
+  hosts: [mail.google.com, mail-attachment.googleusercontent.com]
+  query_keys: [attid]
+  strength: weak
+  basis: documented
+  sources:
+  - https://developers.google.com/gmail/api/reference/rest/v1/users.messages.attachments/get
+- id: outlook-web-attach
+  service: outlook-web
+  label_ko: Outlook 웹 첨부 업로드
+  category: webmail
+  hosts: [outlook.live.com, outlook.office.com, outlook.office365.com, attachment.outlook.live.net]
+  path_regex: '(?i)(CreateAttachment|UploadFile|/attachments?/upload)'
+  strength: strong
+  basis: documented
+  sources:
+  - https://learn.microsoft.com/en-us/exchange/client-developer/web-service-reference/createattachment-operation
+- id: google-drive-upload
+  service: google-drive
+  label_ko: Google Drive 업로드
+  category: cloud
+  hosts: [googleapis.com, clients6.google.com, drive.google.com]
+  path_regex: '(?i)^/upload/drive/'
+  strength: strong
+  basis: documented
+  sources:
+  - https://developers.google.com/drive/api/guides/manage-uploads
+- id: google-drive-resumable
+  service: google-drive
+  label_ko: Google Drive 업로드(재개 가능)
+  category: cloud
+  hosts: [drive.google.com, docs.google.com, clients6.google.com]
+  query_keys: [upload_id, uploadType]
+  strength: medium
+  basis: documented
+  sources:
+  - https://developers.google.com/drive/api/guides/manage-uploads
+- id: dropbox-upload
+  service: dropbox
+  label_ko: Dropbox 업로드
+  category: cloud
+  hosts: [content.dropboxapi.com, dropbox.com]
+  path_regex: '(?i)(^/2/files/upload|^/upload|/cmd/upload)'
+  strength: strong
+  basis: documented
+  sources:
+  - https://www.dropbox.com/developers/documentation/http/documentation
+- id: onedrive-upload
+  service: onedrive
+  label_ko: OneDrive 업로드
+  category: cloud
+  hosts: [onedrive.live.com, api.onedrive.com, graph.microsoft.com, my.microsoftpersonalcontent.com]
+  path_regex: '(?i)(createUploadSession|uploadSession|/upload)'
+  strength: strong
+  basis: documented
+  sources:
+  - https://learn.microsoft.com/en-us/onedrive/developer/rest-api/api/driveitem-createuploadsession
+- id: naver-mybox-upload
+  service: naver-mybox
+  label_ko: 네이버 MYBOX 업로드
+  category: cloud
+  hosts: [mybox.naver.com, ndrive.naver.com]
+  path_regex: '(?i)upload'
+  strength: medium
+  basis: heuristic
+  sources:
+  - https://mybox.naver.com/
+- id: wetransfer-upload
+  service: wetransfer
+  label_ko: WeTransfer 전송
+  category: filesharing
+  hosts: [wetransfer.com, we.tl, wetransfer.net]
+  path_regex: '(?i)(/api/v\d+/transfers|/upload|/uploader)'
+  strength: medium
+  basis: documented
+  sources:
+  - https://developers.wetransfer.com/
+- id: sendanywhere-upload
+  service: sendanywhere
+  label_ko: Send Anywhere 전송
+  category: filesharing
+  hosts: [send-anywhere.com, sendanywhere.com, sendanywhe.re]
+  path_regex: '(?i)(upload|/key|/web/)'
+  strength: medium
+  basis: heuristic
+  sources:
+  - https://send-anywhere.com/
+- id: mega-upload
+  service: mega
+  label_ko: MEGA 업로드
+  category: filesharing
+  hosts: [mega.nz, mega.io, mega.co.nz, userstorage.mega.co.nz]
+  path_regex: '(?i)^/(ul|upload)/'
+  strength: medium
+  basis: heuristic
+  sources:
+  - https://mega.io/
+- id: webhard-upload
+  service: webhard
+  label_ko: 웹하드 업로드
+  category: filesharing
+  hosts: [webhard.co.kr]
+  host_contains: [webhard]
+  path_regex: '(?i)(upload|up_?load|fileup)'
+  strength: medium
+  basis: heuristic
+  sources:
+  - https://www.webhard.co.kr/
+- id: webhard-post
+  service: webhard
+  label_ko: 웹하드 POST 요청
+  category: filesharing
+  hosts: [webhard.co.kr]
+  host_contains: [webhard]
+  post_only: true
+  strength: medium
+  basis: heuristic
+  sources:
+  - https://www.webhard.co.kr/

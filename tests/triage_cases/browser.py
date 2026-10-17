@@ -59,6 +59,17 @@ def extension(**details: object) -> dict[str, object]:
     return browser_row("browser-extension", "Secure Preferences", **base)
 
 
+def upload_candidate(**details: object) -> dict[str, object]:
+    base: dict[str, object] = {
+        "timestamp": "2024-05-01T10:00:00Z",
+        "method": "GET",
+        "source_artifact_type": "browser-cache-entry",
+        "match_pattern_id": "fixture",
+    }
+    base.update(details)
+    return browser_row("web-upload-candidate", r"Cache\Cache_Data\data_1", **base)
+
+
 CASES = {
     "browser.dl_from_filesharing": {
         "positive": {
@@ -162,6 +173,39 @@ CASES = {
         # Same site opened from a bookmark.
         "negative": {
             "rows": [visit("2024-05-01T10:00:00Z", "https://mega.nz/folder/XyZ123", transition=805306371, transition_core="AUTO_BOOKMARK")],
+            "flagged": [],
+        },
+    },
+    "browser.webmail_upload": {
+        "positive": {
+            "rows": [
+                # POST cache entry to the Naver Mail attachment endpoint (strength raised to strong).
+                upload_candidate(url="https://mail.naver.com/json/write/upload/attach", service="naver-mail", category="webmail", strength="strong", method="POST"),
+                # Outlook web CreateAttachment URL from history.
+                upload_candidate(url="https://outlook.office.com/owa/service.svc?action=CreateAttachmentFromLocalFile", service="outlook-web", category="webmail", strength="strong", source_artifact_type="browser-visit"),
+                # A file-sharing upload is the other rule's row.
+                upload_candidate(url="https://wetransfer.com/api/v4/transfers/link", service="wetransfer", category="filesharing", strength="medium"),
+            ],
+            "flagged": [0, 1],
+        },
+        # Gmail attachment reference (attid): opening an attachment looks the same, so the weak tier is not flagged.
+        "negative": {
+            "rows": [upload_candidate(url="https://mail.google.com/mail/u/0/?ui=2&ik=abc&attid=0.1&disp=safe", service="gmail", category="webmail", strength="weak", source_artifact_type="browser-visit")],
+            "flagged": [],
+        },
+    },
+    "browser.filesharing_upload": {
+        "positive": {
+            "rows": [
+                upload_candidate(url="https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable", service="google-drive", category="cloud", strength="strong", method="POST"),
+                upload_candidate(url="https://wetransfer.com/api/v4/transfers/link", service="wetransfer", category="filesharing", strength="medium"),
+                upload_candidate(url="https://mail.naver.com/json/write/upload/attach", service="naver-mail", category="webmail", strength="strong", method="POST"),
+            ],
+            "flagged": [0, 1],
+        },
+        # A weak-tier candidate (folder page, no upload endpoint and no POST) is not flagged.
+        "negative": {
+            "rows": [upload_candidate(url="https://drive.google.com/drive/folders/abc", service="google-drive", category="cloud", strength="weak")],
             "flagged": [],
         },
     },
