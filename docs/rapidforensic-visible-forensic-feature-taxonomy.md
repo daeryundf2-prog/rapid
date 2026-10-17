@@ -444,6 +444,7 @@ GUI 표시 권장:
 관련 collector:
 
 - `cloud-export`
+- `cloud-sync` (데스크톱 동기화 클라이언트: OneDrive·Dropbox·Google Drive·네이버 MYBOX·iCloud)
 
 | 사용자 노출 기능 | artifact type | 현재 상태 | 남은 보강 |
 | --- | --- | --- | --- |
@@ -458,6 +459,10 @@ GUI 표시 권장:
 | iCloud | profile details | partial+ | ADP/shared album |
 | M365/Teams/OneDrive | profile details | partial+ | permissions graph |
 | Cloud API collect | separate workflow | partial | OAuth/device flow and vault |
+| 동기화 계정·폴더 | `cloud-sync-account` | partial | OneDrive ini/Dropbox info.json/DriveFS roots; registry Accounts not joined |
+| 동기화 항목 | `cloud-sync-file` | partial | SyncEngineDatabase/DriveFS state semantics (raw values) |
+| 업로드·삭제 이벤트 | `cloud-sync-event` | partial | ODL record layout per client version, obfuscated/encrypted parameters |
+| 클라이언트 인벤토리 | `cloud-sync-inventory` | partial | Dropbox .dbx and MYBOX/iCloud stores are inventory only |
 
 숨은 기능으로 빼서 보여줄 항목:
 
