@@ -1,9 +1,11 @@
-/* One-line filter bar (visual-polish S1/S2): view switch · search · 필터 popover · chips. */
+/* 조건 줄 (viewer-families U-F1): one 32 px line — view switch · search · 조건 popover · applied
+   chips · result count · overflow (열 선택 · 열 필터). Chips scroll sideways, never wrap. */
 .filter-bar {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
-  padding: var(--space-2) var(--space-3);
+  box-sizing: border-box;
+  height: 32px;
+  padding: 1px var(--space-3) 2px;
   background: var(--bg-panel);
   border-bottom: 1px solid var(--line-subtle);
   flex: none;
@@ -12,9 +14,48 @@
 .filter-row {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: var(--space-2);
-  min-height: 28px;
+  height: 28px;
+  min-width: 0;
+}
+
+.filter-row-end {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+  flex: none;
+}
+
+.filter-result {
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.chip-open {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.chip-open:focus-visible {
+  outline: var(--focus-width) solid var(--focus);
+  outline-offset: var(--focus-offset);
+}
+
+.filter-display-row {
+  display: flex;
+  gap: var(--space-2);
 }
 
 .filter-field {
@@ -138,10 +179,13 @@
 
 .filter-chips {
   display: inline-flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: var(--space-1);
   min-width: 0;
+  flex: 0 1 auto;
+  overflow-x: auto;
+  scrollbar-width: none;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -151,6 +195,7 @@
   display: inline-flex;
   align-items: center;
   gap: 2px;
+  flex: none;
   height: 24px;
   max-width: 260px;
   padding: 0 2px 0 var(--space-2);
@@ -166,7 +211,7 @@
   white-space: nowrap;
 }
 
-.filter-chip button {
+.filter-chip .chip-remove {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -180,7 +225,7 @@
   cursor: pointer;
 }
 
-.filter-chip button:hover {
+.filter-chip .chip-remove:hover {
   color: var(--text);
   background: var(--bg-panel);
 }
@@ -308,4 +353,46 @@
   color: var(--text-muted);
   font-size: var(--fs-aux);
   font-variant-numeric: tabular-nums;
+}
+
+/* U-F8: the applied condition replaces the 조건 label (bold, ellipsised). */
+.filter-trigger-applied {
+  max-width: 260px;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filter-recent {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+}
+
+.filter-saved {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.filter-saved-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+/* 표시 settings chips (열 구성 · 밀도): not conditions — dashed, set apart from the condition chips. */
+.filter-display-chips {
+  padding-left: var(--space-2);
+  border-left: 1px solid var(--line-subtle);
+}
+
+.filter-chip.is-display {
+  border-style: dashed;
 }

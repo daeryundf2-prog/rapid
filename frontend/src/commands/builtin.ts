@@ -10,6 +10,9 @@ import { cancelRun, retryRun } from "../api/runControl";
 import { RUNS_QUERY_KEY, type RunWithProgress } from "../api/runsProgress";
 import { COLLECTION_NODES, runDisplayName } from "../app/collections";
 import type { Command, CommandContext } from "../contracts/command";
+import { conditionsCommand } from "../features/filters/conditionPanel";
+import { treeEmptyCommand } from "../features/tree/treePrefs";
+import { focusPopout } from "../features/viewer/popout/host";
 import { NO_VIEWER_REASON, stageHasViewer, stageOf } from "../router";
 import { viewerPaneCollapsed } from "../state/slices/overlays";
 import { DENSITIES, DENSITY_LABEL } from "../state/slices/prefs";
@@ -397,6 +400,8 @@ export function caseCommands(queryClient: QueryClient): Command[] {
             : "선택된 행이 없습니다",
       run: () => {
         if (!stageHasViewer(stageOf(store().route))) return;
+        // The viewer lives in its own window (U-F2): bring that window forward.
+        if (focusPopout()) return;
         if (store().viewerIsDrawer) store().setOverlay("viewerDrawer", true);
         else expandViewerPane();
         focusViewer();
@@ -456,6 +461,8 @@ export function registerBuiltinCommands(queryClient: QueryClient): () => void {
     ...navigateCommands(),
     ...caseCommands(queryClient),
     ...reviewCommands(queryClient),
+    conditionsCommand(),
+    treeEmptyCommand(),
   ]);
 }
 

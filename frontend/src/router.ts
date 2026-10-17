@@ -126,6 +126,10 @@ export interface Route {
   cols?: string[];
   /** Column header filters, URL `cf=` (grammar: `parseColumnFilters`). */
   cf?: ColumnFilter[];
+  /** 특이사항 rule ids, URL `flag=` (repeated; viewer-families U-F4). */
+  flags?: string[];
+  /** 특이사항 minimum grade, URL `flag_grade=A|B|C`. */
+  flagGrade?: "A" | "B" | "C";
 }
 
 /** Collections whose `{sub}` is a kind with server sort / promoted columns (`sort=`, `cols=`). */
@@ -172,7 +176,7 @@ export function serializeColumnFilters(filters: readonly ColumnFilter[]): string
 
 /** `timestamp` or `details.<scalar key>` (plan artifact-columns §4.1). */
 export function isServerSortKey(key: string): boolean {
-  return key === "timestamp" || /^details\.[^\s,:]+$/.test(key);
+  return key === "timestamp" || key === "flags" || /^details\.[^\s,:]+$/.test(key);
 }
 
 /** `key:order` -> ServerSort; order defaults to asc. Null when the key is not a server sort key. */
@@ -326,6 +330,11 @@ export function parseHash(hash: string): Route {
     } else if (key === "tags" && value) {
       const list = listParam(value);
       if (list.length) route.tags = list;
+    } else if (key === "flag" && value) {
+      const id = safeDecode(value).trim();
+      if (id && !(route.flags ?? []).includes(id)) route.flags = [...(route.flags ?? []), id];
+    } else if (key === "flag_grade" && (value === "A" || value === "B" || value === "C")) {
+      route.flagGrade = value;
     } else if (key === "note" && value === "1") {
       route.notes = true;
     } else if (key === "ext" && value) {
@@ -380,6 +389,8 @@ export function serializeRoute(route: Route): string {
   if (route.ext?.length) query.push(`ext=${route.ext.map(encodeURIComponent).join(",")}`);
   if (route.path) query.push(`path=${encodeURIComponent(route.path)}`);
   if (route.notes) query.push("note=1");
+  if (route.flagGrade) query.push(`flag_grade=${route.flagGrade}`);
+  for (const id of route.flags ?? []) query.push(`flag=${encodeURIComponent(id)}`);
   if (route.tz) query.push(`tz=${encodeURIComponent(route.tz)}`);
   if (route.view && route.view !== "columns") query.push(`view=${route.view}`);
   if (route.cf?.length) {

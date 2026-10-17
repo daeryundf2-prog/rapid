@@ -42,12 +42,24 @@ export function typeOptionsFor(
   query = "",
 ): TypeOption[] {
   const needle = query.trim().toLocaleLowerCase("ko-KR");
-  return types
-    .map((id) => ({ id, label: artifactTypeLabel(id), count: counts[id] }))
-    .filter(
-      (option) =>
-        !needle ||
-        option.id.toLocaleLowerCase("ko-KR").includes(needle) ||
-        (option.label ?? "").toLocaleLowerCase("ko-KR").includes(needle),
-    );
+  return (
+    types
+      .map((id) => ({ id, label: artifactTypeLabel(id), count: counts[id] }))
+      .filter(
+        (option) =>
+          !needle ||
+          option.id.toLocaleLowerCase("ko-KR").includes(needle) ||
+          (option.label ?? "").toLocaleLowerCase("ko-KR").includes(needle),
+      )
+      // Korean names in Korean order (never by the English id, AXIOM 7.3-3); unnamed ids after them.
+      .sort((a, b) =>
+        a.label && b.label
+          ? a.label.localeCompare(b.label, "ko") || a.id.localeCompare(b.id)
+          : a.label
+            ? -1
+            : b.label
+              ? 1
+              : a.id.localeCompare(b.id),
+      )
+  );
 }

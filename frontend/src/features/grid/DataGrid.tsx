@@ -34,12 +34,15 @@ import { runCommandId } from "../analysis/commands";
 import { setColumnFilter } from "../filters/columnFilters";
 import type { FilterBarVariant } from "../filters/FilterBar";
 import { useFilterStore } from "../filters/filterStore";
+import { noteKindTypeCounts, useCatalog } from "../flags/catalog";
+import { flagsPartialNotice, flagsUnavailableReason, mergedKindNode, policyAbsences } from "../tree/model";
 import { useDensity, useGridLocalStore, useRoute, useSelection, useToast, useViewerTarget } from "./adapter";
 import { BatchBar, batchBarState } from "./BatchBar";
 import { ColumnFilterRow } from "./ColumnFilterRow";
 import { collectionDef, lockedColumnId, presetColumnIds } from "./columns";
-import { artifactTypeFamily } from "./columns/artifacts";
-import { isRecord } from "./columns/common";
+import { artifactTypeFamily, resolveArtifactFamily } from "./columns/artifacts";
+import { isRecord, REVIEW_LABELS } from "./columns/common";
+import { auxColumnIds } from "./columns/families";
 import {
   colsToKeys,
   effectiveFieldCols,
@@ -88,8 +91,8 @@ type ColumnSizingState = Record<string, number>;
 
 /** Checkbox 16 + gap 4 + row-menu button 20 + padding 2×8. */
 const SELECT_COL_WIDTH = 56;
-/** Width kept free at the header's right end for the column-menu icon button (28 + padding). */
-const HEAD_TOOLS_WIDTH = 40;
+/** The column menu moved to the 조건 줄 (U-F1): the header keeps no room for it. */
+const HEAD_TOOLS_WIDTH = 0;
 /** The header row is 32px at every density (visual-polish U-V4); rows follow the density. */
 const HEADER_HEIGHT = 32;
 const EMPTY_ROWS: GridRow[] = [];
@@ -154,6 +157,14 @@ interface RowViewProps {
   ariaRowOffset: number;
 }
 
+/** Review mark shown as the row stripe (U-F8): the review status, else a 북마크 tag. */
+export function rowMark(row: GridRow): { id: string; label: string } | null {
+  if (row.reviewStatus) return { id: row.reviewStatus, label: REVIEW_LABELS[row.reviewStatus] };
+  if (row.tags.some((tag) => tag === "북마크" || tag === "bookmark"))
+    return { id: "bookmark", label: "북마크" };
+  return null;
+}
+
 const RowView = memo(function RowView(props: RowViewProps) {
   const { row, index, top, height, selected, focused, specs, widths, lefts } = props;
   const style = { transform: `translateY(${top}px)`, height };
@@ -180,6 +191,7 @@ const RowView = memo(function RowView(props: RowViewProps) {
       </div>
     );
   }
+  const mark = rowMark(row);
   return (
     <div
       role="row"
@@ -188,10 +200,14 @@ const RowView = memo(function RowView(props: RowViewProps) {
       tabIndex={focused ? 0 : -1}
       data-index={index}
       data-row-key={row.rowKey}
+      data-mark={mark?.id}
+      aria-description={mark ? `검토 표시: ${mark.label}` : undefined}
       className={`grid-row${selected ? " is-selected" : ""}${focused ? " is-focused" : ""}`}
       style={style}
     >
       <div role="gridcell" className="grid-cell grid-cell-select" style={{ width: SELECT_COL_WIDTH }}>
+        {/* U-F8: 6px review stripe on the sticky select cell (visible while scrolling sideways). */}
+        {mark ? <span className="grid-row-stripe" data-mark={mark.id} aria-hidden="true" /> : null}
         <input
           type="checkbox"
           tabIndex={-1}
@@ -252,7 +268,24 @@ export function DataGrid(props: DataGridProps = {}) {
   // A 유형 filter of one artifact-type family (다운로드 · USB · SAM …) picks that family's columns.
   const filterTypes = useFilterStore((s) => s.filters.types);
   const typeFamily = ref.id === "artifacts" ? (artifactTypeFamily(filterTypes) ?? "") : "";
-  const columnKey = `${ref.id}:${ref.kind ?? ""}:${typeFamily}`;
+  // The catalogue (bundled fallback, then the server's) picks family layouts: a new one rebuilds them.
+  const catalog = useCatalog();
+  // Shared with the tree (same query key): the run's artifact types (exact server values) for the
+  // 유형 menu and the 유형(정확히) suggestions — loaded rows alone shrink once a 유형 filter applies.
+  // Its per-kind type counts also give a kind the catalogue reaches only through its types (or a
+  // mixed kind) its majority family layout (U-F3).
+  const runTree = useQuery({
+    queryKey: ["run-tree", runId],
+    queryFn: () => getRunTree(runId as string),
+    enabled: Boolean(runId) && ref.id === "artifacts",
+    retry: false,
+    staleTime: 30_000,
+  });
+  if (ref.id === "artifacts" && ref.kind) {
+    noteKindTypeCounts(ref.kind, mergedKindNode(runTree.data, ref.kind)?.artifact_type_counts);
+  }
+  const familyId = ref.id === "artifacts" ? (resolveArtifactFamily(ref.kind, filterTypes)?.id ?? "") : "";
+  const columnKey = `${ref.id}:${ref.kind ?? ""}:${typeFamily}:${familyId}:${catalog.version}`;
   // biome-ignore lint/correctness/useExhaustiveDependencies: columns only depend on the collection/kind/type family
   const baseColumns = useMemo(() => def.columnsFor?.(ref, filterTypes) ?? def.columns, [def, columnKey]);
   // Artifacts (and analysis job rows) are sorted by the server (whole kind / whole job), never
@@ -271,15 +304,6 @@ export function DataGrid(props: DataGridProps = {}) {
   const promotedCols = useMemo(() => effectiveFieldCols(route.cols, fieldScope), [route.cols, fieldScope]);
   const promotedKeys = useMemo(() => colsToKeys(promotedCols), [promotedCols]);
   const q = route.q;
-  // Shared with the tree (same query key): the run's artifact types (exact server values) for the
-  // 유형 menu and the 유형(정확히) suggestions — loaded rows alone shrink once a 유형 filter applies.
-  const runTree = useQuery({
-    queryKey: ["run-tree", runId],
-    queryFn: () => getRunTree(runId as string),
-    enabled: Boolean(runId) && ref.id === "artifacts",
-    retry: false,
-    staleTime: 30_000,
-  });
   const treeTypes = useMemo(
     () => (ref.id === "artifacts" ? artifactTypesOfTree(runTree.data?.nodes, ref.kind) : []),
     [ref.id, ref.kind, runTree.data],
@@ -392,7 +416,7 @@ export function DataGrid(props: DataGridProps = {}) {
   useEffect(() => {
     setVisibility(visibilityFor(columns, preset));
     setPinnedColumns(new Set());
-  }, [collectionKey, preset, typeFamily]);
+  }, [collectionKey, preset, typeFamily, familyId, catalog]);
   // Reset only when the collection changes.
   useEffect(() => {
     setSorting([]);
@@ -465,7 +489,7 @@ export function DataGrid(props: DataGridProps = {}) {
   // Responsive default layout (분석 기본 preset only): a default column with no value in any
   // loaded row goes (시각, 선별 … — review #9), then the lowest-priority columns go while their
   // minimum widths exceed the grid width. 항목 (the first priority id) always stays.
-  const widthPriority = preset === "analysis" ? def.widthPriority?.(ref) : undefined;
+  const widthPriority = preset === "analysis" ? def.widthPriority?.(ref, filterTypes) : undefined;
   const loadedRows = cq.loadedRows;
   const emptyIds = useMemo(
     () =>
@@ -1185,6 +1209,84 @@ export function DataGrid(props: DataGridProps = {}) {
     [ref.id, typeOptions],
   );
 
+  // 특이사항 notices (U-F4): a flag filter on a run without a flag set says so (never an empty
+  // grid without a reason); policy-dependent sources with no records read "부재 ≠ 미발생".
+  const routeFlagsActive = useFilterStore((s) => Boolean(s.filters.flags?.length || s.filters.flagGrade));
+  const flagNotices = useMemo(() => {
+    const out: Array<{ id: string; text: string }> = [];
+    if (ref.id !== "artifacts" || !runTree.data) return out;
+    const unavailable = flagsUnavailableReason(runTree.data);
+    if (routeFlagsActive && unavailable) out.push({ id: "missing", text: unavailable });
+    // A partial flag set (some sources unreadable / corrupt flags skipped): say so on every
+    // artifact grid, filtered or not — an empty 특이사항 cell may mean "not read".
+    const partial = flagsPartialNotice(runTree.data);
+    if (partial) out.push({ id: "partial", text: partial });
+    if (routeFlagsActive || ref.kind === "eventlog") {
+      for (const absent of policyAbsences(runTree.data)) {
+        out.push({ id: `policy-${absent.id}`, text: `${absent.label}: ${absent.note}` });
+      }
+    }
+    return out;
+  }, [ref.id, ref.kind, runTree.data, routeFlagsActive]);
+
+  // 열 설정 overflow at the end of the 조건 줄 (U-F1): 열 선택 (+ catalogue auxiliary columns,
+  // record fields) and the column-filter row; 열 구성 / 밀도 live in the 조건 panel.
+  const family = ref.id === "artifacts" ? resolveArtifactFamily(ref.kind, filterTypes) : undefined;
+  const auxIds = family ? auxColumnIds(family).filter((id) => columns.some((c) => c.id === id)) : [];
+  const columnMenu = (
+    <ColumnMenu
+      preset={preset}
+      columns={columns}
+      visibility={visibility}
+      onToggleColumn={toggleColumn}
+      autoHidden={autoHidden}
+      collectionLabel={def.label}
+      auxColumns={
+        family && auxIds.length
+          ? {
+              family: family.label,
+              ids: auxIds,
+              onToggleAll: (on) => {
+                for (const id of auxIds) toggleColumn(id, on);
+                announce(
+                  on
+                    ? `보조 열 ${auxIds.length}개를 추가했습니다.`
+                    : `보조 열 ${auxIds.length}개를 뺐습니다.`,
+                );
+              },
+            }
+          : undefined
+      }
+      columnFilters={
+        ref.id === "intake"
+          ? undefined
+          : {
+              open: filterRowShown,
+              count: columnFilters?.length ?? 0,
+              onToggle: () => setFilterRowOpen((open) => !open),
+            }
+      }
+      fieldPicker={
+        artifactKind
+          ? {
+              rows: cq.loadedRows,
+              columns: baseColumns,
+              promoted: promotedKeys,
+              onToggle: toggleField,
+            }
+          : undefined
+      }
+    />
+  );
+  const choosePreset = (next: GridPreset) => {
+    setPreset(next);
+    try {
+      window.localStorage.setItem("rapidtriage.grid.preset", next);
+    } catch {
+      // Preset simply does not persist.
+    }
+  };
+
   return (
     <section
       className="grid-root"
@@ -1208,6 +1310,9 @@ export function DataGrid(props: DataGridProps = {}) {
         reviewStatus={ref.id === "review" ? ref.status : undefined}
         onReviewStatus={(status) => route.navigate({ id: "review", ...(status ? { status } : {}) }, q)}
         kindOptions={kindOptions}
+        display={{ preset, onPreset: choosePreset, density, onDensity: setDensity }}
+        resultCount={runId ? { count: cq.isLoading ? null : resultCount, loading: cq.isLoading } : undefined}
+        trailing={columnMenu}
         extra={
           ref.id === "docs" ? (
             <DocsMatchedToggle
@@ -1230,6 +1335,12 @@ export function DataGrid(props: DataGridProps = {}) {
         </p>
       ))}
 
+      {flagNotices.map((notice) => (
+        <p key={notice.id} className="flag-grid-notice" role="note" data-testid={`grid-flag-${notice.id}`}>
+          {notice.text}
+        </p>
+      ))}
+
       {cq.error && displayCount > 0 ? (
         <div className="grid-error" role="alert">
           <span>목록을 불러오지 못했습니다. {cq.error.message}</span>
@@ -1240,46 +1351,6 @@ export function DataGrid(props: DataGridProps = {}) {
       ) : null}
 
       <div className="grid-frame">
-        {/* Column controls: one button at the right end of the header row (visual-polish S3). */}
-        <div className="grid-head-tools" style={{ height: HEADER_HEIGHT }}>
-          <ColumnMenu
-            preset={preset}
-            onPreset={(next) => {
-              setPreset(next);
-              try {
-                window.localStorage.setItem("rapidtriage.grid.preset", next);
-              } catch {
-                // Preset simply does not persist.
-              }
-            }}
-            density={density}
-            onDensity={setDensity}
-            columns={columns}
-            visibility={visibility}
-            onToggleColumn={toggleColumn}
-            autoHidden={autoHidden}
-            collectionLabel={def.label}
-            columnFilters={
-              ref.id === "intake"
-                ? undefined
-                : {
-                    open: filterRowShown,
-                    count: columnFilters?.length ?? 0,
-                    onToggle: () => setFilterRowOpen((open) => !open),
-                  }
-            }
-            fieldPicker={
-              artifactKind
-                ? {
-                    rows: cq.loadedRows,
-                    columns: baseColumns,
-                    promoted: promotedKeys,
-                    onToggle: toggleField,
-                  }
-                : undefined
-            }
-          />
-        </div>
         <div
           ref={scrollRef}
           className="grid-scroll"
@@ -1340,7 +1411,8 @@ export function DataGrid(props: DataGridProps = {}) {
                           type="button"
                           className="grid-sort"
                           aria-describedby={describedBy}
-                          title={reason ? undefined : (spec.sortHint ?? hint?.text)}
+                          // The full header is always the tooltip (a narrow column truncates it, U-F8).
+                          title={reason ? undefined : (spec.sortHint ?? hint?.text ?? spec.header)}
                           onClick={() => cycleSort(spec)}
                         >
                           {spec.header}

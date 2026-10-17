@@ -20,6 +20,7 @@ import { ToastRegion } from "../components/ToastRegion";
 import { Landing } from "../features/case/Landing";
 import { StageRail } from "../features/stages/StageRail";
 import { STAGE_DEFS, STAGE_HEADING_ID } from "../features/stages/stages";
+import { focusPopout, returnViewerFromPopout, usePopoutHost } from "../features/viewer/popout/host";
 import { Icon } from "../icons";
 import { stageHasViewer, stageOf } from "../router";
 import { usePanelLayout } from "../state/hooks";
@@ -148,6 +149,44 @@ function ViewerRail() {
   );
 }
 
+/**
+ * The viewer lives in its own window (U-F2): the pane is a rail that says so, with 되돌리기 and a
+ * button that brings the viewer window forward.
+ */
+function PopoutRail() {
+  return (
+    <div className="viewer-rail viewer-rail-popout" data-testid="viewer-popout-rail">
+      <button
+        type="button"
+        className="viewer-rail-button"
+        aria-label="뷰어 창 앞으로 가져오기"
+        title="뷰어 창 앞으로 가져오기"
+        onClick={() => focusPopout()}
+      >
+        <span className="viewer-rail-icon">
+          <Icon name="external" />
+        </span>
+      </button>
+      <p className="viewer-rail-text">창으로 보는 중</p>
+      <button
+        type="button"
+        className="viewer-rail-button"
+        aria-label="창으로 보는 중 · 되돌리기 (뷰어 창을 닫고 이 열에 다시 표시)"
+        title="되돌리기 — 뷰어 창을 닫고 이 열에 다시 표시"
+        data-testid="viewer-popout-return"
+        onClick={() => {
+          returnViewerFromPopout();
+          focusViewer();
+        }}
+      >
+        <span className="viewer-rail-icon">
+          <Icon name="panel-right-open" />
+        </span>
+      </button>
+    </div>
+  );
+}
+
 function validLayout(layout: Record<string, number> | null): layout is Record<string, number> {
   return Boolean(layout?.[PANEL.tree] && layout[PANEL.grid] && layout[PANEL.viewer]);
 }
@@ -156,7 +195,9 @@ function WidePanes() {
   const [saved, setSaved] = usePanelLayout();
   const groupRef = useRef<GroupImperativeHandle>(null);
   const viewerRef = useRef<PanelImperativeHandle>(null);
-  const collapsed = useAppStore(viewerPaneCollapsed);
+  const poppedOut = usePopoutHost((s) => s.status === "open");
+  const paneCollapsed = useAppStore(viewerPaneCollapsed);
+  const collapsed = paneCollapsed || poppedOut;
   const collapsedRef = useRef(collapsed);
   collapsedRef.current = collapsed;
   const savedRef = useRef(saved);
@@ -228,11 +269,15 @@ function WidePanes() {
           data-testid="viewer-region"
           data-collapsed={collapsed ? "" : undefined}
         >
-          {collapsed ? <ViewerRail /> : null}
-          {/* The viewer stays mounted while collapsed: its history (Alt+←/→) and commands live on. */}
-          <div className="viewer-slot" hidden={collapsed}>
-            <ViewerSlot drawer={false} />
-          </div>
+          {poppedOut ? <PopoutRail /> : collapsed ? <ViewerRail /> : null}
+          {/* The viewer stays mounted while collapsed: its history (Alt+←/→) and commands live on.
+              While it lives in its own window (U-F2) it is unmounted here: one viewer fetches
+              previews and hashes, not two. */}
+          {poppedOut ? null : (
+            <div className="viewer-slot" hidden={collapsed}>
+              <ViewerSlot drawer={false} />
+            </div>
+          )}
         </aside>
       </Panel>
     </Group>

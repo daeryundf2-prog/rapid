@@ -7,6 +7,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { getReviewCounts } from "../../api/caseDb";
+import { getRunTree } from "../../api/runs";
 import { CommandButton } from "../../commands/CommandButton";
 import { serializeRoute } from "../../router";
 import { useRoute, useTimezone } from "../../state/hooks";
@@ -14,7 +15,14 @@ import { formatTimestamp } from "../../utils/time";
 import { EXPORT_ACTIONS, useExportHistory } from "../case/exports";
 import { DataGrid } from "../grid/DataGrid";
 import { useReviewMap } from "../grid/reviewMap";
-import { REVIEW_NODES, reviewCount } from "../tree/model";
+import {
+  flagsPartialNotice,
+  flagsUnavailableReason,
+  NO_FLAGS_REASON,
+  REVIEW_NODES,
+  reviewCount,
+  treeFlagsSection,
+} from "../tree/model";
 import "./stages.css";
 
 const BOOKMARK_TAG = "북마크";
@@ -30,6 +38,15 @@ export function ReviewPanel() {
     retry: false,
   });
   const map = useReviewMap(runId);
+  // 특이사항 shortcuts (U-F4): the same `/tree` summary the 탐색 tree shows (shared query key).
+  const tree = useQuery({
+    queryKey: ["run-tree", runId],
+    queryFn: () => getRunTree(runId as string),
+    enabled: Boolean(runId),
+    retry: false,
+    staleTime: 30_000,
+  });
+  const flags = treeFlagsSection(tree.data);
   const { tags, notes, bookmarks } = useMemo(() => {
     const byTag = new Map<string, number>();
     let withNote = 0;
@@ -78,6 +95,40 @@ export function ReviewPanel() {
           </li>
         ))}
       </ul>
+      <h2 id="review-flags-title">특이사항</h2>
+      {flags ? (
+        <>
+          {flagsPartialNotice(tree.data) ? (
+            <p className="stage-note" data-testid="review-flags-partial">
+              {flagsPartialNotice(tree.data)}
+            </p>
+          ) : null}
+          <ul aria-labelledby="review-flags-title" data-testid="review-flag-links">
+            <li>
+              {link(
+                "특이사항 A 전체 보기",
+                serializeRoute({ runId, collection: "artifacts", flagGrade: "A" }),
+                false,
+                flags.byGrade.A,
+              )}
+            </li>
+            <li>
+              {link(
+                "특이사항 B 이상 보기",
+                serializeRoute({ runId, collection: "artifacts", flagGrade: "B" }),
+                false,
+                flags.byGrade.A + flags.byGrade.B,
+              )}
+            </li>
+          </ul>
+        </>
+      ) : (
+        <p className="stage-note" data-testid="review-flags-missing">
+          {tree.isLoading
+            ? "특이사항 요약을 불러오는 중…"
+            : (flagsUnavailableReason(tree.data) ?? NO_FLAGS_REASON)}
+        </p>
+      )}
       <h2 id="review-tags-title">태그·북마크</h2>
       <ul aria-labelledby="review-tags-title">
         <li>

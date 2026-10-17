@@ -5,8 +5,10 @@ import { Icon } from "../../icons";
 import { useAppStore } from "../../state/store";
 import { navigate } from "./adapter";
 import { targetKey } from "./domains";
-import { flattenVisible, type TreeModelNode, UNKNOWN_COUNT } from "./model";
+import { filterEmptyNodes, flagCountsText, flattenVisible, type TreeModelNode, UNKNOWN_COUNT } from "./model";
+import { useTreePrefs } from "./treePrefs";
 import { useTreeState } from "./useTreeModel";
+import "../flags/flags.css";
 import "./tree.css";
 
 const DEFAULT_EXPANDED = ["evidence", "views", "search"];
@@ -14,15 +16,43 @@ const TYPE_AHEAD_RESET_MS = 600;
 
 function treeItemLabel(node: TreeModelNode): string {
   const label = node.marker ? `${node.label} (${node.marker})` : node.label;
-  if (node.count === undefined) return label;
-  if (node.count === UNKNOWN_COUNT) return `${label}, 건수 미상`;
+  const flags = node.flagCounts ? `, ${flagCountsText(node.flagCounts)}` : "";
+  if (node.count === undefined) return `${label}${flags}`;
+  if (node.count === UNKNOWN_COUNT) return `${label}, 건수 미상${flags}`;
   return typeof node.count === "number"
-    ? `${label}, ${node.count.toLocaleString("ko-KR")}건`
-    : `${label}, 진행 ${node.count}`;
+    ? `${label}, ${node.count.toLocaleString("ko-KR")}건${flags}`
+    : `${label}, 진행 ${node.count}${flags}`;
+}
+
+/** Strongest grade with rows (the badge colour) and its count. */
+function topFlag(counts: TreeModelNode["flagCounts"]): { grade: "A" | "B" | "C"; count: number } | null {
+  for (const grade of ["A", "B", "C"] as const) {
+    const count = counts?.[grade] ?? 0;
+    if (count > 0) return { grade, count };
+  }
+  return null;
+}
+
+/** Ids of the node and its ancestors, or null when it is not in the tree. */
+function pathTo(nodes: readonly TreeModelNode[], id: string, trail: string[] = []): string[] | null {
+  for (const node of nodes) {
+    if (node.id === id) return [...trail, node.id];
+    const hit = node.children ? pathTo(node.children, id, [...trail, node.id]) : null;
+    if (hit) return hit;
+  }
+  return null;
 }
 
 export function EvidenceTree({ runId }: { runId: string }) {
-  const { model, loading } = useTreeState(runId);
+  const { model: fullModel, loading, treeSettled } = useTreeState(runId);
+  // U-F7: empty families are hidden unless "결과 없는 계열 표시" (T) is on; the T command needs a
+  // mounted tree.
+  const showEmpty = useTreePrefs((s) => s.showEmpty);
+  const setShowEmpty = useTreePrefs((s) => s.setShowEmpty);
+  useEffect(() => {
+    useTreePrefs.setState((s) => ({ mounted: s.mounted + 1 }));
+    return () => useTreePrefs.setState((s) => ({ mounted: Math.max(0, s.mounted - 1) }));
+  }, []);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(DEFAULT_EXPANDED));
   const [focusedId, setFocusedId] = useState<string>("views");
   const [blockedReason, setBlockedReason] = useState("");
@@ -51,9 +81,44 @@ export function EvidenceTree({ runId }: { runId: string }) {
       }
       return any;
     };
-    walk(model, []);
+    walk(fullModel, []);
     return { keep, open };
-  }, [model, needle]);
+  }, [fullModel, needle]);
+  const routeKey = useAppStore((s) =>
+    s.route.runId === runId && s.route.collection
+      ? targetKey({ ...s.route, collection: s.route.collection })
+      : "",
+  );
+  // One selected node: the first (DFS order) whose key is the route's — the 전체 보기 views come
+  // before the domain nodes that repeat them (전체 파일, IOC). Hidden (empty) nodes count too: a
+  // deep link to one reveals it.
+  const selectedId = useMemo(() => {
+    const visit = (nodes: TreeModelNode[]): string | null => {
+      for (const node of nodes) {
+        if (
+          !node.noSelect &&
+          !node.activate &&
+          (node.selectKey ?? targetKey({ ...node.route })) === routeKey
+        ) {
+          return node.id;
+        }
+        const hit = node.children ? visit(node.children) : null;
+        if (hit) return hit;
+      }
+      return null;
+    };
+    return routeKey ? visit(fullModel) : null;
+  }, [fullModel, routeKey]);
+  const reveal = useMemo(() => {
+    const ids = new Set<string>(searchView?.keep ?? []);
+    for (const id of selectedId ? (pathTo(fullModel, selectedId) ?? []) : []) ids.add(id);
+    return ids;
+  }, [fullModel, searchView, selectedId]);
+  const emptyView = useMemo(
+    () => filterEmptyNodes(fullModel, showEmpty, reveal),
+    [fullModel, showEmpty, reveal],
+  );
+  const model = emptyView.nodes;
   const visible = useMemo(() => {
     if (!searchView) return flattenVisible(model, expanded);
     const shown = new Set([...expanded, ...searchView.open]);
@@ -159,30 +224,6 @@ export function EvidenceTree({ runId }: { runId: string }) {
     }
   };
 
-  const routeKey = useAppStore((s) =>
-    s.route.runId === runId && s.route.collection
-      ? targetKey({ ...s.route, collection: s.route.collection })
-      : "",
-  );
-  // One selected node: the first (DFS order) whose key is the route's — the 전체 보기 views come
-  // before the domain nodes that repeat them (전체 파일, IOC).
-  const selectedId = useMemo(() => {
-    const visit = (nodes: TreeModelNode[]): string | null => {
-      for (const node of nodes) {
-        if (
-          !node.noSelect &&
-          !node.activate &&
-          (node.selectKey ?? targetKey({ ...node.route })) === routeKey
-        ) {
-          return node.id;
-        }
-        const hit = node.children ? visit(node.children) : null;
-        if (hit) return hit;
-      }
-      return null;
-    };
-    return routeKey ? visit(model) : null;
-  }, [model, routeKey]);
   const selected = (node: TreeModelNode) => node.id === selectedId;
 
   // Open the domain (and group, e.g. 실행 흔적 › Amcache) that holds the selected node (deep links, 결과 보기 →).
@@ -235,6 +276,7 @@ export function EvidenceTree({ runId }: { runId: string }) {
           const hasChildren = Boolean(node.children?.length);
           const isOpen = expanded.has(node.id) || Boolean(searchView?.open.has(node.id));
           const isSelected = selected(node);
+          const emptyReason = emptyView.hiddenIds.has(node.id) ? node.hiddenReason : undefined;
           return (
             // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard handled by the tree root (arrows/Enter/Space)
             <li
@@ -254,8 +296,13 @@ export function EvidenceTree({ runId }: { runId: string }) {
               aria-selected={isSelected}
               aria-current={isSelected ? "page" : undefined}
               aria-disabled={node.disabledReason ? true : undefined}
-              title={node.disabledReason ?? node.note}
-              className={`case-tree-item${isSelected ? " selected" : ""}${node.disabledReason ? " disabled" : ""}${node.count === 0 ? " is-empty" : ""}${node.dimmed ? " is-dimmed" : ""}`}
+              // The 특이사항 section's note (partial coverage) is read, not only hovered.
+              aria-description={
+                emptyReason ? `결과 없음: ${emptyReason}` : node.id === "flags" ? node.note : undefined
+              }
+              data-hidden-empty={emptyReason ? "" : undefined}
+              title={node.disabledReason ?? (emptyReason ? `결과 없음: ${emptyReason}` : node.note)}
+              className={`case-tree-item${isSelected ? " selected" : ""}${node.disabledReason ? " disabled" : ""}${node.count === 0 ? " is-empty" : ""}${node.dimmed || emptyReason ? " is-dimmed" : ""}`}
               style={{ paddingInlineStart: `calc(var(--space-2) + ${level - 1} * var(--space-4))` }}
               onFocus={() => setFocusedId(node.id)}
               onClick={(event) => {
@@ -288,6 +335,21 @@ export function EvidenceTree({ runId }: { runId: string }) {
                   {node.marker}
                 </span>
               ) : null}
+              {(() => {
+                // 특이사항 badge (U-F4): strongest grade and its rows; the full split is in the name.
+                const top = topFlag(node.flagCounts);
+                return top && node.flagCounts ? (
+                  <span
+                    className="case-tree-flag flag-chip"
+                    data-grade={top.grade}
+                    title={flagCountsText(node.flagCounts)}
+                    aria-hidden="true"
+                  >
+                    <span className="flag-chip-grade">{top.grade}</span>
+                    {top.count.toLocaleString("ko-KR")}
+                  </span>
+                ) : null;
+              })()}
               {/* Counts stay hidden until the first load settles (review #11): no "—" flicker. */}
               {node.count !== undefined && !loading && (
                 <span
@@ -310,6 +372,35 @@ export function EvidenceTree({ runId }: { runId: string }) {
         </p>
       ) : null}
       <p className="case-tree-reason">{blockedReason}</p>
+      {/* The count is final once `/tree` answered (before that, kinds look unknown, not empty). */}
+      {treeSettled && emptyView.hiddenCount > 0 ? (
+        <button
+          type="button"
+          className="case-tree-empty-toggle"
+          aria-pressed={showEmpty}
+          aria-keyshortcuts="T"
+          data-testid="tree-empty-toggle"
+          title={
+            showEmpty
+              ? "결과가 없거나 분석되지 않은 계열을 다시 숨깁니다 (T)"
+              : "결과가 없거나 분석되지 않은 계열을 흐리게 사유와 함께 표시합니다 (T)"
+          }
+          onClick={() => {
+            const next = !showEmpty;
+            setShowEmpty(next);
+            announce(
+              next
+                ? `결과 없는 계열 ${emptyView.hiddenCount}개를 표시합니다.`
+                : `결과 없는 계열 ${emptyView.hiddenCount}개를 숨겼습니다.`,
+            );
+          }}
+        >
+          <Icon name={showEmpty ? "eye" : "list"} />
+          <span>
+            결과 없는 계열 {emptyView.hiddenCount.toLocaleString("ko-KR")}개 {showEmpty ? "숨김" : "표시"}
+          </span>
+        </button>
+      ) : null}
     </div>
   );
 }

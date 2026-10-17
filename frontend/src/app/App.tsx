@@ -7,8 +7,10 @@ import { caseOpenCommands, registerBuiltinCommands } from "../commands/builtin";
 import { registerCommands } from "../commands/registry";
 import { AnalysisFeature } from "../features/analysis/AnalysisFeature";
 import { CaseFeature } from "../features/case/CaseFeature";
+import { useFamilyCatalogLoader } from "../features/flags/catalog";
 import { useReviewInvalidation } from "../features/grid/reviewMap";
 import { registerStageCommands } from "../features/stages/stages";
+import { installPopoutHost, popoutCommands } from "../features/viewer/popout/host";
 import { Layout } from "../shell/Layout";
 import { useShortcuts } from "../shortcuts";
 import { useRoute } from "../state/hooks";
@@ -20,10 +22,15 @@ export function App() {
   const runsQuery = useRunsPoll();
   const { route } = useRoute();
   useShortcuts();
+  // Family catalogue (U-F3/U-F4): the bundled fallback until the server's loads.
+  useFamilyCatalogLoader(!runsQuery.isError);
   useReviewInvalidation();
 
   useEffect(() => registerBuiltinCommands(queryClient), [queryClient]);
   useEffect(() => registerStageCommands(), []);
+  // 뷰어 창 모드 (U-F2): Ctrl+Shift+V, 되돌리기, and the popout's requests.
+  useEffect(() => registerCommands(popoutCommands()), []);
+  useEffect(() => installPopoutHost(queryClient), [queryClient]);
 
   // One "case.open.{id}" palette entry per run; re-register only when the run list changes.
   const runs = runsQuery.data;

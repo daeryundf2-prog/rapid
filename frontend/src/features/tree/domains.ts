@@ -840,16 +840,24 @@ export function targetKey(
     category?: string;
     fileCategory?: string;
     fileScope?: "inventory";
+    /** 특이사항 filters (U-F4): part of the key only when set. */
+    flags?: string[];
+    flagGrade?: string;
   },
 ): string {
+  const flagPart = `${target.flagGrade ? `|g=${target.flagGrade}` : ""}${
+    target.flags?.length ? `|f=${[...target.flags].sort().join(",")}` : ""
+  }`;
   const filesCategory = target.fileScope
     ? filesInventoryCategory(target.fileCategory)
     : (target.fileCategory ?? target.category ?? "");
-  return [
-    target.collection,
-    target.collection === "files" ? filesCategory : "",
-    target.kind ?? "",
-    [...(target.types ?? [])].sort().join(","),
-    [...(target.ext ?? [])].sort().join(","),
-  ].join("|");
+  return (
+    [
+      target.collection,
+      target.collection === "files" ? filesCategory : "",
+      target.kind ?? "",
+      [...(target.types ?? [])].sort().join(","),
+      [...(target.ext ?? [])].sort().join(","),
+    ].join("|") + flagPart
+  );
 }

@@ -160,3 +160,34 @@
   font: inherit;
   font-size: var(--fs-body);
 }
+
+/* U-F7: "결과 없는 계열 n개 표시/숨김" at the foot of the tree. */
+.case-tree-empty-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin: var(--space-2) var(--space-2) 0;
+  padding: 2px var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-subtle);
+  font-size: var(--fs-aux);
+  cursor: pointer;
+}
+
+.case-tree-empty-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.case-tree-empty-toggle[aria-pressed="true"] {
+  color: var(--text);
+}
+
+/* 특이사항 badge on kind / domain nodes (U-F4): grade colour, count. */
+.case-tree-flag {
+  flex: none;
+  height: 16px;
+  gap: 2px;
+}

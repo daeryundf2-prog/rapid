@@ -147,6 +147,9 @@ export interface AnalysisRowsQuery {
   sort?: ServerSort;
   locate?: number;
   pathContains?: string;
+  /** 특이사항 filters (`flag=` repeated, `flag_grade=`). */
+  flags?: string[];
+  flagGrade?: string;
 }
 
 interface RowsPayload {
@@ -172,6 +175,8 @@ export function analysisRowsUrl(runId: string, id: string, query: AnalysisRowsQu
   if (query.offset) params.set("offset", String(query.offset));
   params.set("limit", String(query.limit));
   if (query.pathContains?.trim()) params.set("path_contains", query.pathContains.trim());
+  for (const flag of query.flags ?? []) params.append("flag", flag);
+  if (query.flagGrade) params.set("flag_grade", query.flagGrade);
   if (query.sort) {
     params.set("sort", query.sort.key);
     params.set("order", query.sort.order);

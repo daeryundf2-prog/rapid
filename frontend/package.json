@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "prebuild": "node scripts/gen-families-fallback.mjs --if-available",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -12,7 +13,8 @@
     "lint:fix": "biome check --write .",
     "gen:schemas": "node scripts/gen-schemas.mjs",
     "check:contrast": "node scripts/check-contrast.mjs",
-    "e2e": "playwright test --config e2e/playwright.config.ts"
+    "e2e": "playwright test --config e2e/playwright.config.ts",
+    "gen:families": "node scripts/gen-families-fallback.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.102.8",

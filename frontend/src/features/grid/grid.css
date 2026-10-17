@@ -802,3 +802,75 @@
 .grid-error-card .grid-empty-icon {
   color: var(--danger);
 }
+
+/* Catalogue time cells (viewer-families U-F3): the timestamp kind as a chip before the time. */
+.ts-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.ts-kind-chip {
+  flex: none;
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 14px;
+  white-space: nowrap;
+}
+
+/* U-F8: review-mark stripe, 6px on the row's left edge (sticky with the select cell). */
+.grid-row-stripe {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 6px;
+}
+
+.grid-row-stripe[data-mark="relevant"] {
+  background: var(--status-relevant);
+}
+
+.grid-row-stripe[data-mark="excluded"] {
+  background: var(--status-excluded);
+}
+
+.grid-row-stripe[data-mark="needs-review"] {
+  background: var(--status-needs-review);
+}
+
+.grid-row-stripe[data-mark="include-in-report"] {
+  background: var(--status-report);
+}
+
+.grid-row-stripe[data-mark="bookmark"] {
+  background: var(--status-bookmark);
+}
+
+/* U-F8 mixed-family grid: label above value inside one cell (fits the 28px row). */
+.sum-cell {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  line-height: 1.1;
+}
+
+.sum-label {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sum-value {
+  overflow: hidden;
+  font-size: var(--fs-table-aux);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

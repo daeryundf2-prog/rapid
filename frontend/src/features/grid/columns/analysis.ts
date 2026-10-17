@@ -6,6 +6,7 @@
  */
 
 import { fetchAnalysisRowsPage, locateAnalysisRow } from "../../../api/analyses";
+import { parseFlags } from "../../flags/flags";
 import { serverPathFilter } from "../gridUtils";
 import type { CollectionDef, ColumnSpec } from "../types";
 import { type KindColumnDef, kindColumn } from "./artifacts";
@@ -217,6 +218,8 @@ export const analysisCollection: CollectionDef = {
         limit: query.limit,
         sort: query.sort,
         pathContains: query.pathContains?.trim() || serverPathFilter(query.text),
+        ...(query.flags?.length ? { flags: query.flags } : {}),
+        ...(query.flagGrade ? { flagGrade: query.flagGrade } : {}),
       },
       signal,
     );
@@ -256,6 +259,7 @@ export const analysisCollection: CollectionDef = {
           : {}),
         details: volumePath && d.path === undefined ? { ...d, path: volumePath } : d,
         ...(volumePath ? { volumePath } : {}),
+        ...(Array.isArray(raw.flags) ? { flags: raw.flags, flagList: parseFlags(raw.flags) } : {}),
         ...(isCarveHit
           ? { highlight: { offset, ...(length ? { length } : {}) }, viewerMode: "hex", sourceOffset: offset }
           : {}),

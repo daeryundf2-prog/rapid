@@ -12,6 +12,7 @@ import {
   nodeStateIcon,
   nodeStateLabel,
 } from "../analysis/kinds";
+import { GRADES, type Grade, ruleById } from "../flags/catalog";
 import type { CaseRoute } from "./adapter";
 import { groupByCategory, kindIcon } from "./categories";
 import { DOMAINS, type DomainNodeDef, type DomainTarget, NON_EVIDENCE_NOTE, targetKey } from "./domains";
@@ -24,6 +25,9 @@ export type DomainRoute = RouteTail & {
   ext?: string[];
   cols?: string[];
   cf?: ColumnFilter[];
+  /** 특이사항 nodes (U-F4): `flag=` / `flag_grade=`. */
+  flags?: string[];
+  flagGrade?: Grade;
 };
 
 export interface TreeModelNode {
@@ -56,6 +60,13 @@ export interface TreeModelNode {
   dimmed?: boolean;
   /** Tooltip of an openable node (dimmed / skipped-provider explanations). */
   note?: string;
+  /** Kind nodes: flagged rows per highest grade (`/tree` `flag_counts`), shown as a badge. */
+  flagCounts?: Partial<Record<Grade, number>>;
+  /**
+   * U-F7: why the node is hidden by default (count 0, never-run analysis, kind absent from the
+   * run). Groups and domains are hidden when every child is.
+   */
+  hiddenReason?: string;
 }
 
 export interface TreeModelInput {
@@ -125,10 +136,12 @@ function mergeKindNodes(nodes: TreeNode[]): TreeNode | undefined {
     }
     perType = typed ? sum : undefined;
   }
+  const flags = sumFlagCounts(nodes.map((node) => node.flag_counts));
   return {
     ...primary,
     id: `artifacts:${primary.kind}`,
     count: nodes.reduce((sum, node) => sum + (node.count ?? 0), 0),
+    ...(flags ? { flag_counts: flags } : {}),
     ...(perType ? { artifact_type_counts: perType } : {}),
     children: nodes.flatMap((node) => node.children ?? []),
   };
@@ -308,6 +321,19 @@ export interface DomainCount {
   disabledReason?: string;
   marker?: string;
   icon?: IconName;
+  /** Analysis nodes: the job never ran on this run (known from the job list / tree). */
+  neverRan?: boolean;
+}
+
+/** U-F7 reason of an analysis node that never ran. */
+export const NEVER_RAN_REASON = "분석 안 됨 — 처리 단계에서 실행하면 결과가 여기에 나타납니다";
+
+/** U-F7: why a node with this count state is hidden by default (undefined = shown). */
+export function emptyNodeReason(state: DomainCount): string | undefined {
+  if (state.neverRan) return NEVER_RAN_REASON;
+  if (state.count === 0) return state.disabledReason ?? NO_DATA_REASON;
+  if (state.count === UNKNOWN_COUNT && state.disabledReason) return state.disabledReason;
+  return undefined;
 }
 
 /** Count / dimming of one domain node from `/tree`, the summary counts and the analysis jobs. */
@@ -342,7 +368,14 @@ export function domainNodeCount(target: DomainTarget, input: TreeModelInput): Do
         : partial && last?.analysis_id === partial.analysis_id
           ? `${nodeStateLabel(status)} · 부분 결과`
           : nodeStateLabel(status);
-    return { count, marker: stateMarker, icon: status === "completed" ? undefined : nodeStateIcon(status) };
+    // Never ran (known): hidden by default (U-F7). Unknown while the job list loads.
+    const statusKnown = input.analyses !== undefined || input.tree !== undefined;
+    return {
+      count,
+      marker: stateMarker,
+      icon: status === "completed" ? undefined : nodeStateIcon(status),
+      ...(statusKnown && status === null && count === undefined ? { neverRan: true } : {}),
+    };
   }
   if (target.collection === "files" && target.fileScope && !target.fileCategory) {
     return inventoryTotal(input);
@@ -503,9 +536,27 @@ function filteredNote(target: DomainTarget): string {
   return `불러온 행에 열 필터 적용: ${filters}`;
 }
 
+/** Sum of per-grade flag counts; undefined when nothing is flagged. */
+export function sumFlagCounts(
+  list: ReadonlyArray<Partial<Record<Grade, number>> | undefined>,
+): Partial<Record<Grade, number>> | undefined {
+  const sum: Record<Grade, number> = { A: 0, B: 0, C: 0 };
+  for (const counts of list) for (const grade of GRADES) sum[grade] += counts?.[grade] ?? 0;
+  return sum.A + sum.B + sum.C > 0 ? sum : undefined;
+}
+
+/** "특이사항 A 2 · B 10" of a node's badge (accessible text and tooltip). */
+export function flagCountsText(counts: Partial<Record<Grade, number>>): string {
+  return `특이사항 ${GRADES.filter((g) => (counts[g] ?? 0) > 0)
+    .map((g) => `${g} ${(counts[g] ?? 0).toLocaleString("ko-KR")}`)
+    .join(" · ")}`;
+}
+
 function domainNodes(input: TreeModelInput): TreeModelNode[] {
   return DOMAINS.map<TreeModelNode>((domain) => {
     const flat: Array<{ def: DomainNodeDef; count: number | string | undefined }> = [];
+    // Flagged rows per kind under this domain (each kind once): the domain's 특이사항 badge.
+    const domainFlags = new Map<string, Partial<Record<Grade, number>>>();
     const toModel = (node: DomainNodeDef): TreeModelNode => {
       const target = effectiveTarget(node.target, input.tree);
       const state = domainNodeCount(target, input);
@@ -514,6 +565,17 @@ function domainNodes(input: TreeModelInput): TreeModelNode[] {
       const label =
         node.target.collection === "indicators" ? indicatorsLabel(input.tree, node.label) : node.label;
       const children = node.children?.map(toModel);
+      const flagCounts =
+        target.collection === "artifacts" && target.kind && !target.types?.length && !target.cf?.length
+          ? mergedKindNode(input.tree, target.kind)?.flag_counts
+          : undefined;
+      if (flagCounts && target.kind) domainFlags.set(target.kind, flagCounts);
+      const ownReason = emptyNodeReason(state);
+      const hiddenReason = children?.length
+        ? children.every((child) => child.hiddenReason)
+          ? (ownReason ?? children[0]?.hiddenReason)
+          : undefined
+        : ownReason;
       return {
         id: `domain:${domain.id}:${node.id}`,
         label,
@@ -531,9 +593,12 @@ function domainNodes(input: TreeModelInput): TreeModelNode[] {
         ...(children?.length ? { children } : {}),
         ...(node.nonEvidence ? { dimmed: true, note: NON_EVIDENCE_NOTE } : {}),
         ...(target.cf?.length && !node.nonEvidence ? { note: filteredNote(target) } : {}),
+        ...(flagCounts && Object.values(flagCounts).some((n) => (n ?? 0) > 0) ? { flagCounts } : {}),
+        ...(hiddenReason ? { hiddenReason } : {}),
       };
     };
     const children = domain.nodes.map(toModel);
+    const domainFlagCounts = sumFlagCounts([...domainFlags.values()]);
     const total = domainTotal(
       flat.map((entry) => entry.def),
       flat.map((entry) => entry.count),
@@ -549,8 +614,239 @@ function domainNodes(input: TreeModelInput): TreeModelNode[] {
       noSelect: true,
       toggleOnly: true,
       children,
+      ...(domainFlagCounts ? { flagCounts: domainFlagCounts } : {}),
+      ...(children.length && children.every((child) => child.hiddenReason)
+        ? { hiddenReason: "이 계열의 노드가 모두 비어 있습니다" }
+        : {}),
     };
   });
+}
+
+export interface FlagRuleCount {
+  id: string;
+  count: number;
+  grade?: Grade;
+  label?: string;
+  status?: string;
+}
+
+/** `/tree` 특이사항 summary, normalised from either contract shape (see `treeFlagsSection`). */
+export interface FlagsSummary {
+  /** Flagged artifact rows. */
+  total: number;
+  /** Rows per *best* grade (not cumulative). */
+  byGrade: Record<Grade, number>;
+  rules: FlagRuleCount[];
+  policy: Array<{ id: string; label?: string; count: number; note?: string }>;
+  /** Flag-set provenance (`source.status`: "joined" / "skipped" / "too_large" …). */
+  source?: Record<string, unknown>;
+}
+
+function asGrade(value: unknown): Grade | undefined {
+  return value === "A" || value === "B" || value === "C" ? value : undefined;
+}
+
+/**
+ * The run's 특이사항 summary from `/tree`: the `flags` section (`{total, by_grade, by_rule}`) or
+ * D1's `flags` group node (`{id: "flags", count, grades, rules: [{id, label, grade, status,
+ * count}], source}`) — at the top level or among `nodes`. Undefined when the run has no flag set.
+ */
+export function treeFlagsSection(tree: RunTree | undefined): FlagsSummary | undefined {
+  if (!tree) return undefined;
+  const raw = (tree.flags ?? tree.nodes?.find((node) => node.id === "flags")) as
+    | Record<string, unknown>
+    | undefined;
+  if (!raw || typeof raw !== "object") return undefined;
+  const source = isObject(raw.source) ? raw.source : undefined;
+  // A group node without a flag set (`source.status` skipped / missing) means "not analysed".
+  if (source && typeof source.status === "string" && source.status !== "joined") return undefined;
+  const gradesRaw = (
+    isObject(raw.by_grade) ? raw.by_grade : isObject(raw.grades) ? raw.grades : {}
+  ) as Record<string, unknown>;
+  const byGrade: Record<Grade, number> = { A: 0, B: 0, C: 0 };
+  for (const grade of GRADES) {
+    const value = gradesRaw[grade];
+    if (typeof value === "number" && value > 0) byGrade[grade] = value;
+  }
+  const rules: FlagRuleCount[] = [];
+  const list = Array.isArray(raw.rules) ? raw.rules : Array.isArray(raw.by_rule) ? raw.by_rule : null;
+  if (list) {
+    for (const entry of list) {
+      if (!isObject(entry) || typeof entry.id !== "string" || typeof entry.count !== "number") continue;
+      const grade = asGrade(entry.grade);
+      rules.push({
+        id: entry.id,
+        count: entry.count,
+        ...(grade ? { grade } : {}),
+        ...(typeof entry.label === "string" && entry.label ? { label: entry.label } : {}),
+        ...(typeof entry.status === "string" ? { status: entry.status } : {}),
+      });
+    }
+  } else if (isObject(raw.by_rule)) {
+    for (const [id, count] of Object.entries(raw.by_rule)) {
+      if (typeof count === "number") rules.push({ id, count });
+    }
+  }
+  const policy = (Array.isArray(raw.policy) ? raw.policy : []).filter(
+    (entry): entry is FlagsSummary["policy"][number] =>
+      isObject(entry) && typeof entry.id === "string" && typeof entry.count === "number",
+  );
+  const sum = byGrade.A + byGrade.B + byGrade.C;
+  const totalRaw =
+    typeof raw.total === "number" ? raw.total : typeof raw.count === "number" ? raw.count : sum;
+  return { total: totalRaw, byGrade, rules, policy, ...(source ? { source } : {}) };
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export const NO_FLAGS_REASON = "특이사항 분석 결과가 없습니다 — 처리 단계에서 특이사항 분석을 실행하세요";
+
+/** Korean label of a flag row source (`incomplete_sources` entry): kind node label, files, analysis. */
+export function flagSourceLabel(tree: RunTree | undefined, source: string): string {
+  if (source === "files:candidates") return "파일 후보";
+  if (source === "files:inventory") return "전체 파일 목록";
+  if (source.startsWith("analysis:")) return `분석 결과(${source.slice("analysis:".length)})`;
+  return mergedKindNode(tree, source)?.label ?? source;
+}
+
+/**
+ * A joined flag set that could not read every source (`flags_join` / `source`: `coverage:
+ * "partial"`, `incomplete_sources`, `reason`, `skipped_flags`): the notice the grid, the tree's
+ * 특이사항 section and the review panel show. Undefined when the set is complete.
+ */
+export function flagsPartialNotice(tree: RunTree | undefined): string | undefined {
+  if (!tree || !treeFlagsSection(tree)) return undefined;
+  const raw = (tree.flags ?? tree.nodes?.find((node) => node.id === "flags")) as
+    | Record<string, unknown>
+    | undefined;
+  const source = raw && isObject(raw.source) ? raw.source : undefined;
+  if (!source) return undefined;
+  const skipped =
+    typeof source.skipped_flags === "number" && source.skipped_flags > 0 ? source.skipped_flags : 0;
+  const skippedText = skipped ? ` · 손상된 지표 ${skipped.toLocaleString("ko-KR")}개 제외` : "";
+  if (source.coverage !== "partial") return skipped ? `특이사항${skippedText}` : undefined;
+  const sources = (Array.isArray(source.incomplete_sources) ? source.incomplete_sources : [])
+    .filter((s): s is string => typeof s === "string" && s !== "")
+    .map((s) => flagSourceLabel(tree, s));
+  const reason = typeof source.reason === "string" && source.reason ? ` — ${source.reason}` : "";
+  return `특이사항 분석이 일부 소스를 읽지 못했습니다 (${sources.join(", ") || "소스 미상"})${reason}${skippedText}`;
+}
+
+/** Why the run's flags are unusable, per `flags_join` / `source.status` (U-F4 review #8). */
+export const FLAGS_STATUS_REASONS: Record<string, string> = {
+  no_source: NO_FLAGS_REASON,
+  too_large:
+    "특이사항 결과 파일이 너무 커서 색인하지 않았습니다(256 MB 초과) — 행·트리에 특이사항을 붙일 수 없습니다",
+  skipped: "특이사항 결합을 건너뛰었습니다 — 이 런의 출력 위치를 읽을 수 없습니다",
+};
+
+/**
+ * The Korean reason the run has no usable flag set (undefined when it has one): no analysis yet,
+ * a result too large to index, a skipped join, or any other status with the server's reason.
+ */
+export function flagsUnavailableReason(tree: RunTree | undefined): string | undefined {
+  if (!tree || treeFlagsSection(tree)) return undefined;
+  const raw = (tree.flags ?? tree.nodes?.find((node) => node.id === "flags")) as
+    | Record<string, unknown>
+    | undefined;
+  const source = raw && isObject(raw.source) ? raw.source : undefined;
+  const status = typeof source?.status === "string" ? source.status : "no_source";
+  const detail = typeof source?.reason === "string" && source.reason ? ` (${source.reason})` : "";
+  return (FLAGS_STATUS_REASONS[status] ?? `특이사항 결과를 쓸 수 없습니다 — 상태: ${status}`) + detail;
+}
+const GRADE_NODE_LABEL: Record<Grade, string> = { A: "A 등급", B: "B 등급 이상", C: "C 등급 이상" };
+
+/** Selection key of a 특이사항 node (the same `targetKey` the routed filters give). */
+export function flagSelectKey(target: Pick<DomainRoute, "flags" | "flagGrade">): string {
+  return targetKey({ collection: "artifacts", flags: target.flags, flagGrade: target.flagGrade });
+}
+
+/**
+ * 특이사항 section (U-F4): grade nodes ("A 등급", "B 등급 이상", "C 등급 이상" — the grid's
+ * `flag_grade=` is "at least", so counts are cumulative) with their rules underneath (`flag=`).
+ * Counts are the `/tree` `flags` summary (artifact rows per highest grade / per rule).
+ */
+export function flagsSectionNode(tree: RunTree | undefined): TreeModelNode {
+  const section = treeFlagsSection(tree);
+  const root: TreeModelNode = {
+    id: "flags",
+    label: "특이사항",
+    icon: "flag",
+    route: { collection: "artifacts" },
+    noSelect: true,
+    toggleOnly: true,
+  };
+  if (!section) {
+    return tree
+      ? {
+          ...root,
+          toggleOnly: false,
+          disabledReason: flagsUnavailableReason(tree) ?? NO_FLAGS_REASON,
+          hiddenReason: flagsUnavailableReason(tree) ?? NO_FLAGS_REASON,
+        }
+      : root;
+  }
+  let cumulative = 0;
+  const children = GRADES.map<TreeModelNode>((grade) => {
+    cumulative += section.byGrade[grade];
+    const ruleNodes = section.rules
+      .map((entry) => ({ ...entry, grade: entry.grade ?? ruleById(entry.id)?.grade }))
+      .filter((entry) => entry.grade === grade)
+      .sort((a, b) => b.count - a.count || a.id.localeCompare(b.id))
+      .map<TreeModelNode>((entry) => {
+        const target: DomainRoute = { collection: "artifacts", flags: [entry.id] };
+        const provisional = (entry.status ?? ruleById(entry.id)?.status) === "provisional";
+        return {
+          id: `flags:rule:${entry.id}`,
+          label: entry.label ?? ruleById(entry.id)?.label_ko ?? entry.id,
+          count: entry.count,
+          route: { collection: "artifacts" },
+          target,
+          selectKey: flagSelectKey(target),
+          ...(provisional ? { note: "검증 필요 지표 — 실제 이미지로 아직 검증되지 않았습니다" } : {}),
+          ...(entry.count === 0
+            ? { disabledReason: "이 지표에 해당하는 행이 없습니다", hiddenReason: "0건" }
+            : {}),
+        };
+      });
+    const target: DomainRoute = { collection: "artifacts", flagGrade: grade };
+    const count = cumulative;
+    return {
+      id: `flags:grade:${grade}`,
+      label: GRADE_NODE_LABEL[grade],
+      count,
+      route: { collection: "artifacts" },
+      target,
+      selectKey: flagSelectKey(target),
+      ...(ruleNodes.length ? { children: ruleNodes } : {}),
+      ...(count === 0 ? { disabledReason: "이 등급 이상의 특이사항이 없습니다", hiddenReason: "0건" } : {}),
+    };
+  });
+  return {
+    ...root,
+    count: section.total,
+    strongCount: true,
+    children,
+    ...(flagsPartialNotice(tree) ? { note: flagsPartialNotice(tree) } : {}),
+    ...(section.total === 0 ? { hiddenReason: "특이사항이 없습니다" } : {}),
+  };
+}
+
+/** Policy-dependent sources with no records (`/tree` `flags.policy`): "부재 ≠ 미발생" notes. */
+export function policyAbsences(
+  tree: RunTree | undefined,
+): Array<{ id: string; label: string; note: string }> {
+  return (treeFlagsSection(tree)?.policy ?? [])
+    .filter((entry) => entry.count === 0)
+    .map((entry) => ({
+      id: entry.id,
+      label: entry.label ?? entry.id,
+      note:
+        entry.note ??
+        "감사 정책·로그 설정에 따라 기록되지 않았을 수 있습니다 — 부재 ≠ 미발생(이벤트가 없었다는 증거가 아님)",
+    }));
 }
 
 /**
@@ -602,7 +898,11 @@ export function buildTreeModel(input: TreeModelInput): TreeModelNode[] {
     ],
   };
 
-  return [evidenceNode(input.evidence, counts), views, ...domainNodes(input)];
+  // U-F7: empty 전체 보기 views are hidden by default too.
+  views.children = views.children?.map((child) =>
+    child.count === 0 ? { ...child, hiddenReason: child.disabledReason ?? NO_DATA_REASON } : child,
+  );
+  return [evidenceNode(input.evidence, counts), views, flagsSectionNode(input.tree), ...domainNodes(input)];
 }
 
 export interface FlatNode {
@@ -622,4 +922,45 @@ export function flattenVisible(nodes: TreeModelNode[], expanded: ReadonlySet<str
   };
   walk(nodes, 1, null);
   return out;
+}
+
+/** U-F7 view of the model: what is shown, and how many empty families are hidden. */
+export interface EmptyFilterResult {
+  nodes: TreeModelNode[];
+  /**
+   * Hidden nodes counted at their top-most level (a hidden domain counts once, not with its
+   * children): the toggle's "결과 없는 계열 n개".
+   */
+  hiddenCount: number;
+  /** Ids of every node hidden by the rule (shown dimmed while "표시" is on). */
+  hiddenIds: ReadonlySet<string>;
+}
+
+/**
+ * Hide empty families (U-F7): a node with `hiddenReason` is dropped unless `showEmpty` is on or
+ * it is in `reveal` (a tree search match, the routed node of a deep link, and their ancestors).
+ */
+export function filterEmptyNodes(
+  nodes: readonly TreeModelNode[],
+  showEmpty: boolean,
+  reveal: ReadonlySet<string> = new Set(),
+): EmptyFilterResult {
+  const hiddenIds = new Set<string>();
+  let hiddenCount = 0;
+  const walk = (list: readonly TreeModelNode[], parentHidden: boolean): TreeModelNode[] => {
+    const out: TreeModelNode[] = [];
+    for (const node of list) {
+      const hidden = Boolean(node.hiddenReason);
+      if (hidden) {
+        hiddenIds.add(node.id);
+        if (!parentHidden) hiddenCount += 1;
+      }
+      const children = node.children ? walk(node.children, parentHidden || hidden) : undefined;
+      if (hidden && !showEmpty && !reveal.has(node.id)) continue;
+      out.push(children === undefined ? node : { ...node, children: children.length ? children : undefined });
+    }
+    return out;
+  };
+  const shown = walk(nodes, false);
+  return { nodes: shown, hiddenCount, hiddenIds };
 }

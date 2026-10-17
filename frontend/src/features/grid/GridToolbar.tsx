@@ -3,7 +3,7 @@ import { DisabledReason } from "../../a11y/primitives";
 import { Popover } from "../../components/Popover";
 import type { GridRow, ReviewStatus } from "../../contracts/collection";
 import { Icon } from "../../icons";
-import { FilterBar, type FilterBarVariant } from "../filters/FilterBar";
+import { type DisplaySettings, FilterBar, type FilterBarVariant } from "../filters/FilterBar";
 import { useToolbarLead } from "../views/toolbarSlot";
 import { lockedColumnId } from "./columns";
 import { setAxiomMode } from "./columns/axiom";
@@ -15,7 +15,7 @@ import {
   UNSHAREABLE_FIELD_REASON,
 } from "./columns/fieldColumns";
 import { AUTO_HIDE_LABEL, type AutoHideReason, backendLabel, formatCount } from "./gridUtils";
-import { type ColumnSpec, DENSITY_LABELS, type Density, type GridPreset, PRESET_LABELS } from "./types";
+import type { ColumnSpec, GridPreset } from "./types";
 
 export interface GridToolbarProps {
   filterRef: RefObject<HTMLInputElement | null>;
@@ -31,6 +31,11 @@ export interface GridToolbarProps {
   kindOptions?: string[];
   /** Collection-specific toolbar controls (문서: "일치만"). */
   extra?: ReactNode;
+  /** 열 구성 / 밀도 inside the 조건 panel (U-F1). */
+  display?: DisplaySettings;
+  resultCount?: { count: number | null; loading: boolean };
+  /** Row end overflow: the 열 설정 menu (열 선택 · 열 필터). */
+  trailing?: ReactNode;
 }
 
 /** 문서 toolbar: list every document, or only the keyword matches (plain `GET /docs`; every document is `all=1`). */
@@ -53,10 +58,8 @@ export function DocsMatchedToggle({ on, onChange }: { on: boolean; onChange: (on
 }
 
 export interface ColumnMenuProps {
+  /** The preset in effect (AXIOM two-line rows); it is chosen in the 조건 panel. */
   preset: GridPreset;
-  onPreset: (preset: GridPreset) => void;
-  density: Density;
-  onDensity: (density: Density) => void;
   columns: ColumnSpec[];
   visibility: Record<string, boolean>;
   onToggleColumn: (id: string, visible: boolean) => void;
@@ -70,6 +73,8 @@ export interface ColumnMenuProps {
   fieldPicker?: FieldPickerProps;
   /** "열 필터" toggle: shows the column header filter row (plan analysis-workbench-p1 §4). */
   columnFilters?: { open: boolean; count: number; onToggle: () => void };
+  /** Catalogue family layout (U-F3): its auxiliary columns, added or removed together. */
+  auxColumns?: { family: string; ids: string[]; onToggleAll: (on: boolean) => void };
 }
 
 export interface FieldPickerProps {
@@ -183,13 +188,17 @@ export function GridToolbar(props: GridToolbarProps) {
       kindOptions={props.kindOptions}
       lead={lead}
       extra={props.extra}
+      display={props.display}
+      resultCount={props.resultCount}
+      trailing={props.trailing}
     />
   );
 }
 
 /**
- * Column controls folded into one button at the right end of the grid header (visual-polish
- * S3): preset, the column picker (+ record fields), the column-filter row and the density.
+ * Column controls folded into one overflow button at the end of the 조건 줄 (visual-polish S3,
+ * viewer-families U-F1): the column picker (+ catalogue auxiliary columns, record fields) and the
+ * column-filter row. 열 구성 and 밀도 moved into the 조건 panel.
  */
 export function ColumnMenu(props: ColumnMenuProps) {
   const [open, setOpen] = useState(false);
@@ -216,7 +225,7 @@ export function ColumnMenu(props: ColumnMenuProps) {
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls={open ? popoverId : undefined}
-        title={`${props.collectionLabel} 열 설정 — 구성·표시할 열·열 필터·밀도`}
+        title={`${props.collectionLabel} 열 설정 — 표시할 열·열 필터`}
         data-testid="grid-column-menu"
         onClick={() => setOpen((value) => !value)}
       >
@@ -236,38 +245,6 @@ export function ColumnMenu(props: ColumnMenuProps) {
         align="end"
         className="grid-colmenu-popover"
       >
-        <div className="popover-section grid-colmenu-selects">
-          <label className="grid-select">
-            <span>열 구성</span>
-            <select
-              value={props.preset}
-              onChange={(event) => {
-                const next = event.target.value as GridPreset;
-                props.onPreset(next);
-              }}
-            >
-              {(Object.keys(PRESET_LABELS) as GridPreset[]).map((id) => (
-                <option key={id} value={id}>
-                  {PRESET_LABELS[id]}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="grid-select">
-            <span>밀도</span>
-            <select
-              value={props.density}
-              onChange={(event) => props.onDensity(event.target.value as Density)}
-            >
-              {(Object.keys(DENSITY_LABELS) as Density[]).map((id) => (
-                <option key={id} value={id}>
-                  {DENSITY_LABELS[id]}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-
         {props.columnFilters ? (
           <div className="popover-section">
             <button
@@ -280,6 +257,29 @@ export function ColumnMenu(props: ColumnMenuProps) {
               <Icon name="filter" />
               <span>열 필터 행{props.columnFilters.count ? ` (${props.columnFilters.count})` : ""}</span>
             </button>
+          </div>
+        ) : null}
+
+        {props.auxColumns?.ids.length ? (
+          <div className="popover-section">
+            {(() => {
+              const aux = props.auxColumns;
+              const allOn = aux.ids.every((id) => props.visibility[id] === true);
+              return (
+                <button
+                  type="button"
+                  className="grid-btn"
+                  data-testid="grid-aux-columns"
+                  aria-pressed={allOn}
+                  onClick={() => aux.onToggleAll(!allOn)}
+                >
+                  <Icon name="columns" />
+                  <span>
+                    {aux.family} 보조 열 {aux.ids.length}개 {allOn ? "모두 빼기" : "모두 추가"}
+                  </span>
+                </button>
+              );
+            })()}
           </div>
         ) : null}
 
