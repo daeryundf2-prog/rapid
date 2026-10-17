@@ -81,6 +81,18 @@ families:
   - key: source_path
     label: 원본 DB
     format: path
+  - key: recovery_method
+    label: 복구 방식
+  - key: source_offset
+    label: 원본 오프셋
+    format: number
+  - key: local_timestamp
+    label: 현지 시각(오프셋 없음)
+  - key: user
+    label: 사용자 프로필
+  - key: parser_version
+    label: 파서 버전
+    format: mono
   rules:
   - messenger.time_regression
   - messenger.server_client_skew
@@ -139,6 +151,168 @@ families:
   - key: risk_score
     label: 위험 점수
     format: number
+  rules: []
+- id: messenger-attachment
+  label: 메신저 첨부
+  types:
+  - chat-attachment
+  core_columns:
+  - key: timestamp
+    label: 시각
+    format: time
+    ts_kind: sent
+    width: 170
+  - key: service
+    label: 앱
+    aliases:
+    - app
+  - key: file_name
+    semantic: attachment
+    label: 파일 이름
+    aliases:
+    - attachment_name
+  - key: file_size
+    label: 크기
+    format: bytes
+  - key: direction
+    label: 전송 방향
+    width: 80
+  - key: sender
+    semantic: person_sender
+    label: 보낸 사람
+  - key: recipient
+    semantic: person_recipient
+    label: 받는 사람
+  - key: conversation_title
+    label: 대화방
+    aliases:
+    - conversation_id
+  - key: url
+    semantic: url
+    label: 주소 (URL)
+    format: url
+  - key: sha256
+    semantic: hash
+    label: 해시 (SHA-256)
+    format: mono
+  aux_columns:
+  - key: file_path
+    semantic: path
+    label: 파일 경로
+    format: path
+  - key: mime_type
+    label: 형식 (MIME)
+  - key: signature_type
+    label: 파일 서명
+  - key: transfer_status
+    label: 전송 상태
+  - key: recovery_method
+    label: 복구 방식
+  - key: source_path
+    label: 원본
+    format: path
+  - key: source_offset
+    label: 원본 오프셋
+    format: number
+  - key: user
+    label: 사용자 프로필
+  rules:
+  - messenger.external_file_transfer
+- id: messenger-contact
+  label: 메신저 연락처
+  types:
+  - chat-contact
+  core_columns:
+  - key: service
+    label: 앱
+    aliases:
+    - app
+  - key: contact_name
+    semantic: person
+    label: 이름
+    aliases:
+    - display_name
+  - key: contact_id
+    semantic: account
+    label: 계정 ID
+    format: mono
+  - key: email
+    semantic: account
+    label: 이메일
+  - key: phone
+    semantic: person
+    label: 전화번호
+  - key: user
+    label: 사용자 프로필
+  aux_columns:
+  - key: contact_role
+    label: 역할
+  - key: recovery_method
+    label: 복구 방식
+  - key: source_path
+    label: 원본
+    format: path
+  - key: source_offset
+    label: 원본 오프셋
+    format: number
+  rules: []
+- id: messenger-app
+  label: 메신저 앱·처리 상태
+  types:
+  - chat-app-inventory
+  - chat-parse-error
+  core_columns:
+  - key: service
+    label: 앱
+    aliases:
+    - app
+  - key: user
+    label: 사용자 프로필
+  - key: app_version
+    label: 앱 버전
+  - key: encryption_state
+    label: 암호화 상태
+  - key: file_count
+    label: 파일 수
+    format: number
+  - key: total_bytes
+    label: 전체 크기
+    format: bytes
+  - key: message_rows
+    label: 메시지 행
+    format: number
+  - key: reason_ko
+    label: 사유
+    aliases:
+    - error
+    width: 320
+  - key: app_root
+    semantic: path
+    label: 앱 폴더
+    aliases:
+    - source_path
+    format: path
+  aux_columns:
+  - key: last_file_modified
+    label: 마지막 파일 수정
+    format: time
+    ts_kind: modified
+  - key: attachment_rows
+    label: 첨부 행
+    format: number
+  - key: contact_rows
+    label: 연락처 행
+    format: number
+  - key: encrypted_store_count
+    label: 암호화 저장소 수
+    format: number
+  - key: parse_error_count
+    label: 처리 오류 수
+    format: number
+  - key: caps_hit
+    label: 상한 도달
+  - key: error_type
+    label: 오류 종류
   rules: []
 rules:
 - id: messenger.time_regression
@@ -289,3 +463,18 @@ rules:
   status: provisional
   params:
     gap_days: 90
+- id: messenger.external_file_transfer
+  family: messenger-attachment
+  grade: B
+  label_ko: 외부 상대에게 파일 전송
+  rationale_ko: '데스크톱 메신저에서 보낸 첨부의 받는 사람이 조직 외부 도메인(사용자 계정·내부 도메인과 다름)이거나 같은 앱의 연락처 목록에 없는 상대: 유출 경로.'
+  false_positive_ko: 협력사·고객과의 정상 업무 파일 교환, 연락처 동기화가 안 된 앱.
+  sources:
+  - https://attack.mitre.org/techniques/T1567/
+  - https://www.magnetforensics.com/blog/the-lesser-talked-about-messaging-apps/
+  - https://dfrws.org/presentation/digital-forensic-analysis-of-encrypted-database-files-in-instant-messaging-applications-on-windows-operating-systems/
+  version: 1
+  status: provisional
+  params:
+    internal_domains: []
+    flag_unregistered_contact: true

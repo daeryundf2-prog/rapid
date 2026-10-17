@@ -79,6 +79,8 @@ const EVIDENCE: Record<string, string[]> = {
     "kakaotalk-windows-crypto-material-candidate",
   ],
   "windows-shellbags": ["shellbag-entry", "shellbag-hive-summary"],
+  // r2 M1: artifacts/windows/messenger.py row types.
+  "windows-messenger": ["chat-message", "chat-attachment", "chat-contact", "chat-app-inventory"],
   browser: [
     "browser-history",
     "browser-visit",
@@ -247,6 +249,24 @@ describe("domain mapping table (parser-quality r1)", () => {
       ["os", ["amcache-device-census"]],
       ["devices", ["amcache-device-pnp", "amcache-device-container"]],
     ]);
+  });
+
+  it("places the desktop messenger types under 메신저·메일 › 데스크톱 메신저 in Korean order (r2 M1)", () => {
+    const group = DOMAINS.find((d) => d.id === "messaging")?.nodes.find((n) => n.id === "msg-desktop");
+    expect(group?.label).toBe("데스크톱 메신저(Windows)");
+    const labels = (group?.children ?? []).map((c) => c.label);
+    expect(labels).toEqual([...labels].sort((x, y) => x.localeCompare(y, "ko")));
+    expect(group?.children?.map((c) => [c.label, c.target.types])).toEqual([
+      ["대화(메시지)", ["chat-message"]],
+      ["앱 목록", ["chat-app-inventory"]],
+      ["연락처", ["chat-contact"]],
+      ["처리 오류", ["chat-parse-error"]],
+      ["첨부 파일", ["chat-attachment"]],
+    ]);
+    expect(group?.target.types).toEqual(
+      (group?.children ?? []).filter((c) => !c.detail).flatMap((c) => c.target.types ?? []),
+    );
+    expect(group?.children?.find((c) => c.id === "msg-desktop-errors")?.detail).toBe(true);
   });
 
   it("windows-network-interface lives under 시스템 정보 (server routes it to os now)", () => {

@@ -218,6 +218,13 @@
         "artifact_count": 0
       },
       {
+        "name": "windows-messenger",
+        "description": "Windows desktop messengers: Teams, Slack, Discord, Telegram Desktop, WhatsApp Desktop, Skype, LINE, WeChat, Zoom",
+        "target_platform": "windows",
+        "supported": true,
+        "artifact_count": 0
+      },
+      {
         "name": "windows-search-index",
         "description": "Windows Search index EDB inventory and CSV/JSON export imports",
         "target_platform": "windows",

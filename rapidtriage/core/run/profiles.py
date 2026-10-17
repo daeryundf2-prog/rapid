@@ -125,6 +125,7 @@ RUN_PROFILES: dict[str, RunProfile] = {
             "eventlog",
             "windows-search-index",
             "windows-remote-access",
+            "windows-messenger",
             "windows-registry",
             "windows-shellbags",
             "windows-prefetch",

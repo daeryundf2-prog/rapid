@@ -2,6 +2,7 @@ from .browser import WindowsBrowserArtifactsProvider
 from .eventlog import WindowsEventLogProvider
 from .execution import WindowsExecutionProvider
 from .filesystem import WindowsFilesystemProvider
+from .messenger import WindowsMessengerProvider
 from .os_account import WindowsOsAccountProvider
 from .prefetch import WindowsPrefetchProvider
 from .recent_files import WindowsRecentFilesProvider
@@ -16,6 +17,7 @@ __all__ = [
     "WindowsEventLogProvider",
     "WindowsExecutionProvider",
     "WindowsFilesystemProvider",
+    "WindowsMessengerProvider",
     "WindowsOsAccountProvider",
     "WindowsPrefetchProvider",
     "WindowsRecentFilesProvider",
@@ -26,6 +28,7 @@ __all__ = [
     "WindowsSystemArtifactsProvider",
     "browser",
     "eventlog",
+    "messenger",
     "recent_files",
     "registry",
     "remote_access",

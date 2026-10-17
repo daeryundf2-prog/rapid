@@ -40,6 +40,64 @@ def series(start: str, count: int, step_minutes: float, **details: object) -> li
 
 DOWNLOADS = "C:\\Users\\analyst\\Documents\\KakaoTalk Downloads"
 
+TEAMS_STORE = "C:\\Users\\analyst\\AppData\\Roaming\\Microsoft\\Teams\\IndexedDB\\https_teams.microsoft.com_0.indexeddb.leveldb"
+SLACK_STORE = "C:\\Users\\analyst\\AppData\\Roaming\\Slack\\IndexedDB\\https_app.slack.com_0.indexeddb.leveldb"
+
+
+def desktop(artifact_type: str, app_id: str, store: str, source_file: str, **details: object) -> dict[str, object]:
+    """A ``windows-messenger`` row (carved from one file of a LevelDB store)."""
+    source = f"{store}\\{source_file}"
+    return {
+        "kind": "windows-messenger",
+        "row": {
+            "artifact_type": artifact_type,
+            "path": source,
+            "details": {"app_id": app_id, "user": "analyst", "source_path": source, "store_path": store, "recovery_method": "carved", **details},
+        },
+    }
+
+
+def desktop_night(app_id: str, store: str, source_file: str, start: str, count: int, first_index: int = 0) -> list[dict[str, object]]:
+    first = dt.datetime.fromisoformat(start.replace("Z", "+00:00"))
+    return [
+        desktop(
+            "chat-message",
+            app_id,
+            store,
+            source_file,
+            timestamp=(first + dt.timedelta(minutes=2 * index)).isoformat(),
+            direction="outgoing",
+            message_text=f"night {first_index + index}",
+        )
+        for index in range(count)
+    ]
+
+
+def transfer(recipient: str, direction: str = "outgoing", **details: object) -> dict[str, object]:
+    return desktop(
+        "chat-attachment",
+        "teams-new",
+        TEAMS_STORE,
+        "000007.ldb",
+        file_name="q3_budget.xlsx",
+        sender="minsu.kim@corp.example.com",
+        recipient=recipient,
+        direction=direction,
+        timestamp="2024-03-01T01:10:00+00:00",
+        **details,
+    )
+
+
+COLLEAGUE = desktop(
+    "chat-contact",
+    "teams-new",
+    TEAMS_STORE,
+    "000007.ldb",
+    contact_name="박지훈",
+    contact_id="8:orgid:aaaa",
+    email="jihoon.park@corp.example.com",
+)
+
 CASES = {
     "messenger.time_regression": {
         "positive": {
@@ -122,10 +180,35 @@ CASES = {
         },
     },
     "messenger.late_night_burst": {
-        # Ten outgoing messages between 02:00 and 02:18 KST.
-        "positive": {"rows": series("2024-03-01T17:00:00Z", 10, 2, direction="outgoing"), "flagged": list(range(10))},
-        # A group-chat flood received at the same hour (incoming) is not the user's activity.
-        "negative": {"rows": series("2024-03-01T17:00:00Z", 10, 2, direction="incoming"), "flagged": []},
+        # Ten outgoing messages between 02:00 and 02:18 KST; and ten outgoing Teams (desktop) messages carved
+        # from two files (.log + .ldb) of one IndexedDB store: one burst per store, not per file.
+        "positive": {
+            "rows": [
+                *series("2024-03-01T17:00:00Z", 10, 2, direction="outgoing"),
+                *desktop_night("teams-classic", TEAMS_STORE, "000003.log", "2024-03-02T17:00:00Z", 5),
+                *desktop_night("teams-classic", TEAMS_STORE, "000005.ldb", "2024-03-02T17:10:00Z", 5, first_index=5),
+            ],
+            "flagged": list(range(20)),
+        },
+        # A group-chat flood received at the same hour (incoming) is not the user's activity; five night
+        # messages in Teams and five in Slack are two apps' stores, not one burst.
+        "negative": {
+            "rows": [
+                *series("2024-03-01T17:00:00Z", 10, 2, direction="incoming"),
+                *desktop_night("teams-classic", TEAMS_STORE, "000003.log", "2024-03-02T17:00:00Z", 5),
+                *desktop_night("slack", SLACK_STORE, "000003.log", "2024-03-02T17:10:00Z", 5, first_index=5),
+            ],
+            "flagged": [],
+        },
+    },
+    "messenger.external_file_transfer": {
+        # Outgoing Teams attachment to a personal address outside the company domain and the contact list.
+        "positive": {"rows": [COLLEAGUE, transfer("rival.person@gmail.com"), transfer("jihoon.park@corp.example.com")], "flagged": [1]},
+        # Same file to a registered colleague in the company domain, and a file received from outside.
+        "negative": {
+            "rows": [COLLEAGUE, transfer("jihoon.park@corp.example.com"), transfer("rival.person@gmail.com", direction="incoming")],
+            "flagged": [],
+        },
     },
     "messenger.attachment_missing": {
         "positive": {

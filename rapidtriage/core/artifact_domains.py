@@ -46,6 +46,7 @@ ARTIFACT_DOMAIN_TABLE: tuple[tuple[str, str, tuple[str, ...] | None], ...] = (
     ("messaging", "email", None),
     ("messaging", "kakaotalk-windows", None),
     ("messaging", "kakaotalk-macos", None),
+    ("messaging", "windows-messenger", None),
     ("cloud", "cloud-export", None),
     ("media", "media-image", None),
     ("media", "synthetic-media", None),

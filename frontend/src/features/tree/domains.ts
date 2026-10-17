@@ -118,6 +118,22 @@ export const AMCACHE_TYPE_LABELS: Readonly<Record<string, string>> = {
 };
 const AMCACHE_EVIDENCE_TYPES = Object.keys(AMCACHE_TYPE_LABELS);
 
+/** Desktop messenger row types (artifacts/windows/messenger.py, plan r2-communication §3.1) → Korean. */
+export const DESKTOP_MESSENGER_TYPE_LABELS: Readonly<Record<string, string>> = {
+  "chat-message": "대화(메시지)",
+  "chat-app-inventory": "앱 목록",
+  "chat-contact": "연락처",
+  "chat-parse-error": "처리 오류",
+  "chat-attachment": "첨부 파일",
+};
+/** Evidence types of the group node (처리 오류 is a detail child, never in the total). */
+const DESKTOP_MESSENGER_EVIDENCE_TYPES = [
+  "chat-message",
+  "chat-app-inventory",
+  "chat-contact",
+  "chat-attachment",
+];
+
 function pickLabels(labels: Readonly<Record<string, string>>, types: string[]): Record<string, string> {
   return Object.fromEntries(types.map((type) => [type, labels[type] ?? type]));
 }
@@ -634,6 +650,38 @@ export const DOMAINS: readonly DomainDef[] = [
         detail: true,
       },
       { id: "msg-kakao-mac", label: "카카오톡(macOS)", target: a("kakaotalk-macos") },
+      // windows-messenger (plan r2-communication §3.1 M1): Teams·Slack·Discord·Telegram·WhatsApp·Skype·
+      // LINE·WeChat·Zoom desktop apps. Children in Korean order; the 앱 column narrows to one app.
+      {
+        id: "msg-desktop",
+        label: "데스크톱 메신저(Windows)",
+        target: a("windows-messenger", DESKTOP_MESSENGER_EVIDENCE_TYPES),
+        typeLabels: DESKTOP_MESSENGER_TYPE_LABELS,
+        children: [
+          {
+            id: "msg-desktop-messages",
+            label: "대화(메시지)",
+            target: a("windows-messenger", ["chat-message"]),
+          },
+          {
+            id: "msg-desktop-apps",
+            label: "앱 목록",
+            target: a("windows-messenger", ["chat-app-inventory"]),
+          },
+          { id: "msg-desktop-contacts", label: "연락처", target: a("windows-messenger", ["chat-contact"]) },
+          {
+            id: "msg-desktop-errors",
+            label: "처리 오류",
+            target: a("windows-messenger", ["chat-parse-error"]),
+            detail: true,
+          },
+          {
+            id: "msg-desktop-attachments",
+            label: "첨부 파일",
+            target: a("windows-messenger", ["chat-attachment"]),
+          },
+        ],
+      },
       {
         id: "msg-mobile",
         label: "모바일 메시지",
