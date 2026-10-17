@@ -208,6 +208,30 @@ class DerivedApiTests(unittest.TestCase):
             self.assertEqual(page["total"], 7)
             self.assertEqual(self.get("/derived/people/rows", value="user1")["count"], 5)
 
+    def test_index_cache_is_bounded_by_rows_and_search_text_by_length(self) -> None:
+        """Adversarial review of E2 item 11: cache by total rows, search text ≤ SEARCH_TEXT_CHARS."""
+        step = self.build()
+        directory = self.run_dir / "analyses" / str(step["analysis_id"])
+        sidecar = directory / "people.index.json"
+        payload = json.loads(sidecar.read_text(encoding="utf-8"))
+        payload["search"] = [text + "x" * 5000 for text in payload["search"]]  # an older, uncut sidecar
+        sidecar.write_text(json.dumps(payload), encoding="utf-8")
+        cache = derived.TableIndexCache(max_tables=8, max_rows=8)
+        people = cache.get("run", str(step["analysis_id"]), "people", directory / "people.jsonl")
+        self.assertEqual(len(people), 7)
+        self.assertTrue(all(len(text) <= derived.SEARCH_TEXT_CHARS for text in people.search))
+        devices = cache.get("run", str(step["analysis_id"]), "devices", directory / "devices.jsonl")
+        # 7 + 1 rows fit; the next table pushes the oldest (people) out although only 3 tables are cached.
+        self.assertEqual(len(cache._cache), 2)
+        cache.get("run", str(step["analysis_id"]), "paths", directory / "paths.jsonl")
+        self.assertNotIn(("run", "people"), cache._cache)
+        self.assertIn(("run", "paths"), cache._cache)
+        self.assertLessEqual(sum(len(item) for item in cache._cache.values()), 8)
+        # A single table larger than the row budget is still served (the newest is always kept).
+        tiny = derived.TableIndexCache(max_rows=1)
+        self.assertEqual(len(tiny.get("run", str(step["analysis_id"]), "people", directory / "people.jsonl")), 7)
+        self.assertEqual(len(devices), 1)
+
     def test_value_rows_give_grid_locators(self) -> None:
         self.build()
         rows = self.get("/derived/people/rows", value="user1")

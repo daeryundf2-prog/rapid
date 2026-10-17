@@ -9,7 +9,14 @@ from pathlib import Path
 from unittest.mock import patch
 
 from rapidtriage.core.derived import engine as derived_engine
-from rapidtriage.core.derived.engine import TABLES, family_plans, run_derived
+from rapidtriage.core.derived.engine import (
+    SEARCH_TEXT_CHARS,
+    TABLES,
+    family_plans,
+    run_derived,
+    search_text,
+    url_example,
+)
 from rapidtriage.core.derived.normalize import (
     clean,
     credential_record,
@@ -103,6 +110,60 @@ class NormalizationTests(unittest.TestCase):
         self.assertEqual(len(str(record["sha256"])), 64)
         own = credential_record("[마스킹됨]", sha256="A" * 64, length=12)
         self.assertEqual((own["sha256"], own["length"]), ("a" * 64, 12))
+
+
+class NormalizationRegressionTests(unittest.TestCase):
+    """Adversarial review of E2 (items 8-10)."""
+
+    def test_phone_needs_a_prefix_or_punctuated_phone_length(self) -> None:
+        # Dates and employee numbers are not phone numbers: they stay separate text keys.
+        self.assertIsNone(phone_e164("20240501"))
+        self.assertIsNone(phone_e164("2024-05-01"))
+        self.assertIsNone(phone_e164("1234567"))
+        self.assertIsNone(phone_e164("123456789"))
+        self.assertEqual(person_key("20240501"), "20240501")
+        self.assertNotEqual(person_key("2024-05-01"), person_key("20240501"))
+        self.assertEqual(person_key("2024-05-01"), "2024-05-01")
+        # Prefixed numbers and punctuated phone-length numbers still are.
+        self.assertEqual(phone_e164("1-555-010-9999"), "15550109999")
+        self.assertEqual(phone_e164("+82 10 1234 5678"), "+821012345678")
+        self.assertEqual(phone_e164("02-123-4567"), "+8221234567")
+
+    def test_posix_paths_keep_slash_and_case(self) -> None:
+        self.assertEqual(path_key("/sdcard/DCIM//Camera/IMG_1.jpg/"), "/sdcard/DCIM/Camera/IMG_1.jpg")
+        self.assertNotEqual(path_key("/data/A.db"), path_key("/data/a.db"))
+        self.assertEqual(path_key("file:///home/Alice/x.TXT"), "/home/Alice/x.TXT")
+        self.assertEqual(path_key("/"), "/")
+        # Windows paths are unchanged: drive letter, UNC, backslash, or a bare name.
+        self.assertEqual(path_key("C:/Users/A.TXT"), "c:\\users\\a.txt")
+        self.assertEqual(path_key("Users\\Alice/Doc.TXT"), "users\\alice\\doc.txt")
+        self.assertEqual(path_key("Report.PDF"), "report.pdf")
+
+    def test_credential_hash_covers_the_full_value(self) -> None:
+        long_secret = "k" * 3000 + "TAIL"
+        other = "k" * 3000 + "DIFF"
+        self.assertEqual(len(clean(long_secret) or ""), 2048)
+        self.assertEqual(clean(long_secret, max_chars=None), long_secret)
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            records = base / "kakao.jsonl"
+            rows = [
+                {"artifact_type": "kakaotalk-windows-crypto-material-candidate", "details": {"candidate_value": value}}
+                for value in (long_secret, other)
+            ]
+            records.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+            payload = base / "artifacts_kakao.json"
+            payload.write_text(json.dumps({"records_path": str(records), "record_count": 2, "artifacts": []}), encoding="utf-8")
+            out = base / "out"
+            summary = run_derived(
+                TriageInputs(output_dir=base, artifact_payloads={"kakaotalk-windows": payload}), out, source_label="test"
+            )
+            table = [json.loads(line) for line in (out / "credentials.jsonl").read_text(encoding="utf-8").splitlines()]
+        # Two secrets sharing their first 2,048 characters stay two rows; length is the full length.
+        self.assertEqual(len(table), 2)
+        self.assertEqual({row["length"] for row in table}, {3004})
+        self.assertEqual({row["sha256"] for row in table}, {credential_record(long_secret)["sha256"], credential_record(other)["sha256"]})
+        self.assertIn("오프라인", str(summary["limitation"]))
 
 
 class CatalogSemanticTests(unittest.TestCase):
@@ -255,7 +316,7 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(paths["c:\\users\\alice\\desktop\\plan.docx"]["kinds"], {"files:candidates": 1})
         urls = self.table(out, "urls")
         self.assertEqual((urls[0]["normalized"], urls[0]["count"], urls[0]["url_class"]), ("www.google.com", 2, "search"))
-        self.assertEqual(urls[0]["examples"], ["https://www.google.com/search", "https://WWW.google.com:443/maps"])  # no query strings
+        self.assertEqual(urls[0]["examples"], ["https://www.google.com/search", "https://www.google.com:443/maps"])  # no query strings
         self.assertEqual(summary["tables"]["people"]["rows"], len(people))
 
     def test_credentials_are_never_stored_in_clear(self) -> None:
@@ -328,6 +389,40 @@ class EngineTests(unittest.TestCase):
         self.assertEqual({row["normalized"] for row in self.table(out, "attachments")}, {"q3.xlsx", "photo.jpg"})
 
 
+class UrlExampleAndSearchTests(unittest.TestCase):
+    """Adversarial review of E2 (items 1, 11)."""
+
+    def test_url_examples_drop_userinfo_query_and_token_segments(self) -> None:
+        self.assertEqual(url_example("https://alice:Sup3rSecret@Host.example/share?token=X"), "https://host.example/share")
+        self.assertEqual(url_example("https://drive.example:8443/share/AbCdEf0123456789/view#frag"), "https://drive.example:8443/share/…")
+        self.assertEqual(url_example("http://[fe80::1]:8080/"), "http://[fe80::1]:8080")
+        self.assertIsNone(url_example("https://"))
+        self.assertIsNone(url_example("https://host:notaport/x"))
+
+    def test_engine_examples_never_keep_credentials(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            records = base / "browser.jsonl"
+            row = {"artifact_type": "browser-visit", "details": {"url": "https://alice:Sup3rSecret@host.example/reset/tok123?token=X"}}
+            records.write_text(json.dumps(row) + "\n", encoding="utf-8")
+            payload = base / "artifacts_browser.json"
+            payload.write_text(json.dumps({"records_path": str(records), "record_count": 1, "artifacts": []}), encoding="utf-8")
+            out = base / "out"
+            run_derived(TriageInputs(output_dir=base, artifact_payloads={"browser": payload}), out, source_label="test")
+            for path in out.iterdir():
+                text = path.read_text(encoding="utf-8")
+                self.assertNotIn("Sup3rSecret", text, path.name)
+                self.assertNotIn("tok123", text, path.name)
+            urls = [json.loads(line) for line in (out / "urls.jsonl").read_text(encoding="utf-8").splitlines()]
+        self.assertEqual(urls[0]["examples"], ["https://host.example/reset/…"])
+
+    def test_search_text_is_bounded(self) -> None:
+        text = search_text("A" * 5000, "b" * 5000)
+        self.assertLessEqual(len(text), SEARCH_TEXT_CHARS)
+        self.assertTrue(text.startswith("a" * 10) and "\nb" in text)
+        self.assertEqual(search_text("Alice", "alice"), "alice")
+
+
 class StageTests(unittest.TestCase):
     def test_stage_writes_a_derived_analysis_and_isolates_failures(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -344,6 +439,13 @@ class StageTests(unittest.TestCase):
                 failed = run_derived_stage(run_dir, artifact_outputs={})
             self.assertEqual(failed["status"], "failed_isolated")
             self.assertIn("통합 보기 단계 실패", failed["warning_messages"][0])
+            # Only the type and the first 100 characters of the message (it can carry paths / row text).
+            secret_tail = "C:\\Evidence\\" + "x" * 200 + "\\row-fragment-SECRET"
+            with patch.object(derived_engine, "load_url_classes", side_effect=RuntimeError(secret_tail)):
+                failed_long = run_derived_stage(run_dir, artifact_outputs={})
+            message = failed_long["warning_messages"][0]
+            self.assertEqual(message, f"통합 보기 단계 실패: RuntimeError: {secret_tail[:100]}")
+            self.assertNotIn("SECRET", message)
             self.assertFalse((run_dir / "analyses" / str(failed["analysis_id"]) / "analysis.json").exists())
             self.assertTrue((run_dir / "analyses" / str(second["analysis_id"]) / "analysis.json").exists())
 

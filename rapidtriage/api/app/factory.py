@@ -46,8 +46,29 @@ from .search_index_service import (
 )
 
 ANALYSIS_POST_PATH = re.compile(r"/api/runs/[^/]+/analyses")
-# Review-tool bodies (AXIOM E3) also get Korean 422 messages.
-REVIEW_TOOL_BODY_PATH = re.compile(r"/api/cases/[^/]+/(tags(/[^/]+)?|histogram-baselines)")
+# Review-tool bodies (AXIOM E3) also get Korean 422 messages, the tag batch included.
+REVIEW_TOOL_BODY_PATH = re.compile(r"/api/cases/[^/]+/(tags(/[^/]+)?|histogram-baselines)|/api/case-db/review-batch")
+REVIEW_BATCH_FIELD_LABELS = {
+    "database": "케이스 DB(database)",
+    "case_id": "케이스(case_id)",
+    "targets": "대상(targets)",
+    "run_id": "런(run_id)",
+    "tag_ids": "태그(tag_ids)",
+    "remove_tag_ids": "뺄 태그(remove_tag_ids)",
+    "propagate_by_hash": "같은 해시 전파(propagate_by_hash)",
+    "assignee": "담당자(assignee)",
+    "priority": "우선순위(priority)",
+    "due_at": "기한(due_at)",
+    "status": "상태(status)",
+    "tags": "태그 이름(tags)",
+    "add_tags": "더할 태그 이름(add_tags)",
+    "note": "메모(note)",
+    "reviewer": "검토자(reviewer)",
+    "name": "이름(name)",
+    "color_token": "색(color_token)",
+    "shortcut": "단축키(shortcut)",
+    "description": "설명(description)",
+}
 # Case intake routes (AXIOM adoption E1): every validation error in Korean.
 CASE_INTAKE_PATH = re.compile(r"/api/cases(/.*)?|/api/runs/[^/]+/(problems|processing-snapshot)")
 
@@ -100,7 +121,7 @@ def create_app(
     async def korean_analysis_body_errors(request: Request, exc: RequestValidationError):
         """Malformed ``POST /analyses`` bodies get Korean 422 messages; other routes keep FastAPI's."""
         if REVIEW_TOOL_BODY_PATH.fullmatch(request.url.path):
-            return JSONResponse(status_code=422, content={"detail": korean_body_errors(exc.errors())})
+            return JSONResponse(status_code=422, content={"detail": korean_body_errors(exc.errors(), REVIEW_BATCH_FIELD_LABELS)})
         if request.method == "POST" and ANALYSIS_POST_PATH.fullmatch(request.url.path):
             return JSONResponse(status_code=422, content={"detail": korean_body_errors(exc.errors())})
         if CASE_INTAKE_PATH.fullmatch(request.url.path):
@@ -186,7 +207,13 @@ def create_app(
     api.include_router(build_search_router(store))
     api.include_router(build_search_index_router(store, owner=analysis_owner))
     api.include_router(build_reports_router(store))
-    api.include_router(build_review_tools_router(store, open_request_case_database))
+    api.include_router(
+        build_review_tools_router(
+            store,
+            open_request_case_database,
+            lambda raw_path: resolve_case_db_path(store, raw_path, configured_case_db_roots),
+        )
+    )
 
     if static_dir.is_dir():
         api.mount("/assets", StaticFiles(directory=static_dir), name="rapidtriage-assets")

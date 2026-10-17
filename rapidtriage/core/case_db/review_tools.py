@@ -11,12 +11,13 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 
-from .base import now_iso
+from .base import CaseDatabaseError, now_iso
 from .constants import REVIEW_TARGET_TABLES
 from .database import insert_review_history, next_citation_id_for_connection
-from .review import review_mark_to_dict
+from .review import normalize_review_priority, review_mark_to_dict
 from .review_schema import (
     COLOR_TOKENS,
     SYSTEM_TAGS,
@@ -89,6 +90,18 @@ def _audit(connection: sqlite3.Connection, case_id: str, actor: str, action: str
             "",
         ),
     )
+
+
+@contextmanager
+def _unique_conflicts() -> Iterator[None]:
+    """A unique-index hit (a concurrent request took the name or shortcut after our check) -> Korean 409."""
+    try:
+        yield
+    except sqlite3.IntegrityError as exc:
+        raise ReviewToolError(
+            "같은 이름 또는 단축키의 태그가 방금 다른 요청으로 만들어졌습니다. 태그 목록을 새로 고친 뒤 다시 시도하세요.",
+            status=409,
+        ) from exc
 
 
 def _tag_ids_of(raw: object) -> list[int]:
@@ -201,7 +214,12 @@ def _rewrite_mark_names(connection: sqlite3.Connection, case_id: str, tag_id: in
 
 
 def list_case_tags(connection: sqlite3.Connection, case_id: str, *, include_deleted: bool = False) -> list[dict[str, object]]:
-    """Live tags of a case (system tags created on first use) with their mark counts."""
+    """Live tags of a case with their mark counts.
+
+    The first read of a case creates its missing system tags (북마크, 우선순위 1-5) -- an
+    explicit, write-safe migration (see ``ensure_system_tags``) on a case DB that already
+    exists; the API never opens a new DB file for a read (routes_review_tools.py).
+    """
     ensure_system_tags(connection, case_id)
     counts = _tag_counts(connection, case_id)
     where = "" if include_deleted else " AND deleted_at = ''"
@@ -230,11 +248,12 @@ def create_case_tag(
     timestamp = now_iso()
     if color is None:
         color = next_color_token(connection, case_id)
-    cursor = connection.execute(
-        "INSERT INTO case_tag (case_id, name, kind, color_token, shortcut, description, created_by, created_at, updated_at) "
-        "VALUES (?, ?, 'user', ?, ?, ?, ?, ?, ?)",
-        (case_id, clean, color, digit, text, actor or "local-user", timestamp, timestamp),
-    )
+    with _unique_conflicts():
+        cursor = connection.execute(
+            "INSERT INTO case_tag (case_id, name, kind, color_token, shortcut, description, created_by, created_at, updated_at) "
+            "VALUES (?, ?, 'user', ?, ?, ?, ?, ?, ?)",
+            (case_id, clean, color, digit, text, actor or "local-user", timestamp, timestamp),
+        )
     tag_id = int(cursor.lastrowid or 0)
     _audit(connection, case_id, actor, "tag.created", str(tag_id), {"name": clean, "color_token": color, "shortcut": digit})
     return tag_to_dict(_tag_row(connection, case_id, tag_id))
@@ -270,10 +289,11 @@ def update_case_tag(
         changes["description"] = _check_description(description)
     if changes:
         assignments = ", ".join(f"{column} = ?" for column in changes)
-        connection.execute(
-            f"UPDATE case_tag SET {assignments}, updated_at = ? WHERE id = ?",
-            (*changes.values(), now_iso(), tag_id),
-        )
+        with _unique_conflicts():
+            connection.execute(
+                f"UPDATE case_tag SET {assignments}, updated_at = ? WHERE id = ?",
+                (*changes.values(), now_iso(), tag_id),
+            )
         if "name" in changes:
             changes["renamed_marks"] = _rewrite_mark_names(connection, case_id, tag_id)
         _audit(connection, case_id, actor, "tag.updated", str(tag_id), changes)
@@ -294,7 +314,10 @@ def delete_case_tag(connection: sqlite3.Connection, case_id: str, tag_id: int, *
         (case_id, tag_id),
     ).fetchall()
     targets = [{"target_type": str(mark[0]), "target_id": str(mark[1])} for mark in marks]
-    result = _apply_tag_changes(connection, case_id, targets, add_ids=[], remove_ids=[tag_id], actor=actor, timestamp=timestamp)
+    # The marks keep their reviewer: the history row records who deleted the tag.
+    result = _apply_tag_changes(
+        connection, case_id, targets, add_ids=[], remove_ids=[tag_id], actor=actor, timestamp=timestamp, keep_reviewer=True
+    )
     connection.execute(
         "UPDATE case_tag SET deleted_at = ?, deleted_by = ?, shortcut = NULL, updated_at = ? WHERE id = ?",
         (timestamp, actor or "local-user", timestamp, tag_id),
@@ -342,7 +365,11 @@ def _apply_tag_changes(
     remove_ids: Sequence[int],
     actor: str,
     timestamp: str,
+    keep_reviewer: bool = False,
+    workflow: Mapping[str, str] | None = None,
 ) -> dict[str, int]:
+    """Tag ids (and optional ``workflow`` fields: assignee / priority / due_at) on each target."""
+    workflow = dict(workflow or {})
     changed = 0
     created = 0
     remove = set(remove_ids)
@@ -356,9 +383,12 @@ def _apply_tag_changes(
         old_ids = _tag_ids_of(existing["tag_ids_json"]) if existing is not None else []
         new_ids = [tag_id for tag_id in old_ids if tag_id not in remove]
         new_ids += [tag_id for tag_id in add_ids if tag_id not in new_ids]
-        if existing is not None and new_ids == old_ids:
+        workflow_changed = existing is not None and any(
+            str(existing[key] or "") != value for key, value in workflow.items()
+        )
+        if existing is not None and new_ids == old_ids and not workflow_changed:
             continue
-        if existing is None and not new_ids:
+        if existing is None and not new_ids and not workflow:
             continue
         names = tag_names_for_ids(connection, new_ids)
         names_json = json.dumps(names, ensure_ascii=False)
@@ -368,11 +398,25 @@ def _apply_tag_changes(
                 """
                 INSERT INTO review_mark (
                     citation_id, case_id, target_type, target_id, status, verification_status,
-                    tags_json, tag_ids_json, note, include_in_report, reviewer, created_at, updated_at
+                    tags_json, tag_ids_json, note, include_in_report, reviewer, assignee, priority, due_at,
+                    created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, 'unreviewed', 'unverified', ?, ?, '', 0, ?, ?, ?)
+                VALUES (?, ?, ?, ?, 'unreviewed', 'unverified', ?, ?, '', 0, ?, ?, ?, ?, ?, ?)
                 """,
-                (citation_id, case_id, target_type, target_id, names_json, json.dumps(new_ids), actor, timestamp, timestamp),
+                (
+                    citation_id,
+                    case_id,
+                    target_type,
+                    target_id,
+                    names_json,
+                    json.dumps(new_ids),
+                    actor,
+                    workflow.get("assignee", ""),
+                    workflow.get("priority", "normal"),
+                    workflow.get("due_at", ""),
+                    timestamp,
+                    timestamp,
+                ),
             )
             previous = {}
             base = {
@@ -384,20 +428,21 @@ def _apply_tag_changes(
                 "verification_status": "unverified",
                 "note": "",
                 "include_in_report": False,
-                "assignee": "",
-                "priority": "normal",
-                "due_at": "",
+                "assignee": workflow.get("assignee", ""),
+                "priority": workflow.get("priority", "normal"),
+                "due_at": workflow.get("due_at", ""),
             }
             current = _snapshot(base, tags=names, reviewer=actor, updated_at=timestamp)
             created += 1
         else:
             citation_id = str(existing["citation_id"])
-            reviewer = actor or str(existing["reviewer"] or "")
+            reviewer = str(existing["reviewer"] or "") if keep_reviewer else (actor or str(existing["reviewer"] or ""))
+            assignments = "".join(f", {key} = ?" for key in workflow)
             connection.execute(
-                "UPDATE review_mark SET tags_json = ?, tag_ids_json = ?, reviewer = ?, updated_at = ? WHERE id = ?",
-                (names_json, json.dumps(new_ids), reviewer, timestamp, int(existing["id"])),
+                f"UPDATE review_mark SET tags_json = ?, tag_ids_json = ?, reviewer = ?{assignments}, updated_at = ? WHERE id = ?",
+                (names_json, json.dumps(new_ids), reviewer, *workflow.values(), timestamp, int(existing["id"])),
             )
-            current = _snapshot(previous, tags=names, reviewer=reviewer, updated_at=timestamp)
+            current = _snapshot(previous, tags=names, reviewer=reviewer, updated_at=timestamp, **workflow)
         insert_review_history(
             connection,
             case_id=case_id,
@@ -442,11 +487,25 @@ def apply_tag_ids(
     propagate_by_hash: bool = False,
     evidence_source_id: int | None = None,
     cap: int = PROPAGATION_CAP,
+    assignee: str | None = None,
+    priority: str | None = None,
+    due_at: str | None = None,
 ) -> dict[str, object]:
-    """Add/remove tags (by id) on rows; with ``propagate_by_hash`` also on every same-hash file row."""
+    """Add/remove tags (by id) on rows; with ``propagate_by_hash`` also on every same-hash file row.
+
+    ``assignee`` / ``priority`` / ``due_at`` (when given) are set on the same rows in the same
+    transaction, like ``mark_reviews_batch`` does for a tag-name batch.
+    """
     for tag_id in [*add_ids, *remove_ids]:
         _tag_row(connection, case_id, int(tag_id))
-    checked = _check_targets(connection, targets)
+    workflow = _workflow_fields(assignee=assignee, priority=priority, due_at=due_at)
+    target_list = list(targets)
+    # Before any per-target query or hash IN-list: an oversized request is refused up front.
+    if len(target_list) > cap:
+        raise ReviewToolError(
+            f"한 번에 {cap:,}행까지 태그를 적용할 수 있습니다 (요청 {len(target_list):,}행). 선택을 줄이세요.", status=422
+        )
+    checked = _check_targets(connection, target_list)
     if not checked:
         raise ReviewToolError("태그를 적용할 행이 없습니다.", status=422)
     propagation: dict[str, object] | None = None
@@ -467,6 +526,7 @@ def apply_tag_ids(
         remove_ids=[int(tag_id) for tag_id in remove_ids],
         actor=actor,
         timestamp=timestamp,
+        workflow=workflow,
     )
     _audit(
         connection,
@@ -477,6 +537,7 @@ def apply_tag_ids(
         {
             "add_tag_ids": list(add_ids),
             "remove_tag_ids": list(remove_ids),
+            **workflow,
             "target_count": len(checked),
             "changed_count": result["changed_count"],
             "propagate_by_hash": propagate_by_hash,
@@ -494,6 +555,21 @@ def apply_tag_ids(
     if propagation is not None:
         payload["propagation"] = propagation
     return payload
+
+
+def _workflow_fields(*, assignee: str | None, priority: str | None, due_at: str | None) -> dict[str, str]:
+    """The given review-workflow fields, checked (Korean 422)."""
+    fields: dict[str, str] = {}
+    if assignee is not None:
+        fields["assignee"] = str(assignee).strip()
+    if priority is not None:
+        try:
+            fields["priority"] = normalize_review_priority(str(priority))
+        except CaseDatabaseError as exc:
+            raise ReviewToolError("우선순위(priority)는 urgent, high, normal, low 중 하나여야 합니다.", status=422) from exc
+    if due_at is not None:
+        fields["due_at"] = str(due_at).strip()
+    return fields
 
 
 # --- hash propagation ---------------------------------------------------------------
@@ -565,8 +641,16 @@ def hash_propagation_targets(
 
     "Same run" = the evidence sources the target rows come from (a case DB can hold several
     runs' evidence); ``evidence_source_id`` is the fallback when no target names its source.
-    Refuses (Korean, 422) when the result exceeds ``cap`` rows.
+    With neither, the whole case is the scope only when its file rows belong to one evidence
+    source (or none); otherwise the request is refused (Korean 422) instead of tagging other
+    runs' files. Refuses (Korean, 422) when the targets or the result exceed ``cap`` rows.
+    Hash and source lists are bound as one JSON parameter each (``json_each``), so the SQL
+    never exceeds SQLite's variable limit however many hashes the targets carry.
     """
+    if len(targets) > cap:
+        raise ReviewToolError(
+            f"한 번에 {cap:,}행까지 태그를 적용할 수 있습니다 (요청 {len(targets):,}행). 선택을 줄이세요.", status=422
+        )
     wanted: dict[str, set[str]] = {column: set() for column in HASH_COLUMNS}
     hashless = 0
     sources: set[int] = set()
@@ -584,16 +668,28 @@ def hash_propagation_targets(
                 sources.add(int(row[0]))
     if not sources and evidence_source_id is not None:
         sources.add(evidence_source_id)
+    if any(wanted.values()) and not sources:
+        distinct = int(
+            connection.execute(
+                "SELECT COUNT(DISTINCT coalesce(evidence_source_id, -1)) FROM file_record WHERE case_id = ?", (case_id,)
+            ).fetchone()[0]
+        )
+        if distinct > 1:
+            raise ReviewToolError(
+                "선택한 행이 어느 런(증거)에 속하는지 알 수 없어 같은 해시 전파를 하지 않았습니다. "
+                "런(run_id)을 지정하거나 런에 속한 행을 고르세요.",
+                status=422,
+            )
     clauses: list[str] = []
     params: list[object] = [case_id]
     scope = ""
     if sources:
-        scope = f" AND evidence_source_id IN ({', '.join('?' for _ in sources)})"
-        params.extend(sorted(sources))
+        scope = " AND evidence_source_id IN (SELECT value FROM json_each(?))"
+        params.append(json.dumps(sorted(sources)))
     for column, values in wanted.items():
         if values:
-            clauses.append(f"lower({column}) IN ({', '.join('?' for _ in values)})")
-            params.extend(sorted(values))
+            clauses.append(f"lower({column}) IN (SELECT value FROM json_each(?))")
+            params.append(json.dumps(sorted(values)))
     matched: list[int] = []
     if clauses:
         where = f"case_id = ?{scope} AND ({' OR '.join(clauses)})"

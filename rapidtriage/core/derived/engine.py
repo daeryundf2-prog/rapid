@@ -32,7 +32,8 @@ value, sorted by count (desc) then value::
      families: {family: n}, first_seen, last_seen,
      samples: [{kind, record_index, field, family, artifact_type, time}] (≤ 20)}
 
-plus ``url_class`` / ``url_class_label`` / ``examples`` (≤ 3 URLs without query or fragment) for ``urls`` and
+plus ``url_class`` / ``url_class_label`` / ``examples`` (≤ 3 URLs as ``scheme://host[:port]/first-segment``:
+no user name / password, query, fragment or later path segments, see :func:`url_example`) for ``urls`` and
 ``length`` / ``sha256`` for ``credentials``. **A credential's clear value is never
 written**: ``value`` is the masked form, ``normalized`` is ``sha256:<hex>``.
 ``kind`` = artifact kind, ``files:candidates`` / ``files:inventory`` or
@@ -62,6 +63,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from ..json_safe import json_default
 from ..triage_rules.base import EVENT_DATA_KEYS, parse_time
@@ -273,8 +275,9 @@ class DerivedCollector:
             return False
         extra: dict[str, object] | None = None
         if table == "credentials":
+            # Hash and length over the full value (``clean`` cuts display text to 2,048 chars).
             record = credential_record(
-                text,
+                clean(raw, max_chars=None) or text,
                 sha256=_sibling(details, field, "sha256"),
                 length=_sibling(details, field, "length"),
             )
@@ -322,9 +325,8 @@ class DerivedCollector:
             self.estimated_bytes += SAMPLE_BYTES
         if table == "urls" and isinstance(raw, str) and "://" in raw:
             examples = entry.examples if entry.examples is not None else []
-            # Query strings and fragments can carry tokens / session ids: examples keep scheme, host and path.
-            clipped = raw.strip().split("#", 1)[0].split("?", 1)[0][:URL_EXAMPLE_CHARS]
-            if len(examples) < MAX_URL_EXAMPLES and clipped not in examples:
+            clipped = url_example(raw)
+            if clipped and len(examples) < MAX_URL_EXAMPLES and clipped not in examples:
                 examples.append(clipped)
                 entry.examples = examples
                 self.estimated_bytes += 2 * len(clipped)
@@ -358,6 +360,32 @@ class DerivedCollector:
         if table == "credentials" and entry.extra:
             row.update(entry.extra)
         return row
+
+
+def url_example(raw: str) -> str | None:
+    """A URL example without secrets: ``scheme://host[:port]/first-segment`` (``/…`` when more path followed).
+
+    Userinfo (``user:password@``), query and fragment are dropped, and the path is cut to its
+    first segment: share / reset / invite links carry their token in later segments
+    (``/share/<token>``, ``/reset/<token>``), so only the first one is kept as the "what part of
+    the site" hint. The host is lower case; ``None`` when the text has no scheme and host.
+    """
+    try:
+        parts = urlsplit(raw.strip())
+        host = parts.hostname
+        port = parts.port
+    except ValueError:
+        return None
+    if not parts.scheme or not host:
+        return None
+    netloc = f"[{host}]" if ":" in host else host
+    if port is not None:
+        netloc = f"{netloc}:{port}"
+    segments = [segment for segment in parts.path.split("/") if segment]
+    path = ""
+    if segments:
+        path = "/" + segments[0] + ("/…" if len(segments) > 1 else "")
+    return f"{parts.scheme.lower()}://{netloc}{path}"[:URL_EXAMPLE_CHARS]
 
 
 def _sibling(details: Mapping[str, object], field: str, suffix: str) -> Any:
@@ -541,10 +569,18 @@ def run_derived(
 INDEX_VERSION = "derived-index-v1"
 
 
+SEARCH_TEXT_CHARS = 512
+
+
 def search_text(value: object, normalized: str) -> str:
-    """Casefolded text a table search matches: the value, plus the normalised form when it differs."""
-    shown = str(value or "").casefold()
-    key = normalized.casefold()
+    """Casefolded text a table search matches: the value, plus the normalised form when it differs.
+
+    At most ``SEARCH_TEXT_CHARS`` characters (each part keeps its first half), so the paging
+    index's memory is bounded by its row count, not by value lengths.
+    """
+    half = SEARCH_TEXT_CHARS // 2 - 1
+    shown = str(value or "").casefold()[:half]
+    key = normalized.casefold()[:half]
     return shown if shown == key else f"{shown}\n{key}"
 
 
@@ -668,7 +704,11 @@ def _write_outputs(
         "elapsed_s": round(elapsed, 3),
         "limitation": (
             "통합 보기는 카탈로그 의미 태그가 붙은 열의 값을 모은 표입니다. 같은 값이 같은 사람·장치라는 뜻은 아니며, "
-            "자격 증명은 가린 값·길이·SHA-256만 저장합니다. 표본은 값마다 최대 20행입니다."
+            "자격 증명은 가린 값·길이·SHA-256만 저장합니다. SHA-256은 솔트 없이 계산하므로(다른 런·도구의 해시와 대조 가능) "
+            "짧거나 흔한 암호는 해시만으로 오프라인 추측이 가능합니다 — 통합 보기 결과는 런 출력과 같은 수준으로 보관하세요. "
+            "전화번호는 +·00·0으로 시작하거나 구분 기호가 있는 9자리 이상 숫자만 전화번호로 묶습니다. "
+            "경로는 드라이브 문자·UNC·역슬래시가 있으면 Windows 경로(대소문자 무시)로, 그 밖의 /경로(POSIX·Android)는 "
+            "대소문자와 / 를 그대로 둡니다. URL 예시는 사용자 정보·질의 문자열·첫 경로 뒤를 뺍니다. 표본은 값마다 최대 20행입니다."
         ),
     }
 

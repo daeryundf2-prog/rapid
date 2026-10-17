@@ -13,7 +13,8 @@
 
 The ``/api/cases/{case_id}`` routes find the case DB through ``run_id`` (the run's
 canonical case DB, see ``run_review.canonical_run_case``) or an explicit
-``database`` path (checked like every other case-DB route). Tag batches with
+``database`` path (checked like every other case-DB route). An explicit ``database``
+must name an existing file (404 otherwise): these routes never create a case DB. Tag batches with
 hash propagation extend ``POST /api/case-db/review-batch`` (``tag_ids``,
 ``remove_tag_ids``, ``propagate_by_hash``; routes_case_db.py).
 """
@@ -88,6 +89,8 @@ def review_tool_http_error(exc: CaseDatabaseError) -> HTTPException:
     return HTTPException(status_code=status, detail=message)
 
 
+# Fields a ``tag_ids`` batch cannot carry (they belong to a status / tag-name batch).
+# ``assignee`` / ``priority`` / ``due_at`` are applied with the tags (apply_tag_ids).
 TAG_BATCH_EXCLUSIVE_FIELDS = ("status", "verification_status", "tags", "add_tags", "note", "include_in_report")
 
 
@@ -129,6 +132,9 @@ def apply_review_tag_batch(database: CaseDatabase, request: Any, targets: list[d
                 actor=resolve_request_reviewer(request.reviewer) or "local-user",
                 propagate_by_hash=bool(request.propagate_by_hash),
                 evidence_source_id=evidence_source_id,
+                assignee=getattr(request, "assignee", None),
+                priority=getattr(request, "priority", None),
+                due_at=getattr(request, "due_at", None),
             )
     except CaseDatabaseError as exc:
         raise review_tool_http_error(exc) from exc
@@ -166,8 +172,18 @@ def histogram_counts(tree: dict[str, Any]) -> dict[str, dict[str, object]]:
 def build_review_tools_router(
     store: RunJobStore,
     open_request_case_database: Callable[[str | Path], CaseDatabase],
+    resolve_request_case_db_path: Callable[[str | Path], Path] | None = None,
 ) -> APIRouter:
     router = APIRouter()
+
+    def _existing_database(raw_path: str) -> CaseDatabase:
+        """The case DB at an explicit ``database`` path; 404 (nothing created) when there is no file."""
+        if resolve_request_case_db_path is not None:
+            path = resolve_request_case_db_path(raw_path)
+            if not path.is_file():
+                raise HTTPException(status_code=404, detail="케이스 DB 파일을 찾을 수 없습니다. 경로를 확인하세요.")
+            return open_request_case_database(path)
+        return open_request_case_database(raw_path)
 
     def _case_database(case_id: str, run_id: str | None, database: str | None, *, must_exist: bool = True) -> CaseDatabase | None:
         if run_id:
@@ -185,7 +201,7 @@ def build_review_tools_router(
                 return None
             return open_request_case_database(path)
         if database:
-            return open_request_case_database(database)
+            return _existing_database(database)
         raise HTTPException(status_code=422, detail="run_id 또는 database가 필요합니다")
 
     @contextmanager

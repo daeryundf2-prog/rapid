@@ -10,6 +10,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from rapidtriage.core.case_db import (
     CaseDatabase,
@@ -19,6 +20,8 @@ from rapidtriage.core.case_db import (
     create_case_tag,
     delete_case_tag,
     list_case_tags,
+    review_schema,
+    review_tools,
     update_case_tag,
 )
 from rapidtriage.core.case_db.review_schema import SYSTEM_TAGS
@@ -233,6 +236,142 @@ class CaseTagCoreTests(unittest.TestCase):
             self.assertEqual(unknown.exception.status, 404)
 
 
+class ReviewToolsRegressionTests(unittest.TestCase):
+    """Adversarial review of E3 (items 3, 4, 5, 6, 7, 13 and the write-safe system-tag read of 2)."""
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.database = CaseDatabase(Path(self.temp.name) / "case.db")
+        self.database.initialize()
+        self.database.create_case(case_id="CASE-R", examiner="검사관 A")
+
+    def test_concurrent_first_open_alter_race_is_not_an_error(self) -> None:
+        with self.database.connect() as connection:
+            apply_schema(connection)
+            file_id = _insert_file(connection, "CASE-R", "C:/r.txt", None)
+            connection.execute(
+                "INSERT INTO review_mark (citation_id, case_id, target_type, target_id, tags_json, tag_ids_json, reviewer, created_at, updated_at) "
+                "VALUES ('R-1', 'CASE-R', 'file_record', ?, '[\"경합 태그\"]', NULL, '검사관 A', 't', 't')",
+                (str(file_id),),
+            )
+            # Another connection added the column between the check and the ALTER.
+            real_columns = review_schema._columns
+            with patch.object(
+                review_schema, "_columns", side_effect=lambda conn, table: real_columns(conn, table) - {"tag_ids_json"}
+            ):
+                review_schema.apply_review_schema(connection)  # "duplicate column name" is swallowed
+            ids = json.loads(connection.execute("SELECT tag_ids_json FROM review_mark WHERE citation_id = 'R-1'").fetchone()[0])
+            self.assertEqual(len(ids), 1)  # the idempotent string-tag migration still ran
+
+    def test_system_tag_creation_survives_a_concurrent_insert(self) -> None:
+        with self.database.connect() as connection:
+            apply_schema(connection)
+            list_case_tags(connection, "CASE-R")
+            # A stale "live" view (another request inserted the tags first) must not raise IntegrityError.
+            with patch.object(review_schema, "live_tag_rows", return_value=[]):
+                review_schema.ensure_system_tags(connection, "CASE-R")
+            names = [row[0] for row in connection.execute("SELECT name FROM case_tag WHERE case_id = 'CASE-R' AND deleted_at = ''")]
+            self.assertEqual(sorted(names), sorted(SYSTEM_TAGS))
+
+    def test_deleting_a_tag_keeps_each_marks_reviewer(self) -> None:
+        with self.database.connect() as connection:
+            apply_schema(connection)
+            file_id = _insert_file(connection, "CASE-R", "C:/keep.txt", None)
+            tag = create_case_tag(connection, "CASE-R", name="삭제될 태그")
+            target = [{"target_type": "file_record", "target_id": str(file_id)}]
+            apply_tag_ids(connection, "CASE-R", target, add_ids=[tag["id"]], actor="검사관 A")
+            delete_case_tag(connection, "CASE-R", tag["id"], actor="검사관 B")
+            reviewer = connection.execute("SELECT reviewer FROM review_mark WHERE target_id = ?", (str(file_id),)).fetchone()[0]
+            self.assertEqual(reviewer, "검사관 A")
+            last = connection.execute(
+                "SELECT actor, current_json FROM review_mark_history WHERE target_id = ? ORDER BY version DESC LIMIT 1", (str(file_id),)
+            ).fetchone()
+            self.assertEqual(last[0], "검사관 B")  # the deleter is the history actor
+            self.assertEqual(json.loads(last[1])["reviewer"], "검사관 A")
+
+    def test_hash_propagation_without_a_scope_is_refused_when_the_case_has_several_runs(self) -> None:
+        with self.database.connect() as connection:
+            apply_schema(connection)
+            run_a = _insert_source(connection, "CASE-R", "run-a")
+            _insert_file(connection, "CASE-R", "C:/a.jpg", "d" * 32, run_a)
+            other_run = _insert_source(connection, "CASE-R", "run-b")
+            _insert_file(connection, "CASE-R", "C:/b.jpg", "d" * 32, other_run)
+            orphan = _insert_file(connection, "CASE-R", "C:/orphan.jpg", "d" * 32, None)
+            tag = create_case_tag(connection, "CASE-R", name="범위")
+            with self.assertRaises(ReviewToolError) as refused:
+                apply_tag_ids(
+                    connection,
+                    "CASE-R",
+                    [{"target_type": "file_record", "target_id": str(orphan)}],
+                    add_ids=[tag["id"]],
+                    propagate_by_hash=True,
+                )
+            self.assertEqual(refused.exception.status, 422)
+            self.assertIn("어느 런", str(refused.exception))
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM review_mark").fetchone()[0], 0)
+            # With an explicit evidence source the same request is scoped to that run.
+            scoped = apply_tag_ids(
+                connection,
+                "CASE-R",
+                [{"target_type": "file_record", "target_id": str(orphan)}],
+                add_ids=[tag["id"]],
+                propagate_by_hash=True,
+                evidence_source_id=run_a,
+            )
+            self.assertEqual(scoped["propagation"]["matched_file_rows"], 1)
+
+    def test_tag_batch_applies_assignee_priority_and_due_at(self) -> None:
+        with self.database.connect() as connection:
+            apply_schema(connection)
+            existing = _insert_file(connection, "CASE-R", "C:/w1.txt", None)
+            fresh = _insert_file(connection, "CASE-R", "C:/w2.txt", None)
+            tag = create_case_tag(connection, "CASE-R", name="배정")
+            apply_tag_ids(connection, "CASE-R", [{"target_type": "file_record", "target_id": str(existing)}], add_ids=[tag["id"]])
+            targets = [{"target_type": "file_record", "target_id": str(existing)}, {"target_type": "file_record", "target_id": str(fresh)}]
+            result = apply_tag_ids(
+                connection, "CASE-R", targets, add_ids=[tag["id"]], assignee="검사관 C", priority="p1", due_at="2026-10-31"
+            )
+            self.assertEqual(result["changed_count"], 2)  # the already-tagged row changes too (workflow fields)
+            rows = connection.execute("SELECT assignee, priority, due_at FROM review_mark ORDER BY id").fetchall()
+            self.assertEqual([tuple(row) for row in rows], [("검사관 C", "high", "2026-10-31")] * 2)
+            with self.assertRaises(ReviewToolError) as bad:
+                apply_tag_ids(connection, "CASE-R", targets, add_ids=[tag["id"]], priority="someday")
+            self.assertEqual(bad.exception.status, 422)
+            self.assertIn("우선순위", str(bad.exception))
+
+    def test_oversized_target_lists_and_hash_lists_never_hit_the_sql_variable_limit(self) -> None:
+        with self.database.connect() as connection:
+            apply_schema(connection)
+            source = _insert_source(connection, "CASE-R", "run-a")
+            files = [_insert_file(connection, "CASE-R", f"C:/h{index}", f"{index:032x}", source) for index in range(120)]
+            tag = create_case_tag(connection, "CASE-R", name="많은 해시")
+            targets = [{"target_type": "file_record", "target_id": str(file_id)} for file_id in files]
+            with self.assertRaises(ReviewToolError) as refused:
+                apply_tag_ids(connection, "CASE-R", targets, add_ids=[tag["id"]], propagate_by_hash=True, cap=100)
+            self.assertIn("요청 120행", str(refused.exception))
+            # 120 distinct hashes with a 50-variable limit: one bound JSON list per column instead of 120 "?".
+            connection.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, 50)
+            result = apply_tag_ids(connection, "CASE-R", targets, add_ids=[tag["id"]], propagate_by_hash=True)
+            self.assertEqual((result["applied_count"], result["propagation"]["hash_values"]), (120, 120))
+
+    def test_unique_index_race_on_tag_create_and_update_is_korean_409(self) -> None:
+        with self.database.connect() as connection:
+            apply_schema(connection)
+            first = create_case_tag(connection, "CASE-R", name="경합", shortcut=7)
+            second = create_case_tag(connection, "CASE-R", name="다른 것")
+            # The pre-checks passed before the other request committed: the unique index decides.
+            with patch.object(review_tools, "_check_name_free"), patch.object(review_tools, "_check_shortcut", return_value=7):
+                with self.assertRaises(ReviewToolError) as created:
+                    create_case_tag(connection, "CASE-R", name="경합")
+                self.assertEqual(created.exception.status, 409)
+                with self.assertRaises(ReviewToolError) as updated:
+                    update_case_tag(connection, "CASE-R", second["id"], shortcut=7)
+                self.assertEqual(updated.exception.status, 409)
+                self.assertIn("다시 시도", str(updated.exception))
+            self.assertEqual(first["shortcut"], 7)
+
+
 @unittest.skipUnless(HAS_FASTAPI, "fastapi is required for RapidTriage API tests")
 class ReviewToolsApiTests(unittest.TestCase):
     @classmethod
@@ -342,6 +481,51 @@ class ReviewToolsApiTests(unittest.TestCase):
         no_tags = self._batch(located, propagate_by_hash=True)
         self.assertEqual(no_tags.status_code, 422)
         self.assertIn("전파할 태그", no_tags.json()["detail"])
+
+    def test_explicit_database_must_exist_and_is_never_created_by_a_read(self) -> None:
+        """Adversarial review of E3 item 2: ``?database=<new path>`` is a 404 and creates no file."""
+        missing = Path(self.temp.name) / "probe" / "new-case.db"
+        case_id = self.handle["case_id"]
+        for url in (f"/api/cases/{case_id}/tags", f"/api/cases/{case_id}/histogram-baselines"):
+            response = self.client.get(url, params={"database": str(missing)})
+            self.assertEqual(response.status_code, 404, response.text)
+            self.assertIn("케이스 DB 파일을 찾을 수 없습니다", response.json()["detail"])
+        created = self.client.post(f"/api/cases/{case_id}/tags", params={"database": str(missing)}, json={"name": "x"})
+        self.assertEqual(created.status_code, 404, created.text)
+        self.assertFalse(missing.exists())
+        self.assertFalse(missing.parent.exists())
+        # The existing case DB still works through ``database=``.
+        existing = self.client.get(f"/api/cases/{case_id}/tags", params={"database": self.handle["database"]})
+        self.assertEqual(existing.status_code, 200, existing.text)
+
+    def test_review_batch_tag_ids_apply_workflow_fields_and_korean_body_errors(self) -> None:
+        """Adversarial review of E3 items 6 and 12."""
+        tag = self.client.post(self._tags_url(), json={"name": "배정 태그"}).json()["tag"]
+        files = self.client.get(f"/api/runs/{self.run_id}/files?offset=0&limit=5").json()["candidates"]
+        located = [{"collection": "files", "locator": "/candidates/0"}]
+        self.assertTrue(files)
+        applied = self._batch(located, tag_ids=[tag["id"]], assignee="검사관 D", priority="urgent", due_at="2026-11-01")
+        self.assertEqual(applied.status_code, 200, applied.text)
+        target = applied.json()["targets"][0]
+        connection = sqlite3.connect(self.handle["database"])
+        try:
+            row = connection.execute(
+                "SELECT assignee, priority, due_at FROM review_mark WHERE target_type = ? AND target_id = ?",
+                (target["target_type"], target["target_id"]),
+            ).fetchone()
+        finally:
+            connection.close()
+        self.assertEqual(tuple(row), ("검사관 D", "urgent", "2026-11-01"))
+        bad_priority = self._batch(located, tag_ids=[tag["id"]], priority="someday")
+        self.assertEqual(bad_priority.status_code, 422)
+        self.assertIn("우선순위", bad_priority.json()["detail"])
+        malformed = self._batch(located, tag_ids=["x"])
+        self.assertEqual(malformed.status_code, 422)
+        detail = malformed.json()["detail"]
+        self.assertEqual(detail[0]["msg"], "태그(tag_ids)의 1번째 항목은 정수여야 합니다")
+        missing = self.client.post("/api/case-db/review-batch", json={"case_id": "x", "targets": located})
+        self.assertEqual(missing.status_code, 422)
+        self.assertIn("케이스 DB(database) 값이 필요합니다", [item["msg"] for item in missing.json()["detail"]])
 
     def test_histogram_baseline_save_and_compare(self) -> None:
         base_url = f"/api/cases/{self.handle['case_id']}/histogram-baselines?run_id={self.run_id}"

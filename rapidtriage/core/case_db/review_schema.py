@@ -141,7 +141,13 @@ def apply_review_schema(connection: sqlite3.Connection) -> None:
                 connection.execute(statement)
     if "tag_ids_json" not in _columns(connection, "review_mark"):
         # NULL = not migrated yet; migrate_string_tags fills every row.
-        connection.execute("ALTER TABLE review_mark ADD COLUMN tag_ids_json TEXT")
+        try:
+            connection.execute("ALTER TABLE review_mark ADD COLUMN tag_ids_json TEXT")
+        except sqlite3.OperationalError as exc:
+            # Another connection added it between the check and the ALTER (concurrent first open).
+            if "duplicate column" not in str(exc).lower():
+                raise
+        # Idempotent (only rows still NULL), so it is safe after a lost race too.
         migrate_string_tags(connection)
 
 
@@ -215,12 +221,21 @@ def _insert_tag(
 
 
 def ensure_system_tags(connection: sqlite3.Connection, case_id: str) -> None:
-    """Create the missing system tags (북마크, 우선순위 1-5) of a case."""
+    """Create the missing system tags (북마크, 우선순위 1-5) of a case.
+
+    Write-safe under concurrency: each insert runs in a savepoint, and a unique-index hit
+    (another request created the same tag first) is skipped instead of failing the request.
+    """
     live = {str(row["name"]).casefold() for row in live_tag_rows(connection, case_id)}
     timestamp = now_iso()
     for name in SYSTEM_TAGS:
         if name.casefold() not in live:
-            _insert_tag(connection, case_id, name, actor="system", timestamp=timestamp)
+            connection.execute("SAVEPOINT ensure_system_tag")
+            try:
+                _insert_tag(connection, case_id, name, actor="system", timestamp=timestamp)
+            except sqlite3.IntegrityError:
+                connection.execute("ROLLBACK TO SAVEPOINT ensure_system_tag")
+            connection.execute("RELEASE SAVEPOINT ensure_system_tag")
 
 
 def resolve_tag_names(

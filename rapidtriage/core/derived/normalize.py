@@ -5,17 +5,27 @@ when the value is a placeholder (``-``, ``N/A``, ``0`` …) and is not counted:
 
 * people -- an e-mail address (also inside ``Name <addr>``) lower-cased; a phone number
   as E.164 when it can be read (``+`` / ``00`` prefix, or a Korean ``0``-prefixed national
-  number, ``+82``); a SID upper-cased; anything else NFC, whitespace collapsed, casefolded
-  (Windows account names are case-insensitive);
+  number, ``+82``); any other digit string only with at least 9 digits *and* phone
+  punctuation (``-`` ``.`` space brackets) -- bare digit runs (employee numbers,
+  ``20240501``) and short punctuated ones (``2024-05-01``) stay text keys; a SID
+  upper-cased; anything else NFC, whitespace collapsed, casefolded (Windows account names
+  are case-insensitive);
 * devices -- MAC ``AA:BB:CC:DD:EE:FF``, IP addresses in their canonical text, GUIDs lower
   case without braces, everything else casefolded;
-* paths -- ``\\?\`` / ``file:///`` prefixes removed, ``/`` → ``\\``, repeated separators
-  collapsed (a leading UNC ``\\\\`` kept), trailing separator removed, casefolded;
+* paths -- ``\\?\`` / ``file:///`` prefixes removed. A Windows path (drive letter, UNC, any
+  ``\`` in it, or a bare name without ``/``): ``/`` → ``\\``, repeated separators
+  collapsed (a leading UNC ``\\\\`` kept), trailing separator removed, casefolded. Any
+  other path (POSIX / Android ``/data/...``, case-sensitive file systems): ``/`` and case
+  kept, repeated ``/`` collapsed, trailing ``/`` removed;
 * attachments -- the file name (last path part), casefolded;
 * urls -- the host (lower case, no port / credentials / trailing dot / leading dot of a
   cookie domain); a bare host is accepted;
 * credentials -- never normalised from the clear value: :func:`credential_record` gives the
-  masked text, length and SHA-256 and the key is ``sha256:<hex>``.
+  masked text, length and SHA-256 (over the *full* value, before the display cut of
+  :func:`clean`) and the key is ``sha256:<hex>``. The SHA-256 is unsalted on purpose (the
+  same secret matches across runs and other tools' hashes, and parsers already give
+  unsalted ``*_sha256`` values), so a short or common secret can be recovered from it by
+  offline guessing: a derived set is as sensitive as the run output it was made from.
 """
 
 from __future__ import annotations
@@ -33,6 +43,8 @@ MAX_VALUE_CHARS = 2048
 
 EMAIL = re.compile(r"[A-Za-z0-9._%+'-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
 PHONE_CHARS = re.compile(r"^\+?[\d\s().-]{7,24}$")
+PHONE_PUNCTUATION = re.compile(r"[\s().-]")
+WINDOWS_DRIVE = re.compile(r"^[A-Za-z]:")
 SID = re.compile(r"^s-1-[0-9-]+$", re.IGNORECASE)
 MAC = re.compile(r"^[0-9a-f]{2}(?:[:-]?[0-9a-f]{2}){5}$", re.IGNORECASE)
 GUID = re.compile(r"^\{?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\}?$", re.IGNORECASE)
@@ -40,14 +52,15 @@ HOST = re.compile(r"^[a-z0-9_.-]+\.[a-z0-9-]{2,}\.?$|^localhost$", re.IGNORECASE
 WHITESPACE = re.compile(r"\s+")
 
 
-def clean(raw: object) -> str | None:
-    """The display text of a scalar value (``None`` for placeholders, booleans, containers)."""
+def clean(raw: object, *, max_chars: int | None = MAX_VALUE_CHARS) -> str | None:
+    """The display text of a scalar value (``None`` for placeholders, booleans, containers),
+    cut to ``max_chars`` (``None``: the full value -- credential hashes and lengths)."""
     if raw is None or isinstance(raw, bool) or isinstance(raw, (dict, list, tuple, set)):
         return None
     text = unicodedata.normalize("NFC", str(raw)).strip().strip("\x00")
     if text.casefold() in PLACEHOLDERS:
         return None
-    return text[:MAX_VALUE_CHARS]
+    return text if max_chars is None else text[:max_chars]
 
 
 def _text_key(text: str) -> str:
@@ -68,7 +81,13 @@ def phone_e164(text: str) -> str | None:
         return f"+{digits[2:]}"
     if digits.startswith("0") and len(digits) in (9, 10, 11):
         return f"+82{digits[1:]}"
-    return digits
+    if digits.startswith("0"):
+        return digits
+    # No international / national prefix: only a punctuated number of phone length
+    # (``1-555-010-9999``); bare digit runs and dates (``20240501``, ``2024-05-01``) are not phones.
+    if len(digits) >= 9 and PHONE_PUNCTUATION.search(stripped):
+        return digits
+    return None
 
 
 def person_key(text: str) -> str:
@@ -101,12 +120,17 @@ def path_key(text: str) -> str:
     value = text.strip()
     if value.lower().startswith("file:///"):
         value = unquote(value[len("file:///") :])
+        if not WINDOWS_DRIVE.match(value):
+            value = "/" + value  # file:///home/x -> /home/x
     elif value.lower().startswith("file://"):
         value = "\\\\" + unquote(value[len("file://") :])
     for prefix in ("\\\\?\\UNC\\", "\\\\?\\", "\\??\\"):
         if value.startswith(prefix):
             value = ("\\\\" if prefix.endswith("UNC\\") else "") + value[len(prefix) :]
             break
+    if not _windows_path(value):
+        posix = re.sub(r"/{2,}", "/", value)
+        return posix.rstrip("/") or "/"
     value = value.replace("/", "\\")
     unc = value.startswith("\\\\")
     body = re.sub(r"\\{2,}", r"\\", value.lstrip("\\") if unc else value)
@@ -114,6 +138,11 @@ def path_key(text: str) -> str:
     if len(value) > 3 and value.endswith("\\"):
         value = value.rstrip("\\")
     return value.casefold()
+
+
+def _windows_path(value: str) -> bool:
+    """Drive letter, UNC / rooted ``\\``, any backslash, or a bare name (no ``/``) -- else POSIX."""
+    return bool(WINDOWS_DRIVE.match(value)) or "\\" in value or "/" not in value
 
 
 def attachment_key(text: str) -> str:

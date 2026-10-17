@@ -86,6 +86,12 @@ def korean_body_errors(
         "string_too_short": "{subject} 비어 있습니다",
         "string_too_long": "{subject} 너무 깁니다",
         "literal_error": "{field} 값이 허용된 값이 아닙니다",
+        "int_parsing": "{topic} 정수여야 합니다",
+        "int_type": "{topic} 정수여야 합니다",
+        "bool_parsing": "{topic} true 또는 false여야 합니다",
+        "bool_type": "{topic} true 또는 false여야 합니다",
+        "list_type": "{topic} 목록(배열)이어야 합니다",
+        "too_short": "{subject} 비어 있습니다",
     }
     labels = {"kind": "분석 종류(kind)", "options": "옵션(options)", **dict(extra_labels or {})}
     result: list[dict[str, object]] = []
@@ -97,6 +103,9 @@ def korean_body_errors(
         if field == "options" and error_type == "dict_type":
             template = "{topic} 객체여야 합니다"
         name = labels.get(field, field)
+        if field.isdigit() and len(loc) > 2:
+            # A list item (``tag_ids: ["x"]`` -> loc ``body, tag_ids, 0``): name the list and the position.
+            name = f"{labels.get(loc[-2], loc[-2])}의 {int(field) + 1}번째 항목"
         message = template.format(field=name, topic=with_josa(name, "은", "는"), subject=with_josa(name, "이", "가"))
         result.append({"loc": loc, "msg": message, "type": error_type})
     return result

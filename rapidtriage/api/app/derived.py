@@ -7,7 +7,8 @@ validated analysis id, never from a request or a path stored in a state file; th
 table name is one of :data:`TABLES`, so a request can never name a file.
 
 One table is indexed once per (run, analysis id, table, size, mtime) -- single-flight,
-at most ``INDEX_CACHE_MAX`` tables cached -- into a :class:`TableIndex`: the fields paging
+at most ``INDEX_CACHE_MAX`` tables and ``INDEX_CACHE_MAX_ROWS`` rows in all cached (the
+newest table is always kept; search texts are cut to ``SEARCH_TEXT_CHARS``) -- into a :class:`TableIndex`: the fields paging
 needs (normalised value, a casefolded search text, kinds, count, first/last seen), the byte
 offset and length of every row's line, and one row order per sort. The index comes from the
 ``<table>.index.json`` sidecar the engine writes (a set without one, or with one that does
@@ -35,6 +36,7 @@ from fastapi import HTTPException
 from ...core.derived.engine import (
     INDEX_SUFFIX,
     INDEX_VERSION,
+    SEARCH_TEXT_CHARS,
     SUMMARY_FILE_NAME,
     TABLE_LABELS,
     TABLES,
@@ -44,6 +46,8 @@ from ...core.derived.stage import DERIVED_ANALYSIS_KIND
 from .analyses import ANALYSIS_ID_PATTERN, ANALYSIS_RUNNER, analyses_root
 
 INDEX_CACHE_MAX = 8
+# Rows over all cached table indices (each row costs a few hundred bytes: value, search text, offsets).
+INDEX_CACHE_MAX_ROWS = 1_000_000
 TABLE_MAX_BYTES = 512 * 1024 * 1024
 SORTS = ("count", "first_seen", "last_seen")
 DEFAULT_LIMIT = 100
@@ -273,7 +277,8 @@ def _from_sidecar(key: tuple[object, ...], path: Path, sidecar: Path, size: int)
         key,
         path,
         payload["normalized"],
-        payload["search"],
+        # A sidecar of an older engine may hold uncut search texts.
+        [text if len(text) <= SEARCH_TEXT_CHARS else text[:SEARCH_TEXT_CHARS] for text in payload["search"]],
         [frozen[item] for item in kinds],
         payload["count"],
         payload["first"],
@@ -312,8 +317,9 @@ def build_table_index(key: tuple[object, ...], path: Path) -> TableIndex:
 class TableIndexCache:
     """Table indices built single-flight per key; at most ``max_tables`` kept (LRU)."""
 
-    def __init__(self, *, max_tables: int = INDEX_CACHE_MAX) -> None:
+    def __init__(self, *, max_tables: int = INDEX_CACHE_MAX, max_rows: int = INDEX_CACHE_MAX_ROWS) -> None:
         self._max = max_tables
+        self._max_rows = max_rows
         self._lock = threading.Lock()
         self._cache: OrderedDict[tuple[str, str], TableIndex] = OrderedDict()
         self._building: dict[tuple[object, ...], threading.Event] = {}
@@ -345,7 +351,9 @@ class TableIndexCache:
                 self.builds += 1
                 self._cache[slot] = index
                 self._cache.move_to_end(slot)
-                while len(self._cache) > self._max:
+                while len(self._cache) > 1 and (
+                    len(self._cache) > self._max or sum(len(item) for item in self._cache.values()) > self._max_rows
+                ):
                     self._cache.popitem(last=False)
             return index
         finally:

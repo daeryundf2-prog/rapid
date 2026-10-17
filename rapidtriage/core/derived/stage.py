@@ -101,7 +101,9 @@ def run_derived_stage(
             {
                 "status": "failed_isolated",
                 "warning_level": "warning",
-                "warning_messages": [f"통합 보기 단계 실패: {type(exc).__name__}: {exc}"[:300]],
+                # Type + first 100 chars only: the full text can carry evidence paths or row fragments
+                # (the traceback is in the log).
+                "warning_messages": [f"통합 보기 단계 실패: {type(exc).__name__}: {str(exc)[:100]}"],
                 "elapsed_seconds": round(time.monotonic() - started, 3),
                 "reused": False,
             }
