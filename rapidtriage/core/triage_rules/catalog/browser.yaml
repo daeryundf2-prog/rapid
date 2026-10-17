@@ -461,6 +461,165 @@ families:
     format: time
     ts_kind: last-used
   rules: []
+- id: browser-cache-entry
+  label: 브라우저 캐시 항목
+  types:
+  - browser-cache-entry
+  core_columns:
+  - key: timestamp
+    label: 응답 시각
+    aliases:
+    - response_time
+    - created_at
+    format: time
+    ts_kind: cache-response
+  - key: url
+    semantic: url
+    label: 주소 (URL)
+    format: url
+  - key: host
+    label: 호스트
+  - key: method
+    label: 요청 방식
+  - key: http_status
+    label: 응답 상태
+    format: number
+  - key: content_type
+    label: 콘텐츠 형식 (Content-Type)
+  - key: content_length
+    label: 콘텐츠 길이 (Content-Length)
+    format: bytes
+  - key: body_size
+    label: 본문 크기
+    format: bytes
+  - key: body_sha256
+    semantic: hash
+    label: 본문 SHA-256
+    aliases:
+    - body_prefix_sha256
+    format: mono
+  - key: compression
+    label: 압축
+    aliases:
+    - content_encoding
+  - key: file_name_candidate
+    semantic: attachment
+    label: 파일 이름 후보 (Content-Disposition)
+  - key: cache_format
+    label: 캐시 형식
+  - key: browser
+    label: 브라우저
+  - key: profile
+    label: 프로필
+  aux_columns:
+  - key: request_time
+    label: 요청 시각
+    format: time
+    ts_kind: cache-request
+  - key: created_at
+    label: 항목 생성
+    format: time
+    ts_kind: created
+  - key: last_used_at
+    label: 마지막 사용
+    format: time
+    ts_kind: last-used
+  - key: body_signature
+    label: 본문 서명(앞 256바이트)
+  - key: body_hash_scope
+    label: 본문 해시 범위
+  - key: body_status
+    label: 본문 상태
+  - key: headers_status
+    label: 헤더 상태
+  - key: entry_state
+    label: 항목 상태
+  - key: server
+    label: 서버
+  - key: location
+    semantic: url
+    label: 이동 주소 (Location)
+    format: url
+  - key: cache_key
+    label: 캐시 키
+    format: mono
+  - key: source_offset
+    label: 원본 오프셋
+    format: number
+  - key: recovery_method
+    label: 복구 방식
+  - key: webcache_container
+    label: WebCache 컨테이너
+  - key: user
+    semantic: account
+    label: 사용자
+  rules: []
+- id: web-upload-candidate
+  label: 웹메일·웹하드 업로드 후보
+  types:
+  - web-upload-candidate
+  core_columns:
+  - key: timestamp
+    label: 시각
+    format: time
+    ts_kind: observed
+  - key: service_label
+    label: 서비스
+    aliases:
+    - service
+  - key: category_label
+    label: 분류
+    aliases:
+    - category
+  - key: strength_label
+    label: 근거 강도
+    aliases:
+    - strength
+  - key: url
+    semantic: url
+    label: 주소 (URL)
+    format: url
+  - key: method
+    label: 요청 방식
+  - key: size
+    label: 크기
+    format: bytes
+  - key: file_name_candidate
+    semantic: attachment
+    label: 관련 파일 이름 후보
+  - key: source_artifact_type
+    label: 원본 행 유형
+  - key: browser
+    label: 브라우저
+  - key: profile
+    label: 프로필
+  aux_columns:
+  - key: match_pattern_id
+    label: 일치 패턴
+    format: mono
+  - key: match_basis
+    label: 패턴 근거
+  - key: signals
+    label: 신호
+  - key: http_status
+    label: 응답 상태
+    format: number
+  - key: content_type
+    label: 콘텐츠 형식
+  - key: source_path
+    label: 원본 경로
+    format: path
+  - key: source_offset
+    label: 원본 오프셋
+    format: number
+  - key: interpretation_ko
+    label: 해석
+  - key: user
+    semantic: account
+    label: 사용자
+  rules:
+  - browser.webmail_upload
+  - browser.filesharing_upload
 rules:
 - id: browser.dl_from_filesharing
   family: browser-download
@@ -660,3 +819,34 @@ rules:
   params:
     share_domains: *id002
     keywords: *id003
+- id: browser.webmail_upload
+  family: web-upload-candidate
+  grade: B
+  label_ko: 웹메일 첨부 업로드 후보
+  rationale_ko: '캐시 항목·방문 기록 URL이 웹메일(네이버·다음·Gmail·Outlook 웹) 첨부 업로드 경로이거나 그 호스트로 간 POST 요청: 웹메일을 통한 파일 유출 경로.'
+  false_positive_ko: 업무 메일 첨부·첨부 열람(약한 근거 attid는 기본 제외). URL은 업로드 흐름의 흔적일 뿐 어떤 파일이 나갔는지는 다른 증거로 확인.
+  sources: &id004
+  - https://developers.google.com/gmail/api/reference/rest/v1/users.messages.attachments/get
+  - https://learn.microsoft.com/en-us/exchange/client-developer/web-service-reference/createattachment-operation
+  - https://developers.google.com/drive/api/guides/manage-uploads
+  - https://www.dropbox.com/developers/documentation/http/documentation
+  - https://learn.microsoft.com/en-us/onedrive/developer/rest-api/api/driveitem-createuploadsession
+  - https://chromium.googlesource.com/chromium/src/+/HEAD/net/disk_cache/simple/simple_entry_format.h
+  version: 1
+  status: provisional
+  params:
+    min_strength: medium
+- id: browser.filesharing_upload
+  family: web-upload-candidate
+  grade: B
+  label_ko: 파일 공유·웹하드·클라우드 업로드 후보
+  rationale_ko: '캐시 항목·방문 기록 URL이 파일 공유(WeTransfer·Send Anywhere·MEGA)·웹하드·개인 클라우드(Google Drive·Dropbox·OneDrive·MYBOX) 업로드 엔드포인트이거나 그 호스트로 간 POST 요청: 외부 저장소로의 유출 경로.'
+  false_positive_ko: 업무용 클라우드·사내 승인 파일 전송. URL은 업로드 흐름의 흔적일 뿐 어떤 파일이 나갔는지는 다른 증거로 확인.
+  sources: *id004
+  version: 1
+  status: provisional
+  params:
+    min_strength: medium
+    categories:
+    - filesharing
+    - cloud
