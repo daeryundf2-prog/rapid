@@ -6,6 +6,8 @@ import type { GridRow } from "../../contracts/collection";
 import type { MarkAction, ViewerTarget } from "../../contracts/viewer";
 import { evidenceTime } from "../../utils/time";
 import { timestampKindLabel } from "../../utils/timeKinds";
+import { derivedOriginOf } from "../derived/store";
+import { DERIVED_TABLE_LABELS } from "../derived/tables";
 import { flagCitation, rowFlags } from "../flags/flags";
 import {
   type ApplyResult,
@@ -79,6 +81,9 @@ export function buildCitation(
     ...recordCitationParts(row, tz),
     `런=${target.runId}`,
   ];
+  // 통합 보기 (axiom-adoption §3.2): the row was opened from a derived table value.
+  const origin = derivedOriginOf(target.runId, target.ref);
+  if (origin) parts.push(`통합=통합:${DERIVED_TABLE_LABELS[origin.table]}/${origin.normalized}`);
   // 특이사항 (U-F6): each flag as `rule_id@version (evidence field=value, …)`.
   const flags = rowFlags(row);
   if (flags.length) parts.push(`특이사항=${flags.map((flag) => flagCitation(flag)).join(" | ")}`);

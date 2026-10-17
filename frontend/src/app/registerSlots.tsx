@@ -9,6 +9,7 @@ import { CommandButton } from "../commands/CommandButton";
 import { AnalysisPane } from "../features/analysis/AnalysisPane";
 import { AnalysisProgressChip } from "../features/analysis/AnalysisProgressChip";
 import { useCaseDialogs } from "../features/case/dialogs";
+import { DerivedPane } from "../features/derived/DerivedPane";
 import { DataGrid } from "../features/grid/DataGrid";
 import { ProcessPage, ProcessPanel } from "../features/stages/ProcessStage";
 import { ReportPage, ReportPanel, ReviewPanel } from "../features/stages/ReviewReportStage";
@@ -52,6 +53,8 @@ function GridSlot() {
   const { route } = useRoute();
   // 분석 작업 nodes: header + history + the one DataGrid over the selected job's rows.
   if (route.runId && route.collection === "analysis") return <AnalysisPane />;
+  // 통합 보기 (axiom-adoption §3.2): derived tables + original rows, not the DataGrid.
+  if (route.runId && route.collection === "derived") return <DerivedPane />;
   if (route.runId && route.collection === "process") return <ProcessPage />;
   if (route.runId && route.collection === "outputs") return <ReportPage />;
   return route.runId && route.collection === "intake" ? (

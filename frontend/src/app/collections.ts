@@ -13,6 +13,7 @@ export const COLLECTION_NODES: ReadonlyArray<{ id: CollectionId; label: string; 
   { id: "review", label: "리뷰보드", icon: "list" },
   { id: "outputs", label: "산출물", icon: "package" },
   { id: "process", label: "처리", icon: "cpu" },
+  { id: "derived", label: "통합 보기", icon: "link" },
 ];
 
 export const COLLECTION_LABEL = Object.fromEntries(COLLECTION_NODES.map((n) => [n.id, n.label])) as Record<

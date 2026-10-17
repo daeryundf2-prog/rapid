@@ -25,6 +25,8 @@ const BASE_COLLECTIONS: Record<CollectionId, CollectionDef> = {
   analysis: analysisCollection,
   // The 처리 stage is a page (runs + analysis cards), not a grid: no rows, like 접수.
   process: { ...intakeCollection, id: "process", label: "처리" },
+  // 통합 보기 is its own pane (features/derived/DerivedPane), not the DataGrid: no rows here.
+  derived: { ...intakeCollection, id: "derived", label: "통합 보기" },
 };
 
 /** Every collection also carries the AXIOM preset (two-line title + tag/status chip column). */
