@@ -485,6 +485,13 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
                 "artifact_types": ("cloud-message", "cloud-file", "cloud-audit"),
                 "terms": ("m365", "teams", "onedrive", "sharepoint", "m365_export_review_profile", "m365_export_parser_manifest"),
             },
+            {
+                "id": "cloud-sync-clients",
+                "label": "동기화 클라이언트(OneDrive·Dropbox·Google Drive·MYBOX·iCloud)",
+                "status": "partial",
+                "artifact_types": ("cloud-sync-account", "cloud-sync-file", "cloud-sync-event", "cloud-sync-inventory"),
+                "terms": ("cloud-sync", "syncenginedatabase", "odl", "drivefs", "dropbox", "mybox", "icloud drive", "sync root"),
+            },
         ),
     },
     {

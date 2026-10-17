@@ -1,5 +1,5 @@
 {
- "version": "e310c187496355ca",
+ "version": "01c2c796ee0c8c87",
  "families": [
   {
    "id": "sam-account",
@@ -1467,12 +1467,144 @@
    ],
    "rules": [
     "cloud.bulk_download",
+    "cloud.bulk_upload",
     "cloud.external_share",
     "cloud.new_device_login",
     "cloud.delete_after_share",
     "cloud.taken_vs_creation_gap",
     "cloud.json_exif_gps_mismatch",
     "cloud.audit_retention_gap"
+   ]
+  },
+  {
+   "id": "cloud-sync",
+   "label": "클라우드 동기화 클라이언트",
+   "types": [
+    "cloud-sync-account",
+    "cloud-sync-file",
+    "cloud-sync-event",
+    "cloud-sync-inventory"
+   ],
+   "kinds": [
+    "cloud-sync"
+   ],
+   "core_columns": [
+    {
+     "key": "timestamp",
+     "label": "시각",
+     "aliases": [
+      "modified_at"
+     ],
+     "format": "time",
+     "ts_kind": "event",
+     "width": 170
+    },
+    {
+     "key": "client_label",
+     "label": "클라이언트",
+     "aliases": [
+      "client"
+     ]
+    },
+    {
+     "key": "actor",
+     "semantic": "account",
+     "label": "계정",
+     "aliases": [
+      "account",
+      "account_email"
+     ]
+    },
+    {
+     "key": "operation_label",
+     "label": "활동",
+     "aliases": [
+      "operation"
+     ]
+    },
+    {
+     "key": "item_path",
+     "semantic": "path",
+     "label": "항목 경로",
+     "aliases": [
+      "file_name"
+     ],
+     "format": "path"
+    },
+    {
+     "key": "size",
+     "label": "크기",
+     "format": "bytes"
+    },
+    {
+     "key": "sync_state",
+     "label": "상태"
+    },
+    {
+     "key": "shared",
+     "label": "공유 여부"
+    },
+    {
+     "key": "sync_root",
+     "semantic": "path",
+     "label": "동기화 폴더",
+     "aliases": [
+      "sync_roots"
+     ],
+     "format": "path"
+    },
+    {
+     "key": "tenant",
+     "label": "테넌트"
+    },
+    {
+     "key": "site_url",
+     "semantic": "url",
+     "label": "사이트 URL"
+    },
+    {
+     "key": "item_id",
+     "label": "항목 ID",
+     "format": "mono"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "account_id",
+     "label": "계정 ID",
+     "format": "mono"
+    },
+    {
+     "key": "deleted",
+     "label": "삭제 상태"
+    },
+    {
+     "key": "modified_at",
+     "label": "수정 시각",
+     "format": "time",
+     "ts_kind": "modified"
+    },
+    {
+     "key": "inventory_reason",
+     "label": "사유"
+    },
+    {
+     "key": "recovery_method",
+     "label": "복구 방법"
+    },
+    {
+     "key": "source_locator",
+     "label": "원본 위치",
+     "format": "mono"
+    },
+    {
+     "key": "user_profile",
+     "label": "사용자 프로필"
+    }
+   ],
+   "rules": [
+    "cloud.bulk_upload",
+    "cloud.sync_folder_outside_user_profile"
    ]
   },
   {
@@ -7041,6 +7173,42 @@
    "params": {
     "retention_days": 180
    }
+  },
+  {
+   "id": "cloud.bulk_upload",
+   "family": "cloud-sync",
+   "grade": "A",
+   "label_ko": "대량 업로드",
+   "rationale_ko": "한 계정의 업로드가 1시간 안에 50건 이상이거나 합계 500 MB 이상: 개인 클라우드로 대량 반출.",
+   "false_positive_ko": "최초 동기화·새 PC 설정, 사진·백업 폴더 자동 업로드.",
+   "sources": [
+    "https://learn.microsoft.com/purview/audit-log-activities",
+    "https://github.com/ydkhatri/OneDrive",
+    "https://help.dropbox.com/installs/sync-overview"
+   ],
+   "version": 1,
+   "status": "provisional",
+   "params": {
+    "window_minutes": 60,
+    "min_count": 50,
+    "min_bytes": 500000000
+   }
+  },
+  {
+   "id": "cloud.sync_folder_outside_user_profile",
+   "family": "cloud-sync",
+   "grade": "C",
+   "label_ko": "사용자 프로필 밖 동기화 폴더",
+   "rationale_ko": "동기화 클라이언트의 동기화 폴더가 C:\\Users\\<사용자> 밖(다른 드라이브·이동식 디스크·공용 폴더)에 있음: 반출용 경로 구성 정황.",
+   "false_positive_ko": "데이터 드라이브(D:)에 의도적으로 둔 경우, 회사 정책상 위치 변경.",
+   "sources": [
+    "https://learn.microsoft.com/sharepoint/use-group-policy",
+    "https://help.dropbox.com/installs/move-dropbox-folder",
+    "https://support.google.com/drive/answer/10838124"
+   ],
+   "version": 1,
+   "status": "provisional",
+   "params": {}
   },
   {
    "id": "documents.lastsaved_ne_author",

@@ -109,6 +109,8 @@ const EVIDENCE: Record<string, string[]> = {
   "memory-volatility": ["crash-dump-indicators"],
   eventlog: ["eventlog-detection", "eventlog-event", "etl-trace-file", "eventlog-file", "eventlog-summary"],
   "synthetic-media": ["synthetic-media-scan-status", "synthetic-media-scan-summary"],
+  // R2 M4: desktop cloud sync clients (rapidtriage/artifacts/cloud_sync.py).
+  "cloud-sync": ["cloud-sync-account", "cloud-sync-file", "cloud-sync-event", "cloud-sync-inventory"],
 };
 
 /** r2 types (and kinds) that must be reachable from the tree: a typed node or the kind's catch-all. */
@@ -623,5 +625,38 @@ describe("domain counts over the r1 tree (routed kind nodes, zero reasons)", () 
     expect(views?.children?.find((c) => c.id === "indicators")?.label).toBe("지표 후보");
     expect(node("domain:incident:ir-ioc")?.label).toBe("지표 후보");
     expect(node("domain:messaging:msg-docs")?.count).toBe(41);
+  });
+});
+
+describe("R2 M4 cloud sync nodes", () => {
+  const cloud = DOMAINS.find((domain) => domain.id === "cloud");
+
+  it("lists the sync client nodes under 클라우드 in Korean order, the export node kept", () => {
+    const labels = (cloud?.nodes ?? []).map((node) => node.label);
+    expect(labels).toEqual([...labels].sort((left, right) => left.localeCompare(right, "ko")));
+    expect(cloud?.nodes.map((node) => node.id)).toEqual([
+      "cloud-sync-accounts",
+      "cloud-sync-events",
+      "cloud-sync-inventory",
+      "cloud-sync-files",
+      "cloud-export",
+    ]);
+    expect(cloud?.nodes.find((node) => node.id === "cloud-export")?.target).toEqual({
+      collection: "artifacts",
+      kind: "cloud-export",
+    });
+  });
+
+  it("keeps the inventory rows out of the domain total and names every type in Korean", () => {
+    const inventory = cloud?.nodes.find((node) => node.id === "cloud-sync-inventory");
+    expect(inventory?.detail).toBe(true);
+    for (const type of [
+      "cloud-sync-account",
+      "cloud-sync-file",
+      "cloud-sync-event",
+      "cloud-sync-inventory",
+    ]) {
+      expect(artifactTypeLabel(type), type).toMatch(/[가-힣]/);
+    }
   });
 });

@@ -15,6 +15,7 @@ const ENGINE_KINDS = [
   "android-apk",
   "browser",
   "cloud-export",
+  "cloud-sync",
   "email",
   "eventlog",
   "generic-documents",

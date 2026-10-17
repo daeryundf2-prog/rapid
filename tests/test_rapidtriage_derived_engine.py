@@ -169,7 +169,7 @@ class NormalizationRegressionTests(unittest.TestCase):
 class CatalogSemanticTests(unittest.TestCase):
     def test_every_family_is_reviewed(self) -> None:
         catalog = load_catalog()
-        self.assertEqual(len(catalog.families), 57)  # r2 M1: messenger-attachment, messenger-contact, messenger-app
+        self.assertEqual(len(catalog.families), 58)  # r2 M1: messenger-attachment/-contact/-app; r2 M4: cloud-sync
         for family in catalog.families:
             columns = [*family["core_columns"], *(family.get("aux_columns") or [])]
             tagged = [column for column in columns if column.get("semantic")]

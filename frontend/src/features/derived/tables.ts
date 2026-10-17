@@ -68,6 +68,7 @@ const KIND_LABELS: Record<string, string> = {
   "kakaotalk-macos": "카카오톡 (macOS)",
   "mobile-export": "모바일 내보내기",
   "cloud-export": "클라우드 내보내기",
+  "cloud-sync": "클라우드 동기화 클라이언트",
   "android-apk": "Android APK",
   "media-image": "미디어 이미지",
   "synthetic-media": "합성 미디어",

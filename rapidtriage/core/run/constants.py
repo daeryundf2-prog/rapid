@@ -57,6 +57,7 @@ GENERAL_FORENSIC_ARTIFACT_KINDS = (
     "recent-files",
     "email",
     "cloud-export",
+    "cloud-sync",
     "mobile-export",
     "kakaotalk-macos",
     "kakaotalk-windows",
