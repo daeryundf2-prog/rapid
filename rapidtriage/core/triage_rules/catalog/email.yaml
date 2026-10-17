@@ -78,6 +78,33 @@ families:
   - key: attachments
     semantic: attachment
     label: 첨부 파일
+  - key: cc
+    semantic: person_recipient
+    label: 참조 (CC)
+  - key: bcc
+    semantic: person_recipient
+    label: 숨은 참조 (BCC)
+  - key: submit_time
+    label: 제출 시각
+    format: time
+    ts_kind: sent
+    width: 170
+  - key: delivery_time
+    label: 배달 시각
+    format: time
+    ts_kind: received
+    width: 170
+  - key: read_state
+    label: 읽음
+    width: 80
+  - key: thread_id
+    label: 스레드 ID
+    aliases:
+    - conversation_topic
+    format: mono
+  - key: deleted_state
+    label: 삭제·복구 상태
+    width: 110
   rules:
   - email.spf_fail
   - email.dkim_fail
@@ -92,6 +119,185 @@ families:
   - email.date_vs_received_skew
   - email.external_forward_auto
   - email.bcc_self_or_personal
+  - email.external_bulk_attachments
+  - email.deleted_folder_recent
+# r2 M2: Outlook PST/OST rows normalised from pffexport/readpst output, and ICS files.
+- id: email-attachment
+  label: 메일 첨부
+  types:
+  - email-attachment
+  core_columns:
+  - key: message_date
+    label: 메일 시각
+    format: time
+    ts_kind: sent
+    width: 170
+  - key: filename
+    semantic: attachment
+    label: 첨부 파일 이름
+    width: 240
+  - key: size
+    label: 크기
+    format: bytes
+  - key: sha256
+    semantic: hash
+    label: 해시(SHA-256)
+    format: mono
+  - key: from
+    semantic: person_sender
+    label: 보낸 사람
+  - key: to
+    semantic: person_recipient
+    label: 받는 사람
+  - key: message_subject
+    label: 원본 메일 제목
+    width: 240
+  - key: folder
+    label: 폴더
+  aux_columns:
+  - key: content_type
+    label: 콘텐츠 유형
+  - key: message_id
+    label: 원본 메시지 ID
+    format: mono
+  - key: deleted_state
+    label: 삭제·복구 상태
+  - key: export_item
+    label: 내보내기 항목
+    format: path
+  - key: source_path
+    semantic: path
+    label: 원본 PST/OST
+    format: path
+  rules: []
+- id: calendar-event
+  label: 일정(약속)
+  types:
+  - calendar-event
+  core_columns:
+  - key: start
+    label: 시작
+    format: time
+    ts_kind: start
+    width: 170
+  - key: end
+    label: 종료
+    format: time
+    ts_kind: end
+    width: 170
+  - key: title
+    label: 제목
+    width: 260
+  - key: location
+    label: 장소
+  - key: organizer
+    semantic: person_sender
+    label: 주최자
+  - key: attendees
+    semantic: person_recipient
+    label: 참석자
+  - key: all_day
+    label: 종일
+    width: 70
+  - key: folder
+    label: 폴더
+  aux_columns:
+  - key: timezone
+    label: 시간대
+  - key: recurrence_rule
+    label: 반복 규칙
+    format: mono
+  - key: uid
+    label: 일정 UID
+    format: mono
+  - key: status
+    label: 상태
+  - key: description_preview
+    label: 설명 미리보기
+  - key: source_format
+    label: 원본 형식
+  - key: source_path
+    semantic: path
+    label: 원본 파일
+    format: path
+  rules: []
+- id: contact
+  label: 연락처
+  types:
+  - contact
+  core_columns:
+  - key: display_name
+    semantic: person
+    label: 이름
+  - key: email
+    semantic: person
+    label: 이메일
+    aliases:
+    - emails
+  - key: phone
+    semantic: person
+    label: 전화
+    aliases:
+    - phones
+  - key: organization
+    label: 조직
+  - key: title
+    label: 직함
+  - key: folder
+    label: 폴더
+  aux_columns:
+  - key: emails
+    label: 이메일 전체
+  - key: phones
+    label: 전화 전체
+  - key: source_path
+    semantic: path
+    label: 원본 PST/OST
+    format: path
+  rules: []
+- id: email-container
+  label: 메일 컨테이너(PST/OST)
+  types:
+  - email-container-inventory
+  core_columns:
+  - key: container_name
+    label: 파일
+  - key: status_label
+    label: 상태
+    width: 110
+  - key: reason
+    label: 사유
+    width: 360
+  - key: tool
+    label: 사용 도구
+  - key: message_count
+    label: 메시지
+    format: number
+  - key: attachment_count
+    label: 첨부
+    format: number
+  - key: calendar_event_count
+    label: 약속
+    format: number
+  - key: contact_count
+    label: 연락처
+    format: number
+  aux_columns:
+  - key: size
+    label: 크기
+    format: bytes
+  - key: source_sha256
+    semantic: hash
+    label: 해시(SHA-256)
+    format: mono
+  - key: item_error_count
+    label: 읽지 못한 항목
+    format: number
+  - key: source_path
+    semantic: path
+    label: 원본 경로
+    format: path
+  rules: []
 rules:
 - id: email.spf_fail
   family: email
@@ -243,3 +449,31 @@ rules:
     - icloud.com
     - proton.me
     - protonmail.com
+- id: email.external_bulk_attachments
+  family: email
+  grade: B
+  label_ko: 외부 도메인으로 첨부 대량 발송
+  rationale_ko: '메일함 소유 도메인에서 외부 도메인 수신자에게 하루(현지 기준) 첨부 n개 이상 발송: 메일을 통한 자료 유출 정황.'
+  false_positive_ko: 협력사·고객사와의 정상 업무 자료 교환, 계약서 묶음 발송.
+  sources:
+  - https://attack.mitre.org/techniques/T1048/
+  - https://attack.mitre.org/techniques/T1114/
+  - https://learn.microsoft.com/en-us/office/client-developer/outlook/mapi/pidtagclientsubmittime-canonical-property
+  version: 1
+  status: provisional
+  params:
+    min_attachments: 10
+    tz_offset_hours: 9
+- id: email.deleted_folder_recent
+  family: email
+  grade: C
+  label_ko: 최근 삭제한 메일
+  rationale_ko: '지운 편지함·복구 가능한 항목에 있거나 도구가 삭제 영역에서 복구한 메일 중, 같은 메일함의 가장 최근 메일로부터 n일 이내 메일: 증거 인멸·은닉 정황.'
+  false_positive_ko: 일상적인 메일함 정리, 자동 정리 규칙.
+  sources:
+  - https://learn.microsoft.com/en-us/exchange/security-and-compliance/recoverable-items-folder/recoverable-items-folder
+  - https://github.com/libyal/libpff
+  version: 1
+  status: provisional
+  params:
+    recent_days: 30

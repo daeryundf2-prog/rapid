@@ -649,6 +649,24 @@ export const DOMAINS: readonly DomainDef[] = [
         target: a("kakaotalk-windows", ["kakaotalk-windows-correlation-summary"]),
         detail: true,
       },
+      // r2 M2: decrypted chat rows (only with recovered key material), saved/cached pictures and
+      // the per-profile decryption status ("복호 키 없음 — …" when the chat DB stays encrypted).
+      {
+        id: "msg-kakao-pictures",
+        label: "카카오톡(Windows) 공유 사진",
+        target: a("kakaotalk-windows", ["kakaotalk-shared-picture"]),
+      },
+      {
+        id: "msg-kakao-messages",
+        label: "카카오톡(Windows) 메시지",
+        target: a("kakaotalk-windows", ["kakaotalk-message"]),
+      },
+      {
+        id: "msg-kakao-inventory",
+        label: "카카오톡(Windows) 복호 상태",
+        target: a("kakaotalk-windows", ["kakaotalk-app-inventory"]),
+        detail: true,
+      },
       { id: "msg-kakao-mac", label: "카카오톡(macOS)", target: a("kakaotalk-macos") },
       // windows-messenger (plan r2-communication §3.1 M1): Teams·Slack·Discord·Telegram·WhatsApp·Skype·
       // LINE·WeChat·Zoom desktop apps. Children in Korean order; the 앱 column narrows to one app.
@@ -688,6 +706,20 @@ export const DOMAINS: readonly DomainDef[] = [
         target: a("mobile-export", ["mobile-message", "mobile-chat-database"]),
       },
       { id: "msg-email", label: "이메일", target: a("email") },
+      // r2 M2: Outlook PST/OST rows (pffexport/readpst) and ICS calendars.
+      {
+        id: "msg-email-attachments",
+        label: "메일 첨부",
+        target: a("email", ["email-attachment"]),
+      },
+      {
+        id: "msg-email-containers",
+        label: "메일 컨테이너(PST/OST)",
+        target: a("email", ["email-container-inventory"]),
+        detail: true,
+      },
+      { id: "msg-contacts", label: "연락처", target: a("email", ["contact"]) },
+      { id: "msg-calendar", label: "일정(약속)", target: a("email", ["calendar-event"]) },
       { id: "msg-docs", label: "문서/메일 색인", target: { collection: "docs" } },
     ],
   },

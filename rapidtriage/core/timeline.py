@@ -260,6 +260,10 @@ TIMELINE_FIELD_MAP: dict[str, tuple[TimelineField, ...]] = {
     "cloud-sync-file": (F("viewed_at", "cloud-viewed"), F("shared_with_me_at", "cloud-shared-with-me")),
     "cloud-sync-account": (),
     "cloud-sync-inventory": (),
+    # r2 M2: decrypted KakaoTalk PC messages (sendAt, UTC) and saved pictures whose
+    # KakaoTalk_<yyyymmdd>_<hhmmssSSS> file name is a local wall-clock save time.
+    "kakaotalk-message": (F("timestamp", "message"),),
+    "kakaotalk-shared-picture": (F("download_time", "saved", timezone="local-unknown"),),
     # media-image/media-video evidence times come through the row-level
     # timestamp/timestamp_kind contract (EXIF DateTimeOriginal, mp4 mvhd).
     "media-image": (F("exif_gps_profile.gps_datetime_utc_candidate", "gps-fix"),),

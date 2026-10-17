@@ -64,6 +64,24 @@ class RapidTriageDoctorTests(unittest.TestCase):
         self.assertEqual(checks["tool:tesseract"]["status"], WARN)
         self.assertEqual(checks["tools:e01"]["status"], WARN)
         self.assertIn("OCR will be disabled", checks["tool:tesseract"]["summary"])
+        # r2 M2: PST/OST normalisation needs pffexport or readpst.
+        self.assertEqual(checks["tools:email-pst"]["status"], WARN)
+        self.assertIn("pffexport", checks["tools:email-pst"]["summary"])
+
+    def test_doctor_reports_email_pst_tool_when_present(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            static_dir = Path(tmp_dir) / "static"
+            make_static_assets(static_dir)
+            payload = run_doctor(
+                static_dir=static_dir,
+                app_data_dir=Path(tmp_dir) / "app-data",
+                tool_resolver=lambda name: "/usr/bin/readpst" if name == "readpst" else None,
+                include_port_check=False,
+            )
+
+        check = next(check for check in payload["checks"] if check["name"] == "tools:email-pst")
+        self.assertEqual(check["status"], OK)
+        self.assertEqual(check["details"]["available"], ["readpst"])
 
     def test_doctor_text_output_is_human_readable(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

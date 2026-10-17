@@ -77,7 +77,12 @@ const EVIDENCE: Record<string, string[]> = {
     "kakaotalk-windows-app-database",
     "kakaotalk-windows-source-candidate",
     "kakaotalk-windows-crypto-material-candidate",
+    // r2 M2: decrypted chat rows and saved / cached pictures.
+    "kakaotalk-message",
+    "kakaotalk-shared-picture",
   ],
+  // r2 M2: Outlook PST/OST rows (pffexport/readpst) and ICS calendars.
+  email: ["email-attachment", "contact", "calendar-event"],
   "windows-shellbags": ["shellbag-entry", "shellbag-hive-summary"],
   // r2 M1: artifacts/windows/messenger.py row types.
   "windows-messenger": ["chat-message", "chat-attachment", "chat-contact", "chat-app-inventory"],
@@ -142,7 +147,9 @@ const REACHABLE: Record<string, string[]> = {
   "kakaotalk-windows": [
     "kakaotalk-windows-crypto-material-candidate",
     "kakaotalk-windows-correlation-summary",
+    "kakaotalk-app-inventory",
   ],
+  email: ["email-container-inventory", "email-message", "email-mailbox"],
   "memory-volatility": ["memory-process", "process-string-candidate"],
 };
 
@@ -331,6 +338,21 @@ describe("domain mapping table (parser-quality r1)", () => {
       ["eventlog", "eventlog-detection"],
     ]);
     expect(primaryNodes("windows-registry", "registry-persistence-entry")[0]?.domain).toBe("registry");
+  });
+
+  it("r2 M2 KakaoTalk / Outlook nodes: Korean-sorted, status rows kept out of the totals", () => {
+    const messaging = DOMAINS.find((d) => d.id === "messaging")?.nodes ?? [];
+    const kakao = ["msg-kakao-pictures", "msg-kakao-messages", "msg-kakao-inventory"];
+    const mail = ["msg-email-attachments", "msg-email-containers", "msg-contacts", "msg-calendar"];
+    for (const ids of [kakao, mail]) {
+      const labels = ids.map((id) => messaging.find((n) => n.id === id)?.label ?? "");
+      expect(labels.every(Boolean)).toBe(true);
+      expect([...labels].sort((x, y) => x.localeCompare(y, "ko-KR"))).toEqual(labels);
+    }
+    expect(primaryNodes("kakaotalk-windows", "kakaotalk-app-inventory")[0]?.detail).toBe(true);
+    expect(primaryNodes("email", "email-container-inventory")[0]?.detail).toBe(true);
+    expect(artifactTypeLabel("kakaotalk-message")).toBe("카카오톡(Windows) 메시지");
+    expect(artifactTypeLabel("calendar-event")).toBe("일정(약속)");
   });
 
   it("labels crash dumps, kakaotalk traces and ETL apart from Volatility / EVTX", () => {

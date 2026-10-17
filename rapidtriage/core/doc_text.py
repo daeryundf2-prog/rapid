@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
+from .aes_cbc import aes_cbc_decrypt
 from .safe_xml import safe_xml_fromstring
 
 __all__ = [
@@ -862,117 +863,13 @@ def _rc4(key: bytes, data: bytes) -> bytes:
     return bytes(out)
 
 
-def _aes_tables() -> tuple[list[int], list[int], tuple[list[int], list[int], list[int], list[int]]]:
-    sbox = [0] * 256
-    inverse = [0] * 256
-    p = q = 1
-    while True:
-        # p *= 3, q /= 3 in GF(2^8)
-        p = p ^ ((p << 1) & 0xFF) ^ (0x1B if p & 0x80 else 0)
-        q ^= q << 1
-        q ^= q << 2
-        q ^= q << 4
-        q &= 0xFF
-        if q & 0x80:
-            q ^= 0x09
-        value = q ^ (q << 1 | q >> 7) ^ (q << 2 | q >> 6) ^ (q << 3 | q >> 5) ^ (q << 4 | q >> 4)
-        value = (value ^ 0x63) & 0xFF
-        sbox[p] = value
-        inverse[value] = p
-        if p == 1:
-            break
-    sbox[0] = 0x63
-    inverse[0x63] = 0
-
-    def mul(a: int, b: int) -> int:
-        result = 0
-        while b:
-            if b & 1:
-                result ^= a
-            a = ((a << 1) ^ 0x1B) & 0xFF if a & 0x80 else a << 1
-            b >>= 1
-        return result
-
-    td0 = [0] * 256
-    for index in range(256):
-        s = inverse[index]
-        td0[index] = (mul(s, 14) << 24) | (mul(s, 9) << 16) | (mul(s, 13) << 8) | mul(s, 11)
-    td1 = [((value >> 8) | (value << 24)) & 0xFFFFFFFF for value in td0]
-    td2 = [((value >> 16) | (value << 16)) & 0xFFFFFFFF for value in td0]
-    td3 = [((value >> 24) | (value << 8)) & 0xFFFFFFFF for value in td0]
-    return sbox, inverse, (td0, td1, td2, td3)
-
-
-_AES_TABLES: tuple | None = None
-
-
-def _aes_decrypt_round_keys(key: bytes) -> list[list[int]]:
-    global _AES_TABLES
-    if _AES_TABLES is None:
-        _AES_TABLES = _aes_tables()
-    sbox, _inverse, (td0, td1, td2, td3) = _AES_TABLES
-    nk = len(key) // 4
-    rounds = nk + 6
-    words = [int.from_bytes(key[4 * i : 4 * i + 4], "big") for i in range(nk)]
-    rcon = 1
-    for i in range(nk, 4 * (rounds + 1)):
-        temp = words[i - 1]
-        if i % nk == 0:
-            temp = ((temp << 8) | (temp >> 24)) & 0xFFFFFFFF
-            temp = (sbox[temp >> 24] << 24) | (sbox[(temp >> 16) & 0xFF] << 16) | (sbox[(temp >> 8) & 0xFF] << 8) | sbox[temp & 0xFF]
-            temp ^= rcon << 24
-            rcon = ((rcon << 1) ^ 0x1B) & 0xFF if rcon & 0x80 else rcon << 1
-        elif nk > 6 and i % nk == 4:
-            temp = (sbox[temp >> 24] << 24) | (sbox[(temp >> 16) & 0xFF] << 16) | (sbox[(temp >> 8) & 0xFF] << 8) | sbox[temp & 0xFF]
-        words.append(words[i - nk] ^ temp)
-    round_keys = [words[4 * r : 4 * r + 4] for r in range(rounds + 1)]
-    round_keys.reverse()
-    # Equivalent inverse cipher: InvMixColumns on the middle round keys.
-    for r in range(1, rounds):
-        round_keys[r] = [
-            td0[sbox[word >> 24]] ^ td1[sbox[(word >> 16) & 0xFF]] ^ td2[sbox[(word >> 8) & 0xFF]] ^ td3[sbox[word & 0xFF]]
-            for word in round_keys[r]
-        ]
-    return round_keys
-
-
 def _aes_cbc_decrypt(key: bytes, data: bytes) -> bytes:
     """AES-CBC with the IV in the first block and PKCS#5 padding (PDF AESV2/V3)."""
     if len(data) < 32 or len(data) % 16:
         data = data[: len(data) - len(data) % 16]
         if len(data) < 32:
             return b""
-    round_keys = _aes_decrypt_round_keys(key)
-    _sbox, inverse, (td0, td1, td2, td3) = _AES_TABLES  # type: ignore[misc]
-    rounds = len(round_keys) - 1
-    out = bytearray()
-    previous = data[:16]
-    for offset in range(16, len(data), 16):
-        block = data[offset : offset + 16]
-        k = round_keys[0]
-        s0 = int.from_bytes(block[0:4], "big") ^ k[0]
-        s1 = int.from_bytes(block[4:8], "big") ^ k[1]
-        s2 = int.from_bytes(block[8:12], "big") ^ k[2]
-        s3 = int.from_bytes(block[12:16], "big") ^ k[3]
-        for r in range(1, rounds):
-            k = round_keys[r]
-            t0 = td0[s0 >> 24] ^ td1[(s3 >> 16) & 0xFF] ^ td2[(s2 >> 8) & 0xFF] ^ td3[s1 & 0xFF] ^ k[0]
-            t1 = td0[s1 >> 24] ^ td1[(s0 >> 16) & 0xFF] ^ td2[(s3 >> 8) & 0xFF] ^ td3[s2 & 0xFF] ^ k[1]
-            t2 = td0[s2 >> 24] ^ td1[(s1 >> 16) & 0xFF] ^ td2[(s0 >> 8) & 0xFF] ^ td3[s3 & 0xFF] ^ k[2]
-            t3 = td0[s3 >> 24] ^ td1[(s2 >> 16) & 0xFF] ^ td2[(s1 >> 8) & 0xFF] ^ td3[s0 & 0xFF] ^ k[3]
-            s0, s1, s2, s3 = t0, t1, t2, t3
-        k = round_keys[rounds]
-        plain = bytearray(16)
-        for index, (state, a, b, c) in enumerate(((s0, s3, s2, s1), (s1, s0, s3, s2), (s2, s1, s0, s3), (s3, s2, s1, s0))):
-            word = (
-                (inverse[state >> 24] << 24)
-                | (inverse[(a >> 16) & 0xFF] << 16)
-                | (inverse[(b >> 8) & 0xFF] << 8)
-                | inverse[c & 0xFF]
-            ) ^ k[index]
-            plain[4 * index : 4 * index + 4] = word.to_bytes(4, "big")
-        out += bytes(x ^ y for x, y in zip(plain, previous))
-        previous = block
+    out = bytearray(aes_cbc_decrypt(key, data[:16], data[16:]))
     pad = out[-1] if out else 0
     if 1 <= pad <= 16 and out[-pad:] == bytes([pad]) * pad:
         del out[-pad:]

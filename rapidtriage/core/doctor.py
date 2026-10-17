@@ -77,6 +77,7 @@ def run_doctor(
         check_app_data_dir(data_dir, write_probe=write_probe),
         check_tesseract(tool_resolver),
         check_e01_tools(tool_resolver),
+        check_email_tools(tool_resolver),
     ]
     if include_port_check:
         checks.append(check_port_available(host, port))
@@ -263,6 +264,30 @@ def check_e01_tools(tool_resolver: ToolResolver) -> DoctorCheck:
         category="evidence-image",
         status=OK,
         summary="E01 direct extraction tools are available.",
+        details=details,
+    )
+
+
+def check_email_tools(tool_resolver: ToolResolver) -> DoctorCheck:
+    """PST/OST normalisation (r2 M2): libpff ``pffexport`` or libpst ``readpst`` on PATH."""
+    tools = ("pffexport", "readpst")
+    resolved = {tool: tool_resolver(tool) for tool in tools}
+    available = [tool for tool, path in resolved.items() if path is not None]
+    details = {"tools": resolved, "available": available}
+    if not available:
+        return DoctorCheck(
+            name="tools:email-pst",
+            category="email",
+            status=WARN,
+            summary="PST/OST 도구 없음: pffexport·readpst가 없어 Outlook 메일함은 컨테이너 인벤토리만 만듭니다.",
+            details=details,
+            remediation="Install libpff (pffexport) or libpst (readpst) and put it on PATH to turn PST/OST files into message, appointment, contact and attachment rows.",
+        )
+    return DoctorCheck(
+        name="tools:email-pst",
+        category="email",
+        status=OK,
+        summary=f"PST/OST 도구 사용 가능: {', '.join(available)}",
         details=details,
     )
 
