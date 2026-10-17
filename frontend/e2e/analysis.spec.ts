@@ -159,8 +159,11 @@ test("Q-IA-1 / review 16–17: Alt+n switches stage with focus on the panel head
   await expect(page).toHaveURL(new RegExp(`#/case/${runId}/explore/files`));
 
   // U-F7: empty families are hidden by default; show them so 침해사고 › 웹셸 is listed either way.
+  // The toggle appears only once /tree, the run summary and the analysis list have settled
+  // (so its count is final), so wait for it instead of skipping when it is not there yet.
   const showEmpty = page.getByTestId("tree-empty-toggle");
-  if ((await showEmpty.count()) && (await showEmpty.getAttribute("aria-pressed")) === "false") {
+  await showEmpty.waitFor({ state: "visible", timeout: 20_000 });
+  if ((await showEmpty.getAttribute("aria-pressed")) === "false") {
     await showEmpty.click();
   }
   const incident = page.getByRole("treeitem", { name: /^침해사고/ });
