@@ -2,6 +2,7 @@
 import { act, cleanup, configure, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetArtifactCountsCache } from "../../api/collections";
+import { EMPTY_CATALOG_FOR_TESTS, setCatalog } from "../flags/catalog";
 import { useGridLocalStore } from "./adapter";
 import { fieldColumnsStorageKey } from "./columns/fieldColumns";
 import { DataGrid, SORT_COLUMN_REASON, SORT_KIND_REASON } from "./DataGrid";
@@ -37,6 +38,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  setCatalog(null);
   restoreLayout();
   vi.unstubAllGlobals();
   vi.useRealTimers();
@@ -53,7 +55,7 @@ const header = (text: string) =>
 const hasHeader = (text: string) =>
   screen.getAllByRole("columnheader").some((h) => within(h).queryByRole("button", { name: text }));
 const picker = () => within(screen.getByRole("group", { name: "레코드 필드 추가" }));
-const titleOf = (i: number) => within(rowAt(i)).getAllByRole("gridcell")[1]?.textContent ?? "";
+const titleOf = (i: number) => rowAt(i).querySelector('[data-col="title"]')?.textContent ?? "";
 const status = () => screen.getByTestId("grid-sort-status");
 /** Advance the fake clock and flush promises (quick mock responses settle without real time). */
 const tick = (ms: number) =>
@@ -171,7 +173,8 @@ describe("artifacts header sort (server, whole kind)", () => {
   it("artifacts without one kind: every header explains that a kind must be chosen", async () => {
     useGridLocalStore.setState((s) => ({ route: { ...s.route, collection: { id: "artifacts" } } }));
     await renderArtifacts();
-    const button = within(header("시각")).getByRole("button");
+    // Mixed-family layout (U-F8): 항목 still sorts only inside one kind.
+    const button = within(header("항목")).getByRole("button");
     expect(button.getAttribute("aria-disabled")).toBe("true");
     expect(button.getAttribute("data-disabled-reason")).toBe(SORT_KIND_REASON);
     expect(screen.queryByRole("button", { name: "열 설정" })).toBeTruthy();
@@ -316,7 +319,7 @@ describe("record-field columns (열 설정 › 레코드 필드 추가)", () => 
     await renderArtifacts();
     await waitFor(() => expect(useGridLocalStore.getState().route.cols).toEqual(["details.volume_serial"]));
     expect(header("volume_serial")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "열 설정" }));
+    fireEvent.click(screen.getByRole("button", { name: /^조건/ }));
     fireEvent.change(screen.getByRole("combobox", { name: "열 구성" }), { target: { value: "compact" } });
     expect(header("volume_serial")).toBeTruthy();
     fireEvent.change(screen.getByRole("combobox", { name: "열 구성" }), { target: { value: "source" } });
@@ -422,6 +425,9 @@ describe("artifact-columns review fixes", () => {
   });
 
   it("eventlog 메시지 sorts on the key the cells show: message when present, else raw event_message", async () => {
+    // KIND_COLUMNS layout: a catalogue that does not claim eventlog (the catalogue layout keeps
+    // the same 메시지 column, off by default — artifactColumns.test).
+    setCatalog(EMPTY_CATALOG_FOR_TESTS, "server");
     useGridLocalStore.setState((s) => ({
       route: { ...s.route, collection: { id: "artifacts", kind: "eventlog" } },
     }));

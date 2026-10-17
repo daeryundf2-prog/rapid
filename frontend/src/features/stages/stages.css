@@ -428,3 +428,11 @@
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
+
+/* 특이사항 shortcuts without a flag set (U-F4): say why there is nothing to open. */
+.stage-note {
+  margin: 0;
+  padding: 0 var(--space-2);
+  color: var(--text-subtle);
+  font-size: var(--fs-aux);
+}

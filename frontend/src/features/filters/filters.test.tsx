@@ -160,19 +160,19 @@ describe("chips", () => {
 
   it("FilterBar adds a status chip, removes it, and resets", () => {
     render(<FilterBar filterRef={{ current: null }} query="" onQuery={() => {}} onReturnToGrid={() => {}} />);
-    fireEvent.click(screen.getByRole("button", { name: /^필터/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^조건/ }));
     fireEvent.click(screen.getByRole("button", { name: "상태 필터: 재검토" }));
     expect(useFilterStore.getState().filters.statuses).toEqual(["needs-review"]);
-    fireEvent.click(screen.getByRole("button", { name: /상태 재검토 필터 제거/ }));
+    fireEvent.click(screen.getByRole("button", { name: /상태 재검토 조건 제거/ }));
     expect(useFilterStore.getState().filters.statuses).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "7일" }));
     expect(useFilterStore.getState().filters.from).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "필터 초기화" }));
+    fireEvent.click(screen.getByRole("button", { name: "조건 지우기" }));
     expect(useFilterStore.getState().filters.from).toBeUndefined();
   });
 });
 
-describe("one-line filter bar (visual-polish S1/S2)", () => {
+describe("조건 줄 (visual-polish S1/S2, viewer-families U-F1)", () => {
   const bar = (props: Partial<Parameters<typeof FilterBar>[0]> = {}) =>
     render(
       <FilterBar
@@ -189,11 +189,11 @@ describe("one-line filter bar (visual-polish S1/S2)", () => {
     const search = document.querySelector("search.filter-bar") as HTMLElement;
     // One line: search + 필터 button, no time inputs until the popover opens.
     expect(within(search).queryByLabelText("시작 시각")).toBeNull();
-    const trigger = screen.getByRole("button", { name: /^필터/ });
+    const trigger = screen.getByRole("button", { name: /^조건/ });
     expect(trigger.getAttribute("aria-haspopup")).toBe("dialog");
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(trigger);
-    const popover = screen.getByRole("dialog", { name: "필터 조건" });
+    const popover = screen.getByRole("dialog", { name: "조건" });
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
     expect(trigger.getAttribute("aria-controls")).toBe(popover.id);
     for (const group of ["시간 범위", "아티팩트 유형", "태그·상태"])
@@ -206,44 +206,46 @@ describe("one-line filter bar (visual-polish S1/S2)", () => {
     fireEvent.click(within(popover).getByRole("button", { name: "30일" }));
     // The trigger counts the applied conditions; each is a removable chip.
     expect(trigger.textContent).toContain("2");
-    const chips = screen.getByRole("list", { name: "적용된 필터" });
+    const chips = screen.getByRole("list", { name: "적용된 조건" });
     expect(within(chips).getAllByRole("listitem")).toHaveLength(2);
   });
 
   it("popover keyboard: opening focuses the heading (not 오늘), Tab cycles inside, Esc closes and returns focus", () => {
     bar();
-    const trigger = screen.getByRole("button", { name: /^필터/ });
+    const trigger = screen.getByRole("button", { name: /^조건/ });
     trigger.focus();
     fireEvent.click(trigger);
-    const popover = screen.getByRole("dialog", { name: "필터 조건" });
+    const popover = screen.getByRole("dialog", { name: "조건" });
     // Review #10: focus lands on the popover heading so the first preset is not pre-armed.
-    expect(document.activeElement).toBe(within(popover).getByRole("heading", { name: "필터 조건" }));
+    expect(document.activeElement).toBe(within(popover).getByRole("heading", { name: "조건" }));
     const first = within(popover).getByRole("button", { name: "오늘" });
-    const close = within(popover).getByRole("button", { name: /^적용/ });
+    const close = within(popover).getByRole("button", { name: /^닫기/ });
     close.focus();
     fireEvent.keyDown(close, { key: "Tab" });
     expect(document.activeElement).toBe(first);
     fireEvent.keyDown(first, { key: "Tab", shiftKey: true });
     expect(document.activeElement).toBe(close);
     fireEvent.keyDown(close, { key: "Escape" });
-    expect(screen.queryByRole("dialog", { name: "필터 조건" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "조건" })).toBeNull();
     expect(document.activeElement).toBe(trigger);
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
   });
 
   it("a pointer press outside closes the popover without moving focus", () => {
     bar();
-    fireEvent.click(screen.getByRole("button", { name: /^필터/ }));
-    expect(screen.getByRole("dialog", { name: "필터 조건" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /^조건/ }));
+    expect(screen.getByRole("dialog", { name: "조건" })).toBeTruthy();
     fireEvent.pointerDown(document.body);
-    expect(screen.queryByRole("dialog", { name: "필터 조건" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "조건" })).toBeNull();
   });
 
   it("검토 toolbar: review status + tag + search, no time range or 필터 popover", () => {
     const onReviewStatus = vi.fn();
     bar({ variant: "review", reviewStatus: "relevant", onReviewStatus });
-    expect(screen.queryByRole("button", { name: /^필터/ })).toBeNull();
+    // The 조건 panel of 검토 holds only 표시 settings: no time range (S2).
+    fireEvent.click(screen.getByRole("button", { name: /^조건/ }));
     expect(screen.queryByLabelText("시작 시각")).toBeNull();
+    fireEvent.keyDown(screen.getByRole("dialog", { name: "조건" }), { key: "Escape" });
     const status = screen.getByRole("combobox", { name: "리뷰 상태" }) as HTMLSelectElement;
     expect(status.value).toBe("relevant");
     fireEvent.change(status, { target: { value: "excluded" } });
@@ -254,19 +256,18 @@ describe("one-line filter bar (visual-polish S1/S2)", () => {
     fireEvent.change(tag, { target: { value: "악성" } });
     fireEvent.keyDown(tag, { key: "Enter" });
     expect(useFilterStore.getState().filters.tags).toEqual(["악성"]);
-    expect(screen.getByRole("button", { name: "태그 악성 필터 제거" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "태그 악성 조건 제거" })).toBeTruthy();
   });
 
   it("보고 toolbar: export kind + search; the kind is the type filter, shown as 종류", () => {
     bar({ variant: "report", kindOptions: ["보고서", "아티팩트"] });
-    expect(screen.queryByRole("button", { name: /^필터/ })).toBeNull();
     expect(screen.queryByRole("combobox", { name: "리뷰 상태" })).toBeNull();
     const kind = screen.getByRole("combobox", { name: "종류" }) as HTMLSelectElement;
     expect(Array.from(kind.options).map((o) => o.textContent)).toEqual(["전체", "보고서", "아티팩트"]);
     fireEvent.change(kind, { target: { value: "아티팩트" } });
     expect(useFilterStore.getState().filters.types).toEqual(["아티팩트"]);
     expect(useAppStore.getState().route.types).toEqual(["아티팩트"]);
-    expect(screen.getByRole("button", { name: "종류 아티팩트 필터 제거" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "종류 아티팩트 조건 제거" })).toBeTruthy();
     fireEvent.change(kind, { target: { value: "" } });
     expect(useFilterStore.getState().filters.types).toEqual([]);
   });

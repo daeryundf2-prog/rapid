@@ -169,7 +169,7 @@ export function timelineWindowRoute(
 }
 
 /** `artifacts_<kind>` + row index → the artifact row route (viewer opens it). */
-function artifactRowRoute(runId: string, output: unknown, rowIndex: unknown): Route | null {
+export function artifactRowRoute(runId: string, output: unknown, rowIndex: unknown): Route | null {
   const name = scalar(output)
     .replace(/^rapidtriage-/, "")
     .replace(/\.jsonl?$/, "");

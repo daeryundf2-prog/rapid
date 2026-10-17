@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import unicodedata
-from collections.abc import Collection, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from pathlib import Path
 
 from ...core.artifact_profiles import payload_record_count
@@ -144,8 +144,14 @@ def filter_across_kinds(
     limit: int,
     after: str | None = None,
     scan_cap: int | None = None,
+    rows_for: Callable[[str, dict[str, object], Path, int], Iterable[tuple[int, dict[str, object]]]] | None = None,
+    extra: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Page filtered rows across kinds (``sources`` order) as one collection.
+
+    ``rows_for(kind, payload, path, start)`` yields a kind's candidate rows
+    from record ``start`` on (default: every record; the flag filter passes
+    only flagged rows); ``extra`` is merged into ``cross_kind``.
 
     Without ``after`` the first ``offset`` matches are skipped (rescanning
     from the first kind); ``after`` (the previous page's ``next_after``)
@@ -177,7 +183,12 @@ def filter_across_kinds(
     for position in range(start_pos, len(sources)):
         kind, payload, payload_path = sources[position]
         first = start_index if position == start_pos else 0
-        for record_index, row in iter_artifact_records(payload, payload_path=payload_path, start=first):
+        kind_rows = (
+            rows_for(kind, payload, payload_path, first)
+            if rows_for is not None
+            else iter_artifact_records(payload, payload_path=payload_path, start=first)
+        )
+        for record_index, row in kind_rows:
             if scanned >= scan_cap:
                 exhausted = False
                 break
@@ -218,6 +229,7 @@ def filter_across_kinds(
             "artifact_types": sorted(wanted_types) if wanted_types is not None else None,
             "scanned": scanned,
             "truncated": not exhausted and not has_more,
+            **dict(extra or {}),
         },
     }
 

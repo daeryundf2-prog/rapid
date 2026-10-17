@@ -50,8 +50,17 @@ describe("column menu (review B2-6 + AXIOM density nit)", () => {
   it("출처 중심 shows 시각, and 항목 (not the first column) is the locked one", async () => {
     const { artifactColumnsForKind } = await import("./columns/artifacts");
     const { lockedColumnId, presetColumnIds } = await import("./columns");
+    // Every artifact = the mixed-family layout (U-F8): 유형 · 항목 · 특이사항 · 4 summary columns.
     const columns = artifactColumnsForKind(undefined);
-    expect(columns[0]?.id).toBe("timestamp");
+    expect(columns.slice(0, 7).map((c) => c.id)).toEqual([
+      "type",
+      "title",
+      "flags",
+      "sum:main",
+      "sum:support",
+      "sum:extra",
+      "sum:time",
+    ]);
     expect(presetColumnIds(columns, "source")).toContain("timestamp");
     expect(lockedColumnId(columns)).toBe("title");
   });
@@ -61,7 +70,7 @@ describe("column menu (review B2-6 + AXIOM density nit)", () => {
     installFetch({ "/files": filesHandler(20) });
     renderWithClient(<DataGrid />);
     await waitFor(() => expect(screen.queryAllByRole("row").some((r) => r.dataset.index)).toBe(true));
-    act(() => screen.getByTestId("grid-column-menu").click());
+    act(() => screen.getByTestId("filter-popover-button").click());
     const presetSelect = screen.getByLabelText("열 구성") as HTMLSelectElement;
     const { fireEvent } = await import("@testing-library/react");
     fireEvent.change(presetSelect, { target: { value: "axiom" } });

@@ -26,6 +26,9 @@ classifiers = [
 dependencies = [
   "fastapi>=0.110",
   "uvicorn[standard]>=0.27",
+  # triage-flags catalog (rapidtriage/core/triage_rules/catalog/*.yaml) is YAML;
+  # imported lazily so the CLI still imports without it.
+  "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]

@@ -91,6 +91,7 @@ def build_run_summary(
     safety: Mapping[str, object],
     rule_set: RuleSet | None = None,
     source: Mapping[str, object] | None = None,
+    extra_steps: Sequence[Mapping[str, object]] = (),
 ) -> dict[str, object]:
     provider_counts = {
         str(provider["name"]): manifest_provider_artifact_count(provider)
@@ -131,6 +132,8 @@ def build_run_summary(
         outputs=outputs,
         reused_outputs=reused_outputs,
     )
+    # Steps that run after the outputs exist (e.g. ``triage-flags``), already shaped as step rows.
+    step_rows.extend(dict(step) for step in extra_steps)
     silent_failure = build_silent_failure_report(
         root=root,
         docs_payload=docs_payload,

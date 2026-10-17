@@ -49,6 +49,11 @@ const openColumnMenu = () => {
   const button = screen.getByRole("button", { name: "열 설정" });
   if (button.getAttribute("aria-expanded") !== "true") fireEvent.click(button);
 };
+/** Opens the 조건 panel (viewer-families U-F1: 열 구성 / 밀도 moved there). */
+const openConditions = () => {
+  const button = screen.getByRole("button", { name: /^조건/ });
+  if (button.getAttribute("aria-expanded") !== "true") fireEvent.click(button);
+};
 const headerCell = (col: string) =>
   screen.getAllByRole("columnheader").find((h) => h.getAttribute("data-col") === col) as HTMLElement;
 
@@ -101,7 +106,7 @@ describe("files NTFS columns (plan analysis-workbench-p1 U-P1-3)", () => {
     offCommands = registerAnalysisCommands(new QueryClient());
     renderWithClient(<DataGrid />);
     await waitFor(() => expect(dataRows()).toHaveLength(3));
-    openColumnMenu();
+    openConditions();
     fireEvent.change(screen.getByRole("combobox", { name: "열 구성" }), { target: { value: "source" } });
     for (const [col, name] of [
       ["ntfsCreated", "NTFS 생성"],
@@ -131,7 +136,7 @@ describe("files NTFS columns (plan analysis-workbench-p1 U-P1-3)", () => {
     installFetch({ "/files": filesPage(3, { analysis_id: "ntfs-123456789", matched: 1, total: 3 }, true) });
     renderWithClient(<DataGrid initialPreset="source" />);
     await waitFor(() => expect(dataRows()).toHaveLength(3));
-    openColumnMenu();
+    openConditions();
     fireEvent.change(screen.getByRole("combobox", { name: "열 구성" }), { target: { value: "source" } });
     expect(screen.getByTestId("grid-ntfs-status").textContent).toBe(
       "NTFS 메타: 이 페이지 1/3행 일치 (분석 ntfs-123)",
@@ -260,7 +265,7 @@ describe("column header filters (plan analysis-workbench-p1 U-P1-4)", () => {
     // The chip reads the Korean type name; the exact artifact_type stays on the element / tooltip.
     expect(typeCell?.textContent).toBe("웹 서버 로그");
     expect(typeCell?.getAttribute("data-type")).toBe("web-server-log");
-    expect(screen.getByRole("button", { name: "유형 web-server-log 필터 제거" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "유형 web-server-log 조건 제거" })).toBeTruthy();
   });
 
   it("analysis rows: 경로 column filter → path_contains on the rows request", async () => {

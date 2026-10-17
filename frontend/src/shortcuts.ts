@@ -170,6 +170,10 @@ export const KEY_DESCRIPTIONS: Record<keyof typeof KEY_MAP, string> = {
   stageExplore: "단계: 탐색",
   stageReview: "단계: 검토",
   stageReport: "단계: 보고",
+  conditions: "조건 패널 열기/닫기",
+  treeEmpty: "탐색 트리: 결과 없는 계열 표시/숨김",
+  viewerPopout: "뷰어를 새 창으로",
+  viewerModes: "뷰어 창에서 모드 전환 (1–8)",
 };
 
 /** Apple platform (review #14): only there does Ctrl+K read as the ⌘ glyph. */
@@ -213,7 +217,9 @@ export function keyBindingRows(): KeyBindingRow[] {
             c.shortcut &&
             /^\d$/.test(c.shortcut) &&
             c.shortcut >= (range[1] ?? "") &&
-            c.shortcut <= (range[2] ?? ""),
+            c.shortcut <= (range[2] ?? "") &&
+            // 1–5 (priority tags) and 1–8 (viewer window modes) live in different windows.
+            c.id.startsWith("popout.mode.") === (name === "viewerModes"),
         )
       : all.filter((c) => c.shortcut === normalizeShortcut(shortcut));
     return { name, shortcut, description: KEY_DESCRIPTIONS[name], commands: bound };

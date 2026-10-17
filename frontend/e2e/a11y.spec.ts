@@ -405,3 +405,31 @@ test("Q-A3: every visible control does something (request, URL/aria change, or d
   }
   expect(unresponsive, `unresponsive controls:\n${unresponsive.join("\n")}`).toEqual([]);
 });
+
+test("viewer-families: the viewer window, the 조건 panel and shown empty families pass the rules", async ({
+  page,
+  context,
+}) => {
+  await openRoute(page, "explore/files");
+  // Empty families shown dimmed with their reason (U-F7).
+  await page.locator("body").press("t");
+  await expect(page.getByTestId("tree-empty-toggle")).toHaveAttribute("aria-pressed", "true");
+  expect(await audit(page)).toEqual([]);
+  await page.locator("body").press("t");
+  // 조건 panel open (U-F1).
+  await page.getByTestId("filter-popover-button").click();
+  await expect(page.getByRole("dialog", { name: "조건" })).toBeVisible();
+  expect(await audit(page)).toEqual([]);
+  await page.keyboard.press("Escape");
+  // Viewer window (U-F2): one page, one landmark set; it has no skip link (a single region).
+  await page.locator('[role="grid"] [role="row"][aria-rowindex="2"]').first().click();
+  const popupPromise = context.waitForEvent("page");
+  await page.keyboard.press("Control+Shift+V");
+  const popup = await popupPromise;
+  await expect(popup.getByRole("region", { name: "원본 뷰어" })).toBeVisible();
+  await expect(popup).toHaveTitle(/^뷰어 — /);
+  const violations = (await audit(popup)).filter((v) => !v.rule.startsWith("skip-link"));
+  expect(violations).toEqual([]);
+  expect(await audit(page)).toEqual([]);
+  await popup.close();
+});

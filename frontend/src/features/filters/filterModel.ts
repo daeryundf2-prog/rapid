@@ -22,6 +22,8 @@ import type {
 } from "../../contracts/collection";
 import type { Route } from "../../router";
 import { parseInstant } from "../../utils/time";
+import { type Grade, isGrade } from "../flags/catalog";
+import { rowMatchesFlagFilter, ruleLabel } from "../flags/flags";
 
 export interface FilterState {
   /** Inclusive lower bound (ISO or `YYYY-MM-DDTHH:mm`). */
@@ -37,6 +39,10 @@ export interface FilterState {
   notes?: boolean;
   /** Column header filters (URL `cf=`). */
   columns: ColumnFilter[];
+  /** 특이사항 rules (URL `flag=`, repeated; any of them). */
+  flags?: string[];
+  /** 특이사항 grade at least (URL `flag_grade=A|B|C`). */
+  flagGrade?: Grade;
 }
 
 export const EMPTY_FILTERS: FilterState = Object.freeze({
@@ -63,6 +69,8 @@ export function filtersFromRoute(route: Route): FilterState {
     path: route.path ?? "",
     ...(route.notes ? { notes: true } : {}),
     columns: route.cf ?? [],
+    ...(route.flags?.length ? { flags: route.flags } : {}),
+    ...(route.flagGrade ? { flagGrade: route.flagGrade } : {}),
   };
 }
 
@@ -78,6 +86,8 @@ export function filtersToRoutePatch(filters: FilterState): Partial<Route> {
     path: filters.path || undefined,
     notes: filters.notes ? true : undefined,
     cf: filters.columns?.length ? filters.columns : undefined,
+    flags: filters.flags?.length ? filters.flags : undefined,
+    flagGrade: filters.flagGrade && isGrade(filters.flagGrade) ? filters.flagGrade : undefined,
   };
 }
 
@@ -95,6 +105,8 @@ export function filtersEqual(a: FilterState, b: FilterState): boolean {
     a.types.join() === b.types.join() &&
     a.tags.join() === b.tags.join() &&
     a.ext.join() === b.ext.join() &&
+    (a.flags ?? []).join() === (b.flags ?? []).join() &&
+    (a.flagGrade ?? "") === (b.flagGrade ?? "") &&
     columnsKey(a.columns) === columnsKey(b.columns)
   );
 }
@@ -150,8 +162,17 @@ export function activePreset(filters: FilterState, now: Date = new Date()): Time
 
 // --- partitioning -----------------------------------------------------------
 
+/** Collections whose API filters 특이사항 (`flag=` / `flag_grade=`, plan §3.1 조인). */
+export const FLAG_SERVER_COLLECTIONS: ReadonlySet<string> = new Set(["artifacts", "files", "analysis"]);
+
 export interface FilterPlan {
-  server: { path?: string; extension?: string[]; artifactTypes?: string[] };
+  server: {
+    path?: string;
+    extension?: string[];
+    artifactTypes?: string[];
+    flags?: string[];
+    flagGrade?: Grade;
+  };
   /** Column filters the client applies to loaded rows (the rest went to the API). */
   clientColumns: ColumnFilter[];
   /** Column filters the API applies (경로 → path_contains, 유형 → artifact_type, 확장자 → extension). */
@@ -194,6 +215,13 @@ export function partitionFilters(
   if (filters.statuses.length) clientLabels.push("상태");
   if (filters.tags.length) clientLabels.push("태그");
   if (filters.notes) clientLabels.push("메모 있음");
+  if (filters.flags?.length || filters.flagGrade) {
+    if (FLAG_SERVER_COLLECTIONS.has(ref.id)) {
+      if (filters.flags?.length) server.flags = [...filters.flags];
+      if (filters.flagGrade) server.flagGrade = filters.flagGrade;
+      serverLabels.push("특이사항");
+    } else clientLabels.push("특이사항");
+  }
 
   if (filters.types.length) {
     if (ref.id === "artifacts") {
@@ -255,6 +283,8 @@ export function clientOnlyFilters(filters: FilterState, plan: FilterPlan): Filte
     ext: plan.server.extension ? [] : filters.ext,
     path: plan.server.path && filters.path === plan.server.path ? "" : filters.path,
     columns: plan.clientColumns,
+    flags: plan.server.flags ? [] : filters.flags,
+    flagGrade: plan.server.flagGrade || plan.server.flags ? undefined : filters.flagGrade,
   };
 }
 
@@ -272,6 +302,8 @@ export function applyFiltersToQuery(
   if (plan.server.artifactTypes) next.artifactTypes = plan.server.artifactTypes;
   if (plan.server.path) next.pathContains = plan.server.path;
   if (plan.server.extension) next.extension = plan.server.extension;
+  if (plan.server.flags) next.flags = plan.server.flags;
+  if (plan.server.flagGrade) next.flagGrade = plan.server.flagGrade;
   return next;
 }
 
@@ -322,6 +354,7 @@ export function rowMatchesFilters(row: GridRow, filters: FilterState): boolean {
   if (filters.ext.length && !filters.ext.includes(rowExtension(row))) return false;
   if (filters.path && !(row.sourcePath ?? "").toLowerCase().includes(filters.path.toLowerCase()))
     return false;
+  if (!rowMatchesFlagFilter(row, filters.flags ?? [], filters.flagGrade)) return false;
   return true;
 }
 
@@ -331,7 +364,7 @@ export function applyClientFilters(rows: GridRow[], filters: FilterState): GridR
 
 // --- chips -------------------------------------------------------------------
 
-export type FilterKey = "range" | "status" | "type" | "tag" | "ext" | "path" | "note";
+export type FilterKey = "range" | "status" | "type" | "tag" | "ext" | "path" | "note" | "flag" | "flagGrade";
 
 export interface FilterChip {
   key: FilterKey;
@@ -354,6 +387,9 @@ export function activeChips(filters: FilterState, statusLabel: (s: ReviewStatus)
   for (const e of filters.ext) chips.push({ key: "ext", value: e, label: `확장자 .${e}` });
   if (filters.path) chips.push({ key: "path", label: `경로 ${filters.path}` });
   if (filters.notes) chips.push({ key: "note", label: "메모 있음" });
+  if (filters.flagGrade) chips.push({ key: "flagGrade", label: `특이사항 ${filters.flagGrade} 이상` });
+  for (const id of filters.flags ?? [])
+    chips.push({ key: "flag", value: id, label: `특이사항 ${ruleLabel(id)}` });
   return chips;
 }
 
@@ -373,5 +409,9 @@ export function removeChip(filters: FilterState, chip: FilterChip): FilterState 
       return { ...filters, path: "" };
     case "note":
       return { ...filters, notes: false };
+    case "flag":
+      return { ...filters, flags: (filters.flags ?? []).filter((id) => id !== chip.value) };
+    case "flagGrade":
+      return { ...filters, flagGrade: undefined };
   }
 }

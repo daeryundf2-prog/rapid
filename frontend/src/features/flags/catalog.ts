@@ -1,0 +1,331 @@
+/**
+ * Family catalogue (viewer-families plan §3.1/§3.2): `GET /api/meta/families` → per family the
+ * core / auxiliary grid columns and the triage rules (특이사항 지표). The console starts with the
+ * bundled fallback (families.fallback.json, generated from scripts/families-mock.mjs) and swaps in
+ * the server's catalogue once it loads; an older server without the endpoint keeps the fallback.
+ *
+ * Contract (D1):
+ *   { version, families: [{ id, label, types, kinds?, prefixes?, core_columns, aux_columns, rules }],
+ *     rules: [{ id, family, grade, label_ko, rationale_ko, false_positive_ko, sources, version,
+ *               status, params }] }
+ *   column: { key, label, format?, ts_kind?, width?, aliases? }
+ */
+
+import { useQuery } from "@tanstack/react-query";
+import { useEffect, useSyncExternalStore } from "react";
+import { api } from "../../api/client";
+import fallbackJson from "./families.fallback.json";
+
+export type Grade = "A" | "B" | "C";
+export const GRADES: readonly Grade[] = ["A", "B", "C"];
+
+export interface CatalogColumn {
+  key: string;
+  label: string;
+  format?: string;
+  ts_kind?: string;
+  width?: number;
+  /** Other keys of the same fact, tried in order ("event_data.X" reads EVTX EventData). */
+  aliases?: string[];
+}
+
+export interface CatalogFamily {
+  id: string;
+  label: string;
+  types: string[];
+  kinds?: string[];
+  prefixes?: string[];
+  /** Type suffixes ("-string-candidate", "-summary"): checked before exact types and prefixes. */
+  suffixes?: string[];
+  core_columns: CatalogColumn[];
+  aux_columns: CatalogColumn[];
+  rules: string[];
+}
+
+export interface CatalogRule {
+  id: string;
+  family: string;
+  grade: Grade;
+  label_ko: string;
+  rationale_ko: string;
+  false_positive_ko: string;
+  sources: string[];
+  version: string | number;
+  status: "verified" | "provisional";
+  params: Record<string, unknown>;
+}
+
+export interface FamilyCatalog {
+  version: string;
+  families: CatalogFamily[];
+  rules: CatalogRule[];
+}
+
+/**
+ * Korean names for catalogue labels that arrive as a bare English token (older or partly
+ * translated YAML): every label the console shows is Korean. A label that already contains Hangul
+ * is kept as written; an unknown English one is shown as-is (the report lists them for the YAML).
+ */
+export const LABEL_KO: Readonly<Record<string, string>> = {
+  SRUM: "시스템 자원 사용(SRUM)",
+  "MFT/USN": "MFT/USN 메타데이터",
+  "Zone.Identifier": "다운로드 출처 표식(Zone.Identifier)",
+  Defender: "Defender 백신 로그",
+  AppID: "앱 ID",
+  ControlSet: "컨트롤 세트",
+  "Secure/HttpOnly/SameSite": "쿠키 보안 속성(Secure/HttpOnly/SameSite)",
+  "Takeout GPS ≠ EXIF GPS": "Takeout 위치 ≠ EXIF 위치",
+  SID: "보안 식별자(SID)",
+  URL: "URL 주소",
+  PID: "프로세스 ID",
+  GUID: "GUID 식별자",
+};
+
+const HANGUL = /[가-힣]/;
+
+export function koreanLabel(label: string): string {
+  if (HANGUL.test(label)) return label;
+  return LABEL_KO[label.trim()] ?? label;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function strings(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string" && v !== "") : [];
+}
+
+export function isGrade(value: unknown): value is Grade {
+  return value === "A" || value === "B" || value === "C";
+}
+
+function column(raw: unknown): CatalogColumn | null {
+  if (!isRecord(raw) || typeof raw.key !== "string" || !raw.key) return null;
+  return {
+    key: raw.key,
+    label: koreanLabel(typeof raw.label === "string" && raw.label ? raw.label : raw.key),
+    ...(typeof raw.format === "string" ? { format: raw.format } : {}),
+    ...(typeof raw.ts_kind === "string" && raw.ts_kind ? { ts_kind: raw.ts_kind } : {}),
+    ...(typeof raw.width === "number" && raw.width > 0 ? { width: raw.width } : {}),
+    ...(strings(raw.aliases).length ? { aliases: strings(raw.aliases) } : {}),
+  };
+}
+
+/** Validate a catalogue payload; malformed entries are dropped, a payload without families is null. */
+export function normalizeCatalog(raw: unknown): FamilyCatalog | null {
+  if (!isRecord(raw) || !Array.isArray(raw.families)) return null;
+  const families: CatalogFamily[] = [];
+  for (const entry of raw.families) {
+    if (!isRecord(entry) || typeof entry.id !== "string" || !entry.id) continue;
+    families.push({
+      id: entry.id,
+      label: koreanLabel(typeof entry.label === "string" && entry.label ? entry.label : entry.id),
+      types: strings(entry.types),
+      ...(strings(entry.kinds).length ? { kinds: strings(entry.kinds) } : {}),
+      ...(strings(entry.prefixes).length ? { prefixes: strings(entry.prefixes) } : {}),
+      ...(strings(entry.suffixes).length ? { suffixes: strings(entry.suffixes) } : {}),
+      core_columns: (Array.isArray(entry.core_columns) ? entry.core_columns : [])
+        .map(column)
+        .filter((c): c is CatalogColumn => c !== null),
+      aux_columns: (Array.isArray(entry.aux_columns) ? entry.aux_columns : [])
+        .map(column)
+        .filter((c): c is CatalogColumn => c !== null),
+      rules: strings(entry.rules),
+    });
+  }
+  if (!families.length) return null;
+  const rules: CatalogRule[] = [];
+  for (const entry of Array.isArray(raw.rules) ? raw.rules : []) {
+    if (!isRecord(entry) || typeof entry.id !== "string" || !isGrade(entry.grade)) continue;
+    rules.push({
+      id: entry.id,
+      family: typeof entry.family === "string" ? entry.family : "",
+      grade: entry.grade,
+      label_ko: koreanLabel(typeof entry.label_ko === "string" && entry.label_ko ? entry.label_ko : entry.id),
+      rationale_ko: typeof entry.rationale_ko === "string" ? entry.rationale_ko : "",
+      false_positive_ko: typeof entry.false_positive_ko === "string" ? entry.false_positive_ko : "",
+      sources: strings(entry.sources),
+      version: typeof entry.version === "number" || typeof entry.version === "string" ? entry.version : "",
+      status: entry.status === "provisional" ? "provisional" : "verified",
+      params: isRecord(entry.params) ? entry.params : {},
+    });
+  }
+  return {
+    version: typeof raw.version === "string" ? raw.version : String(raw.version ?? ""),
+    families,
+    rules,
+  };
+}
+
+export const FALLBACK_CATALOG: FamilyCatalog = normalizeCatalog(fallbackJson) as FamilyCatalog;
+
+export type CatalogSource = "fallback" | "server";
+
+/** A catalogue that claims no family (tests of the KIND_COLUMNS fallback). */
+export const EMPTY_CATALOG_FOR_TESTS: FamilyCatalog = Object.freeze({
+  version: "empty",
+  families: [],
+  rules: [],
+});
+
+/** The catalogue `setCatalog(null)` returns to (tests pin it to the stable mock fixture). */
+let fallback: FamilyCatalog = FALLBACK_CATALOG;
+let active: FamilyCatalog = fallback;
+let source: CatalogSource = "fallback";
+const listeners = new Set<() => void>();
+let ruleIndex = new Map<string, CatalogRule>();
+let typeIndex = new Map<string, CatalogFamily>();
+
+function reindex(): void {
+  ruleIndex = new Map(active.rules.map((rule) => [rule.id, rule]));
+  typeIndex = new Map();
+  for (const family of active.families) for (const type of family.types) typeIndex.set(type, family);
+}
+reindex();
+
+/** The catalogue in effect (server once loaded, else the bundled fallback). */
+export function getCatalog(): FamilyCatalog {
+  return active;
+}
+
+export function getCatalogSource(): CatalogSource {
+  return source;
+}
+
+/** Install a catalogue (null = back to the bundled fallback). */
+export function setCatalog(next: FamilyCatalog | null, from: CatalogSource = "server"): void {
+  active = next ?? fallback;
+  source = next ? from : "fallback";
+  reindex();
+  for (const listener of listeners) listener();
+}
+
+/**
+ * Tests only (vitest setup): make `setCatalog(null)` return to a fixed catalogue (the families
+ * mock) so unit tests do not drift with the backend YAML.
+ */
+export function pinFallbackCatalogForTests(next: FamilyCatalog): void {
+  fallback = next;
+  setCatalog(null);
+}
+
+export function subscribeCatalog(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+export function useCatalog(): FamilyCatalog {
+  return useSyncExternalStore(subscribeCatalog, getCatalog, getCatalog);
+}
+
+export function ruleById(id: string): CatalogRule | undefined {
+  return ruleIndex.get(id);
+}
+
+/**
+ * Family of one artifact type, in the backend's order (`Catalog.family_for`): a suffix
+ * ("-string-candidate", "-summary"), the exact type, then the longest matching prefix.
+ */
+export function familyForType(type: string | null | undefined): CatalogFamily | undefined {
+  if (!type) return undefined;
+  for (const family of active.families) {
+    if (family.suffixes?.some((suffix) => type.endsWith(suffix))) return family;
+  }
+  const exact = typeIndex.get(type);
+  if (exact) return exact;
+  let best: { family: CatalogFamily; length: number } | undefined;
+  for (const family of active.families) {
+    for (const prefix of family.prefixes ?? []) {
+      if (type.startsWith(prefix) && (!best || prefix.length > best.length))
+        best = { family, length: prefix.length };
+    }
+  }
+  return best?.family;
+}
+
+/** The one family every type belongs to; undefined when they span families or one is unknown. */
+export function familyForTypes(types: readonly string[] | undefined): CatalogFamily | undefined {
+  if (!types?.length) return undefined;
+  const first = familyForType(types[0]);
+  if (!first) return undefined;
+  return types.every((type) => familyForType(type)?.id === first.id) ? first : undefined;
+}
+
+/** Rows per artifact type of each kind (`/tree` artifact_type_counts), for the majority rule. */
+const kindTypeCounts = new Map<string, Record<string, number>>();
+
+/**
+ * Record a kind's rows per artifact type (the grid does this from `/tree`). Returns true when the
+ * counts changed (the column layout then rebuilds).
+ */
+export function noteKindTypeCounts(kind: string, counts: Record<string, number> | undefined): boolean {
+  if (!counts) return false;
+  const before = kindTypeCounts.get(kind);
+  if (before && JSON.stringify(before) === JSON.stringify(counts)) return false;
+  kindTypeCounts.set(kind, { ...counts });
+  return true;
+}
+
+/** Share of a kind's rows the majority family must hold to give the kind its layout. */
+export const MAJORITY_SHARE = 0.5;
+
+/**
+ * Family of a whole artifact kind: the single family listing the kind; else (a kind the
+ * catalogue reaches only through its types, or a mixed kind) the family holding more than half of
+ * the kind's rows by artifact type — rows of other families still show their 유형 chip. A kind
+ * claimed by several families, or without a majority, has none (KIND_COLUMNS fallback).
+ */
+export function familyForKind(kind: string | undefined): CatalogFamily | undefined {
+  if (!kind) return undefined;
+  const claimed = active.families.filter((family) => family.kinds?.includes(kind));
+  if (claimed.length === 1) return claimed[0];
+  if (claimed.length > 1) return undefined;
+  const counts = kindTypeCounts.get(kind);
+  if (!counts) return undefined;
+  const perFamily = new Map<CatalogFamily, number>();
+  let total = 0;
+  for (const [type, count] of Object.entries(counts)) {
+    if (typeof count !== "number" || count <= 0) continue;
+    total += count;
+    const family = familyForType(type);
+    if (family) perFamily.set(family, (perFamily.get(family) ?? 0) + count);
+  }
+  let best: [CatalogFamily, number] | undefined;
+  for (const entry of perFamily) if (!best || entry[1] > best[1]) best = entry;
+  return best && total > 0 && best[1] / total > MAJORITY_SHARE ? best[0] : undefined;
+}
+
+/** Tests only. */
+export function resetKindTypeCounts(): void {
+  kindTypeCounts.clear();
+}
+
+export function familyById(id: string): CatalogFamily | undefined {
+  return active.families.find((family) => family.id === id);
+}
+
+export const FAMILIES_QUERY_KEY = ["meta-families"] as const;
+
+export function fetchFamilyCatalog(signal?: AbortSignal): Promise<unknown> {
+  return api<unknown>("/api/meta/families", { signal });
+}
+
+/**
+ * Mounted once by the app: loads the server catalogue (a 404 from an older server keeps the
+ * bundled fallback, never an error state on screen).
+ */
+export function useFamilyCatalogLoader(enabled = true): void {
+  const query = useQuery({
+    queryKey: FAMILIES_QUERY_KEY,
+    queryFn: ({ signal }) => fetchFamilyCatalog(signal),
+    enabled,
+    retry: false,
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+  useEffect(() => {
+    if (!query.data) return;
+    const next = normalizeCatalog(query.data);
+    if (next) setCatalog(next, "server");
+  }, [query.data]);
+}

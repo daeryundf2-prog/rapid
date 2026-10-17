@@ -1,0 +1,693 @@
+# Triage catalogue: eventlog (plan viewer-families-2026-10-15; research docs/research/forensic-field-catalog-*.md)
+families:
+- id: eventlog-event
+  label: 이벤트 로그
+  types:
+  - eventlog-event
+  kinds:
+  - eventlog
+  core_columns:
+  - key: event_created_at
+    label: 시각(기록)
+    aliases:
+    - timestamp
+    - time_created
+    format: time
+    ts_kind: logged
+    width: 170
+  - key: channel
+    label: 채널
+    aliases:
+    - Channel
+    width: 140
+  - key: event_id
+    label: 이벤트 ID
+    aliases:
+    - eventId
+    - EventID
+    format: mono
+    width: 80
+  - key: event_label_ko
+    label: 요약
+    width: 180
+  - key: computer
+    label: 컴퓨터
+    aliases:
+    - Computer
+  - key: subject_user_name
+    label: 주체 계정
+  - key: target_user_name
+    label: 대상 계정
+  - key: logon_type
+    label: 로그온 유형
+    format: logonType
+    width: 90
+  - key: source_ip
+    label: 원격 IP
+    aliases:
+    - ip_address
+    format: mono
+    width: 130
+  - key: process_name
+    label: 프로세스
+    aliases:
+    - new_process_name
+    - image
+    format: path
+  - key: command_line
+    label: 명령줄
+    format: mono
+    width: 260
+  - key: logon_id
+    label: 로그온 ID (LogonId)
+    aliases:
+    - target_logon_id
+    - subject_logon_id
+    format: mono
+  - key: record_id
+    label: 레코드 ID
+    aliases:
+    - event_record_id
+    - EventRecordID
+    format: mono
+    width: 90
+  aux_columns:
+  - key: level
+    label: 레벨
+    aliases:
+    - Level
+    format: eventLevel
+  - key: provider_name
+    label: 제공자
+    aliases:
+    - ProviderName
+    - provider
+  - key: user_name
+    label: 사용자
+    aliases:
+    - user
+  - key: user_sid
+    label: 사용자 SID
+    aliases:
+    - sid
+    - subject_user_sid
+    format: sid
+  - key: target_domain_name
+    label: 대상 도메인
+  - key: logon_process_name
+    label: 로그온 프로세스
+  - key: authentication_package_name
+    label: 인증 패키지
+  - key: source_port
+    label: 출발지 포트
+  - key: workstation_name
+    label: 워크스테이션
+  - key: destination_ip
+    label: 목적지
+    aliases:
+    - destination_hostname
+    format: mono
+  - key: destination_port
+    label: 목적지 포트
+  - key: status_code
+    label: 상태 코드
+    format: mono
+  - key: failure_reason
+    label: 실패 사유
+  - key: process_id
+    label: 프로세스 ID
+    format: mono
+  - key: thread_id
+    label: 스레드 ID
+    format: mono
+  - key: parent_process_name
+    label: 부모 프로세스
+    format: path
+  - key: parent_command_line
+    label: 부모 명령줄
+    format: mono
+  - key: script_block_text
+    label: 스크립트 블록
+    format: mono
+  - key: service_name
+    label: 서비스 이름
+  - key: service_file_name
+    label: 서비스 경로
+    aliases:
+    - service_image_path
+    - image_path
+    format: path
+  - key: service_account_name
+    label: 서비스 계정
+  - key: task_name
+    label: 예약 작업
+  - key: share_name
+    label: 공유/대상
+    aliases:
+    - relative_target_name
+    format: path
+  - key: target_object
+    label: 대상 개체
+    aliases:
+    - query_name
+    - image_loaded
+    - url
+    - remote_name
+    - local_file
+    format: mono
+  - key: device_instance_id
+    label: 장치 ID
+    aliases:
+    - device_id
+    format: mono
+  - key: document_name
+    label: 인쇄 문서/프린터
+    aliases:
+    - printer_name
+  - key: task
+    label: 작업(Task)
+  - key: opcode
+    label: 연산 코드(Opcode)
+  - key: keywords
+    label: 키워드
+    format: mono
+  - key: rendered_message
+    label: 렌더된 메시지
+    aliases:
+    - message
+    - event_message
+    - event_description
+    - detail
+  - key: rule
+    label: 규칙(이벤트)
+  - key: evtx_record_state
+    label: 레코드 상태
+  - key: evtx_record_id_position
+    label: 레코드 번호 위치
+  - key: duplicate_of_live_record
+    label: 할당 레코드의 중복
+  - key: event_data_key_status
+    label: EventData 이름 상태
+  - key: timestamp_status
+    label: 시각 상태
+  rules:
+  - eventlog.rdp_external_ip
+  - eventlog.failed_logon_burst
+  - eventlog.burst_then_success
+  - eventlog.log_cleared
+  - eventlog.record_id_gap
+  - eventlog.new_service
+  - eventlog.encoded_powershell
+  - eventlog.task_created
+  - eventlog.account_manipulation
+  - eventlog.explicit_credentials
+  - eventlog.off_hours_logon
+  - eventlog.sysmon_injection
+  - eventlog.audit_gap
+  - rdp.external_ip
+  - rdp.pairing_mismatch
+  - rdp.session_hijack
+  - rdp.outbound
+  - rdp.enabled
+  - rdp.multi_host
+  - accounts.new_account
+  - accounts.admin_added
+- id: eventlog-detection
+  label: 이벤트 로그 탐지
+  types:
+  - eventlog-detection
+  core_columns:
+  - key: event_created_at
+    label: 생성 시각
+    aliases:
+    - timestamp
+    - time_created
+    format: time
+    ts_kind: event
+  - key: rule_title
+    label: 탐지 규칙
+    aliases:
+    - rule_name
+    - matchedRules
+  - key: rule_id
+    label: 규칙 ID
+    format: mono
+  - key: severity
+    label: 탐지 심각도
+    aliases:
+    - rule_level
+    format: detectionSeverity
+  - key: mitre_tags
+    label: 공격 기법 (MITRE ATT&CK)
+    aliases:
+    - mitre_attack
+  - key: rule_description
+    label: 규칙 설명
+  - key: matched_fields
+    label: 일치한 필드
+  - key: false_positive_note
+    label: 오탐 참고
+  - key: triage_recommendation
+    label: 선별 권고
+  - key: event_id
+    label: 이벤트 ID
+    aliases:
+    - eventId
+    - EventID
+    format: mono
+  aux_columns:
+  - key: event_label_ko
+    label: 한글 이벤트명
+  - key: level
+    label: 레벨
+    aliases:
+    - Level
+    format: eventLevel
+  - key: provider_name
+    label: 제공자
+    aliases:
+    - ProviderName
+    - provider
+  - key: channel
+    label: 채널
+    aliases:
+    - Channel
+  - key: computer
+    label: 컴퓨터
+    aliases:
+    - Computer
+  - key: user_name
+    label: 사용자
+    aliases:
+    - user
+  - key: user_sid
+    label: 사용자 SID
+    aliases:
+    - sid
+    - subject_user_sid
+    format: sid
+  - key: subject_user_name
+    label: 주체 사용자
+  - key: target_user_name
+    label: 대상 사용자
+  - key: target_domain_name
+    label: 대상 도메인
+  - key: logon_id
+    label: 로그온 ID
+    aliases:
+    - target_logon_id
+    - subject_logon_id
+    format: mono
+  - key: logon_type
+    label: 로그온 유형
+    format: logonType
+  - key: logon_process_name
+    label: 로그온 프로세스
+  - key: authentication_package_name
+    label: 인증 패키지
+  - key: source_ip
+    label: 출발지 IP
+    aliases:
+    - ip_address
+    format: mono
+  - key: source_port
+    label: 출발지 포트
+  - key: workstation_name
+    label: 워크스테이션
+  - key: destination_ip
+    label: 목적지
+    aliases:
+    - destination_hostname
+    format: mono
+  - key: destination_port
+    label: 목적지 포트
+  - key: status_code
+    label: 상태 코드
+    format: mono
+  - key: failure_reason
+    label: 실패 사유
+  - key: process_name
+    label: 프로세스
+    aliases:
+    - new_process_name
+    - image
+    format: path
+  - key: process_id
+    label: 프로세스 ID
+    format: mono
+  - key: thread_id
+    label: 스레드 ID
+    format: mono
+  - key: command_line
+    label: 명령줄
+    format: mono
+  - key: parent_process_name
+    label: 부모 프로세스
+    format: path
+  - key: parent_command_line
+    label: 부모 명령줄
+    format: mono
+  - key: script_block_text
+    label: 스크립트 블록
+    format: mono
+  - key: service_name
+    label: 서비스 이름
+  - key: service_file_name
+    label: 서비스 경로
+    aliases:
+    - service_image_path
+    - image_path
+    format: path
+  - key: service_account_name
+    label: 서비스 계정
+  - key: task_name
+    label: 예약 작업
+  - key: share_name
+    label: 공유/대상
+    aliases:
+    - relative_target_name
+    format: path
+  - key: target_object
+    label: 대상 개체
+    aliases:
+    - query_name
+    - image_loaded
+    - url
+    - remote_name
+    - local_file
+    format: mono
+  - key: device_instance_id
+    label: 장치 ID
+    aliases:
+    - device_id
+    format: mono
+  - key: document_name
+    label: 인쇄 문서/프린터
+    aliases:
+    - printer_name
+  - key: record_id
+    label: 레코드 ID
+    aliases:
+    - event_record_id
+    - EventRecordID
+    format: mono
+  - key: task
+    label: 작업(Task)
+  - key: opcode
+    label: 연산 코드(Opcode)
+  - key: keywords
+    label: 키워드
+    format: mono
+  - key: rendered_message
+    label: 렌더된 메시지
+    aliases:
+    - message
+    - event_message
+    - event_description
+    - detail
+  - key: evtx_record_state
+    label: 레코드 상태
+  - key: evtx_record_id_position
+    label: 레코드 번호 위치
+  - key: duplicate_of_live_record
+    label: 할당 레코드의 중복
+  - key: event_data_key_status
+    label: EventData 이름 상태
+  - key: timestamp_status
+    label: 시각 상태
+  - key: rulepack_version
+    label: 규칙팩 버전
+    format: mono
+  rules: []
+- id: eventlog-logon-session
+  label: 로그온 세션
+  types:
+  - eventlog-logon-session
+  core_columns:
+  - key: started_at
+    label: 로그온 시각
+    format: time
+    ts_kind: logon-start
+  - key: user_name
+    label: 사용자
+  - key: target_domain_name
+    label: 도메인
+  - key: logon_id
+    label: 로그온 ID
+    format: mono
+  - key: logon_type
+    label: 로그온 유형
+    format: logonType
+  - key: source_ip
+    label: 출발지 IP
+    format: mono
+  - key: workstation_name
+    label: 워크스테이션
+  - key: computer
+    label: 컴퓨터
+  - key: duration_seconds
+    label: 세션 길이(초)
+    format: number
+  - key: session_status
+    label: 세션 상태
+  aux_columns:
+  - key: event_ids
+    label: 관련 이벤트 ID
+  - key: event_count
+    label: 이벤트 수
+    format: number
+  - key: events
+    label: 이벤트(최대 100)
+  - key: session_key
+    label: 세션 키
+    format: mono
+  - key: ended_at
+    label: 로그오프 시각
+    format: time
+    ts_kind: logon-end
+  rules: []
+- id: eventlog-record-candidate
+  label: EVTX 레코드 후보
+  types:
+  - eventlog-record-candidate
+  core_columns:
+  - key: timestamp
+    label: 시각(헤더)
+    format: time
+    ts_kind: event
+  - key: record_id
+    label: 레코드 ID
+    format: mono
+  - key: evtx_record_state
+    label: 레코드 상태
+  - key: evtx_record_id_position
+    label: 레코드 번호 위치
+  - key: duplicate_of_live_record
+    label: 할당 레코드의 중복
+  - key: evtx_record_integrity
+    label: 무결성
+  - key: evtx_declared_size
+    label: 선언 크기
+    aliases:
+    - evtx_available_size
+    format: bytes
+  - key: timestamp_status
+    label: 시각 상태
+  - key: extracted_strings
+    label: 추출 문자열
+  - key: native_indicators
+    label: 지표
+  aux_columns: []
+  rules: []
+- id: powershell
+  label: PowerShell 기록
+  types:
+  - powershell-history-command
+  core_columns:
+  - key: timestamp
+    label: 기록 파일 수정(명령 시각 아님)
+    aliases:
+    - modified_at
+    format: time
+    ts_kind: modified
+  - key: command_line
+    label: 명령
+    aliases:
+    - command
+    format: mono
+  - key: source_index
+    label: 줄 순번
+    format: number
+  - key: user
+    label: 사용자
+    aliases:
+    - user_name
+  aux_columns: []
+  rules: []
+rules:
+- id: eventlog.rdp_external_ip
+  family: eventlog-event
+  grade: A
+  label_ko: 외부 IP RDP 로그온
+  rationale_ko: '4624 로그온 유형 10(원격 대화형)의 IpAddress가 사설망·루프백·링크로컬이 아닌 공인 주소: 인터넷에 노출된 RDP로 들어온 접속.'
+  false_positive_ko: VPN·점프호스트 NAT, 공인 IPv6를 쓰는 사내망.
+  sources: &id001
+  - https://learn.microsoft.com/en-us/sysinternals/downloads/sysmon
+  - https://docs.logpoint.com/agentx/references/windows-event-ids-reference
+  - https://detection.fyi/sigmahq/sigma/windows/builtin/system/microsoft_windows_eventlog/win_system_eventlog_cleared/
+  - https://www.manageengine.com/products/active-directory-audit/kb/system-events/event-id-7045.html
+  version: 1
+  status: verified
+  params: {}
+- id: eventlog.failed_logon_burst
+  family: eventlog-event
+  grade: B
+  label_ko: 로그온 실패 폭주(4625)
+  rationale_ko: '같은 출발지 IP(없으면 같은 대상 계정)의 4625가 짧은 시간 안에 임계값 이상: 무차별 대입 시도.'
+  false_positive_ko: 암호가 만료된 서비스 계정, 취약점 스캐너.
+  sources: *id001
+  version: 1
+  status: verified
+  params:
+    window_minutes: 5
+    min_count: 10
+- id: eventlog.burst_then_success
+  family: eventlog-event
+  grade: B
+  label_ko: 실패 폭주 뒤 로그온 성공
+  rationale_ko: '4625 폭주와 같은 출처(IP 또는 계정)에서 폭주 중이거나 직후에 4624 성공: 무차별 대입 성공 가능성.'
+  false_positive_ko: 사용자 오타 반복 뒤 정상 로그온.
+  sources: *id001
+  version: 1
+  status: verified
+  params:
+    window_minutes: 5
+    min_count: 10
+    success_within_minutes: 60
+- id: eventlog.log_cleared
+  family: eventlog-event
+  grade: A
+  label_ko: 이벤트 로그 삭제(1102/104)
+  rationale_ko: 'Security 1102 또는 System 104(Eventlog 제공자): 이벤트 로그가 지워짐. 안티포렌식의 대표 흔적.'
+  false_positive_ko: 에이전트 롤아웃·골든 이미지 준비 과정의 정상 삭제(Sigma 규칙 참고).
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}
+- id: eventlog.record_id_gap
+  family: eventlog-event
+  grade: C
+  label_ko: 레코드 번호 갭
+  rationale_ko: '같은 .evtx 파일의 할당(live) 레코드 EventRecordID가 크게 건너뜀: 레코드 삭제·청크 손실 가능성.'
+  false_positive_ko: 파서가 일부 레코드를 해석하지 못한 경우, 손상 청크.
+  sources: *id001
+  version: 1
+  status: provisional
+  params:
+    min_gap: 10
+- id: eventlog.new_service
+  family: eventlog-event
+  grade: B
+  label_ko: 의심 경로 서비스 설치(7045/4697)
+  rationale_ko: '서비스 설치 이벤트의 ImagePath가 Temp/AppData/UNC/cmd/PowerShell: 지속성 확보·PsExec류 횡이동.'
+  false_positive_ko: 정상 설치 프로그램·드라이버(주체가 SYSTEM인 경우가 흔함). Defender 플랫폼·정의 업데이트 서비스(ProgramData\Microsoft\Windows Defender)는 제외.
+  sources: *id001
+  version: 2
+  status: verified
+  params:
+    allowed_path_prefixes:
+    - programdata\microsoft\windows defender\
+- id: eventlog.encoded_powershell
+  family: eventlog-event
+  grade: B
+  label_ko: 인코딩·난독화 PowerShell
+  rationale_ko: '4688/Sysmon 1 명령줄 또는 4104 스크립트 블록에 -enc/-EncodedCommand/IEX/FromBase64String/[char] 난독화: 은닉 실행.'
+  false_positive_ko: 관리 스크립트, 배포 도구.
+  sources: *id001
+  version: 1
+  status: verified
+  params:
+    min_char_casts: 10
+- id: eventlog.task_created
+  family: eventlog-event
+  grade: B
+  label_ko: 의심 예약 작업 생성(4698/4702)
+  rationale_ko: '작업 생성·변경 이벤트의 실행 명령이 사용자 쓰기 경로·LOLBin·인코딩 PowerShell: 지속성.'
+  false_positive_ko: 정상 업데이터(사용자 AppData에 설치되는 앱).
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}
+- id: eventlog.account_manipulation
+  family: eventlog-event
+  grade: B
+  label_ko: 계정 생성 직후 그룹 추가·암호 재설정
+  rationale_ko: '4720 계정 생성 직후 같은 SID가 4732로 로컬 그룹에 추가되거나, 다른 계정이 4724로 암호를 재설정: 백도어 계정.'
+  false_positive_ko: 정상 계정 프로비저닝, 헬프데스크 암호 재설정.
+  sources: *id001
+  version: 1
+  status: verified
+  params:
+    window_minutes: 60
+- id: eventlog.explicit_credentials
+  family: eventlog-event
+  grade: B
+  label_ko: 명시적 자격 증명 사용(4648, 원격 대상)
+  rationale_ko: '4648의 TargetServerName이 로컬이 아니고 프로세스가 일반 시스템 프로세스가 아님: 횡이동 시도.'
+  false_positive_ko: RunAs, 예약 작업, 네트워크 드라이브 연결.
+  sources: *id001
+  version: 1
+  status: verified
+  params:
+    allowed_processes:
+    - svchost.exe
+    - lsass.exe
+    - consent.exe
+    - winlogon.exe
+    - services.exe
+    - taskhostw.exe
+- id: eventlog.off_hours_logon
+  family: eventlog-event
+  grade: C
+  label_ko: 계정 평소와 다른 시간대 로그온
+  rationale_ko: 대화형/원격 4624가 그 계정의 시간대 분포에서 드문 시각(비율 < 임계값)에 발생.
+  false_positive_ko: 교대 근무, 시간대 오판(기본 UTC+9 가정).
+  sources: *id001
+  version: 1
+  status: provisional
+  params:
+    tz_offset_hours: 9
+    min_events: 20
+    rare_share: 0.03
+- id: eventlog.sysmon_injection
+  family: eventlog-event
+  grade: B
+  label_ko: 프로세스 주입·LSASS 접근(Sysmon 8/10)
+  rationale_ko: 'Sysmon 8(CreateRemoteThread) 또는 10(lsass 접근)의 원본 이미지가 Windows/Program Files 밖: 인젝션·자격 증명 덤프.'
+  false_positive_ko: AV/EDR, 개발 도구.
+  sources: *id001
+  version: 1
+  status: verified
+  params:
+    allowed_sources:
+    - msmpeng.exe
+    - mssense.exe
+    - csfalconservice.exe
+    lsass_access_masks:
+    - '0x1010'
+    - '0x1410'
+    - '0x1438'
+    - '0x143a'
+    - '0x1fffff'
+    - '0x1f3fff'
+- id: eventlog.audit_gap
+  family: eventlog-event
+  grade: C
+  label_ko: 감사 정책 공백(부재 ≠ 미발생)
+  rationale_ko: 'Security 로그는 충분한데 4688이 하나도 없거나 PowerShell Operational 로그에 4104가 없음: 해당 감사가 꺼져 있었을 가능성. 없다고 해서 실행되지 않았다는 뜻이 아님.'
+  false_positive_ko: 정책상 비활성(기본값).
+  sources: *id001
+  version: 1
+  status: verified
+  params:
+    min_channel_events: 100

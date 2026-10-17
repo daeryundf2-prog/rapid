@@ -1,0 +1,351 @@
+# Triage catalogue: ntfs (plan viewer-families-2026-10-15; research docs/research/forensic-field-catalog-*.md)
+families:
+- id: mft
+  label: MFT/USN 메타
+  types:
+  - mft-record
+  - mft-file
+  - usn-record
+  core_columns:
+  - key: timestamp
+    label: 시각
+    format: time
+    ts_kind: event
+  - key: file_path
+    label: 경로
+    aliases:
+    - path_candidates
+    format: path
+  - key: record_number
+    label: 레코드(엔트리) 번호
+    format: number
+  - key: sequence_number
+    label: 시퀀스
+    format: number
+  - key: parent_reference_decoded
+    label: 부모 참조
+    aliases:
+    - parent_reference
+    format: mono
+  - key: in_use
+    label: 사용 중
+  - key: deleted_hint
+    label: 삭제 추정
+  - key: rename_hint
+    label: 이름 변경 추정
+  - key: directory
+    label: 디렉터리
+  - key: used_size
+    label: 크기
+    aliases:
+    - allocated_size
+    format: bytes
+  aux_columns:
+  - key: usn
+    label: 변경 번호 (USN)
+    format: number
+  - key: reason_flags
+    label: USN 사유
+    aliases:
+    - reason
+    - reason_raw
+  - key: file_attributes_names
+    label: 파일 속성
+    aliases:
+    - file_attributes
+  - key: time_stomping_suspected
+    label: 타임스톰핑 의심
+  - key: standard_information
+    label: 표준 정보 시각 ($STANDARD_INFORMATION)
+  - key: file_name_entries
+    label: 파일 이름 시각 ($FILE_NAME)
+  rules:
+  - ntfs.si_before_fn
+  - ntfs.zero_subsecond
+  - ntfs.fn_manipulation
+  - ntfs.usn_basic_info_change
+  - ntfs.time_inversion
+  - ntfs.deletion_trace
+  - ntfs.mass_change
+- id: zone
+  label: 다운로드 출처 표식 (Zone.Identifier)
+  types:
+  - zone-identifier
+  - ads-stream-candidate
+  core_columns:
+  - key: modified_at
+    label: 스트림 수정
+    format: time
+    ts_kind: modified
+  - key: target_name
+    label: 대상 파일
+    aliases:
+    - host_file_name
+  - key: host_file_path
+    label: 대상 경로
+    aliases:
+    - host_file_path_candidate
+    - host_relative_path
+    format: path
+  - key: zone_id
+    label: Zone ID(영역)
+    aliases:
+    - app_zone_id
+  - key: zone_name
+    label: 영역 이름
+  - key: host_url
+    label: 다운로드 URL(HostUrl)
+    format: url
+  - key: referrer_url
+    label: 참조 URL(ReferrerUrl)
+    format: url
+  - key: last_writer_package_family_name
+    label: 기록한 앱
+  - key: stream_name
+    label: 스트림 이름
+    format: mono
+  - key: stream_type
+    label: 스트림 종류
+    aliases:
+    - stream_family
+  aux_columns:
+  - key: detected_signature_kind
+    label: 감지 서명
+  - key: zone_identifier_fields
+    label: Zone.Identifier 내용
+    aliases:
+    - fields
+  - key: host_timestamps
+    label: 대상 파일 시각
+  rules:
+  - ntfs.ads_executable
+  - ntfs.zone_identifier
+- id: recycle
+  label: 휴지통
+  types:
+  - recycle-bin-entry
+  core_columns:
+  - key: deleted_at
+    label: 삭제
+    format: time
+    ts_kind: event
+  - key: original_path
+    label: 원래 경로
+    format: path
+  - key: deleted_file_size
+    label: 원래 크기
+    format: bytes
+  - key: sid_hint
+    label: 사용자 SID
+    aliases:
+    - user_sid
+    format: sid
+  - key: recycle_id
+    label: 휴지통 ID
+    format: mono
+  - key: paired_payload_path
+    label: $R 파일
+    format: path
+  - key: format_version
+    label: 형식 버전
+  aux_columns: []
+  rules:
+  - ntfs.deletion_trace
+- id: file
+  label: 파일
+  types: []
+  core_columns:
+  - key: fs_created_at
+    label: 생성(파일 시스템)
+    format: time
+    ts_kind: created
+  - key: name
+    label: 파일 이름
+    aliases:
+    - file_name
+  - key: path
+    label: 경로
+    aliases:
+    - relative_path
+    - full_path
+    format: path
+  - key: extension
+    label: 확장자
+  - key: size
+    label: 크기
+    aliases:
+    - size_bytes
+    format: bytes
+  - key: category
+    label: 분류
+    aliases:
+    - categories
+  - key: modified_at_origin
+    label: 시각 출처
+    aliases:
+    - time_origin
+  - key: is_deleted
+    label: 삭제 여부
+    aliases:
+    - deletionState
+  - key: entry_number
+    label: MFT 엔트리
+    aliases:
+    - mft_entry
+    format: number
+  - key: mime_type
+    label: 파일 형식 (MIME)
+  aux_columns:
+  - key: attributes
+    label: 속성
+  - key: signature
+    label: 시그니처
+    aliases:
+    - file_signature
+    - detected_signature_kind
+  - key: fs_modified_at
+    label: 수정(파일 시스템)
+    format: time
+    ts_kind: modified
+  - key: fs_accessed_at
+    label: 접근(파일 시스템)
+    format: time
+    ts_kind: accessed
+  - key: fs_changed_at
+    label: MFT 변경
+    format: time
+    ts_kind: mft-modified
+  - key: modified_at
+    label: 수정(원천 표시 참고)
+    format: time
+    ts_kind: modified
+  rules:
+  - archives.ext_mismatch_container
+rules:
+- id: ntfs.si_before_fn
+  family: mft
+  grade: A
+  label_ko: $SI 생성 < $FN 생성(타임스톰핑)
+  rationale_ko: '$STANDARD_INFORMATION 생성 시각이 $FILE_NAME 생성 시각보다 임계값 이상 앞섬: 사용자 모드 타임스톰핑.'
+  false_positive_ko: 이동·복사, 설치기(시각 보존 복사).
+  sources: &id001
+  - https://www.inversecos.com/2022/04/defence-evasion-technique-timestomping.html
+  - https://opus.bibliothek.uni-augsburg.de/opus4/117569
+  - https://andreafortuna.org/2017/10/18/windows-forensics-usn-journal/
+  - https://www.sans.org/blog/ntfs-i30-index-attributes-evidence-of-deleted-and-overwritten-files/
+  - https://andreafortuna.org/2019/09/26/windows-forensics-analysis-of-recycle-bin-artifacts/
+  version: 1
+  status: verified
+  params:
+    min_delta_seconds: 60
+- id: ntfs.zero_subsecond
+  family: mft
+  grade: C
+  label_ko: $SI 초 미만 0
+  rationale_ko: '$SI 생성·수정의 초 미만이 0인데 $FN은 아님: 초 단위로만 쓰는 시각 조작 도구(약한 지표).'
+  false_positive_ko: 일부 정상 SW, FAT에서 복사된 파일.
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}
+- id: ntfs.fn_manipulation
+  family: mft
+  grade: B
+  label_ko: $FN 시각 조작 의심
+  rationale_ko: 'USN RENAME_NEW_NAME 이후에도 $FN 변경 시각이 이름 변경보다 앞섬: 고급 타임스톰핑.'
+  false_positive_ko: 정상 이동, USN 보존 범위.
+  sources: *id001
+  version: 1
+  status: provisional
+  params:
+    tolerance_seconds: 2
+- id: ntfs.usn_basic_info_change
+  family: mft
+  grade: B
+  label_ko: BASIC_INFO_CHANGE 뒤 과거 $SI
+  rationale_ko: 'USN BASIC_INFO_CHANGE 시점보다 $SI 수정 시각이 하루 이상 과거: 조작 시점 단서. 속성 변경도 같은 플래그라 단독 판단 금지.'
+  false_positive_ko: 속성 변경, 압축 해제·복원.
+  sources: *id001
+  version: 1
+  status: verified
+  params:
+    backdate_days: 1
+- id: ntfs.time_inversion
+  family: mft
+  grade: C
+  label_ko: $SI 수정 < 생성
+  rationale_ko: '$SI 수정 시각이 생성 시각보다 앞섬: 복사 또는 조작.'
+  false_positive_ko: 복사된 파일은 정상적으로 이런 모양.
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}
+- id: ntfs.ads_executable
+  family: zone
+  grade: A
+  label_ko: 실행 파일 ADS
+  rationale_ko: 'Zone.Identifier가 아닌 대체 데이터 스트림의 내용이 PE(MZ): 은닉 페이로드.'
+  false_positive_ko: 일부 보안 제품의 태그 스트림.
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}
+- id: ntfs.zone_identifier
+  family: zone
+  grade: C
+  label_ko: 인터넷 다운로드 표시(ZoneId=3)
+  rationale_ko: 'Zone.Identifier ZoneId=3과 HostUrl: 파일의 다운로드 출처.'
+  false_positive_ko: 해당 없음(출처 정보).
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}
+- id: ntfs.deletion_trace
+  family: recycle
+  grade: C
+  label_ko: 민감 파일 삭제 흔적
+  rationale_ko: '휴지통 $I 레코드 또는 미할당 MFT 엔트리가 문서·압축·이미지 확장자: 삭제 증거.'
+  false_positive_ko: 정상 삭제.
+  sources: *id001
+  version: 1
+  status: verified
+  params:
+    sensitive_extensions:
+    - doc
+    - docx
+    - xls
+    - xlsx
+    - ppt
+    - pptx
+    - hwp
+    - hwpx
+    - pdf
+    - txt
+    - csv
+    - zip
+    - 7z
+    - rar
+    - egg
+    - alz
+    - jpg
+    - jpeg
+    - png
+    - heic
+    - pst
+    - ost
+    - eml
+    - db
+    - sqlite
+    - kdbx
+- id: ntfs.mass_change
+  family: mft
+  grade: B
+  label_ko: 대량 이름 변경·삭제(USN)
+  rationale_ko: '짧은 시간에 USN RENAME/DELETE가 임계값 이상: 랜섬웨어·와이핑 패턴.'
+  false_positive_ko: 백업·AV·대량 정리.
+  sources: *id001
+  version: 1
+  status: verified
+  params:
+    window_seconds: 60
+    min_count: 1000

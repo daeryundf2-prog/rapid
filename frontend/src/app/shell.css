@@ -158,6 +158,27 @@ kbd {
   background: var(--accent);
 }
 
+/* Viewer in its own window (U-F2): "창으로 보는 중" written vertically between two buttons. */
+.viewer-rail-popout {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.viewer-rail-popout .viewer-rail-button {
+  flex: none;
+}
+
+.viewer-rail-text {
+  flex: 1;
+  margin: 0;
+  padding: var(--space-2) 0;
+  writing-mode: vertical-rl;
+  align-self: center;
+  color: var(--text-subtle);
+  font-size: var(--fs-aux);
+  letter-spacing: 0.08em;
+}
+
 .resize-handle {
   width: 4px;
   background: transparent;

@@ -1,0 +1,289 @@
+# Triage catalogue: media (plan viewer-families-2026-10-15; research docs/research/forensic-field-catalog-*.md)
+families:
+- id: media-image
+  label: 이미지·동영상
+  types:
+  - media-image
+  - media-video
+  - media-audio
+  - media-image-unreadable
+  - mobile-media
+  - cloud-photo
+  kinds:
+  - media-image
+  core_columns:
+  - key: exif_datetime_original
+    label: 촬영 시각(EXIF, 현지)
+    aliases:
+    - datetime_original
+    format: time
+    ts_kind: captured
+    width: 170
+  - key: source_file_mtime
+    label: 파일 수정
+    format: time
+    ts_kind: modified
+    width: 170
+  - key: exif_make
+    label: 제조사
+  - key: exif_model
+    label: 모델
+  - key: gps_latitude
+    label: 위도
+    format: number
+  - key: gps_longitude
+    label: 경도
+    format: number
+  - key: exif_software
+    label: 편집 SW
+  - key: width
+    label: 해상도
+    aliases:
+    - height
+    format: number
+  - key: content_format
+    label: 형식
+    aliases:
+    - source_format
+  - key: perceptual_hash
+    label: 지각 해시 (pHash)
+    format: mono
+  aux_columns:
+  - key: exif_datetime_digitized
+    label: 디지털화 시각
+    format: time
+    ts_kind: digitized
+  - key: gps_timestamp
+    label: GPS 시각(UTC)
+    format: time
+    ts_kind: gps
+  - key: exif_lens_model
+    label: 렌즈
+  - key: timestamp_timezone
+    label: 시간대 근거
+  - key: trailing_data_bytes
+    label: 뒤붙은 데이터
+    format: bytes
+  - key: extension_mismatch
+    label: 확장자 불일치
+  - key: duration_seconds
+    label: 재생 시간(초)
+    format: number
+  - key: entry_name
+    label: 파일 이름
+  rules:
+  - media.exif_vs_fs_time
+  - media.exif_future_or_pre_device
+  - media.gps_present
+  - media.gps_time_tz_inconsistent
+  - media.editing_software
+  - media.exif_stripped
+  - media.phash_dup_cross_folder
+  - media.thumb_mismatch
+  - media.screenshot_flag
+  - media.live_photo_orphan
+  - media.metadata_conflict
+- id: synthetic-media
+  label: 합성 미디어 선별
+  types: []
+  prefixes:
+  - synthetic-media
+  kinds:
+  - synthetic-media
+  core_columns:
+  - key: entry_name
+    label: 파일
+    aliases:
+    - file_name
+  - key: score
+    label: 선별 점수
+    format: number
+  - key: band_label
+    label: 점수 구간
+    aliases:
+    - band
+  - key: verdict
+    label: 선별 결과
+  - key: score_semantics
+    label: 점수 의미
+  - key: score_guidance
+    label: 점수 안내
+  - key: signals
+    label: 단서
+  - key: signal_count
+    label: 단서 수
+    format: number
+  - key: limitations
+    label: 한계
+  - key: source_guess
+    label: 출처 추정
+  aux_columns:
+  - key: next_checks
+    label: 다음 확인
+  - key: scan_status
+    label: 스캔 상태
+    aliases:
+    - scan_error
+  - key: scan_file_count
+    label: 스캔 파일 수
+    format: number
+  - key: unscanned_candidate_count
+    label: 미선별 후보 수
+    format: number
+  - key: scan_cap_note
+    label: 상한 안내
+  rules: []
+rules:
+- id: media.exif_vs_fs_time
+  family: media-image
+  grade: C
+  label_ko: 촬영 시각 ≠ 파일 시각
+  rationale_ko: 'EXIF DateTimeOriginal(OffsetTimeOriginal 없으면 UTC+9 가정)과 파일 수정 시각 차가 하루 초과: 복사·재저장·시간 조작.'
+  false_positive_ko: 파일 복사(복사 시점), 다운로드.
+  sources: &id001
+  - https://exiftool.org/TagNames/EXIF.html
+  - https://exiftool.org/forum/index.php?msg=85494
+  - https://exiftool.org/TagNames/Composite.html
+  version: 1
+  status: verified
+  params:
+    tz_offset_hours: 9
+    max_gap_hours: 24
+- id: media.exif_future_or_pre_device
+  family: media-image
+  grade: B
+  label_ko: 촬영 시각이 미래·기기 이전
+  rationale_ko: '촬영 시각이 파일 수정 시각보다 하루 넘게 늦거나 기준 연도 이전: 날조.'
+  false_positive_ko: 카메라 시계 오설정.
+  sources: *id001
+  version: 1
+  status: verified
+  params:
+    tz_offset_hours: 9
+    min_year: 1995
+    future_slack_hours: 24
+- id: media.gps_present
+  family: media-image
+  grade: C
+  label_ko: GPS 좌표 포함
+  rationale_ko: 'GPS 태그 존재: 위치 증거·유출 위험.'
+  false_positive_ko: 휴대폰 촬영은 흔함.
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}
+- id: media.gps_time_tz_inconsistent
+  family: media-image
+  grade: B
+  label_ko: GPS 시각과 촬영 시각 불일치
+  rationale_ko: 'GPS UTC가 촬영 시각−OffsetTimeOriginal과 다르거나(없으면) 시간대 단위(15분)로 설명되지 않음: 시계 조작·시간대 오류.'
+  false_positive_ko: 카메라 시계 오차.
+  sources: *id001
+  version: 1
+  status: verified
+  params:
+    tolerance_minutes: 2
+- id: media.editing_software
+  family: media-image
+  grade: C
+  label_ko: 편집 소프트웨어 흔적
+  rationale_ko: 'Software/CreatorTool이 Photoshop·GIMP·Lightroom 등: 편집 가능성.'
+  false_positive_ko: 단순 크기 조절·뷰어 저장.
+  sources: *id001
+  version: 1
+  status: verified
+  params:
+    editors:
+    - photoshop
+    - gimp
+    - lightroom
+    - snapseed
+    - picsart
+    - paint.net
+    - affinity
+    - pixelmator
+    - meitu
+    - canva
+    - photoscape
+    - 포토스케이프
+- id: media.exif_stripped
+  family: media-image
+  grade: C
+  label_ko: EXIF 제거
+  rationale_ko: 'JPEG/HEIC인데 Make·Model·DateTimeOriginal이 모두 없음: 메신저·SNS 재인코딩, 메타 제거.'
+  false_positive_ko: 스크린샷, 웹 이미지.
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}
+- id: media.phash_dup_cross_folder
+  family: media-image
+  grade: C
+  label_ko: 다른 폴더의 유사 이미지
+  rationale_ko: '서로 다른 폴더의 이미지 pHash 거리가 임계값 이하: 은닉 사본·재인코딩.'
+  false_positive_ko: 썸네일, 템플릿류.
+  sources: *id001
+  version: 1
+  status: verified
+  params:
+    max_distance: 8
+    min_pixels: 160000
+    max_bucket: 500
+- id: media.thumb_mismatch
+  family: media-image
+  grade: B
+  label_ko: 내장 썸네일 불일치
+  rationale_ko: '내장 썸네일 pHash가 본 이미지와 크게 다름: 편집 후 썸네일 미갱신.'
+  false_positive_ko: 썸네일만 제거하는 도구.
+  sources: *id001
+  version: 1
+  status: provisional
+  params:
+    min_distance: 16
+- id: media.screenshot_flag
+  family: media-image
+  grade: C
+  label_ko: 스크린샷
+  rationale_ko: '카메라 Make/Model 없이 스크린샷 파일 이름 또는 화면 해상도: 원본 사진 아님.'
+  false_positive_ko: 판정 휴리스틱 오류.
+  sources: *id001
+  version: 1
+  status: provisional
+  params:
+    screen_sizes:
+    - 1920x1080
+    - 1080x1920
+    - 2560x1440
+    - 1440x2560
+    - 1366x768
+    - 1280x720
+    - 750x1334
+    - 1170x2532
+    - 1284x2778
+    - 1179x2556
+    - 1290x2796
+    - 1080x2340
+    - 1080x2400
+    - 1440x3200
+    - 3840x2160
+- id: media.live_photo_orphan
+  family: media-image
+  grade: C
+  label_ko: Live Photo 짝 없음
+  rationale_ko: 'HEIC와 같은 이름의 MOV가 같은 폴더에 없음: 일부 삭제·전송.'
+  false_positive_ko: 메신저 전송 시 분리.
+  sources: *id001
+  version: 1
+  status: provisional
+  params: {}
+- id: media.metadata_conflict
+  family: media-image
+  grade: C
+  label_ko: 메타데이터 날짜 충돌
+  rationale_ko: 'EXIF 원본/디지털화·XMP·IPTC 날짜가 서로 다름: 후처리·동기화 도구 개입.'
+  false_positive_ko: MWG 규칙을 적용하는 도구.
+  sources: *id001
+  version: 1
+  status: verified
+  params:
+    tolerance_minutes: 1

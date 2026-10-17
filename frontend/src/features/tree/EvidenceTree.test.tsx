@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseHash } from "../../router";
 import { useAppStore } from "../../state/store";
@@ -6,7 +6,8 @@ import { mockFetch, renderWithQuery } from "../case/testUtils";
 import { getRegisteredCommands } from "./adapter";
 import { buildTreeCommands } from "./commands";
 import { EvidenceTree } from "./EvidenceTree";
-import { buildTreeModel } from "./model";
+import { buildTreeModel, filterEmptyNodes, flattenVisible, type TreeModelNode } from "./model";
+import { resetTreePrefs, SHOW_EMPTY_KEY, useTreePrefs } from "./treePrefs";
 
 const counts = {
   validation_issues: 1,
@@ -123,10 +124,15 @@ beforeEach(() => {
   // A route left by the previous test would pre-expand its domain.
   useAppStore.getState().syncRouteFromLocation(parseHash(""));
   mockFetch(routes());
+  // The navigation tests walk every node: empty families shown (U-F7 has its own block below).
+  window.localStorage.setItem(SHOW_EMPTY_KEY, "1");
+  resetTreePrefs();
 });
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  window.localStorage.removeItem(SHOW_EMPTY_KEY);
+  resetTreePrefs();
 });
 
 async function renderTree() {
@@ -303,5 +309,132 @@ describe("tree commands", () => {
       "#/case/r1/explore/artifacts/windows-system?types=webshell-source-candidate",
     );
     expect(getRegisteredCommands()).toBeDefined();
+  });
+});
+
+describe("결과 없는 계열 숨김 (viewer-families U-F7)", () => {
+  beforeEach(() => {
+    window.localStorage.removeItem(SHOW_EMPTY_KEY);
+    resetTreePrefs();
+  });
+
+  const toggle = () => screen.getByTestId("tree-empty-toggle");
+  const countIn = (text: string) => Number(/(\d[\d,]*)개/.exec(text)?.[1]?.replace(/,/g, ""));
+
+  it("hides empty families by default; the toggle's n is the number of rows it reveals; state persists", async () => {
+    renderWithQuery(<EvidenceTree runId="r1" />);
+    await screen.findByText("이벤트 로그");
+    await waitFor(() => expect(item("이벤트 로그").textContent).toContain("100"));
+    // 위치·여행 has no data in this run: hidden.
+    expect(screen.queryByRole("treeitem", { name: /^위치·여행/ })).toBeNull();
+    await screen.findByText("패스워드");
+    expect(toggle().getAttribute("aria-pressed")).toBe("false");
+    expect(toggle().textContent).toMatch(/^결과 없는 계열 \d+개 표시$/);
+    const n = countIn(toggle().textContent ?? "");
+    const beforeIds = new Set(screen.getAllByRole("treeitem").map((li) => li.dataset.nodeId));
+    const before = beforeIds.size;
+    fireEvent.click(toggle());
+    expect(toggle().getAttribute("aria-pressed")).toBe("true");
+    expect(toggle().textContent).toBe(`결과 없는 계열 ${n}개 숨김`);
+    // n = rows that appear when every branch is expanded (a hidden domain counts once).
+    const full = buildTreeModel({
+      summary: { summary: { counts } },
+      tree: routes()["GET /api/runs/r1/tree"] as never,
+    });
+    const allIds = (nodes: TreeModelNode[]): Set<string> =>
+      new Set(nodes.flatMap((node) => [node.id, ...(node.children ? allIds(node.children) : [])]));
+    const shownAll = filterEmptyNodes(full, true);
+    const hiddenAll = filterEmptyNodes(full, false);
+    const rows = (nodes: TreeModelNode[]) => flattenVisible(nodes, allIds(nodes)).length;
+    const topLevelRows = (nodes: TreeModelNode[]) =>
+      flattenVisible(nodes, allIds(nodes)).filter(
+        (f) => f.parentId === null || !hiddenAll.hiddenIds.has(f.parentId),
+      ).length;
+    expect(hiddenAll.hiddenCount).toBe(n);
+    expect(topLevelRows(shownAll.nodes) - rows(hiddenAll.nodes)).toBe(n);
+    // Every newly shown row carries the hidden marker.
+    const added = screen.getAllByRole("treeitem").filter((li) => !beforeIds.has(li.dataset.nodeId));
+    expect(added.length).toBeGreaterThan(0);
+    expect(added.every((li) => li.hasAttribute("data-hidden-empty"))).toBe(true);
+    expect(screen.getAllByRole("treeitem").length).toBeGreaterThan(before);
+    // Shown dimmed with the reason.
+    const hiddenDomain = item("위치·여행");
+    expect(hiddenDomain.classList.contains("is-dimmed")).toBe(true);
+    expect(hiddenDomain.getAttribute("aria-description")).toMatch(/^결과 없음: /);
+    expect(window.localStorage.getItem(SHOW_EMPTY_KEY)).toBe("1");
+    expect(useTreePrefs.getState().showEmpty).toBe(true);
+  });
+
+  it("tree search finds hidden nodes and shows them", async () => {
+    renderWithQuery(<EvidenceTree runId="r1" />);
+    await screen.findByText("이벤트 로그");
+    await waitFor(() => expect(item("이벤트 로그").textContent).toContain("100"));
+    expect(screen.queryByRole("treeitem", { name: /^위치·여행/ })).toBeNull();
+    fireEvent.change(screen.getByRole("searchbox", { name: "트리 검색" }), { target: { value: "위치" } });
+    expect(item("위치·여행").hasAttribute("data-hidden-empty")).toBe(true);
+  });
+
+  it("a deep link to a hidden node reveals it (and its domain)", async () => {
+    renderWithQuery(<EvidenceTree runId="r1" />);
+    await screen.findByText("이벤트 로그");
+    await waitFor(() => expect(item("이벤트 로그").textContent).toContain("100"));
+    expect(screen.queryByRole("treeitem", { name: /^위치·여행/ })).toBeNull();
+    const hidden = buildTreeModel({
+      summary: { summary: { counts } },
+      tree: routes()["GET /api/runs/r1/tree"] as never,
+    })
+      .find((n) => n.label === "위치·여행")
+      ?.children?.find((c) => c.target);
+    expect(hidden?.hiddenReason).toBeTruthy();
+    act(() => useAppStore.getState().navigate({ runId: "r1", ...(hidden?.target ?? {}) } as never));
+    await waitFor(() => expect(item(hidden?.label ?? "").getAttribute("aria-selected")).toBe("true"));
+    expect(item("위치·여행").getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("T (tree.toggle-empty) flips the preference only while a tree is mounted", async () => {
+    const { treeEmptyCommand, NO_TREE_REASON } = await import("./treePrefs");
+    const command = treeEmptyCommand();
+    const ctx = {
+      runId: "r1",
+      collection: null,
+      selectedRowKeys: [],
+      focusedRowKey: null,
+      viewerHasTarget: false,
+      runIsActive: false,
+    };
+    expect(command.shortcut).toBe("T");
+    expect(command.disabledReason?.(ctx)).toBe(NO_TREE_REASON);
+    renderWithQuery(<EvidenceTree runId="r1" />);
+    await screen.findByText("이벤트 로그");
+    expect(command.disabledReason?.(ctx)).toBeUndefined();
+    await command.run(ctx);
+    expect(useTreePrefs.getState().showEmpty).toBe(true);
+  });
+});
+
+describe("hidden-family count is final (review #7)", () => {
+  it("the toggle waits for the summary too, so n never jumps after it appears", async () => {
+    window.localStorage.removeItem(SHOW_EMPTY_KEY);
+    resetTreePrefs();
+    const { fetchMock } = mockFetch(routes());
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const inner = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes("/summary")) await gate;
+      return (inner as (i: RequestInfo | URL, n?: RequestInit) => Promise<Response>)(input, init);
+    });
+    renderWithQuery(<EvidenceTree runId="r1" />);
+    await screen.findByText("이벤트 로그");
+    // /tree answered, the summary has not: no count yet.
+    await waitFor(() => expect(item("이벤트 로그").textContent).toContain("100"));
+    expect(screen.queryByTestId("tree-empty-toggle")).toBeNull();
+    act(() => release());
+    const toggle = await screen.findByTestId("tree-empty-toggle");
+    const first = toggle.textContent;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.getByTestId("tree-empty-toggle").textContent).toBe(first);
   });
 });

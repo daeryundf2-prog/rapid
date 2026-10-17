@@ -1,0 +1,562 @@
+# Triage catalogue: registry (plan viewer-families-2026-10-15; research docs/research/forensic-field-catalog-*.md)
+families:
+- id: registry
+  label: 레지스트리
+  types: []
+  prefixes:
+  - registry-
+  kinds:
+  - windows-registry
+  core_columns:
+  - key: key_last_written_at
+    label: 키 마지막 기록
+    aliases:
+    - last_written_at
+    - timestamp
+    format: time
+    ts_kind: last-written
+  - key: key
+    label: 키 경로
+    aliases:
+    - key_path
+    - source_key_path
+    format: path
+  - key: hive_hint
+    label: 하이브
+    aliases:
+    - hive_name
+    - hive
+  - key: name
+    label: 이름
+    aliases:
+    - value_name
+    - key_name
+  - key: value_type
+    label: 값 종류
+  - key: activity_value
+    label: 데이터
+    aliases:
+    - value_data
+    - data
+    format: mono
+  - key: label
+    label: 활동
+    aliases:
+    - activity_label
+  - key: user_activity_category
+    label: 활동 분류
+  - key: mru_position
+    label: MRU 순서
+    format: number
+  - key: user_sid
+    label: 사용자 SID
+    format: sid
+  aux_columns:
+  - key: user_hive_scope
+    label: 사용자 하이브
+  - key: value_names
+    label: 값 이름
+  - key: value_count
+    label: 값 수
+    format: number
+  - key: subkey_count
+    label: 하위 키 수
+    format: number
+  - key: persistence_values
+    label: 자동 실행 값
+  - key: usb_device
+    label: USB 장치
+  - key: decoded_values
+    label: 해석된 값
+  - key: normalized_activity_rows
+    label: 활동 행
+  - key: allocation_status
+    label: 할당 상태
+  - key: cell_kind
+    label: 셀 종류
+  rules:
+  - rdp.enabled
+  - registry.typedpaths_unc
+  - accounts.task_mismatch
+- id: persistence
+  label: 자동 실행
+  types:
+  - registry-persistence-entry
+  - registry-run-key
+  core_columns:
+  - key: key_last_written_at
+    label: 키 마지막 기록
+    aliases:
+    - last_written_at
+    - timestamp
+    format: time
+    ts_kind: last-written
+  - key: value_name
+    label: 항목 이름
+    aliases:
+    - entry_name
+    - name
+  - key: command
+    label: 명령/대상
+    aliases:
+    - value_data
+    - data
+    - image_path
+    format: mono
+  - key: executable_hint
+    label: 실행 파일
+  - key: persistence_category
+    label: 자동 실행 위치
+  - key: evidence_note
+    label: 참고
+  - key: key_path
+    label: 키 경로
+    aliases:
+    - key
+    - source_key_path
+    format: path
+  - key: hive_name
+    label: 하이브
+    aliases:
+    - hive_hint
+  - key: user_sid
+    label: 사용자 SID
+    format: sid
+  - key: persistence_values
+    label: 자동 실행 값
+  aux_columns:
+  - key: user_hive_scope
+    label: 사용자
+    aliases:
+    - user
+  rules:
+  - registry.run_user_path
+  - registry.persistence_lastwrite_window
+- id: service
+  label: 서비스
+  types:
+  - windows-service-config
+  core_columns:
+  - key: key_last_written_at
+    label: 키 마지막 기록
+    aliases:
+    - last_written_at
+    format: time
+    ts_kind: last-written
+  - key: service_name
+    label: 서비스 이름
+    aliases:
+    - name
+    - key_name
+  - key: display_name
+    label: 표시 이름
+  - key: image_path
+    label: 실행 경로
+    aliases:
+    - image_path_hint
+    format: mono
+  - key: service_dll
+    label: 서비스 DLL
+    format: path
+  - key: start_label
+    label: 시작 유형
+    aliases:
+    - start_type_label
+    - start
+    - start_type
+  - key: service_type_label
+    label: 서비스 종류
+    aliases:
+    - service_type
+  - key: object_name
+    label: 실행 계정
+  - key: autostart
+    label: 자동 시작
+  - key: group
+    label: 그룹
+  aux_columns:
+  - key: description
+    label: 설명
+  - key: control_set
+    label: 컨트롤 세트 (ControlSet)
+  - key: key_path
+    label: 키 경로
+    aliases:
+    - key
+    - source_key_path
+    format: path
+  rules:
+  - registry.service_anomaly
+  - registry.persistence_lastwrite_window
+  - accounts.service_suspicious
+- id: timezone
+  label: 표준 시간대
+  types:
+  - windows-timezone
+  core_columns:
+  - key: key_last_written_at
+    label: 키 마지막 기록
+    aliases:
+    - last_written_at
+    format: time
+    ts_kind: last-written
+  - key: time_zone_key_name
+    label: 표준 시간대
+    aliases:
+    - standard_name
+  - key: time_zone_label_ko
+    label: 시간대(한글)
+  - key: utc_offset
+    label: UTC 편차
+  - key: bias_minutes
+    label: 편차(분, Bias)
+    format: number
+  - key: active_time_bias_minutes
+    label: 현재 편차(분)
+    format: number
+  - key: daylight_name
+    label: 일광 절약 이름
+  - key: daylight_bias_minutes
+    label: 일광 절약 편차(분)
+    format: number
+  - key: dynamic_daylight_time_disabled
+    label: 자동 일광 절약 해제
+  - key: bias_semantics
+    label: 편차 의미
+  aux_columns:
+  - key: key_path
+    label: 키 경로
+    aliases:
+    - key
+    - source_key_path
+    format: path
+  rules: []
+- id: system-info
+  label: 시스템 정보
+  types:
+  - windows-control-set
+  - windows-computer-name
+  - windows-network-interface
+  - windows-os-version
+  - windows-profile-list-entry
+  - windows-installed-program
+  core_columns:
+  - key: install_time
+    label: 설치
+    aliases:
+    - install_date
+    format: time
+    ts_kind: installed
+  - key: computer_name
+    label: 컴퓨터 이름
+    aliases:
+    - active_computer_name
+    - tcpip_hostname
+  - key: tcpip_domain
+    label: 도메인
+    aliases:
+    - domain
+  - key: product_name
+    label: 제품
+    aliases:
+    - display_version
+    - edition_id
+  - key: current_build
+    label: 빌드
+    aliases:
+    - ubr
+  - key: registered_owner
+    label: 등록 사용자
+  - key: registered_organization
+    label: 등록 조직
+  - key: current_control_set
+    label: 현재 컨트롤 세트 (ControlSet)
+    aliases:
+    - select_values
+  - key: connection_name
+    label: 네트워크 연결
+    aliases:
+    - interface_guid
+  - key: ip_address
+    label: IP 주소
+    aliases:
+    - subnet_mask
+    - default_gateway
+    format: mono
+  aux_columns:
+  - key: dhcp_enabled
+    label: DHCP 사용
+  - key: name_server
+    label: DNS 서버
+    format: mono
+  - key: sid
+    label: 보안 식별자 (SID)
+    format: sid
+  - key: profile_image_path
+    label: 프로필 경로
+    format: path
+  - key: display_name
+    label: 프로그램
+    aliases:
+    - program_key
+  - key: publisher
+    label: 게시자
+  - key: install_location
+    label: 설치 위치
+    aliases:
+    - uninstall_string
+    format: path
+  - key: key_path
+    label: 키 경로
+    aliases:
+    - key
+    - source_key_path
+    format: path
+  - key: last_shutdown_at
+    label: 마지막 종료
+    format: time
+    ts_kind: event
+  - key: lease_obtained_at
+    label: DHCP 임대
+    format: time
+    ts_kind: event
+  - key: lease_terminates_at
+    label: DHCP 만료
+    format: time
+    ts_kind: expires
+  - key: key_last_written_at
+    label: 키 마지막 기록
+    aliases:
+    - last_written_at
+    format: time
+    ts_kind: last-written
+  rules:
+  - accounts.profile_anomaly
+- id: mounted-device
+  label: 마운트된 장치
+  types:
+  - windows-mounted-device
+  core_columns:
+  - key: key_last_written_at
+    label: 키 마지막 기록
+    aliases:
+    - last_written_at
+    format: time
+    ts_kind: last-written
+  - key: mount_name
+    label: 마운트 지점
+    aliases:
+    - value_name
+    - name
+  - key: drive_letter
+    label: 드라이브 문자
+  - key: volume_guid
+    label: 볼륨 GUID
+    format: mono
+  - key: mount_kind
+    label: 데이터 종류
+    aliases:
+    - data_kind
+  - key: device_path
+    label: 장치 경로
+    aliases:
+    - device_id
+    format: mono
+  - key: disk_signature
+    label: 디스크 서명
+    format: mono
+  - key: partition_offset
+    label: 파티션 오프셋
+    format: hex
+  - key: partition_guid
+    label: 파티션 GUID
+    format: mono
+  - key: usb_serial_number
+    label: USB 시리얼
+    format: mono
+  aux_columns:
+  - key: usb_vendor
+    label: USB 장치
+    aliases:
+    - usb_product
+  - key: removable_usb
+    label: 이동식 USB
+  - key: friendly_name
+    label: 장치 이름
+  - key: data_hex
+    label: 데이터(헥스, 앞 64바이트)
+    format: mono
+  - key: key_path
+    label: 키 경로
+    aliases:
+    - key
+    - source_key_path
+    format: path
+  rules:
+  - registry.usb_serial_cross
+- id: shellbag
+  label: 셸백
+  types: []
+  prefixes:
+  - shellbag
+  kinds:
+  - windows-shellbags
+  core_columns:
+  - key: key_last_written_at
+    label: 키 마지막 기록
+    aliases:
+    - last_written_at
+    format: time
+    ts_kind: last-written
+  - key: shell_path
+    label: 폴더 경로
+    aliases:
+    - folder_path
+    - shellbag_path_candidates
+    - path_candidates
+    format: path
+  - key: item_name
+    label: 항목 이름
+  - key: item_kind
+    label: 셸 항목 종류
+  - key: slot_name
+    label: 슬롯
+    aliases:
+    - node_slot
+    format: mono
+  - key: mru_position
+    label: MRU 순서
+    format: number
+  - key: depth
+    label: 깊이
+    format: number
+  - key: volume
+    label: 볼륨/네트워크
+    aliases:
+    - network_location
+  - key: key_path
+    label: 키 경로
+    aliases:
+    - node_key_path
+    - key
+    - source_key_path
+    format: path
+  - key: hive_name
+    label: 하이브
+    aliases:
+    - hive_hint
+  aux_columns:
+  - key: user_sid
+    label: 사용자 SID
+    format: sid
+  - key: user_hive_scope
+    label: 사용자 하이브
+    aliases:
+    - user
+  - key: shellitem
+    label: 셸 항목
+  - key: activity_label
+    label: 활동
+  - key: value_names
+    label: 값 이름
+  - key: item_created_at
+    label: 생성(셸 항목)
+    format: time
+    ts_kind: created
+  - key: item_modified_at
+    label: 수정(셸 항목)
+    format: time
+    ts_kind: modified
+  - key: item_accessed_at
+    label: 접근(셸 항목)
+    format: time
+    ts_kind: accessed
+  rules:
+  - registry.shellbag_removable_network
+rules:
+- id: registry.run_user_path
+  family: persistence
+  grade: B
+  label_ko: 자동 실행이 사용자 경로·LOLBin
+  rationale_ko: 'Run/RunOnce 등 자동 실행 값이 Temp/AppData/Public/Downloads, 인코딩 PowerShell 또는 LOLBin: 지속성.'
+  false_positive_ko: 사용자 AppData에 설치되는 자동 업데이트(제외 목록 참고). Squirrel 방식 앱(값 이름 com.squirrel.* → AppData\Local\<앱>\<앱>.exe)은 제외.
+  sources: &id001
+  - https://www.cybertriage.com/blog/windows-registry-forensics-cheat-sheet-2026/
+  - https://www.sans.org/blog/digital-forensics-application-execution/
+  - https://forensics.wiki/usb_history_viewing/
+  - https://andreafortuna.org/2019/05/15/windows-forensics-program-execution-artifacts/
+  version: 2
+  status: verified
+  params:
+    exclude_markers:
+    - \appdata\local\microsoft\
+    - \appdata\local\programs\
+    - \appdata\local\google\
+    - \appdata\local\packages\
+    squirrel_value_prefixes:
+    - com.squirrel.
+- id: registry.service_anomaly
+  family: service
+  grade: B
+  label_ko: 서비스 실행 경로 이상
+  rationale_ko: 서비스 ImagePath가 사용자 쓰기 경로·cmd /c·PowerShell·LOLBin(시작 유형 함께 표시).
+  false_positive_ko: 서드파티 서비스.
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}
+- id: registry.persistence_lastwrite_window
+  family: persistence
+  grade: C
+  label_ko: 사건 시간대에 바뀐 자동 실행 키
+  rationale_ko: '자동 실행·서비스 키의 LastWrite가 지정한 사건 시간대 안: 변경 시점 단서(사건 시간대를 지정해야 동작).'
+  false_positive_ko: 설치·패치로 인한 정상 변경.
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}
+- id: registry.usb_serial_cross
+  family: usb
+  grade: B
+  label_ko: USB 시리얼 ↔ MountedDevices 연결
+  rationale_ko: 'USBSTOR 장치 시리얼(또는 볼륨 GUID)이 MountedDevices에도 있음: 장치와 드라이브 문자 연결.'
+  false_positive_ko: 시리얼 없는 장치(UASP는 Enum\SCSI).
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}
+- id: registry.userassist_path
+  family: execution
+  grade: B
+  label_ko: UserAssist 실행 경로 의심
+  rationale_ko: UserAssist 실행 경로가 Temp/사용자 쓰기 경로·UNC·이동식 드라이브.
+  false_positive_ko: 포터블 앱. 바탕 화면·공용 폴더 표시와 바로 가기(.lnk) 실행은 제외.
+  sources: *id001
+  version: 2
+  status: verified
+  params:
+    ignore_extensions:
+    - lnk
+    ignore_markers:
+    - desktop
+    - users\public
+- id: registry.shellbag_removable_network
+  family: shellbag
+  grade: C
+  label_ko: ShellBag 이동식·네트워크 폴더
+  rationale_ko: '탐색한 폴더가 이동식 드라이브 또는 UNC/네트워크 위치: 반출·접근 정황.'
+  false_positive_ko: 정상 공유 폴더 사용.
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}
+- id: registry.typedpaths_unc
+  family: registry
+  grade: B
+  label_ko: 직접 입력한 UNC·관리 공유
+  rationale_ko: 'TypedPaths/RunMRU에 UNC 또는 C$/ADMIN$ 입력: 횡이동 정황.'
+  false_positive_ko: 관리자 업무.
+  sources: *id001
+  version: 1
+  status: provisional
+  params: {}

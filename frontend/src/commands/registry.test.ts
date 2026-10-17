@@ -95,7 +95,7 @@ describe("registry", () => {
     expect(getCommands()).toHaveLength(0);
   });
 
-  it("knows the canonical key set (1–5 expanded)", () => {
+  it("knows the canonical key set (1–5 / 1–8 expanded)", () => {
     expect(normalizeShortcut("alt+left")).toBe("Alt+ArrowLeft");
     expect(normalizeShortcut("esc")).toBe("Escape");
     for (const key of [
@@ -113,10 +113,14 @@ describe("registry", () => {
       "5",
       "?",
       "Escape",
+      "F",
+      "Ctrl+Shift+V",
+      "8",
     ]) {
       expect(CANONICAL_KEYS.has(key)).toBe(true);
     }
-    expect(CANONICAL_KEYS.has("6")).toBe(false);
+    // Viewer-window modes stop at 8 (viewer-families U-F2).
+    expect(CANONICAL_KEYS.has("9")).toBe(false);
   });
 });
 

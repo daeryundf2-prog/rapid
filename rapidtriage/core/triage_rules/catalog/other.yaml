@@ -1,0 +1,360 @@
+# Triage catalogue: other (plan viewer-families-2026-10-15; research docs/research/forensic-field-catalog-*.md)
+families:
+- id: defender
+  label: Defender 로그
+  types: []
+  prefixes:
+  - defender-
+  core_columns:
+  - key: timestamp
+    label: 시각
+    format: time
+    ts_kind: event
+  - key: interesting_entries
+    label: 주요 항목
+  - key: entry_count
+    label: 항목 수
+    format: number
+  - key: interesting_entry_count
+    label: 주요 항목 수
+    format: number
+  - key: policy_entries
+    label: 정책 항목
+  - key: exclusion_entries
+    label: 예외(제외) 항목
+  - key: disabled_protection_entries
+    label: 꺼진 보호 기능
+  - key: tamper_entries
+    label: 변조 방지
+  - key: modified_at
+    label: 로그 파일 수정
+    format: time
+    ts_kind: modified
+  aux_columns: []
+  rules: []
+- id: system-log
+  label: 시스템 로그
+  types:
+  - firewall-log
+  - web-server-log
+  core_columns:
+  - key: timestamp
+    label: 시각
+    format: time
+    ts_kind: event
+  - key: entry_count
+    label: 항목 수
+    aliases:
+    - parsed_row_count
+    - line_count_sampled
+    format: number
+  - key: suspicious_line_count
+    label: 의심/차단 수
+    aliases:
+    - blocked_count
+    format: number
+  - key: sample_entries
+    label: 표본 항목
+    aliases:
+    - suspicious_line_samples
+    - parsed_log
+  - key: request_file_correlation
+    label: 요청-파일 상관
+  - key: modified_at
+    label: 로그 파일 수정
+    format: time
+    ts_kind: modified
+  aux_columns: []
+  rules: []
+- id: crash-dump
+  label: 크래시 덤프
+  types:
+  - crash-dump-indicators
+  prefixes:
+  - memory-
+  core_columns:
+  - key: dump_time
+    label: 덤프 기록
+    aliases:
+    - timestamp
+    format: time
+    ts_kind: event
+  - key: memory_file_kind
+    label: 덤프 종류
+  - key: process_name
+    label: 프로세스
+    aliases:
+    - process_image_path
+    format: path
+  - key: pid
+    label: 프로세스 ID (PID)
+    format: mono
+  - key: exception_code
+    label: 예외
+    aliases:
+    - exception_name
+    format: mono
+  - key: exception_address
+    label: 예외 주소
+    format: mono
+  - key: exception_thread_id
+    label: 예외 스레드
+    format: mono
+  - key: os_version
+    label: OS 버전
+  - key: processor_architecture
+    label: 아키텍처
+  - key: module_count
+    label: 모듈 수
+    format: number
+  aux_columns:
+  - key: indicator_pivots
+    label: 지표 후보
+  - key: environment_variables
+    label: 환경 변수
+  - key: minidump
+    label: 미니덤프 구조
+  - key: process_create_time
+    label: 프로세스 생성
+    format: time
+    ts_kind: created
+  rules: []
+- id: string-candidate
+  label: 문자열 후보
+  types: []
+  suffixes:
+  - -string-candidate
+  - -strings
+  core_columns:
+  - key: executable_path
+    label: 문자열
+    aliases:
+    - candidate_value
+    - decoded_string
+    - string_value
+    - value
+    - path
+    format: mono
+  - key: evidence_class
+    label: 증거 분류
+  - key: source_offset
+    label: 원본 오프셋
+    aliases:
+    - string_offset
+    - offset
+    format: hex
+  - key: source_encoding
+    label: 인코딩
+    aliases:
+    - encoding
+  - key: sha1_candidates
+    label: SHA-1 후보
+    format: mono
+  - key: user_sid
+    label: SID 후보
+    format: sid
+  - key: cache_order
+    label: 캐시 순서
+    format: number
+  - key: timestamp_candidate
+    label: 시각 후보
+  - key: nearby_metadata_candidates
+    label: 주변 메타데이터 후보
+  - key: string_candidate_total
+    label: 후보 수
+    format: number
+  aux_columns: []
+  rules: []
+- id: summary
+  label: 요약(집계)
+  types: []
+  suffixes:
+  - -summary
+  - -scan-summary
+  core_columns:
+  - key: timestamp
+    label: 시각
+    aliases:
+    - time
+    - event_time
+    - normalized_time
+    format: time
+    ts_kind: event
+  - key: title
+    label: 이름
+    aliases:
+    - name
+    - entry_name
+    - file_name
+  - key: message
+    label: 내용
+    aliases:
+    - message_text_preview
+    - message_text
+    - summary
+    - description
+    - detail
+  - key: user
+    label: 사용자
+    aliases:
+    - user_name
+    - account_name
+  - key: url
+    label: 주소 (URL)
+    format: url
+  - key: target_path
+    label: 경로
+    aliases:
+    - path
+    format: path
+  - key: created_at
+    label: 생성
+    format: time
+    ts_kind: created
+  - key: modified_at
+    label: 수정
+    format: time
+    ts_kind: modified
+  aux_columns: []
+  rules: []
+- id: timeline
+  label: 타임라인 이벤트
+  types: []
+  core_columns:
+  - key: timestamp
+    label: 시각
+    format: time
+    ts_kind: event
+  - key: timeKinds
+    label: 시각 종류
+    aliases:
+    - tsLabels
+    - tsKind
+  - key: eventType
+    label: 이벤트
+    format: mono
+  - key: sourceArtifactType
+    label: 원본 아티팩트 유형
+    format: mono
+  - key: source
+    label: 출처
+  - key: tsZone
+    label: 시간대
+  aux_columns: []
+  rules: []
+- id: indicator
+  label: 지표
+  types: []
+  core_columns:
+  - key: first_seen
+    label: 처음 발견
+    aliases:
+    - timestamp
+    format: time
+    ts_kind: event
+  - key: value
+    label: 지표 값
+    aliases:
+    - indicator
+    format: mono
+  - key: type
+    label: 지표 유형
+    aliases:
+    - indicator_type
+  - key: severity
+    label: 심각도
+    format: detectionSeverity
+  - key: rule
+    label: 규칙
+    aliases:
+    - rule_name
+    - matched_rule
+  - key: count
+    label: 출현 수
+    aliases:
+    - occurrences
+    format: number
+  - key: sources
+    label: 출처
+    aliases:
+    - source
+  aux_columns: []
+  rules: []
+- id: generic
+  label: 레코드
+  types: []
+  core_columns:
+  - key: timestamp
+    label: 시각
+    aliases:
+    - time
+    - event_time
+    - normalized_time
+    format: time
+    ts_kind: event
+  - key: title
+    label: 이름
+    aliases:
+    - name
+    - entry_name
+    - file_name
+  - key: message
+    label: 내용
+    aliases:
+    - message_text_preview
+    - message_text
+    - summary
+    - description
+    - detail
+  - key: user
+    label: 사용자
+    aliases:
+    - user_name
+    - account_name
+  - key: url
+    label: 주소 (URL)
+    format: url
+  - key: target_path
+    label: 경로
+    aliases:
+    - path
+    format: path
+  - key: created_at
+    label: 생성
+    format: time
+    ts_kind: created
+  - key: modified_at
+    label: 수정
+    format: time
+    ts_kind: modified
+  aux_columns: []
+  rules:
+  - generic.timestamp_out_of_range
+rules:
+- id: generic.timestamp_out_of_range
+  family: generic
+  grade: C
+  label_ko: 비정상 시각(1980년 이전·미래)
+  rationale_ko: '시각 필드가 1980-01-01 이전이거나 현재+1일 이후: 카빙된 LNK의 1628년 같은 쓰레기 값, 잘못된 단위 해석, 시계 조작. 그 행의 시각은 근거로 쓰기 전에 원본을 확인해야 함.'
+  false_positive_ko: FILETIME 0(1601-01-01)·Unix 0(1970-01-01)·DOS 0(1980-01-01 현지 시각, UTC로 1979-12-31)은 시간대가 밀린 값까지 "시각 없음"이라 제외. 쿠키·인증서 만료, 생일, 예약 실행, PE 링크 시각(Windows 10 재현 빌드는 해시 값)·드라이버 버전 날짜처럼 원래 먼 과거/미래이거나 시각이 아닌 필드는 excluded_key_terms로 제외.
+  sources:
+  - https://www.csirt.gov.sk/wp-content/uploads/2021/08/LNK_File_Forensics.pdf
+  - https://learn.microsoft.com/en-us/windows/win32/sysinfo/file-times
+  version: 1
+  status: provisional
+  params:
+    min_year: 1980
+    future_days: 1
+    excluded_key_terms:
+    - expir
+    - valid_to
+    - valid_until
+    - not_after
+    - birth
+    - due
+    - scheduled
+    - next_run
+    - link_date
+    - link_time
+    - compil
+    - version_date

@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CollectionId } from "../../../contracts/collection";
+import { EMPTY_CATALOG_FOR_TESTS, setCatalog } from "../../flags/catalog";
 import { buildViewerTarget } from "../gridCommands";
 import { bookmarkTarget } from "../reviewActions";
 import { COLLECTIONS, presetColumnIds } from "./index";
@@ -237,6 +238,10 @@ describe("API row -> GridRow mapping", () => {
 });
 
 describe("artifact-kind-aware summaries and record locators", () => {
+  // KIND_COLUMNS layouts: a catalogue that does not claim these kinds (the fallback path);
+  // catalogue family layouts are covered by families.test.ts.
+  beforeEach(() => setCatalog(EMPTY_CATALOG_FOR_TESTS, "server"));
+  afterEach(() => setCatalog(null));
   const evtx = {
     provider: "windows-eventlog",
     artifact_type: "eventlog-event",

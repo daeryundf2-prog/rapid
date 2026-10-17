@@ -16,7 +16,10 @@ Every runner calls an existing core function and only adapts its output to
 * ``cross-case`` -- ``core.cross_case.correlate_case_databases`` over run
   case databases;
 * ``search-index`` -- ``core.search_index.build.build_search_index`` (the run's
-  ``rapidtriage-search.db``; full or incremental per analysis).
+  ``rapidtriage-search.db``; full or incremental per analysis);
+* ``triage-flags`` -- ``core.triage_rules.engine.run_triage_flags`` (특이사항
+  rules over the run's outputs into ``flags.jsonl`` + ``summary.json``; one
+  progress unit per row source).
 """
 
 from __future__ import annotations
@@ -51,6 +54,7 @@ from ...core.files import RUN_OUTPUT_DIR_PREFIX
 from ...core.jobs import is_relative_to
 from ...core.link_safe_walk import WalkStats, iter_files_no_links
 from .analyses import (
+    ANALYSIS_ID_PATTERN,
     ANALYSIS_ROOTS_ENV,
     ANALYSIS_RUNNER,
     ROWS_FILE_NAME,
@@ -1760,6 +1764,131 @@ def run_search_index(ctx: AnalysisContext) -> None:
     ctx.summary.update(summary)
 
 
+# --- triage-flags ---------------------------------------------------------------------------
+
+
+class TriageFlagsOptions(_Options):
+    # Optional incident window (ISO-8601) for the window-dependent rules.
+    incident_start: str | None = Field(default=None, max_length=64)
+    incident_end: str | None = Field(default=None, max_length=64)
+    include_analyses: bool = True
+
+    @field_validator("incident_start", "incident_end")
+    @classmethod
+    def _iso_time(cls, value: str | None) -> str | None:
+        from ...core.triage_rules.base import parse_time
+
+        if value is None or not value.strip():
+            return None
+        if parse_time(value.strip()) is None:
+            raise ValueError(f"ISO-8601 시각 형식이 아닙니다: {value!r}")
+        return value.strip()
+
+    @model_validator(mode="after")
+    def _window_order(self) -> TriageFlagsOptions:
+        from ...core.triage_rules.base import parse_time
+
+        start, end = parse_time(self.incident_start), parse_time(self.incident_end)
+        if start is not None and end is not None and start > end:
+            raise ValueError("사건 시작 시각이 종료 시각보다 늦습니다")
+        return self
+
+
+def triage_inputs(scope: RunScope, *, include_analyses: bool, own_id: str | None = None):
+    """Engine inputs of a run: per-kind artifacts outputs, the files output and completed analyses some rule reads."""
+    from ...core.triage_rules import load_catalog
+    from ...core.triage_rules.engine import TriageInputs, build_rules
+    from ...core.triage_rules.stage import TRIAGE_ANALYSIS_KIND
+
+    outputs = scope.summary.get("outputs") if isinstance(scope.summary.get("outputs"), Mapping) else {}
+    artifacts: dict[str, Path] = {}
+    files_path: Path | None = None
+    for name in sorted(outputs):
+        try:
+            path = scope.store.output_path(scope.run_id, str(name))
+        except (KeyError, RuntimeError, PermissionError, FileNotFoundError, OSError):
+            continue
+        if str(name).startswith("artifacts_"):
+            artifacts[str(name).removeprefix("artifacts_")] = path
+        elif name == "files":
+            files_path = path
+    analyses: list[tuple[str, str, Path, int]] = []
+    if include_analyses:
+        rules = build_rules(load_catalog())
+        for state in ANALYSIS_RUNNER.list_states(scope.output_dir):
+            analysis_id = str(state.get("analysis_id") or "")
+            kind = str(state.get("kind") or "")
+            row_count = int(state.get("row_count") or 0)
+            if (
+                analysis_id == own_id
+                or kind == TRIAGE_ANALYSIS_KIND
+                or state.get("status") != "completed"
+                or row_count <= 0
+                or not ANALYSIS_ID_PATTERN.fullmatch(analysis_id)
+            ):
+                continue
+            if any(rule.accepts("analysis", kind, f"{kind}-row") for rule in rules):
+                analyses.append((analysis_id, kind, analyses_root(scope.output_dir) / analysis_id / ROWS_FILE_NAME, row_count))
+    return TriageInputs(output_dir=scope.output_dir, artifact_payloads=artifacts, files_path=files_path, analyses=analyses)
+
+
+def run_triage_flags_kind(ctx: AnalysisContext) -> None:
+    """Rule engine (``core.triage_rules``) over the run's outputs into ``analyses/<id>/flags.jsonl`` + ``summary.json``.
+
+    One progress unit per row source (artifact kind, files list, analysis);
+    cancellation is checked between sources and every 2,000 rows. No result
+    rows: the flags are joined onto the grid rows (``triage_flags``).
+    """
+    from ...core.triage_rules.engine import Progress, run_triage_flags
+
+    options: TriageFlagsOptions = ctx.options  # type: ignore[assignment]
+    inputs = triage_inputs(ctx.scope, include_analyses=options.include_analyses, own_id=str(ctx.state.get("analysis_id")))
+    started: list[str] = []
+
+    def begin(kind: str, index: int, count: int) -> None:
+        if not started:
+            ctx.set_total(count, message=f"행 소스 {count}개 검사 시작")
+        else:
+            ctx.advance(message=f"{kind} 검사 중")
+        started.append(kind)
+
+    def rows(kind: str, done: int) -> None:
+        ctx.set_message(f"{kind} {done:,}행 검사")
+
+    summary = run_triage_flags(
+        inputs,
+        ctx.directory,
+        source_label=f"analysis:{ctx.state.get('analysis_id')}",
+        incident_start=options.incident_start,
+        incident_end=options.incident_end,
+        progress=Progress(begin=begin, rows=rows, check_cancel=ctx.check_cancel),
+    )
+    if started:
+        ctx.advance(message="특이사항 계산 완료")
+    ctx.summary.update(
+        {
+            key: summary.get(key)
+            for key in (
+                "status",
+                "coverage",
+                "catalog_version",
+                "rule_set",
+                "flagged_rows",
+                "flag_count",
+                "rows_by_best_grade",
+                "flags_by_grade",
+                "by_rule",
+                "rows_scanned",
+                "skipped_sources",
+                "suppressed",
+                "rule_errors",
+                "elapsed_s",
+                "limitation",
+            )
+        }
+    )
+
+
 # --- shared -------------------------------------------------------------------------------
 
 
@@ -1857,6 +1986,9 @@ _COMMON_LABELS = {
     "max_shared": "최대 공유 지표 수",
     "mode": "색인 방식",
     "analysis_ids": "분석 id",
+    "incident_start": "사건 시작 시각",
+    "incident_end": "사건 종료 시각",
+    "include_analyses": "분석 결과 포함",
 }
 
 KIND_RUNNERS: dict[str, AnalysisSpec] = {
@@ -1875,5 +2007,6 @@ KIND_RUNNERS: dict[str, AnalysisSpec] = {
         ),
         AnalysisSpec("cross-case", "교차 케이스", "케이스 쌍", CrossCaseOptions, run_cross_case, prepare_cross_case, _COMMON_LABELS),
         AnalysisSpec("search-index", "검색 색인", "출력 파일", SearchIndexOptions, run_search_index, None, _COMMON_LABELS),
+        AnalysisSpec("triage-flags", "특이사항", "행 소스", TriageFlagsOptions, run_triage_flags_kind, None, _COMMON_LABELS),
     )
 }

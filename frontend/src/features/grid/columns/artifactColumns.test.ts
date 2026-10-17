@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GridRow } from "../../../contracts/collection";
+import { EMPTY_CATALOG_FOR_TESTS, setCatalog } from "../../flags/catalog";
 import { matchesFilter } from "../gridUtils";
 import { summarizeArtifact } from "./artifactSummary";
 import { artifactColumnsForKind, KIND_COLUMNS, SORT_LIST_REASON, TIME_KEYS } from "./artifacts";
@@ -142,6 +143,10 @@ describe("record-field columns: discovery and promotion", () => {
 });
 
 describe("kind default columns (§4.3) and sort keys", () => {
+  // KIND_COLUMNS layouts: a catalogue that does not claim these kinds (the fallback path);
+  // catalogue family layouts are covered by families.test.ts.
+  beforeEach(() => setCatalog(EMPTY_CATALOG_FOR_TESTS, "server"));
+  afterEach(() => setCatalog(null));
   const headers = (kind: string) => artifactColumnsForKind(kind).map((c) => c.header);
 
   it("each listed kind shows its own columns", () => {
@@ -215,6 +220,7 @@ describe("kind default columns (§4.3) and sort keys", () => {
       "시각",
       "유형",
       "항목",
+      "특이사항",
       "경로",
       "선별",
       "내용",
@@ -223,10 +229,12 @@ describe("kind default columns (§4.3) and sort keys", () => {
       "지원",
       "SHA-256",
     ]);
+    // 특이사항 is a default column, hidden while no loaded row is flagged (ARTIFACT_PRIORITY).
     expect(generic.filter((c) => c.presets.includes("analysis")).map((c) => c.header)).toEqual([
       "시각",
       "유형",
       "항목",
+      "특이사항",
       "경로",
       "선별",
     ]);

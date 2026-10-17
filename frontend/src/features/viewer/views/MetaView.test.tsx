@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GridRow } from "../../../contracts/collection";
+import { EMPTY_CATALOG_FOR_TESTS, setCatalog } from "../../flags/catalog";
 import { useGridLocalStore } from "../../grid/adapter";
 import { evidenceInfo, timelineWindowHash } from "../evidenceInfo";
 import { MetaView } from "./MetaView";
@@ -177,6 +178,9 @@ describe("MetaView 증거 정보", () => {
 });
 
 describe("MetaView long values and 열로 표시 (artifact-columns U-C1/U-C3)", () => {
+  // KIND_COLUMNS layouts: a catalogue that does not claim these kinds (the fallback path);
+  // catalogue family layouts are covered by families.test.ts.
+  beforeEach(() => setCatalog(EMPTY_CATALOG_FOR_TESTS, "server"));
   const artifactRow = (details: Record<string, unknown>): GridRow => ({
     rowKey: "artifacts:eventlog:/artifacts/3",
     ref: { collection: "artifacts", kind: "eventlog", locator: "/artifacts/3" },
@@ -207,6 +211,7 @@ describe("MetaView long values and 열로 표시 (artifact-columns U-C1/U-C3)", 
   };
 
   afterEach(() => {
+    setCatalog(null);
     window.localStorage.clear();
     useGridLocalStore.setState((s) => ({
       route: { ...s.route, collection: { id: "files" }, cols: undefined },

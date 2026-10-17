@@ -59,4 +59,12 @@ export const KEY_MAP = {
   stageExplore: "Alt+3",
   stageReview: "Alt+4",
   stageReport: "Alt+5",
+  /** 조건 패널 (viewer-families U-F1): search conditions, 특이사항, 열 구성, 밀도. */
+  conditions: "F",
+  /** 탐색 트리: 결과 없는 계열 표시/숨김 (viewer-families U-F7). */
+  treeEmpty: "T",
+  /** Viewer in its own window (U-F2). */
+  viewerPopout: "Ctrl+Shift+V",
+  /** Viewer window only: mode tabs 1–8 (원본 · 헥스 · SQLite · 이미지 · 문서 · 메일 · 미디어 · 메타). */
+  viewerModes: "1-8",
 } as const;

@@ -65,6 +65,11 @@ export function useTreeData(runId: string | null) {
     evidence: dashboard.data?.evidence_source,
     /** First load of the counts/tree (X18 loading card); false once either settles. */
     loading: enabled && summary.isPending && tree.isPending,
+    /**
+     * Every source of the hidden-family count (U-F7) answered (or failed): `/tree`, the run
+     * summary and the analysis jobs — before that n would still move.
+     */
+    treeSettled: !enabled || (!tree.isPending && !summary.isPending && !analyses.loading),
   };
 }
 
@@ -73,7 +78,11 @@ export function useTreeModel(runId: string | null): TreeModelNode[] {
 }
 
 /** Tree nodes plus the first-load flag (EvidenceTree shows a loading line, X18). */
-export function useTreeState(runId: string | null): { model: TreeModelNode[]; loading: boolean } {
+export function useTreeState(runId: string | null): {
+  model: TreeModelNode[];
+  loading: boolean;
+  treeSettled: boolean;
+} {
   const data = useTreeData(runId);
   const applySavedSearch = useSearchState((s) => s.applySaved);
   const model = useMemo(
@@ -103,5 +112,5 @@ export function useTreeState(runId: string | null): { model: TreeModelNode[]; lo
       runId,
     ],
   );
-  return { model, loading: data.loading };
+  return { model, loading: data.loading, treeSettled: data.treeSettled };
 }
