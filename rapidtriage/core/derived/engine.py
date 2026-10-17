@@ -37,9 +37,12 @@ plus ``url_class`` / ``url_class_label`` / ``examples`` (≤ 3 URLs) for ``urls`
 written**: ``value`` is the masked form, ``normalized`` is ``sha256:<hex>``.
 ``kind`` = artifact kind, ``files:candidates`` / ``files:inventory`` or
 ``analysis:<analysis_id>``; ``record_index`` numbers rows like the grid readers.
+Next to each table, ``<table>.index.json`` is a columnar paging index (normalised values,
+casefolded search texts, counts, first/last seen, kind sets, byte offset + length of each
+row's line) so the API pages a table without parsing every row's samples.
 ``first_seen`` / ``last_seen`` come from the row's first catalogue time column that
-has a value (else its ``timestamp``). Samples are spread round-robin over the kinds a
-value was seen in, so a value seen in several families links to each of them.
+has a value (else its ``timestamp``). Samples are spread round-robin over the (row source,
+family) groups a value was seen in, so a value seen in several families links to each of them.
 
 Caps: at most ``MAX_VALUES_PER_TABLE`` distinct values per table and an estimated
 ``MEMORY_CAP_BYTES`` for all tables together; past a cap new values are not added
@@ -76,6 +79,7 @@ from .normalize import clean, credential_record, normalize
 from .url_classes import UrlClasses, load_url_classes
 
 SUMMARY_FILE_NAME = "summary.json"
+INDEX_SUFFIX = ".index.json"
 SUMMARY_VERSION = "derived-summary-v1"
 TABLES: tuple[str, ...] = ("people", "devices", "paths", "attachments", "credentials", "urls")
 TABLE_LABELS: dict[str, str] = {
@@ -310,14 +314,11 @@ class DerivedCollector:
                 entry.first = moment
             if entry.last is None or moment > entry.last:
                 entry.last = moment
-        kind_samples = entry.samples.setdefault(kind, [])
+        # Samples are kept per (row source, family): each family a value was seen in stays reachable.
+        group = entry.samples.setdefault(f"{kind}\0{family}", [])
         stored = sum(len(items) for items in entry.samples.values())
-        if len(kind_samples) < MAX_SAMPLES_PER_KIND and stored < MAX_SAMPLES_STORED:
-            kind_samples.append((record_index, field, family, artifact_type, moment.isoformat() if moment else None))
-            self.estimated_bytes += SAMPLE_BYTES
-        elif not kind_samples:
-            # A new kind past the stored cap still gets one sample (each family stays reachable).
-            kind_samples.append((record_index, field, family, artifact_type, moment.isoformat() if moment else None))
+        if (len(group) < MAX_SAMPLES_PER_KIND and stored < MAX_SAMPLES_STORED) or not group:
+            group.append((record_index, field, family, artifact_type, moment.isoformat() if moment else None))
             self.estimated_bytes += SAMPLE_BYTES
         if table == "urls" and isinstance(raw, str) and "://" in raw:
             examples = entry.examples if entry.examples is not None else []
@@ -368,7 +369,8 @@ def _sibling(details: Mapping[str, object], field: str, suffix: str) -> Any:
 
 
 def _round_robin(samples: Mapping[str, list[tuple[int, str, str, str, str | None]]]) -> list[dict[str, object]]:
-    queues = [(kind, list(items)) for kind, items in samples.items()]
+    """Up to MAX_SAMPLES samples taken in turn from each (row source, family) group."""
+    queues = [(group.split("\0", 1)[0], list(items)) for group, items in samples.items()]
     picked: list[dict[str, object]] = []
     position = 0
     while len(picked) < MAX_SAMPLES and any(items for _kind, items in queues):
@@ -531,7 +533,45 @@ def run_derived(
         coverage=coverage,
         errors=errors,
         elapsed=time.monotonic() - started,
+        analysis_kinds={source.kind: source.source_kind for source in sources if source.collection == "analysis"},
     )
+
+
+INDEX_VERSION = "derived-index-v1"
+
+
+def search_text(value: object, normalized: str) -> str:
+    """Casefolded text a table search matches: the value, plus the normalised form when it differs."""
+    shown = str(value or "").casefold()
+    key = normalized.casefold()
+    return shown if shown == key else f"{shown}\n{key}"
+
+
+def paging_index(rows: Sequence[Mapping[str, object]]) -> dict[str, Any]:
+    """Columnar paging index of a table (``<table>.index.json``); ``offsets`` / ``lengths`` are filled
+    while the rows are written. ``kinds`` holds an index into ``kind_sets`` per row."""
+    kind_sets: list[list[str]] = []
+    set_ids: dict[tuple[str, ...], int] = {}
+    kinds: list[int] = []
+    for row in rows:
+        key = tuple(dict(row["kinds"]))  # type: ignore[call-overload]
+        if key not in set_ids:
+            set_ids[key] = len(kind_sets)
+            kind_sets.append(list(key))
+        kinds.append(set_ids[key])
+    return {
+        "version": INDEX_VERSION,
+        "rows": len(rows),
+        "normalized": [row["normalized"] for row in rows],
+        "search": [search_text(row["value"], str(row["normalized"])) for row in rows],
+        "count": [row["count"] for row in rows],
+        "first": [row["first_seen"] for row in rows],
+        "last": [row["last_seen"] for row in rows],
+        "kind_sets": kind_sets,
+        "kinds": kinds,
+        "offsets": [],
+        "lengths": [],
+    }
 
 
 def _write_outputs(
@@ -547,6 +587,7 @@ def _write_outputs(
     coverage: Mapping[str, Mapping[str, object]],
     errors: Mapping[str, object],
     elapsed: float,
+    analysis_kinds: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
     out_dir.mkdir(parents=True, exist_ok=True)
     tables: dict[str, dict[str, object]] = {}
@@ -560,11 +601,23 @@ def _write_outputs(
             for semantic, count in dict(row["semantics"]).items():  # type: ignore[call-overload]
                 by_semantic[semantic] = by_semantic.get(semantic, 0) + int(count)
 
-        def write_rows(handle, rows: list[dict[str, object]] = rows) -> None:
+        index = paging_index(rows)
+
+        def write_rows(handle, rows: list[dict[str, object]] = rows, index: dict[str, Any] = index) -> None:
+            offset = 0
             for row in rows:
-                handle.write(json.dumps(row, ensure_ascii=False, separators=(",", ":"), default=json_default) + "\n")
+                line = json.dumps(row, ensure_ascii=False, separators=(",", ":"), default=json_default) + "\n"
+                size = len(line.encode("utf-8"))
+                handle.write(line)
+                index["offsets"].append(offset)
+                index["lengths"].append(size)
+                offset += size
+
+        def write_index(handle, index: dict[str, Any] = index) -> None:
+            handle.write(json.dumps(index, ensure_ascii=False, separators=(",", ":"), default=json_default))
 
         _write_atomic(out_dir / f"{table}.jsonl", write_rows)
+        _write_atomic(out_dir / f"{table}{INDEX_SUFFIX}", write_index)
         state = collector.tables[table]
         tables[table] = {
             "label": TABLE_LABELS[table],
@@ -582,6 +635,9 @@ def _write_outputs(
                 if row.get("url_class"):
                     classes[str(row["url_class"])] = classes.get(str(row["url_class"]), 0) + 1
             tables[table]["by_class"] = dict(sorted(classes.items()))
+        # The written table is no longer needed in memory (lowers the peak for the larger tables after it).
+        state.entries.clear()
+        del rows, index
     coverage_summary = coverage_block(coverage)
     summary: dict[str, object] = {
         "version": SUMMARY_VERSION,
@@ -597,6 +653,8 @@ def _write_outputs(
         },
         "tables": tables,
         "untabled_semantics": dict(sorted(untabled.items())),
+        # ``analysis:<id>`` row source -> its analysis kind (the console opens that analysis node).
+        "analysis_kinds": dict(sorted((analysis_kinds or {}).items())),
         "rows_scanned": dict(scanned),
         "rows_with_values": dict(tagged_rows),
         "errors": dict(errors),

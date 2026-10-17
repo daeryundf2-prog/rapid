@@ -189,6 +189,25 @@ class DerivedApiTests(unittest.TestCase):
         self.build()
         self.assertIn("첫 페이지", self.get("/derived/people", expect=422, limit=2, after=cursor)["detail"])
 
+    def test_missing_or_bad_paging_index_falls_back_to_the_table(self) -> None:
+        step = self.build()
+        directory = self.run_dir / "analyses" / str(step["analysis_id"])
+        expected = self.get("/derived/people", limit=3)["rows"]
+        good = json.loads((directory / "people.index.json").read_text(encoding="utf-8"))
+        past_end = {**good, "offsets": [999_999] * good["rows"]}
+        short = {**good, "count": good["count"][:-1]}
+        for broken in (None, json.dumps(past_end), json.dumps(short), "not json"):
+            derived.clear_derived_cache()
+            sidecar = directory / "people.index.json"
+            if broken is None:
+                sidecar.unlink()
+            else:
+                sidecar.write_text(broken, encoding="utf-8")
+            page = self.get("/derived/people", limit=3)
+            self.assertEqual(page["rows"], expected, broken)
+            self.assertEqual(page["total"], 7)
+            self.assertEqual(self.get("/derived/people/rows", value="user1")["count"], 5)
+
     def test_value_rows_give_grid_locators(self) -> None:
         self.build()
         rows = self.get("/derived/people/rows", value="user1")

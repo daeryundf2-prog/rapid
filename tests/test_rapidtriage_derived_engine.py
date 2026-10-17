@@ -223,7 +223,22 @@ class EngineTests(unittest.TestCase):
         out = self.base / "out"
         summary = run_derived(self.inputs(eventlog=eventlog, windows_os_account=accounts, browser=browser), out, source_label="test")
         self.assertEqual(summary["status"], "completed")
-        self.assertEqual({path.name for path in out.iterdir()}, {*(f"{table}.jsonl" for table in TABLES), "summary.json"})
+        self.assertEqual(
+            {path.name for path in out.iterdir()},
+            {*(f"{table}.jsonl" for table in TABLES), *(f"{table}.index.json" for table in TABLES), "summary.json"},
+        )
+        # The paging index points at each row's own line.
+        raw = (out / "people.jsonl").read_bytes()
+        index = json.loads((out / "people.index.json").read_text(encoding="utf-8"))
+        self.assertEqual(index["rows"], len(raw.splitlines()))
+        for position in range(index["rows"]):
+            offset, length = index["offsets"][position], index["lengths"][position]
+            row = json.loads(raw[offset : offset + length])
+            kinds = index["kind_sets"][index["kinds"][position]]
+            self.assertEqual(
+                (row["normalized"], row["count"], list(row["kinds"])),
+                (index["normalized"][position], index["count"][position], kinds),
+            )
         people = self.table(out, "people")
         alice = people[0]
         self.assertEqual((alice["normalized"], alice["count"]), ("alice", 34))

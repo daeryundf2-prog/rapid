@@ -98,7 +98,7 @@ def build_derived_router(store: RunJobStore) -> APIRouter:
             "table": table,
             "label": TABLE_LABELS[table],
             "source": source_info(source),
-            "total": len(index.lines),
+            "total": len(index),
             "matched": matched,
             "limit": query.limit,
             "sort": query.sort,
@@ -111,8 +111,8 @@ def build_derived_router(store: RunJobStore) -> APIRouter:
     @router.get("/api/runs/{run_id}/derived/{table}/rows")
     def get_derived_value_rows(run_id: str, table: str, value: str = Query(default="")) -> dict[str, object]:
         """Original rows of one table value: the row (by its ``normalized`` value) with ``samples`` =
-        ``[{kind, record_index, field, family, artifact_type, time, collection, locator, kind?|scope?|
-        analysis_id?}]`` (≤20, spread over the kinds it was seen in). ``value`` missing or too long is a
+        ``[{kind, record_index, field, family, artifact_type, time, collection, locator, scope?,
+        analysis_id?, analysis_kind?}]`` (≤20, spread over the kinds it was seen in). ``value`` missing or too long is a
         Korean 422; a value the table does not have is a 404."""
         require_table(table)
         text = value.strip()
@@ -120,6 +120,14 @@ def build_derived_router(store: RunJobStore) -> APIRouter:
             raise HTTPException(status_code=422, detail=f"value(정규화 값)는 1~{MAX_VALUE_CHARS}자여야 합니다")
         source, run_key = _source(run_id)
         index = _index(source, run_key, table)
-        return {"run_id": run_id, "table": table, "label": TABLE_LABELS[table], "source": source_info(source), **value_rows(index, text)}
+        summary = source["summary"] if isinstance(source["summary"], dict) else {}
+        analysis_kinds = summary.get("analysis_kinds") if isinstance(summary.get("analysis_kinds"), dict) else {}
+        return {
+            "run_id": run_id,
+            "table": table,
+            "label": TABLE_LABELS[table],
+            "source": source_info(source),
+            **value_rows(index, text, analysis_kinds),
+        }
 
     return router

@@ -6,10 +6,13 @@ says ``completed`` or ``partial``, by ``finished_at``. The directory comes from 
 validated analysis id, never from a request or a path stored in a state file; the
 table name is one of :data:`TABLES`, so a request can never name a file.
 
-One table file is read once per (run, analysis id, table, size, mtime) -- single-flight,
-at most ``INDEX_CACHE_MAX`` tables cached -- into a :class:`TableIndex`: the raw JSON line
-of every row plus the fields paging needs (normalised value, a casefolded search text,
-kinds, count, first/last seen) and one row order per sort. Pages are keyset pages: the
+One table is indexed once per (run, analysis id, table, size, mtime) -- single-flight,
+at most ``INDEX_CACHE_MAX`` tables cached -- into a :class:`TableIndex`: the fields paging
+needs (normalised value, a casefolded search text, kinds, count, first/last seen), the byte
+offset and length of every row's line, and one row order per sort. The index comes from the
+``<table>.index.json`` sidecar the engine writes (a set without one, or with one that does
+not fit its table, is indexed by reading every row); a page reads only its own rows by offset.
+Pages are keyset pages: the
 cursor names the analysis id, the sort and the last row's normalised value, so a cursor
 from another generation or sort is refused (Korean 422) instead of skipping rows.
 """
@@ -21,6 +24,7 @@ import binascii
 import json
 import re
 import threading
+from array import array
 from collections import OrderedDict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -28,7 +32,14 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
-from ...core.derived.engine import SUMMARY_FILE_NAME, TABLE_LABELS, TABLES
+from ...core.derived.engine import (
+    INDEX_SUFFIX,
+    INDEX_VERSION,
+    SUMMARY_FILE_NAME,
+    TABLE_LABELS,
+    TABLES,
+    search_text,
+)
 from ...core.derived.stage import DERIVED_ANALYSIS_KIND
 from .analyses import ANALYSIS_ID_PATTERN, ANALYSIS_RUNNER, analyses_root
 
@@ -160,25 +171,41 @@ def tree_derived_node(output_dir: Path | None) -> dict[str, object] | None:
 @dataclass
 class TableIndex:
     key: tuple[object, ...]
-    lines: list[bytes]
+    path: Path
     normalized: list[str]
     search: list[str]
     kinds: list[frozenset[str]]
     counts: list[int]
     first: list[str | None]
     last: list[str | None]
+    # Byte offset / length of each row's line in the table file (rows are read on demand).
+    offsets: array = field(default_factory=lambda: array("q"))
+    lengths: array = field(default_factory=lambda: array("q"))
     position: dict[str, int] = field(default_factory=dict)
     orders: dict[str, list[int]] = field(default_factory=dict)
     # sort -> row position -> place in that order (cursor resume), built on the first cursor.
     places: dict[str, dict[int, int]] = field(default_factory=dict)
     lock: threading.Lock = field(default_factory=threading.Lock)
 
+    def __len__(self) -> int:
+        return len(self.normalized)
+
+    def rows_at(self, positions: Sequence[int]) -> list[dict[str, object]]:
+        """The full rows at ``positions`` (one seek + read each, in the given order)."""
+        rows: list[dict[str, object]] = []
+        with self.path.open("rb") as handle:
+            for position in positions:
+                handle.seek(self.offsets[position])
+                row = json.loads(handle.read(self.lengths[position]))
+                rows.append(row if isinstance(row, dict) else {})
+        return rows
+
     def order(self, sort: str) -> list[int]:
         with self.lock:
             cached = self.orders.get(sort)
             if cached is not None:
                 return cached
-            indices = range(len(self.lines))
+            indices = range(len(self.normalized))
             if sort == "count":
                 ordered = list(indices)  # the file is written count desc, normalised asc
             elif sort == "first_seen":
@@ -192,35 +219,93 @@ class TableIndex:
             return ordered
 
 
+def _add(index: TableIndex, normalized: str, value: object, count: object, first: object, last: object, kinds: object) -> None:
+    index.normalized.append(normalized)
+    index.search.append(search_text(value, normalized))
+    index.kinds.append(frozenset(str(kind) for kind in kinds) if isinstance(kinds, (list, Mapping)) else frozenset())
+    index.counts.append(int(count) if isinstance(count, int) and not isinstance(count, bool) else 0)
+    index.first.append(str(first) if first else None)
+    index.last.append(str(last) if last else None)
+
+
+def _str_list(value: object, rows: int, *, optional: bool = False) -> bool:
+    return isinstance(value, list) and len(value) == rows and all(
+        isinstance(item, str) or (optional and item is None) for item in value
+    )
+
+
+def _int_list(value: object, rows: int) -> bool:
+    return isinstance(value, list) and len(value) == rows and all(isinstance(item, int) and not isinstance(item, bool) for item in value)
+
+
+def _from_sidecar(key: tuple[object, ...], path: Path, sidecar: Path, size: int) -> TableIndex | None:
+    """The index from the columnar ``<table>.index.json``; ``None`` when it is missing or does not fit the table."""
+    try:
+        payload = json.loads(sidecar.read_bytes())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(payload, dict) or payload.get("version") != INDEX_VERSION or not isinstance(payload.get("rows"), int):
+        return None
+    rows = int(payload["rows"])
+    kind_sets = payload.get("kind_sets")
+    offsets, lengths, kinds = payload.get("offsets"), payload.get("lengths"), payload.get("kinds")
+    valid = (
+        _str_list(payload.get("normalized"), rows)
+        and _str_list(payload.get("search"), rows)
+        and _str_list(payload.get("first"), rows, optional=True)
+        and _str_list(payload.get("last"), rows, optional=True)
+        and _int_list(payload.get("count"), rows)
+        and _int_list(offsets, rows)
+        and _int_list(lengths, rows)
+        and _int_list(kinds, rows)
+        and isinstance(kind_sets, list)
+        and all(isinstance(entry, list) for entry in kind_sets)
+    )
+    if not valid:
+        return None
+    assert isinstance(offsets, list) and isinstance(lengths, list) and isinstance(kinds, list) and isinstance(kind_sets, list)
+    if any(offset < 0 or length <= 0 or offset + length > size for offset, length in zip(offsets, lengths)):
+        return None
+    if any(not 0 <= item < len(kind_sets) for item in kinds):
+        return None
+    frozen = [frozenset(str(kind) for kind in entry) for entry in kind_sets]
+    return TableIndex(
+        key,
+        path,
+        payload["normalized"],
+        payload["search"],
+        [frozen[item] for item in kinds],
+        payload["count"],
+        payload["first"],
+        payload["last"],
+        offsets=array("q", offsets),
+        lengths=array("q", lengths),
+    )
+
+
 def build_table_index(key: tuple[object, ...], path: Path) -> TableIndex:
-    lines: list[bytes] = []
-    normalized: list[str] = []
-    search: list[str] = []
-    kinds: list[frozenset[str]] = []
-    counts: list[int] = []
-    first: list[str | None] = []
-    last: list[str | None] = []
-    with path.open("rb") as handle:
-        for line in handle:
-            stripped = line.strip()
-            if not stripped.startswith(b"{"):
-                continue
-            try:
-                row = json.loads(stripped)
-            except ValueError:
-                continue
-            if not isinstance(row, dict) or not isinstance(row.get("normalized"), str):
-                continue
-            lines.append(stripped)
-            normalized.append(row["normalized"])
-            search.append(f"{row.get('value') or ''}\n{row['normalized']}".casefold())
-            row_kinds = row.get("kinds") if isinstance(row.get("kinds"), Mapping) else {}
-            kinds.append(frozenset(str(kind) for kind in row_kinds))
-            counts.append(int(row.get("count") or 0))
-            first.append(str(row["first_seen"]) if row.get("first_seen") else None)
-            last.append(str(row["last_seen"]) if row.get("last_seen") else None)
-    index = TableIndex(key, lines, normalized, search, kinds, counts, first, last)
-    index.position = {value: position for position, value in enumerate(normalized)}
+    """Index of one table: from its ``.index.json`` sidecar, else by reading every row (older sets)."""
+    size = path.stat().st_size
+    index = _from_sidecar(key, path, path.with_name(f"{path.stem}{INDEX_SUFFIX}"), size)
+    if index is None:
+        index = TableIndex(key, path, [], [], [], [], [], [])
+        offset = 0
+        with path.open("rb") as handle:
+            for line in handle:
+                start, offset = offset, offset + len(line)
+                stripped = line.strip()
+                if not stripped.startswith(b"{"):
+                    continue
+                try:
+                    row = json.loads(stripped)
+                except ValueError:
+                    continue
+                if not isinstance(row, dict) or not isinstance(row.get("normalized"), str):
+                    continue
+                _add(index, row["normalized"], row.get("value"), row.get("count"), row.get("first_seen"), row.get("last_seen"), row.get("kinds"))
+                index.offsets.append(start)
+                index.lengths.append(len(line))
+    index.position = {value: position for position, value in enumerate(index.normalized)}
     return index
 
 
@@ -340,8 +425,7 @@ def parse_query(q: str | None, kind: str | None, sort: str | None, limit: str | 
     )
 
 
-def _list_row(line: bytes) -> dict[str, object]:
-    row = json.loads(line)
+def _list_row(row: dict[str, object]) -> dict[str, object]:
     samples = row.pop("samples", None)
     row["sample_count"] = len(samples) if isinstance(samples, list) else 0
     return row
@@ -370,19 +454,18 @@ def page_rows(
 
     filtered = bool(needle or kind)
     matched = sum(1 for position in order if passes(position)) if filtered else len(order)
-    rows: list[dict[str, object]] = []
-    last_position: int | None = None
+    picked: list[int] = []
     more = False
     for cursor_index in range(start, len(order)):
         position = order[cursor_index]
         if filtered and not passes(position):
             continue
-        if len(rows) >= query.limit:
+        if len(picked) >= query.limit:
             more = True
             break
-        rows.append(_list_row(index.lines[position]))
-        last_position = position
-    next_cursor = encode_cursor(analysis_id, query.sort, index.normalized[last_position]) if more and last_position is not None else None
+        picked.append(position)
+    rows = [_list_row(row) for row in index.rows_at(picked)]
+    next_cursor = encode_cursor(analysis_id, query.sort, index.normalized[picked[-1]]) if more and picked else None
     return rows, matched, next_cursor
 
 
@@ -397,8 +480,8 @@ def _order_position(index: TableIndex, sort: str, order: Sequence[int], target: 
     return places[target]
 
 
-def locate_sample(sample: Mapping[str, object]) -> dict[str, object]:
-    """Grid address of a sample row: ``{collection, kind?, analysis_id?, locator}``."""
+def locate_sample(sample: Mapping[str, object], analysis_kinds: Mapping[str, object] | None = None) -> dict[str, object]:
+    """Grid address of a sample row: ``{collection, locator, kind? | scope? | analysis_id + analysis_kind?}``."""
     kind = str(sample.get("kind") or "")
     index = sample.get("record_index")
     position = int(index) if isinstance(index, int) and not isinstance(index, bool) else 0
@@ -407,15 +490,19 @@ def locate_sample(sample: Mapping[str, object]) -> dict[str, object]:
         return {"collection": "files", "scope": listing, "locator": f"/{listing}/{position}"}
     if kind.startswith("analysis:"):
         analysis_id = kind.removeprefix("analysis:")
-        return {"collection": "analysis", "analysis_id": analysis_id, "locator": f"/rows/{position}"}
+        located: dict[str, object] = {"collection": "analysis", "analysis_id": analysis_id, "locator": f"/rows/{position}"}
+        analysis_kind = (analysis_kinds or {}).get(kind)
+        if isinstance(analysis_kind, str) and analysis_kind:
+            located["analysis_kind"] = analysis_kind
+        return located
     return {"collection": "artifacts", "kind": kind, "locator": f"/artifacts/{position}"}
 
 
-def value_rows(index: TableIndex, value: str) -> dict[str, object]:
+def value_rows(index: TableIndex, value: str, analysis_kinds: Mapping[str, object] | None = None) -> dict[str, object]:
     position = index.position.get(value)
     if position is None:
         raise HTTPException(status_code=404, detail="이 통합 보기 표에 없는 값입니다 (정규화 값으로 요청하세요)")
-    row = json.loads(index.lines[position])
+    row = index.rows_at([position])[0]
     samples = row.get("samples") if isinstance(row.get("samples"), list) else []
-    row["samples"] = [{**sample, **locate_sample(sample)} for sample in samples if isinstance(sample, Mapping)]
+    row["samples"] = [{**sample, **locate_sample(sample, analysis_kinds)} for sample in samples if isinstance(sample, Mapping)]
     return row
