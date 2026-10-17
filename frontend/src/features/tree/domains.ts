@@ -570,6 +570,29 @@ export const DOMAINS: readonly DomainDef[] = [
         typeLabels: { "browser-acquisition-anomaly": "취득 이상", "browser-parse-error": "파싱 오류" },
       },
       { id: "web-cache", label: "캐시(WebCache)", target: a("browser", ["webcachev01-ese-file"]) },
+      // r2 M3: decoded Chromium Simple Cache / blockfile / CacheStorage entries and WebCache Content rows.
+      { id: "web-cache-entries", label: "캐시 항목", target: a("browser", ["browser-cache-entry"]) },
+      {
+        // WebCacheV01 container rows reuse the browser row types; this is a filtered view (browser = ie-edge-legacy).
+        id: "web-legacy-ie",
+        label: "레거시 Edge/IE(WebCache)",
+        target: {
+          ...a("browser", ["browser-history", "browser-cache-entry", "browser-cookie", "browser-download"]),
+          cols: ["details.browser", "details.webcache_container"],
+          cf: [{ col: "f:browser", op: ":", value: "ie-edge-legacy" }],
+        },
+        typeLabels: {
+          "browser-history": "방문 기록(History·MSHist)",
+          "browser-cache-entry": "캐시(Content)",
+          "browser-cookie": "쿠키(Cookies)",
+          "browser-download": "다운로드(iedownload)",
+        },
+      },
+      {
+        id: "web-upload-candidates",
+        label: "웹메일·웹하드 업로드 후보",
+        target: a("browser", ["web-upload-candidate"]),
+      },
       {
         id: "web-ai",
         label: "AI 서비스 사용",

@@ -28,6 +28,8 @@ export const TS_KIND_LABELS: Record<string, string> = {
   "account-expires": "계정 만료",
   "download-start": "다운로드 시작",
   "download-end": "다운로드 완료",
+  "cache-response": "캐시 응답",
+  "cache-request": "캐시 요청",
   "first-install": "최초 설치",
   "last-accessed": "마지막 접근",
   "last-connected": "마지막 연결",

@@ -101,6 +101,9 @@ const EVIDENCE: Record<string, string[]> = {
     "browser-ai-conversation",
     "browser-storage-inventory",
     "browser-history-downloads",
+    // r2 M3 (browser depth)
+    "browser-cache-entry",
+    "web-upload-candidate",
   ],
   "generic-documents": ["document-metadata-risk", "document-lock-owner", "archive-file-inventory"],
   "media-image": ["media-image", "media-video", "media-audio"],
