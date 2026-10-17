@@ -13,6 +13,7 @@ families:
     format: time
     ts_kind: visited
   - key: url
+    semantic: url
     label: 주소 (URL)
     format: url
   - key: title
@@ -30,9 +31,11 @@ families:
   - key: transition_qualifiers
     label: 전환 한정자
   - key: from_url
+    semantic: url
     label: 이전 URL
     format: url
   - key: external_referrer_url
+    semantic: url
     label: 외부 참조 URL
     format: url
   - key: visit_duration_seconds
@@ -50,6 +53,7 @@ families:
   - key: profile
     label: 프로필
   - key: user
+    semantic: account
     label: 사용자
   rules:
   - browser.incognito_gap
@@ -67,20 +71,24 @@ families:
     format: time
     ts_kind: download-start
   - key: source_url
+    semantic: url
     label: 출처 주소 (URL)
     aliases:
     - url
     format: url
   - key: tab_url
+    semantic: url
     label: 탭 URL
     format: url
   - key: referrer
+    semantic: url
     label: 참조 URL
     aliases:
     - tab_referrer_url
     - site_url
     format: url
   - key: target_path
+    semantic: path
     label: 대상 경로
     aliases:
     - current_path
@@ -121,6 +129,7 @@ families:
   - key: profile
     label: 프로필
   - key: user
+    semantic: account
     label: 사용자
   - key: ended_at
     label: 다운로드 완료
@@ -148,6 +157,7 @@ families:
     format: time
     ts_kind: last-visited
   - key: url
+    semantic: url
     label: 주소 (URL)
     format: url
   - key: title
@@ -171,6 +181,7 @@ families:
     label: 프로필
   aux_columns:
   - key: user
+    semantic: account
     label: 사용자
   - key: history_count
     label: 방문 기록 수
@@ -195,6 +206,7 @@ families:
     format: time
     ts_kind: created
   - key: host
+    semantic: url
     label: 호스트
     aliases:
     - host_key
@@ -248,12 +260,14 @@ families:
     format: time
     ts_kind: created
   - key: origin
+    semantic: url
     label: 사이트
     aliases:
     - action_url
     - signon_realm
     format: url
   - key: username
+    semantic: account
     label: 사용자 이름
     aliases:
     - display_name
@@ -265,6 +279,7 @@ families:
   - key: blacklisted_by_user
     label: 저장 안 함(사용자)
   - key: federation_url
+    semantic: url
     label: 연동 URL
     format: url
   - key: browser
@@ -296,10 +311,12 @@ families:
     format: time
     ts_kind: visited
   - key: term
+    semantic: search_term
     label: 검색어
     aliases:
     - normalized_term
   - key: url
+    semantic: url
     label: 주소 (URL)
     format: url
   - key: title
@@ -329,6 +346,7 @@ families:
     aliases:
     - title
   - key: url
+    semantic: url
     label: 주소 (URL)
     format: url
   - key: folder
@@ -381,6 +399,7 @@ families:
     label: 기본 설치
   aux_columns:
   - key: manifest_path
+    semantic: path
     label: 매니페스트 경로
     format: path
   - key: browser
@@ -413,8 +432,13 @@ families:
     - field_id
     - name
   - key: domain
+    semantic: url
     label: 도메인
   - key: value_preview
+    semantic: credential
+    semantic_when:
+      mask_reason:
+      - secret-field-name
     label: 값(마스킹)
   - key: mask_reason
     label: 마스킹 사유

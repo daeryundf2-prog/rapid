@@ -17,6 +17,7 @@ families:
     - device_description
     - device_name
   - key: serial_number
+    semantic: device
     label: 시리얼
     aliases:
     - serial
@@ -46,11 +47,13 @@ families:
     aliases:
     - drive_letter
   - key: volume_guids
+    semantic: device
     label: 볼륨 GUID
     aliases:
     - volume_guid
     format: mono
   - key: container_id
+    semantic: device
     label: 컨테이너 ID
     format: mono
   - key: usb_instance_id

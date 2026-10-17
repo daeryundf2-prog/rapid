@@ -17,8 +17,10 @@ families:
     ts_kind: sent
     width: 170
   - key: from
+    semantic: person_sender
     label: 보낸 사람
   - key: to
+    semantic: person_recipient
     label: 받는 사람
     aliases:
     - cc
@@ -35,9 +37,11 @@ families:
     - auth_results
     format: mono
   - key: return_path
+    semantic: person_sender
     label: 반송 주소 (Return-Path)
     format: mono
   - key: reply_to
+    semantic: person_sender
     label: 회신 주소 (Reply-To)
     format: mono
   - key: attachment_count
@@ -55,6 +59,7 @@ families:
     label: Received 체인
     format: mono
   - key: x_originating_ip
+    semantic: device
     label: 발신 IP (X-Originating-IP)
     format: mono
   - key: thread_parent_id
@@ -65,10 +70,14 @@ families:
   - key: body_preview
     label: 본문 미리보기
   - key: body_sha256
+    semantic: hash
     label: 본문 SHA-256
     format: mono
   - key: source_format
     label: 원본 형식
+  - key: attachments
+    semantic: attachment
+    label: 첨부 파일
   rules:
   - email.spf_fail
   - email.dkim_fail
