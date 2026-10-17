@@ -15,6 +15,7 @@ from ..core.forensic_accuracy import build_accuracy_gate
 from ..core.models import ArtifactRecord
 from ..core.submission import compute_hashes
 from ._walk import iter_evidence_paths
+from .email_pst import collect_ics_file, collect_outlook_container
 from .review import build_forensic_review
 
 PARSER_VERSION = "email-artifacts-v2"
@@ -164,8 +165,28 @@ class EmailArtifactsProvider:
         for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
             if path.is_file() and path.suffix.lower() in EMAIL_SUFFIXES:
                 yield from collect_email_path(path)
+                if path.suffix.lower() in {".pst", ".ost"}:
+                    yield from collect_outlook_rows(path)
+            elif path.is_file() and path.suffix.lower() == ".ics":
+                yield from collect_calendar_file(path)
             elif path.is_file() and is_maildir_message(path):
                 yield from collect_maildir_message(path)
+
+
+def collect_outlook_rows(path: Path) -> list[ArtifactRecord]:
+    """r2 M2: PST/OST rows through pffexport/readpst, else one ``email-container-inventory`` row."""
+    try:
+        return collect_outlook_container(path)
+    except (OSError, ValueError, UnicodeError, LookupError):
+        return []
+
+
+def collect_calendar_file(path: Path) -> list[ArtifactRecord]:
+    """r2 M2: RFC 5545 VEVENT rows; a damaged file yields no rows and the run continues."""
+    try:
+        return collect_ics_file(path)
+    except (OSError, ValueError, UnicodeError, LookupError):
+        return []
 
 
 def collect_email_path(path: Path) -> Iterable[ArtifactRecord]:

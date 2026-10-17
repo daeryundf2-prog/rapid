@@ -32,7 +32,10 @@ class RapidTriageEmailArtifactsTests(unittest.TestCase):
             payload = json.loads(output.read_text(encoding="utf-8"))
             self.assertEqual(payload["kind"], "email")
             artifact_types = {artifact["artifact_type"] for artifact in payload["artifacts"]}
-            self.assertEqual(artifact_types, {"email-message", "email-mailbox"})
+            # r2 M2: every PST/OST also gets an email-container-inventory row (tool status / reason).
+            self.assertEqual(artifact_types, {"email-message", "email-mailbox", "email-container-inventory"})
+            containers = [artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "email-container-inventory"]
+            self.assertEqual(sorted(Path(item["path"]).name for item in containers), ["archive.pst", "offline.ost"])
             messages = [artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "email-message"]
             mailboxes = [artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "email-mailbox"]
             self.assertGreaterEqual(len(messages), 4)
