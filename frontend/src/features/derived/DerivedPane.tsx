@@ -91,13 +91,15 @@ export function DerivedPane() {
   const select = useDerivedStore((s) => s.select);
   const selectedHere = selected && selected.runId === runId && selected.table === table ? selected : null;
 
-  // A new table (or case) starts clean: no kind chip, count order, first row, no selection.
+  // A new table (or case) starts clean: no kind chip, count order, first row, no selection. Coming
+  // back from an original row to the same table keeps the chosen value (its rows panel reopens).
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset on table / run change only
   useEffect(() => {
     setKind(undefined);
     setSort("count");
     setFocusIdx(0);
-    select(null);
+    const current = useDerivedStore.getState().selected;
+    if (!current || current.runId !== runId || current.table !== table) select(null);
   }, [table, runId]);
 
   // `q` rides in the URL (refresh / copied link keep the search).
@@ -250,7 +252,7 @@ export function DerivedPane() {
 
   return (
     <section className="derived-pane" aria-labelledby={headingId} data-testid="derived-pane">
-      <header className="derived-head">
+      <div className="derived-head">
         <h2 id={headingId} className="derived-title">
           통합 보기 · {label}
         </h2>
@@ -291,7 +293,7 @@ export function DerivedPane() {
             }). 이미 있는 값의 건수는 끝까지 셌습니다.`}
           </p>
         ) : null}
-      </header>
+      </div>
       <div className="derived-toolbar" role="toolbar" aria-label="통합 보기 도구">
         <input
           type="search"
