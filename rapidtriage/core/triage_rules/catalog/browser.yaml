@@ -562,7 +562,7 @@ families:
   - key: timestamp
     label: 시각
     format: time
-    ts_kind: observed
+    ts_kind: event
   - key: service_label
     label: 서비스
     aliases:

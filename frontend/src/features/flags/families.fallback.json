@@ -1,5 +1,5 @@
 {
- "version": "84a53d49eed4a815",
+ "version": "de4e5f85743ba8b4",
  "families": [
   {
    "id": "sam-account",
@@ -1513,7 +1513,7 @@
      "key": "timestamp",
      "label": "시각",
      "format": "time",
-     "ts_kind": "observed"
+     "ts_kind": "event"
     },
     {
      "key": "service_label",

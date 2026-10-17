@@ -180,8 +180,8 @@ describe("RDP direction · EXIF state · auto logon", () => {
       );
       expect(familyById("media-image")?.core_columns.some((c) => c.derive === "exif_status")).toBe(true);
       expect(familyById("rdp")?.core_columns.some((c) => c.derive === "rdp_direction")).toBe(true);
-      // Every family of the backend catalogue was reviewed for semantic tags (54).
-      expect(FALLBACK_CATALOG.families).toHaveLength(54);
+      // Every family of the backend catalogue was reviewed for semantic tags (54 + r2 M3: browser-cache-entry, web-upload-candidate).
+      expect(FALLBACK_CATALOG.families).toHaveLength(56);
       expect(familyById("sam-account")?.core_columns.find((c) => c.key === "user_name")?.semantic).toBe(
         "account",
       );
