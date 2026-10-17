@@ -59,7 +59,21 @@ def checked_local_path(raw: str, *, label: str, confine_to_analysis_roots: bool 
 
 
 def same_path(left: str, right: str) -> bool:
-    return os.path.normcase(os.path.abspath(left)) == os.path.normcase(os.path.abspath(right))
+    """Compare two local paths by case/separators and through symlinks or 8.3 short names.
+
+    CI runners spell the temp folder with an 8.3 short name on Windows or under /private on
+    macOS; a resolved request path must still match a job's unresolved output folder.
+    """
+    def keys(value: str) -> set[str]:
+        absolute = os.path.normcase(os.path.abspath(value))
+        out = {absolute}
+        try:
+            out.add(os.path.normcase(os.path.realpath(value)))
+        except OSError:
+            pass
+        return out
+
+    return bool(keys(left) & keys(right))
 
 
 def expected_hash_algorithm(value: str) -> str | None:
