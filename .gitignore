@@ -42,3 +42,6 @@ frontend/playwright-report/
 frontend/test-results/
 frontend/e2e/.artifacts/
 rapidtriage/native/
+
+# Claude Code agent worktrees (local only)
+.claude/worktrees/
