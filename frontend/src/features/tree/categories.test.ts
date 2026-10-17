@@ -10,11 +10,12 @@ import {
   kindsForCategory,
 } from "./categories";
 
-/** `artifact_collectors()` keys in rapidtriage/core/artifacts (24 kinds). */
+/** `artifact_collectors()` keys in rapidtriage/core/artifacts (25 kinds). */
 const ENGINE_KINDS = [
   "android-apk",
   "browser",
   "cloud-export",
+  "cloud-sync",
   "email",
   "eventlog",
   "generic-documents",

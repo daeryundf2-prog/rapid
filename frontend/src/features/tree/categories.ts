@@ -61,6 +61,7 @@ export const KIND_CATEGORY: Readonly<Record<string, KindMeta>> = {
   email: { category: "email-calendar", icon: "mail" },
   "generic-documents": { category: "documents", icon: "file-text" },
   "cloud-export": { category: "cloud", icon: "cloud" },
+  "cloud-sync": { category: "cloud", icon: "cloud" },
   "windows-execution": { category: "application-usage", icon: "play" },
   "windows-remote-access": { category: "application-usage", icon: "monitor" },
   "android-apk": { category: "application-usage", icon: "app" },

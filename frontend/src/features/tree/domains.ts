@@ -647,7 +647,31 @@ export const DOMAINS: readonly DomainDef[] = [
     id: "cloud",
     label: "클라우드",
     icon: "cloud",
-    nodes: [{ id: "cloud-export", label: "Takeout/iCloud/M365 내보내기", target: a("cloud-export") }],
+    // Korean-sorted (localeCompare "ko": Hangul before Latin). Desktop sync clients: R2 M4, kind cloud-sync.
+    nodes: [
+      {
+        id: "cloud-sync-accounts",
+        label: "동기화 계정·폴더",
+        target: a("cloud-sync", ["cloud-sync-account"]),
+      },
+      {
+        id: "cloud-sync-events",
+        label: "동기화 이벤트(업로드·삭제)",
+        target: a("cloud-sync", ["cloud-sync-event"]),
+      },
+      {
+        id: "cloud-sync-inventory",
+        label: "동기화 클라이언트 인벤토리",
+        target: a("cloud-sync", ["cloud-sync-inventory"]),
+        detail: true,
+      },
+      {
+        id: "cloud-sync-files",
+        label: "동기화 파일",
+        target: a("cloud-sync", ["cloud-sync-file"]),
+      },
+      { id: "cloud-export", label: "Takeout/iCloud/M365 내보내기", target: a("cloud-export") },
+    ],
   },
   {
     id: "media",
