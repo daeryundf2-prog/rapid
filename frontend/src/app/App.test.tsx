@@ -136,7 +136,7 @@ describe("App shell", () => {
     expect(screen.queryByRole("navigation", { name: "탐색 트리" })).toBeNull();
     expect(screen.queryByRole("complementary", { name: "뷰어 패널" })).toBeNull();
     expect(screen.getByRole("heading", { level: 1, name: "RapidForensic" })).toBeTruthy();
-    for (const name of ["케이스 열기", "이미지 실행", "샘플"])
+    for (const name of ["케이스 만들기", "케이스 열기", "케이스 없이 빠른 런", "샘플"])
       expect(screen.getByRole("button", { name })).toBeTruthy();
     const recent = await screen.findByRole("link", { name: /case1\.E01/ });
     expect(recent.getAttribute("href")).toBe("#/case/run-aaaaaaaa/intake");
