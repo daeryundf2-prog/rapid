@@ -331,4 +331,3 @@ def run_brief(store: RunJobStore, run_id: str) -> dict[str, object]:
         "mode": job.request.mode,
         "root": job.request.root,
     }
-
