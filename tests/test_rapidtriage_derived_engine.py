@@ -169,7 +169,8 @@ class NormalizationRegressionTests(unittest.TestCase):
 class CatalogSemanticTests(unittest.TestCase):
     def test_every_family_is_reviewed(self) -> None:
         catalog = load_catalog()
-        self.assertEqual(len(catalog.families), 54)
+        # 54 + r2 M2 (email-attachment, calendar-event, contact, email-container, kakaotalk-app, kakaotalk-shared-picture).
+        self.assertEqual(len(catalog.families), 60)
         for family in catalog.families:
             columns = [*family["core_columns"], *(family.get("aux_columns") or [])]
             tagged = [column for column in columns if column.get("semantic")]

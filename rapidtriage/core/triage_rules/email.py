@@ -20,6 +20,7 @@ from .base import (
     evidence,
     extension,
     org_domain,
+    parse_time,
     register,
     select,
 )
@@ -140,7 +141,7 @@ def header_date(row: RowView) -> dt.datetime | None:
     try:
         moment = parsedate_to_datetime(text)
     except (TypeError, ValueError, IndexError):
-        return None
+        return parse_time(text)  # ISO-8601 (normalised PST rows)
     if moment is None:
         return None
     return moment if moment.tzinfo else moment.replace(tzinfo=dt.timezone.utc)
@@ -366,3 +367,89 @@ class PersonalRecipient(_OwnerDomainRule):
             hits = sorted({target for target in targets if target.rsplit("@", 1)[-1] in personal})
             if hits:
                 yield ref, RuleResult(evidence(owner_domain=owner, personal_recipients=hits))
+
+
+# --- r2 M2: Outlook PST/OST rows (pffexport/readpst) ------------------------------------
+
+DELETED_FOLDER_HINTS = ("deleted items", "deleted", "recoverable items", "trash", "지운 편지함", "삭제된 항목", "휴지통")
+DELETED_STATES = frozenset({"deleted", "deleted-folder", "recovered", "orphan"})
+
+
+def message_time(row: RowView) -> dt.datetime | None:
+    """Submit / delivery time of a normalised PST row, else the Date header."""
+    return row.time("submit_time", "delivery_time") or header_date(row) or row.time("date")
+
+
+def attachment_total(row: RowView) -> int:
+    count = row.number("attachment_count")
+    return int(count) if count is not None else len(attachments(row))
+
+
+@register("email.external_bulk_attachments")
+class ExternalBulkAttachments(_OwnerDomainRule):
+    """≥ ``min_attachments`` attachments sent from the owner's domain to external-domain recipients on one (local) day."""
+
+    def __init__(self, params=None) -> None:
+        super().__init__(params)
+        self.facts: dict[RowRef, tuple[int, dt.datetime]] = {}
+
+    def apply(self, row: RowView, ctx: FlagContext) -> RuleResult | None:
+        super().apply(row, ctx)
+        count = attachment_total(row)
+        moment = message_time(row)
+        if count > 0 and moment is not None:
+            self.facts[row.ref] = (count, moment)
+        return None
+
+    def finalize(self, ctx: FlagContext) -> Iterator[tuple[RowRef, RuleResult]]:
+        offset = dt.timedelta(hours=float(self.param("tz_offset_hours", 9)))
+        days: dict[tuple[str, dt.date], list[tuple[RowRef, int, list[str]]]] = defaultdict(list)
+        for ref, mailbox, sender, targets in self.messages:
+            fact = self.facts.get(ref)
+            owner = self.owner(mailbox)
+            if fact is None or not owner or sender != owner:
+                continue
+            external = sorted({target for target in targets if org_domain(target.rsplit("@", 1)[-1]) != owner})
+            if external:
+                days[(mailbox, (fact[1] + offset).date())].append((ref, fact[0], external))
+        threshold = int(self.param("min_attachments", 10))
+        for (_mailbox, day), items in days.items():
+            total = sum(count for _ref, count, _external in items)
+            if total < threshold:
+                continue
+            for ref, count, external in items:
+                yield ref, RuleResult(
+                    evidence(day=day.isoformat(), attachments_that_day=total, attachments=count, external_recipients=external[:5])
+                )
+
+
+@register("email.deleted_folder_recent")
+class DeletedFolderRecent(Rule):
+    """Message in Deleted Items / Recoverable Items (or recovered by the tool) within ``recent_days`` of the mailbox's newest message."""
+
+    selector = MESSAGES
+
+    def __init__(self, params=None) -> None:
+        super().__init__(params)
+        self.latest: dict[str, dt.datetime] = {}
+        self.candidates: list[tuple[RowRef, str, dt.datetime, str, str]] = []
+
+    def apply(self, row: RowView, ctx: FlagContext) -> RuleResult | None:
+        moment = message_time(row)
+        if moment is None:
+            return None
+        mailbox = row.text("source_path") or row.path()
+        if mailbox not in self.latest or moment > self.latest[mailbox]:
+            self.latest[mailbox] = moment
+        folder = row.text("folder", "mailbox_folder")
+        state = row.text("deleted_state").lower()
+        if state in DELETED_STATES or any(hint in folder.lower() for hint in DELETED_FOLDER_HINTS):
+            self.candidates.append((row.ref, mailbox, moment, folder, state))
+        return None
+
+    def finalize(self, ctx: FlagContext) -> Iterator[tuple[RowRef, RuleResult]]:
+        window = dt.timedelta(days=float(self.param("recent_days", 30)))
+        for ref, mailbox, moment, folder, state in self.candidates:
+            latest = self.latest[mailbox]
+            if latest - moment <= window:
+                yield ref, RuleResult(evidence(folder=folder, deleted_state=state, time=moment, mailbox_latest=latest))

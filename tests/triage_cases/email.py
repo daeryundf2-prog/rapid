@@ -164,4 +164,42 @@ CASES = {
             "params": {"personal_domains": ["example.net"]},
         },
     },
+    # r2 M2: PST rows normalised from pffexport/readpst (submit_time, attachment_count, folder, deleted_state).
+    "email.external_bulk_attachments": {
+        "positive": {
+            "rows": [
+                message(to="buyer@partner.example.net", attachment_count=4, submit_time=f"2024-03-05T0{hour}:00:00Z")
+                for hour in (1, 2, 3)
+            ]
+            + [message(to="bob@example.com", attachment_count=5, submit_time="2024-03-05T04:00:00Z")],
+            "flagged": [0, 1, 2],
+        },
+        # Same 12 attachments to the same partner, but split over two local (KST) days: 23:00 and 01:00.
+        "negative": {
+            "rows": [
+                message(to="buyer@partner.example.net", attachment_count=6, submit_time="2024-03-05T14:00:00Z"),
+                message(to="buyer@partner.example.net", attachment_count=6, submit_time="2024-03-05T16:00:00Z"),
+            ],
+            "flagged": [],
+        },
+    },
+    "email.deleted_folder_recent": {
+        "positive": {
+            "rows": [
+                message(folder="Top of Personal Folders/Inbox", submit_time="2024-03-10T00:00:00Z"),
+                message(folder="Top of Personal Folders/Deleted Items", submit_time="2024-03-01T00:00:00Z"),
+                message(folder="", deleted_state="recovered", submit_time="2024-03-05T00:00:00Z"),
+                message(folder="Personal Folders/지운 편지함", submit_time="2024-03-09T00:00:00Z"),
+            ],
+            "flagged": [1, 2, 3],
+        },
+        # Routine clean-up long ago: the deleted message is a year older than the newest mail of the mailbox.
+        "negative": {
+            "rows": [
+                message(folder="Top of Personal Folders/Inbox", submit_time="2024-03-10T00:00:00Z"),
+                message(folder="Top of Personal Folders/Deleted Items", submit_time="2023-01-01T00:00:00Z"),
+            ],
+            "flagged": [],
+        },
+    },
 }

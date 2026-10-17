@@ -81,6 +81,9 @@ families:
   - key: source_path
     label: 원본 DB
     format: path
+  - key: attachment_local_paths
+    semantic: path
+    label: 첨부 로컬 파일
   rules:
   - messenger.time_regression
   - messenger.server_client_skew
@@ -139,6 +142,94 @@ families:
   - key: risk_score
     label: 위험 점수
     format: number
+  rules: []
+# r2 M2: KakaoTalk PC decryption status per profile and shared/saved pictures.
+- id: kakaotalk-app
+  label: 카카오톡 앱 인벤토리
+  types:
+  - kakaotalk-app-inventory
+  core_columns:
+  - key: profile_path
+    semantic: path
+    label: 프로필 경로
+    format: path
+  - key: status_label
+    label: 복호 상태
+    width: 110
+  - key: reason
+    label: 사유
+    width: 380
+  - key: chat_database_count
+    label: 대화 DB
+    format: number
+  - key: decrypted_database_count
+    label: 복호한 DB
+    format: number
+  - key: message_row_count
+    label: 메시지
+    format: number
+  aux_columns:
+  - key: decryption_status
+    label: 상태 코드
+    format: mono
+  - key: openssl_available
+    label: OpenSSL 사용 가능
+  - key: policy
+    label: 복호 정책
+  rules: []
+- id: kakaotalk-shared-picture
+  label: 카카오톡 공유 사진
+  types:
+  - kakaotalk-shared-picture
+  core_columns:
+  - key: download_time
+    label: 저장 시각(파일 이름)
+    format: time
+    ts_kind: download-end
+    width: 170
+  - key: file_name
+    semantic: attachment
+    label: 파일 이름
+    width: 240
+  - key: location_label
+    label: 위치 종류
+  - key: download_location
+    semantic: path
+    label: 저장 위치
+    format: path
+  - key: mime
+    label: 형식(MIME)
+  - key: sha256
+    semantic: hash
+    label: 해시(SHA-256)
+    format: mono
+  - key: is_thumbnail
+    label: 썸네일
+    width: 70
+  - key: link_status
+    label: 메시지 연결
+  aux_columns:
+  - key: linked_message_id
+    label: 연결 메시지 ID
+    format: mono
+  - key: conversation_id
+    label: 대화방
+  - key: sender
+    semantic: person_sender
+    label: 보낸 사람
+  - key: message_time
+    label: 메시지 시각
+    format: time
+    ts_kind: sent
+  - key: link_method
+    label: 연결 방법
+  - key: size
+    label: 크기
+    format: bytes
+  - key: sha1
+    semantic: hash
+    label: 해시(SHA-1)
+    format: mono
   rules: []
 rules:
 - id: messenger.time_regression
