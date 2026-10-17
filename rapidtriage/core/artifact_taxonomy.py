@@ -19,6 +19,11 @@ KNOWN_DYNAMIC_ARTIFACT_TYPES = {
     "browser-extension-inventory",
     "browser-session-storage-inventory",
     "browser-sync-inventory",
+    "chat-app-inventory",
+    "chat-attachment",
+    "chat-contact",
+    "chat-message",
+    "chat-parse-error",
     "cloud-account",
     "cloud-activity",
     "cloud-audit",
@@ -412,6 +417,19 @@ TAXONOMY_TARGETS: tuple[TaxonomyTarget, ...] = (
         ),
         required_test_markers=("kakaotalk",),
         required_doc_markers=("KakaoTalk",),
+    ),
+    TaxonomyTarget(
+        id="windows-desktop-messengers",
+        category="mail-cloud-chat",
+        title="Windows desktop messenger parser",
+        expectation=(
+            "Recover Teams, Slack, Discord, WhatsApp Desktop, Skype, and Zoom messages/attachments/contacts from "
+            "LevelDB/IndexedDB, cache, and SQLite stores, and inventory encrypted Telegram Desktop, WeChat, and LINE stores."
+        ),
+        required_collectors=("windows-messenger",),
+        expected_artifact_types=("chat-message", "chat-attachment", "chat-contact", "chat-app-inventory"),
+        required_test_markers=("windows-messenger", "leveldb"),
+        required_doc_markers=("windows-messenger", "Telegram Desktop", "WeChat"),
     ),
     TaxonomyTarget(
         id="mobile-ios-backup",

@@ -71,6 +71,7 @@ WINDOWS_FORENSIC_ARTIFACT_KINDS = (
     "eventlog",
     "windows-search-index",
     "windows-remote-access",
+    "windows-messenger",
     "windows-execution",
     "windows-registry",
     "windows-shellbags",
