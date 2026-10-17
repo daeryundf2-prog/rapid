@@ -264,6 +264,12 @@ class OutlookAndIcsTests(unittest.TestCase):
         self.assertEqual(events[2]["dtstart"], "2024-03-10")
         self.assertTrue(events[2]["all_day"])
 
+    def test_windows_tzid_is_mapped(self) -> None:
+        text = ICS_THREE_EVENTS.replace("TZID=Asia/Seoul", 'TZID="Korea Standard Time"')
+        events, _errors = parse_ics_events(text)
+        self.assertEqual(events[1]["dtstart"], "2024-03-06T00:00:00Z")
+        self.assertEqual(events[1]["timezone"], "Korea Standard Time")
+
     def test_tool_time_formats(self) -> None:
         self.assertEqual(parse_tool_time("Mar 04, 2024 01:02:03.123456789 UTC"), "2024-03-04T01:02:03.123456Z")
         self.assertEqual(parse_tool_time("Not set"), "")

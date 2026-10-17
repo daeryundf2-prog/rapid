@@ -181,7 +181,8 @@ describe("RDP direction · EXIF state · auto logon", () => {
       expect(familyById("media-image")?.core_columns.some((c) => c.derive === "exif_status")).toBe(true);
       expect(familyById("rdp")?.core_columns.some((c) => c.derive === "rdp_direction")).toBe(true);
       // Every family of the backend catalogue was reviewed for semantic tags (54).
-      expect(FALLBACK_CATALOG.families).toHaveLength(54);
+      // 54 + r2 M2 (email-attachment, calendar-event, contact, email-container, kakaotalk-app, kakaotalk-shared-picture).
+      expect(FALLBACK_CATALOG.families).toHaveLength(60);
       expect(familyById("sam-account")?.core_columns.find((c) => c.key === "user_name")?.semantic).toBe(
         "account",
       );

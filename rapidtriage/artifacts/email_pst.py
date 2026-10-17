@@ -57,6 +57,20 @@ DELETED_FOLDER_HINTS = (
     "삭제된 항목",
     "휴지통",
 )
+# Outlook exports name Windows time zones in TZID; map the common ones to IANA names.
+WINDOWS_TZ_NAMES = {
+    "Korea Standard Time": "Asia/Seoul",
+    "Tokyo Standard Time": "Asia/Tokyo",
+    "China Standard Time": "Asia/Shanghai",
+    "Taipei Standard Time": "Asia/Taipei",
+    "Singapore Standard Time": "Asia/Singapore",
+    "UTC": "UTC",
+    "GMT Standard Time": "Europe/London",
+    "W. Europe Standard Time": "Europe/Berlin",
+    "Eastern Standard Time": "America/New_York",
+    "Central Standard Time": "America/Chicago",
+    "Pacific Standard Time": "America/Los_Angeles",
+}
 TOOL_REASON_MISSING = "외부 도구 없음 — pffexport(libpff)·readpst(libpst)가 PATH에 없어 메시지·약속·연락처를 풀지 않음(/doctor의 tools:email-pst 참고)"
 ToolResolver = Callable[[str], str | None]
 CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
@@ -219,7 +233,7 @@ def parse_ics_time(value: str, params: Mapping[str, str]) -> tuple[str, bool, st
         try:
             from zoneinfo import ZoneInfo
 
-            return iso(moment.replace(tzinfo=ZoneInfo(tzid))), False, tzid
+            return iso(moment.replace(tzinfo=ZoneInfo(WINDOWS_TZ_NAMES.get(tzid, tzid)))), False, tzid
         except (ImportError, ValueError, KeyError, OSError):
             return moment.isoformat(), False, f"{tzid} (변환 안 함)"
     return moment.isoformat(), False, "floating(시간대 없음)"
@@ -616,7 +630,7 @@ def normalize_pffexport_tree(export_dir: Path, *, base: Mapping[str, object]) ->
             kind = ITEM_DIR_RE.match(item_dir.name).group("kind").lower()  # type: ignore[union-attr]
             item = f"{tree.name}/{relative.as_posix()}"
             try:
-                if kind in ("message", "email", "item", "note", "task"):
+                if kind in ("message", "email", "item"):
                     message = pffexport_message(item_dir, folder=folder, deleted=deleted)
                     if not any(message.get(key) for key in ("from", "to", "subject", "date", "body_sha256", "attachments")):
                         counts["errors"] += 1  # unreadable item folder: nothing to report

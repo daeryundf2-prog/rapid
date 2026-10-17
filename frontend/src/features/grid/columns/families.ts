@@ -70,6 +70,9 @@ export const TS_KIND_LABELS: Record<string, string> = {
   edited: "편집",
   gps: "GPS 시각",
   target: "대상 파일 시각",
+  // r2 M2: calendar-event start / end
+  start: "시작",
+  end: "종료",
   // older spellings (families mock / earlier servers)
   first_seen: "최초 확인",
   last_run: "최근 실행",
