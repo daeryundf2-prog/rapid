@@ -31,26 +31,42 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
+// Each case spawns Python and loads the catalogue; under CI or multi-agent load that can
+// exceed vitest's 5 s default.
+const SPAWN_TIMEOUT = 60_000;
+
 describe.skipIf(!hasPython)("gen-families-fallback", () => {
-  it("a loader error fails even with --if-available (no stale catalogue ships)", () => {
-    const result = run(["--if-available", "--check"], {
-      PYTHONPATH: shadowYaml("raise ValueError('bad yaml')"),
-    });
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain("ValueError: bad yaml");
-  });
+  it(
+    "a loader error fails even with --if-available (no stale catalogue ships)",
+    () => {
+      const result = run(["--if-available", "--check"], {
+        PYTHONPATH: shadowYaml("raise ValueError('bad yaml')"),
+      });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("ValueError: bad yaml");
+    },
+    SPAWN_TIMEOUT,
+  );
 
-  it("a missing loader module is skipped with --if-available, fails without it", () => {
-    const missing = "raise ModuleNotFoundError('No module named yaml', name='yaml')";
-    const skipped = run(["--if-available", "--check"], { PYTHONPATH: shadowYaml(missing) });
-    expect(skipped.status).toBe(0);
-    expect(skipped.stderr).toContain("module missing: yaml");
-    expect(run(["--check"], { PYTHONPATH: shadowYaml(missing) }).status).toBe(1);
-  });
+  it(
+    "a missing loader module is skipped with --if-available, fails without it",
+    () => {
+      const missing = "raise ModuleNotFoundError('No module named yaml', name='yaml')";
+      const skipped = run(["--if-available", "--check"], { PYTHONPATH: shadowYaml(missing) });
+      expect(skipped.status).toBe(0);
+      expect(skipped.stderr).toContain("module missing: yaml");
+      expect(run(["--check"], { PYTHONPATH: shadowYaml(missing) }).status).toBe(1);
+    },
+    SPAWN_TIMEOUT,
+  );
 
-  it("no Python at all is skipped with --if-available", () => {
-    const result = run(["--if-available"], { RAPIDTRIAGE_PYTHON: "no-such-python-binary" });
-    expect(result.status).toBe(0);
-    expect(result.stderr).toContain("skipped");
-  });
+  it(
+    "no Python at all is skipped with --if-available",
+    () => {
+      const result = run(["--if-available"], { RAPIDTRIAGE_PYTHON: "no-such-python-binary" });
+      expect(result.status).toBe(0);
+      expect(result.stderr).toContain("skipped");
+    },
+    SPAWN_TIMEOUT,
+  );
 });
