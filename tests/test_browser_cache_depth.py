@@ -475,6 +475,14 @@ class RunPipelineTests(unittest.TestCase):
             flags = (output_dir / "analyses" / str(step["analysis_id"]) / "flags.jsonl").read_text(encoding="utf-8")
             self.assertIn("browser.webmail_upload", flags)
             self.assertIn("browser.filesharing_upload", flags)
+            # 통합 보기: cache-entry URLs feed the URL table, Content-Disposition names the 첨부 table.
+            (derived_dir,) = sorted((output_dir / "analyses").glob("run-derived-*"))
+            urls = (derived_dir / "urls.jsonl").read_text(encoding="utf-8")
+            self.assertIn("browser-cache-entry", urls)
+            self.assertIn("cdn.example.net", urls)
+            attachments = (derived_dir / "attachments.jsonl").read_text(encoding="utf-8")
+            self.assertIn("report.pdf", attachments)
+            self.assertIn("web-upload-candidate", urls)
 
 
 if __name__ == "__main__":
