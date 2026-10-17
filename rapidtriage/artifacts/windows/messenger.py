@@ -984,7 +984,9 @@ class WindowsMessengerProvider:
         }
 
     def _emit(self, run: _AppRun, candidate: Candidate, path: Path, source_format: str, *, recovery_method: str,
-              offset: int | None, extra: Mapping[str, object] | None = None, raw: Mapping[object, object] | None = None) -> bool:
+              offset: int | None, extra: Mapping[str, object] | None = None,
+              raw: Mapping[object, object] | None = None) -> ArtifactRecord | None:
+        """Add one row; returns it, or ``None`` when it merged into a duplicate or hit the row cap."""
         details = {
             **self._base(run, path, source_format, recovery_method=recovery_method, offset=offset),
             **candidate.fields,
@@ -1000,10 +1002,10 @@ class WindowsMessengerProvider:
         if source_format in ("leveldb-log", "leveldb-table", "leveldb-raw", "chromium-cache"):
             details["store_path"] = str(path.parent)
         fingerprint = _fingerprint(run.spec.app_id, run.user, candidate)
-        return run.add(
-            ArtifactRecord(provider=self.name, artifact_type=candidate.artifact_type, path=str(path), supported=True, details=details),
-            fingerprint,
-        )
+        record = ArtifactRecord(provider=self.name, artifact_type=candidate.artifact_type, path=str(path), supported=True, details=details)
+        before = len(run.rows)
+        run.add(record, fingerprint)
+        return record if len(run.rows) > before else None
 
     # -- LevelDB (IndexedDB / Local Storage) ------------------------------------------------------
 
@@ -1017,8 +1019,12 @@ class WindowsMessengerProvider:
             files = files[: self.limits.max_store_files]
         store_entry: dict[str, object] = {"path": str(directory), "kind": "leveldb", "files": len(files), "status": "read"}
         run.stores.append(store_entry)
+        # Single pass, one file in memory at a time: carved message rows remember their LevelDB key and
+        # sequence; a deletion tombstone newer than the value (seen in any file of the store) marks them
+        # deleted after the pass.
         deleted_keys: dict[bytes, int] = {}
-        pending: list[tuple[Path, str, object]] = []
+        carved: list[tuple[bytes, int, ArtifactRecord]] = []
+        local_storage = directory.name.lower() == "leveldb" and directory.parent.name.lower() == "local storage"
         for path in files:
             data = self._read_bounded(run, path)
             if data is None:
@@ -1027,46 +1033,49 @@ class WindowsMessengerProvider:
             source_format = "leveldb-log" if path.suffix.lower() == ".log" else "leveldb-table"
             try:
                 reader = iter_log_records(data, stats) if source_format == "leveldb-log" else iter_table_records(data, stats)
-                records = list(reader)
+                for record in reader:
+                    if record.deleted:
+                        if record.sequence is not None:
+                            deleted_keys[record.user_key] = max(record.sequence, deleted_keys.get(record.user_key, -1))
+                        continue
+                    if not record.value:
+                        continue
+                    emitted = self._carve_blob(
+                        run,
+                        path,
+                        source_format,
+                        record.value,
+                        offset=record.file_offset,
+                        extra={
+                            "leveldb_origin": record.origin,
+                            "leveldb_sequence": record.sequence,
+                            "leveldb_entry_offset": record.entry_offset,
+                            "leveldb_checksum_ok": record.checksum_ok,
+                            "leveldb_key_preview": _key_preview(record.user_key),
+                        },
+                        local_storage=local_storage,
+                    )
+                    if record.sequence is not None:
+                        carved.extend((record.user_key, record.sequence, row) for row in emitted)
             except LevelDBError as exc:
                 # Structure unreadable (truncated table, bad footer): record the error, carve the raw bytes.
                 self._parse_error(run, path, source_format, exc)
-                self._carve_blob(run, path, "leveldb-raw", data, offset=0, deleted=False, extra={"carve_scope": "raw-file-after-parse-error"})
-                continue
-            for record in records:
-                if record.deleted and record.sequence is not None:
-                    deleted_keys[record.user_key] = max(record.sequence, deleted_keys.get(record.user_key, -1))
-            pending.append((path, source_format, (records, stats)))
-        for path, source_format, payload in pending:
-            records, stats = payload  # type: ignore[misc]
+                self._carve_blob(run, path, "leveldb-raw", data, offset=0, extra={"carve_scope": "raw-file-after-parse-error"})
             if stats.corrupt_fragments or stats.corrupt_blocks:
                 store_entry.setdefault("damaged_files", []).append(  # type: ignore[union-attr]
                     {"file": path.name, **{key: value for key, value in stats.as_dict().items() if key != "errors"}}
                 )
-            for record in records:
-                if record.deleted or not record.value:
-                    continue
-                tombstoned = record.sequence is not None and deleted_keys.get(record.user_key, -1) > record.sequence
-                self._carve_blob(
-                    run,
-                    path,
-                    source_format,
-                    record.value,
-                    offset=record.file_offset,
-                    deleted=tombstoned,
-                    extra={
-                        "leveldb_origin": record.origin,
-                        "leveldb_sequence": record.sequence,
-                        "leveldb_entry_offset": record.entry_offset,
-                        "leveldb_checksum_ok": record.checksum_ok,
-                        "leveldb_key_preview": _key_preview(record.user_key),
-                    },
-                    local_storage=directory.name.lower() == "leveldb" and directory.parent.name.lower() == "local storage",
-                )
+            del data
+        for user_key, sequence, row in carved:
+            if row.artifact_type == "chat-message" and deleted_keys.get(user_key, -1) > sequence:
+                row.details["deleted_state"] = "deleted"
+                row.details["deleted_basis"] = "leveldb-tombstone-newer-than-value"
 
-    def _carve_blob(self, run: _AppRun, path: Path, source_format: str, blob: bytes, *, offset: int | None, deleted: bool,
-                    extra: Mapping[str, object], local_storage: bool = False) -> None:
+    def _carve_blob(self, run: _AppRun, path: Path, source_format: str, blob: bytes, *, offset: int | None,
+                    extra: Mapping[str, object], local_storage: bool = False) -> list[ArtifactRecord]:
+        """Carve one value/body; returns the rows it added (not the merged duplicates)."""
         limits = self.limits
+        added: list[ArtifactRecord] = []
         objects: list[tuple[int, Mapping[object, object], str]] = []
         for position, group in v8_key_objects(blob):
             objects.append((position, group, "v8-key-run"))
@@ -1083,10 +1092,7 @@ class WindowsMessengerProvider:
                     objects.append((position, record, "json-fragment"))
         for position, record, method in objects:
             for candidate in classify_object(record, max_text_chars=limits.max_text_chars, owner=run.owner):
-                if deleted and candidate.artifact_type == "chat-message":
-                    candidate.fields["deleted_state"] = "deleted"
-                    candidate.fields["deleted_basis"] = "leveldb-tombstone-newer-than-value"
-                self._emit(
+                row = self._emit(
                     run,
                     candidate,
                     path,
@@ -1096,6 +1102,9 @@ class WindowsMessengerProvider:
                     extra={**extra, "carve_method": method, "carve_value_offset": position},
                     raw=record,
                 )
+                if row is not None:
+                    added.append(row)
+        return added
 
     # -- Chromium cache bodies (Discord/Slack API responses) -----------------------------------
 
@@ -1127,8 +1136,7 @@ class WindowsMessengerProvider:
             for position, blob in blobs:
                 if b"\"" not in blob:
                     continue
-                self._carve_blob(run, path, "chromium-cache", blob, offset=position, deleted=False,
-                                 extra={"cache_body": "gzip" if position else "raw"})
+                self._carve_blob(run, path, "chromium-cache", blob, offset=position, extra={"cache_body": "gzip" if position else "raw"})
 
     # -- SQLite ---------------------------------------------------------------------------------
 

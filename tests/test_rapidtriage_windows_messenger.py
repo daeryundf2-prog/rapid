@@ -378,6 +378,19 @@ class ReviewRegressionTests(unittest.TestCase):
             other = [row for row in by_app(rows, "skype", "chat-message") if "zz.other" in str(row["path"])]
             self.assertEqual([details(row)["direction"] for row in other], ["unknown"])
 
+    def test_a_newer_tombstone_marks_the_carved_message_deleted(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            store = root.joinpath("Users", "analyst", *fx.ROAMING, "Slack", "IndexedDB", "https_app.slack.com_0.indexeddb.leveldb")
+            message = fx.v8_serialize({"text": "지워질 메시지", "user": "U1", "ts": "1709251200.000100", "channel": "C1"})
+            kept = fx.v8_serialize({"text": "남은 메시지", "user": "U1", "ts": "1709251300.000100", "channel": "C1"})
+            # The tombstone lives in a later file than the value: applied after the whole store is read.
+            fx.write(store / "000003.ldb", fx.leveldb_table([(b"m1", 1, message), (b"m2", 2, kept)]))
+            fx.write(store / "000004.log", fx.leveldb_log([fx.write_batch(3, [(b"m1", None)])]))
+            rows = by_app(collect(root), "slack", "chat-message")
+            states = {details(row)["message_text"]: details(row)["deleted_state"] for row in rows}
+            self.assertEqual(states, {"지워질 메시지": "deleted", "남은 메시지": "unknown"})
+
     def test_whatsapp_contact_objects(self) -> None:
         found = classify_object({"id": "821012345678@c.us", "name": "홍길동", "pushname": "Gildong", "isMyContact": True}, max_text_chars=100)
         self.assertEqual([(item.artifact_type, item.fields["contact_name"]) for item in found], [("chat-contact", "홍길동")])

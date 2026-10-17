@@ -39,7 +39,7 @@ MAX_TABLE_BLOCKS = 200_000
 MAX_RECORDS_PER_FILE = 500_000
 # CRC32C in pure Python costs ~0.5 µs/byte: checksums are verified for the
 # first bytes of a file only (informational in a carving context).
-CRC_VERIFY_BUDGET = 4 * 1024 * 1024
+CRC_VERIFY_BUDGET = 1024 * 1024
 
 LOG_FULL, LOG_FIRST, LOG_MIDDLE, LOG_LAST = 1, 2, 3, 4
 VALUE_TYPE_DELETION, VALUE_TYPE_VALUE = 0, 1
