@@ -1,4 +1,6 @@
-"""Messenger indicators: KakaoTalk / Telegram / WhatsApp / Slack / Teams / SMS (catalogue: apps §1)."""
+"""Messenger indicators: KakaoTalk / Telegram / WhatsApp / Slack / Teams / SMS and the Windows desktop
+messengers of ``windows-messenger`` (Teams, Slack, Discord, Telegram Desktop, WhatsApp Desktop, Skype,
+LINE, WeChat, Zoom) (catalogue: apps §1; plan r2-communication §3.1)."""
 
 from __future__ import annotations
 
@@ -16,9 +18,11 @@ from .base import (
     RuleResult,
     as_bool,
     base_name,
+    email_domain,
     evidence,
     host_matches,
     hour_of,
+    org_domain,
     register,
     select,
     url_host,
@@ -26,6 +30,7 @@ from .base import (
 )
 
 MESSAGES = select(types={"mobile-message", "cloud-message", "kakaotalk-message", "messenger-message", "chat-message"})
+CHAT_TRANSFERS = select(types={"chat-attachment", "chat-contact"})
 _URL = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
 DELETED_STATES = frozenset({"deleted", "recovered", "wal", "freelist", "free-page", "freepage", "journal", "unallocated", "carved"})
 OUTGOING = frozenset({"out", "outgoing", "sent", "send", "from_me", "1", "true", "발신"})
@@ -42,6 +47,18 @@ def conversation(row: RowView) -> str:
 def numeric_id(row: RowView) -> int | None:
     value = row.number("message_id", "msg_id", "log_id", "row_id", "id")
     return int(value) if value is not None else None
+
+
+def message_store(row: RowView) -> str:
+    """One message store: the app store (LevelDB directory, DB) a desktop-messenger row came from, else its file.
+
+    Carved desktop-messenger rows of one IndexedDB come from several ``.log``/``.ldb``
+    files; grouping them by file would split one burst across files.
+    """
+    app_id = row.text("app_id")
+    if not app_id:
+        return row.text("source_path") or row.path()
+    return f"{app_id}|{row.text('store_path') or row.text('source_path') or row.path()}"
 
 
 def is_outgoing(row: RowView) -> bool:
@@ -188,7 +205,7 @@ class LateNightBurst(Rule):
         start, end = int(self.param("night_start_hour", 0)), int(self.param("night_end_hour", 5))
         hour = hour_of(moment, float(self.param("tz_offset_hours", 9)))
         if start <= hour < end:
-            self.night[row.text("source_path") or row.path()].append((moment, row.ref))
+            self.night[message_store(row)].append((moment, row.ref))
         return None
 
     def finalize(self, ctx: FlagContext) -> Iterator[tuple[RowRef, RuleResult]]:
@@ -237,3 +254,70 @@ class AppReinstallGap(Rule):
             for (previous, _), (moment, ref) in zip(items, items[1:]):
                 if moment - previous > gap:
                     yield ref, RuleResult(evidence(previous_message_at=previous, message_at=moment, gap_days=(moment - previous).days))
+
+
+def _identity_keys(*values: str) -> set[str]:
+    return {value.strip().casefold() for value in values if value and value.strip()}
+
+
+@register("messenger.external_file_transfer")
+class ExternalFileTransfer(Rule):
+    """Outgoing desktop-messenger attachment to an external domain or to a counterpart missing from the app's contacts.
+
+    "External" = the recipient's e-mail domain differs from ``internal_domains``
+    (or, when none are configured, from the organisation domain of the sender /
+    owner addresses seen in the same app store). "Unregistered" = the app
+    store has a contact list (``chat-contact`` rows) and the recipient matches
+    none of its names, ids or addresses. With neither signal (no domain, no
+    contact list) the row is not judged.
+    """
+
+    selector = CHAT_TRANSFERS
+
+    def __init__(self, params=None) -> None:
+        super().__init__(params)
+        self.contacts: dict[str, set[str]] = defaultdict(set)
+        self.own_domains: dict[str, set[str]] = defaultdict(set)
+        self.transfers: list[tuple[RowRef, str, str, str, dt.datetime | None]] = []
+
+    @staticmethod
+    def scope(row: RowView) -> str:
+        return f"{row.text('app_id', 'service')}|{row.text('user')}"
+
+    def apply(self, row: RowView, ctx: FlagContext) -> RuleResult | None:
+        scope = self.scope(row)
+        if row.type == "chat-contact":
+            self.contacts[scope] |= _identity_keys(
+                row.text("contact_name", "display_name"), row.text("contact_id"), row.text("email"), row.text("phone"), row.text("account")
+            )
+            if row.text("contact_role") == "account-owner":
+                domain = email_domain(row.text("email", "contact_id"))
+                if domain:
+                    self.own_domains[scope].add(org_domain(domain))
+            return None
+        if row.text("direction").lower() not in OUTGOING:
+            return None
+        recipient = row.text("recipient", "counterpart", "partner")
+        sender_domain = email_domain(row.text("sender", "account"))
+        if sender_domain:
+            self.own_domains[scope].add(org_domain(sender_domain))
+        if recipient:
+            self.transfers.append((row.ref, scope, recipient, row.text("file_name", "attachment_name"), row.time("timestamp")))
+        return None
+
+    def finalize(self, ctx: FlagContext) -> Iterator[tuple[RowRef, RuleResult]]:
+        internal = {org_domain(str(item).lower()) for item in self.param("internal_domains", []) if str(item).strip()}
+        check_contacts = as_bool(self.param("flag_unregistered_contact", True)) is not False
+        for ref, scope, recipient, file_name, moment in self.transfers:
+            reasons: list[str] = []
+            domain = email_domain(recipient)
+            own = internal or self.own_domains.get(scope, set())
+            if domain and own and org_domain(domain) not in own:
+                reasons.append("external-domain")
+            contacts = self.contacts.get(scope)
+            if check_contacts and contacts and not (_identity_keys(recipient) & contacts):
+                reasons.append("unregistered-contact")
+            if reasons:
+                yield ref, RuleResult(
+                    evidence(recipient=recipient, recipient_domain=domain, file_name=file_name, reasons=reasons, time=moment)
+                )
