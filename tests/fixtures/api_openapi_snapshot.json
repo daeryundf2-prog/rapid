@@ -31,6 +31,32 @@
     "/api/case-db/search": {
       "post": "search_case_db_api_case_db_search_post"
     },
+    "/api/cases": {
+      "get": "list_cases_api_cases_get",
+      "post": "create_case_api_cases_post"
+    },
+    "/api/cases/{case_id}": {
+      "get": "get_case_api_cases__case_id__get",
+      "patch": "patch_case_api_cases__case_id__patch"
+    },
+    "/api/cases/{case_id}/evidence": {
+      "get": "list_evidence_api_cases__case_id__evidence_get",
+      "post": "add_evidence_api_cases__case_id__evidence_post"
+    },
+    "/api/cases/{case_id}/notes": {
+      "get": "list_notes_api_cases__case_id__notes_get",
+      "post": "add_note_api_cases__case_id__notes_post"
+    },
+    "/api/cases/{case_id}/notes/{note_id}": {
+      "delete": "delete_note_api_cases__case_id__notes__note_id__delete"
+    },
+    "/api/cases/{case_id}/runs": {
+      "get": "list_case_runs_api_cases__case_id__runs_get",
+      "post": "create_case_run_api_cases__case_id__runs_post"
+    },
+    "/api/cases/{case_id}/runs/link": {
+      "post": "link_case_run_api_cases__case_id__runs_link_post"
+    },
     "/api/collect/plan": {
       "post": "collect_plan_api_collect_plan_post"
     },
@@ -186,6 +212,12 @@
     },
     "/api/runs/{run_id}/outputs/{output_name}/preview": {
       "get": "preview_run_output_api_runs__run_id__outputs__output_name__preview_get"
+    },
+    "/api/runs/{run_id}/problems": {
+      "get": "get_run_problems_api_runs__run_id__problems_get"
+    },
+    "/api/runs/{run_id}/processing-snapshot": {
+      "get": "get_processing_snapshot_api_runs__run_id__processing_snapshot_get"
     },
     "/api/runs/{run_id}/report": {
       "get": "get_run_report_api_runs__run_id__report_get"

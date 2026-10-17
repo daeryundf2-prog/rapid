@@ -18,6 +18,7 @@ from ...core.case_db import open_case_database
 from ...core.crash import write_crash_report
 from ...core.jobs import RunJobStore, default_job_store
 from .analyses import ANALYSIS_RUNNER, COMPLETION_HOOKS
+from .case_workspace import CaseWorkspace
 from .constants import MUTATING_METHODS
 from .helpers import (
     allowed_api_hosts,
@@ -28,6 +29,7 @@ from .helpers import (
 )
 from .routes_analyses import build_analyses_router, korean_body_errors
 from .routes_case_db import build_case_db_router
+from .routes_cases import CASE_FIELD_LABELS, build_cases_router
 from .routes_flags import build_flags_router
 from .routes_ioc import build_ioc_router
 from .routes_media import build_media_router
@@ -42,6 +44,8 @@ from .search_index_service import (
 )
 
 ANALYSIS_POST_PATH = re.compile(r"/api/runs/[^/]+/analyses")
+# Case intake routes (AXIOM adoption E1): every validation error in Korean.
+CASE_INTAKE_PATH = re.compile(r"/api/cases(/.*)?|/api/runs/[^/]+/(problems|processing-snapshot)")
 
 
 def _without_surrogates(value: object) -> object:
@@ -61,8 +65,11 @@ def create_app(
     require_auth: bool | None = None,
     case_db_roots: Iterable[str | Path] | None = None,
     auto_search_index: bool = False,
+    cases_db_path: str | Path | None = None,
 ) -> FastAPI:
     store = job_store or default_job_store
+    # Workspace case DB (cases, evidence, notes, processing snapshots); opened on first use.
+    case_workspace = CaseWorkspace(store, Path(cases_db_path) if cases_db_path else None)
     # Identifies this app's analyses in the process-wide runner.
     analysis_owner = object()
 
@@ -74,6 +81,7 @@ def create_app(
 
     api = FastAPI(title="rapidtriage local API", version="0.2.0", lifespan=lifespan)
     api.state.analysis_owner = analysis_owner
+    api.state.case_workspace = case_workspace
     if auto_search_index:
         # Search index (plan search §0 결정 1): full build when a run completes, incremental
         # update when another analysis completes. The served app (module-level ``app``)
@@ -89,6 +97,10 @@ def create_app(
         """Malformed ``POST /analyses`` bodies get Korean 422 messages; other routes keep FastAPI's."""
         if request.method == "POST" and ANALYSIS_POST_PATH.fullmatch(request.url.path):
             return JSONResponse(status_code=422, content={"detail": korean_body_errors(exc.errors())})
+        if CASE_INTAKE_PATH.fullmatch(request.url.path):
+            return JSONResponse(
+                status_code=422, content={"detail": korean_body_errors(exc.errors(), CASE_FIELD_LABELS)}
+            )
         try:
             return await request_validation_exception_handler(request, exc)
         except UnicodeEncodeError:
@@ -159,6 +171,7 @@ def create_app(
     api.include_router(build_meta_router(store))
     api.include_router(build_case_db_router(store, open_request_case_database, resolve_request_catalog_path))
     api.include_router(build_runs_router(store))
+    api.include_router(build_cases_router(store, case_workspace))
     api.include_router(build_flags_router(store))
     api.include_router(build_analyses_router(store, owner=analysis_owner))
     api.include_router(build_ioc_router(store))

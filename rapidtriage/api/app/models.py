@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from ...core.files import DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES
 from ...core.sample_case import (
@@ -194,3 +196,69 @@ class CollectPlanRequest(BaseModel):
 class RunCaseNotesRequest(BaseModel):
     examiner: str = Field("", max_length=200)
     summary: str = Field("", max_length=20000)
+
+
+# --- case intake (AXIOM adoption E1) -----------------------------------------
+
+
+class CaseCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    case_number: str = Field(..., min_length=1, max_length=100)
+    name: str = Field("", max_length=200)
+    case_type: str = Field("", max_length=100)
+    examiner: str = Field("", max_length=200)
+    requester: str = Field("", max_length=200)
+    organization: str = Field("", max_length=200)
+    description: str = Field("", max_length=4000)
+    case_root: str = Field("", max_length=1024)
+
+
+class CasePatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    case_number: str | None = Field(None, min_length=1, max_length=100)
+    name: str | None = Field(None, max_length=200)
+    case_type: str | None = Field(None, max_length=100)
+    examiner: str | None = Field(None, max_length=200)
+    requester: str | None = Field(None, max_length=200)
+    organization: str | None = Field(None, max_length=200)
+    description: str | None = Field(None, max_length=4000)
+    status: Literal["open", "closed"] | None = None
+    actor: str = Field("", max_length=200)
+
+
+class CaseEvidenceCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    evidence_number: str = Field(..., min_length=1, max_length=50)
+    display_name: str = Field("", max_length=200)
+    source_type: Literal["e01", "folder", "export", "mobile"]
+    path: str = Field(..., min_length=1, max_length=4096)
+    verify_hash: bool = False
+    expected_hash: str = Field("", max_length=128)
+    actor: str = Field("", max_length=200)
+
+
+class CaseRunCreateRequest(RunCreateRequest):
+    """``POST /api/runs`` body + the case evidence the run processes (root defaults to its path)."""
+
+    root: str = ""
+    evidence_citation_id: str = Field(..., min_length=1, max_length=120)
+    actor: str = Field("", max_length=200)
+
+
+class CaseRunLinkRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: str = Field(..., min_length=1, max_length=64)
+    evidence_citation_id: str | None = Field(None, max_length=120)
+    evidence_number: str | None = Field(None, max_length=50)
+    actor: str = Field("", max_length=200)
+
+
+class CaseNoteCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(..., min_length=1, max_length=10000)
+    author: str = Field("", max_length=200)
