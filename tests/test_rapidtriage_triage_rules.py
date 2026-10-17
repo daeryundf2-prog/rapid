@@ -247,7 +247,9 @@ class EngineTests(unittest.TestCase):
         import sys
 
         inputs = tiny_run(self.root)
-        with patch.dict(sys.modules, {"yaml": None}):
+        from rapidtriage.core.triage_rules import catalog as catalog_module
+
+        with patch.dict(sys.modules, {"yaml": None}), patch.dict(catalog_module._CACHE, clear=True):
             import rapidtriage.core.run  # noqa: F401  (import must succeed without yaml)
             from rapidtriage.core.triage_rules.catalog import CatalogError, load_catalog
 
