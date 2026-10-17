@@ -19,6 +19,7 @@ from .constants import (
     SCHEMA_SQL_COMPRESSED_ARTIFACTS,
     SCHEMA_VERSION,
 )
+from .intake import apply_intake_schema, intake_schema_present
 
 __all__ = [
     "ARTIFACT_DATA_CODEC_NONE",
@@ -64,6 +65,9 @@ def apply_schema(connection: sqlite3.Connection, *, compressed_artifacts: bool =
         }
         artifact_columns = {str(row["name"]) for row in connection.execute("PRAGMA table_info(artifact)")}
         if set(REVIEW_MARK_MIGRATION_COLUMNS) <= review_mark_columns and set(ARTIFACT_DATA_COLUMNS) <= artifact_columns:
+            # Case intake (AXIOM adoption E1): additive columns/tables, migrated in place.
+            if not intake_schema_present(connection):
+                apply_intake_schema(connection)
             return
     fresh = current_version == 0 and not connection.execute(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'artifact'"
@@ -76,6 +80,7 @@ def apply_schema(connection: sqlite3.Connection, *, compressed_artifacts: bool =
     ensure_column(connection, "review_mark", "priority", "TEXT NOT NULL DEFAULT 'normal'")
     ensure_column(connection, "review_mark", "due_at", "TEXT NOT NULL DEFAULT ''")
     ensure_column(connection, "review_mark", "source_citation_package_json", "TEXT NOT NULL DEFAULT '{}'")
+    apply_intake_schema(connection)
     connection.execute(
         """
         INSERT INTO schema_info (key, value)
