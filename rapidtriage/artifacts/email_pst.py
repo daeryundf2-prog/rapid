@@ -771,8 +771,13 @@ def normalize_readpst_tree(export_dir: Path, *, base: Mapping[str, object]) -> t
 
 
 def external_tools_enabled(environ: Mapping[str, str] | None = None) -> bool:
+    """Running pffexport/readpst during a run is opt-in (project policy: no external programs by default).
+
+    Set ``RAPIDTRIAGE_EMAIL_EXTERNAL_TOOLS=1`` (or ``on``/``true``/``yes``) to let the run export
+    PST/OST containers with an installed tool; otherwise each container gets an inventory row.
+    """
     env = os.environ if environ is None else environ
-    return str(env.get("RAPIDTRIAGE_EMAIL_EXTERNAL_TOOLS", "auto")).strip().lower() not in {"0", "off", "false", "no"}
+    return str(env.get("RAPIDTRIAGE_EMAIL_EXTERNAL_TOOLS", "")).strip().lower() in {"1", "on", "true", "yes"}
 
 
 def tool_timeout(environ: Mapping[str, str] | None = None) -> int:
@@ -846,18 +851,18 @@ def collect_outlook_container(
     suffix = path.suffix.lower().lstrip(".")
     matrix = email_external_tool_availability_matrix(suffix, preferred_tool=None, tool_resolver=tool_resolver)
     tools_checked = [{"tool": row["tool"], "available": row["available"]} for row in matrix]
+    if not any(row["available"] for row in matrix):
+        return [container_inventory(path, source_sha256=source_sha256, status="tool-missing", reason=TOOL_REASON_MISSING, tools_checked=tools_checked)]
     if not external_tools_enabled(environ):
         return [
             container_inventory(
                 path,
                 source_sha256=source_sha256,
                 status="disabled",
-                reason="외부 도구 꺼짐 — RAPIDTRIAGE_EMAIL_EXTERNAL_TOOLS=0",
+                reason="외부 도구 실행 꺼짐(기본값) — RAPIDTRIAGE_EMAIL_EXTERNAL_TOOLS=1로 켜면 설치된 pffexport/readpst로 내보냅니다",
                 tools_checked=tools_checked,
             )
         ]
-    if not any(row["available"] for row in matrix):
-        return [container_inventory(path, source_sha256=source_sha256, status="tool-missing", reason=TOOL_REASON_MISSING, tools_checked=tools_checked)]
     work = Path(tempfile.mkdtemp(prefix="rt-pst-"))
     try:
         try:

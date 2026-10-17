@@ -300,7 +300,7 @@ class OutlookAndIcsTests(unittest.TestCase):
             pst.write_bytes(PST_HEADER)
             rows = [
                 record.to_dict()
-                for record in collect_outlook_container(pst, tool_resolver=fake_tool_resolver, command_runner=fake_pffexport_runner, environ={})
+                for record in collect_outlook_container(pst, tool_resolver=fake_tool_resolver, command_runner=fake_pffexport_runner, environ={"RAPIDTRIAGE_EMAIL_EXTERNAL_TOOLS": "1"})
             ]
             leftovers = [path for path in Path(tempfile.gettempdir()).glob("rt-pst-*") if path.is_dir()]
         messages = {row["details"]["subject"]: row["details"] for row in of_type(rows, "email-message")}
@@ -343,11 +343,11 @@ class OutlookAndIcsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             pst = Path(tmp) / "broken.ost"
             pst.write_bytes(PST_HEADER)
-            failed = collect_outlook_container(pst, tool_resolver=fake_tool_resolver, command_runner=failing, environ={})
-            disabled = collect_outlook_container(pst, tool_resolver=fake_tool_resolver, environ={"RAPIDTRIAGE_EMAIL_EXTERNAL_TOOLS": "0"})
+            failed = collect_outlook_container(pst, tool_resolver=fake_tool_resolver, command_runner=failing, environ={"RAPIDTRIAGE_EMAIL_EXTERNAL_TOOLS": "1"})
+            disabled = collect_outlook_container(pst, tool_resolver=fake_tool_resolver, environ={})  # default: off
             wrong_header = Path(tmp) / "fake.pst"
             wrong_header.write_bytes(b"not a pst")
-            blocked = collect_outlook_container(wrong_header, tool_resolver=fake_tool_resolver, command_runner=fake_pffexport_runner, environ={})
+            blocked = collect_outlook_container(wrong_header, tool_resolver=fake_tool_resolver, command_runner=fake_pffexport_runner, environ={"RAPIDTRIAGE_EMAIL_EXTERNAL_TOOLS": "1"})
         self.assertEqual([record.details["status"] for record in failed], ["failed"])
         self.assertIn("unable to open", failed[0].details["reason"])
         self.assertEqual([record.details["status"] for record in disabled], ["disabled"])
