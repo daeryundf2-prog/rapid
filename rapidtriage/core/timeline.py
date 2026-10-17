@@ -168,6 +168,25 @@ TIMELINE_FIELD_MAP: dict[str, tuple[TimelineField, ...]] = {
     ),
     "windows-mounted-device": (F("key_last_written_at", "last-written"),),
     "windows-service-config": (F("key_last_written_at", "last-written"),),
+    # R3 O1 registry depth. NetworkList dates are SYSTEMTIME in local wall-clock time; key-level
+    # LastWrite times (MRU lists, FeatureUsage, PCA Store, KnownDLLs) are one event per key.
+    "registry-network-profile": (
+        F("first_connected_at", "first-connected", timezone="local-unknown"),
+        F("last_connected_at", "last-connected", timezone="local-unknown"),
+    ),
+    "registry-wlan-profile": (
+        F("first_connected_at", "first-connected", timezone="local-unknown"),
+        F("last_connected_at", "last-connected", timezone="local-unknown"),
+        F("key_last_written_at", "last-written"),
+    ),
+    "registry-network-share": (F("key_last_written_at", "last-written", scope="key"),),
+    "registry-office-mru": (F("last_opened_at", "last-opened"),),
+    "registry-known-dll": (F("key_last_written_at", "last-written", scope="key"),),
+    "registry-default-browser": (F("key_last_written_at", "last-written"),),
+    "registry-install-state": (F("install_date", "installed", timezone="local-unknown"), F("key_last_written_at", "last-written")),
+    "execution-pca": (F("last_run_at", "run"), F("event_at", "pca-event"), F("key_last_written_at", "last-written", scope="key")),
+    "execution-feature-usage": (F("key_last_written_at", "last-written", scope="key"),),
+    "bitlocker-recovery-key-file": (F("key_created_at", "created"),),
     # --- file usage ------------------------------------------------------
     "shell-shortcut": (
         F("target_created_at", "target-created"),
