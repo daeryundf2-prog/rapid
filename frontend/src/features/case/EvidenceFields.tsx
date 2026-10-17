@@ -142,9 +142,15 @@ export function EvidenceFields({
         />{" "}
         해시 검증 (파일 증거의 MD5·SHA-1·SHA-256을 백그라운드에서 계산)
       </label>
-      {draft.verifyHash ? (
+      {draft.verifyHash && draft.sourceType === "e01" ? (
+        <p className="case-reason">
+          E01은 이미지 파일(컨테이너) 바이트의 해시를 계산해 기록합니다. 획득 기록의 매체 해시와는 값이 달라
+          비교하지 않습니다.
+        </p>
+      ) : null}
+      {draft.verifyHash && draft.sourceType !== "e01" ? (
         <div className="case-field">
-          <label htmlFor={id("hash")}>기대 해시 (선택 · 획득 기록의 MD5/SHA-1/SHA-256)</label>
+          <label htmlFor={id("hash")}>기대 해시 (선택 · 이 파일의 MD5/SHA-1/SHA-256)</label>
           <input
             id={id("hash")}
             type="text"

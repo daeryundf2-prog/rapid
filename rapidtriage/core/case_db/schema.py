@@ -19,7 +19,7 @@ from .constants import (
     SCHEMA_SQL_COMPRESSED_ARTIFACTS,
     SCHEMA_VERSION,
 )
-from .intake import apply_intake_schema, intake_schema_present
+from .intake import apply_intake_schema
 
 __all__ = [
     "ARTIFACT_DATA_CODEC_NONE",
@@ -65,9 +65,8 @@ def apply_schema(connection: sqlite3.Connection, *, compressed_artifacts: bool =
         }
         artifact_columns = {str(row["name"]) for row in connection.execute("PRAGMA table_info(artifact)")}
         if set(REVIEW_MARK_MIGRATION_COLUMNS) <= review_mark_columns and set(ARTIFACT_DATA_COLUMNS) <= artifact_columns:
-            # Case intake (AXIOM adoption E1): additive columns/tables, migrated in place.
-            if not intake_schema_present(connection):
-                apply_intake_schema(connection)
+            # Current schema: no writes (read-only/ACL-locked run DBs keep opening). The case
+            # intake columns/tables are migrated by the workspace DB (ensure_intake_schema).
             return
     fresh = current_version == 0 and not connection.execute(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'artifact'"

@@ -13,6 +13,7 @@ starts). Every column/table here is additive: ``apply_intake_schema`` runs from
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from collections.abc import Callable, Iterable, Mapping
 from contextlib import AbstractContextManager
@@ -30,6 +31,8 @@ __all__ = [
     "CaseIntake",
     "CaseNotFoundError",
     "apply_intake_schema",
+    "ensure_intake_schema",
+    "same_local_path",
 ]
 
 CASE_INTAKE_COLUMNS = (
@@ -155,6 +158,24 @@ def intake_schema_present(connection: sqlite3.Connection) -> bool:
     return len(names) == 3
 
 
+def ensure_intake_schema(connection: sqlite3.Connection) -> bool:
+    """Migrate an existing (current-version) case DB to the intake layout; True when it wrote.
+
+    ``apply_schema`` adds the intake layout only when it replays DDL anyway (fresh or migrating
+    DBs); its current-schema fast path stays write-free so read-only run DBs keep opening. The
+    workspace case DB calls this once when it is opened.
+    """
+    if intake_schema_present(connection):
+        return False
+    apply_intake_schema(connection)
+    return True
+
+
+def same_local_path(left: str, right: str) -> bool:
+    """Path equality as Windows sees it (``D:/x`` == ``d:\\X``), without touching the disk."""
+    return os.path.normcase(os.path.abspath(left)) == os.path.normcase(os.path.abspath(right))
+
+
 def _row_dict(row: sqlite3.Row | None) -> dict[str, object]:
     return {key: row[key] for key in row.keys()} if row is not None else {}
 
@@ -264,7 +285,9 @@ class CaseIntake:
         case_number = str(fields.get("case_number") or "").strip()
         timestamp = now_iso()
         with self.connect() as connection:
-            if connection.execute("SELECT 1 FROM case_record WHERE case_number = ?", (case_number,)).fetchone():
+            if connection.execute(
+                "SELECT 1 FROM case_record WHERE lower(case_number) = lower(?)", (case_number,)
+            ).fetchone():
                 raise CaseConflictError(f"같은 사건 번호의 케이스가 이미 있습니다: {case_number}")
             try:
                 connection.execute(
@@ -315,7 +338,8 @@ class CaseIntake:
             number = updates.get("case_number")
             if number is not None and number != before["case_number"]:
                 clash = connection.execute(
-                    "SELECT 1 FROM case_record WHERE case_number = ? AND case_id <> ?", (number, case_id)
+                    "SELECT 1 FROM case_record WHERE lower(case_number) = lower(?) AND case_id <> ?",
+                    (number, case_id),
                 ).fetchone()
                 if clash:
                     raise CaseConflictError(f"같은 사건 번호의 케이스가 이미 있습니다: {number}")
@@ -381,11 +405,11 @@ class CaseIntake:
             ).fetchone()
             if clash:
                 raise CaseConflictError(f"같은 증거 번호가 이미 있습니다: {evidence_number}")
-            same_path = connection.execute(
-                "SELECT evidence_number FROM evidence_source WHERE case_id = ? AND original_path = ?", (case_id, path)
-            ).fetchone()
-            if same_path:
-                raise CaseConflictError(f"같은 경로의 증거가 이미 있습니다: 증거 {same_path[0]}")
+            for number, existing in connection.execute(
+                "SELECT evidence_number, original_path FROM evidence_source WHERE case_id = ?", (case_id,)
+            ):
+                if existing and same_local_path(str(existing), path):
+                    raise CaseConflictError(f"같은 경로의 증거가 이미 있습니다: 증거 {number}")
             citation_id = _next_citation(connection, case_id, "evidence")
             connection.execute(
                 """
@@ -441,10 +465,10 @@ class CaseIntake:
 
     def find_evidence_by_path(self, case_id: str, path: str) -> dict[str, object] | None:
         with self.connect() as connection:
-            row = connection.execute(
-                "SELECT * FROM evidence_source WHERE case_id = ? AND original_path = ?", (case_id, path)
-            ).fetchone()
-            return self._evidence_payload(row) if row is not None else None
+            for row in connection.execute("SELECT * FROM evidence_source WHERE case_id = ? ORDER BY id", (case_id,)):
+                if row["original_path"] and same_local_path(str(row["original_path"]), path):
+                    return self._evidence_payload(row)
+            return None
 
     def set_evidence_hash(
         self, citation_id: str, *, status: str, message: str = "", digests: Mapping[str, str] | None = None

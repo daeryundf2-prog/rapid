@@ -116,7 +116,12 @@ export function validateEvidenceDraft(draft: EvidenceDraft, all: EvidenceDraft[]
     }
   }
   const expected = draft.expectedHash.trim();
-  if (draft.verifyHash && expected && (!HASH.test(expected) || ![32, 40, 64].includes(expected.length))) {
+  if (
+    draft.verifyHash &&
+    draft.sourceType !== "e01" &&
+    expected &&
+    (!HASH.test(expected) || ![32, 40, 64].includes(expected.length))
+  ) {
     errors.expectedHash = "기대 해시는 MD5(32자)·SHA-1(40자)·SHA-256(64자) 16진수여야 합니다.";
   }
   return errors;
@@ -156,7 +161,8 @@ export function evidenceBody(draft: EvidenceDraft): EvidenceCreateBody {
     source_type: draft.sourceType,
     path: draft.path.trim(),
     verify_hash: draft.verifyHash,
-    expected_hash: draft.verifyHash ? draft.expectedHash.trim() : "",
+    // E01: container bytes are never the acquisition (media) hash, so no expected value is sent.
+    expected_hash: draft.verifyHash && draft.sourceType !== "e01" ? draft.expectedHash.trim() : "",
   };
 }
 

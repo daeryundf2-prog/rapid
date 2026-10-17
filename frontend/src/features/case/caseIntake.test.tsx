@@ -13,6 +13,7 @@ import { summarizeRunRequest } from "./runSummary";
 import { mockFetch, type RecordedCall, renderWithQuery } from "./testUtils";
 import {
   EMPTY_CASE_INFO,
+  evidenceBody,
   evidenceListReason,
   newEvidenceDraft,
   pathProblem,
@@ -74,10 +75,18 @@ describe("wizard model", () => {
     expect(validateEvidenceDraft({ ...a, sourceType: "folder", path: "" }, [a]).path).toBe(
       "증거 경로를 입력하세요.",
     );
+    const file = { ...a, sourceType: "export" as const, path: "D:\\ev\\export.zip" };
     expect(
-      validateEvidenceDraft({ ...a, verifyHash: true, expectedHash: "xyz" }, [a]).expectedHash,
+      validateEvidenceDraft({ ...file, verifyHash: true, expectedHash: "xyz" }, [file]).expectedHash,
     ).toContain("MD5");
-    expect(validateEvidenceDraft({ ...a, verifyHash: true, expectedHash: "a".repeat(32) }, [a])).toEqual({});
+    expect(
+      validateEvidenceDraft({ ...file, verifyHash: true, expectedHash: "a".repeat(32) }, [file]),
+    ).toEqual({});
+    // E01: container bytes are not the media hash — an expected value is neither checked nor sent.
+    const e01 = { ...a, verifyHash: true, expectedHash: "xyz" };
+    expect(validateEvidenceDraft(e01, [e01])).toEqual({});
+    expect(evidenceBody(e01).expected_hash).toBe("");
+    expect(evidenceBody({ ...file, verifyHash: true, expectedHash: " ab " }).expected_hash).toBe("ab");
     expect(evidenceListReason([])).toBe("증거를 하나 이상 추가하세요.");
     expect(evidenceListReason([{ ...a, path: "" }])).toBe("증거 E-01: 증거 경로를 입력하세요.");
   });

@@ -45,6 +45,8 @@ function messageOf(error: unknown): string {
 }
 
 const caseQueryKey = (caseId: string) => ["case", caseId] as const;
+/** Reason shown while a request is in flight (no double submit). */
+const PENDING = "처리 중입니다";
 
 function useCaseQuery(caseId: string | undefined) {
   return useQuery({
@@ -111,7 +113,11 @@ export function LinkCaseDialog({
           <button type="button" className="button" onClick={onClose}>
             취소
           </button>
-          <ReasonButton className="button primary" reason={reason} onClick={() => link.mutate()}>
+          <ReasonButton
+            className="button primary"
+            reason={link.isPending ? PENDING : reason}
+            onClick={() => link.mutate()}
+          >
             연결
           </ReasonButton>
         </div>
@@ -249,7 +255,11 @@ export function CaseEditDialog({
           <button type="button" className="button" onClick={onClose}>
             취소
           </button>
-          <ReasonButton className="button primary" reason={reason} onClick={() => save.mutate()}>
+          <ReasonButton
+            className="button primary"
+            reason={save.isPending ? PENDING : reason}
+            onClick={() => save.mutate()}
+          >
             저장
           </ReasonButton>
         </div>
@@ -348,7 +358,7 @@ export function AddEvidenceDialog({
           </button>
           <ReasonButton
             className="button primary"
-            reason={reason}
+            reason={save.isPending ? PENDING : reason}
             onClick={() => {
               setAttempted(true);
               save.mutate();
@@ -425,7 +435,11 @@ export function AddRunDialog({
           <button type="button" className="button" onClick={onClose}>
             취소
           </button>
-          <ReasonButton className="button primary" reason={reason} onClick={() => start.mutate()}>
+          <ReasonButton
+            className="button primary"
+            reason={start.isPending ? PENDING : reason}
+            onClick={() => start.mutate()}
+          >
             실행
           </ReasonButton>
         </div>

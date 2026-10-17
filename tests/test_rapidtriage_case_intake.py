@@ -23,7 +23,7 @@ except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
 
 from rapidtriage.core.case_db import CaseDatabase
 from rapidtriage.core.case_db.constants import SCHEMA_SQL
-from rapidtriage.core.case_db.intake import intake_schema_present
+from rapidtriage.core.case_db.intake import ensure_intake_schema, intake_schema_present
 from rapidtriage.core.case_db.schema import register_case_db_functions
 from rapidtriage.core.jobs import RunJob, RunJobStore, RunRequest
 
@@ -180,14 +180,23 @@ class CaseIntakeApiTests(unittest.TestCase):
     def test_evidence_hash_verification_matches_and_mismatches(self) -> None:
         case = self.create_case()
         url = f"/api/cases/{case['case_id']}/evidence"
-        md5 = hashlib.md5(self.image.read_bytes()).hexdigest()
-        match = self.client.post(url, json={"evidence_number": "E-01", "source_type": "e01", "path": str(self.image),
+        export = self.temp / "export.zip"
+        export.write_bytes(b"PK export bytes")
+        md5 = hashlib.md5(export.read_bytes()).hexdigest()
+        # E01: container bytes are not the acquisition (media) hash -> no expected-hash comparison.
+        e01_expected = self.client.post(url, json={"evidence_number": "E-09", "source_type": "e01",
+                                                   "path": str(self.image), "verify_hash": True, "expected_hash": "0" * 32})
+        self.assertEqual(e01_expected.status_code, 422)
+        self.assertIn("획득(매체) 해시", e01_expected.json()["detail"])
+        match = self.client.post(url, json={"evidence_number": "E-01", "source_type": "export", "path": str(export),
                                             "verify_hash": True, "expected_hash": md5.upper()})
         self.assertEqual(match.status_code, 201, match.text)
         self.assertIn(match.json()["evidence"]["hash_status"], ("hashing", "matched"))
         other = self.temp / "other.E01"
         other.write_bytes(b"different")
-        mismatch = self.client.post(url, json={"evidence_number": "E-02", "source_type": "e01", "path": str(other),
+        mobile = self.temp / "mobile.tar"
+        mobile.write_bytes(b"different")
+        mismatch = self.client.post(url, json={"evidence_number": "E-02", "source_type": "mobile", "path": str(mobile),
                                                "verify_hash": True, "expected_hash": "0" * 64})
         self.assertEqual(mismatch.status_code, 201)
         plain = self.client.post(url, json={"evidence_number": "E-03", "source_type": "export",
@@ -212,6 +221,11 @@ class CaseIntakeApiTests(unittest.TestCase):
         evidence = workspace.intake.add_evidence(
             case["case_id"], evidence_number="E-01", display_name="x", source_type="e01", path=str(self.image),
             size_bytes=1, hash_verify=True, hash_expected="", hash_status="hashing", hash_message="", actor="t")
+        # Saved by this server and no worker yet: still hashing (no 중단됨 flash before start_hash).
+        listed = self.client.get(f"/api/cases/{case['case_id']}/evidence").json()["evidence"]
+        self.assertEqual(listed[0]["hash_status"], "hashing")
+        # Saved before this server started and no worker: interrupted by a restart.
+        workspace._started_at = "9999"
         listed = self.client.get(f"/api/cases/{case['case_id']}/evidence").json()["evidence"]
         self.assertEqual(listed[0]["citation_id"], evidence["citation_id"])
         self.assertEqual(listed[0]["hash_status"], "interrupted")
@@ -383,6 +397,38 @@ class CaseIntakeApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.json()["detail"], "런이 아직 끝나지 않았습니다")
 
+    def test_link_rules_review_followups(self) -> None:
+        case = self.create_case()
+        # Case numbers are unique regardless of letter case.
+        self.assertEqual(self.client.post("/api/cases", json={"case_number": "2026-고단-1234".upper()}).status_code, 409)
+        self.create_case(case_number="2026-abc")
+        self.assertEqual(self.client.post("/api/cases", json={"case_number": "2026-ABC"}).status_code, 409)
+        # A running run cannot be linked (its snapshot would miss the run's recorded options).
+        active = RunJob(run_id="active02", request=RunRequest(root=str(self.evidence_dir), mode="fraud"), status="running")
+        self.store._jobs[active.run_id] = active
+        link_url = f"/api/cases/{case['case_id']}/runs/link"
+        busy = self.client.post(link_url, json={"run_id": "active02", "evidence_number": "E-01"})
+        self.assertEqual(busy.status_code, 409)
+        self.assertIn("실행 중인 런", busy.json()["detail"])
+        # Evidence registered with backslashes is found for a run whose root uses forward slashes.
+        evidence = self.client.post(f"/api/cases/{case['case_id']}/evidence", json={
+            "evidence_number": "E-01", "source_type": "folder", "path": str(self.evidence_dir)}).json()["evidence"]
+        run_dir = self.temp / "fwd-run"
+        write_run(run_dir, Path(str(self.evidence_dir).replace("\\", "/")))
+        job = self.store.import_completed_run(run_dir)
+        job.request = RunRequest(root=str(self.evidence_dir).replace("\\", "/").upper() if os.name == "nt"
+                                 else str(self.evidence_dir), mode="fraud")
+        linked = self.client.post(link_url, json={"run_id": job.run_id, "evidence_citation_id": "   "})
+        self.assertEqual(linked.status_code, 201, linked.text)
+        self.assertEqual(linked.json()["snapshot"]["evidence_citation_id"], evidence["citation_id"])
+        evidence_rows = self.client.get(f"/api/cases/{case['case_id']}/evidence").json()["evidence"]
+        self.assertEqual(len(evidence_rows), 1)
+        # Same path spelled differently is still a duplicate.
+        if os.name == "nt":
+            dup = self.client.post(f"/api/cases/{case['case_id']}/evidence", json={
+                "evidence_number": "E-02", "source_type": "folder", "path": str(self.evidence_dir).upper()})
+            self.assertEqual(dup.status_code, 409)
+
     def test_routes_require_auth_token(self) -> None:
         bare = TestClient(create_app(RunJobStore(), auth_token=TOKEN, cases_db_path=self.temp / "x.db"))
         for method, path in (("get", "/api/cases"), ("post", "/api/cases"), ("get", "/api/runs/x/problems"),
@@ -430,6 +476,20 @@ class CaseIntakeMigrationTests(unittest.TestCase):
                 self.assertFalse(intake_schema_present(connection))
             database = CaseDatabase(path)
             database.initialize()
+            # A current run DB opened by viewers/search is not written to (read-only folders keep working).
+            with closing(sqlite3.connect(path)) as connection:
+                self.assertFalse(intake_schema_present(connection))
+            # The workspace case DB migrates in place when it is opened.
+            if HAS_FASTAPI:
+                app = create_app(RunJobStore(), auth_token=TOKEN, cases_db_path=path)
+                client = TestClient(app, headers={"X-RapidTriage-Token": TOKEN})
+                self.assertEqual(client.get("/api/cases").json()["cases"], [])
+                made = client.post("/api/cases", json={"case_number": "LEGACY-2"})
+                self.assertEqual(made.status_code, 201, made.text)
+                client.close()
+            else:
+                with database.connect() as connection:
+                    ensure_intake_schema(connection)
             with closing(sqlite3.connect(path)) as connection:
                 connection.row_factory = sqlite3.Row
                 self.assertTrue(intake_schema_present(connection))

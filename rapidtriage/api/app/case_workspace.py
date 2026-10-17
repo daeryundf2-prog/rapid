@@ -21,7 +21,7 @@ from fastapi import HTTPException
 
 from ...core.case_db import CaseDatabase
 from ...core.case_db.base import now_iso
-from ...core.case_db.intake import CaseIntake
+from ...core.case_db.intake import CaseIntake, ensure_intake_schema
 from ...core.e01 import is_e01_path
 from ...core.e01_hash import run_e01_streaming_hash
 from ...core.jobs import RunJob, RunJobStore, RunRequest
@@ -156,6 +156,8 @@ class CaseWorkspace:
         self._intake: CaseIntake | None = None
         self._path: Path | None = None
         self._hash_threads: dict[str, threading.Thread] = {}
+        # Rows saved as `hashing` before this server started have no worker any more.
+        self._started_at = now_iso()
 
     def path(self) -> Path:
         if self._path is None:
@@ -174,6 +176,8 @@ class CaseWorkspace:
             if self._intake is None:
                 database = CaseDatabase(self.path())
                 database.initialize()
+                with database.connect() as connection:
+                    ensure_intake_schema(connection)
                 self._intake = CaseIntake(database.connect)
             return self._intake
 
@@ -203,9 +207,9 @@ class CaseWorkspace:
                 algorithm = HASH_LENGTHS.get(len(expected), "")
                 actual = digests.get(algorithm, "")
                 status = "matched" if actual and actual.lower() == expected else "mismatched"
-                message = f"{algorithm.upper()} 기대값 {expected} / 계산값 {actual or '없음'}"
+                message = f"파일 바이트 {algorithm.upper()} 기대값 {expected} / 계산값 {actual or '없음'}"
             else:
-                status, message = "computed", "기대 해시가 없어 계산값만 기록했습니다 (컨테이너 바이트 기준)"
+                status, message = "computed", "기대 해시가 없어 계산값만 기록했습니다 (파일·컨테이너 바이트 기준)"
             self.intake.set_evidence_hash(citation_id, status=status, message=message, digests=digests)
         except Exception as exc:  # recorded on the evidence row, never raised into the server
             LOGGER.warning("evidence hash failed for %s: %s", citation_id, exc)
@@ -231,7 +235,11 @@ class CaseWorkspace:
 
     def present_evidence(self, evidence: dict[str, object]) -> dict[str, object]:
         """``hashing`` with no live worker (server restarted) reads as ``interrupted``."""
-        if evidence.get("hash_status") == "hashing" and not self.hash_running(str(evidence["citation_id"])):
+        if (
+            evidence.get("hash_status") == "hashing"
+            and str(evidence.get("added_at") or "") < self._started_at
+            and not self.hash_running(str(evidence["citation_id"]))
+        ):
             evidence = {**evidence, "hash_status": "interrupted", "hash_status_label": "해시 계산 중단됨 (서버 재시작)"}
         return evidence
 

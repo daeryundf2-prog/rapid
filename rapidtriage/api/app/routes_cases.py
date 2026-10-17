@@ -9,6 +9,7 @@ run still active), 422 (body validation, path policy, evidence kind, mode).
 from __future__ import annotations
 
 import json
+import sqlite3
 import uuid
 from pathlib import Path
 from typing import Any
@@ -85,6 +86,11 @@ def _raise(exc: CaseDatabaseError) -> None:
     raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+def _integrity_conflict(exc: sqlite3.IntegrityError) -> HTTPException:
+    """A unique index caught a concurrent duplicate the pre-check missed."""
+    return HTTPException(status_code=409, detail=f"같은 번호가 이미 등록되었습니다. 목록을 새로 읽으세요 ({exc})")
+
+
 def _actor(explicit: str, fallback: str = "") -> str:
     return resolve_request_reviewer(explicit) or fallback.strip()
 
@@ -152,6 +158,8 @@ def build_cases_router(store: RunJobStore, workspace: CaseWorkspace) -> APIRoute
             )
         except CaseDatabaseError as exc:
             _raise(exc)
+        except sqlite3.IntegrityError as exc:
+            raise _integrity_conflict(exc) from exc
         return {"command": "case.create", "case": case_detail(case)}
 
     @router.get("/api/cases")
@@ -188,6 +196,11 @@ def build_cases_router(store: RunJobStore, workspace: CaseWorkspace) -> APIRoute
         path = Path(lexical)
         validate_evidence_kind(path, request.source_type)
         algorithm = expected_hash_algorithm(request.expected_hash) if request.verify_hash else None
+        if request.expected_hash.strip() and request.source_type == "e01":
+            raise HTTPException(
+                status_code=422,
+                detail="E01은 컨테이너 바이트만 해시하므로 획득(매체) 해시와 비교할 수 없습니다. 기대 해시 없이 계산만 하세요",
+            )
         if request.expected_hash.strip() and not request.verify_hash:
             raise HTTPException(status_code=422, detail="기대 해시는 해시 검증을 켠 경우에만 지정할 수 있습니다")
         hashable = path.is_file()
@@ -217,6 +230,8 @@ def build_cases_router(store: RunJobStore, workspace: CaseWorkspace) -> APIRoute
             )
         except CaseDatabaseError as exc:
             _raise(exc)
+        except sqlite3.IntegrityError as exc:
+            raise _integrity_conflict(exc) from exc
         if status == "hashing":
             workspace.start_hash(
                 case_id=case_id, citation_id=str(evidence["citation_id"]), path=path,
@@ -285,16 +300,22 @@ def build_cases_router(store: RunJobStore, workspace: CaseWorkspace) -> APIRoute
     def link_case_run(case_id: str, request: CaseRunLinkRequest) -> dict[str, Any]:
         case = case_or_404(case_id)
         job = get_job(store, request.run_id)
+        if job.status in ("queued", "running"):
+            raise HTTPException(status_code=409, detail="실행 중인 런은 끝난 뒤 케이스에 연결할 수 있습니다")
         existing = intake().get_snapshot(job.run_id)
         if existing is not None:
             linked = case_or_404(str(existing["case_id"])) if existing["case_id"] != case_id else case
             raise HTTPException(status_code=409, detail=f"이미 케이스 {linked['case_number']}에 연결된 런입니다")
         actor = _actor(request.actor, str(case["examiner"]))
         try:
-            if request.evidence_citation_id:
-                evidence = intake().get_evidence(case_id, request.evidence_citation_id.strip())
+            if (request.evidence_citation_id or "").strip():
+                evidence = intake().get_evidence(case_id, str(request.evidence_citation_id).strip())
             else:
-                root = job.request.root
+                root = (
+                    checked_local_path(job.request.root, label="런 증거", confine_to_analysis_roots=True)
+                    if job.request.root
+                    else ""
+                )
                 evidence = intake().find_evidence_by_path(case_id, root) if root else None
                 if evidence is None:
                     number = (request.evidence_number or "").strip()
@@ -327,6 +348,8 @@ def build_cases_router(store: RunJobStore, workspace: CaseWorkspace) -> APIRoute
             )
         except CaseDatabaseError as exc:
             _raise(exc)
+        except sqlite3.IntegrityError as exc:
+            raise _integrity_conflict(exc) from exc
         except OSError as exc:
             raise HTTPException(status_code=422, detail=f"증거 경로를 읽을 수 없습니다: {exc}") from exc
         return {"command": "case.run.link", "case_id": case_id, "snapshot": saved,
@@ -349,7 +372,11 @@ def build_cases_router(store: RunJobStore, workspace: CaseWorkspace) -> APIRoute
 
     @router.get("/api/runs/{run_id}/processing-snapshot")
     def get_processing_snapshot(run_id: str) -> dict[str, Any]:
-        saved = intake().get_snapshot(run_id)
+        try:
+            saved = intake().get_snapshot(run_id)
+        except (CaseDatabaseError, sqlite3.Error, OSError):
+            # The workspace case DB is unusable: the run still shows its request snapshot.
+            saved = None
         if saved is not None:
             case = None
             evidence = None
