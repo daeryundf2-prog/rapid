@@ -7,6 +7,7 @@ import { useAppStore } from "../../state/store";
 import { runDisabledReason } from "../analysis/commands";
 import { caseRoute, otherCaseIds } from "../analysis/crossCase";
 import { useAnalysisStore } from "../analysis/store";
+import { buildReviewToolGridCommands } from "../review/gridTools";
 import { recordCitationParts } from "../viewer/citation";
 import { PIVOT_LABELS, PIVOT_ORDER, type PivotId, recordPivots } from "../viewer/pivots";
 import { registerCommand, registerLocalCommand } from "./adapter";
@@ -21,6 +22,7 @@ import {
   reviewTargetOf,
   storeNotice,
 } from "./reviewActions";
+import type { ColumnSpec } from "./types";
 
 /** Everything the grid commands need from the live grid; read through a ref so commands stay stable. */
 export interface GridCommandHost {
@@ -39,6 +41,8 @@ export interface GridCommandHost {
   showExtract: (result: RunExtractResult) => void;
   openTagPrompt: () => void;
   runIsActive: boolean;
+  /** Visible column specs in display order (CSV export of the selection, AXIOM E3). */
+  getExportColumns?: () => ColumnSpec[];
 }
 
 export function buildViewerTarget(runId: string, row: GridRow, mode?: ViewerMode): ViewerTarget {
@@ -463,6 +467,7 @@ export function useGridCommands(host: GridCommandHost): void {
     const unregister = [
       ...buildGridCommands(hostRef).map(registerCommand),
       ...buildRowMarkCommands(hostRef).map(registerLocalCommand),
+      ...buildReviewToolGridCommands(hostRef).map(registerCommand),
     ];
     return () => {
       for (const off of unregister) off();

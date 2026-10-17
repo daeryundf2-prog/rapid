@@ -144,6 +144,11 @@ class CaseDbReviewBatchRequest(BaseModel):
     priority: str | None = None
     due_at: str | None = None
     include_in_report: bool | None = None
+    # Review tags by case_tag id (AXIOM E3). With ``propagate_by_hash`` the tags also go on
+    # every file row of the same run whose MD5/SHA-1/SHA-256 equals a target's (max 10,000 rows).
+    tag_ids: list[int] | None = None
+    remove_tag_ids: list[int] | None = None
+    propagate_by_hash: bool = False
 
 
 class CaseDbReportExportRequest(BaseModel):

@@ -10,7 +10,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { announce, DisabledReason } from "../../a11y";
-import { getCommand } from "../../commands/registry";
+import { getCommand, runCommand } from "../../commands/registry";
 import { MenuButton, type MenuItem } from "../../components/MenuButton";
 import { STATUS_META } from "../../components/StatusChip";
 import "../../components/status.css";
@@ -25,6 +25,8 @@ import {
   unmarkActionOf,
 } from "../grid/reviewActions";
 import { noteKey, setSessionNote } from "../grid/sessionNotes";
+import { NOTE_PANEL_COMMAND, TAG_MANAGER_COMMAND } from "../review/commands";
+import { PROPAGATE_COMMAND } from "../review/gridTools";
 import { useViewerRowContext, useViewerTarget } from "./adapter";
 import { markDisabledReason, targetAsGridRow } from "./citation";
 import { writeClipboard } from "./commands";
@@ -230,6 +232,18 @@ export function ViewerToolbar({
       disabledReason: noteReason,
       onSelect: () => setNoteOpen(true),
     },
+    // Review tools (AXIOM E3): note history with author/time, same-hash propagation, tag manager.
+    ...[NOTE_PANEL_COMMAND, PROPAGATE_COMMAND, TAG_MANAGER_COMMAND].map((id): MenuItem => {
+      const command = getCommand(id);
+      return {
+        id,
+        label: command?.label ?? id,
+        command: id,
+        icon: id === NOTE_PANEL_COMMAND ? "clock" : "tag",
+        disabledReason: command ? command.disabledReason?.(ctx) : "메인 창의 목록에서 쓸 수 있습니다",
+        onSelect: () => void runCommand(id),
+      };
+    }),
   ];
 
   const sourceItems: MenuItem[] = [

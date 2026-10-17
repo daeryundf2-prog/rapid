@@ -31,6 +31,18 @@
     "/api/case-db/search": {
       "post": "search_case_db_api_case_db_search_post"
     },
+    "/api/cases/{case_id}/histogram-baselines": {
+      "get": "list_baselines_api_cases__case_id__histogram_baselines_get",
+      "post": "create_baseline_api_cases__case_id__histogram_baselines_post"
+    },
+    "/api/cases/{case_id}/tags": {
+      "get": "list_tags_api_cases__case_id__tags_get",
+      "post": "create_tag_api_cases__case_id__tags_post"
+    },
+    "/api/cases/{case_id}/tags/{tag_id}": {
+      "delete": "delete_tag_api_cases__case_id__tags__tag_id__delete",
+      "patch": "update_tag_api_cases__case_id__tags__tag_id__patch"
+    },
     "/api/collect/plan": {
       "post": "collect_plan_api_collect_plan_post"
     },
@@ -151,6 +163,9 @@
     "/api/runs/{run_id}/docs-index-search": {
       "get": "search_run_docs_index_api_runs__run_id__docs_index_search_get"
     },
+    "/api/runs/{run_id}/export-context": {
+      "get": "export_context_api_runs__run_id__export_context_get"
+    },
     "/api/runs/{run_id}/extract": {
       "post": "extract_run_rows_api_runs__run_id__extract_post"
     },
@@ -165,6 +180,9 @@
     },
     "/api/runs/{run_id}/flags/row": {
       "get": "get_row_flags_api_runs__run_id__flags_row_get"
+    },
+    "/api/runs/{run_id}/histogram": {
+      "get": "run_histogram_api_runs__run_id__histogram_get"
     },
     "/api/runs/{run_id}/indicators": {
       "get": "get_run_indicators_api_runs__run_id__indicators_get"
@@ -187,6 +205,9 @@
     "/api/runs/{run_id}/outputs/{output_name}/preview": {
       "get": "preview_run_output_api_runs__run_id__outputs__output_name__preview_get"
     },
+    "/api/runs/{run_id}/related-media": {
+      "get": "related_media_api_runs__run_id__related_media_get"
+    },
     "/api/runs/{run_id}/report": {
       "get": "get_run_report_api_runs__run_id__report_get"
     },
@@ -195,6 +216,9 @@
     },
     "/api/runs/{run_id}/review-counts": {
       "get": "run_review_counts_api_runs__run_id__review_counts_get"
+    },
+    "/api/runs/{run_id}/review-history": {
+      "get": "run_review_history_api_runs__run_id__review_history_get"
     },
     "/api/runs/{run_id}/review-map": {
       "get": "run_review_map_api_runs__run_id__review_map_get"

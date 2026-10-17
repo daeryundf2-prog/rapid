@@ -22,6 +22,7 @@ import type { GridRow } from "../../contracts/collection";
 import { useRoute as useAppRoute } from "../../state/hooks";
 import { useFilterStore } from "../filters/filterStore";
 import { useRoute } from "../grid/adapter";
+import { BaselineHistogram } from "../review/BaselineHistogram";
 import { errorText } from "../viewer/useAsync";
 import { emitTimeRangeFilter, toggleExtFilter, toggleTypeFilter } from "./filterEvent";
 import {
@@ -388,7 +389,17 @@ function ArtifactHistogram({ runId, kind }: { runId: string; kind?: string }) {
       />
     );
   }
-  return <CategoryBars bars={bars} basis={kind ? "아티팩트 유형별 건수" : "아티팩트 종류별 건수"} />;
+  const categoryBars = (
+    <CategoryBars bars={bars} basis={kind ? "아티팩트 유형별 건수" : "아티팩트 종류별 건수"} />
+  );
+  // The whole-run kind bars can be saved as a baseline and compared (AXIOM E3).
+  return kind ? (
+    categoryBars
+  ) : (
+    <BaselineHistogram key={runId} runId={runId}>
+      {categoryBars}
+    </BaselineHistogram>
+  );
 }
 
 const ALL_ROWS = (_row: GridRow) => true;
