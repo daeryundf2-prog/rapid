@@ -245,6 +245,13 @@ class CaseEvidenceCreateRequest(BaseModel):
     actor: str = Field("", max_length=200)
 
 
+class CaseEvidenceCheckRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(..., min_length=1, max_length=4096)
+    source_type: Literal["e01", "folder", "export", "mobile"] | None = None
+
+
 class CaseRunCreateRequest(RunCreateRequest):
     """``POST /api/runs`` body + the case evidence the run processes (root defaults to its path)."""
 
@@ -260,6 +267,9 @@ class CaseRunLinkRequest(BaseModel):
     evidence_citation_id: str | None = Field(None, max_length=120)
     evidence_number: str | None = Field(None, max_length=50)
     actor: str = Field("", max_length=200)
+    #: Link to an evidence item whose path differs from the run root (recorded in the audit).
+    force: bool = False
+    force_reason: str = Field("", max_length=500)
 
 
 class CaseNoteCreateRequest(BaseModel):

@@ -3,13 +3,16 @@
 Contract (docs/plans/axiom-adoption-2026-10-17.md §3.1). Errors are Korean:
 404 (case / evidence / note / run not found), 409 (duplicate case number,
 duplicate evidence number or path, run already linked, note already deleted,
-run still active), 422 (body validation, path policy, evidence kind, mode).
+run still active, output folder used by another queued/running run, hash already
+running), 422 (body validation, path policy, evidence kind, mode, run root differs
+from the evidence path, register-only evidence).
 """
 
 from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 import uuid
 from pathlib import Path
 from typing import Any
@@ -29,6 +32,7 @@ from .case_workspace import (
     expected_hash_algorithm,
     infer_source_type,
     run_brief,
+    run_readiness,
     same_path,
     validate_evidence_kind,
 )
@@ -40,6 +44,7 @@ from .helpers import (
 )
 from .models import (
     CaseCreateRequest,
+    CaseEvidenceCheckRequest,
     CaseEvidenceCreateRequest,
     CaseNoteCreateRequest,
     CasePatchRequest,
@@ -75,6 +80,8 @@ CASE_FIELD_LABELS = {
     "root": "증거 경로",
     "output_dir": "출력 폴더",
     "limit": "개수(limit)",
+    "force": "강제 연결",
+    "force_reason": "강제 연결 사유",
 }
 
 
@@ -95,6 +102,17 @@ def _actor(explicit: str, fallback: str = "") -> str:
     return resolve_request_reviewer(explicit) or fallback.strip()
 
 
+def _same_output_dir_job(store: RunJobStore, output_dir: str) -> str | None:
+    """Run id of a queued/running job that already writes into ``output_dir`` (None when free)."""
+    for other in store.list():
+        if other.status not in ("queued", "running"):
+            continue
+        other_dir = job_output_dir(other)
+        if other_dir is not None and same_path(str(other_dir), output_dir):
+            return other.run_id
+    return None
+
+
 def _write_snapshot_file(output_dir: Path | None, snapshot: dict[str, object]) -> tuple[str | None, str | None]:
     if output_dir is None:
         return None, "출력 폴더를 알 수 없습니다"
@@ -111,6 +129,8 @@ def _write_snapshot_file(output_dir: Path | None, snapshot: dict[str, object]) -
 
 def build_cases_router(store: RunJobStore, workspace: CaseWorkspace) -> APIRouter:
     router = APIRouter()
+    # The output-folder check and the submit are one step (two case runs cannot both pass the check).
+    submit_lock = threading.Lock()
 
     def intake():
         return workspace.intake
@@ -237,7 +257,45 @@ def build_cases_router(store: RunJobStore, workspace: CaseWorkspace) -> APIRoute
                 case_id=case_id, citation_id=str(evidence["citation_id"]), path=path,
                 expected=request.expected_hash,
             )
-        return {"command": "case.evidence.add", "evidence": {**evidence, "runs": []}}
+        return {"command": "case.evidence.add", "evidence": {**workspace.present_evidence(evidence), "runs": []}}
+
+    @router.post("/api/cases/{case_id}/evidence/{citation_id}/hash", status_code=202)
+    def rehash_evidence(case_id: str, citation_id: str, actor: str = Query("", max_length=200)) -> dict[str, Any]:
+        """Hash (again) a file evidence item: after a restart (`interrupted`), a failure, or never asked."""
+        case = case_or_404(case_id)
+        try:
+            current = intake().get_evidence(case_id, citation_id)
+        except CaseDatabaseError as exc:
+            _raise(exc)
+        path = Path(str(current["path"]))
+        if not path.is_file():
+            raise HTTPException(status_code=422, detail="파일 증거만 해시를 계산할 수 있습니다 (폴더·없는 경로 제외)")
+        if workspace.hash_running(citation_id):
+            raise HTTPException(status_code=409, detail="이미 해시를 계산하고 있습니다")
+        try:
+            evidence = intake().restart_hash(case_id, citation_id, actor=_actor(actor, str(case["examiner"])))
+        except CaseDatabaseError as exc:
+            _raise(exc)
+        workspace.start_hash(case_id=case_id, citation_id=citation_id, path=path,
+                             expected=str(evidence.get("hash_expected") or ""))
+        return {"command": "case.evidence.hash", "evidence": workspace.present_evidence(evidence)}
+
+    @router.post("/api/cases/evidence-check")
+    def check_evidence(request: CaseEvidenceCheckRequest) -> dict[str, Any]:
+        """Pre-check one evidence path before anything is saved: path policy, kind, runnable."""
+        try:
+            lexical = checked_local_path(request.path, label="증거", confine_to_analysis_roots=True)
+            path = Path(lexical)
+            if request.source_type:
+                validate_evidence_kind(path, request.source_type)
+            elif not path.exists():
+                raise HTTPException(status_code=422, detail=f"증거 경로가 없습니다: {path}")
+        except HTTPException as exc:
+            return {"command": "case.evidence.check", "path": request.path, "ok": False, "problem": str(exc.detail),
+                    "runnable": False, "run_blocked_reason": ""}
+        runnable, reason = run_readiness(path)
+        return {"command": "case.evidence.check", "path": lexical, "ok": True, "problem": "",
+                "runnable": runnable, "run_blocked_reason": reason}
 
     @router.get("/api/cases/{case_id}/evidence")
     def list_evidence(case_id: str) -> dict[str, Any]:
@@ -267,8 +325,9 @@ def build_cases_router(store: RunJobStore, workspace: CaseWorkspace) -> APIRoute
         except HTTPException as exc:
             raise HTTPException(status_code=422, detail=f"이 증거는 바로 처리할 수 없습니다: {exc.detail}") from exc
         output_dir: str | None = None
-        if request.output_dir and request.output_dir.strip():
-            output_dir = checked_local_path(request.output_dir, label="출력 폴더")
+        explicit_output = bool(request.output_dir and request.output_dir.strip())
+        if explicit_output:
+            output_dir = checked_local_path(str(request.output_dir), label="출력 폴더")
         elif case.get("case_root"):
             stamp = uuid.uuid4().hex[:8]
             output_dir = str(
@@ -276,14 +335,29 @@ def build_cases_router(store: RunJobStore, workspace: CaseWorkspace) -> APIRoute
                 / f"{evidence_slug(str(evidence['evidence_number']))}-rapidtriage-run-{request.mode}-{stamp}"
             )
         run_request = run_request_from_body(request, root=root, output_dir=output_dir)
-        job = store.run_sync(run_request) if request.wait else store.submit(run_request)
+        with submit_lock:
+            if explicit_output and output_dir:
+                # Two concurrent runs in one folder overwrite each other's summary, case DB and snapshot.
+                busy = _same_output_dir_job(store, output_dir)
+                if busy:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"같은 출력 폴더를 쓰는 런({busy})이 대기·실행 중입니다. 출력 폴더를 비우거나 다른 폴더를 지정하세요",
+                    )
+            job = store.submit(run_request) if not request.wait else None
+        if job is None:
+            job = store.run_sync(run_request)
         snapshot = build_processing_snapshot(run_request=run_request, case=case, evidence=evidence, origin="case-run")
+        # Written into the run's own output folder: with wait=false (the default) this happens right
+        # after the run is queued, before its first step, so the file is part of the run output from
+        # the start; the path is also recorded in the case audit (run.created params).
         file_path, file_error = _write_snapshot_file(job_output_dir(job), snapshot)
         snapshot["file"] = file_path
         try:
             saved = intake().save_snapshot(
                 run_id=job.run_id, case_id=case_id, evidence_citation_id=str(evidence["citation_id"]),
                 snapshot=snapshot, actor=_actor(request.actor, str(case["examiner"])),
+                audit_params={"snapshot_file": file_path, "snapshot_file_error": file_error},
             )
         except CaseDatabaseError as exc:
             _raise(exc)
@@ -307,9 +381,19 @@ def build_cases_router(store: RunJobStore, workspace: CaseWorkspace) -> APIRoute
             linked = case_or_404(str(existing["case_id"])) if existing["case_id"] != case_id else case
             raise HTTPException(status_code=409, detail=f"이미 케이스 {linked['case_number']}에 연결된 런입니다")
         actor = _actor(request.actor, str(case["examiner"]))
+        force_reason = request.force_reason.strip()
+        if request.force and not force_reason:
+            raise HTTPException(status_code=422, detail="강제 연결 사유를 입력하세요")
+        forced = False
         try:
             if (request.evidence_citation_id or "").strip():
                 evidence = intake().get_evidence(case_id, str(request.evidence_citation_id).strip())
+                # The citation's 증거 번호 must name the evidence the run actually processed.
+                run_root = str(job.request.root or "")
+                if not run_root or not same_path(run_root, str(evidence["path"])):
+                    if not request.force:
+                        raise HTTPException(status_code=422, detail="런 경로가 증거 경로와 다릅니다")
+                    forced = True
             else:
                 root = (
                     checked_local_path(job.request.root, label="런 증거", confine_to_analysis_roots=True)
@@ -340,11 +424,20 @@ def build_cases_router(store: RunJobStore, workspace: CaseWorkspace) -> APIRoute
             snapshot = build_processing_snapshot(
                 run_request=job.request, case=case, evidence=evidence, origin="linked-run", summary=job.summary
             )
-            file_path, file_error = _write_snapshot_file(job_output_dir(job), snapshot)
+            if forced:
+                snapshot["forced_link"] = {"reason": force_reason, "run_root": job.request.root,
+                                           "evidence_path": evidence["path"]}
+            # A finished run's output folder is not touched after the fact: the linked snapshot file
+            # lives in the workspace (next to the cases DB) and its path is in the audit.
+            file_path, file_error = _write_snapshot_file(workspace.linked_snapshot_dir(job.run_id), snapshot)
             snapshot["file"] = file_path
+            audit_params: dict[str, object] = {"snapshot_file": file_path, "snapshot_file_error": file_error}
+            if forced:
+                audit_params.update(forced=True, force_reason=force_reason, run_root=job.request.root,
+                                    evidence_path=evidence["path"])
             saved = intake().save_snapshot(
                 run_id=job.run_id, case_id=case_id, evidence_citation_id=str(evidence["citation_id"]),
-                snapshot=snapshot, actor=actor, action="run.linked",
+                snapshot=snapshot, actor=actor, action="run.linked", audit_params=audit_params,
             )
         except CaseDatabaseError as exc:
             _raise(exc)

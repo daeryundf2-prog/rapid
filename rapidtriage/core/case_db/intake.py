@@ -13,6 +13,7 @@ starts). Every column/table here is additive: ``apply_intake_schema`` runs from
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sqlite3
 from collections.abc import Callable, Iterable, Mapping
@@ -21,6 +22,8 @@ from dataclasses import dataclass
 
 from .base import CaseDatabaseError, normalize_identifier, now_iso
 from .constants import CITATION_KIND_PREFIXES, CITATION_WIDTH
+
+LOGGER = logging.getLogger(__name__)
 
 __all__ = [
     "CASE_INTAKE_COLUMNS",
@@ -82,6 +85,12 @@ BEGIN
     SELECT RAISE(ABORT, 'case_note_history is append-only');
 END;
 
+CREATE TRIGGER IF NOT EXISTS case_note_history_no_delete
+BEFORE DELETE ON case_note_history
+BEGIN
+    SELECT RAISE(ABORT, 'case_note_history is append-only');
+END;
+
 CREATE TABLE IF NOT EXISTS processing_snapshot (
     run_id TEXT PRIMARY KEY,
     case_id TEXT NOT NULL,
@@ -99,6 +108,20 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_case_record_case_number
 CREATE UNIQUE INDEX IF NOT EXISTS idx_evidence_source_number
     ON evidence_source(case_id, evidence_number) WHERE evidence_number <> '';
 """
+
+#: Unique indexes that can fail on a legacy DB that already holds duplicates (created separately so
+#: such a DB still opens; the API pre-checks inside ``BEGIN IMMEDIATE`` keep new rows unique).
+#: ``lower()`` folds ASCII only, the same fold the pre-check uses.
+CASE_NUMBER_NOCASE_INDEX = "idx_case_record_case_number_nocase"
+CITATION_PREFIX_INDEX = "idx_case_record_citation_prefix"
+INTAKE_UNIQUE_INDEXES = (
+    (CASE_NUMBER_NOCASE_INDEX,
+     f"CREATE UNIQUE INDEX IF NOT EXISTS {CASE_NUMBER_NOCASE_INDEX} "
+     "ON case_record(lower(case_number)) WHERE case_number <> ''"),
+    (CITATION_PREFIX_INDEX,
+     f"CREATE UNIQUE INDEX IF NOT EXISTS {CITATION_PREFIX_INDEX} ON case_record(citation_prefix)"),
+)
+INTAKE_TRIGGERS = ("case_note_history_no_update", "case_note_history_no_delete")
 
 #: Evidence kinds the intake wizard offers (AXIOM: image / folder / export / mobile).
 EVIDENCE_TYPES = ("e01", "folder", "export", "mobile")
@@ -139,6 +162,11 @@ def apply_intake_schema(connection: sqlite3.Connection) -> None:
     # commits first, and apply_schema's fast path counts DDL replays (hardening follow-ups).
     for statement in INTAKE_SCHEMA_SQL.strip().split("\n\n"):
         connection.execute(statement)
+    for name, statement in INTAKE_UNIQUE_INDEXES:
+        try:
+            connection.execute(statement)
+        except sqlite3.IntegrityError as exc:
+            LOGGER.warning("case DB keeps duplicate rows; unique index %s not created: %s", name, exc)
 
 
 def intake_schema_present(connection: sqlite3.Connection) -> bool:
@@ -155,7 +183,13 @@ def intake_schema_present(connection: sqlite3.Connection) -> bool:
             "('case_note', 'case_note_history', 'processing_snapshot')"
         )
     }
-    return len(names) == 3
+    if len(names) != 3:
+        return False
+    objects = {
+        str(row[0])
+        for row in connection.execute("SELECT name FROM sqlite_master WHERE type IN ('index', 'trigger')")
+    }
+    return {name for name, _ in INTAKE_UNIQUE_INDEXES} <= objects and set(INTAKE_TRIGGERS) <= objects
 
 
 def ensure_intake_schema(connection: sqlite3.Connection) -> bool:
@@ -174,6 +208,22 @@ def ensure_intake_schema(connection: sqlite3.Connection) -> bool:
 def same_local_path(left: str, right: str) -> bool:
     """Path equality as Windows sees it (``D:/x`` == ``d:\\X``), without touching the disk."""
     return os.path.normcase(os.path.abspath(left)) == os.path.normcase(os.path.abspath(right))
+
+
+def _begin_immediate(connection: sqlite3.Connection) -> None:
+    """Take the write lock now (not at the first write) so a read-then-write stays consistent."""
+    if not connection.in_transaction:
+        connection.execute("BEGIN IMMEDIATE")
+
+
+def case_integrity_conflict(exc: sqlite3.IntegrityError, case_number: str) -> CaseConflictError:
+    """A unique index caught what the pre-check could not (legacy rows / another writer)."""
+    text = str(exc)
+    if "citation_prefix" in text or CITATION_PREFIX_INDEX in text or "audit_event" in text:
+        return CaseConflictError("인용 ID 접두가 다른 케이스와 겹쳐 케이스를 저장하지 못했습니다. 다시 시도하세요")
+    if "case_number" in text:
+        return CaseConflictError(f"같은 사건 번호의 케이스가 이미 있습니다 (대소문자 무시): {case_number}")
+    return CaseConflictError(f"케이스를 저장하지 못했습니다 (중복): {text}")
 
 
 def _row_dict(row: sqlite3.Row | None) -> dict[str, object]:
@@ -285,6 +335,9 @@ class CaseIntake:
         case_number = str(fields.get("case_number") or "").strip()
         timestamp = now_iso()
         with self.connect() as connection:
+            # Pre-check, prefix choice and insert in one write transaction: concurrent creates
+            # serialize here instead of both passing the pre-check (unique indexes back it up).
+            _begin_immediate(connection)
             if connection.execute(
                 "SELECT 1 FROM case_record WHERE lower(case_number) = lower(?)", (case_number,)
             ).fetchone():
@@ -315,7 +368,7 @@ class CaseIntake:
                     ),
                 )
             except sqlite3.IntegrityError as exc:
-                raise CaseConflictError(f"케이스를 만들 수 없습니다: {exc}") from exc
+                raise case_integrity_conflict(exc, case_number) from exc
             _audit(connection, case_id, "case.created", target_type="case", target_id=case_id, actor=actor,
                    params={"case_number": case_number})
             return self._case_payload(self._case_row(connection, case_id))
@@ -334,7 +387,11 @@ class CaseIntake:
     def update_case(self, case_id: str, changes: Mapping[str, str], *, actor: str) -> dict[str, object]:
         updates = {key: str(value).strip() for key, value in changes.items() if key in CASE_FIELDS}
         with self.connect() as connection:
+            _begin_immediate(connection)
             before = self._case_payload(self._case_row(connection, case_id))
+            if "name" in updates and not updates["name"]:
+                # 사건명 is never blank: an emptied name falls back to the case number (as on create).
+                updates["name"] = updates.get("case_number") or str(before["case_number"])
             number = updates.get("case_number")
             if number is not None and number != before["case_number"]:
                 clash = connection.execute(
@@ -346,10 +403,13 @@ class CaseIntake:
             changed = {key: value for key, value in updates.items() if before.get(key) != value}
             if changed:
                 assignments = ", ".join(f"{key} = ?" for key in changed)
-                connection.execute(
-                    f"UPDATE case_record SET {assignments}, updated_at = ? WHERE case_id = ?",
-                    (*changed.values(), now_iso(), case_id),
-                )
+                try:
+                    connection.execute(
+                        f"UPDATE case_record SET {assignments}, updated_at = ? WHERE case_id = ?",
+                        (*changed.values(), now_iso(), case_id),
+                    )
+                except sqlite3.IntegrityError as exc:
+                    raise case_integrity_conflict(exc, str(number or before["case_number"])) from exc
                 _audit(
                     connection, case_id, "case.updated", target_type="case", target_id=case_id, actor=actor,
                     params={"changed": sorted(changed), "previous": {key: before.get(key) for key in changed}},
@@ -496,6 +556,53 @@ class CaseIntake:
                     actor="rapidtriage", params={"status": status, "message": message, **dict(digests)},
                 )
 
+    def mark_interrupted_hashes(self, started_before: str) -> list[str]:
+        """``hashing`` rows saved before ``started_before`` have no worker any more: store ``interrupted``."""
+        message = "서버가 다시 시작되어 해시 계산이 끊겼습니다. 다시 계산하세요"
+        with self.connect() as connection:
+            _begin_immediate(connection)
+            rows = connection.execute(
+                "SELECT citation_id, case_id FROM evidence_source WHERE hash_status = 'hashing' AND added_at < ?",
+                (started_before,),
+            ).fetchall()
+            for citation_id, case_id in rows:
+                connection.execute(
+                    "UPDATE evidence_source SET hash_status = 'interrupted', hash_message = ? WHERE citation_id = ?",
+                    (message, citation_id),
+                )
+                _audit(
+                    connection, str(case_id), "evidence.hash", target_type="evidence_source",
+                    target_id=str(citation_id), actor="rapidtriage",
+                    params={"status": "interrupted", "message": message},
+                )
+        return [str(row[0]) for row in rows]
+
+    def restart_hash(self, case_id: str, citation_id: str, *, actor: str) -> dict[str, object]:
+        """Mark an evidence row ``hashing`` again (re-hash); the caller starts the worker."""
+        with self.connect() as connection:
+            _begin_immediate(connection)
+            self._case_row(connection, case_id)
+            row = connection.execute(
+                "SELECT * FROM evidence_source WHERE case_id = ? AND citation_id = ?", (case_id, citation_id)
+            ).fetchone()
+            if row is None:
+                raise CaseNotFoundError("증거를 찾을 수 없습니다")
+            if row["hash_status"] == "hashing":
+                raise CaseConflictError("이미 해시를 계산하고 있습니다")
+            expected = str(row["hash_expected"] or "")
+            connection.execute(
+                "UPDATE evidence_source SET hash_verify = 1, hash_status = 'hashing', hash_message = ? "
+                "WHERE citation_id = ?",
+                ("다시 계산 중" + (" (기대값과 비교)" if expected else ""), citation_id),
+            )
+            _audit(
+                connection, case_id, "evidence.hash.restart", target_type="evidence_source", target_id=citation_id,
+                actor=actor, params={"previous_status": row["hash_status"]},
+            )
+            return self._evidence_payload(
+                connection.execute("SELECT * FROM evidence_source WHERE citation_id = ?", (citation_id,)).fetchone()
+            )
+
     # --- processing snapshots -----------------------------------------------
 
     def save_snapshot(
@@ -507,6 +614,7 @@ class CaseIntake:
         snapshot: Mapping[str, object],
         actor: str,
         action: str = "run.created",
+        audit_params: Mapping[str, object] | None = None,
     ) -> dict[str, object]:
         captured_at = str(snapshot.get("captured_at") or now_iso())
         with self.connect() as connection:
@@ -524,7 +632,7 @@ class CaseIntake:
             )
             _audit(
                 connection, case_id, action, target_type="run", target_id=run_id, actor=actor,
-                params={"evidence_citation_id": evidence_citation_id},
+                params={"evidence_citation_id": evidence_citation_id, **dict(audit_params or {})},
             )
         return {"run_id": run_id, "case_id": case_id, "evidence_citation_id": evidence_citation_id,
                 "captured_at": captured_at, "snapshot": dict(snapshot)}
