@@ -11,6 +11,7 @@ import { RUNS_QUERY_KEY, type RunWithProgress } from "../api/runsProgress";
 import { COLLECTION_NODES, runDisplayName } from "../app/collections";
 import type { Command, CommandContext } from "../contracts/command";
 import { conditionsCommand } from "../features/filters/conditionPanel";
+import { useViewPrefs } from "../features/review/viewPrefs";
 import { treeEmptyCommand } from "../features/tree/treePrefs";
 import { focusPopout } from "../features/viewer/popout/host";
 import { NO_VIEWER_REASON, stageHasViewer, stageOf } from "../router";
@@ -71,10 +72,25 @@ export function expandViewerPane(): void {
   s.setViewerPane(s.route.row ? "auto" : "open");
 }
 
+export const CLASSIC_COLLAPSE_REASON = "클래식 분할에서는 뷰어를 접을 수 없습니다";
+
+/** Why 뷰어 접기 cannot run: the classic split always shows the viewer (no rail to fold into). */
+export function collapseViewerReason(): string | undefined {
+  const s = useAppStore.getState();
+  if (s.viewerIsDrawer || !stageHasViewer(stageOf(s.route))) return undefined;
+  return useViewPrefs.getState().classicSplit ? CLASSIC_COLLAPSE_REASON : undefined;
+}
+
 /** 뷰어 접기: collapse the wide viewer to its rail for this session; focus moves to the rail. */
 export function collapseViewerPane(): void {
   const s = useAppStore.getState();
   if (s.viewerIsDrawer) return;
+  // Never a hidden "collapsed" state the classic split cannot show (it would surface later).
+  const reason = collapseViewerReason();
+  if (reason) {
+    announce(reason);
+    return;
+  }
   s.setViewerPane("collapsed");
   focusById(VIEWER_EXPAND_ID);
 }

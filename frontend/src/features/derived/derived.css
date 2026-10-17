@@ -1,0 +1,270 @@
+/* 통합 보기 (axiom-adoption §3.2). Colours are tokens only (contrast gate). */
+.derived-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.derived-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--line-subtle);
+  background: var(--bg-panel);
+}
+
+.derived-title {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.derived-hint,
+.derived-status {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
+}
+
+.derived-notice {
+  margin: 0;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--caution-bg);
+  color: var(--text);
+  font-size: var(--fs-table-aux);
+}
+
+.derived-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.derived-tab,
+.derived-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 24px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-table-aux);
+  cursor: pointer;
+}
+
+.derived-tab[aria-current="page"],
+.derived-chip[aria-pressed="true"] {
+  border-color: var(--focus);
+  background: var(--bg-selected);
+  font-weight: 600;
+}
+
+.derived-tab:hover,
+.derived-chip:hover {
+  background: var(--bg-hover);
+}
+
+.derived-tab:focus-visible,
+.derived-chip:focus-visible,
+.derived-sample:focus-visible,
+.derived-row:focus-visible {
+  outline: var(--focus-width) solid var(--focus);
+  outline-offset: calc(-1 * var(--focus-width));
+}
+
+.derived-tab-count,
+.derived-chip-count {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.derived-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--line-subtle);
+}
+
+.derived-search {
+  min-width: 220px;
+  flex: 1 1 220px;
+  max-width: 420px;
+  height: var(--control-h);
+}
+
+.derived-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
+}
+
+.derived-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3);
+  border-bottom: 1px solid var(--line-subtle);
+}
+
+.derived-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 32%);
+  flex: 1;
+  min-height: 0;
+}
+
+.derived-grid-wrap {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.derived-grid {
+  display: grid;
+  font-size: var(--fs-body);
+}
+
+/* Each row spans the grid's columns (CSS subgrid keeps the cells aligned with the header). */
+.derived-row {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  min-height: var(--row-h);
+  border-bottom: 1px solid var(--line-subtle);
+  cursor: pointer;
+}
+
+.derived-row:hover {
+  background: var(--bg-hover);
+}
+
+.derived-row[aria-selected="true"] {
+  background: var(--bg-selected);
+  box-shadow: inset 3px 0 0 var(--focus);
+}
+
+.derived-row-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-panel);
+  cursor: default;
+}
+
+.derived-cell {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 0 var(--space-2);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.derived-head-cell {
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
+  font-weight: 600;
+}
+
+.derived-mono {
+  font-family: var(--font-mono);
+}
+
+.derived-num {
+  justify-content: flex-end;
+  font-variant-numeric: tabular-nums;
+}
+
+.derived-sentinel {
+  height: 1px;
+}
+
+.derived-actions {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+}
+
+.derived-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-2) var(--space-3);
+  border-left: 1px solid var(--line-subtle);
+  background: var(--bg-panel);
+}
+
+.derived-rows-title {
+  margin: 0;
+  font-size: var(--fs-panel-title);
+  overflow-wrap: anywhere;
+}
+
+.derived-samples,
+.derived-examples {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.derived-examples li {
+  font-size: var(--fs-table-aux);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.derived-sample {
+  width: 100%;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-table-aux);
+  text-align: left;
+  cursor: pointer;
+}
+
+.derived-sample:hover {
+  border-color: var(--line);
+  background: var(--bg-hover);
+}
+
+@media (max-width: 900px) {
+  .derived-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+
+  .derived-rows {
+    border-left: none;
+    border-top: 1px solid var(--line-subtle);
+    max-height: 40%;
+  }
+}
+
+/* Empty / loading states: the title and hint sit directly in the pane. */
+.derived-pane > .derived-title,
+.derived-pane > .derived-hint,
+.derived-pane > .derived-actions {
+  margin: var(--space-2) var(--space-3) 0;
+}

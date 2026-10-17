@@ -305,10 +305,15 @@ describe("case / search commands", () => {
   it("registers every action id", () => {
     expect(commands.map((c) => c.id).sort()).toEqual(
       [
+        "case.create",
         "case.delete",
         "case.doctor",
+        "case.edit",
+        "case.evidence.add",
         "case.import",
+        "case.link",
         "case.run",
+        "case.run.add",
         "case.sample",
         "case.switch",
         "export.case-report",

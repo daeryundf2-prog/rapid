@@ -12,6 +12,7 @@ import { createElement } from "react";
 import type { GridRow } from "../../../contracts/collection";
 import { clipValue, flatValue } from "../../../utils/flatValue";
 import { formatGridTime } from "../../../utils/time";
+import { deriveColumn, missingText } from "../../derived/derivedFields";
 import { type CatalogColumn, type CatalogFamily, familyForType, getCatalog } from "../../flags/catalog";
 import { FlagCell } from "../../flags/FlagCell";
 import { flagSortValue, flagsAccessibleName, rowFlags } from "../../flags/flags";
@@ -147,8 +148,48 @@ function displayValue(def: CatalogColumn, value: unknown): string {
 /** Formats shown in the mono face (ids, hashes, SIDs, paths, URLs). */
 const MONO_FORMATS: ReadonlySet<string> = new Set(["mono", "hex", "sid", "path", "url"]);
 
+/**
+ * A display-only catalogue column (`derive:`, axiom-adoption §3.2): computed from the row's own
+ * fields, never sorted by the server; a value the parser cannot give reads "없음 — <사유>".
+ */
+function derivedCatalogColumn(def: CatalogColumn & { derive: string }, aux: boolean): ColumnSpec {
+  const read = (row: GridRow) => deriveColumn(def.derive, detailsOf(row), row.artifactType ?? "");
+  const text = (row: GridRow) => {
+    const hit = read(row);
+    if (!hit) return "";
+    return "missing" in hit ? missingText(hit.missing) : hit.value;
+  };
+  return {
+    id: familyColumnId(def.key),
+    header: def.label,
+    width: def.width ?? 150,
+    minWidth: 60,
+    presets: aux ? [] : ["analysis", "axiom"],
+    fieldKeys: [],
+    value: (row) => {
+      const hit = read(row);
+      return hit && !("missing" in hit) ? hit.value : null;
+    },
+    format: text,
+    tooltip: (row) => {
+      const hit = read(row);
+      if (!hit) return "";
+      if ("missing" in hit) return missingText(hit.missing);
+      return hit.detail ? `${hit.value} (${hit.detail})` : hit.value;
+    },
+    render: (row) => {
+      const hit = read(row);
+      if (!hit) return createElement("span", { className: "grid-cell-empty", "aria-hidden": true }, "—");
+      if ("missing" in hit)
+        return createElement("span", { className: "grid-cell-missing" }, missingText(hit.missing));
+      return createElement("span", { className: "grid-cell-text" }, hit.value);
+    },
+  };
+}
+
 /** Grid column of one catalogue column. `aux` columns start hidden (열 선택 › 카탈로그 보조 열). */
 export function catalogColumn(def: CatalogColumn, aux = false): ColumnSpec {
+  if (def.derive) return derivedCatalogColumn({ ...def, derive: def.derive }, aux);
   const numeric = def.format === "number" || def.format === "bytes";
   const sortable = !def.key.includes(".");
   const read = (row: { fields: Record<string, unknown> }) => readColumn(detailsOf(row), def);
@@ -289,6 +330,12 @@ function rowFacts(row: GridRow): { facts: SummaryEntry[]; time: SummaryEntry | n
   const facts: SummaryEntry[] = [];
   let time: SummaryEntry | null = null;
   for (const def of family?.core_columns ?? []) {
+    if (def.derive) {
+      const derived = deriveColumn(def.derive, details, row.artifactType ?? "");
+      if (derived && !("missing" in derived) && facts.length < 3)
+        facts.push({ label: def.label, value: derived.value });
+      continue;
+    }
     const hit = readColumn(details, def);
     if (!hit) continue;
     const value = displayValue(def, hit.value).trim();

@@ -697,7 +697,8 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertEqual(memory_cap_ledger["stage_telemetry_manifest_hash"], memory_cap_telemetry["manifest_hash"])
             self.assertGreaterEqual(memory_cap_telemetry["stage_check_count"], 8)
             self.assertEqual(memory_cap_telemetry["first_stage"], "prepare")
-            self.assertEqual(memory_cap_telemetry["last_stage"], "triage-flags")  # the last stage before the report (viewer-families §3.1)
+            # The last stage before the report: 통합 보기 runs after triage-flags (axiom-adoption §3.2).
+            self.assertEqual(memory_cap_telemetry["last_stage"], "derived")
             self.assertEqual(
                 summary_payload["processing"]["memory_cap_enforcement"][
                     "memory_cap_report_grade_validation_plan_hash"

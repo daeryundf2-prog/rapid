@@ -1,10 +1,12 @@
 /**
  * First screen (visual-polish S10 / U-V6): a centred card with the brand mark, the three ways
- * to start (케이스 열기 · 이미지 실행 · 샘플), the recent cases and the key hints. Without an API
+ * to start (케이스 만들기 · 케이스 열기 · 케이스 없이 빠른 런 · 샘플), the recent cases and the key hints. Without an API
  * token the same card asks for the token instead (the token gate lives inside the card).
  */
 
+import { useQuery } from "@tanstack/react-query";
 import { useId, useState } from "react";
+import { listCases } from "../../api/cases";
 import { setAuthToken } from "../../api/client";
 import { RUN_MODE_LABEL, runDisplayName } from "../../app/collections";
 import { CommandButton } from "../../commands/CommandButton";
@@ -59,6 +61,15 @@ function TokenForm({ onSaved }: { onSaved: () => void }) {
 function RecentCases() {
   const { runs } = useRuns();
   const { timezone } = useTimezone();
+  // 사건 번호 › 증거 번호 of runs started for a case (AXIOM adoption E1); others read "케이스 없음".
+  const cases = useQuery({ queryKey: ["cases"], queryFn: listCases, retry: false });
+  const caseOfRun = new Map<string, string>();
+  for (const item of cases.data ?? []) {
+    for (const evidence of item.evidence) {
+      for (const run of evidence.runs)
+        caseOfRun.set(run.run_id, `${item.case_number} › ${evidence.evidence_number}`);
+    }
+  }
   const recent = [...runs]
     .sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")))
     .slice(0, LANDING_RECENT_COUNT);
@@ -68,7 +79,9 @@ function RecentCases() {
         최근 케이스
       </h2>
       {recent.length === 0 ? (
-        <p className="landing-note">아직 케이스가 없습니다. 이미지를 실행하거나 샘플로 시작하세요.</p>
+        <p className="landing-note">
+          아직 케이스가 없습니다. 케이스를 만들거나 케이스 없이 빠른 런·샘플로 시작하세요.
+        </p>
       ) : (
         <ul className="landing-cases">
           {recent.map((run) => {
@@ -86,7 +99,14 @@ function RecentCases() {
                   <span className="landing-case-line">
                     <span className="landing-case-name">{runDisplayName(run)}</span>
                     <span className="landing-case-meta">
-                      {[mode, when, run.run_id.slice(0, 8)].filter(Boolean).join(" · ")}
+                      {[
+                        cases.data ? (caseOfRun.get(run.run_id) ?? "케이스 없음") : "",
+                        mode,
+                        when,
+                        run.run_id.slice(0, 8),
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
                     </span>
                   </span>
                   <StatusBadge status={String(run.status)} />
@@ -129,13 +149,24 @@ export function Landing({
           <>
             <div className="landing-actions">
               <CommandButton
+                command="case.create"
+                label="케이스 만들기"
+                variant="primary"
+                className="roomy"
+                testId="landing-create"
+              />
+              <CommandButton
                 command="case.switch"
                 label="케이스 열기"
-                variant="primary"
                 className="roomy"
                 testId="landing-open"
               />
-              <CommandButton command="case.run" label="이미지 실행" className="roomy" testId="landing-run" />
+              <CommandButton
+                command="case.run"
+                label="케이스 없이 빠른 런"
+                className="roomy"
+                testId="landing-run"
+              />
               <CommandButton command="case.sample" label="샘플" className="roomy" testId="landing-sample" />
             </div>
             <RecentCases />

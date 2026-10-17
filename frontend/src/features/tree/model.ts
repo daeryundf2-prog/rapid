@@ -325,6 +325,10 @@ export interface DomainCount {
   neverRan?: boolean;
 }
 
+/** 통합 보기 node of a run without a derived set (older run, or the step failed). */
+export const NO_DERIVED_REASON =
+  "통합 보기 결과가 없습니다 — 명령 팔레트의 '통합 보기 다시 만들기'로 만드세요";
+
 /** U-F7 reason of an analysis node that never ran. */
 export const NEVER_RAN_REASON = "분석 안 됨 — 처리 단계에서 실행하면 결과가 여기에 나타납니다";
 
@@ -376,6 +380,12 @@ export function domainNodeCount(target: DomainTarget, input: TreeModelInput): Do
       icon: status === "completed" ? undefined : nodeStateIcon(status),
       ...(statusKnown && status === null && count === undefined ? { neverRan: true } : {}),
     };
+  }
+  if (target.collection === "derived") {
+    // 통합 보기: distinct values of the table (`/tree` `derived:<table>`); no set yet → hidden with the reason.
+    if (!tree) return { count: undefined };
+    const node = findServerNode(tree, `derived:${target.kind ?? ""}`);
+    return node ? known(node.count, true) : { count: 0, disabledReason: NO_DERIVED_REASON };
   }
   if (target.collection === "files" && target.fileScope && !target.fileCategory) {
     return inventoryTotal(input);
@@ -512,9 +522,16 @@ export function domainTotal(
   const excluded = new Map<string, number>();
   const wide = new Map<string, number>();
   let anyKnown = false;
+  // 통합 보기: each table's distinct values (the tables do not repeat one another's values).
+  let derived = 0;
   nodes.forEach((node, index) => {
     const count = counts[index];
     const t = node.target;
+    if (t.collection === "derived" && typeof count === "number") {
+      anyKnown = true;
+      derived += count;
+      return;
+    }
     if (t.collection !== "artifacts" || !t.kind || typeof count !== "number") return;
     // Catch-alls span domains, groups repeat their leaves, filtered views repeat their types.
     if (node.catchAll || node.children?.length || t.cf?.length) return;
@@ -524,7 +541,7 @@ export function domainTotal(
     else typed.set(t.kind, (typed.get(t.kind) ?? 0) + count);
   });
   if (!anyKnown) return undefined;
-  let total = 0;
+  let total = derived;
   for (const [kind, count] of wide) total += Math.max(0, count - (excluded.get(kind) ?? 0));
   for (const [kind, count] of typed) if (!wide.has(kind)) total += count;
   return total;

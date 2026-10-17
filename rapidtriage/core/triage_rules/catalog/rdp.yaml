@@ -15,6 +15,7 @@ families:
     format: time
     ts_kind: last-written
   - key: destination
+    semantic: device
     label: 대상 서버
     aliases:
     - server
@@ -22,6 +23,7 @@ families:
     - address
     format: mono
   - key: username_hint
+    semantic: account
     label: 사용자 이름
     aliases:
     - user_name
@@ -32,9 +34,13 @@ families:
     - mru_index
     format: number
   - key: user
+    semantic: account
     label: 사용자 프로필
     aliases:
     - user_hive_scope
+  - key: direction
+    label: 방향
+    derive: rdp_direction
   aux_columns: []
   rules: []
 rules:

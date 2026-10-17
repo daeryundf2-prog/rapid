@@ -22,7 +22,9 @@ export type CollectionId =
   /** Analysis jobs (plan analysis-workbench-p1 §4): `#/case/{run}/analysis/{kind}?id=`. */
   | "analysis"
   /** 처리 stage page (runs + analysis cards, console-ia §3): `#/case/{run}/process[/{node}]`. */
-  | "process";
+  | "process"
+  /** 통합 보기 (axiom-adoption §3.2): `#/case/{run}/explore/derived/{table}` (people, devices, paths …). */
+  | "derived";
 
 /** Artifact kinds nest under "artifacts" (one child node per kind). */
 export interface CollectionRef {

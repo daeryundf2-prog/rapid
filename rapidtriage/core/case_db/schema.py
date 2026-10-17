@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import zlib
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from contextlib import closing
 from pathlib import Path
 
@@ -19,6 +19,7 @@ from .constants import (
     SCHEMA_SQL_COMPRESSED_ARTIFACTS,
     SCHEMA_VERSION,
 )
+from .intake import apply_intake_schema
 
 __all__ = [
     "ARTIFACT_DATA_CODEC_NONE",
@@ -40,11 +41,37 @@ __all__ = [
     "insert_document_trigram_row",
     "list_tables",
     "register_case_db_functions",
+    "register_schema_extension",
     "sqlite_supports_trigram",
     "table_columns",
 ]
 
 REVIEW_MARK_MIGRATION_COLUMNS = ("assignee", "priority", "due_at", "source_citation_package_json")
+
+# Schema extensions kept in their own modules (e.g. review_schema.py, AXIOM E3):
+# each runs at the end of every apply_schema call and must be cheap when applied.
+_SCHEMA_EXTENSIONS: list[Callable[[sqlite3.Connection], None]] = []
+
+
+def register_schema_extension(apply: Callable[[sqlite3.Connection], None]) -> None:
+    """Run ``apply(connection)`` after the base schema on every ``apply_schema`` call."""
+    if apply not in _SCHEMA_EXTENSIONS:
+        _SCHEMA_EXTENSIONS.append(apply)
+
+
+def _apply_schema_extensions(connection: sqlite3.Connection) -> None:
+    for apply in _SCHEMA_EXTENSIONS:
+        apply(connection)
+
+
+def _apply_schema_extensions_if_writable(connection: sqlite3.Connection) -> None:
+    """Apply extensions on an already-current DB without failing on read-only files."""
+    try:
+        _apply_schema_extensions(connection)
+    except sqlite3.OperationalError as exc:
+        if "readonly" in str(exc).lower() or "read-only" in str(exc).lower():
+            return
+        raise
 
 
 def apply_schema(connection: sqlite3.Connection, *, compressed_artifacts: bool = False) -> None:
@@ -64,6 +91,11 @@ def apply_schema(connection: sqlite3.Connection, *, compressed_artifacts: bool =
         }
         artifact_columns = {str(row["name"]) for row in connection.execute("PRAGMA table_info(artifact)")}
         if set(REVIEW_MARK_MIGRATION_COLUMNS) <= review_mark_columns and set(ARTIFACT_DATA_COLUMNS) <= artifact_columns:
+            # Current schema: no core writes (read-only/ACL-locked run DBs keep opening). The case
+            # intake columns/tables are migrated by the workspace DB (ensure_intake_schema).
+            # Registered extensions (review tags/baselines) are idempotent and are applied only
+            # when the DB is writable; a read-only DB is left as is.
+            _apply_schema_extensions_if_writable(connection)
             return
     fresh = current_version == 0 and not connection.execute(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'artifact'"
@@ -76,6 +108,7 @@ def apply_schema(connection: sqlite3.Connection, *, compressed_artifacts: bool =
     ensure_column(connection, "review_mark", "priority", "TEXT NOT NULL DEFAULT 'normal'")
     ensure_column(connection, "review_mark", "due_at", "TEXT NOT NULL DEFAULT ''")
     ensure_column(connection, "review_mark", "source_citation_package_json", "TEXT NOT NULL DEFAULT '{}'")
+    apply_intake_schema(connection)
     connection.execute(
         """
         INSERT INTO schema_info (key, value)
@@ -84,6 +117,7 @@ def apply_schema(connection: sqlite3.Connection, *, compressed_artifacts: bool =
         """,
         (str(SCHEMA_VERSION),),
     )
+    _apply_schema_extensions(connection)
 
 
 DOCUMENT_TRIGRAM_TABLE = "indexed_document_trigram"

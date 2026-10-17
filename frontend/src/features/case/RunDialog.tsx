@@ -7,15 +7,8 @@ import { BrowsePanel } from "./BrowsePanel";
 import { ErrorText } from "./ErrorText";
 import { Modal } from "./Modal";
 import { ReasonButton } from "./ReasonButton";
-import {
-  buildRunBody,
-  DEFAULT_RUN_FORM,
-  firstRunFormError,
-  INPUT_KINDS,
-  RUN_MODES,
-  type RunForm,
-  validateRunForm,
-} from "./runForm";
+import { RunOptionsFields } from "./RunOptionsFields";
+import { buildRunBody, DEFAULT_RUN_FORM, firstRunFormError, type RunForm, validateRunForm } from "./runForm";
 
 function messageOf(error: unknown): string {
   return error instanceof ApiError || error instanceof Error ? error.message : "알 수 없는 오류";
@@ -82,7 +75,7 @@ export function RunDialog({
       : undefined;
 
   return (
-    <Modal title="실행" onClose={onClose} wide>
+    <Modal title="케이스 없이 빠른 런" onClose={onClose} wide>
       <form
         className="case-modal-body"
         style={{ padding: 0 }}
@@ -118,156 +111,43 @@ export function RunDialog({
           />
         )}
 
-        <div className="case-field">
-          <label htmlFor="run-mode">모드</label>
-          <select id="run-mode" value={form.mode} onChange={(e) => set("mode", e.target.value)}>
-            {RUN_MODES.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="case-field">
-          <label htmlFor="run-input-kind">입력 종류</label>
-          <select
-            id="run-input-kind"
-            value={form.inputKind}
-            onChange={(e) => set("inputKind", e.target.value)}
-          >
-            {INPUT_KINDS.map((k) => (
-              <option key={k.id} value={k.id}>
-                {k.label}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <label>
-          <input
-            type="checkbox"
-            checked={form.readOnly}
-            onChange={(e) => set("readOnly", e.target.checked)}
-          />{" "}
-          읽기 전용 (증거 폴더에 쓰지 않음)
-        </label>
-
-        <button
-          type="button"
-          className="button"
-          aria-expanded={advanced}
-          aria-controls="run-advanced"
-          onClick={() => setAdvanced((v) => !v)}
-        >
-          고급 옵션 {advanced ? "접기" : "펼치기"}
-        </button>
-        {advanced && (
-          <fieldset id="run-advanced" className="case-field">
-            <legend>고급 옵션</legend>
-            <label htmlFor="run-output-dir">출력 폴더 (비우면 자동)</label>
-            <input
-              id="run-output-dir"
-              type="text"
-              value={form.outputDir}
-              onChange={(e) => set("outputDir", e.target.value)}
-            />
-            <label htmlFor="run-max-mb">최대 추출 크기 (MB, 0 = 제한 없음)</label>
-            <input
-              id="run-max-mb"
-              type="number"
-              min={0}
-              value={form.maxExtractMb}
-              onChange={(e) => set("maxExtractMb", e.target.value)}
-            />
-            {errors.maxExtractMb && <p className="case-error">{errors.maxExtractMb}</p>}
-            <label htmlFor="run-max-files">최대 파일 수 (0 = 제한 없음)</label>
-            <input
-              id="run-max-files"
-              type="number"
-              min={0}
-              value={form.maxFileCount}
-              onChange={(e) => set("maxFileCount", e.target.value)}
-            />
-            {errors.maxFileCount && <p className="case-error">{errors.maxFileCount}</p>}
-            <label htmlFor="run-partition">E01 파티션 시작 섹터 (비우면 자동)</label>
-            <input
-              id="run-partition"
-              type="number"
-              min={0}
-              value={form.partitionSector}
-              onChange={(e) => set("partitionSector", e.target.value)}
-            />
-            {errors.partitionSector && <p className="case-error">{errors.partitionSector}</p>}
-            <label htmlFor="run-feeds">known-good 해시 목록 경로 (한 줄에 하나)</label>
-            <textarea
-              id="run-feeds"
-              rows={2}
-              value={form.knownGoodFeeds}
-              onChange={(e) => set("knownGoodFeeds", e.target.value)}
-            />
-            <label>
-              <input
-                type="checkbox"
-                checked={form.hideKnownGood}
-                onChange={(e) => set("hideKnownGood", e.target.checked)}
-              />{" "}
-              known-good 항목 숨기기
-            </label>
-            {errors.hideKnownGood && <p className="case-error">{errors.hideKnownGood}</p>}
-            <label>
-              <input
-                type="checkbox"
-                checked={form.dryRun}
-                onChange={(e) => set("dryRun", e.target.checked)}
-              />{" "}
-              모의 실행 (결과를 쓰지 않음)
-            </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={form.overwrite}
-                onChange={(e) => set("overwrite", e.target.checked)}
-              />{" "}
-              기존 출력 덮어쓰기
-            </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={form.extract}
-                onChange={(e) => set("extract", e.target.checked)}
-              />{" "}
-              파일 추출
-            </label>
-            {errors.extract && <p className="case-error">{errors.extract}</p>}
-
-            <label htmlFor="run-collect-profile">수집 프로필 (계획 미리보기 전용)</label>
-            <div className="case-actions" style={{ justifyContent: "stretch" }}>
-              <select
-                id="run-collect-profile"
-                style={{ flex: 1 }}
-                value={form.collectProfile}
-                onChange={(e) => set("collectProfile", e.target.value)}
-              >
-                <option value="">선택 안 함</option>
-                {(profiles.data?.profiles ?? []).map((p) => (
-                  <option key={p} value={p}>
-                    {p}
-                  </option>
-                ))}
-              </select>
-              <ReasonButton reason={planReason} onClick={() => plan.mutate()}>
-                수집 계획 보기
-              </ReasonButton>
-            </div>
-            {plan.error && <p className="case-error">{messageOf(plan.error)}</p>}
-            {planText && (
-              <>
-                <p className="case-reason">수집 계획</p>
-                <pre>{planText}</pre>
-              </>
-            )}
-          </fieldset>
-        )}
+        <RunOptionsFields
+          form={form}
+          errors={errors}
+          onChange={set}
+          advanced={advanced}
+          onAdvancedChange={setAdvanced}
+          extra={
+            <>
+              <label htmlFor="run-collect-profile">수집 프로필 (계획 미리보기 전용)</label>
+              <div className="case-actions" style={{ justifyContent: "stretch" }}>
+                <select
+                  id="run-collect-profile"
+                  style={{ flex: 1 }}
+                  value={form.collectProfile}
+                  onChange={(e) => set("collectProfile", e.target.value)}
+                >
+                  <option value="">선택 안 함</option>
+                  {(profiles.data?.profiles ?? []).map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
+                </select>
+                <ReasonButton reason={planReason} onClick={() => plan.mutate()}>
+                  수집 계획 보기
+                </ReasonButton>
+              </div>
+              {plan.error && <p className="case-error">{messageOf(plan.error)}</p>}
+              {planText && (
+                <>
+                  <p className="case-reason">수집 계획</p>
+                  <pre>{planText}</pre>
+                </>
+              )}
+            </>
+          }
+        />
 
         {submitError && <ErrorText>{submitError}</ErrorText>}
         <div className="case-actions">

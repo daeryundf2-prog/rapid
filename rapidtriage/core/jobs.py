@@ -339,6 +339,11 @@ class RunJobStore:
         self._completion_hooks: dict[str, Callable[[RunJobStore, RunJob], None]] = {}
         self._load_state()
 
+    @property
+    def state_path(self) -> Path | None:
+        """The ``runs.json`` this store persists to (``None`` = in-memory store)."""
+        return self._state_path
+
     def set_completion_hook(self, name: str, hook: Callable[[RunJobStore, RunJob], None] | None) -> None:
         """Register (or with ``None`` remove) a named hook run after each completed run."""
         with self._lock:

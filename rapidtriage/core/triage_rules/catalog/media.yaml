@@ -24,11 +24,16 @@ families:
     format: time
     ts_kind: modified
     width: 170
+  - key: exif_status
+    label: EXIF 상태
+    derive: exif_status
+    width: 110
   - key: exif_make
     label: 제조사
   - key: exif_model
     label: 모델
   - key: gps_latitude
+    semantic: geo
     label: 위도
     format: number
   - key: gps_longitude
@@ -46,6 +51,7 @@ families:
     aliases:
     - source_format
   - key: perceptual_hash
+    semantic: hash
     label: 지각 해시 (pHash)
     format: mono
   aux_columns:

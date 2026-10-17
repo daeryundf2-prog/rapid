@@ -24,6 +24,9 @@ const COLLECTIONS = [
   "explore/analysis/carve",
   "review/board/relevant",
   "report/outputs",
+  // 통합 보기 (axiom-adoption §3.2, Q-X12).
+  "explore/derived/people",
+  "explore/derived/paths",
 ] as const;
 
 let runId = "";

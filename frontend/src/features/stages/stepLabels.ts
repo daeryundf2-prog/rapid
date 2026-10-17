@@ -69,6 +69,9 @@ const STEP_NAME_LABEL: Record<string, string> = {
   triage: "분류",
   prepare: "준비",
   finalize: "마무리",
+  // Steps after the outputs exist (viewer-families §3.1, axiom-adoption §3.2).
+  "triage-flags": "특이사항",
+  derived: "통합 보기",
 };
 
 /** Korean name of a plan step (`artifacts-<kind>` → "아티팩트 수집: <kind>"); unknown ids stay as-is. */

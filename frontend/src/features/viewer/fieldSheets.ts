@@ -15,6 +15,7 @@
 
 import type { GridRow } from "../../contracts/collection";
 import { flatValue } from "../../utils/flatValue";
+import { eventSummaryKo, fieldOf } from "../derived/derivedFields";
 import { metaLabel } from "./views/metaLabels";
 
 export type FieldFormat =
@@ -150,6 +151,15 @@ const EVENT_CORE: FieldDef[] = [
   { key: ["provider_name", "ProviderName", "provider"], label: "제공자" },
   { key: ["channel", "Channel"], label: "채널" },
   { key: ["computer", "Computer"], label: "컴퓨터" },
+  {
+    // Korean summary sentence (axiom-adoption §3.2): a template over the record's own fields.
+    key: "summary_ko",
+    label: "요약 문장",
+    derive: (fields) =>
+      fieldOf(fields, "event_id", "eventId", "EventID")
+        ? { value: eventSummaryKo(fields), from: "summary_ko" }
+        : null,
+  },
   { key: ["user_name", "user"], label: "사용자" },
   {
     key: ["user_sid", "sid", "subject_user_sid"],

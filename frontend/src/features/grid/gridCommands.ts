@@ -7,6 +7,9 @@ import { useAppStore } from "../../state/store";
 import { runDisabledReason } from "../analysis/commands";
 import { caseRoute, otherCaseIds } from "../analysis/crossCase";
 import { useAnalysisStore } from "../analysis/store";
+import { caseCitationParts, citationDisabledReason, resolveCaseLink } from "../case/caseLink";
+import { buildReviewToolGridCommands } from "../review/gridTools";
+import { registerRowSource } from "../review/rowSource";
 import { recordCitationParts } from "../viewer/citation";
 import { PIVOT_LABELS, PIVOT_ORDER, type PivotId, recordPivots } from "../viewer/pivots";
 import { registerCommand, registerLocalCommand } from "./adapter";
@@ -21,6 +24,7 @@ import {
   reviewTargetOf,
   storeNotice,
 } from "./reviewActions";
+import type { ColumnSpec } from "./types";
 
 /** Everything the grid commands need from the live grid; read through a ref so commands stay stable. */
 export interface GridCommandHost {
@@ -39,6 +43,10 @@ export interface GridCommandHost {
   showExtract: (result: RunExtractResult) => void;
   openTagPrompt: () => void;
   runIsActive: boolean;
+  /** Visible column specs in display order (CSV export of the selection, AXIOM E3). */
+  getExportColumns?: () => ColumnSpec[];
+  /** Selected keys, loaded or not (getSelectedRows only returns loaded rows). */
+  getSelectedCount?: () => number;
 }
 
 export function buildViewerTarget(runId: string, row: GridRow, mode?: ViewerMode): ViewerTarget {
@@ -59,9 +67,16 @@ export function buildViewerTarget(runId: string, row: GridRow, mode?: ViewerMode
   };
 }
 
-/** Grid citation: path, locator, (container) sha256, then the record id and record time. */
-export function citationText(row: GridRow): string {
-  const parts = [row.sourcePath ?? row.title, `[${row.ref.collection}:${row.ref.locator}]`];
+/**
+ * Grid citation: (사건 번호 · 증거 번호 when the run belongs to a case), path, locator, (container)
+ * sha256, then the record id and record time.
+ */
+export function citationText(row: GridRow, runId?: string | null): string {
+  const parts = [
+    ...caseCitationParts(runId),
+    row.sourcePath ?? row.title,
+    `[${row.ref.collection}:${row.ref.locator}]`,
+  ];
   if (row.sha256)
     parts.push(`${row.ref.collection === "artifacts" ? "컨테이너 sha256" : "sha256"}=${row.sha256}`);
   const record = recordCitationParts(row, currentTimezone());
@@ -196,11 +211,13 @@ export function buildGridCommands(hostRef: { current: GridCommandHost }): Comman
       label: "인용 복사",
       group: "grid",
       icon: "quote",
-      disabledReason: rowDisabled(false),
-      run: async () => {
+      // 사건=…/증거=… prefix: blocked until the run's case link is known (never copied without it).
+      disabledReason: (ctx) => rowDisabled(false)(ctx) ?? citationDisabledReason(ctx.runId),
+      run: async (ctx) => {
         const row = focused();
         if (!row) return;
-        await copyText(citationText(row));
+        await resolveCaseLink(ctx.runId);
+        await copyText(citationText(row, ctx.runId));
         host().toast("인용을 복사했습니다.", "info");
       },
     },
@@ -463,6 +480,13 @@ export function useGridCommands(host: GridCommandHost): void {
     const unregister = [
       ...buildGridCommands(hostRef).map(registerCommand),
       ...buildRowMarkCommands(hostRef).map(registerLocalCommand),
+      ...buildReviewToolGridCommands(hostRef).map(registerCommand),
+      // Shell review tools (tag propagation, digit keys) read the selection through this.
+      registerRowSource({
+        getSelectedRows: () => hostRef.current.getSelectedRows(),
+        patchRows: (keys, patch) => hostRef.current.patchRows(keys, patch),
+        refetch: () => hostRef.current.refetch(),
+      }),
     ];
     return () => {
       for (const off of unregister) off();

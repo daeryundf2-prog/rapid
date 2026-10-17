@@ -1319,10 +1319,13 @@ class AnalysisApiTests(unittest.TestCase):
         owner_a, owner_b = object(), object()
 
         def state_of(analysis_id: str) -> dict[str, object]:
+            # The terminal state is written just before the runner drops the job from its active
+            # registry; wait for both so the next submit of the same kind is not a spurious 409.
             deadline = time.monotonic() + 10
             while True:
                 state = runner.load_state(self.run_dir, analysis_id) or {}
-                if state.get("status") in analyses.TERMINAL_STATUSES or time.monotonic() > deadline:
+                done = state.get("status") in analyses.TERMINAL_STATUSES
+                if (done and runner._context(self.run_dir, analysis_id) is None) or time.monotonic() > deadline:
                     return state
                 time.sleep(0.02)
 
