@@ -33,6 +33,7 @@ from .routes_ioc import build_ioc_router
 from .routes_media import build_media_router
 from .routes_meta import build_meta_router
 from .routes_reports import build_reports_router
+from .routes_review_tools import build_review_tools_router
 from .routes_runs import build_runs_router
 from .routes_search import build_search_router
 from .routes_search_index import build_search_index_router
@@ -42,6 +43,8 @@ from .search_index_service import (
 )
 
 ANALYSIS_POST_PATH = re.compile(r"/api/runs/[^/]+/analyses")
+# Review-tool bodies (AXIOM E3) also get Korean 422 messages.
+REVIEW_TOOL_BODY_PATH = re.compile(r"/api/cases/[^/]+/(tags(/[^/]+)?|histogram-baselines)")
 
 
 def _without_surrogates(value: object) -> object:
@@ -87,6 +90,8 @@ def create_app(
     @api.exception_handler(RequestValidationError)
     async def korean_analysis_body_errors(request: Request, exc: RequestValidationError):
         """Malformed ``POST /analyses`` bodies get Korean 422 messages; other routes keep FastAPI's."""
+        if REVIEW_TOOL_BODY_PATH.fullmatch(request.url.path):
+            return JSONResponse(status_code=422, content={"detail": korean_body_errors(exc.errors())})
         if request.method == "POST" and ANALYSIS_POST_PATH.fullmatch(request.url.path):
             return JSONResponse(status_code=422, content={"detail": korean_body_errors(exc.errors())})
         try:
@@ -166,6 +171,7 @@ def create_app(
     api.include_router(build_search_router(store))
     api.include_router(build_search_index_router(store, owner=analysis_owner))
     api.include_router(build_reports_router(store))
+    api.include_router(build_review_tools_router(store, open_request_case_database))
 
     if static_dir.is_dir():
         api.mount("/assets", StaticFiles(directory=static_dir), name="rapidtriage-assets")

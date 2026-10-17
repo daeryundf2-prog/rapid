@@ -50,6 +50,7 @@ from .models import (
     RunCaseDbEnsureRequest,
     SampleCaseRunRequest,
 )
+from .routes_review_tools import apply_review_tag_batch
 from .run_review import (
     ACTIVE_MARK_SQL,
     RunLocatorIndex,
@@ -393,6 +394,8 @@ def build_case_db_router(
             targets, located = split_batch_targets(request.targets)
             if located:
                 targets.extend(_resolve_run_locators(database, request.case_id, request.run_id, located))
+            if request.tag_ids or request.remove_tag_ids or request.propagate_by_hash:
+                return apply_review_tag_batch(database, request, targets)
             if request.run_id or request.add_tags:
                 return _mark_preserving_tags(database, request, targets)
             return database.mark_reviews_batch(
