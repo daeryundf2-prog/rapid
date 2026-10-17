@@ -60,3 +60,29 @@
 
 ## 5. 결과 기록
 (구현 후)
+
+### E1 — 케이스 만들기 (`feat/axiom-e1-case`, 2026-10-17)
+
+구현: 케이스 DB `core/case_db/intake.py`(추가 마이그레이션, `schema_version` 1 유지) · API `api/app/routes_cases.py`·`case_workspace.py`·`run_problems.py` · 콘솔 `features/case/{CaseWizard,CaseDialogs,EvidenceFields,RunOptionsFields}.tsx`, `features/dashboard/caseCards.tsx` · 계약 `docs/rapidtriage-output-schemas.md` "Case intake" 절. 작업 공간 DB는 `runs.json` 옆 `rapidtriage-cases.db`(`RAPIDTRIAGE_CASES_DB`로 변경). 런마다의 `rapidtriage-case.db`는 그대로.
+
+계획과 다른 점(이유):
+- `POST /api/cases/{id}/runs/link` 추가 — 케이스 없는 런의 "케이스에 연결"(Q-X2)에 필요. 스냅샷 `origin: linked-run`, 프로필·안전·자원 상한은 런 요약에서.
+- `evidence_source`에 `evidence_number`·`hash_verify`·`hash_expected`·`hash_status`·`hash_message` 열 추가(증거 번호와 해시 검증 상태를 저장할 곳이 없었음). 해시 검증 = `e01_hash.run_e01_streaming_hash`로 컨테이너 바이트 MD5/SHA-1/SHA-256 백그라운드 계산, 기대값을 주면 일치/불일치. 서버 재시작으로 끊긴 계산은 "중단됨"으로 보인다.
+- `case_note_history`(추가 전용) — 메모 이력(Q-X4). 삭제는 `deleted_at`/`deleted_by`만 기록.
+- 케이스 폴더를 지정하면 케이스 런 출력은 `<케이스 폴더>/<증거 번호>-rapidtriage-run-<모드>-<8hex>`.
+- `citation_prefix`는 만들 때 사건 번호에서 한 번 정하고 바꾸지 않는다(이미 붙은 인용 ID 보존). 콘솔 인용은 `사건=…; 증거=…`로 시작(뷰어·그리드), 보고서 대화상자는 사건 번호·분석자를 케이스에서 채운다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| Q-X1 | 통과 | e2e `frontend/e2e/case-intake.spec.ts` Q-X1: 사건 번호 비우면 "다음" 비활성 + "사건 번호를 입력하세요." · 증거 2개 추가 → 1개 삭제 · 요약 행 키 = 실제 `POST /api/cases/{id}/runs` 본문 키(wait·evidence_citation_id 제외) · 실행 후 `#/case/<run>/intake` · 5카드 채워짐 · 새로고침 후 동일 · 전환기 "케이스 › 증거 › 런". vitest `caseIntake.test.tsx`(실패 후 재시도는 만든 케이스를 다시 만들지 않음) |
+| Q-X2 | 통과 | e2e Q-X2: 샘플 런(케이스 없음) — 랜딩 "케이스 없음", 접수 기존 카드 정상, 사건 정보 카드 "케이스 없음 — 케이스에 연결" → 연결 대화상자 → 사건 정보·경로 표시. vitest `caseCards.test.tsx` |
+| Q-X3 | 통과 | run-subset10(`b5fabbe09f18`)을 포트 8941 개발 서버에 가져옴: `GET /problems` 합계 21 = warnings 19 + 건너뛴 단계 2(docs-extract·files-extract). warnings 19 → 사유 8개: 행 단위 절단 3, 상한·절단 적용 2, 비인쇄 문자 1, 파일 수 상한 1, 크기 상한 1, 수집된 행 없음 8, 입력 없음 2, 미리보기 절단 1. 카드: 사유별 `details` 미리보기(≤20), "전체 보기 (n건)" → 대화상자(`reason_id`, limit 5000) → Esc로 닫으면 포커스가 버튼으로 복귀. 응답 시간: 단계 기록상 parser_error 0인 출력은 열지 않아 447 ms → 0.4 ms |
+| Q-X4 | 통과 | 같은 서버: 케이스 생성 → 증거 E-01(`D:\rapid-qa\bsh-subset`, 폴더 → 해시 "해당 없음") → 런 연결. 메모 2개(작성자 = 케이스 검사관 "QA검사관" / 본문 author "다른검사관", 시각 ISO) · 삭제 200(soft, `deleted_at`) · 재삭제 409 "이미 삭제된 메모입니다" · 이력 created/created/deleted(작성자 포함) · `case_note_history` UPDATE는 트리거로 거부(단위 테스트) |
+| Q-X12 | 통과 | 새 화면 전부 접근성 이름·라벨·중복 id 없음·polite 영역 1개(e2e quickAudit), 마법사 단계 이동 시 단계 제목으로 포커스, Esc 닫기 후 포커스 복귀(전환기·처리 문제 대화상자), 케이스·증거·사건 유형 목록 한국어 자연 정렬(`localeCompare("ko", {numeric})`), 기존 a11y e2e 23개 통과 |
+| Q-X13 | 통과 | 아래 게이트 |
+
+적대적 리뷰(읽기 전용 검토자) 후 수정: E01에 기대 해시 비교 금지(컨테이너 바이트 ≠ 획득 매체 해시 → 정상 이미지가 "불일치"로 보였음; API 422, 마법사에서 입력 숨김) · `apply_schema` 현재 스키마 경로는 다시 쓰기 없음(읽기 전용/ACL 잠금 런 DB 보호; 작업 공간 DB만 열 때 `ensure_intake_schema`) · 실행 중 런 연결 409 · 연결 시 런 경로도 경로 규칙 통과, 경로 비교는 Windows 방식(대소문자·구분자) · 사건 번호 대소문자 무시 유일 · 방금 저장한 "해시 계산 중" 행이 "중단됨"으로 깜박이지 않음 · 케이스 없는 런 스냅샷은 작업 공간 DB 오류와 무관 · 대화상자 제출 중 중복 클릭 차단. 남은 것: `wait=true` 케이스 런은 요청이 런 끝까지 막힘(기존 `POST /api/runs`와 같음), 스냅샷 쿼리 도착 전 인용 복사는 사건/증거 접두 없이 복사될 수 있음.
+
+게이트(E1 브랜치 최종): unittest 1761 OK(skipped 7), ruff, vulture, compileall, check-doc-refs, OpenAPI 스냅샷(변화 없음), biome, tsc, vitest 908, contrast 0 실패, e2e 개발 서버 37개 — 출력 원문은 E1 보고서.
+
+실데이터 부수 효과: 런 연결로 `D:\rapid-qa\derived\run-subset10\processing-snapshot.json` 1개가 생김(파생 출력 폴더, 증거 아님). QA 상태 파일은 스크래치(저장소 밖).
