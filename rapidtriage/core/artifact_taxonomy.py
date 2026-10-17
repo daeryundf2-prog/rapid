@@ -391,6 +391,16 @@ TAXONOMY_TARGETS: tuple[TaxonomyTarget, ...] = (
         required_test_markers=("cloud", "teams"),
     ),
     TaxonomyTarget(
+        id="cloud-sync-clients",
+        category="mail-cloud-chat",
+        title="Desktop cloud sync clients (OneDrive, Dropbox, Google Drive, Naver MYBOX, iCloud)",
+        expectation="Normalize sync-client accounts, sync roots, synced items, and upload/download/delete/rename/share events from local client databases and logs.",
+        required_collectors=("cloud-sync",),
+        expected_artifact_types=("cloud-sync-account", "cloud-sync-file", "cloud-sync-event", "cloud-sync-inventory"),
+        required_test_markers=("cloud_sync", "onedrive", "drivefs"),
+        required_doc_markers=("OneDrive", "Dropbox", "MYBOX"),
+    ),
+    TaxonomyTarget(
         id="cloud-api-acquisition",
         category="mail-cloud-chat",
         title="Cloud API acquisition",

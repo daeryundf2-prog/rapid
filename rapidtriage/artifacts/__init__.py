@@ -10,6 +10,7 @@ from pathlib import Path
 
 from .android import AndroidApkProvider
 from .cloud import CloudExportProvider
+from .cloud_sync import CloudSyncClientsProvider
 from .email import EmailArtifactsProvider
 from .generic import GenericDocumentArtifactProvider
 from .kakaotalk_macos import KakaoTalkMacOsProvider
@@ -94,6 +95,7 @@ def _builtin_providers() -> list[object]:
         GenericDocumentArtifactProvider(),
         AndroidApkProvider(),
         CloudExportProvider(),
+        CloudSyncClientsProvider(),
         EmailArtifactsProvider(),
         LinuxSystemArtifactsProvider(),
         MacOsSystemArtifactsProvider(),

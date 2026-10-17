@@ -253,6 +253,13 @@ TIMELINE_FIELD_MAP: dict[str, tuple[TimelineField, ...]] = {
     ),
     "mobile-message": (F("message_timestamp", "message"), F("sent_at", "message"), F("edited_at", "edited")),
     "cloud-message": (F("message_timestamp", "message"), F("sent_at", "message")),
+    # Cloud sync clients (R2 M4): events/files use the row-level contract
+    # (``timestamp`` + ``timestamp_kind`` cloud-upload/cloud-modified/...);
+    # account and inventory rows carry no evidence time.
+    "cloud-sync-event": (),
+    "cloud-sync-file": (F("viewed_at", "cloud-viewed"), F("shared_with_me_at", "cloud-shared-with-me")),
+    "cloud-sync-account": (),
+    "cloud-sync-inventory": (),
     # media-image/media-video evidence times come through the row-level
     # timestamp/timestamp_kind contract (EXIF DateTimeOriginal, mp4 mvhd).
     "media-image": (F("exif_gps_profile.gps_datetime_utc_candidate", "gps-fix"),),
