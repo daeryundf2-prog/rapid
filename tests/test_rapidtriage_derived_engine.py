@@ -169,7 +169,7 @@ class NormalizationRegressionTests(unittest.TestCase):
 class CatalogSemanticTests(unittest.TestCase):
     def test_every_family_is_reviewed(self) -> None:
         catalog = load_catalog()
-        self.assertEqual(len(catalog.families), 54)
+        self.assertEqual(len(catalog.families), 55)  # +cloud-sync (R2 M4)
         for family in catalog.families:
             columns = [*family["core_columns"], *(family.get("aux_columns") or [])]
             tagged = [column for column in columns if column.get("semantic")]

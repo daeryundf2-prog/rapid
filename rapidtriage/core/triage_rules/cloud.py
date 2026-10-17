@@ -1,9 +1,10 @@
-"""Cloud export / sync-client indicators: Google / iCloud / Microsoft 365 (catalogue: apps §4)."""
+"""Cloud export / sync-client indicators: Google / iCloud / Microsoft 365 exports and desktop sync clients (catalogue: apps §4, R2 M4)."""
 
 from __future__ import annotations
 
 import datetime as dt
 import math
+import re
 from collections import defaultdict
 from collections.abc import Iterator, Mapping
 
@@ -13,6 +14,7 @@ from .base import (
     RowView,
     Rule,
     RuleResult,
+    as_list,
     as_number,
     email_domain,
     evidence,
@@ -29,6 +31,16 @@ DOWNLOAD_OPERATIONS = ("filedownloaded", "filesyncdownloadedfull", "filesyncdown
 SHARE_OPERATIONS = ("anonymouslinkcreated", "sharinginvitationcreated", "sharingset", "addedtosecurelink", "companylinkcreated", "share")
 DELETE_OPERATIONS = ("filedeleted", "filerecycled", "filedeletedfirststagerecyclebin", "delete", "trash")
 LOGIN_OPERATIONS = ("userloggedin", "login", "signin", "sign-in")
+# M365 audit FileUploaded / FileSyncUploaded* and sync-client ``upload`` events (R2 M4).
+UPLOAD_OPERATIONS = ("fileuploaded", "filesyncuploadedfull", "filesyncuploadedpartial", "upload")
+UPLOADS = select(types={"cloud-sync-event", "cloud-audit", "cloud-activity"})
+# A user profile folder: X:\Users\<name> (not Public / Default / All Users) or the legacy
+# X:\Documents and Settings\<name>; macOS /Users/<name>, Linux /home/<name>. Input is
+# casefolded with "/" turned into "\" for drive-letter paths.
+_WINDOWS_PROFILE = re.compile(
+    r"^[a-z]:\\(?:users|documents and settings)\\(?!(?:public|default|default user|all users)(?:\\|$))[^\\]+(?:\\|$)"
+)
+_POSIX_PROFILE = re.compile(r"^/(?:users/(?!shared(?:/|$))[^/]+|home/[^/]+)(?:/|$)")
 
 
 def operation(row: RowView) -> str:
@@ -240,3 +252,95 @@ class AuditRetentionGap(Rule):
                 evidence(service=service, earliest_record=moment, retention_days=days),
                 note=f"이 시각 이전 활동은 감사 보존기간(기본 {days}일) 밖일 수 있음: 부재 ≠ 미발생",
             )
+
+
+@register("cloud.bulk_upload")
+class BulkUpload(Rule):
+    """One account's uploads within ``window_minutes``: ≥ ``min_count`` items or ≥ ``min_bytes`` bytes.
+
+    Sync-client rows the parser marks ``bulk_rule_eligible = false`` (log keyword hits without an
+    item path, folders) are not counted; the same item uploaded again within one second counts once
+    (a client log restating one transfer).
+    """
+
+    selector = UPLOADS
+
+    def __init__(self, params=None) -> None:
+        super().__init__(params)
+        self.items: dict[tuple[str, str], list[tuple[dt.datetime, RowRef, float, str]]] = defaultdict(list)
+
+    def apply(self, row: RowView, ctx: FlagContext) -> RuleResult | None:
+        if not _matches(operation(row), UPLOAD_OPERATIONS) or row.flag("bulk_rule_eligible") is False:
+            return None
+        moment = row.time("timestamp", "event_time")
+        if moment is None:
+            return None
+        size = max(row.number("size", "size_bytes") or 0.0, 0.0)
+        item = item_key(row) or f"{row.ref[0]}#{row.ref[1]}"
+        self.items[(row.text("client", "service").lower(), actor(row))].append((moment, row.ref, size, item))
+        return None
+
+    def finalize(self, ctx: FlagContext) -> Iterator[tuple[RowRef, RuleResult]]:
+        window = dt.timedelta(minutes=float(self.param("window_minutes", 60)))
+        min_count = int(self.param("min_count", 50))
+        min_bytes = float(self.param("min_bytes", 500_000_000))
+        for (client, account), raw in self.items.items():
+            seen: set[tuple[str, dt.datetime]] = set()
+            items: list[tuple[dt.datetime, RowRef, float, str]] = []
+            for entry in sorted(raw, key=lambda item: (item[0], item[1])):
+                key = (entry[3], entry[0].replace(microsecond=0))
+                if key not in seen:
+                    seen.add(key)
+                    items.append(entry)
+            left, total, flagged_upto = 0, 0.0, -1
+            for right, (moment, _ref, size, _item) in enumerate(items):
+                total += size
+                while moment - items[left][0] > window:
+                    total -= items[left][2]
+                    left += 1
+                count = right - left + 1
+                if count < min_count and total < min_bytes:
+                    continue
+                result = RuleResult(
+                    evidence(
+                        client=client,
+                        account=account,
+                        upload_count=count,
+                        upload_bytes=int(total),
+                        window_start=items[left][0],
+                        window_end=moment,
+                    )
+                )
+                for index in range(max(left, flagged_upto + 1), right + 1):
+                    yield items[index][1], result
+                flagged_upto = right
+
+
+def within_user_profile(path: str) -> bool | None:
+    """``True`` under a user profile folder, ``False`` outside, ``None`` when ``path`` is not absolute."""
+    text = path.strip().strip('"')
+    text = text.removeprefix("\\\\?\\")
+    if re.match(r"^[A-Za-z]:[\\/]", text):
+        return bool(_WINDOWS_PROFILE.match(text.lower().replace("/", "\\")))
+    if text.startswith("\\\\"):
+        return False  # UNC share
+    if text.startswith("\\"):
+        # Volume-relative (a sync root found by path signature in an evidence copy).
+        return bool(_WINDOWS_PROFILE.match("c:" + text.lower()))
+    if text.startswith("/"):
+        return bool(_POSIX_PROFILE.match(text.lower()))
+    return None
+
+
+@register("cloud.sync_folder_outside_user_profile")
+class SyncFolderOutsideProfile(Rule):
+    """A sync client's sync root outside every user profile folder (other drive, removable disk, Public)."""
+
+    selector = select(types={"cloud-sync-account"})
+
+    def apply(self, row: RowView, ctx: FlagContext) -> RuleResult | None:
+        roots = [item for item in as_list(row.get("sync_roots")) if isinstance(item, str)] or [row.text("sync_root")]
+        outside = [root for root in roots if root and within_user_profile(root) is False]
+        if not outside:
+            return None
+        return RuleResult(evidence(client=row.text("client"), account=actor(row), sync_root=outside[0], other_roots=outside[1:]))
