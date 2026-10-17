@@ -11,6 +11,7 @@ near the top of the pretty-printed output).
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,7 @@ from ...core.artifact_domains import (
 from ...core.jobs import RunJobStore, read_output_json, run_output_dir
 from .analyses import ANALYSIS_RUNNER
 from .helpers import default_case_path, enrich_summary_counts, get_job, get_output_path
+from .triage_flags import kind_flag_counts, tree_flags_section
 
 SUMMARY_SCAN_BYTES = 65536
 
@@ -51,6 +53,7 @@ ANALYSIS_NODES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("memory-import", "메모리", ("memory-import",)),
     ("web-logs", "웹 로그·웹셸", ()),
     ("cross-case", "교차 케이스", ("cross-case",)),
+    ("triage-flags", "특이사항", ("triage-flags",)),
 )
 WEB_LOG_KIND = "windows-system"
 WEB_LOG_ARTIFACT_TYPES: tuple[str, ...] = ("web-server-log", "webshell-source-candidate")
@@ -175,6 +178,10 @@ def build_run_tree(store: RunJobStore, run_id: str) -> dict[str, Any]:
     outputs = summary.get("outputs") if isinstance(summary.get("outputs"), dict) else {}
 
     nodes: list[dict[str, Any]] = []
+    try:
+        flags_section, flags_summary = tree_flags_section(run_output_dir(job.summary))
+    except RuntimeError:
+        flags_section, flags_summary = None, None
 
     # --- 파일: category children from the files output summary --------------
     files_children: list[dict[str, Any]] = []
@@ -224,6 +231,10 @@ def build_run_tree(store: RunJobStore, run_id: str) -> dict[str, Any]:
         files_extra: dict[str, Any] = {}
         if isinstance(files_summary.get("inventory_count"), int):
             files_extra["inventory_count"] = int(files_summary["inventory_count"])
+        if flags_summary is not None:
+            files_extra["flag_counts"] = _sum_grades(
+                [kind_flag_counts(flags_summary, "files:candidates"), kind_flag_counts(flags_summary, "files:inventory")]
+            )
         nodes.append(
             _node("files", "파일", files_count, children=files_children, collection="files", **files_extra)
         )
@@ -240,7 +251,7 @@ def build_run_tree(store: RunJobStore, run_id: str) -> dict[str, Any]:
             kind_summaries[kind] = {}
 
     artifacts_total = int(counts.get("artifacts") or 0)
-    artifact_groups = build_artifact_domain_groups(kind_summaries)
+    artifact_groups = build_artifact_domain_groups(kind_summaries, flags_summary=flags_summary)
     if artifacts_total or artifact_groups:
         nodes.append(
             _node("artifacts", "아티팩트", artifacts_total, children=artifact_groups, collection="artifacts")
@@ -300,7 +311,7 @@ def build_run_tree(store: RunJobStore, run_id: str) -> dict[str, Any]:
     nodes.append(_node("issues", "검증 이슈", issue_count, collection="issues"))
 
     request = job.request
-    return {
+    tree: dict[str, Any] = {
         "run_id": run_id,
         "root": {
             "label": Path(request.root).name if request and request.root else run_id,
@@ -309,10 +320,26 @@ def build_run_tree(store: RunJobStore, run_id: str) -> dict[str, Any]:
         },
         "nodes": nodes,
     }
+    # 특이사항 (viewer-families U-F4): absent while the run has no completed triage-flags set.
+    if flags_section is not None:
+        tree["flags"] = flags_section
+    return tree
 
 
-def build_artifact_domain_groups(kind_summaries: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
-    """Domain -> kind -> artifact_type nodes from :data:`ARTIFACT_DOMAIN_TABLE`."""
+def _sum_grades(items: list[dict[str, int]]) -> dict[str, int]:
+    return {grade: sum(int(item.get(grade) or 0) for item in items) for grade in ("A", "B", "C")}
+
+
+def build_artifact_domain_groups(
+    kind_summaries: dict[str, dict[str, Any]], *, flags_summary: Mapping[str, object] | None = None
+) -> list[dict[str, Any]]:
+    """Domain -> kind -> artifact_type nodes from :data:`ARTIFACT_DOMAIN_TABLE`.
+
+    With ``flags_summary`` (a ``triage-flags`` summary) every kind node and
+    domain group carries ``flag_counts`` = flagged rows by strongest grade:
+    the rows of the types placed in that node (the primary node also counts
+    cross-row flags whose row type is unknown), the group the sum of its kinds.
+    """
     placement: dict[str, dict[str, dict[str, int]]] = {}
     kind_order: dict[str, list[str]] = {}
     for kind, kind_summary in sorted(kind_summaries.items()):
@@ -335,6 +362,7 @@ def build_artifact_domain_groups(kind_summaries: dict[str, dict[str, Any]]) -> l
             continue
         kind_nodes: list[dict[str, Any]] = []
         group_count = 0
+        group_flags: list[dict[str, int]] = []
         for kind in kind_order.get(domain, []):
             kind_summary = kind_summaries.get(kind) or {}
             types = bucket[kind]
@@ -374,6 +402,13 @@ def build_artifact_domain_groups(kind_summaries: dict[str, dict[str, Any]]) -> l
             stale = kind_summary.get("stale_below_first_record_count")
             if primary and isinstance(stale, int) and not isinstance(stale, bool):
                 extra["stale_below_first_record_count"] = stale
+            if flags_summary is not None:
+                if not types:
+                    flag_counts = kind_flag_counts(flags_summary, kind) if primary else kind_flag_counts(flags_summary, kind, [])
+                else:
+                    flag_counts = kind_flag_counts(flags_summary, kind, [*types, *([""] if primary else [])])
+                extra["flag_counts"] = flag_counts
+                group_flags.append(flag_counts)
             kind_nodes.append(
                 _node(
                     f"artifacts:{kind}" if primary else f"artifacts:{kind}@{domain}",
@@ -390,8 +425,9 @@ def build_artifact_domain_groups(kind_summaries: dict[str, dict[str, Any]]) -> l
                     **extra,
                 )
             )
+        group_extra: dict[str, Any] = {"flag_counts": _sum_grades(group_flags)} if flags_summary is not None else {}
         groups.append(
-            _node(f"artifacts-group:{domain}", DOMAIN_LABELS.get(domain, "기타"), group_count, children=kind_nodes)
+            _node(f"artifacts-group:{domain}", DOMAIN_LABELS.get(domain, "기타"), group_count, children=kind_nodes, **group_extra)
         )
     return groups
 

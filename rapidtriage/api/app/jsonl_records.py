@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 
 from ...core.artifact_profiles import (
@@ -112,3 +112,37 @@ def iter_artifact_records(
             return
         if row is not None:
             yield index, expand_row(row, profiles)
+
+
+def iter_records_at(
+    payload: Mapping[str, object], payload_path: Path | None, indices: Sequence[int], *, record_limit: int | None = None
+) -> Iterator[tuple[int, dict[str, object]]]:
+    """``(record_index, expanded row)`` of ``indices`` only, in record order (one forward pass; other lines are never parsed)."""
+    wanted = sorted({index for index in indices if index >= 0 and (record_limit is None or index < record_limit)})
+    if not wanted:
+        return
+    profiles = payload_profiles(payload)
+    records_path = jsonl_records_path(payload, payload_path)
+    if records_path is None:
+        inline = payload.get("artifacts")
+        inline = inline if isinstance(inline, list) else []
+        for index in wanted:
+            if index < len(inline) and isinstance(inline[index], dict):
+                yield index, expand_row(inline[index], profiles)
+        return
+    targets = iter(wanted)
+    target = next(targets)
+    index = 0
+    with open(records_path, "rb") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            stripped = line.strip()
+            if not stripped.startswith(b"{"):
+                continue
+            if index == target:
+                row = parse_record_line(stripped, path=records_path, line_number=line_number)
+                if row is not None:
+                    yield index, expand_row(row, profiles)
+                target = next(targets, None)
+                if target is None:
+                    return
+            index += 1

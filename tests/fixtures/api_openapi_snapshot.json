@@ -81,6 +81,9 @@
     "/api/keyword-packs": {
       "get": "keyword_packs_api_keyword_packs_get"
     },
+    "/api/meta/families": {
+      "get": "get_families_api_meta_families_get"
+    },
     "/api/runs": {
       "get": "list_runs_api_runs_get",
       "post": "create_run_api_runs_post"
@@ -156,6 +159,12 @@
     },
     "/api/runs/{run_id}/files": {
       "get": "get_run_files_api_runs__run_id__files_get"
+    },
+    "/api/runs/{run_id}/flags": {
+      "get": "get_run_flags_api_runs__run_id__flags_get"
+    },
+    "/api/runs/{run_id}/flags/row": {
+      "get": "get_row_flags_api_runs__run_id__flags_row_get"
     },
     "/api/runs/{run_id}/indicators": {
       "get": "get_run_indicators_api_runs__run_id__indicators_get"

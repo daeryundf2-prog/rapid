@@ -30,6 +30,13 @@ from .artifact_sort import (
     sort_descriptor,
 )
 from .pagination import paginate_artifact_output
+from .triage_flags import (
+    flag_rows_source,
+    flags_join,
+    is_flags_sort,
+    mark_flag_page,
+    parse_flag_query,
+)
 
 # A running analysis's rows grow on every flush: a whole-kind sort index would
 # be stale before it is ready (and each row count would be another cache entry).
@@ -157,8 +164,14 @@ def build_analyses_router(store: RunJobStore, *, owner: object | None = None) ->
         order: str | None = Query(default=None),
         locate: int | None = Query(default=None, ge=0),
         path_contains: str | None = Query(default=None),
+        flag: list[str] = Query(default=[]),
+        flag_grade: str | None = Query(default=None),
     ) -> dict[str, object]:
         """Result rows paged like an artifacts kind page; every row has ``record_index``.
+
+        특이사항: rows carry ``flags`` (kind ``analysis:<analysis_id>``) and the
+        response reports ``flags_join``; ``flag``/``flag_grade`` filter and
+        ``sort=flags`` orders A, B, C, unflagged, as on ``GET /artifacts``.
 
         ``sort`` (``timestamp`` | ``details.<name>``, optional ``:asc``/``:desc``)
         uses the whole-kind ``artifact_sort`` index over ``rows.jsonl`` of a
@@ -177,13 +190,30 @@ def build_analyses_router(store: RunJobStore, *, owner: object | None = None) ->
         payload: dict[str, object] = {"records_path": str(rows_path), "record_count": record_count, "artifacts": []}
         payload_path = directory / STATE_FILE_NAME
         needle = path_contains.strip() if path_contains and path_contains.strip() else None
-        sort_key, sort_order = parse_sort_request(sort, order)
+        flag_sort = is_flags_sort(sort)
+        flag_query = parse_flag_query(flag, flag_grade, sort_flags=flag_sort)
+        sort_key, sort_order = parse_sort_request(None if flag_sort else sort, order)
         running_sort = bool(sort_key) and state.get("status") in ACTIVE_STATUSES
+        flag_kind = f"analysis:{directory.name}"
+        join = flags_join(scope.output_dir)
         if not rows_path.is_file():
             page: dict[str, object] = {"artifacts": [], "pagination": {"offset": offset, "limit": limit, "returned": 0, "total": 0}}
         else:
             try:
-                if sort_key and not running_sort:
+                if flag_query.active and not (sort_key and not running_sort):
+                    page = filter_artifact_page(
+                        payload,
+                        payload_path=payload_path,
+                        path_contains=needle,
+                        offset=offset,
+                        limit=limit,
+                        record_limit=record_count,
+                        rows_source=flag_rows_source(
+                            payload, payload_path, kind=flag_kind, join=join, query=flag_query, record_limit=record_count
+                        ),
+                    )
+                    mark_flag_page(page, flag_query, record_count=record_count, other_filters=bool(needle))
+                elif sort_key and not running_sort:
                     page = paginate_sorted_artifact_output(
                         payload,
                         run_id=run_id,
@@ -197,7 +227,14 @@ def build_analyses_router(store: RunJobStore, *, owner: object | None = None) ->
                         path_contains=needle,
                         locate=locate,
                         record_limit=record_count,
+                        allowed_records=(
+                            join.require_index().matching(flag_kind, flag_query.rule_ids, flag_query.grade)
+                            if flag_query.filtered
+                            else None
+                        ),
                     )
+                    if flag_query.filtered:
+                        mark_flag_page(page, flag_query)
                 elif needle:
                     page = filter_artifact_page(
                         payload,
@@ -214,7 +251,7 @@ def build_analyses_router(store: RunJobStore, *, owner: object | None = None) ->
         if running_sort:
             unsupported = SortState("unsupported", 0.0, reason=RUNNING_SORT_REASON)
             page["sort"] = sort_descriptor(str(sort_key), sort_order or "asc", unsupported, locate, filtered=bool(needle))
-        annotate_page_counts(page, payload, filtered=bool(needle))
+        annotate_page_counts(page, payload, filtered=bool(needle) or flag_query.filtered)
         pagination = page.get("pagination") if isinstance(page.get("pagination"), dict) else {}
         rows = page.get("artifacts") or []
         if state.get("kind") == "ocr-batch":
@@ -230,13 +267,16 @@ def build_analyses_router(store: RunJobStore, *, owner: object | None = None) ->
             "analysis_id": state.get("analysis_id"),
             "kind": state.get("kind"),
             "status": state.get("status"),
-            "rows": rows,
+            "rows": join.attach(rows, flag_kind),
+            "flags_join": dict(join.info),
             "record_count": page.get("record_count"),
             "matched": page.get("matched"),
             "pagination": {key: pagination[key] for key in PAGINATION_KEYS if key in pagination},
         }
-        if sort_key:
+        if sort_key or flag_sort:
             response["sort"] = page.get("sort")
+        if flag_query.filtered:
+            response["pagination"]["flags"] = flag_query.descriptor()
         return response
 
     return router
