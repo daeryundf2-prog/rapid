@@ -45,6 +45,7 @@ EVIDENCE_INTAKE_COLUMNS = (
     ("evidence_source", "hash_message", "TEXT NOT NULL DEFAULT ''"),
 )
 
+# One statement per blank-line-separated block (apply_intake_schema executes them one by one).
 INTAKE_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS case_note (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -57,6 +58,7 @@ CREATE TABLE IF NOT EXISTS case_note (
     text TEXT NOT NULL,
     FOREIGN KEY (case_id) REFERENCES case_record(case_id) ON DELETE CASCADE
 );
+
 CREATE INDEX IF NOT EXISTS idx_case_note_case ON case_note(case_id, created_at);
 
 CREATE TABLE IF NOT EXISTS case_note_history (
@@ -68,6 +70,7 @@ CREATE TABLE IF NOT EXISTS case_note_history (
     at TEXT NOT NULL,
     text TEXT NOT NULL DEFAULT ''
 );
+
 CREATE INDEX IF NOT EXISTS idx_case_note_history_case ON case_note_history(case_id, id);
 
 CREATE TRIGGER IF NOT EXISTS case_note_history_no_update
@@ -84,10 +87,12 @@ CREATE TABLE IF NOT EXISTS processing_snapshot (
     snapshot_json TEXT NOT NULL DEFAULT '{}',
     FOREIGN KEY (case_id) REFERENCES case_record(case_id) ON DELETE CASCADE
 );
+
 CREATE INDEX IF NOT EXISTS idx_processing_snapshot_case ON processing_snapshot(case_id, captured_at);
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_case_record_case_number
     ON case_record(case_number) WHERE case_number <> '';
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_evidence_source_number
     ON evidence_source(case_id, evidence_number) WHERE evidence_number <> '';
 """
@@ -127,7 +132,10 @@ def apply_intake_schema(connection: sqlite3.Connection) -> None:
     """Add the intake columns and tables (idempotent; existing DBs migrate in place)."""
     for table, column, definition in (*CASE_INTAKE_COLUMNS, *EVIDENCE_INTAKE_COLUMNS):
         _ensure_column(connection, table, column, definition)
-    connection.executescript(INTAKE_SCHEMA_SQL)
+    # One execute() per statement (blank-line separated), not executescript(): executescript
+    # commits first, and apply_schema's fast path counts DDL replays (hardening follow-ups).
+    for statement in INTAKE_SCHEMA_SQL.strip().split("\n\n"):
+        connection.execute(statement)
 
 
 def intake_schema_present(connection: sqlite3.Connection) -> bool:
