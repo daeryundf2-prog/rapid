@@ -131,8 +131,9 @@ export function EvidenceFields({
           onChange={(e) => set("displayName", e.target.value)}
         />
       </div>
-      <label className="case-switch">
+      <label className="case-switch" htmlFor={id("verify-hash")}>
         <input
+          id={id("verify-hash")}
           type="checkbox"
           role="switch"
           aria-checked={draft.verifyHash}

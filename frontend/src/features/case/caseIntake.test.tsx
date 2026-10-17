@@ -137,6 +137,16 @@ describe("CaseWizard (Q-X1)", () => {
     const next = screen.getByTestId("wizard-next");
     expect(next.getAttribute("aria-disabled")).toBe("true");
     expect(screen.getAllByText("사건 번호를 입력하세요.").length).toBeGreaterThan(0);
+    // Accessible names come from the visible labels / button text, not placeholder or reason.
+    expect(screen.getByLabelText("사건 번호", { exact: false }).getAttribute("aria-required")).toBe("true");
+    for (const label of ["사건명", "사건 유형", "검사관", "의뢰처", "소속", "설명", "케이스 폴더"]) {
+      expect(screen.getByLabelText(label, { exact: false })).toBeTruthy();
+    }
+    expect(screen.getByRole("button", { name: /다음/ })).toBe(next);
+    expect(next.getAttribute("aria-describedby")).toBeTruthy();
+    expect(document.getElementById(next.getAttribute("aria-describedby") as string)?.textContent).toBe(
+      "사건 번호를 입력하세요.",
+    );
     fireEvent.click(next);
     expect(screen.getByTestId("wizard-step-info")).toBeTruthy();
     fill("사건 번호", "2026-고단-1234");
@@ -150,6 +160,7 @@ describe("CaseWizard (Q-X1)", () => {
     const items = within(step2).getAllByTestId("wizard-evidence");
     expect(items).toHaveLength(2);
     fill("증거 경로", "D:\\ev\\a.E01", items[0] as HTMLElement);
+    expect(within(items[0] as HTMLElement).getByRole("switch", { name: /^해시 검증/ })).toBeTruthy();
     fireEvent.click(within(items[0] as HTMLElement).getByRole("switch"));
     fill("증거 경로", "D:\\ev\\b.E01", items[1] as HTMLElement);
     fireEvent.click(screen.getByRole("button", { name: "증거 E-02 삭제" }));
@@ -159,6 +170,7 @@ describe("CaseWizard (Q-X1)", () => {
 
     // Step 3: options + summary that matches the request 1:1.
     await screen.findByTestId("wizard-step-options");
+    expect(screen.getByRole("checkbox", { name: /^읽기 전용/ })).toBeTruthy();
     const summary = screen.getByTestId("wizard-summary");
     const summaryKeys = [...summary.querySelectorAll("tr[data-key]")].map((row) =>
       row.getAttribute("data-key"),

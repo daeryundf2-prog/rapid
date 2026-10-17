@@ -52,8 +52,9 @@ export function RunOptionsFields({
         </select>
       </div>
 
-      <label>
+      <label htmlFor={id("read-only")}>
         <input
+          id={id("read-only")}
           type="checkbox"
           checked={form.readOnly}
           onChange={(e) => onChange("readOnly", e.target.checked)}
@@ -114,8 +115,9 @@ export function RunOptionsFields({
             value={form.knownGoodFeeds}
             onChange={(e) => onChange("knownGoodFeeds", e.target.value)}
           />
-          <label>
+          <label htmlFor={id("hide-known-good")}>
             <input
+              id={id("hide-known-good")}
               type="checkbox"
               checked={form.hideKnownGood}
               onChange={(e) => onChange("hideKnownGood", e.target.checked)}
@@ -123,24 +125,27 @@ export function RunOptionsFields({
             known-good 항목 숨기기
           </label>
           {errors.hideKnownGood && <p className="case-error">{errors.hideKnownGood}</p>}
-          <label>
+          <label htmlFor={id("dry-run")}>
             <input
+              id={id("dry-run")}
               type="checkbox"
               checked={form.dryRun}
               onChange={(e) => onChange("dryRun", e.target.checked)}
             />{" "}
             모의 실행 (결과를 쓰지 않음)
           </label>
-          <label>
+          <label htmlFor={id("overwrite")}>
             <input
+              id={id("overwrite")}
               type="checkbox"
               checked={form.overwrite}
               onChange={(e) => onChange("overwrite", e.target.checked)}
             />{" "}
             기존 출력 덮어쓰기
           </label>
-          <label>
+          <label htmlFor={id("extract")}>
             <input
+              id={id("extract")}
               type="checkbox"
               checked={form.extract}
               onChange={(e) => onChange("extract", e.target.checked)}
