@@ -1,0 +1,296 @@
+# Triage catalogue: lnk (plan viewer-families-2026-10-15; research docs/research/forensic-field-catalog-*.md)
+families:
+- id: shortcut
+  label: 바로 가기(LNK)
+  types:
+  - recent-shortcut
+  - shell-shortcut
+  - recent-shortcut-invalid-content
+  - shell-shortcut-invalid-content
+  kinds:
+  - recent-files
+  core_columns:
+  - key: target_created_at
+    label: 대상 생성
+    format: time
+    ts_kind: target-created
+  - key: target_path
+    label: 대상 경로
+    aliases:
+    - local_base_path
+    - entry_hint
+    format: path
+  - key: command_line_arguments
+    label: 인수
+    aliases:
+    - arguments
+    format: mono
+  - key: working_dir
+    label: 작업 폴더
+    aliases:
+    - working_directory
+    format: path
+  - key: relative_path
+    label: 상대 경로
+    format: path
+  - key: description
+    label: 설명
+  - key: target_file_size
+    label: 대상 크기
+    format: bytes
+  - key: volume_label
+    label: 볼륨 레이블
+  - key: volume_serial_number
+    label: 볼륨 시리얼
+    format: mono
+  - key: drive_type_name
+    label: 드라이브 종류
+    aliases:
+    - drive_type
+  aux_columns:
+  - key: net_name
+    label: 네트워크 공유
+    aliases:
+    - device_name
+    - common_path_suffix
+    format: path
+  - key: tracker_machine_id
+    label: 머신 ID(NetBIOS)
+    aliases:
+    - machine_id
+    format: mono
+  - key: hostname
+    label: 호스트 이름
+  - key: droid_volume_id
+    label: Droid 볼륨 ID
+    format: mono
+  - key: droid_file_id
+    label: Droid 파일 ID
+    format: mono
+  - key: birth_droid_volume_id
+    label: 최초 Droid 볼륨 ID
+    format: mono
+  - key: birth_droid_file_id
+    label: 최초 Droid 파일 ID
+    format: mono
+  - key: tracker_droid_file_mac_address
+    label: MAC 주소(Droid)
+    aliases:
+    - mac_address
+    format: mono
+  - key: known_folder_ids
+    label: 알려진 폴더
+  - key: environment_target
+    label: 환경 변수 대상
+    format: path
+  - key: link_flag_names
+    label: 링크 플래그
+  - key: file_attribute_names
+    label: 대상 속성
+  - key: show_command
+    label: 표시 방식
+  - key: hot_key
+    label: 단축키
+  - key: icon_location
+    label: 아이콘 위치
+    format: path
+  - key: entry_name
+    label: 바로 가기 파일
+  - key: location
+    label: 위치
+  - key: user
+    label: 사용자 프로필
+  - key: detected_content_label
+    label: 감지된 내용
+    aliases:
+    - detected_content_kind
+  - key: target_modified_at
+    label: 대상 수정
+    format: time
+    ts_kind: target-modified
+  - key: target_accessed_at
+    label: 대상 접근
+    format: time
+    ts_kind: target-accessed
+  - key: modified_at
+    label: 바로 가기 수정
+    format: time
+    ts_kind: modified
+  rules:
+  - lnk.removable_target
+  - lnk.network_target
+  - lnk.target_missing
+  - lnk.user_path_exec
+  - lnk.foreign_machine
+  - lnk.timestamp_anomaly
+  - usb.cross_match
+- id: jumplist
+  label: 점프 목록
+  types:
+  - jumplist-entry
+  - jumplist-automatic
+  - jumplist-custom
+  core_columns:
+  - key: destlist_last_modified_at
+    label: 마지막 접근(DestList)
+    aliases:
+    - timestamp
+    format: time
+    ts_kind: last-accessed
+  - key: application_id_hash
+    label: 앱 ID (AppID)
+    aliases:
+    - app_id
+    format: mono
+  - key: application_name
+    label: 앱 이름
+    aliases:
+    - app_name
+  - key: jumplist_kind
+    label: 점프 목록 종류
+  - key: destlist_path
+    label: 대상 경로
+    aliases:
+    - target_path
+    - entry_hint
+    format: path
+  - key: destlist_entry_number
+    label: 항목 번호
+    format: number
+  - key: destlist_access_count
+    label: 접근 횟수
+    aliases:
+    - destlist_access_count_float_v1
+    format: number
+  - key: destlist_pinned
+    label: 고정
+    aliases:
+    - destlist_pin_status
+  - key: destlist_hostname
+    label: 호스트 이름
+    aliases:
+    - hostname
+  - key: destlist_volume_droid
+    label: Droid 볼륨 ID
+    format: mono
+  aux_columns:
+  - key: destlist_file_droid
+    label: Droid 파일 ID
+    format: mono
+  - key: destlist_birth_volume_droid
+    label: 최초 Droid 볼륨 ID
+    format: mono
+  - key: destlist_birth_file_droid
+    label: 최초 Droid 파일 ID
+    format: mono
+  - key: destlist_file_droid_mac_address
+    label: MAC 주소(Droid)
+    format: mono
+  - key: lnk_stream_name
+    label: LNK 스트림
+    format: mono
+  - key: working_dir
+    label: 작업 폴더
+    format: path
+  - key: command_line_arguments
+    label: 인수
+    format: mono
+  - key: volume_serial_number
+    label: 볼륨 시리얼
+    format: mono
+  - key: tracker_machine_id
+    label: 머신 ID(NetBIOS)
+    format: mono
+  - key: destinations
+    label: 대상 항목
+  - key: destination_count
+    label: 대상 수
+    aliases:
+    - destinations_total
+    format: number
+  - key: destlist_entry_candidates
+    label: DestList 항목 후보
+  - key: entry_name
+    label: 점프 목록 파일
+  - key: user
+    label: 사용자 프로필
+  - key: target_created_at
+    label: 대상 생성
+    format: time
+    ts_kind: target-created
+  - key: target_modified_at
+    label: 대상 수정
+    format: time
+    ts_kind: target-modified
+  - key: target_accessed_at
+    label: 대상 접근
+    format: time
+    ts_kind: target-accessed
+  rules:
+  - lnk.removable_target
+rules:
+- id: lnk.removable_target
+  family: shortcut
+  grade: B
+  label_ko: 이동식 매체 대상 바로 가기
+  rationale_ko: 'LNK 대상 드라이브 종류가 이동식이거나, 대상 볼륨 시리얼·드라이브 문자가 이동식 장치와 일치: 이동식 매체 접근.'
+  false_positive_ko: 정상 USB 사용.
+  sources: &id001
+  - https://www.csirt.gov.sk/wp-content/uploads/2021/08/LNK_File_Forensics.pdf
+  - https://forensics.wiki/jump_lists/
+  - https://www.it-connect.tech/windows-forensics-jump-lists/
+  - https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-shllink/
+  version: 1
+  status: verified
+  params: {}
+- id: lnk.network_target
+  family: shortcut
+  grade: C
+  label_ko: 네트워크 공유 대상 바로 가기
+  rationale_ko: 'LNK 대상이 UNC·네트워크 드라이브: 공유 접근·횡이동.'
+  false_positive_ko: 정상 공유 폴더. 공유 호스트가 이 컴퓨터 자신(컴퓨터 이름)인 경우는 제외.
+  sources: *id001
+  version: 2
+  status: verified
+  params: {}
+- id: lnk.target_missing
+  family: shortcut
+  grade: C
+  label_ko: 대상이 사라진 바로 가기
+  rationale_ko: 'LNK 대상 경로가 같은 폴더의 다른 파일은 있는데 파일 목록에 없음: 접근 후 삭제.'
+  false_positive_ko: 이동식 매체 분리, 수집 범위 밖.
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}
+- id: lnk.user_path_exec
+  family: shortcut
+  grade: B
+  label_ko: 사용자 경로 실행 파일 바로 가기
+  rationale_ko: 'LNK 대상이 Temp/Downloads/AppData/Public의 실행 파일·스크립트: 사용자 실행 흔적.'
+  false_positive_ko: 정상 설치 파일 실행.
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}
+- id: lnk.foreign_machine
+  family: shortcut
+  grade: B
+  label_ko: 다른 호스트에서 만든 바로 가기
+  rationale_ko: 'LNK Tracker의 MachineID(NetBIOS)가 이 증거의 컴퓨터 이름과 다름: 피싱 LNK·외부 복사.'
+  false_positive_ko: 이미지 복제·이름 변경된 PC. Windows/Program Files 대상(기본 PowerShell 시작 메뉴 바로 가기 등)은 제외.
+  sources: *id001
+  version: 2
+  status: verified
+  params: {}
+- id: lnk.timestamp_anomaly
+  family: shortcut
+  grade: C
+  label_ko: 바로 가기 대상 시각 이상
+  rationale_ko: '대상 생성 시각이 바로 가기 기록 시각보다 늦거나, LinkInfo가 있는데 대상 시각이 모두 0: 조작·복사.'
+  false_positive_ko: 복사된 LNK.
+  sources: *id001
+  version: 1
+  status: verified
+  params:
+    tolerance_minutes: 1

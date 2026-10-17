@@ -1,0 +1,267 @@
+# Triage catalogue: documents (plan viewer-families-2026-10-15; research docs/research/forensic-field-catalog-*.md)
+families:
+- id: document
+  label: 문서 메타데이터
+  types:
+  - document-metadata-risk
+  - document-lock-owner
+  core_columns:
+  - key: created_at
+    label: 문서 생성(내부)
+    format: time
+    ts_kind: created
+  - key: locked_document_name_hint
+    label: 문서
+    aliases:
+    - file_name
+    - entry_name
+  - key: document_family
+    label: 문서 형식
+    aliases:
+    - container_format
+    - lock_format
+  - key: title
+    label: 제목
+  - key: subject
+    label: 주제
+  - key: author
+    label: 작성자
+    aliases:
+    - author_candidates
+  - key: last_modified_by
+    label: 마지막 수정자
+  - key: lock_owner
+    label: 잠금 소유자
+    aliases:
+    - lock_owner_ansi
+  - key: lock_owner_host
+    label: 잠금 호스트
+  - key: company
+    label: 회사
+  aux_columns:
+  - key: manager
+    label: 관리자
+  - key: application
+    label: 작성 프로그램
+    aliases:
+    - application_version
+  - key: template
+    label: 서식 파일
+  - key: timestamps_without_zone
+    label: 시간대 없는 시각
+  - key: revision
+    label: 수정 번호
+  - key: total_edit_time
+    label: 총 편집 시간
+    aliases:
+    - total_edit_time_seconds
+  - key: page_count
+    label: 쪽 수
+    format: number
+  - key: word_count
+    label: 단어 수
+    format: number
+  - key: keywords
+    label: 키워드/메모
+    aliases:
+    - comments
+    - category
+  - key: encrypted
+    label: 암호화
+    aliases:
+    - encryption_reason
+  - key: macro_profile
+    label: 매크로
+  - key: external_reference_candidates
+    label: 외부 참조
+  - key: risk_flags
+    label: 위험 표시
+  - key: modified_at
+    label: 문서 수정(내부)
+    format: time
+    ts_kind: modified
+  - key: last_printed_at
+    label: 마지막 인쇄
+    format: time
+    ts_kind: event
+  rules:
+  - documents.lastsaved_ne_author
+  - documents.edit_time_zero_many_rev
+  - documents.created_after_modified
+  - documents.modified_vs_fs
+  - documents.meta_tool_name_user
+  - documents.macro_or_ole
+  - documents.external_template_url
+  - documents.printed_present
+  - documents.pdf_creator_producer_odd
+  - documents.pdf_incremental_update
+  - documents.tracked_authors_many
+  - documents.meta_scrubbed
+rules:
+- id: documents.lastsaved_ne_author
+  family: document
+  grade: C
+  label_ko: 마지막 저장자 ≠ 작성자
+  rationale_ko: '마지막 저장자가 작성자와 다름: 제3자 수정·전달.'
+  false_positive_ko: 협업, 템플릿 재사용.
+  sources: &id001
+  - https://learn.microsoft.com/en-us/previous-versions/office/developer/sharepoint-2007/bb447589(v=office.12)
+  - https://python-pptx.readthedocs.io/en/latest/dev/analysis/pkg-coreprops.html
+  - https://learn.microsoft.com/en-us/windows/win32/stg/implementing-the-summary-information-property-set
+  - https://api-reference.pdf-tools.com/pdfsdk/1.20/dotnet/html/T_PdfTools_Pdf_Metadata.htm
+  version: 1
+  status: verified
+  params: {}
+- id: documents.edit_time_zero_many_rev
+  family: document
+  grade: C
+  label_ko: 편집 시간 0·수정 번호 큼
+  rationale_ko: '총 편집 시간이 0~1분인데 수정 번호가 큼: 자동 생성·변환·메타 조작.'
+  false_positive_ko: TotalTime을 고정 기록하는 도구.
+  sources: *id001
+  version: 1
+  status: verified
+  params:
+    max_edit_minutes: 1
+    min_revision: 10
+- id: documents.created_after_modified
+  family: document
+  grade: B
+  label_ko: 생성 시각 > 수정 시각
+  rationale_ko: '문서 내부 생성 시각이 수정 시각보다 늦음: 시간 조작·복사 도구.'
+  false_positive_ko: 시계 오차, 형식 변환, 시간대 없는 시각과 UTC 시각의 혼용(같은 날 수 시간 차).
+  sources: *id001
+  version: 2
+  status: verified
+  params:
+    tolerance_hours: 14
+- id: documents.modified_vs_fs
+  family: document
+  grade: C
+  label_ko: 내부 수정 ≠ 파일 수정
+  rationale_ko: '문서 내부 수정 시각과 파일 시스템 수정 시각 차가 하루 초과: 복사·재저장.'
+  false_positive_ko: 이메일 첨부 저장.
+  sources: *id001
+  version: 1
+  status: verified
+  params:
+    max_gap_hours: 24
+- id: documents.meta_tool_name_user
+  family: document
+  grade: C
+  label_ko: 작성자가 도구 이름
+  rationale_ko: '작성자/마지막 저장자가 라이브러리·변환 도구 이름: 프로그램 생성 문서.'
+  false_positive_ko: 자동화 보고서.
+  sources: *id001
+  version: 1
+  status: verified
+  params:
+    tool_names:
+    - python-docx
+    - openpyxl
+    - apache poi
+    - docx4j
+    - aspose
+    - phpword
+    - phpspreadsheet
+    - reportlab
+    - itext
+    - wkhtmltopdf
+    - xlsxwriter
+    - pandoc
+    - closedxml
+    - npoi
+    - epplus
+- id: documents.macro_or_ole
+  family: document
+  grade: B
+  label_ko: 매크로·OLE·DDE
+  rationale_ko: 'vbaProject.bin·OLE 개체·DDE 존재: 악성 또는 자동화.'
+  false_positive_ko: 업무 매크로. 한컴이 모든 HWPX에 넣는 기본 스크립트(Scripts/headerScripts.js·sourceScripts.js)는 제외.
+  sources: *id001
+  version: 2
+  status: verified
+  params:
+    ignored_script_paths:
+    - Scripts/headerScripts.js
+    - Scripts/sourceScripts.js
+- id: documents.external_template_url
+  family: document
+  grade: B
+  label_ko: 원격 템플릿·외부 링크
+  rationale_ko: '서식 파일·외부 관계가 http(s)/UNC를 가리킴: 템플릿 인젝션.'
+  false_positive_ko: 사내 서버 템플릿.
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}
+- id: documents.printed_present
+  family: document
+  grade: C
+  label_ko: 인쇄 기록
+  rationale_ko: '마지막 인쇄 시각 존재: 인쇄 사실.'
+  false_positive_ko: 인쇄 후 저장.
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}
+- id: documents.pdf_creator_producer_odd
+  family: document
+  grade: C
+  label_ko: PDF 작성·생성 도구 불일치
+  rationale_ko: 'Creator는 오피스 앱인데 Producer는 편집기·온라인 변환기: 재작성·편집 정황.'
+  false_positive_ko: 정상 PDF 변환 파이프라인.
+  sources: *id001
+  version: 1
+  status: verified
+  params:
+    office_creators:
+    - word
+    - excel
+    - powerpoint
+    - hwp
+    - 한글
+    - hancom
+    editor_producers:
+    - ilovepdf
+    - smallpdf
+    - pdfescape
+    - sejda
+    - pdf-xchange
+    - foxit
+    - nitro
+    - pdfelement
+    - acrobat pro
+    - pdf24
+    - sodapdf
+- id: documents.pdf_incremental_update
+  family: document
+  grade: C
+  label_ko: PDF 증분 저장
+  rationale_ko: '%%EOF가 여러 개: 생성 뒤 사후 수정.'
+  false_positive_ko: 전자 서명·양식 입력.
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}
+- id: documents.tracked_authors_many
+  family: document
+  grade: C
+  label_ko: 변경 추적 작성자 다수
+  rationale_ko: '변경 추적·메모 작성자가 여럿이거나 작성자와 다른 이름: 협업·타인 개입.'
+  false_positive_ko: 정상 검토.
+  sources: *id001
+  version: 1
+  status: verified
+  params:
+    min_authors: 3
+- id: documents.meta_scrubbed
+  family: document
+  grade: C
+  label_ko: 작성자 정보 제거
+  rationale_ko: '속성은 있는데 작성자·마지막 저장자·회사가 모두 공란: 메타 제거.'
+  false_positive_ko: 익명 템플릿.
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}

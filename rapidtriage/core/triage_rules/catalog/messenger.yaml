@@ -1,0 +1,287 @@
+# Triage catalogue: messenger (plan viewer-families-2026-10-15; research docs/research/forensic-field-catalog-*.md)
+families:
+- id: messenger
+  label: 메신저
+  types:
+  - mobile-message
+  - cloud-message
+  - kakaotalk-message
+  - messenger-message
+  - chat-message
+  core_columns:
+  - key: timestamp
+    label: 시각
+    aliases:
+    - msg_time
+    - sent_at
+    format: time
+    ts_kind: sent
+    width: 170
+  - key: service
+    label: 앱
+    aliases:
+    - app
+  - key: conversation_title
+    label: 대화방
+    aliases:
+    - conversation_id
+    - chat_room
+  - key: sender
+    label: 발화자
+  - key: recipient
+    label: 상대
+    aliases:
+    - participants
+    - counterpart
+  - key: direction
+    label: 방향
+    width: 70
+  - key: message_text_preview
+    label: 본문
+    aliases:
+    - message_text
+    - body
+    width: 320
+  - key: attachment_name
+    label: 첨부
+    aliases:
+    - media_reference
+  - key: deleted_state
+    label: 삭제 여부
+    width: 90
+  - key: read_state
+    label: 읽음 상태
+    aliases:
+    - status
+    width: 90
+  aux_columns:
+  - key: message_id
+    label: 메시지 ID
+    format: mono
+  - key: reply_to_message_id
+    label: 답장 대상
+    format: mono
+  - key: edited_at
+    label: 수정
+    format: time
+    ts_kind: edited
+  - key: reaction
+    label: 반응
+  - key: server_timestamp
+    label: 서버 시각
+    aliases:
+    - receipt_server_timestamp
+    format: time
+    ts_kind: server
+  - key: app_version
+    label: 앱 버전
+  - key: source_path
+    label: 원본 DB
+    format: path
+  rules:
+  - messenger.time_regression
+  - messenger.server_client_skew
+  - messenger.id_gap
+  - messenger.deleted_recovered
+  - messenger.disappearing_on
+  - messenger.external_share_link
+  - messenger.late_night_burst
+  - messenger.attachment_missing
+  - messenger.app_reinstall_gap
+- id: kakaotalk
+  label: 카카오톡 후보
+  types: []
+  prefixes:
+  - kakaotalk-windows-
+  core_columns:
+  - key: registry_key_last_written
+    label: 키 마지막 기록
+    format: time
+    ts_kind: last-written
+  - key: display_label
+    label: 후보 종류
+    aliases:
+    - candidate_kind
+  - key: candidate_value
+    label: 후보 값
+    format: mono
+  - key: candidate_value_sha256
+    label: 후보 값 SHA-256
+    format: mono
+  - key: evidence_nature
+    label: 증거 성격
+  - key: registry_key_path
+    label: 레지스트리 키
+    format: path
+  - key: registry_value_name
+    label: 레지스트리 값
+    format: mono
+  - key: decoded_strings
+    label: 해석된 문자열
+  aux_columns:
+  - key: field_names
+    label: 필드
+  - key: values_redacted
+    label: 값 가림
+  - key: matched_terms
+    label: 일치한 용어
+  - key: path_candidates
+    label: 경로·URL 후보
+    aliases:
+    - url_candidates
+  - key: source_offset
+    label: 원본 오프셋
+    format: hex
+  - key: risk_score
+    label: 위험 점수
+    format: number
+  rules: []
+rules:
+- id: messenger.time_regression
+  family: messenger
+  grade: C
+  label_ko: 메시지 순서·시각 역전
+  rationale_ko: '같은 대화방에서 메시지 id 순서와 시각 순서가 역전: 단말 시계 변경·DB 편집.'
+  false_positive_ko: 서버 재전송, 오프라인 후 동기화.
+  sources: &id001
+  - https://www.group-ib.com/blog/whatsapp-forensic-artifacts/
+  - https://belkasoft.com/android-whatsapp-forensics-analysis
+  - https://www.magnetforensics.com/blog/the-lesser-talked-about-messaging-apps/
+  - https://dfrws.org/presentation/digital-forensic-analysis-of-encrypted-database-files-in-instant-messaging-applications-on-windows-operating-systems/
+  - https://www.forensicfocus.com/webinars/cracking-the-code-of-ios-messages-a-guide-to-storage-and-analysis-techniques-for-forensic-examiners/
+  - https://dfrws.org/wp-content/uploads/2025/03/Forensic-analysis-of-Telegram-Messeng_2025_Forensic-Science-International-D.pdf
+  version: 1
+  status: verified
+  params:
+    tolerance_seconds: 60
+- id: messenger.server_client_skew
+  family: messenger
+  grade: B
+  label_ko: 서버·단말 시각 차
+  rationale_ko: '같은 메시지의 서버 시각과 단말 시각 차가 5분 초과: 시계 조작·시간대 설정 오류.'
+  false_positive_ko: 오프라인 큐 지연.
+  sources: *id001
+  version: 1
+  status: verified
+  params:
+    max_skew_minutes: 5
+- id: messenger.id_gap
+  family: messenger
+  grade: C
+  label_ko: 대화방 메시지 id 결번
+  rationale_ko: 'id가 대화방별로 1씩 느는 방에서 결번: 삭제 가능성.'
+  false_positive_ko: id가 전역으로 증가하는 앱은 항상 결번.
+  sources: *id001
+  version: 1
+  status: provisional
+  params:
+    min_missing: 1
+- id: messenger.deleted_recovered
+  family: messenger
+  grade: B
+  label_ko: 삭제·WAL에서만 복구된 메시지
+  rationale_ko: '활성 테이블이 아닌 WAL/빈 페이지/저널에서만 복구됐거나 삭제 표식이 있는 메시지: 삭제 은닉 정황.'
+  false_positive_ko: 앱 자체 정리(자동 삭제).
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}
+- id: messenger.disappearing_on
+  family: messenger
+  grade: C
+  label_ko: 사라지는 메시지 설정
+  rationale_ko: '자동 삭제·사라지는 메시지 설정 존재: 증거 보존 한계 설명.'
+  false_positive_ko: 정상 개인정보 설정.
+  sources: *id001
+  version: 1
+  status: provisional
+  params: {}
+- id: messenger.external_share_link
+  family: messenger
+  grade: C
+  label_ko: 외부 파일 공유·단축 URL
+  rationale_ko: '본문에 파일 공유·단축 URL: 유출 경로.'
+  false_positive_ko: 일반 링크 공유.
+  sources: *id001
+  version: 1
+  status: verified
+  params:
+    share_domains:
+    - mega.nz
+    - mega.io
+    - wetransfer.com
+    - we.tl
+    - dropbox.com
+    - drive.google.com
+    - docs.google.com
+    - mediafire.com
+    - sendspace.com
+    - file.io
+    - transfer.sh
+    - gofile.io
+    - pixeldrain.com
+    - anonfiles.com
+    - zippyshare.com
+    - 4shared.com
+    - 1drv.ms
+    - onedrive.live.com
+    - box.com
+    - pcloud.com
+    - filemail.com
+    - send.vis.ee
+    - catbox.moe
+    - tmpfiles.org
+    - mydrive.naver.com
+    - ndrive.naver.com
+    - mybox.naver.com
+    - cloud.kakao.com
+    - transfer.it
+    shortener_domains:
+    - bit.ly
+    - t.co
+    - tinyurl.com
+    - goo.gl
+    - ow.ly
+    - is.gd
+    - buff.ly
+    - rebrand.ly
+    - cutt.ly
+    - me2.do
+    - han.gl
+    - url.kr
+- id: messenger.late_night_burst
+  family: messenger
+  grade: C
+  label_ko: 심야 집중 발신
+  rationale_ko: '현지 야간(기본 00–05시)에 짧은 시간 다수 발신: 조사 우선순위.'
+  false_positive_ko: 시간대 오판, 야간 근무.
+  sources: *id001
+  version: 1
+  status: provisional
+  params:
+    tz_offset_hours: 9
+    night_start_hour: 0
+    night_end_hour: 5
+    window_minutes: 30
+    min_count: 10
+- id: messenger.attachment_missing
+  family: messenger
+  grade: C
+  label_ko: 첨부 파일 없음
+  rationale_ko: '메시지에 첨부 메타는 있으나 같은 이름의 파일이 파일 목록에 없음: 미수집 또는 삭제.'
+  false_positive_ko: 미다운로드(썸네일만).
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}
+- id: messenger.app_reinstall_gap
+  family: messenger
+  grade: C
+  label_ko: 메시지 기록 큰 공백
+  rationale_ko: '한 DB에서 연속 메시지 사이 공백이 임계값 초과: 앱 재설치·데이터 삭제.'
+  false_positive_ko: 백업 복원, 장기 미사용.
+  sources: *id001
+  version: 1
+  status: provisional
+  params:
+    gap_days: 90

@@ -1,0 +1,166 @@
+# Triage catalogue: cloud (plan viewer-families-2026-10-15; research docs/research/forensic-field-catalog-*.md)
+families:
+- id: cloud
+  label: 클라우드
+  types:
+  - cloud-activity
+  - cloud-audit
+  - cloud-iaas-audit
+  - cloud-file
+  - cloud-account
+  - cloud-location
+  - cloud-export-archive
+  - ai-service-export-conversation
+  kinds:
+  - cloud-export
+  core_columns:
+  - key: timestamp
+    label: 시각
+    aliases:
+    - event_time
+    format: time
+    ts_kind: event
+    width: 170
+  - key: service
+    label: 서비스
+  - key: actor
+    label: 계정
+    aliases:
+    - account
+    - account_email
+  - key: object_id
+    label: 항목
+    aliases:
+    - item_path
+    - file_path
+    - file_name
+    - subject
+  - key: operation
+    label: 활동
+    aliases:
+    - activity
+    - event_type
+  - key: size
+    label: 크기
+    aliases:
+    - size_bytes
+    format: bytes
+  - key: shared_with
+    label: 공유 대상
+    aliases:
+    - sharing_link_count
+  - key: ip_address
+    label: IP·기기
+    aliases:
+    - client_ip
+    - user_agent
+    format: mono
+  - key: photo_taken_time
+    label: 촬영 시각
+    format: time
+    ts_kind: taken
+  - key: latitude
+    label: 위치
+    aliases:
+    - geo_data
+  aux_columns:
+  - key: permission_roles
+    label: 권한
+  - key: deleted_status
+    label: 삭제 상태
+    aliases:
+    - deleted_at
+  - key: retention_label
+    label: 보존 레이블
+  - key: archive_entry_name
+    label: 보관 파일 항목
+    format: path
+  rules:
+  - cloud.bulk_download
+  - cloud.external_share
+  - cloud.new_device_login
+  - cloud.delete_after_share
+  - cloud.taken_vs_creation_gap
+  - cloud.json_exif_gps_mismatch
+  - cloud.audit_retention_gap
+rules:
+- id: cloud.bulk_download
+  family: cloud
+  grade: B
+  label_ko: 대량 다운로드·동기화
+  rationale_ko: '한 계정의 다운로드/동기화가 짧은 시간에 임계값 이상: 대량 유출.'
+  false_positive_ko: 초기 동기화, 신규 기기.
+  sources: &id001
+  - https://learn.microsoft.com/purview/audit-solutions-overview
+  - https://exiftool.org/forum/index.php?msg=90811
+  - https://support.apple.com/en-qa/108306
+  version: 1
+  status: verified
+  params:
+    window_minutes: 10
+    min_count: 100
+- id: cloud.external_share
+  family: cloud
+  grade: B
+  label_ko: 외부·익명 공유 링크
+  rationale_ko: '익명 링크·외부 공유 초대 생성: 유출 경로.'
+  false_positive_ko: 정상 협업.
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}
+- id: cloud.new_device_login
+  family: cloud
+  grade: C
+  label_ko: 처음 보는 기기·IP 로그인
+  rationale_ko: '계정의 기준 로그인 이후 처음 나타난 IP/기기: 계정 탈취 또는 개인 기기.'
+  false_positive_ko: VPN, 출장.
+  sources: *id001
+  version: 1
+  status: provisional
+  params:
+    baseline_logins: 5
+- id: cloud.delete_after_share
+  family: cloud
+  grade: B
+  label_ko: 공유·다운로드 직후 삭제
+  rationale_ko: '공유·다운로드한 항목을 한 시간 안에 삭제: 흔적 제거.'
+  false_positive_ko: 정리.
+  sources: *id001
+  version: 1
+  status: verified
+  params:
+    window_minutes: 60
+- id: cloud.taken_vs_creation_gap
+  family: cloud
+  grade: C
+  label_ko: 촬영·업로드 시각 차
+  rationale_ko: 'Takeout photoTakenTime과 creationTime 차가 임계값 초과: 오래된 사진 업로드.'
+  false_positive_ko: 사진 일괄 백업.
+  sources: *id001
+  version: 1
+  status: verified
+  params:
+    max_gap_days: 30
+- id: cloud.json_exif_gps_mismatch
+  family: cloud
+  grade: B
+  label_ko: Takeout GPS와 EXIF GPS 불일치
+  rationale_ko: 'Takeout geoData와 geoDataExif가 1 km 넘게 다름: 위치 편집 정황.'
+  false_positive_ko: 앱의 위치 수정 기능.
+  sources: *id001
+  version: 1
+  status: verified
+  params:
+    max_distance_km: 1.0
+- id: cloud.audit_retention_gap
+  family: cloud
+  grade: C
+  label_ko: 감사 보존기간 한계
+  rationale_ko: '서비스별 가장 이른 감사 기록: 그 이전은 보존기간 밖일 수 있어 부재 ≠ 미발생.'
+  false_positive_ko: 해당 없음(한계 표기).
+  sources: *id001
+  version: 1
+  status: verified
+  params:
+    retention_days: 180

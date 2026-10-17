@@ -117,6 +117,7 @@ from ..timeline import (
     run_timeline,
     write_timeline_result,
 )
+from ..triage_rules.stage import run_triage_stage
 from ..virtual_disk import (
     VirtualDiskExtractionError,
     VirtualDiskExtractionResult,
@@ -1099,6 +1100,20 @@ def _run_triage_stages(
             if key in case_db_record
         },
     )
+    # triage-flags (plan viewer-families §3.1): rule engine over the run's own outputs into
+    # a new analyses/run-triage-flags-<time>/ generation under the output dir; a failure is isolated to the step row.
+    progress.begin_stage("triage-flags")
+    triage_step = run_triage_stage(
+        output_dir,
+        artifact_outputs=artifact_outputs,
+        artifact_payloads=artifact_payloads,
+        files_path=files_path,
+        files_payload=files_payload,
+    )
+    finish_stage(
+        "triage-flags",
+        {key: triage_step[key] for key in ("status", "flagged_rows", "flag_count", "elapsed_seconds") if key in triage_step},
+    )
     progress.begin_stage("report")
     write_run_checkpoints(
         checkpoint_path,
@@ -1217,6 +1232,7 @@ def _run_triage_stages(
         },
         rule_set=rule_set,
         source=build_run_source_record(input_root, image_result=image_result, outputs=outputs),
+        extra_steps=[triage_step],
     )
     audit_output = output_dir / "rapidtriage-run-audit.json"
     summary_payload["audit"] = str(audit_output)

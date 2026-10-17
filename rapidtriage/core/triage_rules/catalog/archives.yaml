@@ -1,0 +1,143 @@
+# Triage catalogue: archives (plan viewer-families-2026-10-15; research docs/research/forensic-field-catalog-*.md)
+families:
+- id: archive
+  label: 압축·암호 컨테이너
+  types:
+  - archive-file-inventory
+  core_columns:
+  - key: source_file_mtime
+    label: 파일 수정
+    format: time
+    ts_kind: modified
+    width: 170
+  - key: source_path
+    label: 압축 파일
+    format: path
+  - key: archive_format
+    label: 형식
+  - key: entry_count
+    label: 항목 수
+    format: number
+  - key: encrypted_entry_count
+    label: 암호화 항목
+    format: number
+  - key: compression_ratio
+    label: 압축 비율
+    format: number
+  - key: nested_archive_entry_count
+    label: 중첩 압축
+    format: number
+  - key: executable_entry_count
+    label: 실행 파일 항목
+    format: number
+  - key: path_traversal_entry_count
+    label: 경로 이탈 항목
+    format: number
+  - key: source_size
+    label: 크기
+    format: bytes
+  aux_columns:
+  - key: risk_flags
+    label: 위험 표시
+  rules:
+  - archives.enc_archive_with_exfil
+  - archives.header_encrypted_list_hidden
+  - archives.high_entropy_no_sig
+  - archives.ext_mismatch_container
+  - archives.nested_deep
+  - archives.zip_bomb_ratio
+  - archives.sfx_exe
+  - archives.entry_time_later_than_container
+rules:
+- id: archives.enc_archive_with_exfil
+  family: archive
+  grade: B
+  label_ko: 암호화 압축 후 반출 정황
+  rationale_ko: '암호화 압축 파일이 이동식/네트워크 바로 가기의 대상이거나 작성 직후 USB가 연결됨: 유출 준비.'
+  false_positive_ko: 업무용 압축.
+  sources: &id001
+  - https://www.elastic.co/guide/en/security/8.19/prebuilt-rule-8-3-3-encrypting-files-with-winrar-or-7z.html
+  - https://pds-ppi.igpp.ucla.edu/volume/PV01_0001/SOFTWARE/SOURCE/ZIP_WARE/APPNOTE.TXT
+  - https://host-aws.elcomsoft.com/presentations/20190504_forensic_anlysis_cryptocontainers_en.pdf
+  version: 1
+  status: provisional
+  params:
+    window_hours: 24
+- id: archives.header_encrypted_list_hidden
+  family: archive
+  grade: B
+  label_ko: 파일 목록 암호화 압축
+  rationale_ko: '압축 파일 목록 자체가 암호화(ZIP 중앙 디렉터리 암호화, 7z -mhe): 의도적 은닉.'
+  false_positive_ko: 보안 관행.
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}
+- id: archives.high_entropy_no_sig
+  family: archive
+  grade: C
+  label_ko: 암호 컨테이너 후보
+  rationale_ko: '시그니처 없음 + 엔트로피 ≥ 7.9 + 크기가 64의 배수: VeraCrypt류 후보(확률적 판정).'
+  false_positive_ko: 압축·난수 데이터, 디스크 이미지.
+  sources: *id001
+  version: 1
+  status: verified
+  params:
+    min_entropy: 7.9
+    min_bytes: 1048576
+- id: archives.ext_mismatch_container
+  family: archive
+  grade: B
+  label_ko: 확장자 위장 압축
+  rationale_ko: '확장자(.dat·.jpg 등)와 달리 압축 시그니처: 위장.'
+  false_positive_ko: 이름만 틀린 파일. Windows 10 이후 Prefetch(.pf)는 MAM 압축이라 압축 시그니처로 보이므로 제외(ignored_extensions).
+  sources: *id001
+  version: 2
+  status: verified
+  params:
+    ignored_extensions:
+    - pf
+- id: archives.nested_deep
+  family: archive
+  grade: C
+  label_ko: 깊은 중첩 압축
+  rationale_ko: '압축 중첩이 3단계 이상: 탐지 회피.'
+  false_positive_ko: 설치 파일.
+  sources: *id001
+  version: 1
+  status: provisional
+  params:
+    min_depth: 3
+- id: archives.zip_bomb_ratio
+  family: archive
+  grade: C
+  label_ko: 극단적 압축 비율
+  rationale_ko: '압축 해제 비율과 크기가 임계값 이상: 분석 방해(zip bomb).'
+  false_positive_ko: 로그 등 반복 데이터.
+  sources: *id001
+  version: 1
+  status: verified
+  params:
+    min_ratio: 100
+    min_uncompressed_bytes: 104857600
+- id: archives.sfx_exe
+  family: archive
+  grade: C
+  label_ko: 자동 압축 해제 실행 파일
+  rationale_ko: '실행 파일에 압축 데이터가 붙어 있음(SFX): 은닉 실행.'
+  false_positive_ko: 정상 설치기.
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}
+- id: archives.entry_time_later_than_container
+  family: archive
+  grade: C
+  label_ko: 항목 시각이 압축 파일보다 미래
+  rationale_ko: '압축 항목 수정 시각이 압축 파일 자신의 수정 시각보다 늦음: 시계 조작.'
+  false_positive_ko: DOS 시각(현지)·시간대 차이.
+  sources: *id001
+  version: 1
+  status: verified
+  params:
+    slack_hours: 24
