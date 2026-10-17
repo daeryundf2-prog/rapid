@@ -24,6 +24,7 @@ from ...core.artifact_domains import (
 )
 from ...core.jobs import RunJobStore, read_output_json, run_output_dir
 from .analyses import ANALYSIS_RUNNER
+from .derived import tree_derived_node
 from .helpers import default_case_path, enrich_summary_counts, get_job, get_output_path
 from .triage_flags import kind_flag_counts, tree_flags_section
 
@@ -258,6 +259,14 @@ def build_run_tree(store: RunJobStore, run_id: str) -> dict[str, Any]:
         )
 
     nodes.append(build_analyses_node(summary, kind_summaries.get(WEB_LOG_KIND) or {}))
+
+    # 통합 보기 (plan axiom-adoption §3.2): absent while the run has no completed derived set.
+    try:
+        derived_node = tree_derived_node(run_output_dir(job.summary))
+    except RuntimeError:
+        derived_node = None
+    if derived_node is not None:
+        nodes.append(derived_node)
 
     # --- 문서 / 타임라인 / 지표 / 리뷰 선별 / 검증 이슈 -----------------------
     docs_count = int(counts.get("docs") or 0)

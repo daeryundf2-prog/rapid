@@ -1,0 +1,337 @@
+"""통합 보기 engine (plan axiom-adoption §3.2): semantic tags, normalisation, caps, credential masking, partial sets."""
+
+from __future__ import annotations
+
+import json
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from rapidtriage.core.derived import engine as derived_engine
+from rapidtriage.core.derived.engine import TABLES, family_plans, run_derived
+from rapidtriage.core.derived.normalize import (
+    clean,
+    credential_record,
+    device_key,
+    mask_secret,
+    normalize,
+    path_key,
+    person_key,
+    phone_e164,
+    url_host,
+)
+from rapidtriage.core.derived.stage import DERIVED_ANALYSIS_KIND, run_derived_stage
+from rapidtriage.core.derived.url_classes import (
+    UrlClassError,
+    load_url_classes,
+    parse_url_classes,
+)
+from rapidtriage.core.triage_rules.catalog import (
+    SEMANTIC_TAGS,
+    CatalogError,
+    load_catalog,
+    parse_catalog,
+)
+from rapidtriage.core.triage_rules.engine import TriageInputs
+
+SECRET = "SuperSecretToken-1234567890"
+# Families whose catalogue columns carry no identifier (reviewed for the semantic tagging, §3.2).
+NO_IDENTIFIER_FAMILIES = frozenset(
+    {
+        "eventlog-record-candidate",  # header-only record candidates (strings, no parsed fields)
+        "synthetic-media",  # scoring rows
+        "defender",  # log-file summaries
+        "system-log",  # log-file summaries
+        "string-candidate",  # non-evidence string pivots
+        "summary",  # aggregate rows (would double count)
+        "timeline",  # copies of artifact rows
+        "indicator",  # copies of row values
+        "timezone",  # one registry value
+    }
+)
+
+
+def event(event_id: str, **details: object) -> dict[str, object]:
+    return {
+        "artifact_type": "eventlog-event",
+        "details": {"event_id": event_id, "channel": "Security", "timestamp": "2024-05-01T10:00:00Z", **details},
+    }
+
+
+class NormalizationTests(unittest.TestCase):
+    def test_people(self) -> None:
+        self.assertEqual(person_key("Alice <Alice.Kim@Example.COM>"), "alice.kim@example.com")
+        self.assertEqual(person_key("010-1234-5678"), "+821012345678")
+        self.assertEqual(person_key("+1 (555) 010-9999"), "+15550109999")
+        self.assertEqual(person_key("0082 10 1234 5678"), "+821012345678")
+        self.assertEqual(person_key("s-1-5-21-1-2-3-1001"), "S-1-5-21-1-2-3-1001")
+        self.assertEqual(person_key("  CORP\\Alice   Kim "), "corp\\alice kim")
+        self.assertIsNone(phone_e164("12-34"))
+
+    def test_paths(self) -> None:
+        self.assertEqual(path_key("C:/Users/Alice//Desktop/A.TXT"), "c:\\users\\alice\\desktop\\a.txt")
+        self.assertEqual(path_key("\\\\?\\C:\\Temp\\"), "c:\\temp")
+        self.assertEqual(path_key("\\\\SERVER\\Share\\x"), "\\\\server\\share\\x")
+        self.assertEqual(path_key("file:///C:/Users/a%20b.txt"), "c:\\users\\a b.txt")
+        self.assertEqual(path_key("C:\\"), "c:\\")
+
+    def test_urls_and_devices(self) -> None:
+        self.assertEqual(url_host("https://User@WWW.Example.com:8443/a?b=1"), "www.example.com")
+        self.assertEqual(url_host(".naver.com"), "naver.com")
+        self.assertEqual(url_host("mail.naver.com/inbox"), "mail.naver.com")
+        self.assertIsNone(url_host("not a host"))
+        self.assertEqual(device_key("aa-bb-cc-dd-ee-ff"), "AA:BB:CC:DD:EE:FF")
+        self.assertEqual(device_key("[fe80:0:0::1]"), "fe80::1")
+        self.assertEqual(device_key("{1B2C3D4E-0000-1111-2222-333344445555}"), "1b2c3d4e-0000-1111-2222-333344445555")
+        self.assertEqual(normalize("attachments", "C:\\Mail\\Report.PDF"), "report.pdf")
+
+    def test_placeholders_are_dropped(self) -> None:
+        for raw in ("", "-", "N/A", "null", "0", None, True, [], {"a": 1}):
+            self.assertIsNone(clean(raw), raw)
+        self.assertEqual(clean("  value "), "value")
+
+    def test_mask_never_returns_the_clear_value(self) -> None:
+        self.assertEqual(mask_secret("short"), "•••••")
+        masked = mask_secret(SECRET)
+        self.assertNotIn(SECRET[2:-1], masked)
+        self.assertTrue(masked.startswith("Su") and masked.endswith("0"))
+        # A value its parser already masked is masked again (no pass-through of text containing '*').
+        self.assertNotIn("pass*word12", mask_secret("pass*word12345"))
+        record = credential_record(SECRET)
+        self.assertEqual(record["length"], len(SECRET))
+        self.assertEqual(len(str(record["sha256"])), 64)
+        own = credential_record("[마스킹됨]", sha256="A" * 64, length=12)
+        self.assertEqual((own["sha256"], own["length"]), ("a" * 64, 12))
+
+
+class CatalogSemanticTests(unittest.TestCase):
+    def test_every_family_is_reviewed(self) -> None:
+        catalog = load_catalog()
+        self.assertEqual(len(catalog.families), 54)
+        for family in catalog.families:
+            columns = [*family["core_columns"], *(family.get("aux_columns") or [])]
+            tagged = [column for column in columns if column.get("semantic")]
+            if family["id"] in NO_IDENTIFIER_FAMILIES:
+                self.assertEqual(tagged, [], family["id"])
+            else:
+                self.assertTrue(tagged, f"{family['id']} has no semantic column")
+            for column in tagged:
+                self.assertIn(column["semantic"], SEMANTIC_TAGS)
+
+    def test_plans_map_tags_to_tables(self) -> None:
+        plans = family_plans(load_catalog())
+        people = {column.key for column in plans["sam-account"].columns if column.table == "people"}
+        self.assertIn("user_name", people)
+        autofill = next(column for column in plans["browser-autofill"].columns if column.semantic == "credential")
+        self.assertEqual(dict(autofill.when), {"mask_reason": frozenset({"secret-field-name"})})
+        self.assertEqual(plans["media-image"].columns[0].table, "")  # geo feeds no table
+
+    def test_validator_rejects_bad_tags(self) -> None:
+        def family(column: dict[str, object]) -> list[tuple[str, bytes]]:
+            document = {"families": [{"id": "x", "label": "X", "core_columns": [{"key": "a", "label": "A", **column}]}]}
+            return [("x.yaml", json.dumps(document).encode("utf-8"))]
+
+        for column, message in (
+            ({"semantic": "people"}, "semantic"),
+            ({"semantic_when": {"f": ["v"]}}, "semantic_when"),
+            ({"semantic": "account", "semantic_when": {"f": "v"}}, "semantic_when"),
+            ({"derive": "nope"}, "derive"),
+        ):
+            with self.assertRaises(CatalogError) as caught:
+                parse_catalog(family(column))
+            self.assertIn(message, str(caught.exception))
+        parse_catalog(family({"semantic": "account", "semantic_when": {"f": ["v"]}, "derive": "auto_logon"}))
+
+
+class UrlClassTests(unittest.TestCase):
+    def test_packaged_classes_load_with_sources(self) -> None:
+        classes = load_url_classes()
+        self.assertEqual(set(classes.labels), {"search", "social", "cloud", "messenger", "jobs", "finance", "adult", "suspicious"})
+        for urls in classes.sources.values():
+            self.assertTrue(urls and all(url.startswith("https://") for url in urls))
+        self.assertEqual(classes.classify("www.google.com"), "search")
+        self.assertEqual(classes.classify("search.naver.com"), "search")
+        self.assertIsNone(classes.classify("mail.naver.com"))
+        self.assertEqual(classes.classify("x.blog.naver.com"), "social")
+        self.assertIsNone(classes.classify("com"))
+
+    def test_bad_class_files_are_korean_errors(self) -> None:
+        for text in (b"classes: []", b"classes: [{id: a, label_ko: A, sources: [http://x], domains: [a.com]}]"):
+            with self.assertRaises(UrlClassError):
+                parse_url_classes(text)
+        with self.assertRaises(UrlClassError):
+            parse_url_classes(
+                b"classes: [{id: a, label_ko: A, sources: [https://x], domains: [a.com]},"
+                b" {id: b, label_ko: B, sources: [https://x], domains: [a.com]}]"
+            )
+
+
+class EngineTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.base = Path(self.temp.name)
+
+    def write_kind(self, kind: str, rows: list[dict[str, object]], *, record_count: int | None = None) -> Path:
+        records = self.base / f"{kind}.jsonl"
+        records.write_text("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows), encoding="utf-8")
+        types: dict[str, int] = {}
+        for row in rows:
+            types[str(row["artifact_type"])] = types.get(str(row["artifact_type"]), 0) + 1
+        payload = {
+            "records_path": str(records),
+            "record_count": len(rows) if record_count is None else record_count,
+            "artifacts": [],
+            "summary": {"artifact_type_counts": types},
+        }
+        path = self.base / f"artifacts_{kind}.json"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        return path
+
+    def inputs(self, **kinds: Path) -> TriageInputs:
+        files = self.base / "files.json"
+        files.write_text(
+            json.dumps({"candidates": [{"path": "C:/Users/Alice/Desktop/Plan.docx", "name": "Plan.docx"}], "inventory": []}),
+            encoding="utf-8",
+        )
+        return TriageInputs(output_dir=self.base, artifact_payloads={name.replace("_", "-"): path for name, path in kinds.items()}, files_path=files)
+
+    def table(self, out: Path, name: str) -> list[dict[str, object]]:
+        return [json.loads(line) for line in (out / f"{name}.jsonl").read_text(encoding="utf-8").splitlines()]
+
+    def test_tables_samples_and_first_last_seen(self) -> None:
+        eventlog = self.write_kind(
+            "eventlog",
+            [
+                *[event("4624", target_user_name="Alice", source_ip="10.0.0.5", timestamp=f"2024-05-0{day}T10:00:00Z") for day in (1, 2, 3)],
+                *[event("4672", subject_user_name="ALICE") for _ in range(30)],
+                event("4688", process_name="C:\\Windows\\System32\\cmd.exe"),
+            ],
+        )
+        accounts = self.write_kind(
+            "windows_os_account",
+            [{"artifact_type": "windows-sam-account", "details": {"user_name": "alice", "last_logon_at": "2023-01-01T00:00:00Z"}}],
+        )
+        browser = self.write_kind(
+            "browser",
+            [
+                {"artifact_type": "browser-visit", "details": {"url": "https://www.google.com/search?q=x", "timestamp": "2024-01-01T00:00:00Z"}},
+                {"artifact_type": "browser-visit", "details": {"url": "https://WWW.google.com:443/maps"}},
+            ],
+        )
+        out = self.base / "out"
+        summary = run_derived(self.inputs(eventlog=eventlog, windows_os_account=accounts, browser=browser), out, source_label="test")
+        self.assertEqual(summary["status"], "completed")
+        self.assertEqual({path.name for path in out.iterdir()}, {*(f"{table}.jsonl" for table in TABLES), "summary.json"})
+        people = self.table(out, "people")
+        alice = people[0]
+        self.assertEqual((alice["normalized"], alice["count"]), ("alice", 34))
+        self.assertEqual(alice["kinds"], {"eventlog": 33, "windows-os-account": 1})
+        self.assertEqual(alice["families"], {"eventlog-event": 33, "sam-account": 1})
+        self.assertEqual(alice["first_seen"], "2023-01-01T00:00:00+00:00")
+        self.assertEqual(alice["last_seen"], "2024-05-03T10:00:00+00:00")
+        self.assertEqual(len(alice["samples"]), 20)
+        # Round-robin over kinds: the single SAM row is among the samples.
+        self.assertIn("windows-os-account", {sample["kind"] for sample in alice["samples"]})
+        self.assertEqual(self.table(out, "devices")[0]["normalized"], "10.0.0.5")
+        paths = {row["normalized"]: row for row in self.table(out, "paths")}
+        self.assertIn("c:\\windows\\system32\\cmd.exe", paths)
+        self.assertEqual(paths["c:\\users\\alice\\desktop\\plan.docx"]["kinds"], {"files:candidates": 1})
+        urls = self.table(out, "urls")
+        self.assertEqual((urls[0]["normalized"], urls[0]["count"], urls[0]["url_class"]), ("www.google.com", 2, "search"))
+        self.assertEqual(len(urls[0]["examples"]), 2)
+        self.assertEqual(summary["tables"]["people"]["rows"], len(people))
+
+    def test_credentials_are_never_stored_in_clear(self) -> None:
+        kakao = self.write_kind(
+            "kakaotalk_windows",
+            [{"artifact_type": "kakaotalk-windows-crypto-material-candidate", "details": {"candidate_value": SECRET}}],
+        )
+        browser = self.write_kind(
+            "browser",
+            [
+                {
+                    "artifact_type": "browser-autofill",
+                    "details": {"value_preview": "[마스킹됨]", "mask_reason": "secret-field-name", "value_sha256": "b" * 64, "value_length": 9},
+                },
+                {"artifact_type": "browser-autofill", "details": {"value_preview": "[마스킹됨]", "mask_reason": "personal-field-name", "value_sha256": "c" * 64}},
+            ],
+        )
+        out = self.base / "out"
+        run_derived(self.inputs(kakaotalk_windows=kakao, browser=browser), out, source_label="test")
+        for path in out.iterdir():
+            self.assertNotIn(SECRET, path.read_text(encoding="utf-8"), path.name)
+            self.assertNotIn(SECRET[2:-1], path.read_text(encoding="utf-8"), path.name)
+        rows = {row["normalized"]: row for row in self.table(out, "credentials")}
+        self.assertEqual(set(rows), {f"sha256:{'b' * 64}", f"sha256:{credential_record(SECRET)['sha256']}"})
+        own = rows[f"sha256:{'b' * 64}"]
+        self.assertEqual((own["length"], own["value"]), (9, "•" * len("[마스킹됨]")))
+        token = rows[f"sha256:{credential_record(SECRET)['sha256']}"]
+        self.assertEqual(token["length"], len(SECRET))
+        self.assertNotEqual(token["value"], SECRET)
+
+    def test_value_cap_and_memory_cap(self) -> None:
+        eventlog = self.write_kind("eventlog", [event("4624", target_user_name=f"user{index}") for index in range(5)] + [event("4624", target_user_name="user0")])
+        out = self.base / "out"
+        summary = run_derived(self.inputs(eventlog=eventlog), out, source_label="test", max_values=2)
+        table = summary["tables"]["people"]
+        self.assertEqual((table["rows"], table["capped"], table["cap_reason"], table["dropped_values"]), (2, True, "values", 3))
+        # Known values still count after the cap.
+        self.assertEqual(self.table(out, "people")[0]["count"], 2)
+        summary = run_derived(self.inputs(eventlog=eventlog), self.base / "out2", source_label="test", memory_cap=1)
+        self.assertEqual((summary["tables"]["people"]["rows"], summary["tables"]["people"]["cap_reason"]), (1, "memory"))
+
+    def test_partial_when_a_source_ends_early(self) -> None:
+        eventlog = self.write_kind("eventlog", [event("4624", target_user_name="bob")], record_count=3)
+        summary = run_derived(self.inputs(eventlog=eventlog), self.base / "out", source_label="test")
+        self.assertEqual(summary["status"], "partial")
+        self.assertEqual(summary["coverage"]["incomplete"], ["eventlog"])
+        missing = self.base / "missing.json"
+        summary = run_derived(TriageInputs(output_dir=self.base, artifact_payloads={"browser": missing}), self.base / "out3", source_label="t")
+        self.assertEqual(summary["status"], "partial")
+        self.assertIn("source:browser", summary["errors"])
+
+    def test_list_values_and_recipient_lists(self) -> None:
+        email = self.write_kind(
+            "email",
+            [
+                {
+                    "artifact_type": "email-message",
+                    "details": {
+                        "from": "Kim <KIM@corp.example>",
+                        "to": "a@x.example, B@y.example",
+                        "attachments": [{"filename": "Q3.xlsx"}, {"name": "photo.jpg"}],
+                    },
+                }
+            ],
+        )
+        out = self.base / "out"
+        run_derived(self.inputs(email=email), out, source_label="test")
+        people = {row["normalized"]: row["semantic"] for row in self.table(out, "people")}
+        self.assertEqual(people, {"kim@corp.example": "person_sender", "a@x.example": "person_recipient", "b@y.example": "person_recipient"})
+        self.assertEqual({row["normalized"] for row in self.table(out, "attachments")}, {"q3.xlsx", "photo.jpg"})
+
+
+class StageTests(unittest.TestCase):
+    def test_stage_writes_a_derived_analysis_and_isolates_failures(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            run_dir = Path(temp)
+            step = run_derived_stage(run_dir, artifact_outputs={})
+            self.assertEqual(step["status"], "completed", step)
+            directory = run_dir / "analyses" / str(step["analysis_id"])
+            state = json.loads((directory / "analysis.json").read_text(encoding="utf-8"))
+            self.assertEqual((state["kind"], state["status"], state["options"]), (DERIVED_ANALYSIS_KIND, "completed", {"source": "run-stage"}))
+            self.assertTrue((directory / "people.jsonl").is_file())
+            second = run_derived_stage(run_dir, artifact_outputs={})
+            self.assertFalse(directory.exists())  # older run-stage generation removed
+            with patch.object(derived_engine, "load_url_classes", side_effect=RuntimeError("boom")):
+                failed = run_derived_stage(run_dir, artifact_outputs={})
+            self.assertEqual(failed["status"], "failed_isolated")
+            self.assertIn("통합 보기 단계 실패", failed["warning_messages"][0])
+            self.assertFalse((run_dir / "analyses" / str(failed["analysis_id"]) / "analysis.json").exists())
+            self.assertTrue((run_dir / "analyses" / str(second["analysis_id"]) / "analysis.json").exists())
+
+
+if __name__ == "__main__":
+    unittest.main()
