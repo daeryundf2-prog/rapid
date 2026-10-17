@@ -99,6 +99,13 @@
         "artifact_count": 0
       },
       {
+        "name": "cloud-sync-clients",
+        "description": "Desktop cloud sync clients (OneDrive, Dropbox, Google Drive, Naver MYBOX, iCloud): accounts, synced items, upload/delete events",
+        "target_platform": "windows",
+        "supported": true,
+        "artifact_count": 0
+      },
+      {
         "name": "email-artifacts",
         "description": "Email EML/MBOX parsing and PST/OST/MSG bounded mailbox inventory",
         "target_platform": "any",
