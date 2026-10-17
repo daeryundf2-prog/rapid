@@ -240,6 +240,25 @@ class EngineTests(unittest.TestCase):
         # The previous generation stays joinable.
         self.assertTrue((self.root / "analyses" / str(first["analysis_id"]) / "analysis.json").is_file())
 
+    def test_run_stage_without_pyyaml_is_isolated_and_cli_imports_stay_clean(self) -> None:
+        # The Rust worker CI job runs the CLI with no pip install: importing
+        # rapidtriage must not need PyYAML, and a missing module must only
+        # isolate the triage step (Korean warning), never fail the run.
+        import sys
+
+        inputs = tiny_run(self.root)
+        with patch.dict(sys.modules, {"yaml": None}):
+            import rapidtriage.core.run  # noqa: F401  (import must succeed without yaml)
+            from rapidtriage.core.triage_rules.catalog import CatalogError, load_catalog
+
+            with self.assertRaises(CatalogError) as caught:
+                load_catalog()
+            self.assertIn("PyYAML", str(caught.exception))
+            with self.assertLogs("rapidtriage.core.triage_rules.stage", "ERROR"):
+                step = run_triage_stage(self.root, artifact_outputs=inputs.artifact_payloads)
+        self.assertEqual(step["status"], "failed_isolated")
+        self.assertIn("특이사항 단계 실패", step["warning_messages"][0])
+
     def test_run_stage_writes_a_new_generation_while_the_old_one_is_open(self) -> None:
         inputs = tiny_run(self.root)
         first = run_triage_stage(self.root, artifact_outputs=inputs.artifact_payloads)

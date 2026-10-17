@@ -28,8 +28,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 from .base import GRADES
 
 CATALOG_DIR = Path(__file__).with_name("catalog")
@@ -41,6 +39,16 @@ COLUMN_KEYS = frozenset({"key", "label", "format", "ts_kind", "width", "aliases"
 
 class CatalogError(ValueError):
     """The catalogue YAML is malformed (Korean message)."""
+
+def _yaml():
+    """Import PyYAML lazily so importing rapidtriage (CLI, run pipeline) never
+    needs it; only loading the catalog does. A missing module becomes a
+    CatalogError in Korean instead of an import-time crash."""
+    try:
+        import yaml
+    except ModuleNotFoundError as exc:  # pragma: no cover - environment dependent
+        raise CatalogError("특이사항 카탈로그를 읽으려면 PyYAML이 필요합니다 (pip install pyyaml)") from exc
+    return yaml
 
 
 @dataclass(frozen=True)
@@ -154,8 +162,8 @@ def parse_catalog(files: list[tuple[str, bytes]]) -> Catalog:
         digest.update(name.encode("utf-8") + b"\0" + data + b"\0")
         file_hashes[name] = hashlib.sha256(data).hexdigest()
         try:
-            document = yaml.safe_load(data.decode("utf-8")) or {}
-        except (yaml.YAMLError, UnicodeDecodeError) as exc:
+            document = _yaml().safe_load(data.decode("utf-8")) or {}
+        except (_yaml().YAMLError, UnicodeDecodeError) as exc:
             raise _fail(name, f"YAML을 읽을 수 없습니다: {exc}") from exc
         if not isinstance(document, Mapping) or set(document) - {"families", "rules"}:
             raise _fail(name, "최상위는 families/rules 두 키만 가질 수 있습니다")
