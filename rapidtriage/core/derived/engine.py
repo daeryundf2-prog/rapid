@@ -32,7 +32,7 @@ value, sorted by count (desc) then value::
      families: {family: n}, first_seen, last_seen,
      samples: [{kind, record_index, field, family, artifact_type, time}] (≤ 20)}
 
-plus ``url_class`` / ``url_class_label`` / ``examples`` (≤ 3 URLs) for ``urls`` and
+plus ``url_class`` / ``url_class_label`` / ``examples`` (≤ 3 URLs without query or fragment) for ``urls`` and
 ``length`` / ``sha256`` for ``credentials``. **A credential's clear value is never
 written**: ``value`` is the masked form, ``normalized`` is ``sha256:<hex>``.
 ``kind`` = artifact kind, ``files:candidates`` / ``files:inventory`` or
@@ -322,7 +322,8 @@ class DerivedCollector:
             self.estimated_bytes += SAMPLE_BYTES
         if table == "urls" and isinstance(raw, str) and "://" in raw:
             examples = entry.examples if entry.examples is not None else []
-            clipped = raw.strip()[:URL_EXAMPLE_CHARS]
+            # Query strings and fragments can carry tokens / session ids: examples keep scheme, host and path.
+            clipped = raw.strip().split("#", 1)[0].split("?", 1)[0][:URL_EXAMPLE_CHARS]
             if len(examples) < MAX_URL_EXAMPLES and clipped not in examples:
                 examples.append(clipped)
                 entry.examples = examples

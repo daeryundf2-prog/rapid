@@ -255,7 +255,7 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(paths["c:\\users\\alice\\desktop\\plan.docx"]["kinds"], {"files:candidates": 1})
         urls = self.table(out, "urls")
         self.assertEqual((urls[0]["normalized"], urls[0]["count"], urls[0]["url_class"]), ("www.google.com", 2, "search"))
-        self.assertEqual(len(urls[0]["examples"]), 2)
+        self.assertEqual(urls[0]["examples"], ["https://www.google.com/search", "https://WWW.google.com:443/maps"])  # no query strings
         self.assertEqual(summary["tables"]["people"]["rows"], len(people))
 
     def test_credentials_are_never_stored_in_clear(self) -> None:
