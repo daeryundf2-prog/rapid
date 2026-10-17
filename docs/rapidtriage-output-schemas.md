@@ -716,6 +716,12 @@ The `manifest-windows-artifacts.json` sample also fixes the current artifact row
   - `rdp-config`
   - `rdp-cache-file`
   - `rdp-destination`
+- `windows-messenger`
+  - `chat-message`
+  - `chat-attachment`
+  - `chat-contact`
+  - `chat-app-inventory`
+  - `chat-parse-error`
 - `windows-eventlog`
   - `eventlog-event`
   - `eventlog-detection`
