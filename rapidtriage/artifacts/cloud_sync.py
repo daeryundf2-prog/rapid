@@ -89,7 +89,7 @@ MAX_HASH_BYTES = 256 * MIB
 MAX_LOG_FILES = 400  # per run
 MAX_LOG_FILE_BYTES = 64 * MIB  # on disk
 MAX_LOG_INFLATED_BYTES = 128 * MIB  # after gzip
-MAX_LOG_TOTAL_BYTES = 1024 * MIB  # all logs of a run, after gzip
+MAX_LOG_TOTAL_BYTES = 512 * MIB  # all logs of a run, after gzip
 MAX_LOG_RECORD_BYTES = 64 * 1024
 MAX_LOG_EVENTS_PER_FILE = 5_000
 MAX_LOG_STRINGS_PER_RECORD = 32
@@ -124,6 +124,9 @@ ASCII_RUN_RE = re.compile(rb"[\x20-\x7e]{3,1024}")
 UTF16_RUN_RE = re.compile(rb"(?:[\x20-\x7e]\x00|[\x00-\xff][\xac-\xd7]){4,512}")
 LOG_KEYWORD_RE = re.compile(rb"(?i)upload|download|hydrat|delete|recycle|rename|move|shar(?:e|ing)")
 SOURCE_SUFFIX_EXCLUDED = ("-wal", "-shm", "-journal")
+SOURCE_CODE_SUFFIXES = (".cpp", ".c", ".h", ".hpp", ".cxx")
+# A bare drive (the DriveFS virtual drive G:\) is a mount point, not a sync folder.
+BARE_DRIVE_RE = re.compile(r"^[A-Za-z]:\\?$")
 
 # Operation keywords, checked in this order (a "DeleteUploadedFile" function is a delete;
 # "SharedFolder" is not a share).
@@ -140,7 +143,7 @@ EXECUTABLE_TRACES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("dropbox", ("DROPBOX.EXE-",)),
     ("google-drive", ("GOOGLEDRIVEFS.EXE-", "GOOGLEDRIVESYNC.EXE-")),
     ("icloud", ("ICLOUDDRIVE.EXE-", "ICLOUDSERVICES.EXE-", "ICLOUDHOME.EXE-", "ICLOUD.EXE-")),
-    ("naver-mybox", ("NAVERMYBOX", "MYBOX", "NDRIVE")),
+    ("naver-mybox", ("NAVERMYBOX", "MYBOX", "NDRIVE", "NAVERNDRIVE")),
 )
 PATH_PREFILTER_TERMS = ("onedrive", "dropbox", "drivefs", "google", "mybox", "ndrive", "icloud", "apple", "prefetch")
 NAVER_CLIENT_SEGMENTS = ("mybox", "naver mybox", "navermybox", "ndrive", "naver ndrive", "naverndrive")
@@ -222,18 +225,25 @@ def _index_of(parts: Sequence[str], name: str, previous: Sequence[str] | None = 
     return -1
 
 
-def relative_parts(path: Path, root: Path | None) -> tuple[Path, list[str]]:
-    """``(prefix, parts below it)``: segments are matched below the evidence root only, so the
-    location of an evidence copy (``C:\\Users\\examiner\\AppData\\Local\\Temp\\case``) never
-    looks like a user profile or an ``AppData`` folder."""
+def profile_for(path: Path, root: Path | None) -> str:
+    r"""The evidence user of ``path``: the ``Users\<name>`` segment below the evidence root, else the
+    last one of the full path (a root that is itself a profile or ``AppData`` folder). The location of
+    an evidence copy (``C:\Users\<examiner>\AppData\Local\Temp\case``) is never the profile when the
+    copy holds its own ``Users`` folder."""
     if root is not None:
         try:
-            relative = path.relative_to(root)
+            relative = list(path.relative_to(root).parts)
         except ValueError:
-            relative = None
-        if relative is not None and relative.parts:
-            return root, list(relative.parts)
-    return Path(), list(path.parts)
+            relative = []
+        found = user_profile_of([part.lower() for part in relative], relative)
+        if found:
+            return found
+    original = list(path.parts)
+    parts = [part.lower() for part in original]
+    for index in range(len(parts) - 2, -1, -1):
+        if parts[index] in ("users", "documents and settings"):
+            return original[index + 1]
+    return ""
 
 
 def classify_client_path(path: Path, root: Path | None = None) -> tuple[str, str, str, str] | None:
@@ -243,14 +253,15 @@ def classify_client_path(path: Path, root: Path | None = None) -> tuple[str, str
     ``keystore``, ``info-json``, ``host-db``, ``dbx``, ``content-cache``, ``sync-root``,
     ``other``.
     """
-    prefix, original = relative_parts(path, root)
+    prefix = Path()
+    original = list(path.parts)
     parts = [part.lower() for part in original]
     if not parts:
         return None
     name = parts[-1]
     if any(part in BROWSER_SEGMENTS for part in parts):
         return None
-    profile = user_profile_of(parts, original)
+    profile = profile_for(path, root)
     # --- OneDrive ---------------------------------------------------------------
     index = _index_of(parts, "onedrive", ("microsoft",))
     if index > 0 and "appdata" in parts[:index]:
@@ -353,10 +364,7 @@ def executable_trace_client(path: Path) -> str | None:
         return None
     upper = path.name.upper()
     for client, prefixes in EXECUTABLE_TRACES:
-        if client == "naver-mybox":
-            if any(term in upper.split("-")[0] for term in prefixes) and upper.split("-")[0].endswith(".EXE"):
-                return client
-        elif upper.startswith(prefixes):
+        if upper.startswith(prefixes) and ".EXE-" in upper:
             return client
     return None
 
@@ -608,34 +616,33 @@ class CloudSyncCollector:
 
     # -- walk --
     def discover(self) -> None:
-        root_length = len(str(self.root))
         for path in iter_evidence_paths(self.root, "*"):
-            lowered = str(path)[root_length:].lower()
+            lowered = str(path).lower()
             if not any(term in lowered for term in PATH_PREFILTER_TERMS):
+                continue
+            trace = executable_trace_client(path)
+            classified = None if trace is not None else classify_client_path(path, self.root)
+            if trace is None and classified is None:
                 continue
             try:
                 if not path.is_file():
                     continue
             except OSError:
                 continue
-            trace = executable_trace_client(path)
             if trace is not None:
                 self.traces.setdefault(trace, []).append(str(path))
                 continue
-            classified = classify_client_path(path, self.root)
-            if classified is None:
-                continue
+            assert classified is not None
             client, key, instance_root, role = classified
             instance = self.instances.get(key)
             if instance is not None and "settings" in _parts(Path(instance_root)) and "settings" not in _parts(Path(instance.root)):
                 instance.root = instance_root  # an account's settings folder names it, not its logs folder
             if instance is None:
-                _prefix, relative = relative_parts(path, self.root)
                 instance = ClientInstance(
                     client=client,
                     key=key,
                     root=instance_root,
-                    user_profile=user_profile_of([part.lower() for part in relative], relative),
+                    user_profile=profile_for(path, self.root),
                     account_folder=key.rsplit("|", 1)[-1] if client in ("onedrive", "google-drive") else "",
                 )
                 self.instances[key] = instance
@@ -743,9 +750,8 @@ class CloudSyncCollector:
         for root in values.get("sync_roots") or []:
             if root not in instance.sync_roots:
                 instance.sync_roots.append(str(root))
-        instance.bump("accounts")
         roots = [str(item) for item in values.get("sync_roots") or []]
-        return self.record(
+        row = self.record(
             instance,
             source,
             artifact_type="cloud-sync-account",
@@ -756,6 +762,9 @@ class CloudSyncCollector:
             sync_root=roots[0] if roots else None,
             **values,
         )
+        if row is not None:
+            instance.bump("accounts")
+        return row
 
     # -- OneDrive --
     def onedrive(self, instance: ClientInstance) -> Iterator[ArtifactRecord]:
@@ -784,6 +793,7 @@ class CloudSyncCollector:
         ini_files = [path for path, role in instance.files if role == "ini"]
         folder = instance.account_folder
         emails: list[str] = []
+        preferred = 0
         roots: list[str] = []
         cid = tenant = tenant_name = site_url = ""
         source: Path | None = None
@@ -817,7 +827,13 @@ class CloudSyncCollector:
                     site_url = value.strip('"')
                 for email in EMAIL_RE.findall(line):
                     if email.lower() not in (item.lower() for item in emails):
-                        emails.append(email)
+                        # An e-mail under an e-mail / UPN key names the account; others (support
+                        # addresses in policy files) only follow it.
+                        if any(term in key_lower for term in ("email", "upn", "username")):
+                            emails.insert(preferred, email)
+                            preferred += 1
+                        else:
+                            emails.append(email)
             if not tenant:
                 guid = GUID_RE.search(path.stem)
                 if guid and folder.startswith("business"):
@@ -829,7 +845,7 @@ class CloudSyncCollector:
             "locator": locator or (f"{anchor.name}" if ini_files else "settings folder"),
             "recovery_method": "config-file" if ini_files else "path-signature",
             "source_format": "onedrive-settings-ini" if ini_files else "onedrive-settings-folder",
-            "account": emails[0] if emails else (cid or instance.account_folder),
+            "account": emails[0] if emails else (cid or None),
             "account_email": emails[0] if emails else None,
             "account_emails": emails[1:6] or None,
             "account_id": cid or None,
@@ -1756,7 +1772,7 @@ def parse_odl_record(record: bytes, mapping: Mapping[str, str]) -> tuple[str, st
     code_file = ""
     function = ""
     for index, value in enumerate(strings):
-        if value.lower().endswith((".cpp", ".c", ".h", ".hpp", ".cxx")):
+        if value.lower().endswith(SOURCE_CODE_SUFFIXES):
             code_file = value
             function = strings[index + 1] if index + 1 < len(strings) else ""
             params = strings[index + 2 :]
@@ -1776,11 +1792,11 @@ def parse_odl_record(record: bytes, mapping: Mapping[str, str]) -> tuple[str, st
     item: str | None = None
     for value in candidates:
         path_match = WINDOWS_PATH_RE.search(value)
-        if path_match:
+        if path_match and not path_match.group(0).lower().endswith(SOURCE_CODE_SUFFIXES):
             item = path_match.group(0).strip()
             break
     if item is None:
-        item = next((value for value in candidates if FILE_NAME_RE.match(value.strip()) and not value.lower().endswith((".cpp", ".h", ".c"))), None)
+        item = next((value for value in candidates if FILE_NAME_RE.match(value.strip()) and not value.lower().endswith(SOURCE_CODE_SUFFIXES)), None)
     shown = [deobfuscate(value, mapping) for value in strings][:MAX_LOG_STRINGS_PER_RECORD]
     return operation, basis, function, code_file, shown, item
 
@@ -1832,7 +1848,7 @@ def google_account_hints(connection: sqlite3.Connection, tables: Mapping[str, Se
                     emails.extend(email for email in EMAIL_RE.findall(text) if email not in emails)
                 if ("root" in key_text or "path" in key_text) and re.match(r"^(?:[A-Za-z]:\\|\\\\\?\\|/)", text):
                     cleaned = text.removeprefix("\\\\?\\")
-                    if cleaned not in roots:
+                    if cleaned not in roots and not BARE_DRIVE_RE.match(cleaned):
                         roots.append(cleaned)
         if lowered == "roots":
             path_cols = [column for column in columns if "path" in column.lower()]
@@ -1848,6 +1864,6 @@ def google_account_hints(connection: sqlite3.Connection, tables: Mapping[str, Se
                             emails.extend(email for email in EMAIL_RE.findall(text) if email not in emails)
                         elif re.match(r"^(?:[A-Za-z]:\\|\\\\\?\\|/)", text):
                             cleaned = text.removeprefix("\\\\?\\")
-                            if cleaned not in roots:
+                            if cleaned not in roots and not BARE_DRIVE_RE.match(cleaned):
                                 roots.append(cleaned)
     return emails[:10], roots[:10]

@@ -117,6 +117,27 @@ class CloudSyncOneDriveTests(unittest.TestCase):
         self.assertTrue(any(".dat" in reason for reason in details["inventory_reasons"]))
         self.assertTrue(any("ObfuscationStringMap" in reason for reason in details["inventory_reasons"]))
 
+    def test_business_account_prefers_the_user_email_and_reads_the_tenant(self) -> None:
+        from tests.cloud_sync_fixtures import utf16_text
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            business = appdata_local(root) / "Microsoft" / "OneDrive" / "settings" / "Business1"
+            utf16_text(
+                business / "ClientPolicy_0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0.ini",
+                "SupportUrl = mailto:help@contoso.example\r\nTenantName = Contoso\r\n",
+            )
+            utf16_text(business / "global.ini", "UserEmail = bob@contoso.example\r\n")
+            utf16_text(business / "b1.ini", 'libraryScope = 1 0 "C:\\Users\\bob\\OneDrive - Contoso" 4\r\n')
+            rows, _provider = collect(root)
+        account = of(rows, "cloud-sync-account", "onedrive")[0].details
+        self.assertEqual(account["account"], "bob@contoso.example")
+        self.assertEqual(account["account_emails"], ["help@contoso.example"])
+        self.assertEqual(account["account_type"], "business")
+        self.assertEqual(account["tenant"], "Contoso")
+        self.assertEqual(account["tenant_id"], "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0")
+        self.assertEqual(account["sync_roots"], ["C:\\Users\\bob\\OneDrive - Contoso"])
+
     def test_keystore_is_disclosed_not_decrypted(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -265,6 +286,32 @@ class CloudSyncOtherClientTests(unittest.TestCase):
         self.assertEqual(account["path_basis"], "evidence-root-relative")
         inventory = of(rows, "cloud-sync-inventory", "icloud")[0].details
         self.assertEqual(inventory["sqlite_databases"][0]["tables"][0]["table"], "zones")
+
+    def test_a_root_inside_the_profile_still_finds_the_client(self) -> None:
+        # The examiner points the run at the user's AppData\Local copy (no Users segment below the root).
+        with tempfile.TemporaryDirectory() as tmp:
+            build_onedrive(Path(tmp), user="carol")
+            local = appdata_local(Path(tmp), "carol")
+            rows, _provider = collect(local)
+        account = of(rows, "cloud-sync-account", "onedrive")[0].details
+        self.assertEqual(account["account"], "alice@example.com")
+        self.assertEqual(account["user_profile"], "carol")
+
+    def test_drivefs_virtual_drive_is_not_a_sync_root(self) -> None:
+        from tests.cloud_sync_fixtures import sqlite_db
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            paths = build_drivefs(root)
+            paths["root_preference"].unlink()
+            sqlite_db(
+                paths["root_preference"],
+                ["CREATE TABLE roots (media_id TEXT, root_path TEXT, account_token TEXT)"],
+                [("INSERT INTO roots VALUES (?, ?, ?)", ("m1", "G:\\", "alice.drive@example.com"))],
+            )
+            rows, _provider = collect(root)
+        roots = [root for row in of(rows, "cloud-sync-account", "google-drive") for root in row.details.get("sync_roots") or []]
+        self.assertEqual(roots, [])
 
     def test_examiner_temp_paths_never_look_like_a_profile(self) -> None:
         # The evidence copy lives under C:\Users\<examiner>\AppData\Local\Temp: the profile is the evidence user.
