@@ -64,6 +64,7 @@ const KIND_LABELS: Record<string, string> = {
   browser: "브라우저",
   email: "이메일",
   "kakaotalk-windows": "카카오톡 (Windows)",
+  "windows-messenger": "데스크톱 메신저 (Windows)",
   "kakaotalk-macos": "카카오톡 (macOS)",
   "mobile-export": "모바일 내보내기",
   "cloud-export": "클라우드 내보내기",
