@@ -1012,6 +1012,7 @@ export function DataGrid(props: DataGridProps = {}) {
     openTagPrompt: () => setTagPromptOpen(true),
     runIsActive: false,
     getExportColumns: () => specs,
+    getSelectedCount: () => selectedKeys.size,
   };
   useGridCommands(host);
 

@@ -96,7 +96,13 @@ describe("help rows", () => {
     registerCommand({ id: "h", label: "도움말", group: "app", shortcut: "?", run: vi.fn() });
     const rows = keyBindingRows();
     expect(rows).toHaveLength(Object.keys(KEY_MAP).length);
-    expect(rows.find((r) => r.name === "priority1to5")?.commands.map((c) => c.id)).toEqual(["p1"]);
+    expect(rows.find((r) => r.name === "tagShortcuts")?.commands.map((c) => c.id)).toEqual(["p1"]);
+    // One digit row for the main window (tag keys 1–9); the old 우선순위 1–5 row is gone.
+    expect(rows.map((r) => r.name)).not.toContain("priority1to5");
+    expect(rows.filter((r) => /^\d-\d$/.test(r.shortcut)).map((r) => r.name)).toEqual([
+      "viewerModes",
+      "tagShortcuts",
+    ]);
     expect(rows.find((r) => r.name === "help")?.commands.map((c) => c.id)).toEqual(["h"]);
     expect(rows.find((r) => r.name === "rowDown")?.commands).toEqual([]);
   });

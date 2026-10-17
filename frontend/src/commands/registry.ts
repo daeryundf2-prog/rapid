@@ -144,6 +144,17 @@ export function registerCommands(list: readonly Command[]): () => void {
   };
 }
 
+/**
+ * Change a registered command's label (palette text) in place, e.g. a digit tag key once the
+ * case's tags load ("태그 단축키 7 (DLP 유출 후보)"). Unknown ids are ignored.
+ */
+export function relabelCommand(id: string, label: string): void {
+  const command = commands.get(id);
+  if (!command || command.label === label) return;
+  command.label = label;
+  emit();
+}
+
 export function getCommand(id: string): Command | undefined {
   return commands.get(id);
 }

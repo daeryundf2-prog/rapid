@@ -9,6 +9,7 @@
 
 import type { QueryClient } from "@tanstack/react-query";
 import { announce } from "../a11y";
+import type { CaseTag } from "../api/reviewTools";
 import { type Command, KEY_MAP } from "../contracts/command";
 import type { MarkAction, ViewerTarget } from "../contracts/viewer";
 import { applyReviewAction, type BatchAction, storeNotice } from "../features/grid/reviewActions";
@@ -18,9 +19,11 @@ import {
   tagKeyReason,
   toggleCaseTagOnContextRow,
 } from "../features/review/tagKeys";
+import { useCaseTagStore } from "../features/review/tagStore";
 import { markDisabledReason, targetAsGridRow } from "../features/viewer/citation";
 import { useAppStore } from "../state/store";
 import { NO_RUN_REASON } from "./reasons";
+import { relabelCommand } from "./registry";
 
 export const NO_ROW_REASON = "표시할 행이 없습니다. 그리드에서 행을 선택하세요";
 export const PRIORITY_LEVELS = [1, 2, 3, 4, 5] as const;
@@ -67,6 +70,42 @@ export async function applyToContextRow(
   });
 }
 
+/** Command id of digit `level`'s tag key (review.priority.1–5 kept for 1–5). */
+export function tagKeyCommandId(level: number): string {
+  return level <= PRIORITY_LEVELS.length ? `review.priority.${level}` : `review.tagKey.${level}`;
+}
+
+/**
+ * Palette label of a digit tag key: the bound tag's name once the case's tags are loaded, else the
+ * default (1–5: 우선순위 n), so "우선순위" and every tag name stay searchable in the palette.
+ */
+export function tagKeyLabel(level: number, tags?: readonly CaseTag[] | null): string {
+  const bound = tags?.find((tag) => tag.shortcut === level);
+  if (bound) return `태그 단축키 ${level} (${bound.name})`;
+  if (tags && tags.length > 0) return `태그 단축키 ${level} (지정 안 됨)`;
+  return level <= PRIORITY_LEVELS.length
+    ? `태그 단축키 ${level} (기본: ${priorityTag(level)})`
+    : `태그 단축키 ${level}`;
+}
+
+function loadedTags(): CaseTag[] | null {
+  const state = useCaseTagStore.getState();
+  return state.status === "ready" && state.exists ? state.tags : null;
+}
+
+/** Relabel the digit commands from the loaded tags (on every tag store change, below). */
+export function relabelTagKeys(): void {
+  const tags = loadedTags();
+  for (const level of TAG_KEY_DIGITS) relabelCommand(tagKeyCommandId(level), tagKeyLabel(level, tags));
+}
+
+if (typeof window !== "undefined") {
+  useCaseTagStore.subscribe((state, prev) => {
+    if (state.tags !== prev.tags || state.status !== prev.status || state.exists !== prev.exists)
+      relabelTagKeys();
+  });
+}
+
 export function reviewCommands(queryClient: QueryClient | null): Command[] {
   const marks = MARKS.map(
     ({ action, label, shortcut }): Command => ({
@@ -83,7 +122,7 @@ export function reviewCommands(queryClient: QueryClient | null): Command[] {
   // Ids review.priority.1–5 are kept; 6–9 are review.tagKey.n.
   const tagKey = (level: number, id: string): Command => ({
     id,
-    label: `태그 단축키 ${level}`,
+    label: tagKeyLabel(level, loadedTags()),
     group: "review",
     shortcut: String(level),
     icon: "tag",
@@ -96,9 +135,9 @@ export function reviewCommands(queryClient: QueryClient | null): Command[] {
       else await applyToContextRow(queryClient, "tag", `태그 '${resolved.name}'`, resolved.name);
     },
   });
-  const priorities = PRIORITY_LEVELS.map((level) => tagKey(level, `review.priority.${level}`));
+  const priorities = PRIORITY_LEVELS.map((level) => tagKey(level, tagKeyCommandId(level)));
   const extraKeys = TAG_KEY_DIGITS.filter((level) => level > PRIORITY_LEVELS.length).map((level) =>
-    tagKey(level, `review.tagKey.${level}`),
+    tagKey(level, tagKeyCommandId(level)),
   );
   return [...marks, ...priorities, ...extraKeys];
 }

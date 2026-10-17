@@ -8,7 +8,7 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
-import { announce } from "../../a11y";
+import { announce, useRovingTabindex } from "../../a11y";
 import { getReviewCounts } from "../../api/caseDb";
 import {
   createHistogramBaseline,
@@ -16,7 +16,7 @@ import {
   type HistogramBar,
   listHistogramBaselines,
 } from "../../api/reviewTools";
-import { useTimezone } from "../../state/hooks";
+import { useRoute, useTimezone } from "../../state/hooks";
 import { readStored, writeStored } from "../../state/storage";
 import { formatTimestamp } from "../../utils/time";
 import { ErrorText } from "../case/ErrorText";
@@ -44,8 +44,38 @@ export function sortCompareBars(bars: readonly HistogramBar[]): HistogramBar[] {
   );
 }
 
-export function CompareBars({ bars, baselineName }: { bars: readonly HistogramBar[]; baselineName: string }) {
+const COLLECTION_KEYS = new Set(["files", "docs", "timeline", "indicators"]);
+
+/** What clicking a compare bar opens (the same as the plain bars: the kind node / the collection). */
+export function compareBarTarget(
+  key: string,
+):
+  | { collection: "artifacts"; kind: string }
+  | { collection: "files" | "docs" | "timeline" | "indicators" }
+  | null {
+  const [group, id = ""] = key.split(/:(.*)/s);
+  if (group === "kind" && id) return { collection: "artifacts", kind: id };
+  if (group === "collection" && COLLECTION_KEYS.has(id))
+    return { collection: id as "files" | "docs" | "timeline" | "indicators" };
+  return null;
+}
+
+export function CompareBars({
+  bars,
+  baselineName,
+  onOpen,
+}: {
+  bars: readonly HistogramBar[];
+  baselineName: string;
+  /** Click / Enter on a category (Q-A3 click-to-filter kept in compare mode). */
+  onOpen?: (bar: HistogramBar) => void;
+}) {
   const sorted = sortCompareBars(bars);
+  const listRef = useRef<HTMLUListElement | null>(null);
+  const roving = useRovingTabindex(listRef, {
+    orientation: "vertical",
+    itemSelector: "button.hist-compare-row",
+  });
   const max = Math.max(1, ...sorted.map((bar) => Math.max(bar.count, bar.baseline_count ?? 0)));
   const total = sorted.reduce((sum, bar) => sum + bar.count, 0);
   const baseTotal = sorted.reduce((sum, bar) => sum + (bar.baseline_count ?? 0), 0);
@@ -63,43 +93,52 @@ export function CompareBars({ bars, baselineName }: { bars: readonly HistogramBa
         <span>증감 {deltaText(total - baseTotal)}</span>
       </p>
       <ul
+        ref={listRef}
         className="hist-compare"
         aria-label={`기준선 '${baselineName}'과(와) 비교한 범주 ${sorted.length}개`}
+        {...roving.containerProps}
       >
-        {sorted.map((bar) => {
+        {sorted.map((bar, index) => {
           const base = bar.baseline_count ?? 0;
           const delta = bar.delta ?? bar.count - base;
+          const openable = Boolean(onOpen && compareBarTarget(bar.key));
           return (
-            <li
-              key={bar.key}
-              className="hist-compare-row"
-              data-testid="hist-compare-row"
-              aria-label={`${bar.label}: 현재 ${bar.count.toLocaleString("ko-KR")}건, 기준선 ${base.toLocaleString("ko-KR")}건, 증감 ${deltaText(delta)}`}
-            >
-              <span className="hist-compare-label" title={bar.label} aria-hidden="true">
-                {bar.label}
-              </span>
-              <span className="hist-compare-tracks" aria-hidden="true">
-                <span className="hist-compare-track">
-                  <span
-                    className="hist-compare-fill is-current"
-                    style={{ width: `${(bar.count / max) * 100}%` }}
-                  />
-                </span>
-                <span className="hist-compare-track">
-                  <span
-                    className="hist-compare-fill is-baseline"
-                    style={{ width: `${(base / max) * 100}%` }}
-                  />
-                </span>
-              </span>
-              <span
-                className="hist-compare-delta"
-                data-sign={delta > 0 ? "up" : delta < 0 ? "down" : undefined}
-                aria-hidden="true"
+            <li key={bar.key}>
+              <button
+                type="button"
+                className="hist-compare-row"
+                data-testid="hist-compare-row"
+                aria-label={`${bar.label}: 현재 ${bar.count.toLocaleString("ko-KR")}건, 기준선 ${base.toLocaleString("ko-KR")}건, 증감 ${deltaText(delta)}${openable ? ", 노드 열기" : ""}`}
+                disabled={!openable}
+                {...roving.getItemProps(index)}
+                onClick={() => onOpen?.(bar)}
               >
-                {bar.count.toLocaleString("ko-KR")} ({deltaText(delta)})
-              </span>
+                <span className="hist-compare-label" title={bar.label} aria-hidden="true">
+                  {bar.label}
+                </span>
+                <span className="hist-compare-tracks" aria-hidden="true">
+                  <span className="hist-compare-track">
+                    <span
+                      className="hist-compare-fill is-current"
+                      style={{ width: `${(bar.count / max) * 100}%` }}
+                    />
+                  </span>
+                  <span className="hist-compare-track">
+                    <span
+                      className="hist-compare-fill is-baseline"
+                      style={{ width: `${(base / max) * 100}%` }}
+                    />
+                  </span>
+                </span>
+                {/* Increase / decrease are facts, not good or bad: neutral tokens, sign in text. */}
+                <span
+                  className="hist-compare-delta"
+                  data-sign={delta > 0 ? "up" : delta < 0 ? "down" : undefined}
+                  aria-hidden="true"
+                >
+                  {bar.count.toLocaleString("ko-KR")} ({deltaText(delta)})
+                </span>
+              </button>
             </li>
           );
         })}
@@ -151,6 +190,14 @@ export function BaselineHistogram({ runId, children }: { runId: string; children
     enabled: Boolean(active),
     retry: false,
   });
+
+  const { openCollection } = useRoute();
+  const openBar = (bar: HistogramBar) => {
+    const target = compareBarTarget(bar.key);
+    if (!target) return;
+    if (target.collection === "artifacts") openCollection("artifacts", { kind: target.kind });
+    else openCollection(target.collection);
+  };
 
   const choose = (id: number | null) => {
     setChosen(id);
@@ -261,7 +308,7 @@ export function BaselineHistogram({ runId, children }: { runId: string; children
         ) : compare.error ? (
           <ErrorText>비교하지 못했습니다. {(compare.error as Error).message}</ErrorText>
         ) : compare.data ? (
-          <CompareBars bars={compare.data.bars} baselineName={active.name} />
+          <CompareBars bars={compare.data.bars} baselineName={active.name} onOpen={openBar} />
         ) : null
       ) : (
         children

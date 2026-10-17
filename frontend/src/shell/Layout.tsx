@@ -19,7 +19,7 @@ import { CommandButton } from "../commands/CommandButton";
 import { ToastRegion } from "../components/ToastRegion";
 import { Landing } from "../features/case/Landing";
 import { ReviewToolsHost } from "../features/review/ReviewToolsHost";
-import { useViewPrefs } from "../features/review/viewPrefs";
+import { readClassicLayout, useViewPrefs, writeClassicLayout } from "../features/review/viewPrefs";
 import { StageRail } from "../features/stages/StageRail";
 import { STAGE_DEFS, STAGE_HEADING_ID } from "../features/stages/stages";
 import { focusPopout, returnViewerFromPopout, usePopoutHost } from "../features/viewer/popout/host";
@@ -343,6 +343,12 @@ function NarrowPanes() {
  */
 function ClassicPanes() {
   const poppedOut = usePopoutHost((s) => s.status === "open");
+  const rowsRef = useRef<GroupImperativeHandle>(null);
+  // Like WidePanes: a dragged grid/viewer split is saved and applied once after mount.
+  useEffect(() => {
+    const saved = readClassicLayout();
+    if (saved?.[PANEL.grid] && saved[PANEL.viewer]) rowsRef.current?.setLayout(saved);
+  }, []);
   return (
     <Group id="rapidtriage-console-classic" orientation="horizontal" style={{ height: "100%" }}>
       <Panel id={PANEL.tree} defaultSize={TREE_DEFAULT} minSize="240px" maxSize="320px">
@@ -350,7 +356,15 @@ function ClassicPanes() {
       </Panel>
       <Separator className="resize-handle" />
       <Panel id="pane-classic" minSize="420px">
-        <Group id="rapidtriage-console-classic-rows" orientation="vertical" style={{ height: "100%" }}>
+        <Group
+          id="rapidtriage-console-classic-rows"
+          orientation="vertical"
+          groupRef={rowsRef}
+          onLayoutChanged={(layout, meta) => {
+            if (meta?.isUserInteraction) writeClassicLayout({ ...layout });
+          }}
+          style={{ height: "100%" }}
+        >
           <Panel id={PANEL.grid} defaultSize="55%" minSize="160px">
             <GridPane />
           </Panel>

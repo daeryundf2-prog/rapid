@@ -522,9 +522,16 @@ export function domainTotal(
   const excluded = new Map<string, number>();
   const wide = new Map<string, number>();
   let anyKnown = false;
+  // 통합 보기: each table's distinct values (the tables do not repeat one another's values).
+  let derived = 0;
   nodes.forEach((node, index) => {
     const count = counts[index];
     const t = node.target;
+    if (t.collection === "derived" && typeof count === "number") {
+      anyKnown = true;
+      derived += count;
+      return;
+    }
     if (t.collection !== "artifacts" || !t.kind || typeof count !== "number") return;
     // Catch-alls span domains, groups repeat their leaves, filtered views repeat their types.
     if (node.catchAll || node.children?.length || t.cf?.length) return;
@@ -534,7 +541,7 @@ export function domainTotal(
     else typed.set(t.kind, (typed.get(t.kind) ?? 0) + count);
   });
   if (!anyKnown) return undefined;
-  let total = 0;
+  let total = derived;
   for (const [kind, count] of wide) total += Math.max(0, count - (excluded.get(kind) ?? 0));
   for (const [kind, count] of typed) if (!wide.has(kind)) total += count;
   return total;

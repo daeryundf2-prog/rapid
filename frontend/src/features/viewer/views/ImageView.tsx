@@ -177,7 +177,12 @@ export function ImageView({ runId, preview, onOpenPath }: ImageViewProps) {
                       if (!item.is_anchor) onOpenPath(item.path);
                     }}
                   >
-                    <AuthImage runId={runId} path={item.path} alt="" className="image-thumb-img" />
+                    <AuthImage
+                      runId={runId}
+                      path={item.path}
+                      alt=""
+                      className="image-thumb-img viewer-media-blurrable"
+                    />
                     <span>{item.name}</span>
                   </button>
                 </li>

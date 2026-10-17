@@ -10,10 +10,12 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { announce } from "../../a11y";
 import { type CaseTag, postTagBatch } from "../../api/reviewTools";
+import type { GridRow } from "../../contracts/collection";
 import { useAppStore } from "../../state/store";
 import { notifyReviewApplied, reviewTargetOf } from "../grid/reviewActions";
 import { targetAsGridRow } from "../viewer/citation";
 import { currentReviewer } from "./author";
+import { currentRowSource } from "./rowSource";
 import { loadCaseTags, tagHandle, useCaseTagStore } from "./tagStore";
 
 /** Built-in name of digit n's fallback tag (same as commands/review.ts priorityTag). */
@@ -53,7 +55,22 @@ export async function resolveTagKey(runId: string, digit: number): Promise<{ tag
   throw new Error(unboundKeyReason(digit));
 }
 
-/** Toggle a case tag on the context row (by id); says and shows the result once. */
+/** (run, row, tag) toggles in flight: a second press waits for the first instead of racing it. */
+const inflight = new Set<string>();
+
+/** The tags of `row` after adding / removing `name` (case-insensitive, order kept). */
+export function toggledTags(tags: readonly string[], name: string, add: boolean): string[] {
+  const key = name.toLocaleLowerCase();
+  const kept = tags.filter((tag) => tag.toLocaleLowerCase() !== key);
+  return add ? [...kept, name] : kept;
+}
+
+/**
+ * Toggle a case tag on the context row (by id); says and shows the result once. Add or remove is
+ * decided from the tags on screen; after the POST those tags are patched at once (viewer row and
+ * the list's cached row), so a second press before the refetch lands toggles back correctly. A
+ * press for the same row and tag while one is in flight is ignored.
+ */
 export async function toggleCaseTagOnContextRow(
   queryClient: QueryClient | null,
   tag: CaseTag,
@@ -64,15 +81,35 @@ export async function toggleCaseTagOnContextRow(
   const row = state.viewerRow ?? targetAsGridRow(target);
   const reviewTarget = reviewTargetOf(row);
   if (!reviewTarget) throw new Error(NO_LOCATOR_REASON);
-  const has = row.tags.some((name) => name.toLocaleLowerCase() === tag.name.toLocaleLowerCase());
-  const handle = await tagHandle(target.runId);
-  await postTagBatch(handle, target.runId, [reviewTarget], {
-    ...(has ? { remove_tag_ids: [tag.id] } : { tag_ids: [tag.id] }),
-    reviewer: currentReviewer(),
-  });
-  notifyReviewApplied(target.runId);
-  const text = has ? `태그 '${tag.name}' 해제: 1건 처리했습니다` : `태그 '${tag.name}': 1건 처리했습니다`;
-  announce(text);
-  useAppStore.getState().showNotice(text);
-  await queryClient?.invalidateQueries({ predicate: (query) => query.queryKey.includes(target.runId) });
+  const flightKey = `${target.runId}|${row.rowKey}|${tag.id}`;
+  if (inflight.has(flightKey)) return;
+  inflight.add(flightKey);
+  try {
+    const has = row.tags.some((name) => name.toLocaleLowerCase() === tag.name.toLocaleLowerCase());
+    const handle = await tagHandle(target.runId);
+    await postTagBatch(handle, target.runId, [reviewTarget], {
+      ...(has ? { remove_tag_ids: [tag.id] } : { tag_ids: [tag.id] }),
+      reviewer: currentReviewer(),
+    });
+    const patch = (current: GridRow): GridRow => ({
+      ...current,
+      tags: toggledTags(current.tags, tag.name, !has),
+    });
+    const now = useAppStore.getState();
+    if (now.viewerRow && now.viewerRow.rowKey === row.rowKey)
+      useAppStore.setState({ viewerRow: patch(now.viewerRow) });
+    currentRowSource()?.patchRows?.([row.rowKey], patch);
+    notifyReviewApplied(target.runId);
+    const text = has ? `태그 '${tag.name}' 해제: 1건 처리했습니다` : `태그 '${tag.name}': 1건 처리했습니다`;
+    announce(text);
+    useAppStore.getState().showNotice(text);
+    await queryClient?.invalidateQueries({ predicate: (query) => query.queryKey.includes(target.runId) });
+  } finally {
+    inflight.delete(flightKey);
+  }
+}
+
+/** Tests. */
+export function resetTagKeyFlights(): void {
+  inflight.clear();
 }

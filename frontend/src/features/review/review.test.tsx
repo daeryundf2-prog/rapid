@@ -1,10 +1,15 @@
 // AXIOM adoption E3 (plan §3.3): tag manager, digit tag keys, propagation, classic split,
 // media blur persistence, baseline compare bars, selection CSV.
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CaseTag } from "../../api/reviewTools";
-import { registerCommands, resetCommandRegistry, runCommand } from "../../commands/registry";
-import { NO_ROW_REASON, reviewCommands } from "../../commands/review";
+import { CLASSIC_COLLAPSE_REASON, collapseViewerPane, collapseViewerReason } from "../../commands/builtin";
+import { NO_RUN_REASON } from "../../commands/reasons";
+import { getCommand, registerCommands, resetCommandRegistry, runCommand } from "../../commands/registry";
+import { NO_ROW_REASON, reviewCommands, tagKeyLabel } from "../../commands/review";
+import type { GridRow } from "../../contracts/collection";
 import type { ViewerTarget } from "../../contracts/viewer";
 import { Layout } from "../../shell/Layout";
 import { dispatchShortcut } from "../../shortcuts";
@@ -14,20 +19,44 @@ import { makeRef, makeRow } from "../grid/columns/common";
 import type { GridCommandHost } from "../grid/gridCommands";
 import { resetCaseDbHandles } from "../grid/reviewActions";
 import type { ColumnSpec } from "../grid/types";
-import { CompareBars, deltaText } from "./BaselineHistogram";
+import { showCaseTagNodes } from "../stages/ReviewReportStage";
+import { propagationItems } from "../viewer/ViewerToolbar";
+import { ImageView } from "../viewer/views/ImageView";
+import { CompareBars, compareBarTarget, deltaText } from "./BaselineHistogram";
 import {
   CLASSIC_SPLIT_COMMAND,
   CLASSIC_STAGE_REASON,
   MEDIA_BLUR_COMMAND,
+  mediaBlurReason,
+  NO_MEDIA_VIEW_REASON,
   reviewToolCommands,
 } from "./commands";
 import { buildSelectionCsv, CSV_BOM, csvCell, NONE, TRAILING_HEADERS } from "./csv";
-import { NO_TAGS_TO_PROPAGATE, propagateReason, propagateTagsByHash } from "./gridTools";
+import {
+  CSV_COMMAND,
+  csvExportNotice,
+  csvReason,
+  NO_PROPAGATE_ROW,
+  NO_TAGS_TO_PROPAGATE,
+  ONLY_SYSTEM_TAGS,
+  PROPAGATE_COMMAND,
+  propagateReason,
+  propagateTagsByHash,
+} from "./gridTools";
 import { visibleTagNodes } from "./ReviewTagNodes";
+import { registerRowSource, resetRowSources } from "./rowSource";
 import { draftReason, SYSTEM_TAG_REASON, TagManagerDialog } from "./TagManagerDialog";
-import { unboundKeyReason } from "./tagKeys";
+import { resetTagKeyFlights, unboundKeyReason } from "./tagKeys";
 import { loadCaseTags, resetCaseTagStore, sortTags } from "./tagStore";
-import { CLASSIC_SPLIT_KEY, MEDIA_BLUR_KEY, reloadViewPrefs, useViewPrefs } from "./viewPrefs";
+import {
+  CLASSIC_LAYOUT_KEY,
+  CLASSIC_SPLIT_KEY,
+  MEDIA_BLUR_KEY,
+  readClassicLayout,
+  reloadViewPrefs,
+  useViewPrefs,
+  writeClassicLayout,
+} from "./viewPrefs";
 
 const announceMock = vi.hoisted(() => vi.fn());
 vi.mock("../../a11y", async (importOriginal) => ({
@@ -76,6 +105,8 @@ beforeEach(() => {
   resetCommandRegistry();
   resetCaseTagStore();
   resetCaseDbHandles();
+  resetRowSources();
+  resetTagKeyFlights();
   resetAppStore({ route: { runId: null, collection: null } });
   announceMock.mockReset();
   window.localStorage.clear();
@@ -266,38 +297,112 @@ function gridHost(
   };
 }
 
+const PROPAGATED = {
+  applied_count: 23,
+  changed_count: 22,
+  created_count: 22,
+  propagation: { hash_values: 1, matched_file_rows: 23, added_rows: 22, hashless_targets: 0, cap: 10000 },
+};
+
+function batches(calls: Array<{ url: string; body: unknown }>) {
+  return calls
+    .filter((c) => c.url === "/api/case-db/review-batch")
+    .map((c) => c.body as Record<string, unknown>);
+}
+
 describe("같은 해시 행에 태그 전파", () => {
-  it("sends the rows' tag ids with propagate_by_hash and reports the applied count", async () => {
+  beforeEach(() => registerCommands(reviewToolCommands()));
+
+  it("the shell command spreads the selection's user tags only (북마크·우선순위 left out) and says the count", async () => {
     const { calls } = mockFetch(
       caseRoutes([...SYSTEM, tag({ id: 40, name: "같은 사진", count: 1 })], {
-        "POST /api/case-db/review-batch": {
-          applied_count: 23,
-          changed_count: 22,
-          created_count: 22,
-          propagation: {
-            hash_values: 1,
-            matched_file_rows: 23,
-            added_rows: 22,
-            hashless_targets: 0,
-            cap: 10000,
-          },
-        },
+        "POST /api/case-db/review-batch": PROPAGATED,
       }),
     );
-    const row = makeRow(makeRef("files", "/candidates/4"), { title: "a.jpg", tags: ["같은 사진"] });
-    const host = gridHost([row]);
-    expect(propagateReason(host)).toBeUndefined();
-    const text = await propagateTagsByHash(host);
-    expect(text).toBe("같은 해시 행 23건에 태그 '같은 사진'을(를) 전파했습니다");
-    const batch = calls.find((c) => c.url === "/api/case-db/review-batch");
-    expect(batch?.body).toMatchObject({
+    useAppStore.getState().navigate({ runId: "r1", collection: "files" });
+    const selected = makeRow(makeRef("files", "/candidates/4"), {
+      title: "a.jpg",
+      tags: ["같은 사진", "북마크"],
+    });
+    registerRowSource({ getSelectedRows: () => [selected] });
+    expect(getCommand(PROPAGATE_COMMAND)?.disabledReason?.({ runId: "r1" } as never)).toBeUndefined();
+    expect(await runCommand(PROPAGATE_COMMAND)).toEqual({ ok: true });
+    expect(batches(calls)[0]).toMatchObject({
       case_id: "run-r1",
       run_id: "r1",
       tag_ids: [40],
       propagate_by_hash: true,
       targets: [{ collection: "files", locator: "/candidates/4" }],
     });
-    expect(propagateReason(gridHost([{ ...row, tags: [] }]))).toBe(NO_TAGS_TO_PROPAGATE);
+    expect(announceMock).toHaveBeenCalledWith("같은 해시 행 23건에 태그 '같은 사진'을(를) 전파했습니다");
+    expect(useAppStore.getState().notice?.text).toBe(
+      "같은 해시 행 23건에 태그 '같은 사진'을(를) 전파했습니다",
+    );
+  });
+
+  it("from the viewer menu it acts on the viewer row (not the grid selection) and lists the row's tags", async () => {
+    const { calls } = mockFetch(
+      caseRoutes([...SYSTEM, tag({ id: 40, name: "같은 사진" })], {
+        "POST /api/case-db/review-batch": PROPAGATED,
+      }),
+    );
+    await loadCaseTags("r1");
+    useAppStore.getState().navigate({ runId: "r1", collection: "files" });
+    // The grid selection is another row: the viewer menu must not touch it.
+    registerRowSource({
+      getSelectedRows: () => [
+        makeRow(makeRef("files", "/candidates/9"), { title: "z.jpg", tags: ["같은 사진"] }),
+      ],
+    });
+    const viewerRow = makeRow(makeRef("files", "/candidates/2"), { title: "b.jpg", tags: ["우선순위 2"] });
+    const items = propagationItems(viewerRow, "r1");
+    expect(items.map((item) => item.label)).toEqual([
+      "같은 해시 행에 태그 전파",
+      "'우선순위 2'만 전파 (시스템 태그)",
+    ]);
+    // Only a system tag: the default entry says why, the per-tag entry can still spread it.
+    expect(items[0]?.disabledReason).toBe(ONLY_SYSTEM_TAGS);
+    expect(items[1]?.disabledReason).toBeUndefined();
+    items[1]?.onSelect();
+    await waitFor(() => expect(batches(calls)).toHaveLength(1));
+    expect(batches(calls)[0]).toMatchObject({
+      tag_ids: [3],
+      targets: [{ collection: "files", locator: "/candidates/2" }],
+    });
+
+    const [all, ...each] = propagationItems({ ...viewerRow, tags: ["같은 사진", "북마크"] }, "r1");
+    expect(all?.label).toBe("같은 해시 행에 태그 전파: 사용자 태그 전부 (같은 사진)");
+    expect(all?.disabledReason).toBeUndefined();
+    expect(each.map((item) => item.label)).toEqual(["'같은 사진'만 전파", "'북마크'만 전파 (시스템 태그)"]);
+    all?.onSelect();
+    await waitFor(() => expect(batches(calls)).toHaveLength(2));
+    expect(batches(calls)[1]).toMatchObject({
+      tag_ids: [40],
+      targets: [{ collection: "files", locator: "/candidates/2" }],
+    });
+  });
+
+  it("is a shell command: works with no grid mounted (썸네일 보기) on the viewer row, and says why when it cannot", async () => {
+    const { calls } = mockFetch(
+      caseRoutes([...SYSTEM, tag({ id: 40, name: "같은 사진" })], {
+        "POST /api/case-db/review-batch": PROPAGATED,
+      }),
+    );
+    const ctx = { runId: "r1" } as never;
+    const command = getCommand(PROPAGATE_COMMAND);
+    expect(command).toBeDefined();
+    expect(command?.disabledReason?.({ runId: null } as never)).toBe(NO_RUN_REASON);
+    expect(command?.disabledReason?.(ctx)).toBe(NO_PROPAGATE_ROW);
+    useAppStore.getState().navigate({ runId: "r1", collection: "files", view: "thumbnails" });
+    useAppStore.getState().setViewerTarget(target("/candidates/5"));
+    expect(command?.disabledReason?.(ctx)).toBe(NO_TAGS_TO_PROPAGATE);
+    useAppStore.setState({
+      viewerRow: makeRow(makeRef("files", "/candidates/5"), { title: "file5.jpg", tags: ["같은 사진"] }),
+    });
+    expect(command?.disabledReason?.(ctx)).toBeUndefined();
+    expect(await runCommand(PROPAGATE_COMMAND)).toEqual({ ok: true });
+    expect(batches(calls)[0]).toMatchObject({ targets: [{ collection: "files", locator: "/candidates/5" }] });
+    expect(propagateReason("r1", [])).toBe(NO_PROPAGATE_ROW);
   });
 
   it("surfaces the server's Korean refusal above the cap", async () => {
@@ -313,7 +418,151 @@ describe("같은 해시 행에 태그 전파", () => {
       }),
     );
     const row = makeRow(makeRef("files", "/candidates/4"), { title: "a.jpg", tags: ["같은 사진"] });
-    await expect(propagateTagsByHash(gridHost([row]))).rejects.toThrow("전파 상한 10,000건");
+    await expect(propagateTagsByHash("r1", [row])).rejects.toThrow("전파 상한 10,000건");
+  });
+});
+
+describe("digit tag keys: no race, palette labels", () => {
+  beforeEach(() => registerCommands(reviewCommands(null)));
+
+  it("a second press while the first is in flight is ignored; after it lands the key toggles back", async () => {
+    const { calls } = mockFetch(
+      caseRoutes([...SYSTEM, tag({ id: 20, name: "DLP", shortcut: 7 })], {
+        "POST /api/case-db/review-batch": { updated_count: 1 },
+      }),
+    );
+    useAppStore.getState().navigate({ runId: "r1", collection: "files" });
+    useAppStore.getState().setViewerTarget(target("/candidates/2"));
+    const shown = makeRow(makeRef("files", "/candidates/2"), { title: "file2.jpg", tags: [] });
+    useAppStore.setState({ viewerRow: shown });
+    let gridRow: GridRow = shown;
+    const patchRows = vi.fn((keys: string[], patch: (row: GridRow) => GridRow) => {
+      if (keys.includes(gridRow.rowKey)) gridRow = patch(gridRow);
+      return () => {};
+    });
+    registerRowSource({ getSelectedRows: () => [], patchRows });
+    await loadCaseTags("r1");
+    // Two presses before the refetch: one POST (add), the second is dropped.
+    await Promise.all([runCommand("review.tagKey.7"), runCommand("review.tagKey.7")]);
+    expect(batches(calls)).toHaveLength(1);
+    expect(batches(calls)[0]).toMatchObject({ tag_ids: [20] });
+    // The tags on screen follow at once (viewer row + the list's cached row), before any refetch.
+    expect(useAppStore.getState().viewerRow?.tags).toEqual(["DLP"]);
+    expect(gridRow.tags).toEqual(["DLP"]);
+    // So the next press takes it off.
+    expect(await runCommand("review.tagKey.7")).toEqual({ ok: true });
+    expect(batches(calls)[1]).toMatchObject({ remove_tag_ids: [20] });
+    expect(useAppStore.getState().viewerRow?.tags).toEqual([]);
+    // After a refetch that brings the row back with the tag, the key removes it again.
+    useAppStore.setState({ viewerRow: { ...shown, tags: ["dlp"] } });
+    await runCommand("review.tagKey.7");
+    expect(batches(calls)[2]).toMatchObject({ remove_tag_ids: [20] });
+  });
+
+  it("palette labels name the bound tag once tags load; 우선순위 stays searchable before that", async () => {
+    expect(getCommand("review.priority.3")?.label).toBe("태그 단축키 3 (기본: 우선순위 3)");
+    expect(getCommand("review.tagKey.7")?.label).toBe("태그 단축키 7");
+    mockFetch(caseRoutes([...SYSTEM, tag({ id: 20, name: "DLP 유출 후보", shortcut: 7 })]));
+    await loadCaseTags("r1");
+    await waitFor(() => expect(getCommand("review.tagKey.7")?.label).toBe("태그 단축키 7 (DLP 유출 후보)"));
+    expect(getCommand("review.priority.3")?.label).toBe("태그 단축키 3 (우선순위 3)");
+    expect(getCommand("review.tagKey.8")?.label).toBe("태그 단축키 8 (지정 안 됨)");
+    expect(tagKeyLabel(9)).toBe("태그 단축키 9");
+  });
+});
+
+describe("media blur covers the viewer gallery strip", () => {
+  it("every strip tile is blurrable while 흐리게 is on, and hover / keyboard focus reveals one tile", async () => {
+    const gallery = {
+      items: [
+        { path: "C:/e/a.jpg", name: "a.jpg", is_anchor: true },
+        { path: "C:/e/b.jpg", name: "b.jpg", is_anchor: false },
+      ],
+      total: 2,
+      offset: 0,
+      limit: 12,
+      has_next: false,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) =>
+        String(input).includes("/source-image-gallery")
+          ? new Response(JSON.stringify(gallery), {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            })
+          : new Response(new Blob([new Uint8Array([137, 80, 78, 71])]), { status: 200 }),
+      ),
+    );
+    vi.spyOn(URL, "createObjectURL").mockImplementation(() => "blob:tile");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+    act(() => useViewPrefs.getState().setMediaBlur(true));
+    const preview = { path: "C:/e/a.jpg", name: "a.jpg", preview_type: "image", size: 4, image: {} };
+    render(<ImageView runId="r1" preview={preview as never} onOpenPath={() => undefined} />);
+    const strip = screen.getByRole("region", { name: "같은 폴더의 이미지" });
+    await waitFor(() => expect(strip.querySelectorAll("img.image-thumb-img")).toHaveLength(2));
+    for (const img of strip.querySelectorAll("img.image-thumb-img")) {
+      expect(img.classList.contains("viewer-media-blurrable")).toBe(true);
+      expect(img.closest("[data-media-blur='on']")).not.toBeNull();
+    }
+    const css = readFileSync(resolve(__dirname, "review.css"), "utf8");
+    expect(css).toMatch(/\[data-media-blur="on"\] \.viewer-media-blurrable \{\s*filter: blur/);
+    expect(css).toContain('[data-media-blur="on"] .image-thumb:focus-visible .viewer-media-blurrable');
+    expect(css).toContain('[data-media-blur="on"] .image-thumb:hover .viewer-media-blurrable');
+  });
+});
+
+describe("media blur, classic collapse, CSV notice, tag nodes", () => {
+  it("미디어 흐리게 says why on pages without media", () => {
+    expect(mediaBlurReason()).toBe(NO_RUN_REASON);
+    useAppStore.getState().navigate({ runId: "r1", collection: "intake" });
+    expect(mediaBlurReason()).toBe(NO_MEDIA_VIEW_REASON);
+    registerCommands(reviewToolCommands());
+    expect(getCommand(MEDIA_BLUR_COMMAND)?.disabledReason?.({ runId: "r1" } as never)).toBe(
+      NO_MEDIA_VIEW_REASON,
+    );
+    useAppStore.getState().navigate({ runId: "r1", collection: "files" });
+    expect(mediaBlurReason()).toBeUndefined();
+  });
+
+  it("뷰어 접기 is refused in the classic split (no hidden collapsed state); the split heights persist", () => {
+    useAppStore.getState().navigate({ runId: "r1", collection: "files" });
+    useAppStore.setState({ viewerIsDrawer: false, viewerPane: "auto" });
+    expect(collapseViewerReason()).toBeUndefined();
+    act(() => useViewPrefs.getState().setClassicSplit(true));
+    expect(collapseViewerReason()).toBe(CLASSIC_COLLAPSE_REASON);
+    collapseViewerPane();
+    expect(useAppStore.getState().viewerPane).toBe("auto");
+    expect(announceMock).toHaveBeenCalledWith(CLASSIC_COLLAPSE_REASON);
+    expect(readClassicLayout()).toBeNull();
+    writeClassicLayout({ "pane-grid": 62.5, "pane-viewer": 37.5 });
+    expect(window.localStorage.getItem(CLASSIC_LAYOUT_KEY)).toBe('{"pane-grid":62.5,"pane-viewer":37.5}');
+    expect(readClassicLayout()).toEqual({ "pane-grid": 62.5, "pane-viewer": 37.5 });
+    window.localStorage.setItem(CLASSIC_LAYOUT_KEY, "{broken");
+    expect(readClassicLayout()).toBeNull();
+  });
+
+  it("CSV export names selected rows that were not loaded instead of dropping them silently", () => {
+    const loaded = makeRow(makeRef("files", "/candidates/0"), { title: "a" });
+    const host = gridHost([loaded], { getSelectedCount: () => 5 });
+    expect(csvReason(host)).toBeUndefined();
+    expect(csvExportNotice(1, 5, "x.csv")).toBe(
+      "선택 5행 중 불러온 1행만 내보냅니다 (x.csv). 나머지 4행은 스크롤해 불러온 뒤 다시 내보내세요.",
+    );
+    expect(csvExportNotice(2, 2, "x.csv")).toBe("선택한 2행을 CSV로 내보냈습니다 (x.csv)");
+    const none = gridHost([], { getSelectedRows: () => [], getSelectedCount: () => 3 });
+    expect(csvReason(none)).toBe(
+      "선택한 3행이 아직 불러오지 않은 페이지에 있습니다. 스크롤해 불러온 뒤 내보내세요.",
+    );
+    expect(CSV_COMMAND).toBe("grid.exportSelectionCsv");
+  });
+
+  it("검토 tag nodes fall back to the review map's tags until the case tags are known", () => {
+    expect(showCaseTagNodes({ exists: false, status: "loading", tags: [] })).toBe(false);
+    expect(showCaseTagNodes({ exists: true, status: "loading", tags: [] })).toBe(false);
+    expect(showCaseTagNodes({ exists: true, status: "ready", tags: [] })).toBe(true);
+    // A refresh of loaded tags keeps them (no flicker after every mark).
+    expect(showCaseTagNodes({ exists: true, status: "loading", tags: [...SYSTEM] })).toBe(true);
   });
 });
 
@@ -342,6 +591,7 @@ describe("classic split and media blur", () => {
   });
 
   it("Shift+B toggles media blur; storage failures never throw", async () => {
+    useAppStore.getState().navigate({ runId: "r1", collection: "files" });
     const event = new KeyboardEvent("keydown", {
       key: "B",
       code: "KeyB",
@@ -428,6 +678,51 @@ describe("baseline compare bars", () => {
     ]);
     expect(screen.getByText(/기준선 '처리 직후' 50건/)).toBeTruthy();
     expect(deltaText(-1200)).toBe("−1,200");
+  });
+
+  it("keep click-to-open in compare mode (Q-A3) and colour deltas neutrally", () => {
+    const onOpen = vi.fn();
+    render(
+      <CompareBars
+        baselineName="처리 직후"
+        onOpen={onOpen}
+        bars={[
+          {
+            key: "kind:eventlog",
+            label: "이벤트 로그",
+            group: "artifact",
+            count: 9,
+            baseline_count: 4,
+            delta: 5,
+          },
+          {
+            key: "collection:files",
+            label: "파일",
+            group: "collection",
+            count: 3,
+            baseline_count: 7,
+            delta: -4,
+          },
+          { key: "other:x", label: "기타", group: "collection", count: 1, baseline_count: 1, delta: 0 },
+        ]}
+      />,
+    );
+    const rows = screen.getAllByTestId("hist-compare-row");
+    expect(rows.map((row) => row.tagName)).toEqual(["BUTTON", "BUTTON", "BUTTON"]);
+    expect(rows[0]?.getAttribute("aria-label")).toBe("이벤트 로그: 현재 9건, 기준선 4건, 증감 +5, 노드 열기");
+    fireEvent.click(rows[0] as HTMLElement);
+    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ key: "kind:eventlog" }));
+    fireEvent.click(rows[1] as HTMLElement);
+    expect(onOpen).toHaveBeenLastCalledWith(expect.objectContaining({ key: "collection:files" }));
+    // A category with nothing to open is not a dead button.
+    expect((rows[2] as HTMLButtonElement).disabled).toBe(true);
+    expect(compareBarTarget("kind:eventlog")).toEqual({ collection: "artifacts", kind: "eventlog" });
+    expect(compareBarTarget("collection:files")).toEqual({ collection: "files" });
+    expect(compareBarTarget("collection:bogus")).toBeNull();
+    const css = readFileSync(resolve(__dirname, "review.css"), "utf8");
+    const deltaRules = css.slice(css.indexOf('.hist-compare-delta[data-sign="up"]'));
+    expect(deltaRules.slice(0, deltaRules.indexOf("}"))).toContain("var(--info)");
+    expect(css).not.toMatch(/hist-compare-delta\[data-sign="(up|down)"\][^}]*var\(--(ok|danger)\)/);
   });
 });
 

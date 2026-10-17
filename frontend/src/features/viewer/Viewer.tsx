@@ -7,7 +7,7 @@ import {
   type SourceMetadata,
   type SourcePreview,
 } from "../../api/viewer";
-import { collapseViewerPane } from "../../commands/builtin";
+import { CLASSIC_COLLAPSE_REASON, collapseViewerPane } from "../../commands/builtin";
 import { runCommand as runShellCommand } from "../../commands/registry";
 import { MiddlePath } from "../../components/MiddlePath";
 import type { Command } from "../../contracts/command";
@@ -16,6 +16,7 @@ import { Icon } from "../../icons";
 import { FlagBanner } from "../flags/FlagCell";
 import { currentTimezone } from "../grid/columns/common";
 import { storeNotice } from "../grid/reviewActions";
+import { useViewPrefs } from "../review/viewPrefs";
 import {
   dispatchCommand,
   getCommand,
@@ -82,6 +83,8 @@ export function targetTitle(
 
 export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
   const target = useViewerTarget();
+  // 클래식 분할 always shows the viewer: 뷰어 접기 says why instead of hiding it unseen.
+  const classicSplit = useViewPrefs((s) => s.classicSplit);
   const row = useViewerRowContext();
   const focusSeq = useViewerFocusRequest();
   const ctx = useCommandContext();
@@ -476,16 +479,18 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
           </button>
         )}
         {drawer ? null : (
-          <button
-            type="button"
-            className="viewer-icon-button"
-            aria-label="뷰어 접기"
-            title="뷰어 접기"
-            data-testid="viewer-collapse"
-            onClick={collapseViewerPane}
-          >
-            <Icon name="chevron-right" />
-          </button>
+          <DisabledReason reason={classicSplit ? CLASSIC_COLLAPSE_REASON : undefined}>
+            <button
+              type="button"
+              className="viewer-icon-button"
+              aria-label="뷰어 접기"
+              title={classicSplit ? undefined : "뷰어 접기"}
+              data-testid="viewer-collapse"
+              onClick={collapseViewerPane}
+            >
+              <Icon name="chevron-right" />
+            </button>
+          </DisabledReason>
         )}
       </div>
       {/* 특이사항 (U-F4): the row's flags with their evidence, above the tabs (every mode). */}

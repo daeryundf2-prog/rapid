@@ -156,7 +156,6 @@ export const KEY_DESCRIPTIONS: Record<keyof typeof KEY_MAP, string> = {
   markExcluded: "제외 표시",
   markNeedsReview: "재검토 표시",
   bookmark: "북마크",
-  priority1to5: "우선순위 태그 1–5",
   viewerBack: "뷰어 이전 항목",
   viewerForward: "뷰어 다음 항목",
   help: "단축키 도움말",
@@ -173,8 +172,8 @@ export const KEY_DESCRIPTIONS: Record<keyof typeof KEY_MAP, string> = {
   conditions: "조건 패널 열기/닫기",
   treeEmpty: "탐색 트리: 결과 없는 계열 표시/숨김",
   viewerPopout: "뷰어를 새 창으로",
-  viewerModes: "뷰어 창에서 모드 전환 (1–8)",
-  tagShortcuts: "태그 단축키 1–9 (태그 관리에서 지정)",
+  viewerModes: "새 창 뷰어에서만: 모드 전환 (1–8)",
+  tagShortcuts: "태그 단축키 1–9 (태그 관리에서 지정, 기본 1–5 = 우선순위 1–5)",
   classicSplit: "클래식 분할 보기 (격자 위·세부 아래) 켜기/끄기",
   mediaBlur: "미디어 흐리게 켜기/끄기",
 };
@@ -204,7 +203,7 @@ export interface KeyBindingRow {
   name: keyof typeof KEY_MAP;
   shortcut: string;
   description: string;
-  /** Commands currently bound to this key (several only for the 1–5 range). */
+  /** Commands currently bound to this key (several only for a digit range). */
   commands: Command[];
 }
 
@@ -221,7 +220,7 @@ export function keyBindingRows(): KeyBindingRow[] {
             /^\d$/.test(c.shortcut) &&
             c.shortcut >= (range[1] ?? "") &&
             c.shortcut <= (range[2] ?? "") &&
-            // 1–5 (priority tags) and 1–8 (viewer window modes) live in different windows.
+            // 1–9 (tag keys) and 1–8 (viewer window modes) live in different windows.
             c.id.startsWith("popout.mode.") === (name === "viewerModes"),
         )
       : all.filter((c) => c.shortcut === normalizeShortcut(shortcut));

@@ -25,6 +25,7 @@ import { announce } from "../../a11y";
 import { ApiError } from "../../api/client";
 import { CommandButton } from "../../commands/CommandButton";
 import { useRoute, useTimezone } from "../../state/hooks";
+import { formatGridTime } from "../../utils/time";
 import {
   DERIVED_TABLE_IDS,
   type DerivedRow,
@@ -68,7 +69,17 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : "통합 보기를 불러오지 못했습니다";
 }
 
+/**
+ * One pane per (run, table): switching tables remounts it, so the search box, its debounced value
+ * and the kind chip never carry the previous table's search into the new table's URL (`q=`).
+ */
 export function DerivedPane() {
+  const { route } = useRoute();
+  const table: DerivedTableId = isDerivedTable(route.kind) ? route.kind : "people";
+  return <DerivedTablePane key={`${route.runId ?? ""}|${table}`} />;
+}
+
+function DerivedTablePane() {
   const { route, navigate, patchRoute } = useRoute();
   const runId = route.runId ?? "";
   const table: DerivedTableId = isDerivedTable(route.kind) ? route.kind : "people";
@@ -91,21 +102,21 @@ export function DerivedPane() {
   const select = useDerivedStore((s) => s.select);
   const selectedHere = selected && selected.runId === runId && selected.table === table ? selected : null;
 
-  // A new table (or case) starts clean: no kind chip, count order, first row, no selection. Coming
-  // back from an original row to the same table keeps the chosen value (its rows panel reopens).
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset on table / run change only
+  // A new table (or case) mounts a new pane (keyed below), so it starts clean: the new route's
+  // search (none from the tabs), no kind chip, count order, first row, no selection. Coming back from
+  // an original row to the same table keeps the chosen value (its rows panel reopens).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on mount (table / run) only
   useEffect(() => {
-    setKind(undefined);
-    setSort("count");
-    setFocusIdx(0);
     const current = useDerivedStore.getState().selected;
     if (!current || current.runId !== runId || current.table !== table) select(null);
   }, [table, runId]);
 
-  // `q` rides in the URL (refresh / copied link keep the search).
+  // `q` rides in the URL (refresh / copied link keep the search) once the debounce settles — never
+  // the previous table's search while the box has just been reset.
+  const settled = search.trim() === q;
   useEffect(() => {
-    if ((route.q ?? "") !== q) patchRoute({ q: q || undefined }, { replace: true });
-  }, [q, route.q, patchRoute]);
+    if (settled && (route.q ?? "") !== q) patchRoute({ q: q || undefined }, { replace: true });
+  }, [settled, q, route.q, patchRoute]);
 
   const meta = useQuery({
     queryKey: derivedMetaKey(runId),
@@ -279,7 +290,7 @@ export function DerivedPane() {
           {summary ? ` · 출현 ${summary.occurrences.toLocaleString("ko-KR")}건` : ""}
           {matched !== null && (q || kind) ? ` · 조건 일치 ${matched.toLocaleString("ko-KR")}개` : ""}
           {` · 불러온 ${rows.length.toLocaleString("ko-KR")}개`}
-          {source.generated_at ? ` · 생성 ${new Date(source.generated_at).toLocaleString("ko-KR")}` : ""}
+          {source.generated_at ? ` · 생성 ${formatGridTime(source.generated_at, timezone)}` : ""}
         </p>
         {source.coverage === "partial" ? (
           <p className="derived-notice" role="note">

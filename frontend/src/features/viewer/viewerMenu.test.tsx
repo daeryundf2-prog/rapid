@@ -48,11 +48,14 @@ describe("viewer header (review #6)", () => {
     expect(triggers).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "더보기" }));
     const menu = screen.getByRole("menu", { name: "더보기" });
+    // 같은 해시 행에 전파 (AXIOM E3): its own section, always on the viewer row.
     expect([...menu.querySelectorAll(".menu-heading")].map((h) => h.textContent)).toEqual([
       "리뷰",
+      "같은 해시 행에 전파",
       "원본",
       "피벗",
     ]);
+    expect(menu.querySelector("[data-command='review.tags.propagateByHash']")).not.toBeNull();
     const commands = [...menu.querySelectorAll<HTMLElement>("[data-command]")].map((i) => i.dataset.command);
     // 리뷰 first (marks, then 메모…), then 원본 (source actions, 같은 출처의 다른 행, 레코드 JSON),
     // then 피벗 (viewer redesign §5).

@@ -12,10 +12,12 @@ import type { GridRow } from "../../contracts/collection";
 import type { ViewerTarget } from "../../contracts/viewer";
 import { parseHash, serializeRoute } from "../../router";
 import { useAppStore } from "../../state/store";
+import { formatGridTime } from "../../utils/time";
 import { FALLBACK_CATALOG, familyById, setCatalog } from "../flags/catalog";
 import { catalogColumn } from "../grid/columns/families";
 import { installFetch, jsonResponse, renderWithClient } from "../grid/testSupport";
-import { domainNodeCount, NO_DERIVED_REASON } from "../tree/model";
+import type { DomainNodeDef } from "../tree/domains";
+import { domainNodeCount, domainTotal, NO_DERIVED_REASON } from "../tree/model";
 import { buildCitation } from "../viewer/citation";
 import type { DerivedRow } from "./api";
 import { registerDerivedCommands } from "./commands";
@@ -244,6 +246,51 @@ describe("route · citation · tree contracts", () => {
     expect(buildCitation(other, null)).not.toContain("통합=");
   });
 
+  it("forgets the 통합 origin as soon as the row is reached any other way (no stale provenance)", () => {
+    useDerivedStore.setState({ active: null });
+    const ref = { collection: "artifacts" as const, kind: "eventlog", locator: "/artifacts/7" };
+    const route = { runId: RUN, collection: "artifacts" as const, kind: "eventlog", row: ref };
+    const cite = () =>
+      buildCitation({ runId: RUN, ref, sourcePath: "C:/x.evtx" } as unknown as ViewerTarget, null);
+    // The pane remembers, then navigates to the family grid with the row selected.
+    useDerivedStore.getState().rememberOrigin(RUN, ref, { table: "people", normalized: "alice" });
+    useAppStore.getState().navigate(route);
+    expect(cite()).toContain("통합=통합:사람 식별자/alice");
+    // A filter / sort on the same grid keeps it (the path is still the same).
+    useAppStore.getState().patchRoute({ q: "4624" });
+    expect(cite()).toContain("통합=통합:사람 식별자/alice");
+    // J/K to another row (grid publish from user navigation): gone …
+    useAppStore.getState().setViewerTarget({
+      runId: RUN,
+      ref: { ...ref, locator: "/artifacts/8" },
+      sourcePath: "C:/x.evtx",
+    });
+    expect(useDerivedStore.getState().active).toBeNull();
+    // … and coming back to the same row later cites no 통합 value.
+    useAppStore.getState().setViewerTarget({ runId: RUN, ref, sourcePath: "C:/x.evtx" });
+    expect(cite()).not.toContain("통합=");
+
+    // A route change that keeps the row (tree → another node) also clears it.
+    useAppStore.getState().navigate({ runId: RUN, collection: "derived", kind: "people" });
+    useDerivedStore.getState().rememberOrigin(RUN, ref, { table: "people", normalized: "alice" });
+    useAppStore.getState().navigate(route);
+    expect(cite()).toContain("통합=");
+    useAppStore.getState().openCollection("timeline");
+    expect(useAppStore.getState().route.row).toEqual(ref);
+    expect(cite()).not.toContain("통합=");
+  });
+
+  it("the 통합 보기 domain header sums its tables' value counts", () => {
+    const nodes = [
+      { id: "people", label: "사람 식별자", target: { collection: "derived", kind: "people" } },
+      { id: "paths", label: "접근 경로", target: { collection: "derived", kind: "paths" } },
+      { id: "urls", label: "URL 분류", target: { collection: "derived", kind: "urls" } },
+    ] as unknown as DomainNodeDef[];
+    expect(domainTotal(nodes, [273, 1200, undefined])).toBe(1473);
+    expect(domainTotal(nodes, [undefined, undefined, undefined])).toBeUndefined();
+    expect(domainTotal(nodes, [0, 0, 0])).toBe(0);
+  });
+
   it("counts the tree nodes from /tree and explains a run without a set", () => {
     const tree = {
       run_id: RUN,
@@ -343,7 +390,7 @@ describe("DerivedPane (Q-X5 / Q-X12)", () => {
       loadMore: null,
       focusRows: null,
       rebuilding: null,
-      origins: {},
+      active: null,
     });
     setCatalog(FALLBACK_CATALOG, "server");
   });
@@ -390,8 +437,9 @@ describe("DerivedPane (Q-X5 / Q-X12)", () => {
     const { client } = openPane();
     registerDerivedCommands(client);
     const grid = await screen.findByRole("grid", { name: "사람 식별자 표" });
-    const rows = await within(grid).findAllByRole("row");
-    expect(rows).toHaveLength(4);
+    // The header row renders first; wait for the three value rows.
+    await waitFor(() => expect(within(grid).getAllByRole("row")).toHaveLength(4));
+    const rows = within(grid).getAllByRole("row");
     expect(grid.getAttribute("aria-rowcount")).toBe("4");
     expect(rows[1]?.getAttribute("aria-label")).toContain("값 ALICE");
     expect(screen.getByRole("searchbox", { name: "값 검색" })).toBeTruthy();
@@ -425,9 +473,11 @@ describe("DerivedPane (Q-X5 / Q-X12)", () => {
       kind: "windows-os-account",
       row: { locator: "/artifacts/0" },
     });
-    expect(useDerivedStore.getState().origins[`${RUN}|artifacts|windows-os-account|/artifacts/0`]).toEqual({
-      table: "people",
-      normalized: "alice",
+    expect(useDerivedStore.getState().active).toEqual({
+      key: `${RUN}|artifacts|windows-os-account|/artifacts/0`,
+      origin: { table: "people", normalized: "alice" },
+      // Pinned to the family grid it was opened in.
+      context: `${RUN}|artifacts|windows-os-account||`,
     });
   });
 
@@ -465,6 +515,47 @@ describe("DerivedPane (Q-X5 / Q-X12)", () => {
     fireEvent.change(screen.getByRole("searchbox", { name: "값 검색" }), { target: { value: "ali" } });
     await waitFor(() => expect(calls.some((call) => call.url.includes("q=ali"))).toBe(true));
     await waitFor(() => expect(useAppStore.getState().route.q).toBe("ali"));
+  });
+
+  it("switching tables starts with an empty search and never writes the old q into the new table's URL", async () => {
+    const calls = installFetch({
+      "/derived/people": () => jsonResponse(page([row("alice", 34)])),
+      "/derived/paths": () =>
+        jsonResponse({ ...page([row("c:/windows", 3)]), table: "paths", label: "접근 경로" }),
+      "/derived": () =>
+        jsonResponse({
+          ...META,
+          tables: [...META.tables, { ...META.tables[0], table: "paths", label: "접근 경로", by_kind: {} }],
+        }),
+    });
+    openPane();
+    await screen.findByRole("grid", { name: "사람 식별자 표" });
+    fireEvent.change(screen.getByRole("searchbox", { name: "값 검색" }), { target: { value: "ali" } });
+    await waitFor(() => expect(useAppStore.getState().route.q).toBe("ali"));
+    fireEvent.click(within(screen.getByRole("navigation", { name: "통합 보기 표" })).getByText("접근 경로"));
+    await screen.findByRole("grid", { name: "접근 경로 표" });
+    expect((screen.getByRole("searchbox", { name: "값 검색" }) as HTMLInputElement).value).toBe("");
+    // Past the debounce: the URL has no q and no request for the new table carried it.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(useAppStore.getState().route).toMatchObject({ collection: "derived", kind: "paths" });
+    expect(useAppStore.getState().route.q).toBeUndefined();
+    expect(window.location.hash).not.toContain("q=");
+    expect(calls.filter((call) => call.url.includes("/derived/paths") && call.url.includes("q="))).toEqual(
+      [],
+    );
+  });
+
+  it("shows the set's generation time in the chosen timezone (grid format), not the browser locale", async () => {
+    installFetch({
+      "/derived/people": () => jsonResponse(page([row("alice", 34)])),
+      "/derived": () => jsonResponse(META),
+    });
+    openPane();
+    await screen.findByRole("grid", { name: "사람 식별자 표" });
+    const status = document.querySelector(".derived-status")?.textContent ?? "";
+    const tz = useAppStore.getState().route.tz ?? useAppStore.getState().timezone ?? "local";
+    expect(status).toContain(`생성 ${formatGridTime(META.source.generated_at, tz)}`);
+    expect(status).not.toContain(new Date(META.source.generated_at).toLocaleString("ko-KR"));
   });
 
   it("a run without a set explains why and offers the rebuild command", async () => {

@@ -17,7 +17,7 @@ import { DataGrid } from "../grid/DataGrid";
 import { useReviewMap } from "../grid/reviewMap";
 import { TAG_MANAGER_COMMAND } from "../review/commands";
 import { ReviewTagNodes } from "../review/ReviewTagNodes";
-import { useCaseTags } from "../review/tagStore";
+import { type CaseTagState, useCaseTags } from "../review/tagStore";
 import {
   flagsPartialNotice,
   flagsUnavailableReason,
@@ -151,7 +151,7 @@ export function ReviewPanel() {
             notes,
           )}
         </li>
-        {caseTags.exists ? (
+        {showCaseTagNodes(caseTags) ? (
           // Case tags (AXIOM E3): colour, key and the case DB's count per tag.
           <ReviewTagNodes
             runId={runId}
@@ -176,6 +176,15 @@ export function ReviewPanel() {
       <CommandButton command={TAG_MANAGER_COMMAND} label="태그 관리…" />
     </div>
   );
+}
+
+/**
+ * The 검토 tree lists case tags (colour, key, case DB count) once they are known; until then —
+ * first load, or no case DB — the review map's own tags, so the section never renders empty
+ * while the tags load. A refresh of already-loaded tags keeps showing them (no flicker per mark).
+ */
+export function showCaseTagNodes(state: Pick<CaseTagState, "exists" | "status" | "tags">): boolean {
+  return state.exists && (state.status === "ready" || state.tags.length > 0);
 }
 
 /** Left panel of the 보고 stage. */

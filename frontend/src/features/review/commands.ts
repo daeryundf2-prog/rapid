@@ -10,6 +10,7 @@ import { type Command, KEY_MAP } from "../../contracts/command";
 import { stageHasViewer, stageOf } from "../../router";
 import { useAppStore } from "../../state/store";
 import { markDisabledReason, targetAsGridRow } from "../viewer/citation";
+import { propagateCommand } from "./gridTools";
 import { useReviewToolsUi } from "./uiStore";
 import { useViewPrefs } from "./viewPrefs";
 
@@ -21,6 +22,16 @@ export const MEDIA_BLUR_COMMAND = "view.mediaBlur";
 export const CLASSIC_STAGE_REASON = "탐색·검토 단계에서만 쓸 수 있습니다";
 export const CLASSIC_NARROW_REASON = "창 너비가 1200px 이상일 때 쓸 수 있습니다";
 export const NO_NOTE_ROW_REASON = "뷰어에 표시된 행이 없습니다. 그리드에서 행을 선택하세요";
+export const NO_MEDIA_VIEW_REASON =
+  "미디어가 보이는 탐색·검토 단계(썸네일 보기·뷰어 이미지)에서 쓸 수 있습니다";
+
+/** 미디어 흐리게 needs a page that shows media: a case on 탐색·검토 (thumbnails, viewer image). */
+export function mediaBlurReason(): string | undefined {
+  const route = useAppStore.getState().route;
+  if (!route.runId) return NO_RUN_REASON;
+  if (!stageHasViewer(stageOf(route))) return NO_MEDIA_VIEW_REASON;
+  return undefined;
+}
 
 export function classicSplitReason(): string | undefined {
   const s = useAppStore.getState();
@@ -91,7 +102,10 @@ export function reviewToolCommands(): Command[] {
       group: "viewer",
       icon: "eye",
       shortcut: KEY_MAP.mediaBlur,
+      disabledReason: () => mediaBlurReason(),
       run: toggleMediaBlur,
     },
+    // Same-hash propagation: a shell command (not a grid one) so it works in 썸네일 보기 too.
+    propagateCommand(),
   ];
 }

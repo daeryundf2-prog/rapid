@@ -43,7 +43,6 @@ export const KEY_MAP = {
   markExcluded: "X",
   markNeedsReview: "I",
   bookmark: "B",
-  priority1to5: "1-5",
   viewerBack: "Alt+ArrowLeft",
   viewerForward: "Alt+ArrowRight",
   help: "?",

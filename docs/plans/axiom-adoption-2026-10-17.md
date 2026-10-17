@@ -34,7 +34,7 @@
 ### 3.3 E3 — 검토 도구와 뷰 (백엔드 + 프런트)
 - 케이스 DB 새 테이블(별도 모듈 `case_db/review_schema.py`에 두고 스키마 목록에 등록, `constants.py`는 건드리지 않음): `case_tag(id, case_id, name UNIQUE per case, color_token, shortcut, description, created_by, created_at, deleted_at)`, `histogram_baseline(id, case_id, name, created_at, created_by, counts_json)`. `review_mark.tags_json`은 태그 id 목록으로 전환(기존 문자열 태그는 마이그레이션으로 `case_tag`에 생성). 메모: `review_mark_history`에 author·시각이 남는지 확인하고 없으면 추가.
 - API: `GET/POST/PATCH/DELETE /api/cases/{id}/tags`, `POST /api/case-db/review-batch`에 `tag_ids`·`propagate_by_hash: true`(같은 run의 같은 해시 열 값을 가진 행 전부에 적용, 최대 10,000행, 결과 건수 반환), `GET/POST /api/cases/{id}/histogram-baselines`, `GET /api/runs/{id}/histogram?compare=<baseline_id>`.
-- 프런트: 태그 관리 대화상자(이름·색 토큰 8종·단축키 1–9·설명), 뷰어/그리드에서 단축키로 태그, "같은 해시 행에 태그 전파" 명령(결과 토스트), 트리 검토 단계에 태그별 노드, 메모 패널(작성자·시각·이력). 뷰: **클래식 분할**(격자 위·세부 아래, 키 `\``), **히스토그램 기준선** 저장/비교(막대 2색 + 증감), 미디어 갤러리 **흐리게 토글**(키 B, 저장)과 "관련 미디어 n" 배지(같은 해시·duplicate_content_groups). 그리드 선택 **CSV 내보내기**에 고정 꼬리 열(소스·위치·복구 방법·증거 번호·사건 번호·항목 ID·파서 버전).
+- 프런트: 태그 관리 대화상자(이름·색 토큰 8종·단축키 1–9·설명), 뷰어/그리드에서 단축키로 태그, "같은 해시 행에 태그 전파" 명령(결과 토스트; 셸 명령이라 썸네일 보기에서도 동작, 기본은 사용자 태그만 — 북마크·우선순위 제외, 뷰어 더보기에서는 뷰어 행의 태그를 하나씩 골라 전파), 트리 검토 단계에 태그별 노드, 메모 패널(작성자·시각·이력). 뷰: **클래식 분할**(격자 위·세부 아래, 키 `\``, 높이 저장, 분할 중 뷰어 접기는 사유와 함께 비활성), **히스토그램 기준선** 저장/비교(막대 2색 + 증감; 증감은 중립 색, 비교 중에도 막대 클릭으로 노드 열기), 미디어 갤러리 **흐리게 토글**(키 B, 저장)과 "관련 미디어 n" 배지(같은 해시·duplicate_content_groups). 그리드 선택 **CSV 내보내기**에 고정 꼬리 열(소스·위치·복구 방법·증거 번호·사건 번호·항목 ID·파서 버전).
 
 ### 3.4 경계와 공통 규칙
 - 라벨 전부 한국어, 모든 컨트롤 접근성 이름, 명령 팔레트 등록 + DisabledReason, polite 영역 1개, 대비 게이트, 한국어 정렬.

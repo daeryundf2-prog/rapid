@@ -14,6 +14,7 @@ import { getCommand, runCommand } from "../../commands/registry";
 import { MenuButton, type MenuItem } from "../../components/MenuButton";
 import { STATUS_META } from "../../components/StatusChip";
 import "../../components/status.css";
+import type { GridRow } from "../../contracts/collection";
 import type { Command, CommandContext } from "../../contracts/command";
 import { Icon, isIconName } from "../../icons";
 import { useRoute } from "../../state/hooks";
@@ -26,7 +27,13 @@ import {
 } from "../grid/reviewActions";
 import { noteKey, setSessionNote } from "../grid/sessionNotes";
 import { NOTE_PANEL_COMMAND, TAG_MANAGER_COMMAND } from "../review/commands";
-import { PROPAGATE_COMMAND } from "../review/gridTools";
+import {
+  defaultPropagationTags,
+  isSystemTagName,
+  PROPAGATE_COMMAND,
+  propagateReason,
+  runPropagation,
+} from "../review/gridTools";
 import { useViewerRowContext, useViewerTarget } from "./adapter";
 import { markDisabledReason, targetAsGridRow } from "./citation";
 import { writeClipboard } from "./commands";
@@ -56,6 +63,40 @@ interface ViewerToolbarProps {
 }
 
 const MARK_PREFIX = "viewer.mark.";
+/** A shell command that is not registered in this window (the pop-out viewer). */
+export const POPOUT_ONLY_REASON = "이 창에서는 쓸 수 없습니다. 메인 창의 뷰어에서 실행하세요";
+
+/**
+ * "같은 해시 행에 전파" section of the viewer menu, always on the viewer row: the default entry
+ * spreads every user tag of the row; then one entry per tag on the row (system tags 북마크 ·
+ * 우선순위 n only this way) so the examiner chooses what spreads.
+ */
+export function propagationItems(row: GridRow | null, runId: string | null): MenuItem[] {
+  const rows = row ? [row] : [];
+  const user = defaultPropagationTags(rows);
+  const all: MenuItem = {
+    id: PROPAGATE_COMMAND,
+    label: user.length
+      ? `같은 해시 행에 태그 전파: 사용자 태그 전부 (${user.join(", ")})`
+      : "같은 해시 행에 태그 전파",
+    command: PROPAGATE_COMMAND,
+    icon: "tag",
+    section: "같은 해시 행에 전파",
+    disabledReason: propagateReason(runId, rows),
+    onSelect: () => void runPropagation(runId, rows),
+  };
+  const each = (row?.tags ?? []).map(
+    (name): MenuItem => ({
+      id: `${PROPAGATE_COMMAND}.${name}`,
+      label: `'${name}'만 전파${isSystemTagName(name) ? " (시스템 태그)" : ""}`,
+      command: `${PROPAGATE_COMMAND}.one`,
+      icon: "tag",
+      disabledReason: propagateReason(runId, rows, [name]),
+      onSelect: () => void runPropagation(runId, rows, [name]),
+    }),
+  );
+  return [all, ...each];
+}
 const EXCLUSIVE = ["relevant", "needs-review", "excluded"];
 
 /** Inline 메모 form: textarea + 저장/취소, Esc cancels. */
@@ -232,18 +273,19 @@ export function ViewerToolbar({
       disabledReason: noteReason,
       onSelect: () => setNoteOpen(true),
     },
-    // Review tools (AXIOM E3): note history with author/time, same-hash propagation, tag manager.
-    ...[NOTE_PANEL_COMMAND, PROPAGATE_COMMAND, TAG_MANAGER_COMMAND].map((id): MenuItem => {
+    // Review tools (AXIOM E3): note history with author/time, tag manager.
+    ...[NOTE_PANEL_COMMAND, TAG_MANAGER_COMMAND].map((id): MenuItem => {
       const command = getCommand(id);
       return {
         id,
         label: command?.label ?? id,
         command: id,
         icon: id === NOTE_PANEL_COMMAND ? "clock" : "tag",
-        disabledReason: command ? command.disabledReason?.(ctx) : "메인 창의 목록에서 쓸 수 있습니다",
+        disabledReason: command ? command.disabledReason?.(ctx) : POPOUT_ONLY_REASON,
         onSelect: () => void runCommand(id),
       };
     }),
+    ...propagationItems(target ? (row ?? targetAsGridRow(target)) : null, target?.runId ?? null),
   ];
 
   const sourceItems: MenuItem[] = [

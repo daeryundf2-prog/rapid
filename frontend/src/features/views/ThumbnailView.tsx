@@ -24,6 +24,7 @@ import { formatBytes, REVIEW_LABELS } from "../grid/columns/common";
 import { buildViewerTarget } from "../grid/gridCommands";
 import { PAGE_SIZE, useCollectionQuery } from "../grid/useCollectionQuery";
 import { MediaBlurToggle, RelatedMediaBadge } from "../review/MediaTools";
+import { registerRowSource } from "../review/rowSource";
 import { useViewPrefs } from "../review/viewPrefs";
 import { errorText, useBlobUrl } from "../viewer/useAsync";
 import { SelectionBar } from "./SelectionBar";
@@ -272,6 +273,18 @@ export function ThumbnailView() {
   const selectedRows = useMemo(
     () => sorted.filter((r) => selectedKeys.has(r.rowKey)),
     [sorted, selectedKeys],
+  );
+  // Shell review tools (같은 해시 행에 태그 전파, digit tag keys) act on this selection too.
+  const sourceRef = useRef({ selectedRows, cq });
+  sourceRef.current = { selectedRows, cq };
+  useEffect(
+    () =>
+      registerRowSource({
+        getSelectedRows: () => sourceRef.current.selectedRows,
+        patchRows: (keys, patch) => sourceRef.current.cq.patchRows(keys, patch),
+        refetch: () => sourceRef.current.cq.refetch(),
+      }),
+    [],
   );
   // Examiner protection (AXIOM E3): blurred thumbnails, Shift+B / toolbar toggle, kept across reloads.
   const mediaBlur = useViewPrefs((s) => s.mediaBlur);

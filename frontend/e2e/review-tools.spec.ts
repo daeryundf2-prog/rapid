@@ -5,7 +5,7 @@
 import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, type Page, test } from "@playwright/test";
+import { type APIRequestContext, expect, type Page, test } from "@playwright/test";
 
 const TOKEN = "e2e-token";
 const HEADERS = { "X-RapidTriage-Token": TOKEN };
@@ -89,6 +89,28 @@ async function audit(page: Page): Promise<string[]> {
   });
 }
 
+/** `files:/candidates/3` → `/candidates/3` (the locator the review batch targets). */
+function locatorOf(rowKey: string | null): string {
+  return (rowKey ?? "").replace(/^[^/]*/, "");
+}
+
+async function tagIds(request: APIRequestContext): Promise<Map<string, number>> {
+  const response = await request.get(`/api/cases/${caseId}/tags?run_id=${runId}`, { headers: HEADERS });
+  const tags = ((await response.json()) as { tags: Array<{ id: number; name: string }> }).tags;
+  return new Map(tags.map((tag) => [tag.name, tag.id]));
+}
+
+type BatchBody = {
+  targets: Array<{ locator?: string }>;
+  tag_ids?: number[];
+  remove_tag_ids?: number[];
+  propagate_by_hash?: boolean;
+};
+
+function batchResponse(page: Page) {
+  return page.waitForResponse((r) => r.url().includes("/api/case-db/review-batch") && r.ok());
+}
+
 async function createTag(page: Page, name: string, color: string, key: string) {
   const dialog = page.getByRole("dialog", { name: "태그 관리" });
   await dialog.getByTestId("tag-new").click();
@@ -128,17 +150,27 @@ test("Q-X8: three tags with colours and keys, key tagging in the viewer, tree co
   await open(page, `#/case/${runId}/explore/files`);
   const rows = page.locator('[role="grid"] [role="row"][aria-rowindex]:not([aria-rowindex="1"])');
   await expect(rows.first()).toBeVisible();
+  const ids = await tagIds(request);
+  const firstKey = await rows.nth(0).getAttribute("data-row-key");
+  const secondKey = await rows.nth(1).getAttribute("data-row-key");
+  expect(firstKey).not.toBe(secondKey);
   await rows.nth(0).click();
   await page.keyboard.press("Enter");
   const viewer = page.getByRole("region", { name: "원본 뷰어" });
   await expect(viewer).toBeVisible();
-  let batch = page.waitForResponse((r) => r.url().includes("/api/case-db/review-batch") && r.ok());
+  let batch = batchResponse(page);
   await page.keyboard.press("6");
-  await batch;
+  // Key 6 went to exactly the first row, with 증거 A's id.
+  const sixth = (await batch).request().postDataJSON() as BatchBody;
+  expect(sixth.targets.map((t) => t.locator)).toEqual([locatorOf(firstKey)]);
+  expect(sixth.tag_ids).toEqual([ids.get("증거 A")]);
   await rows.nth(1).click();
-  batch = page.waitForResponse((r) => r.url().includes("/api/case-db/review-batch") && r.ok());
+  batch = batchResponse(page);
   await page.keyboard.press("7");
-  await batch;
+  // Key 7 went to exactly the second row, with 증거 B's id.
+  const seventh = (await batch).request().postDataJSON() as BatchBody;
+  expect(seventh.targets.map((t) => t.locator)).toEqual([locatorOf(secondKey)]);
+  expect(seventh.tag_ids).toEqual([ids.get("증거 B")]);
 
   // 검토 tree: tag nodes with counts; the review board filtered to a tag shows that many rows.
   await open(page, `#/case/${runId}/review/board`);
@@ -198,7 +230,10 @@ test("Q-X10: classic split and media blur survive a reload; baseline compare; �
   const server = await request.get(`/api/runs/${runId}/histogram`, { headers: HEADERS });
   const bars = ((await server.json()) as { bars: unknown[] }).bars;
   await expect(compare.getByTestId("hist-compare-row")).toHaveCount(bars.length);
-  await expect(compare.getByTestId("hist-compare-row").first()).toHaveAttribute("aria-label", /증감 0$/);
+  await expect(compare.getByTestId("hist-compare-row").first()).toHaveAttribute(
+    "aria-label",
+    /증감 0, 노드 열기$/,
+  );
   expect(await audit(page)).toEqual([]);
 
   // Media blur in the gallery: Shift+B, kept after a reload; the duplicate picture's badge.
@@ -233,4 +268,83 @@ test("Q-X10: classic split and media blur survive a reload; baseline compare; �
   await page.locator("body").focus();
   await page.keyboard.press("Shift+KeyB");
   await expect(page.getByTestId("media-blur-toggle")).toHaveAttribute("aria-pressed", "false");
+});
+
+test("E3 fixes: propagation from the viewer acts on the viewer row; a tag key toggles after the refetch; the gallery strip blurs", async ({
+  page,
+  request,
+}) => {
+  // State from Q-X8: the second file row carries 증거 B (key 7).
+  const ids = await tagIds(request);
+  await open(page, `#/case/${runId}/explore/files`);
+  const rows = page.locator('[role="grid"] [role="row"][aria-rowindex]:not([aria-rowindex="1"])');
+  await expect(rows.nth(2)).toBeVisible();
+  // The row tagged 증거 B by key 7 (grid order may differ between tests: find it by locator).
+  const map = await request.get(`/api/runs/${runId}/review-map`, { headers: HEADERS });
+  const marks = ((await map.json()) as { marks: Array<{ tags: string[]; locator: string }> }).marks;
+  const taggedLocator = marks.find((mark) => mark.tags.includes("증거 B"))?.locator ?? "";
+  expect(taggedLocator).not.toBe("");
+  const viewerKey = `files:${taggedLocator}`;
+  const tagged = page.locator(`[role="grid"] [role="row"][data-row-key="${viewerKey}"]`);
+  const other = page.locator(
+    `[role="grid"] [role="row"][aria-rowindex]:not([aria-rowindex="1"]):not([data-row-key="${viewerKey}"])`,
+  );
+  await tagged.click();
+  // The grid selection is another row (checkbox: focus and the viewer stay on the tagged row).
+  await other.first().locator('input[type="checkbox"]').check();
+  await expect(other.first()).toHaveAttribute("aria-selected", "true");
+  const viewer = page.getByRole("region", { name: "원본 뷰어" });
+  await expect(viewer).toBeVisible();
+
+  // 더보기 › 같은 해시 행에 전파 lists the row's tags; the default spreads its user tags.
+  await page.getByTestId("viewer-actions-menu").click();
+  const menu = page.getByRole("menu", { name: "더보기" });
+  await expect(menu.getByRole("menuitem", { name: "'증거 B'만 전파" })).toBeVisible();
+  let batch = batchResponse(page);
+  await menu.getByRole("menuitem", { name: "같은 해시 행에 태그 전파: 사용자 태그 전부 (증거 B)" }).click();
+  const propagated = (await batch).request().postDataJSON() as BatchBody;
+  expect(propagated.propagate_by_hash).toBe(true);
+  expect(propagated.tag_ids).toEqual([ids.get("증거 B")]);
+  expect(propagated.targets.map((t) => t.locator)).toEqual([locatorOf(viewerKey)]);
+  await expect(
+    page.getByText(/같은 해시 행 \d+건에 태그 '증거 B'을\(를\) 전파했습니다/).first(),
+  ).toBeAttached();
+
+  // Key 7 on the viewer row: off, then (after the refetch lands) on, then off again.
+  await viewer.focus();
+  for (const expected of ["remove", "add", "remove"] as const) {
+    batch = batchResponse(page);
+    await page.keyboard.press("7");
+    const body = (await batch).request().postDataJSON() as BatchBody;
+    expect(body.targets.map((t) => t.locator)).toEqual([locatorOf(viewerKey)]);
+    if (expected === "remove") expect(body.remove_tag_ids).toEqual([ids.get("증거 B")]);
+    else expect(body.tag_ids).toEqual([ids.get("증거 B")]);
+    await page.waitForTimeout(800); // the grid refetch lands before the next press
+  }
+
+  // Gallery strip under 미디어 흐리게: every tile blurred; keyboard focus reveals one tile.
+  await open(page, `#/case/${runId}/explore/files`);
+  const dup = rows.filter({ hasText: "dup-1.png" }).first();
+  await expect(dup).toBeVisible();
+  await dup.click();
+  const imageTab = viewer.getByRole("tab", { name: /이미지/ });
+  if (await imageTab.count()) await imageTab.first().click();
+  const strip = page.locator(".image-strip");
+  await expect(strip.locator("img.image-thumb-img").first()).toBeVisible({ timeout: 15_000 });
+  await page.locator("body").focus();
+  await page.keyboard.press("Shift+KeyB");
+  await expect(page.locator(".image-view")).toHaveAttribute("data-media-blur", "on");
+  const filters = await strip
+    .locator("img.image-thumb-img")
+    .evaluateAll((imgs) => imgs.map((img) => getComputedStyle(img).filter));
+  expect(filters.length).toBeGreaterThan(1);
+  for (const filter of filters) expect(filter).toContain("blur");
+  const tile = strip.locator("button.image-thumb:not(.is-current)").first();
+  await tile.focus();
+  await expect
+    .poll(() => tile.locator("img.image-thumb-img").evaluate((img) => getComputedStyle(img).filter))
+    .toBe("none");
+  await page.locator("body").focus();
+  await page.keyboard.press("Shift+KeyB");
+  await expect(page.locator(".image-view")).not.toHaveAttribute("data-media-blur", "on");
 });

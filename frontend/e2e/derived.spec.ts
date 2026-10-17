@@ -29,6 +29,32 @@ test.beforeAll(async ({ request }) => {
   expect(runId).not.toBe("");
 });
 
+/** Capture clipboard writes (인용 복사) in the page: window.__clip holds the last text. */
+async function stubClipboard(page: Page) {
+  await page.addInitScript(() => {
+    const store = window as unknown as { __clip: string };
+    store.__clip = "";
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => {
+          store.__clip = text;
+        },
+      },
+    });
+  });
+}
+
+async function copyCitation(page: Page): Promise<string> {
+  await page.evaluate(() => {
+    (window as unknown as { __clip: string }).__clip = "";
+  });
+  await page.getByTestId("viewer-actions-menu").click();
+  await page.getByRole("menuitem", { name: "인용 복사" }).click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __clip: string }).__clip)).not.toBe("");
+  return page.evaluate(() => (window as unknown as { __clip: string }).__clip);
+}
+
 async function open(page: Page, hash: string) {
   await page.goto(`/v2/#token=${TOKEN}`);
   await expect(page).not.toHaveURL(/token=/);
@@ -38,6 +64,7 @@ async function open(page: Page, hash: string) {
 }
 
 test("Q-X5: 사람 식별자 → 원본 행(2개 이상 계열) → 계열 표에서 같은 행 선택", async ({ page, request }) => {
+  await stubClipboard(page);
   const meta = await request.get(`/api/runs/${runId}/derived`, { headers: HEADERS });
   const tables = ((await meta.json()) as { tables: Array<{ table: string; rows: number }> }).tables;
   expect(tables.find((t) => t.table === "people")?.rows ?? 0).toBeGreaterThan(0);
@@ -73,21 +100,72 @@ test("Q-X5: 사람 식별자 → 원본 행(2개 이상 계열) → 계열 표�
   await expect(selected).toHaveAttribute("tabindex", "0", { timeout: 10_000 });
   await expect(selected).toHaveClass(/is-focused/);
   await expect(selected).toHaveAttribute("data-row-key", new RegExp(`/artifacts/${recordIndex}$`));
+
+  // The citation names the 통합 value the row was opened from …
+  await expect(page.getByRole("region", { name: "원본 뷰어" })).toBeVisible();
+  expect(await copyCitation(page)).toContain("통합=통합:사람 식별자/");
+  // … only while that path holds: J then K (grid navigation) reaches the same row another way.
+  await selected.focus();
+  await page.keyboard.press("j");
+  await expect(selected).not.toHaveClass(/is-focused/);
+  await page.keyboard.press("k");
+  await expect(selected).toHaveClass(/is-focused/);
+  await expect(page).toHaveURL(new RegExp(`row=[^&]*${recordIndex}`));
+  expect(await copyCitation(page)).not.toContain("통합=");
 });
 
-test("Q-X12: 통합 보기 controls are named, chips toggle, search writes q=", async ({ page }) => {
+test("Q-X12: 통합 보기 controls are named, chips toggle, search writes q=", async ({ page, request }) => {
+  const meta = await request.get(`/api/runs/${runId}/derived`, { headers: HEADERS });
+  const tables = (
+    (await meta.json()) as { tables: Array<{ table: string; by_kind: Record<string, number> }> }
+  ).tables;
   await open(page, `#/case/${runId}/explore/derived/paths`);
   const grid = page.getByRole("grid", { name: "접근 경로 표" });
-  await expect(grid.locator('[role="row"][aria-rowindex="2"]')).toBeVisible();
+  const firstValue = grid.locator('[role="row"][aria-rowindex="2"]');
+  await expect(firstValue).toBeVisible();
   const pane = page.getByTestId("derived-pane");
   for (const button of await pane.getByRole("button").all()) {
     const name = (await button.getAttribute("aria-label")) ?? (await button.textContent()) ?? "";
     expect(name.trim()).not.toBe("");
   }
+
+  // Kind chips: one per source kind of the table, in Korean collation order; a chip toggles.
+  const kinds = Object.keys(tables.find((t) => t.table === "paths")?.by_kind ?? {});
+  const chips = page.getByRole("group", { name: "출처 종류 필터" });
+  if (kinds.length > 1) {
+    const names = (
+      await chips
+        .getByRole("button")
+        .evaluateAll((els) => els.map((el) => el.getAttribute("aria-label") ?? el.textContent ?? ""))
+    )
+      .slice(1)
+      .map((name) => name.replace(/ [\d,]+건만 보기$/, ""));
+    expect(names).toHaveLength(kinds.length);
+    expect(names).toEqual([...names].sort(new Intl.Collator("ko").compare));
+    const chip = chips.getByRole("button").nth(1);
+    await chip.click();
+    await expect(chip).toHaveAttribute("aria-pressed", "true");
+    await chip.click();
+    await expect(chip).toHaveAttribute("aria-pressed", "false");
+  } else {
+    await expect(chips).toHaveCount(0);
+  }
+
+  // Enter on a value moves focus into its original rows.
+  await firstValue.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("derived-rows").locator("button.derived-sample").first()).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(firstValue).toBeFocused();
+
   await page.getByRole("searchbox", { name: "값 검색" }).fill("users");
   await expect(page).toHaveURL(/q=users/);
   await expect(page.getByRole("combobox", { name: "정렬" })).toBeVisible();
-  // Tabs between tables.
+  // Tabs between tables: the new table starts with an empty search and no q= in its URL.
   await page.getByRole("button", { name: /^URL 분류/ }).click();
   await expect(page.getByRole("grid", { name: "URL 분류 표" })).toBeVisible();
+  await expect(page.getByRole("searchbox", { name: "값 검색" })).toHaveValue("");
+  await page.waitForTimeout(600); // past the search debounce
+  await expect(page).toHaveURL(/explore\/derived\/urls/);
+  expect(page.url()).not.toContain("q=");
 });

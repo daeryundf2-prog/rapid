@@ -9,6 +9,7 @@ import { caseRoute, otherCaseIds } from "../analysis/crossCase";
 import { useAnalysisStore } from "../analysis/store";
 import { caseCitationParts } from "../case/caseLink";
 import { buildReviewToolGridCommands } from "../review/gridTools";
+import { registerRowSource } from "../review/rowSource";
 import { recordCitationParts } from "../viewer/citation";
 import { PIVOT_LABELS, PIVOT_ORDER, type PivotId, recordPivots } from "../viewer/pivots";
 import { registerCommand, registerLocalCommand } from "./adapter";
@@ -44,6 +45,8 @@ export interface GridCommandHost {
   runIsActive: boolean;
   /** Visible column specs in display order (CSV export of the selection, AXIOM E3). */
   getExportColumns?: () => ColumnSpec[];
+  /** Selected keys, loaded or not (getSelectedRows only returns loaded rows). */
+  getSelectedCount?: () => number;
 }
 
 export function buildViewerTarget(runId: string, row: GridRow, mode?: ViewerMode): ViewerTarget {
@@ -476,6 +479,12 @@ export function useGridCommands(host: GridCommandHost): void {
       ...buildGridCommands(hostRef).map(registerCommand),
       ...buildRowMarkCommands(hostRef).map(registerLocalCommand),
       ...buildReviewToolGridCommands(hostRef).map(registerCommand),
+      // Shell review tools (tag propagation, digit keys) read the selection through this.
+      registerRowSource({
+        getSelectedRows: () => hostRef.current.getSelectedRows(),
+        patchRows: (keys, patch) => hostRef.current.patchRows(keys, patch),
+        refetch: () => hostRef.current.refetch(),
+      }),
     ];
     return () => {
       for (const off of unregister) off();

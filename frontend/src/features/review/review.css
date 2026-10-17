@@ -169,12 +169,15 @@
 /* Hover or keyboard focus on a tile shows that one picture. */
 .thumb-view[data-media-blur] .thumb-tile:hover .thumb-img,
 .thumb-view[data-media-blur] .thumb-tile:focus-visible .thumb-img,
-[data-media-blur="on"] .viewer-media-blurrable:hover {
+[data-media-blur="on"] .viewer-media-blurrable:hover,
+[data-media-blur="on"] .image-thumb:hover .viewer-media-blurrable,
+[data-media-blur="on"] .image-thumb:focus-visible .viewer-media-blurrable {
   filter: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .thumb-view[data-media-blur] .thumb-img {
+  .thumb-view[data-media-blur] .thumb-img,
+  [data-media-blur="on"] .viewer-media-blurrable {
     transition: none;
   }
 }
@@ -230,7 +233,24 @@
   grid-template-columns: minmax(120px, 220px) 1fr auto;
   align-items: center;
   gap: var(--space-2);
+  inline-size: 100%;
+  font: inherit;
   font-size: var(--fs-table-aux);
+  color: var(--text);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  padding: 2px var(--space-2);
+  text-align: start;
+  cursor: pointer;
+}
+
+.hist-compare-row:hover:not(:disabled) {
+  background: var(--bg-panel);
+}
+
+.hist-compare-row:disabled {
+  cursor: default;
 }
 
 .hist-compare-label {
@@ -271,12 +291,10 @@
   color: var(--text-muted);
 }
 
-.hist-compare-delta[data-sign="up"] {
-  color: var(--ok);
-}
-
+/* Neutral, informational: more or fewer rows is not good or bad in forensics (the sign says which). */
+.hist-compare-delta[data-sign="up"],
 .hist-compare-delta[data-sign="down"] {
-  color: var(--danger);
+  color: var(--info);
 }
 
 .hist-legend {
