@@ -60,3 +60,24 @@
 
 ## 5. 결과 기록
 (구현 후)
+
+### 5.3 E3 — 검토 도구와 뷰 (`feat/axiom-e3-review`)
+
+**구현**
+- 케이스 DB: `case_db/review_schema.py`(스키마 확장, `schema.register_schema_extension`으로 등록 — `constants.py` 무변경). `case_tag`(이름 케이스별 고유·대소문자 무시, 색 `tag-1..8`, 단축키 1–9 고유, 설명, `created_by/at`, `deleted_at/by` soft, `kind` user/system), `histogram_baseline`, `review_mark.tag_ids_json`(정식 태그 id 목록). 기존 문자열 태그는 첫 apply 때 `case_tag`로 이전(북마크·우선순위 1–5는 기본 태그, 단축키 1–5 유지). `tags_json`은 이름 미러로 남김(검색 `tag:`·보고서·번들·CLI·이력 diff가 이름을 읽음) — 이름 변경·삭제 시 같은 트랜잭션에서 두 열을 함께 고침. 메모 이력: `review_mark_history`에 이미 `actor`·`changed_at`이 있어 열 추가 없이 `GET /api/runs/{id}/review-history`로 노출하고, 콘솔이 작성자(`rapidtriage.reviewer`, 기본 web-ui)를 실어 보낸다.
+- API: `GET/POST /api/cases/{id}/tags`, `PATCH/DELETE /api/cases/{id}/tags/{tag_id}`(케이스 DB는 `run_id` 또는 `database`로 지정), `POST /api/case-db/review-batch`의 `tag_ids`·`remove_tag_ids`·`propagate_by_hash`(대상 행의 증거 소스 = 같은 런, 파일 행 MD5/SHA-1/SHA-256 일치, 10,000행 초과 시 422 한국어 거부, `applied_count` 반환), `GET/POST /api/cases/{id}/histogram-baselines`, `GET /api/runs/{id}/histogram?compare=`, `GET /api/runs/{id}/related-media?path=`, `GET /api/runs/{id}/export-context`. 본문 오류는 한국어 422. OpenAPI 스냅샷 갱신.
+- 콘솔(`features/review/`): 태그 관리 대화상자, 숫자 키 1–9(바인딩된 태그를 id로 토글), "같은 해시 행에 태그 전파" 명령+토스트, 검토 트리 태그 노드(색·키·건수), 메모·이력 패널, 클래식 분할(`` ` ``, 유지), 히스토그램 기준선 저장/비교(2색 막대+증감), 미디어 흐리게(Shift+B, 유지)·"관련 미디어 n" 배지, 선택 행 CSV(꼬리 7열, UTF-8 BOM, 수식 주입 방지).
+- 편차: 흐리게 키는 **Shift+B** — B는 U5 북마크 키이고 레지스트리가 이중 바인딩을 막는다. `commands/review.ts`의 1–5 명령 정의는 태그 키로 교체(같은 id 유지, 기본 바인딩이 우선순위 n이라 기존 동작과 같음) — 숫자 키를 다른 명령이 가질 수 없어서 불가피.
+
+**QA (실데이터: run-subset10의 사본 `D:\rapid-qa\derived\e3-qa\run-subset10`, 런 `e678c38d6a71` — 원본 `b5fabbe09f18`의 케이스 DB에 QA 마크를 남기지 않으려고 쓰기는 사본에서 수행)**
+
+| # | 결과 |
+|---|---|
+| Q-X8 | e2e `review-tools.spec.ts`: 태그 3개(색·키 6/7/8) 생성, 뷰어에서 키로 적용, 트리 노드 건수 1/1/0 = 필터된 리뷰보드 행 수, 삭제 시 `deleted_at` 남고 마크에서 제거, a11y 부분 감사 0 — 통과 |
+| Q-X9 | API: 최대 같은-MD5 그룹 23행 → `applied_count` 23 = SQL 23 (275 ms). UI: 16행 그룹에서 명령 실행 → 토스트 "같은 해시 행 16건…" = SQL 16. 상한 거부는 실데이터 그룹이 모두 상한 미만이라 단위 테스트로 검증 |
+| Q-X10 | e2e: `` ` `` 분할·Shift+B 흐리게 새로고침 후 유지, 기준선 저장 후 비교 행 수 = 서버 막대 수·증감 0, 관련 미디어 2 = 같은 해시 파일 2 — 통과. 실데이터 관련 미디어 5건 API = SQL |
+| Q-X11 | 실데이터 파일 50행 선택 → CSV: BOM, CRLF 51줄, 열 12개(태그·메모·보이는 열 3·꼬리 7), 꼬리 7열 빈 칸 0(위치·사건 번호·파서 버전은 파일 행이라 "없음", 증거 번호 `RUN-SUBSET10-EVID-000001`) |
+| Q-X12 | 새 화면 a11y 부분 감사 0, Esc/저장/취소 후 포커스 복귀, 한국어 정렬, polite 영역 1개 |
+| Q-X13 | unittest·ruff·vulture·compileall·doc-refs·OpenAPI, vitest·tsc·biome·contrast·e2e(37) 통과(부하 시 시간 초과 3건은 단독 재실행 통과) |
+
+**남은 것**: 기준선 비교는 같은 케이스 DB 안의 기준선만(런마다 케이스 DB가 다른 현 구조에선 같은 런의 전후 비교) — E1 케이스 통합 후 교차 런 비교 가능. 사건 번호는 E1의 `case_record.case_number`가 생기면 자동으로 채워진다. 숫자 키 토글은 행에 표시된 태그(review-map 오버레이) 기준이라 갱신 전 연타는 추가로 처리된다. 기준선 저장·태그 편집은 케이스 DB가 없으면 먼저 런을 케이스 DB로 가져온다(큰 런은 수 분).

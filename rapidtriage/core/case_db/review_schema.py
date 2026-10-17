@@ -134,7 +134,11 @@ def apply_review_schema(connection: sqlite3.Connection) -> None:
         )
     }
     if len(present) < 2:
-        connection.executescript(REVIEW_SCHEMA_SQL)
+        # Statement by statement (no executescript: it commits, and the base schema's DDL-replay
+        # accounting counts executescript calls).
+        for statement in REVIEW_SCHEMA_SQL.split(";"):
+            if statement.strip():
+                connection.execute(statement)
     if "tag_ids_json" not in _columns(connection, "review_mark"):
         # NULL = not migrated yet; migrate_string_tags fills every row.
         connection.execute("ALTER TABLE review_mark ADD COLUMN tag_ids_json TEXT")

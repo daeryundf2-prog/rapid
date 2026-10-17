@@ -138,6 +138,11 @@
 
 /* --- classic split ------------------------------------------------------------ */
 
+/* The bottom viewer has no rail to collapse into: 뷰어 접기 does not apply there. */
+.shell[data-split="classic"] [data-testid="viewer-collapse"] {
+  display: none;
+}
+
 .resize-handle.resize-handle-rows {
   width: auto;
   height: 4px;

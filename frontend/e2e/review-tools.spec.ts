@@ -158,10 +158,12 @@ test("Q-X8: three tags with colours and keys, key tagging in the viewer, tree co
   await expect(dialog.getByRole("rowheader", { name: /증거 A/ })).toHaveCount(0);
   await page.keyboard.press("Escape");
   await expect(page.getByRole("link", { name: /^증거 A,/ })).toHaveCount(0);
-  const tags = await request.get(`/api/cases/${caseId}/tags?run_id=${runId}&include_deleted=true`, { headers: HEADERS });
-  const deleted = ((await tags.json()) as { tags: Array<{ name: string; deleted_at: string | null }> }).tags.find(
-    (tag) => tag.name === "증거 A",
-  );
+  const tags = await request.get(`/api/cases/${caseId}/tags?run_id=${runId}&include_deleted=true`, {
+    headers: HEADERS,
+  });
+  const deleted = (
+    (await tags.json()) as { tags: Array<{ name: string; deleted_at: string | null }> }
+  ).tags.find((tag) => tag.name === "증거 A");
   expect(deleted?.deleted_at).toBeTruthy();
   const map = await request.get(`/api/runs/${runId}/review-map`, { headers: HEADERS });
   const marks = ((await map.json()) as { marks: Array<{ tags: string[] }> }).marks;
@@ -213,9 +215,13 @@ test("Q-X10: classic split and media blur survive a reload; baseline compare; �
   await dupTile.click();
   const related = await request.get(
     `/api/runs/${runId}/related-media?path=${encodeURIComponent(
-      ((await (await request.get(`/api/runs/${runId}/files?offset=0&limit=100`, { headers: HEADERS })).json()) as {
-        candidates: Array<{ path: string }>;
-      }).candidates.find((row) => row.path.endsWith("dup-1.png"))?.path ?? "",
+      (
+        (await (
+          await request.get(`/api/runs/${runId}/files?offset=0&limit=100`, { headers: HEADERS })
+        ).json()) as {
+          candidates: Array<{ path: string }>;
+        }
+      ).candidates.find((row) => row.path.endsWith("dup-1.png"))?.path ?? "",
     )}`,
     { headers: HEADERS },
   );
