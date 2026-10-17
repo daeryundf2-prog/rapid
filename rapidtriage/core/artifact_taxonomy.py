@@ -13,6 +13,7 @@ KNOWN_DYNAMIC_ARTIFACT_TYPES = {
     "activities-cache-db",
     "ads-stream-candidate",
     "archive-file-inventory",
+    "browser-cache-entry",
     "browser-cache-inventory",
     "browser-cookie-store-inventory",
     "browser-credential-store-inventory",

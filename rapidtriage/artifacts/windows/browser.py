@@ -14,6 +14,15 @@ from urllib.parse import parse_qs, unquote_plus, urlparse
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 from .._walk import iter_evidence_paths
+from .browser_cache import (
+    CACHE_PARSER,
+    CACHE_PARSER_VERSION,
+    MAX_CACHE_ENTRIES,
+    CacheBudget,
+    chromium_cache_directories,
+    decode_cache_directory,
+)
+from .browser_webcache import WEBCACHE_PARSER, decode_webcache
 from .common import (
     build_forensic_review,
     isoformat_from_timestamp,
@@ -23,11 +32,24 @@ from .common import (
     open_sqlite_snapshot,
 )
 from .ese import build_ese_page_map, build_ese_string_pivots, probe_ese_database
+from .web_upload import WebUploadScanner
 
 CHROMIUM_BROWSER_ROOTS: tuple[tuple[str, Sequence[str]], ...] = (
     ("chrome", ("AppData", "Local", "Google", "Chrome", "User Data")),
     ("edge", ("AppData", "Local", "Microsoft", "Edge", "User Data")),
     ("brave", ("AppData", "Local", "BraveSoftware", "Brave-Browser", "User Data")),
+    ("whale", ("AppData", "Local", "Naver", "Naver Whale", "User Data")),
+    ("vivaldi", ("AppData", "Local", "Vivaldi", "User Data")),
+)
+# Opera keeps one profile directly in its Roaming folder (no "Default" sub-folder) and its
+# HTTP cache under the matching Local folder: (browser, roaming profile, local cache root).
+CHROMIUM_SINGLE_PROFILE_ROOTS: tuple[tuple[str, Sequence[str], Sequence[str]], ...] = (
+    ("opera", ("AppData", "Roaming", "Opera Software", "Opera Stable"), ("AppData", "Local", "Opera Software", "Opera Stable")),
+    (
+        "opera-gx",
+        ("AppData", "Roaming", "Opera Software", "Opera GX Stable"),
+        ("AppData", "Local", "Opera Software", "Opera GX Stable"),
+    ),
 )
 FIREFOX_PROFILE_ROOT = ("AppData", "Roaming", "Mozilla", "Firefox", "Profiles")
 PARSER_VERSION = "windows-browser-v9"
@@ -299,6 +321,21 @@ class WindowsBrowserArtifactsProvider:
         return True
 
     def collect(self, root: Path) -> Iterable[ArtifactRecord]:
+        scanner = WebUploadScanner()
+        for record in self._collect_rows(root):
+            scanner.observe(record)
+            yield record
+        yield from scanner.candidates
+        if scanner.error or scanner.capped:
+            yield browser_parse_error_record(
+                BrowserRowContext(provider=self.name, user="", browser="", profile=""),
+                Path("web_upload_patterns.yaml"),
+                reason="web-upload-patterns-unavailable" if scanner.error else "web-upload-candidate-cap-reached",
+                error=ValueError(scanner.error) if scanner.error else None,
+            )
+
+    def _collect_rows(self, root: Path) -> Iterable[ArtifactRecord]:
+        cache_budget = CacheBudget(MAX_CACHE_ENTRIES)
         for user_root in iter_windows_user_homes(root):
             user_name = user_root.name
             for browser_name, relative_parts in CHROMIUM_BROWSER_ROOTS:
@@ -311,41 +348,22 @@ class WindowsBrowserArtifactsProvider:
                 for profile_dir in sorted(user_data_root.iterdir(), key=lambda item: item.name.lower()):
                     if not profile_dir.is_dir():
                         continue
-                    history_path = profile_dir / "History"
-                    history_rows: list[dict[str, object]] = []
-                    download_rows: list[dict[str, object]] = []
-                    if history_path.is_file():
-                        # Snapshot/SQLite failures are reported as browser-parse-error
-                        # rows by collect_chromium_profile_rows below.
-                        history_rows, download_rows = extract_chromium_history_and_downloads(history_path)
-                    if not history_rows and not download_rows:
-                        # An unreadable or empty History must not hide the rest of
-                        # the profile: keep the storage-only inventory.
-                        yield from build_browser_storage_only_artifacts(
-                            provider=self.name,
-                            user=user_name,
-                            browser=browser_name,
-                            profile=profile_dir.name,
-                            profile_dir=profile_dir,
-                        )
-                    else:
-                        yield from build_browser_artifacts(
-                            provider=self.name,
-                            artifact_type="browser-history-downloads",
-                            user=user_name,
-                            browser=browser_name,
-                            profile=profile_dir.name,
-                            source_path=history_path,
-                            history_rows=history_rows,
-                            download_rows=download_rows,
-                        )
-                    yield from collect_chromium_profile_rows(
-                        provider=self.name,
-                        user=user_name,
-                        browser=browser_name,
-                        profile=profile_dir.name,
-                        profile_dir=profile_dir,
-                    )
+                    yield from self._collect_chromium_profile(user_name, browser_name, profile_dir, cache_budget)
+            for browser_name, roaming_parts, local_parts in CHROMIUM_SINGLE_PROFILE_ROOTS:
+                profile_dir = user_root.joinpath(*roaming_parts)
+                if not profile_dir.is_dir():
+                    continue
+                yield from chromium_local_state_rows(
+                    provider=self.name, user=user_name, browser=browser_name, user_data_root=profile_dir
+                )
+                local_root = user_root.joinpath(*local_parts)
+                yield from self._collect_chromium_profile(
+                    user_name,
+                    browser_name,
+                    profile_dir,
+                    cache_budget,
+                    extra_cache_roots=(local_root,) if local_root.is_dir() else (),
+                )
 
             firefox_root = user_root.joinpath(*FIREFOX_PROFILE_ROOT)
             if not firefox_root.is_dir():
@@ -375,6 +393,124 @@ class WindowsBrowserArtifactsProvider:
         yield from collect_desktop_cloud_sync_db_artifacts(root)
         yield from collect_ai_service_export_artifacts(root)
 
+    def _collect_chromium_profile(
+        self,
+        user_name: str,
+        browser_name: str,
+        profile_dir: Path,
+        cache_budget: CacheBudget,
+        *,
+        extra_cache_roots: tuple[Path, ...] = (),
+    ) -> Iterable[ArtifactRecord]:
+        history_path = profile_dir / "History"
+        history_rows: list[dict[str, object]] = []
+        download_rows: list[dict[str, object]] = []
+        if history_path.is_file():
+            # Snapshot/SQLite failures are reported as browser-parse-error
+            # rows by collect_chromium_profile_rows below.
+            history_rows, download_rows = extract_chromium_history_and_downloads(history_path)
+        if not history_rows and not download_rows:
+            # An unreadable or empty History must not hide the rest of
+            # the profile: keep the storage-only inventory.
+            yield from build_browser_storage_only_artifacts(
+                provider=self.name,
+                user=user_name,
+                browser=browser_name,
+                profile=profile_dir.name,
+                profile_dir=profile_dir,
+            )
+        else:
+            yield from build_browser_artifacts(
+                provider=self.name,
+                artifact_type="browser-history-downloads",
+                user=user_name,
+                browser=browser_name,
+                profile=profile_dir.name,
+                source_path=history_path,
+                history_rows=history_rows,
+                download_rows=download_rows,
+            )
+        yield from collect_chromium_profile_rows(
+            provider=self.name,
+            user=user_name,
+            browser=browser_name,
+            profile=profile_dir.name,
+            profile_dir=profile_dir,
+        )
+        context = BrowserRowContext(provider=self.name, user=user_name, browser=browser_name, profile=profile_dir.name)
+        yield from collect_chromium_cache_rows(context, profile_dir, cache_budget, extra_roots=extra_cache_roots)
+
+
+def collect_chromium_cache_rows(
+    context: BrowserRowContext, profile_dir: Path, budget: CacheBudget, *, extra_roots: tuple[Path, ...] = ()
+) -> Iterable[ArtifactRecord]:
+    """``browser-cache-entry`` rows of a profile's HTTP / CacheStorage caches (bodies never kept).
+
+    A corrupt entry is isolated: the directory keeps decoding and one ``browser-parse-error``
+    row per directory carries the error count and up to 20 samples.
+    """
+    for directory, layout in chromium_cache_directories(profile_dir, extra_roots):
+        try:
+            result = decode_cache_directory(directory, layout, budget)
+        except Exception as exc:  # one cache directory must never stop the provider
+            yield browser_parse_error_record(context, directory, reason=f"{layout}-directory-failed", error=exc)
+            continue
+        for entry in result.entries:
+            yield cache_entry_record(context, entry, directory)
+        if result.error_count or "entry-cap-reached" in result.notes:
+            record = browser_parse_error_record(
+                context,
+                directory,
+                reason="cache-entries-corrupt" if result.error_count else "cache-entry-cap-reached",
+            )
+            record.details.update(
+                {
+                    "parser": CACHE_PARSER,
+                    "parser_version": CACHE_PARSER_VERSION,
+                    "cache_format": result.cache_format,
+                    "corrupt_entry_count": result.error_count,
+                    "decoded_entry_count": len(result.entries),
+                    "error_samples": result.error_samples,
+                    "notes": result.notes,
+                    "entry_cap": budget.cap,
+                }
+            )
+            yield record
+
+
+def cache_entry_record(context: BrowserRowContext, entry: Mapping[str, object], directory: Path) -> ArtifactRecord:
+    url = str(entry.get("url") or "")
+    response_time = entry.get("response_time")
+    timestamp = response_time or entry.get("created_at") or entry.get("last_used_at") or entry.get("entry_time")
+    if response_time:
+        kind = "cache-response"
+    elif entry.get("created_at"):
+        kind = "cache-created"
+    else:
+        kind = "cache-last-used" if entry.get("last_used_at") else "cache-stored"
+    source_path = Path(str(entry.get("entry_file") or directory))
+    fields = dict(entry)
+    fields.pop("entry_file", None)
+    fields.update(
+        {
+            "parser": CACHE_PARSER,
+            "parser_version": CACHE_PARSER_VERSION,
+            "recovery_method": entry.get("recovery_method") or "parsed",
+            "host": normalize_host(safe_parse_url(url).netloc),
+            "cache_dir": str(directory),
+        }
+    )
+    return browser_row_record(
+        context,
+        "browser-cache-entry",
+        source_path,
+        timestamp=str(timestamp) if timestamp else None,
+        timestamp_kind=kind,
+        fields=fields,
+        source_table=str(entry.get("cache_format") or ""),
+        source_row_id=entry.get("cache_address") or entry.get("entry_hash"),
+    )
+
 
 def collect_webcachev01_artifacts(root: Path) -> Iterable[ArtifactRecord]:
     for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
@@ -391,6 +527,8 @@ def collect_webcachev01_artifacts(root: Path) -> Iterable[ArtifactRecord]:
         )
         review_profile = webcachev01_review_profile(string_pivots, page_map)
         profile = windows_browser_user_profile(path, root=root)
+        decoded = decode_webcache(path)
+        decode_summary = decoded.summary()
         yield ArtifactRecord(
             provider=WindowsBrowserArtifactsProvider.name,
             artifact_type="webcachev01-ese-file",
@@ -429,12 +567,53 @@ def collect_webcachev01_artifacts(root: Path) -> Iterable[ArtifactRecord]:
                 ),
                 "commercial_grade_ready": False,
                 "commercial_grade_blockers": [
+                    "wininet-container-schema-fixture-required",
+                    "trusted-webcache-parser-diff-required",
+                ]
+                if decoded.rows
+                else [
                     "webcachev01-ese-catalog-row-decoder-required",
                     "wininet-container-schema-fixture-required",
                     "trusted-webcache-parser-diff-required",
                 ],
+                "webcache_decode": decode_summary,
             },
         )
+        context = BrowserRowContext(
+            provider=WindowsBrowserArtifactsProvider.name,
+            user=evidence_user_name(path, root) or str(profile.get("profile_name") or ""),
+            browser="ie-edge-legacy",
+            profile="WebCacheV01",
+        )
+        for artifact_type, timestamp, timestamp_kind, fields, table, row_id in decoded.rows:
+            yield browser_row_record(
+                context,
+                artifact_type,
+                path,
+                timestamp=timestamp,
+                timestamp_kind=timestamp_kind,
+                fields=fields,
+                source_table=table,
+                source_row_id=row_id,
+            )
+        if decoded.errors and not decoded.rows:
+            record = browser_parse_error_record(context, path, reason="webcache-ese-rows-not-decoded")
+            record.details.update({"parser": WEBCACHE_PARSER, "webcache_decode": decode_summary})
+            yield record
+
+
+def evidence_user_name(path: Path, root: Path) -> str:
+    """User folder name of ``path`` (``Users\\<name>\\…``) counted from the evidence root, not the host path."""
+    try:
+        parts = path.resolve().relative_to(root.resolve()).parts
+    except (OSError, ValueError):
+        return ""
+    lowered = [part.lower() for part in parts]
+    if "users" in lowered:
+        index = lowered.index("users")
+        if index + 1 < len(parts):
+            return parts[index + 1]
+    return ""
 
 
 def webcachev01_review_profile(

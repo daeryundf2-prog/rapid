@@ -277,6 +277,8 @@ TIMELINE_EXCLUDED_TYPES: frozenset[str] = frozenset(
         "kakaotalk-windows-correlation-summary",
         "synthetic-media-scan-status",
         "synthetic-media-scan-summary",
+        # Derived lead rows that re-copy the time of their source cache/history row.
+        "web-upload-candidate",
     }
 )
 # Aggregate rows that re-copy times of per-row artifacts of the same payload:
