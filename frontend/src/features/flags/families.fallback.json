@@ -1,5 +1,5 @@
 {
- "version": "e9cbdc0da2c657cb",
+ "version": "99087ce6028f5b48",
  "families": [
   {
    "id": "sam-account",
@@ -2501,8 +2501,25 @@
       "deleted-or-recovered-candidate": "삭제·복구 후보",
       "candidate-marker-present": "삭제 표식 후보",
       "not-decoded": "해석 안 함",
-      "unknown": "불명"
+      "unknown": "불명",
+      "index-only": "색인에만 있음",
+      "deleted-folder": "삭제 폴더"
      }
+    },
+    {
+     "key": "mail_client",
+     "label": "메일 클라이언트"
+    },
+    {
+     "key": "account",
+     "semantic": "account",
+     "label": "계정"
+    },
+    {
+     "key": "mailbox_store",
+     "semantic": "path",
+     "label": "메일함 원본",
+     "format": "path"
     }
    ],
    "rules": [
@@ -2663,6 +2680,10 @@
    ],
    "aux_columns": [
     {
+     "key": "mail_client",
+     "label": "메일 클라이언트"
+    },
+    {
      "key": "timezone",
      "label": "시간대"
     },
@@ -2739,6 +2760,10 @@
     }
    ],
    "aux_columns": [
+    {
+     "key": "mail_client",
+     "label": "메일 클라이언트"
+    },
     {
      "key": "emails",
      "label": "이메일 전체"
@@ -2824,6 +2849,309 @@
      "semantic": "path",
      "label": "원본 경로",
      "format": "path"
+    }
+   ],
+   "rules": []
+  },
+  {
+   "id": "email-client-account",
+   "label": "메일 클라이언트 계정",
+   "types": [
+    "email-client-account"
+   ],
+   "core_columns": [
+    {
+     "key": "mail_client",
+     "label": "메일 클라이언트"
+    },
+    {
+     "key": "account",
+     "semantic": "account",
+     "label": "계정"
+    },
+    {
+     "key": "identity_emails",
+     "semantic": "account",
+     "label": "보내는 주소(ID)"
+    },
+    {
+     "key": "server_type",
+     "label": "서버 종류",
+     "value_labels": {
+      "imap": "IMAP",
+      "pop3": "POP3",
+      "none": "로컬 폴더",
+      "rss": "RSS",
+      "nntp": "뉴스그룹"
+     }
+    },
+    {
+     "key": "server_hostname",
+     "semantic": "device",
+     "label": "수신 서버"
+    },
+    {
+     "key": "server_username",
+     "semantic": "account",
+     "label": "서버 사용자 이름"
+    },
+    {
+     "key": "smtp_hosts",
+     "label": "보내는 서버(SMTP)"
+    },
+    {
+     "key": "user",
+     "label": "사용자 프로필"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "identity_names",
+     "semantic": "person",
+     "label": "표시 이름"
+    },
+    {
+     "key": "server_port",
+     "label": "포트",
+     "format": "number"
+    },
+    {
+     "key": "account_key",
+     "label": "계정 키",
+     "format": "mono"
+    },
+    {
+     "key": "server_directory",
+     "label": "메일 폴더 위치",
+     "format": "path"
+    },
+    {
+     "key": "account_fields",
+     "label": "계정 XML 항목"
+    },
+    {
+     "key": "eml_file_count",
+     "label": "EML 파일 수",
+     "format": "number"
+    },
+    {
+     "key": "attachment_file_count",
+     "label": "첨부 파일 수",
+     "format": "number"
+    },
+    {
+     "key": "source_path",
+     "semantic": "path",
+     "label": "원본",
+     "format": "path"
+    },
+    {
+     "key": "parser_version",
+     "label": "파서 버전",
+     "format": "mono"
+    }
+   ],
+   "rules": []
+  },
+  {
+   "id": "email-client-profile",
+   "label": "메일 클라이언트 프로필",
+   "types": [
+    "email-client-profile"
+   ],
+   "core_columns": [
+    {
+     "key": "mail_client",
+     "label": "메일 클라이언트"
+    },
+    {
+     "key": "profile_name",
+     "label": "프로필"
+    },
+    {
+     "key": "client_version",
+     "label": "버전"
+    },
+    {
+     "key": "message_rows",
+     "label": "메일 행",
+     "format": "number"
+    },
+    {
+     "key": "mail_folder_count",
+     "label": "메일 폴더 수",
+     "format": "number"
+    },
+    {
+     "key": "credential_store_files",
+     "label": "자격 증명 저장소(존재만)"
+    },
+    {
+     "key": "reason_ko",
+     "label": "사유",
+     "width": 320
+    },
+    {
+     "key": "user",
+     "label": "사용자 프로필"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "contact_rows",
+     "label": "연락처 행",
+     "format": "number"
+    },
+    {
+     "key": "calendar_rows",
+     "label": "일정 행",
+     "format": "number"
+    },
+    {
+     "key": "account_rows",
+     "label": "계정 행",
+     "format": "number"
+    },
+    {
+     "key": "gloda_index_only_rows",
+     "label": "색인 전용 메일 행",
+     "format": "number"
+    },
+    {
+     "key": "mbox_bytes_read",
+     "label": "읽은 mbox 크기",
+     "format": "bytes"
+    },
+    {
+     "key": "parse_error_count",
+     "label": "처리 오류 수",
+     "format": "number"
+    },
+    {
+     "key": "caps_hit",
+     "label": "상한 도달"
+    },
+    {
+     "key": "client_root",
+     "semantic": "path",
+     "label": "클라이언트 폴더",
+     "format": "path"
+    }
+   ],
+   "rules": []
+  },
+  {
+   "id": "email-client-store",
+   "label": "메일 저장소(ESE)",
+   "types": [
+    "email-client-store"
+   ],
+   "core_columns": [
+    {
+     "key": "mail_client",
+     "label": "메일 클라이언트"
+    },
+    {
+     "key": "store_name",
+     "label": "저장소"
+    },
+    {
+     "key": "store_bytes",
+     "label": "크기",
+     "format": "bytes"
+    },
+    {
+     "key": "ese_decode_status",
+     "label": "해석 상태",
+     "value_labels": {
+      "catalog-decoded": "표 목록 해석",
+      "no-tables": "표 없음",
+      "decode-failed": "해석 실패",
+      "skipped-size-cap": "크기 상한으로 건너뜀",
+      "not-attempted": "시도 안 함"
+     }
+    },
+    {
+     "key": "ese_table_count",
+     "label": "표 수",
+     "format": "number"
+    },
+    {
+     "key": "address_candidates",
+     "semantic": "account",
+     "label": "메일 주소 후보"
+    },
+    {
+     "key": "account",
+     "semantic": "account",
+     "label": "계정"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "ese_tables",
+     "label": "표 목록"
+    },
+    {
+     "key": "ese_decode_error",
+     "label": "해석 오류"
+    },
+    {
+     "key": "note_ko",
+     "label": "안내"
+    },
+    {
+     "key": "source_path",
+     "semantic": "path",
+     "label": "원본",
+     "format": "path"
+    }
+   ],
+   "rules": []
+  },
+  {
+   "id": "email-client-error",
+   "label": "메일 클라이언트 처리 오류",
+   "types": [
+    "email-client-parse-error"
+   ],
+   "core_columns": [
+    {
+     "key": "mail_client",
+     "label": "메일 클라이언트"
+    },
+    {
+     "key": "reason_ko",
+     "label": "사유",
+     "width": 360
+    },
+    {
+     "key": "source_path",
+     "label": "원본",
+     "format": "path"
+    },
+    {
+     "key": "error_type",
+     "label": "오류 종류"
+    },
+    {
+     "key": "source_format",
+     "label": "원본 형식"
+    },
+    {
+     "key": "user",
+     "label": "사용자 프로필"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "error",
+     "label": "오류 원문"
+    },
+    {
+     "key": "parser_version",
+     "label": "파서 버전",
+     "format": "mono"
     }
    ],
    "rules": []
@@ -4960,6 +5288,51 @@
     {
      "key": "entry_name",
      "label": "파일 이름"
+    },
+    {
+     "key": "xmp_creator_tool",
+     "label": "작성 도구(XMP)"
+    },
+    {
+     "key": "xmp_history_summary",
+     "label": "편집 이력(XMP)",
+     "width": 320
+    },
+    {
+     "key": "xmp_history_count",
+     "label": "편집 이력 수",
+     "format": "number"
+    },
+    {
+     "key": "xmp_create_date",
+     "label": "생성(XMP)",
+     "format": "time",
+     "ts_kind": "created"
+    },
+    {
+     "key": "xmp_modify_date",
+     "label": "수정(XMP)",
+     "format": "time",
+     "ts_kind": "modified"
+    },
+    {
+     "key": "xmp_document_ancestor_count",
+     "label": "원본 문서 수(DocumentAncestors)",
+     "format": "number"
+    },
+    {
+     "key": "xmp_document_id",
+     "label": "문서 ID(XMP)",
+     "format": "mono"
+    },
+    {
+     "key": "psd_color_mode",
+     "label": "색상 모드(PSD)"
+    },
+    {
+     "key": "psd_bit_depth",
+     "label": "비트 깊이(PSD)",
+     "format": "number"
     }
    ],
    "rules": [
@@ -5061,6 +5434,230 @@
     {
      "key": "scan_cap_note",
      "label": "상한 안내"
+    }
+   ],
+   "rules": []
+  },
+  {
+   "id": "media-player",
+   "label": "미디어 플레이어 재생 기록",
+   "types": [
+    "media-player-recent"
+   ],
+   "core_columns": [
+    {
+     "key": "list_last_written",
+     "label": "목록 기록 시각(상한)",
+     "format": "time",
+     "ts_kind": "last-written",
+     "width": 170
+    },
+    {
+     "key": "player",
+     "label": "플레이어"
+    },
+    {
+     "key": "media_path",
+     "semantic": "path",
+     "label": "파일 경로",
+     "aliases": [
+      "media_url"
+     ],
+     "format": "path",
+     "width": 320
+    },
+    {
+     "key": "media_name",
+     "label": "파일 이름"
+    },
+    {
+     "key": "drive_letter",
+     "label": "드라이브",
+     "width": 70
+    },
+    {
+     "key": "location_kind",
+     "label": "위치 종류",
+     "value_labels": {
+      "drive": "드라이브",
+      "unc-network": "네트워크 공유",
+      "stream-url": "스트림·URL",
+      "hash-only": "경로 없음(식별자만)",
+      "other": "기타"
+     }
+    },
+    {
+     "key": "mru_order",
+     "label": "목록 순서",
+     "format": "number",
+     "width": 80
+    },
+    {
+     "key": "user",
+     "label": "사용자 프로필"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "media_url",
+     "semantic": "url",
+     "label": "주소(URL)",
+     "format": "url"
+    },
+    {
+     "key": "resume_position_seconds",
+     "label": "이어보기 위치(초)",
+     "format": "number"
+    },
+    {
+     "key": "network_host",
+     "semantic": "device",
+     "label": "네트워크 호스트"
+    },
+    {
+     "key": "entry_kind",
+     "label": "항목 종류",
+     "value_labels": {
+      "file": "파일",
+      "folder": "폴더",
+      "url": "주소",
+      "file-hash": "파일 식별자(해시)"
+     }
+    },
+    {
+     "key": "media_hash",
+     "semantic": "hash",
+     "label": "파일 식별자(곰플레이어)",
+     "format": "mono"
+    },
+    {
+     "key": "resume_position_raw",
+     "label": "이어보기 위치(원래 값)",
+     "format": "number"
+    },
+    {
+     "key": "product_key",
+     "label": "제품 키"
+    },
+    {
+     "key": "source_locator",
+     "label": "원본 위치(섹션·키·값)",
+     "format": "mono"
+    },
+    {
+     "key": "raw_value",
+     "label": "원래 값",
+     "format": "mono"
+    },
+    {
+     "key": "extraction",
+     "label": "추출 방식",
+     "value_labels": {
+      "path-like-value-scan": "경로형 값 수집(값 이름 미확인)",
+      "dpl-file-line": "재생목록 파일 줄"
+     }
+    },
+    {
+     "key": "verification",
+     "label": "형식 확인",
+     "value_labels": {
+      "public-source-documented": "공개 소스로 확인",
+      "unconfirmed": "미확인(후보)"
+     }
+    },
+    {
+     "key": "source_path",
+     "semantic": "path",
+     "label": "원본",
+     "format": "path"
+    },
+    {
+     "key": "recovery_method",
+     "label": "복구 방식"
+    },
+    {
+     "key": "parser_version",
+     "label": "파서 버전",
+     "format": "mono"
+    }
+   ],
+   "rules": []
+  },
+  {
+   "id": "media-player-app",
+   "label": "미디어 플레이어 인벤토리·오류",
+   "types": [
+    "media-player-inventory",
+    "media-player-parse-error"
+   ],
+   "core_columns": [
+    {
+     "key": "player",
+     "label": "플레이어"
+    },
+    {
+     "key": "user",
+     "label": "사용자 프로필"
+    },
+    {
+     "key": "recent_rows",
+     "label": "재생 기록 행",
+     "format": "number"
+    },
+    {
+     "key": "source_count",
+     "label": "원본 수",
+     "format": "number"
+    },
+    {
+     "key": "reason_ko",
+     "label": "사유",
+     "width": 320
+    },
+    {
+     "key": "snapshot_path",
+     "semantic": "path",
+     "label": "스냅샷 폴더(VLC)",
+     "format": "path"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "record_path",
+     "semantic": "path",
+     "label": "녹화 폴더(VLC)",
+     "format": "path"
+    },
+    {
+     "key": "sources",
+     "label": "원본 목록"
+    },
+    {
+     "key": "caps_hit",
+     "label": "상한 도달"
+    },
+    {
+     "key": "parse_error_count",
+     "label": "처리 오류 수",
+     "format": "number"
+    },
+    {
+     "key": "error_type",
+     "label": "오류 종류"
+    },
+    {
+     "key": "error",
+     "label": "오류 원문"
+    },
+    {
+     "key": "verification_note_ko",
+     "label": "형식 확인 안내"
+    },
+    {
+     "key": "source_path",
+     "semantic": "path",
+     "label": "원본",
+     "format": "path"
     }
    ],
    "rules": []
@@ -5624,6 +6221,14 @@
     {
      "key": "caps_hit",
      "label": "상한 도달"
+    },
+    {
+     "key": "key_material_files",
+     "label": "키 파일(존재만)"
+    },
+    {
+     "key": "inventory_only",
+     "label": "인벤토리 전용"
     }
    ],
    "rules": []
@@ -7165,6 +7770,439 @@
    "rules": [
     "generic.timestamp_out_of_range"
    ]
+  },
+  {
+   "id": "phone-link-message",
+   "label": "휴대폰과 연결 문자",
+   "types": [
+    "phone-link-message"
+   ],
+   "core_columns": [
+    {
+     "key": "timestamp",
+     "label": "시각",
+     "format": "time",
+     "ts_kind": "sent",
+     "width": 170
+    },
+    {
+     "key": "counterpart",
+     "semantic": "person",
+     "label": "상대"
+    },
+    {
+     "key": "direction",
+     "label": "방향",
+     "width": 70,
+     "value_labels": {
+      "outgoing": "발신",
+      "incoming": "수신",
+      "draft": "임시 저장",
+      "unknown": "불명"
+     }
+    },
+    {
+     "key": "message_text_preview",
+     "label": "본문",
+     "aliases": [
+      "message_text"
+     ],
+     "width": 320
+    },
+    {
+     "key": "attachments",
+     "semantic": "attachment",
+     "label": "첨부"
+    },
+    {
+     "key": "message_kind",
+     "label": "종류",
+     "width": 70,
+     "value_labels": {
+      "sms": "SMS",
+      "mms": "MMS"
+     }
+    },
+    {
+     "key": "read_state",
+     "label": "읽음",
+     "width": 80
+    },
+    {
+     "key": "device_id",
+     "semantic": "device",
+     "label": "기기 ID",
+     "format": "mono"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "sender",
+     "semantic": "person_sender",
+     "label": "보낸 사람"
+    },
+    {
+     "key": "recipient",
+     "semantic": "person_recipient",
+     "label": "받는 사람"
+    },
+    {
+     "key": "thread_id",
+     "label": "대화 ID",
+     "format": "mono"
+    },
+    {
+     "key": "conversation_title",
+     "label": "대화 상대 목록"
+    },
+    {
+     "key": "message_id",
+     "label": "메시지 ID",
+     "format": "mono"
+    },
+    {
+     "key": "status",
+     "label": "상태"
+    },
+    {
+     "key": "direction_code",
+     "label": "방향 코드(원래 값)",
+     "format": "number"
+    },
+    {
+     "key": "timestamp_encoding",
+     "label": "시각 인코딩"
+    },
+    {
+     "key": "user",
+     "label": "사용자 프로필"
+    },
+    {
+     "key": "source_table",
+     "label": "원본 표"
+    },
+    {
+     "key": "source_path",
+     "semantic": "path",
+     "label": "원본 DB",
+     "format": "path"
+    },
+    {
+     "key": "recovery_method",
+     "label": "복구 방식"
+    },
+    {
+     "key": "parser_version",
+     "label": "파서 버전",
+     "format": "mono"
+    }
+   ],
+   "rules": []
+  },
+  {
+   "id": "phone-link-call",
+   "label": "휴대폰과 연결 통화",
+   "types": [
+    "phone-link-call"
+   ],
+   "core_columns": [
+    {
+     "key": "timestamp",
+     "label": "통화 시작",
+     "format": "time",
+     "ts_kind": "start",
+     "width": 170
+    },
+    {
+     "key": "phone_number",
+     "semantic": "person",
+     "label": "번호"
+    },
+    {
+     "key": "contact_name",
+     "semantic": "person",
+     "label": "이름"
+    },
+    {
+     "key": "call_type",
+     "label": "유형"
+    },
+    {
+     "key": "duration_seconds",
+     "label": "통화 시간(초)",
+     "format": "number"
+    },
+    {
+     "key": "device_id",
+     "semantic": "device",
+     "label": "기기 ID",
+     "format": "mono"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "call_type_code",
+     "label": "유형 코드(원래 값)",
+     "format": "number"
+    },
+    {
+     "key": "timestamp_encoding",
+     "label": "시각 인코딩"
+    },
+    {
+     "key": "user",
+     "label": "사용자 프로필"
+    },
+    {
+     "key": "source_table",
+     "label": "원본 표"
+    },
+    {
+     "key": "source_path",
+     "semantic": "path",
+     "label": "원본 DB",
+     "format": "path"
+    },
+    {
+     "key": "parser_version",
+     "label": "파서 버전",
+     "format": "mono"
+    }
+   ],
+   "rules": []
+  },
+  {
+   "id": "phone-link-contact",
+   "label": "휴대폰과 연결 연락처",
+   "types": [
+    "phone-link-contact"
+   ],
+   "core_columns": [
+    {
+     "key": "contact_name",
+     "semantic": "person",
+     "label": "이름"
+    },
+    {
+     "key": "phone",
+     "semantic": "person",
+     "label": "전화",
+     "aliases": [
+      "phones"
+     ]
+    },
+    {
+     "key": "email",
+     "semantic": "person",
+     "label": "이메일",
+     "aliases": [
+      "emails"
+     ]
+    },
+    {
+     "key": "device_id",
+     "semantic": "device",
+     "label": "기기 ID",
+     "format": "mono"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "phones",
+     "label": "전화 전체"
+    },
+    {
+     "key": "emails",
+     "label": "이메일 전체"
+    },
+    {
+     "key": "contact_id",
+     "label": "연락처 ID",
+     "format": "mono"
+    },
+    {
+     "key": "user",
+     "label": "사용자 프로필"
+    },
+    {
+     "key": "source_path",
+     "semantic": "path",
+     "label": "원본 DB",
+     "format": "path"
+    }
+   ],
+   "rules": []
+  },
+  {
+   "id": "phone-link-photo",
+   "label": "휴대폰과 연결 사진",
+   "types": [
+    "phone-link-photo"
+   ],
+   "core_columns": [
+    {
+     "key": "timestamp",
+     "label": "시각(촬영·동기화)",
+     "format": "time",
+     "ts_kind": "captured",
+     "width": 170
+    },
+    {
+     "key": "file_name",
+     "label": "파일 이름"
+    },
+    {
+     "key": "file_size",
+     "label": "크기",
+     "format": "bytes"
+    },
+    {
+     "key": "mime_type",
+     "label": "형식"
+    },
+    {
+     "key": "media_uri",
+     "semantic": "path",
+     "label": "휴대폰 경로·URI",
+     "format": "path"
+    },
+    {
+     "key": "device_id",
+     "semantic": "device",
+     "label": "기기 ID",
+     "format": "mono"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "taken_at",
+     "label": "촬영",
+     "format": "time",
+     "ts_kind": "captured"
+    },
+    {
+     "key": "updated_at",
+     "label": "갱신",
+     "format": "time",
+     "ts_kind": "last-updated"
+    },
+    {
+     "key": "width",
+     "label": "너비",
+     "format": "number"
+    },
+    {
+     "key": "height",
+     "label": "높이",
+     "format": "number"
+    },
+    {
+     "key": "media_id",
+     "label": "미디어 ID",
+     "format": "mono"
+    },
+    {
+     "key": "source_path",
+     "semantic": "path",
+     "label": "원본 DB",
+     "format": "path"
+    }
+   ],
+   "rules": []
+  },
+  {
+   "id": "phone-link-device",
+   "label": "휴대폰과 연결 기기·오류",
+   "types": [
+    "phone-link-device",
+    "phone-link-parse-error"
+   ],
+   "core_columns": [
+    {
+     "key": "device_id",
+     "semantic": "device",
+     "label": "기기 ID",
+     "format": "mono"
+    },
+    {
+     "key": "device_name",
+     "semantic": "device",
+     "label": "기기 이름"
+    },
+    {
+     "key": "device_model",
+     "label": "모델"
+    },
+    {
+     "key": "message_rows",
+     "label": "문자 행",
+     "format": "number"
+    },
+    {
+     "key": "call_rows",
+     "label": "통화 행",
+     "format": "number"
+    },
+    {
+     "key": "contact_rows",
+     "label": "연락처 행",
+     "format": "number"
+    },
+    {
+     "key": "photo_rows",
+     "label": "사진 행",
+     "format": "number"
+    },
+    {
+     "key": "reason_ko",
+     "label": "사유",
+     "width": 320
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "databases",
+     "label": "DB 목록"
+    },
+    {
+     "key": "database_count",
+     "label": "DB 수",
+     "format": "number"
+    },
+    {
+     "key": "file_count",
+     "label": "파일 수",
+     "format": "number"
+    },
+    {
+     "key": "total_bytes",
+     "label": "전체 크기",
+     "format": "bytes"
+    },
+    {
+     "key": "caps_hit",
+     "label": "상한 도달"
+    },
+    {
+     "key": "error_type",
+     "label": "오류 종류"
+    },
+    {
+     "key": "error",
+     "label": "오류 원문"
+    },
+    {
+     "key": "user",
+     "label": "사용자 프로필"
+    },
+    {
+     "key": "source_path",
+     "semantic": "path",
+     "label": "원본",
+     "format": "path"
+    }
+   ],
+   "rules": []
   },
   {
    "id": "rdp",

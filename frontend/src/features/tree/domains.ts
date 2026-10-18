@@ -321,6 +321,48 @@ export const EMAIL_TYPE_LABELS: Readonly<Record<string, string>> = {
 };
 const EMAIL_EVIDENCE_TYPES = ["email-message", "email-attachment", "contact", "calendar-event"];
 
+// --- R5 L1: communication and media apps ------------------------------------------------------
+/** Desktop mail clients (artifacts/email_clients.py: Thunderbird, Windows Mail, Windows Live Mail) → Korean. */
+export const MAIL_CLIENT_TYPE_LABELS: Readonly<Record<string, string>> = {
+  "email-message": "메일 클라이언트 메일",
+  "email-attachment": "메일 클라이언트 첨부",
+  contact: "메일 클라이언트 연락처",
+  "calendar-event": "메일 클라이언트 일정",
+  "email-client-account": "메일 클라이언트 계정",
+  "email-client-profile": "메일 클라이언트 프로필",
+  "email-client-store": "메일 저장소(ESE) 후보",
+  "email-client-parse-error": "메일 클라이언트 처리 오류",
+};
+/** Evidence types of the 메일 클라이언트 group (profile / store / error rows are detail children). */
+const MAIL_CLIENT_EVIDENCE_TYPES = [
+  "email-message",
+  "email-attachment",
+  "contact",
+  "calendar-event",
+  "email-client-account",
+];
+/** Phone Link / Your Phone (artifacts/windows/phone_link.py) → Korean. */
+export const PHONE_LINK_TYPE_LABELS: Readonly<Record<string, string>> = {
+  "phone-link-message": "휴대폰과 연결 문자",
+  "phone-link-call": "휴대폰과 연결 통화",
+  "phone-link-contact": "휴대폰과 연결 연락처",
+  "phone-link-photo": "휴대폰과 연결 사진",
+  "phone-link-device": "휴대폰과 연결 기기",
+  "phone-link-parse-error": "휴대폰과 연결 처리 오류",
+};
+const PHONE_LINK_EVIDENCE_TYPES = [
+  "phone-link-message",
+  "phone-link-call",
+  "phone-link-contact",
+  "phone-link-photo",
+];
+/** Media player recent-play lists (artifacts/windows/media_players.py) → Korean. */
+export const MEDIA_PLAYER_TYPE_LABELS: Readonly<Record<string, string>> = {
+  "media-player-recent": "미디어 플레이어 재생 기록",
+  "media-player-inventory": "미디어 플레이어 인벤토리",
+  "media-player-parse-error": "미디어 플레이어 처리 오류",
+};
+
 /**
  * 이벤트 로그 › 채널별 › channel group nodes (core/eventlog_channels.py CHANNEL_GROUPS): Korean-sorted
  * (Hangul before Latin), then 기타 채널 and 채널 없음 last (the remainder buckets).
@@ -1172,6 +1214,61 @@ export const DOMAINS: readonly DomainDef[] = [
         ]),
       },
       { id: "msg-docs", label: "문서/메일 색인", target: { collection: "docs" } },
+      // R5 L1: desktop mail clients (email-clients kind) and the Phone Link SMS rows (primary: 모바일).
+      {
+        id: "msg-mail-clients",
+        // Sorts after 이메일 (its group names the shared email-message / contact / … types first).
+        label: "이메일 클라이언트(Thunderbird·Windows 메일)",
+        target: a("email-clients", MAIL_CLIENT_EVIDENCE_TYPES),
+        typeLabels: MAIL_CLIENT_TYPE_LABELS,
+        children: orderGroup([
+          {
+            id: "msg-mail-clients-messages",
+            label: "메일(메시지)",
+            target: a("email-clients", ["email-message"]),
+            lead: true,
+          },
+          {
+            id: "msg-mail-clients-attachments",
+            label: "메일 첨부",
+            target: a("email-clients", ["email-attachment"]),
+          },
+          {
+            id: "msg-mail-clients-contacts",
+            label: "연락처(주소록)",
+            target: a("email-clients", ["contact"]),
+          },
+          { id: "msg-mail-clients-calendar", label: "일정", target: a("email-clients", ["calendar-event"]) },
+          {
+            id: "msg-mail-clients-accounts",
+            label: "계정·서버",
+            target: a("email-clients", ["email-client-account"]),
+          },
+          {
+            id: "msg-mail-clients-profiles",
+            label: "프로필·자격 증명 저장소(존재만)",
+            target: a("email-clients", ["email-client-profile"]),
+            detail: true,
+          },
+          {
+            id: "msg-mail-clients-stores",
+            label: "메일 저장소(ESE) 후보",
+            target: a("email-clients", ["email-client-store"]),
+            detail: true,
+          },
+          {
+            id: "msg-mail-clients-errors",
+            label: "처리 오류",
+            target: a("email-clients", ["email-client-parse-error"]),
+            detail: true,
+          },
+        ]),
+      },
+      {
+        id: "msg-phone-link",
+        label: "휴대폰과 연결 문자(Phone Link)",
+        target: a("windows-phone-link", ["phone-link-message"]),
+      },
     ]),
   },
   {
@@ -1276,6 +1373,22 @@ export const DOMAINS: readonly DomainDef[] = [
           "synthetic-media-scan-error": "스캔 오류",
         },
       },
+      // R5 L1: media player recent-play lists (VLC, PotPlayer, GOM Player, KMPlayer).
+      {
+        id: "media-player-recent",
+        label: "미디어 플레이어 재생 기록",
+        target: a("media-player", ["media-player-recent"]),
+      },
+      {
+        id: "media-player-inventory",
+        label: "미디어 플레이어 인벤토리·오류",
+        target: a("media-player", ["media-player-inventory", "media-player-parse-error"]),
+        detail: true,
+        typeLabels: pickLabels(MEDIA_PLAYER_TYPE_LABELS, [
+          "media-player-inventory",
+          "media-player-parse-error",
+        ]),
+      },
     ],
   },
   {
@@ -1290,6 +1403,45 @@ export const DOMAINS: readonly DomainDef[] = [
       },
       { id: "mobile-android", label: "Android", target: a("android-apk") },
       { id: "mobile-all", label: "통합 뷰", target: a("mobile-export") },
+      // R5 L1: Phone Link / Your Phone (휴대폰과 연결) rows synced to the PC.
+      {
+        id: "mobile-phone-link",
+        label: "휴대폰과 연결(Phone Link)",
+        target: a("windows-phone-link", PHONE_LINK_EVIDENCE_TYPES),
+        typeLabels: PHONE_LINK_TYPE_LABELS,
+        children: orderGroup([
+          {
+            // Primary node: 메신저·메일 › 휴대폰과 연결 문자 (artifact_domains routes phone-link-message there).
+            id: "mobile-phone-link-messages",
+            label: "문자(SMS·MMS)",
+            target: a("windows-phone-link", ["phone-link-message"]),
+            lead: true,
+            crossRef: true,
+          },
+          {
+            id: "mobile-phone-link-calls",
+            label: "통화",
+            target: a("windows-phone-link", ["phone-link-call"]),
+          },
+          {
+            id: "mobile-phone-link-contacts",
+            label: "연락처",
+            target: a("windows-phone-link", ["phone-link-contact"]),
+          },
+          {
+            id: "mobile-phone-link-photos",
+            label: "사진",
+            target: a("windows-phone-link", ["phone-link-photo"]),
+          },
+          {
+            id: "mobile-phone-link-devices",
+            label: "기기·처리 오류",
+            target: a("windows-phone-link", ["phone-link-device", "phone-link-parse-error"]),
+            detail: true,
+            typeLabels: pickLabels(PHONE_LINK_TYPE_LABELS, ["phone-link-device", "phone-link-parse-error"]),
+          },
+        ]),
+      },
     ],
   },
   {
