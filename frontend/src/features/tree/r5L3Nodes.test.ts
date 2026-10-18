@@ -53,7 +53,13 @@ describe("R5 L3 nodes", () => {
     );
     expect(node("web", "web-p2p-errors").detail).toBe(true);
     expect(categoryOf("p2p")).toBe("web");
-    expect(artifactTypeLabel("p2p-transfer")).toBe("전송 기록");
+    // The 유형 list names a type out of its tree context: "P2P" prefix (console review).
+    expect(artifactTypeLabel("p2p-transfer")).toBe("P2P 전송 기록");
+    expect(artifactTypeLabel("p2p-parse-error")).toBe("P2P 읽기 오류");
+    expect(artifactTypeLabel("p2p-client-config")).toBe("P2P 클라이언트 설정");
+    // Types listed by two tree nodes (registry + files) get a neutral name.
+    expect(artifactTypeLabel("startup-item")).toBe("시작 프로그램 항목");
+    expect(artifactTypeLabel("desktop-wallpaper")).toBe("바탕 화면 배경");
   });
 
   it("GA cookies, adb backup and carved URL nodes", () => {

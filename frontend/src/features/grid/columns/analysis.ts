@@ -311,6 +311,16 @@ export function analysisColumnsForKind(kind: string | undefined, family?: Catalo
   ];
 }
 
+/**
+ * Byte length of a url-carve hit. `undefined` (offset-only highlight) when the stored URL was
+ * redacted (tokens removed, so its length is not the on-disk length) or truncated.
+ */
+export function urlCarveHitLength(d: Record<string, unknown>): number | undefined {
+  const url = typeof d.url === "string" ? d.url : "";
+  if (!url || d.url_tokens_redacted === true || d.url_truncated === true) return undefined;
+  return d.encoding === "utf-16le" ? url.length * 2 : url.length;
+}
+
 export const analysisCollection: CollectionDef = {
   id: "analysis",
   label: "분석 결과",
@@ -351,9 +361,13 @@ export const analysisCollection: CollectionDef = {
     const path = kind === "ntfs-meta" ? null : (strOrNull(raw.path) ?? carveSource);
     const offset = typeof d.offset === "number" && d.offset >= 0 ? d.offset : null;
     const length = typeof d.length === "number" && d.length > 0 ? d.length : undefined;
-    const isCarveHit = kind === "carve" && offset !== null && path !== null;
+    const urlCarve = kind === "url-carve";
+    const isCarveHit = (kind === "carve" || urlCarve) && offset !== null && path !== null;
     const carvedRow =
-      kind === "carve" && d.status !== "false-positive-rejected" && d.recovery_method !== "rejected";
+      urlCarve ||
+      (kind === "carve" && d.status !== "false-positive-rejected" && d.recovery_method !== "rejected");
+    // url-carve rows: highlight the URL's bytes at the hit (UTF-16LE = 2 bytes per char).
+    const hitLength = urlCarve ? urlCarveHitLength(d) : length;
     return makeRow(
       makeRef("analysis", `/rows/${rowIndex}`, analysisId || undefined),
       {
@@ -373,7 +387,11 @@ export const analysisCollection: CollectionDef = {
         ...(volumePath ? { volumePath } : {}),
         ...(Array.isArray(raw.flags) ? { flags: raw.flags, flagList: parseFlags(raw.flags) } : {}),
         ...(isCarveHit
-          ? { highlight: { offset, ...(length ? { length } : {}) }, viewerMode: "hex", sourceOffset: offset }
+          ? {
+              highlight: { offset, ...(hitLength ? { length: hitLength } : {}) },
+              viewerMode: "hex",
+              sourceOffset: offset,
+            }
           : {}),
         // 증거 정보 "복구 방법 카빙 · 오프셋" (rows written before R3 have no recovery_method).
         ...(carvedRow ? { recovery: "carved" } : {}),

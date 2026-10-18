@@ -142,6 +142,20 @@ export const TIMESTAMP_KIND_LABELS: Readonly<Record<string, string>> = {
   "last-shared": "마지막 공유",
   "file-date": "파일 날짜",
   "member-modified": "백업 항목 수정",
+  "last-seen-complete": "완전 소스 마지막 확인",
+  // Timeline canonical forms (core/timeline.py canonical_label strips the type noun:
+  // p2p-transfer "transfer-completed" -> "completed", phone-link-photo "photo-synced" -> "synced",
+  // cloud-sync-event "cloud-delete" -> "delete").
+  completed: "완료",
+  synced: "동기화",
+  download: "다운로드",
+  delete: "삭제",
+  rename: "이름 변경·이동",
+  share: "공유",
+  // R5 L3 Phone Link (phone_link.py row timestamp_kind).
+  "call-start": "통화 시작",
+  "photo-taken": "사진 촬영",
+  "photo-synced": "사진 동기화",
 };
 
 /**

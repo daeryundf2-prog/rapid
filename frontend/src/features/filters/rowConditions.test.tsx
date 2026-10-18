@@ -285,6 +285,22 @@ describe("client predicates", () => {
     expect([...rowContentTypes(lnk)]).toEqual(["document"]);
     const media = row({ rowKey: "m", artifactType: "media-image", sourcePath: "C:/p/a.heic" });
     expect([...rowContentTypes(media)]).toEqual(["image"]);
+    // R5 L1 media player rows: the played file (media_path) is the content, never the ini path.
+    const played = row({
+      rowKey: "p",
+      artifactType: "media-player-recent",
+      sourcePath: "C:/Users/a/AppData/Roaming/vlc/vlc-qt-interface.ini",
+      fields: { details: { media_path: "D:/movies/clip.mkv" } },
+    });
+    expect([...rowContentTypes(played)]).toEqual(["video"]);
+    const urlOnly = row({
+      rowKey: "q",
+      artifactType: "media-player-recent",
+      // The row's own path (a .db the player keeps) is not its content.
+      sourcePath: "C:/Users/a/AppData/Roaming/player/history.db",
+      fields: { details: { media_url: "https://example.com/stream" } },
+    });
+    expect([...rowContentTypes(urlOnly)]).toEqual([]);
     expect(pathExtension("C:/a/.hidden")).toBe("");
     expect(pathExtension("C:/a/b.tar.gz")).toBe("gz");
   });
