@@ -57,6 +57,10 @@ export const KIND_CATEGORY: Readonly<Record<string, KindMeta>> = {
   "kakaotalk-windows": { category: "communication", icon: "message" },
   "kakaotalk-macos": { category: "communication", icon: "message" },
   "windows-messenger": { category: "communication", icon: "message" },
+  // R5 L1
+  "windows-phone-link": { category: "communication", icon: "smartphone" },
+  "media-player": { category: "media", icon: "film" },
+  "email-clients": { category: "email-calendar", icon: "mail" },
   "media-image": { category: "media", icon: "image" },
   "synthetic-media": { category: "media", icon: "film" },
   email: { category: "email-calendar", icon: "mail" },

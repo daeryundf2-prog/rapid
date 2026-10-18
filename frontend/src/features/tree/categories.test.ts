@@ -10,13 +10,14 @@ import {
   kindsForCategory,
 } from "./categories";
 
-/** `artifact_collectors()` keys in rapidtriage/core/artifacts (25 kinds). */
+/** `artifact_collectors()` keys in rapidtriage/core/artifacts (25 kinds + R5 L1 email-clients, media-player, windows-phone-link). */
 const ENGINE_KINDS = [
   "android-apk",
   "browser",
   "cloud-export",
   "cloud-sync",
   "email",
+  "email-clients",
   "eventlog",
   "generic-documents",
   "kakaotalk-macos",
@@ -24,6 +25,7 @@ const ENGINE_KINDS = [
   "linux-system",
   "macos-system",
   "media-image",
+  "media-player",
   "memory-volatility",
   "mobile-export",
   "recent-files",
@@ -32,6 +34,7 @@ const ENGINE_KINDS = [
   "windows-filesystem",
   "windows-messenger",
   "windows-os-account",
+  "windows-phone-link",
   "windows-prefetch",
   "windows-registry",
   "windows-remote-access",
@@ -81,6 +84,7 @@ describe("artifact categories (X11)", () => {
       "kakaotalk-macos",
       "kakaotalk-windows",
       "windows-messenger",
+      "windows-phone-link",
     ]);
     expect(kindsForCategory("other", ["browser", "plugin-xyz"])).toEqual(["plugin-xyz"]);
     expect(kindsForCategory("web", ["browser", "eventlog"])).toEqual(["browser"]);

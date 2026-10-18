@@ -140,6 +140,26 @@ const EVIDENCE: Record<string, string[]> = {
   "synthetic-media": ["synthetic-media-scan-status", "synthetic-media-scan-summary"],
   // R2 M4: desktop cloud sync clients (rapidtriage/artifacts/cloud_sync.py).
   "cloud-sync": ["cloud-sync-account", "cloud-sync-file", "cloud-sync-event", "cloud-sync-inventory"],
+  // R5 L1: communication and media apps.
+  "windows-phone-link": [
+    "phone-link-message",
+    "phone-link-call",
+    "phone-link-contact",
+    "phone-link-photo",
+    "phone-link-device",
+    "phone-link-parse-error",
+  ],
+  "media-player": ["media-player-recent", "media-player-inventory", "media-player-parse-error"],
+  "email-clients": [
+    "email-message",
+    "email-attachment",
+    "contact",
+    "calendar-event",
+    "email-client-account",
+    "email-client-profile",
+    "email-client-store",
+    "email-client-parse-error",
+  ],
 };
 
 /** r2 types (and kinds) that must be reachable from the tree: a typed node or the kind's catch-all. */
@@ -440,8 +460,11 @@ describe("domain mapping table (parser-quality r1)", () => {
       "모바일 메시지",
       "문서/메일 색인",
       "이메일",
+      // R5 L1: desktop mail clients and the Phone Link SMS rows.
+      "이메일 클라이언트(Thunderbird·Windows 메일)",
       "카카오톡(macOS)",
       "카카오톡(Windows)",
+      "휴대폰과 연결 문자(Phone Link)",
       // R3 O3: a server-filtered (rank 3) view of the carve analysis, after the evidence nodes.
       "이메일(EML) 복구됨(카빙)",
     ]);
@@ -821,5 +844,55 @@ describe("r3 O1 registry depth and anti-forensics nodes", () => {
     const labels = nodesOf("anti-forensics").map((n) => n.label);
     isSorted(labels);
     expect(primaryNodes("windows-system", "bitlocker-recovery-key-file")[0]?.domain).toBe("anti-forensics");
+  });
+});
+
+describe("R5 L1 communication and media nodes", () => {
+  const domain = (id: string) => DOMAINS.find((item) => item.id === id);
+  const nodes = (id: string) => flattenDomainNodes(domain(id)?.nodes ?? []);
+
+  it("adds the mail client group after 이메일 and the Phone Link SMS cross-node under 메신저·메일", () => {
+    const ids = (domain("messaging")?.nodes ?? []).map((node) => node.id);
+    expect(ids.indexOf("msg-mail-clients")).toBeGreaterThan(ids.indexOf("msg-email"));
+    expect(nodes("messaging").find((node) => node.id === "msg-phone-link")?.target).toEqual({
+      collection: "artifacts",
+      kind: "windows-phone-link",
+      types: ["phone-link-message"],
+    });
+    // The shared email types keep the 이메일 group's names.
+    expect(artifactTypeLabel("email-message")).toBe("메일(메시지)");
+    expect(artifactTypeLabel("contact")).toBe("메일 연락처(Outlook)");
+  });
+
+  it("keeps inventory / profile / error rows as detail nodes and names every new type in Korean", () => {
+    for (const id of [
+      "msg-mail-clients-profiles",
+      "msg-mail-clients-stores",
+      "msg-mail-clients-errors",
+      "media-player-inventory",
+      "mobile-phone-link-devices",
+    ]) {
+      const node = [...nodes("messaging"), ...nodes("media"), ...nodes("mobile")].find(
+        (item) => item.id === id,
+      );
+      expect(node?.detail, id).toBe(true);
+    }
+    for (const type of [
+      "phone-link-message",
+      "phone-link-call",
+      "phone-link-contact",
+      "phone-link-photo",
+      "phone-link-device",
+      "phone-link-parse-error",
+      "media-player-recent",
+      "media-player-inventory",
+      "media-player-parse-error",
+      "email-client-account",
+      "email-client-profile",
+      "email-client-store",
+      "email-client-parse-error",
+    ]) {
+      expect(artifactTypeLabel(type), type).toMatch(/[가-힣]/);
+    }
   });
 });

@@ -183,7 +183,8 @@ describe("RDP direction · EXIF state · auto logon", () => {
       // Every family of the backend catalogue was reviewed for semantic tags: 54 + r2 M1 (3) + M4 (1) + M2 (6) + M3 (2)
       // + console fix (cloud-sync split 2, messenger-error 1) + r3 O1 (10)
       // + r3 O3 (3: ntfs-timestamp-mismatch, ntfs-logfile-transaction, carved-file).
-      expect(FALLBACK_CATALOG.families).toHaveLength(82);
+      // R5 L1: + phone-link (5), media-player (2), email-client (4) families.
+      expect(FALLBACK_CATALOG.families).toHaveLength(93);
       expect(familyById("sam-account")?.core_columns.find((c) => c.key === "user_name")?.semantic).toBe(
         "account",
       );

@@ -128,13 +128,13 @@ GROUP_CATALOG: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     (
         "messaging",
         "메신저·메일",
-        ("email", "kakaotalk-windows", "kakaotalk-macos", "windows-messenger", "mobile-export"),
+        ("email", "kakaotalk-windows", "kakaotalk-macos", "windows-messenger", "mobile-export", "email-clients"),
     ),
     ("cloud", "클라우드", ("cloud-export", "cloud-sync")),
-    ("media-docs", "미디어·문서", ("media-image", "generic-documents", "synthetic-media")),
+    ("media-docs", "미디어·문서", ("media-image", "generic-documents", "synthetic-media", "media-player")),
     ("remote-system", "원격 접속·시스템", ("windows-remote-access", "windows-system")),
     ("memory", "메모리", ("memory-volatility",)),
-    ("mobile", "모바일 앱", ("android-apk",)),
+    ("mobile", "모바일 앱", ("android-apk", "windows-phone-link")),
     ("cross-platform", "리눅스·macOS", ("linux-system", "macos-system")),
     ("manifest", "매니페스트(프로필 밖 공급자)", ("manifest",)),
     ("docs", "문서 검색·색인", ("docs",)),
@@ -232,6 +232,10 @@ TASK_LABELS: dict[str, str] = {
     "android-apk": "Android APK",
     "linux-system": "Linux 시스템",
     "macos-system": "macOS 시스템",
+    # R5 L1
+    "email-clients": "메일 클라이언트(Thunderbird·Windows 메일)",
+    "media-player": "미디어 플레이어 재생 기록",
+    "windows-phone-link": "휴대폰과 연결(Phone Link)",
 }
 
 

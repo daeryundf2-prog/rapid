@@ -48,6 +48,9 @@ IMAGE_EXTENSIONS = {
     ".heif",
     ".avif",
 }
+# R5 L1: Photoshop documents (header / XMP / embedded thumbnail; pixels are not decoded). Kept out of
+# IMAGE_EXTENSIONS, which the OCR queue also reads: there is no pixel decoder for them.
+PSD_EXTENSIONS = {".psd", ".psb"}
 # Extension -> expected content format (compared against the magic-based
 # ``sniff_image_format`` result to flag renamed files).
 EXTENSION_FORMATS = {
@@ -64,6 +67,8 @@ EXTENSION_FORMATS = {
     ".heic": "heic",
     ".heif": "heif",
     ".avif": "avif",
+    ".psd": "psd",
+    ".psb": "psd",
 }
 FORMAT_FAMILIES = {"heic": "heif", "heif": "heif"}
 # Formats the bundled decoders (OpenCV, Pillow fallback) can turn into pixels.
@@ -263,7 +268,7 @@ class MediaImageProvider:
 
     def collect(self, root: Path) -> Iterable[ArtifactRecord]:
         for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
-            if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS:
+            if path.is_file() and (path.suffix.lower() in IMAGE_EXTENSIONS or path.suffix.lower() in PSD_EXTENSIONS):
                 yield build_image_record(path)
             elif path.is_file() and path.suffix.lower() in VIDEO_EXTENSIONS:
                 yield build_media_av_record(path, media_kind="video")
@@ -711,6 +716,8 @@ def sniff_image_format(header: bytes) -> str:
         return "bmp"
     if header[4:8] == b"ftyp":
         return heif_brand_format(parse_ftyp_box(header))
+    if header.startswith(b"8BPS") and header[4:6] in (b"\x00\x01", b"\x00\x02"):
+        return "psd"
     return ""
 
 
@@ -999,6 +1006,8 @@ def scan_image_structure(path: Path) -> dict[str, object]:
             structure, locator = heif_structure(buf), "heif-signature-scan"
         elif content_format == "tiff":
             structure, locator = {"status": "parsed", "image_end_offset": None, "exif_range": (0, size)}, "tiff-header"
+        elif content_format == "psd":
+            structure, locator = psd_structure(buf), "psd-resource-0x0422"
         elif content_format == "bmp":
             declared = int.from_bytes(header[2:6], "little")
             structure = {
@@ -1010,7 +1019,7 @@ def scan_image_structure(path: Path) -> dict[str, object]:
             result["structure_status"] = "content-not-image"
             return result
         result["structure_status"] = structure.get("status")
-        for key in ("segments", "chunk_count", "frame_count", "ispe_width", "ispe_height", "ispe_count"):
+        for key in ("segments", "chunk_count", "frame_count", "ispe_width", "ispe_height", "ispe_count", "psd"):
             if key in structure:
                 result[key] = structure[key]
         end_offset = structure.get("image_end_offset")
@@ -1027,6 +1036,200 @@ def scan_image_structure(path: Path) -> dict[str, object]:
             result["exif_locator"] = locator
             result["exif"] = parse_tiff_exif(buf, exif_range[0], exif_range[1])
     return result
+
+
+# --- Photoshop (PSD/PSB) ------------------------------------------------------------------------
+# Adobe "Photoshop File Formats Specification": 26-byte header, colour-mode data, image resource
+# blocks ("8BIM" + id + Pascal name + size + data, padded to even). Resources read: 0x0424 XMP,
+# 0x040C thumbnail (28-byte header + JFIF), 0x0422 EXIF data 1. Pixels are never decoded.
+PSD_COLOR_MODES = {0: "Bitmap", 1: "Grayscale", 2: "Indexed", 3: "RGB", 4: "CMYK", 7: "Multichannel", 8: "Duotone", 9: "Lab"}
+PSD_RESOURCE_SIGNATURES = (b"8BIM", b"MeSa", b"PHUT", b"AgHg", b"DCSR")
+PSD_MAX_RESOURCES = 4096
+PSD_MAX_XMP_BYTES = 4 * 1024 * 1024
+PSD_MAX_HISTORY = 200
+PSD_MAX_ANCESTORS = 50
+
+
+def psd_structure(buf: bytes) -> dict[str, object]:
+    """Header fields and bounded image-resource scan of a PSD/PSB (``8BPS``)."""
+    size = len(buf)
+    if size < 26:
+        return {"status": "truncated-header", "image_end_offset": None, "exif_range": None, "psd": {"header_valid": False}}
+    version, channels, height, width, depth, mode = struct.unpack(">H6xHIIHH", bytes(buf[4:26]))
+    psd: dict[str, object] = {
+        "header_valid": True,
+        "version": version,
+        "variant": "psb" if version == 2 else "psd",
+        "channels": channels,
+        "width": width,
+        "height": height,
+        "bit_depth": depth,
+        "color_mode": PSD_COLOR_MODES.get(mode, f"unknown-{mode}"),
+        "color_mode_code": mode,
+        "resource_ids": [],
+    }
+    structure: dict[str, object] = {"status": "parsed", "image_end_offset": None, "exif_range": None, "psd": psd}
+    offset = 26
+    if offset + 4 > size:
+        structure["status"] = "truncated-color-mode"
+        return structure
+    offset += 4 + int.from_bytes(buf[offset : offset + 4], "big")
+    if offset + 4 > size:
+        structure["status"] = "truncated-resources"
+        return structure
+    section_length = int.from_bytes(buf[offset : offset + 4], "big")
+    position = offset + 4
+    end = min(size, position + section_length)
+    if position + section_length > size:
+        structure["status"] = "truncated-resources"
+    resource_ids: list[int] = []
+    while position + 12 <= end and len(resource_ids) < PSD_MAX_RESOURCES:
+        if bytes(buf[position : position + 4]) not in PSD_RESOURCE_SIGNATURES:
+            structure["status"] = "resource-signature-mismatch"
+            break
+        resource_id = int.from_bytes(buf[position + 4 : position + 6], "big")
+        name_length = buf[position + 6]
+        name_total = 1 + name_length + ((1 + name_length) % 2)
+        data_size_at = position + 6 + name_total
+        if data_size_at + 4 > end:
+            structure["status"] = "truncated-resources"
+            break
+        data_size = int.from_bytes(buf[data_size_at : data_size_at + 4], "big")
+        data_start = data_size_at + 4
+        data_end = data_start + data_size
+        if data_end > end:
+            structure["status"] = "truncated-resources"
+            break
+        resource_ids.append(resource_id)
+        if resource_id == 0x0424 and data_size <= PSD_MAX_XMP_BYTES:
+            psd["xmp"] = parse_psd_xmp(bytes(buf[data_start:data_end]).decode("utf-8", errors="replace"))
+        elif resource_id == 0x040C and data_size > 28:
+            psd["thumbnail"] = psd_thumbnail(bytes(buf[data_start : min(data_end, data_start + 28 + THUMBNAIL_MAX_BYTES + 1)]), data_size)
+        elif resource_id == 0x0422 and data_size > 8:
+            structure["exif_range"] = (data_start, data_end)
+        position = data_end + (data_size % 2)
+    psd["resource_ids"] = [f"0x{item:04X}" for item in resource_ids[:200]]
+    psd["resource_count"] = len(resource_ids)
+    return structure
+
+
+def psd_thumbnail(data: bytes, declared_size: int) -> dict[str, object]:
+    """0x040C thumbnail: format 1 = JFIF (kJpegRGB); inline as a data URI when within the preview cap."""
+    fmt, width, height = struct.unpack(">III", data[:12])
+    jpeg = data[28:]
+    preview: dict[str, object] = {
+        "strategy": "psd-embedded-thumbnail",
+        "format": "jpeg" if fmt == 1 else f"raw-{fmt}",
+        "width": width,
+        "height": height,
+        "byte_size": declared_size - 28,
+        "available": False,
+    }
+    if fmt != 1 or not jpeg.startswith(b"\xff\xd8"):
+        preview["reason"] = "not-jfif-thumbnail"
+    elif declared_size - 28 > THUMBNAIL_MAX_BYTES:
+        preview["reason"] = "thumbnail-exceeds-inline-limit"
+    else:
+        preview.update(
+            {
+                "available": True,
+                "sha256": hashlib.sha256(jpeg).hexdigest(),
+                "data_uri": "data:image/jpeg;base64," + base64.b64encode(jpeg).decode("ascii"),
+            }
+        )
+    return preview
+
+
+def _xmp_value(text: str, name: str) -> str:
+    match = re.search(rf'(?<![A-Za-z0-9_:]){re.escape(name)}\s*=\s*"([^"]{{0,1024}})"', text) or re.search(
+        rf"<{re.escape(name)}>([^<]{{0,1024}})</{re.escape(name)}>", text
+    )
+    return html_unescape(match.group(1)).strip() if match else ""
+
+
+def html_unescape(value: str) -> str:
+    return value.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", '"').replace("&apos;", "'").replace("&amp;", "&")
+
+
+def parse_psd_xmp(text: str) -> dict[str, object]:
+    """CreatorTool, create/modify dates, document ids, ``xmpMM:History`` events and ``DocumentAncestors`` (regex, no XML parser)."""
+    xmp: dict[str, object] = {
+        "creator_tool": _xmp_value(text, "xmp:CreatorTool"),
+        "create_date": _xmp_value(text, "xmp:CreateDate"),
+        "modify_date": _xmp_value(text, "xmp:ModifyDate"),
+        "metadata_date": _xmp_value(text, "xmp:MetadataDate"),
+        "document_id": _xmp_value(text, "xmpMM:DocumentID"),
+        "original_document_id": _xmp_value(text, "xmpMM:OriginalDocumentID"),
+        "instance_id": _xmp_value(text, "xmpMM:InstanceID"),
+        "format": _xmp_value(text, "dc:format"),
+    }
+    history: list[dict[str, str]] = []
+    block = re.search(r"<xmpMM:History>(.*?)</xmpMM:History>", text, re.DOTALL)
+    if block:
+        for item in re.finditer(r"<rdf:li\b([^>]*?)(/>|>(.*?)</rdf:li>)", block.group(1), re.DOTALL):
+            chunk = item.group(0)
+            event = {
+                key: _xmp_value(chunk, f"stEvt:{key}")
+                for key in ("action", "when", "softwareAgent", "changed", "instanceID", "parameters")
+            }
+            history.append({key: value for key, value in event.items() if value})
+            if len(history) >= PSD_MAX_HISTORY:
+                break
+    xmp["history"] = history
+    xmp["history_count"] = len(history)
+    ancestors: list[str] = []
+    block = re.search(r"<photoshop:DocumentAncestors>(.*?)</photoshop:DocumentAncestors>", text, re.DOTALL)
+    if block:
+        ancestors = [html_unescape(value).strip() for value in re.findall(r"<rdf:li>([^<]{1,512})</rdf:li>", block.group(1))]
+    xmp["document_ancestor_count"] = len(ancestors)
+    xmp["document_ancestors"] = ancestors[:PSD_MAX_ANCESTORS]
+    return xmp
+
+
+def psd_detail_fields(psd: Mapping[str, object]) -> dict[str, object]:
+    """Row fields of a PSD: header size/mode, XMP edit trail, embedded thumbnail."""
+    fields: dict[str, object] = {"psd_header_valid": bool(psd.get("header_valid"))}
+    if not psd.get("header_valid"):
+        return fields
+    fields.update(
+        {
+            "width": psd.get("width"),
+            "height": psd.get("height"),
+            "dimension_source": "psd-header",
+            "psd_variant": psd.get("variant"),
+            "psd_channels": psd.get("channels"),
+            "psd_bit_depth": psd.get("bit_depth"),
+            "psd_color_mode": psd.get("color_mode"),
+            "psd_resource_count": psd.get("resource_count"),
+        }
+    )
+    xmp = psd.get("xmp")
+    if isinstance(xmp, Mapping):
+        history = [item for item in xmp.get("history") or [] if isinstance(item, Mapping)]
+        agents = sorted({str(item.get("softwareAgent")) for item in history if item.get("softwareAgent")})
+        fields.update(
+            {
+                "xmp_creator_tool": xmp.get("creator_tool", ""),
+                "xmp_create_date": xmp.get("create_date", ""),
+                "xmp_modify_date": xmp.get("modify_date", ""),
+                "xmp_metadata_date": xmp.get("metadata_date", ""),
+                "xmp_document_id": xmp.get("document_id", ""),
+                "xmp_original_document_id": xmp.get("original_document_id", ""),
+                "xmp_history": history,
+                "xmp_history_count": len(history),
+                "xmp_history_agents": agents,
+                "xmp_history_summary": "; ".join(
+                    f"{item.get('when', '')} {item.get('action', '')} {item.get('softwareAgent', '')}".strip() for item in history[:5]
+                ),
+                "xmp_document_ancestor_count": xmp.get("document_ancestor_count", 0),
+                "xmp_document_ancestors": xmp.get("document_ancestors", []),
+            }
+        )
+    thumbnail = psd.get("thumbnail")
+    if isinstance(thumbnail, Mapping):
+        fields["thumbnail_preview"] = dict(thumbnail)
+        fields["psd_thumbnail_present"] = True
+    return fields
 
 
 def exif_decode_text(raw: bytes) -> str:
@@ -2027,6 +2230,8 @@ def build_image_record(path: Path) -> ArtifactRecord:
     ]["validation_plan_sha256"]
     structure = scan_image_structure(resolved)
     details.update(image_format_fields(resolved, structure))
+    if isinstance(structure.get("psd"), Mapping):
+        details.update(psd_detail_fields(structure["psd"]))  # type: ignore[arg-type]
     content_format = str(structure.get("content_format") or "")
     image, decoder, decode_error = decode_image(resolved, content_format)
     if image is None:

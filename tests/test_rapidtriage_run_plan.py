@@ -187,7 +187,7 @@ class PlanConstructionTests(unittest.TestCase):
         plan = build_run_plan(mode="hacking", skip_groups=["messaging"], skip_tasks=["eventlog"], actor="web")
         messaging = [group for group in plan["groups"] if group["id"] == "messaging"][0]
         self.assertEqual(messaging["status"], "skipped")
-        self.assertEqual(messaging["counts"]["skipped"], 5)
+        self.assertEqual(messaging["counts"]["skipped"], 6)  # R5 L1: + email-clients
         self.assertTrue(all(task["reason"] == "실행 전 제외" for task in messaging["tasks"]))
         self.assertEqual(find_task(plan, "eventlog")["requested_by"]["actor"], "web")
         with self.assertRaisesRegex(PlanTargetError, "알 수 없는 그룹입니다: nope"):
@@ -320,8 +320,8 @@ class RunControlPipelineTests(unittest.TestCase):
         self.assertEqual(plan["outcome"], "complete")
         messaging = [group for group in plan["groups"] if group["id"] == "messaging"][0]
         self.assertEqual(messaging["status"], "skipped")
-        self.assertEqual(messaging["counts"], {**messaging["counts"], "total": 5, "skipped": 5, "completed": 0})
-        for kind in ("email", "kakaotalk-windows", "windows-messenger"):
+        self.assertEqual(messaging["counts"], {**messaging["counts"], "total": 6, "skipped": 6, "completed": 0})
+        for kind in ("email", "kakaotalk-windows", "windows-messenger", "email-clients"):
             self.assertFalse((self.output_dir / "artifacts" / f"rapidtriage-artifacts-{kind}.json").exists())
             self.assertNotIn(f"artifacts_{kind}", summary["outputs"])
         scheduler = load_json(self.output_dir / "rapidtriage-parser-scheduler.json")
