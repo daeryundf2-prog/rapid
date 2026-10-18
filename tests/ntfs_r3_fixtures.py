@@ -220,3 +220,45 @@ def logfile(*, bad_fixup_page: bool = True, empty_page: bool = True) -> bytes:
         broken[1022:1024] = b"\x99\x99"  # sector 1 tail no longer equals the update sequence number
         parts.append(bytes(broken))
     return b"".join(parts)
+
+
+def page_with(blob: bytes, next_record_offset: int, *, flags: int = 0) -> bytes:
+    """An RCRD page holding ``blob`` from the data offset (``next_record_offset`` as given)."""
+    page = bytearray(PAGE)
+    page[0:4] = b"RCRD"
+    page[DATA_OFFSET : DATA_OFFSET + len(blob)] = blob
+    struct.pack_into("<QIHHH", page, 8, 0, flags, 1, 1, next_record_offset)
+    return bytes(_fixup(page, 0x28))
+
+
+def spanning_logfile(*, next_record_at_spanning_start: bool = True, broken_continuation: bool = False) -> bytes:
+    """Page 2 ends with a 1,112-byte InitializeFileRecordSegment record whose tail is the start
+    of page 3; page 3's own record (``after.txt``) follows the 8-byte aligned tail (R3 review C1)."""
+    image = b"FILE" + bytes(60) + file_name_value("spanner.exe", parent=5, created="2024-05-01T10:00:00Z")
+    image = image.ljust(1024, b"\x00")
+    page2 = 2 * PAGE
+    small = log_record(lsn=lsn_for(page2 + DATA_OFFSET), redo_op=0x1B, undo_op=0)
+    filler = [
+        log_record(lsn=lsn_for(page2 + DATA_OFFSET + len(small) * (index + 1)), redo_op=0x02, undo_op=0, redo=image, target_vcn=index)
+        for index in range(3)
+    ]
+    first = small + b"".join(filler)
+    big = log_record(lsn=lsn_for(page2 + DATA_OFFSET + len(first)), redo_op=0x02, undo_op=0x00, redo=image, target_vcn=99)
+    room = PAGE - DATA_OFFSET - len(first)
+    tail = big[room:]
+    after = log_record(
+        lsn=lsn_for(3 * PAGE + DATA_OFFSET + len(tail)),
+        redo_op=0x0E,
+        undo_op=0x0F,
+        redo=file_name_value("after.txt", parent=5, created="2024-06-01T00:00:00Z"),
+    )
+    next_record = DATA_OFFSET + len(first) if next_record_at_spanning_start else PAGE
+    third = bytearray(page_with(tail + after, DATA_OFFSET + len(tail) + len(after), flags=1))
+    if broken_continuation:
+        third[1022:1024] = b"\x99\x99"
+    return (
+        rstr_page(lsn_for(3 * PAGE))
+        + rstr_page(lsn_for(3 * PAGE))
+        + page_with(first + big[:room], next_record)
+        + bytes(third)
+    )

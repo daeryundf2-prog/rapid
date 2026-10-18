@@ -129,6 +129,18 @@ class R3PositiveTests(unittest.TestCase):
             kinds = sorted(entry["kind"] for entry in payload["entries"] if entry["status"] != STATUS_REJECTED)
             self.assertEqual(kinds, sorted(["wav", "mp3", "m4a", "xlsx", "hwp", "hwpx", "pe", "evtx", "eml"]))
             self.assertEqual(payload["summary"]["rejected_count"], 0)
+            # R3 review B7: the chunked scan reports exactly what carve_buffer reports.
+            from rapidtriage.core.carving import SIGNATURES
+
+            def key(entries: list[dict[str, object]]) -> list[tuple[object, ...]]:
+                return sorted((entry["kind"], entry["offset"], entry["size"], entry["status"]) for entry in entries)
+
+            in_memory = carve_buffer(
+                data, source_path=Path("slack.bin"), output_dir=Path("unused"), extract=False,
+                max_carve_bytes=carving.DEFAULT_MAX_CARVE_BYTES, remaining=100,
+                signatures=[s for s in SIGNATURES if s.kind in R3_KINDS],
+            )
+            self.assertEqual(key(payload["entries"]), key(in_memory))
 
 
 class R3FalsePositiveTests(unittest.TestCase):
@@ -188,7 +200,10 @@ class R3FalsePositiveTests(unittest.TestCase):
 
     def test_hwp(self) -> None:
         self.assert_silent(fx.ole("WordDocument", b"\xec\xa5" + b"\x00" * 30), "hwp")
-        self.assert_rejected(fx.hwp()[:1500], "hwp", "hwp-")
+        # R3 review B6: an OLE file cut before its FileHeader is identified is silent (it may be
+        # any compound file); once the FileHeader is verified, a short window is a truncated HWP.
+        self.assert_silent(fx.hwp()[:1500], "hwp")
+        self.assert_truncated(fx.hwp()[:-1], "hwp")
         broken = bytearray(fx.hwp())
         broken[0x1C:0x1E] = b"\xff\xff"
         self.assert_rejected(bytes(broken), "hwp", "ole-invalid-byte-order")
@@ -214,6 +229,249 @@ class R3FalsePositiveTests(unittest.TestCase):
         self.assert_rejected(bytes(broken), "evtx", "evtx-header-checksum-mismatch")
         no_chunk = fx.evtx(chunks=1)[:4096] + b"\x00" * 65536
         self.assert_rejected(no_chunk, "evtx", "evtx-no-valid-chunk")
+
+
+def scan_entries(data: bytes, kinds: tuple[str, ...] | None = None, **kwargs: object) -> tuple[list[dict[str, object]], dict]:
+    """``_scan_source`` over ``data`` written to a temporary file (API path: ``count_rejected=False``)."""
+    from rapidtriage.core import carving
+
+    signatures = [s for s in carving.SIGNATURES if kinds is None or s.kind in kinds]
+    stats: dict = {}
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "slack.bin"
+        path.write_bytes(data)
+        entries: list[dict[str, object]] = []
+        carving._scan_source(
+            path, read_limit=len(data), source_root=path.parent, output_dir=path.parent, extract=False,
+            max_carve_bytes=int(kwargs.get("max_carve_bytes", 50 * 1024 * 1024)), remaining=int(kwargs.get("remaining", 250)),
+            signatures=signatures, on_entry=entries.append, count_rejected=bool(kwargs.get("count_rejected", False)), stats=stats,
+        )
+    return entries, stats
+
+
+def hostile_cfb(difat_sectors: int, *, sector_shift: int = 9, major: int = 3) -> bytes:
+    """OLE header whose fat_count/DIFAT chain claim far more FAT sectors than the file holds."""
+    import struct
+
+    size = 1 << sector_shift
+    per = size // 4
+    header = bytearray(512)
+    header[0:8] = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+    struct.pack_into("<HHHHH", header, 0x18, 0x3E, major, 0xFFFE, sector_shift, 6)
+    struct.pack_into("<I", header, 0x2C, 109 + difat_sectors * (per - 1))
+    struct.pack_into("<II", header, 0x44, 1, difat_sectors)
+    struct.pack_into("<109I", header, 0x4C, *([0] * 109))
+    sectors = [b"\x00" * size]
+    for index in range(difat_sectors):
+        following = index + 2 if index < difat_sectors - 1 else 0xFFFFFFFE
+        sectors.append(struct.pack(f"<{per}I", *([0] * (per - 1) + [following])))
+    return bytes(header).ljust(size, b"\x00") + b"".join(sectors)
+
+
+class R3CarvingReviewTests(unittest.TestCase):
+    """R3 adversarial-review regressions B1-B10 (repros ``carveB/t1``-``t9``)."""
+
+    def test_hostile_cfb_fat_is_bounded(self) -> None:
+        """B1: fat_count / DIFAT claiming ~0.5 GB from a 2 MiB file is rejected without allocating."""
+        import struct
+        import time
+        import tracemalloc
+
+        for difat_sectors, shift, major in ((4096, 9, 3), (64, 12, 4)):
+            data = hostile_cfb(difat_sectors, sector_shift=shift, major=major)
+            tracemalloc.start()
+            started = time.monotonic()
+            result = formats.walk_hwp(data)
+            peak = tracemalloc.get_traced_memory()[1]
+            tracemalloc.stop()
+            self.assertIsInstance(result, str)
+            self.assertTrue(formats.is_silent(result), result)
+            self.assertLess(time.monotonic() - started, 2.0)
+            self.assertLess(peak, 16 * 1024 * 1024)
+        duplicate = bytearray(fx.hwp() + b"\x00" * 2048)
+        struct.pack_into("<I", duplicate, 0x2C, 2)
+        struct.pack_into("<2I", duplicate, 0x4C, 0, 0)
+        self.assertEqual(formats.walk_hwp(bytes(duplicate)), "hwp-difat-duplicate-sector")
+
+    def test_memory_error_is_a_rejection(self) -> None:
+        from rapidtriage.core import carving
+
+        def explode(_window: bytes) -> object:
+            raise MemoryError
+
+        signature = next(s for s in carving.SIGNATURES if s.kind == "hwp")
+        patched = carving.CarvingSignature(**{**signature.__dict__, "walker": explode})
+        entries = carve_buffer(
+            fx.slack(fx.hwp()), source_path=Path("x"), output_dir=Path("unused"), extract=False,
+            max_carve_bytes=1024 * 1024, remaining=10, signatures=[patched],
+        )
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["status"], STATUS_REJECTED)
+        self.assertTrue(str(entries[0]["rejected_reason"]).endswith("memory-exhausted"))
+
+    def test_walkers_prewalk_a_prefix_before_reading_the_window(self) -> None:
+        """B2: an MP3 frame sync in random data no longer reads its 50 MiB window."""
+        import os
+
+        from rapidtriage.core import carving
+
+        seen: list[int] = []
+        original = formats.walk_mp3_sync
+
+        def spy(window: bytes) -> object:
+            seen.append(len(window))
+            return original(window)
+
+        data = os.urandom(2 * 1024 * 1024)
+        signatures = [s for s in carving.SIGNATURES if s.kind == "mp3" and s.walker is formats.walk_mp3_sync]
+        patched = [carving.CarvingSignature(**{**s.__dict__, "walker": spy}) for s in signatures]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "r.bin"
+            path.write_bytes(data)
+            carving._scan_source(
+                path, read_limit=len(data), source_root=path.parent, output_dir=path.parent, extract=False,
+                max_carve_bytes=50 * 1024 * 1024, remaining=250, signatures=patched, on_entry=lambda _e: None,
+                count_rejected=False,
+            )
+        self.assertTrue(seen)
+        self.assertEqual(max(seen), carving.PREWALK_BYTES)
+        # A real stream still gets its full window after the prefix passes.
+        hits = accepted(carve(fx.slack(fx.mp3_frames(200)), ("mp3",)))
+        self.assertEqual(len(hits), 1)
+        self.assertEqual(hits[0]["size"], len(fx.mp3_frames(200)))
+
+    def test_repeated_received_lines_are_not_quadratic(self) -> None:
+        """B3: an unterminated header block claims what it parsed; rejections per kind are capped."""
+        import time
+
+        from rapidtriage.core import carving
+
+        data = b"Received: from x\n" * (1024 * 1024 // 17)
+        started = time.monotonic()
+        entries, _stats = scan_entries(data, ("eml",))
+        self.assertLess(time.monotonic() - started, 5.0)
+        self.assertLessEqual(len(entries), 20)
+        self.assertTrue(all(entry["rejected_reason"] == "eml-header-unterminated" for entry in entries))
+        bad_pe = bytearray(fx.pe())
+        bad_pe[0x84:0x86] = b"\x34\x12"
+        with unittest.mock.patch.object(carving, "MAX_UNCOUNTED_REJECTIONS_PER_KIND", 3):
+            entries, stats = scan_entries(fx.slack(*([bytes(bad_pe)] * 10)), ("pe",))
+        self.assertEqual(len(entries), 3)
+        self.assertEqual(stats["rejection_capped_kinds"], {"pe": 1})
+
+    def test_truncated_candidates_claim_only_verified_structures(self) -> None:
+        """B4: a footerless docx / truncated mp4 no longer hides the files after it."""
+        import struct
+
+        data = fx.slack(fx.ooxml("docx")[:-30], fx.ooxml("xlsx"), fx.hwpx())
+        for entries in (carve(data), scan_entries(data)[0]):
+            kinds = [entry["kind"] for entry in accepted(entries)]
+            self.assertIn("docx", kinds)
+            self.assertIn("xlsx", kinds)
+            self.assertIn("hwpx", kinds)
+        movie = bytearray(fx.mp4())
+        mdat = bytes(movie).find(b"mdat") - 4
+        struct.pack_into(">I", movie, mdat, 1 << 20)
+        entries = accepted(carve(fx.slack(bytes(movie), fx.m4a())))
+        self.assertEqual([(entry["kind"], entry["status"]) for entry in entries], [("mp4", "length-field-truncated"), ("m4a", "length-field")])
+
+    def test_container_with_a_large_first_member_is_classified_from_the_central_directory(self) -> None:
+        """B5: a docx whose first member is 300 KiB is one docx, not a zip plus a mid-archive docx."""
+        import io
+        import os
+        import zipfile
+
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr(zipfile.ZipInfo("word/media/image1.png"), os.urandom(300 * 1024), compress_type=zipfile.ZIP_STORED)
+            archive.writestr("word/document.xml", "<doc/>")
+            archive.writestr("_rels/.rels", "<r/>")
+            archive.writestr(
+                "[Content_Types].xml",
+                '<Types><Override PartName="/word/document.xml" ContentType="application/'
+                'vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>',
+            )
+        payload = buffer.getvalue()
+        for entries in (carve(fx.slack(payload)), scan_entries(fx.slack(payload))[0]):
+            hits = accepted(entries)
+            self.assertEqual([(entry["kind"], entry["offset"], entry["size"]) for entry in hits], [("docx", 1024, len(payload))])
+            self.assertEqual(hits[0]["status"], "footer-validated")
+
+    def test_hwp_truncation_and_non_hwp_ole(self) -> None:
+        """B6: a short last sector is a truncated HWP; a truncated .doc is silent (not an hwp row)."""
+        truncated = accepted(carve(fx.hwp()[:-1], ("hwp",)))
+        self.assertEqual([entry["status"] for entry in truncated], ["length-field-truncated"])
+        doc = fx.ole("WordDocument", b"\xec\xa5" + b"\x00" * 30)
+        self.assertEqual(carve(doc[:1500], ("hwp",)), [])
+
+    def test_carve_buffer_matches_scan_source(self) -> None:
+        """B7: no per-signature resume point in carve_buffer (an embedded PE is reported by both)."""
+        import struct
+
+        outer = bytearray(fx.pe())
+        struct.pack_into("<I", outer, 0x98 + 240 + 40 + 16, 0x800)
+        data = fx.slack(bytes(outer[:0x600]) + fx.pe())
+
+        def key(entries: list[dict[str, object]]) -> list[tuple[object, ...]]:
+            return sorted((entry["kind"], entry["offset"], entry["size"], entry["status"]) for entry in entries)
+
+        self.assertEqual(key(carve(data, ("pe",))), key(scan_entries(data, ("pe",), count_rejected=True)[0]))
+        self.assertEqual(len(accepted(carve(data, ("pe",)))), 2)
+
+    def test_length_sanity_checks(self) -> None:
+        """B8: wav RIFF size, BMFF size-0 box, PE SizeOfHeaders, ID3 size, evtx chunk count, ZIP comment."""
+        import struct
+
+        wav = bytearray(fx.wav())
+        struct.pack_into("<I", wav, 4, 4)
+        self.assertEqual([e["rejected_reason"] for e in carve(bytes(wav), ("wav",))], ["wav-riff-size-before-fmt-end"])
+        movie = fx._box(b"ftyp", b"isom\x00\x00\x02\x00isom") + b"\x00\x00\x00\x00free" + b"\xe5" * 1000
+        self.assertEqual([e["rejected_reason"] for e in carve(movie, ("mp4",))], ["mp4-no-moov-or-mdat"])
+        pe = bytearray(fx.pe())
+        struct.pack_into("<I", pe, 0x98 + 60, 0x7FFFFFFF)
+        self.assertTrue(str(carve(bytes(pe) + b"\x00" * 5000, ("pe",))[0]["rejected_reason"]).startswith("pe-implausible-size-of-headers"))
+        pe = bytearray(fx.pe())
+        struct.pack_into("<I", pe, 0x98 + 60, 0x800)  # past the first section's raw data (0x400)
+        self.assertTrue(str(carve(bytes(pe), ("pe",))[0]["rejected_reason"]).startswith("pe-size-of-headers-past-first-section"))
+        id3 = b"ID3\x03\x00\x00\x7f\x7f\x7f\x7f" + b"\x00" * 100
+        self.assertEqual(carve(id3, ("mp3",)), [])
+        empty_log = bytearray(fx.evtx(chunks=1)[:4096])
+        struct.pack_into("<H", empty_log, 0x2A, 0)
+        struct.pack_into("<I", empty_log, 0x7C, formats.zlib.crc32(bytes(empty_log[:120])) & 0xFFFFFFFF)
+        self.assertEqual([e["rejected_reason"] for e in carve(bytes(empty_log) + b"\x00" * 4096, ("evtx",))], ["evtx-no-chunks"])
+        document = fx.ooxml("docx")
+        overflow = document[:-2] + b"\x01\x00"
+        hits = accepted(carve(overflow, ("docx",)))
+        self.assertEqual([(hit["status"], hit["size"]) for hit in hits], [("footer-validated", len(document))])
+
+    def test_eml_boundaries(self) -> None:
+        """B9: blank-line separators, mbox From_ lines, adjacent messages, DSN bodies."""
+        body_from = fx.EML + b"From the desk of Alice\r\nmore body\r\n"
+        self.assertEqual([e["size"] for e in accepted(carve(body_from, ("eml",)))], [len(body_from)])
+        second = fx.EML.replace(b"Return-Path: <alice@example.test>\r\n", b"")
+        adjacent = accepted(carve(fx.EML + second, ("eml",)))
+        self.assertEqual([(e["offset"], e["size"]) for e in adjacent], [(0, len(fx.EML)), (len(fx.EML), len(second))])
+        blank = accepted(carve(fx.EML + b"\r\n" + second, ("eml",)))
+        self.assertEqual([e["offset"] for e in blank], [0, len(fx.EML) + 2])
+        from_line = b"From alice@example.test Tue Oct  1 09:00:00 2024\r\n"
+        mbox = fx.EML + from_line + fx.EML
+        hits = accepted(carve(mbox, ("eml",)))
+        self.assertEqual([(e["offset"], e["size"]) for e in hits], [(0, len(fx.EML)), (len(fx.EML) + len(from_line), len(fx.EML))])
+        quoted = fx.EML + b"> Return-Path: <x@example.test>\r\nReturn-Path: in prose\r\n"
+        self.assertEqual(len(accepted(carve(quoted, ("eml",)))), 1)
+        dsn = (
+            b"Return-Path: <>\r\nFrom: MAILER-DAEMON@example.test\r\nTo: bob@example.test\r\nSubject: failure\r\n"
+            b"Date: Tue, 1 Oct 2024 09:00:00 +0900\r\nContent-Type: multipart/report; report-type=delivery-status;\r\n"
+            b'\tboundary="b1"\r\n\r\n--b1\r\nContent-Type: text/plain\r\n\r\nfailed\r\n\r\n--b1\r\n'
+            b"Content-Type: message/rfc822\r\n\r\n" + fx.EML + b"\r\n--b1--\r\n"
+        )
+        self.assertEqual([(e["offset"], e["size"]) for e in accepted(carve(dsn, ("eml",)))], [(0, len(dsn))])
+
+    def test_truncated_headers_at_end_of_file_are_silent(self) -> None:
+        """B10: a header cut by the end of the file is not a false-positive row."""
+        self.assertEqual(carve(fx.slack(fx.wav()) + b"ID3\x03", ("mp3",)), [])
+        self.assertEqual([e for e in carve(fx.slack(fx.wav()) + b"RIFF\x00\x00", ("wav",)) if e["status"] == STATUS_REJECTED], [])
+        self.assertEqual([e for e in carve(fx.slack(b"x") + b"MZ\x90\x00", ("pe",)) if e["status"] == STATUS_REJECTED], [])
 
 
 if __name__ == "__main__":

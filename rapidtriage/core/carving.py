@@ -39,6 +39,17 @@ SCAN_OVERLAP_BYTES = 4096
 
 # Bytes probed at a candidate offset for structural header validation.
 HEADER_PROBE_BYTES = 512
+# Walker-based signatures first walk this prefix of their carve window; the full window
+# (up to max_carve_bytes) is read only when the prefix walk does not reject the candidate.
+PREWALK_BYTES = 64 * 1024
+# With ``count_rejected=False`` (API) a signature kind whose rejections in one source exceed
+# this is not evaluated again in that source (disclosed in the scan ``stats``).
+MAX_UNCOUNTED_REJECTIONS_PER_KIND = 2_000
+# Rejections that mean "the bytes after this offset are the same unterminated header block":
+# the rejected range is claimed so every following header line is not re-parsed (quadratic).
+RANGE_CLAIMING_REJECTIONS = frozenset({"eml-header-unterminated"})
+# Internal entry key: end of the range an entry claims (stripped before the entry is emitted).
+_CLAIM_END = "_claim_end"
 
 CARVE_CHECKPOINT_SCHEMA = "carve-checkpoint-v1"
 CARVE_CHECKPOINT_NAME = "rapidtriage-carve.checkpoint.json"
@@ -243,7 +254,8 @@ SIGNATURES: tuple[CarvingSignature, ...] = (
     *(
         CarvingSignature(
             kind, f".{kind}", b"PK\x03\x04", None, validator=formats.zip_container_validator(kind),
-            walker=formats.walk_zip, probe_bytes=ZIP_CONTAINER_PROBE_BYTES, max_bytes=2 * GIB, group="zip",
+            walker=formats.walk_zip_container(kind), probe_bytes=ZIP_CONTAINER_PROBE_BYTES, max_bytes=2 * GIB,
+            group="zip",
         )
         for kind in ("docx", "xlsx", "pptx", "hwpx")
     ),
@@ -488,9 +500,15 @@ class _Claims:
         return group is not None and any(start <= offset < end for start, end in self.ranges.get(group, ()))
 
     def claim(self, signature: CarvingSignature, entry: Mapping[str, object]) -> None:
-        if signature.group is None or not signature.claims_range or entry.get("status") == STATUS_REJECTED:
+        """Claim the candidate's verified range: a rejected unterminated header block claims what it
+        parsed; a truncated/footerless candidate claims only up to its last verified structure."""
+        if signature.group is None or not signature.claims_range:
             return
-        start, end = int(entry["offset"]), int(entry.get("end_offset") or 0)  # type: ignore[arg-type]
+        explicit = entry.get(_CLAIM_END)
+        if entry.get("status") == STATUS_REJECTED and explicit is None:
+            return
+        start = int(entry["offset"])  # type: ignore[arg-type]
+        end = int(explicit) if explicit is not None else int(entry.get("end_offset") or 0)  # type: ignore[arg-type]
         if end > start:
             self.ranges.setdefault(signature.group, []).append((start, end))
 
@@ -512,6 +530,7 @@ def _scan_source(
     check_cancel: Callable[[], None] | None = None,
     on_entry: Callable[[dict[str, object]], None] | None = None,
     count_rejected: bool = True,
+    stats: dict[str, object] | None = None,
 ) -> tuple[list[dict[str, object]], int]:
     """Scan one source in overlapping chunks; returns (entries, bytes_scanned).
 
@@ -529,9 +548,13 @@ def _scan_source(
     ``on_entry`` receives each entry as soon as it is built instead of the
     returned list collecting it (so a cancelled scan keeps what it emitted);
     ``count_rejected=False`` stops ``false-positive-rejected`` entries from
-    counting toward ``remaining``.
+    counting toward ``remaining``; a signature kind with more than
+    :data:`MAX_UNCOUNTED_REJECTIONS_PER_KIND` rejections in the source is then
+    no longer evaluated there (``stats["rejection_capped_kinds"]``).
     """
     entries: list[dict[str, object]] = []
+    rejections: dict[str, int] = {}
+    capped_kinds: set[str] = set()
     counted = 0
     scanned = 0
     tail = b""
@@ -561,7 +584,7 @@ def _scan_source(
                     continue
                 if counted >= remaining:
                     break
-                if claims.covers(signature.group, offset):
+                if claims.covers(signature.group, offset) or signature.kind in capped_kinds:
                     continue
                 if check_cancel is not None:
                     check_cancel()
@@ -602,8 +625,13 @@ def _scan_source(
                 if entry is None:
                     continue  # silently not this format
                 claims.claim(signature, entry)
+                entry.pop(_CLAIM_END, None)
                 if count_rejected or entry.get("status") != STATUS_REJECTED:
                     counted += 1
+                else:
+                    rejections[signature.kind] = rejections.get(signature.kind, 0) + 1
+                    if rejections[signature.kind] >= MAX_UNCOUNTED_REJECTIONS_PER_KIND:
+                        capped_kinds.add(signature.kind)
                 if on_entry is not None:
                     on_entry(entry)
                 else:
@@ -613,6 +641,12 @@ def _scan_source(
             claims.prune(base - SCAN_OVERLAP_BYTES)
             if eof:
                 break
+    if stats is not None and capped_kinds:
+        stats.setdefault("rejection_capped_kinds", {})
+        capped = stats["rejection_capped_kinds"]
+        if isinstance(capped, dict):
+            for kind in sorted(capped_kinds):
+                capped[kind] = int(capped.get(kind, 0)) + 1
     return entries, scanned
 
 
@@ -669,17 +703,34 @@ def _build_candidate_entry(
         handle.seek(offset)
         probe = handle.read(min(signature.probe_bytes, file_size - offset))
     probe = probe[: max(0, min(len(probe), file_size - offset))]
-    rejection = signature.validator(probe) if signature.validator else None
+    rejection = _safe_call(signature.validator, probe) if signature.validator else None
     if rejection is not None:
-        return None if formats.is_silent(rejection) else _rejected_entry(path, offset, signature, rejection)
+        if rejection.startswith("truncated-") and offset + len(probe) >= file_size:
+            return None  # a header cut by the end of the file is not a false positive (silent)
+        entry = None if formats.is_silent(rejection) else _rejected_entry(path, offset, signature, rejection)
+        if entry is not None and rejection in RANGE_CLAIMING_REJECTIONS:
+            entry[_CLAIM_END] = offset + len(probe)
+        return entry
+    if signature.walker is not None and window_size > PREWALK_BYTES:
+        # Pre-walk a small prefix: an MP3 frame sync or a corrupt container is rejected
+        # without reading its whole (up to max_carve_bytes) window.
+        handle.seek(offset)
+        early = _safe_call(signature.walker, handle.read(PREWALK_BYTES))
+        if isinstance(early, str) and not formats.prefix_dependent(early):
+            return None if formats.is_silent(early) else _rejected_entry(path, offset, signature, early)
     handle.seek(offset)
     window = handle.read(window_size)
-    boundary = signature.walker(window) if signature.walker is not None else None
+    boundary = _safe_call(signature.walker, window) if signature.walker is not None else None
     if isinstance(boundary, str):
         return None if formats.is_silent(boundary) else _rejected_entry(path, offset, signature, boundary)
+    claim_end: int | None = None
     if boundary is not None:
-        length, status, boundary_method = boundary
+        length, status, boundary_method = boundary[:3]
         carved, end_offset = window[: max(0, length)], max(0, length)
+        if len(boundary) > 3:
+            claim_end = offset + int(boundary[3])  # type: ignore[misc]
+        elif status == STATUS_LENGTH_FIELD_TRUNCATED and length >= len(window):
+            claim_end = offset  # a declared length past the window verifies nothing: claim nothing
     else:
         carved, end_offset, status, boundary_method = carve_candidate(
             window, 0, signature, max_carve_bytes=window_size
@@ -705,11 +756,21 @@ def _build_candidate_entry(
             boundary_method=boundary_method,
         ),
     }
+    if claim_end is not None:
+        entry[_CLAIM_END] = claim_end
     if extract:
         output_path = output_dir / f"{path.stem}-{offset:012x}-{digest[:12]}{signature.extension}"
         output_path.write_bytes(carved)
         entry["extracted_path"] = str(output_path)
     return entry
+
+
+def _safe_call(function: Callable[[bytes], object], data: bytes):
+    """A validator/walker result; running out of memory on a hostile structure is a rejection."""
+    try:
+        return function(data)
+    except MemoryError:
+        return f"{getattr(function, '__name__', 'walker')}-memory-exhausted"
 
 
 def _status_confidence(status: str) -> str:
@@ -741,13 +802,13 @@ def carve_buffer(
     entries: list[dict[str, object]] = []
     claims = _Claims()
     handle = io.BytesIO(data)
-    # As before R3: a signature resumes after the end of its own previous candidate.
-    resume_at: dict[int, int] = {}
+    # Same rules as ``_scan_source`` (range claims only; no per-signature resume point), so
+    # the in-memory and the chunked file scan report the same candidates.
     for offset, _tie, index in _buffer_matches(data, 0, selected):
         if remaining <= 0:
             break
         signature = selected[index]
-        if offset < resume_at.get(index, 0) or claims.covers(signature.group, offset):
+        if claims.covers(signature.group, offset):
             continue
         entry = _build_candidate_entry(
             handle,
@@ -762,8 +823,8 @@ def carve_buffer(
         if entry is None:
             continue
         claims.claim(signature, entry)
+        entry.pop(_CLAIM_END, None)
         entries.append(entry)
-        resume_at[index] = max(offset + 1, int(entry["end_offset"]))  # type: ignore[call-overload]
         remaining -= 1
     return sorted(entries, key=lambda item: (str(item["source_path"]), int(item["offset"])))
 

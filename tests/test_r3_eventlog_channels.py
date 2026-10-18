@@ -329,5 +329,53 @@ class ChannelApiTests(unittest.TestCase):
         self.assertNotIn("channel_groups", groups[0]["children"][0])
 
 
+class ChannelReviewTests(unittest.TestCase):
+    """R3 adversarial-review regressions C3, C11, C12."""
+
+    def test_distinct_channel_names_are_capped_with_group_overflow(self) -> None:
+        """C3: hostile EVTX with 5,000 distinct channels: 1,000 names kept, the rest counted per group."""
+        from rapidtriage.core.eventlog_channels import (
+            CHANNEL_OVERFLOW_KEY,
+            CHANNEL_TRUNCATED_KEY,
+            MAX_CHANNEL_NAME_CHARS,
+            MAX_CHANNEL_NAMES,
+        )
+
+        counter = ChannelCounter()
+        for index in range(5_000):
+            counter.observe(record(index, f"Microsoft-Windows-PowerShell/Junk{index}", "x", "eventlog-event").to_dict())
+        counter.observe(record(0, "Custom/" + "A" * 5_000, "x", "eventlog-event").to_dict())
+        summary = counter.summary()
+        self.assertEqual(len(summary[CHANNEL_COUNTS_KEY]), MAX_CHANNEL_NAMES)
+        self.assertTrue(summary[CHANNEL_TRUNCATED_KEY])
+        self.assertEqual(summary[CHANNEL_OVERFLOW_KEY], {"other": 1, "powershell": 5_000 - MAX_CHANNEL_NAMES})
+        self.assertTrue(all(len(name) <= MAX_CHANNEL_NAME_CHARS for name in summary[CHANNEL_COUNTS_KEY]))
+        nodes = {node["id"]: node for node in channel_group_nodes(summary[CHANNEL_COUNTS_KEY], 0, summary[CHANNEL_OVERFLOW_KEY])}
+        self.assertEqual(nodes["powershell"]["count"], 5_000)
+        self.assertEqual(sum(node["count"] for node in nodes.values() if node["partition"]), 5_001)
+        self.assertNotIn(CHANNEL_TRUNCATED_KEY, ChannelCounter().summary())
+
+    def test_channel_whitespace_round_trips(self) -> None:
+        """C11: a channel stored with surrounding blanks is counted, listed and filtered stripped."""
+        from rapidtriage.api.app.artifact_filter import normalize_channel_filter
+
+        row = record(0, "  Security ", "Microsoft-Windows-Security-Auditing", "eventlog-event").to_dict()
+        counter = ChannelCounter()
+        counter.observe(row)
+        self.assertEqual(counter.summary()[CHANNEL_COUNTS_KEY], {"Security": 1})
+        channel_filter = normalize_channel_filter([" Security "])
+        assert channel_filter is not None
+        self.assertTrue(channel_filter.matches(row))
+
+    def test_none_group_matches_only_eventlog_rows(self) -> None:
+        """C12: 채널 없음 across kinds never matches a browser / messenger row."""
+        from rapidtriage.core.eventlog_channels import ChannelFilter
+
+        none = ChannelFilter(groups=frozenset({"none"}))
+        self.assertTrue(none.matches(record(0, "", "x", "eventlog-file").to_dict()))
+        self.assertFalse(none.matches({"artifact_type": "browser-history", "details": {"url": "https://example.test"}}))
+        self.assertFalse(none.matches({"artifact_type": "eventlog-event", "details": {"channel": "Security"}}))
+
+
 if __name__ == "__main__":
     unittest.main()

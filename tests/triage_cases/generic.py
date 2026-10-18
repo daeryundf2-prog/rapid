@@ -19,8 +19,16 @@ CASES = {
                 shortcut(target_accessed_at="2087-01-01T00:00:00+00:00"),
                 {"files": "candidates", "row": {"path": r"C:\Users\u\x.doc", "name": "x.doc", "fs_modified_at": "1975-06-01T00:00:00+00:00"}},
                 shortcut(target_modified_at="2024-01-02T03:04:05+00:00"),
+                # R3 review C5: a 0x7FFF... $SI stomp is the out-of-range marker, not "" (MFT row).
+                {
+                    "analysis": "ntfs-meta",
+                    "row": {
+                        "artifact_type": "ntfs-meta-row",
+                        "details": {"source": "mft", "si_created_at": "9999-12-31T23:59:59.999999+00:00", "name": "x.exe"},
+                    },
+                },
             ],
-            "flagged": [0, 1, 2],
+            "flagged": [0, 1, 2, 4],
         },
         # FILETIME/Unix zero placeholders, a far-future cookie expiry, a contact birthday, an EXIF-style text field.
         "negative": {

@@ -15,13 +15,16 @@ the Linux-NTFS ``logfile.h``):
 
 Every page's fixups are applied and checked first; a page whose update
 sequence numbers do not match, or whose magic is wrong, is counted as
-corrupt and skipped (isolated) -- the rest of the file still parses. Records
-are read inside one page only: a record that continues on the next page is
-emitted with ``spans_pages = true`` and only the part in this page decoded.
+corrupt and skipped (isolated) -- the rest of the file still parses. A record
+whose client data continues on the next page(s) is reassembled from them
+(``spans_pages = true``, ``spanning_reassembled``); the continuation is skipped
+before the next page's own records. When a continuation page is unusable the
+record keeps the part read so far and is counted as unresolved.
 
 Targets: ``target_mft_entry`` is a *candidate* computed as
 ``target_vcn * cluster_size / mft_record_size + cluster_block_offset * 512 /
-mft_record_size`` (defaults 4096 / 1024): the open attribute table that says
+mft_record_size``; the cluster size comes from the volume boot sector when the
+caller has it (``cluster_size_basis``), else 4096 is assumed; the open attribute table that says
 which attribute ``target_attribute`` names is not replayed. File name
 candidates are ``$FILE_NAME`` structures found in the redo / undo data (index
 entries and file records), with their $FN created time as the time estimate.
@@ -98,7 +101,10 @@ OPERATION_NAMES: dict[int, tuple[str, str]] = {
 # Operations whose redo / undo data carry a $FILE_NAME (index entries, file records).
 NAME_BEARING_OPS = frozenset({0x02, 0x05, 0x0C, 0x0D, 0x0E, 0x0F, 0x13, 0x14})
 # Operations whose target is an MFT file record (target_mft_entry is meaningful).
-MFT_TARGET_OPS = frozenset({0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x09, 0x0B, 0x0C, 0x0D, 0x13, 0x21})
+MFT_TARGET_OPS = frozenset({0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x09, 0x0B, 0x0C, 0x0D, 0x11, 0x13, 0x21})
+# Record pages after the restart area that may be tail copies (LFS 1.1) / buffer pages (LFS 2.0):
+# their LSNs are remembered so the same record found again later is not emitted twice.
+TAIL_COPY_PAGES = 34
 
 _FILETIME_MIN = 119_600_064_000_000_000  # 1980-01-01
 _FILETIME_MAX = 159_017_436_000_000_000  # 2104-12-31
@@ -195,6 +201,13 @@ class LogFileScan:
     record_count: int = 0
     truncated_records: int = 0
     rejected_records: int = 0
+    reassembled_records: int = 0
+    unresolved_spanning_records: int = 0
+    duplicate_lsn_records: int = 0
+    restart_page_offsets: list[int] = field(default_factory=list)
+    lfs_version: str = ""
+    cluster_size: int = 4096
+    cluster_size_basis: str = "assumed-default-4096"
     row_cap_reached: bool = False
     page_cap_reached: bool = False
     byte_cap_reached: bool = False
@@ -214,6 +227,12 @@ class LogFileScan:
             "logfile_record_count": self.record_count,
             "logfile_truncated_record_count": self.truncated_records,
             "logfile_rejected_record_count": self.rejected_records,
+            "logfile_reassembled_record_count": self.reassembled_records,
+            "logfile_unresolved_spanning_record_count": self.unresolved_spanning_records,
+            "logfile_duplicate_lsn_record_count": self.duplicate_lsn_records,
+            "logfile_lfs_version": self.lfs_version,
+            "logfile_cluster_size": self.cluster_size,
+            "logfile_cluster_size_basis": self.cluster_size_basis,
             "logfile_row_cap_reached": self.row_cap_reached,
             "logfile_page_cap_reached": self.page_cap_reached,
             "logfile_byte_cap_reached": self.byte_cap_reached,
@@ -254,49 +273,73 @@ def _lsn_offset(lsn: int, seq_bits: int) -> int | None:
     return (lsn & ((1 << (64 - seq_bits)) - 1)) << 3
 
 
-def _record_row(
-    page: bytes,
-    position: int,
-    *,
-    page_offset: int,
-    page_end: int,
-    scan: LogFileScan,
-    cluster_size: int,
-    mft_record_size: int,
-) -> tuple[dict[str, object] | None, int]:
-    """One log record at ``position`` -> (row or None, size consumed; 0 = stop the page)."""
+@dataclass
+class _Header:
+    """The LFS header of one log record (``client`` = the client data read so far)."""
+
+    this_lsn: int
+    previous_lsn: int
+    undo_next_lsn: int
+    data_length: int
+    client_id: int
+    record_type: int
+    transaction_id: int
+    flags: int
+    page_offset: int
+    record_offset: int
+    client: bytearray = field(default_factory=bytearray)
+
+    @property
+    def missing(self) -> int:
+        return self.data_length - len(self.client)
+
+
+def _read_header(page: bytes, position: int, page_end: int, scan: LogFileScan) -> _Header | None:
+    """The record header at ``position`` (``None`` = no further record in this page)."""
     if position + LFS_RECORD_HEADER_SIZE > page_end:
-        return None, 0
+        return None
     this_lsn, previous_lsn, undo_next_lsn, data_length, client_id, record_type, transaction_id, flags = struct.unpack_from(
         "<QQQIIIIH", page, position
     )
     if this_lsn == 0:
-        return None, 0
+        return None
     if record_type not in RECORD_TYPES or data_length > MAX_CLIENT_DATA:
         scan.rejected_records += 1
-        return None, 0
-    total = (LFS_RECORD_HEADER_SIZE + data_length + 7) & ~7
-    data_start = position + LFS_RECORD_HEADER_SIZE
-    available = min(data_length, page_end - data_start)
-    spans = available < data_length or bool(flags & 1)
-    client = page[data_start : data_start + max(0, available)]
+        return None
+    return _Header(this_lsn, previous_lsn, undo_next_lsn, data_length, client_id, record_type, transaction_id, flags, 0, 0)
+
+
+def _record_row(
+    header: _Header,
+    *,
+    spans: bool,
+    complete: bool,
+    scan: LogFileScan,
+    cluster_size: int,
+    cluster_size_basis: str,
+    mft_record_size: int,
+) -> dict[str, object]:
+    """Row of one log record; ``client`` may be partial (``complete=False``: unresolved page-spanning tail)."""
+    client = bytes(header.client)
     row: dict[str, object] = {
         "source": ROW_SOURCE,
-        "lsn": this_lsn,
-        "previous_lsn": previous_lsn,
-        "undo_next_lsn": undo_next_lsn,
-        "client_data_length": data_length,
-        "client_id": client_id,
-        "record_type": RECORD_TYPES[record_type],
-        "transaction_id": transaction_id,
+        "lsn": header.this_lsn,
+        "previous_lsn": header.previous_lsn,
+        "undo_next_lsn": header.undo_next_lsn,
+        "client_data_length": header.data_length,
+        "client_id": header.client_id,
+        "record_type": RECORD_TYPES[header.record_type],
+        "transaction_id": header.transaction_id,
         "spans_pages": spans,
-        "page_offset": page_offset,
-        "record_offset": page_offset + position,
+        "page_offset": header.page_offset,
+        "record_offset": header.record_offset,
     }
-    expected = _lsn_offset(this_lsn, scan.seq_number_bits)
+    if spans:
+        row["spanning_reassembled"] = complete
+    expected = _lsn_offset(header.this_lsn, scan.seq_number_bits)
     if expected is not None:
-        row["lsn_page_match"] = page_offset <= expected < page_offset + scan.page_size
-    if record_type == 1 and len(client) >= NTFS_CLIENT_HEADER_SIZE:
+        row["lsn_page_match"] = header.page_offset <= expected < header.page_offset + scan.page_size
+    if header.record_type == 1 and len(client) >= NTFS_CLIENT_HEADER_SIZE:
         (redo_op, undo_op, redo_offset, redo_length, undo_offset, undo_length, target_attribute, lcns, record_offset,
          attribute_offset, cluster_block_offset) = struct.unpack_from("<HHHHHHHHHHH", client, 0)
         target_vcn = struct.unpack_from("<Q", client, 0x18)[0]
@@ -323,11 +366,19 @@ def _record_row(
             entry = (target_vcn * cluster_size + cluster_block_offset * SECTOR_SIZE) // mft_record_size
             row["target_mft_entry"] = entry
             row["target_mft_entry_basis"] = f"vcn×{cluster_size}+블록×512÷{mft_record_size}(후보)"
+            row["cluster_size"] = cluster_size
+            row["cluster_size_basis"] = cluster_size_basis
         names: list[dict[str, object]] = []
+        partial_data = False
         if redo_op in NAME_BEARING_OPS or undo_op in NAME_BEARING_OPS:
             for offset, length in ((redo_offset, redo_length), (undo_offset, undo_length)):
-                if length and offset + length <= len(client):
-                    names.extend(file_name_candidates(client[offset : offset + length]))
+                if not length or offset >= len(client):
+                    continue
+                if offset + length > len(client):
+                    partial_data = True  # redo/undo data cut at the page end: decode what is there
+                names.extend(file_name_candidates(client[offset : offset + length]))
+        if partial_data:
+            row["redo_undo_data_partial"] = True
         if names:
             unique = list({item["name"]: item for item in names}.values())[:MAX_NAME_CANDIDATES]
             row["file_name_candidates"] = [item["name"] for item in unique]
@@ -337,16 +388,83 @@ def _record_row(
             if times:
                 row["time_estimate"] = max(times)
                 row["time_estimate_basis"] = "$FILE_NAME 생성 시각(파일 이름 후보)"
-    if spans:
-        scan.truncated_records += 1
     row.update({"recovery_method": "parsed", "parser": PARSER_NAME, "parser_version": PARSER_VERSION})
-    return row, total
+    return row
+
+
+def boot_sector_cluster_size(boot: bytes) -> int | None:
+    """Cluster size from an NTFS boot sector (``bytes per sector × sectors per cluster``), else ``None``."""
+    if len(boot) < 0x0E or boot[3:11] != b"NTFS    ":
+        return None
+    bytes_per_sector = int.from_bytes(boot[0x0B:0x0D], "little")
+    raw = boot[0x0D]
+    sectors = 1 << (256 - raw) if raw > 0x80 else raw
+    if bytes_per_sector not in (512, 1024, 2048, 4096) or not sectors or sectors & (sectors - 1):
+        return None
+    size = bytes_per_sector * sectors
+    return size if 512 <= size <= 2 * 1024 * 1024 else None
+
+
+def _read_restart_pages(head: bytes, scan: LogFileScan) -> int:
+    """Parse the restart pages in ``head``; returns the system page size (0 = none valid).
+
+    The first page normally sits at 0 and the second one system page later. When the first one
+    is unreadable (bad magic, implausible sizes, broken fixups) the second is searched at every
+    plausible page size, so a damaged first restart page does not lose the restart area.
+    """
+    system_page_size = 0
+    candidates = [0]
+    tried: set[int] = set()
+    fallback_added = False
+    while candidates:
+        candidate = candidates.pop(0)
+        if candidate in tried:
+            continue
+        tried.add(candidate)
+        valid = False
+        if head[candidate : candidate + 4] == b"RSTR" and candidate + 0x30 <= len(head):
+            system_page = struct.unpack_from("<I", head, candidate + 0x10)[0]
+            log_page = struct.unpack_from("<I", head, candidate + 0x14)[0]
+            if not (_plausible_page_size(system_page) and _plausible_page_size(log_page)):
+                scan.corrupt(candidate, "재시작 페이지 크기 값이 올바르지 않음")
+            elif candidate + system_page > len(head):
+                scan.corrupt(candidate, "재시작 페이지가 파일 끝을 넘음")
+            else:
+                if candidate == 0:
+                    candidates.append(system_page)
+                try:
+                    fixed = apply_fixups(head[candidate : candidate + system_page])
+                except FixupError as exc:
+                    scan.corrupt(candidate, f"재시작 페이지 픽스업 오류: {exc}")
+                else:
+                    valid = True
+                    values = parse_restart_page(fixed)
+                    scan.restart_pages += 1
+                    if candidate:
+                        scan.restart_page_offsets.append(candidate)
+                    system_page_size = system_page_size or system_page
+                    if scan.restart_current_lsn is None or values.get("current_lsn", 0) > scan.restart_current_lsn:
+                        scan.restart_current_lsn = values.get("current_lsn")
+                    scan.page_size = log_page
+                    scan.lfs_version = f"{values.get('major_version', 0)}.{values.get('minor_version', 0)}"
+                    if 0 < values.get("seq_number_bits", 0) < 64:
+                        scan.seq_number_bits = values["seq_number_bits"]
+                    data_offset = values.get("page_data_offset", 0)
+                    if LFS_RECORD_HEADER_SIZE <= data_offset < log_page and data_offset % 8 == 0:
+                        scan.page_data_offset = data_offset
+        if candidate == 0 and not valid and not fallback_added:
+            # Second restart page: one system page after the first (any plausible size).
+            fallback_added = True
+            candidates.extend(size for size in (512 << shift for shift in range(8)) if head[size : size + 4] == b"RSTR")
+    if system_page_size == 0 and scan.restart_page_offsets:
+        system_page_size = scan.restart_page_offsets[0]
+    return system_page_size
 
 
 def iter_logfile_rows(
     path: Path,
     *,
-    cluster_size: int = 4096,
+    cluster_size: int | None = None,
     mft_record_size: int = 1024,
     max_rows: int = MAX_ROWS,
     max_bytes: int = MAX_LOGFILE_BYTES,
@@ -354,49 +472,66 @@ def iter_logfile_rows(
     scan: LogFileScan | None = None,
     check_cancel: Callable[[], None] | None = None,
 ) -> Iterator[dict[str, object]]:
-    """Stream ``logfile-transaction`` rows of ``path`` (pages read one at a time); ``scan`` collects counters."""
+    """Stream ``logfile-transaction`` rows of ``path`` (pages read one at a time); ``scan`` collects counters.
+
+    A record whose client data continues on the next page(s) is reassembled from the following
+    pages' data areas (the continuation is skipped there, 8-byte aligned, before that page's own
+    records); when a following page is corrupt, empty or missing the record is emitted with the
+    part read so far (``spanning_reassembled = false``) and counted as unresolved. Records of the
+    first :data:`TAIL_COPY_PAGES` record pages (LFS 1.1 tail copies / 2.0 buffer pages) are
+    remembered by LSN, and a later copy of the same LSN is not emitted again.
+
+    ``cluster_size`` (for ``target_mft_entry``) comes from the caller (boot sector); without it
+    the default 4096 is assumed and the rows say so (``cluster_size_basis``).
+    """
     scan = scan if scan is not None else LogFileScan()
+    cluster_basis = "boot-sector" if cluster_size else "assumed-default-4096"
+    cluster = cluster_size or 4096
+    scan.cluster_size = cluster
+    scan.cluster_size_basis = cluster_basis
     size = path.stat().st_size
     scan.file_size = size
     rows = 0
+    tail_lsns: set[int] = set()
     with path.open("rb") as handle:
-        # Restart pages first: they name the page size and the record layout.
-        head = handle.read(min(size, 2 * 65536))
-        # The second restart page sits one system page after the first; record
-        # pages start after both (2 x system page size).
-        system_page_size = 0
-        candidates = [0]
-        while candidates:
-            candidate = candidates.pop(0)
-            if head[candidate : candidate + 4] != b"RSTR" or candidate + 0x30 > len(head):
-                continue
-            system_page = struct.unpack_from("<I", head, candidate + 0x10)[0]
-            log_page = struct.unpack_from("<I", head, candidate + 0x14)[0]
-            if not (_plausible_page_size(system_page) and _plausible_page_size(log_page)):
-                scan.corrupt(candidate, "재시작 페이지 크기 값이 올바르지 않음")
-                continue
-            if candidate == 0:
-                candidates.append(system_page)
-            try:
-                fixed = apply_fixups(head[candidate : candidate + system_page])
-            except FixupError as exc:
-                scan.corrupt(candidate, f"재시작 페이지 픽스업 오류: {exc}")
-                continue
-            values = parse_restart_page(fixed)
-            scan.restart_pages += 1
-            system_page_size = system_page_size or system_page
-            if scan.restart_current_lsn is None or values.get("current_lsn", 0) > scan.restart_current_lsn:
-                scan.restart_current_lsn = values.get("current_lsn")
-            scan.page_size = log_page
-            if 0 < values.get("seq_number_bits", 0) < 64:
-                scan.seq_number_bits = values["seq_number_bits"]
-            data_offset = values.get("page_data_offset", 0)
-            if LFS_RECORD_HEADER_SIZE <= data_offset < log_page:
-                scan.page_data_offset = data_offset
+        head = handle.read(min(size, 2 * 65536 + 65536))
+        system_page_size = _read_restart_pages(head, scan)
         page_size = scan.page_size
-        offset = 2 * system_page_size
+        offset = 2 * system_page_size  # 0 without a valid restart page: every page is examined
         pages = 0
-        while offset + page_size <= size:
+        pending: _Header | None = None
+        pending_page = 0
+
+        def finish(header: _Header, *, complete: bool) -> dict[str, object]:
+            if not complete:
+                scan.truncated_records += 1
+                scan.unresolved_spanning_records += 1
+            else:
+                scan.reassembled_records += 1
+            return _record_row(
+                header, spans=True, complete=complete, scan=scan, cluster_size=cluster,
+                cluster_size_basis=cluster_basis, mft_record_size=mft_record_size,
+            )
+
+        def accept(row: dict[str, object], page_index: int) -> bool | None:
+            """``True`` = yield, ``False`` = a tail-copy duplicate (dropped), ``None`` = row cap reached."""
+            nonlocal rows
+            lsn = int(row["lsn"])  # type: ignore[arg-type]
+            if page_index < TAIL_COPY_PAGES:
+                tail_lsns.add(lsn)
+            elif lsn in tail_lsns:
+                scan.duplicate_lsn_records += 1
+                return False
+            if rows >= max_rows:
+                scan.row_cap_reached = True
+                return None
+            rows += 1
+            scan.record_count += 1
+            return True
+
+        while True:
+            if offset + page_size > size:
+                break
             if check_cancel is not None and pages % 256 == 0:
                 check_cancel()
             if offset >= max_bytes:
@@ -411,43 +546,87 @@ def iter_logfile_rows(
             page_offset = offset
             offset += page_size
             magic = page[:4]
+            fixed: bytes | None = None
             if magic == b"RSTR":
-                continue
-            if magic in (b"\xff\xff\xff\xff", b"\x00\x00\x00\x00"):
+                pass
+            elif magic in (b"\xff\xff\xff\xff", b"\x00\x00\x00\x00"):
                 scan.empty_pages += 1
-                continue
-            if magic != b"RCRD":
+            elif magic != b"RCRD":
                 scan.corrupt(page_offset, f"알 수 없는 페이지 서명 {magic.hex()}")
+            else:
+                try:
+                    fixed = apply_fixups(page)
+                except FixupError as exc:
+                    scan.corrupt(page_offset, f"픽스업 오류: {exc}")
+            if fixed is None:
+                if pending is not None:  # the continuation page is unusable: flag the record
+                    row = finish(pending, complete=False)
+                    pending = None
+                    verdict = accept(row, pending_page)
+                    if verdict is None:
+                        return
+                    if verdict:
+                        yield row
                 continue
-            try:
-                fixed = apply_fixups(page)
-            except FixupError as exc:
-                scan.corrupt(page_offset, f"픽스업 오류: {exc}")
-                continue
+            page_index = pages - 1  # ordinal of the page after the restart area
             scan.record_pages += 1
+            data_offset = scan.page_data_offset
             next_record = struct.unpack_from("<H", fixed, 0x18)[0]
-            page_end = next_record if scan.page_data_offset < next_record <= page_size else page_size
-            position = scan.page_data_offset
-            for _ in range(MAX_RECORDS_PER_PAGE):
-                row, consumed = _record_row(
-                    fixed,
-                    position,
-                    page_offset=page_offset,
-                    page_end=page_end,
-                    scan=scan,
-                    cluster_size=cluster_size,
-                    mft_record_size=mft_record_size,
-                )
-                if row is None:
-                    break
-                if rows >= max_rows:
-                    scan.row_cap_reached = True
+            page_end = next_record if data_offset < next_record <= page_size else page_size
+            position = data_offset
+            if pending is not None:
+                take = min(pending.missing, page_size - data_offset)
+                pending.client += fixed[data_offset : data_offset + take]
+                if pending.missing > 0:
+                    continue  # the record covers this whole page too
+                row = finish(pending, complete=True)
+                pending = None
+                verdict = accept(row, pending_page)
+                if verdict is None:
                     return
-                rows += 1
-                scan.record_count += 1
+                if verdict:
+                    yield row
+                position = data_offset + ((take + 7) & ~7)
+                page_end = max(page_end, position)
+            for _ in range(MAX_RECORDS_PER_PAGE):
+                limit = page_end
+                header = _read_header(fixed, position, page_end, scan)
+                if header is None and position >= page_end:
+                    # ``next_record_offset`` may name the start of a record that continues on
+                    # the next page: accept it when its LSN belongs to this page.
+                    header = _read_header(fixed, position, page_size, scan)
+                    expected = _lsn_offset(header.this_lsn, scan.seq_number_bits) if header is not None else None
+                    if header is None or expected is None or not page_offset <= expected < page_offset + page_size:
+                        break
+                    limit = page_size
+                if header is None:
+                    break
+                header.page_offset = page_offset
+                header.record_offset = page_offset + position
+                data_start = position + LFS_RECORD_HEADER_SIZE
+                available = max(0, min(header.data_length, limit - data_start, page_size - data_start))
+                header.client += fixed[data_start : data_start + available]
+                if header.missing > 0:
+                    if limit < page_size and data_start + header.data_length <= page_size:
+                        # Fits in the page but runs past next_record_offset: read it whole.
+                        header.client += fixed[data_start + available : data_start + header.data_length]
+                    else:
+                        pending = header  # continues on the next page
+                        pending_page = page_index
+                        break
+                row = _record_row(
+                    header, spans=bool(header.flags & 1), complete=True, scan=scan, cluster_size=cluster,
+                    cluster_size_basis=cluster_basis, mft_record_size=mft_record_size,
+                )
+                verdict = accept(row, page_index)
+                if verdict is None:
+                    return
+                if verdict:
+                    yield row
+                position += (LFS_RECORD_HEADER_SIZE + header.data_length + 7) & ~7
+                if position >= page_size:
+                    break
+        if pending is not None:
+            row = finish(pending, complete=False)
+            if accept(row, pending_page):
                 yield row
-                if row["spans_pages"]:
-                    break
-                position += consumed
-                if position >= page_end:
-                    break

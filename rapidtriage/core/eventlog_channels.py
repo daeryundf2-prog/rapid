@@ -27,6 +27,13 @@ EVENTLOG_KIND = "eventlog"
 # Kind output summary keys.
 CHANNEL_COUNTS_KEY = "channel_counts"
 SCM_COUNT_KEY = "channel_service_control_manager_count"
+# Bounds of ``channel_counts`` (hostile EVTX: millions of distinct channel names). Names past
+# MAX_CHANNEL_NAMES are counted per group in ``channel_overflow_group_counts``; a name is cut
+# to MAX_CHANNEL_NAME_CHARS. ``channel_counts_truncated`` says either happened.
+CHANNEL_OVERFLOW_KEY = "channel_overflow_group_counts"
+CHANNEL_TRUNCATED_KEY = "channel_counts_truncated"
+MAX_CHANNEL_NAMES = 1_000
+MAX_CHANNEL_NAME_CHARS = 256
 NO_CHANNEL = ""
 SCM_PROVIDERS = frozenset({"service control manager", "microsoft-windows-service control manager"})
 SCM_GROUP = "services"
@@ -103,10 +110,17 @@ def channel_group(channel: str) -> str:
 
 
 def row_channel(row: Mapping[str, object]) -> str:
-    """``details.channel`` of an artifact row (``""`` when absent)."""
+    """``details.channel`` of an artifact row, whitespace-stripped (``""`` when absent).
+
+    Counts, tree channel names and the ``channel=`` filter all use the stripped value, so a
+    channel stored as ``" Security "`` round-trips through the console filter."""
     details = row.get("details")
     value = details.get("channel") if isinstance(details, Mapping) else None
-    return value if isinstance(value, str) else ""
+    return value.strip() if isinstance(value, str) else ""
+
+
+def is_eventlog_row(row: Mapping[str, object]) -> bool:
+    return str(row.get("artifact_type") or "").startswith("eventlog")
 
 
 def is_scm_row(row: Mapping[str, object]) -> bool:
@@ -133,11 +147,15 @@ class ChannelFilter:
 
     def matches(self, row: Mapping[str, object]) -> bool:
         channel = row_channel(row)
-        if channel in self.names:
+        if channel and channel in self.names:
             return True
         if not self.groups:
             return False
-        if channel_group(channel) in self.groups:
+        group = channel_group(channel)
+        if group == NONE_GROUP:
+            # 채널 없음 = eventlog rows without a channel; other kinds' rows never match it.
+            return NONE_GROUP in self.groups and is_eventlog_row(row)
+        if group in self.groups:
             return True
         return SCM_GROUP in self.groups and is_scm_row(row)
 
@@ -156,18 +174,34 @@ class ChannelCounter:
 
     def __init__(self) -> None:
         self.counts: Counter[str] = Counter()
+        self.overflow: Counter[str] = Counter()
+        self.truncated = False
         self.scm = 0
 
     def observe(self, row: Mapping[str, object]) -> None:
-        self.counts[row_channel(row)] += 1
+        channel = row_channel(row)
+        if len(channel) > MAX_CHANNEL_NAME_CHARS:
+            channel = channel[:MAX_CHANNEL_NAME_CHARS]
+            self.truncated = True
+        if channel in self.counts or len(self.counts) < MAX_CHANNEL_NAMES:
+            self.counts[channel] += 1
+        else:
+            self.overflow[channel_group(channel)] += 1
+            self.truncated = True
         if is_scm_row(row):
             self.scm += 1
 
     def summary(self) -> dict[str, object]:
-        return {CHANNEL_COUNTS_KEY: dict(sorted(self.counts.items())), SCM_COUNT_KEY: self.scm}
+        out: dict[str, object] = {CHANNEL_COUNTS_KEY: dict(sorted(self.counts.items())), SCM_COUNT_KEY: self.scm}
+        if self.truncated:
+            out[CHANNEL_TRUNCATED_KEY] = True
+            out[CHANNEL_OVERFLOW_KEY] = dict(sorted(self.overflow.items()))
+        return out
 
 
-def channel_group_nodes(channel_counts: Mapping[str, object], scm_count: object = None) -> list[dict[str, object]]:
+def channel_group_nodes(
+    channel_counts: Mapping[str, object], scm_count: object = None, overflow: Mapping[str, object] | None = None
+) -> list[dict[str, object]]:
     """Tree entries ``{id, label, count, channels, partition}`` sorted by Korean label.
 
     ``channels`` are the exact channel names of the run in that group (the
@@ -184,6 +218,10 @@ def channel_group_nodes(channel_counts: Mapping[str, object], scm_count: object 
         totals[group] += count
         if group != NONE_GROUP:
             members.setdefault(group, []).append(str(channel))
+    for group, count in (overflow or {}).items():
+        # Rows of channel names past MAX_CHANNEL_NAMES still count toward their group.
+        if group in GROUP_LABELS and isinstance(count, int) and not isinstance(count, bool):
+            totals[group] += count
     nodes: list[dict[str, object]] = []
     for group, label in GROUP_LABELS.items():
         if group == SCM_GROUP:

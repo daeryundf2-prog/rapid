@@ -21,10 +21,7 @@ from typing import Protocol
 from xml.etree import ElementTree as ET
 
 from ..artifacts import all_providers, collect_cached
-from ..artifacts.windows.antiforensics import (
-    is_recovery_key_text_name,
-    redact_recovery_key_text,
-)
+from ..artifacts.windows.antiforensics import redact_recovery_key_text
 from .doc_text import (
     OLE_SIGNATURE,
     DocumentText,
@@ -836,11 +833,10 @@ def extract_document_text(
     file that is an OLE container is an encrypted Office document.
     """
     result = _extract_document_text(path, kind, max_input_bytes=max_input_bytes)
-    if is_recovery_key_text_name(path.name):
-        # BitLocker recovery key files: the 48-digit key is masked before the text reaches
-        # the docs output, the docs index or the case DB (same mask as the artifact row).
-        return replace(result, text=redact_recovery_key_text(path.name, result.text))
-    return result
+    # BitLocker recovery passwords are masked by content (checksum-validated), whatever the
+    # file name, before the text reaches the docs output, the docs index or the case DB.
+    redacted = redact_recovery_key_text(path.name, result.text)
+    return result if redacted == result.text else replace(result, text=redacted)
 
 
 def _extract_document_text(path: Path, kind: str, *, max_input_bytes: int) -> DocumentText:
@@ -878,8 +874,8 @@ def extract_text(
     max_archive_member_count: int = MAX_ZIP_TEXT_MEMBER_COUNT,
     max_pdf_stream_decompressed_bytes: int = MAX_PDF_STREAM_DECOMPRESSED_BYTES,
 ) -> str:
-    """Plain text of a document; a BitLocker recovery key file has its key masked
-    (:func:`~rapidtriage.artifacts.windows.antiforensics.redact_recovery_key_text`)."""
+    """Plain text of a document; checksum-valid BitLocker recovery passwords are masked
+    whatever the file name (:func:`~rapidtriage.artifacts.windows.antiforensics.redact_recovery_key_text`)."""
     text = _extract_text(
         path,
         kind,

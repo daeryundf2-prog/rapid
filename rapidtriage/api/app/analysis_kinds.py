@@ -62,6 +62,7 @@ from ...core.ntfs_logfile import ARTIFACT_TYPE as LOGFILE_TRANSACTION_TYPE
 from ...core.ntfs_logfile import LogFileScan, iter_logfile_rows
 from ...core.ntfs_timestamps import ARTIFACT_TYPE as TIMESTAMP_MISMATCH_TYPE
 from ...core.ntfs_timestamps import mismatch_row as timestamp_mismatch_row
+from ...core.ntfs_timestamps import si_before_fn_threshold
 from .analyses import (
     ANALYSIS_ID_PATTERN,
     ANALYSIS_ROOTS_ENV,
@@ -893,6 +894,23 @@ def _mft_data_size(record: Mapping[str, object], file_name: Mapping[str, object]
     return int(value) if isinstance(value, int) else None
 
 
+def mismatch_reference_time(image: Path) -> tuple[dt.datetime, str]:
+    """Reference of the ``future_time`` reason: the acquisition time when known.
+
+    No time on the volume can be later than the image (or extracted $MFT) file that holds it, so
+    its modification time is used (``image-mtime``) when it is not in the future; otherwise the
+    analysis start (``analysis-start``).
+    """
+    now = dt.datetime.now(dt.timezone.utc)
+    try:
+        acquired = dt.datetime.fromtimestamp(image.stat().st_mtime, dt.timezone.utc)
+    except (OSError, OverflowError, ValueError):
+        return now, "analysis-start"
+    if acquired <= now:
+        return acquired, "image-mtime"
+    return now, "analysis-start"
+
+
 def parse_mft_file(
     ctx: AnalysisContext,
     mft_path: Path,
@@ -987,9 +1005,13 @@ def parse_mft_file(
     status_counts: Counter[str] = Counter()
     in_use = 0
     mismatch_reasons: Counter[str] = Counter()
+    mismatch_reasons_all: Counter[str] = Counter()
     mismatch_rows = 0
+    mismatch_total = 0
     mismatch_in_use = 0
+    mismatch_deleted = 0
     mismatch_capped = False
+    si_before_fn_seconds = si_before_fn_threshold()
     with staging.open("r", encoding="utf-8") as handle:
         for index, line in enumerate(handle):
             if index % 4096 == 0:
@@ -1005,15 +1027,24 @@ def parse_mft_file(
             ctx.write_row(ctx.row(details, path=path))
             if mismatch_reference is None:
                 continue
-            mismatch = timestamp_mismatch_row(details, reference=mismatch_reference, mft_row_index=mft_row_index)
+            mismatch = timestamp_mismatch_row(
+                details, reference=mismatch_reference, mft_row_index=mft_row_index, si_before_fn_seconds=si_before_fn_seconds
+            )
             if mismatch is None:
                 continue
-            mismatch_reasons.update(mismatch["reasons"])  # type: ignore[arg-type]
+            mismatch_total += 1
+            mismatch_reasons_all.update(mismatch["reasons"])  # type: ignore[arg-type]
             if mismatch_rows >= TIMESTAMP_MISMATCH_MAX_ROWS:
                 mismatch_capped = True
                 continue
+            mismatch_reasons.update(mismatch["reasons"])  # type: ignore[arg-type]
             mismatch_rows += 1
-            mismatch_in_use += 1 if mismatch.get("in_use") is True else 0
+            # Same rule as the in_use=true/false row filter: only a boolean counts; a row
+            # without one is reported apart (never as deleted).
+            if mismatch.get("in_use") is True:
+                mismatch_in_use += 1
+            elif mismatch.get("in_use") is False:
+                mismatch_deleted += 1
             ctx.write_row(ctx.row(mismatch, path=path, artifact_type=TIMESTAMP_MISMATCH_TYPE))
     staging.unlink(missing_ok=True)
     result: dict[str, object] = {
@@ -1030,9 +1061,15 @@ def parse_mft_file(
                 "timestamp_mismatch_count": mismatch_rows,
                 # Rows of in-use / deleted MFT records (the tree's default node shows in-use only).
                 "timestamp_mismatch_in_use_count": mismatch_in_use,
-                "timestamp_mismatch_deleted_count": mismatch_rows - mismatch_in_use,
+                "timestamp_mismatch_deleted_count": mismatch_deleted,
+                "timestamp_mismatch_in_use_unknown_count": mismatch_rows - mismatch_in_use - mismatch_deleted,
+                # Reasons of the rows written (consistent with timestamp_mismatch_count) and of every
+                # mismatching record, including those past the row cap.
                 "timestamp_mismatch_reason_counts": dict(mismatch_reasons),
+                "timestamp_mismatch_reason_counts_all": dict(mismatch_reasons_all),
+                "timestamp_mismatch_total_count": mismatch_total,
                 "timestamp_mismatch_capped": mismatch_capped,
+                "timestamp_mismatch_si_before_fn_seconds": si_before_fn_seconds,
                 "timestamp_mismatch_reference_time": mismatch_reference.isoformat(),
             }
         )
@@ -1102,14 +1139,44 @@ def parse_usn_file(ctx: AnalysisContext, journal_path: Path, nodes: _NodeView) -
     return {"usn_record_count": count, "usn_scanned_bytes": size}
 
 
-def parse_logfile(ctx: AnalysisContext, logfile_path: Path, *, mft_record_size: int) -> dict[str, object]:
+def ntfs_cluster_size(image: Path | None, partition: Mapping[str, object] | None, siblings: list[Path]) -> int | None:
+    """Volume cluster size from the NTFS boot sector: the partition start of a raw image, or an
+    extracted ``$Boot`` next to the $MFT/$LogFile; ``None`` when neither is readable (EWF images)."""
+    from ...core.ntfs_logfile import boot_sector_cluster_size
+    from ...core.ntfs_metadata import image_is_ewf
+
+    candidates: list[tuple[Path, int]] = []
+    if image is not None and isinstance(partition, Mapping) and partition.get("start_sector") is not None:
+        try:
+            if not image_is_ewf(image):
+                candidates.append((image, int(partition["start_sector"]) * 512))  # type: ignore[call-overload]
+        except (TypeError, ValueError):
+            pass
+    for folder in {path.parent for path in siblings}:
+        candidates.extend((folder / name, 0) for name in ("$Boot", "Boot.bin", "$Boot.bin"))
+    for path, offset in candidates:
+        try:
+            with path.open("rb") as handle:
+                handle.seek(offset)
+                size = boot_sector_cluster_size(handle.read(512))
+        except OSError:
+            continue
+        if size:
+            return size
+    return None
+
+
+def parse_logfile(
+    ctx: AnalysisContext, logfile_path: Path, *, mft_record_size: int, cluster_size: int | None = None
+) -> dict[str, object]:
     """``$LogFile`` -> ``ntfs-logfile-transaction`` rows (``core.ntfs_logfile``; corrupt pages isolated)."""
     scan = LogFileScan()
     count = 0
     ctx.set_message("$LogFile 파싱 중")
     try:
         for row in iter_logfile_rows(
-            logfile_path, mft_record_size=mft_record_size, scan=scan, check_cancel=ctx.check_cancel
+            logfile_path, cluster_size=cluster_size, mft_record_size=mft_record_size, scan=scan,
+            check_cancel=ctx.check_cancel,
         ):
             name = row.get("file_name")
             ctx.write_row(ctx.row(row, path=str(name) if name else None, artifact_type=LOGFILE_TRANSACTION_TYPE))
@@ -1148,11 +1215,17 @@ def _ntfs_source_in_use_counts(summary: Mapping[str, object]) -> dict[str, int]:
     for key, summary_key in (
         ("timestamp-mismatch:in-use", "timestamp_mismatch_in_use_count"),
         ("timestamp-mismatch:deleted", "timestamp_mismatch_deleted_count"),
+        ("timestamp-mismatch:unknown", "timestamp_mismatch_in_use_unknown_count"),
     ):
         value = summary.get(summary_key)
-        if isinstance(value, int) and not isinstance(value, bool):
-            counts[key] = value
+        if isinstance(value, int) and not isinstance(value, bool) and (value or not key.endswith(":unknown")):
+            counts[key] = value  # rows without a boolean in_use are listed only when there are some
     return counts
+
+
+# ``details.source`` values of ntfs-meta rows and the summary key of their row ranges.
+ROW_SOURCE_NAMES = ("mft", "usn", "timestamp-mismatch", "logfile-transaction")
+SOURCE_ROW_RANGES_KEY = "source_row_ranges"
 
 
 def run_ntfs_meta(ctx: AnalysisContext) -> None:
@@ -1214,6 +1287,18 @@ def run_ntfs_meta(ctx: AnalysisContext) -> None:
     nodes = _NodeView()
     mft = outputs.get("mft") if isinstance(outputs.get("mft"), Mapping) else None
     ctx.summary["parse_status"] = "parsed"
+    ranges: dict[str, dict[str, int]] = {}
+
+    def here() -> tuple[int, int]:
+        return ctx.rows_written, ctx.rows_bytes_written
+
+    def mark(sources: tuple[str, ...], start: tuple[int, int]) -> None:
+        """Rows of ``sources`` lie in ``[start, rows_written)`` (record index and byte offset):
+        the analysis-row ``source=`` filter pages from these ranges instead of scanning every row."""
+        end = here()
+        for source in sources:
+            ranges[source] = {"start": start[0], "end": end[0], "start_byte": start[1], "end_byte": end[1]}
+
     if mft and mft.get("path"):
         mft_path = Path(str(mft["path"]))
         record_size = mft_record_size(mft_path)
@@ -1231,24 +1316,42 @@ def run_ntfs_meta(ctx: AnalysisContext) -> None:
             )
         else:
             ctx.set_total(2 + estimated, message="MFT 파싱 중")
-            reference = dt.datetime.now(dt.timezone.utc) if options.timestamp_mismatch else None
+            mft_start = here()
+            reference, basis = mismatch_reference_time(image) if options.timestamp_mismatch else (None, "")
             ctx.summary.update(parse_mft_file(ctx, mft_path, nodes, record_size, mismatch_reference=reference))
+            mark(("mft", "timestamp-mismatch"), mft_start)
+            if reference is not None:
+                ctx.summary["timestamp_mismatch_reference_basis"] = basis
             if reference is None:
                 ctx.summary["timestamp_mismatch_status"] = "disabled"
     if "timestamp_mismatch_status" not in ctx.summary:
         ctx.summary["timestamp_mismatch_status"] = "no-mft" if ctx.summary["parse_status"] == "parsed" else "too-large"
     journal = outputs.get("usn_journal") if isinstance(outputs.get("usn_journal"), Mapping) else None
     if journal and journal.get("path"):
+        usn_start = here()
         ctx.summary.update(parse_usn_file(ctx, Path(str(journal["path"])), nodes))
+        mark(("usn",), usn_start)
     logfile = outputs.get("logfile") if isinstance(outputs.get("logfile"), Mapping) else None
     logfile_path = (logfile or {}).get("path") or options.logfile_path
     if not options.logfile:
         ctx.summary["logfile_status"] = "disabled"
     elif logfile_path:
         mft_size = int(ctx.summary.get("mft_record_size") or MFT_RECORD_SIZE)
-        ctx.summary.update(parse_logfile(ctx, Path(str(logfile_path)), mft_record_size=mft_size))
+        siblings = [Path(str(logfile_path))] + ([Path(str(mft["path"]))] if mft and mft.get("path") else [])
+        cluster = ntfs_cluster_size(
+            image if options.source != "mft" else None,
+            manifest.get("partition") if isinstance(manifest.get("partition"), Mapping) else None,
+            siblings,
+        )
+        logfile_start = here()
+        ctx.summary.update(parse_logfile(ctx, Path(str(logfile_path)), mft_record_size=mft_size, cluster_size=cluster))
+        mark(("logfile-transaction",), logfile_start)
     else:
         ctx.summary["logfile_status"] = "absent"
+    for source in ROW_SOURCE_NAMES:
+        # A source with no stage this run has an empty range (its filter pages nothing, at once).
+        ranges.setdefault(source, {"start": 0, "end": 0, "start_byte": 0, "end_byte": 0})
+    ctx.summary[SOURCE_ROW_RANGES_KEY] = ranges
     ctx.summary["source_counts"] = dict(_ntfs_source_counts(ctx.summary))
     ctx.summary["source_in_use_counts"] = _ntfs_source_in_use_counts(ctx.summary)
     ctx.summary["limitation"] = (

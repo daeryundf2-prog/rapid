@@ -181,19 +181,20 @@ class FieldFilterApiTests(unittest.TestCase):
     def test_field_filters_compose_with_channel_filters(self) -> None:
         """R3 integration: ``browser=`` / ``service=`` AND ``channel=`` / ``channel_group=`` (O2)."""
         page = self.get("kind=windows-messenger&limit=50&service=Slack&channel_group=none")["artifacts"]["windows-messenger"]
-        self.assertEqual(page["matched"], 3)  # Slack rows have no event-log channel
+        # R3 review C12: 채널 없음 = eventlog rows without a channel; other kinds never match it.
+        self.assertEqual(page["matched"], 0)
         self.assertEqual(page["pagination"]["fields"], {"service": ["Slack"]})
         self.assertEqual(page["pagination"]["channel_groups"], ["none"])
         page = self.get("kind=windows-messenger&limit=50&service=Slack&channel=Security")["artifacts"]["windows-messenger"]
         self.assertEqual((page["matched"], page["artifacts"]), (0, []))
         # Across kinds.
         payload = self.get("limit=50&browser=ie-edge-legacy&channel_group=none")
-        self.assertEqual(payload["cross_kind"]["matched"], 4)
+        self.assertEqual(payload["cross_kind"]["matched"], 0)
         self.assertEqual(payload["cross_kind"]["fields"], {"browser": ["ie-edge-legacy"]})
         self.assertEqual(payload["cross_kind"]["channel_groups"], ["none"])
         self.assertEqual(self.get("limit=50&browser=ie-edge-legacy&channel=Security")["cross_kind"]["matched"], 0)
         # Sorted pages and the 특이사항 sort.
-        for channel, expected in (("channel_group=none", 4), ("channel=Security", 0)):
+        for channel, expected in (("channel_group=none", 0), ("channel=Security", 0)):
             sorted_page: dict[str, object] = {}
             for _attempt in range(100):
                 sorted_page = self.get(f"kind=browser&limit=50&browser=ie-edge-legacy&{channel}&sort=timestamp:desc")["artifacts"]["browser"]

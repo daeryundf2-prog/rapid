@@ -25,6 +25,7 @@ from ...core.json_safe import json_default
 from ...core.models import ArtifactRecord
 from ...core.safe_xml import UnsafeXmlError, safe_xml_fromstring, safe_xml_parse
 from .._walk import iter_evidence_paths
+from .antiforensics import redact_recovery_passwords_in
 
 EVENT_LOG_ROOT = ("Windows", "System32", "winevt", "Logs")
 PARSER_VERSION = "eventlog-normalized-v21"
@@ -1803,8 +1804,13 @@ class WindowsEventLogProvider:
         with tempfile.TemporaryFile("w+", encoding="utf-8") as detection_spool:
 
             def emit(record: ArtifactRecord) -> ArtifactRecord:
+                if record.artifact_type in {"eventlog-event", "eventlog-detection"}:
+                    # 4688/4104/Sysmon command lines and script blocks: a BitLocker recovery
+                    # password typed on a command line is masked before any row is written.
+                    record = redact_record_secrets(record)
                 if record.artifact_type == "eventlog-event" and isinstance(record.details, Mapping):
                     for detection in build_builtin_detection_records([record]):
+                        detection = redact_record_secrets(detection)
                         if triage:
                             detection = triage_eventlog_record(detection)
                         detection_spool.write(json.dumps(dataclasses.asdict(detection), ensure_ascii=False, default=json_default))
@@ -8443,6 +8449,14 @@ def triage_truncation_fields(counter: Counter[str] | None) -> dict[str, object]:
 def triage_eventlog_detection_details(details: Mapping[str, object]) -> dict[str, object]:
     """Detection rows keep every populated field; empty pivot strings are dropped."""
     return {key: value for key, value in details.items() if value != ""}
+
+
+def redact_record_secrets(record: ArtifactRecord) -> ArtifactRecord:
+    """``record`` with checksum-valid BitLocker recovery passwords masked in every string field."""
+    details = redact_recovery_passwords_in(record.details)
+    if details is record.details:
+        return record
+    return dataclasses.replace(record, details=details)
 
 
 def triage_eventlog_record(record: ArtifactRecord) -> ArtifactRecord:

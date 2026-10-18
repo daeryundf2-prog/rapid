@@ -6,6 +6,7 @@ import datetime as dt
 from collections import defaultdict
 from collections.abc import Iterator
 
+from ...artifacts.windows.prefetch import prefetch_executable_entry
 from .base import (
     FlagContext,
     RowRef,
@@ -53,31 +54,28 @@ SYSTEM_BINARIES = (
     "cmd.exe",
     "powershell.exe",
 )
-PREFETCH_HEADER_NAME_CHARS = 29
 SYSTEM_BINARY_DIRS = ("windows\\system32\\", "windows\\syswow64\\", "windows\\winsxs\\", "windows\\servicing\\")
 
 
 def prefetch_executable_path(row: RowView) -> str:
     """The executable's own path among a Prefetch row's referenced files (``""`` when not listed).
 
-    Reads the decoded file-metrics entries (``referenced_files[].path``, up to
-    1,000 per PF) first, then the inline ``referenced_paths`` list (rows of
-    older parser versions, or PFs whose metrics could not be decoded).
+    Uses ``executable_reference_path`` (picked by the parser from *every* decoded path, before
+    the 1,000-entry inline cap), then the decoded file-metrics entries (``referenced_files[].path``)
+    and the inline ``referenced_paths`` list (rows of older parser versions). A 29-character
+    header name is a prefix match; an ``.exe``/``.com``/``.scr`` candidate is preferred.
     """
     name = row.text("executable_hint", "header_executable_name", "filename_executable_hint").lower()
     if not name:
         return ""
-    decoded = [item.get("path") for item in as_list(row.get("referenced_files")) if isinstance(item, dict)]
-    for value in [*decoded, *as_list(row.get("referenced_paths"))]:
-        if not value:
-            continue
-        text = str(value)
-        candidate = base_name(text)
-        # The SCCA header keeps 29 characters: a longer executable name is a prefix match.
-        if candidate == name or (len(name) >= PREFETCH_HEADER_NAME_CHARS and candidate.startswith(name)):
-            start = text.find("\\")
-            return text[start:] if start > 0 else text
-    return ""
+    text = row.text("executable_reference_path")
+    if not text:
+        decoded = [item.get("path") for item in as_list(row.get("referenced_files")) if isinstance(item, dict)]
+        text = prefetch_executable_entry(name, [*decoded, *as_list(row.get("referenced_paths"))])
+    if not text:
+        return ""
+    start = text.find("\\")
+    return text[start:] if start > 0 else text
 
 
 def trace_path(row: RowView) -> str:

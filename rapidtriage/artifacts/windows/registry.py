@@ -12,7 +12,12 @@ from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 from ...core.recovery import build_recovery_record
 from .._walk import iter_evidence_paths
-from .registry_depth import DepthStats, export_depth_records, hive_depth_records
+from .registry_depth import (
+    DepthStats,
+    export_depth_records,
+    hive_depth_records,
+    read_export_lines,
+)
 
 PARSER_VERSION = "registry-native-walk-v14"
 REGISTRY_EXPORT_PATTERN = re.compile(r"^\[(?P<key>.+)]$")
@@ -314,14 +319,10 @@ def candidate_registry_hive_paths(root: Path, *, names: set[str] | None = None) 
 
 
 def collect_reg_export(path: Path) -> Iterable[ArtifactRecord]:
-    try:
-        lines = path.read_text(encoding="utf-16").splitlines()
-    except UnicodeError:
-        try:
-            lines = path.read_text(encoding="utf-8").splitlines()
-        except (OSError, UnicodeError):
-            return
-    except OSError:
+    # Same decoding as the depth rows: UTF-16 only with a BOM or the UTF-16 NUL pattern, then
+    # UTF-8, then CP949 (an even-length ANSI export is no longer misread as UTF-16).
+    lines = read_export_lines(path)
+    if not lines:
         return
 
     current_key = ""

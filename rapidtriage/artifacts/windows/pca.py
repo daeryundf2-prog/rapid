@@ -139,6 +139,7 @@ def collect_pca_text_files(root: Path, provider: str) -> Iterable[ArtifactRecord
                     "executable_name": executable.replace("/", "\\").rsplit("\\", 1)[-1],
                     "timestamp": moment,
                     "timestamp_label": "last_run" if kind == "pca-app-launch-dic" else "pca_event",
+                    "timestamp_kind": ("run" if kind == "pca-app-launch-dic" else "pca-event") if moment else "",
                     "timestamp_timezone": "UTC" if moment else "",
                     "malformed_line_count": malformed,
                     "line_cap_reached": truncated,

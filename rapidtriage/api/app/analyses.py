@@ -590,6 +590,7 @@ class AnalysisContext:
         self.summary: dict[str, object] = state.setdefault("summary", {})  # type: ignore[assignment]
         self._rows_handle = None
         self._pending_rows = 0
+        self._bytes_written = 0
         self._last_write = 0.0
 
     # -- state persistence ---------------------------------------------------
@@ -705,6 +706,7 @@ class AnalysisContext:
             assert self._rows_handle is not None
             self._rows_handle.write(line)
             self._pending_rows += 1
+            self._bytes_written += len(line)
 
     def close_rows(self) -> None:
         with self.lock:
@@ -712,6 +714,12 @@ class AnalysisContext:
             if self._rows_handle is not None:
                 self._rows_handle.close()
                 self._rows_handle = None
+
+    @property
+    def rows_bytes_written(self) -> int:
+        """Bytes written to ``rows.jsonl`` by this context: the byte offset of the next row."""
+        with self.lock:
+            return self._bytes_written
 
     @property
     def rows_written(self) -> int:

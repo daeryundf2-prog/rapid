@@ -206,3 +206,52 @@ def bek_file() -> bytes:
     entry[0:2] = (0x2C).to_bytes(2, "little")
     entry[12:44] = bytes(range(1, 33))  # synthetic external key bytes
     return bytes(header) + bytes(entry)
+
+
+class _CyclicOfficeWriter(HiveWriter):
+    """NTUSER hive whose ``16.0`` and ``target`` keys both list ``target`` ``count`` times
+    (duplicate + self-referencing subkey lists: the R3 adversarial-review N**4 repro)."""
+
+    def __init__(self, target: str, count: int) -> None:
+        super().__init__()
+        self.target = target
+        self.count = count
+
+    def build(self, root: Key, **_kwargs: object) -> bytes:
+        offsets: dict[str, int] = {}
+        original = self.serialize
+
+        def serialize(key: Key, parent: int, *, root: bool = False) -> int:
+            offset = original(key, parent, root=root)
+            if key.name in (self.target, "16.0"):
+                offsets[key.name] = offset
+            return offset
+
+        self.serialize = serialize  # type: ignore[method-assign]
+        root_offset = serialize(root, 0, root=True)
+        target = offsets[self.target]
+        listing = self.alloc(b"lh" + self.count.to_bytes(2, "little") + (target.to_bytes(4, "little") + b"\x00" * 4) * self.count)
+        for owner in (target, offsets["16.0"]):
+            self.patch_u32(owner, 0x14, self.count)
+            self.patch_u32(owner, 0x1C, listing)
+        hbin_size = 32 + len(self.cells)
+        hbin_size += (-hbin_size) % 4096
+        hbin = bytearray(hbin_size)
+        hbin[0:4] = b"hbin"
+        hbin[8:12] = hbin_size.to_bytes(4, "little")
+        hbin[32 : 32 + len(self.cells)] = self.cells
+        base = bytearray(4096)
+        base[0:4] = b"regf"
+        for field_offset, value in ((4, 7), (8, 7), (20, 1), (24, 5), (32, 1), (36, root_offset), (40, hbin_size), (44, 1)):
+            base[field_offset : field_offset + 4] = value.to_bytes(4, "little")
+        checksum = 0
+        for index in range(0, 508, 4):
+            checksum ^= int.from_bytes(base[index : index + 4], "little")
+        base[508:512] = checksum.to_bytes(4, "little")
+        return bytes(base) + bytes(hbin)
+
+
+def cyclic_office_hive(target: str = "User MRU", count: int = 2000) -> bytes:
+    root = Key("ROOT")
+    root.path(rf"Software\Microsoft\Office\16.0\{target}\Placeholder").value("x", REG_SZ, sz("y"))
+    return _CyclicOfficeWriter(target, count).build(root)

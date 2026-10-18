@@ -6,6 +6,13 @@ boundaries, so an unrelated "… Cleaner" app never matches ``\\bccleaner\\b``),
 ``executables`` exact file names, ``services`` exact service names and ``commands``
 regexes over command lines. ``builtin`` tools (cipher.exe, the BitLocker wizard) ship with
 Windows: their file names alone are not flagged, only execution traces and command lines.
+
+Command regexes are matched at the *start of each command segment*
+(:func:`command_segments`): the line is split at ``&``, ``;``, ``|`` and newlines, a
+leading ``&``/``call``/``start``/``cmd /c``/``powershell -command`` wrapper is dropped,
+and the executable token (quoted or not) is reduced to its file name, so
+``"C:\\Windows\\system32\\cipher.exe" /w:C:\\`` is matched as ``cipher.exe /w:C:\\``
+and a mere mention (``Write-Host "do not run sdelete"``) is not a match.
 """
 
 from __future__ import annotations
@@ -26,7 +33,6 @@ from .base import (
     parse_time,
     register,
     select,
-    under_system_dir,
 )
 
 INSTALL_TYPES = frozenset({"windows-installed-program", "registry-install-state", "uwp-package"})
@@ -101,6 +107,39 @@ def load_signatures(raw: object) -> list[Signature]:
     return signatures
 
 
+_SEGMENT_SPLIT = re.compile(r"&&|\|\||[&;|\r\n]")
+_WRAPPER = re.compile(
+    r"""^(?:call\s+|start\s+(?:"[^"]*"\s+)?(?:/\w+\s+)*|cmd(?:\.exe)?"?\s+(?:/[a-z]\s+)*/[ck]\s+"?|"""
+    r"""(?:powershell|pwsh)(?:\.exe)?"?\s+(?:-\w+\s+)*?-(?:c|command)\s+["']?)""",
+    re.IGNORECASE,
+)
+
+
+def command_segments(command: str) -> list[str]:
+    """Each command of a command line, starting at its executable's file name (see module doc)."""
+    segments: list[str] = []
+    for part in _SEGMENT_SPLIT.split(command):
+        text = part.strip().lstrip("&").strip()
+        for _ in range(3):  # nested wrappers: cmd /c "powershell -c ..."
+            stripped = _WRAPPER.sub("", text, count=1).strip()
+            if stripped == text:
+                break
+            text = stripped
+        if not text:
+            continue
+        if text[0] in "\"'":
+            quote = text[0]
+            end = text.find(quote, 1)
+            token, rest = (text[1:end], text[end + 1 :]) if end > 0 else (text[1:], "")
+        else:
+            token, _space, rest = text.partition(" ")
+            rest = " " + rest if _space else ""
+        name = token.replace("/", "\\").rstrip("\\").rsplit("\\", 1)[-1]
+        if name:
+            segments.append(name + rest)
+    return segments
+
+
 def row_candidates(row: RowView) -> tuple[list[str], list[str], list[str], list[str]]:
     """``(product names, executable names, service names, command lines)`` a row offers for matching."""
     products: list[str] = []
@@ -139,11 +178,11 @@ def match_signature(row: RowView, signatures: Iterable[Signature]) -> tuple[Sign
     products, executables, services, commands = row_candidates(row)
     file_row = row.type in FILE_TYPES
     if file_row:
-        # File listings are large: one set lookup first, the system-folder check only on a hit.
+        # File listings are large: one set lookup first. A tool under Program Files or Windows
+        # is still a tool on the system (only built-in signatures are skipped for file rows).
         if not any(name in signature.executables for signature in signatures for name in executables):
             return None
-        if under_system_dir(row.text("path") or row.path()):
-            return None
+    segments = [(segment, text) for text in commands for segment in command_segments(text)]
     for signature in signatures:
         if file_row and signature.builtin:
             continue
@@ -156,8 +195,8 @@ def match_signature(row: RowView, signatures: Iterable[Signature]) -> tuple[Sign
         for text in products:
             if any(pattern.search(text) for pattern in signature.products):
                 return signature, "product", text
-        for text in commands:
-            if any(pattern.search(text) for pattern in signature.commands):
+        for segment, text in segments:
+            if any(pattern.match(segment) for pattern in signature.commands):
                 return signature, "command", text
     return None
 
@@ -198,8 +237,12 @@ class ToolPresent(Rule):
 def run_times(row: RowView) -> list[dt.datetime]:
     """Execution times a trace row records (install/inventory rows have none)."""
     if row.type == "prefetch-file":
-        values = [*as_list(row.get("last_run_times")), *(row.get(f"run_time_{index}") for index in range(1, 9))]
-        if not values:
+        values = [
+            value
+            for value in (*as_list(row.get("last_run_times")), *(row.get(f"run_time_{index}") for index in range(1, 9)))
+            if value not in (None, "")
+        ]
+        if not values:  # rows without the run-time list keep the newest run only
             values = [row.get("last_run_at")]
     elif row.type in {"bam-entry", "bam-schema-entry", "userassist-schema-entry"}:
         values = [row.get("timestamp", "last_run_at", "last_executed_at")]

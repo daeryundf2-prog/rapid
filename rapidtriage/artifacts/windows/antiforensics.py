@@ -37,6 +37,12 @@ GUID_TEXT = r"[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-
 KEY_TEXT_NAME = re.compile(rf"^bitlocker (?:recovery key|복구 키)\s*({GUID_TEXT})?.*\.txt$", re.IGNORECASE)
 BEK_NAME = re.compile(rf"^\{{?({GUID_TEXT})\}}?\.bek$", re.IGNORECASE)
 RECOVERY_PASSWORD = re.compile(r"(?<!\d)(\d{6}(?:-\d{6}){7})(?!\d)")
+# Content-based detection (every extracted text / command line, whatever the file name):
+# 8 groups of 6 digits, separated by nothing, a hyphen (ASCII or Unicode dash) or whitespace.
+# Only a candidate whose groups pass the recovery-password checksum (each ≤ 720885 and
+# divisible by 11) is redacted, so ordinary long numbers are left alone.
+RECOVERY_PASSWORD_LOOSE = re.compile(r"(?<!\d)\d{6}(?:[-\s‐-―−]?\d{6}){7}(?!\d)")
+RECOVERY_KEY_TEXT_SCAN_BYTES = 1024 * 1024
 IDENTIFIER = re.compile(rf"(?<![0-9A-Fa-f-])({GUID_TEXT})(?![0-9A-Fa-f-])")
 
 
@@ -53,15 +59,65 @@ def is_recovery_key_text_name(file_name: str) -> bool:
 
 
 def redact_recovery_key_text(file_name: str, text: str) -> str:
-    """``text`` with every 48-digit recovery password masked (:func:`mask_recovery_password`)
-    when ``file_name`` is a BitLocker recovery key text file; other files are returned unchanged.
+    """``text`` with every checksum-valid recovery password masked (:func:`redact_recovery_passwords`).
 
-    Document extraction (docs output, docs index, case DB ``indexed_document``) goes through
-    this, so the key never leaves the evidence in clear text (r3 follow-up to O1).
+    Content-based since the R3 adversarial review: the file name is no longer a gate (a key
+    pasted into ``notes.md``, a ``.log``, an e-mail, a localized or NFD file name is masked
+    too). A recognised key file name additionally masks any 8x6-digit hyphenated value
+    even when its checksum fails.
     """
-    if not text or not is_recovery_key_text_name(file_name):
+    redacted = redact_recovery_passwords(text)
+    if redacted and is_recovery_key_text_name(file_name):
+        # A recognised key file: every 8x6-digit group is masked, checksum or not.
+        redacted = RECOVERY_PASSWORD.sub(lambda match: mask_recovery_password(match.group(1)), redacted)
+    return redacted
+
+
+def _recovery_groups(candidate: str) -> list[str]:
+    digits = "".join(str(int(char)) for char in candidate if char.isdigit())
+    return [digits[index : index + 6] for index in range(0, 48, 6)] if len(digits) == 48 else []
+
+
+def recovery_password_candidate_valid(candidate: str) -> bool:
+    """A loose match (any separator, Unicode digits) whose 8 groups pass the checksum."""
+    groups = _recovery_groups(candidate)
+    return bool(groups) and all(int(group) <= 720885 and int(group) % 11 == 0 for group in groups)
+
+
+def redact_recovery_passwords(text: str) -> str:
+    """Every checksum-valid BitLocker recovery password in ``text`` masked as
+    ``XXXXXX-…-XXXXNN`` (whatever separator the text used)."""
+    if not text or len(text) < 48:
         return text
-    return RECOVERY_PASSWORD.sub(lambda match: mask_recovery_password(match.group(1)), text)
+
+    def replace(match: re.Match[str]) -> str:
+        candidate = match.group(0)
+        groups = _recovery_groups(candidate)
+        if not groups or not recovery_password_candidate_valid(candidate):
+            return candidate
+        return mask_recovery_password("-".join(groups))
+
+    redacted = RECOVERY_PASSWORD_LOOSE.sub(replace, text)
+    return text if redacted == text else redacted
+
+
+def contains_recovery_password(text: str) -> bool:
+    return any(recovery_password_candidate_valid(match.group(0)) for match in RECOVERY_PASSWORD_LOOSE.finditer(text or ""))
+
+
+def file_holds_recovery_secret(path: Path) -> bool:
+    """A BitLocker key file (recognised name, ``.BEK``) or a small file whose text holds a
+    checksum-valid recovery password: such files are never copied verbatim by ``extract``."""
+    name = path.name
+    if is_recovery_key_text_name(name) or BEK_NAME.match(name):
+        return True
+    try:
+        if path.stat().st_size > RECOVERY_KEY_TEXT_SCAN_BYTES:
+            return False
+        data = path.read_bytes()
+    except OSError:
+        return False
+    return contains_recovery_password(decode_key_text(data))
 
 
 def recovery_password_valid(value: str) -> bool:
@@ -183,3 +239,25 @@ def collect_bitlocker_recovery_key_files(root: Path, provider: str) -> Iterable[
                 "raw_preview": f"{name} 식별자 {fields.get('key_identifier') or '-'}",
             },
         )
+
+
+def redact_recovery_passwords_in(value: object) -> object:
+    """``value`` (row details: nested dicts/lists/strings) with every checksum-valid recovery
+    password masked; containers are copied only when something changed. Strings shorter than
+    a recovery password are not scanned, so the walk is cheap on ordinary rows."""
+    if isinstance(value, str):
+        return redact_recovery_passwords(value) if len(value) >= 48 else value
+    if isinstance(value, dict):
+        changed = False
+        out: dict[object, object] = {}
+        for key, item in value.items():
+            new = redact_recovery_passwords_in(item)
+            changed = changed or new is not item
+            out[key] = new
+        return out if changed else value
+    if isinstance(value, (list, tuple)):
+        items = [redact_recovery_passwords_in(item) for item in value]
+        if any(new is not old for new, old in zip(items, value)):
+            return items if isinstance(value, list) else tuple(items)
+        return value
+    return value

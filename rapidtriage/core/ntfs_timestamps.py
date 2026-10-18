@@ -34,7 +34,8 @@ ROW_SOURCE = "timestamp-mismatch"
 ARTIFACT_TYPE = "ntfs-timestamp-mismatch"
 
 TIME_NAMES = ("created_at", "modified_at", "accessed_at", "mft_modified_at")
-# Same threshold as the ``ntfs.si_before_fn`` rule's default ``min_delta_seconds``.
+# Fallback only: the threshold is the ``ntfs.si_before_fn`` rule's ``min_delta_seconds`` from
+# the triage catalogue (:func:`si_before_fn_threshold`), so the mismatch rows and the rule agree.
 SI_BEFORE_FN_MIN_DELTA_SECONDS = 60
 FN_AFTER_SI_TOLERANCE_SECONDS = 60
 FUTURE_TOLERANCE = dt.timedelta(days=1)
@@ -63,8 +64,25 @@ def parse_iso(value: object) -> dt.datetime | None:
     return moment if moment.tzinfo is not None else moment.replace(tzinfo=dt.timezone.utc)
 
 
+def si_before_fn_threshold() -> float:
+    """``min_delta_seconds`` of the ``ntfs.si_before_fn`` catalogue rule (single source of truth);
+    :data:`SI_BEFORE_FN_MIN_DELTA_SECONDS` when the catalogue cannot be loaded."""
+    try:
+        from .triage_rules.catalog import load_catalog
+
+        spec = load_catalog().specs.get("ntfs.si_before_fn")
+        value = spec.params.get("min_delta_seconds") if spec is not None else None
+        return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else float(SI_BEFORE_FN_MIN_DELTA_SECONDS)
+    except Exception:
+        return float(SI_BEFORE_FN_MIN_DELTA_SECONDS)
+
+
 def mismatch_reasons(
-    si: Mapping[str, object], fn: Mapping[str, object], *, reference: dt.datetime
+    si: Mapping[str, object],
+    fn: Mapping[str, object],
+    *,
+    reference: dt.datetime,
+    si_before_fn_seconds: float = SI_BEFORE_FN_MIN_DELTA_SECONDS,
 ) -> tuple[list[str], dict[str, object]]:
     """``(reason codes, evidence)`` for one record's ``si``/``fn`` time maps (keys :data:`TIME_NAMES`)."""
     si_times = {name: parse_iso(si.get(name)) for name in TIME_NAMES}
@@ -75,7 +93,7 @@ def mismatch_reasons(
     if si_created is not None and fn_created is not None:
         delta = (fn_created - si_created).total_seconds()
         evidence["si_fn_created_delta_seconds"] = int(delta)
-        if delta > SI_BEFORE_FN_MIN_DELTA_SECONDS:
+        if delta > si_before_fn_seconds:
             reasons.append("si_created_before_fn")
     si_modified = si_times["modified_at"]
     if (
@@ -109,12 +127,16 @@ def mismatch_reasons(
 
 
 def mismatch_row(
-    mft_details: Mapping[str, object], *, reference: dt.datetime, mft_row_index: int | None
+    mft_details: Mapping[str, object],
+    *,
+    reference: dt.datetime,
+    mft_row_index: int | None,
+    si_before_fn_seconds: float = SI_BEFORE_FN_MIN_DELTA_SECONDS,
 ) -> dict[str, object] | None:
     """The ``timestamp-mismatch`` row details for one ntfs-meta MFT row, or ``None`` when nothing disagrees."""
     si = {name: mft_details.get(f"si_{name}") for name in TIME_NAMES}
     fn = {name: mft_details.get(f"fn_{name}") for name in TIME_NAMES}
-    reasons, evidence = mismatch_reasons(si, fn, reference=reference)
+    reasons, evidence = mismatch_reasons(si, fn, reference=reference, si_before_fn_seconds=si_before_fn_seconds)
     if not reasons:
         return None
     labels = [REASON_LABELS[code] for code in reasons]

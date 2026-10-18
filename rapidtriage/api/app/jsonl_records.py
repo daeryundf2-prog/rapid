@@ -62,6 +62,35 @@ def iter_jsonl_records(
             index += 1
 
 
+def iter_record_range(
+    payload: Mapping[str, object],
+    *,
+    payload_path: Path | str | None,
+    start: int,
+    end: int,
+    start_byte: int,
+) -> Iterator[tuple[int, dict[str, object]]]:
+    """``(record_index, expanded row)`` of records ``[start, end)`` read from ``start_byte`` (the byte
+    offset of record ``start``, recorded when the rows were written): nothing before it is read."""
+    records_path = jsonl_records_path(payload, payload_path)
+    if records_path is None or end <= start:
+        return
+    profiles = payload_profiles(payload)
+    index = start
+    with open(records_path, "rb") as handle:
+        handle.seek(max(0, start_byte))
+        for line_number, line in enumerate(handle, start=1):
+            if index >= end:
+                return
+            stripped = line.strip()
+            if not stripped.startswith(b"{"):
+                continue
+            row = parse_record_line(stripped, path=records_path, line_number=line_number)
+            if row is not None:
+                yield index, expand_row(row, profiles)
+            index += 1
+
+
 def payload_profiles(payload: Mapping[str, object]) -> Mapping[str, Mapping[str, object]] | None:
     profiles = payload.get(PROFILES_PAYLOAD_KEY)
     return profiles if isinstance(profiles, Mapping) else None

@@ -1161,6 +1161,66 @@ class AnalysisApiTests(unittest.TestCase):
             {"timestamp-mismatch:in-use": 1, "timestamp-mismatch:deleted": 1},
         )
 
+    def test_ntfs_meta_source_filter_pages_from_recorded_row_ranges(self) -> None:
+        """R3 review C2/C13/C15: ``source=`` reads only that source's rows (recorded ranges), the
+        sorted path discloses a capped scan, and mismatch rows without a boolean in_use are apart."""
+        from rapidtriage.api.app import routes_analyses
+
+        stomped = ntfs_r3_fixtures.mft_record_times(
+            name="stomped.exe",
+            parent=64,
+            si=("2019-01-01T00:00:00Z", "2019-01-01T00:00:00Z", "2024-02-01T00:00:00.5Z", "2024-02-01T00:00:00.5Z"),
+            fn=("2024-02-01T00:00:00.25Z",) * 4,
+        )
+        state = self.run_ntfs(mft=synthetic_mft({67: stomped}), logfile=ntfs_r3_fixtures.logfile())
+        self.assertEqual(state["status"], "completed", state)
+        summary = state["summary"]
+        ranges = summary["source_row_ranges"]
+        self.assertEqual(ranges["logfile-transaction"]["end"] - ranges["logfile-transaction"]["start"], 4)
+        self.assertEqual(ranges["mft"], ranges["timestamp-mismatch"])
+        self.assertEqual(ranges["usn"]["end"], ranges["usn"]["start"])
+        self.assertEqual(summary["timestamp_mismatch_in_use_unknown_count"], 0)
+        self.assertEqual(summary["timestamp_mismatch_total_count"], 1)
+        analysis_id = str(state["analysis_id"])
+
+        logrows = self.rows(analysis_id, source="logfile-transaction")
+        self.assertEqual(logrows["matched"], 4)
+        self.assertEqual(logrows["pagination"]["scanned"], 4)  # MFT rows before them are never read
+        self.assertEqual(self.rows(analysis_id, source="usn")["pagination"]["scanned"], 0)
+        both = self.rows(analysis_id, source="timestamp-mismatch,logfile-transaction")
+        self.assertEqual(both["matched"], 5)
+
+        routes_analyses._ALLOWED_RECORDS_CACHE.clear()
+        with patch.object(routes_analyses, "DETAIL_FILTER_SCAN_CAP", 2):
+            capped = self.sorted_rows(analysis_id, source="logfile-transaction", sort="details.lsn:asc")
+        routes_analyses._ALLOWED_RECORDS_CACHE.clear()
+        self.assertEqual(len(capped["rows"]), 2)
+        self.assertEqual(capped["pagination"]["details_filter"]["truncated"], True)
+        full = self.sorted_rows(analysis_id, source="logfile-transaction", sort="details.lsn:asc")
+        self.assertEqual(len(full["rows"]), 4)
+        self.assertNotIn("truncated", full["pagination"]["details_filter"])
+
+    def test_detail_row_filter_treats_old_ntfs_rows_as_mft_and_needs_boolean_in_use(self) -> None:
+        """Coordinator follow-up / C15: pre-R3 ntfs-meta rows (no ``source``) are MFT rows; a row
+        without a boolean ``in_use`` matches neither in_use=true nor in_use=false."""
+        from rapidtriage.api.app.analysis_kinds import _ntfs_source_in_use_counts
+        from rapidtriage.api.app.routes_analyses import detail_row_filter
+
+        old = {"artifact_type": "ntfs-meta-row", "details": {"entry_number": 5, "in_use": True}}
+        mft_or_usn = detail_row_filter({"source": frozenset({"mft", "usn"})})
+        self.assertTrue(mft_or_usn(old))
+        self.assertFalse(detail_row_filter({"source": frozenset({"usn"})})(old))
+        self.assertFalse(mft_or_usn({"artifact_type": "carve-row", "details": {}}))
+        unknown = {"artifact_type": "ntfs-timestamp-mismatch", "details": {"source": "timestamp-mismatch", "in_use": None}}
+        for value in (True, False):
+            self.assertFalse(detail_row_filter({"source": frozenset({"timestamp-mismatch"})}, value)(unknown))
+        counts = _ntfs_source_in_use_counts(
+            {"timestamp_mismatch_in_use_count": 2, "timestamp_mismatch_deleted_count": 1, "timestamp_mismatch_in_use_unknown_count": 3}
+        )
+        self.assertEqual(
+            counts, {"timestamp-mismatch:in-use": 2, "timestamp-mismatch:deleted": 1, "timestamp-mismatch:unknown": 3}
+        )
+
     def test_ntfs_meta_raw_mft_picks_up_sibling_logfile(self) -> None:
         mft_dir = self.evidence / "extracted"
         mft_dir.mkdir()

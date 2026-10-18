@@ -32,6 +32,7 @@ import hashlib
 import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 from ...core.models import ArtifactRecord
@@ -40,7 +41,12 @@ DEPTH_PARSER = "windows-registry-depth"
 DEPTH_PARSER_VERSION = "registry-depth-v1"
 MAX_DEPTH_ROWS_PER_TYPE = 50_000
 MAX_EXPORT_BYTES = 256 * 1024 * 1024
+# One ``.reg`` value (after joining ``\`` continuation lines); a larger value is dropped and disclosed.
+MAX_EXPORT_VALUE_CHARS = 16 * 1024 * 1024
 MAX_SUBKEYS_PER_LIST = 20_000
+# Keys one decoder may expand per source: a hostile subkey list (every entry pointing at the
+# same cell, or at an ancestor) cannot turn the nested Office/WLAN walks into an N**4 blow-up.
+MAX_DEPTH_KEYS_PER_DECODER = 200_000
 DEPTH_ARTIFACT_TYPES = (
     "registry-network-profile",
     "registry-network-share",
@@ -128,12 +134,27 @@ class KeyView:
     last_written: str = ""
     native: object = None
     line: int = 0
+    ancestry: frozenset[int] = frozenset()
 
 
 class KeySource:
     """``key(rel)`` and ``subkeys(view)`` over a hive or an export (one hive kind, one user)."""
 
     hive_kind = ""
+    keys_visited = 0
+    budget_exhausted = False
+
+    def reset_budget(self) -> None:
+        self.keys_visited = 0
+        self.budget_exhausted = False
+
+    def charge(self, count: int) -> int:
+        """How many of ``count`` keys may still be expanded under :data:`MAX_DEPTH_KEYS_PER_DECODER`."""
+        allowed = max(0, min(count, MAX_DEPTH_KEYS_PER_DECODER - self.keys_visited))
+        self.keys_visited += allowed
+        if allowed < count:
+            self.budget_exhausted = True
+        return allowed
 
     def key(self, rel: str) -> KeyView | None:  # pragma: no cover - interface
         raise NotImplementedError
@@ -166,10 +187,25 @@ class HiveKeySource(KeySource):
         return self._view(rel, key) if key is not None else None
 
     def subkeys(self, view: KeyView) -> list[KeyView]:
-        if view.native is None:
+        """Children of ``view``: each cell once, never the key itself or one of its ancestors."""
+        if view.native is None or self.budget_exhausted:
             return []
-        children = self.hive.subkeys(view.native)[:MAX_SUBKEYS_PER_LIST]  # type: ignore[attr-defined]
-        return [self._view(f"{view.rel}\\{child.name}", child) for child in children]
+        own = int(getattr(view.native, "offset", 0) or 0)
+        ancestry = view.ancestry | {own}
+        seen: set[int] = set()
+        unique = []
+        for child in self.hive.subkeys(view.native)[:MAX_SUBKEYS_PER_LIST]:  # type: ignore[attr-defined]
+            offset = int(getattr(child, "offset", 0) or 0)
+            if offset in seen or offset in ancestry:
+                continue  # duplicate or cyclic subkey-list entry
+            seen.add(offset)
+            unique.append(child)
+        views = []
+        for child in unique[: self.charge(len(unique))]:
+            child_view = self._view(f"{view.rel}\\{child.name}", child)
+            child_view.ancestry = ancestry
+            views.append(child_view)
+        return views
 
     def control_set(self) -> str:
         if self._ccs is None:
@@ -212,8 +248,11 @@ class ExportKeySource(KeySource):
         return view
 
     def subkeys(self, view: KeyView) -> list[KeyView]:
-        found = []
-        for lowered, original in sorted(self.children.get(view.rel.casefold(), {}).items())[:MAX_SUBKEYS_PER_LIST]:
+        found: list[KeyView] = []
+        if self.budget_exhausted:
+            return found
+        children = sorted(self.children.get(view.rel.casefold(), {}).items())[:MAX_SUBKEYS_PER_LIST]
+        for lowered, original in children[: self.charge(len(children))]:
             child = self.keys.get(lowered) or KeyView(rel=original, name=original.rsplit("\\", 1)[-1], values={})
             found.append(child)
         return found
@@ -243,11 +282,28 @@ class DepthRow:
     risk_flags: tuple[str, ...] = ()
 
 
+# ``timestamp_label`` -> ``timestamp_kind`` (the console's time-semantics column). A key LastWrite
+# (PCA Store/Persisted, App Paths, MountPoints2 ...) is never a per-item run or open time.
+TIMESTAMP_KINDS = {
+    "last_written": "last-written",
+    "last_written_mru_head": "last-written",
+    "last_connected": "last-connected",
+    "first_connected": "first-connected",
+    "last_opened": "last-opened",
+}
+
+
+def timestamp_kind(row: DepthRow) -> str:
+    return TIMESTAMP_KINDS.get(row.timestamp_label, "") if row.timestamp else ""
+
+
 @dataclass
 class DepthStats:
     counts: dict[str, int] = field(default_factory=dict)
     capped: list[str] = field(default_factory=list)
     errors: list[dict[str, str]] = field(default_factory=list)
+    key_budget_exhausted: list[str] = field(default_factory=list)
+    oversized_values: list[str] = field(default_factory=list)
 
     def summary(self) -> dict[str, object]:
         return {
@@ -256,6 +312,11 @@ class DepthStats:
             "row_counts": dict(sorted(self.counts.items())),
             "capped_types": sorted(set(self.capped)),
             "row_cap_per_type": MAX_DEPTH_ROWS_PER_TYPE,
+            "key_budget_exhausted_decoders": sorted(set(self.key_budget_exhausted)),
+            "key_budget_per_decoder": MAX_DEPTH_KEYS_PER_DECODER,
+            "oversized_export_value_count": len(self.oversized_values),
+            "oversized_export_values": self.oversized_values[:20],
+            "export_value_char_cap": MAX_EXPORT_VALUE_CHARS,
             "decoder_errors": self.errors[:20],
             "decoder_error_count": len(self.errors),
         }
@@ -265,17 +326,20 @@ def iter_depth_rows(source: KeySource, stats: DepthStats) -> Iterable[DepthRow]:
     """Every depth row of one source; one decoder failing is recorded and isolated."""
     decoders: Sequence[Callable[[KeySource], Iterable[DepthRow]]] = DECODERS_BY_HIVE.get(source.hive_kind, ())
     for decoder in decoders:
+        source.reset_budget()
         try:
             for row in decoder(source):
                 count = stats.counts.get(row.artifact_type, 0)
                 if count >= MAX_DEPTH_ROWS_PER_TYPE:
                     if row.artifact_type not in stats.capped:
                         stats.capped.append(row.artifact_type)
-                    continue
+                    break  # stop the decoder: draining a capped generator is the blow-up itself
                 stats.counts[row.artifact_type] = count + 1
                 yield row
         except Exception as exc:  # one corrupt key family must not stop the rest
             stats.errors.append({"decoder": decoder.__name__, "error": f"{type(exc).__name__}: {exc}"[:300]})
+        if source.budget_exhausted:
+            stats.key_budget_exhausted.append(f"{source.hive_kind}:{decoder.__name__}")
 
 
 # ---------------------------------------------------------------------------
@@ -323,7 +387,11 @@ def systemtime_text(raw: object) -> str:
     year, month, _weekday, day, hour, minute, second, millis = (
         int.from_bytes(data[index : index + 2], "little") for index in range(0, 16, 2)
     )
-    if not (1980 <= year <= 9999 and 1 <= month <= 12 and 1 <= day <= 31 and hour < 24 and minute < 60 and second < 60 and millis < 1000):
+    if not (1980 <= year <= 9999 and millis < 1000):
+        return ""
+    try:  # calendar validation (February 31st, month 13, hour 24 ...)
+        datetime(year, month, day, hour, minute, second)
+    except ValueError:
         return ""
     stamp = f"{year:04d}-{month:02d}-{day:02d}T{hour:02d}:{minute:02d}:{second:02d}"
     return f"{stamp}.{millis:03d}" if millis else stamp
@@ -888,6 +956,7 @@ def hive_depth_records(context: object, stats: DepthStats) -> Iterable[ArtifactR
                 "recovery_method": "parsed",
                 "source_offset": record.details.get("key_cell_offset"),
                 "timestamp_timezone": row.timestamp_timezone if row.timestamp else "",
+                "timestamp_kind": timestamp_kind(row),
             }
         )
         yield record
@@ -957,21 +1026,44 @@ def decode_export_value(raw: str) -> object:
     return value
 
 
-def iter_export_keys(lines: Sequence[str]) -> Iterable[tuple[str, dict[str, object], int]]:
-    """``(key, decoded values, line number)`` of a ``.reg`` text; ``\\`` continuation lines are joined."""
+def iter_export_keys(
+    lines: Sequence[str], stats: DepthStats | None = None
+) -> Iterable[tuple[str, dict[str, object], int]]:
+    """``(key, decoded values, line number)`` of a ``.reg`` text; ``\\`` continuation lines are joined.
+
+    Continuation parts are collected in a list and joined once (no quadratic re-concatenation);
+    a value whose text exceeds :data:`MAX_EXPORT_VALUE_CHARS` is dropped and disclosed in
+    ``stats.oversized_values``.
+    """
     current = ""
     current_line = 0
     values: dict[str, object] = {}
-    pending = ""
+    parts: list[str] = []
+    parts_chars = 0
+    oversized = False
     for number, line in enumerate([*lines, ""], start=1):
         stripped = line.strip()
-        if pending and not stripped and number <= len(lines):
+        if parts and not stripped and number <= len(lines):
             continue  # blank line inside a continued value (CR CR LF line ends)
-        if pending:
-            stripped = pending + stripped
-            pending = ""
-        if stripped.endswith("\\") and "=" in stripped and not stripped.startswith("["):
-            pending = stripped[:-1]
+        if parts:
+            continued = stripped.endswith("\\")
+            piece = stripped[:-1] if continued else stripped
+            if not oversized:
+                parts.append(piece)
+                parts_chars += len(piece)
+                oversized = parts_chars > MAX_EXPORT_VALUE_CHARS
+            if continued:
+                continue
+            stripped = "".join(parts)
+            parts, parts_chars = [], 0
+            if oversized:
+                oversized = False
+                if stats is not None:
+                    stats.oversized_values.append(f"{current}:{number}"[:300])
+                continue
+        elif stripped.endswith("\\") and "=" in stripped and not stripped.startswith("["):
+            parts, parts_chars = [stripped[:-1]], len(stripped) - 1
+            oversized = parts_chars > MAX_EXPORT_VALUE_CHARS
             continue
         if stripped.startswith("[") and stripped.endswith("]"):
             if current:
@@ -998,9 +1090,9 @@ def iter_export_keys(lines: Sequence[str]) -> Iterable[tuple[str, dict[str, obje
         yield current, values, current_line
 
 
-def export_sources(lines: Sequence[str]) -> list[ExportKeySource]:
+def export_sources(lines: Sequence[str], stats: DepthStats | None = None) -> list[ExportKeySource]:
     sources: dict[tuple[str, str], ExportKeySource] = {}
-    for key, values, line in iter_export_keys(lines):
+    for key, values, line in iter_export_keys(lines, stats):
         split = split_export_key(key)
         if split is None:
             continue
@@ -1012,6 +1104,37 @@ def export_sources(lines: Sequence[str]) -> list[ExportKeySource]:
     return list(sources.values())
 
 
+def looks_like_utf16(data: bytes) -> str:
+    """``"utf-16-le"``/``"utf-16-be"`` when a BOM-less buffer has the NUL pattern of UTF-16 text
+    (most odd or even bytes of the first 4 KiB are NUL), else ``""``."""
+    sample = data[:4096]
+    pairs = len(sample) // 2
+    if pairs < 2:
+        return ""
+    odd_nuls = sum(1 for index in range(1, pairs * 2, 2) if sample[index] == 0)
+    even_nuls = sum(1 for index in range(0, pairs * 2, 2) if sample[index] == 0)
+    if odd_nuls >= pairs * 0.6 and even_nuls <= pairs * 0.1:
+        return "utf-16-le"
+    if even_nuls >= pairs * 0.6 and odd_nuls <= pairs * 0.1:
+        return "utf-16-be"
+    return ""
+
+
+def decode_export_bytes(data: bytes) -> str:
+    """``.reg`` text: UTF-16 only with a BOM or the UTF-16 NUL pattern, then UTF-8, then CP949
+    (``REGEDIT4`` ANSI exports of Korean systems). A CP949 file of even length is never read as
+    UTF-16 (any even-length buffer decodes as UTF-16 without error)."""
+    if data[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        return data.decode("utf-16", errors="replace")
+    utf16 = looks_like_utf16(data)
+    if utf16:
+        return data.decode(utf16, errors="replace")
+    try:
+        return data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return data.decode("cp949", errors="replace")
+
+
 def read_export_lines(path: Path) -> list[str]:
     try:
         if path.stat().st_size > MAX_EXPORT_BYTES:
@@ -1019,12 +1142,7 @@ def read_export_lines(path: Path) -> list[str]:
         data = path.read_bytes()
     except OSError:
         return []
-    for encoding in ("utf-16", "utf-8-sig") if data[:2] in (b"\xff\xfe", b"\xfe\xff") else ("utf-8-sig", "utf-16"):
-        try:
-            return data.decode(encoding).splitlines()
-        except UnicodeError:
-            continue
-    return data.decode("cp949", errors="replace").splitlines()
+    return decode_export_bytes(data).splitlines()
 
 
 def export_depth_records(path: Path, source_hashes: Mapping[str, str], stats: DepthStats | None = None) -> Iterable[ArtifactRecord]:
@@ -1033,7 +1151,7 @@ def export_depth_records(path: Path, source_hashes: Mapping[str, str], stats: De
 
     stats = stats or DepthStats()
     resolved = str(path.resolve())
-    for source in export_sources(read_export_lines(path)):
+    for source in export_sources(read_export_lines(path), stats):
         for row in iter_depth_rows(source, stats):
             key_path = f"{source.mount}\\{row.view.rel}"
             details: dict[str, object] = {
@@ -1059,6 +1177,7 @@ def export_depth_records(path: Path, source_hashes: Mapping[str, str], stats: De
                 "timestamp": row.timestamp,
                 "timestamp_label": row.timestamp_label if row.timestamp else "",
                 "timestamp_timezone": row.timestamp_timezone if row.timestamp else "",
+                "timestamp_kind": timestamp_kind(row),
                 "risk_flags": sorted(set(row.risk_flags)),
                 "risk_score": min(100, 25 * len(set(row.risk_flags))),
                 "raw_preview": (row.preview or key_path)[:2000],

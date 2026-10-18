@@ -339,8 +339,9 @@ class BitLockerKeyDocumentTextTests(unittest.TestCase):
             self.assertNotIn(fx.RECOVERY_PASSWORD, value)
             self.assertIn(masked, value)
             self.assertIn(fx.KEY_ID, value)  # the identifier is not secret and stays searchable
-        # Only files recognised as BitLocker key files are masked.
-        self.assertIn(fx.RECOVERY_PASSWORD, plain)
+        # R3 review A3: masking is content-based (checksum-validated), not gated on the file name.
+        self.assertNotIn(fx.RECOVERY_PASSWORD, plain)
+        self.assertIn(masked, plain)
 
     def test_run_outputs_never_contain_the_key(self) -> None:
         import sqlite3
@@ -357,7 +358,12 @@ class BitLockerKeyDocumentTextTests(unittest.TestCase):
             (documents / f"BitLocker 복구 키 {fx.KEY_ID}.TXT").write_bytes(fx.bitlocker_key_text("ko"))
             (documents / "memo.txt").write_text("password reset memo", encoding="utf-8")
             output_dir = Path(temp) / "run-out"
-            summary = run_triage_mode(root, mode="hacking", output_dir=output_dir)
+            # R3 review A2: with --extract the key files are skipped (manifest reason + hash).
+            summary = run_triage_mode(root, mode="hacking", output_dir=output_dir, extract_enabled=True)
+            manifests = [json.loads(path.read_text(encoding="utf-8")) for path in output_dir.rglob("*extract*manifest*.json")]
+            secret_skips = [item for manifest in manifests for item in manifest.get("skipped", []) if item.get("reason") == "secret-redacted"]
+            self.assertTrue(secret_skips, [path.name for path in output_dir.rglob("*")][:40])
+            self.assertTrue(all(len(item["sha256"]) == 64 for item in secret_skips))
 
             docs = json.loads((output_dir / "rapidtriage-docs.json").read_text(encoding="utf-8"))
             docs_text = json.dumps(docs, ensure_ascii=False)
@@ -427,3 +433,340 @@ class RegistrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# R3 adversarial-review regressions (A1-A14)
+# ---------------------------------------------------------------------------
+
+
+class _FakeKey:
+    def __init__(self, offset: int, name: str) -> None:
+        self.offset = offset
+        self.name = name
+        self.last_written_at = ""
+
+
+class _FakeHive:
+    """Children by offset; ``lists`` may repeat an offset or point back at an ancestor."""
+
+    def __init__(self, keys: dict[int, str], lists: dict[int, list[int]]) -> None:
+        self.keys = {offset: _FakeKey(offset, name) for offset, name in keys.items()}
+        self.lists = lists
+        self.subkey_calls = 0
+
+    def subkeys(self, key: _FakeKey) -> list[_FakeKey]:
+        self.subkey_calls += 1
+        return [self.keys[offset] for offset in self.lists.get(key.offset, [])]
+
+    def values_dict(self, key: _FakeKey) -> dict[str, object]:
+        return {}
+
+    def open_key(self, rel: str) -> _FakeKey | None:
+        return self.keys[1] if rel == "root" else None
+
+
+class RegistryDepthReviewTests(unittest.TestCase):
+    def test_cyclic_and_duplicate_subkey_lists_are_bounded(self) -> None:
+        """A1: 2,000 self-referencing ``User MRU``/``Word`` entries used to take minutes (N**4)."""
+        import time
+
+        from rapidtriage.artifacts.windows import registry_depth as depth
+        from rapidtriage.artifacts.windows.registry import NativeRegistryHive
+
+        for target in ("User MRU", "Word"):
+            hive = NativeRegistryHive.from_bytes(fx.cyclic_office_hive(target, 2000))
+            self.assertIsNotNone(hive)
+            stats = DepthStats()
+            started = time.monotonic()
+            rows = list(iter_depth_rows(depth.HiveKeySource(hive, "NTUSER"), stats))
+            self.assertLess(time.monotonic() - started, 5.0, target)
+            self.assertEqual([row for row in rows if row.artifact_type == "registry-office-mru"], [], target)
+            self.assertEqual(stats.errors, [], target)
+
+    def test_subkeys_dedupe_and_skip_ancestors(self) -> None:
+        from rapidtriage.artifacts.windows import registry_depth as depth
+
+        hive = _FakeHive({1: "root", 2: "a", 3: "b"}, {1: [2, 2, 2, 3, 1], 2: [1, 2, 3], 3: [3]})
+        source = depth.HiveKeySource(hive, "NTUSER")
+        root = source.key("root")
+        children = source.subkeys(root)
+        self.assertEqual([child.name for child in children], ["a", "b"])
+        # a's list points at root (ancestor) and at itself: only b remains; b lists only itself.
+        self.assertEqual([child.name for child in source.subkeys(children[0])], ["b"])
+        self.assertEqual(source.subkeys(children[1]), [])
+
+    def test_key_budget_is_recorded_in_depth_stats(self) -> None:
+        from unittest import mock
+
+        from rapidtriage.artifacts.windows import registry_depth as depth
+
+        source = ExportKeySource("SOFTWARE", "HKLM\\SOFTWARE", "")
+        for index in range(10):
+            source.add(rf"Microsoft\Windows\CurrentVersion\App Paths\tool{index}.exe", {"": f"C:\\t\\tool{index}.exe"}, index + 1)
+        stats = DepthStats()
+        with mock.patch.object(depth, "MAX_DEPTH_KEYS_PER_DECODER", 3):
+            rows = [row for row in iter_depth_rows(source, stats) if row.artifact_type == "registry-install-state"]
+        self.assertEqual(len(rows), 3)
+        self.assertIn("SOFTWARE:install_state_rows", stats.key_budget_exhausted)
+        self.assertEqual(stats.summary()["key_budget_exhausted_decoders"], ["SOFTWARE:install_state_rows"])
+
+    def test_type_cap_stops_the_decoder_and_errors_are_isolated(self) -> None:
+        """A1/A12: a capped type stops its decoder (no draining); a raising decoder is isolated."""
+        from unittest import mock
+
+        from rapidtriage.artifacts.windows import registry_depth as depth
+
+        produced = []
+
+        def flood(_source: object):
+            for index in range(1_000_000):
+                produced.append(index)
+                yield depth.DepthRow("registry-known-dll", "x", depth.KeyView("k", "k", {}), {})
+
+        def broken(_source: object):
+            yield depth.DepthRow("registry-network-share", "x", depth.KeyView("k", "k", {}), {})
+            raise ValueError("corrupt key")
+
+        def fine(_source: object):
+            yield depth.DepthRow("registry-default-browser", "x", depth.KeyView("k", "k", {}), {})
+
+        source = ExportKeySource("SYSTEM", "HKLM\\SYSTEM", "")
+        stats = DepthStats()
+        with (
+            mock.patch.object(depth, "MAX_DEPTH_ROWS_PER_TYPE", 5),
+            mock.patch.dict(depth.DECODERS_BY_HIVE, {"SYSTEM": (flood, broken, fine)}),
+        ):
+            rows = list(iter_depth_rows(source, stats))
+        self.assertLessEqual(len(produced), 6)
+        self.assertEqual(Counter(row.artifact_type for row in rows), {"registry-known-dll": 5, "registry-network-share": 1, "registry-default-browser": 1})
+        self.assertEqual(stats.capped, ["registry-known-dll"])
+        self.assertEqual([error["decoder"] for error in stats.errors], ["broken"])
+        self.assertIn("ValueError: corrupt key", stats.errors[0]["error"])
+
+    def test_corrupted_ntuser_discloses_depth_summary(self) -> None:
+        """A12: a cyclic NTUSER goes through the provider quickly and still gets its depth summary."""
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            write_hive(base, "Users/mallory/NTUSER.DAT", fx.cyclic_office_hive("User MRU", 2000))
+            records = list(WindowsRegistryProvider().collect(base))
+        summaries = [r.details["native_walk"]["registry_depth"] for r in records if r.artifact_type == "registry-hive"]
+        self.assertEqual(len(summaries), 1)
+        summary = summaries[0]
+        self.assertEqual(summary["decoder_error_count"], 0)
+        self.assertIn("key_budget_exhausted_decoders", summary)
+        self.assertNotIn("registry-office-mru", summary["row_counts"])
+
+    def test_long_continuation_is_linear_and_capped(self) -> None:
+        """A5: a 4 MB ``hex:`` value spread over 160k continuation lines; an oversized value is disclosed."""
+        import time
+        from unittest import mock
+
+        from rapidtriage.artifacts.windows import registry_depth as depth
+
+        row = "  " + ",".join(["00"] * 25) + ",\\"
+        lines = ["[HKEY_CURRENT_USER\\X]", '"Blob"=hex:00,\\', *([row] * 160_000), "  00", '"After"=dword:00000001']
+        started = time.monotonic()
+        keys = list(depth.iter_export_keys(lines))
+        self.assertLess(time.monotonic() - started, 10.0)
+        self.assertEqual(len(keys[0][1]["Blob"]), 4_000_002)
+        self.assertEqual(keys[0][1]["After"], 1)
+        stats = DepthStats()
+        with mock.patch.object(depth, "MAX_EXPORT_VALUE_CHARS", 1000):
+            keys = list(depth.iter_export_keys(lines, stats))
+        self.assertNotIn("Blob", keys[0][1])
+        self.assertEqual(keys[0][1]["After"], 1)
+        self.assertEqual(len(stats.oversized_values), 1)
+        self.assertEqual(stats.summary()["oversized_export_value_count"], 1)
+
+    def test_export_decoding_order(self) -> None:
+        """A8: an even-length CP949 ``REGEDIT4`` export is not misread as UTF-16."""
+        from rapidtriage.artifacts.windows.registry import collect_reg_export
+        from rapidtriage.artifacts.windows.registry_depth import (
+            decode_export_bytes,
+            export_depth_records,
+        )
+
+        text = fx.reg_export_text().replace("Windows Registry Editor Version 5.00", "REGEDIT4")
+        cp949 = text.replace("\n", "\r\n").encode("cp949")
+        if len(cp949) % 2:
+            cp949 += b" "
+        self.assertEqual(decode_export_bytes(cp949).rstrip(" "), text.replace("\n", "\r\n").rstrip(" "))
+        self.assertIn("회사", decode_export_bytes('"x"="회사"\r\n'.encode("utf-16-le")))
+        self.assertIn("회사", decode_export_bytes(b"\xff\xfe" + '"x"="회사"'.encode("utf-16-le")))
+        self.assertIn("회사", decode_export_bytes('"x"="회사"'.encode()))
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "ansi.reg"
+            path.write_bytes(cp949)
+            rows = list(export_depth_records(path, {"sha256": "x"}))
+            plain = list(collect_reg_export(path))
+            path.write_bytes(fx.reg_export_text().encode("utf-16"))
+            utf16_rows = list(export_depth_records(path, {"sha256": "x"}))
+        self.assertEqual(len(rows), len(utf16_rows))
+        self.assertTrue(plain)
+        names = {row.details.get("profile_name") for row in rows} - {None}
+        self.assertEqual(names, {row.details.get("profile_name") for row in utf16_rows} - {None})
+        self.assertIn("지점-VPN", names)
+
+    def test_systemtime_calendar_validation(self) -> None:
+        """A9: February 31st or month 13 is not a date."""
+        import struct
+
+        def raw(*fields: int) -> bytes:
+            return struct.pack("<8H", *fields)
+
+        self.assertEqual(systemtime_text(raw(2024, 2, 3, 31, 10, 0, 0, 0)), "")
+        self.assertEqual(systemtime_text(raw(2024, 13, 3, 1, 10, 0, 0, 0)), "")
+        self.assertEqual(systemtime_text(raw(2023, 2, 3, 29, 10, 0, 0, 0)), "")
+        self.assertEqual(systemtime_text(raw(2024, 2, 4, 29, 10, 0, 0, 5)), "2024-02-29T10:00:00.005")
+
+    def test_pca_rows_emit_timestamp_kind(self) -> None:
+        """A14: registry Store/Persisted rows are key LastWrite, never a run time."""
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            write_hive(base, "Users/alice/NTUSER.DAT", fx.ntuser_hive())
+            pca = base / "Windows" / "appcompat" / "pca"
+            pca.mkdir(parents=True)
+            (pca / "PcaAppLaunchDic.txt").write_bytes(fx.pca_app_launch_dic())
+            (pca / "PcaGeneralDb0.txt").write_bytes(fx.pca_general_db())
+            registry_rows = by_type(list(WindowsRegistryProvider().collect(base)), "execution-pca")
+            text_rows = list(collect_pca_text_files(base, "windows-execution"))
+        self.assertTrue(registry_rows)
+        self.assertEqual({row["timestamp_kind"] for row in registry_rows}, {"last-written"})
+        kinds = {row.details["source_kind"]: row.details["timestamp_kind"] for row in text_rows}
+        self.assertEqual(kinds, {"pca-app-launch-dic": "run", "pca-general-db": "pca-event"})
+
+    def test_every_depth_row_maps_timestamp_label_to_kind(self) -> None:
+        """A14 (console follow-up): every timestamp_label of a depth row has its timestamp_kind."""
+        expected = {
+            "last_written": "last-written",
+            "last_written_mru_head": "last-written",
+            "last_connected": "last-connected",
+            "first_connected": "first-connected",
+            "last_opened": "last-opened",
+        }
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            write_hive(base, "Windows/System32/config/SOFTWARE", fx.software_hive())
+            write_hive(base, "Windows/System32/config/SYSTEM", fx.system_hive())
+            write_hive(base, "Users/alice/NTUSER.DAT", fx.ntuser_hive())
+            (base / "export.reg").write_bytes(fx.reg_export_text().encode("utf-16"))
+            rows = [r.details for r in WindowsRegistryProvider().collect(base) if r.artifact_type in DEPTH_ARTIFACT_TYPES]
+        seen = set()
+        for row in rows:
+            label = row.get("timestamp_label") or ""
+            if row.get("timestamp"):
+                self.assertEqual(row["timestamp_kind"], expected[label], (row.get("label"), label))
+                seen.add(label)
+            else:
+                self.assertEqual(row["timestamp_kind"], "", row.get("label"))
+        self.assertTrue({"last_written", "last_connected", "last_opened"} <= seen, seen)
+
+
+class BitLockerSecretReviewTests(unittest.TestCase):
+    """A2-A4: the recovery password is masked by content (checksum-validated) everywhere."""
+
+    def test_content_based_masking_whatever_the_file_name(self) -> None:
+        import unicodedata
+
+        from rapidtriage.core.docs import extract_document_text, extract_text
+
+        masked = mask_recovery_password(fx.RECOVERY_PASSWORD)
+        body = f"Recovery Key:\r\n\t{fx.RECOVERY_PASSWORD}\r\n"
+        names = [
+            "notes.md",
+            "install.log",
+            "BitLockerRecoveryKey.txt",
+            "bitlocker_recovery_key.txt",
+            "my recovery key.txt",
+            unicodedata.normalize("NFD", f"BitLocker 복구 키 {fx.KEY_ID}.TXT"),
+            f"BitLocker 복구 키 {fx.KEY_ID}.txt",
+        ]
+        with tempfile.TemporaryDirectory() as temp:
+            for name in names:
+                path = Path(temp) / name
+                path.write_bytes(b"\xff\xfe" + body.encode("utf-16-le"))
+                kind = path.suffix.lstrip(".").lower()
+                for value in (extract_text(path, kind), extract_document_text(path, kind).text):
+                    self.assertNotIn(fx.RECOVERY_PASSWORD, value, name)
+                    self.assertIn(masked, value, name)
+            eml = Path(temp) / "key.eml"
+            eml.write_bytes(
+                f"From: a@example.test\r\nTo: b@example.test\r\nSubject: key\r\n\r\nmy key {fx.RECOVERY_PASSWORD}\r\n".encode()
+            )
+            self.assertNotIn(fx.RECOVERY_PASSWORD, extract_text(eml, "eml"))
+
+    def test_separators_and_checksum_gate(self) -> None:
+        from rapidtriage.artifacts.windows.antiforensics import (
+            redact_recovery_key_text,
+            redact_recovery_passwords,
+        )
+
+        masked = mask_recovery_password(fx.RECOVERY_PASSWORD)
+        for variant in (
+            fx.RECOVERY_PASSWORD.replace("-", " "),
+            fx.RECOVERY_PASSWORD.replace("-", ""),
+            fx.RECOVERY_PASSWORD.replace("-", "\u2010"),
+            "\uff10" + fx.RECOVERY_PASSWORD[1:],
+        ):
+            self.assertEqual(redact_recovery_passwords(f"key: {variant}."), f"key: {masked}.", ascii(variant))
+        invalid = "123453-234564-345675-456786-567897-678908-111111-222222"  # 678908 % 11 != 0
+        self.assertEqual(redact_recovery_passwords(invalid), invalid)
+        self.assertEqual(redact_recovery_passwords(fx.RECOVERY_PASSWORD + "9"), fx.RECOVERY_PASSWORD + "9")
+        # A recognised key file still masks a key whose checksum fails (name gate kept as a superset).
+        self.assertNotIn(invalid, redact_recovery_key_text(f"BitLocker Recovery Key {fx.KEY_ID}.TXT", invalid))
+
+    def test_extract_skips_key_files_with_hash(self) -> None:
+        """A2: ``extract`` never copies a key file (or a small text holding a valid key) verbatim."""
+        from rapidtriage.core.docs import run_docs_search
+        from rapidtriage.core.extract import run_extract
+
+        with tempfile.TemporaryDirectory() as temp:
+            evidence = Path(temp) / "evidence"
+            evidence.mkdir()
+            (evidence / f"BitLocker Recovery Key {fx.KEY_ID}.TXT").write_bytes(fx.bitlocker_key_text())
+            (evidence / "recovery notes.txt").write_text(f"recovery {fx.RECOVERY_PASSWORD}", encoding="utf-8")
+            (evidence / "recovery plan.txt").write_text("recovery plan without secrets", encoding="utf-8")
+            payload = run_docs_search(evidence, ["recovery"])
+            output = Path(temp) / "out"
+            manifest = run_extract(Path(temp) / "docs.json", output, kinds=["txt"], payload=payload)
+            copied = [Path(entry["extracted_path"]).name for entry in manifest["entries"]]
+            skipped = {Path(item["original_path"]).name: item for item in manifest["skipped"]}
+            files = [path.read_bytes() for path in output.rglob("*") if path.is_file()]
+        self.assertEqual(copied, ["recovery plan.txt"])
+        for name in (f"BitLocker Recovery Key {fx.KEY_ID}.TXT", "recovery notes.txt"):
+            self.assertEqual(skipped[name]["reason"], "secret-redacted")
+            self.assertEqual(len(skipped[name]["sha256"]), 64)
+        for data in files:
+            self.assertNotIn(fx.RECOVERY_PASSWORD.encode("utf-16-le"), data)
+            self.assertNotIn(fx.RECOVERY_PASSWORD.encode(), data)
+
+    def test_command_lines_are_masked_at_row_write(self) -> None:
+        """A4: PowerShell history and 4688 CommandLine rows never hold the key."""
+        from rapidtriage.artifacts.windows.eventlog import WindowsEventLogProvider
+
+        command = f"manage-bde -unlock D: -RecoveryPassword {fx.RECOVERY_PASSWORD}"
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            history = base / "Users" / "alice" / "AppData" / "Roaming" / "Microsoft" / "Windows" / "PowerShell" / "PSReadLine"
+            history.mkdir(parents=True)
+            (history / "ConsoleHost_history.txt").write_text(f"dir\n{command}\n", encoding="utf-8")
+            logs = base / "Windows" / "System32" / "winevt" / "Logs"
+            logs.mkdir(parents=True)
+            (logs / "Security.xml").write_text(
+                '<Events><Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event"><System>'
+                '<Provider Name="Microsoft-Windows-Security-Auditing"/><EventID>4688</EventID>'
+                '<TimeCreated SystemTime="2024-05-02T10:00:00.000Z"/><EventRecordID>1</EventRecordID>'
+                "<Channel>Security</Channel><Computer>pc</Computer></System><EventData>"
+                '<Data Name="NewProcessName">C:\\Windows\\System32\\manage-bde.exe</Data>'
+                f'<Data Name="CommandLine">{command}</Data></EventData></Event></Events>',
+                encoding="utf-8",
+            )
+            execution = [r for r in WindowsExecutionProvider().collect(base) if r.artifact_type == "powershell-history-command"]
+            events = list(WindowsEventLogProvider().collect(base))
+        masked = mask_recovery_password(fx.RECOVERY_PASSWORD)
+        self.assertEqual([r.details["command_line"] for r in execution][-1], f"manage-bde -unlock D: -RecoveryPassword {masked}")
+        dumped = json.dumps([r.details for r in [*execution, *events]], ensure_ascii=False, default=str)
+        self.assertNotIn(fx.RECOVERY_PASSWORD, dumped)
+        event = next(r for r in events if r.artifact_type == "eventlog-event")
+        self.assertIn(masked, json.dumps(event.details, ensure_ascii=False, default=str))

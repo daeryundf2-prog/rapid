@@ -94,6 +94,15 @@ class TimestampMismatchTests(unittest.TestCase):
     def test_missing_file_name_only_checks_future(self) -> None:
         row = mismatch_row({**{f"si_{k}": v for k, v in times().items()}}, reference=REFERENCE, mft_row_index=None)
         self.assertIsNone(row)
+        # R3 review C14: without $FILE_NAME only future_time can fire -- and it does.
+        future = mismatch_row(
+            {**{f"si_{k}": v for k, v in times(modified="2031-01-01T00:00:00.1+00:00", created="2019-01-01T00:00:00+00:00").items()}},
+            reference=REFERENCE,
+            mft_row_index=None,
+        )
+        assert future is not None
+        self.assertEqual(future["reasons"], ["future_time"])
+        self.assertEqual(future["future_fields"], ["si_modified_at"])
 
 
 class LogFileTests(unittest.TestCase):
@@ -176,6 +185,147 @@ class LogFileTests(unittest.TestCase):
 
     def test_unknown_operation_label(self) -> None:
         self.assertEqual(operation_label(0x7F), "알 수 없음(0x7F)")
+
+
+class LogFileReviewTests(unittest.TestCase):
+    """R3 adversarial-review regressions C1, C6-C9, C14 ($LogFile) and C4/C5/C10 (mismatch)."""
+
+    def parse(self, data: bytes, **kwargs: object) -> tuple[list[dict[str, object]], LogFileScan]:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "LogFile.bin"
+            path.write_bytes(data)
+            scan = LogFileScan()
+            rows = list(iter_logfile_rows(path, scan=scan, **kwargs))  # type: ignore[arg-type]
+        return rows, scan
+
+    def test_page_spanning_record_is_reassembled_and_next_page_records_survive(self) -> None:
+        """C1: the tail at the start of page 3 is skipped; page 3's own record is not lost."""
+        for at_start in (True, False):
+            rows, scan = self.parse(fx.spanning_logfile(next_record_at_spanning_start=at_start))
+            vcns = [row.get("target_vcn") for row in rows]
+            self.assertEqual(vcns, [0, 0, 1, 2, 99, 0], at_start)
+            big = rows[4]
+            self.assertTrue(big["spans_pages"])
+            self.assertTrue(big["spanning_reassembled"])
+            self.assertEqual(big["file_name"], "spanner.exe")
+            self.assertEqual(rows[5]["file_name"], "after.txt")
+            self.assertEqual(scan.reassembled_records, 1)
+            self.assertEqual(scan.unresolved_spanning_records, 0)
+            self.assertEqual(scan.rejected_records, 0)
+
+    def test_spanning_record_with_a_corrupt_next_page_is_flagged(self) -> None:
+        """C1/C7: the continuation page fails its fixups: the record keeps what it has, counted unresolved."""
+        rows, scan = self.parse(fx.spanning_logfile(broken_continuation=True))
+        self.assertEqual([row.get("target_vcn") for row in rows], [0, 0, 1, 2, 99])
+        big = rows[-1]
+        self.assertFalse(big["spanning_reassembled"])
+        self.assertTrue(big["redo_undo_data_partial"])
+        self.assertEqual(big["file_name"], "spanner.exe")  # decoded from the part in page 2
+        self.assertEqual(scan.unresolved_spanning_records, 1)
+        self.assertEqual(scan.truncated_records, 1)
+        self.assertEqual(scan.corrupt_pages, 1)
+
+    def test_cluster_size_basis_and_index_root_vcn_target(self) -> None:
+        """C6: cluster size from the boot sector (or the disclosed default); 0x11 targets an MFT record."""
+        import struct
+
+        from rapidtriage.core.ntfs_logfile import (
+            MFT_TARGET_OPS,
+            boot_sector_cluster_size,
+        )
+
+        self.assertIn(0x11, MFT_TARGET_OPS)
+        boot = bytearray(512)
+        boot[3:11] = b"NTFS    "
+        struct.pack_into("<HB", boot, 0x0B, 512, 16)
+        self.assertEqual(boot_sector_cluster_size(bytes(boot)), 8192)
+        boot[0x0D] = 0xF4  # 2**12 sectors per cluster (large-cluster encoding)
+        self.assertEqual(boot_sector_cluster_size(bytes(boot)), 2 * 1024 * 1024)
+        self.assertIsNone(boot_sector_cluster_size(b"\x00" * 512))
+        rows, scan = self.parse(fx.logfile(), cluster_size=8192)
+        create = rows[0]
+        self.assertEqual(create["target_mft_entry"], 128)  # vcn 16 x 8192 / 1024
+        self.assertEqual((create["cluster_size"], create["cluster_size_basis"]), (8192, "boot-sector"))
+        default_rows, default_scan = self.parse(fx.logfile())
+        self.assertEqual(default_rows[0]["cluster_size_basis"], "assumed-default-4096")
+        self.assertEqual(default_scan.summary()["logfile_cluster_size_basis"], "assumed-default-4096")
+
+    def test_tail_copy_duplicates_are_not_emitted_twice(self) -> None:
+        """C8: the same LSN in an early (tail-copy) page and later in the log is one row."""
+        from rapidtriage.core.ntfs_logfile import TAIL_COPY_PAGES
+
+        data = bytearray(fx.logfile(bad_fixup_page=False, empty_page=False))
+        filler = b"\xff" * fx.PAGE * TAIL_COPY_PAGES
+        later = fx.rcrd_page(0, fx.page_records()[0])
+        rows, scan = self.parse(bytes(data) + filler + later)
+        self.assertEqual(len(rows), 4)
+        self.assertEqual(scan.duplicate_lsn_records, 1)
+
+    def test_damaged_first_restart_page_falls_back_to_the_second(self) -> None:
+        """C9: the first RSTR page is broken; the restart area of the second still names the layout."""
+        data = bytearray(fx.logfile())
+        data[0:4] = b"XXXX"
+        rows, scan = self.parse(bytes(data))
+        self.assertEqual(scan.restart_pages, 1)
+        self.assertEqual(scan.seq_number_bits, fx.SEQ_BITS)
+        self.assertEqual(len(rows), 4)
+
+    def test_hostile_restart_values_are_contained(self) -> None:
+        """C14: absurd restart-area values never crash the parse or move pages out of bounds."""
+        import struct
+
+        for field_offset, value in ((0x30 + 0x26, 0xFFFF), (0x30 + 0x26, 0x41), (0x30 + 0x10, 0xFFFFFFFF), (0x14, 0), (0x10, 3)):
+            page = bytearray(fx.rstr_page(fx.lsn_for(4 * fx.PAGE)))
+            struct.pack_into("<I" if field_offset in (0x10, 0x14, 0x30 + 0x10) else "<H", page, field_offset, value)
+            data = bytes(page) + fx.logfile()[fx.PAGE :]
+            rows, scan = self.parse(data)
+            self.assertLessEqual(len(rows), 4, hex(field_offset))
+            self.assertIn(scan.page_data_offset % 8, (0,))
+            self.assertLess(scan.page_data_offset, scan.page_size)
+
+    def test_filetime_out_of_range_reaches_future_time(self) -> None:
+        """C5: a 0x7FFF... $SI stomp is a marker time, not "", so future_time and the generic rule see it."""
+        from rapidtriage.artifacts.windows.filesystem import (
+            FILETIME_OUT_OF_RANGE_ISO,
+            filetime_to_iso,
+            parse_standard_information,
+        )
+
+        self.assertEqual(filetime_to_iso(0x7FFFFFFFFFFFFFFF), FILETIME_OUT_OF_RANGE_ISO)
+        self.assertEqual(filetime_to_iso(0), "")
+        self.assertEqual(filetime_to_iso(133_000_000_000_000_007), "2022-06-18T04:26:40+00:00")
+        parsed = parse_standard_information((0x7FFFFFFFFFFFFFFF).to_bytes(8, "little") * 4 + bytes(4))
+        self.assertEqual(parsed["timestamps_out_of_range"], ["created_at", "modified_at", "mft_modified_at", "accessed_at"])
+        reasons, evidence = mismatch_reasons(times(created=FILETIME_OUT_OF_RANGE_ISO), times(), reference=REFERENCE)
+        self.assertIn("future_time", reasons)
+        self.assertEqual(evidence["future_fields"], ["si_created_at"])
+
+    def test_reference_time_is_the_acquisition_time(self) -> None:
+        """C4: the image mtime is the future_time reference when it is not in the future."""
+        import os
+
+        from rapidtriage.api.app.analysis_kinds import mismatch_reference_time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            image = Path(tmp) / "disk.E01"
+            image.write_bytes(b"x")
+            os.utime(image, (1_700_000_000, 1_700_000_000))
+            moment, basis = mismatch_reference_time(image)
+            self.assertEqual((int(moment.timestamp()), basis), (1_700_000_000, "image-mtime"))
+            os.utime(image, (4_000_000_000, 4_000_000_000))
+            self.assertEqual(mismatch_reference_time(image)[1], "analysis-start")
+            self.assertEqual(mismatch_reference_time(Path(tmp) / "missing")[1], "analysis-start")
+
+    def test_si_before_fn_threshold_comes_from_the_catalogue(self) -> None:
+        """C10: one source of truth for the 60 s threshold (rule param)."""
+        from rapidtriage.core.ntfs_timestamps import si_before_fn_threshold
+        from rapidtriage.core.triage_rules import load_catalog
+
+        expected = float(load_catalog().specs["ntfs.si_before_fn"].params["min_delta_seconds"])
+        self.assertEqual(si_before_fn_threshold(), expected)
+        close = times(created="2024-03-01T09:58:00.1+00:00")  # 120 s before $FN created
+        self.assertEqual(mismatch_reasons(close, times(), reference=REFERENCE, si_before_fn_seconds=300)[0], [])
+        self.assertEqual(mismatch_reasons(close, times(), reference=REFERENCE, si_before_fn_seconds=60)[0], ["si_created_before_fn"])
 
 
 if __name__ == "__main__":

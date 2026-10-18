@@ -26,6 +26,8 @@ from ...core.artifact_domains import (
 )
 from ...core.eventlog_channels import (
     CHANNEL_COUNTS_KEY,
+    CHANNEL_OVERFLOW_KEY,
+    CHANNEL_TRUNCATED_KEY,
     EVENTLOG_KIND,
     SCM_COUNT_KEY,
     channel_group_nodes,
@@ -546,7 +548,12 @@ def build_artifact_domain_groups(
                     for name, value in channel_counts.items()
                     if isinstance(value, int) and not isinstance(value, bool)
                 }
-                extra["channel_groups"] = channel_group_nodes(channel_counts, kind_summary.get(SCM_COUNT_KEY))
+                overflow = kind_summary.get(CHANNEL_OVERFLOW_KEY)
+                extra["channel_groups"] = channel_group_nodes(
+                    channel_counts, kind_summary.get(SCM_COUNT_KEY), overflow if isinstance(overflow, dict) else None
+                )
+                if kind_summary.get(CHANNEL_TRUNCATED_KEY):
+                    extra["channel_counts_truncated"] = True
             if flags_summary is not None:
                 if not types:
                     flag_counts = kind_flag_counts(flags_summary, kind) if primary else kind_flag_counts(flags_summary, kind, [])

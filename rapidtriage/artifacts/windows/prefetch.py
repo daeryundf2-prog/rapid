@@ -50,6 +50,16 @@ MAX_FILE_REFERENCE_CANDIDATES = 64
 MAX_REASONABLE_RUN_COUNT = 1_000_000
 # ``referenced_files`` (decoded file-metrics entries) on the prefetch-file row.
 MAX_REFERENCED_FILES = 1000
+# Volume information: a real file has a handful of volumes and a few hundred directories each
+# (largest on the reviewed BSH subset: 286); 4,096 strings per volume leaves wide headroom.
+MAX_PREFETCH_VOLUMES = 64
+# Total MAM (XPRESS Huffman) output one provider run may decode; see ``MamRunBudget``.
+MAM_RUN_OUTPUT_BUDGET = 256 * 1024 * 1024
+# A ``.pf`` larger than this is not parsed (row ``prefetch-invalid-content`` / ``size-exceeded``).
+MAX_PREFETCH_FILE_BYTES = 64 * 1024 * 1024
+# Reference rows (``prefetch-referenced-file``) one ``.pf`` may emit; the rest is disclosed.
+MAX_PREFETCH_REFERENCE_ROWS = 65_536
+MAX_PREFETCH_DIRECTORY_STRINGS = 4_096
 MAM_ALGORITHM_XPRESS_HUFFMAN = 4
 # Trace-chain entry size: 12 bytes before Windows 8 (v17/v23), 8 bytes after.
 PREFETCH_TRACE_CHAIN_ENTRY_SIZE = {17: 12, 23: 12, 26: 8, 30: 8, 31: 8}
@@ -131,6 +141,25 @@ PREFETCH_REPORT_GRADE_BLOCKERS = [
 PREFETCH_TRUSTED_TOOLS = {"pecmd", "winprefetchview", "velociraptor", "prefetchparser"}
 
 
+class MamRunBudget:
+    """Output bytes the pure-Python XPRESS decoder may still produce in this provider run."""
+
+    def __init__(self) -> None:
+        self.used = 0
+
+    def reset(self) -> None:
+        self.used = 0
+
+    def take(self, size: int) -> bool:
+        if self.used + size > MAM_RUN_OUTPUT_BUDGET:
+            return False
+        self.used += size
+        return True
+
+
+MAM_RUN_BUDGET = MamRunBudget()
+
+
 class WindowsPrefetchProvider:
     name = "windows-prefetch"
     collector_kind = "windows-prefetch"
@@ -144,10 +173,15 @@ class WindowsPrefetchProvider:
         prefetch_root = root.joinpath(*PREFETCH_ROOT)
         if not prefetch_root.is_dir():
             return
+        MAM_RUN_BUDGET.reset()
         for path in sorted(prefetch_root.glob("*.pf"), key=lambda item: item.name.lower()):
             if not path.is_file():
                 continue
             stat_result = path.stat()
+            if stat_result.st_size > MAX_PREFETCH_FILE_BYTES:
+                # Real Prefetch files are a few hundred KiB: never load a huge ``.pf`` whole.
+                yield build_prefetch_invalid_content_record(path, {"prefetch_size_exceeded": True}, stat_result)
+                continue
             header = prefetch_header_hints(path)
             if not header.get("binary_format_detected"):
                 yield build_prefetch_invalid_content_record(path, header, stat_result)
@@ -189,6 +223,8 @@ class WindowsPrefetchProvider:
                     "prefetch_hash": prefetch_hash_hint(path.name),
                     "entry_name": path.name,
                     "size": stat_result.st_size,
+                    "reference_row_count": min(len(all_referenced_paths), MAX_PREFETCH_REFERENCE_ROWS),
+                    "reference_rows_truncated": len(all_referenced_paths) > MAX_PREFETCH_REFERENCE_ROWS,
                     # Host mtime of the acquired copy is provenance only, never an event.
                     "source_file_mtime": isoformat_from_timestamp(stat_result.st_mtime),
                     "timestamp": header.get("last_run_at", ""),
@@ -237,7 +273,7 @@ class WindowsPrefetchProvider:
                     "note": "Prefetch triage parser uses version-specific common-header offsets plus bounded native candidates; validate critical findings with a dedicated parser such as PECmd.",
                 }),
             )
-            for index, referenced_path in enumerate(all_referenced_paths):
+            for index, referenced_path in enumerate(all_referenced_paths[:MAX_PREFETCH_REFERENCE_ROWS]):
                 yield build_prefetch_reference_record(
                     path,
                     str(referenced_path),
@@ -264,7 +300,11 @@ def build_prefetch_invalid_content_record(path: Path, header: Mapping[str, objec
     content = sniff_content_kind(prefix)
     decompression = header.get("prefetch_decompression") if isinstance(header.get("prefetch_decompression"), Mapping) else {}
     content_kind = str(content["kind"])
-    if content_kind == "windows-prefetch-mam":
+    size_exceeded = bool(header.get("prefetch_size_exceeded"))
+    if size_exceeded:
+        content_kind = "size-exceeded"
+        content_label = f"크기 상한 초과({MAX_PREFETCH_FILE_BYTES // (1024 * 1024)} MiB, 구조 해석 생략)"
+    elif content_kind == "windows-prefetch-mam":
         content_kind = "mam-decompression-failed"
         content_label = "MAM 압축 해제 실패(손상)"
     else:
@@ -288,7 +328,8 @@ def build_prefetch_invalid_content_record(path: Path, header: Mapping[str, objec
             "entry_name": path.name,
             "size": stat_result.st_size,
             "source_file_mtime": isoformat_from_timestamp(stat_result.st_mtime),
-            "prefetch_parse_status": "invalid-content",
+            "prefetch_parse_status": "size-exceeded" if size_exceeded else "invalid-content",
+            "prefetch_size_cap_bytes": MAX_PREFETCH_FILE_BYTES,
             "binary_format_detected": False,
             "detected_content_kind": content_kind,
             "detected_content_label": content_label,
@@ -298,7 +339,7 @@ def build_prefetch_invalid_content_record(path: Path, header: Mapping[str, objec
             "header_hex": prefix[:16].hex(),
             "prefetch_decompression": dict(decompression),
             "execution_evidence": False,
-            "risk_flags": ["prefetch-invalid-content", "signature-extension-mismatch"],
+            "risk_flags": ["prefetch-size-exceeded"] if size_exceeded else ["prefetch-invalid-content", "signature-extension-mismatch"],
             "validation_required": True,
             "note": (
                 "파일명은 Prefetch(.pf)이지만 내용이 SCCA/MAM Prefetch 구조가 아닙니다"
@@ -316,6 +357,33 @@ def executable_hint(name: str) -> str:
     return stem.rsplit("-", 1)[0]
 
 
+EXECUTABLE_SUFFIXES = (".exe", ".com", ".scr")
+
+
+def prefetch_executable_entry(name: str, paths: Sequence[object]) -> str:
+    """The executable's own path among a Prefetch file's referenced paths (``""`` when absent).
+
+    An exact file-name match wins. The SCCA header keeps 29 characters, so a longer name is a
+    prefix match: among prefix candidates an ``.exe``/``.com``/``.scr`` file is preferred, then
+    the first one in load order.
+    """
+    wanted = str(name or "").lower()
+    if not wanted:
+        return ""
+    prefixed: list[str] = []
+    for value in paths:
+        text = str(value or "")
+        if not text:
+            continue
+        candidate = text.replace("/", "\\").rsplit("\\", 1)[-1].lower()
+        if candidate == wanted:
+            return text
+        if len(wanted) >= PREFETCH_HEADER_NAME_CHARS and candidate.startswith(wanted):
+            prefixed.append(text)
+    preferred = [text for text in prefixed if text.lower().endswith(EXECUTABLE_SUFFIXES)]
+    return (preferred or prefixed or [""])[0]
+
+
 def prefetch_hash_hint(name: str) -> str:
     stem = Path(name).stem
     if "-" not in stem:
@@ -325,6 +393,8 @@ def prefetch_hash_hint(name: str) -> str:
 
 def prefetch_header_hints(path: Path) -> dict[str, object]:
     try:
+        if path.stat().st_size > MAX_PREFETCH_FILE_BYTES:
+            return {"binary_format_detected": False, "prefetch_size_exceeded": True}
         blob = path.read_bytes()
     except OSError:
         return {"binary_format_detected": False}
@@ -416,6 +486,9 @@ def prefetch_header_hints(path: Path) -> dict[str, object]:
         for item in decoded["file_metrics"]
     ]
     hints["referenced_file_count"] = len(hints["referenced_files"])
+    # The executable's own entry is picked from *all* decoded paths before the inline list is
+    # capped (a PF can reference far more than MAX_REFERENCED_FILES files).
+    hints["executable_reference_path"] = prefetch_executable_entry(decoded["header_executable_name"], referenced_paths)
     cap_list_field(hints, "referenced_files", MAX_REFERENCED_FILES)
     # The row's own record starts at the SCCA header (offset 0 of the file, or
     # of the decompressed stream for MAM files: see source_offset_space).
@@ -629,14 +702,22 @@ def decode_scca_structure(blob: bytes, version: int) -> dict[str, object]:
 
     volume_entry_size = PREFETCH_VOLUME_ENTRY_SIZE.get(version, 0)
     if volume_offset and volume_count and volume_entry_size:
-        section_end = volume_offset + volume_size if volume_size else len(blob)
-        if volume_offset + volume_count * volume_entry_size > min(section_end, len(blob)):
+        section_end = volume_offset + volume_size
+        if not volume_size or section_end > len(blob):
+            # The volume section must declare its size and lie inside the file.
+            result["volume_information_status"] = "declared-out-of-bounds"
+        elif volume_count > MAX_PREFETCH_VOLUMES:
+            result["volume_information_status"] = "declared-count-implausible"
+            result["volume_declared_count"] = volume_count
+        elif volume_offset + volume_count * volume_entry_size > section_end:
             result["volume_information_status"] = "declared-out-of-bounds"
         else:
-            result["volumes"] = [
-                decode_prefetch_volume(blob, volume_offset, index, volume_entry_size, min(section_end, len(blob)))
-                for index in range(volume_count)
-            ]
+            volumes = []
+            claimed: list[tuple[int, int]] = []
+            for index in range(volume_count):
+                volume = decode_prefetch_volume(blob, volume_offset, index, volume_entry_size, section_end, claimed)
+                volumes.append(volume)
+            result["volumes"] = volumes
             result["volume_information_status"] = "decoded"
     elif not volume_count:
         result["volume_information_status"] = "not-declared"
@@ -653,7 +734,17 @@ def prefetch_trace_chain_status(blob: bytes, version: int, offset: int, count: i
     return "counted"
 
 
-def decode_prefetch_volume(blob: bytes, section_offset: int, index: int, entry_size: int, section_end: int) -> dict[str, object]:
+def decode_prefetch_volume(
+    blob: bytes,
+    section_offset: int,
+    index: int,
+    entry_size: int,
+    section_end: int,
+    claimed: list[tuple[int, int]] | None = None,
+) -> dict[str, object]:
+    """One volume entry. At most :data:`MAX_PREFETCH_DIRECTORY_STRINGS` directory strings are
+    decoded (``directory_strings_truncated``); a directory table overlapping one already decoded
+    for another volume of the same file is not decoded again (``directory_table_status``)."""
     base = section_offset + index * entry_size
     device_offset = read_u32(blob, base)
     device_chars = read_u32(blob, base + 4)
@@ -669,15 +760,22 @@ def decode_prefetch_volume(blob: bytes, section_offset: int, index: int, entry_s
         device_path = blob[device_start : device_start + device_chars * 2].decode("utf-16le", errors="replace")
     directories: list[str] = []
     cursor = section_offset + directory_offset
-    for _ in range(directory_count if directory_offset else 0):
-        if cursor + 2 > section_end:
-            break
-        length = read_u16(blob, cursor)
-        cursor += 2
-        if cursor + length * 2 > section_end:
-            break
-        directories.append(blob[cursor : cursor + length * 2].decode("utf-16le", errors="replace"))
-        cursor += (length + 1) * 2
+    table_start = cursor
+    table_status = "decoded" if directory_offset and directory_count else "not-declared"
+    if claimed is not None and directory_offset and any(start <= cursor < end for start, end in claimed):
+        table_status = "overlapping-table-rejected"
+    elif directory_offset:
+        for _ in range(min(directory_count, MAX_PREFETCH_DIRECTORY_STRINGS)):
+            if cursor + 2 > section_end:
+                break
+            length = read_u16(blob, cursor)
+            cursor += 2
+            if cursor + length * 2 > section_end:
+                break
+            directories.append(blob[cursor : cursor + length * 2].decode("utf-16le", errors="replace"))
+            cursor += (length + 1) * 2
+        if claimed is not None and cursor > table_start:
+            claimed.append((table_start, cursor))
     file_reference_count = 0
     if file_reference_offset and file_reference_size >= 8:
         file_reference_count = read_u32(blob, section_offset + file_reference_offset + 4)
@@ -690,6 +788,8 @@ def decode_prefetch_volume(blob: bytes, section_offset: int, index: int, entry_s
         "directory_string_count": directory_count,
         "directory_strings_decoded": len(directories),
         "directory_strings": directories,
+        "directory_strings_truncated": directory_count > MAX_PREFETCH_DIRECTORY_STRINGS and table_status == "decoded",
+        "directory_table_status": table_status,
         "file_reference_count": file_reference_count,
         "source": "volume_information_section",
         "source_offset": base,
@@ -767,6 +867,17 @@ def decompress_mam_prefetch(blob: bytes) -> tuple[bytes, dict[str, object]]:
     if not 0 < declared_size <= MAX_OUTPUT_BYTES:
         status["status"] = "declared-size-out-of-bounds"
         status["max_uncompressed_size"] = MAX_OUTPUT_BYTES
+        return b"", status
+    blocks = -(-declared_size // 65536)
+    if len(compressed) < blocks * 256:
+        # Every 64 KiB output block starts with its 256-byte Huffman table.
+        status["status"] = "declared-size-exceeds-stream"
+        return b"", status
+    if not MAM_RUN_BUDGET.take(declared_size):
+        # Pure-Python decoding costs ~0.2 s per MiB in the worst case (1-bit literal codes):
+        # a run decodes at most MAM_RUN_OUTPUT_BUDGET bytes in total (real images: ~60 MiB).
+        status["status"] = "run-budget-exhausted"
+        status["run_output_budget_bytes"] = MAM_RUN_OUTPUT_BUDGET
         return b"", status
     try:
         target = xpress_huffman_decompress(compressed, declared_size)

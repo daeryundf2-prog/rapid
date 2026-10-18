@@ -375,5 +375,142 @@ class PrefetchRulesReadDecodedFieldsTests(unittest.TestCase):
         self.assertTrue(prefetch_executable_path(truncated).endswith("AM_DELTA_PATCH_1.429.176.0.EXE"))
 
 
+class PrefetchReviewTests(unittest.TestCase):
+    """R3 adversarial-review regressions D1-D6 (synthetic repros ``pf_vol.py`` / ``xh_slow.py``)."""
+
+    @staticmethod
+    def hostile_volumes(volume_count: int, strings: int, *, directory_count: int = 0xFFFFFFFF) -> bytes:
+        """v30 SCCA whose volumes all point at one shared table of ``strings`` empty directory strings."""
+        volume_offset = 0x200
+        directory_rel = volume_count * 96
+        size = volume_offset + directory_rel + strings * 2 + 16
+        blob = bytearray(size)
+        struct.pack_into("<I4s", blob, 0, 30, b"SCCA")
+        struct.pack_into("<I", blob, 0x54, 0x130)
+        struct.pack_into("<III", blob, 0x6C, volume_offset, volume_count, size - volume_offset)
+        for index in range(volume_count):
+            struct.pack_into("<II", blob, volume_offset + index * 96 + 28, directory_rel, directory_count)
+        return bytes(blob)
+
+    def test_volume_directory_strings_are_bounded(self) -> None:
+        """D1: 64 volumes sharing a 200,000-string table no longer decode 12.8 M strings."""
+        import time
+
+        from rapidtriage.artifacts.windows.prefetch import (
+            MAX_PREFETCH_DIRECTORY_STRINGS,
+            decode_scca_structure,
+        )
+
+        started = time.monotonic()
+        decoded = decode_scca_structure(self.hostile_volumes(64, 200_000), 30)
+        self.assertLess(time.monotonic() - started, 5.0)
+        volumes = decoded["volumes"]
+        self.assertEqual(len(volumes), 64)
+        self.assertEqual(len(volumes[0]["directory_strings"]), MAX_PREFETCH_DIRECTORY_STRINGS)
+        self.assertTrue(volumes[0]["directory_strings_truncated"])
+        self.assertEqual({volume["directory_table_status"] for volume in volumes[1:]}, {"overlapping-table-rejected"})
+        self.assertEqual(sum(len(volume["directory_strings"]) for volume in volumes[1:]), 0)
+        too_many = decode_scca_structure(self.hostile_volumes(65, 10), 30)
+        self.assertEqual(too_many["volume_information_status"], "declared-count-implausible")
+        no_size = bytearray(self.hostile_volumes(2, 10))
+        struct.pack_into("<I", no_size, 0x74, 0)
+        self.assertEqual(decode_scca_structure(bytes(no_size), 30)["volume_information_status"], "declared-out-of-bounds")
+
+    def test_oversized_pf_is_not_read(self) -> None:
+        """D2: a ``.pf`` above the size cap becomes a size-exceeded row without parsing."""
+        from unittest import mock
+
+        from rapidtriage.artifacts.windows import prefetch
+
+        inner = build_pf(version=30, executable="A.EXE", paths=tool_paths("A.EXE"), run_times=BURST[:1], run_count=1, volumes=two_volumes())
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            folder = Path(tmp_dir) / "Windows" / "Prefetch"
+            folder.mkdir(parents=True)
+            (folder / "A.EXE-00000001.pf").write_bytes(inner)
+            with (
+                mock.patch.object(prefetch, "MAX_PREFETCH_FILE_BYTES", 1024),
+                mock.patch.object(prefetch, "decode_scca_structure", side_effect=AssertionError("parsed")),
+            ):
+                rows = list(WindowsPrefetchProvider().collect(Path(tmp_dir)))
+        self.assertEqual([row.artifact_type for row in rows], ["prefetch-invalid-content"])
+        details = rows[0].details
+        self.assertEqual(details["prefetch_parse_status"], "size-exceeded")
+        self.assertEqual(details["detected_content_kind"], "size-exceeded")
+        self.assertEqual(details["risk_flags"], ["prefetch-size-exceeded"])
+
+    def test_reference_rows_have_a_hard_ceiling(self) -> None:
+        """D3: at most MAX_PREFETCH_REFERENCE_ROWS reference rows per file, disclosed on the file row."""
+        from unittest import mock
+
+        from rapidtriage.artifacts.windows import prefetch
+
+        paths = [f"{VOLUME}\\DIR\\FILE{index:03d}.DLL" for index in range(40)]
+        inner = build_pf(version=30, executable="BIG.EXE", paths=paths, run_times=BURST[:1], run_count=1, volumes=two_volumes()[:1])
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            folder = Path(tmp_dir) / "Windows" / "Prefetch"
+            folder.mkdir(parents=True)
+            (folder / "BIG.EXE-00000001.pf").write_bytes(mam(inner))
+            with mock.patch.object(prefetch, "MAX_PREFETCH_REFERENCE_ROWS", 10):
+                rows = list(WindowsPrefetchProvider().collect(Path(tmp_dir)))
+        references = [row for row in rows if row.artifact_type == "prefetch-reference"]
+        file_row = next(row.details for row in rows if row.artifact_type == "prefetch-file")
+        self.assertEqual(len(references), 10)
+        self.assertTrue(file_row["reference_rows_truncated"])
+        self.assertEqual(file_row["reference_row_count"], 10)
+
+    def test_xpress_run_budget_bounds_worst_case_cpu(self) -> None:
+        """D4: 1-bit literal codes cost ~0.2 s/MiB; a run decodes at most MAM_RUN_OUTPUT_BUDGET bytes."""
+        from unittest import mock
+
+        from rapidtriage.artifacts.windows import prefetch
+
+        table = bytearray(256)
+        table[0] = 0x11
+        block = bytes(table) + bytes(8194)
+        declared = 4 * 65536
+        stream = b"MAM\x04" + struct.pack("<I", declared) + block * 4
+        with mock.patch.object(prefetch, "MAM_RUN_OUTPUT_BUDGET", declared + 1):
+            prefetch.MAM_RUN_BUDGET.reset()
+            first = decompress_mam_prefetch(stream)
+            second = decompress_mam_prefetch(stream)
+            prefetch.MAM_RUN_BUDGET.reset()
+        self.assertEqual(first[1]["status"], "decompressed")
+        self.assertEqual(len(first[0]), declared)
+        self.assertEqual(second[1]["status"], "run-budget-exhausted")
+        short = b"MAM\x04" + struct.pack("<I", 64 * 65536) + block
+        self.assertEqual(decompress_mam_prefetch(short)[1]["status"], "declared-size-exceeds-stream")
+
+    def test_executable_entry_is_picked_before_the_inline_cap(self) -> None:
+        """D5: the executable listed after the 1,000th file still resolves."""
+        paths = [f"{VOLUME}\\WINDOWS\\SYSTEM32\\FILE{index:04d}.DLL" for index in range(MAX_REFERENCED_FILES + 20)]
+        paths.append(f"{VOLUME}\\USERS\\KIM\\DOWNLOADS\\LATE.EXE")
+        inner = build_pf(version=30, executable="LATE.EXE", paths=paths, run_times=BURST[:1], run_count=1, volumes=two_volumes()[:1])
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            folder = Path(tmp_dir) / "Windows" / "Prefetch"
+            folder.mkdir(parents=True)
+            (folder / "LATE.EXE-00000001.pf").write_bytes(mam(inner))
+            record = next(row for row in WindowsPrefetchProvider().collect(Path(tmp_dir)) if row.artifact_type == "prefetch-file")
+        details = record.to_dict()["details"]
+        self.assertTrue(details["executable_reference_path"].endswith("DOWNLOADS\\LATE.EXE"))
+        row = RowView(
+            kind="windows-prefetch", collection="artifacts", source_kind="windows-prefetch", index=0,
+            row={"artifact_type": "prefetch-file", "path": "C:\\Windows\\Prefetch\\X.pf", "details": details},
+        )
+        self.assertTrue(prefetch_executable_path(row).endswith("DOWNLOADS\\LATE.EXE"))
+        self.assertIsNotNone(SuspiciousPath().apply(row, FlagContext()))
+
+    def test_truncated_header_name_prefers_an_executable(self) -> None:
+        """D6: a 29-character header prefix prefers .exe/.com/.scr over a same-prefix DLL or log."""
+        from rapidtriage.artifacts.windows.prefetch import prefetch_executable_entry
+
+        name = "AM_DELTA_PATCH_1.429.176.0.EX"
+        paths = [
+            f"{VOLUME}\\TEMP\\AM_DELTA_PATCH_1.429.176.0.EXTRA.DLL",
+            f"{VOLUME}\\TEMP\\AM_DELTA_PATCH_1.429.176.0.EXE",
+        ]
+        self.assertTrue(prefetch_executable_entry(name, paths).endswith(".0.EXE"))
+        self.assertEqual(prefetch_executable_entry("SHORT.EXE", [f"{VOLUME}\\SHORT.EXE.LOG"]), "")
+
+
 if __name__ == "__main__":
     unittest.main()
