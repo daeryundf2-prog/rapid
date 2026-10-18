@@ -138,8 +138,14 @@ def match_signature(row: RowView, signatures: Iterable[Signature]) -> tuple[Sign
     """The first signature the row matches: ``(signature, matched field, matched value)``."""
     products, executables, services, commands = row_candidates(row)
     file_row = row.type in FILE_TYPES
+    if file_row:
+        # File listings are large: one set lookup first, the system-folder check only on a hit.
+        if not any(name in signature.executables for signature in signatures for name in executables):
+            return None
+        if under_system_dir(row.text("path") or row.path()):
+            return None
     for signature in signatures:
-        if file_row and (signature.builtin or under_system_dir(row.text("path") or row.path())):
+        if file_row and signature.builtin:
             continue
         for name in executables:
             if name in signature.executables:
@@ -199,7 +205,8 @@ def run_times(row: RowView) -> list[dt.datetime]:
         values = [row.get("timestamp", "last_run_at", "last_executed_at")]
     elif row.type == "execution-pca":
         values = [row.get("last_run_at", "event_at")]
-    elif row.type in {"eventlog-event", "powershell-history-command"}:
+    elif row.type == "eventlog-event":
+        # PowerShell history has only the file's modified time: never a per-command run time.
         values = [row.get("timestamp", "time_created", "TimeCreated")]
     else:
         values = []
@@ -213,7 +220,7 @@ class WiperRunAfterIncident(Rule):
 
     selector = select(
         collections={"artifacts"},
-        types={"prefetch-file", "bam-entry", "bam-schema-entry", "userassist-schema-entry", "execution-pca", "eventlog-event", "powershell-history-command"},
+        types={"prefetch-file", "bam-entry", "bam-schema-entry", "userassist-schema-entry", "execution-pca", "eventlog-event"},
     )
 
     def prepare(self, ctx: FlagContext) -> None:

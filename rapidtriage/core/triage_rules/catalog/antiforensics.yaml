@@ -19,7 +19,6 @@ families:
     aliases:
     - key_file_kind
   - key: key_identifier
-    semantic: device
     label: 키 식별자
     format: mono
   - key: key_masked

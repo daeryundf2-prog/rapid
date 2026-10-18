@@ -1,5 +1,5 @@
 {
- "version": "806bc49099db69d3",
+ "version": "958ad55c7a941cc9",
  "families": [
   {
    "id": "sam-account",
@@ -524,7 +524,6 @@
     },
     {
      "key": "key_identifier",
-     "semantic": "device",
      "label": "키 식별자",
      "format": "mono"
     },
@@ -7346,7 +7345,6 @@
     },
     {
      "key": "profile_name",
-     "semantic": "device",
      "label": "네트워크 이름"
     },
     {
@@ -7528,7 +7526,6 @@
     },
     {
      "key": "ssid",
-     "semantic": "device",
      "label": "무선 이름(SSID)"
     },
     {

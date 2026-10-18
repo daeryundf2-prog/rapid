@@ -510,7 +510,6 @@ families:
     format: time
     ts_kind: first
   - key: profile_name
-    semantic: device
     label: 네트워크 이름
   - key: description
     label: 설명
@@ -618,7 +617,6 @@ families:
     format: time
     ts_kind: first
   - key: ssid
-    semantic: device
     label: 무선 이름(SSID)
   - key: source_kind_label
     label: 출처

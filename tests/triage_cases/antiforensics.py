@@ -76,10 +76,14 @@ CASES = {
             ],
             "flagged": [0, 1, 2, 3],
         },
-        # Look-alikes: unrelated "… Cleaner" / "… Eraser" apps, Windows' own cipher.exe and BitLocker
+        # Look-alikes: unrelated "… Cleaner" / "… Eraser" apps (Samsung PC Cleaner is on the BSH QA
+        # image: pccleaner2service.exe must not read as CCleaner), Windows' own cipher.exe and BitLocker
         # wizard files in System32, and an encrypt-only cipher command.
         "negative": {
             "rows": [
+                program("Samsung PC Cleaner", "Samsung Electronics Co., Ltd."),
+                service("PCCleaner2Service", r"C:\Program Files\Samsung\Samsung PC Cleaner 2 Service\PCCleaner2Service.exe"),
+                listed(r"C:\Program Files\Samsung\Samsung PC Cleaner 2 Service\PCCleaner2Status.exe"),
                 program("Smart PC Cleaner Pro", "Example Soft"),
                 program("Photo Eraser Studio"),
                 listed(r"C:\Windows\System32\cipher.exe"),

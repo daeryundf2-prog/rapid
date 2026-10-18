@@ -58,7 +58,7 @@ def software_hive() -> bytes:
     )
     wlan = root.path(rf"Microsoft\WlanSvc\Interfaces\{INTERFACE_GUID}\Profiles\{WLAN_PROFILE_GUID}")
     wlan.value("ProfileIndex", REG_DWORD, (3).to_bytes(4, "little"))
-    ssid = "HomeNet-5G".encode()
+    ssid = b"HomeNet-5G"
     wlan.path("MetaData").value("Channel Hints", REG_BINARY, len(ssid).to_bytes(4, "little") + ssid.ljust(32, b"\x00") + b"\x01\x00")
     root.path(r"Microsoft\Windows\CurrentVersion\App Paths\VeraCrypt.exe").value(
         "", REG_SZ, sz(r"C:\Program Files\VeraCrypt\VeraCrypt.exe")

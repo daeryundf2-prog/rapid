@@ -102,6 +102,7 @@ KNOWN_DLL_BASELINE = frozenset(
         "OLEAUT32.dll", "PSAPI.DLL", "rpcrt4.dll", "sechost.dll", "Setupapi.dll", "SHCORE.dll",
         "SHELL32.dll", "SHLWAPI.dll", "user32.dll", "WLDAP32.dll", "wow64.dll", "wow64base.dll",
         "wow64con.dll", "wow64cpu.dll", "wow64win.dll", "WS2_32.dll", "xtajit.dll", "xtajit64.dll",
+        "xtajit64se.dll",
         "wowarmhw.dll", "lz32.dll", "url.dll", "urlmon.dll", "wininet.dll", "wintrust.dll",
         "crypt32.dll", "gdi32full.dll", "msvcp_win.dll", "ucrtbase.dll", "kernelbase.dll",
         "ntdll.dll", "win32u.dll", "imagehlp.dll", "ws2_32.dll", "cfgmgr32.dll", "bcrypt.dll",
