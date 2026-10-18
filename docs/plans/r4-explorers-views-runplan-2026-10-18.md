@@ -40,3 +40,21 @@
 
 ## 4. 결과 기록
 (구현 후)
+
+### 4.3 V3 — 뷰 3종·필터 (브랜치 `feat/r4-v3-views-filters`)
+
+**구현**
+- 행(카드) 보기 `features/views/CardView.tsx`(Alt+Shift+5 — AXIOM의 6번 자리 대신 비어 있던 5/6을 차례로 씀): 가상화 `role="list"`/`listitem`(aria-setsize·posinset), 제목·유형—계열 부제·시각·경로·우측 굵은 날짜·특이사항/리뷰/태그 칩, 호버·포커스 시 인용·원본 열기·태그(북마크). J/K·↑↓·Home/End·PageUp/Down, Enter 뷰어, Space 선택, R/X/I/B/1–9는 공용 검토 명령.
+- 지도 대체 보기 `features/views/MapView.tsx`(Alt+Shift+6, 아티팩트 노드): 서버에 `geo=-90,-180,90,180`(좌표 있는 행만)을 요청해 좌표 표 + 0.01° 근접 묶음(건수·처음/마지막 시각, GPS 시각 우선). 묶음 → `geo=<칸 상자>` 조건 + 열 보기. 빈 상태·상단 안내에 "지도 타일·외부 지도 서비스 없음(정책)".
+- 연결 그래프 라이트 `features/derived/DerivedGraph.tsx` + `GET /api/runs/{id}/derived/{table}/graph?value=&max_nodes=`(10–200, 기본 200): 값 → 표본 원본 행(≤20, 계열별) → 그 행의 다른 식별자 값(파생 단계와 같은 열 규칙 `core.derived.engine.collect_row`, 자격 증명은 가린 값). 3열 계층 SVG(외부 라이브러리 없음), 로빙 tabindex·↑↓/←→/Home/End·Enter, 행 → 계열 표의 그 행, 값 → 그 표(`q=`). 통합 보기 도구줄 "원본 행 | 연결 그래프".
+- 행 조건 `rapidtriage/api/app/row_conditions.py` → `GET /artifacts`·`/files`·`/timeline`: `from`/`to`, `weekday`, `hours`(HH-HH, 자정 넘김), `offhours=1`(hours 또는 weekday, 기본 18–09·토·일), `tz`(UTC·±HH:MM·IANA), `partial=1`, `content`(문서·이미지·영상·음성·압축·실행·DB·메일), `/artifacts`만 `geo`. 잘못된 값은 한국어 422, `limit=0`이면 400, 페이지에 `conditions` 반향. channel·browser/service·flag·category·sort와 AND.
+- 콘솔: 조건 패널에 최근 1/7/30일, 사건 시각 ± n시간(최신 특이사항 분석의 `incident_start/end` 미리 채움), 요일·시간대·업무 외 시간(표시 시간대), 콘텐츠 유형 칩, 부분 결과. URL `wd=`·`hours=`·`offhours=1`·`partial=1`·`content=`·`geo=` 왕복, 저장한 조건에 포함, 칩은 한국어("업무 외 시간 18–09시·토·일", "콘텐츠 문서", "부분 결과만", "위치 … 부근"). 시간 범위는 이제 artifacts/files/timeline에서 서버 필터(그 밖은 불러온 행).
+
+**실데이터** (`D:\rapid-qa\derived\run-subset10`, 런 `b5fabbe09f18`, API 8963 + Vite 8964, 증거 읽기 전용, `tz=Asia/Seoul`)
+- 업무 외 시간 이벤트 로그: 서버 202,445건 = 수동 집계 202,445건(294,456행 중 시각 없음 186, 주말 72,205). Security 채널 + 업무 외 20,355. 브라우저 업무 외 4,561, 주말(`weekday=sat,sun`) 1,939, 브라우저 업무 외 + 실행 파일 다운로드 37건(그리드). 타임라인 업무 외 216,333 / 부분 결과 1,575 / 2025-05-23~30 KST 102,379(요청당 약 5 s).
+- 부분 결과(전체 아티팩트) 34,195건, 콘텐츠 문서 4,108 · 이미지 3,707 · 실행 41,764(Prefetch 참조 DLL/EXE 포함). 파일: 문서 2,267(= 문서 범주), 업무 외 0(모든 파일이 취득 사본이고 NTFS 분석 없음 — 한계 문서화).
+- 카드 보기: 이벤트 로그 노드 250장 중 11장만 마운트(가상화), J로 다음 카드·뷰어 행 동기, 접근 이름 "5615 application Microsoft-Windows-WMI, EVTX 이벤트 — 이벤트 로그, 시각 2025-02-23 22:47:22 KST". 브라우저 노드 + 업무 외 시간 카드 확인(월 08:49·토 14:30 등).
+- 지도: media-image 위치 행 3건 → 묶음 2개(37.48,126.94 칸 2건, 37.20,127.10 칸 1건), 묶음 클릭 → 그리드 2건. 전체 아티팩트 지도는 3건(64만 행 훑기 38 s).
+- 연결 그래프 `people/user`: 41 노드(원본 행 19 = SAM 계정·그룹·이벤트·로그온 세션·탐지·브라우저·문서·LNK·점프 목록 11계열, 값 21 = 사람 8·장치 4·경로 5·URL 4, 표에 있는 값 22), 간선 57, 0.98 s. `people/S-1-5-18`: 29 노드, 0.7 s. 키보드 → 행 → 값 이동 확인.
+
+**게이트**: targeted pytest(신규 row_conditions 14 + api·api_contract·derived_api(+그래프 3)·timeline·field_filters·derived_engine 130 passed, parser_quality_integration·triage_flags_api 43, ntfs_r3·analyses 118), ruff·vulture·compileall·check-doc-refs 통과, OpenAPI 스냅샷 갱신(122 경로/139 작업). 프런트 lint·typecheck·check:contrast 통과, vitest(views·filters·derived·grid·api) 33 파일 363 통과 + shortcuts·shell·app 64 통과. 전체 스위트·Playwright는 위임(Q-R4-9).
