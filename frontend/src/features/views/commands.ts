@@ -1,5 +1,5 @@
 /**
- * `view.*` commands (S9, plan X12): Alt+Shift+1–4 switch the explorer view
+ * `view.*` commands (S9, plan X12; r4 §2.3): Alt+Shift+1–6 switch the explorer view
  * of the routed collection by writing `view=` (columns = no param). A view
  * the node cannot show reports its Korean reason instead of running.
  */

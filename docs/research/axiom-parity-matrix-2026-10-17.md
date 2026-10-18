@@ -243,8 +243,8 @@
 | 히스토그램 뷰 | 있음 | `views/HistogramView`(타임라인·아티팩트·파일·문서·검색 노드) | — |
 | 히스토그램 기준선 저장/비교 | 없음 | — | E3 |
 | 클래식(격자 위·세부 아래) 뷰 | 없음 | 세부는 뷰어 시트/팝아웃(`viewer/popout`) | E3 |
-| 행(카드) 뷰 | 없음 | — | 미계획(U-F8 일부: 혼합 kind 라벨 2줄 셀) |
-| 세계지도 뷰 / 지도 새로 고침 | 없음 | EXIF GPS는 메타 필드로만(media exif_gps_map_pivot 메타), 지도 UI 없음 | 미계획 |
+| 행(카드) 뷰 | 있음(r4) | `views/CardView`(가상화 카드 목록, J/K·Enter·Space, 인용·원본 열기·태그 인라인 동작, Alt+Shift+5) | — |
+| 세계지도 뷰 / 지도 새로 고침 | 표 대체(r4) | `views/MapView`: 좌표 표 + 0.01° 근접 묶음, 묶음 → `geo=` 필터. 지도 타일·외부 지도 호출 없음(정책), Alt+Shift+6 | — |
 | 행 좌측 태그 스트라이프 | 부분 | 리뷰 상태 칩(`reviewMap`). 스트라이프 형태는 U-F8 계획 | viewer-families U-F8 |
 
 ### B3. 필터 바·검색
@@ -253,12 +253,12 @@
 |---|---|---|---|
 | 증거 필터 | 부분 | 런 단위 선택(케이스 › 증거 구조 없음) | E1 |
 | 아티팩트 필터 | 있음 | 트리 노드·`artifact_type=` 서버 필터·유형 열 필터 | — |
-| 콘텐츠 유형 필터 | 부분 | 확장자·파일 범주 필터(`filterModel`). 의미 태그(content type) 없음 | E2(`semantic:` 태그) |
+| 콘텐츠 유형 필터 | 있음(r4) | 문서·이미지·영상·음성·압축·실행·DB·메일 칩, 파일·아티팩트·타임라인 공통 서버 필터(`content=`) | — |
 | 날짜/시간 필터(절대) | 있음 | 시간 범위 + 최근 3개 조건 기억(`conditionMemory`, localStorage) | — |
-| 날짜/시간 필터(상대) | 없음 | 절대 범위만 | 미계획 |
+| 날짜/시간 필터(상대) | 있음(r4) | 최근 1/7/30일, 사건 시각 ± n시간, 요일·시간대·업무 외 시간(`weekday=`/`hours=`/`offhours=`, 표시 시간대) — 서버 필터 | — |
 | 태그/주석 필터 | 있음 | 태그·리뷰 상태 필터 | E3(사용자 정의 태그 건수) |
 | 프로필 필터 | 부분 | 런 모드(`fraud/hacking/recovery/seizure`)·사용자 프로필 귀속 필드 | — |
-| 부분 결과(Partial results) 필터 | 없음 | 행 완전성 개념 없음(AXIOM importance 열 기반) | 미계획 |
+| 부분 결과(Partial results) 필터 | 있음(r4) | 파서 오류·잘림·복호 실패·부분 범위 행(`partial=1`, 서버 필터) | — |
 | 키워드 목록 필터 | 부분 | 키워드 팩(`/keyword-packs`)·통합 검색 옵션·저장 검색 | — |
 | 스킨톤·미디어 범주·VICS | 없음 | 해시 집합 API(`/api/hash-sets`, `core/search_index/hashsets.py`)만. 스킨톤·Project VIC 연동 없음 | 미계획(P5 밖) |
 | 키워드 검색 + 고급 검색 | 있음 | FTS5 통합 검색 + 질의 문법(`search_index/query.py`), NFC/casefold, 문서 인덱스 | — |

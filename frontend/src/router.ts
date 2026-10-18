@@ -156,6 +156,18 @@ export interface Route {
   special?: FsSpecial;
   /** 레지스트리 탐색기: selected key path (mount included), URL `key=` (registry only; `kind` = hive id). */
   key?: string;
+  /** Weekdays of the row time (r4 §2.3), URL `wd=sat,sun` (`mon`..`sun`). */
+  weekdays?: string[];
+  /** Hour-of-day window `HH-HH` (wraps midnight), URL `hours=18-09`. */
+  hours?: string;
+  /** 업무 외 시간: hours OR weekdays (defaults 18-09 · sat,sun), URL `offhours=1`. */
+  offhours?: boolean;
+  /** 부분 결과 (parser error / truncation / decrypt failure rows), URL `partial=1`. */
+  partial?: boolean;
+  /** 콘텐츠 유형 ids, URL `content=document,image`. */
+  content?: string[];
+  /** Coordinate box `lat0,lon0,lat1,lon1` (map view cluster), URL `geo=`. */
+  geo?: string;
 }
 
 /** fs-tree special nodes the files listing filters (`GET /files?special=`). */
@@ -219,8 +231,18 @@ export function parseSortParam(value: string): ServerSort | null {
 }
 
 /** Explorer views (S9 ViewSwitch). "columns" is the default DataGrid and is never written to the URL. */
-export type ExplorerView = "columns" | "thumbnails" | "chat" | "histogram";
-export const EXPLORER_VIEWS: readonly ExplorerView[] = ["columns", "thumbnails", "chat", "histogram"];
+export type ExplorerView = "columns" | "thumbnails" | "chat" | "histogram" | "cards" | "map";
+export const EXPLORER_VIEWS: readonly ExplorerView[] = [
+  "columns",
+  "thumbnails",
+  "chat",
+  "histogram",
+  "cards",
+  "map",
+];
+
+/** Weekday ids of `wd=` (r4 §2.3; Monday first, like the server's `weekday=`). */
+export const WEEKDAY_IDS: readonly string[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
 function listParam(value: string): string[] {
   return value
@@ -391,6 +413,21 @@ export function parseHash(hash: string): Route {
       route.special = value as FsSpecial;
     } else if (key === "key" && value && route.collection === "registry") {
       route.key = safeDecode(value);
+    } else if (key === "wd" && value) {
+      const list = listParam(value).filter((day) => WEEKDAY_IDS.includes(day));
+      if (list.length) route.weekdays = [...new Set(list)];
+    } else if (key === "hours" && /^\d{1,2}-\d{1,2}$/.test(value)) {
+      route.hours = value;
+    } else if (key === "offhours" && value === "1") {
+      route.offhours = true;
+    } else if (key === "partial" && value === "1") {
+      route.partial = true;
+    } else if (key === "content" && value) {
+      const list = listParam(value);
+      if (list.length) route.content = [...new Set(list)];
+    } else if (key === "geo" && value) {
+      const box = safeDecode(value);
+      if (/^-?[\d.]+,-?[\d.]+,-?[\d.]+,-?[\d.]+$/.test(box)) route.geo = box;
     } else if (key === "ext" && value) {
       const list = listParam(value);
       if (list.length) route.ext = list;
@@ -452,6 +489,12 @@ export function serializeRoute(route: Route): string {
   }
   if (collection === "files" && route.special) query.push(`special=${route.special}`);
   if (collection === "registry" && route.key) query.push(`key=${encodeURIComponent(route.key)}`);
+  if (route.weekdays?.length) query.push(`wd=${route.weekdays.join(",")}`);
+  if (route.hours) query.push(`hours=${route.hours}`);
+  if (route.offhours) query.push("offhours=1");
+  if (route.partial) query.push("partial=1");
+  if (route.content?.length) query.push(`content=${route.content.map(encodeURIComponent).join(",")}`);
+  if (route.geo) query.push(`geo=${route.geo}`);
   if (route.flagGrade) query.push(`flag_grade=${route.flagGrade}`);
   for (const id of route.flags ?? []) query.push(`flag=${encodeURIComponent(id)}`);
   for (const field of RECORD_FIELD_KEYS) {

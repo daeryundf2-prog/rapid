@@ -14,6 +14,7 @@ from .derived import (
     TABLE_INDEX_CACHE,
     TABLE_LABELS,
     TABLE_MAX_BYTES,
+    TABLES,
     TableIndex,
     derived_sources,
     page_rows,
@@ -23,6 +24,14 @@ from .derived import (
     table_summaries,
     value_rows,
 )
+from .derived_graph import (
+    GRAPH_MAX_NODES,
+    GRAPH_MIN_NODES,
+    build_graph,
+    read_sample_rows,
+)
+from .helpers import get_named_output, get_output_path
+from .jsonl_records import iter_records_at
 
 
 def build_derived_router(store: RunJobStore) -> APIRouter:
@@ -129,5 +138,62 @@ def build_derived_router(store: RunJobStore) -> APIRouter:
             "source": source_info(source),
             **value_rows(index, text, analysis_kinds),
         }
+
+    @router.get("/api/runs/{run_id}/derived/{table}/graph")
+    def get_derived_value_graph(
+        run_id: str,
+        table: str,
+        value: str = Query(default=""),
+        max_nodes: int = Query(default=GRAPH_MAX_NODES),
+    ) -> dict[str, object]:
+        """연결 그래프 라이트 (plan r4 §2.3): ``value`` (normalised) -> its original rows (the stored
+        samples, ≤20, by family) -> the other identifier values on those rows (every 통합 보기 table,
+        read with the derived pass's own column rules; credentials masked). Bounded to ``max_nodes``
+        nodes (10–200, default 200): value nodes ranked by rows shared with the centre, then table
+        count. Response: ``{run_id, table, label, source, center, nodes: [{id, type: value|row,
+        …}], edges: [{source, target}], rows, rows_read, values, dropped_values, truncated,
+        max_nodes}``; a row node carries the grid address (``collection``, ``locator``, ``kind`` |
+        ``scope`` | ``analysis_id``), a value node ``table``, ``normalized``, ``count`` and
+        ``in_table``. ``value`` missing / too long or ``max_nodes`` out of range is a Korean 422; an
+        unknown value is a 404."""
+        require_table(table)
+        text = value.strip()
+        if not text or len(text) > MAX_VALUE_CHARS:
+            raise HTTPException(status_code=422, detail=f"value(정규화 값)는 1~{MAX_VALUE_CHARS}자여야 합니다")
+        if not GRAPH_MIN_NODES <= max_nodes <= GRAPH_MAX_NODES:
+            raise HTTPException(
+                status_code=422, detail=f"max_nodes는 {GRAPH_MIN_NODES}~{GRAPH_MAX_NODES} 사이여야 합니다"
+            )
+        source, run_key = _source(run_id)
+        index = _index(source, run_key, table)
+        summary = source["summary"] if isinstance(source["summary"], dict) else {}
+        analysis_kinds = summary.get("analysis_kinds") if isinstance(summary.get("analysis_kinds"), dict) else {}
+        position = index.position.get(text)
+        if position is None:
+            raise HTTPException(status_code=404, detail="이 통합 보기 표에 없는 값입니다 (정규화 값으로 요청하세요)")
+        center = index.rows_at([position])[0]
+        samples = [sample for sample in center.get("samples") or [] if isinstance(sample, dict)]
+        output_dir = Path(run_key)
+
+        def read_artifacts(kind: str, indices):
+            name = f"artifacts_{kind}"
+            return iter_records_at(store.read_output(run_id, name), get_output_path(store, run_id, name), indices)
+
+        rows = read_sample_rows(
+            samples,
+            read_artifacts=read_artifacts,
+            files_payload=lambda: get_named_output(store, run_id, "files"),
+            output_dir=output_dir,
+        )
+        indexes = {}
+        for other in TABLES:
+            try:
+                indexes[other] = index if other == table else _index(source, run_key, other)
+            except HTTPException:
+                indexes[other] = None  # missing / oversized table: its values show without a count
+        graph = build_graph(
+            table=table, center=center, rows=rows, indexes=indexes, analysis_kinds=analysis_kinds, max_nodes=max_nodes
+        )
+        return {"run_id": run_id, "table": table, "label": TABLE_LABELS[table], "source": source_info(source), **graph}
 
     return router

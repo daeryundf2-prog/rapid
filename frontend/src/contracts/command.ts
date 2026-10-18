@@ -52,6 +52,9 @@ export const KEY_MAP = {
   viewThumbnails: "Alt+Shift+2",
   viewChat: "Alt+Shift+3",
   viewHistogram: "Alt+Shift+4",
+  /** 행(카드) 보기 · 지도 대체 보기 (r4 §2.3; Alt+Shift+5/6 were free). */
+  viewCards: "Alt+Shift+5",
+  viewMap: "Alt+Shift+6",
   /** Stage rail (console-ia §3): 접수 · 처리 · 탐색 · 검토 · 보고. */
   stageIntake: "Alt+1",
   stageProcess: "Alt+2",

@@ -56,8 +56,14 @@ export const timelineCollection: CollectionDef = {
   id: "timeline",
   label: "타임라인",
   source: "paged",
-  fetch: (runId, query, signal) => fetchTimelinePage(runId, query.offset, query.limit, signal),
-  mapRow: (raw, index) => {
+  fetch: (runId, query, signal) =>
+    fetchTimelinePage(runId, query.offset, query.limit, signal, query.rowConditions),
+  mapRow: (raw, position) => {
+    // A condition-filtered page (r4 §2.3) numbers its events by `record_index` (position in `events`).
+    const index =
+      typeof raw.record_index === "number" && Number.isInteger(raw.record_index) && raw.record_index >= 0
+        ? raw.record_index
+        : position;
     const kinds = timestampKindsOf(raw);
     const details = isRecord(raw.details) ? raw.details : {};
     return makeRow(

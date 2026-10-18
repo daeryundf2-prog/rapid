@@ -288,7 +288,7 @@ export const filesCollection: CollectionDef = {
       query.limit,
       signal,
       query.ref.category || undefined,
-      { ids: query.flags, grade: query.flagGrade },
+      { ids: query.flags, grade: query.flagGrade, conditions: query.rowConditions },
       { dir: query.ref.dir, recursive: query.ref.recursive, special: query.ref.special },
     ),
   widthPriority: () => FILES_PRIORITY,

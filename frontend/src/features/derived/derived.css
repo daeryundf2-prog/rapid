@@ -268,3 +268,88 @@
 .derived-pane > .derived-actions {
   margin: var(--space-2) var(--space-3) 0;
 }
+
+/* 연결 그래프 라이트 (r4 §2.3): wider value panel, plain SVG nodes / edges. Tokens only. */
+.derived-body[data-graph] {
+  grid-template-columns: minmax(0, 0.9fr) minmax(360px, 1.1fr);
+}
+
+.segmented.derived-mode {
+  align-self: flex-start;
+}
+
+.derived-graph {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-height: 0;
+}
+
+.derived-graph-scroll {
+  overflow: auto;
+  min-height: 0;
+}
+
+.derived-graph-svg {
+  display: block;
+  min-width: 560px;
+  font-family: var(--font-ui);
+  font-size: 11px;
+}
+
+.derived-graph-head {
+  fill: var(--text-muted);
+  font-weight: 600;
+}
+
+.derived-graph-edge {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.derived-graph-edge.is-active {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.derived-graph-node {
+  cursor: pointer;
+}
+
+.derived-graph-node rect {
+  fill: var(--bg-raised);
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.derived-graph-node text {
+  fill: var(--text);
+}
+
+.derived-graph-node[data-kind="center"] rect {
+  fill: var(--accent);
+  stroke: var(--accent);
+}
+
+.derived-graph-node[data-kind="center"] text {
+  fill: var(--on-accent);
+  font-weight: 600;
+}
+
+.derived-graph-node[data-missing] text {
+  fill: var(--text-muted);
+}
+
+.derived-graph-node:hover rect {
+  stroke: var(--accent);
+}
+
+.derived-graph-node:focus {
+  outline: none;
+}
+
+.derived-graph-node:focus-visible rect {
+  stroke: var(--focus);
+  stroke-width: 3;
+}

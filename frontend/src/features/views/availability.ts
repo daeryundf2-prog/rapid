@@ -1,5 +1,5 @@
 /**
- * Explorer view availability (S9, plan X6/X12). Pure: which of the four views
+ * Explorer view availability (S9, plan X6/X12; r4 §2.3 cards + map). Pure: which of the views
  * a collection node can show, and the Korean reason when it cannot. The
  * ViewSwitch renders unavailable views disabled WITH that reason, and an
  * unavailable `view=` in the URL falls back to the column view.
@@ -21,6 +21,8 @@ export const VIEW_DEFS: readonly ViewDef[] = [
   { id: "thumbnails", label: "썸네일 보기", commandId: "view.thumbnails", shortcut: KEY_MAP.viewThumbnails },
   { id: "chat", label: "대화 보기", commandId: "view.chat", shortcut: KEY_MAP.viewChat },
   { id: "histogram", label: "히스토그램 보기", commandId: "view.histogram", shortcut: KEY_MAP.viewHistogram },
+  { id: "cards", label: "행(카드) 보기", commandId: "view.cards", shortcut: KEY_MAP.viewCards },
+  { id: "map", label: "지도 대체 보기", commandId: "view.map", shortcut: KEY_MAP.viewMap },
 ];
 
 /** Artifact kinds whose rows point at image files. */
@@ -33,6 +35,18 @@ export const CHAT_KINDS: readonly string[] = [
   // r2 M1: Teams·Slack·Discord·… desktop apps (`chat-message` rows; chat.ts reads them).
   "windows-messenger",
 ];
+/** Row listings the card view can draw (every node with paged / loaded rows). */
+export const CARD_COLLECTIONS: readonly CollectionId[] = [
+  "artifacts",
+  "timeline",
+  "files",
+  "docs",
+  "search",
+  "analysis",
+  "indicators",
+];
+/** Location rows (EXIF GPS, mobile locations) are artifact rows: the map view is an artifacts view. */
+export const MAP_COLLECTIONS: readonly CollectionId[] = ["artifacts"];
 export const HISTOGRAM_COLLECTIONS: readonly CollectionId[] = [
   "timeline",
   "artifacts",
@@ -53,6 +67,9 @@ export const CHAT_REASON =
   "대화 보기는 카카오톡·데스크톱 메신저·모바일 내보내기 아티팩트 노드에서 사용할 수 있습니다";
 export const HISTOGRAM_REASON =
   "히스토그램 보기는 타임라인·아티팩트·파일·문서·검색 노드에서 사용할 수 있습니다";
+export const CARDS_REASON =
+  "행(카드) 보기는 행 목록 노드(아티팩트·타임라인·파일·문서·검색·분석·지표)에서 사용할 수 있습니다";
+export const MAP_REASON = "지도 대체 보기는 아티팩트 노드(위치 열이 있는 행)에서 사용할 수 있습니다";
 
 /** Korean reason the view cannot show this node; undefined = available. */
 export function viewDisabledReason(view: ExplorerView, scope: ViewScope): string | undefined {
@@ -68,6 +85,10 @@ export function viewDisabledReason(view: ExplorerView, scope: ViewScope): string
       return id === "artifacts" && kind && CHAT_KINDS.includes(kind) ? undefined : CHAT_REASON;
     case "histogram":
       return HISTOGRAM_COLLECTIONS.includes(id) ? undefined : HISTOGRAM_REASON;
+    case "cards":
+      return CARD_COLLECTIONS.includes(id) ? undefined : CARDS_REASON;
+    case "map":
+      return MAP_COLLECTIONS.includes(id) ? undefined : MAP_REASON;
     default:
       return NO_NODE_REASON;
   }
@@ -79,6 +100,8 @@ export function viewAvailability(scope: ViewScope): Record<ExplorerView, string 
     thumbnails: viewDisabledReason("thumbnails", scope),
     chat: viewDisabledReason("chat", scope),
     histogram: viewDisabledReason("histogram", scope),
+    cards: viewDisabledReason("cards", scope),
+    map: viewDisabledReason("map", scope),
   };
 }
 

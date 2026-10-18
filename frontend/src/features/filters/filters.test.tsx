@@ -106,11 +106,16 @@ describe("server vs client partition", () => {
     expect(q.ref.kind).toBe("windows-system");
   });
 
-  it("search: extension is server-side; timeline: time range is client-side", () => {
+  it("search: extension is server-side; timeline: time range is server-side (r4 row conditions)", () => {
     expect(partitionFilters({ id: "search" }, f({ ext: ["pdf"] })).server.extension).toEqual(["pdf"]);
     const t = partitionFilters({ id: "timeline" }, f({ from: "2026-01-01T00:00", ext: ["pdf"] }));
-    expect(t.serverLabels).toEqual([]);
-    expect(t.clientLabels).toEqual(["시간 범위", "확장자"]);
+    expect(t.serverLabels).toEqual(["시간 범위"]);
+    expect(t.clientLabels).toEqual(["확장자"]);
+    expect(t.server.conditions?.from).toBe(new Date(Date.parse("2026-01-01T00:00")).toISOString());
+    // Docs have no row-condition API: the range stays on the loaded rows.
+    expect(partitionFilters({ id: "docs" }, f({ from: "2026-01-01T00:00" })).clientLabels).toEqual([
+      "시간 범위",
+    ]);
   });
 
   it("client predicate filters time, status, type, tag, ext and path", () => {
@@ -165,7 +170,7 @@ describe("chips", () => {
     expect(useFilterStore.getState().filters.statuses).toEqual(["needs-review"]);
     fireEvent.click(screen.getByRole("button", { name: /상태 재검토 조건 제거/ }));
     expect(useFilterStore.getState().filters.statuses).toEqual([]);
-    fireEvent.click(screen.getByRole("button", { name: "7일" }));
+    fireEvent.click(screen.getByRole("button", { name: "최근 7일" }));
     expect(useFilterStore.getState().filters.from).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "조건 지우기" }));
     expect(useFilterStore.getState().filters.from).toBeUndefined();
@@ -203,7 +208,7 @@ describe("조건 줄 (visual-polish S1/S2, viewer-families U-F1)", () => {
     for (const field of ["태그", "확장자", "경로 포함"])
       expect(within(popover).getByLabelText(field)).toBeTruthy();
     fireEvent.click(within(popover).getByRole("button", { name: "상태 필터: 제외" }));
-    fireEvent.click(within(popover).getByRole("button", { name: "30일" }));
+    fireEvent.click(within(popover).getByRole("button", { name: "최근 30일" }));
     // The trigger counts the applied conditions; each is a removable chip.
     expect(trigger.textContent).toContain("2");
     const chips = screen.getByRole("list", { name: "적용된 조건" });

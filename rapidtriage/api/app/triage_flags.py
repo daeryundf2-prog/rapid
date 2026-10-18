@@ -29,7 +29,7 @@ import threading
 import time
 from array import array
 from collections import OrderedDict
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -508,8 +508,10 @@ def filter_files_rows(
     offset: int,
     limit: int,
     restrict: Sequence[int] | None = None,
+    row_filter: Callable[[Mapping[str, object]], bool] | None = None,
 ) -> tuple[list[object], dict[str, object]]:
-    """Files rows of ``collection`` after category/flag filters (and the ``flags`` order): ``(page rows, pagination)``.
+    """Files rows of ``collection`` after category/flag filters and ``row_filter`` (row conditions)
+    (and the ``flags`` order): ``(page rows, pagination)``.
 
     ``restrict`` (ascending row positions, e.g. one folder of the fs-tree) limits the rows considered."""
     from .artifact_filter import file_row_categories
@@ -527,6 +529,8 @@ def filter_files_rows(
             values = file_row_categories(row, collection)
             if not values or categories.isdisjoint(values):
                 continue
+        if row_filter is not None and not (isinstance(row, Mapping) and row_filter(row)):
+            continue
         order.append(record_index)
     if query.sort and join.index is not None:
         index = join.index
@@ -544,7 +548,7 @@ def filter_files_rows(
         "next_offset": offset + len(window) if has_more else None,
         "previous_offset": max(0, offset - limit) if offset > 0 and limit > 0 else None,
         "has_more": has_more,
-        "filtered": bool(eligible is not None or categories or restrict is not None),
+        "filtered": bool(eligible is not None or categories or restrict is not None or row_filter is not None),
         "categories": sorted(categories) if categories else None,
         "flags": query.descriptor(),
         "scanned": len(restrict) if restrict is not None else len(rows),

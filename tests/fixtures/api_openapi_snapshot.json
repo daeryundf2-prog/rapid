@@ -198,6 +198,9 @@
     "/api/runs/{run_id}/derived/{table}": {
       "get": "get_derived_table_api_runs__run_id__derived__table__get"
     },
+    "/api/runs/{run_id}/derived/{table}/graph": {
+      "get": "get_derived_value_graph_api_runs__run_id__derived__table__graph_get"
+    },
     "/api/runs/{run_id}/derived/{table}/rows": {
       "get": "get_derived_value_rows_api_runs__run_id__derived__table__rows_get"
     },
