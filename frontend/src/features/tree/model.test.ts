@@ -286,6 +286,8 @@ describe("tree model (탐색 domain tree, console-ia §4)", () => {
     ]);
     const channels = flattenVisible(model, new Set(["domain:eventlog", "domain:eventlog:evt-channels"]));
     expect(channels.filter((f) => f.level === 3).map((f) => f.node.label)).toEqual([
+      // R5 L2: NetworkProfile/WLAN/DHCP/DNS/BITS/VPN channels.
+      "네트워크",
       "방화벽(이벤트 채널)",
       "보안",
       "사용자 PNP",

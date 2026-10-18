@@ -294,3 +294,55 @@ class WiperRunAfterIncident(Rule):
             ),
             note=f"사건 시작 이후 {signature.name} 실행 {len(after)}회",
         )
+
+
+# --- R5 L2: presence of crypto wallets and virtual machines (grade C leads) -----------------------
+
+
+@register("antiforensics.crypto_wallet_present")
+class CryptoWalletPresent(Rule):
+    """A crypto wallet (desktop app, wallet file or browser-extension store) with data in it."""
+
+    selector = select(types={"crypto-wallet-presence"}, kinds={"windows-system"})
+
+    def apply(self, row: RowView, ctx: FlagContext) -> RuleResult | None:
+        if row.text("parse_status") == "error":
+            return None
+        files = row.number("file_count") or 0
+        size = row.number("total_size") or 0
+        if files <= 0 and size <= 0:
+            return None  # empty leftover folder (extension installed, never set up)
+        return RuleResult(
+            evidence(
+                wallet=row.text("wallet_product_label", "wallet_product"),
+                kind=row.text("wallet_kind_label", "wallet_kind"),
+                path=row.text("wallet_path", "source_path"),
+                public_address_count=row.number("public_address_count"),
+                encrypted=row.flag("encrypted"),
+            )
+        )
+
+
+@register("antiforensics.vm_present")
+class VirtualMachinePresent(Rule):
+    """A virtual machine definition (VMware/VirtualBox/Hyper-V), except utility VMs named in params."""
+
+    selector = select(types={"vm-config"}, kinds={"windows-system"})
+
+    def apply(self, row: RowView, ctx: FlagContext) -> RuleResult | None:
+        if row.text("parse_status") == "error":
+            return None
+        name = row.text("vm_name")
+        config = row.text("vm_config_path", "source_path")
+        probe = f"{name} {config}".lower()
+        if any(str(marker).lower() in probe for marker in as_list(self.param("ignore_name_markers", []))):
+            return None
+        return RuleResult(
+            evidence(
+                product=row.text("vm_product_label", "vm_product"),
+                vm_name=name,
+                guest_os=row.text("guest_os"),
+                config=config,
+                source=row.text("config_source_label", "config_source"),
+            )
+        )

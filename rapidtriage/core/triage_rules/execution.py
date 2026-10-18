@@ -8,6 +8,7 @@ from collections.abc import Iterator
 
 from ...artifacts.windows.prefetch import prefetch_executable_entry
 from .base import (
+    PERSISTENCE_MARKERS,
     FlagContext,
     RowRef,
     RowView,
@@ -20,10 +21,11 @@ from .base import (
     register,
     select,
     split_windows_path,
+    suspicious_command,
     under_system_dir,
     user_writable_marker,
 )
-from .registry import removable_letters, removable_or_network
+from .registry import removable_letters, removable_or_network, squirrel_autostart
 
 PREFETCH = select(types={"prefetch-file"}, kinds={"windows-prefetch"})
 EXECUTION_TYPES = ("amcache-entry", "shimcache-entry", "bam-entry")
@@ -240,3 +242,45 @@ class MultiSource(Rule):
             if len(sources) >= minimum:
                 for ref in self.rows[name]:
                     yield ref, RuleResult(evidence(executable=name, sources=sorted(sources)), note="실행 신뢰도 보강 지표(의심 아님)")
+
+
+# --- R5 L2: startup items (StartupApproved registry rows and Startup-folder files) ---------------
+
+STARTUP_ITEMS = select(types={"startup-item"}, kinds={"windows-registry", "windows-system"})
+
+
+@register("execution.startup_user_path")
+class StartupUserPath(Rule):
+    """An enabled (or state-unknown) startup item whose command/target is in a user-writable path,
+    a script, encoded PowerShell or a LOLBin (StartupApproved rows joined with Run, Startup-folder files)."""
+
+    selector = STARTUP_ITEMS
+
+    def apply(self, row: RowView, ctx: FlagContext) -> RuleResult | None:
+        if row.flag("enabled") is False:
+            return None  # disabled in Task Manager: not run at logon
+        command = row.text("command", "target_path")
+        if not command:
+            return None
+        probe = "\\" + split_windows_path(command.strip('"').split('"')[0])[1]
+        if any(str(marker).lower() in probe for marker in self.param("exclude_markers", [])):
+            return None
+        reasons = suspicious_command(command, PERSISTENCE_MARKERS)
+        if row.text("item_kind") == "script":
+            reasons.append("시작프로그램 폴더의 스크립트")
+        if not reasons:
+            return None
+        name = row.text("item_name", "value_name")
+        if all(reason.startswith("사용자 쓰기 경로") for reason in reasons) and squirrel_autostart(
+            name, command, list(self.param("squirrel_value_prefixes", []))
+        ):
+            return None
+        return RuleResult(
+            evidence(
+                item_name=name,
+                command=command,
+                startup_source=row.text("startup_source_label", "startup_source"),
+                scope=row.text("scope"),
+                reasons=reasons,
+            )
+        )

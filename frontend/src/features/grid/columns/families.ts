@@ -83,6 +83,8 @@ export const TS_KIND_LABELS: Record<string, string> = {
   // r2 M2: calendar-event start / end
   start: "시작",
   end: "종료",
+  // R5 L2: StartupApproved disabled time
+  disabled: "사용 안 함 설정",
   // older spellings (families mock / earlier servers)
   first_seen: "최초 확인",
   last_run: "최근 실행",

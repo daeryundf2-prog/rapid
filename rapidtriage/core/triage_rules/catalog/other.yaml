@@ -404,6 +404,120 @@ families:
   aux_columns: []
   rules:
   - generic.timestamp_out_of_range
+# --- R5 L2: desktop wallpaper, stored-credential presence (policy: no DPAPI, no blob contents) ---
+- id: desktop-wallpaper
+  label: 바탕 화면 배경
+  types:
+  - desktop-wallpaper
+  core_columns:
+  - key: key_last_written_at
+    label: 키 마지막 기록
+    aliases:
+    - timestamp
+    format: time
+    ts_kind: last-written
+  - key: original_path
+    semantic: path
+    label: 원본 이미지 경로
+    format: path
+  - key: wallpaper_path
+    semantic: path
+    label: 배경 파일
+    format: path
+  - key: wallpaper_source_label
+    label: 출처
+    aliases:
+    - wallpaper_source
+  - key: history_position
+    label: 기록 순서
+    format: number
+  - key: image_format
+    label: 이미지 형식
+  - key: image_width
+    label: 너비
+    format: number
+  - key: image_height
+    label: 높이
+    format: number
+  - key: user
+    semantic: account
+    label: 사용자 프로필
+  - key: user_sid
+    semantic: account
+    label: 사용자 SID
+    format: sid
+  aux_columns:
+  - key: file_size
+    label: 크기
+    format: bytes
+  - key: wallpaper_style
+    label: 배경 맞춤(WallpaperStyle)
+  - key: source_file_mtime
+    label: 파일 수정(사본 기준)
+    format: time
+    ts_kind: modified
+  - key: key_path
+    label: 키 경로
+    aliases:
+    - key
+    format: path
+  - key: source_path
+    label: 원본 파일
+    format: path
+  rules: []
+- id: credential-store-presence
+  label: 저장된 자격 증명(존재만)
+  types:
+  - credential-store-presence
+  core_columns:
+  - key: store_kind_label
+    label: 종류
+    aliases:
+    - store_kind
+  - key: file_name
+    label: 파일 이름
+  - key: file_guid
+    label: 파일 GUID
+    format: mono
+  - key: user
+    semantic: account
+    label: 사용자 프로필
+  - key: user_sid
+    semantic: account
+    label: 사용자 SID(Protect)
+    format: sid
+  - key: file_size
+    label: 크기
+    format: bytes
+  - key: store_family_label
+    label: 저장소
+    aliases:
+    - store_family
+  - key: source_path
+    semantic: path
+    label: 파일 경로
+    format: path
+  aux_columns:
+  - key: vault_guid
+    label: 보관소 GUID
+    format: mono
+  - key: source_file_mtime
+    label: 파일 수정(사본 기준)
+    format: time
+    ts_kind: modified
+  - key: contents_stored
+    label: 내용 저장
+    value_labels:
+      'true': 예
+      'false': 아니요(정책)
+  - key: dpapi_decrypted
+    label: DPAPI 복호
+    value_labels:
+      'true': 예
+      'false': 아니요(정책)
+  - key: evidence_note
+    label: 참고
+  rules: []
 rules:
 - id: generic.timestamp_out_of_range
   family: generic
