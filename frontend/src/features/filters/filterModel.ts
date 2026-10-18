@@ -42,10 +42,12 @@ import { contentTypeLabel } from "./contentTypes";
 import {
   clockLabel,
   hasClock,
+  orderedRange,
   parseGeo,
   rowMatchesConditions,
   type ServerConditionParams,
   serverConditionParams,
+  timeWindow,
 } from "./rowConditions";
 
 export interface FilterState {
@@ -457,7 +459,11 @@ export function applyFiltersToQuery(
 ): CollectionQuery {
   const plan = partitionFilters(query.ref, filters, knownTypes, tz);
   const next: CollectionQuery = { ...query };
-  if (filters.from || filters.to) next.timeRange = { from: filters.from, to: filters.to };
+  if (filters.from || filters.to) {
+    // Never a reversed range (시작 > 종료): the pair is applied in order.
+    const range = orderedRange(filters.from, filters.to);
+    next.timeRange = { from: range.from, to: range.to };
+  }
   if (filters.statuses.length) next.reviewStatus = filters.statuses;
   if (filters.tags.length) next.tags = filters.tags;
   if (plan.server.artifactTypes) next.artifactTypes = plan.server.artifactTypes;
@@ -475,12 +481,6 @@ export function applyFiltersToQuery(
 }
 
 // --- client predicate --------------------------------------------------------
-
-function parseTime(value: string | undefined | null): number | null {
-  if (!value) return null;
-  const ms = Date.parse(value);
-  return Number.isNaN(ms) ? null : ms;
-}
 
 export function rowExtension(row: GridRow): string {
   const field = row.fields.extension;
@@ -500,13 +500,13 @@ function rowKind(row: GridRow): string {
  * API applied some of them (the row conditions are evaluated in `tz`, the display timezone).
  */
 export function rowMatchesFilters(row: GridRow, filters: FilterState, tz = "utc"): boolean {
-  const from = parseTime(filters.from);
-  const to = parseTime(filters.to);
-  if (from !== null || to !== null) {
+  // `[from, until)`: in order, `to` covering the whole minute / second / day it names (server rule).
+  const { from, until } = timeWindow(filters.from, filters.to);
+  if (from !== null || until !== null) {
     const at = parseInstant(row.timestamp)?.getTime() ?? null;
     if (at === null) return false;
     if (from !== null && at < from) return false;
-    if (to !== null && at > to) return false;
+    if (until !== null && at >= until) return false;
   }
   if (filters.statuses.length) {
     const ok = filters.statuses.some((s) =>

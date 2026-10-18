@@ -128,7 +128,7 @@ async function jsonPaged(
   category?: string,
   scope?: string,
   extra = "",
-  /** The server filtered the rows (fs-tree folder): `matched` is the total, like a category page. */
+  /** The server filtered the rows (folder, flags, row conditions): `matched` is the total, like a category page. */
   serverFiltered = false,
 ): Promise<RawPage> {
   const started = now();
@@ -234,7 +234,8 @@ export const fetchFilesPage = (
     route.category,
     route.scope,
     flagQueryString(flags) + pathQuery,
-    Boolean(pathQuery),
+    // Folder, 특이사항 and row-condition pages count matches (`matched`, null past the scan cap).
+    Boolean(pathQuery) || Boolean(flags?.ids?.length || flags?.grade) || hasConditions(flags),
   );
 };
 
@@ -360,6 +361,7 @@ export const fetchTimelinePage = (
     undefined,
     undefined,
     flagQueryString({ conditions }),
+    Object.keys(conditions ?? {}).length > 0,
   );
 export const fetchIndicatorsPage = (runId: string, offset: number, limit: number, signal?: AbortSignal) =>
   jsonPaged(runId, "indicators", "indicators", offset, limit, signal);

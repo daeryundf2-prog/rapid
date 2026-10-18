@@ -7,7 +7,10 @@
  *  - files rows: the scan category (문서 documents · 이미지 images · 압축 archives · 실행
  *    executables · DB databases · 메일 emails); 영상/음성 have no category and go by extension;
  *  - artifact / timeline rows: the artifact type (media-image → 이미지 …) or the extension of the
- *    file the row points at (`target_path`, `local_path`, … then the row's own path).
+ *    file the row points at (`target_path`, `local_path`, …; never `source_path`, the container the
+ *    parser read). Only artifact types whose own path IS the content (media-*, document-*, file,
+ *    email-attachment …: PATH_IS_CONTENT_*) fall back to the row's path — a History database or
+ *    an .evtx is not the row's content.
  */
 
 import type { GridRow } from "../../contracts/collection";
@@ -108,8 +111,24 @@ const TARGET_PATH_KEYS = [
   "file_name",
   "filename",
   "attachment_name",
-  "source_path",
 ];
+const PATH_IS_CONTENT_PREFIXES = ["media-", "document-", "synthetic-media-"];
+const PATH_IS_CONTENT_TYPES: ReadonlySet<string> = new Set([
+  "file",
+  "file-signature-mismatch",
+  "ios-backup-file",
+  "cloud-sync-file",
+  "kakaotalk-shared-picture",
+  "email-attachment",
+  "android-apk",
+]);
+
+/** The artifact type's own path is the content file (server `row_conditions.path_is_content`). */
+export function pathIsContent(type: string): boolean {
+  return (
+    PATH_IS_CONTENT_TYPES.has(type) || PATH_IS_CONTENT_PREFIXES.some((prefix) => type.startsWith(prefix))
+  );
+}
 
 /** Lower-case extension of a path's last component (no dot), "" when none. */
 export function pathExtension(value: unknown): string {
@@ -150,7 +169,8 @@ export function rowContentTypes(row: GridRow): Set<ContentTypeId> {
     target = pathExtension(details[key]);
     if (target) break;
   }
-  if (!target) target = pathExtension(row.sourcePath);
+  if (!target && row.ref.collection === "artifacts" && pathIsContent(type))
+    target = pathExtension(row.sourcePath);
   for (const id of CONTENT_TYPE_IDS) {
     const def = CONTENT_TYPES[id];
     const byType = type !== "" && def.types.some((prefix) => type === prefix || type.startsWith(prefix));

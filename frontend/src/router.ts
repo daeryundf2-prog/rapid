@@ -36,6 +36,13 @@ import {
   type ReviewStatus,
   type ServerSort,
 } from "./contracts/collection";
+import {
+  normalizeContent,
+  normalizeHours,
+  normalizeWeekdays,
+  parseGeo,
+  WEEKDAY_IDS,
+} from "./features/filters/conditionValues";
 
 /** Workflow stages of the rail (console-ia §3), in rail order. */
 export type Stage = "intake" | "process" | "explore" | "review" | "report";
@@ -242,7 +249,7 @@ export const EXPLORER_VIEWS: readonly ExplorerView[] = [
 ];
 
 /** Weekday ids of `wd=` (r4 §2.3; Monday first, like the server's `weekday=`). */
-export const WEEKDAY_IDS: readonly string[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+export { WEEKDAY_IDS };
 
 function listParam(value: string): string[] {
   return value
@@ -414,20 +421,22 @@ export function parseHash(hash: string): Route {
     } else if (key === "key" && value && route.collection === "registry") {
       route.key = safeDecode(value);
     } else if (key === "wd" && value) {
-      const list = listParam(value).filter((day) => WEEKDAY_IDS.includes(day));
-      if (list.length) route.weekdays = [...new Set(list)];
-    } else if (key === "hours" && /^\d{1,2}-\d{1,2}$/.test(value)) {
-      route.hours = value;
+      const list = normalizeWeekdays(listParam(value));
+      if (list.length) route.weekdays = list;
+    } else if (key === "hours" && normalizeHours(value)) {
+      // An empty / malformed window (9-9, 25-03) is dropped, never kept as an inert chip.
+      route.hours = normalizeHours(value);
     } else if (key === "offhours" && value === "1") {
       route.offhours = true;
     } else if (key === "partial" && value === "1") {
       route.partial = true;
     } else if (key === "content" && value) {
-      const list = listParam(value);
-      if (list.length) route.content = [...new Set(list)];
-    } else if (key === "geo" && value) {
+      const list = normalizeContent(listParam(value));
+      if (list.length) route.content = list;
+    } else if (key === "geo" && value && route.collection === "artifacts") {
+      // 위치 상자: located rows are artifact rows (the server takes geo= on /artifacts only).
       const box = safeDecode(value);
-      if (/^-?[\d.]+,-?[\d.]+,-?[\d.]+,-?[\d.]+$/.test(box)) route.geo = box;
+      if (parseGeo(box)) route.geo = box;
     } else if (key === "ext" && value) {
       const list = listParam(value);
       if (list.length) route.ext = list;

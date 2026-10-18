@@ -70,7 +70,9 @@ export function DerivedGraph({
   const [activeId, setActiveId] = useState<string | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const active = layout && activeId ? layout.byId.get(activeId) : undefined;
-  const current = active ?? layout?.columns[0][0];
+  // The tab stop: the active node, else the centre, else the first node (a graph without its centre
+  // node still has one tab stop).
+  const current = active ?? layout?.columns[0][0] ?? layout?.nodes[0];
 
   const connected = useMemo(() => {
     const set = new Set<string>();
@@ -116,6 +118,8 @@ export function DerivedGraph({
   };
 
   const onKeyDown = (event: KeyboardEvent<SVGGElement>, placed: PlacedNode) => {
+    // Ctrl / Meta / Alt combinations belong to the browser and the shell.
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
     const column = layout.columns[placed.column];
     const key = event.key;
     let next: PlacedNode | undefined;

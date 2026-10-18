@@ -7,10 +7,12 @@
  */
 
 import type { GridRow } from "../../contracts/collection";
-import { WEEKDAY_IDS } from "../../router";
 import { parseInstant, zoneName } from "../../utils/time";
 import { rowCoordinates } from "../views/geo";
+import { inGeoBox, parseGeo, parseHours, WEEKDAY_IDS } from "./conditionValues";
 import { rowContentTypes } from "./contentTypes";
+
+export { inGeoBox, parseGeo, parseHours };
 
 export const WEEKDAY_LABELS: Readonly<Record<string, string>> = {
   mon: "월",
@@ -31,14 +33,27 @@ export interface ClockConditions {
   offhours?: boolean;
 }
 
-/** `HH-HH` → [start, end] (0–23), null when malformed or empty (start = end). */
-export function parseHours(value: string | undefined): [number, number] | null {
-  const match = /^(\d{1,2})-(\d{1,2})$/.exec(value ?? "");
-  if (!match) return null;
-  const start = Number(match[1]);
-  const end = Number(match[2]);
-  if (start > 24 || end > 24 || start % 24 === end % 24) return null;
-  return [start % 24, end % 24];
+const hh = (hour: number) => String(hour).padStart(2, "0");
+
+/**
+ * The `hours` value after picking one bound in the dropdowns. A pick that would make the window
+ * empty (start = end) moves the other bound one hour on — it never clears the window — so any
+ * window (18–09 included) is reachable from any state.
+ */
+export function hoursAfterPick(
+  current: readonly [number, number],
+  bound: "start" | "end",
+  hour: number,
+): string {
+  let [start, end] = current;
+  if (bound === "start") {
+    start = hour % 24;
+    if (start === end) end = (start + 1) % 24;
+  } else {
+    end = hour % 24;
+    if (start === end) start = (end + 23) % 24;
+  }
+  return `${hh(start)}-${hh(end)}`;
 }
 
 export function inHours(hour: number, [start, end]: [number, number]): boolean {
@@ -94,37 +109,89 @@ export function clockLabel(conditions: ClockConditions): string {
 
 // --- 부분 결과 ------------------------------------------------------------------------------
 
-const PARTIAL_STATUS_TOKENS = [
+// Whole words of a parse status (row_conditions.PARTIAL_STATUS_WORDS / _PHRASES), unless the word
+// before negates them ("parsed-no-errors").
+const PARTIAL_STATUS_WORDS = new Set([
   "fail",
+  "failed",
+  "failure",
   "error",
-  "truncat",
+  "errors",
+  "truncated",
+  "truncation",
   "invalid",
-  "not-recognized",
-  "not-decoded",
   "unreadable",
-  "too_large",
-  "too-large",
   "unavailable",
   "corrupt",
+  "corrupted",
   "partial",
+  "partially",
+  "unrecognized",
+  "undecoded",
+  "unparsed",
+]);
+const PARTIAL_STATUS_PHRASES: readonly (readonly string[])[] = [
+  ["not", "recognized"],
+  ["not", "decoded"],
+  ["not", "parsed"],
+  ["too", "large"],
+  ["out", "of", "range"],
 ];
-const PARTIAL_TYPE_TOKENS = ["invalid", "unreadable", "parse-error", "parser-error"];
-const DECRYPT_OK = new Set(["", "success", "decrypted", "not-applicable", "not-required", "not-encrypted"]);
+const NEGATIONS = new Set(["no", "non", "without", "zero"]);
+// Read / scan caps only — display caps (message_text_truncated, value_truncated,
+// event_data_truncated, …) of values the parser read completely are not 부분 결과.
+const PARTIAL_TRUNCATION_KEYS = [
+  "truncated",
+  "parse_truncated",
+  "scan_truncated",
+  "stream_truncated",
+  "file_scan_truncated",
+  "sqlite_scan_truncated",
+  "cache_body_truncated",
+  "key_truncated",
+  "native_records_truncated",
+  "message_rows_truncated",
+  "archive_embedded_parse_truncated",
+];
+const PARTIAL_TYPE_TOKENS = ["invalid", "unreadable", "parse-error", "parser-error", "scan-error"];
+const DECRYPT_OK = new Set([
+  "",
+  "success",
+  "decrypted",
+  "not-applicable",
+  "not-required",
+  "not-encrypted",
+  "unknown",
+]);
+
+/** A failing parse status (server `_partial_status`). */
+export function partialStatus(value: unknown): boolean {
+  if (typeof value !== "string" || !value) return false;
+  const words = value
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  return words.some((word, index) => {
+    if (index > 0 && NEGATIONS.has(words[index - 1] as string)) return false;
+    if (PARTIAL_STATUS_WORDS.has(word)) return true;
+    return PARTIAL_STATUS_PHRASES.some((phrase) =>
+      phrase.every((part, offset) => words[index + offset] === part),
+    );
+  });
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function partialContainer(container: Record<string, unknown>): boolean {
-  if (container.parser_error === true || container.truncated === true) return true;
-  const status = container.parse_status;
-  if (typeof status === "string" && PARTIAL_STATUS_TOKENS.some((t) => status.toLowerCase().includes(t)))
-    return true;
+  if (container.parser_error === true) return true;
+  if (partialStatus(container.parse_status)) return true;
   const decrypt = container.decrypt_status;
   if (typeof decrypt === "string" && !DECRYPT_OK.has(decrypt.toLowerCase())) return true;
   const coverage = container.coverage;
   if (coverage === "partial" || (isRecord(coverage) && coverage.status === "partial")) return true;
-  return Object.entries(container).some(([key, value]) => key.endsWith("_truncated") && value === true);
+  return PARTIAL_TRUNCATION_KEYS.some((key) => container[key] === true);
 }
 
 /** 부분 결과: the row (or its `details`) says a parser could not read it completely. */
@@ -143,13 +210,6 @@ export interface RowConditionFilters extends ClockConditions {
   geo?: string;
 }
 
-export function parseGeo(value: string | undefined): [number, number, number, number] | null {
-  if (!value) return null;
-  const parts = value.split(",").map(Number);
-  if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n))) return null;
-  return parts as [number, number, number, number];
-}
-
 /** Client check of the clock / 부분 결과 / 콘텐츠 유형 / 위치 conditions (the time range is checked by the caller). */
 export function rowMatchesConditions(row: GridRow, filters: RowConditionFilters, tz: string): boolean {
   if (hasClock(filters)) {
@@ -164,9 +224,7 @@ export function rowMatchesConditions(row: GridRow, filters: RowConditionFilters,
   const box = parseGeo(filters.geo);
   if (box) {
     const point = rowCoordinates(row);
-    if (!point) return false;
-    const [lat0, lon0, lat1, lon1] = box;
-    if (point.lat < lat0 || point.lat > lat1 || point.lon < lon0 || point.lon > lon1) return false;
+    if (!point || !inGeoBox(point, box)) return false;
   }
   return true;
 }
@@ -176,6 +234,63 @@ export function serverInstant(value: string | undefined): string | undefined {
   if (!value) return undefined;
   const ms = Date.parse(value);
   return Number.isNaN(ms) ? undefined : new Date(ms).toISOString();
+}
+
+/** Milliseconds a `to` bound covers (server `bound_unit`): a minute / second / day as written, else exact. */
+export function boundUnitMs(value: string): number {
+  const text = value.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return 86_400_000;
+  const match = /^\d{4}-\d{2}-\d{2}[T ]\d{2}(:\d{2})?(:\d{2})?([.,]\d+)?/.exec(text);
+  if (!match || match[3]) return 1;
+  if (match[2]) return 1_000;
+  if (match[1]) return 60_000;
+  return 3_600_000;
+}
+
+/** The time range in order: a reversed pair (시작 > 종료) is swapped, never sent reversed. */
+export function orderedRange(
+  from: string | undefined,
+  to: string | undefined,
+): {
+  from?: string;
+  to?: string;
+  reversed: boolean;
+} {
+  const a = from ? Date.parse(from) : Number.NaN;
+  const b = to ? Date.parse(to) : Number.NaN;
+  if (from && to && !Number.isNaN(a) && !Number.isNaN(b) && a > b)
+    return { from: to, to: from, reversed: true };
+  return { ...(from ? { from } : {}), ...(to ? { to } : {}), reversed: false };
+}
+
+/**
+ * `[from, until)` milliseconds of the filter range (client check of the listings the server does
+ * not filter): `to` covers the whole minute / second / day it names, like the server.
+ */
+export function timeWindow(
+  from: string | undefined,
+  to: string | undefined,
+): { from: number | null; until: number | null } {
+  const range = orderedRange(from, to);
+  const start = range.from ? Date.parse(range.from) : Number.NaN;
+  const end = range.to ? Date.parse(range.to) : Number.NaN;
+  return {
+    from: Number.isNaN(start) ? null : start,
+    until: Number.isNaN(end) || !range.to ? null : end + boundUnitMs(range.to),
+  };
+}
+
+/**
+ * The server `to` value: a minute-precision input (`YYYY-MM-DDTHH:mm`) goes as a minute-precision
+ * UTC instant (`…T00:00Z`) so the server includes that whole minute; other forms as ISO.
+ */
+export function serverUpperBound(value: string | undefined): string | undefined {
+  const iso = serverInstant(value);
+  if (!iso || !value) return iso;
+  const unit = boundUnitMs(value);
+  if (unit === 60_000) return `${iso.slice(0, 16)}Z`;
+  if (unit === 1_000) return `${iso.slice(0, 19)}Z`;
+  return iso;
 }
 
 export type ServerConditionParams = Record<string, string | string[]>;
@@ -191,8 +306,9 @@ export function serverConditionParams(
 ): ServerConditionParams {
   const params: ServerConditionParams = {};
   if (options.time) {
-    const from = serverInstant(filters.from);
-    const to = serverInstant(filters.to);
+    const range = orderedRange(filters.from, filters.to);
+    const from = serverInstant(range.from);
+    const to = serverUpperBound(range.to);
     if (from) params.from = from;
     if (to) params.to = to;
   }

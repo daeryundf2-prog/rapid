@@ -580,7 +580,7 @@ function OriginalRows({
         </ul>
       ) : null}
       {detail.isPending && row && !graphMode ? <p className="derived-hint">원본 행을 불러오는 중…</p> : null}
-      {detail.isError ? (
+      {detail.isError && !graphMode ? (
         <p className="derived-notice" role="alert">
           {errorText(detail.error)}
         </p>
