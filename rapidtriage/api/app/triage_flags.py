@@ -507,8 +507,11 @@ def filter_files_rows(
     categories: frozenset[str] | None,
     offset: int,
     limit: int,
+    restrict: Sequence[int] | None = None,
 ) -> tuple[list[object], dict[str, object]]:
-    """Files rows of ``collection`` after category/flag filters (and the ``flags`` order): ``(page rows, pagination)``."""
+    """Files rows of ``collection`` after category/flag filters (and the ``flags`` order): ``(page rows, pagination)``.
+
+    ``restrict`` (ascending row positions, e.g. one folder of the fs-tree) limits the rows considered."""
     from .artifact_filter import file_row_categories
 
     kind = f"files:{collection}"
@@ -516,7 +519,8 @@ def filter_files_rows(
     if query.filtered:
         eligible = set(join.require_index().matching(kind, query.rule_ids, query.grade))
     order: list[int] = []
-    for record_index, row in enumerate(rows):
+    for record_index in restrict if restrict is not None else range(len(rows)):
+        row = rows[record_index]
         if eligible is not None and record_index not in eligible:
             continue
         if categories:
@@ -540,10 +544,10 @@ def filter_files_rows(
         "next_offset": offset + len(window) if has_more else None,
         "previous_offset": max(0, offset - limit) if offset > 0 and limit > 0 else None,
         "has_more": has_more,
-        "filtered": bool(eligible is not None or categories),
+        "filtered": bool(eligible is not None or categories or restrict is not None),
         "categories": sorted(categories) if categories else None,
         "flags": query.descriptor(),
-        "scanned": len(rows),
+        "scanned": len(restrict) if restrict is not None else len(rows),
         "truncated": False,
     }
     if query.sort:
