@@ -40,6 +40,13 @@
       "artifacts": []
     },
     {
+      "name": "email-clients",
+      "description": "Desktop mail clients: Thunderbird (mbox, Gloda, address book, calendar, prefs), Windows Mail and Windows Live Mail",
+      "target_platform": "windows",
+      "supported": true,
+      "artifacts": []
+    },
+    {
       "name": "linux-system-artifacts",
       "description": "Linux user, shell history, SSH, auth log, cron, and systemd triage artifacts",
       "target_platform": "linux",
@@ -102,6 +109,13 @@
       "name": "mobile-export-artifacts",
       "description": "Cellebrite/XRY/GrayKey/AXIOM-style mobile export CSV/JSON normalization",
       "target_platform": "mobile",
+      "supported": true,
+      "artifacts": []
+    },
+    {
+      "name": "p2p-artifacts",
+      "description": "BitTorrent clients (qBittorrent, uTorrent, FrostWire, .torrent) and eMule transfer / share / search records",
+      "target_platform": "any",
       "supported": true,
       "artifacts": []
     },
@@ -15421,7 +15435,21 @@
     },
     {
       "name": "windows-messenger",
-      "description": "Windows desktop messengers: Teams, Slack, Discord, Telegram Desktop, WhatsApp Desktop, Skype, LINE, WeChat, Zoom",
+      "description": "Windows desktop messengers: Teams, Slack, Discord, Telegram Desktop, WhatsApp Desktop, Skype, LINE, WeChat, Zoom, Viber, Facebook Messenger, Signal (inventory), QQ (inventory)",
+      "target_platform": "windows",
+      "supported": true,
+      "artifacts": []
+    },
+    {
+      "name": "media-player",
+      "description": "Media player recent-play lists: VLC, PotPlayer, GOM Player, KMPlayer (ini, playlists, NTUSER)",
+      "target_platform": "windows",
+      "supported": true,
+      "artifacts": []
+    },
+    {
+      "name": "windows-phone-link",
+      "description": "Phone Link / Your Phone (휴대폰과 연결): synced messages, calls, contacts, photos and device folders",
       "target_platform": "windows",
       "supported": true,
       "artifacts": []
