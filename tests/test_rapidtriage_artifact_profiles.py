@@ -597,6 +597,13 @@ class RunListPollingTests(unittest.TestCase):
                 "error_count": 0,
                 "running": ["eventlog", "windows-prefetch"],
                 "updated_at": "now",
+                # Run plan (P2 §3.4) fields; no plan or heartbeat in this progress doc.
+                "heartbeat_at": None,
+                "live": False,
+                "stale": False,
+                "plan_counts": None,
+                "plan_outcome": None,
+                "current": [],
             },
         )
         self.assertIsNone(compact_run_progress(None))
