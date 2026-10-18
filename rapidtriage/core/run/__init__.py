@@ -493,6 +493,25 @@ def run_triage_mode(
         "partial",
         "cancelled",
     }
+    if isinstance(previous_plan, Mapping):
+        # The new progress file replaces the old one: keep the earlier run's
+        # cancel/skip requests and how it ended as evidence in this plan.
+        previous_control = previous_plan.get("control") if isinstance(previous_plan.get("control"), Mapping) else {}
+        plan["resumed_from"] = {
+            "outcome": previous_plan.get("outcome")
+            or ("interrupted" if isinstance(previous_progress, Mapping) and previous_progress.get("status") == "running" else None),
+            "status": previous_progress.get("status") if isinstance(previous_progress, Mapping) else None,
+            "started_at": previous_plan.get("started_at"),
+            "updated_at": previous_plan.get("updated_at"),
+            "control_requests": list(previous_control.get("requests") or []) if isinstance(previous_control, Mapping) else [],
+            "partial_or_cancelled_tasks": [
+                {"id": task.get("id"), "status": task.get("status"), "reason": task.get("reason"), "requested_by": task.get("requested_by")}
+                for group in previous_plan.get("groups") or []
+                if isinstance(group, Mapping)
+                for task in group.get("tasks") or []
+                if isinstance(task, Mapping) and task.get("status") in {"partial", "cancelled", "running"}
+            ],
+        }
     # The collect cache lets the manifest stage and the artifacts stage share
     # one provider collection per run; clearing here guarantees a long-lived
     # server process never reuses stale results for a changed root.
@@ -1582,6 +1601,13 @@ def plan_audit_notes(plan: Mapping[str, object] | None) -> list[str]:
             )
     if plan.get("outcome") in {"partial", "cancelled"}:
         notes.append(f"런 결과: {plan.get('outcome')}")
+    resumed = plan.get("resumed_from") if isinstance(plan.get("resumed_from"), Mapping) else None
+    if resumed:
+        requests = resumed.get("control_requests") or []
+        notes.append(
+            f"이어서 실행: 이전 런 결과 {resumed.get('outcome') or resumed.get('status')}, 이전 제어 요청 {len(requests)}건"
+            " (plan.resumed_from)"
+        )
     return notes
 
 

@@ -384,6 +384,11 @@ class RunControlPipelineTests(unittest.TestCase):
         with slow_provider(rows=50):
             resumed = run_triage_mode(self.root, mode="hacking", output_dir=self.output_dir, resume=True)
         self.assertEqual(resumed["plan"]["outcome"], "complete")
+        self.assertEqual(resumed["plan"]["resumed_from"]["outcome"], "partial")
+        self.assertEqual(
+            [(item["action"], item["actor"]) for item in resumed["plan"]["resumed_from"]["control_requests"]],
+            [("cancel", "web")],
+        )
         self.assertTrue(find_task(resumed["plan"], "windows-registry")["reused"])
         self.assertFalse(find_task(resumed["plan"], "eventlog")["reused"])
         self.assertEqual(find_task(resumed["plan"], "eventlog")["status"], "completed")
