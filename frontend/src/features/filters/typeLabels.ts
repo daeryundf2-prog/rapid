@@ -23,6 +23,9 @@ export const ANALYSIS_TYPE_LABELS: Readonly<Record<string, string>> = {
   "cross-case-row": "교차 케이스 지표",
   "memory-import-row": "메모리 분석 가져오기",
   "triage-flags-row": "특이사항 계산",
+  // R5 L3
+  "carved-url-candidate": "URL 카빙 후보",
+  "url-carve-row": "URL 카빙 결과",
 };
 
 let cache: Map<string, string> | null = null;

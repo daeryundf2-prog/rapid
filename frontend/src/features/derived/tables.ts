@@ -62,6 +62,7 @@ const KIND_LABELS: Record<string, string> = {
   "recent-files": "최근 파일·LNK",
   "windows-remote-access": "원격 접속",
   browser: "브라우저",
+  p2p: "P2P·토렌트",
   email: "이메일",
   "kakaotalk-windows": "카카오톡 (Windows)",
   "windows-messenger": "데스크톱 메신저 (Windows)",

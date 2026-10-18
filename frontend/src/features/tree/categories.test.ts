@@ -26,6 +26,8 @@ const ENGINE_KINDS = [
   "media-image",
   "memory-volatility",
   "mobile-export",
+  // R5 L3
+  "p2p",
   "recent-files",
   "synthetic-media",
   "windows-execution",

@@ -310,6 +310,49 @@ export const ANALYSIS_FIELDS: Record<AnalysisKind, FieldSpec[]> = {
       help: "구역마다 보고할 공유 지표의 상한입니다.",
     },
   ],
+  "url-carve": [
+    {
+      key: "sources",
+      type: "multi",
+      label: "소스 종류",
+      help: "pagefile.sys·swapfile.sys, 이름에 unalloc/blkls가 든 미할당 덤프, .dmp/.mem 메모리 덤프 중 고르세요.",
+      choices: [
+        { id: "pagefile", label: "페이지 파일" },
+        { id: "unallocated", label: "미할당 영역 덤프" },
+        { id: "memory-dump", label: "메모리 덤프" },
+      ],
+      minCount: 1,
+    },
+    {
+      key: "max_scan_bytes",
+      type: "int",
+      min: 1,
+      max: 65536,
+      unit: "MB",
+      label: "파일당 최대 스캔(MB)",
+      help: "파일마다 앞에서부터 이 크기까지 읽습니다.",
+    },
+    {
+      key: "max_candidates",
+      type: "int",
+      min: 1,
+      max: 500000,
+      label: "최대 URL 후보 수",
+      help: "중복을 뺀 URL 수의 상한입니다.",
+    },
+    {
+      key: "ascii_urls",
+      type: "bool",
+      label: "ASCII URL",
+      help: "ASCII·UTF-8 바이트로 쓰인 URL을 찾습니다.",
+    },
+    {
+      key: "utf16_urls",
+      type: "bool",
+      label: "UTF-16LE URL",
+      help: "Windows 메모리에 흔한 UTF-16LE URL을 찾습니다.",
+    },
+  ],
 };
 
 /** Selected OCR targets of a form (grid "선택 행 OCR 실행" preset), blanks dropped. */
@@ -361,6 +404,14 @@ export function defaultForm(
       return { volatility_output_dir: "" };
     case "cross-case":
       return { case_ids: [], max_shared: "500" };
+    case "url-carve":
+      return {
+        sources: ["pagefile", "unallocated"],
+        max_scan_bytes: "4096",
+        max_candidates: "50000",
+        ascii_urls: true,
+        utf16_urls: true,
+      };
   }
 }
 

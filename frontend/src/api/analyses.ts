@@ -16,7 +16,9 @@ export type AnalysisKind =
   | "ntfs-meta"
   | "ocr-batch"
   | "memory-import"
-  | "cross-case";
+  | "cross-case"
+  // R5 L3: URLs carved from page files / unallocated dumps.
+  | "url-carve";
 
 export const ANALYSIS_KINDS: readonly AnalysisKind[] = [
   "carve",
@@ -27,6 +29,7 @@ export const ANALYSIS_KINDS: readonly AnalysisKind[] = [
   "ocr-batch",
   "memory-import",
   "cross-case",
+  "url-carve",
 ];
 
 export function isAnalysisKind(value: unknown): value is AnalysisKind {

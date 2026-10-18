@@ -15,7 +15,14 @@ import {
 } from "../../api/analyses";
 import type { IconName } from "../../icons";
 
-export type AnalysisNodeId = "carve" | "vsc" | "ntfs-meta" | "ocr-batch" | "memory-import" | "cross-case";
+export type AnalysisNodeId =
+  | "carve"
+  | "vsc"
+  | "ntfs-meta"
+  | "ocr-batch"
+  | "memory-import"
+  | "cross-case"
+  | "url-carve";
 
 export interface AnalysisNodeDef {
   id: AnalysisNodeId;
@@ -65,6 +72,14 @@ export const ANALYSIS_NODES: readonly AnalysisNodeDef[] = [
     description: "여러 케이스에 함께 나타난 지표(해시·도메인·IP 등)를 찾습니다.",
     kinds: ["cross-case"],
   },
+  {
+    // R5 L3: carved-url-candidate rows (URL only, never page bodies).
+    id: "url-carve",
+    label: "URL 카빙",
+    description:
+      "페이지 파일·미할당 영역 덤프·메모리 덤프에서 http(s) URL 문자열(ASCII·UTF-16LE)을 찾아 URL 분류와 함께 기록합니다. 주변 바이트(페이지 본문)는 저장하지 않습니다.",
+    kinds: ["url-carve"],
+  },
 ];
 
 export function isAnalysisNodeId(value: unknown): value is AnalysisNodeId {
@@ -90,6 +105,7 @@ export const KIND_LABEL: Record<AnalysisKind, string> = {
   "ocr-batch": "OCR 일괄",
   "memory-import": "메모리 분석 가져오기",
   "cross-case": "교차 케이스 상관 분석",
+  "url-carve": "URL 카빙",
 };
 
 /** Server kinds that are not workbench nodes but still show up in the job list / announcements. */
@@ -118,6 +134,8 @@ export const KIND_CAUTION: Record<AnalysisKind, string> = {
     "이미지 1장마다 OCR을 실행합니다. 이미지가 많으면 오래 걸립니다. 실패한 이미지는 사유와 함께 남습니다.",
   "memory-import": "지정한 Volatility 출력 폴더의 JSON을 읽기만 합니다. 폴더는 허용 루트 아래여야 합니다.",
   "cross-case": "선택한 케이스들의 지표를 쌍마다 비교합니다. 케이스가 많으면 쌍의 수만큼 늘어납니다.",
+  "url-carve":
+    "pagefile.sys·swapfile.sys·미할당 덤프 파일을 파일당 최대 스캔 바이트까지 읽습니다. 수 GB면 수 분 걸립니다. 후보는 방문 증거가 아니며 hiberfil.sys는 검사하지 않습니다.",
 };
 
 export const STATUS_LABEL: Record<AnalysisStatus, string> = {
