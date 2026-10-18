@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunPlanPreview } from "../../api/runPlan";
 import { CaseWizard } from "./CaseWizard";
 import { RunDialog } from "./RunDialog";
-import { REQUIRED_GROUP_REASON } from "./RunPlanGroupsField";
+import { CARVE_GATED_REASON, EXTRACT_GATED_REASON, REQUIRED_GROUP_REASON } from "./RunPlanGroupsField";
 import { buildRunBody, DEFAULT_RUN_FORM } from "./runForm";
 import { summarizeRunRequest } from "./runSummary";
 import { mockFetch, type RecordedCall, renderWithQuery } from "./testUtils";
@@ -150,21 +150,28 @@ describe("RunDialog 처리 그룹", () => {
     );
     expect(screen.getByTestId("run-plan-groups-count").textContent).toBe("4개 그룹 중 3개 실행");
 
-    // Mode change: hacking defaults (카빙 off) replace the fraud choice.
+    // Mode change: hacking defaults replace the fraud choice; 카빙 has no run option here, so it
+    // stays off and disabled with the reason and never counts as running.
     fireEvent.change(screen.getByLabelText("모드"), { target: { value: "hacking" } });
     await waitFor(() => expect(within(fieldset).getAllByRole("checkbox")).toHaveLength(5));
     await waitFor(() => expect(checkbox("카빙").checked).toBe(false));
+    expect(checkbox("카빙").disabled).toBe(true);
+    expect(
+      document.getElementById(checkbox("카빙").getAttribute("aria-describedby") as string)?.textContent,
+    ).toContain(CARVE_GATED_REASON);
     expect(checkbox("이벤트 로그").checked).toBe(true);
     expect(fieldset.textContent).toContain("(태스크 2)");
+    expect(screen.getByTestId("run-plan-groups-count").textContent).toBe("5개 그룹 중 4개 실행");
 
-    // 전부 해제 → every skippable group off; 전부 선택 → all on; then a custom choice.
+    // 전부 해제 → every choosable group off; 전부 선택 → all on (gated 카빙 stays off); then a choice.
     fireEvent.click(within(fieldset).getByRole("button", { name: "전부 해제" }));
     expect(checkbox("이벤트 로그").checked).toBe(false);
     expect(checkbox("웹 브라우저").checked).toBe(false);
     expect(checkbox("보고서").checked).toBe(true);
     fireEvent.click(within(fieldset).getByRole("button", { name: "전부 선택" }));
-    expect(checkbox("카빙").checked).toBe(true);
-    fireEvent.click(checkbox("카빙"));
+    expect(checkbox("카빙").checked).toBe(false);
+    expect(screen.getByTestId("run-plan-groups-count").textContent).toBe("5개 그룹 중 4개 실행");
+    fireEvent.click(checkbox("카빙")); // gated: no effect
     fireEvent.click(checkbox("이벤트 로그"));
     fireEvent.click(checkbox("보고서")); // disabled: no effect
 
@@ -175,8 +182,77 @@ describe("RunDialog 처리 그룹", () => {
     expect(post?.body).toMatchObject({
       root: "D:/case/img.E01",
       mode: "hacking",
-      skip_groups: ["carve", "eventlog"],
+      skip_groups: ["eventlog"],
     });
+  });
+
+  it("추출(선택) follows the 파일 추출 option: disabled with the reason while off, its default re-applied when on", async () => {
+    const extractPreview = (call: RecordedCall): RunPlanPreview => {
+      const extract = new URL(call.url, "http://x").searchParams.get("extract") === "true";
+      return {
+        mode: "fraud",
+        groups: [
+          {
+            id: "prepare",
+            label: "준비",
+            default_on: true,
+            skippable: false,
+            tasks: [{ id: "prepare", label: "준비" }],
+          },
+          {
+            id: "docs",
+            label: "문서",
+            default_on: true,
+            skippable: true,
+            tasks: [{ id: "docs", label: "문서" }],
+          },
+          {
+            id: "extract",
+            label: "추출(선택)",
+            default_on: extract,
+            skippable: true,
+            tasks: [
+              { id: "docs-extract", label: "문서 추출" },
+              { id: "files-extract", label: "파일 추출" },
+            ],
+          },
+        ],
+      };
+    };
+    const { calls } = mockFetch({
+      "GET /api/run-plan/preview": extractPreview,
+      "POST /api/runs": { run_id: "new1", status: "queued" },
+    });
+    const onClose = vi.fn();
+    renderWithQuery(<RunDialog runIsActive={false} onClose={onClose} />);
+    const fieldset = await screen.findByRole("group", { name: "처리 그룹" });
+    await waitFor(() => expect(within(fieldset).getAllByRole("checkbox")).toHaveLength(3));
+    const extract = () => checkbox("추출\\(선택\\)");
+    expect(extract().checked).toBe(false);
+    expect(extract().disabled).toBe(true);
+    expect(
+      document.getElementById(extract().getAttribute("aria-describedby") as string)?.textContent,
+    ).toContain(EXTRACT_GATED_REASON);
+    expect(screen.getByTestId("run-plan-groups-count").textContent).toBe("3개 그룹 중 2개 실행");
+
+    // 파일 추출 on: the preview's default_on flips to true and is applied (checked, enabled).
+    fireEvent.click(screen.getByRole("button", { name: "고급 옵션 펼치기" }));
+    fireEvent.click(screen.getByLabelText("파일 추출"));
+    await waitFor(() => expect(extract().disabled).toBe(false));
+    await waitFor(() => expect(extract().checked).toBe(true));
+    expect(screen.getByTestId("run-plan-groups-count").textContent).toBe("3개 그룹 중 3개 실행");
+    expect(calls.some((call) => call.url.includes("extract=true"))).toBe(true);
+
+    // Unchecked by the examiner → skipped; 파일 추출 off again → gated, not counted, not sent.
+    fireEvent.click(extract());
+    expect(extract().checked).toBe(false);
+    fireEvent.click(screen.getByLabelText("파일 추출"));
+    await waitFor(() => expect(extract().disabled).toBe(true));
+    expect(screen.getByTestId("run-plan-groups-count").textContent).toBe("3개 그룹 중 2개 실행");
+    fireEvent.change(screen.getByLabelText(/증거 경로/), { target: { value: "D:/case/img.E01" } });
+    fireEvent.click(screen.getByRole("button", { name: "실행" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(calls.find((c) => c.method === "POST")?.body).not.toHaveProperty("skip_groups");
   });
 
   it("says so when the preview is unavailable and posts without skip_groups", async () => {
