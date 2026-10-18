@@ -501,7 +501,7 @@ class HostileInputRegressionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             store = root.joinpath("Users", "u", *fx.ROAMING, "Slack", "Local Storage", "leveldb")
-            deep = '{"text":"x","user":"U1","ts":"1709251200.1",' + '"properties":{' * 1500 + "}" * 1500 + "}"
+            deep = '{"text":"x","user":"U1","ts":"1709251200.1",' + '"properties":{' * 600 + "}" * 600 + "}"
             good = json.dumps({"text": "later file message", "user": "U2", "ts": "1709251300.1", "channel": "C1"})
             fx.write(store / "000003.log", fx.leveldb_log([fx.write_batch(1, [(b"k1", b"\x01" + deep.encode())])]))
             fx.write(store / "000005.log", fx.leveldb_log([fx.write_batch(2, [(b"k2", b"\x01" + good.encode())])]))

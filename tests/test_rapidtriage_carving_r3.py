@@ -378,12 +378,13 @@ class R3CarvingReviewTests(unittest.TestCase):
     def test_container_with_a_large_first_member_is_classified_from_the_central_directory(self) -> None:
         """B5: a docx whose first member is 300 KiB is one docx, not a zip plus a mid-archive docx."""
         import io
-        import os
         import zipfile
 
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
-            archive.writestr(zipfile.ZipInfo("word/media/image1.png"), os.urandom(300 * 1024), compress_type=zipfile.ZIP_STORED)
+            # Fixed filler with no 0xFF byte: random bytes could hold a JPEG SOI/EOI pair and add a hit.
+            filler = (bytes(range(255)) * (300 * 1024 // 255 + 1))[: 300 * 1024]
+            archive.writestr(zipfile.ZipInfo("word/media/image1.png"), filler, compress_type=zipfile.ZIP_STORED)
             archive.writestr("word/document.xml", "<doc/>")
             archive.writestr("_rels/.rels", "<r/>")
             archive.writestr(
