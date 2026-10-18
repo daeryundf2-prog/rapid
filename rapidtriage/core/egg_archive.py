@@ -16,7 +16,8 @@ central directory).
 * ALZ: names (cp949), sizes, DOS times, method, CRC and the encrypted flag; listed only.
 
 Caps: ``MAX_ENTRIES`` entries, ``MAX_SCAN_BYTES`` of headers walked, ``MAX_MEMBER_BYTES``
-decompressed per member and a ``MAX_RATIO`` decompression-ratio guard (bombs stop with a
+compressed and decompressed per member, ``MAX_ARCHIVE_DECOMPRESSED_BYTES`` per archive and a
+``MAX_RATIO`` decompression-ratio guard (bombs stop with a
 note). A corrupt header ends the listing with ``analysis_status`` ``*-partial`` and the
 entries read so far.
 """
@@ -53,6 +54,8 @@ ALZ_METHODS = {0: "store", 1: "bzip2", 2: "deflate"}
 MAX_ENTRIES = 20_000
 MAX_SCAN_BYTES = 4 * 1024 * 1024 * 1024
 MAX_MEMBER_BYTES = 64 * 1024 * 1024
+# Decompressed bytes of one archive in total (members hashed in memory); later members are listed only.
+MAX_ARCHIVE_DECOMPRESSED_BYTES = 512 * 1024 * 1024
 MAX_HASH_MEMBERS = 200
 MAX_RATIO = 1000
 MAX_NAME_BYTES = 4096
@@ -300,10 +303,20 @@ def _egg_file(reader: _Reader, archive: dict[str, object], *, extract: bool, has
         if method not in methods:
             methods.append(method)
         if can_extract and method in ("store", "deflate", "bzip2", "lzma"):
-            if block_size > MAX_RATIO * max(block_compressed, 1) or len(collected) + block_size > MAX_MEMBER_BYTES:
+            budget_used = int(archive.get("decompressed_bytes") or 0)
+            if (
+                block_compressed > MAX_MEMBER_BYTES
+                or block_size > MAX_RATIO * max(block_compressed, 1)
+                or len(collected) + block_size > MAX_MEMBER_BYTES
+            ):
                 can_extract, extract_note = False, "decompression-guard"
                 reader.skip(block_compressed)
                 continue
+            if budget_used + block_size > MAX_ARCHIVE_DECOMPRESSED_BYTES:
+                can_extract, extract_note = False, "archive-decompression-budget"
+                reader.skip(block_compressed)
+                continue
+            archive["decompressed_bytes"] = budget_used + block_size
             data = reader.read(block_compressed)
             try:
                 out = _decompress(method, data, block_size)

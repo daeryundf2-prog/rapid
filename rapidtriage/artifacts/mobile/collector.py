@@ -9,7 +9,7 @@ from ...core.models import ArtifactRecord
 from ...core.sqlite_snapshot import open_sqlite_snapshot
 from ...core.submission import compute_hashes
 from .._walk import iter_evidence_paths
-from .adb_backup import collect_adb_backup
+from .adb_backup import adb_backup_error_record, collect_adb_backup
 from .constants import (
     MAX_IOS_BACKUP_FILES,
     MAX_ROWS_PER_SOURCE,
@@ -150,7 +150,12 @@ class MobileExportProvider:
             if acquisition_root is not None and acquisition_root.kind == "android-adb-backup" and acquisition_root.single_file:
                 # R5 L3: the backup's tar members (android-backup / android-backup-member rows).
                 root_details = acquisition_root.to_details(root)
-                for record in collect_adb_backup(path):
+                try:
+                    backup_records = list(collect_adb_backup(path))
+                except Exception as exc:  # one broken backup never stops the mobile provider
+                    self.collection_notes.append(f"adb 백업 해제 실패({path.name}): {type(exc).__name__}")
+                    backup_records = [adb_backup_error_record(path, exc)]
+                for record in backup_records:
                     record.details.update(root_details)
                     yield record
                 continue

@@ -1,4 +1,4 @@
-"""Shared redaction of credential-like query values in URLs emitted by R2 parsers.
+"""Shared redaction of credential-like query values (and URL userinfo) in URLs emitted by parsers.
 
 HTTP caches, upload candidates and cloud sync logs routinely contain signed or
 token-bearing URLs (Discord CDN ``ex/is/hm``, SharePoint ``tempauth``, S3 / GCS
@@ -38,12 +38,30 @@ SENSITIVE_QUERY_KEYS = frozenset(
         "ex",
         "is",
         "hm",
+        # R5 review: credentials passed as query values (login callbacks, API links, share links).
+        "password",
+        "passwd",
+        "pwd",
+        "pass",
+        "passkey",
+        "refresh_token",
+        "id_token",
+        "client_secret",
+        "api_key",
+        "apikey",
+        "secret",
+        "resourcekey",
+        "otp",
     )
 )
 
 # key=value pairs inside a query string or fragment.  Separators: ? & ; #
 _PAIR_RE = re.compile(r"(?P<lead>[?&;#])(?P<key>[^=&;#?\s]+)=(?P<value>[^&;#\s]*)")
 
+
+# ``scheme://user:password@host`` userinfo (FTP/HTTP basic credentials embedded in a URL).  The userinfo
+# may not contain ``/ ? # @`` or whitespace, so ``https://www.google.com/maps/@37.5,127`` is untouched.
+_USERINFO_RE = re.compile(r"(?P<scheme>[A-Za-z][A-Za-z0-9+.-]{0,15}://)(?P<userinfo>[^/?#@\s]+)@")
 
 # Values that are credentials whatever their key is called (Slack ``url_private``
 # links carry ``?t=xoxe-...``; ``t`` itself is too generic to list as a key).
@@ -59,14 +77,20 @@ def _replace_pair(match: re.Match[str]) -> str:
 
 
 def redact_url(value: Any) -> Any:
-    """Return ``value`` with sensitive query/fragment values replaced.
+    """Return ``value`` with sensitive query/fragment values and URL userinfo replaced.
 
-    Non-strings are returned unchanged.  Strings without ``=`` are returned as-is,
-    which keeps the helper cheap for plain paths and host names.  Works on bare
+    Non-strings are returned unchanged.  Strings without ``=`` or ``@`` are returned
+    as-is, which keeps the helper cheap for plain paths and host names.  Works on bare
     URLs, cache keys such as ``1/0/_dk_https://a https://a https://b/x?sig=...``
-    and log lines that embed URLs.
+    and log lines that embed URLs.  ``https://user:pass@host`` becomes
+    ``https://[가림]@host`` (the user name may itself be an identifier worth keeping out
+    of shared rows; the raw URL's sha256 still matches across sources).
     """
-    if not isinstance(value, str) or "=" not in value:
+    if not isinstance(value, str):
+        return value
+    if "@" in value and "://" in value:
+        value = _USERINFO_RE.sub(lambda match: f"{match.group('scheme')}{REDACTED_VALUE}@", value)
+    if "=" not in value:
         return value
     return _PAIR_RE.sub(_replace_pair, value)
 

@@ -11,8 +11,8 @@ UDF (``BEA01`` / ``NSR02`` / ``NSR03`` in the volume recognition sequence) is on
 a UDF-only image (no ``CD001``) gives no entries. ISO 9660 has no encryption.
 
 Caps: ``MAX_ENTRIES`` entries, ``MAX_DIRECTORIES`` directories, ``MAX_DEPTH`` levels,
-``MAX_DIRECTORY_BYTES`` per directory extent; an extent outside the image or a directory seen
-twice (loop) is skipped with a note.
+``MAX_DIRECTORY_BYTES`` per directory extent, ``MAX_TOTAL_DIRECTORY_BYTES`` per image; an
+extent outside the image or a directory seen twice (loop) is skipped with a note.
 """
 
 from __future__ import annotations
@@ -30,6 +30,8 @@ MAX_ENTRIES = 20_000
 MAX_DIRECTORIES = 5_000
 MAX_DEPTH = 24
 MAX_DIRECTORY_BYTES = 8 * 1024 * 1024
+# Directory extent bytes read per image in total (crafted images could repeat 8 MiB extents 5,000 times).
+MAX_TOTAL_DIRECTORY_BYTES = 64 * 1024 * 1024
 JOLIET_ESCAPES = (b"%/@", b"%/C", b"%/E")
 UDF_IDENTIFIERS = (b"BEA01", b"NSR02", b"NSR03", b"TEA01")
 PARSER_VERSION = "iso9660-listing-v1"
@@ -79,14 +81,14 @@ def _name(raw: bytes, joliet: bool) -> str:
     return name.rstrip(".") if "." in name and name.endswith(".") else name
 
 
-def _records(data: bytes) -> list[tuple[int, int, int, str | None, bytes]]:
+def _records(data: bytes, block: int = SECTOR) -> list[tuple[int, int, int, str | None, bytes]]:
     """``(extent, size, flags, time, name bytes)`` of the directory records of one extent."""
     out = []
     position = 0
     while position < len(data):
         length = data[position]
         if length == 0:
-            position = (position // SECTOR + 1) * SECTOR  # records never span sectors
+            position = (position // block + 1) * block  # records never span logical blocks
             continue
         record = data[position : position + length]
         if len(record) < 34 or length < 34:
@@ -156,6 +158,7 @@ def list_iso(path: Path, *, check_cancel: Callable[[], None] | None = None) -> d
         queue: deque[tuple[int, int, str, int]] = deque([(root_extent, root_size, "", 0)])
         seen: set[int] = set()
         directories = 0
+        directory_bytes = 0
         while queue:
             if check_cancel is not None:
                 check_cancel()
@@ -171,9 +174,13 @@ def list_iso(path: Path, *, check_cancel: Callable[[], None] | None = None) -> d
             if extent * block + size > image_size or size > MAX_DIRECTORY_BYTES:
                 notes.append(f"directory-extent-out-of-range:{parent or '/'}"[:200])
                 continue
+            directory_bytes += size
+            if directory_bytes > MAX_TOTAL_DIRECTORY_BYTES:
+                notes.append("directory-read-cap-reached")
+                break
             handle.seek(extent * block)
             data = handle.read(size)
-            for child_extent, child_size, flags, recorded, raw_name in _records(data):
+            for child_extent, child_size, flags, recorded, raw_name in _records(data, block):
                 if raw_name in (b"\x00", b"\x01"):
                     continue
                 name = _name(raw_name, is_joliet)
