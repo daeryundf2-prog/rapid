@@ -741,11 +741,13 @@ def carve_buffer(
     entries: list[dict[str, object]] = []
     claims = _Claims()
     handle = io.BytesIO(data)
+    # As before R3: a signature resumes after the end of its own previous candidate.
+    resume_at: dict[int, int] = {}
     for offset, _tie, index in _buffer_matches(data, 0, selected):
         if remaining <= 0:
             break
         signature = selected[index]
-        if claims.covers(signature.group, offset):
+        if offset < resume_at.get(index, 0) or claims.covers(signature.group, offset):
             continue
         entry = _build_candidate_entry(
             handle,
@@ -761,6 +763,7 @@ def carve_buffer(
             continue
         claims.claim(signature, entry)
         entries.append(entry)
+        resume_at[index] = max(offset + 1, int(entry["end_offset"]))  # type: ignore[call-overload]
         remaining -= 1
     return sorted(entries, key=lambda item: (str(item["source_path"]), int(item["offset"])))
 

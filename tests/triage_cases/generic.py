@@ -39,6 +39,14 @@ CASES = {
                         "details": {"link_date": "2093-12-26T15:23:06+00:00", "driver_version_date": "1968-07-18"},
                     },
                 },
+                # R3: an ntfs-meta timestamp-mismatch row repeats its MFT row's times (that row is checked).
+                {
+                    "analysis": "ntfs-meta",
+                    "row": {
+                        "artifact_type": "ntfs-timestamp-mismatch",
+                        "details": {"source": "timestamp-mismatch", "si_accessed_at": "2091-01-01T00:00:00+00:00"},
+                    },
+                },
             ],
             "flagged": [],
         },

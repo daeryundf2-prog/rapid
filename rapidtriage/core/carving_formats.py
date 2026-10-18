@@ -112,6 +112,8 @@ _MP3_BITRATES = {
 _MP3_RATES = {3: (44100, 48000, 32000), 2: (22050, 24000, 16000), 0: (11025, 12000, 8000)}
 MP3_MIN_FRAMES_ID3 = 2
 MP3_MIN_FRAMES_SYNC = 8
+# Fewer consecutive frames than this after a bare frame sync is ordinary data (no row at all).
+MP3_SILENT_BELOW_FRAMES = 4
 MP3_FIRST_FRAME_SEARCH = 4096
 
 
@@ -199,12 +201,10 @@ def validate_mp3_sync(probe: bytes) -> str | None:
 
 def walk_mp3_sync(window: bytes) -> Boundary | str:
     frames, end, at_window_end = _walk_frames(window, 0)
-    if frames < 2 and not at_window_end:
-        return "no-structure:single-mpeg-frame"
+    if frames < MP3_SILENT_BELOW_FRAMES:
+        return f"no-structure:mpeg-frames:{frames}"
     if frames < MP3_MIN_FRAMES_SYNC and not at_window_end:
         return f"mp3-frame-walk-too-short:{frames}"
-    if frames == 0:
-        return "mp3-truncated-frame"
     if window[end : end + 3] == b"TAG" and end + 128 <= len(window):
         end += 128
     return end, STATUS_LENGTH_FIELD_TRUNCATED if at_window_end else STATUS_LENGTH_FIELD, "frame-walk"
@@ -242,7 +242,8 @@ def mp4_brand(probe: bytes) -> tuple[str | None, str | None]:
 def validate_m4a(probe: bytes) -> str | None:
     subtype, rejection = mp4_brand(probe)
     if rejection:
-        return rejection
+        # The mp4 signature reports a malformed ftyp once; m4a stays silent.
+        return rejection if is_silent(rejection) else f"no-structure:{rejection}"
     return None if subtype == "m4a" else f"other-subtype:{subtype}"
 
 
