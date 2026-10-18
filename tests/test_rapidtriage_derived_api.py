@@ -243,6 +243,49 @@ class DerivedApiTests(unittest.TestCase):
         locators = sorted((sample["collection"], sample["scope"], sample["locator"]) for sample in files["samples"])
         self.assertEqual(locators, [("files", "candidates", "/candidates/0"), ("files", "inventory", "/inventory/0")])
 
+    def test_graph_two_hops_from_a_people_value(self) -> None:
+        """연결 그래프 라이트 (r4 §2.3): value → original rows (by family) → the rows' other values."""
+        self.build()
+        graph = self.get("/derived/people/graph", value="user1")
+        nodes = {node["id"]: node for node in graph["nodes"]}
+        center = nodes[graph["center"]]
+        self.assertTrue(center["center"])
+        self.assertEqual((center["table"], center["normalized"]), ("people", "user1"))
+        rows = [node for node in graph["nodes"] if node["type"] == "row"]
+        self.assertEqual({row["kind"] for row in rows}, {"eventlog", "windows-os-account"})
+        sam = next(row for row in rows if row["kind"] == "windows-os-account")
+        self.assertEqual((sam["collection"], sam["locator"]), ("artifacts", "/artifacts/0"))
+        self.assertEqual(graph["rows_read"], len(rows))
+        # Second hop: the 4624 row of user1 carries source_ip 10.0.0.5 (장치 식별자).
+        device = nodes.get("v:devices:10.0.0.5")
+        self.assertIsNotNone(device, sorted(nodes))
+        self.assertTrue(device["in_table"])
+        self.assertGreaterEqual(device["count"], 7)
+        edges = {(edge["source"], edge["target"]) for edge in graph["edges"]}
+        self.assertTrue(all((graph["center"], row["id"]) in edges for row in rows))
+        self.assertTrue(any(target == "v:devices:10.0.0.5" for _source, target in edges))
+        # The centre value never reappears as its own neighbour.
+        self.assertEqual(sum(1 for node in graph["nodes"] if node.get("normalized") == "user1" and node["table"] == "people"), 1)
+        self.assertLessEqual(len(graph["nodes"]), 200)
+        self.assertFalse(graph["truncated"])
+
+    def test_graph_is_bounded_and_validates(self) -> None:
+        self.build()
+        graph = self.get("/derived/devices/graph", value="10.0.0.5", max_nodes=10)
+        self.assertLessEqual(len(graph["nodes"]), 10)
+        self.assertEqual(graph["max_nodes"], 10)
+        self.assertIn("max_nodes", self.get("/derived/people/graph", expect=422, value="user1", max_nodes=500)["detail"])
+        self.assertIn("value", self.get("/derived/people/graph", expect=422, value="")["detail"])
+        self.assertIn("없는 값", self.get("/derived/people/graph", expect=404, value="nobody")["detail"])
+        self.assertEqual(self.client.get(f"/api/runs/{self.run_id}/derived/secrets/graph", params={"value": "x"}).status_code, 404)
+
+    def test_graph_keeps_credentials_masked(self) -> None:
+        self.build()
+        row = self.get("/derived/credentials")["rows"][0]
+        response = self.client.get(f"/api/runs/{self.run_id}/derived/credentials/graph", params={"value": row["normalized"]})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertNotIn(SECRET[2:-1], response.text)
+
     def test_credentials_are_masked_in_every_response(self) -> None:
         self.build()
         page = self.client.get(f"/api/runs/{self.run_id}/derived/credentials")
