@@ -331,7 +331,8 @@ class RunControlPipelineTests(unittest.TestCase):
         self.assertEqual(steps["artifacts-email"]["warning_level"], "warning")
         self.assertIn("실행 전 제외", steps["artifacts-email"]["warning_messages"][0])
         self.assertEqual(summary["safety"]["skip_groups"], ["messaging"])
-        self.assertEqual(summary["outputs"]["plan"], str(self.output_dir / PLAN_FILE_NAME))
+        # Resolved spellings: CI temp dirs differ (macOS /var -> /private/var, Windows RUNNER~1).
+        self.assertEqual(Path(summary["outputs"]["plan"]).resolve(), (self.output_dir / PLAN_FILE_NAME).resolve())
         audit = load_json(self.output_dir / "rapidtriage-run-audit.json")
         self.assertEqual(audit["provenance"]["options"]["skip_groups"], ["messaging"])
         self.assertTrue(any("부분 런" in note for note in audit.get("notes") or audit["provenance"].get("notes") or []))

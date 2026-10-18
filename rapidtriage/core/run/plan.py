@@ -931,6 +931,9 @@ class RunControlWatcher:
         self._last_stamp: tuple[int, int] | None = None
 
     def start(self) -> None:
+        # Apply requests already waiting (e.g. a cancel_all sent while the run was queued) before
+        # the first stage: the loop below only polls after one interval, and a short run can end first.
+        self.poll()
         self._thread = threading.Thread(target=self._loop, name="rapidtriage-run-control", daemon=True)
         self._thread.start()
 

@@ -82,12 +82,30 @@ def _norm_root(value: object) -> str | None:
 
 
 def files_roots(payload: Mapping[str, object]) -> list[str]:
+    """Evidence roots of the files output, each also in its resolved form (symlinks such as
+    macOS ``/var`` -> ``/private/var`` and Windows 8.3 names give two spellings of one folder)."""
     roots: list[str] = []
     for key in ("scan_scope_root", "root"):
-        root = _norm_root(payload.get(key))
-        if root and root not in roots:
-            roots.append(root)
+        value = payload.get(key)
+        root = _norm_root(value)
+        if not root:
+            continue
+        for candidate in (root, _norm_root(os.path.realpath(value))):  # type: ignore[arg-type]
+            if candidate and candidate not in roots:
+                roots.append(candidate)
     return roots
+
+
+def _absolute_variants(text: str) -> list[str]:
+    """``abspath`` and ``realpath`` spellings of an absolute path typed by the examiner."""
+    variants = [os.path.abspath(text)]
+    try:
+        resolved = os.path.realpath(text)
+    except (OSError, ValueError):
+        resolved = ""
+    if resolved and resolved not in variants:
+        variants.append(resolved)
+    return variants
 
 
 def _relative_to_roots(raw: str, roots: Sequence[str]) -> tuple[str, ...] | None:
@@ -357,13 +375,15 @@ def parse_folder_path(value: str | None, roots: Sequence[str]) -> tuple[str, ...
         raise HTTPException(status_code=422, detail=f"경로는 {FS_PATH_MAX_CHARS:,}자 이하여야 합니다")
     if _CONTROL.search(text):
         raise HTTPException(status_code=422, detail="경로에 제어 문자를 쓸 수 없습니다")
-    if _DRIVE.match(text) or text.startswith(("\\\\", "//")):
-        parts = _relative_to_roots(os.path.abspath(text), roots)
-        if parts is None:
-            if _fold(os.path.abspath(text).replace("\\", "/").rstrip("/")) in {_fold(root) for root in roots}:
+    if _DRIVE.match(text) or text.startswith(("\\\\", "//")) or (os.name != "nt" and text.startswith("/")):
+        folded_roots = {_fold(root) for root in roots}
+        for variant in _absolute_variants(text):
+            parts = _relative_to_roots(variant, roots)
+            if parts is not None:
+                return parts
+            if _fold(variant.replace("\\", "/").rstrip("/")) in folded_roots:
                 return ()
-            raise HTTPException(status_code=403, detail=OUTSIDE_ROOT_MESSAGE)
-        return parts
+        raise HTTPException(status_code=403, detail=OUTSIDE_ROOT_MESSAGE)
     parts = _clean_parts(text)
     if parts is None:
         raise HTTPException(status_code=422, detail="경로에 '..'(상위 폴더)를 쓸 수 없습니다")
