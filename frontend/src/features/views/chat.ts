@@ -62,6 +62,14 @@ function baseName(path: string | null): string {
   );
 }
 
+/** Hint after a bare numeric id where a name is expected (KakaoTalk chat / user ids, m11). */
+export const UNRESOLVED_NAME_HINT = "(이름 미해석)";
+
+/** True for a bare numeric id (5+ digits): the parser could not resolve a name for it. */
+export function isUnresolvedId(value: string): boolean {
+  return /^-?\d{5,}$/.test(value.trim());
+}
+
 /** Message rows of messenger kinds (mobile-message, kakaotalk-*-message…), not summaries or inventories. */
 export function isMessageRow(row: GridRow): boolean {
   const type = (row.artifactType ?? "").toLowerCase();
@@ -130,10 +138,11 @@ export function chatMessageFromRow(row: GridRow): ChatMessage {
   const title = firstText(sources, ["conversation_title", "conversation_name", "chat_name", "room_name"]);
   const fallback = participants.length ? participants.join(", ") : baseName(row.sourcePath) || "대화";
   const conversationId = explicitId || title || fallback;
+  const label = title || explicitId || fallback;
   return {
     row,
     conversationId,
-    conversationLabel: title || explicitId || fallback,
+    conversationLabel: isUnresolvedId(label) ? `${label} ${UNRESOLVED_NAME_HINT}` : label,
     service: serviceOf(details, row),
     sender: firstText(sources, ["sender", "sender_name", "from", "author", "user_name", "remotejid"]),
     recipient: firstText(sources, ["recipient", "to", "receiver"]),

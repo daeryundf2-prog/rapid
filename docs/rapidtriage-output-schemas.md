@@ -607,6 +607,10 @@ Email artifact rows:
 - `email-artifacts`
   - `email-message`
   - `email-mailbox`
+  - `email-attachment` (PST/OST via pffexport/readpst, opt-in `RAPIDTRIAGE_EMAIL_EXTERNAL_TOOLS=1`)
+  - `contact` (PST/OST export, vCard)
+  - `calendar-event` (PST/OST export, `.ics`)
+  - `email-container-inventory` (one per PST/OST container: `status` `normalized`/`failed`/`blocked`/`disabled`/`tool-missing` and `reason`)
 
 Current email rows carry `parser`, `parser_version`, `source_path`, `source_format`, `source_hashes`, message IDs, thread parent IDs, subject/from/to/cc/date headers, body previews and hashes, attachment filename/content-type/size/hash metadata, mailbox candidate strings/email/subject pivots for PST/OST/MSG, `email_format_profile`, `email_mailbox_strategy_profile`, `email_issue_matrix`, `validation_checks`, `commercial_uplift_evidence`, `commercial_grade_ready=false`, `commercial_grade_blockers`, legal warnings, and risk flags. EML, EMLX, MBOX, and Maildir rows are parsed as triage messages; PST/OST/MSG rows are inventory candidates only, not full native mailbox decoding, and their strategy profile records the required libpff/readpst/Outlook/Purview-style trusted export diff before folder, deleted-item, attachment, or threading conclusions.
 
@@ -654,6 +658,14 @@ Cloud export collector rows:
   - `cloud-audit`
   - `cloud-export-archive`
 
+Desktop cloud sync client rows (R2 M4, kind `cloud-sync`):
+
+- `cloud-sync-clients`
+  - `cloud-sync-account`
+  - `cloud-sync-file`
+  - `cloud-sync-event`
+  - `cloud-sync-inventory`
+
 Current cloud rows carry `parser`, `parser_version`, `source_path`, `source_format`, `source_index`, `source_hashes`, `commercial_grade_ready=false`, `service`, `event_type`, normalized timestamps, activity titles/products, account profile fields, location latitude/longitude/accuracy, mail subject/from/to/message/body-preview fields, file ID/name/mime/owner/URL fields, OneDrive/SharePoint permission/version/deleted-state review pivots, Teams/chat message IDs and text hashes, Teams reply/attachment/reaction review pivots, collaboration-SaaS workspace/channel/thread/message pivots plus attachment/reaction review profile fields, audit operation/actor/IP/user-agent fields, `validation_checks`, `commercial_grade_blockers`, `risk_flags`, and the original row under `raw`. ZIP archive mail rows additionally carry `archive_entry_name`, `archive_entry_index`, `archive_entry_crc32`, `archive_entry_size`, `archive_entry_modified_at`, and `archive_message_index`; ZIP JSON/CSV rows carry `archive_json_row_index` or `archive_csv_row_index`, and standalone CSV rows carry `csv_row_index` so the viewer/report flow can cite the exact member or row without extracting the archive.
 
 ### `cloud-collect`
@@ -673,6 +685,8 @@ The `manifest-windows-artifacts.json` sample also fixes the current artifact row
 - `windows-browser-artifacts`
   - `browser-history-downloads`
   - `browser-history`
+  - `browser-cache-entry` (R2 M3: Chromium cache and WebCacheV01 Content rows)
+  - `web-upload-candidate` (R2 M3)
 - `windows-recent-files`
   - `recent-shortcut`
   - `jumplist-automatic`
@@ -722,6 +736,10 @@ The `manifest-windows-artifacts.json` sample also fixes the current artifact row
   - `chat-contact`
   - `chat-app-inventory`
   - `chat-parse-error`
+- `kakaotalk-windows-correlation` (R2 M2 rows)
+  - `kakaotalk-message`
+  - `kakaotalk-shared-picture`
+  - `kakaotalk-app-inventory`
 - `windows-eventlog`
   - `eventlog-event`
   - `eventlog-detection`

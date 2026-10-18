@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { RunTree, TreeNode } from "../../api/runs";
 import { artifactTypeLabel } from "../filters/typeLabels";
-import { DOMAINS, type DomainNodeDef, flattenDomainNodes, NON_EVIDENCE_NOTE, targetKey } from "./domains";
+import {
+  CLOUD_SYNC_CROSS_NOTE,
+  DOMAINS,
+  type DomainNodeDef,
+  flattenDomainNodes,
+  NON_EVIDENCE_NOTE,
+  targetKey,
+} from "./domains";
 import {
   artifactKindNodes,
   buildTreeModel,
@@ -189,6 +196,8 @@ function primaryNodes(kind: string, type: string) {
       node.target.types?.includes(type) &&
       !node.crossRef &&
       !node.children?.length &&
+      !node.fieldChildren &&
+      !node.target.fields &&
       !node.target.cf?.length,
   );
 }
@@ -266,19 +275,27 @@ describe("domain mapping table (parser-quality r1)", () => {
   it("places the desktop messenger types under 메신저·메일 › 데스크톱 메신저 in Korean order (r2 M1)", () => {
     const group = DOMAINS.find((d) => d.id === "messaging")?.nodes.find((n) => n.id === "msg-desktop");
     expect(group?.label).toBe("데스크톱 메신저(Windows)");
-    const labels = (group?.children ?? []).map((c) => c.label);
-    expect(labels).toEqual([...labels].sort((x, y) => x.localeCompare(y, "ko")));
+    // 대화 first, evidence then detail in Korean order, the per-app view last (orderGroup).
     expect(group?.children?.map((c) => [c.label, c.target.types])).toEqual([
       ["대화(메시지)", ["chat-message"]],
-      ["앱 목록", ["chat-app-inventory"]],
       ["연락처", ["chat-contact"]],
-      ["처리 오류", ["chat-parse-error"]],
       ["첨부 파일", ["chat-attachment"]],
+      ["앱 목록", ["chat-app-inventory"]],
+      ["처리 오류", ["chat-parse-error"]],
+      ["앱별 보기", ["chat-message", "chat-contact", "chat-attachment"]],
     ]);
     expect(group?.target.types).toEqual(
-      (group?.children ?? []).filter((c) => !c.detail).flatMap((c) => c.target.types ?? []),
+      (group?.children ?? [])
+        .filter((c) => !c.detail && !c.fieldChildren)
+        .flatMap((c) => c.target.types ?? []),
     );
     expect(group?.children?.find((c) => c.id === "msg-desktop-errors")?.detail).toBe(true);
+    // m4: the per-app inventory is a detail node (never in the domain total).
+    expect(group?.children?.find((c) => c.id === "msg-desktop-apps")?.detail).toBe(true);
+    // m5: the 유형 names say which app family the rows are from.
+    expect(artifactTypeLabel("chat-message")).toBe("메신저 대화");
+    expect(artifactTypeLabel("chat-contact")).toBe("메신저 연락처");
+    expect(artifactTypeLabel("chat-attachment")).toBe("메신저 첨부");
   });
 
   it("windows-network-interface lives under 시스템 정보 (server routes it to os now)", () => {
@@ -343,25 +360,81 @@ describe("domain mapping table (parser-quality r1)", () => {
     expect(primaryNodes("windows-registry", "registry-persistence-entry")[0]?.domain).toBe("registry");
   });
 
-  it("r2 M2 KakaoTalk / Outlook nodes: Korean-sorted, status rows kept out of the totals", () => {
+  it("r2 M2 KakaoTalk / Outlook nodes: one group per app, status rows kept out of the totals", () => {
     const messaging = DOMAINS.find((d) => d.id === "messaging")?.nodes ?? [];
-    const kakao = ["msg-kakao-pictures", "msg-kakao-messages", "msg-kakao-inventory"];
-    const mail = ["msg-email-attachments", "msg-email-containers", "msg-contacts", "msg-calendar"];
-    for (const ids of [kakao, mail]) {
-      const labels = ids.map((id) => messaging.find((n) => n.id === id)?.label ?? "");
-      expect(labels.every(Boolean)).toBe(true);
-      expect([...labels].sort((x, y) => x.localeCompare(y, "ko-KR"))).toEqual(labels);
-    }
+    // M8: 메시지 and 공유 사진 lead the KakaoTalk block; the registry traces are typed.
+    const kakao = messaging.find((n) => n.id === "msg-kakao");
+    expect(kakao?.children?.map((c) => c.label)).toEqual([
+      "메시지",
+      "공유 사진",
+      "레지스트리 흔적(사용자 ID·DeviceInfo)",
+      "앱 DB·원본 후보",
+      "복호 상태",
+      "상관 요약",
+    ]);
+    expect(kakao?.children?.find((c) => c.id === "msg-kakao-registry")?.target.types).toEqual([
+      "kakaotalk-windows-user-id-candidate",
+      "kakaotalk-windows-crypto-material-candidate",
+    ]);
+    // No kind-wide KakaoTalk node any more: every type has its typed home.
+    expect(allNodes().some((n) => n.target.kind === "kakaotalk-windows" && !n.target.types?.length)).toBe(
+      false,
+    );
+    // M3: 이메일 is a group — messages, attachments, contacts, calendar, then the PST/OST detail rows.
+    const email = messaging.find((n) => n.id === "msg-email");
+    expect(email?.children?.map((c) => [c.label, c.target.kind, c.target.types])).toEqual([
+      ["메일(메시지)", "email", ["email-message"]],
+      ["메일 연락처(Outlook)", "email", ["contact"]],
+      ["메일 첨부", "email", ["email-attachment"]],
+      ["메일(클라우드 내보내기)", "cloud-export", ["cloud-mail"]],
+      ["일정(Outlook·ICS)", "email", ["calendar-event"]],
+      ["메일 컨테이너(PST/OST)", "email", ["email-container-inventory"]],
+      ["메일함 문자열(PST/OST)", "email", ["email-mailbox"]],
+    ]);
+    expect(email?.children?.find((c) => c.id === "msg-email-cloud")?.crossRef).toBe(true);
     expect(primaryNodes("kakaotalk-windows", "kakaotalk-app-inventory")[0]?.detail).toBe(true);
     expect(primaryNodes("email", "email-container-inventory")[0]?.detail).toBe(true);
+    expect(primaryNodes("email", "email-mailbox")[0]?.detail).toBe(true);
+    expect(primaryNodes("email", "email-message")).toHaveLength(1);
     expect(artifactTypeLabel("kakaotalk-message")).toBe("카카오톡(Windows) 메시지");
-    expect(artifactTypeLabel("calendar-event")).toBe("일정(약속)");
+    expect(artifactTypeLabel("email-message")).toBe("메일(메시지)");
+    expect(artifactTypeLabel("email-mailbox")).toBe("메일함 문자열(PST/OST)");
+    // m5
+    expect(artifactTypeLabel("contact")).toBe("메일 연락처(Outlook)");
+    expect(artifactTypeLabel("calendar-event")).toBe("일정(Outlook·ICS)");
+  });
+
+  it("orders the whole 메신저·메일 domain per orderGroup with Korean collation (m6)", () => {
+    const messaging = DOMAINS.find((d) => d.id === "messaging");
+    const ko = new Intl.Collator("ko");
+    const rank = (n: DomainNodeDef) =>
+      n.lead ? 0 : n.fieldChildren || n.target.cf?.length || n.target.fields ? 3 : n.detail ? 2 : 1;
+    const check = (nodes: readonly DomainNodeDef[]) => {
+      for (let i = 1; i < nodes.length; i += 1) {
+        const prev = nodes[i - 1] as DomainNodeDef;
+        const next = nodes[i] as DomainNodeDef;
+        expect(rank(prev) <= rank(next), `${prev.label} / ${next.label}`).toBe(true);
+        if (rank(prev) === rank(next) && rank(prev) !== 0) {
+          expect(ko.compare(prev.label, next.label) <= 0, `${prev.label} / ${next.label}`).toBe(true);
+        }
+      }
+      for (const node of nodes) if (node.children) check(node.children);
+    };
+    check(messaging?.nodes ?? []);
+    expect(messaging?.nodes.map((n) => n.label)).toEqual([
+      "데스크톱 메신저(Windows)",
+      "모바일 메시지",
+      "문서/메일 색인",
+      "이메일",
+      "카카오톡(macOS)",
+      "카카오톡(Windows)",
+    ]);
   });
 
   it("labels crash dumps, kakaotalk traces and ETL apart from Volatility / EVTX", () => {
     expect(primaryNodes("memory-volatility", "crash-dump-indicators")[0]?.label).toBe("크래시 덤프");
     expect(primaryNodes("eventlog", "etl-trace-file")[0]?.label).toBe("ETL 추적 파일");
-    const kakao = allNodes().find((n) => n.id === "msg-kakao");
+    const kakao = allNodes().find((n) => n.id === "msg-kakao-registry");
     expect(kakao?.label).toContain("레지스트리 흔적");
     expect(artifactTypeLabel("browser-credit-card")).toBe("저장된 카드(메타데이터)");
   });
@@ -664,8 +737,14 @@ describe("R2 M4 cloud sync nodes", () => {
       "cloud-sync-events",
       "cloud-sync-inventory",
       "cloud-sync-files",
+      "cloud-sync-browser",
       "cloud-export",
     ]);
+    // m10: the browser-side sync DB rows and the sync-client rows point at each other.
+    const browserSide = cloud?.nodes.find((node) => node.id === "cloud-sync-browser");
+    expect(browserSide?.crossRef).toBe(true);
+    expect(browserSide?.note).toBe(CLOUD_SYNC_CROSS_NOTE);
+    expect(allNodes().find((node) => node.id === "web-cloud-sync")?.note).toBe(CLOUD_SYNC_CROSS_NOTE);
     expect(cloud?.nodes.find((node) => node.id === "cloud-export")?.target).toEqual({
       collection: "artifacts",
       kind: "cloud-export",

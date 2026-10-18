@@ -73,6 +73,32 @@ export interface ServerSortState extends ServerSort {
 
 export type ReviewStatus = "relevant" | "needs-review" | "excluded" | "include-in-report";
 
+/**
+ * Exact record-field filters the artifacts API applies server-side (`browser=`, `service=`,
+ * repeated; r2 console fix M2): `details.browser` / `details.service` equal one of the values.
+ */
+export const RECORD_FIELD_KEYS = ["browser", "service"] as const;
+export type RecordFieldKey = (typeof RECORD_FIELD_KEYS)[number];
+export type RecordFieldFilters = Partial<Record<RecordFieldKey, string[]>>;
+
+/** Korean name of a record-field filter (chips, filter status line). */
+export const RECORD_FIELD_LABELS: Readonly<Record<RecordFieldKey, string>> = {
+  browser: "브라우저",
+  service: "앱",
+};
+
+/** True when any record-field filter has a value. */
+export function hasRecordFields(fields: RecordFieldFilters | undefined): boolean {
+  return RECORD_FIELD_KEYS.some((key) => (fields?.[key]?.length ?? 0) > 0);
+}
+
+/** Stable text form of record-field filters (cache / selection keys); "" when none. */
+export function recordFieldsKey(fields: RecordFieldFilters | undefined): string {
+  return RECORD_FIELD_KEYS.filter((key) => fields?.[key]?.length)
+    .map((key) => `${key}=${[...(fields?.[key] ?? [])].sort().join(",")}`)
+    .join("&");
+}
+
 /** Server-side query the grid sends; the hook maps it to the collection's API. */
 export interface CollectionQuery {
   ref: CollectionRef;
@@ -92,6 +118,8 @@ export interface CollectionQuery {
   /** 특이사항 rule ids (`flag=`, repeated) and minimum grade (`flag_grade=`), server-side (plan §3.1). */
   flags?: string[];
   flagGrade?: "A" | "B" | "C";
+  /** Exact record-field filters (`browser=` / `service=`), artifacts server-side only. */
+  fields?: RecordFieldFilters;
   /** Navigation category (tree) filter; interpreted by the collection. */
   category?: string;
   /**

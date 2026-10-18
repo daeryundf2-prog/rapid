@@ -34,7 +34,9 @@ CATALOG_DIR = Path(__file__).with_name("catalog")
 RULE_ID_PATTERN = re.compile(r"^[a-z][a-z0-9-]*\.[a-z0-9_]+$")
 FAMILY_ID_PATTERN = re.compile(r"^[a-z][a-z0-9-]*$")
 STATUSES = ("verified", "provisional")
-COLUMN_KEYS = frozenset({"key", "label", "format", "ts_kind", "width", "aliases", "semantic", "semantic_when", "derive"})
+COLUMN_KEYS = frozenset(
+    {"key", "label", "format", "ts_kind", "width", "aliases", "semantic", "semantic_when", "derive", "value_labels"}
+)
 # Column meaning tags (plan axiom-adoption §3.2; research axiom-case-model §3): the derived engine
 # (``core/derived``) gathers every column with one of these tags into the 통합 보기 tables.
 SEMANTIC_TAGS = frozenset(
@@ -136,6 +138,25 @@ def _check_columns(source: str, family_id: str, columns: object, name: str) -> N
         if unknown:
             raise _fail(source, f"계열 {family_id}의 열에 알 수 없는 키가 있습니다: {sorted(unknown)}")
         _check_semantic(source, family_id, column)
+        _check_value_labels(source, family_id, column)
+
+
+def _check_value_labels(source: str, family_id: str, column: Mapping[str, Any]) -> None:
+    """``value_labels`` (optional) = ``{raw value: 한국어 표시}``: the console shows the Korean
+    reading (grid cell, viewer, citation) and keeps the raw value in the tooltip; a column
+    filter on the Korean reading matches every raw spelling mapped to it."""
+    labels = column.get("value_labels")
+    if labels is None:
+        return
+    valid = isinstance(labels, Mapping) and bool(labels) and all(
+        isinstance(raw, str) and raw != "" and isinstance(text, str) and text.strip() != ""
+        for raw, text in labels.items()
+    )
+    if not valid:
+        raise _fail(
+            source,
+            f"계열 {family_id}의 열 {column.get('key')}: value_labels는 {{원래 값: 한국어 표시}} 형식(빈 값 없이)이어야 합니다",
+        )
 
 
 def _check_semantic(source: str, family_id: str, column: Mapping[str, Any]) -> None:

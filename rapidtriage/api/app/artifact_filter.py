@@ -1,4 +1,4 @@
-"""Streaming path / artifact_type filter for per-kind artifact outputs (``GET /api/runs/{id}/artifacts``)."""
+"""Streaming path / artifact_type / record-field filter for per-kind artifact outputs (``GET /api/runs/{id}/artifacts``)."""
 
 from __future__ import annotations
 
@@ -12,6 +12,69 @@ from .jsonl_records import iter_artifact_records
 ARTIFACT_PATH_FILTER_SCAN_CAP = 2_000_000
 # Rows scanned per request by the all-kinds ``artifact_type=`` pager.
 CROSS_KIND_SCAN_CAP = 200_000
+
+# Exact record-field filters of ``GET /artifacts`` (r2 console fix M2): query
+# parameter -> the record field it matches (``details.<field>``, else the row's
+# top-level field). ``browser=ie-edge-legacy`` pages the WebCacheV01 rows,
+# ``service=teams`` one desktop messenger app.
+RECORD_FIELD_FILTERS: tuple[str, ...] = ("browser", "service")
+FIELD_FILTER_MAX_VALUES = 32
+FIELD_FILTER_MAX_LENGTH = 200
+FieldFilters = Mapping[str, frozenset[str]]
+
+
+def parse_field_filters(values: Mapping[str, Sequence[str]]) -> dict[str, frozenset[str]] | None:
+    """``{"browser": [...], "service": [...]}`` query values -> exact-match sets (``None`` when none).
+
+    Raises :class:`ValueError` with a Korean message (the route answers 422)
+    for an empty value, a control character, an over-long value or too many values.
+    """
+    parsed: dict[str, frozenset[str]] = {}
+    for field, raw_values in values.items():
+        if field not in RECORD_FIELD_FILTERS:
+            raise ValueError(f"지원하지 않는 필드 필터입니다: {field}")
+        cleaned: list[str] = []
+        for raw in raw_values:
+            value = str(raw).strip()
+            if not value:
+                raise ValueError(f"{field} 값이 비어 있습니다 — 정확한 값을 지정하세요")
+            if len(value) > FIELD_FILTER_MAX_LENGTH:
+                raise ValueError(f"{field} 값이 너무 깁니다(최대 {FIELD_FILTER_MAX_LENGTH}자)")
+            if any(ord(char) < 32 for char in value):
+                raise ValueError(f"{field} 값에 제어 문자가 있습니다")
+            cleaned.append(value)
+        if len(cleaned) > FIELD_FILTER_MAX_VALUES:
+            raise ValueError(f"{field} 값은 최대 {FIELD_FILTER_MAX_VALUES}개까지 지정할 수 있습니다")
+        if cleaned:
+            parsed[field] = frozenset(cleaned)
+    return parsed or None
+
+
+def record_field_value(row: Mapping[str, object], field: str) -> str:
+    """``details.<field>`` of a row (string form), else its top-level ``field``."""
+    details = row.get("details")
+    if isinstance(details, Mapping) and details.get(field) not in (None, ""):
+        return str(details.get(field))
+    value = row.get(field)
+    return "" if value is None else str(value)
+
+
+def field_matching_records(
+    payload: dict[str, object],
+    *,
+    payload_path: Path,
+    fields: FieldFilters,
+    scan_cap: int = ARTIFACT_PATH_FILTER_SCAN_CAP,
+) -> set[int]:
+    """Record indices whose fields match ``fields`` (the sorted pager narrows to them)."""
+    matches = row_matcher("", None, fields)
+    found: set[int] = set()
+    for scanned, (record_index, row) in enumerate(iter_artifact_records(payload, payload_path=payload_path)):
+        if scanned >= scan_cap:
+            break
+        if matches(row):
+            found.add(record_index)
+    return found
 
 
 def nfc_fold(value: object) -> str:
@@ -29,9 +92,11 @@ def filter_artifact_page(
     rows_source: Iterable[tuple[int, dict[str, object]]] | None = None,
     artifact_types: Collection[str] | None = None,
     record_limit: int | None = None,
+    fields: FieldFilters | None = None,
 ) -> dict[str, object]:
     """Page only rows whose ``path`` contains ``path_contains`` (NFC, case-insensitive)
-    and, when ``artifact_types`` is given, whose ``artifact_type`` is one of them.
+    and, when ``artifact_types`` is given, whose ``artifact_type`` is one of them
+    (and, with ``fields``, whose record fields equal one of the given values).
 
     Streams the kind's rows; ``offset`` counts matches. Stops after ``limit``
     matches plus one lookahead row, or after ``scan_cap`` scanned rows
@@ -43,7 +108,7 @@ def filter_artifact_page(
     """
     needle = nfc_fold(path_contains) if path_contains else ""
     wanted_types = frozenset(artifact_types) if artifact_types else None
-    matches = row_matcher(needle, wanted_types)
+    matches = row_matcher(needle, wanted_types, fields)
     rows: list[object] = []
     matched = 0
     scanned = 0
@@ -81,18 +146,23 @@ def filter_artifact_page(
         "filtered": True,
         "path_contains": path_contains or None,
         "artifact_types": sorted(wanted_types) if wanted_types is not None else None,
+        **({"fields": {key: sorted(values) for key, values in fields.items()}} if fields else {}),
         "scanned": scanned,
         "truncated": not exhausted and not has_more,
     }
     return page
 
 
-def row_matcher(needle: str, wanted_types: frozenset[str] | None):
-    """Predicate for the ``path_contains`` (pre-folded ``needle``) and ``artifact_type`` filters."""
+def row_matcher(needle: str, wanted_types: frozenset[str] | None, fields: FieldFilters | None = None):
+    """Predicate for the ``path_contains`` (pre-folded ``needle``), ``artifact_type`` and exact field filters."""
 
     def matches(row: Mapping[str, object]) -> bool:
         if wanted_types is not None and str(row.get("artifact_type") or "") not in wanted_types:
             return False
+        if fields:
+            for field, values in fields.items():
+                if record_field_value(row, field) not in values:
+                    return False
         return not needle or needle in nfc_fold(row.get("path") or row.get("source_path"))
 
     return matches
@@ -146,6 +216,7 @@ def filter_across_kinds(
     scan_cap: int | None = None,
     rows_for: Callable[[str, dict[str, object], Path, int], Iterable[tuple[int, dict[str, object]]]] | None = None,
     extra: Mapping[str, object] | None = None,
+    fields: FieldFilters | None = None,
 ) -> dict[str, object]:
     """Page filtered rows across kinds (``sources`` order) as one collection.
 
@@ -163,7 +234,7 @@ def filter_across_kinds(
     scan_cap = CROSS_KIND_SCAN_CAP if scan_cap is None else scan_cap
     needle = nfc_fold(path_contains) if path_contains else ""
     wanted_types = frozenset(artifact_types) if artifact_types else None
-    matches = row_matcher(needle, wanted_types)
+    matches = row_matcher(needle, wanted_types, fields)
     kinds = [kind for kind, _payload, _path in sources]
     resume = parse_cross_kind_after(after)
     start_pos, start_index, matched = 0, 0, 0
@@ -227,6 +298,7 @@ def filter_across_kinds(
             "next_after": next_after,
             "path_contains": path_contains or None,
             "artifact_types": sorted(wanted_types) if wanted_types is not None else None,
+            **({"fields": {key: sorted(values) for key, values in fields.items()}} if fields else {}),
             "scanned": scanned,
             "truncated": not exhausted and not has_more,
             **dict(extra or {}),

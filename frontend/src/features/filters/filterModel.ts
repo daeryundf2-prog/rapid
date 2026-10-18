@@ -5,7 +5,8 @@
  * Server-capable filters (checked against the API, console-redesign S8 and
  * analysis-workbench-p1 §4):
  *  - artifacts: `path_contains` (path text / 경로 column filter), `artifact_type=`
- *               (types / 유형 column filter, repeated)
+ *               (types / 유형 column filter, repeated), `browser=` / `service=`
+ *               (exact record fields of a tree node, repeated)
  *  - analysis:  `path_contains` (path text / 경로 column filter)
  *  - search:    `extension` (repeated param; 확장자 column filter too)
  *  - timeline/files/docs/indicators: paging only, nothing server-side
@@ -13,12 +14,18 @@
  * the rows already loaded; the filter status line says so.
  */
 
-import type {
-  CollectionQuery,
-  CollectionRef,
-  ColumnFilter,
-  GridRow,
-  ReviewStatus,
+import {
+  type CollectionQuery,
+  type CollectionRef,
+  type ColumnFilter,
+  type GridRow,
+  hasRecordFields,
+  RECORD_FIELD_KEYS,
+  RECORD_FIELD_LABELS,
+  type RecordFieldFilters,
+  type RecordFieldKey,
+  type ReviewStatus,
+  recordFieldsKey,
 } from "../../contracts/collection";
 import type { Route } from "../../router";
 import { parseInstant } from "../../utils/time";
@@ -43,6 +50,8 @@ export interface FilterState {
   flags?: string[];
   /** 특이사항 grade at least (URL `flag_grade=A|B|C`). */
   flagGrade?: Grade;
+  /** Exact record fields (URL `browser=` / `service=`; artifacts server-side). */
+  fields?: RecordFieldFilters;
 }
 
 export const EMPTY_FILTERS: FilterState = Object.freeze({
@@ -71,6 +80,7 @@ export function filtersFromRoute(route: Route): FilterState {
     columns: route.cf ?? [],
     ...(route.flags?.length ? { flags: route.flags } : {}),
     ...(route.flagGrade ? { flagGrade: route.flagGrade } : {}),
+    ...(hasRecordFields(route.fields) ? { fields: route.fields } : {}),
   };
 }
 
@@ -88,6 +98,7 @@ export function filtersToRoutePatch(filters: FilterState): Partial<Route> {
     cf: filters.columns?.length ? filters.columns : undefined,
     flags: filters.flags?.length ? filters.flags : undefined,
     flagGrade: filters.flagGrade && isGrade(filters.flagGrade) ? filters.flagGrade : undefined,
+    fields: hasRecordFields(filters.fields) ? filters.fields : undefined,
   };
 }
 
@@ -107,6 +118,7 @@ export function filtersEqual(a: FilterState, b: FilterState): boolean {
     a.ext.join() === b.ext.join() &&
     (a.flags ?? []).join() === (b.flags ?? []).join() &&
     (a.flagGrade ?? "") === (b.flagGrade ?? "") &&
+    recordFieldsKey(a.fields) === recordFieldsKey(b.fields) &&
     columnsKey(a.columns) === columnsKey(b.columns)
   );
 }
@@ -172,6 +184,7 @@ export interface FilterPlan {
     artifactTypes?: string[];
     flags?: string[];
     flagGrade?: Grade;
+    fields?: RecordFieldFilters;
   };
   /** Column filters the client applies to loaded rows (the rest went to the API). */
   clientColumns: ColumnFilter[];
@@ -223,6 +236,15 @@ export function partitionFilters(
     } else clientLabels.push("특이사항");
   }
 
+  if (hasRecordFields(filters.fields)) {
+    const names = RECORD_FIELD_KEYS.filter((key) => filters.fields?.[key]?.length).map(
+      (key) => RECORD_FIELD_LABELS[key],
+    );
+    if (ref.id === "artifacts") {
+      server.fields = filters.fields;
+      serverLabels.push(...names);
+    } else clientLabels.push(...names);
+  }
   if (filters.types.length) {
     if (ref.id === "artifacts") {
       server.artifactTypes = [...filters.types];
@@ -285,6 +307,7 @@ export function clientOnlyFilters(filters: FilterState, plan: FilterPlan): Filte
     columns: plan.clientColumns,
     flags: plan.server.flags ? [] : filters.flags,
     flagGrade: plan.server.flagGrade || plan.server.flags ? undefined : filters.flagGrade,
+    fields: plan.server.fields ? undefined : filters.fields,
   };
 }
 
@@ -304,6 +327,7 @@ export function applyFiltersToQuery(
   if (plan.server.extension) next.extension = plan.server.extension;
   if (plan.server.flags) next.flags = plan.server.flags;
   if (plan.server.flagGrade) next.flagGrade = plan.server.flagGrade;
+  if (plan.server.fields) next.fields = plan.server.fields;
   return next;
 }
 
@@ -364,7 +388,17 @@ export function applyClientFilters(rows: GridRow[], filters: FilterState): GridR
 
 // --- chips -------------------------------------------------------------------
 
-export type FilterKey = "range" | "status" | "type" | "tag" | "ext" | "path" | "note" | "flag" | "flagGrade";
+export type FilterKey =
+  | "range"
+  | "status"
+  | "type"
+  | "tag"
+  | "ext"
+  | "path"
+  | "note"
+  | "flag"
+  | "flagGrade"
+  | "field";
 
 export interface FilterChip {
   key: FilterKey;
@@ -390,6 +424,15 @@ export function activeChips(filters: FilterState, statusLabel: (s: ReviewStatus)
   if (filters.flagGrade) chips.push({ key: "flagGrade", label: `특이사항 ${filters.flagGrade} 이상` });
   for (const id of filters.flags ?? [])
     chips.push({ key: "flag", value: id, label: `특이사항 ${ruleLabel(id)}` });
+  for (const field of RECORD_FIELD_KEYS) {
+    for (const value of filters.fields?.[field] ?? []) {
+      chips.push({
+        key: "field",
+        value: `${field}:${value}`,
+        label: `${RECORD_FIELD_LABELS[field]} ${value}`,
+      });
+    }
+  }
   return chips;
 }
 
@@ -413,5 +456,14 @@ export function removeChip(filters: FilterState, chip: FilterChip): FilterState 
       return { ...filters, flags: (filters.flags ?? []).filter((id) => id !== chip.value) };
     case "flagGrade":
       return { ...filters, flagGrade: undefined };
+    case "field": {
+      const at = (chip.value ?? "").indexOf(":");
+      const field = (chip.value ?? "").slice(0, at) as RecordFieldKey;
+      const value = (chip.value ?? "").slice(at + 1);
+      const rest = (filters.fields?.[field] ?? []).filter((item) => item !== value);
+      const fields: RecordFieldFilters = { ...filters.fields, [field]: rest.length ? rest : undefined };
+      if (!rest.length) delete fields[field];
+      return { ...filters, fields: hasRecordFields(fields) ? fields : undefined };
+    }
   }
 }

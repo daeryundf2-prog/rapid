@@ -82,6 +82,27 @@ class RapidTriageDoctorTests(unittest.TestCase):
         check = next(check for check in payload["checks"] if check["name"] == "tools:email-pst")
         self.assertEqual(check["status"], OK)
         self.assertEqual(check["details"]["available"], ["readpst"])
+        # Runs only use the tool when the opt-in env var is set.
+        self.assertIn("RAPIDTRIAGE_EMAIL_EXTERNAL_TOOLS=1", check["summary"])
+
+    def test_doctor_email_pst_warn_remediation_is_korean(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            static_dir = Path(tmp_dir) / "static"
+            make_static_assets(static_dir)
+            payload = run_doctor(
+                static_dir=static_dir,
+                app_data_dir=Path(tmp_dir) / "app-data",
+                tool_resolver=lambda _name: None,
+                include_port_check=False,
+            )
+
+        check = next(check for check in payload["checks"] if check["name"] == "tools:email-pst")
+        self.assertEqual(check["status"], WARN)
+        remediation = check["remediation"]
+        self.assertTrue(any("가" <= char <= "힣" for char in remediation))
+        self.assertIn("pffexport", remediation)
+        self.assertIn("readpst", remediation)
+        self.assertIn("RAPIDTRIAGE_EMAIL_EXTERNAL_TOOLS=1", remediation)
 
     def test_doctor_text_output_is_human_readable(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

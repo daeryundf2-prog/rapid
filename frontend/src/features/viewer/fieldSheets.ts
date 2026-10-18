@@ -16,6 +16,8 @@
 import type { GridRow } from "../../contracts/collection";
 import { flatValue } from "../../utils/flatValue";
 import { eventSummaryKo, fieldOf } from "../derived/derivedFields";
+import { artifactTypeLabel } from "../filters/typeLabels";
+import { typeValueLabel } from "../flags/catalog";
 import { metaLabel } from "./views/metaLabels";
 
 export type FieldFormat =
@@ -1735,6 +1737,11 @@ export interface SheetEntry {
   derived?: boolean;
   /** An expected field the record does not carry ("레코드에 없음"). */
   missing?: boolean;
+  /**
+   * Korean reading of the raw value (catalogue `value_labels`, or an artifact-type name for
+   * `source_artifact_type`); the raw value stays in the tooltip.
+   */
+  valueLabel?: string;
 }
 
 export interface RecordLayout {
@@ -1912,12 +1919,30 @@ export function recordLayout(row: GridRow | null): RecordLayout {
   // Two keys outside the sheet that read the same label ("앱 이름" for application_name and
   // app_name) carry their raw key in the visible text (review B2-8).
   const all = [...core, ...provenance, ...other, ...governance];
+  for (const entry of all) {
+    const reading = valueReading(row?.artifactType, entry.key, entry.raw);
+    if (reading) entry.valueLabel = reading;
+  }
   const uses = new Map<string, number>();
   for (const entry of all) uses.set(entry.label, (uses.get(entry.label) ?? 0) + 1);
   for (const entry of [...provenance, ...other, ...governance]) {
     if ((uses.get(entry.label) ?? 0) > 1) entry.label = `${entry.label} (${entry.key})`;
   }
   return { sheet, core, table, provenance, other, governance };
+}
+
+/** Korean reading of one record value (r2 console fix M7): catalogue `value_labels`, type names. */
+export function valueReading(
+  artifactType: string | null | undefined,
+  key: string,
+  raw: unknown,
+): string | undefined {
+  if ((key === "source_artifact_type" || key === "source_type") && typeof raw === "string" && raw) {
+    const label = artifactTypeLabel(raw);
+    if (label) return label;
+  }
+  const mapped = typeValueLabel(artifactType, key, raw);
+  return mapped && mapped !== String(raw) ? mapped : undefined;
 }
 
 /** Name/value rows of an EventData-like map or a registry `values` list; null when it is neither. */

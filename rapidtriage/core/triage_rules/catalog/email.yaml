@@ -8,10 +8,14 @@ families:
   - cloud-mail
   kinds:
   - email
+  # 시각: Outlook PST/OST rows carry the MAPI submit (else delivery) time; .eml/.msg rows the
+  # Date header (the sender's claim, also as its own auxiliary column below).
   core_columns:
-  - key: date
-    label: Date(발신 주장)
+  - key: submit_time
+    label: 시각(제출·배달·Date)
     aliases:
+    - delivery_time
+    - date
     - date_header
     format: time
     ts_kind: sent
@@ -28,6 +32,27 @@ families:
   - key: subject
     label: 제목
     width: 280
+  - key: attachment_count
+    label: 첨부
+    aliases:
+    - attachments
+    format: number
+    width: 70
+  - key: folder
+    label: 폴더
+    aliases:
+    - mailbox_folder
+  - key: read_state
+    label: 읽음
+    width: 80
+  aux_columns:
+  - key: date
+    label: Date 헤더(발신 주장)
+    aliases:
+    - date_header
+    format: time
+    ts_kind: sent
+    width: 170
   - key: message_id
     label: 메시지 ID (Message-ID)
     format: mono
@@ -44,17 +69,6 @@ families:
     semantic: person_sender
     label: 회신 주소 (Reply-To)
     format: mono
-  - key: attachment_count
-    label: 첨부
-    aliases:
-    - attachments
-    format: number
-    width: 70
-  - key: folder
-    label: 폴더
-    aliases:
-    - mailbox_folder
-  aux_columns:
   - key: received
     label: Received 체인
     format: mono
@@ -84,19 +98,11 @@ families:
   - key: bcc
     semantic: person_recipient
     label: 숨은 참조 (BCC)
-  - key: submit_time
-    label: 제출 시각
-    format: time
-    ts_kind: sent
-    width: 170
   - key: delivery_time
     label: 배달 시각
     format: time
     ts_kind: received
     width: 170
-  - key: read_state
-    label: 읽음
-    width: 80
   - key: thread_id
     label: 스레드 ID
     aliases:
@@ -105,6 +111,16 @@ families:
   - key: deleted_state
     label: 삭제·복구 상태
     width: 110
+    value_labels:
+      live: 활성
+      live-row: 활성 행
+      'false': 활성
+      deleted: 삭제됨
+      'true': 삭제됨
+      deleted-or-recovered-candidate: 삭제·복구 후보
+      candidate-marker-present: 삭제 표식 후보
+      not-decoded: 해석 안 함
+      unknown: 불명
   rules:
   - email.spf_fail
   - email.dkim_fail
@@ -144,10 +160,8 @@ families:
     label: 해시(SHA-256)
     format: mono
   - key: from
-    semantic: person_sender
     label: 보낸 사람
   - key: to
-    semantic: person_recipient
     label: 받는 사람
   - key: message_subject
     label: 원본 메일 제목
@@ -162,6 +176,16 @@ families:
     format: mono
   - key: deleted_state
     label: 삭제·복구 상태
+    value_labels:
+      live: 활성
+      live-row: 활성 행
+      'false': 활성
+      deleted: 삭제됨
+      'true': 삭제됨
+      deleted-or-recovered-candidate: 삭제·복구 후보
+      candidate-marker-present: 삭제 표식 후보
+      not-decoded: 해석 안 함
+      unknown: 불명
   - key: export_item
     label: 내보내기 항목
     format: path

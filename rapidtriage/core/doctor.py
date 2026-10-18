@@ -281,13 +281,13 @@ def check_email_tools(tool_resolver: ToolResolver) -> DoctorCheck:
             status=WARN,
             summary="PST/OST 도구 없음: pffexport·readpst가 없어 Outlook 메일함은 컨테이너 인벤토리만 만듭니다.",
             details=details,
-            remediation="Install libpff (pffexport) or libpst (readpst) and put it on PATH to turn PST/OST files into message, appointment, contact and attachment rows.",
+            remediation="libpff(pffexport) 또는 libpst(readpst)를 설치해 PATH에 두고 RAPIDTRIAGE_EMAIL_EXTERNAL_TOOLS=1로 런을 실행하면 PST/OST를 메일·일정·연락처·첨부 행으로 변환합니다.",
         )
     return DoctorCheck(
         name="tools:email-pst",
         category="email",
         status=OK,
-        summary=f"PST/OST 도구 사용 가능: {', '.join(available)}",
+        summary=f"{', '.join(available)} 있음 — 런에서는 RAPIDTRIAGE_EMAIL_EXTERNAL_TOOLS=1일 때만 사용",
         details=details,
     )
 

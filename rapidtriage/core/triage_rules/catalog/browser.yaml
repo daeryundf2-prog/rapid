@@ -465,32 +465,31 @@ families:
   label: 브라우저 캐시 항목
   types:
   - browser-cache-entry
+  # 시각: the response time, else the entry's created / last-used / stored time — the cell
+  # chip reads the row's own timestamp_kind (cache-response · cache-created · cache-last-used).
+  # 주소 enters 통합 보기 › URL only for POST entries (uploads); every cached GET resource
+  # would drown the table (the file name candidate column still feeds 첨부).
   core_columns:
   - key: timestamp
-    label: 응답 시각
-    aliases:
-    - response_time
-    - created_at
+    label: 시각
     format: time
     ts_kind: cache-response
   - key: url
     semantic: url
+    semantic_when:
+      method:
+      - POST
     label: 주소 (URL)
     format: url
-  - key: host
-    label: 호스트
-  - key: method
-    label: 요청 방식
   - key: http_status
     label: 응답 상태
     format: number
   - key: content_type
     label: 콘텐츠 형식 (Content-Type)
-  - key: content_length
-    label: 콘텐츠 길이 (Content-Length)
-    format: bytes
   - key: body_size
-    label: 본문 크기
+    label: 크기
+    aliases:
+    - content_length
     format: bytes
   - key: body_sha256
     semantic: hash
@@ -498,20 +497,34 @@ families:
     aliases:
     - body_prefix_sha256
     format: mono
-  - key: compression
-    label: 압축
-    aliases:
-    - content_encoding
+  - key: host
+    label: 호스트
+  - key: method
+    label: 요청 방식
   - key: file_name_candidate
     semantic: attachment
     label: 파일 이름 후보 (Content-Disposition)
   - key: cache_format
     label: 캐시 형식
+    value_labels:
+      chromium-simple: Chromium 단순 캐시
+      chromium-blockfile: Chromium 블록 파일 캐시
+      chromium-cachestorage: Chromium CacheStorage
+      webcache-content: WebCache Content(IE·레거시 Edge)
   - key: browser
     label: 브라우저
+    value_labels:
+      ie-edge-legacy: IE·레거시 Edge(WebCache)
   - key: profile
     label: 프로필
   aux_columns:
+  - key: content_length
+    label: 콘텐츠 길이 (Content-Length)
+    format: bytes
+  - key: compression
+    label: 압축
+    aliases:
+    - content_encoding
   - key: request_time
     label: 요청 시각
     format: time
@@ -558,6 +571,8 @@ families:
   label: 웹메일·웹하드 업로드 후보
   types:
   - web-upload-candidate
+  # The candidate restates its source row (cache entry / history visit): no meaning tags here,
+  # so 통합 보기 counts the URL and the file name once (on the source row).
   core_columns:
   - key: timestamp
     label: 시각
@@ -567,28 +582,27 @@ families:
     label: 서비스
     aliases:
     - service
-  - key: category_label
-    label: 분류
-    aliases:
-    - category
+  - key: url
+    label: 주소 (URL)
+    format: url
   - key: strength_label
     label: 근거 강도
     aliases:
     - strength
-  - key: url
-    semantic: url
-    label: 주소 (URL)
-    format: url
+  - key: file_name_candidate
+    label: 관련 파일 이름 후보
+  - key: category_label
+    label: 분류
+    aliases:
+    - category
   - key: method
     label: 요청 방식
   - key: size
     label: 크기
     format: bytes
-  - key: file_name_candidate
-    semantic: attachment
-    label: 관련 파일 이름 후보
   - key: source_artifact_type
     label: 원본 행 유형
+    format: artifact_type
   - key: browser
     label: 브라우저
   - key: profile
@@ -615,7 +629,6 @@ families:
   - key: interpretation_ko
     label: 해석
   - key: user
-    semantic: account
     label: 사용자
   rules:
   - browser.webmail_upload

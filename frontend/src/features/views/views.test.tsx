@@ -70,6 +70,8 @@ describe("view availability matrix", () => {
     expect(matrix("artifacts", "kakaotalk-windows")).toBe("1011");
     expect(matrix("artifacts", "kakaotalk-macos")).toBe("1011");
     expect(matrix("artifacts", "mobile-export")).toBe("1011");
+    // r2 M1: Teams·Slack·… desktop messenger rows (chat-message).
+    expect(matrix("artifacts", "windows-messenger")).toBe("1011");
     expect(matrix("artifacts", "eventlog")).toBe("1001");
     expect(matrix("artifacts")).toBe("1001");
     expect(matrix("timeline")).toBe("1001");
@@ -492,6 +494,117 @@ describe("ChatView", () => {
 
     fireEvent.keyDown(document.activeElement as HTMLElement, { key: "ArrowLeft" });
     expect(document.activeElement?.getAttribute("role")).toBe("option");
+  });
+
+  it("reads Teams / Slack desktop messenger rows as conversations (r2 M1)", async () => {
+    const teamsSlack = [
+      {
+        provider: "windows-messenger",
+        artifact_type: "chat-message",
+        path: "C:/Users/a/AppData/Roaming/Slack/IndexedDB/x.ldb",
+        details: {
+          service: "Slack",
+          conversation_title: "#영업",
+          sender: "kim",
+          direction: "outgoing",
+          message_text_preview: "견적서 보냅니다",
+          timestamp: "2026-10-01T01:00:00Z",
+        },
+      },
+      {
+        provider: "windows-messenger",
+        artifact_type: "chat-message",
+        path: "C:/Users/a/AppData/Roaming/Slack/IndexedDB/x.ldb",
+        details: {
+          service: "Slack",
+          conversation_title: "#영업",
+          sender: "lee",
+          direction: "incoming",
+          message_text_preview: "받았습니다",
+          timestamp: "2026-10-01T01:05:00Z",
+        },
+      },
+      {
+        provider: "windows-messenger",
+        artifact_type: "chat-message",
+        path: "C:/Users/a/AppData/Local/Packages/MSTeams/EBWebView/x.ldb",
+        details: {
+          service: "Microsoft Teams (new)",
+          conversation_title: "프로젝트 A",
+          sender: "park",
+          direction: "unknown",
+          message_text_preview: "회의 링크",
+          timestamp: "2026-10-02T01:00:00Z",
+        },
+      },
+      {
+        provider: "windows-messenger",
+        artifact_type: "chat-app-inventory",
+        path: "C:/Users/a/AppData/Roaming/WeChat",
+        details: { service: "WeChat" },
+      },
+    ];
+    const rows = teamsSlack.map((raw, i) =>
+      row({
+        rowKey: `w${i}`,
+        artifactType: raw.artifact_type,
+        sourcePath: raw.path,
+        fields: { details: raw.details, kind: "windows-messenger" },
+      }),
+    );
+    expect(viewDisabledReason("chat", { id: "artifacts", kind: "windows-messenger" })).toBeUndefined();
+    const conversations = groupConversations(rows);
+    expect(conversations.map((c) => [c.label, c.service, c.messages.length])).toEqual([
+      ["프로젝트 A", "Microsoft Teams (new)", 1],
+      ["#영업", "Slack", 2],
+    ]);
+    expect(conversations[1]?.messages.map((m) => [m.sender, m.outgoing])).toEqual([
+      ["kim", true],
+      ["lee", false],
+    ]);
+    useGridLocalStore.setState((s) => ({
+      route: { ...s.route, collection: { id: "artifacts", kind: "windows-messenger" } },
+    }));
+    installFetch({
+      "/artifacts": () =>
+        jsonResponse({
+          artifacts: { "windows-messenger": { artifacts: teamsSlack, total: teamsSlack.length } },
+        }),
+    });
+    renderQ(<ChatView />);
+    expect(await screen.findByRole("listbox", { name: /대화 목록, 2개/ })).toBeTruthy();
+  });
+
+  it("marks KakaoTalk numeric chat / author ids as unresolved names (m11)", async () => {
+    const kakao = [
+      {
+        provider: "kakaotalk-windows-correlation",
+        artifact_type: "kakaotalk-message",
+        path: "C:/Users/a/AppData/Local/Kakao/KakaoTalk/users/x/chatLogs_1.edb",
+        details: {
+          service: "KakaoTalk PC",
+          conversation_id: "18291234567",
+          sender: "4412345678",
+          direction: "수신",
+          message_text: "안녕",
+          timestamp: "2026-10-01T01:00:00Z",
+        },
+      },
+    ];
+    const rows = kakao.map((raw, i) =>
+      row({ rowKey: `k${i}`, artifactType: raw.artifact_type, fields: { details: raw.details } }),
+    );
+    expect(groupConversations(rows)[0]?.label).toBe("18291234567 (이름 미해석)");
+    useGridLocalStore.setState((s) => ({
+      route: { ...s.route, collection: { id: "artifacts", kind: "kakaotalk-windows" } },
+    }));
+    installFetch({
+      "/artifacts": () =>
+        jsonResponse({ artifacts: { "kakaotalk-windows": { artifacts: kakao, total: 1 } } }),
+    });
+    renderQ(<ChatView />);
+    const sender = await screen.findByText(/4412345678 \(이름 미해석\)/);
+    expect(sender.getAttribute("title")).toContain("이름을 찾지 못했습니다");
   });
 
   it("explains a messenger node without message rows", async () => {

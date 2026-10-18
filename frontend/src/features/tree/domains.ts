@@ -11,7 +11,13 @@
  */
 
 import { filesInventoryCategory } from "../../api/collections";
-import type { CollectionId, ColumnFilter } from "../../contracts/collection";
+import {
+  type CollectionId,
+  type ColumnFilter,
+  type RecordFieldFilters,
+  type RecordFieldKey,
+  recordFieldsKey,
+} from "../../contracts/collection";
 import type { IconName } from "../../icons";
 import type { AnalysisNodeId } from "../analysis/kinds";
 
@@ -38,6 +44,12 @@ export interface DomainTarget {
   cf?: ColumnFilter[];
   /** Count from this numeric field of the kind's `/tree` node instead of the per-type counts. */
   countField?: string;
+  /**
+   * Exact record-field filters the server applies (`browser=` / `service=`, route the same; r2
+   * console fix M2). Counted from the kind's `/tree` `field_type_counts`; a filtered view of its
+   * types, never their primary node, and left out of the domain total.
+   */
+  fields?: RecordFieldFilters;
   /** Analysis results node (collection "analysis"). */
   analysis?: AnalysisNodeId;
 }
@@ -74,7 +86,54 @@ export interface DomainNodeDef {
    * the union of its evidence children; only the leaves are primary nodes and count in the total.
    */
   children?: DomainNodeDef[];
+  /**
+   * Shown first in its group (the messages of an app, then its pictures): `orderGroup` keeps
+   * lead nodes in table order before the Korean-sorted rest.
+   */
+  lead?: boolean;
+  /**
+   * Children generated per value of a record field (`/tree` `field_type_counts`): one node per
+   * value with rows of `types`, filtered server-side (`<field>=<value>`); values with 0 rows of
+   * those types get no node (데스크톱 메신저 › 앱별 보기 › Slack …).
+   */
+  fieldChildren?: { field: RecordFieldKey; types: string[] };
+  /** Tooltip of the node (cross-links between related nodes in different domains). */
+  note?: string;
 }
+
+/**
+ * Order of a group's children (and a domain's nodes, r2 console fix m6): lead nodes in table
+ * order, then evidence nodes, then detail (bulk / auxiliary) nodes, then views (column- or
+ * field-filtered, per-value groups) — each part in Korean collation (`localeCompare("ko")`).
+ */
+export function orderGroup(nodes: readonly DomainNodeDef[]): DomainNodeDef[] {
+  const rank = (node: DomainNodeDef) =>
+    node.lead
+      ? 0
+      : node.fieldChildren || node.target.cf?.length || recordFieldsKey(node.target.fields)
+        ? 3
+        : node.detail || node.nonEvidence || node.catchAll
+          ? 2
+          : 1;
+  const ko = new Intl.Collator("ko");
+  return nodes
+    .map((node, index) => ({ node, index }))
+    .sort((a, b) => {
+      const ra = rank(a.node);
+      const rb = rank(b.node);
+      if (ra !== rb) return ra - rb;
+      if (ra === 0) return a.index - b.index;
+      return ko.compare(a.node.label, b.node.label) || a.index - b.index;
+    })
+    .map((entry) => entry.node);
+}
+
+/**
+ * Cross-link of the two cloud-sync sources (r2 console fix m10): the browser provider's sync-DB
+ * rows (웹·브라우저) and the sync clients' account / file / event rows (클라우드).
+ */
+export const CLOUD_SYNC_CROSS_NOTE =
+  "같은 질문의 다른 원본 — 웹·브라우저 › 클라우드 저장소 동기화(브라우저 측 DB)와 클라우드 › 동기화 계정·폴더/파일/이벤트(동기화 클라이언트)를 함께 보세요";
 
 /** Tooltip of a non-evidence node (string pivots the parser could not tie to a record). */
 export const NON_EVIDENCE_NOTE =
@@ -120,19 +179,40 @@ const AMCACHE_EVIDENCE_TYPES = Object.keys(AMCACHE_TYPE_LABELS);
 
 /** Desktop messenger row types (artifacts/windows/messenger.py, plan r2-communication §3.1) → Korean. */
 export const DESKTOP_MESSENGER_TYPE_LABELS: Readonly<Record<string, string>> = {
-  "chat-message": "대화(메시지)",
-  "chat-app-inventory": "앱 목록",
-  "chat-contact": "연락처",
-  "chat-parse-error": "처리 오류",
-  "chat-attachment": "첨부 파일",
+  "chat-message": "메신저 대화",
+  "chat-app-inventory": "메신저 앱 목록",
+  "chat-contact": "메신저 연락처",
+  "chat-parse-error": "메신저 처리 오류",
+  "chat-attachment": "메신저 첨부",
 };
-/** Evidence types of the group node (처리 오류 is a detail child, never in the total). */
-const DESKTOP_MESSENGER_EVIDENCE_TYPES = [
-  "chat-message",
-  "chat-app-inventory",
-  "chat-contact",
-  "chat-attachment",
-];
+/**
+ * Evidence types of the group node: 앱 목록 (per-app inventory, r2 console fix m4) and 처리 오류
+ * are detail children, never in the total.
+ */
+const DESKTOP_MESSENGER_EVIDENCE_TYPES = ["chat-message", "chat-contact", "chat-attachment"];
+
+/** KakaoTalk (Windows) row types (kakaotalk_windows.py / kakaotalk_messages.py) → Korean. */
+export const KAKAOTALK_WINDOWS_TYPE_LABELS: Readonly<Record<string, string>> = {
+  "kakaotalk-message": "카카오톡(Windows) 메시지",
+  "kakaotalk-shared-picture": "카카오톡(Windows) 공유 사진",
+  "kakaotalk-windows-user-id-candidate": "카카오톡 사용자 ID 후보(레지스트리)",
+  "kakaotalk-windows-crypto-material-candidate": "카카오톡 암호 자료 후보(DeviceInfo)",
+  "kakaotalk-windows-app-database": "카카오톡 앱 DB",
+  "kakaotalk-windows-source-candidate": "카카오톡 원본 후보",
+  "kakaotalk-app-inventory": "카카오톡 복호 상태",
+  "kakaotalk-windows-correlation-summary": "카카오톡 상관 요약",
+};
+
+/** Outlook PST/OST · .eml/.msg · ICS row types (email.py / email_pst.py) → Korean. */
+export const EMAIL_TYPE_LABELS: Readonly<Record<string, string>> = {
+  "email-message": "메일(메시지)",
+  "email-attachment": "메일 첨부",
+  contact: "메일 연락처(Outlook)",
+  "calendar-event": "일정(Outlook·ICS)",
+  "email-mailbox": "메일함 문자열(PST/OST)",
+  "email-container-inventory": "메일 컨테이너(PST/OST)",
+};
+const EMAIL_EVIDENCE_TYPES = ["email-message", "email-attachment", "contact", "calendar-event"];
 
 function pickLabels(labels: Readonly<Record<string, string>>, types: string[]): Record<string, string> {
   return Object.fromEntries(types.map((type) => [type, labels[type] ?? type]));
@@ -589,13 +669,14 @@ export const DOMAINS: readonly DomainDef[] = [
       // r2 M3: decoded Chromium Simple Cache / blockfile / CacheStorage entries and WebCache Content rows.
       { id: "web-cache-entries", label: "캐시 항목", target: a("browser", ["browser-cache-entry"]) },
       {
-        // WebCacheV01 container rows reuse the browser row types; this is a filtered view (browser = ie-edge-legacy).
+        // WebCacheV01 container rows reuse the browser row types: a server-filtered view
+        // (`browser=ie-edge-legacy`), counted from `/tree` field_type_counts.browser.
         id: "web-legacy-ie",
         label: "레거시 Edge/IE(WebCache)",
         target: {
           ...a("browser", ["browser-history", "browser-cache-entry", "browser-cookie", "browser-download"]),
-          cols: ["details.browser", "details.webcache_container"],
-          cf: [{ col: "f:browser", op: ":", value: "ie-edge-legacy" }],
+          cols: ["details.webcache_container"],
+          fields: { browser: ["ie-edge-legacy"] },
         },
         typeLabels: {
           "browser-history": "방문 기록(History·MSHist)",
@@ -638,8 +719,9 @@ export const DOMAINS: readonly DomainDef[] = [
       },
       {
         id: "web-cloud-sync",
-        label: "클라우드 저장소 동기화",
+        label: "클라우드 저장소 동기화(브라우저 측 DB)",
         target: a("browser", ["desktop-cloud-sync-db", "desktop-cloud-sync-row-candidate"]),
+        note: CLOUD_SYNC_CROSS_NOTE,
       },
     ],
   },
@@ -647,67 +729,95 @@ export const DOMAINS: readonly DomainDef[] = [
     id: "messaging",
     label: "메신저·메일",
     icon: "message",
-    nodes: [
-      // The Windows provider reads registry DeviceInfo / user-id traces, not the (encrypted) chat DB.
-      { id: "msg-kakao", label: "카카오톡(Windows) 레지스트리 흔적", target: a("kakaotalk-windows") },
+    // One group per app (카카오톡 › …, 이메일 › …, 데스크톱 메신저 › …), every level in `orderGroup`
+    // order (r2 console fix m6).
+    nodes: orderGroup([
       {
-        id: "msg-kakao-candidates",
-        label: "카카오톡(Windows) 후보",
+        id: "msg-kakao",
+        label: "카카오톡(Windows)",
         target: a("kakaotalk-windows", [
+          "kakaotalk-message",
+          "kakaotalk-shared-picture",
           "kakaotalk-windows-user-id-candidate",
+          "kakaotalk-windows-crypto-material-candidate",
           "kakaotalk-windows-app-database",
           "kakaotalk-windows-source-candidate",
-          "kakaotalk-windows-crypto-material-candidate",
         ]),
-        typeLabels: {
-          "kakaotalk-windows-user-id-candidate": "사용자 ID 후보",
-          "kakaotalk-windows-app-database": "앱 DB",
-          "kakaotalk-windows-source-candidate": "원본 후보",
-          "kakaotalk-windows-crypto-material-candidate": "암호 자료 후보",
-        },
-      },
-      {
-        id: "msg-kakao-summary",
-        label: "카카오톡(Windows) 상관 요약",
-        target: a("kakaotalk-windows", ["kakaotalk-windows-correlation-summary"]),
-        detail: true,
-      },
-      // r2 M2: decrypted chat rows (only with recovered key material), saved/cached pictures and
-      // the per-profile decryption status ("복호 키 없음 — …" when the chat DB stays encrypted).
-      {
-        id: "msg-kakao-pictures",
-        label: "카카오톡(Windows) 공유 사진",
-        target: a("kakaotalk-windows", ["kakaotalk-shared-picture"]),
-      },
-      {
-        id: "msg-kakao-messages",
-        label: "카카오톡(Windows) 메시지",
-        target: a("kakaotalk-windows", ["kakaotalk-message"]),
-      },
-      {
-        id: "msg-kakao-inventory",
-        label: "카카오톡(Windows) 복호 상태",
-        target: a("kakaotalk-windows", ["kakaotalk-app-inventory"]),
-        detail: true,
+        typeLabels: pickLabels(KAKAOTALK_WINDOWS_TYPE_LABELS, Object.keys(KAKAOTALK_WINDOWS_TYPE_LABELS)),
+        children: orderGroup([
+          // r2 M2: decrypted chat rows (only with recovered key material) and saved / cached pictures.
+          {
+            id: "msg-kakao-messages",
+            label: "메시지",
+            target: a("kakaotalk-windows", ["kakaotalk-message"]),
+            lead: true,
+          },
+          {
+            id: "msg-kakao-pictures",
+            label: "공유 사진",
+            target: a("kakaotalk-windows", ["kakaotalk-shared-picture"]),
+            lead: true,
+          },
+          {
+            // The registry DeviceInfo / user-id traces (NTUSER.DAT, reg exports) the key needs.
+            id: "msg-kakao-registry",
+            label: "레지스트리 흔적(사용자 ID·DeviceInfo)",
+            target: a("kakaotalk-windows", [
+              "kakaotalk-windows-user-id-candidate",
+              "kakaotalk-windows-crypto-material-candidate",
+            ]),
+            typeLabels: pickLabels(KAKAOTALK_WINDOWS_TYPE_LABELS, [
+              "kakaotalk-windows-user-id-candidate",
+              "kakaotalk-windows-crypto-material-candidate",
+            ]),
+          },
+          {
+            id: "msg-kakao-candidates",
+            label: "앱 DB·원본 후보",
+            target: a("kakaotalk-windows", [
+              "kakaotalk-windows-app-database",
+              "kakaotalk-windows-source-candidate",
+            ]),
+            typeLabels: pickLabels(KAKAOTALK_WINDOWS_TYPE_LABELS, [
+              "kakaotalk-windows-app-database",
+              "kakaotalk-windows-source-candidate",
+            ]),
+          },
+          {
+            // Per-profile decryption status ("복호 키 없음 — …" when the chat DB stays encrypted).
+            id: "msg-kakao-inventory",
+            label: "복호 상태",
+            target: a("kakaotalk-windows", ["kakaotalk-app-inventory"]),
+            detail: true,
+          },
+          {
+            id: "msg-kakao-summary",
+            label: "상관 요약",
+            target: a("kakaotalk-windows", ["kakaotalk-windows-correlation-summary"]),
+            detail: true,
+          },
+        ]),
       },
       { id: "msg-kakao-mac", label: "카카오톡(macOS)", target: a("kakaotalk-macos") },
       // windows-messenger (plan r2-communication §3.1 M1): Teams·Slack·Discord·Telegram·WhatsApp·Skype·
-      // LINE·WeChat·Zoom desktop apps. Children in Korean order; the 앱 column narrows to one app.
+      // LINE·WeChat·Zoom desktop apps. 앱별 보기 lists one server-filtered node per app (`service=`).
       {
         id: "msg-desktop",
         label: "데스크톱 메신저(Windows)",
         target: a("windows-messenger", DESKTOP_MESSENGER_EVIDENCE_TYPES),
         typeLabels: DESKTOP_MESSENGER_TYPE_LABELS,
-        children: [
+        children: orderGroup([
           {
             id: "msg-desktop-messages",
             label: "대화(메시지)",
             target: a("windows-messenger", ["chat-message"]),
+            lead: true,
           },
           {
             id: "msg-desktop-apps",
             label: "앱 목록",
             target: a("windows-messenger", ["chat-app-inventory"]),
+            detail: true,
           },
           { id: "msg-desktop-contacts", label: "연락처", target: a("windows-messenger", ["chat-contact"]) },
           {
@@ -721,30 +831,65 @@ export const DOMAINS: readonly DomainDef[] = [
             label: "첨부 파일",
             target: a("windows-messenger", ["chat-attachment"]),
           },
-        ],
+          {
+            id: "msg-desktop-by-app",
+            label: "앱별 보기",
+            target: a("windows-messenger", DESKTOP_MESSENGER_EVIDENCE_TYPES),
+            typeLabels: pickLabels(DESKTOP_MESSENGER_TYPE_LABELS, DESKTOP_MESSENGER_EVIDENCE_TYPES),
+            fieldChildren: { field: "service", types: DESKTOP_MESSENGER_EVIDENCE_TYPES },
+          },
+        ]),
       },
       {
         id: "msg-mobile",
         label: "모바일 메시지",
         target: a("mobile-export", ["mobile-message", "mobile-chat-database"]),
       },
-      { id: "msg-email", label: "이메일", target: a("email") },
-      // r2 M2: Outlook PST/OST rows (pffexport/readpst) and ICS calendars.
+      // r2 M2: Outlook PST/OST rows (pffexport/readpst, opt-in), .eml/.msg and ICS calendars.
       {
-        id: "msg-email-attachments",
-        label: "메일 첨부",
-        target: a("email", ["email-attachment"]),
+        id: "msg-email",
+        label: "이메일",
+        target: a("email", EMAIL_EVIDENCE_TYPES),
+        // Every email type (the detail ones too): the 유형 filter and chips read them.
+        typeLabels: EMAIL_TYPE_LABELS,
+        children: orderGroup([
+          {
+            id: "msg-email-messages",
+            label: "메일(메시지)",
+            target: a("email", ["email-message"]),
+            lead: true,
+          },
+          {
+            // Takeout / M365 exports: the cloud-export kind's mail rows (primary: 클라우드 › 내보내기).
+            id: "msg-email-cloud",
+            label: "메일(클라우드 내보내기)",
+            target: a("cloud-export", ["cloud-mail"]),
+            crossRef: true,
+          },
+          {
+            id: "msg-email-attachments",
+            label: "메일 첨부",
+            target: a("email", ["email-attachment"]),
+          },
+          { id: "msg-contacts", label: "메일 연락처(Outlook)", target: a("email", ["contact"]) },
+          { id: "msg-calendar", label: "일정(Outlook·ICS)", target: a("email", ["calendar-event"]) },
+          {
+            id: "msg-email-containers",
+            label: "메일 컨테이너(PST/OST)",
+            target: a("email", ["email-container-inventory"]),
+            detail: true,
+          },
+          {
+            // Bounded string inventory of a PST/OST (no record structure): a detail node.
+            id: "msg-email-mailbox",
+            label: "메일함 문자열(PST/OST)",
+            target: a("email", ["email-mailbox"]),
+            detail: true,
+          },
+        ]),
       },
-      {
-        id: "msg-email-containers",
-        label: "메일 컨테이너(PST/OST)",
-        target: a("email", ["email-container-inventory"]),
-        detail: true,
-      },
-      { id: "msg-contacts", label: "연락처", target: a("email", ["contact"]) },
-      { id: "msg-calendar", label: "일정(약속)", target: a("email", ["calendar-event"]) },
       { id: "msg-docs", label: "문서/메일 색인", target: { collection: "docs" } },
-    ],
+    ]),
   },
   {
     id: "cloud",
@@ -772,6 +917,14 @@ export const DOMAINS: readonly DomainDef[] = [
         id: "cloud-sync-files",
         label: "동기화 파일",
         target: a("cloud-sync", ["cloud-sync-file"]),
+      },
+      {
+        // The browser provider's own sync-DB rows (web domain primary): same question, other source.
+        id: "cloud-sync-browser",
+        label: "브라우저 측 동기화 DB",
+        target: a("browser", ["desktop-cloud-sync-db", "desktop-cloud-sync-row-candidate"]),
+        crossRef: true,
+        note: CLOUD_SYNC_CROSS_NOTE,
       },
       { id: "cloud-export", label: "Takeout/iCloud/M365 내보내기", target: a("cloud-export") },
     ],
@@ -985,11 +1138,14 @@ export function targetKey(
     /** 특이사항 filters (U-F4): part of the key only when set. */
     flags?: string[];
     flagGrade?: string;
+    /** Exact record-field filters (`browser=` / `service=`): part of the key only when set. */
+    fields?: RecordFieldFilters;
   },
 ): string {
+  const fieldsPart = recordFieldsKey(target.fields);
   const flagPart = `${target.flagGrade ? `|g=${target.flagGrade}` : ""}${
     target.flags?.length ? `|f=${[...target.flags].sort().join(",")}` : ""
-  }`;
+  }${fieldsPart ? `|r=${fieldsPart}` : ""}`;
   const filesCategory = target.fileScope
     ? filesInventoryCategory(target.fileCategory)
     : (target.fileCategory ?? target.category ?? "");

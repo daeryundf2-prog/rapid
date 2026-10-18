@@ -26,7 +26,13 @@ export const VIEW_DEFS: readonly ViewDef[] = [
 /** Artifact kinds whose rows point at image files. */
 export const THUMBNAIL_KINDS: readonly string[] = ["media-image", "synthetic-media"];
 /** Artifact kinds that carry messenger message rows. */
-export const CHAT_KINDS: readonly string[] = ["kakaotalk-windows", "kakaotalk-macos", "mobile-export"];
+export const CHAT_KINDS: readonly string[] = [
+  "kakaotalk-windows",
+  "kakaotalk-macos",
+  "mobile-export",
+  // r2 M1: Teams·Slack·Discord·… desktop apps (`chat-message` rows; chat.ts reads them).
+  "windows-messenger",
+];
 export const HISTOGRAM_COLLECTIONS: readonly CollectionId[] = [
   "timeline",
   "artifacts",
@@ -43,7 +49,8 @@ export interface ViewScope {
 export const NO_NODE_REASON = "케이스의 컬렉션 노드를 먼저 여세요";
 export const THUMBNAIL_REASON =
   "썸네일 보기는 파일 노드와 미디어 이미지 아티팩트 노드에서 사용할 수 있습니다";
-export const CHAT_REASON = "대화 보기는 카카오톡·모바일 내보내기 아티팩트 노드에서 사용할 수 있습니다";
+export const CHAT_REASON =
+  "대화 보기는 카카오톡·데스크톱 메신저·모바일 내보내기 아티팩트 노드에서 사용할 수 있습니다";
 export const HISTOGRAM_REASON =
   "히스토그램 보기는 타임라인·아티팩트·파일·문서·검색 노드에서 사용할 수 있습니다";
 

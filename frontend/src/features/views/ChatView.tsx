@@ -24,7 +24,9 @@ import {
   highlightParts,
   highlightTerms,
   isMessageRow,
+  isUnresolvedId,
   messageMatches,
+  UNRESOLVED_NAME_HINT,
 } from "./chat";
 import { useAutoLoad, useViewRows } from "./useViewRows";
 import { EmptyState, ErrorState, LoadingCard } from "./ViewState";
@@ -286,7 +288,19 @@ function MessageList({
                   requestFocus();
                 }}
               >
-                {showSender ? <span className="chat-sender">{message.sender || "발신자 미상"}</span> : null}
+                {showSender ? (
+                  <span
+                    className="chat-sender"
+                    title={
+                      isUnresolvedId(message.sender)
+                        ? `숫자 ID ${message.sender} — 앱 DB에서 이름을 찾지 못했습니다`
+                        : undefined
+                    }
+                  >
+                    {message.sender || "발신자 미상"}
+                    {isUnresolvedId(message.sender) ? ` ${UNRESOLVED_NAME_HINT}` : ""}
+                  </span>
+                ) : null}
                 <div className="chat-bubble">
                   <p className="chat-text">
                     <Highlighted text={message.text} terms={terms} />

@@ -3,7 +3,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiError } from "../../api/client";
 import type { RawPage } from "../../api/collections";
 import type { TreeNode } from "../../api/runs";
-import type { CollectionQuery, GridRow, ReviewStatus, ServerSortState } from "../../contracts/collection";
+import {
+  type CollectionQuery,
+  type GridRow,
+  type ReviewStatus,
+  recordFieldsKey,
+  type ServerSortState,
+} from "../../contracts/collection";
 import { useTimezone } from "../../state/hooks";
 import { applyColumnFilters } from "../filters/columnFilters";
 import {
@@ -177,6 +183,8 @@ export function collectionQueryKey(runId: string | null, query: CollectionQuery,
     pageSize,
     // 특이사항 server filters (viewer-families §3.1); empty for every other listing.
     query.flags?.length || query.flagGrade ? `${query.flagGrade ?? ""}|${(query.flags ?? []).join(",")}` : "",
+    // Exact record-field filters (`browser=` / `service=`), artifacts only.
+    query.ref.id === "artifacts" ? recordFieldsKey(query.fields) : "",
   ] as const;
 }
 

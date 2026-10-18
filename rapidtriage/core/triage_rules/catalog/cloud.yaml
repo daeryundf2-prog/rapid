@@ -90,23 +90,68 @@ families:
   - cloud.json_exif_gps_mismatch
   - cloud.audit_retention_gap
 # Desktop sync clients (R2 M4, rapidtriage/artifacts/cloud_sync.py): OneDrive, Dropbox,
-# Google Drive (DriveFS), Naver MYBOX, iCloud for Windows.
-- id: cloud-sync
-  label: 클라우드 동기화 클라이언트
+# Google Drive (DriveFS), Naver MYBOX, iCloud for Windows. Three families (r2 console fix m1):
+# accounts (client · account · sync folder · tenant · account id), files/events, inventory.
+- id: cloud-sync-account
+  label: 클라우드 동기화 계정
   types:
   - cloud-sync-account
+  core_columns:
+  - key: client_label
+    label: 클라이언트
+    aliases:
+    - client
+  - key: actor
+    semantic: account
+    label: 계정
+    aliases:
+    - account
+    - account_email
+  - key: sync_root
+    semantic: path
+    label: 동기화 폴더
+    aliases:
+    - sync_roots
+    format: path
+  - key: tenant
+    label: 테넌트
+  - key: account_id
+    semantic: account
+    label: 계정 ID
+    format: mono
+  - key: site_url
+    semantic: url
+    label: 사이트 URL
+  - key: user_profile
+    label: 사용자 프로필
+  aux_columns:
+  - key: sync_roots
+    label: 동기화 폴더 전체
+  - key: account_type
+    label: 계정 종류
+  - key: recovery_method
+    label: 복구 방법
+  - key: source_locator
+    label: 원본 위치
+    format: mono
+  rules:
+  - cloud.sync_folder_outside_user_profile
+- id: cloud-sync
+  label: 클라우드 동기화 파일·이벤트
+  types:
   - cloud-sync-file
   - cloud-sync-event
-  - cloud-sync-inventory
   kinds:
   - cloud-sync
   core_columns:
+  # 시각: a file row's modified time (cloud-modified), an event row's own kind (cloud-upload …);
+  # the cell chip reads the row's timestamp_kind.
   - key: timestamp
     label: 시각
     aliases:
     - modified_at
     format: time
-    ts_kind: event
+    ts_kind: cloud-modified
     width: 170
   - key: client_label
     label: 클라이언트
@@ -122,9 +167,9 @@ families:
     label: 활동
     aliases:
     - operation
+  # Cloud-relative path (not a path on this evidence): no path tag.
   - key: item_path
-    semantic: path
-    label: 항목 경로
+    label: 항목 경로(클라우드 기준)
     aliases:
     - file_name
     format: path
@@ -133,6 +178,16 @@ families:
     format: bytes
   - key: sync_state
     label: 상태
+    value_labels:
+      parsed: 해석함
+      partial-errors: 일부 원본 오류
+      inventory-only: 인벤토리만
+      executable-trace-only: 실행 흔적만
+      trashed: 휴지통
+      metadata: 메타데이터
+      mirror: 로컬 미러
+      removed: 삭제됨
+      cloud-entry: 클라우드 항목
   - key: shared
     label: 공유 여부
   - key: sync_root
@@ -141,26 +196,20 @@ families:
     aliases:
     - sync_roots
     format: path
-  - key: tenant
-    label: 테넌트
-  - key: site_url
-    semantic: url
-    label: 사이트 URL
   - key: item_id
     label: 항목 ID
     format: mono
   aux_columns:
   - key: account_id
+    semantic: account
     label: 계정 ID
     format: mono
   - key: deleted
     label: 삭제 상태
-  - key: modified_at
-    label: 수정 시각
-    format: time
-    ts_kind: modified
-  - key: inventory_reason
-    label: 사유
+  - key: content_hash
+    semantic: hash
+    label: 콘텐츠 해시
+    format: mono
   - key: recovery_method
     label: 복구 방법
   - key: source_locator
@@ -170,7 +219,64 @@ families:
     label: 사용자 프로필
   rules:
   - cloud.bulk_upload
-  - cloud.sync_folder_outside_user_profile
+- id: cloud-sync-inventory
+  label: 클라우드 동기화 클라이언트 인벤토리
+  types:
+  - cloud-sync-inventory
+  core_columns:
+  - key: client_label
+    label: 클라이언트
+    aliases:
+    - client
+  - key: inventory_status
+    label: 상태
+    aliases:
+    - sync_state
+    value_labels:
+      parsed: 해석함
+      partial-errors: 일부 원본 오류
+      inventory-only: 인벤토리만
+      executable-trace-only: 실행 흔적만
+      trashed: 휴지통
+      metadata: 메타데이터
+      mirror: 로컬 미러
+      removed: 삭제됨
+      cloud-entry: 클라우드 항목
+  - key: inventory_reason
+    label: 사유
+    width: 380
+  - key: file_count
+    label: 파일 수
+    format: number
+  - key: total_bytes
+    label: 전체 크기
+    format: bytes
+  - key: encrypted_store_count
+    label: 암호화 저장소
+    format: number
+  - key: account
+    semantic: account
+    label: 계정
+    aliases:
+    - actor
+  - key: sync_root
+    label: 동기화 폴더
+    format: path
+  - key: user_profile
+    label: 사용자 프로필
+  aux_columns:
+  - key: account_folder
+    label: 계정 폴더
+    format: path
+  - key: source_locator
+    label: 원본 위치
+    format: mono
+  - key: recovery_method
+    label: 복구 방법
+  - key: source_path
+    label: 클라이언트 폴더
+    format: path
+  rules: []
 rules:
 - id: cloud.bulk_download
   family: cloud

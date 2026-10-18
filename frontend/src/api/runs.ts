@@ -188,6 +188,19 @@ export interface TreeNode {
   collection_status?: string;
   /** Kind nodes: the provider's collection notes (why rows are missing or capped). */
   collection_notes?: string[];
+  /**
+   * Kind nodes of `browser` / `windows-messenger` (r2 console fix M2): rows per value of a record
+   * field and artifact type, `{browser: {"ie-edge-legacy": {"browser-history": 3}}}` — the counts
+   * of the `browser=` / `service=` filtered nodes.
+   */
+  field_type_counts?: Record<string, Record<string, Record<string, number>>>;
+  /**
+   * Kind nodes of `email` / `kakaotalk-windows` (M4): inventory rows by status with the Korean
+   * reason (PST tools off / missing, KakaoTalk key material missing) — why a typed node is empty.
+   */
+  inventory_notes?: InventoryNote[];
+  /** The facet scan stopped at its row cap: field counts / notes are partial. */
+  facets_truncated?: boolean;
   /** Kind nodes: skipped-row reasons (`skip_reasons`, summary of artifacts.py) — not exposed by tree.py yet. */
   skip_reasons?: Record<string, number>;
   skip_reason?: string;
@@ -381,6 +394,15 @@ export function planCollect(body: {
  *   `status === "building"` its `artifacts` is empty and the client polls (plan artifact-columns §4.1).
  * - Every row carries `record_index` (0-based JSONL index), sorted or not.
  */
+/** One status of a kind's inventory rows (`/tree` `inventory_notes`). */
+export interface InventoryNote {
+  artifact_type: string;
+  status: string;
+  status_label?: string;
+  count: number;
+  reason?: string;
+}
+
 export interface ArtifactsQuery {
   offset?: number;
   limit?: number;
@@ -395,6 +417,9 @@ export interface ArtifactsQuery {
   /** 특이사항 filters (viewer-families §3.1): repeated `flag=` (any of), `flag_grade=` (at least). */
   flag?: string[];
   flag_grade?: string;
+  /** Exact record-field filters (repeated `browser=` / `service=`; r2 console fix M2). */
+  browser?: string[];
+  service?: string[];
 }
 
 export function artifactsQueryString(query: ArtifactsQuery): string {
@@ -406,6 +431,8 @@ export function artifactsQueryString(query: ArtifactsQuery): string {
   for (const type of query.artifact_type ?? []) params.append("artifact_type", type);
   for (const flag of query.flag ?? []) params.append("flag", flag);
   if (query.flag_grade) params.set("flag_grade", query.flag_grade);
+  for (const value of query.browser ?? []) params.append("browser", value);
+  for (const value of query.service ?? []) params.append("service", value);
   if (query.sort) {
     params.set("sort", query.sort);
     params.set("order", query.order ?? "asc");

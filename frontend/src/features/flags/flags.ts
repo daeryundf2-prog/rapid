@@ -7,7 +7,7 @@
 
 import type { GridRow } from "../../contracts/collection";
 import { flatValue } from "../../utils/flatValue";
-import { type CatalogRule, GRADES, type Grade, isGrade, ruleById } from "./catalog";
+import { type CatalogRule, familyValueLabel, GRADES, type Grade, isGrade, ruleById } from "./catalog";
 
 export interface RowFlag {
   id: string;
@@ -131,8 +131,12 @@ export function flagCitation(flag: RowFlag, rule: CatalogRule | undefined = rule
   // The version that produced the flag wins over the catalogue loaded now (a re-run may differ).
   const raw = flag.version ?? rule?.version;
   const version = raw !== undefined && raw !== "" ? `@${raw}` : "";
+  // A raw value with a catalogue reading cites both: `direction=발신(outgoing)`.
   const evidence = evidenceEntries(flag)
-    .map(([key, value]) => `${key}=${value}`)
+    .map(([key, value]) => {
+      const reading = familyValueLabel(rule?.family, key, value);
+      return reading && reading !== String(value) ? `${key}=${reading}(${value})` : `${key}=${value}`;
+    })
     .join(", ");
   return `${flag.id}${version}${evidence ? ` (${evidence})` : ""}`;
 }
