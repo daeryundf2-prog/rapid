@@ -19,7 +19,8 @@ when the value is a placeholder (``-``, ``N/A``, ``0`` …) and is not counted:
   kept, repeated ``/`` collapsed, trailing ``/`` removed;
 * attachments -- the file name (last path part), casefolded;
 * urls -- the host (lower case, no port / credentials / trailing dot / leading dot of a
-  cookie domain); a bare host is accepted;
+  cookie domain); a bare host is accepted; a ``magnet:`` link is keyed ``magnet:<info-hash>``
+  (BitTorrent v1 ``btih`` / v2 ``btmh``, lower case; R5 L3) so it can carry the torrent class;
 * credentials -- never normalised from the clear value: :func:`credential_record` gives the
   masked text, length and SHA-256 (over the *full* value, before the display cut of
   :func:`clean`) and the key is ``sha256:<hex>``. The SHA-256 is unsalted on purpose (the
@@ -50,6 +51,7 @@ MAC = re.compile(r"^[0-9a-f]{2}(?:[:-]?[0-9a-f]{2}){5}$", re.IGNORECASE)
 GUID = re.compile(r"^\{?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\}?$", re.IGNORECASE)
 HOST = re.compile(r"^[a-z0-9_.-]+\.[a-z0-9-]{2,}\.?$|^localhost$", re.IGNORECASE)
 WHITESPACE = re.compile(r"\s+")
+MAGNET_HASH = re.compile(r"xt=urn:(?:btih|btmh):([0-9a-z]{32,68})", re.IGNORECASE)
 
 
 def clean(raw: object, *, max_chars: int | None = MAX_VALUE_CHARS) -> str | None:
@@ -174,6 +176,12 @@ def url_host(text: str) -> str | None:
     return host or None
 
 
+def magnet_key(text: str) -> str | None:
+    """``magnet:<info-hash>`` of a magnet link (``None`` when it carries no BitTorrent hash)."""
+    match = MAGNET_HASH.search(text[:4096])
+    return f"magnet:{match.group(1).lower()}" if match else None
+
+
 def normalize(table: str, text: str) -> str | None:
     """Grouping key of a cleaned value for ``table`` (``credentials`` are keyed by :func:`credential_record`)."""
     if table == "people":
@@ -186,6 +194,8 @@ def normalize(table: str, text: str) -> str | None:
     if table == "attachments":
         return attachment_key(text)
     if table == "urls":
+        if text[:7].lower() == "magnet:":
+            return magnet_key(text)
         return url_host(text)
     raise ValueError(f"no normalisation for table {table!r}")
 

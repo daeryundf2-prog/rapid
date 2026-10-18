@@ -1,4 +1,11 @@
-"""URL classes of the 통합 보기 › URL 분류 table (``url_classes.yaml``, plan axiom-adoption §3.2)."""
+"""URL classes of the 통합 보기 › URL 분류 table (``url_classes.yaml``, plan axiom-adoption §3.2).
+
+A class lists host ``domains`` and, optionally (R5 L3), ``paths`` -- path prefixes that
+classify a URL on *any* host (on-premises Outlook Web App ``/owa/``) -- and ``schemes`` --
+non-HTTP URL schemes (``magnet:``). The 통합 보기 URL table is keyed by host, so a path rule
+classifies a host once one of its URLs matched the path; a scheme rule classifies the
+``<scheme>:<id>`` key :func:`normalize.normalize` gives such URLs.
+"""
 
 from __future__ import annotations
 
@@ -11,6 +18,8 @@ from pathlib import Path
 URL_CLASSES_PATH = Path(__file__).with_name("url_classes.yaml")
 CLASS_ID = re.compile(r"^[a-z][a-z0-9_-]*$")
 DOMAIN = re.compile(r"^[a-z0-9-]+(?:\.[a-z0-9-]+)+$")
+PATH_PREFIX = re.compile(r"^/[a-z0-9._~-]+/$")
+SCHEME = re.compile(r"^[a-z][a-z0-9+.-]*$")
 
 
 class UrlClassError(ValueError):
@@ -24,14 +33,31 @@ class UrlClasses:
     sources: Mapping[str, tuple[str, ...]]
     # domain -> class id
     domains: Mapping[str, str] = field(default_factory=dict)
+    # path prefix (``/owa/``) -> class id; scheme (``magnet``) -> class id (R5 L3)
+    paths: Mapping[str, str] = field(default_factory=dict)
+    schemes: Mapping[str, str] = field(default_factory=dict)
 
     def classify(self, host: str) -> str | None:
-        """Class of ``host``: the longest listed domain equal to it or a parent of it."""
+        """Class of ``host``: the longest listed domain equal to it or a parent of it.
+
+        A ``<scheme>:<id>`` key (``magnet:<btih>``) is the class of its listed scheme."""
+        scheme, colon, _rest = host.partition(":")
+        if colon and scheme.lower() in self.schemes:
+            return self.schemes[scheme.lower()]
         parts = host.lower().strip(".").split(".")
         for start in range(len(parts) - 1):
             found = self.domains.get(".".join(parts[start:]))
             if found is not None:
                 return found
+        return None
+
+    def classify_path(self, path: str) -> str | None:
+        """Class of a URL path by its listed prefix (case-insensitive; ``/owa`` matches ``/owa/``)."""
+        lowered = (path or "/").lower()
+        lowered = lowered if lowered.endswith("/") else lowered + "/"
+        for prefix, class_id in self.paths.items():
+            if lowered.startswith(prefix):
+                return class_id
         return None
 
 
@@ -50,6 +76,8 @@ def parse_url_classes(data: bytes) -> UrlClasses:
     labels: dict[str, str] = {}
     sources: dict[str, tuple[str, ...]] = {}
     domains: dict[str, str] = {}
+    paths: dict[str, str] = {}
+    schemes: dict[str, str] = {}
     for entry in classes:
         class_id = str(entry.get("id") or "") if isinstance(entry, Mapping) else ""
         if not CLASS_ID.fullmatch(class_id) or class_id in labels:
@@ -69,9 +97,24 @@ def parse_url_classes(data: bytes) -> UrlClasses:
             if domain in domains:
                 raise UrlClassError(f"도메인 {domain}이(가) 두 분류에 있습니다")
             domains[domain] = class_id
+        for prefix in entry.get("paths") or []:
+            if not isinstance(prefix, str) or not PATH_PREFIX.fullmatch(prefix) or prefix in paths:
+                raise UrlClassError(f"URL 분류 {class_id}의 경로 접두어 형식이 아니거나 중복됩니다: {prefix!r}")
+            paths[prefix] = class_id
+        for scheme in entry.get("schemes") or []:
+            if not isinstance(scheme, str) or not SCHEME.fullmatch(scheme) or scheme in ("http", "https") or scheme in schemes:
+                raise UrlClassError(f"URL 분류 {class_id}의 스킴 형식이 아니거나 중복됩니다: {scheme!r}")
+            schemes[scheme] = class_id
         labels[class_id] = label
         sources[class_id] = tuple(urls)
-    return UrlClasses(version=hashlib.sha256(data).hexdigest()[:16], labels=labels, sources=sources, domains=domains)
+    return UrlClasses(
+        version=hashlib.sha256(data).hexdigest()[:16],
+        labels=labels,
+        sources=sources,
+        domains=domains,
+        paths=paths,
+        schemes=schemes,
+    )
 
 
 _CACHE: dict[tuple[str, int, int], UrlClasses] = {}
