@@ -52,6 +52,16 @@ from .dashboard import (
     write_case_notes,
 )
 from .files_ntfs import join_files_page
+from .fs_tree import (
+    FS_INDEX_CACHE,
+    files_output_key,
+    files_restriction,
+    files_roots,
+    parse_bool,
+    parse_folder_path,
+    parse_special,
+    special_restriction,
+)
 from .helpers import (
     allowed_source_roots,
     default_case_path,
@@ -899,6 +909,34 @@ def build_runs_router(
         )
 
 
+    def _files_path_restriction(
+        payload: Mapping[str, object],
+        run_id: str,
+        collection: str,
+        path_prefix: str | None,
+        recursive: str | None,
+        special: str | None,
+    ) -> tuple[list[int] | None, dict[str, object] | None]:
+        """Row positions of the fs-tree folder / special node (``None`` = no such filter)."""
+        wanted_special = parse_special(special)
+        if path_prefix is None and wanted_special is None:
+            if recursive is not None and recursive.strip():
+                raise HTTPException(status_code=422, detail="recursive는 path_prefix와 함께 써야 합니다")
+            return None, None
+        deep = parse_bool(recursive, "recursive")
+        restrict: list[int] | None = None
+        folder: str | None = None
+        index = FS_INDEX_CACHE.get(files_output_key(run_id, get_output_path(store, run_id, "files")), payload)
+        if path_prefix is not None:
+            parts = parse_folder_path(path_prefix, files_roots(payload))
+            restrict = files_restriction(index, collection, parts, recursive=deep)
+            folder = "/".join(parts)
+        if wanted_special is not None:
+            special_rows = special_restriction(index, collection, wanted_special)
+            restrict = special_rows if restrict is None else sorted(set(restrict).intersection(special_rows))
+        return restrict, {"path": folder, "recursive": deep, "special": wanted_special, "rows": len(restrict or [])}
+
+
     @router.get("/api/runs/{run_id}/files")
     def get_run_files(
         run_id: str,
@@ -910,8 +948,22 @@ def build_runs_router(
         flag: list[str] = Query(default=[]),
         flag_grade: str | None = Query(default=None),
         sort: str | None = Query(default=None),
+        path_prefix: str | None = Query(default=None),
+        recursive: str | None = Query(default=None),
+        special: str | None = Query(default=None),
     ) -> dict[str, object]:
         """Paged file rows joined with the newest ``ntfs-meta`` analysis.
+
+        파일 시스템 탐색기 (plan r4 §2.2): ``path_prefix`` = a folder of
+        ``GET /fs-tree`` (relative to the volume root, ``/`` separators,
+        ``""`` = root; same validation: Korean 422/403/404) keeps the rows
+        directly in that folder, or the whole subtree with ``recursive=1``;
+        ``matched`` then equals the folder's ``direct_file_count`` /
+        ``file_count`` of ``/fs-tree`` for the same ``scope``. ``special`` =
+        ``orphan`` | ``unallocated`` | ``slack`` keeps the rows of that fs-tree
+        special node. Both need ``limit > 0``, compose with ``category`` and
+        ``flag``/``sort=flags``, and the page reports ``path_filter = {path,
+        recursive, special, rows}``.
 
         특이사항: rows carry ``flags`` (kind ``files:<scope>``) and the page
         reports ``flags_join`` like ``GET /artifacts``; ``flag``/``flag_grade``
@@ -954,19 +1006,30 @@ def build_runs_router(
             LOGGER.info("GET /files ignores unsupported sort=%r", sort[:64])
         flag_query = parse_flag_query(flag, flag_grade, sort_flags=sort_flags)
         join = flags_join(_run_output_dir_or_none(get_job(store, run_id).summary))
-        if flag_query.active:
+        restrict, path_filter = _files_path_restriction(payload, run_id, collection, path_prefix, recursive, special)
+        if flag_query.active or restrict is not None:
             if limit <= 0:
                 raise HTTPException(status_code=400, detail=FILTER_LIMIT_MESSAGE)
             all_rows = payload.get(collection) if isinstance(payload.get(collection), list) else []
             page_rows, flag_pagination = filter_files_rows(
-                all_rows, collection=collection, join=join, query=flag_query, categories=wanted or None, offset=offset, limit=limit
+                all_rows,
+                collection=collection,
+                join=join,
+                query=flag_query,
+                categories=wanted or None,
+                offset=offset,
+                limit=limit,
+                restrict=restrict,
             )
             page = files_page_base(payload, collection)
             page[collection] = page_rows
             page["record_count"] = len(all_rows)
             page["matched"] = flag_pagination["matched"]
             page["pagination"] = flag_pagination
-            mark_flag_page(page, flag_query, record_count=len(all_rows), other_filters=bool(wanted))
+            if flag_query.active:
+                mark_flag_page(page, flag_query, record_count=len(all_rows), other_filters=bool(wanted) or restrict is not None)
+            if path_filter is not None:
+                page["path_filter"] = path_filter
         elif wanted:
             if limit <= 0:
                 raise HTTPException(status_code=400, detail=FILTER_LIMIT_MESSAGE)

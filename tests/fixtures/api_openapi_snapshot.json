@@ -225,6 +225,9 @@
     "/api/runs/{run_id}/flags/row": {
       "get": "get_row_flags_api_runs__run_id__flags_row_get"
     },
+    "/api/runs/{run_id}/fs-tree": {
+      "get": "get_fs_tree_api_runs__run_id__fs_tree_get"
+    },
     "/api/runs/{run_id}/histogram": {
       "get": "run_histogram_api_runs__run_id__histogram_get"
     },
@@ -236,6 +239,12 @@
     },
     "/api/runs/{run_id}/issues": {
       "get": "get_run_issues_api_runs__run_id__issues_get"
+    },
+    "/api/runs/{run_id}/media/groups": {
+      "get": "get_media_groups_api_runs__run_id__media_groups_get"
+    },
+    "/api/runs/{run_id}/media/similar": {
+      "get": "get_media_similar_api_runs__run_id__media_similar_get"
     },
     "/api/runs/{run_id}/output-files": {
       "get": "get_run_output_files_api_runs__run_id__output_files_get"
@@ -260,6 +269,12 @@
     },
     "/api/runs/{run_id}/processing-snapshot": {
       "get": "get_processing_snapshot_api_runs__run_id__processing_snapshot_get"
+    },
+    "/api/runs/{run_id}/registry-tree": {
+      "get": "get_registry_tree_api_runs__run_id__registry_tree_get"
+    },
+    "/api/runs/{run_id}/registry-values": {
+      "get": "get_registry_values_api_runs__run_id__registry_values_get"
     },
     "/api/runs/{run_id}/related-media": {
       "get": "related_media_api_runs__run_id__related_media_get"

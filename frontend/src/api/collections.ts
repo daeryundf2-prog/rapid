@@ -115,6 +115,8 @@ async function jsonPaged(
   category?: string,
   scope?: string,
   extra = "",
+  /** The server filtered the rows (fs-tree folder): `matched` is the total, like a category page. */
+  serverFiltered = false,
 ): Promise<RawPage> {
   const started = now();
   const filter = `${scope ? `&scope=${enc(scope)}` : ""}${category ? `&category=${enc(category)}` : ""}${extra}`;
@@ -144,7 +146,7 @@ async function jsonPaged(
     payload.pagination && typeof payload.pagination === "object" && !Array.isArray(payload.pagination)
       ? (payload.pagination as Record<string, unknown>)
       : {};
-  if (category && ("matched" in payload || "truncated" in pagination)) {
+  if ((category || serverFiltered) && ("matched" in payload || "truncated" in pagination)) {
     // A category-filtered files page (artifact_filter.filter_files_by_category) counts its
     // matches: `matched` is exact, or null when the scan hit its cap (`pagination.truncated`).
     // Its top-level `total` is the copied UNFILTERED payload total — never show that.
@@ -175,6 +177,28 @@ async function jsonPaged(
   return { ...base, total, truncated: false, hasMore };
 }
 
+/** 파일 시스템 탐색기 filter of `GET /files`: one fs-tree folder (`path_prefix=`) or special node. */
+export interface FilesPathFilter {
+  /** Folder relative to the volume root (`""` = root); undefined = no folder filter. */
+  dir?: string;
+  /** The folder's whole subtree (`recursive=1`) instead of its direct files. */
+  recursive?: boolean;
+  /** fs-tree special node (`special=orphan|unallocated|slack`). */
+  special?: string;
+}
+
+/** `&path_prefix=…&recursive=1&special=…` for `GET /files` ("" when no folder filter). */
+export function filesPathQueryString(filter: FilesPathFilter | undefined): string {
+  const params = new URLSearchParams();
+  if (filter?.dir !== undefined) {
+    params.set("path_prefix", filter.dir);
+    if (filter.recursive) params.set("recursive", "1");
+  }
+  if (filter?.special) params.set("special", filter.special);
+  const text = params.toString();
+  return text ? `&${text}` : "";
+}
+
 /** `GET /files` (optionally `category=<id>`: documents, images, archives, databases, emails, …). */
 export const fetchFilesPage = (
   runId: string,
@@ -183,8 +207,10 @@ export const fetchFilesPage = (
   signal?: AbortSignal,
   category?: string,
   flags?: FlagFilter,
+  path?: FilesPathFilter,
 ) => {
   const route = parseFilesCategory(category);
+  const pathQuery = filesPathQueryString(path);
   return jsonPaged(
     runId,
     "files",
@@ -194,7 +220,8 @@ export const fetchFilesPage = (
     signal,
     route.category,
     route.scope,
-    flagQueryString(flags),
+    flagQueryString(flags) + pathQuery,
+    Boolean(pathQuery),
   );
 };
 

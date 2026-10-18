@@ -49,6 +49,8 @@ export type DomainRoute = RouteTail & {
   flagGrade?: Grade;
   /** Exact record-field filters (`browser=` / `service=`, server-side). */
   fields?: RecordFieldFilters;
+  /** 파일 시스템 탐색기 folder (`dir=`; `""` = volume root). */
+  dir?: string;
 };
 
 export interface TreeModelNode {
@@ -538,6 +540,14 @@ export function domainNodeCount(target: DomainTarget, input: TreeModelInput): Do
         : {}),
     };
   }
+  if (target.collection === "registry") {
+    // 레지스트리 탐색기: the run's key-tree rows (windows-registry `registry-key-tree-node`).
+    if (!tree) return { count: undefined };
+    const keys = mergedKindNode(tree, "windows-registry")?.artifact_type_counts?.["registry-key-tree-node"];
+    return typeof keys === "number" && keys > 0
+      ? { count: keys }
+      : { count: 0, disabledReason: NO_REGISTRY_TREE_REASON };
+  }
   if (target.collection === "derived") {
     // 통합 보기: distinct values of the table (`/tree` `derived:<table>`); no set yet → hidden with the reason.
     if (!tree) return { count: undefined };
@@ -734,6 +744,7 @@ function known(count: number | undefined, loaded: boolean, emptyReason = NO_DATA
 export function domainRoute(target: DomainTarget): DomainRoute {
   const route: DomainRoute = { collection: target.collection };
   if (target.kind) route.kind = target.kind;
+  if (target.dir !== undefined) route.dir = target.dir;
   if (target.fileScope) route.category = filesInventoryCategory(target.fileCategory);
   else if (target.fileCategory) route.category = target.fileCategory;
   if (target.types?.length) route.types = [...target.types];
@@ -1195,6 +1206,31 @@ export function policyAbsences(
  * 탐색 stage tree (console-ia §3–§4): 증거 소스, the "전체 보기" views, then the 15 forensic
  * domains. Workflow places (접수 · 처리 · 검토 · 보고) live on the stage rail, not here.
  */
+/** 레지스트리 탐색기 without key-tree rows. */
+export const NO_REGISTRY_TREE_REASON = "이 런에는 레지스트리 키 트리 행이 없습니다(레지스트리 하이브 미수집)";
+
+/** 전체 보기 node of an explorer (파일 시스템 · 레지스트리): navigates with its own route target. */
+function explorerViewNode(
+  id: string,
+  label: string,
+  target: DomainRoute,
+  count: number | string | undefined,
+  emptyReason: string,
+  loaded: boolean,
+): TreeModelNode {
+  const empty = loaded && count === 0;
+  return {
+    id,
+    label,
+    icon: target.collection === "registry" ? "database" : "hard-drive",
+    count,
+    route: { collection: target.collection },
+    target,
+    selectKey: targetKey(target),
+    ...(empty ? { disabledReason: emptyReason } : {}),
+  };
+}
+
 export function buildTreeModel(input: TreeModelInput): TreeModelNode[] {
   const counts = input.summary?.summary?.counts;
   const loaded = Boolean(counts);
@@ -1215,6 +1251,22 @@ export function buildTreeModel(input: TreeModelInput): TreeModelNode[] {
     toggleOnly: true,
     children: [
       dataNode("files", "전체 파일", counts?.files, "이 런에는 파일 목록이 없습니다", loaded),
+      explorerViewNode(
+        "fs-explorer",
+        "파일 시스템",
+        { collection: "files", dir: "" },
+        counts?.files,
+        "이 런에는 파일 목록이 없습니다",
+        loaded,
+      ),
+      explorerViewNode(
+        "registry-explorer",
+        "레지스트리 탐색기",
+        { collection: "registry" },
+        domainNodeCount({ collection: "registry" }, input).count,
+        NO_REGISTRY_TREE_REASON,
+        Boolean(input.tree),
+      ),
       dataNode("artifacts", "전체 아티팩트", counts?.artifacts, "이 런에는 아티팩트가 없습니다", loaded),
       dataNode(
         "timeline",

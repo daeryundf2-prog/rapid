@@ -67,6 +67,8 @@ export interface DomainTarget {
   analysisCount?: { field: "source_counts" | "source_in_use_counts" | "kind_counts"; keys: string[] };
   /** Why an analysis sub-view is empty while its job never ran (replaces the generic reason). */
   neverRanReason?: string;
+  /** 파일 시스템 탐색기 (r4 §2.2): open the files listing with the folder tree at this folder (`""` = root). */
+  dir?: string;
 }
 
 export interface DomainNodeDef {
@@ -658,6 +660,13 @@ export const DOMAINS: readonly DomainDef[] = [
     label: "파일시스템",
     icon: "hard-drive",
     nodes: [
+      {
+        id: "fs-explorer",
+        label: "폴더 탐색기",
+        target: { collection: "files", dir: "" },
+        lead: true,
+        note: "볼륨 → 폴더 계층으로 내려가며 폴더의 파일을 목록에 표시합니다(←/→ 펼침, Enter 열기)",
+      },
       { id: "fs-all", label: "전체 파일", target: { collection: "files" } },
       { id: "fs-inventory", label: "전체 파일(인벤토리)", target: inventory() },
       { id: "fs-documents", label: "문서", target: files("documents") },
@@ -736,6 +745,13 @@ export const DOMAINS: readonly DomainDef[] = [
     label: "레지스트리",
     icon: "database",
     nodes: [
+      {
+        id: "reg-explorer",
+        label: "레지스트리 탐색기(키·값)",
+        target: { collection: "registry" },
+        lead: true,
+        note: "하이브 → 키 트리, 값 표(형식·데이터·디코딩), 키에서 나온 아티팩트 행으로 이동",
+      },
       {
         id: "reg-persistence",
         label: "자동 실행/지속성",
@@ -1436,6 +1452,9 @@ export function targetKey(
     flagGrade?: string;
     /** Exact record-field filters (`browser=` / `service=`): part of the key only when set. */
     fields?: RecordFieldFilters;
+    /** 파일 시스템 탐색기 folder / special node: the explorer view of files is its own node. */
+    dir?: string;
+    special?: string;
     /**
      * Column filters: part of the key only on event-log channel views (`evt_channel(_group)`) and
      * for the analysis `details` server filters (`f:source` / `f:signature_kind` / `f:recovery_method` / `f:in_use`).
@@ -1461,9 +1480,12 @@ export function targetKey(
           .sort()
           .join("")
       : "";
-  const filesCategory = target.fileScope
-    ? filesInventoryCategory(target.fileCategory)
-    : (target.fileCategory ?? target.category ?? "");
+  const fsExplorer = target.collection === "files" && (target.dir !== undefined || Boolean(target.special));
+  const filesCategory = fsExplorer
+    ? "|fs"
+    : target.fileScope
+      ? filesInventoryCategory(target.fileCategory)
+      : (target.fileCategory ?? target.category ?? "");
   return (
     [
       target.collection,

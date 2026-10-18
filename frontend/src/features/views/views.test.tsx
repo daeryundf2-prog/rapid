@@ -10,6 +10,7 @@ import { dispatchShortcut, eventToShortcut } from "../../shortcuts";
 import { resetAppStore, useAppStore } from "../../state/store";
 import { useGridLocalStore } from "../grid/adapter";
 import { installFetch, jsonResponse, mockLayout, queryWrapper, resetGridStore } from "../grid/testSupport";
+import { useViewPrefs } from "../review/viewPrefs";
 import { effectiveView, viewAvailability, viewDisabledReason } from "./availability";
 import { ChatView } from "./ChatView";
 import { groupConversations, highlightParts, highlightTerms, isMessageRow } from "./chat";
@@ -380,6 +381,60 @@ describe("ThumbnailView", () => {
     });
     renderQ(<ThumbnailView />);
     expect(await screen.findByText("이 노드에는 썸네일로 표시할 이미지가 없습니다.")).toBeTruthy();
+  });
+
+  it("미디어 탐색기: 유사 사진 찾기 narrows the grid, selects the set, and keeps the blur", async () => {
+    installFetch({
+      "/files": () =>
+        jsonResponse({
+          candidates: ["a.jpg", "b.png", "c.gif"].map((name) => ({ path: `C:/case/${name}`, name })),
+          total: 3,
+        }),
+      "/media/similar": () =>
+        jsonResponse({
+          run_id: "run-1",
+          ref: { path: "C:/case/a.jpg", record_index: 0, perceptual_hash: "0", sha256: null },
+          max_distance: 8,
+          limit: 100,
+          items: [
+            {
+              path: "C:\\case\\b.png",
+              name: "b.png",
+              kind: "media-image",
+              record_index: 1,
+              locator: "/artifacts/1",
+              distance: 3,
+              same_hash: false,
+              sha256: null,
+              camera: null,
+              captured_at: null,
+            },
+          ],
+          counts: { indexed: 3, with_phash: 3, same_hash: 0, near: 1, matched: 1, returned: 1 },
+        }),
+    });
+    useViewPrefs.setState({ mediaBlur: true });
+    renderQ(<ThumbnailView />);
+    const grid = await screen.findByRole("grid", { name: /이미지 3개/ });
+    const cells = () => Array.from(grid.querySelectorAll<HTMLElement>('[role="gridcell"]'));
+    await waitFor(() => expect(cells().length).toBe(3));
+    // The panel works on the active tile (the roving tab stop, a.jpg until focus moves).
+    act(() => cells()[0]?.focus());
+    fireEvent.click(screen.getByTestId("media-panel-similar"));
+    expect(screen.getByTestId("media-panel-similar").getAttribute("aria-pressed")).toBe("true");
+    const panel = await screen.findByTestId("media-panel");
+    expect(panel.textContent).toContain("유사 사진 찾기 — a.jpg");
+    await waitFor(() => expect(panel.textContent).toContain("pHash 거리 3"));
+    fireEvent.click(screen.getByRole("button", { name: "격자에 이 묶음만" }));
+    expect(await screen.findByRole("grid", { name: /이미지 2개/ })).toBeTruthy();
+    expect(screen.getByTestId("media-narrow").textContent).toContain("2건 표시");
+    expect(document.querySelector(".thumb-view")?.hasAttribute("data-media-blur")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "이 묶음 선택(태그용)" }));
+    expect(useGridLocalStore.getState().selectedKeys.size).toBe(2);
+    expect(await screen.findByText("2개 선택")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "모두 보기" }));
+    expect(await screen.findByRole("grid", { name: /이미지 3개/ })).toBeTruthy();
+    useViewPrefs.setState({ mediaBlur: false });
   });
 });
 

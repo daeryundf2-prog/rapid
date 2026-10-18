@@ -8,6 +8,7 @@ import { registerCommands } from "../commands/registry";
 import { AnalysisFeature } from "../features/analysis/AnalysisFeature";
 import { CaseFeature } from "../features/case/CaseFeature";
 import { DerivedFeature } from "../features/derived/DerivedFeature";
+import { explorerCommands } from "../features/explorers/commands";
 import { useFamilyCatalogLoader } from "../features/flags/catalog";
 import { useReviewInvalidation } from "../features/grid/reviewMap";
 import { registerStageCommands } from "../features/stages/stages";
@@ -31,6 +32,7 @@ export function App() {
   useEffect(() => registerStageCommands(), []);
   // 뷰어 창 모드 (U-F2): Ctrl+Shift+V, 되돌리기, and the popout's requests.
   useEffect(() => registerCommands(popoutCommands()), []);
+  useEffect(() => registerCommands(explorerCommands()), []);
   useEffect(() => installPopoutHost(queryClient), [queryClient]);
 
   // One "case.open.{id}" palette entry per run; re-register only when the run list changes.

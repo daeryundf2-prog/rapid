@@ -175,6 +175,10 @@ export function collectionQueryKey(runId: string | null, query: CollectionQuery,
     def.source === "whole" ? (query.search ?? null) : null,
     def.source === "whole" ? (query.extension ?? null) : null,
     query.ref.id === "analysis" ? (query.ref.analysisId ?? "") : "",
+    // 파일 시스템 탐색기 folder / special node (files only): another folder is another listing.
+    query.ref.id === "files" && (query.ref.dir !== undefined || query.ref.special)
+      ? `${query.ref.dir ?? ""}|${query.ref.recursive ? "r" : "d"}|${query.ref.special ?? ""}`
+      : "",
     query.ref.id === "artifacts" || query.ref.id === "analysis"
       ? query.pathContains?.trim() || serverPathFilter(query.text) || ""
       : "",
@@ -231,6 +235,10 @@ export function useCollectionQuery(
       rawQuery.ref.status,
       rawQuery.ref.category,
       rawQuery.ref.analysisId,
+      // 파일 시스템 탐색기 folder / subtree / special node (files): another listing.
+      rawQuery.ref.dir,
+      rawQuery.ref.recursive,
+      rawQuery.ref.special,
       rawQuery.text,
       rawQuery.search,
       rawQuery.extension,

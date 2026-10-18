@@ -282,10 +282,15 @@ export const filesCollection: CollectionDef = {
   label: "파일",
   source: "paged",
   fetch: (runId, query, signal) =>
-    fetchFilesPage(runId, query.offset, query.limit, signal, query.ref.category || undefined, {
-      ids: query.flags,
-      grade: query.flagGrade,
-    }),
+    fetchFilesPage(
+      runId,
+      query.offset,
+      query.limit,
+      signal,
+      query.ref.category || undefined,
+      { ids: query.flags, grade: query.flagGrade },
+      { dir: query.ref.dir, recursive: query.ref.recursive, special: query.ref.special },
+    ),
   widthPriority: () => FILES_PRIORITY,
   mapRow: (raw, position, ctx) => {
     // A category-filtered page is not candidate-ordered: keep the candidate's own index.

@@ -7,6 +7,8 @@
  *   intake  `#/case/{run}/intake`
  *   process `#/case/{run}/process[/{analysis node}]`
  *   explore `#/case/{run}/explore/{files|docs|artifacts|timeline|indicators|search|analysis}[/{kind}]`
+ *           `#/case/{run}/explore/files?dir=/{folder}[&rec=1]` (파일 시스템 탐색기, `dir=/` = volume root)
+ *           `#/case/{run}/explore/registry[/{hive id}]?key={key path}` (레지스트리 탐색기)
  *   review  `#/case/{run}/review/board[/{status}]`
  *   report  `#/case/{run}/report/outputs`
  * Legacy links `#/case/{run}/{collection}[/{sub}]` parse to the same route and are rewritten
@@ -53,6 +55,7 @@ export const EXPLORE_VIEWS: readonly CollectionId[] = [
   "search",
   "analysis",
   "derived",
+  "registry",
 ];
 
 /** The stage a collection belongs to. */
@@ -141,7 +144,23 @@ export interface Route {
   flagGrade?: "A" | "B" | "C";
   /** Exact record-field filters, URL `browser=` / `service=` (repeated; artifacts server-side). */
   fields?: RecordFieldFilters;
+  /**
+   * 파일 시스템 탐색기 (r4 §2.2): the selected folder relative to the volume root (`""` = root), URL
+   * `dir=/<folder>` (files only). Present = the explorer pane is open and the grid lists that folder
+   * (`GET /files?path_prefix=`).
+   */
+  dir?: string;
+  /** With `dir`: the whole subtree instead of the folder's direct files, URL `rec=1`. */
+  rec?: boolean;
+  /** 파일 시스템 탐색기 special node (`GET /files?special=`), URL `special=` (files only). */
+  special?: FsSpecial;
+  /** 레지스트리 탐색기: selected key path (mount included), URL `key=` (registry only; `kind` = hive id). */
+  key?: string;
 }
+
+/** fs-tree special nodes the files listing filters (`GET /files?special=`). */
+export type FsSpecial = "orphan" | "unallocated" | "slack";
+export const FS_SPECIALS: readonly FsSpecial[] = ["orphan", "unallocated", "slack"];
 
 /** Collections whose `{sub}` is a kind with server sort / promoted columns (`sort=`, `cols=`). */
 function hasKindSort(route: Pick<Route, "collection" | "kind">): boolean {
@@ -223,6 +242,7 @@ export const COLLECTION_IDS: readonly CollectionId[] = [
   "analysis",
   "process",
   "derived",
+  "registry",
 ];
 
 const REVIEW_STATUSES: readonly ReviewStatus[] = [
@@ -293,6 +313,8 @@ export function parseHash(hash: string): Route {
   if (sub && (route.collection === "artifacts" || route.collection === "analysis")) route.kind = sub;
   // 통합 보기: `{sub}` is the table (people, devices, paths, attachments, credentials, urls).
   if (sub && route.collection === "derived") route.kind = sub;
+  // 레지스트리 탐색기: `{sub}` is the hive id.
+  if (sub && route.collection === "registry") route.kind = sub;
   if (sub && route.collection === "review" && (REVIEW_STATUSES as readonly string[]).includes(sub)) {
     route.status = sub as ReviewStatus;
   }
@@ -356,6 +378,19 @@ export function parseHash(hash: string): Route {
       if (item && !list.includes(item)) route.fields = { ...route.fields, [field]: [...list, item] };
     } else if (key === "note" && value === "1") {
       route.notes = true;
+    } else if (key === "dir" && route.collection === "files") {
+      // `dir=/` = volume root; the leading slash keeps an empty folder path visible in the URL.
+      route.dir = safeDecode(value).replace(/^\/+/, "");
+    } else if (key === "rec" && value === "1" && route.collection === "files") {
+      route.rec = true;
+    } else if (
+      key === "special" &&
+      route.collection === "files" &&
+      (FS_SPECIALS as readonly string[]).includes(value)
+    ) {
+      route.special = value as FsSpecial;
+    } else if (key === "key" && value && route.collection === "registry") {
+      route.key = safeDecode(value);
     } else if (key === "ext" && value) {
       const list = listParam(value);
       if (list.length) route.ext = list;
@@ -388,7 +423,9 @@ export function serializeRoute(route: Route): string {
       if ((collection === "artifacts" || collection === "analysis") && route.kind) {
         path += `/${encodeURIComponent(route.kind)}`;
       }
-      if (collection === "derived" && route.kind) path += `/${encodeURIComponent(route.kind)}`;
+      if ((collection === "derived" || collection === "registry") && route.kind) {
+        path += `/${encodeURIComponent(route.kind)}`;
+      }
   }
   const query: string[] = [];
   if (
@@ -409,6 +446,12 @@ export function serializeRoute(route: Route): string {
   if (route.ext?.length) query.push(`ext=${route.ext.map(encodeURIComponent).join(",")}`);
   if (route.path) query.push(`path=${encodeURIComponent(route.path)}`);
   if (route.notes) query.push("note=1");
+  if (collection === "files" && route.dir !== undefined) {
+    query.push(`dir=${encodeURIComponent(`/${route.dir}`)}`);
+    if (route.rec) query.push("rec=1");
+  }
+  if (collection === "files" && route.special) query.push(`special=${route.special}`);
+  if (collection === "registry" && route.key) query.push(`key=${encodeURIComponent(route.key)}`);
   if (route.flagGrade) query.push(`flag_grade=${route.flagGrade}`);
   for (const id of route.flags ?? []) query.push(`flag=${encodeURIComponent(id)}`);
   for (const field of RECORD_FIELD_KEYS) {
@@ -439,7 +482,10 @@ export function collectionChanged(a: Route, b: Route): boolean {
     a.kind !== b.kind ||
     a.status !== b.status ||
     a.category !== b.category ||
-    a.analysisId !== b.analysisId
+    a.analysisId !== b.analysisId ||
+    a.dir !== b.dir ||
+    Boolean(a.rec) !== Boolean(b.rec) ||
+    a.special !== b.special
   );
 }
 

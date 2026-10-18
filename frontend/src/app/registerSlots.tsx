@@ -10,6 +10,8 @@ import { AnalysisPane } from "../features/analysis/AnalysisPane";
 import { AnalysisProgressChip } from "../features/analysis/AnalysisProgressChip";
 import { useCaseDialogs } from "../features/case/dialogs";
 import { DerivedPane } from "../features/derived/DerivedPane";
+import { FsExplorerLayout, fsExplorerOpen } from "../features/explorers/FsExplorer";
+import { RegistryExplorer } from "../features/explorers/RegistryExplorer";
 import { DataGrid } from "../features/grid/DataGrid";
 import { ProcessPage, ProcessPanel } from "../features/stages/ProcessStage";
 import { ReportPage, ReportPanel, ReviewPanel } from "../features/stages/ReviewReportStage";
@@ -56,15 +58,18 @@ function GridSlot() {
   if (route.runId && route.collection === "analysis") return <AnalysisPane />;
   // 통합 보기 (axiom-adoption §3.2): derived tables + original rows, not the DataGrid.
   if (route.runId && route.collection === "derived") return <DerivedPane />;
+  // 레지스트리 탐색기 (r4 §2.2): hive → key tree + value table, its own pane.
+  if (route.runId && route.collection === "registry") return <RegistryExplorer />;
   if (route.runId && route.collection === "process") return <ProcessPage />;
   if (route.runId && route.collection === "outputs") return <ReportPage />;
-  return route.runId && route.collection === "intake" ? (
-    <IntakePane />
-  ) : (
+  if (route.runId && route.collection === "intake") return <IntakePane />;
+  const grid = (
     <ViewSwitch>
       <DataGrid />
     </ViewSwitch>
   );
+  // 파일 시스템 탐색기 (r4 §2.2): folder tree beside the grid of the selected folder.
+  return route.runId && fsExplorerOpen(route) ? <FsExplorerLayout>{grid}</FsExplorerLayout> : grid;
 }
 
 /** "실행/불러오기" opens S4's run dialog (hosted by CaseFeature). */

@@ -40,3 +40,22 @@
 
 ## 4. 결과 기록
 (구현 후)
+
+### 4.2 V2 — 탐색기 3종 (브랜치 `feat/r4-v2-explorers`, 2026-10-18)
+
+**구현**
+- API: `rapidtriage/api/app/fs_tree.py`, `registry_tree.py`, `media_similar.py`, `routes_explorers.py`(+ `GET /files?path_prefix=&recursive=&special=` — `routes_runs.py`, `triage_flags.filter_files_rows(restrict=)`). 테스트 `tests/test_rapidtriage_explorers_api.py`(18건: 폴더 수치 = 그리드 합계(양 범위·직속/하위), 커서 페이지, 경로 한정 403, 한국어 422, 색인 상한 3종, 출력 갱신 시 재색인, 레지스트리 값 디코딩·인용·점프 행·이름만 대체, pHash 거리·같은 해시·그룹).
+  - `GET /api/runs/{id}/fs-tree?path=&scope=&limit=&after=`: 한 단계 자식 폴더(직속·하위 파일 수/크기 합), 볼륨 루트(파티션 시작 섹터는 ntfs-meta 분석이 있을 때), 특수 노드 고아 파일·미할당 공간·슬랙(파일 목록 → ntfs-meta·카빙 분석 순, 없으면 `hidden_special_nodes`에 사유). 증거 루트 밖·상대 경로 불명 행은 트리에 넣지 않고 `index.outside_root`로 보고.
+  - `GET /api/runs/{id}/registry-tree?hive=&key=` / `registry-values?hive=&key=`: `registry-key-tree-node` 행으로 하이브→키 색인(60만 키 상한, 출력 서명별 캐시), 값은 증거 루트 안의 하이브 파일에서 `NativeRegistryHive`로 디코딩(읽지 못하면 수집된 값 이름만 + 사유), 인용 문장, 키에서 나온 `windows-registry`·`windows-shellbags`·`windows-os-account` 행(점프 대상).
+  - `GET /api/runs/{id}/media/similar?ref=&max_distance=&limit=`(pHash 해밍 거리 0–16, 기본 8) · `media/groups?by=camera|date[&key=]`.
+- 콘솔: `frontend/src/features/explorers/`(지연 로드 ARIA 트리 `ExplorerTree`, `FsExplorer`, `RegistryExplorer`, `MediaExplorerPanel`, `explorer.fs`·`explorer.registry` 명령), 라우트 `#/case/{run}/explore/files?dir=/<폴더>[&rec=1|&special=]`, `#/case/{run}/explore/registry/{hive}?key=`. 진입: 전체 보기 › 파일 시스템 · 레지스트리 탐색기, 파일시스템 계열 › 폴더 탐색기, 레지스트리 계열 › 레지스트리 탐색기(키·값), 명령 팔레트. 썸네일 보기 툴바: 관련 미디어 · 유사 사진 찾기 · 카메라·촬영일 그룹, "격자에 이 묶음만"(흐리게 유지), "이 묶음 선택(태그용)" → 선택 막대 태그. 키보드: ↑/↓·←/→(펼침/접기·부모/첫 자식)·Home/End·Enter 열기, 펼침/열기는 셸의 polite 라이브 영역 하나로만 알림. vitest `src/features/views/explorers.test.tsx`(11건) + `views.test.tsx` 썸네일 패널 1건.
+
+**실데이터 (run-subset10, 읽기 전용 증거 `D:\rapid-qa\bsh-subset`, API :8941 + Vite :8942)**
+
+| # | 확인 | 결과 |
+|---|---|---|
+| Q-R4-4 | 폴더 수치 = 그리드 합계 (후보 4,935 / 인벤토리 14,094, 폴더 1,080, 루트 밖 0) | `Users/user/Desktop` 직속 39 = 39, 하위 1,655 = 1,655 · `Users/user/AppData/Local/Microsoft/Edge/User Data/Default` 직속 29 = 29, 하위 1,662 = 1,662 · `Windows/System32/config` 직속 1 = 1, 하위 533 = 533(콘솔 "총 533건" = "하위 포함 533개") · 인벤토리 `Windows/System32/winevt/Logs` 183 = 183. 키보드로 Documents → Koino 열기, 그리드 1건. 특수 노드 3종은 숨김 + 사유(이 런은 디렉터리 증거라 고아·미할당·슬랙 행 없음, ntfs-meta·카빙 분석 없음). `..` → 422, `C:\Windows` → 403 |
+| Q-R4-5 | NTUSER/SYSTEM 키 트리·값·점프 | 하이브 14개(키 248,904, 첫 색인 8.4 s, 이후 0.01 s; 연결 행 3,121). NTUSER(…-1001) 루트 자식 12개; `…\CurrentVersion\Run` 값 8개 REG_SZ 디코딩(OneDrive·KakaoTalk·Slack 등), 연결 행 8건(`registry-persistence-entry`) → "KakaoTalk 행 열기"가 `windows-registry` 그리드 119쪽 행 + 뷰어 레코드로 이동. SYSTEM `ControlSet001\Services` 자식 853개(커서 페이지; 깊은 링크 `Services\WinDefend`는 첫 200개 밖이라 트리가 다음 쪽을 스스로 불러 선택 표시, 값 12개), `ComputerName\ComputerName` = `진료실1`, 연결 `windows-computer-name` 1건. 인용 "하이브 경로 › 키 › 마지막 기록 › 셀 오프셋 0x…" |
+| Q-R4-6 | 관련 미디어·유사 사진 | 이미지 996개(pHash 994). 의사면허증.jpg: 같은 해시 1(`/related-media` 케이스 DB 1 = similar `same_hash` 1), pHash ≤ 8 근접 4 → 패널 "같은 해시 1 · pHash 근접(≤ 8) 4". 전문의 면허증.jpg 1/2, KakaoTalk_20211224_114349237_01.jpg 0/4. 카메라 그룹 7개(iPhone 13 Pro 13 · iPhone 11 Pro 12 · … · 정보 없음 965), 촬영일 그룹 27개; "Apple iPhone 11 Pro" 묶음으로 폴더 격자 좁히기 → 3건 표시 |
+
+**게이트**: 대상 Python 테스트(신규 + api·api_contract·media_image·windows_artifacts)·ruff·vulture·compileall·check-doc-refs·API 스냅샷, 프런트 lint·typecheck·vitest(tree·views·grid·shell·api)·check:contrast 통과(원문은 작업 보고). 전체 스위트·Playwright는 위임 대상.

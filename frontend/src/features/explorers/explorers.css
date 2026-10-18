@@ -1,0 +1,321 @@
+/* 탐색기 panes (plan r4 §2.2 V2): file system, registry, media panel. Tokens only (tokens.css). */
+
+.explorer-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--fs-body);
+}
+
+.explorer-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+  border-inline-end: 1px solid var(--line-subtle);
+  background: var(--bg-panel);
+  padding-block-end: var(--space-2);
+}
+
+.explorer-pane-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--line-subtle);
+}
+
+.explorer-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0;
+  font-size: var(--fs-panel-title);
+  font-weight: 600;
+}
+
+.explorer-field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--fs-table-aux);
+  color: var(--text-muted);
+}
+
+.explorer-field select {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 1px var(--space-1);
+}
+
+.explorer-tree {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-1) 0;
+}
+
+.explorer-tree .case-tree-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--row-h);
+  cursor: pointer;
+}
+
+.explorer-tree-status {
+  list-style: none;
+  padding-block: 2px;
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
+}
+
+.explorer-tree-status.is-error,
+.explorer-note.is-error {
+  color: var(--danger);
+}
+
+.explorer-tree-more .case-tree-label {
+  color: var(--accent);
+}
+
+.explorer-note {
+  margin: var(--space-2) var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
+}
+
+.explorer-empty {
+  margin: var(--space-6) var(--space-4);
+}
+
+.explorer-hidden {
+  margin: var(--space-2) var(--space-3);
+  font-size: var(--fs-table-aux);
+  color: var(--text-muted);
+}
+
+.explorer-hidden ul {
+  margin: var(--space-1) 0 0;
+  padding-inline-start: var(--space-4);
+}
+
+.explorer-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.explorer-main-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.explorer-scroll {
+  overflow: auto;
+  padding: var(--space-3) var(--space-4);
+}
+
+.explorer-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  padding: 6px var(--space-3);
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--line-subtle);
+  font-size: var(--fs-table-aux);
+}
+
+.explorer-crumbs ol {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.explorer-crumbs li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.explorer-crumbs [aria-current="page"] {
+  font-weight: 600;
+}
+
+.explorer-crumb-sep,
+.explorer-muted {
+  color: var(--text-muted);
+}
+
+.explorer-crumbs-text {
+  margin: 0;
+}
+
+.explorer-counts {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.explorer-mono {
+  font-family: var(--font-mono);
+  word-break: break-all;
+}
+
+.explorer-hex {
+  font-size: var(--fs-aux);
+  color: var(--text-muted);
+}
+
+.explorer-key-path {
+  margin: 0 0 var(--space-2);
+  font-size: var(--fs-panel-title);
+  font-weight: 600;
+}
+
+.explorer-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+  margin: 0 0 var(--space-3);
+}
+
+.explorer-facts div {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.explorer-facts dt {
+  color: var(--text-muted);
+}
+
+.explorer-facts dd {
+  margin: 0;
+}
+
+.explorer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.explorer-citation {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  font-size: var(--fs-table-aux);
+}
+
+.explorer-table-wrap {
+  overflow-x: auto;
+  margin-bottom: var(--space-3);
+}
+
+.explorer-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: var(--fs-table-aux);
+}
+
+.explorer-table .col-name {
+  width: 22%;
+}
+
+.explorer-table .col-type {
+  width: 13%;
+}
+
+.explorer-table .col-data {
+  width: 27%;
+}
+
+.explorer-table th,
+.explorer-table td {
+  padding: 3px var(--space-2);
+  border-bottom: 1px solid var(--line-subtle);
+  text-align: start;
+  vertical-align: top;
+}
+
+.explorer-table thead th {
+  color: var(--text-muted);
+  font-weight: 600;
+  background: var(--bg-panel);
+}
+
+.explorer-table tbody th {
+  font-weight: 500;
+}
+
+.explorer-decoded {
+  word-break: break-word;
+}
+
+.explorer-linked h4 {
+  margin: var(--space-3) 0 var(--space-1);
+  font-size: var(--fs-body);
+}
+
+.explorer-linked ul {
+  margin: 0;
+  padding-inline-start: var(--space-4);
+}
+
+/* 관련 미디어 panel of the thumbnail view. */
+.media-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--line-subtle);
+  background: var(--bg-panel);
+  font-size: var(--fs-table-aux);
+  max-height: 40%;
+  overflow: auto;
+}
+
+.media-panel-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.media-panel h3 {
+  margin: 0;
+  font-size: var(--fs-body);
+}
+
+.media-panel ul {
+  margin: 0;
+  padding-inline-start: var(--space-4);
+}
+
+.media-group-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
