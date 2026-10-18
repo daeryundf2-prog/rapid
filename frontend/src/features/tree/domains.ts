@@ -14,6 +14,7 @@ import { filesInventoryCategory } from "../../api/collections";
 import type { CollectionId, ColumnFilter } from "../../contracts/collection";
 import type { IconName } from "../../icons";
 import type { AnalysisNodeId } from "../analysis/kinds";
+import { CHANNEL_FILTER_COLUMN } from "../filters/filterModel";
 
 export interface DomainTarget {
   collection: CollectionId;
@@ -38,6 +39,12 @@ export interface DomainTarget {
   cf?: ColumnFilter[];
   /** Count from this numeric field of the kind's `/tree` node instead of the per-type counts. */
   countField?: string;
+  /**
+   * Event-log channel group (`/tree` `artifacts:eventlog` `channel_groups[].id`): the count comes
+   * from that group and its exact channel names replace the `evt_channel` filter value (server
+   * `channel=`); the static value is the canonical channel, used until `/tree` has the group.
+   */
+  channelGroup?: string;
   /** Analysis results node (collection "analysis"). */
   analysis?: AnalysisNodeId;
 }
@@ -96,6 +103,18 @@ const inventory = (category?: string): DomainTarget => ({
   ...(category ? { fileCategory: category } : {}),
 });
 const derived = (table: string): DomainTarget => ({ collection: "derived", kind: table });
+/** Event-log channel node: server `channel=` filter (exact names, `cf=evt_channel:<a>|<b>`). */
+const channelNode = (
+  group: string,
+  canonical: string[],
+  extra: Partial<DomainTarget> = {},
+): DomainTarget => ({
+  collection: "artifacts",
+  kind: "eventlog",
+  channelGroup: group,
+  ...extra,
+  cf: [{ col: CHANNEL_FILTER_COLUMN, op: ":", value: canonical.join("|") }, ...(extra.cf ?? [])],
+});
 const run = (analysis: AnalysisNodeId): DomainTarget => ({
   collection: "analysis",
   kind: analysis,
@@ -132,6 +151,58 @@ const DESKTOP_MESSENGER_EVIDENCE_TYPES = [
   "chat-app-inventory",
   "chat-contact",
   "chat-attachment",
+];
+
+/** 이벤트 로그 › channel group nodes (core/eventlog_channels.py CHANNEL_GROUPS). */
+export const EVENTLOG_CHANNEL_NODES: readonly DomainNodeDef[] = [
+  { id: "evt-ch-other", label: "기타 채널", target: channelNode("other", ["(없음)"]) },
+  {
+    id: "evt-ch-firewall",
+    label: "방화벽",
+    target: channelNode("firewall", ["Microsoft-Windows-Windows Firewall With Advanced Security/Firewall"]),
+  },
+  { id: "evt-ch-security", label: "보안", target: channelNode("security", ["Security"]) },
+  {
+    id: "evt-ch-user-pnp",
+    label: "사용자 PNP",
+    target: channelNode("user-pnp", ["Microsoft-Windows-UserPnp/DeviceInstall"]),
+  },
+  {
+    id: "evt-ch-services",
+    label: "서비스(SCM)",
+    target: channelNode("services", ["System"], {
+      cols: ["details.provider_name"],
+      cf: [{ col: "f:provider_name", op: ":", value: "Service Control Manager" }],
+    }),
+  },
+  {
+    id: "evt-ch-storage",
+    label: "스토리지",
+    target: channelNode("storage", ["Microsoft-Windows-Ntfs/Operational"]),
+  },
+  { id: "evt-ch-system", label: "시스템", target: channelNode("system", ["System"]) },
+  {
+    id: "evt-ch-rdp",
+    label: "원격 데스크톱",
+    target: channelNode("rdp", ["Microsoft-Windows-TerminalServices-LocalSessionManager/Operational"]),
+  },
+  { id: "evt-ch-application", label: "응용 프로그램", target: channelNode("application", ["Application"]) },
+  {
+    id: "evt-ch-task-scheduler",
+    label: "작업 스케줄러",
+    target: channelNode("task-scheduler", ["Microsoft-Windows-TaskScheduler/Operational"]),
+  },
+  { id: "evt-ch-office-alerts", label: "Office Alerts", target: channelNode("office-alerts", ["OAlerts"]) },
+  {
+    id: "evt-ch-powershell",
+    label: "PowerShell",
+    target: channelNode("powershell", ["Microsoft-Windows-PowerShell/Operational", "Windows PowerShell"]),
+  },
+  {
+    id: "evt-ch-defender",
+    label: "Windows Defender",
+    target: channelNode("defender", ["Microsoft-Windows-Windows Defender/Operational"]),
+  },
 ];
 
 function pickLabels(labels: Readonly<Record<string, string>>, types: string[]): Record<string, string> {
@@ -532,6 +603,10 @@ export const DOMAINS: readonly DomainDef[] = [
       },
       { id: "evt-etl", label: "ETL 추적 파일", target: a("eventlog", ["etl-trace-file"]) },
       { id: "evt-firewall", label: "방화벽 로그", target: a("windows-system", ["firewall-log"]) },
+      // 채널별 (plan r3-os-depth §3.2 O2): Korean-sorted (Hangul before Latin), counts from `/tree`
+      // `channel_groups`; server `channel=` exact match. 서비스(SCM) narrows 시스템 to the Service
+      // Control Manager provider on the loaded rows.
+      ...EVENTLOG_CHANNEL_NODES,
     ],
   },
   {
@@ -985,11 +1060,17 @@ export function targetKey(
     /** 특이사항 filters (U-F4): part of the key only when set. */
     flags?: string[];
     flagGrade?: string;
+    /** Column filters: part of the key only on event-log channel views (an `evt_channel` filter). */
+    cf?: readonly ColumnFilter[];
   },
 ): string {
+  const cf = target.cf ?? [];
+  const channels = cf.some((f) => f.col === CHANNEL_FILTER_COLUMN)
+    ? cf.map((f) => `${f.col}${f.op}${f.value}`)
+    : [];
   const flagPart = `${target.flagGrade ? `|g=${target.flagGrade}` : ""}${
     target.flags?.length ? `|f=${[...target.flags].sort().join(",")}` : ""
-  }`;
+  }${channels.length ? `|ch=${channels.sort().join(",")}` : ""}`;
   const filesCategory = target.fileScope
     ? filesInventoryCategory(target.fileCategory)
     : (target.fileCategory ?? target.category ?? "");

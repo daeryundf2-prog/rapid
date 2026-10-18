@@ -211,7 +211,24 @@ export interface TreeNode {
   stale_below_first_record_count?: number;
   /** Kind nodes: flagged rows per highest grade (viewer-families U-F4, `triage-flags` summary). */
   flag_counts?: Partial<Record<"A" | "B" | "C", number>>;
+  /** `artifacts:eventlog` (plan r3-os-depth §3.2 O2): rows per exact `details.channel` ("" = none). */
+  channel_counts?: Record<string, number>;
+  /** `artifacts:eventlog`: channel groups (core/eventlog_channels.py), Korean-sorted. */
+  channel_groups?: ChannelGroupNode[];
   children?: TreeNode[];
+}
+
+/** One event-log channel group of `/tree` (`artifacts:eventlog` `channel_groups`). */
+export interface ChannelGroupNode {
+  id: string;
+  label: string;
+  /** Rows of the group; null when unknown (서비스(SCM) on an older output). */
+  count: number | null;
+  /** Exact channel names of the run in this group (the server `channel=` values). */
+  channels: string[];
+  /** False for 서비스(SCM): a view inside 시스템, not part of the channel partition. */
+  partition: boolean;
+  provider?: string;
 }
 
 /**
@@ -395,6 +412,8 @@ export interface ArtifactsQuery {
   /** 특이사항 filters (viewer-families §3.1): repeated `flag=` (any of), `flag_grade=` (at least). */
   flag?: string[];
   flag_grade?: string;
+  /** Event-log channels (repeated `channel=`, exact `details.channel`; plan r3-os-depth §3.2 O2). */
+  channel?: string[];
 }
 
 export function artifactsQueryString(query: ArtifactsQuery): string {
@@ -406,6 +425,7 @@ export function artifactsQueryString(query: ArtifactsQuery): string {
   for (const type of query.artifact_type ?? []) params.append("artifact_type", type);
   for (const flag of query.flag ?? []) params.append("flag", flag);
   if (query.flag_grade) params.set("flag_grade", query.flag_grade);
+  for (const channel of query.channel ?? []) params.append("channel", channel);
   if (query.sort) {
     params.set("sort", query.sort);
     params.set("order", query.order ?? "asc");

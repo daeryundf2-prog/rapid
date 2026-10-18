@@ -89,6 +89,8 @@ export interface CollectionQuery {
   tags?: string[];
   /** Artifact types; the artifacts API filters them server-side (`artifact_type=`, repeated). */
   artifactTypes?: string[];
+  /** Event-log channels; the artifacts API filters them server-side (`channel=`, repeated, exact). */
+  channels?: string[];
   /** 특이사항 rule ids (`flag=`, repeated) and minimum grade (`flag_grade=`), server-side (plan §3.1). */
   flags?: string[];
   flagGrade?: "A" | "B" | "C";

@@ -276,6 +276,20 @@ describe("tree model (탐색 domain tree, console-ia §4)", () => {
       "EVTX 파일·요약",
       "ETL 추적 파일",
       "방화벽 로그",
+      // 채널별 (R3 O2), Korean-sorted: Hangul first, then Latin.
+      "기타 채널",
+      "방화벽",
+      "보안",
+      "사용자 PNP",
+      "서비스(SCM)",
+      "스토리지",
+      "시스템",
+      "원격 데스크톱",
+      "응용 프로그램",
+      "작업 스케줄러",
+      "Office Alerts",
+      "PowerShell",
+      "Windows Defender",
     ]);
   });
 

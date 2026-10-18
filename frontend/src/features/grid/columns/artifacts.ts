@@ -667,6 +667,7 @@ export const artifactsCollection: CollectionDef = {
       query.ref.kind ? query.sort : undefined,
       query.artifactTypes,
       { ids: query.flags, grade: query.flagGrade },
+      query.channels,
     ),
   mapRow: (raw, index, ctx) => {
     const details = isRecord(raw.details) ? raw.details : {};

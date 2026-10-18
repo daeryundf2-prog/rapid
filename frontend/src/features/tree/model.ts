@@ -12,6 +12,7 @@ import {
   nodeStateIcon,
   nodeStateLabel,
 } from "../analysis/kinds";
+import { CHANNEL_FILTER_COLUMN, parseChannelFilterValue } from "../filters/filterModel";
 import { GRADES, type Grade, ruleById } from "../flags/catalog";
 import type { CaseRoute } from "./adapter";
 import { groupByCategory, kindIcon } from "./categories";
@@ -406,6 +407,13 @@ export function domainNodeCount(target: DomainTarget, input: TreeModelInput): Do
     // The run has no records of this kind at all.
     if (!kindNode) return known(0, true);
     const zero = zeroReason(kindNode);
+    if (target.channelGroup) {
+      // 이벤트 로그 › 채널별: `/tree` channel_groups (absent on outputs written before R3).
+      if (!kindNode.channel_groups) return { count: 0, disabledReason: NO_CHANNEL_COUNTS_REASON };
+      const group = kindNode.channel_groups.find((item) => item.id === target.channelGroup);
+      if (!group) return known(0, true, zero);
+      return typeof group.count === "number" ? known(group.count, true, zero) : { count: UNKNOWN_COUNT };
+    }
     if (target.countField) {
       const value = (kindNode as unknown as Record<string, unknown>)[target.countField];
       return typeof value === "number" ? known(value, true, zero) : { count: UNKNOWN_COUNT };
@@ -434,6 +442,10 @@ export function domainNodeCount(target: DomainTarget, input: TreeModelInput): Do
   }
   return { count: undefined };
 }
+
+/** Why the 이벤트 로그 channel nodes are empty on an output written before the channel counts (R3). */
+export const NO_CHANNEL_COUNTS_REASON =
+  "이 런의 이벤트 로그 출력에는 채널별 건수가 없습니다 — 이벤트 로그를 다시 수집하면 나타납니다";
 
 /** Why 전체 파일(인벤토리) is empty on a run whose files output predates the inventory. */
 export const NO_INVENTORY_REASON =
@@ -499,6 +511,7 @@ export function domainRoute(target: DomainTarget): DomainRoute {
  * `inventory_only`, a category the scan did not select) opens the inventory scope.
  */
 function effectiveTarget(target: DomainTarget, tree: RunTree | undefined): DomainTarget {
+  if (target.channelGroup) return channelTarget(target, tree);
   if (target.collection !== "files" || !target.fileCategory || target.fileScope) return target;
   const node = findServerNode(tree, `files:${target.fileCategory}`);
   return node?.inventory_only || node?.source === "inventory"
@@ -547,10 +560,36 @@ export function domainTotal(
   return total;
 }
 
-/** Tooltip of a column-filtered node: the filter is applied to the loaded rows. */
+/**
+ * A channel node with the run's exact channel names of its group (`/tree` channel_groups) as the
+ * `evt_channel` filter value; the static canonical value stays when `/tree` has no such group.
+ */
+function channelTarget(target: DomainTarget, tree: RunTree | undefined): DomainTarget {
+  const kindNode = tree && target.kind ? mergedKindNode(tree, target.kind) : undefined;
+  const group = kindNode?.channel_groups?.find((item) => item.id === target.channelGroup);
+  if (!group?.channels.length) return target;
+  return {
+    ...target,
+    cf: (target.cf ?? []).map((filter) =>
+      filter.col === CHANNEL_FILTER_COLUMN ? { ...filter, value: group.channels.join("|") } : filter,
+    ),
+  };
+}
+
+/** Tooltip of a column-filtered node: the channel filter runs on the server, the others on the loaded rows. */
 function filteredNote(target: DomainTarget): string {
-  const filters = (target.cf ?? []).map((f) => `${f.col.replace(/^f:/, "")} ${f.op} ${f.value}`).join(", ");
-  return `불러온 행에 열 필터 적용: ${filters}`;
+  const channels = (target.cf ?? []).filter((f) => f.col === CHANNEL_FILTER_COLUMN);
+  const others = (target.cf ?? []).filter((f) => f.col !== CHANNEL_FILTER_COLUMN);
+  const parts: string[] = [];
+  if (channels.length) {
+    const names = channels.flatMap((f) => parseChannelFilterValue(f.value));
+    parts.push(`서버 채널 필터(정확히 일치): ${names.join(", ")}`);
+  }
+  if (others.length) {
+    const filters = others.map((f) => `${f.col.replace(/^f:/, "")} ${f.op} ${f.value}`).join(", ");
+    parts.push(`불러온 행에 열 필터 적용: ${filters}`);
+  }
+  return parts.join(" · ");
 }
 
 /** Sum of per-grade flag counts; undefined when nothing is flagged. */
