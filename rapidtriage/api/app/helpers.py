@@ -22,10 +22,10 @@ from ...core.jobs import (
     RunJob,
     RunJobStore,
     is_relative_to,
+    job_progress_view,
     run_output_dir,
 )
 from ...core.run.plan import plan_counts_brief
-from ...core.run.progress import load_run_progress_view
 from ...core.run.summary import derive_counts
 from ...core.source_paths import (
     candidate_source_paths,
@@ -99,9 +99,9 @@ def run_progress_payload(job: RunJob) -> dict[str, object] | None:
 
     ``load_run_progress_view``: ``live``/``stale`` flags, ``_owner`` dropped,
     and a run whose process died is shown ``interrupted`` (file unchanged).
+    A run whose folder a resumed retry took over gets a ``superseded_by`` stub.
     """
-    output_dir = job_output_dir(job)
-    return load_run_progress_view(output_dir) if output_dir is not None else None
+    return job_progress_view(job)
 
 
 def run_not_finished_message(job: RunJob) -> str:

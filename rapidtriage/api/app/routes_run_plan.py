@@ -15,7 +15,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
 
-from ...core.jobs import RunControlConflict, RunJobStore
+from ...core.jobs import RunControlConflict, RunJobStore, progress_belongs_to_job
 from ...core.run.plan import (
     PlanTargetError,
     build_run_plan,
@@ -43,8 +43,24 @@ def build_plan_response(store: RunJobStore, run_id: str) -> dict[str, Any]:
     job = get_job(store, run_id)
     progress = run_progress_payload(job)
     plan = progress.get("plan") if isinstance(progress, dict) else None
-    if not isinstance(plan, dict):
-        # Before the run wrote its plan (queued): a skeleton built from the request.
+    superseded_by = progress.get("superseded_by") if isinstance(progress, dict) else None
+    if superseded_by:
+        # A resumed retry took over this run's folder: the plan there is the newer run's.
+        plan = {
+            "command": "run-plan",
+            "version": "run-plan-v1",
+            "groups": [],
+            "counts": {},
+            "outcome": job.status,
+            "message": progress.get("message"),
+            "updated_at": job.updated_at,
+        }
+    elif not isinstance(plan, dict) or job.status == "queued" or (
+        job.status in LIVE_STATUSES and not progress_belongs_to_job(progress, job)
+    ):
+        # Before the run wrote its plan (queued; a queued resume's folder still holds the
+        # earlier run's plan): a skeleton built from the request. Web runs never carve
+        # (RunRequest has no carve option). ``updated_at`` is the job's so the ETag is stable.
         request = job.request
         try:
             plan = build_run_plan(
@@ -58,12 +74,16 @@ def build_plan_response(store: RunJobStore, run_id: str) -> dict[str, Any]:
             )
         except PlanTargetError:
             plan = {"command": "run-plan", "version": "run-plan-v1", "groups": [], "counts": {}, "outcome": None}
+        plan["started_at"] = None
+        plan["updated_at"] = job.updated_at
+        progress = None
     response = dict(plan)
     run_status = job.status
     if run_status in LIVE_STATUSES and isinstance(progress, dict) and progress.get("status") == "interrupted":
         run_status = "interrupted"
     response["run_id"] = run_id
     response["run_status"] = run_status
+    response["superseded_by"] = superseded_by or None
     response["live"] = bool(progress.get("live")) if isinstance(progress, dict) else False
     response["stale"] = bool(progress.get("stale")) if isinstance(progress, dict) else False
     response["heartbeat_at"] = progress.get("heartbeat_at") if isinstance(progress, dict) else None
@@ -75,7 +95,14 @@ def build_plan_response(store: RunJobStore, run_id: str) -> dict[str, Any]:
 
 def _etag(payload: dict[str, Any]) -> str:
     stamp = json.dumps(
-        [payload.get("updated_at"), payload.get("run_status"), payload.get("live"), payload.get("stale"), payload.get("heartbeat_at")],
+        [
+            payload.get("updated_at"),
+            payload.get("run_status"),
+            payload.get("live"),
+            payload.get("stale"),
+            payload.get("heartbeat_at"),
+            payload.get("superseded_by"),
+        ],
         sort_keys=True,
         default=str,
     )

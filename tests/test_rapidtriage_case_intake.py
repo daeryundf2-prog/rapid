@@ -71,7 +71,7 @@ def write_run(run_dir: Path, root: Path, **extra: object) -> Path:
     return summary_path
 
 
-def fake_execute(request, *, run_id=None):
+def fake_execute(request, *, run_id=None, **_kwargs):
     output_dir = Path(request.output_dir) if request.output_dir else Path(request.root).parent / f"out-{run_id}"
     output_dir.mkdir(parents=True, exist_ok=True)
     summary_path = write_run(output_dir, Path(request.root))
@@ -716,7 +716,7 @@ class CaseIntakeApiTests(unittest.TestCase):
         evidence = added.json()["evidence"]
         if not evidence["runnable"]:
             self.skipTest(f"E01 reader unavailable here: {evidence['run_blocked_reason']}")
-        def execute_default(request, *, run_id=None):
+        def execute_default(request, *, run_id=None, **_kwargs):
             # Like the real run: no output folder given -> the default next to the evidence file.
             output_dir = default_run_output_dir(Path(request.root), request.mode, run_id=run_id)
             output_dir.mkdir(parents=True, exist_ok=True)

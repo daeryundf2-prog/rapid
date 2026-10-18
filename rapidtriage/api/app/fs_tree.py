@@ -40,11 +40,16 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
+from .index_cache import SingleFlightIndexCache
+
 FS_TREE_MAX_ROWS = 3_000_000
 FS_TREE_MAX_DIRS = 1_000_000
 FS_TREE_CACHE_RUNS = 4
 FS_TREE_DEFAULT_LIMIT = 200
 FS_TREE_MAX_LIMIT = 1000
+# Folder row-position lists kept per index (``/files?path_prefix`` paging re-uses them).
+FS_RESTRICTION_CACHE_ENTRIES = 32
+FS_RESTRICTION_CACHE_MAX_POSITIONS = 4_000_000
 FS_PATH_MAX_CHARS = 4096
 SCOPES = ("candidates", "inventory")
 SPECIAL_IDS = ("orphan", "unallocated", "slack")
@@ -141,6 +146,9 @@ class FsIndex:
     truncated_reason: str | None = None
     # [scope][special id] -> row positions of the special node (orphan / unallocated / slack)
     special_rows: dict[str, dict[str, list[int]]] = field(default_factory=dict)
+    # (scope, folder, recursive) -> row positions; the index itself is keyed by run + files output signature.
+    restrictions: OrderedDict[tuple[str, int, bool], array] = field(default_factory=OrderedDict, repr=False)
+    restrictions_lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
     def child(self, parent: int, name: str) -> int | None:
         return self.lookup.get((parent, _fold(name)))
@@ -265,41 +273,14 @@ def build_fs_index(key: tuple[object, ...], payload: Mapping[str, object]) -> Fs
     return index
 
 
-class FsIndexCache:
-    """Per-run LRU of :class:`FsIndex`, single-flight per key."""
+class FsIndexCache(SingleFlightIndexCache[FsIndex]):
+    """Per-run LRU of :class:`FsIndex`, single-flight per key (a rewritten files output replaces the old one)."""
 
     def __init__(self, max_runs: int = FS_TREE_CACHE_RUNS) -> None:
-        self.max_runs = max_runs
-        self._lock = threading.Lock()
-        self._build_locks: dict[tuple[object, ...], threading.Lock] = {}
-        self._items: OrderedDict[tuple[object, ...], FsIndex] = OrderedDict()
-
-    def clear(self) -> None:
-        with self._lock:
-            self._items.clear()
+        super().__init__(max_runs)
 
     def get(self, key: tuple[object, ...], payload: Mapping[str, object]) -> FsIndex:
-        with self._lock:
-            found = self._items.get(key)
-            if found is not None:
-                self._items.move_to_end(key)
-                return found
-            build_lock = self._build_locks.setdefault(key, threading.Lock())
-        with build_lock:
-            with self._lock:
-                found = self._items.get(key)
-                if found is not None:
-                    return found
-            index = build_fs_index(key, payload)
-            with self._lock:
-                # One index per run: a rewritten files output replaces the old one.
-                for stale in [item for item in self._items if item[0] == key[0]]:
-                    self._items.pop(stale, None)
-                self._items[key] = index
-                while len(self._items) > self.max_runs:
-                    self._items.popitem(last=False)
-                self._build_locks.pop(key, None)
-            return index
+        return self.get_or_build(key, lambda: build_fs_index(key, payload))
 
 
 FS_INDEX_CACHE = FsIndexCache()
@@ -457,15 +438,37 @@ def index_info(index: FsIndex, scope: str) -> dict[str, object]:
     return info
 
 
-def files_restriction(index: FsIndex, scope: str, parts: Sequence[str], *, recursive: bool) -> list[int]:
-    """Row positions of ``scope`` in the folder (direct files, or the whole subtree)."""
+def files_restriction(index: FsIndex, scope: str, parts: Sequence[str], *, recursive: bool) -> Sequence[int]:
+    """Row positions of ``scope`` in the folder (direct files, or the whole subtree), ascending.
+
+    Computed once per (scope, folder, recursive) and kept on the index (LRU of
+    ``FS_RESTRICTION_CACHE_ENTRIES`` lists, at most
+    ``FS_RESTRICTION_CACHE_MAX_POSITIONS`` positions), so paging a folder does
+    not rescan every row. Callers must not mutate the result.
+    """
     folder = require_folder(index, parts)
+    cache_key = (scope, folder, bool(recursive))
+    with index.restrictions_lock:
+        cached = index.restrictions.get(cache_key)
+        if cached is not None:
+            index.restrictions.move_to_end(cache_key)
+            return cached
     dirs = index.row_dirs.get(scope, array("i"))
     if not recursive:
-        return [position for position, node in enumerate(dirs) if node == folder]
-    low, high = index.pre[folder], index.post[folder]
-    pre = index.pre
-    return [position for position, node in enumerate(dirs) if node >= 0 and low <= pre[node] < high]
+        positions = array("i", (position for position, node in enumerate(dirs) if node == folder))
+    else:
+        low, high = index.pre[folder], index.post[folder]
+        pre = index.pre
+        positions = array("i", (position for position, node in enumerate(dirs) if node >= 0 and low <= pre[node] < high))
+    with index.restrictions_lock:
+        index.restrictions[cache_key] = positions
+        total = sum(len(item) for item in index.restrictions.values())
+        while len(index.restrictions) > 1 and (
+            len(index.restrictions) > FS_RESTRICTION_CACHE_ENTRIES or total > FS_RESTRICTION_CACHE_MAX_POSITIONS
+        ):
+            _evicted_key, evicted = index.restrictions.popitem(last=False)
+            total -= len(evicted)
+    return positions
 
 
 # --- special nodes ----------------------------------------------------------------------

@@ -192,12 +192,16 @@ class RunProgress:
                 self._task_finished_locked(task_id, status="failed" if failed else "completed")
             self._write_locked()
 
-    def finish(self, *, status: str = "completed") -> None:
-        """End the run (``completed`` or ``cancelled``) and write ``rapidtriage-run-plan.json``."""
+    def finish(self, *, status: str | None = None) -> None:
+        """End the run and write ``rapidtriage-run-plan.json``.
+
+        Without ``status`` the progress status follows the plan: ``cancelled``
+        when ``plan.outcome`` is ``cancelled``, else ``completed`` (so the
+        progress file, the plan file and the summary always agree).
+        """
         self._stop_heartbeat()
         with self._lock:
             now = _utc_now()
-            self._payload["status"] = status
             self._payload["completed_at"] = now
             self._set_stage_locked("completed", now)
             if self._plan is not None:
@@ -206,8 +210,13 @@ class RunProgress:
                 refresh_plan(self._plan)
                 if not self._plan.get("outcome"):
                     self._plan["outcome"] = plan_outcome(self._plan)
+            if status is None:
+                outcome = self._plan.get("outcome") if self._plan is not None else None
+                status = "cancelled" if outcome == "cancelled" else "completed"
+            self._payload["status"] = status
             self._write_locked()
             self._write_plan_file_locked()
+        self._deactivate()
 
     def fail(self, exc: BaseException) -> None:
         self._stop_heartbeat()
@@ -238,6 +247,7 @@ class RunProgress:
                 self._plan["outcome"] = "failed"
             self._write_locked()
             self._write_plan_file_locked()
+        self._deactivate()
 
     # -- plan ------------------------------------------------------------
 
@@ -347,6 +357,8 @@ class RunProgress:
             if self._plan is None:
                 return [], []
             accepted, rejected, effects = evaluate_control(self._plan, action, targets)
+            # ``cancel_all``/``finish`` after the report stage started are rejected as a whole.
+            run_wide_rejected = action in {"cancel_all", "finish"} and bool(rejected)
             control = self._plan.setdefault("control", {"cancel_all_at": None, "finish_at": None, "requests": []})
             control.setdefault("requests", []).append(
                 {
@@ -360,10 +372,10 @@ class RunProgress:
                     "effects": dict(effects),
                 }
             )
-            if action == "cancel_all":
+            if action == "cancel_all" and not run_wide_rejected:
                 control["cancel_all_at"] = control.get("cancel_all_at") or at
                 self.cancel_all_requested.set()
-            if action == "finish":
+            if action == "finish" and not run_wide_rejected:
                 control["finish_at"] = control.get("finish_at") or at
                 self.finish_requested.set()
             reason = {"cancel_all": REASON_CANCEL_ALL, "finish": REASON_FINISH}.get(action, REASON_EXAMINER)
@@ -521,6 +533,14 @@ class RunProgress:
         if thread is not None and thread is not threading.current_thread():
             thread.join(timeout=2.0)
         self._heartbeat_thread = None
+
+    def _deactivate(self) -> None:
+        """Leave ``_ACTIVE_RUNS`` -- only after the final status is on disk.
+
+        A reader that misses the in-process recorder falls back to the file;
+        if that still said ``running`` with this process as owner it would be
+        shown ``interrupted`` (``not-active-in-owner``).
+        """
         with _ACTIVE_LOCK:
             key = _active_key(self.output_dir)
             if _ACTIVE_RUNS.get(key) is self:

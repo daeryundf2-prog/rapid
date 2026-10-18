@@ -77,3 +77,13 @@
 - 연결 그래프 `people/user`: 41 노드(원본 행 19 = SAM 계정·그룹·이벤트·로그온 세션·탐지·브라우저·문서·LNK·점프 목록 11계열, 값 21 = 사람 8·장치 4·경로 5·URL 4, 표에 있는 값 22), 간선 57, 0.98 s. `people/S-1-5-18`: 29 노드, 0.7 s. 키보드 → 행 → 값 이동 확인.
 
 **게이트**: targeted pytest(신규 row_conditions 14 + api·api_contract·derived_api(+그래프 3)·timeline·field_filters·derived_engine 130 passed, parser_quality_integration·triage_flags_api 43, ntfs_r3·analyses 118), ruff·vulture·compileall·check-doc-refs 통과, OpenAPI 스냅샷 갱신(122 경로/139 작업). 프런트 lint·typecheck·check:contrast 통과, vitest(views·filters·derived·grid·api) 33 파일 363 통과 + shortcuts·shell·app 64 통과. 전체 스위트·Playwright는 위임(Q-R4-9).
+
+### 4.4 적대적 리뷰 수정 — 백엔드 (브랜치 `fix/r4-backend-review`)
+
+- **이어서 실행 체인**: 이전 계획의 `outcome`이 `complete`가 아니면(partial·cancelled·failed·끝나지 않아 `None`=중단) 단계 출력(manifest·docs·files·timeline·indicators)을 재사용하지 않는다. 재사용 후보 페이로드에 `plan_status`(자리표시) 또는 `inputs_partial`이 있으면 언제나 버린다(`load_reusable_json`). 부분 공급자 입력으로 만든 manifest도 `inputs_partial`을 단다.
+- **같은 출력 폴더 동시 실행 금지**: 대기·실행 중인 런이 쓰는 폴더로의 제출·재실행·이어서 실행은 409(“같은 출력 폴더를 쓰는 런(…)이 대기·실행 중입니다…”). 재실행한 원래 런에는 `retried_by`, 같은 폴더를 이어받은 경우 `superseded_by`가 남고, 그 런의 진행·계획 조회는 새 런의 실시간 상태 대신 `superseded_by` 안내를 돌려준다.
+- **새로 실행(fresh retry)**: `resume=false`로 실행하며 새 폴더에 쓴다 — 출력 폴더를 지정하지 않은 런은 런별 기본 폴더, 지정한 런은 옆에 `<폴더>-retry-<id>`. 원래 런의 출력은 그대로 남는다.
+- **제어 타이밍**: 런은 제출 시각 이후에 쓰인 제어 요청을 감시자 시작 전이라도 적용한다(빠른 “모두 취소”). 대기 중인 런의 계획 제어는 409(“대기 중인 런은 시작한 뒤에 제어할 수 있습니다”), 실행 중이지만 아직 이전 런의 진행 파일만 있는 경우도 409. 대기 중 런의 계획표는 요청으로 만든 골격(ETag 고정)이다.
+- **늦은 모두 취소**: 요약·보고서 단계가 시작된 뒤의 `cancel_all`/`finish`는 “이미 끝난 태스크입니다…”로 거부된다. 진행 파일 상태는 `plan.outcome`에서 정해져 계획 파일·요약과 항상 일치한다.
+- **제어 파일**: 읽기-수정-쓰기를 `O_EXCL` 잠금 파일(30초 지나면 낡은 잠금 제거)로 감싼다. 읽을 수 없는 제어 파일은 덮어쓰지 않고 오류(“실행 제어 파일을 읽을 수 없어…”)를 낸다. 감시자는 읽기에 성공한 뒤에만 파일 도장을 기록한다.
+- 그 밖: 옛 상태 파일의 `canceled` 단계·전이 철자 정규화, 탐색기 색인 캐시(파일 시스템·레지스트리·미디어)의 단일 비행·실패 시 잠금 정리, 레지스트리 마운트 추정 보정, `/files?path_prefix` 폴더 행 위치 캐시, 런 종료 시 최종 상태를 쓴 뒤 활성 목록에서 제거.

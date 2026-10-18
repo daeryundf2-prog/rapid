@@ -7,7 +7,7 @@ import json
 import logging
 import re
 import zipfile
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +26,9 @@ from ...core.indicators import (
     build_indicator_ti_enrichment_package,
 )
 from ...core.jobs import (
+    RunControlConflict,
     RunJobStore,
+    RunOutputDirBusy,
     RunRequest,
     run_output_dir,
 )
@@ -298,7 +300,10 @@ def build_runs_router(
     def create_run(request: RunCreateRequest) -> dict[str, Any]:
         validate_run_evidence_source(request.root)
         run_request = run_request_from_body(request)
-        job = store.run_sync(run_request) if request.wait else store.submit(run_request)
+        try:
+            job = store.run_sync(run_request) if request.wait else store.submit(run_request)
+        except RunOutputDirBusy as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
         return job.to_dict(include_summary=request.wait)
 
 
@@ -354,13 +359,18 @@ def build_runs_router(
             payload = store.cancel(run_id, actor="web").to_dict(include_summary=True)
         except KeyError:
             raise HTTPException(status_code=404, detail="런을 찾을 수 없습니다")
+        except RunControlConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
         payload["plan"] = store.plan_view(run_id)
         return payload
 
 
     @router.post("/api/runs/{run_id}/retry", status_code=202)
     def retry_run(run_id: str, body: RunRetryRequest | None = None) -> dict[str, Any]:
-        """Run a failed/cancelled/interrupted run again; ``{resume: true}`` = "이어서 실행" (completed tasks reused)."""
+        """Run a failed/cancelled/interrupted run again; ``{resume: true}`` = "이어서 실행" (completed tasks reused).
+
+        A fresh retry writes a new output folder (``<folder>-retry-<id>`` next to an explicit one);
+        409 (Korean) while another queued/running run writes into the target folder."""
         resume = bool(body.resume) if body is not None else False
         try:
             payload = store.retry(run_id, resume=resume).to_dict(include_summary=True)
@@ -1057,7 +1067,7 @@ def build_runs_router(
         path_prefix: str | None,
         recursive: str | None,
         special: str | None,
-    ) -> tuple[list[int] | None, dict[str, object] | None]:
+    ) -> tuple[Sequence[int] | None, dict[str, object] | None]:
         """Row positions of the fs-tree folder / special node (``None`` = no such filter)."""
         wanted_special = parse_special(special)
         if path_prefix is None and wanted_special is None:
@@ -1065,7 +1075,7 @@ def build_runs_router(
                 raise HTTPException(status_code=422, detail="recursive는 path_prefix와 함께 써야 합니다")
             return None, None
         deep = parse_bool(recursive, "recursive")
-        restrict: list[int] | None = None
+        restrict: Sequence[int] | None = None
         folder: str | None = None
         index = FS_INDEX_CACHE.get(files_output_key(run_id, get_output_path(store, run_id, "files")), payload)
         if path_prefix is not None:

@@ -20,8 +20,6 @@ SHA-256, EXIF camera (``exif_make`` + ``exif_model``) and capture time
 
 from __future__ import annotations
 
-import threading
-from collections import OrderedDict
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -29,6 +27,7 @@ from pathlib import Path
 from fastapi import HTTPException
 
 from ...core.jobs import RunJobStore
+from .index_cache import SingleFlightIndexCache
 from .jsonl_records import iter_artifact_records, jsonl_records_path
 from .tree import _file_signature
 
@@ -126,29 +125,14 @@ def build_media_index(key: tuple[object, ...], payload: Mapping[str, object], pa
     return index
 
 
-class MediaIndexCache:
-    def __init__(self, max_runs: int = MEDIA_INDEX_CACHE_RUNS) -> None:
-        self.max_runs = max_runs
-        self._lock = threading.Lock()
-        self._items: OrderedDict[tuple[object, ...], MediaIndex] = OrderedDict()
+class MediaIndexCache(SingleFlightIndexCache[MediaIndex]):
+    """Per-run LRU of :class:`MediaIndex`; built single-flight per key, never under the cache-wide lock."""
 
-    def clear(self) -> None:
-        with self._lock:
-            self._items.clear()
+    def __init__(self, max_runs: int = MEDIA_INDEX_CACHE_RUNS) -> None:
+        super().__init__(max_runs)
 
     def get(self, key: tuple[object, ...], payload: Mapping[str, object], payload_path: Path) -> MediaIndex:
-        with self._lock:
-            found = self._items.get(key)
-            if found is not None:
-                self._items.move_to_end(key)
-                return found
-            index = build_media_index(key, payload, payload_path)
-            for stale in [item for item in self._items if item[0] == key[0]]:
-                self._items.pop(stale, None)
-            self._items[key] = index
-            while len(self._items) > self.max_runs:
-                self._items.popitem(last=False)
-            return index
+        return self.get_or_build(key, lambda: build_media_index(key, payload, payload_path))
 
 
 MEDIA_INDEX_CACHE = MediaIndexCache()

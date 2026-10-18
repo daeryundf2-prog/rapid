@@ -38,6 +38,7 @@ bytes already written.
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import datetime as dt
 import json
@@ -59,6 +60,7 @@ __all__ = [
     "PLAN_FILE_NAME",
     "PLAN_VERSION",
     "TASK_STATUSES",
+    "ControlFileError",
     "PlanTargetError",
     "RunControlWatcher",
     "append_control_request",
@@ -87,6 +89,8 @@ HEARTBEAT_STALE_SECONDS = 90.0
 BOOT_ID_TOLERANCE_SECONDS = 120
 CONTROL_POLL_SECONDS = 1.0
 REPLACE_ATTEMPTS = 20
+CONTROL_LOCK_TIMEOUT_SECONDS = 5.0
+CONTROL_LOCK_STALE_SECONDS = 30.0
 
 REASON_PRE_RUN = "실행 전 제외"
 REASON_EXAMINER = "검사관 요청"
@@ -107,6 +111,9 @@ MESSAGE_ALREADY_STARTED = "이미 시작된 태스크는 건너뛸 수 없습니
 MESSAGE_ALREADY_FINISHED = "이미 끝난 태스크입니다"
 MESSAGE_NOT_CANCELLABLE = "취소할 수 없는 태스크입니다: {}"
 MESSAGE_NO_QUEUED = "대기 중인 태스크가 없습니다"
+MESSAGE_REPORT_STARTED = "이미 끝난 태스크입니다: 요약·보고서 단계가 시작되어 {} 요청을 적용할 수 없습니다"
+MESSAGE_CONTROL_UNREADABLE = "실행 제어 파일을 읽을 수 없어 요청을 기록하지 않았습니다: {}"
+MESSAGE_CONTROL_BUSY = "실행 제어 파일이 다른 요청에 잠겨 있습니다. 잠시 후 다시 시도하세요"
 
 # (group id, Korean label, task ids in execution order). Provider groups list
 # collector kinds; a kind absent from the run profile moves to ``manifest``.
@@ -230,6 +237,10 @@ TASK_LABELS: dict[str, str] = {
 
 class PlanTargetError(ValueError):
     """An unknown or unskippable group/task id (``str(exc)`` is Korean)."""
+
+
+class ControlFileError(RuntimeError):
+    """The control file could not be read or locked; nothing was appended (``str(exc)`` is Korean)."""
 
 
 def utc_now() -> str:
@@ -628,6 +639,12 @@ def control_targets(
     return resolved, rejected
 
 
+def report_started(plan: Mapping[str, object]) -> bool:
+    """``True`` once the ``report`` task left ``queued`` (summary/report/audit being written)."""
+    task = find_task(plan, "report")
+    return task is not None and str(task.get("status") or "queued") != "queued"
+
+
 def evaluate_control(
     plan: Mapping[str, object], action: str, targets: Sequence[Mapping[str, object]] = ()
 ) -> tuple[list[dict[str, object]], list[dict[str, object]], dict[str, str]]:
@@ -635,9 +652,14 @@ def evaluate_control(
 
     ``effect`` is ``skip`` (queued -> skipped), ``cancel-queued`` (queued ->
     cancelled) or ``cancel-running`` (cancel event for a running task).
-    ``cancel_all``/``finish`` take no targets and are always accepted.
+    ``cancel_all``/``finish`` take no targets and are accepted until the
+    ``report`` task starts; after that they are rejected (``이미 끝난 태스크``)
+    so the plan outcome and the progress status never disagree.
     """
     effects: dict[str, str] = {}
+    if action in {"cancel_all", "finish"} and report_started(plan):
+        # The summary/report/audit are being written: the run outcome is settled.
+        return [], [{"target": {}, "reason": MESSAGE_REPORT_STARTED.format(action)}], effects
     if action == "cancel_all":
         for task in iter_tasks(plan):
             if task.get("id") == "report":
@@ -757,15 +779,72 @@ def control_path(output_dir: Path) -> Path:
 
 
 def read_control_requests(output_dir: Path) -> list[dict[str, object]]:
+    """Requests in the control file (``[]`` when it is missing or unreadable)."""
     try:
-        payload = json.loads(control_path(output_dir).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        return read_control_requests_strict(output_dir)
+    except ControlFileError:
         return []
+
+
+def read_control_requests_strict(output_dir: Path) -> list[dict[str, object]]:
+    """Requests in the control file: ``[]`` when it does not exist, :class:`ControlFileError` when unreadable."""
+    path = control_path(output_dir)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return []
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ControlFileError(MESSAGE_CONTROL_UNREADABLE.format(exc)) from exc
+    try:
+        payload = json.loads(text)
+    except ValueError as exc:
+        raise ControlFileError(MESSAGE_CONTROL_UNREADABLE.format(exc)) from exc
     requests = payload.get("requests") if isinstance(payload, Mapping) else None
-    return [dict(item) for item in requests if isinstance(item, Mapping)] if isinstance(requests, list) else []
+    if not isinstance(requests, list):
+        raise ControlFileError(MESSAGE_CONTROL_UNREADABLE.format("requests 목록이 없습니다"))
+    return [dict(item) for item in requests if isinstance(item, Mapping)]
 
 
 _CONTROL_WRITE_LOCK = threading.Lock()
+
+
+@contextlib.contextmanager
+def control_file_lock(output_dir: Path, *, timeout: float = CONTROL_LOCK_TIMEOUT_SECONDS) -> Iterator[None]:
+    """Cross-process lock (``O_EXCL`` lock file) around the control file's read-modify-write.
+
+    A lock file older than ``CONTROL_LOCK_STALE_SECONDS`` (its writer died)
+    is removed. Raises :class:`ControlFileError` when the lock is not
+    obtained within ``timeout`` seconds.
+    """
+    lock_path = control_path(output_dir).with_name(CONTROL_FILE_NAME + ".lock")
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            break
+        except FileExistsError:
+            try:
+                age = time.time() - lock_path.stat().st_mtime
+            except OSError:
+                age = 0.0
+            if age > CONTROL_LOCK_STALE_SECONDS:
+                with contextlib.suppress(OSError):
+                    lock_path.unlink()
+                continue
+        except PermissionError:
+            # Windows: the holder is deleting the lock file right now.
+            pass
+        if time.monotonic() >= deadline:
+            raise ControlFileError(MESSAGE_CONTROL_BUSY)
+        time.sleep(0.02)
+    try:
+        with contextlib.suppress(OSError):
+            os.write(fd, f"{os.getpid()} {socket.gethostname()}".encode("utf-8", "replace"))
+        os.close(fd)
+        yield
+    finally:
+        with contextlib.suppress(OSError):
+            lock_path.unlink()
 
 
 def append_control_request(
@@ -775,12 +854,18 @@ def append_control_request(
     *,
     actor: str = "cli",
 ) -> dict[str, object]:
-    """Append one request to ``rapidtriage-run-control.json`` (atomic replace) and return it."""
+    """Append one request to ``rapidtriage-run-control.json`` (atomic replace) and return it.
+
+    The read-modify-write runs under :func:`control_file_lock` (other
+    processes: CLI ``run-control``, a second server). An unreadable existing
+    file raises :class:`ControlFileError` instead of being rewritten, so the
+    request history and its ``seq`` numbering are never reset.
+    """
     if action not in CONTROL_ACTIONS:
         raise PlanTargetError(f"알 수 없는 동작입니다: {action}")
     path = control_path(output_dir)
-    with _CONTROL_WRITE_LOCK:
-        requests = read_control_requests(output_dir)
+    with _CONTROL_WRITE_LOCK, control_file_lock(output_dir):
+        requests = read_control_requests_strict(output_dir)
         request = {
             "seq": (max((int(item.get("seq") or 0) for item in requests), default=0) + 1),
             "action": action,
@@ -812,7 +897,10 @@ class RunControlWatcher:
     """Polls the control file once per second and hands new requests to ``handler``.
 
     Requests already in the file when the watcher starts belong to an earlier
-    run in the same output directory (resume) and are not replayed.
+    run in the same output directory (resume) and are not replayed. With
+    ``since`` (ISO time, e.g. when the run was submitted) only requests written
+    before ``since`` count as earlier: a request written after the run was
+    submitted but before the watcher started (a quick "모두 취소") is applied.
     """
 
     def __init__(
@@ -821,6 +909,7 @@ class RunControlWatcher:
         handler: Callable[[dict[str, object]], None],
         *,
         poll_seconds: float = CONTROL_POLL_SECONDS,
+        since: str | None = None,
     ) -> None:
         self.output_dir = Path(output_dir)
         self._handler = handler
@@ -828,7 +917,11 @@ class RunControlWatcher:
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
-        self._last_seq = max((int(item.get("seq") or 0) for item in read_control_requests(self.output_dir)), default=0)
+        since_at = parse_utc(since)
+        existing = read_control_requests(self.output_dir)
+        if since_at is not None:
+            existing = [item for item in existing if (parse_utc(item.get("at")) or since_at) < since_at]
+        self._last_seq = max((int(item.get("seq") or 0) for item in existing), default=0)
         self._last_stamp: tuple[int, int] | None = None
 
     def start(self) -> None:
@@ -850,8 +943,13 @@ class RunControlWatcher:
             stamp = (stat.st_mtime_ns, stat.st_size)
             if stamp == self._last_stamp:
                 return
+            try:
+                requests = read_control_requests_strict(self.output_dir)
+            except ControlFileError:
+                # Unreadable right now: the stamp stays unset so the next poll reads again.
+                return
             self._last_stamp = stamp
-            for request in read_control_requests(self.output_dir):
+            for request in requests:
                 seq = int(request.get("seq") or 0)
                 if seq <= self._last_seq:
                     continue
