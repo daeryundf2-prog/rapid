@@ -127,6 +127,11 @@ RUN_PROFILES: dict[str, RunProfile] = {
             "windows-search-index",
             "windows-remote-access",
             "windows-messenger",
+            # R5: mail clients, Phone Link and player history sit beside email / messengers /
+            # recent files; p2p stays out with browser (web history kinds).
+            "email-clients",
+            "windows-phone-link",
+            "media-player",
             "windows-registry",
             "windows-shellbags",
             "windows-prefetch",

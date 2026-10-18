@@ -220,7 +220,7 @@ class RapidTriageRunTests(unittest.TestCase):
 
         self.assertEqual(
             supported - set(RUN_PROFILES["recovery"].artifacts_kinds),
-            {"browser", "windows-execution", "windows-system"},
+            {"browser", "p2p", "windows-execution", "windows-system"},
         )
 
     def test_parser_crash_isolation_payload_and_memory_cap_assessment_are_machine_readable(self) -> None:
