@@ -1,5 +1,5 @@
 {
- "version": "8d329d55be656263",
+ "version": "e9cbdc0da2c657cb",
  "families": [
   {
    "id": "sam-account",
@@ -8896,7 +8896,8 @@
       "name": "VeraCrypt",
       "category": "encryption",
       "products": [
-       "\\bveracrypt\\b"
+       "\\bveracrypt\\b",
+       "베라크립트"
       ],
       "executables": [
        "veracrypt.exe",
@@ -8917,7 +8918,8 @@
       "name": "TrueCrypt",
       "category": "encryption",
       "products": [
-       "\\btruecrypt\\b"
+       "\\btruecrypt\\b",
+       "트루크립트"
       ],
       "executables": [
        "truecrypt.exe",
@@ -8949,7 +8951,8 @@
       "name": "CCleaner",
       "category": "cleaner",
       "products": [
-       "\\bccleaner\\b"
+       "\\bccleaner\\b",
+       "씨클리너"
       ],
       "executables": [
        "ccleaner.exe",
@@ -8966,7 +8969,8 @@
       "name": "BleachBit",
       "category": "cleaner",
       "products": [
-       "\\bbleachbit\\b"
+       "\\bbleachbit\\b",
+       "블리치비트"
       ],
       "executables": [
        "bleachbit.exe",
@@ -9112,7 +9116,8 @@
       "name": "VeraCrypt",
       "category": "encryption",
       "products": [
-       "\\bveracrypt\\b"
+       "\\bveracrypt\\b",
+       "베라크립트"
       ],
       "executables": [
        "veracrypt.exe",
@@ -9133,7 +9138,8 @@
       "name": "TrueCrypt",
       "category": "encryption",
       "products": [
-       "\\btruecrypt\\b"
+       "\\btruecrypt\\b",
+       "트루크립트"
       ],
       "executables": [
        "truecrypt.exe",
@@ -9165,7 +9171,8 @@
       "name": "CCleaner",
       "category": "cleaner",
       "products": [
-       "\\bccleaner\\b"
+       "\\bccleaner\\b",
+       "씨클리너"
       ],
       "executables": [
        "ccleaner.exe",
@@ -9182,7 +9189,8 @@
       "name": "BleachBit",
       "category": "cleaner",
       "products": [
-       "\\bbleachbit\\b"
+       "\\bbleachbit\\b",
+       "블리치비트"
       ],
       "executables": [
        "bleachbit.exe",

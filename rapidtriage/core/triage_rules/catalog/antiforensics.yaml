@@ -82,6 +82,7 @@ rules:
       category: encryption
       products:
       - \bveracrypt\b
+      - 베라크립트
       executables:
       - veracrypt.exe
       - veracrypt-x64.exe
@@ -98,6 +99,7 @@ rules:
       category: encryption
       products:
       - \btruecrypt\b
+      - 트루크립트
       executables:
       - truecrypt.exe
       - truecrypt format.exe
@@ -121,6 +123,7 @@ rules:
       category: cleaner
       products:
       - \bccleaner\b
+      - 씨클리너
       executables:
       - ccleaner.exe
       - ccleaner64.exe
@@ -133,6 +136,7 @@ rules:
       category: cleaner
       products:
       - \bbleachbit\b
+      - 블리치비트
       executables:
       - bleachbit.exe
       - bleachbit_console.exe
