@@ -406,3 +406,71 @@ textarea.dash-input {
   display: inline-flex;
   color: var(--text-muted);
 }
+
+/* --- case intake cards (AXIOM adoption E1) ---------------------------------------------- */
+
+.dash-crumb {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
+}
+
+.dash-run-list,
+.dash-problems,
+.dash-memo-list,
+.dash-memo-history {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dash-problem {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.dash-problem details {
+  flex: 1;
+  min-inline-size: 0;
+}
+
+.dash-problem summary {
+  cursor: pointer;
+}
+
+.dash-memo-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0 var(--space-2);
+  padding-block-end: var(--space-1);
+  border-block-end: 1px solid var(--line);
+}
+
+.dash-memo-meta {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
+}
+
+.dash-memo-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.dash-memo-item .button {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  align-self: start;
+}
+
+.dash-memo-history {
+  max-block-size: 200px;
+  overflow: auto;
+  font-size: var(--fs-table-aux);
+}

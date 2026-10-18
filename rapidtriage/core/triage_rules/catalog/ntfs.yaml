@@ -12,6 +12,7 @@ families:
     format: time
     ts_kind: event
   - key: file_path
+    semantic: path
     label: 경로
     aliases:
     - path_candidates
@@ -82,6 +83,7 @@ families:
     aliases:
     - host_file_name
   - key: host_file_path
+    semantic: path
     label: 대상 경로
     aliases:
     - host_file_path_candidate
@@ -94,9 +96,11 @@ families:
   - key: zone_name
     label: 영역 이름
   - key: host_url
+    semantic: url
     label: 다운로드 URL(HostUrl)
     format: url
   - key: referrer_url
+    semantic: url
     label: 참조 URL(ReferrerUrl)
     format: url
   - key: last_writer_package_family_name
@@ -130,12 +134,14 @@ families:
     format: time
     ts_kind: event
   - key: original_path
+    semantic: path
     label: 원래 경로
     format: path
   - key: deleted_file_size
     label: 원래 크기
     format: bytes
   - key: sid_hint
+    semantic: account
     label: 사용자 SID
     aliases:
     - user_sid
@@ -144,6 +150,7 @@ families:
     label: 휴지통 ID
     format: mono
   - key: paired_payload_path
+    semantic: path
     label: $R 파일
     format: path
   - key: format_version
@@ -164,6 +171,7 @@ families:
     aliases:
     - file_name
   - key: path
+    semantic: path
     label: 경로
     aliases:
     - relative_path

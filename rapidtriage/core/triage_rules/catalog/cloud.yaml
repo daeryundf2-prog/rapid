@@ -24,6 +24,7 @@ families:
   - key: service
     label: 서비스
   - key: actor
+    semantic: account
     label: 계정
     aliases:
     - account
@@ -46,10 +47,12 @@ families:
     - size_bytes
     format: bytes
   - key: shared_with
+    semantic: person_recipient
     label: 공유 대상
     aliases:
     - sharing_link_count
   - key: ip_address
+    semantic: device
     label: IP·기기
     aliases:
     - client_ip
@@ -60,6 +63,7 @@ families:
     format: time
     ts_kind: taken
   - key: latitude
+    semantic: geo
     label: 위치
     aliases:
     - geo_data
@@ -73,6 +77,7 @@ families:
   - key: retention_label
     label: 보존 레이블
   - key: archive_entry_name
+    semantic: path
     label: 보관 파일 항목
     format: path
   rules:

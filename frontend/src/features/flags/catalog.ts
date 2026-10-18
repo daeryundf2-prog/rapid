@@ -8,7 +8,7 @@
  *   { version, families: [{ id, label, types, kinds?, prefixes?, core_columns, aux_columns, rules }],
  *     rules: [{ id, family, grade, label_ko, rationale_ko, false_positive_ko, sources, version,
  *               status, params }] }
- *   column: { key, label, format?, ts_kind?, width?, aliases? }
+ *   column: { key, label, format?, ts_kind?, width?, aliases?, semantic?, semantic_when?, derive? }
  */
 
 import { useQuery } from "@tanstack/react-query";
@@ -27,6 +27,13 @@ export interface CatalogColumn {
   width?: number;
   /** Other keys of the same fact, tried in order ("event_data.X" reads EVTX EventData). */
   aliases?: string[];
+  /**
+   * Meaning tag (axiom-adoption §3.2: person, account, device, path, url, hash, credential …): the
+   * server's 통합 보기 tables gather every column with one.
+   */
+  semantic?: string;
+  /** Display-only column computed from the row's own fields (`derivedFields.ts` DERIVERS id). */
+  derive?: string;
 }
 
 export interface CatalogFamily {
@@ -109,6 +116,8 @@ function column(raw: unknown): CatalogColumn | null {
     ...(typeof raw.ts_kind === "string" && raw.ts_kind ? { ts_kind: raw.ts_kind } : {}),
     ...(typeof raw.width === "number" && raw.width > 0 ? { width: raw.width } : {}),
     ...(strings(raw.aliases).length ? { aliases: strings(raw.aliases) } : {}),
+    ...(typeof raw.semantic === "string" && raw.semantic ? { semantic: raw.semantic } : {}),
+    ...(typeof raw.derive === "string" && raw.derive ? { derive: raw.derive } : {}),
   };
 }
 

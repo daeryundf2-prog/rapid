@@ -15,6 +15,7 @@ families:
     format: time
     ts_kind: target-created
   - key: target_path
+    semantic: path
     label: 대상 경로
     aliases:
     - local_base_path
@@ -26,6 +27,7 @@ families:
     - arguments
     format: mono
   - key: working_dir
+    semantic: path
     label: 작업 폴더
     aliases:
     - working_directory
@@ -41,6 +43,7 @@ families:
   - key: volume_label
     label: 볼륨 레이블
   - key: volume_serial_number
+    semantic: device
     label: 볼륨 시리얼
     format: mono
   - key: drive_type_name
@@ -49,17 +52,20 @@ families:
     - drive_type
   aux_columns:
   - key: net_name
+    semantic: path
     label: 네트워크 공유
     aliases:
     - device_name
     - common_path_suffix
     format: path
   - key: tracker_machine_id
+    semantic: device
     label: 머신 ID(NetBIOS)
     aliases:
     - machine_id
     format: mono
   - key: hostname
+    semantic: device
     label: 호스트 이름
   - key: droid_volume_id
     label: Droid 볼륨 ID
@@ -74,6 +80,7 @@ families:
     label: 최초 Droid 파일 ID
     format: mono
   - key: tracker_droid_file_mac_address
+    semantic: device
     label: MAC 주소(Droid)
     aliases:
     - mac_address
@@ -99,6 +106,7 @@ families:
   - key: location
     label: 위치
   - key: user
+    semantic: account
     label: 사용자 프로필
   - key: detected_content_label
     label: 감지된 내용
@@ -149,6 +157,7 @@ families:
   - key: jumplist_kind
     label: 점프 목록 종류
   - key: destlist_path
+    semantic: path
     label: 대상 경로
     aliases:
     - target_path
@@ -167,6 +176,7 @@ families:
     aliases:
     - destlist_pin_status
   - key: destlist_hostname
+    semantic: device
     label: 호스트 이름
     aliases:
     - hostname
@@ -184,21 +194,25 @@ families:
     label: 최초 Droid 파일 ID
     format: mono
   - key: destlist_file_droid_mac_address
+    semantic: device
     label: MAC 주소(Droid)
     format: mono
   - key: lnk_stream_name
     label: LNK 스트림
     format: mono
   - key: working_dir
+    semantic: path
     label: 작업 폴더
     format: path
   - key: command_line_arguments
     label: 인수
     format: mono
   - key: volume_serial_number
+    semantic: device
     label: 볼륨 시리얼
     format: mono
   - key: tracker_machine_id
+    semantic: device
     label: 머신 ID(NetBIOS)
     format: mono
   - key: destinations
@@ -213,6 +227,7 @@ families:
   - key: entry_name
     label: 점프 목록 파일
   - key: user
+    semantic: account
     label: 사용자 프로필
   - key: target_created_at
     label: 대상 생성

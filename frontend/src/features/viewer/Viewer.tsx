@@ -7,15 +7,17 @@ import {
   type SourceMetadata,
   type SourcePreview,
 } from "../../api/viewer";
-import { collapseViewerPane } from "../../commands/builtin";
+import { CLASSIC_COLLAPSE_REASON, collapseViewerPane } from "../../commands/builtin";
 import { runCommand as runShellCommand } from "../../commands/registry";
 import { MiddlePath } from "../../components/MiddlePath";
 import type { Command } from "../../contracts/command";
 import type { MarkAction, ViewerMode, ViewerTarget } from "../../contracts/viewer";
 import { Icon } from "../../icons";
+import { resolveCaseLink } from "../case/caseLink";
 import { FlagBanner } from "../flags/FlagCell";
 import { currentTimezone } from "../grid/columns/common";
 import { storeNotice } from "../grid/reviewActions";
+import { useViewPrefs } from "../review/viewPrefs";
 import {
   dispatchCommand,
   getCommand,
@@ -82,6 +84,8 @@ export function targetTitle(
 
 export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
   const target = useViewerTarget();
+  // 클래식 분할 always shows the viewer: 뷰어 접기 says why instead of hiding it unseen.
+  const classicSplit = useViewPrefs((s) => s.classicSplit);
   const row = useViewerRowContext();
   const focusSeq = useViewerFocusRequest();
   const ctx = useCommandContext();
@@ -274,6 +278,8 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
       if (!target) return;
       try {
         const sha = target.sourcePath ? await ensureSha256().catch(() => null) : null;
+        // The case prefix (사건/증거) must be known first (the viewer window loads it on demand).
+        await resolveCaseLink(target.runId);
         await writeClipboard(buildCitation({ ...target, highlight }, sha, row, currentTimezone()));
         announce("인용을 복사했습니다.");
       } catch (error) {
@@ -476,16 +482,18 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
           </button>
         )}
         {drawer ? null : (
-          <button
-            type="button"
-            className="viewer-icon-button"
-            aria-label="뷰어 접기"
-            title="뷰어 접기"
-            data-testid="viewer-collapse"
-            onClick={collapseViewerPane}
-          >
-            <Icon name="chevron-right" />
-          </button>
+          <DisabledReason reason={classicSplit ? CLASSIC_COLLAPSE_REASON : undefined}>
+            <button
+              type="button"
+              className="viewer-icon-button"
+              aria-label="뷰어 접기"
+              title={classicSplit ? undefined : "뷰어 접기"}
+              data-testid="viewer-collapse"
+              onClick={collapseViewerPane}
+            >
+              <Icon name="chevron-right" />
+            </button>
+          </DisabledReason>
         )}
       </div>
       {/* 특이사항 (U-F4): the row's flags with their evidence, above the tabs (every mode). */}

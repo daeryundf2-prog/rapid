@@ -156,6 +156,29 @@ def _attach_artifact_flags(response: dict[str, object], join: FlagsJoin) -> None
     response["flags_join"] = dict(join.info)
 
 
+def run_request_from_body(request: RunCreateRequest, *, root: str | None = None, output_dir: str | None = None) -> RunRequest:
+    """``RunRequest`` for a ``POST /api/runs`` body (also case runs: ``root``/``output_dir`` overrides)."""
+    return RunRequest(
+        root=root if root is not None else request.root,
+        mode=request.mode,
+        output_dir=output_dir if output_dir is not None else request.output_dir,
+        input_kind=request.input_kind,
+        rules=request.rules,
+        dry_run=request.dry_run,
+        read_only=request.read_only,
+        max_extract_size_bytes=request.max_extract_size_bytes,
+        max_file_count=request.max_file_count,
+        memory_cap_bytes=request.memory_cap_bytes,
+        e01_partition_start_sector=request.e01_partition_start_sector,
+        overwrite=request.overwrite,
+        resume=request.resume,
+        extract=request.extract,
+        known_good_hash_feeds=tuple(path.strip() for path in request.known_good_hash_feeds if path.strip()),
+        hide_known_good=request.hide_known_good,
+        known_good_max_hash_bytes=request.known_good_max_hash_bytes,
+    )
+
+
 def build_runs_router(
     store: RunJobStore,
 ) -> APIRouter:
@@ -164,25 +187,7 @@ def build_runs_router(
     @router.post("/api/runs", status_code=202)
     def create_run(request: RunCreateRequest) -> dict[str, Any]:
         validate_run_evidence_source(request.root)
-        run_request = RunRequest(
-            root=request.root,
-            mode=request.mode,
-            output_dir=request.output_dir,
-            input_kind=request.input_kind,
-            rules=request.rules,
-            dry_run=request.dry_run,
-            read_only=request.read_only,
-            max_extract_size_bytes=request.max_extract_size_bytes,
-            max_file_count=request.max_file_count,
-            memory_cap_bytes=request.memory_cap_bytes,
-            e01_partition_start_sector=request.e01_partition_start_sector,
-            overwrite=request.overwrite,
-            resume=request.resume,
-            extract=request.extract,
-            known_good_hash_feeds=tuple(path.strip() for path in request.known_good_hash_feeds if path.strip()),
-            hide_known_good=request.hide_known_good,
-            known_good_max_hash_bytes=request.known_good_max_hash_bytes,
-        )
+        run_request = run_request_from_body(request)
         job = store.run_sync(run_request) if request.wait else store.submit(run_request)
         return job.to_dict(include_summary=request.wait)
 

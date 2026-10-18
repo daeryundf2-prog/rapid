@@ -115,6 +115,7 @@ from .review import (
     saved_search_to_dict,
     source_citation_package_hash,
 )
+from .review_schema import sync_review_mark_tag_ids, tag_names_for_ids
 from .schema import (
     apply_schema,
     artifact_fts_is_external,
@@ -1092,6 +1093,11 @@ class CaseDatabase:
                         existing["id"],
                     ),
                 )
+            # Review tags (AXIOM E3): the canonical case_tag ids; tags_json keeps the canonical names.
+            mark_tag_ids = sync_review_mark_tag_ids(
+                connection, normalized_case_id, citation_id, effective_tags, actor=effective_reviewer or "local-user"
+            )
+            effective_tags = tag_names_for_ids(connection, mark_tag_ids)
             current_review = {
                 "citation_id": citation_id,
                 "case_id": normalized_case_id,

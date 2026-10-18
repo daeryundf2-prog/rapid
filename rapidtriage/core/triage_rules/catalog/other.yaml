@@ -82,6 +82,7 @@ families:
   - key: memory_file_kind
     label: 덤프 종류
   - key: process_name
+    semantic: path
     label: 프로세스
     aliases:
     - process_image_path
@@ -307,14 +308,17 @@ families:
     - description
     - detail
   - key: user
+    semantic: account
     label: 사용자
     aliases:
     - user_name
     - account_name
   - key: url
+    semantic: url
     label: 주소 (URL)
     format: url
   - key: target_path
+    semantic: path
     label: 경로
     aliases:
     - path

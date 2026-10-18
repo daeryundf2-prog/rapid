@@ -11,6 +11,8 @@ import { StatusBadge } from "../../components/Badge";
 import type { CollectionId, ReviewStatus } from "../../contracts/collection";
 import type { IconName } from "../../icons";
 import { useRoute } from "../../state/hooks";
+import { isRunActive } from "../../state/slices/runs";
+import { useRunCaseLink } from "../case/caseLink";
 import { useSearchState } from "../case/searchState";
 import { Card, CardEmpty, CardError, CardLoading, useCardLayout } from "./Card";
 import {
@@ -24,12 +26,27 @@ import {
   ReviewCard,
   StartCard,
 } from "./cards";
+import {
+  CaseEvidenceCard,
+  CaseInfoCard,
+  CaseMemoCard,
+  NoCaseLink,
+  ProblemsCard,
+  SnapshotCard,
+  useCaseIntakeData,
+} from "./caseCards";
 import { disclosureItems, runWarnings } from "./disclosures";
 import { categoryBars, keywordRows, reviewSummary, stageRows } from "./model";
 import { useDashboardData } from "./useDashboardData";
 import "./dashboard.css";
 
 export const CARD_IDS = [
+  // Case intake (AXIOM adoption E1).
+  "case-info",
+  "case-evidence",
+  "snapshot",
+  "problems",
+  "case-memo",
   "notes",
   "evidence",
   "categories",
@@ -43,6 +60,11 @@ export const CARD_IDS = [
 export type CardId = (typeof CARD_IDS)[number];
 
 const CARD_META: Record<CardId, { title: string; icon: IconName }> = {
+  "case-info": { title: "사건 정보", icon: "inbox" },
+  "case-evidence": { title: "증거 목록", icon: "hard-drive" },
+  snapshot: { title: "처리 설정 스냅샷", icon: "settings" },
+  problems: { title: "처리 문제", icon: "alert" },
+  "case-memo": { title: "케이스 메모", icon: "message" },
   notes: { title: "케이스 요약 노트", icon: "file-text" },
   evidence: { title: "증거 소스", icon: "hard-drive" },
   categories: { title: "아티팩트 범주", icon: "layers" },
@@ -62,6 +84,10 @@ export function CaseDashboard({ runId }: { runId: string }) {
   const data = useDashboardData(runId);
   const { layout, setCollapsed, setHidden, showAll } = useCardLayout();
   const { detail, completed, summary, tree, review, saved, dashboard, notes, issues } = data;
+  const snapshot = useRunCaseLink(runId);
+  const runFinished = Boolean(detail.data) && !isRunActive(detail.data);
+  const intake = useCaseIntakeData(runId, snapshot.data, runFinished);
+  const caseDetail = intake.detail.data;
 
   const counts = summary.data?.summary?.counts;
   const categories = useMemo(() => categoryBars(tree.data), [tree.data]);
@@ -129,6 +155,12 @@ export function CaseDashboard({ runId }: { runId: string }) {
       <div className="dash-head">
         <h1>{runDisplayName(run)}</h1>
         <StatusBadge status={String(run.status)} />
+        {caseDetail ? (
+          <p className="dash-crumb" data-testid="case-crumb">
+            <span className="visually-hidden">케이스 › 증거 › 런: </span>
+            {caseDetail.case_number} › {intake.evidenceNumber || "—"} › {runId.slice(0, 8)}
+          </p>
+        ) : null}
         {hiddenCount ? (
           <button type="button" className="button ghost dash-head-action" onClick={showAll}>
             숨긴 카드 {hiddenCount}개 다시 표시
@@ -137,6 +169,101 @@ export function CaseDashboard({ runId }: { runId: string }) {
       </div>
 
       <div className="dash-grid">
+        {visible("case-info") ? (
+          <Card
+            {...cardProps("case-info", () => {
+              void snapshot.refetch();
+              void intake.detail.refetch();
+            })}
+            meta={caseDetail ? caseDetail.case_number : snapshot.data ? "케이스 없음" : undefined}
+          >
+            {snapshot.isPending || (intake.caseId && intake.detail.isPending) ? (
+              <CardLoading />
+            ) : snapshot.isError ? (
+              <CardError error={snapshot.error} />
+            ) : !intake.caseId ? (
+              <NoCaseLink />
+            ) : intake.detail.isError || !caseDetail ? (
+              <CardError error={intake.detail.error} />
+            ) : (
+              <CaseInfoCard detail={caseDetail} />
+            )}
+          </Card>
+        ) : null}
+
+        {visible("case-evidence") ? (
+          <Card
+            {...cardProps("case-evidence", () => void intake.detail.refetch())}
+            meta={caseDetail ? `증거 ${caseDetail.evidence_count} · 런 ${caseDetail.run_count}` : undefined}
+          >
+            {snapshot.isPending || (intake.caseId && intake.detail.isPending) ? (
+              <CardLoading />
+            ) : !intake.caseId ? (
+              <CardEmpty title="증거 목록">
+                케이스에 연결하면 케이스의 증거와 증거별 런이 표시됩니다.
+              </CardEmpty>
+            ) : intake.detail.isError || !caseDetail ? (
+              <CardError error={intake.detail.error} />
+            ) : (
+              <CaseEvidenceCard detail={caseDetail} currentRunId={runId} />
+            )}
+          </Card>
+        ) : null}
+
+        {visible("snapshot") ? (
+          <Card {...cardProps("snapshot", () => void snapshot.refetch())}>
+            {snapshot.isPending ? (
+              <CardLoading />
+            ) : snapshot.isError || !snapshot.data ? (
+              <CardError error={snapshot.error} />
+            ) : (
+              <SnapshotCard snapshot={snapshot.data} />
+            )}
+          </Card>
+        ) : null}
+
+        {visible("problems") ? (
+          <Card
+            {...cardProps("problems", () => void intake.problems.refetch())}
+            meta={
+              intake.problems.data ? `${intake.problems.data.total.toLocaleString("ko-KR")}건` : undefined
+            }
+          >
+            {!runFinished ? (
+              <CardEmpty title="처리 문제">{WAIT_FOR_RUN}</CardEmpty>
+            ) : intake.problems.isPending ? (
+              <CardLoading />
+            ) : intake.problems.isError || !intake.problems.data ? (
+              <CardError error={intake.problems.error} />
+            ) : (
+              <ProblemsCard runId={runId} problems={intake.problems.data} />
+            )}
+          </Card>
+        ) : null}
+
+        {visible("case-memo") ? (
+          <Card
+            {...cardProps("case-memo", () => void intake.notes.refetch())}
+            meta={intake.notes.data ? `${intake.notes.data.count}건` : undefined}
+          >
+            {snapshot.isPending || (intake.caseId && intake.notes.isPending) ? (
+              <CardLoading />
+            ) : !intake.caseId ? (
+              <CardEmpty title="케이스 메모">
+                케이스에 연결하면 작성자·시각이 남는 케이스 메모를 쓸 수 있습니다.
+              </CardEmpty>
+            ) : intake.notes.isError || !intake.notes.data ? (
+              <CardError error={intake.notes.error} />
+            ) : (
+              <CaseMemoCard
+                caseId={intake.caseId}
+                examiner={caseDetail?.examiner ?? ""}
+                notes={intake.notes.data}
+              />
+            )}
+          </Card>
+        ) : null}
+
         {visible("notes") ? (
           <Card {...cardProps("notes", () => void notes.refetch())}>
             {notes.isPending ? (

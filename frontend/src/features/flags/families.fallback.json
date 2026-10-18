@@ -1,5 +1,5 @@
 {
- "version": "b9313948d4289c0c",
+ "version": "df23745d0915665c",
  "families": [
   {
    "id": "sam-account",
@@ -17,6 +17,7 @@
     },
     {
      "key": "user_name",
+     "semantic": "account",
      "label": "계정",
      "aliases": [
       "user_name_candidate",
@@ -29,6 +30,7 @@
     },
     {
      "key": "full_name",
+     "semantic": "person",
      "label": "전체 이름"
     },
     {
@@ -46,6 +48,7 @@
     },
     {
      "key": "sid",
+     "semantic": "account",
      "label": "보안 식별자 (SID)",
      "aliases": [
       "user_sid"
@@ -71,13 +74,24 @@
       "acb_flags",
       "uac_flags"
      ]
-    }
-   ],
-   "aux_columns": [
+    },
     {
      "key": "account_disabled",
      "label": "사용 안 함"
     },
+    {
+     "key": "last_failed_logon_at",
+     "label": "마지막 로그온 실패",
+     "format": "time",
+     "ts_kind": "last-failed-logon"
+    },
+    {
+     "key": "auto_logon",
+     "label": "자동 로그온",
+     "derive": "auto_logon"
+    }
+   ],
+   "aux_columns": [
     {
      "key": "account_locked",
      "label": "잠김"
@@ -114,6 +128,7 @@
     },
     {
      "key": "profile_path",
+     "semantic": "path",
      "label": "프로필 경로",
      "aliases": [
       "home_directory"
@@ -122,6 +137,7 @@
     },
     {
      "key": "logon_script",
+     "semantic": "path",
      "label": "로그온 스크립트",
      "format": "path"
     },
@@ -145,12 +161,6 @@
      "label": "암호 마지막 변경",
      "format": "time",
      "ts_kind": "password-last-set"
-    },
-    {
-     "key": "last_failed_logon_at",
-     "label": "마지막 로그온 실패",
-     "format": "time",
-     "ts_kind": "last-failed-logon"
     },
     {
      "key": "account_expires_at",
@@ -219,6 +229,7 @@
     },
     {
      "key": "member_names",
+     "semantic": "account",
      "label": "구성원",
      "aliases": [
       "member_sids",
@@ -281,6 +292,7 @@
     },
     {
      "key": "command",
+     "semantic": "path",
      "label": "명령",
      "aliases": [
       "executable_name"
@@ -302,15 +314,18 @@
     },
     {
      "key": "working_directory",
+     "semantic": "path",
      "label": "작업 폴더",
      "format": "path"
     },
     {
      "key": "author",
+     "semantic": "account",
      "label": "작성자"
     },
     {
      "key": "user_id",
+     "semantic": "account",
      "label": "실행 계정(UserId)"
     },
     {
@@ -389,6 +404,7 @@
     },
     {
      "key": "application_path",
+     "semantic": "path",
      "label": "앱 경로",
      "format": "path"
     },
@@ -423,6 +439,7 @@
     },
     {
      "key": "fault_module_path",
+     "semantic": "path",
      "label": "오류 모듈 경로",
      "format": "path"
     },
@@ -494,6 +511,7 @@
     },
     {
      "key": "source_path",
+     "semantic": "path",
      "label": "압축 파일",
      "format": "path"
     },
@@ -573,6 +591,7 @@
     },
     {
      "key": "url",
+     "semantic": "url",
      "label": "주소 (URL)",
      "format": "url"
     },
@@ -603,11 +622,13 @@
     },
     {
      "key": "from_url",
+     "semantic": "url",
      "label": "이전 URL",
      "format": "url"
     },
     {
      "key": "external_referrer_url",
+     "semantic": "url",
      "label": "외부 참조 URL",
      "format": "url"
     },
@@ -639,6 +660,7 @@
     },
     {
      "key": "user",
+     "semantic": "account",
      "label": "사용자"
     }
    ],
@@ -666,6 +688,7 @@
     },
     {
      "key": "source_url",
+     "semantic": "url",
      "label": "출처 주소 (URL)",
      "aliases": [
       "url"
@@ -674,11 +697,13 @@
     },
     {
      "key": "tab_url",
+     "semantic": "url",
      "label": "탭 URL",
      "format": "url"
     },
     {
      "key": "referrer",
+     "semantic": "url",
      "label": "참조 URL",
      "aliases": [
       "tab_referrer_url",
@@ -688,6 +713,7 @@
     },
     {
      "key": "target_path",
+     "semantic": "path",
      "label": "대상 경로",
      "aliases": [
       "current_path"
@@ -759,6 +785,7 @@
     },
     {
      "key": "user",
+     "semantic": "account",
      "label": "사용자"
     },
     {
@@ -800,6 +827,7 @@
     },
     {
      "key": "url",
+     "semantic": "url",
      "label": "주소 (URL)",
      "format": "url"
     },
@@ -842,6 +870,7 @@
    "aux_columns": [
     {
      "key": "user",
+     "semantic": "account",
      "label": "사용자"
     },
     {
@@ -882,6 +911,7 @@
     },
     {
      "key": "host",
+     "semantic": "url",
      "label": "호스트",
      "aliases": [
       "host_key"
@@ -976,6 +1006,7 @@
     },
     {
      "key": "origin",
+     "semantic": "url",
      "label": "사이트",
      "aliases": [
       "action_url",
@@ -985,6 +1016,7 @@
     },
     {
      "key": "username",
+     "semantic": "account",
      "label": "사용자 이름",
      "aliases": [
       "display_name"
@@ -1005,6 +1037,7 @@
     },
     {
      "key": "federation_url",
+     "semantic": "url",
      "label": "연동 URL",
      "format": "url"
     },
@@ -1056,6 +1089,7 @@
     },
     {
      "key": "term",
+     "semantic": "search_term",
      "label": "검색어",
      "aliases": [
       "normalized_term"
@@ -1063,6 +1097,7 @@
     },
     {
      "key": "url",
+     "semantic": "url",
      "label": "주소 (URL)",
      "format": "url"
     },
@@ -1113,6 +1148,7 @@
     },
     {
      "key": "url",
+     "semantic": "url",
      "label": "주소 (URL)",
      "format": "url"
     },
@@ -1204,6 +1240,7 @@
    "aux_columns": [
     {
      "key": "manifest_path",
+     "semantic": "path",
      "label": "매니페스트 경로",
      "format": "path"
     },
@@ -1255,10 +1292,17 @@
     },
     {
      "key": "domain",
+     "semantic": "url",
      "label": "도메인"
     },
     {
      "key": "value_preview",
+     "semantic": "credential",
+     "semantic_when": {
+      "mask_reason": [
+       "secret-field-name"
+      ]
+     },
      "label": "값(마스킹)"
     },
     {
@@ -1332,6 +1376,7 @@
     },
     {
      "key": "actor",
+     "semantic": "account",
      "label": "계정",
      "aliases": [
       "account",
@@ -1366,6 +1411,7 @@
     },
     {
      "key": "shared_with",
+     "semantic": "person_recipient",
      "label": "공유 대상",
      "aliases": [
       "sharing_link_count"
@@ -1373,6 +1419,7 @@
     },
     {
      "key": "ip_address",
+     "semantic": "device",
      "label": "IP·기기",
      "aliases": [
       "client_ip",
@@ -1388,6 +1435,7 @@
     },
     {
      "key": "latitude",
+     "semantic": "geo",
      "label": "위치",
      "aliases": [
       "geo_data"
@@ -1412,6 +1460,7 @@
     },
     {
      "key": "archive_entry_name",
+     "semantic": "path",
      "label": "보관 파일 항목",
      "format": "path"
     }
@@ -1466,6 +1515,7 @@
     },
     {
      "key": "author",
+     "semantic": "person",
      "label": "작성자",
      "aliases": [
       "author_candidates"
@@ -1473,10 +1523,12 @@
     },
     {
      "key": "last_modified_by",
+     "semantic": "person",
      "label": "마지막 수정자"
     },
     {
      "key": "lock_owner",
+     "semantic": "account",
      "label": "잠금 소유자",
      "aliases": [
       "lock_owner_ansi"
@@ -1484,6 +1536,7 @@
     },
     {
      "key": "lock_owner_host",
+     "semantic": "device",
      "label": "잠금 호스트"
     },
     {
@@ -1494,6 +1547,7 @@
    "aux_columns": [
     {
      "key": "manager",
+     "semantic": "person",
      "label": "관리자"
     },
     {
@@ -1553,6 +1607,7 @@
     },
     {
      "key": "external_reference_candidates",
+     "semantic": "url",
      "label": "외부 참조"
     },
     {
@@ -1611,10 +1666,12 @@
     },
     {
      "key": "from",
+     "semantic": "person_sender",
      "label": "보낸 사람"
     },
     {
      "key": "to",
+     "semantic": "person_recipient",
      "label": "받는 사람",
      "aliases": [
       "cc",
@@ -1641,11 +1698,13 @@
     },
     {
      "key": "return_path",
+     "semantic": "person_sender",
      "label": "반송 주소 (Return-Path)",
      "format": "mono"
     },
     {
      "key": "reply_to",
+     "semantic": "person_sender",
      "label": "회신 주소 (Reply-To)",
      "format": "mono"
     },
@@ -1674,6 +1733,7 @@
     },
     {
      "key": "x_originating_ip",
+     "semantic": "device",
      "label": "발신 IP (X-Originating-IP)",
      "format": "mono"
     },
@@ -1691,12 +1751,18 @@
     },
     {
      "key": "body_sha256",
+     "semantic": "hash",
      "label": "본문 SHA-256",
      "format": "mono"
     },
     {
      "key": "source_format",
      "label": "원본 형식"
+    },
+    {
+     "key": "attachments",
+     "semantic": "attachment",
+     "label": "첨부 파일"
     }
    ],
    "rules": [
@@ -1755,12 +1821,19 @@
      "width": 80
     },
     {
+     "key": "summary_ko",
+     "label": "요약 문장",
+     "derive": "event_summary_ko",
+     "width": 320
+    },
+    {
      "key": "event_label_ko",
-     "label": "요약",
+     "label": "이벤트명",
      "width": 180
     },
     {
      "key": "computer",
+     "semantic": "device",
      "label": "컴퓨터",
      "aliases": [
       "Computer"
@@ -1768,10 +1841,12 @@
     },
     {
      "key": "subject_user_name",
+     "semantic": "account",
      "label": "주체 계정"
     },
     {
      "key": "target_user_name",
+     "semantic": "account",
      "label": "대상 계정"
     },
     {
@@ -1782,6 +1857,7 @@
     },
     {
      "key": "source_ip",
+     "semantic": "device",
      "label": "원격 IP",
      "aliases": [
       "ip_address"
@@ -1791,6 +1867,7 @@
     },
     {
      "key": "process_name",
+     "semantic": "path",
      "label": "프로세스",
      "aliases": [
       "new_process_name",
@@ -1826,6 +1903,11 @@
    ],
    "aux_columns": [
     {
+     "key": "rdp_direction",
+     "label": "RDP 방향",
+     "derive": "rdp_direction"
+    },
+    {
      "key": "level",
      "label": "레벨",
      "aliases": [
@@ -1843,6 +1925,7 @@
     },
     {
      "key": "user_name",
+     "semantic": "account",
      "label": "사용자",
      "aliases": [
       "user"
@@ -1850,6 +1933,7 @@
     },
     {
      "key": "user_sid",
+     "semantic": "account",
      "label": "사용자 SID",
      "aliases": [
       "sid",
@@ -1875,10 +1959,12 @@
     },
     {
      "key": "workstation_name",
+     "semantic": "device",
      "label": "워크스테이션"
     },
     {
      "key": "destination_ip",
+     "semantic": "device",
      "label": "목적지",
      "aliases": [
       "destination_hostname"
@@ -1910,6 +1996,7 @@
     },
     {
      "key": "parent_process_name",
+     "semantic": "path",
      "label": "부모 프로세스",
      "format": "path"
     },
@@ -1929,6 +2016,7 @@
     },
     {
      "key": "service_file_name",
+     "semantic": "path",
      "label": "서비스 경로",
      "aliases": [
       "service_image_path",
@@ -1938,6 +2026,7 @@
     },
     {
      "key": "service_account_name",
+     "semantic": "account",
      "label": "서비스 계정"
     },
     {
@@ -1946,6 +2035,7 @@
     },
     {
      "key": "share_name",
+     "semantic": "path",
      "label": "공유/대상",
      "aliases": [
       "relative_target_name"
@@ -1966,9 +2056,20 @@
     },
     {
      "key": "device_instance_id",
+     "semantic": "device",
      "label": "장치 ID",
      "aliases": [
-      "device_id"
+      "device_id",
+      "event_data.DeviceInstanceId"
+     ],
+     "format": "mono"
+    },
+    {
+     "key": "client_address",
+     "semantic": "device",
+     "label": "클라이언트 주소(SMB 등)",
+     "aliases": [
+      "event_data.ClientAddress"
      ],
      "format": "mono"
     },
@@ -2128,6 +2229,11 @@
      "label": "한글 이벤트명"
     },
     {
+     "key": "summary_ko",
+     "label": "요약 문장",
+     "derive": "event_summary_ko"
+    },
+    {
      "key": "level",
      "label": "레벨",
      "aliases": [
@@ -2152,6 +2258,7 @@
     },
     {
      "key": "computer",
+     "semantic": "device",
      "label": "컴퓨터",
      "aliases": [
       "Computer"
@@ -2159,6 +2266,7 @@
     },
     {
      "key": "user_name",
+     "semantic": "account",
      "label": "사용자",
      "aliases": [
       "user"
@@ -2166,6 +2274,7 @@
     },
     {
      "key": "user_sid",
+     "semantic": "account",
      "label": "사용자 SID",
      "aliases": [
       "sid",
@@ -2175,10 +2284,12 @@
     },
     {
      "key": "subject_user_name",
+     "semantic": "account",
      "label": "주체 사용자"
     },
     {
      "key": "target_user_name",
+     "semantic": "account",
      "label": "대상 사용자"
     },
     {
@@ -2209,6 +2320,7 @@
     },
     {
      "key": "source_ip",
+     "semantic": "device",
      "label": "출발지 IP",
      "aliases": [
       "ip_address"
@@ -2221,10 +2333,12 @@
     },
     {
      "key": "workstation_name",
+     "semantic": "device",
      "label": "워크스테이션"
     },
     {
      "key": "destination_ip",
+     "semantic": "device",
      "label": "목적지",
      "aliases": [
       "destination_hostname"
@@ -2246,6 +2360,7 @@
     },
     {
      "key": "process_name",
+     "semantic": "path",
      "label": "프로세스",
      "aliases": [
       "new_process_name",
@@ -2270,6 +2385,7 @@
     },
     {
      "key": "parent_process_name",
+     "semantic": "path",
      "label": "부모 프로세스",
      "format": "path"
     },
@@ -2289,6 +2405,7 @@
     },
     {
      "key": "service_file_name",
+     "semantic": "path",
      "label": "서비스 경로",
      "aliases": [
       "service_image_path",
@@ -2298,6 +2415,7 @@
     },
     {
      "key": "service_account_name",
+     "semantic": "account",
      "label": "서비스 계정"
     },
     {
@@ -2306,6 +2424,7 @@
     },
     {
      "key": "share_name",
+     "semantic": "path",
      "label": "공유/대상",
      "aliases": [
       "relative_target_name"
@@ -2326,6 +2445,7 @@
     },
     {
      "key": "device_instance_id",
+     "semantic": "device",
      "label": "장치 ID",
      "aliases": [
       "device_id"
@@ -2414,6 +2534,7 @@
     },
     {
      "key": "user_name",
+     "semantic": "account",
      "label": "사용자"
     },
     {
@@ -2432,15 +2553,18 @@
     },
     {
      "key": "source_ip",
+     "semantic": "device",
      "label": "출발지 IP",
      "format": "mono"
     },
     {
      "key": "workstation_name",
+     "semantic": "device",
      "label": "워크스테이션"
     },
     {
      "key": "computer",
+     "semantic": "device",
      "label": "컴퓨터"
     },
     {
@@ -2570,6 +2694,7 @@
     },
     {
      "key": "user",
+     "semantic": "account",
      "label": "사용자",
      "aliases": [
       "user_name"
@@ -2601,6 +2726,7 @@
     },
     {
      "key": "executable_path",
+     "semantic": "path",
      "label": "실행 파일 경로",
      "aliases": [
       "decoded_name",
@@ -2648,6 +2774,7 @@
     },
     {
      "key": "sha1",
+     "semantic": "hash",
      "label": "SHA-1(파일)",
      "aliases": [
       "file_id"
@@ -2702,6 +2829,7 @@
     },
     {
      "key": "user_sid",
+     "semantic": "account",
      "label": "사용자 SID",
      "aliases": [
       "sid"
@@ -2710,6 +2838,7 @@
     },
     {
      "key": "user_name",
+     "semantic": "account",
      "label": "사용자",
      "aliases": [
       "user"
@@ -2746,11 +2875,13 @@
     },
     {
      "key": "shortcut_target_path",
+     "semantic": "path",
      "label": "바로 가기 대상",
      "format": "path"
     },
     {
      "key": "device_instance_id",
+     "semantic": "device",
      "label": "장치 ID",
      "aliases": [
       "container_id"
@@ -2830,6 +2961,7 @@
     },
     {
      "key": "prefetch_hash",
+     "semantic": "hash",
      "label": "프리페치 해시",
      "aliases": [
       "header_prefetch_hash"
@@ -2907,6 +3039,7 @@
     },
     {
      "key": "referenced_path",
+     "semantic": "path",
      "label": "참조 경로",
      "format": "path"
     },
@@ -2956,6 +3089,7 @@
     },
     {
      "key": "executable_path",
+     "semantic": "path",
      "label": "앱",
      "aliases": [
       "app_id"
@@ -2964,6 +3098,7 @@
     },
     {
      "key": "user",
+     "semantic": "account",
      "label": "사용자"
     },
     {
@@ -3023,6 +3158,7 @@
     },
     {
      "key": "target_path",
+     "semantic": "path",
      "label": "대상 경로",
      "aliases": [
       "local_base_path",
@@ -3040,6 +3176,7 @@
     },
     {
      "key": "working_dir",
+     "semantic": "path",
      "label": "작업 폴더",
      "aliases": [
       "working_directory"
@@ -3066,6 +3203,7 @@
     },
     {
      "key": "volume_serial_number",
+     "semantic": "device",
      "label": "볼륨 시리얼",
      "format": "mono"
     },
@@ -3080,6 +3218,7 @@
    "aux_columns": [
     {
      "key": "net_name",
+     "semantic": "path",
      "label": "네트워크 공유",
      "aliases": [
       "device_name",
@@ -3089,6 +3228,7 @@
     },
     {
      "key": "tracker_machine_id",
+     "semantic": "device",
      "label": "머신 ID(NetBIOS)",
      "aliases": [
       "machine_id"
@@ -3097,6 +3237,7 @@
     },
     {
      "key": "hostname",
+     "semantic": "device",
      "label": "호스트 이름"
     },
     {
@@ -3121,6 +3262,7 @@
     },
     {
      "key": "tracker_droid_file_mac_address",
+     "semantic": "device",
      "label": "MAC 주소(Droid)",
      "aliases": [
       "mac_address"
@@ -3167,6 +3309,7 @@
     },
     {
      "key": "user",
+     "semantic": "account",
      "label": "사용자 프로필"
     },
     {
@@ -3244,6 +3387,7 @@
     },
     {
      "key": "destlist_path",
+     "semantic": "path",
      "label": "대상 경로",
      "aliases": [
       "target_path",
@@ -3273,6 +3417,7 @@
     },
     {
      "key": "destlist_hostname",
+     "semantic": "device",
      "label": "호스트 이름",
      "aliases": [
       "hostname"
@@ -3302,6 +3447,7 @@
     },
     {
      "key": "destlist_file_droid_mac_address",
+     "semantic": "device",
      "label": "MAC 주소(Droid)",
      "format": "mono"
     },
@@ -3312,6 +3458,7 @@
     },
     {
      "key": "working_dir",
+     "semantic": "path",
      "label": "작업 폴더",
      "format": "path"
     },
@@ -3322,11 +3469,13 @@
     },
     {
      "key": "volume_serial_number",
+     "semantic": "device",
      "label": "볼륨 시리얼",
      "format": "mono"
     },
     {
      "key": "tracker_machine_id",
+     "semantic": "device",
      "label": "머신 ID(NetBIOS)",
      "format": "mono"
     },
@@ -3352,6 +3501,7 @@
     },
     {
      "key": "user",
+     "semantic": "account",
      "label": "사용자 프로필"
     },
     {
@@ -3410,6 +3560,12 @@
      "width": 170
     },
     {
+     "key": "exif_status",
+     "label": "EXIF 상태",
+     "derive": "exif_status",
+     "width": 110
+    },
+    {
      "key": "exif_make",
      "label": "제조사"
     },
@@ -3419,6 +3575,7 @@
     },
     {
      "key": "gps_latitude",
+     "semantic": "geo",
      "label": "위도",
      "format": "number"
     },
@@ -3448,6 +3605,7 @@
     },
     {
      "key": "perceptual_hash",
+     "semantic": "hash",
      "label": "지각 해시 (pHash)",
      "format": "mono"
     }
@@ -3634,10 +3792,12 @@
     },
     {
      "key": "sender",
+     "semantic": "person_sender",
      "label": "발화자"
     },
     {
      "key": "recipient",
+     "semantic": "person_recipient",
      "label": "상대",
      "aliases": [
       "participants",
@@ -3660,6 +3820,7 @@
     },
     {
      "key": "attachment_name",
+     "semantic": "attachment",
      "label": "첨부",
      "aliases": [
       "media_reference"
@@ -3754,6 +3915,7 @@
     },
     {
      "key": "candidate_value",
+     "semantic": "credential",
      "label": "후보 값",
      "format": "mono"
     },
@@ -3856,6 +4018,7 @@
     },
     {
      "key": "contact_name",
+     "semantic": "person",
      "label": "상대",
      "aliases": [
       "phone_number",
@@ -3885,6 +4048,7 @@
     },
     {
      "key": "latitude",
+     "semantic": "geo",
      "label": "위도",
      "format": "number"
     },
@@ -3917,6 +4081,7 @@
     },
     {
      "key": "device_name",
+     "semantic": "device",
      "label": "기기",
      "aliases": [
       "product_version"
@@ -3951,6 +4116,7 @@
     },
     {
      "key": "file_path",
+     "semantic": "path",
      "label": "경로",
      "aliases": [
       "path_candidates"
@@ -4067,6 +4233,7 @@
     },
     {
      "key": "host_file_path",
+     "semantic": "path",
      "label": "대상 경로",
      "aliases": [
       "host_file_path_candidate",
@@ -4087,11 +4254,13 @@
     },
     {
      "key": "host_url",
+     "semantic": "url",
      "label": "다운로드 URL(HostUrl)",
      "format": "url"
     },
     {
      "key": "referrer_url",
+     "semantic": "url",
      "label": "참조 URL(ReferrerUrl)",
      "format": "url"
     },
@@ -4149,6 +4318,7 @@
     },
     {
      "key": "original_path",
+     "semantic": "path",
      "label": "원래 경로",
      "format": "path"
     },
@@ -4159,6 +4329,7 @@
     },
     {
      "key": "sid_hint",
+     "semantic": "account",
      "label": "사용자 SID",
      "aliases": [
       "user_sid"
@@ -4172,6 +4343,7 @@
     },
     {
      "key": "paired_payload_path",
+     "semantic": "path",
      "label": "$R 파일",
      "format": "path"
     },
@@ -4205,6 +4377,7 @@
     },
     {
      "key": "path",
+     "semantic": "path",
      "label": "경로",
      "aliases": [
       "relative_path",
@@ -4432,6 +4605,7 @@
     },
     {
      "key": "process_name",
+     "semantic": "path",
      "label": "프로세스",
      "aliases": [
       "process_image_path"
@@ -4787,6 +4961,7 @@
     },
     {
      "key": "user",
+     "semantic": "account",
      "label": "사용자",
      "aliases": [
       "user_name",
@@ -4795,11 +4970,13 @@
     },
     {
      "key": "url",
+     "semantic": "url",
      "label": "주소 (URL)",
      "format": "url"
     },
     {
      "key": "target_path",
+     "semantic": "path",
      "label": "경로",
      "aliases": [
       "path"
@@ -4845,6 +5022,7 @@
     },
     {
      "key": "destination",
+     "semantic": "device",
      "label": "대상 서버",
      "aliases": [
       "server",
@@ -4855,6 +5033,7 @@
     },
     {
      "key": "username_hint",
+     "semantic": "account",
      "label": "사용자 이름",
      "aliases": [
       "user_name",
@@ -4871,10 +5050,16 @@
     },
     {
      "key": "user",
+     "semantic": "account",
      "label": "사용자 프로필",
      "aliases": [
       "user_hive_scope"
      ]
+    },
+    {
+     "key": "direction",
+     "label": "방향",
+     "derive": "rdp_direction"
     }
    ],
    "aux_columns": [],
@@ -4957,6 +5142,7 @@
     },
     {
      "key": "user_sid",
+     "semantic": "account",
      "label": "사용자 SID",
      "format": "sid"
     }
@@ -4986,6 +5172,7 @@
     },
     {
      "key": "usb_device",
+     "semantic": "device",
      "label": "USB 장치"
     },
     {
@@ -5039,6 +5226,7 @@
     },
     {
      "key": "command",
+     "semantic": "path",
      "label": "명령/대상",
      "aliases": [
       "value_data",
@@ -5077,6 +5265,7 @@
     },
     {
      "key": "user_sid",
+     "semantic": "account",
      "label": "사용자 SID",
      "format": "sid"
     },
@@ -5129,6 +5318,7 @@
     },
     {
      "key": "image_path",
+     "semantic": "path",
      "label": "실행 경로",
      "aliases": [
       "image_path_hint"
@@ -5137,6 +5327,7 @@
     },
     {
      "key": "service_dll",
+     "semantic": "path",
      "label": "서비스 DLL",
      "format": "path"
     },
@@ -5158,6 +5349,7 @@
     },
     {
      "key": "object_name",
+     "semantic": "account",
      "label": "실행 계정"
     },
     {
@@ -5289,6 +5481,7 @@
     },
     {
      "key": "computer_name",
+     "semantic": "device",
      "label": "컴퓨터 이름",
      "aliases": [
       "active_computer_name",
@@ -5319,6 +5512,7 @@
     },
     {
      "key": "registered_owner",
+     "semantic": "person",
      "label": "등록 사용자"
     },
     {
@@ -5341,6 +5535,7 @@
     },
     {
      "key": "ip_address",
+     "semantic": "device",
      "label": "IP 주소",
      "aliases": [
       "subnet_mask",
@@ -5356,16 +5551,19 @@
     },
     {
      "key": "name_server",
+     "semantic": "device",
      "label": "DNS 서버",
      "format": "mono"
     },
     {
      "key": "sid",
+     "semantic": "account",
      "label": "보안 식별자 (SID)",
      "format": "sid"
     },
     {
      "key": "profile_image_path",
+     "semantic": "path",
      "label": "프로필 경로",
      "format": "path"
     },
@@ -5382,6 +5580,7 @@
     },
     {
      "key": "install_location",
+     "semantic": "path",
      "label": "설치 위치",
      "aliases": [
       "uninstall_string"
@@ -5459,6 +5658,7 @@
     },
     {
      "key": "volume_guid",
+     "semantic": "device",
      "label": "볼륨 GUID",
      "format": "mono"
     },
@@ -5479,6 +5679,7 @@
     },
     {
      "key": "disk_signature",
+     "semantic": "device",
      "label": "디스크 서명",
      "format": "mono"
     },
@@ -5494,6 +5695,7 @@
     },
     {
      "key": "usb_serial_number",
+     "semantic": "device",
      "label": "USB 시리얼",
      "format": "mono"
     }
@@ -5555,6 +5757,7 @@
     },
     {
      "key": "shell_path",
+     "semantic": "path",
      "label": "폴더 경로",
      "aliases": [
       "folder_path",
@@ -5617,6 +5820,7 @@
    "aux_columns": [
     {
      "key": "user_sid",
+     "semantic": "account",
      "label": "사용자 SID",
      "format": "sid"
     },
@@ -5687,6 +5891,7 @@
     },
     {
      "key": "serial_number",
+     "semantic": "device",
      "label": "시리얼",
      "aliases": [
       "serial",
@@ -5738,6 +5943,7 @@
     },
     {
      "key": "volume_guids",
+     "semantic": "device",
      "label": "볼륨 GUID",
      "aliases": [
       "volume_guid"
@@ -5746,6 +5952,7 @@
     },
     {
      "key": "container_id",
+     "semantic": "device",
      "label": "컨테이너 ID",
      "format": "mono"
     },

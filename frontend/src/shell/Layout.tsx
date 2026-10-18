@@ -18,6 +18,8 @@ import {
 import { CommandButton } from "../commands/CommandButton";
 import { ToastRegion } from "../components/ToastRegion";
 import { Landing } from "../features/case/Landing";
+import { ReviewToolsHost } from "../features/review/ReviewToolsHost";
+import { readClassicLayout, useViewPrefs, writeClassicLayout } from "../features/review/viewPrefs";
 import { StageRail } from "../features/stages/StageRail";
 import { STAGE_DEFS, STAGE_HEADING_ID } from "../features/stages/stages";
 import { focusPopout, returnViewerFromPopout, usePopoutHost } from "../features/viewer/popout/host";
@@ -335,6 +337,63 @@ function NarrowPanes() {
 }
 
 /**
+ * 클래식 분할 (AXIOM E3, research §7.2): tree | grid above · viewer (details) below, both
+ * resizable. Toggled by ` (view.classicSplit) and kept across reloads. The viewer is always
+ * shown here (no rail); while it lives in its own window the bottom pane says so.
+ */
+function ClassicPanes() {
+  const poppedOut = usePopoutHost((s) => s.status === "open");
+  const rowsRef = useRef<GroupImperativeHandle>(null);
+  // Like WidePanes: a dragged grid/viewer split is saved and applied once after mount.
+  useEffect(() => {
+    const saved = readClassicLayout();
+    if (saved?.[PANEL.grid] && saved[PANEL.viewer]) rowsRef.current?.setLayout(saved);
+  }, []);
+  return (
+    <Group id="rapidtriage-console-classic" orientation="horizontal" style={{ height: "100%" }}>
+      <Panel id={PANEL.tree} defaultSize={TREE_DEFAULT} minSize="240px" maxSize="320px">
+        <TreePane />
+      </Panel>
+      <Separator className="resize-handle" />
+      <Panel id="pane-classic" minSize="420px">
+        <Group
+          id="rapidtriage-console-classic-rows"
+          orientation="vertical"
+          groupRef={rowsRef}
+          onLayoutChanged={(layout, meta) => {
+            if (meta?.isUserInteraction) writeClassicLayout({ ...layout });
+          }}
+          style={{ height: "100%" }}
+        >
+          <Panel id={PANEL.grid} defaultSize="55%" minSize="160px">
+            <GridPane />
+          </Panel>
+          <Separator className="resize-handle resize-handle-rows" />
+          <Panel id={PANEL.viewer} defaultSize="45%" minSize="160px">
+            <aside
+              id={VIEWER_ID}
+              tabIndex={-1}
+              className="pane-frame"
+              aria-label="뷰어 패널 (아래)"
+              data-testid="viewer-region"
+              data-split="classic"
+            >
+              {poppedOut ? (
+                <PopoutRail />
+              ) : (
+                <div className="viewer-slot">
+                  <ViewerSlot drawer={false} />
+                </div>
+              )}
+            </aside>
+          </Panel>
+        </Group>
+      </Panel>
+    </Group>
+  );
+}
+
+/**
  * The console frame (plan §4.1, visual-polish S9/S10): top bar, stage rail, body, status bar.
  * The body is the landing card without a case, two columns on 접수·처리·보고 and three
  * (tree · grid · viewer) on 탐색·검토.
@@ -348,6 +407,8 @@ export function Layout() {
   const hasCase = useAppStore((s) => Boolean(s.route.runId));
   const withViewer = useAppStore((s) => stageHasViewer(stageOf(s.route)));
   const columns = !hasCase ? "landing" : withViewer ? "three" : "two";
+  // 클래식 분할 (AXIOM E3): grid above, viewer below — wide 탐색·검토 only.
+  const classic = useViewPrefs((s) => s.classicSplit);
 
   return (
     <div
@@ -355,6 +416,7 @@ export function Layout() {
       data-testid="workbench-shell"
       data-layout={drawer ? "drawer" : "wide"}
       data-columns={columns}
+      data-split={classic && columns === "three" && !drawer ? "classic" : undefined}
     >
       <SkipLink target={MAIN_ID} />
       <TopBar />
@@ -367,6 +429,8 @@ export function Layout() {
             <TwoPanes narrow={drawer} />
           ) : drawer ? (
             <NarrowPanes />
+          ) : classic ? (
+            <ClassicPanes />
           ) : (
             <WidePanes />
           )}
@@ -376,6 +440,7 @@ export function Layout() {
       <ToastRegion />
       <CommandPalette />
       <HelpOverlay />
+      <ReviewToolsHost />
     </div>
   );
 }

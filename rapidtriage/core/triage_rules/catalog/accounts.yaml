@@ -11,6 +11,7 @@ families:
     format: time
     ts_kind: last-logon
   - key: user_name
+    semantic: account
     label: 계정
     aliases:
     - user_name_candidate
@@ -18,6 +19,7 @@ families:
   - key: well_known_account_ko
     label: 기본 계정
   - key: full_name
+    semantic: person
     label: 전체 이름
   - key: rid
     label: 상대 ID (RID)
@@ -28,6 +30,7 @@ families:
     label: RID(16진)
     format: mono
   - key: sid
+    semantic: account
     label: 보안 식별자 (SID)
     aliases:
     - user_sid
@@ -45,9 +48,16 @@ families:
     - acb_flags_hex
     - acb_flags
     - uac_flags
-  aux_columns:
   - key: account_disabled
     label: 사용 안 함
+  - key: last_failed_logon_at
+    label: 마지막 로그온 실패
+    format: time
+    ts_kind: last-failed-logon
+  - key: auto_logon
+    label: 자동 로그온
+    derive: auto_logon
+  aux_columns:
   - key: account_locked
     label: 잠김
   - key: password_never_expires
@@ -67,11 +77,13 @@ families:
     aliases:
     - user_comment
   - key: profile_path
+    semantic: path
     label: 프로필 경로
     aliases:
     - home_directory
     format: path
   - key: logon_script
+    semantic: path
     label: 로그온 스크립트
     format: path
   - key: lm_hash_present
@@ -87,10 +99,6 @@ families:
     label: 암호 마지막 변경
     format: time
     ts_kind: password-last-set
-  - key: last_failed_logon_at
-    label: 마지막 로그온 실패
-    format: time
-    ts_kind: last-failed-logon
   - key: account_expires_at
     label: 계정 만료
     format: time
@@ -135,6 +143,7 @@ families:
     - sid
     format: sid
   - key: member_names
+    semantic: account
     label: 구성원
     aliases:
     - member_sids
@@ -173,6 +182,7 @@ families:
     label: 작업 경로
     format: path
   - key: command
+    semantic: path
     label: 명령
     aliases:
     - executable_name
@@ -186,11 +196,14 @@ families:
     - action_preview
     format: mono
   - key: working_directory
+    semantic: path
     label: 작업 폴더
     format: path
   - key: author
+    semantic: account
     label: 작성자
   - key: user_id
+    semantic: account
     label: 실행 계정(UserId)
   - key: logon_type
     label: 로그온 방식
@@ -235,6 +248,7 @@ families:
     - application
     - signature_application_name
   - key: application_path
+    semantic: path
     label: 앱 경로
     format: path
   - key: application_version
@@ -255,6 +269,7 @@ families:
     aliases:
     - module
   - key: fault_module_path
+    semantic: path
     label: 오류 모듈 경로
     format: path
   - key: fault_module_version

@@ -49,7 +49,7 @@
   color: var(--text);
 }
 
-.view-pane button:not(.view-link):not(.hist-bar):not(.hist-cat) {
+.view-pane button:not(.view-link):not(.hist-bar):not(.hist-cat):not(.hist-compare-row) {
   font: inherit;
   font-size: var(--fs-table-aux);
   color: var(--text);

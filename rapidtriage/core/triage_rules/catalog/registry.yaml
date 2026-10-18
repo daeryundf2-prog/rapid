@@ -49,6 +49,7 @@ families:
     label: MRU 순서
     format: number
   - key: user_sid
+    semantic: account
     label: 사용자 SID
     format: sid
   aux_columns:
@@ -65,6 +66,7 @@ families:
   - key: persistence_values
     label: 자동 실행 값
   - key: usb_device
+    semantic: device
     label: USB 장치
   - key: decoded_values
     label: 해석된 값
@@ -97,6 +99,7 @@ families:
     - entry_name
     - name
   - key: command
+    semantic: path
     label: 명령/대상
     aliases:
     - value_data
@@ -120,6 +123,7 @@ families:
     aliases:
     - hive_hint
   - key: user_sid
+    semantic: account
     label: 사용자 SID
     format: sid
   - key: persistence_values
@@ -151,11 +155,13 @@ families:
   - key: display_name
     label: 표시 이름
   - key: image_path
+    semantic: path
     label: 실행 경로
     aliases:
     - image_path_hint
     format: mono
   - key: service_dll
+    semantic: path
     label: 서비스 DLL
     format: path
   - key: start_label
@@ -169,6 +175,7 @@ families:
     aliases:
     - service_type
   - key: object_name
+    semantic: account
     label: 실행 계정
   - key: autostart
     label: 자동 시작
@@ -248,6 +255,7 @@ families:
     format: time
     ts_kind: installed
   - key: computer_name
+    semantic: device
     label: 컴퓨터 이름
     aliases:
     - active_computer_name
@@ -266,6 +274,7 @@ families:
     aliases:
     - ubr
   - key: registered_owner
+    semantic: person
     label: 등록 사용자
   - key: registered_organization
     label: 등록 조직
@@ -278,6 +287,7 @@ families:
     aliases:
     - interface_guid
   - key: ip_address
+    semantic: device
     label: IP 주소
     aliases:
     - subnet_mask
@@ -287,12 +297,15 @@ families:
   - key: dhcp_enabled
     label: DHCP 사용
   - key: name_server
+    semantic: device
     label: DNS 서버
     format: mono
   - key: sid
+    semantic: account
     label: 보안 식별자 (SID)
     format: sid
   - key: profile_image_path
+    semantic: path
     label: 프로필 경로
     format: path
   - key: display_name
@@ -302,6 +315,7 @@ families:
   - key: publisher
     label: 게시자
   - key: install_location
+    semantic: path
     label: 설치 위치
     aliases:
     - uninstall_string
@@ -351,6 +365,7 @@ families:
   - key: drive_letter
     label: 드라이브 문자
   - key: volume_guid
+    semantic: device
     label: 볼륨 GUID
     format: mono
   - key: mount_kind
@@ -363,6 +378,7 @@ families:
     - device_id
     format: mono
   - key: disk_signature
+    semantic: device
     label: 디스크 서명
     format: mono
   - key: partition_offset
@@ -372,6 +388,7 @@ families:
     label: 파티션 GUID
     format: mono
   - key: usb_serial_number
+    semantic: device
     label: USB 시리얼
     format: mono
   aux_columns:
@@ -409,6 +426,7 @@ families:
     format: time
     ts_kind: last-written
   - key: shell_path
+    semantic: path
     label: 폴더 경로
     aliases:
     - folder_path
@@ -447,6 +465,7 @@ families:
     - hive_hint
   aux_columns:
   - key: user_sid
+    semantic: account
     label: 사용자 SID
     format: sid
   - key: user_hive_scope

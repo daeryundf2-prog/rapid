@@ -5,6 +5,7 @@
 
 import { type Command, KEY_MAP } from "../../contracts/command";
 import type { MarkAction, ViewerTarget } from "../../contracts/viewer";
+import { citationDisabledReason } from "../case/caseLink";
 import { MARK_LABELS, MARK_ORDER, markDisabledReason } from "./citation";
 import { REASONS } from "./modes";
 
@@ -73,7 +74,8 @@ export function buildViewerCommands(controller: ViewerController): Command[] {
       label: "인용 복사",
       group: "viewer",
       icon: "quote",
-      disabledReason: needsTarget,
+      // 사건=…/증거=… prefix: blocked while the main window is still loading the run's case link.
+      disabledReason: () => needsTarget() ?? citationDisabledReason(controller.getTarget()?.runId),
       run: () => controller.copyCitation(),
     },
     {

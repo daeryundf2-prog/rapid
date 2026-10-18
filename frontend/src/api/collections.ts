@@ -882,6 +882,8 @@ export interface ReviewMarkBody {
   /** Merged into the row's existing tags (server side). */
   add_tags?: string[];
   note?: string;
+  /** Review author (AXIOM E3); overrides the "web-ui" default below. */
+  reviewer?: string;
 }
 
 /** A case-db row, or a run-output locator the server resolves against `run_id`. */

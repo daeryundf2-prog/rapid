@@ -46,6 +46,7 @@ from ..columnar_store import (
     ColumnarStoreUnavailable,
     convert_jsonl_to_parquet,
 )
+from ..derived.stage import run_derived_stage
 from ..disk_image import (
     DiskImageExtractionError,
     DiskImageExtractionResult,
@@ -1114,6 +1115,20 @@ def _run_triage_stages(
         "triage-flags",
         {key: triage_step[key] for key in ("status", "flagged_rows", "flag_count", "elapsed_seconds") if key in triage_step},
     )
+    # derived (통합 보기, plan axiom-adoption §3.2): semantic-tagged column values of every output into
+    # a new analyses/run-derived-<time>/ generation; a failure is isolated to the step row.
+    progress.begin_stage("derived")
+    derived_step = run_derived_stage(
+        output_dir,
+        artifact_outputs=artifact_outputs,
+        artifact_payloads=artifact_payloads,
+        files_path=files_path,
+        files_payload=files_payload,
+    )
+    finish_stage(
+        "derived",
+        {key: derived_step[key] for key in ("status", "table_rows", "elapsed_seconds") if key in derived_step},
+    )
     progress.begin_stage("report")
     write_run_checkpoints(
         checkpoint_path,
@@ -1232,7 +1247,7 @@ def _run_triage_stages(
         },
         rule_set=rule_set,
         source=build_run_source_record(input_root, image_result=image_result, outputs=outputs),
-        extra_steps=[triage_step],
+        extra_steps=[triage_step, derived_step],
     )
     audit_output = output_dir / "rapidtriage-run-audit.json"
     summary_payload["audit"] = str(audit_output)

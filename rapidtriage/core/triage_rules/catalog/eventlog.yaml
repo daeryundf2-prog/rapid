@@ -27,28 +27,37 @@ families:
     - EventID
     format: mono
     width: 80
+  - key: summary_ko
+    label: 요약 문장
+    derive: event_summary_ko
+    width: 320
   - key: event_label_ko
-    label: 요약
+    label: 이벤트명
     width: 180
   - key: computer
+    semantic: device
     label: 컴퓨터
     aliases:
     - Computer
   - key: subject_user_name
+    semantic: account
     label: 주체 계정
   - key: target_user_name
+    semantic: account
     label: 대상 계정
   - key: logon_type
     label: 로그온 유형
     format: logonType
     width: 90
   - key: source_ip
+    semantic: device
     label: 원격 IP
     aliases:
     - ip_address
     format: mono
     width: 130
   - key: process_name
+    semantic: path
     label: 프로세스
     aliases:
     - new_process_name
@@ -72,6 +81,9 @@ families:
     format: mono
     width: 90
   aux_columns:
+  - key: rdp_direction
+    label: RDP 방향
+    derive: rdp_direction
   - key: level
     label: 레벨
     aliases:
@@ -83,10 +95,12 @@ families:
     - ProviderName
     - provider
   - key: user_name
+    semantic: account
     label: 사용자
     aliases:
     - user
   - key: user_sid
+    semantic: account
     label: 사용자 SID
     aliases:
     - sid
@@ -101,8 +115,10 @@ families:
   - key: source_port
     label: 출발지 포트
   - key: workstation_name
+    semantic: device
     label: 워크스테이션
   - key: destination_ip
+    semantic: device
     label: 목적지
     aliases:
     - destination_hostname
@@ -121,6 +137,7 @@ families:
     label: 스레드 ID
     format: mono
   - key: parent_process_name
+    semantic: path
     label: 부모 프로세스
     format: path
   - key: parent_command_line
@@ -132,16 +149,19 @@ families:
   - key: service_name
     label: 서비스 이름
   - key: service_file_name
+    semantic: path
     label: 서비스 경로
     aliases:
     - service_image_path
     - image_path
     format: path
   - key: service_account_name
+    semantic: account
     label: 서비스 계정
   - key: task_name
     label: 예약 작업
   - key: share_name
+    semantic: path
     label: 공유/대상
     aliases:
     - relative_target_name
@@ -156,9 +176,17 @@ families:
     - local_file
     format: mono
   - key: device_instance_id
+    semantic: device
     label: 장치 ID
     aliases:
     - device_id
+    - event_data.DeviceInstanceId
+    format: mono
+  - key: client_address
+    semantic: device
+    label: 클라이언트 주소(SMB 등)
+    aliases:
+    - event_data.ClientAddress
     format: mono
   - key: document_name
     label: 인쇄 문서/프린터
@@ -258,6 +286,9 @@ families:
   aux_columns:
   - key: event_label_ko
     label: 한글 이벤트명
+  - key: summary_ko
+    label: 요약 문장
+    derive: event_summary_ko
   - key: level
     label: 레벨
     aliases:
@@ -273,22 +304,27 @@ families:
     aliases:
     - Channel
   - key: computer
+    semantic: device
     label: 컴퓨터
     aliases:
     - Computer
   - key: user_name
+    semantic: account
     label: 사용자
     aliases:
     - user
   - key: user_sid
+    semantic: account
     label: 사용자 SID
     aliases:
     - sid
     - subject_user_sid
     format: sid
   - key: subject_user_name
+    semantic: account
     label: 주체 사용자
   - key: target_user_name
+    semantic: account
     label: 대상 사용자
   - key: target_domain_name
     label: 대상 도메인
@@ -306,6 +342,7 @@ families:
   - key: authentication_package_name
     label: 인증 패키지
   - key: source_ip
+    semantic: device
     label: 출발지 IP
     aliases:
     - ip_address
@@ -313,8 +350,10 @@ families:
   - key: source_port
     label: 출발지 포트
   - key: workstation_name
+    semantic: device
     label: 워크스테이션
   - key: destination_ip
+    semantic: device
     label: 목적지
     aliases:
     - destination_hostname
@@ -327,6 +366,7 @@ families:
   - key: failure_reason
     label: 실패 사유
   - key: process_name
+    semantic: path
     label: 프로세스
     aliases:
     - new_process_name
@@ -342,6 +382,7 @@ families:
     label: 명령줄
     format: mono
   - key: parent_process_name
+    semantic: path
     label: 부모 프로세스
     format: path
   - key: parent_command_line
@@ -353,16 +394,19 @@ families:
   - key: service_name
     label: 서비스 이름
   - key: service_file_name
+    semantic: path
     label: 서비스 경로
     aliases:
     - service_image_path
     - image_path
     format: path
   - key: service_account_name
+    semantic: account
     label: 서비스 계정
   - key: task_name
     label: 예약 작업
   - key: share_name
+    semantic: path
     label: 공유/대상
     aliases:
     - relative_target_name
@@ -377,6 +421,7 @@ families:
     - local_file
     format: mono
   - key: device_instance_id
+    semantic: device
     label: 장치 ID
     aliases:
     - device_id
@@ -429,6 +474,7 @@ families:
     format: time
     ts_kind: logon-start
   - key: user_name
+    semantic: account
     label: 사용자
   - key: target_domain_name
     label: 도메인
@@ -439,11 +485,14 @@ families:
     label: 로그온 유형
     format: logonType
   - key: source_ip
+    semantic: device
     label: 출발지 IP
     format: mono
   - key: workstation_name
+    semantic: device
     label: 워크스테이션
   - key: computer
+    semantic: device
     label: 컴퓨터
   - key: duration_seconds
     label: 세션 길이(초)
@@ -519,6 +568,7 @@ families:
     label: 줄 순번
     format: number
   - key: user
+    semantic: account
     label: 사용자
     aliases:
     - user_name

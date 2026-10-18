@@ -34,7 +34,28 @@ CATALOG_DIR = Path(__file__).with_name("catalog")
 RULE_ID_PATTERN = re.compile(r"^[a-z][a-z0-9-]*\.[a-z0-9_]+$")
 FAMILY_ID_PATTERN = re.compile(r"^[a-z][a-z0-9-]*$")
 STATUSES = ("verified", "provisional")
-COLUMN_KEYS = frozenset({"key", "label", "format", "ts_kind", "width", "aliases"})
+COLUMN_KEYS = frozenset({"key", "label", "format", "ts_kind", "width", "aliases", "semantic", "semantic_when", "derive"})
+# Column meaning tags (plan axiom-adoption §3.2; research axiom-case-model §3): the derived engine
+# (``core/derived``) gathers every column with one of these tags into the 통합 보기 tables.
+SEMANTIC_TAGS = frozenset(
+    {
+        "person",
+        "person_sender",
+        "person_recipient",
+        "account",
+        "device",
+        "path",
+        "url",
+        "hash",
+        "geo",
+        "search_term",
+        "attachment",
+        "credential",
+    }
+)
+# Display-only columns the console computes from the row's own fields (no stored value):
+# event-log summary sentence, RDP direction, image EXIF state, account auto-logon (plan §3.2).
+DERIVE_IDS = frozenset({"event_summary_ko", "rdp_direction", "exif_status", "auto_logon"})
 
 
 class CatalogError(ValueError):
@@ -114,6 +135,29 @@ def _check_columns(source: str, family_id: str, columns: object, name: str) -> N
         unknown = set(column) - COLUMN_KEYS
         if unknown:
             raise _fail(source, f"계열 {family_id}의 열에 알 수 없는 키가 있습니다: {sorted(unknown)}")
+        _check_semantic(source, family_id, column)
+
+
+def _check_semantic(source: str, family_id: str, column: Mapping[str, Any]) -> None:
+    """``semantic`` ∈ SEMANTIC_TAGS; ``semantic_when`` = ``{field: [values]}`` (only with ``semantic``);
+    ``derive`` ∈ DERIVE_IDS."""
+    key = column.get("key")
+    semantic = column.get("semantic")
+    if semantic is not None and semantic not in SEMANTIC_TAGS:
+        raise _fail(source, f"계열 {family_id}의 열 {key}의 semantic이 알 수 없는 값입니다: {semantic!r}")
+    when = column.get("semantic_when")
+    if when is not None:
+        if semantic is None:
+            raise _fail(source, f"계열 {family_id}의 열 {key}: semantic_when은 semantic과 함께만 쓸 수 있습니다")
+        valid = isinstance(when, Mapping) and bool(when) and all(
+            isinstance(name, str) and isinstance(values, list) and values and all(isinstance(item, str) for item in values)
+            for name, values in when.items()
+        )
+        if not valid:
+            raise _fail(source, f"계열 {family_id}의 열 {key}: semantic_when은 {{필드: [값 …]}} 형식이어야 합니다")
+    derive = column.get("derive")
+    if derive is not None and derive not in DERIVE_IDS:
+        raise _fail(source, f"계열 {family_id}의 열 {key}의 derive가 알 수 없는 값입니다: {derive!r}")
 
 
 def _check_rule(source: str, rule: Mapping[str, Any]) -> RuleSpec:

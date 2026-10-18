@@ -15,6 +15,9 @@ import { formatTimestamp } from "../../utils/time";
 import { EXPORT_ACTIONS, useExportHistory } from "../case/exports";
 import { DataGrid } from "../grid/DataGrid";
 import { useReviewMap } from "../grid/reviewMap";
+import { TAG_MANAGER_COMMAND } from "../review/commands";
+import { ReviewTagNodes } from "../review/ReviewTagNodes";
+import { type CaseTagState, useCaseTags } from "../review/tagStore";
 import {
   flagsPartialNotice,
   flagsUnavailableReason,
@@ -47,6 +50,7 @@ export function ReviewPanel() {
     staleTime: 30_000,
   });
   const flags = treeFlagsSection(tree.data);
+  const caseTags = useCaseTags(runId);
   const { tags, notes, bookmarks } = useMemo(() => {
     const byTag = new Map<string, number>();
     let withNote = 0;
@@ -147,21 +151,40 @@ export function ReviewPanel() {
             notes,
           )}
         </li>
-        {tags
-          .filter(([tag]) => tag !== BOOKMARK_TAG)
-          .map(([tag, count]) => (
-            <li key={tag}>
-              {link(
-                `#${tag}`,
-                serializeRoute({ runId, collection: "review", tags: [tag] }),
-                onBoard && route.tags?.length === 1 && route.tags[0] === tag,
-                count,
-              )}
-            </li>
-          ))}
+        {showCaseTagNodes(caseTags) ? (
+          // Case tags (AXIOM E3): colour, key and the case DB's count per tag.
+          <ReviewTagNodes
+            runId={runId}
+            tags={caseTags.tags}
+            current={onBoard && route.tags?.length === 1 ? (route.tags[0] ?? null) : null}
+          />
+        ) : (
+          tags
+            .filter(([tag]) => tag !== BOOKMARK_TAG)
+            .map(([tag, count]) => (
+              <li key={tag}>
+                {link(
+                  `#${tag}`,
+                  serializeRoute({ runId, collection: "review", tags: [tag] }),
+                  onBoard && route.tags?.length === 1 && route.tags[0] === tag,
+                  count,
+                )}
+              </li>
+            ))
+        )}
       </ul>
+      <CommandButton command={TAG_MANAGER_COMMAND} label="태그 관리…" />
     </div>
   );
+}
+
+/**
+ * The 검토 tree lists case tags (colour, key, case DB count) once they are known; until then —
+ * first load, or no case DB — the review map's own tags, so the section never renders empty
+ * while the tags load. A refresh of already-loaded tags keeps showing them (no flicker per mark).
+ */
+export function showCaseTagNodes(state: Pick<CaseTagState, "exists" | "status" | "tags">): boolean {
+  return state.exists && (state.status === "ready" || state.tags.length > 0);
 }
 
 /** Left panel of the 보고 stage. */

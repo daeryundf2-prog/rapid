@@ -34,6 +34,7 @@ families:
   - key: event_type
     label: 데이터 종류
   - key: contact_name
+    semantic: person
     label: 상대
     aliases:
     - phone_number
@@ -51,6 +52,7 @@ families:
     aliases:
     - package
   - key: latitude
+    semantic: geo
     label: 위도
     format: number
   - key: longitude
@@ -70,6 +72,7 @@ families:
     label: 정확도(m)
     format: number
   - key: device_name
+    semantic: device
     label: 기기
     aliases:
     - product_version

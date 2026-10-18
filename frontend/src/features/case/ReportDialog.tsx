@@ -1,6 +1,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { getReviewCounts } from "../../api/caseDb";
+import { caseLinkOf } from "./caseLink";
 import { ErrorText } from "./ErrorText";
 import {
   EXPORT_ACTIONS,
@@ -38,8 +39,9 @@ export function ReportDialog({
   const [kind, setKind] = useState<ExportKind>("case-report");
   const [format, setFormat] = useState<ReportFormat>("html");
   const [title, setTitle] = useState("");
-  const [caseNumber, setCaseNumber] = useState("");
-  const [investigator, setInvestigator] = useState("");
+  // A case run pre-fills 사건 번호 and 분석자 from its case (AXIOM adoption E1).
+  const [caseNumber, setCaseNumber] = useState(() => caseLinkOf(runId)?.caseNumber ?? "");
+  const [investigator, setInvestigator] = useState(() => caseLinkOf(runId)?.examiner ?? "");
   const groupId = useId();
   const counts = useQuery({
     queryKey: ["review-counts", runId],

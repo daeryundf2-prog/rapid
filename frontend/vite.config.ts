@@ -11,7 +11,8 @@ export default defineConfig({
   server: {
     port: 5174,
     proxy: {
-      "/api": "http://127.0.0.1:8710",
+      // RAPIDTRIAGE_API_PORT lets parallel worktrees run their own API (default 8710).
+      "/api": `http://127.0.0.1:${process.env.RAPIDTRIAGE_API_PORT || "8710"}`,
     },
   },
   test: {
