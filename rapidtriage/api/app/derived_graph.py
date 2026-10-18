@@ -245,4 +245,3 @@ def build_graph(
         "truncated": bool(dropped),
         "max_nodes": max_nodes,
     }
-
