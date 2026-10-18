@@ -516,6 +516,28 @@ describe("carve rows open in the viewer (hex at offset)", () => {
     expect(ocr.sourcePath).toBeNull();
     expect(buildViewerTarget(RUN, ocr).preferredMode).toBeUndefined();
   });
+
+  it("url-carve rows open at the hit with the URL's byte length and the 카빙 recovery badge", () => {
+    const url = "https://example.com/a";
+    const mapUrl = (details: Record<string, unknown>) =>
+      analysisCollection.mapRow(
+        { path: "C:/evidence/pagefile.sys", artifact_type: "carved-url-candidate", _index: 0, details },
+        0,
+        { ref: { id: "analysis", kind: "url-carve", analysisId: "u" } },
+      );
+    const utf16 = mapUrl({ url, encoding: "utf-16le", offset: 8192 });
+    expect(buildViewerTarget(RUN, utf16)).toMatchObject({
+      sourcePath: "C:/evidence/pagefile.sys",
+      preferredMode: "hex",
+      highlight: { offset: 8192, length: url.length * 2 },
+    });
+    expect(utf16.fields.recovery).toBe("carved");
+    const ascii = mapUrl({ url, encoding: "ascii", offset: 16 });
+    expect(buildViewerTarget(RUN, ascii).highlight).toEqual({ offset: 16, length: url.length });
+    // A redacted URL is shorter than the bytes on disk: offset-only highlight.
+    const redacted = mapUrl({ url, encoding: "ascii", offset: 16, url_tokens_redacted: true });
+    expect(buildViewerTarget(RUN, redacted).highlight).toEqual({ offset: 16 });
+  });
 });
 
 describe("backend contract details", () => {

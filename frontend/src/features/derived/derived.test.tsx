@@ -33,7 +33,7 @@ import {
   rdpDirection,
 } from "./derivedFields";
 import { useDerivedStore } from "./store";
-import { derivedCitation, sampleRoute } from "./tables";
+import { DERIVED_COLUMNS, derivedCitation, sampleRoute } from "./tables";
 
 configure({ asyncUtilTimeout: 5000 });
 
@@ -634,5 +634,18 @@ describe("DerivedPane (Q-X5 / Q-X12)", () => {
         .getAllByRole("columnheader")
         .map((h) => h.textContent),
     ).toEqual(["가린 값", "길이", "SHA-256", "건수", "출처 계열", "처음 본 시각", "마지막 본 시각"]);
+  });
+});
+
+describe("URL table: carved-only hosts", () => {
+  it("marks a host seen only in URL carving with 카빙 in the 분류 column", () => {
+    const column = DERIVED_COLUMNS.urls.find((item) => item.id === "class");
+    const carved = row("pastebin.com", 1, {
+      url_class: "paste",
+      url_class_label: "붙여넣기",
+      carved_only: true,
+    });
+    expect(column?.text(carved, "UTC")).toBe("붙여넣기 · 카빙");
+    expect(column?.text(row("example.com", 2), "UTC")).toBe("분류 없음");
   });
 });

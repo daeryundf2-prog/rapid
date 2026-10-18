@@ -1,5 +1,5 @@
 {
- "version": "efe6fb91b17655cc",
+ "version": "d5ead982e47e27d7",
  "families": [
   {
    "id": "sam-account",
@@ -759,7 +759,6 @@
     },
     {
      "key": "public_addresses",
-     "semantic": "account",
      "label": "공개 주소"
     },
     {
@@ -3722,7 +3721,7 @@
     },
     {
      "key": "address_candidates",
-     "semantic": "account",
+     "semantic": "person",
      "label": "메일 주소 후보"
     },
     {
@@ -9045,7 +9044,6 @@
     },
     {
      "key": "files",
-     "semantic": "attachment",
      "label": "파일 목록(표본)"
     },
     {
@@ -9418,7 +9416,21 @@
     },
     {
      "key": "reason",
-     "label": "사유"
+     "label": "사유",
+     "value_labels": {
+      "torrent-unreadable": ".torrent 읽기 실패",
+      "resume-unreadable": "이어받기 정보 읽기 실패",
+      "resume-not-a-dictionary": "이어받기 정보 형식 아님",
+      "resume-dat-unreadable": "resume.dat 읽기 실패",
+      "resume-dat-not-a-dictionary": "resume.dat 형식 아님",
+      "row-cap-reached": "행 상한 도달",
+      "known-met-unreadable": "known.met 읽기 실패",
+      "part-met-unreadable": ".part.met 읽기 실패",
+      "search-strings-unreadable": "검색어 파일 읽기 실패",
+      "preferences-unreadable": "preferences.ini 읽기 실패",
+      "torrent-file-cap-reached": ".torrent 파일 수 상한 도달",
+      "source-failed": "원본 처리 실패"
+     }
     },
     {
      "key": "error_message",
@@ -10321,11 +10333,22 @@
     },
     {
      "key": "password_authentication",
-     "label": "비밀번호 인증"
+     "label": "비밀번호 인증",
+     "value_labels": {
+      "yes": "허용",
+      "no": "허용 안 함"
+     }
     },
     {
      "key": "permit_root_login",
-     "label": "관리자 로그온 허용"
+     "label": "관리자 로그온 허용",
+     "value_labels": {
+      "yes": "허용",
+      "no": "허용 안 함",
+      "prohibit-password": "키 인증만 허용",
+      "without-password": "키 인증만 허용",
+      "forced-commands-only": "지정 명령만 허용"
+     }
     },
     {
      "key": "allow_users",

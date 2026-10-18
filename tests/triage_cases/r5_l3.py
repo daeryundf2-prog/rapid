@@ -4,11 +4,11 @@
 from __future__ import annotations
 
 
-def visit(url: str) -> dict[str, object]:
+def visit(url: str, artifact_type: str = "browser-visit") -> dict[str, object]:
     return {
         "kind": "windows-browser",
         "row": {
-            "artifact_type": "browser-visit",
+            "artifact_type": artifact_type,
             "path": r"C:\Users\alice\AppData\Local\Google\Chrome\User Data\Default\History",
             "details": {"url": url, "visit_time": "2025-03-01T12:00:00Z"},
         },
@@ -46,8 +46,13 @@ def shared(name: str, *, uploaded: int = 0, accepted: int = 0) -> dict[str, obje
 CASES = {
     "browser.torrent_site_visit": {
         "positive": {
-            "rows": [visit("https://thepiratebay.org/search.php?q=x"), visit("magnet:?xt=urn:btih:" + "a" * 40)],
-            "flagged": [0, 1],
+            # A browser-history URL row (no per-visit rows) is read too.
+            "rows": [
+                visit("https://thepiratebay.org/search.php?q=x"),
+                visit("magnet:?xt=urn:btih:" + "a" * 40),
+                visit("https://thepiratebay.org/", artifact_type="browser-history"),
+            ],
+            "flagged": [0, 1, 2],
         },
         "negative": {"rows": [visit("https://www.example.com/torrent-guide")], "flagged": []},
     },

@@ -161,7 +161,6 @@ families:
     label: 공개 주소 수
     format: number
   - key: public_addresses
-    semantic: account
     label: 공개 주소
   - key: extension_id
     label: 확장 ID

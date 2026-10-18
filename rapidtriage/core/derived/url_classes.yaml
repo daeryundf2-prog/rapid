@@ -74,6 +74,7 @@ classes:
   - box.com
   - mega.nz
   - mega.io
+  - drive.proton.me
   - icloud.com
   - mybox.naver.com
   - ndrive.naver.com
@@ -213,7 +214,9 @@ classes:
   - touch.mail.ru
   - hushmail.com
   - mailinator.com
-  - proton.me
+  # mail.proton.me only: proton.me as a parent would class Proton Drive / Pass / VPN / account
+  # pages as webmail (drive.proton.me is listed under cloud).
+  - mail.proton.me
   - protonmail.com
   - mail.naver.com
   - m.mail.naver.com

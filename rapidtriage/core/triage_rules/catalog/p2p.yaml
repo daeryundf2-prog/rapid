@@ -25,8 +25,9 @@ families:
   - key: file_count
     label: 파일 수
     format: number
+  # No attachment tag: a .torrent's file list is what it describes, not a file that was
+  # transferred (p2p-shared-file file_name, a file eMule shared, keeps the tag).
   - key: files
-    semantic: attachment
     label: 파일 목록(표본)
   - key: trackers
     semantic: url
@@ -252,6 +253,19 @@ families:
     - client
   - key: reason
     label: 사유
+    value_labels:
+      torrent-unreadable: .torrent 읽기 실패
+      resume-unreadable: 이어받기 정보 읽기 실패
+      resume-not-a-dictionary: 이어받기 정보 형식 아님
+      resume-dat-unreadable: resume.dat 읽기 실패
+      resume-dat-not-a-dictionary: resume.dat 형식 아님
+      row-cap-reached: 행 상한 도달
+      known-met-unreadable: known.met 읽기 실패
+      part-met-unreadable: .part.met 읽기 실패
+      search-strings-unreadable: 검색어 파일 읽기 실패
+      preferences-unreadable: preferences.ini 읽기 실패
+      torrent-file-cap-reached: .torrent 파일 수 상한 도달
+      source-failed: 원본 처리 실패
   - key: error_message
     label: 오류
   - key: source_path

@@ -472,8 +472,10 @@ families:
   - key: ese_table_count
     label: 표 수
     format: number
+  # Addresses read from the store's ESE strings: correspondents as well as the owner, so they
+  # are people (person), not the owner's accounts.
   - key: address_candidates
-    semantic: account
+    semantic: person
     label: 메일 주소 후보
   - key: account
     semantic: account
