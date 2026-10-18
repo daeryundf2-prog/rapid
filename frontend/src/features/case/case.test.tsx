@@ -168,7 +168,8 @@ describe("RunDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "찾아보기" }));
     fireEvent.click(await screen.findByRole("button", { name: /disk\.E01/ }));
     expect((screen.getByLabelText(/증거 경로/) as HTMLInputElement).value).toBe("/ev/disk.E01");
-    expect(calls[0]?.url).toBe("/api/browse");
+    // The 처리 그룹 preview loads on open too (R4 V1); the browse call is the only other one.
+    expect(calls.filter((c) => !c.url.startsWith("/api/run-plan/preview"))[0]?.url).toBe("/api/browse");
   });
 
   it("sample run posts to /api/sample-case/run", async () => {

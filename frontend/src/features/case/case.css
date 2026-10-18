@@ -467,3 +467,17 @@
   font-size: var(--fs-aux);
   font-weight: 600;
 }
+
+/* 처리 그룹 checklist (R4 V1 U-P2-3): one group per line, required ones disabled with the reason. */
+.run-plan-groups-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.run-plan-groups-actions {
+  justify-content: flex-start;
+  align-items: center;
+}

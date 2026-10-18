@@ -2,7 +2,14 @@ import { useQuery } from "@tanstack/react-query";
 import { getReviewCounts, listSavedSearches } from "../../api/caseDb";
 import { ApiError, api } from "../../api/client";
 import { getCaseNotes, getRunDashboard } from "../../api/dashboard";
-import { getRunIssues, getRunSummary, getRunTree, type RunJob } from "../../api/runs";
+import {
+  getRunIssues,
+  getRunSummary,
+  getRunTree,
+  LIVE_TREE_STATUSES,
+  normalizeRunStatus,
+  type RunJob,
+} from "../../api/runs";
 import { ACTIVE_POLL_MS } from "../../api/runsProgress";
 import { isRunActive } from "../../state/slices/runs";
 import type { ProgressLike } from "./model";
@@ -32,7 +39,11 @@ export function useDashboardData(runId: string) {
     queryFn: () => api<RunDetail>(`/api/runs/${enc(runId)}`),
     refetchInterval: (q) => (isRunActive(q.state.data) ? ACTIVE_POLL_MS : false),
   });
-  const completed = detail.data?.status === "completed";
+  const status = normalizeRunStatus(detail.data?.status);
+  const completed = status === "completed";
+  // R4 V1: a run without a summary (running / interrupted / cancelled before the report) still
+  // has a live tree of its finished providers; the summary stays completed-only.
+  const treeReadable = completed || LIVE_TREE_STATUSES.has(status);
   const summary = useQuery({
     queryKey: ["run-summary", runId],
     queryFn: () => getRunSummary(runId),
@@ -42,7 +53,7 @@ export function useDashboardData(runId: string) {
   const tree = useQuery({
     queryKey: ["run-tree", runId],
     queryFn: () => getRunTree(runId),
-    enabled: completed,
+    enabled: treeReadable,
     retry: false,
   });
   const review = useQuery({

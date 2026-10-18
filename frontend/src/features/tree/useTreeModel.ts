@@ -1,8 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef } from "react";
 import { getReviewCounts, listSavedSearches } from "../../api/caseDb";
 import { getRunDashboard } from "../../api/dashboard";
-import { getRunSummary, getRunTree } from "../../api/runs";
+import { getRunSummary, getRunTree, type RunTreeLive } from "../../api/runs";
 import { useAnalyses } from "../analysis/store";
 import { useSearchState } from "../case/searchState";
 import { navigate, useRunLive } from "./adapter";
@@ -55,6 +55,18 @@ export function useTreeData(runId: string | null) {
     retry: false,
   });
   const analyses = useAnalyses(runId);
+  // Live run (R4 V1): a provider that finished since the last poll makes its kind readable; the
+  // grid's artifact pages refetch (the tree itself refetches on its own interval).
+  const queryClient = useQueryClient();
+  const lastCompleted = useRef<{ runId: string | null; count: number | null }>({ runId, count: null });
+  useEffect(() => {
+    const before = lastCompleted.current;
+    lastCompleted.current = { runId, count: live.completed };
+    if (!runId || before.runId !== runId || before.count === null || live.completed === null) return;
+    if (live.completed > before.count) {
+      void queryClient.invalidateQueries({ queryKey: ["collection", runId, "artifacts"] });
+    }
+  }, [runId, live.completed, queryClient]);
   return {
     live,
     analyses: analyses.unavailable || analyses.loading ? undefined : analyses.analyses,
@@ -82,6 +94,8 @@ export function useTreeState(runId: string | null): {
   model: TreeModelNode[];
   loading: boolean;
   treeSettled: boolean;
+  /** `/tree` `live` block while the run has no summary yet (R4 V1 LiveRunBanner). */
+  liveTree: RunTreeLive | null;
 } {
   const data = useTreeData(runId);
   const applySavedSearch = useSearchState((s) => s.applySaved);
@@ -112,5 +126,10 @@ export function useTreeState(runId: string | null): {
       runId,
     ],
   );
-  return { model, loading: data.loading, treeSettled: data.treeSettled };
+  return {
+    model,
+    loading: data.loading,
+    treeSettled: data.treeSettled,
+    liveTree: data.tree?.live ?? null,
+  };
 }

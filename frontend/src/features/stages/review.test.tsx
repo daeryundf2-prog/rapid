@@ -125,12 +125,13 @@ describe("domain tree review fixes", () => {
     fireEvent.change(search, { target: { value: "powershell" } });
     const hit = await screen.findByRole("treeitem", { name: /^PowerShell 히스토리/ });
     expect(screen.getByRole("treeitem", { name: /^실행 흔적/ }).getAttribute("aria-expanded")).toBe("true");
-    // Only matches and their ancestors are listed.
-    expect(screen.queryByRole("treeitem", { name: /^이벤트 로그/ })).toBeNull();
+    // Only matches and their ancestors are listed (이벤트 로그 stays: its R3
+    // "PowerShell" channel group matches; 파일 has no match).
+    expect(screen.queryByRole("treeitem", { name: /^파일/ })).toBeNull();
     fireEvent.keyDown(search, { key: "Enter" });
     expect(document.activeElement).toBe(hit);
     fireEvent.change(search, { target: { value: "" } });
-    await waitFor(() => expect(screen.getByRole("treeitem", { name: /^이벤트 로그/ })).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole("treeitem", { name: /^파일/ })).toBeTruthy());
   });
 });
 

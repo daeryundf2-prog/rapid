@@ -7,7 +7,9 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { announce, isTextEntry } from "../a11y";
 import { cancelRun, retryRun } from "../api/runControl";
-import { RUNS_QUERY_KEY, type RunWithProgress } from "../api/runsProgress";
+import { controlRunPlan, runPlanQueryKey } from "../api/runPlan";
+import { normalizeRunStatus, RETRYABLE_RUN_STATUSES } from "../api/runs";
+import { RUNS_QUERY_KEY, type RunPlanCountsCompact, type RunWithProgress } from "../api/runsProgress";
 import { COLLECTION_NODES, runDisplayName } from "../app/collections";
 import type { Command, CommandContext } from "../contracts/command";
 import { conditionsCommand } from "../features/filters/conditionPanel";
@@ -348,6 +350,30 @@ export function navigateCommands(): Command[] {
   );
 }
 
+/** Korean disabled reasons of the run-plan controls (R4 V1, plan run-model-p2 §3.7). */
+export const NOT_RUNNING_REASON = "실행 중인 런이 아닙니다";
+export const NO_QUEUED_REASON = "대기 중인 태스크가 없습니다";
+export const FINISHED_TASK_REASON = "이미 끝난 태스크입니다";
+export const RETRY_REASON = "실패·취소·중단된 런만 다시 실행할 수 있습니다";
+export const RESUME_REASON = "실패·취소·중단된 런만 이어서 실행할 수 있습니다";
+
+/** Queued tasks of a run from the runs-list `plan_counts`; null when the server sent none. */
+export function queuedTaskCount(counts: RunPlanCountsCompact | null | undefined): number | null {
+  if (!counts || typeof counts.tasks !== "number") return null;
+  const settled =
+    (counts.completed ?? 0) +
+    (counts.partial ?? 0) +
+    (counts.failed ?? 0) +
+    (counts.skipped ?? 0) +
+    (counts.cancelled ?? 0) +
+    (counts.running ?? 0);
+  return Math.max(0, counts.tasks - settled);
+}
+
+function retryReason(state: ReturnType<typeof useAppStore.getState>, reason: string): string | undefined {
+  return RETRYABLE_RUN_STATUSES.has(normalizeRunStatus(currentRun(state)?.status)) ? undefined : reason;
+}
+
 export function caseCommands(queryClient: QueryClient): Command[] {
   const store = useAppStore.getState;
   const refresh = () => queryClient.invalidateQueries({ queryKey: RUNS_QUERY_KEY });
@@ -365,7 +391,7 @@ export function caseCommands(queryClient: QueryClient): Command[] {
       label: "런 취소",
       group: "case",
       icon: "stop",
-      disabledReason: (ctx) => needsRun(ctx) ?? (ctx.runIsActive ? undefined : "실행 중인 런이 아닙니다"),
+      disabledReason: (ctx) => needsRun(ctx) ?? (ctx.runIsActive ? undefined : NOT_RUNNING_REASON),
       run: async (ctx) => {
         if (!ctx.runId) return;
         await cancelRun(ctx.runId);
@@ -378,18 +404,58 @@ export function caseCommands(queryClient: QueryClient): Command[] {
       label: "런 다시 실행",
       group: "case",
       icon: "refresh",
+      disabledReason: (ctx) => needsRun(ctx) ?? retryReason(store(), RETRY_REASON),
+      run: async (ctx) => {
+        if (!ctx.runId) return;
+        await retryRun(ctx.runId, { resume: false });
+        announce("런을 처음부터 다시 실행합니다");
+        await refresh();
+      },
+    },
+    {
+      id: "run.resume",
+      label: "이어서 실행",
+      group: "case",
+      icon: "play",
+      disabledReason: (ctx) => needsRun(ctx) ?? retryReason(store(), RESUME_REASON),
+      run: async (ctx) => {
+        if (!ctx.runId) return;
+        await retryRun(ctx.runId, { resume: true });
+        announce("런을 이어서 실행합니다 · 완료된 태스크는 재사용합니다");
+        await refresh();
+      },
+    },
+    {
+      id: "run.plan.cancelAll",
+      label: "모두 취소",
+      group: "case",
+      icon: "stop",
+      disabledReason: (ctx) => needsRun(ctx) ?? (ctx.runIsActive ? undefined : NOT_RUNNING_REASON),
+      run: async (ctx) => {
+        if (!ctx.runId) return;
+        const result = await controlRunPlan(ctx.runId, "cancel_all");
+        queryClient.setQueryData(runPlanQueryKey(ctx.runId), result.plan);
+        announce("남은 처리를 모두 취소합니다 · 보고서는 지금까지의 결과로 만듭니다");
+        await refresh();
+      },
+    },
+    {
+      id: "run.plan.finish",
+      label: "지금까지로 마치기",
+      group: "case",
+      icon: "check",
       disabledReason: (ctx) => {
         const missing = needsRun(ctx);
         if (missing) return missing;
-        const status = String(currentRun(store())?.status ?? "");
-        return status === "failed" || status === "cancelled"
-          ? undefined
-          : "실패하거나 취소된 런만 다시 실행할 수 있습니다";
+        if (!ctx.runIsActive) return NOT_RUNNING_REASON;
+        const queued = queuedTaskCount(currentRun(store())?.progress?.plan_counts);
+        return queued === 0 ? NO_QUEUED_REASON : undefined;
       },
       run: async (ctx) => {
         if (!ctx.runId) return;
-        await retryRun(ctx.runId);
-        announce("런을 다시 실행합니다");
+        const result = await controlRunPlan(ctx.runId, "finish");
+        queryClient.setQueryData(runPlanQueryKey(ctx.runId), result.plan);
+        announce("대기 중인 태스크를 취소하고 지금까지의 결과로 마칩니다");
         await refresh();
       },
     },
