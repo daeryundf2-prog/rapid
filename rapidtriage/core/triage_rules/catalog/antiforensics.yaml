@@ -1,0 +1,229 @@
+# Triage catalogue: anti-forensics (plan r3-os-depth-2026-10-17 §3.1 O1; research axiom-parity-matrix §4 gap 9)
+# The tool signature list lives in the rule params below (one entry per tool, each with its source URL).
+families:
+- id: antiforensics
+  label: 안티 포렌식(BitLocker 복구 키 파일)
+  types:
+  - bitlocker-recovery-key-file
+  core_columns:
+  - key: key_created_at
+    label: 키 생성(.BEK)
+    aliases:
+    - timestamp
+    format: time
+    ts_kind: created
+  - key: file_name
+    label: 파일 이름
+  - key: key_file_kind_label
+    label: 파일 종류
+    aliases:
+    - key_file_kind
+  - key: key_identifier
+    semantic: device
+    label: 키 식별자
+    format: mono
+  - key: key_masked
+    label: 복구 키(가림)
+    format: mono
+  - key: key_format_valid
+    label: 키 형식 검증
+  - key: key_sha256
+    semantic: hash
+    label: 키 SHA-256
+    format: mono
+  - key: identifier_matches_file_name
+    label: 파일 이름 식별자 일치
+  - key: source_path
+    semantic: path
+    label: 파일 경로
+    aliases:
+    - path
+    format: path
+  aux_columns:
+  - key: key_count
+    label: 키 수
+    format: number
+  - key: key_value_stored
+    label: 키 값 저장 여부
+  - key: language
+    label: 언어
+  - key: size
+    label: 파일 크기
+    format: bytes
+  - key: evidence_note
+    label: 참고
+  rules:
+  - antiforensics.tool_present
+  - antiforensics.wiper_run_after_incident
+rules:
+- id: antiforensics.tool_present
+  family: antiforensics
+  grade: B
+  label_ko: 안티 포렌식·암호화 도구 흔적
+  rationale_ko: '설치 프로그램·App Paths·Prefetch·Amcache·BAM·PCA·서비스·파일 이름·명령줄에 증거 인멸(삭제·와이프·타임스톰핑)이나 디스크 암호화 도구가 있음: 출처가 명시된 시그니처 목록과 정확히 일치(제품명은 단어 경계, 실행 파일은 파일 이름 전체).'
+  false_positive_ko: 정상 업무용 암호화(회사 정책 VeraCrypt), 일상 정리용 CCleaner. 이름에 cleaner가 들어간 무관한 앱은 일치하지 않음. Windows 구성 요소(cipher.exe·BitLocker 마법사)는 명령줄(/w)이나 실행 흔적에서만 확인.
+  sources: &af_sources
+  - https://attack.mitre.org/techniques/T1070/
+  - https://attack.mitre.org/techniques/T1070/006/
+  - https://attack.mitre.org/techniques/T1485/
+  - https://attack.mitre.org/techniques/T1561/
+  - https://www.sans.org/blog/digital-forensics-application-execution/
+  version: 1
+  status: provisional
+  params:
+    signatures: &af_signatures
+    - id: veracrypt
+      name: VeraCrypt
+      category: encryption
+      products:
+      - \bveracrypt\b
+      executables:
+      - veracrypt.exe
+      - veracrypt-x64.exe
+      - veracrypt-arm64.exe
+      - veracrypt format.exe
+      - veracrypt format-x64.exe
+      - veracryptexpander.exe
+      - veracrypt setup.exe
+      services:
+      - veracrypt
+      source: https://www.veracrypt.fr/en/Home.html
+    - id: truecrypt
+      name: TrueCrypt
+      category: encryption
+      products:
+      - \btruecrypt\b
+      executables:
+      - truecrypt.exe
+      - truecrypt format.exe
+      - truecrypt setup.exe
+      services:
+      - truecrypt
+      source: https://truecrypt.sourceforge.net/
+    - id: bitlocker-to-go
+      name: BitLocker(드라이브 암호화 마법사·To Go)
+      category: encryption
+      builtin: true
+      executables:
+      - bitlockerwizard.exe
+      - bitlockerwizardelev.exe
+      - bitlockertogo.exe
+      commands:
+      - \bmanage-bde(?:\.exe)?\s+-(?:on|protectors\s+-add)\b
+      source: https://learn.microsoft.com/en-us/windows/security/operating-system-security/data-protection/bitlocker/
+    - id: ccleaner
+      name: CCleaner
+      category: cleaner
+      products:
+      - \bccleaner\b
+      executables:
+      - ccleaner.exe
+      - ccleaner64.exe
+      - ccleanerbrowser.exe
+      services:
+      - ccleanerperformanceoptimizerservice
+      source: https://www.ccleaner.com/ccleaner
+    - id: bleachbit
+      name: BleachBit
+      category: cleaner
+      products:
+      - \bbleachbit\b
+      executables:
+      - bleachbit.exe
+      - bleachbit_console.exe
+      source: https://www.bleachbit.org/
+    - id: eraser
+      name: Eraser
+      category: wiper
+      products:
+      - ^eraser(?:\s+\d|\s*$)
+      executables:
+      - eraser.exe
+      services:
+      - eraser
+      source: https://eraser.heidi.ie/
+    - id: sdelete
+      name: SDelete(Sysinternals)
+      category: wiper
+      executables:
+      - sdelete.exe
+      - sdelete64.exe
+      - sdelete64a.exe
+      commands:
+      - \bsdelete(?:64a?)?(?:\.exe)?\s
+      source: https://learn.microsoft.com/en-us/sysinternals/downloads/sdelete
+    - id: cipher-wipe
+      name: cipher /w(빈 공간 덮어쓰기)
+      category: wiper
+      builtin: true
+      commands:
+      - \bcipher(?:\.exe)?\s+(?:/[a-z]+\s+)*/w\b
+      source: https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/cipher
+    - id: privazer
+      name: PrivaZer
+      category: cleaner
+      products:
+      - \bprivazer\b
+      executables:
+      - privazer.exe
+      source: https://privazer.com/en/
+    - id: wise-disk-cleaner
+      name: Wise Disk Cleaner
+      category: cleaner
+      products:
+      - \bwise disk cleaner\b
+      executables:
+      - wisediskcleaner.exe
+      source: https://www.wisecleaner.com/wise-disk-cleaner.html
+    - id: timestomp
+      name: timestomp(Metasploit)
+      category: timestomp
+      executables:
+      - timestomp.exe
+      commands:
+      - \btimestomp(?:\.exe)?\s
+      source: https://attack.mitre.org/techniques/T1070/006/
+    - id: setmace
+      name: SetMACE
+      category: timestomp
+      executables:
+      - setmace.exe
+      - setmace64.exe
+      source: https://github.com/jschicht/SetMace
+    - id: dban
+      name: DBAN(Darik's Boot and Nuke)
+      category: wiper
+      products:
+      - \bdarik'?s boot and nuke\b
+      - \bdban\b
+      executables:
+      - dban.exe
+      source: https://dban.org/
+    - id: killdisk
+      name: KillDisk
+      category: wiper
+      products:
+      - \bkilldisk\b
+      executables:
+      - killdisk.exe
+      - killdiskwin.exe
+      - killdisk_win.exe
+      source: https://www.killdisk.com/
+- id: antiforensics.wiper_run_after_incident
+  family: antiforensics
+  grade: A
+  label_ko: 사건 이후 와이퍼·정리 도구 실행
+  rationale_ko: '와이퍼·정리·타임스톰핑 도구(시그니처 목록)의 실행 시각(Prefetch 실행 8회·BAM·UserAssist·PCA·4688 명령줄)이 사건 시작 이후(종료가 있으면 종료 + 유예 일수까지): 증거 인멸 정황(사건 시간대를 지정해야 동작).'
+  false_positive_ko: 정기 정리 작업(예약 실행), 사건과 무관한 일상 정리. 설치 흔적만 있고 실행 시각이 없는 행은 제외.
+  sources: *af_sources
+  version: 1
+  status: provisional
+  params:
+    signatures: *af_signatures
+    categories:
+    - wiper
+    - cleaner
+    - timestomp
+    incident_start: null
+    incident_end: null
+    grace_days: 30

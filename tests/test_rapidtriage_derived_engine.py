@@ -169,8 +169,8 @@ class NormalizationRegressionTests(unittest.TestCase):
 class CatalogSemanticTests(unittest.TestCase):
     def test_every_family_is_reviewed(self) -> None:
         catalog = load_catalog()
-        # 54 + r2 M1 (3) + r2 M4 (1) + r2 M2 (6) + r2 M3 (2).
-        self.assertEqual(len(catalog.families), 66)
+        # 54 + r2 M1 (3) + r2 M4 (1) + r2 M2 (6) + r2 M3 (2) + r3 O1 (10).
+        self.assertEqual(len(catalog.families), 76)
         for family in catalog.families:
             columns = [*family["core_columns"], *(family.get("aux_columns") or [])]
             tagged = [column for column in columns if column.get("semantic")]

@@ -142,6 +142,8 @@ families:
   - execution.deleted_executable
   - execution.cross_mismatch
   - execution.multi_source
+  - antiforensics.tool_present
+  - antiforensics.wiper_run_after_incident
 - id: prefetch-file
   label: 프리페치
   types:
@@ -202,6 +204,8 @@ families:
   - execution.name_mismatch
   - execution.deleted_executable
   - execution.multi_source
+  - antiforensics.tool_present
+  - antiforensics.wiper_run_after_incident
 - id: prefetch-reference
   label: 프리페치 참조 파일
   types:
@@ -273,6 +277,106 @@ families:
   aux_columns: []
   rules:
   - execution.srum_bulk_upload
+- id: pca
+  label: 프로그램 호환성 도우미(PCA)
+  types:
+  - execution-pca
+  core_columns:
+  - key: timestamp
+    label: 기록 시각
+    aliases:
+    - last_run_at
+    - event_at
+    format: time
+    ts_kind: run
+  - key: executable_path
+    semantic: path
+    label: 실행 파일 경로
+    format: path
+  - key: executable_name
+    label: 실행 파일
+  - key: source_kind_label
+    label: 출처
+    aliases:
+    - source_kind
+  - key: record_type_label
+    label: 기록 종류
+    aliases:
+    - record_type
+  - key: product_name
+    label: 제품
+  - key: vendor
+    label: 게시자
+  - key: product_version
+    label: 버전
+  - key: message
+    label: 메시지
+  - key: user_sid
+    semantic: account
+    label: 사용자 SID
+    format: sid
+  aux_columns:
+  - key: program_id
+    label: 프로그램 ID
+    format: mono
+  - key: value_sha256
+    semantic: hash
+    label: 값 SHA-256
+    format: mono
+  - key: source_line
+    label: 원본 줄 번호
+    format: number
+  - key: malformed_line_count
+    label: 해석 못 한 줄 수
+    format: number
+  - key: evidence_note
+    label: 참고
+  - key: key_path
+    label: 키 경로
+    aliases:
+    - key
+    format: path
+  rules:
+  - antiforensics.tool_present
+  - antiforensics.wiper_run_after_incident
+- id: feature-usage
+  label: 작업 표시줄 사용(FeatureUsage)
+  types:
+  - execution-feature-usage
+  core_columns:
+  - key: key_last_written_at
+    label: 키 마지막 기록
+    aliases:
+    - timestamp
+    format: time
+    ts_kind: last-written
+  - key: application
+    semantic: path
+    label: 앱
+    format: mono
+  - key: feature_label
+    label: 동작
+    aliases:
+    - feature
+  - key: count
+    label: 횟수
+    format: number
+  - key: user_sid
+    semantic: account
+    label: 사용자 SID
+    format: sid
+  aux_columns:
+  - key: executable_name
+    label: 실행 파일
+  - key: evidence_note
+    label: 참고
+  - key: key_path
+    label: 키 경로
+    aliases:
+    - key
+    format: path
+  rules:
+  - antiforensics.tool_present
 rules:
 - id: execution.suspicious_path
   family: execution
