@@ -25,6 +25,7 @@ from . import (  # noqa: F401  (imports register the rule implementations)
     messenger,
     mobile,
     ntfs,
+    p2p,
     rdp,
     registry,
     usb,

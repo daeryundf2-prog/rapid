@@ -26,7 +26,7 @@ export const DERIVED_TABLE_HINTS: Record<DerivedTableId, string> = {
   paths: "실행·열람·바로 가기·셸백 등에 나온 파일·폴더 경로입니다(대소문자·구분자 정규화).",
   attachments: "메일·메신저 첨부 파일 이름입니다.",
   credentials: "암호·토큰 후보입니다. 원문은 저장하지 않고 가린 값·길이·SHA-256만 보여 줍니다.",
-  urls: "방문·다운로드·북마크 등에 나온 URL을 호스트별로 모으고 분류했습니다.",
+  urls: "방문·다운로드·북마크 등에 나온 URL을 호스트별로 모으고 분류했습니다. URL 카빙으로만 찾은 호스트는 '카빙'으로 표시합니다.",
 };
 
 export const SEMANTIC_LABELS: Record<string, string> = {
@@ -62,9 +62,14 @@ const KIND_LABELS: Record<string, string> = {
   "recent-files": "최근 파일·LNK",
   "windows-remote-access": "원격 접속",
   browser: "브라우저",
+  p2p: "P2P·토렌트",
   email: "이메일",
   "kakaotalk-windows": "카카오톡 (Windows)",
   "windows-messenger": "데스크톱 메신저 (Windows)",
+  // R5 L1
+  "email-clients": "메일 클라이언트 (Thunderbird·Windows 메일)",
+  "media-player": "미디어 플레이어 재생 기록",
+  "windows-phone-link": "휴대폰과 연결 (Phone Link)",
   "kakaotalk-macos": "카카오톡 (macOS)",
   "mobile-export": "모바일 내보내기",
   "cloud-export": "클라우드 내보내기",
@@ -184,7 +189,11 @@ export const DERIVED_COLUMNS: Record<DerivedTableId, DerivedColumn[]> = {
       id: "class",
       header: "분류",
       width: "150px",
-      text: (row) => row.url_class_label ?? (row.url_class ? row.url_class : "분류 없음"),
+      text: (row) => {
+        const label = row.url_class_label ?? (row.url_class ? row.url_class : "분류 없음");
+        // Seen only in carved strings (page file / unallocated): no visit evidence.
+        return row.carved_only ? `${label} · 카빙` : label;
+      },
     },
     ...COMMON_TAIL,
   ],

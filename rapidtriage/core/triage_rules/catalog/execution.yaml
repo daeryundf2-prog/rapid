@@ -439,6 +439,87 @@ families:
     format: path
   rules:
   - antiforensics.tool_present
+# --- R5 L2: startup items (StartupApproved registry rows + Startup-folder files) --------------
+- id: startup-item
+  label: 시작 프로그램
+  types:
+  - startup-item
+  core_columns:
+  - key: item_name
+    label: 항목 이름
+    aliases:
+    - value_name
+  - key: state_label
+    label: 사용 여부
+  - key: command
+    semantic: path
+    label: 명령/대상
+    aliases:
+    - target_path
+    format: mono
+  - key: disabled_at
+    label: 사용 안 함 설정 시각
+    format: time
+    ts_kind: disabled
+  - key: key_last_written_at
+    label: 키 마지막 기록
+    format: time
+    ts_kind: last-written
+  - key: target_modified_at
+    label: 대상 수정(LNK)
+    format: time
+    ts_kind: target-modified
+  - key: startup_source_label
+    label: 출처
+    aliases:
+    - startup_source
+  - key: scope_label
+    label: 범위
+    aliases:
+    - scope
+  - key: user
+    semantic: account
+    label: 사용자 프로필
+  - key: user_sid
+    semantic: account
+    label: 사용자 SID
+    format: sid
+  aux_columns:
+  - key: item_kind_label
+    label: 항목 종류
+    aliases:
+    - item_kind
+  - key: state_byte_hex
+    label: 상태 바이트
+    format: mono
+  - key: command_line_arguments
+    label: 인수
+    format: mono
+  - key: target_created_at
+    label: 대상 생성(LNK)
+    format: time
+    ts_kind: target-created
+  - key: volume_serial_number
+    semantic: device
+    label: 볼륨 시리얼(LNK)
+    format: mono
+  - key: target_user_writable
+    label: 사용자 쓰기 경로
+    value_labels:
+      'true': 예
+      'false': 아니요
+  - key: key_path
+    label: 키 경로
+    aliases:
+    - key
+    format: path
+  - key: source_path
+    label: 원본 파일
+    format: path
+  - key: evidence_note
+    label: 참고
+  rules:
+  - execution.startup_user_path
 rules:
 - id: execution.suspicious_path
   family: execution
@@ -530,3 +611,22 @@ rules:
   status: verified
   params:
     min_sources: 3
+- id: execution.startup_user_path
+  family: startup-item
+  grade: B
+  label_ko: 시작 프로그램이 사용자 경로·스크립트·LOLBin
+  rationale_ko: '사용 중이거나 상태를 알 수 없는 시작 프로그램(StartupApproved와 같은 이름의 Run 값, 시작프로그램 폴더의 파일·LNK 대상)이 Temp/AppData/Public/Downloads 등 사용자 쓰기 경로, 스크립트, 인코딩 PowerShell 또는 LOLBin: 로그온 지속성.'
+  false_positive_ko: 사용자 AppData에 설치되는 앱의 자동 시작(제외 목록 참고), Squirrel 방식 업데이트 앱. 작업 관리자에서 사용 안 함으로 바꾼 항목은 표시하지 않음.
+  sources:
+  - https://attack.mitre.org/techniques/T1547/001/
+  - https://www.cybertriage.com/blog/windows-registry-forensics-cheat-sheet-2026/
+  version: 1
+  status: provisional
+  params:
+    exclude_markers:
+    - \appdata\local\microsoft\
+    - \appdata\local\programs\
+    - \appdata\local\google\
+    - \appdata\local\packages\
+    squirrel_value_prefixes:
+    - com.squirrel.

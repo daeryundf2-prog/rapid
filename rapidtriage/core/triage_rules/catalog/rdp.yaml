@@ -43,6 +43,261 @@ families:
     derive: rdp_direction
   aux_columns: []
   rules: []
+# --- R5 L2: SSH / PuTTY / WinSCP (OpenSSH files, ProgramData\ssh, WinSCP.ini, NTUSER) ---------
+- id: ssh-known-host
+  label: SSH 알려진 호스트
+  types:
+  - ssh-known-host
+  core_columns:
+  - key: key_last_written_at
+    label: 키 마지막 기록
+    aliases:
+    - timestamp
+    format: time
+    ts_kind: last-written
+  - key: host
+    semantic: device
+    label: 호스트
+    format: mono
+  - key: port
+    label: 포트
+    format: number
+  - key: key_type
+    label: 키 종류
+  - key: fingerprint_sha256
+    label: 공개키 지문(SHA256)
+    format: mono
+  - key: client_label
+    label: 클라이언트
+    aliases:
+    - client
+  - key: user
+    semantic: account
+    label: 사용자 프로필
+  - key: user_sid
+    semantic: account
+    label: 사용자 SID
+    format: sid
+  aux_columns:
+  - key: host_patterns
+    label: 호스트 패턴
+    format: mono
+  - key: host_hashed
+    label: 호스트 이름 해시됨
+    value_labels:
+      'true': 예
+      'false': 아니요
+  - key: key_sha256
+    label: 키 값 SHA-256
+    format: mono
+  - key: marker
+    label: 표지(@cert-authority 등)
+  - key: key_path
+    label: 키 경로
+    aliases:
+    - key
+    format: path
+  - key: source_path
+    label: 원본 파일
+    format: path
+  rules: []
+- id: ssh-authorized-key
+  label: SSH 허용 공개키
+  types:
+  - ssh-authorized-key
+  core_columns:
+  - key: key_type
+    label: 키 종류
+  - key: fingerprint_sha256
+    label: 공개키 지문(SHA256)
+    format: mono
+  - key: key_comment
+    label: 키 설명(comment)
+  - key: options
+    label: 옵션
+    format: mono
+  - key: scope_label
+    label: 범위
+    aliases:
+    - scope
+  - key: user
+    semantic: account
+    label: 사용자 프로필
+  - key: source_path
+    semantic: path
+    label: 원본 파일
+    format: path
+  aux_columns:
+  - key: key_type_matches_blob
+    label: 키 종류 일치
+    value_labels:
+      'true': 예
+      'false': 아니요
+  - key: parse_status
+    label: 해석 상태
+  - key: source_offset
+    label: 줄 번호
+    format: number
+  rules: []
+- id: ssh-client-session
+  label: SSH·파일 전송 접속 세션
+  types:
+  - ssh-client-session
+  core_columns:
+  - key: key_last_written_at
+    label: 키 마지막 기록
+    aliases:
+    - timestamp
+    format: time
+    ts_kind: last-written
+  - key: session_name
+    label: 세션 이름
+  - key: host_name
+    semantic: device
+    label: 서버
+    format: mono
+  - key: port
+    label: 포트
+    format: number
+  - key: user_name
+    semantic: account
+    label: 접속 계정
+  - key: protocol
+    label: 프로토콜
+  - key: client_label
+    label: 클라이언트
+    aliases:
+    - client
+  - key: password_saved
+    label: 비밀번호 저장
+    value_labels:
+      'true': 저장됨(값은 복사 안 함)
+      'false': 없음
+  - key: user
+    semantic: account
+    label: 사용자 프로필
+  - key: user_sid
+    semantic: account
+    label: 사용자 SID
+    format: sid
+  aux_columns:
+  - key: public_key_file
+    semantic: path
+    label: 개인키 파일
+    aliases:
+    - identity_file
+    format: path
+  - key: proxy_host
+    label: 프록시
+  - key: proxy_jump
+    label: 경유 호스트(ProxyJump)
+  - key: proxy_command
+    label: 프록시 명령
+    format: mono
+  - key: port_forwarding
+    label: 포트 포워딩
+    format: mono
+  - key: proxy_password_saved
+    label: 프록시 비밀번호 저장
+    value_labels:
+      'true': 저장됨(값은 복사 안 함)
+      'false': 없음
+  - key: key_path
+    label: 키 경로
+    aliases:
+    - key
+    format: path
+  - key: source_path
+    label: 원본 파일
+    format: path
+  - key: evidence_note
+    label: 참고
+  rules: []
+- id: ssh-key-file
+  label: SSH 키 파일
+  types:
+  - ssh-key-file
+  core_columns:
+  - key: file_name
+    label: 파일 이름
+  - key: key_role_label
+    label: 종류
+    aliases:
+    - key_role
+  - key: key_format
+    label: 형식
+  - key: key_type
+    label: 키 종류
+  - key: encrypted
+    label: 암호 보호
+    value_labels:
+      'true': 암호화됨
+      'false': 암호화 안 됨
+  - key: fingerprint_sha256
+    label: 공개키 지문(SHA256)
+    format: mono
+  - key: key_comment
+    label: 키 설명(comment)
+  - key: user
+    semantic: account
+    label: 사용자 프로필
+  - key: source_path
+    semantic: path
+    label: 파일 경로
+    format: path
+  aux_columns:
+  - key: file_size
+    label: 크기
+    format: bytes
+  - key: cipher
+    label: 암호 방식
+  - key: kdf
+    label: 키 유도(KDF)
+  - key: source_file_mtime
+    label: 파일 수정(사본 기준)
+    format: time
+    ts_kind: modified
+  - key: secret_values_stored
+    label: 개인키 본문 저장
+    value_labels:
+      'true': 예
+      'false': 아니요(정책)
+  - key: parse_status
+    label: 해석 상태
+  rules: []
+- id: ssh-server-config
+  label: OpenSSH 서버 설정
+  types:
+  - ssh-server-config
+  core_columns:
+  - key: port
+    label: 포트
+  - key: password_authentication
+    label: 비밀번호 인증
+    value_labels:
+      'yes': 허용
+      'no': 허용 안 함
+  - key: permit_root_login
+    label: 관리자 로그온 허용
+    value_labels:
+      'yes': 허용
+      'no': 허용 안 함
+      prohibit-password: 키 인증만 허용
+      without-password: 키 인증만 허용
+      forced-commands-only: 지정 명령만 허용
+  - key: allow_users
+    semantic: account
+    label: 허용 사용자
+  - key: settings
+    label: 설정 지시어
+  - key: source_path
+    semantic: path
+    label: 파일 경로
+    format: path
+  aux_columns:
+  - key: evidence_note
+    label: 참고
+  rules: []
 rules:
 - id: rdp.external_ip
   family: eventlog-event

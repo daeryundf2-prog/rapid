@@ -33,6 +33,11 @@ Sources (all read-only, bounded, each source isolated -- a corrupt file becomes 
 * iCloud for Windows (``AppleInc.iCloud_*`` package, ``Apple Inc``/``Apple Computer``
   iCloud folders, ``Users\\<u>\\iCloudDrive``): path signature inventory; an
   ``iCloudDrive`` folder is reported as the sync root.
+* Google Docs stubs (R5 L3): ``.gdoc`` / ``.gsheet`` / ``.gslides`` / ``.gdraw`` / ``.gform`` …
+  JSON files (Backup and Sync ``url`` / ``doc_id`` / ``email`` / ``resource_id``; Drive for
+  desktop ``doc_id`` / ``email``) anywhere in the input -> ``cloud-sync-file`` rows with
+  ``google_doc_type`` and the document URL (``resource_key`` is never copied); DriveFS items
+  whose mime type is ``application/vnd.google-apps.*`` get the same ``google_doc_type`` / URL.
 * ``Windows\\Prefetch\\<CLIENT>.EXE-*.pf`` without any client data: one inventory row
   ``executable-trace-only`` (the client ran, its data is not in the input).
 
@@ -62,7 +67,7 @@ from ..core.models import ArtifactRecord
 from ..core.sqlite_snapshot import open_sqlite_snapshot
 from ..core.submission import compute_hashes
 from ._walk import iter_evidence_paths
-from .url_redaction import redact_text_urls, redact_url_fields, url_sha256
+from .url_redaction import redact_text_urls, redact_url, redact_url_fields, url_sha256
 
 PARSER = "cloud-sync-clients"
 PARSER_VERSION = "cloud-sync-clients-v1"
@@ -163,10 +168,85 @@ PATH_PREFILTER_TERMS = ("onedrive", "dropbox", "drivefs", "google", "mybox", "nd
 NAVER_CLIENT_SEGMENTS = ("mybox", "naver mybox", "navermybox", "ndrive", "naver ndrive", "naverndrive")
 BROWSER_SEGMENTS = ("indexeddb", "user data", "cache_data", "local storage", "service worker", "webcache")
 INSTALL_ANCHORS = ("appdata", "program files", "program files (x86)", "programdata")
+# R5 L3: Google Docs stubs and DriveFS google-apps mime types.
+GOOGLE_STUB_TYPES: dict[str, str] = {
+    ".gdoc": "document",
+    ".gsheet": "spreadsheet",
+    ".gslides": "presentation",
+    ".gdraw": "drawing",
+    ".gform": "form",
+    ".gtable": "table",
+    ".gsite": "site",
+    ".gmap": "map",
+    ".gjam": "jam",
+    ".gscript": "script",
+}
+GOOGLE_DOC_LABELS: dict[str, str] = {
+    "document": "Google 문서",
+    "spreadsheet": "Google 스프레드시트",
+    "presentation": "Google 프레젠테이션",
+    "drawing": "Google 드로잉",
+    "form": "Google 설문지",
+    "table": "Google 표",
+    "site": "Google 사이트",
+    "map": "Google 내 지도",
+    "jam": "Jamboard",
+    "script": "Apps Script",
+    "folder": "Google Drive 폴더",
+    "shortcut": "Google Drive 바로가기",
+}
+GOOGLE_DOC_URL_PATHS = {
+    "document": "document",
+    "spreadsheet": "spreadsheets",
+    "presentation": "presentation",
+    "drawing": "drawings",
+    "form": "forms",
+}
+GOOGLE_APPS_MIME_PREFIX = "application/vnd.google-apps."
+GOOGLE_DOC_ID_RE = re.compile(r"^[A-Za-z0-9_-]{10,200}$")
+MAX_GOOGLE_STUBS = 20_000
+MAX_GOOGLE_STUB_BYTES = 64 * 1024
 NO_CLIENT_NOTICE = (
     "클라우드 동기화 클라이언트 흔적 없음: OneDrive·Dropbox·Google Drive·네이버 MYBOX·iCloud의 "
     "설정·DB·로그 경로 서명이 입력에 없음"
 )
+
+
+def google_doc_fields(mime_type: object = None, item_id: object = None, *, doc_type: str = "") -> dict[str, object]:
+    """``google_doc_type`` / label / document URL of a Google-native item (R5 L3); empty for other items."""
+    kind = doc_type
+    if not kind and isinstance(mime_type, str) and mime_type.startswith(GOOGLE_APPS_MIME_PREFIX):
+        kind = mime_type[len(GOOGLE_APPS_MIME_PREFIX) :].strip()
+    if not kind:
+        return {}
+    fields: dict[str, object] = {"google_doc_type": kind, "google_doc_type_label": GOOGLE_DOC_LABELS.get(kind, kind)}
+    path = GOOGLE_DOC_URL_PATHS.get(kind)
+    if path and isinstance(item_id, str) and GOOGLE_DOC_ID_RE.fullmatch(item_id):
+        fields["google_doc_url"] = f"https://docs.google.com/{path}/d/{item_id}"
+    return fields
+
+
+def parse_google_stub(data: bytes) -> dict[str, object]:
+    """Fields of a Google Docs stub JSON (``url``, ``doc_id``, ``email``, ``resource_id``); never ``resource_key``."""
+    try:
+        payload = json.loads(decode_text(data))
+    except ValueError as exc:
+        raise CloudSyncParseError(f"Google 문서 바로가기 JSON이 아닙니다: {exc}") from exc
+    if not isinstance(payload, Mapping):
+        raise CloudSyncParseError("Google 문서 바로가기 JSON이 객체가 아닙니다")
+    doc_id = payload.get("doc_id")
+    resource_id = payload.get("resource_id")
+    if not isinstance(doc_id, str) and isinstance(resource_id, str) and ":" in resource_id:
+        doc_id = resource_id.split(":", 1)[1]
+    url = payload.get("url")
+    email = payload.get("email")
+    return {
+        "doc_id": doc_id if isinstance(doc_id, str) and GOOGLE_DOC_ID_RE.fullmatch(doc_id) else None,
+        # R5 review: ``resourcekey`` / token query values and userinfo never leave the stub (any stub type).
+        "stub_url": redact_url(url) if isinstance(url, str) and url.startswith("https://") else None,
+        "email": email if isinstance(email, str) and EMAIL_RE.fullmatch(email) else None,
+        "resource_key_present": bool(payload.get("resource_key")),
+    }
 
 
 class CloudSyncParseError(ValueError):
@@ -697,10 +777,15 @@ class CloudSyncCollector:
         self.hash_cache: dict[str, dict[str, str]] = {}
         self.log_files = 0
         self.log_bytes = 0
+        self.google_stubs: list[Path] = []
+        self.google_stubs_truncated = False
 
     # -- walk --
     def discover(self) -> None:
         for path in iter_evidence_paths(self.root, "*"):
+            if path.suffix.lower() in GOOGLE_STUB_TYPES:
+                self.add_google_stub(path)
+                continue
             lowered = str(path).lower()
             if not any(term in lowered for term in PATH_PREFILTER_TERMS):
                 continue
@@ -751,10 +836,73 @@ class CloudSyncCollector:
                 instance.error(Path(instance.root), f"클라이언트 처리 실패: {exc}")
             yield from rows
             yield self.inventory_row(instance)
+        if self.google_stubs:
+            yield from self.google_stub_rows()
         for client, paths in sorted(self.traces.items()):
             if any(instance.client == client for instance in self.instances.values()):
                 continue
             yield self.trace_row(client, paths)
+
+    # -- Google Docs stubs (R5 L3) --
+    def add_google_stub(self, path: Path) -> None:
+        try:
+            if not path.is_file():
+                return
+        except OSError:
+            return
+        if len(self.google_stubs) >= MAX_GOOGLE_STUBS:
+            self.google_stubs_truncated = True
+            return
+        self.google_stubs.append(path)
+
+    def google_stub_rows(self) -> Iterator[ArtifactRecord]:
+        stubs = sorted(self.google_stubs, key=lambda item: str(item).lower())
+        first = stubs[0]
+        instance = ClientInstance(
+            client="google-drive",
+            key="google-drive|doc-stubs",
+            root=str(first.parent),
+            user_profile=profile_for(first, self.root),
+        )
+        instance.notes.append("Google 문서 바로가기(.gdoc 등) 파일: 문서 내용은 클라우드에만 있음(바로가기의 문서 ID·계정·URL만)")
+        if self.google_stubs_truncated:
+            instance.notes.append(f"Google 문서 바로가기 상한 {MAX_GOOGLE_STUBS:,}개 초과: 이후 파일은 읽지 않음")
+        for path in stubs:
+            instance.add(path, "google-doc-stub")
+            try:
+                if file_size(path) > MAX_GOOGLE_STUB_BYTES:
+                    raise CloudSyncParseError("Google 문서 바로가기가 크기 상한을 넘습니다")
+                fields = parse_google_stub(read_bounded(path, MAX_GOOGLE_STUB_BYTES))
+            except (CloudSyncParseError, OSError) as exc:
+                instance.error(path, exc)
+                continue
+            doc_type = GOOGLE_STUB_TYPES[path.suffix.lower()]
+            if fields["email"] and fields["email"] not in instance.accounts:
+                instance.accounts.append(str(fields["email"]))
+            google = google_doc_fields(item_id=fields["doc_id"], doc_type=doc_type)
+            row = self.record(
+                instance,
+                path,
+                artifact_type="cloud-sync-file",
+                recovery_method="stub-json",
+                source_format="google-docs-stub",
+                locator="json",
+                item_path=str(path),
+                path_basis="local-stub-file",
+                file_name=path.name,
+                item_id=fields["doc_id"],
+                actor=fields["email"],
+                url=google.get("google_doc_url") or fields["stub_url"],
+                resource_key_present=fields["resource_key_present"] or None,
+                sync_state="metadata",
+                sync_state_semantics="google-docs-stub",
+                **google,
+            )
+            if row is None:
+                break
+            instance.bump("files")
+            yield row
+        yield self.inventory_row(instance)
 
     def notes(self) -> list[str]:
         notes: list[str] = []
@@ -1514,6 +1662,10 @@ class CloudSyncCollector:
                 shared=shared,
                 is_owner=owner,
                 mime_type=values.get(col["mime"]) if col["mime"] else None,
+                **google_doc_fields(
+                    values.get(col["mime"]) if col["mime"] else None,
+                    scalar(values.get(col["id"])) if col["id"] else None,
+                ),
                 sync_state="trashed" if trashed else "metadata",
                 sync_state_semantics="drivefs-items-trashed-flag",
                 deleted=trashed,

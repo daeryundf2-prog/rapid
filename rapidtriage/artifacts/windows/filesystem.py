@@ -22,6 +22,7 @@ from ...core.recovery import (
 )
 from .._walk import iter_evidence_paths
 from .common import build_forensic_review
+from .system_extras import collect_ntfs_volume_information
 
 PARSER_VERSION = "windows-filesystem-v9"
 SUPPORTED_SUFFIXES = {".csv", ".json", ".jsonl", ".ndjson"}
@@ -215,6 +216,8 @@ class WindowsFilesystemProvider:
         yield from collect_ads_stream_artifacts(root)
         yield from collect_recovered_ads_artifacts(root)
         yield from collect_signature_mismatch_artifacts(root)
+        # R5 L2: $Boot VBR + $MFT record 3 ($Volume) -> ntfs-volume-information.
+        yield from collect_ntfs_volume_information(root, self.name)
         for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
             if not path.is_file() or path.suffix.lower() not in SUPPORTED_SUFFIXES:
                 continue

@@ -1,0 +1,266 @@
+# Triage catalogue: Phone Link / Your Phone (휴대폰과 연결; plan r5-residual L1, windows-phone-link kind).
+# Rows come from the app's per-device SQLite stores (phone.db, calling.db, contacts.db, photos.db);
+# column meanings are matched by name across app versions (see docs/rapidtriage-known-limitations.md).
+families:
+- id: phone-link-message
+  label: 휴대폰과 연결 문자
+  types:
+  - phone-link-message
+  core_columns:
+  - key: timestamp
+    label: 시각
+    format: time
+    ts_kind: sent
+    width: 170
+  - key: counterpart
+    semantic: person
+    label: 상대
+  - key: direction
+    label: 방향
+    width: 70
+    value_labels:
+      outgoing: 발신
+      incoming: 수신
+      draft: 임시 저장
+      unknown: 불명
+  - key: message_text_preview
+    label: 본문
+    aliases:
+    - message_text
+    width: 320
+  - key: attachments
+    semantic: attachment
+    label: 첨부
+  - key: message_kind
+    label: 종류
+    width: 70
+    value_labels:
+      sms: SMS
+      mms: MMS
+  - key: read_state
+    label: 읽음
+    width: 80
+  - key: device_id
+    semantic: device
+    label: 기기 ID
+    format: mono
+  aux_columns:
+  - key: sender
+    semantic: person_sender
+    label: 보낸 사람
+  - key: recipient
+    semantic: person_recipient
+    label: 받는 사람
+  - key: thread_id
+    label: 대화 ID
+    format: mono
+  - key: conversation_title
+    label: 대화 상대 목록
+  - key: message_id
+    label: 메시지 ID
+    format: mono
+  - key: status
+    label: 상태
+  - key: direction_code
+    label: 방향 코드(원래 값)
+    format: number
+  - key: timestamp_encoding
+    label: 시각 인코딩
+  - key: user
+    label: 사용자 프로필
+  - key: source_table
+    label: 원본 표
+  - key: source_path
+    semantic: path
+    label: 원본 DB
+    format: path
+  - key: recovery_method
+    label: 복구 방식
+  - key: parser_version
+    label: 파서 버전
+    format: mono
+  rules: []
+- id: phone-link-call
+  label: 휴대폰과 연결 통화
+  types:
+  - phone-link-call
+  core_columns:
+  - key: timestamp
+    label: 통화 시작
+    format: time
+    ts_kind: start
+    width: 170
+  - key: phone_number
+    semantic: person
+    label: 번호
+  - key: contact_name
+    semantic: person
+    label: 이름
+  - key: call_type
+    label: 유형
+  - key: duration_seconds
+    label: 통화 시간(초)
+    format: number
+  - key: device_id
+    semantic: device
+    label: 기기 ID
+    format: mono
+  aux_columns:
+  - key: call_type_code
+    label: 유형 코드(원래 값)
+    format: number
+  - key: timestamp_encoding
+    label: 시각 인코딩
+  - key: user
+    label: 사용자 프로필
+  - key: source_table
+    label: 원본 표
+  - key: source_path
+    semantic: path
+    label: 원본 DB
+    format: path
+  - key: parser_version
+    label: 파서 버전
+    format: mono
+  rules: []
+- id: phone-link-contact
+  label: 휴대폰과 연결 연락처
+  types:
+  - phone-link-contact
+  core_columns:
+  - key: contact_name
+    semantic: person
+    label: 이름
+  - key: phone
+    semantic: person
+    label: 전화
+    aliases:
+    - phones
+  - key: email
+    semantic: person
+    label: 이메일
+    aliases:
+    - emails
+  - key: device_id
+    semantic: device
+    label: 기기 ID
+    format: mono
+  aux_columns:
+  - key: phones
+    label: 전화 전체
+  - key: emails
+    label: 이메일 전체
+  - key: contact_id
+    label: 연락처 ID
+    format: mono
+  - key: user
+    label: 사용자 프로필
+  - key: source_path
+    semantic: path
+    label: 원본 DB
+    format: path
+  rules: []
+- id: phone-link-photo
+  label: 휴대폰과 연결 사진
+  types:
+  - phone-link-photo
+  core_columns:
+  - key: timestamp
+    label: 시각(촬영·동기화)
+    format: time
+    ts_kind: captured
+    width: 170
+  - key: file_name
+    label: 파일 이름
+  - key: file_size
+    label: 크기
+    format: bytes
+  - key: mime_type
+    label: 형식
+  - key: media_uri
+    semantic: path
+    label: 휴대폰 경로·URI
+    format: path
+  - key: device_id
+    semantic: device
+    label: 기기 ID
+    format: mono
+  aux_columns:
+  - key: taken_at
+    label: 촬영
+    format: time
+    ts_kind: captured
+  - key: updated_at
+    label: 갱신
+    format: time
+    ts_kind: last-updated
+  - key: width
+    label: 너비
+    format: number
+  - key: height
+    label: 높이
+    format: number
+  - key: media_id
+    label: 미디어 ID
+    format: mono
+  - key: source_path
+    semantic: path
+    label: 원본 DB
+    format: path
+  rules: []
+- id: phone-link-device
+  label: 휴대폰과 연결 기기·오류
+  types:
+  - phone-link-device
+  - phone-link-parse-error
+  core_columns:
+  - key: device_id
+    semantic: device
+    label: 기기 ID
+    format: mono
+  - key: device_name
+    semantic: device
+    label: 기기 이름
+  - key: device_model
+    label: 모델
+  - key: message_rows
+    label: 문자 행
+    format: number
+  - key: call_rows
+    label: 통화 행
+    format: number
+  - key: contact_rows
+    label: 연락처 행
+    format: number
+  - key: photo_rows
+    label: 사진 행
+    format: number
+  - key: reason_ko
+    label: 사유
+    width: 320
+  aux_columns:
+  - key: databases
+    label: DB 목록
+  - key: database_count
+    label: DB 수
+    format: number
+  - key: file_count
+    label: 파일 수
+    format: number
+  - key: total_bytes
+    label: 전체 크기
+    format: bytes
+  - key: caps_hit
+    label: 상한 도달
+  - key: error_type
+    label: 오류 종류
+  - key: error
+    label: 오류 원문
+  - key: user
+    label: 사용자 프로필
+  - key: source_path
+    semantic: path
+    label: 원본
+    format: path
+  rules: []
+rules: []

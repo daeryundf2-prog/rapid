@@ -834,6 +834,134 @@ families:
     format: path
   rules:
   - antiforensics.tool_present
+# --- R5 L2: logon banner, Office identities and Backstage cache --------------------------------
+- id: logon-banner
+  label: 로그온 배너(법적 고지)
+  types:
+  - registry-logon-banner
+  core_columns:
+  - key: key_last_written_at
+    label: 키 마지막 기록
+    aliases:
+    - timestamp
+    format: time
+    ts_kind: last-written
+  - key: banner_caption
+    label: 제목
+  - key: banner_text
+    label: 본문
+  - key: banner_source_label
+    label: 출처
+    aliases:
+    - banner_source
+  - key: key_path
+    label: 키 경로
+    aliases:
+    - key
+    format: path
+  aux_columns:
+  - key: banner_text_truncated
+    label: 본문 잘림
+    value_labels:
+      'true': 예
+      'false': 아니요
+  - key: evidence_note
+    label: 참고
+  rules: []
+- id: office-identity
+  label: Office 연결 계정
+  types:
+  - office-identity
+  core_columns:
+  - key: key_last_written_at
+    label: 키 마지막 기록
+    aliases:
+    - timestamp
+    format: time
+    ts_kind: last-written
+  - key: email_address
+    semantic: account
+    label: 이메일 주소
+  - key: sign_in_name
+    semantic: account
+    label: 로그인 이름
+  - key: friendly_name
+    semantic: person
+    label: 표시 이름
+  - key: provider_label
+    label: 계정 종류
+    aliases:
+    - provider_id
+  - key: office_version
+    label: Office 버전
+  - key: user_sid
+    semantic: account
+    label: 사용자 SID
+    format: sid
+  aux_columns:
+  - key: identity_id
+    label: 계정 키
+    format: mono
+  - key: tenant_id
+    label: 테넌트 ID
+    format: mono
+  - key: identity_provider
+    label: 인증 기관(IdP)
+  - key: key_path
+    label: 키 경로
+    aliases:
+    - key
+    format: path
+  rules: []
+- id: office-backstage
+  label: Office Backstage 캐시
+  types:
+  - office-backstage-item
+  core_columns:
+  - key: modified_at
+    label: 수정 시각
+    aliases:
+    - timestamp
+    format: time
+    ts_kind: modified
+  - key: item_name
+    label: 이름
+  - key: url
+    semantic: url
+    label: 웹 주소
+    format: url
+  - key: local_path
+    semantic: path
+    label: 경로
+    format: path
+  - key: host
+    label: 호스트
+  - key: modified_by
+    semantic: person
+    label: 수정한 사람
+  - key: location_kind_label
+    label: 위치 종류
+    aliases:
+    - location_kind
+  - key: user
+    semantic: account
+    label: 사용자 프로필
+  aux_columns:
+  - key: office_version
+    label: Office 버전
+  - key: cache_folder
+    label: 캐시 폴더
+  - key: cache_file
+    label: 캐시 파일
+  - key: json_path
+    label: JSON 위치
+    format: mono
+  - key: source_path
+    label: 원본 파일
+    format: path
+  - key: evidence_note
+    label: 참고
+  rules: []
 rules:
 - id: registry.run_user_path
   family: persistence

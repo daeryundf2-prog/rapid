@@ -274,6 +274,38 @@ class TypedUrlDirect(Rule):
         return RuleResult(evidence(url=url, domain=domain, keyword=keyword, timestamp=row.text("timestamp", "visit_time")))
 
 
+@register("browser.torrent_site_visit")
+class TorrentSiteVisit(Rule):
+    """Visit of a torrent-class host (``core/derived/url_classes.yaml``) or of a ``magnet:`` link (R5 L3).
+
+    Reads every history row like the other history rules (``browser-history`` URL rows too: some
+    browsers / WebCache exports have no per-visit ``browser-visit`` rows)."""
+
+    selector = HISTORY
+
+    def __init__(self, params=None) -> None:
+        super().__init__(params)
+        from ..derived.url_classes import UrlClassError, load_url_classes
+
+        try:
+            self.classes = load_url_classes()
+        except (UrlClassError, OSError, ModuleNotFoundError):
+            self.classes = None
+
+    def apply(self, row: RowView, ctx: FlagContext) -> RuleResult | None:
+        url = row.text("url")
+        if not url:
+            return None
+        if url[:7].lower() == "magnet:":
+            return RuleResult(evidence(url=url[:200], kind="magnet", timestamp=row.text("timestamp", "visit_time", "last_visited_at")))
+        if self.classes is None:
+            return None
+        host = url_host(url)
+        if not host or self.classes.classify(host) != "torrent":
+            return None
+        return RuleResult(evidence(url=url, host=host, timestamp=row.text("timestamp", "visit_time", "last_visited_at")))
+
+
 UPLOAD = select(types={"web-upload-candidate"})
 UPLOAD_STRENGTHS = ("weak", "medium", "strong")
 

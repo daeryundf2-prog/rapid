@@ -217,6 +217,15 @@ families:
     format: mono
   - key: user_profile
     label: 사용자 프로필
+  # R5 L3: Google Docs stubs (.gdoc …) and DriveFS google-apps items.
+  - key: google_doc_type_label
+    label: Google 문서 종류
+    aliases:
+    - google_doc_type
+  - key: google_doc_url
+    semantic: url
+    label: Google 문서 URL
+    format: url
   rules:
   - cloud.bulk_upload
 - id: cloud-sync-inventory

@@ -3,7 +3,9 @@
 Path signatures under each user profile (``AppData\\Roaming|Local``, ``Packages``,
 ``Documents``, ``Downloads``) for Microsoft Teams (classic and the new
 WebView2 client), Slack, Discord, Telegram Desktop, WhatsApp Desktop, Skype,
-LINE PC, WeChat PC and Zoom. Rows:
+LINE PC, WeChat PC and Zoom; R5 L1 adds Viber (``ViberPC\\<number>\\viber.db``),
+Facebook Messenger desktop (``msys_*.db``, best effort) and the inventory-only
+Signal and QQ/NTQQ roots. Rows:
 
 * ``chat-message`` — app, conversation, sender, recipient, time, body,
   direction, deleted state.
@@ -32,9 +34,11 @@ Recovery methods (``recovery_method``):
 * ``filesystem-inventory`` — presence/size/count only (encrypted stores).
 
 Nothing is decrypted: Telegram ``tdata``, WeChat SQLCipher DBs, LINE and the
-new WhatsApp client's encrypted DBs, and Zoom ``*.enc.db`` are inventoried
-with the reason; no key material or token values are emitted (secret-named
-fields are never copied).
+new WhatsApp client's encrypted DBs, Zoom ``*.enc.db``, Signal Desktop
+``sql\\db.sqlite`` (SQLCipher) and QQ ``Msg3.0.db`` / NTQQ ``nt_db`` are
+inventoried with the reason; no key material or token values are emitted
+(secret-named fields are never copied). Key files such as Signal
+``config.json`` are listed by name, size and time only, never opened.
 """
 
 from __future__ import annotations
@@ -127,6 +131,10 @@ class AppSpec:
     # ``CHAT_APP_PROFILES`` service whose message-table names drive SQLite table selection.
     profile_service: str = ""
     inventory_reason_ko: str = ""
+    # R5 L1: app-specific SQLite join ("viber", "fb-msys") tried before the generic column mapping.
+    sqlite_mapper: str = ""
+    # R5 L1: root-relative key/config files listed by name, size and mtime only (never opened).
+    key_files: tuple[str, ...] = ()
 
 
 _ROAMING = ("AppData", "Roaming")
@@ -264,6 +272,63 @@ APPS: tuple[AppSpec, ...] = (
         inventory_reason_ko=(
             "Zoom 신규 버전의 *.enc.db는 암호화되어 있어 존재·크기만 목록화합니다. 평문 zoomus.db/zoommeeting.db 표와 "
             "Documents\\Zoom의 저장된 회의 채팅(meeting_saved_chat.txt)은 행으로 읽습니다."
+        ),
+    ),
+    # --- R5 L1 (plan r5-residual; re-audit §3 items 12, 13, 27) --------------------------------
+    AppSpec(
+        app_id="viber",
+        profile_service="Viber",
+        service="Viber",
+        label_ko="Viber PC",
+        # %APPDATA%\ViberPC\<phone number>\viber.db (plaintext SQLite: Events, Messages, Contact, ChatInfo).
+        roots=((*_ROAMING, "ViberPC"),),
+        sqlite=("*/viber.db",),
+        home_file_stores=(("Documents", "ViberDownloads"),),
+        encryption_state="plaintext-sqlite",
+        sqlite_mapper="viber",
+        inventory_reason_ko="Viber PC 폴더는 있으나 viber.db에서 메시지 행을 찾지 못했습니다(DB 없음·빈 DB·미확인 스키마).",
+    ),
+    AppSpec(
+        app_id="facebook-messenger",
+        profile_service="Facebook Messenger",
+        service="Facebook Messenger",
+        label_ko="Facebook Messenger(데스크톱)",
+        roots=((*_PACKAGES, "FacebookInc.Messenger_*", "LocalState"),),
+        sqlite=("msys_*.db", "*/msys_*.db"),
+        encryption_state="plaintext-or-unknown",
+        sqlite_mapper="fb-msys",
+        inventory_reason_ko=(
+            "Facebook Messenger 데스크톱(2025-12 종료) msys_*.db는 스키마가 버전마다 크게 달라, messages·contacts·threads 표를 "
+            "찾지 못하면 DB 목록·크기만 제공합니다(최선 노력 매핑)."
+        ),
+    ),
+    AppSpec(
+        app_id="signal",
+        profile_service="Signal",
+        service="Signal Desktop",
+        label_ko="Signal Desktop",
+        roots=((*_ROAMING, "Signal"),),
+        encrypted=("sql/db.sqlite", "attachments.noindex"),
+        key_files=("config.json",),
+        encryption_state="encrypted-sqlcipher",
+        inventory_reason_ko=(
+            "Signal Desktop의 sql\\db.sqlite는 SQLCipher로 암호화되어 있고 첨부(attachments.noindex)도 암호화되어 있어 본문을 읽지 않습니다. "
+            "키가 든 config.json은 열지 않고 존재·크기·시각만 적습니다(키 읽기·복호는 정책상 하지 않음)."
+        ),
+    ),
+    AppSpec(
+        app_id="qq",
+        profile_service="QQ",
+        service="QQ",
+        label_ko="QQ/NTQQ",
+        # Documents\Tencent Files\<QQ number>\Msg3.0.db (classic) and nt_qq\nt_db\*.db (NTQQ): both encrypted.
+        roots=(("Documents", "Tencent Files"),),
+        encrypted=("*/Msg3.0.db", "*/nt_qq/nt_db/*.db"),
+        file_stores=("*/FileRecv",),
+        encryption_state="encrypted-or-unknown",
+        inventory_reason_ko=(
+            "QQ의 Msg3.0.db와 NTQQ nt_db\\*.db는 암호화되어 있어 본문을 읽지 않습니다(키 추출·복호는 정책상 하지 않음). "
+            "계정 폴더·DB 목록과 FileRecv(받은 파일) 목록만 제공합니다."
         ),
     ),
 )
@@ -981,7 +1046,10 @@ class _AppRun:
 class WindowsMessengerProvider:
     name = "windows-messenger"
     collector_kind = "windows-messenger"
-    description = "Windows desktop messengers: Teams, Slack, Discord, Telegram Desktop, WhatsApp Desktop, Skype, LINE, WeChat, Zoom"
+    description = (
+        "Windows desktop messengers: Teams, Slack, Discord, Telegram Desktop, WhatsApp Desktop, Skype, LINE, WeChat, Zoom, "
+        "Viber, Facebook Messenger, Signal (inventory), QQ (inventory)"
+    )
     target_platform = "windows"
 
     def __init__(self, limits: MessengerLimits | None = None) -> None:
@@ -1005,7 +1073,8 @@ class WindowsMessengerProvider:
                     yield from self._collect_app(user_home, spec, app_root, home_stores=index == 0)
         if not found_any:
             self.collection_notes.append(
-                "데스크톱 메신저(Teams·Slack·Discord·Telegram·WhatsApp·Skype·LINE·WeChat·Zoom) 앱 폴더가 사용자 프로필에서 발견되지 않았습니다."
+                "데스크톱 메신저(Teams·Slack·Discord·Telegram·WhatsApp·Skype·LINE·WeChat·Zoom·Viber·Facebook Messenger·Signal·QQ) "
+                "앱 폴더가 사용자 프로필에서 발견되지 않았습니다."
             )
 
     # -- one app root ------------------------------------------------------------------------
@@ -1304,6 +1373,12 @@ class WindowsMessengerProvider:
             connection.execute("SELECT name FROM sqlite_master LIMIT 1").fetchall()
             tables = sqlite_table_names(connection)[: self.limits.max_sqlite_tables]
             lowered = {table.lower(): table for table in tables}
+            if run.spec.sqlite_mapper and self._mapped_sqlite(run, path, connection, lowered, provenance):
+                run.stores.append(
+                    {"path": str(path), "kind": "sqlite", "encryption_state": "plaintext-sqlite", "tables": len(tables),
+                     "mapper": run.spec.sqlite_mapper, "status": "read"}
+                )
+                return
             if "accounts" in lowered:
                 owner_row = _select(connection, lowered["accounts"], ("skypename", "fullname"), 1)
                 if owner_row:
@@ -1377,6 +1452,135 @@ class WindowsMessengerProvider:
         run.stores.append(
             {"path": str(path), "kind": "sqlite", "encryption_state": "plaintext-sqlite", "tables": len(tables), "tables_read": tables_read, "status": "read"}
         )
+
+    # -- app-specific SQLite joins (R5 L1) ---------------------------------------------------------
+
+    def _mapped_sqlite(self, run: _AppRun, path: Path, connection: sqlite3.Connection, lowered: Mapping[str, str],
+                       provenance: Mapping[str, object]) -> bool:
+        """Viber / Facebook Messenger joins; ``False`` when their tables are absent (the generic mapping runs instead)."""
+        if run.spec.sqlite_mapper == "viber":
+            return self._viber_store(run, path, connection, lowered, provenance)
+        if run.spec.sqlite_mapper == "fb-msys":
+            return self._fb_msys_store(run, path, connection, lowered, provenance)
+        return False
+
+    def _rows(self, run: _AppRun, connection: sqlite3.Connection, table: str, columns: tuple[str, ...]) -> list[dict[str, object]]:
+        rows = _select(connection, table, columns, self.limits.max_sqlite_rows + 1)
+        if len(rows) > self.limits.max_sqlite_rows:
+            run.cap("sqlite-row-cap")
+            rows = rows[: self.limits.max_sqlite_rows]
+        return [_lower_map(row) for row in rows]
+
+    def _viber_store(self, run: _AppRun, path: Path, connection: sqlite3.Connection, lowered: Mapping[str, str],
+                     provenance: Mapping[str, object]) -> bool:
+        """Viber PC ``viber.db``: ``Events`` (time, direction, contact, chat) joined with ``Messages`` (body, payload).
+
+        Table/column names follow public Viber Desktop write-ups; ``Direction`` 0/1 is read as incoming/outgoing
+        and kept raw (``viber_direction_raw``) because no vendor documentation confirms it.
+        """
+        if "events" not in lowered or "messages" not in lowered:
+            return False
+        owner = path.parent.name  # ViberPC\<phone number>\viber.db
+        run.owner = owner
+        snapshot = provenance.get("profile_version", "")
+        contacts: dict[str, str] = {}
+        if "contact" in lowered:
+            table = lowered["contact"]
+            for index, row in enumerate(self._rows(run, connection, table, ("ContactID", "Name", "ClientName", "Number"))):
+                name = str(row.get("name") or row.get("clientname") or "").strip()
+                number = str(row.get("number") or "").strip()
+                contacts[str(row.get("contactid"))] = name or number
+                if not (name or number):
+                    continue
+                fields = {"contact_name": name or number, "display_name": name or number, "contact_id": number or str(row.get("contactid")),
+                          "email": "", "phone": number, "account": number or str(row.get("contactid"))}
+                self._emit(run, Candidate("chat-contact", fields), path, "sqlite", recovery_method="sqlite-table", offset=None,
+                           extra={"source_table": table, "source_row": index, "sqlite_snapshot": snapshot}, raw=row)
+        chats: dict[str, str] = {}
+        if "chatinfo" in lowered:
+            for row in self._rows(run, connection, lowered["chatinfo"], ("ChatID", "Name")):
+                chats[str(row.get("chatid"))] = str(row.get("name") or "")
+        messages = {
+            str(row.get("eventid")): row
+            for row in self._rows(run, connection, lowered["messages"], ("EventID", "Body", "Type", "PayloadPath", "Subject"))
+        }
+        events = self._rows(run, connection, lowered["events"], ("EventID", "TimeStamp", "Direction", "Type", "ContactID", "ChatID", "Number"))
+        for index, event in enumerate(events):
+            message = messages.get(str(event.get("eventid")))
+            if message is None:
+                continue  # calls and system events have no Messages row
+            direction_raw = event.get("direction")
+            outgoing = {"0": False, "1": True}.get(str(direction_raw))
+            counterpart = contacts.get(str(event.get("contactid")), "") or str(event.get("number") or "")
+            record: dict[str, object] = {
+                "id": event.get("eventid"),
+                "text": message.get("body") or message.get("subject") or "",
+                "timestamp": event.get("timestamp"),
+                "conversationid": event.get("chatid"),
+                "conversation_name": chats.get(str(event.get("chatid")), ""),
+                "sender": owner if outgoing else counterpart,
+                "to": counterpart if outgoing else owner,
+                "messagetype": message.get("type"),
+            }
+            if outgoing is not None:
+                record["outgoing"] = outgoing
+            payload = str(message.get("payloadpath") or "")
+            if payload:
+                record["files"] = [{"filepath": payload}]
+            for candidate in classify_object(record, max_text_chars=self.limits.max_text_chars, owner=owner):
+                self._emit(
+                    run, candidate, path, "sqlite", recovery_method="sqlite-table", offset=None,
+                    extra={
+                        "source_table": f"{lowered['events']}+{lowered['messages']}",
+                        "source_row": index,
+                        "sqlite_snapshot": snapshot,
+                        "viber_direction_raw": direction_raw,
+                        "direction_basis": "viber-Events.Direction(0=수신·1=발신으로 해석, 공급사 문서 없음)",
+                    },
+                    raw=record,
+                )
+        return True
+
+    def _fb_msys_store(self, run: _AppRun, path: Path, connection: sqlite3.Connection, lowered: Mapping[str, str],
+                       provenance: Mapping[str, object]) -> bool:
+        """Facebook Messenger desktop ``msys_*.db`` (best effort): ``messages`` + ``contacts`` + ``threads`` when present."""
+        if "messages" not in lowered:
+            return False
+        columns = {column.lower() for column in sqlite_columns(connection, lowered["messages"])}
+        text_column = next((name for name in ("text", "message_text", "snippet") if name in columns), "")
+        time_column = next((name for name in ("timestamp_ms", "timestamp", "server_timestamp_ms") if name in columns), "")
+        if not text_column or not time_column:
+            return False
+        snapshot = provenance.get("profile_version", "")
+        contacts: dict[str, str] = {}
+        if "contacts" in lowered:
+            for row in self._rows(run, connection, lowered["contacts"], ("id", "name", "contact_id")):
+                key = str(row.get("id") or row.get("contact_id") or "")
+                if key:
+                    contacts[key] = str(row.get("name") or "")
+        threads: dict[str, str] = {}
+        if "threads" in lowered:
+            for row in self._rows(run, connection, lowered["threads"], ("thread_key", "thread_name")):
+                threads[str(row.get("thread_key"))] = str(row.get("thread_name") or "")
+        rows = self._rows(run, connection, lowered["messages"], ("message_id", "thread_key", "sender_id", text_column, time_column))
+        for index, row in enumerate(rows):
+            sender_id = str(row.get("sender_id") or "")
+            record = {
+                "id": row.get("message_id"),
+                "text": row.get(text_column) or "",
+                "timestamp": row.get(time_column),
+                "conversationid": row.get("thread_key"),
+                "conversation_name": threads.get(str(row.get("thread_key")), ""),
+                "sender": contacts.get(sender_id) or sender_id,
+            }
+            for candidate in classify_object(record, max_text_chars=self.limits.max_text_chars):
+                self._emit(
+                    run, candidate, path, "sqlite", recovery_method="sqlite-table", offset=None,
+                    extra={"source_table": lowered["messages"], "source_row": index, "sqlite_snapshot": snapshot,
+                           "sender_id": sender_id, "schema_confidence": "best-effort-msys"},
+                    raw=record,
+                )
+        return True
 
     # -- inventory-only stores --------------------------------------------------------------------
 
@@ -1617,6 +1821,7 @@ class WindowsMessengerProvider:
             "bytes_read": run.bytes_read,
             "caps_hit": list(run.capped),
             "inventory_only": inventory_only,
+            "key_material_files": _key_file_presence(run.root, spec.key_files),
             "reason_ko": reason,
             "coverage_status": "inventory-only" if inventory_only else "rows-recovered",
             "timestamp": "",
@@ -1672,6 +1877,13 @@ def _inflate_gzip(view: memoryview, cap: int) -> tuple[bytes, int, bool]:
 def _existing_roots(user_home: Path, spec: AppSpec) -> list[Path]:
     roots: list[Path] = []
     for parts in spec.roots:
+        if any("*" in part for part in parts):
+            # Store package folders carry a publisher hash (``FacebookInc.Messenger_<hash>``): glob them.
+            try:
+                roots.extend(sorted((item for item in user_home.glob("/".join(parts)) if item.is_dir()), key=lambda item: str(item).lower()))
+            except OSError:
+                pass
+            continue
         candidate = user_home.joinpath(*parts)
         try:
             if candidate.is_dir():
@@ -1679,6 +1891,27 @@ def _existing_roots(user_home: Path, spec: AppSpec) -> list[Path]:
         except OSError:
             continue
     return roots
+
+
+def _key_file_presence(root: Path, names: Iterable[str]) -> list[dict[str, object]]:
+    """Name, size and mtime of key/config files; the files are never opened (R5 policy: no key reading)."""
+    listed: list[dict[str, object]] = []
+    for name in names:
+        try:
+            stat_result = (root / name).stat()
+        except OSError:
+            listed.append({"name": name, "present": False})
+            continue
+        listed.append(
+            {
+                "name": name,
+                "present": True,
+                "bytes": stat_result.st_size,
+                "modified": isoformat_from_timestamp(stat_result.st_mtime),
+                "content_read": False,
+            }
+        )
+    return listed
 
 
 def _glob_dirs(root: Path, pattern: str) -> list[Path]:

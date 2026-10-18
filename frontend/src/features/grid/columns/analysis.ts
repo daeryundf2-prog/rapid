@@ -132,6 +132,25 @@ export const ANALYSIS_COLUMNS: Record<string, KindColumnDef[]> = {
     { header: "처음 본 시각", keys: ["first_seen"], width: 170, time: true },
     { header: "마지막 본 시각", keys: ["last_seen"], width: 170, time: true },
   ],
+  // R5 L3: carved-url-candidate rows.
+  "url-carve": [
+    { header: "주소 (URL)", keys: ["url"], width: 360 },
+    { header: "URL 분류", keys: ["url_class_label"], width: 110 },
+    { header: "호스트", keys: ["host"], width: 200 },
+    { header: "소스 종류", keys: ["source_kind_label"], width: 120 },
+    { header: "소스 경로", keys: ["source_path"], width: 260 },
+    {
+      header: "오프셋",
+      keys: ["offset"],
+      width: 120,
+      number: true,
+      mono: true,
+      display: (v) => hexOffset(v),
+      tooltip: (d) => `${str(d.offset)} 바이트`,
+    },
+    { header: "인코딩", keys: ["encoding"], width: 90 },
+    { header: "출현 수", keys: ["hit_count"], width: 80, number: true },
+  ],
 };
 
 const TIME_KEYS = ["timestamp", "modified_at", "created_at", "last_seen", "first_seen", "finished_at"];
@@ -167,6 +186,10 @@ function titleOf(kind: string, d: Record<string, unknown>, path: string | null, 
     return `${sig} @ ${hexOffset(d.offset)} · ${baseName(strOrNull(d.source_path) ?? path ?? "")}`;
   }
   if (kind === "ocr-batch") return baseName(strOrNull(d.source_path) ?? path ?? "") || `이미지 ${index + 1}`;
+  if (kind === "url-carve") {
+    const host = strOrNull(d.host) ?? "URL";
+    return `${host} @ ${hexOffset(d.offset)} · ${baseName(strOrNull(d.source_path) ?? path ?? "")}`;
+  }
   if (kind === "vsc-compare" || kind === "vsc-extract") {
     // The changed file (relative path), never the snapshot folder every row shares.
     const file = strOrNull(d.path) ?? strOrNull(d.source_path) ?? path;
@@ -194,7 +217,10 @@ export const ANALYSIS_SOURCE_FAMILIES: Readonly<Record<string, string>> = {
   "timestamp-mismatch": "ntfs-timestamp-mismatch",
   "logfile-transaction": "ntfs-logfile-transaction",
 };
-export const ANALYSIS_KIND_FAMILIES: Readonly<Record<string, string>> = { carve: "carved-file" };
+export const ANALYSIS_KIND_FAMILIES: Readonly<Record<string, string>> = {
+  carve: "carved-file",
+  "url-carve": "carved-url-candidate",
+};
 
 /** Values of a `f:<key>` contains-filter (comma = any of). */
 function filterValues(filters: readonly ColumnFilter[] | undefined, col: string): string[] {
@@ -285,6 +311,16 @@ export function analysisColumnsForKind(kind: string | undefined, family?: Catalo
   ];
 }
 
+/**
+ * Byte length of a url-carve hit. `undefined` (offset-only highlight) when the stored URL was
+ * redacted (tokens removed, so its length is not the on-disk length) or truncated.
+ */
+export function urlCarveHitLength(d: Record<string, unknown>): number | undefined {
+  const url = typeof d.url === "string" ? d.url : "";
+  if (!url || d.url_tokens_redacted === true || d.url_truncated === true) return undefined;
+  return d.encoding === "utf-16le" ? url.length * 2 : url.length;
+}
+
 export const analysisCollection: CollectionDef = {
   id: "analysis",
   label: "분석 결과",
@@ -325,9 +361,13 @@ export const analysisCollection: CollectionDef = {
     const path = kind === "ntfs-meta" ? null : (strOrNull(raw.path) ?? carveSource);
     const offset = typeof d.offset === "number" && d.offset >= 0 ? d.offset : null;
     const length = typeof d.length === "number" && d.length > 0 ? d.length : undefined;
-    const isCarveHit = kind === "carve" && offset !== null && path !== null;
+    const urlCarve = kind === "url-carve";
+    const isCarveHit = (kind === "carve" || urlCarve) && offset !== null && path !== null;
     const carvedRow =
-      kind === "carve" && d.status !== "false-positive-rejected" && d.recovery_method !== "rejected";
+      urlCarve ||
+      (kind === "carve" && d.status !== "false-positive-rejected" && d.recovery_method !== "rejected");
+    // url-carve rows: highlight the URL's bytes at the hit (UTF-16LE = 2 bytes per char).
+    const hitLength = urlCarve ? urlCarveHitLength(d) : length;
     return makeRow(
       makeRef("analysis", `/rows/${rowIndex}`, analysisId || undefined),
       {
@@ -347,7 +387,11 @@ export const analysisCollection: CollectionDef = {
         ...(volumePath ? { volumePath } : {}),
         ...(Array.isArray(raw.flags) ? { flags: raw.flags, flagList: parseFlags(raw.flags) } : {}),
         ...(isCarveHit
-          ? { highlight: { offset, ...(length ? { length } : {}) }, viewerMode: "hex", sourceOffset: offset }
+          ? {
+              highlight: { offset, ...(hitLength ? { length: hitLength } : {}) },
+              viewerMode: "hex",
+              sourceOffset: offset,
+            }
           : {}),
         // 증거 정보 "복구 방법 카빙 · 오프셋" (rows written before R3 have no recovery_method).
         ...(carvedRow ? { recovery: "carved" } : {}),

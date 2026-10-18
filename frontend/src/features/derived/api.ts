@@ -71,6 +71,8 @@ export interface DerivedRow {
   sample_count: number;
   url_class?: string | null;
   url_class_label?: string | null;
+  /** urls: every occurrence came from URL carving (page file / unallocated strings). */
+  carved_only?: boolean;
   examples?: string[];
   length?: number;
   sha256?: string;

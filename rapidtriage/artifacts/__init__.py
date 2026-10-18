@@ -12,6 +12,7 @@ from .android import AndroidApkProvider
 from .cloud import CloudExportProvider
 from .cloud_sync import CloudSyncClientsProvider
 from .email import EmailArtifactsProvider
+from .email_clients import EmailClientsProvider
 from .generic import GenericDocumentArtifactProvider
 from .kakaotalk_macos import KakaoTalkMacOsProvider
 from .kakaotalk_windows import KakaoTalkWindowsProvider
@@ -20,13 +21,16 @@ from .macos import MacOsSystemArtifactsProvider
 from .media import MediaImageProvider
 from .memory import MemoryVolatilityProvider
 from .mobile import MobileExportProvider
+from .p2p import P2PArtifactsProvider
 from .synthetic_media import SyntheticMediaProvider
 from .windows.browser import WindowsBrowserArtifactsProvider
 from .windows.eventlog import WindowsEventLogProvider
 from .windows.execution import WindowsExecutionProvider
 from .windows.filesystem import WindowsFilesystemProvider
+from .windows.media_players import WindowsMediaPlayersProvider
 from .windows.messenger import WindowsMessengerProvider
 from .windows.os_account import WindowsOsAccountProvider
+from .windows.phone_link import WindowsPhoneLinkProvider
 from .windows.prefetch import WindowsPrefetchProvider
 from .windows.recent_files import WindowsRecentFilesProvider
 from .windows.registry import WindowsRegistryProvider
@@ -98,12 +102,15 @@ def _builtin_providers() -> list[object]:
         CloudExportProvider(),
         CloudSyncClientsProvider(),
         EmailArtifactsProvider(),
+        # R5 L1 (communication and media apps)
+        EmailClientsProvider(),
         LinuxSystemArtifactsProvider(),
         MacOsSystemArtifactsProvider(),
         MediaImageProvider(),
         MemoryVolatilityProvider(),
         SyntheticMediaProvider(),
         MobileExportProvider(),
+        P2PArtifactsProvider(),
         KakaoTalkMacOsProvider(),
         KakaoTalkWindowsProvider(),
         WindowsBrowserArtifactsProvider(),
@@ -115,6 +122,9 @@ def _builtin_providers() -> list[object]:
         WindowsRegistryProvider(),
         WindowsRemoteAccessProvider(),
         WindowsMessengerProvider(),
+        # R5 L1 (communication and media apps)
+        WindowsMediaPlayersProvider(),
+        WindowsPhoneLinkProvider(),
         WindowsSearchIndexProvider(),
         WindowsShellbagsProvider(),
         WindowsPrefetchProvider(),

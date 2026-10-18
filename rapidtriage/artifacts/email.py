@@ -3,6 +3,7 @@ from __future__ import annotations
 import email
 import hashlib
 import json
+import os
 import re
 from collections.abc import Iterable, Mapping
 from datetime import timezone
@@ -15,6 +16,14 @@ from ..core.forensic_accuracy import build_accuracy_gate
 from ..core.models import ArtifactRecord
 from ..core.submission import compute_hashes
 from ._walk import iter_evidence_paths
+from .email_clients import (
+    THUNDERBIRD,
+    WINDOWS_LIVE_MAIL,
+    WINDOWS_MAIL,
+    client_consumed_eml_paths,
+    client_mail_path_filter,
+    is_extensionless_mbox,
+)
 from .email_pst import collect_ics_file, collect_outlook_container
 from .review import build_forensic_review
 
@@ -22,6 +31,9 @@ PARSER_VERSION = "email-artifacts-v2"
 FUNCTIONAL_SOURCE_BATCH_ID = "commercial-uplift-046-050"
 EMAIL_SUFFIXES = {".eml", ".emlx", ".mbox", ".msg", ".pst", ".ost"}
 MAX_MBOX_MESSAGES = 200
+# R5 L1: an extensionless mbox (Thunderbird folder copied outside a profile) is parsed up to this size;
+# a larger one gets the bounded container string inventory instead of a whole-file read.
+MAX_EXTENSIONLESS_MBOX_BYTES = 256 * 1024 * 1024
 CONTAINER_SCAN_LIMIT = 16 * 1024 * 1024
 MAX_CONTAINER_CANDIDATES = 200
 EMAIL_ATTACHMENT_PREVIEW_BYTES = 64
@@ -162,7 +174,17 @@ class EmailArtifactsProvider:
         return True
 
     def collect(self, root: Path) -> Iterable[ArtifactRecord]:
+        # R5 L1: files under a desktop mail client root are read (and attributed) by the email-clients
+        # provider; skipping them here keeps one row per message. Only the files that provider actually
+        # reads are skipped (its per-root message cap / bounded walk leave the rest to this provider).
+        client_owner = client_mail_path_filter(root)
+        consumed: set[str] | None = None
         for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
+            if path.suffix.lower() == ".eml" and client_owner(path) in (WINDOWS_MAIL, WINDOWS_LIVE_MAIL):
+                if consumed is None:
+                    consumed = client_consumed_eml_paths(root)
+                if os.path.normcase(os.path.normpath(str(path))) in consumed:
+                    continue
             if path.is_file() and path.suffix.lower() in {".pst", ".ost"}:
                 # One hash of the container, shared by the string inventory and the pffexport/readpst run.
                 source_hashes = compute_hashes(path)
@@ -174,6 +196,36 @@ class EmailArtifactsProvider:
                 yield from collect_calendar_file(path)
             elif path.is_file() and is_maildir_message(path):
                 yield from collect_maildir_message(path)
+            elif (
+                not path.suffix
+                and plausible_mbox_name(path, root)
+                and path.with_name(path.name + ".msf").is_file()
+                and path.is_file()
+                and is_extensionless_mbox(path)
+            ):
+                # Thunderbird folder (extensionless mbox + .msf summary) outside a client profile.
+                if client_owner(path) == THUNDERBIRD:
+                    continue
+                yield from collect_extensionless_mbox(path)
+
+
+CACHE_LIKE_DIRS = frozenset({"cache", "cache2", "code cache", "gpucache", "inetcache", "temp", "tmp", "winsxs", "entries"})
+HEX_ENTRY_NAME = re.compile(r"^[0-9A-Fa-f]{16,}$")
+
+
+def plausible_mbox_name(path: Path, root: Path | None = None) -> bool:
+    """Cheap pre-check before the ``<name>.msf`` stat: browser cache entries (hex names) and cache /
+    temp / WinSxS folders (below the evidence ``root``) hold many extensionless files and never
+    Thunderbird folders."""
+    if HEX_ENTRY_NAME.match(path.name):
+        return False
+    parts = path.parts[:-1]
+    if root is not None:
+        try:
+            parts = path.relative_to(root).parts[:-1]
+        except ValueError:
+            pass
+    return not any(part.lower() in CACHE_LIKE_DIRS for part in parts)
 
 
 def collect_outlook_rows(path: Path, *, source_hashes: Mapping[str, str] | None = None) -> list[ArtifactRecord]:
@@ -260,6 +312,17 @@ def collect_mbox(path: Path) -> Iterable[ArtifactRecord]:
             "commercial_parser_validated": False,
         },
     )
+
+
+def collect_extensionless_mbox(path: Path) -> Iterable[ArtifactRecord]:
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return
+    if size > MAX_EXTENSIONLESS_MBOX_BYTES:
+        yield collect_mail_container(path)
+        return
+    yield from collect_mbox(path)
 
 
 def collect_mail_container(path: Path, *, source_hashes: Mapping[str, str] | None = None) -> ArtifactRecord:

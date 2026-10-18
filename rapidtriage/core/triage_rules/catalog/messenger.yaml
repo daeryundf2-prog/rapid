@@ -353,6 +353,11 @@ families:
     format: number
   - key: caps_hit
     label: 상한 도달
+  # R5 L1: Signal config.json and similar key files: name, size and time only (never opened).
+  - key: key_material_files
+    label: 키 파일(존재만)
+  - key: inventory_only
+    label: 인벤토리 전용
   rules: []
 # Store read failures of the desktop messenger provider: 앱 · 사유 · 앱 폴더 first.
 - id: messenger-error

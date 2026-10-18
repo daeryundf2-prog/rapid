@@ -101,8 +101,9 @@ export function contentTypeLabel(id: string): string {
   return isContentTypeId(id) ? CONTENT_TYPES[id].label : id;
 }
 
-const TARGET_PATH_KEYS = [
+export const TARGET_PATH_KEYS = [
   "target_path",
+  "media_path", // R5 L1: media player recent entries
   "local_path",
   "target_file",
   "file_path",
@@ -112,8 +113,11 @@ const TARGET_PATH_KEYS = [
   "filename",
   "attachment_name",
 ];
-const PATH_IS_CONTENT_PREFIXES = ["media-", "document-", "synthetic-media-"];
-const PATH_IS_CONTENT_TYPES: ReadonlySet<string> = new Set([
+export const PATH_IS_CONTENT_PREFIXES = ["media-", "document-", "synthetic-media-"];
+// R5 L1: media player rows point at the ini / NTUSER they were read from; the played file is
+// `media_path` (a target path key), never the row's own path (server PATH_NOT_CONTENT_PREFIXES).
+export const PATH_NOT_CONTENT_PREFIXES = ["media-player-"];
+export const PATH_IS_CONTENT_TYPES: ReadonlySet<string> = new Set([
   "file",
   "file-signature-mismatch",
   "ios-backup-file",
@@ -125,6 +129,7 @@ const PATH_IS_CONTENT_TYPES: ReadonlySet<string> = new Set([
 
 /** The artifact type's own path is the content file (server `row_conditions.path_is_content`). */
 export function pathIsContent(type: string): boolean {
+  if (PATH_NOT_CONTENT_PREFIXES.some((prefix) => type.startsWith(prefix))) return false;
   return (
     PATH_IS_CONTENT_TYPES.has(type) || PATH_IS_CONTENT_PREFIXES.some((prefix) => type.startsWith(prefix))
   );

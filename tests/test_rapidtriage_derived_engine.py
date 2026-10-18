@@ -57,7 +57,9 @@ NO_IDENTIFIER_FAMILIES = frozenset(
         "timezone",  # one registry value
         "web-upload-candidate",  # restates its source row (r2 console fix m3)
         "messenger-error",  # store read failures (r2 console fix m2)
+        "email-client-error",  # mail client store read failures (r5 L1)
         "ntfs-logfile-transaction",  # LSN / op codes; file names are bare candidates, not paths (R3 §3.3)
+        "logon-banner",  # caption/text of a legal notice (R5 L2)
     }
 )
 
@@ -173,8 +175,10 @@ class CatalogSemanticTests(unittest.TestCase):
     def test_every_family_is_reviewed(self) -> None:
         catalog = load_catalog()
         # 54 + r2 M1 (3) + r2 M4 (1) + r2 M2 (6) + r2 M3 (2) + console fix (cloud-sync split 2, messenger-error 1)
-        # + r3 O1 (10) + r3 O3 (ntfs-timestamp-mismatch, ntfs-logfile-transaction, carved-file).
-        self.assertEqual(len(catalog.families), 82)
+        # + r3 O1 (10) + r3 O3 (ntfs-timestamp-mismatch, ntfs-logfile-transaction, carved-file)
+        # + R5 L3 (11: location-url-candidate, browser-analytics-cookie, carved-url-candidate, 6 p2p, 2 android-backup)
+        # + R5 L2 (15: startup, banner, Office x2, SSH x5, VM, wallet, AV, wallpaper, credential stores, NTFS volume).
+        self.assertEqual(len(catalog.families), 119)
         for family in catalog.families:
             columns = [*family["core_columns"], *(family.get("aux_columns") or [])]
             tagged = [column for column in columns if column.get("semantic")]
@@ -302,12 +306,17 @@ class R2ConsoleCatalogTests(unittest.TestCase):
 class UrlClassTests(unittest.TestCase):
     def test_packaged_classes_load_with_sources(self) -> None:
         classes = load_url_classes()
-        self.assertEqual(set(classes.labels), {"search", "social", "cloud", "messenger", "jobs", "finance", "adult", "suspicious"})
+        self.assertEqual(
+            set(classes.labels),
+            {"search", "social", "cloud", "messenger", "jobs", "finance", "adult", "suspicious", "webmail", "torrent"},
+        )
         for urls in classes.sources.values():
             self.assertTrue(urls and all(url.startswith("https://") for url in urls))
         self.assertEqual(classes.classify("www.google.com"), "search")
         self.assertEqual(classes.classify("search.naver.com"), "search")
-        self.assertIsNone(classes.classify("mail.naver.com"))
+        # R5 L3: personal / Korean webmail is its own class (longest domain wins over naver.com search hosts).
+        self.assertEqual(classes.classify("mail.naver.com"), "webmail")
+        self.assertIsNone(classes.classify("www.naver.com"))
         self.assertEqual(classes.classify("x.blog.naver.com"), "social")
         self.assertIsNone(classes.classify("com"))
 

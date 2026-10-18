@@ -99,6 +99,24 @@ ARTIFACT_DOMAIN_TABLE: tuple[tuple[str, str, tuple[str, ...] | None], ...] = (
     ("location", "mobile-export", ("mobile-location",)),
     ("location", "cloud-export", ("cloud-location",)),
     ("web", "macos-system", ("macos-browser-history-downloads",)),
+    # --- R5 L1: communication and media apps --------------------------------
+    ("messaging", "email-clients", None),
+    ("media", "media-player", None),
+    ("mobile", "windows-phone-link", None),
+    ("messaging", "windows-phone-link", ("phone-link-message",)),
+    # --- R5 L3 (web · URL classes · archives · P2P · recovery) -------------
+    ("web", "p2p", None),
+    # --- R5 L2 (OS, system, policy presence): windows-system defaults to os, windows-registry
+    # to registry; these rows route the SSH / VM / wallet / AV / Office Backstage types.
+    ("os", "windows-registry", ("startup-item", "desktop-wallpaper")),
+    ("devices", "windows-registry", ("ssh-known-host", "ssh-client-session")),
+    (
+        "devices",
+        "windows-system",
+        ("ssh-known-host", "ssh-authorized-key", "ssh-client-session", "ssh-key-file", "ssh-server-config"),
+    ),
+    ("registry", "windows-system", ("office-backstage-item",)),
+    ("anti-forensics", "windows-system", ("vm-config", "crypto-wallet-presence", "av-detection-log")),
 )
 
 

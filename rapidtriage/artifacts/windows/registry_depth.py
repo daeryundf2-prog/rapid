@@ -20,6 +20,20 @@ One set of decoders runs over a small key-source interface, so a native hive
 * ``registry-install-state`` -- ``App Paths`` and MSI ``Installer\\UserData\\<SID>\\Products``
   (``Uninstall`` stays ``windows-installed-program``: no duplicate rows).
 
+R5 L2 (:data:`R5_DEPTH_ARTIFACT_TYPES`, plan r5-residual §3 L2):
+
+* ``startup-item`` -- ``Explorer\\StartupApproved\\{Run,Run32,StartupFolder}`` (12-byte value:
+  byte 0 ``02``/``06`` enabled, ``03``/``07`` disabled, bytes 4-12 FILETIME of the disabling),
+  joined with the ``Run`` value of the same name (command).
+* ``registry-logon-banner`` -- ``legalnoticecaption``/``legalnoticetext`` of ``Policies\\System``
+  and ``Winlogon``.
+* ``ssh-known-host`` / ``ssh-client-session`` -- PuTTY ``SshHostKeys``/``Sessions`` and WinSCP
+  ``SshHostKeys``/``Sessions``. Password values (WinSCP ``Password``, PuTTY/WinSCP
+  ``ProxyPassword``) are never copied: rows only say ``password_saved``.
+* ``office-identity`` -- ``Office\\<ver>\\Common\\Identity\\Identities\\<id>``.
+* ``desktop-wallpaper`` -- ``Control Panel\\Desktop`` ``WallPaper``/``TranscodedImageCache`` and
+  ``Explorer\\Wallpapers`` ``BackgroundHistoryPath<N>``.
+
 NetworkList dates are SYSTEMTIME in *local* wall-clock time: they are kept
 without an offset (``timestamp_timezone = local-unknown``). Each decoder is
 isolated (one corrupt key never stops the others) and every type is capped at
@@ -57,6 +71,15 @@ DEPTH_ARTIFACT_TYPES = (
     "execution-pca",
     "execution-feature-usage",
     "registry-install-state",
+)
+# R5 L2 row types (kept apart from DEPTH_ARTIFACT_TYPES, the R3 contract of its tests).
+R5_DEPTH_ARTIFACT_TYPES = (
+    "startup-item",
+    "registry-logon-banner",
+    "ssh-known-host",
+    "ssh-client-session",
+    "office-identity",
+    "desktop-wallpaper",
 )
 
 NETWORKLIST = r"Microsoft\Windows NT\CurrentVersion\NetworkList"
@@ -290,6 +313,7 @@ TIMESTAMP_KINDS = {
     "last_connected": "last-connected",
     "first_connected": "first-connected",
     "last_opened": "last-opened",
+    "startup_disabled": "disabled",
 }
 
 
@@ -905,8 +929,333 @@ def feature_usage_rows(source: KeySource) -> Iterable[DepthRow]:
             )
 
 
+# ---------------------------------------------------------------------------
+# Decoders: R5 L2 (startup items, logon banner, SSH clients, Office identities, wallpaper)
+# ---------------------------------------------------------------------------
+
+STARTUP_APPROVED_SOURCES = (
+    ("Run", "run", "Run(자동 실행 값)"),
+    ("Run32", "run32", "Run32(32비트 자동 실행 값)"),
+    ("StartupFolder", "startup-folder", "시작프로그램 폴더 항목"),
+)
+STARTUP_ENABLED_BYTES = frozenset({0x02, 0x06})
+STARTUP_DISABLED_BYTES = frozenset({0x03, 0x07})
+# Value names that hold a (DPAPI-less, reversibly obfuscated) password: never copied into a row.
+SECRET_VALUE_NAMES = frozenset({"password", "proxypassword", "tunnelpassword", "passphrase", "encryptedpassword"})
+WINSCP_PROTOCOLS = {0: "SCP", 1: "SFTP(SCP 대체)", 2: "SFTP", 5: "FTP", 6: "WebDAV", 7: "S3"}
+PUTTY_HOST_KEY_NAME = re.compile(r"^(?P<type>[^@]+)@(?P<port>\d+):(?P<host>.+)$")
+OFFICE_PROVIDER_LABELS = {
+    "adal": "회사·학교 계정(Entra ID/ADAL)",
+    "liveid": "개인 Microsoft 계정(MSA)",
+    "orgid": "회사 계정(OrgId)",
+}
+
+
+SECRET_CLIENT_KEYS = (r"software\simontatham\putty", r"software\martin prikryl\winscp 2")
+SECRET_PLACEHOLDER = "(비밀번호 값 — 저장하지 않음)"
+
+
+def is_secret_value(key_path: str, value_name: str) -> bool:
+    """A PuTTY/WinSCP password value (``Password``, ``ProxyPassword`` …): never copied into any row."""
+    folded = key_path.replace("/", "\\").casefold()
+    return value_name.strip('"').casefold() in SECRET_VALUE_NAMES and any(marker in folded for marker in SECRET_CLIENT_KEYS)
+
+
+def hive_secret_strings(hive: object) -> set[str]:
+    """Data of the PuTTY/WinSCP password values of one hive, so the hive string scan can drop them."""
+    source = HiveKeySource(hive, "NTUSER")
+    secrets: set[str] = set()
+    for base in (r"Software\SimonTatham\PuTTY", r"Software\Martin Prikryl\WinSCP 2"):
+        try:
+            sessions = source.key(f"{base}\\Sessions")
+            for session in source.subkeys(sessions) if sessions is not None else []:
+                for name, value in session.values.items():
+                    secret = text(value).strip()
+                    if name.casefold() in SECRET_VALUE_NAMES and len(secret) >= 4:
+                        secrets.add(secret)
+        except Exception:  # pragma: no cover - a corrupt key never stops the hive walk
+            continue
+    return secrets
+
+
+def value_ci(values: Mapping[str, object], name: str) -> object:
+    """Value ``name`` of a key, case-insensitively (``legalnoticecaption`` vs ``LegalNoticeCaption``)."""
+    if name in values:
+        return values[name]
+    folded = name.casefold()
+    return next((value for key, value in values.items() if key.casefold() == folded), None)
+
+
+def percent_decoded(name: str) -> str:
+    """PuTTY/WinSCP session key names are %XX-encoded (``My%20Server``)."""
+    from urllib.parse import unquote
+
+    return unquote(name)
+
+
+def startup_approved_state(raw: object) -> tuple[bool | None, str, str]:
+    """``(enabled, state byte hex, disabled-at ISO)`` of a 12-byte StartupApproved value."""
+    data = as_bytes(raw)
+    if not data:
+        return None, "", ""
+    state = data[0]
+    enabled: bool | None = True if state in STARTUP_ENABLED_BYTES else (False if state in STARTUP_DISABLED_BYTES else None)
+    disabled_at = ""
+    if enabled is False and len(data) >= 12:
+        ticks = int.from_bytes(data[4:12], "little")
+        disabled_at = filetime_text(ticks) if ticks else ""
+    return enabled, f"{state:02X}", disabled_at
+
+
+def _run_commands(source: KeySource, relative: str) -> dict[str, str]:
+    key = source.key(relative)
+    if key is None:
+        return {}
+    return {name.casefold(): text(value) for name, value in key.values.items() if name}
+
+
+def startup_approved_rows(source: KeySource) -> Iterable[DepthRow]:
+    machine = source.hive_kind == "SOFTWARE"
+    prefix = "" if machine else "Software\\"
+    base = f"{prefix}Microsoft\\Windows\\CurrentVersion"
+    run_values = {
+        "run": _run_commands(source, f"{base}\\Run"),
+        "run32": _run_commands(source, "Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Run") if machine else _run_commands(source, f"{base}\\Run"),
+    }
+    for leaf, kind, kind_label in STARTUP_APPROVED_SOURCES:
+        key = source.key(f"{base}\\Explorer\\StartupApproved\\{leaf}")
+        if key is None:
+            continue
+        for name, value in sorted(key.values.items(), key=lambda item: item[0].casefold()):
+            if not name:
+                continue
+            enabled, state_hex, disabled_at = startup_approved_state(value)
+            command = run_values.get(kind, {}).get(name.casefold(), "")
+            state_label = "사용" if enabled else ("사용 안 함" if enabled is False else "알 수 없음")
+            timestamp = disabled_at or key.last_written
+            label = "startup_disabled" if disabled_at else ("last_written" if key.last_written else "")
+            yield DepthRow(
+                artifact_type="startup-item",
+                label=f"시작 프로그램 승인 상태({kind_label})",
+                view=key,
+                fields={
+                    "item_name": name,
+                    "startup_source": f"startup-approved-{kind}",
+                    "startup_source_label": f"StartupApproved\\{leaf}",
+                    "scope": "machine" if machine else "user",
+                    "scope_label": "시스템(모든 사용자)" if machine else "사용자",
+                    "enabled": enabled,
+                    "state_label": state_label,
+                    "state_byte_hex": state_hex,
+                    "disabled_at": disabled_at,
+                    "command": command,
+                    "target_path": command,
+                    "run_value_found": bool(command) if kind != "startup-folder" else None,
+                    "value_name": name,
+                    "evidence_note": (
+                        "StartupApproved는 작업 관리자 '시작 프로그램'의 사용 여부입니다. 비활성화 시각은 값 4–12바이트 FILETIME, "
+                        "사용 중인 항목의 시각은 키 단위 마지막 기록입니다."
+                    ),
+                },
+                timestamp=timestamp,
+                timestamp_label=label,
+                preview=f"{name} ({state_label}) {command}".strip(),
+            )
+
+
+def logon_banner_rows(source: KeySource) -> Iterable[DepthRow]:
+    for relative, policy_label in (
+        (r"Microsoft\Windows\CurrentVersion\Policies\System", "정책(Policies\\System)"),
+        (r"Microsoft\Windows NT\CurrentVersion\Winlogon", "Winlogon"),
+    ):
+        key = source.key(relative)
+        if key is None:
+            continue
+        caption = text(value_ci(key.values, "legalnoticecaption")).strip()
+        body = text(value_ci(key.values, "legalnoticetext")).strip()
+        if not caption and not body:
+            continue
+        yield DepthRow(
+            artifact_type="registry-logon-banner",
+            label=f"로그온 배너({policy_label})",
+            view=key,
+            fields={
+                "banner_caption": caption,
+                "banner_text": body[:4000],
+                "banner_text_truncated": len(body) > 4000,
+                "banner_source": "policies-system" if "Policies" in relative else "winlogon",
+                "banner_source_label": policy_label,
+                "evidence_note": "로그온 전 표시되는 법적 고지(보안 서약·모니터링 고지). 시각은 키 마지막 기록입니다.",
+            },
+            timestamp=key.last_written,
+            timestamp_label="last_written" if key.last_written else "",
+            preview=f"{caption} — {body[:160]}",
+        )
+
+
+def _session_fields(values: Mapping[str, object]) -> dict[str, object]:
+    port = as_int(value_ci(values, "PortNumber"))
+    saved = {name.casefold() for name, value in values.items() if name.casefold() in SECRET_VALUE_NAMES and text(value)}
+    return {
+        "host_name": text(value_ci(values, "HostName")).strip(),
+        "user_name": text(value_ci(values, "UserName")).strip(),
+        "port": port,
+        "public_key_file": text(value_ci(values, "PublicKeyFile")).strip(),
+        "proxy_host": text(value_ci(values, "ProxyHost")).strip(),
+        "password_saved": "password" in saved or "encryptedpassword" in saved,
+        "proxy_password_saved": "proxypassword" in saved,
+        "secret_values_stored": False,
+    }
+
+
+def ssh_client_rows(source: KeySource) -> Iterable[DepthRow]:
+    clients = (
+        ("putty", "PuTTY", r"Software\SimonTatham\PuTTY"),
+        ("winscp", "WinSCP", r"Software\Martin Prikryl\WinSCP 2"),
+    )
+    for client, client_label, base in clients:
+        host_keys = source.key(f"{base}\\SshHostKeys")
+        if host_keys is not None:
+            for name, value in sorted(host_keys.values.items()):
+                match = PUTTY_HOST_KEY_NAME.match(name or "")
+                material = text(value)
+                yield DepthRow(
+                    artifact_type="ssh-known-host",
+                    label=f"SSH 호스트 키({client_label})",
+                    view=host_keys,
+                    fields={
+                        "client": client,
+                        "client_label": client_label,
+                        "host": match.group("host") if match else name,
+                        "port": int(match.group("port")) if match else None,
+                        "key_type": match.group("type") if match else "",
+                        "key_sha256": hashlib.sha256(material.encode("utf-8")).hexdigest() if material else "",
+                        "fingerprint_sha256": "",
+                        "value_name": name,
+                        "evidence_note": "SSH 서버에 처음 접속할 때 저장한 서버 공개키입니다(접속 이력). 시각은 키 단위 마지막 기록입니다.",
+                    },
+                    timestamp=host_keys.last_written,
+                    timestamp_label="last_written" if host_keys.last_written else "",
+                    preview=f"{client_label} {name}",
+                )
+        sessions = source.key(f"{base}\\Sessions")
+        for session in source.subkeys(sessions) if sessions is not None else []:
+            fields = _session_fields(session.values)
+            if not fields["host_name"]:
+                continue  # "Default Settings" and other templates without a host
+            protocol_raw = value_ci(session.values, "Protocol") if client == "putty" else as_int(value_ci(session.values, "FSProtocol"))
+            protocol = text(protocol_raw) if client == "putty" else WINSCP_PROTOCOLS.get(protocol_raw, "") if isinstance(protocol_raw, int) else ""
+            yield DepthRow(
+                artifact_type="ssh-client-session",
+                label=f"저장된 접속 세션({client_label})",
+                view=session,
+                fields={
+                    "client": client,
+                    "client_label": client_label,
+                    "session_name": percent_decoded(session.name),
+                    "protocol": protocol,
+                    **fields,
+                    "evidence_note": "저장된 세션 설정입니다. 비밀번호 값은 복사하지 않고 저장 여부만 표시합니다.",
+                },
+                timestamp=session.last_written,
+                timestamp_label="last_written" if session.last_written else "",
+                preview=f"{client_label} {fields['user_name']}@{fields['host_name']}:{fields['port'] or ''}".rstrip(":"),
+                risk_flags=("ssh-password-saved",) if fields["password_saved"] else (),
+            )
+
+
+def office_identity_rows(source: KeySource) -> Iterable[DepthRow]:
+    office = source.key(r"Software\Microsoft\Office")
+    for version in source.subkeys(office) if office is not None else []:
+        if not OFFICE_VERSION.match(version.name):
+            continue
+        identities = source.key(f"{version.rel}\\Common\\Identity\\Identities")
+        for identity in source.subkeys(identities) if identities is not None else []:
+            values = identity.values
+            email = text(value_ci(values, "EmailAddress")).strip()
+            provider = text(value_ci(values, "ProviderId")).strip()
+            sign_in = text(value_ci(values, "SignInName")).strip()
+            if not (email or sign_in or provider):
+                continue
+            yield DepthRow(
+                artifact_type="office-identity",
+                label="Office 연결 계정",
+                view=identity,
+                fields={
+                    "office_version": version.name,
+                    "identity_id": identity.name,
+                    "email_address": email,
+                    "sign_in_name": sign_in,
+                    "friendly_name": text(value_ci(values, "FriendlyName")).strip(),
+                    "provider_id": provider,
+                    "provider_label": OFFICE_PROVIDER_LABELS.get(provider.casefold(), provider),
+                    "tenant_id": text(value_ci(values, "TenantId")).strip(),
+                    "identity_provider": text(value_ci(values, "IdP")).strip(),
+                    "evidence_note": "Office에 로그인한 계정(회사·개인). 시각은 계정 키 마지막 기록입니다.",
+                },
+                timestamp=identity.last_written,
+                timestamp_label="last_written" if identity.last_written else "",
+                preview=f"{email or sign_in} ({OFFICE_PROVIDER_LABELS.get(provider.casefold(), provider) or '-'})",
+            )
+
+
+def transcoded_image_cache_path(raw: object) -> str:
+    """Original wallpaper path of ``TranscodedImageCache`` (UTF-16LE from offset 0x18)."""
+    data = as_bytes(raw)
+    return text(data[0x18:]).strip() if len(data) > 0x18 else ""
+
+
+def wallpaper_rows(source: KeySource) -> Iterable[DepthRow]:
+    desktop = source.key(r"Control Panel\Desktop")
+    if desktop is not None:
+        current = text(value_ci(desktop.values, "WallPaper")).strip()
+        original = transcoded_image_cache_path(value_ci(desktop.values, "TranscodedImageCache"))
+        if current or original:
+            yield DepthRow(
+                artifact_type="desktop-wallpaper",
+                label="바탕 화면 배경(레지스트리)",
+                view=desktop,
+                fields={
+                    "wallpaper_source": "control-panel-desktop",
+                    "wallpaper_source_label": "Control Panel\\Desktop",
+                    "wallpaper_path": current,
+                    "original_path": original,
+                    "history_position": None,
+                    "wallpaper_style": text(value_ci(desktop.values, "WallpaperStyle")),
+                    "tile_wallpaper": text(value_ci(desktop.values, "TileWallpaper")),
+                    "evidence_note": "WallPaper = 현재 배경 파일(보통 TranscodedWallpaper), TranscodedImageCache = 원본 이미지 경로.",
+                },
+                timestamp=desktop.last_written,
+                timestamp_label="last_written" if desktop.last_written else "",
+                preview=original or current,
+            )
+    history = source.key(f"{EXPLORER}\\Wallpapers")
+    if history is not None:
+        for name, value in sorted(history.values.items()):
+            match = re.fullmatch(r"(?i)BackgroundHistoryPath(\d+)", name or "")
+            if not match or not text(value).strip():
+                continue
+            position = int(match.group(1))
+            yield DepthRow(
+                artifact_type="desktop-wallpaper",
+                label="바탕 화면 배경 기록",
+                view=history,
+                fields={
+                    "wallpaper_source": "background-history",
+                    "wallpaper_source_label": "Explorer\\Wallpapers 기록",
+                    "wallpaper_path": "",
+                    "original_path": text(value).strip(),
+                    "history_position": position,
+                    "value_name": name,
+                },
+                timestamp=history.last_written if position == 0 else "",
+                timestamp_label="last_written_mru_head" if position == 0 and history.last_written else "",
+                preview=text(value).strip(),
+            )
+
+
 DECODERS_BY_HIVE: dict[str, tuple[Callable[[KeySource], Iterable[DepthRow]], ...]] = {
-    "SOFTWARE": (network_profile_rows, wlan_profile_rows, install_state_rows),
+    "SOFTWARE": (network_profile_rows, wlan_profile_rows, install_state_rows, startup_approved_rows, logon_banner_rows),
     "SYSTEM": (known_dll_rows,),
     "NTUSER": (
         network_share_rows,
@@ -915,6 +1264,10 @@ DECODERS_BY_HIVE: dict[str, tuple[Callable[[KeySource], Iterable[DepthRow]], ...
         pca_registry_rows,
         feature_usage_rows,
         install_state_rows,
+        startup_approved_rows,
+        ssh_client_rows,
+        office_identity_rows,
+        wallpaper_rows,
     ),
 }
 

@@ -135,6 +135,8 @@ def table_summaries(summary: Mapping[str, object]) -> dict[str, dict[str, object
         }
         if isinstance(entry.get("by_class"), Mapping):
             out[table]["by_class"] = dict(entry["by_class"])
+        if isinstance(entry.get("by_class_carved"), Mapping):
+            out[table]["by_class_carved"] = dict(entry["by_class_carved"])
     return out
 
 

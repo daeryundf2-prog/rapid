@@ -13,9 +13,13 @@ from ...core.models import ArtifactRecord
 from ...core.recovery import build_recovery_record
 from .._walk import iter_evidence_paths
 from .registry_depth import (
+    SECRET_PLACEHOLDER,
+    SECRET_VALUE_NAMES,
     DepthStats,
     export_depth_records,
     hive_depth_records,
+    hive_secret_strings,
+    is_secret_value,
     read_export_lines,
 )
 
@@ -407,8 +411,15 @@ def collect_registry_hive(
         for record in hive_depth_records(row_context, depth_stats):
             semantic_counts[record.artifact_type] += 1
             yield record
+        free_candidates, allocator_stats = iter_registry_free_cell_candidates(hive)
+        recovery_candidates = [*free_candidates, *native_parent_key_candidates(hive, free_candidates)]
         scan_end = min(stat_result.st_size, MAX_HIVE_STRING_SCAN_BYTES)
         strings = extract_utf16le_strings(bytes(hive._data[:scan_end]))
+        # R5 L2: PuTTY/WinSCP password values never reach the string pivot — neither the current
+        # values nor the data of deleted/free vk cells named Password/ProxyPassword/… (old passwords).
+        secrets = hive_secret_strings(hive) | deleted_secret_value_strings(hive._data, recovery_candidates)
+        if secrets:
+            strings = [item for item in strings if not any(secret in item for secret in secrets)]
         if strings:
             strings_record = build_registry_hive_strings_record(path, strings, metadata, source_hashes)
             strings_record.details["scan_truncated"] = stat_result.st_size > MAX_HIVE_STRING_SCAN_BYTES
@@ -420,8 +431,6 @@ def collect_registry_hive(
             )
             strings_record.details["evidence_strength"] = "string-candidate-not-evidence"
             yield strings_record
-        free_candidates, allocator_stats = iter_registry_free_cell_candidates(hive)
-        recovery_candidates = [*free_candidates, *native_parent_key_candidates(hive, free_candidates)]
         for candidate in free_candidates:
             yield build_registry_deleted_cell_record(path, candidate, metadata, source_hashes)
         yield from build_registry_key_recovery_records(
@@ -983,6 +992,10 @@ def build_registry_value_recovery_records(
             parent_key_path, _ = registry_key_path_for_node(parent, key_by_offset)
             parent_path = f"{path_prefix}\\{parent_key_path}" if parent_key_path else path_prefix
         decoded_data = registry_value_data_preview(blob, candidate)
+        # R5 review: an old/deleted Password/ProxyPassword/… value keeps no data, no data hash.
+        secret_withheld = is_secret_value_cell(candidate) and bool(decoded_data)
+        if secret_withheld:
+            decoded_data = SECRET_PLACEHOLDER
         validation_matrix = registry_value_recovery_validation_matrix(
             candidate,
             parent_confidence,
@@ -1010,7 +1023,7 @@ def build_registry_value_recovery_records(
             recovery_evidence,
             parent_path=parent_path,
             parent_confidence=parent_confidence,
-            decoded_data_preview=decoded_data,
+            decoded_data_preview="" if secret_withheld else decoded_data,
         )
         recovery_profile = registry_recovery_validation_profile(
             candidate,
@@ -1032,7 +1045,7 @@ def build_registry_value_recovery_records(
                 "value_data_size": candidate.get("value_data_size", 0),
                 "value_data_offset": candidate.get("value_data_offset", 0),
                 "value_data_inline": candidate.get("value_data_inline", False),
-                "decoded_data_preview_sha256": sha256_text(decoded_data),
+                "decoded_data_preview_sha256": "" if secret_withheld else sha256_text(decoded_data),
                 "parent_key_path_candidate": parent_path,
                 "parent_key_confidence": parent_confidence,
                 "parent_key_cell_offset": parent.get("cell_offset", 0) if parent is not None else 0,
@@ -2405,6 +2418,8 @@ def build_registry_record(
     source_hashes: Mapping[str, str] | None = None,
 ) -> ArtifactRecord:
     resolved_hashes = dict(source_hashes or file_hashes(path))
+    # R5 L2: PuTTY/WinSCP password values of a .reg export are never copied.
+    values = {name: SECRET_PLACEHOLDER if is_secret_value(key, name) else value for name, value in values.items()}
     lowered_key = key.lower()
     artifact_type = "registry-key"
     if "usb" in lowered_key or "usbstor" in lowered_key:
@@ -4342,6 +4357,23 @@ def registry_key_tree_confidence(key_node: Mapping[str, object], path_confidence
     if key_node.get("value_count"):
         score += 0.05
     return min(0.82, round(score, 2))
+
+
+def is_secret_value_cell(value_cell: Mapping[str, object]) -> bool:
+    """A vk cell named like a saved password (``Password``, ``ProxyPassword`` …), whatever its parent."""
+    return str(value_cell.get("name") or "").strip('"').casefold() in SECRET_VALUE_NAMES
+
+
+def deleted_secret_value_strings(blob: bytes, candidates: Sequence[Mapping[str, object]]) -> set[str]:
+    """Data of free/deleted vk cells named like a saved password, so the hive string scan drops them."""
+    secrets: set[str] = set()
+    for candidate in candidates:
+        if candidate.get("cell_kind") != "value" or not is_secret_value_cell(candidate):
+            continue
+        secret = registry_value_data_preview(blob, candidate).strip()
+        if len(secret) >= 4:
+            secrets.add(secret)
+    return secrets
 
 
 def registry_value_data_preview(blob: bytes, value_cell: Mapping[str, object]) -> str:

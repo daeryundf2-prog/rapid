@@ -7,6 +7,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 
 from ..artifacts.windows.antiforensics import file_holds_recovery_secret
+from ..artifacts.windows.system_extras import file_holds_store_secret
 from .audit import compute_sha256
 from .files import (
     ALL_FILE_CATEGORIES,
@@ -137,9 +138,11 @@ def run_extract(
         if destination_path.exists() and not overwrite:
             skipped_entries.append({"original_path": str(source_path), "reason": "destination-exists"})
             continue
-        if file_holds_recovery_secret(source_path):
-            # BitLocker key files (and small texts holding a checksum-valid recovery password)
-            # are never copied verbatim: the manifest keeps the hash for chain of custody.
+        if file_holds_recovery_secret(source_path) or file_holds_store_secret(source_path):
+            # BitLocker key files (and small texts holding a checksum-valid recovery password),
+            # wallet/credential/browser-login stores, private keys and texts holding saved passwords
+            # (WinSCP INI/.reg, FileZilla <Pass>; R5 L2 + review) are never copied verbatim:
+            # the manifest keeps the hash for chain of custody.
             skipped_entries.append(
                 {
                     "original_path": str(source_path),

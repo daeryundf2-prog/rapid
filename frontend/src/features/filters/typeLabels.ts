@@ -23,13 +23,32 @@ export const ANALYSIS_TYPE_LABELS: Readonly<Record<string, string>> = {
   "cross-case-row": "교차 케이스 지표",
   "memory-import-row": "메모리 분석 가져오기",
   "triage-flags-row": "특이사항 계산",
+  // R5 L3
+  "carved-url-candidate": "URL 카빙 후보",
+  "url-carve-row": "URL 카빙 결과",
+};
+
+/**
+ * Names that win over the tree's node labels: a type listed by two nodes (registry row + file
+ * row) needs a neutral name, and P2P node labels ("전송 기록", "읽기 오류") read ambiguously
+ * out of their tree group in the 유형 list.
+ */
+export const TYPE_LABEL_OVERRIDES: Readonly<Record<string, string>> = {
+  "startup-item": "시작 프로그램 항목",
+  "desktop-wallpaper": "바탕 화면 배경",
+  "p2p-transfer": "P2P 전송 기록",
+  "p2p-torrent": "P2P 토렌트 파일",
+  "p2p-shared-file": "P2P eMule 공유·완료 파일",
+  "p2p-search-term": "P2P 검색어",
+  "p2p-client-config": "P2P 클라이언트 설정",
+  "p2p-parse-error": "P2P 읽기 오류",
 };
 
 let cache: Map<string, string> | null = null;
 
 function labels(): Map<string, string> {
   if (cache) return cache;
-  const out = new Map<string, string>();
+  const out = new Map<string, string>(Object.entries(TYPE_LABEL_OVERRIDES));
   for (const domain of DOMAINS) {
     // Sub-nodes too (이메일 › 메일함 문자열 …); a group's typeLabels come before its children.
     for (const node of flattenDomainNodes(domain.nodes)) {

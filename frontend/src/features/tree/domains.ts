@@ -284,6 +284,16 @@ export const REGISTRY_NETWORK_TYPE_LABELS: Readonly<Record<string, string>> = {
 };
 const REGISTRY_NETWORK_TYPES = Object.keys(REGISTRY_NETWORK_TYPE_LABELS);
 
+/** R5 L2: SSH / PuTTY / WinSCP row types (devices › SSH·파일 전송). */
+export const SSH_TYPE_LABELS: Readonly<Record<string, string>> = {
+  "ssh-known-host": "알려진 호스트",
+  "ssh-authorized-key": "허용 공개키",
+  "ssh-client-session": "접속 설정·세션",
+  "ssh-key-file": "키 파일",
+  "ssh-server-config": "OpenSSH 서버 설정",
+};
+const SSH_FILE_TYPES = Object.keys(SSH_TYPE_LABELS);
+
 /** Desktop messenger row types (artifacts/windows/messenger.py, plan r2-communication §3.1) → Korean. */
 export const DESKTOP_MESSENGER_TYPE_LABELS: Readonly<Record<string, string>> = {
   "chat-message": "메신저 대화",
@@ -321,11 +331,55 @@ export const EMAIL_TYPE_LABELS: Readonly<Record<string, string>> = {
 };
 const EMAIL_EVIDENCE_TYPES = ["email-message", "email-attachment", "contact", "calendar-event"];
 
+// --- R5 L1: communication and media apps ------------------------------------------------------
+/** Desktop mail clients (artifacts/email_clients.py: Thunderbird, Windows Mail, Windows Live Mail) → Korean. */
+export const MAIL_CLIENT_TYPE_LABELS: Readonly<Record<string, string>> = {
+  "email-message": "메일 클라이언트 메일",
+  "email-attachment": "메일 클라이언트 첨부",
+  contact: "메일 클라이언트 연락처",
+  "calendar-event": "메일 클라이언트 일정",
+  "email-client-account": "메일 클라이언트 계정",
+  "email-client-profile": "메일 클라이언트 프로필",
+  "email-client-store": "메일 저장소(ESE) 후보",
+  "email-client-parse-error": "메일 클라이언트 처리 오류",
+};
+/** Evidence types of the 메일 클라이언트 group (profile / store / error rows are detail children). */
+const MAIL_CLIENT_EVIDENCE_TYPES = [
+  "email-message",
+  "email-attachment",
+  "contact",
+  "calendar-event",
+  "email-client-account",
+];
+/** Phone Link / Your Phone (artifacts/windows/phone_link.py) → Korean. */
+export const PHONE_LINK_TYPE_LABELS: Readonly<Record<string, string>> = {
+  "phone-link-message": "휴대폰과 연결 문자",
+  "phone-link-call": "휴대폰과 연결 통화",
+  "phone-link-contact": "휴대폰과 연결 연락처",
+  "phone-link-photo": "휴대폰과 연결 사진",
+  "phone-link-device": "휴대폰과 연결 기기",
+  "phone-link-parse-error": "휴대폰과 연결 처리 오류",
+};
+const PHONE_LINK_EVIDENCE_TYPES = [
+  "phone-link-message",
+  "phone-link-call",
+  "phone-link-contact",
+  "phone-link-photo",
+];
+/** Media player recent-play lists (artifacts/windows/media_players.py) → Korean. */
+export const MEDIA_PLAYER_TYPE_LABELS: Readonly<Record<string, string>> = {
+  "media-player-recent": "미디어 플레이어 재생 기록",
+  "media-player-inventory": "미디어 플레이어 인벤토리",
+  "media-player-parse-error": "미디어 플레이어 처리 오류",
+};
+
 /**
  * 이벤트 로그 › 채널별 › channel group nodes (core/eventlog_channels.py CHANNEL_GROUPS): Korean-sorted
  * (Hangul before Latin), then 기타 채널 and 채널 없음 last (the remainder buckets).
  */
 export const EVENTLOG_CHANNEL_NODES: readonly DomainNodeDef[] = [
+  // R5 L2: NetworkProfile/WLAN/DHCP/DNS/BITS/VPN client channels.
+  { id: "evt-ch-networking", label: "네트워크", target: channelNode("networking") },
   // "(이벤트 채널)": the Windows Firewall EVTX channel, not 방화벽 로그 (pfirewall.log).
   { id: "evt-ch-firewall", label: "방화벽(이벤트 채널)", target: channelNode("firewall") },
   { id: "evt-ch-security", label: "보안", target: channelNode("security") },
@@ -392,6 +446,13 @@ export const DOMAINS: readonly DomainDef[] = [
       { id: "derived-attachments", label: "첨부", target: derived("attachments") },
       { id: "derived-credentials", label: "자격 증명/토큰", target: derived("credentials") },
       { id: "derived-urls", label: "URL 분류", target: derived("urls") },
+      // --- R5 L3: map-URL location candidates (browser rows with latitude/longitude → 지도 대체 보기).
+      {
+        id: "derived-location-urls",
+        label: "지도 URL 위치 후보",
+        target: a("browser", ["location-url-candidate"]),
+        note: "Google 지도·네이버 지도·카카오맵 URL이 가리킨 좌표·검색어·경로입니다. 지도 대체 보기로 열 수 있습니다. 좌표는 기기 위치가 아니라 URL의 지도 중심·장소입니다",
+      },
     ],
   },
   {
@@ -513,6 +574,33 @@ export const DOMAINS: readonly DomainDef[] = [
         label: "Amcache 시스템 정보(DeviceCensus)",
         target: a("windows-execution", ["amcache-device-census"]),
         crossRef: true,
+      },
+      // R5 L2: startup items, wallpaper, stored-credential presence (registry + file rows).
+      {
+        id: "os-startup-approved",
+        label: "시작 프로그램(StartupApproved)",
+        target: a("windows-registry", ["startup-item"]),
+      },
+      {
+        id: "os-startup-folder",
+        label: "시작 프로그램(시작프로그램 폴더)",
+        target: a("windows-system", ["startup-item"]),
+      },
+      {
+        id: "os-wallpaper-registry",
+        label: "바탕 화면 배경(레지스트리)",
+        target: a("windows-registry", ["desktop-wallpaper"]),
+      },
+      {
+        id: "os-wallpaper-files",
+        label: "바탕 화면 배경 이미지",
+        target: a("windows-system", ["desktop-wallpaper"]),
+      },
+      {
+        id: "os-credential-stores",
+        label: "저장된 자격 증명(존재만)",
+        target: a("windows-system", ["credential-store-presence"]),
+        note: "정책상 DPAPI 복호·blob 내용 해석은 하지 않습니다 — Credentials·Vault·Protect 파일의 존재·크기·GUID만 보여 줍니다",
       },
     ],
   },
@@ -716,6 +804,12 @@ export const DOMAINS: readonly DomainDef[] = [
       },
       { id: "fs-vsc", label: "볼륨 섀도우", target: run("vsc") },
       { id: "fs-recycle", label: "삭제/휴지통", target: a("windows-filesystem", ["recycle-bin-entry"]) },
+      // R5 L2: $Boot VBR + $Volume record (VSN pivots with LNK/Prefetch volume serials).
+      {
+        id: "fs-volume-info",
+        label: "NTFS 볼륨 정보(VSN)",
+        target: a("windows-filesystem", ["ntfs-volume-information"]),
+      },
       {
         id: "fs-mismatch",
         label: "시그니처 불일치",
@@ -851,6 +945,22 @@ export const DOMAINS: readonly DomainDef[] = [
           "registry-hive-strings": "하이브 문자열 묶음",
           "registry-summary": "레지스트리 요약",
         },
+      },
+      // R5 L2: logon banner, Office accounts and Backstage cache.
+      {
+        id: "reg-logon-banner",
+        label: "로그온 배너(법적 고지)",
+        target: a("windows-registry", ["registry-logon-banner"]),
+      },
+      {
+        id: "reg-office-identity",
+        label: "Office 연결 계정",
+        target: a("windows-registry", ["office-identity"]),
+      },
+      {
+        id: "reg-office-backstage",
+        label: "Office Backstage 캐시",
+        target: a("windows-system", ["office-backstage-item"]),
       },
       { id: "reg-all", label: "레지스트리 전체", target: a("windows-registry"), catchAll: true },
     ],
@@ -1005,6 +1115,38 @@ export const DOMAINS: readonly DomainDef[] = [
         target: a("browser", ["desktop-cloud-sync-db", "desktop-cloud-sync-row-candidate"]),
         note: CLOUD_SYNC_CROSS_NOTE,
       },
+      // --- R5 L3: GA cookies, P2P / torrent, URL carving --------------------------------------
+      {
+        id: "web-analytics-cookies",
+        label: "방문 분석 쿠키(Google Analytics)",
+        target: a("browser", ["browser-analytics-cookie"]),
+        note: "__utma·__utmz·_ga 쿠키의 방문 시각·세션 수·유입 출처·검색어만 보여 줍니다(클라이언트 ID는 저장하지 않음)",
+      },
+      {
+        id: "web-location-urls",
+        label: "지도 URL 위치 후보",
+        target: a("browser", ["location-url-candidate"]),
+        crossRef: true,
+      },
+      {
+        id: "web-p2p",
+        label: "P2P·토렌트",
+        target: a("p2p"),
+        children: [
+          { id: "web-p2p-transfers", label: "전송 기록", target: a("p2p", ["p2p-transfer"]), lead: true },
+          { id: "web-p2p-torrents", label: "토렌트 파일", target: a("p2p", ["p2p-torrent"]) },
+          { id: "web-p2p-shared", label: "eMule 공유·완료 파일", target: a("p2p", ["p2p-shared-file"]) },
+          { id: "web-p2p-search", label: "P2P 검색어", target: a("p2p", ["p2p-search-term"]) },
+          { id: "web-p2p-config", label: "클라이언트 설정", target: a("p2p", ["p2p-client-config"]) },
+          {
+            id: "web-p2p-errors",
+            label: "읽기 오류",
+            target: a("p2p", ["p2p-parse-error"]),
+            detail: true,
+          },
+        ],
+      },
+      { id: "web-carved-urls", label: "URL 카빙 후보(페이지 파일·미할당)", target: run("url-carve") },
     ],
   },
   {
@@ -1172,6 +1314,61 @@ export const DOMAINS: readonly DomainDef[] = [
         ]),
       },
       { id: "msg-docs", label: "문서/메일 색인", target: { collection: "docs" } },
+      // R5 L1: desktop mail clients (email-clients kind) and the Phone Link SMS rows (primary: 모바일).
+      {
+        id: "msg-mail-clients",
+        // Sorts after 이메일 (its group names the shared email-message / contact / … types first).
+        label: "이메일 클라이언트(Thunderbird·Windows 메일)",
+        target: a("email-clients", MAIL_CLIENT_EVIDENCE_TYPES),
+        typeLabels: MAIL_CLIENT_TYPE_LABELS,
+        children: orderGroup([
+          {
+            id: "msg-mail-clients-messages",
+            label: "메일(메시지)",
+            target: a("email-clients", ["email-message"]),
+            lead: true,
+          },
+          {
+            id: "msg-mail-clients-attachments",
+            label: "메일 첨부",
+            target: a("email-clients", ["email-attachment"]),
+          },
+          {
+            id: "msg-mail-clients-contacts",
+            label: "연락처(주소록)",
+            target: a("email-clients", ["contact"]),
+          },
+          { id: "msg-mail-clients-calendar", label: "일정", target: a("email-clients", ["calendar-event"]) },
+          {
+            id: "msg-mail-clients-accounts",
+            label: "계정·서버",
+            target: a("email-clients", ["email-client-account"]),
+          },
+          {
+            id: "msg-mail-clients-profiles",
+            label: "프로필·자격 증명 저장소(존재만)",
+            target: a("email-clients", ["email-client-profile"]),
+            detail: true,
+          },
+          {
+            id: "msg-mail-clients-stores",
+            label: "메일 저장소(ESE) 후보",
+            target: a("email-clients", ["email-client-store"]),
+            detail: true,
+          },
+          {
+            id: "msg-mail-clients-errors",
+            label: "처리 오류",
+            target: a("email-clients", ["email-client-parse-error"]),
+            detail: true,
+          },
+        ]),
+      },
+      {
+        id: "msg-phone-link",
+        label: "휴대폰과 연결 문자(Phone Link)",
+        target: a("windows-phone-link", ["phone-link-message"]),
+      },
     ]),
   },
   {
@@ -1276,6 +1473,22 @@ export const DOMAINS: readonly DomainDef[] = [
           "synthetic-media-scan-error": "스캔 오류",
         },
       },
+      // R5 L1: media player recent-play lists (VLC, PotPlayer, GOM Player, KMPlayer).
+      {
+        id: "media-player-recent",
+        label: "미디어 플레이어 재생 기록",
+        target: a("media-player", ["media-player-recent"]),
+      },
+      {
+        id: "media-player-inventory",
+        label: "미디어 플레이어 인벤토리·오류",
+        target: a("media-player", ["media-player-inventory", "media-player-parse-error"]),
+        detail: true,
+        typeLabels: pickLabels(MEDIA_PLAYER_TYPE_LABELS, [
+          "media-player-inventory",
+          "media-player-parse-error",
+        ]),
+      },
     ],
   },
   {
@@ -1289,7 +1502,53 @@ export const DOMAINS: readonly DomainDef[] = [
         target: a("mobile-export", ["ios-backup-file", "ios-backup-metadata", "ios-backup-source"]),
       },
       { id: "mobile-android", label: "Android", target: a("android-apk") },
+      // R5 L3: adb backup (.ab) header and its unpacked tar members.
+      {
+        id: "mobile-adb-backup",
+        label: "Android adb 백업",
+        target: a("mobile-export", ["android-backup", "android-backup-member"]),
+        typeLabels: { "android-backup": "adb 백업 파일", "android-backup-member": "adb 백업 항목" },
+      },
       { id: "mobile-all", label: "통합 뷰", target: a("mobile-export") },
+      // R5 L1: Phone Link / Your Phone (휴대폰과 연결) rows synced to the PC.
+      {
+        id: "mobile-phone-link",
+        label: "휴대폰과 연결(Phone Link)",
+        target: a("windows-phone-link", PHONE_LINK_EVIDENCE_TYPES),
+        typeLabels: PHONE_LINK_TYPE_LABELS,
+        children: orderGroup([
+          {
+            // Primary node: 메신저·메일 › 휴대폰과 연결 문자 (artifact_domains routes phone-link-message there).
+            id: "mobile-phone-link-messages",
+            label: "문자(SMS·MMS)",
+            target: a("windows-phone-link", ["phone-link-message"]),
+            lead: true,
+            crossRef: true,
+          },
+          {
+            id: "mobile-phone-link-calls",
+            label: "통화",
+            target: a("windows-phone-link", ["phone-link-call"]),
+          },
+          {
+            id: "mobile-phone-link-contacts",
+            label: "연락처",
+            target: a("windows-phone-link", ["phone-link-contact"]),
+          },
+          {
+            id: "mobile-phone-link-photos",
+            label: "사진",
+            target: a("windows-phone-link", ["phone-link-photo"]),
+          },
+          {
+            id: "mobile-phone-link-devices",
+            label: "기기·처리 오류",
+            target: a("windows-phone-link", ["phone-link-device", "phone-link-parse-error"]),
+            detail: true,
+            typeLabels: pickLabels(PHONE_LINK_TYPE_LABELS, ["phone-link-device", "phone-link-parse-error"]),
+          },
+        ]),
+      },
     ],
   },
   {
@@ -1332,6 +1591,46 @@ export const DOMAINS: readonly DomainDef[] = [
         target: a("windows-execution", ["amcache-device-pnp", "amcache-device-container"]),
         crossRef: true,
       },
+      // R5 L2: SSH / PuTTY / WinSCP (file rows of windows-system, saved sessions of NTUSER).
+      {
+        id: "dev-ssh",
+        label: "SSH·파일 전송(파일)",
+        target: a("windows-system", SSH_FILE_TYPES),
+        typeLabels: SSH_TYPE_LABELS,
+        children: [
+          {
+            id: "dev-ssh-known-hosts",
+            label: "알려진 호스트(known_hosts)",
+            target: a("windows-system", ["ssh-known-host"]),
+          },
+          {
+            id: "dev-ssh-authorized-keys",
+            label: "허용 공개키(authorized_keys)",
+            target: a("windows-system", ["ssh-authorized-key"]),
+          },
+          {
+            id: "dev-ssh-sessions",
+            label: "접속 설정·세션(config·WinSCP.ini)",
+            target: a("windows-system", ["ssh-client-session"]),
+          },
+          {
+            id: "dev-ssh-keys",
+            label: "키 파일(개인키는 존재만)",
+            target: a("windows-system", ["ssh-key-file"]),
+          },
+          {
+            id: "dev-ssh-server",
+            label: "OpenSSH 서버 설정",
+            target: a("windows-system", ["ssh-server-config"]),
+          },
+        ],
+      },
+      {
+        id: "dev-ssh-registry",
+        label: "PuTTY·WinSCP 세션·호스트 키(레지스트리)",
+        target: a("windows-registry", ["ssh-client-session", "ssh-known-host"]),
+        typeLabels: pickLabels(SSH_TYPE_LABELS, ["ssh-client-session", "ssh-known-host"]),
+      },
     ],
   },
   {
@@ -1339,6 +1638,19 @@ export const DOMAINS: readonly DomainDef[] = [
     label: "안티 포렌식",
     icon: "shield",
     nodes: [
+      // R5 L2: VM configs, crypto wallet presence (no keys/seeds), McAfee detection logs.
+      { id: "af-vm", label: "가상 머신 구성", target: a("windows-system", ["vm-config"]) },
+      {
+        id: "af-av-logs",
+        label: "백신 탐지 로그(McAfee)",
+        target: a("windows-system", ["av-detection-log"]),
+      },
+      {
+        id: "af-crypto-wallets",
+        label: "암호화폐 지갑(존재만)",
+        target: a("windows-system", ["crypto-wallet-presence"]),
+        note: "정책상 개인키·시드·키스토어 내용은 읽지 않습니다 — 지갑의 존재·위치·크기·암호화 표시(평문 Electrum은 공개 주소)만 보여 줍니다",
+      },
       {
         id: "af-ads",
         label: "ADS",

@@ -54,6 +54,8 @@ IMPLEMENTED_RUN_MODES = set(SUPPORTED_RUN_MODES)
 RUN_DOC_EXTRACT_KINDS = SUPPORTED_DOC_KINDS
 GENERAL_FORENSIC_ARTIFACT_KINDS = (
     "browser",
+    # R5 L3: BitTorrent clients / .torrent / eMule (artifacts/p2p.py).
+    "p2p",
     "recent-files",
     "email",
     "cloud-export",
@@ -73,6 +75,10 @@ WINDOWS_FORENSIC_ARTIFACT_KINDS = (
     "windows-search-index",
     "windows-remote-access",
     "windows-messenger",
+    # R5 L1: communication and media apps
+    "email-clients",
+    "media-player",
+    "windows-phone-link",
     "windows-execution",
     "windows-registry",
     "windows-shellbags",

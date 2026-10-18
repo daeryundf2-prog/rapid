@@ -33,7 +33,7 @@ import {
   rdpDirection,
 } from "./derivedFields";
 import { useDerivedStore } from "./store";
-import { derivedCitation, sampleRoute } from "./tables";
+import { DERIVED_COLUMNS, derivedCitation, sampleRoute } from "./tables";
 
 configure({ asyncUtilTimeout: 5000 });
 
@@ -182,8 +182,11 @@ describe("RDP direction · EXIF state · auto logon", () => {
       expect(familyById("rdp")?.core_columns.some((c) => c.derive === "rdp_direction")).toBe(true);
       // Every family of the backend catalogue was reviewed for semantic tags: 54 + r2 M1 (3) + M4 (1) + M2 (6) + M3 (2)
       // + console fix (cloud-sync split 2, messenger-error 1) + r3 O1 (10)
-      // + r3 O3 (3: ntfs-timestamp-mismatch, ntfs-logfile-transaction, carved-file).
-      expect(FALLBACK_CATALOG.families).toHaveLength(82);
+      // + r3 O3 (3: ntfs-timestamp-mismatch, ntfs-logfile-transaction, carved-file)
+      // + R5 L1 (11: phone-link 5, media-player 2, email-client 4)
+      // + R5 L3 (11: location-url-candidate, browser-analytics-cookie, carved-url-candidate, 6 p2p, 2 android-backup).
+      // + R5 L2 (15: startup, banner, Office x2, SSH x5, VM, wallet, AV, wallpaper, credential stores, NTFS volume).
+      expect(FALLBACK_CATALOG.families).toHaveLength(119);
       expect(familyById("sam-account")?.core_columns.find((c) => c.key === "user_name")?.semantic).toBe(
         "account",
       );
@@ -631,5 +634,18 @@ describe("DerivedPane (Q-X5 / Q-X12)", () => {
         .getAllByRole("columnheader")
         .map((h) => h.textContent),
     ).toEqual(["가린 값", "길이", "SHA-256", "건수", "출처 계열", "처음 본 시각", "마지막 본 시각"]);
+  });
+});
+
+describe("URL table: carved-only hosts", () => {
+  it("marks a host seen only in URL carving with 카빙 in the 분류 column", () => {
+    const column = DERIVED_COLUMNS.urls.find((item) => item.id === "class");
+    const carved = row("pastebin.com", 1, {
+      url_class: "paste",
+      url_class_label: "붙여넣기",
+      carved_only: true,
+    });
+    expect(column?.text(carved, "UTC")).toBe("붙여넣기 · 카빙");
+    expect(column?.text(row("example.com", 2), "UTC")).toBe("분류 없음");
   });
 });

@@ -60,6 +60,191 @@ families:
   rules:
   - antiforensics.tool_present
   - antiforensics.wiper_run_after_incident
+# --- R5 L2: virtual machines, crypto wallet presence (no keys/seeds), McAfee detection logs ------
+- id: vm-config
+  label: 가상 머신 구성
+  types:
+  - vm-config
+  core_columns:
+  - key: vm_name
+    label: VM 이름
+  - key: vm_product_label
+    label: 제품
+    aliases:
+    - vm_product
+  - key: guest_os
+    label: 게스트 OS
+  - key: vm_config_path
+    semantic: path
+    label: 구성 파일
+    format: path
+  - key: disk_paths
+    semantic: path
+    label: 가상 디스크
+  - key: mac_address
+    semantic: device
+    label: MAC 주소
+    format: mono
+  - key: last_state_change_at
+    label: 마지막 상태 변경
+    aliases:
+    - timestamp
+    format: time
+    ts_kind: last-updated
+  - key: config_source_label
+    label: 출처
+    aliases:
+    - config_source
+  - key: user
+    semantic: account
+    label: 사용자 프로필
+  aux_columns:
+  - key: shared_folders
+    semantic: path
+    label: 공유 폴더(호스트)
+  - key: mac_addresses
+    label: MAC 주소 전체
+  - key: vm_uuid
+    label: VM 식별자(UUID)
+    format: mono
+  - key: encrypted
+    label: VM 암호화
+    value_labels:
+      'true': 예
+      'false': 아니요
+  - key: hardware_version
+    label: 가상 하드웨어 버전
+  - key: snapshot_count
+    label: 스냅숏 수
+    format: number
+  - key: mru_position
+    label: MRU 순서
+    format: number
+  - key: source_file_mtime
+    label: 파일 수정(사본 기준)
+    format: time
+    ts_kind: modified
+  - key: source_path
+    label: 원본 파일
+    format: path
+  rules:
+  - antiforensics.vm_present
+- id: crypto-wallet
+  label: 암호화폐 지갑(존재만)
+  types:
+  - crypto-wallet-presence
+  core_columns:
+  - key: wallet_product_label
+    label: 지갑
+    aliases:
+    - wallet_product
+  - key: wallet_kind_label
+    label: 종류
+    aliases:
+    - wallet_kind
+  - key: wallet_path
+    semantic: path
+    label: 위치
+    format: path
+  - key: file_count
+    label: 파일 수
+    format: number
+  - key: total_size
+    label: 전체 크기
+    format: bytes
+  - key: encrypted
+    label: 암호 보호
+    value_labels:
+      'true': 암호화됨
+      'false': 암호화 안 됨
+  - key: public_address_count
+    label: 공개 주소 수
+    format: number
+  - key: public_addresses
+    label: 공개 주소
+  - key: extension_id
+    label: 확장 ID
+    format: mono
+  - key: browser_profile
+    label: 브라우저 프로필
+  - key: user
+    semantic: account
+    label: 사용자 프로필
+  aux_columns:
+  - key: wallet_format
+    label: 형식
+  - key: electrum_wallet_type
+    label: Electrum 지갑 유형
+  - key: extension_container
+    label: 확장 저장소
+  - key: extension_store_url
+    label: 웹 스토어 주소
+    format: url
+  - key: file_names
+    label: 파일 이름
+  - key: source_file_mtime
+    label: 파일 수정(사본 기준)
+    format: time
+    ts_kind: modified
+  - key: secret_values_stored
+    label: 키·시드 저장
+    value_labels:
+      'true': 예
+      'false': 아니요(정책)
+  - key: evidence_note
+    label: 참고
+  rules:
+  - antiforensics.crypto_wallet_present
+- id: av-detection-log
+  label: 백신 탐지 로그
+  types:
+  - av-detection-log
+  core_columns:
+  - key: detected_at
+    label: 탐지 시각(현지)
+    aliases:
+    - timestamp
+    format: time
+    ts_kind: event
+  - key: av_product_label
+    label: 제품
+    aliases:
+    - av_product
+  - key: action_label
+    label: 조치
+    aliases:
+    - action
+  - key: threat_name
+    label: 위협 이름
+  - key: object_path
+    semantic: path
+    label: 대상 파일
+    format: path
+  - key: process_path
+    semantic: path
+    label: 프로세스
+    format: path
+  - key: account
+    semantic: account
+    label: 계정
+  - key: log_name
+    label: 로그 파일
+  aux_columns:
+  - key: message
+    label: 원문
+    format: mono
+  - key: field_extraction
+    label: 필드 추출 방식
+    value_labels:
+      tab-separated: 탭 구분 열
+      heuristic: 텍스트 패턴(검토 필요)
+  - key: source_offset
+    label: 줄 번호
+    format: number
+  - key: source_path
+    label: 원본 파일
+    format: path
+  rules: []
 rules:
 - id: antiforensics.tool_present
   family: antiforensics
@@ -236,3 +421,33 @@ rules:
     incident_start: null
     incident_end: null
     grace_days: 30
+- id: antiforensics.crypto_wallet_present
+  family: crypto-wallet
+  grade: C
+  label_ko: 암호화폐 지갑 존재
+  rationale_ko: '데스크톱 지갑(Bitcoin Core·Electrum·Exodus·Ledger Live 등), wallet.dat 파일 또는 브라우저 확장 지갑(MetaMask·Phantom·Kaikas 등)의 저장소에 데이터가 있음: 자금 추적의 출발점(키·시드는 정책상 읽지 않음).'
+  false_positive_ko: 확장만 설치하고 쓰지 않은 빈 폴더는 표시하지 않음. 업무용 지갑·테스트넷 지갑도 같은 흔적을 남김.
+  sources:
+  - https://en.bitcoin.it/wiki/Data_directory
+  - https://electrum.readthedocs.io/en/latest/faq.html
+  - https://chromewebstore.google.com/detail/metamask/nkbihfbeogaeaoehlefnkodbefgpgknn
+  version: 1
+  status: provisional
+  params: {}
+- id: antiforensics.vm_present
+  family: vm-config
+  grade: C
+  label_ko: 가상 머신 구성 존재
+  rationale_ko: 'VMware(.vmx·preferences.ini·inventory.vmls)·VirtualBox(.vbox·VirtualBox.xml)·Hyper-V(.vmcx) 가상 머신 정의가 있음: 가상 머신 안에서 작업해 호스트 흔적을 줄였을 가능성(공유 폴더·디스크 경로 확인).'
+  false_positive_ko: 개발·테스트용 VM, Docker Desktop·WSL·Windows Sandbox 같은 유틸리티 VM(이름 표지로 제외).
+  sources:
+  - https://attack.mitre.org/techniques/T1564/006/
+  - https://www.virtualbox.org/manual/
+  version: 1
+  status: provisional
+  params:
+    ignore_name_markers:
+    - dockerdesktopvm
+    - docker-desktop
+    - wslvm
+    - windows sandbox

@@ -119,7 +119,9 @@ DESKTOP_AI_APP_STORAGE_MARKERS = (
     "leveldb",
     "session storage",
 )
-ARCHIVE_SUFFIXES = {".zip", ".rar", ".7z"}
+# R5 L3 (재감사 §3 items 9, 18): EGG / ALZ (core.egg_archive) and ISO 9660 (core.iso9660) entry listings.
+EXTENDED_ARCHIVE_FORMATS = {".egg": "egg", ".alz": "alz", ".iso": "iso9660"}
+ARCHIVE_SUFFIXES = {".zip", ".rar", ".7z", *EXTENDED_ARCHIVE_FORMATS}
 ARCHIVE_ENTRY_SAMPLE_LIMIT = 80
 ARCHIVE_RISK_ENTRY_LIMIT = 100
 ARCHIVE_BOMB_RATIO_THRESHOLD = 100.0
@@ -202,6 +204,8 @@ def collect_archive_inventory(root: Path) -> Iterable[ArtifactRecord]:
 
 
 def archive_inventory_profile(path: Path) -> dict[str, object]:
+    if path.suffix.lower() in EXTENDED_ARCHIVE_FORMATS:
+        return extended_archive_profile(path, EXTENDED_ARCHIVE_FORMATS[path.suffix.lower()])
     if path.suffix.lower() != ".zip":
         return archive_metadata_only_profile(path)
     try:
@@ -265,6 +269,99 @@ def archive_inventory_profile(path: Path) -> dict[str, object]:
             "archives require a sandboxed recursive workflow before reporting file contents."
         ),
     }
+
+
+EXTENDED_ARCHIVE_NOTES = {
+    "egg": "EGG 시각은 파일 헤더의 Windows FILETIME(UTC) 또는 POSIX 시각입니다. AZO 압축·암호화·솔리드 항목은 목록만 냅니다.",
+    "alz": "ALZ 시각은 DOS 시각(압축 당시 PC의 로컬 시각, 시간대 없음)입니다. ALZ는 목록만 냅니다(해제하지 않음).",
+    "iso9660": "ISO 9660 디렉터리 레코드의 기록 시각(GMT 오프셋 포함)입니다. UDF는 존재만 표시합니다.",
+}
+
+
+def extended_archive_profile(path: Path, fmt: str) -> dict[str, object]:
+    """Archive inventory profile of an EGG / ALZ / ISO 9660 file (R5 L3); a corrupt file is isolated."""
+    from ..core.egg_archive import list_alz, list_egg
+    from ..core.iso9660 import list_iso
+
+    readers = {"egg": list_egg, "alz": list_alz, "iso9660": list_iso}
+    try:
+        listing = readers[fmt](path)
+    except (ValueError, OSError, EOFError, struct.error) as exc:
+        return {
+            "profile_version": "archive-inventory-profile-v1",
+            "analysis_status": f"{fmt}-open-failed",
+            "format_hint": fmt,
+            "entry_count": 0,
+            "sample_entries": [],
+            "open_error": f"{type(exc).__name__}: {exc}"[:300],
+            "validation_guidance": "압축 헤더를 읽지 못했습니다(손상·잘림·다른 형식). 전용 도구로 확인하세요.",
+        }
+    entries = list(listing.get("entries") or [])
+    sample_entries: list[dict[str, object]] = []
+    suspicious_entries: list[dict[str, object]] = []
+    counts = {"encrypted": 0, "traversal": 0, "executable": 0, "nested": 0}
+    for index, raw in enumerate(entries):
+        name = str(raw.get("name") or "")
+        suffix = Path(name).suffix.lower()
+        entry = {"source_index": index, **raw}
+        flags: list[str] = []
+        if raw.get("encrypted"):
+            counts["encrypted"] += 1
+            flags.append("archive-encrypted-entry")
+        traversal = archive_entry_path_traversal_risk(name)
+        executable = suffix in ARCHIVE_EXECUTABLE_SUFFIXES
+        nested = suffix in ARCHIVE_NESTED_SUFFIXES or suffix in EXTENDED_ARCHIVE_FORMATS
+        for hit, key, flag in (
+            (traversal, "traversal", "archive-path-traversal-entry"),
+            (executable, "executable", "archive-executable-or-script-entry"),
+            (nested, "nested", "archive-nested-container-entry"),
+        ):
+            if hit:
+                counts[key] += 1
+                flags.append(flag)
+        entry.update({"path_traversal_risk": traversal, "executable_or_script": executable, "nested_archive": nested, "risk_flags": flags})
+        if len(sample_entries) < ARCHIVE_ENTRY_SAMPLE_LIMIT:
+            sample_entries.append(entry)
+        if flags and len(suspicious_entries) < ARCHIVE_RISK_ENTRY_LIMIT:
+            suspicious_entries.append(entry)
+    total_compressed = int(listing.get("total_compressed_size") or 0)
+    total_uncompressed = int(listing.get("total_uncompressed_size") or 0)
+    ratio = float(total_uncompressed / max(total_compressed, 1)) if total_uncompressed else 0.0
+    profile: dict[str, object] = {
+        "profile_version": "archive-inventory-profile-v1",
+        "analysis_status": listing.get("analysis_status"),
+        "format_hint": fmt,
+        "parser_version": listing.get("parser_version"),
+        "entry_count": len(entries),
+        "sample_entries": sample_entries,
+        "suspicious_entries": suspicious_entries,
+        "encrypted_entry_count": counts["encrypted"],
+        "path_traversal_entry_count": counts["traversal"],
+        "executable_entry_count": counts["executable"],
+        "nested_archive_entry_count": counts["nested"],
+        "total_compressed_size": total_compressed,
+        "total_uncompressed_size": total_uncompressed,
+        "compression_ratio": round(ratio, 3),
+        "zip_bomb_candidate": total_uncompressed >= ARCHIVE_BOMB_SIZE_THRESHOLD and ratio >= ARCHIVE_BOMB_RATIO_THRESHOLD,
+        "header_encrypted": bool(listing.get("header_encrypted")),
+        "split_archive": bool(listing.get("split")),
+        "solid_archive": bool(listing.get("solid")),
+        "listing_notes": list(listing.get("notes") or []),
+        "truncated_entries": len(entries) > ARCHIVE_ENTRY_SAMPLE_LIMIT,
+        "sample_entries_truncated": len(entries) > ARCHIVE_ENTRY_SAMPLE_LIMIT,
+        "sample_entry_limit": ARCHIVE_ENTRY_SAMPLE_LIMIT,
+        "entry_time_note": EXTENDED_ARCHIVE_NOTES[fmt],
+        "values_are_metadata_only": True,
+        "validation_guidance": "항목 목록은 헤더 메타데이터입니다. 내용 검토는 격리된 환경에서 전용 도구로 해제한 뒤 하세요.",
+    }
+    if fmt == "iso9660":
+        profile["udf_present"] = bool(listing.get("udf_present"))
+        profile["iso_volume"] = listing.get("volume") or {}
+        profile["motw_note"] = (
+            "ISO 안의 파일은 마운트 후 실행 시 Zone.Identifier(MOTW)가 붙지 않을 수 있습니다 — "
+            "같은 ISO 경로의 Zone.Identifier(안티 포렌식 › ADS) 행과 대조하세요"
+        )
+    return profile
 
 
 def archive_metadata_only_profile(path: Path) -> dict[str, object]:
@@ -357,7 +454,7 @@ def archive_entry_path_traversal_risk(name: str) -> bool:
 
 def archive_risk_flags(profile: Mapping[str, object]) -> list[str]:
     flags = ["archive-file-inventory"]
-    if profile.get("analysis_status") == "zip-open-failed":
+    if str(profile.get("analysis_status") or "").endswith("-open-failed"):
         flags.append("archive-open-failed")
     if int(profile.get("encrypted_entry_count") or 0):
         flags.append("archive-encrypted-entry")
@@ -420,6 +517,8 @@ def archive_format_hint(path: Path) -> str:
         return "rar"
     if suffix == ".7z":
         return "7z"
+    if suffix in EXTENDED_ARCHIVE_FORMATS:
+        return EXTENDED_ARCHIVE_FORMATS[suffix]
     return suffix.lstrip(".")
 
 

@@ -59,6 +59,7 @@ families:
   - browser.incognito_gap
   - browser.history_cleared
   - browser.typed_url_direct
+  - browser.torrent_site_visit
 - id: browser-download
   label: 브라우저 다운로드
   types:
@@ -635,6 +636,203 @@ families:
   rules:
   - browser.webmail_upload
   - browser.filesharing_upload
+# R5 L3: map-URL location candidates (Google Maps / Naver Map / Kakao Map URLs of visits and bookmarks).
+# The candidate restates its source row's URL (no url tag: counted once on the source row); the
+# coordinate (geo) and the search text (search_term) are its own.
+- id: location-url-candidate
+  label: 지도 URL 위치 후보
+  types:
+  - location-url-candidate
+  core_columns:
+  - key: timestamp
+    label: 방문 시각
+    format: time
+    ts_kind: visited
+    width: 170
+  - key: map_provider_label
+    label: 지도 서비스
+    aliases:
+    - map_provider
+  - key: map_url_kind_label
+    label: URL 종류
+    aliases:
+    - map_url_kind
+  - key: latitude
+    semantic: geo
+    label: 위도
+    format: number
+  - key: longitude
+    label: 경도
+    format: number
+  - key: query
+    semantic: search_term
+    label: 검색어·장소
+  - key: origin
+    label: 출발
+  - key: destination
+    label: 도착
+  - key: coordinate_basis
+    label: 좌표 근거
+    value_labels:
+      url-place-pin: URL의 장소 핀
+      url-viewport-center: 지도 화면 중심
+      url-ll-parameter: ll 매개변수
+      url-query-coordinates: 검색어 좌표
+      url-epsg3857-converted: 웹 메르카토르→위경도 변환
+      url-wgs84: URL 위경도
+      url-link-coordinates: 링크 좌표
+  - key: url
+    label: 주소 (URL)
+    format: url
+  - key: browser
+    label: 브라우저
+  aux_columns:
+  - key: zoom
+    label: 확대 수준
+    format: number
+  - key: waypoints
+    label: 경유지
+  - key: plane_coordinates
+    label: 평면 좌표(미변환)
+    format: mono
+  - key: title
+    label: 제목
+  - key: source_artifact_type
+    label: 원본 행 유형
+    format: artifact_type
+  - key: profile
+    label: 프로필
+  - key: user
+    label: 사용자
+  - key: interpretation_ko
+    label: 해석
+  rules: []
+# R5 L3: Google Analytics cookies (__utma / __utmz / _ga): visit times, session count, source, search term.
+# The client (visitor) ID is never stored (plan r5 §2 decision).
+- id: browser-analytics-cookie
+  label: 방문 분석 쿠키(Google Analytics)
+  types:
+  - browser-analytics-cookie
+  core_columns:
+  - key: timestamp
+    label: 시각
+    format: time
+    ts_kind: ga-current-visit
+    width: 170
+  - key: host
+    semantic: url
+    label: 사이트(쿠키 도메인)
+  - key: cookie_name
+    label: 쿠키
+  - key: first_visit_at
+    label: 첫 방문
+    format: time
+    ts_kind: ga-first-visit
+  - key: previous_visit_at
+    label: 이전 방문
+    format: time
+    ts_kind: ga-previous-visit
+  - key: current_visit_at
+    label: 현재 방문
+    format: time
+    ts_kind: ga-current-visit
+  - key: session_count
+    label: 세션 수
+    format: number
+  - key: source
+    label: 유입 출처
+  - key: medium
+    label: 유입 매체
+  - key: search_term
+    semantic: search_term
+    label: 유입 검색어
+  - key: value_status
+    label: 값 상태
+    value_labels:
+      parsed: 해석함
+      unparsed-format: 형식 불일치
+      encrypted-not-read: 암호화(읽지 않음)
+      empty: 값 없음
+  aux_columns:
+  - key: campaign
+    label: 캠페인
+  - key: referral_path
+    label: 참조 경로
+  - key: campaign_set_at
+    label: 캠페인 기록 시각
+    format: time
+    ts_kind: ga-campaign-set
+  - key: session_number
+    label: 세션 번호
+    format: number
+  - key: cookie_created_at
+    label: 쿠키 생성
+    format: time
+    ts_kind: cookie-created
+  - key: browser
+    label: 브라우저
+  - key: profile
+    label: 프로필
+  - key: client_id_policy
+    label: 수집 정책
+  rules: []
+# R5 L3: URL carving of page files / unallocated dumps (analysis url-carve, typed rows). The URL feeds
+# 통합 보기 › URL 분류 like a visit; the row keeps no page body.
+- id: carved-url-candidate
+  label: URL 카빙 후보
+  types:
+  - carved-url-candidate
+  core_columns:
+  - key: url
+    semantic: url
+    label: 주소 (URL)
+    format: url
+  - key: url_class_label
+    label: URL 분류
+    aliases:
+    - url_class
+  - key: source_kind_label
+    label: 소스 종류
+    aliases:
+    - source_kind
+  - key: source_path
+    label: 원본(소스) 경로
+    format: path
+  - key: offset
+    label: 오프셋
+    aliases:
+    - source_offset
+    format: hex
+  - key: encoding
+    label: 인코딩
+    value_labels:
+      ascii: ASCII
+      utf-16le: UTF-16LE
+  - key: hit_count
+    label: 출현 수(이 소스)
+    format: number
+  - key: host
+    label: 호스트
+  aux_columns:
+  - key: latitude
+    semantic: geo
+    label: 위도(지도 URL)
+    format: number
+  - key: longitude
+    label: 경도(지도 URL)
+    format: number
+  - key: url_sha256
+    label: 원본 URL SHA-256
+    format: mono
+  - key: url_tokens_redacted
+    label: 토큰 가림
+  - key: url_truncated
+    label: URL 잘림
+  - key: recovery_method
+    label: 복구 방법
+    value_labels:
+      carved-url: URL 카빙
+  rules: []
 rules:
 - id: browser.dl_from_filesharing
   family: browser-download
@@ -865,3 +1063,16 @@ rules:
     categories:
     - filesharing
     - cloud
+- id: browser.torrent_site_visit
+  family: browser-visit
+  grade: C
+  label_ko: 토렌트 사이트·magnet 링크 방문
+  rationale_ko: '방문 URL이 토렌트 색인·트래커 사이트(URL 분류 torrent)이거나 magnet: 링크: P2P 내려받기·유포 준비 정황(불법촬영물·저작권 사건의 입수 경로).'
+  false_positive_ko: 리눅스 배포판 등 합법 토렌트, 검색 결과로 우연히 연 페이지. 사이트 도메인은 자주 바뀌므로 목록에 없는 사이트는 잡지 못함.
+  sources:
+  - https://en.wikipedia.org/wiki/Comparison_of_BitTorrent_sites
+  - https://torrentfreak.com/top-torrent-sites/
+  - https://www.bittorrent.org/beps/bep_0009.html
+  version: 1
+  status: provisional
+  params: {}

@@ -80,6 +80,7 @@ export const TIMESTAMP_KIND_LABELS: Readonly<Record<string, string>> = {
   logon: "로그온",
   logoff: "로그오프",
   deleted: "삭제",
+  disabled: "사용 안 함 설정",
   crash: "크래시",
   "process-created": "프로세스 생성",
   notification: "알림",
@@ -129,6 +130,32 @@ export const TIMESTAMP_KIND_LABELS: Readonly<Record<string, string>> = {
   "local-created": "로컬 사본 생성",
   "local-accessed": "로컬 사본 접근",
   "sync-local-accessed": "로컬 사본 접근",
+  // R5 L3: Google Analytics cookies, P2P (torrent / eMule), adb backup members.
+  "ga-current-visit": "GA 현재 방문",
+  "ga-previous-visit": "GA 이전 방문",
+  "ga-first-visit": "GA 첫 방문",
+  "ga-campaign-set": "GA 유입 기록",
+  "torrent-created": "토렌트 작성",
+  "transfer-added": "전송 추가",
+  "transfer-completed": "전송 완료",
+  "part-file-date": "임시 파일 날짜",
+  "last-shared": "마지막 공유",
+  "file-date": "파일 날짜",
+  "member-modified": "백업 항목 수정",
+  "last-seen-complete": "완전 소스 마지막 확인",
+  // Timeline canonical forms (core/timeline.py canonical_label strips the type noun:
+  // p2p-transfer "transfer-completed" -> "completed", phone-link-photo "photo-synced" -> "synced",
+  // cloud-sync-event "cloud-delete" -> "delete").
+  completed: "완료",
+  synced: "동기화",
+  download: "다운로드",
+  delete: "삭제",
+  rename: "이름 변경·이동",
+  share: "공유",
+  // R5 L3 Phone Link (phone_link.py row timestamp_kind).
+  "call-start": "통화 시작",
+  "photo-taken": "사진 촬영",
+  "photo-synced": "사진 동기화",
 };
 
 /**

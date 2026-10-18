@@ -22,6 +22,7 @@ from xml.etree import ElementTree as ET
 
 from ..artifacts import all_providers, collect_cached
 from ..artifacts.windows.antiforensics import redact_recovery_key_text
+from ..artifacts.windows.system_extras import redact_secret_store_text
 from .doc_text import (
     OLE_SIGNATURE,
     DocumentText,
@@ -866,7 +867,8 @@ def extract_document_text(
     result = _extract_document_text(path, kind, max_input_bytes=max_input_bytes)
     # BitLocker recovery passwords are masked by content (checksum-validated), whatever the
     # file name, before the text reaches the docs output, the docs index or the case DB.
-    redacted = redact_recovery_key_text(path.name, result.text)
+    # R5 L2: wallet/credential stores and private keys are withheld, saved-password lines masked.
+    redacted = redact_secret_store_text(path, redact_recovery_key_text(path.name, result.text))
     return result if redacted == result.text else replace(result, text=redacted)
 
 
@@ -916,7 +918,7 @@ def extract_text(
         max_archive_member_count=max_archive_member_count,
         max_pdf_stream_decompressed_bytes=max_pdf_stream_decompressed_bytes,
     )
-    return redact_recovery_key_text(path.name, text)
+    return redact_secret_store_text(path, redact_recovery_key_text(path.name, text))
 
 
 def _extract_text(

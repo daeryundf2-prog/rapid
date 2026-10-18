@@ -187,6 +187,21 @@ TIMELINE_FIELD_MAP: dict[str, tuple[TimelineField, ...]] = {
     "execution-pca": (F("last_run_at", "run"), F("event_at", "pca-event"), F("key_last_written_at", "last-written", scope="key")),
     "execution-feature-usage": (F("key_last_written_at", "last-written", scope="key"),),
     "bitlocker-recovery-key-file": (F("key_created_at", "created"),),
+    # --- R5 L2: OS / system rows (registry_depth.py, system_extras.py) ---------------------
+    "startup-item": (
+        F("disabled_at", "disabled"),
+        F("key_last_written_at", "last-written", scope="key"),
+        F("target_created_at", "target-created"),
+        F("target_modified_at", "target-modified"),
+    ),
+    "registry-logon-banner": (F("key_last_written_at", "last-written"),),
+    "ssh-known-host": (F("key_last_written_at", "last-written", scope="key"),),
+    "ssh-client-session": (F("key_last_written_at", "last-written"),),
+    "office-identity": (F("key_last_written_at", "last-written"),),
+    "office-backstage-item": (F("modified_at", "modified"),),
+    "desktop-wallpaper": (F("key_last_written_at", "last-written", scope="key"),),
+    "vm-config": (F("last_state_change_at", "last-updated"),),
+    "av-detection-log": (F("detected_at", "event", timezone="local-unknown"),),
     # --- file usage ------------------------------------------------------
     "shell-shortcut": (
         F("target_created_at", "target-created"),
@@ -295,6 +310,23 @@ TIMELINE_FIELD_MAP: dict[str, tuple[TimelineField, ...]] = {
     "media-image-unreadable": (F("exif_gps_profile.gps_datetime_utc_candidate", "gps-fix"),),
     "media-video": (),
     "sticky-note": (F("created_at", "note-created"), F("updated_at", "note-updated")),
+    # --- R5 L3: P2P, GA cookies, Phone Link photos -----------------------------------------
+    # The row ``timestamp`` carries one of these times (transfer-completed > transfer-added,
+    # last-shared > file-date, ga-current-visit > ga-campaign-set > ga-first-visit, photo-taken >
+    # photo-synced); the others were row fields only. Same-instant fields merge with the row time.
+    "p2p-transfer": (
+        F("added_at", "transfer-added"),
+        F("completed_at", "transfer-completed"),
+        F("last_seen_complete_at", "last-seen-complete"),
+    ),
+    "p2p-shared-file": (F("file_date", "file-date"),),
+    "browser-analytics-cookie": (
+        F("current_visit_at", "ga-current-visit"),
+        F("previous_visit_at", "ga-previous-visit"),
+        F("first_visit_at", "ga-first-visit"),
+        F("campaign_set_at", "ga-campaign-set"),
+    ),
+    "phone-link-photo": (F("taken_at", "photo-taken"), F("updated_at", "photo-synced")),
 }
 # Rows that only aggregate other rows (their times duplicate the source rows)
 # and per-reference rows of a parent artifact never emit events.
@@ -315,6 +347,8 @@ TIMELINE_EXCLUDED_TYPES: frozenset[str] = frozenset(
         "synthetic-media-scan-summary",
         # Derived lead rows that re-copy the time of their source cache/history row.
         "web-upload-candidate",
+        # R5 L3: map URLs of browser history rows (location_urls.py copies the visit's time).
+        "location-url-candidate",
     }
 )
 # Aggregate rows that re-copy times of per-row artifacts of the same payload:
@@ -1314,7 +1348,8 @@ def canonical_label(label: str, artifact_type: str = "") -> str:
             break
     nouns = {part for part in artifact_type.split("-") if len(part) > 2}
     head, _, rest = text.partition("-")
-    if rest and head in nouns and not rest.isdigit():
+    # "file-date" (p2p-shared-file) keeps its head: a bare "date" names no event.
+    if rest and head in nouns and not rest.isdigit() and rest != "date":
         text = rest
     return text or "observed"
 
@@ -1421,7 +1456,8 @@ def iter_artifact_detail_events(
         kind = canonical_label(kind, artifact_type)
         twin = _same_instant(row_events, value)
         if twin is not None:
-            twin.setdefault("extra_labels", []).append(kind)
+            if kind != twin["timestamp_kind"]:
+                twin.setdefault("extra_labels", []).append(kind)
         else:
             explicit_event = {
                 "timestamp": value,

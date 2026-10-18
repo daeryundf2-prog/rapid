@@ -208,3 +208,149 @@ RapidTriage is a local triage and review tool, not a full commercial forensic su
 - 한 kind 노드에서 행 조건을 걸면 서버가 그 kind를 처음부터 훑어 페이지를 만든다(경로 필터와 같음). 행 수가 정해지기 전에는 "n건 이상"으로 보인다. 정렬과 함께 쓰면 조건에 맞는 레코드 집합을, 타임라인 조건은 맞는 이벤트 위치를 (출력 파일 경로·크기·수정 시각, 조건) 키의 작은 LRU(16개, 전체 800만 위치 상한)에 두어 다음 페이지부터는 다시 훑지 않는다 — 첫 페이지는 여전히 전체를 판정한다(합성 50만 이벤트: 첫 페이지 약 5 s, 다음 페이지 0.00 s). 파일 목록 조건은 아직 페이지마다 목록을 훑는다(50만 행 약 1.3 s). 타임라인 히스토그램(`/timeline-histogram`)은 행 조건을 받지 않으며, 콘솔은 "조건 미적용"이라고 표시한다.
 - 연결 그래프는 값마다 저장된 표본 원본 행(최대 20행, 계열마다 고르게)만 첫 단계로 쓴다. 표본 밖의 행에 있는 값은 둘째 단계에 나오지 않으며, 노드는 200개(값 노드는 행마다 40개)까지다. 통합 보기 표에서 상한으로 빠진 값은 노드에 나오지만 표로 열리지 않는다.
 <!-- r4 V3 (views, filters): end -->
+
+## R5 L1 — 통신·미디어 앱 (휴대폰과 연결·미디어 플레이어·메일 클라이언트·Viber·Signal·QQ·Facebook Messenger·PSD)
+<!-- r5 L1 (communication and media apps): start -->
+- **휴대폰과 연결(Phone Link/Your Phone, `windows-phone-link`)**: `Microsoft.YourPhone_8wekyb3d8bbwe\LocalCache\Indexed\<GUID>\System\Database\*.db`만 읽는다(평문 SQLite). 앱 버전마다 표·열 이름이 달라 고정 스키마 대신 표 이름(`message`/`messages`/`sms`, `mms`+`mms_part`, `conversation`, `call*`, `contact`+`phonenumber`/`emailaddress`, `photo`/`media`, 이름에 `device`가 든 표)과 열 별칭으로 맞춘다. 공급사 스키마 문서가 없어 열 의미는 공개 연구와 합성 픽스처(`tests/r5_l1_fixtures.py`) 기준이며 실제 표본으로 확인하지 않았다(검증 필요). 정수 시각은 크기로 Windows FILETIME·Unix 초/밀리초/마이크로초를 고르고 고른 인코딩을 `timestamp_encoding`에 남긴다. 오프셋 없는 문자열 시각은 시점으로 바꾸지 않는다. 방향(`type`/`msg_box`)과 통화 유형 코드는 앱이 따르는 Android `Telephony.Sms`·`CallLog.Calls` 상수로 읽고 원래 값을 함께 둔다. 동기화된 사진 파일 자체(캐시)는 열지 않고 메타데이터 행과 기기 폴더 파일 수만 낸다. 상한: DB 512 MiB, 기기당 DB 64개, 표당 50,000행, 기기당 200,000행. 손상 DB는 `phone-link-parse-error` 한 행으로 격리한다. 문자 행은 메신저·메일 › 휴대폰과 연결 문자가 기본 노드이고 모바일 › 휴대폰과 연결에도 교차 노드로 보인다.
+- **미디어 플레이어 재생 기록(`media-player`)**: VLC는 VLC 소스로 문서화된 `vlc-qt-interface.ini` `[RecentsMRU]`의 `list=`·`times=`(밀리초)를 읽고 `vlcrc`에서는 `snapshot-path`·`input-record-path`만 인벤토리 행에 적는다. 팟플레이어·곰플레이어·KMPlayer는 값 이름을 공급사 문서나 실제 표본으로 확인하지 못했다(`verification: unconfirmed`). 그래서 값 이름을 가정하지 않고 이름이 recent·remember·history·MRU·playlist·last-play인 키·섹션·값 아래에서 경로나 URL처럼 보이는 문자열만 모은다(`extraction: path-like-value-scan`, 신뢰도 낮음). 그 밖의 위치에 기록하는 버전은 놓치고, 설정 경로가 이 이름 아래에 있으면 재생 기록으로 잘못 잡힐 수 있다. 실제 NTUSER 한 건(bsh-subset)에서 곰플레이어 `Software\GRETECH\GomPlayer\OPTION`의 `sRecentFolder`(최근 폴더)와 `_RECENTMEDIANAME###`(32자리 16진 식별자)·`_RECENTMEDIAPOS###`(이어보기 위치)를 확인했다. 식별자는 경로가 아니라서 `location_kind: hash-only`·`media_hash` 행으로 내며, 해시 알고리즘·입력과 위치 단위는 확인하지 못했다(후보 경로의 해시와 대조 필요). 같은 `GRETECH` 아래 `GOMEncoder` 등 다른 제품의 경로 값은 `product_key`로 구분한다. 팟플레이어 `.dpl` 재생목록은 `N*file*경로` 줄만 읽는다. 행의 `list_last_written`(ini·재생목록 수정 시각, 레지스트리 키 마지막 기록)은 목록 전체의 기록 시각이라 최신 항목의 상한일 뿐 항목별 재생 시각이 아니며, 행 `timestamp`는 비워 둔다. 재생 위치는 VLC(`times=`, 밀리초)와 곰플레이어(`_RECENTMEDIAPOS###`, 단위 미확인 원래 값)만 낸다. `.reg` 내보내기와 곰·KMPlayer의 ini 파일은 읽지 않는다. 상한: ini 4 MiB, 재생목록 8 MiB·200개, 플레이어당 20,000행, 레지스트리 루트당 키 5,000개·깊이 4.
+- **메일 클라이언트(`email-clients`)**: Thunderbird는 `Mail`·`ImapMail` 아래의 확장자 없는 mbox(같은 이름의 `.msf` 짝, 짝이 없으면 첫 줄이 `From `인 파일)를 스트리밍으로 읽는다. 빈 줄 뒤의 `From ` 줄만 메시지 경계로 보므로 `>From` 이스케이프 없이 본문 빈 줄 뒤에 `From `으로 시작하는 줄이 있으면 메시지가 갈린다. `X-Mozilla-Status`의 0x0008(expunged)은 압축(compact) 전까지 남은 삭제 메일로 `deleted-or-recovered-candidate`, 0x0001은 읽음이다. 파일당 512 MiB·프로필당 2 GiB·메시지 50,000개·메시지당 32 MiB까지 읽고, 끝까지 읽은 mbox만 SHA-256을 남긴다. `global-messages-db.sqlite`(Gloda)는 파싱한 mbox에 같은 Message-ID가 없는 메시지만 `deleted_state: index-only`(색인에만 있음) 행으로 내며 본문은 색인 텍스트(`messagesText_content`)뿐이다. `abook.sqlite`·`history.sqlite`는 읽고 구형 Mork `abook.mab`는 읽지 않는다(목록만). `calendar-data\local.sqlite` 일정은 PRTime(µs)을 UTC로 바꾸며 `floating` 시간대는 현지 벽시계 시각이다. `prefs.js`는 `mail.identity.*`·`mail.server.*`·`mail.account.*`·`mail.smtpserver.*`만 읽고 이름에 password·token·oauth 등이 든 값은 버린다. `logins.json`·`key4.db`·`key3.db`·`signons.sqlite`는 열지 않고 이름·크기·시각만 프로필 행에 적는다(정책: 자격 증명 비추출).
+- Windows 메일(메일 및 일정, 2024-12 지원 종료)은 `LiveComm\<계정>\<버전>\Mail\*.eml`을 읽고, `store.vol`(ESE)은 `ese_native`로 256 MiB까지 표 목록·행 수(최대 200,000행 셈)와 앞 16 MiB의 메일 주소 문자열 후보만 낸다(`email-client-store`, 메시지 행으로 해석하지 않음, 트랜잭션 로그 재생 없음). 그래서 Windows 메일의 폴더 이름(받은 편지함·보낸 편지함 등)과 읽음·플래그는 알 수 없고 폴더는 `Mail`로 남는다. Windows Live Mail은 계정 폴더 아래 `.eml`과 `*.oeaccount` XML의 서버·주소·사용자 이름 태그만 읽고 이름에 `Password`가 든 태그는 건너뛴다. `Mail.MSMessageStore`는 같은 ESE 인벤토리다.
+- 같은 메일이 두 번 나오지 않도록 `email` 공급자는 Windows 메일·Live Mail 루트 아래의 `.eml`과 Thunderbird 프로필 아래의 확장자 없는 mbox를 건너뛴다(사용자 홈 판정은 `iter_windows_user_homes`와 같은 규칙). 프로필 밖에 복사된 Thunderbird 폴더(`.msf` 짝이 있는 확장자 없는 파일)는 `email` 공급자가 일반 mbox로 읽고(256 MiB 초과는 문자열 인벤토리), 메일 클라이언트 귀속(`mail_client`·`account`)은 없다. 메일 클라이언트 루트당 메시지 상한(50,000)을 넘은 `.eml`·mbox 메시지는 어느 공급자도 읽지 않으며 프로필 행의 `caps_hit`(`message-cap`)과 kind 요약 `collection_notes`에 남는다. Windows 메일·Live Mail `.eml`에는 읽음·삭제 표시가 없어 `deleted_state`를 비워 둔다(삭제 폴더 이름이면 `deleted-folder`).
+- **Viber·Facebook Messenger·Signal·QQ(`windows-messenger` 추가)**: Viber PC `ViberPC\<번호>\viber.db`는 공개 분석 자료의 `Events`·`Messages`·`Contact`·`ChatInfo` 표를 이어 붙인다. `Events.Direction`의 0=수신·1=발신은 공급사 문서로 확인하지 못해 원래 값을 `viber_direction_raw`로 함께 둔다. 통화·시스템 이벤트(메시지 행이 없는 이벤트)는 내지 않는다. Facebook Messenger 데스크톱(2025-12 종료)의 `msys_*.db`는 스키마가 버전마다 크게 달라 `messages`(text·timestamp_ms)·`contacts`·`threads`가 있을 때만 최선 노력으로 매핑하고(`schema_confidence: best-effort-msys`), 없으면 DB 목록·크기만 인벤토리로 낸다. 보낸 사람 이름 외에 소유자를 알 수 없어 방향은 `unknown`이다. Signal Desktop(`sql\db.sqlite` SQLCipher, 암호화된 `attachments.noindex`)과 QQ(`Msg3.0.db`, NTQQ `nt_qq\nt_db\*.db`)는 정책상 인벤토리 전용이다: 키 읽기·복호를 하지 않고, Signal `config.json`은 열지 않은 채 이름·크기·시각만 `key_material_files`에 적는다. QQ `FileRecv`(받은 파일)는 파일 목록 행으로 낸다.
+- **PSD 메타데이터(`media-image`)**: `.psd`·`.psb`는 `8BPS` 머리글(크기·채널·비트 깊이·색상 모드)과 이미지 리소스 블록만 읽는다: 0x0424 XMP(CreatorTool, 생성·수정 시각, 문서 ID, `xmpMM:History` 최대 200개, `photoshop:DocumentAncestors` 최대 50개 표시), 0x040C 썸네일(JFIF, 64 KiB 이하만 인라인 미리보기), 0x0422 EXIF. XMP는 XML 파서 없이 정규식으로 읽으므로 비표준 직렬화(중첩 rdf:Description 등)는 놓칠 수 있다. 픽셀·레이어는 해석하지 않아 pHash·디코드 썸네일이 없고 `coverage_status: container-metadata-only`다.
+- 확인하지 못한 항목(실제 표본 필요): 팟플레이어·곰플레이어·KMPlayer 값 이름, Phone Link 버전별 열 이름과 시각 단위, Viber `Direction` 의미, Facebook Messenger `msys` 스키마, Windows 메일 `store.vol` 표 구조.
+<!-- r5 L1 (communication and media apps): end -->
+## R5 L3
+<!-- r5 L3 (web, URL classes, archives, P2P, recovery): start -->
+- URL 분류 `webmail`·`torrent`와 social의 Flickr는 `core/derived/url_classes.yaml`의 대표 도메인 목록이다(분류마다 출처 URL). 토렌트 사이트(특히 국내 사이트는 숫자 접미가 붙은 도메인이 수시로 바뀜)는 목록에 없으면 분류되지 않는다 — 갱신 절차: 공개 목록(TorrentFreak 순위·위키백과 비교표)으로 도메인을 확인해 YAML에 추가하고 `python -m unittest tests.test_r5_l3_web`으로 형식을 검증한다. 같은 도메인을 두 분류에 넣을 수 없다(`mail.naver.com`은 웹메일, `search.naver.com`은 검색). 사내 Outlook Web App은 경로 접두어 `/owa/`로 잡는다: 통합 보기 URL 표는 호스트 단위라 그 호스트의 URL 하나라도 `/owa/`면 호스트 전체가 웹메일(`url_class_basis=path`)이 되고, 도메인으로 분류된 호스트는 도메인 분류가 우선한다. `magnet:` 링크는 info-hash(`btih`/`btmh`)로 `magnet:<해시>` 키가 되며 해시가 없는 magnet은 세지 않는다. 분류는 조사 단서이지 판단이 아니다.
+- 지도 URL 위치 후보(`location-url-candidate`)는 Windows 브라우저 공급자의 방문 URL·방문 기록·북마크 행에서만 만든다(macOS·모바일 브라우저 행은 아직 안 봄). 좌표는 URL이 담은 값(장소 핀 `!3d…!4d…`, 없으면 지도 화면 중심 `@위도,경도`, 네이버 `c=` 웹 메르카토르 → WGS84 변환, 카카오 `/link/…,위도,경도`)이며 기기 위치가 아니다(`coordinate_basis`). 새 네이버 지도(`map.naver.com/p/…?c=15.00,0,0,0,dh`)는 확대 수준만 있어 좌표가 없다(검색어만). 카카오 `urlX`/`urlY`(WCONGNAMUL 평면 좌표)는 변환하지 않고 문자열로만 둔다. 단축 URL(`goo.gl/maps`, `naver.me`)은 펼치지 않는다(외부 요청 금지). 후보 행은 원본 행을 다시 적은 것이라 통합 보기 URL 표에 URL을 한 번만 세고(`location_candidates`는 URL 표의 호스트 행에 붙는 개수), 위치(geo)·검색어 열만 의미 태그를 단다. 같은 (브라우저, 프로필, URL, 시각)은 한 행이다. 행 상한 50,000건.
+- Chromium 루트 추가(360 Safe Browser `AppData\Roaming\360se6\User Data`, 360 Chrome `AppData\Local\360Chrome\Chrome\User Data`, Yandex, Chromium, Cốc Cốc `AppData\Local\CocCoc\Browser\User Data`, QQ Browser `AppData\Local\Tencent\QQBrowser\User Data`)는 공개 자료 기준 경로이며 실기기 표본으로 확인하지 않았다. 360·QQ 브라우저의 자체 확장 DB(독자 즐겨찾기·클라우드 동기화)는 읽지 않는다.
+- Google Analytics 쿠키(`browser-analytics-cookie`, 결정 r5 §2)는 이름 허용 목록 `__utma`·`__utmz`·`_ga`만, 값에서 방문 시각(첫/이전/현재)·세션 수·유입 출처·매체·캠페인·검색어·참조 경로만 꺼낸다. 방문자 ID(클라이언트 ID)·도메인 해시·광고 클릭 ID(`utmgclid`)는 저장하지 않는다. 최신 Chrome·Edge는 쿠키 값을 `encrypted_value`(DPAPI/v10)에만 두므로 대부분 `value_status=encrypted-not-read`(존재만)이다 — 복호화하지 않는다(정책). Firefox `cookies.sqlite`는 평문이라 해석된다. GA4 세션 쿠키(`_ga_<측정 ID>`)와 `_gid`는 읽지 않는다.
+- EGG(알집) 목록은 ESTsoft 공개 명세의 헤더 배치(EGGA 머리, 파일·파일 이름·Windows/POSIX 정보·암호화·분할·솔리드 확장 헤더, 블록 헤더)를 따르지만 **실제 알집 생성 표본으로 대조하지 않았다**(합성 픽스처만). 특히 LZMA 블록의 앞 4바이트+속성 5바이트 배치는 추정이다(실패하면 `decompress-failed`로 목록만). 저장·Deflate·bzip2·LZMA 블록은 암호화·솔리드가 아닐 때 메모리에서만 풀어 CRC를 확인하고 64 MiB 이하 항목(최대 200개)의 SHA-256을 낸다(디스크에 쓰지 않음). AZO·암호화(ZIP 2.0·AES·LEA)·솔리드 항목은 목록만, 분할 압축은 그 볼륨에 든 항목만 낸다. 파일 이름 헤더가 암호화된 항목은 이름 없이 `header_encrypted`로 표시한다. 압축 폭탄 방지: 블록 비율 1,000배·항목 64 MiB·항목 20,000개 상한.
+- ALZ는 `unalz` 구현의 배치(`ALZ\x01`, `BLZ\x01` 로컬 헤더, `CLZ` 중앙 디렉터리)로 목록만 낸다(이름 cp949, DOS 시각=로컬 시각). 분할 ALZ(`.a00`…)와 압축 해제는 하지 않는다.
+- ISO는 ISO 9660 기본 볼륨 서술자와 Joliet 보조 서술자(UCS-2 이름 우선)의 디렉터리 레코드만 걷는다. Rock Ridge(POSIX 이름·권한), El Torito 부팅 이미지, 멀티세션, UDF 디렉터리는 해석하지 않으며 UDF는 있음만 표시한다(UDF 전용 이미지는 항목 0). 항목 20,000개·디렉터리 5,000개·깊이 24 상한, 자기 자신을 다시 가리키는 디렉터리는 건너뛴다. ISO 안 파일의 MOTW 우회는 같은 ISO 경로의 Zone.Identifier 행과 직접 대조해야 한다(자동 연결 없음).
+- P2P(`p2p` kind): qBittorrent `BT_backup\*.fastresume|*.torrent`, µTorrent·BitTorrent `resume.dat`(경로에 uTorrent/BitTorrent가 있을 때), FrostWire 폴더의 `.torrent`·`.resume`, 그 밖의 모든 `.torrent`(5,000개 상한), eMule `known.met`·`*.part.met`·`AC_SearchStrings.dat`·`config\preferences.ini`. 클라이언트 버전별 키 이름은 공개 문서·소스 기준이며 실제 사용 표본으로 확인하지 않았다. 업로드·다운로드 양은 클라이언트 누적 통계라 상대·시각별 전송 내역이 아니다(유포 규칙 B는 누적 업로드량이 있다는 정황). 트래커 URL은 `스킴://호스트[:포트]`만 남긴다(비공개 트래커의 passkey 비추출). eMule 사용자 해시·서버 목록·`cancelled.met`·`clients.met`, LimeWire(`downloads.dat` 자바 직렬화)와 Shareaza·Vuze는 읽지 않는다. `AC_SearchStrings.dat`에는 검색 시각이 없다(목록 순서만).
+- adb 백업(`.ab`)은 헤더 → zlib → tar를 메모리에서 흘려 읽어 `android-backup`(헤더·항목 수·앱 수)과 `android-backup-member`(앱 패키지·영역·경로·크기·시각·SHA-256) 행을 낸다. 항목 파일을 디스크에 풀어 두지 않으므로 기존 `android-app-data` 행이나 모바일 메신저 파서는 백업 안 DB를 직접 읽지 않는다 — 64 MiB 이하 SQLite 항목(최대 200개)만 임시 사본으로 스키마·행 수를 목록화한다(값 미추출). AES-256 암호화 백업은 존재·헤더(PBKDF2 반복 수)와 사유만 낸다: 솔트·IV·마스터 키 블롭은 행에 넣지 않고 비밀번호 대입은 하지 않는다. 상한: 항목 50,000개, 해제 8 GiB, 비율 200배.
+- Google 문서 바로가기(`.gdoc`·`.gsheet`·`.gslides`·`.gdraw`·`.gform` 등)는 JSON의 문서 ID·계정·URL만 `cloud-sync-file` 행(`recovery_method=stub-json`, `google_doc_type`, `google_doc_url`)으로 낸다. 문서 내용은 클라우드에만 있다. 링크 공유용 `resource_key`는 복사하지 않는다(있음만 `resource_key_present`). DriveFS 항목은 `mime_type`이 `application/vnd.google-apps.*`일 때 같은 종류·URL을 붙인다.
+- URL 카빙(`url-carve` 분석, `carved-url-candidate`)은 파일 이름으로 소스를 고른다: `pagefile.sys`·`swapfile.sys`, 이름에 `unalloc`·`blkls`·`freespace`가 든 미할당 덤프(`.unalloc`), 선택 시 `.dmp`·`.mem`·`.vmem`·`.raw`·`.lime` 메모리 덤프. 미할당 영역을 이미지에서 직접 잘라내지는 않는다(blkls 등으로 만든 덤프를 입력에 두어야 함). `hiberfil.sys`는 압축되어 있어 보지 않는다. ASCII URL과 ASCII 범위 문자로 된 UTF-16LE URL만 찾는다(한글이 그대로 든 UTF-16 URL·퍼센트 인코딩 안 된 IDN은 잘림). 호스트가 `a.b` 형식(마지막 이름 2자 이상 영문)이거나 IP일 때만 후보이며 같은 (URL, 인코딩)은 한 행(첫 오프셋, 소스 안 출현 수)이다. 주변 바이트(페이지 본문)는 저장하지 않고, 토큰 질의 값은 가리며 원본 URL SHA-256만 남긴다. 오탐(코드·문서 속 URL, 인증서 URL)이 많다 — 방문 증거가 아니다. 후보 50,000건(최대 500,000) 상한.
+<!-- r5 L3 (web, URL classes, archives, P2P, recovery): end -->
+## R5 L2
+<!-- r5 L2 (OS, system, policy presence): begin -->
+- 공통: 새 행(`startup-item`·`registry-logon-banner`·`ssh-known-host`·`ssh-authorized-key`·`ssh-client-session`·`ssh-key-file`·`ssh-server-config`·`office-identity`·`office-backstage-item`·`desktop-wallpaper`·`vm-config`·`crypto-wallet-presence`·`credential-store-presence`·`av-detection-log`·`ntfs-volume-information`)은 레지스트리 심화(`registry_depth.py`, 하이브·`.reg` 내보내기)와 파일 모듈(`system_extras.py`, `windows-system` kind; 볼륨 정보만 `windows-filesystem` kind)에서 나온다. 파일 모듈은 유형별 20,000행, 설정 파일 4 MiB, JSON 16 MiB, 로그 64 MiB·50만 줄, 키 파일 1 MiB까지 읽고, 해석하지 못한 파일은 `parse_status=error` 행 하나로 남기고 다음 파일로 넘어간다. 파일 수정 시각(`source_file_mtime`)은 취득 사본의 시각일 수 있어 행 시각으로 쓰지 않는다.
+- 시작 프로그램(`startup-item`): `Explorer\StartupApproved\{Run,Run32,StartupFolder}`(NTUSER·SOFTWARE)의 첫 바이트가 `02`/`06`이면 사용, `03`/`07`이면 사용 안 함이고, 그 밖의 값은 `알 수 없음`으로 원래 바이트(`state_byte_hex`)와 함께 둔다(검토 이미지에서 `01`이 Teams 제거 항목에 나타났으나 의미를 확인하지 못함). 사용 안 함 시각은 4–12바이트 FILETIME(`disabled_at`, `timestamp_kind=disabled`), 사용 중 항목의 시각은 키 단위 마지막 기록이다. 명령은 같은 이름의 `Run` 값으로만 잇는다(`run_value_found=false`는 Run 값이 지워진 잔존 승인 항목). `StartupFolder` 값은 파일 이름뿐이라 시작프로그램 폴더 파일 행과 이름으로 대조해야 한다. 폴더 파일 행의 시각은 LNK에 기록된 대상 파일 시각이며 폴더에 추가된 시각이 아니다. 작업 스케줄러·서비스·WMI 구독·RunOnce는 기존 행에서 본다. 규칙 `execution.startup_user_path`(B)는 사용 안 함 항목을 표시하지 않는다.
+- 로그온 배너(`registry-logon-banner`): `Policies\System`과 `Winlogon`의 `legalnoticecaption`/`legalnoticetext`가 둘 다 비면 행이 없다. 본문은 4,000자에서 자른다(`banner_text_truncated`). GPO 적용 이력은 보지 않는다.
+- SSH: OpenSSH `known_hosts`의 해시 항목(`|1|…`)은 호스트 이름을 복원하지 않는다. `config`의 `Include`는 따라가지 않고 `Match` 블록은 세션 이름으로만 보인다. PuTTY·WinSCP의 `SshHostKeys` 값은 PuTTY 형식이라 SHA256 지문을 계산하지 않고 값의 SHA-256만 둔다. 개인키 파일(`id_*`, `ssh_host_*_key`, `.ppk`, `.pem`/`.key` 중 개인키 머리글)은 존재·형식·암호화 여부·**공개키** 지문만 남긴다: OpenSSH 형식은 암호 방식과 공개키 부분까지만 디코드하고 개인 부분은 읽지 않으며, 개인키 파일은 내용 해시도 저장하지 않는다. PEM은 `Proc-Type: 4,ENCRYPTED`, PKCS#8은 머리글로 암호화를 판정한다.
+- 비밀번호 값: WinSCP `Password`, PuTTY/WinSCP `ProxyPassword`·`TunnelPassword` 등은 행에 복사하지 않고 `password_saved`/`proxy_password_saved`만 낸다. 같은 값은 하이브 문자열 피벗(`registry-hive-strings`), `.reg` 내보내기 행(`values`, 자리 표시 `(비밀번호 값 — 저장하지 않음)`), 문서 추출(docs 출력·색인·케이스 DB의 `WinSCP.ini`/`.reg` 본문)에서도 지운다. 삭제된(빈 셀) 값 복구 후보(`registry-value-recovery-candidate`)에 남은 **과거** 비밀번호 값은 현재 값과 다르면 거르지 못한다.
+- Office: `Office\<버전>\Common\Identity\Identities\<id>`만 읽는다(`Roaming\Identities`, 라이선스·토큰 캐시는 읽지 않음). `BackstageInAppNavCache\**\*.json`은 공개 자료로 스키마를 확인하지 못해 키 이름(`Url`/`Path`/`DisplayName`/`LastModified`/`LastModifiedBy` 등, 대소문자 무시)으로 항목을 찾는다(`field_extraction=heuristic-keys`, 파일당 5,000항목·깊이 32). Office 버전이 바뀌면 열이 비거나 다른 객체가 행이 될 수 있다.
+- 네트워킹 이벤트 채널(`evt-ch-networking`, 채널 그룹 `networking`): NetworkProfile·WLAN-AutoConfig·Dhcp-Client·Dhcpv6-Client·DNS-Client·Bits-Client·VPN-Client·RasAgileVpn·NCSI 채널이다. 10000/10001 등 이벤트 ID별 해석은 기존 이벤트 행 그대로이며, RasClient는 응용 프로그램 채널(공급자 RasClient)에 기록되므로 `응용 프로그램`에 남는다. 이전에 `기타 채널`이던 Bits-Client 행은 `네트워크`로 옮겨진다.
+- NTFS 볼륨 정보(`ntfs-volume-information`): 증거 트리에 있는 `$Boot`(VBR 512바이트)와 같은 폴더의 `$MFT` 3번 레코드(`$Volume`: `$VOLUME_NAME`, `$VOLUME_INFORMATION` 버전·플래그)만 읽는다. 이미지를 직접 열지 않으며, `ntfs-meta` 분석은 `$Boot`를 추출하지 않으므로 이미지 입력에서는 `$Boot`를 따로 내보내야 VSN이 나온다. MFT 레코드 크기는 `$Boot`에서 읽고 없으면 1,024바이트로 가정한다. `volume_serial_number`는 8바이트 VSN의 하위 4바이트(`%08X`, LNK·Prefetch와 같은 표기)이며 의미 태그 `device`로 통합 보기 › 장치 식별자에서 LNK 볼륨 시리얼과 만난다. 검토 서브셋에는 `$Boot`/`$MFT`가 없어 행이 0이다.
+- LogMeIn: 경로에 `logmein`·`lmiguardian`·`lmi_rescue`가 들어간 파일을 기존 원격 제어 행(`third-party-remote-control-artifact`, `product=logmein`)으로 낸다. 로그 줄은 공통 세션 후보 추출(시각·IP·ID 문자열)만 하며 LogMeIn 전용 로그 형식은 해석하지 않는다. 국내 원격 지원(알서포트 RemoteCall)은 경로를 확인하지 못해 넣지 않았다.
+- 백신 로그(`av-detection-log`): McAfee Endpoint Security `*_Activity.log`와 VirusScan Enterprise 8.x(`OnAccessScanLog.txt`·`OnDemandScanLog.txt`·`AccessProtectionLog.txt` 등)만 읽는다. 실제 로그로 형식을 대조하지 못했다: 줄 첫머리 시각(`MM/DD/YYYY`·`YYYY-MM-DD`, AM/PM·오전/오후, 현지 시각·시간대 없음)과 탐지 단어(detected·quarantined·deleted·cleaned·blocked·infected·trojan·탐지·격리·차단·삭제; 모듈 이름에 흔한 threat·virus는 쓰지 않음, "no threats found"류 제외)가 있는 줄만 행이 되고, 탭 구분 줄은 열 순서로, 그 밖은 텍스트 패턴(`contains …`, `Threat Name:`)으로 위협명·경로를 찾는다(`field_extraction`). 원문(`message`)과 함께 검토해야 한다. **AhnLab V3 로그는 넣지 않았다**: 탐지 기록 위치·형식(제품 버전별 DB/암호화 여부)을 공개 자료로 확인하지 못했다(미확인, 후속 과제).
+- 가상 머신(`vm-config`): `.vmx`는 허용 목록 키(표시 이름·게스트 OS·디스크·MAC·공유 폴더·UUID·암호화 표시)만, `preferences.ini`(`pref.mruVM*`), `inventory.vmls`(`vmlist*`), `VirtualBox.xml`(`MachineEntry`), `*.vbox`(Machine·HardDisk·Adapter·SharedFolder·Snapshot)를 읽는다. 가상 디스크(`.vmdk`/`.vdi`) 내부와 Hyper-V `.vmcx`(이진 형식, 존재·GUID만)는 해석하지 않는다. 규칙 `antiforensics.vm_present`(C)는 Docker Desktop·WSL·Windows Sandbox 유틸리티 VM을 이름으로 제외한다.
+- 암호화폐 지갑(`crypto-wallet-presence`, 정책 제외 행): 키·시드·xprv·키스토어 내용은 행·문서 색인·`--extract` 어디에도 남기지 않는다. Bitcoin Core `wallet.dat`(이름으로 어디서나 찾음; BDB/SQLite 머리글, 앞 16 MiB에 `mkey` 레코드가 있으면 암호화로 표시하는 근사), Electrum(평문 JSON이면 `addresses`의 공개 주소만, 최대 20개; `keystore`는 행에 넣지 않음; `BIE1` base64는 암호화), Ethereum keystore(파일 이름의 공개 주소), Exodus·Ledger Live·Atomic·Wasabi·Monero·Coinomi·Guarda·Jaxx는 존재·파일 수·크기만이다. 브라우저 확장 지갑은 Chromium 계열 프로필의 `Local Extension Settings`·`Sync Extension Settings`·`Extensions`·`IndexedDB\chrome-extension_<id>_0.indexeddb.*`에서 확장 ID 목록(MetaMask·Phantom·Kaikas·Coinbase·Trust·Binance·TronLink·Ronin·Keplr·OKX·Rabby·Exodus Web3, Chrome 웹 스토어 ID)으로만 찾는다. Firefox 확장은 프로필별 무작위 UUID라 대응하지 않는다. 규칙 `antiforensics.crypto_wallet_present`(C)는 빈 폴더(설치만 함)를 표시하지 않는다.
+- 저장된 자격 증명(`credential-store-presence`, 정책 제외 행): 사용자(`AppData\{Roaming,Local}\Microsoft\{Credentials,Vault,Protect}`), systemprofile·LocalService·NetworkService, `ProgramData\Microsoft\Vault`, `System32\Microsoft\Protect`의 파일마다 존재·크기·GUID·SID·파일 해시만 낸다. DPAPI 복호, blob 구조(마스터 키 GUID·설명) 해석, `Preferred` 해석은 하지 않는다(정책).
+- 바탕 화면(`desktop-wallpaper`): `Control Panel\Desktop`의 `WallPaper`와 `TranscodedImageCache`(0x18부터 UTF-16 원본 경로), `Explorer\Wallpapers\BackgroundHistoryPath<N>`(0번에만 키 시각), `Themes\TranscodedWallpaper`·`Themes\CachedFiles`(형식·크기·JPEG/PNG/BMP 해상도)만 본다. 바탕 화면 아이콘 배치(`Shell\Bags\1\Desktop` IconLayouts)와 슬라이드쇼 설정은 해석하지 않는다(연기).
+- 문서 추출 정책(R5 L2): 지갑 저장소·지갑 확장 저장소·Credentials/Vault/Protect 파일·SSH 개인키(기본 이름 `id_rsa`·`id_ed25519` 등, `ssh_host_*_key`, `.ppk`)·`wallet.dat`은 문서 본문을 `(비밀 값이 든 파일 — 정책상 본문을 저장하지 않음)`으로 대신하고, 다른 문서 안의 PEM/OpenSSH/PuTTY 개인키 블록과 `WinSCP.ini`·`.reg`의 비밀번호 값 줄은 가린다(일반 문서의 `password=` 줄은 그대로 둔다). `--extract`는 같은 파일을 복사하지 않고 매니페스트에 `secret-redacted`와 SHA-256만 남긴다.
+<!-- r5 L2 (OS, system, policy presence): end -->
+
+### R5 적대적 리뷰 후속 수정 (브랜치 `fix/r5-backend-review`)
+<!-- r5 review fixes (backend): start -->
+- **삭제·이전 비밀번호 값**: 하이브의 free/삭제 vk 셀 중 이름이 `Password`·`ProxyPassword`·`TunnelPassword`·`Passphrase`·`EncryptedPassword`인 값은 부모 키와 상관없이 `registry-value-recovery-candidate`에서 `(비밀번호 값 — 저장하지 않음)`으로 가리고 `decoded_data_preview_sha256`을 비운다. 그 데이터 문자열은 현재 PuTTY/WinSCP 비밀번호가 없어도 `registry-hive-strings` 피벗에서 뺀다. 이름이 지워졌거나 다른 이름으로 남은 값의 데이터는 알아볼 수 없어 가리지 못한다.
+- **문서 본문·추출의 비밀 파일**: Signal `config.json`, `logins*.json`·`key3.db`·`key4.db`·`signons.sqlite`, Chromium `Login Data`·`Login Data For Account`, FileZilla `sitemanager.xml`·`recentservers.xml`은 본문을 저장하지 않는다. `[Sessions\…]`/`[Sessions]` 절이 있는 모든 `.ini`의 비밀번호 줄, FileZilla `<Pass>` 값, `.reg`의 `hex(1):` 줄 이어짐까지 포함한 비밀번호 값, `PRIVATE KEY( BLOCK)` 형식의 모든 개인키(PGP 포함)를 가린다. `extract`는 이런 파일(1 MiB 이하 텍스트는 내용으로 판단)을 복사하지 않고 `secret-redacted`로 해시만 남긴다. 이름·내용이 이 규칙에 없는 비밀 파일은 여전히 문서로 읽힌다.
+- **URL 자격 증명**: `redact_url`은 `scheme://user:pass@` 사용자 정보를 `[가림]@`으로 바꾸고 `password`·`passwd`·`pwd`·`pass`·`passkey`·`refresh_token`·`id_token`·`client_secret`·`api_key`·`apikey`·`secret`·`resourcekey`·`otp` 질의 값을 가린다(URL 카빙, `location-url-candidate`, 미디어 플레이어 스트림 URL·원래 값, Google 문서 바로가기 `stub_url`). 원래 URL의 sha256은 `*_sha256`에 남는다. 목록에 없는 이름의 토큰 질의 값은 가리지 못한다.
+- **자원 한도**: PSD XMP는 앞 256 KiB만 `str.find`로 걷는다(`xmp_truncated`). adb 백업 해제는 요청 크기 + 64 KiB씩만 풀어 압축 폭탄이 메모리를 키우지 못한다. PAX `mtime` 같은 범위 밖 시각은 `member_mtime`이 비우고, 구성원 하나의 예외는 그 구성원만 건너뛴다(`member_error_count`); 해제 전체 실패도 모바일 공급자를 멈추지 않고 `android-backup` 한 행(`unreadable`)으로 남는다. EGG는 압축 블록이 구성원 상한(64 MiB)을 넘으면 읽지 않고, 아카이브당 해제 합계 512 MiB 이후 구성원은 목록만 낸다. ISO 9660은 이미지당 디렉터리 익스텐트 읽기 합계 64 MiB에서 멈추고(`directory-read-cap-reached`) 레코드 건너뛰기에 논리 블록 크기를 쓴다.
+- **메일 중복 제거**: `email` 공급자는 Windows 메일/Live Mail 루트의 `.eml` 가운데 `email-clients`가 실제로 읽은 것(루트당 메시지 상한·걷기 상한 안)만 건너뛰고 나머지는 직접 읽는다. Thunderbird `News/` 뉴스그룹 폴더도 메일 클라이언트 공급자가 읽는다. 확장자 없는 mbox 후보의 `.msf` 확인은 캐시·임시 폴더와 16자 이상 16진 이름을 건너뛴다.
+- **기타**: 네이버 지도 `x`/`y` 대체 좌표는 한반도 주변(위도 30–45, 경도 120–135) 밖이면 버린다(TM128/KATECH 값 오배치 방지). `/place/<숫자 ID>`는 검색어로 쓰지 않는다. v2 전용 토렌트(BEP 52, `pieces` 없음)는 v1 `info_hash`를 내지 않고 `torrent_version`(`v1`·`v2`·`hybrid`)을 둔다. eMule BOOLARRAY 태그 길이는 eMule과 같이 `len/8+1`로 건너뛴다. NTFS `$Volume` 레코드의 fixup 간격은 VBR `bytes_per_sector`를 쓴다(4Kn). eMule `.part.met` 0xE1(분할 형식) 버전은 레이아웃을 공개 자료로 확인하지 못해 여전히 오류 행으로 남긴다.
+<!-- r5 review fixes (backend): end -->
+
+## 공개 미지원 (AXIOM 대비)
+<!-- r5 L4 (documentation): public non-support list: start -->
+2026-10-18 R5 재판정 기준. AXIOM Examine의 Computer 검색 항목 199개 중 아래 38개는 RapidTriage가 파서를 두지 않는다고 공개한다(매트릭스 `docs/research/axiom-parity-matrix-2026-10-17.md` Table A의 최종 열 `공개 미지원`). 대부분 서비스가 끝났거나 국내 사건에서 쓰이지 않는 앱이고, 남은 흔적은 다른 행(설치 프로그램·Prefetch·브라우저 기록·URL 분류·문서 색인·파일 인벤토리)으로 확인한다. 실제 사건에서 필요해지면 합성 픽스처와 공개 형식 자료로 개별 파서를 추가한다.
+
+| AXIOM 항목 | 그룹 | 사유 |
+|---|---|---|
+| AIM | 커뮤니케이션 | 2017-12 서비스 종료, 국내 사용 사례 희소 |
+| Ares | 커뮤니케이션 | Ares Galaxy P2P 개발 중단, 국내 사용 희소(토렌트·eMule 흔적으로 대체) |
+| Bebo | 커뮤니케이션 | 메신저 기능 종료, 국내 미사용 |
+| Bing Toolbar | 웹 관련 | IE 툴바, 배포 종료·IE 지원 종료(2022) |
+| Carbonite | 클라우드 저장소 | 국내 사용이 드문 미국 백업 서비스, 설치 사실은 설치 프로그램·Prefetch 행으로 확인 |
+| Chatroulette | 커뮤니케이션 | 웹 전용이라 로컬 앱 흔적이 없음, 브라우저 기록·URL 분류로 확인 |
+| Chatstep | 커뮤니케이션 | 웹 전용, 서비스 사실상 종료 |
+| Cortana | 운영체제 | Windows 11에서 제거됨, 검색 흔적은 Windows Search·브라우저 행으로 확인 |
+| Gigatribe | 커뮤니케이션 | P2P 서비스 종료 |
+| Google Talk | 커뮤니케이션 | 서비스 종료(Hangouts·Chat으로 이관) |
+| Google Toolbar | 웹 관련 | IE 툴바 배포 종료 |
+| Google+ | 커뮤니케이션 | 2019 서비스 종료 |
+| ICQ | 커뮤니케이션 | 2024-06 서비스 종료 |
+| IME Suggestions | 운영체제 | 중국어·일본어 IME 학습 사전 대상, 한국어 IME에는 해당 추천 기록이 없음 |
+| IP Addresses - Audio/Video Calls | 커뮤니케이션 | 통화 상대 IP는 디스크에 남지 않는 휘발성 정보, 메모리 분석(memory-network) 행으로 확인 |
+| Limerunner | 커뮤니케이션 | P2P 클라이언트 단종 |
+| Luckywire | 커뮤니케이션 | P2P 클라이언트 단종 |
+| Lync / Office Communicator | 커뮤니케이션 | Skype for Business·Teams로 대체됨, 대화 기록은 Outlook '대화 기록' 폴더로 저장되어 PST 경로로 확인 |
+| mIRC | 커뮤니케이션 | 국내 사용 희소, 평문 로그는 문서 색인으로 검색 가능 |
+| MSN Plus! | 커뮤니케이션 | Windows Live Messenger 애드온, 메신저 종료(2013)와 함께 소멸 |
+| MySpace | 커뮤니케이션 | 메시징 기능 소멸, 국내 미사용 |
+| Omegle | 커뮤니케이션 | 2023-11 서비스 종료, 웹 전용 |
+| ooVoo | 커뮤니케이션 | 2017 서비스 종료 |
+| Paltalk | 커뮤니케이션 | 국내 사용 희소 |
+| Pidgin | 커뮤니케이션 | 국내 사용 희소, HTML/텍스트 로그는 문서 색인으로 검색 가능, accounts.xml 비밀번호는 정책상 비추출 |
+| QuickBooks Files | 문서 | 국내 회계는 더존 등 국산 ERP 중심, .qbw는 파일 인벤토리로만 확인 |
+| RealPlayer | 미디어 | 구형·국내 사용 희소 |
+| Second Life | 커뮤니케이션 | 국내 사건 관련성 낮은 가상세계 앱 |
+| Shareaza | 커뮤니케이션 | P2P 클라이언트 개발 중단 |
+| TorChat | 커뮤니케이션 | 개발 중단, Tor 사용은 Tor Browser(Firefox 계열) 흔적으로 확인 |
+| Trillian | 커뮤니케이션 | 국내 사용 희소 |
+| Usenet Binary Files | 미디어 | 국내 사용 희소(NZB 뉴스그룹) |
+| WebKit | 웹 관련 | Windows용 WebKit 브라우저(Safari) 단종 |
+| Wickr Me (데스크톱) | 커뮤니케이션 | 2023-12-31 서비스 종료, 모바일 내보내기 경로는 유지 |
+| Windows Live Messenger / MSN Messenger® | 커뮤니케이션 | 2013 서비스 종료 |
+| WordPerfect Files | 문서 | 국내 사용 희소, 파일은 인벤토리·문자열 색인으로만 확인 |
+| World of Warcraft | 커뮤니케이션 | 게임 채팅 로그는 기본 비활성, 국내 사건 관련성 낮음 |
+| Yahoo! Messenger | 커뮤니케이션 | 2018-07 서비스 종료 |
+
+혼합 행에서 지원하지 않는 부분(행 자체는 지원되는 부분으로 `있음` 판정):
+
+| AXIOM 항목 | 지원하지 않는 부분 | 사유 |
+|---|---|---|
+| Limewire / Frostwire | LimeWire `downloads.dat`·설정 | 2010 법원 명령으로 서비스 중단, 자바 직렬화 형식이라 표준 라이브러리 파서 비용이 큼. FrostWire는 `p2p-torrent`·`p2p-transfer`로 읽음(실샘플 미검증) |
+| Safari | Windows용 Safari | 2012 개발 중단. macOS Safari는 `macos-browser-history-downloads` |
+| iMessage | macOS `chat.db` | macOS 범위(해당 없음). PC에 있는 iOS 백업 `sms.db`는 `mobile-message` |
+
+R5에서 연기했거나 확인하지 못한 항목(AXIOM 행 판정은 위 매트릭스가 기준이며, 아래는 그 행 안의 빈 부분이거나 AXIOM 밖 국내 확장이다):
+
+| 항목 | 관련 행 | 상태 · 사유 |
+|---|---|---|
+| AhnLab V3 탐지 로그 | McAfee Logs(AXIOM 밖 국내 확장) | 구현 안 함. 제품 버전별 탐지 기록 위치·형식(DB·암호화 여부)을 공개 자료로 확인하지 못함. McAfee만 `av-detection-log` |
+| 알서포트 RemoteCall | LogMeIn(AXIOM 밖 국내 확장) | 구현 안 함. 설치·로그 경로를 확인하지 못함 |
+| 팟플레이어·KMPlayer 재생 기록 값 이름 | VLC Media Player(국내 확장) | 값 이름 미확인. 이름이 recent·history 등인 키 아래의 경로형 값만 수집(`verification: unconfirmed`, 신뢰도 낮음). 곰플레이어는 서브셋 한 건으로 배치 확인, 식별자 해시 알고리즘은 미확인 |
+| Windows 메일 `store.vol` 폴더·읽음·플래그 | Windows Mail | ESE 표 목록·주소 후보만(`email-client-store`). 메시지 본문은 `.eml`로 읽음 |
+| Facebook Messenger `msys` 스키마 | Facebook Messenger | 최선 노력 매핑, 맞지 않으면 인벤토리. 앱이 2025-12 종료되어 표본 확보가 어려움 |
+| Viber `Events.Direction` 의미 | Viber | 0=수신·1=발신 가정, 원래 값 `viber_direction_raw`를 함께 둠 |
+| Phone Link 버전별 열·시각 단위 | Your Phone | 표·열 별칭으로 맞춤, 시각 인코딩은 크기로 추정해 `timestamp_encoding`에 남김 |
+| 바탕 화면 아이콘 배치(IconLayouts) | Rebuilt Desktops | 해석 안 함. 배경 이미지·경로만(`desktop-wallpaper`) |
+| Office Backstage JSON 스키마 | Microsoft Office | 키 이름 휴리스틱(`field_extraction=heuristic-keys`) |
+| McAfee 로그 형식 | McAfee Logs | 실제 로그 대조 없음, 휴리스틱 줄 해석 |
+| EGG 실제 알집 표본(LZMA 블록 배치) | EGG Archives | 공개 명세·합성 픽스처만 |
+| Shareaza·Vuze·eMule `clients.met`·`cancelled.met` | Shareaza(공개 미지원), Emule | 읽지 않음 |
+| Thunderbird Mork `abook.mab` | MBOX E-mails | 목록만 |
+| Firefox 지갑 확장 | Crypto Currency | 확장 UUID가 프로필마다 무작위라 대응하지 않음 |
+| `$Boot` 이미지 직접 추출 | File System Information | 증거 트리에 `$Boot`가 있을 때만 `ntfs-volume-information` |
+| hiberfil.sys URL 카빙 | Potential Browser Activity | 압축되어 있어 보지 않음 |
+<!-- r5 L4 (documentation): public non-support list: end -->
+
+## 정책 제외
+<!-- r5 L4 (documentation): policy exclusions: start -->
+RapidTriage는 아래 기능을 프로젝트 정책으로 구현하지 않는다. 각 항목에 대해 대신 나오는 행(존재·위치·메타데이터)을 함께 적는다. 매트릭스 Table A에서 `정책 제외`로 닫힌 11행은 Bitcoin, Crypto Currency, Encrypted Files, LINE, QQ, Rebuild Webpages, Signal, Telegram, Webpage Recovery, WeChat, Windows Stored Credentials이고, 나머지 항목은 Table A 행이 아닌 기능(Table B·워크플로)이다.
+
+| 제외 기능 | 하지 않는 것 | 대신 나오는 것 |
+|---|---|---|
+| 자격 증명 복호·DPAPI | Windows Credential Manager·Vault·DPAPI 마스터 키 복호, 브라우저 저장 비밀번호(`Login Data`·`logins.json`·`key4.db`) 복호, Chromium 쿠키 `encrypted_value` 복호, SECURITY 비밀(LSA secrets) 복호 | `credential-store-presence`(Credentials·Vault·Protect 파일의 존재·크기·GUID·SID·해시), `browser-credential-store-inventory`, Thunderbird 프로필 행의 `logins.json`·`key4.db` 이름·크기·시각, `browser-analytics-cookie`의 `value_status=encrypted-not-read` |
+| 비밀번호 크래킹·대입 | 암호 압축(ZIP·7z·RAR·EGG)·암호 문서(HWP·OOXML·PDF)·adb 암호화 백업·BitLocker의 비밀번호 대입, 사전·무차별 대입, 키 탐색 | 감지 행(`archive-encrypted-*`, 문서 암호 플래그, EGG 암호화 항목, `android-backup`의 암호화 헤더와 PBKDF2 반복 수), `bitlocker-recovery-key-file`(키 가림·해시). 카카오톡 PC는 이미 회수한 키 재료의 결정적 유도만 시도하며 대입은 하지 않음 |
+| 원격 수집·원격 시스템 연결 | 원격 에이전트 배포, 라이브 시스템·클라우드 계정 접속, 단축 URL 펼치기 같은 외부 요청 | 오프라인 증거 입력(E01·디렉터리·내보내기)만 처리. 클라우드·모바일은 승인된 내보내기(Takeout·M365·벤더 CSV/JSON) 정규화, 원격 접속 흔적은 `third-party-remote-control-artifact`·RDP 행 |
+| 외부 프로그램 실행 | 아티팩트 파서가 기본값으로 외부 프로그램을 실행하는 것 | PST/OST는 `RAPIDTRIAGE_EMAIL_EXTERNAL_TOOLS=1`일 때만 설치된 pffexport/readpst를 실행(기본은 `email-container-inventory`의 `disabled` 행과 `/doctor` 안내). 메모리는 Volatility를 실행하지 않고 출력(JSON/JSONL)을 가져와 `memory-*` 행으로 정규화. 증거 입력 추출(Sleuth Kit·7z·bsdtar)은 증거 처리 단계의 선언된 도구 체인이다(Evidence Handling 절) |
+| Magnet REVIEW 업로드 | 타사 검토 플랫폼(Magnet REVIEW)으로 케이스 업로드·연동 | 로컬 검토 묶음(reviewer bundle: 선택 증거 메타데이터·해시·검토 메모·보고서·감사 JSON·매니페스트)과 보고서 내보내기(Markdown·HTML·DOCX·PDF + 해시 매니페스트) |
+| 웹 페이지 재구성·복원(Rebuild Webpages, Webpage Recovery) | 브라우저 캐시 본문 저장·페이지 재조립 | `browser-cache-entry`(URL·헤더·Content-Type·크기·SHA-256·앞 256바이트 서명, `body_policy`), Web Video Fragments는 Content-Type `video/*` 행(표 대체). 유해물·개인정보 재배포 위험 때문에 본문을 저장하지 않음 |
+| 암호화 메신저 저장소(LINE·Telegram·WeChat·Signal·QQ) | 로컬 DB 키 추출·SQLCipher·tdata 복호 | `chat-app-inventory`(`inventory_only=true`, 한국어 사유), 평문으로 남는 받은 파일 목록(`app-file-store`: Telegram `Downloads\Telegram Desktop`, WeChat `FileStorage`, QQ `FileRecv`), 승인된 모바일 내보내기 정규화. Signal `config.json`은 열지 않고 이름·크기·시각만 |
+| 암호화폐 지갑 키·시드 | 개인키·시드·xprv·키스토어 내용 추출, 지갑 복호 | `crypto-wallet-presence`(지갑 종류·경로·파일 수·크기·암호화 표시·평문 Electrum 공개 주소 최대 20개·확장 지갑 ID), `antiforensics.crypto_wallet_present`(C) 규칙, 거래소 방문은 URL 분류 finance. 문서 추출·`--extract`도 지갑 파일 본문을 저장하지 않음(`secret-redacted`) |
+| Credentials/Vault blob·SSH 개인키·저장 비밀번호 값 | blob 구조 해석, SSH 개인키 본문·해시, PuTTY/WinSCP 저장 비밀번호 값 | `credential-store-presence`, `ssh-key-file`(존재·형식·암호화 여부·공개키 지문), `ssh-client-session`의 `password_saved` 표시. 하이브 문자열 피벗·`.reg` 내보내기·문서 색인에서도 같은 값을 가림 |
+<!-- r5 L4 (documentation): policy exclusions: end -->
