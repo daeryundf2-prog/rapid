@@ -1815,6 +1815,28 @@ class AnalysisApiTests(unittest.TestCase):
         page = self.client.get(f"/api/runs/{self.run_id}/files", params={"limit": 10}).json()
         self.assertEqual(page["candidates"][0]["ntfs"]["entry_number"], 65)
 
+    def test_files_time_conditions_resolve_acquisition_copies_through_ntfs(self) -> None:
+        # r4 V3 review B5: /files time conditions look an acquisition copy's $SI time up in the
+        # NTFS join index per row instead of joining the whole list first.
+        state = self.run_ntfs()
+        self.assertEqual(state["status"], "completed", state)
+        page = self.client.get(f"/api/runs/{self.run_id}/files", params={"limit": 10}).json()
+        self.assertEqual(page["ntfs_join"]["status"], "joined")
+        si_modified = page["candidates"][0]["ntfs"]["si_modified_at"]
+        self.assertTrue(si_modified)
+        files_path = Path(json.loads((self.run_dir / "rapidtriage-run-summary.json").read_text(encoding="utf-8"))["outputs"]["files"])
+        payload = json.loads(files_path.read_text(encoding="utf-8"))
+        for candidate in payload["candidates"]:
+            candidate.pop("fs_modified_at", None)
+            candidate.update({"modified_at": "2030-01-01T00:00:00Z", "modified_at_origin": "acquisition-copy"})
+        files_path.write_text(json.dumps(payload), encoding="utf-8")
+        day = si_modified[:10]
+        hit = self.client.get(f"/api/runs/{self.run_id}/files", params={"limit": 10, "from": day, "to": day}).json()
+        self.assertEqual([row["record_index"] for row in hit["candidates"]], [0])
+        self.assertEqual(hit["candidates"][0]["ntfs"]["si_modified_at"], si_modified)  # the page itself is joined
+        miss = self.client.get(f"/api/runs/{self.run_id}/files", params={"limit": 10, "from": "2029-12-31"}).json()
+        self.assertEqual(miss["candidates"], [])  # acquisition copies never use modified_at
+
     def test_files_join_skips_unparsed_ntfs_analyses(self) -> None:
         parsed = self.run_ntfs()
         unparsed = self.run_ntfs(options={"parse": False})

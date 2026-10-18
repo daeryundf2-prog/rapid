@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import functools
 import json
 import logging
 import re
@@ -51,7 +52,7 @@ from .dashboard import (
     read_case_notes,
     write_case_notes,
 )
-from .files_ntfs import join_files_page
+from .files_ntfs import join_files_page, ntfs_si_modified_resolver
 from .fs_tree import (
     FS_INDEX_CACHE,
     files_output_key,
@@ -89,7 +90,14 @@ from .pagination import (
     paginate_payload,
     with_record_index,
 )
-from .row_conditions import RowConditions, filter_rows_page, parse_row_conditions
+from .row_conditions import (
+    MATCH_CACHE,
+    RowConditions,
+    filter_rows_page,
+    needs_ntfs_time,
+    output_stamp,
+    parse_row_conditions,
+)
 from .runops import (
     build_run_output_preview,
     build_run_viewer_workflow_validation,
@@ -157,6 +165,17 @@ def row_conditions_or_422(
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+
+
+GEO_ARTIFACTS_ONLY = (
+    "geo(위치 상자) 조건은 아티팩트 목록(/artifacts)에서만 쓸 수 있습니다 — 파일·타임라인 행에는 좌표가 없습니다"
+)
+
+
+def reject_geo(geo: str | None) -> None:
+    """``/files`` and ``/timeline`` take no ``geo`` (the console sends it to ``/artifacts`` only)."""
+    if geo is not None and geo.strip():
+        raise HTTPException(status_code=422, detail=GEO_ARTIFACTS_ONLY)
 
 
 def _echo_conditions(page: dict[str, object], conditions: RowConditions | None) -> dict[str, object]:
@@ -501,6 +520,7 @@ def build_runs_router(
         tz: str | None = Query(default=None),
         partial: str | None = Query(default=None),
         content: list[str] = Query(default=[]),
+        geo: str | None = Query(default=None),
     ) -> dict[str, object]:
         """Paged timeline events.
 
@@ -509,8 +529,11 @@ def build_runs_router(
         ``timestamp``; content by ``details.artifact_type`` and the referenced file's extension).
         With any of them (``limit > 0``) ``offset``/``limit`` count matches, every event carries
         ``record_index`` (its position in ``events``) and the page reports ``matched``,
-        ``record_count`` and ``pagination.conditions``. A bad value is a Korean 422.
+        ``record_count`` and ``pagination.conditions``. A bad value is a Korean 422; so is ``geo``
+        (events carry no coordinates). The matching positions are cached per (timeline revision,
+        conditions) so later pages do not rescan the events (``row_conditions.MATCH_CACHE``).
         """
+        reject_geo(geo)
         conditions = row_conditions_or_422(
             time_from=time_from,
             time_to=time_to,
@@ -528,7 +551,12 @@ def build_runs_router(
             raise HTTPException(status_code=400, detail=FILTER_LIMIT_MESSAGE)
         events = payload.get("events") if isinstance(payload.get("events"), list) else []
         rows, pagination = filter_rows_page(
-            events, conditions.predicate("timeline"), collection="events", offset=offset, limit=limit
+            events,
+            conditions.predicate("timeline"),
+            collection="events",
+            offset=offset,
+            limit=limit,
+            cache_key=("timeline", run_id, output_stamp(get_output_path(store, run_id, "timeline")), conditions.cache_key()),
         )
         pagination["conditions"] = conditions.describe()
         page = {key: value for key, value in payload.items() if key != "events"}
@@ -778,11 +806,24 @@ def build_runs_router(
                         )
                         if fields or row_filter is not None:
                             # The sort index has no field filter / row conditions: narrow it to the matching records.
-                            by_field = field_matching_records(
-                                artifact_payload,
-                                payload_path=get_output_path(store, run_id, name),
-                                fields=fields,
-                                row_filter=row_filter,
+                            field_path = get_output_path(store, run_id, name)
+                            records_path = artifact_payload.get("records_path")
+                            field_key = (
+                                ("artifacts-sort", run_id, name, output_stamp(field_path, records_path), repr(fields), conditions.cache_key())
+                                if conditions is not None
+                                else None
+                            )
+                            by_field = set(
+                                MATCH_CACHE.get_or_compute(
+                                    field_key,
+                                    functools.partial(
+                                        field_matching_records,
+                                        artifact_payload,
+                                        payload_path=field_path,
+                                        fields=fields,
+                                        row_filter=row_filter,
+                                    ),
+                                )
                             )
                             allowed_records = by_field if allowed_records is None else allowed_records & by_field
                         sorted_page = paginate_sorted_artifact_output(
@@ -1100,6 +1141,7 @@ def build_runs_router(
         tz: str | None = Query(default=None),
         partial: str | None = Query(default=None),
         content: list[str] = Query(default=[]),
+        geo: str | None = Query(default=None),
     ) -> dict[str, object]:
         """Paged file rows joined with the newest ``ntfs-meta`` analysis.
 
@@ -1117,11 +1159,13 @@ def build_runs_router(
         Row conditions (plan r4 §2.3) as on ``GET /artifacts``: ``from``, ``to``, ``weekday``,
         ``hours``, ``offhours``, ``tz``, ``partial``, ``content`` (``limit > 0``; compose with
         ``category``, ``flag``/``flag_grade``, ``sort=flags``). The row time is the 수정 time:
-        ``fs_modified_at``, else for an acquisition copy the joined NTFS ``$SI`` modified time
-        (time conditions then join the whole list first; an acquisition copy without the join has
-        no time and never matches), else ``modified_at``. ``content`` maps to the scan categories
+        ``fs_modified_at``, else for an acquisition copy the NTFS ``$SI`` modified time, looked up
+        per row in the NTFS join index only while the predicate runs and only when the list has
+        such rows and the join status is ``joined`` (an acquisition copy without the join has no
+        time and never matches), else ``modified_at``. ``content`` maps to the scan categories
         (문서 documents · 이미지 images · 압축 archives · 실행 executables · DB databases · 메일
-        emails; 영상/음성 by extension). The page reports ``pagination.conditions``.
+        emails; 영상/음성 by extension). ``geo`` is a Korean 422 (files carry no coordinates).
+        The page reports ``pagination.conditions``.
 
         특이사항: rows carry ``flags`` (kind ``files:<scope>``) and the page
         reports ``flags_join`` like ``GET /artifacts``; ``flag``/``flag_grade``
@@ -1163,6 +1207,7 @@ def build_runs_router(
             # Only sort=flags exists here; other values are ignored (as before this parameter existed).
             LOGGER.info("GET /files ignores unsupported sort=%r", sort[:64])
         flag_query = parse_flag_query(flag, flag_grade, sort_flags=sort_flags)
+        reject_geo(geo)
         conditions = row_conditions_or_422(
             time_from=time_from,
             time_to=time_to,
@@ -1173,22 +1218,24 @@ def build_runs_router(
             partial=partial,
             content=content,
         )
-        row_filter = conditions.predicate("files") if conditions is not None else None
         join = flags_join(_run_output_dir_or_none(get_job(store, run_id).summary))
         restrict, path_filter = _files_path_restriction(payload, run_id, collection, path_prefix, recursive, special)
         if (flag_query.active or wanted or conditions is not None or restrict is not None) and limit <= 0:
             raise HTTPException(status_code=400, detail=FILTER_LIMIT_MESSAGE)
         source_rows: list[object] | None = None
+        row_filter = None
         if conditions is not None:
             source_rows = payload.get(collection) if isinstance(payload.get(collection), list) else []
-            if conditions.uses_time:
-                # Acquisition copies take their time from the NTFS join: join the whole list first.
+            ntfs_time = None
+            if conditions.uses_time and any(needs_ntfs_time(row) for row in source_rows):
+                # Acquisition copies take their time from the NTFS join: resolve it per row while
+                # filtering (only when the join is "joined") instead of joining the whole list.
                 try:
                     time_scope = run_scope(store, run_id, require_ready=False)
                 except HTTPException:
                     time_scope = None
-                joined_all = join_files_page(time_scope, {collection: source_rows}, source_rows, collection=collection)
-                source_rows = joined_all[collection] if isinstance(joined_all.get(collection), list) else source_rows
+                ntfs_time = ntfs_si_modified_resolver(time_scope, source_rows) if time_scope is not None else None
+            row_filter = conditions.predicate("files", ntfs_time)
         if flag_query.active or restrict is not None:
             all_rows = source_rows if source_rows is not None else (payload.get(collection) if isinstance(payload.get(collection), list) else [])
             page_rows, flag_pagination = filter_files_rows(
