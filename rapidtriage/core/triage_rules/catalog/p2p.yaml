@@ -17,7 +17,7 @@ families:
     label: 이름
   - key: info_hash
     semantic: hash
-    label: info-hash(v1)
+    label: 정보 해시(info-hash v1)
     format: mono
   - key: total_size
     label: 전체 크기
@@ -42,7 +42,7 @@ families:
   aux_columns:
   - key: info_hash_v2
     semantic: hash
-    label: info-hash(v2)
+    label: 정보 해시(info-hash v2)
     format: mono
   - key: created_by
     label: 작성 프로그램
@@ -100,7 +100,7 @@ families:
     format: bytes
   - key: info_hash
     semantic: hash
-    label: info-hash
+    label: 정보 해시(info-hash)
     aliases:
     - ed2k_hash
     format: mono

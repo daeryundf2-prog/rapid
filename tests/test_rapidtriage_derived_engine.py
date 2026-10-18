@@ -57,6 +57,7 @@ NO_IDENTIFIER_FAMILIES = frozenset(
         "timezone",  # one registry value
         "web-upload-candidate",  # restates its source row (r2 console fix m3)
         "messenger-error",  # store read failures (r2 console fix m2)
+        "email-client-error",  # mail client store read failures (r5 L1)
         "ntfs-logfile-transaction",  # LSN / op codes; file names are bare candidates, not paths (R3 §3.3)
         "logon-banner",  # caption/text of a legal notice (R5 L2)
     }

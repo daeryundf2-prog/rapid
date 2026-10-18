@@ -1,5 +1,5 @@
 {
- "version": "2a9aa488f84ad435",
+ "version": "efe6fb91b17655cc",
  "families": [
   {
    "id": "sam-account",
@@ -7453,7 +7453,7 @@
     {
      "key": "sha256",
      "semantic": "hash",
-     "label": "SHA-256",
+     "label": "SHA-256 해시",
      "format": "mono"
     }
    ],
@@ -9030,7 +9030,7 @@
     {
      "key": "info_hash",
      "semantic": "hash",
-     "label": "info-hash(v1)",
+     "label": "정보 해시(info-hash v1)",
      "format": "mono"
     },
     {
@@ -9071,7 +9071,7 @@
     {
      "key": "info_hash_v2",
      "semantic": "hash",
-     "label": "info-hash(v2)",
+     "label": "정보 해시(info-hash v2)",
      "format": "mono"
     },
     {
@@ -9166,7 +9166,7 @@
     {
      "key": "info_hash",
      "semantic": "hash",
-     "label": "info-hash",
+     "label": "정보 해시(info-hash)",
      "aliases": [
       "ed2k_hash"
      ],

@@ -156,7 +156,7 @@ families:
     label: 데이터 종류
   - key: sha256
     semantic: hash
-    label: SHA-256
+    label: SHA-256 해시
     format: mono
   aux_columns:
   - key: member_name
