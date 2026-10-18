@@ -252,3 +252,95 @@ RapidTriage is a local triage and review tool, not a full commercial forensic su
 - 바탕 화면(`desktop-wallpaper`): `Control Panel\Desktop`의 `WallPaper`와 `TranscodedImageCache`(0x18부터 UTF-16 원본 경로), `Explorer\Wallpapers\BackgroundHistoryPath<N>`(0번에만 키 시각), `Themes\TranscodedWallpaper`·`Themes\CachedFiles`(형식·크기·JPEG/PNG/BMP 해상도)만 본다. 바탕 화면 아이콘 배치(`Shell\Bags\1\Desktop` IconLayouts)와 슬라이드쇼 설정은 해석하지 않는다(연기).
 - 문서 추출 정책(R5 L2): 지갑 저장소·지갑 확장 저장소·Credentials/Vault/Protect 파일·SSH 개인키(기본 이름 `id_rsa`·`id_ed25519` 등, `ssh_host_*_key`, `.ppk`)·`wallet.dat`은 문서 본문을 `(비밀 값이 든 파일 — 정책상 본문을 저장하지 않음)`으로 대신하고, 다른 문서 안의 PEM/OpenSSH/PuTTY 개인키 블록과 `WinSCP.ini`·`.reg`의 비밀번호 값 줄은 가린다(일반 문서의 `password=` 줄은 그대로 둔다). `--extract`는 같은 파일을 복사하지 않고 매니페스트에 `secret-redacted`와 SHA-256만 남긴다.
 <!-- r5 L2 (OS, system, policy presence): end -->
+
+## 공개 미지원 (AXIOM 대비)
+<!-- r5 L4 (documentation): public non-support list: start -->
+2026-10-18 R5 재판정 기준. AXIOM Examine의 Computer 검색 항목 199개 중 아래 38개는 RapidTriage가 파서를 두지 않는다고 공개한다(매트릭스 `docs/research/axiom-parity-matrix-2026-10-17.md` Table A의 최종 열 `공개 미지원`). 대부분 서비스가 끝났거나 국내 사건에서 쓰이지 않는 앱이고, 남은 흔적은 다른 행(설치 프로그램·Prefetch·브라우저 기록·URL 분류·문서 색인·파일 인벤토리)으로 확인한다. 실제 사건에서 필요해지면 합성 픽스처와 공개 형식 자료로 개별 파서를 추가한다.
+
+| AXIOM 항목 | 그룹 | 사유 |
+|---|---|---|
+| AIM | 커뮤니케이션 | 2017-12 서비스 종료, 국내 사용 사례 희소 |
+| Ares | 커뮤니케이션 | Ares Galaxy P2P 개발 중단, 국내 사용 희소(토렌트·eMule 흔적으로 대체) |
+| Bebo | 커뮤니케이션 | 메신저 기능 종료, 국내 미사용 |
+| Bing Toolbar | 웹 관련 | IE 툴바, 배포 종료·IE 지원 종료(2022) |
+| Carbonite | 클라우드 저장소 | 국내 사용이 드문 미국 백업 서비스, 설치 사실은 설치 프로그램·Prefetch 행으로 확인 |
+| Chatroulette | 커뮤니케이션 | 웹 전용이라 로컬 앱 흔적이 없음, 브라우저 기록·URL 분류로 확인 |
+| Chatstep | 커뮤니케이션 | 웹 전용, 서비스 사실상 종료 |
+| Cortana | 운영체제 | Windows 11에서 제거됨, 검색 흔적은 Windows Search·브라우저 행으로 확인 |
+| Gigatribe | 커뮤니케이션 | P2P 서비스 종료 |
+| Google Talk | 커뮤니케이션 | 서비스 종료(Hangouts·Chat으로 이관) |
+| Google Toolbar | 웹 관련 | IE 툴바 배포 종료 |
+| Google+ | 커뮤니케이션 | 2019 서비스 종료 |
+| ICQ | 커뮤니케이션 | 2024-06 서비스 종료 |
+| IME Suggestions | 운영체제 | 중국어·일본어 IME 학습 사전 대상, 한국어 IME에는 해당 추천 기록이 없음 |
+| IP Addresses - Audio/Video Calls | 커뮤니케이션 | 통화 상대 IP는 디스크에 남지 않는 휘발성 정보, 메모리 분석(memory-network) 행으로 확인 |
+| Limerunner | 커뮤니케이션 | P2P 클라이언트 단종 |
+| Luckywire | 커뮤니케이션 | P2P 클라이언트 단종 |
+| Lync / Office Communicator | 커뮤니케이션 | Skype for Business·Teams로 대체됨, 대화 기록은 Outlook '대화 기록' 폴더로 저장되어 PST 경로로 확인 |
+| mIRC | 커뮤니케이션 | 국내 사용 희소, 평문 로그는 문서 색인으로 검색 가능 |
+| MSN Plus! | 커뮤니케이션 | Windows Live Messenger 애드온, 메신저 종료(2013)와 함께 소멸 |
+| MySpace | 커뮤니케이션 | 메시징 기능 소멸, 국내 미사용 |
+| Omegle | 커뮤니케이션 | 2023-11 서비스 종료, 웹 전용 |
+| ooVoo | 커뮤니케이션 | 2017 서비스 종료 |
+| Paltalk | 커뮤니케이션 | 국내 사용 희소 |
+| Pidgin | 커뮤니케이션 | 국내 사용 희소, HTML/텍스트 로그는 문서 색인으로 검색 가능, accounts.xml 비밀번호는 정책상 비추출 |
+| QuickBooks Files | 문서 | 국내 회계는 더존 등 국산 ERP 중심, .qbw는 파일 인벤토리로만 확인 |
+| RealPlayer | 미디어 | 구형·국내 사용 희소 |
+| Second Life | 커뮤니케이션 | 국내 사건 관련성 낮은 가상세계 앱 |
+| Shareaza | 커뮤니케이션 | P2P 클라이언트 개발 중단 |
+| TorChat | 커뮤니케이션 | 개발 중단, Tor 사용은 Tor Browser(Firefox 계열) 흔적으로 확인 |
+| Trillian | 커뮤니케이션 | 국내 사용 희소 |
+| Usenet Binary Files | 미디어 | 국내 사용 희소(NZB 뉴스그룹) |
+| WebKit | 웹 관련 | Windows용 WebKit 브라우저(Safari) 단종 |
+| Wickr Me (데스크톱) | 커뮤니케이션 | 2023-12-31 서비스 종료, 모바일 내보내기 경로는 유지 |
+| Windows Live Messenger / MSN Messenger® | 커뮤니케이션 | 2013 서비스 종료 |
+| WordPerfect Files | 문서 | 국내 사용 희소, 파일은 인벤토리·문자열 색인으로만 확인 |
+| World of Warcraft | 커뮤니케이션 | 게임 채팅 로그는 기본 비활성, 국내 사건 관련성 낮음 |
+| Yahoo! Messenger | 커뮤니케이션 | 2018-07 서비스 종료 |
+
+혼합 행에서 지원하지 않는 부분(행 자체는 지원되는 부분으로 `있음` 판정):
+
+| AXIOM 항목 | 지원하지 않는 부분 | 사유 |
+|---|---|---|
+| Limewire / Frostwire | LimeWire `downloads.dat`·설정 | 2010 법원 명령으로 서비스 중단, 자바 직렬화 형식이라 표준 라이브러리 파서 비용이 큼. FrostWire는 `p2p-torrent`·`p2p-transfer`로 읽음(실샘플 미검증) |
+| Safari | Windows용 Safari | 2012 개발 중단. macOS Safari는 `macos-browser-history-downloads` |
+| iMessage | macOS `chat.db` | macOS 범위(해당 없음). PC에 있는 iOS 백업 `sms.db`는 `mobile-message` |
+
+R5에서 연기했거나 확인하지 못한 항목(AXIOM 행 판정은 위 매트릭스가 기준이며, 아래는 그 행 안의 빈 부분이거나 AXIOM 밖 국내 확장이다):
+
+| 항목 | 관련 행 | 상태 · 사유 |
+|---|---|---|
+| AhnLab V3 탐지 로그 | McAfee Logs(AXIOM 밖 국내 확장) | 구현 안 함. 제품 버전별 탐지 기록 위치·형식(DB·암호화 여부)을 공개 자료로 확인하지 못함. McAfee만 `av-detection-log` |
+| 알서포트 RemoteCall | LogMeIn(AXIOM 밖 국내 확장) | 구현 안 함. 설치·로그 경로를 확인하지 못함 |
+| 팟플레이어·KMPlayer 재생 기록 값 이름 | VLC Media Player(국내 확장) | 값 이름 미확인. 이름이 recent·history 등인 키 아래의 경로형 값만 수집(`verification: unconfirmed`, 신뢰도 낮음). 곰플레이어는 서브셋 한 건으로 배치 확인, 식별자 해시 알고리즘은 미확인 |
+| Windows 메일 `store.vol` 폴더·읽음·플래그 | Windows Mail | ESE 표 목록·주소 후보만(`email-client-store`). 메시지 본문은 `.eml`로 읽음 |
+| Facebook Messenger `msys` 스키마 | Facebook Messenger | 최선 노력 매핑, 맞지 않으면 인벤토리. 앱이 2025-12 종료되어 표본 확보가 어려움 |
+| Viber `Events.Direction` 의미 | Viber | 0=수신·1=발신 가정, 원래 값 `viber_direction_raw`를 함께 둠 |
+| Phone Link 버전별 열·시각 단위 | Your Phone | 표·열 별칭으로 맞춤, 시각 인코딩은 크기로 추정해 `timestamp_encoding`에 남김 |
+| 바탕 화면 아이콘 배치(IconLayouts) | Rebuilt Desktops | 해석 안 함. 배경 이미지·경로만(`desktop-wallpaper`) |
+| Office Backstage JSON 스키마 | Microsoft Office | 키 이름 휴리스틱(`field_extraction=heuristic-keys`) |
+| McAfee 로그 형식 | McAfee Logs | 실제 로그 대조 없음, 휴리스틱 줄 해석 |
+| EGG 실제 알집 표본(LZMA 블록 배치) | EGG Archives | 공개 명세·합성 픽스처만 |
+| Shareaza·Vuze·eMule `clients.met`·`cancelled.met` | Shareaza(공개 미지원), Emule | 읽지 않음 |
+| Thunderbird Mork `abook.mab` | MBOX E-mails | 목록만 |
+| Firefox 지갑 확장 | Crypto Currency | 확장 UUID가 프로필마다 무작위라 대응하지 않음 |
+| `$Boot` 이미지 직접 추출 | File System Information | 증거 트리에 `$Boot`가 있을 때만 `ntfs-volume-information` |
+| hiberfil.sys URL 카빙 | Potential Browser Activity | 압축되어 있어 보지 않음 |
+<!-- r5 L4 (documentation): public non-support list: end -->
+
+## 정책 제외
+<!-- r5 L4 (documentation): policy exclusions: start -->
+RapidTriage는 아래 기능을 프로젝트 정책으로 구현하지 않는다. 각 항목에 대해 대신 나오는 행(존재·위치·메타데이터)을 함께 적는다. 매트릭스 Table A에서 `정책 제외`로 닫힌 11행은 Bitcoin, Crypto Currency, Encrypted Files, LINE, QQ, Rebuild Webpages, Signal, Telegram, Webpage Recovery, WeChat, Windows Stored Credentials이고, 나머지 항목은 Table A 행이 아닌 기능(Table B·워크플로)이다.
+
+| 제외 기능 | 하지 않는 것 | 대신 나오는 것 |
+|---|---|---|
+| 자격 증명 복호·DPAPI | Windows Credential Manager·Vault·DPAPI 마스터 키 복호, 브라우저 저장 비밀번호(`Login Data`·`logins.json`·`key4.db`) 복호, Chromium 쿠키 `encrypted_value` 복호, SECURITY 비밀(LSA secrets) 복호 | `credential-store-presence`(Credentials·Vault·Protect 파일의 존재·크기·GUID·SID·해시), `browser-credential-store-inventory`, Thunderbird 프로필 행의 `logins.json`·`key4.db` 이름·크기·시각, `browser-analytics-cookie`의 `value_status=encrypted-not-read` |
+| 비밀번호 크래킹·대입 | 암호 압축(ZIP·7z·RAR·EGG)·암호 문서(HWP·OOXML·PDF)·adb 암호화 백업·BitLocker의 비밀번호 대입, 사전·무차별 대입, 키 탐색 | 감지 행(`archive-encrypted-*`, 문서 암호 플래그, EGG 암호화 항목, `android-backup`의 암호화 헤더와 PBKDF2 반복 수), `bitlocker-recovery-key-file`(키 가림·해시). 카카오톡 PC는 이미 회수한 키 재료의 결정적 유도만 시도하며 대입은 하지 않음 |
+| 원격 수집·원격 시스템 연결 | 원격 에이전트 배포, 라이브 시스템·클라우드 계정 접속, 단축 URL 펼치기 같은 외부 요청 | 오프라인 증거 입력(E01·디렉터리·내보내기)만 처리. 클라우드·모바일은 승인된 내보내기(Takeout·M365·벤더 CSV/JSON) 정규화, 원격 접속 흔적은 `third-party-remote-control-artifact`·RDP 행 |
+| 외부 프로그램 실행 | 아티팩트 파서가 기본값으로 외부 프로그램을 실행하는 것 | PST/OST는 `RAPIDTRIAGE_EMAIL_EXTERNAL_TOOLS=1`일 때만 설치된 pffexport/readpst를 실행(기본은 `email-container-inventory`의 `disabled` 행과 `/doctor` 안내). 메모리는 Volatility를 실행하지 않고 출력(JSON/JSONL)을 가져와 `memory-*` 행으로 정규화. 증거 입력 추출(Sleuth Kit·7z·bsdtar)은 증거 처리 단계의 선언된 도구 체인이다(Evidence Handling 절) |
+| Magnet REVIEW 업로드 | 타사 검토 플랫폼(Magnet REVIEW)으로 케이스 업로드·연동 | 로컬 검토 묶음(reviewer bundle: 선택 증거 메타데이터·해시·검토 메모·보고서·감사 JSON·매니페스트)과 보고서 내보내기(Markdown·HTML·DOCX·PDF + 해시 매니페스트) |
+| 웹 페이지 재구성·복원(Rebuild Webpages, Webpage Recovery) | 브라우저 캐시 본문 저장·페이지 재조립 | `browser-cache-entry`(URL·헤더·Content-Type·크기·SHA-256·앞 256바이트 서명, `body_policy`), Web Video Fragments는 Content-Type `video/*` 행(표 대체). 유해물·개인정보 재배포 위험 때문에 본문을 저장하지 않음 |
+| 암호화 메신저 저장소(LINE·Telegram·WeChat·Signal·QQ) | 로컬 DB 키 추출·SQLCipher·tdata 복호 | `chat-app-inventory`(`inventory_only=true`, 한국어 사유), 평문으로 남는 받은 파일 목록(`app-file-store`: Telegram `Downloads\Telegram Desktop`, WeChat `FileStorage`, QQ `FileRecv`), 승인된 모바일 내보내기 정규화. Signal `config.json`은 열지 않고 이름·크기·시각만 |
+| 암호화폐 지갑 키·시드 | 개인키·시드·xprv·키스토어 내용 추출, 지갑 복호 | `crypto-wallet-presence`(지갑 종류·경로·파일 수·크기·암호화 표시·평문 Electrum 공개 주소 최대 20개·확장 지갑 ID), `antiforensics.crypto_wallet_present`(C) 규칙, 거래소 방문은 URL 분류 finance. 문서 추출·`--extract`도 지갑 파일 본문을 저장하지 않음(`secret-redacted`) |
+| Credentials/Vault blob·SSH 개인키·저장 비밀번호 값 | blob 구조 해석, SSH 개인키 본문·해시, PuTTY/WinSCP 저장 비밀번호 값 | `credential-store-presence`, `ssh-key-file`(존재·형식·암호화 여부·공개키 지문), `ssh-client-session`의 `password_saved` 표시. 하이브 문자열 피벗·`.reg` 내보내기·문서 색인에서도 같은 값을 가림 |
+<!-- r5 L4 (documentation): policy exclusions: end -->
