@@ -10,7 +10,7 @@ import {
   resetGridStore,
   sortedArtifactsHandler,
 } from "./testSupport";
-import { categoryScopeText, PAGE_SIZE, useCollectionQuery } from "./useCollectionQuery";
+import { categoryScopeText, collectionQueryKey, PAGE_SIZE, useCollectionQuery } from "./useCollectionQuery";
 
 // Async waits must not depend on machine speed (CI under load).
 configure({ asyncUtilTimeout: 5000 });
@@ -420,5 +420,32 @@ describe("useCollectionQuery server sort (artifact-columns §4.1)", () => {
     await waitFor(() => expect(result.current.total).toBe(10));
     expect(calls[0]?.url).not.toContain("sort=");
     expect(result.current.sortState).toBeNull();
+  });
+});
+
+describe("collectionQueryKey server filters", () => {
+  it("keeps event-log channel groups, record fields and analysis details apart", () => {
+    const eventlog: CollectionQuery = {
+      ref: { id: "artifacts", kind: "eventlog" },
+      offset: 0,
+      limit: PAGE_SIZE,
+    };
+    const key = (query: CollectionQuery) => JSON.stringify(collectionQueryKey("r1", query, PAGE_SIZE));
+    const keys = new Set([
+      key(eventlog),
+      key({ ...eventlog, channelGroups: ["security"] }),
+      key({ ...eventlog, channelGroups: ["system"] }),
+      key({ ...eventlog, channels: ["Security"] }),
+      key({ ...eventlog, channelGroups: ["security"], fields: { service: ["Slack"] } }),
+    ]);
+    expect(keys.size).toBe(5);
+    const ntfs: CollectionQuery = {
+      ref: { id: "analysis", kind: "ntfs-meta", analysisId: "n1" },
+      offset: 0,
+      limit: PAGE_SIZE,
+    };
+    expect(key({ ...ntfs, detailFilters: { source: ["timestamp-mismatch"], in_use: ["true"] } })).not.toBe(
+      key({ ...ntfs, detailFilters: { source: ["timestamp-mismatch"], in_use: ["false"] } }),
+    );
   });
 });

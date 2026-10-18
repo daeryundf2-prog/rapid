@@ -1118,6 +1118,49 @@ class AnalysisApiTests(unittest.TestCase):
         flagged = self.rows(analysis_id, flag="ntfs.si_before_fn")
         self.assertEqual([r["record_index"] for r in flagged["rows"]], [details["mft_row_index"]])
 
+    def test_ntfs_meta_timestamp_mismatch_in_use_filter(self) -> None:
+        """R3 follow-up: 타임스탬프 불일치 defaults to in-use records (server ``in_use=true``)."""
+        si = ("2019-01-01T00:00:00Z", "2019-01-01T00:00:00Z", "2024-02-01T00:00:00.5Z", "2024-02-01T00:00:00.5Z")
+        fn = ("2024-02-01T00:00:00.25Z",) * 4
+        live = ntfs_r3_fixtures.mft_record_times(name="live.exe", parent=64, si=si, fn=fn)
+        gone = ntfs_r3_fixtures.mft_record_times(name="gone.exe", parent=64, si=si, fn=fn, in_use=False)
+        state = self.run_ntfs(mft=synthetic_mft({67: live, 68: gone}))
+        self.assertEqual(state["status"], "completed", state)
+        summary = state["summary"]
+        self.assertEqual(summary["timestamp_mismatch_count"], 2)
+        self.assertEqual(summary["timestamp_mismatch_in_use_count"], 1)
+        self.assertEqual(summary["timestamp_mismatch_deleted_count"], 1)
+        self.assertEqual(
+            summary["source_in_use_counts"], {"timestamp-mismatch:in-use": 1, "timestamp-mismatch:deleted": 1}
+        )
+        analysis_id = str(state["analysis_id"])
+
+        in_use = self.rows(analysis_id, source="timestamp-mismatch", in_use="true")
+        self.assertEqual([row["details"]["entry_number"] for row in in_use["rows"]], [67])
+        self.assertEqual(in_use["pagination"]["details_filter"], {"source": ["timestamp-mismatch"], "in_use": True})
+        deleted = self.rows(analysis_id, source="timestamp-mismatch", in_use="FALSE")
+        self.assertEqual([row["details"]["entry_number"] for row in deleted["rows"]], [68])
+        self.assertEqual(self.rows(analysis_id, source="timestamp-mismatch")["matched"], 2)
+        # Composes with sort (the sorted pager narrows to the matching records first).
+        ordered = self.sorted_rows(analysis_id, source="timestamp-mismatch", in_use="true", sort="details.entry_number:desc")
+        self.assertEqual([row["details"]["entry_number"] for row in ordered["rows"]], [67])
+        # in_use alone also filters (MFT rows carry it too).
+        mft_deleted = self.rows(analysis_id, source="mft", in_use="false")
+        self.assertTrue(mft_deleted["rows"])
+        self.assertTrue(all(row["details"]["in_use"] is False for row in mft_deleted["rows"]))
+
+        bad = self.client.get(f"/api/runs/{self.run_id}/analyses/{analysis_id}/rows", params={"in_use": "yes"})
+        self.assertEqual(bad.status_code, 422)
+        self.assertIn("in_use 값은 true 또는 false여야 합니다", bad.json()["detail"])
+
+        tree = self.client.get(f"/api/runs/{self.run_id}/tree").json()
+        analyses_node = next(node for node in tree["nodes"] if node["id"] == "analyses")
+        ntfs_node = next(node for node in analyses_node["children"] if node["id"] == "analysis:ntfs-meta")
+        self.assertEqual(
+            ntfs_node["latest_completed"]["source_in_use_counts"],
+            {"timestamp-mismatch:in-use": 1, "timestamp-mismatch:deleted": 1},
+        )
+
     def test_ntfs_meta_raw_mft_picks_up_sibling_logfile(self) -> None:
         mft_dir = self.evidence / "extracted"
         mft_dir.mkdir()

@@ -47,6 +47,23 @@ def mask_recovery_password(value: str) -> str:
     return "-".join(masked)
 
 
+def is_recovery_key_text_name(file_name: str) -> bool:
+    """``BitLocker Recovery Key <GUID>.TXT`` / ``BitLocker 복구 키 <GUID>.TXT`` (case-insensitive)."""
+    return bool(KEY_TEXT_NAME.match(file_name))
+
+
+def redact_recovery_key_text(file_name: str, text: str) -> str:
+    """``text`` with every 48-digit recovery password masked (:func:`mask_recovery_password`)
+    when ``file_name`` is a BitLocker recovery key text file; other files are returned unchanged.
+
+    Document extraction (docs output, docs index, case DB ``indexed_document``) goes through
+    this, so the key never leaves the evidence in clear text (r3 follow-up to O1).
+    """
+    if not text or not is_recovery_key_text_name(file_name):
+        return text
+    return RECOVERY_PASSWORD.sub(lambda match: mask_recovery_password(match.group(1)), text)
+
+
 def recovery_password_valid(value: str) -> bool:
     groups = value.split("-")
     return len(groups) == 8 and all(group.isdigit() and int(group) <= 720885 and int(group) % 11 == 0 for group in groups)
@@ -125,7 +142,7 @@ def collect_bitlocker_recovery_key_files(root: Path, provider: str) -> Iterable[
         lowered = name.lower()
         if not (lowered.endswith(".bek") or (lowered.endswith(".txt") and lowered.startswith("bitlocker"))):
             continue
-        is_text = bool(KEY_TEXT_NAME.match(name))
+        is_text = is_recovery_key_text_name(name)
         if not is_text and not BEK_NAME.match(name):
             continue
         try:

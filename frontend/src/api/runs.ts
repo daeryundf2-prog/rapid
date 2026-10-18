@@ -177,12 +177,13 @@ export interface TreeNode {
   state?: { status?: string; finished_at?: string | null } | null;
   /**
    * Analysis nodes: newest completed job; R3 §3.3 sub-view counts ride along (`source_counts` of
-   * ntfs-meta, `kind_counts` of carve).
+   * ntfs-meta, `source_in_use_counts` (`timestamp-mismatch:in-use` / `:deleted`), `kind_counts` of carve).
    */
   latest_completed?: {
     analysis_id?: string;
     row_count?: number | null;
     source_counts?: Record<string, number>;
+    source_in_use_counts?: Record<string, number>;
     kind_counts?: Record<string, number>;
   } | null;
   /**

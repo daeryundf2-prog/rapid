@@ -43,33 +43,65 @@ function job(
 
 describe("파일시스템 › 타임스탬프 불일치 / $LogFile 트랜잭션", () => {
   const mismatch = node("filesystem", "fs-timestamp-mismatch");
+  const mismatchDeleted = node("filesystem", "fs-timestamp-mismatch-deleted");
   const logfile = node("filesystem", "fs-logfile");
   const mft = node("filesystem", "fs-mft");
 
   it("are ntfs-meta views filtered on details.source by the server, selected apart from MFT/USN", () => {
     expect(mismatch.label).toBe("타임스탬프 불일치");
     expect(mismatch.target).toMatchObject({ collection: "analysis", analysis: "ntfs-meta" });
+    // Default: in-use MFT records only (most real mismatch rows are deleted records).
     expect(domainRoute(mismatch.target).cf).toEqual([
       { col: "f:source", op: ":", value: "timestamp-mismatch" },
+      { col: "f:in_use", op: ":", value: "true" },
     ]);
+    expect(domainRoute(mismatchDeleted.target).cf).toEqual([
+      { col: "f:source", op: ":", value: "timestamp-mismatch" },
+      { col: "f:in_use", op: ":", value: "false" },
+    ]);
+    expect(mismatchDeleted.label).toBe("타임스탬프 불일치(삭제된 레코드)");
+    expect(mismatchDeleted.detail).toBe(true);
     expect(domainRoute(mismatch.target).cols).toContain("details.reason");
-    expect(new Set([targetKey(mismatch.target), targetKey(logfile.target), targetKey(mft.target)]).size).toBe(
-      3,
-    );
+    expect(
+      new Set([
+        targetKey(mismatch.target),
+        targetKey(mismatchDeleted.target),
+        targetKey(logfile.target),
+        targetKey(mft.target),
+      ]).size,
+    ).toBe(4);
     // A route carrying the same server filter selects the node (EvidenceTree compares route keys).
     expect(targetKey({ ...domainRoute(mismatch.target) })).toBe(targetKey(mismatch.target));
     expect(mismatch.note).toContain("ntfs.si_before_fn");
   });
 
-  it("count the job summary's source_counts, not the whole row count", () => {
+  it("send in_use with source to the rows API (server filter, nothing left on the loaded rows)", () => {
+    const columns = domainRoute(mismatch.target).cf ?? [];
+    const plan = partitionFilters({ id: "analysis", kind: "ntfs-meta" }, { ...EMPTY_FILTERS, columns });
+    expect(plan.server.details).toEqual({ source: ["timestamp-mismatch"], in_use: ["true"] });
+    expect(plan.clientColumns).toEqual([]);
+    const query = applyFiltersToQuery(
+      { ref: { id: "analysis", kind: "ntfs-meta", analysisId: "n1" }, offset: 0, limit: 100 },
+      { ...EMPTY_FILTERS, columns },
+    );
+    const url = analysisRowsUrl("r1", "n1", { offset: 0, limit: 100, detailFilters: query.detailFilters });
+    expect(url).toContain("source=timestamp-mismatch");
+    expect(url).toContain("in_use=true");
+  });
+
+  it("count the job summary's source_counts / source_in_use_counts, not the whole row count", () => {
     const analyses = [
-      job("ntfs-meta", { source_counts: { mft: 480, "timestamp-mismatch": 3, "logfile-transaction": 17 } }),
+      job("ntfs-meta", {
+        source_counts: { mft: 480, "timestamp-mismatch": 3, "logfile-transaction": 17 },
+        source_in_use_counts: { "timestamp-mismatch:in-use": 1, "timestamp-mismatch:deleted": 2 },
+      }),
     ];
-    expect(domainNodeCount(mismatch.target, { analyses }).count).toBe(3);
+    expect(domainNodeCount(mismatch.target, { analyses }).count).toBe(1);
+    expect(domainNodeCount(mismatchDeleted.target, { analyses }).count).toBe(2);
     expect(domainNodeCount(logfile.target, { analyses }).count).toBe(17);
     expect(domainNodeCount(mft.target, { analyses }).count).toBe(500);
     const none = domainNodeCount(mismatch.target, {
-      analyses: [job("ntfs-meta", { source_counts: { mft: 500 } })],
+      analyses: [job("ntfs-meta", { source_counts: { mft: 500 }, source_in_use_counts: {} })],
     });
     expect(none.count).toBe(0);
     expect(emptyNodeReason(none)).toBe("이 런에는 해당 데이터가 없습니다");
@@ -101,13 +133,15 @@ describe("파일시스템 › 타임스탬프 불일치 / $LogFile 트랜잭션"
                 analysis_id: "a",
                 row_count: 500,
                 source_counts: { "timestamp-mismatch": 9 },
+                source_in_use_counts: { "timestamp-mismatch:in-use": 4, "timestamp-mismatch:deleted": 5 },
               },
             },
           ],
         },
       ],
     };
-    expect(domainNodeCount(mismatch.target, { tree }).count).toBe(9);
+    expect(domainNodeCount(mismatch.target, { tree }).count).toBe(4);
+    expect(domainNodeCount(mismatchDeleted.target, { tree }).count).toBe(5);
   });
 });
 

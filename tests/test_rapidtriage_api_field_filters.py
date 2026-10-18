@@ -178,6 +178,37 @@ class FieldFilterApiTests(unittest.TestCase):
         rows = page["artifacts"]
         self.assertEqual([row["details"]["url"] for row in rows], [f"https://example.test/{n}" for n in (6, 5, 3, 2)])
 
+    def test_field_filters_compose_with_channel_filters(self) -> None:
+        """R3 integration: ``browser=`` / ``service=`` AND ``channel=`` / ``channel_group=`` (O2)."""
+        page = self.get("kind=windows-messenger&limit=50&service=Slack&channel_group=none")["artifacts"]["windows-messenger"]
+        self.assertEqual(page["matched"], 3)  # Slack rows have no event-log channel
+        self.assertEqual(page["pagination"]["fields"], {"service": ["Slack"]})
+        self.assertEqual(page["pagination"]["channel_groups"], ["none"])
+        page = self.get("kind=windows-messenger&limit=50&service=Slack&channel=Security")["artifacts"]["windows-messenger"]
+        self.assertEqual((page["matched"], page["artifacts"]), (0, []))
+        # Across kinds.
+        payload = self.get("limit=50&browser=ie-edge-legacy&channel_group=none")
+        self.assertEqual(payload["cross_kind"]["matched"], 4)
+        self.assertEqual(payload["cross_kind"]["fields"], {"browser": ["ie-edge-legacy"]})
+        self.assertEqual(payload["cross_kind"]["channel_groups"], ["none"])
+        self.assertEqual(self.get("limit=50&browser=ie-edge-legacy&channel=Security")["cross_kind"]["matched"], 0)
+        # Sorted pages and the 특이사항 sort.
+        for channel, expected in (("channel_group=none", 4), ("channel=Security", 0)):
+            sorted_page: dict[str, object] = {}
+            for _attempt in range(100):
+                sorted_page = self.get(f"kind=browser&limit=50&browser=ie-edge-legacy&{channel}&sort=timestamp:desc")["artifacts"]["browser"]
+                if sorted_page["sort"]["status"] != "building":
+                    break
+                time.sleep(0.05)
+            self.assertEqual(sorted_page["sort"]["status"], "ready")
+            self.assertEqual(len(sorted_page["artifacts"]), expected, channel)
+            flag_page = self.get(f"kind=browser&limit=50&browser=ie-edge-legacy&{channel}&sort=flags")["artifacts"]["browser"]
+            self.assertEqual(len(flag_page["artifacts"]), expected, channel)
+        # A bad channel group is still a Korean 422 next to a valid field filter.
+        response = self.client.get(f"/api/runs/{self.run_id}/artifacts?kind=browser&limit=10&browser=chrome&channel_group=bogus")
+        self.assertEqual(response.status_code, 422)
+        self.assertRegex(response.json()["detail"], "[가-힣]")
+
     def test_invalid_field_values_are_korean_422(self) -> None:
         for query in ("kind=browser&limit=10&browser=", "kind=browser&limit=10&service=%20", "kind=browser&limit=10&browser=a%01b"):
             response = self.client.get(f"/api/runs/{self.run_id}/artifacts?{query}")

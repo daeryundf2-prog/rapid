@@ -66,7 +66,7 @@ ANALYSIS_NODES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("cross-case", "교차 케이스", ("cross-case",)),
     ("triage-flags", "특이사항", ("triage-flags",)),
 )
-ANALYSIS_BRIEF_COUNT_KEYS: tuple[str, ...] = ("source_counts", "kind_counts")
+ANALYSIS_BRIEF_COUNT_KEYS: tuple[str, ...] = ("source_counts", "source_in_use_counts", "kind_counts")
 WEB_LOG_KIND = "windows-system"
 WEB_LOG_ARTIFACT_TYPES: tuple[str, ...] = ("web-server-log", "webshell-source-candidate")
 

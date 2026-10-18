@@ -150,12 +150,18 @@ export interface AnalysisRowsQuery {
   /** 특이사항 filters (`flag=` repeated, `flag_grade=`). */
   flags?: string[];
   flagGrade?: string;
-  /** Exact `details` filters (`source=` / `signature_kind=` / `recovery_method=`, repeated). */
+  /** Exact `details` filters (`source=` / `signature_kind=` / `recovery_method=` / `in_use=`, repeated). */
   detailFilters?: Record<string, string[]>;
 }
 
 /** `details` keys the rows API filters exactly (R3 §3.3); any other key stays a client column filter. */
-export const ANALYSIS_DETAIL_FILTER_KEYS: readonly string[] = ["source", "signature_kind", "recovery_method"];
+export const ANALYSIS_DETAIL_FILTER_KEYS: readonly string[] = [
+  "source",
+  "signature_kind",
+  "recovery_method",
+  // MFT record allocation state (`true` / `false`): 타임스탬프 불일치 defaults to in-use records.
+  "in_use",
+];
 
 interface RowsPayload {
   rows?: unknown;

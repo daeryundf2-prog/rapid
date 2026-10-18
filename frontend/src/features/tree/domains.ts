@@ -61,10 +61,10 @@ export interface DomainTarget {
   analysis?: AnalysisNodeId;
   /**
    * Sub-view of an analysis node (R3 §3.3, with a `cf` on `f:source` / `f:signature_kind` /
-   * `f:recovery_method` the rows API applies exactly): count = sum of `<field>[key]` of the newest
-   * completed job's summary (all keys when `keys` is empty).
+   * `f:recovery_method` / `f:in_use` the rows API applies exactly): count = sum of `<field>[key]`
+   * of the newest completed job's summary (all keys when `keys` is empty).
    */
-  analysisCount?: { field: "source_counts" | "kind_counts"; keys: string[] };
+  analysisCount?: { field: "source_counts" | "source_in_use_counts" | "kind_counts"; keys: string[] };
   /** Why an analysis sub-view is empty while its job never ran (replaces the generic reason). */
   neverRanReason?: string;
 }
@@ -196,6 +196,22 @@ const ntfsRows = (source: string, cols: string[]): DomainTarget => ({
   cols: cols.map((key) => `details.${key}`),
   analysisCount: { field: "source_counts", keys: [source] },
   neverRanReason: NTFS_META_NEVER_RAN,
+});
+
+/**
+ * ntfs-meta `timestamp-mismatch` rows of in-use (`true`) or deleted (`false`) MFT records (server
+ * `in_use=`): most real mismatch rows are deleted records, so the main node shows in-use ones.
+ */
+const ntfsMismatchRows = (inUse: boolean, cols: string[]): DomainTarget => ({
+  ...ntfsRows("timestamp-mismatch", cols),
+  cf: [
+    { col: "f:source", op: ":", value: "timestamp-mismatch" },
+    { col: "f:in_use", op: ":", value: inUse ? "true" : "false" },
+  ],
+  analysisCount: {
+    field: "source_in_use_counts",
+    keys: [`timestamp-mismatch:${inUse ? "in-use" : "deleted"}`],
+  },
 });
 
 /**
@@ -618,8 +634,15 @@ export const DOMAINS: readonly DomainDef[] = [
       {
         id: "fs-timestamp-mismatch",
         label: "타임스탬프 불일치",
-        target: ntfsRows("timestamp-mismatch", ["reason", "si_created_at", "fn_created_at"]),
-        note: "$STANDARD_INFORMATION과 $FILE_NAME 시각 불일치 — 특이사항 지표 ntfs.si_before_fn·ntfs.zero_subsecond와 같은 판정(MFT 행에 표시)",
+        target: ntfsMismatchRows(true, ["reason", "si_created_at", "fn_created_at"]),
+        note: "$STANDARD_INFORMATION과 $FILE_NAME 시각 불일치(사용 중인 MFT 레코드) — 특이사항 지표 ntfs.si_before_fn·ntfs.zero_subsecond와 같은 판정(MFT 행에 표시)",
+      },
+      {
+        id: "fs-timestamp-mismatch-deleted",
+        label: "타임스탬프 불일치(삭제된 레코드)",
+        target: ntfsMismatchRows(false, ["reason", "si_created_at", "fn_created_at"]),
+        detail: true,
+        note: "삭제된(미사용) MFT 레코드의 $SI/$FN 시각 불일치 — 남은 레코드의 이전 값이라 실제 행 대부분이 여기에 속합니다",
       },
       {
         id: "fs-logfile",
@@ -1335,7 +1358,7 @@ export function flattenDomainNodes(nodes: readonly DomainNodeDef[]): DomainNodeD
 }
 
 /** Analysis `details` keys whose column filters are server filters (and part of the selection key). */
-const ANALYSIS_KEY_COLUMNS = new Set(["f:source", "f:signature_kind", "f:recovery_method"]);
+const ANALYSIS_KEY_COLUMNS = new Set(["f:source", "f:signature_kind", "f:recovery_method", "f:in_use"]);
 
 /**
  * Selection key of a target (and of a route): collection | kind | types | ext (+ the analysis

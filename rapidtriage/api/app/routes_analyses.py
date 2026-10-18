@@ -97,16 +97,35 @@ def parse_detail_filters(
     return filters
 
 
-def detail_row_filter(filters: Mapping[str, frozenset[str]]) -> Callable[[Mapping[str, object]], bool]:
+def parse_in_use_filter(value: str | None) -> bool | None:
+    """``in_use=true|false`` (MFT record allocation state of ntfs-meta rows); a bad value is a Korean 422."""
+    if value is None:
+        return None
+    text = value.strip().lower()
+    if text in ("true", "false"):
+        return text == "true"
+    raise HTTPException(
+        status_code=422,
+        detail=f"in_use 값은 true 또는 false여야 합니다(받은 값: {value.strip()[:32]})",
+    )
+
+
+def detail_row_filter(
+    filters: Mapping[str, frozenset[str]], in_use: bool | None = None
+) -> Callable[[Mapping[str, object]], bool]:
     """Predicate over a ``<kind>-row`` record: every filtered ``details`` key holds one of its values.
 
     ``recovery_method`` of carve rows written before R3 (no such key) is
     ``carved``, or ``rejected`` for a ``false-positive-rejected`` row.
+    ``in_use`` keeps rows whose ``details.in_use`` is exactly that boolean
+    (rows without an allocation state never match).
     """
 
     def matches(row: Mapping[str, object]) -> bool:
         raw = row.get("details")
         details: Mapping[str, object] = raw if isinstance(raw, Mapping) else {}
+        if in_use is not None and details.get("in_use") is not in_use:
+            return False
         for key, values in filters.items():
             value = details.get(key)
             if key == "recovery_method" and value is None and row.get("artifact_type") == "carve-row":
@@ -241,6 +260,7 @@ def build_analyses_router(store: RunJobStore, *, owner: object | None = None) ->
         source: list[str] = Query(default=[]),
         signature_kind: list[str] = Query(default=[]),
         recovery_method: list[str] = Query(default=[]),
+        in_use: str | None = Query(default=None),
     ) -> dict[str, object]:
         """Result rows paged like an artifacts kind page; every row has ``record_index``.
 
@@ -250,6 +270,10 @@ def build_analyses_router(store: RunJobStore, *, owner: object | None = None) ->
         (carve) and ``recovery_method`` (carved / parsed / rejected). They compose
         with ``path_contains``, ``flag`` and ``sort`` (a sorted page collects the
         matching record indices first, at most ``DETAIL_FILTER_SCAN_CAP`` rows).
+        ``in_use`` (``true`` / ``false``; anything else is a Korean 422) keeps
+        rows of in-use / deleted MFT records (``details.in_use``): the console's
+        타임스탬프 불일치 node defaults to ``in_use=true`` with a sibling node for
+        deleted records. The pagination reports it in ``details_filter``.
 
         특이사항: rows carry ``flags`` (kind ``analysis:<analysis_id>``) and the
         response reports ``flags_join``; ``flag``/``flag_grade`` filter and
@@ -279,7 +303,10 @@ def build_analyses_router(store: RunJobStore, *, owner: object | None = None) ->
         flag_kind = f"analysis:{directory.name}"
         join = flags_join(scope.output_dir)
         detail_filters = parse_detail_filters(source, signature_kind, recovery_method)
-        row_filter = detail_row_filter(detail_filters) if detail_filters else None
+        in_use_filter = parse_in_use_filter(in_use)
+        row_filter = (
+            detail_row_filter(detail_filters, in_use_filter) if detail_filters or in_use_filter is not None else None
+        )
         if not rows_path.is_file():
             page: dict[str, object] = {"artifacts": [], "pagination": {"offset": offset, "limit": limit, "returned": 0, "total": 0}}
         else:
@@ -367,8 +394,11 @@ def build_analyses_router(store: RunJobStore, *, owner: object | None = None) ->
             response["sort"] = page.get("sort")
         if flag_query.filtered:
             response["pagination"]["flags"] = flag_query.descriptor()
-        if detail_filters:
-            response["pagination"]["details_filter"] = {key: sorted(values) for key, values in detail_filters.items()}
+        if detail_filters or in_use_filter is not None:
+            response["pagination"]["details_filter"] = {
+                **{key: sorted(values) for key, values in detail_filters.items()},
+                **({"in_use": in_use_filter} if in_use_filter is not None else {}),
+            }
         return response
 
     return router

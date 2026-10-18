@@ -185,6 +185,11 @@ export function collectionQueryKey(runId: string | null, query: CollectionQuery,
     query.flags?.length || query.flagGrade ? `${query.flagGrade ?? ""}|${(query.flags ?? []).join(",")}` : "",
     // Exact record-field filters (`browser=` / `service=`), artifacts only.
     query.ref.id === "artifacts" ? recordFieldsKey(query.fields) : "",
+    // Event-log channel / channel-group server filters (R3 O2), artifacts only: two 채널별 nodes
+    // of the same kind must not share a cache entry.
+    query.ref.id === "artifacts" && (query.channels?.length || query.channelGroups?.length)
+      ? `${[...(query.channels ?? [])].sort().join("|")}#${[...(query.channelGroups ?? [])].sort().join("|")}`
+      : "",
     // Analysis rows `details` server filters (R3 §3.3).
     query.ref.id === "analysis" && query.detailFilters ? JSON.stringify(query.detailFilters) : "",
   ] as const;

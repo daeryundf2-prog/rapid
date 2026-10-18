@@ -37,6 +37,9 @@ export const TIMESTAMP_KIND_LABELS: Readonly<Record<string, string>> = {
   "target-modified": "대상 수정",
   "target-accessed": "대상 접근",
   "last-used": "마지막 사용",
+  // R3 O1: Office MRU open time, PCA (Program Compatibility Assistant) event time.
+  "last-opened": "마지막 열기",
+  "pca-event": "PCA 이벤트",
   "last-updated": "마지막 갱신",
   expires: "만료",
   "event-time": "이벤트",

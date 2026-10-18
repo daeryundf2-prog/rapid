@@ -319,6 +319,81 @@ class RunPipelineTests(unittest.TestCase):
             self.assertIn("antiforensics.tool_present", flags)
 
 
+class BitLockerKeyDocumentTextTests(unittest.TestCase):
+    """R3 follow-up: the 48-digit key of a recognised key file never reaches the document text,
+    the docs output, the docs index or the case DB (it is masked like the artifact row)."""
+
+    def test_extract_text_masks_the_key_of_a_recognised_key_file(self) -> None:
+        from rapidtriage.core.docs import extract_document_text, extract_text
+
+        with tempfile.TemporaryDirectory() as temp:
+            key_file = Path(temp) / f"BitLocker Recovery Key {fx.KEY_ID}.TXT"
+            key_file.write_bytes(fx.bitlocker_key_text())
+            other = Path(temp) / "notes.txt"
+            other.write_text(f"ticket {fx.RECOVERY_PASSWORD}", encoding="utf-8")
+            text = extract_text(key_file, "txt")
+            document = extract_document_text(key_file, "txt")
+            plain = extract_text(other, "txt")
+        masked = mask_recovery_password(fx.RECOVERY_PASSWORD)
+        for value in (text, document.text):
+            self.assertNotIn(fx.RECOVERY_PASSWORD, value)
+            self.assertIn(masked, value)
+            self.assertIn(fx.KEY_ID, value)  # the identifier is not secret and stays searchable
+        # Only files recognised as BitLocker key files are masked.
+        self.assertIn(fx.RECOVERY_PASSWORD, plain)
+
+    def test_run_outputs_never_contain_the_key(self) -> None:
+        import sqlite3
+        from contextlib import closing
+
+        from rapidtriage.core.run import run_triage_mode
+
+        groups = fx.RECOVERY_PASSWORD.split("-")
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "case-root"
+            documents = root / "Users" / "alice" / "Documents"
+            documents.mkdir(parents=True)
+            (documents / f"BitLocker Recovery Key {fx.KEY_ID}.TXT").write_bytes(fx.bitlocker_key_text())
+            (documents / f"BitLocker 복구 키 {fx.KEY_ID}.TXT").write_bytes(fx.bitlocker_key_text("ko"))
+            (documents / "memo.txt").write_text("password reset memo", encoding="utf-8")
+            output_dir = Path(temp) / "run-out"
+            summary = run_triage_mode(root, mode="hacking", output_dir=output_dir)
+
+            docs = json.loads((output_dir / "rapidtriage-docs.json").read_text(encoding="utf-8"))
+            docs_text = json.dumps(docs, ensure_ascii=False)
+            self.assertIn(f"BitLocker Recovery Key {fx.KEY_ID}.TXT", docs_text)
+            index = json.loads((output_dir / "rapidtriage-docs-index.json").read_text(encoding="utf-8"))
+            key_docs = [item for item in index["documents"] if "BitLocker" in str(item["path"])]
+            self.assertEqual(len(key_docs), 2)
+            self.assertTrue(all(int(item["text_length"]) > 0 for item in key_docs))  # indexed, masked
+            for term in index["terms"]:
+                self.assertFalse(any(group in term for group in groups), term)
+            self.assertIn(mask_recovery_password(fx.RECOVERY_PASSWORD).casefold(), index["terms"])
+
+            db_path = output_dir / "rapidtriage-case.db"
+            self.assertTrue(db_path.is_file(), summary.get("steps"))
+            with closing(sqlite3.connect(db_path)) as connection:
+                bodies = [
+                    str(body)
+                    for title, body in connection.execute("SELECT title, body FROM indexed_document")
+                    if "BitLocker" in str(title)
+                ]
+            self.assertEqual(len(bodies), 2)
+            for body in bodies:
+                self.assertIn(mask_recovery_password(fx.RECOVERY_PASSWORD), body)
+                for group in groups:
+                    self.assertNotIn(group, body)
+
+            # No output file of the run (JSON, JSONL, SQLite, reports) holds the key in any encoding.
+            needles = [fx.RECOVERY_PASSWORD.encode(encoding) for encoding in ("utf-8", "utf-16-le")]
+            for path in output_dir.rglob("*"):
+                if not path.is_file():
+                    continue
+                data = path.read_bytes()
+                for needle in needles:
+                    self.assertNotIn(needle, data, str(path.relative_to(output_dir)))
+
+
 class RegistrationTests(unittest.TestCase):
     def test_catalog_domains_and_timeline(self) -> None:
         catalog = load_catalog()

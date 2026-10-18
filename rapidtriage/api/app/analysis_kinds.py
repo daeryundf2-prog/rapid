@@ -988,6 +988,7 @@ def parse_mft_file(
     in_use = 0
     mismatch_reasons: Counter[str] = Counter()
     mismatch_rows = 0
+    mismatch_in_use = 0
     mismatch_capped = False
     with staging.open("r", encoding="utf-8") as handle:
         for index, line in enumerate(handle):
@@ -1012,6 +1013,7 @@ def parse_mft_file(
                 mismatch_capped = True
                 continue
             mismatch_rows += 1
+            mismatch_in_use += 1 if mismatch.get("in_use") is True else 0
             ctx.write_row(ctx.row(mismatch, path=path, artifact_type=TIMESTAMP_MISMATCH_TYPE))
     staging.unlink(missing_ok=True)
     result: dict[str, object] = {
@@ -1026,6 +1028,9 @@ def parse_mft_file(
             {
                 "timestamp_mismatch_status": "parsed",
                 "timestamp_mismatch_count": mismatch_rows,
+                # Rows of in-use / deleted MFT records (the tree's default node shows in-use only).
+                "timestamp_mismatch_in_use_count": mismatch_in_use,
+                "timestamp_mismatch_deleted_count": mismatch_rows - mismatch_in_use,
                 "timestamp_mismatch_reason_counts": dict(mismatch_reasons),
                 "timestamp_mismatch_capped": mismatch_capped,
                 "timestamp_mismatch_reference_time": mismatch_reference.isoformat(),
@@ -1137,6 +1142,19 @@ def _ntfs_source_counts(summary: Mapping[str, object]) -> Counter[str]:
     return counts
 
 
+def _ntfs_source_in_use_counts(summary: Mapping[str, object]) -> dict[str, int]:
+    """``<source>:in-use`` / ``<source>:deleted`` rows (타임스탬프 불일치 defaults to in-use records)."""
+    counts: dict[str, int] = {}
+    for key, summary_key in (
+        ("timestamp-mismatch:in-use", "timestamp_mismatch_in_use_count"),
+        ("timestamp-mismatch:deleted", "timestamp_mismatch_deleted_count"),
+    ):
+        value = summary.get(summary_key)
+        if isinstance(value, int) and not isinstance(value, bool):
+            counts[key] = value
+    return counts
+
+
 def run_ntfs_meta(ctx: AnalysisContext) -> None:
     from ...core.ntfs_metadata import NTFSMetadataError
 
@@ -1232,6 +1250,7 @@ def run_ntfs_meta(ctx: AnalysisContext) -> None:
     else:
         ctx.summary["logfile_status"] = "absent"
     ctx.summary["source_counts"] = dict(_ntfs_source_counts(ctx.summary))
+    ctx.summary["source_in_use_counts"] = _ntfs_source_in_use_counts(ctx.summary)
     ctx.summary["limitation"] = (
         "경로는 MFT 부모 참조로 재구성한 후보입니다(경로 상태 path_status 참고). "
         "USN 오프셋은 희소 구간을 뺀 추출 파일 기준일 수 있습니다."
