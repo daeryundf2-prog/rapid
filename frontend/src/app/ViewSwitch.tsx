@@ -1,7 +1,7 @@
 /**
- * View switcher above the grid (S9, plan X6/X12): 열 보기 / 썸네일 보기 /
- * 대화 보기 / 히스토그램 보기. The active view lives in the URL (`view=`),
- * Alt+Shift+1–4 run the `view.*` commands, and views the routed node cannot
+ * View switcher above the grid (S9, plan X6/X12; r4 §2.3): 열 보기 / 썸네일 보기 /
+ * 대화 보기 / 히스토그램 보기 / 행(카드) 보기 / 지도 대체 보기. The active view lives in the URL
+ * (`view=`), Alt+Shift+1–6 run the `view.*` commands, and views the routed node cannot
  * show are disabled with their reason. The column view renders `children`
  * (the DataGrid) unchanged and hands the switch to its filter-bar line
  * (visual-polish S1); a node with only the column view shows no switch (S2).
@@ -10,9 +10,11 @@
 import { type ReactNode, useEffect } from "react";
 import { DisabledReason } from "../a11y";
 import { effectiveView, VIEW_DEFS, viewAvailability } from "../features/views/availability";
+import { CardView } from "../features/views/CardView";
 import { ChatView } from "../features/views/ChatView";
 import { registerViewCommands, switchView } from "../features/views/commands";
 import { HistogramView } from "../features/views/HistogramView";
+import { MapView } from "../features/views/MapView";
 import { ThumbnailView } from "../features/views/ThumbnailView";
 import { ToolbarLeadContext } from "../features/views/toolbarSlot";
 import { Icon, type IconName } from "../icons";
@@ -26,6 +28,8 @@ const VIEW_ICONS: Record<ExplorerView, IconName> = {
   thumbnails: "image",
   chat: "message",
   histogram: "bar-chart",
+  cards: "list",
+  map: "map-pin",
 };
 
 export function ViewSwitch({ children }: { children: ReactNode }) {
@@ -75,6 +79,10 @@ export function ViewSwitch({ children }: { children: ReactNode }) {
           <ChatView />
         ) : active === "histogram" ? (
           <HistogramView />
+        ) : active === "cards" ? (
+          <CardView />
+        ) : active === "map" ? (
+          <MapView />
         ) : (
           // The column view: the switch sits on the grid's filter-bar line.
           <ToolbarLeadContext.Provider value={bar}>{children}</ToolbarLeadContext.Provider>

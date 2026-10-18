@@ -164,6 +164,8 @@ export const KEY_DESCRIPTIONS: Record<keyof typeof KEY_MAP, string> = {
   viewThumbnails: "썸네일 보기",
   viewChat: "대화 보기",
   viewHistogram: "히스토그램 보기",
+  viewCards: "행(카드) 보기",
+  viewMap: "지도 대체 보기 (좌표 표·근접 묶음)",
   stageIntake: "단계: 접수",
   stageProcess: "단계: 처리",
   stageExplore: "단계: 탐색",

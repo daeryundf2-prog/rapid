@@ -1,9 +1,12 @@
 export * from "./availability";
+export { CardView } from "./CardView";
 export { ChatView } from "./ChatView";
 export * from "./chat";
 export { registerViewCommands, switchView, viewCommands } from "./commands";
 export * from "./filterEvent";
+export * from "./geo";
 export { HistogramView } from "./HistogramView";
 export * from "./histogram";
+export { MapView } from "./MapView";
 export { ThumbnailView } from "./ThumbnailView";
 export * from "./thumbnails";

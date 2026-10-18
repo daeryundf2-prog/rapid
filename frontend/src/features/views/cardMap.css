@@ -1,0 +1,277 @@
+/* 행(카드) 보기 · 지도 대체 보기 (r4 §2.3). Tokens only: see src/tokens/tokens.css. */
+
+.card-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  position: relative;
+}
+
+.card-body {
+  position: relative;
+  width: 100%;
+}
+
+.card-item {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  gap: var(--space-3);
+  box-sizing: border-box;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--line-subtle);
+  background: var(--bg);
+  cursor: default;
+}
+
+.card-item:hover {
+  background: var(--bg-hover);
+}
+
+.card-item[aria-current="true"],
+.card-item[data-selected] {
+  background: var(--bg-selected);
+}
+
+.card-item:focus-visible {
+  outline: var(--focus-width) solid var(--focus);
+  outline-offset: calc(-1 * var(--focus-width));
+}
+
+/* Review stripe on the left edge (like the grid rows, U-F8). */
+.card-item[data-review="relevant"] {
+  box-shadow: inset 4px 0 0 var(--status-relevant);
+}
+
+.card-item[data-review="needs-review"] {
+  box-shadow: inset 4px 0 0 var(--status-needs-review);
+}
+
+.card-item[data-review="excluded"] {
+  box-shadow: inset 4px 0 0 var(--status-excluded);
+}
+
+.card-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.card-title,
+.card-subtitle,
+.card-meta {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-title {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.card-subtitle {
+  font-size: var(--fs-table-aux);
+  color: var(--text-muted);
+}
+
+.card-meta {
+  display: flex;
+  gap: var(--space-2);
+  font-size: var(--fs-table-aux);
+  color: var(--text-muted);
+}
+
+.card-time {
+  flex: none;
+}
+
+.card-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.card-chips {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: var(--space-1);
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+  overflow: hidden;
+}
+
+.card-chip {
+  flex: none;
+  max-width: 220px;
+  padding: 0 5px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-table-aux);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.card-chip.is-flag[data-grade="A"] {
+  border-color: currentColor;
+  color: var(--danger);
+}
+
+.card-chip.is-flag[data-grade="B"] {
+  border-color: currentColor;
+  color: var(--warn);
+}
+
+.card-side {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 112px;
+}
+
+.card-date {
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.card-clock {
+  font-size: var(--fs-table-aux);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.card-actions {
+  display: flex;
+  gap: var(--space-1);
+  margin-top: auto;
+  visibility: hidden;
+}
+
+.card-item:hover .card-actions,
+.card-item:focus-within .card-actions,
+.card-item[aria-current="true"] .card-actions {
+  visibility: visible;
+}
+
+.view-hint {
+  font-size: var(--fs-table-aux);
+  color: var(--text-muted);
+}
+
+/* 지도 대체 보기: cluster list + coordinate table, no tiles. */
+.map-policy {
+  margin: 0;
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--fs-table-aux);
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--line-subtle);
+}
+
+.map-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(220px, 320px) 1fr;
+  overflow: hidden;
+}
+
+.map-clusters,
+.map-table-wrap {
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-2) var(--space-3);
+}
+
+.map-clusters {
+  border-right: 1px solid var(--line-subtle);
+}
+
+.map-title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--fs-panel-title);
+  font-weight: 600;
+}
+
+.map-cluster-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.view-pane .map-cluster {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px var(--space-2);
+  width: 100%;
+  text-align: left;
+}
+
+.view-pane .map-cluster[aria-pressed="true"] {
+  border-color: var(--accent);
+}
+
+.map-cluster-count {
+  font-weight: 700;
+  text-align: right;
+}
+
+.map-cluster-time {
+  grid-column: 1 / -1;
+  color: var(--text-muted);
+}
+
+.map-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-table-aux);
+}
+
+.map-table th,
+.map-table td {
+  padding: 2px var(--space-2);
+  border-bottom: 1px solid var(--line-subtle);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.map-table th {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.map-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.map-path {
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 720px) {
+  .map-body {
+    grid-template-columns: 1fr;
+    overflow: auto;
+  }
+
+  .map-clusters {
+    border-right: 0;
+    border-bottom: 1px solid var(--line-subtle);
+  }
+}
