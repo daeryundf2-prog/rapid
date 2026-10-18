@@ -61,9 +61,9 @@ import struct
 import threading
 import unicodedata
 from collections import Counter, OrderedDict
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path, PurePath
+from pathlib import Path
 
 from ...core.files import deletion_state_for
 from .analyses import ANALYSIS_RUNNER, ROWS_FILE_NAME, RunScope, analyses_root
@@ -393,29 +393,16 @@ def _null_fields(row: Mapping[str, object], source_image: str | None) -> dict[st
     return sync_row_deletion_state({**row, "ntfs": None, "filesystem": None, "source_image": source_image})
 
 
-def join_files_page(
-    scope: RunScope | None,
-    page: dict[str, object],
-    all_candidates: Sequence[object] = (),
-    *,
-    collection: str = "candidates",
-) -> dict[str, object]:
-    """Return ``page`` (a copy) with ``ntfs``/``filesystem``/``source_image`` per row of
-    ``page[collection]`` (``candidates`` or ``inventory``) and ``ntfs_join``.
-
-    ``ntfs_join = {analysis_id, status, matched, total, analysis_total,
-    volume_prefix, prefix_method, partition, reason?}``; ``matched``/``total``
-    count this page's rows only. ``scope=None`` (no usable run output dir)
-    skips the join. ``all_candidates`` = the collection's full list (volume
-    prefix detection). Deletion states follow ``is_deleted`` (module doc).
-    """
-    rows = page.get(collection)
-    rows = rows if isinstance(rows, list) else []
+def _join_context(
+    scope: RunScope | None, prefix_rows: Sequence[object]
+) -> tuple[dict[str, object], str | None, NtfsIndex | None, str | None]:
+    """``(ntfs_join info, source_image, index | None, volume prefix | None)`` of a run: the index
+    and prefix are set only when the join status is ``joined``."""
     join: dict[str, object] = {
         "analysis_id": None,
         "status": "no_analysis",
         "matched": 0,
-        "total": len(rows),
+        "total": 0,
         "analysis_total": None,
         "volume_prefix": None,
         "prefix_method": None,
@@ -456,7 +443,7 @@ def join_files_page(
                 )
             elif rows_path.is_file():
                 index = NTFS_INDEX_CACHE.get(scope.run_id, analysis_id, rows_path)
-                prefix, method = _volume_prefix(scope, index, all_candidates or rows)
+                prefix, method = _volume_prefix(scope, index, prefix_rows)
                 join["volume_prefix"] = prefix
                 join["prefix_method"] = method
                 if prefix is None:
@@ -465,18 +452,58 @@ def join_files_page(
                     index = None
                 else:
                     join["status"] = "joined"
+    return join, source_image, index, prefix
+
+
+def ntfs_entry_for(row: Mapping[str, object], index: NtfsIndex, prefix: str) -> dict[str, object] | None:
+    """The NTFS entry of a files row under the volume ``prefix`` (None when not indexed)."""
+    parts = _relative_parts(row.get("path"), Path(prefix))
+    return index.lookup(ntfs_path_key("/".join(parts))) if parts else None
+
+
+def ntfs_si_modified_resolver(
+    scope: RunScope | None, all_rows: Sequence[object]
+) -> Callable[[Mapping[str, object]], object] | None:
+    """Per-row ``$SI`` modified time of the NTFS join (row conditions of ``GET /files`` resolve an
+    acquisition copy's time lazily instead of joining the whole list); None unless ``joined``."""
+    _join, _source_image, index, prefix = _join_context(scope, all_rows)
+    if index is None or prefix is None:
+        return None
+
+    def resolve(row: Mapping[str, object]) -> object:
+        entry = ntfs_entry_for(row, index, prefix)
+        return entry.get("si_modified_at") if entry is not None else None
+
+    return resolve
+
+
+def join_files_page(
+    scope: RunScope | None,
+    page: dict[str, object],
+    all_candidates: Sequence[object] = (),
+    *,
+    collection: str = "candidates",
+) -> dict[str, object]:
+    """Return ``page`` (a copy) with ``ntfs``/``filesystem``/``source_image`` per row of
+    ``page[collection]`` (``candidates`` or ``inventory``) and ``ntfs_join``.
+
+    ``ntfs_join = {analysis_id, status, matched, total, analysis_total,
+    volume_prefix, prefix_method, partition, reason?}``; ``matched``/``total``
+    count this page's rows only. ``scope=None`` (no usable run output dir)
+    skips the join. ``all_candidates`` = the collection's full list (volume
+    prefix detection). Deletion states follow ``is_deleted`` (module doc).
+    """
+    rows = page.get(collection)
+    rows = rows if isinstance(rows, list) else []
+    join, source_image, index, prefix = _join_context(scope, all_candidates or rows)
+    join["total"] = len(rows)
     matched = 0
     joined: list[object] = []
-    prefix_path = PurePath(prefix) if prefix else None
     for row in rows:
         if not isinstance(row, Mapping):
             joined.append(row)
             continue
-        entry = None
-        if index is not None and prefix_path is not None:
-            parts = _relative_parts(row.get("path"), Path(prefix_path))
-            if parts:
-                entry = index.lookup(ntfs_path_key("/".join(parts)))
+        entry = ntfs_entry_for(row, index, prefix) if index is not None and prefix is not None else None
         if entry is None:
             nulled = _null_fields(row, source_image)
             nulled["match_method"] = MATCH_METHOD_NONE if index is not None else None

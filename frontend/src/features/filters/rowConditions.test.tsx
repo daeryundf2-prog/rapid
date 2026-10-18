@@ -291,9 +291,11 @@ describe("client predicates", () => {
 
   it("partial rows: parser_error, truncation flags, failing parse / decrypt status, invalid types", () => {
     expect(rowIsPartial(row({ rowKey: "a", fields: { details: { parser_error: true } } }))).toBe(true);
+    // A display cap is no 부분 결과; a read / scan cap is (r4 V3 review B4).
     expect(rowIsPartial(row({ rowKey: "b", fields: { details: { event_data_truncated: true } } }))).toBe(
-      true,
+      false,
     );
+    expect(rowIsPartial(row({ rowKey: "b2", fields: { details: { scan_truncated: true } } }))).toBe(true);
     expect(rowIsPartial(row({ rowKey: "c", fields: { details: { parse_status: "truncated-item" } } }))).toBe(
       true,
     );
@@ -358,8 +360,9 @@ describe("chips and saved condition sets", () => {
       partial: true,
       content: ["image"],
     });
-    expect(normalizeFilters({ hours: "bad", offhours: "yes", content: [1, "x"] })).toMatchObject({
-      content: ["x"],
+    // Unknown content ids are dropped (r4 V3 review F5).
+    expect(normalizeFilters({ hours: "bad", offhours: "yes", content: [1, "x", "image"] })).toMatchObject({
+      content: ["image"],
     });
     expect(normalizeFilters({ hours: "bad" }).hours).toBeUndefined();
   });

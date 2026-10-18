@@ -96,17 +96,22 @@ export function geoRows(rows: readonly GridRow[]): GeoRow[] {
 
 const round = (value: number) => Math.round(value * 1e6) / 1e6;
 
-/** Cell index of a coordinate (floor on the 0.01° grid; a tiny epsilon keeps 37.48 in cell 3748). */
-function cell(value: number): number {
-  return Math.floor(value / CLUSTER_CELL_DEGREES + 1e-9);
+/**
+ * Cell index of a coordinate (floor on the 0.01° grid; a tiny epsilon keeps 37.48 in cell 3748),
+ * clamped so the box never passes the world edge: 90° / 180° fall in the last cell, whose upper
+ * edge the server's half-open box includes (`row_conditions.in_geo_box`).
+ */
+function cell(value: number, limit: number): number {
+  const last = Math.round(limit / CLUSTER_CELL_DEGREES) - 1;
+  return Math.max(-last - 1, Math.min(last, Math.floor(value / CLUSTER_CELL_DEGREES + 1e-9)));
 }
 
 /** Proximity clusters: rows grouped by their 0.01° grid cell, most rows first. */
 export function clusterRows(rows: readonly GeoRow[]): GeoCluster[] {
   const byCell = new Map<string, GeoCluster>();
   for (const item of rows) {
-    const latCell = cell(item.lat);
-    const lonCell = cell(item.lon);
+    const latCell = cell(item.lat, 90);
+    const lonCell = cell(item.lon, 180);
     const id = `${latCell}:${lonCell}`;
     let cluster = byCell.get(id);
     if (!cluster) {

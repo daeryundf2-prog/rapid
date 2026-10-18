@@ -29,6 +29,9 @@ dependencies = [
   # triage-flags catalog (rapidtriage/core/triage_rules/catalog/*.yaml) is YAML;
   # imported lazily so the CLI still imports without it.
   "pyyaml>=6.0",
+  # IANA time zone names of the row conditions (tz=Asia/Seoul): Windows ships no
+  # zoneinfo database; without it the API answers a Korean 422 suggesting ±HH:MM.
+  "tzdata; sys_platform == \"win32\"",
 ]
 
 [project.optional-dependencies]

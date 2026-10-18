@@ -76,6 +76,12 @@
 - 지도: media-image 위치 행 3건 → 묶음 2개(37.48,126.94 칸 2건, 37.20,127.10 칸 1건), 묶음 클릭 → 그리드 2건. 전체 아티팩트 지도는 3건(64만 행 훑기 38 s).
 - 연결 그래프 `people/user`: 41 노드(원본 행 19 = SAM 계정·그룹·이벤트·로그온 세션·탐지·브라우저·문서·LNK·점프 목록 11계열, 값 21 = 사람 8·장치 4·경로 5·URL 4, 표에 있는 값 22), 간선 57, 0.98 s. `people/S-1-5-18`: 29 노드, 0.7 s. 키보드 → 행 → 값 이동 확인.
 
+**적대적 리뷰 후속 수정** (브랜치 `fix/r4-v3-review`, 2026-10-18)
+- 백엔드 `row_conditions.py`: `tz=Asia`/`America`(tzdata 디렉터리, ZoneInfo의 PermissionError/IsADirectoryError)와 읽지 못하는 이름은 500 대신 ±HH:MM을 권하는 한국어 422, 오프셋 ±14:00 상한을 분까지 검사, Windows `tzdata` 의존성 추가(pyproject). 0001/9999년·epoch 253402300799 행의 `astimezone` OverflowError → 그 행은 불일치(단일·교차 kind, 정렬, 타임라인 500 없음). 콘텐츠 유형에서 `source_path`·컨테이너 경로 제외(경로가 곧 내용인 유형만 행 경로로 대체). 부분 결과: 잘림 키 허용 목록(표시용 잘림 제외), 상태 단어 단위·부정 인식, `decrypt_status=unknown` 제외, unrecognized·not-parsed·out-of-range 추가. `to`는 적힌 단위 끝까지(날짜·분·초), 요일 정확히(`mon`..`sun`·전체 영어 이름), `geo` 반열림·날짜 변경선 상자·`/files`/`/timeline`의 `geo`는 422. 아티팩트 행 시각은 해석되는 다음 TIME_KEY로 넘어감.
+- 성능: `/files` 시간 조건은 목록 전체 NTFS 조인 대신 취득 사본 행이 있고 조인이 `joined`일 때만 행마다 `$SI` 시각을 찾는다(`files_ntfs.ntfs_si_modified_resolver`). `/timeline` 조건 페이지와 정렬+조건 레코드 집합은 (출력 리비전, 조건) 키 LRU(`row_conditions.MATCH_CACHE`, 16개·800만 위치 상한)로 다음 페이지 재스캔 없음. 합성 50만 행: 타임라인 첫 페이지 5.05 s(이전 페이지마다 4.9–5.7 s) → 다음 페이지 0.00 s, 파일 목록 전체 null 조인 1.00 s → 취득 사본 확인 0.15 s.
+- 콘솔: 역순 시간 범위는 바꿔 보내고 안내, `to`는 분 단위 그대로 보내 끝 분 포함(최근 n일 포함), 시간대 드롭다운은 같은 시각을 고르면 다른 쪽을 한 시간 옮김(18–09 도달), 카드·그래프 키는 Ctrl/Meta/Alt 무시, 카드 활성은 rowKey 기준·가상 창 밖이면 목록이 탭 정지로 포커스 전달·다시 불러온 뒤 포커스 복원·뷰어 대상 재게시, URL/저장 조건의 요일·콘텐츠·시간·geo 검증(geo는 아티팩트만), 묶음 상자 ±90/±180 안, 반열림 상자, `errorText()`, 지도 빈 상태 문구가 다른 조건 반영·페이지 오류 시 스캔 표시 종료, 원본 행 오류는 연결 그래프 모드에서 숨김, 그래프 중심 노드가 없어도 탭 정지 1개, 파일·타임라인 조건/특이사항 페이지는 `matched`를 전체 수로(상한이면 "이상"), 카드 수 "n건 이상", 히스토그램 "조건 미적용" 안내.
+- 테스트: `tests/test_rapidtriage_api_row_conditions.py` 28개(이전 14), `frontend/src/features/views/v3Review.test.tsx` 15개, derived 1개 추가.
+
 **게이트**: targeted pytest(신규 row_conditions 14 + api·api_contract·derived_api(+그래프 3)·timeline·field_filters·derived_engine 130 passed, parser_quality_integration·triage_flags_api 43, ntfs_r3·analyses 118), ruff·vulture·compileall·check-doc-refs 통과, OpenAPI 스냅샷 갱신(122 경로/139 작업). 프런트 lint·typecheck·check:contrast 통과, vitest(views·filters·derived·grid·api) 33 파일 363 통과 + shortcuts·shell·app 64 통과. 전체 스위트·Playwright는 위임(Q-R4-9).
 
 ### 4.4 적대적 리뷰 수정 — 백엔드 (브랜치 `fix/r4-backend-review`)

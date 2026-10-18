@@ -21,6 +21,7 @@ import { getRunTree } from "../../api/runs";
 import type { GridRow } from "../../contracts/collection";
 import { useRoute as useAppRoute } from "../../state/hooks";
 import { useFilterStore } from "../filters/filterStore";
+import { hasClock } from "../filters/rowConditions";
 import { useRoute } from "../grid/adapter";
 import { BaselineHistogram } from "../review/BaselineHistogram";
 import { errorText } from "../viewer/useAsync";
@@ -89,6 +90,9 @@ function TimelineHistogram({ runId }: { runId: string }) {
   const filterFrom = filters.from ? Date.parse(filters.from) : null;
   const filterTo = filters.to ? Date.parse(filters.to) : null;
   const hasFilter = filterFrom !== null || filterTo !== null;
+  // GET /timeline-histogram takes no row conditions: say so instead of implying they shaped the bars.
+  const unappliedConditions =
+    hasClock(filters) || Boolean(filters.partial) || Boolean(filters.content?.length) || Boolean(filters.geo);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset when the bars change
   useEffect(() => {
@@ -282,6 +286,12 @@ function TimelineHistogram({ runId }: { runId: string }) {
           <span>
             선택: {bucketLabel(buckets[lo]?.startMs ?? 0, granularity)} ~{" "}
             {bucketLabel(buckets[hi]?.startMs ?? 0, granularity)} · {selectedCount.toLocaleString("ko-KR")}건
+          </span>
+        ) : null}
+        {unappliedConditions ? (
+          <span className="hist-filter" role="note">
+            조건 미적용: 요일·시간대·부분 결과·콘텐츠 유형·위치 조건은 이 막대(타임라인 전체)에 적용되지
+            않습니다.
           </span>
         ) : null}
         {hasFilter ? (

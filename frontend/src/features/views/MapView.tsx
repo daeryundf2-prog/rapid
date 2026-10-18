@@ -14,9 +14,11 @@ import { announce } from "../../a11y";
 import type { GridRow } from "../../contracts/collection";
 import { useTimezone } from "../../state/hooks";
 import { formatGridTime } from "../../utils/time";
+import { hasActiveFilters } from "../filters/filterModel";
 import { useFilterStore } from "../filters/filterStore";
 import { useViewerTarget } from "../grid/adapter";
 import { buildViewerTarget } from "../grid/gridCommands";
+import { errorText } from "../viewer/useAsync";
 import { switchView } from "./commands";
 import { clusterRows, formatCoordinates, type GeoCluster, geoRows } from "./geo";
 import { useAutoLoad, useViewRows } from "./useViewRows";
@@ -36,7 +38,7 @@ export const MAP_ROW_CONDITIONS: Readonly<Record<string, string>> = Object.freez
 const allRows = () => true;
 
 export function MapView() {
-  const { cq, rows, runId } = useViewRows({
+  const { cq, rows, runId, q } = useViewRows({
     predicate: allRows,
     textFilter: true,
     rowConditions: MAP_ROW_CONDITIONS,
@@ -44,12 +46,14 @@ export function MapView() {
   const { timezone } = useTimezone();
   const { publishFocusedRow, requestFocus } = useViewerTarget();
   const patchFilters = useFilterStore((s) => s.patchFilters);
+  const filtered = useFilterStore((s) => hasActiveFilters(s.filters)) || Boolean(q);
   const located = useMemo(() => geoRows(rows), [rows]);
   const clusters = useMemo(() => clusterRows(located), [located]);
   const [picked, setPicked] = useState<string | null>(null);
   // Every loaded row is located (server filter); keep paging up to the cap.
   const capped = useAutoLoad(cq, true, MAP_AUTOLOAD_ROWS);
-  const scanning = cq.isFetching || (cq.canLoadMore && !capped);
+  // A failed page stops the automatic paging (useAutoLoad): no endless "찾는 중".
+  const scanning = !cq.error && (cq.isFetching || (cq.canLoadMore && !capped));
 
   const time = (value: string | null) => (value ? formatGridTime(value, timezone) : "—");
 
@@ -69,17 +73,33 @@ export function MapView() {
   };
 
   if (cq.error && cq.loadedCount === 0) {
-    return <ErrorState message={`행을 불러오지 못했습니다. ${String(cq.error)}`} onRetry={cq.refetch} />;
+    return <ErrorState message={`행을 불러오지 못했습니다. ${errorText(cq.error)}`} onRetry={cq.refetch} />;
   }
   if (cq.isLoading) return <LoadingCard label="위치 행을 찾는 중…" />;
   if (located.length === 0) {
     if (scanning) {
       return <LoadingCard label="위치 행을 찾는 중…" />;
     }
+    if (cq.error) {
+      return (
+        <ErrorState
+          message={`위치 행을 더 불러오지 못했습니다. ${errorText(cq.error)}`}
+          onRetry={cq.refetch}
+        />
+      );
+    }
     return (
       <EmptyState
-        title="이 노드에는 위도·경도가 있는 행이 없습니다."
-        hint={`서버가 이 노드의 모든 행에서 좌표 열(EXIF GPS·위치)을 찾았지만 없었습니다. ${MAP_POLICY_NOTE}`}
+        title={
+          filtered
+            ? "현재 조건에 맞는 행 중 위도·경도가 있는 행이 없습니다."
+            : "이 노드에는 위도·경도가 있는 행이 없습니다."
+        }
+        hint={
+          filtered
+            ? `필터·검색 조건을 줄이면 위치 행이 나타날 수 있습니다. ${MAP_POLICY_NOTE}`
+            : `서버가 이 노드의 모든 행에서 좌표 열(EXIF GPS·위치)을 찾았지만 없었습니다. ${MAP_POLICY_NOTE}`
+        }
       >
         {capped ? (
           <button type="button" className="view-link" onClick={() => cq.loadMore()}>

@@ -37,6 +37,7 @@ import {
   toInputValue,
 } from "./filterModel";
 import { type FilterReport, useFilterStore } from "./filterStore";
+import { orderedRange } from "./rowConditions";
 import "./filters.css";
 import { typeOptionsFor } from "./typeLabels";
 
@@ -188,6 +189,11 @@ function FilterPopoverBody({ tagListId }: { tagListId: string }) {
             />
           </label>
         </div>
+        {orderedRange(filters.from, filters.to).reversed ? (
+          <p className="filter-empty" role="status">
+            시작이 종료보다 늦어 두 시각을 바꿔 적용합니다(종료 시각은 그 분의 끝까지 포함).
+          </p>
+        ) : null}
       </fieldset>
 
       <ClockSection />

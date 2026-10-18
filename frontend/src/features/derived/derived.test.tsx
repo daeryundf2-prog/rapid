@@ -560,6 +560,28 @@ describe("DerivedPane (Q-X5 / Q-X12)", () => {
     expect(status).not.toContain(new Date(META.source.generated_at).toLocaleString("ko-KR"));
   });
 
+  it("the 원본 행 error stays with the 원본 행 mode, not the 연결 그래프 (r4 V3 review F10)", async () => {
+    useDerivedStore.setState({ graphMode: false });
+    installFetch({
+      "/derived/people/rows": () => jsonResponse({ detail: "원본 행 목록을 읽지 못했습니다" }, 500),
+      "/derived/people/graph": () => jsonResponse({ detail: "그래프 원본이 없습니다" }, 404),
+      "/derived/people": () => jsonResponse(page([row("alice", 34)])),
+      "/derived": () => jsonResponse(META),
+    });
+    const { client } = openPane();
+    registerDerivedCommands(client);
+    const grid = await screen.findByRole("grid", { name: "사람 식별자 표" });
+    await waitFor(() => expect(within(grid).getAllByRole("row")).toHaveLength(2));
+    fireEvent.keyDown(within(grid).getAllByRole("row")[1] as HTMLElement, { key: "Enter" });
+    const panel = screen.getByTestId("derived-rows");
+    expect((await within(panel).findByRole("alert")).textContent).toContain("원본 행 목록을 읽지 못했습니다");
+    fireEvent.click(screen.getByRole("button", { name: "연결 그래프" }));
+    expect((await within(panel).findByRole("alert")).textContent).toContain("그래프 원본이 없습니다");
+    expect(within(panel).getAllByRole("alert")).toHaveLength(1);
+    expect(panel.textContent).not.toContain("원본 행 목록을 읽지 못했습니다");
+    useDerivedStore.setState({ graphMode: false });
+  });
+
   it("a run without a set explains why and offers the rebuild command", async () => {
     const calls = installFetch({
       "/analyses": () => jsonResponse({ analysis_id: "a-1", kind: "derived", status: "queued" }, 202),

@@ -9,11 +9,15 @@
  * visible cards are mounted); one card is a tab stop (roving tabindex), each card's name reads
  * its title, type, time and chips. Keys: J / ↓ next, K / ↑ previous, Home / End, PageUp /
  * PageDown, Enter = open the row in the viewer, Space = select; R/X/I/B/1–5 act on the focused
- * card through the shared review commands (the viewer target follows card focus).
+ * card through the shared review commands (the viewer target follows card focus). Keys with
+ * Ctrl / Meta / Alt are left to the browser and the shell. The active card is tracked by row key
+ * (a refetch that reorders or drops rows keeps it, or falls back to the nearest index); when it is
+ * scrolled out of the virtual window the list itself is the tab stop and forwards focus to it, and
+ * focus that was inside the list returns to the active card after a refetch.
  */
 
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { type KeyboardEvent, memo, useEffect, useMemo, useRef, useState } from "react";
+import { type FocusEvent, type KeyboardEvent, memo, useEffect, useMemo, useRef, useState } from "react";
 import { announce } from "../../a11y";
 import type { GridRow } from "../../contracts/collection";
 import { encodeRowRef } from "../../contracts/rowRef";
@@ -28,6 +32,7 @@ import { REVIEW_LABELS } from "../grid/columns/common";
 import { buildViewerTarget, citationText, copyText } from "../grid/gridCommands";
 import { applyReviewAction, optimisticPatch, storeNotice } from "../grid/reviewActions";
 import { registerRowSource } from "../review/rowSource";
+import { errorText } from "../viewer/useAsync";
 import { SelectionBar } from "./SelectionBar";
 import { useAutoLoad, useViewRows } from "./useViewRows";
 import { EmptyState, ErrorState, LoadingCard } from "./ViewState";
@@ -40,6 +45,28 @@ const PAGE_JUMP = 8;
 const MAX_CHIPS = 4;
 
 const allRows = () => true;
+
+/** A key the card list handles itself: no Ctrl / Meta / Alt (those belong to the browser / shell). */
+export function isPlainKey(event: { ctrlKey: boolean; metaKey: boolean; altKey: boolean }): boolean {
+  return !event.ctrlKey && !event.metaKey && !event.altKey;
+}
+
+/**
+ * Index of the active card: the row with `activeKey`, else the last known index clamped to the
+ * list (the row disappeared after a refetch), else 0.
+ */
+export function resolveActiveIndex(
+  rows: readonly GridRow[],
+  activeKey: string | null,
+  fallback: number,
+): number {
+  if (rows.length === 0) return 0;
+  if (activeKey !== null) {
+    const found = rows.findIndex((row) => row.rowKey === activeKey);
+    if (found >= 0) return found;
+  }
+  return Math.max(0, Math.min(fallback, rows.length - 1));
+}
 
 export interface CardModel {
   title: string;
@@ -233,10 +260,21 @@ export function CardView() {
   });
   const items = virtualizer.getVirtualItems();
   const lastVisible = items.at(-1)?.index ?? 0;
-  const [active, setActive] = useState(0);
-  const activeIndex = Math.min(active, Math.max(rows.length - 1, 0));
+  // The active card by row key (a refetch may reorder / drop rows); the index is the fallback.
+  const [activeKey, setActiveKey] = useState<string | null>(null);
+  const lastIndex = useRef(0);
+  const activeIndex = resolveActiveIndex(rows, activeKey, lastIndex.current);
+  lastIndex.current = activeIndex;
   const pendingFocus = useRef<number | null>(null);
+  // DOM focus was inside the list (restored onto the active card after a refetch).
+  const focusInside = useRef(false);
   const capped = useAutoLoad(cq, rows.length < lastVisible + 20, CARD_AUTOLOAD_ROWS);
+  const activeMounted = items.some((item) => item.index === activeIndex);
+
+  const setActive = (index: number) => {
+    lastIndex.current = index;
+    setActiveKey(rows[index]?.rowKey ?? null);
+  };
 
   // Move DOM focus onto the target card once it is rendered (cards are virtualised).
   useEffect(() => {
@@ -248,17 +286,58 @@ export function CardView() {
     }
   });
 
+  // Focus leaving for another element of the page ends "focus inside" (a removed card does not).
+  useEffect(() => {
+    const onFocusIn = (event: globalThis.FocusEvent) => {
+      if (!scrollRef.current?.contains(event.target as Node)) focusInside.current = false;
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      if (!scrollRef.current?.contains(event.target as Node)) focusInside.current = false;
+    };
+    document.addEventListener("focusin", onFocusIn);
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      document.removeEventListener("focusin", onFocusIn);
+      document.removeEventListener("pointerdown", onPointerDown);
+    };
+  }, []);
+
+  // The row ref this list last handed the viewer (the viewer "follows" the list while it shows it).
+  const published = useRef<string | null>(null);
   const publish = (row: GridRow | undefined) => {
     if (!row || !runId) return;
-    if (target?.runId === runId && encodeRowRef(target.ref) === encodeRowRef(row.ref)) return;
+    published.current = encodeRowRef(row.ref);
+    if (target?.runId === runId && encodeRowRef(target.ref) === published.current) return;
     publishFocusedRow(row, buildViewerTarget(runId, row));
   };
+
+  // New rows (refetch, more pages): the viewer follows the active card if it changed under it,
+  // and focus that was inside the list (on a card that went away) returns to the active card.
+  const activeRow = rows[activeIndex];
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-run only when the rows change
+  useEffect(() => {
+    const following =
+      target?.runId === runId && published.current !== null && encodeRowRef(target.ref) === published.current;
+    if (activeKey !== null && activeRow && following) publish(activeRow);
+    const list = scrollRef.current;
+    if (focusInside.current && list && !list.contains(document.activeElement)) {
+      pendingFocus.current = activeIndex;
+      virtualizer.scrollToIndex(activeIndex, { align: "auto" });
+      list.querySelector<HTMLElement>(`[data-card-index="${activeIndex}"]`)?.focus();
+    }
+  }, [rows]);
 
   const focusCard = (index: number) => {
     const next = Math.max(0, Math.min(index, rows.length - 1));
     setActive(next);
     pendingFocus.current = next;
     virtualizer.scrollToIndex(next, { align: "auto" });
+  };
+
+  // The list is the tab stop while the active card is outside the virtual window: forward focus.
+  const onListFocus = (event: FocusEvent<HTMLDivElement>) => {
+    focusInside.current = true;
+    if (event.target === event.currentTarget && !activeMounted) focusCard(activeIndex);
   };
 
   const toggle = (index: number) => {
@@ -305,6 +384,7 @@ export function CardView() {
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>, index: number) => {
     if (event.target !== event.currentTarget) return; // keys inside an action button stay with it
+    if (!isPlainKey(event)) return; // Ctrl/Meta/Alt shortcuts belong to the browser and the shell
     const key = event.key;
     let next: number | null = null;
     if (key === "ArrowDown" || key === "j" || key === "J") next = index + 1;
@@ -348,7 +428,7 @@ export function CardView() {
   );
 
   if (cq.error && cq.loadedCount === 0) {
-    return <ErrorState message={`행을 불러오지 못했습니다. ${String(cq.error)}`} onRetry={cq.refetch} />;
+    return <ErrorState message={`행을 불러오지 못했습니다. ${errorText(cq.error)}`} onRetry={cq.refetch} />;
   }
   if (cq.isLoading) return <LoadingCard label="행을 불러오는 중…" />;
   if (rows.length === 0) {
@@ -364,11 +444,13 @@ export function CardView() {
   }
 
   const total = cq.total ?? null;
+  // Unknown total (a capped server scan) while more pages exist: "n건 이상".
+  const atLeast = total === null && cq.canLoadMore;
   return (
     <div className="view-pane card-view">
       <div className="view-toolbar">
         <span className="view-count">
-          {`카드 ${rows.length.toLocaleString("ko-KR")}건`}
+          {`카드 ${rows.length.toLocaleString("ko-KR")}건${atLeast ? " 이상" : ""}`}
           {total !== null && total > cq.loadedCount
             ? ` (전체 ${total.toLocaleString("ko-KR")}건 중 불러온 행)`
             : ""}
@@ -386,8 +468,10 @@ export function CardView() {
         ref={scrollRef}
         className="card-scroll"
         role="list"
-        aria-label={`행 카드 목록, ${rows.length.toLocaleString("ko-KR")}건`}
+        aria-label={`행 카드 목록, ${rows.length.toLocaleString("ko-KR")}건${atLeast ? " 이상" : ""}`}
         data-testid="card-list"
+        tabIndex={activeMounted ? undefined : 0}
+        onFocus={onListFocus}
       >
         <div className="card-body" style={{ height: virtualizer.getTotalSize() }}>
           {items.map((item) => {

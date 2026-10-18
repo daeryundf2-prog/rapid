@@ -7,16 +7,17 @@
  */
 
 import { useEffect, useId, useMemo, useState } from "react";
-import { WEEKDAY_IDS } from "../../router";
 import { useTimezone } from "../../state/hooks";
 import { useAppStore } from "../../state/store";
 import { zoneLabel } from "../../utils/time";
 import { useAnalysisStore } from "../analysis/store";
+import { WEEKDAY_IDS } from "./conditionValues";
 import { CONTENT_TYPE_IDS, CONTENT_TYPES } from "./contentTypes";
 import { toLocalInput } from "./filterModel";
 import { useFilterStore } from "./filterStore";
 import {
   DEFAULT_OFFHOURS,
+  hoursAfterPick,
   incidentFromAnalyses,
   incidentRange,
   parseHours,
@@ -104,10 +105,9 @@ export function ClockSection() {
   const window = parseHours(filters.hours);
   const [start, end] =
     window ?? (filters.offhours ? (parseHours(DEFAULT_OFFHOURS) as [number, number]) : [9, 18]);
-  const setHours = (from: number, to: number) =>
-    patch({
-      hours: from === to ? undefined : `${String(from).padStart(2, "0")}-${String(to).padStart(2, "0")}`,
-    });
+  // A pick that would empty the window moves the other bound (hoursAfterPick); it never clears it.
+  const pickHour = (bound: "start" | "end", hour: number) =>
+    patch({ hours: hoursAfterPick([start, end], bound, hour) });
   const startId = useId();
   const endId = useId();
   return (
@@ -151,7 +151,7 @@ export function ClockSection() {
           onChange={(event) =>
             event.target.value === ""
               ? patch({ hours: undefined })
-              : setHours(Number(event.target.value), end)
+              : pickHour("start", Number(event.target.value))
           }
         >
           <option value="">{filters.offhours ? "기본(18시)" : "전체"}</option>
@@ -170,7 +170,7 @@ export function ClockSection() {
           onChange={(event) =>
             event.target.value === ""
               ? patch({ hours: undefined })
-              : setHours(start, Number(event.target.value))
+              : pickHour("end", Number(event.target.value))
           }
         >
           <option value="">{filters.offhours ? "기본(09시)" : "전체"}</option>
