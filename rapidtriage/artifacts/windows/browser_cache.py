@@ -50,6 +50,8 @@ MAX_CHAIN_LENGTH = 64
 MAX_CACHE_KEY_CHARS = 2048
 MAX_ERROR_SAMPLES = 20
 MAX_SCAN_BLOCKS = 65_536
+MAX_HEADER_LINES = 512
+MAX_HEADER_NAMES = 80
 
 SIMPLE_INITIAL_MAGIC = 0xFCFB6D1BA7725C30
 SIMPLE_FINAL_MAGIC = 0xF4FA6F45970D41D8
@@ -161,14 +163,6 @@ def webkit_time(micros: int | None) -> str | None:
         return None
 
 
-def normalize_host(url: str) -> str:
-    try:
-        host = urlsplit(url).hostname or ""
-    except ValueError:
-        return ""
-    return host.lower().removeprefix("www.")
-
-
 def parse_cache_key(key: str) -> dict[str, object]:
     """URL, upload id and isolation key of an HTTP cache key.
 
@@ -198,18 +192,29 @@ def parse_cache_key(key: str) -> dict[str, object]:
 
 
 def parse_raw_headers(raw: str) -> dict[str, object]:
-    """Status and kept headers of ``HttpResponseHeaders`` raw text (``\\0`` or CRLF separated)."""
-    lines = [line for line in re.split(r"\x00|\r?\n", raw) if line]
+    """Status and kept headers of ``HttpResponseHeaders`` raw text (``\\0`` or CRLF separated).
+
+    Bounded: at most ``MAX_STREAM0_BYTES`` of text and ``MAX_HEADER_LINES`` lines are
+    looked at, and the name list stops at ``MAX_HEADER_NAMES`` distinct names.
+    """
+    lines: list[str] = []
+    for line in re.split(r"\x00|\r?\n", raw[:MAX_STREAM0_BYTES], maxsplit=MAX_HEADER_LINES):
+        if line:
+            lines.append(line)
+            if len(lines) >= MAX_HEADER_LINES:
+                break
     status_line = lines[0] if lines and lines[0].upper().startswith("HTTP/") else ""
     status: int | None = None
     version = ""
     if status_line:
         parts = status_line.split(" ", 2)
         version = parts[0]
-        if len(parts) > 1 and parts[1][:3].isdigit():
-            status = int(parts[1][:3])
+        code = parts[1][:3] if len(parts) > 1 else ""
+        if code.isascii() and code.isdigit():
+            status = int(code)
     headers: dict[str, str] = {}
     names: list[str] = []
+    seen: set[str] = set()
     for line in lines[1 if status_line else 0 :]:
         if ":" not in line:
             continue
@@ -217,11 +222,12 @@ def parse_raw_headers(raw: str) -> dict[str, object]:
         name = name.strip().lower()
         if not name or len(name) > 80:
             continue
-        if name not in names:
+        if name not in seen and len(names) < MAX_HEADER_NAMES:
+            seen.add(name)
             names.append(name)
         if name in KEPT_HEADERS and name not in headers:
             headers[name] = value.strip()[:500]
-    return {"status_line": status_line[:200], "http_version": version, "http_status": status, "headers": headers, "header_names": names[:80]}
+    return {"status_line": status_line[:200], "http_version": version, "http_status": status, "headers": headers, "header_names": names}
 
 
 def content_disposition_filename(value: str) -> str:
@@ -248,7 +254,7 @@ def header_fields(parsed: Mapping[str, object]) -> dict[str, object]:
         "status_line": parsed.get("status_line") or "",
         "http_version": parsed.get("http_version") or "",
         "content_type": str(headers.get("content-type") or "")[:200],
-        "content_length": int(length_text) if length_text.isdigit() else None,
+        "content_length": int(length_text) if length_text.isascii() and length_text.isdigit() and len(length_text) <= 18 else None,
         "content_encoding": encoding,
         "compression": next((token for token in COMPRESSION_TOKENS if token in encoding), ""),
         "content_disposition": disposition[:300],
@@ -348,12 +354,16 @@ def read_chunks(handle: BinaryIO, offset: int, size: int) -> Iterator[bytes]:
 # --- stream 0 decoders -------------------------------------------------------------
 
 
-def parse_response_info_pickle(blob: bytes) -> dict[str, object]:
-    """``HttpResponseInfo`` pickle: times + raw headers (net/http/http_response_info.cc)."""
+def parse_response_info_pickle(blob: bytes, *, truncated: bool = False) -> dict[str, object]:
+    """``HttpResponseInfo`` pickle: times + raw headers (net/http/http_response_info.cc).
+
+    ``truncated``: ``blob`` is the first ``MAX_STREAM0_BYTES`` of a longer stream 0, so the
+    pickle payload size may exceed it; what is present is still decoded.
+    """
     if len(blob) < 12:
         raise CacheEntryError("response-info-too-short")
     payload = struct.unpack_from("<I", blob, 0)[0]
-    if payload > len(blob) - 4 or payload < 8:
+    if payload < 8 or (payload > len(blob) - 4 and not truncated):
         raise CacheEntryError("response-info-bad-payload-size")
     flags = struct.unpack_from("<I", blob, 4)[0]
     position = 8
@@ -498,12 +508,13 @@ def parse_cache_storage_metadata(blob: bytes) -> dict[str, object]:
     return result
 
 
-def parse_stream0(blob: bytes) -> dict[str, object]:
-    if len(blob) >= 8 and struct.unpack_from("<I", blob, 0)[0] <= len(blob) - 4 and blob.find(b"HTTP/", 0, 4096) >= 0:
-        return parse_response_info_pickle(blob)
-    if blob[:1] == b"\x0a":
+def parse_stream0(blob: bytes, *, truncated: bool = False) -> dict[str, object]:
+    """Decode stream 0; ``truncated`` means ``blob`` is only the first ``MAX_STREAM0_BYTES``."""
+    if len(blob) >= 8 and (truncated or struct.unpack_from("<I", blob, 0)[0] <= len(blob) - 4) and blob.find(b"HTTP/", 0, 4096) >= 0:
+        return parse_response_info_pickle(blob, truncated=truncated)
+    if blob[:1] == b"\x0a" and not truncated:
         return parse_cache_storage_metadata(blob)
-    raise CacheEntryError("stream0-unknown-format")
+    raise CacheEntryError("stream0-truncated-unknown-format" if truncated else "stream0-unknown-format")
 
 
 # --- Simple Cache ----------------------------------------------------------------------
@@ -519,9 +530,10 @@ def decode_simple_entry(path: Path) -> dict[str, object]:
         magic, version, key_length, key_hash = struct.unpack_from("<QIII", header, 0)
         if magic != SIMPLE_INITIAL_MAGIC:
             raise CacheEntryError("simple-entry-bad-magic")
-        if key_length <= 0 or key_length > MAX_KEY_BYTES or SIMPLE_HEADER_SIZE + key_length > size:
+        if key_length <= 0 or SIMPLE_HEADER_SIZE + key_length + 2 * SIMPLE_EOF_SIZE > size:
             raise CacheEntryError("simple-entry-bad-key-length")
-        key = handle.read(key_length).decode("utf-8", "replace")
+        # A key above MAX_KEY_BYTES is kept truncated (key_truncated), not rejected.
+        key = handle.read(min(key_length, MAX_KEY_BYTES)).decode("utf-8", "replace")
         handle.seek(size - SIMPLE_EOF_SIZE)
         eof0 = handle.read(SIMPLE_EOF_SIZE)
         final_magic, flags0, _crc0, stream0_size = struct.unpack_from("<QIIi", eof0, 0)
@@ -534,23 +546,37 @@ def decode_simple_entry(path: Path) -> dict[str, object]:
             raise CacheEntryError("simple-entry-bad-stream0-size")
         handle.seek(stream0_start - SIMPLE_EOF_SIZE)
         eof1 = handle.read(SIMPLE_EOF_SIZE)
-        final_magic1, _flags1, _crc1, stream1_size = struct.unpack_from("<QIIi", eof1, 0)
+        final_magic1, _flags1, _crc1, recorded_stream1_size = struct.unpack_from("<QIIi", eof1, 0)
         if final_magic1 != SIMPLE_FINAL_MAGIC:
             raise CacheEntryError("simple-entry-bad-eof1-magic")
         body_offset = SIMPLE_HEADER_SIZE + key_length
-        if stream1_size < 0 or body_offset + stream1_size != stream0_start - SIMPLE_EOF_SIZE:
+        # simple_entry_format.h: SimpleFileEOF.stream_size is only meaningful for stream 0;
+        # stream 1 is the span between the key and its EOF record, whatever that field says.
+        stream1_size = stream0_start - SIMPLE_EOF_SIZE - body_offset
+        if stream1_size < 0:
             raise CacheEntryError("simple-entry-bad-stream1-size")
         handle.seek(stream0_start)
         stream0 = handle.read(min(stream0_size, MAX_STREAM0_BYTES))
+        stream0_truncated = stream0_size > MAX_STREAM0_BYTES
         body = body_profile_from_reader(read_chunks(handle, body_offset, stream1_size), stream1_size)
-    entry: dict[str, object] = {"cache_key": key[:MAX_CACHE_KEY_CHARS], "simple_version": version, "entry_hash": f"{key_hash:08x}"}
+    entry: dict[str, object] = {
+        "cache_key": key[:MAX_CACHE_KEY_CHARS],
+        "key_length": key_length,
+        "key_truncated": key_length > MAX_KEY_BYTES,
+        "simple_version": version,
+        "entry_hash": f"{key_hash:08x}",
+    }
     entry.update(parse_cache_key(key))
+    if recorded_stream1_size not in (0, stream1_size):
+        entry["stream1_size_recorded"] = recorded_stream1_size
     if stream0:
+        entry["stream0_size"] = stream0_size
+        entry["stream0_truncated"] = stream0_truncated
         try:
-            meta = parse_stream0(stream0)
+            meta = parse_stream0(stream0, truncated=stream0_truncated)
             entry.update(meta)
-            entry["headers_status"] = "parsed"
-        except (CacheEntryError, struct.error, UnicodeError) as exc:
+            entry["headers_status"] = "parsed-truncated" if stream0_truncated else "parsed"
+        except (CacheEntryError, struct.error, UnicodeError, ValueError) as exc:
             entry["headers_status"] = f"unparsed:{exc}"[:80]
     else:
         entry["headers_status"] = "no-stream0"
@@ -689,7 +715,8 @@ class BlockFiles:
 
 
 def read_index_addresses(index_path: Path) -> tuple[list[int], dict[str, object]]:
-    data = index_path.read_bytes()
+    with index_path.open("rb") as handle:
+        data = handle.read(INDEX_HEADER_SIZE + INDEX_MAX_TABLE_LEN * 4)
     if len(data) < INDEX_HEADER_SIZE or struct.unpack_from("<I", data, 0)[0] != INDEX_MAGIC:
         raise CacheEntryError("index-bad-magic")
     version = struct.unpack_from("<I", data, 4)[0]
@@ -722,7 +749,7 @@ def decode_entry_store(files: BlockFiles, addr: int) -> tuple[dict[str, object],
     data_size = struct.unpack_from("<4i", block, 40)
     data_addr = struct.unpack_from("<4I", block, 56)
     flags = struct.unpack_from("<I", block, 72)[0]
-    if key_len <= 0 or key_len > MAX_KEY_BYTES or state not in ENTRY_STATES:
+    if key_len <= 0 or state not in ENTRY_STATES:
         raise CacheEntryError("entry-store-implausible")
     if long_key:
         key_bytes, _name, _offset = files.read_stream(long_key, key_len, MAX_KEY_BYTES)
@@ -733,6 +760,8 @@ def decode_entry_store(files: BlockFiles, addr: int) -> tuple[dict[str, object],
     key = key_bytes.decode("utf-8", "replace")
     entry: dict[str, object] = {
         "cache_key": key[:MAX_CACHE_KEY_CHARS],
+        "key_length": key_len,
+        "key_truncated": key_len > MAX_KEY_BYTES,
         "entry_hash": f"{entry_hash:08x}",
         "entry_state": ENTRY_STATES[state],
         "reuse_count": reuse_count,
@@ -754,13 +783,16 @@ def decode_entry_store(files: BlockFiles, addr: int) -> tuple[dict[str, object],
             entry["rankings_status"] = "unreadable"
     # Stream 0: response metadata.
     if data_addr[0] and data_size[0] > 0:
+        stream0_truncated = data_size[0] > MAX_STREAM0_BYTES
+        entry["stream0_size"] = data_size[0]
+        entry["stream0_truncated"] = stream0_truncated
         try:
             meta_bytes, _name, _o = files.read_stream(data_addr[0], data_size[0], MAX_STREAM0_BYTES)
-            entry.update(parse_stream0(meta_bytes))
-            entry["headers_status"] = "parsed"
+            entry.update(parse_stream0(meta_bytes, truncated=stream0_truncated))
+            entry["headers_status"] = "parsed-truncated" if stream0_truncated else "parsed"
         except MissingCacheFile as exc:
             entry["headers_status"] = f"missing-file:{exc.name}"
-        except (CacheEntryError, struct.error, UnicodeError) as exc:
+        except (CacheEntryError, struct.error, UnicodeError, ValueError) as exc:
             entry["headers_status"] = f"unparsed:{exc}"[:80]
     else:
         entry["headers_status"] = "no-stream0"
@@ -816,7 +848,10 @@ def decode_blockfile_directory(directory: Path, budget: CacheBudget) -> CacheDir
                     entry, next_addr = decode_entry_store(files, addr)
                 except (CacheEntryError, struct.error, OSError, ValueError, UnicodeError) as exc:
                     result.error(source_path=directory / f"data_{(addr >> 16) & 0xFF}", offset=None, reason=f"{addr:08x}:{exc}")
-                    break
+                    # One undecodable entry does not end its hash chain: follow its
+                    # ``next`` pointer when the block itself is still readable.
+                    addr = entry_next_address(files, addr) if walk == "index" else 0
+                    continue
                 entry["cache_format"] = "chromium-blockfile"
                 entry["cache_address"] = f"{addr:08x}"
                 entry["recovery_method"] = "parsed" if walk == "index" else "carved"
@@ -829,6 +864,25 @@ def decode_blockfile_directory(directory: Path, budget: CacheBudget) -> CacheDir
     return result
 
 
+def entry_next_address(files: BlockFiles, addr: int) -> int:
+    """``EntryStore.next`` of the block at ``addr`` (0 when unreadable or not an initialized address)."""
+    try:
+        block, _offset, _name = files.read_block(addr, 8)
+    except (CacheEntryError, OSError, struct.error):
+        return 0
+    if len(block) < 8:
+        return 0
+    next_addr = struct.unpack_from("<I", block, 4)[0]
+    # Only another EntryStore address (256-byte blocks, data_1..) inside an existing block file.
+    if not next_addr & ADDR_INITIALIZED or addr_file_type(next_addr) != 2 or not (next_addr >> 16) & 0xFF:
+        return 0
+    try:
+        files.block_offset(next_addr)
+    except (CacheEntryError, OSError, struct.error):
+        return 0
+    return next_addr
+
+
 def scan_entry_blocks(files: BlockFiles) -> list[int]:
     """Fallback when ``index`` is unusable: plausible ``EntryStore`` blocks of ``data_1``."""
     try:
@@ -839,18 +893,35 @@ def scan_entry_blocks(files: BlockFiles) -> list[int]:
         return []
     found: list[int] = []
     total = min((length - BLOCK_HEADER_SIZE) // ENTRY_STORE_SIZE, MAX_SCAN_BLOCKS)
-    for block in range(total):
+    block = 0
+    while block < total:
         handle.seek(BLOCK_HEADER_SIZE + block * ENTRY_STORE_SIZE)
         data = handle.read(ENTRY_STORE_SIZE)
         if len(data) < ENTRY_STORE_SIZE:
             break
         state = struct.unpack_from("<i", data, 20)[0]
         key_len = struct.unpack_from("<i", data, 32)[0]
-        if state not in ENTRY_STATES or not 8 <= key_len <= ENTRY_STORE_SIZE - ENTRY_KEY_OFFSET - 1:
+        long_key = struct.unpack_from("<I", data, 36)[0]
+        # An inline key longer than one block continues in the following blocks (an
+        # EntryStore spans 1..4 blocks: CacheAddr num_blocks); a long key lives elsewhere.
+        span = (ENTRY_KEY_OFFSET + key_len + ENTRY_STORE_SIZE) // ENTRY_STORE_SIZE if not long_key else 1
+        if state not in ENTRY_STATES or key_len < 8 or not 1 <= span <= 4 or block + span > total:
+            block += 1
             continue
-        key = data[ENTRY_KEY_OFFSET : ENTRY_KEY_OFFSET + key_len]
+        if long_key:
+            try:
+                key, _name, _offset = files.read_stream(long_key, key_len, 256)
+            except (CacheEntryError, OSError, struct.error):
+                key = b""
+        else:
+            if span > 1:
+                data += handle.read((span - 1) * ENTRY_STORE_SIZE)
+            key = data[ENTRY_KEY_OFFSET : ENTRY_KEY_OFFSET + min(key_len, 256)]
         if re.match(rb"^(\d+/\d+/)?(_dk_\S* \S* )?[a-z][a-z0-9+.-]*://", key):
-            found.append(ADDR_INITIALIZED | (2 << 28) | (1 << 16) | block)
+            found.append(ADDR_INITIALIZED | (2 << 28) | ((span - 1) << 24) | (1 << 16) | block)
+            block += span
+            continue
+        block += 1
     return found
 
 
@@ -896,23 +967,27 @@ def chromium_cache_directories(profile_dir: Path, extra_roots: tuple[Path, ...] 
                 add(http_dir, "chromium-blockfile")
             elif has_simple_entries(http_dir):
                 add(http_dir, "chromium-simple")
-        storage = root / "Service Worker" / "CacheStorage"
-        if storage.is_dir():
-            try:
-                origins = sorted(storage.iterdir(), key=lambda item: item.name)
-            except OSError:
-                origins = []
-            for origin in origins:
-                if not origin.is_dir():
+        # Service Worker/CacheStorage/<origin>/<cache>/ and, with storage buckets,
+        # WebStorage/<bucket id>/CacheStorage/<cache>/ (one level less).
+        storages = [root / "Service Worker" / "CacheStorage"]
+        storages.extend(bucket / "CacheStorage" for bucket in sorted_children(root / "WebStorage"))
+        for storage in storages:
+            for child in sorted_children(storage):
+                if has_simple_entries(child):
+                    add(child, "chromium-cachestorage")
                     continue
-                try:
-                    caches = sorted(origin.iterdir(), key=lambda item: item.name)
-                except OSError:
-                    continue
-                for cache in caches:
-                    if cache.is_dir() and has_simple_entries(cache):
+                for cache in sorted_children(child):
+                    if has_simple_entries(cache):
                         add(cache, "chromium-cachestorage")
     return found
+
+
+def sorted_children(directory: Path) -> list[Path]:
+    """Sub-directories of ``directory`` by name ([] when missing or unreadable)."""
+    try:
+        return sorted((item for item in directory.iterdir() if item.is_dir()), key=lambda item: item.name)
+    except OSError:
+        return []
 
 
 def decode_cache_directory(directory: Path, layout: str, budget: CacheBudget) -> CacheDirectoryResult:
@@ -921,8 +996,8 @@ def decode_cache_directory(directory: Path, layout: str, budget: CacheBudget) ->
     return decode_simple_cache_directory(directory, budget, cache_format=layout)
 
 
-def file_name_from_url(url: str) -> str:
-    """A file-name candidate from a URL query (``filename=`` …) or its last path segment."""
+def file_name_from_url(url: str, *, path_segment: bool = True) -> str:
+    """A file-name candidate from a URL query (``filename=`` …) or (``path_segment``) its last path segment."""
     try:
         parts = urlsplit(url)
     except ValueError:
@@ -933,6 +1008,8 @@ def file_name_from_url(url: str) -> str:
             candidate = unquote(value.replace("+", " ")).strip()
             if "." in candidate and len(candidate) <= 260:
                 return candidate
+    if not path_segment:
+        return ""
     segment = unquote(parts.path.rsplit("/", 1)[-1])
     if re.fullmatch(r"[^\\/:*?\"<>|]{1,200}\.[A-Za-z0-9]{1,8}", segment or ""):
         return segment

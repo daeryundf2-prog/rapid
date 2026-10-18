@@ -19,6 +19,14 @@ PAGE_SIZE = 4096
 DEVICEINFO = {"sys_uuid": "550e8400-e29b-41d4-a716-446655440000", "hdd_model": "Sample SSD", "hdd_serial": "SERIAL1234"}
 USER_ID = "12345"
 PEER_ID = "67890"
+# App-cache media key (hash-like, so basename linking applies; generic names such as image.jpg do not link).
+CACHE_NAME = "i_3f9a1c7e5b2d4086.jpg"
+# Extra synthetic rows for the run/triage test: a gap in logId (110 after 104), a file-sharing link
+# and an attachment whose file is not in the evidence.
+TRIAGE_ROWS = [
+    (110, 42, int(PEER_ID), 1, 1710000240, "자료는 여기 https://we.tl/t-SyntheticLink", ""),
+    (111, 42, int(USER_ID), 18, 1710000300, "파일", json.dumps({"name": "missing-contract.pdf", "s": 10})),
+]
 
 
 def fixture_key_iv(user_id: str = USER_ID) -> tuple[bytes, bytes]:
@@ -27,7 +35,9 @@ def fixture_key_iv(user_id: str = USER_ID) -> tuple[bytes, bytes]:
     return derive_kakaotalk_key_iv(pragma, user_id)
 
 
-def build_chatlogs_sqlite(path: Path, *, picture_sha1: str = "", rows: int = 0) -> bytes:
+def build_chatlogs_sqlite(
+    path: Path, *, picture_sha1: str = "", rows: int = 0, extra: list[tuple[object, ...]] | None = None
+) -> bytes:
     connection = sqlite3.connect(path)
     try:
         connection.execute(
@@ -44,11 +54,11 @@ def build_chatlogs_sqlite(path: Path, *, picture_sha1: str = "", rows: int = 0) 
                 2,
                 1710000120,
                 "사진",
-                json.dumps({"k": "remote/path/i_sample.jpg", "mt": "image/jpeg", "s": 20, "cs": picture_sha1}),
+                json.dumps({"k": f"remote/path/{CACHE_NAME}", "mt": "image/jpeg", "s": 20, "cs": picture_sha1}),
             ),
             (104, 42, int(USER_ID), 16385, 1710000180, "", ""),
         ]
-        connection.executemany("INSERT INTO chatLogs VALUES (?, ?, ?, ?, ?, ?, ?)", base)
+        connection.executemany("INSERT INTO chatLogs VALUES (?, ?, ?, ?, ?, ?, ?)", base + list(extra or []))
         connection.executemany(
             "INSERT INTO chatLogs VALUES (?, ?, ?, ?, ?, ?, ?)",
             [(1000 + index, 42, int(PEER_ID), 1, 1710001000 + index, f"메시지 {index}", "") for index in range(rows)],
@@ -79,7 +89,9 @@ def write_registry_export(root: Path, *, deviceinfo: bool = True, user_id: bool 
     return reg_path
 
 
-def write_kakaotalk_pc_profile(root: Path, *, encrypt: bool = True, rows: int = 0) -> dict[str, Path]:
+def write_kakaotalk_pc_profile(
+    root: Path, *, encrypt: bool = True, rows: int = 0, extra: list[tuple[object, ...]] | None = None
+) -> dict[str, Path]:
     """KakaoTalk PC profile: encrypted chatLogs_42.edb, an app-cache thumbnail and a saved picture."""
     profile = root / "Users" / "alice" / "AppData" / "Local" / "Kakao" / "KakaoTalk" / "users" / "abc123"
     chat_dir = profile / "chat_data"
@@ -87,11 +99,11 @@ def write_kakaotalk_pc_profile(root: Path, *, encrypt: bool = True, rows: int = 
     saved = root / "Users" / "alice" / "Documents" / "카카오톡 받은 파일" / "KakaoTalk_20240309_160200123.jpg"
     saved.parent.mkdir(parents=True, exist_ok=True)
     saved.write_bytes(b"\xff\xd8\xff\xe0" + b"synthetic-saved-picture")
-    thumb = profile / "cache" / "thumb" / "i_sample.jpg"
+    thumb = profile / "cache" / "thumb" / CACHE_NAME
     thumb.parent.mkdir(parents=True, exist_ok=True)
     thumb.write_bytes(b"\x89PNG\r\n\x1a\n" + b"synthetic-thumbnail")
     scratch = root / "plain-chatlogs.sqlite"
-    plaintext = build_chatlogs_sqlite(scratch, picture_sha1=hashlib.sha1(saved.read_bytes()).hexdigest(), rows=rows)
+    plaintext = build_chatlogs_sqlite(scratch, picture_sha1=hashlib.sha1(saved.read_bytes()).hexdigest(), rows=rows, extra=extra)
     scratch.unlink()
     key, iv = fixture_key_iv()
     database = chat_dir / "chatLogs_42.edb"

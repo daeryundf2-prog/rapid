@@ -32,6 +32,7 @@ from pathlib import Path
 
 from ..core.models import ArtifactRecord
 from ..core.submission import compute_hashes
+from ..core.triage_rules.email import folder_is_deleted
 
 PARSER_VERSION = "email-pst-normalizer-v1"
 ICS_PARSER_VERSION = "ics-vevent-v1"
@@ -44,19 +45,12 @@ MBOX_MAX_BYTES = 512 * 1024 * 1024
 BODY_PREVIEW_CHARS = 500
 ATTACHMENT_HASH_LIMIT = 256 * 1024 * 1024
 DEFAULT_TOOL_TIMEOUT = 900
+MAX_TOOL_TIMEOUT = 4 * 3600
 ITEM_DIR_RE = re.compile(
     r"^(?P<kind>Message|Email|Appointment|Meeting|Contact|Task|Note|Activity|DistributionList|Document|Item)(?P<number>\d{5})$",
     re.IGNORECASE,
 )
-DELETED_FOLDER_HINTS = (
-    "deleted items",
-    "deleted",
-    "recoverable items",
-    "trash",
-    "지운 편지함",
-    "삭제된 항목",
-    "휴지통",
-)
+# Deleted folders: ``folder_is_deleted`` / ``DELETED_FOLDER_NAMES`` live in core.triage_rules.email (shared with the rules).
 # Outlook exports name Windows time zones in TZID; map the common ones to IANA names.
 WINDOWS_TZ_NAMES = {
     "Korea Standard Time": "Asia/Seoul",
@@ -67,9 +61,58 @@ WINDOWS_TZ_NAMES = {
     "UTC": "UTC",
     "GMT Standard Time": "Europe/London",
     "W. Europe Standard Time": "Europe/Berlin",
+    "Central Europe Standard Time": "Europe/Budapest",
+    "Central European Standard Time": "Europe/Warsaw",
+    "Romance Standard Time": "Europe/Paris",
+    "Greenwich Standard Time": "Atlantic/Reykjavik",
     "Eastern Standard Time": "America/New_York",
+    "US Eastern Standard Time": "America/Indiana/Indianapolis",
     "Central Standard Time": "America/Chicago",
+    "Mountain Standard Time": "America/Denver",
+    "US Mountain Standard Time": "America/Phoenix",
     "Pacific Standard Time": "America/Los_Angeles",
+    "India Standard Time": "Asia/Kolkata",
+    "SE Asia Standard Time": "Asia/Bangkok",
+    "Arabian Standard Time": "Asia/Dubai",
+}
+# Fallback when the zoneinfo database is missing (Windows Python without the ``tzdata`` package):
+# zones without daylight saving -> fixed UTC offset in minutes.
+FIXED_TZ_OFFSETS = {
+    "Asia/Seoul": 540,
+    "Asia/Tokyo": 540,
+    "Asia/Shanghai": 480,
+    "Asia/Hong_Kong": 480,
+    "Asia/Taipei": 480,
+    "Asia/Singapore": 480,
+    "Asia/Kolkata": 330,
+    "Asia/Bangkok": 420,
+    "Asia/Dubai": 240,
+    "UTC": 0,
+    "Etc/UTC": 0,
+    "GMT": 0,
+    "Etc/GMT": 0,
+    "Atlantic/Reykjavik": 0,
+    "America/Phoenix": -420,
+}
+# Zones with daylight saving: (standard offset minutes, rule). "us" = US rule since 2007, "eu" = EU rule
+# since 1996; other years are left unconverted (``timezone_status: unconverted``).
+DST_TZ_RULES = {
+    "America/New_York": (-300, "us"),
+    "America/Indiana/Indianapolis": (-300, "us"),
+    "America/Chicago": (-360, "us"),
+    "America/Denver": (-420, "us"),
+    "America/Los_Angeles": (-480, "us"),
+    "Europe/London": (0, "eu"),
+    "Europe/Berlin": (60, "eu"),
+    "Europe/Paris": (60, "eu"),
+    "Europe/Budapest": (60, "eu"),
+    "Europe/Warsaw": (60, "eu"),
+    "Europe/Amsterdam": (60, "eu"),
+    "Europe/Madrid": (60, "eu"),
+    "Europe/Rome": (60, "eu"),
+    "Europe/Vienna": (60, "eu"),
+    "Europe/Prague": (60, "eu"),
+    "Europe/Zurich": (60, "eu"),
 }
 TOOL_REASON_MISSING = "외부 도구 없음 — pffexport(libpff)·readpst(libpst)가 PATH에 없어 메시지·약속·연락처를 풀지 않음(/doctor의 tools:email-pst 참고)"
 ToolResolver = Callable[[str], str | None]
@@ -160,9 +203,9 @@ def iso(moment: dt.datetime) -> str:
     return moment.isoformat()
 
 
-def folder_is_deleted(folder: str) -> bool:
-    lowered = folder.lower()
-    return any(hint in lowered for hint in DELETED_FOLDER_HINTS)
+def safe_folder(parts: Sequence[str]) -> str:
+    """Export folder path; ``.`` / ``..`` segments (a PST folder can be named so) are neutralised."""
+    return "/".join("\uff0e" * len(part) if part and set(part) == {"."} else part for part in parts)
 
 
 # --- RFC 5545 / RFC 6350 content lines ------------------------------------------------------
@@ -211,32 +254,76 @@ def unescape_text(value: str) -> str:
     return re.sub(r"\\([\\;,nN])", lambda match: "\n" if match.group(1) in "nN" else match.group(1), value)
 
 
-def parse_ics_time(value: str, params: Mapping[str, str]) -> tuple[str, bool, str]:
-    """(ISO time, all-day, time-zone label). UTC ``Z`` -> ISO Z; TZID -> local wall time + label."""
+def _nth_sunday(year: int, month: int, nth: int) -> dt.date:
+    first = dt.date(year, month, 1)
+    return first + dt.timedelta(days=(6 - first.weekday()) % 7 + 7 * (nth - 1))
+
+
+def _last_sunday(year: int, month: int) -> dt.date:
+    last = (dt.date(year + 1, 1, 1) if month == 12 else dt.date(year, month + 1, 1)) - dt.timedelta(days=1)
+    return last - dt.timedelta(days=(last.weekday() + 1) % 7)
+
+
+def fallback_utc_offset(zone: str, wall: dt.datetime) -> dt.timedelta | None:
+    """UTC offset of local wall time ``wall`` in ``zone`` without tzdata; ``None`` = cannot tell.
+
+    Ambiguous / skipped hours resolve like ``zoneinfo`` with ``fold=0``.
+    """
+    if zone in FIXED_TZ_OFFSETS:
+        return dt.timedelta(minutes=FIXED_TZ_OFFSETS[zone])
+    rule = DST_TZ_RULES.get(zone)
+    if rule is None:
+        return None
+    standard = dt.timedelta(minutes=rule[0])
+    hour = dt.timedelta(hours=1)
+    if rule[1] == "us":
+        if wall.year < 2007:
+            return None
+        start = dt.datetime.combine(_nth_sunday(wall.year, 3, 2), dt.time(3))
+        end = dt.datetime.combine(_nth_sunday(wall.year, 11, 1), dt.time(2))
+    else:
+        if wall.year < 1996:
+            return None
+        start = dt.datetime.combine(_last_sunday(wall.year, 3), dt.time(1)) + standard + hour
+        end = dt.datetime.combine(_last_sunday(wall.year, 10), dt.time(1)) + standard + hour
+    return standard + hour if start <= wall < end else standard
+
+
+def parse_ics_time(value: str, params: Mapping[str, str]) -> tuple[str, bool, str, str]:
+    """(ISO time, all-day, time-zone label, ``timezone_status``).
+
+    UTC ``Z`` -> ISO Z; TZID -> UTC via zoneinfo, else via the built-in offset table; a TZID that
+    cannot be converted keeps the local wall time (no ``Z``) with status ``unconverted``.
+    """
     text = value.strip()
     if params.get("VALUE", "").upper() == "DATE" or re.fullmatch(r"\d{8}", text):
         try:
-            return dt.datetime.strptime(text[:8], "%Y%m%d").date().isoformat(), True, ""
+            return dt.datetime.strptime(text[:8], "%Y%m%d").date().isoformat(), True, "", "all-day"
         except ValueError:
-            return "", True, ""
+            return "", True, "", ""
     match = re.fullmatch(r"(\d{8})T(\d{6})(Z?)", text)
     if not match:
-        return "", False, ""
+        return "", False, "", ""
     try:
         moment = dt.datetime.strptime(match.group(1) + match.group(2), "%Y%m%d%H%M%S")
     except ValueError:
-        return "", False, ""
+        return "", False, "", ""
     if match.group(3):
-        return iso(moment.replace(tzinfo=dt.timezone.utc)), False, "UTC"
+        return iso(moment.replace(tzinfo=dt.timezone.utc)), False, "UTC", "utc"
     tzid = params.get("TZID", "")
-    if tzid:
-        try:
-            from zoneinfo import ZoneInfo
+    if not tzid:
+        return moment.isoformat(), False, "floating(시간대 없음)", "floating"
+    zone = WINDOWS_TZ_NAMES.get(tzid, tzid)
+    try:
+        from zoneinfo import ZoneInfo
 
-            return iso(moment.replace(tzinfo=ZoneInfo(WINDOWS_TZ_NAMES.get(tzid, tzid)))), False, tzid
-        except (ImportError, ValueError, KeyError, OSError):
-            return moment.isoformat(), False, f"{tzid} (변환 안 함)"
-    return moment.isoformat(), False, "floating(시간대 없음)"
+        return iso(moment.replace(tzinfo=ZoneInfo(zone))), False, tzid, "converted"
+    except (ImportError, ValueError, KeyError, OSError):
+        pass
+    offset = fallback_utc_offset(zone, moment)
+    if offset is not None:
+        return iso(moment.replace(tzinfo=dt.timezone(offset))), False, tzid, "converted-offset-table"
+    return moment.isoformat(), False, f"{tzid} (변환 안 함)", "unconverted"
 
 
 def mail_address(value: str, params: Mapping[str, str]) -> str:
@@ -277,11 +364,12 @@ def parse_ics_events(text: str, *, limit: int = ICS_EVENT_LIMIT) -> tuple[list[d
         if current is None or (stack and stack[-1] != "VEVENT"):
             continue  # VCALENDAR properties, VALARM / VTIMEZONE sub-components
         if name in ("DTSTART", "DTEND", "CREATED", "LAST-MODIFIED", "DTSTAMP"):
-            moment, all_day, tz_label = parse_ics_time(value, params)
+            moment, all_day, tz_label, tz_status = parse_ics_time(value, params)
             current[name.lower().replace("-", "_")] = moment
             if name == "DTSTART":
                 current["all_day"] = all_day
                 current["timezone"] = tz_label
+                current["timezone_status"] = tz_status
         elif name == "ATTENDEE":
             current["attendees"].append(mail_address(value, params))  # type: ignore[union-attr]
         elif name == "ORGANIZER":
@@ -351,6 +439,7 @@ def calendar_record(event: Mapping[str, object], *, base: Mapping[str, object], 
         "end": str(event.get("dtend") or ""),
         "all_day": bool(event.get("all_day")),
         "timezone": str(event.get("timezone") or ""),
+        "timezone_status": str(event.get("timezone_status") or ""),
         "duration": str(event.get("duration") or ""),
         "location": str(event.get("location") or ""),
         "organizer": str(event.get("organizer") or ""),
@@ -413,6 +502,7 @@ def attachment_record(attachment: Mapping[str, object], message: Mapping[str, ob
             "size": attachment.get("size"),
             "sha256": attachment.get("sha256", ""),
             "content_type": attachment.get("content_type", ""),
+            "inline": bool(attachment.get("inline")),
             "message_id": message.get("message_id", ""),
             "message_subject": message.get("subject", ""),
             "message_date": message.get("date", ""),
@@ -445,18 +535,32 @@ def body_fields(text: str) -> dict[str, object]:
     return {"body_preview": clean[:BODY_PREVIEW_CHARS], "body_sha256": sha256_text(text) if text else ""}
 
 
+# Outlook names embedded (signature / pasted) images image001.png, image002.jpg, ...; pffexport has no
+# Content-ID for them, so the name is the only hint (``inline_reason`` discloses it).
+OUTLOOK_INLINE_IMAGE_RE = re.compile(r"^image\d{3}\.(?:png|jpe?g|gif|bmp)$", re.IGNORECASE)
+
+
 def file_attachment(path: Path) -> dict[str, object]:
     try:
         size = path.stat().st_size
     except OSError:
         size = 0
     sha256 = str(compute_hashes(path).get("sha256", "")) if 0 < size <= ATTACHMENT_HASH_LIMIT else ""
+    inline = OUTLOOK_INLINE_IMAGE_RE.match(path.name) is not None
     return {
         "filename": path.name,
         "size": size,
         "sha256": sha256,
         "content_type": mimetypes.guess_type(path.name)[0] or "",
+        "inline": inline,
+        **({"inline_reason": "outlook-inline-image-name"} if inline else {}),
     }
+
+
+def attachment_counts(attachments: Sequence[Mapping[str, object]]) -> dict[str, int]:
+    """``attachment_count`` excludes inline parts (signature images); they are counted separately."""
+    inline = sum(1 for item in attachments if item.get("inline"))
+    return {"attachment_count": len(attachments) - inline, "inline_attachment_count": inline}
 
 
 # --- pffexport -------------------------------------------------------------------------------
@@ -483,7 +587,8 @@ def recipient_blocks(text: str) -> list[dict[str, str]]:
 def recipient_lists(text: str) -> dict[str, list[str]]:
     lists: dict[str, list[str]] = {"to": [], "cc": [], "bcc": []}
     for block in recipient_blocks(text):
-        address = first_value(block, "email address", "smtp address", "recipient email address")
+        candidates = [block.get(label, "") for label in ("smtp address", "email address", "recipient email address", "recipient smtp address")]
+        address = next((value for value in candidates if "@" in value), "") or next((value for value in candidates if value), "")
         name = first_value(block, "display name", "recipient display name")
         entry = f"{name} <{address}>" if name and address and name != address else (address or name)
         if not entry:
@@ -521,7 +626,14 @@ def pffexport_message(item_dir: Path, *, folder: str, deleted: str) -> dict[str,
     recipients = recipient_lists(read_text_bounded(item_dir / "Recipients.txt"))
     sender_name = first_value(fields, "sender name", "sent representing name")
     sender_address = first_value(fields, "sender email address", "sent representing email address")
-    sender = header_text(headers, "From") or (f"{sender_name} <{sender_address}>" if sender_name and sender_address else sender_address or sender_name)
+    sender_smtp = first_value(fields, "sender smtp address", "sender smtp email address", "sent representing smtp address")
+    address_type = first_value(fields, "sender address type", "sender email address type", "sent representing address type").upper()
+    if not address_type:
+        address_type = "EX" if sender_address.upper().startswith("/O=") else ("SMTP" if "@" in sender_address else "")
+    # Exchange senders carry an X.500 DN (/O=EXCHANGELABS/...); prefer the SMTP sender property.
+    best_address = sender_smtp if "@" in sender_smtp else sender_address
+    header_from = header_text(headers, "From")
+    sender = header_from or (f"{sender_name} <{best_address}>" if sender_name and best_address else best_address or sender_name)
     body = ""
     for name in ("Message.txt", "Message.html", "Message.rtf"):
         if (item_dir / name).is_file():
@@ -555,7 +667,10 @@ def pffexport_message(item_dir: Path, *, folder: str, deleted: str) -> dict[str,
         "return_path": str(header_text(headers, "Return-Path") or ""),
         "authentication_results": str(header_text(headers, "Authentication-Results") or ""),
         "received": "\n".join(str(value) for value in headers.get_all("Received") or [])[:4000],
-        "attachment_count": len(attachments),
+        "address_type": "SMTP" if header_from and address_type != "EX" else address_type,
+        "sender_smtp_address": sender_smtp if "@" in sender_smtp else (sender_address if "@" in sender_address else ""),
+        "sender_x500_address": sender_address if sender_address.upper().startswith("/O=") else "",
+        **attachment_counts(attachments),
         "attachments": attachments,
         "deleted_state": deleted,
         **body_fields(body),
@@ -594,17 +709,19 @@ def pffexport_contact(item_dir: Path) -> dict[str, object]:
     }
 
 
-def iter_item_dirs(root: Path) -> Iterable[Path]:
-    count = 0
+def iter_item_dirs(root: Path, counts: dict[str, int] | None = None) -> Iterable[Path]:
+    """Item folders (bounded by ``EXPORT_ITEM_LIMIT`` across calls sharing ``counts``; ``counts["truncated"]`` = 1 when cut)."""
+    counts = {} if counts is None else counts
     for current, dirs, _files in os.walk(root):
         dirs.sort(key=str.lower)
         current_path = Path(current)
         if ITEM_DIR_RE.match(current_path.name):
             dirs[:] = [name for name in dirs if name.lower() != "attachments"]
-            yield current_path
-            count += 1
-            if count >= EXPORT_ITEM_LIMIT:
+            if counts.get("items", 0) >= EXPORT_ITEM_LIMIT:
+                counts["truncated"] = 1
                 return
+            counts["items"] = counts.get("items", 0) + 1
+            yield current_path
 
 
 def export_tree_state(tree_name: str) -> str:
@@ -619,16 +736,18 @@ def export_tree_state(tree_name: str) -> str:
 def normalize_pffexport_tree(export_dir: Path, *, base: Mapping[str, object]) -> tuple[list[ArtifactRecord], dict[str, int]]:
     """Rows from a ``pffexport -f all`` output folder (``<target>.export`` / ``.recovered`` / ``.orphans``)."""
     records: list[ArtifactRecord] = []
-    counts = {"messages": 0, "attachments": 0, "events": 0, "contacts": 0, "skipped": 0, "errors": 0}
+    counts = {"messages": 0, "attachments": 0, "events": 0, "contacts": 0, "skipped": 0, "errors": 0, "items": 0, "truncated": 0}
     trees = sorted((path for path in export_dir.iterdir() if path.is_dir()), key=lambda p: p.name.lower()) if export_dir.is_dir() else []
     for tree in trees:
+        if counts["truncated"]:
+            break
         state = export_tree_state(tree.name)
-        for item_dir in iter_item_dirs(tree):
+        for item_dir in iter_item_dirs(tree, counts):
             relative = item_dir.relative_to(tree)
-            folder = "/".join(relative.parts[:-1])
+            folder = safe_folder(relative.parts[:-1])
             deleted = state or ("deleted-folder" if folder_is_deleted(folder) else "")
             kind = ITEM_DIR_RE.match(item_dir.name).group("kind").lower()  # type: ignore[union-attr]
-            item = f"{tree.name}/{relative.as_posix()}"
+            item = f"{tree.name}/{safe_folder(relative.parts)}"
             try:
                 if kind in ("message", "email", "item"):
                     message = pffexport_message(item_dir, folder=folder, deleted=deleted)
@@ -658,18 +777,29 @@ def normalize_pffexport_tree(export_dir: Path, *, base: Mapping[str, object]) ->
 
 
 def mime_attachments(message: EmailMessage) -> list[dict[str, object]]:
+    """Attachment parts; inline parts (``Content-Disposition: inline``, or an image with a Content-ID) are marked ``inline``."""
     attachments: list[dict[str, object]] = []
     for part in message.iter_attachments():
         try:
             payload = part.get_payload(decode=True) or b""
         except (LookupError, ValueError):
             payload = b""
+        try:
+            disposition = str(part.get_content_disposition() or "")
+            filename = part.get_filename() or ""
+        except (LookupError, ValueError, IndexError, AttributeError):
+            disposition, filename = "", ""
+        content_type = part.get_content_type()
+        content_id = header_text(part, "Content-ID").strip()  # type: ignore[arg-type]
         attachments.append(
             {
-                "filename": part.get_filename() or "",
+                "filename": filename,
                 "size": len(payload),
                 "sha256": hashlib.sha256(payload).hexdigest() if payload else "",
-                "content_type": part.get_content_type(),
+                "content_type": content_type,
+                "content_id": content_id,
+                "content_disposition": disposition,
+                "inline": disposition == "inline" or (bool(content_id) and content_type.startswith("image/")),
             }
         )
         if len(attachments) >= 200:
@@ -690,8 +820,10 @@ def mbox_message(message: EmailMessage, *, folder: str, deleted: str) -> dict[st
         parsed = parsedate_to_datetime(date_text) if date_text else None
     except (TypeError, ValueError, IndexError):
         parsed = None
+    sender = str(header_text(message, "From") or "")
     return {
-        "from": str(header_text(message, "From") or ""),
+        "from": sender,
+        "address_type": "EX" if "/o=" in sender.lower() and "@" not in sender else ("SMTP" if "@" in sender else ""),
         "to": str(header_text(message, "To") or ""),
         "cc": str(header_text(message, "Cc") or ""),
         "bcc": str(header_text(message, "Bcc") or ""),
@@ -708,7 +840,7 @@ def mbox_message(message: EmailMessage, *, folder: str, deleted: str) -> dict[st
         "return_path": str(header_text(message, "Return-Path") or ""),
         "authentication_results": str(header_text(message, "Authentication-Results") or ""),
         "received": "\n".join(str(value) for value in message.get_all("Received") or [])[:4000],
-        "attachment_count": len(attachments),
+        **attachment_counts(attachments),
         "attachments": attachments,
         "deleted_state": deleted,
         **body_fields(str(body)),
@@ -723,10 +855,10 @@ def split_mbox(data: bytes) -> list[bytes]:
 def normalize_readpst_tree(export_dir: Path, *, base: Mapping[str, object]) -> tuple[list[ArtifactRecord], dict[str, int]]:
     """Rows from ``readpst -r`` output: per folder ``mbox`` (or numbered files), ``calendar`` (ICS), ``contacts`` (vCard)."""
     records: list[ArtifactRecord] = []
-    counts = {"messages": 0, "attachments": 0, "events": 0, "contacts": 0, "skipped": 0, "errors": 0}
+    counts = {"messages": 0, "attachments": 0, "events": 0, "contacts": 0, "skipped": 0, "errors": 0, "items": 0, "truncated": 0}
     for current, dirs, files in os.walk(export_dir):
         dirs.sort(key=str.lower)
-        folder = Path(current).relative_to(export_dir).as_posix().strip(".")
+        folder = safe_folder([part for part in Path(current).relative_to(export_dir).parts if part != "."])
         deleted = "deleted-folder" if folder_is_deleted(folder) else ""
         for name in sorted(files, key=str.lower):
             path = Path(current) / name
@@ -752,6 +884,7 @@ def normalize_readpst_tree(export_dir: Path, *, base: Mapping[str, object]) -> t
                     chunks = [data] if lowered.endswith(".eml") or lowered.isdigit() and not data.startswith(b"From ") else split_mbox(data)
                     for index, chunk in enumerate(chunks):
                         if counts["messages"] >= EXPORT_ITEM_LIMIT:
+                            counts["truncated"] = 1
                             break
                         parsed = email.message_from_bytes(chunk, policy=policy.default)
                         message = mbox_message(parsed, folder=folder, deleted=deleted)  # type: ignore[arg-type]
@@ -781,11 +914,22 @@ def external_tools_enabled(environ: Mapping[str, str] | None = None) -> bool:
 
 
 def tool_timeout(environ: Mapping[str, str] | None = None) -> int:
+    """``RAPIDTRIAGE_EMAIL_TOOL_TIMEOUT`` seconds, clamped to 30 s .. 4 h."""
     env = os.environ if environ is None else environ
     try:
-        return max(30, int(str(env.get("RAPIDTRIAGE_EMAIL_TOOL_TIMEOUT", DEFAULT_TOOL_TIMEOUT))))
+        return min(MAX_TOOL_TIMEOUT, max(30, int(str(env.get("RAPIDTRIAGE_EMAIL_TOOL_TIMEOUT", DEFAULT_TOOL_TIMEOUT)))))
     except ValueError:
         return DEFAULT_TOOL_TIMEOUT
+
+
+def export_byte_cap(environ: Mapping[str, str] | None = None) -> int | None:
+    """Operator override ``RAPIDTRIAGE_EMAIL_EXPORT_MAX_BYTES`` (else the wrapper's 2x-container / 8 GiB cap)."""
+    env = os.environ if environ is None else environ
+    try:
+        value = int(str(env.get("RAPIDTRIAGE_EMAIL_EXPORT_MAX_BYTES", "") or 0))
+    except ValueError:
+        return None
+    return value if value > 0 else None
 
 
 def container_inventory(
@@ -796,7 +940,7 @@ def container_inventory(
     reason: str,
     tool: str = "",
     tools_checked: Sequence[Mapping[str, object]] = (),
-    counts: Mapping[str, int] | None = None,
+    counts: Mapping[str, object] | None = None,
 ) -> ArtifactRecord:
     counts = dict(counts or {})
     try:
@@ -827,6 +971,9 @@ def container_inventory(
             "calendar_event_count": counts.get("events", 0),
             "contact_count": counts.get("contacts", 0),
             "item_error_count": counts.get("errors", 0),
+            "export_item_limit": EXPORT_ITEM_LIMIT,
+            "export_truncated": bool(counts.get("truncated")),
+            "export_limit_exceeded": str(counts.get("limit_exceeded") or ""),
         },
     )
 
@@ -837,17 +984,22 @@ def collect_outlook_container(
     tool_resolver: ToolResolver | None = None,
     command_runner: CommandRunner | None = None,
     environ: Mapping[str, str] | None = None,
+    source_hashes: Mapping[str, str] | None = None,
 ) -> list[ArtifactRecord]:
-    """PST/OST: normalised rows when pffexport/readpst ran, plus one ``email-container-inventory`` row."""
+    """PST/OST: normalised rows when pffexport/readpst ran, plus one ``email-container-inventory`` row.
+
+    ``source_hashes`` (from the caller's hashing of the same file) avoid reading the container again.
+    ``command_runner`` is for tests; the default runs the tool under the export-size / output guard.
+    """
     tool_resolver = tool_resolver or shutil.which
-    command_runner = command_runner or subprocess.run
     from .email_external import (
         EmailExternalParserError,
         email_external_tool_availability_matrix,
         run_email_external_parse,
     )
 
-    source_sha256 = str(compute_hashes(path).get("sha256", ""))
+    hashes = dict(source_hashes) if source_hashes and source_hashes.get("sha256") else compute_hashes(path)
+    source_sha256 = str(hashes.get("sha256", ""))
     suffix = path.suffix.lower().lstrip(".")
     matrix = email_external_tool_availability_matrix(suffix, preferred_tool=None, tool_resolver=tool_resolver)
     tools_checked = [{"tool": row["tool"], "available": row["available"]} for row in matrix]
@@ -872,6 +1024,8 @@ def collect_outlook_container(
                 timeout_seconds=tool_timeout(environ),
                 tool_resolver=tool_resolver,
                 command_runner=command_runner,
+                source_hashes=hashes,
+                max_export_bytes=export_byte_cap(environ),
             )
         except (EmailExternalParserError, OSError) as exc:
             return [container_inventory(path, source_sha256=source_sha256, status="failed", reason=f"도구 실행 실패 — {exc}"[:400], tools_checked=tools_checked)]
@@ -886,17 +1040,25 @@ def collect_outlook_container(
             source_format=suffix,
             recovery_method=f"external-tool:{family or 'unknown'}",
         )
+        execution = payload.get("execution") if isinstance(payload.get("execution"), Mapping) else {}
+        limit = str(execution.get("limit_exceeded") or "")  # type: ignore[union-attr]
         if family == "readpst":
             records, counts = normalize_readpst_tree(export_dir, base=base)
         else:
             records, counts = normalize_pffexport_tree(export_dir, base=base)
+        counts_out: dict[str, object] = {**counts, "limit_exceeded": limit}
         if status == "blocked":
             reason = f"헤더 불일치 — {payload.get('source', {}).get('header_profile', {}).get('reason', '')}"  # type: ignore[union-attr]
         elif status != "complete" and not records:
-            stderr = str(payload.get("execution", {}).get("stderr_tail", ""))[-300:]  # type: ignore[union-attr]
-            reason = f"도구 실행 실패 — {tool} 종료 코드 {payload.get('execution', {}).get('returncode')} {stderr}".strip()  # type: ignore[union-attr]
+            stderr = str(execution.get("stderr_tail", ""))[-300:]  # type: ignore[union-attr]
+            error = str(execution.get("error", ""))[:200]  # type: ignore[union-attr]
+            reason = f"도구 실행 실패 — {tool} 종료 코드 {execution.get('returncode')} {error} {stderr}".strip()  # type: ignore[union-attr]
         else:
             reason = f"{tool} 출력 정규화 — 메시지 {counts['messages']}·첨부 {counts['attachments']}·약속 {counts['events']}·연락처 {counts['contacts']}"
+            if limit:
+                reason += f" — 도구 중단({limit}), 일부만 정규화"
+        if counts.get("truncated"):
+            reason += f" — 항목 상한 {EXPORT_ITEM_LIMIT:,}개에서 잘림"
         inventory_status = "normalized" if records or status == "complete" else ("blocked" if status == "blocked" else "failed")
         records.append(
             container_inventory(
@@ -906,7 +1068,7 @@ def collect_outlook_container(
                 reason=reason,
                 tool=tool,
                 tools_checked=tools_checked,
-                counts=counts,
+                counts=counts_out,
             )
         )
         return records

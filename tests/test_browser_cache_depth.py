@@ -5,12 +5,15 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import struct
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
 
-from rapidtriage.artifacts.windows import browser_cache
+from rapidtriage.artifacts.windows import browser_cache, ese_native
 from rapidtriage.artifacts.windows.browser import (
     WindowsBrowserArtifactsProvider,
     collect_webcachev01_artifacts,
@@ -22,17 +25,27 @@ from rapidtriage.artifacts.windows.browser_cache import (
     decode_simple_cache_directory,
     parse_cache_key,
 )
-from rapidtriage.artifacts.windows.browser_webcache import decode_webcache
+from rapidtriage.artifacts.windows.browser_webcache import (
+    decode_webcache,
+    map_container_row,
+    resolve_content_file,
+)
 from rapidtriage.artifacts.windows.web_upload import (
     UploadPatternError,
+    WebUploadScanner,
+    build_upload_candidate,
     load_upload_patterns,
     match_upload_url,
     parse_upload_patterns,
 )
 from rapidtriage.core.models import ArtifactRecord
+from rapidtriage.core.triage_rules.browser import upload_strength_ok
 from tests.browser_cache_fixtures import (
     BODY_MARKER,
+    raw_headers,
+    response_info_pickle,
     sample_webcache,
+    simple_entry,
     write_blockfile_cache,
     write_cache_storage,
     write_simple_cache,
@@ -258,10 +271,10 @@ class ProviderTests(unittest.TestCase):
             self.assertNotIn(BODY_MARKER.decode(), serialized)
             candidates = by_type(records, "web-upload-candidate")
             services = sorted((record.details["service"], record.details["strength"], record.details["source_artifact_type"]) for record in candidates)
-            self.assertIn(("naver-mail", "strong", "browser-cache-entry"), services)  # POST cache entry
+            self.assertIn(("naver-mail", "medium", "browser-cache-entry"), services)  # POST raises the weak path match
             self.assertIn(("google-drive", "strong", "browser-cache-entry"), services)
             self.assertIn(("wetransfer", "medium", "browser-cache-entry"), services)
-            self.assertIn(("naver-mail", "medium", "browser-history"), services)
+            self.assertIn(("naver-mail", "weak", "browser-history"), services)  # GET of the upload path
             # The History url row and its visit share URL and time: one candidate.
             self.assertEqual([item for item in services if item[0] == "gmail"], [("gmail", "weak", "browser-history")])
             for record in candidates:
@@ -269,7 +282,7 @@ class ProviderTests(unittest.TestCase):
                 self.assertEqual(record.details["recovery_method"], "derived")
             drive = next(record for record in candidates if record.details["service"] == "google-drive")
             self.assertEqual(drive.details["method"], "POST")
-            self.assertIsInstance(drive.details["size"], int)
+            self.assertIsInstance(drive.details["response_size"], int)
             self.assertFalse(by_type(records, "browser-parse-error"))
 
     def test_corrupt_cache_directory_yields_one_error_row_and_keeps_the_rest(self) -> None:
@@ -405,14 +418,17 @@ class UploadPatternTests(unittest.TestCase):
     def test_matching(self) -> None:
         patterns = load_upload_patterns()
         cases = [
-            ("https://mail.naver.com/json/write/upload", "GET", ("naver-mail", "medium")),
-            ("https://mail.naver.com/json/write/upload", "POST", ("naver-mail", "strong")),
-            ("https://bigfile.mail.daum.net/upload?x=1", "GET", ("daum-mail", "medium")),
+            ("https://mail.naver.com/json/write/upload", "GET", ("naver-mail", "weak")),
+            ("https://mail.naver.com/json/write/upload", "POST", ("naver-mail", "medium")),
+            ("https://bigfile.mail.daum.net/upload?x=1", "GET", ("daum-mail", "weak")),
             ("https://mail.google.com/mail/u/1/?ui=2&ik=x&attid=0.2", "GET", ("gmail", "weak")),
             ("https://content.dropboxapi.com/2/files/upload", "POST", ("dropbox", "strong")),
-            ("https://www.webhard.co.kr/pages/fileup.php", "GET", ("webhard", "medium")),
-            ("https://my.webhard-example.com/anything", "POST", ("webhard", "medium")),
-            ("https://send-anywhere.com/web/key", "GET", ("sendanywhere", "medium")),
+            ("https://www.webhard.co.kr/pages/fileup.php", "GET", ("webhard", "weak")),
+            ("https://files.webhard.example.kr/anything", "POST", ("webhard", "medium")),
+            ("https://send-anywhere.com/web/v1/key", "POST", ("sendanywhere", "medium")),
+            ("https://send-anywhere.com/web/upload", "GET", ("sendanywhere", "weak")),
+            ("https://graph.microsoft.com/v1.0/me/drive/root:/report.docx:/createUploadSession", "POST", ("onedrive", "strong")),
+            ("https://outlook.office.com/owa/service.svc?action=CreateAttachmentFromLocalFile", "GET", ("outlook-web", "strong")),
         ]
         for url, method, expected in cases:
             matched = match_upload_url(url, method, patterns)
@@ -424,6 +440,7 @@ class UploadPatternTests(unittest.TestCase):
             "https://www.example.com/upload",
             "https://my.webhard-example.com/anything",
             "https://evil-mail.naver.com.example.net/upload",
+            "https://mail.naver.com/v2/folders/0?next=/upload",
             "ftp://mail.naver.com/upload",
         ):
             self.assertIsNone(match_upload_url(url, "GET", patterns), url)
@@ -432,6 +449,10 @@ class UploadPatternTests(unittest.TestCase):
         with self.assertRaisesRegex(UploadPatternError, "sources"):
             parse_upload_patterns(
                 b"patterns:\n- id: x\n  category: webmail\n  strength: weak\n  hosts: [a.com]\n  path_regex: up\n  sources: [http://a]\n"
+            )
+        with self.assertRaisesRegex(UploadPatternError, "host_tokens"):
+            parse_upload_patterns(
+                b"patterns:\n- id: x\n  category: webmail\n  strength: weak\n  hosts: [a.com]\n  host_tokens: [a.com]\n  post_only: true\n  sources: [https://a]\n"
             )
         with self.assertRaisesRegex(UploadPatternError, "path_regex"):
             parse_upload_patterns(b"patterns:\n- id: x\n  category: webmail\n  strength: weak\n  hosts: [a.com]\n  sources: [https://a]\n")
@@ -448,7 +469,9 @@ class CatalogTests(unittest.TestCase):
         for family_id in ("browser-cache-entry", "web-upload-candidate"):
             columns = [*families[family_id]["core_columns"], *families[family_id]["aux_columns"]]
             semantics = {column.get("semantic") for column in columns}
-            self.assertTrue({"url", "attachment"} <= semantics, family_id)
+            # The candidate restates its source row, so only the cache entry carries meaning tags.
+            if family_id == "browser-cache-entry":
+                self.assertTrue({"url", "attachment"} <= semantics, family_id)
             self.assertTrue(all(any("가" <= char <= "힣" for char in column["label"]) or "(" in column["label"] for column in columns))
         self.assertEqual(catalog.specs["browser.webmail_upload"].grade, "B")
         self.assertEqual(catalog.specs["browser.filesharing_upload"].grade, "B")
@@ -479,10 +502,277 @@ class RunPipelineTests(unittest.TestCase):
             (derived_dir,) = sorted((output_dir / "analyses").glob("run-derived-*"))
             urls = (derived_dir / "urls.jsonl").read_text(encoding="utf-8")
             self.assertIn("browser-cache-entry", urls)
-            self.assertIn("cdn.example.net", urls)
+            # Only POST cache entries (uploads) feed the URL table; GET resources such as cdn.example.net do not.
+            self.assertIn("www.googleapis.com", urls)
+            self.assertNotIn("cdn.example.net", urls)
             attachments = (derived_dir / "attachments.jsonl").read_text(encoding="utf-8")
             self.assertIn("report.pdf", attachments)
-            self.assertIn("web-upload-candidate", urls)
+
+
+class R2FixRegressionTests(unittest.TestCase):
+    """One regression per R2 review item (M1, M2, M3, M18, M19, URL redaction, minors)."""
+
+    def test_m1_long_value_page_cycle_terminates_and_is_capped_at_declared_size(self) -> None:
+        # Reviewer repro (lvloop.py): one LV leaf page whose next_page points at itself.
+        rkey = b"\x01\x00\x00\x00"
+
+        class Node:
+            def __init__(self, tag: tuple[int, bytes, bytes, int], _page: object) -> None:
+                self.tag_num, self.key, self.data, self.child_page = tag
+
+        class Page:
+            num = 5
+            is_leaf = True
+            node_count = 2
+            next_page = 5
+
+            def tag(self, number: int) -> tuple[int, bytes, bytes, int] | None:
+                if number == 1:
+                    return (1, rkey, struct.pack("<2I", 0, 1000), 0)
+                if number == 2:
+                    return (2, rkey + struct.pack(">I", 0), b"A" * 10, 0)
+                return None
+
+        page = Page()
+        database = object.__new__(ese_native.EseDatabase)
+        database.page = lambda _number: page  # type: ignore[method-assign]
+        database._find_node = lambda current, _key: Node(current.tag(1), current)  # type: ignore[method-assign]
+
+        class Table:
+            lv_root_page = 5
+
+        result: dict[str, object] = {}
+
+        def run() -> None:
+            result["value"] = database.get_long_value(Table(), b"\x00\x00\x00\x01")  # type: ignore[arg-type]
+
+        with mock.patch.object(ese_native, "EseNode", Node):
+            worker = threading.Thread(target=run, daemon=True)
+            worker.start()
+            worker.join(5)
+        self.assertFalse(worker.is_alive(), "long-value walk loops on a next_page cycle")
+        self.assertEqual(result["value"], b"A" * 10)
+
+    def test_m1_xpress_output_cap_is_enforced_when_dissect_util_is_present(self) -> None:
+        import types
+
+        fake = types.ModuleType("lzxpress")
+        fake.decompress = lambda _data: b"Z" * 4096  # type: ignore[attr-defined]
+        package = types.ModuleType("dissect.util.compression")
+        package.lzxpress = fake  # type: ignore[attr-defined]
+        with mock.patch.dict("sys.modules", {"dissect.util.compression": package, "dissect.util.compression.lzxpress": fake}):
+            self.assertIsNone(ese_native.decompress_ese_value(b"\x18\x00\x10abc", max_output=16))
+            self.assertEqual(ese_native.decompress_ese_value(b"\x18\x00\x10abc", max_output=4096), b"Z" * 4096)
+
+    def test_m2_webcache_content_file_rejects_path_traversal(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            webcache = root / "Users" / "alice" / "AppData" / "Local" / "Microsoft" / "Windows" / "WebCache" / "WebCacheV01.dat"
+            webcache.parent.mkdir(parents=True)
+            base = webcache.parent.parent / "INetCache" / "IE"
+            (base / "ABCD1234").mkdir(parents=True)
+            (base / "ABCD1234" / "ok[1].gif").write_bytes(b"GIF89a")
+            outside = root / "examiner-secret.txt"
+            outside.write_text("not evidence")
+            self.assertIsNotNone(resolve_content_file(webcache, "ABCD1234", 0, "ok[1].gif"))
+            for secure_dirs, file_name in (
+                ("ABCD1234", "..\\..\\..\\..\\..\\..\\..\\..\\examiner-secret.txt"),
+                ("ABCD1234", "../../../../../../../../examiner-secret.txt"),
+                ("ABCD1234", str(outside)),
+                ("ABCD1234", "\\\\server\\share\\x.txt"),
+                ("..\\..\\..", "examiner-secret.txt"),
+                ("C:\\Windo", "win.ini"),
+                ("../../..", "examiner-secret.txt"),
+                ("ABCD1234", ".."),
+            ):
+                self.assertIsNone(resolve_content_file(webcache, secure_dirs, 0, file_name), (secure_dirs, file_name))
+
+    def test_m3_header_parsing_is_bounded(self) -> None:
+        raw = "HTTP/1.1 200 OK\x00" + "\x00".join(f"x-h{index}: v" for index in range(200_000)) + "\x00content-type: text/html"
+        started = time.perf_counter()
+        parsed = browser_cache.parse_raw_headers(raw)
+        self.assertLess(time.perf_counter() - started, 2.0)
+        self.assertEqual(len(parsed["header_names"]), browser_cache.MAX_HEADER_NAMES)
+        self.assertEqual(parsed["http_status"], 200)
+        # WebCache ResponseHeaders are cut to MAX_STREAM0_BYTES before parsing.
+        huge = ("HTTP/1.1 200 OK\r\n" + "x-pad: " + "a" * (2 * browser_cache.MAX_STREAM0_BYTES) + "\r\ncontent-type: text/css\r\n").encode("utf-16-le")
+        _type, _time, _kind, fields = map_container_row(
+            Path("WebCacheV01.dat"), "browser-cache-entry", "Content", {"Url": "https://www.example.com/a.css", "ResponseHeaders": huge}, secure_dirs=""
+        )
+        self.assertEqual(fields["http_status"], 200)
+        self.assertEqual(fields["content_type"], "")
+
+    def test_m19_non_ascii_digits_and_broken_chain_entry(self) -> None:
+        parsed = browser_cache.parse_raw_headers("HTTP/1.1 \u00b2\u00b3\u00b9 OK\x00content-length: \u0661\u0662\u0663")
+        self.assertIsNone(parsed["http_status"])
+        self.assertIsNone(browser_cache.header_fields(parsed)["content_length"])
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp) / "Cache_Data"
+            expected = write_blockfile_cache(directory)
+            index = (directory / "index").read_bytes()
+            head = struct.unpack_from("<I", index, 368)[0]  # bucket 0: entry 1 -> entry 0
+            data1 = bytearray((directory / "data_1").read_bytes())
+            offset = 8192 + (head & 0xFFFF) * 256
+            struct.pack_into("<i", data1, offset + 20, 99)  # implausible state on the chain head
+            (directory / "data_1").write_bytes(bytes(data1))
+            result = decode_blockfile_directory(directory, CacheBudget())
+            urls = {entry["url"] for entry in result.entries}
+            self.assertEqual(result.error_count, 1)
+            self.assertNotIn(expected[1]["url"], urls)
+            self.assertIn(expected[0]["url"], urls)  # reached through the broken head's next pointer
+            self.assertEqual(len(result.entries), 9)
+
+    def test_m18_reviewer_false_positive_urls_do_not_fire(self) -> None:
+        patterns = load_upload_patterns()
+        never = [
+            ("https://bigfile.mail.naver.com/download.aspx?fid=QmlnRmlsZQ&upload=1", "GET"),
+            ("https://mail.naver.com/v2/read/0/56265/attachIndex/1", "GET"),
+            ("https://mail.naver.com/static/img/btn_upload.png", "GET"),
+            ("https://mail.daum.net/hanmailex/js/upload.js", "GET"),
+            ("https://www.webhard.co.kr/board/read/upload", "GET"),
+            ("https://notwetransfer.example/api/v4/transfers", "POST"),
+            ("https://my.webhard-example.com/upload.php", "POST"),
+            ("https://www.example.com/r?next=https://mail.naver.com/upload", "GET"),
+            ("https://wetransfer.com/api/v4/transfers/abc123/download", "GET"),
+            ("https://we.tl/t-AbCdEf", "GET"),
+            ("https://send-anywhere.com/web/v1/key/123456", "GET"),
+            ("https://dropbox.com/s/abc/upload.pdf", "GET"),
+            ("https://mail.naver.com/css/upload.css", "POST"),
+            # Real BSH subset Naver Mail history rows (compose / folders / read pages).
+            ("https://mail.naver.com/v2/new?type=toMe", "GET"),
+            ("https://mail.naver.com/v2/new/done?type=toMe", "GET"),
+            ("https://mail.naver.com/v2/folders/-1/unread?keep=true", "GET"),
+            ("https://mail.naver.com/v2/read/-1/38529", "GET"),
+            ("https://drive.google.com/drive/folders/11PfnDfcBQ7kgiibKE22MTdliWNUOVEYL", "GET"),
+        ]
+        for url, method in never:
+            self.assertIsNone(match_upload_url(url, method, patterns), url)
+        # A GET of an upload screen is only a weak candidate: rules at min_strength medium skip it.
+        for url in ("https://mybox.naver.com/upload", "https://mail.naver.com/write/bigfile/upload", "https://www.webhard.co.kr/pages/fileup.php"):
+            matched = match_upload_url(url, "GET", patterns)
+            assert matched is not None, url
+            self.assertEqual(matched[1], "weak", url)
+            self.assertFalse(upload_strength_ok(_RowStub({"strength": matched[1]}), "medium"))
+        # The catalog rationale's "POST to the service host" is a real check.
+        posted = match_upload_url("https://mail.daum.net/hanmailex/compose/send.json", "POST", patterns)
+        assert posted is not None
+        self.assertEqual((posted[0].id, posted[1]), ("daum-mail-post", "medium"))
+        self.assertIsNone(match_upload_url("https://mail.daum.net/hanmailex/compose/send.json", "GET", patterns))
+        self.assertTrue(any(pattern.post_only for pattern in patterns if pattern.category == "webmail"))
+        self.assertTrue(any(pattern.post_only for pattern in patterns if pattern.category == "filesharing"))
+        self.assertTrue(any(pattern.post_only for pattern in patterns if pattern.category == "cloud"))
+
+    def test_url_tokens_redacted_after_upload_matching(self) -> None:
+        url = "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&upload_id=SECRETUPLOADID&key=APIKEY"
+        record = ArtifactRecord(
+            provider="windows-browser-artifacts",
+            artifact_type="browser-cache-entry",
+            path="data_1",
+            supported=True,
+            details={
+                "parser": browser_cache.CACHE_PARSER,
+                "url": url,
+                "cache_key": f"1/9/_dk_https://example.com https://example.com {url}",
+                "location": "https://www.googleapis.com/next?sig=SIGVALUE",
+                "method": "POST",
+                "browser": "chrome",
+                "body_size": 120,
+                "timestamp": "2024-05-01T10:00:00+00:00",
+            },
+        )
+        scanner = WebUploadScanner()
+        scanner.observe(record)
+        (candidate,) = scanner.candidates
+        self.assertEqual((candidate.details["service"], candidate.details["strength"]), ("google-drive", "strong"))
+        serialized = json.dumps([record.details, candidate.details])
+        for secret in ("SECRETUPLOADID", "APIKEY", "SIGVALUE"):
+            self.assertNotIn(secret, serialized)
+        self.assertTrue(record.details["url_tokens_redacted"])
+        self.assertEqual(len(str(record.details["url_sha256"])), 64)
+        self.assertIn("cache_key_sha256", record.details)
+        self.assertIn("location_sha256", record.details)
+        self.assertEqual(candidate.details["url_sha256"], record.details["url_sha256"])
+        self.assertEqual(candidate.details["host"], "www.googleapis.com")
+
+    def test_upload_candidate_size_is_labelled_response_size_and_no_endpoint_file_name(self) -> None:
+        source = ArtifactRecord(
+            provider="p",
+            artifact_type="browser-cache-entry",
+            path="x",
+            supported=True,
+            details={"url": "https://www.webhard.co.kr/pages/upload.php", "method": "POST", "body_size": 42},
+        )
+        (pattern,) = [item for item in load_upload_patterns() if item.id == "webhard-post"]
+        details = build_upload_candidate(source, pattern, "medium", "POST").details
+        self.assertNotIn("size", details)
+        self.assertEqual((details["response_size"], details["response_size_basis"]), (42, "cached-response-body-bytes"))
+        self.assertEqual(details["file_name_candidate"], "")
+        self.assertEqual(details["host"], "www.webhard.co.kr")
+
+    def test_simple_cache_minors_eof_stream_size_long_key_and_big_stream0(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp) / "Cache_Data"
+            directory.mkdir()
+            meta = response_info_pickle(raw_headers(200, [("content-type", "text/html")]), browser_cache.WEBKIT_EPOCH, browser_cache.WEBKIT_EPOCH)
+            # (a) EOF1.stream_size is only meaningful for stream 0: a stale value is tolerated.
+            blob = bytearray(simple_entry("https://a.example.com/x", meta, b"body"))
+            eof1 = blob.find(struct.pack("<Q", browser_cache.SIMPLE_FINAL_MAGIC))
+            struct.pack_into("<i", blob, eof1 + 16, 0x7FFF)
+            (directory / "0000000000000001_0").write_bytes(bytes(blob))
+            # (b) a key above MAX_KEY_BYTES is truncated, not rejected.
+            long_url = "https://b.example.com/" + "k" * (browser_cache.MAX_KEY_BYTES + 100)
+            (directory / "0000000000000002_0").write_bytes(simple_entry(long_url, meta, b"body"))
+            # (c) a stream 0 above MAX_STREAM0_BYTES is decoded from its prefix and flagged.
+            padded = meta + b"\x00" * (browser_cache.MAX_STREAM0_BYTES + 10)
+            padded = struct.pack("<I", len(padded) - 4) + padded[4:]
+            (directory / "0000000000000003_0").write_bytes(simple_entry("https://c.example.com/x", padded, b"body"))
+            result = decode_simple_cache_directory(directory, CacheBudget(), cache_format="chromium-simple")
+            self.assertEqual(result.error_count, 0, result.error_samples)
+            entries = {str(entry["url"])[:22]: entry for entry in result.entries}
+            self.assertEqual(entries["https://a.example.com/"]["body_size"], 4)
+            self.assertEqual(entries["https://a.example.com/"]["stream1_size_recorded"], 0x7FFF)
+            self.assertTrue(entries["https://b.example.com/"]["key_truncated"])
+            big = entries["https://c.example.com/"]
+            self.assertTrue(big["stream0_truncated"])
+            self.assertEqual((big["headers_status"], big["http_status"]), ("parsed-truncated", 200))
+
+    def test_blockfile_scan_finds_entries_spanning_several_blocks(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp) / "Cache_Data"
+            long_url = "https://long.example.com/" + "p" * 300
+            write_blockfile_cache(directory, urls=["https://short.example.com/", long_url])
+            (directory / "index").write_bytes(b"\x00" * 16)
+            result = decode_blockfile_directory(directory, CacheBudget())
+            self.assertEqual({entry["url"] for entry in result.entries}, {"https://short.example.com/", long_url})
+
+    def test_cache_storage_under_webstorage_buckets_is_discovered(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            profile = Path(temp)
+            write_cache_storage(profile / "WebStorage" / "1" / "CacheStorage" / "0f3c")
+            found = chromium_cache_directories(profile)
+            self.assertEqual([(path.parent.parent.parent.name, layout) for path, layout in found], [("WebStorage", "chromium-cachestorage")])
+
+    def test_dead_normalize_host_removed_and_webcache_host_keeps_www(self) -> None:
+        self.assertFalse(hasattr(browser_cache, "normalize_host"))
+        _type, _time, _kind, fields = map_container_row(
+            Path("WebCacheV01.dat"), "browser-cache-entry", "Content", {"Url": "https://www.example.com/a.css"}, secure_dirs=""
+        )
+        self.assertEqual(fields["host"], "www.example.com")
+
+    def test_webhard_host_token_is_a_label_not_a_substring(self) -> None:
+        (pattern,) = [item for item in load_upload_patterns() if item.id == "webhard-post"]
+        self.assertTrue(pattern.host_matches("www.webhard.co.kr"))
+        self.assertTrue(pattern.host_matches("webhard.example.kr"))
+        self.assertFalse(pattern.host_matches("my.webhard-example.com"))
+        self.assertFalse(pattern.host_matches("notwebhard.example.com"))
+
+
+class _RowStub:
+    def __init__(self, values: dict[str, object]) -> None:
+        self.values = values
+
+    def text(self, key: str) -> str:
+        return str(self.values.get(key) or "")
 
 
 if __name__ == "__main__":

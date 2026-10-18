@@ -49,6 +49,7 @@ import base64
 import binascii
 import datetime as dt
 import json
+import math
 import re
 import sqlite3
 import struct
@@ -61,6 +62,7 @@ from ..core.models import ArtifactRecord
 from ..core.sqlite_snapshot import open_sqlite_snapshot
 from ..core.submission import compute_hashes
 from ._walk import iter_evidence_paths
+from .url_redaction import redact_text_urls, redact_url_fields, url_sha256
 
 PARSER = "cloud-sync-clients"
 PARSER_VERSION = "cloud-sync-clients-v1"
@@ -91,12 +93,16 @@ MAX_LOG_FILE_BYTES = 64 * MIB  # on disk
 MAX_LOG_INFLATED_BYTES = 128 * MIB  # after gzip
 MAX_LOG_TOTAL_BYTES = 512 * MIB  # all logs of a run, after gzip
 MAX_LOG_RECORD_BYTES = 64 * 1024
+MAX_LOG_RECORDS_SCANNED = 2_000_000  # record signatures walked per log file (no offset list is kept)
 MAX_LOG_EVENTS_PER_FILE = 5_000
 MAX_LOG_STRINGS_PER_RECORD = 32
 MAX_FILE_ROWS_PER_SOURCE = 50_000
 MAX_EVENT_ROWS_PER_SOURCE = 20_000
 MAX_TREE_NODES = 400_000  # folder / parent map entries per database
 MAX_PATH_DEPTH = 64
+# Parent links walked per chain (empty-named nodes count too) and resolved prefixes memoised per database.
+MAX_CHAIN_STEPS = 2 * MAX_PATH_DEPTH
+MAX_CHAIN_CACHE = 100_000
 MAX_ROWS_TOTAL = 250_000
 MAX_OBFUSCATION_MAP_BYTES = 16 * MIB
 MAX_OBFUSCATION_ENTRIES = 500_000
@@ -124,19 +130,27 @@ ASCII_RUN_RE = re.compile(rb"[\x20-\x7e]{3,1024}")
 UTF16_RUN_RE = re.compile(rb"(?:[\x20-\x7e]\x00|[\x00-\xff][\xac-\xd7]){4,512}")
 LOG_KEYWORD_RE = re.compile(rb"(?i)upload|download|hydrat|delete|recycle|rename|move|shar(?:e|ing)")
 SOURCE_SUFFIX_EXCLUDED = ("-wal", "-shm", "-journal")
+# URL-like row fields: credential query values are replaced, the raw value's sha256 kept in ``<field>_sha256``.
+URL_FIELDS = ("site_url", "item_path", "url")
 SOURCE_CODE_SUFFIXES = (".cpp", ".c", ".h", ".hpp", ".cxx")
 # A bare drive (the DriveFS virtual drive G:\) is a mount point, not a sync folder.
 BARE_DRIVE_RE = re.compile(r"^[A-Za-z]:\\?$")
 
-# Operation keywords, checked in this order (a "DeleteUploadedFile" function is a delete;
-# "SharedFolder" is not a share).
+# Operation keywords, matched against whole tokens (CamelCase / punctuation split, lower-cased) and
+# checked in this order: a "DeleteUploadedFile" function is a delete; "SharedFolder" and "SharePoint"
+# are not a share; "Dehydrate" (free local space) is not a download; "RemoveFromCache" is not a delete.
 OPERATION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("share", re.compile(r"sharing|share(?!d)")),
-    ("delete", re.compile(r"delete|recycle|remove")),
-    ("rename", re.compile(r"rename|move(?!ment)")),
-    ("upload", re.compile(r"upload")),
-    ("download", re.compile(r"download|hydrat")),
+    ("share", re.compile(r"(?:un)?shar(?:e|es|ing)")),
+    ("delete", re.compile(r"delete[ds]?|deleting|deletion|recycle[ds]?|recycling|remove[ds]?|removing|removal")),
+    ("rename", re.compile(r"rename[ds]?|renaming|move[ds]?|moving")),
+    ("upload", re.compile(r"upload(?:s|ed|ing|er)?")),
+    ("download", re.compile(r"download(?:s|ed|ing|er)?|hydrat(?:e|es|ed|ing|ion)")),
 )
+# Compound vendor words that would otherwise split into operation tokens.
+OPERATION_COMPOUNDS = re.compile(r"(?i)sharepoint|onedrive")
+# Tokens that turn a "remove" into a cache eviction rather than a delete of the item.
+CACHE_TOKENS = frozenset({"cache", "cached", "dehydrate", "dehydrated", "dehydration", "dehydrating"})
+OPERATION_TOKEN_RE = re.compile(r"[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+|\d+")
 
 EXECUTABLE_TRACES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("onedrive", ("ONEDRIVE.EXE-",)),
@@ -175,6 +189,7 @@ class ClientInstance:
     file_count: int = 0
     total_bytes: int = 0
     files_truncated: bool = False
+    role_counts: dict[str, int] = field(default_factory=dict)  # every discovered file, listed or not
     source_errors: list[dict[str, str]] = field(default_factory=list)
     unparsed: list[str] = field(default_factory=list)
     sqlite_inventory: list[dict[str, object]] = field(default_factory=list)
@@ -186,6 +201,7 @@ class ClientInstance:
 
     def add(self, path: Path, role: str) -> None:
         self.file_count += 1
+        self.role_counts[role] = self.role_counts.get(role, 0) + 1
         try:
             self.total_bytes += path.stat().st_size
         except OSError:
@@ -359,6 +375,26 @@ def classify_client_path(path: Path, root: Path | None = None) -> tuple[str, str
     return None
 
 
+def icloud_sync_root(folder: Path, root: Path | None) -> tuple[str, str]:
+    r"""``(sync root, path_basis)`` of an ``iCloudDrive`` folder found in an evidence copy.
+
+    The root is anchored at the ``Users\<name>`` segment (``\Users\bob\iCloudDrive``) so that the
+    copy's own location (``C\Users\bob`` exported as a folder, the examiner's temp path) never
+    becomes part of it. Without a ``Users`` segment (the evidence root *is* the profile) the
+    machine location is unknown: the folder is reported relative to the evidence root with no
+    leading separator, which ``within_user_profile`` treats as unknown, not as outside a profile.
+    """
+    try:
+        relative = list(folder.relative_to(root).parts) if root is not None else list(folder.parts)
+    except ValueError:
+        relative = list(folder.parts[1:])  # never the drive / UNC anchor
+    lowered = [part.lower() for part in relative]
+    for index in range(len(lowered) - 2, -1, -1):
+        if lowered[index] in ("users", "documents and settings"):
+            return "\\" + "\\".join(relative[index:]), "evidence-root-relative"
+    return "\\".join(relative) or folder.name, "evidence-root-relative-unanchored"
+
+
 def executable_trace_client(path: Path) -> str | None:
     if path.parent.name.lower() != "prefetch" or not path.name.lower().endswith(".pf"):
         return None
@@ -458,10 +494,10 @@ def as_int(value: object) -> int | None:
     if isinstance(value, int):
         return value
     if isinstance(value, float):
-        return int(value)
+        return int(value) if math.isfinite(value) else None
     try:
         return int(str(value).strip())
-    except ValueError:
+    except (ValueError, OverflowError):
         return None
 
 
@@ -543,29 +579,77 @@ def table_inventory(connection: sqlite3.Connection, tables: Mapping[str, Sequenc
     return listed
 
 
+ChainCache = dict  # folder id -> (segments top-down, top id, parent links walked); complete chains only
+
+
 def chain_from_parent(
     parent: object,
     parents: Mapping[object, object],
     names: Mapping[object, str],
+    cache: ChainCache | None = None,
 ) -> tuple[list[str], object, bool]:
-    """Folder names from the top down to ``parent`` (inclusive), the first id above the known folders, and a cycle/depth cut flag."""
-    segments: list[str] = []
+    """Folder names from the top down to ``parent`` (inclusive), the first id above the known folders, and a cycle/depth cut flag.
+
+    At most ``MAX_CHAIN_STEPS`` parent links are walked whatever the names (an empty-named chain
+    of 200,000 folders is cut, not walked) and at most ``MAX_PATH_DEPTH`` names are kept. With a
+    ``cache`` (one per database) every resolved uncut prefix is memoised, so the chains of N
+    files cost O(N) walks in total instead of O(N * depth).
+    """
+    walked: list[object] = []
     seen: set[object] = set()
     current = parent
     cut = False
+    base: tuple[tuple[str, ...], object, int] | None = None
     while current is not None and current in names:
-        if current in seen or len(segments) >= MAX_PATH_DEPTH:
+        if cache is not None:
+            cached = cache.get(current)
+            if cached is not None and len(walked) + cached[2] <= MAX_CHAIN_STEPS:
+                base = cached
+                break
+        if current in seen or len(walked) >= MAX_CHAIN_STEPS:
             cut = True
             break
         seen.add(current)
-        if names[current]:
-            segments.append(names[current])
+        walked.append(current)
         following = parents.get(current)
         if following is None:
             break
         current = following
-    segments.reverse()
-    return segments, current, cut
+    prefix: tuple[str, ...] = base[0] if base is not None else ()
+    top = base[1] if base is not None else current
+    steps = base[2] if base is not None else 0
+    own = [names[item] for item in reversed(walked) if names[item]]
+    segments = [*prefix, *own]
+    if len(segments) > MAX_PATH_DEPTH:
+        segments = segments[-MAX_PATH_DEPTH:]
+        cut = True
+    if cache is not None and not cut and len(cache) < MAX_CHAIN_CACHE:
+        # Memoise every walked node top-down: node k's chain is the prefix plus the names above it.
+        running = list(prefix)
+        for depth, item in enumerate(reversed(walked), start=1):
+            if names[item]:
+                running.append(names[item])
+            if len(cache) >= MAX_CHAIN_CACHE:
+                break
+            cache.setdefault(item, (tuple(running), top, steps + depth))
+    return segments, top, cut
+
+
+def redact_row_urls(details: dict[str, object]) -> dict[str, object]:
+    """Token-bearing URLs (SharePoint ``tempauth``, signed links) in ``site_url`` / ``item_path`` / ``log_strings``.
+
+    Values are redacted in place; ``<field>_sha256`` (``log_strings_sha256``: one entry per string,
+    ``None`` when unchanged) keeps the raw value's sha256 so the same URL still matches across sources.
+    """
+    redact_url_fields(details, URL_FIELDS)
+    strings = details.get("log_strings")
+    if isinstance(strings, list) and strings:
+        redacted, changed = redact_text_urls(strings)
+        if changed:
+            details["log_strings_sha256"] = [url_sha256(raw) if new != raw else None for raw, new in zip(strings, redacted)]
+            details["log_strings"] = redacted
+            details["url_tokens_redacted"] = True
+    return details
 
 
 # --- provider ----------------------------------------------------------------------
@@ -741,6 +825,7 @@ class CloudSyncCollector:
         for name, value in values.items():
             if value is not None and value != "" and value != []:
                 details[name] = value
+        redact_row_urls(details)
         return ArtifactRecord(provider=PARSER, artifact_type=artifact_type, path=str(source), supported=True, details=details)
 
     def account_row(self, instance: ClientInstance, source: Path, *, locator: str, recovery_method: str, source_format: str, **values: object) -> ArtifactRecord | None:
@@ -772,10 +857,14 @@ class CloudSyncCollector:
             instance.unparsed.append("OneDrive 설치·업데이트 파일: 경로 서명 인벤토리만")
             return
         if any(role in ("ini", "sqlite") for _path, role in instance.files):
-            account_info = self.onedrive_account(instance)
-            row = self.account_row(instance, account_info.pop("_source"), **account_info)
-            if row is not None:
-                yield row
+            try:
+                account_info = self.onedrive_account(instance)
+            except Exception as exc:  # isolation: a broken settings folder never drops the DB / logs
+                instance.error(Path(instance.root), f"설정 해석 실패: {exc}")
+            else:
+                row = self.account_row(instance, account_info.pop("_source"), **account_info)
+                if row is not None:
+                    yield row
         for path, role in instance.files:
             if role != "sqlite":
                 continue
@@ -785,9 +874,26 @@ class CloudSyncCollector:
                 continue
             try:
                 yield from self.onedrive_sync_db(instance, path)
-            except (sqlite3.Error, CloudSyncParseError, OSError) as exc:
+            except Exception as exc:  # isolation: one poisoned database never drops the other sources
                 instance.error(path, exc)
-        yield from self.onedrive_logs(instance, instance.primary_account)
+        account, borrowed = instance.primary_account, False
+        if not account and instance.key.endswith("|logs"):
+            account = self.sibling_onedrive_account(instance)
+            borrowed = bool(account)
+        yield from self.onedrive_logs(instance, account, borrowed=borrowed)
+
+    def sibling_onedrive_account(self, instance: ClientInstance) -> str:
+        """The account e-mail of the same profile's OneDrive account folders when there is exactly one (Common logs name none)."""
+        accounts = {
+            other.primary_account
+            for other in self.instances.values()
+            if other.client == "onedrive" and other is not instance and other.user_profile == instance.user_profile and other.primary_account
+        }
+        if len(accounts) == 1:
+            return accounts.pop()
+        if accounts:
+            instance.notes.append(f"공통 로그: 같은 프로필의 OneDrive 계정이 {len(accounts)}개라 이벤트 계정을 정하지 않음")
+        return ""
 
     def onedrive_account(self, instance: ClientInstance) -> dict[str, object]:
         ini_files = [path for path, role in instance.files if role == "ini"]
@@ -937,6 +1043,7 @@ class CloudSyncCollector:
         selected = list(dict.fromkeys(selected))
         sql = f"SELECT rowid AS __rowid, {', '.join(quote_identifier(name) for name in selected)} FROM {quote_identifier(table)} LIMIT ?"
         root = instance.sync_roots[0] if len(instance.sync_roots) == 1 else ""
+        chains: ChainCache = {}
         emitted = 0
         for row in connection.execute(sql, (MAX_FILE_ROWS_PER_SOURCE + 1,)):
             if emitted >= MAX_FILE_ROWS_PER_SOURCE:
@@ -946,7 +1053,7 @@ class CloudSyncCollector:
             rowid = row[0]
             name = str(values.get(col["name"]) or "")
             parent = values.get(col["parent"]) if col["parent"] else None
-            segments, top, cut = chain_from_parent(parent, folders, folder_names)
+            segments, top, cut = chain_from_parent(parent, folders, folder_names, chains)
             relative = "\\".join([*segments, name]) if name else "\\".join(segments)
             item_path = f"{root}\\{relative}" if root and relative and not cut else relative
             scope = scopes.get(top) if top is not None else None
@@ -1010,7 +1117,7 @@ class CloudSyncCollector:
                         break
         return mapping
 
-    def onedrive_logs(self, instance: ClientInstance, account: str) -> Iterator[ArtifactRecord]:
+    def onedrive_logs(self, instance: ClientInstance, account: str, *, borrowed: bool = False) -> Iterator[ArtifactRecord]:
         logs = [path for path, role in instance.files if role == "odl"]
         if not logs:
             return
@@ -1023,23 +1130,31 @@ class CloudSyncCollector:
             instance.notes.append(f"ObfuscationStringMap.txt 적용({len(mapping):,}개 항목)")
         else:
             instance.notes.append("난독화 문자열 맵 없음: 로그 매개변수의 난독화 문자열은 해석하지 않음")
+        if borrowed:
+            instance.notes.append(f"공통 로그 이벤트 계정: 같은 프로필의 유일한 OneDrive 계정({account})을 차용 — account_basis=sibling-account-folder")
         for path in sorted(logs, key=lambda item: str(item).lower()):
-            if self.log_files >= MAX_LOG_FILES or self.log_bytes >= MAX_LOG_TOTAL_BYTES:
+            remaining = MAX_LOG_TOTAL_BYTES - self.log_bytes
+            if self.log_files >= MAX_LOG_FILES or remaining <= 0:
                 instance.unparsed.append(f"로그 상한(파일 {MAX_LOG_FILES}개 / {MAX_LOG_TOTAL_BYTES // MIB} MB) 도달: {path.name} 이후 미처리")
                 break
             self.log_files += 1
+            limit = min(MAX_LOG_INFLATED_BYTES, remaining)
             try:
                 data = read_bounded(path, MAX_LOG_FILE_BYTES)
-                version, body, base_offset, inflated, truncated = load_odl_body(data)
-            except CloudSyncParseError as exc:
+                # The run-wide budget bounds what this file may contribute (inflated or plain): no overshoot.
+                version, body, base_offset, inflated, truncated = load_odl_body(data, limit)
+            except Exception as exc:  # isolation: one unreadable log never drops the others
                 instance.error(path, exc)
                 continue
             if truncated:
-                instance.unparsed.append(f"{path.name}: gzip 해제 상한 {MAX_LOG_INFLATED_BYTES // MIB} MB 도달 — 이후 레코드 미처리")
+                instance.unparsed.append(
+                    f"{path.name}: 로그 읽기 상한 {limit:,} bytes 도달(파일당 {MAX_LOG_INFLATED_BYTES // MIB} MB·실행 전체 "
+                    f"{MAX_LOG_TOTAL_BYTES // MIB} MB) — 이후 레코드 미처리"
+                )
             self.log_bytes += len(body)
             instance.bump("log_files")
             try:
-                yield from self.odl_events(instance, path, body, base_offset, inflated, version, account, mapping)
+                yield from self.odl_events(instance, path, body, base_offset, inflated, version, account, mapping, borrowed=borrowed)
             except Exception as exc:  # corrupt record layout: isolate this file
                 instance.error(path, f"ODL 레코드 해석 실패: {exc}")
 
@@ -1053,16 +1168,18 @@ class CloudSyncCollector:
         version: int | None,
         account: str,
         mapping: Mapping[str, str],
+        *,
+        borrowed: bool = False,
     ) -> Iterator[ArtifactRecord]:
-        starts = [match.start() for match in re.finditer(re.escape(ODL_RECORD_SIGNATURE), body)]
         emitted = 0
-        if not starts:
-            instance.unparsed.append(f"{path.name}: ODL 레코드 서명 없음 — 처리하지 않음")
-            return
-        instance.bump("log_records", len(starts))
+        scanned = 0
         seen: set[tuple[str, str, str]] = set()
-        for position, start in enumerate(starts):
-            end = starts[position + 1] if position + 1 < len(starts) else len(body)
+        for start, end in odl_record_spans(body):
+            scanned += 1
+            if scanned > MAX_LOG_RECORDS_SCANNED:
+                instance.unparsed.append(f"{path.name}: 로그 레코드 탐색 상한 {MAX_LOG_RECORDS_SCANNED:,}건에서 중단")
+                break
+            instance.bump("log_records")
             record = body[start : min(end, start + MAX_LOG_RECORD_BYTES)]
             if not LOG_KEYWORD_RE.search(record):
                 continue
@@ -1089,6 +1206,7 @@ class CloudSyncCollector:
                 confidence="low",
                 actor=account or None,
                 account=account or None,
+                account_basis="sibling-account-folder" if borrowed and account else None,
                 operation=operation,
                 operation_label=OPERATION_LABELS[operation],
                 operation_basis=basis,
@@ -1107,6 +1225,8 @@ class CloudSyncCollector:
             emitted += 1
             instance.bump("events")
             yield row
+        if not scanned:
+            instance.unparsed.append(f"{path.name}: ODL 레코드 서명 없음 — 처리하지 않음")
 
     # -- Dropbox --
     def dropbox(self, instance: ClientInstance) -> Iterator[ArtifactRecord]:
@@ -1138,7 +1258,7 @@ class CloudSyncCollector:
                         instance.encrypted.append(str(path))
                         continue
                     yield from self.dropbox_sqlite(instance, path)
-            except (sqlite3.Error, CloudSyncParseError, OSError, ValueError) as exc:
+            except Exception as exc:  # isolation: one source never drops the others
                 instance.error(path, exc)
         if instance.encrypted:
             instance.unparsed.append(
@@ -1285,7 +1405,7 @@ class CloudSyncCollector:
                         parsed_rows.extend(self.drivefs_mirror(instance, path, connection, tables))
                     elif name == "snapshot.db" or find_table(tables, exact=("cloud_entry",)):
                         parsed_rows.extend(self.backup_sync_snapshot(instance, path, connection, tables))
-            except (sqlite3.Error, CloudSyncParseError, OSError) as exc:
+            except Exception as exc:  # isolation: one source never drops the others
                 instance.error(path, exc)
         if emails or roots or account_id:
             anchor = sqlite_paths[0] if sqlite_paths else Path(instance.root)
@@ -1357,6 +1477,7 @@ class CloudSyncCollector:
         where = f" WHERE {quote_identifier(col['folder'])} = 0 OR {quote_identifier(col['folder'])} IS NULL" if col["folder"] else ""
         sql = f"SELECT rowid AS __rowid, {', '.join(quote_identifier(name) for name in selected)} FROM {quote_identifier(table)}{where} LIMIT ?"
         rows: list[ArtifactRecord] = []
+        chains: ChainCache = {}
         for row in connection.execute(sql, (MAX_FILE_ROWS_PER_SOURCE + 1,)):
             if len(rows) >= MAX_FILE_ROWS_PER_SOURCE:
                 instance.unparsed.append(f"{path.name}/items: 파일 행 상한 {MAX_FILE_ROWS_PER_SOURCE:,}건에서 중단")
@@ -1364,7 +1485,7 @@ class CloudSyncCollector:
             values = {name: row[index + 1] for index, name in enumerate(selected)}
             stable = values.get(col["stable"])
             title = str(values.get(col["title"]) or "")
-            segments, _top, cut = chain_from_parent(parents.get(stable), parents, names)
+            segments, _top, cut = chain_from_parent(parents.get(stable), parents, names, chains)
             trashed = as_flag(values.get(col["trashed"])) if col["trashed"] else None
             shared_date = epoch_to_iso(values.get(col["shared_date"])) if col["shared_date"] else None
             shared_flag = as_flag(values.get(col["shared"])) if col["shared"] else None
@@ -1497,6 +1618,7 @@ class CloudSyncCollector:
         selected = list(dict.fromkeys(name for name in col.values() if name))
         sql = f"SELECT rowid AS __rowid, {', '.join(quote_identifier(name) for name in selected)} FROM {quote_identifier(table)} LIMIT ?"
         rows: list[ArtifactRecord] = []
+        chains: ChainCache = {}
         for row in connection.execute(sql, (MAX_FILE_ROWS_PER_SOURCE + 1,)):
             if len(rows) >= MAX_FILE_ROWS_PER_SOURCE:
                 instance.unparsed.append(f"{path.name}/{table}: 파일 행 상한 {MAX_FILE_ROWS_PER_SOURCE:,}건에서 중단")
@@ -1505,7 +1627,7 @@ class CloudSyncCollector:
             if col["type"] and as_int(values.get(col["type"])) == 0:
                 continue  # doc_type 0 = folder in Backup and Sync snapshots
             name = str(values.get(col["name"]) or "")
-            segments, _top, cut = chain_from_parent(parents.get(values.get(col["id"])) if col["id"] else None, parents, names)
+            segments, _top, cut = chain_from_parent(parents.get(values.get(col["id"])) if col["id"] else None, parents, names, chains)
             removed = as_flag(values.get(col["removed"])) if col["removed"] else None
             shared = as_flag(values.get(col["shared"])) if col["shared"] else None
             modified = epoch_to_iso(values.get(col["modified"])) if col["modified"] else None
@@ -1551,7 +1673,7 @@ class CloudSyncCollector:
                 with open_sqlite_snapshot(path) as connection:
                     tables = sqlite_tables(connection)
                     instance.sqlite_inventory.append({"source": str(path), "tables": table_inventory(connection, tables)})
-            except (sqlite3.Error, OSError) as exc:
+            except Exception as exc:  # isolation: one source never drops the others
                 instance.error(path, exc)
         instance.unparsed.append(
             f"{CLIENT_LABELS[instance.client]}: 공개된 DB 스키마가 없어 경로 서명·SQLite 표 인벤토리만(행 해석 없음)"
@@ -1566,11 +1688,7 @@ class CloudSyncCollector:
             parts = _parts(sample)
             index = next(i for i, part in enumerate(parts) if part in ("iclouddrive", "icloud drive"))
             folder = Path(*sample.parts[: index + 1])
-            try:
-                # Volume-relative: the evidence copy's own location is not the machine's path.
-                root = "\\" + str(folder.relative_to(self.root)).replace("/", "\\")
-            except ValueError:
-                root = str(folder)
+            root, basis = icloud_sync_root(folder, self.root)
             row = self.account_row(
                 instance,
                 sample,
@@ -1580,8 +1698,9 @@ class CloudSyncCollector:
                 account=None,
                 account_type="icloud-drive",
                 sync_roots=[root],
-                synced_file_count=len(sync_root_files),
-                path_basis="evidence-root-relative",
+                synced_file_count=instance.role_counts.get("sync-root", 0),
+                synced_file_count_basis="files-under-iclouddrive-in-evidence",
+                path_basis=basis,
             )
             if row is not None:
                 yield row
@@ -1682,31 +1801,65 @@ class CloudSyncCollector:
 
 
 def bounded_gunzip(data: bytes, limit: int | None = None) -> tuple[bytes, bool]:
-    """Inflate a gzip stream to at most ``limit`` bytes; ``(data, truncated)``."""
-    inflater = zlib.decompressobj(16 + zlib.MAX_WBITS)
-    try:
-        out = inflater.decompress(data, MAX_LOG_INFLATED_BYTES if limit is None else limit)
-    except zlib.error as exc:
-        raise CloudSyncParseError(f"gzip 해제 실패: {exc}") from exc
-    return out, bool(inflater.unconsumed_tail)
+    """Inflate every member of a (multi-member) gzip stream to at most ``limit`` bytes in total; ``(data, truncated)``.
+
+    ``truncated`` is set when the cap stopped inflation while compressed input remained. Bytes after
+    the last member that do not start another gzip member (padding) are ignored.
+    """
+    cap = MAX_LOG_INFLATED_BYTES if limit is None else limit
+    chunks: list[bytes] = []
+    produced = 0
+    pending = data
+    while pending[:2] == GZIP_MAGIC:
+        if produced >= cap:
+            return b"".join(chunks), True  # another member waits beyond the cap
+        inflater = zlib.decompressobj(16 + zlib.MAX_WBITS)
+        try:
+            out = inflater.decompress(pending, cap - produced)
+        except zlib.error as exc:
+            raise CloudSyncParseError(f"gzip 해제 실패: {exc}") from exc
+        chunks.append(out)
+        produced += len(out)
+        if not inflater.eof:
+            # Stopped by the cap with input left, or a member cut short (keep what inflated).
+            return b"".join(chunks), bool(inflater.unconsumed_tail)
+        pending = inflater.unused_data
+    return b"".join(chunks), False
 
 
-def load_odl_body(data: bytes) -> tuple[int | None, bytes, int, bool, bool]:
-    """``(format version, record body, body offset in the (inflated) stream, inflated?, inflate cap hit?)`` of an ODL file."""
+def load_odl_body(data: bytes, limit: int | None = None) -> tuple[int | None, bytes, int, bool, bool]:
+    """``(format version, record body, body offset in the (inflated) stream, inflated?, cap hit?)`` of an ODL file.
+
+    ``limit`` (default ``MAX_LOG_INFLATED_BYTES``) bounds the returned body whether it was inflated or stored plain.
+    """
+    cap = MAX_LOG_INFLATED_BYTES if limit is None else limit
     inflated = truncated = False
     if data[:2] == GZIP_MAGIC:
-        data, truncated = bounded_gunzip(data)
+        data, truncated = bounded_gunzip(data, cap + ODL_HEADER_SIZE)
         inflated = True
     if data[:8] == ODL_FILE_MAGIC:
         version = struct.unpack_from("<I", data, 8)[0] if len(data) >= 12 else None
         body = data[ODL_HEADER_SIZE:]
         if body[:2] == GZIP_MAGIC:
-            body, body_truncated = bounded_gunzip(body)
+            body, body_truncated = bounded_gunzip(body, cap)
             return version, body, 0, True, truncated or body_truncated
+        if len(body) > cap:
+            body, truncated = body[:cap], True
         return version, body, ODL_HEADER_SIZE, inflated, truncated
     if ODL_RECORD_SIGNATURE in data[:4096]:
+        if len(data) > cap:
+            data, truncated = data[:cap], True
         return None, data, 0, inflated, truncated
     raise CloudSyncParseError("ODL 헤더(EBFGONED)·레코드 서명 없음")
+
+
+def odl_record_spans(body: bytes) -> Iterator[tuple[int, int]]:
+    """``(start, end)`` of each signature-delimited record, found lazily (no offset list of the whole body)."""
+    start = body.find(ODL_RECORD_SIGNATURE)
+    while start >= 0:
+        following = body.find(ODL_RECORD_SIGNATURE, start + 1)
+        yield start, following if following >= 0 else len(body)
+        start = following
 
 
 def parsed_time(record: bytes) -> str | None:
@@ -1758,10 +1911,19 @@ def deobfuscate(value: str, mapping: Mapping[str, str]) -> str:
     return "".join(mapping.get(piece, piece) for piece in pieces)
 
 
+def operation_tokens(text: str) -> list[str]:
+    """Lower-cased word tokens of a function name / log string (CamelCase and punctuation split)."""
+    flattened = OPERATION_COMPOUNDS.sub(lambda match: " " + match.group(0).lower() + " ", text)
+    return [token.lower() for token in OPERATION_TOKEN_RE.findall(flattened)]
+
+
 def classify_operation(text: str) -> str | None:
-    lowered = text.lower()
+    tokens = operation_tokens(text)
+    cache_context = any(token in CACHE_TOKENS for token in tokens)
     for operation, pattern in OPERATION_PATTERNS:
-        if pattern.search(lowered):
+        if operation == "delete" and cache_context:
+            continue  # RemoveFromCache / dehydration frees local space; the cloud item stays
+        if any(pattern.fullmatch(token) for token in tokens):
             return operation
     return None
 
@@ -1836,7 +1998,8 @@ def google_account_hints(connection: sqlite3.Connection, tables: Mapping[str, Se
     roots: list[str] = []
     for table, columns in tables.items():
         lowered = table.lower()
-        key_col = find_column(columns, "data_key", "property", "key", "name")
+        # Backup and Sync ``data``: ``entry_key`` names the setting, ``data_key`` is the literal "value".
+        key_col = find_column(columns, "entry_key", "data_key", "property", "key", "name")
         value_col = find_column(columns, "data_value", "value")
         if lowered in ("data", "properties", "property", "preferences", "settings") and key_col and value_col:
             for key, value in connection.execute(

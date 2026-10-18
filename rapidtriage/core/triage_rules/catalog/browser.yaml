@@ -597,9 +597,11 @@ families:
     - category
   - key: method
     label: 요청 방식
-  - key: size
-    label: 크기
+  - key: response_size
+    label: 응답 크기 (캐시된 응답, 업로드 파일 크기 아님)
     format: bytes
+  - key: response_size_basis
+    label: 크기 근거
   - key: source_artifact_type
     label: 원본 행 유형
     format: artifact_type

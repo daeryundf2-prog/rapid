@@ -10,6 +10,18 @@ recovered material, validated by the SQLite header of the first page.
 Legacy (pre-2025-08) chat databases are SQLite pages encrypted with AES-128-CBC per 4 KiB
 page (same key and IV for every page). Post-patch SQLCipher stores need a runtime key and
 are reported as ``kakaotalk-app-inventory`` with the reason.
+
+Decryption runs in-process with the pure-Python ``core.aes_cbc`` (about 1 MB/s). No external
+program is started: ``openssl enc`` only takes a raw AES key on its command line (``-K``),
+where any local process and EDR log could read it, so it is not used. Key bytes never reach
+argv, logs, exception text or rows; failures map to fixed Korean reason codes.
+
+Budget (one evidence root, all chat databases together): at most ``DECRYPT_LIMIT_BYTES`` per
+database, ``DECRYPT_TOTAL_BYTES`` decrypted in total and ``DECRYPT_TIME_BUDGET_SECONDS`` of
+decryption wall time; databases are skipped (status ``budget``) once a budget or the
+``MESSAGE_ROW_LIMIT`` row budget is used up. The plaintext SQLite is a 0600 temporary file
+that is deleted after reading (retried; a failed delete is disclosed as
+``plaintext_temp_cleanup_failed``).
 """
 
 from __future__ import annotations
@@ -17,13 +29,14 @@ from __future__ import annotations
 import base64
 import datetime as dt
 import hashlib
+import heapq
 import json
+import math
 import os
 import re
-import shutil
 import sqlite3
-import subprocess
 import tempfile
+import time
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -61,9 +74,12 @@ PAGE_SIZE = 4096
 KEY_CANDIDATE_LIMIT = 512
 USER_ID_LIMIT = 20
 PK_SCAN_FILE_LIMIT = 2
-PURE_PYTHON_DECRYPT_LIMIT = 32 * 1024 * 1024
-OPENSSL_DECRYPT_LIMIT = 1024 * 1024 * 1024
-OPENSSL_CHUNK = 16 * 1024 * 1024
+# Decryption budget (see the module docstring): per database, total per root, wall time.
+DECRYPT_LIMIT_BYTES = 32 * 1024 * 1024
+DECRYPT_TOTAL_BYTES = 128 * 1024 * 1024
+DECRYPT_TIME_BUDGET_SECONDS = 300.0
+DECRYPT_CHUNK = PAGE_SIZE * 64
+TEMP_UNLINK_ATTEMPTS = 5
 MESSAGE_ROW_LIMIT = 100_000
 MESSAGE_TEXT_LIMIT = 4000
 PREVIEW_LIMIT = 300
@@ -91,7 +107,20 @@ STATUS_LABELS = {
     "no-key-material": "복호 키 없음",
     "key-mismatch": "복호 키 없음",
     "size-cap": "크기 상한 초과",
+    "budget": "복호 예산 소진",
     "error": "복호 오류",
+}
+# Fixed reason texts: exception text is never copied into rows (it can carry paths or key bytes).
+REASON_TEXTS = {
+    "stat-error": "DB 크기 확인 실패",
+    "read-error": "DB 읽기 또는 임시 파일 쓰기 실패",
+    "sqlite-error": "복호된 SQLite를 읽을 수 없음(손상 또는 키 불일치)",
+    "format-error": "복호 데이터 형식 오류",
+    "page-size-mismatch": "SQLite 헤더의 페이지 크기가 4096이 아님(페이지 단위 복호 가정과 다름)",
+    "unexpected-error": "예기치 않은 복호 오류",
+    "byte-budget": "전체 복호 바이트 예산 소진",
+    "time-budget": "복호 시간 예산 소진",
+    "row-budget": "메시지 행 상한 도달",
 }
 TABLE_HINTS = ("chatlogs", "chat_logs", "chatlog", "messages", "message")
 COLUMN_HINTS: dict[str, tuple[str, ...]] = {
@@ -141,6 +170,31 @@ class DatabaseResult:
     decrypted_sha256: str = ""
     tried: int = 0
     truncated: bool = False
+    reason_code: str = ""
+    temp_cleanup_failed: bool = False
+
+
+@dataclass
+class DecryptBudget:
+    """Byte and wall-time budget shared by every chat database of one evidence root."""
+
+    remaining_bytes: int = DECRYPT_TOTAL_BYTES
+    deadline: float = 0.0
+
+    @classmethod
+    def start(cls) -> DecryptBudget:
+        return cls(remaining_bytes=DECRYPT_TOTAL_BYTES, deadline=time.monotonic() + DECRYPT_TIME_BUDGET_SECONDS)
+
+    def expired(self) -> bool:
+        return time.monotonic() >= self.deadline
+
+
+class DecryptBudgetExceeded(Exception):
+    """Raised between chunks when the decryption wall-time budget runs out."""
+
+
+def failed(path: Path, code: str, *, status: str = "error", matched: Mapping[str, object] | None = None) -> DatabaseResult:
+    return DatabaseResult(path, status, reason=REASON_TEXTS[code], reason_code=code, matched=matched)
 
 
 def sha256_text(value: str) -> str:
@@ -245,13 +299,23 @@ def gather_key_material(
                 {"key": key, "iv": iv, "source": "operator-key-iv", "user_id_sha256": "", "pragma_variant": "", "key_derivation": "direct-key-iv"}
             )
     material.operator_supplied = bool(operator_user or operator_pragma or candidates)
-    unique_pragmas = list({item["pragma"]: item for item in pragmas if item["pragma"]}.values())
-    if unique_pragmas and material.user_ids:
-        candidates.extend(build_candidate_key_materials_from_pragma_candidates(unique_pragmas, material.user_ids))
+    # Priority (truncated before building, so the cap never drops a better source):
+    # operator key/IV, then memory PK strings, then pragma x user-id derivations.
     for path in list(memory_paths)[:PK_SCAN_FILE_LIMIT]:
-        material.pk_candidates.extend(scan_pk_candidates_from_file(path))
+        try:
+            material.pk_candidates.extend(scan_pk_candidates_from_file(path))
+        except OSError:
+            continue
     candidates.extend(build_candidate_key_materials_from_pk_candidates(material.pk_candidates))
-    material.candidates = candidates[:KEY_CANDIDATE_LIMIT]
+    candidates = candidates[:KEY_CANDIDATE_LIMIT]
+    room = KEY_CANDIDATE_LIMIT - len(candidates)
+    unique_pragmas = list({item["pragma"]: item for item in pragmas if item["pragma"]}.values())
+    if room > 0 and unique_pragmas and material.user_ids:
+        # Each pragma yields at most two keys per user id.
+        pragma_room = math.ceil(room / (2 * len(material.user_ids)))
+        built = build_candidate_key_materials_from_pragma_candidates(unique_pragmas[:pragma_room], material.user_ids)
+        candidates.extend(built[:room])
+    material.candidates = candidates
     return material
 
 
@@ -275,85 +339,108 @@ def find_matching_key(path: Path, candidates: Sequence[Mapping[str, object]]) ->
     return None
 
 
-def openssl_binary() -> str | None:
-    return shutil.which("openssl")
+def sqlite_page_size(first_blocks: bytes) -> int:
+    """Page size from the SQLite header (bytes 16-17, big-endian; 1 means 65536)."""
+    value = int.from_bytes(first_blocks[16:18], "big")
+    return 65536 if value == 1 else value
 
 
-def decrypt_pages_to_file(path: Path, key: bytes, iv: bytes, destination: Path, *, openssl_bin: str | None) -> str:
-    """Decrypt every 4 KiB page into ``destination``; returns the plaintext SHA-256."""
+def decrypt_pages_to_file(
+    path: Path,
+    key: bytes,
+    iv: bytes,
+    destination: Path,
+    *,
+    budget: DecryptBudget | None = None,
+) -> str:
+    """Decrypt every 4 KiB page into ``destination`` in-process; returns the plaintext SHA-256."""
     digest = hashlib.sha256()
     round_keys = decrypt_round_keys(key)
-    iv_int = int.from_bytes(iv, "big")
-    chunk_size = OPENSSL_CHUNK if openssl_bin else PAGE_SIZE * 64
     with path.open("rb") as source, destination.open("wb") as target:
         while True:
-            chunk = source.read(chunk_size)
-            if not chunk:
-                break
+            if budget is not None and budget.expired():
+                raise DecryptBudgetExceeded
+            chunk = source.read(DECRYPT_CHUNK)
             usable = len(chunk) - len(chunk) % 16
-            chunk = chunk[:usable]
-            if not chunk:
+            if not usable:
                 break
-            if openssl_bin:
-                plain = bytearray(openssl_cbc_decrypt(chunk, key, iv, openssl_bin))
-                # One CBC chain over the chunk: re-key every page start to the fixed IV
-                # (P = D(C) ^ C_prev  ->  D(C) ^ IV).
-                for offset in range(PAGE_SIZE, len(chunk), PAGE_SIZE):
-                    previous = int.from_bytes(chunk[offset - 16 : offset], "big")
-                    fixed = int.from_bytes(plain[offset : offset + 16], "big") ^ previous ^ iv_int
-                    plain[offset : offset + 16] = fixed.to_bytes(16, "big")
-                output = bytes(plain)
-            else:
-                output = b"".join(
-                    aes_cbc_decrypt(key, iv, chunk[offset : offset + PAGE_SIZE], round_keys=round_keys)
-                    for offset in range(0, len(chunk), PAGE_SIZE)
-                )
+            chunk = chunk[:usable]
+            output = b"".join(
+                aes_cbc_decrypt(key, iv, chunk[offset : offset + PAGE_SIZE], round_keys=round_keys)
+                for offset in range(0, len(chunk), PAGE_SIZE)
+            )
             digest.update(output)
             target.write(output)
     return digest.hexdigest()
 
 
-def openssl_cbc_decrypt(data: bytes, key: bytes, iv: bytes, openssl_bin: str) -> bytes:
-    completed = subprocess.run(
-        [openssl_bin, "enc", "-d", "-aes-128-cbc", "-K", key.hex(), "-iv", iv.hex(), "-nopad"],
-        input=data,
-        capture_output=True,
-        check=False,
-        timeout=300,
-    )
-    if completed.returncode != 0 or len(completed.stdout) != len(data):
-        raise OSError("openssl AES-128-CBC 복호 실패")
-    return completed.stdout
+def remove_plaintext(temp_path: Path) -> bool:
+    """Delete the plaintext temp file, retrying Windows sharing violations; True when it is gone."""
+    for attempt in range(TEMP_UNLINK_ATTEMPTS):
+        try:
+            temp_path.unlink()
+            return True
+        except FileNotFoundError:
+            return True
+        except OSError:
+            time.sleep(0.05 * (attempt + 1))
+    return not temp_path.exists()
 
 
-def decrypt_chat_database(path: Path, material: KeyMaterial, *, remaining_rows: int) -> DatabaseResult:
+def decrypt_chat_database(
+    path: Path,
+    material: KeyMaterial,
+    *,
+    remaining_rows: int,
+    budget: DecryptBudget | None = None,
+) -> DatabaseResult:
+    budget = budget if budget is not None else DecryptBudget.start()
     if not material.candidates:
         return DatabaseResult(path, "no-key-material")
+    if remaining_rows <= 0:
+        return failed(path, "row-budget", status="budget")
     matched = find_matching_key(path, material.candidates)
     if matched is None:
         return DatabaseResult(path, "key-mismatch", tried=len(material.candidates))
+    key, iv = matched["key"], matched["iv"]
     try:
         size = path.stat().st_size
-    except OSError as exc:
-        return DatabaseResult(path, "error", reason=str(exc), matched=matched)
-    openssl_bin = openssl_binary()
-    limit = OPENSSL_DECRYPT_LIMIT if openssl_bin else PURE_PYTHON_DECRYPT_LIMIT
-    if size > limit:
-        return DatabaseResult(path, "size-cap", matched=matched, reason=f"{size} > {limit} bytes")
-    handle, temp_name = tempfile.mkstemp(prefix="rt-kakao-", suffix=".sqlite")
-    os.close(handle)
+        with path.open("rb") as handle:
+            header = aes_cbc_decrypt(key, iv, handle.read(32))  # type: ignore[arg-type]
+    except (OSError, ValueError):
+        return failed(path, "stat-error", matched=matched)
+    if size > DECRYPT_LIMIT_BYTES:
+        result = DatabaseResult(path, "size-cap", matched=matched, reason=f"{size} > {DECRYPT_LIMIT_BYTES} bytes")
+        result.reason_code = "size-cap"
+        return result
+    if sqlite_page_size(header) != PAGE_SIZE:
+        return failed(path, "page-size-mismatch", matched=matched)
+    if size > budget.remaining_bytes:
+        return failed(path, "byte-budget", status="budget", matched=matched)
+    if budget.expired():
+        return failed(path, "time-budget", status="budget", matched=matched)
+    budget.remaining_bytes -= size
+    handle_fd, temp_name = tempfile.mkstemp(prefix="rt-kakao-", suffix=".sqlite")  # created 0600
+    os.close(handle_fd)
     temp_path = Path(temp_name)
+    result = failed(path, "unexpected-error", matched=matched)
     try:
-        plain_sha256 = decrypt_pages_to_file(path, matched["key"], matched["iv"], temp_path, openssl_bin=openssl_bin)  # type: ignore[arg-type]
+        plain_sha256 = decrypt_pages_to_file(path, key, iv, temp_path, budget=budget)  # type: ignore[arg-type]
         messages, truncated = read_chat_messages(temp_path, remaining_rows=remaining_rows)
-    except (OSError, sqlite3.DatabaseError, subprocess.SubprocessError, ValueError) as exc:
-        return DatabaseResult(path, "error", reason=str(exc)[:300], matched=matched)
+        result = DatabaseResult(path, "decrypted", messages=messages, matched=matched, decrypted_sha256=plain_sha256, truncated=truncated)
+    except DecryptBudgetExceeded:
+        result = failed(path, "time-budget", status="budget", matched=matched)
+    except OSError:
+        result = failed(path, "read-error", matched=matched)
+    except sqlite3.DatabaseError:
+        result = failed(path, "sqlite-error", matched=matched)
+    except (ValueError, UnicodeError):
+        result = failed(path, "format-error", matched=matched)
+    except Exception:  # one database must not abort the provider; exception text may carry key bytes
+        result = failed(path, "unexpected-error", matched=matched)
     finally:
-        try:
-            temp_path.unlink()
-        except OSError:
-            pass
-    return DatabaseResult(path, "decrypted", messages=messages, matched=matched, decrypted_sha256=plain_sha256, truncated=truncated)
+        result.temp_cleanup_failed = not remove_plaintext(temp_path)
+    return result
 
 
 # --- decrypted SQLite -> message dicts -------------------------------------------------
@@ -385,11 +472,13 @@ def quote(identifier: str) -> str:
 
 
 def epoch_to_iso(value: object) -> str:
+    if isinstance(value, bool) or not isinstance(value, (int, float, str, bytes)):
+        return ""
     try:
-        number = float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return str(value or "")
-    if number <= 0:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return ""
+    if not math.isfinite(number) or number <= 0:
         return ""
     if number > 1e14:
         number /= 1_000_000
@@ -476,15 +565,15 @@ def classify_picture(path: Path) -> str:
 
 
 def find_picture_paths(root: Path) -> Iterable[tuple[Path, str]]:
-    count = 0
-    for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
-        kind = classify_picture(path)
-        if not kind or not path.is_file():
-            continue
+    """KakaoTalk pictures under ``root``: the first ``PICTURE_ROW_LIMIT`` by path (bounded heap, no full-tree sort)."""
+    matches = (
+        (str(path).lower(), path, kind)
+        for path in iter_evidence_paths(root, "*")
+        for kind in (classify_picture(path),)
+        if kind and path.is_file()
+    )
+    for _key, path, kind in heapq.nsmallest(PICTURE_ROW_LIMIT, matches, key=lambda item: item[0]):
         yield path, kind
-        count += 1
-        if count >= PICTURE_ROW_LIMIT:
-            return
 
 
 def sniff_mime(path: Path) -> str:
@@ -524,7 +613,12 @@ def build_picture_entry(path: Path, kind: str) -> dict[str, object]:
         size = path.stat().st_size
     except OSError:
         size = 0
-    hashes = compute_hashes(path) if 0 < size <= PICTURE_HASH_LIMIT else {}
+    hashes: Mapping[str, object] = {}
+    if 0 < size <= PICTURE_HASH_LIMIT:
+        try:
+            hashes = compute_hashes(path)
+        except OSError:
+            hashes = {}
     lowered = str(path).lower()
     return {
         "path": path,
@@ -536,6 +630,18 @@ def build_picture_entry(path: Path, kind: str) -> dict[str, object]:
         "download_time": saved_name_time(path.name),
         "link": None,
     }
+
+
+HASH_LIKE_RE = re.compile(r"[0-9a-f]{16,}")
+
+
+def distinctive_name(name: str, checksums: Iterable[object] = ()) -> bool:
+    """Basename linking only for names that identify one file: ``KakaoTalk_*`` or hash-like stems."""
+    lowered = name.lower()
+    stem = Path(lowered).stem
+    if lowered.startswith("kakaotalk_") or HASH_LIKE_RE.search(stem):
+        return True
+    return bool(stem) and stem in {str(value).lower() for value in checksums}
 
 
 def link_pictures(pictures: Sequence[dict[str, object]], messages: Sequence[Mapping[str, object]]) -> None:
@@ -554,6 +660,8 @@ def link_pictures(pictures: Sequence[dict[str, object]], messages: Sequence[Mapp
                 hits.extend((picture, "checksum") for picture in by_hash.get(str(checksum).lower(), []))
             matched_ids = {id(picture) for picture, _method in hits}
             for name in attachment.get("basenames") or []:
+                if not distinctive_name(str(name), attachment.get("checksums") or []):
+                    continue
                 hits.extend(
                     (picture, "basename") for picture in by_name.get(str(name).lower(), []) if id(picture) not in matched_ids
                 )
@@ -654,14 +762,20 @@ def inventory_reason(status: str, *, material: KeyMaterial, db_count: int, resul
             f"({found}; 2025-08 이후 SQLCipher 형식이면 실행 중 메모리의 키가 필요)"
         )
     if status == "size-cap":
-        return "크기 상한 초과 — 키는 맞았으나 DB가 복호 상한보다 큼(OpenSSL 없으면 32 MB, 있으면 1 GB)"
-    errors = "; ".join(result.reason for result in results if result.reason)[:300]
-    return f"복호 오류 — {errors}"
+        return f"크기 상한 초과 — 키는 맞았으나 DB가 복호 상한({DECRYPT_LIMIT_BYTES // (1024 * 1024)} MB)보다 큼"
+    if status == "budget":
+        reasons = ", ".join(dict.fromkeys(result.reason for result in results if result.status == "budget"))
+        return f"복호 예산 소진 — {reasons}(전체 {DECRYPT_TOTAL_BYTES // (1024 * 1024)} MB·{int(DECRYPT_TIME_BUDGET_SECONDS)}초)"
+    errored = [result for result in results if result.status == "error"]
+    reasons = ", ".join(dict.fromkeys(result.reason for result in errored if result.reason))
+    done = sum(1 for result in results if result.status == "decrypted")
+    return f"복호 오류 — 대화 DB {db_count}개 중 {len(errored)}개 오류({reasons}), 복호 완료 {done}개"
 
 
 def overall_status(results: Sequence[DatabaseResult]) -> str:
+    """Worst-first: an error anywhere outranks databases that did decrypt."""
     statuses = {result.status for result in results}
-    for status in ("decrypted", "size-cap", "key-mismatch", "error", "no-key-material"):
+    for status in ("error", "decrypted", "size-cap", "budget", "key-mismatch", "no-key-material"):
         if status in statuses:
             return status
     return "no-chat-database"
@@ -699,12 +813,15 @@ def inventory_record(
                     "status": result.status,
                     "status_label": STATUS_LABELS.get(result.status, result.status),
                     "message_row_count": len(result.messages),
+                    "reason_code": result.reason_code,
+                    "plaintext_temp_cleanup_failed": result.temp_cleanup_failed,
                 }
                 for result in results[:INVENTORY_DB_LIST_LIMIT]
             ],
             "chat_databases_truncated": len(results) > INVENTORY_DB_LIST_LIMIT,
             "key_material": material.public_summary(),
-            "openssl_available": openssl_binary() is not None,
+            "plaintext_temp_cleanup_failed": sum(1 for result in results if result.temp_cleanup_failed),
+            "decrypt_backend": "in-process-pure-python",
             "policy": "복구된 키 재료의 결정적 유도만 시도(암호 크래킹·키 전수 탐색 없음)",
             "source_path": str(anchor),
             "source_offset": None,
@@ -772,9 +889,13 @@ def collect_kakaotalk_message_rows(
     results: list[DatabaseResult] = []
     db_hashes: dict[Path, str] = {}
     remaining = MESSAGE_ROW_LIMIT
+    budget = DecryptBudget.start()
     for db_path in chat_dbs:
-        db_hashes[db_path] = str(compute_hashes(db_path).get("sha256", ""))
-        result = decrypt_chat_database(db_path, material, remaining_rows=remaining)
+        try:
+            db_hashes[db_path] = str(compute_hashes(db_path).get("sha256", ""))
+        except OSError:
+            db_hashes[db_path] = ""
+        result = decrypt_chat_database(db_path, material, remaining_rows=remaining, budget=budget)
         remaining -= len(result.messages)
         results.append(result)
     message_rows: list[dict[str, object]] = []

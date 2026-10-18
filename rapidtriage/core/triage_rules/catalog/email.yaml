@@ -477,13 +477,13 @@ rules:
   family: email
   grade: B
   label_ko: 외부 도메인으로 첨부 대량 발송
-  rationale_ko: '메일함 소유 도메인에서 외부 도메인 수신자에게 하루(현지 기준) 첨부 n개 이상 발송: 메일을 통한 자료 유출 정황.'
+  rationale_ko: '메일함 소유자(보낸 편지함의 최다 발신자, 없으면 컨테이너 파일명의 계정 주소)가 외부 도메인 수신자에게 하루(현지 기준) 첨부 n개 이상 보낸 경우: 메일을 통한 자료 유출 정황. 보낸 편지함 또는 From=소유자인 메일만 세고, 같은 Message-ID는 한 번만(복구·삭제 사본 제외), 본문 삽입 이미지(서명 등 inline/Content-ID)는 첨부 수에서 뺀다.'
   false_positive_ko: 협력사·고객사와의 정상 업무 자료 교환, 계약서 묶음 발송.
   sources:
   - https://attack.mitre.org/techniques/T1048/
   - https://attack.mitre.org/techniques/T1114/
   - https://learn.microsoft.com/en-us/office/client-developer/outlook/mapi/pidtagclientsubmittime-canonical-property
-  version: 1
+  version: 2
   status: provisional
   params:
     min_attachments: 10
@@ -492,12 +492,12 @@ rules:
   family: email
   grade: C
   label_ko: 최근 삭제한 메일
-  rationale_ko: '지운 편지함·복구 가능한 항목에 있거나 도구가 삭제 영역에서 복구한 메일 중, 같은 메일함의 가장 최근 메일로부터 n일 이내 메일: 증거 인멸·은닉 정황.'
+  rationale_ko: '지운 편지함·복구 가능한 항목에 있거나 도구가 삭제 영역에서 복구한 메일 중, 같은 메일함의 가장 최근 메일로부터 n일 이내 메일: 증거 인멸·은닉 정황. 최신 시각은 수신/발송 시각만 쓰고 수집 시각(없으면 현재)+1일보다 미래인 시각은 무시하며, 폴더 이름은 경로 구간 단위로 정확히 비교(EN/KO/JA/ZH/DE/FR/ES).'
   false_positive_ko: 일상적인 메일함 정리, 자동 정리 규칙.
   sources:
   - https://learn.microsoft.com/en-us/exchange/security-and-compliance/recoverable-items-folder/recoverable-items-folder
   - https://github.com/libyal/libpff
-  version: 1
+  version: 2
   status: provisional
   params:
     recent_days: 30

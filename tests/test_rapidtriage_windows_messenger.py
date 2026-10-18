@@ -8,19 +8,27 @@ catalogue mapping, and that runs schedule the provider.
 
 from __future__ import annotations
 
+import gzip
+import hashlib
 import json
 import sqlite3
 import struct
 import tempfile
+import time
+import tracemalloc
 import unittest
 from collections import Counter
 from pathlib import Path
+from unittest import mock
 
 from rapidtriage.artifacts import artifact_collectors, clear_collect_cache
+from rapidtriage.artifacts.windows import messenger as messenger_module
 from rapidtriage.artifacts.windows.leveldb import (
+    MAX_KEY_BYTES,
     LevelDBError,
     ReadStats,
     SnappyError,
+    iter_block_entries,
     iter_log_records,
     iter_table_records,
     snappy_decompress,
@@ -394,6 +402,308 @@ class ReviewRegressionTests(unittest.TestCase):
     def test_whatsapp_contact_objects(self) -> None:
         found = classify_object({"id": "821012345678@c.us", "name": "홍길동", "pushname": "Gildong", "isMyContact": True}, max_text_chars=100)
         self.assertEqual([(item.artifact_type, item.fields["contact_name"]) for item in found], [("chat-contact", "홍길동")])
+
+
+def _skype_transfers_root(temp: str) -> Path:
+    """Skype ``main.db``: one file sent to two partners and one incoming transfer (review repro exp5)."""
+    root = Path(temp)
+    db_path = root.joinpath("Users", "u", *fx.ROAMING, "Skype", "live#3aowner", "main.db")
+    db_path.parent.mkdir(parents=True)
+    connection = sqlite3.connect(db_path)
+    connection.executescript(
+        r"""CREATE TABLE Accounts(skypename TEXT, fullname TEXT);
+        INSERT INTO Accounts VALUES('live:owner','Owner');
+        CREATE TABLE Contacts(skypename TEXT, displayname TEXT);
+        INSERT INTO Contacts VALUES('live:colleague','Colleague');
+        CREATE TABLE Transfers(id INTEGER, type INTEGER, partner_handle TEXT, partner_dispname TEXT, status INTEGER,
+                               starttime INTEGER, filepath TEXT, filename TEXT, filesize TEXT, convo_id INTEGER);
+        INSERT INTO Transfers VALUES(1,2,'live:colleague','C',8,1709251200,'C:\x\plan.pdf','plan.pdf','1000',1);
+        INSERT INTO Transfers VALUES(2,2,'rival@gmail.com','R',8,1709251300,'C:\x\plan.pdf','plan.pdf','1000',2);
+        INSERT INTO Transfers VALUES(3,1,'outsider@gmail.com','O',8,1709251400,'C:\dl\in.pdf','in.pdf','5',3);"""
+    )
+    connection.commit()
+    connection.close()
+    return root
+
+
+class HostileInputRegressionTests(unittest.TestCase):
+    """Second adversarial review (R2 fix): hostile LevelDB shapes, deep JSON, V8 grouping, dedupe, redaction, Zoom."""
+
+    def assert_bounded(self, action, *, max_seconds: float, max_peak_mb: float) -> object:
+        tracemalloc.start()
+        started = time.monotonic()
+        try:
+            result = action()
+        finally:
+            _current, peak = tracemalloc.get_traced_memory()
+            tracemalloc.stop()
+        self.assertLess(time.monotonic() - started, max_seconds)
+        self.assertLess(peak / 1e6, max_peak_mb)
+        return result
+
+    # B2 ------------------------------------------------------------------------------------------
+    def test_b2_prefix_amplified_block_is_bounded(self) -> None:
+        # exp1 (full shared key) and exp2 (shared key + 1 new byte): 10 000 entries re-emitting a 16 KiB key.
+        for tail in (b"", b"B"):
+            with self.subTest(tail=tail):
+                block = fx.prefix_bomb_block(16 * 1024, 10_000, tail=tail)
+
+                def drain(block: bytes = block) -> int:
+                    count = 0
+                    with self.assertRaises(LevelDBError):
+                        for _entry in iter_block_entries(block):
+                            count += 1
+                    return count
+
+                count = self.assert_bounded(drain, max_seconds=5, max_peak_mb=8)
+                self.assertLess(count, 200)
+                stats = ReadStats()
+                table = fx.table_with_blocks([(fx.snappy_compress(block), 1)])
+                self.assert_bounded(lambda table=table, stats=stats: list(iter_table_records(table, stats)), max_seconds=5, max_peak_mb=8)
+                self.assertEqual(stats.corrupt_blocks, 1)
+        with self.assertRaises(LevelDBError):  # one key over 64 KiB
+            list(iter_block_entries(fx.prefix_bomb_block(MAX_KEY_BYTES + 1, 0)))
+
+    # M4 ------------------------------------------------------------------------------------------
+    def test_m4_repeated_index_handles_decompress_once_and_charge_the_budget(self) -> None:
+        # exp3: 20 index entries pointing at one Snappy block that expands to 4 MiB.
+        table = fx.table_with_blocks([(fx.snappy_run(4 * 1024 * 1024), 1)], repeat_first_handle=20)
+        stats = ReadStats()
+        self.assert_bounded(lambda: list(iter_table_records(table, stats)), max_seconds=10, max_peak_mb=40)
+        self.assertEqual(stats.snappy_blocks, 1)
+        self.assertEqual(stats.decompressed_bytes, 4 * 1024 * 1024)
+        self.assertGreaterEqual(stats.corrupt_blocks, 19)
+        budget = ReadStats()
+        self.assertEqual(list(iter_table_records(table, budget, max_decompressed=1024 * 1024)), [])
+        self.assertEqual((budget.snappy_blocks, budget.budget_exhausted, budget.truncated), (0, True, True))
+
+    def test_short_keys_count_one_corrupt_block_not_one_per_entry(self) -> None:
+        raw = fx._block([(b"k%d" % number, b"v") for number in range(5)])  # keys shorter than the 8-byte trailer
+        stats = ReadStats()
+        self.assertEqual(list(iter_table_records(fx.table_with_blocks([(raw, 0)]), stats)), [])
+        self.assertEqual(stats.corrupt_blocks, 1)
+
+    def test_log_full_record_resets_a_dangling_first_fragment(self) -> None:
+        # exp4: FIRST(garbage) FULL MIDDLE LAST - the MIDDLE+LAST tail must not become a ghost batch.
+        ghost = fx.write_batch(99, [(b"ghost", b"phantom")])
+        log = (
+            fx.log_fragment(2, b"junkjunk")
+            + fx.log_fragment(1, fx.write_batch(5, [(b"b", b"y")]))
+            + fx.log_fragment(3, ghost[:6])
+            + fx.log_fragment(4, ghost[6:])
+        )
+        stats = ReadStats()
+        self.assertEqual([record.user_key for record in iter_log_records(log, stats)], [b"b"])
+        self.assertEqual(stats.dropped_partial_batches, 3)
+
+    # M5 ------------------------------------------------------------------------------------------
+    def test_m5_deep_json_does_not_stop_the_store(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            store = root.joinpath("Users", "u", *fx.ROAMING, "Slack", "Local Storage", "leveldb")
+            deep = '{"text":"x","user":"U1","ts":"1709251200.1",' + '"properties":{' * 1500 + "}" * 1500 + "}"
+            good = json.dumps({"text": "later file message", "user": "U2", "ts": "1709251300.1", "channel": "C1"})
+            fx.write(store / "000003.log", fx.leveldb_log([fx.write_batch(1, [(b"k1", b"\x01" + deep.encode())])]))
+            fx.write(store / "000005.log", fx.leveldb_log([fx.write_batch(2, [(b"k2", b"\x01" + good.encode())])]))
+            deep_object = json.loads(deep)
+            self.assertEqual(classify_object(deep_object, max_text_chars=100)[0].fields["message_text"], "x")
+            rows = collect(root)
+            texts = [details(row)["message_text"] for row in by_app(rows, "slack", "chat-message")]
+            self.assertIn("later file message", texts)
+            self.assertEqual(by_app(rows, "slack", "chat-parse-error"), [])
+
+    def test_m5_a_failing_file_is_isolated_per_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            store = root.joinpath("Users", "u", *fx.ROAMING, "Slack", "Local Storage", "leveldb")
+            good = json.dumps({"text": "survivor", "user": "U2", "ts": "1709251300.1", "channel": "C1"})
+            fx.write(store / "000003.log", fx.leveldb_log([fx.write_batch(1, [(b"k1", b"\x01" + b'{"text":"boom","ts":"1709251200.1"}')])]))
+            fx.write(store / "000005.log", fx.leveldb_log([fx.write_batch(2, [(b"k2", b"\x01" + good.encode())])]))
+            original = messenger_module.classify_object
+
+            def flaky(record, **kwargs):
+                if record.get("text") == "boom":
+                    raise RecursionError("synthetic")
+                return original(record, **kwargs)
+
+            with mock.patch.object(messenger_module, "classify_object", flaky):
+                rows = collect(root)
+            errors = by_app(rows, "slack", "chat-parse-error")
+            self.assertEqual([(Path(str(row["path"])).name, details(row)["error_type"]) for row in errors], [("000003.log", "RecursionError")])
+            self.assertEqual([details(row)["message_text"] for row in by_app(rows, "slack", "chat-message")], ["survivor"])
+
+    # M10 -----------------------------------------------------------------------------------------
+    def test_m10_v8_sender_never_leaks_between_neighbouring_objects(self) -> None:
+        two_users = fx.v8_serialize([{"user": "U1", "text": "a", "ts": "1709251200.1"}, {"user": "U2", "text": "b", "ts": "1709251260.1"}])
+        self.assertEqual(
+            [group for _pos, group in v8_key_objects(two_users)],
+            [{"user": "U1", "text": "a", "ts": "1709251200.1"}, {"user": "U2", "text": "b", "ts": "1709251260.1"}],
+        )
+        for first in ({"text": "system notice", "ts": "1709251200.1"}, {"content": "system: call ended", "composetime": "2024-03-01T00:00:00Z"}):
+            with self.subTest(first=first):
+                blob = fx.v8_serialize([first, {"imdisplayname": "Mallory", "content": "send me the file", "composetime": "2024-03-01T00:01:00Z"}])
+                senders = {
+                    candidate.fields["message_text"]: candidate.fields["sender"]
+                    for _pos, group in v8_key_objects(blob)
+                    for candidate in classify_object(group, max_text_chars=100)
+                }
+                self.assertEqual(senders[str(first.get("text") or first.get("content"))], "")
+                self.assertEqual(senders["send me the file"], "Mallory")
+        # Keys of a nested object join the message; the message's own ``id`` wins over the nested one.
+        nested = fx.v8_serialize({"content": "hi", "composetime": "2024-03-01T00:00:00Z", "properties": {"id": "nested", "files": "[]"}, "id": "own"})
+        self.assertEqual([group for _pos, group in v8_key_objects(nested)], [{"content": "hi", "composetime": "2024-03-01T00:00:00Z", "files": "[]", "id": "own"}])
+
+    def test_max_pairs_counts_decode_attempts(self) -> None:
+        junk = b'"\x04text\x99' * 50
+        good = fx.v8_serialize({"text": "late", "ts": "1709251200.1"})
+        self.assertEqual(v8_key_objects(junk + good, max_pairs=10), [])
+        self.assertTrue(v8_key_objects(junk + good, max_pairs=1000))
+
+    # M11 / M12 -----------------------------------------------------------------------------------
+    def test_m11_one_file_sent_to_two_people_is_two_transfers(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            rows = by_app(collect(_skype_transfers_root(temp)), "skype", "chat-attachment")
+            plan = sorted(details(row)["recipient"] for row in rows if details(row)["file_name"] == "plan.pdf")
+            self.assertEqual(plan, ["live:colleague", "rival@gmail.com"])
+            self.assertTrue(all("duplicate_count" not in details(row) for row in rows))
+
+    def test_m12_skype_transfer_sender_and_recipient_follow_direction(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            rows = by_app(collect(_skype_transfers_root(temp)), "skype", "chat-attachment")
+            sides = {(details(row)["file_name"], details(row)["recipient"]): (details(row)["direction"], details(row)["sender"]) for row in rows}
+            self.assertEqual(sides[("plan.pdf", "rival@gmail.com")], ("outgoing", "live:owner"))
+            self.assertEqual(sides[("in.pdf", "live:owner")], ("incoming", "outsider@gmail.com"))
+
+    # Decision (3) --------------------------------------------------------------------------------
+    def test_attachment_urls_have_tokens_redacted_and_keep_the_raw_sha256(self) -> None:
+        raw_url = "https://cdn.discordapp.com/attachments/1/2/plan.docx?ex=65f1&is=65e0&hm=deadbeef"
+        record = {"content": "file", "timestamp": "2024-03-01T02:10:00+00:00", "author": {"username": "minsu"},
+                  "attachments": [{"filename": "plan.docx", "size": 3, "url": raw_url}]}
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            body = gzip.compress(json.dumps([record]).encode("utf-8"))
+            fx.write(root.joinpath("Users", "u", *fx.ROAMING, "discord", "Cache", "Cache_Data", "f_000001"), b"\x00" * 8 + body)
+            rows = collect(root)
+        attachment = details(by_app(rows, "discord", "chat-attachment")[0])
+        self.assertEqual(attachment["url"], "https://cdn.discordapp.com/attachments/1/2/plan.docx?ex=[가림]&is=[가림]&hm=[가림]")
+        self.assertEqual(attachment["url_sha256"], hashlib.sha256(raw_url.encode()).hexdigest())
+        self.assertIs(attachment["url_tokens_redacted"], True)
+        self.assertNotIn("deadbeef", json.dumps(rows, ensure_ascii=False))
+
+    # Minors --------------------------------------------------------------------------------------
+    def test_teams_message_id_prefers_the_server_id(self) -> None:
+        found = classify_object(
+            {"id": "1709251200123", "clientmessageid": "8812", "content": "x", "composetime": "2024-03-01T00:00:00Z"}, max_text_chars=100
+        )
+        self.assertEqual(found[0].fields["message_id"], "1709251200123")
+
+    def test_tombstone_keys_are_bounded(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            store = root.joinpath("Users", "u", *fx.ROAMING, "Slack", "IndexedDB", "https_app.slack.com_0.indexeddb.leveldb")
+            fx.write(store / "000004.log", fx.leveldb_log([fx.write_batch(3, [(b"m%d" % n, None) for n in range(5)])]))
+            rows = collect(root, MessengerLimits(max_deleted_keys=2))
+        self.assertIn("leveldb-tombstone-cap", details(by_app(rows, "slack", "chat-app-inventory")[0])["caps_hit"])
+
+    def test_snapshot_hash_and_inflated_bytes_are_charged_to_the_app_budget(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            home = root / "Users" / "analyst"
+            fx.build_skype(home)
+            fx.build_telegram(home)
+            fx.build_discord(home)
+            db_size = home.joinpath(*fx.ROAMING, "Skype", "live#3aalice.kim", "main.db").stat().st_size
+            rows = collect(root, MessengerLimits(max_app_bytes=db_size - 1))
+            skype = details(by_app(rows, "skype", "chat-app-inventory")[0])
+            self.assertEqual([store["status"] for store in skype["stores"]], ["skipped-app-byte-cap"])
+            self.assertIn("app-byte-cap", skype["caps_hit"])
+            telegram = [details(row) for row in by_app(collect(root, MessengerLimits(max_app_bytes=10)), "telegram-desktop", "chat-attachment")]
+            self.assertEqual([item["sha256"] for item in telegram], [""])
+            discord = details(by_app(collect(root), "discord", "chat-app-inventory")[0])
+            cache_file = home.joinpath(*fx.ROAMING, "discord", "Cache", "Cache_Data", "f_000001")
+            log_file = home.joinpath(*fx.ROAMING, "discord", "Local Storage", "leveldb", "000003.log")
+            self.assertGreater(int(discord["bytes_read"]), cache_file.stat().st_size + log_file.stat().st_size)
+
+    def test_multi_member_gzip_body_is_read_whole_or_marked_truncated(self) -> None:
+        text = json.dumps([{"id": "1", "channel_id": "9", "content": "두 조각 본문", "timestamp": "2024-03-01T02:10:00+00:00",
+                            "author": {"username": "minsu"}}], ensure_ascii=False).encode("utf-8")
+        body = gzip.compress(text[:20]) + gzip.compress(text[20:])
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            fx.write(root.joinpath("Users", "u", *fx.ROAMING, "discord", "Cache", "Cache_Data", "f_000001"), b"\x00" * 8 + body)
+            rows = collect(root)
+            messages = [details(row) for row in by_app(rows, "discord", "chat-message")]
+            self.assertEqual([item["message_text"] for item in messages], ["두 조각 본문"])
+            self.assertNotIn("cache_body_truncated", messages[0])
+            small = collect(root, MessengerLimits(max_json_window=8))
+        self.assertTrue(all(details(row).get("cache_body_truncated") for row in by_app(small, "discord") if details(row).get("cache_body") == "gzip"))
+
+    def test_zoom_old_format_line_with_to_and_a_colon_in_the_body(self) -> None:
+        messages = parse_zoom_chat_log("10:00:00 From Alice : I want to go: now\n")
+        self.assertEqual([(m["sender"], m["recipient"], m["text"]) for m in messages], [("Alice", "", "I want to go: now")])
+
+    def test_zoom_saved_chat_after_midnight_rolls_the_date_over(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            folder = root.joinpath("Users", "u", "Documents", "Zoom", "2024-03-01 23.30.00 Late Sync 81234567890")
+            fx.write(folder / "meeting_saved_chat.txt", "23:59:10 From A to Everyone:\n\tbefore\n00:01:00 From B to Everyone:\n\tafter\n")
+            fx.write(root.joinpath("Users", "u", *fx.ROAMING, "Zoom", "Zoom.exe"), b"MZ")
+            rows = collect(root)
+        times = {details(row)["message_text"]: details(row)["local_timestamp"] for row in by_app(rows, "zoom", "chat-message")}
+        self.assertEqual(times, {"before": "2024-03-01T23:59:10", "after": "2024-03-02T00:01:00"})
+
+    def test_zoom_saved_chat_row_full_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            home = root / "Users" / "analyst"
+            fx.build_zoom(home)
+            rows = collect(root)
+            log_path = home / "Documents" / "Zoom" / "2024-03-01 10.00.00 Weekly Sync 81234567890" / "meeting_saved_chat.txt"
+        row = next(row for row in by_app(rows, "zoom", "chat-message") if details(row)["recovery_method"] == "text-log")
+        self.assertEqual((row["artifact_type"], row["path"]), ("chat-message", str(log_path)))
+        self.assertEqual(
+            details(row),
+            {
+                "parser": "windows-messenger",
+                "parser_version": PARSER_VERSION,
+                "service": "Zoom",
+                "app": "Zoom",
+                "app_id": "zoom",
+                "app_label_ko": "Zoom",
+                "user": "analyst",
+                "recovery_method": "text-log",
+                "source_path": str(log_path),
+                "source_offset": 0,
+                "source_format": "text",
+                "store_path": str(log_path),
+                "reportability": "triage",
+                "validation_required": True,
+                "timestamp": "",
+                "local_timestamp": "2024-03-01T10:01:02",
+                "timestamp_source": "zoom-chat-log-local-time-no-offset",
+                "timezone": "local-unknown",
+                "local_day_offset": 0,
+                "conversation_id": "2024-03-01 10.00.00 Weekly Sync 81234567890",
+                "conversation_title": "2024-03-01 10.00.00 Weekly Sync 81234567890",
+                "sender": "김민수",
+                "recipient": "Everyone",
+                "direction": "unknown",
+                "message_text": "안녕하세요",
+                "message_text_preview": "안녕하세요",
+                "message_text_sha256": hashlib.sha256("안녕하세요".encode()).hexdigest(),
+                "message_text_truncated": False,
+                "message_format": "text",
+                "message_id": "line-1",
+                "message_type": "zoom-meeting-chat",
+                "attachment_name": "",
+                "attachment_count": 0,
+                "edited_at": "",
+                "deleted_state": "live",
+                "source_line": 1,
+                "coverage_status": "mapped",
+                "confidence": "medium",
+            },
+        )
 
 
 class RunPipelineTests(unittest.TestCase):

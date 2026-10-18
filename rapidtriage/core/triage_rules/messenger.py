@@ -267,9 +267,11 @@ class ExternalFileTransfer(Rule):
     "External" = the recipient's e-mail domain differs from ``internal_domains``
     (or, when none are configured, from the organisation domain of the sender /
     owner addresses seen in the same app store). "Unregistered" = the app
-    store has a contact list (``chat-contact`` rows) and the recipient matches
-    none of its names, ids or addresses. With neither signal (no domain, no
-    contact list) the row is not judged.
+    store has a contact list (``chat-contact`` rows other than the account
+    owner's own) and the recipient matches none of its names, ids or
+    addresses. An owner-only contact list is no list: it would make every
+    recipient "unregistered". With neither signal (no domain, no contact
+    list) the row is not judged.
     """
 
     selector = CHAT_TRANSFERS
@@ -277,6 +279,7 @@ class ExternalFileTransfer(Rule):
     def __init__(self, params=None) -> None:
         super().__init__(params)
         self.contacts: dict[str, set[str]] = defaultdict(set)
+        self.has_contact_list: set[str] = set()  # scopes with at least one non-owner contact
         self.own_domains: dict[str, set[str]] = defaultdict(set)
         self.transfers: list[tuple[RowRef, str, str, str, dt.datetime | None]] = []
 
@@ -294,6 +297,8 @@ class ExternalFileTransfer(Rule):
                 domain = email_domain(row.text("email", "contact_id"))
                 if domain:
                     self.own_domains[scope].add(org_domain(domain))
+            else:
+                self.has_contact_list.add(scope)
             return None
         if row.text("direction").lower() not in OUTGOING:
             return None
@@ -315,7 +320,7 @@ class ExternalFileTransfer(Rule):
             if domain and own and org_domain(domain) not in own:
                 reasons.append("external-domain")
             contacts = self.contacts.get(scope)
-            if check_contacts and contacts and not (_identity_keys(recipient) & contacts):
+            if check_contacts and scope in self.has_contact_list and contacts and not (_identity_keys(recipient) & contacts):
                 reasons.append("unregistered-contact")
             if reasons:
                 yield ref, RuleResult(

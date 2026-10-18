@@ -73,12 +73,13 @@ def desktop_night(app_id: str, store: str, source_file: str, start: str, count: 
     ]
 
 
-def transfer(recipient: str, direction: str = "outgoing", **details: object) -> dict[str, object]:
+def transfer(recipient: str, direction: str = "outgoing", app_id: str = "teams-new", store: str = TEAMS_STORE,
+             source_file: str = "000007.ldb", **details: object) -> dict[str, object]:
     return desktop(
         "chat-attachment",
-        "teams-new",
-        TEAMS_STORE,
-        "000007.ldb",
+        app_id,
+        store,
+        source_file,
         file_name="q3_budget.xlsx",
         sender="minsu.kim@corp.example.com",
         recipient=recipient,
@@ -96,6 +97,18 @@ COLLEAGUE = desktop(
     contact_name="박지훈",
     contact_id="8:orgid:aaaa",
     email="jihoon.park@corp.example.com",
+)
+
+SKYPE_DIR = "C:\\Users\\analyst\\AppData\\Roaming\\Skype\\live#3aminsu.kim"
+SKYPE_OWNER = desktop(
+    "chat-contact",
+    "skype",
+    SKYPE_DIR,
+    "main.db",
+    contact_name="김민수",
+    contact_id="minsu.kim@corp.example.com",
+    email="minsu.kim@corp.example.com",
+    contact_role="account-owner",
 )
 
 CASES = {
@@ -204,9 +217,17 @@ CASES = {
     "messenger.external_file_transfer": {
         # Outgoing Teams attachment to a personal address outside the company domain and the contact list.
         "positive": {"rows": [COLLEAGUE, transfer("rival.person@gmail.com"), transfer("jihoon.park@corp.example.com")], "flagged": [1]},
-        # Same file to a registered colleague in the company domain, and a file received from outside.
+        # Same file to a registered colleague in the company domain, and a file received from outside; in
+        # Skype only the account owner's own contact row exists (no contact list): an internal recipient is
+        # not "unregistered".
         "negative": {
-            "rows": [COLLEAGUE, transfer("jihoon.park@corp.example.com"), transfer("rival.person@gmail.com", direction="incoming")],
+            "rows": [
+                COLLEAGUE,
+                transfer("jihoon.park@corp.example.com"),
+                transfer("rival.person@gmail.com", direction="incoming"),
+                SKYPE_OWNER,
+                transfer("jihoon.park@corp.example.com", app_id="skype", store=SKYPE_DIR, source_file="main.db"),
+            ],
             "flagged": [],
         },
     },

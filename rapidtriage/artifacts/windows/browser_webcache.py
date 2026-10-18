@@ -34,7 +34,13 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from .browser_cache import BODY_POLICY, body_signature, header_fields, parse_raw_headers
+from .browser_cache import (
+    BODY_POLICY,
+    MAX_STREAM0_BYTES,
+    body_signature,
+    header_fields,
+    parse_raw_headers,
+)
 from .ese_native import EseDatabase, EseTable
 
 WEBCACHE_PARSER = "windows-webcachev01-rows"
@@ -46,6 +52,9 @@ FILETIME_EPOCH = dt.datetime(1601, 1, 1, tzinfo=dt.timezone.utc)
 FILETIME_MIN = 116_444_736_000_000_000  # 1970-01-01
 FILETIME_MAX = 160_000_000_000_000_000  # ~2108
 UTF16_STRING = re.compile(rb"(?:[\x20-\x7e]\x00){6,}")
+# One path component of the INetCache layout: no separators, no drive / UNC / device
+# prefixes, no ``..``; a SecureDirectories slot is exactly 8 such characters.
+SAFE_COMPONENT = re.compile(r"^[^\\/:*?\"<>|\x00-\x1f]{1,255}$")
 
 
 def filetime_iso(value: object) -> str | None:
@@ -100,8 +109,9 @@ def split_user_url(url: str) -> tuple[str, str]:
 
 
 def host_of(url: str) -> str:
+    """Lower-case host of ``url`` (``www.`` kept, like the Chromium cache and upload rows)."""
     try:
-        return (urlsplit(url if "://" in url else f"http://{url}").hostname or "").lower().removeprefix("www.")
+        return (urlsplit(url if "://" in url else f"http://{url}").hostname or "").lower()
     except ValueError:
         return ""
 
@@ -112,16 +122,38 @@ def utf16_strings(blob: object, limit: int = 32) -> list[str]:
     return [match.group(0).decode("utf-16-le", "replace") for match in UTF16_STRING.finditer(bytes(blob))][:limit]
 
 
+def safe_component(value: str) -> bool:
+    """``value`` is one plain path component (no separator, ``..``, drive or UNC prefix)."""
+    return bool(SAFE_COMPONENT.fullmatch(value)) and value.strip(". ") != "" and value not in {".", ".."}
+
+
 def resolve_content_file(webcache_path: Path, secure_dirs: str, directory_index: object, file_name: str) -> Path | None:
-    """INetCache file of a ``Content`` row: ``…\\INetCache\\IE\\<SecureDirectories[index]>\\<Filename>``."""
-    if not file_name or not isinstance(directory_index, int) or directory_index < 0 or len(secure_dirs) < (directory_index + 1) * 8:
+    """INetCache file of a ``Content`` row: ``…\\INetCache\\IE\\<SecureDirectories[index]>\\<Filename>``.
+
+    ``Filename`` and the ``SecureDirectories`` slot come from the (untrusted) database:
+    each must be a single plain path component, and the resolved file must stay under
+    the INetCache base directory of the evidence, so a crafted row cannot point the
+    hasher at another file of the examiner's machine.
+    """
+    if not file_name or isinstance(directory_index, bool) or not isinstance(directory_index, int) or directory_index < 0:
+        return None
+    if len(secure_dirs) < (directory_index + 1) * 8:
         return None
     name = secure_dirs[directory_index * 8 : (directory_index + 1) * 8]
+    if not safe_component(name) or not safe_component(file_name):
+        return None
     local = webcache_path.parent.parent  # …\AppData\Local\Microsoft\Windows
     for base in (local / "INetCache" / "IE", local / "Temporary Internet Files" / "Content.IE5"):
         candidate = base / name / file_name
-        if candidate.is_file():
-            return candidate
+        try:
+            resolved_base = base.resolve()
+            resolved = candidate.resolve()
+            if not resolved.is_relative_to(resolved_base) or resolved == resolved_base:
+                continue
+            if resolved.is_file():
+                return candidate
+        except (OSError, ValueError, RuntimeError):
+            continue
     return None
 
 
@@ -339,7 +371,10 @@ def map_container_row(
         )
         return mapped, accessed or created, "download-started", common
     # Content: WinINet cache entry.
-    headers_text = ese_text(row.get("ResponseHeaders"))
+    response_headers = row.get("ResponseHeaders")
+    if isinstance(response_headers, (bytes, bytearray)):
+        response_headers = bytes(response_headers[:MAX_STREAM0_BYTES])
+    headers_text = ese_text(response_headers)[:MAX_STREAM0_BYTES]
     parsed = parse_raw_headers(headers_text) if "HTTP/" in headers_text.upper() else {}
     fields = header_fields(parsed) if parsed else {}
     file_name = ese_text(row.get("Filename"))[:260]

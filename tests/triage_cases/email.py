@@ -168,10 +168,10 @@ CASES = {
     "email.external_bulk_attachments": {
         "positive": {
             "rows": [
-                message(to="buyer@partner.example.net", attachment_count=4, submit_time=f"2024-03-05T0{hour}:00:00Z")
+                message(to="buyer@partner.example.net", attachment_count=4, submit_time=f"2024-03-05T0{hour}:00:00Z", message_id=f"<bulk-{hour}@example.com>")
                 for hour in (1, 2, 3)
             ]
-            + [message(to="bob@example.com", attachment_count=5, submit_time="2024-03-05T04:00:00Z")],
+            + [message(to="bob@example.com", attachment_count=5, submit_time="2024-03-05T04:00:00Z", message_id="<bulk-4@example.com>")],
             "flagged": [0, 1, 2],
         },
         # Same 12 attachments to the same partner, but split over two local (KST) days: 23:00 and 01:00.
@@ -202,4 +202,125 @@ CASES = {
             "flagged": [],
         },
     },
+}
+
+ARCHIVE = r"C:\Users\alice\Documents\archive.pst"
+
+# R2 fix regressions (not positive/negative pairs; run by tests.test_r2_m2_kakaotalk_outlook.R2FixEmailTests).
+REGRESSION_CASES = {
+    # M13: inbound-heavy mailbox -- a client sends many attachments to the user, the user rarely sends.
+    "inbound_heavy_mailbox": (
+        "email.external_bulk_attachments",
+        {
+            "rows": [
+                message(
+                    **{
+                        "from": "Client <c@client.example.org>",
+                        "to": "alice@example.com",
+                        "attachment_count": 3,
+                        "submit_time": f"2024-03-05T0{hour}:00:00Z",
+                        "message_id": f"<in-{hour}@client.example.org>",
+                    }
+                )
+                for hour in range(1, 6)
+            ]
+            + [message(**{"from": "Alice Kim <alice@example.com>", "to": "c@client.example.org", "attachment_count": 0, "submit_time": "2024-03-05T07:00:00Z"})],
+            "flagged": [],
+        },
+    ),
+    # M13: owner from the Sent folder (no address in the container name); an Inbox reply from the partner is inbound.
+    "sent_folder_owner": (
+        "email.external_bulk_attachments",
+        {
+            "rows": [
+                message(
+                    ARCHIVE,
+                    **{
+                        "from": "Alice Kim <alice@example.com>",
+                        "to": "buyer@partner.example.net",
+                        "folder": "Top of Personal Folders/보낸 편지함",
+                        "attachment_count": 5,
+                        "submit_time": f"2024-03-05T0{hour}:00:00Z",
+                        "message_id": f"<sent-{hour}@example.com>",
+                    },
+                )
+                for hour in (1, 2)
+            ]
+            + [
+                message(
+                    ARCHIVE,
+                    **{
+                        "from": "Buyer <buyer@partner.example.net>",
+                        "to": "alice@example.com",
+                        "folder": "Top of Personal Folders/Inbox",
+                        "attachment_count": 9,
+                        "submit_time": "2024-03-05T03:00:00Z",
+                        "message_id": "<reply@partner.example.net>",
+                    },
+                )
+            ],
+            "flagged": [0, 1],
+        },
+    ),
+    # M14: the same Message-ID in the live and the recovered tree counts once; inline signature images do not count.
+    "duplicate_and_inline": (
+        "email.external_bulk_attachments",
+        {
+            "rows": [
+                message(to="x@partner.example.net", attachment_count=5, submit_time="2024-03-05T01:00:00Z", message_id="<a@x>"),
+                message(to="x@partner.example.net", attachment_count=5, submit_time="2024-03-05T01:00:00Z", message_id="<a@x>", deleted_state="recovered"),
+                message(
+                    to="x@partner.example.net",
+                    submit_time="2024-03-05T02:00:00Z",
+                    message_id="<b@x>",
+                    attachments=[
+                        {"filename": "image001.png", "content_type": "image/png", "content_id": "<image001.png@01DA>"},
+                        {"filename": "image002.jpg", "content_type": "image/jpeg", "content_disposition": "inline"},
+                        {"filename": "logo.gif", "content_type": "image/gif", "inline": True},
+                        {"filename": "report.pdf", "content_type": "application/pdf"},
+                    ],
+                ),
+            ],
+            "flagged": [],
+        },
+    ),
+    # M15: one future-dated spam message must not hide a recent deletion; exact folder-segment matching.
+    "future_dated_spam": (
+        "email.deleted_folder_recent",
+        {
+            "rows": [
+                message(folder="Inbox", submit_time="2037-01-01T00:00:00Z"),
+                message(folder="Deleted Items", submit_time="2024-03-09T00:00:00Z"),
+                message(folder="Inbox", submit_time="2024-03-10T00:00:00Z"),
+                # The Date header is sender-controlled: without a delivery/submit time the row is not used.
+                message(folder="Deleted Items", date="Sun, 10 Mar 2024 00:00:00 +0000"),
+                message(folder="Inbox/Undeleted", submit_time="2024-03-09T00:00:00Z"),
+                message(folder="Projects/deleted-reports", submit_time="2024-03-09T00:00:00Z"),
+                message(folder="Top of Personal Folders/削除済みアイテム", submit_time="2024-03-08T00:00:00Z"),
+                message(folder="Top of Personal Folders/Gelöschte Elemente", submit_time="2024-03-08T00:00:00Z"),
+            ],
+            "flagged": [1, 6, 7],
+        },
+    ),
+    # M23: Exchange X.500 sender; the parser records the SMTP sender property.
+    "x500_sender": (
+        "email.external_bulk_attachments",
+        {
+            "rows": [
+                message(
+                    **{
+                        "from": "Alice Kim </O=EXCHANGELABS/OU=EXCHANGE ADMINISTRATIVE GROUP (FYDIBOHF23SPDLT)/CN=RECIPIENTS/CN=ALICE>",
+                        "sender_smtp_address": "alice@example.com",
+                        "address_type": "EX",
+                        "to": "buyer@partner.example.net",
+                        "attachment_count": 6,
+                        "submit_time": f"2024-03-05T0{hour}:00:00Z",
+                        "message_id": f"<x500-{hour}@example.com>",
+                    }
+                )
+                for hour in (1, 2)
+            ],
+            "flagged": [0, 1],
+        },
+    ),
 }

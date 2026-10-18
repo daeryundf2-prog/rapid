@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import datetime as dt
 import re
+import unicodedata
 from collections import Counter, defaultdict
 from collections.abc import Iterator, Mapping
 from email.utils import getaddresses, parseaddr, parsedate_to_datetime
+from typing import NamedTuple
 
 from .base import (
     FlagContext,
@@ -147,8 +149,18 @@ def header_date(row: RowView) -> dt.datetime | None:
     return moment if moment.tzinfo else moment.replace(tzinfo=dt.timezone.utc)
 
 
+def sender_address(row: RowView) -> str:
+    """SMTP address of the sender, lower-cased; an Exchange X.500 ``From`` falls back to ``sender_smtp_address``."""
+    _display, address = parseaddr(header(row, "From"))
+    if "@" in address:
+        return address.strip().lower()
+    _display, address = parseaddr(row.text("sender_smtp_address", "sent_representing_smtp_address"))
+    return address.strip().lower() if "@" in address else ""
+
+
 def from_domain(row: RowView) -> str:
-    return email_domain(header(row, "From"))
+    """Sender domain; an Exchange X.500 sender (``/O=EXCHANGELABS/...``) uses the SMTP sender property instead."""
+    return email_domain(header(row, "From")) or email_domain(row.text("sender_smtp_address", "sent_representing_smtp_address"))
 
 
 def recipients(row: RowView) -> list[str]:
@@ -371,8 +383,82 @@ class PersonalRecipient(_OwnerDomainRule):
 
 # --- r2 M2: Outlook PST/OST rows (pffexport/readpst) ------------------------------------
 
-DELETED_FOLDER_HINTS = ("deleted items", "deleted", "recoverable items", "trash", "지운 편지함", "삭제된 항목", "휴지통")
+# Folder names (one path segment, casefolded) of deleted / recoverable mail. Shared with
+# ``rapidtriage.artifacts.email_pst`` (the parser's ``deleted_state``) -- single source of truth.
+DELETED_FOLDER_NAMES = frozenset(
+    {
+        "deleted items",
+        "deleted messages",
+        "deleted",
+        "recoverable items",
+        "trash",
+        "bin",
+        "지운 편지함",
+        "지운편지함",
+        "삭제된 항목",
+        "휴지통",
+        "削除済みアイテム",
+        "ごみ箱",
+        "已删除邮件",
+        "已删除项目",
+        "已刪除的郵件",
+        "已刪除郵件",
+        "gelöschte elemente",
+        "papierkorb",
+        "éléments supprimés",
+        "corbeille",
+        "elementos eliminados",
+        "papelera",
+    }
+)
+SENT_FOLDER_NAMES = frozenset(
+    {
+        "sent items",
+        "sent",
+        "sent mail",
+        "sent messages",
+        "보낸 편지함",
+        "보낸편지함",
+        "送信済みアイテム",
+        "已发送邮件",
+        "已傳送的郵件",
+        "gesendete elemente",
+        "éléments envoyés",
+        "elementos enviados",
+    }
+)
 DELETED_STATES = frozenset({"deleted", "deleted-folder", "recovered", "orphan"})
+_ACCOUNT_IN_NAME = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}")
+_MAILBOX_SUFFIXES = (".pst", ".ost", ".nst", ".mbox", ".msg", ".eml")
+# Times later than "now" + this are clock errors / spam with forged dates, not the mailbox's last activity.
+FUTURE_TOLERANCE = dt.timedelta(days=1)
+
+
+def folder_segments(folder: str) -> list[str]:
+    """Casefolded, NFC-normalised path segments of a mail folder (``/`` or ``\\`` separated)."""
+    text = unicodedata.normalize("NFC", str(folder or ""))
+    return [" ".join(part.split()).casefold() for part in re.split(r"[\\/]+", text) if part.strip()]
+
+
+def folder_is_deleted(folder: str) -> bool:
+    """Exact segment match (``Inbox/Undeleted`` and ``Projects/deleted-reports`` are not deleted folders)."""
+    return any(segment in DELETED_FOLDER_NAMES for segment in folder_segments(folder))
+
+
+def folder_is_sent(folder: str) -> bool:
+    return any(segment in SENT_FOLDER_NAMES for segment in folder_segments(folder))
+
+
+def account_address(mailbox: str) -> str:
+    """Account address in the container file name (Outlook names OSTs ``alice@example.com.ost``)."""
+    name = re.split(r"[\\/]", mailbox)[-1]
+    lowered = name.lower()
+    for suffix in _MAILBOX_SUFFIXES:
+        if lowered.endswith(suffix):
+            name = name[: -len(suffix)]
+            break
+    match = _ACCOUNT_IN_NAME.search(name)
+    return match.group(0).lower() if match else ""
 
 
 def message_time(row: RowView) -> dt.datetime | None:
@@ -380,38 +466,112 @@ def message_time(row: RowView) -> dt.datetime | None:
     return row.time("submit_time", "delivery_time") or header_date(row) or row.time("date")
 
 
+def mailbox_time(row: RowView, now: dt.datetime) -> dt.datetime | None:
+    """Delivery / submit time only (the sender-controlled Date header is not used); future-dated values are dropped."""
+    moment = row.time("delivery_time", "submit_time")
+    if moment is None or moment > now + FUTURE_TOLERANCE:
+        return None
+    return moment
+
+
+def attachment_inline(item: Mapping[str, object]) -> bool:
+    """Inline body part (signature / embedded image): ``inline`` flag, ``Content-Disposition: inline`` or an image with a Content-ID."""
+    if as_bool(item.get("inline")) is True:
+        return True
+    if str(item.get("content_disposition") or "").strip().lower() == "inline":
+        return True
+    return bool(item.get("content_id")) and str(item.get("content_type") or "").lower().startswith("image/")
+
+
 def attachment_total(row: RowView) -> int:
+    """Attachments without inline parts. Rows carrying ``inline_attachment_count`` already exclude them."""
+    items = attachments(row)
+    inline = sum(1 for item in items if attachment_inline(item))
     count = row.number("attachment_count")
-    return int(count) if count is not None else len(attachments(row))
+    if count is None:
+        return len(items) - inline
+    if row.get("inline_attachment_count") is not None:
+        return int(count)
+    return max(0, int(count) - inline)
+
+
+def message_key(row: RowView) -> str:
+    return row.text("message_id", "Message-ID").strip().strip("<>").strip().lower()
+
+
+class _BulkFact(NamedTuple):
+    ref: RowRef
+    mailbox: str
+    sender: str
+    in_sent: bool
+    targets: list[str]
+    count: int
+    moment: dt.datetime
+    key: str
+    live: bool
 
 
 @register("email.external_bulk_attachments")
-class ExternalBulkAttachments(_OwnerDomainRule):
-    """≥ ``min_attachments`` attachments sent from the owner's domain to external-domain recipients on one (local) day."""
+class ExternalBulkAttachments(Rule):
+    """≥ ``min_attachments`` attachments *sent by the mailbox owner* to external-domain recipients on one (local) day.
+
+    Owner: the most common sender of the Sent folder, else the account address in the container name.
+    Direction: Sent folder, or From == owner. One copy per Message-ID (live preferred over recovered / orphan /
+    Deleted Items copies); inline parts (signature images) are not counted.
+    """
+
+    selector = MESSAGES
 
     def __init__(self, params=None) -> None:
         super().__init__(params)
-        self.facts: dict[RowRef, tuple[int, dt.datetime]] = {}
+        self.sent_senders: dict[str, Counter[str]] = defaultdict(Counter)
+        self.messages: list[_BulkFact] = []
 
     def apply(self, row: RowView, ctx: FlagContext) -> RuleResult | None:
-        super().apply(row, ctx)
+        mailbox = row.text("source_path") or row.path()
+        folder = row.text("folder", "mailbox_folder")
+        sender = sender_address(row)
+        in_sent = folder_is_sent(folder)
+        if in_sent and sender:
+            self.sent_senders[mailbox][sender] += 1
         count = attachment_total(row)
         moment = message_time(row)
         if count > 0 and moment is not None:
-            self.facts[row.ref] = (count, moment)
+            live = row.text("deleted_state").lower() not in DELETED_STATES and not folder_is_deleted(folder)
+            self.messages.append(_BulkFact(row.ref, mailbox, sender, in_sent, recipients(row), count, moment, message_key(row), live))
         return None
+
+    def owner(self, mailbox: str) -> str:
+        counts = self.sent_senders.get(mailbox)
+        return counts.most_common(1)[0][0] if counts else account_address(mailbox)
+
+    def deduplicated(self) -> list[_BulkFact]:
+        """One fact per (mailbox, Message-ID): the live copy wins over recovered / deleted copies."""
+        kept: list[_BulkFact] = []
+        unique: dict[tuple[str, str], _BulkFact] = {}
+        for fact in self.messages:
+            if not fact.key:
+                kept.append(fact)
+                continue
+            previous = unique.get((fact.mailbox, fact.key))
+            if previous is None or (fact.live and not previous.live):
+                unique[(fact.mailbox, fact.key)] = fact
+        return kept + list(unique.values())
 
     def finalize(self, ctx: FlagContext) -> Iterator[tuple[RowRef, RuleResult]]:
         offset = dt.timedelta(hours=float(self.param("tz_offset_hours", 9)))
         days: dict[tuple[str, dt.date], list[tuple[RowRef, int, list[str]]]] = defaultdict(list)
-        for ref, mailbox, sender, targets in self.messages:
-            fact = self.facts.get(ref)
-            owner = self.owner(mailbox)
-            if fact is None or not owner or sender != owner:
+        for fact in self.deduplicated():
+            owner = self.owner(fact.mailbox)
+            if not (fact.in_sent or (owner and fact.sender == owner)):
                 continue
-            external = sorted({target for target in targets if org_domain(target.rsplit("@", 1)[-1]) != owner})
+            reference = owner or fact.sender
+            owner_org = org_domain(reference.rsplit("@", 1)[-1]) if "@" in reference else ""
+            if not owner_org:
+                continue
+            external = sorted({target for target in fact.targets if org_domain(target.rsplit("@", 1)[-1]) != owner_org})
             if external:
-                days[(mailbox, (fact[1] + offset).date())].append((ref, fact[0], external))
+                days[(fact.mailbox, (fact.moment + offset).date())].append((fact.ref, fact.count, external))
         threshold = int(self.param("min_attachments", 10))
         for (_mailbox, day), items in days.items():
             total = sum(count for _ref, count, _external in items)
@@ -425,17 +585,27 @@ class ExternalBulkAttachments(_OwnerDomainRule):
 
 @register("email.deleted_folder_recent")
 class DeletedFolderRecent(Rule):
-    """Message in Deleted Items / Recoverable Items (or recovered by the tool) within ``recent_days`` of the mailbox's newest message."""
+    """Message in Deleted Items / Recoverable Items (or recovered by the tool) within ``recent_days`` of the mailbox's newest message.
+
+    Only delivery / submit times count, and times later than the acquisition time (else now) + 1 day
+    (forged / broken dates) are ignored,
+    so one future-dated spam message does not push the mailbox's "newest" time out of reach.
+    """
 
     selector = MESSAGES
 
     def __init__(self, params=None) -> None:
         super().__init__(params)
+        self.now = dt.datetime.now(dt.timezone.utc)
         self.latest: dict[str, dt.datetime] = {}
         self.candidates: list[tuple[RowRef, str, dt.datetime, str, str]] = []
 
+    def reference_time(self, ctx: FlagContext) -> dt.datetime:
+        """Acquisition time when the run provides one (``ctx.shared["acquisition_time"]``), else now."""
+        return parse_time(ctx.shared.get("acquisition_time")) or self.now
+
     def apply(self, row: RowView, ctx: FlagContext) -> RuleResult | None:
-        moment = message_time(row)
+        moment = mailbox_time(row, self.reference_time(ctx))
         if moment is None:
             return None
         mailbox = row.text("source_path") or row.path()
@@ -443,7 +613,7 @@ class DeletedFolderRecent(Rule):
             self.latest[mailbox] = moment
         folder = row.text("folder", "mailbox_folder")
         state = row.text("deleted_state").lower()
-        if state in DELETED_STATES or any(hint in folder.lower() for hint in DELETED_FOLDER_HINTS):
+        if state in DELETED_STATES or folder_is_deleted(folder):
             self.candidates.append((row.ref, mailbox, moment, folder, state))
         return None
 

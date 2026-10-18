@@ -34,6 +34,9 @@ class RuleResult:
 
     evidence: Mapping[str, object]
     note: str | None = None
+    # Optional per-result grade cap (downgrade only): the flag gets the lower of the
+    # catalogue grade and this one, e.g. carved log-only evidence capped at "B".
+    grade: str | None = None
 
 
 # --- row view ------------------------------------------------------------------

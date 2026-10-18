@@ -362,13 +362,13 @@ rules:
   family: cloud-sync
   grade: A
   label_ko: 대량 업로드
-  rationale_ko: '한 계정의 업로드가 1시간 안에 50건 이상이거나 합계 500 MB 이상: 개인 클라우드로 대량 반출.'
-  false_positive_ko: 최초 동기화·새 PC 설정, 사진·백업 폴더 자동 업로드.
+  rationale_ko: '한 계정의 서로 다른 항목 업로드가 1시간 안에 50건 이상이거나, 서로 다른 항목 2건 이상의 합계가 500 MB 이상: 개인 클라우드로 대량 반출. 같은 항목의 재업로드는 한 번만 셈. 로그 카빙 레코드만으로 된 구간은 B 등급(메모 표시).'
+  false_positive_ko: 최초 동기화·새 PC 설정, 사진·백업 폴더 자동 업로드, 같은 파일의 반복 동기화.
   sources:
   - https://learn.microsoft.com/purview/audit-log-activities
   - https://github.com/ydkhatri/OneDrive
   - https://help.dropbox.com/installs/sync-overview
-  version: 1
+  version: 2
   status: provisional
   params:
     window_minutes: 60

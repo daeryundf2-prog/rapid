@@ -257,7 +257,13 @@ TIMELINE_FIELD_MAP: dict[str, tuple[TimelineField, ...]] = {
     # (``timestamp`` + ``timestamp_kind`` cloud-upload/cloud-modified/...);
     # account and inventory rows carry no evidence time.
     "cloud-sync-event": (),
-    "cloud-sync-file": (F("viewed_at", "cloud-viewed"), F("shared_with_me_at", "cloud-shared-with-me")),
+    # OneDrive SyncEngineDatabase diskCreationTime / diskLastAccessTime: the local copy's times.
+    "cloud-sync-file": (
+        F("viewed_at", "cloud-viewed"),
+        F("shared_with_me_at", "cloud-shared-with-me"),
+        F("disk_created_at", "sync-local-created"),
+        F("disk_accessed_at", "sync-local-accessed"),
+    ),
     "cloud-sync-account": (),
     "cloud-sync-inventory": (),
     # r2 M2: decrypted KakaoTalk PC messages (sendAt, UTC) and saved pictures whose

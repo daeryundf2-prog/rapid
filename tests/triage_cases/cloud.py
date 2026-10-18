@@ -167,10 +167,14 @@ CASES = {
         # 50 files uploaded by one account within 25 minutes.
         "positive": {"rows": [sync_upload(index, START + dt.timedelta(seconds=30 * index)) for index in range(50)], "flagged": list(range(50))},
         # The same 50 files trickled over a working day (one every 15 minutes), plus 60 log keyword
-        # hits inside one minute that the parser marked ineligible (no item path).
+        # hits inside one minute that the parser marked ineligible (no item path), one drawing
+        # re-uploaded 60 times within the hour (one distinct item) and a single 600 MB item
+        # (bytes alone need two distinct items).
         "negative": {
             "rows": [sync_upload(index, START + dt.timedelta(minutes=15 * index)) for index in range(50)]
-            + [sync_upload(index, START + dt.timedelta(seconds=index), eligible=False) for index in range(60)],
+            + [sync_upload(index, START + dt.timedelta(seconds=index), eligible=False) for index in range(60)]
+            + [sync_upload(900, START + dt.timedelta(days=2, seconds=30 * index), size=9_000_000) for index in range(60)]
+            + [sync_upload(901, START + dt.timedelta(days=4), size=600_000_000)],
             "flagged": [],
         },
     },

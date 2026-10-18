@@ -8,7 +8,9 @@ import os
 import re
 import shutil
 import subprocess
-from collections.abc import Callable
+import tempfile
+import time
+from collections.abc import Callable, Mapping
 from email import policy
 from pathlib import Path
 
@@ -28,6 +30,16 @@ EMAIL_EXTERNAL_EXPORT_REVIEW_PROFILE_VERSION = "email-external-export-review-pro
 EMAIL_EXTERNAL_REVIEW_MAX_EXPORT_BYTES = 2 * 1024 * 1024
 EMAIL_EXTERNAL_REVIEW_MAX_MESSAGES = 200
 EMAIL_EXTERNAL_REVIEW_BODY_PREVIEW_CHARS = 500
+# Export guard rails (r2 fix M9): the tool is killed when its export grows past the cap
+# (2x the container, at least 64 MiB, at most 8 GiB); free space for the cap is checked first;
+# stdout/stderr go to temporary files and only a bounded tail is read back.
+EMAIL_EXTERNAL_EXPORT_MAX_BYTES = 8 * 1024 * 1024 * 1024
+EMAIL_EXTERNAL_EXPORT_MIN_CAP_BYTES = 64 * 1024 * 1024
+EMAIL_EXTERNAL_EXPORT_SIZE_FACTOR = 2
+EMAIL_EXTERNAL_FREE_SPACE_RESERVE_BYTES = 256 * 1024 * 1024
+EMAIL_EXTERNAL_OUTPUT_TAIL_BYTES = 64 * 1024
+EMAIL_EXTERNAL_OUTPUT_MAX_BYTES = 64 * 1024 * 1024
+EMAIL_EXTERNAL_POLL_SECONDS = 1.0
 
 
 class EmailExternalParserError(ValueError):
@@ -42,8 +54,16 @@ def run_email_external_parse(
     timeout_seconds: int = 300,
     overwrite: bool = False,
     tool_resolver: Callable[[str], str | None] = shutil.which,
-    command_runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+    command_runner: Callable[..., subprocess.CompletedProcess[str]] | None = None,
+    source_hashes: Mapping[str, str] | None = None,
+    max_export_bytes: int | None = None,
 ) -> dict[str, object]:
+    """Run the external tool into ``output_dir/export`` and record the evidence.
+
+    ``command_runner`` (tests) gets the ``subprocess.run`` keywords; the default runs the tool under
+    :func:`run_monitored_command` (export-size cap, bounded output). ``source_hashes`` from the caller
+    avoid hashing the container again.
+    """
     source_path = source_path.expanduser().resolve()
     output_dir = output_dir.expanduser().resolve()
     if output_dir.exists() and any(output_dir.iterdir()) and not overwrite:
@@ -65,22 +85,42 @@ def run_email_external_parse(
     if overwrite and export_dir.exists():
         shutil.rmtree(export_dir)
     export_dir.mkdir(exist_ok=True)
-    source_hashes = compute_hashes(source_path)
+    source_hashes = dict(source_hashes) if source_hashes and source_hashes.get("sha256") else compute_hashes(source_path)
+    export_cap = int(max_export_bytes) if max_export_bytes else export_size_cap(source_path.stat().st_size)
     command: list[str] = []
     completed: subprocess.CompletedProcess[str] | None = None
     status = "blocked"
     error = ""
+    limit_exceeded = ""
+    free_bytes: int | None = None
     if not source_header_profile["compatible"] and not preferred_tool:
         status = "blocked"
         error = str(source_header_profile["reason"])
     elif selected["available"]:
         command = build_email_external_command(str(selected["path"] or selected["tool"]), source_path, export_dir, suffix)
-        try:
-            completed = command_runner(command, text=True, capture_output=True, timeout=timeout_seconds, check=False)
-            status = "complete" if completed.returncode == 0 else "failed"
-        except Exception as exc:  # pragma: no cover - external runtime dependent
+        free_bytes = free_space(export_dir)
+        if free_bytes is not None and free_bytes < export_cap + EMAIL_EXTERNAL_FREE_SPACE_RESERVE_BYTES:
             status = "failed"
-            error = str(exc)
+            limit_exceeded = "insufficient-free-space"
+            error = f"insufficient free space: {free_bytes} bytes free, export cap {export_cap} bytes + reserve {EMAIL_EXTERNAL_FREE_SPACE_RESERVE_BYTES}"
+        else:
+            try:
+                if command_runner is None:
+                    completed, limit_exceeded = run_monitored_command(command, timeout=timeout_seconds, watch_dir=export_dir, max_bytes=export_cap)
+                else:
+                    completed = command_runner(command, text=True, capture_output=True, timeout=timeout_seconds, check=False)
+                    if not limit_exceeded and directory_size(export_dir, stop_at=export_cap) > export_cap:
+                        limit_exceeded = "export-size-cap"
+                status = "complete" if completed.returncode == 0 and not limit_exceeded else "failed"
+                if limit_exceeded:
+                    error = f"tool stopped: {limit_exceeded} (export cap {export_cap} bytes, timeout {timeout_seconds}s)"
+            except subprocess.TimeoutExpired:
+                status = "failed"
+                limit_exceeded = "timeout"
+                error = f"tool stopped: timeout after {timeout_seconds}s"
+            except Exception as exc:  # pragma: no cover - external runtime dependent
+                status = "failed"
+                error = str(exc)
     exports = inventory_email_external_exports(export_dir)
     export_review_profile = email_external_export_review_profile(
         source_path=source_path,
@@ -89,15 +129,22 @@ def run_email_external_parse(
         export_dir=export_dir,
         exports=exports,
     )
+    stdout = str(completed.stdout or "") if completed is not None else ""
+    stderr = str(completed.stderr or "") if completed is not None else error
     execution = {
         "command": command,
         "command_argv_sha256": stable_json_sha256(command),
         "timeout_seconds": timeout_seconds,
         "returncode": completed.returncode if completed is not None else None,
-        "stdout_tail": tail_text(completed.stdout if completed is not None else ""),
-        "stdout_sha256": sha256_text(completed.stdout if completed is not None else ""),
-        "stderr_tail": tail_text(completed.stderr if completed is not None else error),
-        "stderr_sha256": sha256_text(completed.stderr if completed is not None else error),
+        "stdout_tail": tail_text(stdout),
+        "stdout_sha256": sha256_text(stdout),
+        "stderr_tail": tail_text(stderr),
+        "stderr_sha256": sha256_text(stderr),
+        "error": error,
+        "limit_exceeded": limit_exceeded,
+        "max_export_bytes": export_cap,
+        "export_bytes": sum(int(row.get("size_bytes") or 0) for row in exports),
+        "free_bytes_before": free_bytes,
     }
     validation_checks = email_external_validation_checks(
         source_header_profile=source_header_profile,
@@ -173,6 +220,87 @@ def run_email_external_parse(
     write_result(payload, json_path)
     markdown_path.write_text(render_email_external_parse_markdown(payload), encoding="utf-8")
     return payload
+
+
+def export_size_cap(source_size: int) -> int:
+    """Export-size cap for one container: 2x its size, at least 64 MiB, at most 8 GiB."""
+    return min(EMAIL_EXTERNAL_EXPORT_MAX_BYTES, max(EMAIL_EXTERNAL_EXPORT_MIN_CAP_BYTES, EMAIL_EXTERNAL_EXPORT_SIZE_FACTOR * max(0, int(source_size))))
+
+
+def free_space(path: Path) -> int | None:
+    try:
+        return int(shutil.disk_usage(path).free)
+    except OSError:
+        return None
+
+
+def directory_size(path: Path, *, stop_at: int | None = None) -> int:
+    """Total file size under ``path`` (stops counting once past ``stop_at``)."""
+    total = 0
+    stack = [path]
+    while stack:
+        current = stack.pop()
+        try:
+            entries = list(os.scandir(current))
+        except OSError:
+            continue
+        for entry in entries:
+            try:
+                if entry.is_dir(follow_symlinks=False):
+                    stack.append(Path(entry.path))
+                elif entry.is_file(follow_symlinks=False):
+                    total += entry.stat(follow_symlinks=False).st_size
+            except OSError:
+                continue
+            if stop_at is not None and total > stop_at:
+                return total
+    return total
+
+
+def read_tail(handle, limit: int = EMAIL_EXTERNAL_OUTPUT_TAIL_BYTES) -> str:
+    handle.flush()
+    size = os.fstat(handle.fileno()).st_size
+    handle.seek(max(0, size - limit))
+    return handle.read(limit).decode("utf-8", errors="replace")
+
+
+def run_monitored_command(
+    command: list[str],
+    *,
+    timeout: float,
+    watch_dir: Path,
+    max_bytes: int,
+    output_max_bytes: int = EMAIL_EXTERNAL_OUTPUT_MAX_BYTES,
+    poll_seconds: float = EMAIL_EXTERNAL_POLL_SECONDS,
+) -> tuple[subprocess.CompletedProcess[str], str]:
+    """Run ``command``; kill it on timeout, when ``watch_dir`` grows past ``max_bytes`` or its output past ``output_max_bytes``.
+
+    Returns the completed process (stdout/stderr = bounded tails) and the limit that stopped it ("" = none).
+    """
+    with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+        process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=out, stderr=err)
+        deadline = time.monotonic() + float(timeout)
+        reason = ""
+        while True:
+            try:
+                process.wait(timeout=poll_seconds)
+                break
+            except subprocess.TimeoutExpired:
+                pass
+            if time.monotonic() > deadline:
+                reason = "timeout"
+            elif directory_size(watch_dir, stop_at=max_bytes) > max_bytes:
+                reason = "export-size-cap"
+            elif os.fstat(out.fileno()).st_size + os.fstat(err.fileno()).st_size > output_max_bytes:
+                reason = "output-size-cap"
+            if reason:
+                process.kill()
+                process.wait()
+                break
+        if not reason and directory_size(watch_dir, stop_at=max_bytes) > max_bytes:
+            reason = "export-size-cap"
+        completed = subprocess.CompletedProcess(command, process.returncode, read_tail(out), read_tail(err))
+    return completed, reason
 
 
 def select_email_external_tool(

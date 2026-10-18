@@ -121,6 +121,8 @@ export const TIMESTAMP_KIND_LABELS: Readonly<Record<string, string>> = {
   "cloud-shared-with-me": "나와 공유됨",
   // DriveFS local copy times (timeline.py cloud-sync-file).
   "sync-local-created": "로컬 사본 생성",
+  "local-created": "로컬 사본 생성",
+  "local-accessed": "로컬 사본 접근",
   "sync-local-accessed": "로컬 사본 접근",
 };
 

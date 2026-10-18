@@ -632,12 +632,12 @@ rules:
   grade: B
   label_ko: 외부 상대에게 파일 전송
   rationale_ko: '데스크톱 메신저에서 보낸 첨부의 받는 사람이 조직 외부 도메인(사용자 계정·내부 도메인과 다름)이거나 같은 앱의 연락처 목록에 없는 상대: 유출 경로.'
-  false_positive_ko: 협력사·고객과의 정상 업무 파일 교환, 연락처 동기화가 안 된 앱.
+  false_positive_ko: 협력사·고객과의 정상 업무 파일 교환, 연락처 동기화가 안 된 앱, 계정 소유자 본인 연락처만 있는 경우는 연락처 목록으로 보지 않음.
   sources:
   - https://attack.mitre.org/techniques/T1567/
   - https://www.magnetforensics.com/blog/the-lesser-talked-about-messaging-apps/
   - https://dfrws.org/presentation/digital-forensic-analysis-of-encrypted-database-files-in-instant-messaging-applications-on-windows-operating-systems/
-  version: 1
+  version: 2
   status: provisional
   params:
     internal_domains: []

@@ -22,7 +22,7 @@
 - 경로 서명(`AppData\Roaming|Local\<app>`): Teams(IndexedDB/LevelDB `.ldb/.log` + `Teams\IndexedDB`, 신규 Teams `EBWebView`), Slack(`Slack\IndexedDB`, `Local Storage\leveldb`), Discord(`discord\Local Storage\leveldb`), Telegram Desktop(`tdata` — 암호화: 존재·세션·캐시 파일 인벤토리 + 미디어 캐시 `user_data\cache`), WhatsApp Desktop(`WhatsApp\IndexedDB`/`LocalStorage`, `msgstore` 없음 명시), Skype(`Skype for Desktop\IndexedDB`, 구 `main.db` SQLite), LINE PC(`LINE\Data\...` SQLite/암호화 표시), WeChat PC(`WeChat Files\<wxid>\Msg\*.db` SQLCipher — 인벤토리), Zoom(`Zoom\data\zoomus.db`, `zoommeeting.db`).
 - 행 유형: `chat-message`(앱·대화방·발화자·수신자·시각·본문·방향·삭제 여부), `chat-attachment`(파일명·크기·경로·해시·전송 방향), `chat-contact`, `chat-app-inventory`(암호화/미지원 앱: 존재·버전·마지막 사용·파일 수). LevelDB/IndexedDB는 레코드 수준 파싱 대신 **바운디드 문자열·JSON 조각 복구**(`.ldb` 블록 압축 해제는 snappy → 순수 파이썬 구현, 상한 적용)로 메시지 후보를 뽑고 `recovery_method=carved`로 표기.
 - `artifacts/mobile/messengers.py`의 프로필(표 이름·열 매핑)을 재사용할 수 있는 SQLite 앱(Skype main.db, Zoom, LINE 일부)은 재사용.
-- 규칙: `messenger.external_file_transfer`(B: 첨부 전송 상대가 조직 외부 도메인/미등록 연락처), `messenger.after_hours_burst` 기존 규칙에 앱 추가.
+- 규칙: `messenger.external_file_transfer`(B: 첨부 전송 상대가 조직 외부 도메인/미등록 연락처), `messenger.late_night_burst` 기존 규칙에 앱 추가.
 
 ### 3.2 M2 — 카카오톡 PC 메시지·공유 사진 + Outlook PST/OST·ICS (`artifacts/kakaotalk_windows.py`, `artifacts/email_external.py`, 새 `artifacts/email_pst.py`)
 - 카카오톡: 런 단계에서 키 재료 후보가 있고 `kakaotalk-decrypt`(`core/kakaotalk.py`)가 복호 가능하면 `kakaotalk-message`(대화방·발화자·시각·본문·첨부 참조·삭제) 행 생성; 불가하면 `kakaotalk-app-inventory`에 "복호 키 없음 — 사유". 공유 사진 캐시(`KakaoTalk\...\cache`, 썸네일·원본) → `kakaotalk-shared-picture`(메시지 id 연결 가능 시, 다운로드 위치·완료 시각·MIME·해시). 암호 크래킹·키 브루트포스는 하지 않는다(정책).

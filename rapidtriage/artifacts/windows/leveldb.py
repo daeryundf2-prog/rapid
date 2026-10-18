@@ -37,6 +37,14 @@ BLOCK_TRAILER_SIZE = 5
 MAX_BLOCK_OUTPUT = 32 * 1024 * 1024
 MAX_TABLE_BLOCKS = 200_000
 MAX_RECORDS_PER_FILE = 500_000
+# Prefix compression lets a few bytes of block re-emit a long shared key per entry: keys are capped,
+# entries per block are capped and every block has a budget of decoded (key + value) bytes.
+MAX_KEY_BYTES = 64 * 1024
+MAX_BLOCK_ENTRIES = 262_144
+BLOCK_DECODE_FACTOR = 8
+BLOCK_DECODE_FLOOR = 1024 * 1024
+# Decompressed (Snappy) bytes one table may produce; callers pass a smaller per-app remainder.
+MAX_TABLE_DECOMPRESSED = 256 * 1024 * 1024
 # CRC32C in pure Python costs ~0.5 µs/byte: checksums are verified for the
 # first bytes of a file only (informational in a carving context).
 CRC_VERIFY_BUDGET = 1024 * 1024
@@ -78,6 +86,8 @@ class ReadStats:
     dropped_partial_batches: int = 0
     corrupt_blocks: int = 0
     snappy_blocks: int = 0
+    decompressed_bytes: int = 0
+    budget_exhausted: bool = False
     truncated: bool = False
     errors: list[str] = field(default_factory=list)
 
@@ -95,6 +105,8 @@ class ReadStats:
             "dropped_partial_batches": self.dropped_partial_batches,
             "corrupt_blocks": self.corrupt_blocks,
             "snappy_blocks": self.snappy_blocks,
+            "decompressed_bytes": self.decompressed_bytes,
+            "budget_exhausted": self.budget_exhausted,
             "truncated": self.truncated,
             "errors": list(self.errors),
         }
@@ -253,12 +265,15 @@ def iter_log_records(data: bytes, stats: ReadStats | None = None, *, max_records
                 checksum_ok = None
                 stats.checksum_unverified += 1
             if record_type == LOG_FULL:
-                if pending:
+                if pending_offset >= 0:
                     stats.dropped_partial_batches += 1
-                    pending.clear()
+                # A FULL record ends any open FIRST..LAST run: later MIDDLE/LAST fragments must not
+                # be glued onto the dropped prefix (that would yield a ghost batch).
+                pending = bytearray()
+                pending_offset = -1
                 yield from _parse_batch(fragment, position, checksum_ok, stats, max_records)
             elif record_type == LOG_FIRST:
-                if pending:
+                if pending_offset >= 0:
                     stats.dropped_partial_batches += 1
                 pending = bytearray(fragment)
                 pending_offset = position
@@ -282,7 +297,7 @@ def iter_log_records(data: bytes, stats: ReadStats | None = None, *, max_records
                 return
             position = fragment_start + length
         block_start += LOG_BLOCK_SIZE
-    if pending:
+    if pending_offset >= 0:
         stats.dropped_partial_batches += 1
 
 
@@ -346,7 +361,11 @@ def _parse_batch(batch: bytes, file_offset: int, checksum_ok: bool | None, stats
 # --- tables ---------------------------------------------------------------------------
 
 
-def _read_block(data: bytes, offset: int, size: int, stats: ReadStats) -> bytes:
+class _DecompressionBudget(LevelDBError):
+    """The table's decompressed-bytes budget is spent (not damage: the rest of the table is skipped)."""
+
+
+def _read_block(data: bytes, offset: int, size: int, stats: ReadStats, budget: int | None = None) -> bytes:
     if offset < 0 or size < 0 or offset + size + BLOCK_TRAILER_SIZE > len(data):
         raise LevelDBError(f"block handle ({offset}, {size}) outside file")
     raw = data[offset : offset + size]
@@ -354,19 +373,37 @@ def _read_block(data: bytes, offset: int, size: int, stats: ReadStats) -> bytes:
     if compression == 0:
         return raw
     if compression == 1:
+        try:
+            declared = snappy_uncompressed_length(raw)
+        except LevelDBError as exc:
+            raise SnappyError("snappy: bad length preamble") from exc
+        if budget is not None and stats.decompressed_bytes + min(declared, MAX_BLOCK_OUTPUT) > budget:
+            raise _DecompressionBudget(f"decompressed-bytes budget {budget} spent before block at {offset}")
         stats.snappy_blocks += 1
-        return snappy_decompress(raw)
+        block = snappy_decompress(raw)
+        stats.decompressed_bytes += len(block)
+        return block
     raise LevelDBError(f"unknown block compression {compression}")
 
 
 def iter_block_entries(block: bytes) -> Iterator[tuple[int, bytes, bytes]]:
-    """``(entry offset, key, value)`` of one decompressed block."""
+    """``(entry offset, key, value)`` of one decompressed block, lazily.
+
+    Bounded against prefix-compression amplification: a key longer than
+    ``MAX_KEY_BYTES``, more than ``MAX_BLOCK_ENTRIES`` entries, or decoded
+    key + value bytes beyond ``BLOCK_DECODE_FACTOR`` x the block size (at least
+    ``BLOCK_DECODE_FLOOR``) raise :class:`LevelDBError` (entries already
+    yielded stay valid).
+    """
     if len(block) < 4:
         raise LevelDBError("block shorter than its restart count")
     restarts = int.from_bytes(block[-4:], "little")
     limit = len(block) - 4 - 4 * restarts
     if restarts == 0 or limit < 0:
         raise LevelDBError(f"bad restart count {restarts}")
+    decode_budget = max(len(block) * BLOCK_DECODE_FACTOR, BLOCK_DECODE_FLOOR)
+    decoded = 0
+    entries = 0
     position = 0
     last_key = b""
     while position < limit:
@@ -376,6 +413,14 @@ def iter_block_entries(block: bytes) -> Iterator[tuple[int, bytes, bytes]]:
         value_length, position = read_varint(block, position, limit)
         if shared > len(last_key) or position + non_shared + value_length > limit:
             raise LevelDBError(f"block entry at {entry_offset} runs past the block")
+        if shared + non_shared > MAX_KEY_BYTES:
+            raise LevelDBError(f"block entry at {entry_offset}: key of {shared + non_shared} bytes exceeds {MAX_KEY_BYTES}")
+        entries += 1
+        decoded += shared + non_shared + value_length
+        if entries > MAX_BLOCK_ENTRIES:
+            raise LevelDBError(f"block holds more than {MAX_BLOCK_ENTRIES} entries")
+        if decoded > decode_budget:
+            raise LevelDBError(f"block entry at {entry_offset}: decoded bytes exceed {decode_budget} (prefix amplification)")
         key = last_key[:shared] + block[position : position + non_shared]
         position += non_shared
         value = block[position : position + value_length]
@@ -397,46 +442,80 @@ def table_footer(data: bytes) -> tuple[tuple[int, int], tuple[int, int]]:
     return (meta_offset, meta_size), (index_offset, index_size)
 
 
-def iter_table_records(data: bytes, stats: ReadStats | None = None, *, max_records: int = MAX_RECORDS_PER_FILE) -> Iterator[LevelDBRecord]:
-    """Records of an ``.ldb``/``.sst`` table. A bad footer/index raises; a bad data block is skipped (counted)."""
+def iter_table_records(
+    data: bytes,
+    stats: ReadStats | None = None,
+    *,
+    max_records: int = MAX_RECORDS_PER_FILE,
+    max_decompressed: int = MAX_TABLE_DECOMPRESSED,
+) -> Iterator[LevelDBRecord]:
+    """Records of an ``.ldb``/``.sst`` table. A bad footer/index raises; a bad data block is skipped (counted).
+
+    Data-block handles must be strictly increasing, non-overlapping and end
+    before the index block (a hostile index cannot make one block decompress
+    many times). Snappy output is charged to ``max_decompressed``; when it is
+    spent the rest of the table is skipped (``budget_exhausted``/``truncated``).
+    """
     stats = stats if stats is not None else ReadStats()
     _meta, (index_offset, index_size) = table_footer(data)
-    index_block = _read_block(data, index_offset, index_size, stats)
+    try:
+        index_block = _read_block(data, index_offset, index_size, stats, max_decompressed)
+    except _DecompressionBudget:
+        stats.budget_exhausted = stats.truncated = True
+        return
     handles: list[tuple[int, int]] = []
+    previous_end = 0
     for _entry, _key, value in iter_block_entries(index_block):
         block_offset, position = read_varint(value, 0)
         block_size, _ = read_varint(value, position)
+        block_end = block_offset + block_size + BLOCK_TRAILER_SIZE
+        if (handles and block_offset < previous_end) or block_end > index_offset:
+            stats.corrupt_blocks += 1
+            stats.note(f"index handle ({block_offset}, {block_size}) overlaps, repeats or runs past the index block")
+            continue
         handles.append((block_offset, block_size))
+        previous_end = block_end
         if len(handles) >= MAX_TABLE_BLOCKS:
             stats.truncated = True
             break
     for block_offset, block_size in handles:
         try:
-            block = _read_block(data, block_offset, block_size, stats)
-            entries = list(iter_block_entries(block))
+            block = _read_block(data, block_offset, block_size, stats, max_decompressed)
+        except _DecompressionBudget as exc:
+            stats.budget_exhausted = stats.truncated = True
+            stats.note(str(exc))
+            return
         except LevelDBError as exc:
             stats.corrupt_blocks += 1
             stats.note(f"table block at {block_offset}: {exc}")
             continue
-        for entry_offset, key, value in entries:
-            if len(key) < 8:
+        short_key_seen = False
+        try:
+            for entry_offset, key, value in iter_block_entries(block):
+                if len(key) < 8:
+                    if not short_key_seen:  # one damaged block counts once, not once per entry
+                        stats.corrupt_blocks += 1
+                        short_key_seen = True
+                    continue
+                trailer = int.from_bytes(key[-8:], "little")
+                value_type = trailer & 0xFF
+                deleted = value_type == VALUE_TYPE_DELETION
+                stats.records += 1
+                if deleted:
+                    stats.deletions += 1
+                yield LevelDBRecord(
+                    origin="table",
+                    user_key=key[:-8],
+                    value=None if deleted else value,
+                    sequence=trailer >> 8,
+                    deleted=deleted,
+                    file_offset=block_offset,
+                    entry_offset=entry_offset,
+                )
+                if stats.records >= max_records:
+                    stats.truncated = True
+                    return
+        except LevelDBError as exc:
+            if not short_key_seen:
                 stats.corrupt_blocks += 1
-                continue
-            trailer = int.from_bytes(key[-8:], "little")
-            value_type = trailer & 0xFF
-            deleted = value_type == VALUE_TYPE_DELETION
-            stats.records += 1
-            if deleted:
-                stats.deletions += 1
-            yield LevelDBRecord(
-                origin="table",
-                user_key=key[:-8],
-                value=None if deleted else value,
-                sequence=trailer >> 8,
-                deleted=deleted,
-                file_offset=block_offset,
-                entry_offset=entry_offset,
-            )
-            if stats.records >= max_records:
-                stats.truncated = True
-                return
+            stats.note(f"table block at {block_offset}: {exc}")

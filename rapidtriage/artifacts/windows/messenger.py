@@ -63,18 +63,26 @@ from ..mobile.helpers import (
     sqlite_table_names,
 )
 from ..mobile.messengers import chat_app_profile
+from ..url_redaction import redact_url_fields
 from .common import (
     isoformat_from_timestamp,
     iter_windows_user_homes,
     open_sqlite_snapshot,
 )
-from .leveldb import LevelDBError, ReadStats, iter_log_records, iter_table_records
+from .leveldb import (
+    MAX_TABLE_DECOMPRESSED,
+    LevelDBError,
+    ReadStats,
+    iter_log_records,
+    iter_table_records,
+)
 
 PARSER = "windows-messenger"
 PARSER_VERSION = "windows-messenger-v1"
 SQLITE_HEADER = b"SQLite format 3\x00"
 GZIP_MAGIC = b"\x1f\x8b\x08"
 MAX_GZIP_MEMBERS_PER_CACHE_FILE = 64  # Chromium blockfile data_N files hold many bodies
+MAX_CLASSIFY_DEPTH = 8  # nested ``properties`` objects followed by classify_object
 
 
 @dataclass(frozen=True)
@@ -94,6 +102,7 @@ class MessengerLimits:
     max_json_window: int = 1024 * 1024  # characters one JSON fragment may span
     max_text_chars: int = 8_000  # stored message text
     max_store_list: int = 50  # stores listed on the inventory row
+    max_deleted_keys: int = 200_000  # LevelDB tombstone keys remembered per store
 
 
 DEFAULT_LIMITS = MessengerLimits()
@@ -276,7 +285,7 @@ CONVERSATION_KEYS = (
     "threadid", "thread_id", "thread_ts", "roomid", "room_id", "sessionid", "session_id", "remote_jid", "id_remote",
 )
 CONVERSATION_TITLE_KEYS = ("topic", "chattitle", "threadtopic", "conversation_name", "displayname_conversation", "channel_name")
-MESSAGE_ID_KEYS = ("clientmessageid", "client_msg_id", "messageid", "message_id", "msg_id", "msgid", "server_id", "id")
+MESSAGE_ID_KEYS = ("id", "clientmessageid", "client_msg_id", "messageid", "message_id", "msg_id", "msgid", "server_id")
 EDIT_KEYS = ("edittime", "edited_timestamp", "edited_at", "lasteditedtime", "edited")
 DELETE_KEYS = ("deletetime", "deleted", "isdeleted", "is_deleted", "deletedtime")
 OUTGOING_FLAG_KEYS = ("isfromme", "is_from_me", "fromme", "from_me", "issentbyme", "issentbycurrentuser", "outgoing", "is_sent")
@@ -296,7 +305,6 @@ CONTACT_STRONG_KEYS = frozenset(
 )
 EMAIL_KEYS = ("email", "emails", "userprincipalname", "mail")
 PHONE_KEYS = ("phone", "phone_mobile", "phonenumber", "phone_number", "msisdn")
-_ANCHOR_KEYS = frozenset({*TEXT_KEYS, "composetime", "originalarrivaltime", "ts", "timestamp", "conversationid", "channel_id"})
 _SECRET_MARKERS = ("token", "password", "passwd", "secret", "cookie", "authorization", "credential", "session_key", "private_key")
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 _TAG_RE = re.compile(r"<[^>]{0,2000}>")
@@ -304,6 +312,8 @@ _WS_RE = re.compile(r"\s+")
 _JSON_START_RE = re.compile(r"\[\s*\{\s*\"|[\[{]\s*\"")  # arrays of objects first, then objects/string arrays
 _WHATSAPP_MSG_ID = re.compile(r"^(true|false)_([^_\s]+@[a-z.]+)_")
 _APP_VERSION_RE = re.compile(r"^app-(\d+(?:\.\d+){1,3})$", re.IGNORECASE)
+# URL-like emitted fields: token query values are redacted, the raw URL's sha256 is kept beside them.
+URL_FIELDS = ("url", "leveldb_key_preview")
 _KNOWN_KEYS = frozenset(
     {
         *TEXT_KEYS, *TIME_KEYS, *SENDER_KEYS, *RECIPIENT_KEYS, *CONVERSATION_KEYS, *CONVERSATION_TITLE_KEYS,
@@ -517,40 +527,129 @@ def decode_v8_value(blob: bytes, position: int) -> tuple[object, int]:
     return _MISSING, position
 
 
-def v8_key_objects(blob: bytes, *, max_pairs: int = 20_000) -> list[tuple[int, dict[str, object]]]:
-    """Objects rebuilt from V8 ``"key" value`` runs: known keys found by needle, grouped by proximity.
+def _v8_varint(blob: bytes, position: int, end: int) -> tuple[int, int] | None:
+    value = shift = 0
+    while position < end and shift <= 63:
+        byte = blob[position]
+        position += 1
+        value |= (byte & 0x7F) << shift
+        if not byte & 0x80:
+            return value, position
+        shift += 7
+    return None
 
-    A new object starts when an anchor key (body, send time, conversation)
-    repeats or after a 4 KiB gap; other repeated keys (nested ``id``) keep
-    their first value. Positions are offsets of the first key in ``blob``.
+
+def _v8_gap_marks(blob: bytes, start: int, end: int) -> list[int] | None:
+    """Object begin (``o`` → +1) / end (``{`` → -1) tags in ``blob[start:end]``; ``None`` when it is not plain V8 tokens.
+
+    The bytes between two known key/value runs are other keys and scalar
+    values plus object/array framing; any other tag (host object, typed
+    array, Map, ...) makes the gap unknown.
     """
-    hits: list[tuple[int, str, object]] = []
+    marks: list[int] = []
+    position = start
+    while position < end:
+        tag = blob[position]
+        position += 1
+        if tag == 0x00:  # padding
+            continue
+        if tag == 0x6F:
+            marks.append(1)
+            continue
+        skips = 0
+        if tag in (0x7B, 0x49, 0x55, 0x41, 0x61, 0x5E, 0xFF):  # '{' end, ints, array begins, back-reference, version
+            skips = 1
+        elif tag in (0x24, 0x40):  # dense / sparse array end: two varints
+            skips = 2
+        elif tag in (0x22, 0x63, 0x53):  # strings
+            read = _v8_varint(blob, position, end)
+            if read is None:
+                return None
+            length, position = read
+            position += length
+        elif tag in (0x4E, 0x44):
+            position += 8
+        elif tag not in (0x54, 0x46, 0x30, 0x5F, 0x2D):  # true, false, null, undefined, hole
+            return None
+        for _ in range(skips):
+            read = _v8_varint(blob, position, end)
+            if read is None:
+                return None
+            position = read[1]
+        if position > end:
+            return None
+        if tag == 0x7B:
+            marks.append(-1)
+    return marks
+
+
+def v8_key_objects(blob: bytes, *, max_pairs: int = 20_000) -> list[tuple[int, dict[str, object]]]:
+    """Objects rebuilt from V8 ``"key" value`` runs: known keys found by needle, grouped by object framing.
+
+    The bytes between two runs are scanned for V8 object begin (``o``) and end
+    (``{``) tags: a group ends when the object of its first key closes, keys
+    of nested objects join the group (a key of the group's own object wins
+    over a nested one). A key repeated at the group's own level, a 4 KiB gap,
+    or (after an unparsable gap) any repeated key also starts a new object, so
+    the sender of one message never leaks into its neighbour. ``max_pairs``
+    bounds needle hits tried (decoded or not). Positions are offsets of the
+    first key in ``blob``.
+    """
+    hits: list[tuple[int, int, str, object]] = []
+    attempts = 0
     for key, needle in _V8_NEEDLES:
         start = 0
-        while len(hits) < max_pairs:
+        while attempts < max_pairs:
             position = blob.find(needle, start)
             if position < 0:
                 break
-            value, _end = decode_v8_value(blob, position + len(needle))
+            attempts += 1
+            value, value_end = decode_v8_value(blob, position + len(needle))
             if value is not _MISSING:
-                hits.append((position, key, value))
+                hits.append((position, value_end, key, value))
             start = position + 1
     hits.sort(key=lambda item: item[0])
     groups: list[tuple[int, dict[str, object]]] = []
     current: dict[str, object] = {}
-    lowered: set[str] = set()
-    group_start = last = -1
-    for position, key, value in hits:
+    spelling: dict[str, str] = {}  # lowercase key -> key stored in ``current``
+    level_keys: set[str] = set()  # lowercase keys of the group's own object
+    group_start = -1
+    previous_end = 0
+    depth = group_depth = 0
+    tracked = True
+    for position, value_end, key, value in hits:
+        if position < previous_end:
+            continue  # needle inside the previous value
         lower = key.lower()
-        if current and ((lower in lowered and lower in _ANCHOR_KEYS) or position - last > 4096):
+        marks = _v8_gap_marks(blob, previous_end, position)
+        closed = False
+        if marks is None:
+            tracked = False
+        else:
+            for mark in marks:
+                depth += mark
+                if current and tracked and depth < group_depth:
+                    closed = True
+        own_level = not tracked or depth <= group_depth
+        if current and (closed or position - previous_end > 4096 or (own_level and lower in level_keys)):
             groups.append((group_start, current))
-            current, lowered = {}, set()
+            current, spelling, level_keys = {}, {}, set()
         if not current:
             group_start = position
-        if lower not in lowered:
+            group_depth = depth
+            tracked = True
+            own_level = True
+        if own_level:
+            stored = spelling.pop(lower, None)
+            if stored is not None:
+                current.pop(stored, None)  # a nested value of the same key loses to the object's own
             current[key] = value
-            lowered.add(lower)
-        last = position
+            spelling[lower] = key
+            level_keys.add(lower)
+        elif lower not in spelling:
+            current[key] = value
+            spelling[lower] = key
+        previous_end = value_end
     if current:
         groups.append((group_start, current))
     return groups
@@ -677,8 +776,11 @@ def _direction(lower: Mapping[str, object], owner: str = "") -> str:
     return "unknown"
 
 
-def classify_object(record: Mapping[object, object], *, max_text_chars: int, owner: str = "") -> list[Candidate]:
-    """Message / attachment / contact candidates of one object (JSON dict, V8 run group or SQLite row)."""
+def classify_object(record: Mapping[object, object], *, max_text_chars: int, owner: str = "", _depth: int = 0) -> list[Candidate]:
+    """Message / attachment / contact candidates of one object (JSON dict, V8 run group or SQLite row).
+
+    Nested ``properties`` objects are followed ``MAX_CLASSIFY_DEPTH`` levels deep at most.
+    """
     lower = _lower_map(record)
     candidates: list[Candidate] = []
     text_key, text_value = _first(lower, TEXT_KEYS)
@@ -718,8 +820,8 @@ def classify_object(record: Mapping[object, object], *, max_text_chars: int, own
     properties = lower.get("properties")
     if isinstance(properties, str) and properties[:1] == "{":
         properties = _maybe_json(properties)
-    if isinstance(properties, Mapping):
-        for item in classify_object(properties, max_text_chars=max_text_chars, owner=owner):
+    if isinstance(properties, Mapping) and _depth < MAX_CLASSIFY_DEPTH:
+        for item in classify_object(properties, max_text_chars=max_text_chars, owner=owner, _depth=_depth + 1):
             if item.artifact_type == "chat-attachment":
                 files.append(item.fields)
     message_like = text_value is not None and (bool(text_value.strip()) or deleted) and bool(iso or sender or conversation)
@@ -998,10 +1100,15 @@ class WindowsMessengerProvider:
         details["coverage_status"] = "carved-candidate" if recovery_method == "carved" else "mapped"
         details["confidence"] = "low" if recovery_method == "carved" else "medium"
         if raw is not None:
-            details["raw_fields"] = raw_field_sample(raw)
+            sample = raw_field_sample(raw)
+            redact_url_fields(sample, [key for key in sample if key.lower() in FILE_URL_KEYS])
+            if sample.pop("url_tokens_redacted", False):
+                details["url_tokens_redacted"] = True
+            details["raw_fields"] = sample
+        redact_url_fields(details, URL_FIELDS)
         if source_format in ("leveldb-log", "leveldb-table", "leveldb-raw", "chromium-cache"):
             details["store_path"] = str(path.parent)
-        fingerprint = _fingerprint(run.spec.app_id, run.user, candidate)
+        fingerprint = _fingerprint(run.spec.app_id, run.user, candidate, extra)
         record = ArtifactRecord(provider=self.name, artifact_type=candidate.artifact_type, path=str(path), supported=True, details=details)
         before = len(run.rows)
         run.add(record, fingerprint)
@@ -1032,35 +1139,21 @@ class WindowsMessengerProvider:
             stats = ReadStats()
             source_format = "leveldb-log" if path.suffix.lower() == ".log" else "leveldb-table"
             try:
-                reader = iter_log_records(data, stats) if source_format == "leveldb-log" else iter_table_records(data, stats)
-                for record in reader:
-                    if record.deleted:
-                        if record.sequence is not None:
-                            deleted_keys[record.user_key] = max(record.sequence, deleted_keys.get(record.user_key, -1))
-                        continue
-                    if not record.value:
-                        continue
-                    emitted = self._carve_blob(
-                        run,
-                        path,
-                        source_format,
-                        record.value,
-                        offset=record.file_offset,
-                        extra={
-                            "leveldb_origin": record.origin,
-                            "leveldb_sequence": record.sequence,
-                            "leveldb_entry_offset": record.entry_offset,
-                            "leveldb_checksum_ok": record.checksum_ok,
-                            "leveldb_key_preview": _key_preview(record.user_key),
-                        },
-                        local_storage=local_storage,
-                    )
-                    if record.sequence is not None:
-                        carved.extend((record.user_key, record.sequence, row) for row in emitted)
+                self._leveldb_file(run, path, source_format, data, stats, deleted_keys, carved, local_storage=local_storage)
             except LevelDBError as exc:
                 # Structure unreadable (truncated table, bad footer): record the error, carve the raw bytes.
                 self._parse_error(run, path, source_format, exc)
-                self._carve_blob(run, path, "leveldb-raw", data, offset=0, extra={"carve_scope": "raw-file-after-parse-error"})
+                try:
+                    self._carve_blob(run, path, "leveldb-raw", data, offset=0, extra={"carve_scope": "raw-file-after-parse-error"})
+                except Exception as raw_exc:  # hostile bytes must not end the store
+                    self._parse_error(run, path, "leveldb-raw", raw_exc, reason_ko=_FILE_ERROR_REASON_KO)
+            except Exception as exc:  # one hostile file must not end the store
+                self._parse_error(run, path, source_format, exc, reason_ko=_FILE_ERROR_REASON_KO)
+            finally:
+                # Snappy output costs memory and time like bytes read: charged to the app budget.
+                run.bytes_read += stats.decompressed_bytes
+                if stats.budget_exhausted:
+                    run.cap("app-byte-cap")
             if stats.corrupt_fragments or stats.corrupt_blocks:
                 store_entry.setdefault("damaged_files", []).append(  # type: ignore[union-attr]
                     {"file": path.name, **{key: value for key, value in stats.as_dict().items() if key != "errors"}}
@@ -1070,6 +1163,43 @@ class WindowsMessengerProvider:
             if row.artifact_type == "chat-message" and deleted_keys.get(user_key, -1) > sequence:
                 row.details["deleted_state"] = "deleted"
                 row.details["deleted_basis"] = "leveldb-tombstone-newer-than-value"
+
+    def _leveldb_file(self, run: _AppRun, path: Path, source_format: str, data: bytes, stats: ReadStats,
+                      deleted_keys: dict[bytes, int], carved: list[tuple[bytes, int, ArtifactRecord]], *,
+                      local_storage: bool) -> None:
+        if source_format == "leveldb-log":
+            reader = iter_log_records(data, stats)
+        else:
+            remaining = max(0, self.limits.max_app_bytes - run.bytes_read)
+            reader = iter_table_records(data, stats, max_decompressed=min(MAX_TABLE_DECOMPRESSED, remaining))
+        for record in reader:
+            if record.deleted:
+                if record.sequence is None:
+                    continue
+                if record.user_key not in deleted_keys and len(deleted_keys) >= self.limits.max_deleted_keys:
+                    run.cap("leveldb-tombstone-cap")
+                    continue
+                deleted_keys[record.user_key] = max(record.sequence, deleted_keys.get(record.user_key, -1))
+                continue
+            if not record.value:
+                continue
+            emitted = self._carve_blob(
+                run,
+                path,
+                source_format,
+                record.value,
+                offset=record.file_offset,
+                extra={
+                    "leveldb_origin": record.origin,
+                    "leveldb_sequence": record.sequence,
+                    "leveldb_entry_offset": record.entry_offset,
+                    "leveldb_checksum_ok": record.checksum_ok,
+                    "leveldb_key_preview": _key_preview(record.user_key),
+                },
+                local_storage=local_storage,
+            )
+            if record.sequence is not None:
+                carved.extend((record.user_key, record.sequence, row) for row in emitted)
 
     def _carve_blob(self, run: _AppRun, path: Path, source_format: str, blob: bytes, *, offset: int | None,
                     extra: Mapping[str, object], local_storage: bool = False) -> list[ArtifactRecord]:
@@ -1118,25 +1248,41 @@ class WindowsMessengerProvider:
             data = self._read_bounded(run, path)
             if not data:
                 continue
-            blobs: list[tuple[int, bytes]] = [(0, data)]
-            view = memoryview(data)
-            start = 0
-            while len(blobs) <= MAX_GZIP_MEMBERS_PER_CACHE_FILE:
-                position = data.find(GZIP_MAGIC, start)
-                if position < 0:
-                    break
-                try:
-                    inflater = zlib.decompressobj(16 + zlib.MAX_WBITS)
-                    inflated = inflater.decompress(view[position:], self.limits.max_json_window * 4)
-                    if inflated:
-                        blobs.append((position, inflated))
-                except zlib.error:
-                    pass
+            try:
+                self._cache_file(run, path, data)
+            except Exception as exc:  # one hostile cache file must not end the store
+                self._parse_error(run, path, "chromium-cache", exc, reason_ko=_FILE_ERROR_REASON_KO)
+
+    def _cache_file(self, run: _AppRun, path: Path, data: bytes) -> None:
+        blobs: list[tuple[int, bytes, bool]] = [(0, data, False)]
+        view = memoryview(data)
+        start = 0
+        bodies = 0
+        while bodies < MAX_GZIP_MEMBERS_PER_CACHE_FILE:
+            position = data.find(GZIP_MAGIC, start)
+            if position < 0:
+                break
+            bodies += 1
+            budget = min(self.limits.max_json_window * 4, self.limits.max_app_bytes - run.bytes_read)
+            if budget <= 0:
+                run.cap("app-byte-cap")
+                break
+            try:
+                inflated, consumed, truncated = _inflate_gzip(view[position:], budget)
+            except zlib.error:
                 start = position + 3
-            for position, blob in blobs:
-                if b"\"" not in blob:
-                    continue
-                self._carve_blob(run, path, "chromium-cache", blob, offset=position, extra={"cache_body": "gzip" if position else "raw"})
+                continue
+            run.bytes_read += len(inflated)  # inflated bodies are charged like bytes read
+            if inflated:
+                blobs.append((position, inflated, truncated))
+            start = position + max(consumed, 3)
+        for position, blob, truncated in blobs:
+            if b"\"" not in blob:
+                continue
+            extra: dict[str, object] = {"cache_body": "gzip" if position else "raw"}
+            if truncated:
+                extra["cache_body_truncated"] = True
+            self._carve_blob(run, path, "chromium-cache", blob, offset=position, extra=extra)
 
     # -- SQLite ---------------------------------------------------------------------------------
 
@@ -1148,6 +1294,11 @@ class WindowsMessengerProvider:
         provenance: dict[str, object] = {}
         tables_read = 0
         run.owner = ""  # the account owner is per database (one Skype main.db per account)
+        snapshot_bytes = _snapshot_size(path)
+        if not run.can_read(snapshot_bytes):
+            run.stores.append({"path": str(path), "kind": "sqlite", "bytes": snapshot_bytes, "status": "skipped-app-byte-cap"})
+            return
+        run.bytes_read += snapshot_bytes  # the snapshot copy (database + journal/WAL) counts as bytes read
         with open_sqlite_snapshot(path, provenance=provenance) as connection:
             # Probe the schema outside the helpers (which swallow errors): a damaged DB must become a parse-error row.
             connection.execute("SELECT name FROM sqlite_master LIMIT 1").fetchall()
@@ -1193,7 +1344,13 @@ class WindowsMessengerProvider:
                         record.setdefault("to", record.get("partner_handle"))
                     for candidate in classify_object(record, max_text_chars=self.limits.max_text_chars, owner=run.owner):
                         if skype_transfer and candidate.artifact_type == "chat-attachment":
-                            candidate.fields["recipient"] = str(record.get("partner_handle") or "")
+                            partner = str(record.get("partner_handle") or "")
+                            if candidate.fields.get("direction") == "incoming":  # type 1: the partner sent it to the owner
+                                candidate.fields.update({"sender": partner, "recipient": run.owner})
+                            else:  # type 2: the owner sent it to the partner
+                                candidate.fields["recipient"] = partner
+                                if candidate.fields.get("direction") == "outgoing":
+                                    candidate.fields["sender"] = run.owner
                             candidate.fields["transfer_status"] = str(record.get("status") or "")
                             start_iso = parse_chat_time(record.get("starttime"))[0]
                             if start_iso:
@@ -1271,7 +1428,7 @@ class WindowsMessengerProvider:
                 "encryption_state": state,
                 "bytes": size,
                 "header_hex": header[:16].hex(),
-                "sha256": _bounded_sha256(path, self.limits.max_hash_bytes),
+                "sha256": self._charged_sha256(run, path),
                 "status": "inventory-only",
             }
         )
@@ -1303,7 +1460,7 @@ class WindowsMessengerProvider:
                     "url": "",
                     "mime_type": "",
                     "signature_type": signature,
-                    "sha256": _bounded_sha256(path, self.limits.max_hash_bytes),
+                    "sha256": self._charged_sha256(run, path),
                     "direction": "incoming" if saved_by_user else "unknown",
                     "direction_basis": "saved-to-downloads-by-app" if saved_by_user else "app-file-store-mixed-sent-and-received",
                     "sender": "",
@@ -1328,9 +1485,19 @@ class WindowsMessengerProvider:
             if data is None:
                 continue
             text = data.decode("utf-8-sig", errors="replace")
-            meeting_date = _zoom_folder_date(path.parent.name)
+            meeting_date, previous_seconds = _zoom_folder_start(path.parent.name)
+            day_offset = 0
             for message in parse_zoom_chat_log(text):
-                local_time = f"{meeting_date}T{message['time']}" if meeting_date else message["time"]
+                hours, minutes, seconds = (int(part) for part in str(message["time"]).split(":"))
+                clock = hours * 3600 + minutes * 60 + seconds
+                if previous_seconds is not None and clock < previous_seconds - 12 * 3600:
+                    day_offset += 1  # the clock went back past midnight: the meeting ran into the next day
+                previous_seconds = clock
+                if meeting_date:
+                    day = meeting_date + dt.timedelta(days=day_offset)
+                    local_time = f"{day.isoformat()}T{message['time']}"
+                else:
+                    local_time = str(message["time"])
                 body, _fmt, truncated = clean_message_text(message["text"], self.limits.max_text_chars)
                 sender = message["sender"]
                 candidate = Candidate(
@@ -1341,6 +1508,7 @@ class WindowsMessengerProvider:
                         "local_timestamp": local_time,
                         "timestamp_source": "zoom-chat-log-local-time-no-offset",
                         "timezone": "local-unknown",
+                        "local_day_offset": day_offset,
                         "conversation_id": path.parent.name,
                         "conversation_title": path.parent.name,
                         "sender": sender,
@@ -1379,7 +1547,19 @@ class WindowsMessengerProvider:
         run.bytes_read += len(data)
         return data
 
-    def _parse_error(self, run: _AppRun, path: Path, source_format: str, exc: BaseException) -> None:
+    def _charged_sha256(self, run: _AppRun, path: Path) -> str:
+        """sha256 within ``max_hash_bytes``; hashed bytes are charged to the app byte budget ("" when over)."""
+        try:
+            size = path.stat().st_size
+        except OSError:
+            return ""
+        if size > self.limits.max_hash_bytes or not run.can_read(size):
+            return ""
+        run.bytes_read += size
+        return _bounded_sha256(path, self.limits.max_hash_bytes)
+
+    def _parse_error(self, run: _AppRun, path: Path, source_format: str, exc: BaseException, *,
+                     reason_ko: str = "LevelDB 구조가 손상되어 레코드 단위로 읽지 못함 — 원시 바이트에서 문자열 후보만 복구") -> None:
         run.parse_errors += 1
         run.add(
             ArtifactRecord(
@@ -1393,7 +1573,7 @@ class WindowsMessengerProvider:
                     "coverage_status": "parser-error",
                     "error_type": type(exc).__name__,
                     "error": str(exc)[:500],
-                    "reason_ko": "LevelDB 구조가 손상되어 레코드 단위로 읽지 못함 — 원시 바이트에서 문자열 후보만 복구",
+                    "reason_ko": reason_ko,
                     "timestamp": "",
                     "timestamp_source": "none-parse-error",
                 },
@@ -1446,6 +1626,47 @@ class WindowsMessengerProvider:
 
 
 # --- module helpers ----------------------------------------------------------------------------------
+
+_FILE_ERROR_REASON_KO = "이 파일을 처리하다 오류가 나 건너뜀 — 같은 저장소의 나머지 파일은 계속 처리"
+
+
+def _snapshot_size(path: Path) -> int:
+    """Bytes a SQLite snapshot copies: the database plus its journal / WAL / shared-memory sidecars."""
+    total = 0
+    for candidate in (path, *(path.with_name(path.name + suffix) for suffix in ("-wal", "-journal", "-shm"))):
+        try:
+            total += candidate.stat().st_size
+        except OSError:
+            continue
+    return total
+
+
+def _inflate_gzip(view: memoryview, cap: int) -> tuple[bytes, int, bool]:
+    """``(body, input bytes consumed, truncated)`` of a gzip stream; concatenated members are read up to ``cap``."""
+    out = bytearray()
+    offset = 0
+    truncated = False
+    while True:
+        inflater = zlib.decompressobj(16 + zlib.MAX_WBITS)
+        chunk = view[offset:]
+        try:
+            piece = inflater.decompress(chunk, cap - len(out))
+        except zlib.error:
+            if out:
+                break  # bytes after a complete member are not gzip: the body ended
+            raise
+        out += piece
+        if not inflater.eof:
+            truncated = True  # over the cap, or the stream ends early
+            offset += len(chunk) - len(inflater.unconsumed_tail)
+            break
+        offset += len(chunk) - len(inflater.unused_data)
+        if not inflater.unused_data.startswith(GZIP_MAGIC):
+            break
+        if len(out) >= cap:
+            truncated = True
+            break
+    return bytes(out), offset, truncated
 
 
 def _existing_roots(user_home: Path, spec: AppSpec) -> list[Path]:
@@ -1570,13 +1791,17 @@ def _key_preview(key: bytes) -> str:
     return text
 
 
-def _fingerprint(app_id: str, user: str, candidate: Candidate) -> str:
+def _fingerprint(app_id: str, user: str, candidate: Candidate, extra: Mapping[str, object] | None = None) -> str:
     fields = candidate.fields
+    extra = extra or {}
     if candidate.artifact_type == "chat-message":
         parts = (fields.get("conversation_id"), fields.get("timestamp") or fields.get("local_timestamp"), fields.get("sender"),
                  fields.get("message_text_sha256"), fields.get("message_id") if fields.get("message_type") == "zoom-meeting-chat" else "")
     elif candidate.artifact_type == "chat-attachment":
-        parts = (fields.get("file_name"), fields.get("file_size"), fields.get("url"), fields.get("file_path"))
+        # The same file sent to two people (or at two times, or received back) is two transfers.
+        parts = (fields.get("file_name"), fields.get("file_size"), fields.get("url"), fields.get("file_path"),
+                 fields.get("recipient"), fields.get("conversation_id"), fields.get("direction"),
+                 fields.get("timestamp"), extra.get("source_table"), extra.get("source_row"))
     else:
         parts = (fields.get("contact_id"), fields.get("email"), fields.get("contact_name"))
     material = json.dumps([app_id, user, candidate.artifact_type, *[str(item or "") for item in parts]], ensure_ascii=False)
@@ -1607,14 +1832,24 @@ def _select(connection: sqlite3.Connection, table: str, columns: tuple[str, ...]
     return out
 
 
-_ZOOM_FOLDER_DATE = re.compile(r"^(\d{4}-\d{2}-\d{2})")
-_ZOOM_NEW = re.compile(r"^(\d{1,2}:\d{2}:\d{2})\s+From\s+(.+?)\s+[Tt]o\s+(.+?)\s*:\s*(.*)$")
+_ZOOM_FOLDER_START = re.compile(r"^(\d{4})-(\d{2})-(\d{2})(?:[ _](\d{2})\.(\d{2})\.(\d{2}))?")
+# Newer "From A to B:" header first; a colon inside the sender part means the older "From A : body" line.
+_ZOOM_NEW = re.compile(r"^(\d{1,2}:\d{2}:\d{2})\s+From\s+([^:]+?)\s+[Tt]o\s+([^:]+?)\s*:\s*(.*)$")
 _ZOOM_OLD = re.compile(r"^(\d{1,2}:\d{2}:\d{2})\s+From\s+(.+?)\s*:\s?(.*)$")
 
 
-def _zoom_folder_date(name: str) -> str:
-    match = _ZOOM_FOLDER_DATE.match(name)
-    return match.group(1) if match else ""
+def _zoom_folder_start(name: str) -> tuple[dt.date | None, int | None]:
+    """Meeting date and start time (seconds of the day) from a ``YYYY-MM-DD HH.MM.SS Topic`` folder name."""
+    match = _ZOOM_FOLDER_START.match(name)
+    if not match:
+        return None, None
+    try:
+        day = dt.date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+    except ValueError:
+        return None, None
+    if match.group(4) is None:
+        return day, None
+    return day, int(match.group(4)) * 3600 + int(match.group(5)) * 60 + int(match.group(6))
 
 
 def parse_zoom_chat_log(text: str, *, max_messages: int = 20_000) -> list[dict[str, object]]:

@@ -464,3 +464,48 @@ def corrupt_stores(home: Path) -> dict[str, Path]:
     skype_bad = home.joinpath(*ROAMING, "Skype", "live#3abroken", "main.db")
     write(skype_bad, b"SQLite format 3\x00" + b"\xde\xad" * 2000)
     return {"truncated_table": truncated, "garbage_log": garbage_log, "broken_sqlite": skype_bad}
+
+
+# --- hostile LevelDB shapes (review repros exp1-exp4) ---------------------------------------------
+
+
+def prefix_bomb_block(key_size: int, entries: int, *, tail: bytes = b"") -> bytes:
+    """A block whose first key is ``key_size`` bytes and every later entry re-shares it (prefix amplification)."""
+    body = bytearray(varint(0) + varint(key_size) + varint(0) + b"A" * key_size)
+    for _ in range(entries):
+        body += varint(key_size - len(tail)) + varint(len(tail)) + varint(0) + tail
+    return bytes(body + struct.pack("<I", 0) + struct.pack("<I", 1))
+
+
+def snappy_run(length: int) -> bytes:
+    """A tiny Snappy stream that expands to ``length`` bytes (one literal + 64-byte copies)."""
+    out = bytearray(varint(length)) + bytes([0]) + b"x"
+    count, rest = divmod(length - 1, 64)
+    out += bytes([((64 - 1) << 2) | 2, 1, 0]) * count
+    if rest:
+        out += bytes([((rest - 1) << 2) | 2, 1, 0])
+    return bytes(out)
+
+
+def table_with_blocks(payloads: list[tuple[bytes, int]], *, repeat_first_handle: int = 1) -> bytes:
+    """A table of already-encoded data blocks ``(payload, compression)``; the first handle may repeat in the index."""
+    out = bytearray()
+    handles: list[bytes] = []
+    for payload, kind in payloads:
+        handles.append(varint(len(out)) + varint(len(payload)))
+        out += payload + bytes([kind]) + b"\x00" * 4
+    handles = [handles[0]] * repeat_first_handle + handles[1:]
+    index_entries = [(b"k%06d" % number, handle) for number, handle in enumerate(handles)]
+    index_raw = _block(index_entries)
+    index_offset = len(out)
+    out += index_raw + b"\x00" * 5
+    meta_offset = len(out)
+    out += struct.pack("<II", 0, 1) + b"\x00" * 5
+    footer = varint(meta_offset) + varint(8) + varint(index_offset) + varint(len(index_raw))
+    out += footer + b"\x00" * (40 - len(footer)) + struct.pack("<Q", TABLE_MAGIC)
+    return bytes(out)
+
+
+def log_fragment(record_type: int, data: bytes) -> bytes:
+    crc = mask_crc(crc32c(data, crc32c(bytes([record_type]))))
+    return struct.pack("<IHB", crc, len(data), record_type) + data

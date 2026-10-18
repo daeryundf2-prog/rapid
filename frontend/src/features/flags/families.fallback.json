@@ -1,5 +1,5 @@
 {
- "version": "43251b504db5e663",
+ "version": "342e47b4bdfc7bf9",
  "families": [
   {
    "id": "sam-account",
@@ -1563,9 +1563,13 @@
      "label": "요청 방식"
     },
     {
-     "key": "size",
-     "label": "크기",
+     "key": "response_size",
+     "label": "응답 크기 (캐시된 응답, 업로드 파일 크기 아님)",
      "format": "bytes"
+    },
+    {
+     "key": "response_size_basis",
+     "label": "크기 근거"
     },
     {
      "key": "source_artifact_type",
@@ -8289,14 +8293,14 @@
    "family": "cloud-sync",
    "grade": "A",
    "label_ko": "대량 업로드",
-   "rationale_ko": "한 계정의 업로드가 1시간 안에 50건 이상이거나 합계 500 MB 이상: 개인 클라우드로 대량 반출.",
-   "false_positive_ko": "최초 동기화·새 PC 설정, 사진·백업 폴더 자동 업로드.",
+   "rationale_ko": "한 계정의 서로 다른 항목 업로드가 1시간 안에 50건 이상이거나, 서로 다른 항목 2건 이상의 합계가 500 MB 이상: 개인 클라우드로 대량 반출. 같은 항목의 재업로드는 한 번만 셈. 로그 카빙 레코드만으로 된 구간은 B 등급(메모 표시).",
+   "false_positive_ko": "최초 동기화·새 PC 설정, 사진·백업 폴더 자동 업로드, 같은 파일의 반복 동기화.",
    "sources": [
     "https://learn.microsoft.com/purview/audit-log-activities",
     "https://github.com/ydkhatri/OneDrive",
     "https://help.dropbox.com/installs/sync-overview"
    ],
-   "version": 1,
+   "version": 2,
    "status": "provisional",
    "params": {
     "window_minutes": 60,
@@ -8824,14 +8828,14 @@
    "family": "email",
    "grade": "B",
    "label_ko": "외부 도메인으로 첨부 대량 발송",
-   "rationale_ko": "메일함 소유 도메인에서 외부 도메인 수신자에게 하루(현지 기준) 첨부 n개 이상 발송: 메일을 통한 자료 유출 정황.",
+   "rationale_ko": "메일함 소유자(보낸 편지함의 최다 발신자, 없으면 컨테이너 파일명의 계정 주소)가 외부 도메인 수신자에게 하루(현지 기준) 첨부 n개 이상 보낸 경우: 메일을 통한 자료 유출 정황. 보낸 편지함 또는 From=소유자인 메일만 세고, 같은 Message-ID는 한 번만(복구·삭제 사본 제외), 본문 삽입 이미지(서명 등 inline/Content-ID)는 첨부 수에서 뺀다.",
    "false_positive_ko": "협력사·고객사와의 정상 업무 자료 교환, 계약서 묶음 발송.",
    "sources": [
     "https://attack.mitre.org/techniques/T1048/",
     "https://attack.mitre.org/techniques/T1114/",
     "https://learn.microsoft.com/en-us/office/client-developer/outlook/mapi/pidtagclientsubmittime-canonical-property"
    ],
-   "version": 1,
+   "version": 2,
    "status": "provisional",
    "params": {
     "min_attachments": 10,
@@ -8843,13 +8847,13 @@
    "family": "email",
    "grade": "C",
    "label_ko": "최근 삭제한 메일",
-   "rationale_ko": "지운 편지함·복구 가능한 항목에 있거나 도구가 삭제 영역에서 복구한 메일 중, 같은 메일함의 가장 최근 메일로부터 n일 이내 메일: 증거 인멸·은닉 정황.",
+   "rationale_ko": "지운 편지함·복구 가능한 항목에 있거나 도구가 삭제 영역에서 복구한 메일 중, 같은 메일함의 가장 최근 메일로부터 n일 이내 메일: 증거 인멸·은닉 정황. 최신 시각은 수신/발송 시각만 쓰고 수집 시각(없으면 현재)+1일보다 미래인 시각은 무시하며, 폴더 이름은 경로 구간 단위로 정확히 비교(EN/KO/JA/ZH/DE/FR/ES).",
    "false_positive_ko": "일상적인 메일함 정리, 자동 정리 규칙.",
    "sources": [
     "https://learn.microsoft.com/en-us/exchange/security-and-compliance/recoverable-items-folder/recoverable-items-folder",
     "https://github.com/libyal/libpff"
    ],
-   "version": 1,
+   "version": 2,
    "status": "provisional",
    "params": {
     "recent_days": 30
@@ -9830,13 +9834,13 @@
    "grade": "B",
    "label_ko": "외부 상대에게 파일 전송",
    "rationale_ko": "데스크톱 메신저에서 보낸 첨부의 받는 사람이 조직 외부 도메인(사용자 계정·내부 도메인과 다름)이거나 같은 앱의 연락처 목록에 없는 상대: 유출 경로.",
-   "false_positive_ko": "협력사·고객과의 정상 업무 파일 교환, 연락처 동기화가 안 된 앱.",
+   "false_positive_ko": "협력사·고객과의 정상 업무 파일 교환, 연락처 동기화가 안 된 앱, 계정 소유자 본인 연락처만 있는 경우는 연락처 목록으로 보지 않음.",
    "sources": [
     "https://attack.mitre.org/techniques/T1567/",
     "https://www.magnetforensics.com/blog/the-lesser-talked-about-messaging-apps/",
     "https://dfrws.org/presentation/digital-forensic-analysis-of-encrypted-database-files-in-instant-messaging-applications-on-windows-operating-systems/"
    ],
-   "version": 1,
+   "version": 2,
    "status": "provisional",
    "params": {
     "internal_domains": [],

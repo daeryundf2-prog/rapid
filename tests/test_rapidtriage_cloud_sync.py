@@ -237,8 +237,9 @@ class CloudSyncOtherClientTests(unittest.TestCase):
                 base / "sync_config.db",
                 ["CREATE TABLE data (entry_key TEXT, data_key TEXT, data_value TEXT)"],
                 [
-                    ("INSERT INTO data VALUES (?, ?, ?)", ("user_email", "user_email", "legacy@example.com")),
-                    ("INSERT INTO data VALUES (?, ?, ?)", ("local_sync_root_path", "local_sync_root_path", "\\\\?\\F:\\Google Drive")),
+                    # Real Backup and Sync shape: entry_key names the setting, data_key is the literal "value".
+                    ("INSERT INTO data VALUES (?, ?, ?)", ("user_email", "value", "legacy@example.com")),
+                    ("INSERT INTO data VALUES (?, ?, ?)", ("local_sync_root_path", "value","\\\\?\\F:\\Google Drive")),
                 ],
             )
             sqlite_db(
@@ -403,7 +404,9 @@ class CloudSyncInventoryAndCapTests(unittest.TestCase):
             for key in ROW_CONTRACT:
                 self.assertIn(key, row.details, (row.artifact_type, key))
             self.assertEqual(row.details["parser_version"], cloud_sync.PARSER_VERSION)
-            self.assertEqual(catalog.family_for(row.artifact_type, "cloud-sync"), "cloud-sync")
+            # Accounts and inventory rows have their own families (console fix m1); files/events share ``cloud-sync``.
+            expected_family = row.artifact_type if row.artifact_type in ("cloud-sync-account", "cloud-sync-inventory") else "cloud-sync"
+            self.assertEqual(catalog.family_for(row.artifact_type, "cloud-sync"), expected_family)
             json.dumps(row.to_dict(), ensure_ascii=False)  # serialisable (no bytes / sqlite rows)
 
     def test_sqlite_sources_are_never_modified(self) -> None:
@@ -466,6 +469,260 @@ class CloudSyncPipelineTests(unittest.TestCase):
             self.assertEqual(kinds["upload"], 56)  # 55 files + the folder event (not counted by the rule)
             self.assertEqual(kinds["delete"], 1)
         self.assertLess(elapsed, 120)
+
+
+class CloudSyncReviewRegressionTests(unittest.TestCase):
+    """R2 review findings (M6, M7, M16, M17, M20, URL redaction, minors): one test per item."""
+
+    def test_m6_infinite_size_and_a_poisoned_source_do_not_drop_other_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            paths = build_onedrive(root)
+            connection = sqlite3.connect(paths["sync_db"])
+            connection.execute(
+                "INSERT INTO od_ClientFile_Records (resourceID, parentResourceID, fileName, size) VALUES ('X', 'F1', 'bad.bin', 9e999)"
+            )
+            connection.commit()
+            connection.close()
+            rows, _provider = collect(root)
+            self.assertIsNone(cloud_sync.as_int(float("inf")))
+            self.assertIsNone(cloud_sync.as_int(float("nan")))
+            files = {row.details["file_name"]: row.details for row in of(rows, "cloud-sync-file", "onedrive")}
+            self.assertNotIn("size", files["bad.bin"])
+            self.assertEqual(len(of(rows, "cloud-sync-event", "onedrive")), 6)  # the logs still parse
+            # Any exception inside one database is recorded on the inventory row; logs still parse.
+            with mock.patch.object(cloud_sync.CloudSyncCollector, "onedrive_sync_db", side_effect=RuntimeError("poisoned")):
+                rows, _provider = collect(root)
+        inventory = of(rows, "cloud-sync-inventory", "onedrive")[0].details
+        self.assertEqual(inventory["inventory_status"], "partial-errors")
+        self.assertTrue(any("poisoned" in item["error"] for item in inventory["source_errors"]))
+        self.assertEqual(len(of(rows, "cloud-sync-event", "onedrive")), 6)
+        self.assertEqual(len(of(rows, "cloud-sync-account", "onedrive")), 1)
+
+    def test_m7_folder_chain_caps_iterations_and_memoises_prefixes(self) -> None:
+        count = 200_000
+        parents = {index: index + 1 for index in range(count)}
+        names = {index: "" for index in range(count)}
+        started = time.monotonic()
+        for _ in range(50):
+            segments, _top, cut = cloud_sync.chain_from_parent(0, parents, names)
+        self.assertLess(time.monotonic() - started, 2.0)
+        self.assertEqual(segments, [])
+        self.assertTrue(cut)
+
+        class Counting(dict):
+            lookups = 0
+
+            def get(self, key, default=None):
+                Counting.lookups += 1
+                return super().get(key, default)
+
+        depth = 40
+        tree = Counting({index: index - 1 for index in range(1, depth)})
+        tree[0] = None
+        folder_names = {index: f"d{index}" for index in range(depth)}
+        cache: dict = {}
+        expected = cloud_sync.chain_from_parent(depth - 1, dict(tree), folder_names)
+        Counting.lookups = 0
+        for _ in range(1000):
+            self.assertEqual(cloud_sync.chain_from_parent(depth - 1, tree, folder_names, cache), expected)
+        self.assertLessEqual(Counting.lookups, depth)  # one walk, then cache hits
+        # A sibling folder reuses its parent's memoised prefix.
+        tree[depth] = depth - 1
+        folder_names[depth] = "leaf"
+        Counting.lookups = 0
+        segments, _top, cut = cloud_sync.chain_from_parent(depth, tree, folder_names, cache)
+        self.assertEqual(segments, [*expected[0], "leaf"])
+        self.assertFalse(cut)
+        self.assertEqual(Counting.lookups, 1)
+
+    def test_m16_icloud_root_is_anchored_at_the_users_segment(self) -> None:
+        from rapidtriage.core.triage_rules.cloud import within_user_profile
+
+        cases = {("C", "Users", "bob"): ("\\Users\\bob\\iCloudDrive", True), ("Users", "bob"): ("\\Users\\bob\\iCloudDrive", True)}
+        for layout, (expected_root, inside) in cases.items():
+            with tempfile.TemporaryDirectory() as tmp:
+                base = Path(tmp, "kape")
+                drive = base.joinpath(*layout, "iCloudDrive")
+                drive.mkdir(parents=True)
+                for index in range(3):
+                    (drive / f"doc{index}.txt").write_text("x", encoding="utf-8")
+                with mock.patch.object(cloud_sync, "MAX_CLIENT_FILES", 1):
+                    rows, _provider = collect(base)
+            account = of(rows, "cloud-sync-account", "icloud")[0].details
+            self.assertEqual(account["sync_roots"], [expected_root], layout)
+            self.assertIs(within_user_profile(account["sync_roots"][0]), inside)
+            self.assertEqual(account["synced_file_count"], 3)  # a real count, not the listed sample
+        # The evidence root is the profile itself: the machine location is unknown, never "outside".
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp, "Users", "bob")
+            (profile / "iCloudDrive").mkdir(parents=True)
+            (profile / "iCloudDrive" / "doc.txt").write_text("x", encoding="utf-8")
+            rows, _provider = collect(profile)
+        account = of(rows, "cloud-sync-account", "icloud")[0].details
+        self.assertEqual(account["sync_roots"], ["iCloudDrive"])
+        self.assertEqual(account["path_basis"], "evidence-root-relative-unanchored")
+        self.assertIsNone(within_user_profile(account["sync_roots"][0]))
+        self.assertIsNone(within_user_profile("\\iCloudDrive"))
+        self.assertTrue(within_user_profile("\\C\\Users\\bob\\iCloudDrive"))
+
+    def test_m17_bulk_upload_counts_distinct_items_and_caps_log_only_bursts(self) -> None:
+        import datetime as dt
+
+        from rapidtriage.core.triage_rules.base import RowView
+        from rapidtriage.core.triage_rules.cloud import LOG_ONLY_NOTE, BulkUpload
+
+        start = dt.datetime(2024, 5, 1, 9, 0, tzinfo=dt.timezone.utc)
+
+        def run(rows: list[dict]) -> list:
+            rule = BulkUpload({"window_minutes": 60, "min_count": 5, "min_bytes": 1_000_000})
+            for index, details in enumerate(rows):
+                view = RowView(kind="cloud-sync", collection="artifacts", source_kind="cloud-sync", index=index, row={"artifact_type": "cloud-sync-event", "details": details})
+                rule.apply(view, None)  # type: ignore[arg-type]
+            return list(rule.finalize(None))  # type: ignore[arg-type]
+
+        def upload(item: str, second: int, size: int = 10, **extra: object) -> dict:
+            at = (start + dt.timedelta(seconds=second)).isoformat()
+            return {"client": "onedrive", "operation": "upload", "timestamp": at, "actor": "a@x", "item_path": item, "size": size, **extra}
+
+        # One item re-uploaded many times: one distinct item, never a burst (count and bytes).
+        self.assertEqual(run([upload("C:\\a.bin", second * 5, size=900_000) for second in range(20)]), [])
+        # A single huge item: bytes alone need two distinct items.
+        self.assertEqual(run([upload("C:\\big.iso", 0, size=5_000_000_000)]), [])
+        # Two distinct items over min_bytes: flagged; each item's size counted once.
+        flags = run([upload("C:\\a.iso", 0, size=600_000), upload("C:\\a.iso", 1, size=600_000), upload("C:\\b.iso", 2, size=600_000)])
+        self.assertEqual(flags[-1][1].evidence["upload_count"], 2)
+        self.assertEqual(flags[-1][1].evidence["upload_bytes"], 1_200_000)
+        self.assertIsNone(flags[-1][1].note)
+        self.assertNotIn("grade_cap", flags[-1][1].evidence)
+        # Log-carved rows only: still flagged, with a note and grade_cap B.
+        carved = run([upload(f"C:\\f{index}.docx", index, recovery_method="log-record-carved", parser_confidence="low") for index in range(6)])
+        self.assertEqual(len(carved), 6)
+        self.assertEqual(carved[0][1].note, LOG_ONLY_NOTE)
+        self.assertEqual(carved[0][1].evidence["grade_cap"], "B")
+        self.assertEqual(carved[0][1].grade, "B")  # the engine downgrades the flag to B
+        # One structured (SQLite) row in the window keeps the catalogue grade.
+        mixed = run([upload(f"C:\\f{index}.docx", index, recovery_method="log-record-carved") for index in range(5)] + [upload("C:\\g.docx", 9, recovery_method="sqlite-row")])
+        self.assertIsNone(mixed[-1][1].note)
+
+    def test_m20_backup_and_sync_prefers_entry_key(self) -> None:
+        connection = sqlite3.connect(":memory:")
+        connection.execute("CREATE TABLE data (entry_key TEXT, data_key TEXT, data_value TEXT)")
+        connection.execute("INSERT INTO data VALUES ('user_email', 'value', 'legacy@example.com')")
+        connection.execute("INSERT INTO data VALUES ('local_sync_root_path', 'value', ?)", ("\\\\?\\F:\\Google Drive",))
+        emails, roots = cloud_sync.google_account_hints(connection, cloud_sync.sqlite_tables(connection))
+        connection.close()
+        self.assertEqual(emails, ["legacy@example.com"])
+        self.assertEqual(roots, ["F:\\Google Drive"])
+
+    def test_url_redaction_of_site_url_and_log_strings(self) -> None:
+        from rapidtriage.artifacts.url_redaction import url_sha256
+
+        signed = "https://contoso.sharepoint.com/personal/a/_layouts/15/download.aspx?UniqueId=1&tempauth=SECRET123"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            paths = build_onedrive(root)
+            connection = sqlite3.connect(paths["sync_db"])
+            connection.execute("UPDATE od_ScopeInfo_Records SET webURL = ?", (signed,))
+            connection.commit()
+            connection.close()
+            logs = appdata_local(root) / "Microsoft" / "OneDrive" / "logs" / "Personal"
+            record = odl_record(BASE_MS, "SyncEngineUpload.cpp", "UploadFileComplete", ["C:\\Users\\alice\\OneDrive\\x.docx", signed])
+            (logs / "SyncEngine-2024-05-03.odl").write_bytes(odl_file([record], compressed=False))
+            rows, _provider = collect(root)
+        budget = next(row.details for row in of(rows, "cloud-sync-file", "onedrive") if row.details["file_name"] == "budget.xlsx")
+        self.assertNotIn("SECRET123", budget["site_url"])
+        self.assertEqual(budget["site_url_sha256"], url_sha256(signed))
+        self.assertTrue(budget["url_tokens_redacted"])
+        event = next(row.details for row in of(rows, "cloud-sync-event", "onedrive") if row.details["source_path"].endswith("2024-05-03.odl"))
+        self.assertFalse(any("SECRET123" in value for value in event["log_strings"]))
+        self.assertIn(url_sha256(signed), event["log_strings_sha256"])
+        self.assertTrue(event["url_tokens_redacted"])
+        for row in rows:
+            self.assertNotIn("SECRET123", json.dumps(row.to_dict(), ensure_ascii=False))
+
+    def test_minor_operation_classification_uses_word_tokens(self) -> None:
+        expected = {
+            "DehydrateFile": None,
+            "FileDehydrated": None,
+            "HydrateFileComplete": "download",
+            "SharePointUploadSession": "upload",
+            "UploadSharePointItem": "upload",
+            "MovementTracker": None,
+            "RemoveFromCache": None,
+            "OnSharingStateChanged": "share",
+            "SharedItemUpload": "upload",
+            "SharedFolderRefresh": None,
+            "DeleteUploadedFile": "delete",
+            "RenameItem": "rename",
+            "SyncEngineUpload.cpp UploadFileComplete": "upload",
+        }
+        self.assertEqual({name: cloud_sync.classify_operation(name) for name in expected}, expected)
+
+    def test_minor_within_user_profile_handles_device_prefixes(self) -> None:
+        from rapidtriage.core.triage_rules.cloud import within_user_profile
+
+        self.assertIs(within_user_profile("\\\\?\\UNC\\srv\\share\\OneDrive"), False)
+        self.assertIs(within_user_profile("\\\\srv\\share"), False)
+        self.assertIs(within_user_profile("\\\\?\\C:\\Users\\bob\\x"), True)
+        self.assertIs(within_user_profile("\\\\.\\C:\\Users\\bob"), True)
+        self.assertIs(within_user_profile("\\\\.\\E:\\Data"), False)
+
+    def test_minor_log_budget_is_exact_and_gzip_members_are_all_read(self) -> None:
+        import gzip
+
+        multi = gzip.compress(b"A" * 10) + gzip.compress(cloud_sync.ODL_RECORD_SIGNATURE + b"upload")
+        out, truncated = cloud_sync.bounded_gunzip(multi)
+        self.assertEqual(out, b"A" * 10 + cloud_sync.ODL_RECORD_SIGNATURE + b"upload")
+        self.assertFalse(truncated)
+        out, truncated = cloud_sync.bounded_gunzip(multi, 12)
+        self.assertEqual((len(out), truncated), (12, True))
+        out, truncated = cloud_sync.bounded_gunzip(multi, 10)
+        self.assertEqual((out, truncated), (b"A" * 10, True))
+        # A plain (not gzip) log body is cut at the remaining run budget, never overshooting it.
+        record = odl_record(BASE_MS, "SyncEngine.cpp", "UploadFile", ["C:\\Users\\a\\OneDrive\\x.txt"])
+        _version, body, _offset, _inflated, truncated = load_odl_body(odl_file([record] * 50, compressed=False), 300)
+        self.assertEqual((len(body), truncated), (300, True))
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            build_onedrive(root)
+            budget = 400
+            with mock.patch.object(cloud_sync, "MAX_LOG_TOTAL_BYTES", budget):
+                collector = cloud_sync.CloudSyncCollector(root)
+                list(collector.run())
+        self.assertLessEqual(collector.log_bytes, budget)
+        # Record offsets are found lazily (a generator, no list of every offset).
+        spans = cloud_sync.odl_record_spans(cloud_sync.ODL_RECORD_SIGNATURE * 3)
+        self.assertEqual(next(spans), (0, 8))
+
+    def test_minor_common_logs_borrow_the_single_account_email(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            build_onedrive(root)
+            common = appdata_local(root) / "Microsoft" / "OneDrive" / "logs" / "Common"
+            common.mkdir(parents=True)
+            record = odl_record(BASE_MS + 5_000, "SyncEngine.cpp", "DownloadFileComplete", ["C:\\Users\\alice\\OneDrive\\c.txt"])
+            (common / "SyncEngine-common.odl").write_bytes(odl_file([record], compressed=False))
+            rows, _provider = collect(root)
+        event = next(row.details for row in of(rows, "cloud-sync-event", "onedrive") if "Common" in row.details["source_path"])
+        self.assertEqual(event["account"], "alice@example.com")
+        self.assertEqual(event["account_basis"], "sibling-account-folder")
+
+    def test_minor_onedrive_disk_times_reach_the_timeline(self) -> None:
+        from rapidtriage.core.timeline import iter_artifact_detail_events
+
+        details = {
+            "timestamp": "2024-05-01T09:00:00+00:00",
+            "timestamp_kind": "cloud-modified",
+            "disk_created_at": "2024-04-01T08:00:00+00:00",
+            "disk_accessed_at": "2024-04-02T08:00:00+00:00",
+            "item_path": "D:\\Sync\\OneDrive\\a.txt",
+        }
+        events = list(iter_artifact_detail_events("cloud-sync-file", details))
+        by_field = {event["field_path"]: event for event in events}
+        self.assertEqual(by_field["details.disk_created_at"]["timestamp"], "2024-04-01T08:00:00+00:00")
+        self.assertEqual(by_field["details.disk_created_at"]["timestamp_kind"], "local-created")
+        self.assertEqual(by_field["details.disk_accessed_at"]["timestamp_kind"], "local-accessed")
 
 
 if __name__ == "__main__":

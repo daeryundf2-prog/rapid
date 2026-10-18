@@ -33,6 +33,11 @@ ESE_MAGIC = 0x89ABCDEF
 ESE_CATALOG_PAGE = 4  # pgnoFDPMSO
 ESE_PAGE_SIZES = (2048, 4096, 8192, 16384, 32768)
 ESE_MAX_PAGES = 1_000_000
+# Long-value (LV) reassembly bounds: a corrupt or crafted LV btree must not loop
+# (page next-pointers forming a cycle) or grow past the size its header declares.
+ESE_MAX_LONG_VALUE_BYTES = 64 * 1024 * 1024
+ESE_MAX_LONG_VALUE_CHUNKS = 65_536
+ESE_MAX_BTREE_DEPTH = 16
 
 # PAGE_FLAG bits
 PAGE_FLAG_ROOT = 0x00000001
@@ -523,29 +528,37 @@ def _sevenbit_decompress(buf: bytes, *, wide: bool) -> bytes:
     return bytes(out)
 
 
-def decompress_ese_value(buf: bytes) -> bytes | None:
+def decompress_ese_value(buf: bytes, *, max_output: int | None = None) -> bytes | None:
     """Decompress an ESE compressed field; None when the scheme is unsupported.
 
     Mirrors dissect.esedb.compression.decompress: 7-bit ASCII/UNICODE are
     decoded natively; XPRESS uses dissect.util when importable (dev-only
     dependency); XPRESS9/XPRESS10 are unsupported upstream too.
+
+    ``max_output`` (default ``ESE_MAX_LONG_VALUE_BYTES``) caps the result for
+    every scheme, also when dissect.util supplies XPRESS: an XPRESS output above
+    the cap is rejected (None), the 7-bit schemes are truncated to it.
     """
     if not buf:
         return None
+    limit = ESE_MAX_LONG_VALUE_BYTES if max_output is None else max(0, min(max_output, ESE_MAX_LONG_VALUE_BYTES))
     identifier = buf[0] >> 3
     if identifier == 1:
-        return _sevenbit_decompress(buf[1:], wide=False)
+        return _sevenbit_decompress(buf[1:], wide=False)[:limit]
     if identifier == 2:
-        return _sevenbit_decompress(buf[1:], wide=True)
+        return _sevenbit_decompress(buf[1:], wide=True)[:limit]
     if identifier == 3:
         try:
             from dissect.util.compression import lzxpress
         except ImportError:
             return None
         try:
-            return lzxpress.decompress(buf[3:])
+            out = lzxpress.decompress(buf[3:])
         except Exception:
             return None
+        if len(out) > limit:
+            return None
+        return bytes(out)
     if identifier in (5, 6):
         return None
     return buf
@@ -805,7 +818,11 @@ class EseDatabase:
             return None
         rkey = key[::-1]
         page = self.page(table.lv_root_page)
+        descended: set[int] = set()
         while page is not None and not page.is_leaf:
+            if page.num in descended or len(descended) >= ESE_MAX_BTREE_DEPTH:
+                return None
+            descended.add(page.num)
             node = self._find_node(page, rkey)
             if node is None:
                 return None
@@ -816,29 +833,48 @@ class EseDatabase:
         if node is None or node.key != rkey or len(node.data) < 8:
             return None
         _flags, size = struct.unpack("<2I", node.data[:8])
+        size = int(size)
+        if size > ESE_MAX_LONG_VALUE_BYTES:
+            return None
         chunks: list[bytes] = []
         offsets: list[int] = []
+        visited: set[tuple[int, int]] = {(page.num, node.tag_num)}
+        stored = 0
         cursor = self._next_node(page, node)
-        while cursor is not None:
+        while cursor is not None and len(chunks) < ESE_MAX_LONG_VALUE_CHUNKS:
             cur_page, cur_node = cursor
-            if not cur_node.key.startswith(rkey):
+            position_key = (cur_page.num, cur_node.tag_num)
+            # A next-page pointer back into an already-read page (cycle) ends the walk.
+            if position_key in visited or not cur_node.key.startswith(rkey):
                 break
-            chunks.append(bytes(cur_node.data))
+            visited.add(position_key)
             if len(cur_node.key) >= 4:
-                offsets.append(struct.unpack(">I", cur_node.key[-4:])[0])
+                offset = struct.unpack(">I", cur_node.key[-4:])[0]
+                # Chunks are keyed by ascending offset inside [0, size).
+                if offset >= size or (offsets and offset <= offsets[-1]):
+                    break
+                offsets.append(offset)
+            data = bytes(cur_node.data)
+            stored += len(data)
+            if stored > size:
+                break
+            chunks.append(data)
             cursor = self._next_node(cur_page, cur_node)
-        offsets.append(int(size))
+        offsets.append(size)
         out: list[bytes] = []
         position = 0
         for chunk, next_offset in zip(chunks, offsets[1:], strict=False):
-            if len(chunk) != next_offset - position:
-                decompressed = decompress_ese_value(chunk)
+            span = next_offset - position
+            if span <= 0:
+                break
+            if len(chunk) != span:
+                decompressed = decompress_ese_value(chunk, max_output=span)
                 if decompressed is None:
                     return None
                 chunk = decompressed
-            out.append(chunk)
+            out.append(chunk[:span])
             position = next_offset
-        return b"".join(out)
+        return b"".join(out)[:size]
 
     def iter_table_rows(self, table: EseTable) -> Iterable[tuple[EseNode, dict[str, Any], list[str]]]:
         root = self.page(table.root_page)

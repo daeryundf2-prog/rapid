@@ -389,7 +389,13 @@ class _Collector:
         self.types: dict[RowRef, str] = {}
 
     def add(
-        self, ref: RowRef, rule_id: str, evidence: Mapping[str, object], note: str | None, row_type: str | None = None
+        self,
+        ref: RowRef,
+        rule_id: str,
+        evidence: Mapping[str, object],
+        note: str | None,
+        row_type: str | None = None,
+        grade_cap: str | None = None,
     ) -> None:
         row_flags = self.flags.get(ref)
         if row_flags is not None and rule_id in row_flags:
@@ -398,7 +404,10 @@ class _Collector:
             self.suppressed[rule_id] += 1
             return
         spec = self.catalog.specs[rule_id]
-        flag: dict[str, object] = {"id": rule_id, "grade": spec.grade, "label": spec.label_ko, "evidence": dict(evidence)}
+        grade = spec.grade
+        if grade_cap in GRADE_RANK and GRADE_RANK[grade_cap] > GRADE_RANK.get(grade, 0):
+            grade = grade_cap  # downgrade only; a cap never raises the catalogue grade
+        flag: dict[str, object] = {"id": rule_id, "grade": grade, "label": spec.label_ko, "evidence": dict(evidence)}
         if note:
             flag["note"] = note
         self.flags[ref][rule_id] = flag
@@ -516,7 +525,7 @@ def run_triage_flags(
                         record_error(rule.rule_id, exc)
                         continue
                     if result is not None:
-                        collector.add(view.ref, rule.rule_id, result.evidence, result.note, view.type)
+                        collector.add(view.ref, rule.rule_id, result.evidence, result.note, view.type, result.grade)
         except (OSError, ValueError) as exc:  # unreadable / truncated stream: the tail of this source is unread
             failed = True
             errors.setdefault(f"source:{source.kind}", {"count": 1, "message": f"읽기 실패: {exc}"[:300]})
@@ -527,7 +536,7 @@ def run_triage_flags(
     for rule in rules:
         try:
             for ref, result in rule.finalize(ctx):
-                collector.add(ref, rule.rule_id, result.evidence, result.note)
+                collector.add(ref, rule.rule_id, result.evidence, result.note, grade_cap=result.grade)
         except Exception as exc:
             record_error(rule.rule_id, exc)
     progress.check_cancel()
