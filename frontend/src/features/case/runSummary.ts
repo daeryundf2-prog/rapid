@@ -68,6 +68,14 @@ const FIELDS: Record<string, { label: string; format: (value: unknown) => string
   },
   rules: { label: "규칙 파일", format: (v) => (v ? String(v) : "기본") },
   case_db: { label: "케이스 DB 색인", format: yesNo },
+  skip_groups: {
+    label: "건너뛸 처리 그룹",
+    format: (v) => (Array.isArray(v) && v.length ? v.join(", ") : "없음"),
+  },
+  skip_tasks: {
+    label: "건너뛸 태스크",
+    format: (v) => (Array.isArray(v) && v.length ? v.join(", ") : "없음"),
+  },
 };
 
 /** Keys never shown: the evidence path is its own row, `wait` is transport only. */

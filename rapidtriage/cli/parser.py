@@ -1982,6 +1982,15 @@ def build_parser() -> argparse.ArgumentParser:
               rapidtriage run /cases/image.E01 --mode fraud --output-dir ./rapidtriage-run-e01
               rapidtriage run . --mode hacking --read-only --max-file-count 50
               rapidtriage run . --mode fraud --extract
+              rapidtriage run . --mode hacking --skip-group messaging --skip-group mobile
+              rapidtriage run . --mode hacking --print-plan
+              rapidtriage run . --mode hacking --print-plan json
+
+            Run plan: the run is planned as groups -> tasks (rapidtriage-run-plan.json).
+            Ctrl+C cancels everything still running but keeps the rows written so far,
+            then writes the summary, report and audit record (exit code 130);
+            press Ctrl+C again to stop at once. Use `rapidtriage run-control` from
+            another terminal to cancel/skip one task or group, or to finish early.
             """
         ),
     )
@@ -2035,8 +2044,62 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_false",
         help="Skip the persist step's run-local search index (rapidtriage-case.db); unified search then uses the bounded scan backend",
     )
+    run.add_argument(
+        "--skip-group",
+        action="append",
+        default=[],
+        metavar="GROUP",
+        help="Leave a run-plan group out before the run starts (repeatable; ids from --print-plan)",
+    )
+    run.add_argument(
+        "--skip-task",
+        action="append",
+        default=[],
+        metavar="TASK",
+        help="Leave one run-plan task (provider kind or stage) out before the run starts (repeatable)",
+    )
+    run.add_argument(
+        "--print-plan",
+        nargs="?",
+        const="table",
+        choices=("table", "json"),
+        help="Print the run plan (groups -> tasks) for these options and exit without running",
+    )
     add_eventlog_output_arguments(run)
     add_rules_argument(run)
+
+    run_plan = sub.add_parser(
+        "run-plan",
+        help="Show the run plan (groups -> tasks, status, rows, durations) of a run output directory",
+        description="Show the run plan of a running or finished run (rapidtriage-run-progress.json / rapidtriage-run-plan.json)",
+    )
+    run_plan.add_argument("output_dir", help="Run output directory")
+    run_plan.add_argument("--json", action="store_true", help="Print the plan JSON instead of a table")
+
+    run_control = sub.add_parser(
+        "run-control",
+        help="Cancel or skip a task/group of a running run, cancel everything, or finish early",
+        description="Write a request to OUTPUT_DIR/rapidtriage-run-control.json; the run applies it within a second",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage run-control ./run-out cancel --target task:eventlog
+              rapidtriage run-control ./run-out skip --target group:messaging
+              rapidtriage run-control ./run-out cancel        (= cancel-all)
+              rapidtriage run-control ./run-out finish
+            """
+        ),
+    )
+    run_control.add_argument("output_dir", help="Run output directory")
+    run_control.add_argument("action", choices=("cancel", "skip", "finish", "cancel-all"), help="Control action")
+    run_control.add_argument(
+        "--target",
+        action="append",
+        default=[],
+        metavar="group:ID|task:ID",
+        help="Task or group to cancel/skip (repeatable); `cancel` without a target cancels everything",
+    )
 
     web = sub.add_parser(
         "web",

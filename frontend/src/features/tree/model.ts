@@ -307,7 +307,8 @@ const ANALYSIS_STATUSES: readonly AnalysisStatus[] = [
 
 /** Newest job state of an analysis node from the server tree (`analysis:<node>`), null = never ran. */
 function serverAnalysisState(tree: RunTree | undefined, nodeId: string): AnalysisStatus | null {
-  const status = findServerNode(tree, `analysis:${nodeId}`)?.state?.status;
+  const state = findServerNode(tree, `analysis:${nodeId}`)?.state;
+  const status = state && typeof state === "object" ? state.status : undefined;
   return status && (ANALYSIS_STATUSES as readonly string[]).includes(status)
     ? (status as AnalysisStatus)
     : null;
@@ -344,6 +345,43 @@ export interface DomainCount {
   icon?: IconName;
   /** Analysis nodes: the job never ran on this run (known from the job list / tree). */
   neverRan?: boolean;
+  /**
+   * Live run (R4 V1): the kind's provider has not finished (pending / running / skipped …), so the
+   * node stays visible but dimmed and not openable with the server's reason — never hidden as empty.
+   */
+  live?: boolean;
+}
+
+/** Marker of a kind node of a live run, by its provider task `state` (completed = none). */
+export const LIVE_KIND_STATE_LABEL: Record<string, string> = {
+  pending: "대기",
+  queued: "대기",
+  running: "처리 중",
+  partial: "일부 완료",
+  skipped: "건너뜀",
+  cancelled: "취소됨",
+  canceled: "취소됨",
+  failed: "실패",
+};
+
+/** Fallback reason of a live kind node the server sent without one. */
+export const LIVE_PENDING_REASON = "런이 아직 이 그룹을 처리하지 않았습니다";
+
+/** Live-run state of a kind node: disabled with the server reason, or a marker on a partial kind. */
+export function liveKindState(kindNode: TreeNode): DomainCount | undefined {
+  const state = typeof kindNode.state === "string" ? kindNode.state : "";
+  if (kindNode.disabled) {
+    return {
+      count: undefined,
+      disabledReason: kindNode.reason || LIVE_PENDING_REASON,
+      marker: LIVE_KIND_STATE_LABEL[state] ?? "처리 중",
+      live: true,
+    };
+  }
+  if (state && state !== "completed" && LIVE_KIND_STATE_LABEL[state]) {
+    return { count: kindNode.count, marker: LIVE_KIND_STATE_LABEL[state] };
+  }
+  return undefined;
 }
 
 /** 통합 보기 node of a run without a derived set (older run, or the step failed). */
@@ -433,6 +471,7 @@ export function analysisEmptyReason(
 
 /** U-F7: why a node with this count state is hidden by default (undefined = shown). */
 export function emptyNodeReason(state: DomainCount): string | undefined {
+  if (state.live) return undefined;
   if (state.neverRan) return state.disabledReason ?? NEVER_RAN_REASON;
   if (state.count === 0) return state.disabledReason ?? NO_DATA_REASON;
   if (state.count === UNKNOWN_COUNT && state.disabledReason) return state.disabledReason;
@@ -523,6 +562,9 @@ export function domainNodeCount(target: DomainTarget, input: TreeModelInput): Do
     const kindNode = mergedKindNode(tree, target.kind);
     // The run has no records of this kind at all.
     if (!kindNode) return known(0, true);
+    // Live run (R4 V1): an unfinished provider's node is dimmed with the server reason.
+    const liveState = liveKindState(kindNode);
+    if (liveState?.live) return liveState;
     const zero = inventoryReason(kindNode, target.types) ?? zeroReason(kindNode);
     if (target.channelGroup) {
       // 이벤트 로그 › 채널별: `/tree` channel_groups (absent on outputs written before R3).
@@ -539,7 +581,10 @@ export function domainNodeCount(target: DomainTarget, input: TreeModelInput): Do
       const value = (kindNode as unknown as Record<string, unknown>)[target.countField];
       return typeof value === "number" ? known(value, true, zero) : { count: UNKNOWN_COUNT };
     }
-    if (!target.types?.length) return known(kindNode.count, true, zero);
+    if (!target.types?.length) {
+      const state = known(kindNode.count, true, zero);
+      return liveState?.marker ? { ...state, marker: liveState.marker } : state;
+    }
     const perType = kindNode.artifact_type_counts;
     if (perType && typeof perType === "object") {
       return known(
@@ -891,6 +936,7 @@ function domainNodes(input: TreeModelInput): TreeModelNode[] {
         ...(recordFieldsKey(target.fields) && !node.note ? { note: fieldsNote(target) } : {}),
         ...(flagCounts && Object.values(flagCounts).some((n) => (n ?? 0) > 0) ? { flagCounts } : {}),
         ...(hiddenReason ? { hiddenReason } : {}),
+        ...(state.live ? { dimmed: true } : {}),
       };
     };
     const children = domain.nodes.map(toModel);

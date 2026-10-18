@@ -5,6 +5,7 @@ import { Icon } from "../../icons";
 import { useAppStore } from "../../state/store";
 import { navigate } from "./adapter";
 import { targetKey } from "./domains";
+import { LiveRunBanner } from "./LiveRunBanner";
 import { filterEmptyNodes, flagCountsText, flattenVisible, type TreeModelNode, UNKNOWN_COUNT } from "./model";
 import { useTreePrefs } from "./treePrefs";
 import { useTreeState } from "./useTreeModel";
@@ -44,7 +45,7 @@ function pathTo(nodes: readonly TreeModelNode[], id: string, trail: string[] = [
 }
 
 export function EvidenceTree({ runId }: { runId: string }) {
-  const { model: fullModel, loading, treeSettled } = useTreeState(runId);
+  const { model: fullModel, loading, treeSettled, liveTree } = useTreeState(runId);
   // U-F7: empty families are hidden unless "결과 없는 계열 표시" (T) is on; the T command needs a
   // mounted tree.
   const showEmpty = useTreePrefs((s) => s.showEmpty);
@@ -244,6 +245,7 @@ export function EvidenceTree({ runId }: { runId: string }) {
 
   return (
     <div className="case-tree" data-testid="evidence-tree">
+      <LiveRunBanner live={liveTree} />
       <input
         type="search"
         className="case-tree-search"

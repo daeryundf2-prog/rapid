@@ -22,6 +22,7 @@ from .helpers import (
     get_output_path,
     parse_source_preview_archive_request,
     resolve_allowed_source_file,
+    run_not_finished_message,
 )
 from .runops import (
     attach_search_result_source_actions,
@@ -167,7 +168,7 @@ def build_search_router(
     ) -> dict[str, object]:
         job = get_job(store, run_id)
         if job.summary is None:
-            raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
+            raise HTTPException(status_code=409, detail=run_not_finished_message(job))
         try:
             selected_pack_names = [name.strip() for name in keyword_pack if name.strip()]
             keywords = resolve_keyword_packs(keyword, pack_names=selected_pack_names)

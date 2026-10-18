@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import json
+import time
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from ..artifacts import artifact_collectors, collect_cached, get_artifact_collector
@@ -61,8 +63,14 @@ def run_artifact_collection(
     records_path: Path | None = None,
     preview_limit: int = ARTIFACT_PREVIEW_LIMIT,
     use_cache: bool = True,
+    check_cancel: Callable[[], bool] | None = None,
+    on_rows: Callable[[int], None] | None = None,
 ) -> dict[str, object]:
     """Collect one artifact kind into a per-kind payload.
+
+    ``check_cancel``/``on_rows`` (streaming collections only; default ``None``
+    keeps the CLI ``artifacts`` behaviour) are the run plan's cooperative
+    cancel check and row counter, see :func:`stream_artifact_collection`.
 
     Rows carry an ArtifactRecordV1 *envelope* (``fields`` rebuilt from
     ``details`` on demand). With ``records_path`` the provider is consumed
@@ -90,6 +98,8 @@ def run_artifact_collection(
             rule_set=rule_set,
             records_path=records_path,
             preview_limit=preview_limit,
+            check_cancel=check_cancel,
+            on_rows=on_rows,
         )
 
     parser_errors: list[dict[str, str]] = []
@@ -231,6 +241,10 @@ def _provider_header(collector: object) -> dict[str, object]:
 
 
 _STREAM_BUFFER_BYTES = 1 << 20
+# Run plan cooperative cancel cadence (plan P2 §3.3 a).
+CANCEL_CHECK_ROWS = 200
+CANCEL_CHECK_SECONDS = 1.0
+CANCELLED_PARTIAL_STATUS = "cancelled-partial"
 
 
 def _shallow_row(item: object) -> object:
@@ -258,8 +272,17 @@ def stream_artifact_collection(
     rule_set: RuleSet | None,
     records_path: Path,
     preview_limit: int = ARTIFACT_PREVIEW_LIMIT,
+    check_cancel: Callable[[], bool] | None = None,
+    on_rows: Callable[[int], None] | None = None,
 ) -> dict[str, object]:
     """Bounded-memory collection: provider generator -> hoisted JSONL.
+
+    Run plan (P2 §3.3 a): ``check_cancel`` is asked every
+    ``CANCEL_CHECK_ROWS`` rows or ``CANCEL_CHECK_SECONDS``; when it returns
+    true the provider generator is closed and passes 2-3 finish the JSONL
+    with the rows written so far (``collection_status: cancelled-partial``,
+    ``rows_before_cancel``). A cancel is not a parser error. ``on_rows``
+    receives the running row count at the same cadence.
 
     Pass 1 consumes ``collector.collect`` one row at a time, attaches the
     ArtifactRecordV1 envelope (and rule annotations), feeds the per-type
@@ -288,9 +311,15 @@ def stream_artifact_collection(
     parser_errors: list[dict[str, str]] = []
     collection_status = "completed"
     id_allocator = ArtifactIdAllocator()
+    cancelled = False
+    next_check = time.monotonic() + CANCEL_CHECK_SECONDS
+    generator = None
     try:
         with raw_path.open("w", encoding="utf-8", newline="\n", buffering=_STREAM_BUFFER_BYTES) as raw:
-            for index, item in enumerate(collector.collect(input_root.root_path), start=1):  # type: ignore[attr-defined]
+            generator = iter(collector.collect(input_root.root_path))  # type: ignore[attr-defined]
+            if check_cancel is not None and check_cancel():
+                cancelled = True
+            for index, item in enumerate(() if cancelled else generator, start=1):
                 # Rows are serialized and dropped right away and nothing below
                 # mutates nested values, so the provider's details are not copied.
                 row = _shallow_row(item)
@@ -322,7 +351,23 @@ def stream_artifact_collection(
                     channels.observe(adapted if isinstance(adapted, dict) else {})
                 raw.write(_dump_row(adapted) + "\n")
                 record_count += 1
+                if (check_cancel is not None or on_rows is not None) and (
+                    record_count % CANCEL_CHECK_ROWS == 0 or time.monotonic() >= next_check
+                ):
+                    next_check = time.monotonic() + CANCEL_CHECK_SECONDS
+                    if on_rows is not None:
+                        on_rows(record_count)
+                    if check_cancel is not None and check_cancel():
+                        cancelled = True
+                        break
+        if cancelled and generator is not None:
+            close = getattr(generator, "close", None)
+            # Cleanup errors of a cancelled provider are not parser errors.
+            with contextlib.suppress(Exception):
+                if callable(close):
+                    close()
     except Exception as exc:
+        cancelled = False
         collection_status = "failed-isolated"
         parser_errors.append(
             {
@@ -377,10 +422,13 @@ def stream_artifact_collection(
             "artifact_type_counts": dict(type_counts),
             "parser_error_count": count_parser_errors(parser_errors),
             "collection_status": (
-                "skipped"
+                CANCELLED_PARTIAL_STATUS
+                if cancelled
+                else "skipped"
                 if collection_status == "completed" and record_count and sum(skip_reasons.values()) == record_count
                 else collection_status
             ),
+            **({"rows_before_cancel": record_count} if cancelled else {}),
             **collector_disclosure(collector),
             **skipped_row_summary(skip_reasons),
             "artifact_record_contract_valid_count": valid_count,

@@ -29,6 +29,28 @@ class RunCreateRequest(BaseModel):
     hide_known_good: bool = False
     known_good_max_hash_bytes: int = Field(DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES, ge=0)
     wait: bool = False
+    #: Run plan groups/tasks left out before the run starts (``GET /api/run-plan/preview`` ids).
+    skip_groups: list[str] = Field(default_factory=list, max_length=64)
+    skip_tasks: list[str] = Field(default_factory=list, max_length=256)
+
+
+class RunRetryRequest(BaseModel):
+    #: ``true`` = "이어서 실행": same output directory, completed tasks reused.
+    resume: bool = False
+
+
+class RunPlanControlTarget(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    group: str | None = Field(None, min_length=1, max_length=64)
+    task: str | None = Field(None, min_length=1, max_length=64)
+
+
+class RunPlanControlRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["cancel", "skip", "cancel_all", "finish"]
+    targets: list[RunPlanControlTarget] = Field(default_factory=list, max_length=128)
 
 
 class RunExtractRow(BaseModel):

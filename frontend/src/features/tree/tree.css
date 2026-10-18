@@ -191,3 +191,20 @@
   height: 16px;
   gap: 2px;
 }
+
+/* Live run (R4 V1 U-P2-4): finished groups only; the rest is dimmed with its reason. */
+.live-run-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: var(--space-2);
+  padding: var(--space-2);
+  border-left: 3px solid var(--info);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: var(--fs-aux);
+}
+.live-run-banner-counts {
+  color: var(--text-muted);
+}

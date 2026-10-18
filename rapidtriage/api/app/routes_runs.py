@@ -30,6 +30,7 @@ from ...core.jobs import (
     RunRequest,
     run_output_dir,
 )
+from ...core.run.plan import PlanTargetError, plan_counts_brief, validate_skip_targets
 from ...core.visible_capabilities import build_visible_capability_response
 from .analyses import run_scope
 from .analysis_kinds import cross_case_eligibility
@@ -60,6 +61,7 @@ from .helpers import (
     get_named_output,
     get_output_path,
     read_run_artifacts_for_capabilities,
+    run_not_finished_message,
     run_progress_payload,
     validate_run_evidence_source,
 )
@@ -68,6 +70,7 @@ from .models import (
     RunCreateRequest,
     RunExtractRequest,
     RunImportRequest,
+    RunRetryRequest,
 )
 from .pagination import (
     DOCS_MATCHED_REQUIRES_ALL,
@@ -82,7 +85,7 @@ from .runops import (
 )
 from .search_index_service import search_index_available
 from .timeline_hist import build_timeline_histogram
-from .tree import build_run_issues, build_run_tree
+from .tree import build_run_issues, build_run_tree, live_run_block
 from .triage_flags import (
     FlagQuery,
     FlagsJoin,
@@ -97,16 +100,40 @@ from .triage_flags import (
 
 LOGGER = logging.getLogger(__name__)
 ACTIVE_RUN_STATUSES = frozenset({"queued", "running"})
+# Runs whose list row carries ``progress`` (interrupted: the last plan state).
+PROGRESS_RUN_STATUSES = frozenset({"queued", "running", "interrupted"})
+CURRENT_TASKS_MAX = 3
 FILTER_LIMIT_MESSAGE = "필터는 limit>0에서만 지원합니다"
 EXTRACT_ZIP_MAX_BYTES = 2 * 1024 * 1024 * 1024
 EXTRACT_NAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
 
 def compact_run_progress(progress: Mapping[str, object] | None) -> dict[str, object] | None:
-    """Stage, provider counts, and running provider kinds from run progress."""
+    """Stage, provider counts, and running provider kinds from run progress.
+
+    Run plan (P2 §3.4): ``plan_counts`` (group/task totals and task counts by
+    status), ``heartbeat_at``, ``live``/``stale`` and ``current`` (up to three
+    running tasks with ``rows_so_far``).
+    """
     if not isinstance(progress, Mapping):
         return None
     running = progress.get("running") if isinstance(progress.get("running"), list) else []
+    plan = progress.get("plan") if isinstance(progress.get("plan"), Mapping) else None
+    current: list[dict[str, object]] = []
+    if plan is not None:
+        for group in plan.get("groups") or []:
+            for task in (group.get("tasks") or []) if isinstance(group, Mapping) else []:
+                if isinstance(task, Mapping) and task.get("status") == "running" and len(current) < CURRENT_TASKS_MAX:
+                    current.append(
+                        {
+                            "task": task.get("id"),
+                            "label": task.get("label"),
+                            "group": group.get("id"),
+                            "group_label": group.get("label"),
+                            "rows_so_far": int(task.get("rows_so_far") or 0),
+                            "started_at": task.get("started_at"),
+                        }
+                    )
     return {
         "status": progress.get("status"),
         "stage": progress.get("stage"),
@@ -118,6 +145,12 @@ def compact_run_progress(progress: Mapping[str, object] | None) -> dict[str, obj
             for item in running
         ],
         "updated_at": progress.get("updated_at"),
+        "heartbeat_at": progress.get("heartbeat_at"),
+        "live": bool(progress.get("live")),
+        "stale": bool(progress.get("stale")),
+        "plan_counts": plan_counts_brief(plan),
+        "plan_outcome": plan.get("outcome") if plan is not None else None,
+        "current": current,
     }
 
 
@@ -161,7 +194,19 @@ def _attach_artifact_flags(response: dict[str, object], join: FlagsJoin) -> None
 
 
 def run_request_from_body(request: RunCreateRequest, *, root: str | None = None, output_dir: str | None = None) -> RunRequest:
-    """``RunRequest`` for a ``POST /api/runs`` body (also case runs: ``root``/``output_dir`` overrides)."""
+    """``RunRequest`` for a ``POST /api/runs`` body (also case runs: ``root``/``output_dir`` overrides).
+
+    ``skip_groups``/``skip_tasks`` are run-plan ids (400 with a Korean
+    message for unknown or unskippable ids).
+    """
+    skip_groups: tuple[str, ...] = ()
+    skip_tasks: tuple[str, ...] = ()
+    if request.skip_groups or request.skip_tasks:
+        try:
+            groups, tasks = validate_skip_targets(request.mode, request.skip_groups, request.skip_tasks)
+        except PlanTargetError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        skip_groups, skip_tasks = tuple(groups), tuple(tasks)
     return RunRequest(
         root=root if root is not None else request.root,
         mode=request.mode,
@@ -180,6 +225,8 @@ def run_request_from_body(request: RunCreateRequest, *, root: str | None = None,
         known_good_hash_feeds=tuple(path.strip() for path in request.known_good_hash_feeds if path.strip()),
         hide_known_good=request.hide_known_good,
         known_good_max_hash_bytes=request.known_good_max_hash_bytes,
+        skip_groups=skip_groups,
+        skip_tasks=skip_tasks,
     )
 
 
@@ -213,7 +260,7 @@ def build_runs_router(
             # Cross-case dialog filter (plan P1 §3.2 cross-case): one stat, no DB open.
             row.update(cross_case_eligibility(job))
             row["search_index_available"] = search_index_available(job)
-            if job.status in ACTIVE_RUN_STATUSES:
+            if job.status in PROGRESS_RUN_STATUSES:
                 # Compact live progress for the run card (full payload on
                 # GET /api/runs/{run_id}); finished runs skip the file read.
                 row["progress"] = compact_run_progress(run_progress_payload(job))
@@ -243,27 +290,34 @@ def build_runs_router(
 
     @router.post("/api/runs/{run_id}/cancel")
     def cancel_run(run_id: str) -> dict[str, Any]:
+        """"모두 취소" (= ``plan/control`` ``cancel_all``); the response adds the current ``plan``."""
         try:
-            return store.cancel(run_id).to_dict(include_summary=True)
+            payload = store.cancel(run_id, actor="web").to_dict(include_summary=True)
         except KeyError:
             raise HTTPException(status_code=404, detail="런을 찾을 수 없습니다")
+        payload["plan"] = store.plan_view(run_id)
+        return payload
 
 
     @router.post("/api/runs/{run_id}/retry", status_code=202)
-    def retry_run(run_id: str) -> dict[str, Any]:
+    def retry_run(run_id: str, body: RunRetryRequest | None = None) -> dict[str, Any]:
+        """Run a failed/cancelled/interrupted run again; ``{resume: true}`` = "이어서 실행" (completed tasks reused)."""
+        resume = bool(body.resume) if body is not None else False
         try:
-            return store.retry(run_id).to_dict(include_summary=True)
+            payload = store.retry(run_id, resume=resume).to_dict(include_summary=True)
         except KeyError:
             raise HTTPException(status_code=404, detail="런을 찾을 수 없습니다")
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc))
+        payload["retry_mode"] = "resume" if resume else "fresh"
+        return payload
 
 
     @router.get("/api/runs/{run_id}/summary")
     def get_run_summary(run_id: str) -> dict[str, object]:
         job = get_job(store, run_id)
         if job.summary is None:
-            raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
+            raise HTTPException(status_code=409, detail=run_not_finished_message(job))
         try:
             case_path = default_case_path(store, run_id)
         except HTTPException:
@@ -275,7 +329,7 @@ def build_runs_router(
     def get_run_capabilities(run_id: str) -> dict[str, object]:
         job = get_job(store, run_id)
         if job.summary is None:
-            raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
+            raise HTTPException(status_code=409, detail=run_not_finished_message(job))
         # Completed run outputs are immutable; reuse the response until any
         # artifacts output (or the summary) changes on disk.
         cache_key = capability_response_cache_key(run_id, job.summary)
@@ -296,7 +350,7 @@ def build_runs_router(
     def get_run_viewer_workflow_validation(run_id: str) -> dict[str, object]:
         job = get_job(store, run_id)
         if job.summary is None:
-            raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
+            raise HTTPException(status_code=409, detail=run_not_finished_message(job))
         return build_run_viewer_workflow_validation(store, run_id, job.summary)
 
 
@@ -509,9 +563,16 @@ def build_runs_router(
         ``sort.position`` (that record's 0-based position in the sorted order).
         """
         job = get_job(store, run_id)
+        live: dict[str, object] | None = None
         if job.summary is None:
-            raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
-        outputs = job.summary.get("outputs")
+            # Live browsing (plan P2 §3.4): the provider kinds finished so far.
+            live = live_run_block(store, run_id, job)
+            live.pop("kind_states", None)
+            if not live["available_kinds"] and job.status not in ACTIVE_RUN_STATUSES:
+                raise HTTPException(status_code=409, detail=run_not_finished_message(job))
+            outputs = {name: str(path) for name, path in store.provisional_outputs(run_id).items()}
+        else:
+            outputs = job.summary.get("outputs")
         if not isinstance(outputs, dict):
             raise HTTPException(status_code=409, detail="run has no outputs")
         wanted_kinds = {item.strip() for item in kind if item.strip()}
@@ -562,6 +623,8 @@ def build_runs_router(
                 fields=fields,
             )
             _attach_artifact_flags(response, join)
+            if live is not None:
+                response["live"] = live
             return response
         artifacts = {}
         kind_payloads: dict[str, dict[str, object]] = {}
@@ -662,6 +725,8 @@ def build_runs_router(
                 annotate_page_counts(page, kind_payloads[kind_name], filtered=filtered_pages)
         response: dict[str, object] = {"artifacts": artifacts}
         _attach_artifact_flags(response, join)
+        if live is not None:
+            response["live"] = live
         if sort_key:
             statuses = [
                 page["sort"].get("status")
@@ -721,7 +786,7 @@ def build_runs_router(
     def extract_run_rows(run_id: str, request: RunExtractRequest) -> dict[str, Any]:
         job = get_job(store, run_id)
         if job.summary is None:
-            raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
+            raise HTTPException(status_code=409, detail=run_not_finished_message(job))
         roots = allowed_source_roots(job.summary)
         items: list[dict[str, object]] = []
         for row in request.rows:
@@ -774,7 +839,7 @@ def build_runs_router(
     def download_run_extract(run_id: str, name: str) -> FileResponse:
         job = get_job(store, run_id)
         if job.summary is None:
-            raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
+            raise HTTPException(status_code=409, detail=run_not_finished_message(job))
         if not EXTRACT_NAME_PATTERN.fullmatch(name):
             raise HTTPException(status_code=400, detail="invalid extract name")
         base = run_output_dir(job.summary) / "extract"
@@ -811,7 +876,7 @@ def build_runs_router(
         """
         job = get_job(store, run_id)
         if job.summary is None:
-            raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
+            raise HTTPException(status_code=409, detail=run_not_finished_message(job))
         try:
             path = get_output_path(store, run_id, "columnar_artifacts")
         except HTTPException as exc:

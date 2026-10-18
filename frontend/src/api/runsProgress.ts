@@ -16,10 +16,39 @@ export interface RunProgressCompact {
   /** Provider kinds currently running. */
   running?: string[];
   updated_at?: string | null;
+  /** R4 V1 run plan counts: `groups` / `tasks` are totals, the rest are task counts. */
+  plan_counts?: RunPlanCountsCompact | null;
+  /** Last 15 s heartbeat of the run process. */
+  heartbeat_at?: string | null;
+  /** Running but the heartbeat is older than 90 s ("응답 없음"). */
+  stale?: boolean;
+  /** Up to three running tasks. */
+  current?: RunCurrentTask[];
+}
+
+export interface RunPlanCountsCompact {
+  groups?: number;
+  tasks?: number;
+  completed?: number;
+  partial?: number;
+  failed?: number;
+  skipped?: number;
+  cancelled?: number;
+  running?: number;
+  /** Finished groups, when the server reports them (not in the R4 V1 contract; optional). */
+  groups_done?: number;
+}
+
+export interface RunCurrentTask {
+  task: string;
+  label?: string;
+  group?: string;
+  rows_so_far?: number | null;
+  started_at?: string | null;
 }
 
 export interface RunWithProgress extends RunListItem {
-  /** Present only for queued/running runs. */
+  /** Present for queued/running runs (and interrupted ones since R4 V1). */
   progress?: RunProgressCompact | null;
   error?: string;
 }

@@ -15,6 +15,7 @@ const STATUS_LABEL: Record<string, string> = {
   failed: "실패",
   cancelled: "취소됨",
   canceled: "취소됨",
+  interrupted: "중단됨",
 };
 
 export function runLabel(run: RunListItem): string {

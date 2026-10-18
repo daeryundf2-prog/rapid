@@ -11,15 +11,39 @@ import uuid
 from collections import Counter, OrderedDict
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from .files import DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES
 from .forensic_accuracy import build_accuracy_gate
 from .rules import RuleConfigError, load_rule_set
 from .run import RunModeError, run_triage_mode
+from .run.plan import (
+    REASON_INTERRUPTED,
+    PlanTargetError,
+    append_control_request,
+    evaluate_control,
+    plan_counts_brief,
+)
+from .run.progress import active_run_progress, load_run_progress_view
 
-RUN_STATUSES = ("queued", "running", "completed", "failed", "canceled")
+# ``cancelled`` is the only spelling written; ``canceled`` from older state
+# files is normalized on load (plan P2 §3.3). ``interrupted`` = the server
+# restarted while the run was queued/running.
+RUN_STATUSES = ("queued", "running", "completed", "failed", "cancelled", "interrupted")
+RETRYABLE_RUN_STATUSES = frozenset({"failed", "cancelled", "interrupted"})
+ACTIVE_JOB_STATUSES = frozenset({"queued", "running"})
+INTERRUPTED_MESSAGE = REASON_INTERRUPTED
+RETRY_NOT_ALLOWED_MESSAGE = "실패·취소·중단된 런만 다시 실행할 수 있습니다"
+NOT_RUNNING_MESSAGE = "실행 중인 런이 아닙니다"
+TARGETS_REQUIRED_MESSAGE = "대상을 지정하세요"
+LIVE_UNAVAILABLE_MESSAGE = "런 마무리 후 사용할 수 있습니다"
+
+
+def normalize_run_status(status: object) -> str:
+    """``canceled`` (older state files) -> ``cancelled``; everything else unchanged."""
+    text = str(status or "")
+    return "cancelled" if text == "canceled" else text
 JOB_STEP_NAMES = ("prepare", "triage", "persist", "finalize")
 BACKGROUND_JOB_GAP_ID = "#69"
 LONG_RUNNING_JOB_GAP_ID = "#80"
@@ -96,6 +120,8 @@ class RunRequest:
     hide_known_good: bool = False
     known_good_max_hash_bytes: int = DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES
     case_db: bool = True
+    skip_groups: tuple[str, ...] = ()
+    skip_tasks: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -117,6 +143,8 @@ class RunRequest:
             "hide_known_good": self.hide_known_good,
             "known_good_max_hash_bytes": self.known_good_max_hash_bytes,
             "case_db": self.case_db,
+            "skip_groups": list(self.skip_groups),
+            "skip_tasks": list(self.skip_tasks),
         }
 
     @classmethod
@@ -147,6 +175,8 @@ class RunRequest:
                 DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES,
             ),
             case_db=bool(payload.get("case_db", True)),
+            skip_groups=string_tuple(payload.get("skip_groups", [])),
+            skip_tasks=string_tuple(payload.get("skip_tasks", [])),
         )
 
 
@@ -213,6 +243,22 @@ class RunJob:
         payload = self.to_dict(include_summary=True)
         return payload
 
+    def output_dir(self) -> Path | None:
+        """Output directory the job writes to, also while it is still running."""
+        if self.summary:
+            try:
+                return run_output_dir(self.summary)
+            except RuntimeError:
+                pass
+        if self.request.output_dir:
+            return Path(self.request.output_dir).expanduser().resolve()
+        if not self.request.root:
+            return None
+        try:
+            return default_run_output_dir(Path(self.request.root).expanduser().resolve(), self.request.mode, run_id=self.run_id)
+        except OSError:
+            return None
+
     @classmethod
     def from_record(cls, payload: Mapping[str, object]) -> RunJob:
         request_payload = payload.get("request")
@@ -221,7 +267,7 @@ class RunJob:
         return cls(
             run_id=str(payload.get("run_id") or uuid.uuid4().hex[:12]),
             request=request,
-            status=str(payload.get("status") or "failed"),
+            status=normalize_run_status(payload.get("status") or "failed"),
             origin=str(payload.get("origin") or "web"),
             created_at=str(payload.get("created_at") or now_iso()),
             updated_at=str(payload.get("updated_at") or now_iso()),
@@ -435,10 +481,64 @@ class RunJobStore:
         job = self.get(run_id)
         _invalidate_summary_outputs(job.summary)
 
+    def progress_view(self, run_id: str) -> dict[str, object] | None:
+        """Served run progress (``load_run_progress_view``) of ``run_id``."""
+        job = self.get(run_id)
+        output_dir = job.output_dir()
+        return load_run_progress_view(output_dir) if output_dir is not None else None
+
+    def provisional_outputs(self, run_id: str) -> dict[str, Path]:
+        """``artifacts_<kind>`` -> path of every provider task finished (completed/partial) so far.
+
+        Used while a run has no summary (running, interrupted, or cancelled
+        before its report): the plan's ``output.path`` is only trusted when
+        it resolves inside the job's output directory. The ``files`` output
+        joins once the ``files`` task completed.
+        """
+        job = self.get(run_id)
+        output_dir = job.output_dir()
+        progress = load_run_progress_view(output_dir) if output_dir is not None else None
+        plan = progress.get("plan") if isinstance(progress, Mapping) else None
+        outputs: dict[str, Path] = {}
+        if output_dir is None or not isinstance(plan, Mapping):
+            return outputs
+        for group in plan.get("groups") or []:
+            for task in (group.get("tasks") or []) if isinstance(group, Mapping) else []:
+                if not isinstance(task, Mapping) or task.get("status") not in {"completed", "partial"}:
+                    continue
+                if task.get("type") == "provider":
+                    output = task.get("output") if isinstance(task.get("output"), Mapping) else {}
+                    raw = output.get("path") if isinstance(output, Mapping) else None
+                    if not raw or "manifest-only" in Path(str(raw)).parts:
+                        continue
+                    path = Path(str(raw)).expanduser().resolve()
+                    if is_relative_to(path, output_dir):
+                        outputs[f"artifacts_{task.get('id')}"] = path
+                elif task.get("id") == "files" and task.get("status") == "completed":
+                    outputs["files"] = output_dir / "rapidtriage-files.json"
+        return outputs
+
+    def live_unavailable_message(self, run_id: str) -> str:
+        """409 detail for outputs that exist only after the run is finished."""
+        try:
+            progress = self.progress_view(run_id)
+        except KeyError:
+            return LIVE_UNAVAILABLE_MESSAGE
+        brief = plan_counts_brief(progress.get("plan") if isinstance(progress, Mapping) else None)
+        if not brief:
+            return LIVE_UNAVAILABLE_MESSAGE
+        return f"{LIVE_UNAVAILABLE_MESSAGE} (진행: 그룹 {brief['groups_done']}/{brief['groups']})"
+
     def output_path(self, run_id: str, output_name: str) -> Path:
         job = self.get(run_id)
         if job.summary is None:
-            raise RuntimeError("run has no summary yet")
+            provisional = self.provisional_outputs(run_id)
+            if output_name not in provisional:
+                raise RuntimeError(self.live_unavailable_message(run_id))
+            path = provisional[output_name]
+            if not path.is_file():
+                raise FileNotFoundError(str(path))
+            return path
         outputs = job.summary.get("outputs")
         if not isinstance(outputs, Mapping):
             raise RuntimeError("run summary does not include outputs")
@@ -539,7 +639,9 @@ class RunJobStore:
             self._write_state_locked()
         _invalidate_summary_outputs(job.summary)
 
-    def cancel(self, run_id: str) -> RunJob:
+    def cancel(self, run_id: str, *, actor: str = "web") -> RunJob:
+        """"모두 취소": a queued run never starts; a running one gets ``cancel_all`` (control file)."""
+        control_dir: Path | None = None
         with self._lock:
             if run_id not in self._jobs:
                 raise KeyError(run_id)
@@ -550,45 +652,113 @@ class RunJobStore:
             if job.status == "queued":
                 if future is not None:
                     future.cancel()
-                job.status = "canceled"
+                job.status = "cancelled"
                 job.completed_at = now_iso()
-                job.steps = update_step(job.steps, "prepare", "canceled", message="Canceled before execution")
-                append_job_transition(job, event_type="job-canceled", status="canceled", step="prepare", message="Canceled before execution")
+                job.steps = update_step(job.steps, "prepare", "cancelled", message="Canceled before execution")
+                append_job_transition(job, event_type="job-cancelled", status="cancelled", step="prepare", message="Canceled before execution")
             elif job.status == "running":
                 job.steps = update_step(
                     job.steps,
                     "triage",
                     "running",
-                    message="Cancellation requested; current stage will finish safely before state changes.",
+                    message="모두 취소 요청됨: 실행 중 공급자는 지금까지의 행을 남기고 멈추고, 요약·보고서·감사를 기록합니다.",
                 )
                 append_job_transition(
                     job,
                     event_type="running-cancel-recorded",
                     status="running",
                     step="triage",
-                    message="Cancellation requested; current stage will finish safely before state changes.",
+                    message="cancel_all written to the run control file",
                 )
+                control_dir = job.output_dir()
             job.updated_at = now_iso()
             self._write_state_locked()
-            return job
+        if control_dir is not None:
+            control_dir.mkdir(parents=True, exist_ok=True)
+            append_control_request(control_dir, "cancel_all", (), actor=actor)
+            poke_run_control(control_dir)
+        return job
 
-    def retry(self, run_id: str) -> RunJob:
+    def control(
+        self,
+        run_id: str,
+        action: str,
+        targets: Sequence[Mapping[str, object]] = (),
+        *,
+        actor: str = "web",
+    ) -> dict[str, object]:
+        """Run-plan control (plan P2 §3.4): ``cancel``/``skip`` targets, ``cancel_all``, ``finish``.
+
+        Raises ``KeyError`` (unknown run), ``RunControlConflict`` (409: not
+        queued/running) or ``PlanTargetError`` (400). Targets that cannot be
+        applied are listed in ``rejected`` instead of failing the request.
+        """
+        job = self.get(run_id)
+        if job.status not in ACTIVE_JOB_STATUSES:
+            raise RunControlConflict(NOT_RUNNING_MESSAGE)
+        if action not in {"cancel", "skip", "cancel_all", "finish"}:
+            raise PlanTargetError(f"알 수 없는 동작입니다: {action}")
+        if action in {"cancel", "skip"} and not targets:
+            raise PlanTargetError(TARGETS_REQUIRED_MESSAGE)
+        if action == "cancel_all":
+            self.cancel(run_id, actor=actor)
+            return {"accepted": [], "rejected": [], "plan": self.plan_view(run_id)}
+        output_dir = job.output_dir()
+        progress = load_run_progress_view(output_dir) if output_dir is not None else None
+        plan = progress.get("plan") if isinstance(progress, Mapping) else None
+        if output_dir is None or not isinstance(plan, Mapping):
+            raise RunControlConflict("런이 아직 계획을 쓰지 않았습니다. 잠시 후 다시 시도하세요")
+        control = plan.get("control") if isinstance(plan.get("control"), Mapping) else {}
+        if action == "finish" and control.get("finish_at"):
+            return {"accepted": [], "rejected": [], "plan": self.plan_view(run_id), "already_requested_at": control.get("finish_at")}
+        accepted, rejected, _effects = evaluate_control(plan, action, targets)
+        if action == "finish" or accepted:
+            append_control_request(output_dir, action, accepted if action != "finish" else (), actor=actor)
+            poke_run_control(output_dir)
+            with self._lock:
+                append_job_transition(
+                    job,
+                    event_type=f"plan-{action.replace('_', '-')}-requested",
+                    status=job.status,
+                    step="triage",
+                    message=f"{action} {accepted}",
+                )
+                job.updated_at = now_iso()
+                self._write_state_locked()
+        return {"accepted": accepted, "rejected": rejected, "plan": self.plan_view(run_id)}
+
+    def plan_view(self, run_id: str) -> dict[str, object] | None:
+        """The run plan as served (live / interrupted view), or ``None`` before it was written."""
+        progress = self.progress_view(run_id)
+        plan = progress.get("plan") if isinstance(progress, Mapping) else None
+        return dict(plan) if isinstance(plan, Mapping) else None
+
+    def retry(self, run_id: str, *, resume: bool = False) -> RunJob:
+        """Run a failed/cancelled/interrupted run again: ``resume`` reuses its completed tasks (same output dir)."""
         with self._lock:
             if run_id not in self._jobs:
                 raise KeyError(run_id)
             previous = self._jobs[run_id]
-            if previous.status not in {"failed", "canceled"}:
-                raise ValueError("only failed or canceled runs can be retried")
+            if previous.status not in RETRYABLE_RUN_STATUSES:
+                raise ValueError(RETRY_NOT_ALLOWED_MESSAGE)
             next_attempt = int(previous.retry_attempt or 0) + 1
             append_job_transition(
                 previous,
                 event_type="retry-requested",
                 status=previous.status,
-                message="Retry submitted",
-                details={"next_retry_attempt": next_attempt},
+                message="Resume submitted" if resume else "Retry submitted",
+                details={"next_retry_attempt": next_attempt, "retry_mode": "resume" if resume else "fresh"},
             )
             self._write_state_locked()
-        return self.submit(previous.request, retry_of_run_id=previous.run_id, retry_attempt=next_attempt)
+            request = previous.request
+            if resume:
+                output_dir = previous.output_dir()
+                request = replace(
+                    request,
+                    resume=True,
+                    output_dir=str(output_dir) if output_dir is not None else request.output_dir,
+                )
+        return self.submit(request, retry_of_run_id=previous.run_id, retry_attempt=next_attempt)
 
     def _execute(self, run_id: str) -> dict[str, object]:
         with self._lock:
@@ -599,11 +769,11 @@ class RunJobStore:
             append_job_transition(job, event_type="job-running", status="running", message="Worker started")
             self._write_state_locked()
             if job.cancellation_requested:
-                job.status = "canceled"
+                job.status = "cancelled"
                 job.completed_at = now_iso()
                 job.updated_at = job.completed_at
-                job.steps = update_step(job.steps, "prepare", "canceled", message="Canceled before execution")
-                append_job_transition(job, event_type="job-canceled", status="canceled", step="prepare", message="Canceled before execution")
+                job.steps = update_step(job.steps, "prepare", "cancelled", message="Canceled before execution")
+                append_job_transition(job, event_type="job-cancelled", status="cancelled", step="prepare", message="Canceled before execution")
                 self._write_state_locked()
                 return {}
         try:
@@ -622,20 +792,34 @@ class RunJobStore:
                 append_job_transition(job, event_type="job-failed", status="failed", step="triage", message=str(exc))
                 self._write_state_locked()
             raise
+        plan = summary.get("plan") if isinstance(summary, Mapping) else None
+        cancelled = isinstance(plan, Mapping) and plan.get("outcome") == "cancelled"
         with self._lock:
             job.steps = update_step(job.steps, "triage", "completed", message="Triage workflow completed")
             job.steps = update_step(job.steps, "persist", "completed", message=persist_step_message(summary))
-            job.steps = update_step(job.steps, "finalize", "completed", message="Run completed")
-            job.status = "completed"
+            job.steps = update_step(
+                job.steps,
+                "finalize",
+                "completed",
+                message="모두 취소로 끝남 (요약·보고서·감사 기록됨)" if cancelled else "Run completed",
+            )
+            job.status = "cancelled" if cancelled else "completed"
             job.summary = summary
             job.completed_at = now_iso()
             job.updated_at = job.completed_at
-            append_job_transition(job, event_type="job-completed", status="completed", step="finalize", message="Run completed")
+            append_job_transition(
+                job,
+                event_type="job-cancelled" if cancelled else "job-completed",
+                status=job.status,
+                step="finalize",
+                message="Run cancelled (cancel_all) with summary" if cancelled else "Run completed",
+            )
             self._write_state_locked()
         # Outputs were just (re)written by run_triage_mode — drop any stale
         # cached payloads for this run, e.g. a retry over the same output_dir.
         _invalidate_summary_outputs(summary)
-        self._run_completion_hooks(job)
+        if not cancelled:
+            self._run_completion_hooks(job)
         return summary
 
     def _mark_step(self, run_id: str, name: str, status: str, *, message: str = "") -> None:
@@ -661,12 +845,15 @@ class RunJobStore:
             if not isinstance(record, Mapping):
                 continue
             job = RunJob.from_record(record)
-            if job.status in {"queued", "running"}:
-                job.status = "failed"
-                job.error = "server restarted before this run completed"
+            if job.status in ACTIVE_JOB_STATUSES:
+                # Plan P2 §3.2: a run the server was executing when it stopped
+                # is "중단됨"; "이어서 실행" (retry resume) reuses its completed tasks.
+                job.status = "interrupted"
+                job.error = INTERRUPTED_MESSAGE
+                job.error_type = "ServerRestart"
                 job.completed_at = now_iso()
                 job.updated_at = job.completed_at
-                append_job_transition(job, event_type="job-recovered-failed", status="failed", message=job.error)
+                append_job_transition(job, event_type="job-recovered-interrupted", status="interrupted", message=job.error)
                 changed = True
             self._jobs[job.run_id] = job
         if changed:
@@ -775,7 +962,7 @@ def update_step(steps: list[dict[str, object]], name: str, status: str, *, messa
         )
         if status == "running" and not step.get("started_at"):
             step["started_at"] = timestamp
-        if status in {"completed", "failed", "skipped", "canceled"}:
+        if status in {"completed", "failed", "skipped", "cancelled"}:
             step["completed_at"] = timestamp
         break
     return output
@@ -880,7 +1067,7 @@ def job_partial_output_policy(job: RunJob) -> dict[str, object]:
         "known_outputs": output_paths[:20],
         "known_output_head_hash": output_head_hash,
         "outputs_truncated": len(output_paths) > 20,
-        "partial_outputs_possible": job.status in {"failed", "canceled", "running"},
+        "partial_outputs_possible": job.status in {"failed", "cancelled", "interrupted", "running"},
         "cleanup_strategy": "preserve-for-analyst-review",
         "partial_output_cleanup_status": "preserved-not-cleaned",
         "safe_to_auto_delete_partial_outputs": False,
@@ -914,7 +1101,7 @@ def job_persistence_manifest(job: RunJob) -> dict[str, object]:
         "step_rows": step_rows,
         "cancellation_requested": job.cancellation_requested,
         "cancel_supported": True,
-        "retry_eligible": job.status in {"failed", "canceled"},
+        "retry_eligible": job.status in {"failed", "cancelled", "interrupted"},
         "retry_of_run_id": job.retry_of_run_id,
         "retry_attempt": job.retry_attempt,
         "transition_count": transition_profile.get("transition_count", 0),
@@ -983,7 +1170,7 @@ def job_queue_execution_manifest(job: RunJob) -> dict[str, object]:
         "step_head_hash": step_head_hash,
         "cancellation_requested": job.cancellation_requested,
         "cancel_supported": True,
-        "retry_supported_for": ["canceled", "failed"],
+        "retry_supported_for": ["cancelled", "failed", "interrupted"],
         "retry_of_run_id": job.retry_of_run_id,
         "retry_attempt": job.retry_attempt,
         "summary_persisted": bool(job.summary),
@@ -1135,7 +1322,7 @@ def job_queue_report_grade_validation_plan(
 
 def job_step_persistence_row(step: Mapping[str, object], *, index: int) -> dict[str, object]:
     status = str(step.get("status") or "pending")
-    terminal = status in {"completed", "failed", "skipped", "canceled"}
+    terminal = status in {"completed", "failed", "skipped", "cancelled", "interrupted"}
     return {
         "index": index,
         "name": str(step.get("name") or ""),
@@ -1357,7 +1544,7 @@ def job_queue_core_accuracy_gates(
         satisfied.append("step progress recorded")
     if state_persisted:
         satisfied.append("state-file persistence")
-    if cancellation_requested or status in {"failed", "canceled"}:
+    if cancellation_requested or status in {"failed", "cancelled", "interrupted"}:
         satisfied.append("cancel/retry state recorded")
     if transition_count:
         satisfied.append("transition log recorded")
@@ -1496,7 +1683,7 @@ def cancellation_retry_assessment(job: RunJob, *, trusted_diff: Mapping[str, obj
         "cancellation_requested": job.cancellation_requested,
         "retry_of_run_id": job.retry_of_run_id,
         "retry_attempt": job.retry_attempt,
-        "retry_supported_for": ["failed", "canceled"],
+        "retry_supported_for": ["failed", "cancelled", "interrupted"],
         "cancellation_retry_manifest": manifest,
         "retry_lineage_profile": retry_lineage,
         "partial_output_policy": partial_output_policy,
@@ -1522,7 +1709,7 @@ def cancellation_retry_assessment(job: RunJob, *, trusted_diff: Mapping[str, obj
                     f"cancellation_retry_report_grade_validation_plan_hash:{validation_plan.get('validation_plan_hash', '')}",
                     f"cancellation_retry_report_grade_ready_slot_count:{validation_plan.get('ready_slot_count', 0)}",
                     f"cancellation_retry_report_grade_blocking_slot_count:{validation_plan.get('blocking_slot_count', 0)}",
-                    "retry_supported_for:failed,canceled",
+                    "retry_supported_for:failed,cancelled,interrupted",
                 ],
             )
         ],
@@ -1721,7 +1908,7 @@ def cancellation_retry_manifest(job: Mapping[str, object]) -> dict[str, object]:
         if isinstance(retry_value, list):
             retry_supported = sorted(str(value) for value in retry_value)
     if not retry_supported:
-        retry_supported = ["canceled", "failed"]
+        retry_supported = ["cancelled", "failed", "interrupted"]
     steps = job.get("steps")
     step_statuses: list[str] = []
     if isinstance(steps, list):
@@ -1800,7 +1987,7 @@ def cancellation_retry_manifest_source(job: RunJob) -> dict[str, object]:
         "cancellation_requested": job.cancellation_requested,
         "retry_of_run_id": job.retry_of_run_id,
         "retry_attempt": job.retry_attempt,
-        "retry_supported_for": ["failed", "canceled"],
+        "retry_supported_for": ["failed", "cancelled", "interrupted"],
         "steps": job.steps,
         "transition_log_profile": job_transition_log_profile(job.transition_log),
         "retry_lineage_profile": job_retry_lineage_profile(job),
@@ -1808,7 +1995,19 @@ def cancellation_retry_manifest_source(job: RunJob) -> dict[str, object]:
     }
 
 
-def execute_run_request(request: RunRequest, *, run_id: str | None = None) -> dict[str, object]:
+class RunControlConflict(RuntimeError):
+    """A run-plan control request for a run that is not queued/running (HTTP 409)."""
+
+
+def poke_run_control(output_dir: Path) -> None:
+    """Apply a just-written control request now when the run executes in this process."""
+    progress = active_run_progress(output_dir)
+    watcher = getattr(progress, "control_watcher", None) if progress is not None else None
+    if watcher is not None:
+        watcher.poll()
+
+
+def execute_run_request(request: RunRequest, *, run_id: str | None = None, actor: str = "web") -> dict[str, object]:
     root = Path(request.root).expanduser().resolve()
     output_dir = (
         Path(request.output_dir).expanduser().resolve()
@@ -1838,6 +2037,9 @@ def execute_run_request(request: RunRequest, *, run_id: str | None = None) -> di
             known_good_max_hash_bytes=request.known_good_max_hash_bytes,
             rule_set=rule_set,
             case_db=request.case_db,
+            skip_groups=request.skip_groups,
+            skip_tasks=request.skip_tasks,
+            actor=actor,
         )
     except (FileNotFoundError, OSError, RuleConfigError, RunModeError, ValueError):
         raise

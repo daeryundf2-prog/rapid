@@ -21,6 +21,7 @@ const TONES: Record<string, ChipTone> = {
   cancelled: "warn",
   canceled: "warn",
   partial: "warn",
+  interrupted: "warn",
   completed_with_errors: "warn",
   warning: "warn",
   queued: "info",
