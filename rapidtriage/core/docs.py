@@ -244,6 +244,13 @@ def build_manifest(
     covered = dict(artifact_payloads or {})
     outputs = dict(artifact_outputs or {})
 
+    # Run plan hooks (core/run/progress.RunProgress): skipped/cancelled
+    # manifest-group tasks are not collected; running ones can be cancelled.
+    should_run = getattr(progress, "task_should_run", None)
+    task_status = getattr(progress, "task_status", None)
+    cancel_checker = getattr(progress, "cancel_checker", None)
+    rows_reporter = getattr(progress, "rows_reporter", None)
+
     def collect_summary_row(provider: object, progress_key: str) -> dict[str, object]:
         from .artifacts import run_artifact_collection
 
@@ -256,6 +263,8 @@ def build_manifest(
             kind=progress_key,
             records_path=output_path.with_suffix(".jsonl"),
             use_cache=False,
+            check_cancel=cancel_checker(progress_key) if callable(cancel_checker) else None,
+            on_rows=rows_reporter(progress_key) if callable(rows_reporter) else None,
         )
         write_result(payload, output_path)
         return manifest_summary_row(provider, payload, output_path=output_path)
@@ -264,15 +273,21 @@ def build_manifest(
         progress_key = provider_progress_key(provider)
         if progress_key in covered:
             return manifest_summary_row(provider, covered[progress_key], output_path=outputs.get(progress_key))
+        if records_dir is not None and callable(should_run) and not should_run(progress_key):
+            status = str(task_status(progress_key) or "skipped") if callable(task_status) else "skipped"
+            return planned_out_manifest_row(provider, status)
         if progress is not None:
             progress.provider_running(progress_key)
         if records_dir is not None:
             row = collect_summary_row(provider, progress_key)
             if progress is not None:
-                failed = row.get("collection_status") == "failed-isolated"
+                collection_status = str(row.get("collection_status") or "")
+                status = {"failed-isolated": "error", "cancelled-partial": "partial"}.get(collection_status, "completed")
+                if status == "partial" and not int(row.get("artifact_count") or 0):
+                    status = "cancelled"
                 progress.provider_finished(
                     progress_key,
-                    status="error" if failed else "completed",
+                    status=status,
                     artifact_count=int(row.get("artifact_count") or 0),
                 )
             return row
@@ -315,6 +330,22 @@ def build_manifest(
         "platform": platform.platform(),
         "keywords": list(keywords),
         "providers": provider_rows,
+    }
+
+
+def planned_out_manifest_row(provider: object, status: str) -> dict[str, object]:
+    """Manifest row of a provider the run plan skipped or cancelled before it started (no rows)."""
+    return {
+        "name": provider.name,
+        "description": provider.description,
+        "target_platform": provider.target_platform,
+        "supported": provider.supported(),
+        "artifact_count": 0,
+        "artifact_type_counts": {},
+        "records_path": None,
+        "artifacts_output": None,
+        "collection_status": status if status in {"skipped", "cancelled"} else "skipped",
+        "plan_status": status,
     }
 
 

@@ -17,8 +17,10 @@ from collections.abc import (
     Sequence,
 )
 from concurrent.futures import (
+    FIRST_COMPLETED,
     ThreadPoolExecutor,
     as_completed,
+    wait,
 )
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -141,11 +143,29 @@ from .persist import (
     build_run_case_db,
     skipped_case_db_record,
 )
+from .plan import (
+    PLAN_FILE_NAME,
+    REASON_FOLDER_INPUT,
+    PlanTargetError,
+    RunControlWatcher,
+    build_run_plan,
+)
+from .planned_out import (
+    mark_inputs_partial,
+    partial_provider_kinds,
+    planned_out_docs_payload,
+    planned_out_files_payload,
+    planned_out_indicators_payload,
+    planned_out_step,
+    planned_out_timeline_payload,
+)
 from .preview_sandbox import *
 from .profiles import *
 from .progress import (
     RUN_PROGRESS_FILE_NAME,
     RunProgress,
+    active_run_progress,
+    load_run_progress_view,
     read_run_progress,
 )
 from .scheduler import *
@@ -187,6 +207,7 @@ __all__ = [
     "PARSER_CRASH_REPORT_GRADE_VALIDATION_PLAN_VERSION",
     "PARSER_CRASH_TRUSTED_DIFF_BLOCKER_71",
     "PERFORMANCE_BATCH_ID",
+    "PLAN_FILE_NAME",
     "PREVIEW_SANDBOX_GAP_ID",
     "PREVIEW_SANDBOX_REPORT_GRADE_BLOCKERS",
     "PREVIEW_SANDBOX_REPORT_GRADE_VALIDATION_PLAN_VERSION",
@@ -213,6 +234,7 @@ __all__ = [
     "InputRoot",
     "Mapping",
     "Path",
+    "PlanTargetError",
     "RuleSet",
     "RunModeError",
     "RunProfile",
@@ -221,6 +243,7 @@ __all__ = [
     "ThreadPoolExecutor",
     "VirtualDiskExtractionError",
     "VirtualDiskExtractionResult",
+    "active_run_progress",
     "annotate_step",
     "append_artifact_summary_rows",
     "append_extract_rows",
@@ -333,6 +356,7 @@ __all__ = [
     "json",
     "load_or_build_json",
     "load_reusable_json",
+    "load_run_progress_view",
     "mark_reused_step",
     "materialize_delta_scope",
     "memory_cap_enforcement_assessment",
@@ -413,11 +437,24 @@ def run_triage_mode(
     carve: bool = False,
     collector_options: Mapping[str, Mapping[str, object]] | None = None,
     case_db: bool = True,
+    skip_groups: Sequence[str] = (),
+    skip_tasks: Sequence[str] = (),
+    actor: str = "cli",
 ) -> dict[str, object]:
     """Run every triage stage for ``root`` into ``output_dir``.
 
     ``case_db`` (default on) makes the ``persist`` stage build the run-local
     search index ``<output_dir>/rapidtriage-case.db``.
+
+    Run plan (plan P2): the run is planned as groups -> tasks
+    (``core/run/plan.py``); ``skip_groups``/``skip_tasks`` are left out
+    before the run starts (``actor`` = ``web``/``cli`` is recorded). While
+    the run goes, ``rapidtriage-run-control.json`` requests (cancel/skip a
+    task or group, ``cancel_all``, ``finish``) are applied: a cancelled
+    provider keeps the rows written so far (``partial``), ``cancel_all``
+    still writes the summary/report/audit, and the run's summary carries
+    the final plan (``plan.outcome``). The progress status ends
+    ``cancelled`` after ``cancel_all``.
     """
     normalized_mode = mode.lower()
     if normalized_mode not in SUPPORTED_RUN_MODES:
@@ -435,8 +472,27 @@ def run_triage_mode(
         # files-extract/ copy+hash work runs and the summary reports the
         # effective (empty) extraction scope.
         profile = replace(profile, docs_extract_kinds=(), file_extract_categories=())
+    plan = build_run_plan(
+        mode=normalized_mode,
+        carve=carve,
+        extract=extract_enabled,
+        case_db=case_db,
+        skip_groups=skip_groups,
+        skip_tasks=skip_tasks,
+        actor=actor,
+    )
     output_dir = output_dir.expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
+    # A resumed run reuses stage outputs (manifest/docs/files/timeline/...)
+    # only when the previous run's plan finished without cancels or skips:
+    # those outputs were built from partial provider inputs or are
+    # placeholders. Provider outputs are judged one by one.
+    previous_progress = read_run_progress(output_dir) if resume else None
+    previous_plan = previous_progress.get("plan") if isinstance(previous_progress, Mapping) else None
+    stage_reuse_blocked = isinstance(previous_plan, Mapping) and previous_plan.get("outcome") in {
+        "partial",
+        "cancelled",
+    }
     # The collect cache lets the manifest stage and the artifacts stage share
     # one provider collection per run; clearing here guarantees a long-lived
     # server process never reuses stale results for a changed root.
@@ -444,7 +500,14 @@ def run_triage_mode(
     effective_memory_cap = resolve_memory_cap_bytes(memory_cap_bytes)
     memory_cap_stage_checks: list[dict[str, object]] = []
     progress = RunProgress(output_dir)
+    # The watcher notes the control requests of earlier runs in this output
+    # directory before the progress file announces this run, so a request
+    # written after that is never mistaken for an old one.
+    control_watcher = RunControlWatcher(output_dir, progress.apply_control)
     progress.start(stage="prepare")
+    progress.set_plan(plan)
+    control_watcher.start()
+    progress.control_watcher = control_watcher
 
     def record_memory_cap(stage: str) -> None:
         memory_cap_stage_checks.append(
@@ -460,6 +523,8 @@ def run_triage_mode(
             e01_partition_start_sector=e01_partition_start_sector,
         )
         progress.set_run_root(str(input_root.root_path))
+        if image_result is None:
+            progress.task_finished("image-extract", status="skipped", reason=REASON_FOLDER_INPUT)
         progress.complete_stage("prepare")
         # Every provider walks the same evidence tree; the run-scoped path
         # cache makes each tree walk happen once per run (see core/files.py).
@@ -491,13 +556,18 @@ def run_triage_mode(
                 carve=carve,
                 collector_options=collector_options,
                 case_db=case_db,
+                stage_reuse_blocked=stage_reuse_blocked,
+                skip_groups=plan["options"]["skip_groups"],
+                skip_tasks=plan["options"]["skip_tasks"],
             )
         finally:
             disable_evidence_path_cache()
     except BaseException as exc:
+        control_watcher.stop()
         progress.fail(exc)
         raise
-    progress.finish()
+    control_watcher.stop()
+    progress.finish(status="cancelled" if progress.cancel_all_requested.is_set() else "completed")
     return summary_payload
 
 
@@ -591,12 +661,24 @@ def _run_triage_stages(
     carve: bool,
     collector_options: Mapping[str, Mapping[str, object]] | None = None,
     case_db: bool = True,
+    stage_reuse_blocked: bool = False,
+    skip_groups: Sequence[str] = (),
+    skip_tasks: Sequence[str] = (),
 ) -> dict[str, object]:
     """Run every stage after the input root is prepared (see run_triage_mode)."""
 
     def finish_stage(stage: str, details: Mapping[str, object] | None = None) -> None:
         record_memory_cap(stage)
         progress.complete_stage(stage, details)
+
+    def stage_planned_out(task_id: str) -> tuple[str, str] | None:
+        """``(status, reason)`` when the plan skipped/cancelled ``task_id`` (cancel_all, skip, finish)."""
+        if progress.task_should_run(task_id):
+            return None
+        task = progress.task_record(task_id) or {}
+        return str(task.get("status") or "skipped"), str(task.get("reason") or "")
+
+    planned_out_steps: list[dict[str, object]] = []
 
     progress.register_providers(
         [*profile.artifacts_kinds, *(provider_progress_key(provider) for provider in all_providers())]
@@ -644,6 +726,8 @@ def _run_triage_stages(
 
     # Per-file content hashing is only needed for --resume reuse decisions;
     # non-resume runs fingerprint on path+size+mtime metadata only.
+    if resume:
+        progress.task_set_message("fingerprint", "이어서 실행 지문 계산 중 (파일 내용 해시, 파일당 16 MB 상한)")
     current_fingerprint = build_run_input_fingerprint(scan_root, hash_contents=resume)
     finish_stage("fingerprint")
     previous_fingerprint = (
@@ -661,6 +745,10 @@ def _run_triage_stages(
     )
     resume_disabled_reason = ""
     effective_resume = resume
+    if resume and stage_reuse_blocked and not fingerprint_changed:
+        resume_disabled_reason = (
+            "previous run plan ended partial/cancelled; stage outputs are rebuilt, completed provider outputs are reused"
+        )
     if resume and fingerprint_changed:
         effective_resume = False
         resume_disabled_reason = "input fingerprint changed; rebuilding stage outputs"
@@ -766,17 +854,32 @@ def _run_triage_stages(
     )
     write_result(artifact_scheduler_manifest, scheduler_path)
     for kind in profile.artifacts_kinds:
+        if kind not in artifact_results:
+            # Skipped or cancelled by the run plan before it started: no output.
+            planned = stage_planned_out(kind) or ("skipped", "")
+            record_run_checkpoint(
+                checkpoint_records,
+                f"artifacts-{kind}",
+                artifacts_dir / f"rapidtriage-artifacts-{kind}.json",
+                reused=False,
+                plan_status=planned[0],
+                plan_reason=planned[1],
+            )
+            continue
         artifact_payload, artifact_path, reused, delta_merged = artifact_results[kind]
         if reused:
             reused_outputs.add(f"artifacts-{kind}")
         if delta_merged:
             delta_applied_outputs.add(f"artifacts-{kind}")
+        partial = artifact_payload_cancelled(artifact_payload)
         record_run_checkpoint(
             checkpoint_records,
             f"artifacts-{kind}",
             artifact_path,
             reused=reused,
             delta_merged=delta_merged,
+            plan_status=("partial" if artifact_payload_count(artifact_payload) else "cancelled") if partial else None,
+            plan_reason=str((progress.task_record(kind) or {}).get("reason") or "") if partial else None,
         )
         artifact_outputs[kind] = artifact_path
         artifact_payloads[kind] = artifact_payload
@@ -787,10 +890,13 @@ def _run_triage_stages(
     write_result(parser_crash_ledger, parser_crash_ledger_path)
     finish_stage("artifacts")
 
+    # Stage outputs (manifest .. indicators) are reused only after a run whose
+    # plan finished without cancels/skips (they are built from all providers).
+    stage_resume = effective_resume and not stage_reuse_blocked
     progress.begin_stage("manifest")
     manifest_payload, reused = load_or_build_json(
         manifest_path,
-        resume=effective_resume,
+        resume=stage_resume,
         required_keys=("providers",),
         producer=lambda: build_manifest(
             input_root,
@@ -842,30 +948,52 @@ def _run_triage_stages(
                 text_sink=spool.write,
             )
 
-    docs_payload, reused = load_or_build_json(
-        docs_path,
-        resume=effective_resume and docs_index_path.is_file(),
-        expected_command="docs",
-        required_keys=("summary", "results"),
-        producer=produce_docs_payload,
-    )
+    docs_planned = stage_planned_out("docs")
+    if docs_planned is not None:
+        docs_payload = planned_out_docs_payload(
+            scan_input_root,
+            profile.keywords,
+            index_output=docs_index_path,
+            manifest=manifest_payload,
+            status=docs_planned[0],
+            reason=docs_planned[1],
+        )
+        reused = False
+    else:
+        docs_payload, reused = load_or_build_json(
+            docs_path,
+            resume=stage_resume and docs_index_path.is_file(),
+            expected_command="docs",
+            required_keys=("summary", "results"),
+            producer=produce_docs_payload,
+        )
     if reused:
         reused_outputs.update({"docs", "docs-index"})
-    record_run_checkpoint(checkpoint_records, "docs", docs_path, reused=reused)
+    record_run_checkpoint(
+        checkpoint_records,
+        "docs",
+        docs_path,
+        reused=reused,
+        plan_status=docs_planned[0] if docs_planned else None,
+        plan_reason=docs_planned[1] if docs_planned else None,
+    )
     docs_payload["manifest"] = manifest_summary
     docs_payload["scan_scope_root"] = str(scan_input_root.root_path)
     finish_stage("docs")
 
     progress.begin_stage("files")
 
+    files_planned = stage_planned_out("files")
     files_scan_resume = (
-        effective_resume
+        stage_resume
         and not known_good_hash_feeds
         and not hide_known_good
         and known_good_max_hash_bytes == DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES
     )
     files_payload: dict[str, object] | None = None
-    if evidence_delta_context is not None and evidence_delta_context.files_delta_enabled:
+    if files_planned is not None:
+        files_payload = planned_out_files_payload(scan_input_root, status=files_planned[0], reason=files_planned[1])
+    elif evidence_delta_context is not None and evidence_delta_context.files_delta_enabled:
         previous_files_payload = load_reusable_json(
             files_path,
             expected_command="files",
@@ -917,13 +1045,18 @@ def _run_triage_stages(
         files_path,
         reused=reused,
         delta_merged="files" in delta_applied_outputs,
+        plan_status=files_planned[0] if files_planned else None,
+        plan_reason=files_planned[1] if files_planned else None,
     )
     files_payload["scan_scope_root"] = str(scan_input_root.root_path)
     finish_stage("files")
 
     carve_payload: dict[str, object] | None = None
     carve_output_path = output_dir / "carving" / "rapidtriage-carve.json"
-    if carve:
+    carve_planned = stage_planned_out("carve") if carve else None
+    if carve and carve_planned is not None:
+        planned_out_steps.append(planned_out_step("carve", status=carve_planned[0], reason=carve_planned[1]))
+    if carve and carve_planned is None:
         progress.begin_stage("carve")
         # Opt-in bounded carving over the same scan root. The carve stage
         # keeps its own checkpoint so --resume continues mid-scan rather
@@ -943,10 +1076,13 @@ def _run_triage_stages(
     write_result(files_payload, files_path)
 
     progress.begin_stage("extract")
-    if extract_enabled:
+    extract_planned = (
+        stage_planned_out("docs-extract") and stage_planned_out("files-extract") if extract_enabled else None
+    )
+    if extract_enabled and extract_planned is None:
         docs_extract_payload, reused = load_or_build_json(
             docs_extract_manifest,
-            resume=effective_resume,
+            resume=stage_resume,
             expected_command="extract",
             required_keys=("summary", "entries", "skipped"),
             producer=lambda: run_extract(
@@ -966,7 +1102,7 @@ def _run_triage_stages(
         record_run_checkpoint(checkpoint_records, "docs-extract", docs_extract_manifest, reused=reused)
         files_extract_payload, reused = load_or_build_json(
             files_extract_manifest,
-            resume=effective_resume,
+            resume=stage_resume,
             expected_command="extract",
             required_keys=("summary", "entries", "skipped"),
             producer=lambda: run_extract(
@@ -1007,9 +1143,14 @@ def _run_triage_stages(
     progress.begin_stage("timeline")
     timeline_reference = timeline_reference_time(current_fingerprint, run_started_at, files_payload)
 
-    timeline_payload, reused = load_or_build_json(
+    timeline_planned = stage_planned_out("timeline")
+    # Stage outputs built from incomplete provider inputs say so (P2 U-P2-6).
+    partial_kinds = partial_provider_kinds(progress.plan_snapshot())
+    timeline_payload, reused = (planned_out_timeline_payload(
+        input_root, status=timeline_planned[0], reason=timeline_planned[1]
+    ), False) if timeline_planned is not None else load_or_build_json(
         timeline_path,
-        resume=effective_resume,
+        resume=stage_resume,
         expected_command="timeline",
         required_keys=("summary", "events"),
         producer=lambda: run_timeline(
@@ -1033,7 +1174,16 @@ def _run_triage_stages(
     )
     if reused:
         reused_outputs.add("timeline")
-    record_run_checkpoint(checkpoint_records, "timeline", timeline_path, reused=reused)
+    if timeline_planned is None:
+        mark_inputs_partial(timeline_payload, partial_kinds)
+    record_run_checkpoint(
+        checkpoint_records,
+        "timeline",
+        timeline_path,
+        reused=reused,
+        plan_status=timeline_planned[0] if timeline_planned else None,
+        plan_reason=timeline_planned[1] if timeline_planned else None,
+    )
     write_timeline_result(timeline_payload, timeline_path)
     timeline_report_path.write_text(build_timeline_report(timeline_payload), encoding="utf-8")
     finish_stage("timeline")
@@ -1051,9 +1201,12 @@ def _run_triage_stages(
         "timeline_report": timeline_report_path,
         **{f"artifacts_{kind}": path for kind, path in artifact_outputs.items()},
     }
-    indicators_payload, reused = load_or_build_json(
+    indicators_planned = stage_planned_out("indicators")
+    indicators_payload, reused = (planned_out_indicators_payload(
+        status=indicators_planned[0], reason=indicators_planned[1]
+    ), False) if indicators_planned is not None else load_or_build_json(
         indicators_path,
-        resume=effective_resume,
+        resume=stage_resume,
         expected_command="indicators",
         required_keys=("summary", "indicators"),
         producer=lambda: build_indicator_summary(
@@ -1072,7 +1225,16 @@ def _run_triage_stages(
     )
     if reused:
         reused_outputs.add("indicators")
-    record_run_checkpoint(checkpoint_records, "indicators", indicators_path, reused=reused)
+    if indicators_planned is None:
+        mark_inputs_partial(indicators_payload, partial_kinds)
+    record_run_checkpoint(
+        checkpoint_records,
+        "indicators",
+        indicators_path,
+        reused=reused,
+        plan_status=indicators_planned[0] if indicators_planned else None,
+        plan_reason=indicators_planned[1] if indicators_planned else None,
+    )
     write_result(indicators_payload, indicators_path)
     finish_stage("indicators")
 
@@ -1080,7 +1242,13 @@ def _run_triage_stages(
     # queries instead of rescanning every output. A failure leaves the run
     # completed and searchable through the bounded scan backend.
     progress.begin_stage("persist")
-    if case_db:
+    persist_planned = stage_planned_out("persist") if case_db else None
+    if case_db and persist_planned is not None:
+        docs_text_spool_path.unlink(missing_ok=True)
+        case_db_record = skipped_case_db_record(f"run plan: {persist_planned[0]} ({persist_planned[1]})")
+        case_db_record["plan_status"] = persist_planned[0]
+        case_db_record["plan_reason"] = persist_planned[1]
+    elif case_db:
         case_db_record = build_run_case_db(
             output_dir,
             {**provisional_outputs, "indicators": indicators_path},
@@ -1092,7 +1260,19 @@ def _run_triage_stages(
         docs_text_spool_path.unlink(missing_ok=True)
         case_db_record = skipped_case_db_record("disabled by --no-case-db")
     if case_db_record.get("status") == "completed":
+        if partial_kinds:
+            case_db_record["inputs_partial"] = True
+            case_db_record["partial_kinds"] = list(partial_kinds)
         record_run_checkpoint(checkpoint_records, "persist", output_dir / CASE_DB_FILE_NAME, reused=False)
+    elif persist_planned is not None:
+        record_run_checkpoint(
+            checkpoint_records,
+            "persist",
+            output_dir / CASE_DB_FILE_NAME,
+            reused=False,
+            plan_status=persist_planned[0],
+            plan_reason=persist_planned[1],
+        )
     finish_stage(
         "persist",
         {
@@ -1104,7 +1284,10 @@ def _run_triage_stages(
     # triage-flags (plan viewer-families §3.1): rule engine over the run's own outputs into
     # a new analyses/run-triage-flags-<time>/ generation under the output dir; a failure is isolated to the step row.
     progress.begin_stage("triage-flags")
-    triage_step = run_triage_stage(
+    triage_planned = stage_planned_out("triage-flags")
+    triage_step = planned_out_step(
+        "triage-flags", status=triage_planned[0], reason=triage_planned[1]
+    ) if triage_planned is not None else run_triage_stage(
         output_dir,
         artifact_outputs=artifact_outputs,
         artifact_payloads=artifact_payloads,
@@ -1118,7 +1301,10 @@ def _run_triage_stages(
     # derived (통합 보기, plan axiom-adoption §3.2): semantic-tagged column values of every output into
     # a new analyses/run-derived-<time>/ generation; a failure is isolated to the step row.
     progress.begin_stage("derived")
-    derived_step = run_derived_stage(
+    derived_planned = stage_planned_out("derived")
+    derived_step = planned_out_step(
+        "derived", status=derived_planned[0], reason=derived_planned[1]
+    ) if derived_planned is not None else run_derived_stage(
         output_dir,
         artifact_outputs=artifact_outputs,
         artifact_payloads=artifact_payloads,
@@ -1170,6 +1356,7 @@ def _run_triage_stages(
         **{f"artifacts_{kind}": path for kind, path in artifact_outputs.items()},
         "summary": summary_path,
         "report": report_path,
+        "plan": output_dir / PLAN_FILE_NAME,
     }
     if case_db_record.get("status") == "completed":
         outputs["case_db"] = output_dir / CASE_DB_FILE_NAME
@@ -1197,6 +1384,7 @@ def _run_triage_stages(
             outputs["columnar_artifacts"] = Path(str(columnar_artifacts_sidecar["parquet_path"]))
         if columnar_artifacts_sidecar.get("jsonl_path"):
             outputs["columnar_artifacts_jsonl"] = Path(str(columnar_artifacts_sidecar["jsonl_path"]))
+    final_plan = progress.finalize_plan()
     summary_payload = build_run_summary(
         root=input_root.root_path,
         output_dir=output_dir,
@@ -1225,6 +1413,8 @@ def _run_triage_stages(
             "known_good_hash_feeds": [str(path) for path in known_good_hash_feeds],
             "hide_known_good": hide_known_good,
             "known_good_max_hash_bytes": known_good_max_hash_bytes,
+            "skip_groups": list(skip_groups),
+            "skip_tasks": list(skip_tasks),
             "reused_outputs": sorted(reused_outputs),
             "delta_applied_outputs": sorted(delta_applied_outputs),
             "evidence_delta": evidence_delta_manifest or {},
@@ -1247,7 +1437,8 @@ def _run_triage_stages(
         },
         rule_set=rule_set,
         source=build_run_source_record(input_root, image_result=image_result, outputs=outputs),
-        extra_steps=[triage_step, derived_step],
+        extra_steps=[*planned_out_steps, triage_step, derived_step],
+        plan=final_plan,
     )
     audit_output = output_dir / "rapidtriage-run-audit.json"
     summary_payload["audit"] = str(audit_output)
@@ -1304,11 +1495,16 @@ def _run_triage_stages(
             "hide_known_good": hide_known_good,
             "known_good_max_hash_bytes": known_good_max_hash_bytes,
             "reused_outputs": sorted(reused_outputs),
+            "skip_groups": list(skip_groups),
+            "skip_tasks": list(skip_tasks),
+            "plan_control": plan_control_requests(final_plan),
+            "plan_outcome": (final_plan or {}).get("outcome"),
             "image_source": str(image_result.source_path) if image_result else None,
             "image_extracted_root": str(image_result.extract_dir) if image_result else None,
             "image_extraction_command": str(image_result.to_dict().get("command")) if image_result else None,
         },
         input_root=input_root,
+        notes=plan_audit_notes(final_plan),
         input_files=[("image-source", image_result.source_path)] if image_result else [],
         output_files=[
             *([("e01-metadata", e01_metadata_path)] if isinstance(image_result, E01ExtractionResult) else []),
@@ -1343,6 +1539,7 @@ def _run_triage_stages(
             *[(f"artifacts-{kind}", path) for kind, path in artifact_outputs.items()],
             ("run-summary", summary_path),
             ("run-report", report_path),
+            ("run-plan", output_dir / PLAN_FILE_NAME),
             *[
                 (f"docs-extract:{entry['relative_path']}", Path(entry["extracted_path"]).resolve())
                 for entry in docs_extract_payload.get("entries", [])
@@ -1354,6 +1551,38 @@ def _run_triage_stages(
         ],
     )
     return summary_payload
+
+
+def plan_control_requests(plan: Mapping[str, object] | None) -> list[dict[str, object]]:
+    """Every control request the run applied (who/when/what), for the audit record."""
+    control = plan.get("control") if isinstance(plan, Mapping) and isinstance(plan.get("control"), Mapping) else {}
+    requests = control.get("requests") if isinstance(control, Mapping) else None
+    return [dict(item) for item in requests if isinstance(item, Mapping)] if isinstance(requests, list) else []
+
+
+def plan_audit_notes(plan: Mapping[str, object] | None) -> list[str]:
+    """Korean audit notes: one per skipped/cancelled/partial plan task ("부분 런: ...")."""
+    if not isinstance(plan, Mapping):
+        return []
+    notes: list[str] = []
+    labels = {"skipped": "건너뜀", "cancelled": "취소", "partial": "일부 완료(취소)"}
+    for group in plan.get("groups") or []:
+        if not isinstance(group, Mapping):
+            continue
+        for task in group.get("tasks") or []:
+            if not isinstance(task, Mapping):
+                continue
+            status = str(task.get("status") or "")
+            if status not in labels or task.get("reason") in {"옵션 꺼짐", "케이스 DB 꺼짐", "폴더 입력"}:
+                continue
+            requested = task.get("requested_by") if isinstance(task.get("requested_by"), Mapping) else {}
+            who = f"{requested.get('actor')}, {requested.get('at')}" if requested else "사유 기록"
+            notes.append(
+                f"부분 런: 그룹 {group.get('label')} · 태스크 {task.get('label')} {labels[status]} ({who}) — {task.get('reason') or ''}"
+            )
+    if plan.get("outcome") in {"partial", "cancelled"}:
+        notes.append(f"런 결과: {plan.get('outcome')}")
+    return notes
 
 
 def build_columnar_artifacts_sidecar(
@@ -1447,6 +1676,14 @@ def build_columnar_artifacts_sidecar(
     return manifest_core
 
 
+NON_REUSABLE_COLLECTION_STATUSES = frozenset({"cancelled-partial", "failed-isolated"})
+
+
+def artifact_output_ref(artifact_path: Path) -> dict[str, str]:
+    """Plan task ``output`` block of a per-kind artifacts output."""
+    return {"path": str(artifact_path), "records_path": str(artifact_records_path(artifact_path))}
+
+
 def artifact_records_path(artifact_path: Path) -> Path:
     """JSONL row stream that sits next to a per-kind ``.json`` summary."""
     return artifact_path.with_suffix(".jsonl")
@@ -1460,6 +1697,10 @@ def load_reusable_artifact_payload(artifact_path: Path) -> dict[str, object] | N
         required_keys=("summary", "artifacts"),
     )
     if payload is None:
+        return None
+    summary = payload.get("summary") if isinstance(payload.get("summary"), Mapping) else {}
+    if summary.get("collection_status") in NON_REUSABLE_COLLECTION_STATUSES:
+        # A cancelled (partial rows) or failed provider is collected again on resume.
         return None
     if payload.get("records_path") or payload.get("records_file"):
         records_path = resolve_records_path(payload, artifact_path)
@@ -1503,10 +1744,14 @@ def collect_artifact_stages(
     for kind in kinds:
         artifact_path = artifacts_dir / f"rapidtriage-artifacts-{kind}.json"
         reusable = load_reusable_artifact_payload(artifact_path) if (resume or delta is not None) else None
-        if reusable is not None and resume:
+        if reusable is not None and resume and (progress is None or progress.task_should_run(kind)):
             results[kind] = (reusable, artifact_path, True, False)
             if progress is not None:
-                progress.provider_reused(kind, artifact_count=artifact_payload_count(reusable))
+                progress.provider_reused(
+                    kind,
+                    artifact_count=artifact_payload_count(reusable),
+                    output=artifact_output_ref(artifact_path),
+                )
             events.append(
                 build_scheduler_event(
                     kind=kind,
@@ -1572,36 +1817,106 @@ def collect_artifact_stages(
         )
         check_memory(kind)
 
-    if pending or delta_pending:
-        scope_input_root = (
-            derive_child_input_root(input_root, delta.scope_root) if delta else input_root
-        )
-        executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="rapidtriage-artifact")
+    scope_input_root = (
+        derive_child_input_root(input_root, delta.scope_root) if delta is not None and delta_pending else input_root
+    )
+
+    def handle_completed(future: object, mode: str, kind: str, artifact_path: Path, previous: object) -> None:
         try:
-            futures = {}
-            for kind, artifact_path in pending:
-                future = executor.submit(
-                    tracked_artifact_collection,
-                    progress,
+            outcome = future.result()  # type: ignore[attr-defined]
+            if outcome is None:
+                return  # the plan cancelled the task between submit and start
+            payload, started_at, completed_at, duration_ms = outcome
+            status = "completed"
+        except Exception as exc:
+            started_at = dt.datetime.now(dt.timezone.utc).isoformat()
+            completed_at = started_at
+            duration_ms = 0
+            payload = isolated_parser_error_payload(
+                kind,
+                input_root=scope_input_root if mode == "delta" else input_root,
+                exc=exc,
+            )
+            status = "error"
+        cancelled = artifact_payload_cancelled(payload)
+        if mode == "delta" and status == "completed" and not cancelled and delta is not None:
+            record_delta_merge(
+                kind,
+                artifact_path,
+                previous if isinstance(previous, dict) else {},
+                payload,
+                started_at=started_at,
+                completed_at=completed_at,
+                duration_ms=duration_ms,
+            )
+            return
+        if mode == "delta" and cancelled:
+            # A cancelled delta collection leaves the previous complete output untouched.
+            if progress is not None:
+                progress.provider_finished(kind, status="cancelled", artifact_count=0)
+            return
+        if mode == "delta" and status == "error" and delta is not None:
+            # Delta-scope collection failed; fall back to a full
+            # collection so coverage is preserved (crash isolation).
+            try:
+                payload, started_at, completed_at, duration_ms = timed_artifact_collection(
                     input_root,
                     kind=kind,
                     rule_set=rule_set,
                     records_path=artifact_records_path(artifact_path),
                     collector_options=options_by_kind.get(kind),
                 )
-                futures[future] = ("full", kind, artifact_path, None)
+                status = "completed"
+            except Exception as exc:
+                started_at = dt.datetime.now(dt.timezone.utc).isoformat()
+                completed_at = started_at
+                duration_ms = 0
+                payload = isolated_parser_error_payload(kind, input_root=input_root, exc=exc)
+                status = "error"
+        results[kind] = (payload, artifact_path, False, False)
+        # Persist each provider the moment it finishes (I4); the run does not
+        # rewrite these files later. A cancelled provider's output holds the
+        # rows written before the cancel (``cancelled-partial``).
+        write_result(payload, artifact_path)
+        cancelled = artifact_payload_cancelled(payload)
+        if progress is not None:
+            count = artifact_payload_count(payload)
+            summary = payload.get("summary") if isinstance(payload.get("summary"), Mapping) else {}
+            progress.provider_finished(
+                kind,
+                status=("partial" if count else "cancelled") if cancelled else artifact_payload_progress_status(payload, status),
+                artifact_count=count,
+                output=artifact_output_ref(artifact_path),
+                parser_error_count=int(summary.get("parser_error_count") or 0),
+            )
+        events.append(
+            build_scheduler_event(
+                kind=kind,
+                output_path=artifact_path,
+                status="cancelled" if cancelled else status,
+                reused=False,
+                queued_order=output_order.index(kind),
+                output_order=output_order.index(kind),
+                payload=payload,
+                started_at=started_at,
+                completed_at=completed_at,
+                duration_ms=duration_ms,
+            )
+        )
+        check_memory(kind)
+
+    if pending or delta_pending:
+        executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="rapidtriage-artifact")
+        try:
+            futures: dict[object, tuple[str, str, Path, object]] = {}
+            # Run plan (P2 §3.3 b): only ``max_workers`` providers are submitted
+            # at a time and the next queued one when a worker frees up, so a
+            # skip/cancel of a queued task lands before it is ever submitted.
+            queue: list[tuple[str, str, Path, object]] = [("full", kind, path, None) for kind, path in pending]
             if delta is not None:
                 for kind, artifact_path, previous in delta_pending:
                     if delta.scope_file_count:
-                        future = executor.submit(
-                            tracked_artifact_collection,
-                            progress,
-                            scope_input_root,
-                            kind=kind,
-                            rule_set=rule_set,
-                            collector_options=options_by_kind.get(kind),
-                        )
-                        futures[future] = ("delta", kind, artifact_path, previous)
+                        queue.append(("delta", kind, artifact_path, previous))
                     else:
                         # Removal-only delta: no scope files to recollect.
                         record_delta_merge(
@@ -1613,75 +1928,37 @@ def collect_artifact_stages(
                             completed_at=None,
                             duration_ms=0,
                         )
-            for future in as_completed(futures):
-                mode, kind, artifact_path, previous = futures[future]
-                try:
-                    payload, started_at, completed_at, duration_ms = future.result()
-                    status = "completed"
-                except Exception as exc:
-                    started_at = dt.datetime.now(dt.timezone.utc).isoformat()
-                    completed_at = started_at
-                    duration_ms = 0
-                    payload = isolated_parser_error_payload(
-                        kind,
-                        input_root=scope_input_root if mode == "delta" else input_root,
-                        exc=exc,
-                    )
-                    status = "error"
-                if mode == "delta" and status == "completed" and delta is not None:
-                    record_delta_merge(
-                        kind,
-                        artifact_path,
-                        previous if isinstance(previous, dict) else {},
-                        payload,
-                        started_at=started_at,
-                        completed_at=completed_at,
-                        duration_ms=duration_ms,
-                    )
-                    continue
-                if mode == "delta" and status == "error" and delta is not None:
-                    # Delta-scope collection failed; fall back to a full
-                    # collection so coverage is preserved (crash isolation).
-                    try:
-                        payload, started_at, completed_at, duration_ms = timed_artifact_collection(
-                            input_root,
-                            kind=kind,
-                            rule_set=rule_set,
-                            records_path=artifact_records_path(artifact_path),
-                            collector_options=options_by_kind.get(kind),
-                        )
-                        status = "completed"
-                    except Exception as exc:
-                        started_at = dt.datetime.now(dt.timezone.utc).isoformat()
-                        completed_at = started_at
-                        duration_ms = 0
-                        payload = isolated_parser_error_payload(kind, input_root=input_root, exc=exc)
-                        status = "error"
-                results[kind] = (payload, artifact_path, False, False)
-                # Persist each provider the moment it finishes (I4); the run
-                # does not rewrite these files later.
-                write_result(payload, artifact_path)
-                if progress is not None:
-                    progress.provider_finished(
-                        kind,
-                        status=artifact_payload_progress_status(payload, status),
-                        artifact_count=artifact_payload_count(payload),
-                    )
-                events.append(
-                    build_scheduler_event(
+            if progress is not None:
+                queue.sort(key=lambda item: progress.task_order(item[1]))
+
+            def submit_next() -> bool:
+                while queue:
+                    mode, kind, artifact_path, previous = queue.pop(0)
+                    if progress is not None and not progress.task_should_run(kind):
+                        continue  # skipped/cancelled before it started: never submitted
+                    future = executor.submit(
+                        tracked_artifact_collection,
+                        progress,
+                        scope_input_root if mode == "delta" else input_root,
                         kind=kind,
-                        output_path=artifact_path,
-                        status=status,
-                        reused=False,
-                        queued_order=output_order.index(kind),
-                        output_order=output_order.index(kind),
-                        payload=payload,
-                        started_at=started_at,
-                        completed_at=completed_at,
-                        duration_ms=duration_ms,
+                        rule_set=rule_set,
+                        records_path=artifact_records_path(artifact_path) if mode == "full" else None,
+                        collector_options=options_by_kind.get(kind),
                     )
-                )
-                check_memory(kind)
+                    futures[future] = (mode, kind, artifact_path, previous)
+                    return True
+                return False
+
+            for _slot in range(max_workers):
+                if not submit_next():
+                    break
+            while futures:
+                # A 1 s timeout keeps the main thread responsive to Ctrl+C on Windows.
+                done, _not_done = wait(list(futures), timeout=1.0, return_when=FIRST_COMPLETED)
+                for future in done:
+                    mode, kind, artifact_path, previous = futures.pop(future)
+                    handle_completed(future, mode, kind, artifact_path, previous)
+                    submit_next()
         except BaseException:
             # Fail fast (e.g. memory cap): drop queued providers instead of
             # waiting for the whole pool; running workers finish on their own.
@@ -1705,16 +1982,33 @@ def tracked_artifact_collection(
     rule_set: RuleSet | None,
     records_path: Path | None = None,
     collector_options: Mapping[str, object] | None = None,
-) -> tuple[dict[str, object], str, str, int]:
-    """Worker entry point: mark ``kind`` running when its thread starts."""
-    if progress is not None:
-        progress.provider_running(kind)
+) -> tuple[dict[str, object], str, str, int] | None:
+    """Worker entry point: mark ``kind`` running when its thread starts.
+
+    Returns ``None`` (nothing collected) when the run plan skipped or
+    cancelled ``kind`` after it was submitted but before it started; a
+    running collection gets the plan's cooperative cancel check and row
+    counter.
+    """
+    if progress is None:
+        return timed_artifact_collection(
+            input_root,
+            kind=kind,
+            rule_set=rule_set,
+            records_path=records_path,
+            collector_options=collector_options,
+        )
+    if not progress.task_should_run(kind):
+        return None
+    progress.provider_running(kind)
     return timed_artifact_collection(
         input_root,
         kind=kind,
         rule_set=rule_set,
         records_path=records_path,
         collector_options=collector_options,
+        check_cancel=progress.cancel_checker(kind),
+        on_rows=progress.rows_reporter(kind),
     )
 
 
@@ -1726,6 +2020,12 @@ def artifact_payload_count(payload: Mapping[str, object]) -> int:
         except (TypeError, ValueError):
             return 0
     return 0
+
+
+def artifact_payload_cancelled(payload: Mapping[str, object]) -> bool:
+    """The provider was cancelled through the run plan (rows before the cancel are kept)."""
+    summary = payload.get("summary")
+    return isinstance(summary, Mapping) and summary.get("collection_status") == "cancelled-partial"
 
 
 def artifact_payload_progress_status(payload: Mapping[str, object], status: str) -> str:
@@ -1745,6 +2045,8 @@ def timed_artifact_collection(
     rule_set: RuleSet | None,
     records_path: Path | None = None,
     collector_options: Mapping[str, object] | None = None,
+    check_cancel: Callable[[], bool] | None = None,
+    on_rows: Callable[[int], None] | None = None,
 ) -> tuple[dict[str, object], str, str, int]:
     start = time.perf_counter()
     started_at = dt.datetime.now(dt.timezone.utc).isoformat()
@@ -1757,6 +2059,8 @@ def timed_artifact_collection(
         records_path=records_path,
         collector_options=dict(collector_options) if collector_options else None,
         use_cache=False,
+        check_cancel=check_cancel,
+        on_rows=on_rows,
     )
     completed_at = dt.datetime.now(dt.timezone.utc).isoformat()
     duration_ms = max(0, int((time.perf_counter() - start) * 1000))
