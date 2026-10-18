@@ -285,6 +285,7 @@ export const filesCollection: CollectionDef = {
     fetchFilesPage(runId, query.offset, query.limit, signal, query.ref.category || undefined, {
       ids: query.flags,
       grade: query.flagGrade,
+      conditions: query.rowConditions,
     }),
   widthPriority: () => FILES_PRIORITY,
   mapRow: (raw, position, ctx) => {

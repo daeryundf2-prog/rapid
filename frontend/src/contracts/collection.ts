@@ -130,6 +130,11 @@ export interface CollectionQuery {
    * accepted values.
    */
   detailFilters?: Record<string, string[]>;
+  /**
+   * Row conditions the listing API applies (r4 §2.3; artifacts · files · timeline): query params
+   * `from`, `to`, `weekday`, `hours`, `offhours`, `tz`, `partial`, `content`, `geo` (lists repeat).
+   */
+  rowConditions?: Record<string, string | string[]>;
   /** Navigation category (tree) filter; interpreted by the collection. */
   category?: string;
   /**

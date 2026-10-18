@@ -5,7 +5,8 @@
 
 import { type RefObject, useEffect, useMemo, useState } from "react";
 import type { GridRow } from "../../contracts/collection";
-import { rowMatchesFilters } from "../filters/filterModel";
+import { useTimezone } from "../../state/hooks";
+import { clientOnlyFilters, partitionFilters, rowMatchesFilters } from "../filters/filterModel";
 import { useFilterStore } from "../filters/filterStore";
 import { useRoute } from "../grid/adapter";
 import { matchesFilter } from "../grid/gridUtils";
@@ -16,6 +17,8 @@ export interface ViewRowsOptions {
   predicate: (row: GridRow) => boolean;
   /** Apply the grid's text filter `q` (server path filter + client text match). Chat only highlights. */
   textFilter: boolean;
+  /** Server row conditions of the view itself (지도: `geo=` world box = located rows only); stable object. */
+  rowConditions?: Record<string, string | string[]>;
 }
 
 export interface ViewRows {
@@ -25,7 +28,7 @@ export interface ViewRows {
   q: string;
 }
 
-export function useViewRows({ predicate, textFilter }: ViewRowsOptions): ViewRows {
+export function useViewRows({ predicate, textFilter, rowConditions }: ViewRowsOptions): ViewRows {
   const route = useRoute();
   const q = route.q;
   const isSearch = route.collection.id === "search";
@@ -36,19 +39,27 @@ export function useViewRows({ predicate, textFilter }: ViewRowsOptions): ViewRow
       limit: PAGE_SIZE,
       text: textFilter && q ? q : undefined,
       search: route.search,
+      ...(rowConditions ? { rowConditions } : {}),
     },
     { runId: route.runId },
   );
   const filters = useFilterStore((s) => s.filters);
+  const { timezone } = useTimezone();
+  // The rows are already filtered (server + client) by the collection query: only re-check what the
+  // API did not apply, never a server condition the loaded row cannot show (e.g. an NTFS time).
+  const clientFilters = useMemo(
+    () => clientOnlyFilters(filters, partitionFilters(route.collection, filters, [], timezone)),
+    [filters, route.collection, timezone],
+  );
   const rows = useMemo(
     () =>
       cq.loadedRows.filter(
         (row) =>
           predicate(row) &&
-          rowMatchesFilters(row, filters) &&
+          rowMatchesFilters(row, clientFilters, timezone) &&
           (!textFilter || isSearch || matchesFilter(row, q)),
       ),
-    [cq.loadedRows, predicate, filters, textFilter, isSearch, q],
+    [cq.loadedRows, predicate, clientFilters, timezone, textFilter, isSearch, q],
   );
   return { cq, rows, runId: route.runId, q };
 }

@@ -47,6 +47,12 @@ export interface FlagFilter {
   ids?: readonly string[];
   grade?: string;
   fields?: RecordFieldFilters;
+  /** Row conditions (r4 §2.3) the listing API applies: query params, lists repeat. */
+  conditions?: Record<string, string | string[]>;
+}
+
+function hasConditions(filter: FlagFilter | undefined): boolean {
+  return Boolean(filter?.conditions && Object.keys(filter.conditions).length);
 }
 
 function flagQuery(filter: FlagFilter | undefined): {
@@ -54,12 +60,14 @@ function flagQuery(filter: FlagFilter | undefined): {
   flag_grade?: string;
   browser?: string[];
   service?: string[];
+  conditions?: Record<string, string | string[]>;
 } {
   return {
     ...(filter?.ids?.length ? { flag: [...filter.ids] } : {}),
     ...(filter?.grade ? { flag_grade: filter.grade } : {}),
     ...(filter?.fields?.browser?.length ? { browser: [...filter.fields.browser] } : {}),
     ...(filter?.fields?.service?.length ? { service: [...filter.fields.service] } : {}),
+    ...(hasConditions(filter) ? { conditions: filter?.conditions } : {}),
   };
 }
 
@@ -81,14 +89,19 @@ function hasChannelQuery(query: ChannelQuery | undefined): boolean {
 }
 
 function hasFlagFilter(filter: FlagFilter | undefined): boolean {
-  return Boolean(filter?.ids?.length || filter?.grade || hasRecordFields(filter?.fields));
+  return Boolean(
+    filter?.ids?.length || filter?.grade || hasRecordFields(filter?.fields) || hasConditions(filter),
+  );
 }
 
-/** `&flag=…&flag_grade=…` for the JSON listings (files, analysis). */
+/** `&flag=…&flag_grade=…` (+ row conditions) for the JSON listings (files, analysis, timeline). */
 export function flagQueryString(filter: FlagFilter | undefined): string {
   const params = new URLSearchParams();
   for (const id of filter?.ids ?? []) params.append("flag", id);
   if (filter?.grade) params.set("flag_grade", filter.grade);
+  for (const [key, value] of Object.entries(filter?.conditions ?? {})) {
+    for (const item of Array.isArray(value) ? value : [value]) params.append(key, item);
+  }
   const text = params.toString();
   return text ? `&${text}` : "";
 }
@@ -303,8 +316,24 @@ export async function fetchDocsPage(
     meta: { docs_rows: key },
   };
 }
-export const fetchTimelinePage = (runId: string, offset: number, limit: number, signal?: AbortSignal) =>
-  jsonPaged(runId, "timeline", "events", offset, limit, signal);
+export const fetchTimelinePage = (
+  runId: string,
+  offset: number,
+  limit: number,
+  signal?: AbortSignal,
+  conditions?: Record<string, string | string[]>,
+) =>
+  jsonPaged(
+    runId,
+    "timeline",
+    "events",
+    offset,
+    limit,
+    signal,
+    undefined,
+    undefined,
+    flagQueryString({ conditions }),
+  );
 export const fetchIndicatorsPage = (runId: string, offset: number, limit: number, signal?: AbortSignal) =>
   jsonPaged(runId, "indicators", "indicators", offset, limit, signal);
 

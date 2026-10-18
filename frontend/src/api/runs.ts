@@ -452,6 +452,8 @@ export interface ArtifactsQuery {
   channel?: string[];
   /** Event-log channel groups (repeated `channel_group=`: security … other, none, services). */
   channel_group?: string[];
+  /** Row conditions (r4 §2.3): `from`, `to`, `weekday`, `hours`, `offhours`, `tz`, `partial`, `content`, `geo`. */
+  conditions?: Record<string, string | string[]>;
 }
 
 export function artifactsQueryString(query: ArtifactsQuery): string {
@@ -467,6 +469,9 @@ export function artifactsQueryString(query: ArtifactsQuery): string {
   for (const value of query.service ?? []) params.append("service", value);
   for (const channel of query.channel ?? []) params.append("channel", channel);
   for (const group of query.channel_group ?? []) params.append("channel_group", group);
+  for (const [key, value] of Object.entries(query.conditions ?? {})) {
+    for (const item of Array.isArray(value) ? value : [value]) params.append(key, item);
+  }
   if (query.sort) {
     params.set("sort", query.sort);
     params.set("order", query.order ?? "asc");

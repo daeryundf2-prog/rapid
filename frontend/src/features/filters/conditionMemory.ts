@@ -94,6 +94,15 @@ export function normalizeFilters(raw: unknown): FilterState {
     columns,
     ...(flags.length ? { flags } : {}),
     ...(grade ? { flagGrade: grade } : {}),
+    // Row conditions (r4 §2.3): saved condition sets carry them too.
+    ...(stringList(src.weekdays).length ? { weekdays: stringList(src.weekdays) } : {}),
+    ...(text(src.hours) && /^\d{1,2}-\d{1,2}$/.test(text(src.hours) as string)
+      ? { hours: text(src.hours) }
+      : {}),
+    ...(src.offhours === true ? { offhours: true } : {}),
+    ...(src.partial === true ? { partial: true } : {}),
+    ...(stringList(src.content).length ? { content: stringList(src.content) } : {}),
+    ...(text(src.geo) ? { geo: text(src.geo) } : {}),
   };
 }
 

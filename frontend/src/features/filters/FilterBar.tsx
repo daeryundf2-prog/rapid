@@ -14,6 +14,7 @@ import { Icon } from "../../icons";
 import { type Grade, useCatalog } from "../flags/catalog";
 import { REVIEW_LABELS } from "../grid/columns/common";
 import { DEFAULT_PRESET, DENSITY_LABELS, type Density, type GridPreset, PRESET_LABELS } from "../grid/types";
+import { ClockSection, IncidentRange, ResultSection } from "./ConditionSections";
 import {
   recentRanges,
   rememberRange,
@@ -162,6 +163,7 @@ function FilterPopoverBody({ tagListId }: { tagListId: string }) {
             </button>
           ))}
         </div>
+        <IncidentRange />
         <RecentRanges onPick={(range) => patch({ from: range.from, to: range.to })} />
         {/* One column (review #10): a datetime field needs the popover's full width. */}
         <div className="filter-range">
@@ -187,6 +189,9 @@ function FilterPopoverBody({ tagListId }: { tagListId: string }) {
           </label>
         </div>
       </fieldset>
+
+      <ClockSection />
+      <ResultSection />
 
       <fieldset className="popover-section" aria-label="아티팩트 유형">
         <legend className="popover-title">유형</legend>
@@ -742,6 +747,12 @@ export function FilterBar(props: FilterBarProps) {
                       path: "",
                       flags: [],
                       flagGrade: undefined,
+                      weekdays: undefined,
+                      hours: undefined,
+                      offhours: undefined,
+                      partial: undefined,
+                      content: undefined,
+                      geo: undefined,
                     })
                   }
                 >
