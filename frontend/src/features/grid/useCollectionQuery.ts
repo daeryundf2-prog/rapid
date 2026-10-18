@@ -185,6 +185,8 @@ export function collectionQueryKey(runId: string | null, query: CollectionQuery,
     query.flags?.length || query.flagGrade ? `${query.flagGrade ?? ""}|${(query.flags ?? []).join(",")}` : "",
     // Exact record-field filters (`browser=` / `service=`), artifacts only.
     query.ref.id === "artifacts" ? recordFieldsKey(query.fields) : "",
+    // Analysis rows `details` server filters (R3 §3.3).
+    query.ref.id === "analysis" && query.detailFilters ? JSON.stringify(query.detailFilters) : "",
   ] as const;
 }
 

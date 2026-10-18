@@ -1,4 +1,4 @@
-"""Extract NTFS metadata files ($MFT, $UsnJrnl:$J) from disk images.
+"""Extract NTFS metadata files ($MFT, $UsnJrnl:$J, $LogFile) from disk images.
 
 Uses Sleuth Kit ``mmls``/``fls``/``icat`` so the same code path works on
 raw/dd images and on E01/Ex01 images when the installed TSK build has
@@ -32,6 +32,7 @@ from .e01 import (
 NTFS_METADATA_REQUIRED_TOOLS = ("mmls", "fls", "icat")
 
 MFT_INODE = 0
+LOGFILE_INODE = 2
 EXTEND_INODE = 11
 USN_JOURNAL_NAME = "$UsnJrnl"
 USN_JOURNAL_DATA_STREAM = "$J"
@@ -321,8 +322,31 @@ def extract_ntfs_metadata(
             )
             journal_path.unlink(missing_ok=True)
 
+    # --- $LogFile (plan r3-os-depth §3.3; optional: never changes extraction_status) ---
+    logfile_path = out_dir / "LogFile.bin"
+    logfile_command = ["icat", "-o", str(sector), str(source), str(LOGFILE_INODE)]
+    logfile_result = stream_runner(logfile_command, logfile_path)
+    if logfile_result.returncode == 0 and logfile_path.is_file() and logfile_path.stat().st_size > 0:
+        manifest["outputs"]["logfile"] = {
+            "path": str(logfile_path),
+            "size_bytes": logfile_path.stat().st_size,
+            "sha256": hash_file_sha256(logfile_path),
+            "inode": LOGFILE_INODE,
+            "command": logfile_command,
+            "extraction_mode": "full-stream",
+        }
+    else:
+        manifest["skipped"].append(
+            {
+                "target": "logfile",
+                "reason": f"icat exit {logfile_result.returncode}: {(logfile_result.stderr or b'').decode('utf-8', 'replace').strip()[:300]}",
+            }
+        )
+        logfile_path.unlink(missing_ok=True)
+
+    required = {"mft", "usn_journal"} & set(manifest["outputs"])
     manifest["extraction_status"] = (
-        "complete" if len(manifest["outputs"]) == 2 else ("partial" if manifest["outputs"] else "blocked")
+        "complete" if len(required) == 2 else ("partial" if required else "blocked")
     )
     manifest_path = out_dir / "rapidtriage-ntfs-meta.json"
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")

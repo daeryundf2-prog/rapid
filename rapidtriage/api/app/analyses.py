@@ -713,9 +713,18 @@ class AnalysisContext:
                 self._rows_handle.close()
                 self._rows_handle = None
 
-    def row(self, details: Mapping[str, object], *, path: str | None = None) -> dict[str, object]:
-        """Build a ``<kind>-row`` record."""
-        record: dict[str, object] = {"artifact_type": f"{self.spec.kind}-row"}
+    @property
+    def rows_written(self) -> int:
+        """Rows written so far (flushed + pending): the ``record_index`` the next row gets."""
+        with self.lock:
+            return int(self.state.get("row_count") or 0) + self._pending_rows
+
+    def row(
+        self, details: Mapping[str, object], *, path: str | None = None, artifact_type: str | None = None
+    ) -> dict[str, object]:
+        """Build a ``<kind>-row`` record (``artifact_type`` names a typed row of the kind, e.g.
+        ``ntfs-timestamp-mismatch`` of ``ntfs-meta``)."""
+        record: dict[str, object] = {"artifact_type": artifact_type or f"{self.spec.kind}-row"}
         if path:
             record["path"] = path
         record["details"] = dict(details)

@@ -15,6 +15,11 @@ import { baseName, col, isRecord, makeRef, makeRow, sha256Of, str, strOrNull } f
 
 const VSC_STATUS: Record<string, string> = { deleted: "삭제됨", modified: "수정됨", added: "추가됨" };
 const OCR_STATUS: Record<string, string> = { ok: "성공", empty: "텍스트 없음", failed: "실패" };
+const RECOVERY_METHOD: Record<string, string> = {
+  carved: "카빙",
+  parsed: "파싱됨",
+  rejected: "거부됨(오탐)",
+};
 
 const label = (map: Record<string, string>) => (value: unknown) => {
   const text = str(value);
@@ -43,6 +48,9 @@ export const ANALYSIS_COLUMNS: Record<string, KindColumnDef[]> = {
     { header: "길이", keys: ["length"], width: 100, bytes: true },
     { header: "신뢰도", keys: ["confidence"], width: 80, number: true },
     { header: "SHA-256", keys: ["sha256"], width: 200, mono: true },
+    // R3 §3.3: the family a carved file belongs to and how it was recovered.
+    { header: "계열", keys: ["family_label"], width: 90 },
+    { header: "복구 방법", keys: ["recovery_method"], width: 90, display: label(RECOVERY_METHOD) },
     { header: "추출 경로", keys: ["extracted_path"], width: 260 },
     { header: "비고", keys: ["notes"], width: 200 },
   ],
@@ -220,6 +228,7 @@ export const analysisCollection: CollectionDef = {
         pathContains: query.pathContains?.trim() || serverPathFilter(query.text),
         ...(query.flags?.length ? { flags: query.flags } : {}),
         ...(query.flagGrade ? { flagGrade: query.flagGrade } : {}),
+        ...(query.detailFilters ? { detailFilters: query.detailFilters } : {}),
       },
       signal,
     );
@@ -242,6 +251,8 @@ export const analysisCollection: CollectionDef = {
     const offset = typeof d.offset === "number" && d.offset >= 0 ? d.offset : null;
     const length = typeof d.length === "number" && d.length > 0 ? d.length : undefined;
     const isCarveHit = kind === "carve" && offset !== null && path !== null;
+    const carvedRow =
+      kind === "carve" && d.status !== "false-positive-rejected" && d.recovery_method !== "rejected";
     return makeRow(
       makeRef("analysis", `/rows/${rowIndex}`, analysisId || undefined),
       {
@@ -263,6 +274,8 @@ export const analysisCollection: CollectionDef = {
         ...(isCarveHit
           ? { highlight: { offset, ...(length ? { length } : {}) }, viewerMode: "hex", sourceOffset: offset }
           : {}),
+        // 증거 정보 "복구 방법 카빙 · 오프셋" (rows written before R3 have no recovery_method).
+        ...(carvedRow ? { recovery: "carved" } : {}),
       },
     );
   },

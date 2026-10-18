@@ -124,6 +124,11 @@ export interface CollectionQuery {
   flagGrade?: "A" | "B" | "C";
   /** Exact record-field filters (`browser=` / `service=`), artifacts server-side only. */
   fields?: RecordFieldFilters;
+  /**
+   * Analysis rows: exact `details` filters the rows API applies (R3 §3.3: `source=`,
+   * `signature_kind=`, `recovery_method=`), key → accepted values.
+   */
+  detailFilters?: Record<string, string[]>;
   /** Navigation category (tree) filter; interpreted by the collection. */
   category?: string;
   /**

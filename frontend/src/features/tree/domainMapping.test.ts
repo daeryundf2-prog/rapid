@@ -442,6 +442,8 @@ describe("domain mapping table (parser-quality r1)", () => {
       "이메일",
       "카카오톡(macOS)",
       "카카오톡(Windows)",
+      // R3 O3: a server-filtered (rank 3) view of the carve analysis, after the evidence nodes.
+      "이메일(EML) 복구됨(카빙)",
     ]);
   });
 

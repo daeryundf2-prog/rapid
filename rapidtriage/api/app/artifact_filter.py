@@ -138,13 +138,15 @@ def filter_artifact_page(
     record_limit: int | None = None,
     channels: ChannelFilter | Collection[str] | None = None,
     fields: FieldFilters | None = None,
+    row_filter: Callable[[Mapping[str, object]], bool] | None = None,
 ) -> dict[str, object]:
     """Page only rows whose ``path`` contains ``path_contains`` (NFC, case-insensitive),
     when ``artifact_types`` is given, whose ``artifact_type`` is one of them,
     when ``channels`` is given, that match it (exact ``details.channel``
-    names and/or channel groups, see :class:`ChannelFilter`), and, with
-    ``fields``, whose record fields equal one of the given values. Filter
-    kinds AND together; values within one kind OR.
+    names and/or channel groups, see :class:`ChannelFilter`), with
+    ``fields``, whose record fields equal one of the given values, and, with
+    ``row_filter``, that predicate holds (analysis ``details`` filters).
+    Filter kinds AND together; values within one kind OR.
 
     Streams the kind's rows; ``offset`` counts matches. Stops after ``limit``
     matches plus one lookahead row, or after ``scan_cap`` scanned rows
@@ -158,6 +160,12 @@ def filter_artifact_page(
     wanted_types = frozenset(artifact_types) if artifact_types else None
     wanted_channels = as_channel_filter(channels)
     matches = row_matcher(needle, wanted_types, wanted_channels, fields)
+    if row_filter is not None:
+        base_matches = matches
+
+        def matches(row: Mapping[str, object]) -> bool:
+            return base_matches(row) and row_filter(row)
+
     rows: list[object] = []
     matched = 0
     scanned = 0

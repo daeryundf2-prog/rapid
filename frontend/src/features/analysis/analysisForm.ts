@@ -61,6 +61,19 @@ export const CARVE_KINDS: Choice[] = [
   { id: "7z", label: "7z" },
   { id: "rar", label: "RAR" },
   { id: "sqlite", label: "SQLite" },
+  // R3 §3.3 (core/carving.py SIGNATURE_KINDS).
+  { id: "wav", label: "WAV 오디오" },
+  { id: "mp3", label: "MP3 오디오" },
+  { id: "m4a", label: "M4A 오디오" },
+  { id: "mp4", label: "MP4 동영상" },
+  { id: "docx", label: "Word(DOCX)" },
+  { id: "xlsx", label: "Excel(XLSX)" },
+  { id: "pptx", label: "PowerPoint(PPTX)" },
+  { id: "hwp", label: "한글(HWP)" },
+  { id: "hwpx", label: "한글(HWPX)" },
+  { id: "eml", label: "이메일(EML)" },
+  { id: "pe", label: "실행 파일(PE)" },
+  { id: "evtx", label: "이벤트 로그(EVTX)" },
 ];
 
 export const VSC_STATUSES: Choice[] = [

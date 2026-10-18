@@ -16,6 +16,7 @@
  * the rows already loaded; the filter status line says so.
  */
 
+import { ANALYSIS_DETAIL_FILTER_KEYS } from "../../api/analyses";
 import {
   type CollectionQuery,
   type CollectionRef,
@@ -189,6 +190,8 @@ export interface FilterPlan {
     flags?: string[];
     flagGrade?: Grade;
     fields?: RecordFieldFilters;
+    /** Analysis rows: exact `details` filters (`f:source` / `f:signature_kind` / `f:recovery_method`). */
+    details?: Record<string, string[]>;
   };
   /** Column filters the client applies to loaded rows (the rest went to the API). */
   clientColumns: ColumnFilter[];
@@ -215,6 +218,12 @@ export function parseChannelFilterValue(value: string): string[] {
     .split("|")
     .map((part) => part.trim())
     .filter(Boolean);
+}
+
+/** `f:<key>` column of an analysis `details` key the rows API filters exactly, else null. */
+export function analysisDetailKey(col: string): string | null {
+  const key = col.startsWith("f:") ? col.slice(2) : "";
+  return ANALYSIS_DETAIL_FILTER_KEYS.includes(key) ? key : null;
 }
 
 /** Decide which active filters go to the API for this collection and which stay on the client. */
@@ -317,6 +326,17 @@ export function partitionFilters(
         server.channelGroups = [...new Set([...(server.channelGroups ?? []), ...groups])];
         serverColumns.push(filter);
       } else clientColumns.push(filter);
+    } else if (contains && ref.id === "analysis" && analysisDetailKey(filter.col)) {
+      // R3 §3.3: exact server filter on the rows' `details` (comma = any of).
+      const key = analysisDetailKey(filter.col) as string;
+      const values = filter.value
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean);
+      if (values.length) {
+        server.details = { ...(server.details ?? {}), [key]: values };
+        serverColumns.push(filter);
+      } else clientColumns.push(filter);
     } else if (contains && filter.col === "extension" && ref.id === "search") {
       const ext = normalizeExt(filter.value);
       server.extension = [...new Set([...(server.extension ?? []), ext])];
@@ -368,6 +388,7 @@ export function applyFiltersToQuery(
   if (plan.server.flags) next.flags = plan.server.flags;
   if (plan.server.flagGrade) next.flagGrade = plan.server.flagGrade;
   if (plan.server.fields) next.fields = plan.server.fields;
+  if (plan.server.details) next.detailFilters = plan.server.details;
   return next;
 }
 

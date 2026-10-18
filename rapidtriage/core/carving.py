@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import io
 import json
 import os
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import carving_formats as formats
 from .docs import write_result
 from .input_root import InputRoot, resolve_input_root
 from .recovery import (
@@ -47,6 +49,8 @@ STATUS_LENGTH_FIELD_TRUNCATED = "length-field-truncated"
 STATUS_BOUNDED_NO_FOOTER = "bounded-no-footer"
 STATUS_BOUNDED_HEADER = "bounded-header-candidate"
 STATUS_REJECTED = "false-positive-rejected"
+# Boundary found by a text heuristic (eml: first NUL byte / next message separator).
+STATUS_TEXT_BOUNDARY = formats.STATUS_TEXT_BOUNDARY
 
 
 class CarvingError(RuntimeError):
@@ -171,13 +175,36 @@ class CarvingSignature:
     include_end: bool = True
     validator: Callable[[bytes], str | None] | None = None
     size_hint: Callable[[bytes], int | None] | None = None
+    # R3 (plan r3-os-depth §3.3). ``anchor``: the pattern sits this many bytes after
+    # the file start (``ftyp`` at +4). ``probe_bytes``: header bytes the validator
+    # sees. ``max_bytes``: the format's own length bound (``max_carve_bytes`` still
+    # caps it). ``walker``: carve window -> ``(length, status, boundary method)`` or
+    # a rejection reason. ``group``: an accepted candidate claims ``[offset, end)``
+    # so later matches of the same group inside it (ZIP members of a docx, MP3
+    # frames after an ID3 tag, the ``Received:`` lines of one message) are not
+    # separate candidates; ``claims_range=False`` (generic zip) is suppressed by a
+    # claim but never claims. ``fallback`` signatures lose ties at the same offset
+    # (a docx is not reported as a zip as well).
+    anchor: int = 0
+    probe_bytes: int = HEADER_PROBE_BYTES
+    max_bytes: int | None = None
+    walker: Callable[[bytes], tuple[int, str, str] | str] | None = None
+    group: str | None = None
+    claims_range: bool = True
+    fallback: bool = False
 
+
+GIB = formats.GIB
+MIB = formats.MIB
+ZIP_CONTAINER_PROBE_BYTES = 256 * 1024
 
 SIGNATURES: tuple[CarvingSignature, ...] = (
     CarvingSignature("jpeg", ".jpg", b"\xff\xd8\xff", b"\xff\xd9", validator=_validate_jpeg),
     CarvingSignature("png", ".png", b"\x89PNG\r\n\x1a\n", b"IEND\xaeB`\x82", validator=_validate_png),
     CarvingSignature("pdf", ".pdf", b"%PDF-", b"%%EOF", validator=_validate_pdf),
-    CarvingSignature("zip", ".zip", b"PK\x03\x04", None, validator=_validate_zip),
+    CarvingSignature(
+        "zip", ".zip", b"PK\x03\x04", None, validator=_validate_zip, group="zip", claims_range=False, fallback=True
+    ),
     CarvingSignature(
         "sqlite",
         ".sqlite",
@@ -189,9 +216,85 @@ SIGNATURES: tuple[CarvingSignature, ...] = (
     CarvingSignature("gif", ".gif", b"GIF8", b"\x3b", validator=_validate_gif),
     CarvingSignature("7z", ".7z", b"7z\xbc\xaf\x27\x1c", None, validator=_validate_7z),
     CarvingSignature("rar", ".rar", b"Rar!\x1a\x07", None, validator=_validate_rar),
+    # R3: audio/video, Office/HWP, e-mail, executables, event logs (validators: carving_formats).
+    CarvingSignature(
+        "wav", ".wav", b"RIFF", None, validator=formats.validate_wav, walker=formats.walk_wav,
+        probe_bytes=1024, max_bytes=4 * GIB + 8,
+    ),
+    CarvingSignature(
+        "mp3", ".mp3", b"ID3", None, validator=formats.validate_mp3_id3, walker=formats.walk_mp3_id3,
+        max_bytes=512 * MIB, group="mp3",
+    ),
+    *(
+        CarvingSignature(
+            "mp3", ".mp3", sync, None, validator=formats.validate_mp3_sync, walker=formats.walk_mp3_sync,
+            probe_bytes=4, max_bytes=512 * MIB, group="mp3",
+        )
+        for sync in (b"\xff\xfb", b"\xff\xfa", b"\xff\xf3", b"\xff\xf2")
+    ),
+    CarvingSignature(
+        "m4a", ".m4a", b"ftyp", None, anchor=4, validator=formats.validate_m4a, walker=formats.walk_bmff,
+        max_bytes=4 * GIB, group="bmff",
+    ),
+    CarvingSignature(
+        "mp4", ".mp4", b"ftyp", None, anchor=4, validator=formats.validate_mp4, walker=formats.walk_bmff,
+        max_bytes=16 * GIB, group="bmff",
+    ),
+    *(
+        CarvingSignature(
+            kind, f".{kind}", b"PK\x03\x04", None, validator=formats.zip_container_validator(kind),
+            walker=formats.walk_zip, probe_bytes=ZIP_CONTAINER_PROBE_BYTES, max_bytes=2 * GIB, group="zip",
+        )
+        for kind in ("docx", "xlsx", "pptx", "hwpx")
+    ),
+    CarvingSignature(
+        "hwp", ".hwp", b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1", None, validator=formats.validate_cfb,
+        walker=formats.walk_hwp, max_bytes=2 * GIB,
+    ),
+    *(
+        CarvingSignature(
+            "eml", ".eml", start, None, validator=formats.validate_eml, walker=formats.walk_eml,
+            probe_bytes=formats.EML_HEADER_MAX, max_bytes=64 * MIB, group="eml",
+        )
+        for start in (b"Return-Path: ", b"Received: from ", b"Delivered-To: ")
+    ),
+    CarvingSignature(
+        "pe", ".exe", b"MZ", None, validator=formats.validate_pe, walker=formats.walk_pe,
+        probe_bytes=formats.PE_PROBE_BYTES, max_bytes=2 * GIB,
+    ),
+    CarvingSignature(
+        "evtx", ".evtx", b"ElfFile\x00", None, validator=formats.validate_evtx, walker=formats.walk_evtx,
+        probe_bytes=formats.EVTX_HEADER_BLOCK, max_bytes=4 * GIB,
+    ),
 )
 
-SIGNATURE_KINDS: tuple[str, ...] = tuple(signature.kind for signature in SIGNATURES)
+# Several patterns may share a kind (mp3: ID3 + four frame syncs; eml: three header starts).
+SIGNATURE_KINDS: tuple[str, ...] = tuple(dict.fromkeys(signature.kind for signature in SIGNATURES))
+
+# Where a carved candidate of each signature kind belongs in the evidence tree (plan
+# r3-os-depth §3.3 "복구됨(카빙)" family nodes): (artifact kind, artifact_type, Korean family).
+CARVED_FAMILIES: dict[str, tuple[str, str, str]] = {
+    "jpeg": ("media-image", "media-image", "이미지"),
+    "png": ("media-image", "media-image", "이미지"),
+    "gif": ("media-image", "media-image", "이미지"),
+    "wav": ("media-image", "media-audio", "오디오"),
+    "mp3": ("media-image", "media-audio", "오디오"),
+    "m4a": ("media-image", "media-audio", "오디오"),
+    "mp4": ("media-image", "media-video", "동영상"),
+    "pdf": ("generic-documents", "document", "문서"),
+    "docx": ("generic-documents", "document", "문서"),
+    "xlsx": ("generic-documents", "document", "문서"),
+    "pptx": ("generic-documents", "document", "문서"),
+    "hwp": ("generic-documents", "document", "문서"),
+    "hwpx": ("generic-documents", "document", "문서"),
+    "zip": ("generic-documents", "archive-file-inventory", "압축"),
+    "7z": ("generic-documents", "archive-file-inventory", "압축"),
+    "rar": ("generic-documents", "archive-file-inventory", "압축"),
+    "sqlite": ("windows-filesystem", "database-file", "데이터베이스"),
+    "eml": ("email", "email-message", "이메일"),
+    "pe": ("windows-execution", "executable-file", "실행 파일"),
+    "evtx": ("eventlog", "eventlog-file", "이벤트 로그"),
+}
 
 
 def run_bounded_carving(
@@ -353,6 +456,49 @@ def run_bounded_carving(
     return payload
 
 
+def _buffer_matches(buffer: bytes, base: int, signatures: Sequence[CarvingSignature]) -> list[tuple[int, int, int]]:
+    """Every header match in ``buffer`` as ``(file offset, tie order, signature index)``, sorted.
+
+    Candidates are processed in offset order (not signature by signature) so a
+    range claimed by an accepted container suppresses the matches inside it;
+    at one offset specific signatures go before ``fallback`` ones.
+    """
+    matches: list[tuple[int, int, int]] = []
+    for index, signature in enumerate(signatures):
+        start_at = 0
+        while True:
+            pos = buffer.find(signature.start, start_at)
+            if pos < 0:
+                break
+            start_at = pos + 1
+            offset = base + pos - signature.anchor
+            if offset >= 0:
+                matches.append((offset, 1 if signature.fallback else 0, index))
+    matches.sort()
+    return matches
+
+
+class _Claims:
+    """Accepted ``[start, end)`` ranges per signature group (pruned as the scan moves on)."""
+
+    def __init__(self) -> None:
+        self.ranges: dict[str, list[tuple[int, int]]] = {}
+
+    def covers(self, group: str | None, offset: int) -> bool:
+        return group is not None and any(start <= offset < end for start, end in self.ranges.get(group, ()))
+
+    def claim(self, signature: CarvingSignature, entry: Mapping[str, object]) -> None:
+        if signature.group is None or not signature.claims_range or entry.get("status") == STATUS_REJECTED:
+            return
+        start, end = int(entry["offset"]), int(entry.get("end_offset") or 0)  # type: ignore[arg-type]
+        if end > start:
+            self.ranges.setdefault(signature.group, []).append((start, end))
+
+    def prune(self, below: int) -> None:
+        for group, ranges in self.ranges.items():
+            self.ranges[group] = [item for item in ranges if item[1] > below]
+
+
 def _scan_source(
     path: Path,
     *,
@@ -373,6 +519,10 @@ def _scan_source(
     deferred to the next window so headers straddling chunk boundaries
     are not missed. Carving itself seeks to the candidate offset and
     reads a bounded window, so footers may live beyond the scan chunk.
+    Matches are handled in offset order; a match inside a range an accepted
+    candidate of the same ``group`` claimed is skipped, and a rejection
+    whose reason is "not this format at all" (``carving_formats.SILENT_PREFIXES``)
+    is dropped without an entry.
 
     Optional hooks (defaults keep the CLI behaviour): ``check_cancel`` is
     called before every chunk read and every candidate (it raises to stop);
@@ -386,6 +536,7 @@ def _scan_source(
     scanned = 0
     tail = b""
     base = 0  # file offset of buffer[0]
+    claims = _Claims()
     with path.open("rb") as handle:
         while True:
             if check_cancel is not None:
@@ -401,48 +552,100 @@ def _scan_source(
             # are emitted then. Matches already emitted sit below the
             # previous emit limit, which equals this window's base.
             emit_limit = base + len(buffer) - (0 if eof else SCAN_OVERLAP_BYTES)
-            for signature in signatures:
-                start_at = 0
-                while True:
-                    pos = buffer.find(signature.start, start_at)
-                    if pos < 0:
-                        break
-                    offset = base + pos
-                    start_at = pos + 1
-                    if offset >= emit_limit:
-                        continue
-                    if counted >= remaining:
-                        break
-                    if check_cancel is not None:
-                        check_cancel()
-                    # Building a candidate seeks to its offset and reads its window;
-                    # the scan resumes from the chunk position afterwards (without
-                    # this, the next chunk read continued after the carve window).
-                    position = handle.tell()
-                    try:
-                        entry = _build_candidate_entry(
-                            handle,
-                            path=path,
-                            file_size=read_limit,
-                            offset=offset,
-                            signature=signature,
-                            output_dir=output_dir,
-                            extract=extract,
-                            max_carve_bytes=max_carve_bytes,
-                        )
-                    finally:
-                        handle.seek(position)
-                    if count_rejected or entry.get("status") != STATUS_REJECTED:
-                        counted += 1
-                    if on_entry is not None:
-                        on_entry(entry)
+            probes: dict[tuple[int, int], bytes] = {}
+            for offset, _tie, index in _buffer_matches(buffer, base, signatures):
+                signature = signatures[index]
+                # An anchored pattern (``ftyp`` at +4) whose file start lies before
+                # this window was handled by the previous one.
+                if offset >= emit_limit or offset < base:
+                    continue
+                if counted >= remaining:
+                    break
+                if claims.covers(signature.group, offset):
+                    continue
+                if check_cancel is not None:
+                    check_cancel()
+                # The probe comes from the buffer when it fits (no extra read);
+                # matches at one offset share the same probe object.
+                key = (offset, signature.probe_bytes)
+                probe = probes.get(key)
+                if probe is None:
+                    local = offset - base
+                    if local >= 0 and local + signature.probe_bytes <= len(buffer):
+                        probe = buffer[local : local + signature.probe_bytes]
                     else:
-                        entries.append(entry)
+                        handle_position = handle.tell()
+                        try:
+                            handle.seek(offset)
+                            probe = handle.read(min(signature.probe_bytes, max(0, read_limit - offset)))
+                        finally:
+                            handle.seek(handle_position)
+                    probes = {key: probe}
+                # Building a candidate seeks to its offset and reads its window;
+                # the scan resumes from the chunk position afterwards (without
+                # this, the next chunk read continued after the carve window).
+                position = handle.tell()
+                try:
+                    entry = _build_candidate_entry(
+                        handle,
+                        path=path,
+                        file_size=read_limit,
+                        offset=offset,
+                        signature=signature,
+                        output_dir=output_dir,
+                        extract=extract,
+                        max_carve_bytes=max_carve_bytes,
+                        probe=probe,
+                    )
+                finally:
+                    handle.seek(position)
+                if entry is None:
+                    continue  # silently not this format
+                claims.claim(signature, entry)
+                if count_rejected or entry.get("status") != STATUS_REJECTED:
+                    counted += 1
+                if on_entry is not None:
+                    on_entry(entry)
+                else:
+                    entries.append(entry)
             tail = buffer[-SCAN_OVERLAP_BYTES:]
             base = base + len(buffer) - len(tail)
+            claims.prune(base - SCAN_OVERLAP_BYTES)
             if eof:
                 break
     return entries, scanned
+
+
+def _rejected_entry(
+    path: Path, offset: int, signature: CarvingSignature, rejection: str
+) -> dict[str, object]:
+    return {
+        "source_path": str(path),
+        "kind": signature.kind,
+        "extension": signature.extension,
+        "offset": offset,
+        "extracted_path": None,
+        "end_offset": offset,
+        "size": 0,
+        "status": STATUS_REJECTED,
+        "rejected_reason": rejection,
+        "recovery": carved_recovery_record(
+            STATUS_REJECTED,
+            signature=signature,
+            source_path=path,
+            offset=offset,
+            rejection=rejection,
+        ),
+    }
+
+
+def carved_family(kind: str) -> dict[str, object]:
+    """``recovery_method`` + the evidence-tree family of a carved candidate (row fields)."""
+    family = CARVED_FAMILIES.get(kind)
+    fields: dict[str, object] = {"recovery_method": "carved"}
+    if family is not None:
+        fields.update({"family_kind": family[0], "family_artifact_type": family[1], "family_label": family[2]})
+    return fields
 
 
 def _build_candidate_entry(
@@ -455,59 +658,53 @@ def _build_candidate_entry(
     output_dir: Path,
     extract: bool,
     max_carve_bytes: int,
-) -> dict[str, object]:
-    window_size = min(max_carve_bytes, file_size - offset)
-    handle.seek(offset)
+    probe: bytes | None = None,
+) -> dict[str, object] | None:
+    """One candidate entry, or ``None`` when the validator says "not this format" (silent)."""
+    limit = max_carve_bytes if signature.max_bytes is None else min(max_carve_bytes, signature.max_bytes)
+    window_size = min(limit, file_size - offset)
     # Validate on the header probe first: a rejected candidate never reads its
     # (up to max_carve_bytes) carve window.
-    probe = handle.read(min(HEADER_PROBE_BYTES, window_size))
+    if probe is None:
+        handle.seek(offset)
+        probe = handle.read(min(signature.probe_bytes, file_size - offset))
+    probe = probe[: max(0, min(len(probe), file_size - offset))]
     rejection = signature.validator(probe) if signature.validator else None
+    if rejection is not None:
+        return None if formats.is_silent(rejection) else _rejected_entry(path, offset, signature, rejection)
+    handle.seek(offset)
+    window = handle.read(window_size)
+    boundary = signature.walker(window) if signature.walker is not None else None
+    if isinstance(boundary, str):
+        return None if formats.is_silent(boundary) else _rejected_entry(path, offset, signature, boundary)
+    if boundary is not None:
+        length, status, boundary_method = boundary
+        carved, end_offset = window[: max(0, length)], max(0, length)
+    else:
+        carved, end_offset, status, boundary_method = carve_candidate(
+            window, 0, signature, max_carve_bytes=window_size
+        )
+    digest = hashlib.sha256(carved).hexdigest()
     entry: dict[str, object] = {
         "source_path": str(path),
         "kind": signature.kind,
         "extension": signature.extension,
         "offset": offset,
         "extracted_path": None,
+        "end_offset": offset + end_offset,
+        "size": len(carved),
+        "sha256": digest,
+        "status": status,
+        "confidence": _status_confidence(status),
+        "boundary_method": boundary_method,
+        "recovery": carved_recovery_record(
+            status,
+            signature=signature,
+            source_path=path,
+            offset=offset,
+            boundary_method=boundary_method,
+        ),
     }
-    if rejection is not None:
-        entry.update(
-            {
-                "end_offset": offset,
-                "size": 0,
-                "status": STATUS_REJECTED,
-                "rejected_reason": rejection,
-                "recovery": carved_recovery_record(
-                    STATUS_REJECTED,
-                    signature=signature,
-                    source_path=path,
-                    offset=offset,
-                    rejection=rejection,
-                ),
-            }
-        )
-        return entry
-    handle.seek(offset)
-    window = handle.read(window_size)
-    carved, end_offset, status, boundary_method = carve_candidate(
-        window, 0, signature, max_carve_bytes=max_carve_bytes
-    )
-    digest = hashlib.sha256(carved).hexdigest()
-    entry.update(
-        {
-            "end_offset": offset + end_offset,
-            "size": len(carved),
-            "sha256": digest,
-            "status": status,
-            "confidence": _status_confidence(status),
-            "recovery": carved_recovery_record(
-                status,
-                signature=signature,
-                source_path=path,
-                offset=offset,
-                boundary_method=boundary_method,
-            ),
-        }
-    )
     if extract:
         output_path = output_dir / f"{path.stem}-{offset:012x}-{digest[:12]}{signature.extension}"
         output_path.write_bytes(carved)
@@ -518,7 +715,7 @@ def _build_candidate_entry(
 def _status_confidence(status: str) -> str:
     if status in (STATUS_FOOTER_VALIDATED, STATUS_LENGTH_FIELD):
         return CONFIDENCE_HIGH
-    if status == STATUS_LENGTH_FIELD_TRUNCATED:
+    if status in (STATUS_LENGTH_FIELD_TRUNCATED, STATUS_TEXT_BOUNDARY):
         return CONFIDENCE_MEDIUM
     return CONFIDENCE_LOW
 
@@ -537,67 +734,37 @@ def carve_buffer(
 
     Kept for callers that already hold bytes (tests, memory dumps). The
     file-scanning path uses ``_scan_source`` so chunk boundaries are
-    handled by overlapping windows instead of whole-file reads.
+    handled by overlapping windows instead of whole-file reads. Same
+    validators, walkers, range claims and silent drops as ``_scan_source``.
     """
+    selected = list(signatures or SIGNATURES)
     entries: list[dict[str, object]] = []
-    for signature in signatures or SIGNATURES:
-        start_at = 0
-        while remaining > 0:
-            offset = data.find(signature.start, start_at)
-            if offset < 0:
-                break
-            probe = data[offset : offset + HEADER_PROBE_BYTES]
-            rejection = signature.validator(probe) if signature.validator else None
-            if rejection is not None:
-                entry: dict[str, object] = {
-                    "source_path": str(source_path),
-                    "kind": signature.kind,
-                    "extension": signature.extension,
-                    "offset": offset,
-                    "end_offset": offset,
-                    "size": 0,
-                    "status": STATUS_REJECTED,
-                    "rejected_reason": rejection,
-                    "extracted_path": None,
-                    "recovery": carved_recovery_record(
-                        STATUS_REJECTED,
-                        signature=signature,
-                        source_path=source_path,
-                        offset=offset,
-                        rejection=rejection,
-                    ),
-                }
-            else:
-                carved, end_offset, status, boundary_method = carve_candidate(
-                    data, offset, signature, max_carve_bytes=max_carve_bytes
-                )
-                digest = hashlib.sha256(carved).hexdigest()
-                entry = {
-                    "source_path": str(source_path),
-                    "kind": signature.kind,
-                    "extension": signature.extension,
-                    "offset": offset,
-                    "end_offset": end_offset,
-                    "size": len(carved),
-                    "sha256": digest,
-                    "status": status,
-                    "confidence": _status_confidence(status),
-                    "extracted_path": None,
-                    "recovery": carved_recovery_record(
-                        status,
-                        signature=signature,
-                        source_path=source_path,
-                        offset=offset,
-                        boundary_method=boundary_method,
-                    ),
-                }
-                if extract:
-                    output_path = output_dir / f"{source_path.stem}-{offset:012x}-{digest[:12]}{signature.extension}"
-                    output_path.write_bytes(carved)
-                    entry["extracted_path"] = str(output_path)
-            entries.append(entry)
-            remaining -= 1
-            start_at = max(offset + 1, int(entry["end_offset"]))
+    claims = _Claims()
+    handle = io.BytesIO(data)
+    # As before R3: a signature resumes after the end of its own previous candidate.
+    resume_at: dict[int, int] = {}
+    for offset, _tie, index in _buffer_matches(data, 0, selected):
+        if remaining <= 0:
+            break
+        signature = selected[index]
+        if offset < resume_at.get(index, 0) or claims.covers(signature.group, offset):
+            continue
+        entry = _build_candidate_entry(
+            handle,
+            path=source_path,
+            file_size=len(data),
+            offset=offset,
+            signature=signature,
+            output_dir=output_dir,
+            extract=extract,
+            max_carve_bytes=max_carve_bytes,
+        )
+        if entry is None:
+            continue
+        claims.claim(signature, entry)
+        entries.append(entry)
+        resume_at[index] = max(offset + 1, int(entry["end_offset"]))  # type: ignore[call-overload]
+        remaining -= 1
     return sorted(entries, key=lambda item: (str(item["source_path"]), int(item["offset"])))
 
 
@@ -650,6 +817,21 @@ def carved_recovery_record(
             limitation=(
                 "Boundary derived from the format's declared length field; "
                 "internal page structure is not verified."
+            ),
+        )
+    if status == STATUS_TEXT_BOUNDARY:
+        return build_recovery_record(
+            CANDIDATE_KIND_CARVED,
+            confidence=CONFIDENCE_MEDIUM,
+            validation_status=VALIDATION_PARTIAL,
+            deletion_state="unallocated-candidate",
+            source_path=str(source_path),
+            source_offset=offset,
+            boundary_method=boundary_method or "text-boundary",
+            signature_type=signature.kind,
+            limitation=(
+                "Header block validated; the end is the first NUL byte or the next "
+                "message separator, so the body may be cut short or include trailing text."
             ),
         )
     if status in (STATUS_BOUNDED_NO_FOOTER, STATUS_LENGTH_FIELD_TRUNCATED):

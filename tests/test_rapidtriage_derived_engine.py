@@ -57,6 +57,7 @@ NO_IDENTIFIER_FAMILIES = frozenset(
         "timezone",  # one registry value
         "web-upload-candidate",  # restates its source row (r2 console fix m3)
         "messenger-error",  # store read failures (r2 console fix m2)
+        "ntfs-logfile-transaction",  # LSN / op codes; file names are bare candidates, not paths (R3 §3.3)
     }
 )
 
@@ -172,8 +173,8 @@ class CatalogSemanticTests(unittest.TestCase):
     def test_every_family_is_reviewed(self) -> None:
         catalog = load_catalog()
         # 54 + r2 M1 (3) + r2 M4 (1) + r2 M2 (6) + r2 M3 (2) + console fix (cloud-sync split 2, messenger-error 1)
-        # + r3 O1 (10).
-        self.assertEqual(len(catalog.families), 79)
+        # + r3 O1 (10) + r3 O3 (ntfs-timestamp-mismatch, ntfs-logfile-transaction, carved-file).
+        self.assertEqual(len(catalog.families), 82)
         for family in catalog.families:
             columns = [*family["core_columns"], *(family.get("aux_columns") or [])]
             tagged = [column for column in columns if column.get("semantic")]
