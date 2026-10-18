@@ -80,6 +80,7 @@ export const TIMESTAMP_KIND_LABELS: Readonly<Record<string, string>> = {
   logon: "로그온",
   logoff: "로그오프",
   deleted: "삭제",
+  disabled: "사용 안 함 설정",
   crash: "크래시",
   "process-created": "프로세스 생성",
   notification: "알림",
