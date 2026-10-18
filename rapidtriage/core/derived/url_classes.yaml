@@ -4,6 +4,9 @@
 # 여러 분류에 걸리면 가장 긴(구체적인) 도메인의 분류를 쓴다. 목록은 조사 우선순위를 돕는 단서이며
 # 판단이 아니다: "악성 의심"은 공격에 자주 남용되는 무료 호스팅·터널·단축·붙여넣기 도메인이지 악성 판정이 아니다.
 # 각 분류의 sources는 목록을 고른 근거(공개 목록·문서)다. 도메인은 소문자, 스킴·경로·포트 없이 적는다.
+# (R5 L3) paths는 어느 호스트든 그 경로 접두어로 시작하는 URL을 분류한다(사내 Outlook Web App `/owa/`):
+# 표는 호스트 단위라서 그 호스트의 URL 하나라도 접두어에 맞으면 호스트가 그 분류가 된다(호스트 도메인 분류가 우선).
+# schemes는 HTTP가 아닌 스킴(`magnet:`)을 분류하며, 그런 URL은 `<스킴>:<식별자>`(magnet은 info-hash) 키로 묶인다.
 classes:
 - id: search
   label_ko: 검색 엔진
@@ -51,6 +54,9 @@ classes:
   - cafe.daum.net
   - weibo.com
   - vk.com
+  # R5 L3: Flickr (사진 공유 소셜).
+  - flickr.com
+  - flic.kr
 - id: cloud
   label_ko: 클라우드 저장소
   sources:
@@ -177,3 +183,74 @@ classes:
   - requestbin.net
   - interact.sh
   - oast.fun
+# R5 L3: 웹메일(개인·국내·일회용 메일). 사내 Exchange OWA는 경로 접두어 `/owa/`로 잡는다.
+# mail.google.com ⊂ google.com(검색)처럼 더 긴 도메인이 이긴다.
+- id: webmail
+  label_ko: 웹메일
+  sources:
+  - https://en.wikipedia.org/wiki/Comparison_of_webmail_providers
+  - https://learn.microsoft.com/en-us/exchange/clients/outlook-on-the-web/outlook-on-the-web
+  - https://en.wikipedia.org/wiki/Mailinator
+  - https://en.wikipedia.org/wiki/Hushmail
+  - https://en.wikipedia.org/wiki/Naver
+  domains:
+  - mail.google.com
+  - inbox.google.com
+  - outlook.live.com
+  - outlook.office.com
+  - outlook.office365.com
+  - outlook.com
+  - hotmail.com
+  - mail.live.com
+  - mail.yahoo.com
+  - mail.yahoo.co.jp
+  - gmx.net
+  - gmx.com
+  - gmx.de
+  - gmx.at
+  - gmx.ch
+  - e.mail.ru
+  - touch.mail.ru
+  - hushmail.com
+  - mailinator.com
+  - proton.me
+  - protonmail.com
+  - mail.naver.com
+  - m.mail.naver.com
+  - mail.daum.net
+  - m.mail.daum.net
+  - mail.kakao.com
+  - mail.nate.com
+  paths:
+  - /owa/
+# R5 L3: 토렌트 색인·트래커 사이트와 magnet 링크. 사이트 도메인은 자주 바뀌므로(국내 토렌트 사이트는 숫자 접미가 계속 바뀜)
+# 이 목록은 대표 도메인만 담는다 — 갱신 절차는 docs/rapidtriage-known-limitations.md `## R5 L3`.
+- id: torrent
+  label_ko: 토렌트·P2P
+  sources:
+  - https://en.wikipedia.org/wiki/Comparison_of_BitTorrent_sites
+  - https://torrentfreak.com/top-torrent-sites/
+  - https://en.wikipedia.org/wiki/Magnet_URI_scheme
+  - https://www.bittorrent.org/beps/bep_0009.html
+  domains:
+  - thepiratebay.org
+  - 1337x.to
+  - 1337x.st
+  - nyaa.si
+  - sukebei.nyaa.si
+  - yts.mx
+  - yts.am
+  - eztvx.to
+  - eztv.re
+  - rarbg.to
+  - torrentgalaxy.to
+  - limetorrents.lol
+  - rutracker.org
+  - kickasstorrents.to
+  - torlock.com
+  - torrentz2.nz
+  - fitgirl-repacks.site
+  - btdig.com
+  - solidtorrents.to
+  schemes:
+  - magnet

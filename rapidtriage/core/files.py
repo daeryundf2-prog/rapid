@@ -431,7 +431,7 @@ CATEGORY_RULES: dict[str, dict[str, tuple[str, ...]]] = {
             ".z00", ".z01", ".7z001", ".zipx", ".wim", ".swm",
         ),
         "names": (),
-        "magics": ("zip-archive", "7z", "rar", "gzip", "bzip2", "xz", "cab", "zstd"),
+        "magics": ("zip-archive", "7z", "rar", "gzip", "bzip2", "xz", "cab", "zstd", "egg", "alz"),
         "path_segments": ("archive", "archives", "backup", "backups"),
         "qualifying_path_segments": (),
     },
@@ -530,6 +530,9 @@ CATEGORY_MAGICS: tuple[tuple[str, int, bytes], ...] = (
     ("xz", 0, b"\xfd7zXZ\x00"),
     ("cab", 0, b"MSCF\x00\x00\x00\x00"),
     ("zstd", 0, b"\x28\xb5\x2f\xfd"),
+    # R5 L3: ALZip EGG / ALZ (archive inventory lists their entries, artifacts/generic.py).
+    ("egg", 0, b"EGGA"),
+    ("alz", 0, b"ALZ\x01"),
     ("sqlite", 0, b"SQLite format 3\x00"),
     ("ese-database", 4, b"\xef\xcd\xab\x89"),
     ("windows-pe", 0, b"MZ"),

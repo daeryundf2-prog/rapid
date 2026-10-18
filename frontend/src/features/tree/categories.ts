@@ -54,6 +54,8 @@ export interface KindMeta {
 /** Every artifact collector kind the engine ships (keep in sync with `artifact_collectors()`). */
 export const KIND_CATEGORY: Readonly<Record<string, KindMeta>> = {
   browser: { category: "web", icon: "globe" },
+  // R5 L3: BitTorrent clients / .torrent / eMule.
+  p2p: { category: "web", icon: "globe" },
   "kakaotalk-windows": { category: "communication", icon: "message" },
   "kakaotalk-macos": { category: "communication", icon: "message" },
   "windows-messenger": { category: "communication", icon: "message" },

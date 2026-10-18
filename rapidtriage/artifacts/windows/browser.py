@@ -14,6 +14,14 @@ from urllib.parse import parse_qs, unquote_plus, urlparse
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 from .._walk import iter_evidence_paths
+from .browser_analytics import (
+    ANALYTICS_COOKIE_NAMES,
+    ANALYTICS_PARSER,
+    ANALYTICS_PARSER_VERSION,
+    CLIENT_ID_POLICY,
+    analytics_row_time,
+    parse_analytics_cookie,
+)
 from .browser_cache import (
     CACHE_PARSER,
     CACHE_PARSER_VERSION,
@@ -32,6 +40,7 @@ from .common import (
     open_sqlite_snapshot,
 )
 from .ese import build_ese_page_map, build_ese_string_pivots, probe_ese_database
+from .location_urls import LocationUrlScanner
 from .web_upload import WebUploadScanner
 
 CHROMIUM_BROWSER_ROOTS: tuple[tuple[str, Sequence[str]], ...] = (
@@ -40,6 +49,13 @@ CHROMIUM_BROWSER_ROOTS: tuple[tuple[str, Sequence[str]], ...] = (
     ("brave", ("AppData", "Local", "BraveSoftware", "Brave-Browser", "User Data")),
     ("whale", ("AppData", "Local", "Naver", "Naver Whale", "User Data")),
     ("vivaldi", ("AppData", "Local", "Vivaldi", "User Data")),
+    # R5 L3 (재감사 §3 item 23): 360 Safe Browser / 360 Chrome, Yandex, Chromium, Cốc Cốc, QQ Browser.
+    ("360se", ("AppData", "Roaming", "360se6", "User Data")),
+    ("360chrome", ("AppData", "Local", "360Chrome", "Chrome", "User Data")),
+    ("yandex", ("AppData", "Local", "Yandex", "YandexBrowser", "User Data")),
+    ("chromium", ("AppData", "Local", "Chromium", "User Data")),
+    ("coccoc", ("AppData", "Local", "CocCoc", "Browser", "User Data")),
+    ("qqbrowser", ("AppData", "Local", "Tencent", "QQBrowser", "User Data")),
 )
 # Opera keeps one profile directly in its Roaming folder (no "Default" sub-folder) and its
 # HTTP cache under the matching Local folder: (browser, roaming profile, local cache root).
@@ -322,10 +338,20 @@ class WindowsBrowserArtifactsProvider:
 
     def collect(self, root: Path) -> Iterable[ArtifactRecord]:
         scanner = WebUploadScanner()
+        locations = LocationUrlScanner()
         for record in self._collect_rows(root):
+            # Map URLs are read before the upload scanner redacts token-bearing query values.
+            locations.observe(record)
             scanner.observe(record)
             yield record
         yield from scanner.candidates
+        yield from locations.candidates
+        if locations.capped:
+            yield browser_parse_error_record(
+                BrowserRowContext(provider=self.name, user="", browser="", profile=""),
+                Path("location-url-candidate"),
+                reason="location-url-candidate-cap-reached",
+            )
         if scanner.error or scanner.capped:
             yield browser_parse_error_record(
                 BrowserRowContext(provider=self.name, user="", browser="", profile=""),
@@ -7089,6 +7115,7 @@ BROWSER_PLACEHOLDER_PREVIEW = "[빈 값: Edge 자리표시자]"
 SNSS_MAGIC = b"SNSS"
 MAX_SNSS_FILE_BYTES = 64 * 1024 * 1024
 BROWSER_NULL_FILL_RATIO = 0.5
+MAX_ANALYTICS_COOKIE_ROWS = 20_000
 SQLITE_HEADER = b"SQLite format 3\x00"
 WEBKIT_EPOCH = dt.datetime(1601, 1, 1, tzinfo=dt.timezone.utc)
 UNIX_EPOCH = dt.datetime(1970, 1, 1, tzinfo=dt.timezone.utc)
@@ -7566,6 +7593,114 @@ def chromium_cookie_reader(context: BrowserRowContext):
                         "value_encrypted": bool(row["encrypted_value_length"] or 0),
                         "value_policy": "쿠키 값은 수집하지 않음(존재 여부만 기록)",
                     },
+                )
+            )
+        records.extend(chromium_analytics_cookie_rows(context, connection, source, columns))
+        return records
+
+    return reader
+
+
+def analytics_cookie_record(
+    context: BrowserRowContext,
+    source: Path,
+    *,
+    host: str,
+    name: str,
+    value: str,
+    encrypted: bool,
+    created_at: str | None,
+    source_table: str,
+    source_row_id: object,
+) -> ArtifactRecord:
+    """One ``browser-analytics-cookie`` row: only the allow-listed GA fields (no client ID, R5 §2)."""
+    if value:
+        fields = parse_analytics_cookie(name, value)
+    else:
+        fields = {"value_status": "encrypted-not-read" if encrypted else "empty"}
+    timestamp, kind = analytics_row_time(fields)
+    return browser_row_record(
+        context,
+        "browser-analytics-cookie",
+        source,
+        timestamp=timestamp or created_at,
+        timestamp_kind=kind or "cookie-created",
+        source_table=source_table,
+        source_row_id=source_row_id,
+        fields={
+            "parser": ANALYTICS_PARSER,
+            "parser_version": ANALYTICS_PARSER_VERSION,
+            "recovery_method": "parsed",
+            "host": host,
+            "cookie_name": name,
+            "cookie_created_at": created_at,
+            **fields,
+            "client_id_policy": CLIENT_ID_POLICY,
+        },
+    )
+
+
+def chromium_analytics_cookie_rows(
+    context: BrowserRowContext, connection: sqlite3.Connection, source: Path, columns: set[str] | Sequence[str]
+) -> list[ArtifactRecord]:
+    """GA cookies (``__utma`` / ``__utmz`` / ``_ga``) of a Chromium ``cookies`` table; a value kept
+    only in ``encrypted_value`` is reported as present, never decrypted."""
+    if "name" not in columns or "host_key" not in columns:
+        return []
+    value = "value" if "value" in columns else "'' AS value"
+    encrypted = "length(encrypted_value) AS encrypted_length" if "encrypted_value" in columns else "0 AS encrypted_length"
+    created = "creation_utc" if "creation_utc" in columns else "NULL AS creation_utc"
+    marks = ", ".join("?" for _ in ANALYTICS_COOKIE_NAMES)
+    records = []
+    query = (
+        f"SELECT rowid AS source_rowid, host_key, name, {value}, {encrypted}, {created} FROM cookies "
+        f"WHERE name IN ({marks}) ORDER BY rowid LIMIT {MAX_ANALYTICS_COOKIE_ROWS}"
+    )
+    for row in connection.execute(query, ANALYTICS_COOKIE_NAMES):
+        raw = row["value"]
+        records.append(
+            analytics_cookie_record(
+                context,
+                source,
+                host=str(row["host_key"] or ""),
+                name=str(row["name"] or ""),
+                value=raw if isinstance(raw, str) else "",
+                encrypted=bool(row["encrypted_length"] or 0),
+                created_at=webkit_micros_to_iso(row["creation_utc"]),
+                source_table="cookies",
+                source_row_id=browser_int(row["source_rowid"]),
+            )
+        )
+    return records
+
+
+def firefox_analytics_cookie_reader(context: BrowserRowContext):
+    def reader(connection: sqlite3.Connection, source: Path) -> list[ArtifactRecord]:
+        if not sqlite_table_exists(connection, "moz_cookies"):
+            return []
+        columns = sqlite_table_columns(connection, "moz_cookies")
+        if not {"name", "host", "value"} <= set(columns):
+            return []
+        created = "creationTime" if "creationTime" in columns else "NULL AS creationTime"
+        marks = ", ".join("?" for _ in ANALYTICS_COOKIE_NAMES)
+        records = []
+        query = (
+            f"SELECT rowid AS source_rowid, host, name, value, {created} FROM moz_cookies "
+            f"WHERE name IN ({marks}) ORDER BY rowid LIMIT {MAX_ANALYTICS_COOKIE_ROWS}"
+        )
+        for row in connection.execute(query, ANALYTICS_COOKIE_NAMES):
+            raw = row["value"]
+            records.append(
+                analytics_cookie_record(
+                    context,
+                    source,
+                    host=str(row["host"] or ""),
+                    name=str(row["name"] or ""),
+                    value=raw if isinstance(raw, str) else "",
+                    encrypted=False,
+                    created_at=unix_micros_to_iso(row["creationTime"]),
+                    source_table="moz_cookies",
+                    source_row_id=browser_int(row["source_rowid"]),
                 )
             )
         return records
@@ -8402,4 +8537,7 @@ def collect_firefox_profile_rows(*, provider: str, user: str, profile: str, plac
     context = BrowserRowContext(provider=provider, user=user, browser="firefox", profile=profile)
     errors: list[ArtifactRecord] = []
     records = browser_sqlite_rows(context, places_path, errors, firefox_places_reader(context))
+    cookies = places_path.with_name("cookies.sqlite")
+    if cookies.is_file():
+        records.extend(browser_sqlite_rows(context, cookies, errors, firefox_analytics_cookie_reader(context)))
     return [*records, *errors]

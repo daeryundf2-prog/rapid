@@ -33,7 +33,11 @@ value, sorted by count (desc) then value::
      samples: [{kind, record_index, field, family, artifact_type, time}] (≤ 20)}
 
 plus ``url_class`` / ``url_class_label`` / ``examples`` (≤ 3 URLs as ``scheme://host[:port]/first-segment``:
-no user name / password, query, fragment or later path segments, see :func:`url_example`) for ``urls`` and
+no user name / password, query, fragment or later path segments, see :func:`url_example`) for ``urls`` --
+R5 L3: ``url_class_basis`` (``host`` / ``path``: a host not listed by domain takes the class of a
+listed path prefix one of its URLs had, e.g. on-premises OWA ``/owa/``; ``scheme``: ``magnet:<hash>``
+keys) and ``location_candidates`` (URLs of the value that are map URLs naming a place, coordinate or
+route, ``core.derived.map_urls``; the rows themselves are the browser's ``location-url-candidate``) -- and
 ``length`` / ``sha256`` for ``credentials``. **A credential's clear value is never
 written**: ``value`` is the masked form, ``normalized`` is ``sha256:<hex>``.
 ``kind`` = artifact kind, ``files:candidates`` / ``files:inventory`` or
@@ -77,6 +81,7 @@ from ..triage_rules.engine import (
     _write_atomic,
     coverage_block,
 )
+from .map_urls import maybe_map_url, parse_map_url
 from .normalize import clean, credential_record, normalize
 from .url_classes import UrlClasses, load_url_classes
 
@@ -255,6 +260,8 @@ class DerivedCollector:
         self.memory_cap = memory_cap
         self.tables: dict[str, _TableState] = {table: _TableState({}) for table in TABLES}
         self.estimated_bytes = 0
+        # R5 L3: path prefixes without their trailing "/" (cheap substring pre-filter before urlsplit).
+        self.path_tokens = tuple(prefix.rstrip("/") for prefix in url_classes.paths)
 
     def add(
         self,
@@ -330,7 +337,25 @@ class DerivedCollector:
                 examples.append(clipped)
                 entry.examples = examples
                 self.estimated_bytes += 2 * len(clipped)
+            self._url_extras(entry, raw)
         return True
+
+    def _url_extras(self, entry: _Entry, raw: str) -> None:
+        """R5 L3: the path-prefix class of a host and its map-URL location count."""
+        extra = entry.extra
+        if self.path_tokens and (extra is None or "path_class" not in extra):
+            lowered = raw[:512].lower()
+            if any(token in lowered for token in self.path_tokens):
+                try:
+                    path = urlsplit(raw).path
+                except ValueError:
+                    path = ""
+                found = self.url_classes.classify_path(path)
+                if found:
+                    extra = entry.extra = {**(extra or {}), "path_class": found}
+        if maybe_map_url(raw) and parse_map_url(raw) is not None:
+            extra = entry.extra = entry.extra or {}
+            extra["location_candidates"] = int(extra.get("location_candidates") or 0) + 1  # type: ignore[call-overload]
 
     def rows(self, table: str) -> list[dict[str, object]]:
         """The table's rows, count desc then normalised value."""
@@ -353,10 +378,17 @@ class DerivedCollector:
             "samples": _round_robin(entry.samples),
         }
         if table == "urls":
+            extra = entry.extra or {}
             url_class = self.url_classes.classify(key)
+            basis = ("scheme" if ":" in key else "host") if url_class else None
+            if url_class is None and extra.get("path_class"):
+                url_class, basis = str(extra["path_class"]), "path"
             row["url_class"] = url_class
             row["url_class_label"] = self.url_classes.labels.get(url_class) if url_class else None
+            row["url_class_basis"] = basis
             row["examples"] = list(entry.examples or [])
+            if extra.get("location_candidates"):
+                row["location_candidates"] = extra["location_candidates"]
         if table == "credentials" and entry.extra:
             row.update(entry.extra)
         return row
@@ -693,10 +725,13 @@ def _write_outputs(
         }
         if table == "urls":
             classes: dict[str, int] = {}
+            locations = 0
             for row in rows:
                 if row.get("url_class"):
                     classes[str(row["url_class"])] = classes.get(str(row["url_class"]), 0) + 1
+                locations += int(row.get("location_candidates") or 0)  # type: ignore[call-overload]
             tables[table]["by_class"] = dict(sorted(classes.items()))
+            tables[table]["location_candidates"] = locations
         # The written table is no longer needed in memory (lowers the peak for the larger tables after it).
         state.entries.clear()
         del rows, index

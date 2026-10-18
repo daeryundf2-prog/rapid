@@ -104,6 +104,8 @@ ARTIFACT_DOMAIN_TABLE: tuple[tuple[str, str, tuple[str, ...] | None], ...] = (
     ("media", "media-player", None),
     ("mobile", "windows-phone-link", None),
     ("messaging", "windows-phone-link", ("phone-link-message",)),
+    # --- R5 L3 (web · URL classes · archives · P2P · recovery) -------------
+    ("web", "p2p", None),
 )
 
 

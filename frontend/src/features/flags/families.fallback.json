@@ -1,5 +1,5 @@
 {
- "version": "99087ce6028f5b48",
+ "version": "0a69af05f9f2fdec",
  "families": [
   {
    "id": "sam-account",
@@ -765,7 +765,8 @@
    "rules": [
     "browser.incognito_gap",
     "browser.history_cleared",
-    "browser.typed_url_direct"
+    "browser.typed_url_direct",
+    "browser.torrent_site_visit"
    ]
   },
   {
@@ -1731,6 +1732,324 @@
    ]
   },
   {
+   "id": "location-url-candidate",
+   "label": "지도 URL 위치 후보",
+   "types": [
+    "location-url-candidate"
+   ],
+   "core_columns": [
+    {
+     "key": "timestamp",
+     "label": "방문 시각",
+     "format": "time",
+     "ts_kind": "visited",
+     "width": 170
+    },
+    {
+     "key": "map_provider_label",
+     "label": "지도 서비스",
+     "aliases": [
+      "map_provider"
+     ]
+    },
+    {
+     "key": "map_url_kind_label",
+     "label": "URL 종류",
+     "aliases": [
+      "map_url_kind"
+     ]
+    },
+    {
+     "key": "latitude",
+     "semantic": "geo",
+     "label": "위도",
+     "format": "number"
+    },
+    {
+     "key": "longitude",
+     "label": "경도",
+     "format": "number"
+    },
+    {
+     "key": "query",
+     "semantic": "search_term",
+     "label": "검색어·장소"
+    },
+    {
+     "key": "origin",
+     "label": "출발"
+    },
+    {
+     "key": "destination",
+     "label": "도착"
+    },
+    {
+     "key": "coordinate_basis",
+     "label": "좌표 근거",
+     "value_labels": {
+      "url-place-pin": "URL의 장소 핀",
+      "url-viewport-center": "지도 화면 중심",
+      "url-ll-parameter": "ll 매개변수",
+      "url-query-coordinates": "검색어 좌표",
+      "url-epsg3857-converted": "웹 메르카토르→위경도 변환",
+      "url-wgs84": "URL 위경도",
+      "url-link-coordinates": "링크 좌표"
+     }
+    },
+    {
+     "key": "url",
+     "label": "주소 (URL)",
+     "format": "url"
+    },
+    {
+     "key": "browser",
+     "label": "브라우저"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "zoom",
+     "label": "확대 수준",
+     "format": "number"
+    },
+    {
+     "key": "waypoints",
+     "label": "경유지"
+    },
+    {
+     "key": "plane_coordinates",
+     "label": "평면 좌표(미변환)",
+     "format": "mono"
+    },
+    {
+     "key": "title",
+     "label": "제목"
+    },
+    {
+     "key": "source_artifact_type",
+     "label": "원본 행 유형",
+     "format": "artifact_type"
+    },
+    {
+     "key": "profile",
+     "label": "프로필"
+    },
+    {
+     "key": "user",
+     "label": "사용자"
+    },
+    {
+     "key": "interpretation_ko",
+     "label": "해석"
+    }
+   ],
+   "rules": []
+  },
+  {
+   "id": "browser-analytics-cookie",
+   "label": "방문 분석 쿠키(Google Analytics)",
+   "types": [
+    "browser-analytics-cookie"
+   ],
+   "core_columns": [
+    {
+     "key": "timestamp",
+     "label": "시각",
+     "format": "time",
+     "ts_kind": "ga-current-visit",
+     "width": 170
+    },
+    {
+     "key": "host",
+     "semantic": "url",
+     "label": "사이트(쿠키 도메인)"
+    },
+    {
+     "key": "cookie_name",
+     "label": "쿠키"
+    },
+    {
+     "key": "first_visit_at",
+     "label": "첫 방문",
+     "format": "time",
+     "ts_kind": "ga-first-visit"
+    },
+    {
+     "key": "previous_visit_at",
+     "label": "이전 방문",
+     "format": "time",
+     "ts_kind": "ga-previous-visit"
+    },
+    {
+     "key": "current_visit_at",
+     "label": "현재 방문",
+     "format": "time",
+     "ts_kind": "ga-current-visit"
+    },
+    {
+     "key": "session_count",
+     "label": "세션 수",
+     "format": "number"
+    },
+    {
+     "key": "source",
+     "label": "유입 출처"
+    },
+    {
+     "key": "medium",
+     "label": "유입 매체"
+    },
+    {
+     "key": "search_term",
+     "semantic": "search_term",
+     "label": "유입 검색어"
+    },
+    {
+     "key": "value_status",
+     "label": "값 상태",
+     "value_labels": {
+      "parsed": "해석함",
+      "unparsed-format": "형식 불일치",
+      "encrypted-not-read": "암호화(읽지 않음)",
+      "empty": "값 없음"
+     }
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "campaign",
+     "label": "캠페인"
+    },
+    {
+     "key": "referral_path",
+     "label": "참조 경로"
+    },
+    {
+     "key": "campaign_set_at",
+     "label": "캠페인 기록 시각",
+     "format": "time",
+     "ts_kind": "ga-campaign-set"
+    },
+    {
+     "key": "session_number",
+     "label": "세션 번호",
+     "format": "number"
+    },
+    {
+     "key": "cookie_created_at",
+     "label": "쿠키 생성",
+     "format": "time",
+     "ts_kind": "cookie-created"
+    },
+    {
+     "key": "browser",
+     "label": "브라우저"
+    },
+    {
+     "key": "profile",
+     "label": "프로필"
+    },
+    {
+     "key": "client_id_policy",
+     "label": "수집 정책"
+    }
+   ],
+   "rules": []
+  },
+  {
+   "id": "carved-url-candidate",
+   "label": "URL 카빙 후보",
+   "types": [
+    "carved-url-candidate"
+   ],
+   "core_columns": [
+    {
+     "key": "url",
+     "semantic": "url",
+     "label": "주소 (URL)",
+     "format": "url"
+    },
+    {
+     "key": "url_class_label",
+     "label": "URL 분류",
+     "aliases": [
+      "url_class"
+     ]
+    },
+    {
+     "key": "source_kind_label",
+     "label": "소스 종류",
+     "aliases": [
+      "source_kind"
+     ]
+    },
+    {
+     "key": "source_path",
+     "label": "원본(소스) 경로",
+     "format": "path"
+    },
+    {
+     "key": "offset",
+     "label": "오프셋",
+     "aliases": [
+      "source_offset"
+     ],
+     "format": "hex"
+    },
+    {
+     "key": "encoding",
+     "label": "인코딩",
+     "value_labels": {
+      "ascii": "ASCII",
+      "utf-16le": "UTF-16LE"
+     }
+    },
+    {
+     "key": "hit_count",
+     "label": "출현 수(이 소스)",
+     "format": "number"
+    },
+    {
+     "key": "host",
+     "label": "호스트"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "latitude",
+     "semantic": "geo",
+     "label": "위도(지도 URL)",
+     "format": "number"
+    },
+    {
+     "key": "longitude",
+     "label": "경도(지도 URL)",
+     "format": "number"
+    },
+    {
+     "key": "url_sha256",
+     "label": "원본 URL SHA-256",
+     "format": "mono"
+    },
+    {
+     "key": "url_tokens_redacted",
+     "label": "토큰 가림"
+    },
+    {
+     "key": "url_truncated",
+     "label": "URL 잘림"
+    },
+    {
+     "key": "recovery_method",
+     "label": "복구 방법",
+     "value_labels": {
+      "carved-url": "URL 카빙"
+     }
+    }
+   ],
+   "rules": []
+  },
+  {
    "id": "cloud",
    "label": "클라우드",
    "types": [
@@ -2058,6 +2377,19 @@
     {
      "key": "user_profile",
      "label": "사용자 프로필"
+    },
+    {
+     "key": "google_doc_type_label",
+     "label": "Google 문서 종류",
+     "aliases": [
+      "google_doc_type"
+     ]
+    },
+    {
+     "key": "google_doc_url",
+     "semantic": "url",
+     "label": "Google 문서 URL",
+     "format": "url"
     }
    ],
    "rules": [
@@ -6564,6 +6896,152 @@
    ]
   },
   {
+   "id": "android-backup",
+   "label": "Android adb 백업",
+   "types": [
+    "android-backup"
+   ],
+   "core_columns": [
+    {
+     "key": "source_path",
+     "semantic": "path",
+     "label": "백업 파일",
+     "format": "path"
+    },
+    {
+     "key": "status",
+     "label": "상태",
+     "value_labels": {
+      "completed": "해제함",
+      "partial": "일부만(손상·상한)",
+      "encrypted-not-unpacked": "암호화(해제 안 함)",
+      "unreadable": "읽기 실패"
+     }
+    },
+    {
+     "key": "status_reason",
+     "label": "사유"
+    },
+    {
+     "key": "encryption",
+     "label": "암호화"
+    },
+    {
+     "key": "compressed",
+     "label": "압축"
+    },
+    {
+     "key": "backup_version",
+     "label": "형식 버전",
+     "format": "number"
+    },
+    {
+     "key": "member_count",
+     "label": "항목 수",
+     "format": "number"
+    },
+    {
+     "key": "package_count",
+     "label": "앱 수",
+     "format": "number"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "packages",
+     "label": "앱 패키지"
+    },
+    {
+     "key": "sqlite_inventoried",
+     "label": "DB 스키마 목록화",
+     "format": "number"
+    },
+    {
+     "key": "pbkdf2_rounds",
+     "label": "PBKDF2 반복",
+     "format": "number"
+    }
+   ],
+   "rules": []
+  },
+  {
+   "id": "android-backup-member",
+   "label": "Android 백업 항목",
+   "types": [
+    "android-backup-member"
+   ],
+   "core_columns": [
+    {
+     "key": "timestamp",
+     "label": "수정 시각",
+     "aliases": [
+      "member_mtime"
+     ],
+     "format": "time",
+     "ts_kind": "member-modified",
+     "width": 170
+    },
+    {
+     "key": "package",
+     "label": "앱 패키지"
+    },
+    {
+     "key": "backup_domain_label",
+     "label": "영역",
+     "aliases": [
+      "backup_domain"
+     ]
+    },
+    {
+     "key": "member_path",
+     "semantic": "path",
+     "label": "앱 내 경로",
+     "format": "path"
+    },
+    {
+     "key": "size",
+     "label": "크기",
+     "format": "bytes"
+    },
+    {
+     "key": "data_category",
+     "label": "데이터 종류"
+    },
+    {
+     "key": "sha256",
+     "semantic": "hash",
+     "label": "SHA-256",
+     "format": "mono"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "member_name",
+     "label": "tar 항목 이름",
+     "format": "mono"
+    },
+    {
+     "key": "member_type",
+     "label": "항목 형식"
+    },
+    {
+     "key": "mode",
+     "label": "권한",
+     "format": "mono"
+    },
+    {
+     "key": "source_path",
+     "label": "백업 파일",
+     "format": "path"
+    },
+    {
+     "key": "risk_flags",
+     "label": "표시"
+    }
+   ],
+   "rules": []
+  },
+  {
    "id": "mft",
    "label": "MFT/USN 메타",
    "types": [
@@ -7770,6 +8248,439 @@
    "rules": [
     "generic.timestamp_out_of_range"
    ]
+  },
+  {
+   "id": "p2p-torrent",
+   "label": "토렌트 파일",
+   "types": [
+    "p2p-torrent"
+   ],
+   "core_columns": [
+    {
+     "key": "timestamp",
+     "label": "토렌트 작성 시각",
+     "aliases": [
+      "created_at"
+     ],
+     "format": "time",
+     "ts_kind": "torrent-created",
+     "width": 170
+    },
+    {
+     "key": "name",
+     "label": "이름"
+    },
+    {
+     "key": "info_hash",
+     "semantic": "hash",
+     "label": "info-hash(v1)",
+     "format": "mono"
+    },
+    {
+     "key": "total_size",
+     "label": "전체 크기",
+     "format": "bytes"
+    },
+    {
+     "key": "file_count",
+     "label": "파일 수",
+     "format": "number"
+    },
+    {
+     "key": "files",
+     "semantic": "attachment",
+     "label": "파일 목록(표본)"
+    },
+    {
+     "key": "trackers",
+     "semantic": "url",
+     "label": "트래커(호스트만)"
+    },
+    {
+     "key": "client_label",
+     "label": "클라이언트",
+     "aliases": [
+      "client"
+     ]
+    },
+    {
+     "key": "source_path",
+     "semantic": "path",
+     "label": "토렌트 파일",
+     "format": "path"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "info_hash_v2",
+     "semantic": "hash",
+     "label": "info-hash(v2)",
+     "format": "mono"
+    },
+    {
+     "key": "created_by",
+     "label": "작성 프로그램"
+    },
+    {
+     "key": "comment",
+     "label": "설명"
+    },
+    {
+     "key": "private",
+     "label": "비공개 트래커"
+    },
+    {
+     "key": "piece_length",
+     "label": "조각 크기",
+     "format": "bytes"
+    },
+    {
+     "key": "user",
+     "semantic": "account",
+     "label": "사용자"
+    }
+   ],
+   "rules": []
+  },
+  {
+   "id": "p2p-transfer",
+   "label": "P2P 전송 기록",
+   "types": [
+    "p2p-transfer"
+   ],
+   "core_columns": [
+    {
+     "key": "timestamp",
+     "label": "시각",
+     "format": "time",
+     "ts_kind": "transfer-completed",
+     "width": 170
+    },
+    {
+     "key": "client_label",
+     "label": "클라이언트",
+     "aliases": [
+      "client"
+     ]
+    },
+    {
+     "key": "name",
+     "label": "이름",
+     "aliases": [
+      "file_name"
+     ]
+    },
+    {
+     "key": "state",
+     "label": "상태",
+     "value_labels": {
+      "completed": "완료",
+      "incomplete": "미완료"
+     }
+    },
+    {
+     "key": "added_at",
+     "label": "추가",
+     "format": "time",
+     "ts_kind": "transfer-added"
+    },
+    {
+     "key": "completed_at",
+     "label": "완료",
+     "format": "time",
+     "ts_kind": "transfer-completed"
+    },
+    {
+     "key": "save_path",
+     "semantic": "path",
+     "label": "저장 경로",
+     "format": "path"
+    },
+    {
+     "key": "downloaded_bytes",
+     "label": "받은 양",
+     "format": "bytes"
+    },
+    {
+     "key": "uploaded_bytes",
+     "label": "보낸 양(유포)",
+     "format": "bytes"
+    },
+    {
+     "key": "info_hash",
+     "semantic": "hash",
+     "label": "info-hash",
+     "aliases": [
+      "ed2k_hash"
+     ],
+     "format": "mono"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "file_size",
+     "label": "파일 크기",
+     "format": "bytes"
+    },
+    {
+     "key": "part_file_name",
+     "label": "임시 파일(.part)"
+    },
+    {
+     "key": "category",
+     "label": "분류"
+    },
+    {
+     "key": "tags",
+     "label": "태그"
+    },
+    {
+     "key": "active_seconds",
+     "label": "활동 시간(초)",
+     "format": "number"
+    },
+    {
+     "key": "seeding_seconds",
+     "label": "시딩 시간(초)",
+     "format": "number"
+    },
+    {
+     "key": "trackers",
+     "semantic": "url",
+     "label": "트래커(호스트만)"
+    },
+    {
+     "key": "client_entry_key",
+     "label": "클라이언트 항목 키"
+    },
+    {
+     "key": "source_path",
+     "semantic": "path",
+     "label": "원본 파일",
+     "format": "path"
+    },
+    {
+     "key": "user",
+     "semantic": "account",
+     "label": "사용자"
+    }
+   ],
+   "rules": [
+    "p2p.torrent_seeding_uploaded",
+    "p2p.transfer_completed"
+   ]
+  },
+  {
+   "id": "p2p-shared-file",
+   "label": "eMule 공유·완료 파일",
+   "types": [
+    "p2p-shared-file"
+   ],
+   "core_columns": [
+    {
+     "key": "timestamp",
+     "label": "마지막 공유",
+     "aliases": [
+      "last_shared_at"
+     ],
+     "format": "time",
+     "ts_kind": "last-shared",
+     "width": 170
+    },
+    {
+     "key": "file_name",
+     "semantic": "attachment",
+     "label": "파일 이름"
+    },
+    {
+     "key": "file_size",
+     "label": "크기",
+     "format": "bytes"
+    },
+    {
+     "key": "ed2k_hash",
+     "semantic": "hash",
+     "label": "ed2k 해시(MD4)",
+     "format": "mono"
+    },
+    {
+     "key": "all_time_uploaded_bytes",
+     "label": "누적 업로드(유포)",
+     "format": "bytes"
+    },
+    {
+     "key": "all_time_requests",
+     "label": "누적 요청",
+     "format": "number"
+    },
+    {
+     "key": "all_time_accepted",
+     "label": "누적 수락",
+     "format": "number"
+    },
+    {
+     "key": "file_date",
+     "label": "파일 날짜",
+     "format": "time",
+     "ts_kind": "file-date"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "ed2k_link",
+     "label": "ed2k 링크",
+     "format": "mono"
+    },
+    {
+     "key": "file_type",
+     "label": "파일 형식"
+    },
+    {
+     "key": "source_path",
+     "semantic": "path",
+     "label": "원본(known.met)",
+     "format": "path"
+    },
+    {
+     "key": "user",
+     "semantic": "account",
+     "label": "사용자"
+    }
+   ],
+   "rules": [
+    "p2p.emule_shared_uploaded"
+   ]
+  },
+  {
+   "id": "p2p-search-term",
+   "label": "P2P 검색어",
+   "types": [
+    "p2p-search-term"
+   ],
+   "core_columns": [
+    {
+     "key": "term",
+     "semantic": "search_term",
+     "label": "검색어"
+    },
+    {
+     "key": "client_label",
+     "label": "클라이언트",
+     "aliases": [
+      "client"
+     ]
+    },
+    {
+     "key": "list_position",
+     "label": "목록 순서",
+     "format": "number"
+    },
+    {
+     "key": "source_path",
+     "semantic": "path",
+     "label": "원본",
+     "format": "path"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "time_note",
+     "label": "시각"
+    },
+    {
+     "key": "user",
+     "semantic": "account",
+     "label": "사용자"
+    }
+   ],
+   "rules": []
+  },
+  {
+   "id": "p2p-client-config",
+   "label": "P2P 클라이언트 설정",
+   "types": [
+    "p2p-client-config"
+   ],
+   "core_columns": [
+    {
+     "key": "client_label",
+     "label": "클라이언트",
+     "aliases": [
+      "client"
+     ]
+    },
+    {
+     "key": "nick",
+     "semantic": "account",
+     "label": "닉네임"
+    },
+    {
+     "key": "incoming_dir",
+     "semantic": "path",
+     "label": "받은 파일 폴더",
+     "format": "path"
+    },
+    {
+     "key": "temp_dir",
+     "semantic": "path",
+     "label": "임시 폴더",
+     "format": "path"
+    },
+    {
+     "key": "app_version",
+     "label": "버전"
+    },
+    {
+     "key": "source_path",
+     "label": "설정 파일",
+     "format": "path"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "user",
+     "semantic": "account",
+     "label": "사용자"
+    }
+   ],
+   "rules": []
+  },
+  {
+   "id": "p2p-error",
+   "label": "P2P 읽기 오류",
+   "types": [
+    "p2p-parse-error"
+   ],
+   "core_columns": [
+    {
+     "key": "client_label",
+     "label": "클라이언트",
+     "aliases": [
+      "client"
+     ]
+    },
+    {
+     "key": "reason",
+     "label": "사유"
+    },
+    {
+     "key": "error_message",
+     "label": "오류"
+    },
+    {
+     "key": "source_path",
+     "semantic": "path",
+     "label": "원본",
+     "format": "path"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "error_type",
+     "label": "오류 종류"
+    }
+   ],
+   "rules": []
   },
   {
    "id": "phone-link-message",
@@ -10886,6 +11797,22 @@
    }
   },
   {
+   "id": "browser.torrent_site_visit",
+   "family": "browser-visit",
+   "grade": "C",
+   "label_ko": "토렌트 사이트·magnet 링크 방문",
+   "rationale_ko": "방문 URL이 토렌트 색인·트래커 사이트(URL 분류 torrent)이거나 magnet: 링크: P2P 내려받기·유포 준비 정황(불법촬영물·저작권 사건의 입수 경로).",
+   "false_positive_ko": "리눅스 배포판 등 합법 토렌트, 검색 결과로 우연히 연 페이지. 사이트 도메인은 자주 바뀌므로 목록에 없는 사이트는 잡지 못함.",
+   "sources": [
+    "https://en.wikipedia.org/wiki/Comparison_of_BitTorrent_sites",
+    "https://torrentfreak.com/top-torrent-sites/",
+    "https://www.bittorrent.org/beps/bep_0009.html"
+   ],
+   "version": 1,
+   "status": "provisional",
+   "params": {}
+  },
+  {
    "id": "cloud.bulk_download",
    "family": "cloud",
    "grade": "B",
@@ -12960,6 +13887,64 @@
      "compil",
      "version_date"
     ]
+   }
+  },
+  {
+   "id": "p2p.torrent_seeding_uploaded",
+   "family": "p2p-transfer",
+   "grade": "B",
+   "label_ko": "토렌트 업로드(시딩) 기록",
+   "rationale_ko": "BitTorrent 클라이언트 전송 기록에 다른 사용자에게 보낸 양(uploaded)이 있음: 내려받는 동안·뒤에 조각을 공유한 유포 정황(불법촬영물·저작권 사건의 유포 요건).",
+   "false_positive_ko": "합법 배포물 공유. 보낸 양은 클라이언트 누적 통계이며 상대·시각별 내역은 아님.",
+   "sources": [
+    "https://www.bittorrent.org/beps/bep_0003.html",
+    "https://www.libtorrent.org/manual-ref.html",
+    "https://github.com/qbittorrent/qBittorrent/wiki/Explanation-of-Options-in-qBittorrent",
+    "https://www.emule-project.net/home/perl/help.cgi?l=1&rm=show_topic&topic_id=232",
+    "https://forensics.wiki/emule/"
+   ],
+   "version": 1,
+   "status": "provisional",
+   "params": {
+    "min_uploaded_bytes": 1
+   }
+  },
+  {
+   "id": "p2p.transfer_completed",
+   "family": "p2p-transfer",
+   "grade": "C",
+   "label_ko": "P2P 내려받기 완료",
+   "rationale_ko": "토렌트·eMule 전송이 완료됨(완료 시각 있음): 파일 입수 정황, 저장 경로에서 실물 확인.",
+   "false_positive_ko": "합법 배포물(리눅스 배포판·게임 패치).",
+   "sources": [
+    "https://www.bittorrent.org/beps/bep_0003.html",
+    "https://www.libtorrent.org/manual-ref.html",
+    "https://github.com/qbittorrent/qBittorrent/wiki/Explanation-of-Options-in-qBittorrent",
+    "https://www.emule-project.net/home/perl/help.cgi?l=1&rm=show_topic&topic_id=232",
+    "https://forensics.wiki/emule/"
+   ],
+   "version": 1,
+   "status": "provisional",
+   "params": {}
+  },
+  {
+   "id": "p2p.emule_shared_uploaded",
+   "family": "p2p-shared-file",
+   "grade": "B",
+   "label_ko": "eMule 공유 파일 업로드 기록",
+   "rationale_ko": "eMule known.met의 공유 파일에 누적 업로드량·수락된 요청이 있음: 다른 사용자에게 파일을 보낸 유포 정황(국내 \"당나귀\" 유포 사건).",
+   "false_positive_ko": "공유 폴더 기본 설정으로 의도 없이 공유된 파일. 누적 통계이며 시각·상대는 없음.",
+   "sources": [
+    "https://www.bittorrent.org/beps/bep_0003.html",
+    "https://www.libtorrent.org/manual-ref.html",
+    "https://github.com/qbittorrent/qBittorrent/wiki/Explanation-of-Options-in-qBittorrent",
+    "https://www.emule-project.net/home/perl/help.cgi?l=1&rm=show_topic&topic_id=232",
+    "https://forensics.wiki/emule/"
+   ],
+   "version": 1,
+   "status": "provisional",
+   "params": {
+    "min_uploaded_bytes": 1
    }
   },
   {

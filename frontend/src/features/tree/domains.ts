@@ -434,6 +434,13 @@ export const DOMAINS: readonly DomainDef[] = [
       { id: "derived-attachments", label: "첨부", target: derived("attachments") },
       { id: "derived-credentials", label: "자격 증명/토큰", target: derived("credentials") },
       { id: "derived-urls", label: "URL 분류", target: derived("urls") },
+      // --- R5 L3: map-URL location candidates (browser rows with latitude/longitude → 지도 대체 보기).
+      {
+        id: "derived-location-urls",
+        label: "지도 URL 위치 후보",
+        target: a("browser", ["location-url-candidate"]),
+        note: "Google 지도·네이버 지도·카카오맵 URL이 가리킨 좌표·검색어·경로입니다. 지도 대체 보기로 열 수 있습니다. 좌표는 기기 위치가 아니라 URL의 지도 중심·장소입니다",
+      },
     ],
   },
   {
@@ -1047,6 +1054,38 @@ export const DOMAINS: readonly DomainDef[] = [
         target: a("browser", ["desktop-cloud-sync-db", "desktop-cloud-sync-row-candidate"]),
         note: CLOUD_SYNC_CROSS_NOTE,
       },
+      // --- R5 L3: GA cookies, P2P / torrent, URL carving --------------------------------------
+      {
+        id: "web-analytics-cookies",
+        label: "방문 분석 쿠키(Google Analytics)",
+        target: a("browser", ["browser-analytics-cookie"]),
+        note: "__utma·__utmz·_ga 쿠키의 방문 시각·세션 수·유입 출처·검색어만 보여 줍니다(클라이언트 ID는 저장하지 않음)",
+      },
+      {
+        id: "web-location-urls",
+        label: "지도 URL 위치 후보",
+        target: a("browser", ["location-url-candidate"]),
+        crossRef: true,
+      },
+      {
+        id: "web-p2p",
+        label: "P2P·토렌트",
+        target: a("p2p"),
+        children: [
+          { id: "web-p2p-transfers", label: "전송 기록", target: a("p2p", ["p2p-transfer"]), lead: true },
+          { id: "web-p2p-torrents", label: "토렌트 파일", target: a("p2p", ["p2p-torrent"]) },
+          { id: "web-p2p-shared", label: "eMule 공유·완료 파일", target: a("p2p", ["p2p-shared-file"]) },
+          { id: "web-p2p-search", label: "P2P 검색어", target: a("p2p", ["p2p-search-term"]) },
+          { id: "web-p2p-config", label: "클라이언트 설정", target: a("p2p", ["p2p-client-config"]) },
+          {
+            id: "web-p2p-errors",
+            label: "읽기 오류",
+            target: a("p2p", ["p2p-parse-error"]),
+            detail: true,
+          },
+        ],
+      },
+      { id: "web-carved-urls", label: "URL 카빙 후보(페이지 파일·미할당)", target: run("url-carve") },
     ],
   },
   {
@@ -1402,6 +1441,13 @@ export const DOMAINS: readonly DomainDef[] = [
         target: a("mobile-export", ["ios-backup-file", "ios-backup-metadata", "ios-backup-source"]),
       },
       { id: "mobile-android", label: "Android", target: a("android-apk") },
+      // R5 L3: adb backup (.ab) header and its unpacked tar members.
+      {
+        id: "mobile-adb-backup",
+        label: "Android adb 백업",
+        target: a("mobile-export", ["android-backup", "android-backup-member"]),
+        typeLabels: { "android-backup": "adb 백업 파일", "android-backup-member": "adb 백업 항목" },
+      },
       { id: "mobile-all", label: "통합 뷰", target: a("mobile-export") },
       // R5 L1: Phone Link / Your Phone (휴대폰과 연결) rows synced to the PC.
       {

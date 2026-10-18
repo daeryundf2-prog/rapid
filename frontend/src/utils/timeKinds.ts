@@ -129,6 +129,18 @@ export const TIMESTAMP_KIND_LABELS: Readonly<Record<string, string>> = {
   "local-created": "로컬 사본 생성",
   "local-accessed": "로컬 사본 접근",
   "sync-local-accessed": "로컬 사본 접근",
+  // R5 L3: Google Analytics cookies, P2P (torrent / eMule), adb backup members.
+  "ga-current-visit": "GA 현재 방문",
+  "ga-previous-visit": "GA 이전 방문",
+  "ga-first-visit": "GA 첫 방문",
+  "ga-campaign-set": "GA 유입 기록",
+  "torrent-created": "토렌트 작성",
+  "transfer-added": "전송 추가",
+  "transfer-completed": "전송 완료",
+  "part-file-date": "임시 파일 날짜",
+  "last-shared": "마지막 공유",
+  "file-date": "파일 날짜",
+  "member-modified": "백업 항목 수정",
 };
 
 /**

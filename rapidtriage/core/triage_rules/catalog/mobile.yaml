@@ -85,6 +85,94 @@ families:
   - mobile.location_outlier
   - mobile.time_epoch_mismatch
   - mobile.factory_reset_gap
+# R5 L3: Android adb backup (.ab) unpacked in memory: header row + one row per tar member.
+- id: android-backup
+  label: Android adb 백업
+  types:
+  - android-backup
+  core_columns:
+  - key: source_path
+    semantic: path
+    label: 백업 파일
+    format: path
+  - key: status
+    label: 상태
+    value_labels:
+      completed: 해제함
+      partial: 일부만(손상·상한)
+      encrypted-not-unpacked: 암호화(해제 안 함)
+      unreadable: 읽기 실패
+  - key: status_reason
+    label: 사유
+  - key: encryption
+    label: 암호화
+  - key: compressed
+    label: 압축
+  - key: backup_version
+    label: 형식 버전
+    format: number
+  - key: member_count
+    label: 항목 수
+    format: number
+  - key: package_count
+    label: 앱 수
+    format: number
+  aux_columns:
+  - key: packages
+    label: 앱 패키지
+  - key: sqlite_inventoried
+    label: DB 스키마 목록화
+    format: number
+  - key: pbkdf2_rounds
+    label: PBKDF2 반복
+    format: number
+  rules: []
+- id: android-backup-member
+  label: Android 백업 항목
+  types:
+  - android-backup-member
+  core_columns:
+  - key: timestamp
+    label: 수정 시각
+    aliases:
+    - member_mtime
+    format: time
+    ts_kind: member-modified
+    width: 170
+  - key: package
+    label: 앱 패키지
+  - key: backup_domain_label
+    label: 영역
+    aliases:
+    - backup_domain
+  - key: member_path
+    semantic: path
+    label: 앱 내 경로
+    format: path
+  - key: size
+    label: 크기
+    format: bytes
+  - key: data_category
+    label: 데이터 종류
+  - key: sha256
+    semantic: hash
+    label: SHA-256
+    format: mono
+  aux_columns:
+  - key: member_name
+    label: tar 항목 이름
+    format: mono
+  - key: member_type
+    label: 항목 형식
+  - key: mode
+    label: 권한
+    format: mono
+  - key: source_path
+    label: 백업 파일
+    format: path
+  - key: risk_flags
+    label: 표시
+  rules: []
 rules:
 - id: mobile.backup_encrypted_partial
   family: mobile
