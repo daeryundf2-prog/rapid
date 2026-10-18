@@ -9,9 +9,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { filesPathQueryString } from "../../api/collections";
 import type { FsTreePage, RegistryLevel, RegistryValues } from "../../api/explorers";
 import { getCommand, registerCommands, resetCommandRegistry, runCommand } from "../../commands/registry";
+import type { GridRow } from "../../contracts/collection";
 import { parseHash, serializeRoute } from "../../router";
 import { resetAppStore, useAppStore } from "../../state/store";
 import { explorerCommands } from "../explorers/commands";
+import { MAX_AUTO_PAGES } from "../explorers/ExplorerTree";
 import { ancestorIds, FsExplorerLayout, fsExplorerOpen, fsScopeOf } from "../explorers/FsExplorer";
 import { MediaExplorerPanel, mediaPathKey } from "../explorers/MediaExplorerPanel";
 import { keyAncestorIds, RegistryExplorer } from "../explorers/RegistryExplorer";
@@ -19,6 +21,7 @@ import { installFetch, jsonResponse, renderWithClient, resetGridStore } from "..
 import { collectionQueryKey } from "../grid/useCollectionQuery";
 import { targetKey } from "../tree/domains";
 import { buildTreeModel, domainNodeCount, domainRoute, NO_REGISTRY_TREE_REASON } from "../tree/model";
+import { narrowedActiveIndex } from "./ThumbnailView";
 
 configure({ asyncUtilTimeout: 5000 });
 
@@ -679,5 +682,153 @@ describe("미디어 탐색기 패널", () => {
       label: "카메라: Apple iPhone",
       paths: ["C:/case/a.jpg"],
     });
+  });
+});
+
+// --- review fixes (R4 console) ---------------------------------------------------------------
+
+describe("탐색기 리뷰 수정", () => {
+  function renderFs() {
+    renderWithClient(
+      <FsExplorerLayout>
+        <p>grid</p>
+      </FsExplorerLayout>,
+    );
+  }
+
+  it("더 보기 keeps its row (busy) while loading, then focuses the first new child", async () => {
+    let release: () => void = () => undefined;
+    installFetch({
+      "/fs-tree": (url) => {
+        if (!url.searchParams.get("after")) {
+          return jsonResponse(fsPage("", [folder("Users", 8, 0)], { child_total: 2, next_after: "QQ" }));
+        }
+        return new Promise<Response>((resolve) => {
+          release = () => resolve(jsonResponse(fsPage("", [folder("Windows", 2, 0)])));
+        });
+      },
+    });
+    useAppStore.getState().navigate({ runId: RUN, collection: "files", dir: "" });
+    renderFs();
+    const tree = await screen.findByRole("tree", { name: "파일 시스템 폴더 트리" });
+    const more = await within(tree).findByRole("treeitem", { name: /더 보기 \(1개 남음\)/ });
+    act(() => more.focus());
+    fireEvent.keyDown(more, { key: "Enter" });
+    // Same element, still focused, marked busy.
+    await waitFor(() => expect(more.getAttribute("aria-busy")).toBe("true"));
+    expect(more.isConnected).toBe(true);
+    expect(more.textContent).toContain("더 불러오는 중…");
+    expect(document.activeElement).toBe(more);
+    await act(async () => release());
+    const windows = await within(tree).findByRole("treeitem", { name: /^Windows, 파일 2개/ });
+    await waitFor(() => expect(document.activeElement).toBe(windows));
+    expect(windows.tabIndex).toBe(0);
+  });
+
+  it("stops paging after MAX_AUTO_PAGES for a deep link that is not there and says so", async () => {
+    const calls = installFetch({
+      "/fs-tree": (url) => {
+        const path = url.searchParams.get("path") ?? "";
+        if (path !== "") return jsonResponse({ detail: "폴더를 찾을 수 없습니다" }, 404);
+        const page = Number(url.searchParams.get("after") ?? "0");
+        return jsonResponse(
+          fsPage("", [folder(`F${page}`, 1, 0)], { child_total: 100, next_after: String(page + 1) }),
+        );
+      },
+    });
+    useAppStore.getState().navigate({ runId: RUN, collection: "files", dir: "Missing" });
+    renderFs();
+    const tree = await screen.findByRole("tree", { name: "파일 시스템 폴더 트리" });
+    expect(await within(tree).findByText(/위치를 찾지 못했습니다/)).toBeTruthy();
+    const paged = calls.filter((call) => call.url.includes("after="));
+    expect(paged).toHaveLength(MAX_AUTO_PAGES);
+    // The rest stays with the examiner (더 보기), and nothing pages on by itself.
+    expect(within(tree).getByRole("treeitem", { name: /더 보기/ })).toBeTruthy();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(calls.filter((call) => call.url.includes("after="))).toHaveLength(MAX_AUTO_PAGES);
+  });
+
+  it("an empty folder list still offers the special nodes", async () => {
+    installFetch({
+      "/fs-tree": () =>
+        jsonResponse(
+          fsPage("", [], {
+            node: { ...folder("", 0, 0), name: "" },
+            special_nodes: [
+              {
+                id: "orphan",
+                label: "고아 파일",
+                count: 3,
+                counts: { candidates: 3, inventory: 0 },
+                source: "files",
+                files_query: { special: "orphan" },
+              },
+            ],
+          }),
+        ),
+    });
+    useAppStore.getState().navigate({ runId: RUN, collection: "files", dir: "" });
+    renderFs();
+    expect(await screen.findByTestId("fs-explorer-empty")).toBeTruthy();
+    const orphan = await screen.findByRole("treeitem", { name: /고아 파일, 3건/ });
+    fireEvent.click(orphan);
+    expect(useAppStore.getState().route).toMatchObject({ collection: "files", special: "orphan" });
+  });
+
+  it("a breadcrumb clears the open row and viewer mode", async () => {
+    installFetch({
+      "/fs-tree": (url) => {
+        const path = url.searchParams.get("path") ?? "";
+        if (path === "Users/alice") return jsonResponse(fsPage("Users/alice", []));
+        if (path === "Users") return jsonResponse(fsPage("Users", [folder("Users/alice", 8, 0)]));
+        return jsonResponse(fsPage("", [folder("Users", 8, 1)]));
+      },
+    });
+    useAppStore.getState().navigate({
+      runId: RUN,
+      collection: "files",
+      dir: "Users/alice",
+      row: { collection: "files", locator: "/files/3" },
+      mode: "hex",
+    });
+    renderFs();
+    const header = await screen.findByTestId("fs-explorer-header");
+    const crumbs = within(header).getByRole("navigation", { name: "폴더 경로" });
+    fireEvent.click(await within(crumbs).findByRole("button", { name: "Users" }));
+    expect(useAppStore.getState().route.dir).toBe("Users");
+    expect(useAppStore.getState().route.row).toBeUndefined();
+    expect(useAppStore.getState().route.mode).toBeUndefined();
+    fireEvent.click(await within(crumbs).findByRole("button", { name: "볼륨 1 (스캔 루트)" }));
+    expect(useAppStore.getState().route.dir).toBe("");
+    expect(useAppStore.getState().route.row).toBeUndefined();
+  });
+
+  it("registry key details start over for another key (no stale copy message)", async () => {
+    Object.assign(navigator, { clipboard: { writeText: vi.fn(async () => {}) } });
+    installFetch({
+      "/registry-tree": () => jsonResponse({ run_id: RUN, hives: [HIVE], index: null }),
+      "/registry-values": () => jsonResponse(VALUES),
+    });
+    useAppStore
+      .getState()
+      .navigate({ runId: RUN, collection: "registry", kind: "h1", key: "HKLM\\SYSTEM\\Select" });
+    renderWithClient(<RegistryExplorer />);
+    const details = await screen.findByTestId("registry-key-details");
+    fireEvent.click(within(details).getByRole("button", { name: /키 경로 복사/ }));
+    expect(await screen.findByText(/복사했습니다/)).toBeTruthy();
+    act(() => useAppStore.getState().patchRoute({ key: "HKLM\\SYSTEM\\ControlSet001" }));
+    await screen.findByTestId("registry-key-details");
+    expect(screen.queryByText(/복사했습니다/)).toBeNull();
+  });
+
+  it("narrowing the thumbnails keeps the active image when it is in the set", () => {
+    const rows = ["C:/a.jpg", "C:/b.jpg", "C:/c.jpg"].map(
+      (sourcePath, index) => ({ rowKey: String(index), sourcePath }) as unknown as GridRow,
+    );
+    const set = { label: "같은 해시", paths: ["c:\\c.jpg", "C:/b.jpg"] };
+    expect(narrowedActiveIndex(rows, set, "C:/c.jpg")).toBe(1);
+    expect(narrowedActiveIndex(rows, set, "C:/a.jpg")).toBe(0);
+    expect(narrowedActiveIndex(rows, null, "C:/c.jpg")).toBe(2);
+    expect(narrowedActiveIndex(rows, set, null)).toBe(0);
   });
 });

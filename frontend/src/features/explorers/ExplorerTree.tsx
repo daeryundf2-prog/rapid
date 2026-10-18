@@ -40,6 +40,8 @@ interface Branch {
   total: number;
   status: "loading" | "ready" | "error";
   error?: string;
+  /** The load is a next page ("더 보기"): the more row stays (busy) instead of a status line. */
+  paging?: boolean;
 }
 
 type Row =
@@ -51,7 +53,7 @@ type Row =
       pos: number;
       size: number;
     }
-  | { type: "more"; id: string; parentId: string; level: number; remaining: number }
+  | { type: "more"; id: string; parentId: string; level: number; remaining: number; busy: boolean }
   | { type: "status"; id: string; level: number; text: string; error?: boolean; parentId: string };
 
 export interface ExplorerTreeProps {
@@ -69,7 +71,9 @@ export interface ExplorerTreeProps {
 
 const MORE_PREFIX = "more:";
 /** Pages loaded on their own to reveal a deep-linked item (then "더 보기" is left to the user). */
-export const MAX_AUTO_PAGES = 20;
+export const MAX_AUTO_PAGES = 5;
+/** Note under a level when a deep-linked item was not found in it. */
+export const DEEP_LINK_NOT_FOUND = "위치를 찾지 못했습니다";
 
 export function ExplorerTree({
   label,
@@ -85,17 +89,29 @@ export function ExplorerTree({
   const [branches, setBranches] = useState<ReadonlyMap<string, Branch>>(() => new Map());
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const refs = useRef(new Map<string, HTMLElement>());
+  const treeRef = useRef<HTMLUListElement | null>(null);
   const controllers = useRef(new Map<string, AbortController>());
   const loadRef = useRef(loadChildren);
   loadRef.current = loadChildren;
   const branchesRef = useRef(branches);
   branchesRef.current = branches;
+  /** Bumped on every reset: a page that answers for an older generation is dropped. */
+  const generation = useRef(0);
+  /** Pages loaded on their own per parent (deep link); cleared on reset and on a new deep link. */
+  const autoPages = useRef(new Map<string, number>());
+  /** "더 보기" activated: focus the first newly added child of `parentId` once it is rendered. */
+  const pendingMoreFocus = useRef<{ parentId: string; from: number } | null>(null);
 
   // Another run / scope: forget every branch (in-flight loads are aborted).
   // biome-ignore lint/correctness/useExhaustiveDependencies: resetKey is the trigger
   useEffect(() => {
+    generation.current += 1;
     for (const controller of controllers.current.values()) controller.abort();
     controllers.current.clear();
+    // Effects later in this pass read the ref: never resume an old run's cursor ("stalled").
+    branchesRef.current = new Map();
+    autoPages.current.clear();
+    pendingMoreFocus.current = null;
     setBranches(new Map());
     setExpanded(new Set(expandIds ?? []));
   }, [resetKey]);
@@ -114,6 +130,7 @@ export function ExplorerTree({
     controllers.current.get(id)?.abort();
     const controller = new AbortController();
     controllers.current.set(id, controller);
+    const gen = generation.current;
     setBranches((prev) => {
       const next = new Map(prev);
       const current = prev.get(id);
@@ -122,13 +139,14 @@ export function ExplorerTree({
         nextAfter: current?.nextAfter ?? null,
         total: current?.total ?? 0,
         status: "loading",
+        paging: Boolean(after),
       });
       return next;
     });
     loadRef
       .current(id, after, controller.signal)
       .then((page) => {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || gen !== generation.current) return;
         setBranches((prev) => {
           const next = new Map(prev);
           const before = after ? (prev.get(id)?.items ?? []) : [];
@@ -142,7 +160,7 @@ export function ExplorerTree({
         });
       })
       .catch((error: unknown) => {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || gen !== generation.current) return;
         setBranches((prev) => {
           const next = new Map(prev);
           const current = prev.get(id);
@@ -188,22 +206,50 @@ export function ExplorerTree({
 
   // A deep link past the first page of a level (`expandIds` is the ancestor chain, the selected
   // item its last child): page on in the parent until the next link of the chain is loaded.
-  const autoPages = useRef(new Map<string, number>());
+  // A new deep link gets its own page budget.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: expandKey / selectedId are the trigger
+  useEffect(() => {
+    autoPages.current.clear();
+  }, [expandKey, selectedId]);
+  /** Parent whose level does not hold the next link of the deep-link chain (budget spent / end). */
+  const [notFoundIn, setNotFoundIn] = useState<string | null>(null);
   useEffect(() => {
     const chain = [...(expandIds ?? []), ...(selectedId ? [selectedId] : [])];
+    let missing: string | null = null;
     for (let i = 1; i < chain.length; i += 1) {
       const wanted = chain[i] as string;
       if (allItems.has(wanted)) continue;
       const parent = chain[i - 1] as string;
       const branch = branches.get(parent);
       const pages = autoPages.current.get(parent) ?? 0;
-      if (branch?.status === "ready" && branch.nextAfter && pages < MAX_AUTO_PAGES) {
-        autoPages.current.set(parent, pages + 1);
-        load(parent, branch.nextAfter);
+      if (branch?.status === "ready") {
+        if (branch.nextAfter && pages < MAX_AUTO_PAGES) {
+          autoPages.current.set(parent, pages + 1);
+          load(parent, branch.nextAfter);
+        } else missing = parent;
       }
-      return;
+      break;
     }
+    setNotFoundIn(missing);
   }, [expandIds, selectedId, allItems, branches, load]);
+
+  // "더 보기" finished: move focus to the first child it added (the more row may be gone).
+  useEffect(() => {
+    const pending = pendingMoreFocus.current;
+    if (!pending) return;
+    const branch = branches.get(pending.parentId);
+    if (!branch || branch.status === "loading") return;
+    pendingMoreFocus.current = null;
+    const first = branch.items[pending.from];
+    // Nothing new (or the page failed: its status line is not focusable): the more row or the parent.
+    const target =
+      first?.id ??
+      (branch.status === "ready" && branch.nextAfter
+        ? `${MORE_PREFIX}${pending.parentId}`
+        : pending.parentId);
+    setFocusedId(target);
+    refs.current.get(target)?.focus();
+  }, [branches]);
 
   const rows = useMemo(() => {
     const out: Row[] = [];
@@ -223,7 +269,17 @@ export function ExplorerTree({
           return;
         }
         walk(branch.items, level + 1, item.id);
-        if (branch.status === "loading") {
+        if (branch.status === "loading" && branch.paging) {
+          // Keep the focused "더 보기" row in place (busy) while the next page loads.
+          out.push({
+            type: "more",
+            id: `${MORE_PREFIX}${item.id}`,
+            parentId: item.id,
+            level: level + 1,
+            remaining: Math.max(0, branch.total - branch.items.length),
+            busy: true,
+          });
+        } else if (branch.status === "loading") {
           out.push({
             type: "status",
             id: `status:${item.id}`,
@@ -247,6 +303,7 @@ export function ExplorerTree({
             parentId: item.id,
             level: level + 1,
             remaining: Math.max(0, branch.total - branch.items.length),
+            busy: false,
           });
         } else if (branch.items.length === 0) {
           out.push({
@@ -257,11 +314,23 @@ export function ExplorerTree({
             parentId: item.id,
           });
         }
+        if (notFoundIn === item.id && branch.status === "ready") {
+          out.push({
+            type: "status",
+            id: `notfound:${item.id}`,
+            level: level + 1,
+            text: branch.nextAfter
+              ? `${DEEP_LINK_NOT_FOUND} · 더 보기로 계속 찾을 수 있습니다`
+              : DEEP_LINK_NOT_FOUND,
+            error: true,
+            parentId: item.id,
+          });
+        }
       });
     };
     walk(roots, 1, null);
     return out;
-  }, [roots, branches, expanded]);
+  }, [roots, branches, expanded, notFoundIn]);
 
   // Reveal the selected item once it is rendered (deep link, breadcrumb, reload).
   const scrolledFor = useRef<string | null>(null);
@@ -304,6 +373,11 @@ export function ExplorerTree({
   const activateMore = (row: Extract<Row, { type: "more" }>) => {
     const branch = branches.get(row.parentId);
     if (branch?.nextAfter && branch.status !== "loading") {
+      const active = typeof document !== "undefined" ? document.activeElement : null;
+      // Move focus afterwards only when it is on the tree (the more row) or was lost.
+      if (!active || active === document.body || treeRef.current?.contains(active)) {
+        pendingMoreFocus.current = { parentId: row.parentId, from: branch.items.length };
+      }
       load(row.parentId, branch.nextAfter);
       announce("다음 항목을 불러옵니다");
     }
@@ -364,8 +438,15 @@ export function ExplorerTree({
   };
 
   return (
-    // biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: ul is the ARIA tree container
-    <ul role="tree" aria-label={label} className="explorer-tree" data-testid={testId} onKeyDown={onKeyDown}>
+    <ul
+      ref={treeRef}
+      // biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: ul is the ARIA tree container
+      role="tree"
+      aria-label={label}
+      className="explorer-tree"
+      data-testid={testId}
+      onKeyDown={onKeyDown}
+    >
       {rows.map((row) => {
         const indent = { paddingInlineStart: `calc(var(--space-2) + ${row.level - 1} * var(--space-4))` };
         if (row.type === "status") {
@@ -394,6 +475,7 @@ export function ExplorerTree({
               tabIndex={tabStop === row.id ? 0 : -1}
               aria-level={row.level}
               aria-selected={false}
+              aria-busy={row.busy || undefined}
               className="case-tree-item explorer-tree-more"
               style={indent}
               onFocus={() => setFocusedId(row.id)}
@@ -401,7 +483,7 @@ export function ExplorerTree({
             >
               <span className="case-tree-twisty" aria-hidden="true" />
               <span className="case-tree-label">
-                더 보기 ({row.remaining.toLocaleString("ko-KR")}개 남음)
+                {row.busy ? "더 불러오는 중…" : `더 보기 (${row.remaining.toLocaleString("ko-KR")}개 남음)`}
               </span>
             </li>
           );

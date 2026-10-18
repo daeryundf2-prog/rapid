@@ -165,6 +165,25 @@ export function mergeImageRows(primary: readonly GridRow[], extra: readonly Grid
   return out;
 }
 
+/** The rows a media set narrows the grid to (null = every row). */
+export function narrowRows(rows: readonly GridRow[], set: MediaSet | null): GridRow[] {
+  if (!set) return rows as GridRow[];
+  const wanted = new Set(set.paths.map(mediaPathKey));
+  return rows.filter((row) => wanted.has(mediaPathKey(row.sourcePath ?? "")));
+}
+
+/** Where the active tile lands after narrowing / widening: the same image if still shown, else 0. */
+export function narrowedActiveIndex(
+  rows: readonly GridRow[],
+  set: MediaSet | null,
+  activePath: string | null | undefined,
+): number {
+  if (!activePath) return 0;
+  const key = mediaPathKey(activePath);
+  const index = narrowRows(rows, set).findIndex((row) => mediaPathKey(row.sourcePath ?? "") === key);
+  return index >= 0 ? index : 0;
+}
+
 export function ThumbnailView() {
   const route = useRoute();
   const { cq, rows: routeRows, runId } = useViewRows({ predicate: isImageRow, textFilter: true });
@@ -192,11 +211,7 @@ export function ThumbnailView() {
   const nodeKey = `${route.runId}|${route.collection.id}|${route.collection.kind ?? ""}|${route.collection.dir ?? ""}|${route.collection.special ?? ""}`;
   // biome-ignore lint/correctness/useExhaustiveDependencies: nodeKey is the trigger
   useEffect(() => setNarrow(null), [nodeKey]);
-  const sorted = useMemo(() => {
-    if (!narrow) return allSorted;
-    const wanted = new Set(narrow.paths.map(mediaPathKey));
-    return allSorted.filter((row) => wanted.has(mediaPathKey(row.sourcePath ?? "")));
-  }, [allSorted, narrow]);
+  const sorted = useMemo(() => narrowRows(allSorted, narrow), [allSorted, narrow]);
   const loadedKeys = useMemo(
     () => new Set(allSorted.map((row) => mediaPathKey(row.sourcePath ?? ""))),
     [allSorted],
@@ -366,7 +381,8 @@ export function ThumbnailView() {
   };
   const narrowTo = (set: MediaSet | null) => {
     setNarrow(set);
-    setActive(0);
+    // Keep the tile the examiner was on when it is part of the new set.
+    setActive(narrowedActiveIndex(allSorted, set, activeRow?.sourcePath));
     announce(
       set ? `격자를 ${set.label} ${set.paths.length}건으로 좁혔습니다` : "격자에 모든 이미지를 표시합니다",
     );
@@ -455,6 +471,8 @@ export function ThumbnailView() {
       {panel && runId ? (
         <div id={panelId}>
           <MediaExplorerPanel
+            // Another run: its camera / date groups and the picked group start over.
+            key={runId}
             runId={runId}
             mode={panel}
             activePath={activeRow?.sourcePath ?? null}

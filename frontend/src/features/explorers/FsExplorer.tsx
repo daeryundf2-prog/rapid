@@ -184,10 +184,25 @@ export function FsExplorerPane() {
       </p>
     );
   } else if (root.data && root.data.node.file_count === 0) {
+    // No folder to show, but the special nodes (고아 파일 · 미할당 공간 · NTFS 메타) still open.
+    const specialRoots = roots.filter((item) => item.id.startsWith(SPECIAL_PREFIX));
     body = (
-      <p className="explorer-note">
-        이 목록({scope === "inventory" ? "기타 파일" : "후보 파일"})에는 폴더에 놓을 파일이 없습니다.
-      </p>
+      <>
+        <p className="explorer-note" data-testid="fs-explorer-empty">
+          이 목록({scope === "inventory" ? "기타 파일" : "후보 파일"})에는 폴더에 놓을 파일이 없습니다.
+        </p>
+        {specialRoots.length ? (
+          <ExplorerTree
+            label="파일 시스템 특수 노드"
+            roots={specialRoots}
+            loadChildren={loadChildren}
+            selectedId={selectedId}
+            onOpen={onOpen}
+            resetKey={`${runId}|${scope}`}
+            testId="fs-explorer-tree"
+          />
+        ) : null}
+      </>
     );
   } else {
     body = (
@@ -296,7 +311,11 @@ export function FsExplorerHeader() {
         <ol>
           <li>
             {crumbs.length ? (
-              <button type="button" className="view-link" onClick={() => patchRoute({ dir: "" })}>
+              <button
+                type="button"
+                className="view-link"
+                onClick={() => patchRoute({ dir: "", row: undefined, mode: undefined })}
+              >
                 {data?.volume.label ?? "볼륨"}
               </button>
             ) : (
@@ -311,7 +330,11 @@ export function FsExplorerHeader() {
               {index === crumbs.length - 1 ? (
                 <span aria-current="page">{crumb.name}</span>
               ) : (
-                <button type="button" className="view-link" onClick={() => patchRoute({ dir: crumb.path })}>
+                <button
+                  type="button"
+                  className="view-link"
+                  onClick={() => patchRoute({ dir: crumb.path, row: undefined, mode: undefined })}
+                >
                   {crumb.name}
                 </button>
               )}

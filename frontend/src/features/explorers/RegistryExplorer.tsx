@@ -121,7 +121,7 @@ function ValueTable({ data }: { data: RegistryValues }) {
               <td className="explorer-mono explorer-hex">
                 {value.data_hex ?? "—"}
                 {value.data_truncated ? " …" : ""}
-                {value.data_size !== null ? (
+                {value.data_size != null ? (
                   <span className="explorer-muted"> ({n(value.data_size)} B)</span>
                 ) : null}
               </td>
@@ -369,7 +369,7 @@ export function RegistryExplorer() {
       </section>
       <div className="explorer-main explorer-scroll">
         {runId && hive ? (
-          <KeyDetails runId={runId} hive={hive} keyPath={keyPath} />
+          <KeyDetails key={`${runId}|${hive.id}|${keyPath}`} runId={runId} hive={hive} keyPath={keyPath} />
         ) : route.kind && hives.data && !hive ? (
           <p className="explorer-note">이 런에 없는 하이브입니다. 왼쪽 트리에서 하이브를 고르세요.</p>
         ) : (
