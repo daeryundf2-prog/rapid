@@ -8,9 +8,13 @@ way that suggests timestomping (AXIOM "NTFS Timestamp Mismatch" columns):
   ``SI_BEFORE_FN_MIN_DELTA_SECONDS`` (the ``ntfs.si_before_fn`` rule default);
 * ``zero_subsecond`` -- $SI created and modified have zero sub-seconds while
   $FN created has sub-seconds (second-precision tools; ``ntfs.zero_subsecond``);
-* ``fn_after_si_modified`` -- a $FN created/modified time later than $SI
-  modified by more than ``FN_AFTER_SI_TOLERANCE_SECONDS`` ($FN is only written
-  on create/rename/move, so it should not follow the last $SI modification);
+* ``fn_after_si_modified`` -- a $FN created/modified time later than both $SI
+  modified *and* $SI MFT-modified by more than ``FN_AFTER_SI_TOLERANCE_SECONDS``.
+  $FN is written on create/rename/move, and the same operation updates the $SI
+  entry-modified time; a copy keeps an old $SI modified but a fresh $SI
+  MFT-modified, so only a backdated $SI MFT-modified (a timestomping tool that
+  sets all four $SI times) trips it. (Comparing with $SI modified alone flagged
+  450,699 of 1,421,896 records of the BSH $MFT, almost all ordinary copies.)
 * ``future_time`` -- any of the eight times later than the reference time
   (analysis start) plus ``FUTURE_TOLERANCE``.
 
@@ -38,7 +42,7 @@ FUTURE_TOLERANCE = dt.timedelta(days=1)
 REASON_LABELS: dict[str, str] = {
     "si_created_before_fn": "$SI 생성이 $FN 생성보다 앞섬",
     "zero_subsecond": "$SI 생성·수정 초 미만 0($FN은 아님)",
-    "fn_after_si_modified": "$FN 시각이 $SI 수정보다 늦음",
+    "fn_after_si_modified": "$FN 시각이 $SI 수정·MFT 수정보다 늦음",
     "future_time": "미래 시각",
 }
 REASON_CODES: tuple[str, ...] = tuple(REASON_LABELS)
@@ -83,10 +87,11 @@ def mismatch_reasons(
         and fn_created.microsecond
     ):
         reasons.append("zero_subsecond")
-    if si_modified is not None:
+    si_changed = si_times["mft_modified_at"]
+    if si_modified is not None and si_changed is not None:
         later = [moment for moment in (fn_created, fn_times["modified_at"]) if moment is not None]
         if later:
-            gap = (max(later) - si_modified).total_seconds()
+            gap = (max(later) - max(si_modified, si_changed)).total_seconds()
             if gap > FN_AFTER_SI_TOLERANCE_SECONDS:
                 reasons.append("fn_after_si_modified")
                 evidence["fn_after_si_modified_seconds"] = int(gap)

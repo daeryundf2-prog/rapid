@@ -1069,7 +1069,7 @@ class AnalysisApiTests(unittest.TestCase):
         self.assertEqual(summary["timestamp_mismatch_count"], 1)
         self.assertEqual(
             summary["timestamp_mismatch_reason_counts"],
-            {"si_created_before_fn": 1, "zero_subsecond": 1, "fn_after_si_modified": 1},
+            {"si_created_before_fn": 1, "zero_subsecond": 1},
         )
         self.assertEqual(summary["logfile_status"], "parsed")
         self.assertEqual(summary["logfile_transaction_count"], 4)

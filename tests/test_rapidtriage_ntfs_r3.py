@@ -56,10 +56,13 @@ class TimestampMismatchTests(unittest.TestCase):
 
     def test_fn_after_si_modified(self) -> None:
         reasons, evidence = mismatch_reasons(
-            times(modified="2023-01-01T00:00:00.1+00:00"), times(), reference=REFERENCE
+            times(modified="2023-01-01T00:00:00.1+00:00", mft="2023-01-01T00:00:00.1+00:00"), times(), reference=REFERENCE
         )
         self.assertIn("fn_after_si_modified", reasons)
         self.assertGreater(evidence["fn_after_si_modified_seconds"], 0)
+        # A copy keeps an old $SI modified but a fresh $SI MFT-modified: not a mismatch.
+        copied, _ = mismatch_reasons(times(modified="2023-01-01T00:00:00.1+00:00"), times(), reference=REFERENCE)
+        self.assertEqual(copied, [])
 
     def test_future_time(self) -> None:
         reasons, evidence = mismatch_reasons(times(accessed="2031-05-05T00:00:00.1+00:00"), times(), reference=REFERENCE)
@@ -79,8 +82,7 @@ class TimestampMismatchTests(unittest.TestCase):
         row = mismatch_row(details, reference=REFERENCE, mft_row_index=12)
         assert row is not None
         self.assertEqual(row["source"], "timestamp-mismatch")
-        # Backdating $SI modified as well leaves $FN later than it.
-        self.assertEqual(row["reasons"], ["si_created_before_fn", "zero_subsecond", "fn_after_si_modified"])
+        self.assertEqual(row["reasons"], ["si_created_before_fn", "zero_subsecond"])
         self.assertEqual(row["related_rules"], ["ntfs.si_before_fn", "ntfs.zero_subsecond"])
         self.assertEqual(row["mft_row_index"], 12)
         for prefix in ("si", "fn"):
