@@ -187,6 +187,21 @@ TIMELINE_FIELD_MAP: dict[str, tuple[TimelineField, ...]] = {
     "execution-pca": (F("last_run_at", "run"), F("event_at", "pca-event"), F("key_last_written_at", "last-written", scope="key")),
     "execution-feature-usage": (F("key_last_written_at", "last-written", scope="key"),),
     "bitlocker-recovery-key-file": (F("key_created_at", "created"),),
+    # --- R5 L2: OS / system rows (registry_depth.py, system_extras.py) ---------------------
+    "startup-item": (
+        F("disabled_at", "disabled"),
+        F("key_last_written_at", "last-written", scope="key"),
+        F("target_created_at", "target-created"),
+        F("target_modified_at", "target-modified"),
+    ),
+    "registry-logon-banner": (F("key_last_written_at", "last-written"),),
+    "ssh-known-host": (F("key_last_written_at", "last-written", scope="key"),),
+    "ssh-client-session": (F("key_last_written_at", "last-written"),),
+    "office-identity": (F("key_last_written_at", "last-written"),),
+    "office-backstage-item": (F("modified_at", "modified"),),
+    "desktop-wallpaper": (F("key_last_written_at", "last-written", scope="key"),),
+    "vm-config": (F("last_state_change_at", "last-updated"),),
+    "av-detection-log": (F("detected_at", "event", timezone="local-unknown"),),
     # --- file usage ------------------------------------------------------
     "shell-shortcut": (
         F("target_created_at", "target-created"),

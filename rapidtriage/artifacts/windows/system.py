@@ -22,6 +22,7 @@ from .common import (
     isoformat_from_timestamp,
     open_sqlite_snapshot,
 )
+from .system_extras import collect_system_extras
 
 PARSER_VERSION = "windows-system-v8"
 TASKS_ROOT = ("Windows", "System32", "Tasks")
@@ -207,6 +208,8 @@ REMOTE_CONTROL_PRODUCTS = {
     "teamviewer": ("teamviewer", "connections_incoming", "tvnetwork"),
     "rustdesk": ("rustdesk", "rustdesk.toml", "config/rustdesk"),
     "chrome-remote-desktop": ("chrome remote desktop", "chromoting", "remoting_host"),
+    # R5 L2: LogMeIn (Pro/Central, Rescue, Hamachi) -- %ProgramData%\LogMeIn\*.log, LMIGuardian, Program Files\LogMeIn.
+    "logmein": ("logmein", "lmiguardian", "lmi_rescue", "lmirescue"),
 }
 BITS_QMGR_NAMES = {"qmgr0.dat", "qmgr1.dat", "qmgr.db", "qmgr.dat"}
 RECALL_DB_NAMES = {"ukg.db", "semantictextstore.sidb", "semanticindex.db", "recall.db"}
@@ -243,6 +246,8 @@ class WindowsSystemArtifactsProvider:
         yield from collect_activity_notification_uwp_artifacts(root)
         yield from collect_webshell_and_server_log_artifacts(root)
         yield from collect_bitlocker_recovery_key_files(root, self.name)
+        # R5 L2: startup folders, SSH, Office Backstage, VM, wallets, credential stores, McAfee, wallpaper.
+        yield from collect_system_extras(root, self.name)
 
 
 def collect_print_spooler_artifacts(root: Path) -> Iterable[ArtifactRecord]:

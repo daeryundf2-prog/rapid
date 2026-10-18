@@ -3,7 +3,8 @@
 Every ``eventlog`` row falls into exactly one *partition* group by its
 ``details.channel`` (exact names first, then prefixes, case-insensitive):
 보안, 시스템, 응용 프로그램, PowerShell, Windows Defender, 방화벽, 작업 스케줄러,
-스토리지, 사용자 PNP, Office Alerts, 원격 데스크톱 (TerminalServices-*), then
+스토리지, 사용자 PNP, Office Alerts, 원격 데스크톱 (TerminalServices-*), 네트워크 (R5 L2:
+NetworkProfile, WLAN-AutoConfig, DHCP, DNS-Client, BITS-Client, VPN-Client), then
 기타 채널 (any other channel) and 채널 없음 (inventory/summary rows, records
 without a channel). The partition counts therefore sum to the kind's row
 total. 서비스(SCM) is a *view* inside 시스템 (System channel rows whose
@@ -74,6 +75,24 @@ CHANNEL_GROUPS: tuple[tuple[str, str, tuple[str, ...], tuple[str, ...]], ...] = 
         (),
         ("microsoft-windows-terminalservices-", "microsoft-windows-remotedesktopservices-"),
     ),
+    # R5 L2: network connection channels (NetworkProfile 10000/10001, WLAN, DHCP, DNS, BITS, VPN).
+    # RasClient writes to the Application channel (provider RasClient): it stays in 응용 프로그램.
+    (
+        "networking",
+        "네트워크",
+        (),
+        (
+            "microsoft-windows-networkprofile/",
+            "microsoft-windows-wlan-autoconfig/",
+            "microsoft-windows-dhcp-client/",
+            "microsoft-windows-dhcpv6-client/",
+            "microsoft-windows-dns-client/",
+            "microsoft-windows-bits-client/",
+            "microsoft-windows-vpn-client/",
+            "microsoft-windows-rasagilevpn/",
+            "microsoft-windows-ncsi/",
+        ),
+    ),
 )
 GROUP_LABELS: dict[str, str] = {
     **{group: label for group, label, _exact, _prefixes in CHANNEL_GROUPS},
@@ -94,6 +113,7 @@ CANONICAL_CHANNELS: dict[str, tuple[str, ...]] = {
     "user-pnp": ("Microsoft-Windows-UserPnp/DeviceInstall",),
     "office-alerts": ("OAlerts",),
     "rdp": ("Microsoft-Windows-TerminalServices-LocalSessionManager/Operational",),
+    "networking": ("Microsoft-Windows-NetworkProfile/Operational",),
     SCM_GROUP: ("System",),
 }
 
