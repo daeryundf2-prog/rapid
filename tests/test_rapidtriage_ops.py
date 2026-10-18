@@ -5459,7 +5459,7 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertTrue(
                 any(item["event_type"] == "run-sync-exception-observed" for item in failed.transition_log)
             )
-            self.assertIn(canceled.status, {"queued", "running", "canceled", "failed"})
+            self.assertIn(canceled.status, {"queued", "running", "cancelled", "failed"})
             self.assertTrue(canceled.cancellation_requested)
             self.assertIn("#69", canceled.to_dict()["job_queue_assessment"]["commercial_gap_ids"])
             self.assertEqual(canceled.to_dict()["job_queue_assessment"]["core_accuracy_gates"][0]["gap_id"], "#69")

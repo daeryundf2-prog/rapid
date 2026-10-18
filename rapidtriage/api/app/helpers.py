@@ -21,11 +21,11 @@ from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.jobs import (
     RunJob,
     RunJobStore,
-    default_run_output_dir,
     is_relative_to,
     run_output_dir,
 )
-from ...core.run.progress import read_run_progress
+from ...core.run.plan import plan_counts_brief
+from ...core.run.progress import load_run_progress_view
 from ...core.run.summary import derive_counts
 from ...core.source_paths import (
     candidate_source_paths,
@@ -91,26 +91,28 @@ def get_job(store: RunJobStore, run_id: str):
 
 def job_output_dir(job: RunJob) -> Path | None:
     """Output directory a job writes to, also while it is still running."""
-    if job.summary:
-        try:
-            return run_output_dir(job.summary)
-        except RuntimeError:
-            pass
-    request = job.request
-    if request.output_dir:
-        return Path(request.output_dir).expanduser().resolve()
-    if not request.root:
-        return None
-    try:
-        return default_run_output_dir(Path(request.root).expanduser().resolve(), request.mode, run_id=job.run_id)
-    except OSError:
-        return None
+    return job.output_dir()
 
 
 def run_progress_payload(job: RunJob) -> dict[str, object] | None:
-    """Contents of ``rapidtriage-run-progress.json`` for ``job`` (or ``None``)."""
+    """``rapidtriage-run-progress.json`` of ``job`` as served (or ``None``).
+
+    ``load_run_progress_view``: ``live``/``stale`` flags, ``_owner`` dropped,
+    and a run whose process died is shown ``interrupted`` (file unchanged).
+    """
     output_dir = job_output_dir(job)
-    return read_run_progress(output_dir) if output_dir is not None else None
+    return load_run_progress_view(output_dir) if output_dir is not None else None
+
+
+def run_not_finished_message(job: RunJob) -> str:
+    """409 detail of an output that needs a finished run (P2 §3.4 라이브 열람)."""
+    if job.status not in {"queued", "running"}:
+        return "완료된 런이 아닙니다"
+    progress = run_progress_payload(job)
+    brief = plan_counts_brief(progress.get("plan") if isinstance(progress, Mapping) else None)
+    if not brief:
+        return "런 마무리 후 사용할 수 있습니다"
+    return f"런 마무리 후 사용할 수 있습니다 (진행: 그룹 {brief['groups_done']}/{brief['groups']})"
 
 
 def validate_run_evidence_source(raw_root: str) -> None:
@@ -249,7 +251,7 @@ def resolve_allowed_source_file(
     """
     job = get_job(store, run_id)
     if job.summary is None:
-        raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
+        raise HTTPException(status_code=409, detail=run_not_finished_message(job))
     allowed_roots = allowed_source_roots(job.summary)
     candidates = candidate_source_paths(raw_path, allowed_roots)
     scoped_candidates = [candidate for candidate in candidates if any(is_relative_to(candidate, root) for root in allowed_roots)]
@@ -609,7 +611,7 @@ def dt_from_epoch(value: float) -> str:
 def default_case_path(store: RunJobStore, run_id: str) -> Path:
     job = get_job(store, run_id)
     if job.summary is None:
-        raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
+        raise HTTPException(status_code=409, detail=run_not_finished_message(job))
     output_dir = job.summary.get("output_dir")
     if not isinstance(output_dir, str) or not output_dir:
         raise HTTPException(status_code=409, detail="run summary does not include output_dir")

@@ -75,6 +75,7 @@ from .helpers import (
     is_sqlite_candidate,
     model_to_dict,
     optional_int_for_api,
+    run_not_finished_message,
     stable_payload_sha256,
 )
 from .hex import (
@@ -616,7 +617,7 @@ def build_run_submission_manifest(
 ) -> dict[str, object]:
     job = get_job(store, run_id)
     if job.summary is None:
-        raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
+        raise HTTPException(status_code=409, detail=run_not_finished_message(job))
     case_path = default_case_path(store, run_id)
     case_payload = load_case_payload_or_empty(case_path)
     try:
@@ -637,7 +638,7 @@ def build_run_case_report(
 ) -> str:
     job = get_job(store, run_id)
     if job.summary is None:
-        raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
+        raise HTTPException(status_code=409, detail=run_not_finished_message(job))
     case_path = default_case_path(store, run_id)
     case_payload = load_case_payload_or_empty(case_path)
     manifest = build_run_submission_manifest(
@@ -668,7 +669,7 @@ def build_run_case_report(
 def build_run_validation_package(store: RunJobStore, run_id: str) -> dict[str, object]:
     job = get_job(store, run_id)
     if job.summary is None:
-        raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
+        raise HTTPException(status_code=409, detail=run_not_finished_message(job))
     summary = job.summary
     output_dir = run_output_dir(summary)
     case_path = default_case_path(store, run_id)

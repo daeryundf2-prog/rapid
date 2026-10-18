@@ -128,6 +128,9 @@
     "/api/meta/families": {
       "get": "get_families_api_meta_families_get"
     },
+    "/api/run-plan/preview": {
+      "get": "preview_run_plan_api_run_plan_preview_get"
+    },
     "/api/runs": {
       "get": "list_runs_api_runs_get",
       "post": "create_run_api_runs_post"
@@ -245,6 +248,12 @@
     },
     "/api/runs/{run_id}/outputs/{output_name}/preview": {
       "get": "preview_run_output_api_runs__run_id__outputs__output_name__preview_get"
+    },
+    "/api/runs/{run_id}/plan": {
+      "get": "get_run_plan_api_runs__run_id__plan_get"
+    },
+    "/api/runs/{run_id}/plan/control": {
+      "post": "control_run_plan_api_runs__run_id__plan_control_post"
     },
     "/api/runs/{run_id}/problems": {
       "get": "get_run_problems_api_runs__run_id__problems_get"

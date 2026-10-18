@@ -31,6 +31,7 @@ from .helpers import (
     default_submission_manifest_path,
     get_job,
     get_output_path,
+    run_not_finished_message,
 )
 from .models import (
     BookmarkCreateRequest,
@@ -172,7 +173,7 @@ def build_reports_router(
     def create_reviewer_bundle(run_id: str, request: ReviewerBundleCreateRequest) -> dict[str, object]:
         job = get_job(store, run_id)
         if job.summary is None:
-            raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
+            raise HTTPException(status_code=409, detail=run_not_finished_message(job))
         case_path = default_case_path(store, run_id)
         if not case_path.is_file():
             raise HTTPException(status_code=404, detail="case review file not found")
@@ -193,7 +194,7 @@ def build_reports_router(
     def download_reviewer_bundle(run_id: str) -> FileResponse:
         job = get_job(store, run_id)
         if job.summary is None:
-            raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
+            raise HTTPException(status_code=409, detail=run_not_finished_message(job))
         case_path = default_case_path(store, run_id)
         if not case_path.is_file():
             raise HTTPException(status_code=404, detail="case review file not found")
