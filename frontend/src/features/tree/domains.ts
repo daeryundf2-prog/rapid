@@ -118,6 +118,14 @@ export const AMCACHE_TYPE_LABELS: Readonly<Record<string, string>> = {
 };
 const AMCACHE_EVIDENCE_TYPES = Object.keys(AMCACHE_TYPE_LABELS);
 
+/** Registry network types (r3 O1 registry_depth.py) → Korean. */
+export const REGISTRY_NETWORK_TYPE_LABELS: Readonly<Record<string, string>> = {
+  "registry-network-share": "네트워크 공유·매핑 드라이브",
+  "registry-network-profile": "네트워크 프로필(NetworkList)",
+  "registry-wlan-profile": "무선 연결 이력(WLAN)",
+};
+const REGISTRY_NETWORK_TYPES = Object.keys(REGISTRY_NETWORK_TYPE_LABELS);
+
 /** Desktop messenger row types (artifacts/windows/messenger.py, plan r2-communication §3.1) → Korean. */
 export const DESKTOP_MESSENGER_TYPE_LABELS: Readonly<Record<string, string>> = {
   "chat-message": "대화(메시지)",
@@ -397,6 +405,23 @@ export const DOMAINS: readonly DomainDef[] = [
         label: "SRUM",
         target: a("windows-execution", ["srum-row-candidate", "srum-database-file"]),
       },
+      // r3 O1: PCA (text files: windows-execution; Compatibility Assistant\Store: windows-registry) and
+      // FeatureUsage. One node per kind; Korean-sorted block.
+      {
+        id: "exec-feature-usage",
+        label: "작업 표시줄 사용(FeatureUsage)",
+        target: a("windows-registry", ["execution-feature-usage"]),
+      },
+      {
+        id: "exec-pca-files",
+        label: "프로그램 호환성 도우미(PCA 기록 파일)",
+        target: a("windows-execution", ["execution-pca"]),
+      },
+      {
+        id: "exec-pca-registry",
+        label: "프로그램 호환성 도우미(PCA 레지스트리)",
+        target: a("windows-registry", ["execution-pca"]),
+      },
     ],
   },
   {
@@ -461,6 +486,50 @@ export const DOMAINS: readonly DomainDef[] = [
         label: "ShellBags",
         target: a("windows-shellbags", ["shellbag-entry", "shellbag-hive-summary"]),
         typeLabels: { "shellbag-entry": "ShellBags 항목", "shellbag-hive-summary": "ShellBags 하이브 요약" },
+      },
+      // r3 O1 registry depth (plan r3-os-depth §3.1): Korean-sorted block (Hangul before Latin).
+      {
+        id: "reg-default-browser",
+        label: "기본 브라우저",
+        target: a("windows-registry", ["registry-default-browser"]),
+      },
+      {
+        id: "reg-network",
+        label: "네트워크·공유·무선",
+        target: a("windows-registry", REGISTRY_NETWORK_TYPES),
+        typeLabels: REGISTRY_NETWORK_TYPE_LABELS,
+        children: [
+          {
+            id: "reg-network-shares",
+            label: "네트워크 공유·매핑 드라이브",
+            target: a("windows-registry", ["registry-network-share"]),
+          },
+          {
+            id: "reg-network-profiles",
+            label: "네트워크 프로필(NetworkList)",
+            target: a("windows-registry", ["registry-network-profile"]),
+          },
+          {
+            id: "reg-network-wlan",
+            label: "무선 연결 이력(WLAN)",
+            target: a("windows-registry", ["registry-wlan-profile"]),
+          },
+        ],
+      },
+      {
+        id: "reg-install-state",
+        label: "설치 상태(App Paths·MSI)",
+        target: a("windows-registry", ["registry-install-state"]),
+      },
+      {
+        id: "reg-known-dlls",
+        label: "알려진 DLL(KnownDLLs)",
+        target: a("windows-registry", ["registry-known-dll"]),
+      },
+      {
+        id: "reg-office-mru",
+        label: "Office 최근 파일(MRU)",
+        target: a("windows-registry", ["registry-office-mru"]),
       },
       {
         id: "reg-keytree",
@@ -890,6 +959,12 @@ export const DOMAINS: readonly DomainDef[] = [
         id: "af-ads",
         label: "ADS",
         target: a("windows-filesystem", ["ads-stream-candidate", "zone-identifier"]),
+      },
+      // r3 O1: BitLocker recovery key files (key value never stored: masked value, identifier, hashes).
+      {
+        id: "af-bitlocker-keys",
+        label: "BitLocker 복구 키 파일",
+        target: a("windows-system", ["bitlocker-recovery-key-file"]),
       },
       {
         id: "af-defender",
