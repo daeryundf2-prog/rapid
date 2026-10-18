@@ -12,13 +12,35 @@
  * PageUp/PageDown; Enter = open in the viewer (image mode); Space = select;
  * R/X/I/B/1–5 act on the focused tile through the shared review commands
  * (the viewer target follows tile focus, as it follows grid focus).
+ *
+ * 미디어 탐색기 (plan r4 §2.2): 관련 미디어 / 유사 사진 찾기 / 카메라·촬영일 그룹 panel
+ * (MediaExplorerPanel); a result set can narrow the grid ("격자에 이 묶음만") or select its tiles.
  */
 
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { type KeyboardEvent, type MouseEvent, memo, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type KeyboardEvent,
+  type MouseEvent,
+  memo,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { announce, DisabledReason } from "../../a11y";
 import { fetchSourceBlob, fetchSourceThumbnailBlob, isArchiveEntryPath } from "../../api/viewer";
 import type { CollectionRef, GridRow } from "../../contracts/collection";
 import { encodeRowRef } from "../../contracts/rowRef";
+import { useAppStore } from "../../state/store";
+import {
+  MEDIA_PANEL_LABELS,
+  MediaExplorerPanel,
+  type MediaPanelMode,
+  type MediaSet,
+  mediaPathKey,
+  NO_ACTIVE_IMAGE_REASON,
+} from "../explorers/MediaExplorerPanel";
 import { useRoute, useSelection, useViewerTarget } from "../grid/adapter";
 import { formatBytes, REVIEW_LABELS } from "../grid/columns/common";
 import { buildViewerTarget } from "../grid/gridCommands";
@@ -143,11 +165,32 @@ export function mergeImageRows(primary: readonly GridRow[], extra: readonly Grid
   return out;
 }
 
+/** The rows a media set narrows the grid to (null = every row). */
+export function narrowRows(rows: readonly GridRow[], set: MediaSet | null): GridRow[] {
+  if (!set) return rows as GridRow[];
+  const wanted = new Set(set.paths.map(mediaPathKey));
+  return rows.filter((row) => wanted.has(mediaPathKey(row.sourcePath ?? "")));
+}
+
+/** Where the active tile lands after narrowing / widening: the same image if still shown, else 0. */
+export function narrowedActiveIndex(
+  rows: readonly GridRow[],
+  set: MediaSet | null,
+  activePath: string | null | undefined,
+): number {
+  if (!activePath) return 0;
+  const key = mediaPathKey(activePath);
+  const index = narrowRows(rows, set).findIndex((row) => mediaPathKey(row.sourcePath ?? "") === key);
+  return index >= 0 ? index : 0;
+}
+
 export function ThumbnailView() {
   const route = useRoute();
   const { cq, rows: routeRows, runId } = useViewRows({ predicate: isImageRow, textFilter: true });
   // The files listing can hold its images far past the first pages: also read the media-image artifacts.
-  const withArtifacts = route.collection.id === "files";
+  // A folder of the file system explorer (or a special node) lists only its own files.
+  const withArtifacts =
+    route.collection.id === "files" && route.collection.dir === undefined && !route.collection.special;
   const media = useCollectionQuery(
     { ref: MEDIA_IMAGE_REF, offset: 0, limit: PAGE_SIZE },
     { runId: withArtifacts ? route.runId : null, passive: true },
@@ -160,7 +203,19 @@ export function ThumbnailView() {
   const { selectedKeys, select } = useSelection();
   const { target, publishFocusedRow, requestFocus } = useViewerTarget();
   const [sort, setSort] = useState<ThumbSort>("name-asc");
-  const sorted = useMemo(() => sortThumbs(rows, sort), [rows, sort]);
+  const allSorted = useMemo(() => sortThumbs(rows, sort), [rows, sort]);
+  // 미디어 탐색기: panel mode and the result set the grid is narrowed to (null = every image).
+  const [panel, setPanel] = useState<MediaPanelMode | null>(null);
+  const [narrow, setNarrow] = useState<MediaSet | null>(null);
+  const panelId = useId();
+  const nodeKey = `${route.runId}|${route.collection.id}|${route.collection.kind ?? ""}|${route.collection.dir ?? ""}|${route.collection.special ?? ""}`;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: nodeKey is the trigger
+  useEffect(() => setNarrow(null), [nodeKey]);
+  const sorted = useMemo(() => narrowRows(allSorted, narrow), [allSorted, narrow]);
+  const loadedKeys = useMemo(
+    () => new Set(allSorted.map((row) => mediaPathKey(row.sourcePath ?? ""))),
+    [allSorted],
+  );
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const width = useElementWidth(scrollRef, 800);
   const columns = Math.max(1, Math.floor(width / TILE_WIDTH));
@@ -295,7 +350,7 @@ export function ThumbnailView() {
     );
   }
   if (cq.isLoading) return <LoadingCard label="썸네일을 불러오는 중…" />;
-  if (sorted.length === 0) {
+  if (allSorted.length === 0) {
     if (paging) {
       return <LoadingCard label={`이미지를 찾는 중… (${scanned.toLocaleString("ko-KR")}행 검사)`} />;
     }
@@ -314,6 +369,63 @@ export function ThumbnailView() {
   }
 
   const activeRow = sorted[activeIndex];
+  const activeName = activeRow
+    ? (activeRow.sourcePath ?? activeRow.title).split(/[\\/]/).pop() || activeRow.title
+    : "";
+  const togglePanel = (mode: MediaPanelMode) => {
+    const next = panel === mode ? null : mode;
+    setPanel(next);
+    announce(
+      next ? `${MEDIA_PANEL_LABELS[mode]} 패널을 엽니다` : `${MEDIA_PANEL_LABELS[mode]} 패널을 닫았습니다`,
+    );
+  };
+  const narrowTo = (set: MediaSet | null) => {
+    setNarrow(set);
+    // Keep the tile the examiner was on when it is part of the new set.
+    setActive(narrowedActiveIndex(allSorted, set, activeRow?.sourcePath));
+    announce(
+      set ? `격자를 ${set.label} ${set.paths.length}건으로 좁혔습니다` : "격자에 모든 이미지를 표시합니다",
+    );
+  };
+  const selectSet = (set: MediaSet) => {
+    const wanted = new Set(set.paths.map(mediaPathKey));
+    const keys = allSorted
+      .filter((row) => wanted.has(mediaPathKey(row.sourcePath ?? "")))
+      .map((row) => row.rowKey);
+    select(keys);
+    announce(`${set.label}: 이미지 ${keys.length}개를 선택했습니다. 선택 막대에서 태그를 붙일 수 있습니다`);
+  };
+  const focusPath = (path: string): boolean => {
+    const key = mediaPathKey(path);
+    const index = sorted.findIndex((row) => mediaPathKey(row.sourcePath ?? "") === key);
+    if (index < 0) return false;
+    focusTile(index);
+    return true;
+  };
+  const openRecord = (recordIndex: number) => {
+    if (!runId) return;
+    useAppStore.getState().navigate({
+      runId,
+      collection: "artifacts",
+      kind: "media-image",
+      view: "thumbnails",
+      row: { collection: "artifacts", kind: "media-image", locator: `/artifacts/${recordIndex}` },
+    });
+  };
+  const panelButton = (mode: MediaPanelMode, needsImage: boolean) => (
+    <DisabledReason key={mode} reason={needsImage && !activeRow ? NO_ACTIVE_IMAGE_REASON : undefined}>
+      <button
+        type="button"
+        className="view-link"
+        aria-pressed={panel === mode}
+        aria-controls={panel === mode ? panelId : undefined}
+        data-testid={`media-panel-${mode}`}
+        onClick={() => togglePanel(mode)}
+      >
+        {MEDIA_PANEL_LABELS[mode]}
+      </button>
+    </DisabledReason>
+  );
   return (
     <div className="view-pane thumb-view" data-media-blur={mediaBlur ? "" : undefined}>
       <div className="view-toolbar">
@@ -337,6 +449,17 @@ export function ThumbnailView() {
           </button>
         ) : null}
         <MediaBlurToggle />
+        {panelButton("related", true)}
+        {panelButton("similar", true)}
+        {panelButton("groups", false)}
+        {narrow ? (
+          <span className="media-narrow" data-testid="media-narrow">
+            격자: {narrow.label} ({sorted.length.toLocaleString("ko-KR")}건 표시)
+            <button type="button" className="view-link" onClick={() => narrowTo(null)}>
+              모두 보기
+            </button>
+          </span>
+        ) : null}
         <RelatedMediaBadge
           runId={runId ?? null}
           path={activeRow?.sourcePath ?? null}
@@ -345,7 +468,29 @@ export function ThumbnailView() {
           }
         />
       </div>
+      {panel && runId ? (
+        <div id={panelId}>
+          <MediaExplorerPanel
+            // Another run: its camera / date groups and the picked group start over.
+            key={runId}
+            runId={runId}
+            mode={panel}
+            activePath={activeRow?.sourcePath ?? null}
+            activeName={activeName}
+            loadedKeys={loadedKeys}
+            onNarrow={narrowTo}
+            onSelect={selectSet}
+            onFocusPath={focusPath}
+            onOpenRecord={openRecord}
+          />
+        </div>
+      ) : null}
       <SelectionBar runId={runId} rows={selectedRows} patchRows={cq.patchRows} onClear={() => select([])} />
+      {sorted.length === 0 ? (
+        <p className="explorer-note" data-testid="media-narrow-empty">
+          이 묶음의 이미지가 아직 격자에 불러와지지 않았습니다. "모두 보기"로 돌아가거나 더 불러오세요.
+        </p>
+      ) : null}
       <div
         ref={scrollRef}
         className="thumb-scroll"

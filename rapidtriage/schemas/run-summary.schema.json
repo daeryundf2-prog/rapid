@@ -23,6 +23,11 @@
     "command": {
       "const": "run"
     },
+    "plan": {
+      "type": "object",
+      "description": "Run plan snapshot at the end of the run (r4 run plan; same document as rapidtriage-run-plan.json, see docs/rapidtriage-output-schemas.md).",
+      "additionalProperties": true
+    },
     "warnings": {
       "type": "array",
       "description": "Every step warning (caps/truncations, silent-failure verdicts, skipped providers); same rows as processing.warnings.",
@@ -241,6 +246,16 @@
         },
         "resume_effective": {
           "type": "boolean"
+        },
+        "skip_groups": {
+          "type": "array",
+          "description": "Run-plan groups skipped before the run started (r4 run plan).",
+          "items": {"type": "string"}
+        },
+        "skip_tasks": {
+          "type": "array",
+          "description": "Run-plan tasks skipped before the run started (r4 run plan).",
+          "items": {"type": "string"}
         },
         "resume_disabled_reason": {
           "type": "string"

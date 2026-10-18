@@ -436,3 +436,69 @@
   color: var(--text-subtle);
   font-size: var(--fs-aux);
 }
+
+/* 처리 계획표 (R4 V1): group rows with a bar + "3/5 태스크", indented task rows, row × buttons. */
+.run-plan-controls {
+  margin-bottom: var(--space-2);
+}
+
+.run-plan-stale,
+.process-run-note.is-warn {
+  color: var(--warn);
+}
+
+.run-plan-stale {
+  margin: 0 0 var(--space-2);
+  font-size: var(--fs-table-aux);
+}
+
+.process-run-note {
+  color: var(--text-muted);
+}
+
+.run-plan-table tr[role="row"]:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.run-plan-group > td:first-child {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.run-plan-twisty {
+  display: inline-flex;
+  align-items: center;
+  margin-right: var(--space-1);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.run-plan-task-label {
+  padding-left: calc(var(--space-3) + 16px);
+}
+
+.run-plan-progress {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.run-plan-progress progress {
+  width: 72px;
+  margin-right: var(--space-2);
+  vertical-align: middle;
+}
+
+.run-plan-table tr[data-status="queued"] > td:first-child,
+.run-plan-table tr[data-status="skipped"] > td:first-child {
+  color: var(--text-muted);
+}
+
+.run-plan-x {
+  width: 24px;
+  height: 24px;
+}

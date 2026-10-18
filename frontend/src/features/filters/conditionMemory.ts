@@ -4,6 +4,7 @@
  * wrapped and the UI simply shows nothing to recall.
  */
 
+import { normalizeContent, normalizeHours, normalizeWeekdays, parseGeo } from "./conditionValues";
 import { EMPTY_FILTERS, type FilterState, filtersEqual } from "./filterModel";
 
 export const RECENT_RANGES_KEY = "rapidtriage.v2.conditions.recentRanges";
@@ -81,6 +82,10 @@ export function normalizeFilters(raw: unknown): FilterState {
   const grade =
     src.flagGrade === "A" || src.flagGrade === "B" || src.flagGrade === "C" ? src.flagGrade : undefined;
   const flags = stringList(src.flags);
+  const weekdays = normalizeWeekdays(stringList(src.weekdays));
+  const hours = normalizeHours(src.hours);
+  const content = normalizeContent(stringList(src.content));
+  const geo = text(src.geo);
   return {
     ...EMPTY_FILTERS,
     ...(text(src.from) ? { from: text(src.from) } : {}),
@@ -94,6 +99,14 @@ export function normalizeFilters(raw: unknown): FilterState {
     columns,
     ...(flags.length ? { flags } : {}),
     ...(grade ? { flagGrade: grade } : {}),
+    // Row conditions (r4 §2.3): saved condition sets carry them too.
+    // Unknown weekday / content ids, empty hour windows and out-of-range boxes are dropped.
+    ...(weekdays.length ? { weekdays } : {}),
+    ...(hours ? { hours } : {}),
+    ...(src.offhours === true ? { offhours: true } : {}),
+    ...(src.partial === true ? { partial: true } : {}),
+    ...(content.length ? { content } : {}),
+    ...(geo && parseGeo(geo) ? { geo } : {}),
   };
 }
 

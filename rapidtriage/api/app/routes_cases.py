@@ -21,7 +21,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from ...core.case_db.base import CaseDatabaseError
 from ...core.case_db.intake import CaseConflictError, CaseNotFoundError
-from ...core.jobs import RunJobStore
+from ...core.jobs import RunJobStore, RunOutputDirBusy
 from ...core.run.profiles import RUN_PROFILES
 from .case_workspace import (
     SNAPSHOT_FILE_NAME,
@@ -344,9 +344,15 @@ def build_cases_router(store: RunJobStore, workspace: CaseWorkspace) -> APIRoute
                         status_code=409,
                         detail=f"같은 출력 폴더를 쓰는 런({busy})이 대기·실행 중입니다. 출력 폴더를 비우거나 다른 폴더를 지정하세요",
                     )
-            job = store.submit(run_request) if not request.wait else None
+            try:
+                job = store.submit(run_request) if not request.wait else None
+            except RunOutputDirBusy as exc:
+                raise HTTPException(status_code=409, detail=str(exc))
         if job is None:
-            job = store.run_sync(run_request)
+            try:
+                job = store.run_sync(run_request)
+            except RunOutputDirBusy as exc:
+                raise HTTPException(status_code=409, detail=str(exc))
         snapshot = build_processing_snapshot(run_request=run_request, case=case, evidence=evidence, origin="case-run")
         # Written into the run's own output folder: with wait=false (the default) this happens right
         # after the run is queued, before its first step, so the file is part of the run output from

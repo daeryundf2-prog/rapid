@@ -40,3 +40,56 @@
 
 ## 4. 결과 기록
 (구현 후)
+
+### 4.2 V2 — 탐색기 3종 (브랜치 `feat/r4-v2-explorers`, 2026-10-18)
+
+**구현**
+- API: `rapidtriage/api/app/fs_tree.py`, `registry_tree.py`, `media_similar.py`, `routes_explorers.py`(+ `GET /files?path_prefix=&recursive=&special=` — `routes_runs.py`, `triage_flags.filter_files_rows(restrict=)`). 테스트 `tests/test_rapidtriage_explorers_api.py`(18건: 폴더 수치 = 그리드 합계(양 범위·직속/하위), 커서 페이지, 경로 한정 403, 한국어 422, 색인 상한 3종, 출력 갱신 시 재색인, 레지스트리 값 디코딩·인용·점프 행·이름만 대체, pHash 거리·같은 해시·그룹).
+  - `GET /api/runs/{id}/fs-tree?path=&scope=&limit=&after=`: 한 단계 자식 폴더(직속·하위 파일 수/크기 합), 볼륨 루트(파티션 시작 섹터는 ntfs-meta 분석이 있을 때), 특수 노드 고아 파일·미할당 공간·슬랙(파일 목록 → ntfs-meta·카빙 분석 순, 없으면 `hidden_special_nodes`에 사유). 증거 루트 밖·상대 경로 불명 행은 트리에 넣지 않고 `index.outside_root`로 보고.
+  - `GET /api/runs/{id}/registry-tree?hive=&key=` / `registry-values?hive=&key=`: `registry-key-tree-node` 행으로 하이브→키 색인(60만 키 상한, 출력 서명별 캐시), 값은 증거 루트 안의 하이브 파일에서 `NativeRegistryHive`로 디코딩(읽지 못하면 수집된 값 이름만 + 사유), 인용 문장, 키에서 나온 `windows-registry`·`windows-shellbags`·`windows-os-account` 행(점프 대상).
+  - `GET /api/runs/{id}/media/similar?ref=&max_distance=&limit=`(pHash 해밍 거리 0–16, 기본 8) · `media/groups?by=camera|date[&key=]`.
+- 콘솔: `frontend/src/features/explorers/`(지연 로드 ARIA 트리 `ExplorerTree`, `FsExplorer`, `RegistryExplorer`, `MediaExplorerPanel`, `explorer.fs`·`explorer.registry` 명령), 라우트 `#/case/{run}/explore/files?dir=/<폴더>[&rec=1|&special=]`, `#/case/{run}/explore/registry/{hive}?key=`. 진입: 전체 보기 › 파일 시스템 · 레지스트리 탐색기, 파일시스템 계열 › 폴더 탐색기, 레지스트리 계열 › 레지스트리 탐색기(키·값), 명령 팔레트. 썸네일 보기 툴바: 관련 미디어 · 유사 사진 찾기 · 카메라·촬영일 그룹, "격자에 이 묶음만"(흐리게 유지), "이 묶음 선택(태그용)" → 선택 막대 태그. 키보드: ↑/↓·←/→(펼침/접기·부모/첫 자식)·Home/End·Enter 열기, 펼침/열기는 셸의 polite 라이브 영역 하나로만 알림. vitest `src/features/views/explorers.test.tsx`(11건) + `views.test.tsx` 썸네일 패널 1건.
+
+**실데이터 (run-subset10, 읽기 전용 증거 `D:\rapid-qa\bsh-subset`, API :8941 + Vite :8942)**
+
+| # | 확인 | 결과 |
+|---|---|---|
+| Q-R4-4 | 폴더 수치 = 그리드 합계 (후보 4,935 / 인벤토리 14,094, 폴더 1,080, 루트 밖 0) | `Users/user/Desktop` 직속 39 = 39, 하위 1,655 = 1,655 · `Users/user/AppData/Local/Microsoft/Edge/User Data/Default` 직속 29 = 29, 하위 1,662 = 1,662 · `Windows/System32/config` 직속 1 = 1, 하위 533 = 533(콘솔 "총 533건" = "하위 포함 533개") · 인벤토리 `Windows/System32/winevt/Logs` 183 = 183. 키보드로 Documents → Koino 열기, 그리드 1건. 특수 노드 3종은 숨김 + 사유(이 런은 디렉터리 증거라 고아·미할당·슬랙 행 없음, ntfs-meta·카빙 분석 없음). `..` → 422, `C:\Windows` → 403 |
+| Q-R4-5 | NTUSER/SYSTEM 키 트리·값·점프 | 하이브 14개(키 248,904, 첫 색인 8.4 s, 이후 0.01 s; 연결 행 3,121). NTUSER(…-1001) 루트 자식 12개; `…\CurrentVersion\Run` 값 8개 REG_SZ 디코딩(OneDrive·KakaoTalk·Slack 등), 연결 행 8건(`registry-persistence-entry`) → "KakaoTalk 행 열기"가 `windows-registry` 그리드 119쪽 행 + 뷰어 레코드로 이동. SYSTEM `ControlSet001\Services` 자식 853개(커서 페이지; 깊은 링크 `Services\WinDefend`는 첫 200개 밖이라 트리가 다음 쪽을 스스로 불러 선택 표시, 값 12개), `ComputerName\ComputerName` = `진료실1`, 연결 `windows-computer-name` 1건. 인용 "하이브 경로 › 키 › 마지막 기록 › 셀 오프셋 0x…" |
+| Q-R4-6 | 관련 미디어·유사 사진 | 이미지 996개(pHash 994). 의사면허증.jpg: 같은 해시 1(`/related-media` 케이스 DB 1 = similar `same_hash` 1), pHash ≤ 8 근접 4 → 패널 "같은 해시 1 · pHash 근접(≤ 8) 4". 전문의 면허증.jpg 1/2, KakaoTalk_20211224_114349237_01.jpg 0/4. 카메라 그룹 7개(iPhone 13 Pro 13 · iPhone 11 Pro 12 · … · 정보 없음 965), 촬영일 그룹 27개; "Apple iPhone 11 Pro" 묶음으로 폴더 격자 좁히기 → 3건 표시 |
+
+**게이트**: 대상 Python 테스트(신규 + api·api_contract·media_image·windows_artifacts)·ruff·vulture·compileall·check-doc-refs·API 스냅샷, 프런트 lint·typecheck·vitest(tree·views·grid·shell·api)·check:contrast 통과(원문은 작업 보고). 전체 스위트·Playwright는 위임 대상.
+
+### 4.3 V3 — 뷰 3종·필터 (브랜치 `feat/r4-v3-views-filters`)
+
+**구현**
+- 행(카드) 보기 `features/views/CardView.tsx`(Alt+Shift+5 — AXIOM의 6번 자리 대신 비어 있던 5/6을 차례로 씀): 가상화 `role="list"`/`listitem`(aria-setsize·posinset), 제목·유형—계열 부제·시각·경로·우측 굵은 날짜·특이사항/리뷰/태그 칩, 호버·포커스 시 인용·원본 열기·태그(북마크). J/K·↑↓·Home/End·PageUp/Down, Enter 뷰어, Space 선택, R/X/I/B/1–9는 공용 검토 명령.
+- 지도 대체 보기 `features/views/MapView.tsx`(Alt+Shift+6, 아티팩트 노드): 서버에 `geo=-90,-180,90,180`(좌표 있는 행만)을 요청해 좌표 표 + 0.01° 근접 묶음(건수·처음/마지막 시각, GPS 시각 우선). 묶음 → `geo=<칸 상자>` 조건 + 열 보기. 빈 상태·상단 안내에 "지도 타일·외부 지도 서비스 없음(정책)".
+- 연결 그래프 라이트 `features/derived/DerivedGraph.tsx` + `GET /api/runs/{id}/derived/{table}/graph?value=&max_nodes=`(10–200, 기본 200): 값 → 표본 원본 행(≤20, 계열별) → 그 행의 다른 식별자 값(파생 단계와 같은 열 규칙 `core.derived.engine.collect_row`, 자격 증명은 가린 값). 3열 계층 SVG(외부 라이브러리 없음), 로빙 tabindex·↑↓/←→/Home/End·Enter, 행 → 계열 표의 그 행, 값 → 그 표(`q=`). 통합 보기 도구줄 "원본 행 | 연결 그래프".
+- 행 조건 `rapidtriage/api/app/row_conditions.py` → `GET /artifacts`·`/files`·`/timeline`: `from`/`to`, `weekday`, `hours`(HH-HH, 자정 넘김), `offhours=1`(hours 또는 weekday, 기본 18–09·토·일), `tz`(UTC·±HH:MM·IANA), `partial=1`, `content`(문서·이미지·영상·음성·압축·실행·DB·메일), `/artifacts`만 `geo`. 잘못된 값은 한국어 422, `limit=0`이면 400, 페이지에 `conditions` 반향. channel·browser/service·flag·category·sort와 AND.
+- 콘솔: 조건 패널에 최근 1/7/30일, 사건 시각 ± n시간(최신 특이사항 분석의 `incident_start/end` 미리 채움), 요일·시간대·업무 외 시간(표시 시간대), 콘텐츠 유형 칩, 부분 결과. URL `wd=`·`hours=`·`offhours=1`·`partial=1`·`content=`·`geo=` 왕복, 저장한 조건에 포함, 칩은 한국어("업무 외 시간 18–09시·토·일", "콘텐츠 문서", "부분 결과만", "위치 … 부근"). 시간 범위는 이제 artifacts/files/timeline에서 서버 필터(그 밖은 불러온 행).
+
+**실데이터** (`D:\rapid-qa\derived\run-subset10`, 런 `b5fabbe09f18`, API 8963 + Vite 8964, 증거 읽기 전용, `tz=Asia/Seoul`)
+- 업무 외 시간 이벤트 로그: 서버 202,445건 = 수동 집계 202,445건(294,456행 중 시각 없음 186, 주말 72,205). Security 채널 + 업무 외 20,355. 브라우저 업무 외 4,561, 주말(`weekday=sat,sun`) 1,939, 브라우저 업무 외 + 실행 파일 다운로드 37건(그리드). 타임라인 업무 외 216,333 / 부분 결과 1,575 / 2025-05-23~30 KST 102,379(요청당 약 5 s).
+- 부분 결과(전체 아티팩트) 34,195건, 콘텐츠 문서 4,108 · 이미지 3,707 · 실행 41,764(Prefetch 참조 DLL/EXE 포함). 파일: 문서 2,267(= 문서 범주), 업무 외 0(모든 파일이 취득 사본이고 NTFS 분석 없음 — 한계 문서화).
+- 카드 보기: 이벤트 로그 노드 250장 중 11장만 마운트(가상화), J로 다음 카드·뷰어 행 동기, 접근 이름 "5615 application Microsoft-Windows-WMI, EVTX 이벤트 — 이벤트 로그, 시각 2025-02-23 22:47:22 KST". 브라우저 노드 + 업무 외 시간 카드 확인(월 08:49·토 14:30 등).
+- 지도: media-image 위치 행 3건 → 묶음 2개(37.48,126.94 칸 2건, 37.20,127.10 칸 1건), 묶음 클릭 → 그리드 2건. 전체 아티팩트 지도는 3건(64만 행 훑기 38 s).
+- 연결 그래프 `people/user`: 41 노드(원본 행 19 = SAM 계정·그룹·이벤트·로그온 세션·탐지·브라우저·문서·LNK·점프 목록 11계열, 값 21 = 사람 8·장치 4·경로 5·URL 4, 표에 있는 값 22), 간선 57, 0.98 s. `people/S-1-5-18`: 29 노드, 0.7 s. 키보드 → 행 → 값 이동 확인.
+
+**적대적 리뷰 후속 수정** (브랜치 `fix/r4-v3-review`, 2026-10-18)
+- 백엔드 `row_conditions.py`: `tz=Asia`/`America`(tzdata 디렉터리, ZoneInfo의 PermissionError/IsADirectoryError)와 읽지 못하는 이름은 500 대신 ±HH:MM을 권하는 한국어 422, 오프셋 ±14:00 상한을 분까지 검사, Windows `tzdata` 의존성 추가(pyproject). 0001/9999년·epoch 253402300799 행의 `astimezone` OverflowError → 그 행은 불일치(단일·교차 kind, 정렬, 타임라인 500 없음). 콘텐츠 유형에서 `source_path`·컨테이너 경로 제외(경로가 곧 내용인 유형만 행 경로로 대체). 부분 결과: 잘림 키 허용 목록(표시용 잘림 제외), 상태 단어 단위·부정 인식, `decrypt_status=unknown` 제외, unrecognized·not-parsed·out-of-range 추가. `to`는 적힌 단위 끝까지(날짜·분·초), 요일 정확히(`mon`..`sun`·전체 영어 이름), `geo` 반열림·날짜 변경선 상자·`/files`/`/timeline`의 `geo`는 422. 아티팩트 행 시각은 해석되는 다음 TIME_KEY로 넘어감.
+- 성능: `/files` 시간 조건은 목록 전체 NTFS 조인 대신 취득 사본 행이 있고 조인이 `joined`일 때만 행마다 `$SI` 시각을 찾는다(`files_ntfs.ntfs_si_modified_resolver`). `/timeline` 조건 페이지와 정렬+조건 레코드 집합은 (출력 리비전, 조건) 키 LRU(`row_conditions.MATCH_CACHE`, 16개·800만 위치 상한)로 다음 페이지 재스캔 없음. 합성 50만 행: 타임라인 첫 페이지 5.05 s(이전 페이지마다 4.9–5.7 s) → 다음 페이지 0.00 s, 파일 목록 전체 null 조인 1.00 s → 취득 사본 확인 0.15 s.
+- 콘솔: 역순 시간 범위는 바꿔 보내고 안내, `to`는 분 단위 그대로 보내 끝 분 포함(최근 n일 포함), 시간대 드롭다운은 같은 시각을 고르면 다른 쪽을 한 시간 옮김(18–09 도달), 카드·그래프 키는 Ctrl/Meta/Alt 무시, 카드 활성은 rowKey 기준·가상 창 밖이면 목록이 탭 정지로 포커스 전달·다시 불러온 뒤 포커스 복원·뷰어 대상 재게시, URL/저장 조건의 요일·콘텐츠·시간·geo 검증(geo는 아티팩트만), 묶음 상자 ±90/±180 안, 반열림 상자, `errorText()`, 지도 빈 상태 문구가 다른 조건 반영·페이지 오류 시 스캔 표시 종료, 원본 행 오류는 연결 그래프 모드에서 숨김, 그래프 중심 노드가 없어도 탭 정지 1개, 파일·타임라인 조건/특이사항 페이지는 `matched`를 전체 수로(상한이면 "이상"), 카드 수 "n건 이상", 히스토그램 "조건 미적용" 안내.
+- 테스트: `tests/test_rapidtriage_api_row_conditions.py` 28개(이전 14), `frontend/src/features/views/v3Review.test.tsx` 15개, derived 1개 추가.
+
+**게이트**: targeted pytest(신규 row_conditions 14 + api·api_contract·derived_api(+그래프 3)·timeline·field_filters·derived_engine 130 passed, parser_quality_integration·triage_flags_api 43, ntfs_r3·analyses 118), ruff·vulture·compileall·check-doc-refs 통과, OpenAPI 스냅샷 갱신(122 경로/139 작업). 프런트 lint·typecheck·check:contrast 통과, vitest(views·filters·derived·grid·api) 33 파일 363 통과 + shortcuts·shell·app 64 통과. 전체 스위트·Playwright는 위임(Q-R4-9).
+
+### 4.4 적대적 리뷰 수정 — 백엔드 (브랜치 `fix/r4-backend-review`)
+
+- **이어서 실행 체인**: 이전 계획의 `outcome`이 `complete`가 아니면(partial·cancelled·failed·끝나지 않아 `None`=중단) 단계 출력(manifest·docs·files·timeline·indicators)을 재사용하지 않는다. 재사용 후보 페이로드에 `plan_status`(자리표시) 또는 `inputs_partial`이 있으면 언제나 버린다(`load_reusable_json`). 부분 공급자 입력으로 만든 manifest도 `inputs_partial`을 단다.
+- **같은 출력 폴더 동시 실행 금지**: 대기·실행 중인 런이 쓰는 폴더로의 제출·재실행·이어서 실행은 409(“같은 출력 폴더를 쓰는 런(…)이 대기·실행 중입니다…”). 재실행한 원래 런에는 `retried_by`, 같은 폴더를 이어받은 경우 `superseded_by`가 남고, 그 런의 진행·계획 조회는 새 런의 실시간 상태 대신 `superseded_by` 안내를 돌려준다.
+- **새로 실행(fresh retry)**: `resume=false`로 실행하며 새 폴더에 쓴다 — 출력 폴더를 지정하지 않은 런은 런별 기본 폴더, 지정한 런은 옆에 `<폴더>-retry-<id>`. 원래 런의 출력은 그대로 남는다.
+- **제어 타이밍**: 런은 제출 시각 이후에 쓰인 제어 요청을 감시자 시작 전이라도 적용한다(빠른 “모두 취소”). 대기 중인 런의 계획 제어는 409(“대기 중인 런은 시작한 뒤에 제어할 수 있습니다”), 실행 중이지만 아직 이전 런의 진행 파일만 있는 경우도 409. 대기 중 런의 계획표는 요청으로 만든 골격(ETag 고정)이다.
+- **늦은 모두 취소**: 요약·보고서 단계가 시작된 뒤의 `cancel_all`/`finish`는 “이미 끝난 태스크입니다…”로 거부된다. 진행 파일 상태는 `plan.outcome`에서 정해져 계획 파일·요약과 항상 일치한다.
+- **제어 파일**: 읽기-수정-쓰기를 `O_EXCL` 잠금 파일(30초 지나면 낡은 잠금 제거)로 감싼다. 읽을 수 없는 제어 파일은 덮어쓰지 않고 오류(“실행 제어 파일을 읽을 수 없어…”)를 낸다. 감시자는 읽기에 성공한 뒤에만 파일 도장을 기록한다.
+- 그 밖: 옛 상태 파일의 `canceled` 단계·전이 철자 정규화, 탐색기 색인 캐시(파일 시스템·레지스트리·미디어)의 단일 비행·실패 시 잠금 정리, 레지스트리 마운트 추정 보정, `/files?path_prefix` 폴더 행 위치 캐시, 런 종료 시 최종 상태를 쓴 뒤 활성 목록에서 제거.

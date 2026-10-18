@@ -24,7 +24,9 @@ export type CollectionId =
   /** 처리 stage page (runs + analysis cards, console-ia §3): `#/case/{run}/process[/{node}]`. */
   | "process"
   /** 통합 보기 (axiom-adoption §3.2): `#/case/{run}/explore/derived/{table}` (people, devices, paths …). */
-  | "derived";
+  | "derived"
+  /** 레지스트리 탐색기 (r4 §2.2): `#/case/{run}/explore/registry/{hive}?key=` — its own pane, no grid. */
+  | "registry";
 
 /** Artifact kinds nest under "artifacts" (one child node per kind). */
 export interface CollectionRef {
@@ -44,6 +46,14 @@ export interface CollectionRef {
    * job's API kind, e.g. "carve", which picks the columns).
    */
   analysisId?: string;
+  /**
+   * 파일 시스템 탐색기 folder (id === "files"; `""` = volume root): the listing pages only that folder
+   * (`GET /files?path_prefix=`), its whole subtree with `recursive`.
+   */
+  dir?: string;
+  recursive?: boolean;
+  /** fs-tree special node of the files listing (`GET /files?special=`). */
+  special?: string;
 }
 
 /**
@@ -130,6 +140,11 @@ export interface CollectionQuery {
    * accepted values.
    */
   detailFilters?: Record<string, string[]>;
+  /**
+   * Row conditions the listing API applies (r4 §2.3; artifacts · files · timeline): query params
+   * `from`, `to`, `weekday`, `hours`, `offhours`, `tz`, `partial`, `content`, `geo` (lists repeat).
+   */
+  rowConditions?: Record<string, string | string[]>;
   /** Navigation category (tree) filter; interpreted by the collection. */
   category?: string;
   /**

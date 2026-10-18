@@ -110,7 +110,26 @@ def load_reusable_json(
         return None
     if any(key not in payload for key in required_keys):
         return None
+    if stage_payload_incomplete(payload):
+        return None
     return payload
+
+
+def stage_payload_incomplete(payload: Mapping[str, object]) -> bool:
+    """``True`` for a run-plan placeholder or a payload built from partial inputs.
+
+    A stage the plan skipped/cancelled leaves a zero-row payload with
+    ``plan_status``; a stage built after a cancelled/skipped provider carries
+    ``inputs_partial``. Neither may be reused by ``--resume``.
+    """
+    summary = payload.get("summary") if isinstance(payload.get("summary"), Mapping) else {}
+    for holder in (payload, summary):
+        status = holder.get("plan_status")
+        if status not in (None, "", "completed"):
+            return True
+        if holder.get("inputs_partial"):
+            return True
+    return False
 
 
 def build_run_input_fingerprint(

@@ -34,7 +34,10 @@ function sameCollection(a: CollectionRef, b: CollectionRef): boolean {
     (a.kind ?? "") === (b.kind ?? "") &&
     (a.status ?? "") === (b.status ?? "") &&
     (a.category ?? "") === (b.category ?? "") &&
-    (a.analysisId ?? "") === (b.analysisId ?? "")
+    (a.analysisId ?? "") === (b.analysisId ?? "") &&
+    a.dir === b.dir &&
+    Boolean(a.recursive) === Boolean(b.recursive) &&
+    (a.special ?? "") === (b.special ?? "")
   );
 }
 
@@ -59,6 +62,11 @@ export function gridRouteFromShell(): RouteState {
   if (route.status) collection.status = route.status;
   if (route.category) collection.category = route.category;
   if (route.collection === "analysis" && route.analysisId) collection.analysisId = route.analysisId;
+  if (route.collection === "files" && route.dir !== undefined) {
+    collection.dir = route.dir;
+    if (route.rec) collection.recursive = true;
+  }
+  if (route.collection === "files" && route.special) collection.special = route.special;
   const isSearch = collection.id === "search";
   const grid = useGridLocalStore.getState().route;
   return {

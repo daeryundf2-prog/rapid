@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import datetime as dt
+import functools
 import json
 import logging
 import re
 import zipfile
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -26,10 +27,13 @@ from ...core.indicators import (
     build_indicator_ti_enrichment_package,
 )
 from ...core.jobs import (
+    RunControlConflict,
     RunJobStore,
+    RunOutputDirBusy,
     RunRequest,
     run_output_dir,
 )
+from ...core.run.plan import PlanTargetError, plan_counts_brief, validate_skip_targets
 from ...core.visible_capabilities import build_visible_capability_response
 from .analyses import run_scope
 from .analysis_kinds import cross_case_eligibility
@@ -50,7 +54,17 @@ from .dashboard import (
     read_case_notes,
     write_case_notes,
 )
-from .files_ntfs import join_files_page
+from .files_ntfs import join_files_page, ntfs_si_modified_resolver
+from .fs_tree import (
+    FS_INDEX_CACHE,
+    files_output_key,
+    files_restriction,
+    files_roots,
+    parse_bool,
+    parse_folder_path,
+    parse_special,
+    special_restriction,
+)
 from .helpers import (
     allowed_source_roots,
     default_case_path,
@@ -60,6 +74,7 @@ from .helpers import (
     get_named_output,
     get_output_path,
     read_run_artifacts_for_capabilities,
+    run_not_finished_message,
     run_progress_payload,
     validate_run_evidence_source,
 )
@@ -68,6 +83,7 @@ from .models import (
     RunCreateRequest,
     RunExtractRequest,
     RunImportRequest,
+    RunRetryRequest,
 )
 from .pagination import (
     DOCS_MATCHED_REQUIRES_ALL,
@@ -76,13 +92,21 @@ from .pagination import (
     paginate_payload,
     with_record_index,
 )
+from .row_conditions import (
+    MATCH_CACHE,
+    RowConditions,
+    filter_rows_page,
+    needs_ntfs_time,
+    output_stamp,
+    parse_row_conditions,
+)
 from .runops import (
     build_run_output_preview,
     build_run_viewer_workflow_validation,
 )
 from .search_index_service import search_index_available
 from .timeline_hist import build_timeline_histogram
-from .tree import build_run_issues, build_run_tree
+from .tree import build_run_issues, build_run_tree, live_run_block
 from .triage_flags import (
     FlagQuery,
     FlagsJoin,
@@ -97,16 +121,99 @@ from .triage_flags import (
 
 LOGGER = logging.getLogger(__name__)
 ACTIVE_RUN_STATUSES = frozenset({"queued", "running"})
+# Runs whose list row carries ``progress`` (interrupted: the last plan state).
+PROGRESS_RUN_STATUSES = frozenset({"queued", "running", "interrupted"})
+CURRENT_TASKS_MAX = 3
 FILTER_LIMIT_MESSAGE = "필터는 limit>0에서만 지원합니다"
 EXTRACT_ZIP_MAX_BYTES = 2 * 1024 * 1024 * 1024
 EXTRACT_NAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+_TRUE_FLAGS = frozenset({"1", "true", "yes", "on"})
+_FALSE_FLAGS = frozenset({"", "0", "false", "no", "off"})
+
+
+def _flag_param(name: str, raw: str | None) -> bool:
+    text = (raw or "").strip().lower()
+    if text in _TRUE_FLAGS:
+        return True
+    if text in _FALSE_FLAGS:
+        return False
+    raise HTTPException(status_code=422, detail=f"{name} 값은 1 또는 0이어야 합니다")
+
+
+def row_conditions_or_422(
+    *,
+    time_from: str | None,
+    time_to: str | None,
+    weekday: list[str],
+    hours: str | None,
+    offhours: str | None,
+    tz: str | None,
+    partial: str | None,
+    content: list[str],
+    geo: str | None = None,
+) -> RowConditions | None:
+    """``from``/``to``/``weekday``/``hours``/``offhours``/``tz``/``partial``/``content``/``geo`` -> conditions (Korean 422)."""
+    try:
+        return parse_row_conditions(
+            time_from=time_from,
+            time_to=time_to,
+            weekday=weekday,
+            hours=hours,
+            offhours=_flag_param("offhours", offhours),
+            tz=tz,
+            partial=_flag_param("partial", partial),
+            content=content,
+            geo=geo,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+GEO_ARTIFACTS_ONLY = (
+    "geo(위치 상자) 조건은 아티팩트 목록(/artifacts)에서만 쓸 수 있습니다 — 파일·타임라인 행에는 좌표가 없습니다"
+)
+
+
+def reject_geo(geo: str | None) -> None:
+    """``/files`` and ``/timeline`` take no ``geo`` (the console sends it to ``/artifacts`` only)."""
+    if geo is not None and geo.strip():
+        raise HTTPException(status_code=422, detail=GEO_ARTIFACTS_ONLY)
+
+
+def _echo_conditions(page: dict[str, object], conditions: RowConditions | None) -> dict[str, object]:
+    """Report the applied row conditions in a filtered page's ``pagination`` (``conditions``)."""
+    pagination = page.get("pagination")
+    if conditions is not None and isinstance(pagination, dict):
+        pagination["conditions"] = conditions.describe()
+    return page
 
 
 def compact_run_progress(progress: Mapping[str, object] | None) -> dict[str, object] | None:
-    """Stage, provider counts, and running provider kinds from run progress."""
+    """Stage, provider counts, and running provider kinds from run progress.
+
+    Run plan (P2 §3.4): ``plan_counts`` (group/task totals and task counts by
+    status), ``heartbeat_at``, ``live``/``stale`` and ``current`` (up to three
+    running tasks with ``rows_so_far``).
+    """
     if not isinstance(progress, Mapping):
         return None
     running = progress.get("running") if isinstance(progress.get("running"), list) else []
+    plan = progress.get("plan") if isinstance(progress.get("plan"), Mapping) else None
+    current: list[dict[str, object]] = []
+    if plan is not None:
+        for group in plan.get("groups") or []:
+            for task in (group.get("tasks") or []) if isinstance(group, Mapping) else []:
+                if isinstance(task, Mapping) and task.get("status") == "running" and len(current) < CURRENT_TASKS_MAX:
+                    current.append(
+                        {
+                            "task": task.get("id"),
+                            "label": task.get("label"),
+                            "group": group.get("id"),
+                            "group_label": group.get("label"),
+                            "rows_so_far": int(task.get("rows_so_far") or 0),
+                            "started_at": task.get("started_at"),
+                        }
+                    )
     return {
         "status": progress.get("status"),
         "stage": progress.get("stage"),
@@ -118,6 +225,12 @@ def compact_run_progress(progress: Mapping[str, object] | None) -> dict[str, obj
             for item in running
         ],
         "updated_at": progress.get("updated_at"),
+        "heartbeat_at": progress.get("heartbeat_at"),
+        "live": bool(progress.get("live")),
+        "stale": bool(progress.get("stale")),
+        "plan_counts": plan_counts_brief(plan),
+        "plan_outcome": plan.get("outcome") if plan is not None else None,
+        "current": current,
     }
 
 
@@ -161,7 +274,19 @@ def _attach_artifact_flags(response: dict[str, object], join: FlagsJoin) -> None
 
 
 def run_request_from_body(request: RunCreateRequest, *, root: str | None = None, output_dir: str | None = None) -> RunRequest:
-    """``RunRequest`` for a ``POST /api/runs`` body (also case runs: ``root``/``output_dir`` overrides)."""
+    """``RunRequest`` for a ``POST /api/runs`` body (also case runs: ``root``/``output_dir`` overrides).
+
+    ``skip_groups``/``skip_tasks`` are run-plan ids (400 with a Korean
+    message for unknown or unskippable ids).
+    """
+    skip_groups: tuple[str, ...] = ()
+    skip_tasks: tuple[str, ...] = ()
+    if request.skip_groups or request.skip_tasks:
+        try:
+            groups, tasks = validate_skip_targets(request.mode, request.skip_groups, request.skip_tasks)
+        except PlanTargetError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        skip_groups, skip_tasks = tuple(groups), tuple(tasks)
     return RunRequest(
         root=root if root is not None else request.root,
         mode=request.mode,
@@ -180,6 +305,8 @@ def run_request_from_body(request: RunCreateRequest, *, root: str | None = None,
         known_good_hash_feeds=tuple(path.strip() for path in request.known_good_hash_feeds if path.strip()),
         hide_known_good=request.hide_known_good,
         known_good_max_hash_bytes=request.known_good_max_hash_bytes,
+        skip_groups=skip_groups,
+        skip_tasks=skip_tasks,
     )
 
 
@@ -192,7 +319,10 @@ def build_runs_router(
     def create_run(request: RunCreateRequest) -> dict[str, Any]:
         validate_run_evidence_source(request.root)
         run_request = run_request_from_body(request)
-        job = store.run_sync(run_request) if request.wait else store.submit(run_request)
+        try:
+            job = store.run_sync(run_request) if request.wait else store.submit(run_request)
+        except RunOutputDirBusy as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
         return job.to_dict(include_summary=request.wait)
 
 
@@ -213,7 +343,7 @@ def build_runs_router(
             # Cross-case dialog filter (plan P1 §3.2 cross-case): one stat, no DB open.
             row.update(cross_case_eligibility(job))
             row["search_index_available"] = search_index_available(job)
-            if job.status in ACTIVE_RUN_STATUSES:
+            if job.status in PROGRESS_RUN_STATUSES:
                 # Compact live progress for the run card (full payload on
                 # GET /api/runs/{run_id}); finished runs skip the file read.
                 row["progress"] = compact_run_progress(run_progress_payload(job))
@@ -243,27 +373,39 @@ def build_runs_router(
 
     @router.post("/api/runs/{run_id}/cancel")
     def cancel_run(run_id: str) -> dict[str, Any]:
+        """"모두 취소" (= ``plan/control`` ``cancel_all``); the response adds the current ``plan``."""
         try:
-            return store.cancel(run_id).to_dict(include_summary=True)
+            payload = store.cancel(run_id, actor="web").to_dict(include_summary=True)
         except KeyError:
             raise HTTPException(status_code=404, detail="런을 찾을 수 없습니다")
+        except RunControlConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        payload["plan"] = store.plan_view(run_id)
+        return payload
 
 
     @router.post("/api/runs/{run_id}/retry", status_code=202)
-    def retry_run(run_id: str) -> dict[str, Any]:
+    def retry_run(run_id: str, body: RunRetryRequest | None = None) -> dict[str, Any]:
+        """Run a failed/cancelled/interrupted run again; ``{resume: true}`` = "이어서 실행" (completed tasks reused).
+
+        A fresh retry writes a new output folder (``<folder>-retry-<id>`` next to an explicit one);
+        409 (Korean) while another queued/running run writes into the target folder."""
+        resume = bool(body.resume) if body is not None else False
         try:
-            return store.retry(run_id).to_dict(include_summary=True)
+            payload = store.retry(run_id, resume=resume).to_dict(include_summary=True)
         except KeyError:
             raise HTTPException(status_code=404, detail="런을 찾을 수 없습니다")
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc))
+        payload["retry_mode"] = "resume" if resume else "fresh"
+        return payload
 
 
     @router.get("/api/runs/{run_id}/summary")
     def get_run_summary(run_id: str) -> dict[str, object]:
         job = get_job(store, run_id)
         if job.summary is None:
-            raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
+            raise HTTPException(status_code=409, detail=run_not_finished_message(job))
         try:
             case_path = default_case_path(store, run_id)
         except HTTPException:
@@ -275,7 +417,7 @@ def build_runs_router(
     def get_run_capabilities(run_id: str) -> dict[str, object]:
         job = get_job(store, run_id)
         if job.summary is None:
-            raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
+            raise HTTPException(status_code=409, detail=run_not_finished_message(job))
         # Completed run outputs are immutable; reuse the response until any
         # artifacts output (or the summary) changes on disk.
         cache_key = capability_response_cache_key(run_id, job.summary)
@@ -296,7 +438,7 @@ def build_runs_router(
     def get_run_viewer_workflow_validation(run_id: str) -> dict[str, object]:
         job = get_job(store, run_id)
         if job.summary is None:
-            raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
+            raise HTTPException(status_code=409, detail=run_not_finished_message(job))
         return build_run_viewer_workflow_validation(store, run_id, job.summary)
 
 
@@ -380,9 +522,59 @@ def build_runs_router(
         offset: int = Query(0, ge=0),
         limit: int = Query(0, ge=0, le=1000),
         cursor: str | None = Query(default=None),
+        time_from: str | None = Query(default=None, alias="from"),
+        time_to: str | None = Query(default=None, alias="to"),
+        weekday: list[str] = Query(default=[]),
+        hours: str | None = Query(default=None),
+        offhours: str | None = Query(default=None),
+        tz: str | None = Query(default=None),
+        partial: str | None = Query(default=None),
+        content: list[str] = Query(default=[]),
+        geo: str | None = Query(default=None),
     ) -> dict[str, object]:
+        """Paged timeline events.
+
+        Row conditions (plan r4 §2.3) as on ``GET /artifacts``: ``from``, ``to``, ``weekday``,
+        ``hours``, ``offhours``, ``tz``, ``partial``, ``content`` (row time = the event's
+        ``timestamp``; content by ``details.artifact_type`` and the referenced file's extension).
+        With any of them (``limit > 0``) ``offset``/``limit`` count matches, every event carries
+        ``record_index`` (its position in ``events``) and the page reports ``matched``,
+        ``record_count`` and ``pagination.conditions``. A bad value is a Korean 422; so is ``geo``
+        (events carry no coordinates). The matching positions are cached per (timeline revision,
+        conditions) so later pages do not rescan the events (``row_conditions.MATCH_CACHE``).
+        """
+        reject_geo(geo)
+        conditions = row_conditions_or_422(
+            time_from=time_from,
+            time_to=time_to,
+            weekday=weekday,
+            hours=hours,
+            offhours=offhours,
+            tz=tz,
+            partial=partial,
+            content=content,
+        )
         payload = get_named_output(store, run_id, "timeline")
-        return paginate_payload(payload, "events", offset=offset, limit=limit, cursor=cursor)
+        if conditions is None:
+            return paginate_payload(payload, "events", offset=offset, limit=limit, cursor=cursor)
+        if limit <= 0:
+            raise HTTPException(status_code=400, detail=FILTER_LIMIT_MESSAGE)
+        events = payload.get("events") if isinstance(payload.get("events"), list) else []
+        rows, pagination = filter_rows_page(
+            events,
+            conditions.predicate("timeline"),
+            collection="events",
+            offset=offset,
+            limit=limit,
+            cache_key=("timeline", run_id, output_stamp(get_output_path(store, run_id, "timeline")), conditions.cache_key()),
+        )
+        pagination["conditions"] = conditions.describe()
+        page = {key: value for key, value in payload.items() if key != "events"}
+        page["events"] = rows
+        page["record_count"] = len(events)
+        page["matched"] = pagination["matched"]
+        page["pagination"] = pagination
+        return page
 
 
     @router.get("/api/runs/{run_id}/timeline-histogram")
@@ -440,8 +632,30 @@ def build_runs_router(
         service: list[str] = Query(default=[]),
         channel: list[str] = Query(default=[]),
         channel_group: list[str] = Query(default=[]),
+        time_from: str | None = Query(default=None, alias="from"),
+        time_to: str | None = Query(default=None, alias="to"),
+        weekday: list[str] = Query(default=[]),
+        hours: str | None = Query(default=None),
+        offhours: str | None = Query(default=None),
+        tz: str | None = Query(default=None),
+        partial: str | None = Query(default=None),
+        content: list[str] = Query(default=[]),
+        geo: str | None = Query(default=None),
     ) -> dict[str, object]:
         """Page per-kind artifact rows; every row carries its JSONL ``record_index``.
+
+        Row conditions (plan r4 §2.3, ``row_conditions``): ``from``/``to`` (inclusive ISO-8601
+        bounds on the row time; no offset = ``tz``), ``weekday`` (repeatable or comma-joined
+        ``mon``..``sun``), ``hours`` (``HH-HH`` local window, wraps midnight: ``18-09``),
+        ``offhours=1`` (업무 외 시간: ``hours`` default ``18-09`` OR ``weekday`` default
+        ``sat,sun``), ``tz`` (``UTC`` | ``+09:00`` | IANA name; default UTC), ``partial=1`` (부분
+        결과: parser error / truncation / decrypt failure / partial coverage rows), ``content``
+        (repeatable: document, image, video, audio, archive, executable, database, mail) and
+        ``geo=lat_min,lon_min,lat_max,lon_max`` (rows whose coordinates fall in the box). They
+        AND with every other filter, need ``limit > 0``, compose like ``artifact_type``
+        (streaming; across kinds when zero or several ``kind`` are given; with ``sort`` the sorted
+        index is narrowed to the matching records) and are echoed as ``conditions`` in the
+        pagination; a bad value is a 422 with a Korean message.
 
         ``browser`` / ``service`` (repeatable, exact, case-sensitive) keep only
         rows whose ``details.browser`` / ``details.service`` equals one of the
@@ -509,9 +723,16 @@ def build_runs_router(
         ``sort.position`` (that record's 0-based position in the sorted order).
         """
         job = get_job(store, run_id)
+        live: dict[str, object] | None = None
         if job.summary is None:
-            raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
-        outputs = job.summary.get("outputs")
+            # Live browsing (plan P2 §3.4): the provider kinds finished so far.
+            live = live_run_block(store, run_id, job)
+            live.pop("kind_states", None)
+            if not live["available_kinds"] and job.status not in ACTIVE_RUN_STATUSES:
+                raise HTTPException(status_code=409, detail=run_not_finished_message(job))
+            outputs = {name: str(path) for name, path in store.provisional_outputs(run_id).items()}
+        else:
+            outputs = job.summary.get("outputs")
         if not isinstance(outputs, dict):
             raise HTTPException(status_code=409, detail="run has no outputs")
         wanted_kinds = {item.strip() for item in kind if item.strip()}
@@ -525,10 +746,22 @@ def build_runs_router(
             fields = parse_field_filters({"browser": browser, "service": service})
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
+        conditions = row_conditions_or_422(
+            time_from=time_from,
+            time_to=time_to,
+            weekday=weekday,
+            hours=hours,
+            offhours=offhours,
+            tz=tz,
+            partial=partial,
+            content=content,
+            geo=geo,
+        )
+        row_filter = conditions.predicate("artifacts") if conditions is not None else None
         sort_key = sort.strip() if sort and sort.strip() else None
         flag_sort = is_flags_sort(sort_key)
         flag_query = parse_flag_query(flag, flag_grade, sort_flags=flag_sort)
-        if (wanted_types or wanted_channels or needle or flag_query.active or fields) and limit <= 0:
+        if (wanted_types or wanted_channels or needle or flag_query.active or fields or conditions) and limit <= 0:
             raise HTTPException(status_code=400, detail=FILTER_LIMIT_MESSAGE)
         if flag_sort:
             if len(wanted_kinds) != 1:
@@ -546,7 +779,7 @@ def build_runs_router(
             sort_order = sort_order or "asc"
             if sort_order not in SORT_ORDERS:
                 raise HTTPException(status_code=400, detail="order must be asc or desc")
-        if (wanted_types or wanted_channels or needle or flag_query.filtered or fields) and not sort_key and not flag_sort and len(wanted_kinds) != 1 and limit > 0:
+        if (wanted_types or wanted_channels or needle or flag_query.filtered or fields or conditions) and not sort_key and not flag_sort and len(wanted_kinds) != 1 and limit > 0:
             response = _artifacts_across_kinds(
                 run_id,
                 outputs,
@@ -560,8 +793,11 @@ def build_runs_router(
                 join=join,
                 flag_query=flag_query,
                 fields=fields,
+                conditions=conditions,
             )
             _attach_artifact_flags(response, join)
+            if live is not None:
+                response["live"] = live
             return response
         artifacts = {}
         kind_payloads: dict[str, dict[str, object]] = {}
@@ -578,10 +814,26 @@ def build_runs_router(
                             if flag_query.filtered
                             else None
                         )
-                        if fields:
-                            # The sort index has no field filter: narrow it to the matching records.
-                            by_field = field_matching_records(
-                                artifact_payload, payload_path=get_output_path(store, run_id, name), fields=fields
+                        if fields or row_filter is not None:
+                            # The sort index has no field filter / row conditions: narrow it to the matching records.
+                            field_path = get_output_path(store, run_id, name)
+                            records_path = artifact_payload.get("records_path")
+                            field_key = (
+                                ("artifacts-sort", run_id, name, output_stamp(field_path, records_path), repr(fields), conditions.cache_key())
+                                if conditions is not None
+                                else None
+                            )
+                            by_field = set(
+                                MATCH_CACHE.get_or_compute(
+                                    field_key,
+                                    functools.partial(
+                                        field_matching_records,
+                                        artifact_payload,
+                                        payload_path=field_path,
+                                        fields=fields,
+                                        row_filter=row_filter,
+                                    ),
+                                )
                             )
                             allowed_records = by_field if allowed_records is None else allowed_records & by_field
                         sorted_page = paginate_sorted_artifact_output(
@@ -602,6 +854,7 @@ def build_runs_router(
                         )
                         if flag_query.filtered:
                             mark_flag_page(sorted_page, flag_query)
+                        _echo_conditions(sorted_page, conditions)
                         artifacts[name.removeprefix("artifacts_")] = sorted_page
                         continue
                     if flag_query.active:
@@ -615,6 +868,7 @@ def build_runs_router(
                             artifact_types=wanted_types,
                             channels=wanted_channels,
                             fields=fields,
+                            row_filter=row_filter,
                             rows_source=flag_rows_source(
                                 artifact_payload,
                                 payload_path,
@@ -627,20 +881,25 @@ def build_runs_router(
                             kind_page,
                             flag_query,
                             record_count=payload_record_count(artifact_payload),
-                            other_filters=bool(needle or wanted_types or wanted_channels or fields),
+                            other_filters=bool(needle or wanted_types or wanted_channels or fields or conditions),
                         )
+                        _echo_conditions(kind_page, conditions)
                         artifacts[name.removeprefix("artifacts_")] = kind_page
                         continue
-                    if (needle or wanted_types or wanted_channels or fields) and limit > 0:
-                        artifacts[name.removeprefix("artifacts_")] = filter_artifact_page(
-                            artifact_payload,
-                            payload_path=get_output_path(store, run_id, name),
-                            path_contains=needle,
-                            offset=offset,
-                            limit=limit,
-                            artifact_types=wanted_types,
-                            channels=wanted_channels,
-                            fields=fields,
+                    if (needle or wanted_types or wanted_channels or fields or conditions) and limit > 0:
+                        artifacts[name.removeprefix("artifacts_")] = _echo_conditions(
+                            filter_artifact_page(
+                                artifact_payload,
+                                payload_path=get_output_path(store, run_id, name),
+                                path_contains=needle,
+                                offset=offset,
+                                limit=limit,
+                                artifact_types=wanted_types,
+                                channels=wanted_channels,
+                                fields=fields,
+                                row_filter=row_filter,
+                            ),
+                            conditions,
                         )
                         continue
                     artifacts[name.removeprefix("artifacts_")] = paginate_artifact_output(
@@ -656,12 +915,14 @@ def build_runs_router(
                     raise HTTPException(status_code=403, detail=str(exc))
                 except FileNotFoundError as exc:
                     raise HTTPException(status_code=404, detail=str(exc))
-        filtered_pages = bool(needle or wanted_types or wanted_channels or flag_query.filtered or fields) and limit > 0
+        filtered_pages = bool(needle or wanted_types or wanted_channels or flag_query.filtered or fields or conditions) and limit > 0
         for kind_name, page in artifacts.items():
             if isinstance(page, dict) and kind_name in kind_payloads:
                 annotate_page_counts(page, kind_payloads[kind_name], filtered=filtered_pages)
         response: dict[str, object] = {"artifacts": artifacts}
         _attach_artifact_flags(response, join)
+        if live is not None:
+            response["live"] = live
         if sort_key:
             statuses = [
                 page["sort"].get("status")
@@ -686,6 +947,7 @@ def build_runs_router(
         flag_query: FlagQuery,
         channels: ChannelFilter | None = None,
         fields: Mapping[str, frozenset[str]] | None = None,
+        conditions: RowConditions | None = None,
     ) -> dict[str, object]:
         available = [name.removeprefix("artifacts_") for name in sorted(outputs) if name.startswith("artifacts_")]
         ordered = [item for item in kinds if item in available] if kinds else available
@@ -710,8 +972,13 @@ def build_runs_router(
                 limit=limit,
                 after=after,
                 rows_for=kind_rows_for_flags(join, flag_query) if flag_query.filtered else None,
-                extra={"flags": flag_query.descriptor()} if flag_query.filtered else None,
+                extra={
+                    **({"flags": flag_query.descriptor()} if flag_query.filtered else {}),
+                    **({"conditions": conditions.describe()} if conditions is not None else {}),
+                }
+                or None,
                 fields=fields,
+                row_filter=conditions.predicate("artifacts") if conditions is not None else None,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
@@ -721,7 +988,7 @@ def build_runs_router(
     def extract_run_rows(run_id: str, request: RunExtractRequest) -> dict[str, Any]:
         job = get_job(store, run_id)
         if job.summary is None:
-            raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
+            raise HTTPException(status_code=409, detail=run_not_finished_message(job))
         roots = allowed_source_roots(job.summary)
         items: list[dict[str, object]] = []
         for row in request.rows:
@@ -774,7 +1041,7 @@ def build_runs_router(
     def download_run_extract(run_id: str, name: str) -> FileResponse:
         job = get_job(store, run_id)
         if job.summary is None:
-            raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
+            raise HTTPException(status_code=409, detail=run_not_finished_message(job))
         if not EXTRACT_NAME_PATTERN.fullmatch(name):
             raise HTTPException(status_code=400, detail="invalid extract name")
         base = run_output_dir(job.summary) / "extract"
@@ -811,7 +1078,7 @@ def build_runs_router(
         """
         job = get_job(store, run_id)
         if job.summary is None:
-            raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
+            raise HTTPException(status_code=409, detail=run_not_finished_message(job))
         try:
             path = get_output_path(store, run_id, "columnar_artifacts")
         except HTTPException as exc:
@@ -834,6 +1101,34 @@ def build_runs_router(
         )
 
 
+    def _files_path_restriction(
+        payload: Mapping[str, object],
+        run_id: str,
+        collection: str,
+        path_prefix: str | None,
+        recursive: str | None,
+        special: str | None,
+    ) -> tuple[Sequence[int] | None, dict[str, object] | None]:
+        """Row positions of the fs-tree folder / special node (``None`` = no such filter)."""
+        wanted_special = parse_special(special)
+        if path_prefix is None and wanted_special is None:
+            if recursive is not None and recursive.strip():
+                raise HTTPException(status_code=422, detail="recursive는 path_prefix와 함께 써야 합니다")
+            return None, None
+        deep = parse_bool(recursive, "recursive")
+        restrict: Sequence[int] | None = None
+        folder: str | None = None
+        index = FS_INDEX_CACHE.get(files_output_key(run_id, get_output_path(store, run_id, "files")), payload)
+        if path_prefix is not None:
+            parts = parse_folder_path(path_prefix, files_roots(payload))
+            restrict = files_restriction(index, collection, parts, recursive=deep)
+            folder = "/".join(parts)
+        if wanted_special is not None:
+            special_rows = special_restriction(index, collection, wanted_special)
+            restrict = special_rows if restrict is None else sorted(set(restrict).intersection(special_rows))
+        return restrict, {"path": folder, "recursive": deep, "special": wanted_special, "rows": len(restrict or [])}
+
+
     @router.get("/api/runs/{run_id}/files")
     def get_run_files(
         run_id: str,
@@ -845,8 +1140,42 @@ def build_runs_router(
         flag: list[str] = Query(default=[]),
         flag_grade: str | None = Query(default=None),
         sort: str | None = Query(default=None),
+        path_prefix: str | None = Query(default=None),
+        recursive: str | None = Query(default=None),
+        special: str | None = Query(default=None),
+        time_from: str | None = Query(default=None, alias="from"),
+        time_to: str | None = Query(default=None, alias="to"),
+        weekday: list[str] = Query(default=[]),
+        hours: str | None = Query(default=None),
+        offhours: str | None = Query(default=None),
+        tz: str | None = Query(default=None),
+        partial: str | None = Query(default=None),
+        content: list[str] = Query(default=[]),
+        geo: str | None = Query(default=None),
     ) -> dict[str, object]:
         """Paged file rows joined with the newest ``ntfs-meta`` analysis.
+
+        파일 시스템 탐색기 (plan r4 §2.2): ``path_prefix`` = a folder of
+        ``GET /fs-tree`` (relative to the volume root, ``/`` separators,
+        ``""`` = root; same validation: Korean 422/403/404) keeps the rows
+        directly in that folder, or the whole subtree with ``recursive=1``;
+        ``matched`` then equals the folder's ``direct_file_count`` /
+        ``file_count`` of ``/fs-tree`` for the same ``scope``. ``special`` =
+        ``orphan`` | ``unallocated`` | ``slack`` keeps the rows of that fs-tree
+        special node. Both need ``limit > 0``, compose with ``category`` and
+        ``flag``/``sort=flags``, and the page reports ``path_filter = {path,
+        recursive, special, rows}``.
+
+        Row conditions (plan r4 §2.3) as on ``GET /artifacts``: ``from``, ``to``, ``weekday``,
+        ``hours``, ``offhours``, ``tz``, ``partial``, ``content`` (``limit > 0``; compose with
+        ``category``, ``flag``/``flag_grade``, ``sort=flags``). The row time is the 수정 time:
+        ``fs_modified_at``, else for an acquisition copy the NTFS ``$SI`` modified time, looked up
+        per row in the NTFS join index only while the predicate runs and only when the list has
+        such rows and the join status is ``joined`` (an acquisition copy without the join has no
+        time and never matches), else ``modified_at``. ``content`` maps to the scan categories
+        (문서 documents · 이미지 images · 압축 archives · 실행 executables · DB databases · 메일
+        emails; 영상/음성 by extension). ``geo`` is a Korean 422 (files carry no coordinates).
+        The page reports ``pagination.conditions``.
 
         특이사항: rows carry ``flags`` (kind ``files:<scope>``) and the page
         reports ``flags_join`` like ``GET /artifacts``; ``flag``/``flag_grade``
@@ -888,24 +1217,67 @@ def build_runs_router(
             # Only sort=flags exists here; other values are ignored (as before this parameter existed).
             LOGGER.info("GET /files ignores unsupported sort=%r", sort[:64])
         flag_query = parse_flag_query(flag, flag_grade, sort_flags=sort_flags)
+        reject_geo(geo)
+        conditions = row_conditions_or_422(
+            time_from=time_from,
+            time_to=time_to,
+            weekday=weekday,
+            hours=hours,
+            offhours=offhours,
+            tz=tz,
+            partial=partial,
+            content=content,
+        )
         join = flags_join(_run_output_dir_or_none(get_job(store, run_id).summary))
-        if flag_query.active:
-            if limit <= 0:
-                raise HTTPException(status_code=400, detail=FILTER_LIMIT_MESSAGE)
-            all_rows = payload.get(collection) if isinstance(payload.get(collection), list) else []
+        restrict, path_filter = _files_path_restriction(payload, run_id, collection, path_prefix, recursive, special)
+        if (flag_query.active or wanted or conditions is not None or restrict is not None) and limit <= 0:
+            raise HTTPException(status_code=400, detail=FILTER_LIMIT_MESSAGE)
+        source_rows: list[object] | None = None
+        row_filter = None
+        if conditions is not None:
+            source_rows = payload.get(collection) if isinstance(payload.get(collection), list) else []
+            ntfs_time = None
+            if conditions.uses_time and any(needs_ntfs_time(row) for row in source_rows):
+                # Acquisition copies take their time from the NTFS join: resolve it per row while
+                # filtering (only when the join is "joined") instead of joining the whole list.
+                try:
+                    time_scope = run_scope(store, run_id, require_ready=False)
+                except HTTPException:
+                    time_scope = None
+                ntfs_time = ntfs_si_modified_resolver(time_scope, source_rows) if time_scope is not None else None
+            row_filter = conditions.predicate("files", ntfs_time)
+        if flag_query.active or restrict is not None:
+            all_rows = source_rows if source_rows is not None else (payload.get(collection) if isinstance(payload.get(collection), list) else [])
             page_rows, flag_pagination = filter_files_rows(
-                all_rows, collection=collection, join=join, query=flag_query, categories=wanted or None, offset=offset, limit=limit
+                all_rows,
+                collection=collection,
+                join=join,
+                query=flag_query,
+                categories=wanted or None,
+                offset=offset,
+                limit=limit,
+                restrict=restrict,
+                row_filter=row_filter,
             )
             page = files_page_base(payload, collection)
             page[collection] = page_rows
             page["record_count"] = len(all_rows)
             page["matched"] = flag_pagination["matched"]
             page["pagination"] = flag_pagination
-            mark_flag_page(page, flag_query, record_count=len(all_rows), other_filters=bool(wanted))
-        elif wanted:
-            if limit <= 0:
-                raise HTTPException(status_code=400, detail=FILTER_LIMIT_MESSAGE)
-            page = filter_files_by_category(payload, wanted, offset=offset, limit=limit, collection=collection)
+            if flag_query.active:
+                mark_flag_page(
+                    page, flag_query, record_count=len(all_rows), other_filters=bool(wanted or conditions) or restrict is not None
+                )
+            if path_filter is not None:
+                page["path_filter"] = path_filter
+            _echo_conditions(page, conditions)
+        elif wanted or conditions is not None:
+            page = _echo_conditions(
+                filter_files_by_category(
+                    payload, wanted, offset=offset, limit=limit, collection=collection, row_filter=row_filter, rows=source_rows
+                ),
+                conditions,
+            )
         else:
             page = dict(paginate_payload(files_page_base(payload, collection), collection, offset=offset, limit=limit, cursor=cursor))
             pagination = page.get("pagination") if limit > 0 and isinstance(page.get("pagination"), dict) else {}

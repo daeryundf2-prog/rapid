@@ -437,6 +437,51 @@ def _matches(details: Mapping[str, object], column: TaggedColumn) -> bool:
     return True
 
 
+def collect_row(
+    collector: DerivedCollector,
+    plan: FamilyPlan,
+    details: Mapping[str, object],
+    *,
+    kind: str,
+    record_index: int,
+    artifact_type: str,
+    untabled: dict[str, int] | None = None,
+) -> bool:
+    """Add every tagged column value of one row (``details`` of an artifacts / analysis row, the
+    files row itself) to ``collector``; True when at least one value was added. ``untabled``
+    counts semantic columns without a table. The connection graph reads one row's values with it."""
+    moment: dt.datetime | None = None
+    timed = False
+    row_hit = False
+    for column in plan.columns:
+        if column.when and not _matches(details, column):
+            continue
+        hit = read_column(details, column.candidates)
+        if hit is None:
+            continue
+        if not column.table:
+            if untabled is not None:
+                untabled[column.semantic] = untabled.get(column.semantic, 0) + 1
+            continue
+        if not timed:
+            moment, timed = _row_time(details, plan), True
+        for item in iter_items(hit[0], column.semantic):
+            if collector.add(
+                column.table,
+                column.semantic,
+                item,
+                kind=kind,
+                family=plan.family,
+                record_index=record_index,
+                field=column.key,
+                artifact_type=artifact_type,
+                moment=moment,
+                details=details,
+            ):
+                row_hit = True
+    return row_hit
+
+
 def _sources(inputs: TriageInputs, files: FilesOutput, load_errors: dict[str, str]) -> list[RowSource]:
     analyses = tuple(item for item in inputs.analyses if item[1] not in SKIPPED_ANALYSIS_KINDS)
     scoped = TriageInputs(
@@ -512,35 +557,15 @@ def run_derived(
                     family_cache[artifact_type] = plan
                 if plan is None or not plan.columns:
                     continue
-                moment: dt.datetime | None = None
-                timed = False
-                row_hit = False
-                for column in plan.columns:
-                    if column.when and not _matches(details, column):
-                        continue
-                    hit = read_column(details, column.candidates)
-                    if hit is None:
-                        continue
-                    if not column.table:
-                        untabled[column.semantic] = untabled.get(column.semantic, 0) + 1
-                        continue
-                    if not timed:
-                        moment, timed = _row_time(details, plan), True
-                    for item in iter_items(hit[0], column.semantic):
-                        if collector.add(
-                            column.table,
-                            column.semantic,
-                            item,
-                            kind=source.kind,
-                            family=plan.family,
-                            record_index=index,
-                            field=column.key,
-                            artifact_type=artifact_type,
-                            moment=moment,
-                            details=details,
-                        ):
-                            row_hit = True
-                if row_hit:
+                if collect_row(
+                    collector,
+                    plan,
+                    details,
+                    kind=source.kind,
+                    record_index=index,
+                    artifact_type=artifact_type,
+                    untabled=untabled,
+                ):
                     hits += 1
         except (OSError, ValueError) as exc:  # unreadable / truncated stream: the tail of this source is unread
             failed = True

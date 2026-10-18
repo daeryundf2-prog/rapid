@@ -44,15 +44,20 @@ def record_run_checkpoint(
     *,
     reused: bool,
     delta_merged: bool = False,
+    plan_status: str | None = None,
+    plan_reason: str | None = None,
 ) -> None:
+    """Append a stage checkpoint; ``plan_status`` (``cancelled``/``skipped``/``partial``)
+    records a run-plan cancel or skip, which ``--resume`` never reuses."""
     record = {
         "stage": stage,
-        "status": "delta-merged" if delta_merged else ("reused" if reused else "completed"),
+        "status": plan_status or ("delta-merged" if delta_merged else ("reused" if reused else "completed")),
         "delta_merged": delta_merged,
         "output": str(path),
         "exists": path.is_file(),
         "size_bytes": path.stat().st_size if path.is_file() else None,
         "reused": reused,
+        **({"plan_status": plan_status, "plan_reason": plan_reason or ""} if plan_status else {}),
         "recorded_at": dt.datetime.now().isoformat(),
         "commercial_gap_ids": [CHECKPOINT_RESUME_GAP_ID],
         "core_accuracy_gates": checkpoint_resume_core_accuracy_gates(

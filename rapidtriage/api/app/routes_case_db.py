@@ -37,6 +37,7 @@ from ...core.search import (
 from .helpers import (
     get_job,
     resolve_request_reviewer,
+    run_not_finished_message,
 )
 from .models import (
     CaseCatalogAddRunRequest,
@@ -104,7 +105,7 @@ def build_case_db_router(
         """
         job = get_job(store, run_id)
         if job.summary is None:
-            raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
+            raise HTTPException(status_code=409, detail=run_not_finished_message(job))
         output_dir = run_output_dir(job.summary)
         database_path, case_id = canonical_run_case(job.summary, run_id)
         by_status: dict[str, int] = {}
@@ -175,7 +176,7 @@ def build_case_db_router(
     def ensure_run_case_db(run_id: str, request: RunCaseDbEnsureRequest) -> dict[str, object]:
         job = get_job(store, run_id)
         if job.summary is None:
-            raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
+            raise HTTPException(status_code=409, detail=run_not_finished_message(job))
         output_dir = run_output_dir(job.summary)
         default_database, default_case_id = canonical_run_case(job.summary, run_id)
         database_path = Path(request.database).expanduser().resolve() if request.database else default_database
@@ -269,7 +270,7 @@ def build_case_db_router(
             raise HTTPException(status_code=400, detail="로케이터 대상에는 run_id가 필요합니다")
         job = get_job(store, run_id)
         if job.summary is None:
-            raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
+            raise HTTPException(status_code=409, detail=run_not_finished_message(job))
         outputs = job.summary.get("outputs")
         resolved: list[dict[str, str]] = []
         unresolved: list[str] = []
@@ -306,7 +307,7 @@ def build_case_db_router(
         """
         job = get_job(store, run_id)
         if job.summary is None:
-            raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
+            raise HTTPException(status_code=409, detail=run_not_finished_message(job))
         database_path, case_id = canonical_run_case(job.summary, run_id)
         payload: dict[str, object] = {
             "command": "case-db.review-map",

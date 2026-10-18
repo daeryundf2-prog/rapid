@@ -175,6 +175,10 @@ export function collectionQueryKey(runId: string | null, query: CollectionQuery,
     def.source === "whole" ? (query.search ?? null) : null,
     def.source === "whole" ? (query.extension ?? null) : null,
     query.ref.id === "analysis" ? (query.ref.analysisId ?? "") : "",
+    // 파일 시스템 탐색기 folder / special node (files only): another folder is another listing.
+    query.ref.id === "files" && (query.ref.dir !== undefined || query.ref.special)
+      ? `${query.ref.dir ?? ""}|${query.ref.recursive ? "r" : "d"}|${query.ref.special ?? ""}`
+      : "",
     query.ref.id === "artifacts" || query.ref.id === "analysis"
       ? query.pathContains?.trim() || serverPathFilter(query.text) || ""
       : "",
@@ -192,6 +196,8 @@ export function collectionQueryKey(runId: string | null, query: CollectionQuery,
       : "",
     // Analysis rows `details` server filters (R3 §3.3).
     query.ref.id === "analysis" && query.detailFilters ? JSON.stringify(query.detailFilters) : "",
+    // Row conditions (r4 §2.3: time, 요일·시간대, 부분 결과, 콘텐츠 유형, 위치), artifacts · files · timeline.
+    query.rowConditions ? JSON.stringify(query.rowConditions) : "",
   ] as const;
 }
 
@@ -217,20 +223,26 @@ export function useCollectionQuery(
   const passive = options.passive === true;
   const filters = passive ? EMPTY_FILTERS : storeFilters;
   const setReport = useFilterStore((s) => s.setReport);
-  useTimezone(); // timestamp cells format in the display timezone; re-render rows when it changes
+  // Timestamp cells format in the display timezone (re-render rows when it changes); the 요일·시간대
+  // conditions are evaluated in it too (server `tz=` and the client predicate).
+  const { timezone } = useTimezone();
   const setOptions = useFilterStore((s) => s.setOptions);
   // The run's known artifact types (`/tree`): a 유형 column text selects those containing it.
   const serverTypes = options.typeOptions ?? NO_TYPES;
   // Server-capable filters (path_contains, kind=, extension) fold into the query; the rest stay client-side.
   // biome-ignore lint/correctness/useExhaustiveDependencies: rawQuery fields are listed individually
   const query = useMemo(
-    () => applyFiltersToQuery(rawQuery, filters, serverTypes),
+    () => applyFiltersToQuery(rawQuery, filters, serverTypes, timezone),
     [
       rawQuery.ref.id,
       rawQuery.ref.kind,
       rawQuery.ref.status,
       rawQuery.ref.category,
       rawQuery.ref.analysisId,
+      // 파일 시스템 탐색기 folder / subtree / special node (files): another listing.
+      rawQuery.ref.dir,
+      rawQuery.ref.recursive,
+      rawQuery.ref.special,
       rawQuery.text,
       rawQuery.search,
       rawQuery.extension,
@@ -238,13 +250,15 @@ export function useCollectionQuery(
       rawQuery.offset,
       rawQuery.sort?.key,
       rawQuery.sort?.order,
+      rawQuery.rowConditions,
       filters,
       serverTypes,
+      timezone,
     ],
   );
   const plan = useMemo(
-    () => partitionFilters(rawQuery.ref, filters, serverTypes),
-    [rawQuery.ref, filters, serverTypes],
+    () => partitionFilters(rawQuery.ref, filters, serverTypes, timezone),
+    [rawQuery.ref, filters, serverTypes, timezone],
   );
   const clientFiltering = plan.clientLabels.length > 0;
   const route = useRoute();
@@ -342,11 +356,11 @@ export function useCollectionQuery(
   );
   const loadedRows = useMemo(() => {
     if (!clientFiltering) return unfilteredRows;
-    const rows = applyClientFilters(unfilteredRows, clientFilters);
+    const rows = applyClientFilters(unfilteredRows, clientFilters, timezone);
     return clientFilters.columns.length
       ? applyColumnFilters(rows, clientFilters.columns, resolveColumn)
       : rows;
-  }, [clientFiltering, unfilteredRows, clientFilters, resolveColumn]);
+  }, [clientFiltering, unfilteredRows, clientFilters, resolveColumn, timezone]);
 
   const serverTotal =
     def.source === "whole" ? (firstData ? (mappedByPage.get(0)?.length ?? 0) : null) : total0;

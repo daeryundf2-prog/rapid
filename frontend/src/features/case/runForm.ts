@@ -15,6 +15,8 @@ export interface RunForm {
   dryRun: boolean;
   overwrite: boolean;
   extract: boolean;
+  /** Skippable processing groups the examiner unchecked (R4 V1 "처리 그룹"; sent as `skip_groups`). */
+  skipGroups: string[];
 }
 
 export const DEFAULT_RUN_FORM: RunForm = {
@@ -32,6 +34,7 @@ export const DEFAULT_RUN_FORM: RunForm = {
   dryRun: false,
   overwrite: false,
   extract: false,
+  skipGroups: [],
 };
 
 export const RUN_MODES: Array<{ id: string; label: string }> = [
@@ -81,8 +84,19 @@ export function firstRunFormError(errors: RunFormErrors): string | undefined {
   return Object.values(errors).find(Boolean);
 }
 
-/** Exact body for `POST /api/runs` (RunCreateRequest). */
+/**
+ * Exact body for `POST /api/runs` (RunCreateRequest). `skip_groups` rides only when a group is
+ * unchecked, so a run with the mode defaults sends the same body as before R4.
+ */
 export function buildRunBody(form: RunForm): RunCreateBody {
+  const skipGroups = [...new Set(form.skipGroups)];
+  return {
+    ...buildBaseRunBody(form),
+    ...(skipGroups.length ? { skip_groups: skipGroups } : {}),
+  };
+}
+
+function buildBaseRunBody(form: RunForm): RunCreateBody {
   return {
     root: form.root.trim(),
     mode: form.mode,

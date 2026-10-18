@@ -27,6 +27,8 @@ const BASE_COLLECTIONS: Record<CollectionId, CollectionDef> = {
   process: { ...intakeCollection, id: "process", label: "처리" },
   // 통합 보기 is its own pane (features/derived/DerivedPane), not the DataGrid: no rows here.
   derived: { ...intakeCollection, id: "derived", label: "통합 보기" },
+  // 레지스트리 탐색기 is its own pane (features/explorers/RegistryExplorer), not the DataGrid.
+  registry: { ...intakeCollection, id: "registry", label: "레지스트리 탐색기" },
 };
 
 /** Every collection also carries the AXIOM preset (two-line title + tag/status chip column). */

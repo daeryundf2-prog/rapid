@@ -131,8 +131,8 @@ describe("built-in commands", () => {
   it("register without key conflicts and explain why they are disabled", async () => {
     const client = { invalidateQueries: vi.fn() } as never;
     registerCommands([...appCommands(), ...navigateCommands(), ...caseCommands(client)]);
-    // One per COLLECTION_NODES entry (incl. 분석 작업 and 통합 보기).
-    expect(getCommands("navigate")).toHaveLength(12);
+    // One per COLLECTION_NODES entry (incl. 분석 작업, 통합 보기 and 레지스트리 탐색기).
+    expect(getCommands("navigate")).toHaveLength(13);
     expect(await runCommand("navigate.files")).toEqual({ ok: false, reason: NO_RUN_REASON });
     // No case open: the landing page mounts no viewer.
     expect(await runCommand("viewer.open")).toEqual({ ok: false, reason: "이 단계에는 뷰어가 없습니다" });

@@ -42,6 +42,7 @@ from .memory import (
 )
 from .parser_isolation import parser_crash_isolation_assessment
 from .performance import performance_commercial_uplift_evidence
+from .planned_out import apply_plan_to_steps, plan_step_rows
 from .profiles import RunProfile
 from .scheduler import (
     parallel_parser_scheduler_assessment,
@@ -92,6 +93,7 @@ def build_run_summary(
     rule_set: RuleSet | None = None,
     source: Mapping[str, object] | None = None,
     extra_steps: Sequence[Mapping[str, object]] = (),
+    plan: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     provider_counts = {
         str(provider["name"]): manifest_provider_artifact_count(provider)
@@ -134,6 +136,11 @@ def build_run_summary(
     )
     # Steps that run after the outputs exist (e.g. ``triage-flags``), already shaped as step rows.
     step_rows.extend(dict(step) for step in extra_steps)
+    # Run plan (P2 U-P2-6): skipped/cancelled/partial tasks carry their status,
+    # Korean reason and who/when on the step rows; tasks that never produced a
+    # step row (skipped providers, cancelled stages) get one.
+    apply_plan_to_steps(step_rows, plan)
+    step_rows.extend(plan_step_rows(plan, {str(step.get("name")) for step in step_rows}))
     silent_failure = build_silent_failure_report(
         root=root,
         docs_payload=docs_payload,
@@ -247,6 +254,8 @@ def build_run_summary(
             "preferred_location_candidates": preferred_candidates[:5],
         },
     }
+    if isinstance(plan, Mapping):
+        payload["plan"] = dict(plan)
     if rule_set is not None:
         annotation_summary = summarize_payload_annotations(files_payload, docs_payload, *artifact_payloads.values())
         payload["rule_set"] = {

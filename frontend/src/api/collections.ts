@@ -47,6 +47,12 @@ export interface FlagFilter {
   ids?: readonly string[];
   grade?: string;
   fields?: RecordFieldFilters;
+  /** Row conditions (r4 §2.3) the listing API applies: query params, lists repeat. */
+  conditions?: Record<string, string | string[]>;
+}
+
+function hasConditions(filter: FlagFilter | undefined): boolean {
+  return Boolean(filter?.conditions && Object.keys(filter.conditions).length);
 }
 
 function flagQuery(filter: FlagFilter | undefined): {
@@ -54,12 +60,14 @@ function flagQuery(filter: FlagFilter | undefined): {
   flag_grade?: string;
   browser?: string[];
   service?: string[];
+  conditions?: Record<string, string | string[]>;
 } {
   return {
     ...(filter?.ids?.length ? { flag: [...filter.ids] } : {}),
     ...(filter?.grade ? { flag_grade: filter.grade } : {}),
     ...(filter?.fields?.browser?.length ? { browser: [...filter.fields.browser] } : {}),
     ...(filter?.fields?.service?.length ? { service: [...filter.fields.service] } : {}),
+    ...(hasConditions(filter) ? { conditions: filter?.conditions } : {}),
   };
 }
 
@@ -81,14 +89,19 @@ function hasChannelQuery(query: ChannelQuery | undefined): boolean {
 }
 
 function hasFlagFilter(filter: FlagFilter | undefined): boolean {
-  return Boolean(filter?.ids?.length || filter?.grade || hasRecordFields(filter?.fields));
+  return Boolean(
+    filter?.ids?.length || filter?.grade || hasRecordFields(filter?.fields) || hasConditions(filter),
+  );
 }
 
-/** `&flag=…&flag_grade=…` for the JSON listings (files, analysis). */
+/** `&flag=…&flag_grade=…` (+ row conditions) for the JSON listings (files, analysis, timeline). */
 export function flagQueryString(filter: FlagFilter | undefined): string {
   const params = new URLSearchParams();
   for (const id of filter?.ids ?? []) params.append("flag", id);
   if (filter?.grade) params.set("flag_grade", filter.grade);
+  for (const [key, value] of Object.entries(filter?.conditions ?? {})) {
+    for (const item of Array.isArray(value) ? value : [value]) params.append(key, item);
+  }
   const text = params.toString();
   return text ? `&${text}` : "";
 }
@@ -115,6 +128,8 @@ async function jsonPaged(
   category?: string,
   scope?: string,
   extra = "",
+  /** The server filtered the rows (folder, flags, row conditions): `matched` is the total, like a category page. */
+  serverFiltered = false,
 ): Promise<RawPage> {
   const started = now();
   const filter = `${scope ? `&scope=${enc(scope)}` : ""}${category ? `&category=${enc(category)}` : ""}${extra}`;
@@ -144,7 +159,7 @@ async function jsonPaged(
     payload.pagination && typeof payload.pagination === "object" && !Array.isArray(payload.pagination)
       ? (payload.pagination as Record<string, unknown>)
       : {};
-  if (category && ("matched" in payload || "truncated" in pagination)) {
+  if ((category || serverFiltered) && ("matched" in payload || "truncated" in pagination)) {
     // A category-filtered files page (artifact_filter.filter_files_by_category) counts its
     // matches: `matched` is exact, or null when the scan hit its cap (`pagination.truncated`).
     // Its top-level `total` is the copied UNFILTERED payload total — never show that.
@@ -175,6 +190,28 @@ async function jsonPaged(
   return { ...base, total, truncated: false, hasMore };
 }
 
+/** 파일 시스템 탐색기 filter of `GET /files`: one fs-tree folder (`path_prefix=`) or special node. */
+export interface FilesPathFilter {
+  /** Folder relative to the volume root (`""` = root); undefined = no folder filter. */
+  dir?: string;
+  /** The folder's whole subtree (`recursive=1`) instead of its direct files. */
+  recursive?: boolean;
+  /** fs-tree special node (`special=orphan|unallocated|slack`). */
+  special?: string;
+}
+
+/** `&path_prefix=…&recursive=1&special=…` for `GET /files` ("" when no folder filter). */
+export function filesPathQueryString(filter: FilesPathFilter | undefined): string {
+  const params = new URLSearchParams();
+  if (filter?.dir !== undefined) {
+    params.set("path_prefix", filter.dir);
+    if (filter.recursive) params.set("recursive", "1");
+  }
+  if (filter?.special) params.set("special", filter.special);
+  const text = params.toString();
+  return text ? `&${text}` : "";
+}
+
 /** `GET /files` (optionally `category=<id>`: documents, images, archives, databases, emails, …). */
 export const fetchFilesPage = (
   runId: string,
@@ -183,8 +220,10 @@ export const fetchFilesPage = (
   signal?: AbortSignal,
   category?: string,
   flags?: FlagFilter,
+  path?: FilesPathFilter,
 ) => {
   const route = parseFilesCategory(category);
+  const pathQuery = filesPathQueryString(path);
   return jsonPaged(
     runId,
     "files",
@@ -194,7 +233,9 @@ export const fetchFilesPage = (
     signal,
     route.category,
     route.scope,
-    flagQueryString(flags),
+    flagQueryString(flags) + pathQuery,
+    // Folder, 특이사항 and row-condition pages count matches (`matched`, null past the scan cap).
+    Boolean(pathQuery) || Boolean(flags?.ids?.length || flags?.grade) || hasConditions(flags),
   );
 };
 
@@ -303,8 +344,25 @@ export async function fetchDocsPage(
     meta: { docs_rows: key },
   };
 }
-export const fetchTimelinePage = (runId: string, offset: number, limit: number, signal?: AbortSignal) =>
-  jsonPaged(runId, "timeline", "events", offset, limit, signal);
+export const fetchTimelinePage = (
+  runId: string,
+  offset: number,
+  limit: number,
+  signal?: AbortSignal,
+  conditions?: Record<string, string | string[]>,
+) =>
+  jsonPaged(
+    runId,
+    "timeline",
+    "events",
+    offset,
+    limit,
+    signal,
+    undefined,
+    undefined,
+    flagQueryString({ conditions }),
+    Object.keys(conditions ?? {}).length > 0,
+  );
 export const fetchIndicatorsPage = (runId: string, offset: number, limit: number, signal?: AbortSignal) =>
   jsonPaged(runId, "indicators", "indicators", offset, limit, signal);
 

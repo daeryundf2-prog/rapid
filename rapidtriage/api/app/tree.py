@@ -33,10 +33,18 @@ from ...core.eventlog_channels import (
     channel_group_nodes,
 )
 from ...core.jobs import RunJobStore, read_output_json, run_output_dir
+from ...core.run.plan import plan_counts_brief
 from .analyses import ANALYSIS_RUNNER
 from .artifact_filter import record_field_value
 from .derived import tree_derived_node
-from .helpers import default_case_path, enrich_summary_counts, get_job, get_output_path
+from .helpers import (
+    default_case_path,
+    enrich_summary_counts,
+    get_job,
+    get_output_path,
+    run_not_finished_message,
+    run_progress_payload,
+)
 from .jsonl_records import iter_artifact_records, jsonl_records_path
 from .triage_flags import kind_flag_counts, tree_flags_section
 
@@ -280,11 +288,151 @@ def _case_bookmark_count(store: RunJobStore, run_id: str) -> int:
     return len(bookmarks) if isinstance(bookmarks, list) else 0
 
 
+LIVE_MESSAGE = "런 진행 중 · 완료된 그룹만 표시 · 검색/타임라인은 마무리 후"
+LIVE_STOPPED_MESSAGE = "런이 끝나지 않았습니다 · 완료된 그룹만 표시 · 이어서 실행하면 나머지를 처리합니다"
+LIVE_READABLE_TASK_STATUSES = frozenset({"completed", "partial"})
+TASK_STATE_REASONS = {
+    "skipped": "건너뜀",
+    "cancelled": "취소됨",
+    "failed": "실패",
+}
+
+
+def _plan_task_reason(task: Mapping[str, Any], group: Mapping[str, Any], queue_position: int | None) -> str:
+    status = str(task.get("status") or "")
+    reason = str(task.get("reason") or "")
+    if status == "running":
+        rows = int(task.get("rows_so_far") or 0)
+        return f"처리 중 (그룹 {group.get('label')}, 지금까지 {rows:,}행)"
+    if status == "queued":
+        position = f", 대기 {queue_position}번째" if queue_position else ""
+        return f"대기 중 (그룹 {group.get('label')}{position})"
+    if status in {"completed", "partial"}:
+        return "매니페스트 단계 공급자 · 런 마무리 후 열립니다"
+    label = TASK_STATE_REASONS.get(status, status)
+    return f"{label} · {reason}" if reason else label
+
+
+def live_run_block(store: RunJobStore, run_id: str, job: Any | None = None) -> dict[str, Any]:
+    """``live`` block of ``/tree`` and ``/artifacts`` for a run without a summary (plan P2 §3.4)."""
+    job = job if job is not None else get_job(store, run_id)
+    progress = run_progress_payload(job)
+    plan = progress.get("plan") if isinstance(progress, dict) else None
+    provisional = store.provisional_outputs(run_id)
+    available = sorted(name.removeprefix("artifacts_") for name in provisional if name.startswith("artifacts_"))
+    pending: list[str] = []
+    states: dict[str, dict[str, Any]] = {}
+    queue_position = 0
+    for group in (plan or {}).get("groups") or []:
+        if not isinstance(group, dict):
+            continue
+        for task in group.get("tasks") or []:
+            if not isinstance(task, dict) or task.get("type") != "provider":
+                continue
+            kind = str(task.get("id"))
+            status = str(task.get("status") or "queued")
+            if status == "queued":
+                queue_position += 1
+            readable = f"artifacts_{kind}" in provisional
+            states[kind] = {
+                "state": status,
+                "group": group.get("id"),
+                "group_label": group.get("label"),
+                "rows_so_far": int(task.get("rows_so_far") or 0),
+                **({} if readable else {"reason": _plan_task_reason(task, group, queue_position if status == "queued" else None)}),
+                **({"reason": f"일부 완료 · {task.get('reason') or '취소'} (지금까지의 행만)"} if status == "partial" else {}),
+            }
+            if not readable:
+                pending.append(kind)
+    run_status = job.status
+    if isinstance(progress, dict) and progress.get("status") == "interrupted":
+        run_status = "interrupted"
+    active = run_status in {"queued", "running"}
+    return {
+        "run_status": run_status,
+        "partial": True,
+        "available_kinds": available,
+        "pending_kinds": pending,
+        "files_available": "files" in provisional,
+        "message": LIVE_MESSAGE if active else LIVE_STOPPED_MESSAGE,
+        "plan_counts": plan_counts_brief(plan),
+        "kind_states": states,
+    }
+
+
+def build_live_run_tree(store: RunJobStore, run_id: str, job: Any) -> dict[str, Any]:
+    """Evidence tree of a run without a summary: finished provider kinds open, the rest dimmed with a reason."""
+    live = live_run_block(store, run_id, job)
+    if not live["available_kinds"] and not live["kind_states"] and job.status not in {"queued", "running"}:
+        raise HTTPException(status_code=409, detail=run_not_finished_message(job))
+    states: dict[str, dict[str, Any]] = live.pop("kind_states")
+    kind_summaries: dict[str, dict[str, Any]] = {}
+    for kind in live["available_kinds"]:
+        try:
+            kind_summaries[kind] = read_output_summary(get_output_path(store, run_id, f"artifacts_{kind}"))
+        except HTTPException:
+            kind_summaries[kind] = {}
+    for kind in live["pending_kinds"]:
+        kind_summaries.setdefault(kind, {})
+    facets = {kind: kind_facets(store, run_id, kind) for kind in live["available_kinds"]}
+    groups = build_artifact_domain_groups(kind_summaries, kind_facets={kind: item for kind, item in facets.items() if item})
+    total = 0
+    for group in groups:
+        group_total = 0
+        for node in group.get("children") or []:
+            kind = str(node.get("kind") or "")
+            state = states.get(kind)
+            if kind in live["available_kinds"]:
+                node["state"] = state["state"] if state else "completed"
+                if state and state.get("reason"):
+                    node["reason"] = state["reason"]
+                group_total += int(node.get("count") or 0)
+                continue
+            node["state"] = state["state"] if state else "pending"
+            node["disabled"] = True
+            node["reason"] = (state or {}).get("reason") or "처리 전"
+            if state and state.get("state") == "running":
+                node["rows_so_far"] = state.get("rows_so_far", 0)
+            node.pop("children", None)
+        group["count"] = group_total
+        total += group_total
+    nodes: list[dict[str, Any]] = []
+    if live["files_available"]:
+        try:
+            files_summary = read_output_summary(get_output_path(store, run_id, "files"))
+        except HTTPException:
+            files_summary = {}
+        files_children = [
+            _node(f"files:{category}", FILE_CATEGORY_LABELS.get(category, category), count, collection="files", category=category)
+            for category, count in (files_summary.get("category_counts") or {}).items()
+            if isinstance(count, int)
+        ]
+        nodes.append(
+            _node("files", "파일", int(files_summary.get("candidate_count") or 0), children=files_children, collection="files")
+        )
+    else:
+        nodes.append(_node("files", "파일", 0, collection="files", state="pending", disabled=True, reason="파일 인벤토리 단계 후 열립니다"))
+    nodes.append(_node("artifacts", "아티팩트", total, children=groups, collection="artifacts"))
+    for node_id, label in (("docs", "문서"), ("timeline", "타임라인"), ("indicators", "지표 후보")):
+        nodes.append(_node(node_id, label, 0, collection=node_id, state="pending", disabled=True, reason="런 마무리 후 사용할 수 있습니다"))
+    request = job.request
+    return {
+        "run_id": run_id,
+        "root": {
+            "label": Path(request.root).name if request and request.root else run_id,
+            "mode": request.mode if request else None,
+            "status": live["run_status"],
+        },
+        "nodes": nodes,
+        "live": live,
+    }
+
+
 def build_run_tree(store: RunJobStore, run_id: str) -> dict[str, Any]:
-    """Assemble the evidence tree for one completed run."""
+    """Assemble the evidence tree for one run (live view while the run has no summary)."""
     job = get_job(store, run_id)
     if job.summary is None:
-        raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
+        return build_live_run_tree(store, run_id, job)
 
     try:
         case_path = default_case_path(store, run_id)
@@ -675,7 +823,7 @@ def build_run_issues(store: RunJobStore, run_id: str) -> dict[str, Any]:
     """
     job = get_job(store, run_id)
     if job.summary is None:
-        raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
+        raise HTTPException(status_code=409, detail=run_not_finished_message(job))
 
     rows: list[dict[str, Any]] = []
     processing = job.summary.get("processing")

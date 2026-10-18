@@ -11,9 +11,12 @@
  *               joined by "|"; the 이벤트 로그 channel nodes use the group filter)
  *  - analysis:  `path_contains` (path text / 경로 column filter)
  *  - search:    `extension` (repeated param; 확장자 column filter too)
- *  - timeline/files/docs/indicators: paging only, nothing server-side
- * Everything else (time range, review status, tags, other column filters) runs on
- * the rows already loaded; the filter status line says so.
+ *  - artifacts/files/timeline (r4 §2.3 row conditions): time range (`from`/`to`), 요일·시간대·업무
+ *               외 시간 (`weekday`/`hours`/`offhours` + `tz`), 부분 결과 (`partial`), 콘텐츠 유형
+ *               (`content`); artifacts also the map cluster box (`geo`)
+ *  - docs/indicators/search/analysis: those row conditions run on the loaded rows
+ * Everything else (review status, tags, other column filters) runs on the rows already
+ * loaded; the filter status line says so.
  */
 
 import { ANALYSIS_DETAIL_FILTER_KEYS } from "../../api/analyses";
@@ -35,6 +38,17 @@ import { parseInstant } from "../../utils/time";
 import { CARVE_KINDS } from "../analysis/analysisForm";
 import { type Grade, isGrade } from "../flags/catalog";
 import { rowMatchesFlagFilter, ruleLabel } from "../flags/flags";
+import { contentTypeLabel } from "./contentTypes";
+import {
+  clockLabel,
+  hasClock,
+  orderedRange,
+  parseGeo,
+  rowMatchesConditions,
+  type ServerConditionParams,
+  serverConditionParams,
+  timeWindow,
+} from "./rowConditions";
 
 export interface FilterState {
   /** Inclusive lower bound (ISO or `YYYY-MM-DDTHH:mm`). */
@@ -56,6 +70,18 @@ export interface FilterState {
   flagGrade?: Grade;
   /** Exact record fields (URL `browser=` / `service=`; artifacts server-side). */
   fields?: RecordFieldFilters;
+  /** Weekdays of the row time, `mon`..`sun` (URL `wd=`). */
+  weekdays?: string[];
+  /** Hour-of-day window `HH-HH` (URL `hours=`). */
+  hours?: string;
+  /** 업무 외 시간: hours OR weekdays, defaults 18-09 · sat,sun (URL `offhours=1`). */
+  offhours?: boolean;
+  /** 부분 결과 rows only (URL `partial=1`). */
+  partial?: boolean;
+  /** 콘텐츠 유형 ids (URL `content=`). */
+  content?: string[];
+  /** Map cluster box `lat0,lon0,lat1,lon1` (URL `geo=`). */
+  geo?: string;
 }
 
 export const EMPTY_FILTERS: FilterState = Object.freeze({
@@ -85,6 +111,12 @@ export function filtersFromRoute(route: Route): FilterState {
     ...(route.flags?.length ? { flags: route.flags } : {}),
     ...(route.flagGrade ? { flagGrade: route.flagGrade } : {}),
     ...(hasRecordFields(route.fields) ? { fields: route.fields } : {}),
+    ...(route.weekdays?.length ? { weekdays: route.weekdays } : {}),
+    ...(route.hours ? { hours: route.hours } : {}),
+    ...(route.offhours ? { offhours: true } : {}),
+    ...(route.partial ? { partial: true } : {}),
+    ...(route.content?.length ? { content: route.content } : {}),
+    ...(route.geo ? { geo: route.geo } : {}),
   };
 }
 
@@ -103,6 +135,12 @@ export function filtersToRoutePatch(filters: FilterState): Partial<Route> {
     flags: filters.flags?.length ? filters.flags : undefined,
     flagGrade: filters.flagGrade && isGrade(filters.flagGrade) ? filters.flagGrade : undefined,
     fields: hasRecordFields(filters.fields) ? filters.fields : undefined,
+    weekdays: filters.weekdays?.length ? filters.weekdays : undefined,
+    hours: filters.hours || undefined,
+    offhours: filters.offhours ? true : undefined,
+    partial: filters.partial ? true : undefined,
+    content: filters.content?.length ? filters.content : undefined,
+    geo: filters.geo && parseGeo(filters.geo) ? filters.geo : undefined,
   };
 }
 
@@ -123,7 +161,13 @@ export function filtersEqual(a: FilterState, b: FilterState): boolean {
     (a.flags ?? []).join() === (b.flags ?? []).join() &&
     (a.flagGrade ?? "") === (b.flagGrade ?? "") &&
     recordFieldsKey(a.fields) === recordFieldsKey(b.fields) &&
-    columnsKey(a.columns) === columnsKey(b.columns)
+    columnsKey(a.columns) === columnsKey(b.columns) &&
+    (a.weekdays ?? []).join() === (b.weekdays ?? []).join() &&
+    (a.hours ?? "") === (b.hours ?? "") &&
+    Boolean(a.offhours) === Boolean(b.offhours) &&
+    Boolean(a.partial) === Boolean(b.partial) &&
+    (a.content ?? []).join() === (b.content ?? []).join() &&
+    (a.geo ?? "") === (b.geo ?? "")
   );
 }
 
@@ -133,13 +177,17 @@ export function hasActiveFilters(filters: FilterState): boolean {
 
 // --- time presets -----------------------------------------------------------
 
-export type TimePreset = "today" | "7d" | "30d";
+/** Relative ranges (r4 §2.3): 오늘 and 최근 1 / 7 / 30일, ending now. */
+export type TimePreset = "today" | "1d" | "7d" | "30d";
 
 export const TIME_PRESET_LABELS: Record<TimePreset, string> = {
   today: "오늘",
-  "7d": "7일",
-  "30d": "30일",
+  "1d": "최근 1일",
+  "7d": "최근 7일",
+  "30d": "최근 30일",
 };
+
+const PRESET_DAYS: Record<Exclude<TimePreset, "today">, number> = { "1d": 1, "7d": 7, "30d": 30 };
 
 /** Local `YYYY-MM-DDTHH:mm` (the value format of `<input type="datetime-local">`). */
 export function toLocalInput(date: Date): string {
@@ -158,14 +206,14 @@ export function toInputValue(value: string | undefined): string {
 export function presetRange(preset: TimePreset, now: Date = new Date()): { from: string; to: string } {
   const start = new Date(now);
   if (preset === "today") start.setHours(0, 0, 0, 0);
-  else start.setTime(now.getTime() - (preset === "7d" ? 7 : 30) * 86_400_000);
+  else start.setTime(now.getTime() - PRESET_DAYS[preset] * 86_400_000);
   return { from: toLocalInput(start), to: toLocalInput(now) };
 }
 
 /** Which preset (if any) the current range equals, with a minute of slack. */
 export function activePreset(filters: FilterState, now: Date = new Date()): TimePreset | null {
   if (!filters.from || !filters.to) return null;
-  for (const preset of ["today", "7d", "30d"] as const) {
+  for (const preset of ["today", "1d", "7d", "30d"] as const) {
     const range = presetRange(preset, now);
     if (
       Math.abs(Date.parse(range.from) - Date.parse(filters.from)) <= 60_000 &&
@@ -177,6 +225,9 @@ export function activePreset(filters: FilterState, now: Date = new Date()): Time
 }
 
 // --- partitioning -----------------------------------------------------------
+
+/** Collections whose API applies the row conditions (r4 §2.3: time, clock, 부분 결과, 콘텐츠 유형). */
+export const CONDITION_SERVER_COLLECTIONS: ReadonlySet<string> = new Set(["artifacts", "files", "timeline"]);
 
 /** Collections whose API filters 특이사항 (`flag=` / `flag_grade=`, plan §3.1 조인). */
 export const FLAG_SERVER_COLLECTIONS: ReadonlySet<string> = new Set(["artifacts", "files", "analysis"]);
@@ -193,6 +244,8 @@ export interface FilterPlan {
     fields?: RecordFieldFilters;
     /** Analysis rows: exact `details` filters (`f:source` / `f:signature_kind` / `f:recovery_method` / `f:in_use`). */
     details?: Record<string, string[]>;
+    /** Row-condition query params (`from`, `to`, `weekday`, `hours`, `offhours`, `tz`, `partial`, `content`, `geo`). */
+    conditions?: ServerConditionParams;
   };
   /** Column filters the client applies to loaded rows (the rest went to the API). */
   clientColumns: ColumnFilter[];
@@ -246,6 +299,7 @@ export function partitionFilters(
   ref: CollectionRef,
   filters: FilterState,
   knownTypes: readonly string[] = [],
+  tz = "utc",
 ): FilterPlan {
   const server: FilterPlan["server"] = {};
   const serverLabels: string[] = [];
@@ -255,7 +309,21 @@ export function partitionFilters(
   const pathOnServer = ref.id === "artifacts" || ref.id === "analysis";
   let typeColumn: "exact" | "contains" | null = null;
 
-  if (filters.from || filters.to) clientLabels.push("시간 범위"); // no from/to on any API
+  const conditionLabels: string[] = [];
+  if (filters.from || filters.to) conditionLabels.push("시간 범위");
+  if (hasClock(filters)) conditionLabels.push(filters.offhours ? "업무 외 시간" : "요일·시간대");
+  if (filters.partial) conditionLabels.push("부분 결과");
+  if (filters.content?.length) conditionLabels.push("콘텐츠 유형");
+  const geoOnServer = ref.id === "artifacts";
+  if (CONDITION_SERVER_COLLECTIONS.has(ref.id)) {
+    const params = serverConditionParams(filters, tz, { time: true, geo: geoOnServer });
+    if (Object.keys(params).length) server.conditions = params;
+    serverLabels.push(...conditionLabels);
+    if (parseGeo(filters.geo)) (geoOnServer ? serverLabels : clientLabels).push("위치");
+  } else {
+    clientLabels.push(...conditionLabels);
+    if (parseGeo(filters.geo)) clientLabels.push("위치");
+  }
   if (filters.statuses.length) clientLabels.push("상태");
   if (filters.tags.length) clientLabels.push("태그");
   if (filters.notes) clientLabels.push("메모 있음");
@@ -367,6 +435,18 @@ export function clientOnlyFilters(filters: FilterState, plan: FilterPlan): Filte
     flags: plan.server.flags ? [] : filters.flags,
     flagGrade: plan.server.flagGrade || plan.server.flags ? undefined : filters.flagGrade,
     fields: plan.server.fields ? undefined : filters.fields,
+    ...(plan.server.conditions
+      ? {
+          from: undefined,
+          to: undefined,
+          weekdays: undefined,
+          hours: undefined,
+          offhours: undefined,
+          partial: undefined,
+          content: undefined,
+          geo: plan.server.conditions.geo ? undefined : filters.geo,
+        }
+      : {}),
   };
 }
 
@@ -375,10 +455,15 @@ export function applyFiltersToQuery(
   query: CollectionQuery,
   filters: FilterState,
   knownTypes: readonly string[] = [],
+  tz = "utc",
 ): CollectionQuery {
-  const plan = partitionFilters(query.ref, filters, knownTypes);
+  const plan = partitionFilters(query.ref, filters, knownTypes, tz);
   const next: CollectionQuery = { ...query };
-  if (filters.from || filters.to) next.timeRange = { from: filters.from, to: filters.to };
+  if (filters.from || filters.to) {
+    // Never a reversed range (시작 > 종료): the pair is applied in order.
+    const range = orderedRange(filters.from, filters.to);
+    next.timeRange = { from: range.from, to: range.to };
+  }
   if (filters.statuses.length) next.reviewStatus = filters.statuses;
   if (filters.tags.length) next.tags = filters.tags;
   if (plan.server.artifactTypes) next.artifactTypes = plan.server.artifactTypes;
@@ -390,16 +475,12 @@ export function applyFiltersToQuery(
   if (plan.server.flagGrade) next.flagGrade = plan.server.flagGrade;
   if (plan.server.fields) next.fields = plan.server.fields;
   if (plan.server.details) next.detailFilters = plan.server.details;
+  // A view may ask for its own row condition (지도: every located row, `geo=` world box); the bar wins.
+  if (plan.server.conditions) next.rowConditions = { ...query.rowConditions, ...plan.server.conditions };
   return next;
 }
 
 // --- client predicate --------------------------------------------------------
-
-function parseTime(value: string | undefined | null): number | null {
-  if (!value) return null;
-  const ms = Date.parse(value);
-  return Number.isNaN(ms) ? null : ms;
-}
 
 export function rowExtension(row: GridRow): string {
   const field = row.fields.extension;
@@ -414,15 +495,18 @@ function rowKind(row: GridRow): string {
   return typeof kind === "string" ? kind : "";
 }
 
-/** True when the row passes every active filter (server-handled ones are re-checked; harmless). */
-export function rowMatchesFilters(row: GridRow, filters: FilterState): boolean {
-  const from = parseTime(filters.from);
-  const to = parseTime(filters.to);
-  if (from !== null || to !== null) {
+/**
+ * True when the row passes every active filter. Pass `clientOnlyFilters(…)` for a listing whose
+ * API applied some of them (the row conditions are evaluated in `tz`, the display timezone).
+ */
+export function rowMatchesFilters(row: GridRow, filters: FilterState, tz = "utc"): boolean {
+  // `[from, until)`: in order, `to` covering the whole minute / second / day it names (server rule).
+  const { from, until } = timeWindow(filters.from, filters.to);
+  if (from !== null || until !== null) {
     const at = parseInstant(row.timestamp)?.getTime() ?? null;
     if (at === null) return false;
     if (from !== null && at < from) return false;
-    if (to !== null && at > to) return false;
+    if (until !== null && at >= until) return false;
   }
   if (filters.statuses.length) {
     const ok = filters.statuses.some((s) =>
@@ -441,11 +525,11 @@ export function rowMatchesFilters(row: GridRow, filters: FilterState): boolean {
   if (filters.path && !(row.sourcePath ?? "").toLowerCase().includes(filters.path.toLowerCase()))
     return false;
   if (!rowMatchesFlagFilter(row, filters.flags ?? [], filters.flagGrade)) return false;
-  return true;
+  return rowMatchesConditions(row, filters, tz);
 }
 
-export function applyClientFilters(rows: GridRow[], filters: FilterState): GridRow[] {
-  return hasActiveFilters(filters) ? rows.filter((row) => rowMatchesFilters(row, filters)) : rows;
+export function applyClientFilters(rows: GridRow[], filters: FilterState, tz = "utc"): GridRow[] {
+  return hasActiveFilters(filters) ? rows.filter((row) => rowMatchesFilters(row, filters, tz)) : rows;
 }
 
 // --- chips -------------------------------------------------------------------
@@ -461,7 +545,11 @@ export type FilterKey =
   | "flag"
   | "flagGrade"
   | "field"
-  | "column";
+  | "column"
+  | "clock"
+  | "partial"
+  | "content"
+  | "geo";
 
 export interface FilterChip {
   key: FilterKey;
@@ -601,6 +689,16 @@ export function activeChips(
     const label = hiddenFilterLabel(filter, options);
     if (label) chips.push({ key: "column", value: columnFilterId(filter), label });
   }
+  if (hasClock(filters)) chips.push({ key: "clock", label: clockLabel(filters) });
+  if (filters.partial) chips.push({ key: "partial", label: "부분 결과만" });
+  for (const id of filters.content ?? [])
+    chips.push({ key: "content", value: id, label: `콘텐츠 ${contentTypeLabel(id)}` });
+  const box = parseGeo(filters.geo);
+  if (box) {
+    const lat = ((box[0] + box[2]) / 2).toFixed(3);
+    const lon = ((box[1] + box[3]) / 2).toFixed(3);
+    chips.push({ key: "geo", label: `위치 ${lat}, ${lon} 부근` });
+  }
   return chips;
 }
 
@@ -638,5 +736,15 @@ export function removeChip(filters: FilterState, chip: FilterChip): FilterState 
         ...filters,
         columns: (filters.columns ?? []).filter((filter) => columnFilterId(filter) !== chip.value),
       };
+    case "clock":
+      return { ...filters, weekdays: undefined, hours: undefined, offhours: undefined };
+    case "partial":
+      return { ...filters, partial: undefined };
+    case "content": {
+      const rest = (filters.content ?? []).filter((id) => id !== chip.value);
+      return { ...filters, content: rest.length ? rest : undefined };
+    }
+    case "geo":
+      return { ...filters, geo: undefined };
   }
 }

@@ -48,7 +48,12 @@ from ...core.case_db import (
 from ...core.case_db.helpers import normalize_path_for_db
 from ...core.case_db.review_schema import COLOR_TOKEN_LABELS, COLOR_TOKENS
 from ...core.jobs import RunJobStore, run_output_dir
-from .helpers import get_job, get_output_path, resolve_request_reviewer
+from .helpers import (
+    get_job,
+    get_output_path,
+    resolve_request_reviewer,
+    run_not_finished_message,
+)
 from .run_review import RunLocatorIndex, canonical_run_case
 from .tree import build_run_tree, read_output_key
 
@@ -189,7 +194,7 @@ def build_review_tools_router(
         if run_id:
             job = get_job(store, run_id)
             if job.summary is None:
-                raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
+                raise HTTPException(status_code=409, detail=run_not_finished_message(job))
             path, canonical = canonical_run_case(job.summary, run_id)
             if case_id != canonical:
                 raise HTTPException(status_code=404, detail=f"이 런의 케이스가 아닙니다: {case_id} (런의 케이스: {canonical})")
@@ -355,7 +360,7 @@ def build_review_tools_router(
         """Category counts of the run; with ``compare`` also the baseline count and delta per bar."""
         job = get_job(store, run_id)
         if job.summary is None:
-            raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
+            raise HTTPException(status_code=409, detail=run_not_finished_message(job))
         counts = _run_histogram(run_id)
         database_path, case_id = canonical_run_case(job.summary, run_id)
         baseline: dict[str, object] | None = None
@@ -413,7 +418,7 @@ def build_review_tools_router(
         """Change history of one row's mark (newest first): author, time, note and tags before/after."""
         job = get_job(store, run_id)
         if job.summary is None:
-            raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
+            raise HTTPException(status_code=409, detail=run_not_finished_message(job))
         database_path, case_id = canonical_run_case(job.summary, run_id)
         payload: dict[str, object] = {"command": "case-db.review-history", "run_id": run_id, "case_id": case_id, "entries": []}
         if not database_path.is_file():
@@ -457,7 +462,7 @@ def build_review_tools_router(
         """
         job = get_job(store, run_id)
         if job.summary is None:
-            raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
+            raise HTTPException(status_code=409, detail=run_not_finished_message(job))
         database_path, case_id = canonical_run_case(job.summary, run_id)
         payload: dict[str, object] = {
             "command": "run.export-context",
@@ -505,7 +510,7 @@ def build_review_tools_router(
         """Other files with the same content hash as ``path`` ("관련 미디어 n")."""
         job = get_job(store, run_id)
         if job.summary is None:
-            raise HTTPException(status_code=409, detail="완료된 런이 아닙니다")
+            raise HTTPException(status_code=409, detail=run_not_finished_message(job))
         database_path, case_id = canonical_run_case(job.summary, run_id)
         payload: dict[str, object] = {"command": "run.related-media", "run_id": run_id, "path": path, "count": 0, "paths": [], "source": "none"}
         normalized = normalize_path_for_db(path)

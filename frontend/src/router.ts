@@ -7,6 +7,8 @@
  *   intake  `#/case/{run}/intake`
  *   process `#/case/{run}/process[/{analysis node}]`
  *   explore `#/case/{run}/explore/{files|docs|artifacts|timeline|indicators|search|analysis}[/{kind}]`
+ *           `#/case/{run}/explore/files?dir=/{folder}[&rec=1]` (파일 시스템 탐색기, `dir=/` = volume root)
+ *           `#/case/{run}/explore/registry[/{hive id}]?key={key path}` (레지스트리 탐색기)
  *   review  `#/case/{run}/review/board[/{status}]`
  *   report  `#/case/{run}/report/outputs`
  * Legacy links `#/case/{run}/{collection}[/{sub}]` parse to the same route and are rewritten
@@ -34,6 +36,13 @@ import {
   type ReviewStatus,
   type ServerSort,
 } from "./contracts/collection";
+import {
+  normalizeContent,
+  normalizeHours,
+  normalizeWeekdays,
+  parseGeo,
+  WEEKDAY_IDS,
+} from "./features/filters/conditionValues";
 
 /** Workflow stages of the rail (console-ia §3), in rail order. */
 export type Stage = "intake" | "process" | "explore" | "review" | "report";
@@ -53,6 +62,7 @@ export const EXPLORE_VIEWS: readonly CollectionId[] = [
   "search",
   "analysis",
   "derived",
+  "registry",
 ];
 
 /** The stage a collection belongs to. */
@@ -141,7 +151,35 @@ export interface Route {
   flagGrade?: "A" | "B" | "C";
   /** Exact record-field filters, URL `browser=` / `service=` (repeated; artifacts server-side). */
   fields?: RecordFieldFilters;
+  /**
+   * 파일 시스템 탐색기 (r4 §2.2): the selected folder relative to the volume root (`""` = root), URL
+   * `dir=/<folder>` (files only). Present = the explorer pane is open and the grid lists that folder
+   * (`GET /files?path_prefix=`).
+   */
+  dir?: string;
+  /** With `dir`: the whole subtree instead of the folder's direct files, URL `rec=1`. */
+  rec?: boolean;
+  /** 파일 시스템 탐색기 special node (`GET /files?special=`), URL `special=` (files only). */
+  special?: FsSpecial;
+  /** 레지스트리 탐색기: selected key path (mount included), URL `key=` (registry only; `kind` = hive id). */
+  key?: string;
+  /** Weekdays of the row time (r4 §2.3), URL `wd=sat,sun` (`mon`..`sun`). */
+  weekdays?: string[];
+  /** Hour-of-day window `HH-HH` (wraps midnight), URL `hours=18-09`. */
+  hours?: string;
+  /** 업무 외 시간: hours OR weekdays (defaults 18-09 · sat,sun), URL `offhours=1`. */
+  offhours?: boolean;
+  /** 부분 결과 (parser error / truncation / decrypt failure rows), URL `partial=1`. */
+  partial?: boolean;
+  /** 콘텐츠 유형 ids, URL `content=document,image`. */
+  content?: string[];
+  /** Coordinate box `lat0,lon0,lat1,lon1` (map view cluster), URL `geo=`. */
+  geo?: string;
 }
+
+/** fs-tree special nodes the files listing filters (`GET /files?special=`). */
+export type FsSpecial = "orphan" | "unallocated" | "slack";
+export const FS_SPECIALS: readonly FsSpecial[] = ["orphan", "unallocated", "slack"];
 
 /** Collections whose `{sub}` is a kind with server sort / promoted columns (`sort=`, `cols=`). */
 function hasKindSort(route: Pick<Route, "collection" | "kind">): boolean {
@@ -200,8 +238,18 @@ export function parseSortParam(value: string): ServerSort | null {
 }
 
 /** Explorer views (S9 ViewSwitch). "columns" is the default DataGrid and is never written to the URL. */
-export type ExplorerView = "columns" | "thumbnails" | "chat" | "histogram";
-export const EXPLORER_VIEWS: readonly ExplorerView[] = ["columns", "thumbnails", "chat", "histogram"];
+export type ExplorerView = "columns" | "thumbnails" | "chat" | "histogram" | "cards" | "map";
+export const EXPLORER_VIEWS: readonly ExplorerView[] = [
+  "columns",
+  "thumbnails",
+  "chat",
+  "histogram",
+  "cards",
+  "map",
+];
+
+/** Weekday ids of `wd=` (r4 §2.3; Monday first, like the server's `weekday=`). */
+export { WEEKDAY_IDS };
 
 function listParam(value: string): string[] {
   return value
@@ -223,6 +271,7 @@ export const COLLECTION_IDS: readonly CollectionId[] = [
   "analysis",
   "process",
   "derived",
+  "registry",
 ];
 
 const REVIEW_STATUSES: readonly ReviewStatus[] = [
@@ -293,6 +342,8 @@ export function parseHash(hash: string): Route {
   if (sub && (route.collection === "artifacts" || route.collection === "analysis")) route.kind = sub;
   // 통합 보기: `{sub}` is the table (people, devices, paths, attachments, credentials, urls).
   if (sub && route.collection === "derived") route.kind = sub;
+  // 레지스트리 탐색기: `{sub}` is the hive id.
+  if (sub && route.collection === "registry") route.kind = sub;
   if (sub && route.collection === "review" && (REVIEW_STATUSES as readonly string[]).includes(sub)) {
     route.status = sub as ReviewStatus;
   }
@@ -356,6 +407,36 @@ export function parseHash(hash: string): Route {
       if (item && !list.includes(item)) route.fields = { ...route.fields, [field]: [...list, item] };
     } else if (key === "note" && value === "1") {
       route.notes = true;
+    } else if (key === "dir" && route.collection === "files") {
+      // `dir=/` = volume root; the leading slash keeps an empty folder path visible in the URL.
+      route.dir = safeDecode(value).replace(/^\/+/, "");
+    } else if (key === "rec" && value === "1" && route.collection === "files") {
+      route.rec = true;
+    } else if (
+      key === "special" &&
+      route.collection === "files" &&
+      (FS_SPECIALS as readonly string[]).includes(value)
+    ) {
+      route.special = value as FsSpecial;
+    } else if (key === "key" && value && route.collection === "registry") {
+      route.key = safeDecode(value);
+    } else if (key === "wd" && value) {
+      const list = normalizeWeekdays(listParam(value));
+      if (list.length) route.weekdays = list;
+    } else if (key === "hours" && normalizeHours(value)) {
+      // An empty / malformed window (9-9, 25-03) is dropped, never kept as an inert chip.
+      route.hours = normalizeHours(value);
+    } else if (key === "offhours" && value === "1") {
+      route.offhours = true;
+    } else if (key === "partial" && value === "1") {
+      route.partial = true;
+    } else if (key === "content" && value) {
+      const list = normalizeContent(listParam(value));
+      if (list.length) route.content = list;
+    } else if (key === "geo" && value && route.collection === "artifacts") {
+      // 위치 상자: located rows are artifact rows (the server takes geo= on /artifacts only).
+      const box = safeDecode(value);
+      if (parseGeo(box)) route.geo = box;
     } else if (key === "ext" && value) {
       const list = listParam(value);
       if (list.length) route.ext = list;
@@ -388,7 +469,9 @@ export function serializeRoute(route: Route): string {
       if ((collection === "artifacts" || collection === "analysis") && route.kind) {
         path += `/${encodeURIComponent(route.kind)}`;
       }
-      if (collection === "derived" && route.kind) path += `/${encodeURIComponent(route.kind)}`;
+      if ((collection === "derived" || collection === "registry") && route.kind) {
+        path += `/${encodeURIComponent(route.kind)}`;
+      }
   }
   const query: string[] = [];
   if (
@@ -409,6 +492,18 @@ export function serializeRoute(route: Route): string {
   if (route.ext?.length) query.push(`ext=${route.ext.map(encodeURIComponent).join(",")}`);
   if (route.path) query.push(`path=${encodeURIComponent(route.path)}`);
   if (route.notes) query.push("note=1");
+  if (collection === "files" && route.dir !== undefined) {
+    query.push(`dir=${encodeURIComponent(`/${route.dir}`)}`);
+    if (route.rec) query.push("rec=1");
+  }
+  if (collection === "files" && route.special) query.push(`special=${route.special}`);
+  if (collection === "registry" && route.key) query.push(`key=${encodeURIComponent(route.key)}`);
+  if (route.weekdays?.length) query.push(`wd=${route.weekdays.join(",")}`);
+  if (route.hours) query.push(`hours=${route.hours}`);
+  if (route.offhours) query.push("offhours=1");
+  if (route.partial) query.push("partial=1");
+  if (route.content?.length) query.push(`content=${route.content.map(encodeURIComponent).join(",")}`);
+  if (route.geo) query.push(`geo=${route.geo}`);
   if (route.flagGrade) query.push(`flag_grade=${route.flagGrade}`);
   for (const id of route.flags ?? []) query.push(`flag=${encodeURIComponent(id)}`);
   for (const field of RECORD_FIELD_KEYS) {
@@ -439,7 +534,10 @@ export function collectionChanged(a: Route, b: Route): boolean {
     a.kind !== b.kind ||
     a.status !== b.status ||
     a.category !== b.category ||
-    a.analysisId !== b.analysisId
+    a.analysisId !== b.analysisId ||
+    a.dir !== b.dir ||
+    Boolean(a.rec) !== Boolean(b.rec) ||
+    a.special !== b.special
   );
 }
 

@@ -440,7 +440,9 @@ export function DataGrid(props: DataGridProps = {}) {
     setVisibility(visibilityFor(columns, preset));
     setPinnedColumns(new Set());
   }, [collectionKey, preset, typeFamily, familyId, catalog]);
-  // Reset only when the collection changes.
+  // 파일 시스템 탐색기: another folder is another listing (focus / selection), same columns.
+  const listingKey = `${collectionKey}:${ref.dir ?? ""}:${ref.recursive ? "r" : ""}:${ref.special ?? ""}`;
+  // Reset only when the collection (or the explorer folder) changes.
   useEffect(() => {
     setSorting([]);
     setSortNotice(null);
@@ -453,8 +455,8 @@ export function DataGrid(props: DataGridProps = {}) {
     userNavigated.current = false;
     // The selection belongs to one grid: another collection / stage / run starts empty (a
     // remount of the same grid — e.g. the layout switching to the drawer — keeps it).
-    useGridLocalStore.getState().enterSelectionScope(`${runId ?? ""}|${collectionKey}`);
-  }, [collectionKey, runId]);
+    useGridLocalStore.getState().enterSelectionScope(`${runId ?? ""}|${listingKey}`);
+  }, [listingKey, runId]);
   // Server order / server path filter changed: positions mean other records now. Re-resolve the
   // focused row from the route's `row=` (locate= under a server sort), else fall back to row 0.
   const orderKey = serverSorted

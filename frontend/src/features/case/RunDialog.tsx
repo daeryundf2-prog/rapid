@@ -8,6 +8,7 @@ import { ErrorText } from "./ErrorText";
 import { Modal } from "./Modal";
 import { ReasonButton } from "./ReasonButton";
 import { RunOptionsFields } from "./RunOptionsFields";
+import { RunPlanGroupsField } from "./RunPlanGroupsField";
 import { buildRunBody, DEFAULT_RUN_FORM, firstRunFormError, type RunForm, validateRunForm } from "./runForm";
 
 function messageOf(error: unknown): string {
@@ -148,6 +149,8 @@ export function RunDialog({
             </>
           }
         />
+
+        <RunPlanGroupsField form={form} onChange={(skipGroups) => set("skipGroups", skipGroups)} />
 
         {submitError && <ErrorText>{submitError}</ErrorText>}
         <div className="case-actions">

@@ -85,7 +85,7 @@ export function citationText(row: GridRow, runId?: string | null): string {
   return parts.join(" ");
 }
 
-async function copyText(text: string): Promise<void> {
+export async function copyText(text: string): Promise<void> {
   if (navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(text);
     return;

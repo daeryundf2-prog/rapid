@@ -9,7 +9,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { announce, DisabledReason } from "../../a11y";
 import { type AnalysisState, isAnalysisActive } from "../../api/analyses";
-import { getRunSummary } from "../../api/runs";
+import { ApiError } from "../../api/client";
+import { useRunPlan } from "../../api/runPlan";
+import { getRunSummary, normalizeRunStatus, RETRYABLE_RUN_STATUSES } from "../../api/runs";
 import { RUN_MODE_LABEL, runDisplayName } from "../../app/collections";
 import { CommandButton } from "../../commands/CommandButton";
 import { useCommandState } from "../../commands/registry";
@@ -17,7 +19,7 @@ import { StatusBadge, statusLabel } from "../../components/Badge";
 import { chipToneOf, ToneChip } from "../../components/ToneChip";
 import { Icon } from "../../icons";
 import { serializeRoute } from "../../router";
-import { formatElapsed, progressText as runProgressText } from "../../shell/StatusBar";
+import { formatElapsed, progressText as runProgressText, staleText } from "../../shell/StatusBar";
 import { useRoute, useRuns, useTimezone } from "../../state/hooks";
 import { isRunActive } from "../../state/slices/runs";
 import { useAppStore } from "../../state/store";
@@ -40,7 +42,9 @@ import { useAnalyses } from "../analysis/store";
 import { DisclosuresCard } from "../dashboard/cards";
 import { disclosureDigest, disclosureItems, runWarnings } from "../dashboard/disclosures";
 import { formatCount } from "../grid/gridUtils";
+import { RunPlanTable } from "./RunPlanTable";
 import { stepNameLabel, stepStatusLabel, stepWarningLabel } from "./stepLabels";
+import { useNow } from "./useNow";
 import "../analysis/analysis.css";
 import "../dashboard/dashboard.css";
 import "./stages.css";
@@ -58,17 +62,7 @@ function elapsedOf(
   return Number.isFinite(end) ? formatElapsed(end - start) : "—";
 }
 
-/** Current time, ticking every second while `active` (run elapsed clocks). */
-export function useNow(active: boolean): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!active) return;
-    setNow(Date.now());
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [active]);
-  return now;
-}
+export { useNow };
 
 /** Runs listed before "더 보기" in the 처리 panel (the routed run is always listed). */
 export const RECENT_RUN_COUNT = 5;
@@ -315,9 +309,10 @@ export function stepNoteText(step: Record<string, unknown>): string {
 
 /**
  * 처리 계획 (visual-polish S8): the run summary's steps as a full table in Korean — 단계 · 상태 ·
- * 건수 · 비고 — with a status tally above it. It fills the page until the P2 group/task table.
+ * 건수 · 비고 — with a status tally above it: the fallback of a run without a plan (written before
+ * R4 V1). With a plan (`planned`) only the 공개 사항 digest is left here.
  */
-function StepList({ runId }: { runId: string }) {
+function StepList({ runId, planned = false }: { runId: string; planned?: boolean }) {
   const summary = useQuery({
     queryKey: ["run-summary", runId],
     queryFn: () => getRunSummary(runId),
@@ -326,6 +321,14 @@ function StepList({ runId }: { runId: string }) {
   const steps = (summary.data?.steps ?? []) as Array<Record<string, unknown>>;
   const disclosures = disclosureItems(summary.data);
   const warnings = runWarnings(summary.data);
+  if (planned) {
+    return disclosures.length || warnings.length ? (
+      <details className="process-plan-disclosures" data-testid="process-disclosures">
+        <summary>{disclosureDigest(summary.data)}</summary>
+        <DisclosuresCard items={disclosures} warnings={warnings} />
+      </details>
+    ) : null;
+  }
   const text = (v: unknown) => (typeof v === "string" || typeof v === "number" ? String(v) : "");
   const timed = steps.some((step) => text(step.elapsed_s ?? step.duration_s ?? step.elapsed) !== "");
   const tally = new Map<string, number>();
@@ -545,8 +548,12 @@ export function ProcessPage() {
   const runId = route.runId;
   const { analyses, unavailable } = useAnalyses(runId);
   const now = useNow(isRunActive(currentRun));
+  const plan = useRunPlan(runId ?? null, currentRun?.status);
   if (!runId) return <p className="pane-empty">케이스를 먼저 선택하세요.</p>;
   const run = currentRun;
+  const runStatus = normalizeRunStatus(run?.status);
+  const active = isRunActive(run);
+  const retryable = RETRYABLE_RUN_STATUSES.has(runStatus);
   return (
     <section className="stage-page" aria-labelledby="process-title" data-testid="process-page">
       <h2 id="process-title">처리</h2>
@@ -555,8 +562,12 @@ export function ProcessPage() {
         {run ? (
           <dl className="stage-dl">
             <dt>상태</dt>
-            <dd>
+            <dd data-testid="process-run-status">
               <StatusBadge status={String(run.status)} />
+              {runStatus === "interrupted" ? <span className="process-run-note"> · 서버 재시작</span> : null}
+              {staleText(run, now) ? (
+                <span className="process-run-note is-warn"> · {staleText(run, now)}</span>
+              ) : null}
             </dd>
             <dt>모드</dt>
             <dd>{RUN_MODE_LABEL[String(run.request?.mode ?? "")] ?? run.request?.mode ?? "—"}</dd>
@@ -574,12 +585,37 @@ export function ProcessPage() {
         ) : (
           <p className="analysis-desc">런 정보를 불러오는 중…</p>
         )}
-        <div className="analysis-actions">
-          <CommandButton command="case.cancel" label="런 취소" />
-          <CommandButton command="case.retry" label="런 다시 실행" />
-        </div>
+        {/* Run controls (R4 V1): 모두 취소 / 마치기 while it runs; 이어서 실행 (completed tasks
+            reused) / 처음부터 다시 after a failure, a cancel or a server restart. */}
+        {active || retryable ? (
+          <div className="analysis-actions" data-testid="process-run-actions">
+            {active ? (
+              <>
+                <CommandButton command="run.plan.cancelAll" label="모두 취소" testId="process-cancel-all" />
+                <CommandButton command="run.plan.finish" label="마치기" testId="process-finish" />
+              </>
+            ) : (
+              <>
+                <CommandButton
+                  command="run.resume"
+                  label="이어서 실행"
+                  variant="primary"
+                  testId="process-resume"
+                />
+                <CommandButton command="case.retry" label="처음부터 다시" testId="process-restart" />
+              </>
+            )}
+          </div>
+        ) : null}
       </section>
-      <StepList runId={runId} />
+      {plan.data ? <RunPlanTable key={runId} runId={runId} plan={plan.data} controls={false} /> : null}
+      {!plan.data && plan.error && !(plan.error instanceof ApiError && plan.error.status === 404) ? (
+        // A run written before R4 has no plan (404 → the step list alone); any other failure is said.
+        <p className="run-plan-stale" role="status" data-testid="run-plan-error">
+          처리 계획을 불러오지 못했습니다: {plan.error.message}
+        </p>
+      ) : null}
+      <StepList runId={runId} planned={Boolean(plan.data)} />
       <section aria-labelledby="process-analyses-heading">
         <h3 id="process-analyses-heading">추가 분석</h3>
         {unavailable ? <p className="analysis-desc">이 서버는 분석 작업을 지원하지 않습니다.</p> : null}

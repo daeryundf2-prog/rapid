@@ -695,7 +695,7 @@ export const artifactsCollection: CollectionDef = {
         : undefined,
       query.ref.kind ? query.sort : undefined,
       query.artifactTypes,
-      { ids: query.flags, grade: query.flagGrade, fields: query.fields },
+      { ids: query.flags, grade: query.flagGrade, fields: query.fields, conditions: query.rowConditions },
       { names: query.channels, groups: query.channelGroups },
     ),
   mapRow: (raw, index, ctx) => {

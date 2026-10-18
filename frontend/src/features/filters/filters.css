@@ -396,3 +396,63 @@
 .filter-chip.is-display {
   border-style: dashed;
 }
+
+/* r4 §2.3: 사건 시각 ±, 요일·시간대, 콘텐츠 유형 chips. */
+.filter-incident {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+}
+
+.filter-incident input[type="datetime-local"] {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.segmented.filter-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  height: auto;
+  margin-top: var(--space-1);
+}
+
+.segmented.filter-weekdays > button {
+  height: 24px;
+}
+
+.filter-hours {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+}
+
+.filter-content-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.filter-content-chip {
+  padding: 1px var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-table-aux);
+  cursor: pointer;
+}
+
+.filter-content-chip[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.filter-content-chip:focus-visible {
+  outline: var(--focus-width) solid var(--focus);
+  outline-offset: var(--focus-offset);
+}

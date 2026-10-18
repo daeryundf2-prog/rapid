@@ -27,6 +27,7 @@ import { EvidenceFields } from "./EvidenceFields";
 import { Modal } from "./Modal";
 import { ReasonButton } from "./ReasonButton";
 import { RunOptionsFields } from "./RunOptionsFields";
+import { RunPlanGroupsField } from "./RunPlanGroupsField";
 import { buildRunBody, DEFAULT_RUN_FORM, firstRunFormError, type RunForm, validateRunForm } from "./runForm";
 import { summarizeRunRequest } from "./runSummary";
 import {
@@ -520,6 +521,11 @@ export function CaseWizard({
               onChange={setRun}
               advanced={advanced}
               onAdvancedChange={setAdvanced}
+              idPrefix={`${baseId}-run`}
+            />
+            <RunPlanGroupsField
+              form={runForm}
+              onChange={(skipGroups) => setRun("skipGroups", skipGroups)}
               idPrefix={`${baseId}-run`}
             />
             {outputDirReason(runForm.outputDir, toRun.length) ? (

@@ -107,11 +107,12 @@ def field_matching_records(
     payload: dict[str, object],
     *,
     payload_path: Path,
-    fields: FieldFilters,
+    fields: FieldFilters | None,
     scan_cap: int = ARTIFACT_PATH_FILTER_SCAN_CAP,
+    row_filter: Callable[[Mapping[str, object]], bool] | None = None,
 ) -> set[int]:
-    """Record indices whose fields match ``fields`` (the sorted pager narrows to them)."""
-    matches = row_matcher("", None, None, fields)
+    """Record indices whose fields match ``fields`` and ``row_filter`` (the sorted pager narrows to them)."""
+    matches = row_matcher("", None, None, fields, row_filter)
     found: set[int] = set()
     for scanned, (record_index, row) in enumerate(iter_artifact_records(payload, payload_path=payload_path)):
         if scanned >= scan_cap:
@@ -159,13 +160,7 @@ def filter_artifact_page(
     needle = nfc_fold(path_contains) if path_contains else ""
     wanted_types = frozenset(artifact_types) if artifact_types else None
     wanted_channels = as_channel_filter(channels)
-    matches = row_matcher(needle, wanted_types, wanted_channels, fields)
-    if row_filter is not None:
-        base_matches = matches
-
-        def matches(row: Mapping[str, object]) -> bool:
-            return base_matches(row) and row_filter(row)
-
+    matches = row_matcher(needle, wanted_types, wanted_channels, fields, row_filter)
     rows: list[object] = []
     matched = 0
     scanned = 0
@@ -216,8 +211,10 @@ def row_matcher(
     wanted_types: frozenset[str] | None,
     wanted_channels: ChannelFilter | None = None,
     fields: FieldFilters | None = None,
+    row_filter: Callable[[Mapping[str, object]], bool] | None = None,
 ):
-    """Predicate for the ``path_contains`` (pre-folded ``needle``), ``artifact_type``, channel and exact field filters.
+    """Predicate for the ``path_contains`` (pre-folded ``needle``), ``artifact_type``, channel and exact field filters,
+    and ``row_filter`` (row conditions, analysis ``details`` filters) last.
 
     ``channel`` names match ``details.channel`` exactly; rows without one
     (other kinds, inventory rows) match only the ``none`` channel group.
@@ -232,7 +229,9 @@ def row_matcher(
             for field, values in fields.items():
                 if record_field_value(row, field) not in values:
                     return False
-        return not needle or needle in nfc_fold(row.get("path") or row.get("source_path"))
+        if needle and needle not in nfc_fold(row.get("path") or row.get("source_path")):
+            return False
+        return row_filter is None or row_filter(row)
 
     return matches
 
@@ -287,8 +286,9 @@ def filter_across_kinds(
     extra: Mapping[str, object] | None = None,
     channels: ChannelFilter | Collection[str] | None = None,
     fields: FieldFilters | None = None,
+    row_filter: Callable[[Mapping[str, object]], bool] | None = None,
 ) -> dict[str, object]:
-    """Page filtered rows across kinds (``sources`` order) as one collection.
+    """Page filtered rows across kinds (``sources`` order) as one collection (``row_filter``: row conditions).
 
     ``rows_for(kind, payload, path, start)`` yields a kind's candidate rows
     from record ``start`` on (default: every record; the flag filter passes
@@ -305,7 +305,7 @@ def filter_across_kinds(
     needle = nfc_fold(path_contains) if path_contains else ""
     wanted_types = frozenset(artifact_types) if artifact_types else None
     wanted_channels = as_channel_filter(channels)
-    matches = row_matcher(needle, wanted_types, wanted_channels, fields)
+    matches = row_matcher(needle, wanted_types, wanted_channels, fields, row_filter)
     kinds = [kind for kind, _payload, _path in sources]
     resume = parse_cross_kind_after(after)
     start_pos, start_index, matched = 0, 0, 0
@@ -411,8 +411,12 @@ def filter_files_by_category(
     limit: int,
     collection: str = "candidates",
     scan_cap: int = ARTIFACT_PATH_FILTER_SCAN_CAP,
+    row_filter: Callable[[Mapping[str, object]], bool] | None = None,
+    rows: Sequence[object] | None = None,
 ) -> dict[str, object]:
-    """Files page of ``collection`` rows whose ``categories`` intersect ``categories``.
+    """Files page of ``collection`` rows whose ``categories`` intersect ``categories``
+    (no ``categories``: every row) and, with ``row_filter``, that pass it (row conditions).
+    ``rows`` replaces ``payload[collection]`` (rows already joined with NTFS times).
 
     ``collection`` is ``candidates`` (default) or ``inventory``. The rows are
     already in memory, so the scan runs to the end (or ``scan_cap``) and
@@ -422,9 +426,8 @@ def filter_files_by_category(
     holds only ``collection``'s rows (the other list is dropped).
     """
     wanted = frozenset(categories)
-    source = payload.get(collection)
-    source = source if isinstance(source, list) else []
-    rows: list[object] = []
+    source: Sequence[object] = rows if rows is not None else (payload.get(collection) if isinstance(payload.get(collection), list) else [])  # type: ignore[assignment]
+    page_rows: list[object] = []
     matched = 0
     scanned = 0
     exhausted = True
@@ -433,30 +436,33 @@ def filter_files_by_category(
             exhausted = False
             break
         scanned += 1
-        values = file_row_categories(row, collection)
-        if not values or wanted.isdisjoint(values):
+        if wanted:
+            values = file_row_categories(row, collection)
+            if not values or wanted.isdisjoint(values):
+                continue
+        if row_filter is not None and not (isinstance(row, Mapping) and row_filter(row)):
             continue
-        if matched >= offset and (limit <= 0 or len(rows) < limit):
-            rows.append({**row, "record_index": record_index})
+        if matched >= offset and (limit <= 0 or len(page_rows) < limit):
+            page_rows.append({**row, "record_index": record_index})
         matched += 1
     total = matched if exhausted else None
-    has_more = (offset + len(rows) < matched) if limit > 0 else False
+    has_more = (offset + len(page_rows) < matched) if limit > 0 else False
     page = files_page_base(payload, collection)
-    page[collection] = rows
+    page[collection] = page_rows
     page["record_count"] = len(source)
     page["matched"] = total
     page["pagination"] = {
         "collection": collection,
         "offset": offset,
         "limit": limit,
-        "returned": len(rows),
+        "returned": len(page_rows),
         "total": total,
         "matched": total,
-        "next_offset": offset + len(rows) if has_more else None,
+        "next_offset": offset + len(page_rows) if has_more else None,
         "previous_offset": max(0, offset - limit) if offset > 0 and limit > 0 else None,
         "has_more": has_more or not exhausted,
         "filtered": True,
-        "categories": sorted(wanted),
+        "categories": sorted(wanted) if wanted else None,
         "scanned": scanned,
         "truncated": not exhausted,
     }

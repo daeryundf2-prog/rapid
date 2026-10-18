@@ -44,6 +44,9 @@ interface DerivedState {
   rebuilding: string | null;
   /** The row opened from the pane while the viewer still shows it on the path it was opened by. */
   active: ActiveDerivedOrigin | null;
+  /** The value panel shows the 연결 그래프 (r4 §2.3) instead of the original-row list. */
+  graphMode: boolean;
+  setGraphMode: (on: boolean) => void;
   select: (selection: DerivedSelection | null) => void;
   setLoadMore: (loader: (() => void) | null) => void;
   setFocusRows: (focus: (() => void) | null) => void;
@@ -63,6 +66,8 @@ export const useDerivedStore = create<DerivedState>()((set) => ({
   focusRows: null,
   rebuilding: null,
   active: null,
+  graphMode: false,
+  setGraphMode: (graphMode) => set({ graphMode }),
   select: (selected) => set({ selected }),
   setLoadMore: (loadMore) => set({ loadMore }),
   setFocusRows: (focusRows) => set({ focusRows }),

@@ -19,6 +19,7 @@ __all__ = [
     "build_disclosure_section",
     "build_key_hit_rows",
     "build_markdown_report",
+    "build_plan_section",
 ]
 
 
@@ -69,10 +70,58 @@ def apply_report_disclosures(markdown: str, summary_payload: Mapping[str, object
     markdown = _DOC_MATCH_LINE_RE.sub(lambda match: f"- 문서 키워드 일치(후보 중): {match.group(1)}", markdown)
     markdown = markdown.replace("Deep - uncapped extraction", "Deep - extraction without size limits")
     section = build_disclosure_section(disclosures)
+    plan_section = build_plan_section(summary_payload.get("plan"))
+    if plan_section:
+        section = section.rstrip("\n") + "\n\n" + plan_section
     anchor = "\n## Mode profile"
     if anchor in markdown:
         return markdown.replace(anchor, "\n" + section + anchor, 1)
     return markdown.rstrip("\n") + "\n\n" + section
+
+
+PLAN_STATUS_TEXT = {"skipped": "건너뜀", "cancelled": "취소", "partial": "일부 완료"}
+PLAN_OUTCOME_TEXT = {"complete": "전부 완료", "partial": "부분 완료", "cancelled": "모두 취소", "failed": "실패"}
+PLAN_OPTION_REASONS = frozenset({"옵션 꺼짐", "케이스 DB 꺼짐", "폴더 입력"})
+
+
+def build_plan_section(plan: object) -> str:
+    """"건너뛴·취소된 처리" section (plan P2 U-P2-6): every task the examiner skipped or cancelled."""
+    if not isinstance(plan, Mapping):
+        return ""
+    rows: list[str] = []
+    for group in plan.get("groups") or []:
+        if not isinstance(group, Mapping):
+            continue
+        for task in group.get("tasks") or []:
+            if not isinstance(task, Mapping):
+                continue
+            status = str(task.get("status") or "")
+            if status not in PLAN_STATUS_TEXT or task.get("reason") in PLAN_OPTION_REASONS:
+                continue
+            requested = task.get("requested_by") if isinstance(task.get("requested_by"), Mapping) else {}
+            who = f"{requested.get('actor', '')} · {requested.get('at', '')}" if requested else "-"
+            rows_text = f"{int(task.get('artifact_count') or 0):,}" if status == "partial" else "-"
+            rows.append(
+                f"| {group.get('label')} | {task.get('label')} | {PLAN_STATUS_TEXT[status]} | {rows_text} |"
+                f" {task.get('reason') or ''} | {who} |"
+            )
+    counts = plan.get("counts") if isinstance(plan.get("counts"), Mapping) else {}
+    tasks = counts.get("tasks") if isinstance(counts.get("tasks"), Mapping) else {}
+    outcome = str(plan.get("outcome") or "")
+    if not rows and outcome in {"", "complete"}:
+        return ""
+    lines = [
+        "## 건너뛴·취소된 처리 / Skipped and cancelled processing",
+        "",
+        f"- 처리 결과: {PLAN_OUTCOME_TEXT.get(outcome, outcome or '-')}"
+        f" (태스크 {tasks.get('total', 0)} · 완료 {tasks.get('completed', 0)} · 일부 {tasks.get('partial', 0)}"
+        f" · 건너뜀 {tasks.get('skipped', 0)} · 취소 {tasks.get('cancelled', 0)} · 실패 {tasks.get('failed', 0)})",
+        "- 취소·건너뛰기는 이미 쓴 출력을 지우지 않습니다. 일부 완료 태스크의 행은 취소 시점까지 수집된 것입니다.",
+        "",
+    ]
+    if rows:
+        lines.extend(["| 그룹 | 태스크 | 상태 | 남은 행 | 사유 | 요청(누가·언제) |", "|---|---|---|---|---|---|", *rows, ""])
+    return "\n".join(lines)
 
 
 def build_disclosure_section(disclosures: Mapping[str, object]) -> str:

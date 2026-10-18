@@ -1,6 +1,26 @@
 import { api } from "./client";
 
-export type RunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+export type RunStatus = "queued" | "running" | "completed" | "failed" | "cancelled" | "interrupted";
+
+/**
+ * One spelling for run / task states: old state files wrote `canceled`; the server now writes
+ * `cancelled` (R4 V1). Compare and display statuses only through this.
+ */
+export function normalizeRunStatus(status: unknown): string {
+  const text = typeof status === "string" ? status.trim().toLowerCase() : "";
+  return text === "canceled" ? "cancelled" : text;
+}
+
+/** Run states that "이어서 실행" / "처음부터 다시" accept (`POST /retry`). */
+export const RETRYABLE_RUN_STATUSES: ReadonlySet<string> = new Set(["failed", "cancelled", "interrupted"]);
+
+/** Run states whose `/tree` lists the finished providers before any summary exists (R4 V1 live tree). */
+export const LIVE_TREE_STATUSES: ReadonlySet<string> = new Set([
+  "queued",
+  "running",
+  "interrupted",
+  "cancelled",
+]);
 
 export interface RunRequest {
   root?: string;
@@ -16,6 +36,8 @@ export interface RunListItem {
   updated_at?: string;
   request?: RunRequest;
   origin?: string;
+  /** The run this one retries (이어서 실행 / 처음부터 다시), when it is a retry. */
+  retry_of_run_id?: string | null;
 }
 
 export interface RunJob extends RunListItem {
@@ -174,7 +196,10 @@ export interface TreeNode {
   artifact_type?: string;
   category?: string;
   /** Analysis nodes (`analysis:<kind>`): newest job state, null = never ran (plan analysis-workbench-p1 §3.3). */
-  state?: { status?: string; finished_at?: string | null } | null;
+  state?: { status?: string; finished_at?: string | null } | string | null;
+  /** Live run (R4 V1): the kind cannot be read yet; `reason` says why ("처리 중 (그룹 이벤트 로그)"). */
+  disabled?: boolean;
+  reason?: string;
   /**
    * Analysis nodes: newest completed job; R3 §3.3 sub-view counts ride along (`source_counts` of
    * ntfs-meta, `source_in_use_counts` (`timestamp-mismatch:in-use` / `:deleted`), `kind_counts` of carve).
@@ -268,12 +293,27 @@ export interface TreeFlagsSection {
   versions?: Record<string, string | number>;
 }
 
+/**
+ * `/tree` `live` block (R4 V1): the run has no summary yet (running / interrupted / cancelled
+ * before the report) and the tree lists only the finished providers' kinds.
+ */
+export interface RunTreeLive {
+  run_status?: string;
+  partial?: boolean;
+  available_kinds?: string[];
+  pending_kinds?: string[];
+  /** Korean banner sentence ("런 진행 중 · 완료된 그룹만 표시 · 검색/타임라인은 마무리 후"). */
+  message?: string;
+}
+
 export interface RunTree {
   run_id: string;
   root: { label?: string; mode?: string; status?: string };
   nodes: TreeNode[];
   /** Absent: the run has no triage-flags analysis yet. */
   flags?: TreeFlagsSection;
+  /** Present only while browsing a run that has no summary yet (R4 V1). */
+  live?: RunTreeLive | null;
 }
 
 export function getRunTree(runId: string): Promise<RunTree> {
@@ -351,6 +391,9 @@ export interface RunCreateBody {
   hide_known_good?: boolean;
   known_good_max_hash_bytes?: number;
   wait?: boolean;
+  /** R4 V1: processing groups / tasks left out of the run plan (`GET /run-plan/preview` ids). */
+  skip_groups?: string[];
+  skip_tasks?: string[];
 }
 
 export function createRun(body: RunCreateBody): Promise<RunJob> {
@@ -452,6 +495,8 @@ export interface ArtifactsQuery {
   channel?: string[];
   /** Event-log channel groups (repeated `channel_group=`: security … other, none, services). */
   channel_group?: string[];
+  /** Row conditions (r4 §2.3): `from`, `to`, `weekday`, `hours`, `offhours`, `tz`, `partial`, `content`, `geo`. */
+  conditions?: Record<string, string | string[]>;
 }
 
 export function artifactsQueryString(query: ArtifactsQuery): string {
@@ -467,6 +512,9 @@ export function artifactsQueryString(query: ArtifactsQuery): string {
   for (const value of query.service ?? []) params.append("service", value);
   for (const channel of query.channel ?? []) params.append("channel", channel);
   for (const group of query.channel_group ?? []) params.append("channel_group", group);
+  for (const [key, value] of Object.entries(query.conditions ?? {})) {
+    for (const item of Array.isArray(value) ? value : [value]) params.append(key, item);
+  }
   if (query.sort) {
     params.set("sort", query.sort);
     params.set("order", query.order ?? "asc");

@@ -24,6 +24,7 @@ import {
 import { announce } from "../../a11y";
 import { ApiError } from "../../api/client";
 import { CommandButton } from "../../commands/CommandButton";
+import type { Route } from "../../router";
 import { useRoute, useTimezone } from "../../state/hooks";
 import { formatGridTime } from "../../utils/time";
 import {
@@ -38,6 +39,7 @@ import {
   fetchDerivedValueRows,
   isDerivedTable,
 } from "./api";
+import { DerivedGraph } from "./DerivedGraph";
 import { useDerivedStore } from "./store";
 import {
   DERIVED_COLUMNS,
@@ -100,6 +102,8 @@ function DerivedTablePane() {
 
   const selected = useDerivedStore((s) => s.selected);
   const select = useDerivedStore((s) => s.select);
+  const graphMode = useDerivedStore((s) => s.graphMode);
+  const setGraphMode = useDerivedStore((s) => s.setGraphMode);
   const selectedHere = selected && selected.runId === runId && selected.table === table ? selected : null;
 
   // A new table (or case) mounts a new pane (keyed below), so it starts clean: the new route's
@@ -169,7 +173,9 @@ function DerivedTablePane() {
     return () => setLoadMore(null);
   }, [hasNextPage, loadMore, setLoadMore]);
   const focusRows = useCallback(() => {
-    rowsPanelRef.current?.querySelector<HTMLElement>("button, [tabindex='0']")?.focus();
+    rowsPanelRef.current
+      ?.querySelector<HTMLElement>("button.derived-sample, .derived-graph-node[tabindex='0'], [tabindex='0']")
+      ?.focus();
   }, []);
   useEffect(() => {
     setFocusRows(focusRows);
@@ -330,6 +336,19 @@ function DerivedTablePane() {
           </select>
         </label>
         <CommandButton command="derived.copy-citation" label="인용 복사" />
+        <div className="segmented derived-mode" role="group" aria-label="값 패널 보기">
+          <button type="button" aria-pressed={!graphMode} onClick={() => setGraphMode(false)}>
+            원본 행
+          </button>
+          <button
+            type="button"
+            aria-pressed={graphMode}
+            title="값 → 원본 행 → 그 행의 다른 식별자 값 (2단계)"
+            onClick={() => setGraphMode(true)}
+          >
+            연결 그래프
+          </button>
+        </div>
         <CommandButton command="derived.rebuild" label="다시 만들기" variant="ghost" />
       </div>
       {kindChips.length > 1 ? (
@@ -357,7 +376,7 @@ function DerivedTablePane() {
           ))}
         </div>
       ) : null}
-      <div className="derived-body">
+      <div className="derived-body" data-graph={graphMode ? "" : undefined}>
         <div className="derived-grid-wrap">
           <div
             ref={gridRef}
@@ -446,6 +465,15 @@ function DerivedTablePane() {
             }
             navigate(target);
           }}
+          onNavigate={(target) => {
+            if (target.row && selectedHere) {
+              useDerivedStore.getState().rememberOrigin(runId, target.row, {
+                table,
+                normalized: selectedHere.row.normalized,
+              });
+            }
+            navigate(target);
+          }}
         />
       </div>
     </section>
@@ -462,6 +490,7 @@ function OriginalRows({
   pendingFocus,
   onBack,
   onOpen,
+  onNavigate,
 }: {
   panelRef: RefObject<HTMLElement | null>;
   headingId: string;
@@ -472,18 +501,20 @@ function OriginalRows({
   pendingFocus: RefObject<boolean>;
   onBack: () => void;
   onOpen: (sample: DerivedSample) => void;
+  onNavigate: (route: Route) => void;
 }) {
+  const graphMode = useDerivedStore((s) => s.graphMode);
   const detail = useQuery({
     queryKey: ["derived-rows", runId, table, row?.normalized ?? ""],
     queryFn: ({ signal }) => fetchDerivedValueRows(runId, table, row?.normalized ?? "", signal),
-    enabled: Boolean(row),
+    enabled: Boolean(row) && !graphMode,
     retry: false,
   });
   const samples = detail.data?.samples ?? [];
   useEffect(() => {
     if (!pendingFocus.current || !samples.length) return;
     pendingFocus.current = false;
-    panelRef.current?.querySelector<HTMLElement>("button")?.focus();
+    panelRef.current?.querySelector<HTMLElement>("button.derived-sample")?.focus();
   }, [samples, pendingFocus, panelRef]);
 
   const onKey = (event: KeyboardEvent<HTMLElement>) => {
@@ -512,12 +543,26 @@ function OriginalRows({
       onKeyDown={onKey}
     >
       <h3 id={headingId} className="derived-rows-title">
-        원본 행{row ? ` — ${row.value}` : ""}
+        {graphMode ? "연결 그래프" : "원본 행"}
+        {row ? ` — ${row.value}` : ""}
       </h3>
       {!row ? (
-        <p className="derived-hint">값을 고르면(클릭·Space·Enter) 그 값이 나온 원본 행이 여기에 나옵니다.</p>
+        <p className="derived-hint">
+          {graphMode
+            ? "값을 고르면(클릭·Space·Enter) 값 → 원본 행 → 그 행의 다른 식별자 값을 2단계 그래프로 보여 줍니다."
+            : "값을 고르면(클릭·Space·Enter) 그 값이 나온 원본 행이 여기에 나옵니다."}
+        </p>
       ) : null}
-      {row ? (
+      {row && graphMode ? (
+        <DerivedGraph
+          runId={runId}
+          table={table}
+          normalized={row.normalized}
+          timezone={timezone}
+          onNavigate={onNavigate}
+        />
+      ) : null}
+      {row && !graphMode ? (
         <p className="derived-hint">
           {`건수 ${row.count.toLocaleString("ko-KR")} · 출처 ${Object.keys(row.families).length}개 계열 · 표본 최대 20행(계열마다 고르게)`}
         </p>
@@ -534,13 +579,13 @@ function OriginalRows({
           ))}
         </ul>
       ) : null}
-      {detail.isPending && row ? <p className="derived-hint">원본 행을 불러오는 중…</p> : null}
-      {detail.isError ? (
+      {detail.isPending && row && !graphMode ? <p className="derived-hint">원본 행을 불러오는 중…</p> : null}
+      {detail.isError && !graphMode ? (
         <p className="derived-notice" role="alert">
           {errorText(detail.error)}
         </p>
       ) : null}
-      {samples.length ? (
+      {samples.length && !graphMode ? (
         <ul className="derived-samples" aria-label="원본 행 목록 (선택하면 해당 계열 표로 이동)">
           {samples.map((sample) => {
             const text = sampleLabel(sample, timezone);
