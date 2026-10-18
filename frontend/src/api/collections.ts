@@ -63,6 +63,23 @@ function flagQuery(filter: FlagFilter | undefined): {
   };
 }
 
+/** Event-log channel filter of a listing: exact names (`channel=`) and/or group ids (`channel_group=`). */
+export interface ChannelQuery {
+  names?: readonly string[];
+  groups?: readonly string[];
+}
+
+function channelParams(query: ChannelQuery | undefined): { channel?: string[]; channel_group?: string[] } {
+  return {
+    ...(query?.names?.length ? { channel: [...query.names] } : {}),
+    ...(query?.groups?.length ? { channel_group: [...query.groups] } : {}),
+  };
+}
+
+function hasChannelQuery(query: ChannelQuery | undefined): boolean {
+  return Boolean(query?.names?.length || query?.groups?.length);
+}
+
 function hasFlagFilter(filter: FlagFilter | undefined): boolean {
   return Boolean(filter?.ids?.length || filter?.grade || hasRecordFields(filter?.fields));
 }
@@ -369,8 +386,9 @@ async function fetchCrossKindPage(
   types: string[],
   started: number,
   flags?: FlagFilter,
+  channels?: ChannelQuery,
 ): Promise<RawPage> {
-  const fl = flagQuery(flags);
+  const fl = { ...flagQuery(flags), ...channelParams(channels) };
   if (kinds?.length === 1) {
     // One kind: the ordinary kind page (offset paging, `matched`).
     const kind = kinds[0] as string;
@@ -634,13 +652,26 @@ export async function fetchArtifactsPage(
   sort?: ServerSort,
   artifactTypes?: readonly string[],
   flags?: FlagFilter,
+  channelQuery?: ChannelQuery,
 ): Promise<RawPage> {
   const started = now();
   const filter = pathContains?.trim() || undefined;
   const types = artifactTypes?.length ? [...artifactTypes] : undefined;
-  const fl = flagQuery(flags);
+  const channels = hasChannelQuery(channelQuery) ? channelQuery : undefined;
+  const fl = { ...flagQuery(flags), ...channelParams(channels) };
   if (!kind && restrictKinds) {
-    return fetchArtifactKindsPage(runId, restrictKinds, offset, limit, signal, filter, started, types, flags);
+    return fetchArtifactKindsPage(
+      runId,
+      restrictKinds,
+      offset,
+      limit,
+      signal,
+      filter,
+      started,
+      types,
+      flags,
+      channels,
+    );
   }
   if (kind) {
     const window = await artifactWindow(
@@ -674,9 +705,20 @@ export async function fetchArtifactsPage(
       ...(sortState ? { sort: sortState } : {}),
     };
   }
-  // Types or 특이사항 over every kind: one cross-kind listing (cursor paging).
-  if (types || hasFlagFilter(flags)) {
-    return fetchCrossKindPage(runId, undefined, offset, limit, signal, filter, types ?? [], started, flags);
+  // Types, channels or 특이사항 over every kind: one cross-kind listing (cursor paging).
+  if (types || channels || hasFlagFilter(flags)) {
+    return fetchCrossKindPage(
+      runId,
+      undefined,
+      offset,
+      limit,
+      signal,
+      filter,
+      types ?? [],
+      started,
+      flags,
+      channels,
+    );
   }
   if (filter) {
     // All kinds + path filter: per-kind matches from the first window only.
@@ -744,6 +786,7 @@ async function fetchArtifactKindsPage(
   started: number,
   types?: string[],
   flags?: FlagFilter,
+  channels?: ChannelQuery,
 ): Promise<RawPage> {
   const all = await artifactKindCounts(runId, signal);
   const allowed = new Set(restrict(all.map(([k]) => k)));
@@ -752,8 +795,19 @@ async function fetchArtifactKindsPage(
   if (kinds.length === 0) {
     return { rows: [], total: 0, offset, backend: "file", truncated: false, elapsedMs: 0, kinds };
   }
-  if (types || hasFlagFilter(flags)) {
-    return fetchCrossKindPage(runId, kinds, offset, limit, signal, filter, types ?? [], started, flags);
+  if (types || channels || hasFlagFilter(flags)) {
+    return fetchCrossKindPage(
+      runId,
+      kinds,
+      offset,
+      limit,
+      signal,
+      filter,
+      types ?? [],
+      started,
+      flags,
+      channels,
+    );
   }
   if (filter) {
     // Path filter: one request with every category kind (repeatable kind=), first window only.

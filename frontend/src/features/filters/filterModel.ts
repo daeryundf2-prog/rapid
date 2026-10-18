@@ -6,7 +6,9 @@
  * analysis-workbench-p1 §4):
  *  - artifacts: `path_contains` (path text / 경로 column filter), `artifact_type=`
  *               (types / 유형 column filter, repeated), `browser=` / `service=`
- *               (exact record fields of a tree node, repeated)
+ *               (exact record fields of a tree node, repeated), `channel=` / `channel_group=`
+ *               (`evt_channel` / `evt_channel_group` column filters: exact names or group ids
+ *               joined by "|"; the 이벤트 로그 channel nodes use the group filter)
  *  - analysis:  `path_contains` (path text / 경로 column filter)
  *  - search:    `extension` (repeated param; 확장자 column filter too)
  *  - timeline/files/docs/indicators: paging only, nothing server-side
@@ -182,6 +184,8 @@ export interface FilterPlan {
     path?: string;
     extension?: string[];
     artifactTypes?: string[];
+    channels?: string[];
+    channelGroups?: string[];
     flags?: string[];
     flagGrade?: Grade;
     fields?: RecordFieldFilters;
@@ -194,6 +198,23 @@ export interface FilterPlan {
   serverLabels: string[];
   /** Korean names of filters applied only to loaded rows. */
   clientLabels: string[];
+}
+
+/**
+ * Column id of the event-log channel filter (`cf=evt_channel:<names>`, not the 채널 grid column whose
+ * header filter stays a substring match on loaded rows): exact channel names joined by
+ * "|", applied server-side only (`channel=`, repeated) — never a substring match on loaded rows.
+ */
+export const CHANNEL_FILTER_COLUMN = "evt_channel";
+/** Column id of the event-log channel *group* filter (`cf=evt_channel_group:security`): server `channel_group=`. */
+export const CHANNEL_GROUP_FILTER_COLUMN = "evt_channel_group";
+
+/** `Security|System` → ["Security", "System"] (trimmed, empty parts dropped). */
+export function parseChannelFilterValue(value: string): string[] {
+  return value
+    .split("|")
+    .map((part) => part.trim())
+    .filter(Boolean);
 }
 
 /** Decide which active filters go to the API for this collection and which stay on the client. */
@@ -283,6 +304,19 @@ export function partitionFilters(
         serverColumns.push(filter);
         typeColumn = kept.length === 1 && kept[0] === filter.value.trim() ? "exact" : "contains";
       }
+    } else if (contains && filter.col === CHANNEL_FILTER_COLUMN && ref.id === "artifacts") {
+      // 이벤트 로그 채널 노드: exact channel names, sent as repeated `channel=`.
+      const channels = parseChannelFilterValue(filter.value);
+      if (channels.length) {
+        server.channels = [...new Set([...(server.channels ?? []), ...channels])];
+        serverColumns.push(filter);
+      } else clientColumns.push(filter);
+    } else if (contains && filter.col === CHANNEL_GROUP_FILTER_COLUMN && ref.id === "artifacts") {
+      const groups = parseChannelFilterValue(filter.value);
+      if (groups.length) {
+        server.channelGroups = [...new Set([...(server.channelGroups ?? []), ...groups])];
+        serverColumns.push(filter);
+      } else clientColumns.push(filter);
     } else if (contains && filter.col === "extension" && ref.id === "search") {
       const ext = normalizeExt(filter.value);
       server.extension = [...new Set([...(server.extension ?? []), ext])];
@@ -292,7 +326,11 @@ export function partitionFilters(
   if (typeColumn === "exact") serverLabels.push("유형(정확히)");
   else if (typeColumn === "contains")
     serverLabels.push(`유형(포함: ${(server.artifactTypes ?? []).length}개 유형)`);
-  if (serverColumns.some((f) => f.col !== "type")) serverLabels.push("열 필터");
+  if (server.channels?.length || server.channelGroups?.length) serverLabels.push("채널");
+  if (
+    serverColumns.some((f) => !["type", CHANNEL_FILTER_COLUMN, CHANNEL_GROUP_FILTER_COLUMN].includes(f.col))
+  )
+    serverLabels.push("열 필터");
   if (clientColumns.length) clientLabels.push("열 필터");
   return { server, serverLabels, clientLabels, clientColumns, serverColumns };
 }
@@ -323,6 +361,8 @@ export function applyFiltersToQuery(
   if (filters.statuses.length) next.reviewStatus = filters.statuses;
   if (filters.tags.length) next.tags = filters.tags;
   if (plan.server.artifactTypes) next.artifactTypes = plan.server.artifactTypes;
+  if (plan.server.channels) next.channels = plan.server.channels;
+  if (plan.server.channelGroups) next.channelGroups = plan.server.channelGroups;
   if (plan.server.path) next.pathContains = plan.server.path;
   if (plan.server.extension) next.extension = plan.server.extension;
   if (plan.server.flags) next.flags = plan.server.flags;

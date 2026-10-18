@@ -19,6 +19,7 @@ from .artifact_store import (
     artifact_record_contract_summary,
     attach_artifact_record_contracts,
 )
+from .eventlog_channels import EVENTLOG_KIND, ChannelCounter
 from .input_root import InputRoot, resolve_input_root
 from .json_safe import json_default
 from .models import ArtifactRecord
@@ -110,16 +111,19 @@ def run_artifact_collection(
         )
     artifact_type_counts = Counter()
     skip_reasons: Counter[str] = Counter()
+    collector_kind = str(getattr(collector, "collector_kind", kind))
+    channels = ChannelCounter() if collector_kind == EVENTLOG_KIND else None
     for artifact in artifacts:
         artifact_type = artifact.get("artifact_type")
         if artifact_type:
             artifact_type_counts[str(artifact_type)] += 1
+        if channels is not None:
+            channels.observe(artifact if isinstance(artifact, dict) else {})
         observe_skipped_row(artifact, skip_reasons)
         observe_parser_error_row(artifact, parser_errors, kind=kind)
     if collection_status == "completed" and artifacts and sum(skip_reasons.values()) == len(artifacts):
         collection_status = "skipped"
 
-    collector_kind = str(getattr(collector, "collector_kind", kind))
     payload = {
         "command": "artifacts",
         "kind": collector_kind,
@@ -138,6 +142,7 @@ def run_artifact_collection(
             "collection_status": collection_status,
             **collector_disclosure(collector),
             **skipped_row_summary(skip_reasons),
+            **(channels.summary() if channels is not None else {}),
         },
         "parser_errors": parser_errors,
         "artifacts": artifacts,
@@ -275,6 +280,7 @@ def stream_artifact_collection(
     annotator = StreamingArtifactAnnotator(rule_set) if rule_set is not None else None
     type_counts: Counter[str] = Counter()
     skip_reasons: Counter[str] = Counter()
+    channels = ChannelCounter() if collector_kind == EVENTLOG_KIND else None
     contract_errors: list[dict[str, object]] = []
     valid_count = 0
     invalid_count = 0
@@ -312,6 +318,8 @@ def stream_artifact_collection(
                     observe_skipped_row(adapted, skip_reasons)
                     observe_parser_error_row(adapted, parser_errors, kind=kind)
                     builder.observe(adapted)
+                if channels is not None:
+                    channels.observe(adapted if isinstance(adapted, dict) else {})
                 raw.write(_dump_row(adapted) + "\n")
                 record_count += 1
     except Exception as exc:
@@ -329,6 +337,7 @@ def stream_artifact_collection(
         contract_errors = []
         type_counts = Counter()
         skip_reasons = Counter()
+        channels = ChannelCounter() if collector_kind == EVENTLOG_KIND else None
         builder = StreamingProfileBuilder()
         annotator = StreamingArtifactAnnotator(rule_set) if rule_set is not None else None
         raw_path.write_text("", encoding="utf-8")
@@ -376,6 +385,7 @@ def stream_artifact_collection(
             **skipped_row_summary(skip_reasons),
             "artifact_record_contract_valid_count": valid_count,
             "artifact_record_contract_invalid_count": invalid_count,
+            **(channels.summary() if channels is not None else {}),
         },
         "parser_errors": parser_errors,
         "artifacts": preview,

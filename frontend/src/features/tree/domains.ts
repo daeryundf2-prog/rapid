@@ -20,6 +20,7 @@ import {
 } from "../../contracts/collection";
 import type { IconName } from "../../icons";
 import type { AnalysisNodeId } from "../analysis/kinds";
+import { CHANNEL_FILTER_COLUMN, CHANNEL_GROUP_FILTER_COLUMN } from "../filters/filterModel";
 
 export interface DomainTarget {
   collection: CollectionId;
@@ -50,6 +51,12 @@ export interface DomainTarget {
    * types, never their primary node, and left out of the domain total.
    */
   fields?: RecordFieldFilters;
+  /**
+   * Event-log channel group (`/tree` `artifacts:eventlog` `channel_groups[].id`): the count comes
+   * from that group; the node opens the kind with the `evt_channel_group` filter (server
+   * `channel_group=`).
+   */
+  channelGroup?: string;
   /** Analysis results node (collection "analysis"). */
   analysis?: AnalysisNodeId;
 }
@@ -155,6 +162,16 @@ const inventory = (category?: string): DomainTarget => ({
   ...(category ? { fileCategory: category } : {}),
 });
 const derived = (table: string): DomainTarget => ({ collection: "derived", kind: table });
+/**
+ * Event-log channel node: the server `channel_group=` filter (`cf=evt_channel_group:<id>`, group
+ * ids of core/eventlog_channels.py) — exact on the server, so the node count is the page total.
+ */
+const channelNode = (group: string): DomainTarget => ({
+  collection: "artifacts",
+  kind: "eventlog",
+  channelGroup: group,
+  cf: [{ col: CHANNEL_GROUP_FILTER_COLUMN, op: ":", value: group }],
+});
 const run = (analysis: AnalysisNodeId): DomainTarget => ({
   collection: "analysis",
   kind: analysis,
@@ -213,6 +230,26 @@ export const EMAIL_TYPE_LABELS: Readonly<Record<string, string>> = {
   "email-container-inventory": "메일 컨테이너(PST/OST)",
 };
 const EMAIL_EVIDENCE_TYPES = ["email-message", "email-attachment", "contact", "calendar-event"];
+
+/** 이벤트 로그 › channel group nodes (core/eventlog_channels.py CHANNEL_GROUPS). */
+export const EVENTLOG_CHANNEL_NODES: readonly DomainNodeDef[] = [
+  { id: "evt-ch-other", label: "기타 채널", target: channelNode("other") },
+  { id: "evt-ch-firewall", label: "방화벽", target: channelNode("firewall") },
+  { id: "evt-ch-security", label: "보안", target: channelNode("security") },
+  { id: "evt-ch-user-pnp", label: "사용자 PNP", target: channelNode("user-pnp") },
+  // A view inside 시스템 (System rows of the Service Control Manager provider).
+  { id: "evt-ch-services", label: "서비스(SCM)", target: channelNode("services") },
+  { id: "evt-ch-storage", label: "스토리지", target: channelNode("storage") },
+  { id: "evt-ch-system", label: "시스템", target: channelNode("system") },
+  { id: "evt-ch-rdp", label: "원격 데스크톱", target: channelNode("rdp") },
+  { id: "evt-ch-application", label: "응용 프로그램", target: channelNode("application") },
+  { id: "evt-ch-task-scheduler", label: "작업 스케줄러", target: channelNode("task-scheduler") },
+  // EVTX file/summary rows and records without a channel (detail: never in a total).
+  { id: "evt-ch-none", label: "채널 없음", target: channelNode("none"), detail: true },
+  { id: "evt-ch-office-alerts", label: "Office Alerts", target: channelNode("office-alerts") },
+  { id: "evt-ch-powershell", label: "PowerShell", target: channelNode("powershell") },
+  { id: "evt-ch-defender", label: "Windows Defender", target: channelNode("defender") },
+];
 
 function pickLabels(labels: Readonly<Record<string, string>>, types: string[]): Record<string, string> {
   return Object.fromEntries(types.map((type) => [type, labels[type] ?? type]));
@@ -612,6 +649,9 @@ export const DOMAINS: readonly DomainDef[] = [
       },
       { id: "evt-etl", label: "ETL 추적 파일", target: a("eventlog", ["etl-trace-file"]) },
       { id: "evt-firewall", label: "방화벽 로그", target: a("windows-system", ["firewall-log"]) },
+      // 채널별 (plan r3-os-depth §3.2 O2): Korean-sorted (Hangul before Latin), counts from `/tree`
+      // `channel_groups`, rows from the server `channel_group=` filter.
+      ...EVENTLOG_CHANNEL_NODES,
     ],
   },
   {
@@ -1140,12 +1180,18 @@ export function targetKey(
     flagGrade?: string;
     /** Exact record-field filters (`browser=` / `service=`): part of the key only when set. */
     fields?: RecordFieldFilters;
+    /** Column filters: part of the key only on event-log channel views (`evt_channel(_group)`). */
+    cf?: readonly ColumnFilter[];
   },
 ): string {
   const fieldsPart = recordFieldsKey(target.fields);
+  const cf = target.cf ?? [];
+  const channels = cf.some((f) => f.col === CHANNEL_FILTER_COLUMN || f.col === CHANNEL_GROUP_FILTER_COLUMN)
+    ? cf.map((f) => `${f.col}${f.op}${f.value}`)
+    : [];
   const flagPart = `${target.flagGrade ? `|g=${target.flagGrade}` : ""}${
     target.flags?.length ? `|f=${[...target.flags].sort().join(",")}` : ""
-  }${fieldsPart ? `|r=${fieldsPart}` : ""}`;
+  }${fieldsPart ? `|r=${fieldsPart}` : ""}${channels.length ? `|ch=${channels.sort().join(",")}` : ""}`;
   const filesCategory = target.fileScope
     ? filesInventoryCategory(target.fileCategory)
     : (target.fileCategory ?? target.category ?? "");

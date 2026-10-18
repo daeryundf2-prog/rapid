@@ -18,6 +18,11 @@ import {
   nodeStateIcon,
   nodeStateLabel,
 } from "../analysis/kinds";
+import {
+  CHANNEL_FILTER_COLUMN,
+  CHANNEL_GROUP_FILTER_COLUMN,
+  parseChannelFilterValue,
+} from "../filters/filterModel";
 import { GRADES, type Grade, ruleById } from "../flags/catalog";
 import type { CaseRoute } from "./adapter";
 import { groupByCategory, kindIcon } from "./categories";
@@ -421,6 +426,13 @@ export function domainNodeCount(target: DomainTarget, input: TreeModelInput): Do
     // The run has no records of this kind at all.
     if (!kindNode) return known(0, true);
     const zero = inventoryReason(kindNode, target.types) ?? zeroReason(kindNode);
+    if (target.channelGroup) {
+      // 이벤트 로그 › 채널별: `/tree` channel_groups (absent on outputs written before R3).
+      if (!kindNode.channel_groups) return { count: 0, disabledReason: NO_CHANNEL_COUNTS_REASON };
+      const group = kindNode.channel_groups.find((item) => item.id === target.channelGroup);
+      if (!group) return known(0, true, zero);
+      return typeof group.count === "number" ? known(group.count, true, zero) : { count: UNKNOWN_COUNT };
+    }
     if (recordFieldsKey(target.fields)) {
       const count = fieldCount(kindNode, target);
       return count === undefined ? { count: UNKNOWN_COUNT } : known(count, true, zero);
@@ -525,6 +537,9 @@ export function inventoryReason(
   }
   return parts.length ? parts.slice(0, 2).join("; ") : undefined;
 }
+/** Why the 이벤트 로그 channel nodes are empty on an output written before the channel counts (R3). */
+export const NO_CHANNEL_COUNTS_REASON =
+  "이 런의 이벤트 로그 출력에는 채널별 건수가 없습니다 — 이벤트 로그를 다시 수집하면 나타납니다";
 
 /** Why 전체 파일(인벤토리) is empty on a run whose files output predates the inventory. */
 export const NO_INVENTORY_REASON =
@@ -679,10 +694,33 @@ export function fieldChildDefs(node: DomainNodeDef, tree: RunTree | undefined): 
   return orderGroup(defs);
 }
 
-/** Tooltip of a column-filtered node: the filter is applied to the loaded rows. */
-function filteredNote(target: DomainTarget): string {
-  const filters = (target.cf ?? []).map((f) => `${f.col.replace(/^f:/, "")} ${f.op} ${f.value}`).join(", ");
-  return `불러온 행에 열 필터 적용: ${filters}`;
+/** Tooltip of a column-filtered node: channel filters run on the server, the others on the loaded rows. */
+function filteredNote(target: DomainTarget, tree: RunTree | undefined): string {
+  const isChannel = (f: ColumnFilter) =>
+    f.col === CHANNEL_FILTER_COLUMN || f.col === CHANNEL_GROUP_FILTER_COLUMN;
+  const others = (target.cf ?? []).filter((f) => !isChannel(f));
+  const parts: string[] = [];
+  const names = (target.cf ?? [])
+    .filter((f) => f.col === CHANNEL_FILTER_COLUMN)
+    .flatMap((f) => parseChannelFilterValue(f.value));
+  if (names.length) parts.push(`서버 채널 필터(정확히 일치): ${names.join(", ")}`);
+  if (target.channelGroup) {
+    const group = mergedKindNode(tree, target.kind ?? "")?.channel_groups?.find(
+      (item) => item.id === target.channelGroup,
+    );
+    const listed = group?.channels ?? [];
+    const shown = listed.slice(0, 5).join(", ") + (listed.length > 5 ? ` 외 ${listed.length - 5}개` : "");
+    parts.push(
+      target.channelGroup === "services"
+        ? "서버 채널 그룹 필터: System 채널의 Service Control Manager 공급자"
+        : `서버 채널 그룹 필터${shown ? `: ${shown}` : ""}`,
+    );
+  }
+  if (others.length) {
+    const filters = others.map((f) => `${f.col.replace(/^f:/, "")} ${f.op} ${f.value}`).join(", ");
+    parts.push(`불러온 행에 열 필터 적용: ${filters}`);
+  }
+  return parts.join(" · ");
 }
 
 /** Sum of per-grade flag counts; undefined when nothing is flagged. */
@@ -747,7 +785,7 @@ function domainNodes(input: TreeModelInput): TreeModelNode[] {
         ...(children?.length ? { children } : {}),
         ...(node.note ? { note: node.note } : {}),
         ...(node.nonEvidence ? { dimmed: true, note: NON_EVIDENCE_NOTE } : {}),
-        ...(target.cf?.length && !node.nonEvidence ? { note: filteredNote(target) } : {}),
+        ...(target.cf?.length && !node.nonEvidence ? { note: filteredNote(target, input.tree) } : {}),
         ...(recordFieldsKey(target.fields) && !node.note ? { note: fieldsNote(target) } : {}),
         ...(flagCounts && Object.values(flagCounts).some((n) => (n ?? 0) > 0) ? { flagCounts } : {}),
         ...(hiddenReason ? { hiddenReason } : {}),

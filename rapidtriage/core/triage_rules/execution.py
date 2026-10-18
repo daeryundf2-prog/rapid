@@ -53,17 +53,28 @@ SYSTEM_BINARIES = (
     "cmd.exe",
     "powershell.exe",
 )
+PREFETCH_HEADER_NAME_CHARS = 29
 SYSTEM_BINARY_DIRS = ("windows\\system32\\", "windows\\syswow64\\", "windows\\winsxs\\", "windows\\servicing\\")
 
 
 def prefetch_executable_path(row: RowView) -> str:
-    """The executable's own path among a Prefetch row's referenced files (``""`` when not listed)."""
+    """The executable's own path among a Prefetch row's referenced files (``""`` when not listed).
+
+    Reads the decoded file-metrics entries (``referenced_files[].path``, up to
+    1,000 per PF) first, then the inline ``referenced_paths`` list (rows of
+    older parser versions, or PFs whose metrics could not be decoded).
+    """
     name = row.text("executable_hint", "header_executable_name", "filename_executable_hint").lower()
     if not name:
         return ""
-    for value in as_list(row.get("referenced_paths")):
+    decoded = [item.get("path") for item in as_list(row.get("referenced_files")) if isinstance(item, dict)]
+    for value in [*decoded, *as_list(row.get("referenced_paths"))]:
+        if not value:
+            continue
         text = str(value)
-        if base_name(text) == name:
+        candidate = base_name(text)
+        # The SCCA header keeps 29 characters: a longer executable name is a prefix match.
+        if candidate == name or (len(name) >= PREFETCH_HEADER_NAME_CHARS and candidate.startswith(name)):
             start = text.find("\\")
             return text[start:] if start > 0 else text
     return ""

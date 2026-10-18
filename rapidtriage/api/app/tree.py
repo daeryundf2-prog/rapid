@@ -24,6 +24,12 @@ from ...core.artifact_domains import (
     DOMAIN_LABELS,
     artifact_type_domain,
 )
+from ...core.eventlog_channels import (
+    CHANNEL_COUNTS_KEY,
+    EVENTLOG_KIND,
+    SCM_COUNT_KEY,
+    channel_group_nodes,
+)
 from ...core.jobs import RunJobStore, read_output_json, run_output_dir
 from .analyses import ANALYSIS_RUNNER
 from .artifact_filter import record_field_value
@@ -529,6 +535,17 @@ def build_artifact_domain_groups(
             stale = kind_summary.get("stale_below_first_record_count")
             if primary and isinstance(stale, int) and not isinstance(stale, bool):
                 extra["stale_below_first_record_count"] = stale
+            # eventlog channel groups (plan r3-os-depth §3.2 O2): counts from the
+            # kind summary's raw ``channel_counts`` (absent on older outputs, so
+            # the console shows "—"); ``channels`` = exact ``channel=`` values.
+            channel_counts = kind_summary.get(CHANNEL_COUNTS_KEY)
+            if primary and kind == EVENTLOG_KIND and isinstance(channel_counts, dict):
+                extra["channel_counts"] = {
+                    str(name): int(value)
+                    for name, value in channel_counts.items()
+                    if isinstance(value, int) and not isinstance(value, bool)
+                }
+                extra["channel_groups"] = channel_group_nodes(channel_counts, kind_summary.get(SCM_COUNT_KEY))
             if flags_summary is not None:
                 if not types:
                     flag_counts = kind_flag_counts(flags_summary, kind) if primary else kind_flag_counts(flags_summary, kind, [])
