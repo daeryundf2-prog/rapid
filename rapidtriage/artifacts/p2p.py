@@ -225,8 +225,13 @@ def torrent_summary(data: bytes) -> dict[str, object]:
     fields: dict[str, object] = {}
     if isinstance(info, dict) and span is not None:
         raw = data[span[0] : span[1]]
-        fields["info_hash"] = hashlib.sha1(raw).hexdigest()  # BitTorrent v1 info-hash is SHA-1 by definition
-        if _int(info.get(b"meta version")) == 2:
+        v2 = _int(info.get(b"meta version")) == 2
+        v1 = b"pieces" in info or not v2
+        # BitTorrent v1 info-hash is SHA-1 by definition; a v2-only torrent (BEP 52, no ``pieces``) has no
+        # v1 info-hash, so none is emitted rather than a SHA-1 no client would ever announce.
+        fields["info_hash"] = hashlib.sha1(raw).hexdigest() if v1 else ""
+        fields["torrent_version"] = "hybrid" if v1 and v2 else "v2" if v2 else "v1"
+        if v2:
             fields["info_hash_v2"] = hashlib.sha256(raw).hexdigest()
         fields.update(_info_files(info))
     fields.update(
@@ -492,7 +497,7 @@ class _Met:
         if kind == 0x05:
             return name_id, self.u8()
         if kind == 0x06:
-            return name_id, self.take((self.u16() + 7) // 8)
+            return name_id, self.take(self.u16() // 8 + 1)  # eMule CTag skips (len / 8) + 1 bytes
         if kind == 0x07:
             return name_id, self.take(self.u32())
         if kind == 0x08:

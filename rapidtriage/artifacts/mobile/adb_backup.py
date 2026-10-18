@@ -28,7 +28,7 @@ import hashlib
 import tarfile
 import tempfile
 import zlib
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path, PurePosixPath
 
 from ...core.models import ArtifactRecord
@@ -44,6 +44,7 @@ MAX_HASH_BYTES = 32 * 1024 * 1024
 MAX_SQLITE_BYTES = 64 * 1024 * 1024
 MAX_SQLITE_MEMBERS = 200
 CHUNK = 1024 * 1024
+INFLATE_STEP = 64 * 1024
 DOMAIN_LABELS = {
     "_manifest": "백업 매니페스트",
     "a": "APK",
@@ -98,35 +99,67 @@ def read_header(handle) -> dict[str, object]:
 
 
 class _Inflate:
-    """File-like reader of the (optionally zlib-compressed) payload with bomb guards."""
+    """File-like reader of the (optionally zlib-compressed) payload with bomb guards.
+
+    Decompression is incremental (``max_length`` + ``unconsumed_tail``): one call never
+    produces more than the bytes asked for plus :data:`INFLATE_STEP`, so a 1 MiB chunk of a
+    zlib bomb cannot balloon into gigabytes in memory before the size / ratio guards run."""
 
     def __init__(self, handle, compressed: bool) -> None:
         self.handle = handle
         self.decoder = zlib.decompressobj() if compressed else None
-        self.buffer = b""
+        self.buffer = bytearray()
+        self.pending = b""
         self.read_in = 0
         self.produced = 0
         self.eof = False
 
-    def read(self, size: int = -1) -> bytes:
-        want = CHUNK * 4 if size is None or size < 0 else size
-        while len(self.buffer) < want and not self.eof:
+    def _next_data(self, room: int) -> bytes:
+        if self.decoder is None:
+            chunk = self.handle.read(max(room, CHUNK))
+            self.read_in += len(chunk)
+            if not chunk:
+                self.eof = True
+            return chunk
+        if not self.pending:
+            if self.decoder.eof:
+                self.eof = True
+                return b""
             chunk = self.handle.read(CHUNK)
             self.read_in += len(chunk)
             if not chunk:
                 self.eof = True
-                if self.decoder is not None:
-                    self.buffer += self.decoder.flush()
-                break
-            data = self.decoder.decompress(chunk) if self.decoder is not None else chunk
+                return self.decoder.flush()
+            self.pending = chunk
+        data = self.decoder.decompress(self.pending, max(room, INFLATE_STEP))
+        self.pending = b"" if self.decoder.eof else self.decoder.unconsumed_tail
+        return data
+
+    def read(self, size: int = -1) -> bytes:
+        want = CHUNK * 4 if size is None or size < 0 else size
+        while len(self.buffer) < want and not self.eof:
+            data = self._next_data(want - len(self.buffer))
             self.produced += len(data)
             if self.produced > MAX_TOTAL_BYTES:
                 raise AdbBackupError("해제 크기 상한을 넘었습니다(압축 폭탄 방지)")
             if self.decoder is not None and self.produced > 64 * 1024 * 1024 and self.produced > MAX_RATIO * max(self.read_in, 1):
                 raise AdbBackupError("압축 비율이 비정상입니다(압축 폭탄 방지)")
             self.buffer += data
-        out, self.buffer = self.buffer[:want], self.buffer[want:]
+        out = bytes(self.buffer[:want])
+        del self.buffer[:want]
         return out
+
+
+def member_mtime(value: object) -> str | None:
+    """ISO UTC of a tar member mtime; ``None`` for 0, negative, non-finite or out-of-range values
+    (a PAX ``mtime=1e300`` header must not raise ``OverflowError``)."""
+    try:
+        seconds = float(value)  # type: ignore[arg-type]
+        if not seconds > 0:
+            return None
+        return dt.datetime.fromtimestamp(seconds, tz=dt.timezone.utc).isoformat().replace("+00:00", "Z")
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
 
 
 def member_parts(name: str) -> tuple[str, str, str]:
@@ -163,6 +196,54 @@ def _sqlite_inventory(data: bytes) -> dict[str, object]:
         return build_android_sqlite_schema_inventory(target)
 
 
+def _member_record(
+    path: Path,
+    archive: tarfile.TarFile,
+    member: tarfile.TarInfo,
+    packages: dict[str, int],
+    sqlite_done: int,
+    android_app_data_category: Callable[[Path], str],
+    android_app_data_risk_flags: Callable[[Path, str], list[str]],
+) -> tuple[ArtifactRecord, int]:
+    """``android-backup-member`` row of one tar member (and the updated SQLite inventory count)."""
+    package, domain, relative = member_parts(member.name)
+    if package:
+        packages[package] = packages.get(package, 0) + 1
+    digest = None
+    inventory = None
+    if member.isfile() and member.size <= MAX_HASH_BYTES:
+        extracted = archive.extractfile(member)
+        data = extracted.read() if extracted is not None else b""
+        digest = hashlib.sha256(data).hexdigest()
+        if (
+            data.startswith(b"SQLite format 3\x00")
+            and member.size <= MAX_SQLITE_BYTES
+            and sqlite_done < MAX_SQLITE_MEMBERS
+        ):
+            sqlite_done += 1
+            inventory = _sqlite_inventory(data)
+    pseudo = Path("apps", package, domain, relative) if package else Path(member.name)
+    category = android_app_data_category(pseudo)
+    mtime = member_mtime(member.mtime)
+    fields: dict[str, object] = {
+        "member_name": member.name[:1000],
+        "package": package,
+        "backup_domain": domain,
+        "backup_domain_label": DOMAIN_LABELS.get(domain, domain),
+        "member_path": relative[:1000],
+        "member_type": "file" if member.isfile() else "directory" if member.isdir() else "other",
+        "size": member.size,
+        "mode": f"{member.mode:o}",
+        "member_mtime": mtime,
+        "sha256": digest,
+        "data_category": category,
+        "risk_flags": android_app_data_risk_flags(pseudo, category),
+    }
+    if inventory is not None:
+        fields["sqlite_schema_inventory"] = inventory
+    return _base(path, "android-backup-member", fields, timestamp=mtime, kind="member-modified"), sqlite_done
+
+
 def collect_adb_backup(path: Path) -> Iterator[ArtifactRecord]:
     """``android-backup`` + ``android-backup-member`` rows of one ``.ab`` (see module doc)."""
     from ..android import android_app_data_category, android_app_data_risk_flags
@@ -173,6 +254,8 @@ def collect_adb_backup(path: Path) -> Iterator[ArtifactRecord]:
     error = ""
     header: dict[str, object] = {}
     sqlite_done = 0
+    member_errors = 0
+    last_member_error = ""
     try:
         with path.open("rb") as handle:
             header = read_header(handle)
@@ -186,47 +269,18 @@ def collect_adb_backup(path: Path) -> Iterator[ArtifactRecord]:
                             if len(members) >= MAX_MEMBERS:
                                 status, error = "partial", "member-cap-reached"
                                 break
-                            package, domain, relative = member_parts(member.name)
-                            if package:
-                                packages[package] = packages.get(package, 0) + 1
-                            digest = None
-                            inventory = None
-                            if member.isfile() and member.size <= MAX_HASH_BYTES:
-                                extracted = archive.extractfile(member)
-                                data = extracted.read() if extracted is not None else b""
-                                digest = hashlib.sha256(data).hexdigest()
-                                if (
-                                    data.startswith(b"SQLite format 3\x00")
-                                    and member.size <= MAX_SQLITE_BYTES
-                                    and sqlite_done < MAX_SQLITE_MEMBERS
-                                ):
-                                    sqlite_done += 1
-                                    inventory = _sqlite_inventory(data)
-                            pseudo = Path("apps", package, domain, relative) if package else Path(member.name)
-                            category = android_app_data_category(pseudo)
-                            mtime = (
-                                dt.datetime.fromtimestamp(member.mtime, tz=dt.timezone.utc).isoformat().replace("+00:00", "Z")
-                                if member.mtime and member.mtime > 0
-                                else None
-                            )
-                            fields: dict[str, object] = {
-                                "member_name": member.name[:1000],
-                                "package": package,
-                                "backup_domain": domain,
-                                "backup_domain_label": DOMAIN_LABELS.get(domain, domain),
-                                "member_path": relative[:1000],
-                                "member_type": "file" if member.isfile() else "directory" if member.isdir() else "other",
-                                "size": member.size,
-                                "mode": f"{member.mode:o}",
-                                "member_mtime": mtime,
-                                "sha256": digest,
-                                "data_category": category,
-                                "risk_flags": android_app_data_risk_flags(pseudo, category),
-                            }
-                            if inventory is not None:
-                                fields["sqlite_schema_inventory"] = inventory
-                            members.append(_base(path, "android-backup-member", fields, timestamp=mtime, kind="member-modified"))
-                except (tarfile.TarError, zlib.error, EOFError, OSError, AdbBackupError) as exc:
+                            try:
+                                record, sqlite_done = _member_record(
+                                    path, archive, member, packages, sqlite_done, android_app_data_category, android_app_data_risk_flags
+                                )
+                            except (tarfile.TarError, zlib.error, EOFError, OSError, AdbBackupError):
+                                raise
+                            except Exception as exc:  # one malformed member never drops the backup
+                                member_errors += 1
+                                last_member_error = f"{type(exc).__name__}: {exc}"[:300]
+                                continue
+                            members.append(record)
+                except (tarfile.TarError, zlib.error, EOFError, OSError, ValueError, OverflowError) as exc:
                     status, error = "partial", f"{type(exc).__name__}: {exc}"[:300]
     except (AdbBackupError, OSError) as exc:
         status, error = "unreadable", f"{type(exc).__name__}: {exc}"[:300]
@@ -238,7 +292,24 @@ def collect_adb_backup(path: Path) -> Iterator[ArtifactRecord]:
         "package_count": len(packages),
         "packages": sorted(packages)[:200],
         "sqlite_inventoried": sqlite_done,
+        "member_error_count": member_errors,
+        "member_error_last": last_member_error,
         "coverage_status": "parsed" if status == "completed" else status,
     }
     yield _base(path, "android-backup", summary, timestamp=None, kind="")
     yield from members
+
+
+def adb_backup_error_record(path: Path, exc: BaseException) -> ArtifactRecord:
+    """``android-backup`` header row for a backup whose unpacking failed unexpectedly."""
+    reason = f"adb 백업 해제 중 예기치 않은 오류로 건너뜀 — {type(exc).__name__}: {exc}"[:300]
+    fields: dict[str, object] = {
+        "status": "unreadable",
+        "status_reason": reason,
+        "member_count": 0,
+        "package_count": 0,
+        "packages": [],
+        "sqlite_inventoried": 0,
+        "coverage_status": "unreadable",
+    }
+    return _base(path, "android-backup", fields, timestamp=None, kind="")

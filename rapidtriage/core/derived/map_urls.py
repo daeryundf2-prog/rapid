@@ -182,6 +182,11 @@ def _naver_point(x_text: str, y_text: str) -> tuple[float, float, str] | None:
     return (lat, lon, "url-epsg3857-converted") if _valid(lat, lon) else None
 
 
+def _near_korea(lat: float, lon: float) -> bool:
+    """Sanity window (Korean peninsula and surrounding seas) for Naver ``x``/``y`` fallback points."""
+    return 30.0 <= lat <= 45.0 and 120.0 <= lon <= 135.0
+
+
 def _naver(path: str, query: dict[str, list[str]]) -> dict[str, object] | None:
     segments = _segments(path)
     kind = "coordinates"
@@ -207,7 +212,9 @@ def _naver(path: str, query: dict[str, list[str]]) -> dict[str, object] | None:
             break
         if segment == "place" and index + 1 < len(segments):
             kind = "place"
-            result["query"] = _text(segments[index + 1])
+            # ``/p/entry/place/<numeric id>`` is a place id, not a search text.
+            if not segments[index + 1].isdigit():
+                result["query"] = _text(segments[index + 1])
     text_query = _first(query, "query", "q")
     if text_query and not result["query"]:
         result["query"] = _text(text_query)
@@ -224,6 +231,10 @@ def _naver(path: str, query: dict[str, list[str]]) -> dict[str, object] | None:
         lng, lat = _first(query, "lng", "x"), _first(query, "lat", "y")
         if lng and lat:
             point = _naver_point(lng.strip(), lat.strip())
+            # ``x``/``y`` are also TM128/KATECH metres on old Naver links: a value that does not land in
+            # or near Korea after the EPSG:3857 / degree reading is dropped rather than misplaced.
+            if point is not None and not _near_korea(point[0], point[1]):
+                point = None
     if point is not None:
         _set_point(result, point[0], point[1], point[2])
     result["map_url_kind"] = kind

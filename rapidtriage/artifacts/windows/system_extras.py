@@ -459,15 +459,32 @@ SECRET_STORE_SEQUENCES: tuple[tuple[str, ...], ...] = (
     ("microsoft", "protect"),
 )
 SECRET_INI_LINE = re.compile(r"(?im)^(\s*(?:password|proxypassword|tunnelpassword|encryptedpassword|passphrase)\s*=).*$")
-SECRET_REG_LINE = re.compile(r'(?im)^(\s*"(?:password|proxypassword|tunnelpassword|encryptedpassword|passphrase)"\s*=).*$')
+# A .reg saved-password value, including ``hex(1):`` data continued over ``\``-terminated lines.
+SECRET_REG_LINE = re.compile(
+    r'(?im)^(\s*"(?:password|proxypassword|tunnelpassword|encryptedpassword|passphrase)"\s*=)(?:[^\r\n]*\\\r?\n)*[^\r\n]*'
+)
+# WinSCP session sections (``[Sessions\name]`` / ``[Sessions]``) mark a WinSCP INI whatever the file is called (portable copies).
+WINSCP_SESSION_SECTION = re.compile(r"(?im)^\s*\[Sessions[\\\]]")
+# FileZilla saved passwords (``<Pass encoding="base64">…</Pass>``) in site manager / recent-server exports.
+FILEZILLA_PASS_ELEMENT = re.compile(r"(?is)(<Pass\b[^>]*>).*?(</Pass\s*>)")
+# Any PEM/OpenSSH/PGP private key armour: RSA, EC, OPENSSH, ENCRYPTED, PGP … ``PRIVATE KEY( BLOCK)``.
 PRIVATE_KEY_BLOCK = re.compile(
-    r"-----BEGIN (?P<kind>(?:OPENSSH |RSA |DSA |EC |ENCRYPTED )?PRIVATE KEY)-----.*?(?:-----END (?P=kind)-----|\Z)", re.DOTALL
+    r"-----BEGIN (?P<kind>[A-Z0-9 ]{0,40}PRIVATE KEY(?: BLOCK)?)-----.*?(?:-----END (?P=kind)-----|\Z)", re.DOTALL
 )
 PPK_PRIVATE_LINES = re.compile(r"(?ims)^Private-Lines:\s*\d+\s*$.*?(?=^Private-MAC:|\Z)")
 WITHHELD_TEXT = "(비밀 값이 든 파일 — 정책상 본문을 저장하지 않음)"
 # OpenSSH default private key names (``id_rsa.pub`` etc. are public) and server host keys.
 SSH_PRIVATE_KEY_NAMES = frozenset({"id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", "id_ecdsa_sk", "id_ed25519_sk", "identity"})
 SSH_HOST_PRIVATE_KEY = re.compile(r"^ssh_host_[a-z0-9]+_key$")
+# Browser / mail / FTP credential stores withheld whole: Firefox/Thunderbird ``logins*.json`` (+ ``key3.db`` /
+# ``key4.db`` / legacy ``signons.sqlite``), Chromium ``Login Data`` and FileZilla site lists.
+SECRET_STORE_NAMES = frozenset(
+    {"key3.db", "key4.db", "signons.sqlite", "login data", "login data for account", "sitemanager.xml", "recentservers.xml"}
+)
+LOGINS_JSON_NAME = re.compile(r"^logins[\w.-]*\.json$")
+# Signal Desktop ``config.json`` holds the SQLCipher database key.
+SIGNAL_CONFIG_PARENTS = frozenset({"signal", "signal beta"})
+SECRET_FILE_SCAN_BYTES = 1024 * 1024
 
 
 def is_secret_store_path(path: Path) -> bool:
@@ -475,6 +492,10 @@ def is_secret_store_path(path: Path) -> bool:
     parts = [part.lower() for part in path.parts]
     name = parts[-1] if parts else ""
     if name in SSH_PRIVATE_KEY_NAMES or name == "wallet.dat" or name.endswith(".ppk") or SSH_HOST_PRIVATE_KEY.match(name):
+        return True
+    if name in SECRET_STORE_NAMES or LOGINS_JSON_NAME.match(name):
+        return True
+    if name == "config.json" and len(parts) > 1 and parts[-2] in SIGNAL_CONFIG_PARENTS:
         return True
     for index, part in enumerate(parts[:-1]):
         if part in WALLET_EXTENSION_CONTAINERS and index + 1 < len(parts) and parts[index + 1] in WALLET_EXTENSIONS:
@@ -491,19 +512,43 @@ def is_secret_store_path(path: Path) -> bool:
 
 def redact_secret_store_text(path: Path, text: str) -> str:
     """Document text with secrets removed: secret-store files are withheld, saved-password lines of
-    ``.ini``/``.reg`` text and private-key blocks (PEM/OpenSSH/PuTTY) are masked."""
+    WinSCP ``.ini``/``.reg`` text, FileZilla ``<Pass>`` values and private-key blocks (PEM/OpenSSH/PGP/PuTTY)
+    are masked."""
     if not text:
         return text
     if is_secret_store_path(path):
         return WITHHELD_TEXT
     redacted = text
     name = path.name.lower()
-    if name == "winscp.ini":  # only saved-session INI files: other documents keep their text
+    # Saved-session INI files only (WinSCP.ini or any .ini with ``[Sessions\…]``): other documents keep their text.
+    if name == "winscp.ini" or (name.endswith(".ini") and WINSCP_SESSION_SECTION.search(redacted)):
         redacted = SECRET_INI_LINE.sub(r"\1(비밀번호 값 — 저장하지 않음)", redacted)
     if name.endswith(".reg"):
         redacted = SECRET_REG_LINE.sub(r"\1(비밀번호 값 — 저장하지 않음)", redacted)
+    redacted = FILEZILLA_PASS_ELEMENT.sub(r"\1(비밀번호 값 — 저장하지 않음)\2", redacted)
     redacted = PRIVATE_KEY_BLOCK.sub(lambda match: f"[{match.group('kind')} — 본문 저장하지 않음]", redacted)
     return PPK_PRIVATE_LINES.sub("Private-Lines: (본문 저장하지 않음)\n", redacted)
+
+
+def file_holds_store_secret(path: Path) -> bool:
+    """A secret store (:func:`is_secret_store_path`) or a small text file whose secrets
+    :func:`redact_secret_store_text` would mask (WinSCP INI/.reg passwords, FileZilla ``<Pass>``,
+    private-key blocks): ``extract`` never copies such files verbatim."""
+    if is_secret_store_path(path):
+        return True
+    try:
+        if path.stat().st_size > SECRET_FILE_SCAN_BYTES:
+            return False
+        data = path.read_bytes()
+    except OSError:
+        return False
+    if data[:2] == b"\xfe\xff":
+        text = data.decode("utf-16", errors="replace")
+    elif data[:2] == b"\xff\xfe" or (len(data) > 1 and data[1:2] == b"\x00"):
+        text = data.decode("utf-16-le", errors="replace")
+    else:
+        text = data.decode("utf-8", errors="replace")
+    return redact_secret_store_text(path, text) != text
 
 
 # ---------------------------------------------------------------------------
@@ -1887,9 +1932,11 @@ NTFS_VOLUME_FLAGS = {
 }
 
 
-def parse_volume_record(record: bytes) -> dict[str, object]:
-    """``$VOLUME_NAME`` (0x60) and ``$VOLUME_INFORMATION`` (0x70) of MFT record 3."""
-    data = apply_fixups(record)
+def parse_volume_record(record: bytes, sector_size: int = 512) -> dict[str, object]:
+    """``$VOLUME_NAME`` (0x60) and ``$VOLUME_INFORMATION`` (0x70) of MFT record 3.
+
+    The fixup stride is the volume's ``bytes_per_sector`` (4Kn disks: 4096), not a fixed 512."""
+    data = apply_fixups(record, sector_size if sector_size in (512, 1024, 2048, 4096) else 512)
     if data is None:
         return {"volume_record_status": "invalid-file-record"}
     offset = int.from_bytes(data[0x14:0x16], "little")
@@ -1945,7 +1992,8 @@ def collect_ntfs_volume_information(root: Path, provider: str) -> Iterable[Artif
             try:
                 with mft_path.open("rb") as handle:
                     handle.seek(3 * size)
-                    fields.update(parse_volume_record(handle.read(size)))
+                    sector = fields.get("bytes_per_sector")
+                    fields.update(parse_volume_record(handle.read(size), sector if isinstance(sector, int) else 512))
             except OSError as exc:
                 fields["volume_record_status"] = f"unreadable: {type(exc).__name__}"
         if fields.get("vbr_parse_status") not in (None, "parsed") and fields.get("volume_record_status") != "parsed":

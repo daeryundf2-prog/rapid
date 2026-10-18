@@ -67,7 +67,7 @@ from ..core.models import ArtifactRecord
 from ..core.sqlite_snapshot import open_sqlite_snapshot
 from ..core.submission import compute_hashes
 from ._walk import iter_evidence_paths
-from .url_redaction import redact_text_urls, redact_url_fields, url_sha256
+from .url_redaction import redact_text_urls, redact_url, redact_url_fields, url_sha256
 
 PARSER = "cloud-sync-clients"
 PARSER_VERSION = "cloud-sync-clients-v1"
@@ -242,7 +242,8 @@ def parse_google_stub(data: bytes) -> dict[str, object]:
     email = payload.get("email")
     return {
         "doc_id": doc_id if isinstance(doc_id, str) and GOOGLE_DOC_ID_RE.fullmatch(doc_id) else None,
-        "stub_url": url if isinstance(url, str) and url.startswith("https://") else None,
+        # R5 review: ``resourcekey`` / token query values and userinfo never leave the stub (any stub type).
+        "stub_url": redact_url(url) if isinstance(url, str) and url.startswith("https://") else None,
         "email": email if isinstance(email, str) and EMAIL_RE.fullmatch(email) else None,
         "resource_key_present": bool(payload.get("resource_key")),
     }

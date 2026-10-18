@@ -87,9 +87,11 @@ CLIENT_IDS = {THUNDERBIRD: "thunderbird", WINDOWS_MAIL: "windows-mail", WINDOWS_
 
 THUNDERBIRD_PROFILES = ("appdata", "roaming", "thunderbird", "profiles")
 LIVECOMM = ("appdata", "local", "packages", "microsoft.windowscommunicationsapps_8wekyb3d8bbwe", "localstate", "indexed", "livecomm")
+LIVECOMM_PARTS = ("AppData", "Local", "Packages", "microsoft.windowscommunicationsapps_8wekyb3d8bbwe", "LocalState", "Indexed", "LiveComm")
 LIVE_MAIL = ("appdata", "local", "microsoft", "windows live mail")
 CREDENTIAL_STORE_FILES = ("logins.json", "key4.db", "key3.db", "signons.sqlite", "logins-backup.json")
-MAIL_STORE_DIRS = ("Mail", "ImapMail")
+# ``News`` holds newsgroup folders (same mbox + .msf layout); the email provider skips the whole profile.
+MAIL_STORE_DIRS = ("Mail", "ImapMail", "News")
 NON_MBOX_SUFFIXES = frozenset({".msf", ".dat", ".json", ".js", ".html", ".htm", ".sqlite", ".db", ".txt", ".ini", ".xml", ".log", ".bak", ".eml"})
 MOZ_READ = 0x0001
 MOZ_REPLIED = 0x0002
@@ -137,6 +139,44 @@ def client_mail_path_filter(root: Path) -> Callable[[Path], str]:
         return ""
 
     return owner
+
+
+def _path_key(path: Path) -> str:
+    return os.path.normcase(os.path.normpath(str(path)))
+
+
+def windows_mail_eml_paths(livecomm: Path) -> list[Path]:
+    """``.eml`` files of a Windows Mail ``LiveComm`` root in the order :meth:`EmailClientsProvider._windows_mail` reads them."""
+    return [path for account_dir in _child_dirs(livecomm) for path in _walk(account_dir) if path.suffix.lower() == ".eml"]
+
+
+def live_mail_eml_paths(live_mail: Path) -> list[Path]:
+    """``.eml`` files of a Windows Live Mail root in the order :meth:`EmailClientsProvider._live_mail` reads them."""
+    paths = sorted(live_mail.glob("*.eml"), key=lambda item: item.name.lower())
+    paths.extend(path for account_dir in _child_dirs(live_mail) for path in _walk(account_dir) if path.suffix.lower() == ".eml")
+    return paths
+
+
+def client_consumed_eml_paths(root: Path) -> set[str]:
+    """Normalised paths of the ``.eml`` files the email-clients provider parses (Windows Mail / Live Mail).
+
+    Only the first :data:`MAX_MESSAGES_PER_ROOT` messages of a client root (and the files its bounded
+    walk reaches) are read there, so the generic ``email`` provider skips exactly these and still parses
+    the rest — no message is lost when a root hits its cap."""
+    consumed: set[str] = set()
+    for user_home in iter_windows_user_homes(root):
+        roots = (
+            (user_home.joinpath(*LIVECOMM_PARTS), windows_mail_eml_paths),
+            (user_home / "AppData" / "Local" / "Microsoft" / "Windows Live Mail", live_mail_eml_paths),
+        )
+        for client_root, enumerate_paths in roots:
+            try:
+                if not client_root.is_dir():
+                    continue
+                consumed.update(_path_key(path) for path in enumerate_paths(client_root)[:MAX_MESSAGES_PER_ROOT])
+            except OSError:
+                continue
+    return consumed
 
 
 def is_extensionless_mbox(path: Path) -> bool:
@@ -360,8 +400,7 @@ class EmailClientsProvider:
             for profile in _child_dirs(profiles_dir):
                 found = True
                 yield from self._finish(self._thunderbird(_ClientRun(THUNDERBIRD, user_home.name, profile)))
-            livecomm = user_home.joinpath("AppData", "Local", "Packages", "microsoft.windowscommunicationsapps_8wekyb3d8bbwe",
-                                          "LocalState", "Indexed", "LiveComm")
+            livecomm = user_home.joinpath(*LIVECOMM_PARTS)
             if livecomm.is_dir():
                 found = True
                 yield from self._finish(self._windows_mail(_ClientRun(WINDOWS_MAIL, user_home.name, livecomm)))
@@ -693,7 +732,7 @@ class EmailClientsProvider:
             for path in _walk(account_dir):
                 lowered_parts = [part.lower() for part in path.relative_to(account_dir).parts]
                 if path.suffix.lower() == ".eml":
-                    emls.append(path)  # every .eml under the root (the email provider skips them all)
+                    emls.append(path)  # same order as windows_mail_eml_paths (the email provider skips the ones read here)
                 elif path.name.lower() == "store.vol":
                     stores.append(path)
                 elif "att" in lowered_parts[:-1]:

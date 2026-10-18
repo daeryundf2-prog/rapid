@@ -253,6 +253,16 @@ RapidTriage is a local triage and review tool, not a full commercial forensic su
 - 문서 추출 정책(R5 L2): 지갑 저장소·지갑 확장 저장소·Credentials/Vault/Protect 파일·SSH 개인키(기본 이름 `id_rsa`·`id_ed25519` 등, `ssh_host_*_key`, `.ppk`)·`wallet.dat`은 문서 본문을 `(비밀 값이 든 파일 — 정책상 본문을 저장하지 않음)`으로 대신하고, 다른 문서 안의 PEM/OpenSSH/PuTTY 개인키 블록과 `WinSCP.ini`·`.reg`의 비밀번호 값 줄은 가린다(일반 문서의 `password=` 줄은 그대로 둔다). `--extract`는 같은 파일을 복사하지 않고 매니페스트에 `secret-redacted`와 SHA-256만 남긴다.
 <!-- r5 L2 (OS, system, policy presence): end -->
 
+### R5 적대적 리뷰 후속 수정 (브랜치 `fix/r5-backend-review`)
+<!-- r5 review fixes (backend): start -->
+- **삭제·이전 비밀번호 값**: 하이브의 free/삭제 vk 셀 중 이름이 `Password`·`ProxyPassword`·`TunnelPassword`·`Passphrase`·`EncryptedPassword`인 값은 부모 키와 상관없이 `registry-value-recovery-candidate`에서 `(비밀번호 값 — 저장하지 않음)`으로 가리고 `decoded_data_preview_sha256`을 비운다. 그 데이터 문자열은 현재 PuTTY/WinSCP 비밀번호가 없어도 `registry-hive-strings` 피벗에서 뺀다. 이름이 지워졌거나 다른 이름으로 남은 값의 데이터는 알아볼 수 없어 가리지 못한다.
+- **문서 본문·추출의 비밀 파일**: Signal `config.json`, `logins*.json`·`key3.db`·`key4.db`·`signons.sqlite`, Chromium `Login Data`·`Login Data For Account`, FileZilla `sitemanager.xml`·`recentservers.xml`은 본문을 저장하지 않는다. `[Sessions\…]`/`[Sessions]` 절이 있는 모든 `.ini`의 비밀번호 줄, FileZilla `<Pass>` 값, `.reg`의 `hex(1):` 줄 이어짐까지 포함한 비밀번호 값, `PRIVATE KEY( BLOCK)` 형식의 모든 개인키(PGP 포함)를 가린다. `extract`는 이런 파일(1 MiB 이하 텍스트는 내용으로 판단)을 복사하지 않고 `secret-redacted`로 해시만 남긴다. 이름·내용이 이 규칙에 없는 비밀 파일은 여전히 문서로 읽힌다.
+- **URL 자격 증명**: `redact_url`은 `scheme://user:pass@` 사용자 정보를 `[가림]@`으로 바꾸고 `password`·`passwd`·`pwd`·`pass`·`passkey`·`refresh_token`·`id_token`·`client_secret`·`api_key`·`apikey`·`secret`·`resourcekey`·`otp` 질의 값을 가린다(URL 카빙, `location-url-candidate`, 미디어 플레이어 스트림 URL·원래 값, Google 문서 바로가기 `stub_url`). 원래 URL의 sha256은 `*_sha256`에 남는다. 목록에 없는 이름의 토큰 질의 값은 가리지 못한다.
+- **자원 한도**: PSD XMP는 앞 256 KiB만 `str.find`로 걷는다(`xmp_truncated`). adb 백업 해제는 요청 크기 + 64 KiB씩만 풀어 압축 폭탄이 메모리를 키우지 못한다. PAX `mtime` 같은 범위 밖 시각은 `member_mtime`이 비우고, 구성원 하나의 예외는 그 구성원만 건너뛴다(`member_error_count`); 해제 전체 실패도 모바일 공급자를 멈추지 않고 `android-backup` 한 행(`unreadable`)으로 남는다. EGG는 압축 블록이 구성원 상한(64 MiB)을 넘으면 읽지 않고, 아카이브당 해제 합계 512 MiB 이후 구성원은 목록만 낸다. ISO 9660은 이미지당 디렉터리 익스텐트 읽기 합계 64 MiB에서 멈추고(`directory-read-cap-reached`) 레코드 건너뛰기에 논리 블록 크기를 쓴다.
+- **메일 중복 제거**: `email` 공급자는 Windows 메일/Live Mail 루트의 `.eml` 가운데 `email-clients`가 실제로 읽은 것(루트당 메시지 상한·걷기 상한 안)만 건너뛰고 나머지는 직접 읽는다. Thunderbird `News/` 뉴스그룹 폴더도 메일 클라이언트 공급자가 읽는다. 확장자 없는 mbox 후보의 `.msf` 확인은 캐시·임시 폴더와 16자 이상 16진 이름을 건너뛴다.
+- **기타**: 네이버 지도 `x`/`y` 대체 좌표는 한반도 주변(위도 30–45, 경도 120–135) 밖이면 버린다(TM128/KATECH 값 오배치 방지). `/place/<숫자 ID>`는 검색어로 쓰지 않는다. v2 전용 토렌트(BEP 52, `pieces` 없음)는 v1 `info_hash`를 내지 않고 `torrent_version`(`v1`·`v2`·`hybrid`)을 둔다. eMule BOOLARRAY 태그 길이는 eMule과 같이 `len/8+1`로 건너뛴다. NTFS `$Volume` 레코드의 fixup 간격은 VBR `bytes_per_sector`를 쓴다(4Kn). eMule `.part.met` 0xE1(분할 형식) 버전은 레이아웃을 공개 자료로 확인하지 못해 여전히 오류 행으로 남긴다.
+<!-- r5 review fixes (backend): end -->
+
 ## 공개 미지원 (AXIOM 대비)
 <!-- r5 L4 (documentation): public non-support list: start -->
 2026-10-18 R5 재판정 기준. AXIOM Examine의 Computer 검색 항목 199개 중 아래 38개는 RapidTriage가 파서를 두지 않는다고 공개한다(매트릭스 `docs/research/axiom-parity-matrix-2026-10-17.md` Table A의 최종 열 `공개 미지원`). 대부분 서비스가 끝났거나 국내 사건에서 쓰이지 않는 앱이고, 남은 흔적은 다른 행(설치 프로그램·Prefetch·브라우저 기록·URL 분류·문서 색인·파일 인벤토리)으로 확인한다. 실제 사건에서 필요해지면 합성 픽스처와 공개 형식 자료로 개별 파서를 추가한다.

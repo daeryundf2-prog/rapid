@@ -40,6 +40,7 @@ from pathlib import Path, PureWindowsPath
 from urllib.parse import unquote, urlsplit
 
 from ...core.models import ArtifactRecord
+from ..url_redaction import redact_url_fields
 from .common import iter_windows_user_homes
 
 PARSER = "media-player"
@@ -167,7 +168,7 @@ def media_location(value: str) -> dict[str, object] | None:
             if re.match(r"^/[A-Za-z]:/", local):
                 local = local[1:]
             if parts.netloc and parts.netloc.lower() != "localhost":
-                local = "\\\\" + parts.netloc + local
+                local = "\\\\" + parts.netloc.rsplit("@", 1)[-1] + local
             local = local.replace("/", "\\")
             return _path_fields(local, url=text)
         return {
@@ -376,6 +377,8 @@ class WindowsMediaPlayersProvider:
             "confidence": "medium" if run.spec.verification != "unconfirmed" else "low",
             **(dict(extra) if extra else {}),
         }
+        # R5 review: stream URLs may carry ``user:pass@`` or token query values (raw sha256 kept).
+        redact_url_fields(details, ("media_url", "raw_value"))
         run.rows.append(
             ArtifactRecord(provider=self.name, artifact_type="media-player-recent", path=str(path), supported=True, details=details)
         )

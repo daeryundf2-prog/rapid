@@ -1048,6 +1048,8 @@ PSD_MAX_RESOURCES = 4096
 PSD_MAX_XMP_BYTES = 4 * 1024 * 1024
 PSD_MAX_HISTORY = 200
 PSD_MAX_ANCESTORS = 50
+# XMP text handed to the regex/find walk (a crafted multi-MiB packet must stay linear and bounded).
+PSD_MAX_XMP_CHARS = 256 * 1024
 
 
 def psd_structure(buf: bytes) -> dict[str, object]:
@@ -1151,8 +1153,49 @@ def html_unescape(value: str) -> str:
     return value.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", '"').replace("&apos;", "'").replace("&amp;", "&")
 
 
+def _xmp_block(text: str, open_tag: str, close_tag: str) -> str | None:
+    """Body of the first ``open_tag … close_tag`` block (``str.find`` walk, linear in ``text``)."""
+    start = text.find(open_tag)
+    if start < 0:
+        return None
+    start += len(open_tag)
+    end = text.find(close_tag, start)
+    return text[start:end] if end >= 0 else None
+
+
+def _xmp_list_items(block: str) -> Iterator[str]:
+    """``<rdf:li …/>`` / ``<rdf:li …>…</rdf:li>`` elements of a block, walked with ``str.find``."""
+    position = 0
+    while True:
+        start = block.find("<rdf:li", position)
+        if start < 0:
+            return
+        after = start + len("<rdf:li")
+        if after < len(block) and block[after] not in " \t\r\n/>":
+            position = after  # ``<rdf:lighter`` etc.
+            continue
+        tag_end = block.find(">", after)
+        if tag_end < 0:
+            return
+        if block[tag_end - 1] == "/":
+            yield block[start : tag_end + 1]
+            position = tag_end + 1
+            continue
+        close = block.find("</rdf:li>", tag_end)
+        if close < 0:
+            return
+        yield block[start : close + len("</rdf:li>")]
+        position = close + len("</rdf:li>")
+
+
 def parse_psd_xmp(text: str) -> dict[str, object]:
-    """CreatorTool, create/modify dates, document ids, ``xmpMM:History`` events and ``DocumentAncestors`` (regex, no XML parser)."""
+    """CreatorTool, create/modify dates, document ids, ``xmpMM:History`` events and ``DocumentAncestors`` (no XML parser).
+
+    Only the first :data:`PSD_MAX_XMP_CHARS` characters are read, and blocks / list items are
+    located with ``str.find`` so a crafted packet cannot make the walk quadratic."""
+    truncated = len(text) > PSD_MAX_XMP_CHARS
+    if truncated:
+        text = text[:PSD_MAX_XMP_CHARS]
     xmp: dict[str, object] = {
         "creator_tool": _xmp_value(text, "xmp:CreatorTool"),
         "create_date": _xmp_value(text, "xmp:CreateDate"),
@@ -1162,12 +1205,12 @@ def parse_psd_xmp(text: str) -> dict[str, object]:
         "original_document_id": _xmp_value(text, "xmpMM:OriginalDocumentID"),
         "instance_id": _xmp_value(text, "xmpMM:InstanceID"),
         "format": _xmp_value(text, "dc:format"),
+        "xmp_truncated": truncated,
     }
     history: list[dict[str, str]] = []
-    block = re.search(r"<xmpMM:History>(.*?)</xmpMM:History>", text, re.DOTALL)
+    block = _xmp_block(text, "<xmpMM:History>", "</xmpMM:History>")
     if block:
-        for item in re.finditer(r"<rdf:li\b([^>]*?)(/>|>(.*?)</rdf:li>)", block.group(1), re.DOTALL):
-            chunk = item.group(0)
+        for chunk in _xmp_list_items(block):
             event = {
                 key: _xmp_value(chunk, f"stEvt:{key}")
                 for key in ("action", "when", "softwareAgent", "changed", "instanceID", "parameters")
@@ -1178,9 +1221,9 @@ def parse_psd_xmp(text: str) -> dict[str, object]:
     xmp["history"] = history
     xmp["history_count"] = len(history)
     ancestors: list[str] = []
-    block = re.search(r"<photoshop:DocumentAncestors>(.*?)</photoshop:DocumentAncestors>", text, re.DOTALL)
+    block = _xmp_block(text, "<photoshop:DocumentAncestors>", "</photoshop:DocumentAncestors>")
     if block:
-        ancestors = [html_unescape(value).strip() for value in re.findall(r"<rdf:li>([^<]{1,512})</rdf:li>", block.group(1))]
+        ancestors = [html_unescape(value).strip() for value in re.findall(r"<rdf:li>([^<]{1,512})</rdf:li>", block)]
     xmp["document_ancestor_count"] = len(ancestors)
     xmp["document_ancestors"] = ancestors[:PSD_MAX_ANCESTORS]
     return xmp
