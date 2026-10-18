@@ -16,7 +16,8 @@ features added in R2/R3 ride inside their provider task):
 * ``eventlog``: ``eventlog`` (channel counts)
 * ``filesystem``: ``windows-filesystem`` (anti-forensics, $UsnJrnl/MFT
   inventory), ``windows-search-index``
-* ``web``: ``browser`` (cache, WebCache, upload candidates)
+* ``web``: ``browser`` (cache, WebCache, upload candidates, map-URL locations), ``p2p``
+  (BitTorrent clients, ``.torrent``, eMule; R5 L3)
 * ``messaging``: ``email`` (PST/ICS), ``kakaotalk-windows`` (messages and
   pictures), ``kakaotalk-macos``, ``windows-messenger``, ``mobile-export``
 * ``cloud``: ``cloud-export``, ``cloud-sync``
@@ -124,7 +125,7 @@ GROUP_CATALOG: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("execution", "실행 흔적", ("windows-execution", "windows-prefetch", "recent-files")),
     ("eventlog", "이벤트 로그", ("eventlog",)),
     ("filesystem", "파일시스템·검색 색인", ("windows-filesystem", "windows-search-index")),
-    ("web", "웹·브라우저", ("browser",)),
+    ("web", "웹·브라우저", ("browser", "p2p")),
     (
         "messaging",
         "메신저·메일",
@@ -216,6 +217,7 @@ TASK_LABELS: dict[str, str] = {
     "windows-filesystem": "파일시스템 기록",
     "windows-search-index": "Windows 검색 색인",
     "browser": "브라우저(캐시·WebCache 포함)",
+    "p2p": "P2P·토렌트(eMule 포함)",
     "email": "이메일(PST·ICS 포함)",
     "kakaotalk-windows": "카카오톡 (Windows)",
     "kakaotalk-macos": "카카오톡 (macOS)",

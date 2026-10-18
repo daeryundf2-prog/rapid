@@ -20,6 +20,7 @@ from .macos import MacOsSystemArtifactsProvider
 from .media import MediaImageProvider
 from .memory import MemoryVolatilityProvider
 from .mobile import MobileExportProvider
+from .p2p import P2PArtifactsProvider
 from .synthetic_media import SyntheticMediaProvider
 from .windows.browser import WindowsBrowserArtifactsProvider
 from .windows.eventlog import WindowsEventLogProvider
@@ -104,6 +105,7 @@ def _builtin_providers() -> list[object]:
         MemoryVolatilityProvider(),
         SyntheticMediaProvider(),
         MobileExportProvider(),
+        P2PArtifactsProvider(),
         KakaoTalkMacOsProvider(),
         KakaoTalkWindowsProvider(),
         WindowsBrowserArtifactsProvider(),

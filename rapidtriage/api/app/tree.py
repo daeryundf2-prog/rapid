@@ -75,6 +75,8 @@ ANALYSIS_NODES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("web-logs", "웹 로그·웹셸", ()),
     ("cross-case", "교차 케이스", ("cross-case",)),
     ("triage-flags", "특이사항", ("triage-flags",)),
+    # R5 L3: URL carving of page files / unallocated dumps (carved-url-candidate rows).
+    ("url-carve", "URL 카빙", ("url-carve",)),
 )
 ANALYSIS_BRIEF_COUNT_KEYS: tuple[str, ...] = ("source_counts", "source_in_use_counts", "kind_counts")
 WEB_LOG_KIND = "windows-system"
@@ -105,6 +107,7 @@ KIND_LABELS: dict[str, str] = {
     "recent-files": "최근 파일·LNK",
     "windows-remote-access": "원격 접속",
     "browser": "브라우저",
+    "p2p": "P2P·토렌트",
     "email": "이메일",
     "kakaotalk-windows": "카카오톡 (Windows)",
     "windows-messenger": "데스크톱 메신저 (Windows)",
