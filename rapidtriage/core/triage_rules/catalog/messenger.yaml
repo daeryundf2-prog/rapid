@@ -38,20 +38,42 @@ families:
   - key: direction
     label: 방향
     width: 70
+    value_labels:
+      outgoing: 발신
+      sent: 발신
+      out: 발신
+      발신: 발신
+      incoming: 수신
+      received: 수신
+      in: 수신
+      수신: 수신
+      unknown: 불명
+      불명: 불명
   - key: message_text_preview
     label: 본문
     aliases:
     - message_text
     - body
     width: 320
-  - key: attachment_name
+  - key: attachments
     semantic: attachment
     label: 첨부
     aliases:
+    - attachment_name
     - media_reference
   - key: deleted_state
     label: 삭제 여부
     width: 90
+    value_labels:
+      live: 활성
+      live-row: 활성 행
+      'false': 활성
+      deleted: 삭제됨
+      'true': 삭제됨
+      deleted-or-recovered-candidate: 삭제·복구 후보
+      candidate-marker-present: 삭제 표식 후보
+      not-decoded: 해석 안 함
+      unknown: 불명
   - key: read_state
     label: 읽음 상태
     aliases:
@@ -81,6 +103,21 @@ families:
   - key: source_path
     label: 원본 DB
     format: path
+  - key: recovery_method
+    label: 복구 방식
+  - key: source_offset
+    label: 원본 오프셋
+    format: number
+  - key: local_timestamp
+    label: 현지 시각(오프셋 없음)
+  - key: user
+    label: 사용자 프로필
+  - key: parser_version
+    label: 파서 버전
+    format: mono
+  - key: attachment_local_paths
+    semantic: path
+    label: 첨부 로컬 파일
   rules:
   - messenger.time_regression
   - messenger.server_client_skew
@@ -139,6 +176,307 @@ families:
   - key: risk_score
     label: 위험 점수
     format: number
+  rules: []
+- id: messenger-attachment
+  label: 메신저 첨부
+  types:
+  - chat-attachment
+  core_columns:
+  - key: timestamp
+    label: 시각
+    format: time
+    ts_kind: sent
+    width: 170
+  - key: service
+    label: 앱
+    aliases:
+    - app
+  - key: file_name
+    semantic: attachment
+    label: 파일 이름
+    aliases:
+    - attachment_name
+  - key: file_size
+    label: 크기
+    format: bytes
+  - key: direction
+    label: 전송 방향
+    width: 80
+    value_labels:
+      outgoing: 발신
+      sent: 발신
+      out: 발신
+      발신: 발신
+      incoming: 수신
+      received: 수신
+      in: 수신
+      수신: 수신
+      unknown: 불명
+      불명: 불명
+  - key: sender
+    semantic: person_sender
+    label: 보낸 사람
+  - key: recipient
+    semantic: person_recipient
+    label: 받는 사람
+  - key: conversation_title
+    label: 대화방
+    aliases:
+    - conversation_id
+  - key: url
+    semantic: url
+    label: 주소 (URL)
+    format: url
+  - key: sha256
+    semantic: hash
+    label: 해시 (SHA-256)
+    format: mono
+  aux_columns:
+  - key: file_path
+    semantic: path
+    label: 파일 경로
+    format: path
+  - key: mime_type
+    label: 형식 (MIME)
+  - key: signature_type
+    label: 파일 서명
+  - key: transfer_status
+    label: 전송 상태
+  - key: recovery_method
+    label: 복구 방식
+  - key: source_path
+    label: 원본
+    format: path
+  - key: source_offset
+    label: 원본 오프셋
+    format: number
+  - key: user
+    label: 사용자 프로필
+  rules:
+  - messenger.external_file_transfer
+- id: messenger-contact
+  label: 메신저 연락처
+  types:
+  - chat-contact
+  core_columns:
+  - key: service
+    label: 앱
+    aliases:
+    - app
+  - key: contact_name
+    semantic: person
+    label: 이름
+    aliases:
+    - display_name
+  - key: contact_id
+    semantic: account
+    label: 계정 ID
+    format: mono
+  - key: email
+    semantic: person
+    label: 이메일
+  - key: phone
+    semantic: person
+    label: 전화번호
+  - key: user
+    label: 사용자 프로필
+  aux_columns:
+  - key: contact_role
+    label: 역할
+  - key: recovery_method
+    label: 복구 방식
+  - key: source_path
+    label: 원본
+    format: path
+  - key: source_offset
+    label: 원본 오프셋
+    format: number
+  rules: []
+- id: messenger-app
+  label: 메신저 앱 목록
+  types:
+  - chat-app-inventory
+  core_columns:
+  - key: service
+    label: 앱
+    aliases:
+    - app
+  - key: user
+    label: 사용자 프로필
+  - key: app_version
+    label: 앱 버전
+  - key: encryption_state
+    label: 암호화 상태
+    value_labels:
+      leveldb-plaintext: 평문(LevelDB)
+      plaintext-sqlite: 평문(SQLite)
+      encrypted-tdata: 암호화(tdata)
+      encrypted-sqlcipher: 암호화(SQLCipher)
+      encrypted-or-unknown: 암호화 또는 불명
+      mixed: 혼합(평문·암호화)
+  - key: file_count
+    label: 파일 수
+    format: number
+  - key: total_bytes
+    label: 전체 크기
+    format: bytes
+  - key: message_rows
+    label: 메시지 행
+    format: number
+  - key: reason_ko
+    label: 사유
+    aliases:
+    - error
+    width: 320
+  - key: app_root
+    semantic: path
+    label: 앱 폴더
+    aliases:
+    - source_path
+    format: path
+  aux_columns:
+  - key: last_file_modified
+    label: 마지막 파일 수정
+    format: time
+    ts_kind: modified
+  - key: attachment_rows
+    label: 첨부 행
+    format: number
+  - key: contact_rows
+    label: 연락처 행
+    format: number
+  - key: encrypted_store_count
+    label: 암호화 저장소 수
+    format: number
+  - key: parse_error_count
+    label: 처리 오류 수
+    format: number
+  - key: caps_hit
+    label: 상한 도달
+  rules: []
+# Store read failures of the desktop messenger provider: 앱 · 사유 · 앱 폴더 first.
+- id: messenger-error
+  label: 메신저 처리 오류
+  types:
+  - chat-parse-error
+  core_columns:
+  - key: service
+    label: 앱
+    aliases:
+    - app
+  - key: reason_ko
+    label: 사유
+    aliases:
+    - error
+    width: 360
+  - key: app_root
+    label: 앱 폴더
+    aliases:
+    - store_path
+    - source_path
+    format: path
+  - key: error_type
+    label: 오류 종류
+  - key: source_format
+    label: 저장소 형식
+  - key: user
+    label: 사용자 프로필
+  aux_columns:
+  - key: error
+    label: 오류 원문
+  - key: source_path
+    label: 원본
+    format: path
+  - key: parser_version
+    label: 파서 버전
+    format: mono
+# r2 M2: KakaoTalk PC decryption status per profile and shared/saved pictures.
+- id: kakaotalk-app
+  label: 카카오톡 앱 인벤토리
+  types:
+  - kakaotalk-app-inventory
+  core_columns:
+  - key: profile_path
+    semantic: path
+    label: 프로필 경로
+    format: path
+  - key: status_label
+    label: 복호 상태
+    width: 110
+  - key: reason
+    label: 사유
+    width: 380
+  - key: chat_database_count
+    label: 대화 DB
+    format: number
+  - key: decrypted_database_count
+    label: 복호한 DB
+    format: number
+  - key: message_row_count
+    label: 메시지
+    format: number
+  aux_columns:
+  - key: decryption_status
+    label: 상태 코드
+    format: mono
+  - key: openssl_available
+    label: OpenSSL 사용 가능
+  - key: policy
+    label: 복호 정책
+  rules: []
+- id: kakaotalk-shared-picture
+  label: 카카오톡 공유 사진
+  types:
+  - kakaotalk-shared-picture
+  core_columns:
+  - key: download_time
+    label: 저장 시각(파일 이름)
+    format: time
+    ts_kind: saved
+    width: 170
+  - key: file_name
+    semantic: attachment
+    label: 파일 이름
+    width: 240
+  - key: location_label
+    label: 위치 종류
+  - key: download_location
+    semantic: path
+    label: 저장 위치
+    format: path
+  - key: mime
+    label: 형식(MIME)
+  - key: sha256
+    semantic: hash
+    label: 해시(SHA-256)
+    format: mono
+  - key: is_thumbnail
+    label: 썸네일
+    width: 70
+  - key: link_status
+    label: 메시지 연결
+  aux_columns:
+  - key: linked_message_id
+    label: 연결 메시지 ID
+    format: mono
+  - key: conversation_id
+    label: 대화방
+  - key: sender
+    semantic: person_sender
+    label: 보낸 사람
+  - key: message_time
+    label: 메시지 시각
+    format: time
+    ts_kind: sent
+  - key: link_method
+    label: 연결 방법
+  - key: size
+    label: 크기
+    format: bytes
+  - key: sha1
+    semantic: hash
+    label: 해시(SHA-1)
+    format: mono
   rules: []
 rules:
 - id: messenger.time_regression
@@ -289,3 +627,18 @@ rules:
   status: provisional
   params:
     gap_days: 90
+- id: messenger.external_file_transfer
+  family: messenger-attachment
+  grade: B
+  label_ko: 외부 상대에게 파일 전송
+  rationale_ko: '데스크톱 메신저에서 보낸 첨부의 받는 사람이 조직 외부 도메인(사용자 계정·내부 도메인과 다름)이거나 같은 앱의 연락처 목록에 없는 상대: 유출 경로.'
+  false_positive_ko: 협력사·고객과의 정상 업무 파일 교환, 연락처 동기화가 안 된 앱, 계정 소유자 본인 연락처만 있는 경우는 연락처 목록으로 보지 않음.
+  sources:
+  - https://attack.mitre.org/techniques/T1567/
+  - https://www.magnetforensics.com/blog/the-lesser-talked-about-messaging-apps/
+  - https://dfrws.org/presentation/digital-forensic-analysis-of-encrypted-database-files-in-instant-messaging-applications-on-windows-operating-systems/
+  version: 2
+  status: provisional
+  params:
+    internal_domains: []
+    flag_unregistered_contact: true

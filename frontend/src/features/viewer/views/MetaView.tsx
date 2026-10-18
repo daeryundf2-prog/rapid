@@ -565,6 +565,8 @@ function EntryValue({
       />
     );
   }
+  // Catalogue reading (발신 for outgoing, a Korean type name …); the raw value is the tooltip.
+  if (scalar && entry.valueLabel) return coded(entry.valueLabel);
   if (scalar) {
     switch (entry.format) {
       case "eventLevel":

@@ -25,7 +25,15 @@
  */
 
 import { captureFragmentToken } from "./api/client";
-import type { CollectionId, ColumnFilter, ReviewStatus, ServerSort } from "./contracts/collection";
+import {
+  type CollectionId,
+  type ColumnFilter,
+  RECORD_FIELD_KEYS,
+  type RecordFieldFilters,
+  type RecordFieldKey,
+  type ReviewStatus,
+  type ServerSort,
+} from "./contracts/collection";
 
 /** Workflow stages of the rail (console-ia §3), in rail order. */
 export type Stage = "intake" | "process" | "explore" | "review" | "report";
@@ -131,6 +139,8 @@ export interface Route {
   flags?: string[];
   /** 특이사항 minimum grade, URL `flag_grade=A|B|C`. */
   flagGrade?: "A" | "B" | "C";
+  /** Exact record-field filters, URL `browser=` / `service=` (repeated; artifacts server-side). */
+  fields?: RecordFieldFilters;
 }
 
 /** Collections whose `{sub}` is a kind with server sort / promoted columns (`sort=`, `cols=`). */
@@ -339,6 +349,11 @@ export function parseHash(hash: string): Route {
       if (id && !(route.flags ?? []).includes(id)) route.flags = [...(route.flags ?? []), id];
     } else if (key === "flag_grade" && (value === "A" || value === "B" || value === "C")) {
       route.flagGrade = value;
+    } else if ((RECORD_FIELD_KEYS as readonly string[]).includes(key) && value) {
+      const field = key as RecordFieldKey;
+      const item = safeDecode(value).trim();
+      const list = route.fields?.[field] ?? [];
+      if (item && !list.includes(item)) route.fields = { ...route.fields, [field]: [...list, item] };
     } else if (key === "note" && value === "1") {
       route.notes = true;
     } else if (key === "ext" && value) {
@@ -396,6 +411,9 @@ export function serializeRoute(route: Route): string {
   if (route.notes) query.push("note=1");
   if (route.flagGrade) query.push(`flag_grade=${route.flagGrade}`);
   for (const id of route.flags ?? []) query.push(`flag=${encodeURIComponent(id)}`);
+  for (const field of RECORD_FIELD_KEYS) {
+    for (const item of route.fields?.[field] ?? []) query.push(`${field}=${encodeURIComponent(item)}`);
+  }
   if (route.tz) query.push(`tz=${encodeURIComponent(route.tz)}`);
   if (route.view && route.view !== "columns") query.push(`view=${route.view}`);
   if (route.cf?.length) {

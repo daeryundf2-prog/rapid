@@ -11,6 +11,8 @@ near the top of the pretty-printed output).
 from __future__ import annotations
 
 import json
+import threading
+from collections import OrderedDict
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -24,8 +26,10 @@ from ...core.artifact_domains import (
 )
 from ...core.jobs import RunJobStore, read_output_json, run_output_dir
 from .analyses import ANALYSIS_RUNNER
+from .artifact_filter import record_field_value
 from .derived import tree_derived_node
 from .helpers import default_case_path, enrich_summary_counts, get_job, get_output_path
+from .jsonl_records import iter_artifact_records, jsonl_records_path
 from .triage_flags import kind_flag_counts, tree_flags_section
 
 SUMMARY_SCAN_BYTES = 65536
@@ -86,9 +90,11 @@ KIND_LABELS: dict[str, str] = {
     "browser": "브라우저",
     "email": "이메일",
     "kakaotalk-windows": "카카오톡 (Windows)",
+    "windows-messenger": "데스크톱 메신저 (Windows)",
     "kakaotalk-macos": "카카오톡 (macOS)",
     "mobile-export": "모바일 내보내기",
     "cloud-export": "클라우드 내보내기",
+    "cloud-sync": "클라우드 동기화 클라이언트",
     "android-apk": "Android APK",
     "media-image": "미디어 이미지",
     "synthetic-media": "합성 미디어",
@@ -99,6 +105,108 @@ KIND_LABELS: dict[str, str] = {
     "linux-system": "Linux 시스템",
     "macos-system": "macOS 시스템",
 }
+
+
+# r2 console fix M2/M4: per-value row counts and inventory notes of a few kinds,
+# read with one bounded row scan per output (cached by file signature).
+# kind -> the record field counted per value and artifact_type
+# (``field_type_counts``; the console's per-browser / per-app nodes and the
+# ``browser=`` / ``service=`` filters of ``GET /artifacts``).
+FIELD_FACET_KINDS: dict[str, str] = {"browser": "browser", "windows-messenger": "service"}
+# kind -> (inventory artifact_type, status field): rows counted by status with
+# their Korean ``reason`` (``inventory_notes``; why a typed node is empty —
+# PST tools switched off / missing, KakaoTalk key material missing).
+INVENTORY_NOTE_KINDS: dict[str, tuple[str, str]] = {
+    "email": ("email-container-inventory", "status"),
+    "kakaotalk-windows": ("kakaotalk-app-inventory", "decryption_status"),
+}
+FACET_SCAN_CAP = 1_000_000
+FACET_CACHE_SIZE = 64
+_FACET_CACHE: OrderedDict[tuple[object, ...], dict[str, Any]] = OrderedDict()
+_FACET_LOCK = threading.Lock()
+
+
+def _file_signature(path: Path | None) -> tuple[object, ...]:
+    if path is None:
+        return ()
+    try:
+        stat = path.stat()
+    except OSError:
+        return (str(path), None)
+    return (str(path), stat.st_mtime_ns, stat.st_size)
+
+
+def scan_kind_facets(payload: Mapping[str, object], payload_path: Path, kind: str) -> dict[str, Any]:
+    """``field_type_counts`` / ``inventory_notes`` of one kind output (one bounded row scan)."""
+    field = FIELD_FACET_KINDS.get(kind)
+    note = INVENTORY_NOTE_KINDS.get(kind)
+    if field is None and note is None:
+        return {}
+    by_value: dict[str, dict[str, int]] = {}
+    notes: dict[str, dict[str, Any]] = {}
+    truncated = False
+    for scanned, (_index, row) in enumerate(iter_artifact_records(payload, payload_path=payload_path)):
+        if scanned >= FACET_SCAN_CAP:
+            truncated = True
+            break
+        artifact_type = str(row.get("artifact_type") or "")
+        if field is not None:
+            value = record_field_value(row, field)
+            if value:
+                per_type = by_value.setdefault(value, {})
+                per_type[artifact_type] = per_type.get(artifact_type, 0) + 1
+        if note is not None and artifact_type == note[0]:
+            status = record_field_value(row, note[1]) or "unknown"
+            entry = notes.setdefault(
+                status,
+                {
+                    "artifact_type": artifact_type,
+                    "status": status,
+                    "status_label": record_field_value(row, "status_label") or status,
+                    "count": 0,
+                    "reason": record_field_value(row, "reason"),
+                },
+            )
+            entry["count"] += 1
+    facets: dict[str, Any] = {}
+    if field is not None:
+        facets["field_type_counts"] = {
+            field: {value: dict(sorted(types.items())) for value, types in sorted(by_value.items())}
+        }
+    if note is not None:
+        facets["inventory_notes"] = sorted(notes.values(), key=lambda item: (-int(item["count"]), str(item["status"])))
+    if truncated:
+        facets["facets_truncated"] = True
+    return facets
+
+
+def kind_facets(store: RunJobStore, run_id: str, kind: str) -> dict[str, Any]:
+    """Cached :func:`scan_kind_facets` of ``artifacts_<kind>`` (``{}`` when absent or unreadable)."""
+    if kind not in FIELD_FACET_KINDS and kind not in INVENTORY_NOTE_KINDS:
+        return {}
+    name = f"artifacts_{kind}"
+    try:
+        path = get_output_path(store, run_id, name)
+        payload = store.read_output(run_id, name)
+    except (HTTPException, RuntimeError, OSError, ValueError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    key = (kind, *_file_signature(path), *_file_signature(jsonl_records_path(payload, path)))
+    with _FACET_LOCK:
+        cached = _FACET_CACHE.get(key)
+        if cached is not None:
+            _FACET_CACHE.move_to_end(key)
+            return cached
+    try:
+        facets = scan_kind_facets(payload, path, kind)
+    except OSError:
+        return {}
+    with _FACET_LOCK:
+        _FACET_CACHE[key] = facets
+        while len(_FACET_CACHE) > FACET_CACHE_SIZE:
+            _FACET_CACHE.popitem(last=False)
+    return facets
 
 
 def read_output_key(path: Path, key: str) -> Any:
@@ -252,7 +360,10 @@ def build_run_tree(store: RunJobStore, run_id: str) -> dict[str, Any]:
             kind_summaries[kind] = {}
 
     artifacts_total = int(counts.get("artifacts") or 0)
-    artifact_groups = build_artifact_domain_groups(kind_summaries, flags_summary=flags_summary)
+    facets = {kind: kind_facets(store, run_id, kind) for kind in kind_summaries}
+    artifact_groups = build_artifact_domain_groups(
+        kind_summaries, flags_summary=flags_summary, kind_facets={kind: item for kind, item in facets.items() if item}
+    )
     if artifacts_total or artifact_groups:
         nodes.append(
             _node("artifacts", "아티팩트", artifacts_total, children=artifact_groups, collection="artifacts")
@@ -340,9 +451,15 @@ def _sum_grades(items: list[dict[str, int]]) -> dict[str, int]:
 
 
 def build_artifact_domain_groups(
-    kind_summaries: dict[str, dict[str, Any]], *, flags_summary: Mapping[str, object] | None = None
+    kind_summaries: dict[str, dict[str, Any]],
+    *,
+    flags_summary: Mapping[str, object] | None = None,
+    kind_facets: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Domain -> kind -> artifact_type nodes from :data:`ARTIFACT_DOMAIN_TABLE`.
+
+    ``kind_facets`` (:func:`kind_facets`) adds ``field_type_counts`` /
+    ``inventory_notes`` to every node of that kind (each a whole-kind value).
 
     With ``flags_summary`` (a ``triage-flags`` summary) every kind node and
     domain group carries ``flag_counts`` = flagged rows by strongest grade:
@@ -404,6 +521,7 @@ def build_artifact_domain_groups(
                 extra["skip_reasons"] = {str(reason): int(count) for reason, count in skip_reasons.items() if isinstance(count, int)}
             if isinstance(kind_summary.get("skipped_row_count"), int):
                 extra["skipped_row_count"] = int(kind_summary["skipped_row_count"])
+            extra.update((kind_facets or {}).get(kind) or {})
             # eventlog: recovered records whose id is below the first live
             # record (``evtx_record_id_position = "stale-below-first"``). The
             # tree has no details-level sub-nodes, so only the count is sent;

@@ -368,6 +368,20 @@ export function artifactTypeFamily(types: readonly string[] | undefined): string
   return undefined;
 }
 
+/** Korean reading of a messenger row's `direction` (every app's raw spelling). */
+export const MESSENGER_DIRECTION_KO: Readonly<Record<string, string>> = {
+  outgoing: "발신",
+  sent: "발신",
+  out: "발신",
+  발신: "발신",
+  incoming: "수신",
+  received: "수신",
+  in: "수신",
+  수신: "수신",
+  unknown: "불명",
+  불명: "불명",
+};
+
 export const KIND_COLUMNS: Record<string, KindColumnDef[]> = {
   eventlog: [
     { header: "레벨", keys: ["level"], width: 80 },
@@ -512,6 +526,21 @@ export const KIND_COLUMNS: Record<string, KindColumnDef[]> = {
     { header: "서비스", keys: ["service"], width: 140 },
     { header: "이벤트 유형", keys: ["event_type"], width: 140 },
     { header: "클라우드", keys: ["cloud_family"], width: 130 },
+  ],
+  // 데스크톱 메신저 group (messages · contacts · attachments mixed, r2 console fix m7): the
+  // conversation facts every row type shares; 방향 reads 발신/수신/불명.
+  "windows-messenger": [
+    { header: "앱", keys: ["service", "app"], width: 150 },
+    { header: "대화방", keys: ["conversation_title", "conversation_id"], width: 200 },
+    { header: "발화자·이름", keys: ["sender", "contact_name", "display_name"], width: 160 },
+    {
+      header: "방향",
+      keys: ["direction"],
+      width: 70,
+      display: (value) => MESSENGER_DIRECTION_KO[String(value ?? "").toLowerCase()] ?? String(value ?? ""),
+      tooltip: (details) => (details.direction ? `원래 값: ${String(details.direction)}` : ""),
+    },
+    { header: "본문·파일", keys: ["message_text_preview", "message_text", "file_name"], width: 320 },
   ],
   "kakaotalk-windows": [
     { header: "후보 종류", keys: ["candidate_kind"], width: 150 },
@@ -666,7 +695,7 @@ export const artifactsCollection: CollectionDef = {
         : undefined,
       query.ref.kind ? query.sort : undefined,
       query.artifactTypes,
-      { ids: query.flags, grade: query.flagGrade },
+      { ids: query.flags, grade: query.flagGrade, fields: query.fields },
     ),
   mapRow: (raw, index, ctx) => {
     const details = isRecord(raw.details) ? raw.details : {};

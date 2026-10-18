@@ -34,10 +34,12 @@ from .analyses import run_scope
 from .analysis_kinds import cross_case_eligibility
 from .artifact_filter import (
     annotate_page_counts,
+    field_matching_records,
     files_page_base,
     filter_across_kinds,
     filter_artifact_page,
     filter_files_by_category,
+    parse_field_filters,
 )
 from .artifact_sort import SORT_ORDERS, paginate_sorted_artifact_output
 from .dashboard import (
@@ -432,8 +434,19 @@ def build_runs_router(
         after: str | None = Query(default=None),
         flag: list[str] = Query(default=[]),
         flag_grade: str | None = Query(default=None),
+        browser: list[str] = Query(default=[]),
+        service: list[str] = Query(default=[]),
     ) -> dict[str, object]:
         """Page per-kind artifact rows; every row carries its JSONL ``record_index``.
+
+        ``browser`` / ``service`` (repeatable, exact, case-sensitive) keep only
+        rows whose ``details.browser`` / ``details.service`` equals one of the
+        values (``browser=ie-edge-legacy``: the WebCacheV01 rows;
+        ``service=Slack``: one desktop messenger app). They compose with every
+        other filter like ``artifact_type`` (``limit > 0``; an empty, over-long
+        or control-character value is a 422 with a Korean message); the
+        pagination reports ``fields``. ``/tree`` gives the matching counts
+        (``field_type_counts``).
 
         특이사항 (plan viewer-families §3.1): every row carries ``flags`` (the
         newest completed ``triage-flags`` set; ``[]`` when none) and the
@@ -480,10 +493,14 @@ def build_runs_router(
         wanted_kinds = {item.strip() for item in kind if item.strip()}
         wanted_types = frozenset(item.strip() for item in artifact_type if item.strip()) or None
         needle = path_contains.strip() if path_contains and path_contains.strip() else None
+        try:
+            fields = parse_field_filters({"browser": browser, "service": service})
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
         sort_key = sort.strip() if sort and sort.strip() else None
         flag_sort = is_flags_sort(sort_key)
         flag_query = parse_flag_query(flag, flag_grade, sort_flags=flag_sort)
-        if (wanted_types or needle or flag_query.active) and limit <= 0:
+        if (wanted_types or needle or flag_query.active or fields) and limit <= 0:
             raise HTTPException(status_code=400, detail=FILTER_LIMIT_MESSAGE)
         if flag_sort:
             if len(wanted_kinds) != 1:
@@ -501,7 +518,7 @@ def build_runs_router(
             sort_order = sort_order or "asc"
             if sort_order not in SORT_ORDERS:
                 raise HTTPException(status_code=400, detail="order must be asc or desc")
-        if (wanted_types or needle or flag_query.filtered) and not sort_key and not flag_sort and len(wanted_kinds) != 1 and limit > 0:
+        if (wanted_types or needle or flag_query.filtered or fields) and not sort_key and not flag_sort and len(wanted_kinds) != 1 and limit > 0:
             response = _artifacts_across_kinds(
                 run_id,
                 outputs,
@@ -513,6 +530,7 @@ def build_runs_router(
                 after=after,
                 join=join,
                 flag_query=flag_query,
+                fields=fields,
             )
             _attach_artifact_flags(response, join)
             return response
@@ -526,6 +544,17 @@ def build_runs_router(
                     artifact_payload = store.read_output(run_id, name)
                     kind_payloads[name.removeprefix("artifacts_")] = artifact_payload
                     if sort_key:
+                        allowed_records: set[int] | None = (
+                            set(join.require_index().matching(name.removeprefix("artifacts_"), flag_query.rule_ids, flag_query.grade))
+                            if flag_query.filtered
+                            else None
+                        )
+                        if fields:
+                            # The sort index has no field filter: narrow it to the matching records.
+                            by_field = field_matching_records(
+                                artifact_payload, payload_path=get_output_path(store, run_id, name), fields=fields
+                            )
+                            allowed_records = by_field if allowed_records is None else allowed_records & by_field
                         sorted_page = paginate_sorted_artifact_output(
                             artifact_payload,
                             run_id=run_id,
@@ -539,11 +568,7 @@ def build_runs_router(
                             path_contains=needle,
                             locate=locate,
                             artifact_types=wanted_types,
-                            allowed_records=(
-                                join.require_index().matching(name.removeprefix("artifacts_"), flag_query.rule_ids, flag_query.grade)
-                                if flag_query.filtered
-                                else None
-                            ),
+                            allowed_records=allowed_records,
                         )
                         if flag_query.filtered:
                             mark_flag_page(sorted_page, flag_query)
@@ -558,6 +583,7 @@ def build_runs_router(
                             offset=offset,
                             limit=limit,
                             artifact_types=wanted_types,
+                            fields=fields,
                             rows_source=flag_rows_source(
                                 artifact_payload,
                                 payload_path,
@@ -570,11 +596,11 @@ def build_runs_router(
                             kind_page,
                             flag_query,
                             record_count=payload_record_count(artifact_payload),
-                            other_filters=bool(needle or wanted_types),
+                            other_filters=bool(needle or wanted_types or fields),
                         )
                         artifacts[name.removeprefix("artifacts_")] = kind_page
                         continue
-                    if (needle or wanted_types) and limit > 0:
+                    if (needle or wanted_types or fields) and limit > 0:
                         artifacts[name.removeprefix("artifacts_")] = filter_artifact_page(
                             artifact_payload,
                             payload_path=get_output_path(store, run_id, name),
@@ -582,6 +608,7 @@ def build_runs_router(
                             offset=offset,
                             limit=limit,
                             artifact_types=wanted_types,
+                            fields=fields,
                         )
                         continue
                     artifacts[name.removeprefix("artifacts_")] = paginate_artifact_output(
@@ -597,7 +624,7 @@ def build_runs_router(
                     raise HTTPException(status_code=403, detail=str(exc))
                 except FileNotFoundError as exc:
                     raise HTTPException(status_code=404, detail=str(exc))
-        filtered_pages = bool(needle or wanted_types or flag_query.filtered) and limit > 0
+        filtered_pages = bool(needle or wanted_types or flag_query.filtered or fields) and limit > 0
         for kind_name, page in artifacts.items():
             if isinstance(page, dict) and kind_name in kind_payloads:
                 annotate_page_counts(page, kind_payloads[kind_name], filtered=filtered_pages)
@@ -625,6 +652,7 @@ def build_runs_router(
         after: str | None,
         join: FlagsJoin,
         flag_query: FlagQuery,
+        fields: Mapping[str, frozenset[str]] | None = None,
     ) -> dict[str, object]:
         available = [name.removeprefix("artifacts_") for name in sorted(outputs) if name.startswith("artifacts_")]
         ordered = [item for item in kinds if item in available] if kinds else available
@@ -649,6 +677,7 @@ def build_runs_router(
                 after=after,
                 rows_for=kind_rows_for_flags(join, flag_query) if flag_query.filtered else None,
                 extra={"flags": flag_query.descriptor()} if flag_query.filtered else None,
+                fields=fields,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))

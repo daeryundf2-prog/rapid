@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from rapidtriage.artifacts.windows.web_upload import (
+    CATEGORIES,
+    load_upload_patterns,
+    match_upload_url,
+)
+
 PROFILE = r"C:\Users\alice\AppData\Local\Google\Chrome\User Data\Default"
 
 
@@ -57,6 +63,35 @@ def extension(**details: object) -> dict[str, object]:
     }
     base.update(details)
     return browser_row("browser-extension", "Secure Preferences", **base)
+
+
+def upload_candidate(**details: object) -> dict[str, object]:
+    base: dict[str, object] = {
+        "timestamp": "2024-05-01T10:00:00Z",
+        "method": "GET",
+        "source_artifact_type": "browser-cache-entry",
+        "match_pattern_id": "fixture",
+    }
+    base.update(details)
+    return browser_row("web-upload-candidate", r"Cache\Cache_Data\data_1", **base)
+
+
+def pattern_candidate(url: str, method: str = "GET", **details: object) -> dict[str, object]:
+    """The ``web-upload-candidate`` row the scanner builds for ``url`` (service/category/strength
+    from ``web_upload_patterns.yaml``), so the cases follow the shipped patterns."""
+    matched = match_upload_url(url, method, load_upload_patterns())
+    assert matched is not None, f"no upload pattern matches {url}"
+    pattern, strength = matched
+    assert pattern.category in CATEGORIES
+    return upload_candidate(
+        url=url,
+        method=method,
+        service=pattern.service,
+        category=pattern.category,
+        strength=strength,
+        match_pattern_id=pattern.id,
+        **details,
+    )
 
 
 CASES = {
@@ -162,6 +197,53 @@ CASES = {
         # Same site opened from a bookmark.
         "negative": {
             "rows": [visit("2024-05-01T10:00:00Z", "https://mega.nz/folder/XyZ123", transition=805306371, transition_core="AUTO_BOOKMARK")],
+            "flagged": [],
+        },
+    },
+    "browser.webmail_upload": {
+        "positive": {
+            "rows": [
+                # POST cache entry to the Naver Mail attachment path (heuristic weak, raised to medium by the POST).
+                pattern_candidate("https://mail.naver.com/json/write/upload/attach", "POST"),
+                # Outlook web CreateAttachment action from history (documented endpoint: strong).
+                pattern_candidate("https://outlook.office.com/owa/service.svc?action=CreateAttachmentFromLocalFile", source_artifact_type="browser-visit"),
+                # Any POST to a webmail host is a candidate of its own (catalog rationale).
+                pattern_candidate("https://mail.daum.net/hanmailex/compose/send.json", "POST"),
+                # A file-sharing upload is the other rule's row.
+                pattern_candidate("https://wetransfer.com/api/v4/transfers/link"),
+            ],
+            "flagged": [0, 1, 2],
+        },
+        # Weak tier the scanner really produces: Gmail attachment reference (attid) — opening an
+        # attachment looks the same — and a GET of the Naver Mail upload path (page view, no POST).
+        "negative": {
+            "rows": [
+                pattern_candidate("https://mail.google.com/mail/u/0/?ui=2&ik=abc&attid=0.1&disp=safe", source_artifact_type="browser-visit"),
+                pattern_candidate("https://mail.naver.com/write/bigfile/upload", source_artifact_type="browser-history"),
+            ],
+            "flagged": [],
+        },
+    },
+    "browser.filesharing_upload": {
+        "positive": {
+            "rows": [
+                pattern_candidate("https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable", "POST"),
+                pattern_candidate("https://wetransfer.com/api/v4/transfers/link"),
+                pattern_candidate("https://mail.naver.com/json/write/upload/attach", "POST"),
+                # POST to a web-hard host (label token match).
+                pattern_candidate("https://www.webhard.co.kr/pages/fileup.php", "POST"),
+            ],
+            "flagged": [0, 1, 3],
+        },
+        # Weak tier the scanner really produces: GETs of upload screens (MYBOX, web-hard, MEGA, Send
+        # Anywhere) — a page view, not a transfer — are candidates but not flagged at medium.
+        "negative": {
+            "rows": [
+                pattern_candidate("https://mybox.naver.com/upload", source_artifact_type="browser-history"),
+                pattern_candidate("https://www.webhard.co.kr/pages/fileup.php", source_artifact_type="browser-visit"),
+                pattern_candidate("https://mega.nz/upload/folder"),
+                pattern_candidate("https://send-anywhere.com/web/upload"),
+            ],
             "flagged": [],
         },
     },

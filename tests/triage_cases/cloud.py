@@ -36,7 +36,39 @@ def photo(raw: dict[str, object]) -> dict[str, object]:
     }
 
 
-ITEM = "https://example.sharepoint.com/sites/finance/Shared Documents/budget.xlsx"
+def sync_upload(index: int, at: dt.datetime, *, size: int = 2_000_000, eligible: bool = True) -> dict[str, object]:
+    """A desktop sync-client upload event (``cloud-sync-event``, R2 M4)."""
+    return {
+        "kind": "cloud-sync",
+        "row": {
+            "artifact_type": "cloud-sync-event",
+            "path": r"C:\Users\alice\AppData\Local\Microsoft\OneDrive\logs\Personal\SyncEngine-2024-05-01.odl",
+            "details": {
+                "client": "onedrive",
+                "operation": "upload",
+                "timestamp": at.isoformat().replace("+00:00", "Z"),
+                "actor": "alice@example.com",
+                "item_path": rf"C:\Users\alice\OneDrive\설계\도면{index:03d}.dwg",
+                "size": size,
+                "bulk_rule_eligible": eligible,
+            },
+        },
+    }
+
+
+def sync_account(*roots: str) -> dict[str, object]:
+    """A desktop sync-client account row with its sync root(s) (``cloud-sync-account``)."""
+    return {
+        "kind": "cloud-sync",
+        "row": {
+            "artifact_type": "cloud-sync-account",
+            "path": r"C:\Users\alice\AppData\Local\Microsoft\OneDrive\settings\Personal\global.ini",
+            "details": {"client": "onedrive", "actor": "alice@example.com", "sync_root": roots[0], "sync_roots": list(roots)},
+        },
+    }
+
+
+ITEM ="https://example.sharepoint.com/sites/finance/Shared Documents/budget.xlsx"
 DAY = dt.timedelta(days=1)
 
 CASES = {
@@ -127,6 +159,33 @@ CASES = {
             "rows": [
                 audit("FileAccessed", START, "cloud-activity", object_id=ITEM, service="onedrive-sync"),
                 audit("FileModified", START + DAY, "cloud-activity", object_id=ITEM, service="onedrive-sync"),
+            ],
+            "flagged": [],
+        },
+    },
+    "cloud.bulk_upload": {
+        # 50 files uploaded by one account within 25 minutes.
+        "positive": {"rows": [sync_upload(index, START + dt.timedelta(seconds=30 * index)) for index in range(50)], "flagged": list(range(50))},
+        # The same 50 files trickled over a working day (one every 15 minutes), plus 60 log keyword
+        # hits inside one minute that the parser marked ineligible (no item path), one drawing
+        # re-uploaded 60 times within the hour (one distinct item) and a single 600 MB item
+        # (bytes alone need two distinct items).
+        "negative": {
+            "rows": [sync_upload(index, START + dt.timedelta(minutes=15 * index)) for index in range(50)]
+            + [sync_upload(index, START + dt.timedelta(seconds=index), eligible=False) for index in range(60)]
+            + [sync_upload(900, START + dt.timedelta(days=2, seconds=30 * index), size=9_000_000) for index in range(60)]
+            + [sync_upload(901, START + dt.timedelta(days=4), size=600_000_000)],
+            "flagged": [],
+        },
+    },
+    "cloud.sync_folder_outside_user_profile": {
+        # A removable/second drive and the shared Public profile.
+        "positive": {"rows": [sync_account(r"E:\OneDrive"), sync_account(r"C:\Users\Public\Dropbox")], "flagged": [0, 1]},
+        # Default and business locations under the user's own profile (and a volume-relative root).
+        "negative": {
+            "rows": [
+                sync_account(r"C:\Users\alice\OneDrive - Contoso", r"C:\Users\alice\OneDrive"),
+                sync_account("\\Users\\alice\\iCloudDrive"),
             ],
             "flagged": [],
         },

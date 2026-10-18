@@ -12,8 +12,16 @@ import { createElement } from "react";
 import type { GridRow } from "../../../contracts/collection";
 import { clipValue, flatValue } from "../../../utils/flatValue";
 import { formatGridTime } from "../../../utils/time";
+import { timestampKindLabel } from "../../../utils/timeKinds";
 import { deriveColumn, missingText } from "../../derived/derivedFields";
-import { type CatalogColumn, type CatalogFamily, familyForType, getCatalog } from "../../flags/catalog";
+import { artifactTypeLabel } from "../../filters/typeLabels";
+import {
+  type CatalogColumn,
+  type CatalogFamily,
+  columnValueLabel,
+  familyForType,
+  getCatalog,
+} from "../../flags/catalog";
 import { FlagCell } from "../../flags/FlagCell";
 import { flagSortValue, flagsAccessibleName, rowFlags } from "../../flags/flags";
 import { eventLevelLabel, logonTypeLabel, severityLabel } from "../../viewer/fieldFormat";
@@ -28,6 +36,8 @@ export const TS_KIND_LABELS: Record<string, string> = {
   "account-expires": "계정 만료",
   "download-start": "다운로드 시작",
   "download-end": "다운로드 완료",
+  "cache-response": "캐시 응답",
+  "cache-request": "캐시 요청",
   "first-install": "최초 설치",
   "last-accessed": "마지막 접근",
   "last-connected": "마지막 연결",
@@ -70,6 +80,9 @@ export const TS_KIND_LABELS: Record<string, string> = {
   edited: "편집",
   gps: "GPS 시각",
   target: "대상 파일 시각",
+  // r2 M2: calendar-event start / end
+  start: "시작",
+  end: "종료",
   // older spellings (families mock / earlier servers)
   first_seen: "최초 확인",
   last_run: "최근 실행",
@@ -90,7 +103,27 @@ export const TS_KIND_LABELS: Record<string, string> = {
 
 /** Korean name of a timestamp kind; an unknown id reads "시각 종류: <id>" rather than bare English. */
 export function tsKindLabel(kind: string): string {
-  return TS_KIND_LABELS[kind] ?? TS_KIND_LABELS[kind.replace(/-/g, "_")] ?? `시각 종류: ${kind}`;
+  const own = TS_KIND_LABELS[kind] ?? TS_KIND_LABELS[kind.replace(/-/g, "_")];
+  if (own) return own;
+  // The parsers' / timeline's kinds (cloud-upload, cache-created, saved …): utils/timeKinds.
+  const shared = timestampKindLabel(kind);
+  return shared && shared !== kind ? shared : `시각 종류: ${kind}`;
+}
+
+/**
+ * The timestamp kind of a time cell: the row's own `timestamp_kind` for the generic `timestamp`
+ * column (a cache entry falls back from the response to the created / last-used time, a cloud
+ * event is an upload or a delete …), else the catalogue column's `ts_kind`.
+ */
+export function cellTsKind(
+  def: CatalogColumn,
+  details: Record<string, unknown>,
+  from: string,
+): string | undefined {
+  if (def.format !== "time") return undefined;
+  const own = details.timestamp_kind;
+  if (from === "timestamp" && typeof own === "string" && own) return own;
+  return def.ts_kind;
 }
 
 /** Column id of a catalogue column (same `d:` space as KIND_COLUMNS: promoted keys dedupe on it). */
@@ -133,7 +166,47 @@ export function readColumn(
   return null;
 }
 
+/**
+ * Numeric-only ids in a person / conversation column (KakaoTalk `chat_id`, `user_id` without a
+ * resolved name, r2 console fix m11): the tooltip and the chat view add this hint.
+ */
+export const UNRESOLVED_NAME_HINT = "(이름 미해석)";
+const NAME_KEYS: ReadonlySet<string> = new Set([
+  "sender",
+  "recipient",
+  "author",
+  "conversation_title",
+  "conversation_id",
+  "chat_id",
+  "chat_room",
+  "author_id",
+]);
+
+/** True for a bare numeric id (5+ digits) where a name is expected. */
+export function isUnresolvedNameId(value: unknown): boolean {
+  return (typeof value === "string" || typeof value === "number") && /^-?\d{5,}$/.test(String(value).trim());
+}
+
+function nameColumn(def: CatalogColumn): boolean {
+  return NAME_KEYS.has(def.key) || (def.semantic ?? "").startsWith("person");
+}
+
+/**
+ * Korean reading of a raw catalogue value: `value_labels` (발신/수신/불명 for every app's raw
+ * spelling, r2 console fix M7) or an artifact-type name (`format: artifact_type`); undefined = none.
+ */
+export function catalogValueReading(def: CatalogColumn, value: unknown): string | undefined {
+  const mapped = columnValueLabel(def, value);
+  if (mapped) return mapped;
+  if (def.format === "artifact_type" && typeof value === "string" && value) {
+    return artifactTypeLabel(value) ?? undefined;
+  }
+  return undefined;
+}
+
 function displayValue(def: CatalogColumn, value: unknown): string {
+  const reading = catalogValueReading(def, value);
+  if (reading) return reading;
   if (def.format === "time" && (typeof value === "string" || typeof value === "number")) {
     return formatGridTime(value, currentTimezone());
   }
@@ -142,6 +215,17 @@ function displayValue(def: CatalogColumn, value: unknown): string {
     return logonTypeLabel(value) || flatValue(value);
   if (def.format === "eventLevel") return eventLevelLabel(value) || flatValue(value);
   if (def.format === "detectionSeverity") return severityLabel(value) || flatValue(value);
+  // A list of attachment / item objects reads as their names, not JSON.
+  if (Array.isArray(value) && value.some(isRecord)) {
+    const names = value
+      .map((item) =>
+        isRecord(item)
+          ? flatValue(item.name ?? item.filename ?? item.file_name ?? item.path ?? item.url ?? "")
+          : flatValue(item),
+      )
+      .filter(Boolean);
+    if (names.length) return clipValue(names.join(", "), 300);
+  }
   return clipValue(flatValue(value), 300);
 }
 
@@ -219,8 +303,13 @@ export function catalogColumn(def: CatalogColumn, aux = false): ColumnSpec {
       const hit = read(row);
       if (!hit) return "";
       const text = displayValue(def, hit.value);
-      const kind = tsKind ? ` · ${tsKindLabel(tsKind)}(${tsKind})` : "";
-      return hit.from === def.key ? `${text}${kind}` : `${text}${kind} — ${hit.from}`;
+      const rowKind = cellTsKind(def, detailsOf(row), hit.from) ?? tsKind;
+      const kind = rowKind ? ` · ${tsKindLabel(rowKind)}(${rowKind})` : "";
+      // The raw value stays readable behind a Korean reading ("발신 (원래 값: outgoing)").
+      const raw = catalogValueReading(def, hit.value) ? ` (원래 값: ${flatValue(hit.value)})` : "";
+      const hint = nameColumn(def) && isUnresolvedNameId(hit.value) ? ` ${UNRESOLVED_NAME_HINT}` : "";
+      const shown = `${text}${raw}${hint}${kind}`;
+      return hit.from === def.key ? shown : `${shown} — ${hit.from}`;
     },
     ...(tsKind
       ? {
@@ -228,14 +317,15 @@ export function catalogColumn(def: CatalogColumn, aux = false): ColumnSpec {
             const hit = read(row);
             if (!hit)
               return createElement("span", { className: "grid-cell-empty", "aria-hidden": true }, "—");
+            const rowKind = cellTsKind(def, detailsOf(row), hit.from) ?? tsKind;
             return createElement(
               "span",
               { className: "ts-cell" },
-              // Korean chip (기록 · 생성 · 마지막 …); the catalogue's ts_kind id is in the tooltip.
+              // Korean chip (기록 · 생성 · 마지막 …); the ts_kind id is in the tooltip.
               createElement(
                 "span",
-                { className: "ts-kind-chip", title: `${tsKindLabel(tsKind)} (${tsKind})` },
-                tsKindLabel(tsKind),
+                { className: "ts-kind-chip", title: `${tsKindLabel(rowKind)} (${rowKind})` },
+                tsKindLabel(rowKind),
               ),
               createElement("span", { className: "grid-cell-text" }, displayValue(def, hit.value)),
             );

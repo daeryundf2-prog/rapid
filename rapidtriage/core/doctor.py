@@ -77,6 +77,7 @@ def run_doctor(
         check_app_data_dir(data_dir, write_probe=write_probe),
         check_tesseract(tool_resolver),
         check_e01_tools(tool_resolver),
+        check_email_tools(tool_resolver),
     ]
     if include_port_check:
         checks.append(check_port_available(host, port))
@@ -263,6 +264,30 @@ def check_e01_tools(tool_resolver: ToolResolver) -> DoctorCheck:
         category="evidence-image",
         status=OK,
         summary="E01 direct extraction tools are available.",
+        details=details,
+    )
+
+
+def check_email_tools(tool_resolver: ToolResolver) -> DoctorCheck:
+    """PST/OST normalisation (r2 M2): libpff ``pffexport`` or libpst ``readpst`` on PATH."""
+    tools = ("pffexport", "readpst")
+    resolved = {tool: tool_resolver(tool) for tool in tools}
+    available = [tool for tool, path in resolved.items() if path is not None]
+    details = {"tools": resolved, "available": available}
+    if not available:
+        return DoctorCheck(
+            name="tools:email-pst",
+            category="email",
+            status=WARN,
+            summary="PST/OST 도구 없음: pffexport·readpst가 없어 Outlook 메일함은 컨테이너 인벤토리만 만듭니다.",
+            details=details,
+            remediation="libpff(pffexport) 또는 libpst(readpst)를 설치해 PATH에 두고 RAPIDTRIAGE_EMAIL_EXTERNAL_TOOLS=1로 런을 실행하면 PST/OST를 메일·일정·연락처·첨부 행으로 변환합니다.",
+        )
+    return DoctorCheck(
+        name="tools:email-pst",
+        category="email",
+        status=OK,
+        summary=f"{', '.join(available)} 있음 — 런에서는 RAPIDTRIAGE_EMAIL_EXTERNAL_TOOLS=1일 때만 사용",
         details=details,
     )
 

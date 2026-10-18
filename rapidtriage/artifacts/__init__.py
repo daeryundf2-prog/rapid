@@ -10,6 +10,7 @@ from pathlib import Path
 
 from .android import AndroidApkProvider
 from .cloud import CloudExportProvider
+from .cloud_sync import CloudSyncClientsProvider
 from .email import EmailArtifactsProvider
 from .generic import GenericDocumentArtifactProvider
 from .kakaotalk_macos import KakaoTalkMacOsProvider
@@ -24,6 +25,7 @@ from .windows.browser import WindowsBrowserArtifactsProvider
 from .windows.eventlog import WindowsEventLogProvider
 from .windows.execution import WindowsExecutionProvider
 from .windows.filesystem import WindowsFilesystemProvider
+from .windows.messenger import WindowsMessengerProvider
 from .windows.os_account import WindowsOsAccountProvider
 from .windows.prefetch import WindowsPrefetchProvider
 from .windows.recent_files import WindowsRecentFilesProvider
@@ -94,6 +96,7 @@ def _builtin_providers() -> list[object]:
         GenericDocumentArtifactProvider(),
         AndroidApkProvider(),
         CloudExportProvider(),
+        CloudSyncClientsProvider(),
         EmailArtifactsProvider(),
         LinuxSystemArtifactsProvider(),
         MacOsSystemArtifactsProvider(),
@@ -111,6 +114,7 @@ def _builtin_providers() -> list[object]:
         WindowsEventLogProvider(),
         WindowsRegistryProvider(),
         WindowsRemoteAccessProvider(),
+        WindowsMessengerProvider(),
         WindowsSearchIndexProvider(),
         WindowsShellbagsProvider(),
         WindowsPrefetchProvider(),

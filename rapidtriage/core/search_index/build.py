@@ -680,7 +680,7 @@ def document_meta(details: Mapping[str, object]) -> dict[str, str]:
 def flatten_messenger(ctx: BuildContext, kind: str, record_index: int, row: Mapping[str, object], text: Mapping[str, object]) -> Doc:
     """Message body + conversation partner (KakaoTalk, mobile/email exports)."""
     doc, details = _base_doc(ctx, kind, record_index, row)
-    body = _first_text(details, ("message", "body", "text", "content", "candidate_value", "subject"))
+    body = _first_text(details, ("message", "message_text", "body", "text", "content", "candidate_value", "subject"))
     partner = _first_text(details, ("sender", "from", "to", "partner", "chat_name", "room_name"))
     parts = [part for part in (body, partner) if part]
     walk_values(text, parts, set(parts), doc.text_cap, list_cap=doc.list_cap, cuts=doc.cuts)
@@ -719,6 +719,7 @@ KIND_FLATTENERS: dict[str, Callable[[BuildContext, str, int, Mapping[str, object
     "generic-documents": flatten_documents,
     "kakaotalk-windows": flatten_messenger,
     "kakaotalk-macos": flatten_messenger,
+    "windows-messenger": flatten_messenger,
     "email": flatten_messenger,
     "mobile-export": flatten_messenger,
     "media-image": flatten_media,

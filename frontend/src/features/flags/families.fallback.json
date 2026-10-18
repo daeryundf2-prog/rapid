@@ -1,5 +1,5 @@
 {
- "version": "df23745d0915665c",
+ "version": "342e47b4bdfc7bf9",
  "families": [
   {
    "id": "sam-account",
@@ -1344,6 +1344,295 @@
    "rules": []
   },
   {
+   "id": "browser-cache-entry",
+   "label": "브라우저 캐시 항목",
+   "types": [
+    "browser-cache-entry"
+   ],
+   "core_columns": [
+    {
+     "key": "timestamp",
+     "label": "시각",
+     "format": "time",
+     "ts_kind": "cache-response"
+    },
+    {
+     "key": "url",
+     "semantic": "url",
+     "semantic_when": {
+      "method": [
+       "POST"
+      ]
+     },
+     "label": "주소 (URL)",
+     "format": "url"
+    },
+    {
+     "key": "http_status",
+     "label": "응답 상태",
+     "format": "number"
+    },
+    {
+     "key": "content_type",
+     "label": "콘텐츠 형식 (Content-Type)"
+    },
+    {
+     "key": "body_size",
+     "label": "크기",
+     "aliases": [
+      "content_length"
+     ],
+     "format": "bytes"
+    },
+    {
+     "key": "body_sha256",
+     "semantic": "hash",
+     "label": "본문 SHA-256",
+     "aliases": [
+      "body_prefix_sha256"
+     ],
+     "format": "mono"
+    },
+    {
+     "key": "host",
+     "label": "호스트"
+    },
+    {
+     "key": "method",
+     "label": "요청 방식"
+    },
+    {
+     "key": "file_name_candidate",
+     "semantic": "attachment",
+     "label": "파일 이름 후보 (Content-Disposition)"
+    },
+    {
+     "key": "cache_format",
+     "label": "캐시 형식",
+     "value_labels": {
+      "chromium-simple": "Chromium 단순 캐시",
+      "chromium-blockfile": "Chromium 블록 파일 캐시",
+      "chromium-cachestorage": "Chromium CacheStorage",
+      "webcache-content": "WebCache Content(IE·레거시 Edge)"
+     }
+    },
+    {
+     "key": "browser",
+     "label": "브라우저",
+     "value_labels": {
+      "ie-edge-legacy": "IE·레거시 Edge(WebCache)"
+     }
+    },
+    {
+     "key": "profile",
+     "label": "프로필"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "content_length",
+     "label": "콘텐츠 길이 (Content-Length)",
+     "format": "bytes"
+    },
+    {
+     "key": "compression",
+     "label": "압축",
+     "aliases": [
+      "content_encoding"
+     ]
+    },
+    {
+     "key": "request_time",
+     "label": "요청 시각",
+     "format": "time",
+     "ts_kind": "cache-request"
+    },
+    {
+     "key": "created_at",
+     "label": "항목 생성",
+     "format": "time",
+     "ts_kind": "created"
+    },
+    {
+     "key": "last_used_at",
+     "label": "마지막 사용",
+     "format": "time",
+     "ts_kind": "last-used"
+    },
+    {
+     "key": "body_signature",
+     "label": "본문 서명(앞 256바이트)"
+    },
+    {
+     "key": "body_hash_scope",
+     "label": "본문 해시 범위"
+    },
+    {
+     "key": "body_status",
+     "label": "본문 상태"
+    },
+    {
+     "key": "headers_status",
+     "label": "헤더 상태"
+    },
+    {
+     "key": "entry_state",
+     "label": "항목 상태"
+    },
+    {
+     "key": "server",
+     "label": "서버"
+    },
+    {
+     "key": "location",
+     "semantic": "url",
+     "label": "이동 주소 (Location)",
+     "format": "url"
+    },
+    {
+     "key": "cache_key",
+     "label": "캐시 키",
+     "format": "mono"
+    },
+    {
+     "key": "source_offset",
+     "label": "원본 오프셋",
+     "format": "number"
+    },
+    {
+     "key": "recovery_method",
+     "label": "복구 방식"
+    },
+    {
+     "key": "webcache_container",
+     "label": "WebCache 컨테이너"
+    },
+    {
+     "key": "user",
+     "semantic": "account",
+     "label": "사용자"
+    }
+   ],
+   "rules": []
+  },
+  {
+   "id": "web-upload-candidate",
+   "label": "웹메일·웹하드 업로드 후보",
+   "types": [
+    "web-upload-candidate"
+   ],
+   "core_columns": [
+    {
+     "key": "timestamp",
+     "label": "시각",
+     "format": "time",
+     "ts_kind": "event"
+    },
+    {
+     "key": "service_label",
+     "label": "서비스",
+     "aliases": [
+      "service"
+     ]
+    },
+    {
+     "key": "url",
+     "label": "주소 (URL)",
+     "format": "url"
+    },
+    {
+     "key": "strength_label",
+     "label": "근거 강도",
+     "aliases": [
+      "strength"
+     ]
+    },
+    {
+     "key": "file_name_candidate",
+     "label": "관련 파일 이름 후보"
+    },
+    {
+     "key": "category_label",
+     "label": "분류",
+     "aliases": [
+      "category"
+     ]
+    },
+    {
+     "key": "method",
+     "label": "요청 방식"
+    },
+    {
+     "key": "response_size",
+     "label": "응답 크기 (캐시된 응답, 업로드 파일 크기 아님)",
+     "format": "bytes"
+    },
+    {
+     "key": "response_size_basis",
+     "label": "크기 근거"
+    },
+    {
+     "key": "source_artifact_type",
+     "label": "원본 행 유형",
+     "format": "artifact_type"
+    },
+    {
+     "key": "browser",
+     "label": "브라우저"
+    },
+    {
+     "key": "profile",
+     "label": "프로필"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "match_pattern_id",
+     "label": "일치 패턴",
+     "format": "mono"
+    },
+    {
+     "key": "match_basis",
+     "label": "패턴 근거"
+    },
+    {
+     "key": "signals",
+     "label": "신호"
+    },
+    {
+     "key": "http_status",
+     "label": "응답 상태",
+     "format": "number"
+    },
+    {
+     "key": "content_type",
+     "label": "콘텐츠 형식"
+    },
+    {
+     "key": "source_path",
+     "label": "원본 경로",
+     "format": "path"
+    },
+    {
+     "key": "source_offset",
+     "label": "원본 오프셋",
+     "format": "number"
+    },
+    {
+     "key": "interpretation_ko",
+     "label": "해석"
+    },
+    {
+     "key": "user",
+     "label": "사용자"
+    }
+   ],
+   "rules": [
+    "browser.webmail_upload",
+    "browser.filesharing_upload"
+   ]
+  },
+  {
    "id": "cloud",
    "label": "클라우드",
    "types": [
@@ -1467,6 +1756,7 @@
    ],
    "rules": [
     "cloud.bulk_download",
+    "cloud.bulk_upload",
     "cloud.external_share",
     "cloud.new_device_login",
     "cloud.delete_after_share",
@@ -1474,6 +1764,300 @@
     "cloud.json_exif_gps_mismatch",
     "cloud.audit_retention_gap"
    ]
+  },
+  {
+   "id": "cloud-sync-account",
+   "label": "클라우드 동기화 계정",
+   "types": [
+    "cloud-sync-account"
+   ],
+   "core_columns": [
+    {
+     "key": "client_label",
+     "label": "클라이언트",
+     "aliases": [
+      "client"
+     ]
+    },
+    {
+     "key": "actor",
+     "semantic": "account",
+     "label": "계정",
+     "aliases": [
+      "account",
+      "account_email"
+     ]
+    },
+    {
+     "key": "sync_root",
+     "semantic": "path",
+     "label": "동기화 폴더",
+     "aliases": [
+      "sync_roots"
+     ],
+     "format": "path"
+    },
+    {
+     "key": "tenant",
+     "label": "테넌트"
+    },
+    {
+     "key": "account_id",
+     "semantic": "account",
+     "label": "계정 ID",
+     "format": "mono"
+    },
+    {
+     "key": "site_url",
+     "semantic": "url",
+     "label": "사이트 URL"
+    },
+    {
+     "key": "user_profile",
+     "label": "사용자 프로필"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "sync_roots",
+     "label": "동기화 폴더 전체"
+    },
+    {
+     "key": "account_type",
+     "label": "계정 종류"
+    },
+    {
+     "key": "recovery_method",
+     "label": "복구 방법"
+    },
+    {
+     "key": "source_locator",
+     "label": "원본 위치",
+     "format": "mono"
+    }
+   ],
+   "rules": [
+    "cloud.sync_folder_outside_user_profile"
+   ]
+  },
+  {
+   "id": "cloud-sync",
+   "label": "클라우드 동기화 파일·이벤트",
+   "types": [
+    "cloud-sync-file",
+    "cloud-sync-event"
+   ],
+   "kinds": [
+    "cloud-sync"
+   ],
+   "core_columns": [
+    {
+     "key": "timestamp",
+     "label": "시각",
+     "aliases": [
+      "modified_at"
+     ],
+     "format": "time",
+     "ts_kind": "cloud-modified",
+     "width": 170
+    },
+    {
+     "key": "client_label",
+     "label": "클라이언트",
+     "aliases": [
+      "client"
+     ]
+    },
+    {
+     "key": "actor",
+     "semantic": "account",
+     "label": "계정",
+     "aliases": [
+      "account",
+      "account_email"
+     ]
+    },
+    {
+     "key": "operation_label",
+     "label": "활동",
+     "aliases": [
+      "operation"
+     ]
+    },
+    {
+     "key": "item_path",
+     "label": "항목 경로(클라우드 기준)",
+     "aliases": [
+      "file_name"
+     ],
+     "format": "path"
+    },
+    {
+     "key": "size",
+     "label": "크기",
+     "format": "bytes"
+    },
+    {
+     "key": "sync_state",
+     "label": "상태",
+     "value_labels": {
+      "parsed": "해석함",
+      "partial-errors": "일부 원본 오류",
+      "inventory-only": "인벤토리만",
+      "executable-trace-only": "실행 흔적만",
+      "trashed": "휴지통",
+      "metadata": "메타데이터",
+      "mirror": "로컬 미러",
+      "removed": "삭제됨",
+      "cloud-entry": "클라우드 항목"
+     }
+    },
+    {
+     "key": "shared",
+     "label": "공유 여부"
+    },
+    {
+     "key": "sync_root",
+     "semantic": "path",
+     "label": "동기화 폴더",
+     "aliases": [
+      "sync_roots"
+     ],
+     "format": "path"
+    },
+    {
+     "key": "item_id",
+     "label": "항목 ID",
+     "format": "mono"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "account_id",
+     "semantic": "account",
+     "label": "계정 ID",
+     "format": "mono"
+    },
+    {
+     "key": "deleted",
+     "label": "삭제 상태"
+    },
+    {
+     "key": "content_hash",
+     "semantic": "hash",
+     "label": "콘텐츠 해시",
+     "format": "mono"
+    },
+    {
+     "key": "recovery_method",
+     "label": "복구 방법"
+    },
+    {
+     "key": "source_locator",
+     "label": "원본 위치",
+     "format": "mono"
+    },
+    {
+     "key": "user_profile",
+     "label": "사용자 프로필"
+    }
+   ],
+   "rules": [
+    "cloud.bulk_upload"
+   ]
+  },
+  {
+   "id": "cloud-sync-inventory",
+   "label": "클라우드 동기화 클라이언트 인벤토리",
+   "types": [
+    "cloud-sync-inventory"
+   ],
+   "core_columns": [
+    {
+     "key": "client_label",
+     "label": "클라이언트",
+     "aliases": [
+      "client"
+     ]
+    },
+    {
+     "key": "inventory_status",
+     "label": "상태",
+     "aliases": [
+      "sync_state"
+     ],
+     "value_labels": {
+      "parsed": "해석함",
+      "partial-errors": "일부 원본 오류",
+      "inventory-only": "인벤토리만",
+      "executable-trace-only": "실행 흔적만",
+      "trashed": "휴지통",
+      "metadata": "메타데이터",
+      "mirror": "로컬 미러",
+      "removed": "삭제됨",
+      "cloud-entry": "클라우드 항목"
+     }
+    },
+    {
+     "key": "inventory_reason",
+     "label": "사유",
+     "width": 380
+    },
+    {
+     "key": "file_count",
+     "label": "파일 수",
+     "format": "number"
+    },
+    {
+     "key": "total_bytes",
+     "label": "전체 크기",
+     "format": "bytes"
+    },
+    {
+     "key": "encrypted_store_count",
+     "label": "암호화 저장소",
+     "format": "number"
+    },
+    {
+     "key": "account",
+     "semantic": "account",
+     "label": "계정",
+     "aliases": [
+      "actor"
+     ]
+    },
+    {
+     "key": "sync_root",
+     "label": "동기화 폴더",
+     "format": "path"
+    },
+    {
+     "key": "user_profile",
+     "label": "사용자 프로필"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "account_folder",
+     "label": "계정 폴더",
+     "format": "path"
+    },
+    {
+     "key": "source_locator",
+     "label": "원본 위치",
+     "format": "mono"
+    },
+    {
+     "key": "recovery_method",
+     "label": "복구 방법"
+    },
+    {
+     "key": "source_path",
+     "label": "클라이언트 폴더",
+     "format": "path"
+    }
+   ],
+   "rules": []
   },
   {
    "id": "document",
@@ -1655,9 +2239,11 @@
    ],
    "core_columns": [
     {
-     "key": "date",
-     "label": "Date(발신 주장)",
+     "key": "submit_time",
+     "label": "시각(제출·배달·Date)",
      "aliases": [
+      "delivery_time",
+      "date",
       "date_header"
      ],
      "format": "time",
@@ -1684,6 +2270,39 @@
      "width": 280
     },
     {
+     "key": "attachment_count",
+     "label": "첨부",
+     "aliases": [
+      "attachments"
+     ],
+     "format": "number",
+     "width": 70
+    },
+    {
+     "key": "folder",
+     "label": "폴더",
+     "aliases": [
+      "mailbox_folder"
+     ]
+    },
+    {
+     "key": "read_state",
+     "label": "읽음",
+     "width": 80
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "date",
+     "label": "Date 헤더(발신 주장)",
+     "aliases": [
+      "date_header"
+     ],
+     "format": "time",
+     "ts_kind": "sent",
+     "width": 170
+    },
+    {
      "key": "message_id",
      "label": "메시지 ID (Message-ID)",
      "format": "mono"
@@ -1708,24 +2327,6 @@
      "label": "회신 주소 (Reply-To)",
      "format": "mono"
     },
-    {
-     "key": "attachment_count",
-     "label": "첨부",
-     "aliases": [
-      "attachments"
-     ],
-     "format": "number",
-     "width": 70
-    },
-    {
-     "key": "folder",
-     "label": "폴더",
-     "aliases": [
-      "mailbox_folder"
-     ]
-    }
-   ],
-   "aux_columns": [
     {
      "key": "received",
      "label": "Received 체인",
@@ -1763,6 +2364,47 @@
      "key": "attachments",
      "semantic": "attachment",
      "label": "첨부 파일"
+    },
+    {
+     "key": "cc",
+     "semantic": "person_recipient",
+     "label": "참조 (CC)"
+    },
+    {
+     "key": "bcc",
+     "semantic": "person_recipient",
+     "label": "숨은 참조 (BCC)"
+    },
+    {
+     "key": "delivery_time",
+     "label": "배달 시각",
+     "format": "time",
+     "ts_kind": "received",
+     "width": 170
+    },
+    {
+     "key": "thread_id",
+     "label": "스레드 ID",
+     "aliases": [
+      "conversation_topic"
+     ],
+     "format": "mono"
+    },
+    {
+     "key": "deleted_state",
+     "label": "삭제·복구 상태",
+     "width": 110,
+     "value_labels": {
+      "live": "활성",
+      "live-row": "활성 행",
+      "false": "활성",
+      "deleted": "삭제됨",
+      "true": "삭제됨",
+      "deleted-or-recovered-candidate": "삭제·복구 후보",
+      "candidate-marker-present": "삭제 표식 후보",
+      "not-decoded": "해석 안 함",
+      "unknown": "불명"
+     }
     }
    ],
    "rules": [
@@ -1778,8 +2420,315 @@
     "email.attach_exec_or_archive_enc",
     "email.date_vs_received_skew",
     "email.external_forward_auto",
-    "email.bcc_self_or_personal"
+    "email.bcc_self_or_personal",
+    "email.external_bulk_attachments",
+    "email.deleted_folder_recent"
    ]
+  },
+  {
+   "id": "email-attachment",
+   "label": "메일 첨부",
+   "types": [
+    "email-attachment"
+   ],
+   "core_columns": [
+    {
+     "key": "message_date",
+     "label": "메일 시각",
+     "format": "time",
+     "ts_kind": "sent",
+     "width": 170
+    },
+    {
+     "key": "filename",
+     "semantic": "attachment",
+     "label": "첨부 파일 이름",
+     "width": 240
+    },
+    {
+     "key": "size",
+     "label": "크기",
+     "format": "bytes"
+    },
+    {
+     "key": "sha256",
+     "semantic": "hash",
+     "label": "해시(SHA-256)",
+     "format": "mono"
+    },
+    {
+     "key": "from",
+     "label": "보낸 사람"
+    },
+    {
+     "key": "to",
+     "label": "받는 사람"
+    },
+    {
+     "key": "message_subject",
+     "label": "원본 메일 제목",
+     "width": 240
+    },
+    {
+     "key": "folder",
+     "label": "폴더"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "content_type",
+     "label": "콘텐츠 유형"
+    },
+    {
+     "key": "message_id",
+     "label": "원본 메시지 ID",
+     "format": "mono"
+    },
+    {
+     "key": "deleted_state",
+     "label": "삭제·복구 상태",
+     "value_labels": {
+      "live": "활성",
+      "live-row": "활성 행",
+      "false": "활성",
+      "deleted": "삭제됨",
+      "true": "삭제됨",
+      "deleted-or-recovered-candidate": "삭제·복구 후보",
+      "candidate-marker-present": "삭제 표식 후보",
+      "not-decoded": "해석 안 함",
+      "unknown": "불명"
+     }
+    },
+    {
+     "key": "export_item",
+     "label": "내보내기 항목",
+     "format": "path"
+    },
+    {
+     "key": "source_path",
+     "semantic": "path",
+     "label": "원본 PST/OST",
+     "format": "path"
+    }
+   ],
+   "rules": []
+  },
+  {
+   "id": "calendar-event",
+   "label": "일정(약속)",
+   "types": [
+    "calendar-event"
+   ],
+   "core_columns": [
+    {
+     "key": "start",
+     "label": "시작",
+     "format": "time",
+     "ts_kind": "start",
+     "width": 170
+    },
+    {
+     "key": "end",
+     "label": "종료",
+     "format": "time",
+     "ts_kind": "end",
+     "width": 170
+    },
+    {
+     "key": "title",
+     "label": "제목",
+     "width": 260
+    },
+    {
+     "key": "location",
+     "label": "장소"
+    },
+    {
+     "key": "organizer",
+     "semantic": "person_sender",
+     "label": "주최자"
+    },
+    {
+     "key": "attendees",
+     "semantic": "person_recipient",
+     "label": "참석자"
+    },
+    {
+     "key": "all_day",
+     "label": "종일",
+     "width": 70
+    },
+    {
+     "key": "folder",
+     "label": "폴더"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "timezone",
+     "label": "시간대"
+    },
+    {
+     "key": "recurrence_rule",
+     "label": "반복 규칙",
+     "format": "mono"
+    },
+    {
+     "key": "uid",
+     "label": "일정 UID",
+     "format": "mono"
+    },
+    {
+     "key": "status",
+     "label": "상태"
+    },
+    {
+     "key": "description_preview",
+     "label": "설명 미리보기"
+    },
+    {
+     "key": "source_format",
+     "label": "원본 형식"
+    },
+    {
+     "key": "source_path",
+     "semantic": "path",
+     "label": "원본 파일",
+     "format": "path"
+    }
+   ],
+   "rules": []
+  },
+  {
+   "id": "contact",
+   "label": "연락처",
+   "types": [
+    "contact"
+   ],
+   "core_columns": [
+    {
+     "key": "display_name",
+     "semantic": "person",
+     "label": "이름"
+    },
+    {
+     "key": "email",
+     "semantic": "person",
+     "label": "이메일",
+     "aliases": [
+      "emails"
+     ]
+    },
+    {
+     "key": "phone",
+     "semantic": "person",
+     "label": "전화",
+     "aliases": [
+      "phones"
+     ]
+    },
+    {
+     "key": "organization",
+     "label": "조직"
+    },
+    {
+     "key": "title",
+     "label": "직함"
+    },
+    {
+     "key": "folder",
+     "label": "폴더"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "emails",
+     "label": "이메일 전체"
+    },
+    {
+     "key": "phones",
+     "label": "전화 전체"
+    },
+    {
+     "key": "source_path",
+     "semantic": "path",
+     "label": "원본 PST/OST",
+     "format": "path"
+    }
+   ],
+   "rules": []
+  },
+  {
+   "id": "email-container",
+   "label": "메일 컨테이너(PST/OST)",
+   "types": [
+    "email-container-inventory"
+   ],
+   "core_columns": [
+    {
+     "key": "container_name",
+     "label": "파일"
+    },
+    {
+     "key": "status_label",
+     "label": "상태",
+     "width": 110
+    },
+    {
+     "key": "reason",
+     "label": "사유",
+     "width": 360
+    },
+    {
+     "key": "tool",
+     "label": "사용 도구"
+    },
+    {
+     "key": "message_count",
+     "label": "메시지",
+     "format": "number"
+    },
+    {
+     "key": "attachment_count",
+     "label": "첨부",
+     "format": "number"
+    },
+    {
+     "key": "calendar_event_count",
+     "label": "약속",
+     "format": "number"
+    },
+    {
+     "key": "contact_count",
+     "label": "연락처",
+     "format": "number"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "size",
+     "label": "크기",
+     "format": "bytes"
+    },
+    {
+     "key": "source_sha256",
+     "semantic": "hash",
+     "label": "해시(SHA-256)",
+     "format": "mono"
+    },
+    {
+     "key": "item_error_count",
+     "label": "읽지 못한 항목",
+     "format": "number"
+    },
+    {
+     "key": "source_path",
+     "semantic": "path",
+     "label": "원본 경로",
+     "format": "path"
+    }
+   ],
+   "rules": []
   },
   {
    "id": "eventlog-event",
@@ -3807,7 +4756,19 @@
     {
      "key": "direction",
      "label": "방향",
-     "width": 70
+     "width": 70,
+     "value_labels": {
+      "outgoing": "발신",
+      "sent": "발신",
+      "out": "발신",
+      "발신": "발신",
+      "incoming": "수신",
+      "received": "수신",
+      "in": "수신",
+      "수신": "수신",
+      "unknown": "불명",
+      "불명": "불명"
+     }
     },
     {
      "key": "message_text_preview",
@@ -3819,17 +4780,29 @@
      "width": 320
     },
     {
-     "key": "attachment_name",
+     "key": "attachments",
      "semantic": "attachment",
      "label": "첨부",
      "aliases": [
+      "attachment_name",
       "media_reference"
      ]
     },
     {
      "key": "deleted_state",
      "label": "삭제 여부",
-     "width": 90
+     "width": 90,
+     "value_labels": {
+      "live": "활성",
+      "live-row": "활성 행",
+      "false": "활성",
+      "deleted": "삭제됨",
+      "true": "삭제됨",
+      "deleted-or-recovered-candidate": "삭제·복구 후보",
+      "candidate-marker-present": "삭제 표식 후보",
+      "not-decoded": "해석 안 함",
+      "unknown": "불명"
+     }
     },
     {
      "key": "read_state",
@@ -3878,6 +4851,33 @@
      "key": "source_path",
      "label": "원본 DB",
      "format": "path"
+    },
+    {
+     "key": "recovery_method",
+     "label": "복구 방식"
+    },
+    {
+     "key": "source_offset",
+     "label": "원본 오프셋",
+     "format": "number"
+    },
+    {
+     "key": "local_timestamp",
+     "label": "현지 시각(오프셋 없음)"
+    },
+    {
+     "key": "user",
+     "label": "사용자 프로필"
+    },
+    {
+     "key": "parser_version",
+     "label": "파서 버전",
+     "format": "mono"
+    },
+    {
+     "key": "attachment_local_paths",
+     "semantic": "path",
+     "label": "첨부 로컬 파일"
     }
    ],
    "rules": [
@@ -3972,6 +4972,502 @@
      "key": "risk_score",
      "label": "위험 점수",
      "format": "number"
+    }
+   ],
+   "rules": []
+  },
+  {
+   "id": "messenger-attachment",
+   "label": "메신저 첨부",
+   "types": [
+    "chat-attachment"
+   ],
+   "core_columns": [
+    {
+     "key": "timestamp",
+     "label": "시각",
+     "format": "time",
+     "ts_kind": "sent",
+     "width": 170
+    },
+    {
+     "key": "service",
+     "label": "앱",
+     "aliases": [
+      "app"
+     ]
+    },
+    {
+     "key": "file_name",
+     "semantic": "attachment",
+     "label": "파일 이름",
+     "aliases": [
+      "attachment_name"
+     ]
+    },
+    {
+     "key": "file_size",
+     "label": "크기",
+     "format": "bytes"
+    },
+    {
+     "key": "direction",
+     "label": "전송 방향",
+     "width": 80,
+     "value_labels": {
+      "outgoing": "발신",
+      "sent": "발신",
+      "out": "발신",
+      "발신": "발신",
+      "incoming": "수신",
+      "received": "수신",
+      "in": "수신",
+      "수신": "수신",
+      "unknown": "불명",
+      "불명": "불명"
+     }
+    },
+    {
+     "key": "sender",
+     "semantic": "person_sender",
+     "label": "보낸 사람"
+    },
+    {
+     "key": "recipient",
+     "semantic": "person_recipient",
+     "label": "받는 사람"
+    },
+    {
+     "key": "conversation_title",
+     "label": "대화방",
+     "aliases": [
+      "conversation_id"
+     ]
+    },
+    {
+     "key": "url",
+     "semantic": "url",
+     "label": "주소 (URL)",
+     "format": "url"
+    },
+    {
+     "key": "sha256",
+     "semantic": "hash",
+     "label": "해시 (SHA-256)",
+     "format": "mono"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "file_path",
+     "semantic": "path",
+     "label": "파일 경로",
+     "format": "path"
+    },
+    {
+     "key": "mime_type",
+     "label": "형식 (MIME)"
+    },
+    {
+     "key": "signature_type",
+     "label": "파일 서명"
+    },
+    {
+     "key": "transfer_status",
+     "label": "전송 상태"
+    },
+    {
+     "key": "recovery_method",
+     "label": "복구 방식"
+    },
+    {
+     "key": "source_path",
+     "label": "원본",
+     "format": "path"
+    },
+    {
+     "key": "source_offset",
+     "label": "원본 오프셋",
+     "format": "number"
+    },
+    {
+     "key": "user",
+     "label": "사용자 프로필"
+    }
+   ],
+   "rules": [
+    "messenger.external_file_transfer"
+   ]
+  },
+  {
+   "id": "messenger-contact",
+   "label": "메신저 연락처",
+   "types": [
+    "chat-contact"
+   ],
+   "core_columns": [
+    {
+     "key": "service",
+     "label": "앱",
+     "aliases": [
+      "app"
+     ]
+    },
+    {
+     "key": "contact_name",
+     "semantic": "person",
+     "label": "이름",
+     "aliases": [
+      "display_name"
+     ]
+    },
+    {
+     "key": "contact_id",
+     "semantic": "account",
+     "label": "계정 ID",
+     "format": "mono"
+    },
+    {
+     "key": "email",
+     "semantic": "person",
+     "label": "이메일"
+    },
+    {
+     "key": "phone",
+     "semantic": "person",
+     "label": "전화번호"
+    },
+    {
+     "key": "user",
+     "label": "사용자 프로필"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "contact_role",
+     "label": "역할"
+    },
+    {
+     "key": "recovery_method",
+     "label": "복구 방식"
+    },
+    {
+     "key": "source_path",
+     "label": "원본",
+     "format": "path"
+    },
+    {
+     "key": "source_offset",
+     "label": "원본 오프셋",
+     "format": "number"
+    }
+   ],
+   "rules": []
+  },
+  {
+   "id": "messenger-app",
+   "label": "메신저 앱 목록",
+   "types": [
+    "chat-app-inventory"
+   ],
+   "core_columns": [
+    {
+     "key": "service",
+     "label": "앱",
+     "aliases": [
+      "app"
+     ]
+    },
+    {
+     "key": "user",
+     "label": "사용자 프로필"
+    },
+    {
+     "key": "app_version",
+     "label": "앱 버전"
+    },
+    {
+     "key": "encryption_state",
+     "label": "암호화 상태",
+     "value_labels": {
+      "leveldb-plaintext": "평문(LevelDB)",
+      "plaintext-sqlite": "평문(SQLite)",
+      "encrypted-tdata": "암호화(tdata)",
+      "encrypted-sqlcipher": "암호화(SQLCipher)",
+      "encrypted-or-unknown": "암호화 또는 불명",
+      "mixed": "혼합(평문·암호화)"
+     }
+    },
+    {
+     "key": "file_count",
+     "label": "파일 수",
+     "format": "number"
+    },
+    {
+     "key": "total_bytes",
+     "label": "전체 크기",
+     "format": "bytes"
+    },
+    {
+     "key": "message_rows",
+     "label": "메시지 행",
+     "format": "number"
+    },
+    {
+     "key": "reason_ko",
+     "label": "사유",
+     "aliases": [
+      "error"
+     ],
+     "width": 320
+    },
+    {
+     "key": "app_root",
+     "semantic": "path",
+     "label": "앱 폴더",
+     "aliases": [
+      "source_path"
+     ],
+     "format": "path"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "last_file_modified",
+     "label": "마지막 파일 수정",
+     "format": "time",
+     "ts_kind": "modified"
+    },
+    {
+     "key": "attachment_rows",
+     "label": "첨부 행",
+     "format": "number"
+    },
+    {
+     "key": "contact_rows",
+     "label": "연락처 행",
+     "format": "number"
+    },
+    {
+     "key": "encrypted_store_count",
+     "label": "암호화 저장소 수",
+     "format": "number"
+    },
+    {
+     "key": "parse_error_count",
+     "label": "처리 오류 수",
+     "format": "number"
+    },
+    {
+     "key": "caps_hit",
+     "label": "상한 도달"
+    }
+   ],
+   "rules": []
+  },
+  {
+   "id": "messenger-error",
+   "label": "메신저 처리 오류",
+   "types": [
+    "chat-parse-error"
+   ],
+   "core_columns": [
+    {
+     "key": "service",
+     "label": "앱",
+     "aliases": [
+      "app"
+     ]
+    },
+    {
+     "key": "reason_ko",
+     "label": "사유",
+     "aliases": [
+      "error"
+     ],
+     "width": 360
+    },
+    {
+     "key": "app_root",
+     "label": "앱 폴더",
+     "aliases": [
+      "store_path",
+      "source_path"
+     ],
+     "format": "path"
+    },
+    {
+     "key": "error_type",
+     "label": "오류 종류"
+    },
+    {
+     "key": "source_format",
+     "label": "저장소 형식"
+    },
+    {
+     "key": "user",
+     "label": "사용자 프로필"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "error",
+     "label": "오류 원문"
+    },
+    {
+     "key": "source_path",
+     "label": "원본",
+     "format": "path"
+    },
+    {
+     "key": "parser_version",
+     "label": "파서 버전",
+     "format": "mono"
+    }
+   ],
+   "rules": []
+  },
+  {
+   "id": "kakaotalk-app",
+   "label": "카카오톡 앱 인벤토리",
+   "types": [
+    "kakaotalk-app-inventory"
+   ],
+   "core_columns": [
+    {
+     "key": "profile_path",
+     "semantic": "path",
+     "label": "프로필 경로",
+     "format": "path"
+    },
+    {
+     "key": "status_label",
+     "label": "복호 상태",
+     "width": 110
+    },
+    {
+     "key": "reason",
+     "label": "사유",
+     "width": 380
+    },
+    {
+     "key": "chat_database_count",
+     "label": "대화 DB",
+     "format": "number"
+    },
+    {
+     "key": "decrypted_database_count",
+     "label": "복호한 DB",
+     "format": "number"
+    },
+    {
+     "key": "message_row_count",
+     "label": "메시지",
+     "format": "number"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "decryption_status",
+     "label": "상태 코드",
+     "format": "mono"
+    },
+    {
+     "key": "openssl_available",
+     "label": "OpenSSL 사용 가능"
+    },
+    {
+     "key": "policy",
+     "label": "복호 정책"
+    }
+   ],
+   "rules": []
+  },
+  {
+   "id": "kakaotalk-shared-picture",
+   "label": "카카오톡 공유 사진",
+   "types": [
+    "kakaotalk-shared-picture"
+   ],
+   "core_columns": [
+    {
+     "key": "download_time",
+     "label": "저장 시각(파일 이름)",
+     "format": "time",
+     "ts_kind": "saved",
+     "width": 170
+    },
+    {
+     "key": "file_name",
+     "semantic": "attachment",
+     "label": "파일 이름",
+     "width": 240
+    },
+    {
+     "key": "location_label",
+     "label": "위치 종류"
+    },
+    {
+     "key": "download_location",
+     "semantic": "path",
+     "label": "저장 위치",
+     "format": "path"
+    },
+    {
+     "key": "mime",
+     "label": "형식(MIME)"
+    },
+    {
+     "key": "sha256",
+     "semantic": "hash",
+     "label": "해시(SHA-256)",
+     "format": "mono"
+    },
+    {
+     "key": "is_thumbnail",
+     "label": "썸네일",
+     "width": 70
+    },
+    {
+     "key": "link_status",
+     "label": "메시지 연결"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "linked_message_id",
+     "label": "연결 메시지 ID",
+     "format": "mono"
+    },
+    {
+     "key": "conversation_id",
+     "label": "대화방"
+    },
+    {
+     "key": "sender",
+     "semantic": "person_sender",
+     "label": "보낸 사람"
+    },
+    {
+     "key": "message_time",
+     "label": "메시지 시각",
+     "format": "time",
+     "ts_kind": "sent"
+    },
+    {
+     "key": "link_method",
+     "label": "연결 방법"
+    },
+    {
+     "key": "size",
+     "label": "크기",
+     "format": "bytes"
+    },
+    {
+     "key": "sha1",
+     "semantic": "hash",
+     "label": "해시(SHA-1)",
+     "format": "mono"
     }
    ],
    "rules": []
@@ -6622,6 +8118,52 @@
    }
   },
   {
+   "id": "browser.webmail_upload",
+   "family": "web-upload-candidate",
+   "grade": "B",
+   "label_ko": "웹메일 첨부 업로드 후보",
+   "rationale_ko": "캐시 항목·방문 기록 URL이 웹메일(네이버·다음·Gmail·Outlook 웹) 첨부 업로드 경로이거나 그 호스트로 간 POST 요청: 웹메일을 통한 파일 유출 경로.",
+   "false_positive_ko": "업무 메일 첨부·첨부 열람(약한 근거 attid는 기본 제외). URL은 업로드 흐름의 흔적일 뿐 어떤 파일이 나갔는지는 다른 증거로 확인.",
+   "sources": [
+    "https://developers.google.com/gmail/api/reference/rest/v1/users.messages.attachments/get",
+    "https://learn.microsoft.com/en-us/exchange/client-developer/web-service-reference/createattachment-operation",
+    "https://developers.google.com/drive/api/guides/manage-uploads",
+    "https://www.dropbox.com/developers/documentation/http/documentation",
+    "https://learn.microsoft.com/en-us/onedrive/developer/rest-api/api/driveitem-createuploadsession",
+    "https://chromium.googlesource.com/chromium/src/+/HEAD/net/disk_cache/simple/simple_entry_format.h"
+   ],
+   "version": 1,
+   "status": "provisional",
+   "params": {
+    "min_strength": "medium"
+   }
+  },
+  {
+   "id": "browser.filesharing_upload",
+   "family": "web-upload-candidate",
+   "grade": "B",
+   "label_ko": "파일 공유·웹하드·클라우드 업로드 후보",
+   "rationale_ko": "캐시 항목·방문 기록 URL이 파일 공유(WeTransfer·Send Anywhere·MEGA)·웹하드·개인 클라우드(Google Drive·Dropbox·OneDrive·MYBOX) 업로드 엔드포인트이거나 그 호스트로 간 POST 요청: 외부 저장소로의 유출 경로.",
+   "false_positive_ko": "업무용 클라우드·사내 승인 파일 전송. URL은 업로드 흐름의 흔적일 뿐 어떤 파일이 나갔는지는 다른 증거로 확인.",
+   "sources": [
+    "https://developers.google.com/gmail/api/reference/rest/v1/users.messages.attachments/get",
+    "https://learn.microsoft.com/en-us/exchange/client-developer/web-service-reference/createattachment-operation",
+    "https://developers.google.com/drive/api/guides/manage-uploads",
+    "https://www.dropbox.com/developers/documentation/http/documentation",
+    "https://learn.microsoft.com/en-us/onedrive/developer/rest-api/api/driveitem-createuploadsession",
+    "https://chromium.googlesource.com/chromium/src/+/HEAD/net/disk_cache/simple/simple_entry_format.h"
+   ],
+   "version": 1,
+   "status": "provisional",
+   "params": {
+    "min_strength": "medium",
+    "categories": [
+     "filesharing",
+     "cloud"
+    ]
+   }
+  },
+  {
    "id": "cloud.bulk_download",
    "family": "cloud",
    "grade": "B",
@@ -6745,6 +8287,42 @@
    "params": {
     "retention_days": 180
    }
+  },
+  {
+   "id": "cloud.bulk_upload",
+   "family": "cloud-sync",
+   "grade": "A",
+   "label_ko": "대량 업로드",
+   "rationale_ko": "한 계정의 서로 다른 항목 업로드가 1시간 안에 50건 이상이거나, 서로 다른 항목 2건 이상의 합계가 500 MB 이상: 개인 클라우드로 대량 반출. 같은 항목의 재업로드는 한 번만 셈. 로그 카빙 레코드만으로 된 구간은 B 등급(메모 표시).",
+   "false_positive_ko": "최초 동기화·새 PC 설정, 사진·백업 폴더 자동 업로드, 같은 파일의 반복 동기화.",
+   "sources": [
+    "https://learn.microsoft.com/purview/audit-log-activities",
+    "https://github.com/ydkhatri/OneDrive",
+    "https://help.dropbox.com/installs/sync-overview"
+   ],
+   "version": 2,
+   "status": "provisional",
+   "params": {
+    "window_minutes": 60,
+    "min_count": 50,
+    "min_bytes": 500000000
+   }
+  },
+  {
+   "id": "cloud.sync_folder_outside_user_profile",
+   "family": "cloud-sync",
+   "grade": "C",
+   "label_ko": "사용자 프로필 밖 동기화 폴더",
+   "rationale_ko": "동기화 클라이언트의 동기화 폴더가 C:\\Users\\<사용자> 밖(다른 드라이브·이동식 디스크·공용 폴더)에 있음: 반출용 경로 구성 정황.",
+   "false_positive_ko": "데이터 드라이브(D:)에 의도적으로 둔 경우, 회사 정책상 위치 변경.",
+   "sources": [
+    "https://learn.microsoft.com/sharepoint/use-group-policy",
+    "https://help.dropbox.com/installs/move-dropbox-folder",
+    "https://support.google.com/drive/answer/10838124"
+   ],
+   "version": 1,
+   "status": "provisional",
+   "params": {}
   },
   {
    "id": "documents.lastsaved_ne_author",
@@ -7243,6 +8821,42 @@
      "proton.me",
      "protonmail.com"
     ]
+   }
+  },
+  {
+   "id": "email.external_bulk_attachments",
+   "family": "email",
+   "grade": "B",
+   "label_ko": "외부 도메인으로 첨부 대량 발송",
+   "rationale_ko": "메일함 소유자(보낸 편지함의 최다 발신자, 없으면 컨테이너 파일명의 계정 주소)가 외부 도메인 수신자에게 하루(현지 기준) 첨부 n개 이상 보낸 경우: 메일을 통한 자료 유출 정황. 보낸 편지함 또는 From=소유자인 메일만 세고, 같은 Message-ID는 한 번만(복구·삭제 사본 제외), 본문 삽입 이미지(서명 등 inline/Content-ID)는 첨부 수에서 뺀다.",
+   "false_positive_ko": "협력사·고객사와의 정상 업무 자료 교환, 계약서 묶음 발송.",
+   "sources": [
+    "https://attack.mitre.org/techniques/T1048/",
+    "https://attack.mitre.org/techniques/T1114/",
+    "https://learn.microsoft.com/en-us/office/client-developer/outlook/mapi/pidtagclientsubmittime-canonical-property"
+   ],
+   "version": 2,
+   "status": "provisional",
+   "params": {
+    "min_attachments": 10,
+    "tz_offset_hours": 9
+   }
+  },
+  {
+   "id": "email.deleted_folder_recent",
+   "family": "email",
+   "grade": "C",
+   "label_ko": "최근 삭제한 메일",
+   "rationale_ko": "지운 편지함·복구 가능한 항목에 있거나 도구가 삭제 영역에서 복구한 메일 중, 같은 메일함의 가장 최근 메일로부터 n일 이내 메일: 증거 인멸·은닉 정황. 최신 시각은 수신/발송 시각만 쓰고 수집 시각(없으면 현재)+1일보다 미래인 시각은 무시하며, 폴더 이름은 경로 구간 단위로 정확히 비교(EN/KO/JA/ZH/DE/FR/ES).",
+   "false_positive_ko": "일상적인 메일함 정리, 자동 정리 규칙.",
+   "sources": [
+    "https://learn.microsoft.com/en-us/exchange/security-and-compliance/recoverable-items-folder/recoverable-items-folder",
+    "https://github.com/libyal/libpff"
+   ],
+   "version": 2,
+   "status": "provisional",
+   "params": {
+    "recent_days": 30
    }
   },
   {
@@ -8212,6 +9826,25 @@
    "status": "provisional",
    "params": {
     "gap_days": 90
+   }
+  },
+  {
+   "id": "messenger.external_file_transfer",
+   "family": "messenger-attachment",
+   "grade": "B",
+   "label_ko": "외부 상대에게 파일 전송",
+   "rationale_ko": "데스크톱 메신저에서 보낸 첨부의 받는 사람이 조직 외부 도메인(사용자 계정·내부 도메인과 다름)이거나 같은 앱의 연락처 목록에 없는 상대: 유출 경로.",
+   "false_positive_ko": "협력사·고객과의 정상 업무 파일 교환, 연락처 동기화가 안 된 앱, 계정 소유자 본인 연락처만 있는 경우는 연락처 목록으로 보지 않음.",
+   "sources": [
+    "https://attack.mitre.org/techniques/T1567/",
+    "https://www.magnetforensics.com/blog/the-lesser-talked-about-messaging-apps/",
+    "https://dfrws.org/presentation/digital-forensic-analysis-of-encrypted-database-files-in-instant-messaging-applications-on-windows-operating-systems/"
+   ],
+   "version": 2,
+   "status": "provisional",
+   "params": {
+    "internal_domains": [],
+    "flag_unregistered_contact": true
    }
   },
   {

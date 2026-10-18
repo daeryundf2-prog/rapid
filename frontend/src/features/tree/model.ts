@@ -3,7 +3,13 @@ import type { ReviewCounts, SavedSearch } from "../../api/caseDb";
 import { filesInventoryCategory } from "../../api/collections";
 import type { EvidencePartition, EvidenceSource } from "../../api/dashboard";
 import type { CanonicalCounts, RunSummary, RunTree, TreeNode } from "../../api/runs";
-import type { CollectionId, ColumnFilter, ReviewStatus } from "../../contracts/collection";
+import type {
+  CollectionId,
+  ColumnFilter,
+  RecordFieldFilters,
+  ReviewStatus,
+} from "../../contracts/collection";
+import { RECORD_FIELD_KEYS, recordFieldsKey } from "../../contracts/collection";
 import type { IconName } from "../../icons";
 import {
   ANALYSIS_NODES,
@@ -15,7 +21,14 @@ import {
 import { GRADES, type Grade, ruleById } from "../flags/catalog";
 import type { CaseRoute } from "./adapter";
 import { groupByCategory, kindIcon } from "./categories";
-import { DOMAINS, type DomainNodeDef, type DomainTarget, NON_EVIDENCE_NOTE, targetKey } from "./domains";
+import {
+  DOMAINS,
+  type DomainNodeDef,
+  type DomainTarget,
+  NON_EVIDENCE_NOTE,
+  orderGroup,
+  targetKey,
+} from "./domains";
 
 export type RouteTail = Omit<CaseRoute, "runId">;
 
@@ -28,6 +41,8 @@ export type DomainRoute = RouteTail & {
   /** 특이사항 nodes (U-F4): `flag=` / `flag_grade=`. */
   flags?: string[];
   flagGrade?: Grade;
+  /** Exact record-field filters (`browser=` / `service=`, server-side). */
+  fields?: RecordFieldFilters;
 };
 
 export interface TreeModelNode {
@@ -405,7 +420,11 @@ export function domainNodeCount(target: DomainTarget, input: TreeModelInput): Do
     const kindNode = mergedKindNode(tree, target.kind);
     // The run has no records of this kind at all.
     if (!kindNode) return known(0, true);
-    const zero = zeroReason(kindNode);
+    const zero = inventoryReason(kindNode, target.types) ?? zeroReason(kindNode);
+    if (recordFieldsKey(target.fields)) {
+      const count = fieldCount(kindNode, target);
+      return count === undefined ? { count: UNKNOWN_COUNT } : known(count, true, zero);
+    }
     if (target.countField) {
       const value = (kindNode as unknown as Record<string, unknown>)[target.countField];
       return typeof value === "number" ? known(value, true, zero) : { count: UNKNOWN_COUNT };
@@ -433,6 +452,78 @@ export function domainNodeCount(target: DomainTarget, input: TreeModelInput): Do
     return kindNode.count === 0 ? known(0, true, zero) : { count: UNKNOWN_COUNT };
   }
   return { count: undefined };
+}
+
+/**
+ * Rows of a field-filtered node (`browser=` / `service=`) from the kind's `field_type_counts`:
+ * the target's types (all types when it has none) of every value of every filtered field.
+ * undefined = the server sent no counts for that field (older server).
+ */
+export function fieldCount(
+  kindNode: TreeNode,
+  target: Pick<DomainTarget, "types" | "fields">,
+): number | undefined {
+  let total: number | undefined;
+  for (const field of RECORD_FIELD_KEYS) {
+    const values = target.fields?.[field];
+    if (!values?.length) continue;
+    const byValue = kindNode.field_type_counts?.[field];
+    if (!byValue) return undefined;
+    let sum = 0;
+    for (const value of values) {
+      for (const [type, count] of Object.entries(byValue[value] ?? {})) {
+        if (!target.types?.length || target.types.includes(type)) sum += count;
+      }
+    }
+    // Several filtered fields AND together: the smallest count bounds the rows.
+    total = total === undefined ? sum : Math.min(total, sum);
+  }
+  return total;
+}
+
+/** Nouns of the inventory rows behind M4's empty-node reasons, by inventory type. */
+const INVENTORY_NOUNS: Readonly<Record<string, string>> = {
+  "email-container-inventory": "메일 컨테이너(PST/OST)",
+  "kakaotalk-app-inventory": "카카오톡 프로필",
+};
+
+/**
+ * Typed nodes whose emptiness an inventory explains (r2 console fix M4): 메일·첨부·연락처·일정
+ * are empty while the PST/OST tools are off or missing; 카카오톡 메시지 while the chat DB stays
+ * encrypted. Statuses that produced rows (`normalized`, `decrypted`) are no reason.
+ */
+const INVENTORY_EXPLAINS: ReadonlyArray<{
+  inventory: string;
+  types: readonly string[];
+  ok: readonly string[];
+}> = [
+  {
+    inventory: "email-container-inventory",
+    types: ["email-message", "email-attachment", "contact", "calendar-event"],
+    ok: ["normalized"],
+  },
+  { inventory: "kakaotalk-app-inventory", types: ["kakaotalk-message"], ok: ["decrypted"] },
+];
+
+/**
+ * Korean reason of an empty typed node from the kind's `inventory_notes`: "메일 컨테이너(PST/OST)
+ * 2개: 외부 도구 실행 꺼짐(기본값) — RAPIDTRIAGE_EMAIL_EXTERNAL_TOOLS=1 …". undefined = none.
+ */
+export function inventoryReason(
+  kindNode: TreeNode,
+  types: readonly string[] | undefined,
+): string | undefined {
+  if (!types?.length || !kindNode.inventory_notes?.length) return undefined;
+  const parts: string[] = [];
+  for (const rule of INVENTORY_EXPLAINS) {
+    if (!types.every((type) => rule.types.includes(type))) continue;
+    for (const note of kindNode.inventory_notes) {
+      if (note.artifact_type !== rule.inventory || rule.ok.includes(note.status)) continue;
+      const why = note.reason || note.status_label || note.status;
+      parts.push(`${INVENTORY_NOUNS[note.artifact_type] ?? note.artifact_type} ${note.count}개: ${why}`);
+    }
+  }
+  return parts.length ? parts.slice(0, 2).join("; ") : undefined;
 }
 
 /** Why 전체 파일(인벤토리) is empty on a run whose files output predates the inventory. */
@@ -491,6 +582,14 @@ export function domainRoute(target: DomainTarget): DomainRoute {
   if (target.ext?.length) route.ext = [...target.ext];
   if (target.cols?.length) route.cols = [...target.cols];
   if (target.cf?.length) route.cf = target.cf.map((filter) => ({ ...filter }));
+  if (recordFieldsKey(target.fields)) {
+    route.fields = Object.fromEntries(
+      RECORD_FIELD_KEYS.filter((key) => target.fields?.[key]?.length).map((key) => [
+        key,
+        [...(target.fields?.[key] ?? [])],
+      ]),
+    );
+  }
   return route;
 }
 
@@ -534,7 +633,8 @@ export function domainTotal(
     }
     if (t.collection !== "artifacts" || !t.kind || typeof count !== "number") return;
     // Catch-alls span domains, groups repeat their leaves, filtered views repeat their types.
-    if (node.catchAll || node.children?.length || t.cf?.length) return;
+    if (node.catchAll || node.children?.length || node.fieldChildren || t.cf?.length) return;
+    if (recordFieldsKey(t.fields)) return;
     anyKnown = true;
     if (!t.types?.length) wide.set(t.kind, count);
     else if (node.nonEvidence || node.detail) excluded.set(t.kind, (excluded.get(t.kind) ?? 0) + count);
@@ -545,6 +645,38 @@ export function domainTotal(
   for (const [kind, count] of wide) total += Math.max(0, count - (excluded.get(kind) ?? 0));
   for (const [kind, count] of typed) if (!wide.has(kind)) total += count;
   return total;
+}
+
+/** Tooltip of a field-filtered node: the server pages only the matching rows. */
+function fieldsNote(target: DomainTarget): string {
+  const parts = RECORD_FIELD_KEYS.filter((key) => target.fields?.[key]?.length).map(
+    (key) => `${key}=${(target.fields?.[key] ?? []).join("|")}`,
+  );
+  return `서버 필터: ${parts.join(", ")}`;
+}
+
+/**
+ * Children of a `fieldChildren` node (데스크톱 메신저 › 앱별 보기): one server-filtered node per
+ * value of the field with rows of the node's types (`/tree` `field_type_counts`), in Korean order;
+ * values without such rows get no node.
+ */
+export function fieldChildDefs(node: DomainNodeDef, tree: RunTree | undefined): DomainNodeDef[] {
+  const spec = node.fieldChildren;
+  const kind = node.target.kind;
+  if (!spec || !kind) return [];
+  const byValue = mergedKindNode(tree, kind)?.field_type_counts?.[spec.field] ?? {};
+  const defs: DomainNodeDef[] = [];
+  for (const [value, perType] of Object.entries(byValue)) {
+    const rows = spec.types.reduce((sum, type) => sum + (perType[type] ?? 0), 0);
+    if (!value || rows <= 0) continue;
+    defs.push({
+      id: `${node.id}:${value}`,
+      label: value,
+      target: { collection: "artifacts", kind, types: [...spec.types], fields: { [spec.field]: [value] } },
+      ...(node.typeLabels ? { typeLabels: node.typeLabels } : {}),
+    });
+  }
+  return orderGroup(defs);
 }
 
 /** Tooltip of a column-filtered node: the filter is applied to the loaded rows. */
@@ -581,9 +713,14 @@ function domainNodes(input: TreeModelInput): TreeModelNode[] {
       const route = domainRoute(target);
       const label =
         node.target.collection === "indicators" ? indicatorsLabel(input.tree, node.label) : node.label;
-      const children = node.children?.map(toModel);
+      const childDefs = node.fieldChildren ? fieldChildDefs(node, input.tree) : node.children;
+      const children = childDefs?.map(toModel);
       const flagCounts =
-        target.collection === "artifacts" && target.kind && !target.types?.length && !target.cf?.length
+        target.collection === "artifacts" &&
+        target.kind &&
+        !target.types?.length &&
+        !target.cf?.length &&
+        !recordFieldsKey(target.fields)
           ? mergedKindNode(input.tree, target.kind)?.flag_counts
           : undefined;
       if (flagCounts && target.kind) domainFlags.set(target.kind, flagCounts);
@@ -608,8 +745,10 @@ function domainNodes(input: TreeModelInput): TreeModelNode[] {
         marker: state.marker,
         icon: state.icon ?? node.icon,
         ...(children?.length ? { children } : {}),
+        ...(node.note ? { note: node.note } : {}),
         ...(node.nonEvidence ? { dimmed: true, note: NON_EVIDENCE_NOTE } : {}),
         ...(target.cf?.length && !node.nonEvidence ? { note: filteredNote(target) } : {}),
+        ...(recordFieldsKey(target.fields) && !node.note ? { note: fieldsNote(target) } : {}),
         ...(flagCounts && Object.values(flagCounts).some((n) => (n ?? 0) > 0) ? { flagCounts } : {}),
         ...(hiddenReason ? { hiddenReason } : {}),
       };

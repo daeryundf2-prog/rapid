@@ -8,13 +8,14 @@ from collections.abc import Iterable, Mapping
 from datetime import timezone
 from email import policy
 from email.message import EmailMessage
-from email.utils import getaddresses, parsedate_to_datetime
+from email.utils import getaddresses, parseaddr, parsedate_to_datetime
 from pathlib import Path
 
 from ..core.forensic_accuracy import build_accuracy_gate
 from ..core.models import ArtifactRecord
 from ..core.submission import compute_hashes
 from ._walk import iter_evidence_paths
+from .email_pst import collect_ics_file, collect_outlook_container
 from .review import build_forensic_review
 
 PARSER_VERSION = "email-artifacts-v2"
@@ -162,10 +163,33 @@ class EmailArtifactsProvider:
 
     def collect(self, root: Path) -> Iterable[ArtifactRecord]:
         for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
-            if path.is_file() and path.suffix.lower() in EMAIL_SUFFIXES:
+            if path.is_file() and path.suffix.lower() in {".pst", ".ost"}:
+                # One hash of the container, shared by the string inventory and the pffexport/readpst run.
+                source_hashes = compute_hashes(path)
+                yield collect_mail_container(path, source_hashes=source_hashes)
+                yield from collect_outlook_rows(path, source_hashes=source_hashes)
+            elif path.is_file() and path.suffix.lower() in EMAIL_SUFFIXES:
                 yield from collect_email_path(path)
+            elif path.is_file() and path.suffix.lower() == ".ics":
+                yield from collect_calendar_file(path)
             elif path.is_file() and is_maildir_message(path):
                 yield from collect_maildir_message(path)
+
+
+def collect_outlook_rows(path: Path, *, source_hashes: Mapping[str, str] | None = None) -> list[ArtifactRecord]:
+    """r2 M2: PST/OST rows through pffexport/readpst, else one ``email-container-inventory`` row."""
+    try:
+        return collect_outlook_container(path, source_hashes=source_hashes)
+    except (OSError, ValueError, UnicodeError, LookupError):
+        return []
+
+
+def collect_calendar_file(path: Path) -> list[ArtifactRecord]:
+    """r2 M2: RFC 5545 VEVENT rows; a damaged file yields no rows and the run continues."""
+    try:
+        return collect_ics_file(path)
+    except (OSError, ValueError, UnicodeError, LookupError):
+        return []
 
 
 def collect_email_path(path: Path) -> Iterable[ArtifactRecord]:
@@ -238,8 +262,8 @@ def collect_mbox(path: Path) -> Iterable[ArtifactRecord]:
     )
 
 
-def collect_mail_container(path: Path) -> ArtifactRecord:
-    source_hashes = compute_hashes(path)
+def collect_mail_container(path: Path, *, source_hashes: Mapping[str, str] | None = None) -> ArtifactRecord:
+    source_hashes = dict(source_hashes) if source_hashes and source_hashes.get("sha256") else compute_hashes(path)
     blob = read_prefix(path, CONTAINER_SCAN_LIMIT)
     emails = sorted({item.decode("ascii", errors="ignore") for item in EMAIL_RE.findall(blob)})[:MAX_CONTAINER_CANDIDATES]
     subjects = sorted({decode_bytes(item) for item in SUBJECT_RE.findall(blob) if decode_bytes(item)})[:MAX_CONTAINER_CANDIDATES]
@@ -388,6 +412,7 @@ def build_message_record(
         "thread_parent_id": header_value(message, "In-Reply-To"),
         "subject": header_value(message, "Subject"),
         "from": header_value(message, "From"),
+        "address_type": sender_address_type(header_value(message, "From")),
         "to": header_value(message, "To"),
         "cc": header_value(message, "Cc"),
         "date": header_value(message, "Date"),
@@ -656,7 +681,16 @@ def message_body_summary(message: EmailMessage) -> tuple[str, str, bool]:
     return preview, sha256_text(body) if body else "", len(body) > len(preview)
 
 
+def sender_address_type(value: str) -> str:
+    """``SMTP`` for an internet address, ``EX`` for an Exchange X.500 DN (``/O=EXCHANGELABS/...``), else ``""``."""
+    _name, address = parseaddr(value)
+    if "@" in address:
+        return "SMTP"
+    return "EX" if "/o=" in value.lower() else ""
+
+
 def attachment_summaries(message: EmailMessage) -> list[dict[str, object]]:
+    """``Content-Disposition: attachment`` parts; an image with a Content-ID (signature image) is marked ``inline``."""
     attachments: list[dict[str, object]] = []
     attachment_parts = [
         part
@@ -671,6 +705,8 @@ def attachment_summaries(message: EmailMessage) -> list[dict[str, object]]:
                 "index": index,
                 "filename": part.get_filename() or "",
                 "content_type": part.get_content_type(),
+                "content_id": str(part.get("Content-ID") or "").strip(),
+                "inline": bool(str(part.get("Content-ID") or "").strip()) and part.get_content_type().startswith("image/"),
                 "size": len(payload),
                 "sha256": hashlib.sha256(payload).hexdigest() if payload else "",
                 "bounded_preview_bytes": len(preview),

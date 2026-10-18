@@ -272,3 +272,53 @@ class TypedUrlDirect(Rule):
         if not domain and not keyword:
             return None
         return RuleResult(evidence(url=url, domain=domain, keyword=keyword, timestamp=row.text("timestamp", "visit_time")))
+
+
+UPLOAD = select(types={"web-upload-candidate"})
+UPLOAD_STRENGTHS = ("weak", "medium", "strong")
+
+
+def upload_strength_ok(row: RowView, minimum: object) -> bool:
+    """The candidate's ``strength`` (weak < medium < strong) is at least ``minimum``."""
+    strength = row.text("strength").lower()
+    floor = str(minimum or "medium").lower()
+    if strength not in UPLOAD_STRENGTHS or floor not in UPLOAD_STRENGTHS:
+        return False
+    return UPLOAD_STRENGTHS.index(strength) >= UPLOAD_STRENGTHS.index(floor)
+
+
+def upload_evidence(row: RowView) -> dict[str, object]:
+    return evidence(
+        url=row.text("url"),
+        service=row.text("service"),
+        strength=row.text("strength"),
+        method=row.text("method"),
+        file_name_candidate=row.text("file_name_candidate"),
+        source_artifact_type=row.text("source_artifact_type"),
+        timestamp=row.text("timestamp"),
+    )
+
+
+@register("browser.webmail_upload")
+class WebmailUpload(Rule):
+    """Webmail attachment-upload candidate (Naver/Daum/Gmail/Outlook web) at or above ``min_strength``."""
+
+    selector = UPLOAD
+
+    def apply(self, row: RowView, ctx: FlagContext) -> RuleResult | None:
+        if row.text("category") != "webmail" or not upload_strength_ok(row, self.param("min_strength", "medium")):
+            return None
+        return RuleResult(upload_evidence(row))
+
+
+@register("browser.filesharing_upload")
+class FileSharingUpload(Rule):
+    """Upload candidate to a file-sharing / web-hard / personal cloud service at or above ``min_strength``."""
+
+    selector = UPLOAD
+
+    def apply(self, row: RowView, ctx: FlagContext) -> RuleResult | None:
+        categories = {str(item) for item in self.param("categories", ["filesharing", "cloud"])}
+        if row.text("category") not in categories or not upload_strength_ok(row, self.param("min_strength", "medium")):
+            return None
+        return RuleResult(upload_evidence(row))

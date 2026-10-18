@@ -1059,6 +1059,15 @@ export const VISIBLE_FORENSIC_CAPABILITY_GROUPS = [
         terms: ["m365", "teams", "onedrive", "sharepoint", "m365_export_review_profile", "m365_export_parser_manifest"],
         nextAction: "M365/Teams/OneDrive/SharePoint export rows와 manifest는 제공; Purview/eDiscovery/Graph trusted diff 필요",
       },
+      {
+        id: "cloud-sync-clients",
+        label: "동기화 클라이언트(OneDrive·Dropbox·Google Drive·MYBOX·iCloud)",
+        status: "partial",
+        viewer: "Cloud sync client viewer",
+        artifactTypes: ["cloud-sync-account", "cloud-sync-file", "cloud-sync-event", "cloud-sync-inventory"],
+        terms: ["cloud-sync", "syncenginedatabase", "odl", "drivefs", "dropbox", "mybox", "icloud drive", "sync root"],
+        nextAction: "계정·동기화 폴더·항목·업로드/삭제 이벤트 행은 제공; 클라이언트 버전별 스키마·ODL 레코드 검증과 암호화 저장소(.dbx·keystore)는 미해석",
+      },
     ],
   },
   {

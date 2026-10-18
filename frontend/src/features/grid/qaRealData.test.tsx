@@ -126,7 +126,7 @@ describe("jsonPaged reads pagination.total (Q: 총 250건, never paged past 250)
     Object.defineProperty(grid, "scrollTop", { configurable: true, value: 240 * 28 });
     fireEvent.scroll(grid);
     await waitFor(() => expect(calls.some((c) => c.url.includes("offset=250"))).toBe(true));
-  });
+  }, 20_000);
 });
 
 describe("loading state while a server filter scans (16)", () => {

@@ -55,6 +55,8 @@ NO_IDENTIFIER_FAMILIES = frozenset(
         "timeline",  # copies of artifact rows
         "indicator",  # copies of row values
         "timezone",  # one registry value
+        "web-upload-candidate",  # restates its source row (r2 console fix m3)
+        "messenger-error",  # store read failures (r2 console fix m2)
     }
 )
 
@@ -169,7 +171,8 @@ class NormalizationRegressionTests(unittest.TestCase):
 class CatalogSemanticTests(unittest.TestCase):
     def test_every_family_is_reviewed(self) -> None:
         catalog = load_catalog()
-        self.assertEqual(len(catalog.families), 54)
+        # 54 + r2 M1 (3) + r2 M4 (1) + r2 M2 (6) + r2 M3 (2) + console fix (cloud-sync split 2, messenger-error 1).
+        self.assertEqual(len(catalog.families), 69)
         for family in catalog.families:
             columns = [*family["core_columns"], *(family.get("aux_columns") or [])]
             tagged = [column for column in columns if column.get("semantic")]
@@ -203,6 +206,95 @@ class CatalogSemanticTests(unittest.TestCase):
                 parse_catalog(family(column))
             self.assertIn(message, str(caught.exception))
         parse_catalog(family({"semantic": "account", "semantic_when": {"f": ["v"]}, "derive": "auto_logon"}))
+
+
+class R2ConsoleCatalogTests(unittest.TestCase):
+    """r2 console fix m1/m2/m3/m8/M7: family split, column order, meaning tags, value labels."""
+
+    def setUp(self) -> None:
+        self.catalog = load_catalog()
+        self.families = {family["id"]: family for family in self.catalog.families}
+
+    def column(self, family: str, key: str) -> dict[str, object]:
+        family_def = self.families[family]
+        return next(column for column in [*family_def["core_columns"], *(family_def.get("aux_columns") or [])] if column["key"] == key)
+
+    def core_labels(self, family: str) -> list[str]:
+        return [str(column["label"]) for column in self.families[family]["core_columns"]]
+
+    def test_cloud_sync_is_split_into_account_file_event_and_inventory(self) -> None:
+        self.assertEqual(self.catalog.family_for("cloud-sync-account"), "cloud-sync-account")
+        self.assertEqual(self.catalog.family_for("cloud-sync-file"), "cloud-sync")
+        self.assertEqual(self.catalog.family_for("cloud-sync-event"), "cloud-sync")
+        self.assertEqual(self.catalog.family_for("cloud-sync-inventory"), "cloud-sync-inventory")
+        self.assertEqual(self.core_labels("cloud-sync-account")[:5], ["클라이언트", "계정", "동기화 폴더", "테넌트", "계정 ID"])
+        self.assertEqual(self.column("cloud-sync-account", "account_id")["semantic"], "account")
+        self.assertEqual(self.core_labels("cloud-sync-inventory")[:3], ["클라이언트", "상태", "사유"])
+        self.assertIn("cloud.sync_folder_outside_user_profile", self.families["cloud-sync-account"]["rules"])
+        # m3: the cloud-relative item path is no evidence path; m8: modified time is the timestamp kind.
+        self.assertNotIn("semantic", self.column("cloud-sync", "item_path"))
+        timestamp = self.column("cloud-sync", "timestamp")
+        self.assertEqual(timestamp["ts_kind"], "cloud-modified")
+        keys = [column["key"] for column in self.families["cloud-sync"]["aux_columns"]]
+        self.assertNotIn("modified_at", keys)
+
+    def test_contact_email_tags_agree(self) -> None:
+        self.assertEqual(self.column("contact", "email")["semantic"], self.column("messenger-contact", "email")["semantic"])
+
+    def test_email_core_order_and_pst_time(self) -> None:
+        self.assertEqual(self.core_labels("email"), ["시각(제출·배달·Date)", "보낸 사람", "받는 사람", "제목", "첨부", "폴더", "읽음"])
+        time = self.families["email"]["core_columns"][0]
+        self.assertEqual(time["key"], "submit_time")
+        self.assertEqual(time["aliases"][:2], ["delivery_time", "date"])
+        aux = [column["key"] for column in self.families["email"]["aux_columns"]]
+        for key in ("date", "message_id", "authentication_results", "return_path", "reply_to"):
+            self.assertIn(key, aux)
+        self.assertEqual(self.column("email", "date")["label"], "Date 헤더(발신 주장)")
+
+    def test_cache_entry_and_upload_candidate_order_and_tags(self) -> None:
+        self.assertEqual(self.core_labels("browser-cache-entry")[:8], ["시각", "주소 (URL)", "응답 상태", "콘텐츠 형식 (Content-Type)", "크기", "본문 SHA-256", "호스트", "요청 방식"])
+        self.assertEqual(self.column("browser-cache-entry", "url")["semantic_when"], {"method": ["POST"]})
+        self.assertEqual(self.core_labels("web-upload-candidate")[:5], ["시각", "서비스", "주소 (URL)", "근거 강도", "관련 파일 이름 후보"])
+        family = self.families["web-upload-candidate"]
+        self.assertFalse([column for column in [*family["core_columns"], *family["aux_columns"]] if column.get("semantic")])
+        self.assertEqual(self.column("web-upload-candidate", "source_artifact_type")["format"], "artifact_type")
+        # Cache GET resources stay out of 통합 보기 › URL; POST (upload) entries go in.
+        plan = next(column for column in family_plans(self.catalog)["browser-cache-entry"].columns if column.key == "url")
+        self.assertEqual(dict(plan.when), {"method": frozenset({"POST"})})
+
+    def test_messenger_error_family_and_attachment_tags(self) -> None:
+        self.assertEqual(self.catalog.family_for("chat-parse-error"), "messenger-error")
+        self.assertEqual(self.catalog.family_for("chat-app-inventory"), "messenger-app")
+        self.assertEqual(self.core_labels("messenger-error")[:3], ["앱", "사유", "앱 폴더"])
+        attachment = self.column("messenger", "attachments")
+        self.assertEqual((attachment["semantic"], attachment["aliases"][0]), ("attachment", "attachment_name"))
+        for key in ("from", "to"):
+            self.assertNotIn("semantic", self.column("email-attachment", key))
+        self.assertEqual(self.column("kakaotalk-shared-picture", "download_time")["ts_kind"], "saved")
+
+    def test_value_labels_cover_r2_raw_values(self) -> None:
+        direction = self.column("messenger", "direction")["value_labels"]
+        self.assertEqual({direction[raw] for raw in ("outgoing", "sent", "발신")}, {"발신"})
+        self.assertEqual({direction[raw] for raw in ("incoming", "received", "수신")}, {"수신"})
+        self.assertEqual(direction["unknown"], "불명")
+        self.assertEqual(self.column("messenger-attachment", "direction")["value_labels"], direction)
+        self.assertEqual(self.column("messenger", "deleted_state")["value_labels"]["live"], "활성")
+        self.assertIn("leveldb-plaintext", self.column("messenger-app", "encryption_state")["value_labels"])
+        self.assertIn("executable-trace-only", self.column("cloud-sync-inventory", "inventory_status")["value_labels"])
+        self.assertIn("mirror", self.column("cloud-sync", "sync_state")["value_labels"])
+        self.assertIn("chromium-simple", self.column("browser-cache-entry", "cache_format")["value_labels"])
+
+    def test_value_labels_validator_is_korean(self) -> None:
+        def family(column: dict[str, object]) -> list[tuple[str, bytes]]:
+            document = {"families": [{"id": "x", "label": "X", "core_columns": [{"key": "a", "label": "A", **column}]}]}
+            return [("x.yaml", json.dumps(document).encode("utf-8"))]
+
+        for labels in ({}, ["a"], {"a": ""}, {"": "가"}, {"a": 1}):
+            with self.assertRaises(CatalogError) as caught:
+                parse_catalog(family({"value_labels": labels}))
+            self.assertIn("value_labels", str(caught.exception))
+            self.assertRegex(str(caught.exception), "[가-힣]")
+        parse_catalog(family({"value_labels": {"outgoing": "발신"}}))
 
 
 class UrlClassTests(unittest.TestCase):

@@ -253,6 +253,23 @@ TIMELINE_FIELD_MAP: dict[str, tuple[TimelineField, ...]] = {
     ),
     "mobile-message": (F("message_timestamp", "message"), F("sent_at", "message"), F("edited_at", "edited")),
     "cloud-message": (F("message_timestamp", "message"), F("sent_at", "message")),
+    # Cloud sync clients (R2 M4): events/files use the row-level contract
+    # (``timestamp`` + ``timestamp_kind`` cloud-upload/cloud-modified/...);
+    # account and inventory rows carry no evidence time.
+    "cloud-sync-event": (),
+    # OneDrive SyncEngineDatabase diskCreationTime / diskLastAccessTime: the local copy's times.
+    "cloud-sync-file": (
+        F("viewed_at", "cloud-viewed"),
+        F("shared_with_me_at", "cloud-shared-with-me"),
+        F("disk_created_at", "sync-local-created"),
+        F("disk_accessed_at", "sync-local-accessed"),
+    ),
+    "cloud-sync-account": (),
+    "cloud-sync-inventory": (),
+    # r2 M2: decrypted KakaoTalk PC messages (sendAt, UTC) and saved pictures whose
+    # KakaoTalk_<yyyymmdd>_<hhmmssSSS> file name is a local wall-clock save time.
+    "kakaotalk-message": (F("timestamp", "message"),),
+    "kakaotalk-shared-picture": (F("download_time", "saved", timezone="local-unknown"),),
     # media-image/media-video evidence times come through the row-level
     # timestamp/timestamp_kind contract (EXIF DateTimeOriginal, mp4 mvhd).
     "media-image": (F("exif_gps_profile.gps_datetime_utc_candidate", "gps-fix"),),
@@ -277,6 +294,8 @@ TIMELINE_EXCLUDED_TYPES: frozenset[str] = frozenset(
         "kakaotalk-windows-correlation-summary",
         "synthetic-media-scan-status",
         "synthetic-media-scan-summary",
+        # Derived lead rows that re-copy the time of their source cache/history row.
+        "web-upload-candidate",
     }
 )
 # Aggregate rows that re-copy times of per-row artifacts of the same payload:

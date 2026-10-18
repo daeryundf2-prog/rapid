@@ -34,6 +34,13 @@ export interface CatalogColumn {
   semantic?: string;
   /** Display-only column computed from the row's own fields (`derivedFields.ts` DERIVERS id). */
   derive?: string;
+  /**
+   * Korean readings of raw values (`{outgoing: "발신", …}`, r2 console fix M7): the grid cell,
+   * viewer and citation show the reading, the raw value stays in the tooltip, and a column filter
+   * on the reading matches every raw spelling mapped to it (client-side column filters match the
+   * shown text). Values not in the map are shown as written.
+   */
+  value_labels?: Record<string, string>;
 }
 
 export interface CatalogFamily {
@@ -118,7 +125,53 @@ function column(raw: unknown): CatalogColumn | null {
     ...(strings(raw.aliases).length ? { aliases: strings(raw.aliases) } : {}),
     ...(typeof raw.semantic === "string" && raw.semantic ? { semantic: raw.semantic } : {}),
     ...(typeof raw.derive === "string" && raw.derive ? { derive: raw.derive } : {}),
+    ...(valueLabels(raw.value_labels) ? { value_labels: valueLabels(raw.value_labels) } : {}),
   };
+}
+
+function valueLabels(raw: unknown): Record<string, string> | undefined {
+  if (!isRecord(raw)) return undefined;
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (key && typeof value === "string" && value.trim()) out[key] = value;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+/** Korean reading of a raw scalar by a column's `value_labels` (undefined = none). */
+export function columnValueLabel(def: Pick<CatalogColumn, "value_labels">, raw: unknown): string | undefined {
+  if (!def.value_labels || (typeof raw !== "string" && typeof raw !== "number" && typeof raw !== "boolean"))
+    return undefined;
+  return def.value_labels[String(raw)];
+}
+
+/** The catalogue column of `family` reading record key `key` (its key or an alias). */
+function familyColumnFor(family: CatalogFamily | undefined, key: string): CatalogColumn | undefined {
+  if (!family) return undefined;
+  return [...family.core_columns, ...family.aux_columns].find(
+    (def) => def.key === key || (def.aliases ?? []).includes(key),
+  );
+}
+
+/** Korean reading of `raw` in record key `key` of a row of `artifactType` (viewer meta). */
+export function typeValueLabel(
+  artifactType: string | null | undefined,
+  key: string,
+  raw: unknown,
+): string | undefined {
+  const def = familyColumnFor(familyForType(artifactType), key);
+  return def ? columnValueLabel(def, raw) : undefined;
+}
+
+/** Korean reading of `raw` in record key `key` of family `familyId` (flag evidence in citations). */
+export function familyValueLabel(
+  familyId: string | undefined,
+  key: string,
+  raw: unknown,
+): string | undefined {
+  const family = familyId ? active.families.find((entry) => entry.id === familyId) : undefined;
+  const def = familyColumnFor(family, key);
+  return def ? columnValueLabel(def, raw) : undefined;
 }
 
 /** Validate a catalogue payload; malformed entries are dropped, a payload without families is null. */

@@ -530,4 +530,3 @@ def build_cases_router(store: RunJobStore, workspace: CaseWorkspace) -> APIRoute
         return {"command": "case.note.delete", "note": note}
 
     return router
-

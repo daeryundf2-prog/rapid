@@ -4,7 +4,13 @@
 // grid footer shows. Mapping raw rows to GridRow lives in
 // features/grid/columns/<collection>.ts so the API layer stays shape-agnostic.
 
-import type { CollectionQuery, ServerSort, ServerSortState } from "../contracts/collection";
+import {
+  type CollectionQuery,
+  hasRecordFields,
+  type RecordFieldFilters,
+  type ServerSort,
+  type ServerSortState,
+} from "../contracts/collection";
 import { ApiError, api } from "./client";
 import { type ArtifactsQuery, artifactsQueryString } from "./runs";
 
@@ -32,21 +38,33 @@ export interface RawPage {
 
 const enc = encodeURIComponent;
 
-/** 특이사항 filter of a listing (`flag=` repeated, `flag_grade=`). */
+/**
+ * 특이사항 filter of a listing (`flag=` repeated, `flag_grade=`) plus the artifacts' exact
+ * record-field filters (`browser=` / `service=`, r2 console fix M2) — both server-side row
+ * filters that page across kinds the same way.
+ */
 export interface FlagFilter {
   ids?: readonly string[];
   grade?: string;
+  fields?: RecordFieldFilters;
 }
 
-function flagQuery(filter: FlagFilter | undefined): { flag?: string[]; flag_grade?: string } {
+function flagQuery(filter: FlagFilter | undefined): {
+  flag?: string[];
+  flag_grade?: string;
+  browser?: string[];
+  service?: string[];
+} {
   return {
     ...(filter?.ids?.length ? { flag: [...filter.ids] } : {}),
     ...(filter?.grade ? { flag_grade: filter.grade } : {}),
+    ...(filter?.fields?.browser?.length ? { browser: [...filter.fields.browser] } : {}),
+    ...(filter?.fields?.service?.length ? { service: [...filter.fields.service] } : {}),
   };
 }
 
 function hasFlagFilter(filter: FlagFilter | undefined): boolean {
-  return Boolean(filter?.ids?.length || filter?.grade);
+  return Boolean(filter?.ids?.length || filter?.grade || hasRecordFields(filter?.fields));
 }
 
 /** `&flag=…&flag_grade=…` for the JSON listings (files, analysis). */
