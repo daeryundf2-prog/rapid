@@ -55,6 +55,7 @@ NO_IDENTIFIER_FAMILIES = frozenset(
         "timeline",  # copies of artifact rows
         "indicator",  # copies of row values
         "timezone",  # one registry value
+        "ntfs-logfile-transaction",  # LSN / op codes; file names are bare candidates, not paths (R3 §3.3)
     }
 )
 
@@ -170,7 +171,8 @@ class CatalogSemanticTests(unittest.TestCase):
     def test_every_family_is_reviewed(self) -> None:
         catalog = load_catalog()
         # 54 + r2 M1 (3) + r2 M4 (1) + r2 M2 (6) + r2 M3 (2).
-        self.assertEqual(len(catalog.families), 66)
+        # 66 + R3 O3 (ntfs-timestamp-mismatch, ntfs-logfile-transaction, carved-file).
+        self.assertEqual(len(catalog.families), 69)
         for family in catalog.families:
             columns = [*family["core_columns"], *(family.get("aux_columns") or [])]
             tagged = [column for column in columns if column.get("semantic")]

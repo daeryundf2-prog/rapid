@@ -56,6 +56,7 @@ ANALYSIS_NODES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("cross-case", "교차 케이스", ("cross-case",)),
     ("triage-flags", "특이사항", ("triage-flags",)),
 )
+ANALYSIS_BRIEF_COUNT_KEYS: tuple[str, ...] = ("source_counts", "kind_counts")
 WEB_LOG_KIND = "windows-system"
 WEB_LOG_ARTIFACT_TYPES: tuple[str, ...] = ("web-server-log", "webshell-source-candidate")
 
@@ -450,13 +451,21 @@ def placement_domains(placement: dict[str, dict[str, dict[str, int]]], kind: str
 def _analysis_brief(state: dict[str, Any] | None) -> dict[str, Any] | None:
     if state is None:
         return None
-    return {
+    brief = {
         "analysis_id": state.get("analysis_id"),
         "kind": state.get("kind"),
         "status": state.get("status"),
         "finished_at": state.get("finished_at"),
         "row_count": state.get("row_count"),
     }
+    # R3 §3.3 sub-node counts: ntfs-meta rows per source (타임스탬프 불일치, $LogFile),
+    # carve candidates per signature kind (계열 노드 "복구됨(카빙)").
+    summary = state.get("summary") if isinstance(state.get("summary"), Mapping) else {}
+    for key in ANALYSIS_BRIEF_COUNT_KEYS:
+        counts = summary.get(key)
+        if isinstance(counts, Mapping):
+            brief[key] = {str(name): int(value) for name, value in counts.items() if isinstance(value, int)}
+    return brief
 
 
 def build_analyses_node(summary: dict[str, Any], web_log_summary: dict[str, Any]) -> dict[str, Any]:

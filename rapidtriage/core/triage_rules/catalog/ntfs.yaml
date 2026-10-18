@@ -68,6 +68,120 @@ families:
   - ntfs.time_inversion
   - ntfs.deletion_trace
   - ntfs.mass_change
+- id: ntfs-timestamp-mismatch
+  label: NTFS 타임스탬프 불일치
+  types:
+  - ntfs-timestamp-mismatch
+  core_columns:
+  - key: path
+    semantic: path
+    label: 경로
+    aliases:
+    - name
+    format: path
+  - key: entry_number
+    label: MFT 엔트리
+    format: number
+  - key: sequence_number
+    label: 시퀀스
+    format: number
+  - key: reason
+    label: 사유
+    aliases:
+    - reason_labels
+  - key: si_created_at
+    label: $SI 생성
+    format: time
+    ts_kind: created
+  - key: si_modified_at
+    label: $SI 수정
+    format: time
+    ts_kind: modified
+  - key: si_accessed_at
+    label: $SI 접근
+    format: time
+    ts_kind: accessed
+  - key: si_mft_modified_at
+    label: $SI MFT 수정
+    format: time
+    ts_kind: mft-modified
+  - key: fn_created_at
+    label: $FN 생성
+    format: time
+  - key: fn_modified_at
+    label: $FN 수정
+    format: time
+  - key: fn_accessed_at
+    label: $FN 접근
+    format: time
+  - key: fn_mft_modified_at
+    label: $FN MFT 수정
+    format: time
+  aux_columns:
+  - key: in_use
+    label: 사용 중
+  - key: si_fn_created_delta_seconds
+    label: $FN−$SI 생성 차(초)
+    format: number
+  - key: related_rules
+    label: 관련 특이사항 지표
+  - key: mft_row_index
+    label: MFT 행 번호
+    format: number
+  - key: record_offset
+    label: 레코드 오프셋
+    format: mono
+  rules:
+  - ntfs.si_before_fn
+  - ntfs.zero_subsecond
+- id: ntfs-logfile-transaction
+  label: $LogFile 트랜잭션
+  types:
+  - ntfs-logfile-transaction
+  core_columns:
+  - key: lsn
+    label: 로그 순번(LSN)
+    format: number
+  - key: time_estimate
+    label: 시각 추정
+    format: time
+    ts_kind: event
+  - key: redo_op_label
+    label: 재실행(redo) 작업
+  - key: undo_op_label
+    label: 취소(undo) 작업
+  - key: target_mft_entry
+    label: 대상 MFT 엔트리(후보)
+    format: number
+  - key: file_name
+    label: 파일 이름 후보
+    aliases:
+    - file_name_candidates
+  - key: transaction_id
+    label: 트랜잭션 ID
+    format: number
+  aux_columns:
+  - key: previous_lsn
+    label: 이전 LSN
+    format: number
+  - key: undo_next_lsn
+    label: 취소 다음 LSN
+    format: number
+  - key: target_vcn
+    label: 대상 VCN
+    format: number
+  - key: cluster_block_offset
+    label: 클러스터 블록 오프셋
+    format: number
+  - key: spans_pages
+    label: 페이지 걸침
+  - key: record_offset
+    label: 레코드 오프셋
+    format: mono
+  - key: page_offset
+    label: 페이지 오프셋
+    format: mono
+  rules: []
 - id: zone
   label: 다운로드 출처 표식 (Zone.Identifier)
   types:

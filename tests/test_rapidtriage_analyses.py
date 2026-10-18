@@ -37,6 +37,7 @@ from rapidtriage.core import vsc
 from rapidtriage.core.case_db import open_case_database
 from rapidtriage.core.jobs import RunJobStore
 from rapidtriage.core.ntfs_metadata import missing_ntfs_metadata_tools
+from tests import carving_r3_fixtures, ntfs_r3_fixtures
 
 TOKEN = "analyses-test-token"
 JPEG = b"\xff\xd8\xff\xe0" + b"\x00\x10JFIF\x00" + b"\x11" * 64 + b"\xff\xd9"
@@ -304,7 +305,12 @@ class AnalysisApiTests(unittest.TestCase):
         return response.json()
 
     def run_ntfs(
-        self, *, usn: bytes | None = None, mft: bytes | None = None, options: dict[str, object] | None = None
+        self,
+        *,
+        usn: bytes | None = None,
+        mft: bytes | None = None,
+        options: dict[str, object] | None = None,
+        logfile: bytes | None = None,
     ) -> dict[str, object]:
         def fake_extract(image, output_dir, *, partition_start_sector=None, sparse_journal=True):
             output_dir.mkdir(parents=True, exist_ok=True)
@@ -315,6 +321,10 @@ class AnalysisApiTests(unittest.TestCase):
                 journal = output_dir / "UsnJrnl_J.bin"
                 journal.write_bytes(usn)
                 outputs["usn_journal"] = {"path": str(journal), "size_bytes": len(usn), "sha256": "y"}
+            if logfile is not None:
+                log_path = output_dir / "LogFile.bin"
+                log_path.write_bytes(logfile)
+                outputs["logfile"] = {"path": str(log_path), "size_bytes": len(logfile), "sha256": "z"}
             return {"outputs": outputs, "extraction_status": "complete", "partition": {"start_sector": 2048}, "skipped": []}
 
         with patch.object(analysis_kinds, "NTFS_EXTRACTOR", fake_extract):
@@ -1033,6 +1043,133 @@ class AnalysisApiTests(unittest.TestCase):
         rows = [{"path": str(root / "p2" / "Users" / "x.txt")}, {"path": str(root / "p2" / "Windows" / "y")}]
         self.assertEqual(files_ntfs.detect_volume_prefix([root], rows, index.top_level), (str(root / "p2"), "sentinel-depth-1"))
         self.assertEqual(files_ntfs.detect_volume_prefix([root], rows, frozenset())[0], None)
+
+    # -- R3 §3.3 (Q-R3-5 / Q-R3-6) ---------------------------------------------------
+
+    def sorted_rows(self, analysis_id: str, **params) -> dict[str, object]:
+        """A sorted rows page once the background sort index is ready."""
+        deadline = time.monotonic() + 20
+        while True:
+            page = self.rows(analysis_id, **params)
+            if page["sort"]["status"] != "building" or time.monotonic() > deadline:
+                self.assertEqual(page["sort"]["status"], "ready", page["sort"])
+                return page
+            time.sleep(0.02)
+
+    def test_ntfs_meta_timestamp_mismatch_and_logfile_rows(self) -> None:
+        stomped = ntfs_r3_fixtures.mft_record_times(
+            name="stomped.exe",
+            parent=64,
+            si=("2019-01-01T00:00:00Z", "2019-01-01T00:00:00Z", "2024-02-01T00:00:00.5Z", "2024-02-01T00:00:00.5Z"),
+            fn=("2024-02-01T00:00:00.25Z",) * 4,
+        )
+        state = self.run_ntfs(mft=synthetic_mft({67: stomped}), logfile=ntfs_r3_fixtures.logfile())
+        self.assertEqual(state["status"], "completed", state)
+        summary = state["summary"]
+        self.assertEqual(summary["timestamp_mismatch_count"], 1)
+        self.assertEqual(
+            summary["timestamp_mismatch_reason_counts"],
+            {"si_created_before_fn": 1, "zero_subsecond": 1, "fn_after_si_modified": 1},
+        )
+        self.assertEqual(summary["logfile_status"], "parsed")
+        self.assertEqual(summary["logfile_transaction_count"], 4)
+        self.assertEqual(summary["logfile_record_page_count"], 3)
+        self.assertEqual(summary["logfile_corrupt_page_count"], 1)
+        self.assertEqual(summary["source_counts"], {"mft": 5, "timestamp-mismatch": 1, "logfile-transaction": 4})
+        analysis_id = str(state["analysis_id"])
+
+        mismatch = self.rows(analysis_id, source="timestamp-mismatch")
+        self.assertEqual(mismatch["matched"], 1)
+        row = mismatch["rows"][0]
+        self.assertEqual(row["artifact_type"], "ntfs-timestamp-mismatch")
+        details = row["details"]
+        self.assertEqual(details["entry_number"], 67)
+        self.assertEqual(details["path"], "\\Users\\stomped.exe")
+        self.assertEqual(details["related_rules"], ["ntfs.si_before_fn", "ntfs.zero_subsecond"])
+        self.assertTrue(details["si_created_at"].startswith("2019-01-01"))
+        self.assertTrue(details["fn_created_at"].startswith("2024-02-01"))
+        # The cross-link: the MFT row it points at is the same entry (where ntfs.si_before_fn fires).
+        mft_row = self.client.get(
+            f"/api/runs/{self.run_id}/analyses/{analysis_id}/rows", params={"limit": 1, "offset": details["mft_row_index"]}
+        ).json()["rows"][0]
+        self.assertEqual(mft_row["details"]["source"], "mft")
+        self.assertEqual(mft_row["details"]["entry_number"], 67)
+
+        logrows = self.sorted_rows(analysis_id, source="logfile-transaction", sort="details.lsn:asc")
+        self.assertEqual([r["artifact_type"] for r in logrows["rows"]], ["ntfs-logfile-transaction"] * 4)
+        self.assertEqual(logrows["rows"][0]["details"]["redo_op_name"], "InitializeFileRecordSegment")
+        self.assertEqual(logrows["rows"][0]["path"], "secret.docx")
+        both = self.rows(analysis_id, source="timestamp-mismatch,logfile-transaction")
+        self.assertEqual(both["matched"], 5)
+
+        bad = self.client.get(f"/api/runs/{self.run_id}/analyses/{analysis_id}/rows", params={"source": "mft,bogus"})
+        self.assertEqual(bad.status_code, 422)
+        self.assertIn("알 수 없는 행 출처(source) 값입니다: bogus", bad.json()["detail"])
+
+        # /tree: the ntfs-meta node's newest completed job carries the per-source counts (sub-node counts).
+        tree = self.client.get(f"/api/runs/{self.run_id}/tree").json()
+        analyses_node = next(node for node in tree["nodes"] if node["id"] == "analyses")
+        ntfs_node = next(node for node in analyses_node["children"] if node["id"] == "analysis:ntfs-meta")
+        self.assertEqual(ntfs_node["latest_completed"]["source_counts"]["timestamp-mismatch"], 1)
+
+        # 특이사항: ntfs.si_before_fn fires on the MFT row the mismatch row points at.
+        flags = self.wait(str(self.submit("triage-flags", {"include_analyses": True})["analysis_id"]))
+        self.assertEqual(flags["status"], "completed", flags)
+        flagged = self.rows(analysis_id, flag="ntfs.si_before_fn")
+        self.assertEqual([r["record_index"] for r in flagged["rows"]], [details["mft_row_index"]])
+
+    def test_ntfs_meta_raw_mft_picks_up_sibling_logfile(self) -> None:
+        mft_dir = self.evidence / "extracted"
+        mft_dir.mkdir()
+        record0 = mft_record(name="$MFT", parent=5, in_use=True, directory=False, created="2024-01-01T00:00:00Z")
+        (mft_dir / "$MFT").write_bytes(synthetic_mft({0: record0}))
+        (mft_dir / "$LogFile").write_bytes(ntfs_r3_fixtures.logfile(bad_fixup_page=False))
+        state = self.wait(str(self.submit("ntfs-meta", {"image_path": str(mft_dir / "$MFT")})["analysis_id"]))
+        self.assertEqual(state["status"], "completed", state)
+        self.assertEqual(state["options"]["logfile_path"], str((mft_dir / "$LogFile").resolve()))
+        self.assertEqual(state["summary"]["logfile_transaction_count"], 4)
+        self.assertEqual(state["summary"]["logfile_corrupt_page_count"], 0)
+        self.assertEqual(state["summary"]["timestamp_mismatch_count"], 0)
+        off = self.wait(str(self.submit("ntfs-meta", {"image_path": str(mft_dir / "$MFT"), "logfile": False, "timestamp_mismatch": False})["analysis_id"]))
+        self.assertEqual(off["summary"]["logfile_status"], "disabled")
+        self.assertEqual(off["summary"]["timestamp_mismatch_status"], "disabled")
+        self.assertIsNone(off["options"]["logfile_path"])
+
+    def test_carve_r3_rows_carry_recovery_method_and_filter_by_family(self) -> None:
+        (self.evidence / "slack.bin").write_bytes(
+            carving_r3_fixtures.slack(
+                carving_r3_fixtures.wav(), carving_r3_fixtures.mp3_id3(), carving_r3_fixtures.ooxml("docx"), carving_r3_fixtures.pe()
+            )
+            + b"PK\x03\x04" + b"\xff" * 40  # implausible zip method: a rejected row
+        )
+        state = self.wait(str(self.submit("carve", {"ext": ".bin", "include_rejected": True})["analysis_id"]))
+        self.assertEqual(state["status"], "completed", state)
+        analysis_id = str(state["analysis_id"])
+        audio = self.rows(analysis_id, signature_kind=["wav", "mp3"], recovery_method="carved")
+        self.assertEqual(sorted(r["details"]["signature_kind"] for r in audio["rows"]), ["mp3", "wav"])
+        for row in audio["rows"]:
+            self.assertEqual(row["details"]["recovery_method"], "carved")
+            self.assertEqual(row["details"]["family_artifact_type"], "media-audio")
+            self.assertEqual(row["details"]["family_label"], "오디오")
+            self.assertEqual(row["details"]["source_offset"], row["details"]["offset"])
+        docs = self.rows(analysis_id, signature_kind="docx,xlsx,pptx,hwp,hwpx,pdf", recovery_method="carved")
+        self.assertEqual([r["details"]["signature_kind"] for r in docs["rows"]], ["docx"])
+        rejected = self.rows(analysis_id, recovery_method="rejected")
+        self.assertTrue(rejected["rows"])
+        self.assertTrue(all(r["details"]["status"] == "false-positive-rejected" for r in rejected["rows"]))
+        carved_all = self.sorted_rows(analysis_id, recovery_method="carved", sort="details.offset:desc")
+        offsets = [r["details"]["offset"] for r in carved_all["rows"]]
+        self.assertEqual(offsets, sorted(offsets, reverse=True))
+        self.assertNotIn("zip", {r["details"]["signature_kind"] for r in carved_all["rows"] if r["details"]["offset"] < 20000})
+        bad = self.client.get(f"/api/runs/{self.run_id}/analyses/{analysis_id}/rows", params={"recovery_method": "deleted"})
+        self.assertEqual(bad.status_code, 422)
+        self.assertIn("복구 방법(recovery_method)", bad.json()["detail"])
+        bad_kind = self.client.get(f"/api/runs/{self.run_id}/analyses/{analysis_id}/rows", params={"signature_kind": "flac"})
+        self.assertEqual(bad_kind.status_code, 422)
+        tree = self.client.get(f"/api/runs/{self.run_id}/tree").json()
+        analyses_node = next(node for node in tree["nodes"] if node["id"] == "analyses")
+        carve_node = next(node for node in analyses_node["children"] if node["id"] == "analysis:carve")
+        self.assertEqual(carve_node["latest_completed"]["kind_counts"]["wav"], 1)
 
     def test_join_index_single_flight_and_too_large(self) -> None:
         state = self.run_ntfs()

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
+from ...core.carving import SIGNATURE_KINDS
 from ...core.jobs import RunJobStore
 from .analyses import (
     ACTIVE_STATUSES,
@@ -30,6 +31,7 @@ from .artifact_sort import (
     paginate_sorted_artifact_output,
     sort_descriptor,
 )
+from .jsonl_records import iter_artifact_records
 from .pagination import paginate_artifact_output
 from .triage_flags import (
     flag_rows_source,
@@ -60,6 +62,60 @@ PAGINATION_KEYS = (
     "scanned",
     "truncated",
 )
+
+
+# R3 §3.3 server filters on result-row ``details`` (``GET .../rows``): exact values, Korean 422.
+ROW_SOURCES = ("mft", "usn", "timestamp-mismatch", "logfile-transaction")
+RECOVERY_METHODS = ("carved", "parsed", "rejected")
+DETAIL_FILTER_MAX_VALUES = 32
+# Sorted pages with a details filter collect the matching record indices first.
+DETAIL_FILTER_SCAN_CAP = 5_000_000
+
+
+def parse_detail_filters(
+    source: list[str], signature_kind: list[str], recovery_method: list[str]
+) -> dict[str, frozenset[str]]:
+    """``{details key: allowed values}``; an unknown value is a 422 with a Korean message."""
+    filters: dict[str, frozenset[str]] = {}
+    for key, label, values, allowed in (
+        ("source", "행 출처(source)", source, ROW_SOURCES),
+        ("signature_kind", "서명 종류(signature_kind)", signature_kind, SIGNATURE_KINDS),
+        ("recovery_method", "복구 방법(recovery_method)", recovery_method, RECOVERY_METHODS),
+    ):
+        wanted = [item.strip() for value in values for item in value.split(",") if item.strip()]
+        if not wanted:
+            continue
+        if len(wanted) > DETAIL_FILTER_MAX_VALUES:
+            raise HTTPException(status_code=422, detail=f"{label} 값은 한 번에 {DETAIL_FILTER_MAX_VALUES}개까지 지정할 수 있습니다")
+        unknown = sorted(set(wanted) - set(allowed))
+        if unknown:
+            raise HTTPException(
+                status_code=422,
+                detail=f"알 수 없는 {label} 값입니다: {', '.join(unknown[:5])} (가능: {', '.join(allowed)})",
+            )
+        filters[key] = frozenset(wanted)
+    return filters
+
+
+def detail_row_filter(filters: Mapping[str, frozenset[str]]) -> Callable[[Mapping[str, object]], bool]:
+    """Predicate over a ``<kind>-row`` record: every filtered ``details`` key holds one of its values.
+
+    ``recovery_method`` of carve rows written before R3 (no such key) is
+    ``carved``, or ``rejected`` for a ``false-positive-rejected`` row.
+    """
+
+    def matches(row: Mapping[str, object]) -> bool:
+        raw = row.get("details")
+        details: Mapping[str, object] = raw if isinstance(raw, Mapping) else {}
+        for key, values in filters.items():
+            value = details.get(key)
+            if key == "recovery_method" and value is None and row.get("artifact_type") == "carve-row":
+                value = "rejected" if details.get("status") == "false-positive-rejected" else "carved"
+            if str(value or "") not in values:
+                return False
+        return True
+
+    return matches
 
 
 class AnalysisCreateRequest(BaseModel):
@@ -182,8 +238,18 @@ def build_analyses_router(store: RunJobStore, *, owner: object | None = None) ->
         path_contains: str | None = Query(default=None),
         flag: list[str] = Query(default=[]),
         flag_grade: str | None = Query(default=None),
+        source: list[str] = Query(default=[]),
+        signature_kind: list[str] = Query(default=[]),
+        recovery_method: list[str] = Query(default=[]),
     ) -> dict[str, object]:
         """Result rows paged like an artifacts kind page; every row has ``record_index``.
+
+        R3 §3.3 details filters (repeatable or comma-separated, exact values;
+        unknown values are a 422 in Korean): ``source`` (ntfs-meta row source:
+        mft / usn / timestamp-mismatch / logfile-transaction), ``signature_kind``
+        (carve) and ``recovery_method`` (carved / parsed / rejected). They compose
+        with ``path_contains``, ``flag`` and ``sort`` (a sorted page collects the
+        matching record indices first, at most ``DETAIL_FILTER_SCAN_CAP`` rows).
 
         특이사항: rows carry ``flags`` (kind ``analysis:<analysis_id>``) and the
         response reports ``flags_join``; ``flag``/``flag_grade`` filter and
@@ -212,6 +278,8 @@ def build_analyses_router(store: RunJobStore, *, owner: object | None = None) ->
         running_sort = bool(sort_key) and state.get("status") in ACTIVE_STATUSES
         flag_kind = f"analysis:{directory.name}"
         join = flags_join(scope.output_dir)
+        detail_filters = parse_detail_filters(source, signature_kind, recovery_method)
+        row_filter = detail_row_filter(detail_filters) if detail_filters else None
         if not rows_path.is_file():
             page: dict[str, object] = {"artifacts": [], "pagination": {"offset": offset, "limit": limit, "returned": 0, "total": 0}}
         else:
@@ -227,8 +295,9 @@ def build_analyses_router(store: RunJobStore, *, owner: object | None = None) ->
                         rows_source=flag_rows_source(
                             payload, payload_path, kind=flag_kind, join=join, query=flag_query, record_limit=record_count
                         ),
+                        row_filter=row_filter,
                     )
-                    mark_flag_page(page, flag_query, record_count=record_count, other_filters=bool(needle))
+                    mark_flag_page(page, flag_query, record_count=record_count, other_filters=bool(needle or row_filter))
                 elif sort_key and not running_sort:
                     page = paginate_sorted_artifact_output(
                         payload,
@@ -243,15 +312,19 @@ def build_analyses_router(store: RunJobStore, *, owner: object | None = None) ->
                         path_contains=needle,
                         locate=locate,
                         record_limit=record_count,
-                        allowed_records=(
+                        allowed_records=_allowed_records(
                             join.require_index().matching(flag_kind, flag_query.rule_ids, flag_query.grade)
                             if flag_query.filtered
-                            else None
+                            else None,
+                            payload,
+                            payload_path,
+                            row_filter,
+                            record_count,
                         ),
                     )
                     if flag_query.filtered:
                         mark_flag_page(page, flag_query)
-                elif needle:
+                elif needle or row_filter is not None:
                     page = filter_artifact_page(
                         payload,
                         payload_path=payload_path,
@@ -259,6 +332,7 @@ def build_analyses_router(store: RunJobStore, *, owner: object | None = None) ->
                         offset=offset,
                         limit=limit,
                         record_limit=record_count,
+                        row_filter=row_filter,
                     )
                 else:
                     page = paginate_artifact_output(payload, payload_path=payload_path, offset=offset, limit=limit)
@@ -267,7 +341,7 @@ def build_analyses_router(store: RunJobStore, *, owner: object | None = None) ->
         if running_sort:
             unsupported = SortState("unsupported", 0.0, reason=RUNNING_SORT_REASON)
             page["sort"] = sort_descriptor(str(sort_key), sort_order or "asc", unsupported, locate, filtered=bool(needle))
-        annotate_page_counts(page, payload, filtered=bool(needle) or flag_query.filtered)
+        annotate_page_counts(page, payload, filtered=bool(needle) or flag_query.filtered or row_filter is not None)
         pagination = page.get("pagination") if isinstance(page.get("pagination"), dict) else {}
         rows = page.get("artifacts") or []
         if state.get("kind") == "ocr-batch":
@@ -293,6 +367,28 @@ def build_analyses_router(store: RunJobStore, *, owner: object | None = None) ->
             response["sort"] = page.get("sort")
         if flag_query.filtered:
             response["pagination"]["flags"] = flag_query.descriptor()
+        if detail_filters:
+            response["pagination"]["details_filter"] = {key: sorted(values) for key, values in detail_filters.items()}
         return response
 
     return router
+
+
+def _allowed_records(
+    flagged: list[int] | None,
+    payload: Mapping[str, object],
+    payload_path,
+    row_filter: Callable[[Mapping[str, object]], bool] | None,
+    record_count: int,
+) -> list[int] | set[int] | None:
+    """Record indices a sorted page may show: the 특이사항 set and/or the details-filter matches."""
+    if row_filter is None:
+        return flagged
+    matching: set[int] = set()
+    rows = iter_artifact_records(payload, payload_path=payload_path, limit=record_count)
+    for scanned, (record_index, row) in enumerate(rows):
+        if scanned >= DETAIL_FILTER_SCAN_CAP:
+            break
+        if row_filter(row):
+            matching.add(record_index)
+    return matching if flagged is None else matching.intersection(flagged)

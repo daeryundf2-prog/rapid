@@ -29,9 +29,11 @@ def filter_artifact_page(
     rows_source: Iterable[tuple[int, dict[str, object]]] | None = None,
     artifact_types: Collection[str] | None = None,
     record_limit: int | None = None,
+    row_filter: Callable[[Mapping[str, object]], bool] | None = None,
 ) -> dict[str, object]:
     """Page only rows whose ``path`` contains ``path_contains`` (NFC, case-insensitive)
-    and, when ``artifact_types`` is given, whose ``artifact_type`` is one of them.
+    and, when ``artifact_types`` is given, whose ``artifact_type`` is one of them
+    (and, with ``row_filter``, that predicate holds: analysis ``details`` filters).
 
     Streams the kind's rows; ``offset`` counts matches. Stops after ``limit``
     matches plus one lookahead row, or after ``scan_cap`` scanned rows
@@ -44,6 +46,12 @@ def filter_artifact_page(
     needle = nfc_fold(path_contains) if path_contains else ""
     wanted_types = frozenset(artifact_types) if artifact_types else None
     matches = row_matcher(needle, wanted_types)
+    if row_filter is not None:
+        base_matches = matches
+
+        def matches(row: Mapping[str, object]) -> bool:
+            return base_matches(row) and row_filter(row)
+
     rows: list[object] = []
     matched = 0
     scanned = 0

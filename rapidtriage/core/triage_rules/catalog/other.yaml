@@ -281,6 +281,45 @@ families:
     - source
   aux_columns: []
   rules: []
+- id: carved-file
+  label: 카빙 복구 파일
+  types:
+  - carve-row
+  core_columns:
+  - key: signature_kind
+    label: 서명 종류
+  - key: family_label
+    label: 계열
+  - key: source_path
+    label: 원본(소스) 경로
+    format: path
+  - key: offset
+    label: 오프셋
+    aliases:
+    - source_offset
+    format: number
+  - key: length
+    label: 길이
+    format: bytes
+  - key: sha256
+    semantic: hash
+    label: 해시(SHA-256)
+    format: mono
+  - key: status
+    label: 경계 판정
+  - key: confidence
+    label: 신뢰도
+  aux_columns:
+  - key: recovery_method
+    label: 복구 방법
+  - key: boundary_method
+    label: 경계 방법
+  - key: rejected_reason
+    label: 거부 사유
+  - key: extracted_path
+    label: 추출 경로
+    format: path
+  rules: []
 - id: generic
   label: 레코드
   types: []
