@@ -332,9 +332,28 @@ export const NO_DERIVED_REASON =
 /** U-F7 reason of an analysis node that never ran. */
 export const NEVER_RAN_REASON = "분석 안 됨 — 처리 단계에서 실행하면 결과가 여기에 나타납니다";
 
+/**
+ * Count of an analysis sub-view from a job summary (`source_counts` / `kind_counts`): the sum
+ * over `keys` (every key when empty); undefined while the summary has no such counts (an older
+ * analysis: the sub-view then shows "—" instead of the whole row count).
+ */
+export function analysisSubCount(
+  spec: { field: string; keys: readonly string[] },
+  summary: Record<string, unknown> | undefined,
+  rowCount: number | undefined,
+): number | string | undefined {
+  if (rowCount === undefined) return undefined;
+  const counts = summary?.[spec.field];
+  if (!counts || typeof counts !== "object") return UNKNOWN_COUNT;
+  const entries = Object.entries(counts as Record<string, unknown>);
+  return entries
+    .filter(([key]) => spec.keys.length === 0 || spec.keys.includes(key))
+    .reduce((sum, [, value]) => sum + (typeof value === "number" ? value : 0), 0);
+}
+
 /** U-F7: why a node with this count state is hidden by default (undefined = shown). */
 export function emptyNodeReason(state: DomainCount): string | undefined {
-  if (state.neverRan) return NEVER_RAN_REASON;
+  if (state.neverRan) return state.disabledReason ?? NEVER_RAN_REASON;
   if (state.count === 0) return state.disabledReason ?? NO_DATA_REASON;
   if (state.count === UNKNOWN_COUNT && state.disabledReason) return state.disabledReason;
   return undefined;
@@ -358,13 +377,24 @@ export function domainNodeCount(target: DomainTarget, input: TreeModelInput): Do
       : input.analyses?.find(
           (job) => (node?.kinds as string[] | undefined)?.includes(job.kind) && isPartialResult(job),
         );
-    const count = completed
+    const rowCount = completed
       ? completed.row_count
       : partial
         ? partial.row_count
         : !input.analyses && status === "completed"
           ? serverCount
           : undefined;
+    // R3 §3.3 sub-view (타임스탬프 불일치, 복구됨(카빙)): the job summary's per-source / per-kind counts.
+    const count = target.analysisCount
+      ? analysisSubCount(
+          target.analysisCount,
+          (completed ?? partial)?.summary ??
+            (input.analyses
+              ? undefined
+              : (findServerNode(tree, `analysis:${target.analysis}`)?.latest_completed ?? undefined)),
+          rowCount,
+        )
+      : rowCount;
     // Never disabled: the results pane explains a never-ran / running / failed job itself.
     const stateMarker =
       status === "completed"
@@ -379,6 +409,10 @@ export function domainNodeCount(target: DomainTarget, input: TreeModelInput): Do
       marker: stateMarker,
       icon: status === "completed" ? undefined : nodeStateIcon(status),
       ...(statusKnown && status === null && count === undefined ? { neverRan: true } : {}),
+      ...(statusKnown && status === null && target.neverRanReason
+        ? { disabledReason: target.neverRanReason }
+        : {}),
+      ...(count === 0 && target.analysisCount ? { disabledReason: NO_DATA_REASON } : {}),
     };
   }
   if (target.collection === "derived") {
@@ -547,10 +581,10 @@ export function domainTotal(
   return total;
 }
 
-/** Tooltip of a column-filtered node: the filter is applied to the loaded rows. */
+/** Tooltip of a column-filtered node: the filter is applied to the loaded rows (analysis `details` keys: by the server). */
 function filteredNote(target: DomainTarget): string {
   const filters = (target.cf ?? []).map((f) => `${f.col.replace(/^f:/, "")} ${f.op} ${f.value}`).join(", ");
-  return `불러온 행에 열 필터 적용: ${filters}`;
+  return target.analysisCount ? `서버 필터: ${filters}` : `불러온 행에 열 필터 적용: ${filters}`;
 }
 
 /** Sum of per-grade flag counts; undefined when nothing is flagged. */
@@ -610,6 +644,7 @@ function domainNodes(input: TreeModelInput): TreeModelNode[] {
         ...(children?.length ? { children } : {}),
         ...(node.nonEvidence ? { dimmed: true, note: NON_EVIDENCE_NOTE } : {}),
         ...(target.cf?.length && !node.nonEvidence ? { note: filteredNote(target) } : {}),
+        ...(node.note ? { note: node.note } : {}),
         ...(flagCounts && Object.values(flagCounts).some((n) => (n ?? 0) > 0) ? { flagCounts } : {}),
         ...(hiddenReason ? { hiddenReason } : {}),
       };

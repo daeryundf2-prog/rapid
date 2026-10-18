@@ -92,6 +92,11 @@ export interface CollectionQuery {
   /** 특이사항 rule ids (`flag=`, repeated) and minimum grade (`flag_grade=`), server-side (plan §3.1). */
   flags?: string[];
   flagGrade?: "A" | "B" | "C";
+  /**
+   * Analysis rows: exact `details` filters the rows API applies (R3 §3.3: `source=`,
+   * `signature_kind=`, `recovery_method=`), key → accepted values.
+   */
+  detailFilters?: Record<string, string[]>;
   /** Navigation category (tree) filter; interpreted by the collection. */
   category?: string;
   /**

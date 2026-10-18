@@ -145,6 +145,19 @@ describe("MetaView 증거 정보", () => {
     expect(text).toContain("r1");
   });
 
+  it("a carved row (details.recovery_method) reads 복구 방법 카빙 · 오프셋 (R3 §3.3)", () => {
+    show({
+      details: { recovery_method: "carved", source_offset: 1024, offset: 1024, signature_kind: "wav" },
+    });
+    const recovery = screen.getByText("복구 방법").nextElementSibling?.textContent ?? "";
+    expect(recovery).toContain("카빙 · 오프셋 0x400");
+    expect(screen.getByTestId("evidence-info").textContent).toContain("0x400 (1,024)");
+    const info = evidenceInfo(row({ details: { recovery_method: "carved", offset: 2048 } }));
+    expect(info).toMatchObject({ recovery: "카빙", offset: 2048 });
+    // A parsed row with an `offset` detail is not a carving location.
+    expect(evidenceInfo(row({ details: { recovery_method: "parsed", offset: 7 } })).offset).toBeNull();
+  });
+
   it("maps each recovery source id", () => {
     expect(evidenceInfo(row({ recovery: { source_id: "carving" } })).recovery).toBe("카빙");
     expect(evidenceInfo(row({ recovery: { source_id: "filesystem-scan" } })).recovery).toBe("파싱됨");

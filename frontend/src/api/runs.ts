@@ -176,6 +176,16 @@ export interface TreeNode {
   /** Analysis nodes (`analysis:<kind>`): newest job state, null = never ran (plan analysis-workbench-p1 §3.3). */
   state?: { status?: string; finished_at?: string | null } | null;
   /**
+   * Analysis nodes: newest completed job; R3 §3.3 sub-view counts ride along (`source_counts` of
+   * ntfs-meta, `kind_counts` of carve).
+   */
+  latest_completed?: {
+    analysis_id?: string;
+    row_count?: number | null;
+    source_counts?: Record<string, number>;
+    kind_counts?: Record<string, number>;
+  } | null;
+  /**
    * Kind nodes: records per artifact_type. On the primary node (`artifacts:<kind>`) the whole
    * kind; on a routed node (`artifacts:<kind>@<domain>`) only the types placed in that domain.
    */

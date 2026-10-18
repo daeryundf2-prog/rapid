@@ -276,6 +276,8 @@ describe("tree model (탐색 domain tree, console-ia §4)", () => {
       "EVTX 파일·요약",
       "ETL 추적 파일",
       "방화벽 로그",
+      // R3 O3: carved EVTX files (carve analysis rows recovery_method=carved, signature_kind=evtx).
+      "EVTX 복구됨(카빙)",
     ]);
   });
 

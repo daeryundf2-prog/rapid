@@ -32,7 +32,7 @@ import { recordBanners } from "../banners";
 import { bytesOfHex, filterUtf16Strings, hexDump, utf16Strings } from "../binaryValue";
 import { locatorText } from "../citation";
 import { ROWS_FOR_SOURCE_COMMAND, writeClipboard } from "../commands";
-import { evidenceInfo, isSourceMissing } from "../evidenceInfo";
+import { evidenceInfo, isSourceMissing, RECOVERY_LABELS } from "../evidenceInfo";
 import {
   bytesLabel,
   eventLevelLabel,
@@ -1310,6 +1310,10 @@ export function EvidenceTail({
         <dt>복구 방법</dt>
         <dd>
           {info.recovery !== "—" ? info.recovery : TAIL_REASONS.recovery}
+          {/* R3 §3.3: a carved row names where in its source it was carved from. */}
+          {info.recovery === RECOVERY_LABELS.carving && info.offset !== null
+            ? ` · 오프셋 0x${info.offset.toString(16).toUpperCase()}`
+            : null}
           {info.sourceId ? <span className="mono"> ({info.sourceId})</span> : null}
         </dd>
         <dt>삭제된 출처</dt>

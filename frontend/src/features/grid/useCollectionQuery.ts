@@ -177,6 +177,8 @@ export function collectionQueryKey(runId: string | null, query: CollectionQuery,
     pageSize,
     // 특이사항 server filters (viewer-families §3.1); empty for every other listing.
     query.flags?.length || query.flagGrade ? `${query.flagGrade ?? ""}|${(query.flags ?? []).join(",")}` : "",
+    // Analysis rows `details` server filters (R3 §3.3).
+    query.ref.id === "analysis" && query.detailFilters ? JSON.stringify(query.detailFilters) : "",
   ] as const;
 }
 

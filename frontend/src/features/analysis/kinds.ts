@@ -30,7 +30,7 @@ export const ANALYSIS_NODES: readonly AnalysisNodeDef[] = [
   {
     id: "carve",
     label: "카빙",
-    description: "런의 파일에서 알려진 파일 서명(JPEG·PNG·PDF·ZIP 등)을 찾아 위치와 해시를 기록합니다.",
+    description: "런의 파일에서 알려진 파일 서명(JPEG·PNG·PDF·ZIP·오디오·동영상·Office·HWP·EML·PE·EVTX 등)을 찾아 위치와 해시를 기록합니다.",
     kinds: ["carve"],
   },
   {
@@ -42,7 +42,7 @@ export const ANALYSIS_NODES: readonly AnalysisNodeDef[] = [
   {
     id: "ntfs-meta",
     label: "NTFS 메타(MFT/USN)",
-    description: "$MFT와 USN 저널을 읽어 생성·접근·MFT 수정 시각과 MFT 엔트리 번호를 파일 목록에 채웁니다.",
+    description: "$MFT와 USN 저널을 읽어 생성·접근·MFT 수정 시각과 MFT 엔트리 번호를 파일 목록에 채우고, $SI·$FN 타임스탬프 불일치와 $LogFile 트랜잭션을 기록합니다.",
     kinds: ["ntfs-meta"],
   },
   {
