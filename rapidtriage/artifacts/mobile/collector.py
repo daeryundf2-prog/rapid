@@ -9,6 +9,7 @@ from ...core.models import ArtifactRecord
 from ...core.sqlite_snapshot import open_sqlite_snapshot
 from ...core.submission import compute_hashes
 from .._walk import iter_evidence_paths
+from .adb_backup import collect_adb_backup
 from .constants import (
     MAX_IOS_BACKUP_FILES,
     MAX_ROWS_PER_SOURCE,
@@ -146,6 +147,13 @@ class MobileExportProvider:
         self.collection_notes = []
         for path in files:
             acquisition_root = root_for_path(path, roots)
+            if acquisition_root is not None and acquisition_root.kind == "android-adb-backup" and acquisition_root.single_file:
+                # R5 L3: the backup's tar members (android-backup / android-backup-member rows).
+                root_details = acquisition_root.to_details(root)
+                for record in collect_adb_backup(path):
+                    record.details.update(root_details)
+                    yield record
+                continue
             if acquisition_root is None or acquisition_root.single_file:
                 continue
             hint = acquisition_root.relative_hint(path)

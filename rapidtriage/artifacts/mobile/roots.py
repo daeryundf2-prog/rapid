@@ -12,7 +12,8 @@ Signatures (structure/magic based, never absolute-path substrings):
   same directory.
 * Android data tree: path segments ``data/data/<package>`` or
   ``data/user/<n>/<package>``.
-* Android adb backup: ``.ab`` file starting with ``ANDROID BACKUP``.
+* Android adb backup: ``.ab`` file starting with ``ANDROID BACKUP`` (R5 L3: its tar members
+  are unpacked in memory by ``adb_backup.collect_adb_backup``).
 * Cellebrite UFED: ``.ufd`` / ``.ufdr`` / ``.ufdx`` or a report XML carrying
   the Cellebrite report namespace.
 * Magnet AXIOM: ``.mfdb`` case database or ``Case Information`` file naming
