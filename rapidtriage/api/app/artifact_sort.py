@@ -801,6 +801,7 @@ def paginate_sorted_artifact_output(
     artifact_types: frozenset[str] | None = None,
     record_limit: int | None = None,
     allowed_records: Collection[int] | None = None,
+    channels: frozenset[str] | None = None,
 ) -> dict[str, object]:
     """One kind's artifacts page in whole-kind sorted order.
 
@@ -818,7 +819,7 @@ def paginate_sorted_artifact_output(
     profiles = payload_profiles(payload)
     records_path = sort_records_path(payload, payload_path)
     key = sort.strip()
-    filtered = bool(path_contains) or bool(artifact_types) or allowed_records is not None
+    filtered = bool(path_contains) or bool(artifact_types) or bool(channels) or allowed_records is not None
     allowed = None if allowed_records is None else (allowed_records if isinstance(allowed_records, (set, frozenset)) else set(allowed_records))
     try:
         key = parse_sort_key(sort)
@@ -859,6 +860,7 @@ def paginate_sorted_artifact_output(
                 offset=offset,
                 limit=limit,
                 artifact_types=artifact_types,
+                channels=channels,
                 record_limit=record_limit,
                 rows_source=(
                     None
@@ -885,7 +887,7 @@ def paginate_sorted_artifact_output(
 
     ordered_all = index.order(order)
     ordered = ordered_all if allowed is None else array("q", (item for item in ordered_all if item in allowed))
-    if filtered and (path_contains or artifact_types):
+    if filtered and (path_contains or artifact_types or channels):
         page = filter_artifact_page(
             payload,
             payload_path=payload_path,
@@ -895,6 +897,7 @@ def paginate_sorted_artifact_output(
             scan_cap=SORTED_FILTER_SCAN_CAP,
             rows_source=guarded(iter_rows_in_order(records_path, index, ordered, profiles)),
             artifact_types=artifact_types,
+            channels=channels,
         )
     else:
 
