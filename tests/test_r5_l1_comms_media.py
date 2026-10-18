@@ -452,11 +452,14 @@ class RegistrationTests(unittest.TestCase):
         self.assertEqual(artifact_type_domain("email-clients", "email-client-account"), "messaging")
 
     def test_media_player_content_type_comes_from_the_played_file(self) -> None:
-        from rapidtriage.api.app.row_conditions import path_is_content, row_content_types
+        from rapidtriage.api.app.row_conditions import (
+            path_is_content,
+            row_content_types,
+        )
 
         self.assertFalse(path_is_content("media-player-recent"))
         row = {"artifact_type": "media-player-recent", "path": "C:/Users/a/AppData/Roaming/vlc/vlc-qt-interface.ini",
-               "details": {"media_path": "E:\clip.mkv"}}
+               "details": {"media_path": "E:\\clip.mkv"}}
         self.assertEqual(row_content_types(row, "artifacts"), {"video"})
 
     def test_sqlite_fixture_is_plain_sqlite(self) -> None:
