@@ -13,7 +13,7 @@ import { useMemo, useSyncExternalStore } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { announce } from "../a11y";
 import { type Command, type CommandContext, type CommandGroup, KEY_MAP } from "../contracts/command";
-import { currentRun, isRunActive } from "../state/slices/runs";
+import { currentRun, isRunActive, runRetryInFlight } from "../state/slices/runs";
 import { type AppState, useAppStore } from "../state/store";
 
 export type CommandResult = { ok: true } | { ok: false; reason: string };
@@ -187,6 +187,7 @@ export function commandContextFrom(state: AppState): CommandContext {
     focusedRowKey: state.focusedRowKey,
     viewerHasTarget: state.viewerTarget !== null,
     runIsActive: isRunActive(currentRun(state)),
+    runRetryInFlight: runRetryInFlight(state, state.route.runId),
   };
 }
 

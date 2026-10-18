@@ -218,6 +218,49 @@ describe("처리 계획표 (RunPlanTable)", () => {
     expect(document.activeElement).toBe(screen.getByTestId("run-plan-group-report"));
   });
 
+  it("row × buttons are out of the tab order and reached with → (← / Esc back to the row)", () => {
+    renderWithClient(<RunPlanTable runId={RUN} plan={fixture()} />);
+    const buttons = screen.getAllByRole("button", { name: /(취소|건너뛰기)$/ });
+    const rowButtons = buttons.filter((button) => button.classList.contains("run-plan-x"));
+    expect(rowButtons.length).toBeGreaterThan(0);
+    for (const button of rowButtons) expect(button.tabIndex).toBe(-1);
+    const task = screen.getByTestId("run-plan-task-eventlog");
+    task.focus();
+    fireEvent.keyDown(task, { key: "ArrowRight" });
+    const x = within(task).getByRole("button", { name: "이벤트 로그 취소" });
+    expect(document.activeElement).toBe(x);
+    fireEvent.keyDown(x, { key: "ArrowLeft" });
+    expect(document.activeElement).toBe(task);
+    fireEvent.keyDown(task, { key: "ArrowRight" });
+    fireEvent.keyDown(x, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(screen.getByTestId("run-plan-task-eventlog-sysmon"));
+    // A collapsed group with tasks expands first; a leaf group row reaches its × directly.
+    const browser = screen.getByTestId("run-plan-group-browser");
+    browser.focus();
+    fireEvent.keyDown(browser, { key: "ArrowRight" });
+    expect(browser.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("stops in-flight plan polls before the POST and before writing the reply", async () => {
+    const order: string[] = [];
+    installFetch({
+      "/plan/control": () => {
+        order.push("post");
+        return jsonResponse({ accepted: [], rejected: [], plan: fixture({ stale: true }) }, 202);
+      },
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const cancel = vi.spyOn(client, "cancelQueries").mockImplementation(async () => {
+      order.push("cancel");
+    });
+    const write = vi.spyOn(client, "setQueryData");
+    renderWithClient(<RunPlanTable runId={RUN} plan={fixture()} />, client);
+    fireEvent.click(screen.getByRole("button", { name: "웹 브라우저 그룹 건너뛰기" }));
+    await waitFor(() => expect(write).toHaveBeenCalled());
+    expect(order).toEqual(["cancel", "post", "cancel"]);
+    expect(cancel).toHaveBeenCalledWith({ queryKey: ["run-plan", RUN] });
+  });
+
   it("row × buttons cancel a running group, skip a queued one and explain the rest", async () => {
     const calls = installFetch({
       "/plan/control": () =>
@@ -300,7 +343,14 @@ describe("처리 계획표 (RunPlanTable)", () => {
     const calls = installFetch({
       "/plan/control": () => jsonResponse({ accepted: [], rejected: [], plan: fixture() }, 202),
     });
+    // 모두 취소 asks first: declining sends nothing.
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal("confirm", confirm);
     const { unmount } = renderWithClient(<RunPlanTable runId={RUN} plan={fixture()} />);
+    fireEvent.click(screen.getByRole("button", { name: "모두 취소" }));
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("남은 처리를 모두 취소할까요"));
+    expect(calls).toHaveLength(0);
+    confirm.mockReturnValue(true);
     fireEvent.click(screen.getByRole("button", { name: "모두 취소" }));
     await waitFor(() => expect(calls[0]?.body).toEqual({ action: "cancel_all" }));
     await waitFor(() =>
@@ -425,6 +475,23 @@ describe("처리 page with a plan", () => {
     });
     await waitFor(() => expect(calls.some((c) => c.url.endsWith("/retry"))).toBe(true));
     expect(calls.find((c) => c.url.endsWith("/retry"))?.body).toEqual({ resume: true });
+    // The examiner follows the new run instead of staying on the old one with the button live.
+    await waitFor(() => expect(useAppStore.getState().route.runId).toBe("run-2"));
+    expect(useAppStore.getState().route.collection).toBe("process");
+    expect(window.location.hash).toContain("run-2");
+  });
+
+  it("says when the plan cannot be loaded (not a 404) instead of falling back silently", async () => {
+    setRun({ status: "completed", request: { root: "C:/ev/case1", mode: "fraud" } });
+    installFetch({
+      "/plan": () => jsonResponse({ detail: "plan file is corrupt" }, 500),
+      "/summary": () => jsonResponse({ steps: [{ step: "files", status: "completed", record_count: 3 }] }),
+      "/analyses": () => jsonResponse({ analyses: [] }),
+    });
+    renderWithClient(<ProcessPage />);
+    const note = await screen.findByTestId("run-plan-error");
+    expect(note.textContent).toContain("처리 계획을 불러오지 못했습니다");
+    expect(note.textContent).toContain("plan file is corrupt");
   });
 
   it("keeps the summary step list for an older run without a plan", async () => {
@@ -437,5 +504,7 @@ describe("처리 page with a plan", () => {
     expect(await screen.findByRole("table", { name: "처리 단계" })).toBeTruthy();
     expect(screen.queryByRole("treegrid")).toBeNull();
     expect(screen.queryByTestId("process-run-actions")).toBeNull();
+    // A 404 is "no plan" (older run): no error note.
+    expect(screen.queryByTestId("run-plan-error")).toBeNull();
   });
 });

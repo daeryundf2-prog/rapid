@@ -26,6 +26,7 @@ import {
 import { normalizeRunStatus } from "../../api/runs";
 import { RUNS_QUERY_KEY } from "../../api/runsProgress";
 import { FINISHED_TASK_REASON, NO_QUEUED_REASON, NOT_RUNNING_REASON } from "../../commands/builtin";
+import { CANCEL_ALL_CONFIRM, confirmAction } from "../../commands/reasons";
 import { StatusBadge, statusLabel } from "../../components/Badge";
 import { Icon } from "../../icons";
 import { formatElapsed } from "../../shell/StatusBar";
@@ -191,9 +192,13 @@ export function RunPlanTable({
   const queued = plan.counts.tasks.queued;
 
   const send = async (action: PlanControlAction, targets: PlanTarget[] | undefined, what: string) => {
+    if (action === "cancel_all" && !confirmAction(CANCEL_ALL_CONFIRM)) return;
     setBusy(true);
     try {
+      // An in-flight plan poll that resolves after the reply would put the old plan back.
+      await queryClient.cancelQueries({ queryKey: runPlanQueryKey(runId) });
       const result = await controlRunPlan(runId, action, targets);
+      await queryClient.cancelQueries({ queryKey: runPlanQueryKey(runId) });
       queryClient.setQueryData(runPlanQueryKey(runId), result.plan);
       void queryClient.invalidateQueries({ queryKey: RUNS_QUERY_KEY });
       if (result.rejected.length) {
@@ -225,8 +230,29 @@ export function RunPlanTable({
     rowRefs.current.get(key)?.focus();
   };
 
+  /** The row's × button (out of the tab order; → from the row reaches it, ← goes back). */
+  const focusRowAction = (key: string): boolean => {
+    const button = rowRefs.current.get(key)?.querySelector<HTMLButtonElement>("button.run-plan-x");
+    if (!button) return false;
+    button.focus();
+    return true;
+  };
+
   const onKeyDown = (event: KeyboardEvent<HTMLTableElement>) => {
     const target = event.target as HTMLElement;
+    const actionOf = target.dataset.actionFor;
+    if (actionOf) {
+      // On a row's × button: ← / Esc back to the row, ↑ / ↓ to the neighbouring rows.
+      const at = rows.findIndex((row) => rowKey(row) === actionOf);
+      let moved: RowRef | undefined;
+      if (event.key === "ArrowLeft" || event.key === "Escape") moved = rows[at];
+      else if (event.key === "ArrowDown") moved = rows[at + 1];
+      else if (event.key === "ArrowUp") moved = rows[at - 1];
+      else return;
+      if (moved) focusRow(rowKey(moved));
+      event.preventDefault();
+      return;
+    }
     if (!target.dataset.rowKey) return;
     const key = target.dataset.rowKey ?? "";
     const index = rows.findIndex((row) => rowKey(row) === key);
@@ -256,9 +282,10 @@ export function RunPlanTable({
       }
       case "ArrowRight":
         if (row.kind === "group") {
-          if (!expanded.has(row.group.id)) toggle(row.group.id);
+          if (!expanded.has(row.group.id) && row.group.tasks.length) toggle(row.group.id);
           else if (row.group.tasks[0]) focusRow(`t:${row.group.tasks[0].id}`);
-        }
+          else focusRowAction(key);
+        } else focusRowAction(key);
         break;
       case "ArrowLeft":
         if (row.kind === "group") {
@@ -417,6 +444,8 @@ export function RunPlanTable({
                           type="button"
                           className="icon-btn run-plan-x"
                           aria-label={`${group.label} 그룹 ${verb}`}
+                          tabIndex={-1}
+                          data-action-for={key}
                           data-action={action ?? "none"}
                           onClick={() => {
                             if (!action) return;
@@ -485,6 +514,8 @@ export function RunPlanTable({
                         type="button"
                         className="icon-btn run-plan-x"
                         aria-label={`${task.label} ${verb}`}
+                        tabIndex={-1}
+                        data-action-for={key}
                         data-action={action ?? "none"}
                         onClick={() => {
                           if (!action) return;

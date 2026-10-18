@@ -9,6 +9,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { announce, DisabledReason } from "../../a11y";
 import { type AnalysisState, isAnalysisActive } from "../../api/analyses";
+import { ApiError } from "../../api/client";
 import { useRunPlan } from "../../api/runPlan";
 import { getRunSummary, normalizeRunStatus, RETRYABLE_RUN_STATUSES } from "../../api/runs";
 import { RUN_MODE_LABEL, runDisplayName } from "../../app/collections";
@@ -607,7 +608,13 @@ export function ProcessPage() {
           </div>
         ) : null}
       </section>
-      {plan.data ? <RunPlanTable runId={runId} plan={plan.data} controls={false} /> : null}
+      {plan.data ? <RunPlanTable key={runId} runId={runId} plan={plan.data} controls={false} /> : null}
+      {!plan.data && plan.error && !(plan.error instanceof ApiError && plan.error.status === 404) ? (
+        // A run written before R4 has no plan (404 → the step list alone); any other failure is said.
+        <p className="run-plan-stale" role="status" data-testid="run-plan-error">
+          처리 계획을 불러오지 못했습니다: {plan.error.message}
+        </p>
+      ) : null}
       <StepList runId={runId} planned={Boolean(plan.data)} />
       <section aria-labelledby="process-analyses-heading">
         <h3 id="process-analyses-heading">추가 분석</h3>

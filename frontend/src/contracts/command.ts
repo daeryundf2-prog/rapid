@@ -15,6 +15,8 @@ export interface CommandContext {
   focusedRowKey: string | null;
   viewerHasTarget: boolean;
   runIsActive: boolean;
+  /** A resume / restart of the current run is in flight or already running (optional). */
+  runRetryInFlight?: boolean;
 }
 
 export interface Command {

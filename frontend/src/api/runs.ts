@@ -36,6 +36,8 @@ export interface RunListItem {
   updated_at?: string;
   request?: RunRequest;
   origin?: string;
+  /** The run this one retries (이어서 실행 / 처음부터 다시), when it is a retry. */
+  retry_of_run_id?: string | null;
 }
 
 export interface RunJob extends RunListItem {
