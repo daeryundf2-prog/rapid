@@ -56,6 +56,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ...core.artifact_profiles import payload_record_count
+from ...core.eventlog_channels import ChannelFilter
 from .artifact_filter import filter_artifact_page
 from .jsonl_records import (
     expand_row,
@@ -801,7 +802,7 @@ def paginate_sorted_artifact_output(
     artifact_types: frozenset[str] | None = None,
     record_limit: int | None = None,
     allowed_records: Collection[int] | None = None,
-    channels: frozenset[str] | None = None,
+    channels: ChannelFilter | None = None,
 ) -> dict[str, object]:
     """One kind's artifacts page in whole-kind sorted order.
 

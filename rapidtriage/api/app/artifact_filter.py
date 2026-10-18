@@ -7,7 +7,7 @@ from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from pathlib import Path
 
 from ...core.artifact_profiles import payload_record_count
-from ...core.eventlog_channels import row_channel
+from ...core.eventlog_channels import GROUP_LABELS, ChannelFilter
 from .jsonl_records import iter_artifact_records
 
 ARTIFACT_PATH_FILTER_SCAN_CAP = 2_000_000
@@ -18,14 +18,23 @@ MAX_CHANNEL_VALUES = 256
 MAX_CHANNEL_CHARS = 256
 
 
-def normalize_channel_filter(values: Collection[str]) -> frozenset[str] | None:
-    """Validated ``channel=`` values (``None`` without any); ``ValueError`` with a Korean message.
+def normalize_channel_filter(values: Collection[str], groups: Collection[str] = ()) -> ChannelFilter | None:
+    """Validated ``channel=`` / ``channel_group=`` values (``None`` without any); ``ValueError`` with a Korean message.
 
-    A value is one exact channel name (``Security``,
+    A ``channel`` value is one exact channel name (``Security``,
     ``Microsoft-Windows-PowerShell/Operational``): non-empty after trimming,
     at most ``MAX_CHANNEL_CHARS`` characters, no control characters; at most
-    ``MAX_CHANNEL_VALUES`` values per request.
+    ``MAX_CHANNEL_VALUES`` values per request. A ``channel_group`` value is a
+    group id of ``core.eventlog_channels`` (``security`` ... ``other``,
+    ``none``, ``services``).
     """
+    wanted_groups: list[str] = []
+    for value in groups:
+        text = str(value).strip()
+        if text not in GROUP_LABELS:
+            known = ", ".join(sorted(GROUP_LABELS))
+            raise ValueError(f"channel_group 값 '{text[:64]}'을(를) 알 수 없습니다 — 다음 중 하나: {known}")
+        wanted_groups.append(text)
     cleaned: list[str] = []
     for value in values:
         text = str(value).strip()
@@ -38,7 +47,14 @@ def normalize_channel_filter(values: Collection[str]) -> frozenset[str] | None:
         cleaned.append(text)
     if len(set(cleaned)) > MAX_CHANNEL_VALUES:
         raise ValueError(f"channel 값은 요청당 {MAX_CHANNEL_VALUES}개 이하여야 합니다")
-    return frozenset(cleaned) or None
+    channel_filter = ChannelFilter(frozenset(cleaned), frozenset(wanted_groups))
+    return channel_filter or None
+
+
+def as_channel_filter(channels: ChannelFilter | Collection[str] | None) -> ChannelFilter | None:
+    if isinstance(channels, ChannelFilter):
+        return channels or None
+    return ChannelFilter(frozenset(channels)) if channels else None
 
 
 def nfc_fold(value: object) -> str:
@@ -56,11 +72,12 @@ def filter_artifact_page(
     rows_source: Iterable[tuple[int, dict[str, object]]] | None = None,
     artifact_types: Collection[str] | None = None,
     record_limit: int | None = None,
-    channels: Collection[str] | None = None,
+    channels: ChannelFilter | Collection[str] | None = None,
 ) -> dict[str, object]:
     """Page only rows whose ``path`` contains ``path_contains`` (NFC, case-insensitive),
     when ``artifact_types`` is given, whose ``artifact_type`` is one of them,
-    and, when ``channels`` is given, whose ``details.channel`` equals one of them.
+    and, when ``channels`` is given, that match it (exact ``details.channel``
+    names and/or channel groups, see :class:`ChannelFilter`).
 
     Streams the kind's rows; ``offset`` counts matches. Stops after ``limit``
     matches plus one lookahead row, or after ``scan_cap`` scanned rows
@@ -72,7 +89,7 @@ def filter_artifact_page(
     """
     needle = nfc_fold(path_contains) if path_contains else ""
     wanted_types = frozenset(artifact_types) if artifact_types else None
-    wanted_channels = frozenset(channels) if channels else None
+    wanted_channels = as_channel_filter(channels)
     matches = row_matcher(needle, wanted_types, wanted_channels)
     rows: list[object] = []
     matched = 0
@@ -111,24 +128,24 @@ def filter_artifact_page(
         "filtered": True,
         "path_contains": path_contains or None,
         "artifact_types": sorted(wanted_types) if wanted_types is not None else None,
-        **({"channels": sorted(wanted_channels)} if wanted_channels is not None else {}),
+        **(wanted_channels.describe() if wanted_channels is not None else {}),
         "scanned": scanned,
         "truncated": not exhausted and not has_more,
     }
     return page
 
 
-def row_matcher(needle: str, wanted_types: frozenset[str] | None, wanted_channels: frozenset[str] | None = None):
-    """Predicate for the ``path_contains`` (pre-folded ``needle``), ``artifact_type`` and ``channel`` filters.
+def row_matcher(needle: str, wanted_types: frozenset[str] | None, wanted_channels: ChannelFilter | None = None):
+    """Predicate for the ``path_contains`` (pre-folded ``needle``), ``artifact_type`` and channel filters.
 
-    ``channel`` is an exact match on ``details.channel``; rows without one
-    (other kinds, inventory rows) never match a channel filter.
+    ``channel`` names match ``details.channel`` exactly; rows without one
+    (other kinds, inventory rows) match only the ``none`` channel group.
     """
 
     def matches(row: Mapping[str, object]) -> bool:
         if wanted_types is not None and str(row.get("artifact_type") or "") not in wanted_types:
             return False
-        if wanted_channels is not None and row_channel(row) not in wanted_channels:
+        if wanted_channels is not None and not wanted_channels.matches(row):
             return False
         return not needle or needle in nfc_fold(row.get("path") or row.get("source_path"))
 
@@ -183,7 +200,7 @@ def filter_across_kinds(
     scan_cap: int | None = None,
     rows_for: Callable[[str, dict[str, object], Path, int], Iterable[tuple[int, dict[str, object]]]] | None = None,
     extra: Mapping[str, object] | None = None,
-    channels: Collection[str] | None = None,
+    channels: ChannelFilter | Collection[str] | None = None,
 ) -> dict[str, object]:
     """Page filtered rows across kinds (``sources`` order) as one collection.
 
@@ -201,7 +218,7 @@ def filter_across_kinds(
     scan_cap = CROSS_KIND_SCAN_CAP if scan_cap is None else scan_cap
     needle = nfc_fold(path_contains) if path_contains else ""
     wanted_types = frozenset(artifact_types) if artifact_types else None
-    wanted_channels = frozenset(channels) if channels else None
+    wanted_channels = as_channel_filter(channels)
     matches = row_matcher(needle, wanted_types, wanted_channels)
     kinds = [kind for kind, _payload, _path in sources]
     resume = parse_cross_kind_after(after)
@@ -266,7 +283,7 @@ def filter_across_kinds(
             "next_after": next_after,
             "path_contains": path_contains or None,
             "artifact_types": sorted(wanted_types) if wanted_types is not None else None,
-            **({"channels": sorted(wanted_channels)} if wanted_channels is not None else {}),
+            **(wanted_channels.describe() if wanted_channels is not None else {}),
             "scanned": scanned,
             "truncated": not exhausted and not has_more,
             **dict(extra or {}),

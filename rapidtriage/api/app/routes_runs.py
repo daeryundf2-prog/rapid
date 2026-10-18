@@ -19,6 +19,7 @@ from fastapi.responses import (
 
 from ...core.artifact_profiles import payload_record_count
 from ...core.columnar_store import query_columnar_artifact_records
+from ...core.eventlog_channels import ChannelFilter
 from ...core.extract import DEFAULT_EXTRACT_MANIFEST_NAME, ExtractError, run_extract
 from ...core.indicators import (
     IndicatorSummaryError,
@@ -434,6 +435,7 @@ def build_runs_router(
         flag: list[str] = Query(default=[]),
         flag_grade: str | None = Query(default=None),
         channel: list[str] = Query(default=[]),
+        channel_group: list[str] = Query(default=[]),
     ) -> dict[str, object]:
         """Page per-kind artifact rows; every row carries its JSONL ``record_index``.
 
@@ -445,7 +447,13 @@ def build_runs_router(
         ``limit > 0``, across kinds when zero or several ``kind`` are given;
         rows without a channel never match). An empty, over-long (> 256
         characters) or control-character value, or more than 256 values, is a
-        422 with a Korean message.
+        422 with a Korean message. ``channel_group`` (repeatable) selects
+        whole channel groups of ``core.eventlog_channels`` (``security``,
+        ``system``, ``application``, ``powershell``, ``defender``,
+        ``firewall``, ``task-scheduler``, ``storage``, ``user-pnp``,
+        ``office-alerts``, ``rdp``, ``other``, ``none`` = no channel,
+        ``services`` = System rows of the Service Control Manager); it is
+        OR-ed with ``channel`` (unknown ids are a Korean 422).
 
         특이사항 (plan viewer-families §3.1): every row carries ``flags`` (the
         newest completed ``triage-flags`` set; ``[]`` when none) and the
@@ -492,7 +500,7 @@ def build_runs_router(
         wanted_kinds = {item.strip() for item in kind if item.strip()}
         wanted_types = frozenset(item.strip() for item in artifact_type if item.strip()) or None
         try:
-            wanted_channels = normalize_channel_filter(channel)
+            wanted_channels = normalize_channel_filter(channel, channel_group)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
         needle = path_contains.strip() if path_contains and path_contains.strip() else None
@@ -645,7 +653,7 @@ def build_runs_router(
         after: str | None,
         join: FlagsJoin,
         flag_query: FlagQuery,
-        channels: frozenset[str] | None = None,
+        channels: ChannelFilter | None = None,
     ) -> dict[str, object]:
         available = [name.removeprefix("artifacts_") for name in sorted(outputs) if name.startswith("artifacts_")]
         ordered = [item for item in kinds if item in available] if kinds else available

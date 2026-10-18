@@ -12,7 +12,11 @@ import {
   nodeStateIcon,
   nodeStateLabel,
 } from "../analysis/kinds";
-import { CHANNEL_FILTER_COLUMN, parseChannelFilterValue } from "../filters/filterModel";
+import {
+  CHANNEL_FILTER_COLUMN,
+  CHANNEL_GROUP_FILTER_COLUMN,
+  parseChannelFilterValue,
+} from "../filters/filterModel";
 import { GRADES, type Grade, ruleById } from "../flags/catalog";
 import type { CaseRoute } from "./adapter";
 import { groupByCategory, kindIcon } from "./categories";
@@ -511,7 +515,6 @@ export function domainRoute(target: DomainTarget): DomainRoute {
  * `inventory_only`, a category the scan did not select) opens the inventory scope.
  */
 function effectiveTarget(target: DomainTarget, tree: RunTree | undefined): DomainTarget {
-  if (target.channelGroup) return channelTarget(target, tree);
   if (target.collection !== "files" || !target.fileCategory || target.fileScope) return target;
   const node = findServerNode(tree, `files:${target.fileCategory}`);
   return node?.inventory_only || node?.source === "inventory"
@@ -560,30 +563,27 @@ export function domainTotal(
   return total;
 }
 
-/**
- * A channel node with the run's exact channel names of its group (`/tree` channel_groups) as the
- * `evt_channel` filter value; the static canonical value stays when `/tree` has no such group.
- */
-function channelTarget(target: DomainTarget, tree: RunTree | undefined): DomainTarget {
-  const kindNode = tree && target.kind ? mergedKindNode(tree, target.kind) : undefined;
-  const group = kindNode?.channel_groups?.find((item) => item.id === target.channelGroup);
-  if (!group?.channels.length) return target;
-  return {
-    ...target,
-    cf: (target.cf ?? []).map((filter) =>
-      filter.col === CHANNEL_FILTER_COLUMN ? { ...filter, value: group.channels.join("|") } : filter,
-    ),
-  };
-}
-
-/** Tooltip of a column-filtered node: the channel filter runs on the server, the others on the loaded rows. */
-function filteredNote(target: DomainTarget): string {
-  const channels = (target.cf ?? []).filter((f) => f.col === CHANNEL_FILTER_COLUMN);
-  const others = (target.cf ?? []).filter((f) => f.col !== CHANNEL_FILTER_COLUMN);
+/** Tooltip of a column-filtered node: channel filters run on the server, the others on the loaded rows. */
+function filteredNote(target: DomainTarget, tree: RunTree | undefined): string {
+  const isChannel = (f: ColumnFilter) =>
+    f.col === CHANNEL_FILTER_COLUMN || f.col === CHANNEL_GROUP_FILTER_COLUMN;
+  const others = (target.cf ?? []).filter((f) => !isChannel(f));
   const parts: string[] = [];
-  if (channels.length) {
-    const names = channels.flatMap((f) => parseChannelFilterValue(f.value));
-    parts.push(`서버 채널 필터(정확히 일치): ${names.join(", ")}`);
+  const names = (target.cf ?? [])
+    .filter((f) => f.col === CHANNEL_FILTER_COLUMN)
+    .flatMap((f) => parseChannelFilterValue(f.value));
+  if (names.length) parts.push(`서버 채널 필터(정확히 일치): ${names.join(", ")}`);
+  if (target.channelGroup) {
+    const group = mergedKindNode(tree, target.kind ?? "")?.channel_groups?.find(
+      (item) => item.id === target.channelGroup,
+    );
+    const listed = group?.channels ?? [];
+    const shown = listed.slice(0, 5).join(", ") + (listed.length > 5 ? ` 외 ${listed.length - 5}개` : "");
+    parts.push(
+      target.channelGroup === "services"
+        ? "서버 채널 그룹 필터: System 채널의 Service Control Manager 공급자"
+        : `서버 채널 그룹 필터${shown ? `: ${shown}` : ""}`,
+    );
   }
   if (others.length) {
     const filters = others.map((f) => `${f.col.replace(/^f:/, "")} ${f.op} ${f.value}`).join(", ");
@@ -648,7 +648,7 @@ function domainNodes(input: TreeModelInput): TreeModelNode[] {
         icon: state.icon ?? node.icon,
         ...(children?.length ? { children } : {}),
         ...(node.nonEvidence ? { dimmed: true, note: NON_EVIDENCE_NOTE } : {}),
-        ...(target.cf?.length && !node.nonEvidence ? { note: filteredNote(target) } : {}),
+        ...(target.cf?.length && !node.nonEvidence ? { note: filteredNote(target, input.tree) } : {}),
         ...(flagCounts && Object.values(flagCounts).some((n) => (n ?? 0) > 0) ? { flagCounts } : {}),
         ...(hiddenReason ? { hiddenReason } : {}),
       };

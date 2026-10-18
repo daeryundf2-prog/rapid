@@ -143,6 +143,7 @@ def decompress(data: bytes, output_size: int) -> bytes:
             if offset >= match_length:
                 out += out[start : start + match_length]
             else:
-                for index in range(match_length):
-                    out.append(out[start + index])
+                # Overlapping copy = the last ``offset`` bytes repeated (LZ77 run).
+                period = bytes(out[start:])
+                out += (period * (match_length // offset + 1))[:match_length]
     return bytes(out)

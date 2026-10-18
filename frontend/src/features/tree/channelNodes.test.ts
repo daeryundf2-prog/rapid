@@ -1,9 +1,10 @@
-/** 이벤트 로그 › 채널별 nodes (plan r3-os-depth §3.2 O2): counts from `/tree`, server `channel=`. */
+/** 이벤트 로그 › 채널별 nodes (plan r3-os-depth §3.2 O2): counts from `/tree`, server channel filters. */
 import { describe, expect, it } from "vitest";
-import { artifactsQueryString, type RunTree } from "../../api/runs";
+import { artifactsQueryString, type ChannelGroupNode, type RunTree } from "../../api/runs";
 import {
   applyFiltersToQuery,
   CHANNEL_FILTER_COLUMN,
+  CHANNEL_GROUP_FILTER_COLUMN,
   type FilterState,
   partitionFilters,
 } from "../filters/filterModel";
@@ -12,76 +13,39 @@ import { buildTreeModel, NO_CHANNEL_COUNTS_REASON, type TreeModelNode } from "./
 
 const BASE_FILTERS: FilterState = { statuses: [], types: [], tags: [], ext: [], path: "", columns: [] };
 
-const GROUPS = [
-  {
-    id: "other",
-    label: "기타 채널",
-    count: 1,
-    channels: ["Microsoft-Windows-Bits-Client/Operational"],
-    partition: true,
-  },
-  {
-    id: "firewall",
-    label: "방화벽",
-    count: 0,
-    channels: ["Microsoft-Windows-Windows Firewall With Advanced Security/Firewall"],
-    partition: true,
-  },
-  { id: "security", label: "보안", count: 40, channels: ["Security"], partition: true },
-  {
-    id: "user-pnp",
-    label: "사용자 PNP",
-    count: 0,
-    channels: ["Microsoft-Windows-UserPnp/DeviceInstall"],
-    partition: true,
-  },
-  {
-    id: "services",
-    label: "서비스(SCM)",
-    count: 3,
-    channels: ["System"],
-    partition: false,
-    provider: "Service Control Manager",
-  },
-  {
-    id: "storage",
-    label: "스토리지",
-    count: 2,
-    channels: ["Microsoft-Windows-Ntfs/Operational", "Microsoft-Windows-Storage-ClassPnP/Operational"],
-    partition: true,
-  },
-  { id: "system", label: "시스템", count: 30, channels: ["System"], partition: true },
-  {
-    id: "rdp",
-    label: "원격 데스크톱",
-    count: 4,
-    channels: ["Microsoft-Windows-TerminalServices-LocalSessionManager/Operational"],
-    partition: true,
-  },
-  { id: "application", label: "응용 프로그램", count: 10, channels: ["Application"], partition: true },
-  {
-    id: "task-scheduler",
-    label: "작업 스케줄러",
-    count: 0,
-    channels: ["Microsoft-Windows-TaskScheduler/Operational"],
-    partition: true,
-  },
-  { id: "none", label: "채널 없음", count: 3, channels: [], partition: true },
-  { id: "office-alerts", label: "Office Alerts", count: 0, channels: ["OAlerts"], partition: true },
-  {
-    id: "powershell",
-    label: "PowerShell",
-    count: 10,
-    channels: ["Microsoft-Windows-PowerShell/Operational", "Windows PowerShell"],
-    partition: true,
-  },
-  {
-    id: "defender",
-    label: "Windows Defender",
-    count: 0,
-    channels: ["Microsoft-Windows-Windows Defender/Operational"],
-    partition: true,
-  },
+const group = (
+  id: string,
+  label: string,
+  count: number | null,
+  channels: string[],
+  partition = true,
+): ChannelGroupNode => ({
+  id,
+  label,
+  count,
+  channels,
+  partition,
+});
+
+// Partition counts sum to the kind's 100 rows; 서비스(SCM) is a view inside 시스템.
+const GROUPS: ChannelGroupNode[] = [
+  group("other", "기타 채널", 1, ["Microsoft-Windows-Bits-Client/Operational"]),
+  group("firewall", "방화벽", 0, ["Microsoft-Windows-Windows Firewall With Advanced Security/Firewall"]),
+  group("security", "보안", 40, ["Security"]),
+  group("user-pnp", "사용자 PNP", 0, ["Microsoft-Windows-UserPnp/DeviceInstall"]),
+  group("services", "서비스(SCM)", 3, ["System"], false),
+  group("storage", "스토리지", 2, [
+    "Microsoft-Windows-Ntfs/Operational",
+    "Microsoft-Windows-Storage-ClassPnP/Operational",
+  ]),
+  group("system", "시스템", 30, ["System"]),
+  group("rdp", "원격 데스크톱", 4, ["Microsoft-Windows-TerminalServices-LocalSessionManager/Operational"]),
+  group("application", "응용 프로그램", 10, ["Application"]),
+  group("task-scheduler", "작업 스케줄러", 0, ["Microsoft-Windows-TaskScheduler/Operational"]),
+  group("none", "채널 없음", 3, []),
+  group("office-alerts", "Office Alerts", 0, ["OAlerts"]),
+  group("powershell", "PowerShell", 10, ["Microsoft-Windows-PowerShell/Operational", "Windows PowerShell"]),
+  group("defender", "Windows Defender", 0, ["Microsoft-Windows-Windows Defender/Operational"]),
 ];
 
 function runTree(withGroups: boolean): RunTree {
@@ -123,15 +87,15 @@ function eventlogDomain(tree: RunTree): TreeModelNode {
   return domain;
 }
 
-function channelNode(domain: TreeModelNode, id: string): TreeModelNode {
-  const node = domain.children?.find((child) => child.id === `domain:eventlog:${id}`);
-  if (!node) throw new Error(`no node ${id}`);
-  return node;
+function node(domain: TreeModelNode, id: string): TreeModelNode {
+  const found = domain.children?.find((child) => child.id === `domain:eventlog:${id}`);
+  if (!found) throw new Error(`no node ${id}`);
+  return found;
 }
 
 describe("event-log channel nodes", () => {
   it("are listed under 이벤트 로그, Korean-sorted (Hangul before Latin)", () => {
-    const labels = EVENTLOG_CHANNEL_NODES.map((node) => node.label);
+    const labels = EVENTLOG_CHANNEL_NODES.map((item) => item.label);
     expect(labels).toEqual([...labels].sort((x, y) => x.localeCompare(y, "ko")));
     expect(labels).toEqual(
       expect.arrayContaining([
@@ -153,79 +117,83 @@ describe("event-log channel nodes", () => {
     expect(eventlog?.nodes.slice(-EVENTLOG_CHANNEL_NODES.length)).toEqual(EVENTLOG_CHANNEL_NODES);
   });
 
-  it("take counts and exact channel names from /tree channel_groups", () => {
+  it("count from /tree channel_groups and open the kind with the server group filter", () => {
     const domain = eventlogDomain(runTree(true));
-    const security = channelNode(domain, "evt-ch-security");
+    const security = node(domain, "evt-ch-security");
     expect(security.count).toBe(40);
-    expect(security.target?.cf).toEqual([{ col: CHANNEL_FILTER_COLUMN, op: ":", value: "Security" }]);
-    const storage = channelNode(domain, "evt-ch-storage");
+    expect(security.target).toMatchObject({
+      collection: "artifacts",
+      kind: "eventlog",
+      cf: [{ col: CHANNEL_GROUP_FILTER_COLUMN, op: ":", value: "security" }],
+    });
+    expect(node(domain, "evt-ch-services").count).toBe(3);
+    expect(node(domain, "evt-ch-services").note).toContain("Service Control Manager");
+    const storage = node(domain, "evt-ch-storage");
     expect(storage.count).toBe(2);
-    expect(storage.target?.cf?.[0]?.value).toBe(
-      "Microsoft-Windows-Ntfs/Operational|Microsoft-Windows-Storage-ClassPnP/Operational",
+    expect(storage.note).toContain("Microsoft-Windows-Ntfs/Operational");
+    expect(node(domain, "evt-ch-defender").disabledReason).toBeDefined(); // count 0
+    // The partition nodes add up to the kind's rows (Q-R3-4) …
+    const partition = EVENTLOG_CHANNEL_NODES.filter((item) => item.id !== "evt-ch-services").map(
+      (item) => node(domain, item.id).count as number,
     );
-    expect(storage.note).toContain("서버 채널 필터");
-    const services = channelNode(domain, "evt-ch-services");
-    expect(services.count).toBe(3);
-    expect(services.target?.cf).toEqual([
-      { col: CHANNEL_FILTER_COLUMN, op: ":", value: "System" },
-      { col: "f:provider_name", op: ":", value: "Service Control Manager" },
-    ]);
-    expect(services.note).toContain("불러온 행에 열 필터 적용");
-    expect(channelNode(domain, "evt-ch-defender").disabledReason).toBeDefined(); // count 0
-    // Channel views never add to the domain header (the kind-wide node already counts the rows).
-    expect(domain.count).toBe(97); // 100 rows minus the 3 EVTX 파일·요약 detail rows
+    expect(partition.reduce((sum, value) => sum + value, 0)).toBe(100);
+    // … but channel views never add to the domain header (100 rows minus 3 EVTX 파일·요약 detail rows).
+    expect(domain.count).toBe(97);
   });
 
   it("select keys tell the channel views apart from the whole kind and each other", () => {
     const domain = eventlogDomain(runTree(true));
     const keys = ["evt-all", "evt-ch-system", "evt-ch-services", "evt-ch-security"].map(
-      (id) => channelNode(domain, id).selectKey,
+      (id) => node(domain, id).selectKey,
     );
     expect(new Set(keys).size).toBe(keys.length);
-    const security = channelNode(domain, "evt-ch-security");
+    const security = node(domain, "evt-ch-security");
     expect(targetKey({ collection: "artifacts", kind: "eventlog", cf: security.target?.cf })).toBe(
       security.selectKey,
     );
   });
 
   it("are hidden with a Korean reason on outputs without channel counts", () => {
-    const security = channelNode(eventlogDomain(runTree(false)), "evt-ch-security");
+    const security = node(eventlogDomain(runTree(false)), "evt-ch-security");
     expect(security.count).toBe(0);
     expect(security.disabledReason).toBe(NO_CHANNEL_COUNTS_REASON);
-    expect(security.target?.cf?.[0]?.value).toBe("Security"); // canonical fallback
   });
 
-  it("send the channel filter to the server as repeated channel=", () => {
-    const filters = {
+  it("send channel filters to the server as repeated channel= / channel_group=", () => {
+    const filters: FilterState = {
       ...BASE_FILTERS,
       columns: [
-        {
-          col: CHANNEL_FILTER_COLUMN,
-          op: ":" as const,
-          value: "Windows PowerShell|Microsoft-Windows-PowerShell/Operational",
-        },
+        { col: CHANNEL_GROUP_FILTER_COLUMN, op: ":", value: "powershell|rdp" },
+        { col: CHANNEL_FILTER_COLUMN, op: ":", value: "Windows PowerShell|OAlerts" },
       ],
     };
     const ref = { id: "artifacts" as const, kind: "eventlog" };
     const plan = partitionFilters(ref, filters);
-    expect(plan.server.channels).toEqual(["Windows PowerShell", "Microsoft-Windows-PowerShell/Operational"]);
+    expect(plan.server.channelGroups).toEqual(["powershell", "rdp"]);
+    expect(plan.server.channels).toEqual(["Windows PowerShell", "OAlerts"]);
     expect(plan.clientColumns).toEqual([]);
     expect(plan.serverLabels).toContain("채널");
     expect(plan.serverLabels).not.toContain("열 필터");
     const query = applyFiltersToQuery({ ref, offset: 0, limit: 50 }, filters);
-    expect(query.channels).toEqual(["Windows PowerShell", "Microsoft-Windows-PowerShell/Operational"]);
     const qs = new URLSearchParams(
-      artifactsQueryString({ kind: ["eventlog"], limit: 50, channel: query.channels }),
+      artifactsQueryString({
+        kind: ["eventlog"],
+        limit: 50,
+        channel: query.channels,
+        channel_group: query.channelGroups,
+      }),
     );
-    expect(qs.getAll("channel")).toEqual(["Windows PowerShell", "Microsoft-Windows-PowerShell/Operational"]);
-    // Another collection cannot filter channels on the server: it stays a client column.
-    expect(partitionFilters({ id: "timeline" }, filters).clientColumns).toHaveLength(1);
+    expect(qs.getAll("channel")).toEqual(["Windows PowerShell", "OAlerts"]);
+    expect(qs.getAll("channel_group")).toEqual(["powershell", "rdp"]);
+    // Another collection cannot filter channels on the server: they stay client columns.
+    expect(partitionFilters({ id: "timeline" }, filters).clientColumns).toHaveLength(2);
   });
 
   it("leave the 채널 grid column's header filter on the loaded rows", () => {
-    const filters = { ...BASE_FILTERS, columns: [{ col: "channel", op: ":" as const, value: "Sec" }] };
+    const filters: FilterState = { ...BASE_FILTERS, columns: [{ col: "channel", op: ":", value: "Sec" }] };
     const plan = partitionFilters({ id: "artifacts", kind: "eventlog" }, filters);
     expect(plan.server.channels).toBeUndefined();
+    expect(plan.server.channelGroups).toBeUndefined();
     expect(plan.clientColumns).toHaveLength(1);
   });
 });

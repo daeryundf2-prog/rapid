@@ -266,6 +266,35 @@ class ChannelApiTests(unittest.TestCase):
         too_many = [("kind", "eventlog"), ("limit", "10"), *(("channel", f"C{index}") for index in range(257))]
         self.assertEqual(self.client.get(self.url, params=too_many).status_code, 422)
 
+    def test_channel_group_filter_matches_tree_counts(self) -> None:
+        tree = self.client.get(f"/api/runs/{self.run_id}/tree").json()
+        eventlog = next(
+            kind
+            for node in tree["nodes"]
+            if node["id"] == "artifacts"
+            for group in node["children"]
+            for kind in group["children"]
+            if kind["id"] == "artifacts:eventlog"
+        )
+        for group in eventlog["channel_groups"]:
+            page = self.client.get(self.url, params={"kind": "eventlog", "channel_group": group["id"], "limit": 100}).json()
+            kind_page = page["artifacts"]["eventlog"]
+            self.assertEqual(kind_page["matched"], group["count"], group["id"])
+            self.assertEqual(kind_page["pagination"]["channel_groups"], [group["id"]])
+        services = self.client.get(self.url, params={"kind": "eventlog", "channel_group": "services", "limit": 10}).json()
+        self.assertEqual(
+            [row["details"]["provider_name"] for row in services["artifacts"]["eventlog"]["artifacts"]], ["Service Control Manager"]
+        )
+        # channel and channel_group are OR-ed; unknown group ids are a Korean 422
+        both = self.client.get(
+            self.url, params=[("kind", "eventlog"), ("channel_group", "rdp"), ("channel", "OAlerts"), ("limit", "50")]
+        ).json()["artifacts"]["eventlog"]
+        self.assertEqual(both["matched"], 3)
+        bad = self.client.get(self.url, params={"kind": "eventlog", "channel_group": "Security", "limit": 10})
+        self.assertEqual(bad.status_code, 422)
+        self.assertIn("channel_group", bad.json()["detail"])
+        self.assertRegex(bad.json()["detail"], "[가-힣]")
+
     def test_channel_requires_positive_limit(self) -> None:
         response = self.client.get(self.url, params={"kind": "eventlog", "channel": "Security", "limit": 0})
         self.assertEqual(response.status_code, 400)

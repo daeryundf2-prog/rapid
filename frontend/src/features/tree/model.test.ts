@@ -287,6 +287,7 @@ describe("tree model (탐색 domain tree, console-ia §4)", () => {
       "원격 데스크톱",
       "응용 프로그램",
       "작업 스케줄러",
+      "채널 없음",
       "Office Alerts",
       "PowerShell",
       "Windows Defender",

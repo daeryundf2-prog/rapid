@@ -11,14 +11,17 @@ provider is the Service Control Manager) and is not part of the partition.
 
 The kind output summary records the raw ``channel_counts`` (written by
 ``core.artifacts``); ``/tree`` turns them into group nodes with the exact
-channel names each group matched, which the console sends back as the
-server ``channel=`` filter (exact match on ``details.channel``).
+channel names each group matched. ``GET /artifacts`` filters by exact
+names (``channel=``) or by group (``channel_group=``, :class:`ChannelFilter`);
+the console's channel nodes use the group filter, so their page totals
+equal the ``/tree`` counts.
 """
 
 from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Mapping
+from dataclasses import dataclass, field
 
 EVENTLOG_KIND = "eventlog"
 # Kind output summary keys.
@@ -112,6 +115,40 @@ def is_scm_row(row: Mapping[str, object]) -> bool:
         return False
     provider = details.get("provider_name") or details.get("provider")
     return isinstance(provider, str) and provider.strip().casefold() in SCM_PROVIDERS
+
+
+@dataclass(frozen=True)
+class ChannelFilter:
+    """Server channel filter: exact ``details.channel`` names and/or channel group ids (union).
+
+    ``groups`` use :func:`channel_group` (``none`` = rows without a channel)
+    plus ``services`` (System rows of the Service Control Manager provider).
+    """
+
+    names: frozenset[str] = field(default_factory=frozenset)
+    groups: frozenset[str] = field(default_factory=frozenset)
+
+    def __bool__(self) -> bool:
+        return bool(self.names or self.groups)
+
+    def matches(self, row: Mapping[str, object]) -> bool:
+        channel = row_channel(row)
+        if channel in self.names:
+            return True
+        if not self.groups:
+            return False
+        if channel_group(channel) in self.groups:
+            return True
+        return SCM_GROUP in self.groups and is_scm_row(row)
+
+    def describe(self) -> dict[str, list[str]]:
+        """Pagination echo: ``channels`` / ``channel_groups`` (only the parts that are set)."""
+        out: dict[str, list[str]] = {}
+        if self.names:
+            out["channels"] = sorted(self.names)
+        if self.groups:
+            out["channel_groups"] = sorted(self.groups)
+        return out
 
 
 class ChannelCounter:

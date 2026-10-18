@@ -45,6 +45,23 @@ function flagQuery(filter: FlagFilter | undefined): { flag?: string[]; flag_grad
   };
 }
 
+/** Event-log channel filter of a listing: exact names (`channel=`) and/or group ids (`channel_group=`). */
+export interface ChannelQuery {
+  names?: readonly string[];
+  groups?: readonly string[];
+}
+
+function channelParams(query: ChannelQuery | undefined): { channel?: string[]; channel_group?: string[] } {
+  return {
+    ...(query?.names?.length ? { channel: [...query.names] } : {}),
+    ...(query?.groups?.length ? { channel_group: [...query.groups] } : {}),
+  };
+}
+
+function hasChannelQuery(query: ChannelQuery | undefined): boolean {
+  return Boolean(query?.names?.length || query?.groups?.length);
+}
+
 function hasFlagFilter(filter: FlagFilter | undefined): boolean {
   return Boolean(filter?.ids?.length || filter?.grade);
 }
@@ -351,9 +368,9 @@ async function fetchCrossKindPage(
   types: string[],
   started: number,
   flags?: FlagFilter,
-  channels?: string[],
+  channels?: ChannelQuery,
 ): Promise<RawPage> {
-  const fl = { ...flagQuery(flags), ...(channels?.length ? { channel: channels } : {}) };
+  const fl = { ...flagQuery(flags), ...channelParams(channels) };
   if (kinds?.length === 1) {
     // One kind: the ordinary kind page (offset paging, `matched`).
     const kind = kinds[0] as string;
@@ -373,14 +390,7 @@ async function fetchCrossKindPage(
       kinds,
     };
   }
-  const key = JSON.stringify([
-    runId,
-    kinds ?? null,
-    filter ?? "",
-    [...types].sort(),
-    fl,
-    [...(channels ?? [])].sort(),
-  ]);
+  const key = JSON.stringify([runId, kinds ?? null, filter ?? "", [...types].sort(), fl]);
   const cursors = crossKindCursors.get(key) ?? new Map<number, string>();
   crossKindCursors.set(key, cursors);
   let pos = 0;
@@ -624,13 +634,13 @@ export async function fetchArtifactsPage(
   sort?: ServerSort,
   artifactTypes?: readonly string[],
   flags?: FlagFilter,
-  channelFilter?: readonly string[],
+  channelQuery?: ChannelQuery,
 ): Promise<RawPage> {
   const started = now();
   const filter = pathContains?.trim() || undefined;
   const types = artifactTypes?.length ? [...artifactTypes] : undefined;
-  const channels = channelFilter?.length ? [...channelFilter] : undefined;
-  const fl = { ...flagQuery(flags), ...(channels ? { channel: channels } : {}) };
+  const channels = hasChannelQuery(channelQuery) ? channelQuery : undefined;
+  const fl = { ...flagQuery(flags), ...channelParams(channels) };
   if (!kind && restrictKinds) {
     return fetchArtifactKindsPage(
       runId,
@@ -758,7 +768,7 @@ async function fetchArtifactKindsPage(
   started: number,
   types?: string[],
   flags?: FlagFilter,
-  channels?: string[],
+  channels?: ChannelQuery,
 ): Promise<RawPage> {
   const all = await artifactKindCounts(runId, signal);
   const allowed = new Set(restrict(all.map(([k]) => k)));

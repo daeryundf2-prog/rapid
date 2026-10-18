@@ -414,6 +414,8 @@ export interface ArtifactsQuery {
   flag_grade?: string;
   /** Event-log channels (repeated `channel=`, exact `details.channel`; plan r3-os-depth §3.2 O2). */
   channel?: string[];
+  /** Event-log channel groups (repeated `channel_group=`: security … other, none, services). */
+  channel_group?: string[];
 }
 
 export function artifactsQueryString(query: ArtifactsQuery): string {
@@ -426,6 +428,7 @@ export function artifactsQueryString(query: ArtifactsQuery): string {
   for (const flag of query.flag ?? []) params.append("flag", flag);
   if (query.flag_grade) params.set("flag_grade", query.flag_grade);
   for (const channel of query.channel ?? []) params.append("channel", channel);
+  for (const group of query.channel_group ?? []) params.append("channel_group", group);
   if (query.sort) {
     params.set("sort", query.sort);
     params.set("order", query.order ?? "asc");
