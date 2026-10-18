@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 
-def startup(kind: str, name: str, command: str, *, enabled: object = True, item_kind: str = "") -> dict[str, object]:
-    details: dict[str, object] = {"item_name": name, "command": command, "enabled": enabled, "scope": "user"}
+def startup(kind: str, name: str, command: str, *, enabled: object = True, item_kind: str = "", scope: str = "user") -> dict[str, object]:
+    details: dict[str, object] = {"item_name": name, "command": command, "enabled": enabled, "scope": scope}
     if item_kind:
         details["item_kind"] = item_kind
     return {
@@ -43,14 +43,18 @@ CASES = {
                 startup("windows-registry", "Updater", r"C:\Users\alice\AppData\Roaming\upd\upd.exe /silent"),
                 startup("windows-system", "run.bat", r"C:\Users\alice\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\run.bat", enabled=None, item_kind="script"),
                 startup("windows-registry", "Program", r'"C:\Program Files\Vendor\agent.exe" /tray'),
+                # An executable dropped straight into the user's Startup folder (``command`` = file name only).
+                startup("windows-system", "payload.exe", "payload.exe", enabled=None, item_kind="executable"),
             ],
-            "flagged": [0, 1],
+            "flagged": [0, 1, 3],
         },
-        # Disabled in Task Manager (StartupApproved 03) and an AppData\Local\Programs install: not flagged.
+        # Disabled in Task Manager (StartupApproved 03), an AppData\Local\Programs install and an
+        # executable in the all-users Startup folder (admin-writable only): not flagged.
         "negative": {
             "rows": [
                 startup("windows-registry", "Updater", r"C:\Users\alice\AppData\Roaming\upd\upd.exe /silent", enabled=False),
                 startup("windows-registry", "Teams", r"C:\Users\alice\AppData\Local\Programs\Teams\Update.exe --processStart Teams.exe"),
+                startup("windows-system", "VendorTray.exe", "VendorTray.exe", enabled=None, item_kind="executable", scope="machine"),
             ],
             "flagged": [],
         },

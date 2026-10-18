@@ -266,8 +266,13 @@ class StartupUserPath(Rule):
         if any(str(marker).lower() in probe for marker in self.param("exclude_markers", [])):
             return None
         reasons = suspicious_command(command, PERSISTENCE_MARKERS)
-        if row.text("item_kind") == "script":
+        item_kind = row.text("item_kind")
+        if item_kind == "script":
             reasons.append("시작프로그램 폴더의 스크립트")
+        elif item_kind == "executable" and row.text("scope") == "user":
+            # A file dropped straight into the user's Startup folder: the row's ``command`` is only
+            # the file name, so the user-writable marker of the folder never reaches the probe.
+            reasons.append("시작프로그램 폴더의 실행 파일")
         if not reasons:
             return None
         name = row.text("item_name", "value_name")
@@ -275,6 +280,10 @@ class StartupUserPath(Rule):
             name, command, list(self.param("squirrel_value_prefixes", []))
         ):
             return None
+        # A StartupApproved\Run row whose command was joined from the Run value of the same name:
+        # ``registry.run_user_path`` already flags that Run value at grade B, so this row (which adds
+        # only the enabled state) is capped at C instead of double-counting one autostart as two B flags.
+        from_run = row.text("startup_source").startswith("startup-approved-run") and row.flag("run_value_found") is True
         return RuleResult(
             evidence(
                 item_name=name,
@@ -282,5 +291,7 @@ class StartupUserPath(Rule):
                 startup_source=row.text("startup_source_label", "startup_source"),
                 scope=row.text("scope"),
                 reasons=reasons,
-            )
+            ),
+            note="같은 Run 값이 registry.run_user_path로 따로 표시됨(사용 상태 보강, C로 낮춤)" if from_run else None,
+            grade="C" if from_run else None,
         )

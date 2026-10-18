@@ -37,7 +37,9 @@ no user name / password, query, fragment or later path segments, see :func:`url_
 R5 L3: ``url_class_basis`` (``host`` / ``path``: a host not listed by domain takes the class of a
 listed path prefix one of its URLs had, e.g. on-premises OWA ``/owa/``; ``scheme``: ``magnet:<hash>``
 keys) and ``location_candidates`` (URLs of the value that are map URLs naming a place, coordinate or
-route, ``core.derived.map_urls``; the rows themselves are the browser's ``location-url-candidate``) -- and
+route, ``core.derived.map_urls``; the rows themselves are the browser's ``location-url-candidate``) and
+``carved_only`` (true when every occurrence is a url-carve row: page-file / unallocated strings, no
+visit; such hosts count in the summary's ``by_class_carved``, not ``by_class``) -- and
 ``length`` / ``sha256`` for ``credentials``. **A credential's clear value is never
 written**: ``value`` is the masked form, ``normalized`` is ``sha256:<hex>``.
 ``kind`` = artifact kind, ``files:candidates`` / ``files:inventory`` or
@@ -114,6 +116,8 @@ MAX_SAMPLES = 20
 MAX_SAMPLES_PER_KIND = 20
 MAX_SAMPLES_STORED = 60
 MAX_URL_EXAMPLES = 3
+# Catalogue family of url-carve rows: a URL host seen only there is marked ``carved_only``.
+CARVED_URL_FAMILY = "carved-url-candidate"
 URL_EXAMPLE_CHARS = 300
 MEMORY_CAP_BYTES = 320 * 1024 * 1024
 # Rough per-entry / per-sample cost of the in-memory tables (CPython objects), for the memory cap.
@@ -387,6 +391,10 @@ class DerivedCollector:
             row["url_class_label"] = self.url_classes.labels.get(url_class) if url_class else None
             row["url_class_basis"] = basis
             row["examples"] = list(entry.examples or [])
+            # R5 console review: a host seen only in url-carve rows (page file / unallocated strings)
+            # is no visit evidence; it is marked and kept out of the summary's by_class counts.
+            if entry.families and set(entry.families) == {CARVED_URL_FAMILY}:
+                row["carved_only"] = True
             if extra.get("location_candidates"):
                 row["location_candidates"] = extra["location_candidates"]
         if table == "credentials" and entry.extra:
@@ -725,12 +733,15 @@ def _write_outputs(
         }
         if table == "urls":
             classes: dict[str, int] = {}
+            carved_classes: dict[str, int] = {}
             locations = 0
             for row in rows:
                 if row.get("url_class"):
-                    classes[str(row["url_class"])] = classes.get(str(row["url_class"]), 0) + 1
+                    bucket = carved_classes if row.get("carved_only") else classes
+                    bucket[str(row["url_class"])] = bucket.get(str(row["url_class"]), 0) + 1
                 locations += int(row.get("location_candidates") or 0)  # type: ignore[call-overload]
             tables[table]["by_class"] = dict(sorted(classes.items()))
+            tables[table]["by_class_carved"] = dict(sorted(carved_classes.items()))
             tables[table]["location_candidates"] = locations
         # The written table is no longer needed in memory (lowers the peak for the larger tables after it).
         state.entries.clear()
