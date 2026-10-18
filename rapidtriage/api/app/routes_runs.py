@@ -861,14 +861,13 @@ def build_runs_router(
         deep = parse_bool(recursive, "recursive")
         restrict: list[int] | None = None
         folder: str | None = None
+        index = FS_INDEX_CACHE.get(files_output_key(run_id, get_output_path(store, run_id, "files")), payload)
         if path_prefix is not None:
-            index = FS_INDEX_CACHE.get(files_output_key(run_id, get_output_path(store, run_id, "files")), payload)
             parts = parse_folder_path(path_prefix, files_roots(payload))
             restrict = files_restriction(index, collection, parts, recursive=deep)
             folder = "/".join(parts)
         if wanted_special is not None:
-            rows = payload.get(collection) if isinstance(payload.get(collection), list) else []
-            special_rows = special_restriction(rows, wanted_special)
+            special_rows = special_restriction(index, collection, wanted_special)
             restrict = special_rows if restrict is None else sorted(set(restrict).intersection(special_rows))
         return restrict, {"path": folder, "recursive": deep, "special": wanted_special, "rows": len(restrict or [])}
 

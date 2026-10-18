@@ -68,6 +68,8 @@ export interface ExplorerTreeProps {
 }
 
 const MORE_PREFIX = "more:";
+/** Pages loaded on their own to reveal a deep-linked item (then "더 보기" is left to the user). */
+export const MAX_AUTO_PAGES = 20;
 
 export function ExplorerTree({
   label,
@@ -183,6 +185,25 @@ export function ExplorerTree({
       if (!branch || stalled) load(id, stalled && branch.items.length ? branch.nextAfter : null);
     }
   }, [expanded, allItems, load]);
+
+  // A deep link past the first page of a level (`expandIds` is the ancestor chain, the selected
+  // item its last child): page on in the parent until the next link of the chain is loaded.
+  const autoPages = useRef(new Map<string, number>());
+  useEffect(() => {
+    const chain = [...(expandIds ?? []), ...(selectedId ? [selectedId] : [])];
+    for (let i = 1; i < chain.length; i += 1) {
+      const wanted = chain[i] as string;
+      if (allItems.has(wanted)) continue;
+      const parent = chain[i - 1] as string;
+      const branch = branches.get(parent);
+      const pages = autoPages.current.get(parent) ?? 0;
+      if (branch?.status === "ready" && branch.nextAfter && pages < MAX_AUTO_PAGES) {
+        autoPages.current.set(parent, pages + 1);
+        load(parent, branch.nextAfter);
+      }
+      return;
+    }
+  }, [expandIds, selectedId, allItems, branches, load]);
 
   const rows = useMemo(() => {
     const out: Row[] = [];

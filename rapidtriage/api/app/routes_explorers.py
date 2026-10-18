@@ -164,7 +164,7 @@ def build_explorers_router(store: RunJobStore) -> APIRouter:
         }
         if node == 0:
             carve_state = _newest_completed(scope_info.output_dir, "carve") if scope_info is not None else None
-            shown, hidden = special_nodes(special_counts(payload), ntfs_state, carve_state)
+            shown, hidden = special_nodes(special_counts(index), ntfs_state, carve_state)
             response["special_nodes"] = shown
             response["hidden_special_nodes"] = hidden
         return response

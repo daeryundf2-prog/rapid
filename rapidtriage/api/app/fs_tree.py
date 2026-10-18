@@ -139,6 +139,8 @@ class FsIndex:
     post: array = field(default_factory=lambda: array("i"))
     truncated: bool = False
     truncated_reason: str | None = None
+    # [scope][special id] -> row positions of the special node (orphan / unallocated / slack)
+    special_rows: dict[str, dict[str, list[int]]] = field(default_factory=dict)
 
     def child(self, parent: int, name: str) -> int | None:
         return self.lookup.get((parent, _fold(name)))
@@ -191,7 +193,12 @@ def build_fs_index(key: tuple[object, ...], payload: Mapping[str, object]) -> Fs
         dirs = array("i", [-1]) * len(rows)
         placed: list[tuple[int, int]] = []
         outside = 0
+        specials: dict[str, list[int]] = {special: [] for special in SPECIAL_IDS}
+        index.special_rows[scope] = specials
         for position, row in enumerate(rows):
+            kind = special_kind(row) if isinstance(row, Mapping) else None
+            if kind is not None:
+                specials[kind].append(position)
             if position >= FS_TREE_MAX_ROWS:
                 index.truncated = True
                 index.truncated_reason = f"파일 행이 {FS_TREE_MAX_ROWS:,}개를 넘어 앞부분만 폴더 색인에 넣었습니다"
@@ -497,20 +504,16 @@ def parse_special(value: str | None) -> str | None:
     return text
 
 
-def special_restriction(rows: Sequence[object], special: str) -> list[int]:
-    return [position for position, row in enumerate(rows) if isinstance(row, Mapping) and special_kind(row) == special]
+def special_restriction(index: FsIndex, scope: str, special: str) -> list[int]:
+    """Row positions of ``scope`` that belong to the special node (the whole list, folders aside)."""
+    return list(index.special_rows.get(scope, {}).get(special, ()))
 
 
-def special_counts(payload: Mapping[str, object]) -> dict[str, dict[str, int]]:
-    counts = {special: {scope: 0 for scope in SCOPES} for special in SPECIAL_IDS}
-    for scope in SCOPES:
-        rows = payload.get(scope)
-        for row in rows if isinstance(rows, list) else []:
-            if isinstance(row, Mapping):
-                kind = special_kind(row)
-                if kind:
-                    counts[kind][scope] += 1
-    return counts
+def special_counts(index: FsIndex) -> dict[str, dict[str, int]]:
+    return {
+        special: {scope: len(index.special_rows.get(scope, {}).get(special, ())) for scope in SCOPES}
+        for special in SPECIAL_IDS
+    }
 
 
 ORPHAN_STATUSES = ("partial-parent-reference-missing", "partial-parent-sequence-mismatch", "partial-parent-outside-bounded-scan")

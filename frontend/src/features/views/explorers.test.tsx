@@ -230,6 +230,7 @@ describe("파일 시스템 탐색기", () => {
                     id: "orphan",
                     label: "고아 파일",
                     count: 3,
+                    counts: { candidates: 0, inventory: 3 },
                     source: "files",
                     files_query: { special: "orphan" },
                   },
@@ -292,11 +293,38 @@ describe("파일 시스템 탐색기", () => {
 
     // Special node → the files listing filtered server-side.
     fireEvent.click(within(tree).getByRole("treeitem", { name: /고아 파일/ }));
-    expect(useAppStore.getState().route).toMatchObject({ collection: "files", special: "orphan" });
+    // Its rows live only in the inventory: the listing switches to that list.
+    expect(useAppStore.getState().route).toMatchObject({
+      collection: "files",
+      special: "orphan",
+      category: "inventory",
+    });
     expect(useAppStore.getState().route.dir).toBeUndefined();
 
     fireEvent.click(screen.getByTestId("fs-explorer-close"));
     expect(fsExplorerOpen(useAppStore.getState().route)).toBe(false);
+  });
+
+  it("pages on to reveal a deep-linked folder past the first page", async () => {
+    installFetch({
+      "/fs-tree": (url) => {
+        const path = url.searchParams.get("path") ?? "";
+        if (path === "Zed") return jsonResponse(fsPage("Zed", []));
+        return url.searchParams.get("after")
+          ? jsonResponse(fsPage("", [folder("Zed", 1, 0)]))
+          : jsonResponse(fsPage("", [folder("Alpha", 2, 0)], { child_total: 2, next_after: "QWxwaGE" }));
+      },
+    });
+    useAppStore.getState().navigate({ runId: RUN, collection: "files", dir: "Zed" });
+    renderWithClient(
+      <FsExplorerLayout>
+        <p>grid</p>
+      </FsExplorerLayout>,
+    );
+    const tree = await screen.findByRole("tree", { name: "파일 시스템 폴더 트리" });
+    const zed = await within(tree).findByRole("treeitem", { name: /^Zed, 파일 1개/ });
+    expect(zed.getAttribute("aria-current")).toBe("location");
+    expect(within(tree).queryByRole("treeitem", { name: /더 보기/ })).toBeNull();
   });
 
   it("explains an empty list and a failed load", async () => {

@@ -189,7 +189,7 @@ export function ThumbnailView() {
   const [panel, setPanel] = useState<MediaPanelMode | null>(null);
   const [narrow, setNarrow] = useState<MediaSet | null>(null);
   const panelId = useId();
-  const nodeKey = `${route.runId}|${route.collection.id}|${route.collection.kind ?? ""}|${route.collection.dir ?? ""}`;
+  const nodeKey = `${route.runId}|${route.collection.id}|${route.collection.kind ?? ""}|${route.collection.dir ?? ""}|${route.collection.special ?? ""}`;
   // biome-ignore lint/correctness/useExhaustiveDependencies: nodeKey is the trigger
   useEffect(() => setNarrow(null), [nodeKey]);
   const sorted = useMemo(() => {

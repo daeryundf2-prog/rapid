@@ -148,10 +148,16 @@ export function FsExplorerPane() {
           analysisId: node.analysis.analysis_id,
         });
       } else {
+        // The list (candidates / inventory) that holds the node's rows: rows only the inventory
+        // has would show an empty candidates list.
+        const inInventory = (node.counts?.candidates ?? 0) === 0 && (node.counts?.inventory ?? 0) > 0;
+        const inCandidates = (node.counts?.candidates ?? 0) > 0 && (node.counts?.inventory ?? 0) === 0;
+        const category = inInventory ? FILES_INVENTORY : inCandidates ? undefined : route.category;
         patchRoute({
           dir: undefined,
           rec: undefined,
           special: node.id as FsSpecial,
+          category,
           row: undefined,
           mode: undefined,
         });

@@ -40,6 +40,8 @@ export interface FsSpecialNode {
   id: "orphan" | "unallocated" | "slack";
   label: string;
   count: number;
+  /** Rows per list (files-sourced nodes only). */
+  counts?: Record<FsScope, number>;
   source: "files" | "ntfs-meta" | "carve";
   files_query?: { special: string };
   analysis?: { analysis_id: string; kind: string };
