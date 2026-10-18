@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from . import (  # noqa: F401  (imports register the rule implementations)
     accounts,
+    antiforensics,
     archives,
     browser,
     cloud,

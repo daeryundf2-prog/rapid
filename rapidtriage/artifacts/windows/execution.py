@@ -16,6 +16,7 @@ from .._walk import iter_evidence_paths
 from .common import build_forensic_review, iter_windows_user_homes
 from .ese import ESE_SCAN_READ_SIZE, build_ese_string_pivots, probe_ese_database
 from .os_account import decode_reg_export
+from .pca import collect_pca_text_files
 from .registry import (
     filetime_to_iso_ticks,
     read_u32,
@@ -308,6 +309,7 @@ class WindowsExecutionProvider:
             *collect_powershell_history(root),
             *collect_srum_imports(root),
             *collect_srum_dat_inventory(root),
+            *collect_pca_text_files(root, self.name),
         ]
         yield from records
         summary = build_execution_summary(root, records)

@@ -181,8 +181,8 @@ describe("RDP direction · EXIF state · auto logon", () => {
       expect(familyById("media-image")?.core_columns.some((c) => c.derive === "exif_status")).toBe(true);
       expect(familyById("rdp")?.core_columns.some((c) => c.derive === "rdp_direction")).toBe(true);
       // Every family of the backend catalogue was reviewed for semantic tags: 54 + r2 M1 (3) + M4 (1) + M2 (6) + M3 (2)
-      // + console fix (cloud-sync split 2, messenger-error 1).
-      expect(FALLBACK_CATALOG.families).toHaveLength(69);
+      // + console fix (cloud-sync split 2, messenger-error 1) + r3 O1 (10).
+      expect(FALLBACK_CATALOG.families).toHaveLength(79);
       expect(familyById("sam-account")?.core_columns.find((c) => c.key === "user_name")?.semantic).toBe(
         "account",
       );

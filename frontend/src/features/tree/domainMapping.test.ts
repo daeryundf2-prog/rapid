@@ -38,6 +38,8 @@ const EVIDENCE: Record<string, string[]> = {
     "amcache-device-container",
     "amcache-application-shortcut",
     "amcache-device-census",
+    // r3 O1: PCA text files (pca.py).
+    "execution-pca",
   ],
   "windows-prefetch": ["prefetch-file", "prefetch-invalid-content"],
   "recent-files": [
@@ -61,6 +63,16 @@ const EVIDENCE: Record<string, string[]> = {
     "windows-installed-program",
     "registry-persistence-entry",
     "registry-user-activity",
+    // r3 O1: registry_depth.py row types.
+    "registry-network-profile",
+    "registry-network-share",
+    "registry-wlan-profile",
+    "registry-office-mru",
+    "registry-known-dll",
+    "registry-default-browser",
+    "registry-install-state",
+    "execution-pca",
+    "execution-feature-usage",
   ],
   "windows-os-account": [
     "windows-sam-account",
@@ -78,6 +90,8 @@ const EVIDENCE: Record<string, string[]> = {
     "icon-cache-file",
     "thumbnail-cache-entry-candidate",
     "icon-cache-entry-candidate",
+    // r3 O1: BitLocker recovery key files (antiforensics.py).
+    "bitlocker-recovery-key-file",
   ],
   "kakaotalk-windows": [
     "kakaotalk-windows-user-id-candidate",
@@ -762,5 +776,48 @@ describe("R2 M4 cloud sync nodes", () => {
     ]) {
       expect(artifactTypeLabel(type), type).toMatch(/[가-힣]/);
     }
+  });
+});
+
+describe("r3 O1 registry depth and anti-forensics nodes", () => {
+  const nodesOf = (domain: string) => DOMAINS.find((d) => d.id === domain)?.nodes ?? [];
+  const isSorted = (labels: string[]) =>
+    expect(labels).toEqual([...labels].sort((x, y) => x.localeCompare(y, "ko")));
+
+  it("adds a Korean-sorted registry block with the network group", () => {
+    const ids = [
+      "reg-default-browser",
+      "reg-network",
+      "reg-install-state",
+      "reg-known-dlls",
+      "reg-office-mru",
+    ];
+    const registry = nodesOf("registry");
+    const block = ids.map((id) => registry.find((n) => n.id === id));
+    expect(block.every(Boolean)).toBe(true);
+    isSorted(block.map((n) => n?.label ?? ""));
+    const network = registry.find((n) => n.id === "reg-network");
+    isSorted((network?.children ?? []).map((c) => c.label));
+    expect(network?.target.types).toEqual((network?.children ?? []).flatMap((c) => c.target.types ?? []));
+    expect(primaryNodes("windows-registry", "registry-office-mru")[0]?.domain).toBe("registry");
+    expect(artifactTypeLabel("registry-network-profile")).toBe("네트워크 프로필(NetworkList)");
+  });
+
+  it("lists PCA once per emitting kind and FeatureUsage under 실행 흔적", () => {
+    const labels = ["exec-feature-usage", "exec-pca-files", "exec-pca-registry"].map(
+      (id) => nodesOf("execution").find((n) => n.id === id)?.label ?? "",
+    );
+    isSorted(labels);
+    expect(primaryNodes("windows-execution", "execution-pca").map((n) => n.domain)).toEqual(["execution"]);
+    expect(primaryNodes("windows-registry", "execution-pca").map((n) => n.domain)).toEqual(["execution"]);
+    expect(primaryNodes("windows-registry", "execution-feature-usage").map((n) => n.domain)).toEqual([
+      "execution",
+    ]);
+  });
+
+  it("places BitLocker recovery key files under 안티 포렌식", () => {
+    const labels = nodesOf("anti-forensics").map((n) => n.label);
+    isSorted(labels);
+    expect(primaryNodes("windows-system", "bitlocker-recovery-key-file")[0]?.domain).toBe("anti-forensics");
   });
 });

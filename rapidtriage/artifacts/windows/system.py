@@ -16,6 +16,7 @@ from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 from ...core.safe_xml import UnsafeXmlError, safe_xml_parse
 from .._walk import iter_evidence_paths
+from .antiforensics import collect_bitlocker_recovery_key_files
 from .common import (
     build_forensic_review,
     isoformat_from_timestamp,
@@ -241,6 +242,7 @@ class WindowsSystemArtifactsProvider:
         yield from collect_explorer_cache_artifacts(root)
         yield from collect_activity_notification_uwp_artifacts(root)
         yield from collect_webshell_and_server_log_artifacts(root)
+        yield from collect_bitlocker_recovery_key_files(root, self.name)
 
 
 def collect_print_spooler_artifacts(root: Path) -> Iterable[ArtifactRecord]:
