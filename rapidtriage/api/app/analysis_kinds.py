@@ -22,7 +22,10 @@ Every runner calls an existing core function and only adapts its output to
   progress unit per row source);
 * ``derived`` -- ``core.derived.engine.run_derived`` (통합 보기 tables
   ``<table>.jsonl`` + ``summary.json`` from the catalogue's semantic column tags;
-  one progress unit per row source).
+  one progress unit per row source);
+* ``url-carve`` -- ``core.url_carving.scan_url_source`` (R5 L3: ``http(s)://`` URLs in
+  ASCII / UTF-16LE from page files, unallocated-space dumps and memory dumps; URL only,
+  never page bodies; ``carved-url-candidate`` rows with the URL class; one unit per file).
 """
 
 from __future__ import annotations
@@ -352,6 +355,126 @@ def _carve_sources(
             "skipped": skipped[:200],
             "extract_dir": str(carved_dir) if options.extract else None,
             "limitation": "시그니처 카빙은 선별 보조 수단입니다. 후보는 헥스 뷰어에서 offset을 확인한 뒤 인용하세요.",
+        }
+    )
+
+
+# --- URL carving (R5 L3) ----------------------------------------------------------------
+
+
+URL_CARVE_PARSER_VERSION = "url-carve-v1"
+
+
+class UrlCarveOptions(_Options):
+    sources: list[Literal["pagefile", "unallocated", "memory-dump"]] = Field(
+        default_factory=lambda: ["pagefile", "unallocated"], min_length=1
+    )
+    max_scan_bytes: int = Field(4 * GIB, ge=1, le=64 * GIB)
+    max_candidates: int = Field(50_000, ge=1, le=500_000)
+    ascii_urls: bool = True
+    utf16_urls: bool = True
+
+
+def run_url_carve(ctx: AnalysisContext) -> None:
+    from ...core.derived.url_classes import load_url_classes
+    from ...core.url_carving import (
+        SOURCE_LABELS,
+        UrlCarveState,
+        scan_url_source,
+        source_kind,
+    )
+
+    options: UrlCarveOptions = ctx.options  # type: ignore[assignment]
+    if not (options.ascii_urls or options.utf16_urls):
+        raise AnalysisFailure("ASCII와 UTF-16LE 중 하나 이상을 선택하세요")
+    root = ctx.scope.scan_root()
+    if not root.exists():
+        raise AnalysisFailure(f"스캔 루트가 없습니다: {root}")
+    ctx.set_message("소스 파일 목록 작성 중")
+    walk_stats = WalkStats()
+    wanted = set(options.sources)
+    sources = [
+        (path, kind)
+        for path in iter_evidence_files(ctx, root, walk_stats)
+        if (kind := source_kind(path)) is not None and kind in wanted
+    ]
+    ctx.set_total(len(sources), unit="파일", message=f"소스 파일 {len(sources)}개")
+    try:
+        url_classes = load_url_classes()
+    except Exception:  # URL classes are a label; a broken rule file never stops the carve
+        url_classes = None
+    state = UrlCarveState(url_classes, options.max_candidates)
+    candidates = 0
+    scanned_bytes = 0
+    kind_counts: Counter[str] = Counter()
+    class_counts: Counter[str] = Counter()
+    encoding_counts: Counter[str] = Counter()
+    skipped: list[dict[str, object]] = []
+    for path, kind in sources:
+        ctx.check_cancel()
+        if state.capped:
+            break
+        try:
+            size = path.stat().st_size
+            entries, scanned = scan_url_source(
+                path,
+                state=state,
+                read_limit=min(size, options.max_scan_bytes),
+                ascii_urls=options.ascii_urls,
+                utf16_urls=options.utf16_urls,
+                check_cancel=ctx.check_cancel,
+            )
+        except OSError as exc:
+            skipped.append({"path": str(path), "reason": f"read-error:{exc}"[:300]})
+            ctx.advance()
+            continue
+        scanned_bytes += scanned
+        for entry in sorted(entries, key=lambda item: int(item.get("offset") or 0)):
+            candidates += 1
+            kind_counts[kind] += 1
+            encoding_counts[str(entry.get("encoding"))] += 1
+            if entry.get("url_class"):
+                class_counts[str(entry["url_class"])] += 1
+            ctx.write_row(
+                ctx.row(
+                    {
+                        **entry,
+                        "source_path": str(path),
+                        "source_kind": kind,
+                        "source_kind_label": SOURCE_LABELS[kind],
+                        "source_offset": entry.get("offset"),
+                        "source_scanned_bytes": scanned,
+                        "source_truncated": scanned < size,
+                        "recovery_method": "carved-url",
+                        "parser_version": URL_CARVE_PARSER_VERSION,
+                    },
+                    path=str(path),
+                    artifact_type="carved-url-candidate",
+                )
+            )
+        ctx.advance(message=f"{path.name} · URL 후보 {candidates}건")
+    if state.capped:
+        done = ctx.progress_done()
+        ctx.set_total(done, message=f"URL 후보 상한 {options.max_candidates}건 도달 · 파일 {done}/{len(sources)}개 확인")
+    ctx.summary.update(
+        {
+            "source_root": str(root),
+            "source_file_count": len(sources),
+            "skipped_link_count": walk_stats.skipped_links,
+            "pruned_output_dir_count": walk_stats.pruned_dirs,
+            "scanned_byte_count": scanned_bytes,
+            "candidate_count": candidates,
+            "candidate_cap_reached": state.capped,
+            "kind_counts": dict(kind_counts),
+            "encoding_counts": dict(encoding_counts),
+            "url_class_counts": dict(class_counts),
+            "skipped_count": len(skipped),
+            "skipped": skipped[:200],
+            "limitation": (
+                "URL 카빙 후보는 페이지 파일·미할당 영역·메모리 덤프에 남은 URL 문자열입니다. 방문했다는 증거가 아니며 "
+                "주변 바이트(페이지 본문)는 저장하지 않습니다. 토큰이 든 질의 값은 가리고 원본 URL의 SHA-256만 둡니다. "
+                "hiberfil.sys는 압축되어 있어 검사하지 않습니다."
+            ),
         }
     )
 
@@ -2299,6 +2422,8 @@ def analysis_row_title(kind: str, row: Mapping[str, object], record_index: int) 
         title = f"{details.get('memory_artifact_type') or '메모리'} · {name}" if name else str(details.get("memory_artifact_type") or "")
     elif kind == "cross-case":
         title = f"{details.get('kind') or '지표'} · {details.get('indicator') or ''}".rstrip(" ·")
+    elif kind == "url-carve":
+        title = f"{details.get('host') or 'URL'} @ {details.get('offset_hex') or ''} · {_base_name(details.get('source_path') or path)}"
     return title.strip() or f"{analysis_kind_label(kind)} #{record_index}"
 
 
@@ -2342,6 +2467,9 @@ _COMMON_LABELS = {
     "incident_start": "사건 시작 시각",
     "incident_end": "사건 종료 시각",
     "include_analyses": "분석 결과 포함",
+    "sources": "소스 종류",
+    "ascii_urls": "ASCII URL",
+    "utf16_urls": "UTF-16LE URL",
 }
 
 KIND_RUNNERS: dict[str, AnalysisSpec] = {
@@ -2362,5 +2490,6 @@ KIND_RUNNERS: dict[str, AnalysisSpec] = {
         AnalysisSpec("search-index", "검색 색인", "출력 파일", SearchIndexOptions, run_search_index, None, _COMMON_LABELS),
         AnalysisSpec("triage-flags", "특이사항", "행 소스", TriageFlagsOptions, run_triage_flags_kind, None, _COMMON_LABELS),
         AnalysisSpec("derived", "통합 보기", "행 소스", DerivedOptions, run_derived_kind, None, _COMMON_LABELS),
+        AnalysisSpec("url-carve", "URL 카빙", "파일", UrlCarveOptions, run_url_carve, None, _COMMON_LABELS),
     )
 }

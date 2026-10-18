@@ -117,6 +117,7 @@ ANALYSIS_DOMAINS = {
     "ocr-batch": "media",
     "memory-import": "memory",
     "cross-case": "incident",
+    "url-carve": "web",
 }
 
 # Detail keys whose values are boilerplate (validation plans, readiness,
