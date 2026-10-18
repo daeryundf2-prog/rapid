@@ -19,6 +19,7 @@ from fastapi.responses import (
 
 from ...core.artifact_profiles import payload_record_count
 from ...core.columnar_store import query_columnar_artifact_records
+from ...core.eventlog_channels import ChannelFilter
 from ...core.extract import DEFAULT_EXTRACT_MANIFEST_NAME, ExtractError, run_extract
 from ...core.indicators import (
     IndicatorSummaryError,
@@ -39,6 +40,7 @@ from .artifact_filter import (
     filter_across_kinds,
     filter_artifact_page,
     filter_files_by_category,
+    normalize_channel_filter,
     parse_field_filters,
 )
 from .artifact_sort import SORT_ORDERS, paginate_sorted_artifact_output
@@ -436,6 +438,8 @@ def build_runs_router(
         flag_grade: str | None = Query(default=None),
         browser: list[str] = Query(default=[]),
         service: list[str] = Query(default=[]),
+        channel: list[str] = Query(default=[]),
+        channel_group: list[str] = Query(default=[]),
     ) -> dict[str, object]:
         """Page per-kind artifact rows; every row carries its JSONL ``record_index``.
 
@@ -447,6 +451,26 @@ def build_runs_router(
         or control-character value is a 422 with a Korean message); the
         pagination reports ``fields``. ``/tree`` gives the matching counts
         (``field_type_counts``).
+
+        ``channel`` (repeatable; plan r3-os-depth §3.2 O2) keeps only rows whose
+        ``details.channel`` equals one of the values exactly (event-log
+        channel names such as ``Security`` or
+        ``Microsoft-Windows-PowerShell/Operational``; ``/tree`` lists them per
+        channel group). It composes like ``artifact_type`` (streaming filter,
+        ``limit > 0``, across kinds when zero or several ``kind`` are given;
+        rows without a channel never match). An empty, over-long (> 256
+        characters) or control-character value, or more than 256 values, is a
+        422 with a Korean message. ``channel_group`` (repeatable) selects
+        whole channel groups of ``core.eventlog_channels`` (``security``,
+        ``system``, ``application``, ``powershell``, ``defender``,
+        ``firewall``, ``task-scheduler``, ``storage``, ``user-pnp``,
+        ``office-alerts``, ``rdp``, ``other``, ``none`` = no channel,
+        ``services`` = System rows of the Service Control Manager); it is
+        OR-ed with ``channel`` (unknown ids are a Korean 422).
+
+        Different filter kinds (``artifact_type``, ``path_contains``,
+        ``channel``/``channel_group``, ``browser``, ``service``, ``flag``) AND
+        together; repeated values of one kind OR.
 
         특이사항 (plan viewer-families §3.1): every row carries ``flags`` (the
         newest completed ``triage-flags`` set; ``[]`` when none) and the
@@ -492,6 +516,10 @@ def build_runs_router(
             raise HTTPException(status_code=409, detail="run has no outputs")
         wanted_kinds = {item.strip() for item in kind if item.strip()}
         wanted_types = frozenset(item.strip() for item in artifact_type if item.strip()) or None
+        try:
+            wanted_channels = normalize_channel_filter(channel, channel_group)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
         needle = path_contains.strip() if path_contains and path_contains.strip() else None
         try:
             fields = parse_field_filters({"browser": browser, "service": service})
@@ -500,7 +528,7 @@ def build_runs_router(
         sort_key = sort.strip() if sort and sort.strip() else None
         flag_sort = is_flags_sort(sort_key)
         flag_query = parse_flag_query(flag, flag_grade, sort_flags=flag_sort)
-        if (wanted_types or needle or flag_query.active or fields) and limit <= 0:
+        if (wanted_types or wanted_channels or needle or flag_query.active or fields) and limit <= 0:
             raise HTTPException(status_code=400, detail=FILTER_LIMIT_MESSAGE)
         if flag_sort:
             if len(wanted_kinds) != 1:
@@ -518,13 +546,14 @@ def build_runs_router(
             sort_order = sort_order or "asc"
             if sort_order not in SORT_ORDERS:
                 raise HTTPException(status_code=400, detail="order must be asc or desc")
-        if (wanted_types or needle or flag_query.filtered or fields) and not sort_key and not flag_sort and len(wanted_kinds) != 1 and limit > 0:
+        if (wanted_types or wanted_channels or needle or flag_query.filtered or fields) and not sort_key and not flag_sort and len(wanted_kinds) != 1 and limit > 0:
             response = _artifacts_across_kinds(
                 run_id,
                 outputs,
                 kinds=list(dict.fromkeys(item.strip() for item in kind if item.strip())),
                 path_contains=needle,
                 artifact_types=wanted_types,
+                channels=wanted_channels,
                 offset=offset,
                 limit=limit,
                 after=after,
@@ -568,6 +597,7 @@ def build_runs_router(
                             path_contains=needle,
                             locate=locate,
                             artifact_types=wanted_types,
+                            channels=wanted_channels,
                             allowed_records=allowed_records,
                         )
                         if flag_query.filtered:
@@ -583,6 +613,7 @@ def build_runs_router(
                             offset=offset,
                             limit=limit,
                             artifact_types=wanted_types,
+                            channels=wanted_channels,
                             fields=fields,
                             rows_source=flag_rows_source(
                                 artifact_payload,
@@ -596,11 +627,11 @@ def build_runs_router(
                             kind_page,
                             flag_query,
                             record_count=payload_record_count(artifact_payload),
-                            other_filters=bool(needle or wanted_types or fields),
+                            other_filters=bool(needle or wanted_types or wanted_channels or fields),
                         )
                         artifacts[name.removeprefix("artifacts_")] = kind_page
                         continue
-                    if (needle or wanted_types or fields) and limit > 0:
+                    if (needle or wanted_types or wanted_channels or fields) and limit > 0:
                         artifacts[name.removeprefix("artifacts_")] = filter_artifact_page(
                             artifact_payload,
                             payload_path=get_output_path(store, run_id, name),
@@ -608,6 +639,7 @@ def build_runs_router(
                             offset=offset,
                             limit=limit,
                             artifact_types=wanted_types,
+                            channels=wanted_channels,
                             fields=fields,
                         )
                         continue
@@ -624,7 +656,7 @@ def build_runs_router(
                     raise HTTPException(status_code=403, detail=str(exc))
                 except FileNotFoundError as exc:
                     raise HTTPException(status_code=404, detail=str(exc))
-        filtered_pages = bool(needle or wanted_types or flag_query.filtered or fields) and limit > 0
+        filtered_pages = bool(needle or wanted_types or wanted_channels or flag_query.filtered or fields) and limit > 0
         for kind_name, page in artifacts.items():
             if isinstance(page, dict) and kind_name in kind_payloads:
                 annotate_page_counts(page, kind_payloads[kind_name], filtered=filtered_pages)
@@ -652,6 +684,7 @@ def build_runs_router(
         after: str | None,
         join: FlagsJoin,
         flag_query: FlagQuery,
+        channels: ChannelFilter | None = None,
         fields: Mapping[str, frozenset[str]] | None = None,
     ) -> dict[str, object]:
         available = [name.removeprefix("artifacts_") for name in sorted(outputs) if name.startswith("artifacts_")]
@@ -672,6 +705,7 @@ def build_runs_router(
                 sources,
                 path_contains=path_contains,
                 artifact_types=artifact_types,
+                channels=channels,
                 offset=offset,
                 limit=limit,
                 after=after,

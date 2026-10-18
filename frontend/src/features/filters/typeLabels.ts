@@ -7,6 +7,24 @@
 
 import { DOMAINS, flattenDomainNodes } from "../tree/domains";
 
+/**
+ * Korean names of the analysis job row types (`<kind>-row`, R3 typed rows such as
+ * `ntfs-timestamp-mismatch`): no tree node maps them as a type, so they are seeded here.
+ */
+export const ANALYSIS_TYPE_LABELS: Readonly<Record<string, string>> = {
+  "ntfs-timestamp-mismatch": "NTFS 타임스탬프 불일치",
+  "ntfs-logfile-transaction": "$LogFile 트랜잭션",
+  "ntfs-meta-row": "MFT/USN 레코드",
+  "carve-row": "카빙 결과",
+  "vsc-discover-row": "볼륨 섀도우 후보",
+  "vsc-compare-row": "볼륨 섀도우 비교",
+  "vsc-extract-row": "볼륨 섀도우 추출",
+  "ocr-batch-row": "OCR 결과",
+  "cross-case-row": "교차 케이스 지표",
+  "memory-import-row": "메모리 분석 가져오기",
+  "triage-flags-row": "특이사항 계산",
+};
+
 let cache: Map<string, string> | null = null;
 
 function labels(): Map<string, string> {
@@ -21,6 +39,7 @@ function labels(): Map<string, string> {
         if (!out.has(type)) out.set(type, label);
     }
   }
+  for (const [type, label] of Object.entries(ANALYSIS_TYPE_LABELS)) if (!out.has(type)) out.set(type, label);
   cache = out;
   return out;
 }

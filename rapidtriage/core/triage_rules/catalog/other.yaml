@@ -281,6 +281,76 @@ families:
     - source
   aux_columns: []
   rules: []
+- id: carved-file
+  label: 카빙 복구 파일
+  types:
+  - carve-row
+  core_columns:
+  - key: signature_kind
+    label: 서명 종류
+  - key: family_label
+    label: 계열
+  - key: source_path
+    label: 원본(소스) 경로
+    format: path
+  - key: offset
+    label: 오프셋
+    aliases:
+    - source_offset
+    format: hex
+  - key: length
+    label: 길이
+    format: bytes
+  - key: sha256
+    semantic: hash
+    label: 해시(SHA-256)
+    format: mono
+  - key: status
+    label: 경계 판정
+    value_labels:
+      footer-validated: 끝 표식 확인
+      length-field: 길이 필드 확인
+      length-field-truncated: 길이 필드(잘림)
+      bounded-no-footer: 끝 표식 없음(상한까지)
+      bounded-header-candidate: 머리만 확인(상한까지)
+      text-boundary: 텍스트 경계
+      false-positive-rejected: 오탐 거부
+  - key: confidence
+    label: 신뢰도
+    value_labels:
+      high: 높음
+      medium: 중간
+      low: 낮음
+      unknown: 불명
+  aux_columns:
+  - key: recovery_method
+    label: 복구 방법
+    value_labels:
+      carved: 카빙
+      parsed: 파싱됨
+      rejected: 거부됨(오탐)
+  - key: boundary_method
+    label: 경계 방법
+    value_labels:
+      signature-header: 머리 서명만
+      signature-footer: 끝 서명
+      length-field: 길이 필드
+      text-boundary: 텍스트 경계
+      header-only-bounded: 머리만(상한까지)
+      box-walk: 박스 순회(MP4/M4A)
+      chunk-count: 청크 수(EVTX)
+      frame-walk: 프레임 순회(MP3)
+      ole-fat: OLE FAT(HWP)
+      riff-size: RIFF 크기(WAV)
+      section-table: 섹션 표(PE)
+      zip-eocd: ZIP 끝 레코드(EOCD)
+      id3-size: ID3 크기
+  - key: rejected_reason
+    label: 거부 사유
+  - key: extracted_path
+    label: 추출 경로
+    format: path
+  rules: []
 - id: generic
   label: 레코드
   types: []

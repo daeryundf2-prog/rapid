@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { RawPage, RawRow } from "../../api/collections";
-import type { CollectionId, CollectionRef, GridRow } from "../../contracts/collection";
+import type { CollectionId, CollectionRef, ColumnFilter, GridRow } from "../../contracts/collection";
 
 export type GridPreset = "analysis" | "compact" | "source" | "axiom";
 
@@ -85,6 +85,15 @@ export interface MapContext {
   page?: RawPage;
 }
 
+/**
+ * What else picks a grid's columns (analysis rows, R3 §3.3): the route's column filters (an
+ * ntfs-meta `f:source` sub-view) and the loaded rows' artifact types (one catalogue family).
+ */
+export interface ColumnsContext {
+  columnFilters?: readonly ColumnFilter[];
+  rowTypes?: readonly string[];
+}
+
 export interface CollectionDef {
   id: CollectionId;
   /** Korean label for headings and the empty state. */
@@ -92,7 +101,7 @@ export interface CollectionDef {
   columns: ColumnSpec[];
   /** Kind-aware column set (e.g. eventlog adds 이벤트ID/채널/메시지); defaults to `columns`. */
   /** Columns of one kind; `types` = the grid's 유형 filter (artifact type families pick their own set). */
-  columnsFor?: (ref: CollectionRef, types?: readonly string[]) => ColumnSpec[];
+  columnsFor?: (ref: CollectionRef, types?: readonly string[], context?: ColumnsContext) => ColumnSpec[];
   /**
    * Responsive default layout: the column ids in priority order (highest first) for the default
    * ("분석 기본") preset. While the columns' minimum widths (`minWidth`) exceed the grid width the

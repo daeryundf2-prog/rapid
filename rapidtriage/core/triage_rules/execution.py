@@ -6,6 +6,7 @@ import datetime as dt
 from collections import defaultdict
 from collections.abc import Iterator
 
+from ...artifacts.windows.prefetch import prefetch_executable_entry
 from .base import (
     FlagContext,
     RowRef,
@@ -57,16 +58,24 @@ SYSTEM_BINARY_DIRS = ("windows\\system32\\", "windows\\syswow64\\", "windows\\wi
 
 
 def prefetch_executable_path(row: RowView) -> str:
-    """The executable's own path among a Prefetch row's referenced files (``""`` when not listed)."""
+    """The executable's own path among a Prefetch row's referenced files (``""`` when not listed).
+
+    Uses ``executable_reference_path`` (picked by the parser from *every* decoded path, before
+    the 1,000-entry inline cap), then the decoded file-metrics entries (``referenced_files[].path``)
+    and the inline ``referenced_paths`` list (rows of older parser versions). A 29-character
+    header name is a prefix match; an ``.exe``/``.com``/``.scr`` candidate is preferred.
+    """
     name = row.text("executable_hint", "header_executable_name", "filename_executable_hint").lower()
     if not name:
         return ""
-    for value in as_list(row.get("referenced_paths")):
-        text = str(value)
-        if base_name(text) == name:
-            start = text.find("\\")
-            return text[start:] if start > 0 else text
-    return ""
+    text = row.text("executable_reference_path")
+    if not text:
+        decoded = [item.get("path") for item in as_list(row.get("referenced_files")) if isinstance(item, dict)]
+        text = prefetch_executable_entry(name, [*decoded, *as_list(row.get("referenced_paths"))])
+    if not text:
+        return ""
+    start = text.find("\\")
+    return text[start:] if start > 0 else text
 
 
 def trace_path(row: RowView) -> str:

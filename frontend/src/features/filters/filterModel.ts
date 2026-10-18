@@ -6,7 +6,9 @@
  * analysis-workbench-p1 §4):
  *  - artifacts: `path_contains` (path text / 경로 column filter), `artifact_type=`
  *               (types / 유형 column filter, repeated), `browser=` / `service=`
- *               (exact record fields of a tree node, repeated)
+ *               (exact record fields of a tree node, repeated), `channel=` / `channel_group=`
+ *               (`evt_channel` / `evt_channel_group` column filters: exact names or group ids
+ *               joined by "|"; the 이벤트 로그 channel nodes use the group filter)
  *  - analysis:  `path_contains` (path text / 경로 column filter)
  *  - search:    `extension` (repeated param; 확장자 column filter too)
  *  - timeline/files/docs/indicators: paging only, nothing server-side
@@ -14,6 +16,7 @@
  * the rows already loaded; the filter status line says so.
  */
 
+import { ANALYSIS_DETAIL_FILTER_KEYS } from "../../api/analyses";
 import {
   type CollectionQuery,
   type CollectionRef,
@@ -29,6 +32,7 @@ import {
 } from "../../contracts/collection";
 import type { Route } from "../../router";
 import { parseInstant } from "../../utils/time";
+import { CARVE_KINDS } from "../analysis/analysisForm";
 import { type Grade, isGrade } from "../flags/catalog";
 import { rowMatchesFlagFilter, ruleLabel } from "../flags/flags";
 
@@ -182,9 +186,13 @@ export interface FilterPlan {
     path?: string;
     extension?: string[];
     artifactTypes?: string[];
+    channels?: string[];
+    channelGroups?: string[];
     flags?: string[];
     flagGrade?: Grade;
     fields?: RecordFieldFilters;
+    /** Analysis rows: exact `details` filters (`f:source` / `f:signature_kind` / `f:recovery_method` / `f:in_use`). */
+    details?: Record<string, string[]>;
   };
   /** Column filters the client applies to loaded rows (the rest went to the API). */
   clientColumns: ColumnFilter[];
@@ -194,6 +202,29 @@ export interface FilterPlan {
   serverLabels: string[];
   /** Korean names of filters applied only to loaded rows. */
   clientLabels: string[];
+}
+
+/**
+ * Column id of the event-log channel filter (`cf=evt_channel:<names>`, not the 채널 grid column whose
+ * header filter stays a substring match on loaded rows): exact channel names joined by
+ * "|", applied server-side only (`channel=`, repeated) — never a substring match on loaded rows.
+ */
+export const CHANNEL_FILTER_COLUMN = "evt_channel";
+/** Column id of the event-log channel *group* filter (`cf=evt_channel_group:security`): server `channel_group=`. */
+export const CHANNEL_GROUP_FILTER_COLUMN = "evt_channel_group";
+
+/** `Security|System` → ["Security", "System"] (trimmed, empty parts dropped). */
+export function parseChannelFilterValue(value: string): string[] {
+  return value
+    .split("|")
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+/** `f:<key>` column of an analysis `details` key the rows API filters exactly, else null. */
+export function analysisDetailKey(col: string): string | null {
+  const key = col.startsWith("f:") ? col.slice(2) : "";
+  return ANALYSIS_DETAIL_FILTER_KEYS.includes(key) ? key : null;
 }
 
 /** Decide which active filters go to the API for this collection and which stay on the client. */
@@ -283,6 +314,30 @@ export function partitionFilters(
         serverColumns.push(filter);
         typeColumn = kept.length === 1 && kept[0] === filter.value.trim() ? "exact" : "contains";
       }
+    } else if (contains && filter.col === CHANNEL_FILTER_COLUMN && ref.id === "artifacts") {
+      // 이벤트 로그 채널 노드: exact channel names, sent as repeated `channel=`.
+      const channels = parseChannelFilterValue(filter.value);
+      if (channels.length) {
+        server.channels = [...new Set([...(server.channels ?? []), ...channels])];
+        serverColumns.push(filter);
+      } else clientColumns.push(filter);
+    } else if (contains && filter.col === CHANNEL_GROUP_FILTER_COLUMN && ref.id === "artifacts") {
+      const groups = parseChannelFilterValue(filter.value);
+      if (groups.length) {
+        server.channelGroups = [...new Set([...(server.channelGroups ?? []), ...groups])];
+        serverColumns.push(filter);
+      } else clientColumns.push(filter);
+    } else if (contains && ref.id === "analysis" && analysisDetailKey(filter.col)) {
+      // R3 §3.3: exact server filter on the rows' `details` (comma = any of).
+      const key = analysisDetailKey(filter.col) as string;
+      const values = filter.value
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean);
+      if (values.length) {
+        server.details = { ...(server.details ?? {}), [key]: values };
+        serverColumns.push(filter);
+      } else clientColumns.push(filter);
     } else if (contains && filter.col === "extension" && ref.id === "search") {
       const ext = normalizeExt(filter.value);
       server.extension = [...new Set([...(server.extension ?? []), ext])];
@@ -292,7 +347,11 @@ export function partitionFilters(
   if (typeColumn === "exact") serverLabels.push("유형(정확히)");
   else if (typeColumn === "contains")
     serverLabels.push(`유형(포함: ${(server.artifactTypes ?? []).length}개 유형)`);
-  if (serverColumns.some((f) => f.col !== "type")) serverLabels.push("열 필터");
+  if (server.channels?.length || server.channelGroups?.length) serverLabels.push("채널");
+  if (
+    serverColumns.some((f) => !["type", CHANNEL_FILTER_COLUMN, CHANNEL_GROUP_FILTER_COLUMN].includes(f.col))
+  )
+    serverLabels.push("열 필터");
   if (clientColumns.length) clientLabels.push("열 필터");
   return { server, serverLabels, clientLabels, clientColumns, serverColumns };
 }
@@ -323,11 +382,14 @@ export function applyFiltersToQuery(
   if (filters.statuses.length) next.reviewStatus = filters.statuses;
   if (filters.tags.length) next.tags = filters.tags;
   if (plan.server.artifactTypes) next.artifactTypes = plan.server.artifactTypes;
+  if (plan.server.channels) next.channels = plan.server.channels;
+  if (plan.server.channelGroups) next.channelGroups = plan.server.channelGroups;
   if (plan.server.path) next.pathContains = plan.server.path;
   if (plan.server.extension) next.extension = plan.server.extension;
   if (plan.server.flags) next.flags = plan.server.flags;
   if (plan.server.flagGrade) next.flagGrade = plan.server.flagGrade;
   if (plan.server.fields) next.fields = plan.server.fields;
+  if (plan.server.details) next.detailFilters = plan.server.details;
   return next;
 }
 
@@ -398,7 +460,8 @@ export type FilterKey =
   | "note"
   | "flag"
   | "flagGrade"
-  | "field";
+  | "field"
+  | "column";
 
 export interface FilterChip {
   key: FilterKey;
@@ -407,7 +470,107 @@ export interface FilterChip {
   label: string;
 }
 
-export function activeChips(filters: FilterState, statusLabel: (s: ReviewStatus) => string): FilterChip[] {
+/** Korean names of the event-log channel groups (core/eventlog_channels.py GROUP_LABELS). */
+export const CHANNEL_GROUP_LABELS: Readonly<Record<string, string>> = {
+  security: "보안",
+  system: "시스템",
+  application: "응용 프로그램",
+  powershell: "PowerShell",
+  defender: "Windows Defender",
+  firewall: "방화벽(이벤트 채널)",
+  "task-scheduler": "작업 스케줄러",
+  storage: "스토리지",
+  "user-pnp": "사용자 PNP",
+  "office-alerts": "Office Alerts",
+  rdp: "원격 데스크톱",
+  services: "서비스(SCM)",
+  other: "기타 채널",
+  none: "채널 없음",
+};
+
+/** Korean names of the ntfs-meta row sources (`details.source`, R3 §3.3). */
+export const ANALYSIS_SOURCE_LABELS: Readonly<Record<string, string>> = {
+  mft: "MFT",
+  usn: "USN 저널",
+  "timestamp-mismatch": "타임스탬프 불일치",
+  "logfile-transaction": "$LogFile 트랜잭션",
+};
+
+/** Korean readings of the carve rows' `details.recovery_method`. */
+export const RECOVERY_METHOD_LABELS: Readonly<Record<string, string>> = {
+  carved: "카빙",
+  parsed: "파싱됨",
+  rejected: "거부됨(오탐)",
+};
+
+/**
+ * Server filters that have no grid column (tree-node views: 이벤트 로그 채널, 타임스탬프 불일치,
+ * 복구됨(카빙)): shown as removable chips, else they would narrow the rows invisibly.
+ */
+export const HIDDEN_FILTER_COLUMNS: readonly string[] = [
+  CHANNEL_GROUP_FILTER_COLUMN,
+  CHANNEL_FILTER_COLUMN,
+  "f:source",
+  "f:in_use",
+  "f:signature_kind",
+  "f:recovery_method",
+];
+
+export interface ChipLabelOptions {
+  /** Channel group id → Korean label (`/tree` `channel_groups[].label`); CHANNEL_GROUP_LABELS otherwise. */
+  channelGroupLabels?: Readonly<Record<string, string>>;
+}
+
+function listText(names: string[], unit: string): string {
+  return names.length > 3
+    ? `${names.slice(0, 2).join(", ")} 외 ${names.length - 2}개 ${unit}`.trim()
+    : names.join(", ");
+}
+
+/** Chip label of a hidden server filter (HIDDEN_FILTER_COLUMNS); null for any other column. */
+export function hiddenFilterLabel(filter: ColumnFilter, options: ChipLabelOptions = {}): string | null {
+  const commaValues = filter.value
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  switch (filter.col) {
+    case CHANNEL_GROUP_FILTER_COLUMN: {
+      const names = parseChannelFilterValue(filter.value).map(
+        (id) => options.channelGroupLabels?.[id] ?? CHANNEL_GROUP_LABELS[id] ?? id,
+      );
+      return `채널 ${listText(names, "그룹")}`;
+    }
+    case CHANNEL_FILTER_COLUMN:
+      return `채널 ${listText(parseChannelFilterValue(filter.value), "채널")}`;
+    case "f:source":
+      return `출처 ${commaValues.map((value) => ANALYSIS_SOURCE_LABELS[value] ?? value).join("·")}`;
+    case "f:in_use":
+      return filter.value.trim() === "true"
+        ? "사용 중인 레코드"
+        : filter.value.trim() === "false"
+          ? "삭제된 레코드"
+          : `사용 중 ${filter.value}`;
+    case "f:signature_kind":
+      return `서명 종류 ${listText(
+        commaValues.map((value) => CARVE_KINDS.find((choice) => choice.id === value)?.label ?? value),
+        "종류",
+      )}`;
+    case "f:recovery_method":
+      return `복구 방법 ${commaValues.map((value) => RECOVERY_METHOD_LABELS[value] ?? value).join("·")}`;
+    default:
+      return null;
+  }
+}
+
+function columnFilterId(filter: ColumnFilter): string {
+  return `${filter.col}${filter.op}${filter.value}`;
+}
+
+export function activeChips(
+  filters: FilterState,
+  statusLabel: (s: ReviewStatus) => string,
+  options: ChipLabelOptions = {},
+): FilterChip[] {
   const chips: FilterChip[] = [];
   if (filters.from || filters.to) {
     chips.push({
@@ -432,6 +595,11 @@ export function activeChips(filters: FilterState, statusLabel: (s: ReviewStatus)
         label: `${RECORD_FIELD_LABELS[field]} ${value}`,
       });
     }
+  }
+  for (const filter of filters.columns ?? []) {
+    if (!HIDDEN_FILTER_COLUMNS.includes(filter.col)) continue;
+    const label = hiddenFilterLabel(filter, options);
+    if (label) chips.push({ key: "column", value: columnFilterId(filter), label });
   }
   return chips;
 }
@@ -465,5 +633,10 @@ export function removeChip(filters: FilterState, chip: FilterChip): FilterState 
       if (!rest.length) delete fields[field];
       return { ...filters, fields: hasRecordFields(fields) ? fields : undefined };
     }
+    case "column":
+      return {
+        ...filters,
+        columns: (filters.columns ?? []).filter((filter) => columnFilterId(filter) !== chip.value),
+      };
   }
 }

@@ -24,6 +24,14 @@ from ...core.artifact_domains import (
     DOMAIN_LABELS,
     artifact_type_domain,
 )
+from ...core.eventlog_channels import (
+    CHANNEL_COUNTS_KEY,
+    CHANNEL_OVERFLOW_KEY,
+    CHANNEL_TRUNCATED_KEY,
+    EVENTLOG_KIND,
+    SCM_COUNT_KEY,
+    channel_group_nodes,
+)
 from ...core.jobs import RunJobStore, read_output_json, run_output_dir
 from .analyses import ANALYSIS_RUNNER
 from .artifact_filter import record_field_value
@@ -60,6 +68,7 @@ ANALYSIS_NODES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("cross-case", "교차 케이스", ("cross-case",)),
     ("triage-flags", "특이사항", ("triage-flags",)),
 )
+ANALYSIS_BRIEF_COUNT_KEYS: tuple[str, ...] = ("source_counts", "source_in_use_counts", "kind_counts")
 WEB_LOG_KIND = "windows-system"
 WEB_LOG_ARTIFACT_TYPES: tuple[str, ...] = ("web-server-log", "webshell-source-candidate")
 
@@ -529,6 +538,22 @@ def build_artifact_domain_groups(
             stale = kind_summary.get("stale_below_first_record_count")
             if primary and isinstance(stale, int) and not isinstance(stale, bool):
                 extra["stale_below_first_record_count"] = stale
+            # eventlog channel groups (plan r3-os-depth §3.2 O2): counts from the
+            # kind summary's raw ``channel_counts`` (absent on older outputs, so
+            # the console shows "—"); ``channels`` = exact ``channel=`` values.
+            channel_counts = kind_summary.get(CHANNEL_COUNTS_KEY)
+            if primary and kind == EVENTLOG_KIND and isinstance(channel_counts, dict):
+                extra["channel_counts"] = {
+                    str(name): int(value)
+                    for name, value in channel_counts.items()
+                    if isinstance(value, int) and not isinstance(value, bool)
+                }
+                overflow = kind_summary.get(CHANNEL_OVERFLOW_KEY)
+                extra["channel_groups"] = channel_group_nodes(
+                    channel_counts, kind_summary.get(SCM_COUNT_KEY), overflow if isinstance(overflow, dict) else None
+                )
+                if kind_summary.get(CHANNEL_TRUNCATED_KEY):
+                    extra["channel_counts_truncated"] = True
             if flags_summary is not None:
                 if not types:
                     flag_counts = kind_flag_counts(flags_summary, kind) if primary else kind_flag_counts(flags_summary, kind, [])
@@ -566,13 +591,21 @@ def placement_domains(placement: dict[str, dict[str, dict[str, int]]], kind: str
 def _analysis_brief(state: dict[str, Any] | None) -> dict[str, Any] | None:
     if state is None:
         return None
-    return {
+    brief = {
         "analysis_id": state.get("analysis_id"),
         "kind": state.get("kind"),
         "status": state.get("status"),
         "finished_at": state.get("finished_at"),
         "row_count": state.get("row_count"),
     }
+    # R3 §3.3 sub-node counts: ntfs-meta rows per source (타임스탬프 불일치, $LogFile),
+    # carve candidates per signature kind (계열 노드 "복구됨(카빙)").
+    summary = state.get("summary") if isinstance(state.get("summary"), Mapping) else {}
+    for key in ANALYSIS_BRIEF_COUNT_KEYS:
+        counts = summary.get(key)
+        if isinstance(counts, Mapping):
+            brief[key] = {str(name): int(value) for name, value in counts.items() if isinstance(value, int)}
+    return brief
 
 
 def build_analyses_node(summary: dict[str, Any], web_log_summary: dict[str, Any]) -> dict[str, Any]:

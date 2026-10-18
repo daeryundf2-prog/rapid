@@ -12,6 +12,12 @@ from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 from ...core.recovery import build_recovery_record
 from .._walk import iter_evidence_paths
+from .registry_depth import (
+    DepthStats,
+    export_depth_records,
+    hive_depth_records,
+    read_export_lines,
+)
 
 PARSER_VERSION = "registry-native-walk-v14"
 REGISTRY_EXPORT_PATTERN = re.compile(r"^\[(?P<key>.+)]$")
@@ -275,7 +281,12 @@ class WindowsRegistryProvider:
         for path in sorted(iter_evidence_paths(root, "*.reg"), key=lambda item: str(item).lower()):
             if not path.is_file():
                 continue
+            source_hashes: Mapping[str, str] | None = None
             for record in collect_reg_export(path):
+                source_hashes = source_hashes or record.details.get("source_hashes")  # type: ignore[assignment]
+                summary_records.append(record)
+                yield record
+            for record in export_depth_records(path, source_hashes or file_hashes(path)):
                 summary_records.append(record)
                 yield record
         context = RegistryCollectionContext(root)
@@ -308,14 +319,10 @@ def candidate_registry_hive_paths(root: Path, *, names: set[str] | None = None) 
 
 
 def collect_reg_export(path: Path) -> Iterable[ArtifactRecord]:
-    try:
-        lines = path.read_text(encoding="utf-16").splitlines()
-    except UnicodeError:
-        try:
-            lines = path.read_text(encoding="utf-8").splitlines()
-        except (OSError, UnicodeError):
-            return
-    except OSError:
+    # Same decoding as the depth rows: UTF-16 only with a BOM or the UTF-16 NUL pattern, then
+    # UTF-8, then CP949 (an even-length ANSI export is no longer misread as UTF-16).
+    lines = read_export_lines(path)
+    if not lines:
         return
 
     current_key = ""
@@ -396,6 +403,10 @@ def collect_registry_hive(
         for record in registry_native_semantic_records(row_context):
             semantic_counts[record.artifact_type] += 1
             yield record
+        depth_stats = DepthStats()
+        for record in hive_depth_records(row_context, depth_stats):
+            semantic_counts[record.artifact_type] += 1
+            yield record
         scan_end = min(stat_result.st_size, MAX_HIVE_STRING_SCAN_BYTES)
         strings = extract_utf16le_strings(bytes(hive._data[:scan_end]))
         if strings:
@@ -433,6 +444,7 @@ def collect_registry_hive(
             else None,
             "free_cell_candidate_count": len(free_candidates),
             "semantic_row_counts": dict(sorted(semantic_counts.items())),
+            "registry_depth": depth_stats.summary(),
             "read_cap_bytes": None,
             "cell_cap": None,
         }

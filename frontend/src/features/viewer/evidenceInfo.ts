@@ -69,7 +69,9 @@ function offsetOf(value: unknown): number | null {
 /**
  * Reads recovery metadata from a grid row. The files collection exposes the raw
  * `recovery` object (or flat `recoverySourceId` / `deletionState` / `sourceOffset`
- * fields); artifact rows carry it under `artifact_record.recovery`.
+ * fields); artifact rows carry it under `artifact_record.recovery`. Rows that only say
+ * `details.recovery_method = "carved"` (carve analysis rows, R3 §3.3) read as 카빙 at
+ * `details.source_offset` (else `details.offset`).
  */
 export function evidenceInfo(row: GridRow | null): EvidenceInfo {
   const fields = row?.fields ?? {};
@@ -77,10 +79,18 @@ export function evidenceInfo(row: GridRow | null): EvidenceInfo {
     ...record(record(fields.artifact_record).recovery),
     ...record(fields.recovery),
   };
+  const details = record(fields.details);
+  const carvedDetail = text(details.recovery_method) === "carved";
   const sourceId = text(fields.recoverySourceId) ?? text(nested.source_id);
-  const candidateKind = typeof fields.recovery === "string" ? fields.recovery : text(nested.candidate_kind);
+  const candidateKind =
+    typeof fields.recovery === "string"
+      ? fields.recovery
+      : (text(nested.candidate_kind) ?? (carvedDetail ? "carved" : null));
   const deletionState = text(fields.deletionState) ?? text(nested.deletion_state);
-  const offset = offsetOf(fields.sourceOffset) ?? offsetOf(nested.source_offset);
+  const offset =
+    offsetOf(fields.sourceOffset) ??
+    offsetOf(nested.source_offset) ??
+    (carvedDetail ? (offsetOf(details.source_offset) ?? offsetOf(details.offset)) : null);
   return {
     sourceId,
     recovery: recoveryLabel(sourceId, candidateKind),

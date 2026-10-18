@@ -196,6 +196,7 @@ families:
   - registry.service_anomaly
   - registry.persistence_lastwrite_window
   - accounts.service_suspicious
+  - antiforensics.tool_present
 - id: timezone
   label: 표준 시간대
   types:
@@ -346,6 +347,7 @@ families:
     ts_kind: last-written
   rules:
   - accounts.profile_anomaly
+  - antiforensics.tool_present
 - id: mounted-device
   label: 마운트된 장치
   types:
@@ -492,6 +494,346 @@ families:
     ts_kind: accessed
   rules:
   - registry.shellbag_removable_network
+- id: network-profile
+  label: 네트워크 프로필(NetworkList)
+  types:
+  - registry-network-profile
+  core_columns:
+  - key: last_connected_at
+    label: 마지막 연결(현지 시각)
+    aliases:
+    - timestamp
+    format: time
+    ts_kind: last-connected
+  - key: first_connected_at
+    label: 최초 연결(현지 시각)
+    format: time
+    ts_kind: first
+  - key: profile_name
+    label: 네트워크 이름
+  - key: description
+    label: 설명
+  - key: name_type_label
+    label: 연결 종류
+    aliases:
+    - name_type
+  - key: category_label
+    label: 네트워크 위치
+    aliases:
+    - category
+  - key: gateway_mac
+    semantic: device
+    label: 게이트웨이 MAC
+    format: mono
+  - key: dns_suffix
+    label: DNS 접미사
+  - key: signature_scope
+    label: 관리 구분(Managed/Unmanaged)
+    value_labels:
+      Managed: 관리됨(도메인)
+      Unmanaged: 관리 안 됨
+  - key: profile_guid
+    label: 프로필 GUID
+    format: mono
+  aux_columns:
+  - key: first_network
+    label: 최초 네트워크 이름
+  - key: profile_key_missing
+    label: 프로필 키 없음(서명만 남음)
+    value_labels:
+      'true': 예(서명만 남음)
+      'false': 아니요
+  - key: timestamp_semantics
+    label: 시각 의미
+  - key: key_path
+    label: 키 경로
+    aliases:
+    - key
+    format: path
+  - key: key_last_written_at
+    label: 키 마지막 기록
+    format: time
+    ts_kind: last-written
+  rules: []
+- id: network-share
+  label: 네트워크 공유·매핑 드라이브
+  types:
+  - registry-network-share
+  core_columns:
+  - key: key_last_written_at
+    label: 키 마지막 기록
+    aliases:
+    - timestamp
+    format: time
+    ts_kind: last-written
+  - key: share_path
+    semantic: path
+    label: 공유 경로
+    format: path
+  - key: share_server
+    semantic: device
+    label: 서버
+  - key: share_kind_label
+    label: 항목 종류
+    aliases:
+    - share_kind
+  - key: drive_letter
+    label: 드라이브 문자
+  - key: source_kind_label
+    label: 출처 키
+    aliases:
+    - source_kind
+  - key: username
+    semantic: account
+    label: 연결 계정
+  - key: mount_label
+    label: 볼륨 이름
+  - key: mru_position
+    label: MRU 순서
+    format: number
+  - key: user_sid
+    semantic: account
+    label: 사용자 SID
+    format: sid
+  aux_columns:
+  - key: provider_name
+    label: 네트워크 공급자
+  - key: connection_type
+    label: 연결 종류 값
+    format: number
+  - key: key_path
+    label: 키 경로
+    aliases:
+    - key
+    format: path
+  rules: []
+- id: wlan-profile-registry
+  label: 무선 연결 이력(레지스트리)
+  types:
+  - registry-wlan-profile
+  core_columns:
+  - key: last_connected_at
+    label: 마지막 연결(현지 시각)
+    aliases:
+    - timestamp
+    format: time
+    ts_kind: last-connected
+  - key: first_connected_at
+    label: 최초 연결(현지 시각)
+    format: time
+    ts_kind: first
+  - key: ssid
+    label: 무선 이름(SSID)
+  - key: source_kind_label
+    label: 출처
+    aliases:
+    - source_kind
+  - key: gateway_mac
+    semantic: device
+    label: 게이트웨이 MAC
+    format: mono
+  - key: interface_guid
+    label: 인터페이스 GUID
+    format: mono
+  - key: profile_guid
+    label: 프로필 GUID
+    format: mono
+  - key: profile_index
+    label: 프로필 순번
+    format: number
+  aux_columns:
+  - key: dns_suffix
+    label: DNS 접미사
+  - key: category_label
+    label: 네트워크 위치
+  - key: key_last_written_at
+    label: 키 마지막 기록
+    format: time
+    ts_kind: last-written
+  - key: key_path
+    label: 키 경로
+    aliases:
+    - key
+    format: path
+  rules: []
+- id: office-mru
+  label: Office 최근 파일(MRU)
+  types:
+  - registry-office-mru
+  core_columns:
+  - key: last_opened_at
+    label: 마지막 열기
+    aliases:
+    - timestamp
+    format: time
+    ts_kind: last-opened
+  - key: file_path
+    semantic: path
+    label: 파일/폴더 경로
+    format: path
+  - key: file_name
+    label: 파일 이름
+  - key: application
+    label: 앱
+  - key: office_version
+    label: Office 버전
+  - key: mru_kind_label
+    label: 목록 종류
+    aliases:
+    - mru_kind
+  - key: mru_position
+    label: MRU 순서
+    format: number
+  - key: account_id
+    semantic: account
+    label: Office 계정 키
+  - key: user_sid
+    semantic: account
+    label: 사용자 SID
+    format: sid
+  aux_columns:
+  - key: raw_value
+    label: 원본 값
+    format: mono
+  - key: flags_hex
+    label: 플래그(F)
+    format: mono
+  - key: key_path
+    label: 키 경로
+    aliases:
+    - key
+    format: path
+  rules: []
+- id: known-dll
+  label: 알려진 DLL(KnownDLLs)
+  types:
+  - registry-known-dll
+  core_columns:
+  - key: key_last_written_at
+    label: 키 마지막 기록
+    aliases:
+    - timestamp
+    format: time
+    ts_kind: last-written
+  - key: value_name
+    label: 값 이름
+  - key: dll_name
+    semantic: path
+    label: DLL/디렉터리
+    format: mono
+  - key: in_default_baseline
+    label: 기본 목록 포함
+    value_labels:
+      'true': 예
+      'false': 아니요
+  - key: entry_kind
+    label: 항목 종류
+    value_labels:
+      dll: DLL
+      directory: 디렉터리(DllDirectory)
+  - key: control_set
+    label: 컨트롤 세트 (ControlSet)
+  aux_columns:
+  - key: baseline_note
+    label: 참고
+  - key: key_path
+    label: 키 경로
+    aliases:
+    - key
+    format: path
+  rules: []
+- id: default-browser
+  label: 기본 브라우저
+  types:
+  - registry-default-browser
+  core_columns:
+  - key: key_last_written_at
+    label: 설정 시각(키 마지막 기록)
+    aliases:
+    - timestamp
+    format: time
+    ts_kind: last-written
+  - key: browser
+    label: 브라우저
+  - key: protocol
+    label: 프로토콜
+  - key: prog_id
+    label: 프로그램 ID(ProgId)
+    format: mono
+  - key: user_sid
+    semantic: account
+    label: 사용자 SID
+    format: sid
+  aux_columns:
+  - key: user_choice_hash
+    label: UserChoice 해시
+    format: mono
+  - key: timestamp_semantics
+    label: 시각 의미
+  - key: key_path
+    label: 키 경로
+    aliases:
+    - key
+    format: path
+  rules: []
+- id: install-state
+  label: 설치 상태(App Paths·MSI)
+  types:
+  - registry-install-state
+  core_columns:
+  - key: key_last_written_at
+    label: 키 마지막 기록
+    aliases:
+    - timestamp
+    format: time
+    ts_kind: last-written
+  - key: display_name
+    label: 프로그램
+    aliases:
+    - application_name
+  - key: state_source_label
+    label: 출처
+    aliases:
+    - state_source
+  - key: executable_path
+    semantic: path
+    label: 실행 파일
+    format: path
+  - key: display_version
+    label: 버전
+  - key: publisher
+    label: 게시자
+  - key: install_date
+    label: 설치일(현지)
+  - key: install_location
+    semantic: path
+    label: 설치 위치
+    aliases:
+    - app_path_dir
+    format: path
+  - key: product_code
+    label: 제품 코드
+    format: mono
+  aux_columns:
+  - key: local_package
+    semantic: path
+    label: 캐시 MSI
+    format: path
+  - key: install_source
+    semantic: path
+    label: 설치 원본
+    format: path
+  - key: installer_sid
+    semantic: account
+    label: 설치 계정 SID
+    format: sid
+  - key: key_path
+    label: 키 경로
+    aliases:
+    - key
+    format: path
+  rules:
+  - antiforensics.tool_present
 rules:
 - id: registry.run_user_path
   family: persistence

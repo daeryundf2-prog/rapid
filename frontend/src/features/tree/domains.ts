@@ -20,6 +20,7 @@ import {
 } from "../../contracts/collection";
 import type { IconName } from "../../icons";
 import type { AnalysisNodeId } from "../analysis/kinds";
+import { CHANNEL_FILTER_COLUMN, CHANNEL_GROUP_FILTER_COLUMN } from "../filters/filterModel";
 
 export interface DomainTarget {
   collection: CollectionId;
@@ -50,8 +51,22 @@ export interface DomainTarget {
    * types, never their primary node, and left out of the domain total.
    */
   fields?: RecordFieldFilters;
+  /**
+   * Event-log channel group (`/tree` `artifacts:eventlog` `channel_groups[].id`): the count comes
+   * from that group; the node opens the kind with the `evt_channel_group` filter (server
+   * `channel_group=`).
+   */
+  channelGroup?: string;
   /** Analysis results node (collection "analysis"). */
   analysis?: AnalysisNodeId;
+  /**
+   * Sub-view of an analysis node (R3 §3.3, with a `cf` on `f:source` / `f:signature_kind` /
+   * `f:recovery_method` / `f:in_use` the rows API applies exactly): count = sum of `<field>[key]`
+   * of the newest completed job's summary (all keys when `keys` is empty).
+   */
+  analysisCount?: { field: "source_counts" | "source_in_use_counts" | "kind_counts"; keys: string[] };
+  /** Why an analysis sub-view is empty while its job never ran (replaces the generic reason). */
+  neverRanReason?: string;
 }
 
 export interface DomainNodeDef {
@@ -59,6 +74,11 @@ export interface DomainNodeDef {
   label: string;
   target: DomainTarget;
   icon?: IconName;
+  /**
+   * Tooltip (e.g. the 특이사항 rule a sub-view cross-links, cross-links between related nodes in
+   * different domains); replaces the column-filter and record-field notes.
+   */
+  note?: string;
   /**
    * Rows that are not evidence records (`*-string-candidate` pivots): the node stays listed but
    * dimmed with NON_EVIDENCE_NOTE, and its count never adds to the domain total.
@@ -97,8 +117,6 @@ export interface DomainNodeDef {
    * those types get no node (데스크톱 메신저 › 앱별 보기 › Slack …).
    */
   fieldChildren?: { field: RecordFieldKey; types: string[] };
-  /** Tooltip of the node (cross-links between related nodes in different domains). */
-  note?: string;
 }
 
 /**
@@ -135,6 +153,14 @@ export function orderGroup(nodes: readonly DomainNodeDef[]): DomainNodeDef[] {
 export const CLOUD_SYNC_CROSS_NOTE =
   "같은 질문의 다른 원본 — 웹·브라우저 › 클라우드 저장소 동기화(브라우저 측 DB)와 클라우드 › 동기화 계정·폴더/파일/이벤트(동기화 클라이언트)를 함께 보세요";
 
+/**
+ * Cross-link of the PCA sources (R3 O1): the PCA text files (실행 흔적) and the Compatibility
+ * Assistant Store / Persisted registry values (레지스트리 › 프로그램 호환성 도우미, also listed under
+ * 실행 흔적) answer the same question — "was this program run here".
+ */
+export const PCA_CROSS_NOTE =
+  "같은 질문의 다른 원본 — 실행 흔적 › 프로그램 호환성 도우미(PCA 기록 파일: 실행·PCA 이벤트 시각)와 레지스트리 › 프로그램 호환성 도우미(Compatibility Assistant Store: 키 마지막 기록)를 함께 보세요";
+
 /** Tooltip of a non-evidence node (string pivots the parser could not tie to a record). */
 export const NON_EVIDENCE_NOTE =
   "문자열 후보 — 레코드 구조로 해석되지 않은 문자열 피벗입니다. 증거 레코드가 아니므로 개수 합계에서 뺍니다.";
@@ -155,11 +181,82 @@ const inventory = (category?: string): DomainTarget => ({
   ...(category ? { fileCategory: category } : {}),
 });
 const derived = (table: string): DomainTarget => ({ collection: "derived", kind: table });
+/**
+ * Event-log channel node: the server `channel_group=` filter (`cf=evt_channel_group:<id>`, group
+ * ids of core/eventlog_channels.py) — exact on the server, so the node count is the page total.
+ */
+const channelNode = (group: string): DomainTarget => ({
+  collection: "artifacts",
+  kind: "eventlog",
+  channelGroup: group,
+  cf: [{ col: CHANNEL_GROUP_FILTER_COLUMN, op: ":", value: group }],
+});
 const run = (analysis: AnalysisNodeId): DomainTarget => ({
   collection: "analysis",
   kind: analysis,
   analysis,
 });
+
+/**
+ * ntfs-meta rows of `details.source` values (R3 §3.3: mft+usn, timestamp-mismatch,
+ * logfile-transaction). The grid picks the source's catalogue family columns itself
+ * (grid/columns/analysis.ts `analysisFamily`): no promoted `cols`.
+ */
+const ntfsRows = (sources: string[]): DomainTarget => ({
+  ...run("ntfs-meta"),
+  cf: [{ col: "f:source", op: ":", value: sources.join(",") }],
+  analysisCount: { field: "source_counts", keys: sources },
+  neverRanReason: NTFS_META_NEVER_RAN,
+});
+
+/**
+ * ntfs-meta `timestamp-mismatch` rows of in-use (`true`) or deleted (`false`) MFT records (server
+ * `in_use=`): most real mismatch rows are deleted records, so the main node shows in-use ones.
+ */
+const ntfsMismatchRows = (inUse: boolean): DomainTarget => ({
+  ...ntfsRows(["timestamp-mismatch"]),
+  cf: [
+    { col: "f:source", op: ":", value: "timestamp-mismatch" },
+    { col: "f:in_use", op: ":", value: inUse ? "true" : "false" },
+  ],
+  analysisCount: {
+    field: "source_in_use_counts",
+    keys: [`timestamp-mismatch:${inUse ? "in-use" : "deleted"}`],
+  },
+});
+
+/**
+ * "복구됨(카빙)" of a family (R3 §3.3): carve rows `recovery_method=carved` of these signature kinds
+ * (server `signature_kind=` / `recovery_method=`, core/carving.py CARVED_FAMILIES); all kinds when empty.
+ */
+export const carved = (kinds: string[]): DomainTarget => ({
+  ...run("carve"),
+  cf: [
+    ...(kinds.length ? [{ col: "f:signature_kind", op: ":" as const, value: kinds.join(",") }] : []),
+    { col: "f:recovery_method", op: ":", value: "carved" },
+  ],
+  analysisCount: { field: "kind_counts", keys: kinds },
+  neverRanReason: CARVE_NEVER_RAN,
+});
+
+/** Label suffix of a family's carved sub-view. */
+export const CARVED_LABEL = "복구됨(카빙)";
+export const NTFS_META_NEVER_RAN =
+  "NTFS 메타 분석 안 됨 — 처리 단계에서 NTFS 메타(MFT/USN)를 실행하면 결과가 여기에 나타납니다";
+export const CARVE_NEVER_RAN =
+  "카빙 분석 안 됨 — 처리 단계에서 카빙을 실행하면 복구된 파일이 여기에 나타납니다";
+/** Signature kinds per family (core/carving.py CARVED_FAMILIES). */
+export const CARVED_KINDS = {
+  audio: ["wav", "mp3", "m4a"],
+  video: ["mp4"],
+  images: ["jpeg", "png", "gif"],
+  documents: ["pdf", "docx", "xlsx", "pptx", "hwp", "hwpx"],
+  archives: ["zip", "7z", "rar"],
+  email: ["eml"],
+  executables: ["pe"],
+  eventlog: ["evtx"],
+  databases: ["sqlite"],
+} as const;
 
 /** EVTX recovered-record position detail (eventlog.py `evtx_record_id_position`). */
 export const EVTX_RECORD_ID_POSITION = "evtx_record_id_position";
@@ -176,6 +273,14 @@ export const AMCACHE_TYPE_LABELS: Readonly<Record<string, string>> = {
   "amcache-device-census": "DeviceCensus 시스템 정보",
 };
 const AMCACHE_EVIDENCE_TYPES = Object.keys(AMCACHE_TYPE_LABELS);
+
+/** Registry network types (r3 O1 registry_depth.py) → Korean. */
+export const REGISTRY_NETWORK_TYPE_LABELS: Readonly<Record<string, string>> = {
+  "registry-network-share": "네트워크 공유·매핑 드라이브",
+  "registry-network-profile": "네트워크 프로필(NetworkList)",
+  "registry-wlan-profile": "무선 연결 이력(WLAN)",
+};
+const REGISTRY_NETWORK_TYPES = Object.keys(REGISTRY_NETWORK_TYPE_LABELS);
 
 /** Desktop messenger row types (artifacts/windows/messenger.py, plan r2-communication §3.1) → Korean. */
 export const DESKTOP_MESSENGER_TYPE_LABELS: Readonly<Record<string, string>> = {
@@ -213,6 +318,51 @@ export const EMAIL_TYPE_LABELS: Readonly<Record<string, string>> = {
   "email-container-inventory": "메일 컨테이너(PST/OST)",
 };
 const EMAIL_EVIDENCE_TYPES = ["email-message", "email-attachment", "contact", "calendar-event"];
+
+/**
+ * 이벤트 로그 › 채널별 › channel group nodes (core/eventlog_channels.py CHANNEL_GROUPS): Korean-sorted
+ * (Hangul before Latin), then 기타 채널 and 채널 없음 last (the remainder buckets).
+ */
+export const EVENTLOG_CHANNEL_NODES: readonly DomainNodeDef[] = [
+  // "(이벤트 채널)": the Windows Firewall EVTX channel, not 방화벽 로그 (pfirewall.log).
+  { id: "evt-ch-firewall", label: "방화벽(이벤트 채널)", target: channelNode("firewall") },
+  { id: "evt-ch-security", label: "보안", target: channelNode("security") },
+  { id: "evt-ch-user-pnp", label: "사용자 PNP", target: channelNode("user-pnp") },
+  // A view inside 시스템 (System rows of the Service Control Manager provider).
+  { id: "evt-ch-services", label: "서비스(SCM)", target: channelNode("services") },
+  { id: "evt-ch-storage", label: "스토리지", target: channelNode("storage") },
+  { id: "evt-ch-system", label: "시스템", target: channelNode("system") },
+  { id: "evt-ch-rdp", label: "원격 데스크톱", target: channelNode("rdp") },
+  { id: "evt-ch-application", label: "응용 프로그램", target: channelNode("application") },
+  { id: "evt-ch-task-scheduler", label: "작업 스케줄러", target: channelNode("task-scheduler") },
+  { id: "evt-ch-office-alerts", label: "Office Alerts", target: channelNode("office-alerts") },
+  { id: "evt-ch-powershell", label: "PowerShell", target: channelNode("powershell") },
+  { id: "evt-ch-defender", label: "Windows Defender", target: channelNode("defender") },
+  { id: "evt-ch-other", label: "기타 채널", target: channelNode("other") },
+  // EVTX file/summary rows and records without a channel (detail: never in a total).
+  { id: "evt-ch-none", label: "채널 없음", target: channelNode("none"), detail: true },
+];
+
+/** Channel groups that partition the event-log rows (서비스(SCM) is a view inside 시스템). */
+export const EVENTLOG_PARTITION_GROUPS: readonly string[] = EVENTLOG_CHANNEL_NODES.map(
+  (node) => node.target.channelGroup ?? "",
+).filter((group) => group && group !== "services");
+
+/**
+ * 이벤트 로그 › 채널별: the group of the channel nodes. Its own view is every partition group (=
+ * every event-log row) under the server group filter, so it is selected apart from 전체 이벤트 로그.
+ */
+export const EVENTLOG_CHANNELS_GROUP: DomainNodeDef = {
+  id: "evt-channels",
+  label: "채널별",
+  target: {
+    collection: "artifacts",
+    kind: "eventlog",
+    cf: [{ col: CHANNEL_GROUP_FILTER_COLUMN, op: ":", value: EVENTLOG_PARTITION_GROUPS.join("|") }],
+  },
+  note: "이벤트 로그 채널 그룹별 보기 — 하위 노드의 행 수는 /tree 채널 그룹 건수(서버 channel_group= 필터)입니다",
+  children: [...EVENTLOG_CHANNEL_NODES],
+};
 
 function pickLabels(labels: Readonly<Record<string, string>>, types: string[]): Record<string, string> {
   return Object.fromEntries(types.map((type) => [type, labels[type] ?? type]));
@@ -371,6 +521,11 @@ export const DOMAINS: readonly DomainDef[] = [
     nodes: [
       { id: "exec-prefetch", label: "Prefetch", target: a("windows-prefetch", ["prefetch-file"]) },
       {
+        id: "exec-carved",
+        label: `실행 파일(PE) ${CARVED_LABEL}`,
+        target: carved([...CARVED_KINDS.executables]),
+      },
+      {
         id: "exec-prefetch-invalid",
         label: "손상/비정상 Prefetch",
         target: a("windows-prefetch", ["prefetch-invalid-content"]),
@@ -477,6 +632,25 @@ export const DOMAINS: readonly DomainDef[] = [
         label: "SRUM",
         target: a("windows-execution", ["srum-row-candidate", "srum-database-file"]),
       },
+      // r3 O1: PCA (text files: windows-execution; Compatibility Assistant\Store: windows-registry) and
+      // FeatureUsage. One node per kind; Korean-sorted block.
+      {
+        id: "exec-feature-usage",
+        label: "작업 표시줄 사용(FeatureUsage)",
+        target: a("windows-registry", ["execution-feature-usage"]),
+      },
+      {
+        id: "exec-pca-files",
+        label: "프로그램 호환성 도우미(PCA 기록 파일)",
+        target: a("windows-execution", ["execution-pca"]),
+        note: PCA_CROSS_NOTE,
+      },
+      {
+        id: "exec-pca-registry",
+        label: "프로그램 호환성 도우미(PCA 레지스트리)",
+        target: a("windows-registry", ["execution-pca"]),
+        note: PCA_CROSS_NOTE,
+      },
     ],
   },
   {
@@ -493,8 +667,44 @@ export const DOMAINS: readonly DomainDef[] = [
       { id: "fs-emails", label: "이메일 파일", target: files("emails") },
       // Files outside the selected scan categories: inventory rows only (no hash / content scan).
       { id: "fs-other", label: "기타 (스캔 제외)", target: inventory("other") },
-      { id: "fs-mft", label: "MFT/USN", target: run("ntfs-meta") },
-      { id: "fs-carve", label: "복구/카빙", target: run("carve") },
+      // MFT/USN records only (source=mft,usn): 타임스탬프 불일치 / $LogFile rows have their own nodes.
+      { id: "fs-mft", label: "MFT/USN", target: ntfsRows(["mft", "usn"]) },
+      // R3 §3.3: $SI/$FN disagreement rows of the ntfs-meta analysis (AXIOM "NTFS Timestamp Mismatch").
+      {
+        id: "fs-timestamp-mismatch",
+        label: "타임스탬프 불일치",
+        target: ntfsMismatchRows(true),
+        note: "$STANDARD_INFORMATION과 $FILE_NAME 시각 불일치(사용 중인 MFT 레코드) — 특이사항 지표 ntfs.si_before_fn·ntfs.zero_subsecond와 같은 판정(MFT 행에 표시)",
+      },
+      {
+        id: "fs-timestamp-mismatch-deleted",
+        label: "타임스탬프 불일치(삭제된 레코드)",
+        target: ntfsMismatchRows(false),
+        detail: true,
+        note: "삭제된(미사용) MFT 레코드의 $SI/$FN 시각 불일치 — 남은 레코드의 이전 값이라 실제 행 대부분이 여기에 속합니다",
+      },
+      {
+        id: "fs-logfile",
+        label: "$LogFile 트랜잭션",
+        target: ntfsRows(["logfile-transaction"]),
+      },
+      {
+        id: "fs-carve",
+        label: "복구/카빙",
+        target: run("carve"),
+        note: "카빙 작업의 모든 후보 행 — 오탐으로 거부된 후보(복구 방법: 거부됨)도 포함합니다. 복구된 파일만 보려면 '복구됨(카빙) 전체(오탐 제외)'",
+      },
+      {
+        id: "fs-carved",
+        label: `${CARVED_LABEL} 전체(오탐 제외)`,
+        target: carved([]),
+        note: "카빙으로 복구된 파일만(복구 방법: 카빙) — 계열별 '복구됨(카빙)' 노드의 합. 거부된 후보까지 보려면 '복구/카빙'",
+      },
+      {
+        id: "fs-databases-carved",
+        label: `데이터베이스 ${CARVED_LABEL}`,
+        target: carved([...CARVED_KINDS.databases]),
+      },
       { id: "fs-vsc", label: "볼륨 섀도우", target: run("vsc") },
       { id: "fs-recycle", label: "삭제/휴지통", target: a("windows-filesystem", ["recycle-bin-entry"]) },
       {
@@ -541,6 +751,58 @@ export const DOMAINS: readonly DomainDef[] = [
         label: "ShellBags",
         target: a("windows-shellbags", ["shellbag-entry", "shellbag-hive-summary"]),
         typeLabels: { "shellbag-entry": "ShellBags 항목", "shellbag-hive-summary": "ShellBags 하이브 요약" },
+      },
+      // r3 O1 registry depth (plan r3-os-depth §3.1): Korean-sorted block (Hangul before Latin).
+      {
+        id: "reg-default-browser",
+        label: "기본 브라우저",
+        target: a("windows-registry", ["registry-default-browser"]),
+      },
+      {
+        id: "reg-network",
+        label: "네트워크·공유·무선",
+        target: a("windows-registry", REGISTRY_NETWORK_TYPES),
+        typeLabels: REGISTRY_NETWORK_TYPE_LABELS,
+        children: [
+          {
+            id: "reg-network-shares",
+            label: "네트워크 공유·매핑 드라이브",
+            target: a("windows-registry", ["registry-network-share"]),
+          },
+          {
+            id: "reg-network-profiles",
+            label: "네트워크 프로필(NetworkList)",
+            target: a("windows-registry", ["registry-network-profile"]),
+          },
+          {
+            id: "reg-network-wlan",
+            label: "무선 연결 이력(WLAN)",
+            target: a("windows-registry", ["registry-wlan-profile"]),
+          },
+        ],
+      },
+      {
+        id: "reg-install-state",
+        label: "설치 상태(App Paths·MSI)",
+        target: a("windows-registry", ["registry-install-state"]),
+      },
+      {
+        id: "reg-known-dlls",
+        label: "알려진 DLL(KnownDLLs)",
+        target: a("windows-registry", ["registry-known-dll"]),
+      },
+      {
+        id: "reg-office-mru",
+        label: "Office 최근 파일(MRU)",
+        target: a("windows-registry", ["registry-office-mru"]),
+      },
+      {
+        // Primary node: 실행 흔적 › 프로그램 호환성 도우미(PCA 레지스트리).
+        id: "reg-pca",
+        label: "프로그램 호환성 도우미(PCA)",
+        target: a("windows-registry", ["execution-pca"]),
+        crossRef: true,
+        note: PCA_CROSS_NOTE,
       },
       {
         id: "reg-keytree",
@@ -612,6 +874,10 @@ export const DOMAINS: readonly DomainDef[] = [
       },
       { id: "evt-etl", label: "ETL 추적 파일", target: a("eventlog", ["etl-trace-file"]) },
       { id: "evt-firewall", label: "방화벽 로그", target: a("windows-system", ["firewall-log"]) },
+      { id: "evt-carved", label: `EVTX ${CARVED_LABEL}`, target: carved([...CARVED_KINDS.eventlog]) },
+      // 채널별 (plan r3-os-depth §3.2 O2): one group; counts from `/tree` `channel_groups`, rows
+      // from the server `channel_group=` filter.
+      EVENTLOG_CHANNELS_GROUP,
     ],
   },
   {
@@ -799,6 +1065,7 @@ export const DOMAINS: readonly DomainDef[] = [
         ]),
       },
       { id: "msg-kakao-mac", label: "카카오톡(macOS)", target: a("kakaotalk-macos") },
+      { id: "msg-eml-carved", label: `이메일(EML) ${CARVED_LABEL}`, target: carved([...CARVED_KINDS.email]) },
       // windows-messenger (plan r2-communication §3.1 M1): Teams·Slack·Discord·Telegram·WhatsApp·Skype·
       // LINE·WeChat·Zoom desktop apps. 앱별 보기 lists one server-filtered node per app (`service=`).
       {
@@ -943,6 +1210,13 @@ export const DOMAINS: readonly DomainDef[] = [
       },
       { id: "media-video", label: "동영상", target: a("media-image", ["media-video"]) },
       { id: "media-audio", label: "오디오", target: a("media-image", ["media-audio"]) },
+      {
+        id: "media-images-carved",
+        label: `이미지 ${CARVED_LABEL}`,
+        target: carved([...CARVED_KINDS.images]),
+      },
+      { id: "media-video-carved", label: `동영상 ${CARVED_LABEL}`, target: carved([...CARVED_KINDS.video]) },
+      { id: "media-audio-carved", label: `오디오 ${CARVED_LABEL}`, target: carved([...CARVED_KINDS.audio]) },
       { id: "media-ocr", label: "OCR 텍스트", target: run("ocr-batch") },
       {
         id: "media-doc-risk",
@@ -960,6 +1234,16 @@ export const DOMAINS: readonly DomainDef[] = [
         target: a("generic-documents", ["archive-file-inventory"]),
       },
       { id: "media-documents", label: "문서 전체", target: a("generic-documents") },
+      {
+        id: "media-documents-carved",
+        label: `문서 ${CARVED_LABEL}`,
+        target: carved([...CARVED_KINDS.documents]),
+      },
+      {
+        id: "media-archives-carved",
+        label: `압축 ${CARVED_LABEL}`,
+        target: carved([...CARVED_KINDS.archives]),
+      },
       { id: "media-synthetic", label: "합성 미디어", target: a("synthetic-media") },
       {
         id: "media-synthetic-status",
@@ -1043,6 +1327,12 @@ export const DOMAINS: readonly DomainDef[] = [
         id: "af-ads",
         label: "ADS",
         target: a("windows-filesystem", ["ads-stream-candidate", "zone-identifier"]),
+      },
+      // r3 O1: BitLocker recovery key files (key value never stored: masked value, identifier, hashes).
+      {
+        id: "af-bitlocker-keys",
+        label: "BitLocker 복구 키 파일",
+        target: a("windows-system", ["bitlocker-recovery-key-file"]),
       },
       {
         id: "af-defender",
@@ -1129,7 +1419,13 @@ export function flattenDomainNodes(nodes: readonly DomainNodeDef[]): DomainNodeD
   return nodes.flatMap((node) => [node, ...flattenDomainNodes(node.children ?? [])]);
 }
 
-/** Selection key of a target (and of a route): collection | kind | types | ext. */
+/** Analysis `details` keys whose column filters are server filters (and part of the selection key). */
+const ANALYSIS_KEY_COLUMNS = new Set(["f:source", "f:signature_kind", "f:recovery_method", "f:in_use"]);
+
+/**
+ * Selection key of a target (and of a route): collection | kind | types | ext (+ the analysis
+ * `details` server filters, so "타임스탬프 불일치" and "MFT/USN" are different selections).
+ */
 export function targetKey(
   target: Pick<DomainTarget, "collection" | "kind" | "types" | "ext"> & {
     category?: string;
@@ -1140,12 +1436,31 @@ export function targetKey(
     flagGrade?: string;
     /** Exact record-field filters (`browser=` / `service=`): part of the key only when set. */
     fields?: RecordFieldFilters;
+    /**
+     * Column filters: part of the key only on event-log channel views (`evt_channel(_group)`) and
+     * for the analysis `details` server filters (`f:source` / `f:signature_kind` / `f:recovery_method` / `f:in_use`).
+     */
+    cf?: readonly ColumnFilter[];
   },
 ): string {
   const fieldsPart = recordFieldsKey(target.fields);
+  const cf = target.cf ?? [];
+  // Only the channel filters themselves: a column filter typed on a channel view never changes
+  // which node is selected.
+  const channels = cf
+    .filter((f) => f.col === CHANNEL_FILTER_COLUMN || f.col === CHANNEL_GROUP_FILTER_COLUMN)
+    .map((f) => `${f.col}${f.op}${f.value}`);
   const flagPart = `${target.flagGrade ? `|g=${target.flagGrade}` : ""}${
     target.flags?.length ? `|f=${[...target.flags].sort().join(",")}` : ""
-  }${fieldsPart ? `|r=${fieldsPart}` : ""}`;
+  }${fieldsPart ? `|r=${fieldsPart}` : ""}${channels.length ? `|ch=${channels.sort().join(",")}` : ""}`;
+  const detailPart =
+    target.collection === "analysis"
+      ? (target.cf ?? [])
+          .filter((filter) => ANALYSIS_KEY_COLUMNS.has(filter.col))
+          .map((filter) => `|${filter.col}=${filter.value}`)
+          .sort()
+          .join("")
+      : "";
   const filesCategory = target.fileScope
     ? filesInventoryCategory(target.fileCategory)
     : (target.fileCategory ?? target.category ?? "");
@@ -1156,6 +1471,8 @@ export function targetKey(
       target.kind ?? "",
       [...(target.types ?? [])].sort().join(","),
       [...(target.ext ?? [])].sort().join(","),
-    ].join("|") + flagPart
+    ].join("|") +
+    flagPart +
+    detailPart
   );
 }

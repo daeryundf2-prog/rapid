@@ -13,6 +13,7 @@ import zlib
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from email import policy
 from email.message import EmailMessage
 from pathlib import Path
@@ -20,6 +21,7 @@ from typing import Protocol
 from xml.etree import ElementTree as ET
 
 from ..artifacts import all_providers, collect_cached
+from ..artifacts.windows.antiforensics import redact_recovery_key_text
 from .doc_text import (
     OLE_SIGNATURE,
     DocumentText,
@@ -830,6 +832,14 @@ def extract_document_text(
     ``core.doc_text``; the other kinds wrap :func:`extract_text`. An OOXML
     file that is an OLE container is an encrypted Office document.
     """
+    result = _extract_document_text(path, kind, max_input_bytes=max_input_bytes)
+    # BitLocker recovery passwords are masked by content (checksum-validated), whatever the
+    # file name, before the text reaches the docs output, the docs index or the case DB.
+    redacted = redact_recovery_key_text(path.name, result.text)
+    return result if redacted == result.text else replace(result, text=redacted)
+
+
+def _extract_document_text(path: Path, kind: str, *, max_input_bytes: int) -> DocumentText:
     kind = kind.lower()
     if max_input_bytes > 0 and path.stat().st_size > max_input_bytes:
         raise TextExtractionTooLarge(f"{kind} file exceeds text extraction size limit")
@@ -863,6 +873,30 @@ def extract_text(
     max_archive_total_bytes: int = MAX_ZIP_TEXT_TOTAL_BYTES,
     max_archive_member_count: int = MAX_ZIP_TEXT_MEMBER_COUNT,
     max_pdf_stream_decompressed_bytes: int = MAX_PDF_STREAM_DECOMPRESSED_BYTES,
+) -> str:
+    """Plain text of a document; checksum-valid BitLocker recovery passwords are masked
+    whatever the file name (:func:`~rapidtriage.artifacts.windows.antiforensics.redact_recovery_key_text`)."""
+    text = _extract_text(
+        path,
+        kind,
+        max_input_bytes=max_input_bytes,
+        max_archive_member_bytes=max_archive_member_bytes,
+        max_archive_total_bytes=max_archive_total_bytes,
+        max_archive_member_count=max_archive_member_count,
+        max_pdf_stream_decompressed_bytes=max_pdf_stream_decompressed_bytes,
+    )
+    return redact_recovery_key_text(path.name, text)
+
+
+def _extract_text(
+    path: Path,
+    kind: str,
+    *,
+    max_input_bytes: int,
+    max_archive_member_bytes: int,
+    max_archive_total_bytes: int,
+    max_archive_member_count: int,
+    max_pdf_stream_decompressed_bytes: int,
 ) -> str:
     if max_input_bytes > 0 and path.stat().st_size > max_input_bytes:
         raise TextExtractionTooLarge(f"{kind} file exceeds text extraction size limit")

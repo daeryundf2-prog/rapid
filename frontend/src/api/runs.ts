@@ -176,6 +176,17 @@ export interface TreeNode {
   /** Analysis nodes (`analysis:<kind>`): newest job state, null = never ran (plan analysis-workbench-p1 §3.3). */
   state?: { status?: string; finished_at?: string | null } | null;
   /**
+   * Analysis nodes: newest completed job; R3 §3.3 sub-view counts ride along (`source_counts` of
+   * ntfs-meta, `source_in_use_counts` (`timestamp-mismatch:in-use` / `:deleted`), `kind_counts` of carve).
+   */
+  latest_completed?: {
+    analysis_id?: string;
+    row_count?: number | null;
+    source_counts?: Record<string, number>;
+    source_in_use_counts?: Record<string, number>;
+    kind_counts?: Record<string, number>;
+  } | null;
+  /**
    * Kind nodes: records per artifact_type. On the primary node (`artifacts:<kind>`) the whole
    * kind; on a routed node (`artifacts:<kind>@<domain>`) only the types placed in that domain.
    */
@@ -224,7 +235,24 @@ export interface TreeNode {
   stale_below_first_record_count?: number;
   /** Kind nodes: flagged rows per highest grade (viewer-families U-F4, `triage-flags` summary). */
   flag_counts?: Partial<Record<"A" | "B" | "C", number>>;
+  /** `artifacts:eventlog` (plan r3-os-depth §3.2 O2): rows per exact `details.channel` ("" = none). */
+  channel_counts?: Record<string, number>;
+  /** `artifacts:eventlog`: channel groups (core/eventlog_channels.py), Korean-sorted. */
+  channel_groups?: ChannelGroupNode[];
   children?: TreeNode[];
+}
+
+/** One event-log channel group of `/tree` (`artifacts:eventlog` `channel_groups`). */
+export interface ChannelGroupNode {
+  id: string;
+  label: string;
+  /** Rows of the group; null when unknown (서비스(SCM) on an older output). */
+  count: number | null;
+  /** Exact channel names of the run in this group (the server `channel=` values). */
+  channels: string[];
+  /** False for 서비스(SCM): a view inside 시스템, not part of the channel partition. */
+  partition: boolean;
+  provider?: string;
 }
 
 /**
@@ -420,6 +448,10 @@ export interface ArtifactsQuery {
   /** Exact record-field filters (repeated `browser=` / `service=`; r2 console fix M2). */
   browser?: string[];
   service?: string[];
+  /** Event-log channels (repeated `channel=`, exact `details.channel`; plan r3-os-depth §3.2 O2). */
+  channel?: string[];
+  /** Event-log channel groups (repeated `channel_group=`: security … other, none, services). */
+  channel_group?: string[];
 }
 
 export function artifactsQueryString(query: ArtifactsQuery): string {
@@ -433,6 +465,8 @@ export function artifactsQueryString(query: ArtifactsQuery): string {
   if (query.flag_grade) params.set("flag_grade", query.flag_grade);
   for (const value of query.browser ?? []) params.append("browser", value);
   for (const value of query.service ?? []) params.append("service", value);
+  for (const channel of query.channel ?? []) params.append("channel", channel);
+  for (const group of query.channel_group ?? []) params.append("channel_group", group);
   if (query.sort) {
     params.set("sort", query.sort);
     params.set("order", query.order ?? "asc");

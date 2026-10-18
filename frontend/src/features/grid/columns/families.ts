@@ -111,9 +111,39 @@ export function tsKindLabel(kind: string): string {
 }
 
 /**
- * The timestamp kind of a time cell: the row's own `timestamp_kind` for the generic `timestamp`
- * column (a cache entry falls back from the response to the created / last-used time, a cloud
- * event is an upload or a delete …), else the catalogue column's `ts_kind`.
+ * Timestamp kind of a row's `timestamp_label` (parsers that write a label but no
+ * `timestamp_kind`: PCA, registry depth). PCA's PcaAppLaunchDic is a run time, PcaGeneralDb an
+ * event, the Compatibility Assistant Store / Persisted key a key LastWrite.
+ */
+export const TIMESTAMP_LABEL_KINDS: Readonly<Record<string, string>> = {
+  last_run: "run",
+  run: "run",
+  pca_event: "pca-event",
+  last_written: "last-written",
+  last_written_mru_head: "last-written",
+  key_last_written: "last-written",
+  last_connected: "last-connected",
+  first_connected: "first-connected",
+  last_opened: "last-opened",
+  created: "created",
+  modified: "modified",
+  accessed: "accessed",
+};
+
+/** The row's own timestamp kind: `timestamp_kind`, else its `timestamp_label` read as a kind. */
+export function rowTimestampKind(details: Record<string, unknown>): string | undefined {
+  const own = details.timestamp_kind;
+  if (typeof own === "string" && own) return own;
+  const label = details.timestamp_label;
+  if (typeof label !== "string" || !label) return undefined;
+  return TIMESTAMP_LABEL_KINDS[label] ?? TIMESTAMP_LABEL_KINDS[label.replace(/-/g, "_")];
+}
+
+/**
+ * The timestamp kind of a time cell: the row's own `timestamp_kind` (or `timestamp_label`) for the
+ * generic `timestamp` column (a cache entry falls back from the response to the created /
+ * last-used time, a cloud event is an upload or a delete, a PCA row is a run or a PCA event …),
+ * else the catalogue column's `ts_kind`.
  */
 export function cellTsKind(
   def: CatalogColumn,
@@ -121,8 +151,10 @@ export function cellTsKind(
   from: string,
 ): string | undefined {
   if (def.format !== "time") return undefined;
-  const own = details.timestamp_kind;
-  if (from === "timestamp" && typeof own === "string" && own) return own;
+  if (from === "timestamp" || def.key === "timestamp") {
+    const own = rowTimestampKind(details);
+    if (own) return own;
+  }
   return def.ts_kind;
 }
 
@@ -141,14 +173,20 @@ function present(value: unknown): boolean {
   );
 }
 
-/** One candidate key: a top-level key, `event_data.X` (any EVTX EventData container) or a dotted path. */
+/**
+ * One candidate key: a top-level key, `event_data.X` (any EVTX EventData container) or a dotted
+ * path; a numeric part indexes a list (`last_run_times.0` = Prefetch's most recent run).
+ */
 export function readKey(details: Record<string, unknown>, key: string): unknown {
   if (!key.includes(".")) return details[key];
   const [head, ...rest] = key.split(".");
   const containers = head === "event_data" ? EVENT_DATA_KEYS : [head as string];
   for (const name of containers) {
     let value: unknown = details[name];
-    for (const part of rest) value = isRecord(value) ? value[part] : undefined;
+    for (const part of rest) {
+      if (Array.isArray(value) && /^\d+$/.test(part)) value = value[Number(part)];
+      else value = isRecord(value) ? value[part] : undefined;
+    }
     if (present(value)) return value;
   }
   return undefined;
@@ -204,11 +242,54 @@ export function catalogValueReading(def: CatalogColumn, value: unknown): string 
   return undefined;
 }
 
+/** `0x1A2B` of a non-negative integer offset (`format: hex`); other values as written. */
+function hexText(value: unknown): string | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return undefined;
+  return `0x${Math.floor(value).toString(16).toUpperCase()}`;
+}
+
+/**
+ * Prefetch volume table (`volumes` / `volume_candidates`): "장치 · 일련번호 · 생성 시각" per volume
+ * (creation time in the display timezone), volumes separated by "; ".
+ */
+export function prefetchVolumesText(value: unknown): string {
+  const list = Array.isArray(value) ? value : [value];
+  return list
+    .map((item) => {
+      if (!isRecord(item)) return flatValue(item);
+      const created = item.volume_created_at;
+      return [
+        flatValue(item.volume_device_path ?? item.device_path ?? ""),
+        item.volume_serial_number ? `VSN ${flatValue(item.volume_serial_number)}` : "",
+        typeof created === "string" && created ? `생성 ${formatGridTime(created, currentTimezone())}` : "",
+      ]
+        .filter(Boolean)
+        .join(" · ");
+    })
+    .filter(Boolean)
+    .join("; ");
+}
+
 function displayValue(def: CatalogColumn, value: unknown): string {
   const reading = catalogValueReading(def, value);
   if (reading) return reading;
   if (def.format === "time" && (typeof value === "string" || typeof value === "number")) {
     return formatGridTime(value, currentTimezone());
+  }
+  // A list of times (Prefetch's 8 run times): each in the display timezone, never raw UTC.
+  if (def.format === "time" && Array.isArray(value)) {
+    return clipValue(
+      value
+        .filter((item) => typeof item === "string" || typeof item === "number")
+        .map((item) => formatGridTime(item as string | number, currentTimezone()))
+        .join(", "),
+      300,
+    );
+  }
+  if (def.format === "prefetch_volumes") return clipValue(prefetchVolumesText(value), 300);
+  if (def.format === "hex") {
+    const hex = hexText(value);
+    if (hex) return hex;
   }
   if (def.format === "bytes" && typeof value === "number") return formatBytes(value);
   if (def.format === "logon_type" || def.format === "logonType")
@@ -230,7 +311,7 @@ function displayValue(def: CatalogColumn, value: unknown): string {
 }
 
 /** Formats shown in the mono face (ids, hashes, SIDs, paths, URLs). */
-const MONO_FORMATS: ReadonlySet<string> = new Set(["mono", "hex", "sid", "path", "url"]);
+const MONO_FORMATS: ReadonlySet<string> = new Set(["mono", "hex", "sid", "path", "url", "prefetch_volumes"]);
 
 /**
  * A display-only catalogue column (`derive:`, axiom-adoption §3.2): computed from the row's own

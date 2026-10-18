@@ -142,6 +142,8 @@ families:
   - execution.deleted_executable
   - execution.cross_mismatch
   - execution.multi_source
+  - antiforensics.tool_present
+  - antiforensics.wiper_run_after_incident
 - id: prefetch-file
   label: 프리페치
   types:
@@ -166,6 +168,8 @@ families:
     format: number
   - key: last_run_times
     label: 실행 시각 목록(최대 8)
+    format: time
+    ts_kind: run
   - key: prefetch_hash
     semantic: hash
     label: 프리페치 해시
@@ -175,9 +179,10 @@ families:
   - key: prefetch_version
     label: 버전
   - key: volumes
-    label: 볼륨
+    label: 볼륨(장치 · 일련번호 · 생성 시각)
     aliases:
     - volume_candidates
+    format: prefetch_volumes
   - key: volume_count
     label: 볼륨 수
     format: number
@@ -187,6 +192,65 @@ families:
     label: 참조 파일 수
     format: number
   aux_columns:
+  - key: run_time_1
+    label: 실행 1회차
+    aliases:
+    - last_run_times.0
+    format: time
+    ts_kind: run-1
+  - key: run_time_2
+    label: 실행 2회차
+    aliases:
+    - last_run_times.1
+    format: time
+    ts_kind: run-2
+  - key: run_time_3
+    label: 실행 3회차
+    aliases:
+    - last_run_times.2
+    format: time
+    ts_kind: run-3
+  - key: run_time_4
+    label: 실행 4회차
+    aliases:
+    - last_run_times.3
+    format: time
+    ts_kind: run-4
+  - key: run_time_5
+    label: 실행 5회차
+    aliases:
+    - last_run_times.4
+    format: time
+    ts_kind: run-5
+  - key: run_time_6
+    label: 실행 6회차
+    aliases:
+    - last_run_times.5
+    format: time
+    ts_kind: run-6
+  - key: run_time_7
+    label: 실행 7회차
+    aliases:
+    - last_run_times.6
+    format: time
+    ts_kind: run-7
+  - key: run_time_8
+    label: 실행 8회차
+    aliases:
+    - last_run_times.7
+    format: time
+    ts_kind: run-8
+  - key: referenced_files
+    label: 참조 파일(MFT·오프셋, 최대 1,000)
+  - key: referenced_file_count
+    label: 디코드된 참조 파일 수
+    format: number
+  - key: trace_chain_count
+    label: 트레이스 체인 수
+    format: number
+  - key: source_offset
+    label: 원본 오프셋
+    format: number
   - key: file_reference_candidates
     label: 파일 참조(MFT)
   - key: declared_file_size
@@ -202,6 +266,8 @@ families:
   - execution.name_mismatch
   - execution.deleted_executable
   - execution.multi_source
+  - antiforensics.tool_present
+  - antiforensics.wiper_run_after_incident
 - id: prefetch-reference
   label: 프리페치 참조 파일
   types:
@@ -273,6 +339,106 @@ families:
   aux_columns: []
   rules:
   - execution.srum_bulk_upload
+- id: pca
+  label: 프로그램 호환성 도우미(PCA)
+  types:
+  - execution-pca
+  core_columns:
+  - key: timestamp
+    label: 기록 시각
+    aliases:
+    - last_run_at
+    - event_at
+    format: time
+    ts_kind: pca-event
+  - key: executable_path
+    semantic: path
+    label: 실행 파일 경로
+    format: path
+  - key: executable_name
+    label: 실행 파일
+  - key: source_kind_label
+    label: 출처
+    aliases:
+    - source_kind
+  - key: record_type_label
+    label: 기록 종류
+    aliases:
+    - record_type
+  - key: product_name
+    label: 제품
+  - key: vendor
+    label: 게시자
+  - key: product_version
+    label: 버전
+  - key: message
+    label: 메시지
+  - key: user_sid
+    semantic: account
+    label: 사용자 SID
+    format: sid
+  aux_columns:
+  - key: program_id
+    label: 프로그램 ID
+    format: mono
+  - key: value_sha256
+    semantic: hash
+    label: 값 SHA-256
+    format: mono
+  - key: source_line
+    label: 원본 줄 번호
+    format: number
+  - key: malformed_line_count
+    label: 해석 못 한 줄 수
+    format: number
+  - key: evidence_note
+    label: 참고
+  - key: key_path
+    label: 키 경로
+    aliases:
+    - key
+    format: path
+  rules:
+  - antiforensics.tool_present
+  - antiforensics.wiper_run_after_incident
+- id: feature-usage
+  label: 작업 표시줄 사용(FeatureUsage)
+  types:
+  - execution-feature-usage
+  core_columns:
+  - key: key_last_written_at
+    label: 키 마지막 기록
+    aliases:
+    - timestamp
+    format: time
+    ts_kind: last-written
+  - key: application
+    semantic: path
+    label: 앱
+    format: mono
+  - key: feature_label
+    label: 동작
+    aliases:
+    - feature
+  - key: count
+    label: 횟수
+    format: number
+  - key: user_sid
+    semantic: account
+    label: 사용자 SID
+    format: sid
+  aux_columns:
+  - key: executable_name
+    label: 실행 파일
+  - key: evidence_note
+    label: 참고
+  - key: key_path
+    label: 키 경로
+    aliases:
+    - key
+    format: path
+  rules:
+  - antiforensics.tool_present
 rules:
 - id: execution.suspicious_path
   family: execution

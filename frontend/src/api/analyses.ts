@@ -150,7 +150,18 @@ export interface AnalysisRowsQuery {
   /** 특이사항 filters (`flag=` repeated, `flag_grade=`). */
   flags?: string[];
   flagGrade?: string;
+  /** Exact `details` filters (`source=` / `signature_kind=` / `recovery_method=` / `in_use=`, repeated). */
+  detailFilters?: Record<string, string[]>;
 }
+
+/** `details` keys the rows API filters exactly (R3 §3.3); any other key stays a client column filter. */
+export const ANALYSIS_DETAIL_FILTER_KEYS: readonly string[] = [
+  "source",
+  "signature_kind",
+  "recovery_method",
+  // MFT record allocation state (`true` / `false`): 타임스탬프 불일치 defaults to in-use records.
+  "in_use",
+];
 
 interface RowsPayload {
   rows?: unknown;
@@ -177,6 +188,9 @@ export function analysisRowsUrl(runId: string, id: string, query: AnalysisRowsQu
   if (query.pathContains?.trim()) params.set("path_contains", query.pathContains.trim());
   for (const flag of query.flags ?? []) params.append("flag", flag);
   if (query.flagGrade) params.set("flag_grade", query.flagGrade);
+  for (const [key, values] of Object.entries(query.detailFilters ?? {})) {
+    if (ANALYSIS_DETAIL_FILTER_KEYS.includes(key)) for (const value of values) params.append(key, value);
+  }
   if (query.sort) {
     params.set("sort", query.sort.key);
     params.set("order", query.sort.order);

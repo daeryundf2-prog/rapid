@@ -3961,13 +3961,13 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             details = prefetch_file["details"]
 
             self.assertEqual(details["prefetch_parse_status"], "parsed-common-header")
-            self.assertEqual(details["parser_version"], "prefetch-inventory-v9")
+            self.assertEqual(details["parser_version"], "prefetch-inventory-v10")
             self.assertFalse(details["commercial_grade_ready"])
             self.assertIn("Full file metrics array decoding", details["commercial_readiness_blockers"][0])
             self.assertIn("#16", details["prefetch_report_grade_assessment"]["commercial_gap_ids"])
             self.assertEqual(details["forensic_review"]["gap_id"], "#16")
             self.assertFalse(details["forensic_review"]["report_grade_ready"])
-            self.assertFalse(details["prefetch_native_capabilities"]["full_file_metrics_array_decode"])
+            self.assertTrue(details["prefetch_native_capabilities"]["full_file_metrics_array_decode"])
             self.assertEqual(details["prefetch_version_metadata"]["layout_name"], "windows-10")
             self.assertEqual(details["prefetch_version_metadata"]["run_count_offset_hex"], "0xd0")
             self.assertEqual(details["run_count"], 3)
@@ -4050,7 +4050,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             )
             self.assertEqual(prefetch_manifest["referenced_file_metrics"]["file_metrics_section_status"], "bounded-locator")
             self.assertFalse(prefetch_manifest["referenced_file_metrics"]["full_file_metrics_decoded"])
-            self.assertFalse(prefetch_manifest["referenced_file_metrics"]["mft_file_reference_decode_available"])
+            self.assertTrue(prefetch_manifest["referenced_file_metrics"]["mft_file_reference_decode_available"])
             self.assertEqual(
                 prefetch_manifest["reportability"]["allowed_use"],
                 "prefetch-execution-triage-pivot",
@@ -4134,7 +4134,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             hints = prefetch_header_hints(pf)
 
         self.assertEqual(hints["prefetch_decompression"]["status"], "decompressed")
-        self.assertEqual(hints["prefetch_decompression"]["method"], "ntdll-RtlDecompressBufferEx")
+        self.assertEqual(hints["prefetch_decompression"]["method"], "pure-python-xpress-huffman")
         self.assertTrue(hints["binary_format_detected"])
         self.assertEqual(hints["prefetch_version"], 31)
         self.assertEqual(hints["header_executable_name"], "TESTAPP.EXE")

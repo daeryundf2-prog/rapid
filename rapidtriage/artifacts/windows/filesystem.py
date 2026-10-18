@@ -6135,8 +6135,10 @@ def parse_standard_information(value: bytes) -> dict[str, object]:
         "accessed_at": filetime_to_iso(int_from(value, 24, 8)),
     }
     file_attributes = int_from(value, 32, 4) if len(value) >= 36 else 0
+    out_of_range = [name for name, text in timestamps.items() if text == FILETIME_OUT_OF_RANGE_ISO]
     return {
         "timestamps": timestamps,
+        **({"timestamps_out_of_range": out_of_range} if out_of_range else {}),
         "file_attributes": file_attributes,
         "file_attribute_names": flag_names(file_attributes, NTFS_FILE_ATTRIBUTE_NAMES),
     }
@@ -6842,11 +6844,19 @@ def count_many(values: Iterable[object]) -> list[dict[str, object]]:
     return [{"value": value, "count": count} for value, count in sorted(counts.items())]
 
 
+# A FILETIME past the last representable datetime (a timestomping tool writing 0x7FFF...):
+# clamped to this marker instead of "" so the future-time checks still see it.
+FILETIME_OUT_OF_RANGE_ISO = "9999-12-31T23:59:59.999999+00:00"
+_FILETIME_TICKS_MAX = (dt.datetime(9999, 12, 31, 23, 59, 59, 999999) - dt.datetime(1601, 1, 1)) // dt.timedelta(microseconds=1) * 10
+
+
 def filetime_to_iso(value: int) -> str:
+    """UTC ISO text of a FILETIME (integer arithmetic, no float rounding); ``""`` for 0, and
+    :data:`FILETIME_OUT_OF_RANGE_ISO` for a value past year 9999."""
     if value <= 0:
         return ""
-    try:
-        base = dt.datetime(1601, 1, 1, tzinfo=dt.timezone.utc)
-        return (base + dt.timedelta(microseconds=value / 10)).isoformat()
-    except (OverflowError, ValueError):
-        return ""
+    if value > _FILETIME_TICKS_MAX:
+        return FILETIME_OUT_OF_RANGE_ISO
+    seconds, ticks = divmod(value, 10_000_000)
+    base = dt.datetime(1601, 1, 1, tzinfo=dt.timezone.utc)
+    return (base + dt.timedelta(seconds=seconds, microseconds=ticks // 10)).isoformat()

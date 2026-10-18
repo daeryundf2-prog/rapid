@@ -115,11 +115,21 @@ export interface CollectionQuery {
   tags?: string[];
   /** Artifact types; the artifacts API filters them server-side (`artifact_type=`, repeated). */
   artifactTypes?: string[];
+  /** Event-log channels; the artifacts API filters them server-side (`channel=`, repeated, exact). */
+  channels?: string[];
+  /** Event-log channel groups (`channel_group=`, repeated; the 이벤트 로그 channel nodes). */
+  channelGroups?: string[];
   /** 특이사항 rule ids (`flag=`, repeated) and minimum grade (`flag_grade=`), server-side (plan §3.1). */
   flags?: string[];
   flagGrade?: "A" | "B" | "C";
   /** Exact record-field filters (`browser=` / `service=`), artifacts server-side only. */
   fields?: RecordFieldFilters;
+  /**
+   * Analysis rows: exact `details` filters the rows API applies (R3 §3.3: `source=`,
+   * `signature_kind=`, `recovery_method=`, `in_use=` (`true` / `false`, exact boolean)), key →
+   * accepted values.
+   */
+  detailFilters?: Record<string, string[]>;
   /** Navigation category (tree) filter; interpreted by the collection. */
   category?: string;
   /**

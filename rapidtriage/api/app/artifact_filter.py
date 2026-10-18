@@ -1,4 +1,4 @@
-"""Streaming path / artifact_type / record-field filter for per-kind artifact outputs (``GET /api/runs/{id}/artifacts``)."""
+"""Streaming path / artifact_type / channel / record-field filter for per-kind artifact outputs (``GET /api/runs/{id}/artifacts``)."""
 
 from __future__ import annotations
 
@@ -7,11 +7,55 @@ from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from pathlib import Path
 
 from ...core.artifact_profiles import payload_record_count
+from ...core.eventlog_channels import GROUP_LABELS, ChannelFilter
 from .jsonl_records import iter_artifact_records
 
 ARTIFACT_PATH_FILTER_SCAN_CAP = 2_000_000
 # Rows scanned per request by the all-kinds ``artifact_type=`` pager.
 CROSS_KIND_SCAN_CAP = 200_000
+# ``channel=`` (event-log channel, exact match on ``details.channel``) bounds.
+MAX_CHANNEL_VALUES = 256
+MAX_CHANNEL_CHARS = 256
+
+
+def normalize_channel_filter(values: Collection[str], groups: Collection[str] = ()) -> ChannelFilter | None:
+    """Validated ``channel=`` / ``channel_group=`` values (``None`` without any); ``ValueError`` with a Korean message.
+
+    A ``channel`` value is one exact channel name (``Security``,
+    ``Microsoft-Windows-PowerShell/Operational``): non-empty after trimming,
+    at most ``MAX_CHANNEL_CHARS`` characters, no control characters; at most
+    ``MAX_CHANNEL_VALUES`` values per request. A ``channel_group`` value is a
+    group id of ``core.eventlog_channels`` (``security`` ... ``other``,
+    ``none``, ``services``).
+    """
+    wanted_groups: list[str] = []
+    for value in groups:
+        text = str(value).strip()
+        if text not in GROUP_LABELS:
+            known = ", ".join(sorted(GROUP_LABELS))
+            raise ValueError(f"channel_group 값 '{text[:64]}'을(를) 알 수 없습니다 — 다음 중 하나: {known}")
+        wanted_groups.append(text)
+    cleaned: list[str] = []
+    for value in values:
+        text = str(value).strip()
+        if not text:
+            raise ValueError("channel 값이 비어 있습니다 — 채널 이름을 정확히 지정하세요(예: Security)")
+        if len(text) > MAX_CHANNEL_CHARS:
+            raise ValueError(f"channel 값은 {MAX_CHANNEL_CHARS}자 이하여야 합니다")
+        if any(ord(char) < 0x20 or ord(char) == 0x7F for char in text):
+            raise ValueError("channel 값에 제어 문자를 쓸 수 없습니다")
+        cleaned.append(text)
+    if len(set(cleaned)) > MAX_CHANNEL_VALUES:
+        raise ValueError(f"channel 값은 요청당 {MAX_CHANNEL_VALUES}개 이하여야 합니다")
+    channel_filter = ChannelFilter(frozenset(cleaned), frozenset(wanted_groups))
+    return channel_filter or None
+
+
+def as_channel_filter(channels: ChannelFilter | Collection[str] | None) -> ChannelFilter | None:
+    if isinstance(channels, ChannelFilter):
+        return channels or None
+    return ChannelFilter(frozenset(channels)) if channels else None
+
 
 # Exact record-field filters of ``GET /artifacts`` (r2 console fix M2): query
 # parameter -> the record field it matches (``details.<field>``, else the row's
@@ -67,7 +111,7 @@ def field_matching_records(
     scan_cap: int = ARTIFACT_PATH_FILTER_SCAN_CAP,
 ) -> set[int]:
     """Record indices whose fields match ``fields`` (the sorted pager narrows to them)."""
-    matches = row_matcher("", None, fields)
+    matches = row_matcher("", None, None, fields)
     found: set[int] = set()
     for scanned, (record_index, row) in enumerate(iter_artifact_records(payload, payload_path=payload_path)):
         if scanned >= scan_cap:
@@ -92,11 +136,17 @@ def filter_artifact_page(
     rows_source: Iterable[tuple[int, dict[str, object]]] | None = None,
     artifact_types: Collection[str] | None = None,
     record_limit: int | None = None,
+    channels: ChannelFilter | Collection[str] | None = None,
     fields: FieldFilters | None = None,
+    row_filter: Callable[[Mapping[str, object]], bool] | None = None,
 ) -> dict[str, object]:
-    """Page only rows whose ``path`` contains ``path_contains`` (NFC, case-insensitive)
-    and, when ``artifact_types`` is given, whose ``artifact_type`` is one of them
-    (and, with ``fields``, whose record fields equal one of the given values).
+    """Page only rows whose ``path`` contains ``path_contains`` (NFC, case-insensitive),
+    when ``artifact_types`` is given, whose ``artifact_type`` is one of them,
+    when ``channels`` is given, that match it (exact ``details.channel``
+    names and/or channel groups, see :class:`ChannelFilter`), with
+    ``fields``, whose record fields equal one of the given values, and, with
+    ``row_filter``, that predicate holds (analysis ``details`` filters).
+    Filter kinds AND together; values within one kind OR.
 
     Streams the kind's rows; ``offset`` counts matches. Stops after ``limit``
     matches plus one lookahead row, or after ``scan_cap`` scanned rows
@@ -108,7 +158,14 @@ def filter_artifact_page(
     """
     needle = nfc_fold(path_contains) if path_contains else ""
     wanted_types = frozenset(artifact_types) if artifact_types else None
-    matches = row_matcher(needle, wanted_types, fields)
+    wanted_channels = as_channel_filter(channels)
+    matches = row_matcher(needle, wanted_types, wanted_channels, fields)
+    if row_filter is not None:
+        base_matches = matches
+
+        def matches(row: Mapping[str, object]) -> bool:
+            return base_matches(row) and row_filter(row)
+
     rows: list[object] = []
     matched = 0
     scanned = 0
@@ -146,6 +203,7 @@ def filter_artifact_page(
         "filtered": True,
         "path_contains": path_contains or None,
         "artifact_types": sorted(wanted_types) if wanted_types is not None else None,
+        **(wanted_channels.describe() if wanted_channels is not None else {}),
         **({"fields": {key: sorted(values) for key, values in fields.items()}} if fields else {}),
         "scanned": scanned,
         "truncated": not exhausted and not has_more,
@@ -153,11 +211,22 @@ def filter_artifact_page(
     return page
 
 
-def row_matcher(needle: str, wanted_types: frozenset[str] | None, fields: FieldFilters | None = None):
-    """Predicate for the ``path_contains`` (pre-folded ``needle``), ``artifact_type`` and exact field filters."""
+def row_matcher(
+    needle: str,
+    wanted_types: frozenset[str] | None,
+    wanted_channels: ChannelFilter | None = None,
+    fields: FieldFilters | None = None,
+):
+    """Predicate for the ``path_contains`` (pre-folded ``needle``), ``artifact_type``, channel and exact field filters.
+
+    ``channel`` names match ``details.channel`` exactly; rows without one
+    (other kinds, inventory rows) match only the ``none`` channel group.
+    """
 
     def matches(row: Mapping[str, object]) -> bool:
         if wanted_types is not None and str(row.get("artifact_type") or "") not in wanted_types:
+            return False
+        if wanted_channels is not None and not wanted_channels.matches(row):
             return False
         if fields:
             for field, values in fields.items():
@@ -216,6 +285,7 @@ def filter_across_kinds(
     scan_cap: int | None = None,
     rows_for: Callable[[str, dict[str, object], Path, int], Iterable[tuple[int, dict[str, object]]]] | None = None,
     extra: Mapping[str, object] | None = None,
+    channels: ChannelFilter | Collection[str] | None = None,
     fields: FieldFilters | None = None,
 ) -> dict[str, object]:
     """Page filtered rows across kinds (``sources`` order) as one collection.
@@ -234,7 +304,8 @@ def filter_across_kinds(
     scan_cap = CROSS_KIND_SCAN_CAP if scan_cap is None else scan_cap
     needle = nfc_fold(path_contains) if path_contains else ""
     wanted_types = frozenset(artifact_types) if artifact_types else None
-    matches = row_matcher(needle, wanted_types, fields)
+    wanted_channels = as_channel_filter(channels)
+    matches = row_matcher(needle, wanted_types, wanted_channels, fields)
     kinds = [kind for kind, _payload, _path in sources]
     resume = parse_cross_kind_after(after)
     start_pos, start_index, matched = 0, 0, 0
@@ -298,6 +369,7 @@ def filter_across_kinds(
             "next_after": next_after,
             "path_contains": path_contains or None,
             "artifact_types": sorted(wanted_types) if wanted_types is not None else None,
+            **(wanted_channels.describe() if wanted_channels is not None else {}),
             **({"fields": {key: sorted(values) for key, values in fields.items()}} if fields else {}),
             "scanned": scanned,
             "truncated": not exhausted and not has_more,

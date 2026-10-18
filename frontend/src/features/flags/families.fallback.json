@@ -1,5 +1,5 @@
 {
- "version": "342e47b4bdfc7bf9",
+ "version": "e9cbdc0da2c657cb",
  "families": [
   {
    "id": "sam-account",
@@ -493,6 +493,104 @@
    ],
    "rules": [
     "accounts.wer_anomaly"
+   ]
+  },
+  {
+   "id": "antiforensics",
+   "label": "안티 포렌식(BitLocker 복구 키 파일)",
+   "types": [
+    "bitlocker-recovery-key-file"
+   ],
+   "core_columns": [
+    {
+     "key": "key_created_at",
+     "label": "키 생성(.BEK)",
+     "aliases": [
+      "timestamp"
+     ],
+     "format": "time",
+     "ts_kind": "created"
+    },
+    {
+     "key": "file_name",
+     "label": "파일 이름"
+    },
+    {
+     "key": "key_file_kind_label",
+     "label": "파일 종류",
+     "aliases": [
+      "key_file_kind"
+     ]
+    },
+    {
+     "key": "key_identifier",
+     "label": "키 식별자",
+     "format": "mono"
+    },
+    {
+     "key": "key_masked",
+     "label": "복구 키(가림)",
+     "format": "mono"
+    },
+    {
+     "key": "key_format_valid",
+     "label": "키 형식 검증",
+     "value_labels": {
+      "true": "유효",
+      "false": "유효하지 않음"
+     }
+    },
+    {
+     "key": "key_sha256",
+     "semantic": "hash",
+     "label": "키 SHA-256",
+     "format": "mono"
+    },
+    {
+     "key": "identifier_matches_file_name",
+     "label": "파일 이름 식별자 일치",
+     "value_labels": {
+      "true": "일치",
+      "false": "불일치"
+     }
+    },
+    {
+     "key": "source_path",
+     "semantic": "path",
+     "label": "파일 경로",
+     "aliases": [
+      "path"
+     ],
+     "format": "path"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "key_count",
+     "label": "키 수",
+     "format": "number"
+    },
+    {
+     "key": "key_value_stored",
+     "label": "키 값 저장 여부"
+    },
+    {
+     "key": "language",
+     "label": "언어"
+    },
+    {
+     "key": "size",
+     "label": "파일 크기",
+     "format": "bytes"
+    },
+    {
+     "key": "evidence_note",
+     "label": "참고"
+    }
+   ],
+   "rules": [
+    "antiforensics.tool_present",
+    "antiforensics.wiper_run_after_incident"
    ]
   },
   {
@@ -3868,7 +3966,9 @@
     "execution.name_mismatch",
     "execution.deleted_executable",
     "execution.cross_mismatch",
-    "execution.multi_source"
+    "execution.multi_source",
+    "antiforensics.tool_present",
+    "antiforensics.wiper_run_after_incident"
    ]
   },
   {
@@ -3906,7 +4006,9 @@
     },
     {
      "key": "last_run_times",
-     "label": "실행 시각 목록(최대 8)"
+     "label": "실행 시각 목록(최대 8)",
+     "format": "time",
+     "ts_kind": "run"
     },
     {
      "key": "prefetch_hash",
@@ -3923,10 +4025,11 @@
     },
     {
      "key": "volumes",
-     "label": "볼륨",
+     "label": "볼륨(장치 · 일련번호 · 생성 시각)",
      "aliases": [
       "volume_candidates"
-     ]
+     ],
+     "format": "prefetch_volumes"
     },
     {
      "key": "volume_count",
@@ -3944,6 +4047,97 @@
     }
    ],
    "aux_columns": [
+    {
+     "key": "run_time_1",
+     "label": "실행 1회차",
+     "aliases": [
+      "last_run_times.0"
+     ],
+     "format": "time",
+     "ts_kind": "run-1"
+    },
+    {
+     "key": "run_time_2",
+     "label": "실행 2회차",
+     "aliases": [
+      "last_run_times.1"
+     ],
+     "format": "time",
+     "ts_kind": "run-2"
+    },
+    {
+     "key": "run_time_3",
+     "label": "실행 3회차",
+     "aliases": [
+      "last_run_times.2"
+     ],
+     "format": "time",
+     "ts_kind": "run-3"
+    },
+    {
+     "key": "run_time_4",
+     "label": "실행 4회차",
+     "aliases": [
+      "last_run_times.3"
+     ],
+     "format": "time",
+     "ts_kind": "run-4"
+    },
+    {
+     "key": "run_time_5",
+     "label": "실행 5회차",
+     "aliases": [
+      "last_run_times.4"
+     ],
+     "format": "time",
+     "ts_kind": "run-5"
+    },
+    {
+     "key": "run_time_6",
+     "label": "실행 6회차",
+     "aliases": [
+      "last_run_times.5"
+     ],
+     "format": "time",
+     "ts_kind": "run-6"
+    },
+    {
+     "key": "run_time_7",
+     "label": "실행 7회차",
+     "aliases": [
+      "last_run_times.6"
+     ],
+     "format": "time",
+     "ts_kind": "run-7"
+    },
+    {
+     "key": "run_time_8",
+     "label": "실행 8회차",
+     "aliases": [
+      "last_run_times.7"
+     ],
+     "format": "time",
+     "ts_kind": "run-8"
+    },
+    {
+     "key": "referenced_files",
+     "label": "참조 파일(MFT·오프셋, 최대 1,000)"
+    },
+    {
+     "key": "referenced_file_count",
+     "label": "디코드된 참조 파일 수",
+     "format": "number"
+    },
+    {
+     "key": "trace_chain_count",
+     "label": "트레이스 체인 수",
+     "format": "number"
+    },
+    {
+     "key": "source_offset",
+     "label": "원본 오프셋",
+     "format": "number"
+    },
     {
      "key": "file_reference_candidates",
      "label": "파일 참조(MFT)"
@@ -3967,7 +4161,9 @@
     "execution.runcount_spike",
     "execution.name_mismatch",
     "execution.deleted_executable",
-    "execution.multi_source"
+    "execution.multi_source",
+    "antiforensics.tool_present",
+    "antiforensics.wiper_run_after_incident"
    ]
   },
   {
@@ -4084,6 +4280,173 @@
    "aux_columns": [],
    "rules": [
     "execution.srum_bulk_upload"
+   ]
+  },
+  {
+   "id": "pca",
+   "label": "프로그램 호환성 도우미(PCA)",
+   "types": [
+    "execution-pca"
+   ],
+   "core_columns": [
+    {
+     "key": "timestamp",
+     "label": "기록 시각",
+     "aliases": [
+      "last_run_at",
+      "event_at"
+     ],
+     "format": "time",
+     "ts_kind": "pca-event"
+    },
+    {
+     "key": "executable_path",
+     "semantic": "path",
+     "label": "실행 파일 경로",
+     "format": "path"
+    },
+    {
+     "key": "executable_name",
+     "label": "실행 파일"
+    },
+    {
+     "key": "source_kind_label",
+     "label": "출처",
+     "aliases": [
+      "source_kind"
+     ]
+    },
+    {
+     "key": "record_type_label",
+     "label": "기록 종류",
+     "aliases": [
+      "record_type"
+     ]
+    },
+    {
+     "key": "product_name",
+     "label": "제품"
+    },
+    {
+     "key": "vendor",
+     "label": "게시자"
+    },
+    {
+     "key": "product_version",
+     "label": "버전"
+    },
+    {
+     "key": "message",
+     "label": "메시지"
+    },
+    {
+     "key": "user_sid",
+     "semantic": "account",
+     "label": "사용자 SID",
+     "format": "sid"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "program_id",
+     "label": "프로그램 ID",
+     "format": "mono"
+    },
+    {
+     "key": "value_sha256",
+     "semantic": "hash",
+     "label": "값 SHA-256",
+     "format": "mono"
+    },
+    {
+     "key": "source_line",
+     "label": "원본 줄 번호",
+     "format": "number"
+    },
+    {
+     "key": "malformed_line_count",
+     "label": "해석 못 한 줄 수",
+     "format": "number"
+    },
+    {
+     "key": "evidence_note",
+     "label": "참고"
+    },
+    {
+     "key": "key_path",
+     "label": "키 경로",
+     "aliases": [
+      "key"
+     ],
+     "format": "path"
+    }
+   ],
+   "rules": [
+    "antiforensics.tool_present",
+    "antiforensics.wiper_run_after_incident"
+   ]
+  },
+  {
+   "id": "feature-usage",
+   "label": "작업 표시줄 사용(FeatureUsage)",
+   "types": [
+    "execution-feature-usage"
+   ],
+   "core_columns": [
+    {
+     "key": "key_last_written_at",
+     "label": "키 마지막 기록",
+     "aliases": [
+      "timestamp"
+     ],
+     "format": "time",
+     "ts_kind": "last-written"
+    },
+    {
+     "key": "application",
+     "semantic": "path",
+     "label": "앱",
+     "format": "mono"
+    },
+    {
+     "key": "feature_label",
+     "label": "동작",
+     "aliases": [
+      "feature"
+     ]
+    },
+    {
+     "key": "count",
+     "label": "횟수",
+     "format": "number"
+    },
+    {
+     "key": "user_sid",
+     "semantic": "account",
+     "label": "사용자 SID",
+     "format": "sid"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "executable_name",
+     "label": "실행 파일"
+    },
+    {
+     "key": "evidence_note",
+     "label": "참고"
+    },
+    {
+     "key": "key_path",
+     "label": "키 경로",
+     "aliases": [
+      "key"
+     ],
+     "format": "path"
+    }
+   ],
+   "rules": [
+    "antiforensics.tool_present"
    ]
   },
   {
@@ -5639,7 +6002,11 @@
     },
     {
      "key": "in_use",
-     "label": "사용 중"
+     "label": "사용 중",
+     "value_labels": {
+      "true": "예(사용 중)",
+      "false": "아니요(삭제된 레코드)"
+     }
     },
     {
      "key": "deleted_hint",
@@ -5705,6 +6072,204 @@
     "ntfs.deletion_trace",
     "ntfs.mass_change"
    ]
+  },
+  {
+   "id": "ntfs-timestamp-mismatch",
+   "label": "NTFS 타임스탬프 불일치",
+   "types": [
+    "ntfs-timestamp-mismatch"
+   ],
+   "core_columns": [
+    {
+     "key": "path",
+     "semantic": "path",
+     "label": "경로",
+     "aliases": [
+      "name"
+     ],
+     "format": "path"
+    },
+    {
+     "key": "entry_number",
+     "label": "MFT 엔트리",
+     "format": "number"
+    },
+    {
+     "key": "sequence_number",
+     "label": "시퀀스",
+     "format": "number"
+    },
+    {
+     "key": "reason",
+     "label": "사유",
+     "aliases": [
+      "reason_labels"
+     ]
+    },
+    {
+     "key": "si_created_at",
+     "label": "$SI 생성",
+     "format": "time",
+     "ts_kind": "si-created"
+    },
+    {
+     "key": "si_modified_at",
+     "label": "$SI 수정",
+     "format": "time",
+     "ts_kind": "si-modified"
+    },
+    {
+     "key": "si_accessed_at",
+     "label": "$SI 접근",
+     "format": "time",
+     "ts_kind": "si-accessed"
+    },
+    {
+     "key": "si_mft_modified_at",
+     "label": "$SI MFT 수정",
+     "format": "time",
+     "ts_kind": "si-mft-modified"
+    },
+    {
+     "key": "fn_created_at",
+     "label": "$FN 생성",
+     "format": "time",
+     "ts_kind": "fn-created"
+    },
+    {
+     "key": "fn_modified_at",
+     "label": "$FN 수정",
+     "format": "time",
+     "ts_kind": "fn-modified"
+    },
+    {
+     "key": "fn_accessed_at",
+     "label": "$FN 접근",
+     "format": "time",
+     "ts_kind": "fn-accessed"
+    },
+    {
+     "key": "fn_mft_modified_at",
+     "label": "$FN MFT 수정",
+     "format": "time",
+     "ts_kind": "fn-mft-modified"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "in_use",
+     "label": "사용 중",
+     "value_labels": {
+      "true": "예(사용 중)",
+      "false": "아니요(삭제된 레코드)"
+     }
+    },
+    {
+     "key": "si_fn_created_delta_seconds",
+     "label": "$FN−$SI 생성 차(초)",
+     "format": "number"
+    },
+    {
+     "key": "related_rules",
+     "label": "관련 특이사항 지표"
+    },
+    {
+     "key": "mft_row_index",
+     "label": "MFT 행 번호",
+     "format": "number"
+    },
+    {
+     "key": "record_offset",
+     "label": "레코드 오프셋",
+     "format": "mono"
+    }
+   ],
+   "rules": [
+    "ntfs.si_before_fn",
+    "ntfs.zero_subsecond"
+   ]
+  },
+  {
+   "id": "ntfs-logfile-transaction",
+   "label": "$LogFile 트랜잭션",
+   "types": [
+    "ntfs-logfile-transaction"
+   ],
+   "core_columns": [
+    {
+     "key": "lsn",
+     "label": "로그 순번(LSN)",
+     "format": "number"
+    },
+    {
+     "key": "time_estimate",
+     "label": "시각 추정",
+     "format": "time",
+     "ts_kind": "fn-created"
+    },
+    {
+     "key": "redo_op_label",
+     "label": "재실행(redo) 작업"
+    },
+    {
+     "key": "undo_op_label",
+     "label": "취소(undo) 작업"
+    },
+    {
+     "key": "target_mft_entry",
+     "label": "대상 MFT 엔트리(후보)",
+     "format": "number"
+    },
+    {
+     "key": "file_name",
+     "label": "파일 이름 후보",
+     "aliases": [
+      "file_name_candidates"
+     ]
+    },
+    {
+     "key": "transaction_id",
+     "label": "트랜잭션 ID",
+     "format": "number"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "previous_lsn",
+     "label": "이전 LSN",
+     "format": "number"
+    },
+    {
+     "key": "undo_next_lsn",
+     "label": "취소 다음 LSN",
+     "format": "number"
+    },
+    {
+     "key": "target_vcn",
+     "label": "대상 VCN",
+     "format": "number"
+    },
+    {
+     "key": "cluster_block_offset",
+     "label": "클러스터 블록 오프셋",
+     "format": "number"
+    },
+    {
+     "key": "spans_pages",
+     "label": "페이지 걸침"
+    },
+    {
+     "key": "record_offset",
+     "label": "레코드 오프셋",
+     "format": "mono"
+    },
+    {
+     "key": "page_offset",
+     "label": "페이지 오프셋",
+     "format": "mono"
+    }
+   ],
+   "rules": []
   },
   {
    "id": "zone",
@@ -6420,6 +6985,110 @@
    "rules": []
   },
   {
+   "id": "carved-file",
+   "label": "카빙 복구 파일",
+   "types": [
+    "carve-row"
+   ],
+   "core_columns": [
+    {
+     "key": "signature_kind",
+     "label": "서명 종류"
+    },
+    {
+     "key": "family_label",
+     "label": "계열"
+    },
+    {
+     "key": "source_path",
+     "label": "원본(소스) 경로",
+     "format": "path"
+    },
+    {
+     "key": "offset",
+     "label": "오프셋",
+     "aliases": [
+      "source_offset"
+     ],
+     "format": "hex"
+    },
+    {
+     "key": "length",
+     "label": "길이",
+     "format": "bytes"
+    },
+    {
+     "key": "sha256",
+     "semantic": "hash",
+     "label": "해시(SHA-256)",
+     "format": "mono"
+    },
+    {
+     "key": "status",
+     "label": "경계 판정",
+     "value_labels": {
+      "footer-validated": "끝 표식 확인",
+      "length-field": "길이 필드 확인",
+      "length-field-truncated": "길이 필드(잘림)",
+      "bounded-no-footer": "끝 표식 없음(상한까지)",
+      "bounded-header-candidate": "머리만 확인(상한까지)",
+      "text-boundary": "텍스트 경계",
+      "false-positive-rejected": "오탐 거부"
+     }
+    },
+    {
+     "key": "confidence",
+     "label": "신뢰도",
+     "value_labels": {
+      "high": "높음",
+      "medium": "중간",
+      "low": "낮음",
+      "unknown": "불명"
+     }
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "recovery_method",
+     "label": "복구 방법",
+     "value_labels": {
+      "carved": "카빙",
+      "parsed": "파싱됨",
+      "rejected": "거부됨(오탐)"
+     }
+    },
+    {
+     "key": "boundary_method",
+     "label": "경계 방법",
+     "value_labels": {
+      "signature-header": "머리 서명만",
+      "signature-footer": "끝 서명",
+      "length-field": "길이 필드",
+      "text-boundary": "텍스트 경계",
+      "header-only-bounded": "머리만(상한까지)",
+      "box-walk": "박스 순회(MP4/M4A)",
+      "chunk-count": "청크 수(EVTX)",
+      "frame-walk": "프레임 순회(MP3)",
+      "ole-fat": "OLE FAT(HWP)",
+      "riff-size": "RIFF 크기(WAV)",
+      "section-table": "섹션 표(PE)",
+      "zip-eocd": "ZIP 끝 레코드(EOCD)",
+      "id3-size": "ID3 크기"
+     }
+    },
+    {
+     "key": "rejected_reason",
+     "label": "거부 사유"
+    },
+    {
+     "key": "extracted_path",
+     "label": "추출 경로",
+     "format": "path"
+    }
+   ],
+   "rules": []
+  },
+  {
    "id": "generic",
    "label": "레코드",
    "types": [],
@@ -6879,7 +7548,8 @@
    "rules": [
     "registry.service_anomaly",
     "registry.persistence_lastwrite_window",
-    "accounts.service_suspicious"
+    "accounts.service_suspicious",
+    "antiforensics.tool_present"
    ]
   },
   {
@@ -7121,7 +7791,8 @@
     }
    ],
    "rules": [
-    "accounts.profile_anomaly"
+    "accounts.profile_anomaly",
+    "antiforensics.tool_present"
    ]
   },
   {
@@ -7360,6 +8031,571 @@
    ],
    "rules": [
     "registry.shellbag_removable_network"
+   ]
+  },
+  {
+   "id": "network-profile",
+   "label": "네트워크 프로필(NetworkList)",
+   "types": [
+    "registry-network-profile"
+   ],
+   "core_columns": [
+    {
+     "key": "last_connected_at",
+     "label": "마지막 연결(현지 시각)",
+     "aliases": [
+      "timestamp"
+     ],
+     "format": "time",
+     "ts_kind": "last-connected"
+    },
+    {
+     "key": "first_connected_at",
+     "label": "최초 연결(현지 시각)",
+     "format": "time",
+     "ts_kind": "first"
+    },
+    {
+     "key": "profile_name",
+     "label": "네트워크 이름"
+    },
+    {
+     "key": "description",
+     "label": "설명"
+    },
+    {
+     "key": "name_type_label",
+     "label": "연결 종류",
+     "aliases": [
+      "name_type"
+     ]
+    },
+    {
+     "key": "category_label",
+     "label": "네트워크 위치",
+     "aliases": [
+      "category"
+     ]
+    },
+    {
+     "key": "gateway_mac",
+     "semantic": "device",
+     "label": "게이트웨이 MAC",
+     "format": "mono"
+    },
+    {
+     "key": "dns_suffix",
+     "label": "DNS 접미사"
+    },
+    {
+     "key": "signature_scope",
+     "label": "관리 구분(Managed/Unmanaged)",
+     "value_labels": {
+      "Managed": "관리됨(도메인)",
+      "Unmanaged": "관리 안 됨"
+     }
+    },
+    {
+     "key": "profile_guid",
+     "label": "프로필 GUID",
+     "format": "mono"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "first_network",
+     "label": "최초 네트워크 이름"
+    },
+    {
+     "key": "profile_key_missing",
+     "label": "프로필 키 없음(서명만 남음)",
+     "value_labels": {
+      "true": "예(서명만 남음)",
+      "false": "아니요"
+     }
+    },
+    {
+     "key": "timestamp_semantics",
+     "label": "시각 의미"
+    },
+    {
+     "key": "key_path",
+     "label": "키 경로",
+     "aliases": [
+      "key"
+     ],
+     "format": "path"
+    },
+    {
+     "key": "key_last_written_at",
+     "label": "키 마지막 기록",
+     "format": "time",
+     "ts_kind": "last-written"
+    }
+   ],
+   "rules": []
+  },
+  {
+   "id": "network-share",
+   "label": "네트워크 공유·매핑 드라이브",
+   "types": [
+    "registry-network-share"
+   ],
+   "core_columns": [
+    {
+     "key": "key_last_written_at",
+     "label": "키 마지막 기록",
+     "aliases": [
+      "timestamp"
+     ],
+     "format": "time",
+     "ts_kind": "last-written"
+    },
+    {
+     "key": "share_path",
+     "semantic": "path",
+     "label": "공유 경로",
+     "format": "path"
+    },
+    {
+     "key": "share_server",
+     "semantic": "device",
+     "label": "서버"
+    },
+    {
+     "key": "share_kind_label",
+     "label": "항목 종류",
+     "aliases": [
+      "share_kind"
+     ]
+    },
+    {
+     "key": "drive_letter",
+     "label": "드라이브 문자"
+    },
+    {
+     "key": "source_kind_label",
+     "label": "출처 키",
+     "aliases": [
+      "source_kind"
+     ]
+    },
+    {
+     "key": "username",
+     "semantic": "account",
+     "label": "연결 계정"
+    },
+    {
+     "key": "mount_label",
+     "label": "볼륨 이름"
+    },
+    {
+     "key": "mru_position",
+     "label": "MRU 순서",
+     "format": "number"
+    },
+    {
+     "key": "user_sid",
+     "semantic": "account",
+     "label": "사용자 SID",
+     "format": "sid"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "provider_name",
+     "label": "네트워크 공급자"
+    },
+    {
+     "key": "connection_type",
+     "label": "연결 종류 값",
+     "format": "number"
+    },
+    {
+     "key": "key_path",
+     "label": "키 경로",
+     "aliases": [
+      "key"
+     ],
+     "format": "path"
+    }
+   ],
+   "rules": []
+  },
+  {
+   "id": "wlan-profile-registry",
+   "label": "무선 연결 이력(레지스트리)",
+   "types": [
+    "registry-wlan-profile"
+   ],
+   "core_columns": [
+    {
+     "key": "last_connected_at",
+     "label": "마지막 연결(현지 시각)",
+     "aliases": [
+      "timestamp"
+     ],
+     "format": "time",
+     "ts_kind": "last-connected"
+    },
+    {
+     "key": "first_connected_at",
+     "label": "최초 연결(현지 시각)",
+     "format": "time",
+     "ts_kind": "first"
+    },
+    {
+     "key": "ssid",
+     "label": "무선 이름(SSID)"
+    },
+    {
+     "key": "source_kind_label",
+     "label": "출처",
+     "aliases": [
+      "source_kind"
+     ]
+    },
+    {
+     "key": "gateway_mac",
+     "semantic": "device",
+     "label": "게이트웨이 MAC",
+     "format": "mono"
+    },
+    {
+     "key": "interface_guid",
+     "label": "인터페이스 GUID",
+     "format": "mono"
+    },
+    {
+     "key": "profile_guid",
+     "label": "프로필 GUID",
+     "format": "mono"
+    },
+    {
+     "key": "profile_index",
+     "label": "프로필 순번",
+     "format": "number"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "dns_suffix",
+     "label": "DNS 접미사"
+    },
+    {
+     "key": "category_label",
+     "label": "네트워크 위치"
+    },
+    {
+     "key": "key_last_written_at",
+     "label": "키 마지막 기록",
+     "format": "time",
+     "ts_kind": "last-written"
+    },
+    {
+     "key": "key_path",
+     "label": "키 경로",
+     "aliases": [
+      "key"
+     ],
+     "format": "path"
+    }
+   ],
+   "rules": []
+  },
+  {
+   "id": "office-mru",
+   "label": "Office 최근 파일(MRU)",
+   "types": [
+    "registry-office-mru"
+   ],
+   "core_columns": [
+    {
+     "key": "last_opened_at",
+     "label": "마지막 열기",
+     "aliases": [
+      "timestamp"
+     ],
+     "format": "time",
+     "ts_kind": "last-opened"
+    },
+    {
+     "key": "file_path",
+     "semantic": "path",
+     "label": "파일/폴더 경로",
+     "format": "path"
+    },
+    {
+     "key": "file_name",
+     "label": "파일 이름"
+    },
+    {
+     "key": "application",
+     "label": "앱"
+    },
+    {
+     "key": "office_version",
+     "label": "Office 버전"
+    },
+    {
+     "key": "mru_kind_label",
+     "label": "목록 종류",
+     "aliases": [
+      "mru_kind"
+     ]
+    },
+    {
+     "key": "mru_position",
+     "label": "MRU 순서",
+     "format": "number"
+    },
+    {
+     "key": "account_id",
+     "semantic": "account",
+     "label": "Office 계정 키"
+    },
+    {
+     "key": "user_sid",
+     "semantic": "account",
+     "label": "사용자 SID",
+     "format": "sid"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "raw_value",
+     "label": "원본 값",
+     "format": "mono"
+    },
+    {
+     "key": "flags_hex",
+     "label": "플래그(F)",
+     "format": "mono"
+    },
+    {
+     "key": "key_path",
+     "label": "키 경로",
+     "aliases": [
+      "key"
+     ],
+     "format": "path"
+    }
+   ],
+   "rules": []
+  },
+  {
+   "id": "known-dll",
+   "label": "알려진 DLL(KnownDLLs)",
+   "types": [
+    "registry-known-dll"
+   ],
+   "core_columns": [
+    {
+     "key": "key_last_written_at",
+     "label": "키 마지막 기록",
+     "aliases": [
+      "timestamp"
+     ],
+     "format": "time",
+     "ts_kind": "last-written"
+    },
+    {
+     "key": "value_name",
+     "label": "값 이름"
+    },
+    {
+     "key": "dll_name",
+     "semantic": "path",
+     "label": "DLL/디렉터리",
+     "format": "mono"
+    },
+    {
+     "key": "in_default_baseline",
+     "label": "기본 목록 포함",
+     "value_labels": {
+      "true": "예",
+      "false": "아니요"
+     }
+    },
+    {
+     "key": "entry_kind",
+     "label": "항목 종류",
+     "value_labels": {
+      "dll": "DLL",
+      "directory": "디렉터리(DllDirectory)"
+     }
+    },
+    {
+     "key": "control_set",
+     "label": "컨트롤 세트 (ControlSet)"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "baseline_note",
+     "label": "참고"
+    },
+    {
+     "key": "key_path",
+     "label": "키 경로",
+     "aliases": [
+      "key"
+     ],
+     "format": "path"
+    }
+   ],
+   "rules": []
+  },
+  {
+   "id": "default-browser",
+   "label": "기본 브라우저",
+   "types": [
+    "registry-default-browser"
+   ],
+   "core_columns": [
+    {
+     "key": "key_last_written_at",
+     "label": "설정 시각(키 마지막 기록)",
+     "aliases": [
+      "timestamp"
+     ],
+     "format": "time",
+     "ts_kind": "last-written"
+    },
+    {
+     "key": "browser",
+     "label": "브라우저"
+    },
+    {
+     "key": "protocol",
+     "label": "프로토콜"
+    },
+    {
+     "key": "prog_id",
+     "label": "프로그램 ID(ProgId)",
+     "format": "mono"
+    },
+    {
+     "key": "user_sid",
+     "semantic": "account",
+     "label": "사용자 SID",
+     "format": "sid"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "user_choice_hash",
+     "label": "UserChoice 해시",
+     "format": "mono"
+    },
+    {
+     "key": "timestamp_semantics",
+     "label": "시각 의미"
+    },
+    {
+     "key": "key_path",
+     "label": "키 경로",
+     "aliases": [
+      "key"
+     ],
+     "format": "path"
+    }
+   ],
+   "rules": []
+  },
+  {
+   "id": "install-state",
+   "label": "설치 상태(App Paths·MSI)",
+   "types": [
+    "registry-install-state"
+   ],
+   "core_columns": [
+    {
+     "key": "key_last_written_at",
+     "label": "키 마지막 기록",
+     "aliases": [
+      "timestamp"
+     ],
+     "format": "time",
+     "ts_kind": "last-written"
+    },
+    {
+     "key": "display_name",
+     "label": "프로그램",
+     "aliases": [
+      "application_name"
+     ]
+    },
+    {
+     "key": "state_source_label",
+     "label": "출처",
+     "aliases": [
+      "state_source"
+     ]
+    },
+    {
+     "key": "executable_path",
+     "semantic": "path",
+     "label": "실행 파일",
+     "format": "path"
+    },
+    {
+     "key": "display_version",
+     "label": "버전"
+    },
+    {
+     "key": "publisher",
+     "label": "게시자"
+    },
+    {
+     "key": "install_date",
+     "label": "설치일(현지)"
+    },
+    {
+     "key": "install_location",
+     "semantic": "path",
+     "label": "설치 위치",
+     "aliases": [
+      "app_path_dir"
+     ],
+     "format": "path"
+    },
+    {
+     "key": "product_code",
+     "label": "제품 코드",
+     "format": "mono"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "local_package",
+     "semantic": "path",
+     "label": "캐시 MSI",
+     "format": "path"
+    },
+    {
+     "key": "install_source",
+     "semantic": "path",
+     "label": "설치 원본",
+     "format": "path"
+    },
+    {
+     "key": "installer_sid",
+     "semantic": "account",
+     "label": "설치 계정 SID",
+     "format": "sid"
+    },
+    {
+     "key": "key_path",
+     "label": "키 경로",
+     "aliases": [
+      "key"
+     ],
+     "format": "path"
+    }
+   ],
+   "rules": [
+    "antiforensics.tool_present"
    ]
   },
   {
@@ -7636,6 +8872,454 @@
    "version": 1,
    "status": "provisional",
    "params": {}
+  },
+  {
+   "id": "antiforensics.tool_present",
+   "family": "antiforensics",
+   "grade": "B",
+   "label_ko": "안티 포렌식·암호화 도구 흔적",
+   "rationale_ko": "설치 프로그램·App Paths·Prefetch·Amcache·BAM·PCA·서비스·파일 이름·명령줄에 증거 인멸(삭제·와이프·타임스톰핑)이나 디스크 암호화 도구가 있음: 출처가 명시된 시그니처 목록과 정확히 일치(제품명은 단어 경계, 실행 파일은 파일 이름 전체).",
+   "false_positive_ko": "정상 업무용 암호화(회사 정책 VeraCrypt), 일상 정리용 CCleaner. 이름에 cleaner가 들어간 무관한 앱은 일치하지 않음. Windows 구성 요소(cipher.exe·BitLocker 마법사)는 명령줄(/w)이나 실행 흔적에서만 확인.",
+   "sources": [
+    "https://attack.mitre.org/techniques/T1070/",
+    "https://attack.mitre.org/techniques/T1070/006/",
+    "https://attack.mitre.org/techniques/T1485/",
+    "https://attack.mitre.org/techniques/T1561/",
+    "https://www.sans.org/blog/digital-forensics-application-execution/"
+   ],
+   "version": 1,
+   "status": "provisional",
+   "params": {
+    "signatures": [
+     {
+      "id": "veracrypt",
+      "name": "VeraCrypt",
+      "category": "encryption",
+      "products": [
+       "\\bveracrypt\\b",
+       "베라크립트"
+      ],
+      "executables": [
+       "veracrypt.exe",
+       "veracrypt-x64.exe",
+       "veracrypt-arm64.exe",
+       "veracrypt format.exe",
+       "veracrypt format-x64.exe",
+       "veracryptexpander.exe",
+       "veracrypt setup.exe"
+      ],
+      "services": [
+       "veracrypt"
+      ],
+      "source": "https://www.veracrypt.fr/en/Home.html"
+     },
+     {
+      "id": "truecrypt",
+      "name": "TrueCrypt",
+      "category": "encryption",
+      "products": [
+       "\\btruecrypt\\b",
+       "트루크립트"
+      ],
+      "executables": [
+       "truecrypt.exe",
+       "truecrypt format.exe",
+       "truecrypt setup.exe"
+      ],
+      "services": [
+       "truecrypt"
+      ],
+      "source": "https://truecrypt.sourceforge.net/"
+     },
+     {
+      "id": "bitlocker-to-go",
+      "name": "BitLocker(드라이브 암호화 마법사·To Go)",
+      "category": "encryption",
+      "builtin": true,
+      "executables": [
+       "bitlockerwizard.exe",
+       "bitlockerwizardelev.exe",
+       "bitlockertogo.exe"
+      ],
+      "commands": [
+       "\\bmanage-bde(?:\\.exe)?\\s+-(?:on|protectors\\s+-add)\\b"
+      ],
+      "source": "https://learn.microsoft.com/en-us/windows/security/operating-system-security/data-protection/bitlocker/"
+     },
+     {
+      "id": "ccleaner",
+      "name": "CCleaner",
+      "category": "cleaner",
+      "products": [
+       "\\bccleaner\\b",
+       "씨클리너"
+      ],
+      "executables": [
+       "ccleaner.exe",
+       "ccleaner64.exe",
+       "ccleanerbrowser.exe"
+      ],
+      "services": [
+       "ccleanerperformanceoptimizerservice"
+      ],
+      "source": "https://www.ccleaner.com/ccleaner"
+     },
+     {
+      "id": "bleachbit",
+      "name": "BleachBit",
+      "category": "cleaner",
+      "products": [
+       "\\bbleachbit\\b",
+       "블리치비트"
+      ],
+      "executables": [
+       "bleachbit.exe",
+       "bleachbit_console.exe"
+      ],
+      "source": "https://www.bleachbit.org/"
+     },
+     {
+      "id": "eraser",
+      "name": "Eraser",
+      "category": "wiper",
+      "products": [
+       "^eraser(?:\\s+\\d|\\s*$)"
+      ],
+      "executables": [
+       "eraser.exe"
+      ],
+      "services": [
+       "eraser"
+      ],
+      "source": "https://eraser.heidi.ie/"
+     },
+     {
+      "id": "sdelete",
+      "name": "SDelete(Sysinternals)",
+      "category": "wiper",
+      "executables": [
+       "sdelete.exe",
+       "sdelete64.exe",
+       "sdelete64a.exe"
+      ],
+      "commands": [
+       "\\bsdelete(?:64a?)?(?:\\.exe)?\\s"
+      ],
+      "source": "https://learn.microsoft.com/en-us/sysinternals/downloads/sdelete"
+     },
+     {
+      "id": "cipher-wipe",
+      "name": "cipher /w(빈 공간 덮어쓰기)",
+      "category": "wiper",
+      "builtin": true,
+      "commands": [
+       "\\bcipher(?:\\.exe)?\\s+(?:/[a-z]+\\s+)*/w\\b"
+      ],
+      "source": "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/cipher"
+     },
+     {
+      "id": "privazer",
+      "name": "PrivaZer",
+      "category": "cleaner",
+      "products": [
+       "\\bprivazer\\b"
+      ],
+      "executables": [
+       "privazer.exe"
+      ],
+      "source": "https://privazer.com/en/"
+     },
+     {
+      "id": "wise-disk-cleaner",
+      "name": "Wise Disk Cleaner",
+      "category": "cleaner",
+      "products": [
+       "\\bwise disk cleaner\\b"
+      ],
+      "executables": [
+       "wisediskcleaner.exe"
+      ],
+      "source": "https://www.wisecleaner.com/wise-disk-cleaner.html"
+     },
+     {
+      "id": "timestomp",
+      "name": "timestomp(Metasploit)",
+      "category": "timestomp",
+      "executables": [
+       "timestomp.exe"
+      ],
+      "commands": [
+       "\\btimestomp(?:\\.exe)?\\s"
+      ],
+      "source": "https://attack.mitre.org/techniques/T1070/006/"
+     },
+     {
+      "id": "setmace",
+      "name": "SetMACE",
+      "category": "timestomp",
+      "executables": [
+       "setmace.exe",
+       "setmace64.exe"
+      ],
+      "source": "https://github.com/jschicht/SetMace"
+     },
+     {
+      "id": "dban",
+      "name": "DBAN(Darik's Boot and Nuke)",
+      "category": "wiper",
+      "products": [
+       "\\bdarik'?s boot and nuke\\b",
+       "\\bdban\\b"
+      ],
+      "executables": [
+       "dban.exe"
+      ],
+      "source": "https://dban.org/"
+     },
+     {
+      "id": "killdisk",
+      "name": "KillDisk",
+      "category": "wiper",
+      "products": [
+       "\\bkilldisk\\b"
+      ],
+      "executables": [
+       "killdisk.exe",
+       "killdiskwin.exe",
+       "killdisk_win.exe"
+      ],
+      "source": "https://www.killdisk.com/"
+     }
+    ]
+   }
+  },
+  {
+   "id": "antiforensics.wiper_run_after_incident",
+   "family": "antiforensics",
+   "grade": "A",
+   "label_ko": "사건 이후 와이퍼·정리 도구 실행",
+   "rationale_ko": "와이퍼·정리·타임스톰핑 도구(시그니처 목록)의 실행 시각(Prefetch 실행 8회·BAM·UserAssist·PCA·4688 명령줄)이 사건 시작 이후(종료가 있으면 종료 + 유예 일수까지): 증거 인멸 정황(사건 시간대를 지정해야 동작).",
+   "false_positive_ko": "정기 정리 작업(예약 실행), 사건과 무관한 일상 정리. 설치 흔적만 있고 실행 시각이 없는 행은 제외.",
+   "sources": [
+    "https://attack.mitre.org/techniques/T1070/",
+    "https://attack.mitre.org/techniques/T1070/006/",
+    "https://attack.mitre.org/techniques/T1485/",
+    "https://attack.mitre.org/techniques/T1561/",
+    "https://www.sans.org/blog/digital-forensics-application-execution/"
+   ],
+   "version": 1,
+   "status": "provisional",
+   "params": {
+    "signatures": [
+     {
+      "id": "veracrypt",
+      "name": "VeraCrypt",
+      "category": "encryption",
+      "products": [
+       "\\bveracrypt\\b",
+       "베라크립트"
+      ],
+      "executables": [
+       "veracrypt.exe",
+       "veracrypt-x64.exe",
+       "veracrypt-arm64.exe",
+       "veracrypt format.exe",
+       "veracrypt format-x64.exe",
+       "veracryptexpander.exe",
+       "veracrypt setup.exe"
+      ],
+      "services": [
+       "veracrypt"
+      ],
+      "source": "https://www.veracrypt.fr/en/Home.html"
+     },
+     {
+      "id": "truecrypt",
+      "name": "TrueCrypt",
+      "category": "encryption",
+      "products": [
+       "\\btruecrypt\\b",
+       "트루크립트"
+      ],
+      "executables": [
+       "truecrypt.exe",
+       "truecrypt format.exe",
+       "truecrypt setup.exe"
+      ],
+      "services": [
+       "truecrypt"
+      ],
+      "source": "https://truecrypt.sourceforge.net/"
+     },
+     {
+      "id": "bitlocker-to-go",
+      "name": "BitLocker(드라이브 암호화 마법사·To Go)",
+      "category": "encryption",
+      "builtin": true,
+      "executables": [
+       "bitlockerwizard.exe",
+       "bitlockerwizardelev.exe",
+       "bitlockertogo.exe"
+      ],
+      "commands": [
+       "\\bmanage-bde(?:\\.exe)?\\s+-(?:on|protectors\\s+-add)\\b"
+      ],
+      "source": "https://learn.microsoft.com/en-us/windows/security/operating-system-security/data-protection/bitlocker/"
+     },
+     {
+      "id": "ccleaner",
+      "name": "CCleaner",
+      "category": "cleaner",
+      "products": [
+       "\\bccleaner\\b",
+       "씨클리너"
+      ],
+      "executables": [
+       "ccleaner.exe",
+       "ccleaner64.exe",
+       "ccleanerbrowser.exe"
+      ],
+      "services": [
+       "ccleanerperformanceoptimizerservice"
+      ],
+      "source": "https://www.ccleaner.com/ccleaner"
+     },
+     {
+      "id": "bleachbit",
+      "name": "BleachBit",
+      "category": "cleaner",
+      "products": [
+       "\\bbleachbit\\b",
+       "블리치비트"
+      ],
+      "executables": [
+       "bleachbit.exe",
+       "bleachbit_console.exe"
+      ],
+      "source": "https://www.bleachbit.org/"
+     },
+     {
+      "id": "eraser",
+      "name": "Eraser",
+      "category": "wiper",
+      "products": [
+       "^eraser(?:\\s+\\d|\\s*$)"
+      ],
+      "executables": [
+       "eraser.exe"
+      ],
+      "services": [
+       "eraser"
+      ],
+      "source": "https://eraser.heidi.ie/"
+     },
+     {
+      "id": "sdelete",
+      "name": "SDelete(Sysinternals)",
+      "category": "wiper",
+      "executables": [
+       "sdelete.exe",
+       "sdelete64.exe",
+       "sdelete64a.exe"
+      ],
+      "commands": [
+       "\\bsdelete(?:64a?)?(?:\\.exe)?\\s"
+      ],
+      "source": "https://learn.microsoft.com/en-us/sysinternals/downloads/sdelete"
+     },
+     {
+      "id": "cipher-wipe",
+      "name": "cipher /w(빈 공간 덮어쓰기)",
+      "category": "wiper",
+      "builtin": true,
+      "commands": [
+       "\\bcipher(?:\\.exe)?\\s+(?:/[a-z]+\\s+)*/w\\b"
+      ],
+      "source": "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/cipher"
+     },
+     {
+      "id": "privazer",
+      "name": "PrivaZer",
+      "category": "cleaner",
+      "products": [
+       "\\bprivazer\\b"
+      ],
+      "executables": [
+       "privazer.exe"
+      ],
+      "source": "https://privazer.com/en/"
+     },
+     {
+      "id": "wise-disk-cleaner",
+      "name": "Wise Disk Cleaner",
+      "category": "cleaner",
+      "products": [
+       "\\bwise disk cleaner\\b"
+      ],
+      "executables": [
+       "wisediskcleaner.exe"
+      ],
+      "source": "https://www.wisecleaner.com/wise-disk-cleaner.html"
+     },
+     {
+      "id": "timestomp",
+      "name": "timestomp(Metasploit)",
+      "category": "timestomp",
+      "executables": [
+       "timestomp.exe"
+      ],
+      "commands": [
+       "\\btimestomp(?:\\.exe)?\\s"
+      ],
+      "source": "https://attack.mitre.org/techniques/T1070/006/"
+     },
+     {
+      "id": "setmace",
+      "name": "SetMACE",
+      "category": "timestomp",
+      "executables": [
+       "setmace.exe",
+       "setmace64.exe"
+      ],
+      "source": "https://github.com/jschicht/SetMace"
+     },
+     {
+      "id": "dban",
+      "name": "DBAN(Darik's Boot and Nuke)",
+      "category": "wiper",
+      "products": [
+       "\\bdarik'?s boot and nuke\\b",
+       "\\bdban\\b"
+      ],
+      "executables": [
+       "dban.exe"
+      ],
+      "source": "https://dban.org/"
+     },
+     {
+      "id": "killdisk",
+      "name": "KillDisk",
+      "category": "wiper",
+      "products": [
+       "\\bkilldisk\\b"
+      ],
+      "executables": [
+       "killdisk.exe",
+       "killdiskwin.exe",
+       "killdisk_win.exe"
+      ],
+      "source": "https://www.killdisk.com/"
+     }
+    ],
+    "categories": [
+     "wiper",
+     "cleaner",
+     "timestomp"
+    ],
+    "incident_start": null,
+    "incident_end": null,
+    "grace_days": 30
+   }
   },
   {
    "id": "archives.enc_archive_with_exfil",

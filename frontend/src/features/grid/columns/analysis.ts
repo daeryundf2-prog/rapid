@@ -6,15 +6,25 @@
  */
 
 import { fetchAnalysisRowsPage, locateAnalysisRow } from "../../../api/analyses";
+import type { ColumnFilter } from "../../../contracts/collection";
+import { artifactTypeLabel } from "../../filters/typeLabels";
+import { type CatalogFamily, familyById, familyForTypes } from "../../flags/catalog";
 import { parseFlags } from "../../flags/flags";
 import { serverPathFilter } from "../gridUtils";
 import type { CollectionDef, ColumnSpec } from "../types";
 import { type KindColumnDef, kindColumn } from "./artifacts";
 import { crossCaseCasesCell } from "./CrossCaseCell";
 import { baseName, col, isRecord, makeRef, makeRow, sha256Of, str, strOrNull } from "./common";
+import { familyLayout } from "./families";
+import { typeChipCell } from "./StatusCells";
 
 const VSC_STATUS: Record<string, string> = { deleted: "삭제됨", modified: "수정됨", added: "추가됨" };
 const OCR_STATUS: Record<string, string> = { ok: "성공", empty: "텍스트 없음", failed: "실패" };
+const RECOVERY_METHOD: Record<string, string> = {
+  carved: "카빙",
+  parsed: "파싱됨",
+  rejected: "거부됨(오탐)",
+};
 
 const label = (map: Record<string, string>) => (value: unknown) => {
   const text = str(value);
@@ -43,6 +53,9 @@ export const ANALYSIS_COLUMNS: Record<string, KindColumnDef[]> = {
     { header: "길이", keys: ["length"], width: 100, bytes: true },
     { header: "신뢰도", keys: ["confidence"], width: 80, number: true },
     { header: "SHA-256", keys: ["sha256"], width: 200, mono: true },
+    // R3 §3.3: the family a carved file belongs to and how it was recovered.
+    { header: "계열", keys: ["family_label"], width: 90 },
+    { header: "복구 방법", keys: ["recovery_method"], width: 90, display: label(RECOVERY_METHOD) },
     { header: "추출 경로", keys: ["extracted_path"], width: 260 },
     { header: "비고", keys: ["notes"], width: 200 },
   ],
@@ -173,10 +186,80 @@ function titleOf(kind: string, d: Record<string, unknown>, path: string | null, 
   return kind === "cross-case" || kind === "vsc-discover" ? text : baseName(text) || text;
 }
 
-const typeColumn = col.field("type", "유형", 140, ["source"], (r) => r.artifactType);
+/**
+ * Catalogue family of an analysis row source (R3 §3.3): the ntfs-meta `details.source` sub-views
+ * and the carve job (every carve row is a `carve-row`).
+ */
+export const ANALYSIS_SOURCE_FAMILIES: Readonly<Record<string, string>> = {
+  "timestamp-mismatch": "ntfs-timestamp-mismatch",
+  "logfile-transaction": "ntfs-logfile-transaction",
+};
+export const ANALYSIS_KIND_FAMILIES: Readonly<Record<string, string>> = { carve: "carved-file" };
 
-/** Column set of one analysis kind; kinds without a table (memory-import) keep generic columns. */
-export function analysisColumnsForKind(kind: string | undefined): ColumnSpec[] {
+/** Values of a `f:<key>` contains-filter (comma = any of). */
+function filterValues(filters: readonly ColumnFilter[] | undefined, col: string): string[] {
+  return (filters ?? [])
+    .filter((filter) => filter.col === col && filter.op === ":")
+    .flatMap((filter) => filter.value.split(","))
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+/**
+ * The catalogue family whose columns an analysis grid shows (U-F3 for analysis rows): the
+ * `f:source` server filter of an ntfs-meta sub-view (타임스탬프 불일치 → ntfs-timestamp-mismatch,
+ * $LogFile → ntfs-logfile-transaction), the carve job (carved-file), else the one family of the
+ * loaded rows' artifact types. Mixed rows (MFT + USN + mismatch) have none (kind columns).
+ */
+export function analysisFamily(
+  kind: string | undefined,
+  columnFilters?: readonly ColumnFilter[],
+  rowTypes?: readonly string[],
+): CatalogFamily | undefined {
+  const sources = [...new Set(filterValues(columnFilters, "f:source"))];
+  if (sources.length) {
+    const ids = new Set(sources.map((source) => ANALYSIS_SOURCE_FAMILIES[source]));
+    const [only] = [...ids];
+    return ids.size === 1 && only ? familyById(only) : undefined;
+  }
+  const byKind = kind ? ANALYSIS_KIND_FAMILIES[kind] : undefined;
+  if (byKind) {
+    const family = familyById(byKind);
+    if (family) return family;
+  }
+  return familyForTypes(rowTypes?.length ? [...new Set(rowTypes)] : undefined);
+}
+
+/** Korean name of an analysis row type (unknown ids as written). */
+export function analysisTypeLabel(type: string | null | undefined): string {
+  if (!type) return "";
+  return artifactTypeLabel(type) ?? type;
+}
+
+const typeColumn = col.field("type", "유형", 150, ["source"], (r) => r.artifactType, {
+  render: typeChipCell,
+  format: (r) => analysisTypeLabel(r.artifactType),
+  tooltip: (r) => {
+    const id = r.artifactType ?? "";
+    const label = analysisTypeLabel(id);
+    return label && label !== id ? `${label} (${id})` : id;
+  },
+});
+
+/**
+ * Column set of one analysis kind; kinds without a table (memory-import) keep generic columns.
+ * `family` (analysisFamily) gives the grid that family's catalogue columns instead.
+ */
+export function analysisColumnsForKind(kind: string | undefined, family?: CatalogFamily): ColumnSpec[] {
+  if (family) {
+    const coreKeys = new Set(family.core_columns.map((def) => def.key));
+    return familyLayout(family, {
+      title: col.title("항목", 280),
+      review: col.review(),
+      type: { ...typeColumn, presets: ["analysis", "source"] },
+      rest: [col.path(360, ["source"]), ...(coreKeys.has("sha256") ? [] : [col.sha256()])],
+    });
+  }
   const defs = kind ? ANALYSIS_COLUMNS[kind] : undefined;
   const head = [col.title("항목", 280), col.review()];
   if (!defs) {
@@ -220,6 +303,7 @@ export const analysisCollection: CollectionDef = {
         pathContains: query.pathContains?.trim() || serverPathFilter(query.text),
         ...(query.flags?.length ? { flags: query.flags } : {}),
         ...(query.flagGrade ? { flagGrade: query.flagGrade } : {}),
+        ...(query.detailFilters ? { detailFilters: query.detailFilters } : {}),
       },
       signal,
     );
@@ -242,6 +326,8 @@ export const analysisCollection: CollectionDef = {
     const offset = typeof d.offset === "number" && d.offset >= 0 ? d.offset : null;
     const length = typeof d.length === "number" && d.length > 0 ? d.length : undefined;
     const isCarveHit = kind === "carve" && offset !== null && path !== null;
+    const carvedRow =
+      kind === "carve" && d.status !== "false-positive-rejected" && d.recovery_method !== "rejected";
     return makeRow(
       makeRef("analysis", `/rows/${rowIndex}`, analysisId || undefined),
       {
@@ -263,9 +349,15 @@ export const analysisCollection: CollectionDef = {
         ...(isCarveHit
           ? { highlight: { offset, ...(length ? { length } : {}) }, viewerMode: "hex", sourceOffset: offset }
           : {}),
+        // 증거 정보 "복구 방법 카빙 · 오프셋" (rows written before R3 have no recovery_method).
+        ...(carvedRow ? { recovery: "carved" } : {}),
       },
     );
   },
   columns: analysisColumnsForKind(undefined),
-  columnsFor: (ref) => analysisColumnsForKind(ref.kind),
+  columnsFor: (ref, _types, context) =>
+    analysisColumnsForKind(
+      ref.kind,
+      ref.analysisId ? analysisFamily(ref.kind, context?.columnFilters, context?.rowTypes) : undefined,
+    ),
 };

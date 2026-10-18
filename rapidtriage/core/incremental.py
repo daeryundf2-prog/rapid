@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .docs import write_result
+from .eventlog_channels import CHANNEL_COUNTS_KEY, EVENTLOG_KIND, ChannelCounter
 
 __all__ = [
     "EVIDENCE_DELTA_MANIFEST_NAME",
@@ -398,6 +399,11 @@ def merge_delta_artifact_payload(
     summary["artifact_type_counts"] = dict(type_counts)
     summary["parser_error_count"] = len(parser_errors)
     summary["collection_status"] = "delta-merged"
+    if str(merged.get("kind") or "") == EVENTLOG_KIND or CHANNEL_COUNTS_KEY in summary:
+        channels = ChannelCounter()
+        for row in kept:
+            channels.observe(row if isinstance(row, Mapping) else {})
+        summary.update(channels.summary())
     merged["summary"] = summary
 
     contract = (

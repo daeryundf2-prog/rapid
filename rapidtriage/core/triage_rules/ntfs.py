@@ -6,6 +6,7 @@ import datetime as dt
 from collections import defaultdict
 from collections.abc import Iterator, Mapping
 
+from ..ntfs_timestamps import SI_BEFORE_FN_MIN_DELTA_SECONDS
 from .base import (
     FlagContext,
     RowRef,
@@ -78,7 +79,7 @@ class SiBeforeFn(Rule):
         if si is None or fn is None:
             return None
         delta = (fn - si).total_seconds()
-        if delta <= float(self.param("min_delta_seconds", 60)):
+        if delta <= float(self.param("min_delta_seconds", SI_BEFORE_FN_MIN_DELTA_SECONDS)):
             return None
         return RuleResult(evidence(path=mft_path(row), si_created_at=si, fn_created_at=fn, delta_seconds=int(delta)))
 

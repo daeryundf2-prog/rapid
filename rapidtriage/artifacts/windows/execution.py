@@ -13,9 +13,11 @@ from pathlib import Path
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 from .._walk import iter_evidence_paths
+from .antiforensics import redact_recovery_passwords
 from .common import build_forensic_review, iter_windows_user_homes
 from .ese import ESE_SCAN_READ_SIZE, build_ese_string_pivots, probe_ese_database
 from .os_account import decode_reg_export
+from .pca import collect_pca_text_files
 from .registry import (
     filetime_to_iso_ticks,
     read_u32,
@@ -308,6 +310,7 @@ class WindowsExecutionProvider:
             *collect_powershell_history(root),
             *collect_srum_imports(root),
             *collect_srum_dat_inventory(root),
+            *collect_pca_text_files(root, self.name),
         ]
         yield from records
         summary = build_execution_summary(root, records)
@@ -2173,7 +2176,9 @@ def collect_powershell_history(root: Path) -> Iterable[ArtifactRecord]:
             continue
         modified_at = path_modified_at(path)
         for index, command in enumerate(lines):
-            command = command.strip()
+            # A BitLocker recovery password typed on the command line (manage-bde -unlock
+            # -RecoveryPassword ...) is masked before the row is built.
+            command = redact_recovery_passwords(command.strip())
             if not command:
                 continue
             risk_flags = [f"suspicious-command:{term}" for term in SUSPICIOUS_COMMAND_TERMS if term in command.lower()]

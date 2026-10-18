@@ -276,6 +276,27 @@ describe("tree model (탐색 domain tree, console-ia §4)", () => {
       "EVTX 파일·요약",
       "ETL 추적 파일",
       "방화벽 로그",
+      // R3 O3: carved EVTX files (carve analysis rows recovery_method=carved, signature_kind=evtx).
+      "EVTX 복구됨(카빙)",
+      // 채널별 (R3 O2): one group; its channel nodes are level 3.
+      "채널별",
+    ]);
+    const channels = flattenVisible(model, new Set(["domain:eventlog", "domain:eventlog:evt-channels"]));
+    expect(channels.filter((f) => f.level === 3).map((f) => f.node.label)).toEqual([
+      "방화벽(이벤트 채널)",
+      "보안",
+      "사용자 PNP",
+      "서비스(SCM)",
+      "스토리지",
+      "시스템",
+      "원격 데스크톱",
+      "응용 프로그램",
+      "작업 스케줄러",
+      "Office Alerts",
+      "PowerShell",
+      "Windows Defender",
+      "기타 채널",
+      "채널 없음",
     ]);
   });
 

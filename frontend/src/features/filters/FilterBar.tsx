@@ -125,6 +125,8 @@ export interface FilterBarProps {
   resultCount?: { count: number | null; loading: boolean };
   /** Overflow at the row's end (열 선택 · 열 필터). */
   trailing?: ReactNode;
+  /** Event-log channel group labels of the run (`/tree` `channel_groups`) for the 채널 chip. */
+  channelGroupLabels?: Readonly<Record<string, string>>;
 }
 
 function toggle<T extends string>(list: T[], value: T): T[] {
@@ -530,7 +532,9 @@ export function FilterBar(props: FilterBarProps) {
   // 보고: the type filter is the output kind (종류).
   const chipLabel = (chip: FilterChip) =>
     variant === "report" && chip.key === "type" ? `종류 ${chip.value ?? ""}` : chip.label;
-  const chips: RowChip[] = activeChips(filters, (s) => REVIEW_LABELS[s]).map((chip) => ({
+  const chips: RowChip[] = activeChips(filters, (s) => REVIEW_LABELS[s], {
+    channelGroupLabels: props.channelGroupLabels,
+  }).map((chip) => ({
     id: `${chip.key}:${chip.value ?? ""}`,
     label: chipLabel(chip),
     remove: () => setFilters(removeChip(filters, chip)),

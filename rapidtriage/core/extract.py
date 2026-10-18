@@ -6,6 +6,7 @@ import shutil
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 
+from ..artifacts.windows.antiforensics import file_holds_recovery_secret
 from .audit import compute_sha256
 from .files import (
     ALL_FILE_CATEGORIES,
@@ -135,6 +136,18 @@ def run_extract(
             continue
         if destination_path.exists() and not overwrite:
             skipped_entries.append({"original_path": str(source_path), "reason": "destination-exists"})
+            continue
+        if file_holds_recovery_secret(source_path):
+            # BitLocker key files (and small texts holding a checksum-valid recovery password)
+            # are never copied verbatim: the manifest keeps the hash for chain of custody.
+            skipped_entries.append(
+                {
+                    "original_path": str(source_path),
+                    "reason": "secret-redacted",
+                    "sha256": compute_sha256(source_path),
+                    "size": source_stat.st_size,
+                }
+            )
             continue
 
         shutil.copy2(source_path, destination_path)

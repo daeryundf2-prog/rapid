@@ -27,6 +27,11 @@ def _is_time_key(key: str) -> bool:
     return lowered in TIME_KEYS or lowered.endswith(TIME_KEY_SUFFIXES)
 
 
+# Rows that repeat another row's times (ntfs-meta ``ntfs-timestamp-mismatch`` repeats its MFT
+# row, which this rule already checks; R3 §3.3).
+COPY_ROW_TYPES = frozenset({"ntfs-timestamp-mismatch"})
+
+
 @register("generic.timestamp_out_of_range")
 class TimestampOutOfRange(Rule):
     """A top-level time field (``*_at``/``*_time``/``*_date``/``timestamp``) before ``min_year`` or after now + ``future_days``."""
@@ -39,6 +44,8 @@ class TimestampOutOfRange(Rule):
         self._excluded = tuple(str(item).lower() for item in self.param("excluded_key_terms", []))
 
     def apply(self, row: RowView, ctx: FlagContext) -> RuleResult | None:
+        if row.type in COPY_ROW_TYPES:
+            return None
         found: list[tuple[str, str]] = []
         for key, value in row.details.items():
             if not isinstance(value, str) or len(value) < 10 or not value[:4].isdigit() or not _is_time_key(str(key)):

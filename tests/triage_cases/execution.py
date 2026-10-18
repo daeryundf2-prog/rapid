@@ -6,7 +6,12 @@ VOLUME = r"\VOLUME{01d9a0b1c2d3e4f5-1a2b3c4d}"
 
 
 def prefetch(name: str, folder: str, run_times: list[str] | None = None) -> dict[str, object]:
-    """Prefetch row of ``name`` whose referenced files include ``<VOLUME>\\<folder>\\<name>``."""
+    """Decoded Prefetch row (parser v10) of ``name`` whose file metrics include ``<VOLUME>\\<folder>\\<name>``.
+
+    The executable's path is only in ``referenced_files`` (decoded file-metrics
+    entries), so the rules must read the decoded field.
+    """
+    files = [rf"{VOLUME}\WINDOWS\SYSTEM32\NTDLL.DLL", rf"{VOLUME}\{folder}\{name}"]
     return {
         "kind": "windows-prefetch",
         "row": {
@@ -14,9 +19,14 @@ def prefetch(name: str, folder: str, run_times: list[str] | None = None) -> dict
             "path": rf"C:\Windows\Prefetch\{name}-1A2B3C4D.pf",
             "details": {
                 "executable_hint": name,
-                "referenced_paths": [rf"{VOLUME}\WINDOWS\SYSTEM32\NTDLL.DLL", rf"{VOLUME}\{folder}\{name}"],
+                "referenced_files": [
+                    {"path": path, "mft_entry": 1000 + index, "mft_sequence": 3, "source_offset": 0x400 + 0x60 * index}
+                    for index, path in enumerate(files)
+                ],
+                "referenced_file_count": len(files),
                 "run_count": len(run_times or []) or 1,
                 "last_run_times": run_times or ["2024-05-01T10:00:00Z"],
+                "volumes": [{"volume_device_path": VOLUME, "volume_serial_number": "1A2B3C4D"}],
             },
         },
     }
@@ -42,7 +52,14 @@ DAILY = [f"2024-05-{day:02d}T09:00:00Z" for day in range(1, 9)]
 
 CASES = {
     "execution.suspicious_path": {
-        "positive": {"rows": [trace("amcache-entry", r"C:\Users\user1\AppData\Local\Temp\x1\dropper.exe")], "flagged": [0]},
+        "positive": {
+            "rows": [
+                trace("amcache-entry", r"C:\Users\user1\AppData\Local\Temp\x1\dropper.exe"),
+                # Decoded Prefetch (MAM, parser v10): the path comes from referenced_files.
+                prefetch("DROPPER.EXE", r"USERS\USER1\DOWNLOADS"),
+            ],
+            "flagged": [0, 1],
+        },
         # Per-user installed app (AppData\Local\Programs): excluded by the catalogue's exclude_markers.
         "negative": {"rows": [trace("amcache-entry", r"C:\Users\user1\AppData\Local\Programs\VendorApp\vendorapp.exe")], "flagged": []},
     },

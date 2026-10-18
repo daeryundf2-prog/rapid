@@ -91,7 +91,9 @@ ARTIFACT_DOMAIN_TABLE: tuple[tuple[str, str, tuple[str, ...] | None], ...] = (
         "windows-system",
         ("web-server-log", "webshell-source-candidate", "bits-qmgr-transfer-candidate", "bits-qmgr-sqlite-job-candidate"),
     ),
-    ("anti-forensics", "windows-system", ("defender-policy-artifact", "defender-support-log")),
+    ("anti-forensics", "windows-system", ("defender-policy-artifact", "defender-support-log", "bitlocker-recovery-key-file")),
+    # Registry-depth execution rows (r3 O1): PCA Store / FeatureUsage live in NTUSER.
+    ("execution", "windows-registry", ("execution-pca", "execution-feature-usage")),
     ("anti-forensics", "windows-filesystem", ("ads-stream-candidate", "zone-identifier")),
     ("messaging", "mobile-export", ("mobile-message", "mobile-chat-database")),
     ("location", "mobile-export", ("mobile-location",)),
