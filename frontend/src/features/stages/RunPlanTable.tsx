@@ -407,7 +407,7 @@ export function RunPlanTable({
                         type="button"
                         className="run-plan-twisty"
                         tabIndex={-1}
-                        aria-hidden="true"
+                        aria-label={`${group.label} ${open ? "접기" : "펼치기"}`}
                         onClick={() => toggle(group.id)}
                       >
                         <Icon name={open ? "chevron-down" : "chevron-right"} />
