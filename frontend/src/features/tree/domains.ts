@@ -284,6 +284,16 @@ export const REGISTRY_NETWORK_TYPE_LABELS: Readonly<Record<string, string>> = {
 };
 const REGISTRY_NETWORK_TYPES = Object.keys(REGISTRY_NETWORK_TYPE_LABELS);
 
+/** R5 L2: SSH / PuTTY / WinSCP row types (devices › SSH·파일 전송). */
+export const SSH_TYPE_LABELS: Readonly<Record<string, string>> = {
+  "ssh-known-host": "알려진 호스트",
+  "ssh-authorized-key": "허용 공개키",
+  "ssh-client-session": "접속 설정·세션",
+  "ssh-key-file": "키 파일",
+  "ssh-server-config": "OpenSSH 서버 설정",
+};
+const SSH_FILE_TYPES = Object.keys(SSH_TYPE_LABELS);
+
 /** Desktop messenger row types (artifacts/windows/messenger.py, plan r2-communication §3.1) → Korean. */
 export const DESKTOP_MESSENGER_TYPE_LABELS: Readonly<Record<string, string>> = {
   "chat-message": "메신저 대화",
@@ -368,6 +378,8 @@ export const MEDIA_PLAYER_TYPE_LABELS: Readonly<Record<string, string>> = {
  * (Hangul before Latin), then 기타 채널 and 채널 없음 last (the remainder buckets).
  */
 export const EVENTLOG_CHANNEL_NODES: readonly DomainNodeDef[] = [
+  // R5 L2: NetworkProfile/WLAN/DHCP/DNS/BITS/VPN client channels.
+  { id: "evt-ch-networking", label: "네트워크", target: channelNode("networking") },
   // "(이벤트 채널)": the Windows Firewall EVTX channel, not 방화벽 로그 (pfirewall.log).
   { id: "evt-ch-firewall", label: "방화벽(이벤트 채널)", target: channelNode("firewall") },
   { id: "evt-ch-security", label: "보안", target: channelNode("security") },
@@ -562,6 +574,33 @@ export const DOMAINS: readonly DomainDef[] = [
         label: "Amcache 시스템 정보(DeviceCensus)",
         target: a("windows-execution", ["amcache-device-census"]),
         crossRef: true,
+      },
+      // R5 L2: startup items, wallpaper, stored-credential presence (registry + file rows).
+      {
+        id: "os-startup-approved",
+        label: "시작 프로그램(StartupApproved)",
+        target: a("windows-registry", ["startup-item"]),
+      },
+      {
+        id: "os-startup-folder",
+        label: "시작 프로그램(시작프로그램 폴더)",
+        target: a("windows-system", ["startup-item"]),
+      },
+      {
+        id: "os-wallpaper-registry",
+        label: "바탕 화면 배경(레지스트리)",
+        target: a("windows-registry", ["desktop-wallpaper"]),
+      },
+      {
+        id: "os-wallpaper-files",
+        label: "바탕 화면 배경 이미지",
+        target: a("windows-system", ["desktop-wallpaper"]),
+      },
+      {
+        id: "os-credential-stores",
+        label: "저장된 자격 증명(존재만)",
+        target: a("windows-system", ["credential-store-presence"]),
+        note: "정책상 DPAPI 복호·blob 내용 해석은 하지 않습니다 — Credentials·Vault·Protect 파일의 존재·크기·GUID만 보여 줍니다",
       },
     ],
   },
@@ -765,6 +804,12 @@ export const DOMAINS: readonly DomainDef[] = [
       },
       { id: "fs-vsc", label: "볼륨 섀도우", target: run("vsc") },
       { id: "fs-recycle", label: "삭제/휴지통", target: a("windows-filesystem", ["recycle-bin-entry"]) },
+      // R5 L2: $Boot VBR + $Volume record (VSN pivots with LNK/Prefetch volume serials).
+      {
+        id: "fs-volume-info",
+        label: "NTFS 볼륨 정보(VSN)",
+        target: a("windows-filesystem", ["ntfs-volume-information"]),
+      },
       {
         id: "fs-mismatch",
         label: "시그니처 불일치",
@@ -900,6 +945,22 @@ export const DOMAINS: readonly DomainDef[] = [
           "registry-hive-strings": "하이브 문자열 묶음",
           "registry-summary": "레지스트리 요약",
         },
+      },
+      // R5 L2: logon banner, Office accounts and Backstage cache.
+      {
+        id: "reg-logon-banner",
+        label: "로그온 배너(법적 고지)",
+        target: a("windows-registry", ["registry-logon-banner"]),
+      },
+      {
+        id: "reg-office-identity",
+        label: "Office 연결 계정",
+        target: a("windows-registry", ["office-identity"]),
+      },
+      {
+        id: "reg-office-backstage",
+        label: "Office Backstage 캐시",
+        target: a("windows-system", ["office-backstage-item"]),
       },
       { id: "reg-all", label: "레지스트리 전체", target: a("windows-registry"), catchAll: true },
     ],
@@ -1530,6 +1591,46 @@ export const DOMAINS: readonly DomainDef[] = [
         target: a("windows-execution", ["amcache-device-pnp", "amcache-device-container"]),
         crossRef: true,
       },
+      // R5 L2: SSH / PuTTY / WinSCP (file rows of windows-system, saved sessions of NTUSER).
+      {
+        id: "dev-ssh",
+        label: "SSH·파일 전송(파일)",
+        target: a("windows-system", SSH_FILE_TYPES),
+        typeLabels: SSH_TYPE_LABELS,
+        children: [
+          {
+            id: "dev-ssh-known-hosts",
+            label: "알려진 호스트(known_hosts)",
+            target: a("windows-system", ["ssh-known-host"]),
+          },
+          {
+            id: "dev-ssh-authorized-keys",
+            label: "허용 공개키(authorized_keys)",
+            target: a("windows-system", ["ssh-authorized-key"]),
+          },
+          {
+            id: "dev-ssh-sessions",
+            label: "접속 설정·세션(config·WinSCP.ini)",
+            target: a("windows-system", ["ssh-client-session"]),
+          },
+          {
+            id: "dev-ssh-keys",
+            label: "키 파일(개인키는 존재만)",
+            target: a("windows-system", ["ssh-key-file"]),
+          },
+          {
+            id: "dev-ssh-server",
+            label: "OpenSSH 서버 설정",
+            target: a("windows-system", ["ssh-server-config"]),
+          },
+        ],
+      },
+      {
+        id: "dev-ssh-registry",
+        label: "PuTTY·WinSCP 세션·호스트 키(레지스트리)",
+        target: a("windows-registry", ["ssh-client-session", "ssh-known-host"]),
+        typeLabels: pickLabels(SSH_TYPE_LABELS, ["ssh-client-session", "ssh-known-host"]),
+      },
     ],
   },
   {
@@ -1537,6 +1638,19 @@ export const DOMAINS: readonly DomainDef[] = [
     label: "안티 포렌식",
     icon: "shield",
     nodes: [
+      // R5 L2: VM configs, crypto wallet presence (no keys/seeds), McAfee detection logs.
+      { id: "af-vm", label: "가상 머신 구성", target: a("windows-system", ["vm-config"]) },
+      {
+        id: "af-av-logs",
+        label: "백신 탐지 로그(McAfee)",
+        target: a("windows-system", ["av-detection-log"]),
+      },
+      {
+        id: "af-crypto-wallets",
+        label: "암호화폐 지갑(존재만)",
+        target: a("windows-system", ["crypto-wallet-presence"]),
+        note: "정책상 개인키·시드·키스토어 내용은 읽지 않습니다 — 지갑의 존재·위치·크기·암호화 표시(평문 Electrum은 공개 주소)만 보여 줍니다",
+      },
       {
         id: "af-ads",
         label: "ADS",

@@ -53,7 +53,9 @@ ROWS = [
     ("OAlerts", "Microsoft Office 16 Alerts", "eventlog-event"),
     ("Microsoft-Windows-TerminalServices-LocalSessionManager/Operational", "Microsoft-Windows-TerminalServices-LocalSessionManager", "eventlog-event"),
     ("Microsoft-Windows-TerminalServices-RemoteConnectionManager/Operational", "Microsoft-Windows-TerminalServices-RemoteConnectionManager", "eventlog-event"),
-    ("Microsoft-Windows-Bits-Client/Operational", "Microsoft-Windows-Bits-Client", "eventlog-event"),
+    ("Microsoft-Windows-Kernel-Boot/Operational", "Microsoft-Windows-Kernel-Boot", "eventlog-event"),
+    # R5 L2: 네트워크 group.
+    ("Microsoft-Windows-NetworkProfile/Operational", "Microsoft-Windows-NetworkProfile", "eventlog-event"),
     ("", "", "eventlog-file"),
     ("", "", "eventlog-summary"),
 ]
@@ -100,7 +102,13 @@ class ChannelGroupTests(unittest.TestCase):
             "OAlerts": "office-alerts",
             "Microsoft-Windows-TerminalServices-RDPClient/Operational": "rdp",
             "Microsoft-Windows-RemoteDesktopServices-RdpCoreTS/Operational": "rdp",
-            "Microsoft-Windows-Bits-Client/Operational": "other",
+            "Microsoft-Windows-Bits-Client/Operational": "networking",
+            "Microsoft-Windows-NetworkProfile/Operational": "networking",
+            "Microsoft-Windows-WLAN-AutoConfig/Operational": "networking",
+            "Microsoft-Windows-Dhcp-Client/Admin": "networking",
+            "Microsoft-Windows-DNS-Client/Operational": "networking",
+            "Microsoft-Windows-VPN-Client/Operational": "networking",
+            "Microsoft-Windows-Kernel-Boot/Operational": "other",
             "Securityx": "other",
             "": "none",
             "   ": "none",
@@ -126,7 +134,9 @@ class ChannelGroupTests(unittest.TestCase):
         self.assertEqual(by_id["services"]["count"], 1)
         self.assertFalse(by_id["services"]["partition"])
         self.assertEqual(by_id["services"]["channels"], ["System"])
-        self.assertEqual(by_id["other"]["channels"], ["Microsoft-Windows-Bits-Client/Operational"])
+        self.assertEqual(by_id["other"]["channels"], ["Microsoft-Windows-Kernel-Boot/Operational"])
+        self.assertEqual(by_id["networking"]["channels"], ["Microsoft-Windows-NetworkProfile/Operational"])
+        self.assertEqual(by_id["networking"]["label"], "네트워크")
         self.assertEqual(by_id["none"]["count"], 2)
         self.assertEqual(by_id["none"]["channels"], [])
         labels = [node["label"] for node in nodes]

@@ -13,9 +13,12 @@ from ...core.models import ArtifactRecord
 from ...core.recovery import build_recovery_record
 from .._walk import iter_evidence_paths
 from .registry_depth import (
+    SECRET_PLACEHOLDER,
     DepthStats,
     export_depth_records,
     hive_depth_records,
+    hive_secret_strings,
+    is_secret_value,
     read_export_lines,
 )
 
@@ -409,6 +412,9 @@ def collect_registry_hive(
             yield record
         scan_end = min(stat_result.st_size, MAX_HIVE_STRING_SCAN_BYTES)
         strings = extract_utf16le_strings(bytes(hive._data[:scan_end]))
+        secrets = hive_secret_strings(hive)
+        if secrets:  # R5 L2: PuTTY/WinSCP password values never reach the string pivot
+            strings = [item for item in strings if not any(secret in item for secret in secrets)]
         if strings:
             strings_record = build_registry_hive_strings_record(path, strings, metadata, source_hashes)
             strings_record.details["scan_truncated"] = stat_result.st_size > MAX_HIVE_STRING_SCAN_BYTES
@@ -2405,6 +2411,8 @@ def build_registry_record(
     source_hashes: Mapping[str, str] | None = None,
 ) -> ArtifactRecord:
     resolved_hashes = dict(source_hashes or file_hashes(path))
+    # R5 L2: PuTTY/WinSCP password values of a .reg export are never copied.
+    values = {name: SECRET_PLACEHOLDER if is_secret_value(key, name) else value for name, value in values.items()}
     lowered_key = key.lower()
     artifact_type = "registry-key"
     if "usb" in lowered_key or "usbstor" in lowered_key:

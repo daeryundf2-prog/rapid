@@ -353,6 +353,82 @@ families:
     ts_kind: modified
   rules:
   - archives.ext_mismatch_container
+# --- R5 L2: NTFS volume information ($Boot VBR + $Volume record); VSN pivots with LNK/Prefetch ----
+- id: ntfs-volume-information
+  label: NTFS 볼륨 정보
+  types:
+  - ntfs-volume-information
+  core_columns:
+  - key: volume_serial_display
+    label: 볼륨 일련번호
+    format: mono
+  - key: volume_serial_number
+    semantic: device
+    label: 볼륨 시리얼(LNK·Prefetch 형식)
+    format: mono
+  - key: volume_label
+    label: 볼륨 이름
+  - key: ntfs_version
+    label: NTFS 버전
+  - key: volume_dirty
+    label: 더티 플래그
+    value_labels:
+      'true': 설정됨(비정상 종료·검사 필요)
+      'false': 없음
+  - key: cluster_size
+    label: 클러스터 크기
+    format: bytes
+  - key: volume_size_bytes
+    label: 볼륨 크기
+    format: bytes
+  - key: mft_lcn
+    label: MFT 시작 클러스터
+    format: number
+  - key: boot_source_path
+    semantic: path
+    label: $Boot 파일
+    format: path
+  aux_columns:
+  - key: volume_serial_number_64
+    label: 볼륨 일련번호(8바이트)
+    format: mono
+  - key: oem_id
+    label: OEM 식별자
+  - key: bytes_per_sector
+    label: 섹터 크기
+    format: number
+  - key: sectors_per_cluster
+    label: 클러스터당 섹터
+    format: number
+  - key: total_sectors
+    label: 전체 섹터
+    format: number
+  - key: mft_mirror_lcn
+    label: MFT 미러 시작 클러스터
+    format: number
+  - key: mft_record_size
+    label: MFT 레코드 크기
+    format: bytes
+  - key: index_record_size
+    label: 인덱스 레코드 크기
+    format: bytes
+  - key: volume_flag_names
+    label: 볼륨 플래그
+  - key: boot_signature_valid
+    label: 부트 서명(55AA)
+    value_labels:
+      'true': 정상
+      'false': 비정상
+  - key: mft_source_path
+    label: $MFT 파일
+    format: path
+  - key: vbr_parse_status
+    label: VBR 해석 상태
+  - key: volume_record_status
+    label: $Volume 해석 상태
+  - key: evidence_note
+    label: 참고
+  rules: []
 rules:
 - id: ntfs.si_before_fn
   family: mft
