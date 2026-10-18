@@ -122,6 +122,7 @@ CONTENT_TYPES: dict[str, ContentType] = {
 # e.g. places.sqlite of a browser history row) is deliberately not one of them.
 TARGET_PATH_KEYS: tuple[str, ...] = (
     "target_path",
+    "media_path",  # R5 L1: media player recent entries
     "local_path",
     "target_file",
     "file_path",
@@ -134,6 +135,9 @@ TARGET_PATH_KEYS: tuple[str, ...] = (
 # Artifact types whose own ``path`` is the content file itself (not a container such as a
 # History database, an .evtx or a hive): only these fall back to the row's path extension.
 PATH_IS_CONTENT_PREFIXES: tuple[str, ...] = ("media-", "document-", "synthetic-media-")
+# R5 L1: media player rows (``media-player-*``) point at the ini / NTUSER they were read from; the
+# played file is ``media_path`` (a target path key), never the row's own path.
+PATH_NOT_CONTENT_PREFIXES: tuple[str, ...] = ("media-player-",)
 PATH_IS_CONTENT_TYPES = frozenset(
     {
         "file",
@@ -360,6 +364,8 @@ def _type_matches(artifact_type: str, prefixes: Iterable[str]) -> bool:
 
 def path_is_content(artifact_type: str) -> bool:
     """The artifact type's own ``path`` is the content file (:data:`PATH_IS_CONTENT_TYPES`)."""
+    if artifact_type.startswith(PATH_NOT_CONTENT_PREFIXES):
+        return False
     return artifact_type in PATH_IS_CONTENT_TYPES or artifact_type.startswith(PATH_IS_CONTENT_PREFIXES)
 
 

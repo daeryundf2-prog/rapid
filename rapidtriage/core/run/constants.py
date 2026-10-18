@@ -73,6 +73,10 @@ WINDOWS_FORENSIC_ARTIFACT_KINDS = (
     "windows-search-index",
     "windows-remote-access",
     "windows-messenger",
+    # R5 L1: communication and media apps
+    "email-clients",
+    "media-player",
+    "windows-phone-link",
     "windows-execution",
     "windows-registry",
     "windows-shellbags",

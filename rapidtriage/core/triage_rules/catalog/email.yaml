@@ -121,6 +121,18 @@ families:
       candidate-marker-present: 삭제 표식 후보
       not-decoded: 해석 안 함
       unknown: 불명
+      index-only: 색인에만 있음
+      deleted-folder: 삭제 폴더
+  # R5 L1: desktop mail clients (email-clients kind) attribute rows to client / account / store.
+  - key: mail_client
+    label: 메일 클라이언트
+  - key: account
+    semantic: account
+    label: 계정
+  - key: mailbox_store
+    semantic: path
+    label: 메일함 원본
+    format: path
   rules:
   - email.spf_fail
   - email.dkim_fail
@@ -226,6 +238,8 @@ families:
   - key: folder
     label: 폴더
   aux_columns:
+  - key: mail_client
+    label: 메일 클라이언트
   - key: timezone
     label: 시간대
   - key: recurrence_rule
@@ -270,6 +284,8 @@ families:
   - key: folder
     label: 폴더
   aux_columns:
+  - key: mail_client
+    label: 메일 클라이언트
   - key: emails
     label: 이메일 전체
   - key: phones
@@ -321,6 +337,184 @@ families:
     semantic: path
     label: 원본 경로
     format: path
+  rules: []
+# R5 L1: desktop mail clients (Thunderbird, Windows Mail, Windows Live Mail; email-clients kind).
+- id: email-client-account
+  label: 메일 클라이언트 계정
+  types:
+  - email-client-account
+  core_columns:
+  - key: mail_client
+    label: 메일 클라이언트
+  - key: account
+    semantic: account
+    label: 계정
+  - key: identity_emails
+    semantic: account
+    label: 보내는 주소(ID)
+  - key: server_type
+    label: 서버 종류
+    value_labels:
+      imap: IMAP
+      pop3: POP3
+      none: 로컬 폴더
+      rss: RSS
+      nntp: 뉴스그룹
+  - key: server_hostname
+    semantic: device
+    label: 수신 서버
+  - key: server_username
+    semantic: account
+    label: 서버 사용자 이름
+  - key: smtp_hosts
+    label: 보내는 서버(SMTP)
+  - key: user
+    label: 사용자 프로필
+  aux_columns:
+  - key: identity_names
+    semantic: person
+    label: 표시 이름
+  - key: server_port
+    label: 포트
+    format: number
+  - key: account_key
+    label: 계정 키
+    format: mono
+  - key: server_directory
+    label: 메일 폴더 위치
+    format: path
+  - key: account_fields
+    label: 계정 XML 항목
+  - key: eml_file_count
+    label: EML 파일 수
+    format: number
+  - key: attachment_file_count
+    label: 첨부 파일 수
+    format: number
+  - key: source_path
+    semantic: path
+    label: 원본
+    format: path
+  - key: parser_version
+    label: 파서 버전
+    format: mono
+  rules: []
+- id: email-client-profile
+  label: 메일 클라이언트 프로필
+  types:
+  - email-client-profile
+  core_columns:
+  - key: mail_client
+    label: 메일 클라이언트
+  - key: profile_name
+    label: 프로필
+  - key: client_version
+    label: 버전
+  - key: message_rows
+    label: 메일 행
+    format: number
+  - key: mail_folder_count
+    label: 메일 폴더 수
+    format: number
+  - key: credential_store_files
+    label: 자격 증명 저장소(존재만)
+  - key: reason_ko
+    label: 사유
+    width: 320
+  - key: user
+    label: 사용자 프로필
+  aux_columns:
+  - key: contact_rows
+    label: 연락처 행
+    format: number
+  - key: calendar_rows
+    label: 일정 행
+    format: number
+  - key: account_rows
+    label: 계정 행
+    format: number
+  - key: gloda_index_only_rows
+    label: 색인 전용 메일 행
+    format: number
+  - key: mbox_bytes_read
+    label: 읽은 mbox 크기
+    format: bytes
+  - key: parse_error_count
+    label: 처리 오류 수
+    format: number
+  - key: caps_hit
+    label: 상한 도달
+  - key: client_root
+    semantic: path
+    label: 클라이언트 폴더
+    format: path
+  rules: []
+- id: email-client-store
+  label: 메일 저장소(ESE)
+  types:
+  - email-client-store
+  core_columns:
+  - key: mail_client
+    label: 메일 클라이언트
+  - key: store_name
+    label: 저장소
+  - key: store_bytes
+    label: 크기
+    format: bytes
+  - key: ese_decode_status
+    label: 해석 상태
+    value_labels:
+      catalog-decoded: 표 목록 해석
+      no-tables: 표 없음
+      decode-failed: 해석 실패
+      skipped-size-cap: 크기 상한으로 건너뜀
+      not-attempted: 시도 안 함
+  - key: ese_table_count
+    label: 표 수
+    format: number
+  - key: address_candidates
+    semantic: account
+    label: 메일 주소 후보
+  - key: account
+    semantic: account
+    label: 계정
+  aux_columns:
+  - key: ese_tables
+    label: 표 목록
+  - key: ese_decode_error
+    label: 해석 오류
+  - key: note_ko
+    label: 안내
+  - key: source_path
+    semantic: path
+    label: 원본
+    format: path
+  rules: []
+- id: email-client-error
+  label: 메일 클라이언트 처리 오류
+  types:
+  - email-client-parse-error
+  core_columns:
+  - key: mail_client
+    label: 메일 클라이언트
+  - key: reason_ko
+    label: 사유
+    width: 360
+  - key: source_path
+    label: 원본
+    format: path
+  - key: error_type
+    label: 오류 종류
+  - key: source_format
+    label: 원본 형식
+  - key: user
+    label: 사용자 프로필
+  aux_columns:
+  - key: error
+    label: 오류 원문
+  - key: parser_version
+    label: 파서 버전
+    format: mono
   rules: []
 rules:
 - id: email.spf_fail

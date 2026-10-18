@@ -99,6 +99,11 @@ ARTIFACT_DOMAIN_TABLE: tuple[tuple[str, str, tuple[str, ...] | None], ...] = (
     ("location", "mobile-export", ("mobile-location",)),
     ("location", "cloud-export", ("cloud-location",)),
     ("web", "macos-system", ("macos-browser-history-downloads",)),
+    # --- R5 L1: communication and media apps --------------------------------
+    ("messaging", "email-clients", None),
+    ("media", "media-player", None),
+    ("mobile", "windows-phone-link", None),
+    ("messaging", "windows-phone-link", ("phone-link-message",)),
 )
 
 
