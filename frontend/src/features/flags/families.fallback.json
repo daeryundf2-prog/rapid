@@ -1,5 +1,5 @@
 {
- "version": "73e5e78570738d4c",
+ "version": "8d329d55be656263",
  "families": [
   {
    "id": "sam-account",
@@ -534,7 +534,11 @@
     },
     {
      "key": "key_format_valid",
-     "label": "키 형식 검증"
+     "label": "키 형식 검증",
+     "value_labels": {
+      "true": "유효",
+      "false": "유효하지 않음"
+     }
     },
     {
      "key": "key_sha256",
@@ -544,7 +548,11 @@
     },
     {
      "key": "identifier_matches_file_name",
-     "label": "파일 이름 식별자 일치"
+     "label": "파일 이름 식별자 일치",
+     "value_labels": {
+      "true": "일치",
+      "false": "불일치"
+     }
     },
     {
      "key": "source_path",
@@ -3998,7 +4006,9 @@
     },
     {
      "key": "last_run_times",
-     "label": "실행 시각 목록(최대 8)"
+     "label": "실행 시각 목록(최대 8)",
+     "format": "time",
+     "ts_kind": "run"
     },
     {
      "key": "prefetch_hash",
@@ -4015,10 +4025,11 @@
     },
     {
      "key": "volumes",
-     "label": "볼륨",
+     "label": "볼륨(장치 · 일련번호 · 생성 시각)",
      "aliases": [
       "volume_candidates"
-     ]
+     ],
+     "format": "prefetch_volumes"
     },
     {
      "key": "volume_count",
@@ -4036,6 +4047,78 @@
     }
    ],
    "aux_columns": [
+    {
+     "key": "run_time_1",
+     "label": "실행 1회차",
+     "aliases": [
+      "last_run_times.0"
+     ],
+     "format": "time",
+     "ts_kind": "run-1"
+    },
+    {
+     "key": "run_time_2",
+     "label": "실행 2회차",
+     "aliases": [
+      "last_run_times.1"
+     ],
+     "format": "time",
+     "ts_kind": "run-2"
+    },
+    {
+     "key": "run_time_3",
+     "label": "실행 3회차",
+     "aliases": [
+      "last_run_times.2"
+     ],
+     "format": "time",
+     "ts_kind": "run-3"
+    },
+    {
+     "key": "run_time_4",
+     "label": "실행 4회차",
+     "aliases": [
+      "last_run_times.3"
+     ],
+     "format": "time",
+     "ts_kind": "run-4"
+    },
+    {
+     "key": "run_time_5",
+     "label": "실행 5회차",
+     "aliases": [
+      "last_run_times.4"
+     ],
+     "format": "time",
+     "ts_kind": "run-5"
+    },
+    {
+     "key": "run_time_6",
+     "label": "실행 6회차",
+     "aliases": [
+      "last_run_times.5"
+     ],
+     "format": "time",
+     "ts_kind": "run-6"
+    },
+    {
+     "key": "run_time_7",
+     "label": "실행 7회차",
+     "aliases": [
+      "last_run_times.6"
+     ],
+     "format": "time",
+     "ts_kind": "run-7"
+    },
+    {
+     "key": "run_time_8",
+     "label": "실행 8회차",
+     "aliases": [
+      "last_run_times.7"
+     ],
+     "format": "time",
+     "ts_kind": "run-8"
+    },
     {
      "key": "referenced_files",
      "label": "참조 파일(MFT·오프셋, 최대 1,000)"
@@ -4214,7 +4297,7 @@
       "event_at"
      ],
      "format": "time",
-     "ts_kind": "run"
+     "ts_kind": "pca-event"
     },
     {
      "key": "executable_path",
@@ -5919,7 +6002,11 @@
     },
     {
      "key": "in_use",
-     "label": "사용 중"
+     "label": "사용 중",
+     "value_labels": {
+      "true": "예(사용 중)",
+      "false": "아니요(삭제된 레코드)"
+     }
     },
     {
      "key": "deleted_hint",
@@ -6023,51 +6110,59 @@
      "key": "si_created_at",
      "label": "$SI 생성",
      "format": "time",
-     "ts_kind": "created"
+     "ts_kind": "si-created"
     },
     {
      "key": "si_modified_at",
      "label": "$SI 수정",
      "format": "time",
-     "ts_kind": "modified"
+     "ts_kind": "si-modified"
     },
     {
      "key": "si_accessed_at",
      "label": "$SI 접근",
      "format": "time",
-     "ts_kind": "accessed"
+     "ts_kind": "si-accessed"
     },
     {
      "key": "si_mft_modified_at",
      "label": "$SI MFT 수정",
      "format": "time",
-     "ts_kind": "mft-modified"
+     "ts_kind": "si-mft-modified"
     },
     {
      "key": "fn_created_at",
      "label": "$FN 생성",
-     "format": "time"
+     "format": "time",
+     "ts_kind": "fn-created"
     },
     {
      "key": "fn_modified_at",
      "label": "$FN 수정",
-     "format": "time"
+     "format": "time",
+     "ts_kind": "fn-modified"
     },
     {
      "key": "fn_accessed_at",
      "label": "$FN 접근",
-     "format": "time"
+     "format": "time",
+     "ts_kind": "fn-accessed"
     },
     {
      "key": "fn_mft_modified_at",
      "label": "$FN MFT 수정",
-     "format": "time"
+     "format": "time",
+     "ts_kind": "fn-mft-modified"
     }
    ],
    "aux_columns": [
     {
      "key": "in_use",
-     "label": "사용 중"
+     "label": "사용 중",
+     "value_labels": {
+      "true": "예(사용 중)",
+      "false": "아니요(삭제된 레코드)"
+     }
     },
     {
      "key": "si_fn_created_delta_seconds",
@@ -6110,7 +6205,7 @@
      "key": "time_estimate",
      "label": "시각 추정",
      "format": "time",
-     "ts_kind": "event"
+     "ts_kind": "fn-created"
     },
     {
      "key": "redo_op_label",
@@ -6915,7 +7010,7 @@
      "aliases": [
       "source_offset"
      ],
-     "format": "number"
+     "format": "hex"
     },
     {
      "key": "length",
@@ -6930,21 +7025,56 @@
     },
     {
      "key": "status",
-     "label": "경계 판정"
+     "label": "경계 판정",
+     "value_labels": {
+      "footer-validated": "끝 표식 확인",
+      "length-field": "길이 필드 확인",
+      "length-field-truncated": "길이 필드(잘림)",
+      "bounded-no-footer": "끝 표식 없음(상한까지)",
+      "bounded-header-candidate": "머리만 확인(상한까지)",
+      "text-boundary": "텍스트 경계",
+      "false-positive-rejected": "오탐 거부"
+     }
     },
     {
      "key": "confidence",
-     "label": "신뢰도"
+     "label": "신뢰도",
+     "value_labels": {
+      "high": "높음",
+      "medium": "중간",
+      "low": "낮음",
+      "unknown": "불명"
+     }
     }
    ],
    "aux_columns": [
     {
      "key": "recovery_method",
-     "label": "복구 방법"
+     "label": "복구 방법",
+     "value_labels": {
+      "carved": "카빙",
+      "parsed": "파싱됨",
+      "rejected": "거부됨(오탐)"
+     }
     },
     {
      "key": "boundary_method",
-     "label": "경계 방법"
+     "label": "경계 방법",
+     "value_labels": {
+      "signature-header": "머리 서명만",
+      "signature-footer": "끝 서명",
+      "length-field": "길이 필드",
+      "text-boundary": "텍스트 경계",
+      "header-only-bounded": "머리만(상한까지)",
+      "box-walk": "박스 순회(MP4/M4A)",
+      "chunk-count": "청크 수(EVTX)",
+      "frame-walk": "프레임 순회(MP3)",
+      "ole-fat": "OLE FAT(HWP)",
+      "riff-size": "RIFF 크기(WAV)",
+      "section-table": "섹션 표(PE)",
+      "zip-eocd": "ZIP 끝 레코드(EOCD)",
+      "id3-size": "ID3 크기"
+     }
     },
     {
      "key": "rejected_reason",
@@ -7959,7 +8089,11 @@
     },
     {
      "key": "signature_scope",
-     "label": "관리 구분(Managed/Unmanaged)"
+     "label": "관리 구분(Managed/Unmanaged)",
+     "value_labels": {
+      "Managed": "관리됨(도메인)",
+      "Unmanaged": "관리 안 됨"
+     }
     },
     {
      "key": "profile_guid",
@@ -7974,7 +8108,11 @@
     },
     {
      "key": "profile_key_missing",
-     "label": "프로필 키 없음(서명만 남음)"
+     "label": "프로필 키 없음(서명만 남음)",
+     "value_labels": {
+      "true": "예(서명만 남음)",
+      "false": "아니요"
+     }
     },
     {
      "key": "timestamp_semantics",
@@ -8179,7 +8317,7 @@
       "timestamp"
      ],
      "format": "time",
-     "ts_kind": "last-used"
+     "ts_kind": "last-opened"
     },
     {
      "key": "file_path",
@@ -8273,11 +8411,19 @@
     },
     {
      "key": "in_default_baseline",
-     "label": "기본 목록 포함"
+     "label": "기본 목록 포함",
+     "value_labels": {
+      "true": "예",
+      "false": "아니요"
+     }
     },
     {
      "key": "entry_kind",
-     "label": "항목 종류"
+     "label": "항목 종류",
+     "value_labels": {
+      "dll": "DLL",
+      "directory": "디렉터리(DllDirectory)"
+     }
     },
     {
      "key": "control_set",

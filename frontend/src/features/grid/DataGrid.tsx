@@ -40,6 +40,7 @@ import { useDensity, useGridLocalStore, useRoute, useSelection, useToast, useVie
 import { BatchBar, batchBarState } from "./BatchBar";
 import { ColumnFilterRow } from "./ColumnFilterRow";
 import { collectionDef, lockedColumnId, presetColumnIds } from "./columns";
+import { analysisFamily } from "./columns/analysis";
 import { artifactTypeFamily, resolveArtifactFamily } from "./columns/artifacts";
 import { isRecord, REVIEW_LABELS } from "./columns/common";
 import { auxColumnIds } from "./columns/families";
@@ -284,10 +285,9 @@ export function DataGrid(props: DataGridProps = {}) {
   if (ref.id === "artifacts" && ref.kind) {
     noteKindTypeCounts(ref.kind, mergedKindNode(runTree.data, ref.kind)?.artifact_type_counts);
   }
-  const familyId = ref.id === "artifacts" ? (resolveArtifactFamily(ref.kind, filterTypes)?.id ?? "") : "";
-  const columnKey = `${ref.id}:${ref.kind ?? ""}:${typeFamily}:${familyId}:${catalog.version}`;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: columns only depend on the collection/kind/type family
-  const baseColumns = useMemo(() => def.columnsFor?.(ref, filterTypes) ?? def.columns, [def, columnKey]);
+  // Analysis rows (R3 §3.3): the node's `f:source` server filter (타임스탬프 불일치, $LogFile), the
+  // carve job, or the loaded rows' one artifact-type family picks catalogue columns too.
+  const routeColumnFilters = useFilterStore((s) => s.filters.columns);
   // Artifacts (and analysis job rows) are sorted by the server (whole kind / whole job), never
   // client-side over the loaded pages.
   const isAnalysis = ref.id === "analysis";
@@ -311,6 +311,29 @@ export function DataGrid(props: DataGridProps = {}) {
   const cq = useCollectionQuery(
     { ref, offset: 0, limit: PAGE_SIZE, text: q || undefined, search: route.search, sort: routeSort },
     { runId, typeOptions: treeTypes },
+  );
+  const analysisRowTypesSig =
+    ref.id === "analysis" && ref.analysisId
+      ? [...new Set(cq.loadedRows.map((row) => row.artifactType ?? ""))].sort().join(",")
+      : "";
+  const analysisRowTypes = useMemo(
+    () => (analysisRowTypesSig ? analysisRowTypesSig.split(",") : []),
+    [analysisRowTypesSig],
+  );
+  const family =
+    ref.id === "artifacts"
+      ? resolveArtifactFamily(ref.kind, filterTypes)
+      : ref.id === "analysis" && ref.analysisId
+        ? analysisFamily(ref.kind, routeColumnFilters, analysisRowTypes)
+        : undefined;
+  const familyId = family?.id ?? "";
+  const columnKey = `${ref.id}:${ref.kind ?? ""}:${ref.analysisId ?? ""}:${typeFamily}:${familyId}:${catalog.version}`;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: columns only depend on the collection/kind/family
+  const baseColumns = useMemo(
+    () =>
+      def.columnsFor?.(ref, filterTypes, { columnFilters: routeColumnFilters, rowTypes: analysisRowTypes }) ??
+      def.columns,
+    [def, columnKey],
   );
   // Promoted keys holding lists in the loaded rows: shown, but not server-sortable.
   const listSig = useMemo(
@@ -1231,9 +1254,14 @@ export function DataGrid(props: DataGridProps = {}) {
     return out;
   }, [ref.id, ref.kind, runTree.data, routeFlagsActive]);
 
+  // 채널 chip labels: the run's `/tree` channel groups (Korean labels of core/eventlog_channels.py).
+  const channelGroupLabels = useMemo(() => {
+    const groups = mergedKindNode(runTree.data, "eventlog")?.channel_groups;
+    return groups?.length ? Object.fromEntries(groups.map((group) => [group.id, group.label])) : undefined;
+  }, [runTree.data]);
+
   // 열 설정 overflow at the end of the 조건 줄 (U-F1): 열 선택 (+ catalogue auxiliary columns,
   // record fields) and the column-filter row; 열 구성 / 밀도 live in the 조건 panel.
-  const family = ref.id === "artifacts" ? resolveArtifactFamily(ref.kind, filterTypes) : undefined;
   const auxIds = family ? auxColumnIds(family).filter((id) => columns.some((c) => c.id === id)) : [];
   const columnMenu = (
     <ColumnMenu
@@ -1315,6 +1343,7 @@ export function DataGrid(props: DataGridProps = {}) {
         display={{ preset, onPreset: choosePreset, density, onDensity: setDensity }}
         resultCount={runId ? { count: cq.isLoading ? null : resultCount, loading: cq.isLoading } : undefined}
         trailing={columnMenu}
+        channelGroupLabels={channelGroupLabels}
         extra={
           ref.id === "docs" ? (
             <DocsMatchedToggle

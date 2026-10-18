@@ -8,7 +8,13 @@ import {
   type FilterState,
   partitionFilters,
 } from "../filters/filterModel";
-import { DOMAINS, EVENTLOG_CHANNEL_NODES, targetKey } from "./domains";
+import {
+  DOMAINS,
+  EVENTLOG_CHANNEL_NODES,
+  EVENTLOG_CHANNELS_GROUP,
+  EVENTLOG_PARTITION_GROUPS,
+  targetKey,
+} from "./domains";
 import { buildTreeModel, NO_CHANNEL_COUNTS_REASON, type TreeModelNode } from "./model";
 
 const BASE_FILTERS: FilterState = { statuses: [], types: [], tags: [], ext: [], path: "", columns: [] };
@@ -88,15 +94,21 @@ function eventlogDomain(tree: RunTree): TreeModelNode {
 }
 
 function node(domain: TreeModelNode, id: string): TreeModelNode {
-  const found = domain.children?.find((child) => child.id === `domain:eventlog:${id}`);
+  const found = [
+    ...(domain.children ?? []),
+    ...(domain.children ?? []).flatMap((child) => child.children ?? []),
+  ].find((child) => child.id === `domain:eventlog:${id}`);
   if (!found) throw new Error(`no node ${id}`);
   return found;
 }
 
 describe("event-log channel nodes", () => {
-  it("are listed under 이벤트 로그, Korean-sorted (Hangul before Latin)", () => {
+  it("are listed under 이벤트 로그 › 채널별, Korean-sorted with 기타 채널 · 채널 없음 last", () => {
     const labels = EVENTLOG_CHANNEL_NODES.map((item) => item.label);
-    expect(labels).toEqual([...labels].sort((x, y) => x.localeCompare(y, "ko")));
+    // R3 console fix #4: the remainder buckets close the list.
+    expect(labels.slice(-2)).toEqual(["기타 채널", "채널 없음"]);
+    const named = labels.slice(0, -2);
+    expect(named).toEqual([...named].sort((x, y) => x.localeCompare(y, "ko")));
     expect(labels).toEqual(
       expect.arrayContaining([
         "보안",
@@ -104,7 +116,8 @@ describe("event-log channel nodes", () => {
         "응용 프로그램",
         "PowerShell",
         "Windows Defender",
-        "방화벽",
+        // The EVTX channel, apart from 방화벽 로그 (pfirewall.log).
+        "방화벽(이벤트 채널)",
         "작업 스케줄러",
         "서비스(SCM)",
         "스토리지",
@@ -114,7 +127,33 @@ describe("event-log channel nodes", () => {
       ]),
     );
     const eventlog = DOMAINS.find((domain) => domain.id === "eventlog");
-    expect(eventlog?.nodes.slice(-EVENTLOG_CHANNEL_NODES.length)).toEqual(EVENTLOG_CHANNEL_NODES);
+    // One "채널별" group, not 14 nodes at the domain level.
+    expect(eventlog?.nodes.at(-1)).toBe(EVENTLOG_CHANNELS_GROUP);
+    expect(EVENTLOG_CHANNELS_GROUP.label).toBe("채널별");
+    expect(EVENTLOG_CHANNELS_GROUP.children).toEqual(EVENTLOG_CHANNEL_NODES);
+    expect(eventlog?.nodes.some((item) => item.id.startsWith("evt-ch-"))).toBe(false);
+  });
+
+  it("the 채널별 group opens every partition group and is selected apart from 전체 이벤트 로그", () => {
+    expect(EVENTLOG_PARTITION_GROUPS).not.toContain("services");
+    expect(EVENTLOG_PARTITION_GROUPS).toHaveLength(EVENTLOG_CHANNEL_NODES.length - 1);
+    const domain = eventlogDomain(runTree(true));
+    const group = node(domain, "evt-channels");
+    expect(group.count).toBe(100);
+    expect(group.children?.map((child) => child.label).slice(-2)).toEqual(["기타 채널", "채널 없음"]);
+    expect(group.selectKey).not.toBe(node(domain, "evt-all").selectKey);
+    const plan = partitionFilters(
+      { id: "artifacts", kind: "eventlog" },
+      { ...BASE_FILTERS, columns: group.target?.cf ?? [] },
+    );
+    expect(plan.server.channelGroups).toEqual([...EVENTLOG_PARTITION_GROUPS]);
+  });
+
+  it("a column filter typed on a channel view keeps the node selected (R3 console fix #5)", () => {
+    const domain = eventlogDomain(runTree(true));
+    const security = node(domain, "evt-ch-security");
+    const typed = [...(security.target?.cf ?? []), { col: "message", op: ":" as const, value: "logon" }];
+    expect(targetKey({ collection: "artifacts", kind: "eventlog", cf: typed })).toBe(security.selectKey);
   });
 
   it("count from /tree channel_groups and open the kind with the server group filter", () => {

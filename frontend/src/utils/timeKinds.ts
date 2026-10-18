@@ -59,6 +59,8 @@ export const TIMESTAMP_KIND_LABELS: Readonly<Record<string, string>> = {
   "si-accessed": "SI 접근",
   "fn-created": "FN 생성",
   "fn-modified": "FN 수정",
+  "fn-accessed": "FN 접근",
+  "fn-mft-modified": "FN MFT 변경",
   "file-modified": "파일 수정",
   "volume-created": "볼륨 생성",
   "usn-change": "USN 변경",

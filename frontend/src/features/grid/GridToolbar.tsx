@@ -36,6 +36,8 @@ export interface GridToolbarProps {
   resultCount?: { count: number | null; loading: boolean };
   /** Row end overflow: the 열 설정 menu (열 선택 · 열 필터). */
   trailing?: ReactNode;
+  /** Event-log channel group labels of the run for the 채널 chip. */
+  channelGroupLabels?: Readonly<Record<string, string>>;
 }
 
 /** 문서 toolbar: list every document, or only the keyword matches (plain `GET /docs`; every document is `all=1`). */
@@ -191,6 +193,7 @@ export function GridToolbar(props: GridToolbarProps) {
       display={props.display}
       resultCount={props.resultCount}
       trailing={props.trailing}
+      channelGroupLabels={props.channelGroupLabels}
     />
   );
 }

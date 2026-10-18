@@ -529,6 +529,9 @@ families:
     label: DNS 접미사
   - key: signature_scope
     label: 관리 구분(Managed/Unmanaged)
+    value_labels:
+      Managed: 관리됨(도메인)
+      Unmanaged: 관리 안 됨
   - key: profile_guid
     label: 프로필 GUID
     format: mono
@@ -537,6 +540,9 @@ families:
     label: 최초 네트워크 이름
   - key: profile_key_missing
     label: 프로필 키 없음(서명만 남음)
+    value_labels:
+      'true': 예(서명만 남음)
+      'false': 아니요
   - key: timestamp_semantics
     label: 시각 의미
   - key: key_path
@@ -660,7 +666,7 @@ families:
     aliases:
     - timestamp
     format: time
-    ts_kind: last-used
+    ts_kind: last-opened
   - key: file_path
     semantic: path
     label: 파일/폴더 경로
@@ -717,8 +723,14 @@ families:
     format: mono
   - key: in_default_baseline
     label: 기본 목록 포함
+    value_labels:
+      'true': 예
+      'false': 아니요
   - key: entry_kind
     label: 항목 종류
+    value_labels:
+      dll: DLL
+      directory: 디렉터리(DllDirectory)
   - key: control_set
     label: 컨트롤 세트 (ControlSet)
   aux_columns:

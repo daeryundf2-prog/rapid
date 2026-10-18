@@ -153,6 +153,14 @@ export function orderGroup(nodes: readonly DomainNodeDef[]): DomainNodeDef[] {
 export const CLOUD_SYNC_CROSS_NOTE =
   "같은 질문의 다른 원본 — 웹·브라우저 › 클라우드 저장소 동기화(브라우저 측 DB)와 클라우드 › 동기화 계정·폴더/파일/이벤트(동기화 클라이언트)를 함께 보세요";
 
+/**
+ * Cross-link of the PCA sources (R3 O1): the PCA text files (실행 흔적) and the Compatibility
+ * Assistant Store / Persisted registry values (레지스트리 › 프로그램 호환성 도우미, also listed under
+ * 실행 흔적) answer the same question — "was this program run here".
+ */
+export const PCA_CROSS_NOTE =
+  "같은 질문의 다른 원본 — 실행 흔적 › 프로그램 호환성 도우미(PCA 기록 파일: 실행·PCA 이벤트 시각)와 레지스트리 › 프로그램 호환성 도우미(Compatibility Assistant Store: 키 마지막 기록)를 함께 보세요";
+
 /** Tooltip of a non-evidence node (string pivots the parser could not tie to a record). */
 export const NON_EVIDENCE_NOTE =
   "문자열 후보 — 레코드 구조로 해석되지 않은 문자열 피벗입니다. 증거 레코드가 아니므로 개수 합계에서 뺍니다.";
@@ -189,12 +197,15 @@ const run = (analysis: AnalysisNodeId): DomainTarget => ({
   analysis,
 });
 
-/** ntfs-meta rows of one `details.source` (R3 §3.3: timestamp-mismatch, logfile-transaction). */
-const ntfsRows = (source: string, cols: string[]): DomainTarget => ({
+/**
+ * ntfs-meta rows of `details.source` values (R3 §3.3: mft+usn, timestamp-mismatch,
+ * logfile-transaction). The grid picks the source's catalogue family columns itself
+ * (grid/columns/analysis.ts `analysisFamily`): no promoted `cols`.
+ */
+const ntfsRows = (sources: string[]): DomainTarget => ({
   ...run("ntfs-meta"),
-  cf: [{ col: "f:source", op: ":", value: source }],
-  cols: cols.map((key) => `details.${key}`),
-  analysisCount: { field: "source_counts", keys: [source] },
+  cf: [{ col: "f:source", op: ":", value: sources.join(",") }],
+  analysisCount: { field: "source_counts", keys: sources },
   neverRanReason: NTFS_META_NEVER_RAN,
 });
 
@@ -202,8 +213,8 @@ const ntfsRows = (source: string, cols: string[]): DomainTarget => ({
  * ntfs-meta `timestamp-mismatch` rows of in-use (`true`) or deleted (`false`) MFT records (server
  * `in_use=`): most real mismatch rows are deleted records, so the main node shows in-use ones.
  */
-const ntfsMismatchRows = (inUse: boolean, cols: string[]): DomainTarget => ({
-  ...ntfsRows("timestamp-mismatch", cols),
+const ntfsMismatchRows = (inUse: boolean): DomainTarget => ({
+  ...ntfsRows(["timestamp-mismatch"]),
   cf: [
     { col: "f:source", op: ":", value: "timestamp-mismatch" },
     { col: "f:in_use", op: ":", value: inUse ? "true" : "false" },
@@ -224,7 +235,6 @@ export const carved = (kinds: string[]): DomainTarget => ({
     ...(kinds.length ? [{ col: "f:signature_kind", op: ":" as const, value: kinds.join(",") }] : []),
     { col: "f:recovery_method", op: ":", value: "carved" },
   ],
-  cols: ["details.family_label", "details.status", "details.boundary_method"],
   analysisCount: { field: "kind_counts", keys: kinds },
   neverRanReason: CARVE_NEVER_RAN,
 });
@@ -245,6 +255,7 @@ export const CARVED_KINDS = {
   email: ["eml"],
   executables: ["pe"],
   eventlog: ["evtx"],
+  databases: ["sqlite"],
 } as const;
 
 /** EVTX recovered-record position detail (eventlog.py `evtx_record_id_position`). */
@@ -308,10 +319,13 @@ export const EMAIL_TYPE_LABELS: Readonly<Record<string, string>> = {
 };
 const EMAIL_EVIDENCE_TYPES = ["email-message", "email-attachment", "contact", "calendar-event"];
 
-/** 이벤트 로그 › channel group nodes (core/eventlog_channels.py CHANNEL_GROUPS). */
+/**
+ * 이벤트 로그 › 채널별 › channel group nodes (core/eventlog_channels.py CHANNEL_GROUPS): Korean-sorted
+ * (Hangul before Latin), then 기타 채널 and 채널 없음 last (the remainder buckets).
+ */
 export const EVENTLOG_CHANNEL_NODES: readonly DomainNodeDef[] = [
-  { id: "evt-ch-other", label: "기타 채널", target: channelNode("other") },
-  { id: "evt-ch-firewall", label: "방화벽", target: channelNode("firewall") },
+  // "(이벤트 채널)": the Windows Firewall EVTX channel, not 방화벽 로그 (pfirewall.log).
+  { id: "evt-ch-firewall", label: "방화벽(이벤트 채널)", target: channelNode("firewall") },
   { id: "evt-ch-security", label: "보안", target: channelNode("security") },
   { id: "evt-ch-user-pnp", label: "사용자 PNP", target: channelNode("user-pnp") },
   // A view inside 시스템 (System rows of the Service Control Manager provider).
@@ -321,12 +335,34 @@ export const EVENTLOG_CHANNEL_NODES: readonly DomainNodeDef[] = [
   { id: "evt-ch-rdp", label: "원격 데스크톱", target: channelNode("rdp") },
   { id: "evt-ch-application", label: "응용 프로그램", target: channelNode("application") },
   { id: "evt-ch-task-scheduler", label: "작업 스케줄러", target: channelNode("task-scheduler") },
-  // EVTX file/summary rows and records without a channel (detail: never in a total).
-  { id: "evt-ch-none", label: "채널 없음", target: channelNode("none"), detail: true },
   { id: "evt-ch-office-alerts", label: "Office Alerts", target: channelNode("office-alerts") },
   { id: "evt-ch-powershell", label: "PowerShell", target: channelNode("powershell") },
   { id: "evt-ch-defender", label: "Windows Defender", target: channelNode("defender") },
+  { id: "evt-ch-other", label: "기타 채널", target: channelNode("other") },
+  // EVTX file/summary rows and records without a channel (detail: never in a total).
+  { id: "evt-ch-none", label: "채널 없음", target: channelNode("none"), detail: true },
 ];
+
+/** Channel groups that partition the event-log rows (서비스(SCM) is a view inside 시스템). */
+export const EVENTLOG_PARTITION_GROUPS: readonly string[] = EVENTLOG_CHANNEL_NODES.map(
+  (node) => node.target.channelGroup ?? "",
+).filter((group) => group && group !== "services");
+
+/**
+ * 이벤트 로그 › 채널별: the group of the channel nodes. Its own view is every partition group (=
+ * every event-log row) under the server group filter, so it is selected apart from 전체 이벤트 로그.
+ */
+export const EVENTLOG_CHANNELS_GROUP: DomainNodeDef = {
+  id: "evt-channels",
+  label: "채널별",
+  target: {
+    collection: "artifacts",
+    kind: "eventlog",
+    cf: [{ col: CHANNEL_GROUP_FILTER_COLUMN, op: ":", value: EVENTLOG_PARTITION_GROUPS.join("|") }],
+  },
+  note: "이벤트 로그 채널 그룹별 보기 — 하위 노드의 행 수는 /tree 채널 그룹 건수(서버 channel_group= 필터)입니다",
+  children: [...EVENTLOG_CHANNEL_NODES],
+};
 
 function pickLabels(labels: Readonly<Record<string, string>>, types: string[]): Record<string, string> {
   return Object.fromEntries(types.map((type) => [type, labels[type] ?? type]));
@@ -607,11 +643,13 @@ export const DOMAINS: readonly DomainDef[] = [
         id: "exec-pca-files",
         label: "프로그램 호환성 도우미(PCA 기록 파일)",
         target: a("windows-execution", ["execution-pca"]),
+        note: PCA_CROSS_NOTE,
       },
       {
         id: "exec-pca-registry",
         label: "프로그램 호환성 도우미(PCA 레지스트리)",
         target: a("windows-registry", ["execution-pca"]),
+        note: PCA_CROSS_NOTE,
       },
     ],
   },
@@ -629,28 +667,44 @@ export const DOMAINS: readonly DomainDef[] = [
       { id: "fs-emails", label: "이메일 파일", target: files("emails") },
       // Files outside the selected scan categories: inventory rows only (no hash / content scan).
       { id: "fs-other", label: "기타 (스캔 제외)", target: inventory("other") },
-      { id: "fs-mft", label: "MFT/USN", target: run("ntfs-meta") },
+      // MFT/USN records only (source=mft,usn): 타임스탬프 불일치 / $LogFile rows have their own nodes.
+      { id: "fs-mft", label: "MFT/USN", target: ntfsRows(["mft", "usn"]) },
       // R3 §3.3: $SI/$FN disagreement rows of the ntfs-meta analysis (AXIOM "NTFS Timestamp Mismatch").
       {
         id: "fs-timestamp-mismatch",
         label: "타임스탬프 불일치",
-        target: ntfsMismatchRows(true, ["reason", "si_created_at", "fn_created_at"]),
+        target: ntfsMismatchRows(true),
         note: "$STANDARD_INFORMATION과 $FILE_NAME 시각 불일치(사용 중인 MFT 레코드) — 특이사항 지표 ntfs.si_before_fn·ntfs.zero_subsecond와 같은 판정(MFT 행에 표시)",
       },
       {
         id: "fs-timestamp-mismatch-deleted",
         label: "타임스탬프 불일치(삭제된 레코드)",
-        target: ntfsMismatchRows(false, ["reason", "si_created_at", "fn_created_at"]),
+        target: ntfsMismatchRows(false),
         detail: true,
         note: "삭제된(미사용) MFT 레코드의 $SI/$FN 시각 불일치 — 남은 레코드의 이전 값이라 실제 행 대부분이 여기에 속합니다",
       },
       {
         id: "fs-logfile",
         label: "$LogFile 트랜잭션",
-        target: ntfsRows("logfile-transaction", ["lsn", "redo_op_label", "target_mft_entry", "file_name"]),
+        target: ntfsRows(["logfile-transaction"]),
       },
-      { id: "fs-carve", label: "복구/카빙", target: run("carve") },
-      { id: "fs-carved", label: `${CARVED_LABEL} 전체`, target: carved([]) },
+      {
+        id: "fs-carve",
+        label: "복구/카빙",
+        target: run("carve"),
+        note: "카빙 작업의 모든 후보 행 — 오탐으로 거부된 후보(복구 방법: 거부됨)도 포함합니다. 복구된 파일만 보려면 '복구됨(카빙) 전체(오탐 제외)'",
+      },
+      {
+        id: "fs-carved",
+        label: `${CARVED_LABEL} 전체(오탐 제외)`,
+        target: carved([]),
+        note: "카빙으로 복구된 파일만(복구 방법: 카빙) — 계열별 '복구됨(카빙)' 노드의 합. 거부된 후보까지 보려면 '복구/카빙'",
+      },
+      {
+        id: "fs-databases-carved",
+        label: `데이터베이스 ${CARVED_LABEL}`,
+        target: carved([...CARVED_KINDS.databases]),
+      },
       { id: "fs-vsc", label: "볼륨 섀도우", target: run("vsc") },
       { id: "fs-recycle", label: "삭제/휴지통", target: a("windows-filesystem", ["recycle-bin-entry"]) },
       {
@@ -743,6 +797,14 @@ export const DOMAINS: readonly DomainDef[] = [
         target: a("windows-registry", ["registry-office-mru"]),
       },
       {
+        // Primary node: 실행 흔적 › 프로그램 호환성 도우미(PCA 레지스트리).
+        id: "reg-pca",
+        label: "프로그램 호환성 도우미(PCA)",
+        target: a("windows-registry", ["execution-pca"]),
+        crossRef: true,
+        note: PCA_CROSS_NOTE,
+      },
+      {
         id: "reg-keytree",
         label: "키 트리",
         target: a("windows-registry", ["registry-key-tree-node"]),
@@ -813,9 +875,9 @@ export const DOMAINS: readonly DomainDef[] = [
       { id: "evt-etl", label: "ETL 추적 파일", target: a("eventlog", ["etl-trace-file"]) },
       { id: "evt-firewall", label: "방화벽 로그", target: a("windows-system", ["firewall-log"]) },
       { id: "evt-carved", label: `EVTX ${CARVED_LABEL}`, target: carved([...CARVED_KINDS.eventlog]) },
-      // 채널별 (plan r3-os-depth §3.2 O2): Korean-sorted (Hangul before Latin), counts from `/tree`
-      // `channel_groups`, rows from the server `channel_group=` filter.
-      ...EVENTLOG_CHANNEL_NODES,
+      // 채널별 (plan r3-os-depth §3.2 O2): one group; counts from `/tree` `channel_groups`, rows
+      // from the server `channel_group=` filter.
+      EVENTLOG_CHANNELS_GROUP,
     ],
   },
   {
@@ -1376,16 +1438,18 @@ export function targetKey(
     fields?: RecordFieldFilters;
     /**
      * Column filters: part of the key only on event-log channel views (`evt_channel(_group)`) and
-     * for the analysis `details` server filters (`f:source` / `f:signature_kind` / `f:recovery_method`).
+     * for the analysis `details` server filters (`f:source` / `f:signature_kind` / `f:recovery_method` / `f:in_use`).
      */
     cf?: readonly ColumnFilter[];
   },
 ): string {
   const fieldsPart = recordFieldsKey(target.fields);
   const cf = target.cf ?? [];
-  const channels = cf.some((f) => f.col === CHANNEL_FILTER_COLUMN || f.col === CHANNEL_GROUP_FILTER_COLUMN)
-    ? cf.map((f) => `${f.col}${f.op}${f.value}`)
-    : [];
+  // Only the channel filters themselves: a column filter typed on a channel view never changes
+  // which node is selected.
+  const channels = cf
+    .filter((f) => f.col === CHANNEL_FILTER_COLUMN || f.col === CHANNEL_GROUP_FILTER_COLUMN)
+    .map((f) => `${f.col}${f.op}${f.value}`);
   const flagPart = `${target.flagGrade ? `|g=${target.flagGrade}` : ""}${
     target.flags?.length ? `|f=${[...target.flags].sort().join(",")}` : ""
   }${fieldsPart ? `|r=${fieldsPart}` : ""}${channels.length ? `|ch=${channels.sort().join(",")}` : ""}`;

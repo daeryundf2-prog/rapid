@@ -30,6 +30,9 @@ families:
     format: mono
   - key: in_use
     label: 사용 중
+    value_labels:
+      'true': 예(사용 중)
+      'false': 아니요(삭제된 레코드)
   - key: deleted_hint
     label: 삭제 추정
   - key: rename_hint
@@ -92,34 +95,41 @@ families:
   - key: si_created_at
     label: $SI 생성
     format: time
-    ts_kind: created
+    ts_kind: si-created
   - key: si_modified_at
     label: $SI 수정
     format: time
-    ts_kind: modified
+    ts_kind: si-modified
   - key: si_accessed_at
     label: $SI 접근
     format: time
-    ts_kind: accessed
+    ts_kind: si-accessed
   - key: si_mft_modified_at
     label: $SI MFT 수정
     format: time
-    ts_kind: mft-modified
+    ts_kind: si-mft-modified
   - key: fn_created_at
     label: $FN 생성
     format: time
+    ts_kind: fn-created
   - key: fn_modified_at
     label: $FN 수정
     format: time
+    ts_kind: fn-modified
   - key: fn_accessed_at
     label: $FN 접근
     format: time
+    ts_kind: fn-accessed
   - key: fn_mft_modified_at
     label: $FN MFT 수정
     format: time
+    ts_kind: fn-mft-modified
   aux_columns:
   - key: in_use
     label: 사용 중
+    value_labels:
+      'true': 예(사용 중)
+      'false': 아니요(삭제된 레코드)
   - key: si_fn_created_delta_seconds
     label: $FN−$SI 생성 차(초)
     format: number
@@ -145,7 +155,7 @@ families:
   - key: time_estimate
     label: 시각 추정
     format: time
-    ts_kind: event
+    ts_kind: fn-created
   - key: redo_op_label
     label: 재실행(redo) 작업
   - key: undo_op_label

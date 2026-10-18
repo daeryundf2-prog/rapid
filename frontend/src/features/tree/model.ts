@@ -11,6 +11,7 @@ import type {
 } from "../../contracts/collection";
 import { RECORD_FIELD_KEYS, recordFieldsKey } from "../../contracts/collection";
 import type { IconName } from "../../icons";
+import { CARVE_KINDS } from "../analysis/analysisForm";
 import {
   ANALYSIS_NODES,
   isPartialResult,
@@ -371,6 +372,65 @@ export function analysisSubCount(
     .reduce((sum, [, value]) => sum + (typeof value === "number" ? value : 0), 0);
 }
 
+/** Values of an analysis sub-view's `f:<key>` filter (comma = any of). */
+function subViewValues(target: DomainTarget, col: string): string[] {
+  return (target.cf ?? [])
+    .filter((filter) => filter.col === col)
+    .flatMap((filter) => filter.value.split(","))
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+const LOGFILE_STATUS_REASONS: Readonly<Record<string, string>> = {
+  absent: "$LogFile 입력 없음 — 이미지에서 $LogFile을 추출하지 못했거나 추출한 $MFT 옆에 $LogFile이 없습니다",
+  disabled: "$LogFile 파싱 꺼짐 — NTFS 메타 분석을 $LogFile 파싱을 켜고 다시 실행하면 나타납니다",
+};
+
+const MISMATCH_STATUS_REASONS: Readonly<Record<string, string>> = {
+  disabled: "타임스탬프 불일치 판정 꺼짐 — NTFS 메타 분석을 불일치 판정을 켜고 다시 실행하면 나타납니다",
+  "no-mft": "$MFT를 파싱하지 못해 타임스탬프 불일치를 판정하지 않았습니다",
+  "too-large": "$MFT가 파싱 한도를 넘어 타임스탬프 불일치를 판정하지 않았습니다(추출 파일은 보존됨)",
+  too_large: "$MFT가 파싱 한도를 넘어 타임스탬프 불일치를 판정하지 않았습니다(추출 파일은 보존됨)",
+};
+
+/**
+ * Why an analysis sub-view of a completed job is empty, when the job says so (R3 §3.3): $LogFile
+ * without input / parsing off / unreadable (`logfile_status`), mismatch not judged
+ * (`timestamp_mismatch_status`), carve signature kinds the job did not select (`options.kinds`).
+ * undefined = the job ran it and found nothing (NO_DATA_REASON).
+ */
+export function analysisEmptyReason(
+  target: DomainTarget,
+  job: Pick<AnalysisState, "summary" | "options"> | undefined,
+): string | undefined {
+  if (!job) return undefined;
+  const summary = job.summary ?? {};
+  const sources = subViewValues(target, "f:source");
+  if (sources.includes("logfile-transaction")) {
+    const status = typeof summary.logfile_status === "string" ? summary.logfile_status : "";
+    if (status === "failed") {
+      const error = typeof summary.logfile_error === "string" ? summary.logfile_error : "";
+      return `$LogFile 읽기 실패${error ? ` — ${error}` : ""}`;
+    }
+    if (LOGFILE_STATUS_REASONS[status]) return LOGFILE_STATUS_REASONS[status];
+  }
+  if (sources.includes("timestamp-mismatch")) {
+    const status =
+      typeof summary.timestamp_mismatch_status === "string" ? summary.timestamp_mismatch_status : "";
+    if (MISMATCH_STATUS_REASONS[status]) return MISMATCH_STATUS_REASONS[status];
+  }
+  const kinds = subViewValues(target, "f:signature_kind");
+  const selected = Array.isArray(job.options?.kinds)
+    ? job.options.kinds.filter((kind): kind is string => typeof kind === "string" && kind !== "")
+    : [];
+  // An empty selection carves every signature kind.
+  if (kinds.length && selected.length && !kinds.some((kind) => selected.includes(kind))) {
+    const names = kinds.map((kind) => CARVE_KINDS.find((choice) => choice.id === kind)?.label ?? kind);
+    return `카빙에서 이 서명 종류(${names.join(", ")})를 선택하지 않았습니다 — 카빙을 이 종류를 포함해 다시 실행하면 나타납니다`;
+  }
+  return undefined;
+}
+
 /** U-F7: why a node with this count state is hidden by default (undefined = shown). */
 export function emptyNodeReason(state: DomainCount): string | undefined {
   if (state.neverRan) return state.disabledReason ?? NEVER_RAN_REASON;
@@ -432,7 +492,11 @@ export function domainNodeCount(target: DomainTarget, input: TreeModelInput): Do
       ...(statusKnown && status === null && target.neverRanReason
         ? { disabledReason: target.neverRanReason }
         : {}),
-      ...(count === 0 && target.analysisCount ? { disabledReason: NO_DATA_REASON } : {}),
+      ...(count === 0 && target.analysisCount
+        ? {
+            disabledReason: analysisEmptyReason(target, completed ?? partial) ?? NO_DATA_REASON,
+          }
+        : {}),
     };
   }
   if (target.collection === "derived") {

@@ -32,6 +32,7 @@ import {
 } from "../../contracts/collection";
 import type { Route } from "../../router";
 import { parseInstant } from "../../utils/time";
+import { CARVE_KINDS } from "../analysis/analysisForm";
 import { type Grade, isGrade } from "../flags/catalog";
 import { rowMatchesFlagFilter, ruleLabel } from "../flags/flags";
 
@@ -190,7 +191,7 @@ export interface FilterPlan {
     flags?: string[];
     flagGrade?: Grade;
     fields?: RecordFieldFilters;
-    /** Analysis rows: exact `details` filters (`f:source` / `f:signature_kind` / `f:recovery_method`). */
+    /** Analysis rows: exact `details` filters (`f:source` / `f:signature_kind` / `f:recovery_method` / `f:in_use`). */
     details?: Record<string, string[]>;
   };
   /** Column filters the client applies to loaded rows (the rest went to the API). */
@@ -459,7 +460,8 @@ export type FilterKey =
   | "note"
   | "flag"
   | "flagGrade"
-  | "field";
+  | "field"
+  | "column";
 
 export interface FilterChip {
   key: FilterKey;
@@ -468,7 +470,107 @@ export interface FilterChip {
   label: string;
 }
 
-export function activeChips(filters: FilterState, statusLabel: (s: ReviewStatus) => string): FilterChip[] {
+/** Korean names of the event-log channel groups (core/eventlog_channels.py GROUP_LABELS). */
+export const CHANNEL_GROUP_LABELS: Readonly<Record<string, string>> = {
+  security: "보안",
+  system: "시스템",
+  application: "응용 프로그램",
+  powershell: "PowerShell",
+  defender: "Windows Defender",
+  firewall: "방화벽(이벤트 채널)",
+  "task-scheduler": "작업 스케줄러",
+  storage: "스토리지",
+  "user-pnp": "사용자 PNP",
+  "office-alerts": "Office Alerts",
+  rdp: "원격 데스크톱",
+  services: "서비스(SCM)",
+  other: "기타 채널",
+  none: "채널 없음",
+};
+
+/** Korean names of the ntfs-meta row sources (`details.source`, R3 §3.3). */
+export const ANALYSIS_SOURCE_LABELS: Readonly<Record<string, string>> = {
+  mft: "MFT",
+  usn: "USN 저널",
+  "timestamp-mismatch": "타임스탬프 불일치",
+  "logfile-transaction": "$LogFile 트랜잭션",
+};
+
+/** Korean readings of the carve rows' `details.recovery_method`. */
+export const RECOVERY_METHOD_LABELS: Readonly<Record<string, string>> = {
+  carved: "카빙",
+  parsed: "파싱됨",
+  rejected: "거부됨(오탐)",
+};
+
+/**
+ * Server filters that have no grid column (tree-node views: 이벤트 로그 채널, 타임스탬프 불일치,
+ * 복구됨(카빙)): shown as removable chips, else they would narrow the rows invisibly.
+ */
+export const HIDDEN_FILTER_COLUMNS: readonly string[] = [
+  CHANNEL_GROUP_FILTER_COLUMN,
+  CHANNEL_FILTER_COLUMN,
+  "f:source",
+  "f:in_use",
+  "f:signature_kind",
+  "f:recovery_method",
+];
+
+export interface ChipLabelOptions {
+  /** Channel group id → Korean label (`/tree` `channel_groups[].label`); CHANNEL_GROUP_LABELS otherwise. */
+  channelGroupLabels?: Readonly<Record<string, string>>;
+}
+
+function listText(names: string[], unit: string): string {
+  return names.length > 3
+    ? `${names.slice(0, 2).join(", ")} 외 ${names.length - 2}개 ${unit}`.trim()
+    : names.join(", ");
+}
+
+/** Chip label of a hidden server filter (HIDDEN_FILTER_COLUMNS); null for any other column. */
+export function hiddenFilterLabel(filter: ColumnFilter, options: ChipLabelOptions = {}): string | null {
+  const commaValues = filter.value
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  switch (filter.col) {
+    case CHANNEL_GROUP_FILTER_COLUMN: {
+      const names = parseChannelFilterValue(filter.value).map(
+        (id) => options.channelGroupLabels?.[id] ?? CHANNEL_GROUP_LABELS[id] ?? id,
+      );
+      return `채널 ${listText(names, "그룹")}`;
+    }
+    case CHANNEL_FILTER_COLUMN:
+      return `채널 ${listText(parseChannelFilterValue(filter.value), "채널")}`;
+    case "f:source":
+      return `출처 ${commaValues.map((value) => ANALYSIS_SOURCE_LABELS[value] ?? value).join("·")}`;
+    case "f:in_use":
+      return filter.value.trim() === "true"
+        ? "사용 중인 레코드"
+        : filter.value.trim() === "false"
+          ? "삭제된 레코드"
+          : `사용 중 ${filter.value}`;
+    case "f:signature_kind":
+      return `서명 종류 ${listText(
+        commaValues.map((value) => CARVE_KINDS.find((choice) => choice.id === value)?.label ?? value),
+        "종류",
+      )}`;
+    case "f:recovery_method":
+      return `복구 방법 ${commaValues.map((value) => RECOVERY_METHOD_LABELS[value] ?? value).join("·")}`;
+    default:
+      return null;
+  }
+}
+
+function columnFilterId(filter: ColumnFilter): string {
+  return `${filter.col}${filter.op}${filter.value}`;
+}
+
+export function activeChips(
+  filters: FilterState,
+  statusLabel: (s: ReviewStatus) => string,
+  options: ChipLabelOptions = {},
+): FilterChip[] {
   const chips: FilterChip[] = [];
   if (filters.from || filters.to) {
     chips.push({
@@ -493,6 +595,11 @@ export function activeChips(filters: FilterState, statusLabel: (s: ReviewStatus)
         label: `${RECORD_FIELD_LABELS[field]} ${value}`,
       });
     }
+  }
+  for (const filter of filters.columns ?? []) {
+    if (!HIDDEN_FILTER_COLUMNS.includes(filter.col)) continue;
+    const label = hiddenFilterLabel(filter, options);
+    if (label) chips.push({ key: "column", value: columnFilterId(filter), label });
   }
   return chips;
 }
@@ -526,5 +633,10 @@ export function removeChip(filters: FilterState, chip: FilterChip): FilterState 
       if (!rest.length) delete fields[field];
       return { ...filters, fields: hasRecordFields(fields) ? fields : undefined };
     }
+    case "column":
+      return {
+        ...filters,
+        columns: (filters.columns ?? []).filter((filter) => columnFilterId(filter) !== chip.value),
+      };
   }
 }

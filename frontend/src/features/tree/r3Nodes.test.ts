@@ -14,7 +14,14 @@ import {
   NTFS_META_NEVER_RAN,
   targetKey,
 } from "./domains";
-import { analysisSubCount, domainNodeCount, domainRoute, emptyNodeReason, UNKNOWN_COUNT } from "./model";
+import {
+  analysisEmptyReason,
+  analysisSubCount,
+  domainNodeCount,
+  domainRoute,
+  emptyNodeReason,
+  UNKNOWN_COUNT,
+} from "./model";
 
 function node(domain: string, id: string): DomainNodeDef {
   const found = flattenDomainNodes(DOMAINS.find((d) => d.id === domain)?.nodes ?? []).find(
@@ -28,12 +35,13 @@ function job(
   kind: string,
   summary: Record<string, unknown>,
   status: AnalysisState["status"] = "completed",
+  options: Record<string, unknown> = {},
 ): AnalysisState {
   return {
     analysis_id: `${kind}-1`,
     kind,
     status,
-    options: {},
+    options,
     created_at: "2026-10-18T00:00:00Z",
     progress: { done: 1, total: 1, unit: "", message: "", percent: 100 },
     row_count: 500,
@@ -61,7 +69,9 @@ describe("파일시스템 › 타임스탬프 불일치 / $LogFile 트랜잭션"
     ]);
     expect(mismatchDeleted.label).toBe("타임스탬프 불일치(삭제된 레코드)");
     expect(mismatchDeleted.detail).toBe(true);
-    expect(domainRoute(mismatch.target).cols).toContain("details.reason");
+    // R3 console fix #1: the grid picks the ntfs-timestamp-mismatch family itself (no promoted cols).
+    expect(domainRoute(mismatch.target).cols).toBeUndefined();
+    expect(domainRoute(logfile.target).cols).toBeUndefined();
     expect(
       new Set([
         targetKey(mismatch.target),
@@ -99,12 +109,44 @@ describe("파일시스템 › 타임스탬프 불일치 / $LogFile 트랜잭션"
     expect(domainNodeCount(mismatch.target, { analyses }).count).toBe(1);
     expect(domainNodeCount(mismatchDeleted.target, { analyses }).count).toBe(2);
     expect(domainNodeCount(logfile.target, { analyses }).count).toBe(17);
-    expect(domainNodeCount(mft.target, { analyses }).count).toBe(500);
+    // R3 console fix #2: MFT/USN counts (and pages) only mft + usn rows.
+    expect(domainNodeCount(mft.target, { analyses }).count).toBe(480);
     const none = domainNodeCount(mismatch.target, {
       analyses: [job("ntfs-meta", { source_counts: { mft: 500 }, source_in_use_counts: {} })],
     });
     expect(none.count).toBe(0);
     expect(emptyNodeReason(none)).toBe("이 런에는 해당 데이터가 없습니다");
+  });
+
+  it("MFT/USN pages only mft + usn rows on the server (R3 console fix #2)", () => {
+    expect(domainRoute(mft.target).cf).toEqual([{ col: "f:source", op: ":", value: "mft,usn" }]);
+    expect(mft.target.analysisCount).toEqual({ field: "source_counts", keys: ["mft", "usn"] });
+    const plan = partitionFilters(
+      { id: "analysis", kind: "ntfs-meta" },
+      { ...EMPTY_FILTERS, columns: domainRoute(mft.target).cf ?? [] },
+    );
+    expect(plan.server.details).toEqual({ source: ["mft", "usn"] });
+  });
+
+  it("empty sub-views say why: $LogFile input / mismatch not judged (R3 console fix m)", () => {
+    const empty = (target: DomainNodeDef["target"], summary: Record<string, unknown>) =>
+      emptyNodeReason(
+        domainNodeCount(target, {
+          analyses: [job("ntfs-meta", { source_counts: { mft: 5 }, source_in_use_counts: {}, ...summary })],
+        }),
+      );
+    expect(empty(logfile.target, { logfile_status: "absent" })).toContain("$LogFile 입력 없음");
+    expect(empty(logfile.target, { logfile_status: "disabled" })).toContain("$LogFile 파싱 꺼짐");
+    expect(empty(logfile.target, { logfile_status: "failed", logfile_error: "권한 없음" })).toBe(
+      "$LogFile 읽기 실패 — 권한 없음",
+    );
+    expect(empty(logfile.target, { logfile_status: "parsed" })).toBe("이 런에는 해당 데이터가 없습니다");
+    expect(empty(mismatch.target, { timestamp_mismatch_status: "disabled" })).toContain("판정 꺼짐");
+    expect(empty(mismatch.target, { timestamp_mismatch_status: "too-large" })).toContain("파싱 한도");
+    // A job that judged mismatches and found none: the plain no-data reason.
+    expect(empty(mismatch.target, { timestamp_mismatch_status: "parsed" })).toBe(
+      "이 런에는 해당 데이터가 없습니다",
+    );
   });
 
   it("never ran: hidden with the ntfs-meta reason; an older job without source counts shows —", () => {
@@ -201,6 +243,46 @@ describe("복구됨(카빙) family nodes", () => {
     expect(count("filesystem", "fs-carved")).toBe(19);
     const never = domainNodeCount(node("media", "media-audio-carved").target, { analyses: [] });
     expect(emptyNodeReason(never)).toBe(CARVE_NEVER_RAN);
+  });
+
+  it("say when the carve job did not select the family's signature kinds", () => {
+    const audio = node("media", "media-audio-carved");
+    const picked = job("carve", { kind_counts: { jpeg: 5 } }, "completed", { kinds: ["jpeg", "png"] });
+    const reason = emptyNodeReason(domainNodeCount(audio.target, { analyses: [picked] }));
+    expect(reason).toContain("WAV 오디오");
+    expect(reason).toContain("선택하지 않았습니다");
+    // Every kind carved (empty selection): the plain no-data reason.
+    expect(analysisEmptyReason(audio.target, job("carve", {}, "completed", { kinds: [] }))).toBeUndefined();
+  });
+
+  it("데이터베이스 복구됨(카빙) lists carved SQLite files; 복구/카빙 vs 전체 are told apart", () => {
+    const sqlite = node("filesystem", "fs-databases-carved");
+    expect(sqlite.label).toBe("데이터베이스 복구됨(카빙)");
+    expect(domainRoute(sqlite.target).cf).toEqual([
+      { col: "f:signature_kind", op: ":", value: "sqlite" },
+      { col: "f:recovery_method", op: ":", value: "carved" },
+    ]);
+    expect(
+      domainNodeCount(sqlite.target, { analyses: [job("carve", { kind_counts: { sqlite: 6 } })] }).count,
+    ).toBe(6);
+    expect(node("filesystem", "fs-carve").note).toContain("거부된 후보");
+    expect(node("filesystem", "fs-carved").label).toBe("복구됨(카빙) 전체(오탐 제외)");
+    expect(node("filesystem", "fs-carved").note).toContain("복구된 파일만");
+    // No family node promotes record-field columns any more: the carved-file family gives them.
+    expect(domainRoute(sqlite.target).cols).toBeUndefined();
+  });
+
+  it("PCA is cross-linked between 레지스트리 and 실행 흔적", () => {
+    const reg = node("registry", "reg-pca");
+    expect(reg.crossRef).toBe(true);
+    expect(reg.target.types).toEqual(["execution-pca"]);
+    for (const [domain, id] of [
+      ["registry", "reg-pca"],
+      ["execution", "exec-pca-files"],
+      ["execution", "exec-pca-registry"],
+    ] as const) {
+      expect(node(domain, id).note).toContain("같은 질문의 다른 원본");
+    }
   });
 
   it("analysisSubCount sums the listed keys (all when none)", () => {

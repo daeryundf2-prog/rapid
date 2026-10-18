@@ -26,12 +26,18 @@ families:
     format: mono
   - key: key_format_valid
     label: 키 형식 검증
+    value_labels:
+      'true': 유효
+      'false': 유효하지 않음
   - key: key_sha256
     semantic: hash
     label: 키 SHA-256
     format: mono
   - key: identifier_matches_file_name
     label: 파일 이름 식별자 일치
+    value_labels:
+      'true': 일치
+      'false': 불일치
   - key: source_path
     semantic: path
     label: 파일 경로

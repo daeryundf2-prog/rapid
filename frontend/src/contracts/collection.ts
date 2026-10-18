@@ -126,7 +126,8 @@ export interface CollectionQuery {
   fields?: RecordFieldFilters;
   /**
    * Analysis rows: exact `details` filters the rows API applies (R3 §3.3: `source=`,
-   * `signature_kind=`, `recovery_method=`), key → accepted values.
+   * `signature_kind=`, `recovery_method=`, `in_use=` (`true` / `false`, exact boolean)), key →
+   * accepted values.
    */
   detailFilters?: Record<string, string[]>;
   /** Navigation category (tree) filter; interpreted by the collection. */
