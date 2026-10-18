@@ -27,9 +27,8 @@ built from the run's ``windows-registry`` output:
 from __future__ import annotations
 
 import hashlib
-import threading
 from array import array
-from collections import Counter, OrderedDict
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -43,6 +42,7 @@ from ...artifacts.windows.registry import (
     registry_value_type_name,
 )
 from ...core.jobs import RunJobStore
+from .index_cache import SingleFlightIndexCache
 from .jsonl_records import iter_artifact_records, iter_records_at, jsonl_records_path
 from .tree import _file_signature
 
@@ -260,6 +260,10 @@ def _add_key(
         "cell_offset": _int(details.get("cell_offset")),
         "record_index": record_index,
     }
+    if hive is not None and details.get("is_root_key") is True and _fold(key_path) != _fold(hive.mount):
+        # The hive's root row came after a key whose mount was guessed: re-mount.
+        _remount(index, by_path, hive, key_path, fields)
+        return
     existing = by_path.get((folded_hive, _fold(key_path)))
     if existing is not None:
         # A synthetic parent created earlier: fill in the collected facts.
@@ -305,6 +309,79 @@ def _add_key(
     hive.key_count += 1
 
 
+def _subtree_size(index: RegistryIndex, node: int) -> int:
+    size = 0
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        size += 1
+        stack.extend(index.children.get(current, ()))
+    return size
+
+
+def _remount(
+    index: RegistryIndex,
+    by_path: dict[tuple[str, str], int],
+    hive: HiveInfo,
+    root_path: str,
+    fields: Mapping[str, int],
+) -> None:
+    """Make ``root_path`` (the ``is_root_key`` row) the hive root when the mount was guessed wrong.
+
+    The guess (``HKLM\\<hive>`` from the first, non-root row) can be deeper or
+    shallower than the real root. Deeper real root: its node (under the guess)
+    becomes the root and the guessed ancestors drop out of the hive. Shallower
+    real root: a new root node is created and the guessed root is re-attached
+    beneath it. An unrelated root path counts as ``outside_mount``.
+    """
+    folded_hive = _fold(hive.path)
+    folded_root = _fold(root_path)
+    folded_mount = _fold(hive.mount)
+    if folded_root.startswith(folded_mount + "\\"):
+        node = by_path.get((folded_hive, folded_root))
+        if node is None:
+            _add_key(index, by_path, hive.path, root_path, {}, int(fields.get("record_index", -1)))
+            node = by_path[(folded_hive, folded_root)]
+        index.filetimes[node] = fields["filetime"]
+        index.value_counts[node] = fields["value_count"]
+        index.subkey_counts[node] = fields["subkey_count"]
+        index.cell_offsets[node] = fields["cell_offset"]
+        index.record_indices[node] = fields["record_index"]
+        parent = index.parents[node]
+        if parent >= 0:
+            siblings = index.children.get(parent, [])
+            if node in siblings:
+                siblings.remove(node)
+        index.parents[node] = -1
+        index.names[node] = root_path
+        hive.root = node
+        hive.mount = root_path
+        hive.key_count = _subtree_size(index, node)
+        return
+    if folded_mount.startswith(folded_root + "\\"):
+        new_root = index.add_node(root_path, -1, **fields)
+        by_path[(folded_hive, folded_root)] = new_root
+        relative = hive.mount[len(root_path) + 1 :].split("\\")
+        parent = new_root
+        prefix = root_path
+        for part in relative[:-1]:
+            prefix = f"{prefix}\\{part}"
+            found = by_path.get((folded_hive, _fold(prefix)))
+            if found is None:
+                found = index.add_node(part, parent)
+                by_path[(folded_hive, _fold(prefix))] = found
+            parent = found
+        old_root = hive.root
+        index.names[old_root] = relative[-1]
+        index.parents[old_root] = parent
+        index.children.setdefault(parent, []).append(old_root)
+        hive.root = new_root
+        hive.mount = root_path
+        hive.key_count = _subtree_size(index, new_root)
+        return
+    index.outside_mount += 1
+
+
 def _link_label(details: Mapping[str, object], artifact_type: str) -> str:
     for name in ("value_name", "activity_value", "service_name", "display_name", "user_name", "group_name", "label", "persistence_category"):
         value = details.get(name)
@@ -313,38 +390,12 @@ def _link_label(details: Mapping[str, object], artifact_type: str) -> str:
     return artifact_type
 
 
-class RegistryIndexCache:
+class RegistryIndexCache(SingleFlightIndexCache[RegistryIndex]):
     def __init__(self, max_runs: int = REGISTRY_TREE_CACHE_RUNS) -> None:
-        self.max_runs = max_runs
-        self._lock = threading.Lock()
-        self._build_locks: dict[tuple[object, ...], threading.Lock] = {}
-        self._items: OrderedDict[tuple[object, ...], RegistryIndex] = OrderedDict()
-
-    def clear(self) -> None:
-        with self._lock:
-            self._items.clear()
+        super().__init__(max_runs)
 
     def get(self, key: tuple[object, ...], sources: Sequence[tuple[str, Mapping[str, object], Path]]) -> RegistryIndex:
-        with self._lock:
-            found = self._items.get(key)
-            if found is not None:
-                self._items.move_to_end(key)
-                return found
-            build_lock = self._build_locks.setdefault(key, threading.Lock())
-        with build_lock:
-            with self._lock:
-                found = self._items.get(key)
-                if found is not None:
-                    return found
-            index = build_registry_index(key, sources)
-            with self._lock:
-                for stale in [item for item in self._items if item[0] == key[0]]:
-                    self._items.pop(stale, None)
-                self._items[key] = index
-                while len(self._items) > self.max_runs:
-                    self._items.popitem(last=False)
-                self._build_locks.pop(key, None)
-            return index
+        return self.get_or_build(key, lambda: build_registry_index(key, sources))
 
 
 REGISTRY_INDEX_CACHE = RegistryIndexCache()
