@@ -8,10 +8,12 @@ import {
   type SourcePreview,
 } from "../../api/viewer";
 import { collapseViewerPane } from "../../commands/builtin";
+import { runCommand as runShellCommand } from "../../commands/registry";
 import { MiddlePath } from "../../components/MiddlePath";
 import type { Command } from "../../contracts/command";
 import type { MarkAction, ViewerMode, ViewerTarget } from "../../contracts/viewer";
 import { Icon } from "../../icons";
+import { FlagBanner } from "../flags/FlagCell";
 import { currentTimezone } from "../grid/columns/common";
 import { storeNotice } from "../grid/reviewActions";
 import {
@@ -40,6 +42,7 @@ import {
 import { targetKey } from "./history";
 import { ModeTabs, panelId, tabId, VIEWER_PANEL_ID } from "./ModeTabs";
 import { resolveModes } from "./modes";
+import { POPOUT_COMMAND_ID } from "./popout/host";
 import { recordByteRange } from "./record";
 import { viewerSession } from "./session";
 import { type AsyncState, errorText, useAsync } from "./useAsync";
@@ -290,6 +293,10 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
           ],
         }));
         announce(`표시됨: ${MARK_LABELS[action]}${storeNotice(result)}`);
+        // The viewer window (U-F2) tells the main window to refresh its grid's review data.
+        window.dispatchEvent(
+          new CustomEvent("rapidtriage:viewer-marked", { detail: { runId: target.runId } }),
+        );
       } catch (error) {
         announce(`표시 실패: ${errorText(error)}`);
       }
@@ -459,6 +466,19 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
           <button
             type="button"
             className="viewer-icon-button"
+            aria-label="뷰어를 새 창으로 (Ctrl+Shift+V)"
+            aria-keyshortcuts="Control+Shift+V"
+            title="뷰어를 새 창으로 (Ctrl+Shift+V) — 듀얼 모니터"
+            data-testid="viewer-popout"
+            onClick={() => void runShellCommand(POPOUT_COMMAND_ID)}
+          >
+            <Icon name="external" />
+          </button>
+        )}
+        {drawer ? null : (
+          <button
+            type="button"
+            className="viewer-icon-button"
             aria-label="뷰어 접기"
             title="뷰어 접기"
             data-testid="viewer-collapse"
@@ -468,6 +488,9 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
           </button>
         )}
       </div>
+      {/* 특이사항 (U-F4): the row's flags with their evidence, above the tabs (every mode). */}
+      {/* Keyed by row: each row starts with its own default (open for A), never the last row's toggle. */}
+      <FlagBanner key={row?.rowKey ?? key ?? "none"} row={row} />
       <ModeTabs modes={modes} active={activeMode} onSelect={selectMode} />
       {/* Inactive modes get an empty, hidden panel so every tab's aria-controls resolves to a
           tabpanel labelled by that tab; only the active mode renders content. */}

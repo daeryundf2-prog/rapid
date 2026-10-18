@@ -679,3 +679,34 @@ function hexRowsFor(offset: number, length: number) {
   }
   return rows;
 }
+
+describe("특이사항 banner per row (review #11)", () => {
+  it("collapsing one row's banner does not keep the next row's A banner collapsed", async () => {
+    routes(preview({ preview_type: "text", text: "x" }));
+    const flagged = (locator: string): GridRow =>
+      ({
+        rowKey: `artifacts:k:${locator}`,
+        ref: { collection: "artifacts", kind: "k", locator },
+        title: locator,
+        sourcePath: null,
+        timestamp: null,
+        tags: [],
+        reviewStatus: null,
+        fields: { flags: [{ id: "eventlog.log_cleared", grade: "A", label: "로그 삭제" }] },
+      }) as unknown as GridRow;
+    const a = flagged("/artifacts/1");
+    const b = flagged("/artifacts/2");
+    render(<Viewer />);
+    act(() => setViewerTarget({ runId: "run-1", ref: a.ref, sourcePath: null }, a));
+    const first = (await screen.findByTestId("viewer-flag-banner")) as HTMLDetailsElement;
+    expect(first.open).toBe(true);
+    act(() => {
+      first.open = false;
+      first.dispatchEvent(new Event("toggle"));
+    });
+    act(() => setViewerTarget({ runId: "run-1", ref: b.ref, sourcePath: null }, b));
+    await waitFor(() =>
+      expect((screen.getByTestId("viewer-flag-banner") as HTMLDetailsElement).open).toBe(true),
+    );
+  });
+});

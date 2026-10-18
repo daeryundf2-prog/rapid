@@ -846,7 +846,7 @@ class AnalysisApiTests(unittest.TestCase):
         ids = [child["id"] for child in group["children"]]
         self.assertEqual(
             ids,
-            ["analysis:carve", "analysis:vsc", "analysis:ntfs-meta", "analysis:ocr-batch", "analysis:memory-import", "analysis:web-logs", "analysis:cross-case"],
+            ["analysis:carve", "analysis:vsc", "analysis:ntfs-meta", "analysis:ocr-batch", "analysis:memory-import", "analysis:web-logs", "analysis:cross-case", "analysis:triage-flags"],
         )
         self.assertIsNone(group["children"][0]["state"])
         self.assertIsNone(group["children"][0]["latest"])

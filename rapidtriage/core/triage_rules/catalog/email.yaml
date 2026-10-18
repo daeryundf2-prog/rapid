@@ -1,0 +1,236 @@
+# Triage catalogue: email (plan viewer-families-2026-10-15; research docs/research/forensic-field-catalog-*.md)
+families:
+- id: email
+  label: 이메일
+  types:
+  - email-message
+  - email-mailbox
+  - cloud-mail
+  kinds:
+  - email
+  core_columns:
+  - key: date
+    label: Date(발신 주장)
+    aliases:
+    - date_header
+    format: time
+    ts_kind: sent
+    width: 170
+  - key: from
+    label: 보낸 사람
+  - key: to
+    label: 받는 사람
+    aliases:
+    - cc
+    - bcc
+  - key: subject
+    label: 제목
+    width: 280
+  - key: message_id
+    label: 메시지 ID (Message-ID)
+    format: mono
+  - key: authentication_results
+    label: 인증 결과(SPF/DKIM/DMARC)
+    aliases:
+    - auth_results
+    format: mono
+  - key: return_path
+    label: 반송 주소 (Return-Path)
+    format: mono
+  - key: reply_to
+    label: 회신 주소 (Reply-To)
+    format: mono
+  - key: attachment_count
+    label: 첨부
+    aliases:
+    - attachments
+    format: number
+    width: 70
+  - key: folder
+    label: 폴더
+    aliases:
+    - mailbox_folder
+  aux_columns:
+  - key: received
+    label: Received 체인
+    format: mono
+  - key: x_originating_ip
+    label: 발신 IP (X-Originating-IP)
+    format: mono
+  - key: thread_parent_id
+    label: 상위 메시지 (In-Reply-To)
+    aliases:
+    - in_reply_to
+    format: mono
+  - key: body_preview
+    label: 본문 미리보기
+  - key: body_sha256
+    label: 본문 SHA-256
+    format: mono
+  - key: source_format
+    label: 원본 형식
+  rules:
+  - email.spf_fail
+  - email.dkim_fail
+  - email.dmarc_fail
+  - email.display_name_spoof
+  - email.reply_to_differs
+  - email.returnpath_from_mismatch
+  - email.msgid_domain_mismatch
+  - email.attach_double_ext
+  - email.attach_ext_mime_mismatch
+  - email.attach_exec_or_archive_enc
+  - email.date_vs_received_skew
+  - email.external_forward_auto
+  - email.bcc_self_or_personal
+rules:
+- id: email.spf_fail
+  family: email
+  grade: B
+  label_ko: SPF 실패
+  rationale_ko: 'Authentication-Results/Received-SPF의 spf=fail/softfail: 발신 서버 비인가.'
+  false_positive_ko: 포워딩·메일링 리스트는 SPF가 깨지는 게 정상.
+  sources: &id001
+  - https://www.rfc-editor.org/rfc/rfc8601
+  - https://learn.microsoft.com/en-us/office/client-developer/outlook/mapi/pidtagtransportmessageheaders-canonical-property
+  - https://technet.microsoft.com/en-us/library/cc815404(v=office.14)
+  - https://mxtoolbox.com/dmarc/spf/spf-alignment
+  version: 1
+  status: verified
+  params: {}
+- id: email.dkim_fail
+  family: email
+  grade: C
+  label_ko: DKIM 실패·없음
+  rationale_ko: 'dkim=fail/none: 변조 또는 서명 없음.'
+  false_positive_ko: 리스트 서버의 제목·본문 수정.
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}
+- id: email.dmarc_fail
+  family: email
+  grade: B
+  label_ko: DMARC 실패
+  rationale_ko: 'dmarc=fail: Return-Path/DKIM d=와 From 도메인 정렬 실패.'
+  false_positive_ko: 제3자 발송(마케팅 SaaS).
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}
+- id: email.display_name_spoof
+  family: email
+  grade: B
+  label_ko: 표시 이름 사칭
+  rationale_ko: 'From 표시 이름에 실제 주소와 다른 도메인의 주소가 들어 있음: 사칭.'
+  false_positive_ko: 정상 개인 메일 별칭.
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}
+- id: email.reply_to_differs
+  family: email
+  grade: B
+  label_ko: Reply-To 도메인 불일치
+  rationale_ko: 'Reply-To 도메인이 From 도메인과 다름: 회신 탈취(BEC).'
+  false_positive_ko: 지원센터·비서 대행.
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}
+- id: email.returnpath_from_mismatch
+  family: email
+  grade: C
+  label_ko: Return-Path 도메인 불일치
+  rationale_ko: 'Return-Path(봉투 발신자) 도메인이 From 도메인과 다름: 대리 발송.'
+  false_positive_ko: ESP 사용.
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}
+- id: email.msgid_domain_mismatch
+  family: email
+  grade: C
+  label_ko: Message-ID 도메인 불일치
+  rationale_ko: 'Message-ID 도메인이 From 도메인과 다름: 위조·다른 시스템 발송.'
+  false_positive_ko: 클라우드 메일.
+  sources: *id001
+  version: 1
+  status: provisional
+  params: {}
+- id: email.attach_double_ext
+  family: email
+  grade: B
+  label_ko: 첨부 이중 확장자
+  rationale_ko: '첨부 이름이 .pdf.exe·.docx.js처럼 문서 확장자 뒤에 실행 확장자: 확장자 위장.'
+  false_positive_ko: 드물게 정상 파일명.
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}
+- id: email.attach_ext_mime_mismatch
+  family: email
+  grade: C
+  label_ko: 첨부 확장자·내용 불일치
+  rationale_ko: '첨부 앞부분 바이트(매직)가 확장자와 다른 형식: 위장.'
+  false_positive_ko: 서버 변환.
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}
+- id: email.attach_exec_or_archive_enc
+  family: email
+  grade: B
+  label_ko: 실행형·암호화 압축 첨부
+  rationale_ko: '실행 파일·스크립트·디스크 이미지 첨부 또는 암호화된 ZIP 첨부: 악성 또는 유출.'
+  false_positive_ko: 업무상 암호화 zip.
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}
+- id: email.date_vs_received_skew
+  family: email
+  grade: B
+  label_ko: Date와 Received 차
+  rationale_ko: 'Date 헤더와 수신 서버 Received 시각 차가 하루 초과: 시계 조작·백데이트.'
+  false_positive_ko: 큐 지연, 시계 오류.
+  sources: *id001
+  version: 1
+  status: verified
+  params:
+    max_skew_hours: 24
+- id: email.external_forward_auto
+  family: email
+  grade: C
+  label_ko: 외부 주소로 반복 전달
+  rationale_ko: '메일함 소유 도메인에서 같은 외부 주소로 임계값 이상 발송: 자동 전달·유출.'
+  false_positive_ko: 퇴사자 인수인계.
+  sources: *id001
+  version: 1
+  status: provisional
+  params:
+    min_count: 20
+- id: email.bcc_self_or_personal
+  family: email
+  grade: C
+  label_ko: 개인 메일로 발송
+  rationale_ko: '소유 도메인 발신 메일의 수신자(To/Cc/Bcc)에 개인 웹메일 주소: 유출 정황.'
+  false_positive_ko: 정당한 개인 연락.
+  sources: *id001
+  version: 1
+  status: verified
+  params:
+    personal_domains:
+    - gmail.com
+    - naver.com
+    - daum.net
+    - hanmail.net
+    - kakao.com
+    - nate.com
+    - outlook.com
+    - hotmail.com
+    - live.com
+    - yahoo.com
+    - icloud.com
+    - proton.me
+    - protonmail.com

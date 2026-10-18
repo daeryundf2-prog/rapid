@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import logging
 import re
 import zipfile
 from collections.abc import Mapping
@@ -16,6 +17,7 @@ from fastapi.responses import (
     PlainTextResponse,
 )
 
+from ...core.artifact_profiles import payload_record_count
 from ...core.columnar_store import query_columnar_artifact_records
 from ...core.extract import DEFAULT_EXTRACT_MANIFEST_NAME, ExtractError, run_extract
 from ...core.indicators import (
@@ -77,7 +79,19 @@ from .runops import (
 from .search_index_service import search_index_available
 from .timeline_hist import build_timeline_histogram
 from .tree import build_run_issues, build_run_tree
+from .triage_flags import (
+    FlagQuery,
+    FlagsJoin,
+    filter_files_rows,
+    flag_rows_source,
+    flags_join,
+    is_flags_sort,
+    kind_rows_for_flags,
+    mark_flag_page,
+    parse_flag_query,
+)
 
+LOGGER = logging.getLogger(__name__)
 ACTIVE_RUN_STATUSES = frozenset({"queued", "running"})
 FILTER_LIMIT_MESSAGE = "필터는 limit>0에서만 지원합니다"
 EXTRACT_ZIP_MAX_BYTES = 2 * 1024 * 1024 * 1024
@@ -121,6 +135,25 @@ def capability_response_cache_key(run_id: str, summary: Mapping[str, object]) ->
         except OSError:
             stamps.append((str(path), -1, -1))
     return (run_id, tuple(stamps))
+
+
+def _run_output_dir_or_none(summary: Mapping[str, object] | None) -> Path | None:
+    if summary is None:
+        return None
+    try:
+        return run_output_dir(summary)
+    except RuntimeError:
+        return None
+
+
+def _attach_artifact_flags(response: dict[str, object], join: FlagsJoin) -> None:
+    """``flags`` on every row of every kind page and the response's ``flags_join``."""
+    pages = response.get("artifacts")
+    if isinstance(pages, dict):
+        for kind_name, page in pages.items():
+            if isinstance(page, dict) and isinstance(page.get("artifacts"), list):
+                page["artifacts"] = join.attach(page["artifacts"], str(kind_name))
+    response["flags_join"] = dict(join.info)
 
 
 def build_runs_router(
@@ -392,8 +425,22 @@ def build_runs_router(
         locate: int | None = Query(default=None, ge=0),
         artifact_type: list[str] = Query(default=[]),
         after: str | None = Query(default=None),
+        flag: list[str] = Query(default=[]),
+        flag_grade: str | None = Query(default=None),
     ) -> dict[str, object]:
         """Page per-kind artifact rows; every row carries its JSONL ``record_index``.
+
+        특이사항 (plan viewer-families §3.1): every row carries ``flags`` (the
+        newest completed ``triage-flags`` set; ``[]`` when none) and the
+        response reports ``flags_join = {status: joined|no_source|too_large|
+        skipped, source?, analysis_id?, generated_at?, catalog_version?,
+        reason?}``. ``flag`` (repeatable rule id: any of) and ``flag_grade``
+        (``A``/``B``/``C``: strongest flag at least that grade) filter
+        server-side (``limit > 0``; unknown ids / grades are a 422, no flag set
+        a 409); they compose with ``kind``, ``artifact_type``,
+        ``path_contains`` and ``sort`` (zero or several kinds page across
+        kinds like ``artifact_type``). ``sort=flags`` (one kind) orders A, B,
+        C rows first (record order inside a grade) and then the unflagged rows.
 
         ``artifact_type`` (repeatable) keeps only rows of those types: a
         streaming filter (with ``limit > 0``) composable with ``kind``,
@@ -428,10 +475,17 @@ def build_runs_router(
         wanted_kinds = {item.strip() for item in kind if item.strip()}
         wanted_types = frozenset(item.strip() for item in artifact_type if item.strip()) or None
         needle = path_contains.strip() if path_contains and path_contains.strip() else None
-        if (wanted_types or needle) and limit <= 0:
-            raise HTTPException(status_code=400, detail=FILTER_LIMIT_MESSAGE)
         sort_key = sort.strip() if sort and sort.strip() else None
+        flag_sort = is_flags_sort(sort_key)
+        flag_query = parse_flag_query(flag, flag_grade, sort_flags=flag_sort)
+        if (wanted_types or needle or flag_query.active) and limit <= 0:
+            raise HTTPException(status_code=400, detail=FILTER_LIMIT_MESSAGE)
+        if flag_sort:
+            if len(wanted_kinds) != 1:
+                raise HTTPException(status_code=400, detail="특이사항 정렬(sort=flags)은 kind를 하나만 지정할 때 쓸 수 있습니다")
+            sort_key = None
         sort_order = (order or "").strip().lower() or None
+        join = flags_join(_run_output_dir_or_none(job.summary))
         if sort_key:
             head, _, suffix = sort_key.rpartition(":")
             if head and suffix.lower() in SORT_ORDERS:
@@ -442,8 +496,8 @@ def build_runs_router(
             sort_order = sort_order or "asc"
             if sort_order not in SORT_ORDERS:
                 raise HTTPException(status_code=400, detail="order must be asc or desc")
-        if (wanted_types or needle) and not sort_key and len(wanted_kinds) != 1 and limit > 0:
-            return _artifacts_across_kinds(
+        if (wanted_types or needle or flag_query.filtered) and not sort_key and not flag_sort and len(wanted_kinds) != 1 and limit > 0:
+            response = _artifacts_across_kinds(
                 run_id,
                 outputs,
                 kinds=list(dict.fromkeys(item.strip() for item in kind if item.strip())),
@@ -452,7 +506,11 @@ def build_runs_router(
                 offset=offset,
                 limit=limit,
                 after=after,
+                join=join,
+                flag_query=flag_query,
             )
+            _attach_artifact_flags(response, join)
+            return response
         artifacts = {}
         kind_payloads: dict[str, dict[str, object]] = {}
         for name in sorted(outputs):
@@ -463,7 +521,7 @@ def build_runs_router(
                     artifact_payload = store.read_output(run_id, name)
                     kind_payloads[name.removeprefix("artifacts_")] = artifact_payload
                     if sort_key:
-                        artifacts[name.removeprefix("artifacts_")] = paginate_sorted_artifact_output(
+                        sorted_page = paginate_sorted_artifact_output(
                             artifact_payload,
                             run_id=run_id,
                             kind=name.removeprefix("artifacts_"),
@@ -476,7 +534,40 @@ def build_runs_router(
                             path_contains=needle,
                             locate=locate,
                             artifact_types=wanted_types,
+                            allowed_records=(
+                                join.require_index().matching(name.removeprefix("artifacts_"), flag_query.rule_ids, flag_query.grade)
+                                if flag_query.filtered
+                                else None
+                            ),
                         )
+                        if flag_query.filtered:
+                            mark_flag_page(sorted_page, flag_query)
+                        artifacts[name.removeprefix("artifacts_")] = sorted_page
+                        continue
+                    if flag_query.active:
+                        payload_path = get_output_path(store, run_id, name)
+                        kind_page = filter_artifact_page(
+                            artifact_payload,
+                            payload_path=payload_path,
+                            path_contains=needle,
+                            offset=offset,
+                            limit=limit,
+                            artifact_types=wanted_types,
+                            rows_source=flag_rows_source(
+                                artifact_payload,
+                                payload_path,
+                                kind=name.removeprefix("artifacts_"),
+                                join=join,
+                                query=flag_query,
+                            ),
+                        )
+                        mark_flag_page(
+                            kind_page,
+                            flag_query,
+                            record_count=payload_record_count(artifact_payload),
+                            other_filters=bool(needle or wanted_types),
+                        )
+                        artifacts[name.removeprefix("artifacts_")] = kind_page
                         continue
                     if (needle or wanted_types) and limit > 0:
                         artifacts[name.removeprefix("artifacts_")] = filter_artifact_page(
@@ -501,10 +592,12 @@ def build_runs_router(
                     raise HTTPException(status_code=403, detail=str(exc))
                 except FileNotFoundError as exc:
                     raise HTTPException(status_code=404, detail=str(exc))
+        filtered_pages = bool(needle or wanted_types or flag_query.filtered) and limit > 0
         for kind_name, page in artifacts.items():
             if isinstance(page, dict) and kind_name in kind_payloads:
-                annotate_page_counts(page, kind_payloads[kind_name], filtered=bool(needle or wanted_types) and limit > 0)
+                annotate_page_counts(page, kind_payloads[kind_name], filtered=filtered_pages)
         response: dict[str, object] = {"artifacts": artifacts}
+        _attach_artifact_flags(response, join)
         if sort_key:
             statuses = [
                 page["sort"].get("status")
@@ -525,6 +618,8 @@ def build_runs_router(
         offset: int,
         limit: int,
         after: str | None,
+        join: FlagsJoin,
+        flag_query: FlagQuery,
     ) -> dict[str, object]:
         available = [name.removeprefix("artifacts_") for name in sorted(outputs) if name.startswith("artifacts_")]
         ordered = [item for item in kinds if item in available] if kinds else available
@@ -547,6 +642,8 @@ def build_runs_router(
                 offset=offset,
                 limit=limit,
                 after=after,
+                rows_for=kind_rows_for_flags(join, flag_query) if flag_query.filtered else None,
+                extra={"flags": flag_query.descriptor()} if flag_query.filtered else None,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
@@ -677,8 +774,16 @@ def build_runs_router(
         cursor: str | None = Query(default=None),
         category: list[str] = Query(default=[]),
         scope: str = Query("candidates", pattern="^(candidates|inventory)$"),
+        flag: list[str] = Query(default=[]),
+        flag_grade: str | None = Query(default=None),
+        sort: str | None = Query(default=None),
     ) -> dict[str, object]:
         """Paged file rows joined with the newest ``ntfs-meta`` analysis.
+
+        특이사항: rows carry ``flags`` (kind ``files:<scope>``) and the page
+        reports ``flags_join`` like ``GET /artifacts``; ``flag``/``flag_grade``
+        filter and ``sort=flags`` (the only sort here; others are a 422)
+        orders A, B, C, unflagged (``limit > 0``; composes with ``category``).
 
         ``scope`` picks the files-output list: ``candidates`` (default; files
         of the selected categories) or ``inventory`` (every other scanned file,
@@ -710,7 +815,26 @@ def build_runs_router(
         payload = get_named_output(store, run_id, "files")
         collection = scope
         wanted = frozenset(item.strip() for item in category if item.strip())
-        if wanted:
+        sort_flags = is_flags_sort(sort)
+        if sort and sort.strip() and not sort_flags:
+            # Only sort=flags exists here; other values are ignored (as before this parameter existed).
+            LOGGER.info("GET /files ignores unsupported sort=%r", sort[:64])
+        flag_query = parse_flag_query(flag, flag_grade, sort_flags=sort_flags)
+        join = flags_join(_run_output_dir_or_none(get_job(store, run_id).summary))
+        if flag_query.active:
+            if limit <= 0:
+                raise HTTPException(status_code=400, detail=FILTER_LIMIT_MESSAGE)
+            all_rows = payload.get(collection) if isinstance(payload.get(collection), list) else []
+            page_rows, flag_pagination = filter_files_rows(
+                all_rows, collection=collection, join=join, query=flag_query, categories=wanted or None, offset=offset, limit=limit
+            )
+            page = files_page_base(payload, collection)
+            page[collection] = page_rows
+            page["record_count"] = len(all_rows)
+            page["matched"] = flag_pagination["matched"]
+            page["pagination"] = flag_pagination
+            mark_flag_page(page, flag_query, record_count=len(all_rows), other_filters=bool(wanted))
+        elif wanted:
             if limit <= 0:
                 raise HTTPException(status_code=400, detail=FILTER_LIMIT_MESSAGE)
             page = filter_files_by_category(payload, wanted, offset=offset, limit=limit, collection=collection)
@@ -735,7 +859,11 @@ def build_runs_router(
         except HTTPException:
             run = None  # no usable output dir: serve the rows without the NTFS join
         # Volume-prefix detection samples the scope's own full list.
-        return join_files_page(run, page, (inventory or []) if collection == "inventory" else candidates, collection=collection)
+        joined = join_files_page(run, page, (inventory or []) if collection == "inventory" else candidates, collection=collection)
+        if isinstance(joined.get(collection), list):
+            joined[collection] = join.attach(joined[collection], f"files:{collection}")
+        joined["flags_join"] = dict(join.info)
+        return joined
 
 
     @router.get("/api/runs/{run_id}/docs")

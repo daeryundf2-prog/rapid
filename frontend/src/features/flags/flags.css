@@ -1,0 +1,221 @@
+/* 특이사항 (viewer-families U-F4). Grade colours reuse the status text tokens (--danger / --warn /
+   --text-muted), which pass the contrast gate on every row surface; no new colour tokens. */
+
+.flag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  height: 18px;
+  padding: 0 5px;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-table-aux);
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.flag-chip[data-grade="A"] {
+  color: var(--danger);
+}
+
+.flag-chip[data-grade="B"] {
+  color: var(--warn);
+}
+
+.flag-chip[data-grade="C"] {
+  color: var(--text-muted);
+}
+
+.flag-chip-grade {
+  font-weight: 700;
+}
+
+.flag-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+}
+
+.flag-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.flag-cell:focus-visible {
+  outline: var(--focus-width) solid var(--focus);
+  outline-offset: var(--focus-offset);
+}
+
+.flag-more {
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
+}
+
+.flag-popover-anchor {
+  z-index: 700;
+}
+
+.flag-popover {
+  max-width: min(460px, calc(100vw - var(--space-6)));
+}
+
+.flag-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--line-subtle);
+}
+
+.flag-detail-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+
+.flag-detail-text {
+  margin: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.flag-muted {
+  color: var(--text-muted);
+}
+
+.flag-provisional {
+  padding: 0 5px;
+  border: 1px dashed var(--warn);
+  border-radius: var(--radius-sm);
+  color: var(--warn);
+  font-size: var(--fs-table-aux);
+  font-weight: 500;
+}
+
+.flag-evidence {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px var(--space-2);
+  margin: 0;
+}
+
+.flag-evidence > div {
+  display: contents;
+}
+
+.flag-evidence dt {
+  color: var(--text-muted);
+}
+
+.flag-evidence dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.flag-sources a {
+  color: var(--accent);
+}
+
+/* Viewer banner (U-F4): the row's flags, above the mode tabs in every mode. */
+.flag-banner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0 var(--space-3) var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line-subtle);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+}
+
+.flag-banner[data-grade="A"] {
+  border-left-color: var(--danger);
+}
+
+.flag-banner[data-grade="C"] {
+  border-left-color: var(--line);
+}
+
+.flag-banner-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  cursor: pointer;
+  list-style: none;
+}
+
+.flag-banner-summary::-webkit-details-marker {
+  display: none;
+}
+
+.flag-banner-summary strong {
+  margin-right: var(--space-1);
+}
+
+.policy-banner {
+  margin: 0;
+  padding: var(--space-1) var(--space-3);
+  border-left: 3px solid var(--info);
+  color: var(--text);
+  font-size: var(--fs-table-aux);
+}
+
+.flag-banner-summary::before {
+  content: "▸";
+  color: var(--text-muted);
+}
+
+.flag-banner[open] > .flag-banner-summary::before {
+  content: "▾";
+}
+
+.flag-banner-summary:focus-visible {
+  outline: var(--focus-width) solid var(--focus);
+  outline-offset: var(--focus-offset);
+}
+
+.flag-banner-title {
+  font-weight: 600;
+}
+
+.flag-banner-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+
+.flag-banner-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+/* Grid notices of the 특이사항 filter (no flag set / policy-dependent sources). */
+.flag-grid-notice {
+  margin: 0;
+  padding: var(--space-1) var(--space-3);
+  border-left: 3px solid var(--warn);
+  background: var(--surface-1);
+  color: var(--text);
+  font-size: var(--fs-table-aux);
+}

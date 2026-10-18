@@ -1,0 +1,364 @@
+# Triage catalogue: accounts (plan viewer-families-2026-10-15; research docs/research/forensic-field-catalog-*.md)
+families:
+- id: sam-account
+  label: SAM 계정
+  types:
+  - windows-sam-account
+  - windows-sam-account-candidate
+  core_columns:
+  - key: last_logon_at
+    label: 마지막 로그온
+    format: time
+    ts_kind: last-logon
+  - key: user_name
+    label: 계정
+    aliases:
+    - user_name_candidate
+    - account_name
+  - key: well_known_account_ko
+    label: 기본 계정
+  - key: full_name
+    label: 전체 이름
+  - key: rid
+    label: 상대 ID (RID)
+    aliases:
+    - rid_decimal
+    format: number
+  - key: rid_hex
+    label: RID(16진)
+    format: mono
+  - key: sid
+    label: 보안 식별자 (SID)
+    aliases:
+    - user_sid
+    format: sid
+  - key: logon_count
+    label: 로그온 수
+    format: number
+  - key: failed_logon_count
+    label: 로그온 실패 수
+    format: number
+  - key: acb_flags_labels_ko
+    label: 계정 플래그(UAC)
+    aliases:
+    - acb_flags_names
+    - acb_flags_hex
+    - acb_flags
+    - uac_flags
+  aux_columns:
+  - key: account_disabled
+    label: 사용 안 함
+  - key: account_locked
+    label: 잠김
+  - key: password_never_expires
+    label: 암호 만료 없음
+  - key: password_not_required
+    label: 암호 필요 없음
+  - key: group_memberships
+    label: 그룹
+  - key: admin_member
+    label: 관리자 그룹 구성원
+  - key: candidate_role
+    label: 역할
+    aliases:
+    - account_type_hint
+  - key: comment
+    label: 설명
+    aliases:
+    - user_comment
+  - key: profile_path
+    label: 프로필 경로
+    aliases:
+    - home_directory
+    format: path
+  - key: logon_script
+    label: 로그온 스크립트
+    format: path
+  - key: lm_hash_present
+    label: 해시 저장됨(LM/NT)
+    aliases:
+    - nt_hash_present
+  - key: key_path
+    label: 키 경로
+    aliases:
+    - key
+    format: path
+  - key: password_last_set_at
+    label: 암호 마지막 변경
+    format: time
+    ts_kind: password-last-set
+  - key: last_failed_logon_at
+    label: 마지막 로그온 실패
+    format: time
+    ts_kind: last-failed-logon
+  - key: account_expires_at
+    label: 계정 만료
+    format: time
+    ts_kind: account-expires
+  - key: rid_key_last_written_at
+    label: 키 마지막 기록
+    aliases:
+    - names_key_last_written_at
+    - key_last_written_at
+    - last_written_at
+    format: time
+    ts_kind: last-written
+  rules:
+  - accounts.new_account
+- id: sam-group
+  label: SAM 그룹
+  types:
+  - windows-sam-group
+  - windows-sam-group-candidate
+  - windows-group-membership
+  core_columns:
+  - key: key_last_written_at
+    label: 키 마지막 기록
+    aliases:
+    - last_written_at
+    format: time
+    ts_kind: last-written
+  - key: group_name
+    label: 그룹
+    aliases:
+    - group_name_candidate
+    - name
+  - key: rid
+    label: 상대 ID (RID)
+    aliases:
+    - alias_rid_decimal
+    - rid_decimal
+    format: number
+  - key: group_sid
+    label: 그룹 보안 식별자 (SID)
+    aliases:
+    - sid
+    format: sid
+  - key: member_names
+    label: 구성원
+    aliases:
+    - member_sids
+    - member_rids
+    - members
+  - key: member_count
+    label: 구성원 수
+    format: number
+  - key: privileged_group
+    label: 특권 그룹
+  - key: group_scope_ko
+    label: 범위
+    aliases:
+    - group_scope
+  - key: comment
+    label: 설명
+    aliases:
+    - description
+  - key: key_path
+    label: 키 경로
+    aliases:
+    - key
+    format: path
+  aux_columns: []
+  rules: []
+- id: task
+  label: 예약 작업
+  types:
+  - task-scheduler-task
+  core_columns:
+  - key: registration_date
+    label: 등록
+    format: time
+    ts_kind: registered
+  - key: task_uri
+    label: 작업 경로
+    format: path
+  - key: command
+    label: 명령
+    aliases:
+    - executable_name
+    format: mono
+  - key: arguments
+    label: 인수
+    format: mono
+  - key: command_line
+    label: 명령줄
+    aliases:
+    - action_preview
+    format: mono
+  - key: working_directory
+    label: 작업 폴더
+    format: path
+  - key: author
+    label: 작성자
+  - key: user_id
+    label: 실행 계정(UserId)
+  - key: logon_type
+    label: 로그온 방식
+  - key: run_level
+    label: 실행 수준
+  aux_columns:
+  - key: trigger_types
+    label: 트리거
+  - key: trigger_details
+    label: 트리거 세부
+  - key: start_boundaries
+    label: 시작 시각(트리거)
+  - key: actions
+    label: 동작
+  - key: principals
+    label: 주체
+  - key: hidden
+    label: 숨김
+  - key: normalized_action
+    label: 동작 분류
+  - key: modified_at
+    label: 작업 파일 수정
+    format: time
+    ts_kind: modified
+  rules:
+  - accounts.task_suspicious
+  - accounts.task_mismatch
+- id: wer
+  label: 오류 보고(WER)
+  types:
+  - wer-report
+  core_columns:
+  - key: event_time
+    label: 이벤트 시각
+    aliases:
+    - timestamp
+    format: time
+    ts_kind: event
+  - key: application_name
+    label: 앱
+    aliases:
+    - application
+    - signature_application_name
+  - key: application_path
+    label: 앱 경로
+    format: path
+  - key: application_version
+    label: 앱 버전
+  - key: event_type_name
+    label: 이벤트 유형
+    aliases:
+    - friendly_event_name
+    - event_type
+  - key: exception_code
+    label: 예외 코드
+    format: mono
+  - key: exception_offset
+    label: 예외 오프셋
+    format: mono
+  - key: fault_module_name
+    label: 오류 모듈
+    aliases:
+    - module
+  - key: fault_module_path
+    label: 오류 모듈 경로
+    format: path
+  - key: fault_module_version
+    label: 오류 모듈 버전
+  aux_columns:
+  - key: event_time_raw
+    label: 이벤트 시각(원문)
+    format: mono
+  - key: report_id
+    label: 보고서 ID
+    format: mono
+  - key: bucket_id
+    label: 버킷
+    aliases:
+    - bucket
+    format: mono
+  - key: cab_id
+    label: CAB 파일 ID
+    format: mono
+  - key: package_full_name
+    label: 패키지
+  - key: problem_signature
+    label: 문제 서명
+  - key: report_store
+    label: 보고서 저장소
+  - key: upload_time
+    label: 업로드
+    format: time
+    ts_kind: upload
+  rules:
+  - accounts.wer_anomaly
+rules:
+- id: accounts.new_account
+  family: eventlog-event
+  grade: B
+  label_ko: 신규·숨김 계정
+  rationale_ko: 4720 계정 생성(사건 시간대 지정 시 그 안), 또는 이름이 $로 끝나는 로컬 SAM 계정(숨김 계정 기법).
+  false_positive_ko: 정상 프로비저닝.
+  sources: &id001
+  - https://docs.logpoint.com/agentx/references/windows-event-ids-reference
+  - https://www.manageengine.com/products/active-directory-audit/kb/windows-security-log-event-id-4698.html
+  - https://www.cybertriage.com/blog/windows-registry-forensics-cheat-sheet-2026/
+  - https://www.sans.org/blog/digital-forensics-application-execution/
+  version: 1
+  status: provisional
+  params: {}
+- id: accounts.admin_added
+  family: eventlog-event
+  grade: B
+  label_ko: 관리자 그룹 추가
+  rationale_ko: '4732/4728/4756으로 Administrators(S-1-5-32-544) 또는 *Admins 그룹에 구성원 추가: 권한 상승.'
+  false_positive_ko: 정상 관리 작업.
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}
+- id: accounts.task_suspicious
+  family: task
+  grade: B
+  label_ko: 의심 예약 작업
+  rationale_ko: '작업 동작이 사용자 쓰기 경로·PowerShell·LOLBin이거나, 숨김 작업이 분 단위 반복·SYSTEM으로 실행: 지속성.'
+  false_positive_ko: 업데이터.
+  sources: *id001
+  version: 1
+  status: verified
+  params:
+    max_repeat_minutes: 5
+- id: accounts.task_mismatch
+  family: task
+  grade: C
+  label_ko: 예약 작업 파일·TaskCache 불일치
+  rationale_ko: TaskCache 키에 SD 값이 없거나(숨김 작업 기법) 작업 파일과 TaskCache 키가 한쪽에만 있음.
+  false_positive_ko: 손상, 수집 범위 차이.
+  sources: *id001
+  version: 1
+  status: provisional
+  params: {}
+- id: accounts.service_suspicious
+  family: service
+  grade: B
+  label_ko: 비표준 ServiceDll
+  rationale_ko: '서비스 ServiceDll이 System32/SysWOW64 밖: 지속성(svchost 호스팅 악성 DLL).'
+  false_positive_ko: 서드파티 드라이버·서비스.
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}
+- id: accounts.profile_anomaly
+  family: system-info
+  grade: C
+  label_ko: 비표준 프로필 경로
+  rationale_ko: 'ProfileList 프로필 경로가 Users·서비스 프로필 밖: 은닉 계정·비정상 프로필.'
+  false_positive_ko: 이전 OS에서 옮긴 프로필.
+  sources: *id001
+  version: 1
+  status: provisional
+  params: {}
+- id: accounts.wer_anomaly
+  family: wer
+  grade: C
+  label_ko: 의심 경로 앱 충돌(WER)
+  rationale_ko: 'WER 보고서의 앱 경로가 Temp/Downloads/Public이거나 실행 파일이 목록에 없음: 실행 흔적 보강.'
+  false_positive_ko: 정상 앱 크래시.
+  sources: *id001
+  version: 1
+  status: provisional
+  params: {}

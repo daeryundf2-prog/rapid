@@ -4,6 +4,7 @@
     "includes": [
       "**",
       "!src/schemas",
+      "!src/features/flags/families.fallback.json",
       "!node_modules",
       "!test-results",
       "!playwright-report",

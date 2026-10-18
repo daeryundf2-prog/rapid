@@ -1,5 +1,6 @@
 import { fetchFilesPage } from "../../../api/collections";
 import { formatGridTime } from "../../../utils/time";
+import { parseFlags } from "../../flags/flags";
 import type { CollectionDef, ColumnSpec } from "../types";
 import {
   baseName,
@@ -23,6 +24,7 @@ import {
   modifiedCell,
   signatureCell,
 } from "./FileCells";
+import { flagsColumn } from "./families";
 
 /** Shown on the NTFS columns while no NTFS-meta analysis has been joined (plan U-P1-3). */
 export const NTFS_EMPTY_HINT = "NTFS 메타 분석을 실행하면 채워집니다";
@@ -265,14 +267,25 @@ export const SIGNATURE_STATE_LABELS: Readonly<Record<string, string>> = {
 };
 
 /** Files default layout, highest priority first: 이름 > 수정 > 크기 > 선별 > 경로 > NTFS 생성. */
-export const FILES_PRIORITY = ["title", "timestamp", "size", "review", "path", "ntfsCreated"] as const;
+export const FILES_PRIORITY = [
+  "title",
+  "flags",
+  "timestamp",
+  "size",
+  "review",
+  "path",
+  "ntfsCreated",
+] as const;
 
 export const filesCollection: CollectionDef = {
   id: "files",
   label: "파일",
   source: "paged",
   fetch: (runId, query, signal) =>
-    fetchFilesPage(runId, query.offset, query.limit, signal, query.ref.category || undefined),
+    fetchFilesPage(runId, query.offset, query.limit, signal, query.ref.category || undefined, {
+      ids: query.flags,
+      grade: query.flagGrade,
+    }),
   widthPriority: () => FILES_PRIORITY,
   mapRow: (raw, position, ctx) => {
     // A category-filtered page is not candidate-ordered: keep the candidate's own index.
@@ -329,6 +342,7 @@ export const filesCollection: CollectionDef = {
         // Directory candidates: the viewer shows a directory state instead of requesting a preview.
         isDirectory: isDirectoryRaw(raw, path),
         ...recoveryFields(raw.recovery),
+        ...(Array.isArray(raw.flags) ? { flags: raw.flags, flagList: parseFlags(raw.flags) } : {}),
       },
     );
   },
@@ -336,6 +350,8 @@ export const filesCollection: CollectionDef = {
   // minimum width; 이름 takes the slack and a narrow grid hides columns by FILES_PRIORITY.
   columns: [
     { ...col.title("이름", 220), minWidth: 220 },
+    // 특이사항 (U-F4): hidden while no loaded row carries a flag (FILES_PRIORITY empty-column rule).
+    flagsColumn(["analysis", "compact"]),
     col.path(200, ["analysis", "source"]),
     col.field("size", "크기", 80, ["analysis", "compact"], (r) => (r.fields.size as number | null) ?? null, {
       align: "right",

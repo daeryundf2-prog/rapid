@@ -1,0 +1,638 @@
+# Triage catalogue: browser (plan viewer-families-2026-10-15; research docs/research/forensic-field-catalog-*.md)
+families:
+- id: browser-visit
+  label: 브라우저 방문
+  types:
+  - browser-visit
+  - mobile-browser
+  core_columns:
+  - key: timestamp
+    label: 방문 시각
+    aliases:
+    - visit_time
+    format: time
+    ts_kind: visited
+  - key: url
+    label: 주소 (URL)
+    format: url
+  - key: title
+    label: 제목
+  - key: visit_count
+    label: 방문 수
+    format: number
+  - key: typed_count
+    label: 직접 입력 수
+    format: number
+  - key: transition_core
+    label: 전환
+    aliases:
+    - transition
+  - key: transition_qualifiers
+    label: 전환 한정자
+  - key: from_url
+    label: 이전 URL
+    format: url
+  - key: external_referrer_url
+    label: 외부 참조 URL
+    format: url
+  - key: visit_duration_seconds
+    label: 머문 시간
+    aliases:
+    - visit_duration_micros
+  aux_columns:
+  - key: visit_time_raw
+    label: 방문 시각(원문 WebKit)
+    format: mono
+  - key: domain
+    label: 도메인
+  - key: browser
+    label: 브라우저
+  - key: profile
+    label: 프로필
+  - key: user
+    label: 사용자
+  rules:
+  - browser.incognito_gap
+  - browser.history_cleared
+  - browser.typed_url_direct
+- id: browser-download
+  label: 브라우저 다운로드
+  types:
+  - browser-download
+  core_columns:
+  - key: started_at
+    label: 다운로드 시작
+    aliases:
+    - timestamp
+    format: time
+    ts_kind: download-start
+  - key: source_url
+    label: 출처 주소 (URL)
+    aliases:
+    - url
+    format: url
+  - key: tab_url
+    label: 탭 URL
+    format: url
+  - key: referrer
+    label: 참조 URL
+    aliases:
+    - tab_referrer_url
+    - site_url
+    format: url
+  - key: target_path
+    label: 대상 경로
+    aliases:
+    - current_path
+    format: path
+  - key: total_bytes
+    label: 크기
+    aliases:
+    - received_bytes
+    format: bytes
+  - key: state_name
+    label: 상태
+    aliases:
+    - state
+  - key: danger_type_name
+    label: 위험 판정
+    aliases:
+    - danger_type
+  - key: interrupt_reason
+    label: 중단 사유
+  - key: opened
+    label: 열림
+  aux_columns:
+  - key: mime_type
+    label: 파일 형식 (MIME)
+    aliases:
+    - original_mime_type
+  - key: url_chain
+    label: URL 체인
+  - key: by_extension_name
+    label: 확장 프로그램
+    aliases:
+    - by_extension_id
+  - key: guid
+    label: 고유 ID (GUID)
+    format: mono
+  - key: browser
+    label: 브라우저
+  - key: profile
+    label: 프로필
+  - key: user
+    label: 사용자
+  - key: ended_at
+    label: 다운로드 완료
+    format: time
+    ts_kind: download-end
+  - key: last_accessed_at
+    label: 마지막 열람
+    format: time
+    ts_kind: last-accessed
+  rules:
+  - browser.dl_from_filesharing
+  - browser.dl_dangerous
+  - browser.dl_missing_file
+- id: browser-history
+  label: 브라우저 방문 기록
+  types:
+  - browser-history
+  - browser-history-downloads
+  - macos-browser-history-downloads
+  kinds:
+  - browser
+  core_columns:
+  - key: timestamp
+    label: 마지막 방문
+    format: time
+    ts_kind: last-visited
+  - key: url
+    label: 주소 (URL)
+    format: url
+  - key: title
+    label: 제목
+  - key: visit_count
+    label: 방문 수
+    format: number
+  - key: typed_count
+    label: 직접 입력 수
+    format: number
+  - key: hidden
+    label: 숨김
+  - key: last_visit_time_raw
+    label: 마지막 방문(원문 WebKit)
+    format: mono
+  - key: domain
+    label: 도메인
+  - key: browser
+    label: 브라우저
+  - key: profile
+    label: 프로필
+  aux_columns:
+  - key: user
+    label: 사용자
+  - key: history_count
+    label: 방문 기록 수
+    format: number
+  - key: download_count
+    label: 다운로드 수
+    format: number
+  - key: top_domains
+    label: 상위 도메인
+  rules:
+  - browser.incognito_gap
+  - browser.history_cleared
+- id: browser-cookie
+  label: 쿠키
+  types:
+  - browser-cookie
+  core_columns:
+  - key: created_at
+    label: 생성
+    aliases:
+    - timestamp
+    format: time
+    ts_kind: created
+  - key: host
+    label: 호스트
+    aliases:
+    - host_key
+  - key: name
+    label: 쿠키 이름
+  - key: path
+    label: 경로
+  - key: session_cookie
+    label: 세션 쿠키
+  - key: is_persistent
+    label: 영구 쿠키
+  - key: is_secure
+    label: 보안 전송만 (Secure)
+  - key: is_httponly
+    label: 스크립트 접근 차단 (HttpOnly)
+  - key: samesite
+    label: 교차 사이트 제한 (SameSite)
+  - key: value_present
+    label: 값 있음
+  aux_columns:
+  - key: value_encrypted
+    label: 값 암호화
+  - key: top_frame_site_key
+    label: 최상위 사이트
+  - key: browser
+    label: 브라우저
+  - key: profile
+    label: 프로필
+  - key: last_accessed_at
+    label: 마지막 접근
+    format: time
+    ts_kind: last-accessed
+  - key: last_updated_at
+    label: 마지막 갱신
+    format: time
+    ts_kind: last-updated
+  - key: expires_at
+    label: 만료
+    format: time
+    ts_kind: expires
+  rules: []
+- id: browser-login
+  label: 저장된 로그인
+  types:
+  - browser-login
+  core_columns:
+  - key: date_created
+    label: 저장
+    aliases:
+    - timestamp
+    format: time
+    ts_kind: created
+  - key: origin
+    label: 사이트
+    aliases:
+    - action_url
+    - signon_realm
+    format: url
+  - key: username
+    label: 사용자 이름
+    aliases:
+    - display_name
+  - key: times_used
+    label: 사용 횟수
+    format: number
+  - key: password_stored
+    label: 암호 저장됨
+  - key: blacklisted_by_user
+    label: 저장 안 함(사용자)
+  - key: federation_url
+    label: 연동 URL
+    format: url
+  - key: browser
+    label: 브라우저
+  - key: profile
+    label: 프로필
+  - key: date_last_used
+    label: 마지막 사용
+    format: time
+    ts_kind: last-used
+  aux_columns:
+  - key: date_password_modified
+    label: 암호 변경
+    format: time
+    ts_kind: modified
+  - key: date_synced
+    label: 동기화
+    format: time
+    ts_kind: last-updated
+  rules:
+  - browser.cred_first_use_new_site
+- id: browser-search
+  label: 검색어
+  types:
+  - browser-search
+  core_columns:
+  - key: timestamp
+    label: 검색 시각
+    format: time
+    ts_kind: visited
+  - key: term
+    label: 검색어
+    aliases:
+    - normalized_term
+  - key: url
+    label: 주소 (URL)
+    format: url
+  - key: title
+    label: 제목
+  - key: search_engine_host
+    label: 검색 엔진
+  - key: browser
+    label: 브라우저
+  - key: profile
+    label: 프로필
+  aux_columns: []
+  rules:
+  - browser.search_sensitive
+- id: browser-bookmark
+  label: 북마크
+  types:
+  - browser-bookmark
+  core_columns:
+  - key: date_added
+    label: 추가
+    aliases:
+    - timestamp
+    format: time
+    ts_kind: created
+  - key: name
+    label: 제목
+    aliases:
+    - title
+  - key: url
+    label: 주소 (URL)
+    format: url
+  - key: folder
+    label: 폴더
+  - key: browser
+    label: 브라우저
+  - key: profile
+    label: 프로필
+  - key: date_last_used
+    label: 마지막 사용
+    format: time
+    ts_kind: last-used
+  aux_columns: []
+  rules: []
+- id: browser-extension
+  label: 브라우저 확장
+  types:
+  - browser-extension
+  core_columns:
+  - key: install_time
+    label: 설치
+    aliases:
+    - timestamp
+    format: time
+    ts_kind: installed
+  - key: name
+    label: 확장 이름
+  - key: extension_id
+    label: 확장 ID
+    format: mono
+  - key: version
+    label: 버전
+  - key: description
+    label: 설명
+  - key: permissions
+    label: 권한
+    aliases:
+    - active_api_permissions
+  - key: state
+    label: 상태
+    aliases:
+    - disable_reasons
+  - key: from_webstore
+    label: 웹 스토어 설치
+  - key: location_name
+    label: 설치 출처
+    aliases:
+    - location
+  - key: was_installed_by_default
+    label: 기본 설치
+  aux_columns:
+  - key: manifest_path
+    label: 매니페스트 경로
+    format: path
+  - key: browser
+    label: 브라우저
+  - key: profile
+    label: 프로필
+  - key: last_update_time
+    label: 마지막 갱신
+    format: time
+    ts_kind: last-updated
+  rules:
+  - browser.ext_broad_perm
+  - browser.ext_sideloaded
+- id: browser-autofill
+  label: 자동완성
+  types:
+  - browser-autofill
+  - browser-autofill-address
+  - browser-credit-card
+  core_columns:
+  - key: date_created
+    label: 생성
+    aliases:
+    - timestamp
+    format: time
+    ts_kind: created
+  - key: field_name
+    label: 입력란
+    aliases:
+    - field_id
+    - name
+  - key: domain
+    label: 도메인
+  - key: value_preview
+    label: 값(마스킹)
+  - key: mask_reason
+    label: 마스킹 사유
+  - key: value_length
+    label: 값 길이
+    format: number
+  - key: value_sha256
+    label: 값 SHA-256
+    format: mono
+  - key: use_count
+    label: 사용 횟수
+    format: number
+  - key: browser
+    label: 브라우저
+  - key: profile
+    label: 프로필
+  aux_columns:
+  - key: date_last_used
+    label: 마지막 사용
+    format: time
+    ts_kind: last-used
+  rules: []
+rules:
+- id: browser.dl_from_filesharing
+  family: browser-download
+  grade: B
+  label_ko: 파일 공유 사이트 다운로드
+  rationale_ko: '다운로드 URL·탭 URL·참조가 파일 공유/일회용 전송 도메인: 유출·악성 반입.'
+  false_positive_ko: 업무용 클라우드.
+  sources: &id001
+  - https://forensics.wiki/mozilla_firefox/
+  - https://sleuthkit.org/autopsy/docs/api-docs/4.19.0/_firefox_8java_source.html
+  - https://developer.chrome.com/docs/extensions/declare_permissions
+  - https://research.chalmers.se/publication/521711
+  - https://docs.velociraptor.app/exchange/artifacts/pages/detection.application.cursedchrome/
+  version: 1
+  status: verified
+  params:
+    share_domains: &id002
+    - mega.nz
+    - mega.io
+    - wetransfer.com
+    - we.tl
+    - dropbox.com
+    - drive.google.com
+    - docs.google.com
+    - mediafire.com
+    - sendspace.com
+    - file.io
+    - transfer.sh
+    - gofile.io
+    - pixeldrain.com
+    - anonfiles.com
+    - zippyshare.com
+    - 4shared.com
+    - 1drv.ms
+    - onedrive.live.com
+    - box.com
+    - pcloud.com
+    - filemail.com
+    - send.vis.ee
+    - catbox.moe
+    - tmpfiles.org
+    - mydrive.naver.com
+    - ndrive.naver.com
+    - mybox.naver.com
+    - cloud.kakao.com
+    - transfer.it
+- id: browser.dl_dangerous
+  family: browser-download
+  grade: B
+  label_ko: 위험 판정 다운로드
+  rationale_ko: '다운로드 danger_type이 확정 위험(DANGEROUS_FILE/URL/CONTENT/HOST, POTENTIALLY_UNWANTED, USER_VALIDATED 등)이거나, 약한 판정(MAYBE_DANGEROUS_CONTENT/UNCOMMON_CONTENT)인데 대상이 실행·스크립트 파일: 브라우저 보호 기능 경고.'
+  false_positive_ko: 흔치 않은 문서(PDF/HWP/XLSX)나 서명된 보안 플러그인 설치 파일도 약한 판정을 받음(문서는 제외, 실행 파일은 남음). 오래된 값 의미 변화.
+  sources: *id001
+  version: 2
+  status: provisional
+  params:
+    strong_types:
+    - DANGEROUS_FILE
+    - DANGEROUS_URL
+    - DANGEROUS_CONTENT
+    - USER_VALIDATED
+    - DANGEROUS_HOST
+    - POTENTIALLY_UNWANTED
+    - DEEP_SCANNED_OPENED_DANGEROUS
+    - DANGEROUS_ACCOUNT_COMPROMISE
+    weak_types:
+    - MAYBE_DANGEROUS_CONTENT
+    - UNCOMMON_CONTENT
+    exec_extensions:
+    - exe
+    - msi
+    - scr
+    - com
+    - pif
+    - cpl
+    - dll
+    - js
+    - jse
+    - vbs
+    - vbe
+    - wsf
+    - ps1
+    - bat
+    - cmd
+    - hta
+    - jar
+    - lnk
+    - iso
+    - img
+    - vhd
+    - vhdx
+    - apk
+- id: browser.dl_missing_file
+  family: browser-download
+  grade: C
+  label_ko: 다운로드 파일 없음
+  rationale_ko: '다운로드 대상 경로가 같은 폴더의 다른 파일은 있는데 목록에 없음: 삭제·이동.'
+  false_positive_ko: 이동·정리.
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}
+- id: browser.incognito_gap
+  family: browser-history
+  grade: C
+  label_ko: 방문 기록 공백(시크릿/삭제)
+  rationale_ko: '이벤트·Prefetch 활동은 있는 날이 연속되는데 방문 기록이 비어 있음: 시크릿 모드·기록 삭제.'
+  false_positive_ko: 단순 비활성, 다른 브라우저 사용.
+  sources: *id001
+  version: 1
+  status: provisional
+  params:
+    min_activity_events: 50
+    min_gap_days: 3
+- id: browser.history_cleared
+  family: browser-history
+  grade: C
+  label_ko: 방문 기록 앞부분 삭제
+  rationale_ko: '남은 기록의 가장 작은 행 id가 임계값보다 큼: 앞부분 기록 삭제.'
+  false_positive_ko: 자동 만료(보관기간).
+  sources: *id001
+  version: 1
+  status: provisional
+  params:
+    min_first_id: 1000
+- id: browser.ext_broad_perm
+  family: browser-extension
+  grade: B
+  label_ko: 전체 트래픽 열람 확장
+  rationale_ko: '확장이 <all_urls>류 호스트 권한과 webRequest를 함께 가짐: 전체 트래픽 열람.'
+  false_positive_ko: 광고 차단·번역기 등 합법 확장.
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}
+- id: browser.ext_sideloaded
+  family: browser-extension
+  grade: C
+  label_ko: 스토어 밖 설치 확장
+  rationale_ko: '웹 스토어 설치도 기본 설치도 아닌 확장: 악성 확장·정책 위반. Secure Preferences HMAC은 우회 가능해 무결성 증거 아님.'
+  false_positive_ko: 개발자 확장.
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}
+- id: browser.search_sensitive
+  family: browser-search
+  grade: B
+  label_ko: 사건 관련 검색어
+  rationale_ko: '검색어가 사건 키워드(삭제 방법·와이핑·해외 송금 등): 의도 정황.'
+  false_positive_ko: 일반 정보 검색.
+  sources: *id001
+  version: 1
+  status: verified
+  params:
+    keywords: &id003
+    - 삭제 방법
+    - 영구 삭제
+    - 복구 불가
+    - 포맷 방법
+    - 디가우징
+    - 와이핑
+    - 증거 인멸
+    - 안티포렌식
+    - 기록 삭제
+    - 해외 송금
+    - 차명 계좌
+    - wipe
+    - shred
+    - eraser
+    - ccleaner
+    - bleachbit
+    - secure delete
+    - anti forensic
+    - anti-forensic
+    - delete history
+    - clear event log
+- id: browser.cred_first_use_new_site
+  family: browser-login
+  grade: C
+  label_ko: 사건 직전 저장된 로그인
+  rationale_ko: '저장된 로그인 생성 시각이 지정한 사건 시간대 안: 신규 계정 사용(사건 시간대를 지정해야 동작).'
+  false_positive_ko: 정상 사용.
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}
+- id: browser.typed_url_direct
+  family: browser-visit
+  grade: C
+  label_ko: 주소창 직접 입력한 민감 URL
+  rationale_ko: '직접 입력(typed) 전이로 파일 공유 사이트나 사건 키워드가 든 URL 방문: 사전 인지.'
+  false_positive_ko: 즐겨찾기·자동완성.
+  sources: *id001
+  version: 1
+  status: verified
+  params:
+    share_domains: *id002
+    keywords: *id003

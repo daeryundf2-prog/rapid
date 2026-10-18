@@ -51,7 +51,7 @@ import time
 from array import array
 from bisect import bisect_left
 from collections import OrderedDict
-from collections.abc import Iterator, Mapping
+from collections.abc import Collection, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -60,6 +60,7 @@ from .artifact_filter import filter_artifact_page
 from .jsonl_records import (
     expand_row,
     iter_jsonl_records,
+    iter_records_at,
     jsonl_records_path,
     parse_record_line,
     payload_profiles,
@@ -733,16 +734,15 @@ def read_rows_at(
             yield record_index, expand_row(row, profiles)
 
 
-def iter_sorted_rows(
+def iter_rows_in_order(
     records_path: Path,
     index: SortIndex,
-    order: str,
+    ordered: array,
     profiles: Mapping[str, Mapping[str, object]] | None,
     *,
     chunk: int = 512,
 ) -> Iterator[tuple[int, dict[str, object]]]:
-    """Every row in sorted order (for ``path_contains`` filtering)."""
-    ordered = index.order(order)
+    """The rows of ``ordered`` (record indices in sorted order) in that order (for ``path_contains`` filtering)."""
     for start in range(0, len(ordered), chunk):
         yield from read_rows_at(records_path, index, list(ordered[start:start + chunk]), profiles)
 
@@ -800,8 +800,13 @@ def paginate_sorted_artifact_output(
     cache: SortIndexCache | None = None,
     artifact_types: frozenset[str] | None = None,
     record_limit: int | None = None,
+    allowed_records: Collection[int] | None = None,
 ) -> dict[str, object]:
     """One kind's artifacts page in whole-kind sorted order.
+
+    ``allowed_records`` (ascending record indices, e.g. the 특이사항 filter)
+    keeps only those records: the sorted order is narrowed before any row is
+    read, and the unsorted fallbacks read only those records.
 
     The page carries ``sort`` = ``{key, order, status, progress, reason?,
     position?}``. ``building`` pages have no rows (the real ``total`` is kept)
@@ -813,7 +818,8 @@ def paginate_sorted_artifact_output(
     profiles = payload_profiles(payload)
     records_path = sort_records_path(payload, payload_path)
     key = sort.strip()
-    filtered = bool(path_contains) or bool(artifact_types)
+    filtered = bool(path_contains) or bool(artifact_types) or allowed_records is not None
+    allowed = None if allowed_records is None else (allowed_records if isinstance(allowed_records, (set, frozenset)) else set(allowed_records))
     try:
         key = parse_sort_key(sort)
         if records_path is None:
@@ -854,6 +860,11 @@ def paginate_sorted_artifact_output(
                 limit=limit,
                 artifact_types=artifact_types,
                 record_limit=record_limit,
+                rows_source=(
+                    None
+                    if allowed is None
+                    else iter_records_at(payload, payload_path, sorted(allowed), record_limit=record_limit)
+                ),
             )
         else:
             page = paginate_artifact_output(
@@ -872,7 +883,9 @@ def paginate_sorted_artifact_output(
                 cache.evict(state.cache_key)
             raise
 
-    if filtered:
+    ordered_all = index.order(order)
+    ordered = ordered_all if allowed is None else array("q", (item for item in ordered_all if item in allowed))
+    if filtered and (path_contains or artifact_types):
         page = filter_artifact_page(
             payload,
             payload_path=payload_path,
@@ -880,11 +893,10 @@ def paginate_sorted_artifact_output(
             offset=offset,
             limit=limit,
             scan_cap=SORTED_FILTER_SCAN_CAP,
-            rows_source=guarded(iter_sorted_rows(records_path, index, order, profiles)),
+            rows_source=guarded(iter_rows_in_order(records_path, index, ordered, profiles)),
             artifact_types=artifact_types,
         )
     else:
-        ordered = index.order(order)
 
         def window(start: int, count: int) -> list[object]:
             wanted = list(ordered[start:start + count])
@@ -898,7 +910,10 @@ def paginate_sorted_artifact_output(
             limit=limit,
             cursor=cursor,
             row_window=window,
-            window_total=index.total,
+            window_total=len(ordered),
         )
+        if allowed is not None and isinstance(page.get("pagination"), dict):
+            page["pagination"]["filtered"] = True
+            page["pagination"]["total"] = len(ordered)
     page["sort"] = sort_descriptor(key, order, state, locate, filtered=filtered)
     return page

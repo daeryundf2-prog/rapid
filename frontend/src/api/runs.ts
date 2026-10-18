@@ -209,13 +209,30 @@ export interface TreeNode {
   source?: string;
   /** `artifacts:eventlog`: recovered records older than the first live record id (not sent by tree.py yet). */
   stale_below_first_record_count?: number;
+  /** Kind nodes: flagged rows per highest grade (viewer-families U-F4, `triage-flags` summary). */
+  flag_counts?: Partial<Record<"A" | "B" | "C", number>>;
   children?: TreeNode[];
+}
+
+/**
+ * `/tree` `flags` section (viewer-families U-F4): artifact rows per highest grade, rows per rule,
+ * and policy-dependent sources with their record counts ("부재 ≠ 미발생" when 0).
+ */
+export interface TreeFlagsSection {
+  total?: number;
+  by_grade?: Partial<Record<"A" | "B" | "C", number>>;
+  by_rule?: Record<string, number> | Array<{ id: string; count: number; grade?: string; label?: string }>;
+  policy?: Array<{ id: string; label?: string; count: number; note?: string }>;
+  /** Rule-set versions the summary was computed with. */
+  versions?: Record<string, string | number>;
 }
 
 export interface RunTree {
   run_id: string;
   root: { label?: string; mode?: string; status?: string };
   nodes: TreeNode[];
+  /** Absent: the run has no triage-flags analysis yet. */
+  flags?: TreeFlagsSection;
 }
 
 export function getRunTree(runId: string): Promise<RunTree> {
@@ -375,6 +392,9 @@ export interface ArtifactsQuery {
   locate?: number;
   /** Server-side artifact_type filter (repeated `artifact_type=`; plan analysis-workbench-p1 §3.3). */
   artifact_type?: string[];
+  /** 특이사항 filters (viewer-families §3.1): repeated `flag=` (any of), `flag_grade=` (at least). */
+  flag?: string[];
+  flag_grade?: string;
 }
 
 export function artifactsQueryString(query: ArtifactsQuery): string {
@@ -384,6 +404,8 @@ export function artifactsQueryString(query: ArtifactsQuery): string {
   for (const kind of query.kind ?? []) params.append("kind", kind);
   if (query.path_contains?.trim()) params.set("path_contains", query.path_contains.trim());
   for (const type of query.artifact_type ?? []) params.append("artifact_type", type);
+  for (const flag of query.flag ?? []) params.append("flag", flag);
+  if (query.flag_grade) params.set("flag_grade", query.flag_grade);
   if (query.sort) {
     params.set("sort", query.sort);
     params.set("order", query.order ?? "asc");

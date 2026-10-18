@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { GridRow } from "../../contracts/collection";
 import {
   evidenceTime,
@@ -10,6 +10,7 @@ import {
   zoneLabel,
 } from "../../utils/time";
 import { timestampKindLabel } from "../../utils/timeKinds";
+import { EMPTY_CATALOG_FOR_TESTS, setCatalog } from "../flags/catalog";
 import { artifactColumnsForKind, artifactTypeFamily } from "../grid/columns/artifacts";
 import { citationText } from "../grid/gridCommands";
 import { recordBanners } from "./banners";
@@ -206,6 +207,10 @@ describe("pivots (§5)", () => {
 });
 
 describe("grid presets per family (§7)", () => {
+  // KIND_COLUMNS layouts: a catalogue that does not claim these kinds (the fallback path);
+  // catalogue family layouts are covered by families.test.ts.
+  beforeEach(() => setCatalog(EMPTY_CATALOG_FOR_TESTS, "server"));
+  afterEach(() => setCatalog(null));
   const visible = (kind: string, types?: string[]) =>
     artifactColumnsForKind(kind, types)
       .filter((c) => c.id.startsWith("d:") && c.presets.includes("analysis"))

@@ -2,6 +2,8 @@ import { fetchArtifactsPage, locateArtifactRow } from "../../../api/collections"
 import { clipValue, flatValue } from "../../../utils/flatValue";
 import { formatGridTime } from "../../../utils/time";
 import { artifactTypeLabel } from "../../filters/typeLabels";
+import { type CatalogFamily, familyForKind, familyForTypes } from "../../flags/catalog";
+import { parseFlags } from "../../flags/flags";
 import { kindsForCategory } from "../../tree/categories";
 import { serverPathFilter } from "../gridUtils";
 import type { CollectionDef, ColumnSpec } from "../types";
@@ -19,6 +21,7 @@ import {
   str,
   strOrNull,
 } from "./common";
+import { familyLayout, familyWidthPriority, flagsColumn, mixedSummaryColumns } from "./families";
 import { mismatchDirectionLabel } from "./files";
 import { typeChipCell } from "./StatusCells";
 
@@ -343,9 +346,22 @@ export const TYPE_FAMILY_COLUMNS: Record<string, { types: readonly string[]; col
   },
 };
 
+/**
+ * The catalogue family of the grid (viewer-families U-F3): the one family of the 유형 filter's
+ * types, else the one family claiming the kind. Mixed kinds have none (KIND_COLUMNS fallback).
+ */
+export function resolveArtifactFamily(
+  kind: string | undefined,
+  types?: readonly string[],
+): CatalogFamily | undefined {
+  return familyForTypes(types) ?? (types?.length ? undefined : familyForKind(kind));
+}
+
 /** The type family every selected type belongs to (one family only), else undefined. */
 export function artifactTypeFamily(types: readonly string[] | undefined): string | undefined {
   if (!types?.length) return undefined;
+  const catalogued = familyForTypes(types);
+  if (catalogued) return `catalog:${catalogued.id}`;
   for (const [family, def] of Object.entries(TYPE_FAMILY_COLUMNS)) {
     if (types.every((type) => def.types.includes(type))) return family;
   }
@@ -524,6 +540,8 @@ const defaultColumns = (): ColumnSpec[] => [
   // 130px: the colour dot + ~14 characters ("cloud-messaging") without an ellipsis.
   { ...typeColumn, width: 130, minWidth: 130 },
   { ...col.title("항목", 220), minWidth: 220 },
+  // 특이사항 (U-F4): hidden while no loaded row carries a flag (empty default column, ARTIFACT_PRIORITY).
+  flagsColumn(["analysis", "compact"]),
   col.path(200, ["analysis", "source"]),
   { ...col.review(), width: 88, minWidth: 88 },
   quietDetailColumn,
@@ -533,16 +551,78 @@ const defaultColumns = (): ColumnSpec[] => [
     .map((column): ColumnSpec => (column.id === "provider" ? { ...column, presets: ["source"] } : column)),
 ];
 
-/** Generic artifact layout, highest priority first: 항목 > 유형 > 시각 > 선별 > 경로. */
-export const ARTIFACT_PRIORITY = ["title", "type", "timestamp", "review", "path"] as const;
+/**
+ * Mixed-family grid (U-F8, AXIOM's 혼합 아티팩트 격자): every artifact, a category / domain node
+ * over several kinds, or a 유형 filter spanning families. Instead of one family's columns, four
+ * summary columns whose cells carry their own label above the value (the row's family decides
+ * what 주요 / 지원 / 추가 / 시각 are); one family resolves to its catalogue layout instead.
+ */
+export function isMixedGrid(kind: string | undefined, types?: readonly string[]): boolean {
+  if (resolveArtifactFamily(kind, types)) return false;
+  return !kind || (types?.length ?? 0) > 1;
+}
 
-/** Only the generic layout is responsive; kind layouts keep their own columns. */
-export function artifactWidthPriority(kind: string | undefined): readonly string[] | undefined {
+const mixedColumns = (): ColumnSpec[] => [
+  { ...typeColumn, width: 130, minWidth: 130 },
+  { ...col.title("항목", 220), minWidth: 200 },
+  flagsColumn(["analysis", "compact"]),
+  ...mixedSummaryColumns(),
+  { ...col.review(), width: 88, minWidth: 88 },
+  { ...timeColumn, presets: ["source"] },
+  col.path(200, ["source"]),
+  quietDetailColumn,
+  ...tail
+    .filter((column) => column.id !== "path")
+    .map((column): ColumnSpec => (column.id === "provider" ? { ...column, presets: ["source"] } : column)),
+];
+
+/** Mixed layout priority: 항목 > 주요 > 특이사항 > 유형 > 시각 > 지원 > 추가 > 선별. */
+export const MIXED_PRIORITY = [
+  "title",
+  "sum:main",
+  "flags",
+  "type",
+  "sum:time",
+  "sum:support",
+  "sum:extra",
+  "review",
+] as const;
+
+/** Generic artifact layout, highest priority first: 항목 > 특이사항 > 유형 > 시각 > 선별 > 경로. */
+export const ARTIFACT_PRIORITY = ["title", "flags", "type", "timestamp", "review", "path"] as const;
+
+/**
+ * Responsive layouts: the generic one and every catalogue family layout (empty core columns go
+ * first, then the lowest priority by width); KIND_COLUMNS fallbacks keep their own columns.
+ */
+export function artifactWidthPriority(
+  kind: string | undefined,
+  types?: readonly string[],
+): readonly string[] | undefined {
+  const catalogued = resolveArtifactFamily(kind, types);
+  if (catalogued) return familyWidthPriority(catalogued);
+  if (isMixedGrid(kind, types) && !(kind && KIND_COLUMNS[kind])) return MIXED_PRIORITY;
+  if (kind && types?.length && artifactTypeFamily(types)) return undefined;
   return kind && (kind === "eventlog" || KIND_COLUMNS[kind]) ? undefined : ARTIFACT_PRIORITY;
 }
 
 /** Default column set of one artifact kind (plan §4.3); other kinds keep the generic set. */
 export function artifactColumnsForKind(kind: string | undefined, types?: readonly string[]): ColumnSpec[] {
+  const catalogued = resolveArtifactFamily(kind, types);
+  if (catalogued) {
+    return familyLayout(catalogued, {
+      title: col.title("항목", 240),
+      review: col.review(),
+      type: typeColumn,
+      // eventlog keeps its 메시지 column (sorts on the key the cells show), off by default.
+      rest: [
+        { ...timeColumn, presets: [] },
+        catalogued.id === "eventlog" ? { ...messageColumn, presets: [] } : quietDetailColumn,
+        // The catalogue sets the examiner's default columns: 파서 stays in 원본 preset / 열 선택.
+        ...tail.map((column) => ({ ...column, presets: column.presets.filter((p) => p !== "analysis") })),
+      ],
+    });
+  }
   const family = kind ? artifactTypeFamily(types) : undefined;
   const defs = family ? TYPE_FAMILY_COLUMNS[family]?.columns : kind ? KIND_COLUMNS[kind] : undefined;
   if (kind === "eventlog" && !family) {
@@ -557,7 +637,7 @@ export function artifactColumnsForKind(kind: string | undefined, types?: readonl
       ...tail,
     ];
   }
-  if (!defs) return defaultColumns();
+  if (!defs) return isMixedGrid(kind, types) ? mixedColumns() : defaultColumns();
   return [
     col.title("항목", 280),
     col.review(),
@@ -586,6 +666,7 @@ export const artifactsCollection: CollectionDef = {
         : undefined,
       query.ref.kind ? query.sort : undefined,
       query.artifactTypes,
+      { ids: query.flags, grade: query.flagGrade },
     ),
   mapRow: (raw, index, ctx) => {
     const details = isRecord(raw.details) ? raw.details : {};
@@ -622,13 +703,15 @@ export const artifactsCollection: CollectionDef = {
         matchedRules: Array.isArray(raw.matched_rules) ? raw.matched_rules.map(str).join(", ") : "",
         highlight: recordHighlight(details),
         ...recoveryFields(details.recovery),
+        // 특이사항 (U-F4): raw API value + the parsed list the cells read.
+        ...(Array.isArray(raw.flags) ? { flags: raw.flags, flagList: parseFlags(raw.flags) } : {}),
         details,
       },
     );
   },
   columns: defaultColumns(),
   columnsFor: (ref, types) => artifactColumnsForKind(ref.kind, types),
-  widthPriority: (ref) => artifactWidthPriority(ref.kind),
+  widthPriority: (ref, types) => artifactWidthPriority(ref.kind, types),
   locate: (runId, ref, sort, recordIndex, signal) =>
     ref.kind
       ? locateArtifactRow(runId, ref.kind, sort, recordIndex, signal)

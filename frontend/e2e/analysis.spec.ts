@@ -158,6 +158,11 @@ test("Q-IA-1 / review 16–17: Alt+n switches stage with focus on the panel head
   await page.keyboard.press("Alt+3");
   await expect(page).toHaveURL(new RegExp(`#/case/${runId}/explore/files`));
 
+  // U-F7: empty families are hidden by default; show them so 침해사고 › 웹셸 is listed either way.
+  const showEmpty = page.getByTestId("tree-empty-toggle");
+  if ((await showEmpty.count()) && (await showEmpty.getAttribute("aria-pressed")) === "false") {
+    await showEmpty.click();
+  }
   const incident = page.getByRole("treeitem", { name: /^침해사고/ });
   await incident.click();
   await expect(incident).toHaveAttribute("aria-expanded", "true");

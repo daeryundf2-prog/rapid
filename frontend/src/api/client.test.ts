@@ -70,3 +70,28 @@ describe("api", () => {
     await expect(api("/api/runs")).rejects.toBeInstanceOf(ApiError);
   });
 });
+
+describe("422 details (D1 /flags/row, review follow-up)", () => {
+  it("surfaces the Korean detail string and validation message lists", async () => {
+    const { errorMessageFromDetail, api, ApiError } = await import("./client");
+    expect(errorMessageFromDetail("알 수 없는 kind입니다: zzz")).toBe("알 수 없는 kind입니다: zzz");
+    expect(
+      errorMessageFromDetail([{ msg: "record_index는 0 이상이어야 합니다" }, { msg: "kind가 필요합니다" }]),
+    ).toBe("record_index는 0 이상이어야 합니다 · kind가 필요합니다");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ detail: "알 수 없는 kind입니다: zzz" }), {
+            status: 422,
+            headers: { "content-type": "application/json" },
+          }),
+      ),
+    );
+    const error = await api("/api/runs/r/flags/row?kind=zzz&record_index=0").catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as Error).message).toBe("알 수 없는 kind입니다: zzz");
+    expect((error as InstanceType<typeof ApiError>).status).toBe(422);
+    vi.unstubAllGlobals();
+  });
+});

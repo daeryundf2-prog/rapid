@@ -1,5 +1,7 @@
-import { Fragment, useEffect, useId, useMemo, useState } from "react";
+import { QueryClientContext } from "@tanstack/react-query";
+import { Fragment, useContext, useEffect, useId, useMemo, useState } from "react";
 import { DisabledReason } from "../../../a11y/primitives";
+import { getRunDashboard, type RunDashboard } from "../../../api/dashboard";
 import type { SourceMetadata, SourcePreview } from "../../../api/viewer";
 import { runDisplayName } from "../../../app/collections";
 import type { GridRow, ReviewStatus } from "../../../contracts/collection";
@@ -41,7 +43,7 @@ import {
 } from "../fieldFormat";
 import { humanizeKey, layoutFields, type RecordLayout, recordLayout, type SheetEntry } from "../fieldSheets";
 import { isDirectoryTarget } from "../modes";
-import { TIMELINE_WINDOW_MS, timelineWindowRoute } from "../pivots";
+import { artifactRowRoute, TIMELINE_WINDOW_MS, timelineWindowRoute } from "../pivots";
 import { makeRecordField, type RecordField, recordByteRange } from "../record";
 import { eventRecordXml, hasEventRecord, RECONSTRUCTED_LABEL } from "../recordXml";
 import { isSid, useSidName } from "../sidNames";
@@ -972,12 +974,9 @@ export function MetaView({
   onComputeHash,
 }: MetaViewProps) {
   const { timezone } = useTimezone();
-  const { currentRun } = useRuns();
-  const ctx = useCommandContext();
   const { setMode } = useViewerRouteMode();
   const sessionNote = useSessionNote(noteKey(target.runId, target.ref));
   const note = sessionNote ?? (typeof row?.fields.note === "string" ? row.fields.note : "");
-  const info = evidenceInfo(row);
   const formatTime = (value: number | string | undefined) => {
     const reading = evidenceTime(value ?? null, timezone);
     return reading ? reading.text : value === undefined || value === "" ? "—" : String(value);
@@ -1117,53 +1116,6 @@ export function MetaView({
           <p className="viewer-error">메타데이터를 불러오지 못했습니다: {metadataError}</p>
         ) : null}
       </section>
-      <section aria-label="증거 정보" data-testid="evidence-info">
-        <h3 className="viewer-subtitle">증거 정보</h3>
-        <dl className="viewer-dl">
-          <dt>소스</dt>
-          <dd className="viewer-break">
-            {target.sourcePath ? (
-              <button
-                type="button"
-                className="viewer-button mono"
-                title="이 원본에서 나온 행을 그리드에 표시합니다."
-                onClick={() => void dispatchCommand(ROWS_FOR_SOURCE_COMMAND, ctx)}
-              >
-                {target.sourcePath}
-              </button>
-            ) : (
-              "원본 파일 없음(파생 항목)"
-            )}
-          </dd>
-          <dt>복구 방법</dt>
-          <dd>
-            {info.recovery}
-            {info.sourceId ? <span className="mono"> ({info.sourceId})</span> : null}
-          </dd>
-          <dt>삭제 여부</dt>
-          <dd>{info.deletion}</dd>
-          <dt>위치</dt>
-          <dd>
-            {info.offset !== null ? (
-              <button
-                type="button"
-                className="viewer-button mono"
-                title="헥스 보기에서 이 오프셋을 강조해 엽니다."
-                onClick={() => openHex(info.offset as number)}
-              >
-                0x{info.offset.toString(16).toUpperCase()} ({info.offset.toLocaleString("ko-KR")})
-              </button>
-            ) : (
-              "—"
-            )}
-          </dd>
-          <dt>증거 번호</dt>
-          <dd className="mono viewer-break">
-            {target.runId}
-            {currentRun ? ` · ${runDisplayName(currentRun)}` : ""}
-          </dd>
-        </dl>
-      </section>
       {target.sourcePath ? (
         <section aria-label={isArtifact ? "컨테이너 파일 해시" : "파일 해시"}>
           <h3 className="viewer-subtitle">{isArtifact ? "컨테이너 파일 해시" : "파일 해시"}</h3>
@@ -1245,7 +1197,156 @@ export function MetaView({
           ) : null}
         </dl>
       </section>
+      {/* U-F8 fixed tail: the same seven evidence facts on every row, "없음" with a reason. */}
+      <EvidenceTail target={target} row={row} onOpenHex={openHex} />
       <GovernanceSection layout={layout} row={row} runId={target.runId} />
     </div>
+  );
+}
+
+/**
+ * The run's evidence source (partition) from the dashboard query the tree / 접수 already load (same
+ * key); works without a QueryClient (unit tests render MetaView bare).
+ */
+function useRunEvidence(runId: string): RunDashboard["evidence_source"] | null {
+  const client = useContext(QueryClientContext);
+  const key = ["run-dashboard", runId];
+  const [data, setData] = useState<RunDashboard | undefined>(() => client?.getQueryData<RunDashboard>(key));
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the run
+  useEffect(() => {
+    if (!client || !runId) return;
+    let live = true;
+    client
+      .fetchQuery({ queryKey: key, queryFn: () => getRunDashboard(runId), staleTime: 60_000 })
+      .then((next) => {
+        if (live) setData(next);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [client, runId]);
+  return data?.evidence_source ?? null;
+}
+
+/** Why a tail fact is absent (U-F8: never a bare dash). */
+export const TAIL_REASONS = {
+  source: "없음 — 원본 파일이 없는 파생 항목입니다",
+  partition: "파티션 정보 없음(폴더·논리 증거)",
+  recovery: "없음 — 파서가 복구 방법을 기록하지 않았습니다",
+  deletion: "없음 — 할당 상태가 기록되지 않았습니다",
+  offset: "없음 — 원본 안 오프셋이 기록되지 않았습니다",
+  parser: "없음 — 파서 이름·버전이 기록되지 않았습니다",
+  origin: "없음 — 파생 행이 아닙니다(이 행이 원본)",
+} as const;
+
+function parserText(row: GridRow | null): string | null {
+  const fields = row?.fields ?? {};
+  const details = (fields.details && typeof fields.details === "object" ? fields.details : {}) as Record<
+    string,
+    unknown
+  >;
+  // Timeline rows name their source collection as the provider, not a parser.
+  const providers = row?.ref.collection === "timeline" ? [] : [row?.provider, fields.provider];
+  const name = [details.parser, ...providers].find((v) => typeof v === "string" && v) as string | undefined;
+  const version = [details.parser_version, details.evtx_decoder_version, fields.parserVersion].find(
+    (v) => (typeof v === "string" && v) || typeof v === "number",
+  );
+  if (!name && version === undefined) return null;
+  const versionText =
+    version === undefined ? "" : /^\d/.test(String(version)) ? `v${String(version)}` : String(version);
+  return [name, versionText].filter(Boolean).join(" ");
+}
+
+/**
+ * 증거 정보 (U-F8, AXIOM 세부 정보 규약): 소스(파티션·경로) · 복구 방법 · 삭제된 출처 · 위치(오프셋) ·
+ * 증거 번호 · 파서 버전 · 원본 행 — always present, in this order, at the end of the meta view.
+ */
+export function EvidenceTail({
+  target,
+  row,
+  onOpenHex,
+}: {
+  target: ViewerTarget;
+  row: GridRow | null;
+  onOpenHex: (offset: number) => void;
+}) {
+  const ctx = useCommandContext();
+  const { currentRun } = useRuns();
+  const evidenceFacts = evidenceInfo(row);
+  // Decoded records carry their byte range (EVTX record offset …) when no recovery offset exists.
+  const info = { ...evidenceFacts, offset: evidenceFacts.offset ?? recordByteRange(row)?.offset ?? null };
+  const evidence = useRunEvidence(target.runId);
+  const partition = evidence?.partitions.find((p) => p.number === evidence.selected_partition);
+  const partitionText = partition
+    ? `파티션 ${partition.number}${partition.filesystem ? ` (${partition.filesystem.toUpperCase()})` : ""}`
+    : TAIL_REASONS.partition;
+  const parser = parserText(row);
+  const sourceRecord = row?.fields.sourceRecord as { output?: unknown; row_index?: unknown } | undefined;
+  const origin =
+    row?.ref.collection === "timeline" && sourceRecord
+      ? artifactRowRoute(target.runId, sourceRecord.output, sourceRecord.row_index)
+      : null;
+  return (
+    <section aria-label="증거 정보" data-testid="evidence-info" className="meta-evidence-tail">
+      <h3 className="viewer-subtitle">증거 정보</h3>
+      <dl className="viewer-dl">
+        <dt>소스</dt>
+        <dd className="viewer-break">
+          <span className="meta-tail-sub">{partitionText}</span>{" "}
+          {target.sourcePath ? (
+            <button
+              type="button"
+              className="viewer-button mono"
+              title="이 원본에서 나온 행을 그리드에 표시합니다."
+              onClick={() => void dispatchCommand(ROWS_FOR_SOURCE_COMMAND, ctx)}
+            >
+              {target.sourcePath}
+            </button>
+          ) : (
+            TAIL_REASONS.source
+          )}
+        </dd>
+        <dt>복구 방법</dt>
+        <dd>
+          {info.recovery !== "—" ? info.recovery : TAIL_REASONS.recovery}
+          {info.sourceId ? <span className="mono"> ({info.sourceId})</span> : null}
+        </dd>
+        <dt>삭제된 출처</dt>
+        <dd>{info.deletion !== "—" ? info.deletion : TAIL_REASONS.deletion}</dd>
+        <dt>위치</dt>
+        <dd>
+          {info.offset !== null ? (
+            <button
+              type="button"
+              className="viewer-button mono"
+              title="헥스 보기에서 이 오프셋을 강조해 엽니다."
+              onClick={() => onOpenHex(info.offset as number)}
+            >
+              0x{info.offset.toString(16).toUpperCase()} ({info.offset.toLocaleString("ko-KR")})
+            </button>
+          ) : (
+            TAIL_REASONS.offset
+          )}
+        </dd>
+        <dt>증거 번호</dt>
+        <dd className="mono viewer-break">
+          {target.runId}
+          {currentRun ? ` · ${runDisplayName(currentRun)}` : ""}
+        </dd>
+        <dt>파서 버전</dt>
+        <dd className="mono">{parser ?? TAIL_REASONS.parser}</dd>
+        <dt>원본 행</dt>
+        <dd>
+          {origin ? (
+            <a className="viewer-button" href={serializeRoute(origin)}>
+              원본 아티팩트 행으로 이동
+            </a>
+          ) : (
+            TAIL_REASONS.origin
+          )}
+        </dd>
+      </dl>
+    </section>
   );
 }

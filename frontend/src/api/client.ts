@@ -63,8 +63,15 @@ export function clearAuthToken(): void {
   }
 }
 
-function errorMessageFromDetail(detail: unknown): string {
+export function errorMessageFromDetail(detail: unknown): string {
   if (typeof detail === "string") return detail;
+  // FastAPI validation errors (422): a list of {msg} — show the messages, never "[object Object]".
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((item) => (item && typeof item === "object" && "msg" in item ? String(item.msg) : String(item)))
+      .filter(Boolean);
+    if (messages.length) return messages.join(" · ");
+  }
   if (detail && typeof detail === "object" && "message" in detail) {
     const message = (detail as { message?: unknown }).message;
     if (typeof message === "string") return message;

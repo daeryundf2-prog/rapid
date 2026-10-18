@@ -375,28 +375,31 @@ describe("DataGrid filter", () => {
 });
 
 describe("grid chrome (visual-polish S3 / §0)", () => {
-  it("column controls are one 열 설정 button over the header's right end, outside the ARIA grid", async () => {
+  it("column controls are one 열 설정 overflow at the end of the 조건 줄, outside the ARIA grid", async () => {
     await renderFiles(20);
     const button = screen.getByRole("button", { name: "열 설정" });
     expect(button.closest('[role="grid"]')).toBeNull();
-    expect(button.closest(".grid-head-tools")).toBeTruthy();
+    expect(button.closest("search.filter-bar")).toBeTruthy();
     // No separate column toolbar row any more.
     expect(screen.queryByRole("toolbar", { name: /그리드 도구/ })).toBeNull();
     button.focus();
     fireEvent.click(button);
     const popover = screen.getByRole("dialog", { name: "열 설정" });
-    expect(within(popover).getByRole("combobox", { name: "열 구성" })).toBeTruthy();
-    expect(within(popover).getByRole("combobox", { name: "밀도" })).toBeTruthy();
+    // 열 구성 / 밀도 live in the 조건 panel (viewer-families U-F1).
+    expect(within(popover).queryByRole("combobox", { name: "열 구성" })).toBeNull();
     expect(within(popover).getByRole("group", { name: "표시할 열" })).toBeTruthy();
     expect(within(popover).getByTestId("grid-colfilter-toggle")).toBeTruthy();
-    expect(document.activeElement).toBe(within(popover).getByRole("combobox", { name: "열 구성" }));
-    fireEvent.change(within(popover).getByRole("combobox", { name: "밀도" }), {
-      target: { value: "compact" },
-    });
-    expect(screen.getByRole("region", { name: /그리드$/ }).getAttribute("data-density")).toBe("compact");
+    expect(document.activeElement).toBe(within(popover).getByTestId("grid-colfilter-toggle"));
     fireEvent.keyDown(document.activeElement as HTMLElement, { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: "열 설정" })).toBeNull();
     expect(document.activeElement).toBe(button);
+    // 밀도 in the 조건 panel; a non-default density shows as a chip with ×.
+    fireEvent.click(screen.getByRole("button", { name: /^조건/ }));
+    const panel = screen.getByRole("dialog", { name: "조건" });
+    fireEvent.change(within(panel).getByRole("combobox", { name: "밀도" }), { target: { value: "compact" } });
+    expect(screen.getByRole("region", { name: /그리드$/ }).getAttribute("data-density")).toBe("compact");
+    fireEvent.click(screen.getByRole("button", { name: "밀도 촘촘하게 기본값으로 되돌리기" }));
+    expect(screen.getByRole("region", { name: /그리드$/ }).getAttribute("data-density")).toBe("default");
   });
 
   it("the batch bar floats over the grid: selecting does not insert a row above the grid", async () => {
@@ -583,8 +586,10 @@ describe("DataGrid notes and AXIOM preset", () => {
   it("the persisted AXIOM preset pins the chip column after the select cell and renders status chips", async () => {
     window.localStorage.setItem("rapidtriage.grid.preset", "axiom");
     await renderFiles(20);
-    fireEvent.click(screen.getByRole("button", { name: "열 설정" }));
+    fireEvent.click(screen.getByRole("button", { name: /^조건/ }));
     expect((screen.getByRole("combobox", { name: "열 구성" }) as HTMLSelectElement).value).toBe("axiom");
+    // A non-default preset is an applied condition: a chip on the 조건 줄.
+    expect(screen.getByRole("button", { name: "열 구성 AXIOM 스타일 기본값으로 되돌리기" })).toBeTruthy();
     expect(screen.getByRole("region", { name: /그리드$/ }).getAttribute("data-preset")).toBe("axiom");
     const headers = screen.getAllByRole("columnheader");
     expect(headers[1]?.textContent).toContain("태그·상태");

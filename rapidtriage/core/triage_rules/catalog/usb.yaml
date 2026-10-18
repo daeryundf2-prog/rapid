@@ -1,0 +1,169 @@
+# Triage catalogue: usb (plan viewer-families-2026-10-15; research docs/research/forensic-field-catalog-*.md)
+families:
+- id: usb
+  label: USB 장치
+  types:
+  - windows-usb-device
+  - registry-usb
+  - usb-setupapi-device-install-candidate
+  core_columns:
+  - key: first_install_at
+    label: 최초 설치
+    format: time
+    ts_kind: first-install
+  - key: friendly_name
+    label: 장치 이름
+    aliases:
+    - device_description
+    - device_name
+  - key: serial_number
+    label: 시리얼
+    aliases:
+    - serial
+    - usb_serial_number
+    format: mono
+  - key: serial_is_os_generated
+    label: OS가 만든 시리얼
+  - key: vid
+    label: 제조사 ID (VID)
+    format: mono
+  - key: pid
+    label: 제품 ID (PID)
+    format: mono
+  - key: vendor
+    label: 제조사
+  - key: product
+    label: 제품
+  - key: revision
+    label: 리비전
+  - key: device_type
+    label: 장치 종류
+    aliases:
+    - device_class_id
+  aux_columns:
+  - key: drive_letters
+    label: 드라이브 문자
+    aliases:
+    - drive_letter
+  - key: volume_guids
+    label: 볼륨 GUID
+    aliases:
+    - volume_guid
+    format: mono
+  - key: container_id
+    label: 컨테이너 ID
+    format: mono
+  - key: usb_instance_id
+    label: 인스턴스 ID
+    format: mono
+  - key: usb_key_path
+    label: 키 경로
+    aliases:
+    - key
+    - key_path
+    - source_key_path
+    format: path
+  - key: control_set
+    label: 컨트롤 세트 (ControlSet)
+  - key: driver
+    label: 드라이버
+  - key: install_at
+    label: 설치
+    format: time
+    ts_kind: installed
+  - key: last_arrival_at
+    label: 마지막 연결
+    format: time
+    ts_kind: last-connected
+  - key: last_removal_at
+    label: 마지막 분리
+    format: time
+    ts_kind: last-removal
+  - key: usb_key_last_written_at
+    label: 키 마지막 기록
+    aliases:
+    - key_last_written_at
+    - last_written_at
+    format: time
+    ts_kind: last-written
+  rules:
+  - registry.usb_serial_cross
+  - usb.new_device
+  - usb.serial_missing
+  - usb.mass_storage_activity
+  - usb.non_storage_hid
+  - usb.cross_match
+  - usb.logging_disabled
+rules:
+- id: usb.new_device
+  family: usb
+  grade: C
+  label_ko: 사건 시간대 신규 USB
+  rationale_ko: USB 장치 최초 설치·연결이 지정한 사건 시간대 안(사건 시간대를 지정해야 동작).
+  false_positive_ko: 정상 USB 사용.
+  sources: &id001
+  - https://docs.nxlog.co/integrate/windows-usb-auditing.html
+  - https://forensics.wiki/usb_history_viewing/
+  - https://www.it-connect.tech/windows-forensics-usb-history/
+  - https://hackmd.io/@M4shl3/USB-Forensics
+  version: 1
+  status: verified
+  params: {}
+- id: usb.serial_missing
+  family: usb
+  grade: C
+  label_ko: USB 시리얼 부재·중복
+  rationale_ko: '시리얼이 OS 생성값(두 번째 문자 &)·공란·일반값이거나 서로 다른 VID/PID가 같은 시리얼을 씀: 장치 식별 신뢰도 낮음·복제.'
+  false_positive_ko: 저가 USB.
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}
+- id: usb.mass_storage_activity
+  family: usb
+  grade: B
+  label_ko: USB 연결 전후 대량 파일 열람
+  rationale_ko: 'USB 저장 장치 연결 시각 전후에 바로 가기·ShellBag 기록이 임계값 이상: 유출 정황.'
+  false_positive_ko: 백업 작업.
+  sources: *id001
+  version: 1
+  status: verified
+  params:
+    window_minutes: 60
+    min_items: 20
+- id: usb.non_storage_hid
+  family: usb
+  grade: C
+  label_ko: 키보드·HID 장치(BadUSB 후보)
+  rationale_ko: '키보드/HID 클래스 USB 장치(사건 시간대 지정 시 그 안 설치): 입력 장치 위장.'
+  false_positive_ko: 새 키보드·마우스. PS/2·ACPI 장치, 같은 분에 다른 장치 3개 이상과 함께 설치된 경우(OS 설치·드라이버 열거)는 제외.
+  sources: *id001
+  version: 2
+  status: provisional
+  params:
+    exclude_terms:
+    - ps/2
+    exclude_enumerators:
+    - acpi
+    batch_min_others: 3
+- id: usb.cross_match
+  family: usb
+  grade: B
+  label_ko: USB 볼륨 시리얼 ↔ 바로 가기
+  rationale_ko: 'Partition/Diagnostic 1006의 VBR 볼륨 시리얼이 LNK LinkInfo 볼륨 시리얼과 같음: 사용자-장치-파일 연결.'
+  false_positive_ko: 재포맷 시 VSN 변경.
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}
+- id: usb.logging_disabled
+  family: usb
+  grade: C
+  label_ko: 장치 이벤트 로그 부재(부재 ≠ 미발생)
+  rationale_ko: '레지스트리에 USB 장치는 있는데 DriverFrameworks/Partition 이벤트가 없음: 연결 이력은 레지스트리 최신 값에만 의존.'
+  false_positive_ko: 기본 설정(비활성).
+  sources: *id001
+  version: 1
+  status: verified
+  params:
+    min_eventlog_rows: 100

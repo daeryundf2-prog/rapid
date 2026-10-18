@@ -6,6 +6,7 @@ import type { GridRow } from "../../contracts/collection";
 import type { MarkAction, ViewerTarget } from "../../contracts/viewer";
 import { evidenceTime } from "../../utils/time";
 import { timestampKindLabel } from "../../utils/timeKinds";
+import { flagCitation, rowFlags } from "../flags/flags";
 import {
   type ApplyResult,
   applyReviewAction,
@@ -78,6 +79,9 @@ export function buildCitation(
     ...recordCitationParts(row, tz),
     `런=${target.runId}`,
   ];
+  // 특이사항 (U-F6): each flag as `rule_id@version (evidence field=value, …)`.
+  const flags = rowFlags(row);
+  if (flags.length) parts.push(`특이사항=${flags.map((flag) => flagCitation(flag)).join(" | ")}`);
   const highlight = target.highlight;
   if (highlight?.offset !== undefined) {
     const end = highlight.offset + Math.max((highlight.length ?? 1) - 1, 0);

@@ -175,6 +175,8 @@ export function collectionQueryKey(runId: string | null, query: CollectionQuery,
     query.ref.id === "artifacts" ? (query.artifactTypes ?? []).join(",") : "",
     serverSortOf(query) ? `${query.sort?.key}:${query.sort?.order}` : "",
     pageSize,
+    // 특이사항 server filters (viewer-families §3.1); empty for every other listing.
+    query.flags?.length || query.flagGrade ? `${query.flagGrade ?? ""}|${(query.flags ?? []).join(",")}` : "",
   ] as const;
 }
 

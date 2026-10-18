@@ -1,0 +1,188 @@
+# Triage catalogue: mobile (plan viewer-families-2026-10-15; research docs/research/forensic-field-catalog-*.md)
+families:
+- id: mobile
+  label: 모바일
+  types:
+  - mobile-call
+  - mobile-contact
+  - mobile-app
+  - mobile-location
+  - mobile-file
+  - mobile-account
+  - mobile-health
+  - mobile-screen-time
+  - mobile-chat-database
+  - mobile-export
+  - mobile-export-source
+  - mobile-correlation-summary
+  - ios-backup
+  - ios-backup-source
+  - ios-backup-file
+  - ios-backup-metadata
+  - ios-keychain-inventory
+  - android-app-data
+  - android-apk
+  kinds:
+  - mobile-export
+  - android-apk
+  core_columns:
+  - key: timestamp
+    label: 시각
+    format: time
+    ts_kind: event
+    width: 170
+  - key: event_type
+    label: 데이터 종류
+  - key: contact_name
+    label: 상대
+    aliases:
+    - phone_number
+    - counterpart
+  - key: call_type
+    label: 방향
+    aliases:
+    - direction
+  - key: duration_seconds
+    label: 통화 시간·본문
+    aliases:
+    - message_text_preview
+  - key: app_name
+    label: 앱
+    aliases:
+    - package
+  - key: latitude
+    label: 위도
+    format: number
+  - key: longitude
+    label: 경도
+    format: number
+  - key: source_path
+    label: 원본
+    format: path
+  - key: deleted_state
+    label: 삭제 여부
+  aux_columns:
+  - key: installed_at
+    label: 설치
+    format: time
+    ts_kind: installed
+  - key: accuracy_meters
+    label: 정확도(m)
+    format: number
+  - key: device_name
+    label: 기기
+    aliases:
+    - product_version
+  rules:
+  - mobile.backup_encrypted_partial
+  - mobile.deleted_calls_sms
+  - mobile.call_to_unsaved_number
+  - mobile.call_burst_event
+  - mobile.app_installed_recent
+  - mobile.location_outlier
+  - mobile.time_epoch_mismatch
+  - mobile.factory_reset_gap
+rules:
+- id: mobile.backup_encrypted_partial
+  family: mobile
+  grade: C
+  label_ko: 비암호화 백업(수집 한계)
+  rationale_ko: 'iOS 백업이 암호화되지 않음: 건강·키체인·Safari 일부 누락은 증거 부재가 아니라 수집 한계.'
+  false_positive_ko: 정상 설정.
+  sources: &id001
+  - https://theapplewiki.com/wiki/ITunes_Backup
+  - https://imazing.com/guides/use-imazing-for-ios-digital-forensic-analysis-and-e-discovery
+  - https://www.magnetforensics.com/blog/android-messaging-forensics-sms-mms-and-beyond/
+  - https://epochconverter.com/coredata
+  version: 1
+  status: verified
+  params: {}
+- id: mobile.deleted_calls_sms
+  family: mobile
+  grade: B
+  label_ko: 삭제된 통화·문자
+  rationale_ko: '활성 DB가 아닌 빈 페이지·저널에만 있거나 삭제 표식이 있는 통화·문자: 삭제 정황.'
+  false_positive_ko: 자동 정리.
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}
+- id: mobile.call_to_unsaved_number
+  family: mobile
+  grade: C
+  label_ko: 연락처에 없는 반복 상대
+  rationale_ko: '연락처에 없는 번호와 통화·문자가 임계값 이상: 은닉 연락.'
+  false_positive_ko: 일반 사업자 번호.
+  sources: *id001
+  version: 1
+  status: verified
+  params:
+    min_calls: 5
+- id: mobile.call_burst_event
+  family: mobile
+  grade: C
+  label_ko: 통화·문자 급증
+  rationale_ko: '짧은 시간에 통화·문자가 임계값 이상(사건 시간대 지정 시 그 안): 연관 정황.'
+  false_positive_ko: 우연.
+  sources: *id001
+  version: 1
+  status: verified
+  params:
+    window_minutes: 30
+    min_count: 20
+- id: mobile.app_installed_recent
+  family: mobile
+  grade: C
+  label_ko: 메신저·VPN·삭제 앱 설치
+  rationale_ko: '메신저·VPN·정리/삭제 앱 설치(사건 시간대 지정 시 그 안): 의도 정황.'
+  false_positive_ko: 일반 앱 설치.
+  sources: *id001
+  version: 1
+  status: verified
+  params:
+    app_keywords:
+    - vpn
+    - telegram
+    - signal
+    - threema
+    - wickr
+    - wire
+    - cleaner
+    - wipe
+    - shredder
+    - secure delete
+    - hide
+    - vault
+- id: mobile.location_outlier
+  family: mobile
+  grade: C
+  label_ko: 평소 반경 밖 위치
+  rationale_ko: '위치가 전체 중앙 위치에서 임계 반경 밖: 동선 단서.'
+  false_positive_ko: 위치 오차, 여행.
+  sources: *id001
+  version: 1
+  status: provisional
+  params:
+    min_points: 20
+    radius_km: 50
+- id: mobile.time_epoch_mismatch
+  family: mobile
+  grade: C
+  label_ko: 시각 단위 혼재
+  rationale_ko: '같은 DB 안에서 원시 시각 자릿수가 다수와 다름(초/나노초 혼재): 변환 오류 방지.'
+  false_positive_ko: 버전 전환.
+  sources: *id001
+  version: 1
+  status: verified
+  params: {}
+- id: mobile.factory_reset_gap
+  family: mobile
+  grade: C
+  label_ko: 초기화·이전 공백
+  rationale_ko: '한 내보내기의 데이터가 긴 공백 뒤부터만 있음: 초기화·마이그레이션.'
+  false_positive_ko: 새 기기 복원.
+  sources: *id001
+  version: 1
+  status: provisional
+  params:
+    gap_days: 180

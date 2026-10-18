@@ -11,6 +11,9 @@ export const PRESET_LABELS: Record<GridPreset, string> = {
   axiom: "AXIOM 스타일",
 };
 
+/** The preset a grid starts with (조건 줄 chips show any other one). */
+export const DEFAULT_PRESET: GridPreset = "analysis";
+
 export type Density = "compact" | "default" | "comfortable";
 
 /** Row height in px per density token (plan 4.5: 24/28/32). */
@@ -95,7 +98,7 @@ export interface CollectionDef {
    * ("분석 기본") preset. While the columns' minimum widths (`minWidth`) exceed the grid width the
    * lowest-priority ones are hidden (열 menu: "폭 부족으로 숨김 — 표시"). Undefined = no hiding.
    */
-  widthPriority?: (ref: CollectionRef) => readonly string[] | undefined;
+  widthPriority?: (ref: CollectionRef, types?: readonly string[]) => readonly string[] | undefined;
   /** Map one raw API row to the normalised GridRow. `index` is the global row index. */
   mapRow: (raw: RawRow, index: number, ctx: MapContext) => GridRow;
   /** "paged" = server offset/limit; "whole" = one response, paged on the client. */
