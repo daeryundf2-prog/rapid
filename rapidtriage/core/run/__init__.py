@@ -149,6 +149,7 @@ from .plan import (
     PlanTargetError,
     RunControlWatcher,
     build_run_plan,
+    utc_now,
 )
 from .planned_out import (
     mark_inputs_partial,
@@ -440,6 +441,7 @@ def run_triage_mode(
     skip_groups: Sequence[str] = (),
     skip_tasks: Sequence[str] = (),
     actor: str = "cli",
+    control_since: str | None = None,
 ) -> dict[str, object]:
     """Run every triage stage for ``root`` into ``output_dir``.
 
@@ -455,7 +457,13 @@ def run_triage_mode(
     still writes the summary/report/audit, and the run's summary carries
     the final plan (``plan.outcome``). The progress status ends
     ``cancelled`` after ``cancel_all``.
+
+    ``control_since`` (ISO time; the web job's submit time) marks which
+    control requests in the output directory belong to this run: requests
+    written at or after it are applied even when they were written before
+    the run process started watching (default: when this call started).
     """
+    control_since = control_since or utc_now()
     normalized_mode = mode.lower()
     if normalized_mode not in SUPPORTED_RUN_MODES:
         supported = ", ".join(SUPPORTED_RUN_MODES)
@@ -484,15 +492,17 @@ def run_triage_mode(
     output_dir = output_dir.expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     # A resumed run reuses stage outputs (manifest/docs/files/timeline/...)
-    # only when the previous run's plan finished without cancels or skips:
-    # those outputs were built from partial provider inputs or are
-    # placeholders. Provider outputs are judged one by one.
+    # only when the previous run's plan finished ``complete``: after a
+    # partial/cancelled/failed run, or one that died before it ended (outcome
+    # still ``None``: interrupted, e.g. a resume that was itself rebuilding),
+    # the stage outputs on disk may be placeholders or built from partial
+    # provider inputs. Every reused stage payload is also checked for
+    # ``plan_status``/``inputs_partial`` (load_reusable_json), so a chain of
+    # resumes never carries a placeholder forward. Provider outputs are judged
+    # one by one.
     previous_progress = read_run_progress(output_dir) if resume else None
     previous_plan = previous_progress.get("plan") if isinstance(previous_progress, Mapping) else None
-    stage_reuse_blocked = isinstance(previous_plan, Mapping) and previous_plan.get("outcome") in {
-        "partial",
-        "cancelled",
-    }
+    stage_reuse_blocked = isinstance(previous_plan, Mapping) and previous_plan.get("outcome") != "complete"
     if isinstance(previous_plan, Mapping):
         # The new progress file replaces the old one: keep the earlier run's
         # cancel/skip requests and how it ended as evidence in this plan.
@@ -522,7 +532,7 @@ def run_triage_mode(
     # The watcher notes the control requests of earlier runs in this output
     # directory before the progress file announces this run, so a request
     # written after that is never mistaken for an old one.
-    control_watcher = RunControlWatcher(output_dir, progress.apply_control)
+    control_watcher = RunControlWatcher(output_dir, progress.apply_control, since=control_since)
     progress.start(stage="prepare")
     progress.set_plan(plan)
     control_watcher.start()
@@ -586,7 +596,8 @@ def run_triage_mode(
         progress.fail(exc)
         raise
     control_watcher.stop()
-    progress.finish(status="cancelled" if progress.cancel_all_requested.is_set() else "completed")
+    # The status follows plan.outcome (a cancel_all after the report stage started is rejected).
+    progress.finish()
     return summary_payload
 
 
@@ -766,7 +777,8 @@ def _run_triage_stages(
     effective_resume = resume
     if resume and stage_reuse_blocked and not fingerprint_changed:
         resume_disabled_reason = (
-            "previous run plan ended partial/cancelled; stage outputs are rebuilt, completed provider outputs are reused"
+            "previous run plan did not end complete (partial/cancelled/failed/interrupted); "
+            "stage outputs are rebuilt, completed provider outputs are reused"
         )
     if resume and fingerprint_changed:
         effective_resume = False
@@ -932,6 +944,9 @@ def _run_triage_stages(
     if reused:
         reused_outputs.add("manifest")
         progress.mark_unfinished_reused()
+    else:
+        # Built after a cancelled/skipped provider: never reused by a later --resume.
+        mark_inputs_partial(manifest_payload, partial_provider_kinds(progress.plan_snapshot()))
     write_result(manifest_payload, manifest_path)
     record_run_checkpoint(checkpoint_records, "manifest", manifest_path, reused=reused)
     finish_stage("manifest")

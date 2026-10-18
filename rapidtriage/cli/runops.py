@@ -27,6 +27,7 @@ from ..core.plugins import (
 from ..core.rearchitecture import build_rearchitecture_status
 from ..core.run import RunModeError, run_triage_mode
 from ..core.run.plan import (
+    ControlFileError,
     PlanTargetError,
     append_control_request,
     build_run_plan,
@@ -286,7 +287,14 @@ def handle_run_control(args: argparse.Namespace, parser: argparse.ArgumentParser
             print(f"거부: {item.get('target')} — {item.get('reason')}", file=sys.stderr)
         if action in {"cancel", "skip"} and not accepted:
             return 1
-        request = append_control_request(output_dir, action, accepted, actor="cli")
+        if action in {"cancel_all", "finish"} and rejected:
+            # The report stage started: the run's outcome is settled.
+            return 1
+        try:
+            request = append_control_request(output_dir, action, accepted, actor="cli")
+        except ControlFileError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
         print(json.dumps({"request": request, "accepted": accepted, "rejected": rejected}, ensure_ascii=False, indent=2))
         return 0
 
