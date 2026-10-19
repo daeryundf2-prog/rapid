@@ -1509,6 +1509,7 @@ def _ntfs_source_counts(summary: Mapping[str, object]) -> Counter[str]:
         ("usn", "usn_record_count"),
         ("timestamp-mismatch", "timestamp_mismatch_count"),
         ("logfile-transaction", "logfile_transaction_count"),
+        ("volume-information", "volume_information_count"),
     ):
         value = summary.get(key)
         if isinstance(value, int) and not isinstance(value, bool):
@@ -1531,7 +1532,7 @@ def _ntfs_source_in_use_counts(summary: Mapping[str, object]) -> dict[str, int]:
 
 
 # ``details.source`` values of ntfs-meta rows and the summary key of their row ranges.
-ROW_SOURCE_NAMES = ("mft", "usn", "timestamp-mismatch", "logfile-transaction")
+ROW_SOURCE_NAMES = ("mft", "usn", "timestamp-mismatch", "logfile-transaction", "volume-information")
 SOURCE_ROW_RANGES_KEY = "source_row_ranges"
 
 
@@ -1550,7 +1551,22 @@ def _native_boot_manifest(ctx: AnalysisContext, image: Path, options: NtfsMetaOp
 def write_volume_information_row(ctx: AnalysisContext, outputs: Mapping[str, object]) -> None:
     """One ``ntfs-volume-information`` row from ``outputs.boot`` (VBR) and ``outputs.mft`` (record 3 =
     ``$Volume``) when either decodes; the volume serial (``%08X`` like LNK), cluster size and label
-    also go to the summary. Never fails the analysis."""
+    also go to the summary, with the row's ``source_row_ranges`` entry and ``source_counts``
+    (``source=volume-information`` filter / tree count). Never fails the analysis."""
+    start = (ctx.rows_written, ctx.rows_bytes_written)
+    _write_volume_information_row(ctx, outputs)
+    end = (ctx.rows_written, ctx.rows_bytes_written)
+    ranges = ctx.summary.get(SOURCE_ROW_RANGES_KEY)
+    ranges = dict(ranges) if isinstance(ranges, Mapping) else {}
+    ranges["volume-information"] = {"start": start[0], "end": end[0], "start_byte": start[1], "end_byte": end[1]}
+    ctx.summary[SOURCE_ROW_RANGES_KEY] = ranges
+    counts = ctx.summary.get("source_counts")
+    counts = dict(counts) if isinstance(counts, Mapping) else {}
+    counts["volume-information"] = end[0] - start[0]
+    ctx.summary["source_counts"] = counts
+
+
+def _write_volume_information_row(ctx: AnalysisContext, outputs: Mapping[str, object]) -> None:
     from ...core.ntfs_volume import read_volume_information, volume_information_decoded
 
     def entry_path(name: str) -> Path | None:

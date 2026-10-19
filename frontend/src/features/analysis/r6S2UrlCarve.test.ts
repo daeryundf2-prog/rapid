@@ -31,7 +31,10 @@ describe("R6 S2 url-carve image-unallocated source", () => {
   it("rejects image options without the image source, in Korean", () => {
     const form = { ...defaultForm("url-carve"), image_path: "D:\\case\\disk.E01" };
     expect(validateAnalysisForm("url-carve", form).image_path).toMatch(/이미지 미할당 영역/);
+    // console review #7: the message sits on the field that holds the value.
     const sector = { ...defaultForm("url-carve"), partition_start_sector: "63" };
-    expect(validateAnalysisForm("url-carve", sector).image_path).toMatch(/고를 때만/);
+    const errors = validateAnalysisForm("url-carve", sector);
+    expect(errors.partition_start_sector).toMatch(/^파티션 시작 섹터: .*고를 때만/);
+    expect(errors.image_path).toBeUndefined();
   });
 });

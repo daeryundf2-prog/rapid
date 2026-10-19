@@ -369,3 +369,12 @@ AhnLab V3 로그, adb 백업 내부 DB → 기존 앱 파서, 이미지에서 `$
 
 ## 7. 결과 기록
 (구현 후 단계별로 채움)
+
+### 단계 2 콘솔·카탈로그 적대 검토 수정(fix/r6-s2-console-review)
+- url-carve `image-unallocated` 행: E01/Ex01/분할 이미지(서버 `image_format`/`image_media_kind`, 없으면 확장자 .dd/.raw/.img/.bin 외)는 컨테이너를 오프셋으로 열지 않고 오프셋·클러스터·파티션 시작 섹터를 메타로만 표시("E01 미디어 오프셋 — 파일 위치가 아님"). raw 이미지는 종전대로 헥스 이동.
+- 요약 메모: 이미지 미할당 영역 실패(오류 문구)·일부만 스캔(스캔/전체 바이트)·URL 후보 상한, ntfs-meta `boot-only-native`(Sleuth Kit 설치 안내). 트리의 MFT/USN·불일치·$LogFile 빈 노드 사유는 `extraction_status`/`summary.skipped`에서 가져옴.
+- ntfs-meta `volume-information` 행: 행 출처 필터(`source=volume-information`)·`source_row_ranges`·`source_counts`, 트리 노드 "NTFS 볼륨 정보(NTFS 메타 분석)", 카탈로그 계열 `ntfs-volume-information`, 콘솔 제목.
+- 타임라인: `av-detection-log.detected_at`은 행의 `timestamp_timezone`(AhnLab SQLite epoch = UTC) 우선, 열 이름은 "탐지 시각"; `av-product-presence`는 타임라인 제외(미매핑 집계 없음). 트리 노드 "백신 제품 흔적"(AhnLab은 설명에).
+- 한국어 라벨: carved-url `cluster`·`partition_start_sector`, adb 해제 사본 키(`inner_path` = "해제 사본(증거 아님)", `container_*`, `backup_domain` 코드, 해제 생략 사유), AhnLab `parse_error`·`schema_confidence`·`count_truncated`·`walk_truncated`, 미분류 DB 조치 값(파생 열 `av_action`, "DB 원본 값·조치 분류 안 됨"). adb 해석 행의 "파일 열기"는 원본 .ab(행 path)이며 해제 사본은 메타의 보조 항목.
+- url-carve 양식: 최대 스캔 도움말에 이미지 미할당 총량 의미, 파티션 시작 섹터 오류는 해당 필드(aria-invalid/describedby).
+- 남은 한계: 행 자체에 이미지 형식 플래그는 아직 없음(`_carve_image_unallocated`는 별도 견고성 작업 범위) — 확장자 판정이 기본. 파생 "조치" 열은 서버 정렬 대상이 아님.

@@ -200,8 +200,10 @@ families:
   types:
   - av-detection-log
   core_columns:
+  # McAfee text logs are local wall-clock time, AhnLab SQLite epoch cells UTC: the row's
+  # timestamp_timezone says which (timeline uses it), so the label stays neutral.
   - key: detected_at
-    label: 탐지 시각(현지)
+    label: 탐지 시각
     aliases:
     - timestamp
     format: time
@@ -210,10 +212,10 @@ families:
     label: 제품
     aliases:
     - av_product
+  # AhnLab heuristic SQLite rows keep the raw DB cell when no 조치 word matched: shown labelled.
   - key: action_label
     label: 조치
-    aliases:
-    - action
+    derive: av_action
   - key: threat_name
     label: 위협 이름
   - key: object_path
@@ -246,6 +248,21 @@ families:
     value_labels:
       unconfirmed: 미확인(실표본 검증 전)
       confirmed: 확인됨
+  - key: schema_confidence
+    label: 스키마 신뢰도
+    value_labels:
+      heuristic-sqlite: DB 표·열 이름 추정(형식 미확인)
+  - key: parse_status
+    label: 해석 상태
+    value_labels:
+      error: 해석 오류
+  - key: parse_error
+    label: 해석 오류 사유
+  - key: timestamp_timezone
+    label: 시각 시간대
+    value_labels:
+      local-unknown: 현지 시각(시간대 미상)
+      UTC: UTC
   - key: source_table
     label: 원본 표(DB)
   - key: detected_at_raw
@@ -292,6 +309,8 @@ families:
       inventory-only: 목록만(형식 미지원)
       skipped-size-cap: 크기 상한 초과
       error: 해석 오류
+  - key: parse_error
+    label: 해석 오류 사유
   - key: file_count
     label: 파일 수
     format: number
@@ -327,6 +346,16 @@ families:
   - key: quarantine_file_count
     label: 격리 파일 수
     format: number
+  - key: count_truncated
+    label: 격리 파일 수 잘림
+    value_labels:
+      'true': 예(상한 5,000개 도달 — 실제는 더 많음)
+      'false': 아니요
+  - key: walk_truncated
+    label: 폴더 탐색 잘림
+    value_labels:
+      'true': 예(항목 상한 도달 — 일부만 셈)
+      'false': 아니요
   - key: contents_opened
     label: 내용 열람
     value_labels:

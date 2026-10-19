@@ -347,7 +347,7 @@ export const ANALYSIS_FIELDS: Record<AnalysisKind, FieldSpec[]> = {
       max: 65536,
       unit: "MB",
       label: "파일당 최대 스캔(MB)",
-      help: "파일마다 앞에서부터 이 크기까지 읽습니다.",
+      help: "파일마다 앞에서부터 이 크기까지 읽습니다. '이미지 미할당 영역'은 이 값이 미할당 클러스터 전체에서 읽는 총량입니다(넘으면 일부만 스캔).",
     },
     {
       key: "max_candidates",
@@ -462,12 +462,16 @@ export function validateAnalysisForm(
   if (kind === "url-carve") {
     // R6 S2: the image options only apply to the image-unallocated source (the server says 422 otherwise).
     const sources = Array.isArray(form.sources) ? form.sources : [];
-    const imageOption = ["image_path", "partition_start_sector"].some(
-      (key) => typeof form[key] === "string" && (form[key] as string).trim(),
-    );
-    if (imageOption && !sources.includes("image-unallocated")) {
-      errors.image_path =
-        "디스크 이미지·파티션 시작 섹터: 소스 종류에서 '이미지 미할당 영역'을 고를 때만 씁니다.";
+    // The message goes on the field that holds the value (aria-invalid / describedby there).
+    if (!sources.includes("image-unallocated")) {
+      const filled = (key: string) => typeof form[key] === "string" && (form[key] as string).trim() !== "";
+      if (filled("image_path")) {
+        errors.image_path = "디스크 이미지: 소스 종류에서 '이미지 미할당 영역'을 고를 때만 씁니다.";
+      }
+      if (filled("partition_start_sector")) {
+        errors.partition_start_sector =
+          "파티션 시작 섹터: 소스 종류에서 '이미지 미할당 영역'을 고를 때만 씁니다.";
+      }
     }
   }
   for (const field of ANALYSIS_FIELDS[kind]) {

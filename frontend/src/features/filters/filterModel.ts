@@ -582,6 +582,7 @@ export const ANALYSIS_SOURCE_LABELS: Readonly<Record<string, string>> = {
   usn: "USN 저널",
   "timestamp-mismatch": "타임스탬프 불일치",
   "logfile-transaction": "$LogFile 트랜잭션",
+  "volume-information": "NTFS 볼륨 정보",
 };
 
 /** Korean readings of the carve rows' `details.recovery_method`. */

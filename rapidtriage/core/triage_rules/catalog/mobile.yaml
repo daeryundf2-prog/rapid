@@ -172,6 +172,25 @@ families:
     format: path
   - key: risk_flags
     label: 표시
+  # R6 S2: app databases copied out of the backup for the existing parsers (never evidence).
+  - key: inner_path
+    label: 해제 사본(증거 아님)
+    format: path
+  - key: inner_extract_skipped
+    label: 해제 안 함
+    value_labels:
+      cap: 상한 도달
+      unsafe-name: 안전하지 않은 이름
+      name-collision: 이름 충돌
+  - key: inner_extract_skipped_reason
+    label: 해제 안 한 사유
+    value_labels:
+      size: 항목 크기 상한 초과
+      count: 해제 파일 수 상한 도달
+      total: 해제 총 크기 상한 도달
+      unsafe-name: 안전하지 않은 이름
+      name-collision: 이름 충돌(이미 있는 사본)
+      cap: 상한 도달
   rules: []
 rules:
 - id: mobile.backup_encrypted_partial

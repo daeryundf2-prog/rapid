@@ -433,6 +433,54 @@ const MISMATCH_STATUS_REASONS: Readonly<Record<string, string>> = {
   too_large: "$MFT가 파싱 한도를 넘어 타임스탬프 불일치를 판정하지 않았습니다(추출 파일은 보존됨)",
 };
 
+/** ntfs-meta extraction targets (`summary.skipped[].target`) each row source is parsed from. */
+const SOURCE_EXTRACTION_TARGETS: Readonly<Record<string, readonly string[]>> = {
+  mft: ["mft"],
+  usn: ["usn_journal"],
+  "timestamp-mismatch": ["mft"],
+  "logfile-transaction": ["logfile"],
+  "volume-information": ["boot"],
+};
+
+const VOLUME_STATUS_REASONS: Readonly<Record<string, string>> = {
+  absent: "$Boot·$MFT 추출 파일이 없어 볼륨 정보 행을 만들지 않았습니다",
+  "not-decoded": "$Boot(VBR)·$Volume 레코드를 해석하지 못해 볼륨 정보 행을 만들지 않았습니다",
+};
+
+const EXTRACTION_TARGET_LABELS: Readonly<Record<string, string>> = {
+  mft: "$MFT",
+  usn_journal: "USN 저널($UsnJrnl:$J)",
+  logfile: "$LogFile",
+  boot: "$Boot",
+};
+
+/** Reason of an ntfs-meta job that read only $Boot because Sleuth Kit is missing (R6 S2). */
+export const BOOT_ONLY_NATIVE_REASON =
+  "Sleuth Kit이 없어 $Boot만 읽음 — $MFT·USN·$LogFile 미추출. Sleuth Kit(mmls·fls·icat)을 PATH에 설치한 뒤 NTFS 메타 분석을 다시 실행하세요";
+
+/**
+ * Why an ntfs-meta sub-view is empty because its input was never extracted: the Sleuth Kit-less
+ * $Boot-only fallback (`extraction_status: "boot-only-native"`), else the job's `summary.skipped`
+ * entry of the source's target ("$MFT 추출 안 됨 — <사유>").
+ */
+function skippedExtraction(summary: Record<string, unknown>, sources: readonly string[]): string | undefined {
+  const targets = new Set(sources.flatMap((source) => SOURCE_EXTRACTION_TARGETS[source] ?? []));
+  if (!targets.size) return undefined;
+  if (summary.extraction_status === "boot-only-native" && !(targets.size === 1 && targets.has("boot"))) {
+    return BOOT_ONLY_NATIVE_REASON;
+  }
+  const skipped = Array.isArray(summary.skipped) ? summary.skipped : [];
+  for (const entry of skipped) {
+    if (!entry || typeof entry !== "object") continue;
+    const { target, reason } = entry as Record<string, unknown>;
+    if (typeof target === "string" && targets.has(target)) {
+      const name = EXTRACTION_TARGET_LABELS[target] ?? target;
+      return `${name} 추출 안 됨${typeof reason === "string" && reason ? ` — ${reason}` : ""}`;
+    }
+  }
+  return undefined;
+}
+
 /**
  * Why an analysis sub-view of a completed job is empty, when the job says so (R3 §3.3): $LogFile
  * without input / parsing off / unreadable (`logfile_status`), mismatch not judged
@@ -446,6 +494,13 @@ export function analysisEmptyReason(
   if (!job) return undefined;
   const summary = job.summary ?? {};
   const sources = subViewValues(target, "f:source");
+  const skipped = skippedExtraction(summary, sources);
+  if (skipped) return skipped;
+  if (sources.includes("volume-information")) {
+    const status =
+      typeof summary.volume_information_status === "string" ? summary.volume_information_status : "";
+    if (VOLUME_STATUS_REASONS[status]) return VOLUME_STATUS_REASONS[status];
+  }
   if (sources.includes("logfile-transaction")) {
     const status = typeof summary.logfile_status === "string" ? summary.logfile_status : "";
     if (status === "failed") {

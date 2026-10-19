@@ -810,6 +810,14 @@ export const DOMAINS: readonly DomainDef[] = [
         label: "NTFS 볼륨 정보(VSN)",
         target: a("windows-filesystem", ["ntfs-volume-information"]),
       },
+      // R6 S2: the ntfs-meta analysis's $Boot/$Volume row (also written when Sleuth Kit is missing).
+      {
+        id: "fs-volume-info-analysis",
+        label: "NTFS 볼륨 정보(NTFS 메타 분석)",
+        target: ntfsRows(["volume-information"]),
+        detail: true,
+        note: "NTFS 메타 분석이 $Boot(VBR)·$Volume 레코드에서 읽은 볼륨 일련번호(VSN)·클러스터 크기·레이블 — Sleuth Kit이 없어도 $Boot만으로 만듭니다",
+      },
       {
         id: "fs-mismatch",
         label: "시그니처 불일치",
@@ -1643,9 +1651,9 @@ export const DOMAINS: readonly DomainDef[] = [
       // R6 S2 lane A: AhnLab product folders, log candidates, quarantine folders (counts only).
       {
         id: "af-av-presence",
-        label: "백신 제품 흔적(AhnLab)",
+        label: "백신 제품 흔적",
         target: a("windows-system", ["av-product-presence"]),
-        note: "AhnLab 로그 형식은 미확인입니다 — 제품 폴더·로그 후보·격리 폴더(파일 수·크기만, 내용은 열지 않음)를 보여 줍니다",
+        note: "현재 AhnLab V3만 수집합니다(로그 형식 미확인) — 제품 폴더·로그 후보·격리 폴더(파일 수·크기만, 내용은 열지 않음)를 보여 줍니다",
       },
       {
         id: "af-av-logs",

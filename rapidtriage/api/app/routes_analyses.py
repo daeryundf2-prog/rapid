@@ -65,7 +65,7 @@ PAGINATION_KEYS = (
 
 
 # R3 §3.3 server filters on result-row ``details`` (``GET .../rows``): exact values, Korean 422.
-ROW_SOURCES = ("mft", "usn", "timestamp-mismatch", "logfile-transaction")
+ROW_SOURCES = ("mft", "usn", "timestamp-mismatch", "logfile-transaction", "volume-information")
 RECOVERY_METHODS = ("carved", "parsed", "rejected")
 DETAIL_FILTER_MAX_VALUES = 32
 # Sorted pages with a details filter collect the matching record indices first.
