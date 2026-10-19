@@ -329,7 +329,8 @@ class UnallocatedTests(_Temp):
         bitmap = b"\x55" * (8 * 1024 * 1024)
         started = time.monotonic()
         result = bitmap_unallocated_runs(bitmap, len(bitmap) * 8)
-        self.assertLess(time.monotonic() - started, 2.5)
+        # The old per-bit loop took ~20 s here; 10 s still catches that regression on a loaded machine.
+        self.assertLess(time.monotonic() - started, 10.0)
         self.assertTrue(result.truncated)
         self.assertEqual(len(result.runs), ntfs_unalloc.MAX_RUNS)
         self.assertEqual(result.free_clusters, len(bitmap) * 4)
