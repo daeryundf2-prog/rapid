@@ -85,7 +85,7 @@
 
 | 항목 | 기준 런 | 새 런 | 판정 |
 |---|---|---|---|
-| 대상 커밋 / 런 ID | `run-subset10` (런 `b5fabbe09f18`, 2026-10-15) | `feat/r6-followups` `b65341b`, `D:apid-qa\derived6-s1-run` (2026-10-19, `--mode hacking --read-only`) | — |
+| 대상 커밋 / 런 ID | `run-subset10` (런 `b5fabbe09f18`, 2026-10-15) | `feat/r6-followups` `b65341b`, `D:\rapid-qa\derived\r6-s1-run` (2026-10-19, `--mode hacking --read-only`) | — |
 | 종료 코드 · `parser_errors` | 0 · 0 | 0 · 0 (로그 6줄, 트레이스백 없음; PIL DecompressionBombWarning 1건) | 통과 |
 | 기존 kind 회귀(`regression_kinds`) | — | 없음 (`compare-runs.py` PASS, 종료 코드 0) | 통과 |
 | 이동(`move_kinds`)·허용 유형(`--allow-type`) | — | 이동 없음; 허용 `browser-analytics-cookie` 0 → 197 | 통과 |
