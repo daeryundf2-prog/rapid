@@ -1,4 +1,4 @@
-"""Extract NTFS metadata files ($MFT, $UsnJrnl:$J, $LogFile) from disk images.
+"""Extract NTFS metadata files ($MFT, $UsnJrnl:$J, $LogFile, $Boot) from disk images.
 
 Uses Sleuth Kit ``mmls``/``fls``/``icat`` so the same code path works on
 raw/dd images and on E01/Ex01 images when the installed TSK build has
@@ -33,6 +33,12 @@ NTFS_METADATA_REQUIRED_TOOLS = ("mmls", "fls", "icat")
 
 MFT_INODE = 0
 LOGFILE_INODE = 2
+BOOT_INODE = 7
+# $Boot is 8 KiB on every Windows-formatted volume (16 sectors); keep at most that much and
+# refuse a stream shorter than one boot sector (R6 S2).
+BOOT_MIN_BYTES = 512
+BOOT_MAX_BYTES = 8 * 1024
+BOOT_FILE_NAME = "$Boot"
 EXTEND_INODE = 11
 USN_JOURNAL_NAME = "$UsnJrnl"
 USN_JOURNAL_DATA_STREAM = "$J"
@@ -344,10 +350,82 @@ def extract_ntfs_metadata(
         )
         logfile_path.unlink(missing_ok=True)
 
+    # --- $Boot (R6 S2; optional: never changes extraction_status) ---
+    boot_entry, boot_skip = _extract_boot(stream_runner, source, sector, out_dir)
+    if boot_entry is not None:
+        manifest["outputs"]["boot"] = boot_entry
+    else:
+        manifest["skipped"].append({"target": "boot", "reason": boot_skip})
+
     required = {"mft", "usn_journal"} & set(manifest["outputs"])
     manifest["extraction_status"] = (
         "complete" if len(required) == 2 else ("partial" if required else "blocked")
     )
+    manifest_path = out_dir / "rapidtriage-ntfs-meta.json"
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    manifest["manifest_path"] = str(manifest_path)
+    return manifest
+
+
+def _extract_boot(
+    stream_runner: StreamRunner, source: Path, sector: int, out_dir: Path
+) -> tuple[dict[str, object] | None, str]:
+    """``icat`` inode 7 -> ``<out_dir>/$Boot`` (at least 512 bytes, cut to 8 KiB); ``(entry, "")``
+    or ``(None, skip reason)``."""
+    boot_path = out_dir / BOOT_FILE_NAME
+    command = ["icat", "-o", str(sector), str(source), str(BOOT_INODE)]
+    result = stream_runner(command, boot_path)
+    size = boot_path.stat().st_size if boot_path.is_file() else 0
+    if result.returncode != 0 or size < BOOT_MIN_BYTES:
+        boot_path.unlink(missing_ok=True)
+        if result.returncode != 0:
+            return None, f"icat exit {result.returncode}: {(result.stderr or b'').decode('utf-8', 'replace').strip()[:300]}"
+        return None, f"$Boot stream is {size} bytes (< {BOOT_MIN_BYTES})"
+    truncated = size > BOOT_MAX_BYTES
+    if truncated:
+        with boot_path.open("r+b") as handle:
+            handle.truncate(BOOT_MAX_BYTES)
+    entry: dict[str, object] = {
+        "path": str(boot_path),
+        "size_bytes": boot_path.stat().st_size,
+        "sha256": hash_file_sha256(boot_path),
+        "inode": BOOT_INODE,
+        "command": command,
+        "extraction_mode": "full-stream" if not truncated else "first-8KiB",
+    }
+    if truncated:
+        entry["stream_size_bytes"] = size
+    return entry, ""
+
+
+def extract_ntfs_boot_native(
+    image_path: Path, output_dir: Path, *, partition_start_sector: int | None = None
+) -> dict[str, object]:
+    """``ntfs-meta`` manifest with only ``outputs.boot`` read natively (no Sleuth Kit).
+
+    Raw images: stdlib; E01/Ex01: pyewf (``core.e01_native.dump_boot_sector``). ``$MFT`` /
+    ``$UsnJrnl`` / ``$LogFile`` need Sleuth Kit and are listed in ``skipped``. Raises
+    ``core.e01_native.NativeImageError`` (Korean) when the boot sector cannot be read."""
+    from .e01_native import dump_boot_sector
+
+    source = Path(image_path).expanduser().resolve()
+    out_dir = Path(output_dir).expanduser().resolve()
+    entry = dump_boot_sector(source, out_dir / BOOT_FILE_NAME, partition_start_sector=partition_start_sector)
+    partition = entry.pop("partition")
+    reason = "Sleuth Kit(icat)이 없어 추출하지 않았습니다(네이티브 경로는 $Boot만 읽음)"
+    manifest: dict[str, object] = {
+        "command": "ntfs-meta",
+        "image": str(source),
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "partition": partition,
+        "tools": {},
+        "outputs": {"boot": entry},
+        "skipped": [{"target": target, "reason": reason} for target in ("mft", "usn_journal", "logfile")],
+        "extraction_status": "boot-only-native",
+        "limitations": [
+            "Native fallback: only the partition boot sector was read; $MFT, $UsnJrnl:$J and $LogFile need Sleuth Kit.",
+        ],
+    }
     manifest_path = out_dir / "rapidtriage-ntfs-meta.json"
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     manifest["manifest_path"] = str(manifest_path)

@@ -41,7 +41,16 @@ from collections import Counter
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from pathlib import Path
 
+from ...core.files import RUN_OUTPUT_DIR_PREFIX
 from ...core.models import ArtifactRecord
+from ...core.ntfs_volume import (  # noqa: F401 - re-exported (moved to core in R6 S2)
+    NTFS_VOLUME_FLAGS,
+    VBR_OEM_NTFS,
+    apply_fixups,
+    parse_ntfs_vbr,
+    parse_volume_record,
+    read_volume_information,
+)
 from .._walk import iter_evidence_paths
 from .common import isoformat_from_timestamp, iter_windows_user_homes
 
@@ -266,9 +275,6 @@ VMX_DISK_KEY = re.compile(r"^(?:scsi|sata|ide|nvme)\d+:\d+\.filename$", re.IGNOR
 VMX_MAC_KEY = re.compile(r"^ethernet\d+\.(?:generatedaddress|address)$", re.IGNORECASE)
 VMWARE_MRU_KEY = re.compile(r"^pref\.mruvm(?P<index>\d+)\.(?P<field>filename|displayname)$", re.IGNORECASE)
 VMLS_KEY = re.compile(r"^vmlist(?P<index>\d+)\.(?P<field>config|displayname)$", re.IGNORECASE)
-
-VBR_OEM_NTFS = b"NTFS    "
-
 
 class _Counter:
     """Rows per type across one collector run (``MAX_ROWS_PER_TYPE``)."""
@@ -1865,143 +1871,83 @@ def mcafee_log_records(path: Path, provider: str) -> Iterable[ArtifactRecord]:
 # ---------------------------------------------------------------------------
 
 
-def parse_ntfs_vbr(boot: bytes) -> dict[str, object]:
-    """Fields of an NTFS boot sector; ``parse_status`` says why a sector was not decoded."""
-    if len(boot) < 512:
-        return {"vbr_parse_status": "truncated"}
-    if boot[3:11] != VBR_OEM_NTFS:
-        return {"vbr_parse_status": "not-ntfs", "oem_id": boot[3:11].decode("ascii", errors="replace").strip()}
-    bytes_per_sector = int.from_bytes(boot[0x0B:0x0D], "little")
-    raw_spc = boot[0x0D]
-    sectors_per_cluster = 1 << (256 - raw_spc) if raw_spc > 0x80 else raw_spc
-    total_sectors = int.from_bytes(boot[0x28:0x30], "little")
-    cluster_size = bytes_per_sector * sectors_per_cluster if bytes_per_sector and sectors_per_cluster else 0
-
-    def record_size(raw: int) -> int | None:
-        signed = raw - 256 if raw > 127 else raw
-        if signed < 0:
-            return 1 << -signed if -signed < 31 else None
-        return signed * cluster_size if cluster_size else None
-
-    vsn = int.from_bytes(boot[0x48:0x50], "little")
-    low = vsn & 0xFFFFFFFF
-    return {
-        "vbr_parse_status": "parsed",
-        "oem_id": boot[3:11].decode("ascii").strip(),
-        "bytes_per_sector": bytes_per_sector,
-        "sectors_per_cluster": sectors_per_cluster,
-        "cluster_size": cluster_size,
-        "media_descriptor": f"{boot[0x15]:02X}",
-        "hidden_sectors": int.from_bytes(boot[0x1C:0x20], "little"),
-        "total_sectors": total_sectors,
-        "volume_size_bytes": total_sectors * bytes_per_sector if bytes_per_sector else None,
-        "mft_lcn": int.from_bytes(boot[0x30:0x38], "little"),
-        "mft_mirror_lcn": int.from_bytes(boot[0x38:0x40], "little"),
-        "mft_record_size": record_size(boot[0x40]),
-        "index_record_size": record_size(boot[0x44]),
-        "volume_serial_number_64": f"{vsn:016X}",
-        "volume_serial_number": f"{low:08X}",
-        "volume_serial_display": f"{low >> 16:04X}-{low & 0xFFFF:04X}",
-        "boot_signature_valid": boot[510:512] == b"\x55\xaa",
-    }
+# Run output folders whose ``ntfs-meta`` analyses extracted ``$Boot`` / ``$MFT`` (R6 S2):
+# ``<root>/rapidtriage-run*/analyses/<id>/ntfs/`` (a folder run; the evidence walk itself prunes
+# run outputs) and ``<run output>/analyses/<id>/ntfs/`` when ``root`` lies inside a run output
+# folder (an E01 run's extraction root, e.g. ``<output>/<stage>/fs``).
+ANALYSIS_NTFS_GLOB = ("analyses", "*", "ntfs")
+ANALYSIS_BOOT_NAMES = ("$Boot", "Boot.bin", "$Boot.bin")
+ANALYSIS_MFT_NAMES = ("MFT.bin", "$MFT")
+MAX_ANALYSIS_NTFS_FOLDERS = 64
+RUN_OUTPUT_MARKERS = ("rapidtriage-run-summary.json", "rapidtriage-run-plan.json")
+RUN_OUTPUT_ANCESTOR_LEVELS = 3
 
 
-def apply_fixups(record: bytes, sector_size: int = 512) -> bytes | None:
-    if len(record) < 48 or record[:4] != b"FILE":
-        return None
-    usa_offset = int.from_bytes(record[4:6], "little")
-    usa_count = int.from_bytes(record[6:8], "little")
-    if usa_count < 1 or usa_offset + usa_count * 2 > len(record):
-        return None
-    data = bytearray(record)
-    check = data[usa_offset : usa_offset + 2]
-    for index in range(1, usa_count):
-        end = index * sector_size
-        if end > len(data):
-            break
-        if data[end - 2 : end] != check:
-            return None
-        data[end - 2 : end] = data[usa_offset + index * 2 : usa_offset + index * 2 + 2]
-    return bytes(data)
+def _run_output_folders(root: Path) -> list[Path]:
+    runs: list[Path] = []
+    try:
+        runs.extend(
+            sorted(
+                (item for item in root.iterdir() if item.name.startswith(RUN_OUTPUT_DIR_PREFIX) and item.is_dir() and not item.is_symlink()),
+                key=lambda item: item.name.lower(),
+            )
+        )
+    except OSError:
+        pass
+    for ancestor in [root, *list(root.parents)[:RUN_OUTPUT_ANCESTOR_LEVELS]]:
+        if ancestor not in runs and any((ancestor / marker).is_file() for marker in RUN_OUTPUT_MARKERS):
+            runs.append(ancestor)
+    return runs
 
 
-NTFS_VOLUME_FLAGS = {
-    0x0001: "dirty",
-    0x0002: "resize-logfile",
-    0x0004: "upgrade-on-mount",
-    0x0008: "mounted-on-nt4",
-    0x0010: "delete-usn-underway",
-    0x0020: "repair-object-ids",
-    0x8000: "chkdsk-modified",
-}
-
-
-def parse_volume_record(record: bytes, sector_size: int = 512) -> dict[str, object]:
-    """``$VOLUME_NAME`` (0x60) and ``$VOLUME_INFORMATION`` (0x70) of MFT record 3.
-
-    The fixup stride is the volume's ``bytes_per_sector`` (4Kn disks: 4096), not a fixed 512."""
-    data = apply_fixups(record, sector_size if sector_size in (512, 1024, 2048, 4096) else 512)
-    if data is None:
-        return {"volume_record_status": "invalid-file-record"}
-    offset = int.from_bytes(data[0x14:0x16], "little")
-    out: dict[str, object] = {"volume_record_status": "parsed"}
-    guard = 0
-    while 0 < offset < len(data) - 8 and guard < 64:
-        guard += 1
-        attr_type = int.from_bytes(data[offset : offset + 4], "little")
-        if attr_type == 0xFFFFFFFF:
-            break
-        length = int.from_bytes(data[offset + 4 : offset + 8], "little")
-        if length < 16 or offset + length > len(data):
-            out["volume_record_status"] = "attribute-overrun"
-            break
-        resident = data[offset + 8] == 0
-        if resident:
-            content_length = int.from_bytes(data[offset + 0x10 : offset + 0x14], "little")
-            content_offset = int.from_bytes(data[offset + 0x14 : offset + 0x16], "little")
-            content = data[offset + content_offset : offset + content_offset + content_length]
-            if attr_type == 0x60:
-                out["volume_label"] = content.decode("utf-16-le", errors="replace")
-            elif attr_type == 0x70 and len(content) >= 12:
-                flags = int.from_bytes(content[10:12], "little")
-                out.update(
-                    {
-                        "ntfs_version": f"{content[8]}.{content[9]}",
-                        "volume_flags": flags,
-                        "volume_flag_names": [name for bit, name in NTFS_VOLUME_FLAGS.items() if flags & bit],
-                        "volume_dirty": bool(flags & 0x0001),
-                    }
-                )
-        offset += length
-    return out
+def analysis_ntfs_folders(root: Path) -> list[tuple[Path, dict[str, Path]]]:
+    """``ntfs-meta`` extraction folders of the run output folders inside or above ``root``."""
+    found: list[tuple[Path, dict[str, Path]]] = []
+    for run in _run_output_folders(root):
+        for folder in sorted(run.glob("/".join(ANALYSIS_NTFS_GLOB)), key=lambda item: str(item).lower()):
+            if len(found) >= MAX_ANALYSIS_NTFS_FOLDERS:
+                return found
+            if not folder.is_dir() or folder.is_symlink():
+                continue
+            members: dict[str, Path] = {}
+            for key, names in (("$boot", ANALYSIS_BOOT_NAMES), ("$mft", ANALYSIS_MFT_NAMES)):
+                match = next((folder / name for name in names if (folder / name).is_file()), None)
+                if match is not None:
+                    members[key] = match
+            if members:
+                found.append((folder, members))
+    return found
 
 
 def collect_ntfs_volume_information(root: Path, provider: str) -> Iterable[ArtifactRecord]:
-    """One row per folder holding ``$Boot`` and/or ``$MFT`` (record 3 = ``$Volume``)."""
+    """One row per folder holding ``$Boot`` and/or ``$MFT`` (record 3 = ``$Volume``).
+
+    Also reads the ``ntfs/`` folders of ``ntfs-meta`` analyses in this root's run output
+    folders (``$Boot`` extracted from an image, R6 S2), so the volume serial of an E01 meets the
+    LNK volume serials in 통합 보기 from the next run on; one row per distinct volume serial."""
     folders: dict[Path, dict[str, Path]] = {}
     for path in iter_evidence_paths(root, "*"):
         name = path.name.lower()
         if name in {"$boot", "$mft"} and path.is_file():
             folders.setdefault(path.parent, {})[name] = path
-    for folder in sorted(folders, key=lambda item: str(item).lower()):
-        members = folders[folder]
+    analysis_folders = dict(analysis_ntfs_folders(root)) if root.is_dir() else {}
+    seen_serials: set[str] = set()
+    for folder in [
+        *sorted(folders, key=lambda item: str(item).lower()),
+        *(folder for folder in analysis_folders if folder not in folders),
+    ]:
+        from_analysis = folder in analysis_folders and folder not in folders
+        members = analysis_folders[folder] if from_analysis else folders[folder]
         boot_path = members.get("$boot")
         mft_path = members.get("$mft")
-        fields: dict[str, object] = {}
-        if boot_path is not None:
-            fields.update(parse_ntfs_vbr(read_prefix(boot_path, 512)))
-        if mft_path is not None:
-            record_size = fields.get("mft_record_size")
-            size = record_size if isinstance(record_size, int) and record_size in (1024, 2048, 4096) else 1024
-            try:
-                with mft_path.open("rb") as handle:
-                    handle.seek(3 * size)
-                    sector = fields.get("bytes_per_sector")
-                    fields.update(parse_volume_record(handle.read(size), sector if isinstance(sector, int) else 512))
-            except OSError as exc:
-                fields["volume_record_status"] = f"unreadable: {type(exc).__name__}"
+        fields = read_volume_information(boot_path, mft_path)
         if fields.get("vbr_parse_status") not in (None, "parsed") and fields.get("volume_record_status") != "parsed":
             continue  # neither part decoded: not an NTFS metadata folder
+        serial = str(fields.get("volume_serial_number_64") or "")
+        if from_analysis and (not serial or serial in seen_serials):
+            continue  # an analysis folder adds a volume serial the evidence tree has not shown
+        if serial:
+            seen_serials.add(serial)
         primary = boot_path or mft_path
         if primary is None:
             continue
@@ -2013,6 +1959,7 @@ def collect_ntfs_volume_information(root: Path, provider: str) -> Iterable[Artif
                 "mft_source_path": str(mft_path.resolve()) if mft_path is not None else "",
                 "volume_record_number": 3 if mft_path is not None else None,
                 **fields,
+                **({"volume_source": "ntfs-meta-analysis", "analysis_id": folder.parent.name} if from_analysis else {}),
                 "source_offset": 0,
                 "label": "NTFS 볼륨 정보",
                 "evidence_note": "볼륨 일련번호(VSN)는 LNK·Prefetch·이벤트 1006의 볼륨 시리얼과 같은 값(하위 4바이트)입니다. 8바이트 전체는 volume_serial_number_64.",

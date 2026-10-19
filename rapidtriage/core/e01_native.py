@@ -164,6 +164,148 @@ def open_ewf_segments(segments: list[Path]) -> Any:
     return handle
 
 
+class RawMediaHandle:
+    """pyewf-handle-shaped view of a raw/dd image file (stdlib), for ``native_partition_table``."""
+
+    bytes_per_sector = 512
+
+    def __init__(self, path: Path):
+        self._file = Path(path).open("rb")
+        self._size = os.fstat(self._file.fileno()).st_size
+
+    def get_media_size(self) -> int:
+        return self._size
+
+    def seek(self, offset: int, whence: int = io.SEEK_SET) -> int:
+        return self._file.seek(offset, whence)
+
+    def read(self, size: int = -1) -> bytes:
+        return self._file.read(size)
+
+    def close(self) -> None:
+        self._file.close()
+
+
+class NativeImageError(RuntimeError):
+    """A native image read that cannot go on; ``str(exc)`` is the Korean reason shown to the examiner."""
+
+
+EWF_SIGNATURE = b"EVF\x09\x0d\x0a\xff\x00"
+NTFS_OEM_ID = b"NTFS    "
+
+
+def is_ewf_file(path: Path) -> bool:
+    try:
+        with Path(path).open("rb") as handle:
+            return handle.read(8) == EWF_SIGNATURE
+    except OSError:
+        return False
+
+
+@contextlib.contextmanager
+def open_image_media(image: Path):
+    """Yield ``(handle, media_kind)`` for an E01/Ex01 segment set (pyewf) or a raw image (stdlib).
+
+    Raises ``NativeImageError`` (Korean) when an EWF image needs pyewf and it is missing."""
+    from .e01 import discover_e01_segments
+
+    if is_ewf_file(image):
+        if pyewf is None:
+            raise NativeImageError(
+                "E01 이미지를 직접 읽으려면 pyewf(libewf-python)가 필요합니다. pyewf를 설치하거나 Sleuth Kit을 설치하세요"
+            )
+        try:
+            handle = open_ewf_segments(discover_e01_segments(Path(image)))
+        except Exception as exc:  # pyewf raises IOError/OSError subclasses with C messages
+            raise NativeImageError(f"E01 이미지를 열 수 없습니다: {exc}") from exc
+        kind = "ewf"
+    else:
+        try:
+            handle = RawMediaHandle(Path(image))
+        except OSError as exc:
+            raise NativeImageError(f"이미지를 열 수 없습니다: {exc}") from exc
+        kind = "raw"
+    try:
+        yield handle, kind
+    finally:
+        with contextlib.suppress(Exception):
+            handle.close()
+
+
+def locate_ntfs_partition(handle: Any, partition_start_sector: int | None = None) -> dict[str, object]:
+    """The NTFS partition of an opened image: ``start_sector``, ``byte_offset``, ``sector_size_bytes``,
+    ``description``, ``selection_method``. A volume image (VBR at offset 0) is its own partition.
+
+    Raises ``NativeImageError`` (Korean) when the requested sector holds no NTFS boot sector or
+    no partition does."""
+    reader = EwfSectorReader(handle)
+    sector_size = ewf_sector_size(handle)
+
+    def oem_at(byte_offset: int) -> bytes:
+        reader.seek(byte_offset + 3)
+        return reader.read(8)
+
+    if partition_start_sector is not None:
+        offset = partition_start_sector * sector_size
+        if oem_at(offset) != NTFS_OEM_ID:
+            raise NativeImageError(
+                f"지정한 파티션 시작 섹터 {partition_start_sector}에 NTFS 부트 섹터가 없습니다(파티션이 아니거나 NTFS가 아님)"
+            )
+        return {
+            "start_sector": partition_start_sector,
+            "byte_offset": offset,
+            "sector_size_bytes": sector_size,
+            "description": "",
+            "selection_method": "operator-specified",
+        }
+    if oem_at(0) == NTFS_OEM_ID:
+        return {
+            "start_sector": 0,
+            "byte_offset": 0,
+            "sector_size_bytes": sector_size,
+            "description": "NTFS volume image",
+            "selection_method": "volume-image",
+        }
+    partitions, sector_size = native_partition_table(handle)
+    for row in sorted(partitions, key=lambda item: -int(item.get("sector_count") or 0)):
+        offset = int(row.get("byte_offset") or 0)
+        if oem_at(offset) == NTFS_OEM_ID:
+            return {
+                "start_sector": int(row.get("start_sector") or 0),
+                "byte_offset": offset,
+                "sector_size_bytes": sector_size,
+                "description": str(row.get("description") or ""),
+                "selection_method": "ntfs-oem-id-probe",
+            }
+    raise NativeImageError("이미지에서 NTFS 파티션을 찾지 못했습니다(디스크 이미지가 아니거나 NTFS 파티션이 없음)")
+
+
+def dump_boot_sector(image: Path, out_path: Path, *, partition_start_sector: int | None = None) -> dict[str, object]:
+    """Copy the first sector (512 bytes) of the image's NTFS partition to ``out_path``.
+
+    The native fallback of ``ntfs-meta`` when Sleuth Kit is absent: raw images need nothing,
+    E01/Ex01 images pyewf (``EwfSectorReader``). Returns the ``outputs.boot`` manifest entry
+    plus ``partition``; raises ``NativeImageError`` (Korean)."""
+    import hashlib
+
+    with open_image_media(image) as (handle, media_kind):
+        partition = locate_ntfs_partition(handle, partition_start_sector)
+        reader = EwfSectorReader(handle)
+        reader.seek(int(partition["byte_offset"]))  # type: ignore[call-overload]
+        boot = reader.read(512)
+    if len(boot) < 512:
+        raise NativeImageError("NTFS 부트 섹터를 끝까지 읽지 못했습니다(이미지가 잘림)")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_bytes(boot)
+    return {
+        "path": str(out_path),
+        "size_bytes": len(boot),
+        "sha256": hashlib.sha256(boot).hexdigest(),
+        "extraction_mode": f"native-boot-sector-{media_kind}",
+        "partition": {**partition, "filesystem_guess": "ntfs", "filesystem_verified": True},
+    }
+
+
 def ewf_sector_size(handle: Any) -> int:
     size = int(getattr(handle, "bytes_per_sector", 0) or 0)
     return size if size > 0 else 512
