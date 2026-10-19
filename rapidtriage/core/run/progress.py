@@ -55,6 +55,10 @@ MAX_PROGRESS_WRITE_ERRORS = 20
 REPLACE_ATTEMPTS = 3
 ROWS_WRITE_INTERVAL_SECONDS = 1.0
 CANCEL_REQUESTED_MESSAGE = "취소 요청됨 · 지금까지의 행을 남기고 멈춥니다"
+STUCK_PROVIDER_MESSAGE = (
+    "취소 후 공급자 호출이 제한 시간 안에 끝나지 않아 스레드를 남겨 두고 진행함"
+    " · 지금까지의 행은 저장됨, 이후 행은 버려짐"
+)
 
 __all__ = [
     "RUN_PROGRESS_FILE_NAME",
@@ -417,6 +421,15 @@ class RunProgress:
                 self._task_finished_locked(task_id, status="completed")
             refresh_plan(self._plan)
             self._plan["outcome"] = plan_outcome(self._plan)
+            stuck = [
+                {"task": str(task.get("id")), "thread": str(task["provider_thread_left_running"])}
+                for group in self._plan.get("groups") or []
+                if isinstance(group, Mapping)
+                for task in group.get("tasks") or []
+                if isinstance(task, Mapping) and task.get("provider_thread_left_running")
+            ]
+            if stuck:
+                self._plan["stuck_providers"] = stuck
             self._write_locked()
             return json.loads(json.dumps(self._plan, default=json_default))
 
@@ -456,12 +469,22 @@ class RunProgress:
         output: Mapping[str, object] | None = None,
         parser_error_count: int = 0,
         message: str = "",
+        stuck_thread: str | None = None,
     ) -> None:
-        """Record a terminal state for ``kind``: ``completed``/``error``/``partial``/``cancelled``."""
+        """Record a terminal state for ``kind``: ``completed``/``error``/``partial``/``cancelled``.
+
+        ``stuck_thread`` names a provider thread that was still inside a call
+        after the cancel grace period (left behind; it writes no output).
+        """
         with self._lock:
             entry = self._providers.setdefault(str(kind), self._new_entry())
             if entry["status"] in PROVIDER_TERMINAL_STATUSES:
                 return
+            if stuck_thread:
+                task = find_task(self._plan, str(kind)) if self._plan is not None else None
+                if task is not None:
+                    task["provider_thread_left_running"] = str(stuck_thread)
+                message = message or STUCK_PROVIDER_MESSAGE
             now = _utc_now()
             started = self._started_clock.pop(str(kind), None)
             entry["status"] = status
