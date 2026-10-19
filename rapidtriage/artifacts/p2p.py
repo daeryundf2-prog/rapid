@@ -13,7 +13,8 @@
                       file date, last shared time, all-time uploaded / requested / accepted
 ``p2p-search-term``   eMule ``AC_SearchStrings.dat`` (search box history)
 ``p2p-client-config`` eMule ``preferences.ini``: nick, incoming / temp directory, version
-``p2p-parse-error``   a source that could not be read (the run continues)
+``p2p-parse-error``   a source that could not be read (the run continues): a fixed ``reason`` /
+                      ``reason_code`` with Korean ``reason_ko``
 
 Bencode is decoded by a pure-Python, bounded reader (depth, item count, input size). Tracker
 URLs are cut to ``scheme://host[:port]``: private-tracker URLs carry the user's passkey in the
@@ -74,6 +75,24 @@ EMULE_TAG_NAMES = {
     0x52: "all_time_accepted",
     0x53: "category",
     0x54: "all_time_transferred_hi",
+}
+# Fixed ``p2p-parse-error`` reason codes → Korean text (R6 S2 D). The catalogue column ``reason``
+# (p2p.yaml, family ``p2p-error``) carries the same value labels; a test asserts every code passed
+# to ``_error`` is listed in both.
+REASON_KO = {
+    "torrent-unreadable": ".torrent 읽기 실패",
+    "resume-unreadable": "이어받기 정보 읽기 실패",
+    "resume-not-a-dictionary": "이어받기 정보 형식 아님",
+    "resume-dat-unreadable": "resume.dat 읽기 실패",
+    "resume-dat-not-a-dictionary": "resume.dat 형식 아님",
+    "row-cap-reached": "행 상한 도달",
+    "known-met-unreadable": "known.met 읽기 실패",
+    "known-met-truncated": "known.met 중간에 잘림(앞 행은 유지)",
+    "part-met-unreadable": ".part.met 읽기 실패",
+    "search-strings-unreadable": "검색어 파일 읽기 실패",
+    "preferences-unreadable": "preferences.ini 읽기 실패",
+    "torrent-file-cap-reached": ".torrent 파일 수 상한 도달",
+    "source-failed": "원본 처리 실패",
 }
 EMULE_PREFERENCE_KEYS = {"nick": "nick", "incomingdir": "incoming_dir", "tempdir": "temp_dir", "appversion": "app_version"}
 
@@ -330,7 +349,14 @@ def _record(artifact_type: str, path: Path, client: str, fields: Mapping[str, ob
     return ArtifactRecord(provider=P2PArtifactsProvider.name, artifact_type=artifact_type, path=str(path), supported=True, details=details)
 
 
-def _error(path: Path, client: str, reason: str, exc: BaseException | None = None) -> ArtifactRecord:
+def _error(
+    path: Path, client: str, reason_code: str, exc: BaseException | None = None, *, truncated_after_rows: int | None = None
+) -> ArtifactRecord:
+    """``p2p-parse-error`` row: ``reason`` / ``reason_code`` are always a fixed code from :data:`REASON_KO`
+    (catalogue value label). A truncated known.met used to emit ``known-met-truncated-after-N-rows``
+    (pre-R6 runs keep that text); it is now ``known-met-truncated`` + ``truncated_after_rows=N``, so
+    ``reason.startswith("known-met-truncated")`` still holds for older consumers."""
+    extra: dict[str, object] = {} if truncated_after_rows is None else {"truncated_after_rows": truncated_after_rows}
     return _record(
         "p2p-parse-error",
         path,
@@ -339,7 +365,10 @@ def _error(path: Path, client: str, reason: str, exc: BaseException | None = Non
             "recovery_method": "not-recovered",
             "coverage_status": "parser-error",
             "parser_error": True,
-            "reason": reason,
+            "reason": reason_code,
+            "reason_code": reason_code,
+            "reason_ko": REASON_KO.get(reason_code, reason_code),
+            **extra,
             "error_type": type(exc).__name__ if exc is not None else "",
             "error_message": str(exc)[:300] if exc is not None else "",
         },
@@ -588,8 +617,46 @@ def known_met_rows(path: Path) -> list[ArtifactRecord]:
         if count > MAX_ROWS_PER_SOURCE:
             rows.append(_error(path, "emule", "row-cap-reached"))
     except MetError as exc:
-        rows.append(_error(path, "emule", f"known-met-truncated-after-{len(rows)}-rows", exc))
+        rows.append(_error(path, "emule", "known-met-truncated", exc, truncated_after_rows=len(rows)))
     return rows
+
+
+# eMule .part.met versions — github.com/irwir/eMule (public mirror of the eMule sources; files at the
+# repository root), commit 88a8c8f2d782849642880ea616cdca60b01bd8c7 (2016-04-10):
+#   opcodes.h L33-35: PARTFILE_VERSION 0xe0, PARTFILE_SPLITTEDVERSION 0xe1, PARTFILE_VERSION_LARGEFILE 0xe2
+#   PartFile.cpp CPartFile::LoadPartFile L797-844 (header), L847-848 (u32 tag count + CTag list),
+#   L1140-1153 (optional trailing part-hash set of the split format)
+#   FileIdentifier.cpp L182-201 LoadMD4HashsetFromFile: 16-byte hash, u16 count, count x 16 bytes
+#   KnownFile.cpp L892-894 LoadDateFromFile: u32
+PARTFILE_VERSION = 0xE0
+PARTFILE_SPLITTEDVERSION = 0xE1
+PARTFILE_VERSION_LARGEFILE = 0xE2
+
+
+def _part_met_header(reader: _Met, version: int) -> tuple[int | None, bytes, int, str]:
+    """``(date, file hash, part-hash count, layout)`` after the version byte.
+
+    0xE0 / 0xE2 (and the legacy 0x0E / 0x0F): date u32, then the MD4 hash set (PartFile.cpp L841-844).
+    0xE1 (split format, PartFile.cpp L808 ``isnewstyle``, L826-839): the u32 at offset 1 is read first;
+    when it is 0 (eMule 0.48 split files) the hash set follows at offset 5 with no date (L830-831),
+    otherwise the reader seeks back to offset 2 and reads date u32 + the 16-byte file hash only
+    (L834-837; the part hashes, if any, trail the tag list). The eDonkey "old part style" heuristic for
+    0xE0 (L810-823, bytes 24-27 = 00 00 02 01) is not applied here.
+    """
+    if version != PARTFILE_SPLITTEDVERSION:
+        date = reader.u32()
+        file_hash = reader.take(16)
+        parts = reader.u16()
+        reader.take(16 * parts)
+        return date, file_hash, parts, "default"
+    if reader.u32() == 0:
+        file_hash = reader.take(16)
+        parts = reader.u16()
+        reader.take(16 * parts)
+        return None, file_hash, parts, "split-0.48"
+    reader.position = 2
+    date = reader.u32()
+    return date, reader.take(16), 0, "split"
 
 
 def part_met_rows(path: Path) -> list[ArtifactRecord]:
@@ -597,15 +664,17 @@ def part_met_rows(path: Path) -> list[ArtifactRecord]:
     try:
         reader = _Met(_read(path, MAX_MET_BYTES))
         version = reader.u8()
-        if version not in (0xE0, 0xE2, 0x0E, 0x0F):
+        if version not in (PARTFILE_VERSION, PARTFILE_SPLITTEDVERSION, PARTFILE_VERSION_LARGEFILE, 0x0E, 0x0F):
             raise MetError(f".part.met 버전이 아닙니다(0x{version:02x})")
-        date = reader.u32()
-        file_hash = reader.take(16)
-        parts = reader.u16()
-        reader.take(16 * parts)
+        date, file_hash, parts, layout = _part_met_header(reader, version)
         tags = reader.tags()
     except (MetError, BencodeError, OSError) as exc:
         return [_error(path, "emule", "part-met-unreadable", exc)]
+    if layout == "split":
+        # PartFile.cpp L1141-1151: one byte, then 16-byte part hashes while ``position + 16 < length``
+        # (strict, so eMule never reads a hash that ends exactly at EOF); counted the same way here.
+        remaining = len(reader.data) - reader.position
+        parts = max(0, (remaining - 2) // 16)
     fields = {
         **_ed2k_fields(file_hash, tags),
         "name": str(tags.get("file_name") or ""),
@@ -616,6 +685,9 @@ def part_met_rows(path: Path) -> list[ArtifactRecord]:
         "last_seen_complete_at": _unix(tags.get("last_seen_complete")),
         "download_active_seconds": tags.get("download_active_time") if isinstance(tags.get("download_active_time"), int) else None,
         "info_hash": "",
+        "part_met_version": f"0x{version:02x}",
+        "part_met_layout": layout,
+        "part_hash_count": parts,
     }
     file_date = fields["file_date"]
     return [_record("p2p-transfer", path, "emule", fields, timestamp=file_date if isinstance(file_date, str) else None, kind="part-file-date")]

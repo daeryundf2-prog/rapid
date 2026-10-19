@@ -260,8 +260,18 @@ RapidTriage is a local triage and review tool, not a full commercial forensic su
 - **URL 자격 증명**: `redact_url`은 `scheme://user:pass@` 사용자 정보를 `[가림]@`으로 바꾸고 `password`·`passwd`·`pwd`·`pass`·`passkey`·`refresh_token`·`id_token`·`client_secret`·`api_key`·`apikey`·`secret`·`resourcekey`·`otp` 질의 값을 가린다(URL 카빙, `location-url-candidate`, 미디어 플레이어 스트림 URL·원래 값, Google 문서 바로가기 `stub_url`). 원래 URL의 sha256은 `*_sha256`에 남는다. 목록에 없는 이름의 토큰 질의 값은 가리지 못한다.
 - **자원 한도**: PSD XMP는 앞 256 KiB만 `str.find`로 걷는다(`xmp_truncated`). adb 백업 해제는 요청 크기 + 64 KiB씩만 풀어 압축 폭탄이 메모리를 키우지 못한다. PAX `mtime` 같은 범위 밖 시각은 `member_mtime`이 비우고, 구성원 하나의 예외는 그 구성원만 건너뛴다(`member_error_count`); 해제 전체 실패도 모바일 공급자를 멈추지 않고 `android-backup` 한 행(`unreadable`)으로 남는다. EGG는 압축 블록이 구성원 상한(64 MiB)을 넘으면 읽지 않고, 아카이브당 해제 합계 512 MiB 이후 구성원은 목록만 낸다. ISO 9660은 이미지당 디렉터리 익스텐트 읽기 합계 64 MiB에서 멈추고(`directory-read-cap-reached`) 레코드 건너뛰기에 논리 블록 크기를 쓴다.
 - **메일 중복 제거**: `email` 공급자는 Windows 메일/Live Mail 루트의 `.eml` 가운데 `email-clients`가 실제로 읽은 것(루트당 메시지 상한·걷기 상한 안)만 건너뛰고 나머지는 직접 읽는다. Thunderbird `News/` 뉴스그룹 폴더도 메일 클라이언트 공급자가 읽는다. 확장자 없는 mbox 후보의 `.msf` 확인은 캐시·임시 폴더와 16자 이상 16진 이름을 건너뛴다.
-- **기타**: 네이버 지도 `x`/`y` 대체 좌표는 한반도 주변(위도 30–45, 경도 120–135) 밖이면 버린다(TM128/KATECH 값 오배치 방지). `/place/<숫자 ID>`는 검색어로 쓰지 않는다. v2 전용 토렌트(BEP 52, `pieces` 없음)는 v1 `info_hash`를 내지 않고 `torrent_version`(`v1`·`v2`·`hybrid`)을 둔다. eMule BOOLARRAY 태그 길이는 eMule과 같이 `len/8+1`로 건너뛴다. NTFS `$Volume` 레코드의 fixup 간격은 VBR `bytes_per_sector`를 쓴다(4Kn). eMule `.part.met` 0xE1(분할 형식) 버전은 레이아웃을 공개 자료로 확인하지 못해 여전히 오류 행으로 남긴다.
+- **기타**: 네이버 지도 `x`/`y` 대체 좌표는 한반도 주변(위도 30–45, 경도 120–135) 밖이면 버린다(TM128/KATECH 값 오배치 방지). `/place/<숫자 ID>`는 검색어로 쓰지 않는다. v2 전용 토렌트(BEP 52, `pieces` 없음)는 v1 `info_hash`를 내지 않고 `torrent_version`(`v1`·`v2`·`hybrid`)을 둔다. eMule BOOLARRAY 태그 길이는 eMule과 같이 `len/8+1`로 건너뛴다. NTFS `$Volume` 레코드의 fixup 간격은 VBR `bytes_per_sector`를 쓴다(4Kn). eMule `.part.met` 0xE1(분할 형식)은 R6 S2에서 eMule 소스 인용 레이아웃으로 읽는다(아래 `## R6 S2`).
 <!-- r5 review fixes (backend): end -->
+
+## R6 S2
+
+### 소형 항목 (갈래 D)
+<!-- r6 s2 lane D (small items): start -->
+- **eMule `.part.met` 0xE1(분할 형식)**: eMule 공개 소스 미러 `github.com/irwir/eMule` 커밋 `88a8c8f2d782849642880ea616cdca60b01bd8c7`(2016-04-10)의 `opcodes.h` L33–35(`PARTFILE_VERSION` 0xE0·`PARTFILE_SPLITTEDVERSION` 0xE1·`PARTFILE_VERSION_LARGEFILE` 0xE2)와 `PartFile.cpp` `CPartFile::LoadPartFile` L797–848·L1140–1151, `FileIdentifier.cpp` L182–201(`LoadMD4HashsetFromFile`), `KnownFile.cpp` L892–894(`LoadDateFromFile`)를 근거로 구현했다. 0xE1은 오프셋 1의 u32를 먼저 읽어 0이면(eMule 0.48 분할 파일) 오프셋 5부터 MD4 해시 세트(날짜 없음, `part_met_layout=split-0.48`), 아니면 오프셋 2로 돌아가 날짜 u32 + 파일 해시 16바이트만 읽고(`split`) 이어서 u32 태그 수와 태그 목록, 남은 바이트가 있으면 1바이트 + 조각 해시(eMule과 같이 `위치 + 16 < 길이`인 동안만 셈, `part_hash_count`). 행은 `p2p-transfer`에 `part_met_version`(`0xe0`·`0xe1`·`0xe2`)·`part_met_layout`을 둔다. 실제 0xE1 표본 대조는 없다(합성 픽스처만). eDonkey "old part style" 판별(0xE0인데 바이트 24–27이 `00 00 02 01`, `PartFile.cpp` L810–823)은 적용하지 않아 그런 파일은 기본 배치로 읽다 실패하면 오류 행이 된다.
+- **`p2p-parse-error` 사유**: 모든 오류 행이 고정 코드 `reason`·`reason_code`와 한국어 `reason_ko`를 갖고, 콘솔은 카탈로그 값 라벨(`p2p-error` 계열 `reason` 열)로 한글 표시한다. 잘린 `known.met`은 `known-met-truncated-after-N-rows` 대신 `reason=known-met-truncated` + `truncated_after_rows=N`(보조 열 "잘리기 전 행 수")이다. R6 이전 런 출력은 예전 가변 문자열이 그대로 남아 원문으로 보인다(`reason`이 `known-met-truncated`로 시작하는 점은 같음).
+- **카카오맵 `urlX`/`urlY`(WCONGNAMUL) → WGS84 변환**: 구현하지 않았다. 카카오 공개 문서는 변환 함수 이름만 있고 수식이 없어 역공학 공개 자료(WTM × 2.5)에 기대야 하는데, 그 근거 채택이 사용자 승인 대기(R6 계획 §6 U7)라 좌표는 계속 문자열로만 둔다(`location-url-candidate`, `plane_coordinate_system` 표기).
+- **IconLayouts**: R6에서도 연기(아래 연기 표 참고).
+<!-- r6 s2 lane D (small items): end -->
 
 ## 공개 미지원 (AXIOM 대비)
 <!-- r5 L4 (documentation): public non-support list: start -->
@@ -327,7 +337,7 @@ R5에서 연기했거나 확인하지 못한 항목(AXIOM 행 판정은 위 매�
 | Facebook Messenger `msys` 스키마 | Facebook Messenger | 최선 노력 매핑, 맞지 않으면 인벤토리. 앱이 2025-12 종료되어 표본 확보가 어려움 |
 | Viber `Events.Direction` 의미 | Viber | 0=수신·1=발신 가정, 원래 값 `viber_direction_raw`를 함께 둠 |
 | Phone Link 버전별 열·시각 단위 | Your Phone | 표·열 별칭으로 맞춤, 시각 인코딩은 크기로 추정해 `timestamp_encoding`에 남김 |
-| 바탕 화면 아이콘 배치(IconLayouts) | Rebuilt Desktops | 해석 안 함. 배경 이미지·경로만(`desktop-wallpaper`) |
+| 바탕 화면 아이콘 배치(IconLayouts) | Rebuilt Desktops | R6에서도 연기(결정). `Shell\Bags\1\Desktop` `IconLayouts` 이진 형식(헤더 + UTF-16 이름 배열 + 좌표)은 공개 역공학 자료만 있고, 바탕 화면 파일 목록은 파일 인벤토리·쉘백(`windows-shellbags`)·LNK로 이미 나와 사건 가치가 낮다. 배경 이미지·경로만(`desktop-wallpaper`) |
 | Office Backstage JSON 스키마 | Microsoft Office | 키 이름 휴리스틱(`field_extraction=heuristic-keys`) |
 | McAfee 로그 형식 | McAfee Logs | 실제 로그 대조 없음, 휴리스틱 줄 해석 |
 | EGG 실제 알집 표본(LZMA 블록 배치) | EGG Archives | 공개 명세·합성 픽스처만 |
