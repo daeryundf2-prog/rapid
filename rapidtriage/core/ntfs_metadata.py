@@ -81,6 +81,72 @@ def default_stream_runner(
     return subprocess.CompletedProcess(list(command), proc.returncode, b"", proc.stderr)
 
 
+def bounded_stream_runner(
+    command: Sequence[str], output_path: Path, *, max_bytes: int, chunk_bytes: int = 1024 * 1024
+) -> subprocess.CompletedProcess[bytes]:
+    """Like :func:`default_stream_runner` but never writes more than ``max_bytes``.
+
+    stdout is read in chunks; once the stream goes past ``max_bytes`` the file is cut there and
+    the tool is killed (a huge ``$Boot`` / ``$Bitmap`` stream is never written in full first).
+    The result carries ``stream_capped`` (bool) and returncode ``0`` when the cap was hit."""
+    import tempfile
+
+    written = 0
+    capped = False
+    with tempfile.TemporaryFile() as stderr_file, output_path.open("wb") as handle:
+        proc = subprocess.Popen(list(command), stdout=subprocess.PIPE, stderr=stderr_file)
+        try:
+            assert proc.stdout is not None
+            while True:
+                chunk = proc.stdout.read(chunk_bytes)
+                if not chunk:
+                    break
+                room = max_bytes - written
+                if len(chunk) > room:
+                    handle.write(chunk[:room])
+                    written += room
+                    capped = True
+                    break
+                handle.write(chunk)
+                written += len(chunk)
+            if capped:
+                proc.kill()
+            returncode = proc.wait(timeout=ICAT_TIMEOUT_SECONDS)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+            if proc.stdout is not None:
+                proc.stdout.close()
+        stderr_file.seek(0)
+        stderr = stderr_file.read(64 * 1024)
+    result = subprocess.CompletedProcess(list(command), 0 if capped else returncode, b"", stderr)
+    result.stream_capped = capped  # type: ignore[attr-defined]
+    return result
+
+
+# The default runners honour a byte cap; injected (test) runners keep the two-argument contract
+# and their output is cut afterwards.
+default_stream_runner.supports_max_bytes = True  # type: ignore[attr-defined]
+
+
+def run_stream_capped(
+    stream_runner: StreamRunner, command: Sequence[str], output_path: Path, max_bytes: int
+) -> tuple[subprocess.CompletedProcess[bytes], bool, int | None]:
+    """``(result, capped, full stream size or None)``: stream ``command`` into ``output_path``
+    keeping at most ``max_bytes`` (the full size is known only for an injected runner)."""
+    if getattr(stream_runner, "supports_max_bytes", False):
+        result = bounded_stream_runner(command, output_path, max_bytes=max_bytes)
+        return result, bool(getattr(result, "stream_capped", False)), None
+    result = stream_runner(command, output_path)
+    size = output_path.stat().st_size if output_path.is_file() else 0
+    capped = size > max_bytes
+    if capped:
+        with output_path.open("r+b") as handle:
+            handle.truncate(max_bytes)
+    return result, capped, size
+
+
 def find_usn_journal_attribute(fls_output: str) -> dict[str, object] | None:
     """Parse ``fls`` output of $Extend for the $UsnJrnl:$J attribute."""
     inum: int | None = None
@@ -370,21 +436,18 @@ def extract_ntfs_metadata(
 def _extract_boot(
     stream_runner: StreamRunner, source: Path, sector: int, out_dir: Path
 ) -> tuple[dict[str, object] | None, str]:
-    """``icat`` inode 7 -> ``<out_dir>/$Boot`` (at least 512 bytes, cut to 8 KiB); ``(entry, "")``
-    or ``(None, skip reason)``."""
+    """``icat`` inode 7 -> ``<out_dir>/$Boot`` (at least 512 bytes, at most 8 KiB: the default runner
+    kills icat past the cap, so a huge stream is never written); ``(entry, "")`` or
+    ``(None, skip reason)``."""
     boot_path = out_dir / BOOT_FILE_NAME
     command = ["icat", "-o", str(sector), str(source), str(BOOT_INODE)]
-    result = stream_runner(command, boot_path)
+    result, truncated, stream_size = run_stream_capped(stream_runner, command, boot_path, BOOT_MAX_BYTES)
     size = boot_path.stat().st_size if boot_path.is_file() else 0
     if result.returncode != 0 or size < BOOT_MIN_BYTES:
         boot_path.unlink(missing_ok=True)
         if result.returncode != 0:
             return None, f"icat exit {result.returncode}: {(result.stderr or b'').decode('utf-8', 'replace').strip()[:300]}"
         return None, f"$Boot stream is {size} bytes (< {BOOT_MIN_BYTES})"
-    truncated = size > BOOT_MAX_BYTES
-    if truncated:
-        with boot_path.open("r+b") as handle:
-            handle.truncate(BOOT_MAX_BYTES)
     entry: dict[str, object] = {
         "path": str(boot_path),
         "size_bytes": boot_path.stat().st_size,
@@ -394,7 +457,9 @@ def _extract_boot(
         "extraction_mode": "full-stream" if not truncated else "first-8KiB",
     }
     if truncated:
-        entry["stream_size_bytes"] = size
+        entry["stream_capped_at_bytes"] = BOOT_MAX_BYTES
+        if stream_size is not None:
+            entry["stream_size_bytes"] = stream_size
     return entry, ""
 
 

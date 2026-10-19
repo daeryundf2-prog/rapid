@@ -16,7 +16,7 @@ from ..core.audit import audit_path_for, write_audit_record
 from ..core.docs import write_result
 from ..core.doctor import format_doctor_text, run_doctor
 from ..core.enterprise import build_enterprise_policy
-from ..core.files import MOBILE_INNER_DIR_NAME
+from ..core.files import MOBILE_INNER_DIR_NAME, path_is_within
 from ..core.input_root import resolve_input_root
 from ..core.keyword_packs import keyword_pack_library_assessment, list_keyword_packs
 from ..core.plugins import (
@@ -320,7 +320,16 @@ def handle_artifacts(args: argparse.Namespace, parser: argparse.ArgumentParser, 
         collector_options.update(eventlog_options)
         if args.kind == "mobile-export":
             # R6 S2: adb backup inner databases are copied next to --output (never the evidence tree).
-            collector_options["inner_dir"] = output.parent / MOBILE_INNER_DIR_NAME
+            inner_dir = output.parent / MOBILE_INNER_DIR_NAME
+            if root.is_dir() and path_is_within(inner_dir, root):
+                # R6 S2 review: never write copies into the evidence being scanned. The provider
+                # also refuses such a folder (member inventory only, with a collection note).
+                print(
+                    f"경고: adb 백업 해제 사본 폴더({inner_dir})가 스캔 대상 증거 폴더({root}) 안이라 "
+                    "내부 DB 해제를 건너뜁니다(구성원 목록만 기록). --output을 증거 폴더 밖으로 지정하십시오.",
+                    file=sys.stderr,
+                )
+            collector_options["inner_dir"] = inner_dir
         try:
             payload = run_artifact_collection(
                 root,

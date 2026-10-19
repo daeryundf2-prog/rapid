@@ -20,6 +20,7 @@ from rapidtriage.artifacts.windows import system_extras
 from rapidtriage.artifacts.windows.system_extras import collect_ntfs_volume_information
 from rapidtriage.core import e01_native, ntfs_volume
 from rapidtriage.core.e01_native import NativeImageError, dump_boot_sector
+from rapidtriage.core.files import register_run_output_dir, unregister_run_output_dir
 from rapidtriage.core.jobs import RunJobStore
 from rapidtriage.core.ntfs_metadata import NTFSMetadataError, extract_ntfs_metadata
 from tests import r5_l2_fixtures as fx
@@ -277,6 +278,10 @@ class CollectorReadsAnalysisFoldersTests(unittest.TestCase):
                 folder.mkdir(parents=True)
                 (folder / "$Boot").write_bytes(fx.boot_sector() + bytes(7680))
                 (folder / "MFT.bin").write_bytes(fx.mft_with_volume_record())
+            # R6 S2 review: a rapidtriage-run* folder is read only when it is an active run's output
+            self.assertEqual(list(collect_ntfs_volume_information(root, "windows-filesystem")), [])
+            register_run_output_dir(root / "rapidtriage-run-hacking")
+            self.addCleanup(unregister_run_output_dir, root / "rapidtriage-run-hacking")
             rows = list(collect_ntfs_volume_information(root, "windows-filesystem"))
             self.assertEqual(len(rows), 1)
             details = rows[0].details
@@ -298,6 +303,8 @@ class CollectorReadsAnalysisFoldersTests(unittest.TestCase):
             folder = output / "analyses" / "20261019T000000-cccc" / "ntfs"
             folder.mkdir(parents=True)
             (folder / "$Boot").write_bytes(fx.boot_sector())
+            register_run_output_dir(output)
+            self.addCleanup(unregister_run_output_dir, output)
             rows = list(collect_ntfs_volume_information(root, "windows-filesystem"))
             self.assertEqual([row.details["volume_serial_number"] for row in rows], [fx.VSN_LOW])
             self.assertEqual(rows[0].details["volume_source"], "ntfs-meta-analysis")

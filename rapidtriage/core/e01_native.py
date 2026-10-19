@@ -165,13 +165,20 @@ def open_ewf_segments(segments: list[Path]) -> Any:
 
 
 class RawMediaHandle:
-    """pyewf-handle-shaped view of a raw/dd image file (stdlib), for ``native_partition_table``."""
+    """pyewf-handle-shaped view of a raw/dd image file (stdlib), for ``native_partition_table``.
+
+    ``bytes_per_sector`` is 512 unless the image is a 4Kn GPT disk (``EFI PART`` at byte 4096
+    and not at byte 512), where it is 4096."""
 
     bytes_per_sector = 512
 
     def __init__(self, path: Path):
         self._file = Path(path).open("rb")
         self._size = os.fstat(self._file.fileno()).st_size
+        head = self._file.read(4096 + 8)
+        self._file.seek(0)
+        if head[512:520] != GPT_SIGNATURE and head[4096:4104] == GPT_SIGNATURE:
+            self.bytes_per_sector = 4096
 
     def get_media_size(self) -> int:
         return self._size
@@ -191,6 +198,7 @@ class NativeImageError(RuntimeError):
 
 
 EWF_SIGNATURE = b"EVF\x09\x0d\x0a\xff\x00"
+GPT_SIGNATURE = b"EFI PART"
 NTFS_OEM_ID = b"NTFS    "
 
 
@@ -247,6 +255,9 @@ def locate_ntfs_partition(handle: Any, partition_start_sector: int | None = None
 
     if partition_start_sector is not None:
         offset = partition_start_sector * sector_size
+        if oem_at(offset) != NTFS_OEM_ID and sector_size == 512 and oem_at(partition_start_sector * 4096) == NTFS_OEM_ID:
+            # 4Kn media whose sector size the container does not record: sectors are 4096 bytes.
+            sector_size, offset = 4096, partition_start_sector * 4096
         if oem_at(offset) != NTFS_OEM_ID:
             raise NativeImageError(
                 f"지정한 파티션 시작 섹터 {partition_start_sector}에 NTFS 부트 섹터가 없습니다(파티션이 아니거나 NTFS가 아님)"
@@ -269,11 +280,17 @@ def locate_ntfs_partition(handle: Any, partition_start_sector: int | None = None
     partitions, sector_size = native_partition_table(handle)
     for row in sorted(partitions, key=lambda item: -int(item.get("sector_count") or 0)):
         offset = int(row.get("byte_offset") or 0)
+        row_sector_size = sector_size
+        if oem_at(offset) != NTFS_OEM_ID and sector_size == 512:
+            # 4Kn MBR disk read as 512-byte sectors: the table's LBAs count 4096-byte sectors.
+            offset_4k = int(row.get("start_sector") or 0) * 4096
+            if offset_4k and oem_at(offset_4k) == NTFS_OEM_ID:
+                offset, row_sector_size = offset_4k, 4096
         if oem_at(offset) == NTFS_OEM_ID:
             return {
                 "start_sector": int(row.get("start_sector") or 0),
                 "byte_offset": offset,
-                "sector_size_bytes": sector_size,
+                "sector_size_bytes": row_sector_size,
                 "description": str(row.get("description") or ""),
                 "selection_method": "ntfs-oem-id-probe",
             }

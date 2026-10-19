@@ -42,7 +42,7 @@ import threading
 import unicodedata
 from array import array
 from collections import Counter, OrderedDict
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Literal
 
@@ -97,18 +97,20 @@ def run_output_pruner(output_dir: Path) -> Callable[[Path], bool]:
 
     Same rule as ``core.files.iter_evidence_paths`` (the tool's own outputs are
     never re-read as evidence), applied per directory so pruned subtrees are
-    never listed.
+    never listed (each prune is counted in ``WalkStats.pruned_dirs``). A
+    ``mobile-inner`` folder is pruned only when it is this run's own copy folder
+    (``<output_dir>/mobile-inner``) or another registered run copy folder -- a
+    marker file planted in the evidence never hides it (R6 S2 review).
     """
-    from ...core.files import (
-        is_tool_output_dir,  # R6 S2: also a marked mobile-inner copy folder
-    )
+    from ...core.files import MOBILE_INNER_DIR_NAME, is_tool_output_dir
 
     own = os.path.normcase(os.path.abspath(output_dir))
+    own_inner = (output_dir / MOBILE_INNER_DIR_NAME,)
 
     def prune(path: Path) -> bool:
         return (
             path.name.startswith(RUN_OUTPUT_DIR_PREFIX)
-            or is_tool_output_dir(path)
+            or is_tool_output_dir(path, own_dirs=own_inner)
             or os.path.normcase(os.path.abspath(path)) == own
         )
 
@@ -584,20 +586,35 @@ def _carve_image_unallocated(
     stats = ScanStats()
     try:
         with open_unallocated_image(
-            image, partition_start_sector=options.partition_start_sector, work_dir=ctx.directory / "unalloc"
+            image,
+            partition_start_sector=options.partition_start_sector,
+            work_dir=ctx.directory / "unalloc",
+            check_cancel=ctx.check_cancel,
         ) as source:
             runs = source.runs
             total = source.unallocated_bytes
             ctx.set_message(f"미할당 구간 {len(runs.runs):,}개 · {total / GIB:.2f} GiB 중 최대 {options.max_scan_bytes / GIB:.2f} GiB 스캔")
 
+            read_error: list[str] = []
+
             def windows():
-                for window in source.windows(options.max_scan_bytes, stats=stats, check_cancel=ctx.check_cancel):
+                # R6 S2 review: a read error mid-scan (EWF chunk / truncated image) keeps the
+                # candidates found so far; the summary marks the scan partial with the error.
+                iterator = source.windows(options.max_scan_bytes, stats=stats, check_cancel=ctx.check_cancel)
+                while True:
+                    try:
+                        window = next(iterator)
+                    except StopIteration:
+                        return
+                    except (OSError, ValueError, OverflowError, NtfsUnallocError) as exc:
+                        read_error.append(f"{type(exc).__name__}: {exc}"[:300])
+                        return
                     if stats.windows % IMAGE_PROGRESS_EVERY_WINDOWS == 0:
                         ctx.set_message(f"이미지 미할당 영역 {stats.bytes_read / GIB:.2f} GiB 스캔 · URL 후보 {tally.candidates + len(state.seen)}건")
                     yield window.data, window.image_offset, window.cutoff
 
             entries = scan_url_windows(windows(), state=state, ascii_urls=options.ascii_urls, utf16_urls=options.utf16_urls)
-            truncated = stats.bytes_read < total or runs.truncated
+            truncated = stats.bytes_read < total or runs.truncated or bool(read_error)
             start_sector = source.partition.get("start_sector")
             for entry in sorted(entries, key=lambda item: int(item.get("offset") or 0)):
                 tally.write(
@@ -612,7 +629,7 @@ def _carve_image_unallocated(
                     },
                 )
             summary: dict[str, object] = {
-                "image_unallocated_status": "scanned",
+                "image_unallocated_status": "partial" if read_error else "scanned",
                 "image_path": str(image),
                 "image_media_kind": source.media_kind,
                 "image_partition": source.partition,
@@ -625,6 +642,8 @@ def _carve_image_unallocated(
                 "image_unallocated_scanned_bytes": stats.bytes_read,
                 "image_unallocated_truncated": truncated,
             }
+            if read_error:
+                summary["image_unallocated_error"] = f"이미지 미할당 영역을 읽는 중 오류로 중단했습니다(찾은 후보는 유지): {read_error[0]}"
     except NtfsUnallocError as exc:
         message = (
             f"이미지 미할당 영역을 읽지 못했습니다: {exc}. Sleuth Kit의 blkls로 미할당 영역을 덤프해 이름에 "
@@ -1085,6 +1104,24 @@ def prepare_ntfs_meta(options: NtfsMetaOptions, scope: RunScope) -> dict[str, ob
     return payload
 
 
+def _sibling_boot_check(boot_path: Path, mft_path: Path) -> tuple[str, str]:
+    """``(verdict, reason)`` of ``boot_path`` against the raw ``$MFT`` ``mft_path``
+    (``core.ntfs_unalloc.boot_mft_consistency``; ``"mismatch"`` = skip the $Boot)."""
+    from ...core.ntfs_unalloc import boot_mft_consistency
+
+    record_size = raw_mft_record_size(mft_path)
+    if record_size is None:
+        return "unverified", "$MFT 레코드 크기를 읽지 못해 $Boot와 같은 볼륨인지 확인하지 못했습니다"
+    try:
+        with boot_path.open("rb") as handle:
+            boot = handle.read(512)
+        with mft_path.open("rb") as handle:
+            head = handle.read(record_size)
+    except OSError as exc:
+        return "mismatch", f"$Boot·$MFT를 읽지 못했습니다: {exc}"
+    return boot_mft_consistency(boot, head, record_size)
+
+
 def _sibling_logfile(
     mft: Path, scope: RunScope, *, names: tuple[str, ...] = LOGFILE_SIBLING_NAMES, label: str = "$LogFile"
 ) -> str | None:
@@ -1446,9 +1483,17 @@ def parse_usn_file(ctx: AnalysisContext, journal_path: Path, nodes: _NodeView) -
     return {"usn_record_count": count, "usn_scanned_bytes": size}
 
 
-def ntfs_cluster_size(image: Path | None, partition: Mapping[str, object] | None, siblings: list[Path]) -> int | None:
-    """Volume cluster size from the NTFS boot sector: the partition start of a raw image, or an
-    extracted ``$Boot`` next to the $MFT/$LogFile; ``None`` when neither is readable (EWF images)."""
+def ntfs_cluster_size(
+    image: Path | None,
+    partition: Mapping[str, object] | None,
+    siblings: list[Path],
+    *,
+    sibling_boot: bool = True,
+    boot_files: Sequence[Path] = (),
+) -> int | None:
+    """Volume cluster size from the NTFS boot sector: the partition start of a raw image, the
+    ``boot_files`` (an extracted ``$Boot`` already checked), or -- with ``sibling_boot`` -- a
+    ``$Boot`` next to the $MFT/$LogFile; ``None`` when none is readable (EWF images)."""
     from ...core.ntfs_logfile import boot_sector_cluster_size
     from ...core.ntfs_metadata import image_is_ewf
 
@@ -1456,11 +1501,16 @@ def ntfs_cluster_size(image: Path | None, partition: Mapping[str, object] | None
     if image is not None and isinstance(partition, Mapping) and partition.get("start_sector") is not None:
         try:
             if not image_is_ewf(image):
-                candidates.append((image, int(partition["start_sector"]) * 512))  # type: ignore[call-overload]
+                offset = partition.get("byte_offset")
+                # byte_offset (when known) keeps 4Kn partitions right; start_sector counts 512-byte sectors.
+                byte_offset = int(offset) if offset is not None else int(partition["start_sector"]) * 512  # type: ignore[call-overload]
+                candidates.append((image, byte_offset))
         except (TypeError, ValueError):
             pass
-    for folder in {path.parent for path in siblings}:
-        candidates.extend((folder / name, 0) for name in ("$Boot", "Boot.bin", "$Boot.bin"))
+    candidates.extend((path, 0) for path in boot_files)
+    if sibling_boot:
+        for folder in {path.parent for path in siblings}:
+            candidates.extend((folder / name, 0) for name in BOOT_SIBLING_NAMES)
     for path, offset in candidates:
         try:
             with path.open("rb") as handle:
@@ -1620,12 +1670,19 @@ def run_ntfs_meta(ctx: AnalysisContext) -> None:
             "outputs": {"mft": {"path": str(image), "size_bytes": size, "sha256": None, "extraction_mode": "raw-mft-input"}},
             "manifest_path": None,
         }
-        if options.boot_path:
+        verdict, boot_reason = _sibling_boot_check(Path(str(options.boot_path)), image) if options.boot_path else ("", "")
+        if options.boot_path and verdict == "mismatch":
+            # R6 S2 review: a $Boot of another volume is skipped with the reason, never used.
+            manifest["skipped"].append({"target": "boot", "reason": f"{boot_reason}: {options.boot_path}"})  # type: ignore[attr-defined]
+        elif options.boot_path:
             boot = Path(str(options.boot_path))
             manifest["outputs"]["boot"] = {  # type: ignore[index]
                 "path": str(boot), "size_bytes": boot.stat().st_size if boot.is_file() else None,
                 "sha256": None, "extraction_mode": "sibling-boot-input",
             }
+            ctx.summary["boot_volume_check"] = verdict
+            if boot_reason:
+                ctx.summary["boot_volume_check_note"] = boot_reason
         else:
             manifest["skipped"].append({"target": "boot", "reason": "$MFT 옆에 $Boot 파일이 없습니다"})  # type: ignore[attr-defined]
     else:
@@ -1720,12 +1777,14 @@ def run_ntfs_meta(ctx: AnalysisContext) -> None:
         mft_size = int(ctx.summary.get("mft_record_size") or MFT_RECORD_SIZE)
         siblings = [Path(str(logfile_path))] + ([Path(str(mft["path"]))] if mft and mft.get("path") else [])
         boot = outputs.get("boot") if isinstance(outputs.get("boot"), Mapping) else None
-        if boot and boot.get("path"):
-            siblings.append(Path(str(boot["path"])))  # an extracted $Boot is named $Boot: EWF images too
+        boot_files = [Path(str(boot["path"]))] if boot and boot.get("path") else []
         cluster = ntfs_cluster_size(
             image if options.source != "mft" else None,
             manifest.get("partition") if isinstance(manifest.get("partition"), Mapping) else None,
             siblings,
+            # source="mft": only the $Boot that passed the same-volume check is used.
+            sibling_boot=options.source != "mft",
+            boot_files=boot_files,
         )
         logfile_start = here()
         ctx.summary.update(parse_logfile(ctx, Path(str(logfile_path)), mft_record_size=mft_size, cluster_size=cluster))

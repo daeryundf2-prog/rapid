@@ -10,17 +10,22 @@ layers and marks every row ``verification: unconfirmed``:
    ``version*.ini`` value, file count/size), one ``log-candidate`` row per file whose suffix is
    ``.log``/``.txt``/``.db``/``.dat`` and whose name holds ``log``/``history``/``detect``/
    ``quarantine``/``event`` (size, mtime, sniffed format: text/SQLite/ESE/unknown), and one
-   ``quarantine-folder`` row per ``Quarantine``/``Vault`` folder with **counts and sizes only**:
-   quarantine contents are never opened, hashed, sniffed or copied (it is malware).
+   ``quarantine-folder`` row per folder whose name contains ``quarantine``/``vault``/``격리``
+   (case-insensitive) with **counts and sizes only**: quarantine contents are never opened,
+   hashed, sniffed or copied (it is malware); the count stops at ``MAX_QUARANTINE_FILES`` files,
+   ``MAX_QUARANTINE_DIRS`` folders or ``MAX_WALK_DEPTH`` levels and never follows links/junctions.
 2. ``av-detection-log`` rows with ``av_product=ahnlab-v3`` (the McAfee row shape): a text
    candidate yields lines with a leading timestamp and a detection word
    (``field_extraction=heuristic-lines``); a SQLite candidate yields rows of tables whose name or
    columns say detect/threat/malware/virus/infect/quarantine and which also have a path or a
-   date column (``field_extraction=heuristic-sqlite``, ``schema_confidence=heuristic-sqlite``).
+   date column (``field_extraction=heuristic-sqlite``, ``schema_confidence=heuristic-sqlite``);
+   a column whose name looks secret (password/token/key/secret...) is masked in ``message``.
    Anything else stays in the inventory layer.
 
 Bounds reuse ``system_extras``: logs 64 MiB / 500,000 lines, rows per type 20,000 (also
-enforced by ``collect_system_extras``); a walk stops at ``MAX_WALK_ENTRIES`` entries per AhnLab
+enforced by ``collect_system_extras``). Rows are streamed: the remaining per-type budget is
+passed into the text / SQLite row builders, a file is not parsed once the detection budget is
+spent and the walk stops when both budgets are spent; a walk stops at ``MAX_WALK_ENTRIES`` entries per AhnLab
 folder and a quarantine count at 5,000 files. One corrupt file yields an error row and the walk
 continues. Standard library only.
 """
@@ -34,6 +39,7 @@ import re
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 
+from ...core.link_safe_walk import entry_is_directory_link
 from ...core.models import ArtifactRecord
 from ...core.sqlite_snapshot import open_sqlite_snapshot
 from .._walk import iter_evidence_paths
@@ -62,6 +68,7 @@ AHNLAB_PARSER_VERSION = "av-ahnlab-v1"
 MAX_WALK_ENTRIES = 20_000
 MAX_WALK_DEPTH = 8
 MAX_QUARANTINE_FILES = 5_000
+MAX_QUARANTINE_DIRS = 5_000
 MAX_VERSION_INI_BYTES = 64 * 1024
 MAX_SQLITE_BYTES = 64 * 1024 * 1024
 MAX_SQLITE_TABLES = 200
@@ -75,7 +82,11 @@ AHNLAB_PARENTS = {
     "local": ("user-local-appdata", "사용자 AppData\\Local"),
     "roaming": ("user-roaming-appdata", "사용자 AppData\\Roaming"),
 }
-QUARANTINE_NAMES = frozenset({"quarantine", "vault"})
+# A folder whose name contains one of these (case-insensitive) is a quarantine folder.
+QUARANTINE_NAME_WORDS = ("quarantine", "vault", "격리")
+# SQLite columns whose values are masked in ``message`` (credential-looking names).
+SECRET_COLUMN_WORDS = ("password", "passwd", "pwd", "token", "secret", "key", "credential", "cookie", "session")
+SECRET_MASK = "(숨김: 비밀 값으로 보이는 열)"
 LOG_SUFFIXES = frozenset({".log", ".txt", ".db", ".dat"})
 LOG_NAME_WORDS = ("log", "history", "detect", "quarantine", "event")
 SQLITE_MAGIC = b"SQLite format 3\x00"
@@ -145,24 +156,48 @@ SQL_ACTION_WORDS = ("action", "result", "treat", "status")
 # ---------------------------------------------------------------------------
 
 
+class RowBudget:
+    """Remaining rows per artifact type, shared by every builder of one collection."""
+
+    def __init__(self, limit: int | None = None) -> None:
+        limit = MAX_ROWS_PER_TYPE if limit is None else limit
+        self.remaining = {PRESENCE_TYPE: limit, DETECTION_TYPE: limit}
+
+    def left(self, artifact_type: str) -> int:
+        return max(self.remaining.get(artifact_type, 0), 0)
+
+    def take(self, artifact_type: str) -> bool:
+        if self.remaining.get(artifact_type, 0) <= 0:
+            return False
+        self.remaining[artifact_type] -= 1
+        return True
+
+    @property
+    def exhausted(self) -> bool:
+        return all(value <= 0 for value in self.remaining.values())
+
+
+def is_quarantine_name(name: str) -> bool:
+    lowered = name.casefold()
+    return any(word in lowered for word in QUARANTINE_NAME_WORDS)
+
+
 def collect_ahnlab_v3(root: Path, provider: str) -> Iterable[ArtifactRecord]:
-    """``av-product-presence`` and AhnLab ``av-detection-log`` rows of an evidence root."""
-    emitted = {PRESENCE_TYPE: 0, DETECTION_TYPE: 0}
+    """``av-product-presence`` and AhnLab ``av-detection-log`` rows of an evidence root (streamed)."""
+    budget = RowBudget()
     seen: set[str] = set()
     for folder in ahnlab_roots(root):
+        if budget.exhausted:
+            return
         key = str(folder).casefold()
         if key in seen:
             continue
         seen.add(key)
         try:
-            records = list(_ahnlab_root_records(folder, root, provider))
+            yield from _ahnlab_root_records(folder, root, provider, budget)
         except Exception as exc:  # pragma: no cover - a whole folder failing never stops the run
-            records = [_error_record(provider, folder, exc, product=OTHER_PRODUCT)]
-        for record in records:
-            if emitted[record.artifact_type] >= MAX_ROWS_PER_TYPE:
-                continue
-            emitted[record.artifact_type] += 1
-            yield record
+            if budget.take(DETECTION_TYPE):
+                yield _error_record(provider, folder, exc, product=OTHER_PRODUCT)
 
 
 def ahnlab_roots(root: Path) -> Iterator[Path]:
@@ -205,6 +240,7 @@ class _Walk:
         self.truncated = False
         self.files: list[Path] = []
         self.quarantines: list[Path] = []
+        self.skipped_links = 0
 
     def run(self, top: Path, depth: int = 0) -> None:
         if depth > MAX_WALK_DEPTH:
@@ -223,7 +259,10 @@ class _Walk:
                 if entry.is_symlink():
                     continue
                 if entry.is_dir(follow_symlinks=False):
-                    if entry.name.lower() in QUARANTINE_NAMES:
+                    if entry_is_directory_link(entry):  # junction / reparse point: never followed
+                        self.skipped_links += 1
+                        continue
+                    if is_quarantine_name(entry.name):
                         self.quarantines.append(Path(entry.path))
                     else:
                         self.run(Path(entry.path), depth + 1)
@@ -240,7 +279,19 @@ def _stat_size(path: Path) -> int:
         return 0
 
 
-def _ahnlab_root_records(folder: Path, root: Path, provider: str) -> Iterator[ArtifactRecord]:
+def _ahnlab_root_records(
+    folder: Path, root: Path, provider: str, budget: RowBudget | None = None
+) -> Iterator[ArtifactRecord]:
+    """Rows of one ``AhnLab`` folder; every row is taken from ``budget`` before it is yielded."""
+    budget = budget if budget is not None else RowBudget()
+    for record in _ahnlab_folder_rows(folder, provider, budget):
+        if budget.take(record.artifact_type):
+            yield record
+        if budget.exhausted:
+            return
+
+
+def _ahnlab_folder_rows(folder: Path, provider: str, budget: RowBudget) -> Iterator[ArtifactRecord]:
     scope, scope_label = AHNLAB_PARENTS[folder.parent.name.lower()]
     user = _user_of(folder)
     try:
@@ -249,22 +300,44 @@ def _ahnlab_root_records(folder: Path, root: Path, provider: str) -> Iterator[Ar
         children = []
     loose = _Walk()
     for child in children:
-        if child.is_symlink():
+        if budget.exhausted:
+            return
+        if child.is_symlink() or _is_dir_link(child):
             continue
         if child.is_dir():
-            if child.name.lower() in QUARANTINE_NAMES:
+            if is_quarantine_name(child.name):
                 loose.quarantines.append(child)
                 continue
-            yield from _product_records(child, folder, provider, scope=scope, scope_label=scope_label, user=user, product=product_of(child.name))
+            yield from _product_records(
+                child, folder, provider, scope=scope, scope_label=scope_label, user=user, product=product_of(child.name), budget=budget
+            )
         elif child.is_file():
             loose.files.append(child)
     # Files and quarantine folders directly under ``AhnLab`` belong to no product folder.
     context = {"scope": scope, "scope_label": scope_label, "user": user, "product": OTHER_PRODUCT, "product_folder": folder}
     for path in loose.files:
+        if budget.exhausted:
+            return
         if is_log_candidate(path):
-            yield from _candidate_records(path, provider, context)
+            yield from _candidate_records(path, provider, context, budget)
     for quarantine in loose.quarantines:
+        if budget.left(PRESENCE_TYPE) <= 0:
+            return
         yield _quarantine_record(quarantine, provider, context)
+
+
+def _is_dir_link(path: Path) -> bool:
+    """A junction / reparse-point directory (``Path.is_symlink`` misses junctions before 3.12)."""
+    is_junction = getattr(path, "is_junction", None)
+    try:
+        if is_junction is not None and is_junction():
+            return True
+        if os.name == "nt":
+            attributes = int(getattr(path.lstat(), "st_file_attributes", 0) or 0)
+            return bool(attributes & 0x400)  # FILE_ATTRIBUTE_REPARSE_POINT
+    except OSError:
+        return True
+    return False
 
 
 def _product_records(
@@ -276,6 +349,7 @@ def _product_records(
     scope_label: str,
     user: str,
     product: tuple[str, str],
+    budget: RowBudget,
 ) -> Iterator[ArtifactRecord]:
     walk = _Walk()
     walk.run(product_folder)
@@ -301,7 +375,9 @@ def _product_records(
     )
     yield make_record(provider, PRESENCE_TYPE, product_folder, details)
     for path in candidates:
-        yield from _candidate_records(path, provider, context)
+        if budget.exhausted:
+            return
+        yield from _candidate_records(path, provider, context, budget)
     yield from quarantine_rows
 
 
@@ -372,22 +448,28 @@ def sniff_format(head: bytes) -> str:
     return "text" if controls <= len(head) * 0.02 else "unknown"
 
 
-def _candidate_records(path: Path, provider: str, context: dict[str, object]) -> Iterator[ArtifactRecord]:
+def _candidate_records(
+    path: Path, provider: str, context: dict[str, object], budget: RowBudget | None = None
+) -> Iterator[ArtifactRecord]:
     size = _stat_size(path)
     head = read_prefix(path, SNIFF_BYTES)
     sniffed = sniff_format(head)
     detection: list[ArtifactRecord] = []
     outcome = "inventory-only"
     error = ""
+    # Never build more detection rows than the collection may still emit.
+    limit = budget.left(DETECTION_TYPE) if budget is not None else RowBudget().left(DETECTION_TYPE)
     try:
-        if sniffed == "text":
-            detection = list(text_detection_records(path, provider, context))
+        if sniffed in {"text", "sqlite"} and limit <= 0:
+            outcome = "skipped-row-cap"
+        elif sniffed == "text":
+            detection = list(text_detection_records(path, provider, context, limit=limit))
             outcome = "detection-rows" if detection else "no-detection-lines"
         elif sniffed == "sqlite":
             if size > MAX_SQLITE_BYTES:
                 outcome = "skipped-size-cap"
             else:
-                detection, matched_tables = sqlite_detection_records(path, provider, context)
+                detection, matched_tables = sqlite_detection_records(path, provider, context, limit=limit)
                 outcome = "detection-rows" if detection else ("no-detection-rows" if matched_tables else "no-detection-table")
     except Exception as exc:  # corrupt input: an error row, the walk continues
         outcome = "error"
@@ -422,13 +504,21 @@ def _relative(path: Path, base: Path) -> str:
 
 
 def _quarantine_record(folder: Path, provider: str, context: dict[str, object]) -> ArtifactRecord:
-    """Counts and sizes only: a quarantine file is never opened (``os.scandir`` + ``stat``)."""
+    """Counts and sizes only: a quarantine file is never opened (``os.scandir`` + ``stat``).
+
+    Bounded by ``MAX_QUARANTINE_FILES`` files, ``MAX_QUARANTINE_DIRS`` folders and
+    ``MAX_WALK_DEPTH`` levels; symlinks and junctions are never followed (no cycles)."""
     count = 0
     total = 0
     truncated = False
-    stack = [folder]
+    directories = 0
+    stack: list[tuple[Path, int]] = [(folder, 0)]
     while stack and not truncated:
-        current = stack.pop()
+        current, depth = stack.pop()
+        directories += 1
+        if directories > MAX_QUARANTINE_DIRS:
+            truncated = True
+            break
         try:
             entries = list(os.scandir(current))
         except OSError:
@@ -438,7 +528,12 @@ def _quarantine_record(folder: Path, provider: str, context: dict[str, object]) 
                 if entry.is_symlink():
                     continue
                 if entry.is_dir(follow_symlinks=False):
-                    stack.append(Path(entry.path))
+                    if entry_is_directory_link(entry):
+                        continue
+                    if depth + 1 > MAX_WALK_DEPTH:
+                        truncated = True
+                        continue
+                    stack.append((Path(entry.path), depth + 1))
                 elif entry.is_file(follow_symlinks=False):
                     if count >= MAX_QUARANTINE_FILES:
                         truncated = True
@@ -506,12 +601,27 @@ def _detection_details(path: Path, context: dict[str, object], *, source_format:
     return details
 
 
-def text_detection_records(path: Path, provider: str, context: dict[str, object]) -> Iterator[ArtifactRecord]:
+def _row(provider: str, resolved: str, details: dict[str, object]) -> ArtifactRecord:
+    """``av-detection-log`` record from a per-file template copy (no per-row ``resolve``)."""
+    details.setdefault("timestamp", "")
+    return ArtifactRecord(provider=provider, artifact_type=DETECTION_TYPE, path=resolved, supported=True, details=details)
+
+
+def text_detection_records(
+    path: Path, provider: str, context: dict[str, object], *, limit: int | None = None
+) -> Iterator[ArtifactRecord]:
+    """Detection lines of a text log; at most ``limit`` rows (the file is not read when ``limit`` <= 0)."""
+    limit = MAX_ROWS_PER_TYPE if limit is None else limit
+    if limit <= 0:
+        return
     hashes = sha256_of(path)
     text_value = decode_text(read_prefix(path, MAX_LOG_BYTES))
+    # base_details (resolve + stat) once per file, copied per row.
+    template = _detection_details(path, context, source_format="ahnlab-text-log", extraction="heuristic-lines")
+    resolved = str(path.resolve())
     produced = 0
     for number, raw in iter_lines(text_value, MAX_LOG_LINES):
-        if produced >= MAX_ROWS_PER_TYPE:
+        if produced >= limit:
             break
         line = raw.strip()
         lowered = line.lower()
@@ -536,7 +646,8 @@ def text_detection_records(path: Path, provider: str, context: dict[str, object]
         user_match = AV_USER.search(rest)
         user = (user_match.group("angle") or user_match.group("domain") or "") if user_match else ""
         action, action_label = _action(lowered)
-        details = _detection_details(path, context, source_format="ahnlab-text-log", extraction="heuristic-lines")
+        details = dict(template)
+        details["risk_flags"] = list(template["risk_flags"])  # type: ignore[call-overload]
         details.update(
             {
                 "source_hashes": hashes,
@@ -558,7 +669,7 @@ def text_detection_records(path: Path, provider: str, context: dict[str, object]
             }
         )
         produced += 1
-        yield make_record(provider, DETECTION_TYPE, path, details)
+        yield _row(provider, resolved, details)
 
 
 def _quote(name: str) -> str:
@@ -599,11 +710,23 @@ def _cell_text(value: object) -> str:
     return "" if value is None else str(value)
 
 
-def sqlite_detection_records(path: Path, provider: str, context: dict[str, object]) -> tuple[list[ArtifactRecord], int]:
-    """Rows of tables that look like detection history; raises on a corrupt database."""
-    hashes = sha256_of(path)
+def is_secret_column(name: str) -> bool:
+    lowered = name.lower()
+    return any(word in lowered for word in SECRET_COLUMN_WORDS)
+
+
+def sqlite_detection_records(
+    path: Path, provider: str, context: dict[str, object], *, limit: int | None = None
+) -> tuple[list[ArtifactRecord], int]:
+    """Rows of tables that look like detection history (at most ``limit``); raises on a corrupt database."""
     records: list[ArtifactRecord] = []
     matched = 0
+    limit = MAX_ROWS_PER_TYPE if limit is None else limit
+    if limit <= 0:
+        return records, matched
+    hashes = sha256_of(path)
+    template = _detection_details(path, context, source_format="ahnlab-sqlite-log", extraction="heuristic-sqlite")
+    resolved = str(path.resolve())
     with open_sqlite_snapshot(path) as connection:
         tables = [
             str(row[0])
@@ -623,13 +746,15 @@ def sqlite_detection_records(path: Path, provider: str, context: dict[str, objec
             matched += 1
             threat_column = _pick(columns, ("threat", "malware", "virus", "detect"), prefer="name")
             action_column = _pick(columns, SQL_ACTION_WORDS)
-            cursor = connection.execute(f"SELECT rowid, * FROM {_quote(table)} LIMIT ?", (MAX_ROWS_PER_TYPE - len(records),))
+            secret_columns = {column for column in columns if is_secret_column(column)}
+            cursor = connection.execute(f"SELECT rowid, * FROM {_quote(table)} LIMIT ?", (limit - len(records),))
             for row in cursor:
                 cells = dict(zip(columns, row[1:]))
                 stamp, timezone = sql_time_value(cells.get(time_column)) if time_column else ("", "")
                 action_raw = _cell_text(cells.get(action_column)) if action_column else ""
                 action, action_label = _action(action_raw.lower())
-                details = _detection_details(path, context, source_format="ahnlab-sqlite-log", extraction="heuristic-sqlite")
+                details = dict(template)
+                details["risk_flags"] = list(template["risk_flags"])  # type: ignore[call-overload]
                 details.update(
                     {
                         "source_hashes": hashes,
@@ -646,15 +771,21 @@ def sqlite_detection_records(path: Path, provider: str, context: dict[str, objec
                         "object_path": _cell_text(cells.get(path_column))[:1000] if path_column else "",
                         "process_path": "",
                         "account": "",
-                        "message": json.dumps({key: _cell_text(value)[:200] for key, value in cells.items()}, ensure_ascii=False)[:1000],
+                        "message": json.dumps(
+                            {
+                                key: SECRET_MASK if key in secret_columns else _cell_text(value)[:200]
+                                for key, value in list(cells.items())[:40]
+                            },
+                            ensure_ascii=False,
+                        )[:1000],
                         "timestamp": stamp,
                         "timestamp_kind": "event" if stamp else "",
                         "timestamp_timezone": timezone if stamp else "",
                         "evidence_note": "AhnLab DB 스키마를 확인하지 못해 표·열 이름(탐지·위협·경로·시각)으로 고른 행입니다. 열 해석은 원문(message)과 함께 확인하십시오.",
                     }
                 )
-                records.append(make_record(provider, DETECTION_TYPE, path, details))
-            if len(records) >= MAX_ROWS_PER_TYPE:
+                records.append(_row(provider, resolved, details))
+            if len(records) >= limit:
                 break
     return records, matched
 

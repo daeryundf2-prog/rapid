@@ -41,7 +41,7 @@ from collections import Counter
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from pathlib import Path
 
-from ...core.files import RUN_OUTPUT_DIR_PREFIX
+from ...core.files import RUN_OUTPUT_DIR_PREFIX, is_active_run_output_dir
 from ...core.models import ArtifactRecord
 from ...core.ntfs_volume import (  # noqa: F401 - re-exported (moved to core in R6 S2)
     NTFS_VOLUME_FLAGS,
@@ -1874,7 +1874,9 @@ def mcafee_log_records(path: Path, provider: str) -> Iterable[ArtifactRecord]:
 # Run output folders whose ``ntfs-meta`` analyses extracted ``$Boot`` / ``$MFT`` (R6 S2):
 # ``<root>/rapidtriage-run*/analyses/<id>/ntfs/`` (a folder run; the evidence walk itself prunes
 # run outputs) and ``<run output>/analyses/<id>/ntfs/`` when ``root`` lies inside a run output
-# folder (an E01 run's extraction root, e.g. ``<output>/<stage>/fs``).
+# folder (an E01 run's extraction root, e.g. ``<output>/<stage>/fs``). R6 S2 review: only the
+# output folder of a run active in this process counts (``core.files.register_run_output_dir``);
+# a ``rapidtriage-run*`` folder planted in the evidence is never read as the tool's own output.
 ANALYSIS_NTFS_GLOB = ("analyses", "*", "ntfs")
 ANALYSIS_BOOT_NAMES = ("$Boot", "Boot.bin", "$Boot.bin")
 ANALYSIS_MFT_NAMES = ("MFT.bin", "$MFT")
@@ -1897,7 +1899,7 @@ def _run_output_folders(root: Path) -> list[Path]:
     for ancestor in [root, *list(root.parents)[:RUN_OUTPUT_ANCESTOR_LEVELS]]:
         if ancestor not in runs and any((ancestor / marker).is_file() for marker in RUN_OUTPUT_MARKERS):
             runs.append(ancestor)
-    return runs
+    return [run for run in runs if is_active_run_output_dir(run)]
 
 
 def analysis_ntfs_folders(root: Path) -> list[tuple[Path, dict[str, Path]]]:

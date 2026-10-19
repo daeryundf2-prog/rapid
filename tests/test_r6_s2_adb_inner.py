@@ -27,6 +27,8 @@ from rapidtriage.core.files import (
     MOBILE_INNER_MARKER_NAME,
     is_tool_output_dir,
     iter_evidence_paths,
+    register_tool_output_dir,
+    unregister_tool_output_dir,
 )
 
 SECRET = "R6S2-PLANTED-SECRET-7f3a"
@@ -186,21 +188,26 @@ class InnerHandoffTests(_Sandbox):
 
     def test_inner_folder_pruned_from_rescans(self) -> None:
         self.write_ab("phone.ab", ab(tar_bytes(self.members()), compressed=True))
-        # an output folder inside the evidence tree: the marked copies are never re-read as evidence
+        # R6 S2 review: an inner folder inside the evidence tree is refused (nothing is written there)
         inside = self.evidence / "out" / MOBILE_INNER_DIR_NAME
-        rows = list(MobileExportProvider(inner_dir=inside).collect(self.evidence))
+        before = files_under(self.evidence)
+        provider = MobileExportProvider(inner_dir=inside)
+        rows = list(provider.collect(self.evidence))
+        self.assertEqual(files_under(self.evidence), before)
+        self.assertFalse(any(row.artifact_type == "mobile-chat-database" for row in rows))
+        self.assertTrue(any("증거 폴더 안" in note for note in provider.collection_notes))
+        # the run's own (registered) copy folder outside the evidence holds the copies
+        rows = list(MobileExportProvider(inner_dir=self.inner).collect(self.evidence))
         self.assertTrue(any(row.artifact_type == "mobile-chat-database" for row in rows))
-        self.assertTrue(is_tool_output_dir(inside))
-        walked = list(iter_evidence_paths(self.evidence, "*"))
-        self.assertFalse(any(MOBILE_INNER_DIR_NAME in path.parts for path in walked))
-        rescan = list(MobileExportProvider(inner_dir=self.inner).collect(self.evidence))
-        self.assertEqual(
-            sorted(row.artifact_type for row in rescan), sorted(row.artifact_type for row in rows)
-        )
-        # an unmarked folder of the same name is ordinary evidence
+        self.assertFalse(is_tool_output_dir(self.inner), "the marker alone never prunes a folder")
+        register_tool_output_dir(self.inner)
+        self.addCleanup(unregister_tool_output_dir, self.inner)
+        self.assertTrue(is_tool_output_dir(self.inner))
+        # an unmarked / marked-but-unregistered folder of the same name is ordinary evidence
         plain = self.evidence / "other" / MOBILE_INNER_DIR_NAME
         plain.mkdir(parents=True)
         (plain / "note.txt").write_text("x", encoding="utf-8")
+        (plain / MOBILE_INNER_MARKER_NAME).write_text("x", encoding="utf-8")
         self.assertFalse(is_tool_output_dir(plain))
         self.assertIn(plain / "note.txt", list(iter_evidence_paths(self.evidence, "*")))
 

@@ -369,3 +369,9 @@ AhnLab V3 로그, adb 백업 내부 DB → 기존 앱 파서, 이미지에서 `$
 
 ## 7. 결과 기록
 (구현 후 단계별로 채움)
+
+### 단계 2 적대적 리뷰 후속 수정(백엔드)
+- 브랜치 `fix/r6-s2-backend-review`(기준 `feat/r6-followups` 13c166f). 회귀 시험 `tests/test_r6_s2_backend_review.py`(리뷰어 재현 스크립트 7개를 합성 데이터 시험으로 옮김).
+- 높음: `mobile-inner` 표지만으로는 제외하지 않는다 — 실행 중인 런의 자기 사본 폴더(`normcase(realpath)` 등록)와 분석의 `<출력>/mobile-inner`만 제외, 제외는 `tool-output-dir`·`pruned_output_dir_count`로 기록.
+- 중간: CLI·공급자는 증거 폴더 안 사본 폴더에 쓰지 않음(한국어 경고·수집 메모), 재실행 시 목록 병합(`-<n>` 폴더도 목록에 있음); `$Boot`(8 KiB)·`$Bitmap`(512 MiB) `icat`은 흘려 쓰는 중 상한에서 종료; 음수·볼륨 밖 LCN은 한국어 오류, `ValueError`·`OverflowError`도 `NtfsUnallocError`; `$Bitmap`→구간은 바이트 표·popcount·취소 확인(8 MiB 0x55 약 0.5초); AhnLab은 남은 행 예산으로 흘려 생성.
+- 그 밖: 잘린 adb 구성원의 부분 사본 삭제, 수집당 adb 사본 합계 4 GiB, 백업 전체 재읽기 제거, 이미지 읽기 오류 시 부분 결과 유지, AhnLab 격리 이름(`quarantine`·`vault`·`격리`)·깊이/폴더 상한·정션 차단·비밀 열 가림, 분석 NTFS 폴더는 실행 중인 런 출력만, 4Kn 섹터, 형제 `$Boot`의 같은 볼륨 확인. 세부는 `docs/rapidtriage-known-limitations.md` `## R6 S2`.

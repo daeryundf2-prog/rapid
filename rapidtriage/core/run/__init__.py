@@ -86,7 +86,11 @@ from ..files import (
     MOBILE_INNER_INDEX_NAME,
     disable_evidence_path_cache,
     enable_evidence_path_cache,
+    register_run_output_dir,
+    register_tool_output_dir,
     run_files_scan,
+    unregister_run_output_dir,
+    unregister_tool_output_dir,
 )
 from ..filetime import parse_iso_utc
 from ..forensic_accuracy import build_accuracy_gate
@@ -560,6 +564,10 @@ def run_triage_mode(
         # Every provider walks the same evidence tree; the run-scoped path
         # cache makes each tree walk happen once per run (see core/files.py).
         enable_evidence_path_cache()
+        # R6 S2: this run's own adb copy folder is the only ``mobile-inner`` pruned from walks.
+        own_inner_dir = output_dir / MOBILE_INNER_DIR_NAME
+        register_tool_output_dir(own_inner_dir)
+        register_run_output_dir(output_dir)
         try:
             summary_payload = _run_triage_stages(
                 input_root,
@@ -592,6 +600,8 @@ def run_triage_mode(
                 skip_tasks=plan["options"]["skip_tasks"],
             )
         finally:
+            unregister_tool_output_dir(own_inner_dir)
+            unregister_run_output_dir(output_dir)
             disable_evidence_path_cache()
     except BaseException as exc:
         control_watcher.stop()

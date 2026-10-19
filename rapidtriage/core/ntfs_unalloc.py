@@ -16,6 +16,7 @@ is only read. Nothing here writes outside the caller's work folder.
 from __future__ import annotations
 
 import contextlib
+import re
 import shutil
 import subprocess
 from collections.abc import Callable, Iterator, Sequence
@@ -61,54 +62,106 @@ class Window:
     cutoff: int
 
 
-def bitmap_unallocated_runs(bitmap: bytes, total_clusters: int, *, max_runs: int = MAX_RUNS) -> UnallocatedRuns:
+def _clear_bit_runs(value: int) -> tuple[tuple[int, int], ...]:
+    """``(first bit, end bit)`` runs of clear bits of one bitmap byte (LSB first)."""
+    out: list[tuple[int, int]] = []
+    bit = 0
+    while bit < 8:
+        if value & (1 << bit):
+            bit += 1
+            continue
+        first = bit
+        while bit < 8 and not value & (1 << bit):
+            bit += 1
+        out.append((first, bit))
+    return tuple(out)
+
+
+# Per-byte lookup table: the clear-bit runs of every byte value (R6 S2 review: no bit loop).
+_CLEAR_BIT_RUNS = tuple(_clear_bit_runs(value) for value in range(256))
+_BITMAP_RUN_PATTERN = re.compile(rb"\x00+|[^\x00\xff]+")
+
+
+def _count_free_clusters(view: memoryview, total_clusters: int, limit_bytes: int, check_cancel: Callable[[], None] | None) -> int:
+    """Clear bits among the first ``total_clusters`` bits (popcount per block, not per bit)."""
+    full_bytes = min(limit_bytes, total_clusters // 8)
+    free = 0
+    for position in range(0, full_bytes, BITMAP_SCAN_BYTES):
+        if check_cancel is not None:
+            check_cancel()
+        block = view[position : min(position + BITMAP_SCAN_BYTES, full_bytes)]
+        free += len(block) * 8 - int.from_bytes(block, "little").bit_count()
+    if full_bytes < limit_bytes:
+        value = view[full_bytes]
+        free += sum(1 for bit in range(total_clusters - full_bytes * 8) if not value & (1 << bit))
+    return free
+
+
+def bitmap_unallocated_runs(
+    bitmap: bytes,
+    total_clusters: int,
+    *,
+    max_runs: int = MAX_RUNS,
+    check_cancel: Callable[[], None] | None = None,
+) -> UnallocatedRuns:
     """Merged ``(first cluster, cluster count)`` runs of clear bits among the first ``total_clusters``
     bits of ``bitmap`` (bit ``n`` = byte ``n // 8``, bit ``n % 8``, LSB first). ``free_clusters``
-    counts every clear bit even past ``max_runs``."""
-    import re
+    counts every clear bit even past ``max_runs`` (a popcount per block once the run list is full).
 
+    0x00 / 0xFF byte runs are taken whole; any other byte uses a per-byte run table.
+    ``check_cancel`` is called once per ``BITMAP_SCAN_BYTES`` block."""
+    total_clusters = max(int(total_clusters), 0)
+    view = memoryview(bitmap).cast("B") if not isinstance(bitmap, bytes) else memoryview(bitmap)
+    limit_bytes = min(len(view), (total_clusters + 7) // 8)
+    free = _count_free_clusters(view, total_clusters, limit_bytes, check_cancel)
     runs: list[tuple[int, int]] = []
-    free = 0
     truncated = False
-    limit_bytes = min(len(bitmap), (total_clusters + 7) // 8)
     current_start = -1
     current_end = -1
-
-    def add(start: int, end: int) -> None:
-        nonlocal current_start, current_end, truncated
-        end = min(end, total_clusters)
-        if end <= start:
-            return
-        if start == current_end:
-            current_end = end
-            return
-        if current_start >= 0:
-            if len(runs) >= max_runs:
-                truncated = True
-            else:
-                runs.append((current_start, current_end - current_start))
-        current_start, current_end = start, end
-
-    # A run of 0x00 bytes is all free; any other non-0xFF byte is examined bit by bit.
-    pattern = re.compile(rb"\x00+|[^\x00\xff]")
+    table = _CLEAR_BIT_RUNS
     for position in range(0, limit_bytes, BITMAP_SCAN_BYTES):
-        block = bitmap[position : min(position + BITMAP_SCAN_BYTES, limit_bytes)]
-        for match in pattern.finditer(block):
-            first = (position + match.start()) * 8
-            if block[match.start()] == 0:
-                start, end = first, (position + match.end()) * 8
-                add(start, end)
-                free += min(end, total_clusters) - min(start, total_clusters)
+        if truncated:
+            break
+        if check_cancel is not None:
+            check_cancel()
+        block = bytes(view[position : min(position + BITMAP_SCAN_BYTES, limit_bytes)])
+        for match in _BITMAP_RUN_PATTERN.finditer(block):
+            first_byte = match.start()
+            if block[first_byte] == 0:
+                start, end = (position + first_byte) * 8, min((position + match.end()) * 8, total_clusters)
+                if start == current_end:
+                    current_end = end
+                    continue
+                if current_start >= 0:
+                    if len(runs) >= max_runs:
+                        truncated = True
+                        break
+                    runs.append((current_start, current_end - current_start))
+                current_start, current_end = start, end
                 continue
-            value = block[match.start()]
-            for bit in range(8):
-                cluster = first + bit
-                if cluster >= total_clusters:
+            base = (position + first_byte) * 8
+            for value in block[first_byte : match.end()]:
+                for low, high in table[value]:
+                    start, end = base + low, base + high
+                    if end > total_clusters:
+                        end = total_clusters
+                        if end <= start:
+                            break
+                    if start == current_end:
+                        current_end = end
+                        continue
+                    if current_start >= 0:
+                        if len(runs) >= max_runs:
+                            truncated = True
+                            break
+                        runs.append((current_start, current_end - current_start))
+                    current_start, current_end = start, end
+                if truncated:
                     break
-                if not value & (1 << bit):
-                    add(cluster, cluster + 1)
-                    free += 1
-    if current_start >= 0:
+                base += 8
+            if truncated:
+                break
+    if current_start >= 0 and not truncated:
         if len(runs) >= max_runs:
             truncated = True
         else:
@@ -297,6 +350,12 @@ def _read_bitmap_native(reader: Any, partition_offset: int, vbr: dict[str, objec
         if lcn is None:
             out += bytes(size)
             continue
+        if lcn < 0 or lcn + count > total_clusters:
+            # R6 S2 review: a corrupt runlist (negative / past-the-volume LCN) is a Korean error,
+            # never a negative seek (ValueError) escaping the analysis.
+            raise NtfsUnallocError(
+                f"$Bitmap 데이터 런의 클러스터 번호({lcn:,}, {count:,}개)가 볼륨 범위(0~{total_clusters:,}) 밖입니다(손상된 MFT 레코드)"
+            )
         reader.seek(partition_offset + lcn * cluster_size)
         piece = reader.read(size)
         if len(piece) < size:
@@ -311,14 +370,18 @@ def _read_bitmap_icat(
     image: Path, start_sector: int, work_dir: Path, stream_runner: StreamRunner
 ) -> bytes | None:
     """``icat -o <sector> <image> 6`` into ``work_dir``; ``None`` when icat fails."""
+    from .ntfs_metadata import run_stream_capped
+
     out = work_dir / "Bitmap.bin"
     work_dir.mkdir(parents=True, exist_ok=True)
-    result = stream_runner(["icat", "-o", str(start_sector), str(image), str(BITMAP_INODE)], out)
+    command = ["icat", "-o", str(start_sector), str(image), str(BITMAP_INODE)]
     try:
+        # The default runner kills icat once the stream passes the cap (never written in full).
+        result, capped, _size = run_stream_capped(stream_runner, command, out, MAX_BITMAP_BYTES)
+        if capped:
+            raise NtfsUnallocError(f"$Bitmap이 너무 큽니다(> {MAX_BITMAP_BYTES:,}바이트)")
         if result.returncode != 0 or not out.is_file() or out.stat().st_size == 0:
             return None
-        if out.stat().st_size > MAX_BITMAP_BYTES:
-            raise NtfsUnallocError(f"$Bitmap이 너무 큽니다({out.stat().st_size:,}바이트 > {MAX_BITMAP_BYTES:,})")
         return out.read_bytes()
     finally:
         out.unlink(missing_ok=True)
@@ -330,6 +393,9 @@ def _default_stream_runner(command: Sequence[str], output_path: Path) -> subproc
     return default_stream_runner(command, output_path)
 
 
+_default_stream_runner.supports_max_bytes = True  # type: ignore[attr-defined]
+
+
 @contextlib.contextmanager
 def open_unallocated_image(
     image: Path,
@@ -339,6 +405,7 @@ def open_unallocated_image(
     max_runs: int = MAX_RUNS,
     stream_runner: StreamRunner = _default_stream_runner,
     tool_resolver: Callable[[str], str | None] = shutil.which,
+    check_cancel: Callable[[], None] | None = None,
 ) -> Iterator[UnallocatedImage]:
     """Open ``image``, find its NTFS partition, read ``$Boot`` and ``$Bitmap`` and compute the runs.
 
@@ -369,12 +436,14 @@ def open_unallocated_image(
             bitmap: bytes | None = None
             method = "native-mft-record-6"
             if tool_resolver("icat") is not None:
-                bitmap = _read_bitmap_icat(Path(image), int(partition["start_sector"]), work_dir, stream_runner)  # type: ignore[call-overload]
+                # icat ``-o`` counts 512-byte sectors; the byte offset keeps 4Kn partitions right.
+                icat_sector = int(partition["byte_offset"]) // 512  # type: ignore[call-overload]
+                bitmap = _read_bitmap_icat(Path(image), icat_sector, work_dir, stream_runner)
                 method = "sleuthkit-icat"
             if bitmap is None:
                 bitmap = _read_bitmap_native(reader, int(partition["byte_offset"]), vbr, total_clusters)  # type: ignore[call-overload]
                 method = "native-mft-record-6"
-            runs = bitmap_unallocated_runs(bitmap, total_clusters, max_runs=max_runs)
+            runs = bitmap_unallocated_runs(bitmap, total_clusters, max_runs=max_runs, check_cancel=check_cancel)
             del bitmap
             yield UnallocatedImage(
                 image=Path(image),
@@ -391,3 +460,33 @@ def open_unallocated_image(
         raise NtfsUnallocError(str(exc)) from exc
     except OSError as exc:
         raise NtfsUnallocError(f"이미지를 읽을 수 없습니다: {exc}") from exc
+    except (ValueError, OverflowError) as exc:
+        raise NtfsUnallocError(f"NTFS 구조 값이 비정상입니다(손상된 부트 섹터·MFT 레코드): {exc}") from exc
+
+
+def boot_mft_consistency(boot: bytes, mft_head: bytes, mft_record_size: int) -> tuple[str, str]:
+    """``(verdict, Korean reason)`` of an extracted ``$Boot`` against an extracted ``$MFT``
+    (R6 S2 review: a sibling ``$Boot`` from another volume is never used).
+
+    ``verdict``: ``"match"`` (the first data run of ``$MFT`` record 0 -- the ``$MFT``'s own
+    ``$DATA`` -- starts at the boot sector's ``mft_lcn`` and the MFT record sizes agree),
+    ``"mismatch"`` (not an NTFS boot sector, or record size / MFT LCN differ: skip it) or
+    ``"unverified"`` (record 0 carries no readable runlist, e.g. a partial export)."""
+    vbr = parse_ntfs_vbr(boot[:512])
+    if vbr.get("vbr_parse_status") != "parsed":
+        return "mismatch", "$Boot 파일이 NTFS 부트 섹터가 아닙니다"
+    boot_record_size = vbr.get("mft_record_size")
+    if isinstance(boot_record_size, int) and boot_record_size != mft_record_size:
+        return "mismatch", f"$Boot의 MFT 레코드 크기({boot_record_size})가 $MFT({mft_record_size})와 다릅니다(다른 볼륨)"
+    try:
+        content, runlist, _size = bitmap_data_attribute(
+            mft_head[:mft_record_size], int(vbr.get("bytes_per_sector") or 512)  # type: ignore[call-overload]
+        )
+    except NtfsUnallocError:
+        return "unverified", "$MFT 레코드 0의 $DATA를 읽지 못해 $Boot와 같은 볼륨인지 확인하지 못했습니다"
+    first_lcn = next((lcn for lcn, _count in runlist if lcn is not None), None)
+    if content is not None or first_lcn is None:
+        return "unverified", "$MFT 레코드 0에 데이터 런이 없어 $Boot와 같은 볼륨인지 확인하지 못했습니다"
+    if first_lcn != vbr.get("mft_lcn"):
+        return "mismatch", f"$Boot의 MFT 시작 클러스터({vbr.get('mft_lcn')})가 $MFT 레코드 0의 위치({first_lcn})와 다릅니다(다른 볼륨)"
+    return "match", ""

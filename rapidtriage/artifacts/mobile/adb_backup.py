@@ -23,12 +23,15 @@ decompressed bytes and a ``MAX_RATIO`` decompression-ratio guard.
 R6 S2 (inner databases handed to the app parsers): with ``inner_root`` set (the run output's
 ``mobile-inner/`` folder, never the evidence tree), each SQLite member (``SQLite format 3``
 header) of an ``apps/<package>/{db,f,r,sp}/`` domain is streamed to
-``<inner_root>/<backup sha256[:16]>/<sha256(package)[:16]>/<safe name>`` together with its
+``<inner_root>/<sha256(backup path)[:16]>/<sha256(package)[:16]>/<safe name>`` together with its
 ``-wal`` / ``-shm`` / ``-journal`` companions. File names come only from the member's basename
 through :func:`safe_component`; only regular members are written (links / devices skipped) and
-an existing file is never overwritten. Caps: ``MAX_SQLITE_BYTES`` per database,
-``MAX_SQLITE_MEMBERS`` databases and ``MAX_INNER_EXTRACT_BYTES`` in total per backup; a member
-over a cap keeps its member row (``inner_extract_skipped`` = ``cap``). Each copy is then handed
+an existing file is never overwritten (a re-run into the same folder gets a ``-<n>`` folder and
+the index is merged, so every copy on disk stays listed). Caps: ``MAX_SQLITE_BYTES`` per
+database, ``MAX_SQLITE_MEMBERS`` databases, ``MAX_INNER_EXTRACT_BYTES`` in total per backup and
+``MAX_RUN_INNER_EXTRACT_BYTES`` across every backup of one collection (:class:`InnerBudget`); a
+member over a cap keeps its member row (``inner_extract_skipped`` = ``cap``). A member whose
+stream ends early (truncated tar) leaves no partial copy: the file is removed and not indexed. Each copy is then handed
 to the existing parser: a messenger database (``is_chat_app_database_candidate``) to
 ``collect_chat_app_database_inventory``, anything else to ``build_android_app_data_record``;
 those rows carry ``container_backup_path``, ``container_member``, ``inner_path`` and
@@ -63,6 +66,8 @@ MAX_SQLITE_BYTES = 64 * 1024 * 1024
 MAX_SQLITE_MEMBERS = 200
 # R6 S2: inner-database extraction (copies under the run output, never the evidence tree).
 MAX_INNER_EXTRACT_BYTES = 1024 * 1024 * 1024
+# R6 S2 review: total inner copies across all ``.ab`` files of one collection (run / CLI call).
+MAX_RUN_INNER_EXTRACT_BYTES = 4 * 1024 * 1024 * 1024
 MAX_SAFE_NAME = 120
 INNER_DOMAINS = frozenset({"db", "f", "r", "sp"})
 COMPANION_SUFFIXES = ("-wal", "-shm", "-journal")
@@ -274,12 +279,32 @@ def write_inner_marker(inner_root: Path) -> None:
         marker.write_text(INNER_MARKER_TEXT, encoding="utf-8")
 
 
+def _previous_index_copies(index: Path) -> list[dict[str, object]]:
+    """Copies listed by an earlier index whose files still exist (merged, never dropped)."""
+    try:
+        payload = json.loads(index.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    copies = payload.get("copies") if isinstance(payload, dict) else None
+    if not isinstance(copies, list):
+        return []
+    return [
+        entry
+        for entry in copies
+        if isinstance(entry, dict) and isinstance(entry.get("inner_path"), str) and Path(entry["inner_path"]).is_file()
+    ]
+
+
 def write_inner_index(inner_root: Path, copies: list[dict[str, object]]) -> Path | None:
-    """``rapidtriage-mobile-inner.json``: every inner copy written by one collection."""
+    """``rapidtriage-mobile-inner.json``: every inner copy in the folder (earlier runs' entries merged)."""
     if not copies:
         return None
     write_inner_marker(inner_root)
     index = inner_root / INNER_INDEX_NAME
+    fresh = {os.path.normcase(str(entry.get("inner_path"))) for entry in copies}
+    copies = [
+        entry for entry in _previous_index_copies(index) if os.path.normcase(str(entry["inner_path"])) not in fresh
+    ] + list(copies)
     payload = {
         "label_ko": INNER_COPY_LABEL,
         "evidence": False,
@@ -291,15 +316,23 @@ def write_inner_index(inner_root: Path, copies: list[dict[str, object]]) -> Path
     return index
 
 
-class _InnerExtractor:
-    """Bounded writer of one backup's SQLite members under ``<inner_root>/<backup sha16>/``."""
+class InnerBudget:
+    """Inner-copy byte budget shared by every backup of one collection (``MAX_RUN_INNER_EXTRACT_BYTES``)."""
 
-    def __init__(self, inner_root: Path, backup_sha256: str) -> None:
+    def __init__(self, limit: int | None = None) -> None:
+        self.remaining = MAX_RUN_INNER_EXTRACT_BYTES if limit is None else limit
+
+
+class _InnerExtractor:
+    """Bounded writer of one backup's SQLite members under ``<inner_root>/<sha16(backup path)>/``."""
+
+    def __init__(self, inner_root: Path, backup_key: str, budget: InnerBudget) -> None:
         self.inner_root = inner_root
-        candidate, counter = inner_root / backup_sha256[:16], 0
+        self.budget = budget
+        candidate, counter = inner_root / backup_key, 0
         while candidate.exists():
             counter += 1
-            candidate = inner_root / f"{backup_sha256[:16]}-{counter}"
+            candidate = inner_root / f"{backup_key}-{counter}"
         self.root = candidate
         self.created = False
         self.written_bytes = 0
@@ -344,7 +377,7 @@ class _InnerExtractor:
             return None, "size"
         if is_sqlite and self.database_count >= MAX_SQLITE_MEMBERS:
             return None, "count"
-        if self.written_bytes + size > MAX_INNER_EXTRACT_BYTES:
+        if self.written_bytes + size > MAX_INNER_EXTRACT_BYTES or size > self.budget.remaining:
             return None, "total"
         target = self.root / _sha16(package) / (self._name_for(package, domain, db_relative, database=is_sqlite) + companion)
         if not _within(self.root, target):
@@ -416,12 +449,24 @@ def _read_member(
         except FileExistsError:
             inner_fields = {"inner_extract_skipped": "name-collision", "inner_extract_skipped_reason": "name-collision"}
             target = inventory_path = None
+        except BaseException:
+            # R6 S2 review: a stream that ends mid-member leaves no partial copy behind.
+            if handle is not None:
+                handle.close()
+                handle = None
+                if target is not None:
+                    try:
+                        target.unlink()
+                    except OSError:
+                        pass
+            raise
         finally:
             if handle is not None:
                 handle.close()
         digest = hasher.hexdigest() if hasher is not None else None
         if target is not None and extractor is not None:
             extractor.written_bytes += member.size
+            extractor.budget.remaining -= member.size
             inner_fields = {"inner_path": str(target), "inner_copy_label": INNER_COPY_LABEL}
             if is_sqlite:
                 extractor.database_count += 1
@@ -529,20 +574,22 @@ def _handed_records(path: Path, extractor: _InnerExtractor, errors: list[str]) -
         yield record
 
 
-def _file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(CHUNK), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+def _backup_key(path: Path) -> str:
+    """Copy-folder name of one backup: ``sha256(normcase(abspath))[:16]`` (no extra full read)."""
+    return _sha16(os.path.normcase(os.path.abspath(path)))
 
 
 def collect_adb_backup(
-    path: Path, *, inner_root: Path | None = None, inner_copies: list[dict[str, object]] | None = None
+    path: Path,
+    *,
+    inner_root: Path | None = None,
+    inner_copies: list[dict[str, object]] | None = None,
+    inner_budget: InnerBudget | None = None,
 ) -> Iterator[ArtifactRecord]:
     """``android-backup`` + ``android-backup-member`` rows of one ``.ab`` (see module doc), then -- with
     ``inner_root`` (R6 S2) -- the app-parser rows of its extracted inner databases. ``inner_copies``
-    (optional) receives one index entry per file written."""
+    (optional) receives one index entry per file written; ``inner_budget`` (optional) is the byte
+    budget shared with the collection's other backups."""
     from ..android import android_app_data_category, android_app_data_risk_flags
 
     members: list[ArtifactRecord] = []
@@ -561,7 +608,7 @@ def collect_adb_backup(
                 status = "encrypted-not-unpacked"
             else:
                 if inner_root is not None:
-                    extractor = _InnerExtractor(Path(inner_root), _file_sha256(path))
+                    extractor = _InnerExtractor(Path(inner_root), _backup_key(path), inner_budget or InnerBudget())
                 stream = _Inflate(handle, bool(header.get("compressed")))
                 try:
                     with tarfile.open(fileobj=stream, mode="r|") as archive:  # type: ignore[call-overload]
