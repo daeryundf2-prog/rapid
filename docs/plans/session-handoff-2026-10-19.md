@@ -15,7 +15,7 @@
 - 단계 순서: 1 실데이터 재실행 + 미검증 파서 실샘플 검증 → 2 국내 사건 연기 기능(AhnLab V3, adb 내부 DB, `$Boot` 추출, 미할당 URL 카빙, eMule 0xE1, 카카오맵 좌표) → 3 성능(조건 타임라인 첫 페이지 5 s → ≤1 s, `/files` 조건 페이징 캐시, 지도 38 s → ≤2 s) → 4 A등급 규칙 검증·릴리스 증거 입력 목록.
 
 ### 단계 1의 현재 위치
-- 1단계 도구 구현(Opus)이 **아직 시작 전**이다. 첫 시도는 사용량 한도로 멈췄고(변경 없음), 재시도는 에이전트 작업 트리 생성 실패로 거부됐다(아래 §4).
+- 1단계 도구 구현(Opus)을 2026-10-19 다시 시작했다(브랜치 `feat/r6-s1-realdata`, 에이전트 작업 트리). 첫 시도는 사용량 한도, 두 번째는 작업 트리 생성 실패로 멈췄고, 작업 트리 정리 후 재시작했다(§4).
 - 해야 할 일(계획 §1.3 갈래 A·B):
   1. `rapidtriage/core/run/constants.py` `GENERAL_FORENSIC_ARTIFACT_KINDS`에 `"p2p"` 추가 — **현재 어떤 실행 모드도 p2p 수집기를 돌리지 않는 결함**(recovery 모드는 의도적으로 제외, 테스트가 단언). 출력 샘플 재생성(`python scripts/update-output-samples.py`).
   2. `scripts/compare-runs.py`(기준 런 vs 새 런 kind·artifact_type 행 수·단계 시간 비교, 회귀 판정) + `tests/test_compare_runs.py`.
@@ -32,6 +32,9 @@
 
 ## 4. 알려진 환경 문제
 - **에이전트 작업 트리 생성 실패**: `.claude/worktrees/` 아래 R1–R5 에이전트 작업 트리가 30개 가까이 쌓여 새 작업 트리 생성(`isolation: worktree`)이 "git identity could not be verified"로 거부된다. 머지 끝난 깨끗한 작업 트리는 `git worktree remove`로 정리하고(변경 있는 것은 먼저 확인), 반쯤 생성된 작업 트리는 `git worktree remove --force --force`. node_modules 정션은 `cmd /c rmdir`로만 지운다(재귀 삭제 금지).
+- 2026-10-19 정리 결과: 머지 끝난 깨끗한 작업 트리 20개를 정리했다(Git 등록은 해제됨). 그중 7개(`agent-a168…`, `a21b…`, `a3a4…`, `a55c…`, `a759…`, `a8f6…`, `aede…`)는 "Invalid argument / Permission denied"로 폴더 일부가 디스크에 남아 있다. **이 폴더들은 링크 여부를 확인하기 전에는 지우지 않는다.** 정리 중 메인 `frontend/node_modules` 일부가 지워져 `npm ci`로 복구했다(의존성 전부 확인, typecheck·lint·vitest 정상).
+- 남아 있는 프로세스: R4 V2 에이전트가 띄운 Vite 개발 서버(포트 8942, `agent-a3a459bb…` 경로)가 아직 실행 중이다. 종료는 자동 모드에서 거부돼 사용자 판단이 필요하다. 이 서버가 잡고 있던 rolldown 바이너리는 `.claude/worktrees/rolldown-binding-inuse.node.old`로 옮겨 두었고, 서버를 끄면 지워도 된다.
+- 등록 상태로 남은 작업 트리 4개(`agent-a2650…`·`af2cd…`는 locked, `aee34…`, `afc07…`)는 모두 main에 머지됐고 변경이 없다. 지우기 전에 `cmd /c dir /AL /S`로 링크가 없는지 먼저 확인한다.
 - 메인 작업 트리에서 `git add -A`는 매우 느리다 → `git add -u` 또는 경로 지정.
 - 셸 명령이 120 s를 넘으면 백그라운드로 넘어간다. 긴 테스트는 `run_in_background`로 실행.
 - 사용량 한도(429)로 에이전트가 멈추면 같은 에이전트에 SendMessage로 재개(작업 트리가 확인 가능할 때만 됨).
