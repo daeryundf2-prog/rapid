@@ -85,14 +85,18 @@
 
 | 항목 | 기준 런 | 새 런 | 판정 |
 |---|---|---|---|
-| 대상 커밋 / 런 ID | `run-subset10` (런 `b5fabbe09f18`, 2026-10-15) | | |
-| 종료 코드 · `parser_errors` | | | |
-| 기존 kind 회귀(`regression_kinds`) | — | | |
-| 이동(`move_kinds`)·허용 유형(`--allow-type`) | — | | |
-| 새 kind 행 수·시간·오류(windows-messenger·cloud-sync·email-clients·windows-phone-link·media-player·p2p) | — | | |
-| 새 kind 합계 시간(≤ 60 s) | — | | |
-| 전체 소요(≤ 기준 × 1.2) | | | |
-| 타임라인 이벤트 · 파일 후보 · 지표 수 | | | |
+| 대상 커밋 / 런 ID | `run-subset10` (런 `b5fabbe09f18`, 2026-10-15) | `feat/r6-followups` `b65341b`, `D:apid-qa\derived6-s1-run` (2026-10-19, `--mode hacking --read-only`) | — |
+| 종료 코드 · `parser_errors` | 0 · 0 | 0 · 0 (로그 6줄, 트레이스백 없음; PIL DecompressionBombWarning 1건) | 통과 |
+| 기존 kind 회귀(`regression_kinds`) | — | 없음 (`compare-runs.py` PASS, 종료 코드 0) | 통과 |
+| 이동(`move_kinds`)·허용 유형(`--allow-type`) | — | 이동 없음; 허용 `browser-analytics-cookie` 0 → 197 | 통과 |
+| 새 유형(기존 kind 안) | — | browser-cache-entry 6,595 · kakaotalk-shared-picture 101 · kakaotalk-app-inventory 1 · execution-pca 642 · execution-feature-usage 335 · registry-office-mru 246 · registry-known-dll 36 · registry-install-state 15 · registry-network-share 12 · startup-item 12 · desktop-wallpaper 7 · registry-default-browser 2 · credential-store-presence 4 | R2–R5 추가분, 기존 유형 변화 0 |
+| 새 kind 행 수·시간·오류 | — | cloud-sync 1행 1.19 s · email-clients 0행 1.36 s · media-player 5행 1.47 s · p2p 0행 0.66 s · windows-messenger 0행 2.96 s · windows-phone-link 0행 0.35 s · 오류 0 | 통과 |
+| 새 kind 합계 시간(≤ 60 s) | — | 7.99 s | 통과 |
+| 전체 소요(≤ 기준 × 1.2) | 2,526.7 s | 1,973.9 s (0.78×) | 통과 |
+| 단계별 | — | artifacts 0.75× · docs 0.68× · files 0.59× · timeline 0.75× · indicators 0.78× · persist 0.85×; 새 단계 triage-flags 45.0 s · derived 39.0 s; **fingerprint 5.6 → 44.6 s** | 아래 주 1 |
+| 타임라인 이벤트 · 파일 후보 · 지표 수 | 323,543 · 4,935 · 4,712 | 330,707 · 4,935 · 11,383 | 증가분은 새 유형(캐시 항목 URL 등)에서 옴 |
+
+주 1 — fingerprint 단계: 비재개 런의 지문은 메타데이터만 보며(`build_run_input_fingerprint(hash_contents=False)`), 같은 서브셋에서 단독 측정 1.4 s, 단계 구간 프로파일 7.5 s였다. 시간 대부분은 런 공유 경로 캐시(`core/files.py` `_cached_evidence_paths`)의 **첫 증거 트리 순회**이며, 런 직후 콜드 디스크에서 44.6 s가 걸렸다. 같은 순회를 이후 단계가 재사용해 artifacts·docs·files가 빨라졌고 전체는 0.78×다. 코드 회귀가 아니라 비용이 앞 단계로 옮겨 간 것으로 판정한다(3단계 성능 작업에서 `pathlib.relative_to` 비용 1/2 이상 절감 여지 확인됨).
 
 ### 5.2 파서별 표본 검증 (Q-S1-6)
 
