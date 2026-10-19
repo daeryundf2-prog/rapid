@@ -117,6 +117,8 @@ ARTIFACT_DOMAIN_TABLE: tuple[tuple[str, str, tuple[str, ...] | None], ...] = (
     ),
     ("registry", "windows-system", ("office-backstage-item",)),
     ("anti-forensics", "windows-system", ("vm-config", "crypto-wallet-presence", "av-detection-log")),
+    # --- R6 S2 lane A: AhnLab V3 inventory (product folders, log candidates, quarantine counts) ---
+    ("anti-forensics", "windows-system", ("av-product-presence",)),
 )
 
 

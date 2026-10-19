@@ -1640,9 +1640,16 @@ export const DOMAINS: readonly DomainDef[] = [
     nodes: [
       // R5 L2: VM configs, crypto wallet presence (no keys/seeds), McAfee detection logs.
       { id: "af-vm", label: "가상 머신 구성", target: a("windows-system", ["vm-config"]) },
+      // R6 S2 lane A: AhnLab product folders, log candidates, quarantine folders (counts only).
+      {
+        id: "af-av-presence",
+        label: "백신 제품 흔적(AhnLab)",
+        target: a("windows-system", ["av-product-presence"]),
+        note: "AhnLab 로그 형식은 미확인입니다 — 제품 폴더·로그 후보·격리 폴더(파일 수·크기만, 내용은 열지 않음)를 보여 줍니다",
+      },
       {
         id: "af-av-logs",
-        label: "백신 탐지 로그(McAfee)",
+        label: "백신 탐지 로그(McAfee·AhnLab)",
         target: a("windows-system", ["av-detection-log"]),
       },
       {

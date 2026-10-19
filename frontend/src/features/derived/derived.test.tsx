@@ -185,8 +185,9 @@ describe("RDP direction · EXIF state · auto logon", () => {
       // + r3 O3 (3: ntfs-timestamp-mismatch, ntfs-logfile-transaction, carved-file)
       // + R5 L1 (11: phone-link 5, media-player 2, email-client 4)
       // + R5 L3 (11: location-url-candidate, browser-analytics-cookie, carved-url-candidate, 6 p2p, 2 android-backup).
-      // + R5 L2 (15: startup, banner, Office x2, SSH x5, VM, wallet, AV, wallpaper, credential stores, NTFS volume).
-      expect(FALLBACK_CATALOG.families).toHaveLength(119);
+      // + R5 L2 (15: startup, banner, Office x2, SSH x5, VM, wallet, AV, wallpaper, credential stores, NTFS volume)
+      // + R6 S2 lane A (1: av-product-presence).
+      expect(FALLBACK_CATALOG.families).toHaveLength(120);
       expect(familyById("sam-account")?.core_columns.find((c) => c.key === "user_name")?.semantic).toBe(
         "account",
       );
