@@ -16,6 +16,7 @@ from ..core.audit import audit_path_for, write_audit_record
 from ..core.docs import write_result
 from ..core.doctor import format_doctor_text, run_doctor
 from ..core.enterprise import build_enterprise_policy
+from ..core.files import MOBILE_INNER_DIR_NAME
 from ..core.input_root import resolve_input_root
 from ..core.keyword_packs import keyword_pack_library_assessment, list_keyword_packs
 from ..core.plugins import (
@@ -317,6 +318,9 @@ def handle_artifacts(args: argparse.Namespace, parser: argparse.ArgumentParser, 
         if eventlog_options and args.kind != "eventlog":
             parser.error("--eventlog-structure-rows/--eventlog-record-detail can only be used with --kind eventlog")
         collector_options.update(eventlog_options)
+        if args.kind == "mobile-export":
+            # R6 S2: adb backup inner databases are copied next to --output (never the evidence tree).
+            collector_options["inner_dir"] = output.parent / MOBILE_INNER_DIR_NAME
         try:
             payload = run_artifact_collection(
                 root,

@@ -19,18 +19,36 @@ An encrypted backup gives the header row only, with the Korean reason: the backu
 needed and is never guessed (no brute force). A corrupt or truncated stream keeps the members
 read so far (``status`` = ``partial``). Caps: ``MAX_MEMBERS`` members, ``MAX_TOTAL_BYTES``
 decompressed bytes and a ``MAX_RATIO`` decompression-ratio guard.
+
+R6 S2 (inner databases handed to the app parsers): with ``inner_root`` set (the run output's
+``mobile-inner/`` folder, never the evidence tree), each SQLite member (``SQLite format 3``
+header) of an ``apps/<package>/{db,f,r,sp}/`` domain is streamed to
+``<inner_root>/<backup sha256[:16]>/<sha256(package)[:16]>/<safe name>`` together with its
+``-wal`` / ``-shm`` / ``-journal`` companions. File names come only from the member's basename
+through :func:`safe_component`; only regular members are written (links / devices skipped) and
+an existing file is never overwritten. Caps: ``MAX_SQLITE_BYTES`` per database,
+``MAX_SQLITE_MEMBERS`` databases and ``MAX_INNER_EXTRACT_BYTES`` in total per backup; a member
+over a cap keeps its member row (``inner_extract_skipped`` = ``cap``). Each copy is then handed
+to the existing parser: a messenger database (``is_chat_app_database_candidate``) to
+``collect_chat_app_database_inventory``, anything else to ``build_android_app_data_record``;
+those rows carry ``container_backup_path``, ``container_member``, ``inner_path`` and
+``recovery_method`` = ``adb-backup-extracted``. The copies are labelled "해제 사본, 증거 아님"
+(marker file + ``rapidtriage-mobile-inner.json`` index) and pruned from evidence rescans.
 """
 
 from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import json
+import os
 import tarfile
 import tempfile
 import zlib
 from collections.abc import Callable, Iterator
 from pathlib import Path, PurePosixPath
 
+from ...core.files import MOBILE_INNER_INDEX_NAME, MOBILE_INNER_MARKER_NAME
 from ...core.models import ArtifactRecord
 
 ADB_MAGIC = b"ANDROID BACKUP\n"
@@ -43,6 +61,22 @@ MAX_RATIO = 200
 MAX_HASH_BYTES = 32 * 1024 * 1024
 MAX_SQLITE_BYTES = 64 * 1024 * 1024
 MAX_SQLITE_MEMBERS = 200
+# R6 S2: inner-database extraction (copies under the run output, never the evidence tree).
+MAX_INNER_EXTRACT_BYTES = 1024 * 1024 * 1024
+MAX_SAFE_NAME = 120
+INNER_DOMAINS = frozenset({"db", "f", "r", "sp"})
+COMPANION_SUFFIXES = ("-wal", "-shm", "-journal")
+SQLITE_MAGIC = b"SQLite format 3\x00"
+INNER_INDEX_NAME = MOBILE_INNER_INDEX_NAME
+INNER_COPY_LABEL = "해제 사본, 증거 아님"
+INNER_MARKER_TEXT = (
+    "해제 사본, 증거 아님\n"
+    "이 폴더는 RapidTriage가 adb 백업(.ab) 안 SQLite 데이터베이스를 기존 앱 파서에 넘기려고 풀어 둔 사본입니다.\n"
+    "원본 증거가 아니며 증거 재스캔에서 제외됩니다. 원본은 각 행의 container_backup_path·container_member를 보십시오.\n"
+)
+_WINDOWS_DEVICE_NAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL", *(f"COM{n}" for n in range(1, 10)), *(f"LPT{n}" for n in range(1, 10))}
+)
 CHUNK = 1024 * 1024
 INFLATE_STEP = 64 * 1024
 DOMAIN_LABELS = {
@@ -187,13 +221,227 @@ def _base(path: Path, artifact_type: str, fields: dict[str, object], *, timestam
     return ArtifactRecord(provider="mobile-export-artifacts", artifact_type=artifact_type, path=str(path), supported=True, details=details)
 
 
-def _sqlite_inventory(data: bytes) -> dict[str, object]:
+def safe_component(name: str, *, fallback: str = "member.db") -> str:
+    """Safe single file-name component from a tar member name (R6 S2 path rule).
+
+    Only the basename is kept (``/`` and ``\\`` both split); characters other than ASCII letters,
+    digits, ``.``, ``_`` and ``-`` become ``_`` (so ``:`` NTFS streams, drive letters, NUL and
+    control characters never survive); leading dots are dropped (no ``.``/``..``/hidden names);
+    Windows device names get a ``_`` prefix; the result is at most ``MAX_SAFE_NAME`` characters
+    with a short extension kept."""
+    base = name.replace("\\", "/").rsplit("/", 1)[-1]
+    cleaned = "".join(ch if (ch.isascii() and (ch.isalnum() or ch in "._-")) else "_" for ch in base)
+    cleaned = cleaned.lstrip(".").rstrip(". ")
+    if not cleaned or set(cleaned) <= {"_", ".", "-"}:
+        cleaned = fallback
+    if cleaned.partition(".")[0].upper() in _WINDOWS_DEVICE_NAMES:
+        cleaned = "_" + cleaned
+    if len(cleaned) > MAX_SAFE_NAME:
+        stem, dot, suffix = cleaned.rpartition(".")
+        if dot and 0 < len(suffix) <= 16:
+            cleaned = stem[: MAX_SAFE_NAME - len(suffix) - 1] + "." + suffix
+        else:
+            cleaned = cleaned[:MAX_SAFE_NAME]
+    return cleaned
+
+
+def _companion_split(relative: str) -> tuple[str, str]:
+    """``(database member path, companion suffix)``; suffix ``""`` for a non-companion member."""
+    lowered = relative.lower()
+    for suffix in COMPANION_SUFFIXES:
+        if lowered.endswith(suffix) and len(relative) > len(suffix):
+            return relative[: -len(suffix)], suffix
+    return relative, ""
+
+
+def _sha16(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8", errors="surrogatepass")).hexdigest()[:16]
+
+
+def _within(root: Path, candidate: Path) -> bool:
+    try:
+        base = os.path.abspath(root)
+        return os.path.commonpath([base, os.path.abspath(candidate)]) == base
+    except ValueError:
+        return False
+
+
+def write_inner_marker(inner_root: Path) -> None:
+    """Create ``inner_root`` and its "copies, not evidence" marker (pruned from evidence walks)."""
+    inner_root.mkdir(parents=True, exist_ok=True)
+    marker = inner_root / MOBILE_INNER_MARKER_NAME
+    if not marker.exists():
+        marker.write_text(INNER_MARKER_TEXT, encoding="utf-8")
+
+
+def write_inner_index(inner_root: Path, copies: list[dict[str, object]]) -> Path | None:
+    """``rapidtriage-mobile-inner.json``: every inner copy written by one collection."""
+    if not copies:
+        return None
+    write_inner_marker(inner_root)
+    index = inner_root / INNER_INDEX_NAME
+    payload = {
+        "label_ko": INNER_COPY_LABEL,
+        "evidence": False,
+        "description_ko": INNER_MARKER_TEXT.strip(),
+        "copy_count": len(copies),
+        "copies": copies,
+    }
+    index.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return index
+
+
+class _InnerExtractor:
+    """Bounded writer of one backup's SQLite members under ``<inner_root>/<backup sha16>/``."""
+
+    def __init__(self, inner_root: Path, backup_sha256: str) -> None:
+        self.inner_root = inner_root
+        candidate, counter = inner_root / backup_sha256[:16], 0
+        while candidate.exists():
+            counter += 1
+            candidate = inner_root / f"{backup_sha256[:16]}-{counter}"
+        self.root = candidate
+        self.created = False
+        self.written_bytes = 0
+        self.database_count = 0
+        self.skipped = 0
+        self.names: dict[tuple[str, str, str], str] = {}
+        self.claimed: set[tuple[str, str, str]] = set()
+        self.used: dict[str, set[str]] = {}
+        self.databases: list[dict[str, object]] = []
+
+    def _name_for(self, package: str, domain: str, db_relative: str, *, database: bool) -> str:
+        """Safe name of a database (companions reuse it; a repeated database member gets ``-<n>``)."""
+        key = (package, domain, db_relative)
+        name = self.names.get(key)
+        if name is not None and not (database and key in self.claimed):
+            if database:
+                self.claimed.add(key)
+            return name
+        if database:
+            self.claimed.add(key)
+        used = self.used.setdefault(package, set())
+        base = safe_component(db_relative)
+        stem, dot, suffix = base.rpartition(".")
+        if not dot or not stem:
+            stem, suffix = base, ""
+        name, counter = base, 0
+        while name.lower() in used:
+            counter += 1
+            name = f"{stem}-{counter}.{suffix}" if suffix else f"{stem}-{counter}"
+        used.add(name.lower())
+        for extra in COMPANION_SUFFIXES:
+            used.add((name + extra).lower())
+        self.names[key] = name
+        return name
+
+    def plan(self, package: str, domain: str, relative: str, size: int, is_sqlite: bool) -> tuple[Path | None, str]:
+        """Target path of a member (``None`` and a reason when it is not extracted)."""
+        db_relative, companion = (relative, "") if is_sqlite else _companion_split(relative)
+        if not is_sqlite and not companion:
+            return None, ""
+        if size > MAX_SQLITE_BYTES:
+            return None, "size"
+        if is_sqlite and self.database_count >= MAX_SQLITE_MEMBERS:
+            return None, "count"
+        if self.written_bytes + size > MAX_INNER_EXTRACT_BYTES:
+            return None, "total"
+        target = self.root / _sha16(package) / (self._name_for(package, domain, db_relative, database=is_sqlite) + companion)
+        if not _within(self.root, target):
+            return None, "unsafe-name"
+        return target, ""
+
+    def open(self, target: Path):
+        if not self.created:
+            write_inner_marker(self.inner_root)
+            self.created = True
+        target.parent.mkdir(parents=True, exist_ok=True)
+        return target.open("xb")  # never overwrite, never write through an existing link
+
+
+def _stream_member(extracted, head: bytes, size: int, sinks: list[Callable[[bytes], object]]) -> None:
+    """Copy one member (``head`` already read) into every sink (hasher / file), chunk by chunk."""
+    for sink in sinks:
+        sink(head)
+    remaining = size - len(head)
+    while remaining > 0:
+        chunk = extracted.read(min(CHUNK, remaining))
+        if not chunk:
+            raise EOFError("tar 구성원이 잘렸습니다")
+        remaining -= len(chunk)
+        for sink in sinks:
+            sink(chunk)
+
+
+def _read_member(
+    archive: tarfile.TarFile,
+    member: tarfile.TarInfo,
+    package: str,
+    domain: str,
+    relative: str,
+    state: dict[str, int],
+    extractor: _InnerExtractor | None,
+) -> tuple[str | None, dict[str, object] | None, dict[str, object]]:
+    """``(sha256, schema inventory, inner fields)`` of one regular member, streamed (never whole in memory)."""
     from ..android import build_android_sqlite_schema_inventory
 
+    extracted = archive.extractfile(member)
+    if extracted is None:
+        return None, None, {}
+    head = extracted.read(16)
+    is_sqlite = head.startswith(SQLITE_MAGIC)
+    hasher = hashlib.sha256() if member.size <= MAX_HASH_BYTES else None
+    inner_fields: dict[str, object] = {}
+    target: Path | None = None
+    if extractor is not None and package and domain in INNER_DOMAINS:
+        target, reason = extractor.plan(package, domain, relative, member.size, is_sqlite)
+        if reason:
+            extractor.skipped += 1
+            inner_fields = {
+                "inner_extract_skipped": "cap" if reason in {"size", "count", "total"} else reason,
+                "inner_extract_skipped_reason": reason,
+            }
+    want_inventory = is_sqlite and member.size <= MAX_SQLITE_BYTES and state["sqlite_done"] < MAX_SQLITE_MEMBERS
+    inventory = None
     with tempfile.TemporaryDirectory(prefix="rapidtriage-ab-") as directory:
-        target = Path(directory) / "member.db"
-        target.write_bytes(data)
-        return build_android_sqlite_schema_inventory(target)
+        inventory_path = target if target is not None else (Path(directory) / "member.db" if want_inventory else None)
+        sinks: list[Callable[[bytes], object]] = [hasher.update] if hasher is not None else []
+        handle = None
+        try:
+            if inventory_path is not None:
+                handle = extractor.open(inventory_path) if target is not None and extractor is not None else inventory_path.open("xb")
+                sinks.append(handle.write)
+            if sinks:
+                _stream_member(extracted, head, member.size, sinks)
+        except FileExistsError:
+            inner_fields = {"inner_extract_skipped": "name-collision", "inner_extract_skipped_reason": "name-collision"}
+            target = inventory_path = None
+        finally:
+            if handle is not None:
+                handle.close()
+        digest = hasher.hexdigest() if hasher is not None else None
+        if target is not None and extractor is not None:
+            extractor.written_bytes += member.size
+            inner_fields = {"inner_path": str(target), "inner_copy_label": INNER_COPY_LABEL}
+            if is_sqlite:
+                extractor.database_count += 1
+                extractor.databases.append(
+                    {
+                        "package": package,
+                        "domain": domain,
+                        "member_name": member.name[:1000],
+                        "member_path": relative,
+                        "inner_path": target,
+                        "size": member.size,
+                        "sha256": digest,
+                    }
+                )
+            else:
+                inner_fields["inner_companion_of"] = _companion_split(relative)[0][:1000]
+        if want_inventory and inventory_path is not None:
+            state["sqlite_done"] += 1
+            inventory = build_android_sqlite_schema_inventory(inventory_path)
+    return digest, inventory, inner_fields
 
 
 def _member_record(
@@ -201,27 +449,18 @@ def _member_record(
     archive: tarfile.TarFile,
     member: tarfile.TarInfo,
     packages: dict[str, int],
-    sqlite_done: int,
+    state: dict[str, int],
+    extractor: _InnerExtractor | None,
     android_app_data_category: Callable[[Path], str],
     android_app_data_risk_flags: Callable[[Path, str], list[str]],
-) -> tuple[ArtifactRecord, int]:
-    """``android-backup-member`` row of one tar member (and the updated SQLite inventory count)."""
+) -> ArtifactRecord:
+    """``android-backup-member`` row of one tar member (links, devices and directories are never read)."""
     package, domain, relative = member_parts(member.name)
     if package:
         packages[package] = packages.get(package, 0) + 1
-    digest = None
-    inventory = None
-    if member.isfile() and member.size <= MAX_HASH_BYTES:
-        extracted = archive.extractfile(member)
-        data = extracted.read() if extracted is not None else b""
-        digest = hashlib.sha256(data).hexdigest()
-        if (
-            data.startswith(b"SQLite format 3\x00")
-            and member.size <= MAX_SQLITE_BYTES
-            and sqlite_done < MAX_SQLITE_MEMBERS
-        ):
-            sqlite_done += 1
-            inventory = _sqlite_inventory(data)
+    digest, inventory, inner_fields = None, None, {}
+    if member.isreg():
+        digest, inventory, inner_fields = _read_member(archive, member, package, domain, relative, state, extractor)
     pseudo = Path("apps", package, domain, relative) if package else Path(member.name)
     category = android_app_data_category(pseudo)
     mtime = member_mtime(member.mtime)
@@ -238,14 +477,72 @@ def _member_record(
         "sha256": digest,
         "data_category": category,
         "risk_flags": android_app_data_risk_flags(pseudo, category),
+        **inner_fields,
     }
     if inventory is not None:
         fields["sqlite_schema_inventory"] = inventory
-    return _base(path, "android-backup-member", fields, timestamp=mtime, kind="member-modified"), sqlite_done
+    return _base(path, "android-backup-member", fields, timestamp=mtime, kind="member-modified")
 
 
-def collect_adb_backup(path: Path) -> Iterator[ArtifactRecord]:
-    """``android-backup`` + ``android-backup-member`` rows of one ``.ab`` (see module doc)."""
+def _handed_records(path: Path, extractor: _InnerExtractor, errors: list[str]) -> Iterator[ArtifactRecord]:
+    """Hand every extracted database to the existing chat-database / Android app-data parsers."""
+    from ..android import (
+        android_app_data_category,
+        android_app_data_risk_flags,
+        build_android_app_data_record,
+    )
+    from .collector import collect_chat_app_database_inventory
+    from .detect import is_chat_app_database_candidate
+    from .roots import adb_inner_hint
+
+    for entry in extractor.databases:
+        inner_path = Path(str(entry["inner_path"]))
+        package = str(entry["package"])
+        hint = adb_inner_hint(package, str(entry["domain"]), str(entry["member_path"]), safe=safe_component)
+        try:
+            if is_chat_app_database_candidate(hint):
+                record = collect_chat_app_database_inventory(inner_path, hint=hint)
+            else:
+                record = build_android_app_data_record(inner_path, package)
+                category = android_app_data_category(hint)
+                record.details["data_category"] = category
+                record.details["risk_flags"] = android_app_data_risk_flags(hint, category)
+        except Exception as exc:  # one broken inner database never drops the backup
+            errors.append(f"{entry['member_name']}: {type(exc).__name__}"[:300])
+            continue
+        record.provider = "mobile-export-artifacts"
+        record.path = str(path)
+        record.details.update(
+            {
+                "container_backup_path": str(path),
+                "container_member": entry["member_name"],
+                "container_member_sha256": entry["sha256"],
+                "container_format": "android-adb-backup",
+                "recovery_method": "adb-backup-extracted",
+                "inner_path": str(inner_path),
+                "inner_copy_label": INNER_COPY_LABEL,
+                "inner_hint": hint.as_posix(),
+                "package": package,
+                "backup_domain": entry["domain"],
+            }
+        )
+        yield record
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(CHUNK), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def collect_adb_backup(
+    path: Path, *, inner_root: Path | None = None, inner_copies: list[dict[str, object]] | None = None
+) -> Iterator[ArtifactRecord]:
+    """``android-backup`` + ``android-backup-member`` rows of one ``.ab`` (see module doc), then -- with
+    ``inner_root`` (R6 S2) -- the app-parser rows of its extracted inner databases. ``inner_copies``
+    (optional) receives one index entry per file written."""
     from ..android import android_app_data_category, android_app_data_risk_flags
 
     members: list[ArtifactRecord] = []
@@ -253,15 +550,18 @@ def collect_adb_backup(path: Path) -> Iterator[ArtifactRecord]:
     status = "completed"
     error = ""
     header: dict[str, object] = {}
-    sqlite_done = 0
+    state = {"sqlite_done": 0}
     member_errors = 0
     last_member_error = ""
+    extractor: _InnerExtractor | None = None
     try:
         with path.open("rb") as handle:
             header = read_header(handle)
             if str(header.get("encryption") or "").lower() != "none":
                 status = "encrypted-not-unpacked"
             else:
+                if inner_root is not None:
+                    extractor = _InnerExtractor(Path(inner_root), _file_sha256(path))
                 stream = _Inflate(handle, bool(header.get("compressed")))
                 try:
                     with tarfile.open(fileobj=stream, mode="r|") as archive:  # type: ignore[call-overload]
@@ -270,8 +570,15 @@ def collect_adb_backup(path: Path) -> Iterator[ArtifactRecord]:
                                 status, error = "partial", "member-cap-reached"
                                 break
                             try:
-                                record, sqlite_done = _member_record(
-                                    path, archive, member, packages, sqlite_done, android_app_data_category, android_app_data_risk_flags
+                                record = _member_record(
+                                    path,
+                                    archive,
+                                    member,
+                                    packages,
+                                    state,
+                                    extractor,
+                                    android_app_data_category,
+                                    android_app_data_risk_flags,
                                 )
                             except (tarfile.TarError, zlib.error, EOFError, OSError, AdbBackupError):
                                 raise
@@ -284,6 +591,23 @@ def collect_adb_backup(path: Path) -> Iterator[ArtifactRecord]:
                     status, error = "partial", f"{type(exc).__name__}: {exc}"[:300]
     except (AdbBackupError, OSError) as exc:
         status, error = "unreadable", f"{type(exc).__name__}: {exc}"[:300]
+    handed: list[ArtifactRecord] = []
+    handoff_errors: list[str] = []
+    if extractor is not None:
+        handed = list(_handed_records(path, extractor, handoff_errors))
+        if inner_copies is not None:
+            inner_copies.extend(
+                {
+                    "inner_path": record.details["inner_path"],
+                    "label_ko": INNER_COPY_LABEL,
+                    "container_backup_path": str(path),
+                    "container_member": record.details.get("member_name"),
+                    "size": record.details.get("size"),
+                    "sha256": record.details.get("sha256"),
+                }
+                for record in members
+                if record.details.get("inner_path")
+            )
     summary: dict[str, object] = {
         **header,
         "status": status,
@@ -291,13 +615,26 @@ def collect_adb_backup(path: Path) -> Iterator[ArtifactRecord]:
         "member_count": len(members),
         "package_count": len(packages),
         "packages": sorted(packages)[:200],
-        "sqlite_inventoried": sqlite_done,
+        "sqlite_inventoried": state["sqlite_done"],
         "member_error_count": member_errors,
         "member_error_last": last_member_error,
         "coverage_status": "parsed" if status == "completed" else status,
     }
+    if extractor is not None:
+        summary.update(
+            {
+                "inner_extract_dir": str(extractor.root) if extractor.created else "",
+                "inner_copy_label": INNER_COPY_LABEL,
+                "inner_databases_extracted": extractor.database_count,
+                "inner_bytes_written": extractor.written_bytes,
+                "inner_extract_skipped_count": extractor.skipped,
+                "inner_records_handed": len(handed),
+                "inner_handoff_errors": handoff_errors[:20],
+            }
+        )
     yield _base(path, "android-backup", summary, timestamp=None, kind="")
     yield from members
+    yield from handed
 
 
 def adb_backup_error_record(path: Path, exc: BaseException) -> ArtifactRecord:

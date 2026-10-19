@@ -38,7 +38,7 @@ from .doc_text import (
 from .doc_text import (
     finalize as finalize_document_text,
 )
-from .files import RUN_OUTPUT_DIR_PREFIX, file_time_origin_for_input_kind
+from .files import file_time_origin_for_input_kind, is_tool_output_dir
 from .input_root import InputRoot, resolve_input_root
 from .json_safe import json_default
 from .models import DocumentCandidate, DocumentMatch
@@ -140,7 +140,7 @@ def scan_document_candidates(root: InputRoot | Path, limit: int = 0) -> list[Doc
     origin = file_time_origin_for_input_kind(input_root.kind)
     candidates: list[DocumentCandidate] = []
     for dirpath, dirnames, files in os.walk(input_root.root_path):
-        dirnames[:] = [name for name in dirnames if not name.startswith(RUN_OUTPUT_DIR_PREFIX)]
+        dirnames[:] = [name for name in dirnames if not is_tool_output_dir(Path(dirpath) / name)]
         for name in files:
             path = Path(dirpath) / name
             suffix = path.suffix.lower()

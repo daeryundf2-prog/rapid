@@ -13,7 +13,9 @@ Signatures (structure/magic based, never absolute-path substrings):
 * Android data tree: path segments ``data/data/<package>`` or
   ``data/user/<n>/<package>``.
 * Android adb backup: ``.ab`` file starting with ``ANDROID BACKUP`` (R5 L3: its tar members
-  are unpacked in memory by ``adb_backup.collect_adb_backup``).
+  are unpacked in memory by ``adb_backup.collect_adb_backup``; R6 S2: with a run output, its
+  SQLite members are copied to ``<output>/mobile-inner/`` and handed to the app parsers with
+  :func:`adb_inner_hint` as the token-matching hint).
 * Cellebrite UFED: ``.ufd`` / ``.ufdr`` / ``.ufdx`` or a report XML carrying
   the Cellebrite report namespace.
 * Magnet AXIOM: ``.mfdb`` case database or ``Case Information`` file naming
@@ -29,9 +31,9 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 NO_MOBILE_ACQUISITION_NOTICE = "모바일 추출물 없음"
 
@@ -202,6 +204,17 @@ def detect_mobile_acquisition_roots(walk_root: Path, files: Iterable[Path]) -> l
         if root is not None:
             roots.setdefault((str(root.path), root.kind), root)
     return sorted(roots.values(), key=lambda item: (len(item.path.parts), str(item.path).lower()))
+
+
+def adb_inner_hint(package: str, domain: str, member_path: str, *, safe: Callable[..., str]) -> PurePosixPath:
+    """Root-relative hint ``apps/<package>/<domain>/<path>`` of an adb backup inner database (R6 S2).
+
+    The extracted copy lives under a hashed run-output folder, so the app parsers' token matching
+    (``is_chat_app_database_candidate`` / ``detect_chat_service``, data categories) uses this hint
+    instead. It is never a filesystem path: every component goes through ``safe`` (the adb
+    ``safe_component`` rule), so ``..``, drives and ``:`` never appear."""
+    parts = [safe(part, fallback="_") for part in member_path.replace("\\", "/").split("/") if part]
+    return PurePosixPath("apps", safe(package, fallback="_"), safe(domain, fallback="_"), *(parts or ["member.db"]))
 
 
 def root_for_path(path: Path, roots: Sequence[MobileAcquisitionRoot]) -> MobileAcquisitionRoot | None:

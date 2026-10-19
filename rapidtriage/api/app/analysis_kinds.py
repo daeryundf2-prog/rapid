@@ -96,10 +96,18 @@ def run_output_pruner(output_dir: Path) -> Callable[[Path], bool]:
     never re-read as evidence), applied per directory so pruned subtrees are
     never listed.
     """
+    from ...core.files import (
+        is_tool_output_dir,  # R6 S2: also a marked mobile-inner copy folder
+    )
+
     own = os.path.normcase(os.path.abspath(output_dir))
 
     def prune(path: Path) -> bool:
-        return path.name.startswith(RUN_OUTPUT_DIR_PREFIX) or os.path.normcase(os.path.abspath(path)) == own
+        return (
+            path.name.startswith(RUN_OUTPUT_DIR_PREFIX)
+            or is_tool_output_dir(path)
+            or os.path.normcase(os.path.abspath(path)) == own
+        )
 
     return prune
 
