@@ -1,4 +1,4 @@
-"""URL carving from page files and unallocated-space dumps (R5 L3; 재감사 §3 item 21).
+"""URL carving from page files, unallocated-space dumps and image free clusters (R5 L3; R6 S2).
 
 ``scan_url_source`` reads one file in bounded windows (``CHUNK_BYTES`` with a
 ``OVERLAP_BYTES`` overlap so a URL across a window edge is found once) and finds
@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -39,8 +39,16 @@ UTF16_URL = re.compile(rb"h\x00t\x00t\x00p\x00(?:s\x00)?:\x00/\x00/\x00(?:[\x21-
 TRAILING = ".,;:!?)]}'\"*"
 HOST_LABEL = re.compile(r"^[a-z0-9-]{1,63}$")
 TLD = re.compile(r"^[a-z]{2,24}$|^xn--[a-z0-9-]{2,59}$")
-SOURCE_KINDS = ("pagefile", "unallocated", "memory-dump")
-SOURCE_LABELS = {"pagefile": "페이지 파일", "unallocated": "미할당 영역 덤프", "memory-dump": "메모리 덤프"}
+SOURCE_KINDS = ("pagefile", "unallocated", "memory-dump", "image-unallocated")
+# ``image-unallocated`` is not a file kind: the unallocated clusters of the NTFS volume of a disk
+# image, read through ``core.ntfs_unalloc`` (R6 S2) and scanned with ``scan_url_windows``.
+IMAGE_UNALLOCATED = "image-unallocated"
+SOURCE_LABELS = {
+    "pagefile": "페이지 파일",
+    "unallocated": "미할당 영역 덤프",
+    "memory-dump": "메모리 덤프",
+    IMAGE_UNALLOCATED: "이미지 미할당 영역",
+}
 PAGEFILE_NAMES = frozenset({"pagefile.sys", "swapfile.sys"})
 UNALLOCATED_TOKENS = ("unalloc", "blkls", "freespace", "free-space")
 MEMORY_DUMP_SUFFIXES = frozenset({".dmp", ".mem", ".vmem", ".raw", ".lime"})
@@ -95,6 +103,28 @@ class UrlCarveState:
         return len(self.seen) >= self.max_candidates
 
 
+def _patterns(ascii_urls: bool, utf16_urls: bool) -> list[tuple[re.Pattern[bytes], str]]:
+    return [(pattern, encoding) for pattern, encoding, wanted in ((ASCII_URL, "ascii", ascii_urls), (UTF16_URL, "utf-16le", utf16_urls)) if wanted]
+
+
+def _scan_window(
+    window: bytes,
+    base: int,
+    cutoff: int,
+    patterns: list[tuple[re.Pattern[bytes], str]],
+    found: dict[tuple[str, str], dict[str, object]],
+    state: UrlCarveState,
+) -> None:
+    """Matches of ``window`` starting before ``cutoff`` (the rest belongs to the next window);
+    ``base`` is the offset of ``window[0]`` in the source."""
+    for pattern, encoding in patterns:
+        for match in pattern.finditer(window):
+            if match.start() >= cutoff:
+                break
+            text = match.group(0).decode("ascii" if encoding == "ascii" else "utf-16-le", errors="replace")
+            _add(found, state, text, encoding, base + match.start())
+
+
 def scan_url_source(
     path: Path,
     *,
@@ -109,7 +139,7 @@ def scan_url_source(
     scanned = 0
     offset = 0
     tail = b""
-    patterns = [(pattern, encoding) for pattern, encoding, wanted in ((ASCII_URL, "ascii", ascii_urls), (UTF16_URL, "utf-16le", utf16_urls)) if wanted]
+    patterns = _patterns(ascii_urls, utf16_urls)
     with path.open("rb") as handle:
         while offset < read_limit:
             if check_cancel is not None:
@@ -126,16 +156,29 @@ def scan_url_source(
             # window where it starts before the overlap (URLs are shorter than the overlap, so it
             # ends inside the window); the last window takes everything.
             cutoff = len(window) if final else max(len(window) - OVERLAP_BYTES, 0)
-            for pattern, encoding in patterns:
-                for match in pattern.finditer(window):
-                    if match.start() >= cutoff:
-                        break
-                    text = match.group(0).decode("ascii" if encoding == "ascii" else "utf-16-le", errors="replace")
-                    _add(found, state, text, encoding, base + match.start())
+            _scan_window(window, base, cutoff, patterns, found, state)
             tail = window[cutoff:]
             if state.capped:
                 break
     return list(found.values()), scanned
+
+
+def scan_url_windows(
+    windows: Iterable[tuple[bytes, int, int]],
+    *,
+    state: UrlCarveState,
+    ascii_urls: bool = True,
+    utf16_urls: bool = True,
+) -> list[dict[str, object]]:
+    """Candidates of pre-cut ``(window, base offset, cutoff)`` windows (``core.ntfs_unalloc``:
+    ``base`` is an absolute image byte offset, so is every candidate's ``offset``)."""
+    found: dict[tuple[str, str], dict[str, object]] = {}
+    patterns = _patterns(ascii_urls, utf16_urls)
+    for window, base, cutoff in windows:
+        _scan_window(window, base, cutoff, patterns, found, state)
+        if state.capped:
+            break
+    return list(found.values())
 
 
 def _add(found: dict[tuple[str, str], dict[str, object]], state: UrlCarveState, raw: str, encoding: str, offset: int) -> None:
