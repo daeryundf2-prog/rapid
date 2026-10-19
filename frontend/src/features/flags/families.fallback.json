@@ -1,5 +1,5 @@
 {
- "version": "d5ead982e47e27d7",
+ "version": "980c9d27e0c2e68a",
  "families": [
   {
    "id": "sam-account",
@@ -888,18 +888,168 @@
      "label": "필드 추출 방식",
      "value_labels": {
       "tab-separated": "탭 구분 열",
-      "heuristic": "텍스트 패턴(검토 필요)"
+      "heuristic": "텍스트 패턴(검토 필요)",
+      "heuristic-lines": "줄 패턴(형식 미확인)",
+      "heuristic-sqlite": "DB 표·열 이름 추정(형식 미확인)"
      }
     },
     {
+     "key": "verification",
+     "label": "형식 검증",
+     "value_labels": {
+      "unconfirmed": "미확인(실표본 검증 전)",
+      "confirmed": "확인됨"
+     }
+    },
+    {
+     "key": "source_table",
+     "label": "원본 표(DB)"
+    },
+    {
+     "key": "detected_at_raw",
+     "label": "원본 시각 값"
+    },
+    {
      "key": "source_offset",
-     "label": "줄 번호",
+     "label": "줄 번호·rowid",
      "format": "number"
     },
     {
      "key": "source_path",
      "label": "원본 파일",
      "format": "path"
+    }
+   ],
+   "rules": []
+  },
+  {
+   "id": "av-product-presence",
+   "label": "백신 제품 흔적",
+   "types": [
+    "av-product-presence"
+   ],
+   "core_columns": [
+    {
+     "key": "presence_kind_label",
+     "label": "항목",
+     "aliases": [
+      "presence_kind"
+     ]
+    },
+    {
+     "key": "av_product_label",
+     "label": "제품",
+     "aliases": [
+      "av_product"
+     ]
+    },
+    {
+     "key": "product_version",
+     "label": "버전(version*.ini)"
+    },
+    {
+     "key": "source_path",
+     "semantic": "path",
+     "label": "위치",
+     "format": "path"
+    },
+    {
+     "key": "sniffed_format_label",
+     "label": "파일 형식(추정)",
+     "aliases": [
+      "sniffed_format"
+     ]
+    },
+    {
+     "key": "parse_outcome",
+     "label": "해석 결과",
+     "value_labels": {
+      "detection-rows": "탐지 행 있음",
+      "no-detection-lines": "탐지 줄 없음",
+      "no-detection-rows": "탐지 행 없음",
+      "no-detection-table": "탐지 표 없음",
+      "inventory-only": "목록만(형식 미지원)",
+      "skipped-size-cap": "크기 상한 초과",
+      "error": "해석 오류"
+     }
+    },
+    {
+     "key": "file_count",
+     "label": "파일 수",
+     "format": "number"
+    },
+    {
+     "key": "total_size",
+     "label": "전체 크기",
+     "format": "bytes"
+    },
+    {
+     "key": "user",
+     "semantic": "account",
+     "label": "사용자 프로필"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "install_scope_label",
+     "label": "설치 위치",
+     "aliases": [
+      "install_scope"
+     ]
+    },
+    {
+     "key": "product_folder_name",
+     "label": "제품 폴더"
+    },
+    {
+     "key": "relative_path",
+     "label": "폴더 안 경로",
+     "format": "path"
+    },
+    {
+     "key": "file_size",
+     "label": "크기",
+     "format": "bytes"
+    },
+    {
+     "key": "source_file_mtime",
+     "label": "파일 수정(사본 기준)",
+     "format": "time",
+     "ts_kind": "modified"
+    },
+    {
+     "key": "detection_row_count",
+     "label": "탐지 행 수",
+     "format": "number"
+    },
+    {
+     "key": "log_candidate_count",
+     "label": "로그 후보 수",
+     "format": "number"
+    },
+    {
+     "key": "quarantine_file_count",
+     "label": "격리 파일 수",
+     "format": "number"
+    },
+    {
+     "key": "contents_opened",
+     "label": "내용 열람",
+     "value_labels": {
+      "false": "아니요(정책)"
+     }
+    },
+    {
+     "key": "verification",
+     "label": "형식 검증",
+     "value_labels": {
+      "unconfirmed": "미확인(실표본 검증 전)",
+      "confirmed": "확인됨"
+     }
+    },
+    {
+     "key": "evidence_note",
+     "label": "참고"
     }
    ],
    "rules": []

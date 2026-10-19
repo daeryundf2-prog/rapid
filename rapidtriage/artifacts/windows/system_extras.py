@@ -558,6 +558,9 @@ def file_holds_store_secret(path: Path) -> bool:
 
 def collect_system_extras(root: Path, provider: str) -> Iterable[ArtifactRecord]:
     """All ``windows-system`` R5 L2 rows of an evidence root (each collector isolated)."""
+    # R6 S2 lane A (lazy: av_ahnlab imports this module).
+    from .av_ahnlab import collect_ahnlab_v3
+
     counter = _Counter()
     collectors: tuple[Callable[[Path, str], Iterable[ArtifactRecord]], ...] = (
         collect_startup_folder_items,
@@ -566,6 +569,7 @@ def collect_system_extras(root: Path, provider: str) -> Iterable[ArtifactRecord]
         collect_credential_store_presence,
         collect_wallpaper_files,
         collect_walk_dispatched,
+        collect_ahnlab_v3,
     )
     for collector in collectors:
         try:

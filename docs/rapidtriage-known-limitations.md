@@ -263,6 +263,17 @@ RapidTriage is a local triage and review tool, not a full commercial forensic su
 - **기타**: 네이버 지도 `x`/`y` 대체 좌표는 한반도 주변(위도 30–45, 경도 120–135) 밖이면 버린다(TM128/KATECH 값 오배치 방지). `/place/<숫자 ID>`는 검색어로 쓰지 않는다. v2 전용 토렌트(BEP 52, `pieces` 없음)는 v1 `info_hash`를 내지 않고 `torrent_version`(`v1`·`v2`·`hybrid`)을 둔다. eMule BOOLARRAY 태그 길이는 eMule과 같이 `len/8+1`로 건너뛴다. NTFS `$Volume` 레코드의 fixup 간격은 VBR `bytes_per_sector`를 쓴다(4Kn). eMule `.part.met` 0xE1(분할 형식) 버전은 레이아웃을 공개 자료로 확인하지 못해 여전히 오류 행으로 남긴다.
 <!-- r5 review fixes (backend): end -->
 
+## R6 S2
+
+### AhnLab V3 (갈래 A, 인벤토리 우선)
+
+- 근거·범위: `docs/plans/r6-followups-2026-10-19.md` §2.3 갈래 A. 공개 자료로 V3의 탐지 기록 위치·형식(평문·SQLite·ESE·암호화 여부)을 확인하지 못했으므로 두 층으로 나눴다. **모든 AhnLab 행은 `verification: unconfirmed`**이며, 단계 1(b) VM 표본(V3 Lite + EICAR)으로 확인되기 전에는 올리지 않는다.
+- 1층 `av-product-presence`(kind `windows-system`, 영역 안티 포렌식 › 백신 제품 흔적(AhnLab)): 부모가 `Program Files`·`Program Files (x86)`·`ProgramData`·사용자 `AppData\Local`·`AppData\Roaming`인 `AhnLab` 폴더만 본다(다운로드 폴더 등 다른 곳의 `AhnLab` 폴더는 무시). 하위 폴더마다 `product-folder` 1행(폴더 이름으로 제품 추정: V3 Lite·V3 IS·V3 ES·V3 Net·Safe Transaction·기타, 버전은 `version*.ini`의 `Version=` 값; 실행 파일 버전 리소스·설치 프로그램 행 조인은 하지 않음), 이름에 `log`·`history`·`detect`·`quarantine`·`event`가 든 `.log`·`.txt`·`.db`·`.dat` 파일마다 `log-candidate` 1행(크기·수정 시각·앞 4 KiB 형식 추정: 텍스트·SQLite·ESE·알 수 없음, 해석 결과), `Quarantine`·`Vault` 폴더마다 `quarantine-folder` 1행.
+- 격리 폴더: 파일 수·크기만 `os.scandir`/`stat`으로 센다(최대 5,000개, 넘으면 `count_truncated`). **내용은 열거나 해시·형식 추정·복사하지 않는다**(악성 코드, `contents_opened: false`). 다른 수집기(파일 인벤토리·카빙 등)가 일반 파일로서 이 폴더를 다루는 기존 동작은 바꾸지 않았다.
+- 2층 `av-detection-log`(`av_vendor=ahnlab`, `av_product=ahnlab-v3`): 텍스트 후보는 McAfee와 같은 줄 휴리스틱(줄 첫머리 시각 `YYYY-MM-DD`·`YYYY.MM.DD`·`YYYY/MM/DD` + 오전/오후, 탐지 단어 탐지·치료·격리·차단·삭제·detected·repaired·quarantined…, "탐지되지 않음"류 제외)으로 `field_extraction=heuristic-lines`. SQLite 후보는 표 이름·열에 detect·threat·malware·virus·infect·quarantine이 있고 경로 또는 시각 열이 있는 표의 행만 `field_extraction=heuristic-sqlite`(`schema_confidence=heuristic-sqlite`, `source_table`·`source_rowid`)로 낸다. 정수 시각은 Unix 초·밀리초로 가정해 UTC로 바꾸고 원래 값은 `detected_at_raw`에 둔다. ESE·이진·64 MiB 넘는 SQLite는 1층 목록에서 끝난다.
+- 상한: 로그 64 MiB·50만 줄, 유형별 2만 행(`system_extras` 상한 재사용), AhnLab 폴더당 탐색 2만 항목·깊이 8. 손상 파일은 `parse_status=error` 오류 행 1개로 격리되고 탐색은 계속된다.
+- 미확인: 실제 V3 로그 파일 이름·위치·인코딩·DB 스키마, 탐지 기록이 암호화된 저장소인지 여부, 제품 폴더 이름 규칙(버전별), 정수 시각 열의 기준(UTC 여부). 검토 서브셋(`bsh-subset`)에는 AhnLab 폴더가 없어 행 0·오류 0이다.
+
 ## 공개 미지원 (AXIOM 대비)
 <!-- r5 L4 (documentation): public non-support list: start -->
 2026-10-18 R5 재판정 기준. AXIOM Examine의 Computer 검색 항목 199개 중 아래 38개는 RapidTriage가 파서를 두지 않는다고 공개한다(매트릭스 `docs/research/axiom-parity-matrix-2026-10-17.md` Table A의 최종 열 `공개 미지원`). 대부분 서비스가 끝났거나 국내 사건에서 쓰이지 않는 앱이고, 남은 흔적은 다른 행(설치 프로그램·Prefetch·브라우저 기록·URL 분류·문서 색인·파일 인벤토리)으로 확인한다. 실제 사건에서 필요해지면 합성 픽스처와 공개 형식 자료로 개별 파서를 추가한다.
@@ -320,7 +331,7 @@ R5에서 연기했거나 확인하지 못한 항목(AXIOM 행 판정은 위 매�
 
 | 항목 | 관련 행 | 상태 · 사유 |
 |---|---|---|
-| AhnLab V3 탐지 로그 | McAfee Logs(AXIOM 밖 국내 확장) | 구현 안 함. 제품 버전별 탐지 기록 위치·형식(DB·암호화 여부)을 공개 자료로 확인하지 못함. McAfee만 `av-detection-log` |
+| AhnLab V3 탐지 로그 | McAfee Logs(AXIOM 밖 국내 확장) | R6 S2에서 인벤토리 우선으로 추가(`av-product-presence` + 텍스트·SQLite 후보의 `av-detection-log` `av_product=ahnlab-v3`, 모든 행 `verification: unconfirmed`). 탐지 기록 위치·형식은 여전히 미확인 — 아래 `## R6 S2` 참고 |
 | 알서포트 RemoteCall | LogMeIn(AXIOM 밖 국내 확장) | 구현 안 함. 설치·로그 경로를 확인하지 못함 |
 | 팟플레이어·KMPlayer 재생 기록 값 이름 | VLC Media Player(국내 확장) | 값 이름 미확인. 이름이 recent·history 등인 키 아래의 경로형 값만 수집(`verification: unconfirmed`, 신뢰도 낮음). 곰플레이어는 서브셋 한 건으로 배치 확인, 식별자 해시 알고리즘은 미확인 |
 | Windows 메일 `store.vol` 폴더·읽음·플래그 | Windows Mail | ESE 표 목록·주소 후보만(`email-client-store`). 메시지 본문은 `.eml`로 읽음 |
