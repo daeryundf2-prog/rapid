@@ -82,6 +82,8 @@ from ..extract import (
 )
 from ..files import (
     DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES,
+    MOBILE_INNER_DIR_NAME,
+    MOBILE_INNER_INDEX_NAME,
     disable_evidence_path_cache,
     enable_evidence_path_cache,
     run_files_scan,
@@ -1398,6 +1400,10 @@ def _run_triage_stages(
         outputs["evidence_delta"] = output_dir / EVIDENCE_DELTA_MANIFEST_NAME
     if carve_payload is not None:
         outputs["carve"] = carve_output_path
+    mobile_inner_index = output_dir / MOBILE_INNER_DIR_NAME / MOBILE_INNER_INDEX_NAME
+    if mobile_inner_index.is_file():
+        # R6 S2: index of the adb inner-database copies (label_ko "해제 사본, 증거 아님").
+        outputs["mobile_inner_copies"] = mobile_inner_index
     if isinstance(image_result, E01ExtractionResult):
         outputs = {"e01": e01_metadata_path, **outputs}
     if isinstance(image_result, DiskImageExtractionResult):
@@ -1782,6 +1788,11 @@ def collect_artifact_stages(
     output_order = list(kinds)
     max_workers = artifact_scheduler_workers(kinds)
     options_by_kind = dict(collector_options or {})
+    # R6 S2: adb backup inner databases are copied under the run output (never the evidence
+    # tree); the marked ``mobile-inner`` folder is pruned from evidence rescans.
+    mobile_options = dict(options_by_kind.get("mobile-export") or {})
+    mobile_options.setdefault("inner_dir", artifacts_dir.parent / MOBILE_INNER_DIR_NAME)
+    options_by_kind["mobile-export"] = mobile_options
     for kind in kinds:
         artifact_path = artifacts_dir / f"rapidtriage-artifacts-{kind}.json"
         reusable = load_reusable_artifact_payload(artifact_path) if (resume or delta is not None) else None

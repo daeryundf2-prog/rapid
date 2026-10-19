@@ -117,6 +117,35 @@ EXPECTED_SIGNATURES_BY_EXTENSION: dict[str, set[str]] = {
     for extension in rule["extensions"]  # type: ignore[union-attr]
 }
 RUN_OUTPUT_DIR_PREFIX = "rapidtriage-run"
+# R6 S2: adb backup inner databases are unpacked into ``<run output>/mobile-inner/`` (copies,
+# not evidence). The folder carries this marker file; a ``mobile-inner`` folder with the marker
+# is pruned from evidence walks exactly like a ``rapidtriage-run*`` folder.
+MOBILE_INNER_DIR_NAME = "mobile-inner"
+MOBILE_INNER_MARKER_NAME = "RAPIDTRIAGE-INNER-COPIES.txt"
+MOBILE_INNER_INDEX_NAME = "rapidtriage-mobile-inner.json"
+
+
+def is_tool_output_dir(path: Path) -> bool:
+    """True for a run-output folder (``rapidtriage-run*``) or a marked ``mobile-inner`` copy folder."""
+    name = path.name
+    if name.startswith(RUN_OUTPUT_DIR_PREFIX):
+        return True
+    if name != MOBILE_INNER_DIR_NAME:
+        return False
+    try:
+        return (path / MOBILE_INNER_MARKER_NAME).is_file()
+    except OSError:
+        return False
+
+
+def _relative_has_tool_output_dir(base: Path, parts: Sequence[str]) -> bool:
+    """Whether a directory component of ``base / *parts`` is a tool output folder."""
+    for index, part in enumerate(parts):
+        if part.startswith(RUN_OUTPUT_DIR_PREFIX):
+            return True
+        if part == MOBILE_INNER_DIR_NAME and is_tool_output_dir(base.joinpath(*parts[: index + 1])):
+            return True
+    return False
 
 
 def iter_evidence_paths(root: Path, pattern: str = "*") -> Iterable[Path]:
@@ -146,7 +175,7 @@ def _walk_evidence_paths(root: Path, pattern: str) -> Iterable[tuple[Path, Path]
             relative = path.relative_to(root)
         except ValueError:
             relative = path
-        if any(part.startswith(RUN_OUTPUT_DIR_PREFIX) for part in relative.parts):
+        if _relative_has_tool_output_dir(root, relative.parts):
             continue
         yield path, relative
 
@@ -373,7 +402,7 @@ def _locate_evidence_snapshot(root: Path, root_key: str) -> tuple[_EvidencePathS
         relative = absolute.relative_to(ancestor)
         # The ancestor walk pruned run-output directories; a sub-root that
         # lives inside one cannot be answered from it.
-        if any(part.startswith(RUN_OUTPUT_DIR_PREFIX) for part in relative.parts):
+        if _relative_has_tool_output_dir(ancestor, relative.parts):
             return None
         return snapshot, str(relative)
     return None
@@ -938,7 +967,7 @@ def scan_file_candidates(
                 for entry in entries:
                     try:
                         if entry.is_dir(follow_symlinks=False):
-                            if entry.name.startswith(RUN_OUTPUT_DIR_PREFIX):
+                            if is_tool_output_dir(Path(entry.path)):
                                 continue
                             pending.append(Path(entry.path))
                             continue
