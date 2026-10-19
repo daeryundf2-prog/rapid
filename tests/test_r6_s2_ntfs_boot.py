@@ -227,6 +227,20 @@ class VolumeRowAnalysisTests(unittest.TestCase):
         self.assertEqual(state["row_count"], mft_range["end"] + 1)
         title = analysis_kinds.analysis_row_title("ntfs-meta", self.volume_rows(state)[0], 0)
         self.assertEqual(title, "NTFS 볼륨 정보 · VSN 5E6F-7788 · 증거볼륨")
+        # console review #4: the volume row has its own source range / count and row filter
+        self.assertEqual(state["summary"]["source_row_ranges"]["volume-information"]["start"], mft_range["end"])
+        self.assertEqual(state["summary"]["source_row_ranges"]["volume-information"]["end"], mft_range["end"] + 1)
+        self.assertEqual(state["summary"]["source_counts"]["volume-information"], 1)
+        self.assert_source_filter(state)
+
+    def assert_source_filter(self, state: dict[str, object]) -> None:
+        page = self.client.get(
+            f"/api/runs/{self.run_id}/analyses/{state['analysis_id']}/rows",
+            params={"limit": 50, "source": "volume-information"},
+        )
+        self.assertEqual(page.status_code, 200, page.text)
+        rows = page.json()["rows"]
+        self.assertEqual([row["artifact_type"] for row in rows], ["ntfs-volume-information"])
 
     def test_raw_mft_input_with_sibling_boot(self) -> None:
         mft = self.evidence / "export" / "$MFT"
@@ -263,6 +277,9 @@ class VolumeRowAnalysisTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["details"]["volume_serial_number"], f"{VSN & 0xFFFFFFFF:08X}")
         self.assertEqual(state["summary"]["cluster_size"], 1024)
+        self.assertEqual(state["summary"]["source_counts"]["volume-information"], 1)
+        self.assertEqual(state["summary"]["source_row_ranges"]["volume-information"]["end"], 1)
+        self.assert_source_filter(state)
         self.assertEqual(failed["status"], "failed")
         self.assertIn("Sleuth Kit 도구가 없습니다", failed["error"])
         self.assertIn("부트 섹터 직접 읽기도 실패", failed["error"])

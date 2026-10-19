@@ -60,6 +60,8 @@ class TimelineField(NamedTuple):
     rewrite sets in bulk (Amcache InventoryDriverBinary/DevicePnp/...): one
     event per (hive, section) at the dominant rewrite time; the per-key time
     distribution stays in the event details.
+    ``timezone_key`` names a row detail that carries the value's own time-zone label
+    (``timestamp_timezone``); a non-empty value there replaces ``timezone``.
     """
 
     path: str
@@ -67,6 +69,16 @@ class TimelineField(NamedTuple):
     event_type: str | None = None
     timezone: str = "UTC"
     scope: str = "row"
+    timezone_key: str | None = None
+
+
+def field_timezone(field: TimelineField, details: Mapping[str, object]) -> str:
+    """The time-zone label of ``field`` in ``details``: the row's own label when it has one."""
+    if field.timezone_key:
+        value = details.get(field.timezone_key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return field.timezone
 
 
 F = TimelineField
@@ -201,7 +213,9 @@ TIMELINE_FIELD_MAP: dict[str, tuple[TimelineField, ...]] = {
     "office-backstage-item": (F("modified_at", "modified"),),
     "desktop-wallpaper": (F("key_last_written_at", "last-written", scope="key"),),
     "vm-config": (F("last_state_change_at", "last-updated"),),
-    "av-detection-log": (F("detected_at", "event", timezone="local-unknown"),),
+    # McAfee text logs are local wall-clock time; AhnLab SQLite epoch cells are UTC: the row's
+    # ``timestamp_timezone`` says which (R6 S2 console review).
+    "av-detection-log": (F("detected_at", "event", timezone="local-unknown", timezone_key="timestamp_timezone"),),
     # --- file usage ------------------------------------------------------
     "shell-shortcut": (
         F("target_created_at", "target-created"),
@@ -349,6 +363,9 @@ TIMELINE_EXCLUDED_TYPES: frozenset[str] = frozenset(
         "web-upload-candidate",
         # R5 L3: map URLs of browser history rows (location_urls.py copies the visit's time).
         "location-url-candidate",
+        # R6 S2: AhnLab product / log-candidate / quarantine inventory rows (the file mtime is a
+        # row field, not an evidence time; detections are av-detection-log rows).
+        "av-product-presence",
     }
 )
 # Aggregate rows that re-copy times of per-row artifacts of the same payload:
@@ -1399,7 +1416,7 @@ def iter_artifact_detail_events(
                     {
                         "timestamp": value,
                         "timestamp_kind": canonical,
-                        "timezone": field.timezone,
+                        "timezone": field_timezone(field, details),
                         "event_type": field.event_type or f"artifact-{artifact_type}-{canonical}",
                         "field_path": f"details.{field.path}",
                         "element_identity": "",
@@ -1415,7 +1432,7 @@ def iter_artifact_detail_events(
                     {
                         "timestamp": value,
                         "timestamp_kind": canonical,
-                        "timezone": field.timezone,
+                        "timezone": field_timezone(field, details),
                         "event_type": field.event_type or f"artifact-{artifact_type}-{canonical}",
                         "field_path": f"details.{field.path}",
                         "identity": f"key={key_name}",
@@ -1430,7 +1447,7 @@ def iter_artifact_detail_events(
                 {
                     "timestamp": value,
                     "timestamp_kind": canonical,
-                    "timezone": field.timezone,
+                    "timezone": field_timezone(field, details),
                     "event_type": field.event_type or f"artifact-{artifact_type}-{canonical}",
                     "field_path": f"details.{field.path}",
                     "element_identity": element_identity,

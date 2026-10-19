@@ -2,7 +2,7 @@
  * Display-only catalogue columns (axiom-adoption §3.2, catalogue `derive:`): values the console
  * computes from the row's own fields — the event-log summary sentence (`event_summary_ko`), the
  * RDP direction (`rdp_direction`), the image EXIF state (`exif_status`) and the account auto-logon
- * flag (`auto_logon`). A deriver returns the value, `null` when the column does not apply to the row
+ * flag (`auto_logon`), the antivirus 조치 (`av_action`). A deriver returns the value, `null` when the column does not apply to the row
  * (an RDP direction on a non-RDP event), or a reason when the parser does not give the input — the
  * grid then shows "없음 — <사유>" (docs/rapidtriage-known-limitations.md lists each one).
  */
@@ -474,6 +474,24 @@ export function exifStatus(fields: Record<string, unknown>, artifactType: string
   return status ? { value: EXIF_NONE, detail: status } : { missing: "EXIF 상태 값이 비어 있음" };
 }
 
+// ---- antivirus --------------------------------------------------------------------------------
+
+/** Suffix of an AhnLab heuristic SQLite 조치 cell that matched no known action word. */
+export const AV_ACTION_UNCLASSIFIED = "DB 원본 값·조치 분류 안 됨";
+
+/**
+ * 조치 of an `av-detection-log` row: the classified label (`action` code + `action_label`), or —
+ * when no action word matched and the parser kept the raw DB cell as `action_label` (AhnLab
+ * heuristic SQLite) — that raw value labelled as unclassified. null when the row has neither.
+ */
+export function avAction(fields: Record<string, unknown>): DerivedValue {
+  const label = scalar(fields.action_label);
+  const code = scalar(fields.action);
+  if (code) return { value: label || code, detail: code };
+  if (!label) return null;
+  return { value: `${label} (${AV_ACTION_UNCLASSIFIED})`, detail: AV_ACTION_UNCLASSIFIED };
+}
+
 // ---- registry ---------------------------------------------------------------------------------
 
 export const AUTO_LOGON_REASON = "파서 미지원(Winlogon AutoAdminLogon 값이 계정 행에 연결되지 않음)";
@@ -500,6 +518,8 @@ export function deriveColumn(
       return exifStatus(fields, artifactType);
     case "auto_logon":
       return { missing: AUTO_LOGON_REASON };
+    case "av_action":
+      return avAction(fields);
     default:
       return { missing: `알 수 없는 파생 열(${id})` };
   }

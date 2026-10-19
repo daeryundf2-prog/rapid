@@ -832,6 +832,18 @@ families:
     label: 복구 방법
     value_labels:
       carved-url: URL 카빙
+  # R6 S2 image-unallocated rows: the offset is the image's media offset (not an E01 file position).
+  - key: cluster
+    label: 클러스터 번호(NTFS)
+    format: number
+  - key: partition_start_sector
+    label: 파티션 시작 섹터
+    format: number
+  - key: source_truncated
+    label: 소스 일부만 스캔
+    value_labels:
+      'true': 예(스캔 상한)
+      'false': 아니요
   rules: []
 rules:
 - id: browser.dl_from_filesharing

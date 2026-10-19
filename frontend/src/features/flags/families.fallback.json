@@ -1,5 +1,5 @@
 {
- "version": "2ff23fdab83946c0",
+ "version": "ccf155732188dd1f",
  "families": [
   {
    "id": "sam-account",
@@ -830,7 +830,7 @@
    "core_columns": [
     {
      "key": "detected_at",
-     "label": "탐지 시각(현지)",
+     "label": "탐지 시각",
      "aliases": [
       "timestamp"
      ],
@@ -847,9 +847,7 @@
     {
      "key": "action_label",
      "label": "조치",
-     "aliases": [
-      "action"
-     ]
+     "derive": "av_action"
     },
     {
      "key": "threat_name",
@@ -899,6 +897,32 @@
      "value_labels": {
       "unconfirmed": "미확인(실표본 검증 전)",
       "confirmed": "확인됨"
+     }
+    },
+    {
+     "key": "schema_confidence",
+     "label": "스키마 신뢰도",
+     "value_labels": {
+      "heuristic-sqlite": "DB 표·열 이름 추정(형식 미확인)"
+     }
+    },
+    {
+     "key": "parse_status",
+     "label": "해석 상태",
+     "value_labels": {
+      "error": "해석 오류"
+     }
+    },
+    {
+     "key": "parse_error",
+     "label": "해석 오류 사유"
+    },
+    {
+     "key": "timestamp_timezone",
+     "label": "시각 시간대",
+     "value_labels": {
+      "local-unknown": "현지 시각(시간대 미상)",
+      "UTC": "UTC"
      }
     },
     {
@@ -974,6 +998,10 @@
      }
     },
     {
+     "key": "parse_error",
+     "label": "해석 오류 사유"
+    },
+    {
      "key": "file_count",
      "label": "파일 수",
      "format": "number"
@@ -1031,6 +1059,22 @@
      "key": "quarantine_file_count",
      "label": "격리 파일 수",
      "format": "number"
+    },
+    {
+     "key": "count_truncated",
+     "label": "격리 파일 수 잘림",
+     "value_labels": {
+      "true": "예(상한 5,000개 도달 — 실제는 더 많음)",
+      "false": "아니요"
+     }
+    },
+    {
+     "key": "walk_truncated",
+     "label": "폴더 탐색 잘림",
+     "value_labels": {
+      "true": "예(항목 상한 도달 — 일부만 셈)",
+      "false": "아니요"
+     }
     },
     {
      "key": "contents_opened",
@@ -2505,6 +2549,24 @@
      "label": "복구 방법",
      "value_labels": {
       "carved-url": "URL 카빙"
+     }
+    },
+    {
+     "key": "cluster",
+     "label": "클러스터 번호(NTFS)",
+     "format": "number"
+    },
+    {
+     "key": "partition_start_sector",
+     "label": "파티션 시작 섹터",
+     "format": "number"
+    },
+    {
+     "key": "source_truncated",
+     "label": "소스 일부만 스캔",
+     "value_labels": {
+      "true": "예(스캔 상한)",
+      "false": "아니요"
      }
     }
    ],
@@ -7629,6 +7691,32 @@
     {
      "key": "risk_flags",
      "label": "표시"
+    },
+    {
+     "key": "inner_path",
+     "label": "해제 사본(증거 아님)",
+     "format": "path"
+    },
+    {
+     "key": "inner_extract_skipped",
+     "label": "해제 안 함",
+     "value_labels": {
+      "cap": "상한 도달",
+      "unsafe-name": "안전하지 않은 이름",
+      "name-collision": "이름 충돌"
+     }
+    },
+    {
+     "key": "inner_extract_skipped_reason",
+     "label": "해제 안 한 사유",
+     "value_labels": {
+      "size": "항목 크기 상한 초과",
+      "count": "해제 파일 수 상한 도달",
+      "total": "해제 총 크기 상한 도달",
+      "unsafe-name": "안전하지 않은 이름",
+      "name-collision": "이름 충돌(이미 있는 사본)",
+      "cap": "상한 도달"
+     }
     }
    ],
    "rules": []
