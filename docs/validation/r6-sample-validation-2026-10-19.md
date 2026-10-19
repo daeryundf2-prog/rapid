@@ -133,7 +133,7 @@
 
 ### 5.4 단계 2 실이미지 검증 (`$Boot`·미할당 카빙, 2026-10-19)
 
-대상: D 드라이브에서 NTFS 볼륨 전체가 든 가장 작은 이미지 `IMG-A`(E01 파일 1.57 GB, 미디어 1 TB, NTFS 파티션 시작 섹터 2048). 사용자 지시("D드라이브에서 제일 작은 이미지")에 따라 읽기 전용으로 사용했다. 이름·경로·URL 내용은 기록하지 않는다. 원시 결과는 `D:apid-qa\derived6-s2-realimgeport.json`(Git 밖). 코드 `feat/r6-followups` `9f866e3`, Sleuth Kit 없음(pyewf 네이티브 경로).
+대상: D 드라이브에서 NTFS 볼륨 전체가 든 가장 작은 이미지 `IMG-A`(E01 파일 1.57 GB, 미디어 1 TB, NTFS 파티션 시작 섹터 2048). 사용자 지시("D드라이브에서 제일 작은 이미지")에 따라 읽기 전용으로 사용했다. 이름·경로·URL 내용은 기록하지 않는다. 원시 결과는 `D:\rapid-qa\derived\r6-s2-realimg\report.json`(Git 밖). 코드 `feat/r6-followups` `9f866e3`, Sleuth Kit 없음(pyewf 네이티브 경로).
 
 | 항목 | 결과 | 교차 확인 | 판정 |
 |---|---|---|---|
