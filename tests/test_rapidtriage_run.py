@@ -223,6 +223,14 @@ class RapidTriageRunTests(unittest.TestCase):
             {"browser", "p2p", "windows-execution", "windows-system"},
         )
 
+    def test_investigative_modes_run_p2p_but_recovery_does_not(self) -> None:
+        # R6 S1 Q-S1-4: `run --mode hacking|seizure|fraud` must schedule the p2p collector.
+        for mode in ("seizure", "fraud", "hacking"):
+            with self.subTest(mode=mode):
+                self.assertIn("p2p", RUN_PROFILES[mode].artifacts_kinds)
+                self.assertEqual(RUN_PROFILES[mode].artifacts_kinds.count("p2p"), 1)
+        self.assertNotIn("p2p", RUN_PROFILES["recovery"].artifacts_kinds)
+
     def test_parser_crash_isolation_payload_and_memory_cap_assessment_are_machine_readable(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             payload = isolated_parser_error_payload(

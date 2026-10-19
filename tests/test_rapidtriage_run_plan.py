@@ -173,8 +173,13 @@ class PlanConstructionTests(unittest.TestCase):
             self.assertEqual(find_task(plan, "report")["skippable"], False)
         hacking = build_run_plan(mode="hacking")
         self.assertEqual(hacking["counts"]["tasks"]["total"], len(builtin_provider_kinds()) + 14)
+        # R6 S1 Q-S1-4: p2p runs in the web group for investigative modes.
+        for mode in ("seizure", "fraud", "hacking"):
+            p2p_task = find_task(build_run_plan(mode=mode), "p2p")
+            self.assertEqual(p2p_task["group"], "web", mode)
+            self.assertEqual(p2p_task["status"], "queued", mode)
         recovery = build_run_plan(mode="recovery")
-        for kind in ("browser", "windows-execution", "windows-system"):
+        for kind in ("browser", "p2p", "windows-execution", "windows-system"):
             self.assertEqual(find_task(recovery, kind)["group"], "manifest", kind)
         manifest_tasks = [task["id"] for task in recovery["groups"][[g["id"] for g in recovery["groups"]].index("manifest")]["tasks"]]
         self.assertEqual(manifest_tasks[-1], "manifest")
