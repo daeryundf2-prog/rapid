@@ -131,6 +131,21 @@
 | KMPlayer 값 이름 | `reg export` 전후 diff | |
 | EGG LZMA 블록 배치 | 실제 블록 바이트 vs `_lzma_block` 추정 | |
 
+### 5.4 단계 2 실이미지 검증 (`$Boot`·미할당 카빙, 2026-10-19)
+
+대상: D 드라이브에서 NTFS 볼륨 전체가 든 가장 작은 이미지 `IMG-A`(E01 파일 1.57 GB, 미디어 1 TB, NTFS 파티션 시작 섹터 2048). 사용자 지시("D드라이브에서 제일 작은 이미지")에 따라 읽기 전용으로 사용했다. 이름·경로·URL 내용은 기록하지 않는다. 원시 결과는 `D:apid-qa\derived6-s2-realimgeport.json`(Git 밖). 코드 `feat/r6-followups` `9f866e3`, Sleuth Kit 없음(pyewf 네이티브 경로).
+
+| 항목 | 결과 | 교차 확인 | 판정 |
+|---|---|---|---|
+| `$Boot` 네이티브 추출(`dump_boot_sector`, 파티션 자동 탐지) | 0.24 s; 섹터 512 B, 클러스터 4,096 B, 총 섹터 1,953,519,615, MFT LCN 786,432, VSN `6224EA89`(64비트 `5A6225086224EA89`) | `dissect.ntfs`의 serial64·클러스터·MFT LCN·총 섹터 일치(E01 읽기는 같은 `EwfSectorReader`를 써서 NTFS 해석만 독립) | 통과 |
+| `ntfs-meta`(Sleuth Kit 없음) | `extraction_status=boot-only-native`, `ntfs-volume-information` 1행, `source_counts.volume-information=1`, 요약 VSN·클러스터가 위와 같음, 0.27 s | — | 통과 |
+| `$Bitmap` 네이티브 읽기 → 미할당 구간 | `$Bitmap` 30,523,744 B 0.108 s; 클러스터 244,189,951 중 미할당 244,156,705(99.99%), 구간 8개, 잘림 없음, 계산 0.059 s | `dissect.ntfs` `$Bitmap` 바이트 동일, 미할당 수 일치 | 통과 |
+| 미할당 URL 카빙(기본 4 GiB 상한) | 4,294,967,296 B 스캔, `source_truncated=true`(미할당 약 1 TB), 114.4 s(37.5 MB/s), 후보 438(ASCII 289·UTF-16LE 149), 분류: 검색 3·소셜 1·미분류 434 | 64 MiB 상한 재실행: 정확히 67,108,864 B, 2.21 s, 후보 189 | 통과 |
+| 취소 | 5 s 시점 취소 → 0.12 s 뒤 `AnalysisCancelled` | — | 통과 |
+| raw 사본(같은 디스크 앞 2 GB) | `dump_boot_sector` 0.002 s, 시작 섹터 2048, VSN 동일 | — | 통과 |
+
+관찰: 미할당 영역 대부분이 0으로 채워진 디스크에서도 E01 압축 해제 비용 때문에 37.5 MB/s에 그쳤다. 1 TB 전체를 훑으면 몇 시간이 걸리므로 4 GiB 기본 상한이 필요하다. 0으로만 된 청크를 건너뛰는 최적화는 단계 3(성능) 후보로 남긴다. LNK 볼륨 시리얼과의 대조는 이 이미지의 LNK를 추출하지 않아 하지 않았다(VSN 표기 `%08X`는 합성 테스트로 LNK와 같음을 확인).
+
 ## 6. 실행 방법
 
 ### 6.1 런 비교
