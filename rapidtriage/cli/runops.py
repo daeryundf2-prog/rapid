@@ -231,6 +231,12 @@ def handle_run(args: argparse.Namespace, parser: argparse.ArgumentParser, rule_s
         )
         if plan.get("outcome") and plan.get("outcome") != "complete":
             print(f"Run plan outcome: {plan.get('outcome')} (see {payload['outputs'].get('plan')})")
+        stuck = [item for item in plan.get("stuck_providers") or [] if isinstance(item, Mapping)]
+        if stuck:
+            print(
+                "Providers still inside a call after the cancel grace period (left running, rows after the cancel dropped): "
+                + ", ".join(str(item.get("task")) for item in stuck)
+            )
         if plan.get("outcome") == "cancelled":
             return EXIT_CANCELLED
         return 0

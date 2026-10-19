@@ -1950,6 +1950,7 @@ def collect_artifact_stages(
                 artifact_count=count,
                 output=artifact_output_ref(artifact_path),
                 parser_error_count=int(summary.get("parser_error_count") or 0),
+                stuck_thread=str(summary.get("provider_thread") or "") if summary.get("provider_stop_timeout") else None,
             )
         events.append(
             build_scheduler_event(
