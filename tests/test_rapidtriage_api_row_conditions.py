@@ -426,11 +426,11 @@ class RowConditionApiTests(unittest.TestCase):
         self.assertEqual(third["matched"], 1)
 
     def test_files_time_condition_without_acquisition_copies_skips_ntfs(self) -> None:
-        with mock.patch("rapidtriage.api.app.routes_runs.ntfs_si_modified_resolver") as resolver:
+        with mock.patch("rapidtriage.api.app.routes_runs.ntfs_si_modified_times") as resolver:
             page = self.call("files", "limit=50&scope=inventory&from=2025-05-01T00:00:00Z")
             resolver.assert_not_called()
         self.assertEqual([row["name"] for row in page["inventory"]], ["a.exe"])
-        with mock.patch("rapidtriage.api.app.routes_runs.ntfs_si_modified_resolver", return_value=None) as resolver:
+        with mock.patch("rapidtriage.api.app.routes_runs.ntfs_si_modified_times", return_value=None) as resolver:
             self.call("files", "limit=50&from=2025-05-01T00:00:00Z")
             resolver.assert_called_once()
 

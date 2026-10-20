@@ -413,10 +413,13 @@ def filter_files_by_category(
     scan_cap: int = ARTIFACT_PATH_FILTER_SCAN_CAP,
     row_filter: Callable[[Mapping[str, object]], bool] | None = None,
     rows: Sequence[object] | None = None,
+    positions: Sequence[int] | None = None,
 ) -> dict[str, object]:
     """Files page of ``collection`` rows whose ``categories`` intersect ``categories``
     (no ``categories``: every row) and, with ``row_filter``, that pass it (row conditions).
     ``rows`` replaces ``payload[collection]`` (rows already joined with NTFS times).
+    ``positions`` = the matching row positions already known (``files_index.files_matched_positions``,
+    cached across pages): the page slices them instead of scanning, and ``matched`` is exact.
 
     ``collection`` is ``candidates`` (default) or ``inventory``. The rows are
     already in memory, so the scan runs to the end (or ``scan_cap``) and
@@ -431,7 +434,15 @@ def filter_files_by_category(
     matched = 0
     scanned = 0
     exhausted = True
-    for record_index, row in enumerate(source):
+    if positions is not None:
+        window = positions[offset : offset + limit] if limit > 0 else positions[offset:]
+        page_rows = [{**source[index], "record_index": index} for index in window]  # type: ignore[dict-item]
+        matched = len(positions)
+        scanned = len(source)
+        source_iter: Sequence[object] = ()
+    else:
+        source_iter = source
+    for record_index, row in enumerate(source_iter):
         if scanned >= scan_cap:
             exhausted = False
             break

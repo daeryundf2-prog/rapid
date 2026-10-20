@@ -509,11 +509,15 @@ def filter_files_rows(
     limit: int,
     restrict: Sequence[int] | None = None,
     row_filter: Callable[[Mapping[str, object]], bool] | None = None,
+    positions: Sequence[int] | None = None,
 ) -> tuple[list[object], dict[str, object]]:
     """Files rows of ``collection`` after category/flag filters and ``row_filter`` (row conditions)
     (and the ``flags`` order): ``(page rows, pagination)``.
 
-    ``restrict`` (ascending row positions, e.g. one folder of the fs-tree) limits the rows considered."""
+    ``restrict`` (ascending row positions, e.g. one folder of the fs-tree) limits the rows considered.
+    ``positions`` = the rows that already passed ``restrict``, ``categories`` and ``row_filter``
+    (``files_index.files_matched_positions``, cached across pages): only the flag filter and order
+    run here."""
     from .artifact_filter import file_row_categories
 
     kind = f"files:{collection}"
@@ -521,7 +525,9 @@ def filter_files_rows(
     if query.filtered:
         eligible = set(join.require_index().matching(kind, query.rule_ids, query.grade))
     order: list[int] = []
-    for record_index in restrict if restrict is not None else range(len(rows)):
+    if positions is not None:
+        order = [item for item in positions if eligible is None or item in eligible]
+    for record_index in () if positions is not None else restrict if restrict is not None else range(len(rows)):
         row = rows[record_index]
         if eligible is not None and record_index not in eligible:
             continue
