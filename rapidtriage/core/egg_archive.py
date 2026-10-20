@@ -19,7 +19,12 @@ Caps: ``MAX_ENTRIES`` entries, ``MAX_SCAN_BYTES`` of headers walked, ``MAX_MEMBE
 compressed and decompressed per member, ``MAX_ARCHIVE_DECOMPRESSED_BYTES`` per archive and a
 ``MAX_RATIO`` decompression-ratio guard (bombs stop with a
 note). A corrupt header ends the listing with ``analysis_status`` ``*-partial`` and the
-entries read so far.
+entries read so far. When an EGG stream ends inside an entry (a truncated file, or a split set
+cut at a missing volume) and that entry's 12-byte file header was read completely, the entry is
+still listed with ``data_truncated`` and ``truncated_at`` (``filename``: name unknown, a
+placeholder with ``name_known`` false; ``file-extra``; ``block-header``; ``block-data``), the
+sizes read so far (``compressed_size`` ``None`` before any complete block header) and no
+decompression / CRC check. Every other EGG entry carries ``data_truncated`` false.
 
 Split (multi-volume) EGG (R6 S1 follow-up): every volume starts with its own EGG header whose
 split extra header carries the previous / next volume's header ID (0 = none). The volumes are
@@ -86,6 +91,13 @@ class ArchiveFormatError(ValueError):
     """The bytes are not a well-formed EGG / ALZ structure (Korean message)."""
 
 
+class _Truncated(ArchiveFormatError):
+    """The stream ended inside a structure (truncated file or a split set cut at a missing
+    volume). ``entry`` is the partly read EGG entry, when enough of it was read to list it."""
+
+    entry: dict[str, object] | None = None
+
+
 def _filetime(value: int) -> str | None:
     if value <= 0:
         return None
@@ -118,10 +130,10 @@ class _Reader:
 
     def read(self, count: int) -> bytes:
         if count < 0 or self.tell() + count > self.size:
-            raise ArchiveFormatError("헤더가 파일 끝을 넘습니다(잘린 압축 파일)")
+            raise _Truncated("헤더가 파일 끝을 넘습니다(잘린 압축 파일)")
         data = self.handle.read(count)
         if len(data) != count:
-            raise ArchiveFormatError("헤더를 끝까지 읽지 못했습니다")
+            raise _Truncated("헤더를 끝까지 읽지 못했습니다")
         return data
 
     def u8(self) -> int:
@@ -138,7 +150,7 @@ class _Reader:
 
     def skip(self, count: int) -> None:
         if count < 0 or self.tell() + count > self.size:
-            raise ArchiveFormatError("데이터 길이가 파일 끝을 넘습니다(잘린 압축 파일)")
+            raise _Truncated("데이터 길이가 파일 끝을 넘습니다(잘린 압축 파일)")
         self.handle.seek(count, 1)
 
 
@@ -528,6 +540,11 @@ def _walk_egg(
                 break
             entry, hashed = _egg_file(reader, archive, extract=extract, hashed=hashed)
             entries.append(entry)
+    except _Truncated as exc:
+        if exc.entry is not None:
+            entries.append(exc.entry)
+        status = "egg-partial"
+        notes.append(f"corrupt: {exc}"[:200])
     except ArchiveFormatError as exc:
         status = "egg-partial"
         notes.append(f"corrupt: {exc}"[:200])
@@ -535,91 +552,127 @@ def _walk_egg(
 
 
 def _egg_file(reader: _Reader, archive: dict[str, object], *, extract: bool, hashed: int) -> tuple[dict[str, object], int]:
+    """One EGG file entry. A stream that ends inside the entry (``_Truncated``) after its file
+    header was read completely carries a partial entry (``data_truncated``, ``truncated_at``):
+    ``filename`` (name unknown, placeholder), ``file-extra``, ``block-header`` or ``block-data``.
+    A truncated entry is never decompressed or CRC-checked."""
     reader.u32()  # file id
-    uncompressed = reader.u64()
+    uncompressed = reader.u64()  # a stream cut inside these 12 bytes lists nothing for the entry
     name = ""
     name_encoding = ""
+    name_read = False
     name_encrypted = False
     modified: str | None = None
     attributes = 0
     encryption = ""
-    while True:
-        signature = reader.u32()
-        if signature == EGG_END:
-            break
-        flag, data = _extra(reader)
-        if signature == EGG_FILENAME:
-            name_encrypted = bool(flag & 0x08)
-            position = 0
-            locale = None
-            if flag & 0x10:
-                locale = struct.unpack_from("<H", data, position)[0]
-                position += 2
-            if flag & 0x20:
-                position += 4  # parent path id
-            if name_encrypted:
-                name, name_encoding = "", "encrypted"
-            else:
-                name, name_encoding = _decode_name(data[position:], locale)
-        elif signature == EGG_WINDOWS_INFO and len(data) >= 9:
-            modified = _filetime(struct.unpack_from("<Q", data, 0)[0])
-            attributes = data[8]
-        elif signature == EGG_POSIX_INFO and len(data) >= 20:
-            moment = struct.unpack_from("<Q", data, 12)[0]
-            if 0 < moment < 4_102_444_800:
-                modified = dt.datetime.fromtimestamp(moment, tz=dt.timezone.utc).isoformat().replace("+00:00", "Z")
-        elif signature == EGG_ENCRYPT and data:
-            encryption = EGG_ENCRYPTION.get(data[0], f"unknown-{data[0]}")
     compressed = 0
+    blocks = 0
     crc_ok: bool | None = None
     digest = None
     methods: list[str] = []
     collected = bytearray()
-    can_extract = extract and not encryption and not archive.get("solid") and uncompressed <= MAX_MEMBER_BYTES and hashed < MAX_HASH_MEMBERS
     extract_note = ""
-    while True:
-        position = reader.tell()
-        signature = reader.u32()
-        if signature != EGG_BLOCK:
-            reader.handle.seek(position)
-            break
-        method = EGG_METHODS.get(reader.u8(), "unknown")
-        reader.u8()  # compression hint
-        block_size = reader.u32()
-        block_compressed = reader.u32()
-        block_crc = reader.u32()
-        if reader.u32() != EGG_END:
-            raise ArchiveFormatError("블록 헤더 끝 표시가 없습니다")
-        compressed += block_compressed
-        if method not in methods:
-            methods.append(method)
-        if can_extract and method in ("store", "deflate", "bzip2", "lzma"):
-            budget_used = int(archive.get("decompressed_bytes") or 0)
-            if (
-                block_compressed > MAX_MEMBER_BYTES
-                or block_size > MAX_RATIO * max(block_compressed, 1)
-                or len(collected) + block_size > MAX_MEMBER_BYTES
-            ):
-                can_extract, extract_note = False, "decompression-guard"
+    stage = "filename"
+    try:
+        while True:
+            signature = reader.u32()
+            if signature == EGG_END:
+                break
+            flag, data = _extra(reader)
+            if signature == EGG_FILENAME:
+                name_encrypted = bool(flag & 0x08)
+                position = 0
+                locale = None
+                if flag & 0x10:
+                    locale = struct.unpack_from("<H", data, position)[0]
+                    position += 2
+                if flag & 0x20:
+                    position += 4  # parent path id
+                if name_encrypted:
+                    name, name_encoding = "", "encrypted"
+                else:
+                    name, name_encoding = _decode_name(data[position:], locale)
+                name_read, stage = True, "file-extra"
+            elif signature == EGG_WINDOWS_INFO and len(data) >= 9:
+                modified = _filetime(struct.unpack_from("<Q", data, 0)[0])
+                attributes = data[8]
+            elif signature == EGG_POSIX_INFO and len(data) >= 20:
+                moment = struct.unpack_from("<Q", data, 12)[0]
+                if 0 < moment < 4_102_444_800:
+                    modified = dt.datetime.fromtimestamp(moment, tz=dt.timezone.utc).isoformat().replace("+00:00", "Z")
+            elif signature == EGG_ENCRYPT and data:
+                encryption = EGG_ENCRYPTION.get(data[0], f"unknown-{data[0]}")
+        can_extract = extract and not encryption and not archive.get("solid") and uncompressed <= MAX_MEMBER_BYTES and hashed < MAX_HASH_MEMBERS
+        while True:
+            stage = "block-header"
+            position = reader.tell()
+            signature = reader.u32()
+            if signature != EGG_BLOCK:
+                reader.handle.seek(position)
+                break
+            method = EGG_METHODS.get(reader.u8(), "unknown")
+            reader.u8()  # compression hint
+            block_size = reader.u32()
+            block_compressed = reader.u32()
+            block_crc = reader.u32()
+            if reader.u32() != EGG_END:
+                raise ArchiveFormatError("블록 헤더 끝 표시가 없습니다")
+            compressed += block_compressed
+            blocks += 1
+            if method not in methods:
+                methods.append(method)
+            stage = "block-data"
+            if reader.tell() + block_compressed > reader.size:
+                raise _Truncated("블록 데이터가 파일 끝을 넘습니다(잘린 압축 파일)")
+            if can_extract and method in ("store", "deflate", "bzip2", "lzma"):
+                budget_used = int(archive.get("decompressed_bytes") or 0)
+                if (
+                    block_compressed > MAX_MEMBER_BYTES
+                    or block_size > MAX_RATIO * max(block_compressed, 1)
+                    or len(collected) + block_size > MAX_MEMBER_BYTES
+                ):
+                    can_extract, extract_note = False, "decompression-guard"
+                    reader.skip(block_compressed)
+                    continue
+                if budget_used + block_size > MAX_ARCHIVE_DECOMPRESSED_BYTES:
+                    can_extract, extract_note = False, "archive-decompression-budget"
+                    reader.skip(block_compressed)
+                    continue
+                archive["decompressed_bytes"] = budget_used + block_size
+                data = reader.read(block_compressed)
+                try:
+                    out = _decompress(method, data, block_size)
+                except (ValueError, OSError, EOFError, zlib.error, lzma.LZMAError) as exc:
+                    can_extract, extract_note = False, f"decompress-failed:{exc}"[:120]
+                    continue
+                crc_ok = (zlib.crc32(out) & 0xFFFFFFFF) == block_crc and (crc_ok is not False)
+                collected.extend(out)
+            else:
+                if can_extract and method not in ("store", "deflate", "bzip2", "lzma"):
+                    can_extract, extract_note = False, f"list-only-method:{method}"
                 reader.skip(block_compressed)
-                continue
-            if budget_used + block_size > MAX_ARCHIVE_DECOMPRESSED_BYTES:
-                can_extract, extract_note = False, "archive-decompression-budget"
-                reader.skip(block_compressed)
-                continue
-            archive["decompressed_bytes"] = budget_used + block_size
-            data = reader.read(block_compressed)
-            try:
-                out = _decompress(method, data, block_size)
-            except (ValueError, OSError, EOFError, zlib.error, lzma.LZMAError) as exc:
-                can_extract, extract_note = False, f"decompress-failed:{exc}"[:120]
-                continue
-            crc_ok = (zlib.crc32(out) & 0xFFFFFFFF) == block_crc and (crc_ok is not False)
-            collected.extend(out)
-        else:
-            if can_extract and method not in ("store", "deflate", "bzip2", "lzma"):
-                can_extract, extract_note = False, f"list-only-method:{method}"
-            reader.skip(block_compressed)
+    except _Truncated as exc:
+        exc.entry = _entry(
+            name,
+            name_encoding=name_encoding if name_read else "unknown",
+            is_dir=bool(attributes & 0x80),
+            compressed_size=compressed if blocks else None,
+            uncompressed_size=uncompressed,
+            compression_methods=methods,
+            encrypted=bool(encryption),
+            encryption_method=encryption,
+            name_encrypted=name_encrypted,
+            last_modified=modified,
+            timezone="UTC" if modified else "",
+            attributes=attributes,
+            crc_ok=None,
+            sha256=None,
+            extract_note="truncated-not-extracted",
+            data_truncated=True,
+            truncated_at=stage,
+            name_known=name_read,
+        )
+        raise
     if can_extract and len(collected) == uncompressed and crc_ok is not None:
         digest = hashlib.sha256(bytes(collected)).hexdigest()
         hashed += 1
@@ -640,6 +693,9 @@ def _egg_file(reader: _Reader, archive: dict[str, object], *, extract: bool, has
         crc_ok=crc_ok,
         sha256=digest,
         extract_note=extract_note or ("encrypted-not-extracted" if encryption else ""),
+        data_truncated=False,
+        truncated_at="",
+        name_known=name_read,
     )
     return entry, hashed
 

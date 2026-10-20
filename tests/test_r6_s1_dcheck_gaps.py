@@ -120,6 +120,84 @@ class SplitEggTests(unittest.TestCase):
             self.assertEqual(rows[name]["archive_inventory_profile"]["split_first_volume"], "set.vol1.egg")
 
 
+class TruncatedEggEntryTests(unittest.TestCase):
+    """A stream that ends inside an entry still lists it when its file header was read."""
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.base = Path(self.temp.name)
+        self.one = egg_file("a.txt", b"alpha " * 40, "store", file_id=1)
+        self.data = "잘린 항목 synthetic ".encode() * 80
+        self.two = egg_file("b.txt", self.data, "deflate", file_id=2)
+        # egg_file layout: 16-byte file header, filename extra (7 + 5) -> 28, Windows extra
+        # (7 + 9) -> 44, EGG_END -> 48, 22-byte block header -> 70, then the payload.
+        self.head = b"EGGA" + struct.pack("<HII", 0x0100, 0x12345678, 0) + struct.pack("<I", EGG_END)
+
+    def listing(self, cut: int) -> dict[str, object]:
+        path = self.base / "cut.egg"
+        path.write_bytes(self.head + self.one + self.two[:cut])
+        return list_egg(path)
+
+    def assert_truncated(self, listing: dict[str, object], stage: str) -> dict[str, object]:
+        self.assertEqual(listing["analysis_status"], "egg-partial")
+        self.assertTrue(any(str(note).startswith("corrupt:") for note in listing["notes"]))
+        entries = listing["entries"]
+        self.assertEqual(len(entries), 2)
+        self.assertFalse(entries[0]["data_truncated"])
+        self.assertTrue(entries[0]["crc_ok"])
+        cut = entries[1]
+        self.assertEqual((cut["data_truncated"], cut["truncated_at"]), (True, stage))
+        self.assertEqual((cut["crc_ok"], cut["sha256"], cut["extract_note"]), (None, None, "truncated-not-extracted"))
+        self.assertEqual(cut["uncompressed_size"], len(self.data))
+        return cut
+
+    def test_cut_mid_block_data(self) -> None:
+        cut = self.assert_truncated(self.listing(70 + 20), "block-data")
+        self.assertEqual(cut["name"], "b.txt")
+        self.assertEqual(cut["compressed_size"], len(self.two) - 70)
+        self.assertEqual(cut["compression_methods"], ["deflate"])
+        self.assertEqual(cut["last_modified"], "2024-05-01T12:00:00Z")
+
+    def test_cut_mid_block_header(self) -> None:
+        cut = self.assert_truncated(self.listing(48 + 10), "block-header")
+        self.assertEqual((cut["name"], cut["name_known"]), ("b.txt", True))
+        self.assertIsNone(cut["compressed_size"])
+
+    def test_cut_mid_file_extra(self) -> None:
+        cut = self.assert_truncated(self.listing(28 + 5), "file-extra")
+        self.assertEqual(cut["name"], "b.txt")
+        self.assertIsNone(cut["last_modified"])
+
+    def test_cut_mid_filename_is_placeholder(self) -> None:
+        cut = self.assert_truncated(self.listing(16 + 9), "filename")
+        self.assertEqual((cut["name"], cut["name_known"], cut["name_encoding"]), ("", False, "unknown"))
+        self.assertIsNone(cut["compressed_size"])
+
+    def test_cut_mid_file_header_lists_nothing(self) -> None:
+        listing = self.listing(10)
+        self.assertEqual(listing["analysis_status"], "egg-partial")
+        self.assertEqual([entry["name"] for entry in listing["entries"]], ["a.txt"])
+
+    def test_split_missing_volume_lists_cut_entry(self) -> None:
+        body = self.one + self.two + struct.pack("<I", EGG_END)
+        volumes = split_volumes(body, [len(self.one) + len(self.two) - 15], ids=IDS[:2])
+        (self.base / "set.vol1.egg").write_bytes(volumes[0])  # vol2 genuinely absent
+        listing = list_egg(self.base / "set.vol1.egg")
+        self.assertEqual(listing["analysis_status"], "egg-partial")
+        self.assertIn("split-volume-missing", listing["notes"])
+        self.assertEqual(listing["missing_volumes"][0]["expected_name"], "set.vol2.egg")
+        self.assertEqual([entry["name"] for entry in listing["entries"]], ["a.txt", "b.txt"])
+        cut = listing["entries"][1]
+        self.assertEqual((cut["data_truncated"], cut["truncated_at"], cut["crc_ok"]), (True, "block-data", None))
+        self.assertEqual(cut["uncompressed_size"], len(self.data))
+        rows = {Path(record.path).name: record.details for record in collect_archive_inventory(self.base)}
+        profile = rows["set.vol1.egg"]["archive_inventory_profile"]
+        self.assertEqual((rows["set.vol1.egg"]["entry_count"], profile["data_truncated_entry_count"]), (2, 1))
+        sample = profile["sample_entries"][1]
+        self.assertEqual((sample["data_truncated"], sample["truncated_at"]), (True, "block-data"))
+
+
 class ZipNamedEggTests(unittest.TestCase):
     def test_zip_named_egg_is_routed_to_zip(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

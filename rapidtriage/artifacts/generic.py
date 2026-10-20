@@ -372,6 +372,10 @@ def extended_archive_profile(path: Path, fmt: str) -> dict[str, object]:
                 "format_mismatch", "reason_ko"):
         if key in listing:
             profile[key] = listing[key]
+    # R6 S1: an EGG entry cut by the end of the stream (truncated file / missing split volume) is
+    # still listed; its data_truncated / truncated_at fields pass through in the entry dicts.
+    if fmt == "egg":
+        profile["data_truncated_entry_count"] = sum(1 for entry in entries if entry.get("data_truncated"))
     if fmt == "iso9660":
         profile["udf_present"] = bool(listing.get("udf_present"))
         profile["iso_volume"] = listing.get("volume") or {}
