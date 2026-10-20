@@ -6,11 +6,12 @@
 # --- How to run ---
 #   python scripts/perf-r6.py --timeline --synthetic [--events 500000] [--repeat 5] [--output <report.json>]
 #   python scripts/perf-r6.py --timeline --run <run output dir> [--repeat 5] [--output <report.json>]
+#   (scripts/perf-r6.py dispatches --timeline here with argv unchanged; running this file
+#   directly with the same arguments works too.)
 #
-# R6 S3 performance measurements (docs/plans/r6-followups-2026-10-19.md section 3.4). Each mode
-# is one function (`measure_<mode>`) registered in MODES; lanes add their own modes
-# (--files, --geo) next to --timeline. The API is called in-process through FastAPI's TestClient;
-# times are medians of --repeat runs. Engineering measurement only -- not a unit test, not CI.
+# R6 S3 timeline mode of the performance measurements (docs/plans/r6-followups-2026-10-19.md
+# section 3.4). The API is called in-process through FastAPI's TestClient; times are medians of
+# --repeat runs. Engineering measurement only -- not a unit test, not CI.
 #
 # --timeline (lane A, timeline condition index):
 #   * synthetic: a temporary run with N events (default 500,000). "no_file" = an older run without
