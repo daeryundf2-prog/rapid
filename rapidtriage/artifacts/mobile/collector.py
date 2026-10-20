@@ -5,11 +5,17 @@ import sqlite3
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 
+from ...core.files import inner_dir_pruned_below, path_is_within
 from ...core.models import ArtifactRecord
 from ...core.sqlite_snapshot import open_sqlite_snapshot
 from ...core.submission import compute_hashes
 from .._walk import iter_evidence_paths
-from .adb_backup import adb_backup_error_record, collect_adb_backup
+from .adb_backup import (
+    InnerBudget,
+    adb_backup_error_record,
+    collect_adb_backup,
+    write_inner_index,
+)
 from .constants import (
     MAX_IOS_BACKUP_FILES,
     MAX_ROWS_PER_SOURCE,
@@ -129,9 +135,18 @@ class MobileExportProvider:
     def supported(self) -> bool:
         return True
 
-    def __init__(self) -> None:
+    def __init__(self, *, inner_dir: Path | str | None = None) -> None:
         self.collection_notes: list[str] = []
         self.acquisition_roots: list[dict[str, object]] = []
+        # R6 S2: where adb backup inner databases are copied (run output ``mobile-inner/``);
+        # ``None`` keeps the in-memory member inventory only (nothing is written).
+        self.inner_dir = Path(inner_dir) if inner_dir else None
+        if self.inner_dir is not None:
+            self.options_key = "inner:" + str(self.inner_dir)
+
+    def with_options(self, *, inner_dir: Path | str | None = None, **_ignored: object) -> MobileExportProvider:
+        """Collector options from the run / CLI (``inner_dir``)."""
+        return MobileExportProvider(inner_dir=inner_dir)
 
     def collect(self, root: Path) -> Iterable[ArtifactRecord]:
         files = sorted(
@@ -145,13 +160,28 @@ class MobileExportProvider:
             self.collection_notes = [NO_MOBILE_ACQUISITION_NOTICE]
             return
         self.collection_notes = []
+        inner_copies: list[dict[str, object]] = []
+        inner_dir = self.inner_dir
+        if inner_dir is not None and root.is_dir() and path_is_within(inner_dir, root) and not inner_dir_pruned_below(root, inner_dir):
+            # R6 S2 review: never write copies into the evidence tree being scanned.
+            self.collection_notes.append(
+                f"adb 해제 사본 폴더({inner_dir})가 증거 폴더 안이라 내부 DB 해제를 건너뜀(구성원 목록만 기록)"
+            )
+            inner_dir = None
+        inner_budget = InnerBudget()
         for path in files:
             acquisition_root = root_for_path(path, roots)
             if acquisition_root is not None and acquisition_root.kind == "android-adb-backup" and acquisition_root.single_file:
-                # R5 L3: the backup's tar members (android-backup / android-backup-member rows).
+                # R5 L3: the backup's tar members (android-backup / android-backup-member rows);
+                # R6 S2: plus its inner databases handed to the app parsers (inner_dir set).
                 root_details = acquisition_root.to_details(root)
                 try:
-                    backup_records = list(collect_adb_backup(path))
+                    if inner_dir is not None:
+                        backup_records = list(
+                            collect_adb_backup(path, inner_root=inner_dir, inner_copies=inner_copies, inner_budget=inner_budget)
+                        )
+                    else:
+                        backup_records = list(collect_adb_backup(path))
                 except Exception as exc:  # one broken backup never stops the mobile provider
                     self.collection_notes.append(f"adb 백업 해제 실패({path.name}): {type(exc).__name__}")
                     backup_records = [adb_backup_error_record(path, exc)]
@@ -166,6 +196,11 @@ class MobileExportProvider:
             for record in self._collect_file(path, hint, acquisition_root):
                 record.details.update(root_details)
                 yield record
+        if inner_dir is not None and inner_copies:
+            try:
+                write_inner_index(inner_dir, inner_copies)
+            except OSError as exc:
+                self.collection_notes.append(f"adb 해제 사본 목록 기록 실패: {type(exc).__name__}")
 
     @staticmethod
     def _collect_file(path: Path, hint: Path, acquisition_root: MobileAcquisitionRoot) -> Iterable[ArtifactRecord]:

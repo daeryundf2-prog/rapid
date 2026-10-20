@@ -226,8 +226,8 @@ function NestedList({ name, items, depth }: { name: string; items: unknown[]; de
  * A scalar's reading: its Korean label (raw value as tooltip), a raw parser token in mono, or
  * the plain text. Exported for tests.
  */
-export function ScalarReading({ raw, text }: { raw: unknown; text: string }) {
-  const label = metaValueLabel(raw);
+export function ScalarReading({ raw, text, name }: { raw: unknown; text: string; name?: string }) {
+  const label = metaValueLabel(raw, name);
   if (label) {
     return (
       <span className="meta-value-label" title={String(raw)} data-raw={String(raw)}>
@@ -243,7 +243,7 @@ export function ScalarReading({ raw, text }: { raw: unknown; text: string }) {
 function ScalarText({ name, value }: { name: string; value: unknown }) {
   const field = makeRecordField(name, value);
   if (field.truncated) return <LongValue field={field} />;
-  return <ScalarReading raw={value} text={field.value} />;
+  return <ScalarReading raw={value} text={field.value} name={name} />;
 }
 
 function FieldValue({ field }: { field: RecordField }) {
@@ -254,7 +254,7 @@ function FieldValue({ field }: { field: RecordField }) {
   }
   // Scalars and arrays of scalars (comma list) use the flat text; long ones fold (U-C3).
   if (field.truncated) return <LongValue field={field} />;
-  return <ScalarReading raw={raw} text={field.value} />;
+  return <ScalarReading raw={raw} text={field.value} name={field.key} />;
 }
 
 /**

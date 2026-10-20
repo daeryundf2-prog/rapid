@@ -25,7 +25,10 @@ Every runner calls an existing core function and only adapts its output to
   one progress unit per row source);
 * ``url-carve`` -- ``core.url_carving.scan_url_source`` (R5 L3: ``http(s)://`` URLs in
   ASCII / UTF-16LE from page files, unallocated-space dumps and memory dumps; URL only,
-  never page bodies; ``carved-url-candidate`` rows with the URL class; one unit per file).
+  never page bodies; ``carved-url-candidate`` rows with the URL class; one unit per file). R6 S2:
+  the ``image-unallocated`` source reads the NTFS free clusters of a disk image
+  (``core.ntfs_unalloc``; one more unit), and ``ntfs-meta`` also extracts ``$Boot`` and writes one
+  ``ntfs-volume-information`` row (``core.ntfs_volume``).
 """
 
 from __future__ import annotations
@@ -39,7 +42,7 @@ import threading
 import unicodedata
 from array import array
 from collections import Counter, OrderedDict
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Literal
 
@@ -94,12 +97,22 @@ def run_output_pruner(output_dir: Path) -> Callable[[Path], bool]:
 
     Same rule as ``core.files.iter_evidence_paths`` (the tool's own outputs are
     never re-read as evidence), applied per directory so pruned subtrees are
-    never listed.
+    never listed (each prune is counted in ``WalkStats.pruned_dirs``). A
+    ``mobile-inner`` folder is pruned only when it is this run's own copy folder
+    (``<output_dir>/mobile-inner``) or another registered run copy folder -- a
+    marker file planted in the evidence never hides it (R6 S2 review).
     """
+    from ...core.files import MOBILE_INNER_DIR_NAME, is_tool_output_dir
+
     own = os.path.normcase(os.path.abspath(output_dir))
+    own_inner = (output_dir / MOBILE_INNER_DIR_NAME,)
 
     def prune(path: Path) -> bool:
-        return path.name.startswith(RUN_OUTPUT_DIR_PREFIX) or os.path.normcase(os.path.abspath(path)) == own
+        return (
+            path.name.startswith(RUN_OUTPUT_DIR_PREFIX)
+            or is_tool_output_dir(path, own_dirs=own_inner)
+            or os.path.normcase(os.path.abspath(path)) == own
+        )
 
     return prune
 
@@ -363,22 +376,105 @@ def _carve_sources(
 
 
 URL_CARVE_PARSER_VERSION = "url-carve-v1"
+IMAGE_UNALLOCATED_SOURCE = "image-unallocated"
+IMAGE_ONLY_OPTIONS_MESSAGE = (
+    "image_path·partition_start_sector는 소스 종류에 '이미지 미할당 영역'(image-unallocated)을 고를 때만 씁니다"
+)
+# Windows between progress messages of an image-unallocated scan (64 x 8 MiB = 512 MiB).
+IMAGE_PROGRESS_EVERY_WINDOWS = 64
 
 
 class UrlCarveOptions(_Options):
-    sources: list[Literal["pagefile", "unallocated", "memory-dump"]] = Field(
+    sources: list[Literal["pagefile", "unallocated", "memory-dump", "image-unallocated"]] = Field(
         default_factory=lambda: ["pagefile", "unallocated"], min_length=1
     )
     max_scan_bytes: int = Field(4 * GIB, ge=1, le=64 * GIB)
     max_candidates: int = Field(50_000, ge=1, le=500_000)
     ascii_urls: bool = True
     utf16_urls: bool = True
+    # R6 S2 ``image-unallocated``: the disk image (E01/raw; omitted: the run's source image) and
+    # its NTFS partition (omitted: found from the partition table / NTFS boot sector).
+    image_path: str | None = None
+    partition_start_sector: int | None = Field(None, ge=0)
+
+    @model_validator(mode="after")
+    def _image_options_need_image_source(self) -> UrlCarveOptions:
+        if IMAGE_UNALLOCATED_SOURCE not in self.sources and (self.image_path or self.partition_start_sector is not None):
+            raise ValueError(IMAGE_ONLY_OPTIONS_MESSAGE)
+        return self
+
+
+def prepare_url_carve(options: UrlCarveOptions, scope: RunScope) -> dict[str, object]:
+    """``image-unallocated``: the image resolves like ``ntfs-meta`` (``image_path`` under the input
+    roots, else the run's source file); a raw ``$MFT`` is not a disk image."""
+    payload = options.model_dump()
+    if IMAGE_UNALLOCATED_SOURCE not in options.sources:
+        return payload
+    if options.image_path:
+        image = scope.resolve_input_path(options.image_path, label="디스크 이미지")
+        if not image.is_file():
+            raise HTTPException(
+                status_code=400,
+                detail=f"지정한 image_path가 파일이 아닙니다: {image}. 디스크 이미지(E01/raw)를 지정하세요",
+            )
+    else:
+        image = scope.source_path()
+        if image is None or not image.is_file():
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "이미지 미할당 영역 URL 카빙에는 디스크 이미지(E01/raw)가 필요합니다. "
+                    f"이 런의 소스는 파일이 아닙니다: {image}. image_path 옵션으로 이미지를 지정하세요"
+                ),
+            )
+    if raw_mft_record_size(image) is not None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"추출한 $MFT 파일은 디스크 이미지가 아닙니다: {image}. E01/raw 디스크 이미지를 지정하세요",
+        )
+    payload["image_path"] = str(image)
+    return payload
+
+
+class _UrlCarveTally:
+    """Row writer + counters shared by the file sources and the image-unallocated source."""
+
+    def __init__(self, ctx: AnalysisContext) -> None:
+        self.ctx = ctx
+        self.candidates = 0
+        self.kind_counts: Counter[str] = Counter()
+        self.class_counts: Counter[str] = Counter()
+        self.encoding_counts: Counter[str] = Counter()
+
+    def write(self, entry: Mapping[str, object], *, path: str, kind: str, extra: Mapping[str, object]) -> None:
+        from ...core.url_carving import SOURCE_LABELS
+
+        self.candidates += 1
+        self.kind_counts[kind] += 1
+        self.encoding_counts[str(entry.get("encoding"))] += 1
+        if entry.get("url_class"):
+            self.class_counts[str(entry["url_class"])] += 1
+        self.ctx.write_row(
+            self.ctx.row(
+                {
+                    **entry,
+                    "source_path": path,
+                    "source_kind": kind,
+                    "source_kind_label": SOURCE_LABELS[kind],
+                    "source_offset": entry.get("offset"),
+                    **extra,
+                    "recovery_method": "carved-url",
+                    "parser_version": URL_CARVE_PARSER_VERSION,
+                },
+                path=path,
+                artifact_type="carved-url-candidate",
+            )
+        )
 
 
 def run_url_carve(ctx: AnalysisContext) -> None:
     from ...core.derived.url_classes import load_url_classes
     from ...core.url_carving import (
-        SOURCE_LABELS,
         UrlCarveState,
         scan_url_source,
         source_kind,
@@ -387,28 +483,30 @@ def run_url_carve(ctx: AnalysisContext) -> None:
     options: UrlCarveOptions = ctx.options  # type: ignore[assignment]
     if not (options.ascii_urls or options.utf16_urls):
         raise AnalysisFailure("ASCII와 UTF-16LE 중 하나 이상을 선택하세요")
-    root = ctx.scope.scan_root()
-    if not root.exists():
-        raise AnalysisFailure(f"스캔 루트가 없습니다: {root}")
-    ctx.set_message("소스 파일 목록 작성 중")
+    wanted = set(options.sources) - {IMAGE_UNALLOCATED_SOURCE}
+    want_image = IMAGE_UNALLOCATED_SOURCE in options.sources
     walk_stats = WalkStats()
-    wanted = set(options.sources)
-    sources = [
-        (path, kind)
-        for path in iter_evidence_files(ctx, root, walk_stats)
-        if (kind := source_kind(path)) is not None and kind in wanted
-    ]
-    ctx.set_total(len(sources), unit="파일", message=f"소스 파일 {len(sources)}개")
+    sources: list[tuple[Path, str]] = []
+    root: Path | None = None
+    if wanted:
+        root = ctx.scope.scan_root()
+        if not root.exists():
+            raise AnalysisFailure(f"스캔 루트가 없습니다: {root}")
+        ctx.set_message("소스 파일 목록 작성 중")
+        sources = [
+            (path, kind)
+            for path in iter_evidence_files(ctx, root, walk_stats)
+            if (kind := source_kind(path)) is not None and kind in wanted
+        ]
+    units = len(sources) + (1 if want_image else 0)
+    ctx.set_total(units, unit="파일", message=f"소스 파일 {len(sources)}개" + (" + 이미지 미할당 영역" if want_image else ""))
     try:
         url_classes = load_url_classes()
     except Exception:  # URL classes are a label; a broken rule file never stops the carve
         url_classes = None
     state = UrlCarveState(url_classes, options.max_candidates)
-    candidates = 0
+    tally = _UrlCarveTally(ctx)
     scanned_bytes = 0
-    kind_counts: Counter[str] = Counter()
-    class_counts: Counter[str] = Counter()
-    encoding_counts: Counter[str] = Counter()
     skipped: list[dict[str, object]] = []
     for path, kind in sources:
         ctx.check_cancel()
@@ -430,53 +528,133 @@ def run_url_carve(ctx: AnalysisContext) -> None:
             continue
         scanned_bytes += scanned
         for entry in sorted(entries, key=lambda item: int(item.get("offset") or 0)):
-            candidates += 1
-            kind_counts[kind] += 1
-            encoding_counts[str(entry.get("encoding"))] += 1
-            if entry.get("url_class"):
-                class_counts[str(entry["url_class"])] += 1
-            ctx.write_row(
-                ctx.row(
-                    {
-                        **entry,
-                        "source_path": str(path),
-                        "source_kind": kind,
-                        "source_kind_label": SOURCE_LABELS[kind],
-                        "source_offset": entry.get("offset"),
-                        "source_scanned_bytes": scanned,
-                        "source_truncated": scanned < size,
-                        "recovery_method": "carved-url",
-                        "parser_version": URL_CARVE_PARSER_VERSION,
-                    },
-                    path=str(path),
-                    artifact_type="carved-url-candidate",
-                )
+            tally.write(
+                entry,
+                path=str(path),
+                kind=kind,
+                extra={"source_scanned_bytes": scanned, "source_truncated": scanned < size},
             )
-        ctx.advance(message=f"{path.name} · URL 후보 {candidates}건")
+        ctx.advance(message=f"{path.name} · URL 후보 {tally.candidates}건")
+    image_summary: dict[str, object] = {}
+    if want_image and not state.capped:
+        image_summary = _carve_image_unallocated(ctx, options, state, tally, sole_source=not sources)
+        scanned_bytes += int(image_summary.get("image_unallocated_scanned_bytes") or 0)
     if state.capped:
         done = ctx.progress_done()
-        ctx.set_total(done, message=f"URL 후보 상한 {options.max_candidates}건 도달 · 파일 {done}/{len(sources)}개 확인")
+        ctx.set_total(done, message=f"URL 후보 상한 {options.max_candidates}건 도달 · 소스 {done}/{units}개 확인")
     ctx.summary.update(
         {
-            "source_root": str(root),
+            "source_root": str(root) if root is not None else None,
             "source_file_count": len(sources),
             "skipped_link_count": walk_stats.skipped_links,
             "pruned_output_dir_count": walk_stats.pruned_dirs,
             "scanned_byte_count": scanned_bytes,
-            "candidate_count": candidates,
+            "candidate_count": tally.candidates,
             "candidate_cap_reached": state.capped,
-            "kind_counts": dict(kind_counts),
-            "encoding_counts": dict(encoding_counts),
-            "url_class_counts": dict(class_counts),
+            "kind_counts": dict(tally.kind_counts),
+            "encoding_counts": dict(tally.encoding_counts),
+            "url_class_counts": dict(tally.class_counts),
             "skipped_count": len(skipped),
             "skipped": skipped[:200],
+            **image_summary,
             "limitation": (
                 "URL 카빙 후보는 페이지 파일·미할당 영역·메모리 덤프에 남은 URL 문자열입니다. 방문했다는 증거가 아니며 "
                 "주변 바이트(페이지 본문)는 저장하지 않습니다. 토큰이 든 질의 값은 가리고 원본 URL의 SHA-256만 둡니다. "
                 "hiberfil.sys는 압축되어 있어 검사하지 않습니다."
+                + (
+                    " 이미지 미할당 영역은 $Bitmap 기준 NTFS 미할당 클러스터만 읽으며 오프셋은 이미지(미디어) 절대 바이트 "
+                    "오프셋입니다(E01 파일의 바이트 위치가 아님). 슬랙 공간·VSS·NTFS 밖 영역은 읽지 않습니다."
+                    if want_image
+                    else ""
+                )
             ),
         }
     )
+
+
+def _carve_image_unallocated(
+    ctx: AnalysisContext, options: UrlCarveOptions, state, tally: _UrlCarveTally, *, sole_source: bool
+) -> dict[str, object]:
+    """``image-unallocated``: URLs in the NTFS free clusters of ``options.image_path`` (R6 S2,
+    ``core.ntfs_unalloc``). A failure fails the analysis when it is the only source, else it is
+    reported in the summary and the file-source rows stay."""
+    from ...core.ntfs_unalloc import NtfsUnallocError, ScanStats, open_unallocated_image
+    from ...core.url_carving import scan_url_windows
+
+    image = Path(str(options.image_path))
+    ctx.set_message("이미지 미할당 영역 계산 중($Boot·$Bitmap)")
+    stats = ScanStats()
+    try:
+        with open_unallocated_image(
+            image,
+            partition_start_sector=options.partition_start_sector,
+            work_dir=ctx.directory / "unalloc",
+            check_cancel=ctx.check_cancel,
+        ) as source:
+            runs = source.runs
+            total = source.unallocated_bytes
+            ctx.set_message(f"미할당 구간 {len(runs.runs):,}개 · {total / GIB:.2f} GiB 중 최대 {options.max_scan_bytes / GIB:.2f} GiB 스캔")
+
+            read_error: list[str] = []
+
+            def windows():
+                # R6 S2 review: a read error mid-scan (EWF chunk / truncated image) keeps the
+                # candidates found so far; the summary marks the scan partial with the error.
+                iterator = source.windows(options.max_scan_bytes, stats=stats, check_cancel=ctx.check_cancel)
+                while True:
+                    try:
+                        window = next(iterator)
+                    except StopIteration:
+                        return
+                    except (OSError, ValueError, OverflowError, NtfsUnallocError) as exc:
+                        read_error.append(f"{type(exc).__name__}: {exc}"[:300])
+                        return
+                    if stats.windows % IMAGE_PROGRESS_EVERY_WINDOWS == 0:
+                        ctx.set_message(f"이미지 미할당 영역 {stats.bytes_read / GIB:.2f} GiB 스캔 · URL 후보 {tally.candidates + len(state.seen)}건")
+                    yield window.data, window.image_offset, window.cutoff
+
+            entries = scan_url_windows(windows(), state=state, ascii_urls=options.ascii_urls, utf16_urls=options.utf16_urls)
+            truncated = stats.bytes_read < total or runs.truncated or bool(read_error)
+            start_sector = source.partition.get("start_sector")
+            for entry in sorted(entries, key=lambda item: int(item.get("offset") or 0)):
+                tally.write(
+                    entry,
+                    path=str(image),
+                    kind=IMAGE_UNALLOCATED_SOURCE,
+                    extra={
+                        "cluster": source.cluster_at(int(entry.get("offset") or 0)),
+                        "partition_start_sector": start_sector,
+                        "source_scanned_bytes": stats.bytes_read,
+                        "source_truncated": truncated,
+                    },
+                )
+            summary: dict[str, object] = {
+                "image_unallocated_status": "partial" if read_error else "scanned",
+                "image_path": str(image),
+                "image_media_kind": source.media_kind,
+                "image_partition": source.partition,
+                "image_cluster_size": source.cluster_size,
+                "image_total_clusters": source.total_clusters,
+                "image_bitmap_method": source.bitmap_method,
+                "image_unallocated_run_count": len(runs.runs),
+                "image_unallocated_runs_truncated": runs.truncated,
+                "image_unallocated_bytes": total,
+                "image_unallocated_scanned_bytes": stats.bytes_read,
+                "image_unallocated_truncated": truncated,
+            }
+            if read_error:
+                summary["image_unallocated_error"] = f"이미지 미할당 영역을 읽는 중 오류로 중단했습니다(찾은 후보는 유지): {read_error[0]}"
+    except NtfsUnallocError as exc:
+        message = (
+            f"이미지 미할당 영역을 읽지 못했습니다: {exc}. Sleuth Kit의 blkls로 미할당 영역을 덤프해 이름에 "
+            "'blkls' 또는 'unalloc'이 든 파일로 입력 폴더에 두고 '미할당 영역 덤프' 소스로 실행할 수도 있습니다"
+        )
+        if sole_source:
+            raise AnalysisFailure(message) from exc
+        ctx.advance()
+        return {"image_unallocated_status": "failed", "image_unallocated_error": message, "image_path": str(image)}
+    ctx.advance(message=f"이미지 미할당 영역 · URL 후보 {tally.candidates}건")
+    return summary
 
 
 # --- VSC ------------------------------------------------------------------------
@@ -816,6 +994,9 @@ USN_RECORD_LIMIT_PER_WINDOW = 10_000_000
 TIMESTAMP_MISMATCH_MAX_ROWS = 2_000_000
 # Names an extracted $LogFile may carry next to a raw $MFT input (auto-detected).
 LOGFILE_SIBLING_NAMES = ("$LogFile", "LogFile.bin", "LogFile")
+# R6 S2: names an extracted $Boot may carry next to a raw $MFT input (auto-detected).
+BOOT_SIBLING_NAMES = ("$Boot", "Boot.bin", "$Boot.bin")
+VOLUME_INFORMATION_TYPE = "ntfs-volume-information"
 
 
 def _default_ntfs_extractor(*args, **kwargs):
@@ -826,6 +1007,16 @@ def _default_ntfs_extractor(*args, **kwargs):
 
 # Tests replace this hook to mock the Sleuth Kit runner.
 NTFS_EXTRACTOR = _default_ntfs_extractor
+
+
+def _default_boot_fallback(*args, **kwargs):
+    from ...core.ntfs_metadata import extract_ntfs_boot_native
+
+    return extract_ntfs_boot_native(*args, **kwargs)
+
+
+# R6 S2: without Sleuth Kit, the partition boot sector is read natively (raw: stdlib, E01: pyewf).
+NTFS_BOOT_FALLBACK = _default_boot_fallback
 
 
 class NtfsMetaOptions(_Options):
@@ -845,6 +1036,9 @@ class NtfsMetaOptions(_Options):
     # Already-extracted $LogFile (``source="mft"``); a sibling of the $MFT named
     # ``$LogFile`` / ``LogFile.bin`` is picked up when omitted.
     logfile_path: str | None = None
+    # R6 S2: already-extracted $Boot (``source="mft"``); a sibling of the $MFT named
+    # ``$Boot`` / ``Boot.bin`` / ``$Boot.bin`` is picked up when omitted.
+    boot_path: str | None = None
 
 
 def raw_mft_record_size(path: Path) -> int | None:
@@ -900,17 +1094,44 @@ def prepare_ntfs_meta(options: NtfsMetaOptions, scope: RunScope) -> dict[str, ob
         payload["logfile_path"] = str(logfile)
     elif options.logfile and payload["source"] == "mft":
         payload["logfile_path"] = _sibling_logfile(image, scope)
+    if options.boot_path:
+        boot = scope.resolve_input_path(options.boot_path, label="$Boot")
+        if not boot.is_file():
+            raise HTTPException(status_code=400, detail=f"지정한 boot_path가 파일이 아닙니다: {boot}")
+        payload["boot_path"] = str(boot)
+    elif payload["source"] == "mft":
+        payload["boot_path"] = _sibling_logfile(image, scope, names=BOOT_SIBLING_NAMES, label="$Boot")
     return payload
 
 
-def _sibling_logfile(mft: Path, scope: RunScope) -> str | None:
-    """An extracted $LogFile next to a raw $MFT input (same allowed roots), else ``None``."""
-    for name in LOGFILE_SIBLING_NAMES:
+def _sibling_boot_check(boot_path: Path, mft_path: Path) -> tuple[str, str]:
+    """``(verdict, reason)`` of ``boot_path`` against the raw ``$MFT`` ``mft_path``
+    (``core.ntfs_unalloc.boot_mft_consistency``; ``"mismatch"`` = skip the $Boot)."""
+    from ...core.ntfs_unalloc import boot_mft_consistency
+
+    record_size = raw_mft_record_size(mft_path)
+    if record_size is None:
+        return "unverified", "$MFT 레코드 크기를 읽지 못해 $Boot와 같은 볼륨인지 확인하지 못했습니다"
+    try:
+        with boot_path.open("rb") as handle:
+            boot = handle.read(512)
+        with mft_path.open("rb") as handle:
+            head = handle.read(record_size)
+    except OSError as exc:
+        return "mismatch", f"$Boot·$MFT를 읽지 못했습니다: {exc}"
+    return boot_mft_consistency(boot, head, record_size)
+
+
+def _sibling_logfile(
+    mft: Path, scope: RunScope, *, names: tuple[str, ...] = LOGFILE_SIBLING_NAMES, label: str = "$LogFile"
+) -> str | None:
+    """An extracted $LogFile (or ``names``: $Boot) next to a raw $MFT input (same allowed roots), else ``None``."""
+    for name in names:
         candidate = mft.parent / name
         if not candidate.is_file():
             continue
         try:
-            return str(scope.resolve_input_path(str(candidate), label="$LogFile"))
+            return str(scope.resolve_input_path(str(candidate), label=label))
         except HTTPException:
             return None
     return None
@@ -1262,9 +1483,17 @@ def parse_usn_file(ctx: AnalysisContext, journal_path: Path, nodes: _NodeView) -
     return {"usn_record_count": count, "usn_scanned_bytes": size}
 
 
-def ntfs_cluster_size(image: Path | None, partition: Mapping[str, object] | None, siblings: list[Path]) -> int | None:
-    """Volume cluster size from the NTFS boot sector: the partition start of a raw image, or an
-    extracted ``$Boot`` next to the $MFT/$LogFile; ``None`` when neither is readable (EWF images)."""
+def ntfs_cluster_size(
+    image: Path | None,
+    partition: Mapping[str, object] | None,
+    siblings: list[Path],
+    *,
+    sibling_boot: bool = True,
+    boot_files: Sequence[Path] = (),
+) -> int | None:
+    """Volume cluster size from the NTFS boot sector: the partition start of a raw image, the
+    ``boot_files`` (an extracted ``$Boot`` already checked), or -- with ``sibling_boot`` -- a
+    ``$Boot`` next to the $MFT/$LogFile; ``None`` when none is readable (EWF images)."""
     from ...core.ntfs_logfile import boot_sector_cluster_size
     from ...core.ntfs_metadata import image_is_ewf
 
@@ -1272,11 +1501,16 @@ def ntfs_cluster_size(image: Path | None, partition: Mapping[str, object] | None
     if image is not None and isinstance(partition, Mapping) and partition.get("start_sector") is not None:
         try:
             if not image_is_ewf(image):
-                candidates.append((image, int(partition["start_sector"]) * 512))  # type: ignore[call-overload]
+                offset = partition.get("byte_offset")
+                # byte_offset (when known) keeps 4Kn partitions right; start_sector counts 512-byte sectors.
+                byte_offset = int(offset) if offset is not None else int(partition["start_sector"]) * 512  # type: ignore[call-overload]
+                candidates.append((image, byte_offset))
         except (TypeError, ValueError):
             pass
-    for folder in {path.parent for path in siblings}:
-        candidates.extend((folder / name, 0) for name in ("$Boot", "Boot.bin", "$Boot.bin"))
+    candidates.extend((path, 0) for path in boot_files)
+    if sibling_boot:
+        for folder in {path.parent for path in siblings}:
+            candidates.extend((folder / name, 0) for name in BOOT_SIBLING_NAMES)
     for path, offset in candidates:
         try:
             with path.open("rb") as handle:
@@ -1325,6 +1559,7 @@ def _ntfs_source_counts(summary: Mapping[str, object]) -> Counter[str]:
         ("usn", "usn_record_count"),
         ("timestamp-mismatch", "timestamp_mismatch_count"),
         ("logfile-transaction", "logfile_transaction_count"),
+        ("volume-information", "volume_information_count"),
     ):
         value = summary.get(key)
         if isinstance(value, int) and not isinstance(value, bool):
@@ -1347,8 +1582,87 @@ def _ntfs_source_in_use_counts(summary: Mapping[str, object]) -> dict[str, int]:
 
 
 # ``details.source`` values of ntfs-meta rows and the summary key of their row ranges.
-ROW_SOURCE_NAMES = ("mft", "usn", "timestamp-mismatch", "logfile-transaction")
+ROW_SOURCE_NAMES = ("mft", "usn", "timestamp-mismatch", "logfile-transaction", "volume-information")
 SOURCE_ROW_RANGES_KEY = "source_row_ranges"
+
+
+def _native_boot_manifest(ctx: AnalysisContext, image: Path, options: NtfsMetaOptions, tool_message: str) -> Mapping[str, object]:
+    """R6 S2 fallback without Sleuth Kit: only ``$Boot`` (the partition boot sector) read natively,
+    so the volume serial still reaches an ``ntfs-volume-information`` row; else the Sleuth Kit failure."""
+    from ...core.e01_native import NativeImageError
+
+    ctx.set_message("Sleuth Kit이 없어 파티션 부트 섹터만 직접 읽습니다")
+    try:
+        return NTFS_BOOT_FALLBACK(image, ctx.directory / "ntfs", partition_start_sector=options.partition_start_sector)
+    except (NativeImageError, OSError) as exc:
+        raise AnalysisFailure(f"NTFS 메타 추출 실패: {tool_message} (부트 섹터 직접 읽기도 실패: {exc})") from exc
+
+
+def write_volume_information_row(ctx: AnalysisContext, outputs: Mapping[str, object]) -> None:
+    """One ``ntfs-volume-information`` row from ``outputs.boot`` (VBR) and ``outputs.mft`` (record 3 =
+    ``$Volume``) when either decodes; the volume serial (``%08X`` like LNK), cluster size and label
+    also go to the summary, with the row's ``source_row_ranges`` entry and ``source_counts``
+    (``source=volume-information`` filter / tree count). Never fails the analysis."""
+    start = (ctx.rows_written, ctx.rows_bytes_written)
+    _write_volume_information_row(ctx, outputs)
+    end = (ctx.rows_written, ctx.rows_bytes_written)
+    ranges = ctx.summary.get(SOURCE_ROW_RANGES_KEY)
+    ranges = dict(ranges) if isinstance(ranges, Mapping) else {}
+    ranges["volume-information"] = {"start": start[0], "end": end[0], "start_byte": start[1], "end_byte": end[1]}
+    ctx.summary[SOURCE_ROW_RANGES_KEY] = ranges
+    counts = ctx.summary.get("source_counts")
+    counts = dict(counts) if isinstance(counts, Mapping) else {}
+    counts["volume-information"] = end[0] - start[0]
+    ctx.summary["source_counts"] = counts
+
+
+def _write_volume_information_row(ctx: AnalysisContext, outputs: Mapping[str, object]) -> None:
+    from ...core.ntfs_volume import read_volume_information, volume_information_decoded
+
+    def entry_path(name: str) -> Path | None:
+        entry = outputs.get(name)
+        if isinstance(entry, Mapping) and entry.get("path"):
+            path = Path(str(entry["path"]))
+            return path if path.is_file() else None
+        return None
+
+    boot_path, mft_path = entry_path("boot"), entry_path("mft")
+    if boot_path is None and mft_path is None:
+        ctx.summary["volume_information_status"] = "absent"
+        return
+    fields = read_volume_information(boot_path, mft_path)
+    if not volume_information_decoded(fields):
+        ctx.summary["volume_information_status"] = "not-decoded"
+        return
+    primary = boot_path or mft_path
+    ctx.write_row(
+        ctx.row(
+            {
+                "source": "volume-information",
+                "source_path": str(primary),
+                "boot_source_path": str(boot_path) if boot_path else "",
+                "mft_source_path": str(mft_path) if mft_path else "",
+                "volume_record_number": 3 if mft_path is not None else None,
+                **fields,
+                "label": "NTFS 볼륨 정보",
+                "evidence_note": "볼륨 일련번호(VSN)는 LNK·Prefetch·이벤트 1006의 볼륨 시리얼과 같은 값(하위 4바이트)입니다. 8바이트 전체는 volume_serial_number_64.",
+                "raw_preview": f"{fields.get('volume_label') or '-'} VSN {fields.get('volume_serial_display') or '-'} NTFS {fields.get('ntfs_version') or '-'}",
+                **({"risk_flags": ["ntfs-volume-dirty"]} if fields.get("volume_dirty") else {}),
+            },
+            path=str(primary),
+            artifact_type=VOLUME_INFORMATION_TYPE,
+        )
+    )
+    ctx.summary.update(
+        {
+            "volume_information_status": "parsed",
+            "volume_information_count": 1,
+            "volume_serial_number": fields.get("volume_serial_number"),
+            "volume_serial_number_64": fields.get("volume_serial_number_64"),
+            "cluster_size": fields.get("cluster_size"),
+            "volume_label": fields.get("volume_label"),
+        }
+    )
 
 
 def run_ntfs_meta(ctx: AnalysisContext) -> None:
@@ -1372,6 +1686,21 @@ def run_ntfs_meta(ctx: AnalysisContext) -> None:
             "outputs": {"mft": {"path": str(image), "size_bytes": size, "sha256": None, "extraction_mode": "raw-mft-input"}},
             "manifest_path": None,
         }
+        verdict, boot_reason = _sibling_boot_check(Path(str(options.boot_path)), image) if options.boot_path else ("", "")
+        if options.boot_path and verdict == "mismatch":
+            # R6 S2 review: a $Boot of another volume is skipped with the reason, never used.
+            manifest["skipped"].append({"target": "boot", "reason": f"{boot_reason}: {options.boot_path}"})  # type: ignore[attr-defined]
+        elif options.boot_path:
+            boot = Path(str(options.boot_path))
+            manifest["outputs"]["boot"] = {  # type: ignore[index]
+                "path": str(boot), "size_bytes": boot.stat().st_size if boot.is_file() else None,
+                "sha256": None, "extraction_mode": "sibling-boot-input",
+            }
+            ctx.summary["boot_volume_check"] = verdict
+            if boot_reason:
+                ctx.summary["boot_volume_check_note"] = boot_reason
+        else:
+            manifest["skipped"].append({"target": "boot", "reason": "$MFT 옆에 $Boot 파일이 없습니다"})  # type: ignore[attr-defined]
     else:
         ctx.set_total(2, unit="단계·레코드", message="Sleuth Kit으로 $MFT·$UsnJrnl 추출 중")
         try:
@@ -1383,9 +1712,10 @@ def run_ntfs_meta(ctx: AnalysisContext) -> None:
             )
         except NTFSMetadataError as exc:
             message = str(exc)
-            if message.startswith("missing Sleuth Kit tools"):
-                message = f"Sleuth Kit 도구가 없습니다({message.split(':', 1)[-1].strip()}). mmls·fls·icat를 PATH에 설치하세요"
-            raise AnalysisFailure(f"NTFS 메타 추출 실패: {message}") from exc
+            if not message.startswith("missing Sleuth Kit tools"):
+                raise AnalysisFailure(f"NTFS 메타 추출 실패: {message}") from exc
+            message = f"Sleuth Kit 도구가 없습니다({message.split(':', 1)[-1].strip()}). mmls·fls·icat를 PATH에 설치하세요"
+            manifest = _native_boot_manifest(ctx, image, options, message)
         except OSError as exc:
             raise AnalysisFailure(f"NTFS 메타 추출 실패: {exc}") from exc
     outputs = manifest.get("outputs") if isinstance(manifest.get("outputs"), Mapping) else {}
@@ -1406,6 +1736,7 @@ def run_ntfs_meta(ctx: AnalysisContext) -> None:
     ctx.advance(2, message="추출 생략(추출한 $MFT 입력)" if options.source == "mft" else "추출 완료")
     ctx.check_cancel()
     if not options.parse:
+        write_volume_information_row(ctx, outputs)
         return
     nodes = _NodeView()
     mft = outputs.get("mft") if isinstance(outputs.get("mft"), Mapping) else None
@@ -1461,10 +1792,15 @@ def run_ntfs_meta(ctx: AnalysisContext) -> None:
     elif logfile_path:
         mft_size = int(ctx.summary.get("mft_record_size") or MFT_RECORD_SIZE)
         siblings = [Path(str(logfile_path))] + ([Path(str(mft["path"]))] if mft and mft.get("path") else [])
+        boot = outputs.get("boot") if isinstance(outputs.get("boot"), Mapping) else None
+        boot_files = [Path(str(boot["path"]))] if boot and boot.get("path") else []
         cluster = ntfs_cluster_size(
             image if options.source != "mft" else None,
             manifest.get("partition") if isinstance(manifest.get("partition"), Mapping) else None,
             siblings,
+            # source="mft": only the $Boot that passed the same-volume check is used.
+            sibling_boot=options.source != "mft",
+            boot_files=boot_files,
         )
         logfile_start = here()
         ctx.summary.update(parse_logfile(ctx, Path(str(logfile_path)), mft_record_size=mft_size, cluster_size=cluster))
@@ -1475,6 +1811,8 @@ def run_ntfs_meta(ctx: AnalysisContext) -> None:
         # A source with no stage this run has an empty range (its filter pages nothing, at once).
         ranges.setdefault(source, {"start": 0, "end": 0, "start_byte": 0, "end_byte": 0})
     ctx.summary[SOURCE_ROW_RANGES_KEY] = ranges
+    # R6 S2: the volume row is written last so the recorded source ranges stay as they were.
+    write_volume_information_row(ctx, outputs)
     ctx.summary["source_counts"] = dict(_ntfs_source_counts(ctx.summary))
     ctx.summary["source_in_use_counts"] = _ntfs_source_in_use_counts(ctx.summary)
     ctx.summary["limitation"] = (
@@ -2404,6 +2742,8 @@ def analysis_row_title(kind: str, row: Mapping[str, object], record_index: int) 
             )
             title = f"$LogFile LSN {details.get('lsn')} · {details.get('redo_op_label') or details.get('record_type') or ''}"
             title = f"{title} · {target}" if target else title
+        elif details.get("source") == "volume-information":
+            title = f"NTFS 볼륨 정보 · VSN {details.get('volume_serial_display') or '-'} · {details.get('volume_label') or '레이블 없음'}"
         elif details.get("source") == "usn":
             name = str(details.get("path") or details.get("file_name") or "") or f"MFT 엔트리 #{details.get('entry_number')}"
             reason = str(details.get("reason") or "")
@@ -2451,6 +2791,7 @@ _COMMON_LABELS = {
     "timestamp_mismatch": "타임스탬프 불일치 행",
     "logfile": "$LogFile 파싱",
     "logfile_path": "$LogFile 파일",
+    "boot_path": "$Boot 파일",
     "parse": "파싱",
     "image_path": "디스크 이미지",
     "target": "대상",
@@ -2490,6 +2831,6 @@ KIND_RUNNERS: dict[str, AnalysisSpec] = {
         AnalysisSpec("search-index", "검색 색인", "출력 파일", SearchIndexOptions, run_search_index, None, _COMMON_LABELS),
         AnalysisSpec("triage-flags", "특이사항", "행 소스", TriageFlagsOptions, run_triage_flags_kind, None, _COMMON_LABELS),
         AnalysisSpec("derived", "통합 보기", "행 소스", DerivedOptions, run_derived_kind, None, _COMMON_LABELS),
-        AnalysisSpec("url-carve", "URL 카빙", "파일", UrlCarveOptions, run_url_carve, None, _COMMON_LABELS),
+        AnalysisSpec("url-carve", "URL 카빙", "파일", UrlCarveOptions, run_url_carve, prepare_url_carve, _COMMON_LABELS),
     )
 }

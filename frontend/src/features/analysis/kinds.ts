@@ -227,6 +227,41 @@ function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+const GIB = 1024 ** 3;
+
+function gib(bytes: number): string {
+  return `${(bytes / GIB).toLocaleString("ko-KR", { maximumFractionDigits: 2 })} GiB`;
+}
+
+/**
+ * url-carve summary facts (R6 S2): the image-unallocated source failed (its error text; the
+ * file-source rows stay), scanned only part of the free clusters (scanned / total bytes), or the
+ * candidate cap stopped the scan.
+ */
+function urlCarveNotes(summary: Record<string, unknown>): string[] {
+  const notes: string[] = [];
+  if (summary.image_unallocated_status === "failed") {
+    const error = text(summary.image_unallocated_error);
+    notes.push(`이미지 미할당 영역 실패${error ? `: ${error}` : ""}`);
+  }
+  if (summary.image_unallocated_truncated === true) {
+    const scanned = count(summary.image_unallocated_scanned_bytes);
+    const total = count(summary.image_unallocated_bytes);
+    notes.push(
+      scanned !== null && total !== null
+        ? `이미지 미할당 영역 일부만 스캔: ${gib(scanned)} / ${gib(total)} (스캔 상한·구간 상한)`
+        : "이미지 미할당 영역 일부만 스캔(스캔 상한·구간 상한)",
+    );
+  }
+  if (summary.candidate_cap_reached === true) {
+    const found = count(summary.candidate_count);
+    notes.push(
+      `URL 후보 상한 도달${found !== null ? `(${found.toLocaleString("ko-KR")}건)` : ""} — 남은 영역은 스캔하지 않았습니다`,
+    );
+  }
+  return notes;
+}
+
 /**
  * Extra facts of a finished job worth one line on its card / pane: OCR success/failure
  * counts and engine error, a truncated volume-shadow comparison with its reason, the
@@ -260,6 +295,12 @@ export function summaryNotes(job: AnalysisState): string[] {
   if (job.kind === "ntfs-meta" && summary.source === "mft") {
     notes.push("입력: 추출한 $MFT 파일(USN 저널 없음)");
   }
+  if (job.kind === "ntfs-meta" && summary.extraction_status === "boot-only-native") {
+    notes.push(
+      "Sleuth Kit이 없어 $Boot만 읽음 — $MFT·USN·$LogFile 미추출. Sleuth Kit(mmls·fls·icat)을 PATH에 설치한 뒤 다시 실행하세요",
+    );
+  }
+  if (job.kind === "url-carve") notes.push(...urlCarveNotes(summary));
   if (job.status === "failed" && job.error) notes.push(`실패 사유: ${job.error}`);
   return notes;
 }

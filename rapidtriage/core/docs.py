@@ -38,7 +38,7 @@ from .doc_text import (
 from .doc_text import (
     finalize as finalize_document_text,
 )
-from .files import RUN_OUTPUT_DIR_PREFIX, file_time_origin_for_input_kind
+from .files import file_time_origin_for_input_kind, is_tool_output_dir
 from .input_root import InputRoot, resolve_input_root
 from .json_safe import json_default
 from .models import DocumentCandidate, DocumentMatch
@@ -132,7 +132,7 @@ class ManifestProgress(Protocol):
 
     def provider_running(self, kind: str) -> None: ...
 
-    def provider_finished(self, kind: str, *, status: str, artifact_count: int) -> None: ...
+    def provider_finished(self, kind: str, *, status: str, artifact_count: int, **extra: object) -> None: ...
 
 
 def scan_document_candidates(root: InputRoot | Path, limit: int = 0) -> list[DocumentCandidate]:
@@ -140,7 +140,7 @@ def scan_document_candidates(root: InputRoot | Path, limit: int = 0) -> list[Doc
     origin = file_time_origin_for_input_kind(input_root.kind)
     candidates: list[DocumentCandidate] = []
     for dirpath, dirnames, files in os.walk(input_root.root_path):
-        dirnames[:] = [name for name in dirnames if not name.startswith(RUN_OUTPUT_DIR_PREFIX)]
+        dirnames[:] = [name for name in dirnames if not is_tool_output_dir(Path(dirpath) / name)]
         for name in files:
             path = Path(dirpath) / name
             suffix = path.suffix.lower()
@@ -265,7 +265,11 @@ def build_manifest(
             on_rows=rows_reporter(progress_key) if callable(rows_reporter) else None,
         )
         write_result(payload, output_path)
-        return manifest_summary_row(provider, payload, output_path=output_path)
+        row = manifest_summary_row(provider, payload, output_path=output_path)
+        summary = payload.get("summary") if isinstance(payload.get("summary"), Mapping) else {}
+        if summary.get("provider_stop_timeout"):
+            row["provider_thread_left_running"] = str(summary.get("provider_thread") or "")
+        return row
 
     def collect_row(provider: object) -> dict[str, object]:
         progress_key = provider_progress_key(provider)
@@ -283,10 +287,13 @@ def build_manifest(
                 status = {"failed-isolated": "error", "cancelled-partial": "partial"}.get(collection_status, "completed")
                 if status == "partial" and not int(row.get("artifact_count") or 0):
                     status = "cancelled"
+                stuck_thread = row.pop("provider_thread_left_running", None)
                 progress.provider_finished(
                     progress_key,
                     status=status,
                     artifact_count=int(row.get("artifact_count") or 0),
+                    # Only a RunProgress gets here with a stuck thread (cancel checker).
+                    **({"stuck_thread": stuck_thread} if stuck_thread else {}),
                 )
             return row
         row: dict[str, object] = {

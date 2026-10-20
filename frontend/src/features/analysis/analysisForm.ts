@@ -315,13 +315,30 @@ export const ANALYSIS_FIELDS: Record<AnalysisKind, FieldSpec[]> = {
       key: "sources",
       type: "multi",
       label: "소스 종류",
-      help: "pagefile.sys·swapfile.sys, 이름에 unalloc/blkls가 든 미할당 덤프, .dmp/.mem 메모리 덤프 중 고르세요.",
+      help: "pagefile.sys·swapfile.sys, 이름에 unalloc/blkls가 든 미할당 덤프, .dmp/.mem 메모리 덤프, 디스크 이미지(E01/raw) NTFS 볼륨의 미할당 클러스터 중 고르세요.",
       choices: [
         { id: "pagefile", label: "페이지 파일" },
         { id: "unallocated", label: "미할당 영역 덤프" },
         { id: "memory-dump", label: "메모리 덤프" },
+        { id: "image-unallocated", label: "이미지 미할당 영역" },
       ],
       minCount: 1,
+    },
+    {
+      key: "image_path",
+      type: "path",
+      pick: "file",
+      optional: true,
+      label: "디스크 이미지",
+      help: "'이미지 미할당 영역'을 고를 때만 씁니다. E01/raw 이미지를 고르고, 비우면 런의 소스 이미지를 씁니다($Bitmap 기준 미할당 클러스터만 읽음).",
+    },
+    {
+      key: "partition_start_sector",
+      type: "int",
+      min: 0,
+      optional: true,
+      label: "파티션 시작 섹터",
+      help: "'이미지 미할당 영역'을 고를 때만 씁니다. 비우면 NTFS 파티션을 자동으로 찾습니다.",
     },
     {
       key: "max_scan_bytes",
@@ -330,7 +347,7 @@ export const ANALYSIS_FIELDS: Record<AnalysisKind, FieldSpec[]> = {
       max: 65536,
       unit: "MB",
       label: "파일당 최대 스캔(MB)",
-      help: "파일마다 앞에서부터 이 크기까지 읽습니다.",
+      help: "파일마다 앞에서부터 이 크기까지 읽습니다. '이미지 미할당 영역'은 이 값이 미할당 클러스터 전체에서 읽는 총량입니다(넘으면 일부만 스캔).",
     },
     {
       key: "max_candidates",
@@ -407,6 +424,8 @@ export function defaultForm(
     case "url-carve":
       return {
         sources: ["pagefile", "unallocated"],
+        image_path: "",
+        partition_start_sector: "",
         max_scan_bytes: "4096",
         max_candidates: "50000",
         ascii_urls: true,
@@ -438,6 +457,21 @@ export function validateAnalysisForm(
     const count = formLocators(form).length;
     if (count > OCR_MAX_ITEMS) {
       errors.locators = `대상: 한 번에 ${OCR_MAX_ITEMS.toLocaleString("ko-KR")}장까지 OCR할 수 있습니다(선택 ${count.toLocaleString("ko-KR")}장).`;
+    }
+  }
+  if (kind === "url-carve") {
+    // R6 S2: the image options only apply to the image-unallocated source (the server says 422 otherwise).
+    const sources = Array.isArray(form.sources) ? form.sources : [];
+    // The message goes on the field that holds the value (aria-invalid / describedby there).
+    if (!sources.includes("image-unallocated")) {
+      const filled = (key: string) => typeof form[key] === "string" && (form[key] as string).trim() !== "";
+      if (filled("image_path")) {
+        errors.image_path = "디스크 이미지: 소스 종류에서 '이미지 미할당 영역'을 고를 때만 씁니다.";
+      }
+      if (filled("partition_start_sector")) {
+        errors.partition_start_sector =
+          "파티션 시작 섹터: 소스 종류에서 '이미지 미할당 영역'을 고를 때만 씁니다.";
+      }
     }
   }
   for (const field of ANALYSIS_FIELDS[kind]) {

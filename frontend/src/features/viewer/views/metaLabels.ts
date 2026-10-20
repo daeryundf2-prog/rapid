@@ -335,6 +335,36 @@ export const META_LABELS: Record<string, string> = {
   provider_family: "공급자 계열",
   product_family: "제품 계열",
   service: "서비스",
+  // R6 S2: url-carve image-unallocated rows (media offset of a disk image).
+  cluster: "클러스터 번호(NTFS)",
+  partition_start_sector: "파티션 시작 섹터",
+  offset_basis_note: "오프셋 기준",
+  source_kind: "소스 종류",
+  source_kind_label: "소스 종류",
+  source_scanned_bytes: "소스 스캔 바이트",
+  source_truncated: "소스 일부만 스캔",
+  // R6 S2: rows the existing parsers made from databases copied out of an Android adb backup.
+  inner_path: "해제 사본(증거 아님)",
+  inner_copy_label: "해제 사본 표시",
+  inner_hint: "해석 경로(앱 내 위치)",
+  inner_companion_of: "함께 해제한 DB",
+  inner_extract_skipped: "해제 안 함",
+  inner_extract_skipped_reason: "해제 안 한 사유",
+  container_backup_path: "원본 ADB 백업(.ab)",
+  container_member: "백업 안 항목(tar)",
+  container_member_sha256: "백업 안 항목 SHA-256",
+  container_format: "컨테이너 형식",
+  backup_domain: "백업 영역",
+  backup_domain_label: "백업 영역",
+  // R6 S2: AhnLab V3 rows.
+  parse_error: "해석 오류 사유",
+  parse_outcome: "해석 결과",
+  schema_confidence: "스키마 신뢰도",
+  count_truncated: "격리 파일 수 잘림",
+  walk_truncated: "폴더 탐색 잘림",
+  detected_at: "탐지 시각",
+  detected_at_raw: "원본 시각 값",
+  action_label: "조치",
 };
 
 /**
@@ -421,6 +451,52 @@ export const META_VALUE_LABELS: Record<string, string> = {
   "acquisition-copy": "취득 사본(원본 아님)",
   filesystem: "파일 시스템",
   listing: "목록(fls/MFT)",
+  // R6 S2 tokens (unique enough to read the same under any key).
+  "adb-backup-extracted": "ADB 백업에서 해제한 사본을 해석",
+  "adb-backup-unpacked": "ADB 백업 해제",
+  "android-adb-backup": "Android ADB 백업(.ab)",
+  "carved-url": "URL 카빙",
+  "image-unallocated": "이미지 미할당 영역",
+  "unsafe-name": "안전하지 않은 이름",
+  "name-collision": "이름 충돌",
+  "heuristic-sqlite": "DB 표·열 이름 추정(형식 미확인)",
+  "heuristic-lines": "줄 패턴(형식 미확인)",
+  "local-unknown": "현지 시각(시간대 미상)",
+};
+
+/**
+ * Readings of short codes that only mean something under one key (adb backup domains `db` / `f`,
+ * extraction caps `size` / `count` …): `META_KEYED_VALUE_LABELS[key][value]`.
+ */
+export const META_KEYED_VALUE_LABELS: Record<string, Record<string, string>> = {
+  backup_domain: {
+    _manifest: "백업 매니페스트",
+    a: "APK",
+    f: "앱 파일(files)",
+    db: "데이터베이스(databases)",
+    sp: "설정(shared_prefs)",
+    r: "앱 루트",
+    c: "캐시",
+    ef: "외부 저장소(앱)",
+    k: "키-값 백업",
+    obb: "확장 파일(OBB)",
+  },
+  inner_extract_skipped: { cap: "상한 도달" },
+  inner_extract_skipped_reason: {
+    size: "항목 크기 상한 초과",
+    count: "해제 파일 수 상한 도달",
+    total: "해제 총 크기 상한 도달",
+    cap: "상한 도달",
+  },
+  parse_outcome: {
+    "detection-rows": "탐지 행 있음",
+    "no-detection-lines": "탐지 줄 없음",
+    "no-detection-rows": "탐지 행 없음",
+    "no-detection-table": "탐지 표 없음",
+    "inventory-only": "목록만(형식 미지원)",
+    "skipped-size-cap": "크기 상한 초과",
+    error: "해석 오류",
+  },
 };
 
 /** Suffixes whose reading carries over to `<family>-<suffix>` tokens ("shellbags-validation-required"). */
@@ -438,11 +514,13 @@ export function isRawToken(value: string): boolean {
 
 /**
  * Korean reading of a scalar record value, or null when it has none (the caller shows the raw
- * value; a raw token in mono). Booleans always read 예 / 아니요.
+ * value; a raw token in mono). Booleans always read 예 / 아니요; `key` picks a keyed reading first.
  */
-export function metaValueLabel(value: unknown): string | null {
+export function metaValueLabel(value: unknown, key?: string): string | null {
   if (typeof value === "boolean") return value ? "예" : "아니요";
   if (typeof value !== "string") return null;
+  const keyed = key ? META_KEYED_VALUE_LABELS[key]?.[value] : undefined;
+  if (keyed) return keyed;
   const direct = META_VALUE_LABELS[value] ?? META_VALUE_LABELS[value.toLowerCase()];
   if (direct) return direct;
   if (!isRawToken(value)) return null;

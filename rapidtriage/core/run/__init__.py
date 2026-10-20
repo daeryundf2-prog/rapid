@@ -82,9 +82,15 @@ from ..extract import (
 )
 from ..files import (
     DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES,
+    MOBILE_INNER_DIR_NAME,
+    MOBILE_INNER_INDEX_NAME,
     disable_evidence_path_cache,
     enable_evidence_path_cache,
+    register_run_output_dir,
+    register_tool_output_dir,
     run_files_scan,
+    unregister_run_output_dir,
+    unregister_tool_output_dir,
 )
 from ..filetime import parse_iso_utc
 from ..forensic_accuracy import build_accuracy_gate
@@ -558,6 +564,10 @@ def run_triage_mode(
         # Every provider walks the same evidence tree; the run-scoped path
         # cache makes each tree walk happen once per run (see core/files.py).
         enable_evidence_path_cache()
+        # R6 S2: this run's own adb copy folder is the only ``mobile-inner`` pruned from walks.
+        own_inner_dir = output_dir / MOBILE_INNER_DIR_NAME
+        register_tool_output_dir(own_inner_dir)
+        register_run_output_dir(output_dir)
         try:
             summary_payload = _run_triage_stages(
                 input_root,
@@ -590,6 +600,8 @@ def run_triage_mode(
                 skip_tasks=plan["options"]["skip_tasks"],
             )
         finally:
+            unregister_tool_output_dir(own_inner_dir)
+            unregister_run_output_dir(output_dir)
             disable_evidence_path_cache()
     except BaseException as exc:
         control_watcher.stop()
@@ -1398,6 +1410,10 @@ def _run_triage_stages(
         outputs["evidence_delta"] = output_dir / EVIDENCE_DELTA_MANIFEST_NAME
     if carve_payload is not None:
         outputs["carve"] = carve_output_path
+    mobile_inner_index = output_dir / MOBILE_INNER_DIR_NAME / MOBILE_INNER_INDEX_NAME
+    if mobile_inner_index.is_file():
+        # R6 S2: index of the adb inner-database copies (label_ko "해제 사본, 증거 아님").
+        outputs["mobile_inner_copies"] = mobile_inner_index
     if isinstance(image_result, E01ExtractionResult):
         outputs = {"e01": e01_metadata_path, **outputs}
     if isinstance(image_result, DiskImageExtractionResult):
@@ -1782,6 +1798,11 @@ def collect_artifact_stages(
     output_order = list(kinds)
     max_workers = artifact_scheduler_workers(kinds)
     options_by_kind = dict(collector_options or {})
+    # R6 S2: adb backup inner databases are copied under the run output (never the evidence
+    # tree); the marked ``mobile-inner`` folder is pruned from evidence rescans.
+    mobile_options = dict(options_by_kind.get("mobile-export") or {})
+    mobile_options.setdefault("inner_dir", artifacts_dir.parent / MOBILE_INNER_DIR_NAME)
+    options_by_kind["mobile-export"] = mobile_options
     for kind in kinds:
         artifact_path = artifacts_dir / f"rapidtriage-artifacts-{kind}.json"
         reusable = load_reusable_artifact_payload(artifact_path) if (resume or delta is not None) else None
@@ -1929,6 +1950,7 @@ def collect_artifact_stages(
                 artifact_count=count,
                 output=artifact_output_ref(artifact_path),
                 parser_error_count=int(summary.get("parser_error_count") or 0),
+                stuck_thread=str(summary.get("provider_thread") or "") if summary.get("provider_stop_timeout") else None,
             )
         events.append(
             build_scheduler_event(

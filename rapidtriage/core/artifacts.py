@@ -3,9 +3,10 @@ from __future__ import annotations
 import contextlib
 import datetime as dt
 import json
+import threading
 import time
-from collections import Counter
-from collections.abc import Callable, Mapping
+from collections import Counter, deque
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 
 from ..artifacts import artifact_collectors, collect_cached, get_artifact_collector
@@ -245,6 +246,114 @@ _STREAM_BUFFER_BYTES = 1 << 20
 CANCEL_CHECK_ROWS = 200
 CANCEL_CHECK_SECONDS = 1.0
 CANCELLED_PARTIAL_STATUS = "cancelled-partial"
+# A cancellable collection runs the provider in its own daemon thread
+# ("rapidtriage-provider-<kind>") so a cancel lands even while the provider
+# is inside one long call: the writer closes and finishes the JSONL with the
+# rows received so far, then waits at most PROVIDER_STOP_GRACE_SECONDS for
+# the provider thread. A provider still inside its call after that is
+# reported (``provider_stop_timeout``) and left behind; it holds none of the
+# run's output files and its later rows are dropped.
+PROVIDER_THREAD_PREFIX = "rapidtriage-provider-"
+PROVIDER_STOP_GRACE_SECONDS = 3.0
+_PUMP_MAX_PENDING = 1024
+_PUMP_LOW_WATER = _PUMP_MAX_PENDING // 2
+_PUMP_WAIT_SECONDS = 0.25
+
+
+class _ProviderPump:
+    """Run ``collector.collect`` in a daemon thread; hand rows over a bounded deque.
+
+    The consumer (the writer) never blocks on the provider for longer than
+    ``_PUMP_WAIT_SECONDS`` without asking ``check_cancel``. The generator is
+    advanced and closed only by the provider thread.
+    """
+
+    def __init__(self, collector: object, root: Path, *, kind: str) -> None:
+        self._collector = collector
+        self._root = root
+        self._items: deque[object] = deque()
+        self._stop = threading.Event()
+        self._ready = threading.Event()
+        self._space = threading.Event()
+        self._consumer_waiting = False
+        self._producer_waiting = False
+        self._done = False
+        self._error: BaseException | None = None
+        self.cancelled = False
+        self.thread = threading.Thread(target=self._produce, name=f"{PROVIDER_THREAD_PREFIX}{kind}", daemon=True)
+
+    def start(self) -> None:
+        self.thread.start()
+
+    def _produce(self) -> None:
+        generator = None
+        try:
+            generator = iter(self._collector.collect(self._root))  # type: ignore[attr-defined]
+            for item in generator:
+                if self._stop.is_set():
+                    break  # cancelled while the provider was inside its call: drop the row
+                self._items.append(item)
+                if self._consumer_waiting:
+                    self._ready.set()
+                while len(self._items) >= _PUMP_MAX_PENDING and not self._stop.is_set():
+                    self._producer_waiting = True
+                    self._space.clear()
+                    if len(self._items) >= _PUMP_MAX_PENDING and not self._stop.is_set():
+                        self._space.wait(_PUMP_WAIT_SECONDS)
+                    self._producer_waiting = False
+        except BaseException as exc:  # handed to the writer thread (isolated failure)
+            self._error = exc
+        finally:
+            if self._stop.is_set() and generator is not None:
+                close = getattr(generator, "close", None)
+                # Cleanup errors of a cancelled provider are not parser errors.
+                with contextlib.suppress(Exception):
+                    if callable(close):
+                        close()
+            self._done = True
+            self._ready.set()
+
+    def iterate(self, check_cancel: Callable[[], bool]) -> Iterator[object]:
+        """Provider rows in order; stops early (``cancelled``) when ``check_cancel`` says so."""
+        items = self._items
+        while True:
+            try:
+                item = items.popleft()
+            except IndexError:
+                if self._done:
+                    if items:
+                        continue
+                    if self._error is not None:
+                        raise self._error
+                    return
+                self._consumer_waiting = True
+                self._ready.clear()
+                if not items and not self._done:
+                    self._ready.wait(_PUMP_WAIT_SECONDS)
+                self._consumer_waiting = False
+                if not items and check_cancel():
+                    self.cancelled = True
+                    return
+                continue
+            if self._producer_waiting and len(items) <= _PUMP_LOW_WATER:
+                self._space.set()
+            yield item
+
+    def request_stop(self) -> None:
+        self._stop.set()
+        self._space.set()
+
+    def stop(self, grace_seconds: float) -> bool:
+        """Ask the provider thread to stop; ``True`` once it has ended within ``grace_seconds``."""
+        self.request_stop()
+        self.thread.join(max(0.0, grace_seconds))
+        return not self.thread.is_alive()
+
+
+def _remove_temp_files(*paths: Path) -> None:
+    for path in paths:
+        with contextlib.suppress(OSError):
+            path.unlink(missing_ok=True)
 
 
 def _shallow_row(item: object) -> object:
@@ -282,7 +391,13 @@ def stream_artifact_collection(
     true the provider generator is closed and passes 2-3 finish the JSONL
     with the rows written so far (``collection_status: cancelled-partial``,
     ``rows_before_cancel``). A cancel is not a parser error. ``on_rows``
-    receives the running row count at the same cadence.
+    receives the running row count at the same cadence. With ``check_cancel``
+    the provider runs in its own thread (:class:`_ProviderPump`), so a cancel
+    also lands while the provider is stuck inside one call: the JSONL is
+    finished and closed right away, the provider thread gets a bounded join
+    (``PROVIDER_STOP_GRACE_SECONDS``) and one that is still running is
+    disclosed as ``provider_stop_timeout``/``provider_thread``. Any failure
+    removes the ``.raw.tmp``/``.tmp`` files instead of leaving them behind.
 
     Pass 1 consumes ``collector.collect`` one row at a time, attaches the
     ArtifactRecordV1 envelope (and rule annotations), feeds the per-type
@@ -314,12 +429,21 @@ def stream_artifact_collection(
     cancelled = False
     next_check = time.monotonic() + CANCEL_CHECK_SECONDS
     generator = None
+    pump: _ProviderPump | None = None
     try:
         with raw_path.open("w", encoding="utf-8", newline="\n", buffering=_STREAM_BUFFER_BYTES) as raw:
-            generator = iter(collector.collect(input_root.root_path))  # type: ignore[attr-defined]
-            if check_cancel is not None and check_cancel():
+            source: Iterator[object] | tuple[()]
+            if check_cancel is None:
+                generator = iter(collector.collect(input_root.root_path))  # type: ignore[attr-defined]
+                source = generator
+            elif check_cancel():
                 cancelled = True
-            for index, item in enumerate(() if cancelled else generator, start=1):
+                source = ()
+            else:
+                pump = _ProviderPump(collector, input_root.root_path, kind=collector_kind)
+                pump.start()
+                source = pump.iterate(check_cancel)
+            for index, item in enumerate(source, start=1):
                 # Rows are serialized and dropped right away and nothing below
                 # mutates nested values, so the provider's details are not copied.
                 row = _shallow_row(item)
@@ -360,6 +484,8 @@ def stream_artifact_collection(
                     if check_cancel is not None and check_cancel():
                         cancelled = True
                         break
+            if pump is not None and pump.cancelled:
+                cancelled = True
         if cancelled and generator is not None:
             close = getattr(generator, "close", None)
             # Cleanup errors of a cancelled provider are not parser errors.
@@ -368,6 +494,8 @@ def stream_artifact_collection(
                     close()
     except Exception as exc:
         cancelled = False
+        if pump is not None:
+            pump.request_stop()  # e.g. the writer failed: the provider must not keep running
         collection_status = "failed-isolated"
         parser_errors.append(
             {
@@ -386,30 +514,50 @@ def stream_artifact_collection(
         builder = StreamingProfileBuilder()
         annotator = StreamingArtifactAnnotator(rule_set) if rule_set is not None else None
         raw_path.write_text("", encoding="utf-8")
-    builder.finish_types()
-    # Pass 2 is read-only (contexts/codes); pass 3 re-applies the type level
-    # and writes the final rows -- cheaper than writing an intermediate file.
-    with raw_path.open("r", encoding="utf-8", buffering=_STREAM_BUFFER_BYTES) as raw:
-        for line in raw:
-            row = json.loads(line)
-            if isinstance(row, dict):
-                builder.strip_type(row)
-                builder.observe_context(row)
-    builder.finish_contexts()
+    except BaseException:
+        # Not an isolated provider failure (e.g. interpreter shutdown): stop
+        # the provider thread and leave no temporary file behind.
+        if pump is not None:
+            pump.request_stop()
+        _remove_temp_files(raw_path, final_tmp)
+        raise
     preview: list[object] = []
-    with raw_path.open("r", encoding="utf-8", buffering=_STREAM_BUFFER_BYTES) as raw, final_tmp.open(
-        "w", encoding="utf-8", newline="\n", buffering=_STREAM_BUFFER_BYTES
-    ) as final:
-        for line in raw:
-            row = json.loads(line)
-            if isinstance(row, dict):
-                builder.strip_type(row)
-                row = builder.strip_context(row)
-            if len(preview) < max(0, preview_limit):
-                preview.append(row)
-            final.write(_dump_row(row) + "\n")
-    raw_path.unlink()
-    final_tmp.replace(records_path)
+    try:
+        builder.finish_types()
+        # Pass 2 is read-only (contexts/codes); pass 3 re-applies the type level
+        # and writes the final rows -- cheaper than writing an intermediate file.
+        with raw_path.open("r", encoding="utf-8", buffering=_STREAM_BUFFER_BYTES) as raw:
+            for line in raw:
+                row = json.loads(line)
+                if isinstance(row, dict):
+                    builder.strip_type(row)
+                    builder.observe_context(row)
+        builder.finish_contexts()
+        with raw_path.open("r", encoding="utf-8", buffering=_STREAM_BUFFER_BYTES) as raw, final_tmp.open(
+            "w", encoding="utf-8", newline="\n", buffering=_STREAM_BUFFER_BYTES
+        ) as final:
+            for line in raw:
+                row = json.loads(line)
+                if isinstance(row, dict):
+                    builder.strip_type(row)
+                    row = builder.strip_context(row)
+                if len(preview) < max(0, preview_limit):
+                    preview.append(row)
+                final.write(_dump_row(row) + "\n")
+        raw_path.unlink()
+        final_tmp.replace(records_path)
+    except BaseException:
+        _remove_temp_files(raw_path, final_tmp)
+        raise
+    # The output files are final and closed; now wait (bounded) for the
+    # provider thread of a cancelled collection.
+    provider_stop: dict[str, object] = {}
+    if pump is not None and not pump.stop(PROVIDER_STOP_GRACE_SECONDS):
+        provider_stop = {
+            "provider_stop_timeout": True,
+            "provider_thread": pump.thread.name,
+            "provider_stop_grace_seconds": PROVIDER_STOP_GRACE_SECONDS,
+        }
 
     payload: dict[str, object] = {
         "command": "artifacts",
@@ -429,6 +577,7 @@ def stream_artifact_collection(
                 else collection_status
             ),
             **({"rows_before_cancel": record_count} if cancelled else {}),
+            **provider_stop,
             **collector_disclosure(collector),
             **skipped_row_summary(skip_reasons),
             "artifact_record_contract_valid_count": valid_count,

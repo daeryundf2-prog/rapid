@@ -195,6 +195,10 @@ function titleOf(kind: string, d: Record<string, unknown>, path: string | null, 
     const file = strOrNull(d.path) ?? strOrNull(d.source_path) ?? path;
     if (file) return baseName(file) || file;
   }
+  if (kind === "ntfs-meta" && d.source === "volume-information") {
+    const serial = strOrNull(d.volume_serial_display) ?? "-";
+    return `NTFS 볼륨 정보 · VSN ${serial} · ${strOrNull(d.volume_label) ?? "레이블 없음"}`;
+  }
   if (kind === "ntfs-meta") {
     const named = firstText(d, ["name", "file_name"]) ?? strOrNull(d.path);
     if (named) return baseName(named) || named;
@@ -216,6 +220,8 @@ function titleOf(kind: string, d: Record<string, unknown>, path: string | null, 
 export const ANALYSIS_SOURCE_FAMILIES: Readonly<Record<string, string>> = {
   "timestamp-mismatch": "ntfs-timestamp-mismatch",
   "logfile-transaction": "ntfs-logfile-transaction",
+  // R6 S2: the ntfs-meta $Boot/$Volume row (same family as the run's 볼륨 정보 rows).
+  "volume-information": "ntfs-volume-information",
 };
 export const ANALYSIS_KIND_FAMILIES: Readonly<Record<string, string>> = {
   carve: "carved-file",
@@ -321,6 +327,25 @@ export function urlCarveHitLength(d: Record<string, unknown>): number | undefine
   return d.encoding === "utf-16le" ? url.length * 2 : url.length;
 }
 
+/** Extensions of a flat (raw / dd) disk image: a media offset is also the file's byte offset. */
+const RAW_IMAGE_EXTENSION = /\.(dd|raw|img|bin)$/i;
+/** Meta note of an image-unallocated hit in a container image (E01/Ex01/split). */
+export const MEDIA_OFFSET_NOTE = "E01 미디어 오프셋 — 파일 위치가 아님";
+
+/**
+ * True when a url-carve `image-unallocated` hit's offset is a media (disk) offset inside a
+ * container image (E01/Ex01/split): opening that file at the offset would show the wrong bytes.
+ * A server flag (`image_format` / `image_media_kind`: "raw" | "ewf" …) wins; else the extension
+ * (.dd/.raw/.img/.bin = raw, anything else = container).
+ */
+export function isContainerMediaOffset(d: Record<string, unknown>, path: string | null): boolean {
+  if (d.source_kind !== "image-unallocated") return false;
+  const flag = strOrNull(d.image_format) ?? strOrNull(d.image_media_kind);
+  if (flag) return flag.toLowerCase() !== "raw";
+  const image = strOrNull(d.source_path) ?? path ?? "";
+  return !RAW_IMAGE_EXTENSION.test(image);
+}
+
 export const analysisCollection: CollectionDef = {
   id: "analysis",
   label: "분석 결과",
@@ -362,7 +387,9 @@ export const analysisCollection: CollectionDef = {
     const offset = typeof d.offset === "number" && d.offset >= 0 ? d.offset : null;
     const length = typeof d.length === "number" && d.length > 0 ? d.length : undefined;
     const urlCarve = kind === "url-carve";
-    const isCarveHit = (kind === "carve" || urlCarve) && offset !== null && path !== null;
+    // An E01 media offset is not a byte position of the .E01 file: metadata only (no hex jump).
+    const mediaOffset = urlCarve && isContainerMediaOffset(d, path);
+    const isCarveHit = (kind === "carve" || urlCarve) && offset !== null && path !== null && !mediaOffset;
     const carvedRow =
       urlCarve ||
       (kind === "carve" && d.status !== "false-positive-rejected" && d.recovery_method !== "rejected");
@@ -383,7 +410,11 @@ export const analysisCollection: CollectionDef = {
         ...(path && (d.is_directory === true || d.directory === true || /[\\/]$/.test(path))
           ? { isDirectory: true }
           : {}),
-        details: volumePath && d.path === undefined ? { ...d, path: volumePath } : d,
+        details: mediaOffset
+          ? { ...d, offset_basis_note: MEDIA_OFFSET_NOTE }
+          : volumePath && d.path === undefined
+            ? { ...d, path: volumePath }
+            : d,
         ...(volumePath ? { volumePath } : {}),
         ...(Array.isArray(raw.flags) ? { flags: raw.flags, flagList: parseFlags(raw.flags) } : {}),
         ...(isCarveHit

@@ -173,8 +173,13 @@ class PlanConstructionTests(unittest.TestCase):
             self.assertEqual(find_task(plan, "report")["skippable"], False)
         hacking = build_run_plan(mode="hacking")
         self.assertEqual(hacking["counts"]["tasks"]["total"], len(builtin_provider_kinds()) + 14)
+        # R6 S1 Q-S1-4: p2p runs in the web group for investigative modes.
+        for mode in ("seizure", "fraud", "hacking"):
+            p2p_task = find_task(build_run_plan(mode=mode), "p2p")
+            self.assertEqual(p2p_task["group"], "web", mode)
+            self.assertEqual(p2p_task["status"], "queued", mode)
         recovery = build_run_plan(mode="recovery")
-        for kind in ("browser", "windows-execution", "windows-system"):
+        for kind in ("browser", "p2p", "windows-execution", "windows-system"):
             self.assertEqual(find_task(recovery, kind)["group"], "manifest", kind)
         manifest_tasks = [task["id"] for task in recovery["groups"][[g["id"] for g in recovery["groups"]].index("manifest")]["tasks"]]
         self.assertEqual(manifest_tasks[-1], "manifest")
@@ -423,6 +428,76 @@ class RunControlPipelineTests(unittest.TestCase):
         report = (self.output_dir / "rapidtriage-run-report.md").read_text(encoding="utf-8")
         self.assertIn("모두 취소", report)
 
+    def test_cancel_all_with_provider_stuck_in_a_call_closes_writers_and_reports_it(self) -> None:
+        # The provider yields one row, then sits inside a long call (a parser
+        # library that never yields). Cancel arrives through the control file
+        # (web jobs.cancel / store.control path); the run must still end
+        # promptly with every output file closed (Windows: renamable) and the
+        # stuck provider thread reported, not joined forever.
+        entered = threading.Event()
+        release = threading.Event()
+
+        class StuckCollector(SlowCollector):
+            def collect(self, root: Path) -> Iterator[ArtifactRecord]:
+                rows = super().collect(root)
+                yield next(rows)
+                entered.set()
+                release.wait(120)
+                yield from rows
+
+        real = core_artifacts.get_artifact_collector
+
+        def fake(name: str):
+            return StuckCollector("eventlog", 5) if name.strip().lower() == "eventlog" else real(name)
+
+        def cancel_when_stuck() -> None:
+            if wait_for(lambda: entered.is_set() and (plan_task(self.output_dir, "eventlog") or {}).get("status") == "running"):
+                append_control_request(self.output_dir, "cancel_all", (), actor="web")
+
+        trigger = threading.Thread(target=cancel_when_stuck, daemon=True)
+        try:
+            with mock.patch.object(core_artifacts, "get_artifact_collector", side_effect=fake), mock.patch.object(
+                run_module, "artifact_scheduler_workers", return_value=1
+            ), mock.patch.object(core_artifacts, "PROVIDER_STOP_GRACE_SECONDS", 0.5):
+                trigger.start()
+                started = time.monotonic()
+                summary = run_triage_mode(self.root, mode="hacking", output_dir=self.output_dir)
+                elapsed = time.monotonic() - started
+            trigger.join(5)
+            self.assertLess(elapsed, 60.0)
+            plan = summary["plan"]
+            self.assertEqual(plan["outcome"], "cancelled")
+            task = find_task(plan, "eventlog")
+            self.assertEqual(task["status"], "partial")
+            self.assertEqual(task["artifact_count"], 1)
+            self.assertEqual(task["provider_thread_left_running"], "rapidtriage-provider-eventlog")
+            self.assertEqual(plan["stuck_providers"], [{"task": "eventlog", "thread": "rapidtriage-provider-eventlog"}])
+            payload = load_json(self.output_dir / "artifacts" / "rapidtriage-artifacts-eventlog.json")
+            self.assertTrue(payload["summary"]["provider_stop_timeout"])
+            self.assertEqual(payload["summary"]["rows_before_cancel"], 1)
+            # No run worker is left; only the reported stuck provider thread.
+            names = [thread.name for thread in threading.enumerate()]
+            self.assertFalse([name for name in names if name.startswith(("rapidtriage-artifact", "rapidtriage-manifest"))], names)
+            self.assertEqual([name for name in names if name.startswith("rapidtriage-provider-")], ["rapidtriage-provider-eventlog"])
+            # Every output file is closed: no temp leftovers, and each file can be
+            # renamed (fails with WinError 32 while any handle is open on Windows).
+            self.assertEqual(sorted(self.output_dir.rglob("*.tmp")), [])
+            jsonl = self.output_dir / "artifacts" / "rapidtriage-artifacts-eventlog.jsonl"
+            jsonl_bytes = jsonl.read_bytes()
+            for path in [item for item in self.output_dir.rglob("*") if item.is_file()]:
+                moved = path.with_name(path.name + ".moved")
+                os.rename(path, moved)
+                os.rename(moved, path)
+        finally:
+            release.set()
+        stuck = [thread for thread in threading.enumerate() if thread.name == "rapidtriage-provider-eventlog"]
+        for thread in stuck:
+            thread.join(10)
+            self.assertFalse(thread.is_alive())
+        # The released provider's later rows are dropped; nothing is rewritten.
+        self.assertEqual(jsonl.read_bytes(), jsonl_bytes)
+        self.assertEqual(sorted(self.output_dir.rglob("*.tmp")), [])
+
     def test_finish_cancels_queued_providers_and_finishes_later_stages(self) -> None:
         with slow_provider(rows=2500):
             thread = control_when_running(self.output_dir, "eventlog", "finish", actor="web")
@@ -664,8 +739,14 @@ class RunPlanCliTests(unittest.TestCase):
             kwargs: dict = {}
             if sys.platform == "win32":
                 kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+            # synthetic-media is skipped: with the optional deepfake_lens installed
+            # its analysis of the fixture images takes minutes, and the plugin
+            # provider (manifest stage) only starts after the artifacts stage.
             process = subprocess.Popen(
-                [sys.executable, "-m", "rapidtriage", "run", str(root), "--mode", "hacking", "--output-dir", str(output_dir)],
+                [
+                    sys.executable, "-m", "rapidtriage", "run", str(root), "--mode", "hacking",
+                    "--output-dir", str(output_dir), "--skip-task", "synthetic-media",
+                ],
                 cwd=str(REPO_ROOT),
                 env=env,
                 stdout=subprocess.PIPE,
@@ -683,7 +764,16 @@ class RunPlanCliTests(unittest.TestCase):
             finally:
                 if process.poll() is None:
                     process.kill()
+                # Reap the process before the temp dir is removed: on Windows its
+                # open handles block the cleanup until it has really exited.
+                process.wait(60)
             self.assertEqual(process.returncode, 130, stderr.decode("utf-8", "replace")[-2000:])
+            # Nothing of the run is left open or half-written once the CLI returned.
+            self.assertEqual(sorted(output_dir.rglob("*.tmp")), [])
+            for path in [item for item in output_dir.rglob("*") if item.is_file()]:
+                moved = path.with_name(path.name + ".moved")
+                os.rename(path, moved)
+                os.rename(moved, path)
             plan = load_json(output_dir / PLAN_FILE_NAME)
             self.assertEqual(plan["outcome"], "cancelled")
             self.assertEqual(find_task(plan, "slow-test")["status"], "partial")
@@ -691,6 +781,7 @@ class RunPlanCliTests(unittest.TestCase):
             self.assertTrue((output_dir / "rapidtriage-run-summary.json").is_file())
             self.assertTrue((output_dir / "rapidtriage-run-audit.json").is_file())
             self.assertIn(b"Saved run summary JSON", stdout)
+            self.assertNotIn("stuck_providers", plan)
 
 
 if __name__ == "__main__":

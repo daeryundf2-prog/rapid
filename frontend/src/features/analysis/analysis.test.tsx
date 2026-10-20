@@ -587,3 +587,24 @@ describe("backend contract details", () => {
     expect(buildViewerTarget(RUN, row).sourcePath).toBeNull();
   });
 });
+
+describe("R6 S2 console review: url-carve image options", () => {
+  it("puts the partition_start_sector error on that field (aria-invalid / describedby)", async () => {
+    setRun();
+    setRoute(`#/case/${RUN}/process/url-carve`);
+    installFetch({ "/analyses": () => jsonResponse({ analyses: [] }) });
+    renderWithClient(<AnalysisDialog kind="url-carve" runId={RUN} onClose={() => undefined} />);
+    const sector = screen.getByLabelText("파티션 시작 섹터");
+    fireEvent.change(sector, { target: { value: "2048" } });
+    const submit = screen.getByTestId("analysis-submit");
+    fireEvent.mouseDown(submit);
+    fireEvent.click(submit);
+    const message = await screen.findByText(
+      "파티션 시작 섹터: 소스 종류에서 '이미지 미할당 영역'을 고를 때만 씁니다.",
+      { selector: "p" },
+    );
+    expect(sector.getAttribute("aria-describedby")).toContain(message.id);
+    expect(sector.getAttribute("aria-invalid")).toBe("true");
+    expect(screen.getByLabelText("디스크 이미지").getAttribute("aria-invalid")).not.toBe("true");
+  });
+});

@@ -190,7 +190,12 @@ describe("dialog bounds mirror the backend Field limits (3)", () => {
     "memory-import": {},
     "cross-case": { max_shared: [1, 5000, "500"] },
     // R5 L3 UrlCarveOptions: max_scan_bytes le=64 GiB (default 4 GiB), max_candidates le=500,000.
-    "url-carve": { max_scan_bytes: [1, 64 * 1024, "4096"], max_candidates: [1, 500_000, "50000"] },
+    // R6 S2: partition_start_sector ge=0, optional (image-unallocated only).
+    "url-carve": {
+      max_scan_bytes: [1, 64 * 1024, "4096"],
+      max_candidates: [1, 500_000, "50000"],
+      partition_start_sector: [0, undefined, ""],
+    },
   };
 
   it("every int field's bounds and default equal the backend Field; never '0 = unlimited'", () => {

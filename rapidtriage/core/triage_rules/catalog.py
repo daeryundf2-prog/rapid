@@ -56,8 +56,9 @@ SEMANTIC_TAGS = frozenset(
     }
 )
 # Display-only columns the console computes from the row's own fields (no stored value):
-# event-log summary sentence, RDP direction, image EXIF state, account auto-logon (plan §3.2).
-DERIVE_IDS = frozenset({"event_summary_ko", "rdp_direction", "exif_status", "auto_logon"})
+# event-log summary sentence, RDP direction, image EXIF state, account auto-logon (plan §3.2),
+# antivirus 조치 (classified label, or the raw AhnLab DB value labelled as unclassified; R6 S2).
+DERIVE_IDS = frozenset({"event_summary_ko", "rdp_direction", "exif_status", "auto_logon", "av_action"})
 
 
 class CatalogError(ValueError):
