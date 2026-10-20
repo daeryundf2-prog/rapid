@@ -619,6 +619,24 @@ def run_triage_mode(
 RUN_MAX_INDICATORS: int | None = None
 
 
+def write_timeline_condition_index(payload: Mapping[str, object], timeline_path: Path) -> Path | None:
+    """R6 S3: the timeline column index next to a just-written timeline
+    (``rapidtriage-timeline-index.bin``; ``api.app.timeline_index``) so the console's first
+    conditioned timeline page reads it instead of parsing every event. Best effort: without the
+    web extra, or on any failure, the API builds it on the first conditioned request instead."""
+    events = payload.get("events")
+    if not isinstance(events, list):
+        return None
+    try:
+        from ...api.app.timeline_index import write_timeline_index
+    except ImportError:
+        return None
+    try:
+        return write_timeline_index(events, timeline_path)
+    except Exception:  # an index is an optimisation, never a run failure
+        return None
+
+
 def timeline_reference_time(
     fingerprint: Mapping[str, object],
     run_started_at: dt.datetime,
@@ -1232,6 +1250,7 @@ def _run_triage_stages(
         plan_reason=timeline_planned[1] if timeline_planned else None,
     )
     write_timeline_result(timeline_payload, timeline_path)
+    write_timeline_condition_index(timeline_payload, timeline_path)
     timeline_report_path.write_text(build_timeline_report(timeline_payload), encoding="utf-8")
     finish_stage("timeline")
 

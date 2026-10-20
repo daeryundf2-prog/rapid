@@ -118,6 +118,7 @@ from .runops import (
 )
 from .search_index_service import search_index_available
 from .timeline_hist import build_timeline_histogram
+from .timeline_index import timeline_positions
 from .tree import build_run_issues, build_run_tree, live_run_block
 from .triage_flags import (
     FlagQuery,
@@ -577,7 +578,9 @@ def build_runs_router(
         ``record_index`` (its position in ``events``) and the page reports ``matched``,
         ``record_count`` and ``pagination.conditions``. A bad value is a Korean 422; so is ``geo``
         (events carry no coordinates). The matching positions are cached per (timeline revision,
-        conditions) so later pages do not rescan the events (``row_conditions.MATCH_CACHE``).
+        conditions) so later pages do not rescan the events (``row_conditions.MATCH_CACHE``); the
+        first page reads the run's timeline column index (``timeline_index``, saved next to the
+        timeline as ``rapidtriage-timeline-index.bin``) instead of parsing every event.
         """
         reject_geo(geo)
         conditions = row_conditions_or_422(
@@ -595,6 +598,8 @@ def build_runs_router(
             return paginate_payload(payload, "events", offset=offset, limit=limit, cursor=cursor)
         if limit <= 0:
             raise HTTPException(status_code=400, detail=FILTER_LIMIT_MESSAGE)
+        timeline_path = get_output_path(store, run_id, "timeline")
+        stamp = output_stamp(timeline_path)
         events = payload.get("events") if isinstance(payload.get("events"), list) else []
         rows, pagination = filter_rows_page(
             events,
@@ -602,7 +607,9 @@ def build_runs_router(
             collection="events",
             offset=offset,
             limit=limit,
-            cache_key=("timeline", run_id, output_stamp(get_output_path(store, run_id, "timeline")), conditions.cache_key()),
+            cache_key=("timeline", run_id, stamp, conditions.cache_key()),
+            # R6 S3: positions from the run's timeline column index (same set as the predicate).
+            compute=timeline_positions(run_id, timeline_path, events, conditions, stamp),
         )
         pagination["conditions"] = conditions.describe()
         page = {key: value for key, value in payload.items() if key != "events"}

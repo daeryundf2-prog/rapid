@@ -812,12 +812,18 @@ def filter_rows_page(
     offset: int,
     limit: int,
     cache_key: tuple[object, ...] | None = None,
+    compute: Callable[[], Iterable[int]] | None = None,
 ) -> tuple[list[object], dict[str, object]]:
     """Rows of an in-memory list passing ``predicate`` -> ``(page rows with record_index, pagination)``.
 
     ``record_index`` is the row's position in ``rows``; ``matched`` is exact (the list is scanned
-    to the end once per ``cache_key``: later pages reuse the matched positions, :data:`MATCH_CACHE`)."""
-    indices = matched_indices(rows, predicate, cache_key)
+    to the end once per ``cache_key``: later pages reuse the matched positions, :data:`MATCH_CACHE`).
+    ``compute`` (the timeline column index, ``timeline_index``) yields the same positions as the
+    ``predicate`` scan without it."""
+    if compute is not None:
+        indices = MATCH_CACHE.get_or_compute(cache_key, compute)
+    else:
+        indices = matched_indices(rows, predicate, cache_key)
     matched = len(indices)
     window = indices[offset : offset + limit] if limit > 0 else indices[offset:]
     page: list[object] = [{**rows[index], "record_index": index} for index in window]  # type: ignore[dict-item]
