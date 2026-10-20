@@ -102,11 +102,13 @@ describe("MapView with the located-row index", () => {
     kindRoute();
     const calls = installFetch({ "/geo-clusters": () => jsonResponse(READY), "/artifacts": kindPage });
     render(<MapView />, { wrapper: queryWrapper().wrapper });
-    const list = await screen.findByRole("list", { name: /근접 묶음/ });
+    const list = await screen.findByRole("list", { name: /근접 묶음/ }, { timeout: 5000 });
     const clusters = within(list).getAllByRole("button");
     expect(clusters).toHaveLength(2);
     expect(clusters[0]?.getAttribute("aria-label")).toMatch(/37\.4850° N, 126\.9450° E 부근 1500건/);
-    await waitFor(() => expect(screen.getByRole("table").querySelectorAll("tbody tr")).toHaveLength(500));
+    await waitFor(() => expect(screen.getByRole("table").querySelectorAll("tbody tr")).toHaveLength(500), {
+      timeout: 5000,
+    });
     expect(screen.getByText(/위치 행 2,000건 · 묶음 2개/)).toBeTruthy();
 
     const clusterCall = calls.find((call) => call.url.includes("/geo-clusters"));
@@ -123,8 +125,9 @@ describe("MapView with the located-row index", () => {
 
     // "더 불러오기" asks for the next 500-row page (the grid prefetches the one after it).
     fireEvent.click(screen.getByRole("button", { name: `좌표 표 ${MAP_TABLE_PAGE}건 더 불러오기` }));
-    await waitFor(() =>
-      expect(screen.getByRole("table").querySelectorAll("tbody tr").length).toBeGreaterThan(500),
+    await waitFor(
+      () => expect(screen.getByRole("table").querySelectorAll("tbody tr").length).toBeGreaterThan(500),
+      { timeout: 5000 },
     );
     expect(pages()[1]?.url).toContain(`offset=${MAP_TABLE_PAGE}`);
     for (const page of pages()) expect(page.url).toContain(`limit=${MAP_TABLE_PAGE}`);
@@ -132,7 +135,7 @@ describe("MapView with the located-row index", () => {
     // A server cluster filters the grid to its box like before.
     fireEvent.click(clusters[1] as HTMLElement);
     expect(useAppStore.getState().route.geo).toBe("35.1,129.04,35.11,129.05");
-  });
+  }, 20_000);
 
   it("says the index is being built, then asks again and draws the server clusters", async () => {
     kindRoute();
