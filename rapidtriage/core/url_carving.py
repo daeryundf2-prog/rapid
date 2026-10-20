@@ -13,6 +13,14 @@ kept with the number of hits in that source. Each candidate carries the 통합 �
 its host (``core.derived.url_classes``) and, for a map URL, its coordinates
 (``core.derived.map_urls``).
 
+Zero spans (R6 S3): runs of at least ``ZERO_SPAN_MIN`` zero bytes are not handed to the regex
+scans (wiped free space is mostly zeros and the two scans cost about 10 ms per MiB of zeros). No
+URL match can contain two consecutive zero bytes -- ASCII URLs hold no zero at all and a UTF-16LE
+match alternates a printable byte with ``0x00`` and only ends on a ``0x00`` -- so cutting the
+scan at any run of zeros (keeping the run's first zero byte for a UTF-16LE match that ends there)
+finds exactly the matches of the whole window, at the same offsets. The skipped bytes are counted
+in ``UrlCarveState.zero_bytes_skipped``; they were still read and count toward the read budget.
+
 Results are *candidates*: a URL string in the page file or free space says the string was in
 memory or on disk at some time, not that the page was visited (hiberfil.sys is compressed and is
 not scanned).
@@ -37,6 +45,12 @@ MIN_URL_TAIL = 4
 ASCII_URL = re.compile(rb"https?://[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]{4,2048}", re.IGNORECASE)
 UTF16_URL = re.compile(rb"h\x00t\x00t\x00p\x00(?:s\x00)?:\x00/\x00/\x00(?:[\x21-\x7e]\x00){4,2048}", re.IGNORECASE)
 TRAILING = ".,;:!?)]}'\"*"
+# A zero run this long is skipped (shorter runs -- the zero bytes of UTF-16LE text, padding -- are
+# scanned as usual). ``_ZERO_BIG`` is the stride used to walk a long run.
+ZERO_SPAN_MIN = 4 * 1024
+_ZERO_SPAN = bytes(ZERO_SPAN_MIN)
+_ZERO_BIG_BYTES = 1024 * 1024
+_ZERO_BIG = bytes(_ZERO_BIG_BYTES)
 HOST_LABEL = re.compile(r"^[a-z0-9-]{1,63}$")
 TLD = re.compile(r"^[a-z]{2,24}$|^xn--[a-z0-9-]{2,59}$")
 SOURCE_KINDS = ("pagefile", "unallocated", "memory-dump", "image-unallocated")
@@ -98,6 +112,9 @@ class UrlCarveState:
         self.max_candidates = max_candidates
         self.seen: set[tuple[str, str]] = set()
         self.capped = False
+        # Bytes of zero runs (>= ``ZERO_SPAN_MIN``) not handed to the regex scans (R6 S3); every
+        # source byte is counted at most once (window overlaps are not double-counted).
+        self.zero_bytes_skipped = 0
 
     def full(self) -> bool:
         return len(self.seen) >= self.max_candidates
@@ -105,6 +122,46 @@ class UrlCarveState:
 
 def _patterns(ascii_urls: bool, utf16_urls: bool) -> list[tuple[re.Pattern[bytes], str]]:
     return [(pattern, encoding) for pattern, encoding, wanted in ((ASCII_URL, "ascii", ascii_urls), (UTF16_URL, "utf-16le", utf16_urls)) if wanted]
+
+
+def _zero_run_end(window: bytes, start: int) -> int:
+    """End of the zero run that begins at ``start`` (``window[start:start + ZERO_SPAN_MIN]`` is zero)."""
+    size = len(window)
+    position = start + ZERO_SPAN_MIN
+    while position + _ZERO_BIG_BYTES <= size and window[position : position + _ZERO_BIG_BYTES] == _ZERO_BIG:
+        position += _ZERO_BIG_BYTES
+    while position + ZERO_SPAN_MIN <= size and window[position : position + ZERO_SPAN_MIN] == _ZERO_SPAN:
+        position += ZERO_SPAN_MIN
+    rest = window[position : position + ZERO_SPAN_MIN]
+    return position + len(rest) - len(rest.lstrip(b"\x00"))
+
+
+def nonzero_segments(window: bytes, cutoff: int) -> tuple[list[tuple[int, int]], int]:
+    """``([(start, end), ...], zero bytes skipped before cutoff)``: the parts of ``window`` the regex
+    scans must see. A zero run of ``ZERO_SPAN_MIN`` bytes or more is dropped except its first byte
+    (the ``0x00`` a UTF-16LE match may end on). Segments starting at or after ``cutoff`` are left
+    to the next window; the skipped count covers ``window[:cutoff]`` only so an overlap is never
+    counted twice."""
+    size = len(window)
+    if not size:
+        return [], 0
+    if window[:ZERO_SPAN_MIN] == _ZERO_SPAN[: min(size, ZERO_SPAN_MIN)] and window.count(0) == size:
+        # The common case on wiped free space: the whole window is zeros.
+        return ([], min(cutoff, size)) if size >= ZERO_SPAN_MIN else ([(0, size)], 0)
+    segments: list[tuple[int, int]] = []
+    position = 0
+    while position < size and position < cutoff:
+        run = window.find(_ZERO_SPAN, position)
+        if run < 0:
+            segments.append((position, size))
+            break
+        if run > position:
+            # Keep the run's first zero byte: a UTF-16LE match may end on it.
+            segments.append((position, run + 1))
+        position = _zero_run_end(window, run)
+    limit = min(cutoff, size)
+    scanned = sum(max(0, min(end, limit) - start) for start, end in segments)
+    return segments, limit - scanned
 
 
 def _scan_window(
@@ -116,13 +173,21 @@ def _scan_window(
     state: UrlCarveState,
 ) -> None:
     """Matches of ``window`` starting before ``cutoff`` (the rest belongs to the next window);
-    ``base`` is the offset of ``window[0]`` in the source."""
+    ``base`` is the offset of ``window[0]`` in the source. Zero runs are skipped
+    (``nonzero_segments``) without changing which matches are found or their offsets."""
+    segments, skipped = nonzero_segments(window, cutoff)
+    state.zero_bytes_skipped += skipped
+    # Pattern-major order as before the zero skip, so de-duplication and the candidate cap see
+    # the matches in the same order.
     for pattern, encoding in patterns:
-        for match in pattern.finditer(window):
-            if match.start() >= cutoff:
+        for start, end in segments:
+            if start >= cutoff:
                 break
-            text = match.group(0).decode("ascii" if encoding == "ascii" else "utf-16-le", errors="replace")
-            _add(found, state, text, encoding, base + match.start())
+            for match in pattern.finditer(window, start, end):
+                if match.start() >= cutoff:
+                    break
+                text = match.group(0).decode("ascii" if encoding == "ascii" else "utf-16-le", errors="replace")
+                _add(found, state, text, encoding, base + match.start())
 
 
 def scan_url_source(
