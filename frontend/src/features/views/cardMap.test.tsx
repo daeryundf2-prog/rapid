@@ -7,6 +7,7 @@ import type { GridRow } from "../../contracts/collection";
 import { KEY_MAP } from "../../contracts/command";
 import { parseHash, serializeRoute } from "../../router";
 import { resetAppStore, useAppStore } from "../../state/store";
+import { inGeoBox, parseGeo } from "../filters/conditionValues";
 import { useGridLocalStore } from "../grid/adapter";
 import {
   filesHandler,
@@ -18,7 +19,15 @@ import {
 } from "../grid/testSupport";
 import { VIEW_DEFS, viewAvailability, viewDisabledReason } from "./availability";
 import { CARD_HEIGHT, CardView, cardAccessibleName, cardModel } from "./CardView";
-import { CLUSTER_CELL_DEGREES, clusterRows, formatCoordinates, geoRows, rowCoordinates } from "./geo";
+import {
+  CLUSTER_CELL_DEGREES,
+  cellEdge,
+  cellOf,
+  clusterRows,
+  formatCoordinates,
+  geoRows,
+  rowCoordinates,
+} from "./geo";
 import { MAP_POLICY_NOTE, MapView } from "./MapView";
 
 let restoreLayout: () => void = () => {};
@@ -213,6 +222,80 @@ describe("geo model", () => {
     expect(top?.box).toBe("37.48,126.94,37.49,126.95");
     expect(top?.first).toBe("2021-10-27T07:00:00Z");
     expect(top?.last).toBe("2021-10-28T07:01:19Z");
+  });
+
+  it("uses the server cell rule (geo_index.cell_edge / cell_of): each box holds exactly its rows", () => {
+    // Reference of the documented rule at 0.01°: edge(i) = round6(i * 0.01), exactly -limit for the
+    // first cell and limit past the last; a value goes to the cell whose half-open box holds it,
+    // limit itself in the last cell. Brute force over every cell, independent of `cellOf`.
+    const refEdge = (index: number, limit: number) => {
+      const last = Math.round(limit / 0.01) - 1;
+      if (index <= -last - 1) return -limit;
+      if (index > last) return limit;
+      return Math.round(index * 0.01 * 1e6) / 1e6;
+    };
+    const refCell = (value: number, limit: number) => {
+      const last = Math.round(limit / 0.01) - 1;
+      for (let index = -last - 1; index <= last; index += 1) {
+        const high = refEdge(index + 1, limit);
+        if (value >= refEdge(index, limit) && (value < high || (index === last && value <= high)))
+          return index;
+      }
+      throw new Error(`no cell for ${value}`);
+    };
+    const points: [string, number, number][] = [
+      ["n-edge", 89.9995, 179.9999],
+      ["s-edge", -89.9995, -180],
+      ["just-below-cell", 0.0099999999995, -0.005],
+      ["world-corner", 90, 180],
+      ["seoul", 37.48, 126.94],
+      ["neg-lat", -0.005, 179.9999],
+      ["lat-0.01", 0.01, -180],
+    ];
+    // Values printed by rapidtriage.api.app.geo_index (cell_of / cell_edge / _number_text).
+    const serverBoxes: Record<string, string> = {
+      "n-edge": "89.99,179.99,90,180",
+      "s-edge": "-90,-180,-89.99,-179.99",
+      "just-below-cell": "0,-0.01,0.01,0",
+      "world-corner": "89.99,179.99,90,180",
+      seoul: "37.48,126.94,37.49,126.95",
+      "neg-lat": "-0.01,179.99,0,180",
+      "lat-0.01": "0.01,-180,0.02,-179.99",
+    };
+    const rows = points.map(([key, lat, lon]) => located(key, lat, lon));
+    const clusters = clusterRows(geoRows(rows));
+    for (const [key, lat, lon] of points) {
+      const latCell = refCell(lat, 90);
+      const lonCell = refCell(lon, 180);
+      expect(cellOf(lat, 90)).toBe(latCell);
+      expect(cellOf(lon, 180)).toBe(lonCell);
+      const cluster = clusters.find((item) => item.rows.some((r) => r.rowKey === key));
+      expect(cluster?.id).toBe(`${latCell}:${lonCell}`);
+      const expected = [
+        refEdge(latCell, 90),
+        refEdge(lonCell, 180),
+        refEdge(latCell + 1, 90),
+        refEdge(lonCell + 1, 180),
+      ];
+      expect(cluster?.box).toBe(expected.join(","));
+      expect(cluster?.box).toBe(serverBoxes[key]);
+    }
+    expect(cellEdge(-9000, 90)).toBe(-90);
+    expect(cellEdge(9000, 90)).toBe(90);
+    expect(cellEdge(18000, 180)).toBe(180);
+    // Every cluster's geo= box holds exactly its own rows under the client in-box check.
+    for (const cluster of clusters) {
+      const box = parseGeo(cluster.box);
+      expect(box).not.toBeNull();
+      const inside = rows
+        .filter((r) => {
+          const point = rowCoordinates(r);
+          return point !== null && inGeoBox(point, box as [number, number, number, number]);
+        })
+        .map((r) => r.rowKey)
+        .sort();
+      expect(inside).toEqual(cluster.rows.map((r) => r.rowKey).sort());
+    }
   });
 });
 

@@ -98,31 +98,49 @@ export function geoRows(rows: readonly GridRow[]): GeoRow[] {
   return out;
 }
 
+/** `Math.round(value * 1e6) / 1e6` (server `geo_index._js_round6`). */
 const round = (value: number) => Math.round(value * 1e6) / 1e6;
 
+const lastCell = (limit: number, cell: number) => Math.round(limit / cell) - 1;
+
 /**
- * Cell index of a coordinate (floor on the 0.01° grid; a tiny epsilon keeps 37.48 in cell 3748),
- * clamped so the box never passes the world edge: 90° / 180° fall in the last cell, whose upper
- * edge the server's half-open box includes (`row_conditions.in_geo_box`).
+ * Lower edge of cell `index` (the upper edge of `index - 1`), server `geo_index.cell_edge`:
+ * `round6(index * cell)`, exactly `-limit` for the first cell and `limit` past the last
+ * (clamped) one.
  */
-function cell(value: number, limit: number): number {
-  const last = Math.round(limit / CLUSTER_CELL_DEGREES) - 1;
-  return Math.max(-last - 1, Math.min(last, Math.floor(value / CLUSTER_CELL_DEGREES + 1e-9)));
+export function cellEdge(index: number, limit: number, cell = CLUSTER_CELL_DEGREES): number {
+  const last = lastCell(limit, cell);
+  if (index <= -last - 1) return -limit;
+  if (index > last) return limit;
+  return round(index * cell);
+}
+
+/**
+ * Grid cell index of a coordinate, server `geo_index.cell_of`: the cell whose half-open box
+ * `[edge(i), edge(i + 1))` holds it (`limit` itself in the last cell, whose upper edge the
+ * half-open box includes — `row_conditions.in_geo_box`), clamped to the first / last cell.
+ */
+export function cellOf(value: number, limit: number, cell = CLUSTER_CELL_DEGREES): number {
+  const last = lastCell(limit, cell);
+  let index = Math.max(-last - 1, Math.min(last, Math.floor(value / cell)));
+  while (index > -last - 1 && value < cellEdge(index, limit, cell)) index -= 1;
+  while (index < last && value >= cellEdge(index + 1, limit, cell)) index += 1;
+  return index;
 }
 
 /** Proximity clusters: rows grouped by their 0.01° grid cell, most rows first. */
 export function clusterRows(rows: readonly GeoRow[]): GeoCluster[] {
   const byCell = new Map<string, GeoCluster>();
   for (const item of rows) {
-    const latCell = cell(item.lat, 90);
-    const lonCell = cell(item.lon, 180);
+    const latCell = cellOf(item.lat, 90);
+    const lonCell = cellOf(item.lon, 180);
     const id = `${latCell}:${lonCell}`;
     let cluster = byCell.get(id);
     if (!cluster) {
-      const lat0 = round(latCell * CLUSTER_CELL_DEGREES);
-      const lon0 = round(lonCell * CLUSTER_CELL_DEGREES);
-      const lat1 = round(lat0 + CLUSTER_CELL_DEGREES);
-      const lon1 = round(lon0 + CLUSTER_CELL_DEGREES);
+      const lat0 = cellEdge(latCell, 90);
+      const lon0 = cellEdge(lonCell, 180);
+      const lat1 = cellEdge(latCell + 1, 90);
+      const lon1 = cellEdge(lonCell + 1, 180);
       cluster = {
         id,
         box: `${lat0},${lon0},${lat1},${lon1}`,
