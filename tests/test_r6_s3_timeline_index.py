@@ -19,6 +19,7 @@ try:
     from fastapi.testclient import TestClient
 
     from rapidtriage.api.app import create_app, timeline_index
+    from rapidtriage.api.app.index_cache import head_tail_digest
     from rapidtriage.api.app.row_conditions import MATCH_CACHE, parse_row_conditions
     from rapidtriage.api.app.timeline_index import (
         INDEX_FILE_NAME,
@@ -302,7 +303,7 @@ class TimelineIndexFileTests(unittest.TestCase):
     def test_written_index_round_trips(self) -> None:
         written = write_timeline_index(self.events, self.timeline)
         self.assertEqual(written, self.timeline.with_name(INDEX_FILE_NAME))
-        loaded = load_index(index_path_for(self.timeline), self.stamp(), len(self.events))
+        loaded = load_index(index_path_for(self.timeline), self.stamp(), len(self.events), head_tail_digest(self.timeline))
         assert loaded is not None
         built = build_timeline_index(self.events)
         self.assertEqual(loaded.source, "file")
@@ -317,22 +318,22 @@ class TimelineIndexFileTests(unittest.TestCase):
         index_file = index_path_for(self.timeline)
         # Rewritten timeline (size / mtime change): the old file no longer applies.
         self.timeline.write_text(json.dumps({"events": self.events[:-1]}), encoding="utf-8")
-        self.assertIsNone(load_index(index_file, self.stamp(), len(self.events) - 1))
+        self.assertIsNone(load_index(index_file, self.stamp(), len(self.events) - 1, head_tail_digest(self.timeline)))
         reopened = open_index(self.timeline, len(self.events) - 1)
         self.assertEqual((reopened.source, reopened.epoch_us), ("built", None))
         # Restore the matching revision, then damage the file in different ways.
         self.timeline.write_text(json.dumps({"events": self.events}), encoding="utf-8")
         write_timeline_index(self.events, self.timeline)
         good = index_file.read_bytes()
-        self.assertIsNotNone(load_index(index_file, self.stamp(), len(self.events)))
-        self.assertIsNone(load_index(index_file, self.stamp(), len(self.events) + 1))
+        self.assertIsNotNone(load_index(index_file, self.stamp(), len(self.events), head_tail_digest(self.timeline)))
+        self.assertIsNone(load_index(index_file, self.stamp(), len(self.events) + 1, head_tail_digest(self.timeline)))
         for damaged in (b"", b"XXXXXXXX" + good[8:], good[:-1], good + b"\0", good.replace(b'"rules":"', b'"rules":"0', 1)):
             index_file.write_bytes(damaged)
             with self.subTest(size=len(damaged)):
-                self.assertIsNone(load_index(index_file, self.stamp(), len(self.events)))
+                self.assertIsNone(load_index(index_file, self.stamp(), len(self.events), head_tail_digest(self.timeline)))
         index_file.write_bytes(good)
         with mock.patch.object(timeline_index, "RULES_FINGERPRINT", "changed-rules"):
-            self.assertIsNone(load_index(index_file, self.stamp(), len(self.events)))
+            self.assertIsNone(load_index(index_file, self.stamp(), len(self.events), head_tail_digest(self.timeline)))
 
     def test_unwritable_folder_keeps_the_index_in_memory(self) -> None:
         with mock.patch.object(Path, "open", side_effect=PermissionError("read-only")):
@@ -433,7 +434,7 @@ class TimelineIndexApiTests(unittest.TestCase):
         self.timeline.write_text(json.dumps({"events": self.events}), encoding="utf-8")
         self.assertEqual(self.all_matches("partial=1"), self.expected(partial=True))
         self.assertNotEqual(index_file.read_bytes(), before)
-        loaded = load_index(index_file, (self.timeline.stat().st_size, self.timeline.stat().st_mtime_ns), 1000)
+        loaded = load_index(index_file, (self.timeline.stat().st_size, self.timeline.stat().st_mtime_ns), 1000, head_tail_digest(self.timeline))
         self.assertIsNotNone(loaded)
 
     def test_read_only_output_folder_answers_from_memory(self) -> None:

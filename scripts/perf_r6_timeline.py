@@ -81,6 +81,8 @@ TIMELINE_QUERIES: tuple[tuple[str, str], ...] = (
     ("from=2025-01-01&content=image&partial=1", "combined"),
 )
 PAGE = 100
+# Seconds per join of a background index build before no_index_file reports it and joins again.
+BACKGROUND_JOIN_S = 300.0
 
 
 # --- shared helpers ----------------------------------------------------------------------------
@@ -208,14 +210,20 @@ def reset_timeline_caches() -> None:
 def no_index_file() -> Iterator[None]:
     """Memory-only index: no saved file is read or written (read-only folder, older run). The
     background completion of the last request is joined inside the block: patching ``save_index``
-    alone let that thread write rapidtriage-timeline-index.bin into the run folder after the block."""
+    alone let that thread write rapidtriage-timeline-index.bin into the run folder after the block.
+    The patches (and RAPIDTRIAGE_INDEX_PERSIST) are restored only once no background build is left:
+    a join that times out is reported and joined again, never left running past the block."""
     from rapidtriage.api.app import timeline_index
 
     with mock.patch.object(timeline_index, "load_index", return_value=None), index_persist(False):
         try:
             yield
         finally:
-            timeline_index.wait_for_background(300)
+            while not timeline_index.wait_for_background(BACKGROUND_JOIN_S):
+                print(
+                    f"perf-r6: timeline index background build still running after {BACKGROUND_JOIN_S:.0f} s; waiting",
+                    file=sys.stderr,
+                )
 
 
 def first_and_next(client: object, run_id: str, query: str) -> tuple[float, float, int]:

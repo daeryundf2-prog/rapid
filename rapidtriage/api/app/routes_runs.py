@@ -594,13 +594,16 @@ def build_runs_router(
             partial=partial,
             content=content,
         )
-        payload = get_named_output(store, run_id, "timeline")
         if conditions is None:
+            payload = get_named_output(store, run_id, "timeline")
             return paginate_payload(payload, "events", offset=offset, limit=limit, cursor=cursor)
-        if limit <= 0:
-            raise HTTPException(status_code=400, detail=FILTER_LIMIT_MESSAGE)
+        # Stamp the timeline *before* reading it: a rewrite in between leaves the cache key and the
+        # column index on the older stamp (never the new revision's key holding old positions).
         timeline_path = get_output_path(store, run_id, "timeline")
         stamp = output_stamp(timeline_path)
+        payload = get_named_output(store, run_id, "timeline")
+        if limit <= 0:
+            raise HTTPException(status_code=400, detail=FILTER_LIMIT_MESSAGE)
         events = payload.get("events") if isinstance(payload.get("events"), list) else []
         rows, pagination = filter_rows_page(
             events,

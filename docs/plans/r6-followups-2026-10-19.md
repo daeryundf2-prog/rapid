@@ -384,3 +384,10 @@ AhnLab V3 로그, adb 백업 내부 DB → 기존 앱 파서, 이미지에서 `$
 - 한국어 라벨: carved-url `cluster`·`partition_start_sector`, adb 해제 사본 키(`inner_path` = "해제 사본(증거 아님)", `container_*`, `backup_domain` 코드, 해제 생략 사유), AhnLab `parse_error`·`schema_confidence`·`count_truncated`·`walk_truncated`, 미분류 DB 조치 값(파생 열 `av_action`, "DB 원본 값·조치 분류 안 됨"). adb 해석 행의 "파일 열기"는 원본 .ab(행 path)이며 해제 사본은 메타의 보조 항목.
 - url-carve 양식: 최대 스캔 도움말에 이미지 미할당 총량 의미, 파티션 시작 섹터 오류는 해당 필드(aria-invalid/describedby).
 - 남은 한계: 행 자체에 이미지 형식 플래그는 아직 없음(`_carve_image_unallocated`는 별도 견고성 작업 범위) — 확장자 판정이 기본. 파생 "조치" 열은 서버 정렬 대상이 아님.
+
+### 적대적 리뷰 후속 수정(단계 3 백엔드)
+- 브랜치 `fix/r6-s3-backend-review`(기준 `feat/r6-s3-perf` c27d6e4). 회귀 시험 `tests/test_r6_s3_backend_review.py`(리뷰어 재현 스크립트를 합성 데이터 시험으로 옮김; 시간대·무작위 조건 퍼즈는 기존 동등성 시험이 다룸).
+- 중간: 근접 묶음 상자 — 첫·마지막 칸 경계를 정확히 ±90°/±180°로, 1e-9 보정 대신 상자 경계 기준 배정(묶음 `box` 재조회 = `count`); 요청이 기다리는 열은 배경 작성이 쉼 없이 마침; 큰 출력 JSON 캐시 칸 2개와 실제 메모리 상한 문서화.
+- 낮음: 심어진·손상된 위치 행 색인 파일은 검증 후 무시·재작성(500 없음), 빌드 실패는 60초 뒤 재시도.
+- 그 밖: 읽기 전 스탬프(타임라인 경로·위치 행 스캔), 색인 파일의 처음·끝 64 KB 다이제스트(타임라인 색인 형식 버전 2), 규칙 지문에 부정어 포함, `GeoEntry` slots·캐시 런 4개, 늦게 끝난 옛 스탬프 빌드가 새 항목을 밀어내지 않음, `.tmp` 정리, perf 스크립트 배경 작성 대기. 세부는 `docs/rapidtriage-known-limitations.md` `## R6 S3`.
+- 남은 한계: 콘솔 `geo.ts` `clusterRows`(서버 없는 대체 경로)는 아직 1e-9 보정 규칙 — 콘솔 담당 작업에서 맞춘다.

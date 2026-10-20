@@ -116,9 +116,19 @@ OUTPUT_JSON_CACHE_MAX_BYTES = 200 * 1024 * 1024
 # A single output larger than the byte budget (a real timeline is ~280 MB) is
 # kept in its own slot -- at most this many such payloads -- instead of being
 # evicted the moment it is inserted (which re-parsed it on every request: every
-# timeline page cost ~3.5 s on real runs). Memory bound: the byte budget plus
-# these oversized payloads, which a request has to hold in memory anyway.
-OUTPUT_JSON_CACHE_MAX_LARGE_ENTRIES = 1
+# timeline page cost ~3.5 s on real runs). Two slots, so two large outputs read
+# in turn (the timeline and the files list of a real run, or two runs' timelines)
+# do not evict each other on every request (adversarial review of R6 S3: with one
+# slot each switch re-parsed ~280 MB).
+#
+# Real RAM bound: the budgets count *file* bytes; parsed Python objects take
+# several times that (about 5-8x for these JSON outputs: a 280 MB timeline is
+# ~2 GB parsed). So the cache may hold roughly
+#   (OUTPUT_JSON_CACHE_MAX_BYTES + the two largest oversized files) x 5-8
+# -- e.g. (200 MB + 2 x 280 MB) x ~7 = ~5 GB on a real run -- plus a parse in
+# progress. Lower OUTPUT_JSON_CACHE_MAX_LARGE_ENTRIES to 1 (or 0) on a small
+# machine (docs/rapidtriage-known-limitations.md).
+OUTPUT_JSON_CACHE_MAX_LARGE_ENTRIES = 2
 
 
 def now_iso() -> str:
@@ -353,10 +363,12 @@ class OutputJsonCache:
     the process so the memory bound applies globally.
 
     A payload whose file is larger than the byte budget goes to a separate LRU
-    of ``max_large_entries`` (default one) instead of the budgeted one, so it
+    of ``max_large_entries`` (default two) instead of the budgeted one, so it
     stays cached between requests; one parse per key at a time (concurrent
     readers of the same uncached revision wait for it instead of parsing it
-    again -- a 280 MB timeline costs ~2 GB per parse).
+    again -- a 280 MB timeline costs ~2 GB per parse). Both bounds count file
+    bytes; the parsed payloads take several times that (see
+    ``OUTPUT_JSON_CACHE_MAX_LARGE_ENTRIES`` for the real RAM bound).
 
     Cached payloads are returned as the same object across hits: callers must
     treat the result as read-only. All current consumers were audited and copy
