@@ -181,6 +181,26 @@ def build_run_case_db(
     return record
 
 
+def build_run_geo_index(
+    output_dir: Path,
+    artifact_outputs: Mapping[str, Path],
+    artifact_payloads: Mapping[str, Mapping[str, object]],
+) -> dict[str, object]:
+    """위치 행 색인 (plan r6 §3.3 갈래 C): ``<output_dir>/rapidtriage-geo-index.json`` from one
+    pass over every kind's rows, so the console's map view never scans the run. Never raises: a
+    failed index leaves the run usable (the API builds it on the first map request)."""
+    try:
+        from ...api.app.geo_index import write_run_geo_index
+    except Exception as exc:  # pragma: no cover - the API package is part of the install
+        return {"status": "skipped", "reason": f"{type(exc).__name__}: {exc}"}
+    sources = [
+        (kind, artifact_payloads[kind], Path(path))
+        for kind, path in sorted(artifact_outputs.items())
+        if kind in artifact_payloads
+    ]
+    return write_run_geo_index(output_dir, sources)
+
+
 def skipped_case_db_record(reason: str) -> dict[str, object]:
     return {"status": "skipped", "search_backend": SEARCH_BACKEND_SCAN, "reason": reason}
 

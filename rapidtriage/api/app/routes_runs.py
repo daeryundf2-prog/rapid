@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import functools
 import json
 import logging
 import re
 import zipfile
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -44,8 +45,11 @@ from .artifact_filter import (
     filter_across_kinds,
     filter_artifact_page,
     filter_files_by_category,
+    nfc_fold,
     normalize_channel_filter,
+    parse_cross_kind_after,
     parse_field_filters,
+    row_matcher,
 )
 from .artifact_sort import SORT_ORDERS, paginate_sorted_artifact_output
 from .dashboard import (
@@ -64,6 +68,14 @@ from .fs_tree import (
     parse_folder_path,
     parse_special,
     special_restriction,
+)
+from .geo_index import (
+    GEO_INDEX_SERVICE,
+    build_clusters,
+    candidates,
+    filtered_candidates,
+    page_located,
+    parse_cell,
 )
 from .helpers import (
     allowed_source_roots,
@@ -178,6 +190,30 @@ def reject_geo(geo: str | None) -> None:
     """``/files`` and ``/timeline`` take no ``geo`` (the console sends it to ``/artifacts`` only)."""
     if geo is not None and geo.strip():
         raise HTTPException(status_code=422, detail=GEO_ARTIFACTS_ONLY)
+
+
+def _geo_other_filters(
+    path_contains: str | None,
+    artifact_types: Collection[str] | None,
+    channels: ChannelFilter | None,
+    fields: Mapping[str, frozenset[str]] | None,
+    conditions: RowConditions | None,
+) -> Callable[[Mapping[str, object]], bool] | None:
+    """The filters besides the ``geo`` box (``None`` when the box is the only one: the located-row
+    index answers alone); the box itself is re-checked on the record when there are others."""
+    others = False
+    if conditions is not None:
+        other_conditions = dataclasses.replace(conditions, geo=None)
+        others = other_conditions.uses_time or other_conditions.partial or other_conditions.content is not None
+    if not (path_contains or artifact_types or channels or fields or others):
+        return None
+    return row_matcher(
+        nfc_fold(path_contains) if path_contains else "",
+        frozenset(artifact_types) if artifact_types else None,
+        channels or None,
+        fields,
+        conditions.predicate("artifacts") if conditions is not None else None,
+    )
 
 
 def _echo_conditions(page: dict[str, object], conditions: RowConditions | None) -> dict[str, object]:
@@ -794,6 +830,9 @@ def build_runs_router(
                 flag_query=flag_query,
                 fields=fields,
                 conditions=conditions,
+                # Finished runs only: a live run's outputs still grow.
+                geo_index=live is None,
+                geo_index_dir=_run_output_dir_or_none(job.summary),
             )
             _attach_artifact_flags(response, join)
             if live is not None:
@@ -948,11 +987,75 @@ def build_runs_router(
         channels: ChannelFilter | None = None,
         fields: Mapping[str, frozenset[str]] | None = None,
         conditions: RowConditions | None = None,
+        geo_index: bool = False,
+        geo_index_dir: Path | None = None,
     ) -> dict[str, object]:
         available = [name.removeprefix("artifacts_") for name in sorted(outputs) if name.startswith("artifacts_")]
         ordered = [item for item in kinds if item in available] if kinds else available
+        sources = _artifact_sources(run_id, ordered)
+        extra = {
+            **({"flags": flag_query.descriptor()} if flag_query.filtered else {}),
+            **({"conditions": conditions.describe()} if conditions is not None else {}),
+        }
+        geo_state: object = None
+        if conditions is not None and conditions.geo is not None and geo_index:
+            # 위치 행 색인 (r6 §3.3 갈래 C): the box's rows come from the run's located-row index
+            # (one index over every kind, so its stamp covers them all).
+            index, status = GEO_INDEX_SERVICE.lookup(
+                run_id, sources if ordered == available else _artifact_sources(run_id, available), geo_index_dir
+            )
+            if index is not None and not index.truncated:
+                try:
+                    return page_located(
+                        index,
+                        sources,
+                        box=conditions.geo,
+                        offset=offset,
+                        limit=limit,
+                        after=parse_cross_kind_after(after),
+                        matches=_geo_other_filters(path_contains, artifact_types, channels, fields, conditions),
+                        allowed_for=(
+                            (lambda kind: set(join.require_index().matching(kind, flag_query.rule_ids, flag_query.grade)))
+                            if flag_query.filtered
+                            else None
+                        ),
+                        describe={
+                            "path_contains": path_contains or None,
+                            "artifact_types": sorted(artifact_types) if artifact_types else None,
+                            **(channels.describe() if channels else {}),
+                            **({"fields": {key: sorted(values) for key, values in fields.items()}} if fields else {}),
+                            **extra,
+                        },
+                    )
+                except ValueError as exc:
+                    raise HTTPException(status_code=400, detail=str(exc))
+            geo_state = status if index is None else "truncated"
+        try:
+            response = filter_across_kinds(
+                sources,
+                path_contains=path_contains,
+                artifact_types=artifact_types,
+                channels=channels,
+                offset=offset,
+                limit=limit,
+                after=after,
+                rows_for=kind_rows_for_flags(join, flag_query) if flag_query.filtered else None,
+                extra=extra or None,
+                fields=fields,
+                row_filter=conditions.predicate("artifacts") if conditions is not None else None,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        if geo_state is not None:
+            # The index is building (or unusable): the scan's partial results, marked as such.
+            response["cross_kind"]["geo_index"] = geo_state  # type: ignore[index]
+        return response
+
+
+    def _artifact_sources(run_id: str, kinds: Sequence[str]) -> list[tuple[str, dict[str, object], Path]]:
+        """``(kind, payload, payload path)`` of each kind (409 / 403 / 404 like the listing)."""
         sources = []
-        for item in ordered:
+        for item in kinds:
             name = f"artifacts_{item}"
             try:
                 sources.append((item, store.read_output(run_id, name), get_output_path(store, run_id, name)))
@@ -962,26 +1065,131 @@ def build_runs_router(
                 raise HTTPException(status_code=403, detail=str(exc))
             except FileNotFoundError as exc:
                 raise HTTPException(status_code=404, detail=str(exc))
+        return sources
+
+
+    @router.get("/api/runs/{run_id}/geo-clusters")
+    def get_run_geo_clusters(
+        run_id: str,
+        kind: list[str] = Query(default=[]),
+        cell: str | None = Query(default=None),
+        path_contains: str | None = Query(default=None),
+        artifact_type: list[str] = Query(default=[]),
+        flag: list[str] = Query(default=[]),
+        flag_grade: str | None = Query(default=None),
+        browser: list[str] = Query(default=[]),
+        service: list[str] = Query(default=[]),
+        channel: list[str] = Query(default=[]),
+        channel_group: list[str] = Query(default=[]),
+        time_from: str | None = Query(default=None, alias="from"),
+        time_to: str | None = Query(default=None, alias="to"),
+        weekday: list[str] = Query(default=[]),
+        hours: str | None = Query(default=None),
+        offhours: str | None = Query(default=None),
+        tz: str | None = Query(default=None),
+        partial: str | None = Query(default=None),
+        content: list[str] = Query(default=[]),
+        geo: str | None = Query(default=None),
+    ) -> dict[str, object]:
+        """근접 묶음 of the run's located rows (plan r6 §3.3 갈래 C) from the located-row index.
+
+        ``cell`` (degrees, default 0.01, 0.001-1) is the grid; a cluster is one cell:
+        ``{id, box, lat, lon, count, first_time, last_time, sample}`` -- ``box`` is the cell's
+        ``geo=`` value (half-open, the last cell includes 90° / 180°), ``sample`` one row
+        (``kind``, ``record_index``, ``lat``, ``lon``, ``time``). Most rows first; at most
+        ``MAX_CLUSTERS`` (``clusters_truncated``). ``kind`` (repeatable) narrows the kinds (default:
+        all); ``geo`` the box; the other filters are those of ``/artifacts`` and are applied to the
+        located rows' records only (``filtered``).
+
+        ``geo_index``: ``ready`` (``geo_index_source``: ``file`` = written at run completion,
+        ``built`` = built now and stored, ``memory`` = the output folder is read-only), ``building``
+        (an older run's index is being built in the background: no clusters yet, ask again) or
+        ``unavailable`` (the build failed). ``located_total``: located rows of the kinds;
+        ``matched``: rows in the clusters; ``truncated``: the index stopped at its row cap or the
+        filter read cap.
+        """
+        job = get_job(store, run_id)
+        if job.summary is None:
+            raise HTTPException(status_code=409, detail=run_not_finished_message(job))
+        outputs = job.summary.get("outputs")
+        if not isinstance(outputs, dict):
+            raise HTTPException(status_code=409, detail="run has no outputs")
         try:
-            return filter_across_kinds(
-                sources,
-                path_contains=path_contains,
-                artifact_types=artifact_types,
-                channels=channels,
-                offset=offset,
-                limit=limit,
-                after=after,
-                rows_for=kind_rows_for_flags(join, flag_query) if flag_query.filtered else None,
-                extra={
-                    **({"flags": flag_query.descriptor()} if flag_query.filtered else {}),
-                    **({"conditions": conditions.describe()} if conditions is not None else {}),
-                }
-                or None,
-                fields=fields,
-                row_filter=conditions.predicate("artifacts") if conditions is not None else None,
-            )
+            cell_degrees = parse_cell(cell)
+            wanted_channels = normalize_channel_filter(channel, channel_group)
+            fields = parse_field_filters({"browser": browser, "service": service})
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
+            raise HTTPException(status_code=422, detail=str(exc))
+        conditions = row_conditions_or_422(
+            time_from=time_from,
+            time_to=time_to,
+            weekday=weekday,
+            hours=hours,
+            offhours=offhours,
+            tz=tz,
+            partial=partial,
+            content=content,
+            geo=geo,
+        )
+        flag_query = parse_flag_query(flag, flag_grade)
+        needle = path_contains.strip() if path_contains and path_contains.strip() else None
+        wanted_types = frozenset(item.strip() for item in artifact_type if item.strip()) or None
+        available = [name.removeprefix("artifacts_") for name in sorted(outputs) if name.startswith("artifacts_")]
+        requested = list(dict.fromkeys(item.strip() for item in kind if item.strip()))
+        kinds = [item for item in requested if item in available] if requested else available
+        all_sources = _artifact_sources(run_id, available)
+        index, status = GEO_INDEX_SERVICE.lookup(run_id, all_sources, _run_output_dir_or_none(job.summary))
+        response: dict[str, object] = {
+            "run_id": run_id,
+            "cell": cell_degrees,
+            "kinds": kinds,
+            "available_kinds": available,
+            "geo_index": status,
+            **({"conditions": conditions.describe()} if conditions is not None else {}),
+            **({"flags": flag_query.descriptor()} if flag_query.filtered else {}),
+        }
+        if index is None:
+            response.update(
+                {
+                    "located_total": None,
+                    "matched": None,
+                    "clusters": [],
+                    "clusters_total": 0,
+                    "clusters_truncated": False,
+                    "truncated": False,
+                    "filtered": False,
+                    "scanned": 0,
+                }
+            )
+            return response
+        join = flags_join(_run_output_dir_or_none(job.summary)) if flag_query.filtered else None
+        items = candidates(
+            index,
+            kinds,
+            conditions.geo if conditions is not None else None,
+            (lambda name: set(join.require_index().matching(name, flag_query.rule_ids, flag_query.grade)))
+            if join is not None
+            else None,
+        )
+        matches = _geo_other_filters(needle, wanted_types, wanted_channels, fields, conditions)
+        scanned, read_truncated = 0, False
+        if matches is not None:
+            items, scanned, read_truncated = filtered_candidates(items, all_sources, matches)
+        clusters, total = build_clusters(items, cell_degrees)
+        response.update(
+            {
+                "geo_index_source": index.source,
+                "located_total": sum(len(index.by_kind.get(name, ())) for name in kinds),
+                "matched": len(items),
+                "clusters": clusters,
+                "clusters_total": total,
+                "clusters_truncated": total > len(clusters),
+                "truncated": index.truncated or read_truncated,
+                "filtered": matches is not None or join is not None,
+                "scanned": scanned,
+            }
+        )
+        return response
 
 
     @router.post("/api/runs/{run_id}/extract")
