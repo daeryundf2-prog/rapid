@@ -46,5 +46,7 @@ describe("tree data when the run finishes", () => {
       setRuns("completed");
     });
     expect(finishCalls()).toHaveLength(RUN_FINISH_QUERY_KEYS.length);
+    // The map's server clusters answered 409 while the run was live: they are asked again.
+    expect(RUN_FINISH_QUERY_KEYS).toContain("geo-clusters");
   });
 });

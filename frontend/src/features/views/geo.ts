@@ -6,7 +6,7 @@
  */
 
 import { api } from "../../api/client";
-import { artifactsQueryString } from "../../api/runs";
+import { artifactsQueryString, type TreeNode } from "../../api/runs";
 import type { CollectionQuery, GridRow } from "../../contracts/collection";
 import { parseInstant } from "../../utils/time";
 import { serverPathFilter } from "../grid/gridUtils";
@@ -180,6 +180,17 @@ export interface GeoClustersPayload {
   filtered: boolean;
 }
 
+/**
+ * The text filter `q` is only partly applied by the server: `/geo-clusters` (like the listing)
+ * sends it as `path_contains` only when it is one word and no 경로 filter takes that parameter;
+ * otherwise the console matches it on loaded rows and the server clusters cannot reflect it.
+ */
+export function geoTextFilterClientSide(query: CollectionQuery): boolean {
+  const text = query.text?.trim();
+  if (!text) return false;
+  return Boolean(query.pathContains?.trim()) || serverPathFilter(text) === undefined;
+}
+
 /** The `/geo-clusters` filters of an artifacts collection query (the same server filters as its listing). */
 export function geoClusterParams(query: CollectionQuery, kinds?: readonly string[]): string {
   const params = new URLSearchParams(
@@ -200,32 +211,59 @@ export function geoClusterParams(query: CollectionQuery, kinds?: readonly string
   return params.toString();
 }
 
-const EMPTY_CLUSTERS = (payload: GeoClustersPayload, kinds: string[]): GeoClustersPayload => ({
-  ...payload,
-  kinds,
+/** The run's artifact kinds as the tree lists them (`artifacts` nodes with a `kind`). */
+export function artifactKindsOfTree(nodes: readonly TreeNode[] | undefined): string[] {
+  const found = new Set<string>();
+  const visit = (list: readonly TreeNode[] | undefined) => {
+    for (const node of list ?? []) {
+      if (node.collection === "artifacts" && node.kind) found.add(node.kind);
+      visit(node.children);
+    }
+  };
+  visit(nodes);
+  return [...found].sort();
+}
+
+/** A category none of the run's kinds belong to: nothing to cluster. */
+const EMPTY_CATEGORY = (available: readonly string[], cell = CLUSTER_CELL_DEGREES): GeoClustersPayload => ({
+  geo_index: "ready",
+  cell,
+  kinds: [],
+  available_kinds: [...available],
   located_total: 0,
   matched: 0,
   clusters: [],
   clusters_total: 0,
   clusters_truncated: false,
+  truncated: false,
+  filtered: false,
 });
 
 /**
- * Server clusters of the query's node. A category node asks once for the run's kinds
+ * Server clusters of the query's node. A category node sends its kinds — `kindsForCategory`
+ * over the run's kinds from the tree (`runKinds`, as the listing does) — in one request; only
+ * without the tree (`runKinds` null / empty) does it ask once for the run's kinds
  * (`available_kinds`) and again with the category's kinds.
  */
 export async function fetchGeoClusters(
   runId: string,
   query: CollectionQuery,
   signal?: AbortSignal,
+  runKinds?: readonly string[] | null,
 ): Promise<GeoClustersPayload> {
   const url = (kinds?: readonly string[]) =>
     `/api/runs/${encodeURIComponent(runId)}/geo-clusters?${geoClusterParams(query, kinds)}`;
-  const payload = await api<GeoClustersPayload>(url(), { signal });
   const category = !query.ref.kind ? query.ref.category : undefined;
-  if (!category || payload.geo_index !== "ready") return payload;
+  if (!category) return api<GeoClustersPayload>(url(), { signal });
+  if (runKinds && runKinds.length > 0) {
+    const kinds = kindsForCategory(category, runKinds);
+    if (kinds.length === 0) return EMPTY_CATEGORY(runKinds);
+    return api<GeoClustersPayload>(url(kinds), { signal });
+  }
+  const payload = await api<GeoClustersPayload>(url(), { signal });
+  if (payload.geo_index !== "ready") return payload;
   const kinds = kindsForCategory(category, payload.available_kinds ?? []);
-  if (kinds.length === 0) return EMPTY_CLUSTERS(payload, kinds);
+  if (kinds.length === 0) return EMPTY_CATEGORY(payload.available_kinds ?? [], payload.cell);
   return api<GeoClustersPayload>(url(kinds), { signal });
 }
 

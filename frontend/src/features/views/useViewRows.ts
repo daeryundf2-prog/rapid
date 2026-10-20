@@ -5,6 +5,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { type RefObject, useEffect, useMemo, useState } from "react";
+import { getRunTree } from "../../api/runs";
 import type { CollectionQuery, GridRow } from "../../contracts/collection";
 import { useTimezone } from "../../state/hooks";
 import {
@@ -17,7 +18,12 @@ import { useFilterStore } from "../filters/filterStore";
 import { useRoute } from "../grid/adapter";
 import { matchesFilter } from "../grid/gridUtils";
 import { type CollectionQueryResult, PAGE_SIZE, useCollectionQuery } from "../grid/useCollectionQuery";
-import { fetchGeoClusters, type GeoClustersPayload } from "./geo";
+import {
+  artifactKindsOfTree,
+  fetchGeoClusters,
+  type GeoClustersPayload,
+  geoTextFilterClientSide,
+} from "./geo";
 
 export interface ViewRowsOptions {
   /** Keep only rows the view can draw (images, message rows…); must be a stable function. */
@@ -28,6 +34,8 @@ export interface ViewRowsOptions {
   rowConditions?: Record<string, string | string[]>;
   /** Server page size (default `PAGE_SIZE`; the map's coordinate table pages 500 rows). */
   pageSize?: number;
+  /** Prefetch the page after the requested one (default true; the map asks one page per click). */
+  prefetchNext?: boolean;
 }
 
 export interface ViewRows {
@@ -37,7 +45,13 @@ export interface ViewRows {
   q: string;
 }
 
-export function useViewRows({ predicate, textFilter, rowConditions, pageSize }: ViewRowsOptions): ViewRows {
+export function useViewRows({
+  predicate,
+  textFilter,
+  rowConditions,
+  pageSize,
+  prefetchNext,
+}: ViewRowsOptions): ViewRows {
   const route = useRoute();
   const q = route.q;
   const isSearch = route.collection.id === "search";
@@ -50,7 +64,7 @@ export function useViewRows({ predicate, textFilter, rowConditions, pageSize }: 
       search: route.search,
       ...(rowConditions ? { rowConditions } : {}),
     },
-    { runId: route.runId },
+    { runId: route.runId, ...(prefetchNext === false ? { prefetchNext } : {}) },
   );
   const filters = useFilterStore((s) => s.filters);
   const { timezone } = useTimezone();
@@ -75,14 +89,21 @@ export function useViewRows({ predicate, textFilter, rowConditions, pageSize }: 
 
 /** Re-request interval while the server builds a run's located-row index (`geo_index: building`). */
 export const GEO_INDEX_POLL_MS = 1000;
+/** Polling of a `building` index stops after this long (then the view keeps the loaded-row clusters). */
+export const GEO_INDEX_POLL_LIMIT_MS = 5 * 60_000;
 
 export interface GeoClustersState {
-  /** The server's clusters (null while loading, on error, or off an artifacts node). */
+  /** The server's clusters (null while loading, on error, off an artifacts node, or client-filtered). */
   payload: GeoClustersPayload | null;
   error: Error | null;
   isLoading: boolean;
-  /** Filters only the console applies (the server clusters cannot reflect them). */
+  /**
+   * Filters only the console applies, or a text filter the server applies only in part: the
+   * server clusters cannot reflect them (no request is sent).
+   */
   clientFiltered: boolean;
+  /** The index was still `building` after `GEO_INDEX_POLL_LIMIT_MS`: polling stopped. */
+  buildingTimedOut: boolean;
 }
 
 /**
@@ -113,39 +134,68 @@ export function useGeoClusters({
       ),
     [ref, textFilter, route.q, rowConditions, filters, timezone],
   );
+  // Client-only filters, or a text filter the server sees only in part (several words, or a word
+  // next to a 경로 filter): the server clusters would count other rows than the table, so the
+  // view clusters its loaded rows and no cluster request is sent.
   const clientFiltered = useMemo(
-    () => partitionFilters(ref, filters, [], timezone).clientLabels.length > 0,
-    [ref, filters, timezone],
+    () =>
+      partitionFilters(ref, filters, [], timezone).clientLabels.length > 0 || geoTextFilterClientSide(query),
+    [ref, filters, timezone, query],
   );
-  const enabled = route.runId !== null && ref.id === "artifacts";
+  const isArtifacts = route.runId !== null && ref.id === "artifacts";
+  // A category node sends its kinds (the run's kinds from the tree, as the listing's category
+  // scope) in one request; the tree query is the shared `run-tree` cache entry.
+  const category = isArtifacts && !ref.kind && Boolean(ref.category);
+  const tree = useQuery({
+    queryKey: ["run-tree", route.runId],
+    queryFn: () => getRunTree(route.runId as string),
+    enabled: category,
+    retry: false,
+  });
+  const runKinds = useMemo(() => (tree.data ? artifactKindsOfTree(tree.data.nodes) : null), [tree.data]);
+  const treeSettled = !category || tree.data !== undefined || tree.isError;
+  const enabled = isArtifacts && !clientFiltered && treeSettled;
+  const key = [
+    "geo-clusters",
+    route.runId,
+    ref.kind ?? "",
+    ref.kind ? "" : (ref.category ?? ""),
+    JSON.stringify([
+      query.pathContains ?? query.text ?? "",
+      query.artifactTypes ?? [],
+      query.flags ?? [],
+      query.flagGrade ?? "",
+      query.fields ?? {},
+      query.channels ?? [],
+      query.channelGroups ?? [],
+      query.rowConditions ?? {},
+    ]),
+  ] as const;
+  const keyString = JSON.stringify(key);
+  const [timedOutKey, setTimedOutKey] = useState<string | null>(null);
+  const timedOut = timedOutKey === keyString;
   const result = useQuery({
-    queryKey: [
-      "geo-clusters",
-      route.runId,
-      ref.kind ?? "",
-      ref.kind ? "" : (ref.category ?? ""),
-      JSON.stringify([
-        query.pathContains ?? query.text ?? "",
-        query.artifactTypes ?? [],
-        query.flags ?? [],
-        query.flagGrade ?? "",
-        query.fields ?? {},
-        query.channels ?? [],
-        query.channelGroups ?? [],
-        query.rowConditions ?? {},
-      ]),
-    ],
-    queryFn: ({ signal }) => fetchGeoClusters(route.runId as string, query, signal),
+    queryKey: key,
+    queryFn: ({ signal }) => fetchGeoClusters(route.runId as string, query, signal, runKinds),
     enabled,
     staleTime: 30_000,
     retry: false,
-    refetchInterval: (q) => (q.state.data?.geo_index === "building" ? GEO_INDEX_POLL_MS : false),
+    refetchInterval: (q) => (q.state.data?.geo_index === "building" && !timedOut ? GEO_INDEX_POLL_MS : false),
   });
+  const building = enabled && result.data?.geo_index === "building";
+  // Polling stops after GEO_INDEX_POLL_LIMIT_MS of `building`: the view keeps the loaded-row
+  // clusters and says so (a later visit, or the run-finish refetch, asks again).
+  useEffect(() => {
+    if (!building) return;
+    const timer = setTimeout(() => setTimedOutKey(keyString), GEO_INDEX_POLL_LIMIT_MS);
+    return () => clearTimeout(timer);
+  }, [building, keyString]);
   return {
     payload: enabled ? (result.data ?? null) : null,
-    error: result.error instanceof Error ? result.error : null,
-    isLoading: enabled && result.isLoading,
+    error: enabled && result.error instanceof Error ? result.error : null,
+    isLoading: enabled ? result.isLoading : isArtifacts && !clientFiltered,
     clientFiltered,
+    buildingTimedOut: building && timedOut,
   };
 }
 

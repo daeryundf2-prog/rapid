@@ -46,6 +46,11 @@ export interface CollectionQueryOptions {
    * server's `artifact_type=` match is exact (case-sensitive), so options are never re-cased.
    */
   typeOptions?: readonly string[];
+  /**
+   * Prefetch the page after the requested ones (default true: grid scrolling). The map's
+   * coordinate table turns it off so "500건 더 불러오기" asks for exactly one page.
+   */
+  prefetchNext?: boolean;
 }
 
 const NO_TYPES: readonly string[] = [];
@@ -221,6 +226,7 @@ export function useCollectionQuery(
 ): CollectionQueryResult {
   const storeFilters = useFilterStore((s) => s.filters);
   const passive = options.passive === true;
+  const prefetchNext = options.prefetchNext !== false;
   const filters = passive ? EMPTY_FILTERS : storeFilters;
   const setReport = useFilterStore((s) => s.setReport);
   // Timestamp cells format in the display timezone (re-render rows when it changes); the 요일·시간대
@@ -382,7 +388,8 @@ export function useCollectionQuery(
     (start: number, end: number) => {
       if (def.source === "whole") return;
       const first = Math.max(0, Math.floor(start / pageSize));
-      const lastWanted = Math.floor(Math.max(start, end) / pageSize) + 1; // +1 = prefetch the next page
+      // +1 = prefetch the next page (unless the caller pages one page per request).
+      const lastWanted = Math.floor(Math.max(start, end) / pageSize) + (prefetchNext ? 1 : 0);
       const limit = pageCount === null ? lastWanted : Math.min(lastWanted, pageCount - 1);
       setWantedState((prev) => {
         const base = prev.key === keyString ? prev.pages : [0];
@@ -392,7 +399,7 @@ export function useCollectionQuery(
         return { key: keyString, pages: [...next].sort((a, b) => a - b) };
       });
     },
-    [def.source, keyString, pageCount, pageSize],
+    [def.source, keyString, pageCount, pageSize, prefetchNext],
   );
   // Filtered indices are not page indices: while client filters are active the hook pulls pages itself.
   const ensureRange = useCallback(

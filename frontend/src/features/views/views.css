@@ -142,6 +142,13 @@
   text-decoration: underline;
 }
 
+/* Busy link (지도 "더 불러오기" while its page loads): stays focusable, reads as inactive. */
+.view-link[aria-disabled="true"] {
+  color: var(--text-muted);
+  cursor: progress;
+  text-decoration: none;
+}
+
 .view-message {
   font-size: var(--fs-table-aux);
   color: var(--text-muted);
