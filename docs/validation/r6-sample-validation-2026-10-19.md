@@ -175,6 +175,11 @@
 - 곰플레이어 기록 행에 시각이 없다: 키 마지막 기록 시각(LastWrite)을 목록 시각 상한으로 붙여야 한다.
 - 수집 대상 밖 플레이어 흔적: BBPlayer 키(1개 하이브), Windows Media Player 키(5개 하이브, 최근 목록 값은 보이지 않음). 이번에는 기록만 한다.
 
+**후속 수정** (브랜치 `fix/r6-s1-dcheck-gaps`, 합성 픽스처 `tests/test_r6_s1_dcheck_gaps.py`; 상세는 `docs/rapidtriage-known-limitations.md` `## R6 S1`)
+- 분할 EGG: 분할 헤더의 이전·다음 볼륨 ID로 같은 폴더의 형제 볼륨을 잇고(안 되면 `이름.volN.egg` 번호) 머리 뒤 데이터를 하나의 스트림으로 읽는다. 빠진 볼륨은 `missing_volumes` + `egg-partial`, 첫 볼륨이 아닌 파일은 `egg-split-member`("분할 볼륨(첫 볼륨에서 목록)")로 중복 목록을 막는다. 위 5개 실제 분할 표본으로는 **다시 돌려 보지 않았다**(재확인 필요).
+- 확장자만 .egg인 ZIP: 예외 대신 `egg-format-mismatch`(`format_mismatch: "zip"`), 압축 파일 인벤토리는 ZIP 목록으로 낸다.
+- 곰플레이어: 레지스트리 행에 `key_path`·`key_last_written_at`을 두고 타임라인에 키당 한 `last-written` 이벤트로 연결(행 `timestamp`는 계속 비움). `_RECENTMEDIAAUDIOINDEX#`·`_RECENTMEDIAAUDIOINDEXDVD#`·`_RECENTMEDIAPOS#` 원값을 같은 번호 행에 붙인다.
+
 ## 6. 실행 방법
 
 ### 6.1 런 비교

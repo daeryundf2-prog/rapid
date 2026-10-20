@@ -20,6 +20,15 @@ compressed and decompressed per member, ``MAX_ARCHIVE_DECOMPRESSED_BYTES`` per a
 ``MAX_RATIO`` decompression-ratio guard (bombs stop with a
 note). A corrupt header ends the listing with ``analysis_status`` ``*-partial`` and the
 entries read so far.
+
+Split (multi-volume) EGG (R6 S1 follow-up): every volume starts with its own EGG header whose
+split extra header carries the previous / next volume's header ID (0 = none). The volumes are
+linked by those IDs (siblings in the same folder; the ALZip ``name.volN.egg`` naming is used to
+find candidates first and as a fallback link when the IDs do not chain), and the data after
+each volume's header is read as one continuous stream (``MAX_SPLIT_VOLUMES``). A missing volume
+ends the listing at the gap (``missing_volumes``, ``egg-partial``); a non-first volume lists
+nothing (``egg-split-member``: the set is listed once, from its first volume). A ZIP / ALZ file
+named ``.egg`` is reported as ``egg-format-mismatch`` (``format_mismatch``) instead of raising.
 """
 
 from __future__ import annotations
@@ -28,9 +37,13 @@ import bz2
 import datetime as dt
 import hashlib
 import lzma
+import os
+import re
 import struct
 import zlib
 from collections.abc import Callable
+from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 EGG_SIGNATURE = 0x41474745  # b"EGGA"
@@ -60,7 +73,13 @@ MAX_HASH_MEMBERS = 200
 MAX_RATIO = 1000
 MAX_NAME_BYTES = 4096
 FILETIME_EPOCH = dt.datetime(1601, 1, 1, tzinfo=dt.timezone.utc)
-PARSER_VERSION = "egg-alz-listing-v1"
+PARSER_VERSION = "egg-alz-listing-v2"
+MAX_SPLIT_VOLUMES = 256
+# Sibling ``.egg`` files whose headers are read to link a split set when the names do not chain.
+MAX_SPLIT_SIBLING_SCAN = 1024
+MAX_HEADER_EXTRAS = 64
+SPLIT_NAME_RE = re.compile(r"^(?P<base>.+)\.vol(?P<number>\d{1,4})\.egg$", re.IGNORECASE)
+ZIP_MAGICS = (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08")
 
 
 class ArchiveFormatError(ValueError):
@@ -195,52 +214,324 @@ def _entry(name: str, **fields: object) -> dict[str, object]:
     return {"name": name[:500], **fields}
 
 
-def list_egg(path: Path, *, extract: bool = True, check_cancel: Callable[[], None] | None = None) -> dict[str, object]:
-    """Entry listing of an EGG archive (see module doc)."""
+@dataclass(frozen=True)
+class _EggHeader:
+    """The EGG header of one file (one volume of a split set)."""
+
+    path: Path
+    header_id: int
+    split: bool
+    prev_id: int
+    next_id: int
+    data_start: int
+
+
+def _read_egg_header(path: Path) -> _EggHeader:
+    """EGG header and its split extra header; raises ``ArchiveFormatError``."""
     size = path.stat().st_size
-    entries: list[dict[str, object]] = []
-    notes: list[str] = []
-    archive: dict[str, object] = {"split": False, "solid": False}
-    status = "egg-parsed"
     with path.open("rb") as handle:
         reader = _Reader(handle, size)
         if reader.u32() != EGG_SIGNATURE:
             raise ArchiveFormatError("EGG 서명(EGGA)이 아닙니다")
-        archive["version"] = reader.u16()
-        reader.u32()  # header id (random)
+        reader.u16()  # version
+        header_id = reader.u32()
         reader.u32()  # reserved
-        while True:
+        split = False
+        prev_id = next_id = 0
+        for _ in range(MAX_HEADER_EXTRAS):
             signature = reader.u32()
             if signature == EGG_END:
                 break
-            _extra(reader)
+            _flag, data = _extra(reader)
             if signature == EGG_SPLIT:
-                archive["split"] = True
-            elif signature == EGG_SOLID:
-                archive["solid"] = True
-        hashed = 0
-        try:
-            while reader.tell() < min(size, MAX_SCAN_BYTES):
-                if check_cancel is not None and len(entries) % 200 == 0:
-                    check_cancel()
-                signature = reader.u32()
-                if signature == EGG_END:
+                split = True
+                if len(data) >= 8:
+                    prev_id, next_id = struct.unpack_from("<II", data, 0)
+        else:
+            raise ArchiveFormatError("EGG 헤더 확장이 너무 많습니다")
+        return _EggHeader(path, header_id, split, prev_id, next_id, reader.tell())
+
+
+def sniff_format(path: Path) -> str:
+    """``egg`` / ``zip`` / ``alz`` / ``""`` from the first bytes (the extension is not trusted)."""
+    try:
+        with path.open("rb") as handle:
+            magic = handle.read(4)
+    except OSError:
+        return ""
+    if magic == b"EGGA":
+        return "egg"
+    if magic == ALZ_SIGNATURE:
+        return "alz"
+    if magic in ZIP_MAGICS:
+        return "zip"
+    return ""
+
+
+class _VolumeStream:
+    """Read-only file-like view of several volumes' regions as one continuous stream."""
+
+    def __init__(self, parts: list[tuple[Path, int, int]]) -> None:
+        self.parts = parts  # (path, start offset in the file, length)
+        self.starts: list[int] = []
+        total = 0
+        for _path, _offset, length in parts:
+            self.starts.append(total)
+            total += length
+        self.size = total
+        self.position = 0
+        self._index = -1
+        self._handle = None
+
+    def tell(self) -> int:
+        return self.position
+
+    def seek(self, offset: int, whence: int = 0) -> int:
+        self.position = offset if whence == 0 else self.position + offset
+        return self.position
+
+    def read(self, count: int) -> bytes:
+        out = bytearray()
+        while count > 0 and self.position < self.size:
+            index = max(i for i, start in enumerate(self.starts) if start <= self.position)
+            path, offset, length = self.parts[index]
+            inside = self.position - self.starts[index]
+            take = min(count, length - inside)
+            if take <= 0:
+                break
+            if index != self._index:
+                self.close()
+                self._handle = path.open("rb")
+                self._index = index
+            self._handle.seek(offset + inside)
+            chunk = self._handle.read(take)
+            if not chunk:
+                break
+            out += chunk
+            self.position += len(chunk)
+            count -= len(chunk)
+        return bytes(out)
+
+    def close(self) -> None:
+        if self._handle is not None:
+            self._handle.close()
+        self._handle = None
+        self._index = -1
+
+
+def _split_name(path: Path) -> tuple[str, int] | None:
+    """``(base, N)`` of an ALZip-style ``base.volN.egg`` name."""
+    match = SPLIT_NAME_RE.match(path.name)
+    return (match.group("base").lower(), int(match.group("number"))) if match else None
+
+
+def _split_candidates(path: Path) -> list[Path]:
+    """Sibling ``.egg`` files: same ``base.volN.egg`` set first, then the rest (bounded)."""
+    own = _split_name(path)
+    named: list[Path] = []
+    others: list[Path] = []
+    try:
+        with os.scandir(path.parent) as listing:
+            for item in listing:
+                if len(named) + len(others) >= MAX_SPLIT_SIBLING_SCAN:
                     break
-                if signature == EGG_COMMENT:
-                    _extra(reader)
+                if not item.name.lower().endswith(".egg") or item.name == path.name or not item.is_file():
                     continue
-                if signature != EGG_FILE:
-                    raise ArchiveFormatError(f"알 수 없는 EGG 헤더 서명 0x{signature:08x}")
-                if len(entries) >= MAX_ENTRIES:
-                    notes.append("entry-cap-reached")
-                    status = "egg-partial"
-                    break
-                entry, hashed = _egg_file(reader, archive, extract=extract, hashed=hashed)
-                entries.append(entry)
-        except ArchiveFormatError as exc:
-            status = "egg-partial"
-            notes.append(f"corrupt: {exc}"[:200])
-    return _profile("egg", status, entries, notes, archive)
+                candidate = Path(item.path)
+                parsed = _split_name(candidate)
+                (named if own and parsed and parsed[0] == own[0] else others).append(candidate)
+    except OSError:
+        pass
+    return sorted(named, key=lambda item: item.name.lower()) + sorted(others, key=lambda item: item.name.lower())
+
+
+def _sibling_header(path: Path) -> _EggHeader | None:
+    """A sibling's EGG header (``None`` when unreadable); cached by path, size and mtime so the
+    volumes of one set scanned one after another do not re-read every sibling."""
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return _cached_header(str(path), stat.st_size, stat.st_mtime_ns)
+
+
+@lru_cache(maxsize=4096)
+def _cached_header(path: str, _size: int, _mtime_ns: int) -> _EggHeader | None:
+    try:
+        return _read_egg_header(Path(path))
+    except (ArchiveFormatError, OSError, struct.error):
+        return None
+
+
+class _SplitSet:
+    """The volumes of a split set around one scanned volume, linked by header IDs."""
+
+    def __init__(self, scanned: _EggHeader) -> None:
+        self.scanned = scanned
+        self.base = _split_name(scanned.path)
+        self.by_id: dict[int, _EggHeader] = {scanned.header_id: scanned}
+        self.by_number: dict[int, _EggHeader] = {self.base[1]: scanned} if self.base else {}
+        self.link = "header-id"
+        self.notes: list[str] = []
+        for candidate in _split_candidates(scanned.path):
+            header = _sibling_header(candidate)
+            if header is None or not header.split:
+                continue
+            self.by_id.setdefault(header.header_id, header)
+            parsed = _split_name(candidate)
+            if self.base and parsed and parsed[0] == self.base[0]:
+                self.by_number.setdefault(parsed[1], header)
+
+    def _neighbour(self, header: _EggHeader, step: int) -> _EggHeader | None:
+        wanted = header.prev_id if step < 0 else header.next_id
+        found = self.by_id.get(wanted)
+        if found is not None and (found.next_id if step < 0 else found.prev_id) == header.header_id:
+            return found
+        parsed = _split_name(header.path)
+        if parsed and self.base and parsed[0] == self.base[0] and parsed[1] + step in self.by_number:
+            self.link = "file-name"
+            return self.by_number[parsed[1] + step]
+        return None
+
+    def first(self) -> _EggHeader | None:
+        """The first volume (``prev_id == 0``), or ``None`` when it is not in the folder."""
+        current = self.scanned
+        seen = {current.path}
+        while current.prev_id:
+            previous = self._neighbour(current, -1)
+            if previous is None or previous.path in seen or len(seen) > MAX_SPLIT_VOLUMES:
+                return None
+            seen.add(previous.path)
+            current = previous
+        return current
+
+    def chain(self, first: _EggHeader) -> tuple[list[_EggHeader], list[dict[str, object]]]:
+        """Volumes from ``first`` in order, and the missing volume after the last one found."""
+        volumes = [first]
+        missing: list[dict[str, object]] = []
+        current = first
+        while current.next_id:
+            if len(volumes) >= MAX_SPLIT_VOLUMES:
+                self.notes.append("split-volume-cap-reached")
+                break
+            following = self._neighbour(current, 1)
+            if following is None or following in volumes:
+                missing.append(_missing_volume(current, len(volumes) + 1, current.next_id))
+                break
+            volumes.append(following)
+            current = following
+        return volumes, missing
+
+
+def _missing_volume(previous: _EggHeader, position: int, header_id: int) -> dict[str, object]:
+    match = SPLIT_NAME_RE.match(previous.path.name)
+    expected = f"{match.group('base')}.vol{position}.egg" if match else ""
+    return {"volume_index": position, "header_id": f"{header_id:08x}", "expected_name": expected}
+
+
+def _mismatch_profile(fmt: str) -> dict[str, object]:
+    label = fmt.upper()
+    reason = f"확장자는 .egg이지만 파일 서명상 실제 형식은 {label}입니다 — {label} 도구로 확인하세요"
+    return _profile("egg", "egg-format-mismatch", [], [f"format-mismatch:{fmt}"], {}, format_mismatch=fmt, reason_ko=reason)
+
+
+def list_egg(path: Path, *, extract: bool = True, check_cancel: Callable[[], None] | None = None) -> dict[str, object]:
+    """Entry listing of an EGG archive, split sets included (see module doc)."""
+    detected = sniff_format(path)
+    if detected and detected != "egg":
+        return _mismatch_profile(detected)
+    header = _read_egg_header(path)
+    extra: dict[str, object] = {}
+    missing: list[dict[str, object]] = []
+    split_notes: list[str] = []
+    stream: _VolumeStream | None = None
+    if header.split and (header.prev_id or header.next_id):
+        split_set = _SplitSet(header)
+        first = split_set.first()
+        if first is None or first.path != path:
+            member: dict[str, object] = {
+                "split_member": True,
+                "split_first_volume": first.path.name if first is not None else "",
+                "reason_ko": "분할 볼륨(첫 볼륨에서 목록)",
+            }
+            if first is None:
+                member["missing_volumes"] = [{"volume_index": 1, "header_id": "", "expected_name": ""}]
+                member["reason_ko"] = "분할 볼륨(첫 볼륨에서 목록) — 같은 폴더에 첫 볼륨이 없어 목록을 만들 수 없습니다"
+            status = "egg-split-member" if first is not None else "egg-partial"
+            return _profile("egg", status, [], ["split-member"], {"split": True}, **member)
+        volumes, missing = split_set.chain(first)
+        split_notes = list(split_set.notes)
+        parts = [(volumes[0].path, 0, volumes[0].path.stat().st_size)]
+        parts += [(volume.path, volume.data_start, volume.path.stat().st_size - volume.data_start) for volume in volumes[1:]]
+        stream = _VolumeStream(parts)
+        extra = {
+            "split_volumes": [volume.path.name for volume in volumes],
+            "volume_count": len(volumes),
+            "split_link": split_set.link,
+            "missing_volumes": missing,
+        }
+        if missing:
+            names = ", ".join(str(item["expected_name"] or f"#{item['volume_index']}") for item in missing)
+            extra["reason_ko"] = f"분할 볼륨 일부가 없습니다({names}) — 빠진 볼륨 앞까지만 목록을 냈습니다"
+    handle = stream if stream is not None else path.open("rb")
+    try:
+        size = stream.size if stream is not None else path.stat().st_size
+        status, entries, notes, archive = _walk_egg(_Reader(handle, size), size, extract=extract, check_cancel=check_cancel)
+    finally:
+        handle.close()
+    notes = split_notes + notes
+    if missing:
+        status = "egg-partial"
+        notes.append("split-volume-missing")
+    elif split_notes:
+        status = "egg-partial"
+    return _profile("egg", status, entries, notes, archive, **extra)
+
+
+def _walk_egg(
+    reader: _Reader, size: int, *, extract: bool, check_cancel: Callable[[], None] | None
+) -> tuple[str, list[dict[str, object]], list[str], dict[str, object]]:
+    entries: list[dict[str, object]] = []
+    notes: list[str] = []
+    archive: dict[str, object] = {"split": False, "solid": False}
+    status = "egg-parsed"
+    if reader.u32() != EGG_SIGNATURE:
+        raise ArchiveFormatError("EGG 서명(EGGA)이 아닙니다")
+    archive["version"] = reader.u16()
+    reader.u32()  # header id (random)
+    reader.u32()  # reserved
+    while True:
+        signature = reader.u32()
+        if signature == EGG_END:
+            break
+        _extra(reader)
+        if signature == EGG_SPLIT:
+            archive["split"] = True
+        elif signature == EGG_SOLID:
+            archive["solid"] = True
+    hashed = 0
+    try:
+        while reader.tell() < min(size, MAX_SCAN_BYTES):
+            if check_cancel is not None and len(entries) % 200 == 0:
+                check_cancel()
+            signature = reader.u32()
+            if signature == EGG_END:
+                break
+            if signature == EGG_COMMENT:
+                _extra(reader)
+                continue
+            if signature != EGG_FILE:
+                raise ArchiveFormatError(f"알 수 없는 EGG 헤더 서명 0x{signature:08x}")
+            if len(entries) >= MAX_ENTRIES:
+                notes.append("entry-cap-reached")
+                status = "egg-partial"
+                break
+            entry, hashed = _egg_file(reader, archive, extract=extract, hashed=hashed)
+            entries.append(entry)
+    except ArchiveFormatError as exc:
+        status = "egg-partial"
+        notes.append(f"corrupt: {exc}"[:200])
+    return status, entries, notes, archive
 
 
 def _egg_file(reader: _Reader, archive: dict[str, object], *, extract: bool, hashed: int) -> tuple[dict[str, object], int]:
@@ -427,7 +718,14 @@ def list_alz(path: Path, *, check_cancel: Callable[[], None] | None = None) -> d
     return _profile("alz", status, entries, notes, {})
 
 
-def _profile(fmt: str, status: str, entries: list[dict[str, object]], notes: list[str], archive: dict[str, object]) -> dict[str, object]:
+def _profile(
+    fmt: str,
+    status: str,
+    entries: list[dict[str, object]],
+    notes: list[str],
+    archive: dict[str, object],
+    **extra: object,
+) -> dict[str, object]:
     total_compressed = sum(int(entry.get("compressed_size") or 0) for entry in entries)
     total_uncompressed = sum(int(entry.get("uncompressed_size") or 0) for entry in entries)
     return {
@@ -441,4 +739,5 @@ def _profile(fmt: str, status: str, entries: list[dict[str, object]], notes: lis
         "header_encrypted": any(entry.get("name_encrypted") for entry in entries),
         "total_compressed_size": total_compressed,
         "total_uncompressed_size": total_uncompressed,
+        **extra,
     }

@@ -122,6 +122,7 @@ DESKTOP_AI_APP_STORAGE_MARKERS = (
 # R5 L3 (재감사 §3 items 9, 18): EGG / ALZ (core.egg_archive) and ISO 9660 (core.iso9660) entry listings.
 EXTENDED_ARCHIVE_FORMATS = {".egg": "egg", ".alz": "alz", ".iso": "iso9660"}
 ARCHIVE_SUFFIXES = {".zip", ".rar", ".7z", *EXTENDED_ARCHIVE_FORMATS}
+ARCHIVE_ZIP_MAGICS = (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08")
 ARCHIVE_ENTRY_SAMPLE_LIMIT = 80
 ARCHIVE_RISK_ENTRY_LIMIT = 100
 ARCHIVE_BOMB_RATIO_THRESHOLD = 100.0
@@ -204,10 +205,22 @@ def collect_archive_inventory(root: Path) -> Iterable[ArtifactRecord]:
 
 
 def archive_inventory_profile(path: Path) -> dict[str, object]:
-    if path.suffix.lower() in EXTENDED_ARCHIVE_FORMATS:
-        return extended_archive_profile(path, EXTENDED_ARCHIVE_FORMATS[path.suffix.lower()])
-    if path.suffix.lower() != ".zip":
+    suffix = path.suffix.lower()
+    if suffix in (".egg", ".alz") and read_prefix(path, 4) in ARCHIVE_ZIP_MAGICS:
+        # R6 S1: Python eggs / Java-style ZIPs named .egg — list them as the ZIP they are.
+        profile = zip_inventory_profile(path)
+        profile["format_hint"] = "zip"
+        profile["format_mismatch"] = "zip"
+        profile["format_mismatch_reason_ko"] = f"확장자는 {suffix}이지만 파일 서명상 실제 형식은 ZIP입니다 — ZIP 목록으로 냈습니다"
+        return profile
+    if suffix in EXTENDED_ARCHIVE_FORMATS:
+        return extended_archive_profile(path, EXTENDED_ARCHIVE_FORMATS[suffix])
+    if suffix != ".zip":
         return archive_metadata_only_profile(path)
+    return zip_inventory_profile(path)
+
+
+def zip_inventory_profile(path: Path) -> dict[str, object]:
     try:
         with zipfile.ZipFile(path) as archive:
             entries = archive.infolist()
@@ -354,6 +367,11 @@ def extended_archive_profile(path: Path, fmt: str) -> dict[str, object]:
         "values_are_metadata_only": True,
         "validation_guidance": "항목 목록은 헤더 메타데이터입니다. 내용 검토는 격리된 환경에서 전용 도구로 해제한 뒤 하세요.",
     }
+    # R6 S1: split EGG sets (listed once, from the first volume) and extension/format mismatches.
+    for key in ("split_volumes", "volume_count", "split_link", "missing_volumes", "split_member", "split_first_volume",
+                "format_mismatch", "reason_ko"):
+        if key in listing:
+            profile[key] = listing[key]
     if fmt == "iso9660":
         profile["udf_present"] = bool(listing.get("udf_present"))
         profile["iso_volume"] = listing.get("volume") or {}

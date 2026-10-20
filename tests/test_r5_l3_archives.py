@@ -219,8 +219,10 @@ class EggTests(unittest.TestCase):
         truncated = list_egg(self.write("cut.egg", data[: len(data) - 30]))
         self.assertEqual(truncated["analysis_status"], "egg-partial")
         self.assertEqual([entry["name"] for entry in truncated["entries"]], ["a.txt"])
+        # R6 S1: a ZIP named .egg is a format mismatch, not an exception; other bytes still raise.
+        self.assertEqual(list_egg(self.write("fake.egg", b"PK\x03\x04 not an egg"))["format_mismatch"], "zip")
         with self.assertRaises(ArchiveFormatError):
-            list_egg(self.write("fake.egg", b"PK\x03\x04 not an egg"))
+            list_egg(self.write("junk.egg", b"JUNK not an egg"))
 
     def test_decompression_bomb_guard(self) -> None:
         bomb_data = b"\x00" * (4 * 1024 * 1024)
