@@ -19,10 +19,16 @@ included) and goes into ``row_conditions.MATCH_CACHE`` as before, so later pages
 
 One index per timeline revision (key ``row_conditions.output_stamp``, single-flight per run),
 saved next to the timeline as :data:`INDEX_FILE_NAME` with a header carrying the timeline size /
-mtime, the event count and a fingerprint of the content / partial rules. A run writes it when its
+mtime, a digest of its first / last 64 KB (``index_cache.head_tail_digest``: a rewrite keeping size
+and mtime is noticed too), the event count and a fingerprint of the content / partial / time
+rules. The request stamps the timeline *before* reading it and carries that stamp into the index
+(``timeline_positions``): a timeline rewritten after the stamp keeps the index in memory under the
+old stamp -- never loaded from or saved to a file of the new revision. A run writes it when its
 timeline stage completes (:func:`write_timeline_index`). An older run gets it on its first
 conditioned request: the columns that request needs are built first (a time condition only parses
-the timestamps), the rest -- and the file -- follow (in the background for a large timeline). A
+the timestamps), the rest -- and the file -- follow (in the background for a large timeline;
+slices of :data:`BACKGROUND_CHUNK_ROWS` rows with a short sleep between them, dropped while a
+request waits for a column -- a request never waits behind the throttle). A
 header that does not match is ignored and the index rebuilt; a folder that cannot be written -- or
 ``RAPIDTRIAGE_INDEX_PERSIST=0`` (``index_cache.index_persist_enabled``) -- keeps the index in
 memory only. Any index failure falls back to the predicate scan -- never a 500.
@@ -44,9 +50,10 @@ from array import array
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from pathlib import Path
 
-from .index_cache import SingleFlightIndexCache, index_persist_enabled
+from .index_cache import SingleFlightIndexCache, head_tail_digest, index_persist_enabled
 from .row_conditions import (
     _FRACTION,
+    _NEGATIONS,
     CONTENT_TYPES,
     DECRYPT_OK,
     DEFAULT_OFFHOURS,
@@ -66,7 +73,7 @@ LOGGER = logging.getLogger(__name__)
 
 INDEX_FILE_NAME = "rapidtriage-timeline-index.bin"
 INDEX_MAGIC = b"RTTLIDX1"
-INDEX_VERSION = 1
+INDEX_VERSION = 2  # 2: header carries the timeline digest (adversarial review of R6 S3)
 MISSING = -(2**63)  # INT64_MIN: no parseable row time
 US = dt.timedelta(microseconds=1)
 HOUR_US = 3_600_000_000
@@ -103,6 +110,9 @@ def _rules_fingerprint() -> str:
             sorted(PARTIAL_TRUNCATION_KEYS),
             PARTIAL_TYPE_TOKENS,
             sorted(DECRYPT_OK),
+            sorted(_NEGATIONS),
+            sorted(_PARTIAL_KEYS),
+            _FRACTION.pattern,
         )
     )
     return hashlib.sha256(rules.encode("utf-8")).hexdigest()[:16]
@@ -333,6 +343,14 @@ class TimelineIndex:
         # One lock per column: a request never waits for a column it does not need.
         self._column_locks = {column: threading.Lock() for column in COLUMNS}
         self._completing = False
+        # Request threads waiting per column: the background build of a column a request waits
+        # for runs without its pauses (the other columns keep yielding the GIL to requests).
+        self._waiting = dict.fromkeys(COLUMNS, 0)
+
+    def requests_waiting(self, column: str | None = None) -> bool:
+        if column is None:
+            return any(self._waiting.values())
+        return self._waiting[column] > 0
 
     def has(self, column: str) -> bool:
         if column == TIME:
@@ -345,7 +363,38 @@ class TimelineIndex:
         return all(self.has(column) for column in COLUMNS)
 
     def ensure(self, events: Sequence[object], columns: Iterable[str], pause: Pause = None) -> None:
-        """Build the missing ``columns`` from ``events`` (one pass per column)."""
+        """Build the missing ``columns`` from ``events`` (one pass per column). A request
+        (``pause is None``) waiting for a column the background build holds makes that build drop
+        its pauses until the column is done (it never waits behind the throttle)."""
+        missing = [column for column in columns if not self.has(column)]
+        if not missing:
+            return
+        if pause is not None:
+            self._build(events, missing, pause)
+            return
+        with self._lock:
+            for column in missing:
+                self._waiting[column] += 1
+        try:
+            self._build(events, missing, None)
+        finally:
+            with self._lock:
+                for column in missing:
+                    self._waiting[column] -= 1
+
+    def _paced(self, column: str, pause: Pause) -> Pause:
+        """``pause`` unless a request waits for ``column``."""
+        if pause is None:
+            return None
+        waiting = self._waiting
+
+        def paced() -> None:
+            if not waiting[column]:
+                pause()
+
+        return paced
+
+    def _build(self, events: Sequence[object], columns: Iterable[str], pause: Pause) -> None:
         for column in columns:
             if self.has(column):
                 continue
@@ -353,12 +402,12 @@ class TimelineIndex:
                 if self.has(column):
                     continue
                 if column == TIME:
-                    epoch, offsets = time_column(events, pause)
+                    epoch, offsets = time_column(events, self._paced(column, pause))
                     self.has_offset, self.epoch_us = offsets, epoch
                 elif column == CONTENT:
-                    self.content_mask = content_column(events, pause)
+                    self.content_mask = content_column(events, self._paced(column, pause))
                 else:
-                    self.partial = partial_column(events, pause)
+                    self.partial = partial_column(events, self._paced(column, pause))
 
     def complete_and_save(self, events: Sequence[object], pause: Pause = None) -> None:
         """All columns, then the index file when the timeline is still the indexed revision."""
@@ -368,7 +417,10 @@ class TimelineIndex:
                 return
             if _file_stamp(self.timeline_path) != self.stamp:
                 return
-            self.saved = save_index(self, index_path_for(self.timeline_path), self.stamp)
+            digest = head_tail_digest(self.timeline_path)
+            if digest is None or _file_stamp(self.timeline_path) != self.stamp:
+                return
+            self.saved = save_index(self, index_path_for(self.timeline_path), self.stamp, digest)
 
 
 def build_timeline_index(events: Sequence[object]) -> TimelineIndex:
@@ -390,11 +442,12 @@ def index_path_for(timeline_path: Path) -> Path:
     return timeline_path.with_name(INDEX_FILE_NAME)
 
 
-def _header(count: int, stamp: tuple[int, int]) -> dict[str, object]:
+def _header(count: int, stamp: tuple[int, int], digest: str | None) -> dict[str, object]:
     return {
         "version": INDEX_VERSION,
         "timeline_size": stamp[0],
         "timeline_mtime_ns": stamp[1],
+        "timeline_digest": digest,
         "count": count,
         "rules": RULES_FINGERPRINT,
         "content_ids": list(CONTENT_IDS),
@@ -402,11 +455,12 @@ def _header(count: int, stamp: tuple[int, int]) -> dict[str, object]:
     }
 
 
-def save_index(index: TimelineIndex, index_path: Path, stamp: tuple[int, int]) -> bool:
-    """Write a complete index atomically; ``False`` (memory only) when the folder is not writable."""
+def save_index(index: TimelineIndex, index_path: Path, stamp: tuple[int, int], digest: str | None) -> bool:
+    """Write a complete index atomically; ``False`` (memory only) when the folder is not writable
+    or writing fails in any other way (the temporary file is removed then)."""
     if index.epoch_us is None or index.has_offset is None or index.content_mask is None or index.partial is None:
         return False
-    header = json.dumps(_header(index.count, stamp), separators=(",", ":")).encode("utf-8")
+    header = json.dumps(_header(index.count, stamp, digest), separators=(",", ":")).encode("utf-8")
     temp = index_path.with_name(f"{index_path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
     try:
         with temp.open("wb") as handle:
@@ -419,18 +473,20 @@ def save_index(index: TimelineIndex, index_path: Path, stamp: tuple[int, int]) -
             handle.write(index.partial)
         os.replace(temp, index_path)
         return True
-    except OSError as exc:
+    except Exception as exc:
         LOGGER.info("timeline index not saved to %s (memory only): %s", index_path, exc)
         try:
-            temp.unlink()
+            temp.unlink(missing_ok=True)
         except OSError:
             pass
         return False
 
 
-def load_index(index_path: Path, stamp: tuple[int, int] | None, count: int | None = None) -> TimelineIndex | None:
-    """The saved index when its header matches ``stamp`` (and ``count``), else ``None``."""
-    if stamp is None:
+def load_index(
+    index_path: Path, stamp: tuple[int, int] | None, count: int | None = None, digest: str | None = None
+) -> TimelineIndex | None:
+    """The saved index when its header matches ``stamp``, ``digest`` (and ``count``), else ``None``."""
+    if stamp is None or digest is None:
         return None
     try:
         with index_path.open("rb") as handle:
@@ -443,7 +499,7 @@ def load_index(index_path: Path, stamp: tuple[int, int] | None, count: int | Non
             if not isinstance(header, dict) or not isinstance(header.get("count"), int):
                 return None
             total = header["count"]
-            if header != _header(total, stamp) or (count is not None and total != count) or total < 0:
+            if header != _header(total, stamp, digest) or (count is not None and total != count) or total < 0:
                 return None
             epoch = array("q")
             epoch.fromfile(handle, total)
@@ -467,14 +523,21 @@ def write_timeline_index(events: Sequence[object], timeline_path: Path) -> Path 
     if stamp is None:
         return None
     target = index_path_for(timeline_path)
-    return target if save_index(build_timeline_index(events), target, stamp) else None
+    digest = head_tail_digest(timeline_path)
+    return target if save_index(build_timeline_index(events), target, stamp, digest) else None
 
 
-def open_index(timeline_path: Path, count: int) -> TimelineIndex:
+def open_index(timeline_path: Path, count: int, stamp: tuple[int, int] | None = None) -> TimelineIndex:
     """The saved index when it matches the timeline revision, else an empty one to fill (with no
-    ``timeline_path`` -- nothing to save -- when index files must not be written)."""
-    stamp = _file_stamp(timeline_path)
-    found = load_index(index_path_for(timeline_path), stamp, count)
+    ``timeline_path`` -- nothing to save -- when index files must not be written).
+
+    ``stamp`` is the ``(size, mtime_ns)`` taken before the events were read (default: now). When
+    the file no longer has it the events may be of another revision: the index stays in memory."""
+    current = _file_stamp(timeline_path)
+    stamp = current if stamp is None else stamp
+    if stamp is None or current != stamp:
+        return TimelineIndex(count, stamp=stamp, timeline_path=None)
+    found = load_index(index_path_for(timeline_path), stamp, count, head_tail_digest(timeline_path))
     if found is not None:
         return found
     return TimelineIndex(count, stamp=stamp, timeline_path=timeline_path if index_persist_enabled() else None)
@@ -694,7 +757,8 @@ _BACKGROUND_LOCK = threading.Lock()
 
 
 def _yield_to_requests() -> None:
-    """Background build: give the GIL to request threads between slices."""
+    """Background build: give the GIL to request threads between slices (skipped while a request
+    waits for the column being built: ``TimelineIndex._paced``)."""
     time.sleep(BACKGROUND_PAUSE_S)
 
 
@@ -733,6 +797,15 @@ def wait_for_background(timeout: float = 30.0) -> bool:
         return not _BACKGROUND
 
 
+def _output_file_stamp(stamp: tuple[object, ...], timeline_path: Path) -> tuple[int, int] | None:
+    """``(size, mtime_ns)`` of ``timeline_path`` in an ``output_stamp`` (``None``: not there)."""
+    if len(stamp) == 1 and isinstance(stamp[0], tuple) and len(stamp[0]) == 3:
+        path, size, mtime = stamp[0]
+        if path == str(timeline_path) and type(size) is int and type(mtime) is int and size >= 0:
+            return size, mtime
+    return None
+
+
 def timeline_positions(
     run_id: str,
     timeline_path: Path,
@@ -741,11 +814,17 @@ def timeline_positions(
     stamp: tuple[object, ...],
 ) -> Callable[[], Iterable[int]]:
     """``MATCH_CACHE`` compute of ``GET /timeline``: positions from the run's index, or the
-    predicate scan when the index cannot be used (an index problem never fails the request)."""
+    predicate scan when the index cannot be used (an index problem never fails the request).
+
+    ``stamp`` is ``row_conditions.output_stamp(timeline_path)`` taken *before* ``events`` were read
+    (the route does so); its ``(size, mtime_ns)`` is the revision the index describes."""
+    file_stamp = _output_file_stamp(stamp, timeline_path)
 
     def compute() -> Iterable[int]:
         try:
-            index = TIMELINE_INDEXES.get_or_build((run_id, stamp), lambda: open_index(timeline_path, len(events)))
+            index = TIMELINE_INDEXES.get_or_build(
+                (run_id, stamp), lambda: open_index(timeline_path, len(events), file_stamp)
+            )
             if index.count == len(events):
                 positions = evaluate_building(index, events, conditions)
                 if not index.complete() or not index.saved:

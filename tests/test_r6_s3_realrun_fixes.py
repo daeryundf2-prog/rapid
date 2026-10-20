@@ -86,7 +86,7 @@ class OutputJsonCacheTests(unittest.TestCase):
             small = [base / f"small-{number}.json" for number in range(3)]
             for number, path in enumerate(small):
                 path.write_text(json.dumps({"n": number}), encoding="utf-8")
-            cache = OutputJsonCache(max_entries=8, max_bytes=100)
+            cache = OutputJsonCache(max_entries=8, max_bytes=100, max_large_entries=1)
             first = cache.read(big)
             for path in small:
                 cache.read(path)

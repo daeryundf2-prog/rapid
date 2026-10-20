@@ -391,3 +391,10 @@ AhnLab V3 로그, adb 백업 내부 DB → 기존 앱 파서, 이미지에서 `$
 - 1만 개 묶음 상한(`clusters_truncated`: "묶음이 많아 처음 N개만 받았습니다(전체 M개)")과 색인·필터 읽기 상한(`truncated`: 건수 "N건 이상" + 일부 행만 묶었다는 메모)을 따로 표시. 묶음 aria-label 건수 `ko-KR` 표기.
 - 범주 노드는 실행 트리(`run-tree` 캐시)의 종류로 `kindsForCategory`를 계산해 묶음 요청 한 번(트리 없을 때만 종전 두 번). 백엔드 변경 없음.
 - 그 밖: `building` 폴링 5분 상한 후 불러온 행 기준 묶음 + 한국어 안내; 런 종료 시 `geo-clusters` 무효화(실행 중 409 대체 고착 방지, `RUN_FINISH_QUERY_KEYS`); 서버 묶음 대기 중 "묶음 불러오는 중…"; 묶음 단추 처음 300개 + "묶음 N개 더 보기"(새 첫 단추로 포커스); 선택 묶음·표시 수는 런·노드별; `/artifacts` `cross_kind.geo_index`(`building`/`truncated`/`unavailable`)를 좌표 표 메모로; 서버가 0건이라 해도 목록에 위치 행이 있으면 빈 상태 대신 불러온 행 기준 묶음. 시험은 `frontend/src/features/views/MapView.test.tsx`("console review fixes"), `features/tree/runFinish.test.tsx`.
+
+### 적대적 리뷰 후속 수정(단계 3 백엔드)
+- 브랜치 `fix/r6-s3-backend-review`(기준 `feat/r6-s3-perf` c27d6e4). 회귀 시험 `tests/test_r6_s3_backend_review.py`(리뷰어 재현 스크립트를 합성 데이터 시험으로 옮김; 시간대·무작위 조건 퍼즈는 기존 동등성 시험이 다룸).
+- 중간: 근접 묶음 상자 — 첫·마지막 칸 경계를 정확히 ±90°/±180°로, 1e-9 보정 대신 상자 경계 기준 배정(묶음 `box` 재조회 = `count`); 요청이 기다리는 열은 배경 작성이 쉼 없이 마침; 큰 출력 JSON 캐시 칸 2개와 실제 메모리 상한 문서화.
+- 낮음: 심어진·손상된 위치 행 색인 파일은 검증 후 무시·재작성(500 없음), 빌드 실패는 60초 뒤 재시도.
+- 그 밖: 읽기 전 스탬프(타임라인 경로·위치 행 스캔), 색인 파일의 처음·끝 64 KB 다이제스트(타임라인 색인 형식 버전 2), 규칙 지문에 부정어 포함, `GeoEntry` slots·캐시 런 4개, 늦게 끝난 옛 스탬프 빌드가 새 항목을 밀어내지 않음, `.tmp` 정리, perf 스크립트 배경 작성 대기. 세부는 `docs/rapidtriage-known-limitations.md` `## R6 S3`.
+- 남은 한계: 콘솔 `geo.ts` `clusterRows`(서버 없는 대체 경로)는 아직 1e-9 보정 규칙 — 콘솔 담당 작업에서 맞춘다.

@@ -11,7 +11,13 @@ build per key through :class:`SingleFlightIndexCache`). An output folder that ca
 memory only (``source: memory``) -- never an error.
 
 The file's ``stamp`` lists ``(kind, file name, size, mtime_ns)`` of every kind's payload JSON and
-JSONL stream; any change rebuilds the index (a stale file is ignored).
+JSONL stream, taken before the scan reads them; any change rebuilds the index (a stale file is
+ignored; a source rewritten during the scan keeps the index in memory under the old stamp). The
+file also carries ``digests`` (``index_cache.head_tail_digest`` of each of those files) so a
+rewrite keeping size and mtime is noticed too. A stored file that does not validate (rows outside
+-90..90 / -180..180, non-finite numbers, negative indexes, an unknown kind, more than
+:data:`GEO_INDEX_MAX_ROWS` rows, nesting the JSON parser rejects) is ignored and rebuilt -- never a
+500. A failed build is reported ``unavailable`` for :data:`GEO_INDEX_RETRY_SECONDS`, then retried.
 
 Consumers:
 
@@ -19,9 +25,13 @@ Consumers:
   from the index and only those records are read (by byte offset); other filters (path, type,
   channel, field, flag, row conditions) are applied to those rows only.
 * ``GET /api/runs/{id}/geo-clusters`` (:func:`build_clusters`): grid clusters (default 0.01°)
-  with count, first / last time and one representative row -- the same cell rule as the
-  console's ``geo.ts`` ``clusterRows`` (floor with a 1e-9 epsilon, the last cell clamped at
-  90° / 180°, boxes half-open like ``row_conditions.in_geo_box``).
+  with count, first / last time and one representative row. A cell's box edges are
+  ``round6(index * cell)`` (the console's ``Math.round(x * 1e6) / 1e6``), except that the first
+  cell starts at exactly -90° / -180° and the last one (clamped, also holding a cell that does not
+  divide 90 / 180 evenly) ends at exactly 90° / 180°. A row goes to the cell whose box
+  (half-open, like ``row_conditions.in_geo_box``) holds it, so re-querying a cluster's ``box``
+  returns exactly its ``count`` rows (adversarial review of R6 S3: the console's ``geo.ts``
+  floor-with-1e-9 rule put e.g. 89.9995° at cell 0.007° in a box ending at 89.999°).
 
 Rows with coordinates hold one of the exact keys ``gps_latitude`` / ``latitude`` / ``lat``
 (:data:`row_conditions.COORDINATE_KEYS`), so the build parses only JSONL lines whose raw bytes
@@ -46,7 +56,7 @@ from typing import BinaryIO
 
 from ...core.artifact_profiles import payload_record_count
 from .artifact_sort import TIME_KEYS
-from .index_cache import SingleFlightIndexCache, index_persist_enabled
+from .index_cache import SingleFlightIndexCache, head_tail_digest, index_persist_enabled
 from .jsonl_records import (
     expand_row,
     iter_artifact_records,
@@ -64,7 +74,9 @@ GEO_INDEX_FORMAT = "rapidtriage-geo-index-v1"
 GEO_INDEX_MAX_ROWS = 500_000
 # Seconds a request waits for a background build before answering ``building``.
 GEO_INDEX_WAIT_SECONDS = 1.0
-GEO_INDEX_CACHE_RUNS = 8
+GEO_INDEX_CACHE_RUNS = 4
+# Seconds a failed build is reported ``unavailable`` before a request tries again.
+GEO_INDEX_RETRY_SECONDS = 60.0
 DEFAULT_CELL_DEGREES = 0.01
 MIN_CELL_DEGREES = 0.001
 MAX_CELL_DEGREES = 1.0
@@ -80,7 +92,7 @@ _COORDINATE_KEY = re.compile(rb'"(?:gps_)?lat(?:itude)?"')
 Source = tuple[str, Mapping[str, object], Path]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class GeoEntry:
     record_index: int
     offset: int  # byte offset of the JSONL line; -1 for inline payloads
@@ -278,9 +290,16 @@ def _scan_jsonl(
     return found, index, False
 
 
-def scan_geo_index(sources: Sequence[Source], *, max_rows: int | None = None) -> GeoIndex:
-    """Build the index with one pass over every kind (kind order: alphabetical)."""
+def scan_geo_index(
+    sources: Sequence[Source],
+    *,
+    max_rows: int | None = None,
+    stamp: tuple[tuple[object, ...], ...] | None = None,
+) -> GeoIndex:
+    """Build the index with one pass over every kind (kind order: alphabetical). ``stamp`` (default:
+    taken now, before any file is read) is the revision the index describes."""
     max_rows = GEO_INDEX_MAX_ROWS if max_rows is None else max_rows
+    stamp = sources_stamp(sources) if stamp is None else stamp
     started = time.perf_counter()
     by_kind: dict[str, list[GeoEntry]] = {}
     scanned = 0
@@ -295,7 +314,7 @@ def scan_geo_index(sources: Sequence[Source], *, max_rows: int | None = None) ->
             by_kind[kind] = rows
         truncated = cut
     return GeoIndex(
-        stamp=sources_stamp(sources),
+        stamp=stamp,
         kinds=tuple(kind for kind, _payload, _path in ordered),
         by_kind=by_kind,
         truncated=truncated,
@@ -311,8 +330,24 @@ def _jsonable_stamp(stamp: tuple[tuple[object, ...], ...]) -> list[list[object]]
     return [list(item) for item in stamp]
 
 
-def write_geo_index_file(index: GeoIndex, output_dir: Path) -> Path:
-    """Atomically write ``rapidtriage-geo-index.json`` (``OSError`` when the folder is read-only)."""
+def stamp_digests(
+    stamp: tuple[tuple[object, ...], ...], output_dir: Path, sources: Sequence[Source] | None = None
+) -> list[object]:
+    """:func:`index_cache.head_tail_digest` of the files a stamp lists (payload, JSONL per kind)."""
+    paths: dict[str, tuple[Path, Path | None]] = {}
+    for kind, payload, payload_path in sources or ():
+        paths[kind] = (Path(payload_path), jsonl_records_path(payload, payload_path))
+    out: list[object] = []
+    for item in stamp:
+        kind = str(item[0])
+        payload_path, records = paths.get(kind, (Path(output_dir) / str(item[1]), None))
+        out.append([head_tail_digest(payload_path), head_tail_digest(records) if records is not None else None])
+    return out
+
+
+def write_geo_index_file(index: GeoIndex, output_dir: Path, sources: Sequence[Source] | None = None) -> Path:
+    """Atomically write ``rapidtriage-geo-index.json`` (``OSError`` when the folder is read-only;
+    the temporary file is removed on any error)."""
     kinds = list(index.kinds)
     position = {kind: number for number, kind in enumerate(kinds)}
     rows = [
@@ -324,6 +359,7 @@ def write_geo_index_file(index: GeoIndex, output_dir: Path) -> Path:
         "format": GEO_INDEX_FORMAT,
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "stamp": _jsonable_stamp(index.stamp),
+        "digests": stamp_digests(index.stamp, output_dir, sources),
         "kinds": kinds,
         "max_rows": GEO_INDEX_MAX_ROWS,
         "truncated": index.truncated,
@@ -338,7 +374,7 @@ def write_geo_index_file(index: GeoIndex, output_dir: Path) -> Path:
         with open(temp, "w", encoding="utf-8", newline="\n") as handle:
             json.dump(document, handle, ensure_ascii=False, separators=(",", ":"))
         os.replace(temp, target)
-    except OSError:
+    except BaseException:
         try:
             temp.unlink(missing_ok=True)
         except OSError:
@@ -347,61 +383,99 @@ def write_geo_index_file(index: GeoIndex, output_dir: Path) -> Path:
     return target
 
 
-def read_geo_index_file(output_dir: Path, stamp: tuple[tuple[object, ...], ...]) -> GeoIndex | None:
-    """The stored index when its stamp matches ``stamp`` (``None``: missing, unreadable or stale)."""
+def _finite(value: object, low: float, high: float) -> float:
+    """``value`` as a float in ``low``..``high`` (``ValueError`` otherwise: bool, NaN, inf, text)."""
+    if type(value) is not float and type(value) is not int:
+        raise ValueError("not a number")
+    number = float(value)
+    if not (math.isfinite(number) and low <= number <= high):
+        raise ValueError("out of range")
+    return number
+
+
+def _count(value: object, low: int) -> int:
+    if type(value) is not int or value < low:
+        raise ValueError("not an integer in range")
+    return value
+
+
+def _stored_entry(item: object, kinds: int) -> tuple[int, GeoEntry]:
+    """One stored row (``ValueError`` when any value is outside what the scan writes)."""
+    if type(item) is not list or len(item) != 7:
+        raise ValueError("row shape")
+    kind = _count(item[0], 0)
+    if kind >= kinds:
+        raise ValueError("kind index")
+    time_text = item[5]
+    if time_text is not None and type(time_text) is not str:
+        raise ValueError("time text")
+    epoch = None if item[6] is None else _finite(item[6], -1e13, 1e13)
+    entry = GeoEntry(
+        _count(item[1], 0), _count(item[2], -1), _finite(item[3], -90, 90), _finite(item[4], -180, 180), time_text, epoch
+    )
+    return kind, entry
+
+
+def read_geo_index_file(
+    output_dir: Path, stamp: tuple[tuple[object, ...], ...], sources: Sequence[Source] | None = None
+) -> GeoIndex | None:
+    """The stored index when its stamp (and, given ``sources``, the file digests) match and every
+    row validates (``None``: missing, unreadable, stale or invalid -- the caller rebuilds it)."""
     path = Path(output_dir) / GEO_INDEX_FILE_NAME
     try:
         with open(path, encoding="utf-8") as handle:
             document = json.load(handle)
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError, OverflowError, MemoryError):
         return None
-    if not isinstance(document, dict) or document.get("format") != GEO_INDEX_FORMAT:
-        return None
-    if document.get("stamp") != _jsonable_stamp(stamp):
-        return None
-    kinds = document.get("kinds")
-    rows = document.get("rows")
-    if not isinstance(kinds, list) or not isinstance(rows, list):
-        return None
-    by_kind: dict[str, list[GeoEntry]] = {}
     try:
+        if not isinstance(document, dict) or document.get("format") != GEO_INDEX_FORMAT:
+            return None
+        if document.get("stamp") != _jsonable_stamp(stamp):
+            return None
+        if sources is not None and document.get("digests") != stamp_digests(stamp, output_dir, sources):
+            return None
+        kinds = document.get("kinds")
+        rows = document.get("rows")
+        if type(kinds) is not list or type(rows) is not list or not all(type(kind) is str for kind in kinds):
+            return None
+        if len(rows) > GEO_INDEX_MAX_ROWS:
+            return None
+        by_kind: dict[str, list[GeoEntry]] = {}
         for item in rows:
-            kind = str(kinds[int(item[0])])
-            by_kind.setdefault(kind, []).append(
-                GeoEntry(
-                    int(item[1]),
-                    int(item[2]),
-                    float(item[3]),
-                    float(item[4]),
-                    None if item[5] is None else str(item[5]),
-                    None if item[6] is None else float(item[6]),
-                )
-            )
-    except (IndexError, TypeError, ValueError):
+            kind_index, entry = _stored_entry(item, len(kinds))
+            by_kind.setdefault(kinds[kind_index], []).append(entry)
+        truncated = document.get("truncated")
+        scanned = document.get("scanned")
+        return GeoIndex(
+            stamp=stamp,
+            kinds=tuple(kinds),
+            by_kind=by_kind,
+            truncated=truncated is True,
+            scanned=scanned if type(scanned) is int and scanned >= 0 else 0,
+            source="file",
+        )
+    except (IndexError, TypeError, ValueError, KeyError, RecursionError, OverflowError) as exc:
+        LOGGER.info("geo index file %s ignored (invalid: %s); rebuilding", path, exc)
         return None
-    return GeoIndex(
-        stamp=stamp,
-        kinds=tuple(str(kind) for kind in kinds),
-        by_kind=by_kind,
-        truncated=bool(document.get("truncated")),
-        scanned=int(document.get("scanned") or 0),
-        source="file",
-    )
 
 
 def load_or_build(sources: Sequence[Source], output_dir: Path | None) -> GeoIndex:
     """The stored index when current, else a new one (written next to the outputs when possible)."""
     stamp = sources_stamp(sources)
     if output_dir is not None:
-        stored = read_geo_index_file(output_dir, stamp)
+        stored = read_geo_index_file(output_dir, stamp, sources)
         if stored is not None:
             return stored
-    index = scan_geo_index(sources)
+    index = scan_geo_index(sources, stamp=stamp)
     if output_dir is None or not index_persist_enabled():
         index.source = "memory"
         return index
+    if sources_stamp(sources) != stamp:
+        # A source changed while it was scanned: keep the index (under the old stamp) in memory.
+        index.source = "memory"
+        return index
     try:
-        write_geo_index_file(index, output_dir)
+        write_geo_index_file(index, output_dir, sources)
     except OSError as exc:
         LOGGER.info("geo index kept in memory (output folder not writable): %s", exc)
         index.source = "memory"
@@ -413,7 +487,7 @@ def write_run_geo_index(output_dir: Path, sources: Sequence[Source]) -> dict[str
     started = time.perf_counter()
     try:
         index = scan_geo_index(sources)
-        path = write_geo_index_file(index, output_dir)
+        path = write_geo_index_file(index, output_dir, sources)
     except Exception as exc:  # the run stays usable: the API builds the index on demand
         return {
             "status": "failed",
@@ -449,7 +523,18 @@ class GeoIndexService:
         self.cache = _GeoCache(max_runs)
         self._lock = threading.Lock()
         self._threads: dict[tuple[object, ...], threading.Thread] = {}
-        self._failed: dict[tuple[object, ...], str] = {}
+        # key -> (error, monotonic time of the failure); retried after GEO_INDEX_RETRY_SECONDS.
+        self._failed: dict[tuple[object, ...], tuple[str, float]] = {}
+
+    def _failed_recently(self, key: tuple[object, ...]) -> bool:
+        """Whether ``key`` failed less than :data:`GEO_INDEX_RETRY_SECONDS` ago (caller holds the lock)."""
+        failure = self._failed.get(key)
+        if failure is None:
+            return False
+        if _now() - failure[1] < GEO_INDEX_RETRY_SECONDS:
+            return True
+        del self._failed[key]
+        return False
 
     def clear(self) -> None:
         self.cache.clear()
@@ -470,7 +555,7 @@ class GeoIndexService:
         if found is not None:
             return found, "ready"
         with self._lock:
-            if key in self._failed:
+            if self._failed_recently(key):
                 return None, "unavailable"
             thread = self._threads.get(key)
             if thread is None:
@@ -484,7 +569,7 @@ class GeoIndexService:
         if found is not None:
             return found, "ready"
         with self._lock:
-            return None, "unavailable" if key in self._failed else "building"
+            return None, "unavailable" if self._failed_recently(key) else "building"
 
     def _build(self, key: tuple[object, ...], sources: list[Source], output_dir: Path | None) -> None:
         try:
@@ -494,10 +579,14 @@ class GeoIndexService:
             with self._lock:
                 if len(self._failed) > 64:
                     self._failed.clear()
-                self._failed[key] = f"{type(exc).__name__}: {exc}"
+                self._failed[key] = (f"{type(exc).__name__}: {exc}", _now())
         finally:
             with self._lock:
                 self._threads.pop(key, None)
+
+
+def _now() -> float:
+    return time.monotonic()
 
 
 GEO_INDEX_SERVICE = GeoIndexService()
@@ -696,10 +785,31 @@ def _number_text(value: float) -> str:
     return repr(value)
 
 
+def _last_cell(limit: float, cell: float) -> int:
+    return round(limit / cell) - 1
+
+
+def cell_edge(index: int, limit: float, cell: float) -> float:
+    """Lower edge of cell ``index`` (the upper edge of ``index - 1``): ``round6(index * cell)``,
+    exactly ``-limit`` for the first cell and ``limit`` past the last (clamped) one."""
+    last = _last_cell(limit, cell)
+    if index <= -last - 1:
+        return -float(limit)
+    if index > last:
+        return float(limit)
+    return _js_round6(index * cell)
+
+
 def cell_of(value: float, limit: float, cell: float) -> int:
-    """Grid cell index (``geo.ts`` ``cell``): floor with a 1e-9 epsilon, clamped to the last cell."""
-    last = round(limit / cell) - 1
-    return max(-last - 1, min(last, math.floor(value / cell + 1e-9)))
+    """Grid cell index of ``value``: the cell whose half-open box ``[edge(i), edge(i + 1))`` holds
+    it (``limit`` itself in the last cell), clamped to the first / last cell."""
+    last = _last_cell(limit, cell)
+    index = max(-last - 1, min(last, math.floor(value / cell)))
+    while index > -last - 1 and value < cell_edge(index, limit, cell):
+        index -= 1
+    while index < last and value >= cell_edge(index + 1, limit, cell):
+        index += 1
+    return index
 
 
 def build_clusters(
@@ -726,8 +836,8 @@ def build_clusters(
                 group["last"] = entry
     out: list[dict[str, object]] = []
     for (lat_cell, lon_cell), group in groups.items():
-        lat0, lon0 = _js_round6(lat_cell * cell), _js_round6(lon_cell * cell)
-        lat1, lon1 = _js_round6(lat0 + cell), _js_round6(lon0 + cell)
+        lat0, lon0 = cell_edge(lat_cell, 90, cell), cell_edge(lon_cell, 180, cell)
+        lat1, lon1 = cell_edge(lat_cell + 1, 90, cell), cell_edge(lon_cell + 1, 180, cell)
         sample_kind, sample = group["sample"]  # type: ignore[misc]
         first, last = group["first"], group["last"]
         out.append(
