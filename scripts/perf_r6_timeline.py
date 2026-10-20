@@ -19,8 +19,11 @@
 #     "with_file" = the index written at run completion; "next_page" = the second page (MATCH_CACHE);
 #     "memory_extra_mb" = memory retained by the index + matched positions (tracemalloc, one pass);
 #     "baseline_scan_s" = the predicate scan the index replaces (one pass).
-#   * --run <dir>: an existing run output folder, read-only -- the index file is never written
-#     ("memory" scenario = no file read or written; "as_is" = the folder's index file if present).
+#   * --run <dir>: an existing run output folder, read-only -- RAPIDTRIAGE_INDEX_PERSIST=0 keeps every
+#     index the API builds in memory ("no_file" = no file read or written; "as_is" = the folder's own
+#     index file if present). "with_file" copies the timeline into a temporary folder (--scratch,
+#     default the system temp folder), writes the index there and measures that copy. The run folder
+#     listing (path, size, mtime) is compared before / after: any change fails the run.
 #   Targets (Q-S3-2): no_file first page <= 1.0 s, with_file first page <= 0.3 s, next page <= 0.05 s,
 #   memory extra <= 30 MB. Exit code 1 when a target is missed, 2 on input errors.
 # ------------------
@@ -38,6 +41,7 @@ import contextlib
 import gc
 import json
 import random
+import shutil
 import statistics
 import sys
 import tempfile
@@ -50,6 +54,15 @@ from unittest import mock
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+SCRIPTS = Path(__file__).resolve().parent
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
+
+from perf_r6_common import (
+    folder_snapshot,
+    index_persist,
+    snapshot_changes,
+)
 
 TOKEN = "perf-r6-token"
 TIMELINE_TARGETS = {
@@ -193,13 +206,16 @@ def reset_timeline_caches() -> None:
 
 @contextlib.contextmanager
 def no_index_file() -> Iterator[None]:
-    """Memory-only index: no saved file is read or written (read-only folder, older run)."""
+    """Memory-only index: no saved file is read or written (read-only folder, older run). The
+    background completion of the last request is joined inside the block: patching ``save_index``
+    alone let that thread write rapidtriage-timeline-index.bin into the run folder after the block."""
     from rapidtriage.api.app import timeline_index
 
-    with mock.patch.object(timeline_index, "load_index", return_value=None), mock.patch.object(
-        timeline_index, "save_index", return_value=False
-    ):
-        yield
+    with mock.patch.object(timeline_index, "load_index", return_value=None), index_persist(False):
+        try:
+            yield
+        finally:
+            timeline_index.wait_for_background(300)
 
 
 def first_and_next(client: object, run_id: str, query: str) -> tuple[float, float, int]:
@@ -259,14 +275,33 @@ def timeline_baseline(store_events: list[object]) -> float:
     return round(seconds, 3)
 
 
+def timeline_copy(timeline_path: Path, events: list[object], scratch: Path) -> tuple[Path, float]:
+    """A run folder in ``scratch`` holding a copy of the timeline and its index file (written there,
+    never next to the original): the "with index file" case of a read-only ``--run``."""
+    from rapidtriage.api.app import timeline_index
+
+    run_dir = scratch / "run-copy"
+    run_dir.mkdir()
+    copy = run_dir / timeline_path.name
+    shutil.copyfile(timeline_path, copy)
+    write_run_summary(run_dir, {"timeline": str(copy)})
+    seconds, written = timed(lambda: timeline_index.write_timeline_index(events, copy))
+    if written is None:
+        raise RuntimeError(f"timeline index not written to {run_dir}")
+    return run_dir, seconds
+
+
 def measure_timeline(args: argparse.Namespace) -> dict[str, object]:
     from rapidtriage.api.app import timeline_index
 
     report: dict[str, object] = {"mode": "timeline", "repeat": args.repeat, "page": PAGE}
+    before: dict[str, tuple[int, int]] = {}
     with contextlib.ExitStack() as stack:
         if args.run:
             run_dir = Path(args.run)
             report["source"] = {"run": str(run_dir)}
+            before = folder_snapshot(run_dir)
+            stack.enter_context(index_persist(False))  # --run is read-only: indexes stay in memory
         else:
             temp = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix="perf-r6-timeline-")))
             seconds, run_dir = timed(lambda: synthetic_timeline_run(temp, args.events))
@@ -280,20 +315,34 @@ def measure_timeline(args: argparse.Namespace) -> dict[str, object]:
 
         with no_index_file():
             report["no_file"] = timeline_scenario(client, run_id, args.repeat, lambda: None)
+        report.update(timeline_memory(client, run_id))
+        report["baseline_scan_s"] = timeline_baseline(events)  # type: ignore[arg-type]
+        reset_timeline_caches()
         if args.run:
-            # Read-only: the run folder's own index file when present, never a written one.
+            # The run folder's own index file when present (read, never written).
             if timeline_index.index_path_for(timeline_path).exists():
-                with mock.patch.object(timeline_index, "save_index", return_value=False):
-                    report["as_is"] = timeline_scenario(client, run_id, args.repeat, lambda: None)
+                report["as_is"] = timeline_scenario(client, run_id, args.repeat, lambda: None)
             else:
                 report["as_is"] = {"skipped": "no index file in the run folder"}
+            scratch = Path(
+                stack.enter_context(tempfile.TemporaryDirectory(prefix="perf-r6-timeline-copy-", dir=args.scratch))
+            )
+            copy_dir, persist_s = timeline_copy(timeline_path, events, scratch)  # type: ignore[arg-type]
+            report["persist_build_s"] = round(persist_s, 2)
+            copy_client, _copy_store, copy_id = api_client(copy_dir)
+            copy_load_s, _ = timed(lambda: get_json(copy_client, f"/api/runs/{copy_id}/timeline?limit=1"))
+            report["with_file_source"] = {"copy": "temporary folder, deleted afterwards", "json_load_s": round(copy_load_s, 2)}
+            report["with_file"] = timeline_scenario(copy_client, copy_id, args.repeat, lambda: None)
         else:
             persist_s, _ = timed(lambda: timeline_index.write_timeline_index(events, timeline_path))  # type: ignore[arg-type]
             report["persist_build_s"] = round(persist_s, 2)
             report["with_file"] = timeline_scenario(client, run_id, args.repeat, lambda: None)
-        report.update(timeline_memory(client, run_id))
-        report["baseline_scan_s"] = timeline_baseline(events)  # type: ignore[arg-type]
         reset_timeline_caches()
+    if args.run:
+        changes = snapshot_changes(before, folder_snapshot(Path(args.run)))
+        report["run_folder_unchanged"] = not changes
+        if changes:
+            report["run_folder_changes"] = changes[:50]
 
     measured = {
         "no_file_first_page_s": report["no_file"]["first_page_s"],  # type: ignore[index]
@@ -308,7 +357,9 @@ def measure_timeline(args: argparse.Namespace) -> dict[str, object]:
         key: {"measured": value, "target": TIMELINE_TARGETS[key], "ok": float(value) <= TIMELINE_TARGETS[key]}  # type: ignore[arg-type]
         for key, value in measured.items()
     }
-    report["ok"] = all(item["ok"] for item in report["targets"].values())  # type: ignore[union-attr]
+    report["ok"] = all(item["ok"] for item in report["targets"].values()) and bool(  # type: ignore[union-attr]
+        report.get("run_folder_unchanged", True)
+    )
     return report
 
 
@@ -329,6 +380,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--events", type=int, default=500_000, help="synthetic timeline events (default 500000)")
     parser.add_argument("--repeat", type=int, default=5, help="runs per measurement, median reported (default 5)")
     parser.add_argument("--output", help="write the JSON report here")
+    parser.add_argument("--scratch", help="--run: folder for the temporary timeline copy (default: system temp)")
     args = parser.parse_args(argv)
     if not any(getattr(args, mode) for mode in MODES):
         parser.error("choose at least one mode: " + ", ".join(f"--{mode}" for mode in MODES))

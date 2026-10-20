@@ -32,6 +32,7 @@ from ...core.jobs import (
     RunJobStore,
     RunOutputDirBusy,
     RunRequest,
+    read_output_json,
     run_output_dir,
 )
 from ...core.run.plan import PlanTargetError, plan_counts_brief, validate_skip_targets
@@ -1060,12 +1061,16 @@ def build_runs_router(
 
 
     def _artifact_sources(run_id: str, kinds: Sequence[str]) -> list[tuple[str, dict[str, object], Path]]:
-        """``(kind, payload, payload path)`` of each kind (409 / 403 / 404 like the listing)."""
+        """``(kind, payload, payload path)`` of each kind (409 / 403 / 404 like the listing).
+
+        One ``output_path`` per kind (path checks resolve the path and the output folder: ~0.1 ms
+        each on Windows, and a real run has ~30 kinds read by every map / cross-kind request)."""
         sources = []
         for item in kinds:
             name = f"artifacts_{item}"
             try:
-                sources.append((item, store.read_output(run_id, name), get_output_path(store, run_id, name)))
+                path = store.output_path(run_id, name)
+                sources.append((item, read_output_json(path), path))
             except RuntimeError as exc:
                 raise HTTPException(status_code=409, detail=str(exc))
             except PermissionError as exc:

@@ -2,12 +2,23 @@
 
 from __future__ import annotations
 
+import os
 import threading
 from collections import OrderedDict
 from collections.abc import Callable
 from typing import Generic, TypeVar
 
 IndexT = TypeVar("IndexT")
+
+# ``0`` / ``false`` / ``no`` / ``off``: the API keeps every index it builds on demand (timeline
+# column index, located-row index) in memory only and never writes an index file next to the run
+# outputs (benchmarks over a real run folder, read-only review copies). Saved files are still read.
+INDEX_PERSIST_ENV = "RAPIDTRIAGE_INDEX_PERSIST"
+
+
+def index_persist_enabled() -> bool:
+    """Whether on-demand index builds may write their file next to the run outputs (default yes)."""
+    return os.environ.get(INDEX_PERSIST_ENV, "").strip().lower() not in {"0", "false", "no", "off"}
 
 
 class SingleFlightIndexCache(Generic[IndexT]):

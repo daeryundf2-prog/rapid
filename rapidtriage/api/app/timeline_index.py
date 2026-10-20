@@ -23,8 +23,9 @@ mtime, the event count and a fingerprint of the content / partial rules. A run w
 timeline stage completes (:func:`write_timeline_index`). An older run gets it on its first
 conditioned request: the columns that request needs are built first (a time condition only parses
 the timestamps), the rest -- and the file -- follow (in the background for a large timeline). A
-header that does not match is ignored and the index rebuilt; a folder that cannot be written keeps
-the index in memory only. Any index failure falls back to the predicate scan -- never a 500.
+header that does not match is ignored and the index rebuilt; a folder that cannot be written -- or
+``RAPIDTRIAGE_INDEX_PERSIST=0`` (``index_cache.index_persist_enabled``) -- keeps the index in
+memory only. Any index failure falls back to the predicate scan -- never a 500.
 """
 
 from __future__ import annotations
@@ -43,7 +44,7 @@ from array import array
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from pathlib import Path
 
-from .index_cache import SingleFlightIndexCache
+from .index_cache import SingleFlightIndexCache, index_persist_enabled
 from .row_conditions import (
     _FRACTION,
     CONTENT_TYPES,
@@ -87,7 +88,7 @@ COLUMNS: tuple[str, ...] = (TIME, CONTENT, PARTIAL)
 # Timelines up to this many events complete their index (and file) inside the first request;
 # larger ones finish the remaining columns and the file in a background thread.
 SYNC_COMPLETE_MAX_EVENTS = 50_000
-BACKGROUND_PAUSE_S = 0.002
+BACKGROUND_PAUSE_S = 0.001
 
 
 def _rules_fingerprint() -> str:
@@ -166,14 +167,19 @@ def _details_of(row: Mapping[str, object]) -> Mapping[str, object] | None:
 
 Pause = Callable[[], None] | None
 CHUNK_ROWS = 4096
+# Background slices are small: a request thread waits for the GIL until the build pauses, so a
+# 4096-row slice (~6 ms) made the next page right after a first page cost ~45 ms on a real
+# 330k-event timeline; 512-row slices keep it at ~15-20 ms (the build itself takes ~2x longer).
+BACKGROUND_CHUNK_ROWS = 512
 
 
 def _chunks(events: Sequence[object], pause: Pause) -> Iterator[tuple[int, Sequence[object]]]:
     """``events`` in slices; ``pause`` between slices lets request threads run (background build)."""
-    for start in range(0, len(events), CHUNK_ROWS):
+    step = CHUNK_ROWS if pause is None else BACKGROUND_CHUNK_ROWS
+    for start in range(0, len(events), step):
         if pause is not None and start:
             pause()
-        yield start, events[start : start + CHUNK_ROWS]
+        yield start, events[start : start + step]
 
 
 def time_column(events: Sequence[object], pause: Pause = None) -> tuple[array, bytearray]:
@@ -358,7 +364,7 @@ class TimelineIndex:
         """All columns, then the index file when the timeline is still the indexed revision."""
         self.ensure(events, COLUMNS, pause)
         with self._lock:
-            if self.saved or self.timeline_path is None or self.stamp is None:
+            if self.saved or self.timeline_path is None or self.stamp is None or not index_persist_enabled():
                 return
             if _file_stamp(self.timeline_path) != self.stamp:
                 return
@@ -465,12 +471,13 @@ def write_timeline_index(events: Sequence[object], timeline_path: Path) -> Path 
 
 
 def open_index(timeline_path: Path, count: int) -> TimelineIndex:
-    """The saved index when it matches the timeline revision, else an empty one to fill."""
+    """The saved index when it matches the timeline revision, else an empty one to fill (with no
+    ``timeline_path`` -- nothing to save -- when index files must not be written)."""
     stamp = _file_stamp(timeline_path)
     found = load_index(index_path_for(timeline_path), stamp, count)
     if found is not None:
         return found
-    return TimelineIndex(count, stamp=stamp, timeline_path=timeline_path)
+    return TimelineIndex(count, stamp=stamp, timeline_path=timeline_path if index_persist_enabled() else None)
 
 
 # --- evaluation ----------------------------------------------------------------------------------

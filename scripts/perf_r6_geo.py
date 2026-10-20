@@ -8,8 +8,13 @@ block per mode):
   and the building path of a run without it (first request -> ``building`` -> ready).
 
 Data: ``--synthetic`` writes a temporary run (``--artifacts`` rows over ``--kinds`` kinds,
-``--located`` of them with coordinates); ``--run <dir>`` measures an existing run folder as it is
-(the API may write ``rapidtriage-geo-index.json`` there, or keep it in memory when it cannot).
+``--located`` of them with coordinates); ``--run <dir>`` measures an existing run folder read-only:
+``RAPIDTRIAGE_INDEX_PERSIST=0`` keeps the index the API builds in memory, the "index file present"
+case runs on a temporary copy of the ``artifacts_*`` payload JSONs (``--scratch``, default the system
+temp folder) with the index written there, and the run folder listing (path, size, mtime) taken
+before and after must match. Checked targets: clusters <= 0.5 s, first display with the index
+<= 2 s, first display while building (no index file: first request -> ``building`` -> ready, the
+slower of the cold first sample and the median) <= 10 s.
 
 Times are medians of ``--repeat`` runs through FastAPI's ``TestClient`` (no server, no network).
 Exit status 1 when a target is missed. Not part of CI (Antigravity request per §0).
@@ -18,7 +23,9 @@ Exit status 1 when a target is missed. Not part of CI (Antigravity request per �
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
+import shutil
 import statistics
 import sys
 import tempfile
@@ -30,6 +37,15 @@ from unittest import mock
 REPO = Path(__file__).resolve().parents[1]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
+SCRIPTS = Path(__file__).resolve().parent
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
+
+from perf_r6_common import (
+    folder_snapshot,
+    index_persist,
+    snapshot_changes,
+)
 
 TOKEN = "perf-r6-token"
 WORLD = "-90,-180,90,180"
@@ -132,108 +148,163 @@ def _geo_sources(run_dir: Path):
     return sources
 
 
-def measure_geo(run_dir: Path, *, repeat: int, synthetic: bool) -> dict[str, object]:
+def geo_copy(run_dir: Path, scratch: Path) -> Path:
+    """A run folder in ``scratch`` with copies of the run's ``artifacts_*`` payload JSONs (their JSONL
+    streams stay where they are, read only) and the located-row index written there: the "index
+    file present" case of a read-only ``--run``."""
+    from rapidtriage.api.app import geo_index
+
+    summary = json.loads((run_dir / "rapidtriage-run-summary.json").read_text(encoding="utf-8"))
+    copy_dir = scratch / "run-copy"
+    (copy_dir / "artifacts").mkdir(parents=True)
+    outputs: dict[str, str] = {}
+    for name, raw in sorted(summary["outputs"].items()):
+        if name.startswith("artifacts_") and Path(raw).is_file():
+            target = copy_dir / "artifacts" / Path(raw).name
+            shutil.copy2(raw, target)
+            outputs[name] = str(target)
+    summary_path = copy_dir / "rapidtriage-run-summary.json"
+    outputs["summary"] = str(summary_path)
+    summary_path.write_text(
+        json.dumps({**summary, "output_dir": str(copy_dir), "outputs": outputs}, ensure_ascii=False), encoding="utf-8"
+    )
+    persisted = geo_index.write_run_geo_index(copy_dir, _geo_sources(copy_dir))
+    if persisted.get("status") != "completed":
+        raise RuntimeError(f"geo index not written to {copy_dir}: {persisted}")
+    return copy_dir
+
+
+def measure_geo(run_dir: Path, *, repeat: int, synthetic: bool, scratch: str | None = None) -> dict[str, object]:
     from rapidtriage.api.app import geo_index
     from rapidtriage.api.app.artifact_filter import filter_across_kinds
     from rapidtriage.api.app.row_conditions import parse_row_conditions
 
-    client, run_id = api_client(run_dir)
-    service = geo_index.GEO_INDEX_SERVICE
-    clusters_url = f"/api/runs/{run_id}/geo-clusters?cell=0.01&geo={WORLD}"
-    page_url = f"/api/runs/{run_id}/artifacts?limit=500&geo={WORLD}"
-    index_file = run_dir / geo_index.GEO_INDEX_FILE_NAME
     report: dict[str, object] = {"run_dir": str(run_dir), "repeat": repeat, "targets": GEO_TARGETS}
-    sources = _geo_sources(run_dir)
+    with contextlib.ExitStack() as stack:
+        before: dict[str, tuple[int, int]] = {}
+        if not synthetic:
+            before = folder_snapshot(run_dir)
+            stack.enter_context(index_persist(False))  # --run is read-only: the index stays in memory
+        client, run_id = api_client(run_dir)
+        service = geo_index.GEO_INDEX_SERVICE
+        index_file = run_dir / geo_index.GEO_INDEX_FILE_NAME
+        sources = _geo_sources(run_dir)
 
-    def first_display() -> None:
-        get_json(client, clusters_url)
-        get_json(client, page_url)
+        def urls(run: str) -> tuple[str, str]:
+            return f"/api/runs/{run}/geo-clusters?cell=0.01&geo={WORLD}", f"/api/runs/{run}/artifacts?limit=500&geo={WORLD}"
 
-    def wait_ready() -> dict[str, object]:
-        deadline = time.perf_counter() + 120
-        while True:
-            payload = get_json(client, clusters_url)
-            if payload["geo_index"] != "building" or time.perf_counter() > deadline:
-                return payload
-            time.sleep(0.05)
+        clusters_url, page_url = urls(run_id)
 
-    # Building path: no index file, empty cache (an older run on first map request).
-    if synthetic:
-        building_samples = []
-        statuses = []
-        for _ in range(repeat):
+        def wait_ready(api: object, url: str) -> dict[str, object]:
+            deadline = time.perf_counter() + 120
+            while True:
+                payload = get_json(api, url)
+                if payload["geo_index"] != "building" or time.perf_counter() > deadline:
+                    return payload
+                time.sleep(0.05)
+
+        def building_display() -> None:
+            statuses.append(get_json(client, clusters_url)["geo_index"])
+            wait_ready(client, clusters_url)
+            get_json(client, page_url)
+
+        # Building path: no index file, empty cache (an older run on its first map request). The
+        # first sample also parses the payload JSONs (a fresh server); the median is the build.
+        statuses: list[str] = []
+        if synthetic:
+            index_file.unlink(missing_ok=True)
+        with mock.patch.object(geo_index, "read_geo_index_file", return_value=None):
+            started = time.perf_counter()
+            service.clear()
+            building_display()
+            first_sample = time.perf_counter() - started
+            report["first_display_building_s"] = max(
+                first_sample, median_seconds(building_display, max(1, repeat - 1), before=service.clear)
+            )
+        report["first_display_building_cold_s"] = round(first_sample, 4)
+        report["first_request_status"] = statuses
+        report["build_index_source"] = wait_ready(client, clusters_url).get("geo_index_source")
+
+        # Index path: the file written at run completion (persist step) and a fresh server cache --
+        # on a temporary copy of the payloads for --run (nothing is written into the run folder).
+        if synthetic:
+            index_file.unlink(missing_ok=True)
+            report["persist_step"] = geo_index.write_run_geo_index(run_dir, sources)
+            api, api_run = client, run_id
+        else:
+            temp = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix="perf-r6-geo-copy-", dir=scratch)))
+            copy_dir = geo_copy(run_dir, temp)
+            api, api_run = api_client(copy_dir)
+            report["with_index_source"] = "temporary copy of the payload JSONs (deleted afterwards)"
+        api_clusters, api_page = urls(api_run)
+
+        def first_display() -> None:
+            get_json(api, api_clusters)
+            get_json(api, api_page)
+
+        report["first_display_with_index_s"] = median_seconds(first_display, repeat, before=service.clear)
+        ready = wait_ready(api, api_clusters)
+        report["clusters_s"] = median_seconds(lambda: get_json(api, api_clusters), repeat)
+        report["clusters_cold_s"] = median_seconds(lambda: get_json(api, api_clusters), repeat, before=service.clear)
+        report["first_page_s"] = median_seconds(lambda: get_json(api, api_page), repeat)
+        report["geo_index_source"] = ready.get("geo_index_source")
+        report["located_total"] = ready.get("located_total")
+        report["clusters_total"] = ready.get("clusters_total")
+        if synthetic:
+            report["index_file_bytes"] = index_file.stat().st_size if index_file.is_file() else None
+        else:
+            copied = copy_dir / geo_index.GEO_INDEX_FILE_NAME
+            report["index_file_bytes"] = copied.stat().st_size if copied.is_file() else None
+
+        # Equivalence (Q-S3-7): the index path's located rows = the full scan's.
+        if synthetic:
+            indexed: list[tuple[str, int]] = []
+            after = None
+            while True:
+                url = f"/api/runs/{run_id}/artifacts?limit=1000&geo={WORLD}" + (f"&after={after}" if after else "")
+                cross = get_json(client, url)["cross_kind"]
+                indexed.extend((kind, index) for kind, index in cross["order"])
+                after = cross.get("next_after")
+                if not after:
+                    break
+            conditions = parse_row_conditions(geo=WORLD)
+            scanned = filter_across_kinds(
+                sources,
+                path_contains=None,
+                artifact_types=None,
+                offset=0,
+                limit=10_000_000,
+                scan_cap=10_000_000,
+                row_filter=conditions.predicate("artifacts") if conditions else None,
+            )["cross_kind"]["order"]
+            report["equivalent"] = indexed == [(kind, index) for kind, index in scanned]
+            report["indexed_rows"] = len(indexed)
+
+            # Read-only output folder (Q-S3-8): memory index, no 500.
             index_file.unlink(missing_ok=True)
             service.clear()
-            started = time.perf_counter()
-            statuses.append(get_json(client, clusters_url)["geo_index"])
-            wait_ready()
-            get_json(client, page_url)
-            building_samples.append(time.perf_counter() - started)
-        report["first_display_building_s"] = round(statistics.median(building_samples), 4)
-        report["first_request_status"] = statuses
-    else:
-        started = time.perf_counter()
-        report["first_request_status"] = [get_json(client, clusters_url)["geo_index"]]
-        wait_ready()
-        get_json(client, page_url)
-        report["first_display_as_found_s"] = round(time.perf_counter() - started, 4)
-
-    # Index path: the file written at run completion (persist step) and a fresh server cache.
-    if synthetic:
-        index_file.unlink(missing_ok=True)
-        persist = geo_index.write_run_geo_index(run_dir, sources)
-        report["persist_step"] = persist
-    report["first_display_with_index_s"] = median_seconds(first_display, repeat, before=service.clear)
-    ready = wait_ready()
-    report["clusters_s"] = median_seconds(lambda: get_json(client, clusters_url), repeat)
-    report["clusters_cold_s"] = median_seconds(lambda: get_json(client, clusters_url), repeat, before=service.clear)
-    report["first_page_s"] = median_seconds(lambda: get_json(client, page_url), repeat)
-    report["geo_index_source"] = ready.get("geo_index_source")
-    report["located_total"] = ready.get("located_total")
-    report["clusters_total"] = ready.get("clusters_total")
-    report["index_file_bytes"] = index_file.stat().st_size if index_file.is_file() else None
-
-    # Equivalence (Q-S3-7): the index path's located rows = the full scan's.
-    if synthetic:
-        indexed: list[tuple[str, int]] = []
-        after = None
-        while True:
-            url = f"/api/runs/{run_id}/artifacts?limit=1000&geo={WORLD}" + (f"&after={after}" if after else "")
-            cross = get_json(client, url)["cross_kind"]
-            indexed.extend((kind, index) for kind, index in cross["order"])
-            after = cross.get("next_after")
-            if not after:
-                break
-        conditions = parse_row_conditions(geo=WORLD)
-        scanned = filter_across_kinds(
-            sources,
-            path_contains=None,
-            artifact_types=None,
-            offset=0,
-            limit=10_000_000,
-            scan_cap=10_000_000,
-            row_filter=conditions.predicate("artifacts") if conditions else None,
-        )["cross_kind"]["order"]
-        report["equivalent"] = indexed == [(kind, index) for kind, index in scanned]
-        report["indexed_rows"] = len(indexed)
-
-        # Read-only output folder (Q-S3-8): memory index, no 500.
-        index_file.unlink(missing_ok=True)
+            with mock.patch.object(geo_index, "write_geo_index_file", side_effect=PermissionError("read-only")):
+                payload = wait_ready(client, clusters_url)
+                get_json(client, page_url)
+            report["read_only_source"] = payload.get("geo_index_source")
         service.clear()
-        with mock.patch.object(geo_index, "write_geo_index_file", side_effect=PermissionError("read-only")):
-            payload = wait_ready()
-            get_json(client, page_url)
-        report["read_only_source"] = payload.get("geo_index_source")
 
     checks = {
         "clusters_s": report["clusters_s"] <= GEO_TARGETS["clusters_s"],  # type: ignore[operator]
         "first_display_with_index_s": report["first_display_with_index_s"] <= GEO_TARGETS["first_display_with_index_s"],  # type: ignore[operator]
+        "first_display_building_s": report["first_display_building_s"] <= GEO_TARGETS["first_display_building_s"],  # type: ignore[operator]
     }
-    if "first_display_building_s" in report:
-        checks["first_display_building_s"] = report["first_display_building_s"] <= GEO_TARGETS["first_display_building_s"]  # type: ignore[operator]
+    report["first_display_building_s"] = round(float(report["first_display_building_s"]), 4)  # type: ignore[arg-type]
     if "equivalent" in report:
         checks["equivalent"] = bool(report["equivalent"])
         checks["read_only_memory"] = report.get("read_only_source") == "memory"
+    if not synthetic:
+        changes = snapshot_changes(before, folder_snapshot(run_dir))
+        report["run_folder_unchanged"] = not changes
+        if changes:
+            report["run_folder_changes"] = changes[:50]
+        checks["run_folder_unchanged"] = not changes
+        checks["build_in_memory"] = report.get("build_index_source") == "memory"
     report["checks"] = checks
     report["passed"] = all(checks.values())
     return report
@@ -244,7 +315,7 @@ def measure_geo(run_dir: Path, *, repeat: int, synthetic: bool) -> dict[str, obj
 
 def run_geo(args: argparse.Namespace, workdir: Path) -> dict[str, object]:
     if args.run:
-        return measure_geo(Path(args.run), repeat=args.repeat, synthetic=False)
+        return measure_geo(Path(args.run), repeat=args.repeat, synthetic=False, scratch=args.scratch)
     started = time.perf_counter()
     run_dir = synthetic_artifact_run(workdir, rows=args.artifacts, located=args.located, kinds=args.kinds)
     report = measure_geo(run_dir, repeat=args.repeat, synthetic=True)
@@ -271,6 +342,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--kinds", type=int, default=8, help="합성 아티팩트 종류 수")
     parser.add_argument("--repeat", type=int, default=5, help="중앙값을 낼 반복 횟수")
     parser.add_argument("--output", help="JSON 보고서 경로(없으면 표준 출력)")
+    parser.add_argument("--scratch", help="--run: 색인 파일 측정용 임시 복사본 위치(기본: 시스템 임시 폴더)")
     return parser.parse_args(argv)
 
 

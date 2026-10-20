@@ -105,11 +105,20 @@ CANCELLATION_RETRY_TRUSTED_TOOLS = {
     "long-running-job-control-export",
 }
 # Parsed run-output payloads are large (a real manifest is ~57 MB), so
-# RunJobStore.read_output memoizes parsed JSON in a small LRU bounded by both
+# RunJobStore.read_output memoizes parsed JSON in an LRU bounded by both
 # entry count and an approximate byte budget (source file size is used as a
-# cheap proxy for parsed-payload memory).
-OUTPUT_JSON_CACHE_MAX_ENTRIES = 4
+# cheap proxy for parsed-payload memory). The entry bound is generous because a
+# real run has ~30 small ``artifacts_*`` payloads that every cross-kind request
+# (map clusters, located rows) reads together; with 4 entries each such request
+# re-parsed all of them (R6 S3 real-run fix: ~0.33 s fixed cost per request).
+OUTPUT_JSON_CACHE_MAX_ENTRIES = 128
 OUTPUT_JSON_CACHE_MAX_BYTES = 200 * 1024 * 1024
+# A single output larger than the byte budget (a real timeline is ~280 MB) is
+# kept in its own slot -- at most this many such payloads -- instead of being
+# evicted the moment it is inserted (which re-parsed it on every request: every
+# timeline page cost ~3.5 s on real runs). Memory bound: the byte budget plus
+# these oversized payloads, which a request has to hold in memory anyway.
+OUTPUT_JSON_CACHE_MAX_LARGE_ENTRIES = 1
 
 
 def now_iso() -> str:
@@ -343,6 +352,12 @@ class OutputJsonCache:
     out through LRU eviction. The cache is shared by every ``RunJobStore`` in
     the process so the memory bound applies globally.
 
+    A payload whose file is larger than the byte budget goes to a separate LRU
+    of ``max_large_entries`` (default one) instead of the budgeted one, so it
+    stays cached between requests; one parse per key at a time (concurrent
+    readers of the same uncached revision wait for it instead of parsing it
+    again -- a 280 MB timeline costs ~2 GB per parse).
+
     Cached payloads are returned as the same object across hits: callers must
     treat the result as read-only. All current consumers were audited and copy
     before mutating (``paginate_payload`` copies into a new page dict,
@@ -350,38 +365,76 @@ class OutputJsonCache:
     remaining callers only read).
     """
 
-    def __init__(self, *, max_entries: int = OUTPUT_JSON_CACHE_MAX_ENTRIES, max_bytes: int = OUTPUT_JSON_CACHE_MAX_BYTES) -> None:
+    def __init__(
+        self,
+        *,
+        max_entries: int = OUTPUT_JSON_CACHE_MAX_ENTRIES,
+        max_bytes: int = OUTPUT_JSON_CACHE_MAX_BYTES,
+        max_large_entries: int = OUTPUT_JSON_CACHE_MAX_LARGE_ENTRIES,
+    ) -> None:
         self._max_entries = max(1, int(max_entries))
         self._max_bytes = max(0, int(max_bytes))
+        self._max_large_entries = max(0, int(max_large_entries))
         self._entries: OrderedDict[tuple[str, int, int], tuple[dict[str, object], int]] = OrderedDict()
+        self._large: OrderedDict[tuple[str, int, int], tuple[dict[str, object], int]] = OrderedDict()
         self._total_bytes = 0
         self._lock = threading.Lock()
+        self._parse_locks: dict[tuple[str, int, int], threading.Lock] = {}
+
+    def _get(self, key: tuple[str, int, int]) -> dict[str, object] | None:
+        for entries in (self._entries, self._large):
+            hit = entries.get(key)
+            if hit is not None:
+                entries.move_to_end(key)
+                return hit[0]
+        return None
 
     def read(self, path: Path) -> dict[str, object]:
         resolved = Path(path).expanduser().resolve()
         stat = resolved.stat()  # raises FileNotFoundError like read_text would
         key = (str(resolved), stat.st_mtime_ns, stat.st_size)
         with self._lock:
-            hit = self._entries.get(key)
+            hit = self._get(key)
             if hit is not None:
-                self._entries.move_to_end(key)
-                return hit[0]
-        payload = json.loads(resolved.read_text(encoding="utf-8"))
-        with self._lock:
-            previous = self._entries.get(key)
-            if previous is not None:
-                self._total_bytes -= previous[1]
-            self._entries[key] = (payload, stat.st_size)
-            self._entries.move_to_end(key)
-            self._total_bytes += stat.st_size
-            self._evict()
-        return payload
+                return hit
+            parse_lock = self._parse_locks.setdefault(key, threading.Lock())
+        try:
+            with parse_lock:
+                with self._lock:
+                    hit = self._get(key)
+                    if hit is not None:
+                        return hit
+                payload = json.loads(resolved.read_text(encoding="utf-8"))
+                with self._lock:
+                    self._store(key, payload, stat.st_size)
+                return payload
+        finally:
+            with self._lock:
+                if self._parse_locks.get(key) is parse_lock:
+                    self._parse_locks.pop(key, None)
+
+    def _store(self, key: tuple[str, int, int], payload: dict[str, object], size: int) -> None:
+        if size > self._max_bytes:
+            if self._max_large_entries:
+                self._large[key] = (payload, size)
+                self._large.move_to_end(key)
+                while len(self._large) > self._max_large_entries:
+                    self._large.popitem(last=False)
+            return
+        previous = self._entries.get(key)
+        if previous is not None:
+            self._total_bytes -= previous[1]
+        self._entries[key] = (payload, size)
+        self._entries.move_to_end(key)
+        self._total_bytes += size
+        self._evict()
 
     def invalidate(self, path: Path | str | None = None) -> None:
         """Drop every entry, or every cached revision of one resolved path."""
         with self._lock:
             if path is None:
                 self._entries.clear()
+                self._large.clear()
                 self._total_bytes = 0
                 return
             target = str(Path(path).expanduser().resolve())
@@ -389,6 +442,8 @@ class OutputJsonCache:
             for key in stale:
                 self._total_bytes -= self._entries[key][1]
                 del self._entries[key]
+            for key in [key for key in self._large if key[0] == target]:
+                del self._large[key]
 
     def _evict(self) -> None:
         while self._entries and (
@@ -399,7 +454,12 @@ class OutputJsonCache:
 
     def stats(self) -> dict[str, int]:
         with self._lock:
-            return {"entries": len(self._entries), "bytes": self._total_bytes}
+            return {
+                "entries": len(self._entries),
+                "bytes": self._total_bytes,
+                "large_entries": len(self._large),
+                "large_bytes": sum(size for _payload, size in self._large.values()),
+            }
 
 
 _output_json_cache = OutputJsonCache()

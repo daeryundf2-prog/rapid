@@ -301,6 +301,11 @@ RapidTriage is a local triage and review tool, not a full commercial forensic su
 - **실데이터 미검증**: 위 경로는 합성 이미지(MBR + 손으로 만든 `$Boot`·`$Bitmap`·MFT 6번 레코드)와 가짜 `icat`으로만 시험했다. `BSH.E01`(250 GB)에서의 `$Boot` VSN과 서브셋 LNK `volume_serial` 일치, `$Bitmap` 구간 계산 시간, 4 GiB 상한 카빙 시간·후보 수는 사용자 승인 후 측정한다.
 <!-- r6 S2 C ($Boot extraction, image-unallocated URL carving): end -->
 
+## R6 S3 — 색인 파일과 메모리
+
+- 오래된 런을 처음 열 때 API는 타임라인 조건 색인(`rapidtriage-timeline-index.bin`)과 위치 행 색인(`rapidtriage-geo-index.json`)을 만들어 런 출력 폴더에 쓴다(쓸 수 없으면 메모리만). 런 폴더를 바꾸면 안 되는 경우(검토용 사본, 측정) `RAPIDTRIAGE_INDEX_PERSIST=0`으로 서버를 띄우면 새로 쓰지 않고 메모리에만 둔다(이미 있는 색인 파일은 읽는다). `scripts/perf-r6.py --run`은 이 설정으로 돌고 "색인 파일 있음" 경우는 임시 사본에서 잰다.
+- 파싱한 출력 JSON 캐시는 원본 크기 기준 200 MB 예산을 두되, 예산보다 큰 출력 1개(실제 타임라인 약 280 MB)는 따로 캐시에 남긴다. 그래서 서버는 그 출력의 파싱 결과(실측 약 2 GB)를 계속 들고 있다. 처음 한 번의 파싱은 실측 3–5 초다.
+
 ## R6 S1 — 기존 증거 점검 후속 수정
 
 근거: `docs/validation/r6-sample-validation-2026-10-19.md` §5.5(D 드라이브 기존 증거 읽기 전용 점검). 테스트는 합성 픽스처만 쓴다(`tests/test_r6_s1_dcheck_gaps.py`).

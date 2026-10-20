@@ -7,7 +7,8 @@ finds a coordinate pair -- one pass over every kind's ``.jsonl`` (inline payload
 ``persist`` stage (:func:`write_run_geo_index`); a run without the file (older runs, a changed
 output) builds it on the first map request in a background thread (:class:`GeoIndexService`, one
 build per key through :class:`SingleFlightIndexCache`). An output folder that cannot be written
-keeps the index in memory only (``source: memory``) -- never an error.
+-- or ``RAPIDTRIAGE_INDEX_PERSIST=0`` (``index_cache.index_persist_enabled``) -- keeps the index in
+memory only (``source: memory``) -- never an error.
 
 The file's ``stamp`` lists ``(kind, file name, size, mtime_ns)`` of every kind's payload JSON and
 JSONL stream; any change rebuilds the index (a stale file is ignored).
@@ -41,10 +42,11 @@ import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import BinaryIO
 
 from ...core.artifact_profiles import payload_record_count
 from .artifact_sort import TIME_KEYS
-from .index_cache import SingleFlightIndexCache
+from .index_cache import SingleFlightIndexCache, index_persist_enabled
 from .jsonl_records import (
     expand_row,
     iter_artifact_records,
@@ -169,11 +171,11 @@ def _profiles_have_coordinates(profiles: Mapping[str, object] | None) -> bool:
 
 def _scan_kind(payload: Mapping[str, object], payload_path: Path, budget: int) -> tuple[list[GeoEntry], int, bool]:
     """Located rows of one kind (record order), rows scanned, and whether ``budget`` cut it short."""
-    found: list[GeoEntry] = []
-    scanned = 0
     records_path = jsonl_records_path(payload, payload_path)
     profiles = payload_profiles(payload)
     if records_path is None:
+        found: list[GeoEntry] = []
+        scanned = 0
         for record_index, row in iter_artifact_records(payload, payload_path=payload_path):
             scanned += 1
             entry = _entry(record_index, -1, row)
@@ -182,30 +184,98 @@ def _scan_kind(payload: Mapping[str, object], payload_path: Path, budget: int) -
                     return found, scanned, True
                 found.append(entry)
         return found, scanned, False
-    prefilter = not _profiles_have_coordinates(profiles)
-    index = 0
-    position = 0
+    return _scan_jsonl(records_path, profiles, budget, prefilter=not _profiles_have_coordinates(profiles))
+
+
+# Bytes read per block by the JSONL scan.
+SCAN_BLOCK_BYTES = 8 << 20
+# Raw-bytes probes of :data:`_COORDINATE_KEY` (``"lat"``, ``"latitude"``, ``"gps_lat…"``): a block
+# holding neither cannot hold a located row.
+_KEY_PROBES = (b'"lat', b'"gps_lat')
+
+
+def _blocks(handle: BinaryIO) -> Iterator[bytes]:
+    """The file in blocks of whole lines (the last one may lack its newline)."""
+    tail = b""
+    while True:
+        block = handle.read(SCAN_BLOCK_BYTES)
+        if not block:
+            if tail:
+                yield tail
+            return
+        data = tail + block if tail else block
+        cut = data.rfind(b"\n") + 1
+        if cut == 0:
+            tail = data
+            continue
+        tail = data[cut:]
+        yield data[:cut] if tail else data
+
+
+def _scan_jsonl(
+    records_path: Path, profiles: Mapping[str, object] | None, budget: int, *, prefilter: bool
+) -> tuple[list[GeoEntry], int, bool]:
+    """:func:`_scan_kind` over a JSONL stream, block by block (R6 S3 real-run fix).
+
+    Records are the ``{``-lines (as in ``jsonl_records.iter_jsonl_records``). With ``prefilter``
+    a block without any coordinate key is only counted; in a block where every line is a record
+    only the lines holding a key are parsed (found by one regex pass over the block). Otherwise
+    the block goes line by line. The per-line regex over every line cost ~2 s for the 294k long
+    event-log lines of a real run."""
+    found: list[GeoEntry] = []
+    index = 0  # record index of the block's first record
+    lines_before = 0  # lines before the block (1-based line numbers for warnings)
+    base = 0  # byte offset of the block
+
+    def take(record_index: int, offset: int, line_number: int, line: bytes) -> bool:
+        row = parse_record_line(line, path=records_path, line_number=line_number)
+        if row is None:
+            return False
+        entry = _entry(record_index, offset, expand_row(row, profiles))
+        if entry is None:
+            return False
+        if len(found) >= budget:
+            return True
+        found.append(entry)
+        return False
+
     with open(records_path, "rb") as handle:
-        for line_number, line in enumerate(handle, start=1):
-            offset = position
-            position += len(line)
-            stripped = line.strip()
-            if not stripped.startswith(b"{"):
-                continue
-            record_index = index
-            index += 1
-            scanned += 1
-            if prefilter and _COORDINATE_KEY.search(stripped) is None:
-                continue
-            row = parse_record_line(stripped, path=records_path, line_number=line_number)
-            if row is None:
-                continue
-            entry = _entry(record_index, offset, expand_row(row, profiles))
-            if entry is not None:
-                if len(found) >= budget:
-                    return found, scanned, True
-                found.append(entry)
-    return found, scanned, False
+        for block in _blocks(handle):
+            lines = block.count(b"\n") + (0 if block.endswith(b"\n") else 1)
+            uniform = block.count(b"\n{") + (1 if block.startswith(b"{") else 0) == lines
+            if prefilter and uniform:
+                # Every line is a record: record index = line index; parse the key lines only.
+                if any(probe in block for probe in _KEY_PROBES):
+                    counted, counted_at, last_start = 0, 0, -1
+                    for match in _COORDINATE_KEY.finditer(block):
+                        start = block.rfind(b"\n", 0, match.start()) + 1
+                        if start == last_start:
+                            continue
+                        last_start = start
+                        counted += block.count(b"\n", counted_at, start)
+                        counted_at = start
+                        end = block.find(b"\n", start)
+                        line = block[start : len(block) if end < 0 else end].strip()
+                        if take(index + counted, base + start, lines_before + counted + 1, line):
+                            return found, index + counted + 1, True
+                index += lines
+            else:
+                position = 0
+                for number, line in enumerate(block.split(b"\n")[:lines], start=lines_before + 1):
+                    offset = base + position
+                    position += len(line) + 1
+                    stripped = line.strip()
+                    if not stripped.startswith(b"{"):
+                        continue
+                    record_index = index
+                    index += 1
+                    if prefilter and _COORDINATE_KEY.search(stripped) is None:
+                        continue
+                    if take(record_index, offset, number, stripped):
+                        return found, index, True
+            lines_before += lines
+            base += len(block)
+    return found, index, False
 
 
 def scan_geo_index(sources: Sequence[Source], *, max_rows: int | None = None) -> GeoIndex:
@@ -327,7 +397,7 @@ def load_or_build(sources: Sequence[Source], output_dir: Path | None) -> GeoInde
         if stored is not None:
             return stored
     index = scan_geo_index(sources)
-    if output_dir is None:
+    if output_dir is None or not index_persist_enabled():
         index.source = "memory"
         return index
     try:
