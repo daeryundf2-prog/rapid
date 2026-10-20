@@ -180,6 +180,16 @@
 - 확장자만 .egg인 ZIP: 예외 대신 `egg-format-mismatch`(`format_mismatch: "zip"`), 압축 파일 인벤토리는 ZIP 목록으로 낸다.
 - 곰플레이어: 레지스트리 행에 `key_path`·`key_last_written_at`을 두고 타임라인에 키당 한 `last-written` 이벤트로 연결(행 `timestamp`는 계속 비움). `_RECENTMEDIAAUDIOINDEX#`·`_RECENTMEDIAAUDIOINDEXDVD#`·`_RECENTMEDIAPOS#` 원값을 같은 번호 행에 붙인다.
 
+**후속 수정 후 실자료 재확인 (2026-10-20)**
+
+| 출처 | 수정 전 | 수정 후 |
+|---|---|---|
+| S1·S2 (이름만 .egg인 ZIP) | 예외 | `egg-format-mismatch`(zip), 압축 목록에서 ZIP으로 나옴 |
+| S8·S9 (2볼륨 분할) | 0–2개 | 6개 전부, 볼륨 연결 `header-id`, CRC 불일치 0 |
+| S6·S7 (같은 묶음 2번 볼륨) | 0개 | `egg-split-member`, 첫 볼륨 위치 표시(목록은 S8·S9에서) |
+| S5 (2번 볼륨이 디스크에 없음) | 0개 | 1개, 이름 확인, `data_truncated`(`block-data`), 빠진 볼륨 1 |
+| 곰플레이어(하이브 7개) | 시각 없음 | 전 행 `key_last_written_at`, 같은 번호의 재생 위치·오디오 트랙 값, 타임라인 키당 이벤트 1개 |
+
 ## 6. 실행 방법
 
 ### 6.1 런 비교
