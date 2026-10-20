@@ -146,6 +146,50 @@
 
 관찰: 미할당 영역 대부분이 0으로 채워진 디스크에서도 E01 압축 해제 비용 때문에 37.5 MB/s에 그쳤다. 1 TB 전체를 훑으면 몇 시간이 걸리므로 4 GiB 기본 상한이 필요하다. 0으로만 된 청크를 건너뛰는 최적화는 단계 3(성능) 후보로 남긴다. LNK 볼륨 시리얼과의 대조는 이 이미지의 LNK를 추출하지 않아 하지 않았다(VSN 표기 `%08X`는 합성 테스트로 LNK와 같음을 확인).
 
+### 5.5 D 드라이브 기존 증거 점검 (VM 대신, 2026-10-20)
+
+사용자 결정으로 VM/Sandbox 표본 생성 대신 D 드라이브에 이미 있는 증거를 읽기 전용으로 점검했다(정답 없는 표본이므로 "읽어 낸다"까지만 확인). 출처는 S1… 번호로만 적고 이름·경로·재생 경로는 기록하지 않는다. 원시 결과는 Git 밖 `D:/rapid-qa/derived/r6-s1-dcheck/`.
+
+**EGG(.egg 11개, .alz 0개)**
+
+| 결과 | 개수 |
+|---|---|
+| 정상 목록(`egg-parsed`) | 4개(항목 13·7·300·1,602) |
+| 실제로 푼 항목 CRC 일치 | 407 / 407 (저장·Deflate) |
+| 암호화 항목 목록만 | 13 |
+| 분할 볼륨 일부만(`egg-partial`, 항목 0–2) | 5개 |
+| 확장자만 .egg인 ZIP | 2개(목록 함수가 예외) |
+| LZMA·bzip2·AZO·솔리드·ALZ | 0 — LZMA 블록 배치 가정은 여전히 **미검증** |
+
+**미디어 플레이어(NTUSER.DAT 21개, 내용 기준 13개)**
+
+| 플레이어 | 결과 |
+|---|---|
+| 곰플레이어 | 4개 하이브에서 기록 행 2–50개; `_RECENTMEDIANAME#`(32자리 해시)·`_RECENTMEDIAPOS#`(정수)·`_RECENTMEDIAAUDIOINDEX#`·`_RECENTMEDIAAUDIOINDEXDVD#`·`sRecentFolder`·`sRecentFileFolder` 값 이름 확인, 오류 0 |
+| 팟플레이어·KMPlayer | 키 자체가 없음 → 0행이 맞음, 값 이름 **미검증** 유지 |
+| VLC | 설정 파일 없음 → **미검증** 유지 |
+
+**드러난 파서 공백** — 후속 수정 대상
+- 분할 EGG: 첫 볼륨 또는 일부만 목록에 나온다. 형제 볼륨을 이어 읽어야 한다.
+- 확장자가 .egg인 ZIP: 예외 대신 "EGG 아님, ZIP" 판정이 필요하다.
+- 곰플레이어 기록 행에 시각이 없다: 키 마지막 기록 시각(LastWrite)을 목록 시각 상한으로 붙여야 한다.
+- 수집 대상 밖 플레이어 흔적: BBPlayer 키(1개 하이브), Windows Media Player 키(5개 하이브, 최근 목록 값은 보이지 않음). 이번에는 기록만 한다.
+
+**후속 수정** (브랜치 `fix/r6-s1-dcheck-gaps`, 합성 픽스처 `tests/test_r6_s1_dcheck_gaps.py`; 상세는 `docs/rapidtriage-known-limitations.md` `## R6 S1`)
+- 분할 EGG: 분할 헤더의 이전·다음 볼륨 ID로 같은 폴더의 형제 볼륨을 잇고(안 되면 `이름.volN.egg` 번호) 머리 뒤 데이터를 하나의 스트림으로 읽는다. 빠진 볼륨은 `missing_volumes` + `egg-partial`, 첫 볼륨이 아닌 파일은 `egg-split-member`("분할 볼륨(첫 볼륨에서 목록)")로 중복 목록을 막는다. 위 5개 실제 분할 표본으로는 **다시 돌려 보지 않았다**(재확인 필요).
+- 확장자만 .egg인 ZIP: 예외 대신 `egg-format-mismatch`(`format_mismatch: "zip"`), 압축 파일 인벤토리는 ZIP 목록으로 낸다.
+- 곰플레이어: 레지스트리 행에 `key_path`·`key_last_written_at`을 두고 타임라인에 키당 한 `last-written` 이벤트로 연결(행 `timestamp`는 계속 비움). `_RECENTMEDIAAUDIOINDEX#`·`_RECENTMEDIAAUDIOINDEXDVD#`·`_RECENTMEDIAPOS#` 원값을 같은 번호 행에 붙인다.
+
+**후속 수정 후 실자료 재확인 (2026-10-20)**
+
+| 출처 | 수정 전 | 수정 후 |
+|---|---|---|
+| S1·S2 (이름만 .egg인 ZIP) | 예외 | `egg-format-mismatch`(zip), 압축 목록에서 ZIP으로 나옴 |
+| S8·S9 (2볼륨 분할) | 0–2개 | 6개 전부, 볼륨 연결 `header-id`, CRC 불일치 0 |
+| S6·S7 (같은 묶음 2번 볼륨) | 0개 | `egg-split-member`, 첫 볼륨 위치 표시(목록은 S8·S9에서) |
+| S5 (2번 볼륨이 디스크에 없음) | 0개 | 1개, 이름 확인, `data_truncated`(`block-data`), 빠진 볼륨 1 |
+| 곰플레이어(하이브 7개) | 시각 없음 | 전 행 `key_last_written_at`, 같은 번호의 재생 위치·오디오 트랙 값, 타임라인 키당 이벤트 1개 |
+
 ## 6. 실행 방법
 
 ### 6.1 런 비교
