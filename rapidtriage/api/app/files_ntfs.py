@@ -477,6 +477,76 @@ def ntfs_si_modified_resolver(
     return resolve
 
 
+def ntfs_join_stamp(scope: RunScope | None) -> tuple[object, ...]:
+    """Revision of a run's NTFS join state for caches of joined times: the newest parsed
+    ``ntfs-meta`` analysis and its rows file (a newly completed analysis changes it)."""
+    if scope is None:
+        return ("skipped",)
+    state = latest_parsed_ntfs_analysis(scope)
+    if state is None:
+        return ("no_analysis",)
+    analysis_id = str(state.get("analysis_id"))
+    summary = state.get("summary") if isinstance(state.get("summary"), Mapping) else {}
+    rows_path = analyses_root(scope.output_dir) / analysis_id / ROWS_FILE_NAME
+    try:
+        stat = rows_path.stat()
+        revision: tuple[int, int] = (stat.st_size, stat.st_mtime_ns)
+    except OSError:
+        revision = (-1, -1)
+    return ("analysis", analysis_id, summary.get("mft_record_count"), *revision)
+
+
+def _path_key_function(prefix: str) -> Callable[[object], str | None]:
+    """``raw path -> ntfs_path_key`` under the volume ``prefix`` (None outside it): the key
+    :func:`ntfs_entry_for` looks up, with a string fast path for plain absolute paths."""
+    root_path = Path(prefix)
+    root = str(root_path)
+    root_norm = os.path.normcase(root)
+    base = root if root.endswith(os.sep) else root + os.sep
+    base_norm = os.path.normcase(base)
+    double = os.sep * 2
+
+    def slow(text: str) -> str | None:
+        parts = _relative_parts(text, root_path)
+        return ntfs_path_key("/".join(parts)) if parts else None
+
+    def key(raw: object) -> str | None:
+        text = str(raw or "")
+        if not text:
+            return None
+        full = os.path.abspath(text)
+        folded = os.path.normcase(full)
+        if len(folded) != len(full) or len(root_norm) != len(root) or full.startswith(double) or root.startswith(double):
+            return slow(text)  # case folding changed lengths, or a UNC / // path: let pathlib decide
+        if not folded.startswith(base_norm):
+            return None  # outside the volume (or the volume root itself: no parts)
+        rest = full[len(base) :]
+        return ntfs_path_key("/".join(rest.split(os.sep))) if rest else None
+
+    return key
+
+
+def ntfs_si_modified_times(scope: RunScope | None, all_rows: Sequence[object], positions: Sequence[int]) -> list[int] | None:
+    """NTFS ``$SI`` modified time (epoch microseconds; ``-2**63`` when the row has none) of the
+    rows at ``positions`` -- what :func:`ntfs_si_modified_resolver` gives row by row, resolved in
+    one pass (path key -> index entry, no per-row entry dict). None unless the join is ``joined``."""
+    _join, _source_image, index, prefix = _join_context(scope, all_rows)
+    if index is None or prefix is None:
+        return None
+    key_of = _path_key_function(prefix)
+    entries = index.entries
+    size = _PACK.size
+    unpack = _PACK.unpack
+    field = 1 + TIME_FIELDS.index("si_modified_at")
+    times: list[int] = []
+    for position in positions:
+        row = all_rows[position]
+        path_key = key_of(row.get("path")) if isinstance(row, Mapping) else None
+        packed = entries.get(_hash_key(path_key)) if path_key is not None else None
+        times.append(unpack(packed)[field] if packed is not None and len(packed) == size else _NONE_TIME)
+    return times
+
+
 def join_files_page(
     scope: RunScope | None,
     page: dict[str, object],

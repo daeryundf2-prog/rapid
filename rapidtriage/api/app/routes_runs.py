@@ -58,7 +58,8 @@ from .dashboard import (
     read_case_notes,
     write_case_notes,
 )
-from .files_ntfs import join_files_page, ntfs_si_modified_resolver
+from .files_index import NtfsTimes, files_matched_positions
+from .files_ntfs import join_files_page, ntfs_join_stamp, ntfs_si_modified_times
 from .fs_tree import (
     FS_INDEX_CACHE,
     files_output_key,
@@ -108,7 +109,6 @@ from .row_conditions import (
     MATCH_CACHE,
     RowConditions,
     filter_rows_page,
-    needs_ntfs_time,
     output_stamp,
     parse_row_conditions,
 )
@@ -1337,6 +1337,15 @@ def build_runs_router(
         return restrict, {"path": folder, "recursive": deep, "special": wanted_special, "rows": len(restrict or [])}
 
 
+    def _files_ntfs_times(run_id: str, rows: Sequence[object]) -> tuple[tuple[object, ...], NtfsTimes]:
+        """``(NTFS join stamp, resolver)`` of the acquisition copies' ``$SI`` modified times."""
+        try:
+            time_scope = run_scope(store, run_id, require_ready=False)
+        except HTTPException:
+            time_scope = None
+        return ntfs_join_stamp(time_scope), lambda positions: ntfs_si_modified_times(time_scope, rows, positions)
+
+
     @router.get("/api/runs/{run_id}/files")
     def get_run_files(
         run_id: str,
@@ -1378,9 +1387,11 @@ def build_runs_router(
         ``hours``, ``offhours``, ``tz``, ``partial``, ``content`` (``limit > 0``; compose with
         ``category``, ``flag``/``flag_grade``, ``sort=flags``). The row time is the 수정 time:
         ``fs_modified_at``, else for an acquisition copy the NTFS ``$SI`` modified time, looked up
-        per row in the NTFS join index only while the predicate runs and only when the list has
-        such rows and the join status is ``joined`` (an acquisition copy without the join has no
-        time and never matches), else ``modified_at``. ``content`` maps to the scan categories
+        in the NTFS join index once per join state and only when the list has such rows and the
+        join status is ``joined`` (an acquisition copy without the join has no time and never
+        matches), else ``modified_at``. The matching rows of a query (with ``category`` and the
+        folder filter) are kept per files-output revision and NTFS join state, so later pages do
+        not rescan the list: ``matched`` is exact and ``truncated`` false. ``content`` maps to the scan categories
         (문서 documents · 이미지 images · 압축 archives · 실행 executables · DB databases · 메일
         emails; 영상/음성 by extension). ``geo`` is a Korean 422 (files carry no coordinates).
         The page reports ``pagination.conditions``.
@@ -1440,22 +1451,24 @@ def build_runs_router(
         restrict, path_filter = _files_path_restriction(payload, run_id, collection, path_prefix, recursive, special)
         if (flag_query.active or wanted or conditions is not None or restrict is not None) and limit <= 0:
             raise HTTPException(status_code=400, detail=FILTER_LIMIT_MESSAGE)
-        source_rows: list[object] | None = None
-        row_filter = None
-        if conditions is not None:
-            source_rows = payload.get(collection) if isinstance(payload.get(collection), list) else []
-            ntfs_time = None
-            if conditions.uses_time and any(needs_ntfs_time(row) for row in source_rows):
-                # Acquisition copies take their time from the NTFS join: resolve it per row while
-                # filtering (only when the join is "joined") instead of joining the whole list.
-                try:
-                    time_scope = run_scope(store, run_id, require_ready=False)
-                except HTTPException:
-                    time_scope = None
-                ntfs_time = ntfs_si_modified_resolver(time_scope, source_rows) if time_scope is not None else None
-            row_filter = conditions.predicate("files", ntfs_time)
+        source_rows: list[object] = payload.get(collection) if isinstance(payload.get(collection), list) else []  # type: ignore[assignment]
+        positions = None
+        if wanted or conditions is not None:
+            # Matching positions once per (files revision, NTFS join state, query): later pages slice
+            # them (row_conditions.MATCH_CACHE) and ``matched`` is exact (plan r6 §3.3 갈래 B).
+            positions = files_matched_positions(
+                source_rows,
+                run_id=run_id,
+                collection=collection,
+                files_stamp=output_stamp(get_output_path(store, run_id, "files")),
+                categories=wanted,
+                conditions=conditions,
+                restrict=restrict,
+                restrict_key=(path_filter["path"], path_filter["recursive"], path_filter["special"]) if path_filter else None,
+                ntfs_join=lambda: _files_ntfs_times(run_id, source_rows),
+            )
         if flag_query.active or restrict is not None:
-            all_rows = source_rows if source_rows is not None else (payload.get(collection) if isinstance(payload.get(collection), list) else [])
+            all_rows = source_rows
             page_rows, flag_pagination = filter_files_rows(
                 all_rows,
                 collection=collection,
@@ -1465,7 +1478,8 @@ def build_runs_router(
                 offset=offset,
                 limit=limit,
                 restrict=restrict,
-                row_filter=row_filter,
+                row_filter=conditions.predicate("files") if conditions is not None else None,
+                positions=positions,
             )
             page = files_page_base(payload, collection)
             page[collection] = page_rows
@@ -1482,7 +1496,7 @@ def build_runs_router(
         elif wanted or conditions is not None:
             page = _echo_conditions(
                 filter_files_by_category(
-                    payload, wanted, offset=offset, limit=limit, collection=collection, row_filter=row_filter, rows=source_rows
+                    payload, wanted, offset=offset, limit=limit, collection=collection, rows=source_rows, positions=positions
                 ),
                 conditions,
             )
