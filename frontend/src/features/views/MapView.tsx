@@ -6,6 +6,11 @@
  *   2. 좌표 표 — every located row (위도 · 경도 · 시각 · 경로); Enter / click opens the row.
  * The listing asks the server for located rows only (`geo=` world box), so a node with millions
  * of rows and a handful of GPS rows still lists just those.
+ * r6 §3.3 갈래 C: the clusters come from the server's located-row index first (`GET /geo-clusters`,
+ * every located row of the node, no rows downloaded); the table pages 500 rows at a time. While an
+ * older run's index is being built the view says so (위치 색인 만드는 중) and asks again; without
+ * server clusters (live run, failed build, filters only the console applies) it clusters the
+ * loaded rows itself.
  * Policy: no map tiles and no external map calls — the coordinates stay in this console.
  */
 
@@ -20,15 +25,15 @@ import { useViewerTarget } from "../grid/adapter";
 import { buildViewerTarget } from "../grid/gridCommands";
 import { errorText } from "../viewer/useAsync";
 import { switchView } from "./commands";
-import { clusterRows, formatCoordinates, type GeoCluster, geoRows } from "./geo";
-import { useAutoLoad, useViewRows } from "./useViewRows";
+import { clusterRows, formatCoordinates, type GeoCluster, geoRows, serverClusters } from "./geo";
+import { useAutoLoad, useGeoClusters, useViewRows } from "./useViewRows";
 import { EmptyState, ErrorState, LoadingCard } from "./ViewState";
 import "./cardMap.css";
 
-/** Rows scanned automatically for coordinates (then "더 불러오기"). */
-export const MAP_AUTOLOAD_ROWS = 20_000;
-/** Coordinate-table rows drawn at once (the clusters always cover every loaded row). */
-export const MAP_TABLE_MAX = 500;
+/** Coordinate-table page: rows fetched per request (then "더 불러오기"). */
+export const MAP_TABLE_PAGE = 500;
+/** Rows paged automatically only while no located row has arrived yet (a scan window can be empty). */
+export const MAP_EMPTY_SCAN_ROWS = 20_000;
 export const MAP_POLICY_NOTE =
   "지도 타일과 외부 지도 서비스는 쓰지 않습니다(정책). 좌표는 이 콘솔 밖으로 나가지 않으며, 표와 근접 묶음(0.01° 격자, 약 1.1 km)으로 보여 줍니다.";
 
@@ -42,18 +47,25 @@ export function MapView() {
     predicate: allRows,
     textFilter: true,
     rowConditions: MAP_ROW_CONDITIONS,
+    pageSize: MAP_TABLE_PAGE,
   });
+  const server = useGeoClusters({ textFilter: true, rowConditions: MAP_ROW_CONDITIONS });
   const { timezone } = useTimezone();
   const { publishFocusedRow, requestFocus } = useViewerTarget();
   const patchFilters = useFilterStore((s) => s.patchFilters);
   const filtered = useFilterStore((s) => hasActiveFilters(s.filters)) || Boolean(q);
   const located = useMemo(() => geoRows(rows), [rows]);
-  const clusters = useMemo(() => clusterRows(located), [located]);
+  // Server clusters cover every located row of the node; the console clusters only its loaded rows.
+  const ready = server.payload?.geo_index === "ready" && !server.clientFiltered ? server.payload : null;
+  const building = server.payload?.geo_index === "building";
+  const clusters = useMemo(() => (ready ? serverClusters(ready) : clusterRows(located)), [ready, located]);
   const [picked, setPicked] = useState<string | null>(null);
-  // Every loaded row is located (server filter); keep paging up to the cap.
-  const capped = useAutoLoad(cq, true, MAP_AUTOLOAD_ROWS);
+  // Page on automatically only while nothing located has arrived (a scan window may be empty);
+  // otherwise the table grows 500 rows per "더 불러오기".
+  const capped = useAutoLoad(cq, located.length === 0, MAP_EMPTY_SCAN_ROWS);
   // A failed page stops the automatic paging (useAutoLoad): no endless "찾는 중".
-  const scanning = !cq.error && (cq.isFetching || (cq.canLoadMore && !capped));
+  const scanning = !cq.error && (cq.isFetching || (located.length === 0 && cq.canLoadMore && !capped));
+  const serverEmpty = ready !== null && ready.matched === 0;
 
   const time = (value: string | null) => (value ? formatGridTime(value, timezone) : "—");
 
@@ -72,15 +84,17 @@ export function MapView() {
     );
   };
 
-  if (cq.error && cq.loadedCount === 0) {
+  if (cq.error && cq.loadedCount === 0 && !ready) {
     return <ErrorState message={`행을 불러오지 못했습니다. ${errorText(cq.error)}`} onRetry={cq.refetch} />;
   }
-  if (cq.isLoading) return <LoadingCard label="위치 행을 찾는 중…" />;
-  if (located.length === 0) {
-    if (scanning) {
-      return <LoadingCard label="위치 행을 찾는 중…" />;
+  if (cq.isLoading && !ready) {
+    return <LoadingCard label={building ? "위치 색인 만드는 중…" : "위치 행을 찾는 중…"} />;
+  }
+  if (serverEmpty || (located.length === 0 && !ready)) {
+    if (!serverEmpty && scanning) {
+      return <LoadingCard label={building ? "위치 색인 만드는 중…" : "위치 행을 찾는 중…"} />;
     }
-    if (cq.error) {
+    if (!serverEmpty && cq.error) {
       return (
         <ErrorState
           message={`위치 행을 더 불러오지 못했습니다. ${errorText(cq.error)}`}
@@ -101,7 +115,7 @@ export function MapView() {
             : `서버가 이 노드의 모든 행에서 좌표 열(EXIF GPS·위치)을 찾았지만 없었습니다. ${MAP_POLICY_NOTE}`
         }
       >
-        {capped ? (
+        {!serverEmpty && capped ? (
           <button type="button" className="view-link" onClick={() => cq.loadMore()}>
             더 불러오기
           </button>
@@ -110,20 +124,21 @@ export function MapView() {
     );
   }
 
-  const shown = located.slice(0, MAP_TABLE_MAX);
+  const total = ready?.matched ?? null;
+  const clusterCount = ready ? ready.clusters_total : clusters.length;
   return (
     <div className="view-pane map-view">
       <div className="view-toolbar">
         <span className="view-count">
-          {`위치 행 ${located.length.toLocaleString("ko-KR")}건 · 묶음 ${clusters.length.toLocaleString("ko-KR")}개`}
-          {cq.total !== null && cq.total > cq.loadedCount
+          {`위치 행 ${(total ?? located.length).toLocaleString("ko-KR")}건 · 묶음 ${clusterCount.toLocaleString("ko-KR")}개`}
+          {total === null && cq.total !== null && cq.total > cq.loadedCount
             ? ` (전체 ${cq.total.toLocaleString("ko-KR")}건 중)`
             : ""}
-          {scanning ? " · 불러오는 중…" : ""}
+          {cq.isFetching ? " · 불러오는 중…" : ""}
         </span>
-        {capped ? (
+        {cq.canLoadMore && !cq.isFetching ? (
           <button type="button" className="view-link" onClick={() => cq.loadMore()}>
-            더 불러오기
+            {`좌표 표 ${MAP_TABLE_PAGE}건 더 불러오기`}
           </button>
         ) : null}
       </div>
@@ -135,6 +150,18 @@ export function MapView() {
           <h3 id="map-clusters-title" className="map-title">
             근접 묶음 (0.01° 격자)
           </h3>
+          {building ? (
+            <p className="map-policy" role="status">
+              위치 색인 만드는 중… 끝나면 이 노드의 모든 위치 행으로 묶음을 다시 그립니다. 지금은 불러온 행
+              기준입니다.
+            </p>
+          ) : !ready ? (
+            <p className="map-policy">불러온 행 기준 묶음입니다.</p>
+          ) : ready.clusters_truncated || ready.truncated ? (
+            <p className="map-policy">
+              {`묶음이 많아 처음 ${ready.clusters.length.toLocaleString("ko-KR")}개만 보입니다(위치 행 색인 상한).`}
+            </p>
+          ) : null}
           <ul
             className="map-cluster-list"
             aria-label="근접 묶음 — 선택하면 그 위치의 행만 열 보기로 거릅니다"
@@ -163,7 +190,7 @@ export function MapView() {
         </section>
         <section className="map-table-wrap" aria-labelledby="map-table-title">
           <h3 id="map-table-title" className="map-title">
-            좌표 표{located.length > MAP_TABLE_MAX ? ` (처음 ${MAP_TABLE_MAX}건)` : ""}
+            {`좌표 표 (불러온 ${located.length.toLocaleString("ko-KR")}건)`}
           </h3>
           <table className="map-table">
             <caption className="sr-only">
@@ -183,7 +210,7 @@ export function MapView() {
               </tr>
             </thead>
             <tbody>
-              {shown.map((item) => (
+              {located.map((item) => (
                 <tr key={item.row.rowKey}>
                   <td className="mono num">{item.lat.toFixed(6)}</td>
                   <td className="mono num">{item.lon.toFixed(6)}</td>

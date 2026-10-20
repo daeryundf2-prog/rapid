@@ -147,6 +147,7 @@ from .persist import (
     DOCS_TEXT_SPOOL_NAME,
     DocumentTextSpool,
     build_run_case_db,
+    build_run_geo_index,
     skipped_case_db_record,
 )
 from .plan import (
@@ -1319,12 +1320,21 @@ def _run_triage_stages(
             plan_status=persist_planned[0],
             plan_reason=persist_planned[1],
         )
+    # 위치 행 색인 (r6 §3.3 갈래 C): the map view's located-row index, written with the run.
+    geo_index_record = build_run_geo_index(output_dir, artifact_outputs, artifact_payloads)
     finish_stage(
         "persist",
         {
-            key: case_db_record[key]
-            for key in ("started_at", "status", "search_backend", "counts", "elapsed_seconds", "error", "reason")
-            if key in case_db_record
+            **{
+                key: case_db_record[key]
+                for key in ("started_at", "status", "search_backend", "counts", "elapsed_seconds", "error", "reason")
+                if key in case_db_record
+            },
+            "geo_index": {
+                key: geo_index_record[key]
+                for key in ("status", "located", "truncated", "elapsed_seconds", "error", "reason")
+                if key in geo_index_record
+            },
         },
     )
     # triage-flags (plan viewer-families §3.1): rule engine over the run's own outputs into

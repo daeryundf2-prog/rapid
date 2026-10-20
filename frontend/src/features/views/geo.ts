@@ -5,8 +5,12 @@
  * `row_coordinates` (the server's `geo=` box filter reads the same fields).
  */
 
-import type { GridRow } from "../../contracts/collection";
+import { api } from "../../api/client";
+import { artifactsQueryString } from "../../api/runs";
+import type { CollectionQuery, GridRow } from "../../contracts/collection";
 import { parseInstant } from "../../utils/time";
+import { serverPathFilter } from "../grid/gridUtils";
+import { kindsForCategory } from "../tree/categories";
 
 export const CLUSTER_CELL_DEGREES = 0.01;
 
@@ -142,6 +146,101 @@ export function clusterRows(rows: readonly GeoRow[]): GeoCluster[] {
     }
   }
   return [...byCell.values()].sort((a, b) => b.count - a.count || a.id.localeCompare(b.id));
+}
+
+/** One cluster of `GET /api/runs/{id}/geo-clusters` (server cell rule = `clusterRows`). */
+export interface ServerGeoCluster {
+  id: string;
+  box: string;
+  lat: number;
+  lon: number;
+  count: number;
+  first_time: string | null;
+  last_time: string | null;
+  sample?: { kind: string; record_index: number; lat: number; lon: number; time: string | null };
+}
+
+/**
+ * `GET /geo-clusters` (r6 §3.3 갈래 C): clusters from the run's located-row index.
+ * `geo_index`: `ready`, `building` (an older run's index is being built: ask again) or
+ * `unavailable` (the console then clusters the loaded rows itself).
+ */
+export interface GeoClustersPayload {
+  geo_index: "ready" | "building" | "unavailable";
+  geo_index_source?: "file" | "built" | "memory";
+  cell: number;
+  kinds: string[];
+  available_kinds: string[];
+  located_total: number | null;
+  matched: number | null;
+  clusters: ServerGeoCluster[];
+  clusters_total: number;
+  clusters_truncated: boolean;
+  truncated: boolean;
+  filtered: boolean;
+}
+
+/** The `/geo-clusters` filters of an artifacts collection query (the same server filters as its listing). */
+export function geoClusterParams(query: CollectionQuery, kinds?: readonly string[]): string {
+  const params = new URLSearchParams(
+    artifactsQueryString({
+      kind: kinds ? [...kinds] : query.ref.kind ? [query.ref.kind] : undefined,
+      path_contains: query.pathContains?.trim() || serverPathFilter(query.text),
+      artifact_type: query.artifactTypes,
+      flag: query.flags,
+      flag_grade: query.flagGrade,
+      browser: query.fields?.browser ? [...query.fields.browser] : undefined,
+      service: query.fields?.service ? [...query.fields.service] : undefined,
+      channel: query.channels,
+      channel_group: query.channelGroups,
+      conditions: query.rowConditions,
+    }),
+  );
+  params.set("cell", String(CLUSTER_CELL_DEGREES));
+  return params.toString();
+}
+
+const EMPTY_CLUSTERS = (payload: GeoClustersPayload, kinds: string[]): GeoClustersPayload => ({
+  ...payload,
+  kinds,
+  located_total: 0,
+  matched: 0,
+  clusters: [],
+  clusters_total: 0,
+  clusters_truncated: false,
+});
+
+/**
+ * Server clusters of the query's node. A category node asks once for the run's kinds
+ * (`available_kinds`) and again with the category's kinds.
+ */
+export async function fetchGeoClusters(
+  runId: string,
+  query: CollectionQuery,
+  signal?: AbortSignal,
+): Promise<GeoClustersPayload> {
+  const url = (kinds?: readonly string[]) =>
+    `/api/runs/${encodeURIComponent(runId)}/geo-clusters?${geoClusterParams(query, kinds)}`;
+  const payload = await api<GeoClustersPayload>(url(), { signal });
+  const category = !query.ref.kind ? query.ref.category : undefined;
+  if (!category || payload.geo_index !== "ready") return payload;
+  const kinds = kindsForCategory(category, payload.available_kinds ?? []);
+  if (kinds.length === 0) return EMPTY_CLUSTERS(payload, kinds);
+  return api<GeoClustersPayload>(url(kinds), { signal });
+}
+
+/** Server clusters in the console's cluster shape (rows stay on the server: `rows` is empty). */
+export function serverClusters(payload: GeoClustersPayload): GeoCluster[] {
+  return payload.clusters.map((cluster) => ({
+    id: cluster.id,
+    box: cluster.box,
+    lat: cluster.lat,
+    lon: cluster.lon,
+    count: cluster.count,
+    first: cluster.first_time,
+    last: cluster.last_time,
+    rows: [],
+  }));
 }
 
 /** "37.4812° N, 126.9497° E" (4 decimals ≈ 11 m). */
