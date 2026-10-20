@@ -8,8 +8,17 @@ import { useSearchState } from "../case/searchState";
 import { navigate, useRunLive } from "./adapter";
 import { buildTreeModel, type TreeModelNode } from "./model";
 
-/** Queries of a run refetched once when it stops running (they poll only while it is active). */
-export const RUN_FINISH_QUERY_KEYS = ["run-tree", "run-summary", "run-dashboard", "review-counts"] as const;
+/**
+ * Queries of a run refetched once when it stops running (they poll only while it is active;
+ * `geo-clusters` answers 409 until the run has finished, so the map would keep its fallback).
+ */
+export const RUN_FINISH_QUERY_KEYS = [
+  "run-tree",
+  "run-summary",
+  "run-dashboard",
+  "review-counts",
+  "geo-clusters",
+] as const;
 
 /**
  * Live data behind the tree. Counts refresh every 3 s while the run is active

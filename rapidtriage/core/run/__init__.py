@@ -147,6 +147,7 @@ from .persist import (
     DOCS_TEXT_SPOOL_NAME,
     DocumentTextSpool,
     build_run_case_db,
+    build_run_geo_index,
     skipped_case_db_record,
 )
 from .plan import (
@@ -616,6 +617,24 @@ def run_triage_mode(
 # Run-pipeline indicator cap: ``None`` = uncapped (the CLI ``indicators
 # --limit N`` caps explicitly). Disclosed in the indicators summary.
 RUN_MAX_INDICATORS: int | None = None
+
+
+def write_timeline_condition_index(payload: Mapping[str, object], timeline_path: Path) -> Path | None:
+    """R6 S3: the timeline column index next to a just-written timeline
+    (``rapidtriage-timeline-index.bin``; ``api.app.timeline_index``) so the console's first
+    conditioned timeline page reads it instead of parsing every event. Best effort: without the
+    web extra, or on any failure, the API builds it on the first conditioned request instead."""
+    events = payload.get("events")
+    if not isinstance(events, list):
+        return None
+    try:
+        from ...api.app.timeline_index import write_timeline_index
+    except ImportError:
+        return None
+    try:
+        return write_timeline_index(events, timeline_path)
+    except Exception:  # an index is an optimisation, never a run failure
+        return None
 
 
 def timeline_reference_time(
@@ -1231,6 +1250,7 @@ def _run_triage_stages(
         plan_reason=timeline_planned[1] if timeline_planned else None,
     )
     write_timeline_result(timeline_payload, timeline_path)
+    write_timeline_condition_index(timeline_payload, timeline_path)
     timeline_report_path.write_text(build_timeline_report(timeline_payload), encoding="utf-8")
     finish_stage("timeline")
 
@@ -1319,12 +1339,21 @@ def _run_triage_stages(
             plan_status=persist_planned[0],
             plan_reason=persist_planned[1],
         )
+    # 위치 행 색인 (r6 §3.3 갈래 C): the map view's located-row index, written with the run.
+    geo_index_record = build_run_geo_index(output_dir, artifact_outputs, artifact_payloads)
     finish_stage(
         "persist",
         {
-            key: case_db_record[key]
-            for key in ("started_at", "status", "search_backend", "counts", "elapsed_seconds", "error", "reason")
-            if key in case_db_record
+            **{
+                key: case_db_record[key]
+                for key in ("started_at", "status", "search_backend", "counts", "elapsed_seconds", "error", "reason")
+                if key in case_db_record
+            },
+            "geo_index": {
+                key: geo_index_record[key]
+                for key in ("status", "located", "truncated", "elapsed_seconds", "error", "reason")
+                if key in geo_index_record
+            },
         },
     )
     # triage-flags (plan viewer-families §3.1): rule engine over the run's own outputs into

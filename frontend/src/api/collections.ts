@@ -395,6 +395,11 @@ interface CrossKindBlock {
   next_after?: unknown;
   scanned?: unknown;
   truncated?: unknown;
+  /**
+   * `geo=` listings (r6 §3.3 갈래 C): `true` = paged from the run's located-row index; otherwise
+   * why not (`building` / `truncated` / `unavailable`: the rows come from a capped scan).
+   */
+  geo_index?: unknown;
 }
 
 /** `after=` cursors per filtered cross-kind listing: offset → cursor that resumes there. */
@@ -482,6 +487,7 @@ async function fetchCrossKindPage(
   let truncated = false;
   let exhausted = false;
   let matched: number | null = null;
+  let geoIndex: string | undefined;
   for (let request = 0; request < CROSS_KIND_MAX_REQUESTS; request += 1) {
     const want = Math.min(CROSS_KIND_MAX_LIMIT, Math.max(1, offset - pos + (limit - rows.length)));
     const payload = await crossKindRequest(
@@ -490,6 +496,7 @@ async function fetchCrossKindPage(
       signal,
     );
     const cross = payload.cross_kind ?? {};
+    if (typeof cross.geo_index === "string") geoIndex = cross.geo_index;
     const window = payload.artifacts ?? {};
     const byKind = new Map<string, Map<number, RawRow>>();
     for (const [k, page] of Object.entries(window)) {
@@ -536,6 +543,7 @@ async function fetchCrossKindPage(
       matched: exhausted ? matched : null,
       crossKind: true,
       ...(truncated ? { lastWindowTruncated: true } : {}),
+      ...(geoIndex ? { geoIndex } : {}),
     },
     ...(kinds ? { kinds } : {}),
   };

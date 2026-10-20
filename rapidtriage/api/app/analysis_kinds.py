@@ -549,6 +549,9 @@ def run_url_carve(ctx: AnalysisContext) -> None:
             "skipped_link_count": walk_stats.skipped_links,
             "pruned_output_dir_count": walk_stats.pruned_dirs,
             "scanned_byte_count": scanned_bytes,
+            # R6 S3: bytes of long zero runs that were read (and count in scanned_byte_count and
+            # the read budget) but not regex-scanned -- they cannot hold a URL.
+            "zero_bytes_skipped": state.zero_bytes_skipped,
             "candidate_count": tally.candidates,
             "candidate_cap_reached": state.capped,
             "kind_counts": dict(tally.kind_counts),
@@ -613,6 +616,7 @@ def _carve_image_unallocated(
                         ctx.set_message(f"이미지 미할당 영역 {stats.bytes_read / GIB:.2f} GiB 스캔 · URL 후보 {tally.candidates + len(state.seen)}건")
                     yield window.data, window.image_offset, window.cutoff
 
+            zero_before = state.zero_bytes_skipped
             entries = scan_url_windows(windows(), state=state, ascii_urls=options.ascii_urls, utf16_urls=options.utf16_urls)
             truncated = stats.bytes_read < total or runs.truncated or bool(read_error)
             start_sector = source.partition.get("start_sector")
@@ -640,6 +644,7 @@ def _carve_image_unallocated(
                 "image_unallocated_runs_truncated": runs.truncated,
                 "image_unallocated_bytes": total,
                 "image_unallocated_scanned_bytes": stats.bytes_read,
+                "image_unallocated_zero_bytes_skipped": state.zero_bytes_skipped - zero_before,
                 "image_unallocated_truncated": truncated,
             }
             if read_error:

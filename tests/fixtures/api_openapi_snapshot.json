@@ -231,6 +231,9 @@
     "/api/runs/{run_id}/fs-tree": {
       "get": "get_fs_tree_api_runs__run_id__fs_tree_get"
     },
+    "/api/runs/{run_id}/geo-clusters": {
+      "get": "get_run_geo_clusters_api_runs__run_id__geo_clusters_get"
+    },
     "/api/runs/{run_id}/histogram": {
       "get": "run_histogram_api_runs__run_id__histogram_get"
     },

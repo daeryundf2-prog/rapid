@@ -384,3 +384,17 @@ AhnLab V3 로그, adb 백업 내부 DB → 기존 앱 파서, 이미지에서 `$
 - 한국어 라벨: carved-url `cluster`·`partition_start_sector`, adb 해제 사본 키(`inner_path` = "해제 사본(증거 아님)", `container_*`, `backup_domain` 코드, 해제 생략 사유), AhnLab `parse_error`·`schema_confidence`·`count_truncated`·`walk_truncated`, 미분류 DB 조치 값(파생 열 `av_action`, "DB 원본 값·조치 분류 안 됨"). adb 해석 행의 "파일 열기"는 원본 .ab(행 path)이며 해제 사본은 메타의 보조 항목.
 - url-carve 양식: 최대 스캔 도움말에 이미지 미할당 총량 의미, 파티션 시작 섹터 오류는 해당 필드(aria-invalid/describedby).
 - 남은 한계: 행 자체에 이미지 형식 플래그는 아직 없음(`_carve_image_unallocated`는 별도 견고성 작업 범위) — 확장자 판정이 기본. 파생 "조치" 열은 서버 정렬 대상이 아님.
+
+### 단계 3 지도 보기 콘솔 적대 검토 수정(fix/r6-s3-console-review)
+- 검색어가 서버에 일부만 반영될 때(여러 단어, 또는 한 단어 + 경로 필터) `/geo-clusters`를 부르지 않고 불러온 행으로 묶음 — 묶음·건수가 좌표 표와 같다(`geoTextFilterClientSide`). 한 단어는 종전대로 `path_contains`로 서버에 보낸다.
+- 좌표 표 오류는 서버 묶음이 준비돼 있어도 표 영역에 한국어 경고 + 재시도(`cq.refetch`). "좌표 표 500건 더 불러오기"는 한 번에 정확히 한 쪽(500행, `prefetchNext: false`); 실패한 쪽 뒤에는 같은 단추가 "좌표 표 다시 불러오기"(재요청)로 바뀐다. 불러오는 동안 단추는 남아 있고 `aria-disabled`·`aria-busy`(실제 `disabled`는 포커스를 잃게 해 쓰지 않음), 마지막 쪽이 와 단추가 사라지면 포커스는 좌표 표 제목으로.
+- 1만 개 묶음 상한(`clusters_truncated`: "묶음이 많아 처음 N개만 받았습니다(전체 M개)")과 색인·필터 읽기 상한(`truncated`: 건수 "N건 이상" + 일부 행만 묶었다는 메모)을 따로 표시. 묶음 aria-label 건수 `ko-KR` 표기.
+- 범주 노드는 실행 트리(`run-tree` 캐시)의 종류로 `kindsForCategory`를 계산해 묶음 요청 한 번(트리 없을 때만 종전 두 번). 백엔드 변경 없음.
+- 그 밖: `building` 폴링 5분 상한 후 불러온 행 기준 묶음 + 한국어 안내; 런 종료 시 `geo-clusters` 무효화(실행 중 409 대체 고착 방지, `RUN_FINISH_QUERY_KEYS`); 서버 묶음 대기 중 "묶음 불러오는 중…"; 묶음 단추 처음 300개 + "묶음 N개 더 보기"(새 첫 단추로 포커스); 선택 묶음·표시 수는 런·노드별; `/artifacts` `cross_kind.geo_index`(`building`/`truncated`/`unavailable`)를 좌표 표 메모로; 서버가 0건이라 해도 목록에 위치 행이 있으면 빈 상태 대신 불러온 행 기준 묶음. 시험은 `frontend/src/features/views/MapView.test.tsx`("console review fixes"), `features/tree/runFinish.test.tsx`.
+
+### 적대적 리뷰 후속 수정(단계 3 백엔드)
+- 브랜치 `fix/r6-s3-backend-review`(기준 `feat/r6-s3-perf` c27d6e4). 회귀 시험 `tests/test_r6_s3_backend_review.py`(리뷰어 재현 스크립트를 합성 데이터 시험으로 옮김; 시간대·무작위 조건 퍼즈는 기존 동등성 시험이 다룸).
+- 중간: 근접 묶음 상자 — 첫·마지막 칸 경계를 정확히 ±90°/±180°로, 1e-9 보정 대신 상자 경계 기준 배정(묶음 `box` 재조회 = `count`); 요청이 기다리는 열은 배경 작성이 쉼 없이 마침; 큰 출력 JSON 캐시 칸 2개와 실제 메모리 상한 문서화.
+- 낮음: 심어진·손상된 위치 행 색인 파일은 검증 후 무시·재작성(500 없음), 빌드 실패는 60초 뒤 재시도.
+- 그 밖: 읽기 전 스탬프(타임라인 경로·위치 행 스캔), 색인 파일의 처음·끝 64 KB 다이제스트(타임라인 색인 형식 버전 2), 규칙 지문에 부정어 포함, `GeoEntry` slots·캐시 런 4개, 늦게 끝난 옛 스탬프 빌드가 새 항목을 밀어내지 않음, `.tmp` 정리, perf 스크립트 배경 작성 대기. 세부는 `docs/rapidtriage-known-limitations.md` `## R6 S3`.
+- 남은 한계: 콘솔 `geo.ts` `clusterRows`(서버 없는 대체 경로)는 아직 1e-9 보정 규칙 — 콘솔 담당 작업에서 맞춘다.

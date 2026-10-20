@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import functools
 import json
 import logging
 import re
 import zipfile
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,7 @@ from ...core.jobs import (
     RunJobStore,
     RunOutputDirBusy,
     RunRequest,
+    read_output_json,
     run_output_dir,
 )
 from ...core.run.plan import PlanTargetError, plan_counts_brief, validate_skip_targets
@@ -44,8 +46,11 @@ from .artifact_filter import (
     filter_across_kinds,
     filter_artifact_page,
     filter_files_by_category,
+    nfc_fold,
     normalize_channel_filter,
+    parse_cross_kind_after,
     parse_field_filters,
+    row_matcher,
 )
 from .artifact_sort import SORT_ORDERS, paginate_sorted_artifact_output
 from .dashboard import (
@@ -54,7 +59,8 @@ from .dashboard import (
     read_case_notes,
     write_case_notes,
 )
-from .files_ntfs import join_files_page, ntfs_si_modified_resolver
+from .files_index import NtfsTimes, files_matched_positions
+from .files_ntfs import join_files_page, ntfs_join_stamp, ntfs_si_modified_times
 from .fs_tree import (
     FS_INDEX_CACHE,
     files_output_key,
@@ -64,6 +70,14 @@ from .fs_tree import (
     parse_folder_path,
     parse_special,
     special_restriction,
+)
+from .geo_index import (
+    GEO_INDEX_SERVICE,
+    build_clusters,
+    candidates,
+    filtered_candidates,
+    page_located,
+    parse_cell,
 )
 from .helpers import (
     allowed_source_roots,
@@ -96,7 +110,6 @@ from .row_conditions import (
     MATCH_CACHE,
     RowConditions,
     filter_rows_page,
-    needs_ntfs_time,
     output_stamp,
     parse_row_conditions,
 )
@@ -106,6 +119,7 @@ from .runops import (
 )
 from .search_index_service import search_index_available
 from .timeline_hist import build_timeline_histogram
+from .timeline_index import timeline_positions
 from .tree import build_run_issues, build_run_tree, live_run_block
 from .triage_flags import (
     FlagQuery,
@@ -178,6 +192,30 @@ def reject_geo(geo: str | None) -> None:
     """``/files`` and ``/timeline`` take no ``geo`` (the console sends it to ``/artifacts`` only)."""
     if geo is not None and geo.strip():
         raise HTTPException(status_code=422, detail=GEO_ARTIFACTS_ONLY)
+
+
+def _geo_other_filters(
+    path_contains: str | None,
+    artifact_types: Collection[str] | None,
+    channels: ChannelFilter | None,
+    fields: Mapping[str, frozenset[str]] | None,
+    conditions: RowConditions | None,
+) -> Callable[[Mapping[str, object]], bool] | None:
+    """The filters besides the ``geo`` box (``None`` when the box is the only one: the located-row
+    index answers alone); the box itself is re-checked on the record when there are others."""
+    others = False
+    if conditions is not None:
+        other_conditions = dataclasses.replace(conditions, geo=None)
+        others = other_conditions.uses_time or other_conditions.partial or other_conditions.content is not None
+    if not (path_contains or artifact_types or channels or fields or others):
+        return None
+    return row_matcher(
+        nfc_fold(path_contains) if path_contains else "",
+        frozenset(artifact_types) if artifact_types else None,
+        channels or None,
+        fields,
+        conditions.predicate("artifacts") if conditions is not None else None,
+    )
 
 
 def _echo_conditions(page: dict[str, object], conditions: RowConditions | None) -> dict[str, object]:
@@ -541,7 +579,9 @@ def build_runs_router(
         ``record_index`` (its position in ``events``) and the page reports ``matched``,
         ``record_count`` and ``pagination.conditions``. A bad value is a Korean 422; so is ``geo``
         (events carry no coordinates). The matching positions are cached per (timeline revision,
-        conditions) so later pages do not rescan the events (``row_conditions.MATCH_CACHE``).
+        conditions) so later pages do not rescan the events (``row_conditions.MATCH_CACHE``); the
+        first page reads the run's timeline column index (``timeline_index``, saved next to the
+        timeline as ``rapidtriage-timeline-index.bin``) instead of parsing every event.
         """
         reject_geo(geo)
         conditions = row_conditions_or_422(
@@ -554,9 +594,14 @@ def build_runs_router(
             partial=partial,
             content=content,
         )
-        payload = get_named_output(store, run_id, "timeline")
         if conditions is None:
+            payload = get_named_output(store, run_id, "timeline")
             return paginate_payload(payload, "events", offset=offset, limit=limit, cursor=cursor)
+        # Stamp the timeline *before* reading it: a rewrite in between leaves the cache key and the
+        # column index on the older stamp (never the new revision's key holding old positions).
+        timeline_path = get_output_path(store, run_id, "timeline")
+        stamp = output_stamp(timeline_path)
+        payload = get_named_output(store, run_id, "timeline")
         if limit <= 0:
             raise HTTPException(status_code=400, detail=FILTER_LIMIT_MESSAGE)
         events = payload.get("events") if isinstance(payload.get("events"), list) else []
@@ -566,7 +611,9 @@ def build_runs_router(
             collection="events",
             offset=offset,
             limit=limit,
-            cache_key=("timeline", run_id, output_stamp(get_output_path(store, run_id, "timeline")), conditions.cache_key()),
+            cache_key=("timeline", run_id, stamp, conditions.cache_key()),
+            # R6 S3: positions from the run's timeline column index (same set as the predicate).
+            compute=timeline_positions(run_id, timeline_path, events, conditions, stamp),
         )
         pagination["conditions"] = conditions.describe()
         page = {key: value for key, value in payload.items() if key != "events"}
@@ -794,6 +841,9 @@ def build_runs_router(
                 flag_query=flag_query,
                 fields=fields,
                 conditions=conditions,
+                # Finished runs only: a live run's outputs still grow.
+                geo_index=live is None,
+                geo_index_dir=_run_output_dir_or_none(job.summary),
             )
             _attach_artifact_flags(response, join)
             if live is not None:
@@ -948,22 +998,51 @@ def build_runs_router(
         channels: ChannelFilter | None = None,
         fields: Mapping[str, frozenset[str]] | None = None,
         conditions: RowConditions | None = None,
+        geo_index: bool = False,
+        geo_index_dir: Path | None = None,
     ) -> dict[str, object]:
         available = [name.removeprefix("artifacts_") for name in sorted(outputs) if name.startswith("artifacts_")]
         ordered = [item for item in kinds if item in available] if kinds else available
-        sources = []
-        for item in ordered:
-            name = f"artifacts_{item}"
-            try:
-                sources.append((item, store.read_output(run_id, name), get_output_path(store, run_id, name)))
-            except RuntimeError as exc:
-                raise HTTPException(status_code=409, detail=str(exc))
-            except PermissionError as exc:
-                raise HTTPException(status_code=403, detail=str(exc))
-            except FileNotFoundError as exc:
-                raise HTTPException(status_code=404, detail=str(exc))
+        sources = _artifact_sources(run_id, ordered)
+        extra = {
+            **({"flags": flag_query.descriptor()} if flag_query.filtered else {}),
+            **({"conditions": conditions.describe()} if conditions is not None else {}),
+        }
+        geo_state: object = None
+        if conditions is not None and conditions.geo is not None and geo_index:
+            # 위치 행 색인 (r6 §3.3 갈래 C): the box's rows come from the run's located-row index
+            # (one index over every kind, so its stamp covers them all).
+            index, status = GEO_INDEX_SERVICE.lookup(
+                run_id, sources if ordered == available else _artifact_sources(run_id, available), geo_index_dir
+            )
+            if index is not None and not index.truncated:
+                try:
+                    return page_located(
+                        index,
+                        sources,
+                        box=conditions.geo,
+                        offset=offset,
+                        limit=limit,
+                        after=parse_cross_kind_after(after),
+                        matches=_geo_other_filters(path_contains, artifact_types, channels, fields, conditions),
+                        allowed_for=(
+                            (lambda kind: set(join.require_index().matching(kind, flag_query.rule_ids, flag_query.grade)))
+                            if flag_query.filtered
+                            else None
+                        ),
+                        describe={
+                            "path_contains": path_contains or None,
+                            "artifact_types": sorted(artifact_types) if artifact_types else None,
+                            **(channels.describe() if channels else {}),
+                            **({"fields": {key: sorted(values) for key, values in fields.items()}} if fields else {}),
+                            **extra,
+                        },
+                    )
+                except ValueError as exc:
+                    raise HTTPException(status_code=400, detail=str(exc))
+            geo_state = status if index is None else "truncated"
         try:
-            return filter_across_kinds(
+            response = filter_across_kinds(
                 sources,
                 path_contains=path_contains,
                 artifact_types=artifact_types,
@@ -972,16 +1051,160 @@ def build_runs_router(
                 limit=limit,
                 after=after,
                 rows_for=kind_rows_for_flags(join, flag_query) if flag_query.filtered else None,
-                extra={
-                    **({"flags": flag_query.descriptor()} if flag_query.filtered else {}),
-                    **({"conditions": conditions.describe()} if conditions is not None else {}),
-                }
-                or None,
+                extra=extra or None,
                 fields=fields,
                 row_filter=conditions.predicate("artifacts") if conditions is not None else None,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
+        if geo_state is not None:
+            # The index is building (or unusable): the scan's partial results, marked as such.
+            response["cross_kind"]["geo_index"] = geo_state  # type: ignore[index]
+        return response
+
+
+    def _artifact_sources(run_id: str, kinds: Sequence[str]) -> list[tuple[str, dict[str, object], Path]]:
+        """``(kind, payload, payload path)`` of each kind (409 / 403 / 404 like the listing).
+
+        One ``output_path`` per kind (path checks resolve the path and the output folder: ~0.1 ms
+        each on Windows, and a real run has ~30 kinds read by every map / cross-kind request)."""
+        sources = []
+        for item in kinds:
+            name = f"artifacts_{item}"
+            try:
+                path = store.output_path(run_id, name)
+                sources.append((item, read_output_json(path), path))
+            except RuntimeError as exc:
+                raise HTTPException(status_code=409, detail=str(exc))
+            except PermissionError as exc:
+                raise HTTPException(status_code=403, detail=str(exc))
+            except FileNotFoundError as exc:
+                raise HTTPException(status_code=404, detail=str(exc))
+        return sources
+
+
+    @router.get("/api/runs/{run_id}/geo-clusters")
+    def get_run_geo_clusters(
+        run_id: str,
+        kind: list[str] = Query(default=[]),
+        cell: str | None = Query(default=None),
+        path_contains: str | None = Query(default=None),
+        artifact_type: list[str] = Query(default=[]),
+        flag: list[str] = Query(default=[]),
+        flag_grade: str | None = Query(default=None),
+        browser: list[str] = Query(default=[]),
+        service: list[str] = Query(default=[]),
+        channel: list[str] = Query(default=[]),
+        channel_group: list[str] = Query(default=[]),
+        time_from: str | None = Query(default=None, alias="from"),
+        time_to: str | None = Query(default=None, alias="to"),
+        weekday: list[str] = Query(default=[]),
+        hours: str | None = Query(default=None),
+        offhours: str | None = Query(default=None),
+        tz: str | None = Query(default=None),
+        partial: str | None = Query(default=None),
+        content: list[str] = Query(default=[]),
+        geo: str | None = Query(default=None),
+    ) -> dict[str, object]:
+        """근접 묶음 of the run's located rows (plan r6 §3.3 갈래 C) from the located-row index.
+
+        ``cell`` (degrees, default 0.01, 0.001-1) is the grid; a cluster is one cell:
+        ``{id, box, lat, lon, count, first_time, last_time, sample}`` -- ``box`` is the cell's
+        ``geo=`` value (half-open, the last cell includes 90° / 180°), ``sample`` one row
+        (``kind``, ``record_index``, ``lat``, ``lon``, ``time``). Most rows first; at most
+        ``MAX_CLUSTERS`` (``clusters_truncated``). ``kind`` (repeatable) narrows the kinds (default:
+        all); ``geo`` the box; the other filters are those of ``/artifacts`` and are applied to the
+        located rows' records only (``filtered``).
+
+        ``geo_index``: ``ready`` (``geo_index_source``: ``file`` = written at run completion,
+        ``built`` = built now and stored, ``memory`` = the output folder is read-only), ``building``
+        (an older run's index is being built in the background: no clusters yet, ask again) or
+        ``unavailable`` (the build failed). ``located_total``: located rows of the kinds;
+        ``matched``: rows in the clusters; ``truncated``: the index stopped at its row cap or the
+        filter read cap.
+        """
+        job = get_job(store, run_id)
+        if job.summary is None:
+            raise HTTPException(status_code=409, detail=run_not_finished_message(job))
+        outputs = job.summary.get("outputs")
+        if not isinstance(outputs, dict):
+            raise HTTPException(status_code=409, detail="run has no outputs")
+        try:
+            cell_degrees = parse_cell(cell)
+            wanted_channels = normalize_channel_filter(channel, channel_group)
+            fields = parse_field_filters({"browser": browser, "service": service})
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        conditions = row_conditions_or_422(
+            time_from=time_from,
+            time_to=time_to,
+            weekday=weekday,
+            hours=hours,
+            offhours=offhours,
+            tz=tz,
+            partial=partial,
+            content=content,
+            geo=geo,
+        )
+        flag_query = parse_flag_query(flag, flag_grade)
+        needle = path_contains.strip() if path_contains and path_contains.strip() else None
+        wanted_types = frozenset(item.strip() for item in artifact_type if item.strip()) or None
+        available = [name.removeprefix("artifacts_") for name in sorted(outputs) if name.startswith("artifacts_")]
+        requested = list(dict.fromkeys(item.strip() for item in kind if item.strip()))
+        kinds = [item for item in requested if item in available] if requested else available
+        all_sources = _artifact_sources(run_id, available)
+        index, status = GEO_INDEX_SERVICE.lookup(run_id, all_sources, _run_output_dir_or_none(job.summary))
+        response: dict[str, object] = {
+            "run_id": run_id,
+            "cell": cell_degrees,
+            "kinds": kinds,
+            "available_kinds": available,
+            "geo_index": status,
+            **({"conditions": conditions.describe()} if conditions is not None else {}),
+            **({"flags": flag_query.descriptor()} if flag_query.filtered else {}),
+        }
+        if index is None:
+            response.update(
+                {
+                    "located_total": None,
+                    "matched": None,
+                    "clusters": [],
+                    "clusters_total": 0,
+                    "clusters_truncated": False,
+                    "truncated": False,
+                    "filtered": False,
+                    "scanned": 0,
+                }
+            )
+            return response
+        join = flags_join(_run_output_dir_or_none(job.summary)) if flag_query.filtered else None
+        items = candidates(
+            index,
+            kinds,
+            conditions.geo if conditions is not None else None,
+            (lambda name: set(join.require_index().matching(name, flag_query.rule_ids, flag_query.grade)))
+            if join is not None
+            else None,
+        )
+        matches = _geo_other_filters(needle, wanted_types, wanted_channels, fields, conditions)
+        scanned, read_truncated = 0, False
+        if matches is not None:
+            items, scanned, read_truncated = filtered_candidates(items, all_sources, matches)
+        clusters, total = build_clusters(items, cell_degrees)
+        response.update(
+            {
+                "geo_index_source": index.source,
+                "located_total": sum(len(index.by_kind.get(name, ())) for name in kinds),
+                "matched": len(items),
+                "clusters": clusters,
+                "clusters_total": total,
+                "clusters_truncated": total > len(clusters),
+                "truncated": index.truncated or read_truncated,
+                "filtered": matches is not None or join is not None,
+                "scanned": scanned,
+            }
+        )
+        return response
 
 
     @router.post("/api/runs/{run_id}/extract")
@@ -1129,6 +1352,15 @@ def build_runs_router(
         return restrict, {"path": folder, "recursive": deep, "special": wanted_special, "rows": len(restrict or [])}
 
 
+    def _files_ntfs_times(run_id: str, rows: Sequence[object]) -> tuple[tuple[object, ...], NtfsTimes]:
+        """``(NTFS join stamp, resolver)`` of the acquisition copies' ``$SI`` modified times."""
+        try:
+            time_scope = run_scope(store, run_id, require_ready=False)
+        except HTTPException:
+            time_scope = None
+        return ntfs_join_stamp(time_scope), lambda positions: ntfs_si_modified_times(time_scope, rows, positions)
+
+
     @router.get("/api/runs/{run_id}/files")
     def get_run_files(
         run_id: str,
@@ -1170,9 +1402,11 @@ def build_runs_router(
         ``hours``, ``offhours``, ``tz``, ``partial``, ``content`` (``limit > 0``; compose with
         ``category``, ``flag``/``flag_grade``, ``sort=flags``). The row time is the 수정 time:
         ``fs_modified_at``, else for an acquisition copy the NTFS ``$SI`` modified time, looked up
-        per row in the NTFS join index only while the predicate runs and only when the list has
-        such rows and the join status is ``joined`` (an acquisition copy without the join has no
-        time and never matches), else ``modified_at``. ``content`` maps to the scan categories
+        in the NTFS join index once per join state and only when the list has such rows and the
+        join status is ``joined`` (an acquisition copy without the join has no time and never
+        matches), else ``modified_at``. The matching rows of a query (with ``category`` and the
+        folder filter) are kept per files-output revision and NTFS join state, so later pages do
+        not rescan the list: ``matched`` is exact and ``truncated`` false. ``content`` maps to the scan categories
         (문서 documents · 이미지 images · 압축 archives · 실행 executables · DB databases · 메일
         emails; 영상/음성 by extension). ``geo`` is a Korean 422 (files carry no coordinates).
         The page reports ``pagination.conditions``.
@@ -1232,22 +1466,24 @@ def build_runs_router(
         restrict, path_filter = _files_path_restriction(payload, run_id, collection, path_prefix, recursive, special)
         if (flag_query.active or wanted or conditions is not None or restrict is not None) and limit <= 0:
             raise HTTPException(status_code=400, detail=FILTER_LIMIT_MESSAGE)
-        source_rows: list[object] | None = None
-        row_filter = None
-        if conditions is not None:
-            source_rows = payload.get(collection) if isinstance(payload.get(collection), list) else []
-            ntfs_time = None
-            if conditions.uses_time and any(needs_ntfs_time(row) for row in source_rows):
-                # Acquisition copies take their time from the NTFS join: resolve it per row while
-                # filtering (only when the join is "joined") instead of joining the whole list.
-                try:
-                    time_scope = run_scope(store, run_id, require_ready=False)
-                except HTTPException:
-                    time_scope = None
-                ntfs_time = ntfs_si_modified_resolver(time_scope, source_rows) if time_scope is not None else None
-            row_filter = conditions.predicate("files", ntfs_time)
+        source_rows: list[object] = payload.get(collection) if isinstance(payload.get(collection), list) else []  # type: ignore[assignment]
+        positions = None
+        if wanted or conditions is not None:
+            # Matching positions once per (files revision, NTFS join state, query): later pages slice
+            # them (row_conditions.MATCH_CACHE) and ``matched`` is exact (plan r6 §3.3 갈래 B).
+            positions = files_matched_positions(
+                source_rows,
+                run_id=run_id,
+                collection=collection,
+                files_stamp=output_stamp(get_output_path(store, run_id, "files")),
+                categories=wanted,
+                conditions=conditions,
+                restrict=restrict,
+                restrict_key=(path_filter["path"], path_filter["recursive"], path_filter["special"]) if path_filter else None,
+                ntfs_join=lambda: _files_ntfs_times(run_id, source_rows),
+            )
         if flag_query.active or restrict is not None:
-            all_rows = source_rows if source_rows is not None else (payload.get(collection) if isinstance(payload.get(collection), list) else [])
+            all_rows = source_rows
             page_rows, flag_pagination = filter_files_rows(
                 all_rows,
                 collection=collection,
@@ -1257,7 +1493,8 @@ def build_runs_router(
                 offset=offset,
                 limit=limit,
                 restrict=restrict,
-                row_filter=row_filter,
+                row_filter=conditions.predicate("files") if conditions is not None else None,
+                positions=positions,
             )
             page = files_page_base(payload, collection)
             page[collection] = page_rows
@@ -1274,7 +1511,7 @@ def build_runs_router(
         elif wanted or conditions is not None:
             page = _echo_conditions(
                 filter_files_by_category(
-                    payload, wanted, offset=offset, limit=limit, collection=collection, row_filter=row_filter, rows=source_rows
+                    payload, wanted, offset=offset, limit=limit, collection=collection, rows=source_rows, positions=positions
                 ),
                 conditions,
             )
