@@ -42,7 +42,7 @@ python scripts/rule-validation.py --run <런> --rules antiforensics.wiper_run_af
 ```
 
 - `--expect`: `{규칙 id: {"min": n} | {"max": n}}`(양성 n건 이상 / 음성 n건 이하). 기대에만 있는 규칙도 평가한다. 종료 코드 0 통과 · 1 불일치 · 2 입력 오류.
-- 규칙마다: 적중 수, 등급별 수, 행 종류별 수, **입력 가능 행 수**(`eligible_rows`, 규칙 선택자가 읽는 행: 아티팩트 유형 수·파일 목록·분석 행), 표본 최대 10건(`--samples`; 아티팩트 유형, 경로 끝 이름만, 시각, 근거 필드 — 경로 값은 끝 이름, URL은 `scheme://host/…`로 줄임).
+- 규칙마다: 적중 수, 등급별 수, 행 종류별 수, **입력 가능 행 수**(`eligible_rows`, 규칙 선택자가 읽는 행: 아티팩트 유형 수·파일 목록·분석 행; 파일 목록은 엔진이 메모리에 올리는 256 MiB 이하면 목록 길이, 넘으면 흘려 읽으며 센 행 수 — UX 라운드 리뷰 전에는 큰 목록에서 늘 `null`이었다), 표본 최대 10건(`--samples`; 아티팩트 유형, 경로 끝 이름만, 시각, 근거 필드 — 경로 값은 끝 이름, URL은 `scheme://host/…`로 줄임).
 - 입력 가능 행이 0인 규칙은 `not_applicable`이고, 여기에 음성 기대(`max`)를 걸면 **불일치**(음성 대조 불성립)다. 0적중이 곧 오탐 0의 근거가 되지 않게 한다.
 - `--run`은 지표(`rapidtriage-indicators.json`)의 IP 지표를 규칙의 `is_public_ip`로 공인/비공인으로 나눠 보고한다(`non_public_samples` 최대 10개 — 출력은 Git 밖에만).
 - `--ntfs-analysis`는 분석 요약에 `timestamp_mismatch_reason_counts_all`이 있으면 `ntfs.si_before_fn` 적중 수와 분석 자체의 `si_created_before_fn` 수를 나란히 보고한다(`analysis_cross_check.agree`). 차이가 나면 수동 확인 3건(Q-S4-2)과 `scripts/mft-reference-diff.py` 교차를 권한다.
@@ -56,16 +56,19 @@ python scripts/rule-validation.py --run <런> --rules antiforensics.wiper_run_af
 | run-subset10 | 94be1df | `cloud.bulk_upload` · `ntfs.ads_executable` | 0 · 0 | 0 · 0 | — | 해당 없음(입력 없음) |
 | BSH 전체 이미지 `$MFT` | 94be1df(버전 1) | `ntfs.si_before_fn` | 174,852(전부 A) | 1,421,896 | 무작위 10건 모두 정상(시각 보존 복사·압축 해제·서비싱), 수동 확인 3건($SI<$FN 자체는 사실) | **오탐 폭주 → 재설계** |
 | BSH 전체 이미지 `$MFT` | fix/r6-s4-si-before-fn(버전 2) | `ntfs.si_before_fn` | 8,970(A 2 · B 202 · C 8,766) | 1,421,896 | A 2건 전수 검토(§5.3), B 상위 폴더 검토 | A는 이상 모양이 맞으나 조작 여부 미확정 |
+| BSH 전체 이미지 `$MFT` | fix/r6-ux-review(버전 3) | `ntfs.si_before_fn` | 8,503(A 2 · B 202 · C 8,299) | 1,421,896 | §5.5 — A·B는 버전 2와 같고 정시를 걸친 대량 C 467건이 빠짐 | 대량 판정 이동 창 |
 | 공개 데이터셋 | — | — | — | — | — | 승인 대기(공개 데이터셋·VM) |
 | VM 생성 | — | — | — | — | — | 승인 대기(공개 데이터셋·VM) |
 
-위 결과는 7개 규칙의 카탈로그 `validation.real`에 `{source, hits, false_positives, checked_at: '2026-10-21', note_ko}`로 기록했다(메타데이터만으로는 `version`을 올리지 않는다; `ntfs.si_before_fn`은 판정 로직이 바뀌어 버전 2). 콘솔 팝오버 한 줄은 "검증: 실데이터 n건(…) · 합성 픽스처"다. 음성·미평가·해당 없음은 출처 이름에 그대로 적었다(예: "run-subset10(사건 기간 없음 — 미평가)").
+위 결과는 7개 규칙의 카탈로그 `validation.real`에 `{source, result, hits, false_positives, sample_size, checked_at: '2026-10-21', note_ko}`로 기록했다(메타데이터만으로는 `version`을 올리지 않는다; `ntfs.si_before_fn`은 판정 로직이 바뀌어 버전 2, 대량 판정 이동 창으로 버전 3).
+
+**`result`(UX 라운드 리뷰, 필수)**: `positive`(실데이터에 확인된 참양성이 있고 규칙이 잡음) · `negative`(실데이터 입력에서 돌았고 확인된 참양성 없음 — 음성 대조, 적중은 오탐·미확정) · `not_applicable`(규칙이 읽을 입력 행 0) · `unevaluated`(규칙이 돌 수 없음, 예: 사건 기간 없음). 실데이터 검증으로 세는 것은 `positive`·`negative`뿐이다 — 콘솔 팝오버는 "검증: 실데이터 음성 n건 · 양성 m건 · 합성 픽스처"로, 해당 없음·미평가만 있으면 "검증: 실데이터 해당 없음 · 합성 픽스처" / "검증: 실데이터 미평가 · 합성 픽스처"로 보이고(전에는 N/A 항목도 "실데이터 1건"으로 셌다), `scripts/rule-validation.py`의 `validation_synthetic_only`도 두 결과만 본다. 7개 규칙: `eventlog.log_cleared`·`eventlog.rdp_external_ip`·`rdp.external_ip` 음성 1건, `ntfs.si_before_fn` 음성 3건(버전 1·2·3), `cloud.bulk_upload`·`ntfs.ads_executable` 해당 없음, `antiforensics.wiper_run_after_incident` 미평가 — 양성은 0건이다. `false_positives`는 검토한 표본 안의 오탐 수이고 `sample_size`가 표본 크기다(`ntfs.si_before_fn` 버전 1: 표본 10건 중 10건 오탐 — 174,852건 전체의 오탐 수가 아니다). 표본 수보다 큰 `false_positives`는 카탈로그 오류다.
 
 ## 4. 등급 권고(현재)
 
 - `eventlog.log_cleared`·`eventlog.rdp_external_ip`·`rdp.external_ip`: 음성 대조에서 오탐 0. 등급 유지. 참양성은 실데이터로 아직 증명되지 않았다.
 - `antiforensics.wiper_run_after_incident`·`cloud.bulk_upload`·`ntfs.ads_executable`: 실데이터에서 평가하지 못했다(사건 기간 없음 / 입력 없음). 등급 유지, 합성 근거만.
-- `ntfs.si_before_fn`: 버전 1의 "단순 $SI<$FN = A"는 실데이터에서 A 오탐 폭주였다. 버전 2(§5)는 A를 타임스톰핑 보강 근거가 있는 경우로 좁혔다. 카탈로그 등급은 A로 두고 결과별 상한(B/C)과 미표시로 낮춘다.
+- `ntfs.si_before_fn`: 버전 1의 "단순 $SI<$FN = A"는 실데이터에서 A 오탐 폭주였다. 버전 2(§5)는 A를 타임스톰핑 보강 근거가 있는 경우로 좁혔고, 버전 3(§5.5)은 대량 판정을 이동 창으로 바꿨다. 카탈로그 등급은 A로 두고 결과별 상한(B/C)과 미표시로 낮춘다.
 - 어느 규칙도 실데이터 양성이 없다. 공개 데이터셋·일회용 VM 생성은 사용자 승인 대기다.
 
 ## 5. `ntfs.si_before_fn` 재설계(버전 2, 2026-10-21)
@@ -85,11 +88,11 @@ python scripts/rule-validation.py --run <런> --rules antiforensics.wiper_run_af
 | A | 보강 근거 ① $SI 생성·수정·MFT 수정 모두 초 미만 0 + $FN 생성은 초 미만 있음, 또는 ② $SI 수정·MFT 수정도 $FN 생성보다 임계값 이상 앞섬. 대량·서비싱이어도 표시 | 2 |
 | B | 보강 근거 없음 + 사용자 쓰기 가능 경로(`\AppData\`, `\Temp\`, `\Downloads\`, `\Users\Public\`, `\ProgramData\` 등)의 실행·스크립트 확장자(`executable_extensions`) | 202 |
 | C | 보강 근거 없음, 그 밖 | 8,766 |
-| 미표시 | 보강 근거 없음 + 서비싱 경로(`suppress_path_markers`: WinSxS·servicing·SoftwareDistribution) 또는 $FN 생성 같은 구간(`bulk_bucket_seconds` 3600초)의 후보가 `bulk_min_records`(500)건 이상 | 165,884 |
+| 미표시 | 보강 근거 없음 + 서비싱 경로(`suppress_path_markers`: WinSxS·servicing·SoftwareDistribution) 또는 $FN 생성 같은 구간(`bulk_bucket_seconds` 3600초)의 후보가 `bulk_min_records`(500)건 이상(버전 3은 같은 구간 대신 이동 창 — §5.5) | 165,884 |
 
 설계 근거(실측): $SI 생성·수정만 초 미만 0인 후보는 30,489건(압축 해제·MSI의 2초 단위 시각)이라 보강 근거가 못 된다 — NTFS가 직접 쓰는 $SI MFT 수정까지 0인 경우는 1건뿐이다. $SI 수정만 $FN보다 앞선 후보는 비대량에서도 8,029건(복사가 수정 시각을 보존)이라 MFT 수정까지 요구한다. "사용자 쓰기 가능 경로의 실행 파일"을 A 근거로 쓰면 202건이 모두 설치기·Teams 추가 기능 압축 해제라 B로 낮췄다. 500건/시간 기준은 후보의 165,587건(21개 시간 구간)을 덮고 서비싱 경로가 297건을 더한다. 보강 근거가 있는 후보는 대량·서비싱 구간에 0건이었다.
 
-`$MFT` 단독 분석의 판단은 엔진의 `finalize`에서 한다(시간 구간 수를 다 센 뒤). 후보 메모리는 BSH 기준 약 17.5만 건이다.
+`$MFT` 단독 분석의 판단은 엔진의 `finalize`에서 한다(시간 구간 수를 다 센 뒤). 후보 메모리는 BSH 기준 약 17.5만 건이다(버전 3의 메모리는 §5.5).
 
 ### 5.3 남은 A 2건 검토(전수 — 10건 미만)
 
@@ -107,6 +110,23 @@ python scripts/rule-validation.py --ntfs-analysis <런>\analyses\<ntfs-meta 분�
 ```
 
 `analysis_cross_check`는 `{analysis_count, engine_candidates, engine_hits, not_flagged, agree}`다. `engine_candidates`는 하네스가 행을 한 번 더 읽어 규칙의 `apply`만 돌린 후보 수(등급·미표시 전)이고 `agree`는 이것과 분석 수의 일치다. BSH 측정: 버전 1 71.7초, 버전 2 52.1초(엔진) + 후보 재계산.
+
+### 5.5 버전 3 — 대량 판정 이동 창(UX 라운드 적대적 리뷰, 2026-10-21)
+
+버전 2의 대량 판정은 고정 1시간 구간(`int($FN 생성) // 3600`)이라 정시를 걸친 물결이 새었다: 10:55–11:04에 600건이면 구간마다 300건이라 500건 기준에 못 미쳐 600건이 모두 C로 표시됐다. 버전 3은 `finalize`에서 후보를 (출처, $FN 생성)으로 정렬하고 두 포인터로 각 후보의 ±`bulk_bucket_seconds`/2(±30분, 양 끝 포함) 안 같은 출처 후보 수를 센다(O(n log n)). 그 수가 `bulk_min_records` 이상이고 보강 근거가 없으면 미표시, 보강 근거가 있으면 종전대로 늘 표시. 근거 필드 `bucket_hits`는 이제 이 창 안의 후보 수다. 시험: `tests/triage_cases/ntfs.py` 음성 픽스처(10:55·10:58·11:02·11:04, `bulk_min_records` 3), `tests/test_rapidtriage_triage_rules.py`(리뷰어의 600건 사례, 정시 경계 2초 차, 무작위 창 수의 전수 비교, 후보 메모리).
+
+후보는 열 단위로 둔다: $SI 생성·$FN 생성·$SI 수정·$SI MFT 수정은 에포크 마이크로초 `array('q')`, 출처·행 유형·사용자 쓰기 가능 표지는 번호, 보강 근거는 비트, 경로는 문자열 하나. 근거의 시각 문자열은 종전과 같다(마이크로초 왕복).
+
+| BSH 전체 `$MFT`(1,421,896 레코드) | 버전 2(고정 구간) | 버전 3(이동 창) |
+|---|---|---|
+| A / B / C | 2 / 202 / 8,766 | 2 / 202 / 8,299 |
+| 미표시 | 165,884 | 166,351 |
+| 후보(분석 자체 수와 일치) | 174,854 | 174,854 |
+| 후보당 유지 메모리(처음 40만 레코드, tracemalloc) | 731 B | 186 B |
+| `rule-validation.py --ntfs-analysis` 최대 작업 집합 | 216.8 MB | 130.5 MB |
+| 하네스 경과(엔진, 부하 있는 기계) | 47.2 s | 40.2 s |
+
+A·B는 그대로이고 정시를 걸친 대량 구간의 보강 근거 없는 C 467건이 새로 빠졌다. 이동 창은 대량 구간 가장자리(창 안 후보가 500건 미만이 되는 앞뒤 끝)의 몇 건을 여전히 C로 남길 수 있다.
 
 ## Not Evidence
 
