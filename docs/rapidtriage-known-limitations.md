@@ -432,3 +432,12 @@ RapidTriage는 아래 기능을 프로젝트 정책으로 구현하지 않는다
 | 암호화폐 지갑 키·시드 | 개인키·시드·xprv·키스토어 내용 추출, 지갑 복호 | `crypto-wallet-presence`(지갑 종류·경로·파일 수·크기·암호화 표시·평문 Electrum 공개 주소 최대 20개·확장 지갑 ID), `antiforensics.crypto_wallet_present`(C) 규칙, 거래소 방문은 URL 분류 finance. 문서 추출·`--extract`도 지갑 파일 본문을 저장하지 않음(`secret-redacted`) |
 | Credentials/Vault blob·SSH 개인키·저장 비밀번호 값 | blob 구조 해석, SSH 개인키 본문·해시, PuTTY/WinSCP 저장 비밀번호 값 | `credential-store-presence`, `ssh-key-file`(존재·형식·암호화 여부·공개키 지문), `ssh-client-session`의 `password_saved` 표시. 하이브 문자열 피벗·`.reg` 내보내기·문서 색인에서도 같은 값을 가림 |
 <!-- r5 L4 (documentation): policy exclusions: end -->
+
+## R6 S4 — A등급 규칙 검증 범위
+<!-- r6 S4 (validation gaps): start -->
+- **실데이터 근거 범위**: A등급 7개 규칙(`antiforensics.wiper_run_after_incident`, `cloud.bulk_upload`, `eventlog.rdp_external_ip`, `eventlog.log_cleared`, `ntfs.si_before_fn`, `ntfs.ads_executable`, `rdp.external_ip`)은 현재 **합성 픽스처 근거만** 있다(`tests/triage_cases`의 양성·음성). 카탈로그 `validation` 블록(`synthetic: true`, `real`·`public` 비어 있음)으로 표시하고 콘솔 근거 팝오버에 "검증: 합성 픽스처만" 한 줄이 나온다. 등급은 내리지 않았다. 규칙별 근거 표와 워커 실행 계획: `docs/validation/triage-rules-a-grade-2026-10-19.md`.
+- **음성 대조만 가능한 소스**: 서브셋(run-subset10)에는 `$MFT`·Security 1102·외부 IP 로그온이 없어 `eventlog.log_cleared`·`eventlog.rdp_external_ip`·`rdp.external_ip`는 0적중(오탐 없음)만 확인할 수 있다. 양성은 공개 데이터셋·일회용 VM 생성(사용자 승인 대기)이 필요하다. VM NAT는 사설 주소라 외부 IP RDP 양성은 만들기 어렵다.
+- **`ntfs.ads_executable`과 `$MFT` 단독 분석**: `ntfs-meta`(`source=mft`) 분석 행에는 ADS 정보가 없어 이 규칙은 `bsh-mft.bin`만으로 검증할 수 없다(`scripts/rule-validation.py --ntfs-analysis`는 `not_applicable`로 보고). 이미지 런의 `windows-filesystem` `ads-stream-candidate` 행으로 검증해야 한다. `ntfs.si_before_fn`은 `$MFT` 단독 분석으로 검증할 수 있고, 하네스는 분석 자체의 `si_created_before_fn` 수와 교차한다.
+- **하네스 한계**: `scripts/rule-validation.py`의 "입력 가능 행"은 규칙 선택자가 읽는 행 수(아티팩트 유형 수·파일 목록·분석 행 수)라서 규칙이 실제로 판단하는 행보다 많을 수 있다(`ntfs.si_before_fn`만 MFT 행으로 좁힘). 아티팩트 매니페스트에 `artifact_type_counts`가 없거나 64 MB를 넘으면 그 종류의 입력 가능 행은 "알 수 없음"이다. 저장된 특이사항 조인이 현재 카탈로그보다 오래되면 경고하며, 재계산은 `--recompute`다.
+- **EVTX 레코드 식별자**: 2026-08-30 Windows T1 발견(물리 레코드 헤더 id ≠ BinXML `EventRecordID`)은 현재 코드에서 해소되었다 — native 파서의 `record_id`는 BinXML `EventRecordID`이고 BinXML을 풀지 못한 레코드만 헤더 id로 대체한다(합성 EVTX 시험). 운영자 호스트의 EvtxECmd 레코드 단위 diff 재실행은 운영자 승인 대기다(`docs/validation/windows-t1-operator-inputs.md`).
+<!-- r6 S4 (validation gaps): end -->
