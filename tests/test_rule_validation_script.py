@@ -43,6 +43,13 @@ def case_rows(cases: Mapping[str, Mapping[str, Any]], rule_id: str) -> list[dict
     return [*cases[rule_id]["positive"]["rows"], *cases[rule_id]["negative"]["rows"]]
 
 
+def si_fn_rows() -> list[dict[str, Any]]:
+    """ntfs.si_before_fn positives (A, A, C, B) + the negatives that hold under catalogue params (the WinSxS
+    servicing copy: a candidate that is not flagged; the plain copy: not a candidate). The fixture's bulk-copy
+    negatives need ``bulk_min_records: 3``, which the harness (catalogue params) does not apply."""
+    return [*NTFS_CASES[SI_FN]["positive"]["rows"], *NTFS_CASES[SI_FN]["negative"]["rows"][3:]]
+
+
 def snapshot(root: Path) -> dict[str, tuple[int, int]]:
     return {str(path.relative_to(root)): (path.stat().st_size, path.stat().st_mtime_ns) for path in root.rglob("*") if path.is_file()}
 
@@ -150,7 +157,7 @@ class RuleValidationScriptTests(unittest.TestCase):
         self.assertEqual(rules[LOG_CLEARED]["result"], "pass")
         self.assertEqual(rules[LOG_CLEARED]["grades"], {"A": 1})
         self.assertEqual(rules[LOG_CLEARED]["hits_by_kind"], {"eventlog": 1})
-        self.assertTrue(rules[LOG_CLEARED]["validation_synthetic_only"])
+        self.assertFalse(rules[LOG_CLEARED]["validation_synthetic_only"])  # real-data negative control recorded (R6 S4)
         # Eligible rows: 8 event-log rows for the event-log rules, 4 ADS rows for ntfs.ads_executable.
         self.assertEqual(rules[LOG_CLEARED]["eligible_rows"], 8)
         self.assertEqual(rules[ADS]["eligible_rows"], 4)
@@ -278,20 +285,24 @@ class RuleValidationScriptTests(unittest.TestCase):
     def test_ntfs_analysis_mode_runs_the_engine_over_mft_rows(self) -> None:
         run = self.root / "ntfs-run"
         run.mkdir()
-        rows = case_rows(NTFS_CASES, SI_FN)  # timestomped (+1) · plain copy (−1)
-        analysis = write_ntfs_analysis(run, rows, reason_counts={"si_created_before_fn": 1, "zero_subsecond": 0})
+        rows = si_fn_rows()  # 4 flagged (A, A, C, B) · WinSxS candidate not flagged · plain copy not a candidate
+        analysis = write_ntfs_analysis(run, rows, reason_counts={"si_created_before_fn": 5, "zero_subsecond": 1})
         before = snapshot(run)
-        code, report, _err = self.run_script("--ntfs-analysis", str(analysis), "--expect", self.expect({SI_FN: {"min": 1, "max": 1}}), "--json")
+        code, report, _err = self.run_script("--ntfs-analysis", str(analysis), "--expect", self.expect({SI_FN: {"min": 4, "max": 4}}), "--json")
         self.assertEqual(code, 0, report)
         self.assertEqual(snapshot(run), before)  # read-only
         self.assertEqual(report["mode"], "ntfs-analysis")
-        self.assertEqual(report["input"]["row_count"], 2)
+        self.assertEqual(report["input"]["row_count"], 6)
         rules = self.by_id(report)
         self.assertEqual(set(rules), {SI_FN, ADS})  # default rule pair
         si = rules[SI_FN]
-        self.assertEqual((si["hits"], si["eligible_rows"], si["result"]), (1, 2, "pass"))
-        self.assertEqual(si["hits_by_kind"], {"analysis:ntfs-mft-1": 1})
-        self.assertEqual(si["analysis_cross_check"], {"reason": "si_created_before_fn", "analysis_count": 1, "engine_hits": 1, "agree": True})
+        self.assertEqual((si["hits"], si["eligible_rows"], si["result"]), (4, 6, "pass"))
+        self.assertEqual(si["grades"], {"A": 2, "B": 1, "C": 1})
+        self.assertEqual(si["hits_by_kind"], {"analysis:ntfs-mft-1": 4})
+        self.assertEqual(
+            si["analysis_cross_check"],
+            {"reason": "si_created_before_fn", "analysis_count": 5, "engine_candidates": 5, "engine_hits": 4, "not_flagged": 1, "agree": True},
+        )
         sample = si["samples"][0]
         self.assertEqual((sample["artifact_type"], sample["path_tail"]), ("ntfs-meta-row", "svc-helper.exe"))
         self.assertEqual(sample["evidence"]["path"], "…\\svc-helper.exe")
@@ -305,7 +316,7 @@ class RuleValidationScriptTests(unittest.TestCase):
     def test_ntfs_analysis_negative_expectation_on_ads_is_a_mismatch(self) -> None:
         run = self.root / "ntfs-run"
         run.mkdir()
-        analysis = write_ntfs_analysis(run, case_rows(NTFS_CASES, SI_FN))
+        analysis = write_ntfs_analysis(run, si_fn_rows())
         code, report, _err = self.run_script("--ntfs-analysis", str(analysis), "--expect", self.expect({ADS: {"max": 0}}), "--json")
         self.assertEqual(code, 1)
         ads = self.by_id(report)[ADS]
@@ -316,7 +327,7 @@ class RuleValidationScriptTests(unittest.TestCase):
     def test_ntfs_analysis_negative_only_and_input_errors(self) -> None:
         run = self.root / "ntfs-run"
         run.mkdir()
-        analysis = write_ntfs_analysis(run, NTFS_CASES[SI_FN]["negative"]["rows"])
+        analysis = write_ntfs_analysis(run, NTFS_CASES[SI_FN]["negative"]["rows"][3:])
         code, report, _err = self.run_script("--ntfs-analysis", str(analysis), "--rules", SI_FN, "--expect", self.expect({SI_FN: {"max": 0}}), "--json")
         self.assertEqual(code, 0)
         self.assertEqual(self.by_id(report)[SI_FN]["hits"], 0)

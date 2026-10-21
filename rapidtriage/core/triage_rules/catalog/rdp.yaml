@@ -314,9 +314,14 @@ rules:
   status: verified
   validation:
     synthetic: true
-    real: []
+    real:
+    - source: run-subset10 이벤트 로그(음성)
+      hits: 0
+      false_positives: 0
+      checked_at: '2026-10-21'
+      note_ko: '입력 가능 이벤트 로그 292,370행에서 0적중(기대 최대 0, 통과). 1149·131 공인 IP 연결이 없어 양성은 확인하지 못함. r6-s1-run·qa-case1·r4-v1 런은 같은 증거를 다시 처리한 것이라 독립 근거가 아님.'
     public: []
-    notes_ko: 합성 근거만(tests/triage_cases 양성·음성 픽스처). 실데이터·공개 데이터셋 검증 대기(R6 S4).
+    notes_ko: 실데이터는 음성 대조만(0적중·오탐 0). 양성 실데이터 없음 — 공개 데이터셋·VM 생성은 사용자 승인 대기.
   params: {}
 - id: rdp.pairing_mismatch
   family: eventlog-event

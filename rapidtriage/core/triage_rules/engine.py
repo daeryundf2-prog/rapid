@@ -535,8 +535,11 @@ def run_triage_flags(
     progress.check_cancel()
     for rule in rules:
         try:
-            for ref, result in rule.finalize(ctx):
-                collector.add(ref, rule.rule_id, result.evidence, result.note, grade_cap=result.grade)
+            for item in rule.finalize(ctx):
+                # ``(ref, result)`` or ``(ref, result, artifact_type)`` (a deferred per-row flag keeps its row type).
+                ref, result = item[0], item[1]
+                row_type = item[2] if len(item) > 2 else None
+                collector.add(ref, rule.rule_id, result.evidence, result.note, row_type, grade_cap=result.grade)
         except Exception as exc:
             record_error(rule.rule_id, exc)
     progress.check_cancel()

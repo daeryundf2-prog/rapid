@@ -72,7 +72,7 @@ from rapidtriage.core.triage_rules import (
     RowView,
     load_catalog,
 )
-from rapidtriage.core.triage_rules.base import is_public_ip
+from rapidtriage.core.triage_rules.base import FlagContext, is_public_ip
 from rapidtriage.core.triage_rules.catalog import Catalog
 from rapidtriage.core.triage_rules.engine import (
     FLAGS_FILE_NAME,
@@ -219,6 +219,22 @@ def sub_catalog(catalog: Catalog, rule_ids: Iterable[str]) -> Catalog:
 
 def rule_instance(catalog: Catalog, rule_id: str):
     return RULE_CLASSES[rule_id](dict(catalog.specs[rule_id].params))
+
+
+def ntfs_candidates(catalog: Catalog, rule_id: str, rows_path: Path, row_count: int) -> int | None:
+    """Rows the rule *considers* (before grading and bulk/servicing suppression) on an ntfs-meta analysis:
+    a second read-only pass that only calls ``apply`` (``None`` when the rule has no ``candidate_count``)."""
+    rule = rule_instance(catalog, rule_id)
+    if not hasattr(rule, "candidate_count"):
+        return None
+    ctx = FlagContext()
+    for index, row in iter_jsonl_rows(rows_path, limit=row_count):
+        if row is None:
+            continue
+        view = RowView(kind=f"analysis:{NTFS_KIND}", collection="analysis", source_kind=NTFS_KIND, index=index, row=row)
+        if rule.accepts("analysis", NTFS_KIND, view.type):
+            rule.apply(view, ctx)
+    return int(rule.candidate_count)
 
 
 # --- flags ------------------------------------------------------------------------------------
@@ -672,11 +688,17 @@ def validate_ntfs(args: argparse.Namespace, catalog: Catalog) -> dict[str, Any]:
         reason = NTFS_CROSS_CHECK.get(item["id"])
         if reason and isinstance(reasons, Mapping):
             count = reasons.get(reason)
+            # Since ntfs.si_before_fn v2 the flags omit uncorroborated bulk/servicing hits, so the analysis'
+            # count is compared with the rows the rule considered (candidates), not with the flags.
+            candidates = ntfs_candidates(catalog, item["id"], rows_path, row_count)
+            compared = candidates if candidates is not None else item["hits"]
             item["analysis_cross_check"] = {
                 "reason": reason,
                 "analysis_count": count,
+                "engine_candidates": candidates,
                 "engine_hits": item["hits"],
-                "agree": count == item["hits"],
+                "not_flagged": compared - item["hits"],
+                "agree": count == compared,
             }
     return {
         "schema": SCHEMA_VERSION,
