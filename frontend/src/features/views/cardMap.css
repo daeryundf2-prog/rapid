@@ -182,14 +182,21 @@
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(220px, 320px) 1fr;
+  /* minmax(0, 1fr) (scroll review C5): a bare 1fr track is at least as wide as the nowrap
+     coordinate table, which widened the whole page at ≤ 1280px. The table scrolls in its wrap. */
+  grid-template-columns: minmax(220px, 320px) minmax(0, 1fr);
   overflow: hidden;
+}
+
+.map-body > * {
+  min-width: 0;
 }
 
 .map-clusters,
 .map-table-wrap {
   min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
   padding: var(--space-2) var(--space-3);
 }
 
@@ -266,7 +273,7 @@
 
 @media (max-width: 720px) {
   .map-body {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     overflow: auto;
   }
 

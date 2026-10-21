@@ -6,7 +6,7 @@
  * The URL stays the source of truth (filterStore / filterModel are unchanged).
  */
 
-import { type ReactNode, type RefObject, useEffect, useId, useRef, useState } from "react";
+import { type ReactNode, type RefObject, useEffect, useId, useRef, useState, type WheelEvent } from "react";
 import { announce } from "../../a11y";
 import { Popover } from "../../components/Popover";
 import type { ReviewStatus } from "../../contracts/collection";
@@ -133,6 +133,17 @@ export interface FilterBarProps {
 
 function toggle<T extends string>(list: T[], value: T): T[] {
   return list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
+}
+
+/**
+ * The chip strip scrolls sideways (scroll review C6): a plain vertical wheel over it moves it
+ * left/right too, besides its thin scrollbar and Tab (focus scrolls a chip into view).
+ */
+export function chipStripWheel(event: WheelEvent<HTMLElement>): void {
+  const el = event.currentTarget;
+  if (el.scrollWidth <= el.clientWidth + 1) return;
+  if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+  el.scrollLeft += event.deltaY;
 }
 
 /** Popover body (탐색): time range, type, status, tag, extension, path. */
@@ -781,7 +792,7 @@ export function FilterBar(props: FilterBarProps) {
         </span>
 
         {displayChips.length ? (
-          <ul className="filter-chips filter-display-chips" aria-label="표시 설정">
+          <ul className="filter-chips filter-display-chips" aria-label="표시 설정" onWheel={chipStripWheel}>
             {displayChips.map((chip) => (
               <li key={chip.id} className="filter-chip chip is-display">
                 <button
@@ -805,7 +816,7 @@ export function FilterBar(props: FilterBarProps) {
           </ul>
         ) : null}
         {chips.length ? (
-          <ul className="filter-chips" aria-label="적용된 조건">
+          <ul className="filter-chips" aria-label="적용된 조건" onWheel={chipStripWheel}>
             {chips.map((chip) => (
               <li key={chip.id} className="filter-chip chip">
                 <button type="button" className="chip-open" title="조건 패널 열기" onClick={openPanel}>
