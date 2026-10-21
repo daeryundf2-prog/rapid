@@ -375,7 +375,9 @@ describe("rule validation line (R6 S4, Q-S4-6)", () => {
     expect(popoverLine()?.textContent).toBe("검증: 실데이터 해당 없음 · 합성 픽스처");
     cleanup();
     // An older payload without `result` reads as unevaluated, never as a counted check.
-    setCatalog(catalogWith({ synthetic: true, real: [{ source: "old", hits: 0 }], public: [], notes_ko: "x" }));
+    setCatalog(
+      catalogWith({ synthetic: true, real: [{ source: "old", hits: 0 }], public: [], notes_ko: "x" }),
+    );
     expect(popoverLine()?.textContent).toBe("검증: 실데이터 미평가 · 합성 픽스처");
   });
 

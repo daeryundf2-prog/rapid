@@ -179,9 +179,10 @@ function validationPart(name: string, entries: readonly RuleValidationEntry[]): 
 export function validationLine(rule: Pick<CatalogRule, "validation"> | undefined): string | null {
   const validation: RuleValidation | undefined = rule?.validation;
   if (!validation) return null;
-  const parts = [validationPart("실데이터", validation.real), validationPart("공개 데이터셋", validation.public)].filter(
-    (part): part is string => part !== null,
-  );
+  const parts = [
+    validationPart("실데이터", validation.real),
+    validationPart("공개 데이터셋", validation.public),
+  ].filter((part): part is string => part !== null);
   if (!parts.length) return validation.synthetic ? "검증: 합성 픽스처만" : "검증: 기록 없음";
   if (validation.synthetic) parts.push("합성 픽스처");
   return `검증: ${parts.join(" · ")}`;

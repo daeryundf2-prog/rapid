@@ -65,7 +65,12 @@ export interface CatalogFamily {
  */
 export type RuleValidationResult = "positive" | "negative" | "not_applicable" | "unevaluated";
 
-const VALIDATION_RESULTS: readonly RuleValidationResult[] = ["positive", "negative", "not_applicable", "unevaluated"];
+const VALIDATION_RESULTS: readonly RuleValidationResult[] = [
+  "positive",
+  "negative",
+  "not_applicable",
+  "unevaluated",
+];
 
 /** One real-data / public-dataset check of a rule (catalogue `validation.real` / `.public`). */
 export interface RuleValidationEntry {
