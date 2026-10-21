@@ -61,6 +61,7 @@ from .dashboard import (
 )
 from .files_index import NtfsTimes, files_matched_positions
 from .files_ntfs import join_files_page, ntfs_join_stamp, ntfs_si_modified_times
+from .files_sections import apply_page_sections, section_response
 from .fs_tree import (
     FS_INDEX_CACHE,
     files_output_key,
@@ -1441,8 +1442,21 @@ def build_runs_router(
         partial: str | None = Query(default=None),
         content: list[str] = Query(default=[]),
         geo: str | None = Query(default=None),
+        sections: list[str] = Query(default=[]),
     ) -> dict[str, object]:
         """Paged file rows joined with the newest ``ntfs-meta`` analysis.
+
+        Non-row sections (R6 S3 follow-up): a page (``limit > 0``) carries the rows, pagination
+        and the small header fields (scalars, ``filters``, ``summary``, ``time_provenance``,
+        ``file_exclusions``, ``known_good_suppression_profile``, ``file_signature_profile``,
+        ``core_accuracy_gates``) only. Every other list/object field of the files output
+        (``duplicate_content_groups``, ``duplicate_detection_assessment``,
+        ``duplicate_content_manifest``, ``hash_cache_manifest``, ``hash_cache_assessment``,
+        ``signature_mismatch_candidates``, ``fuzzy_text_duplicate_groups`` ...) is listed in
+        ``sections_available = [{name, approx_bytes, item_count}]`` and included only when asked:
+        ``sections=<name>,<name>`` (repeatable) or ``sections=all``; requested names the run lacks
+        are reported in ``sections_missing``. ``GET /files/sections?name=`` serves one section.
+        ``limit=0`` (full export) is unchanged and still returns the whole output.
 
         파일 시스템 탐색기 (plan r4 §2.2): ``path_prefix`` = a folder of
         ``GET /fs-tree`` (relative to the volume root, ``/`` separators,
@@ -1597,7 +1611,28 @@ def build_runs_router(
         if isinstance(joined.get(collection), list):
             joined[collection] = join.attach(joined[collection], f"files:{collection}")
         joined["flags_join"] = dict(join.info)
+        if limit > 0:
+            joined = apply_page_sections(joined, payload, output_stamp(get_output_path(store, run_id, "files")), sections)
         return joined
+
+
+    @router.get("/api/runs/{run_id}/files/sections")
+    def get_run_files_section(
+        run_id: str,
+        name: str = Query(..., min_length=1, max_length=128),
+        offset: int = Query(0, ge=0),
+        limit: int = Query(0, ge=0, le=1000),
+    ) -> dict[str, object]:
+        """One non-row section of the files output (``sections_available`` of ``GET /files``).
+
+        Returns ``{run_id, name, kind: list|object, item_count, approx_bytes, value}``. A list
+        section is paged by ``offset``/``limit`` (``limit=0`` = the whole list) and then reports
+        ``pagination = {offset, limit, returned, total, has_more}``; an object section is returned
+        whole. Unknown name: Korean 404; malformed name: Korean 422.
+        """
+        payload = get_named_output(store, run_id, "files")
+        stamp = output_stamp(get_output_path(store, run_id, "files"))
+        return section_response(payload, stamp, run_id, name, offset=offset, limit=limit)
 
 
     @router.get("/api/runs/{run_id}/docs")
