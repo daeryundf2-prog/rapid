@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import datetime as dt
 import re
-from collections import Counter, defaultdict
+from array import array
+from collections import defaultdict
 from collections.abc import Iterator, Mapping
 
 from ..ntfs_timestamps import SI_BEFORE_FN_MIN_DELTA_SECONDS
@@ -70,6 +71,7 @@ def mft_path(row: RowView) -> str:
 
 SI_BEFORE_FN_SUPPRESS_PATHS = ("\\windows\\winsxs\\", "\\windows\\servicing\\", "\\windows\\softwaredistribution\\")
 SI_BEFORE_FN_EXECUTABLES = ("exe", "dll", "sys", "scr", "com", "pif", "cpl", "msi", "bat", "cmd", "ps1", "psm1", "vbs", "vbe", "js", "jse", "wsf", "hta", "jar", "lnk")
+_EPOCH_UTC = dt.datetime(1970, 1, 1, tzinfo=dt.timezone.utc)
 _EXTRA_DIGITS = re.compile(r"(\.\d{6})\d+")
 FILETIME_FLOOR_YEAR = 1601  # FILETIME 0 (1601-01-01) = "no time"; 1970 is a real (if odd) $SI value
 
@@ -118,21 +120,44 @@ class SiBeforeFn(Rule):
     An executable/script under a user-writable folder without those is capped at B; everything else at
     C. A hit with no corroborator is dropped (no flag) when its path is under a servicing folder
     (``suppress_path_markers``) or when it belongs to a bulk pattern: at least ``bulk_min_records``
-    hits whose $FN created falls in the same ``bulk_bucket_seconds`` bucket (feature update, copy of a
-    whole tree). Corroborated hits are never dropped (mass timestomping stays visible).
+    hits of the same source whose $FN created lies within +/-``bulk_bucket_seconds``/2 of its own (a
+    sliding window, so a feature update or tree copy straddling a clock hour is still one wave; the
+    count is the evidence ``bucket_hits``). Corroborated hits are never dropped (mass timestomping
+    stays visible).
+
+    Memory: the ~175k hits of a 1.4M-record $MFT are kept column-wise (epoch-microsecond
+    ``array('q')`` columns, interned kind/type/marker codes, one path string each) instead of
+    datetime tuples.
     """
 
     selector = MFT_ROWS
 
     def __init__(self, params=None) -> None:
         super().__init__(params)
-        # (ref, row type, bucket, (path, si created, fn created, si modified, si MFT-modified), corroborators,
-        # user-writable marker of an executable); ~175k entries on a 1.4M-record $MFT.
-        self.hits: list[tuple[RowRef, str, tuple[str, int], tuple[str, dt.datetime, dt.datetime, dt.datetime | None, dt.datetime | None], tuple[str, ...], str]] = []
-        self.buckets: Counter[tuple[str, int]] = Counter()
         self.executables = frozenset(str(item).lower().lstrip(".") for item in self.param("executable_extensions", SI_BEFORE_FN_EXECUTABLES))
         self.threshold = float(self.param("min_delta_seconds", SI_BEFORE_FN_MIN_DELTA_SECONDS))
         self.bucket_seconds = max(1, int(float(self.param("bulk_bucket_seconds", 3600))))
+        # Interned strings (row kind, row type, user-writable marker) -> small codes.
+        self._names: list[str] = []
+        self._codes: dict[str, int] = {}
+        # Hit columns, one entry per candidate row.
+        self._kind = array("H")
+        self._type = array("H")
+        self._index = array("q")
+        self._si = array("q")
+        self._fn = array("q")
+        self._si_modified = array("q")
+        self._si_changed = array("q")
+        self._corroborators = array("B")  # bit 0 zero_subsecond_si, bit 1 si_changed_before_fn
+        self._marker = array("H")  # code of the user-writable marker of an executable ("" = none)
+        self._paths: list[str] = []
+
+    def _code(self, text: str) -> int:
+        code = self._codes.get(text)
+        if code is None:
+            code = self._codes[text] = len(self._names)
+            self._names.append(text)
+        return code
 
     def apply(self, row: RowView, ctx: FlagContext) -> RuleResult | None:
         if row_source(row) != "mft":
@@ -146,62 +171,112 @@ class SiBeforeFn(Rule):
         if delta <= threshold:
             return None
         si_modified, si_changed = times["si_modified_at"], times["si_mft_modified_at"]
-        corroborators: list[str] = []
+        corroborators = 0
         if (
             si_modified is not None
             and si_changed is not None
             and not (si.microsecond or si_modified.microsecond or si_changed.microsecond)
             and fn.microsecond
         ):
-            corroborators.append("zero_subsecond_si")
+            corroborators |= 1
         if (
             si_modified is not None
             and si_changed is not None
             and (fn - si_modified).total_seconds() > threshold
             and (fn - si_changed).total_seconds() > threshold
         ):
-            corroborators.append("si_changed_before_fn")
+            corroborators |= 2
         path = mft_path(row)
         executable = ""
         if row.flag("directory") is not True and extension(path) in self.executables:
             executable = user_writable_marker(path)
-        bucket = (row.kind, int(fn.timestamp()) // self.bucket_seconds)
-        self.buckets[bucket] += 1
-        self.hits.append((row.ref, row.type, bucket, (path, si, fn, si_modified, si_changed), tuple(corroborators), executable))
+        self._kind.append(self._code(row.kind))
+        self._type.append(self._code(row.type))
+        self._index.append(row.index)
+        self._si.append(_epoch_us(si))
+        self._fn.append(_epoch_us(fn))
+        self._si_modified.append(_epoch_us(si_modified))
+        self._si_changed.append(_epoch_us(si_changed))
+        self._corroborators.append(corroborators)
+        self._marker.append(self._code(executable))
+        self._paths.append(path)
         return None
 
     @property
     def candidate_count(self) -> int:
         """Rows read so far with $SI created < $FN created by more than the threshold (before grading/suppression);
         ``scripts/rule-validation.py`` compares it with the analysis' own ``si_created_before_fn`` count."""
-        return len(self.hits)
+        return len(self._paths)
+
+    def window_counts(self) -> list[int]:
+        """Per hit: hits of the same row kind whose $FN created lies within +/-``bulk_bucket_seconds``/2
+        of its own, itself included (sort by (kind, $FN created), then a two-pointer sweep: O(n log n))."""
+        half = self.bucket_seconds * 1_000_000 // 2
+        kinds, fns = self._kind, self._fn
+        order = sorted(range(len(fns)), key=lambda position: (kinds[position], fns[position]))
+        counts = [0] * len(order)
+        low = high = 0
+        for current, position in enumerate(order):
+            kind, moment = kinds[position], fns[position]
+            if kinds[order[low]] != kind:  # first hit of the next kind
+                low = current
+            while fns[order[low]] < moment - half:
+                low += 1
+            high = max(high, current)
+            while high + 1 < len(order) and kinds[order[high + 1]] == kind and fns[order[high + 1]] <= moment + half:
+                high += 1
+            counts[position] = high - low + 1
+        return counts
 
     def finalize(self, ctx: FlagContext) -> Iterator[tuple[RowRef, RuleResult, str]]:
         bulk_min = int(self.param("bulk_min_records", 500))
         markers = tuple(str(item).lower() for item in self.param("suppress_path_markers", SI_BEFORE_FN_SUPPRESS_PATHS))
-        for ref, row_type, bucket, (path, si, fn, si_modified, si_changed), corroborators, executable in self.hits:
-            bucket_count = self.buckets[bucket]
+        counts = self.window_counts()
+        names = self._names
+        for position, path in enumerate(self._paths):
+            window_hits = counts[position]
+            corroborator_bits = self._corroborators[position]
+            if not corroborator_bits:
+                probe = "\\" + split_windows_path(path)[1]
+                if window_hits >= bulk_min or any(marker in probe for marker in markers):
+                    continue  # servicing / bulk copy pattern: informational only, no flag
+            ref = (names[self._kind[position]], self._index[position])
+            row_type = names[self._type[position]]
+            si, fn = self._si[position], self._fn[position]
             fields = {
                 "path": path,
-                "si_created_at": si,
-                "fn_created_at": fn,
-                "delta_seconds": int((fn - si).total_seconds()),
-                "si_modified_at": si_modified,
-                "si_mft_modified_at": si_changed,
+                "si_created_at": _from_epoch_us(si),
+                "fn_created_at": _from_epoch_us(fn),
+                "delta_seconds": (fn - si) // 1_000_000,
+                "si_modified_at": _from_epoch_us(self._si_modified[position]),
+                "si_mft_modified_at": _from_epoch_us(self._si_changed[position]),
             }
-            if corroborators:
+            if corroborator_bits:
+                corroborators = [name for bit, name in CORROBORATOR_BITS if corroborator_bits & bit]
                 note = "타임스톰핑 정황: " + ", ".join(CORROBORATOR_LABELS[name] for name in corroborators)
-                yield ref, RuleResult(evidence(**fields, corroborators=list(corroborators), bucket_hits=bucket_count), note=note), row_type
+                yield ref, RuleResult(evidence(**fields, corroborators=corroborators, bucket_hits=window_hits), note=note), row_type
                 continue
-            probe = "\\" + split_windows_path(path)[1]
-            if any(marker in probe for marker in markers) or bucket_count >= bulk_min:
-                continue  # servicing / bulk copy pattern: informational only, no flag
+            executable = names[self._marker[position]]
             if executable:
                 note = f"보강 근거 없음: 사용자 쓰기 가능 경로({executable})의 실행·스크립트 파일"
-                yield ref, RuleResult(evidence(**fields, bucket_hits=bucket_count), note=note, grade="B"), row_type
+                yield ref, RuleResult(evidence(**fields, bucket_hits=window_hits), note=note, grade="B"), row_type
             else:
                 note = "보강 근거 없음: 시각 보존 복사·압축 해제에서도 흔한 모양"
-                yield ref, RuleResult(evidence(**fields, bucket_hits=bucket_count), note=note, grade="C"), row_type
+                yield ref, RuleResult(evidence(**fields, bucket_hits=window_hits), note=note, grade="C"), row_type
+
+
+NO_TIME_US = -(2**63)  # array('q') sentinel: missing $SI modified / MFT-modified
+_US = dt.timedelta(microseconds=1)
+CORROBORATOR_BITS = ((1, "zero_subsecond_si"), (2, "si_changed_before_fn"))
+
+
+def _epoch_us(moment: dt.datetime | None) -> int:
+    """Aware UTC datetime -> integer microseconds since 1970 (``NO_TIME_US`` for ``None``)."""
+    return NO_TIME_US if moment is None else (moment - _EPOCH_UTC) // _US
+
+
+def _from_epoch_us(value: int) -> dt.datetime | None:
+    return None if value == NO_TIME_US else _EPOCH_UTC + dt.timedelta(microseconds=value)
 
 
 CORROBORATOR_LABELS = {

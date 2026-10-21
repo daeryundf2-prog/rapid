@@ -9,6 +9,7 @@ import json
 import shutil
 import tempfile
 import unittest
+import unittest.mock
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -45,9 +46,9 @@ def case_rows(cases: Mapping[str, Mapping[str, Any]], rule_id: str) -> list[dict
 
 def si_fn_rows() -> list[dict[str, Any]]:
     """ntfs.si_before_fn positives (A, A, C, B) + the negatives that hold under catalogue params (the WinSxS
-    servicing copy: a candidate that is not flagged; the plain copy: not a candidate). The fixture's bulk-copy
+    servicing copy: a candidate that is not flagged; the plain copy: not a candidate). The fixture's four bulk-copy
     negatives need ``bulk_min_records: 3``, which the harness (catalogue params) does not apply."""
-    return [*NTFS_CASES[SI_FN]["positive"]["rows"], *NTFS_CASES[SI_FN]["negative"]["rows"][3:]]
+    return [*NTFS_CASES[SI_FN]["positive"]["rows"], *NTFS_CASES[SI_FN]["negative"]["rows"][4:]]
 
 
 def snapshot(root: Path) -> dict[str, tuple[int, int]]:
@@ -327,7 +328,7 @@ class RuleValidationScriptTests(unittest.TestCase):
     def test_ntfs_analysis_negative_only_and_input_errors(self) -> None:
         run = self.root / "ntfs-run"
         run.mkdir()
-        analysis = write_ntfs_analysis(run, NTFS_CASES[SI_FN]["negative"]["rows"][3:])
+        analysis = write_ntfs_analysis(run, NTFS_CASES[SI_FN]["negative"]["rows"][4:])
         code, report, _err = self.run_script("--ntfs-analysis", str(analysis), "--rules", SI_FN, "--expect", self.expect({SI_FN: {"max": 0}}), "--json")
         self.assertEqual(code, 0)
         self.assertEqual(self.by_id(report)[SI_FN]["hits"], 0)
@@ -339,6 +340,46 @@ class RuleValidationScriptTests(unittest.TestCase):
             self.assertEqual(code, 2, args)
             self.assertIn("input error", err)
         shutil.rmtree(wrong)
+
+    def test_validation_synthetic_only_ignores_not_applicable_entries(self) -> None:
+        """UX-round review: N/A / unevaluated real-data entries are not validation."""
+        counted = rule_validation.counted_validation
+        self.assertEqual(counted({"real": [{"source": "x", "result": "not_applicable"}, {"source": "y", "result": "unevaluated"}], "public": []}), [])
+        self.assertEqual(len(counted({"real": [{"source": "x", "result": "negative"}], "public": [{"source": "p", "result": "positive"}]})), 2)
+        code, report, _err = self.run_script("--run", str(self.standard_run()), "--json")
+        self.assertEqual(code, 0, report)
+        rules = self.by_id(report)
+        self.assertFalse(rules[LOG_CLEARED]["validation_synthetic_only"])  # real-data negative control
+        self.assertTrue(rules[ADS]["validation_synthetic_only"])  # its only real entry is not_applicable
+        self.assertTrue(rules["cloud.bulk_upload"]["validation_synthetic_only"])
+        self.assertTrue(rules["antiforensics.wiper_run_after_incident"]["validation_synthetic_only"])  # unevaluated
+
+    def test_files_eligible_rows_count_a_streamed_listing(self) -> None:
+        """A files listing over the engine's in-memory limit is streamed; its rows are still counted (was null)."""
+        listing = self.root / "rapidtriage-files.json"
+        listing.write_text(
+            json.dumps({"summary": {"candidate_count": 3}, "candidates": [{"path": f"c{i}"} for i in range(3)], "inventory": [{"path": "i0"}, {"path": "i1"}]}),
+            encoding="utf-8",
+        )
+        engine = rule_validation.FilesOutput.__module__
+        with unittest.mock.patch(f"{engine}.FILES_LOAD_MAX_BYTES", 10):
+            files = rule_validation.FilesOutput(None, listing)
+        self.assertTrue(files.streamed)
+        self.assertIsNone(files.total("candidates"))
+        self.assertEqual(rule_validation.files_total(files, "candidates"), 3)
+        self.assertEqual(rule_validation.files_total(files, "inventory"), 2)
+        loaded = rule_validation.FilesOutput(None, listing)
+        self.assertEqual((rule_validation.files_total(loaded, "candidates"), rule_validation.files_total(loaded, "missing")), (3, 0))
+        self.assertIsNone(rule_validation.files_total(rule_validation.FilesOutput(None, self.root / "absent.json"), "candidates"))
+        # Through eligible_rows: a files rule over the streamed listing gets 3 + 2 rows, not null.
+        catalog = rule_validation.load_catalog()
+        files_rules = [rule_id for rule_id in catalog.specs if rule_validation.rule_instance(catalog, rule_id).accepts("files", "files", "file")]
+        self.assertTrue(files_rules)
+        run = rule_validation.RunOutputs(self.root, {}, listing, None)
+        inputs = rule_validation.TriageInputs(output_dir=self.root, files_path=listing)
+        with unittest.mock.patch(f"{engine}.FILES_LOAD_MAX_BYTES", 10):
+            counts = rule_validation.eligible_rows(run, inputs, catalog, files_rules[:1])
+        self.assertEqual(counts[files_rules[0]], 5)
 
 
 if __name__ == "__main__":

@@ -383,6 +383,7 @@ rules:
     synthetic: true
     real:
     - source: run-subset10(입력 없음 — 해당 없음)
+      result: not_applicable
       hits: 0
       checked_at: '2026-10-21'
       note_ko: 서브셋·다른 D 드라이브 런에 클라우드 동기화 업로드 행이 없어 규칙이 읽을 입력이 0행(not_applicable). 0적중은 음성 근거가 아님.

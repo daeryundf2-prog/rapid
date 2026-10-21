@@ -593,6 +593,7 @@ rules:
     synthetic: true
     real:
     - source: run-subset10 이벤트 로그(음성)
+      result: negative
       hits: 0
       false_positives: 0
       checked_at: '2026-10-21'
@@ -638,6 +639,7 @@ rules:
     synthetic: true
     real:
     - source: run-subset10 이벤트 로그(음성)
+      result: negative
       hits: 0
       false_positives: 0
       checked_at: '2026-10-21'

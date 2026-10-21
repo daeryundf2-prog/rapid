@@ -73,7 +73,7 @@ from rapidtriage.core.triage_rules import (
     load_catalog,
 )
 from rapidtriage.core.triage_rules.base import FlagContext, is_public_ip
-from rapidtriage.core.triage_rules.catalog import Catalog
+from rapidtriage.core.triage_rules.catalog import VALIDATION_COUNTED_RESULTS, Catalog
 from rapidtriage.core.triage_rules.engine import (
     FLAGS_FILE_NAME,
     SUMMARY_FILE_NAME,
@@ -413,6 +413,28 @@ def run_inputs(run: RunOutputs, catalog: Catalog) -> TriageInputs:
     return TriageInputs(output_dir=run.directory, artifact_payloads=dict(run.artifacts), files_path=run.files, analyses=analyses)
 
 
+def counted_validation(validation: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """Real/public validation entries that are real evidence (``result`` positive or negative)."""
+    entries = [*(validation.get("real") or []), *(validation.get("public") or [])]
+    return [entry for entry in entries if isinstance(entry, Mapping) and entry.get("result") in VALIDATION_COUNTED_RESULTS]
+
+
+def files_total(files: FilesOutput, collection: str) -> int | None:
+    """Rows of one files collection: the loaded payload's list length, else (a listing over the engine's
+    in-memory limit, streamed) counted by streaming the array; None when it cannot be read."""
+    total = files.total(collection)
+    if total is not None:
+        return total
+    if files.payload is not None:
+        return 0  # loaded, but no such list
+    if files.path is None:
+        return None  # missing or unreadable listing
+    try:
+        return sum(1 for _ in files.rows(collection))
+    except (OSError, ValueError):  # JsonStreamError is a ValueError
+        return None
+
+
 def eligible_rows(run: RunOutputs, inputs: TriageInputs, catalog: Catalog, rule_ids: list[str]) -> dict[str, int | None]:
     """Rows each rule could read (artifact type counts of the manifests, files lists, analyses); None = unknown."""
     rules = {rule_id: rule_instance(catalog, rule_id) for rule_id in rule_ids}
@@ -446,10 +468,10 @@ def eligible_rows(run: RunOutputs, inputs: TriageInputs, catalog: Catalog, rule_
                     if isinstance(n, int) and rule.accepts("artifacts", kind, str(name)) and (judged is None or name in judged)
                 ),
             )
-    if run.files is not None:
+    if run.files is not None and any(rule.accepts("files", "files", "file") for rule in rules.values()):
         files = FilesOutput(None, run.files)
         for collection in ("candidates", "inventory"):
-            total = files.total(collection)
+            total = files_total(files, collection)
             for rule_id, rule in rules.items():
                 if rule.accepts("files", "files", "file"):
                     add(rule_id, total)
@@ -552,7 +574,8 @@ def evaluate(
                 "catalog_grade": spec.grade,
                 "version": spec.version,
                 "status": spec.status,
-                "validation_synthetic_only": bool(validation) and not validation.get("real") and not validation.get("public"),
+                # Only positive / negative real or public checks count (not_applicable / unevaluated prove nothing).
+                "validation_synthetic_only": bool(validation) and not counted_validation(validation),
                 "hits": hits,
                 "grades": dict(sorted(grades.get(rule_id, Counter()).items())),
                 "hits_by_kind": dict(sorted(kinds.get(rule_id, Counter()).items())),

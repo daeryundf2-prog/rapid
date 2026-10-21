@@ -61,11 +61,18 @@ SEMANTIC_TAGS = frozenset(
 DERIVE_IDS = frozenset({"event_summary_ko", "rdp_direction", "exif_status", "auto_logon", "av_action"})
 # Optional per-rule ``validation`` block (R6 S4, plan r6-followups §4.3 갈래 B): what the rule was
 # checked against beyond its code. ``synthetic`` = covered by tests/triage_cases fixtures; ``real`` /
-# ``public`` = real-data / public-dataset checks ``[{source, hits?, false_positives?, checked_at?,
-# note_ko?}]``; ``notes_ko`` = one Korean sentence. Metadata only: it never changes a verdict, so
-# adding or filling it does not bump the rule ``version``.
+# ``public`` = real-data / public-dataset checks ``[{source, result, hits?, false_positives?,
+# sample_size?, checked_at?, note_ko?}]``; ``notes_ko`` = one Korean sentence. Metadata only: it never
+# changes a verdict, so adding or filling it does not bump the rule ``version``.
+# ``result`` (required, UX-round review): ``positive`` = the data held a confirmed true positive the
+# rule flagged; ``negative`` = the rule ran over real input with no confirmed true positive (a negative
+# control: its hits are false positives / unconfirmed); ``not_applicable`` = the rule had no input rows;
+# ``unevaluated`` = the rule could not run (e.g. no incident window). Only positive/negative count as
+# real validation. ``false_positives`` counts the reviewed sample (``sample_size`` rows) when given.
 VALIDATION_KEYS = frozenset({"synthetic", "real", "public", "notes_ko"})
-VALIDATION_ENTRY_KEYS = frozenset({"source", "hits", "false_positives", "checked_at", "note_ko"})
+VALIDATION_ENTRY_KEYS = frozenset({"source", "result", "hits", "false_positives", "sample_size", "checked_at", "note_ko"})
+VALIDATION_RESULTS = ("positive", "negative", "not_applicable", "unevaluated")
+VALIDATION_COUNTED_RESULTS = frozenset({"positive", "negative"})
 
 
 class CatalogError(ValueError):
@@ -200,10 +207,18 @@ def _check_validation_entries(source: str, rule_id: str, name: str, entries: obj
         unknown = set(entry) - VALIDATION_ENTRY_KEYS
         if unknown:
             raise _fail(source, f"규칙 {rule_id}의 validation.{name} 항목에 알 수 없는 키가 있습니다: {sorted(unknown)}")
-        for key in ("hits", "false_positives"):
+        if entry.get("result") not in VALIDATION_RESULTS:
+            raise _fail(
+                source,
+                f"규칙 {rule_id}의 validation.{name} 항목의 result는 {'/'.join(VALIDATION_RESULTS)} 중 하나여야 합니다"
+                "(양성·음성·해당 없음·미평가)",
+            )
+        for key in ("hits", "false_positives", "sample_size"):
             value = entry.get(key)
             if value is not None and (not isinstance(value, int) or isinstance(value, bool) or value < 0):
                 raise _fail(source, f"규칙 {rule_id}의 validation.{name}.{key}는 0 이상 정수여야 합니다")
+        if entry.get("sample_size") is not None and entry.get("false_positives", 0) > entry["sample_size"]:
+            raise _fail(source, f"규칙 {rule_id}의 validation.{name}.false_positives가 표본 수(sample_size)보다 큽니다")
         for key in ("checked_at", "note_ko"):
             value = entry.get(key)
             if value is not None and not isinstance(value, str):

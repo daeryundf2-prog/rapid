@@ -58,11 +58,24 @@ export interface CatalogFamily {
   rules: string[];
 }
 
+/**
+ * What one real-data / public-dataset check proves (UX-round review): `positive` = a confirmed true
+ * positive was flagged; `negative` = the rule ran over real input with no confirmed true positive;
+ * `not_applicable` = no input rows; `unevaluated` = the rule could not run. Only positive/negative count.
+ */
+export type RuleValidationResult = "positive" | "negative" | "not_applicable" | "unevaluated";
+
+const VALIDATION_RESULTS: readonly RuleValidationResult[] = ["positive", "negative", "not_applicable", "unevaluated"];
+
 /** One real-data / public-dataset check of a rule (catalogue `validation.real` / `.public`). */
 export interface RuleValidationEntry {
   source: string;
+  /** Missing in an older payload: read as `unevaluated` (never counted). */
+  result: RuleValidationResult;
   hits?: number;
+  /** False positives in the reviewed sample (`sample_size` rows when given), not over every hit. */
   false_positives?: number;
+  sample_size?: number;
   checked_at?: string;
   note_ko?: string;
 }
@@ -199,10 +212,13 @@ function validationEntries(raw: unknown): RuleValidationEntry[] {
   const out: RuleValidationEntry[] = [];
   for (const entry of raw) {
     if (!isRecord(entry) || typeof entry.source !== "string" || !entry.source.trim()) continue;
+    const result = VALIDATION_RESULTS.find((item) => item === entry.result) ?? "unevaluated";
     out.push({
       source: entry.source,
+      result,
       ...(typeof entry.hits === "number" ? { hits: entry.hits } : {}),
       ...(typeof entry.false_positives === "number" ? { false_positives: entry.false_positives } : {}),
+      ...(typeof entry.sample_size === "number" ? { sample_size: entry.sample_size } : {}),
       ...(typeof entry.checked_at === "string" && entry.checked_at ? { checked_at: entry.checked_at } : {}),
       ...(typeof entry.note_ko === "string" && entry.note_ko ? { note_ko: entry.note_ko } : {}),
     });

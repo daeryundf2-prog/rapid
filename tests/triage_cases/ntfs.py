@@ -119,14 +119,17 @@ CASES = {
             ],
             "flagged": [0, 1, 2, 3],
         },
-        # Not flagged: a bulk copy (>= bulk_min_records hits whose $FN created falls in one hour), a
-        # WinSxS servicing file, and a plain copy whose $SI/$FN Created are both the copy time.
+        # Not flagged: a bulk copy (>= bulk_min_records hits whose $FN created lie within
+        # +/-bulk_bucket_seconds/2 of each other) -- this wave straddles 11:00, so fixed clock-hour
+        # buckets (2 + 2 hits) would leak it --, a WinSxS servicing file, and a plain copy whose
+        # $SI/$FN Created are both the copy time.
         "negative": {
             "params": {"bulk_min_records": 3},
             "rows": [
-                copied(1210, r"\Users\analyst\Documents\tree\a.docx", "2024-05-01T10:01:00.1000000Z"),
-                copied(1211, r"\Users\analyst\Documents\tree\b.pdf", "2024-05-01T10:20:00.2000000Z"),
-                copied(1212, r"\Users\analyst\Documents\tree\c.exe", "2024-05-01T10:59:00.3000000Z"),
+                copied(1210, r"\Users\analyst\Documents\tree\a.docx", "2024-05-01T10:55:00.1000000Z"),
+                copied(1211, r"\Users\analyst\Documents\tree\b.pdf", "2024-05-01T10:58:00.2000000Z"),
+                copied(1212, r"\Users\analyst\Documents\tree\c.exe", "2024-05-01T11:02:00.3000000Z"),
+                copied(1214, r"\Users\analyst\Documents\tree\d.xlsx", "2024-05-01T11:04:00.4000000Z"),
                 copied(1213, r"\Windows\WinSxS\amd64_microsoft-windows-shell32_31bf3856ad364e35\shell32.dll", "2024-06-02T08:00:00.4000000Z"),
                 mft(
                     1202,

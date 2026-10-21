@@ -24,7 +24,7 @@ import {
 } from "./catalog";
 import { FlagBanner, FlagCell } from "./FlagCell";
 import fallbackJson from "./families.fallback.json";
-import { flagCitation, flagsAccessibleName, parseFlags, rowMatchesFlagFilter } from "./flags";
+import { flagCitation, flagsAccessibleName, parseFlags, rowMatchesFlagFilter, validationLine } from "./flags";
 
 afterEach(() => {
   cleanup();
@@ -344,18 +344,39 @@ describe("rule validation line (R6 S4, Q-S4-6)", () => {
     expect(line?.getAttribute("title")).toBe("합성 근거만");
   });
 
-  it("real-data and public-dataset checks are counted with their sources", () => {
+  it("only positive/negative real-data and public-dataset checks are counted", () => {
     setCatalog(
       catalogWith({
         synthetic: true,
-        real: [{ source: "bsh-mft", hits: 3 }, { source: "bsh-subset", hits: 0 }, { source: "vm-1102" }],
-        public: [{ source: "cfreds-hacking-case", hits: 1 }],
+        real: [
+          { source: "bsh-mft", result: "negative", hits: 3, false_positives: 3, sample_size: 3 },
+          { source: "bsh-subset", result: "negative", hits: 0 },
+          { source: "vm-1102", result: "positive", hits: 1 },
+          { source: "subset-na", result: "not_applicable", hits: 0 },
+        ],
+        public: [{ source: "cfreds-hacking-case", result: "positive", hits: 1 }],
         notes_ko: "실데이터 확인",
       }),
     );
     expect(popoverLine()?.textContent).toBe(
-      "검증: 실데이터 3건(bsh-mft, bsh-subset …) · 공개 데이터셋 1건(cfreds-hacking-case) · 합성 픽스처",
+      "검증: 실데이터 음성 2건 · 양성 1건 · 공개 데이터셋 음성 0건 · 양성 1건 · 합성 픽스처",
     );
+  });
+
+  it("not-applicable / unevaluated entries are not validation (UX-round review)", () => {
+    setCatalog(
+      catalogWith({
+        synthetic: true,
+        real: [{ source: "run-subset10(입력 없음)", result: "not_applicable", hits: 0 }],
+        public: [],
+        notes_ko: "해당 없음",
+      }),
+    );
+    expect(popoverLine()?.textContent).toBe("검증: 실데이터 해당 없음 · 합성 픽스처");
+    cleanup();
+    // An older payload without `result` reads as unevaluated, never as a counted check.
+    setCatalog(catalogWith({ synthetic: true, real: [{ source: "old", hits: 0 }], public: [], notes_ko: "x" }));
+    expect(popoverLine()?.textContent).toBe("검증: 실데이터 미평가 · 합성 픽스처");
   });
 
   it("rules without a validation block (or a malformed one) show no line", () => {
@@ -371,6 +392,12 @@ describe("rule validation line (R6 S4, Q-S4-6)", () => {
     const aGrade = catalog.rules.filter((rule) => rule.grade === "A");
     expect(aGrade).toHaveLength(7);
     for (const rule of aGrade) expect(rule.validation?.synthetic, rule.id).toBe(true);
+    const lines = Object.fromEntries(aGrade.map((rule) => [rule.id, validationLine(rule)]));
+    expect(lines["eventlog.log_cleared"]).toBe("검증: 실데이터 음성 1건 · 양성 0건 · 합성 픽스처");
+    expect(lines["ntfs.ads_executable"]).toBe("검증: 실데이터 해당 없음 · 합성 픽스처");
+    expect(lines["cloud.bulk_upload"]).toBe("검증: 실데이터 해당 없음 · 합성 픽스처");
+    expect(lines["antiforensics.wiper_run_after_incident"]).toBe("검증: 실데이터 미평가 · 합성 픽스처");
+    expect(lines["ntfs.si_before_fn"]).toBe("검증: 실데이터 음성 3건 · 양성 0건 · 합성 픽스처");
   });
 });
 
