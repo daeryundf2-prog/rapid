@@ -1273,6 +1273,26 @@ def group_page_fields(
     }
 
 
+def locate_position(
+    shown: Sequence[int], record: int, groups: GroupColumn | None = None, matched: Sequence[int] | None = None
+) -> int | None:
+    """Row position of event ``record`` in a listing showing the ascending positions ``shown``
+    (``locate=``: a deep link to one event). Grouped: the row of its group's first matched member
+    (``matched`` = the positions the conditions / ``q`` kept, ``None`` = every event). ``None``
+    when the event is not listed."""
+    if matched is not None and not _contains(matched, record):
+        return None  # the conditions / q leave the event out
+    target = record
+    if groups is not None and 0 <= record < len(groups.ids):
+        group = groups.ids[record]
+        for member in groups.members.get(group, ()) if group != NO_GROUP else ():
+            if matched is None or _contains(matched, member):
+                target = member
+                break
+    at = bisect_left(shown, target)
+    return at if at < len(shown) and shown[at] == target else None
+
+
 def _contains(sorted_positions: Sequence[int], position: int) -> bool:
     at = bisect_left(sorted_positions, position)
     return at < len(sorted_positions) and sorted_positions[at] == position

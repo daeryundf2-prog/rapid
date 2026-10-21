@@ -240,12 +240,16 @@ describe("C4/C5 timeline columns", () => {
     expect(screen.getByTestId("timeline-source-count").textContent).toBe("출처 3");
   });
 
-  it("event logs read their summary as 상세 and the summary as 대상 when they have no target", () => {
+  it("event logs: 대상 = channel · event ID, 상세 = the readable summary", () => {
     const row = mapEvent(eventlogEvent);
     expect(row.fields.detail).toBe(eventlogEvent.summary);
-    expect(row.fields.target).toBe(eventlogEvent.summary);
+    expect(row.fields.target).toBe("Security · 4624");
     expect(timelineAreaLabel("eventlog-event")).toBeTruthy();
     expect(column("sourceCount")?.value(row)).toBeNull(); // single source: the column stays empty
+    // An event with neither a target nor an event ID reads its summary as 대상.
+    expect(mapEvent({ ...eventlogEvent, details: { artifact_type: "wer-report" } }).fields.target).toBe(
+      eventlogEvent.summary,
+    );
   });
 
   it("targets: URL host + path, key tail, file name; source rows without the acquisition root", () => {
@@ -313,6 +317,38 @@ describe("C1/C3 server search and display groups on the wire", () => {
     expect(screen.getByTestId("grid-group-status").textContent).toContain("한 행으로 묶어");
     screen.getByTestId("grid-group-toggle").click();
     await waitFor(() => expect(calls.some((call) => !call.url.includes("group=1"))).toBe(true));
+  });
+});
+
+describe("timeline deep links while grouped", () => {
+  it("asks the server where the linked event's row is and focuses it (a group member too)", async () => {
+    const calls = installFetch({
+      "/timeline": (url: URL) =>
+        url.searchParams.has("locate")
+          ? jsonResponse({ events: [], pagination: { total: 2, locate: { record_index: 9, position: 1 } } })
+          : jsonResponse({
+              events: [{ ...eventlogEvent, record_index: 3 }, jumplistEvent],
+              matched: 2,
+              pagination: { total: 2, matched: 2, filtered: true, grouped: true },
+            }),
+    });
+    useGridLocalStore.setState((s) => ({
+      route: {
+        ...s.route,
+        collection: { id: "timeline" },
+        rowRef: { collection: "timeline", locator: "/events/9" },
+      },
+    }));
+    renderWithClient(<DataGrid />);
+    await waitFor(() => {
+      const focused = screen
+        .queryAllByRole("row")
+        .filter((r) => r.hasAttribute("data-index") && r.tabIndex === 0)
+        .map((r) => r.getAttribute("data-index"));
+      expect(focused).toEqual(["1"]);
+    });
+    const locate = calls.find((call) => call.url.includes("locate=9"));
+    expect(locate?.url).toContain("group=1");
   });
 });
 

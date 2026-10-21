@@ -73,6 +73,8 @@ export function artifactTypesOfTree(nodes: readonly TreeNode[] | undefined, kind
 
 export interface CollectionQueryResult {
   def: CollectionDef;
+  /** The query the pages are fetched with (filters folded in: conditions, server text …). */
+  query: CollectionQuery;
   pageSize: number;
   /** Total rows after server filters; null while unknown. */
   total: number | null;
@@ -525,6 +527,7 @@ export function useCollectionQuery(
 
   return {
     def,
+    query,
     pageSize,
     total,
     pageCount,

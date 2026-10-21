@@ -374,6 +374,28 @@ export const fetchTimelinePage = (
     Object.keys(conditions ?? {}).length > 0 || q !== "" || search.group === true,
   );
 };
+/**
+ * Row position of timeline event `recordIndex` in the listing a query shows (`locate=`, with the
+ * same conditions / `q` / `group` as the grid): a deep link's page when positions are not record
+ * indexes (grouped or filtered). Null when the event is not listed.
+ */
+export async function locateTimelineRow(
+  runId: string,
+  recordIndex: number,
+  conditions: Record<string, string | string[]> | undefined,
+  search: { q?: string; group?: boolean },
+  signal?: AbortSignal,
+): Promise<number | null> {
+  const q = search.q?.trim() ?? "";
+  const extra = `${flagQueryString({ conditions })}${q ? `&q=${enc(q)}` : ""}${search.group ? "&group=1" : ""}`;
+  const payload = await api<{ pagination?: { locate?: { position?: unknown } } }>(
+    `/api/runs/${enc(runId)}/timeline?offset=0&limit=1&locate=${recordIndex}${extra}`,
+    { signal },
+  );
+  const position = payload.pagination?.locate?.position;
+  return typeof position === "number" && Number.isInteger(position) && position >= 0 ? position : null;
+}
+
 export const fetchIndicatorsPage = (runId: string, offset: number, limit: number, signal?: AbortSignal) =>
   jsonPaged(runId, "indicators", "indicators", offset, limit, signal);
 

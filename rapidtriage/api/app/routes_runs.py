@@ -121,6 +121,7 @@ from .search_index_service import search_index_available
 from .timeline_hist import build_timeline_histogram
 from .timeline_index import (
     group_page_fields,
+    locate_position,
     search_needle,
     timeline_groups,
     timeline_positions,
@@ -576,6 +577,7 @@ def build_runs_router(
         geo: str | None = Query(default=None),
         q: str | None = Query(default=None, max_length=1000),
         group: str | None = Query(default=None),
+        locate: int | None = Query(default=None, ge=0),
     ) -> dict[str, object]:
         """Paged timeline events.
 
@@ -585,7 +587,9 @@ def build_runs_router(
         ``group=1`` (C1 rule 2): events about the same target at the same second with the same
         family of time kind are one row (``group_id``, ``source_count``, ``sources``,
         ``group_members`` = their ``record_index`` values); grouping runs on the matched positions
-        (after conditions and ``q``), so ``matched`` counts rows as shown.
+        (after conditions and ``q``), so ``matched`` counts rows as shown. ``locate=<record_index>``
+        adds ``pagination.locate`` = ``{record_index, position}``: the row position of that event in
+        this listing (its group's row when grouped; ``None`` when left out) -- a deep link's page.
 
         Row conditions (plan r4 §2.3) as on ``GET /artifacts``: ``from``, ``to``, ``weekday``,
         ``hours``, ``offhours``, ``tz``, ``partial``, ``content`` (row time = the event's
@@ -613,7 +617,14 @@ def build_runs_router(
         grouped = _flag_param("group", group)
         if conditions is None and not needle and not grouped:
             payload = get_named_output(store, run_id, "timeline")
-            return paginate_payload(payload, "events", offset=offset, limit=limit, cursor=cursor)
+            page = paginate_payload(payload, "events", offset=offset, limit=limit, cursor=cursor)
+            if locate is not None and limit > 0 and isinstance(page.get("pagination"), dict):
+                count = len(payload["events"]) if isinstance(payload.get("events"), list) else 0
+                page["pagination"] = {
+                    **page["pagination"],
+                    "locate": {"record_index": locate, "position": locate if locate < count else None},
+                }
+            return page
         # Stamp the timeline *before* reading it: a rewrite in between leaves the cache key and the
         # column index on the older stamp (never the new revision's key holding old positions).
         timeline_path = get_output_path(store, run_id, "timeline")
@@ -652,6 +663,13 @@ def build_runs_router(
                 if isinstance(row, dict):
                     row.update(group_page_fields(groups, events, int(row["record_index"]), matched_positions))
             pagination["grouped"] = True
+        if locate is not None:
+            shown = MATCH_CACHE.get_or_compute(page_key, compute)
+            matched_for_locate = MATCH_CACHE.get_or_compute(cache_key, positions) if filtered else None
+            pagination["locate"] = {
+                "record_index": locate,
+                "position": locate_position(shown, locate, groups, matched_for_locate),
+            }
         pagination["conditions"] = conditions.describe() if conditions is not None else {}
         if needle:
             pagination["search"] = {"q": q, "fields": ["summary", "target", "path", "event_type", "event_label_ko"]}

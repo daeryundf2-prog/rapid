@@ -492,6 +492,21 @@ class TimelineApiTests(unittest.TestCase):
         ):
             self.assertEqual([row["record_index"] for row in self.all_rows("group=1")], expected)
 
+    def test_locate_gives_the_row_of_an_event_in_the_listing(self) -> None:
+        self.start(grouped_events())  # type: ignore[arg-type]
+
+        def where(query: str) -> object:
+            return self.page(f"limit=2&{query}")["pagination"]["locate"]["position"]  # type: ignore[index]
+
+        # Grouped rows: [0 (members 0,1,2), 3, 4, 5, 6, 7 (members 7,8)].
+        self.assertEqual(where("group=1&locate=2"), 0)
+        self.assertEqual(where("group=1&locate=4"), 2)
+        self.assertEqual(where("group=1&locate=8"), 5)
+        self.assertEqual(where("q=recent-shortcut&group=1&locate=3"), 1)
+        self.assertIsNone(where("q=recent-shortcut&group=1&locate=0"))  # left out by q
+        self.assertEqual(where("locate=6"), 6)  # plain listing: the position is the index
+        self.assertIsNone(where("locate=99"))
+
     def test_bad_group_value_is_a_korean_422(self) -> None:
         self.start(grouped_events())  # type: ignore[arg-type]
         assert self.client is not None

@@ -157,8 +157,17 @@ export const timelineCollection: CollectionDef = {
     const kinds = timestampKindsOf(raw);
     const details = isRecord(raw.details) ? raw.details : {};
     const sourceType = strOrNull(details.artifact_type);
-    const target = timelineTarget(raw);
     const summary = strOrNull(raw.summary);
+    // An event-log event is about a record of a channel: "Security · 4624" (its summary is 상세).
+    const eventId = sourceType?.startsWith("eventlog-") ? strOrNull(details.event_id) : null;
+    const target =
+      timelineTarget(raw) ??
+      (eventId
+        ? (() => {
+            const text = [strOrNull(details.channel), eventId].filter(Boolean).join(" · ");
+            return { text, full: text };
+          })()
+        : null);
     const path = timelinePathOf(raw);
     const root = strOrNull(ctx.page?.meta?.root);
     // 상세: event logs read their summary (event name / message · account · computer); other

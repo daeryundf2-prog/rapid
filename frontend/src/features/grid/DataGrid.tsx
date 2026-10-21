@@ -24,7 +24,7 @@ import {
 import { announce } from "../../a11y";
 import { DisabledReason } from "../../a11y/primitives";
 import { ApiError, downloadFile } from "../../api/client";
-import { DOCS_MATCHED } from "../../api/collections";
+import { DOCS_MATCHED, locateTimelineRow } from "../../api/collections";
 import type { RunExtractResult } from "../../api/extract";
 import { getRunTree } from "../../api/runs";
 import type { CollectionRef, GridRow } from "../../contracts/collection";
@@ -768,6 +768,38 @@ export function DataGrid(props: DataGridProps = {}) {
     };
   }, [locateKey, sortReady, runId, artifactKind, routeSort, locateTarget, located, locateRow]);
 
+  // Timeline deep link while grouped / searched / filtered: rows are not at their record index,
+  // so the server says where the event's row is (`locate=` with the same query; C1 / C3).
+  const timelineLocateTarget =
+    ref.id === "timeline" && route.rowRef?.collection === "timeline" ? indexFromRef(route.rowRef) : null;
+  const timelineConditions = cq.query.rowConditions;
+  const timelineLocateKey =
+    timelineLocateTarget !== null &&
+    (timelineGrouped || serverQuery !== "" || Object.keys(timelineConditions ?? {}).length > 0)
+      ? `${runId}|timeline|${JSON.stringify([timelineConditions ?? null, serverQuery, timelineGrouped])}|${timelineLocateTarget}`
+      : null;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the query is identified by timelineLocateKey
+  useEffect(() => {
+    if (!timelineLocateKey || timelineLocateTarget === null || restoredRow.current || !runId) return;
+    if (located?.key === timelineLocateKey) return;
+    const controller = new AbortController();
+    locateTimelineRow(
+      runId,
+      timelineLocateTarget,
+      timelineConditions,
+      { q: serverQuery, group: timelineGrouped },
+      controller.signal,
+    )
+      .then((position) => {
+        if (!controller.signal.aborted) setLocated({ key: timelineLocateKey, position });
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setLocated({ key: timelineLocateKey, position: null });
+      });
+    return () => controller.abort();
+  }, [timelineLocateKey, located]);
+  const activeLocateKey = locateKey ?? timelineLocateKey;
+
   // Deep link: restore `row=` (focus + scroll) once, resolving the server page from the locator.
   useEffect(() => {
     const target = route.rowRef;
@@ -778,8 +810,8 @@ export function DataGrid(props: DataGridProps = {}) {
       return;
     }
     let idx: number | null;
-    if (locateKey) {
-      if (located?.key !== locateKey) return; // waiting for the sorted position
+    if (activeLocateKey) {
+      if (located?.key !== activeLocateKey) return; // waiting for the server position
       idx = located.position;
     } else {
       idx = indexFromRef(target);
@@ -790,7 +822,9 @@ export function DataGrid(props: DataGridProps = {}) {
     }
     ensureRange(idx, idx);
     const row = cq.getRow(idx);
-    if (row && row.ref.locator !== target.locator) {
+    // A grouped timeline row stands for its members: the linked event may be one of them.
+    const members = Array.isArray(row?.fields.groupMembers) ? (row?.fields.groupMembers as unknown[]) : [];
+    if (row && row.ref.locator !== target.locator && !members.includes(indexFromRef(target))) {
       // Path-filtered (unsorted) pages: the locator index is not the display position; leave focus alone.
       restoredRow.current = true;
       return;
@@ -806,7 +840,7 @@ export function DataGrid(props: DataGridProps = {}) {
     ensureRange,
     cq.getRow,
     virtualizer,
-    locateKey,
+    activeLocateKey,
     located,
     routeSort,
     serverPath,
