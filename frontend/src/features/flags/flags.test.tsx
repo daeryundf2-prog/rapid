@@ -317,6 +317,63 @@ describe("특이사항 (U-F4)", () => {
   });
 });
 
+describe("rule validation line (R6 S4, Q-S4-6)", () => {
+  function catalogWith(validation: unknown): FamilyCatalog {
+    const base = getCatalog();
+    const raw = {
+      version: "t",
+      families: base.families,
+      rules: base.rules.map((rule) =>
+        rule.id === "eventlog.log_cleared" ? { ...rule, validation } : { ...rule },
+      ),
+    };
+    return normalizeCatalog(raw) as FamilyCatalog;
+  }
+
+  function popoverLine(): HTMLElement | null {
+    render(<FlagCell row={row({ flags: RAW_FLAGS })} />);
+    fireEvent.click(screen.getByRole("button"));
+    const dialog = screen.getByRole("dialog", { name: "특이사항 근거" });
+    return within(dialog).queryByTestId("flag-validation");
+  }
+
+  it("synthetic-only rules say so in the popover; the note is the tooltip", () => {
+    setCatalog(catalogWith({ synthetic: true, real: [], public: [], notes_ko: "합성 근거만" }));
+    const line = popoverLine();
+    expect(line?.textContent).toBe("검증: 합성 픽스처만");
+    expect(line?.getAttribute("title")).toBe("합성 근거만");
+  });
+
+  it("real-data and public-dataset checks are counted with their sources", () => {
+    setCatalog(
+      catalogWith({
+        synthetic: true,
+        real: [{ source: "bsh-mft", hits: 3 }, { source: "bsh-subset", hits: 0 }, { source: "vm-1102" }],
+        public: [{ source: "cfreds-hacking-case", hits: 1 }],
+        notes_ko: "실데이터 확인",
+      }),
+    );
+    expect(popoverLine()?.textContent).toBe(
+      "검증: 실데이터 3건(bsh-mft, bsh-subset …) · 공개 데이터셋 1건(cfreds-hacking-case) · 합성 픽스처",
+    );
+  });
+
+  it("rules without a validation block (or a malformed one) show no line", () => {
+    setCatalog(catalogWith(undefined));
+    expect(popoverLine()).toBeNull();
+    cleanup();
+    setCatalog(catalogWith({ synthetic: "yes", notes_ko: "x" }));
+    expect(popoverLine()).toBeNull();
+  });
+
+  it("the bundled catalogue carries the block on all seven A-grade rules", () => {
+    const catalog = normalizeCatalog(fallbackJson) as FamilyCatalog;
+    const aGrade = catalog.rules.filter((rule) => rule.grade === "A");
+    expect(aGrade).toHaveLength(7);
+    for (const rule of aGrade) expect(rule.validation?.synthetic, rule.id).toBe(true);
+  });
+});
+
 describe("tree 특이사항 section (U-F4)", () => {
   const base: RunTree = { run_id: "r1", root: {}, nodes: [] };
 

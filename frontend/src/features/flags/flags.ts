@@ -7,7 +7,16 @@
 
 import type { GridRow } from "../../contracts/collection";
 import { flatValue } from "../../utils/flatValue";
-import { type CatalogRule, familyValueLabel, GRADES, type Grade, isGrade, ruleById } from "./catalog";
+import {
+  type CatalogRule,
+  familyValueLabel,
+  GRADES,
+  type Grade,
+  isGrade,
+  type RuleValidation,
+  type RuleValidationEntry,
+  ruleById,
+} from "./catalog";
 
 export interface RowFlag {
   id: string;
@@ -144,6 +153,31 @@ export function flagCitation(flag: RowFlag, rule: CatalogRule | undefined = rule
 /** The flag's rule is provisional ("검증 필요"): the row's status, else the catalogue's. */
 export function isProvisional(flag: RowFlag): boolean {
   return (flag.status ?? ruleById(flag.id)?.status) === "provisional";
+}
+
+/** Sources named in the validation line before "…" (the full list is in the tooltip). */
+const VALIDATION_SOURCES_SHOWN = 2;
+
+function validationPart(name: string, entries: readonly RuleValidationEntry[]): string {
+  const shown = entries.slice(0, VALIDATION_SOURCES_SHOWN).map((entry) => entry.source);
+  const more = entries.length > VALIDATION_SOURCES_SHOWN ? " …" : "";
+  return `${name} ${entries.length}건(${shown.join(", ")}${more})`;
+}
+
+/**
+ * One Korean line on what a rule was checked against (R6 S4, catalogue `validation`):
+ * "검증: 합성 픽스처만" · "검증: 실데이터 2건(bsh-mft, bsh-subset) · 합성 픽스처" ·
+ * "검증: 공개 데이터셋 1건(cfreds-hacking-case)". Null when the rule carries no block.
+ */
+export function validationLine(rule: Pick<CatalogRule, "validation"> | undefined): string | null {
+  const validation: RuleValidation | undefined = rule?.validation;
+  if (!validation) return null;
+  const parts: string[] = [];
+  if (validation.real.length) parts.push(validationPart("실데이터", validation.real));
+  if (validation.public.length) parts.push(validationPart("공개 데이터셋", validation.public));
+  if (!parts.length) return validation.synthetic ? "검증: 합성 픽스처만" : "검증: 기록 없음";
+  if (validation.synthetic) parts.push("합성 픽스처");
+  return `검증: ${parts.join(" · ")}`;
 }
 
 /** Label of a rule id for chips / the tree (catalogue label, else the id). */

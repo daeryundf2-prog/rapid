@@ -1,5 +1,5 @@
 {
- "version": "ccf155732188dd1f",
+ "version": "1811d7fdf30a1017",
  "families": [
   {
    "id": "sam-account",
@@ -12711,6 +12711,12 @@
    ],
    "version": 1,
    "status": "provisional",
+   "validation": {
+    "synthetic": true,
+    "real": [],
+    "public": [],
+    "notes_ko": "합성 근거만(tests/triage_cases 양성·음성 픽스처). 실데이터·공개 데이터셋 검증 대기(R6 S4)."
+   },
    "params": {
     "signatures": [
      {
@@ -13642,6 +13648,12 @@
    ],
    "version": 2,
    "status": "provisional",
+   "validation": {
+    "synthetic": true,
+    "real": [],
+    "public": [],
+    "notes_ko": "합성 근거만(tests/triage_cases 양성·음성 픽스처). 실데이터·공개 데이터셋 검증 대기(R6 S4)."
+   },
    "params": {
     "window_minutes": 60,
     "min_count": 50,
@@ -14214,6 +14226,12 @@
    ],
    "version": 1,
    "status": "verified",
+   "validation": {
+    "synthetic": true,
+    "real": [],
+    "public": [],
+    "notes_ko": "합성 근거만(tests/triage_cases 양성·음성 픽스처). 실데이터·공개 데이터셋 검증 대기(R6 S4)."
+   },
    "params": {}
   },
   {
@@ -14272,6 +14290,12 @@
    ],
    "version": 1,
    "status": "verified",
+   "validation": {
+    "synthetic": true,
+    "real": [],
+    "public": [],
+    "notes_ko": "합성 근거만(tests/triage_cases 양성·음성 픽스처). 실데이터·공개 데이터셋 검증 대기(R6 S4)."
+   },
    "params": {}
   },
   {
@@ -15389,6 +15413,12 @@
    ],
    "version": 1,
    "status": "verified",
+   "validation": {
+    "synthetic": true,
+    "real": [],
+    "public": [],
+    "notes_ko": "합성 근거만(tests/triage_cases 양성·음성 픽스처). 실데이터·공개 데이터셋 검증 대기(R6 S4)."
+   },
    "params": {
     "min_delta_seconds": 60
    }
@@ -15485,6 +15515,12 @@
    ],
    "version": 1,
    "status": "verified",
+   "validation": {
+    "synthetic": true,
+    "real": [],
+    "public": [],
+    "notes_ko": "합성 근거만(tests/triage_cases 양성·음성 픽스처). 실데이터·공개 데이터셋 검증 대기(R6 S4)."
+   },
    "params": {}
   },
   {
@@ -15678,6 +15714,12 @@
    ],
    "version": 1,
    "status": "verified",
+   "validation": {
+    "synthetic": true,
+    "real": [],
+    "public": [],
+    "notes_ko": "합성 근거만(tests/triage_cases 양성·음성 픽스처). 실데이터·공개 데이터셋 검증 대기(R6 S4)."
+   },
    "params": {}
   },
   {
