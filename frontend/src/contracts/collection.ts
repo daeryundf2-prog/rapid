@@ -147,7 +147,8 @@ export interface CollectionQuery {
   rowConditions?: Record<string, string | string[]>;
   /**
    * Timeline display grouping (`group=1`): events about the same target at the same second with
-   * the same kind of time are one row with its sources. On unless explicitly `false`.
+   * the same kind of time are one row with its sources. Only when `true` (the console timeline grid
+   * sets it, on by default); other readers of the timeline get every event.
    */
   group?: boolean;
   /** Navigation category (tree) filter; interpreted by the collection. */

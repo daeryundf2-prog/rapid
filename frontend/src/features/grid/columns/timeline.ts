@@ -134,7 +134,7 @@ export const timelineCollection: CollectionDef = {
   fetch: (runId, query, signal) =>
     fetchTimelinePage(runId, query.offset, query.limit, signal, query.rowConditions, {
       q: query.text,
-      group: query.group !== false,
+      group: query.group === true,
     }),
   widthPriority: () => [
     "timestamp",
@@ -308,7 +308,7 @@ export const timelineCollection: CollectionDef = {
       tooltip: (r) => r.sourcePath ?? "",
     }),
     // Selectable, off by default: summary, source, raw event id, review mark, full path.
-    { ...col.title("요약", 380), presets: ["compact"] },
+    { ...col.title("요약", 380), presets: ["compact", "source", "axiom"] },
     col.field("source", "출처", 90, [], (r) => r.provider),
     col.field("eventType", "이벤트", 160, [], (r) => r.artifactType),
     col.review(),

@@ -575,7 +575,7 @@ def build_runs_router(
         partial: str | None = Query(default=None),
         content: list[str] = Query(default=[]),
         geo: str | None = Query(default=None),
-        q: str | None = Query(default=None, max_length=1000),
+        q: str | None = Query(default=None),
         group: str | None = Query(default=None),
         locate: int | None = Query(default=None, ge=0),
     ) -> dict[str, object]:

@@ -207,7 +207,7 @@ export function collectionQueryKey(runId: string | null, query: CollectionQuery,
     query.rowConditions ? JSON.stringify(query.rowConditions) : "",
     // Timeline server search (`q=`) and display grouping (`group=1`, on unless false).
     query.ref.id === "timeline"
-      ? `${query.text?.trim() ?? ""}|${query.group === false ? "flat" : "group"}`
+      ? `${query.text?.trim() ?? ""}|${query.group === true ? "group" : "flat"}`
       : "",
   ] as const;
 }
