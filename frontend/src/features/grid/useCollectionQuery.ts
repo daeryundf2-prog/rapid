@@ -203,6 +203,10 @@ export function collectionQueryKey(runId: string | null, query: CollectionQuery,
     query.ref.id === "analysis" && query.detailFilters ? JSON.stringify(query.detailFilters) : "",
     // Row conditions (r4 §2.3: time, 요일·시간대, 부분 결과, 콘텐츠 유형, 위치), artifacts · files · timeline.
     query.rowConditions ? JSON.stringify(query.rowConditions) : "",
+    // Timeline server search (`q=`) and display grouping (`group=1`, on unless false).
+    query.ref.id === "timeline"
+      ? `${query.text?.trim() ?? ""}|${query.group === false ? "flat" : "group"}`
+      : "",
   ] as const;
 }
 
@@ -257,6 +261,7 @@ export function useCollectionQuery(
       rawQuery.sort?.key,
       rawQuery.sort?.order,
       rawQuery.rowConditions,
+      rawQuery.group,
       filters,
       serverTypes,
       timezone,

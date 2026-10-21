@@ -145,6 +145,11 @@ export interface CollectionQuery {
    * `from`, `to`, `weekday`, `hours`, `offhours`, `tz`, `partial`, `content`, `geo` (lists repeat).
    */
   rowConditions?: Record<string, string | string[]>;
+  /**
+   * Timeline display grouping (`group=1`): events about the same target at the same second with
+   * the same kind of time are one row with its sources. On unless explicitly `false`.
+   */
+  group?: boolean;
   /** Navigation category (tree) filter; interpreted by the collection. */
   category?: string;
   /**

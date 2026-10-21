@@ -144,6 +144,8 @@ async function jsonPaged(
   const meta: Record<string, unknown> = {};
   // Files rows are joined with the newest NTFS-meta analysis; `null` = never ran (absent = old server).
   if ("ntfs_join" in payload) meta.ntfs_join = payload.ntfs_join;
+  // Timeline pages: the acquisition root the event paths start with (출처 행 column strips it).
+  if (endpoint === "timeline" && typeof payload.root === "string") meta.root = payload.root;
   // Files pages (parser-quality r2): candidates vs. every scanned file (`scope=inventory`).
   for (const key of ["scope", "inventory_count", "candidate_count"] as const) {
     if (key in payload) meta[key] = payload[key];
@@ -344,14 +346,22 @@ export async function fetchDocsPage(
     meta: { docs_rows: key },
   };
 }
+/**
+ * Timeline page. `search.q` is the server text search (`q=`: summary, target, path, event type,
+ * Korean event name — every event, not the loaded page); `search.group` asks for display groups
+ * (`group=1`: one row per target · second · kind family, with `source_count` / `sources`).
+ */
 export const fetchTimelinePage = (
   runId: string,
   offset: number,
   limit: number,
   signal?: AbortSignal,
   conditions?: Record<string, string | string[]>,
-) =>
-  jsonPaged(
+  search: { q?: string; group?: boolean } = {},
+) => {
+  const q = search.q?.trim() ?? "";
+  const extra = `${flagQueryString({ conditions })}${q ? `&q=${enc(q)}` : ""}${search.group ? "&group=1" : ""}`;
+  return jsonPaged(
     runId,
     "timeline",
     "events",
@@ -360,9 +370,10 @@ export const fetchTimelinePage = (
     signal,
     undefined,
     undefined,
-    flagQueryString({ conditions }),
-    Object.keys(conditions ?? {}).length > 0,
+    extra,
+    Object.keys(conditions ?? {}).length > 0 || q !== "" || search.group === true,
   );
+};
 export const fetchIndicatorsPage = (runId: string, offset: number, limit: number, signal?: AbortSignal) =>
   jsonPaged(runId, "indicators", "indicators", offset, limit, signal);
 

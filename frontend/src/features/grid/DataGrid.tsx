@@ -304,12 +304,25 @@ export function DataGrid(props: DataGridProps = {}) {
   const promotedCols = useMemo(() => effectiveFieldCols(route.cols, fieldScope), [route.cols, fieldScope]);
   const promotedKeys = useMemo(() => colsToKeys(promotedCols), [promotedCols]);
   const q = route.q;
+  // Timeline (timeline/grid readability C3 / C1): the text box searches every event on the server
+  // (`q=`), and events of one target · second · kind of time are one row unless ungrouped.
+  const serverSearch = ref.id === "timeline";
+  const serverQuery = serverSearch ? q.trim() : "";
+  const [timelineGrouped, setTimelineGrouped] = useState(true);
   const treeTypes = useMemo(
     () => (ref.id === "artifacts" ? artifactTypesOfTree(runTree.data?.nodes, ref.kind) : []),
     [ref.id, ref.kind, runTree.data],
   );
   const cq = useCollectionQuery(
-    { ref, offset: 0, limit: PAGE_SIZE, text: q || undefined, search: route.search, sort: routeSort },
+    {
+      ref,
+      offset: 0,
+      limit: PAGE_SIZE,
+      text: q || undefined,
+      search: route.search,
+      sort: routeSort,
+      ...(serverSearch ? { group: timelineGrouped } : {}),
+    },
     { runId, typeOptions: treeTypes },
   );
   const analysisRowTypesSig =
@@ -493,7 +506,8 @@ export function DataGrid(props: DataGridProps = {}) {
     [fieldScope, promotedCols, setCols],
   );
 
-  const needle = q.trim();
+  // A server-searched listing (timeline) never re-filters its rows by the text on the client.
+  const needle = serverSearch ? "" : q.trim();
   const clientSorting = !serverSorted && sorting.length > 0;
   const compactMode = needle !== "" || clientSorting;
 
@@ -515,17 +529,17 @@ export function DataGrid(props: DataGridProps = {}) {
   // loaded row goes (시각, 선별 … — review #9), then the lowest-priority columns go while their
   // minimum widths exceed the grid width. 항목 (the first priority id) always stays.
   const widthPriority = preset === "analysis" ? def.widthPriority?.(ref, filterTypes) : undefined;
+  // Core columns of the grid's family are never hidden for one page without values (P1).
+  const keepWhenEmptySig = (def.keepWhenEmpty?.(ref, filterTypes) ?? []).join("|");
   const loadedRows = cq.loadedRows;
-  const emptyIds = useMemo(
-    () =>
-      widthPriority
-        ? emptyColumnIds(orderedColumns, loadedRows, {
-            candidates: widthPriority.slice(1),
-            keep: pinnedColumns,
-          })
-        : [],
-    [widthPriority, orderedColumns, loadedRows, pinnedColumns],
-  );
+  const emptyIds = useMemo(() => {
+    if (!widthPriority) return [];
+    const keep = new Set(keepWhenEmptySig ? keepWhenEmptySig.split("|") : []);
+    return emptyColumnIds(orderedColumns, loadedRows, {
+      candidates: widthPriority.slice(1).filter((id) => !keep.has(id)),
+      keep: pinnedColumns,
+    });
+  }, [widthPriority, keepWhenEmptySig, orderedColumns, loadedRows, pinnedColumns]);
   const autoHidden = useMemo(() => {
     const out = new Map<string, AutoHideReason>();
     if (!widthPriority) return out;
@@ -1207,20 +1221,26 @@ export function DataGrid(props: DataGridProps = {}) {
         ? { icon: "search", text: "검색어를 입력하면 결과가 여기에 표시됩니다." }
         : sortBuilding
           ? { icon: "clock", text: "전체 정렬 인덱스를 만드는 중입니다. 끝나면 정렬된 순서로 표시합니다." }
-          : compactMode && needle
-            ? { icon: "filter", text: "조건에 맞는 행이 없습니다. 불러온 행 안에서만 필터합니다." }
-            : isAnalysis && ref.kind
-              ? {
-                  icon: "inbox",
-                  text: "이 노드에는 결과가 없습니다.",
-                  action: { command: runCommandId(ref.kind), label: "분석 실행" },
-                }
-              : compactMode
-                ? { icon: "filter", text: "조건에 맞는 행이 없습니다. 불러온 행 안에서만 필터합니다." }
-                : { icon: "inbox", text: "이 노드에는 표시할 행이 없습니다." };
+          : serverQuery
+            ? { icon: "search", text: "검색어에 맞는 이벤트가 없습니다. (서버 검색: 전체 이벤트)" }
+            : compactMode && needle
+              ? { icon: "filter", text: "조건에 맞는 행이 없습니다. 불러온 행 안에서만 필터합니다." }
+              : isAnalysis && ref.kind
+                ? {
+                    icon: "inbox",
+                    text: "이 노드에는 결과가 없습니다.",
+                    action: { command: runCommandId(ref.kind), label: "분석 실행" },
+                  }
+                : compactMode
+                  ? { icon: "filter", text: "조건에 맞는 행이 없습니다. 불러온 행 안에서만 필터합니다." }
+                  : { icon: "inbox", text: "이 노드에는 표시할 행이 없습니다." };
 
   const serverFiltering =
-    cq.serverColumnFilters || storeTypes.length > 0 || Boolean(storePath) || Boolean(serverPathFilter(q));
+    cq.serverColumnFilters ||
+    storeTypes.length > 0 ||
+    Boolean(storePath) ||
+    Boolean(serverPathFilter(q)) ||
+    serverQuery !== "";
   const loadingMessage = serverFiltering
     ? "서버에서 조건에 맞는 행을 찾는 중입니다 … (큰 유형은 수 초 걸릴 수 있습니다)"
     : "목록을 불러오는 중입니다 …";
@@ -1359,6 +1379,23 @@ export function DataGrid(props: DataGridProps = {}) {
       {serverSorted ? (
         <p className="grid-sortstatus" data-testid="grid-sort-status" hidden={!sortStatusText}>
           {sortStatusText}
+        </p>
+      ) : null}
+
+      {serverSearch ? (
+        <p className="grid-sortstatus" data-testid="grid-group-status">
+          {timelineGrouped
+            ? "같은 대상·같은 초·같은 시각 종류의 이벤트는 한 행으로 묶어 출처 수로 표시합니다."
+            : "이벤트를 하나씩 표시합니다(묶지 않음)."}{" "}
+          <button
+            type="button"
+            className="grid-btn grid-btn-quiet"
+            data-testid="grid-group-toggle"
+            aria-pressed={timelineGrouped}
+            onClick={() => setTimelineGrouped((on) => !on)}
+          >
+            {timelineGrouped ? "묶지 않고 보기" : "출처 묶어 보기"}
+          </button>
         </p>
       ) : null}
 
@@ -1591,7 +1628,8 @@ export function DataGrid(props: DataGridProps = {}) {
         backend={cq.backend}
         elapsedMs={cq.elapsedMs}
         truncated={cq.truncated}
-        filtering={needle !== ""}
+        filtering={needle !== "" || serverQuery !== ""}
+        serverSearch={serverQuery !== ""}
         sorting={clientSorting}
         loadedCount={cq.loadedCount}
         canLoadMore={compactMode && cq.canLoadMore}
