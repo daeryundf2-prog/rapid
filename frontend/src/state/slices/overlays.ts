@@ -35,14 +35,22 @@ export function viewerPaneCollapsed(
   return state.viewerPane === "collapsed" || (state.viewerPane === "auto" && !state.route.row);
 }
 
-export type OverlayName = "palette" | "help" | "runDialog" | "viewerDrawer";
+export type OverlayName = "palette" | "help" | "runDialog" | "treeDrawer" | "viewerDrawer";
 
-type OverlayFlag = "paletteOpen" | "helpOpen" | "runDialogOpen" | "viewerDrawerOpen";
+type OverlayFlag = "paletteOpen" | "helpOpen" | "runDialogOpen" | "treeDrawerOpen" | "viewerDrawerOpen";
 
 export interface OverlaySlice {
   paletteOpen: boolean;
   helpOpen: boolean;
   runDialogOpen: boolean;
+  /** Below 900 px the left panel (tree) is an overlay drawer (scroll review C2); its open state. */
+  treeDrawerOpen: boolean;
+  /** True while the layout renders the left panel as a drawer (< 900 px). */
+  treeIsDrawer: boolean;
+  setTreeIsDrawer: (drawer: boolean) => void;
+  /** Wide layouts: the left panel is folded to its 36px rail (dragged shut or 탐색 패널 접기). */
+  treeCollapsed: boolean;
+  setTreeCollapsed: (collapsed: boolean) => void;
   /** Below 1200 px the viewer is an overlay drawer; this is its open state. */
   viewerDrawerOpen: boolean;
   /** True while the layout renders the viewer as a drawer (< 1200 px). */
@@ -64,11 +72,12 @@ const FLAG: Record<OverlayName, OverlayFlag> = {
   palette: "paletteOpen",
   help: "helpOpen",
   runDialog: "runDialogOpen",
+  treeDrawer: "treeDrawerOpen",
   viewerDrawer: "viewerDrawerOpen",
 };
 
 /** Topmost first. */
-const STACK: readonly OverlayName[] = ["palette", "help", "runDialog", "viewerDrawer"];
+const STACK: readonly OverlayName[] = ["palette", "help", "runDialog", "treeDrawer", "viewerDrawer"];
 
 export function topOverlay(state: Pick<AppState, OverlayFlag>): OverlayName | null {
   return STACK.find((name) => state[FLAG[name]]) ?? null;
@@ -78,6 +87,12 @@ export const createOverlaySlice: StateCreator<AppState, [], [], OverlaySlice> = 
   paletteOpen: false,
   helpOpen: false,
   runDialogOpen: false,
+  treeDrawerOpen: false,
+  treeIsDrawer: false,
+  setTreeIsDrawer: (drawer) =>
+    set(drawer ? { treeIsDrawer: true } : { treeIsDrawer: false, treeDrawerOpen: false }),
+  treeCollapsed: false,
+  setTreeCollapsed: (collapsed) => set({ treeCollapsed: collapsed }),
   viewerDrawerOpen: false,
   viewerIsDrawer: false,
   viewerPane: storedViewerPane(),
@@ -94,6 +109,9 @@ export const createOverlaySlice: StateCreator<AppState, [], [], OverlaySlice> = 
   setOverlay: (name, open) => {
     const flag = FLAG[name];
     const patch: Partial<Record<OverlayFlag, boolean>> = { [flag]: open };
+    // The two drawers share the narrow pane area: opening one closes the other.
+    if (open && name === "treeDrawer") patch.viewerDrawerOpen = false;
+    if (open && name === "viewerDrawer") patch.treeDrawerOpen = false;
     set(patch);
   },
   setViewerIsDrawer: (drawer) =>
