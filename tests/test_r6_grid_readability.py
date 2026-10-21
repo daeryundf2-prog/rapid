@@ -107,6 +107,63 @@ def keyed(events: list[dict[str, object]]) -> dict[tuple[str, str, str], dict[st
     return out
 
 
+def secret_events() -> list[dict[str, object]]:
+    """Events whose summary / targets carry credentials (UX-round review (c))."""
+    return [
+        {
+            "timestamp": T1,
+            "timestamp_kind": "run",
+            "event_type": "artifact",
+            "source": "artifacts",
+            "path": "C:\\Windows\\Prefetch\\NET.EXE-1.pf",
+            "summary": "net use \\\\fs\\share /user:admin password=hunter2",
+            "details": {"artifact_type": "eventlog-event", "command_line": "cmd /c run --token=tok-77"},
+        },
+        {
+            "timestamp": T2,
+            "timestamp_kind": "visited",
+            "event_type": "artifact",
+            "source": "artifacts",
+            "path": "C:\\Users\\u\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\History",
+            "summary": "https://acct.blob.core.windows.net/c/f.zip?sv=2022&sharedAccessToken=sas-sig-123",
+            "details": {
+                "artifact_type": "browser-history",
+                "url": "https://login.example.com/cb?code=abc&state=oauth-state-9",
+            },
+        },
+        {
+            "timestamp": T2,
+            "timestamp_kind": "modified",
+            "event_type": "artifact",
+            "source": "artifacts",
+            "path": "C:\\svc.log",
+            "summary": "service state=running key=HKLM\\Software\\X",
+            "details": {"artifact_type": "eventlog-event"},
+        },
+    ]
+
+
+class SecretRedactionTests(unittest.TestCase):
+    """UX-round review (c): credential-like values in summaries / targets are hidden before storage."""
+
+    def test_builder_redacts_summary_and_targets(self) -> None:
+        stats = TimelineStats()
+        builder = TimelineBuilder(stats)
+        builder.extend([dict(event) for event in secret_events()])
+        events = builder.events()
+        self.assertEqual(events[0]["summary"], "net use \\\\fs\\share /user:admin password=[가림]")
+        self.assertEqual(events[0]["details"]["command_line"], "cmd /c run --token=[가림]")  # type: ignore[index]
+        self.assertTrue(str(events[1]["summary"]).endswith("sharedAccessToken=[가림]"))
+        self.assertEqual(events[1]["details"]["url"], "https://login.example.com/cb?code=[가림]&state=[가림]")  # type: ignore[index]
+        # Prose key=value pairs that are not credentials stay readable.
+        self.assertEqual(events[2]["summary"], "service state=running key=HKLM\\Software\\X")
+        self.assertEqual(stats.secret_redactions, 2)
+        self.assertEqual(stats.as_dict()["secret_redacted_events"], 2)
+        dumped = json.dumps(events, ensure_ascii=False)
+        for secret in ("hunter2", "tok-77", "sas-sig-123", "oauth-state-9"):
+            self.assertNotIn(secret, dumped)
+
+
 class JumplistIdentityTests(unittest.TestCase):
     """C1 rule 1: one event per embedded LNK and instant, the DestList entry event kept."""
 
@@ -479,6 +536,74 @@ class TimelineApiTests(unittest.TestCase):
         indices = [row["record_index"] for row in first["events"] + second["events"]]  # type: ignore[operator]
         self.assertEqual(indices, [0, 3, 4, 5, 6, 7])
 
+    def test_large_timeline_groups_in_the_request_and_builds_the_column_later(self) -> None:
+        """UX-round review item 6: without the group column a large timeline does not build time +
+        group over every event before the first grouped page; the rows are the same."""
+        self.start(grouped_events())  # type: ignore[arg-type]
+        queries = ("group=1", "group=1&q=recent-shortcut", "group=1&from=2024-03-01T10:00:00.4Z&to=2024-03-01T10:00:00.95Z")
+        expected = {query: self.all_rows(query) for query in queries}
+        expected_locate = self.page("group=1&limit=2&locate=8")["pagination"]["locate"]  # type: ignore[index]
+        for query in queries:
+            TIMELINE_INDEXES.clear()
+            MATCH_CACHE.clear()
+            with (
+                mock.patch.object(timeline_index, "SYNC_COMPLETE_MAX_EVENTS", 0),
+                mock.patch.object(timeline_index, "load_index", return_value=None),
+                mock.patch.object(timeline_index.TimelineIndex, "ensure_groups", side_effect=AssertionError("synchronous group column")),
+                mock.patch.object(timeline_index, "_complete_later") as later,
+            ):
+                self.assertEqual(self.all_rows(query, limit=2), expected[query], query)
+                later.assert_called()  # the column (and the file) are built in the background
+            if query == "group=1":
+                with (
+                    mock.patch.object(timeline_index, "SYNC_COMPLETE_MAX_EVENTS", 0),
+                    mock.patch.object(timeline_index, "_complete_later"),
+                ):
+                    self.assertEqual(self.page("group=1&limit=2&locate=8")["pagination"]["locate"], expected_locate)  # type: ignore[index]
+
+    def test_q_with_conditions_searches_first_on_a_large_timeline(self) -> None:
+        """UX-round review item 6: q + a condition on a large timeline without the condition column
+        checks the condition on the search hits only (no time column over every event); same rows."""
+        rng = random.Random(3)
+        self.start([random_event(rng, position) for position in range(1_500)])  # type: ignore[arg-type]
+        queries = ("q=exe&from=2024-01-01", "q=a&content=document&partial=1", "q=e&group=1&from=2020-01-01&tz=Asia/Seoul&hours=09-18")
+        expected = {query: self.all_rows(query) for query in queries}
+        self.assertTrue(all(expected.values()), {query: len(rows) for query, rows in expected.items()})
+        for query in queries:
+            TIMELINE_INDEXES.clear()
+            MATCH_CACHE.clear()
+            with (
+                mock.patch.object(timeline_index, "SYNC_COMPLETE_MAX_EVENTS", 0),
+                mock.patch.object(timeline_index, "load_index", return_value=None),
+                mock.patch.object(timeline_index, "evaluate_building", side_effect=AssertionError("full columns first")),
+                mock.patch.object(timeline_index, "_complete_later") as later,
+            ):
+                self.assertEqual(self.all_rows(query), expected[query], query)
+                later.assert_called()
+
+    def test_request_groups_equal_the_column_on_random_events(self) -> None:
+        rng = random.Random(11)
+        events = [random_event(rng, position) for position in range(2_000)]
+        for event in events:
+            if isinstance(event, dict):
+                event["timestamp_kind"] = rng.choice(("created", "target-created", "modified", None))
+                details = event.get("details")
+                if isinstance(details, dict) and rng.random() < 0.6:
+                    details[rng.choice(("target_path", "executable_path", "url"))] = rng.choice(("C:\\A.exe", "c:\\a.EXE", "Ünï", "ÜNÏ", ""))
+                if rng.random() < 0.6:
+                    event["timestamp"] = rng.choice(("2025-01-01T00:00:00Z", "2025-01-01T00:00:00.9Z", "2025-01-01T09:00:00+09:00", "2025-01-01T00:00:00"))
+        full = timeline_index.build_timeline_index(events).ensure_groups(events)
+        for matched in (None, sorted(rng.sample(range(len(events)), 700)), sorted(rng.sample(range(len(events)), 40))):
+            local = timeline_index.request_group_column(events, matched)
+            positions = range(len(events)) if matched is None else matched
+            self.assertEqual(local.leaders(positions), full.leaders(positions))
+            for leader in full.leaders(positions):
+                keep = None if matched is None else matched
+                self.assertEqual(
+                    timeline_index.group_page_fields(local, events, leader, keep),
+                    timeline_index.group_page_fields(full, events, leader, keep),
+                )
+
     def test_group_ids_are_saved_in_the_index_file(self) -> None:
         self.start(grouped_events())  # type: ignore[arg-type]
         expected = [row["record_index"] for row in self.all_rows("group=1")]
@@ -541,6 +666,17 @@ class TimelineApiTests(unittest.TestCase):
         for a in positions[:400]:
             for b in positions:
                 self.assertEqual(ids[a] == ids[b], reference[a] == reference[b], (a, b))
+
+    def test_q_cannot_surface_a_redacted_secret(self) -> None:
+        """UX-round review (c): secrets are hidden when the timeline is built, so q= has nothing to find."""
+        builder = TimelineBuilder(TimelineStats())
+        builder.extend([dict(event) for event in secret_events()])
+        self.start(builder.events())  # type: ignore[arg-type]
+        for secret in ("hunter2", "sas-sig-123", "oauth-state-9", "tok-77"):
+            self.assertEqual(self.all_rows(f"q={secret}"), [], secret)
+        rows = self.all_rows("q=password")
+        self.assertEqual(len(rows), 1)
+        self.assertIn("password=[가림]", rows[0]["summary"])  # type: ignore[operator]
 
     def test_kind_families(self) -> None:
         self.assertEqual(kind_family("target-created"), kind_family("created"))

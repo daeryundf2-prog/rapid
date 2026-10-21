@@ -34,6 +34,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import NamedTuple
 
+from ..artifacts.url_redaction import redact_secret_text
 from .artifact_profiles import iter_payload_records
 from .artifacts import SUPPORTED_ARTIFACT_KINDS, run_artifact_collection
 from .docs import scan_document_candidates
@@ -495,6 +496,8 @@ class TimelineStats:
         self.cross_record_merges = 0
         # Jump List container events joined to their DestList entry event (same embedded LNK).
         self.jumplist_lnk_merges = 0
+        # Events whose summary / target fields had a credential-like value hidden (UX-round review).
+        self.secret_redactions = 0
         self.timezone_relabelled = 0
         # Row-level truncation seen while streaming every artifact row (the
         # run steps promote it to step warnings): kind -> Counter.
@@ -538,6 +541,7 @@ class TimelineStats:
             "label_variants_merged_by_type": dict(self.label_merges.most_common(50)),
             "cross_record_merges": self.cross_record_merges,
             "jumplist_lnk_merges": self.jumplist_lnk_merges,
+            "secret_redacted_events": self.secret_redactions,
             "key_level_events_collapsed": sum(self.key_level_collapsed.values()),
             "key_level_events_collapsed_by_type": dict(self.key_level_collapsed.most_common(20)),
             "aggregate_rows_not_emitted": dict(self.aggregate_types_skipped),
@@ -736,6 +740,49 @@ def _summary(payload: Mapping[str, object]) -> Mapping[str, object]:
     return summary if isinstance(summary, Mapping) else {}
 
 
+# What ``q=`` searches and the console shows of an event besides its summary (the search target
+# keys of api.app.timeline_index plus command lines): redacted before the event is stored.
+SECRET_TEXT_DETAIL_KEYS: tuple[str, ...] = (
+    "target_path",
+    "media_path",
+    "local_path",
+    "target_file",
+    "file_path",
+    "executable_path",
+    "referenced_path",
+    "file_name",
+    "filename",
+    "attachment_name",
+    "url",
+    "key_path",
+    "command_line",
+    "arguments",
+)
+
+
+def redact_event_secrets(event: dict[str, object]) -> bool:
+    """Hide credential-like values (``password=`` / ``token=`` / ``sharedAccessToken=`` / OAuth
+    ``state=`` ... , URL userinfo) in an event's summary and target fields (UX-round review: the
+    timeline stores them and ``q=`` would surface them). ``True`` when anything changed."""
+    changed = False
+    summary = event.get("summary")
+    if isinstance(summary, str) and ("=" in summary or "@" in summary):
+        redacted = redact_secret_text(summary)
+        if redacted != summary:
+            event["summary"] = redacted
+            changed = True
+    details = event.get("details")
+    if isinstance(details, dict):
+        for key in SECRET_TEXT_DETAIL_KEYS:
+            value = details.get(key)
+            if isinstance(value, str) and ("=" in value or "@" in value):
+                redacted = redact_secret_text(value)
+                if redacted != value:
+                    details[key] = redacted
+                    changed = True
+    return changed
+
+
 class TimelineBuilder:
     """Collects events: one event per ``(source record, timestamp)``.
 
@@ -760,6 +807,8 @@ class TimelineBuilder:
             self.add(event)
 
     def add(self, event: dict[str, object]) -> None:
+        if redact_event_secrets(event):
+            self.stats.secret_redactions += 1
         record_key = event.pop("record_key", None)
         scope = event.pop("_scope", "row")
         if not record_key:

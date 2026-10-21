@@ -39,7 +39,11 @@ search text of ``q=`` (C3, :class:`SearchColumn`, the same text :func:`event_mat
 scans) lives in memory only, built on the first search. Grouping runs after the position
 selection: the matched positions of the conditions and ``q`` are reduced to one leader per group
 (``MATCH_CACHE`` keeps the leaders, so later pages are a slice), and each page row lists its
-members among those matched positions.
+members among those matched positions. A large timeline without the ``group`` column (an older
+run) builds it in the background like the other columns; until then a grouped request groups its
+matched positions itself (:func:`request_group_column`: only the events with a target key, their
+own timestamps -- no time column over every event), with the same leaders and members. A page
+row's ``group_id`` is a digest of the group key (:func:`group_label`), not the column's number.
 """
 
 from __future__ import annotations
@@ -121,6 +125,8 @@ _KIND_FAMILIES: dict[str, str] = {
     **dict.fromkeys(("accessed", "target-accessed", "item-accessed", "fs-accessed", "file-accessed", "last-accessed"), "accessed"),
 }
 NO_GROUP = -1
+# Request-local group sets kept per index until its ``group`` column is built (UX-round review).
+REQUEST_GROUPS_MAX = 8
 # Timelines up to this many events complete their index (and file) inside the first request;
 # larger ones finish the remaining columns and the file in a background thread.
 SYNC_COMPLETE_MAX_EVENTS = 50_000
@@ -535,21 +541,19 @@ def kind_family(kind: object) -> str:
 
 class GroupColumn:
     """Group id per event (:data:`NO_GROUP` = never grouped) and the positions of every group
-    with two or more events."""
+    with two or more events. ``ids`` is the index's ``group`` column, or for a request-local
+    computation (:func:`request_group_column`) a :class:`SparseGroupIds` with ``members`` given."""
 
     __slots__ = ("ids", "members")
 
-    def __init__(self, ids: array) -> None:
+    def __init__(self, ids: Sequence[int], members: dict[int, list[int]] | None = None) -> None:
         self.ids = ids
-        counts: dict[int, int] = {}
-        get = counts.get
-        for group in ids:
-            if group != NO_GROUP:
-                counts[group] = get(group, 0) + 1
-        members: dict[int, list[int]] = {}
-        for position, group in enumerate(ids):
-            if group != NO_GROUP and counts[group] > 1:
-                members.setdefault(group, []).append(position)
+        if members is None:
+            grouped = [position for position, group in enumerate(ids) if group != NO_GROUP]
+            by_group: dict[int, list[int]] = {}
+            for position in grouped:
+                by_group.setdefault(ids[position], []).append(position)
+            members = {group: positions for group, positions in by_group.items() if len(positions) > 1}
         self.members = members
 
     def leaders(self, positions: Iterable[int]) -> list[int]:
@@ -566,6 +570,102 @@ class GroupColumn:
                 seen.add(group)
                 append(position)
         return out
+
+
+class SparseGroupIds:
+    """``ids`` of a request-local :class:`GroupColumn`: the group of the computed positions,
+    :data:`NO_GROUP` for every other one (``len`` = the event count)."""
+
+    __slots__ = ("count", "groups")
+
+    def __init__(self, count: int, groups: dict[int, int]) -> None:
+        self.count = count
+        self.groups = groups
+
+    def __len__(self) -> int:
+        return self.count
+
+    def __getitem__(self, position: int) -> int:
+        return self.groups.get(position, NO_GROUP)
+
+
+def event_group_key(row: object) -> tuple[object, ...] | None:
+    """The display-group key of one event -- ``(UTC second, has offset, folded target, time-kind
+    family)`` -- exactly as :func:`group_column` keys it (``None``: never grouped)."""
+    if not _is_mapping(row):
+        return None
+    details = _details_of(row)  # type: ignore[arg-type]
+    if details is None or _GROUP_TARGET_SET.isdisjoint(details):
+        return None
+    epoch, offset = event_epoch(row.get("timestamp"))  # type: ignore[union-attr]
+    if epoch == MISSING:
+        return None
+    target = ""
+    for name in GROUP_TARGET_KEYS:
+        candidate = details.get(name)
+        if isinstance(candidate, str):
+            candidate = candidate.strip()
+            if candidate:
+                target = candidate.lower() if candidate.isascii() else fold_text(candidate)
+                break
+    if not target:
+        return None
+    return (epoch // 1_000_000, offset, target, kind_family(row.get("timestamp_kind")))  # type: ignore[union-attr]
+
+
+def group_label(key: tuple[object, ...] | None) -> str:
+    """``group_id`` of a page row: a digest of the group key, so it is the same whichever way the
+    groups were computed (index column or request-local) and across index rebuilds."""
+    return "g" + hashlib.blake2b(repr(key).encode("utf-8"), digest_size=6).hexdigest()
+
+
+def target_positions(events: Sequence[object]) -> array:
+    """Positions of the events whose details hold a group target key (the only ones that group)."""
+    target_set = _GROUP_TARGET_SET
+    details = [row.get("details") if type(row) is dict else _details_of(row) if _is_mapping(row) else None for row in events]  # type: ignore[arg-type]
+    return array(
+        "l",
+        [
+            position
+            for position, found in enumerate(details)
+            if (type(found) is dict or isinstance(found, Mapping)) and not target_set.isdisjoint(found)  # type: ignore[arg-type]
+        ],
+    )
+
+
+def request_group_column(events: Sequence[object], matched: Sequence[int] | None, targets: Sequence[int] | None = None) -> GroupColumn:
+    """The display groups of the ``matched`` positions alone (``None`` = every event), computed
+    from the events' own timestamps: no ``time`` / ``group`` column over the whole timeline. The
+    leaders and members (members are always limited to the matched positions) equal those of the
+    index's column; only the internal group numbers differ (``group_id`` is :func:`group_label`)."""
+    if targets is None:
+        targets = target_positions(events)
+    if matched is None:
+        candidates: Iterable[int] = targets
+    elif len(matched) <= len(targets):
+        is_target = bytearray(len(events))
+        for position in targets:
+            is_target[position] = 1
+        candidates = [position for position in matched if is_target[position]]
+    else:
+        wanted = bytearray(len(events))
+        for position in matched:
+            wanted[position] = 1
+        candidates = [position for position in targets if wanted[position]]
+    by_key: dict[tuple[object, ...], int] = {}
+    groups: dict[int, int] = {}
+    positions_of: dict[int, list[int]] = {}
+    for position in candidates:
+        key = event_group_key(events[position])
+        if key is None:
+            continue
+        group = by_key.get(key)
+        if group is None:
+            group = by_key[key] = len(by_key)
+        groups[position] = group
+        positions_of.setdefault(group, []).append(position)
+    members = {group: positions for group, positions in positions_of.items() if len(positions) > 1}
+    return GroupColumn(SparseGroupIds(len(events), groups), members)
 
 
 def event_group_target(row: Mapping[str, object]) -> str:
@@ -653,6 +753,10 @@ class TimelineIndex:
         # members of each display group (from ``group_ids``).
         self.search: SearchColumn | None = None
         self.groups: GroupColumn | None = None
+        # Until the ``group`` column exists (a large timeline builds it in the background, UX-round
+        # review): the target positions and the request-local groups per matched set (small LRU).
+        self.targets: array | None = None
+        self.request_groups: dict[tuple[object, ...], GroupColumn] = {}
         self._extra_lock = threading.Lock()
         self._lock = threading.Lock()  # saved / completing flags
         # One lock per column: a request never waits for a column it does not need.
@@ -752,6 +856,27 @@ class TimelineIndex:
                 if found is None:
                     assert self.group_ids is not None
                     found = self.groups = GroupColumn(self.group_ids)
+        return found
+
+    def groups_for(
+        self, events: Sequence[object], key: tuple[object, ...], matched: Callable[[], Sequence[int]] | None
+    ) -> GroupColumn:
+        """Display groups of one matched set without the ``group`` column (request-local, cached
+        per ``key`` so later pages reuse them; the full column replaces them once built)."""
+        if self.groups is not None:
+            return self.groups
+        with self._extra_lock:
+            found = self.request_groups.get(key)
+            if found is not None:
+                return found
+            if self.targets is None:
+                self.targets = target_positions(events)
+            targets = self.targets
+        found = request_group_column(events, matched() if matched is not None else None, targets)
+        with self._extra_lock:
+            self.request_groups[key] = found
+            while len(self.request_groups) > REQUEST_GROUPS_MAX:
+                self.request_groups.pop(next(iter(self.request_groups)))
         return found
 
     def complete_and_save(self, events: Sequence[object], pause: Pause = None) -> None:
@@ -1104,6 +1229,21 @@ def evaluate_building(index: TimelineIndex, events: Sequence[object], conditions
     return [candidates[position] for position in evaluate(subset, only_columns(conditions, missing))]
 
 
+def _search_first(index: TimelineIndex, conditions: RowConditions) -> bool:
+    """``q`` with conditions on a large timeline whose index lacks a needed column (UX-round
+    review: the search column is built anyway; parsing every timestamp for the time column first
+    doubled the first page)."""
+    return index.count > SYNC_COMPLETE_MAX_EVENTS and any(not index.has(column) for column in needed_columns(conditions))
+
+
+def evaluate_on(events: Sequence[object], candidates: Sequence[int], conditions: RowConditions) -> list[int]:
+    """The ``candidates`` (ascending positions) passing ``conditions``, from columns of those events only."""
+    needed = needed_columns(conditions)
+    subset = TimelineIndex(len(candidates))
+    subset.ensure([events[position] for position in candidates], needed)
+    return [candidates[position] for position in evaluate(subset, only_columns(conditions, needed))]
+
+
 # --- API entry -----------------------------------------------------------------------------------
 
 TIMELINE_INDEXES: SingleFlightIndexCache[TimelineIndex] = SingleFlightIndexCache(max_runs=4)
@@ -1187,6 +1327,13 @@ def timeline_positions(
             index = _run_index(run_id, timeline_path, events, stamp)
             if index.count == len(events):
                 positions: list[int] | None = None
+                if conditions is not None and needle and _search_first(index, conditions):
+                    # A large timeline missing a condition column: the search narrows first and the
+                    # conditions are checked on its hits only (an AND of per-row tests: same set);
+                    # the columns complete in the background.
+                    positions = evaluate_on(events, index.ensure_search(events).positions(needle), conditions)
+                    _complete_later(index, events)
+                    return positions
                 if conditions is not None:
                     positions = evaluate_building(index, events, conditions)
                     if not index.complete() or not index.saved:
@@ -1208,13 +1355,30 @@ def timeline_positions(
 
 
 def timeline_groups(
-    run_id: str, timeline_path: Path, events: Sequence[object], stamp: tuple[object, ...]
+    run_id: str,
+    timeline_path: Path,
+    events: Sequence[object],
+    stamp: tuple[object, ...],
+    matched: Callable[[], Sequence[int]] | None = None,
+    key: tuple[object, ...] = (),
 ) -> GroupColumn:
-    """The run's display groups (``group=1``); built without the shared index when that fails."""
+    """The run's display groups (``group=1``); built without the shared index when that fails.
+
+    With the ``group`` column (index file, or a small timeline built in the request) the groups of
+    every event; a large timeline without it (an older run) builds the column in the background
+    and answers from the groups of the ``matched`` positions (``None`` = every event) under
+    ``key`` (the request's match key) -- same leaders and members (UX-round review: the first
+    grouped page no longer waits for the time + group columns of the whole timeline)."""
     try:
         index = _run_index(run_id, timeline_path, events, stamp)
         if index.count == len(events):
-            groups = index.ensure_groups(events)
+            local = index.request_groups.get(key) if index.groups is None else None
+            if local is not None:  # later pages of a request answered before the column existed
+                groups = local
+            elif index.has(GROUP) or index.count <= SYNC_COMPLETE_MAX_EVENTS:
+                groups = index.ensure_groups(events)
+            else:
+                groups = index.groups_for(events, key, matched)
             if not index.complete() or not index.saved:
                 _complete_later(index, events)
             return groups
@@ -1263,7 +1427,7 @@ def group_page_fields(
                 }
             )
     return {
-        "group_id": f"g{group}",
+        "group_id": group_label(event_group_key(events[leader])),
         "source_count": len(seen),
         "event_count": len(members),
         "sources": sources,

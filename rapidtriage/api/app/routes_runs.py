@@ -638,7 +638,20 @@ def build_runs_router(
         # R6 S3: positions from the run's timeline column index (same set as the predicate scan).
         positions = timeline_positions(run_id, timeline_path, events, conditions, stamp, needle)
         filtered = conditions is not None or bool(needle)
-        groups = timeline_groups(run_id, timeline_path, events, stamp) if grouped else None
+        # A large timeline without the index's group column groups the matched positions in the
+        # request (the column follows in the background; same leaders / members).
+        groups = (
+            timeline_groups(
+                run_id,
+                timeline_path,
+                events,
+                stamp,
+                (lambda: MATCH_CACHE.get_or_compute(cache_key, positions)) if filtered else None,
+                cache_key,
+            )
+            if grouped
+            else None
+        )
         if groups is not None:
 
             def leaders() -> Iterable[int]:
