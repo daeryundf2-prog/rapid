@@ -2,6 +2,8 @@
 
 .dash {
   container: dash / inline-size;
+  /* Positioned so its visually hidden spans scroll with it instead of escaping the pane. */
+  position: relative;
   height: 100%;
   overflow: auto;
   padding: var(--space-3) var(--space-4) var(--space-5);

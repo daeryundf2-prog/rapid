@@ -36,6 +36,10 @@ export const VIEWER_ID = "viewer";
 export const GLOBAL_SEARCH_ID = "global-search";
 /** The collapsed viewer rail's expand button (뷰어 접기 lands focus here). */
 export const VIEWER_EXPAND_ID = "viewer-expand";
+/** The collapsed left panel's expand button (탐색 패널 접기 lands focus here). */
+export const TREE_EXPAND_ID = "tree-expand";
+/** The left panel's stage heading (tabindex=-1 h1; features/stages STAGE_HEADING_ID). */
+const TREE_HEADING_ID = "stage-heading";
 
 function focusById(id: string, preferSelector?: string): void {
   const run = () => {
@@ -96,6 +100,26 @@ export function collapseViewerPane(): void {
   }
   s.setViewerPane("collapsed");
   focusById(VIEWER_EXPAND_ID);
+}
+
+/**
+ * 탐색 패널 (scroll review C2): below 900 px the left panel is a drawer (open/close); wider, it
+ * folds to its 36px rail and back. Focus follows: the panel's heading when it opens, the grid
+ * (drawer) or the rail's expand button (folded) when it closes.
+ */
+export function toggleTreePane(): void {
+  const s = useAppStore.getState();
+  if (!s.route.runId) return;
+  if (s.treeIsDrawer) {
+    const open = !s.treeDrawerOpen;
+    s.setOverlay("treeDrawer", open);
+    if (open) focusById(TREE_HEADING_ID);
+    else focusMain();
+    return;
+  }
+  const collapse = !s.treeCollapsed;
+  s.setTreeCollapsed(collapse);
+  focusById(collapse ? TREE_EXPAND_ID : TREE_HEADING_ID);
 }
 
 const GRID_ROW_SELECTOR = '[data-grid-focus], [role="row"][tabindex="0"]';
@@ -285,13 +309,16 @@ export function appCommands(): Command[] {
       icon: "close",
       disabledReason: () => {
         const s = store();
-        return s.paletteOpen || s.helpOpen || s.runDialogOpen || s.viewerDrawerOpen
+        return s.paletteOpen || s.helpOpen || s.runDialogOpen || s.treeDrawerOpen || s.viewerDrawerOpen
           ? undefined
           : "닫을 창이 없습니다";
       },
       run: () => {
         const wasDrawer =
-          store().viewerDrawerOpen && !store().paletteOpen && !store().helpOpen && !store().runDialogOpen;
+          (store().treeDrawerOpen || store().viewerDrawerOpen) &&
+          !store().paletteOpen &&
+          !store().helpOpen &&
+          !store().runDialogOpen;
         store().closeTopOverlay();
         if (wasDrawer) focusMain();
       },
@@ -499,6 +526,14 @@ export function caseCommands(queryClient: QueryClient): Command[] {
       icon: "search",
       disabledReason: needsRun,
       run: () => focusById(GLOBAL_SEARCH_ID),
+    },
+    {
+      id: "view.tree",
+      label: "탐색 패널 접기/펼치기",
+      group: "app",
+      icon: "sidebar",
+      disabledReason: needsRun,
+      run: () => toggleTreePane(),
     },
     {
       id: "viewer.open",

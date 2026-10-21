@@ -249,19 +249,6 @@
   background: var(--bg-hover);
 }
 
-@media (max-width: 900px) {
-  .derived-body {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr) auto;
-  }
-
-  .derived-rows {
-    border-left: none;
-    border-top: 1px solid var(--line-subtle);
-    max-height: 40%;
-  }
-}
-
 /* Empty / loading states: the title and hint sit directly in the pane. */
 .derived-pane > .derived-title,
 .derived-pane > .derived-hint,
@@ -279,15 +266,35 @@
 }
 
 .derived-graph {
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
   min-height: 0;
 }
 
+/* The graph scrolls in its own box below its two hint lines (scroll review). */
 .derived-graph-scroll {
+  flex: 1 1 auto;
   overflow: auto;
+  overscroll-behavior: contain;
   min-height: 0;
+}
+
+/* Stacked below 900px (scroll review): values above, the row / graph panel below, in fixed
+   3:2 tracks (an auto track ignored the panel's 40% cap). After the [data-graph] rule so the
+   graph mode stacks too instead of squeezing the value list to a ~110px column. */
+@media (max-width: 900px) {
+  .derived-body,
+  .derived-body[data-graph] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 3fr) minmax(0, 2fr);
+  }
+
+  .derived-rows {
+    border-left: none;
+    border-top: 1px solid var(--line-subtle);
+  }
 }
 
 .derived-graph-svg {

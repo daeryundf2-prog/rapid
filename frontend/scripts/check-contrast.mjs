@@ -51,6 +51,10 @@ const PAIRS = [
     ["status chip text", `--status-${n}-on`, `--status-${n}`, TEXT, "text"],
   ]),
   ...[1, 2, 3, 4, 5, 6, 7, 8].flatMap((n) => ROWS.map((b) => [`tag-${n}`, `--tag-${n}`, b, UI, "ui"])),
+  // Scrollbars and pane resize grips (scroll review C3/C4): non-text UI on every surface.
+  ...["--sb-thumb", "--sb-thumb-hover", "--resize-grip"].flatMap((f) =>
+    SURFACES.map((b) => [`scrollbar / resize grip ${f.slice(2)}`, f, b, UI, "ui"]),
+  ),
 ];
 
 function stripComments(s) {
