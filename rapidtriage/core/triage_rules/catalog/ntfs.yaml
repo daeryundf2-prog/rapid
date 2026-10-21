@@ -444,6 +444,11 @@ rules:
   - https://andreafortuna.org/2019/09/26/windows-forensics-analysis-of-recycle-bin-artifacts/
   version: 1
   status: verified
+  validation:
+    synthetic: true
+    real: []
+    public: []
+    notes_ko: 합성 근거만(tests/triage_cases 양성·음성 픽스처). 실데이터·공개 데이터셋 검증 대기(R6 S4).
   params:
     min_delta_seconds: 60
 - id: ntfs.zero_subsecond
@@ -497,6 +502,11 @@ rules:
   sources: *id001
   version: 1
   status: verified
+  validation:
+    synthetic: true
+    real: []
+    public: []
+    notes_ko: 합성 근거만(tests/triage_cases 양성·음성 픽스처). 실데이터·공개 데이터셋 검증 대기(R6 S4).
   params: {}
 - id: ntfs.zone_identifier
   family: zone

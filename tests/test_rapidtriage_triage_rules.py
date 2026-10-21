@@ -114,6 +114,64 @@ class CatalogTests(unittest.TestCase):
         with self.assertRaises(CatalogError):
             parse_catalog([("a.yaml", GOOD_RULE.encode()), ("b.yaml", GOOD_RULE.replace("- id: fam\n", "- id: fam2\n").encode())])
 
+    def test_a_grade_rules_carry_validation_metadata(self) -> None:
+        """R6 S4 (Q-S4-6): the seven A-grade rules have a ``validation`` block; it is metadata only."""
+        catalog = load_catalog()
+        a_grade = {spec.id for spec in catalog.specs.values() if spec.grade == "A"}
+        # Rule versions before the R6 S4 metadata (unchanged: the verdict logic did not change).
+        versions = {
+            "antiforensics.wiper_run_after_incident": 1,
+            "cloud.bulk_upload": 2,
+            "eventlog.rdp_external_ip": 1,
+            "eventlog.log_cleared": 1,
+            "ntfs.si_before_fn": 1,
+            "ntfs.ads_executable": 1,
+            "rdp.external_ip": 1,
+        }
+        self.assertEqual(a_grade, set(versions))
+        served = {rule["id"]: rule for rule in catalog.payload()["rules"]}
+        for rule_id in sorted(a_grade):
+            with self.subTest(rule_id):
+                validation = catalog.specs[rule_id].validation
+                self.assertIsNotNone(validation)
+                self.assertIs(validation["synthetic"], True)
+                self.assertIsInstance(validation["real"], list)
+                self.assertIsInstance(validation["public"], list)
+                self.assertRegex(validation["notes_ko"], "[가-힣]")
+                self.assertEqual(served[rule_id]["validation"], dict(validation))
+                self.assertEqual(catalog.specs[rule_id].version, versions[rule_id])
+        # Rules without the block load as before (``validation`` stays optional).
+        self.assertTrue(any(spec.validation is None for spec in catalog.specs.values()))
+
+    def test_validation_block_schema(self) -> None:
+        def with_validation(block: str) -> bytes:
+            return GOOD_RULE.replace("  status: verified\n", "  status: verified\n" + block).encode()
+
+        good = with_validation(
+            "  validation:\n    synthetic: true\n    real:\n    - source: bsh-mft\n      hits: 2\n"
+            "      false_positives: 0\n      checked_at: '2026-10-20'\n      note_ko: 수동 확인 3건\n    notes_ko: 실데이터 2건\n"
+        )
+        spec = parse_catalog([("a.yaml", good)]).specs["fam.one"]
+        self.assertEqual(spec.validation["real"][0]["source"], "bsh-mft")
+        self.assertEqual(spec.validation["public"], [])  # omitted list normalised to []
+        minimal = parse_catalog([("a.yaml", with_validation("  validation: {synthetic: false, notes_ko: 미검증}\n"))])
+        self.assertEqual(minimal.payload()["rules"][0]["validation"], {"synthetic": False, "real": [], "public": [], "notes_ko": "미검증"})
+        broken = {
+            "not-object": "  validation: yes\n",
+            "unknown-key": "  validation: {synthetic: true, notes_ko: 가, extra: 1}\n",
+            "synthetic-type": "  validation: {synthetic: 'yes', notes_ko: 가}\n",
+            "notes-missing": "  validation: {synthetic: true}\n",
+            "real-not-list": "  validation: {synthetic: true, notes_ko: 가, real: bsh}\n",
+            "entry-no-source": "  validation: {synthetic: true, notes_ko: 가, real: [{hits: 1}]}\n",
+            "entry-unknown": "  validation: {synthetic: true, notes_ko: 가, public: [{source: x, url: y}]}\n",
+            "hits-negative": "  validation: {synthetic: true, notes_ko: 가, real: [{source: x, hits: -1}]}\n",
+            "date-unquoted": "  validation: {synthetic: true, notes_ko: 가, real: [{source: x, checked_at: 2026-10-20}]}\n",
+        }
+        for name, block in broken.items():
+            with self.subTest(name), self.assertRaises(CatalogError) as caught:
+                parse_catalog([("a.yaml", with_validation(block))])
+            self.assertRegex(str(caught.exception), "[가-힣]")
+
 
 class RuleFixtureTests(unittest.TestCase):
     """Every rule: one positive and one false-positive look-alike fixture (``tests/triage_cases``)."""

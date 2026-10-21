@@ -20,8 +20,10 @@ def build_flags_router(store: RunJobStore) -> APIRouter:
     def get_families() -> dict[str, object]:
         """The triage catalogue: ``{version, families: [{id, label, types, kinds?, prefixes?, suffixes?,
         core_columns, aux_columns, rules, sources?}], rules: [{id, family, grade, label_ko, rationale_ko,
-        false_positive_ko, sources, version, status, params}]}``; columns are ``{key, label, format?,
-        ts_kind?, width?, aliases?}``."""
+        false_positive_ko, sources, version, status, params, validation?}]}``; columns are ``{key, label,
+        format?, ts_kind?, width?, aliases?}``; ``validation`` = ``{synthetic, real: [{source, hits?,
+        false_positives?, checked_at?, note_ko?}], public: [...], notes_ko}`` (what the rule was checked
+        against; metadata only)."""
         try:
             return load_catalog().payload()
         except CatalogError as exc:

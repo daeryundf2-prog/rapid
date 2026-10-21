@@ -59,6 +59,13 @@ SEMANTIC_TAGS = frozenset(
 # event-log summary sentence, RDP direction, image EXIF state, account auto-logon (plan §3.2),
 # antivirus 조치 (classified label, or the raw AhnLab DB value labelled as unclassified; R6 S2).
 DERIVE_IDS = frozenset({"event_summary_ko", "rdp_direction", "exif_status", "auto_logon", "av_action"})
+# Optional per-rule ``validation`` block (R6 S4, plan r6-followups §4.3 갈래 B): what the rule was
+# checked against beyond its code. ``synthetic`` = covered by tests/triage_cases fixtures; ``real`` /
+# ``public`` = real-data / public-dataset checks ``[{source, hits?, false_positives?, checked_at?,
+# note_ko?}]``; ``notes_ko`` = one Korean sentence. Metadata only: it never changes a verdict, so
+# adding or filling it does not bump the rule ``version``.
+VALIDATION_KEYS = frozenset({"synthetic", "real", "public", "notes_ko"})
+VALIDATION_ENTRY_KEYS = frozenset({"source", "hits", "false_positives", "checked_at", "note_ko"})
 
 
 class CatalogError(ValueError):
@@ -87,6 +94,7 @@ class RuleSpec:
     version: int
     status: str
     params: Mapping[str, Any]
+    validation: Mapping[str, Any] | None = None
 
     @property
     def citation(self) -> str:
@@ -182,6 +190,50 @@ def _check_semantic(source: str, family_id: str, column: Mapping[str, Any]) -> N
         raise _fail(source, f"계열 {family_id}의 열 {key}의 derive가 알 수 없는 값입니다: {derive!r}")
 
 
+def _check_validation_entries(source: str, rule_id: str, name: str, entries: object) -> list[dict[str, Any]]:
+    if not isinstance(entries, list):
+        raise _fail(source, f"규칙 {rule_id}의 validation.{name}는 목록이어야 합니다")
+    checked: list[dict[str, Any]] = []
+    for entry in entries:
+        if not isinstance(entry, Mapping) or not isinstance(entry.get("source"), str) or not entry["source"].strip():
+            raise _fail(source, f"규칙 {rule_id}의 validation.{name} 항목은 source(문자열)가 있는 객체여야 합니다")
+        unknown = set(entry) - VALIDATION_ENTRY_KEYS
+        if unknown:
+            raise _fail(source, f"규칙 {rule_id}의 validation.{name} 항목에 알 수 없는 키가 있습니다: {sorted(unknown)}")
+        for key in ("hits", "false_positives"):
+            value = entry.get(key)
+            if value is not None and (not isinstance(value, int) or isinstance(value, bool) or value < 0):
+                raise _fail(source, f"규칙 {rule_id}의 validation.{name}.{key}는 0 이상 정수여야 합니다")
+        for key in ("checked_at", "note_ko"):
+            value = entry.get(key)
+            if value is not None and not isinstance(value, str):
+                raise _fail(source, f"규칙 {rule_id}의 validation.{name}.{key}는 문자열이어야 합니다(날짜는 따옴표로 감싸세요)")
+        checked.append(dict(entry))
+    return checked
+
+
+def _check_validation(source: str, rule_id: str, raw: object) -> dict[str, Any] | None:
+    """The optional ``validation`` block (``VALIDATION_KEYS``); ``None`` when the rule has none."""
+    if raw is None:
+        return None
+    if not isinstance(raw, Mapping):
+        raise _fail(source, f"규칙 {rule_id}의 validation은 객체여야 합니다")
+    unknown = set(raw) - VALIDATION_KEYS
+    if unknown:
+        raise _fail(source, f"규칙 {rule_id}의 validation에 알 수 없는 키가 있습니다: {sorted(unknown)}")
+    if not isinstance(raw.get("synthetic"), bool):
+        raise _fail(source, f"규칙 {rule_id}의 validation.synthetic은 true/false여야 합니다")
+    notes = raw.get("notes_ko")
+    if not isinstance(notes, str) or not notes.strip():
+        raise _fail(source, f"규칙 {rule_id}의 validation.notes_ko(한국어 한 줄)가 없습니다")
+    return {
+        "synthetic": raw["synthetic"],
+        "real": _check_validation_entries(source, rule_id, "real", raw.get("real", [])),
+        "public": _check_validation_entries(source, rule_id, "public", raw.get("public", [])),
+        "notes_ko": notes,
+    }
+
+
 def _check_rule(source: str, rule: Mapping[str, Any]) -> RuleSpec:
     rule_id = str(rule.get("id") or "")
     if not RULE_ID_PATTERN.fullmatch(rule_id):
@@ -213,6 +265,7 @@ def _check_rule(source: str, rule: Mapping[str, Any]) -> RuleSpec:
         version=version,
         status=str(rule["status"]),
         params=dict(params),
+        validation=_check_validation(source, rule_id, rule.get("validation")),
     )
 
 
@@ -252,7 +305,10 @@ def parse_catalog(files: list[tuple[str, bytes]]) -> Catalog:
             if spec.id in specs:
                 raise _fail(name, f"규칙 id가 중복됩니다: {spec.id}")
             specs[spec.id] = spec
-            rules.append(dict(rule))
+            entry = dict(rule)
+            if spec.validation is not None:
+                entry["validation"] = dict(spec.validation)  # normalised: real/public always lists
+            rules.append(entry)
     for spec in specs.values():
         if spec.family not in family_ids:
             raise _fail("catalog", f"규칙 {spec.id}의 계열 {spec.family}이(가) 없습니다")

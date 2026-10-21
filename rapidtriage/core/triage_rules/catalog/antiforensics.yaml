@@ -535,6 +535,11 @@ rules:
   sources: *af_sources
   version: 1
   status: provisional
+  validation:
+    synthetic: true
+    real: []
+    public: []
+    notes_ko: 합성 근거만(tests/triage_cases 양성·음성 픽스처). 실데이터·공개 데이터셋 검증 대기(R6 S4).
   params:
     signatures: *af_signatures
     categories:

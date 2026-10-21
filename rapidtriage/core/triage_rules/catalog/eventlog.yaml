@@ -588,6 +588,11 @@ rules:
   - https://www.manageengine.com/products/active-directory-audit/kb/system-events/event-id-7045.html
   version: 1
   status: verified
+  validation:
+    synthetic: true
+    real: []
+    public: []
+    notes_ko: 합성 근거만(tests/triage_cases 양성·음성 픽스처). 실데이터·공개 데이터셋 검증 대기(R6 S4).
   params: {}
 - id: eventlog.failed_logon_burst
   family: eventlog-event
@@ -623,6 +628,11 @@ rules:
   sources: *id001
   version: 1
   status: verified
+  validation:
+    synthetic: true
+    real: []
+    public: []
+    notes_ko: 합성 근거만(tests/triage_cases 양성·음성 픽스처). 실데이터·공개 데이터셋 검증 대기(R6 S4).
   params: {}
 - id: eventlog.record_id_gap
   family: eventlog-event
