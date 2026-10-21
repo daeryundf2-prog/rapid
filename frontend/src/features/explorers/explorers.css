@@ -21,6 +21,20 @@
   padding-block-end: var(--space-2);
 }
 
+/* Phone-width windows (scroll review C2): the folder tree stacks above the list instead of
+   leaving the list a ~40px column beside a 300px tree. */
+@media (max-width: 639.98px) {
+  .explorer-layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 2fr) minmax(0, 3fr);
+  }
+
+  .explorer-pane {
+    border-inline-end: none;
+    border-block-end: 1px solid var(--line-subtle);
+  }
+}
+
 .explorer-pane-head {
   display: flex;
   flex-wrap: wrap;

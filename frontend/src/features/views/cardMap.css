@@ -194,6 +194,8 @@
 
 .map-clusters,
 .map-table-wrap {
+  /* Positioned: the table's visually hidden header text stays inside this scroller. */
+  position: relative;
   min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;

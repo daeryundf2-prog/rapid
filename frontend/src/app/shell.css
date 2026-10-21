@@ -98,6 +98,12 @@ kbd {
   background: var(--bg);
 }
 
+/* The landing card is the one pane frame that scrolls itself (short windows). */
+.pane-frame.landing-frame {
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
 .pane-frame:focus-visible {
   outline-offset: -2px;
 }
@@ -570,6 +576,18 @@ kbd {
   .topbar-search {
     order: 3;
     flex: 1 0 100%;
+  }
+
+  /* (.shell > to outrank the status bar rule further down.) */
+  .shell > .statusbar {
+    gap: var(--space-2);
+    padding: 0 var(--space-2);
+  }
+
+  /* No case open: no search field, so ⌘K stays on the first row. */
+  .topbar-search:not(:has(.global-search)) {
+    order: 0;
+    flex: 0 0 auto;
   }
 }
 
