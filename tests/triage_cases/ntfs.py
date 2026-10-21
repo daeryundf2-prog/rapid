@@ -70,33 +70,72 @@ def burst(start_second: int, step_seconds: int, count: int, reasons: list[str]) 
     return rows
 
 
+FN_TIME = "2024-05-01T10:15:30.1234567Z"
+SI_BEFORE_FN_GRADES = ["A", "A", "C", "B"]  # grade of each positive row (tests.test_rapidtriage_triage_rules)
+
+
+def copied(entry: int, path: str, fn_created_at: str = FN_TIME) -> dict[str, object]:
+    """A timestamp-preserving copy/extraction: old $SI created/modified with sub-seconds, $SI MFT-modified = copy time."""
+    return mft(
+        entry,
+        path,
+        si_created_at="2021-07-07T12:00:00.5550000Z",
+        si_modified_at="2021-07-07T12:00:00.5550000Z",
+        si_mft_modified_at=fn_created_at,
+        fn_created_at=fn_created_at,
+        fn_modified_at=fn_created_at,
+    )
+
+
 CASES = {
     "ntfs.si_before_fn": {
-        # $SI Created set back years before the $FILE_NAME creation (user-mode timestomp).
+        # $SI Created set back years before the $FILE_NAME creation; grades in SI_BEFORE_FN_GRADES.
         "positive": {
             "rows": [
+                # A: second-precision timestomp -- every $SI time .0000000 ($SI MFT-modified recent), $FN has sub-seconds.
                 mft(
                     1201,
                     TOOL,
                     si_created_at="2019-03-01T09:00:00.0000000Z",
                     si_modified_at="2019-03-01T09:00:00.0000000Z",
-                    fn_created_at="2024-05-01T10:15:30.1234567Z",
-                    fn_modified_at="2024-05-01T10:15:30.1234567Z",
-                )
+                    si_mft_modified_at="2024-05-01T10:15:30.0000000Z",
+                    fn_created_at=FN_TIME,
+                    fn_modified_at=FN_TIME,
+                ),
+                # A: all four $SI times rewritten with sub-seconds ($SI MFT-modified also before the name existed).
+                mft(
+                    1203,
+                    r"\Users\analyst\Documents\ledger-2019.xlsx",
+                    si_created_at="2019-03-01T09:00:00.1234567Z",
+                    si_modified_at="2019-03-02T11:20:00.7654321Z",
+                    si_mft_modified_at="2019-03-02T11:20:00.7654321Z",
+                    fn_created_at=FN_TIME,
+                    fn_modified_at=FN_TIME,
+                ),
+                # C: plain timestamp-preserving copy of a document (sub-second $SI, fresh $SI MFT-modified).
+                copied(1204, DOC),
+                # B: the same plain copy, but an executable under a user-writable folder.
+                copied(1205, r"\Users\analyst\Downloads\setup-helper.exe"),
             ],
-            "flagged": [0],
+            "flagged": [0, 1, 2, 3],
         },
-        # Plain copy: $SI/$FN Created are both the copy time, only $SI Modified is old.
+        # Not flagged: a bulk copy (>= bulk_min_records hits whose $FN created falls in one hour), a
+        # WinSxS servicing file, and a plain copy whose $SI/$FN Created are both the copy time.
         "negative": {
+            "params": {"bulk_min_records": 3},
             "rows": [
+                copied(1210, r"\Users\analyst\Documents\tree\a.docx", "2024-05-01T10:01:00.1000000Z"),
+                copied(1211, r"\Users\analyst\Documents\tree\b.pdf", "2024-05-01T10:20:00.2000000Z"),
+                copied(1212, r"\Users\analyst\Documents\tree\c.exe", "2024-05-01T10:59:00.3000000Z"),
+                copied(1213, r"\Windows\WinSxS\amd64_microsoft-windows-shell32_31bf3856ad364e35\shell32.dll", "2024-06-02T08:00:00.4000000Z"),
                 mft(
                     1202,
                     DOC,
-                    si_created_at="2024-05-01T10:15:30.1234567Z",
+                    si_created_at=FN_TIME,
                     si_modified_at="2021-07-07T12:00:00.5550000Z",
-                    fn_created_at="2024-05-01T10:15:30.1234567Z",
-                    fn_modified_at="2024-05-01T10:15:30.1234567Z",
-                )
+                    fn_created_at=FN_TIME,
+                    fn_modified_at=FN_TIME,
+                ),
             ],
             "flagged": [],
         },

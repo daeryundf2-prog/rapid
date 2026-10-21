@@ -381,9 +381,13 @@ rules:
   status: provisional
   validation:
     synthetic: true
-    real: []
+    real:
+    - source: run-subset10(입력 없음 — 해당 없음)
+      hits: 0
+      checked_at: '2026-10-21'
+      note_ko: 서브셋·다른 D 드라이브 런에 클라우드 동기화 업로드 행이 없어 규칙이 읽을 입력이 0행(not_applicable). 0적중은 음성 근거가 아님.
     public: []
-    notes_ko: 합성 근거만(tests/triage_cases 양성·음성 픽스처). 실데이터·공개 데이터셋 검증 대기(R6 S4).
+    notes_ko: 실데이터 입력 없음(해당 없음). 양성 실데이터 없음 — 공개 데이터셋·VM 생성(테스트 계정)은 사용자 승인 대기.
   params:
     window_minutes: 60
     min_count: 50

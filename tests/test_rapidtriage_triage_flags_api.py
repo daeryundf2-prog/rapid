@@ -385,11 +385,12 @@ class TriageFlagsApiTests(unittest.TestCase):
         rule = next(item for item in payload["rules"] if item["id"] == CLEARED)
         self.assertEqual(rule["grade"], "A")
         self.assertTrue(all(url.startswith("https://") for url in rule["sources"]))
-        # R6 S4: the A-grade rules serve their validation metadata (synthetic-only until filled).
+        # R6 S4: the A-grade rules serve their validation metadata (real-data negative control filled 2026-10-21).
         self.assertEqual(rule["validation"]["synthetic"], True)
-        self.assertEqual(rule["validation"]["real"], [])
+        self.assertEqual([(entry["source"], entry["hits"], entry["false_positives"]) for entry in rule["validation"]["real"]],
+                         [("run-subset10 이벤트 로그(음성)", 0, 0)])
         self.assertEqual(rule["validation"]["public"], [])
-        self.assertRegex(rule["validation"]["notes_ko"], "합성 근거만")
+        self.assertRegex(rule["validation"]["notes_ko"], "음성 대조만")
         a_rules = [item for item in payload["rules"] if item["grade"] == "A"]
         self.assertEqual(len(a_rules), 7)
         self.assertTrue(all(isinstance(item.get("validation"), dict) for item in a_rules))

@@ -28,7 +28,9 @@ from rapidtriage.core.triage_rules.stage import (
     RUN_STAGE_ANALYSIS_PREFIX,
     run_triage_stage,
 )
-from tests.triage_cases import all_cases, run_case
+from tests.triage_cases import all_cases, case_flags, run_case
+from tests.triage_cases.ntfs import CASES as NTFS_CASES
+from tests.triage_cases.ntfs import FN_TIME, SI_BEFORE_FN_GRADES, copied, mft
 
 GOOD_RULE = """
 families:
@@ -118,13 +120,13 @@ class CatalogTests(unittest.TestCase):
         """R6 S4 (Q-S4-6): the seven A-grade rules have a ``validation`` block; it is metadata only."""
         catalog = load_catalog()
         a_grade = {spec.id for spec in catalog.specs.values() if spec.grade == "A"}
-        # Rule versions before the R6 S4 metadata (unchanged: the verdict logic did not change).
+        # Rule versions (the R6 S4 metadata alone never bumps them; ntfs.si_before_fn 2 = R6 S4 redesign).
         versions = {
             "antiforensics.wiper_run_after_incident": 1,
             "cloud.bulk_upload": 2,
             "eventlog.rdp_external_ip": 1,
             "eventlog.log_cleared": 1,
-            "ntfs.si_before_fn": 1,
+            "ntfs.si_before_fn": 2,
             "ntfs.ads_executable": 1,
             "rdp.external_ip": 1,
         }
@@ -192,6 +194,74 @@ class RuleFixtureTests(unittest.TestCase):
                     flagged, expected, summary = run_case(case, rule_id)
                     self.assertNotIn(rule_id, summary["rule_errors"])
                     self.assertEqual(flagged, expected)
+
+
+class SiBeforeFnGradeTests(unittest.TestCase):
+    """R6 S4 redesign of ``ntfs.si_before_fn``: A only with a timestomp-like corroborator, bulk/servicing dropped."""
+
+    RULE = "ntfs.si_before_fn"
+
+    def grades(self, case) -> dict[int, dict]:
+        flags, _expected, summary = case_flags(case, self.RULE)
+        self.assertNotIn(self.RULE, summary["rule_errors"])
+        return {index: flag for (_kind, index), flag in flags.items()}
+
+    def test_positive_rows_are_graded_by_corroborator(self) -> None:
+        flags = self.grades(NTFS_CASES[self.RULE]["positive"])
+        self.assertEqual([flags[index]["grade"] for index in sorted(flags)], SI_BEFORE_FN_GRADES)
+        self.assertEqual(flags[0]["evidence"]["corroborators"], ["zero_subsecond_si"])
+        self.assertEqual(flags[1]["evidence"]["corroborators"], ["si_changed_before_fn"])
+        self.assertNotIn("corroborators", flags[2]["evidence"])  # plain copy: C, no corroborator
+        self.assertIn("downloads", flags[3]["note"])
+        self.assertEqual(flags[2]["evidence"]["bucket_hits"], 4)  # the four positive rows share the $FN hour
+
+    def test_corroborated_hits_survive_bulk_and_servicing(self) -> None:
+        stomped = mft(
+            1300,
+            r"\Windows\WinSxS\x86_evil\payload.dll",
+            si_created_at="2019-03-01T09:00:00.0000000Z",
+            si_modified_at="2019-03-01T09:00:00.0000000Z",
+            si_mft_modified_at="2019-03-01T09:00:00.0000000Z",
+            fn_created_at=FN_TIME,
+        )
+        rows = [copied(1301 + index, rf"\Users\a\Documents\c{index}.docx") for index in range(3)] + [stomped]
+        flags = self.grades({"rows": rows, "params": {"bulk_min_records": 3}})
+        self.assertEqual(sorted(flags), [3])  # the bulk copies are dropped, the timestomped file is not
+        self.assertEqual(flags[3]["grade"], "A")
+        self.assertEqual(flags[3]["evidence"]["corroborators"], ["zero_subsecond_si", "si_changed_before_fn"])
+        self.assertEqual(flags[3]["evidence"]["bucket_hits"], 4)
+
+    def test_zero_subsecond_extraction_is_not_a(self) -> None:
+        """A ZIP extraction keeps 2-second $SI created/modified, but NTFS writes $SI MFT-modified itself."""
+        extracted = mft(
+            1310,
+            r"\Users\a\Documents\report.hwp",
+            si_created_at="2020-02-02T02:02:02.0000000Z",
+            si_modified_at="2020-02-02T02:02:02.0000000Z",
+            si_mft_modified_at="2024-05-01T10:15:30.2000000Z",
+            fn_created_at=FN_TIME,
+        )
+        self.assertEqual(self.grades({"rows": [extracted]})[0]["grade"], "C")
+
+    def test_bulk_bucket_threshold_is_per_bucket(self) -> None:
+        rows = [copied(1320, r"\Users\a\x.docx", "2024-05-01T10:59:59.1000000Z"), copied(1321, r"\Users\a\y.docx", "2024-05-01T11:00:01.1000000Z")]
+        self.assertEqual(sorted(self.grades({"rows": rows, "params": {"bulk_min_records": 2}})), [0, 1])  # different hours
+        self.assertEqual(self.grades({"rows": rows, "params": {"bulk_min_records": 2, "bulk_bucket_seconds": 86400}}), {})
+
+    def test_1970_si_counts_like_the_analysis(self) -> None:
+        """$SI 1970-01-02 (BSH IME files) is a real time; only FILETIME 0 (1601) means "no time"."""
+        ime = mft(
+            1330,
+            r"\Users\a\AppData\Roaming\Microsoft\InputMethod\Chs\ChsPinyinUDL_RoamUp.dat",
+            si_created_at="1970-01-02T00:00:00+00:00",
+            si_modified_at="1970-01-02T00:00:00+00:00",
+            si_mft_modified_at="2021-12-05T06:28:48.465053+00:00",
+            fn_created_at="2021-12-05T06:28:48.465053+00:00",
+        )
+        unset = mft(1331, r"\Users\a\b.txt", si_created_at="1601-01-01T00:00:00+00:00", fn_created_at=FN_TIME)
+        flags = self.grades({"rows": [ime, unset]})
+        self.assertEqual(sorted(flags), [0])
+        self.assertEqual(flags[0]["grade"], "C")  # zero sub-second created/modified, but $SI MFT-modified is not
 
 
 class EngineTests(unittest.TestCase):

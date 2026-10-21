@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import datetime as dt
-from collections import defaultdict
+import re
+from collections import Counter, defaultdict
 from collections.abc import Iterator, Mapping
 
 from ..ntfs_timestamps import SI_BEFORE_FN_MIN_DELTA_SECONDS
@@ -19,6 +20,8 @@ from .base import (
     parse_time,
     register,
     select,
+    split_windows_path,
+    user_writable_marker,
     window_groups,
 )
 
@@ -65,23 +68,146 @@ def mft_path(row: RowView) -> str:
     return row.text("path", "file_path", "name", "file_name")
 
 
+SI_BEFORE_FN_SUPPRESS_PATHS = ("\\windows\\winsxs\\", "\\windows\\servicing\\", "\\windows\\softwaredistribution\\")
+SI_BEFORE_FN_EXECUTABLES = ("exe", "dll", "sys", "scr", "com", "pif", "cpl", "msi", "bat", "cmd", "ps1", "psm1", "vbs", "vbe", "js", "jse", "wsf", "hta", "jar", "lnk")
+_EXTRA_DIGITS = re.compile(r"(\.\d{6})\d+")
+FILETIME_FLOOR_YEAR = 1601  # FILETIME 0 (1601-01-01) = "no time"; 1970 is a real (if odd) $SI value
+
+
+def ntfs_time(value: object) -> dt.datetime | None:
+    """:func:`parse_time` without its 1971 floor: only FILETIME 0 (year 1601) is "no time" for $SI/$FN
+    (two BSH IME files carry $SI 1970-01-02, which the analysis' own $SI/$FN check counts)."""
+    moment = parse_time(value)
+    if moment is not None or not isinstance(value, str):
+        return moment
+    try:
+        moment = dt.datetime.fromisoformat(_EXTRA_DIGITS.sub(r"\1", value.strip().replace("Z", "+00:00")))
+    except ValueError:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=dt.timezone.utc)
+    return moment.astimezone(dt.timezone.utc) if moment.year > FILETIME_FLOOR_YEAR else None
+
+
+def _si_fn_times(row: RowView) -> dict[str, dt.datetime | None]:
+    si = row.get("standard_information")
+    fn_entries = as_list(row.get("file_name_entries"))
+    fn = fn_entries[0] if fn_entries and isinstance(fn_entries[0], Mapping) else {}
+    times: dict[str, dt.datetime | None] = {}
+    for name in ("created_at", "modified_at", "mft_modified_at"):
+        times[f"si_{name}"] = ntfs_time(row.get(f"si_{name}")) or (ntfs_time(si.get(name)) if isinstance(si, Mapping) else None)
+    times["fn_created_at"] = ntfs_time(row.get("fn_created_at")) or ntfs_time(fn.get("created_at"))
+    return times
+
+
 @register("ntfs.si_before_fn")
 class SiBeforeFn(Rule):
-    """$STANDARD_INFORMATION Created earlier than $FILE_NAME Created by more than ``min_delta_seconds`` (timestomping)."""
+    """$SI Created earlier than $FN Created by more than ``min_delta_seconds``, graded by corroborators.
+
+    A plain $SI < $FN is what every timestamp-preserving copy, archive extraction and Windows servicing
+    leaves (174,854 of 1,421,896 records of the BSH $MFT, R6 S4), so the catalogue grade (A) needs a
+    timestomp-like corroborator:
+
+    * ``zero_subsecond_si`` -- $SI created, modified *and* MFT-modified all have zero sub-seconds while
+      $FN created has them (second-precision SetFileTime/timestomp tools; an extraction keeps the
+      archive's 2-second times in created/modified, but NTFS writes MFT-modified itself);
+    * ``si_changed_before_fn`` -- $SI modified *and* MFT-modified are also earlier than $FN created by
+      more than the threshold (creating the name updates $SI MFT-modified; only a tool that rewrites
+      all $SI times leaves it behind).
+
+    An executable/script under a user-writable folder without those is capped at B; everything else at
+    C. A hit with no corroborator is dropped (no flag) when its path is under a servicing folder
+    (``suppress_path_markers``) or when it belongs to a bulk pattern: at least ``bulk_min_records``
+    hits whose $FN created falls in the same ``bulk_bucket_seconds`` bucket (feature update, copy of a
+    whole tree). Corroborated hits are never dropped (mass timestomping stays visible).
+    """
 
     selector = MFT_ROWS
+
+    def __init__(self, params=None) -> None:
+        super().__init__(params)
+        # (ref, row type, bucket, (path, si created, fn created, si modified, si MFT-modified), corroborators,
+        # user-writable marker of an executable); ~175k entries on a 1.4M-record $MFT.
+        self.hits: list[tuple[RowRef, str, tuple[str, int], tuple[str, dt.datetime, dt.datetime, dt.datetime | None, dt.datetime | None], tuple[str, ...], str]] = []
+        self.buckets: Counter[tuple[str, int]] = Counter()
+        self.executables = frozenset(str(item).lower().lstrip(".") for item in self.param("executable_extensions", SI_BEFORE_FN_EXECUTABLES))
+        self.threshold = float(self.param("min_delta_seconds", SI_BEFORE_FN_MIN_DELTA_SECONDS))
+        self.bucket_seconds = max(1, int(float(self.param("bulk_bucket_seconds", 3600))))
 
     def apply(self, row: RowView, ctx: FlagContext) -> RuleResult | None:
         if row_source(row) != "mft":
             return None
-        times = mft_times(row)
+        times = _si_fn_times(row)
         si, fn = times["si_created_at"], times["fn_created_at"]
         if si is None or fn is None:
             return None
+        threshold = self.threshold
         delta = (fn - si).total_seconds()
-        if delta <= float(self.param("min_delta_seconds", SI_BEFORE_FN_MIN_DELTA_SECONDS)):
+        if delta <= threshold:
             return None
-        return RuleResult(evidence(path=mft_path(row), si_created_at=si, fn_created_at=fn, delta_seconds=int(delta)))
+        si_modified, si_changed = times["si_modified_at"], times["si_mft_modified_at"]
+        corroborators: list[str] = []
+        if (
+            si_modified is not None
+            and si_changed is not None
+            and not (si.microsecond or si_modified.microsecond or si_changed.microsecond)
+            and fn.microsecond
+        ):
+            corroborators.append("zero_subsecond_si")
+        if (
+            si_modified is not None
+            and si_changed is not None
+            and (fn - si_modified).total_seconds() > threshold
+            and (fn - si_changed).total_seconds() > threshold
+        ):
+            corroborators.append("si_changed_before_fn")
+        path = mft_path(row)
+        executable = ""
+        if row.flag("directory") is not True and extension(path) in self.executables:
+            executable = user_writable_marker(path)
+        bucket = (row.kind, int(fn.timestamp()) // self.bucket_seconds)
+        self.buckets[bucket] += 1
+        self.hits.append((row.ref, row.type, bucket, (path, si, fn, si_modified, si_changed), tuple(corroborators), executable))
+        return None
+
+    @property
+    def candidate_count(self) -> int:
+        """Rows read so far with $SI created < $FN created by more than the threshold (before grading/suppression);
+        ``scripts/rule-validation.py`` compares it with the analysis' own ``si_created_before_fn`` count."""
+        return len(self.hits)
+
+    def finalize(self, ctx: FlagContext) -> Iterator[tuple[RowRef, RuleResult, str]]:
+        bulk_min = int(self.param("bulk_min_records", 500))
+        markers = tuple(str(item).lower() for item in self.param("suppress_path_markers", SI_BEFORE_FN_SUPPRESS_PATHS))
+        for ref, row_type, bucket, (path, si, fn, si_modified, si_changed), corroborators, executable in self.hits:
+            bucket_count = self.buckets[bucket]
+            fields = {
+                "path": path,
+                "si_created_at": si,
+                "fn_created_at": fn,
+                "delta_seconds": int((fn - si).total_seconds()),
+                "si_modified_at": si_modified,
+                "si_mft_modified_at": si_changed,
+            }
+            if corroborators:
+                note = "타임스톰핑 정황: " + ", ".join(CORROBORATOR_LABELS[name] for name in corroborators)
+                yield ref, RuleResult(evidence(**fields, corroborators=list(corroborators), bucket_hits=bucket_count), note=note), row_type
+                continue
+            probe = "\\" + split_windows_path(path)[1]
+            if any(marker in probe for marker in markers) or bucket_count >= bulk_min:
+                continue  # servicing / bulk copy pattern: informational only, no flag
+            if executable:
+                note = f"보강 근거 없음: 사용자 쓰기 가능 경로({executable})의 실행·스크립트 파일"
+                yield ref, RuleResult(evidence(**fields, bucket_hits=bucket_count), note=note, grade="B"), row_type
+            else:
+                note = "보강 근거 없음: 시각 보존 복사·압축 해제에서도 흔한 모양"
+                yield ref, RuleResult(evidence(**fields, bucket_hits=bucket_count), note=note, grade="C"), row_type
+
+
+CORROBORATOR_LABELS = {
+    "zero_subsecond_si": "$SI 생성·수정·MFT 수정 초 미만 0($FN은 아님)",
+    "si_changed_before_fn": "$SI 수정·MFT 수정도 $FN 생성보다 앞섬",
+}
 
 
 @register("ntfs.zero_subsecond")

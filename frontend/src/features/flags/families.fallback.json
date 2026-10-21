@@ -1,5 +1,5 @@
 {
- "version": "d63c6d7a18f7fe14",
+ "version": "9466f8bef0e127fd",
  "families": [
   {
    "id": "sam-account",
@@ -13012,9 +13012,16 @@
    "status": "provisional",
    "validation": {
     "synthetic": true,
-    "real": [],
+    "real": [
+     {
+      "source": "run-subset10(사건 기간 없음 — 미평가)",
+      "hits": 0,
+      "checked_at": "2026-10-21",
+      "note_ko": "입력 가능 행 284,292행이 있으나 사건 기간(--incident-start/--incident-end)을 주지 않아 규칙이 동작하지 않음: 0적중은 음성 근거가 아님. r6-s1-run·qa-case1·r4-v1 런은 같은 증거를 다시 처리한 것이라 독립 근거가 아님."
+     }
+    ],
     "public": [],
-    "notes_ko": "합성 근거만(tests/triage_cases 양성·음성 픽스처). 실데이터·공개 데이터셋 검증 대기(R6 S4)."
+    "notes_ko": "실데이터 미평가(사건 기간 없음). 양성 실데이터 없음 — 공개 데이터셋·VM 생성은 사용자 승인 대기."
    },
    "params": {
     "signatures": [
@@ -13949,9 +13956,16 @@
    "status": "provisional",
    "validation": {
     "synthetic": true,
-    "real": [],
+    "real": [
+     {
+      "source": "run-subset10(입력 없음 — 해당 없음)",
+      "hits": 0,
+      "checked_at": "2026-10-21",
+      "note_ko": "서브셋·다른 D 드라이브 런에 클라우드 동기화 업로드 행이 없어 규칙이 읽을 입력이 0행(not_applicable). 0적중은 음성 근거가 아님."
+     }
+    ],
     "public": [],
-    "notes_ko": "합성 근거만(tests/triage_cases 양성·음성 픽스처). 실데이터·공개 데이터셋 검증 대기(R6 S4)."
+    "notes_ko": "실데이터 입력 없음(해당 없음). 양성 실데이터 없음 — 공개 데이터셋·VM 생성(테스트 계정)은 사용자 승인 대기."
    },
    "params": {
     "window_minutes": 60,
@@ -14527,9 +14541,17 @@
    "status": "verified",
    "validation": {
     "synthetic": true,
-    "real": [],
+    "real": [
+     {
+      "source": "run-subset10 이벤트 로그(음성)",
+      "hits": 0,
+      "false_positives": 0,
+      "checked_at": "2026-10-21",
+      "note_ko": "입력 가능 이벤트 로그 292,370행에서 0적중(기대 최대 0, 통과). 서브셋에 유형 10 외부 IP 로그온이 없어 양성은 확인하지 못함. r6-s1-run·qa-case1·r4-v1 런은 같은 증거를 다시 처리한 것이라 독립 근거가 아님."
+     }
+    ],
     "public": [],
-    "notes_ko": "합성 근거만(tests/triage_cases 양성·음성 픽스처). 실데이터·공개 데이터셋 검증 대기(R6 S4)."
+    "notes_ko": "실데이터는 음성 대조만(0적중·오탐 0). 양성 실데이터 없음 — 공개 데이터셋·VM 생성은 사용자 승인 대기."
    },
    "params": {}
   },
@@ -14591,9 +14613,17 @@
    "status": "verified",
    "validation": {
     "synthetic": true,
-    "real": [],
+    "real": [
+     {
+      "source": "run-subset10 이벤트 로그(음성)",
+      "hits": 0,
+      "false_positives": 0,
+      "checked_at": "2026-10-21",
+      "note_ko": "입력 가능 이벤트 로그 292,370행에서 0적중(기대 최대 0, 통과). 서브셋 Security/System에 1102·104가 없어 양성은 확인하지 못함. r6-s1-run·qa-case1·r4-v1 런은 같은 증거를 다시 처리한 것이라 독립 근거가 아님."
+     }
+    ],
     "public": [],
-    "notes_ko": "합성 근거만(tests/triage_cases 양성·음성 픽스처). 실데이터·공개 데이터셋 검증 대기(R6 S4)."
+    "notes_ko": "실데이터는 음성 대조만(0적중·오탐 0). 양성 실데이터 없음 — 공개 데이터셋·VM 생성은 사용자 승인 대기."
    },
    "params": {}
   },
@@ -15701,25 +15731,68 @@
    "family": "mft",
    "grade": "A",
    "label_ko": "$SI 생성 < $FN 생성(타임스톰핑)",
-   "rationale_ko": "$STANDARD_INFORMATION 생성 시각이 $FILE_NAME 생성 시각보다 임계값 이상 앞섬: 사용자 모드 타임스톰핑.",
-   "false_positive_ko": "이동·복사, 설치기(시각 보존 복사).",
+   "rationale_ko": "$STANDARD_INFORMATION 생성 시각이 $FILE_NAME 생성 시각보다 임계값 이상 앞서고 타임스톰핑 보강 근거가 있을 때만 A: ① $SI 생성·수정·MFT 수정이 모두 초 미만 0인데 $FN 생성은 아님(초 단위 SetFileTime·타임스톰핑 도구), ② $SI 수정·MFT 수정도 $FN 생성보다 임계값 이상 앞섬(이름이 생길 때 NTFS가 $SI MFT 수정을 갱신하므로 $SI 시각을 모두 되돌리는 도구만 남기는 모양). 보강 근거 없이 사용자 쓰기 가능 경로의 실행·스크립트 파일이면 B, 그 밖은 C. 보강 근거가 없고 $FN 생성이 같은 시간 구간(bulk_bucket_seconds)에 bulk_min_records건 이상 몰렸거나 서비싱 경로(WinSxS·servicing·SoftwareDistribution)면 표시하지 않음(보강 근거가 있으면 대량이어도 표시).",
+   "false_positive_ko": "시각을 보존하는 복사·압축 해제·설치기·Windows 기능 업데이트(BSH 전체 $MFT에서 단순 $SI<$FN 174,854건, 87%가 8일에 몰림 — 대부분 2025-02-21·23 기능 업데이트). 초 미만 0은 압축(ZIP 2초 단위) 해제에서도 생기지만 그때 $SI MFT 수정은 해제 시각이라 ①에 걸리지 않음. 시각이 마이크로초로 잘려 있어 100ns 1~9틱만 있는 값은 0으로 읽힘(드묾). 정상 이동·하드 링크도 ②를 남길 수 있어 A는 검토 대상이지 판단이 아님.",
    "sources": [
     "https://www.inversecos.com/2022/04/defence-evasion-technique-timestomping.html",
+    "https://attack.mitre.org/techniques/T1070/006/",
+    "https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-setfiletime",
     "https://opus.bibliothek.uni-augsburg.de/opus4/117569",
-    "https://andreafortuna.org/2017/10/18/windows-forensics-usn-journal/",
-    "https://www.sans.org/blog/ntfs-i30-index-attributes-evidence-of-deleted-and-overwritten-files/",
-    "https://andreafortuna.org/2019/09/26/windows-forensics-analysis-of-recycle-bin-artifacts/"
+    "https://www.sans.org/blog/ntfs-i30-index-attributes-evidence-of-deleted-and-overwritten-files/"
    ],
-   "version": 1,
+   "version": 2,
    "status": "verified",
    "validation": {
     "synthetic": true,
-    "real": [],
+    "real": [
+     {
+      "source": "BSH 전체 이미지 $MFT(버전 1, ntfs-meta source=mft, 1,421,896 레코드)",
+      "hits": 174852,
+      "false_positives": 10,
+      "checked_at": "2026-10-21",
+      "note_ko": "버전 1(보강 근거 없이 A): 174,852건 적중(파일 156,999·디렉터리 17,855, 사용 중 93,010·삭제 81,844), 무작위 표본 10건 모두 시각 보존 복사·압축 해제·서비싱(오탐), 3건 수동 확인($SI<$FN 자체는 사실). 분석 자체 수 174,854와의 2건 차이는 $SI 1970-01-02인 IME 파일 2개를 1971년 하한으로 버린 것(버전 2에서 수정)."
+     },
+     {
+      "source": "BSH 전체 이미지 $MFT(버전 2 재측정)",
+      "hits": 8970,
+      "checked_at": "2026-10-21",
+      "note_ko": "버전 2: 후보 174,854건(분석 자체 수와 일치) 중 8,970건 표시 — A 2·B 202·C 8,766, 165,884건은 대량(같은 시간 500건 이상)·서비싱 경로라 미표시. A 2건(AhnLab DLL: $SI MFT 수정도 $FN보다 2년 앞섬 / 루트의 삭제된 GUID 이름 파일: $SI 네 시각이 같은 초 미만 0)은 이상 모양은 맞으나 조작 여부 미확정(내용·USN 없음). B 202건은 사용자 폴더 설치기·추가 기능 압축 해제(검토상 정상)."
+     }
+    ],
     "public": [],
-    "notes_ko": "합성 근거만(tests/triage_cases 양성·음성 픽스처). 실데이터·공개 데이터셋 검증 대기(R6 S4)."
+    "notes_ko": "실데이터 1건(BSH 전체 $MFT): 버전 1은 오탐 폭주라 보강 근거·대량·서비싱 조건으로 재설계(버전 2). 타임스톰핑 양성 실데이터는 아직 없음(공개 데이터셋·VM 승인 대기)."
    },
    "params": {
-    "min_delta_seconds": 60
+    "min_delta_seconds": 60,
+    "bulk_min_records": 500,
+    "bulk_bucket_seconds": 3600,
+    "suppress_path_markers": [
+     "\\windows\\winsxs\\",
+     "\\windows\\servicing\\",
+     "\\windows\\softwaredistribution\\"
+    ],
+    "executable_extensions": [
+     "exe",
+     "dll",
+     "sys",
+     "scr",
+     "com",
+     "pif",
+     "cpl",
+     "msi",
+     "bat",
+     "cmd",
+     "ps1",
+     "psm1",
+     "vbs",
+     "vbe",
+     "js",
+     "jse",
+     "wsf",
+     "hta",
+     "jar",
+     "lnk"
+    ]
    }
   },
   {
@@ -15816,9 +15889,16 @@
    "status": "verified",
    "validation": {
     "synthetic": true,
-    "real": [],
+    "real": [
+     {
+      "source": "BSH 전체 이미지 $MFT(해당 없음 — ADS 행 없음)",
+      "hits": 0,
+      "checked_at": "2026-10-21",
+      "note_ko": "ntfs-meta(source=mft) 분석 행에는 ADS 정보가 없어 규칙이 읽을 입력이 0행(not_applicable). 서브셋에도 ads-stream-candidate 행 없음. 이미지 런의 windows-filesystem 행으로 검증해야 함."
+     }
+    ],
     "public": [],
-    "notes_ko": "합성 근거만(tests/triage_cases 양성·음성 픽스처). 실데이터·공개 데이터셋 검증 대기(R6 S4)."
+    "notes_ko": "실데이터 해당 없음($MFT 단독 분석에 ADS 없음). 양성 실데이터 없음 — 이미지 런·공개 데이터셋·VM은 사용자 승인 대기."
    },
    "params": {}
   },
@@ -16015,9 +16095,17 @@
    "status": "verified",
    "validation": {
     "synthetic": true,
-    "real": [],
+    "real": [
+     {
+      "source": "run-subset10 이벤트 로그(음성)",
+      "hits": 0,
+      "false_positives": 0,
+      "checked_at": "2026-10-21",
+      "note_ko": "입력 가능 이벤트 로그 292,370행에서 0적중(기대 최대 0, 통과). 1149·131 공인 IP 연결이 없어 양성은 확인하지 못함. r6-s1-run·qa-case1·r4-v1 런은 같은 증거를 다시 처리한 것이라 독립 근거가 아님."
+     }
+    ],
     "public": [],
-    "notes_ko": "합성 근거만(tests/triage_cases 양성·음성 픽스처). 실데이터·공개 데이터셋 검증 대기(R6 S4)."
+    "notes_ko": "실데이터는 음성 대조만(0적중·오탐 0). 양성 실데이터 없음 — 공개 데이터셋·VM 생성은 사용자 승인 대기."
    },
    "params": {}
   },
