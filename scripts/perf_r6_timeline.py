@@ -25,8 +25,9 @@
 #     default the system temp folder), writes the index there and measures that copy. The run folder
 #     listing (path, size, mtime) is compared before / after: any change fails the run.
 #   Targets (Q-S3-2): no_file first page <= 1.0 s, with_file first page <= 0.3 s, next page <= 0.05 s,
-#   memory extra <= 30 MB. "search_group" (q= server search, group=1 display grouping; memory-only
-#   columns, timeline/grid readability C1/C3): first page <= 1.0 s, next page <= 0.05 s.
+#   memory extra <= 30 MB. "search_group" (timeline/grid readability C1/C3: q= server search over a
+#   memory-only text column, group=1 display grouping; "search_group_with_file" = with the index
+#   file, which holds the group ids): first page <= 1.0 s, next page <= 0.05 s.
 #   Exit code 1 when a target is missed, 2 on input errors.
 # ------------------
 from __future__ import annotations
@@ -82,16 +83,21 @@ TIMELINE_QUERIES: tuple[tuple[str, str], ...] = (
     ("partial=1", "partial"),
     ("from=2025-01-01&content=image&partial=1", "combined"),
 )
-# Server search and display grouping (timeline/grid readability C1/C3): memory-only columns built
-# on the first request that needs them, so they have their own targets -- first page <= 1.0 s with
-# or without the index file, next page <= 0.05 s.
+# Server search and display grouping (timeline/grid readability C1/C3): the search text is a
+# memory-only column built on the first search, the group ids come from the index file (else are
+# built on the first grouped request) -- first page <= 1.0 s with or without the index file, next
+# page <= 0.05 s.
 SEARCH_GROUP_QUERIES: tuple[tuple[str, str], ...] = (
     ("q=liveupdate.exe", "q"),
     ("q=exe&from=2025-01-01&partial=1", "q-combined"),
     ("group=1", "grouped"),
     ("group=1&q=docx&from=2024-06-01", "grouped-q-time"),
 )
-SEARCH_GROUP_TARGETS = {"search_group_first_page_s": 1.0, "search_group_next_page_s": 0.05}
+SEARCH_GROUP_TARGETS = {
+    "search_group_first_page_s": 1.0,
+    "search_group_with_file_first_page_s": 1.0,
+    "search_group_next_page_s": 0.05,
+}
 PAGE = 100
 # Seconds per join of a background index build before no_index_file reports it and joins again.
 BACKGROUND_JOIN_S = 300.0
@@ -360,10 +366,14 @@ def measure_timeline(args: argparse.Namespace) -> dict[str, object]:
             copy_load_s, _ = timed(lambda: get_json(copy_client, f"/api/runs/{copy_id}/timeline?limit=1"))
             report["with_file_source"] = {"copy": "temporary folder, deleted afterwards", "json_load_s": round(copy_load_s, 2)}
             report["with_file"] = timeline_scenario(copy_client, copy_id, args.repeat, lambda: None)
+            report["search_group_with_file"] = timeline_scenario(
+                copy_client, copy_id, args.repeat, lambda: None, SEARCH_GROUP_QUERIES
+            )
         else:
             persist_s, _ = timed(lambda: timeline_index.write_timeline_index(events, timeline_path))  # type: ignore[arg-type]
             report["persist_build_s"] = round(persist_s, 2)
             report["with_file"] = timeline_scenario(client, run_id, args.repeat, lambda: None)
+            report["search_group_with_file"] = timeline_scenario(client, run_id, args.repeat, lambda: None, SEARCH_GROUP_QUERIES)
         reset_timeline_caches()
     if args.run:
         changes = snapshot_changes(before, folder_snapshot(Path(args.run)))
@@ -382,6 +392,8 @@ def measure_timeline(args: argparse.Namespace) -> dict[str, object]:
         measured["with_file_first_page_s"] = report["as_is"]["first_page_s"]  # type: ignore[index]
     measured["search_group_first_page_s"] = report["search_group"]["first_page_s"]  # type: ignore[index]
     measured["search_group_next_page_s"] = report["search_group"]["next_page_s"]  # type: ignore[index]
+    if "search_group_with_file" in report:
+        measured["search_group_with_file_first_page_s"] = report["search_group_with_file"]["first_page_s"]  # type: ignore[index]
     targets = {**TIMELINE_TARGETS, **SEARCH_GROUP_TARGETS}
     report["targets"] = {
         key: {"measured": value, "target": targets[key], "ok": float(value) <= targets[key]}  # type: ignore[arg-type]

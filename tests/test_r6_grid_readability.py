@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import random
 import tempfile
+import unicodedata
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -379,6 +380,13 @@ class TimelineApiTests(unittest.TestCase):
         self.assertEqual(len(self.all_rows("q=shimcache-schema")), 1)  # event type
         self.assertEqual(self.all_rows("q=nothing-like-this"), [])
 
+    def test_q_finds_decomposed_korean_and_ignores_control_characters(self) -> None:
+        row = {"summary": unicodedata.normalize("NFD", "D:\\보고서\\한글문서.hwp"), "path": "x", "details": {}}
+        self.assertTrue(event_matches_search(row, search_needle("한글문서")))
+        self.assertTrue(search_column([row]).positions(search_needle("한글문서")) == [0])
+        self.assertEqual(search_needle("  A\tB\x00c  "), "a b c")
+        self.assertEqual(search_needle(" \n "), "")
+
     def test_q_and_conditions_are_anded(self) -> None:
         self.start(grouped_events())  # type: ignore[arg-type]
         rows = self.all_rows("q=a.docx&from=2024-03-01T10:00:01Z")
@@ -387,7 +395,8 @@ class TimelineApiTests(unittest.TestCase):
     def test_q_index_equals_the_predicate_on_random_events(self) -> None:
         rng = random.Random(23)
         events = [random_event(rng, position) for position in range(2_000)]
-        words = ("Ünïcode", "ＡＢＣ", "로그온", "C:\\X", "report", "e1", ".EXE", "docx", "ß", "")
+        nfd = unicodedata.normalize("NFD", "한글문서.hwp")
+        words = ("Ünïcode", "ＡＢＣ", "로그온", "C:\\X", "report", "e1", ".EXE", "docx", "ß", "", nfd, "İstanbul", "a\x00b", "x\ny")
         for position, event in enumerate(events):
             if isinstance(event, dict) and rng.random() < 0.7:
                 event["summary"] = f"{rng.choice(words)} {position} {rng.choice(words)}"
@@ -395,7 +404,8 @@ class TimelineApiTests(unittest.TestCase):
                 if isinstance(details, dict) and rng.random() < 0.3:
                     details["event_label_ko"] = rng.choice(("로그온 성공", "일반 이벤트", "SS"))
         column = search_column(events)
-        for raw in ("report", "REPORT", "로그온", "c:\\x", "ss", "ß", "abc", "ａｂｃ", ".exe", "e1 ", " 1", "성공", "x\\b"):
+        needles = ("report", "REPORT", "로그온", "c:\\x", "ss", "ß", "abc", "ａｂｃ", ".exe", "e1 ", " 1", "성공", "x\\b")
+        for raw in (*needles, "한글", "한글문서.HWP", "i̇stanbul", "istanbul", "a b", "x y", "a\x00b"):
             needle = search_needle(raw)
             expected = [i for i, row in enumerate(events) if event_matches_search(row, needle)]
             self.assertEqual(column.positions(needle), expected, raw)
@@ -488,6 +498,34 @@ class TimelineApiTests(unittest.TestCase):
         response = self.client.get(f"/api/runs/{self.run_id}/timeline?limit=5&group=maybe")
         self.assertEqual(response.status_code, 422)
         self.assertIn("group", response.json()["detail"])
+
+    def test_group_column_equals_the_reference_key_on_random_events(self) -> None:
+        rng = random.Random(5)
+        events = [random_event(rng, position) for position in range(3_000)]
+        kinds = ("created", "target-created", "modified", "file-last-modified", "run-1", None, 3)
+        for event in events:
+            if isinstance(event, dict):
+                event["timestamp_kind"] = rng.choice(kinds)
+                details = event.get("details")
+                if isinstance(details, dict) and rng.random() < 0.5:
+                    details[rng.choice(("target_path", "executable_path", "url"))] = rng.choice(("C:\\A.exe", "c:\\a.EXE", " c:\\a.exe ", "Ünï", "ÜNÏ", ""))
+                if rng.random() < 0.5:
+                    event["timestamp"] = rng.choice(("2025-01-01T00:00:00Z", "2025-01-01T00:00:00.9Z", "2025-01-01T09:00:00+09:00", "2025-01-01T00:00:00"))
+        index = timeline_index.build_timeline_index(events)
+        ids = index.group_ids
+        assert ids is not None and index.epoch_us is not None
+        reference: dict[int, tuple[object, ...]] = {}
+        for position, row in enumerate(events):
+            epoch = index.epoch_us[position]
+            target = timeline_index.event_group_target(row) if isinstance(row, dict) else ""
+            if epoch == timeline_index.MISSING or not target:
+                self.assertEqual(ids[position], timeline_index.NO_GROUP, position)
+                continue
+            reference[position] = (epoch // 1_000_000, index.has_offset[position], target, kind_family(row.get("timestamp_kind")))  # type: ignore[index, union-attr]
+        positions = list(reference)
+        for a in positions[:400]:
+            for b in positions:
+                self.assertEqual(ids[a] == ids[b], reference[a] == reference[b], (a, b))
 
     def test_kind_families(self) -> None:
         self.assertEqual(kind_family("target-created"), kind_family("created"))

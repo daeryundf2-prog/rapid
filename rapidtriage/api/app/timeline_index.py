@@ -50,14 +50,16 @@ import hashlib
 import json
 import logging
 import os
+import re
 import struct
 import sys
 import threading
 import time
 import unicodedata
 from array import array
-from bisect import bisect_left
+from bisect import bisect_left, bisect_right
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from itertools import accumulate
 from pathlib import Path
 
 from .index_cache import SingleFlightIndexCache, head_tail_digest, index_persist_enabled
@@ -356,6 +358,8 @@ def partial_column(events: Sequence[object], pause: Pause = None) -> bytearray:
 
 SEARCH_TARGET_KEYS: tuple[str, ...] = tuple(dict.fromkeys((*TARGET_PATH_KEYS, "url", "key_path")))
 SEARCH_MAX_LENGTH = 200  # q is a substring, not a document
+_EVENT_SEPARATOR = "\x00"  # between events in the search text; never part of a needle
+_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]+")
 
 
 def fold_text(value: str) -> str:
@@ -366,14 +370,27 @@ def fold_text(value: str) -> str:
 
 
 def search_needle(q: str | None) -> str:
-    """The folded ``q`` (whitespace runs -> one space; ``""`` = no search)."""
+    """The canonical ``q``: whitespace runs -> one space, control characters dropped, NFC,
+    lower-cased (``""`` = no search). The cache key of a search."""
     if not q:
         return ""
-    return fold_text(" ".join(q.split())[:SEARCH_MAX_LENGTH])
+    text = " ".join(_CONTROL_RE.sub(" ", q).split())[:SEARCH_MAX_LENGTH]
+    return unicodedata.normalize("NFC", text).lower()
+
+
+def needle_forms(needle: str) -> tuple[str, ...]:
+    """The needle as written (NFC) and decomposed (NFD): event text is lower-cased but not
+    re-normalised (normalising ~25 M characters costs minutes), so a macOS-style NFD file name is
+    found by the NFD form."""
+    decomposed = unicodedata.normalize("NFD", needle)
+    return (needle,) if decomposed == needle else (needle, decomposed)
 
 
 def event_search_parts(row: object) -> tuple[str, str]:
-    """``(own, shared)`` raw texts of one event (not folded); ``("", "")`` for a non-object."""
+    """``(own, shared)`` raw texts of one event (not lower-cased); ``("", "")`` for a non-object.
+
+    Own: the summary and the target keys (path / executable / URL / key); shared: the source path,
+    event type and Korean event name. Parts are joined by "\\n" (a needle never holds one)."""
     if not _is_mapping(row):
         return "", ""
     details = _details_of(row)  # type: ignore[arg-type]
@@ -398,30 +415,69 @@ def event_search_parts(row: object) -> tuple[str, str]:
 
 
 def event_matches_search(row: object, needle: str) -> bool:
-    """Predicate form of ``q`` (the scan the search column replaces)."""
+    """Predicate form of ``q`` (the scan the search column replaces): a form of the needle is in
+    the lower-cased own or shared text."""
     if not needle:
         return True
     own, shared = event_search_parts(row)
-    return needle in fold_text(own) or needle in fold_text(shared)
+    own, shared = own.replace(_EVENT_SEPARATOR, " ").lower(), shared.lower()
+    return any(form in own or form in shared for form in needle_forms(needle))
+
+
+class SharedField:
+    """One shared field (source path, event type or Korean event name): an id per event and the
+    lower-cased distinct values (a few thousand at most in a real run)."""
+
+    __slots__ = ("ids", "values")
+
+    def __init__(self, raw: Iterable[object]) -> None:
+        by_value: dict[str, int] = {}
+        setdefault = by_value.setdefault
+        self.ids = array("i", [setdefault(value, len(by_value)) for value in _str_or_empty(raw)])
+        self.values = [value.lower() for value in by_value]
 
 
 class SearchColumn:
-    """Folded own text per event + a shared-text id per event."""
+    """The lower-cased own texts of every event in one string (events separated by
+    :data:`_EVENT_SEPARATOR`, ``starts[i]`` = where event ``i`` begins) and the shared fields. A
+    search is ``str.find`` over that string, jumping to the next event after each hit, plus the
+    events whose shared value holds the needle (a needle never holds the "\\n" between parts, so
+    matching a part is matching :func:`event_search_parts`' joined shared text)."""
 
-    __slots__ = ("own", "shared", "shared_ids")
+    __slots__ = ("shared", "starts", "text")
 
-    def __init__(self, own: list[str], shared_ids: array, shared: list[str]) -> None:
-        self.own = own
-        self.shared_ids = shared_ids
+    def __init__(self, text: str, starts: array, shared: tuple[SharedField, ...]) -> None:
+        self.text = text
+        self.starts = starts
         self.shared = shared
+
+    def mask(self, needle: str) -> bytearray:
+        """1 per event whose own or shared text holds a form of ``needle``."""
+        starts, find = self.starts, self.text.find
+        count = len(starts) - 1
+        found = bytearray(count)
+        forms = needle_forms(needle)
+        for form in forms:
+            at = find(form)
+            while at >= 0:
+                event = bisect_right(starts, at) - 1
+                found[event] = 1
+                if event + 1 >= count:
+                    break
+                at = find(form, starts[event + 1])
+        for field in self.shared:
+            hits = bytes(1 if any(form in value for form in forms) else 0 for value in field.values)
+            if any(hits):
+                for event in [i for i, value_id in enumerate(field.ids) if hits[value_id]]:
+                    found[event] = 1
+        return found
 
     def positions(self, needle: str, candidates: Iterable[int] | None = None) -> list[int]:
         """Positions (of ``candidates``, default all) whose text contains ``needle``."""
-        hits = bytes(1 if needle in text else 0 for text in self.shared)
-        own, ids = self.own, self.shared_ids
+        found = self.mask(needle)
         if candidates is None:
-            return [i for i, text in enumerate(own) if needle in text or hits[ids[i]]]
-        return [i for i in candidates if needle in own[i] or hits[ids[i]]]
+            return [i for i, flag in enumerate(found) if flag]
+        return [i for i in candidates if found[i]]
 
 
 _SEARCH_TARGET_SET = frozenset(SEARCH_TARGET_KEYS)
@@ -438,35 +494,37 @@ def _str_or_empty(values: Iterable[object]) -> list[str]:
 
 
 def search_column(events: Sequence[object]) -> SearchColumn:
-    """:func:`event_search_parts` of every event, folded. Built column by column with list
-    comprehensions (a per-event Python loop cost ~4 us an event): the target keys are read only for
-    events whose details hold one, the shared text is keyed by its raw ``(path, event_type,
-    event_label_ko)`` values and folded once per distinct key."""
+    """:func:`event_search_parts` of every event. Built with list comprehensions and whole-string
+    operations (a per-event Python loop costs ~4 us an event; lower-casing one string per event
+    ~2 us for Korean text): the own texts are joined, then lower-cased once."""
     empty: dict[str, object] = {}
     rows = [found if found is not None else empty for found in map(_as_dict, events)]
     details = [_as_dict(row.get("details")) for row in rows]
     texts = _str_or_empty(row.get("summary") for row in rows)
-    target_set, target_keys = _SEARCH_TARGET_SET, SEARCH_TARGET_KEYS
-    for i in [i for i, found in enumerate(details) if found is not None and not target_set.isdisjoint(found)]:
-        found = details[i]
-        assert found is not None
-        parts = [texts[i]] if texts[i] else []
-        for key in target_keys:
-            value = found.get(key)
-            if type(value) is str and value and value not in parts:
-                parts.append(value)
-        texts[i] = "\n".join(parts)
-    own = [text.lower() if text.isascii() else fold_text(text) for text in texts]
-    keys = zip(
-        _str_or_empty(row.get("path") for row in rows),
-        _str_or_empty(row.get("event_type") for row in rows),
-        _str_or_empty(found.get("event_label_ko") if found is not None else None for found in details),
+    target_set = _SEARCH_TARGET_SET
+    for i, found in enumerate(details):
+        if found is None or target_set.isdisjoint(found):
+            continue
+        # The target values present (any order: a needle never spans the "\n" between parts).
+        values = [value for value in map(found.get, target_set.intersection(found)) if type(value) is str and value]
+        if values:
+            text = texts[i]
+            texts[i] = "\n".join([text, *values] if text else values)
+    # A separator inside an event's text would split it: replace it (a needle never holds one).
+    texts = [text.replace(_EVENT_SEPARATOR, " ") if _EVENT_SEPARATOR in text else text for text in texts]
+    joined = _EVENT_SEPARATOR.join(texts)
+    lowered = joined.lower()
+    if len(lowered) != len(joined):  # a character lower-cases to two ("İ"): offsets per event
+        texts = [text.lower() for text in texts]
+        lowered = _EVENT_SEPARATOR.join(texts)
+    starts = array("q", [0])
+    starts.extend(accumulate(len(text) + 1 for text in texts))
+    shared = (
+        SharedField(row.get("path") for row in rows),
+        SharedField(row.get("event_type") for row in rows),
+        SharedField(found.get("event_label_ko") if found is not None else None for found in details),
     )
-    by_key: dict[tuple[str, str, str], int] = {}
-    setdefault = by_key.setdefault
-    ids = array("i", [setdefault(key, len(by_key)) for key in keys])
-    shared = [fold_text("\n".join(part for part in key if part)) for key in by_key]
-    return SearchColumn(own, ids, shared)
+    return SearchColumn(lowered, starts, shared)
 
 
 def kind_family(kind: object) -> str:
@@ -526,46 +584,45 @@ _GROUP_TARGET_SET = frozenset(GROUP_TARGET_KEYS)
 
 
 def group_column(events: Sequence[object], epoch_us: array, has_offset: bytearray, pause: Pause = None) -> array:
-    """Group id per event by :func:`event_group_target` / :func:`kind_family` (inlined: most events
-    -- event logs -- have no target key and are skipped on a set test)."""
+    """Group id per event by :func:`event_group_target` / :func:`kind_family`. Per chunk, list
+    comprehensions pick the events whose details hold a target key (most events -- event logs --
+    have none); only those run the per-event code."""
     ids = array("i", [NO_GROUP]) * len(events)
     by_key: dict[tuple[object, ...], int] = {}
     families: dict[object, str] = {}
     target_set, target_keys = _GROUP_TARGET_SET, GROUP_TARGET_KEYS
-    for position, row in _positions(events, pause):
-        value = epoch_us[position]
-        if value == MISSING or not (type(row) is dict or isinstance(row, Mapping)):
-            continue
-        details = row.get("details")  # type: ignore[union-attr]
-        if not (type(details) is dict or isinstance(details, Mapping)) or target_set.isdisjoint(details):
-            continue
-        target = ""
-        for name in target_keys:
-            candidate = details.get(name)
-            if isinstance(candidate, str):
-                candidate = candidate.strip()
-                if candidate:
-                    target = candidate.lower() if candidate.isascii() else fold_text(candidate)
-                    break
-        if not target:
-            continue
-        kind = row.get("timestamp_kind")  # type: ignore[union-attr]
-        family = families.get(kind) if isinstance(kind, str) else None
-        if family is None:
-            family = kind_family(kind)
-            if isinstance(kind, str):
-                families[kind] = family
-        key = (value // 1_000_000, has_offset[position], target, family)
-        group = by_key.get(key)
-        if group is None:
-            group = by_key[key] = len(by_key)
-        ids[position] = group
-    return ids
-
-
-def _positions(events: Sequence[object], pause: Pause) -> Iterator[tuple[int, object]]:
+    empty: dict[str, object] = {}
     for start, chunk in _chunks(events, pause):
-        yield from enumerate(chunk, start)
+        details_of = [_as_dict((_as_dict(row) or empty).get("details")) for row in chunk]
+        for offset, details in enumerate(details_of):
+            if details is None or target_set.isdisjoint(details):
+                continue
+            position = start + offset
+            value = epoch_us[position]
+            if value == MISSING:
+                continue
+            target = ""
+            for name in target_keys:
+                candidate = details.get(name)
+                if isinstance(candidate, str):
+                    candidate = candidate.strip()
+                    if candidate:
+                        target = candidate.lower() if candidate.isascii() else fold_text(candidate)
+                        break
+            if not target:
+                continue
+            kind = chunk[offset].get("timestamp_kind")  # type: ignore[union-attr]
+            family = families.get(kind) if isinstance(kind, str) else None
+            if family is None:
+                family = kind_family(kind)
+                if isinstance(kind, str):
+                    families[kind] = family
+            key = (value // 1_000_000, has_offset[position], target, family)
+            group = by_key.get(key)
+            if group is None:
+                group = by_key[key] = len(by_key)
+            ids[position] = group
+    return ids
 
 
 # --- the index ---------------------------------------------------------------------------------------
