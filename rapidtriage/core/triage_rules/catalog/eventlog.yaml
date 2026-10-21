@@ -14,7 +14,7 @@ families:
     - time_created
     format: time
     ts_kind: logged
-    width: 170
+    width: 200
   - key: channel
     label: 채널
     aliases:
@@ -27,24 +27,31 @@ families:
     - EventID
     format: mono
     width: 80
-  - key: summary_ko
-    label: 요약 문장
-    derive: event_summary_ko
-    width: 320
+  - key: level
+    label: 수준
+    aliases:
+    - Level
+    format: eventLevel
+    width: 70
   - key: event_label_ko
     label: 이벤트명
     width: 180
-  - key: computer
-    semantic: device
-    label: 컴퓨터
-    aliases:
-    - Computer
+  - key: summary_ko
+    label: 요약
+    derive: event_summary_ko
+    width: 320
   - key: subject_user_name
     semantic: account
     label: 주체 계정
   - key: target_user_name
     semantic: account
     label: 대상 계정
+  - key: computer
+    semantic: device
+    label: 컴퓨터
+    aliases:
+    - Computer
+  aux_columns:
   - key: logon_type
     label: 로그온 유형
     format: logonType
@@ -80,15 +87,9 @@ families:
     - EventRecordID
     format: mono
     width: 90
-  aux_columns:
   - key: rdp_direction
     label: RDP 방향
     derive: rdp_direction
-  - key: level
-    label: 레벨
-    aliases:
-    - Level
-    format: eventLevel
   - key: provider_name
     label: 제공자
     aliases:

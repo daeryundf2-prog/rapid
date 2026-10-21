@@ -55,6 +55,8 @@ export const TS_KIND_LABELS: Record<string, string> = {
   "target-accessed": "대상 접근",
   "target-created": "대상 생성",
   "target-modified": "대상 수정",
+  // ShimCache: the file's own LastModified time, never a run time (C8).
+  "file-last-modified": "파일 수정(실행 아님)",
   event: "이벤트 시각",
   created: "생성",
   modified: "수정",
@@ -123,6 +125,8 @@ export const TIMESTAMP_LABEL_KINDS: Readonly<Record<string, string>> = {
   pca_event: "pca-event",
   last_written: "last-written",
   last_written_mru_head: "last-written",
+  // ShimCache rows (`timestamp_label: file_last_modified`): the file's LastModified, not a run (C8).
+  file_last_modified: "file-last-modified",
   key_last_written: "last-written",
   last_connected: "last-connected",
   first_connected: "first-connected",
@@ -238,6 +242,8 @@ function nameColumn(def: CatalogColumn): boolean {
 export function catalogValueReading(def: CatalogColumn, value: unknown): string | undefined {
   const mapped = columnValueLabel(def, value);
   if (mapped) return mapped;
+  // A flag reads 예 / 아니오, never true / false (C9; the raw value stays in the tooltip).
+  if (typeof value === "boolean") return value ? "예" : "아니오";
   if (def.format === "artifact_type" && typeof value === "string" && value) {
     return artifactTypeLabel(value) ?? undefined;
   }
@@ -293,7 +299,14 @@ function displayValue(def: CatalogColumn, value: unknown): string {
     const hex = hexText(value);
     if (hex) return hex;
   }
-  if (def.format === "bytes" && typeof value === "number") return formatBytes(value);
+  // Sizes: numbers, or digit strings (Amcache `size_bytes` is written as text, C9).
+  if (
+    def.format === "bytes" &&
+    (typeof value === "number" || (typeof value === "string" && /^\d+$/.test(value)))
+  )
+    return formatBytes(Number(value));
+  // Registry key path (registry family, P4): the last three parts; the full path is in the tooltip.
+  if (def.format === "key_tail" && typeof value === "string") return keyTail(value);
   if (def.format === "logon_type" || def.format === "logonType")
     return logonTypeLabel(value) || flatValue(value);
   if (def.format === "eventLevel") return eventLevelLabel(value) || flatValue(value);
@@ -313,7 +326,24 @@ function displayValue(def: CatalogColumn, value: unknown): string {
 }
 
 /** Formats shown in the mono face (ids, hashes, SIDs, paths, URLs). */
-const MONO_FORMATS: ReadonlySet<string> = new Set(["mono", "hex", "sid", "path", "url", "prefetch_volumes"]);
+const MONO_FORMATS: ReadonlySet<string> = new Set([
+  "mono",
+  "hex",
+  "sid",
+  "path",
+  "url",
+  "prefetch_volumes",
+  "key_tail",
+]);
+
+/** "…\\Explorer\\RecentDocs\\.docx": the last three parts of a registry key path. */
+export function keyTail(path: string, parts = 3): string {
+  const segments = path.split("\\").filter(Boolean);
+  return segments.length <= parts ? path : `…\\${segments.slice(-parts).join("\\")}`;
+}
+
+/** Default width of a catalogue column: a time cell holds its kind chip and the time (C7). */
+export const TIME_COLUMN_WIDTH = 200;
 
 /**
  * A display-only catalogue column (`derive:`, axiom-adoption §3.2): computed from the row's own
@@ -364,7 +394,7 @@ export function catalogColumn(def: CatalogColumn, aux = false): ColumnSpec {
   return {
     id: familyColumnId(def.key),
     header: def.label,
-    width: def.width ?? (def.format === "time" ? 170 : 150),
+    width: def.width ?? (def.format === "time" ? TIME_COLUMN_WIDTH : 150),
     minWidth: 60,
     presets: aux ? [] : ["analysis", "axiom"],
     ...(MONO_FORMATS.has(def.format ?? "") ? { mono: true } : {}),
@@ -385,7 +415,8 @@ export function catalogColumn(def: CatalogColumn, aux = false): ColumnSpec {
     tooltip: (row) => {
       const hit = read(row);
       if (!hit) return "";
-      const text = displayValue(def, hit.value);
+      // A shortened key path shows the whole path on hover.
+      const text = def.format === "key_tail" ? flatValue(hit.value) : displayValue(def, hit.value);
       const rowKind = cellTsKind(def, detailsOf(row), hit.from) ?? tsKind;
       const kind = rowKind ? ` · ${tsKindLabel(rowKind)}(${rowKind})` : "";
       // The raw value stays readable behind a Korean reading ("발신 (원래 값: outgoing)").
@@ -497,7 +528,10 @@ export interface SummaryEntry {
 }
 
 /** Up to three non-time catalogue facts of the row's own family, in catalogue order. */
-function rowFacts(row: GridRow): { facts: SummaryEntry[]; time: SummaryEntry | null } {
+function rowFacts(row: Pick<GridRow, "artifactType" | "timestamp" | "fields">): {
+  facts: SummaryEntry[];
+  time: SummaryEntry | null;
+} {
   const family = familyForType(row.artifactType);
   const details = detailsOf(row);
   const facts: SummaryEntry[] = [];
@@ -521,6 +555,49 @@ function rowFacts(row: GridRow): { facts: SummaryEntry[]; time: SummaryEntry | n
     time = { label: "시각", value: formatGridTime(row.timestamp, currentTimezone()) };
   }
   return { facts, time };
+}
+
+/**
+ * Every core column of the family of `artifactType` that has a value in `details`, read like the
+ * family grid reads it (viewer › 메타 of a timeline event, C10: the source row's core facts).
+ */
+export function familyCoreFacts(
+  artifactType: string | null | undefined,
+  details: Record<string, unknown>,
+): { family: string; facts: SummaryEntry[] } | null {
+  const family = familyForType(artifactType);
+  if (!family) return null;
+  const facts: SummaryEntry[] = [];
+  for (const def of family.core_columns) {
+    if (def.derive) {
+      const derived = deriveColumn(def.derive, details, artifactType ?? "");
+      if (derived && !("missing" in derived)) facts.push({ label: def.label, value: derived.value });
+      continue;
+    }
+    const hit = readColumn(details, def);
+    if (!hit) continue;
+    const value = (def.format === "key_tail" ? flatValue(hit.value) : displayValue(def, hit.value)).trim();
+    if (value) facts.push({ label: def.label, value });
+  }
+  return { family: family.label, facts };
+}
+
+/**
+ * One line of an artifact row's own family facts ("실행 횟수: 5 · 볼륨: …"): the catalogue core
+ * columns read from `details` (timeline 상세 column, timeline/grid readability C4). `skip` drops
+ * facts that repeat another column's value (the 대상 column).
+ */
+export function familyFactsLine(
+  artifactType: string | null | undefined,
+  details: Record<string, unknown>,
+  skip: readonly string[] = [],
+): string {
+  const { facts } = rowFacts({ artifactType: artifactType ?? null, timestamp: null, fields: { details } });
+  const skipped = new Set(skip.map((value) => value.trim()).filter(Boolean));
+  return facts
+    .filter((fact) => !skipped.has(fact.value))
+    .map((fact) => `${fact.label}: ${fact.value}`)
+    .join(" · ");
 }
 
 /**
@@ -579,6 +656,6 @@ export function mixedSummaryColumns(): ColumnSpec[] {
     summaryColumn("sum:main", "주요 세부 정보", (row) => factsOf(row).facts[0], 220),
     summaryColumn("sum:support", "지원 세부 정보", (row) => factsOf(row).facts[1], 180),
     summaryColumn("sum:extra", "추가 세부 정보", (row) => factsOf(row).facts[2], 180),
-    summaryColumn("sum:time", "날짜 및 시각", (row) => factsOf(row).time, 170),
+    summaryColumn("sum:time", "날짜 및 시각", (row) => factsOf(row).time, TIME_COLUMN_WIDTH),
   ];
 }

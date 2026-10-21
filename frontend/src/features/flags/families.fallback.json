@@ -1,5 +1,5 @@
 {
- "version": "ccf155732188dd1f",
+ "version": "bba7340264de7103",
  "families": [
   {
    "id": "sam-account",
@@ -1193,20 +1193,30 @@
      "ts_kind": "visited"
     },
     {
+     "key": "title",
+     "label": "제목"
+    },
+    {
      "key": "url",
      "semantic": "url",
      "label": "주소 (URL)",
      "format": "url"
     },
     {
-     "key": "title",
-     "label": "제목"
-    },
-    {
      "key": "visit_count",
      "label": "방문 수",
      "format": "number"
     },
+    {
+     "key": "browser",
+     "label": "브라우저"
+    },
+    {
+     "key": "profile",
+     "label": "프로필"
+    }
+   ],
+   "aux_columns": [
     {
      "key": "typed_count",
      "label": "직접 입력 수",
@@ -1241,9 +1251,7 @@
      "aliases": [
       "visit_duration_micros"
      ]
-    }
-   ],
-   "aux_columns": [
+    },
     {
      "key": "visit_time_raw",
      "label": "방문 시각(원문 WebKit)",
@@ -1252,14 +1260,6 @@
     {
      "key": "domain",
      "label": "도메인"
-    },
-    {
-     "key": "browser",
-     "label": "브라우저"
-    },
-    {
-     "key": "profile",
-     "label": "프로필"
     },
     {
      "key": "user",
@@ -1430,20 +1430,30 @@
      "ts_kind": "last-visited"
     },
     {
+     "key": "title",
+     "label": "제목"
+    },
+    {
      "key": "url",
      "semantic": "url",
      "label": "주소 (URL)",
      "format": "url"
     },
     {
-     "key": "title",
-     "label": "제목"
-    },
-    {
      "key": "visit_count",
      "label": "방문 수",
      "format": "number"
     },
+    {
+     "key": "browser",
+     "label": "브라우저"
+    },
+    {
+     "key": "profile",
+     "label": "프로필"
+    }
+   ],
+   "aux_columns": [
     {
      "key": "typed_count",
      "label": "직접 입력 수",
@@ -1462,16 +1472,6 @@
      "key": "domain",
      "label": "도메인"
     },
-    {
-     "key": "browser",
-     "label": "브라우저"
-    },
-    {
-     "key": "profile",
-     "label": "프로필"
-    }
-   ],
-   "aux_columns": [
     {
      "key": "user",
      "semantic": "account",
@@ -4030,7 +4030,7 @@
      ],
      "format": "time",
      "ts_kind": "logged",
-     "width": 170
+     "width": 200
     },
     {
      "key": "channel",
@@ -4051,10 +4051,13 @@
      "width": 80
     },
     {
-     "key": "summary_ko",
-     "label": "요약 문장",
-     "derive": "event_summary_ko",
-     "width": 320
+     "key": "level",
+     "label": "수준",
+     "aliases": [
+      "Level"
+     ],
+     "format": "eventLevel",
+     "width": 70
     },
     {
      "key": "event_label_ko",
@@ -4062,12 +4065,10 @@
      "width": 180
     },
     {
-     "key": "computer",
-     "semantic": "device",
-     "label": "컴퓨터",
-     "aliases": [
-      "Computer"
-     ]
+     "key": "summary_ko",
+     "label": "요약",
+     "derive": "event_summary_ko",
+     "width": 320
     },
     {
      "key": "subject_user_name",
@@ -4079,6 +4080,16 @@
      "semantic": "account",
      "label": "대상 계정"
     },
+    {
+     "key": "computer",
+     "semantic": "device",
+     "label": "컴퓨터",
+     "aliases": [
+      "Computer"
+     ]
+    }
+   ],
+   "aux_columns": [
     {
      "key": "logon_type",
      "label": "로그온 유형",
@@ -4129,21 +4140,11 @@
      ],
      "format": "mono",
      "width": 90
-    }
-   ],
-   "aux_columns": [
+    },
     {
      "key": "rdp_direction",
      "label": "RDP 방향",
      "derive": "rdp_direction"
-    },
-    {
-     "key": "level",
-     "label": "레벨",
-     "aliases": [
-      "Level"
-     ],
-     "format": "eventLevel"
     },
     {
      "key": "provider_name",
@@ -5155,6 +5156,298 @@
    ]
   },
   {
+   "id": "shimcache",
+   "label": "앱 호환성 캐시(ShimCache)",
+   "types": [
+    "shimcache-schema-entry"
+   ],
+   "core_columns": [
+    {
+     "key": "timestamp",
+     "label": "파일 수정 시각(실행 아님)",
+     "format": "time",
+     "ts_kind": "file-last-modified",
+     "width": 200
+    },
+    {
+     "key": "executable_path",
+     "semantic": "path",
+     "label": "실행 파일 경로",
+     "aliases": [
+      "decoded_name",
+      "display_path",
+      "path"
+     ],
+     "format": "path",
+     "width": 360
+    },
+    {
+     "key": "cache_order",
+     "label": "캐시 순서",
+     "format": "number",
+     "width": 90
+    },
+    {
+     "key": "evidence_strength",
+     "label": "근거 강도",
+     "width": 200,
+     "value_labels": {
+      "program-presence-not-proof-of-execution": "존재 흔적(실행 증거 아님)",
+      "execution-indicator": "실행 정황"
+     }
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "exec_flag",
+     "label": "실행 플래그"
+    },
+    {
+     "key": "key_last_written_at",
+     "label": "키 마지막 기록",
+     "aliases": [
+      "last_written_at"
+     ],
+     "format": "time",
+     "ts_kind": "last-written"
+    },
+    {
+     "key": "control_set",
+     "label": "컨트롤 세트 (ControlSet)"
+    },
+    {
+     "key": "value_format",
+     "label": "값 형식"
+    },
+    {
+     "key": "entry_offset",
+     "label": "항목 오프셋",
+     "format": "hex"
+    },
+    {
+     "key": "source_key",
+     "label": "키 경로",
+     "aliases": [
+      "key_path",
+      "source_key_path"
+     ],
+     "format": "path"
+    },
+    {
+     "key": "sha1",
+     "semantic": "hash",
+     "label": "SHA-1(파일)",
+     "aliases": [
+      "file_id"
+     ],
+     "format": "mono"
+    },
+    {
+     "key": "user_sid",
+     "semantic": "account",
+     "label": "사용자 SID",
+     "aliases": [
+      "sid"
+     ],
+     "format": "sid"
+    },
+    {
+     "key": "user_name",
+     "semantic": "account",
+     "label": "사용자",
+     "aliases": [
+      "user"
+     ]
+    },
+    {
+     "key": "shortcut_target_path",
+     "semantic": "path",
+     "label": "바로 가기 대상",
+     "format": "path"
+    },
+    {
+     "key": "device_instance_id",
+     "semantic": "device",
+     "label": "장치 ID",
+     "aliases": [
+      "container_id"
+     ],
+     "format": "mono"
+    }
+   ],
+   "rules": [
+    "execution.suspicious_path",
+    "execution.name_mismatch",
+    "execution.deleted_executable",
+    "execution.cross_mismatch",
+    "execution.multi_source",
+    "antiforensics.tool_present"
+   ]
+  },
+  {
+   "id": "amcache-file",
+   "label": "Amcache 파일·프로그램 항목",
+   "types": [
+    "amcache-schema-row",
+    "amcache-entry"
+   ],
+   "core_columns": [
+    {
+     "key": "key_last_written_at",
+     "label": "키 마지막 기록",
+     "aliases": [
+      "last_written_at",
+      "timestamp"
+     ],
+     "format": "time",
+     "ts_kind": "last-written"
+    },
+    {
+     "key": "executable_path",
+     "semantic": "path",
+     "label": "실행 파일 경로",
+     "aliases": [
+      "decoded_name",
+      "display_path",
+      "driver_path",
+      "shortcut_path",
+      "path"
+     ],
+     "format": "path",
+     "width": 340
+    },
+    {
+     "key": "program_name",
+     "label": "프로그램",
+     "aliases": [
+      "original_file_name",
+      "name"
+     ]
+    },
+    {
+     "key": "publisher",
+     "label": "게시자",
+     "aliases": [
+      "manufacturer"
+     ]
+    },
+    {
+     "key": "version",
+     "label": "버전",
+     "aliases": [
+      "product_version"
+     ]
+    },
+    {
+     "key": "size_bytes",
+     "label": "크기",
+     "aliases": [
+      "size"
+     ],
+     "format": "bytes",
+     "width": 100
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "sha1",
+     "semantic": "hash",
+     "label": "SHA-1(파일)",
+     "aliases": [
+      "file_id"
+     ],
+     "format": "mono"
+    },
+    {
+     "key": "product_name",
+     "label": "제품"
+    },
+    {
+     "key": "binary_type",
+     "label": "바이너리 유형",
+     "value_labels": {
+      "pe32_i386": "32비트 PE(x86)",
+      "pe64_amd64": "64비트 PE(x64)",
+      "pe64_arm64": "64비트 PE(ARM64)",
+      "pe32_arm": "32비트 PE(ARM)",
+      "pe32_clr_32": "32비트 .NET",
+      "pe32_clr_64": "64비트 .NET",
+      "pe32_unknown": "32비트 PE(아키텍처 불명)"
+     }
+    },
+    {
+     "key": "section",
+     "label": "섹션",
+     "aliases": [
+      "label"
+     ]
+    },
+    {
+     "key": "key_name",
+     "label": "키 이름",
+     "aliases": [
+      "guid"
+     ],
+     "format": "mono"
+    },
+    {
+     "key": "link_date",
+     "label": "링크 시각",
+     "format": "time",
+     "ts_kind": "created"
+    },
+    {
+     "key": "install_date",
+     "label": "설치",
+     "aliases": [
+      "first_install_date"
+     ],
+     "format": "time",
+     "ts_kind": "installed"
+    },
+    {
+     "key": "user_sid",
+     "semantic": "account",
+     "label": "사용자 SID",
+     "aliases": [
+      "sid"
+     ],
+     "format": "sid"
+    },
+    {
+     "key": "user_name",
+     "semantic": "account",
+     "label": "사용자",
+     "aliases": [
+      "user"
+     ]
+    },
+    {
+     "key": "shortcut_target_path",
+     "semantic": "path",
+     "label": "바로 가기 대상",
+     "format": "path"
+    },
+    {
+     "key": "device_instance_id",
+     "semantic": "device",
+     "label": "장치 ID",
+     "aliases": [
+      "container_id"
+     ],
+     "format": "mono"
+    }
+   ],
+   "rules": [
+    "execution.suspicious_path",
+    "execution.name_mismatch",
+    "execution.deleted_executable",
+    "execution.cross_mismatch",
+    "execution.multi_source",
+    "antiforensics.tool_present"
+   ]
+  },
+  {
    "id": "prefetch-file",
    "label": "프리페치",
    "types": [
@@ -5166,6 +5459,21 @@
    ],
    "core_columns": [
     {
+     "key": "executable_hint",
+     "label": "실행 파일",
+     "aliases": [
+      "header_executable_name",
+      "filename_executable_hint"
+     ],
+     "width": 220
+    },
+    {
+     "key": "run_count",
+     "label": "실행 횟수",
+     "format": "number",
+     "width": 90
+    },
+    {
      "key": "last_run_at",
      "label": "최근 실행",
      "aliases": [
@@ -5175,24 +5483,23 @@
      "ts_kind": "run"
     },
     {
-     "key": "executable_hint",
-     "label": "실행 파일",
-     "aliases": [
-      "header_executable_name",
-      "filename_executable_hint"
-     ]
-    },
-    {
-     "key": "run_count",
-     "label": "실행 횟수",
-     "format": "number"
-    },
-    {
      "key": "last_run_times",
-     "label": "실행 시각 목록(최대 8)",
+     "label": "이전 실행(최대 8)",
      "format": "time",
-     "ts_kind": "run"
+     "ts_kind": "run",
+     "width": 180
     },
+    {
+     "key": "volumes",
+     "label": "볼륨(장치 · 일련번호 · 생성 시각)",
+     "aliases": [
+      "volume_candidates"
+     ],
+     "format": "prefetch_volumes",
+     "width": 260
+    }
+   ],
+   "aux_columns": [
     {
      "key": "prefetch_hash",
      "semantic": "hash",
@@ -5207,14 +5514,6 @@
      "label": "버전"
     },
     {
-     "key": "volumes",
-     "label": "볼륨(장치 · 일련번호 · 생성 시각)",
-     "aliases": [
-      "volume_candidates"
-     ],
-     "format": "prefetch_volumes"
-    },
-    {
      "key": "volume_count",
      "label": "볼륨 수",
      "format": "number"
@@ -5227,9 +5526,7 @@
      "key": "referenced_path_count",
      "label": "참조 파일 수",
      "format": "number"
-    }
-   ],
-   "aux_columns": [
+    },
     {
      "key": "run_time_1",
      "label": "실행 1회차",
@@ -10645,7 +10942,26 @@
       "key_path",
       "source_key_path"
      ],
-     "format": "path"
+     "format": "key_tail",
+     "width": 260
+    },
+    {
+     "key": "name",
+     "label": "값 이름",
+     "aliases": [
+      "value_name",
+      "key_name"
+     ]
+    },
+    {
+     "key": "activity_value",
+     "label": "값 데이터",
+     "aliases": [
+      "value_data",
+      "data"
+     ],
+     "format": "mono",
+     "width": 260
     },
     {
      "key": "hive_hint",
@@ -10654,27 +10970,12 @@
       "hive_name",
       "hive"
      ]
-    },
-    {
-     "key": "name",
-     "label": "이름",
-     "aliases": [
-      "value_name",
-      "key_name"
-     ]
-    },
+    }
+   ],
+   "aux_columns": [
     {
      "key": "value_type",
      "label": "값 종류"
-    },
-    {
-     "key": "activity_value",
-     "label": "데이터",
-     "aliases": [
-      "value_data",
-      "data"
-     ],
-     "format": "mono"
     },
     {
      "key": "label",
@@ -10697,9 +10998,7 @@
      "semantic": "account",
      "label": "사용자 SID",
      "format": "sid"
-    }
-   ],
-   "aux_columns": [
+    },
     {
      "key": "user_hive_scope",
      "label": "사용자 하이브"
@@ -12234,8 +12533,16 @@
      "format": "mono"
     },
     {
-     "key": "serial_is_os_generated",
-     "label": "OS가 만든 시리얼"
+     "key": "last_arrival_at",
+     "label": "마지막 연결",
+     "format": "time",
+     "ts_kind": "last-connected"
+    },
+    {
+     "key": "last_removal_at",
+     "label": "마지막 분리",
+     "format": "time",
+     "ts_kind": "last-removal"
     },
     {
      "key": "vid",
@@ -12246,6 +12553,12 @@
      "key": "pid",
      "label": "제품 ID (PID)",
      "format": "mono"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "serial_is_os_generated",
+     "label": "OS가 만든 시리얼"
     },
     {
      "key": "vendor",
@@ -12265,9 +12578,7 @@
      "aliases": [
       "device_class_id"
      ]
-    }
-   ],
-   "aux_columns": [
+    },
     {
      "key": "drive_letters",
      "label": "드라이브 문자",
@@ -12318,18 +12629,6 @@
      "label": "설치",
      "format": "time",
      "ts_kind": "installed"
-    },
-    {
-     "key": "last_arrival_at",
-     "label": "마지막 연결",
-     "format": "time",
-     "ts_kind": "last-connected"
-    },
-    {
-     "key": "last_removal_at",
-     "label": "마지막 분리",
-     "format": "time",
-     "ts_kind": "last-removal"
     },
     {
      "key": "usb_key_last_written_at",

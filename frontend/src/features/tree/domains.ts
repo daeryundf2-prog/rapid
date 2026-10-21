@@ -1569,16 +1569,30 @@ export const DOMAINS: readonly DomainDef[] = [
         label: "USB 설치 기록",
         target: a("windows-system", ["usb-setupapi-device-install-candidate"]),
       },
+      // One artifact type per node (timeline/grid readability C6): the USB node gets the USB
+      // family layout (최초 설치 · 장치 이름 · 시리얼 · 마지막 연결/분리 · VID/PID); mounted
+      // devices (MountedDevices) are their own node with their own layout.
       {
         id: "dev-usb-registry",
-        label: "USB·마운트 장치(레지스트리)",
-        target: a("windows-registry", ["windows-usb-device", "windows-mounted-device"]),
-        typeLabels: { "windows-usb-device": "USB 장치", "windows-mounted-device": "마운트된 장치" },
+        label: "USB 장치(레지스트리)",
+        target: a("windows-registry", ["windows-usb-device"]),
+        typeLabels: { "windows-usb-device": "USB 장치" },
+      },
+      {
+        id: "dev-mounted-registry",
+        label: "마운트된 장치(레지스트리)",
+        target: a("windows-registry", ["windows-mounted-device"]),
+        typeLabels: { "windows-mounted-device": "마운트된 장치" },
       },
       {
         id: "dev-usb-mounted",
-        label: "USB·마운트 장치(reg 내보내기)",
-        target: a("windows-os-account", ["windows-mounted-device", "windows-usb-device"]),
+        label: "USB 장치(reg 내보내기)",
+        target: a("windows-os-account", ["windows-usb-device"]),
+      },
+      {
+        id: "dev-mounted-export",
+        label: "마운트된 장치(reg 내보내기)",
+        target: a("windows-os-account", ["windows-mounted-device"]),
       },
       { id: "dev-rdp", label: "RDP", target: a("windows-remote-access") },
       {

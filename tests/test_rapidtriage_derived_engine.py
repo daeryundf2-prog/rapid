@@ -178,8 +178,9 @@ class CatalogSemanticTests(unittest.TestCase):
         # + r3 O1 (10) + r3 O3 (ntfs-timestamp-mismatch, ntfs-logfile-transaction, carved-file)
         # + R5 L3 (11: location-url-candidate, browser-analytics-cookie, carved-url-candidate, 6 p2p, 2 android-backup)
         # + R5 L2 (15: startup, banner, Office x2, SSH x5, VM, wallet, AV, wallpaper, credential stores, NTFS volume)
-        # + R6 S2 lane A (1: av-product-presence).
-        self.assertEqual(len(catalog.families), 120)
+        # + R6 S2 lane A (1: av-product-presence)
+        # + timeline/grid readability C8 (2: shimcache, amcache-file).
+        self.assertEqual(len(catalog.families), 122)
         for family in catalog.families:
             columns = [*family["core_columns"], *(family.get("aux_columns") or [])]
             tagged = [column for column in columns if column.get("semantic")]

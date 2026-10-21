@@ -23,14 +23,23 @@ families:
     - serial
     - usb_serial_number
     format: mono
-  - key: serial_is_os_generated
-    label: OS가 만든 시리얼
+  - key: last_arrival_at
+    label: 마지막 연결
+    format: time
+    ts_kind: last-connected
+  - key: last_removal_at
+    label: 마지막 분리
+    format: time
+    ts_kind: last-removal
   - key: vid
     label: 제조사 ID (VID)
     format: mono
   - key: pid
     label: 제품 ID (PID)
     format: mono
+  aux_columns:
+  - key: serial_is_os_generated
+    label: OS가 만든 시리얼
   - key: vendor
     label: 제조사
   - key: product
@@ -41,7 +50,6 @@ families:
     label: 장치 종류
     aliases:
     - device_class_id
-  aux_columns:
   - key: drive_letters
     label: 드라이브 문자
     aliases:
@@ -74,14 +82,6 @@ families:
     label: 설치
     format: time
     ts_kind: installed
-  - key: last_arrival_at
-    label: 마지막 연결
-    format: time
-    ts_kind: last-connected
-  - key: last_removal_at
-    label: 마지막 분리
-    format: time
-    ts_kind: last-removal
   - key: usb_key_last_written_at
     label: 키 마지막 기록
     aliases:

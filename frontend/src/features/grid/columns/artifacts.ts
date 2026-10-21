@@ -2,7 +2,12 @@ import { fetchArtifactsPage, locateArtifactRow } from "../../../api/collections"
 import { clipValue, flatValue } from "../../../utils/flatValue";
 import { formatGridTime } from "../../../utils/time";
 import { artifactTypeLabel } from "../../filters/typeLabels";
-import { type CatalogFamily, familyForKind, familyForTypes } from "../../flags/catalog";
+import {
+  type CatalogFamily,
+  familyForKind,
+  familyForTypes,
+  majorityFamilyForTypes,
+} from "../../flags/catalog";
 import { parseFlags } from "../../flags/flags";
 import { kindsForCategory } from "../../tree/categories";
 import { serverPathFilter } from "../gridUtils";
@@ -21,7 +26,13 @@ import {
   str,
   strOrNull,
 } from "./common";
-import { familyLayout, familyWidthPriority, flagsColumn, mixedSummaryColumns } from "./families";
+import {
+  familyColumnId,
+  familyLayout,
+  familyWidthPriority,
+  flagsColumn,
+  mixedSummaryColumns,
+} from "./families";
 import { mismatchDirectionLabel } from "./files";
 import { typeChipCell } from "./StatusCells";
 
@@ -354,7 +365,8 @@ export function resolveArtifactFamily(
   kind: string | undefined,
   types?: readonly string[],
 ): CatalogFamily | undefined {
-  return familyForTypes(types) ?? (types?.length ? undefined : familyForKind(kind));
+  // Several types of one kind: the family holding most of their rows (C6), else the mixed layout.
+  return familyForTypes(types) ?? (types?.length ? majorityFamilyForTypes(kind, types) : familyForKind(kind));
 }
 
 /** The type family every selected type belongs to (one family only), else undefined. */
@@ -742,6 +754,9 @@ export const artifactsCollection: CollectionDef = {
   columns: defaultColumns(),
   columnsFor: (ref, types) => artifactColumnsForKind(ref.kind, types),
   widthPriority: (ref, types) => artifactWidthPriority(ref.kind, types),
+  // A family's core columns stay when one page has no value for them (P1).
+  keepWhenEmpty: (ref, types) =>
+    resolveArtifactFamily(ref.kind, types)?.core_columns.map((def) => familyColumnId(def.key)) ?? [],
   locate: (runId, ref, sort, recordIndex, signal) =>
     ref.kind
       ? locateArtifactRow(runId, ref.kind, sort, recordIndex, signal)

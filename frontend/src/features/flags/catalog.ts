@@ -358,6 +358,31 @@ export function familyForKind(kind: string | undefined): CatalogFamily | undefin
   return best && total > 0 && best[1] / total > MAJORITY_SHARE ? best[0] : undefined;
 }
 
+/**
+ * Primary family of a node / filter listing several types of one kind (timeline/grid readability
+ * C6): the family holding more than half of those types' rows (`/tree` counts) — rows of the
+ * other types keep their 유형 chip. Undefined without counts or a majority (mixed layout).
+ */
+export function majorityFamilyForTypes(
+  kind: string | undefined,
+  types: readonly string[] | undefined,
+): CatalogFamily | undefined {
+  const counts = kind ? kindTypeCounts.get(kind) : undefined;
+  if (!counts || !types?.length) return undefined;
+  const perFamily = new Map<CatalogFamily, number>();
+  let total = 0;
+  for (const type of types) {
+    const count = counts[type];
+    if (typeof count !== "number" || count <= 0) continue;
+    total += count;
+    const family = familyForType(type);
+    if (family) perFamily.set(family, (perFamily.get(family) ?? 0) + count);
+  }
+  let best: [CatalogFamily, number] | undefined;
+  for (const entry of perFamily) if (!best || entry[1] > best[1]) best = entry;
+  return best && total > 0 && best[1] / total > MAJORITY_SHARE ? best[0] : undefined;
+}
+
 /** Tests only. */
 export function resetKindTypeCounts(): void {
   kindTypeCounts.clear();

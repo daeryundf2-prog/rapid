@@ -10,7 +10,7 @@ by name), so a flag written with one catalogue can be cited as
 A rule belongs to exactly one family (``rule.family``, the prefix of its id
 names the module), but a family's ``rules`` list may also *cross-list* rules
 of another family whose rows it shows, so that family's grid offers the
-filter chip. 15 rules are cross-listed this way, e.g. ``sam-account`` lists
+filter chip. 22 rules are cross-listed this way, e.g. ``sam-account`` lists
 ``accounts.new_account`` (family ``eventlog-event``), ``prefetch-file`` lists
 four ``execution.*`` rules, ``registry`` lists ``rdp.enabled`` and
 ``accounts.task_mismatch``, ``mounted-device`` lists
