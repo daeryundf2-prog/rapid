@@ -133,12 +133,59 @@ def synthetic_file_rows(count: int, root: Path) -> list[dict[str, object]]:
     return rows
 
 
+def synthetic_files_sections(root: Path, groups: int = 280) -> dict[str, object]:
+    """Non-row sections shaped like a real ``rapidtriage-files.json`` (run-subset10: about 1.9 MB of
+    duplicate groups, duplicate / hash-cache manifests and assessments, signature mismatches)."""
+    base = str(root)
+
+    def group(index: int) -> dict[str, object]:
+        paths = [os.path.join(base, "Users", f"u{index % 50}", f"copy{member}", f"dup{index}.docx") for member in range(20)]
+        return {
+            "group_id": f"dup-{index:016d}",
+            "sha256": f"{index:064x}",
+            "group_fingerprint": f"{index * 7:064x}",
+            "file_count": 23,
+            "size": 52_000 + index,
+            "representative_path": paths[0],
+            "representative_name": f"dup{index}.docx",
+            "paths": paths,
+            "truncated_paths": True,
+            "commercial_gap_ids": ["duplicate-content"],
+            "duplicate_resolution_status": "exact-hash-duplicate",
+            "report_suppression_status": "not-suppressed",
+            "analyst_review_required": True,
+            "suppression_policy": {"mode": "report-only", "reason": "analyst review"},
+        }
+
+    duplicate_groups = [group(index) for index in range(groups)]
+    manifest = {"profile": "duplicate-content-manifest", "group_count": groups, "groups": duplicate_groups[: groups // 2]}
+    events = [{"event": "hit", "path": os.path.join(base, f"f{index}.bin"), "sha256": f"{index:064x}"} for index in range(300)]
+    hash_manifest = {"profile": "hash-cache-manifest", "entries": events[:150], "recent_events": events, "persistence_manifest": {"entries": events}}
+    return {
+        "signature_mismatch_candidates": [
+            {"path": os.path.join(base, f"mismatch{index}.jpg"), "detected": "zip", "extension": ".jpg", "note": "x" * 700}
+            for index in range(100)
+        ],
+        "hash_cache_manifest": hash_manifest,
+        "hash_cache_assessment": {"component": "hash-cache", "status": "engineering", "hash_cache_manifest": hash_manifest},
+        "duplicate_content_manifest": manifest,
+        "duplicate_detection_assessment": {
+            "component": "duplicate-detection",
+            "duplicate_content_manifest": manifest,
+            "duplicate_suppression_manifest": {"groups": duplicate_groups[: groups // 4]},
+        },
+        "duplicate_content_groups": duplicate_groups,
+        "fuzzy_text_duplicate_groups": [group(groups + index) for index in range(7)],
+    }
+
+
 def synthetic_files_run(base: Path, count: int) -> Path:
     run_dir = base / "run"
     run_dir.mkdir(parents=True, exist_ok=True)
     root = base / "evidence"
     files_path = run_dir / "rapidtriage-files.json"
-    files_path.write_text(json.dumps({"candidates": synthetic_file_rows(count, root), "inventory": []}), encoding="utf-8")
+    payload = {"summary": {"candidate_count": count}, **synthetic_files_sections(root), "candidates": synthetic_file_rows(count, root), "inventory": []}
+    files_path.write_text(json.dumps(payload), encoding="utf-8")
     write_summary(run_dir, {"files": str(files_path)}, root)
     return run_dir
 
@@ -153,6 +200,22 @@ def clear_files_caches() -> None:
     except ImportError:  # before lane B
         return
     files_index.clear_files_index_cache()
+
+
+def bench_plain_paging(client, url: str, repeat: int) -> dict[str, object]:
+    """Unfiltered ``limit=100`` pages: JSON size and next-page time of the default page and of
+    ``sections=all`` (the non-row sections inline, as every page carried them before the change)."""
+    result: dict[str, object] = {}
+    for name, extra in (("default", {}), ("sections_all", {"sections": "all"})):
+        params = {"limit": 100, **extra}
+        response = client.get(url, params={**params, "offset": 100})
+        if response.status_code != 200:
+            # A server without ``sections=`` (before the change) answers the plain page.
+            response = client.get(url, params={"limit": 100, "offset": 100})
+        following = median_of(repeat, lambda params=params: timed_get(client, url, {**params, "offset": 100})[0])
+        result[name] = {"page_bytes": len(response.content), "next_page": following}
+        print(f"[files] plain {name}: {len(response.content):,} bytes next={following['median_s']} s", file=sys.stderr)
+    return result
 
 
 FILES_SCENARIOS: tuple[tuple[str, dict[str, object]], ...] = (
@@ -179,8 +242,11 @@ def bench_files(args: argparse.Namespace) -> dict[str, object]:
         started = time.perf_counter()
         _, plain = timed_get(client, url, {"limit": 100})
         load_s = time.perf_counter() - started
-        scenarios: list[dict[str, object]] = []
         missed: list[str] = []
+        plain_paging = bench_plain_paging(client, url, args.repeat)
+        if float(plain_paging["default"]["next_page"]["median_s"]) > FILES_TARGETS["next_page_s"]:  # type: ignore[index]
+            missed.append(f"plain: next page {plain_paging['default']['next_page']['median_s']} s > {FILES_TARGETS['next_page_s']} s")  # type: ignore[index]
+        scenarios: list[dict[str, object]] = []
         for name, condition in FILES_SCENARIOS:
             params = {"limit": 100, **condition}
 
@@ -226,6 +292,7 @@ def bench_files(args: argparse.Namespace) -> dict[str, object]:
             "rows": plain.get("candidate_count"),
             "source": str(args.run) if args.run else "synthetic",
             "initial_load_s": round(load_s, 3),
+            "plain_paging": plain_paging,
             "targets": FILES_TARGETS,
             "scenarios": scenarios,
             "missed": missed,

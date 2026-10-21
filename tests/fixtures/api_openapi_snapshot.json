@@ -222,6 +222,9 @@
     "/api/runs/{run_id}/files": {
       "get": "get_run_files_api_runs__run_id__files_get"
     },
+    "/api/runs/{run_id}/files/sections": {
+      "get": "get_run_files_section_api_runs__run_id__files_sections_get"
+    },
     "/api/runs/{run_id}/flags": {
       "get": "get_run_flags_api_runs__run_id__flags_get"
     },

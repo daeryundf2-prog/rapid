@@ -148,6 +148,9 @@ async function jsonPaged(
   for (const key of ["scope", "inventory_count", "candidate_count"] as const) {
     if (key in payload) meta[key] = payload[key];
   }
+  // Files pages list their large non-row sections instead of carrying them (R6 S3 follow-up):
+  // `fetchFilesSection` loads one when its UI opens.
+  if (Array.isArray(payload.sections_available)) meta.sections_available = payload.sections_available;
   const base = {
     rows,
     offset,
@@ -238,6 +241,45 @@ export const fetchFilesPage = (
     Boolean(pathQuery) || Boolean(flags?.ids?.length || flags?.grade) || hasConditions(flags),
   );
 };
+
+/** One entry of a files page's `sections_available` (a non-row section left out of the page). */
+export interface FilesSectionInfo {
+  name: string;
+  /** JSON size of the section in bytes. */
+  approx_bytes: number;
+  /** List length or object key count. */
+  item_count: number | null;
+}
+
+/** `GET /files/sections?name=`: one non-row section of the files output. */
+export interface FilesSection<T = unknown> {
+  run_id: string;
+  name: string;
+  kind: "list" | "object";
+  item_count: number | null;
+  approx_bytes: number | null;
+  /** The section, or the requested slice of a list section. */
+  value: T;
+  /** Present when a list section was paged (`limit > 0`). */
+  pagination?: { offset: number; limit: number; returned: number; total: number; has_more: boolean };
+}
+
+/**
+ * Paged `GET /files` responses leave out the large non-row sections (duplicate groups, duplicate /
+ * hash-cache manifests …, R6 S3 follow-up); this loads one of them on demand. `limit` pages a
+ * list section (0 = the whole section).
+ */
+export function fetchFilesSection<T = unknown>(
+  runId: string,
+  name: string,
+  page: { offset?: number; limit?: number } = {},
+  signal?: AbortSignal,
+): Promise<FilesSection<T>> {
+  const params = new URLSearchParams({ name });
+  if (page.offset) params.set("offset", String(page.offset));
+  if (page.limit) params.set("limit", String(page.limit));
+  return api<FilesSection<T>>(`/api/runs/${enc(runId)}/files/sections?${params.toString()}`, { signal });
+}
 
 /**
  * Route `category=` value of the files inventory (parser-quality r2): `inventory` = every scanned
