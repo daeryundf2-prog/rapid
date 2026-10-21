@@ -413,6 +413,16 @@
   position: relative;
 }
 
+/* A kept core column with no value on the loaded page (UX-round review): a quiet note, not a hint link. */
+.grid-hcell-novalue {
+  flex: none;
+  margin-inline-end: 4px;
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
+  font-weight: 400;
+  white-space: nowrap;
+}
+
 /* The accent bar must stay on top of the sticky select cell, which covers the row's own edge. */
 .grid-row.is-selected > .grid-cell-select {
   box-shadow: inset 2px 0 0 var(--accent);

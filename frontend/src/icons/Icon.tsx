@@ -82,6 +82,12 @@ export const ICON_PATHS = {
     "M15 3v18",
     "M10 15l-3-3 3-3",
   ],
+  /** Lucide panel-left-open: the folded left panel's rail (scroll review C2). */
+  "panel-left-open": [
+    "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z",
+    "M9 3v18",
+    "M14 9l3 3-3 3",
+  ],
   "panel-right": ["M3 4h18v16H3z", "M15 4v16"],
   sidebar: ["M3 4h18v16H3z", "M9 4v16"],
   report: ["M6 3h8l4 4v14H6z", "M14 3v4h4", "M9 17v-3M12 17v-6M15 17v-4"],

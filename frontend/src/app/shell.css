@@ -88,8 +88,20 @@ kbd {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  overflow: hidden;
+  /* clip, not hidden (scroll review C1): a hidden box is still a scroll container, so keyboard
+     focus (End in the tree) could scroll the frame itself and push the heading out of view. */
+  overflow: clip;
+  /* The containing block of absolutely positioned bits inside the panes (scroll review): the
+     intake dashboard's visually hidden "불러오는 중" spans otherwise escaped to .shell-panes and
+     made the document thousands of pixels tall under body overflow: hidden. */
+  position: relative;
   background: var(--bg);
+}
+
+/* The landing card is the one pane frame that scrolls itself (short windows). */
+.pane-frame.landing-frame {
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .pane-frame:focus-visible {
@@ -179,23 +191,58 @@ kbd {
   letter-spacing: 0.08em;
 }
 
+/* Pane resize handle (scroll review C3): an 8px hit strip with a 1px divider and a 4×32 grip
+   (--resize-grip, ≥ 3:1 on the panes in both themes; check:contrast). Hover, drag and keyboard
+   focus tint it with the accent; double-click resets the left pane (react-resizable-panels).
+   The library reports its state in data-separator (inactive / hover / active / focus). */
 .resize-handle {
-  width: 4px;
-  background: transparent;
+  flex: 0 0 8px;
+  width: 8px;
   position: relative;
+  background: transparent;
+  cursor: col-resize;
+  outline: none;
+}
+
+.resize-handle::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: var(--line-subtle);
 }
 
 .resize-handle::after {
   content: "";
   position: absolute;
-  inset: 0 1px;
-  background: var(--line-subtle);
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 32px;
+  transform: translate(-50%, -50%);
+  border-radius: 2px;
+  background: var(--resize-grip);
 }
 
-.resize-handle[data-resize-handle-state="hover"]::after,
-.resize-handle[data-resize-handle-state="drag"]::after,
-.resize-handle:focus-visible::after {
+.resize-handle[data-separator="hover"],
+.resize-handle[data-separator="active"],
+.resize-handle[data-separator="focus"] {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.resize-handle[data-separator="hover"]::before,
+.resize-handle[data-separator="hover"]::after,
+.resize-handle[data-separator="active"]::before,
+.resize-handle[data-separator="active"]::after,
+.resize-handle[data-separator="focus"]::before,
+.resize-handle[data-separator="focus"]::after {
   background: var(--accent);
+}
+
+.resize-handle:focus-visible {
+  outline: var(--focus-width) solid var(--focus);
+  outline-offset: -2px;
 }
 
 /* Light theme surface tiers (review #23): navigation (stage rail, tree) sits on surface-0,
@@ -210,11 +257,6 @@ kbd {
 :root[data-theme="light"] [data-testid="viewer-region"] {
   --bg: var(--surface-1);
   background: var(--surface-1);
-}
-
-:root[data-theme="light"] .resize-handle::after {
-  inset: 0 auto 0 0;
-  width: 1px;
 }
 
 /* --- top bar -------------------------------------------------------------- */
@@ -491,6 +533,64 @@ kbd {
   flex: none;
 }
 
+/* Narrow windows (scroll review C2): the top bar compacts (mark only, shorter case name) and,
+   below 640px, wraps the search onto its own row so search · ⌘K · theme · help stay reachable. */
+@media (max-width: 899.98px) {
+  .topbar {
+    gap: var(--space-2);
+    padding: 0 var(--space-2);
+  }
+
+  .brand-word {
+    display: none;
+  }
+
+  .case-picker-trigger {
+    max-width: 180px;
+  }
+
+  .global-search {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 639.98px) {
+  .topbar {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 48px;
+    padding-block: 6px;
+    row-gap: 6px;
+  }
+
+  .topbar-case {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .case-picker-trigger {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .topbar-search {
+    order: 3;
+    flex: 1 0 100%;
+  }
+
+  /* (.shell > to outrank the status bar rule further down.) */
+  .shell > .statusbar {
+    gap: var(--space-2);
+    padding: 0 var(--space-2);
+  }
+
+  /* No case open: no search field, so ⌘K stays on the first row. */
+  .topbar-search:not(:has(.global-search)) {
+    order: 0;
+    flex: 0 0 auto;
+  }
+}
+
 /* --- buttons: controls.css (.button .primary/.secondary/.ghost/.danger, .icon-btn) --- */
 
 /* Visible "why disabled" line next to a disabled action (not only on hover/focus). */
@@ -750,11 +850,18 @@ kbd {
   margin: 0;
 }
 
+/* The dialog body scrolls, not the table (overflow on a <table> never scrolls). */
+.help-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
 .help-table {
   width: 100%;
   border-collapse: collapse;
   font-size: var(--fs-table-aux);
-  overflow: auto;
 }
 
 .help-table th,
@@ -766,6 +873,10 @@ kbd {
 }
 
 .help-table th {
+  /* The header row stays in view while the dialog body scrolls. */
+  position: sticky;
+  top: 0;
+  background: var(--surface-3);
   color: var(--text-muted);
   font-weight: 600;
 }
@@ -805,6 +916,40 @@ kbd {
 
 .viewer-drawer[hidden] {
   display: none;
+}
+
+/* Left-panel drawer (< 900px, scroll review C2): the tree / stage panel over the grid, from the
+   left edge beside the stage rail. Same scrim, head and Esc as the viewer drawer. */
+.tree-drawer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  z-index: 700;
+  width: min(320px, 88%);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--line);
+  box-shadow: 8px 0 24px color-mix(in srgb, var(--scrim) 35%, transparent);
+}
+
+.tree-drawer[hidden] {
+  display: none;
+}
+
+.tree-drawer > .pane-frame {
+  flex: 1 1 auto;
+  height: auto;
+}
+
+/* A folded or closed left panel keeps its content mounted (tree state, search) but hidden. */
+.pane-frame[hidden] {
+  display: none;
+}
+
+.tree-rail {
+  height: 100%;
 }
 
 .drawer-head {

@@ -14,7 +14,7 @@ families:
     - time_created
     format: time
     ts_kind: logged
-    width: 170
+    width: 200
   - key: channel
     label: 채널
     aliases:
@@ -27,24 +27,31 @@ families:
     - EventID
     format: mono
     width: 80
-  - key: summary_ko
-    label: 요약 문장
-    derive: event_summary_ko
-    width: 320
+  - key: level
+    label: 수준
+    aliases:
+    - Level
+    format: eventLevel
+    width: 70
   - key: event_label_ko
     label: 이벤트명
     width: 180
-  - key: computer
-    semantic: device
-    label: 컴퓨터
-    aliases:
-    - Computer
+  - key: summary_ko
+    label: 요약
+    derive: event_summary_ko
+    width: 320
   - key: subject_user_name
     semantic: account
     label: 주체 계정
   - key: target_user_name
     semantic: account
     label: 대상 계정
+  - key: computer
+    semantic: device
+    label: 컴퓨터
+    aliases:
+    - Computer
+  aux_columns:
   - key: logon_type
     label: 로그온 유형
     format: logonType
@@ -80,15 +87,9 @@ families:
     - EventRecordID
     format: mono
     width: 90
-  aux_columns:
   - key: rdp_direction
     label: RDP 방향
     derive: rdp_direction
-  - key: level
-    label: 레벨
-    aliases:
-    - Level
-    format: eventLevel
   - key: provider_name
     label: 제공자
     aliases:
@@ -588,6 +589,17 @@ rules:
   - https://www.manageengine.com/products/active-directory-audit/kb/system-events/event-id-7045.html
   version: 1
   status: verified
+  validation:
+    synthetic: true
+    real:
+    - source: run-subset10 이벤트 로그(음성)
+      result: negative
+      hits: 0
+      false_positives: 0
+      checked_at: '2026-10-21'
+      note_ko: '입력 가능 이벤트 로그 292,370행에서 0적중(기대 최대 0, 통과). 서브셋에 유형 10 외부 IP 로그온이 없어 양성은 확인하지 못함. r6-s1-run·qa-case1·r4-v1 런은 같은 증거를 다시 처리한 것이라 독립 근거가 아님.'
+    public: []
+    notes_ko: 실데이터는 음성 대조만(0적중·오탐 0). 양성 실데이터 없음 — 공개 데이터셋·VM 생성은 사용자 승인 대기.
   params: {}
 - id: eventlog.failed_logon_burst
   family: eventlog-event
@@ -623,6 +635,17 @@ rules:
   sources: *id001
   version: 1
   status: verified
+  validation:
+    synthetic: true
+    real:
+    - source: run-subset10 이벤트 로그(음성)
+      result: negative
+      hits: 0
+      false_positives: 0
+      checked_at: '2026-10-21'
+      note_ko: '입력 가능 이벤트 로그 292,370행에서 0적중(기대 최대 0, 통과). 서브셋 Security/System에 1102·104가 없어 양성은 확인하지 못함. r6-s1-run·qa-case1·r4-v1 런은 같은 증거를 다시 처리한 것이라 독립 근거가 아님.'
+    public: []
+    notes_ko: 실데이터는 음성 대조만(0적중·오탐 0). 양성 실데이터 없음 — 공개 데이터셋·VM 생성은 사용자 승인 대기.
   params: {}
 - id: eventlog.record_id_gap
   family: eventlog-event

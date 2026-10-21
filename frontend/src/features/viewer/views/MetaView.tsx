@@ -22,8 +22,10 @@ import {
 import { useFilterStore } from "../../filters/filterStore";
 import { useGridLocalStore } from "../../grid/adapter";
 import { defaultFieldHeaders } from "../../grid/columns/artifacts";
+import { familyCoreFacts } from "../../grid/columns/families";
 import { FIELD_LABELS } from "../../grid/columns/fieldColumns";
 import { NTFS_EMPTY_HINT, NTFS_RUN_COMMAND } from "../../grid/columns/files";
+import { timeKindsText, timelineAreaLabel, tsLabelsOf } from "../../grid/columns/timeline";
 import { EmptyHintLink } from "../../grid/EmptyHintLink";
 import { noteKey, useSessionNote } from "../../grid/sessionNotes";
 import { usePromotedFields } from "../../grid/usePromotedFields";
@@ -844,9 +846,36 @@ function GovernanceSection({
   );
 }
 
+/** Korean reading of a timeline event's `source` (C9). */
+const TIMELINE_SOURCE_LABELS: Readonly<Record<string, string>> = {
+  artifacts: "아티팩트 출력",
+  files: "파일 목록(파일 시스템 시각)",
+  docs: "문서 후보",
+};
+
 function provenanceEntries(row: GridRow | null): Array<[string, string]> {
   if (!row) return [];
   const out: Array<[string, string]> = [];
+  if (row.ref.collection === "timeline") {
+    // Timeline events (C9): Korean readings, the raw ids in brackets.
+    const sourceType = typeof row.fields.sourceArtifactType === "string" ? row.fields.sourceArtifactType : "";
+    const area = timelineAreaLabel(sourceType || row.artifactType);
+    if (row.artifactType)
+      out.push([
+        "이벤트",
+        area && area !== row.artifactType ? `${area} (${row.artifactType})` : row.artifactType,
+      ]);
+    const kinds = timeKindsText(tsLabelsOf(row));
+    if (kinds) out.push(["시각 종류", kinds]);
+    if (row.provider)
+      out.push([
+        "출처",
+        TIMELINE_SOURCE_LABELS[row.provider]
+          ? `${TIMELINE_SOURCE_LABELS[row.provider]} (${row.provider})`
+          : row.provider,
+      ]);
+    return out;
+  }
   // Output-file rows reuse artifactType for their kind (보고 종류 filter): call it 종류 there.
   if (row.artifactType)
     out.push([row.ref.collection === "outputs" ? "종류" : "아티팩트 유형", row.artifactType]);
@@ -965,6 +994,58 @@ function CrossCaseSection({ row, runId }: { row: GridRow | null; runId: string }
   );
 }
 
+/**
+ * Timeline event (C10): what the event is about and the core facts of its source artifact row (the
+ * family's core columns, read from the event's details), then the sources folded into this row
+ * (display groups, `group=1`). The full source row stays one click away ("원본 아티팩트 행으로 이동").
+ */
+function TimelineEventSection({ row }: { row: GridRow | null }) {
+  if (row?.ref.collection !== "timeline") return null;
+  const details =
+    row.fields.details && typeof row.fields.details === "object" && !Array.isArray(row.fields.details)
+      ? (row.fields.details as Record<string, unknown>)
+      : {};
+  const sourceType = typeof row.fields.sourceArtifactType === "string" ? row.fields.sourceArtifactType : null;
+  const core = familyCoreFacts(sourceType, details);
+  const target = typeof row.fields.targetFull === "string" ? row.fields.targetFull : "";
+  const sources = Array.isArray(row.fields.groupSources)
+    ? (row.fields.groupSources as Array<{ artifactType: string; path: string; recordIndex: number | null }>)
+    : [];
+  return (
+    <section aria-label="이벤트" data-testid="timeline-event-section">
+      <h3 className="viewer-subtitle">이벤트{core ? ` — ${core.family}` : ""}</h3>
+      <dl className="viewer-dl">
+        {target ? (
+          <>
+            <dt>대상</dt>
+            <dd className="mono viewer-break">{target}</dd>
+          </>
+        ) : null}
+        {(core?.facts ?? []).map((fact) => (
+          <Fragment key={fact.label}>
+            <dt>{fact.label}</dt>
+            <dd className="viewer-break">{fact.value}</dd>
+          </Fragment>
+        ))}
+      </dl>
+      {sources.length > 1 ? (
+        <>
+          <h4 className="viewer-subtitle">같은 대상·같은 초에 기록한 출처 {sources.length}곳</h4>
+          <ul data-testid="timeline-group-sources">
+            {sources.map((source) => (
+              <li key={`${source.artifactType}|${source.path}`}>
+                {timelineAreaLabel(source.artifactType)} —{" "}
+                <span className="mono viewer-break">{source.path}</span>
+                {source.recordIndex !== null ? ` (이벤트 #${source.recordIndex + 1})` : ""}
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+    </section>
+  );
+}
+
 export function MetaView({
   target,
   preview,
@@ -1025,6 +1106,7 @@ export function MetaView({
   return (
     <div className="meta-view">
       <RecordBanners row={row} />
+      <TimelineEventSection row={row} />
       {sourceMissing ? (
         <p className="meta-notice" role="alert" data-testid="source-missing">
           소스를 찾을 수 없습니다 — 원본 경로: <span className="mono viewer-break">{target.sourcePath}</span>

@@ -15,30 +15,35 @@ families:
     - timestamp
     format: time
     ts_kind: last-written
+  # Value-centric default (timeline/grid readability P4): key LastWrite · key (last three parts,
+  # full path on hover) · value name · value data · hive.
   - key: key
     label: 키 경로
     aliases:
     - key_path
     - source_key_path
-    format: path
+    format: key_tail
+    width: 260
+  - key: name
+    label: 값 이름
+    aliases:
+    - value_name
+    - key_name
+  - key: activity_value
+    label: 값 데이터
+    aliases:
+    - value_data
+    - data
+    format: mono
+    width: 260
   - key: hive_hint
     label: 하이브
     aliases:
     - hive_name
     - hive
-  - key: name
-    label: 이름
-    aliases:
-    - value_name
-    - key_name
+  aux_columns:
   - key: value_type
     label: 값 종류
-  - key: activity_value
-    label: 데이터
-    aliases:
-    - value_data
-    - data
-    format: mono
   - key: label
     label: 활동
     aliases:
@@ -52,7 +57,6 @@ families:
     semantic: account
     label: 사용자 SID
     format: sid
-  aux_columns:
   - key: user_hive_scope
     label: 사용자 하이브
   - key: value_names

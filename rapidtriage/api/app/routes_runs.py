@@ -9,7 +9,7 @@ import json
 import logging
 import re
 import zipfile
-from collections.abc import Callable, Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -61,6 +61,7 @@ from .dashboard import (
 )
 from .files_index import NtfsTimes, files_matched_positions
 from .files_ntfs import join_files_page, ntfs_join_stamp, ntfs_si_modified_times
+from .files_sections import apply_page_sections, section_response
 from .fs_tree import (
     FS_INDEX_CACHE,
     files_output_key,
@@ -119,7 +120,13 @@ from .runops import (
 )
 from .search_index_service import search_index_available
 from .timeline_hist import build_timeline_histogram
-from .timeline_index import timeline_positions
+from .timeline_index import (
+    group_page_fields,
+    locate_position,
+    search_needle,
+    timeline_groups,
+    timeline_positions,
+)
 from .tree import build_run_issues, build_run_tree, live_run_block
 from .triage_flags import (
     FlagQuery,
@@ -569,8 +576,21 @@ def build_runs_router(
         partial: str | None = Query(default=None),
         content: list[str] = Query(default=[]),
         geo: str | None = Query(default=None),
+        q: str | None = Query(default=None),
+        group: str | None = Query(default=None),
+        locate: int | None = Query(default=None, ge=0),
     ) -> dict[str, object]:
         """Paged timeline events.
+
+        ``q`` (timeline/grid readability C3): case-insensitive "contains" over the summary, the
+        target (path / executable / URL / key), the source path, event type and Korean event name
+        (``timeline_index.event_search_parts``), on the server -- AND-ed with the row conditions.
+        ``group=1`` (C1 rule 2): events about the same target at the same second with the same
+        family of time kind are one row (``group_id``, ``source_count``, ``sources``,
+        ``group_members`` = their ``record_index`` values); grouping runs on the matched positions
+        (after conditions and ``q``), so ``matched`` counts rows as shown. ``locate=<record_index>``
+        adds ``pagination.locate`` = ``{record_index, position}``: the row position of that event in
+        this listing (its group's row when grouped; ``None`` when left out) -- a deep link's page.
 
         Row conditions (plan r4 §2.3) as on ``GET /artifacts``: ``from``, ``to``, ``weekday``,
         ``hours``, ``offhours``, ``tz``, ``partial``, ``content`` (row time = the event's
@@ -594,9 +614,18 @@ def build_runs_router(
             partial=partial,
             content=content,
         )
-        if conditions is None:
+        needle = search_needle(q)
+        grouped = _flag_param("group", group)
+        if conditions is None and not needle and not grouped:
             payload = get_named_output(store, run_id, "timeline")
-            return paginate_payload(payload, "events", offset=offset, limit=limit, cursor=cursor)
+            page = paginate_payload(payload, "events", offset=offset, limit=limit, cursor=cursor)
+            if locate is not None and limit > 0 and isinstance(page.get("pagination"), dict):
+                count = len(payload["events"]) if isinstance(payload.get("events"), list) else 0
+                page["pagination"] = {
+                    **page["pagination"],
+                    "locate": {"record_index": locate, "position": locate if locate < count else None},
+                }
+            return page
         # Stamp the timeline *before* reading it: a rewrite in between leaves the cache key and the
         # column index on the older stamp (never the new revision's key holding old positions).
         timeline_path = get_output_path(store, run_id, "timeline")
@@ -605,17 +634,59 @@ def build_runs_router(
         if limit <= 0:
             raise HTTPException(status_code=400, detail=FILTER_LIMIT_MESSAGE)
         events = payload.get("events") if isinstance(payload.get("events"), list) else []
+        cache_key = ("timeline", run_id, stamp, conditions.cache_key() if conditions is not None else None, needle)
+        # R6 S3: positions from the run's timeline column index (same set as the predicate scan).
+        positions = timeline_positions(run_id, timeline_path, events, conditions, stamp, needle)
+        filtered = conditions is not None or bool(needle)
+        # A large timeline without the index's group column groups the matched positions in the
+        # request (the column follows in the background; same leaders / members).
+        groups = (
+            timeline_groups(
+                run_id,
+                timeline_path,
+                events,
+                stamp,
+                (lambda: MATCH_CACHE.get_or_compute(cache_key, positions)) if filtered else None,
+                cache_key,
+            )
+            if grouped
+            else None
+        )
+        if groups is not None:
+
+            def leaders() -> Iterable[int]:
+                matched = MATCH_CACHE.get_or_compute(cache_key, positions) if filtered else range(len(events))
+                return groups.leaders(matched)
+
+            compute: Callable[[], Iterable[int]] = leaders
+            page_key: tuple[object, ...] = (*cache_key, "group")
+        else:
+            compute, page_key = positions, cache_key
         rows, pagination = filter_rows_page(
             events,
-            conditions.predicate("timeline"),
+            lambda _row: True,
             collection="events",
             offset=offset,
             limit=limit,
-            cache_key=("timeline", run_id, stamp, conditions.cache_key()),
-            # R6 S3: positions from the run's timeline column index (same set as the predicate).
-            compute=timeline_positions(run_id, timeline_path, events, conditions, stamp),
+            cache_key=page_key,
+            compute=compute,
         )
-        pagination["conditions"] = conditions.describe()
+        if groups is not None:
+            matched_positions = MATCH_CACHE.get_or_compute(cache_key, positions) if filtered else None
+            for row in rows:
+                if isinstance(row, dict):
+                    row.update(group_page_fields(groups, events, int(row["record_index"]), matched_positions))
+            pagination["grouped"] = True
+        if locate is not None:
+            shown = MATCH_CACHE.get_or_compute(page_key, compute)
+            matched_for_locate = MATCH_CACHE.get_or_compute(cache_key, positions) if filtered else None
+            pagination["locate"] = {
+                "record_index": locate,
+                "position": locate_position(shown, locate, groups, matched_for_locate),
+            }
+        pagination["conditions"] = conditions.describe() if conditions is not None else {}
+        if needle:
+            pagination["search"] = {"q": q, "fields": ["summary", "target", "path", "event_type", "event_label_ko"]}
         page = {key: value for key, value in payload.items() if key != "events"}
         page["events"] = rows
         page["record_count"] = len(events)
@@ -1384,8 +1455,21 @@ def build_runs_router(
         partial: str | None = Query(default=None),
         content: list[str] = Query(default=[]),
         geo: str | None = Query(default=None),
+        sections: list[str] = Query(default=[]),
     ) -> dict[str, object]:
         """Paged file rows joined with the newest ``ntfs-meta`` analysis.
+
+        Non-row sections (R6 S3 follow-up): a page (``limit > 0``) carries the rows, pagination
+        and the small header fields (scalars, ``filters``, ``summary``, ``time_provenance``,
+        ``file_exclusions``, ``known_good_suppression_profile``, ``file_signature_profile``,
+        ``core_accuracy_gates``) only. Every other list/object field of the files output
+        (``duplicate_content_groups``, ``duplicate_detection_assessment``,
+        ``duplicate_content_manifest``, ``hash_cache_manifest``, ``hash_cache_assessment``,
+        ``signature_mismatch_candidates``, ``fuzzy_text_duplicate_groups`` ...) is listed in
+        ``sections_available = [{name, approx_bytes, item_count}]`` and included only when asked:
+        ``sections=<name>,<name>`` (repeatable) or ``sections=all``; requested names the run lacks
+        are reported in ``sections_missing``. ``GET /files/sections?name=`` serves one section.
+        ``limit=0`` (full export) is unchanged and still returns the whole output.
 
         파일 시스템 탐색기 (plan r4 §2.2): ``path_prefix`` = a folder of
         ``GET /fs-tree`` (relative to the volume root, ``/`` separators,
@@ -1540,7 +1624,28 @@ def build_runs_router(
         if isinstance(joined.get(collection), list):
             joined[collection] = join.attach(joined[collection], f"files:{collection}")
         joined["flags_join"] = dict(join.info)
+        if limit > 0:
+            joined = apply_page_sections(joined, payload, output_stamp(get_output_path(store, run_id, "files")), sections)
         return joined
+
+
+    @router.get("/api/runs/{run_id}/files/sections")
+    def get_run_files_section(
+        run_id: str,
+        name: str = Query(..., min_length=1, max_length=128),
+        offset: int = Query(0, ge=0),
+        limit: int = Query(0, ge=0, le=1000),
+    ) -> dict[str, object]:
+        """One non-row section of the files output (``sections_available`` of ``GET /files``).
+
+        Returns ``{run_id, name, kind: list|object, item_count, approx_bytes, value}``. A list
+        section is paged by ``offset``/``limit`` (``limit=0`` = the whole list) and then reports
+        ``pagination = {offset, limit, returned, total, has_more}``; an object section is returned
+        whole. Unknown name: Korean 404; malformed name: Korean 422.
+        """
+        payload = get_named_output(store, run_id, "files")
+        stamp = output_stamp(get_output_path(store, run_id, "files"))
+        return section_response(payload, stamp, run_id, name, offset=offset, limit=limit)
 
 
     @router.get("/api/runs/{run_id}/docs")

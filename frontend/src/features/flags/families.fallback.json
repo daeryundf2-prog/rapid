@@ -1,5 +1,5 @@
 {
- "version": "ccf155732188dd1f",
+ "version": "598449069b41b9ee",
  "families": [
   {
    "id": "sam-account",
@@ -1193,20 +1193,30 @@
      "ts_kind": "visited"
     },
     {
+     "key": "title",
+     "label": "제목"
+    },
+    {
      "key": "url",
      "semantic": "url",
      "label": "주소 (URL)",
      "format": "url"
     },
     {
-     "key": "title",
-     "label": "제목"
-    },
-    {
      "key": "visit_count",
      "label": "방문 수",
      "format": "number"
     },
+    {
+     "key": "browser",
+     "label": "브라우저"
+    },
+    {
+     "key": "profile",
+     "label": "프로필"
+    }
+   ],
+   "aux_columns": [
     {
      "key": "typed_count",
      "label": "직접 입력 수",
@@ -1241,9 +1251,7 @@
      "aliases": [
       "visit_duration_micros"
      ]
-    }
-   ],
-   "aux_columns": [
+    },
     {
      "key": "visit_time_raw",
      "label": "방문 시각(원문 WebKit)",
@@ -1252,14 +1260,6 @@
     {
      "key": "domain",
      "label": "도메인"
-    },
-    {
-     "key": "browser",
-     "label": "브라우저"
-    },
-    {
-     "key": "profile",
-     "label": "프로필"
     },
     {
      "key": "user",
@@ -1430,20 +1430,30 @@
      "ts_kind": "last-visited"
     },
     {
+     "key": "title",
+     "label": "제목"
+    },
+    {
      "key": "url",
      "semantic": "url",
      "label": "주소 (URL)",
      "format": "url"
     },
     {
-     "key": "title",
-     "label": "제목"
-    },
-    {
      "key": "visit_count",
      "label": "방문 수",
      "format": "number"
     },
+    {
+     "key": "browser",
+     "label": "브라우저"
+    },
+    {
+     "key": "profile",
+     "label": "프로필"
+    }
+   ],
+   "aux_columns": [
     {
      "key": "typed_count",
      "label": "직접 입력 수",
@@ -1462,16 +1472,6 @@
      "key": "domain",
      "label": "도메인"
     },
-    {
-     "key": "browser",
-     "label": "브라우저"
-    },
-    {
-     "key": "profile",
-     "label": "프로필"
-    }
-   ],
-   "aux_columns": [
     {
      "key": "user",
      "semantic": "account",
@@ -4030,7 +4030,7 @@
      ],
      "format": "time",
      "ts_kind": "logged",
-     "width": 170
+     "width": 200
     },
     {
      "key": "channel",
@@ -4051,10 +4051,13 @@
      "width": 80
     },
     {
-     "key": "summary_ko",
-     "label": "요약 문장",
-     "derive": "event_summary_ko",
-     "width": 320
+     "key": "level",
+     "label": "수준",
+     "aliases": [
+      "Level"
+     ],
+     "format": "eventLevel",
+     "width": 70
     },
     {
      "key": "event_label_ko",
@@ -4062,12 +4065,10 @@
      "width": 180
     },
     {
-     "key": "computer",
-     "semantic": "device",
-     "label": "컴퓨터",
-     "aliases": [
-      "Computer"
-     ]
+     "key": "summary_ko",
+     "label": "요약",
+     "derive": "event_summary_ko",
+     "width": 320
     },
     {
      "key": "subject_user_name",
@@ -4079,6 +4080,16 @@
      "semantic": "account",
      "label": "대상 계정"
     },
+    {
+     "key": "computer",
+     "semantic": "device",
+     "label": "컴퓨터",
+     "aliases": [
+      "Computer"
+     ]
+    }
+   ],
+   "aux_columns": [
     {
      "key": "logon_type",
      "label": "로그온 유형",
@@ -4129,21 +4140,11 @@
      ],
      "format": "mono",
      "width": 90
-    }
-   ],
-   "aux_columns": [
+    },
     {
      "key": "rdp_direction",
      "label": "RDP 방향",
      "derive": "rdp_direction"
-    },
-    {
-     "key": "level",
-     "label": "레벨",
-     "aliases": [
-      "Level"
-     ],
-     "format": "eventLevel"
     },
     {
      "key": "provider_name",
@@ -5155,6 +5156,298 @@
    ]
   },
   {
+   "id": "shimcache",
+   "label": "앱 호환성 캐시(ShimCache)",
+   "types": [
+    "shimcache-schema-entry"
+   ],
+   "core_columns": [
+    {
+     "key": "timestamp",
+     "label": "파일 수정 시각(실행 아님)",
+     "format": "time",
+     "ts_kind": "file-last-modified",
+     "width": 200
+    },
+    {
+     "key": "executable_path",
+     "semantic": "path",
+     "label": "실행 파일 경로",
+     "aliases": [
+      "decoded_name",
+      "display_path",
+      "path"
+     ],
+     "format": "path",
+     "width": 360
+    },
+    {
+     "key": "cache_order",
+     "label": "캐시 순서",
+     "format": "number",
+     "width": 90
+    },
+    {
+     "key": "evidence_strength",
+     "label": "근거 강도",
+     "width": 200,
+     "value_labels": {
+      "program-presence-not-proof-of-execution": "존재 흔적(실행 증거 아님)",
+      "execution-indicator": "실행 정황"
+     }
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "exec_flag",
+     "label": "실행 플래그"
+    },
+    {
+     "key": "key_last_written_at",
+     "label": "키 마지막 기록",
+     "aliases": [
+      "last_written_at"
+     ],
+     "format": "time",
+     "ts_kind": "last-written"
+    },
+    {
+     "key": "control_set",
+     "label": "컨트롤 세트 (ControlSet)"
+    },
+    {
+     "key": "value_format",
+     "label": "값 형식"
+    },
+    {
+     "key": "entry_offset",
+     "label": "항목 오프셋",
+     "format": "hex"
+    },
+    {
+     "key": "source_key",
+     "label": "키 경로",
+     "aliases": [
+      "key_path",
+      "source_key_path"
+     ],
+     "format": "path"
+    },
+    {
+     "key": "sha1",
+     "semantic": "hash",
+     "label": "SHA-1(파일)",
+     "aliases": [
+      "file_id"
+     ],
+     "format": "mono"
+    },
+    {
+     "key": "user_sid",
+     "semantic": "account",
+     "label": "사용자 SID",
+     "aliases": [
+      "sid"
+     ],
+     "format": "sid"
+    },
+    {
+     "key": "user_name",
+     "semantic": "account",
+     "label": "사용자",
+     "aliases": [
+      "user"
+     ]
+    },
+    {
+     "key": "shortcut_target_path",
+     "semantic": "path",
+     "label": "바로 가기 대상",
+     "format": "path"
+    },
+    {
+     "key": "device_instance_id",
+     "semantic": "device",
+     "label": "장치 ID",
+     "aliases": [
+      "container_id"
+     ],
+     "format": "mono"
+    }
+   ],
+   "rules": [
+    "execution.suspicious_path",
+    "execution.name_mismatch",
+    "execution.deleted_executable",
+    "execution.cross_mismatch",
+    "execution.multi_source",
+    "antiforensics.tool_present"
+   ]
+  },
+  {
+   "id": "amcache-file",
+   "label": "Amcache 파일·프로그램 항목",
+   "types": [
+    "amcache-schema-row",
+    "amcache-entry"
+   ],
+   "core_columns": [
+    {
+     "key": "key_last_written_at",
+     "label": "키 마지막 기록",
+     "aliases": [
+      "last_written_at",
+      "timestamp"
+     ],
+     "format": "time",
+     "ts_kind": "last-written"
+    },
+    {
+     "key": "executable_path",
+     "semantic": "path",
+     "label": "실행 파일 경로",
+     "aliases": [
+      "decoded_name",
+      "display_path",
+      "driver_path",
+      "shortcut_path",
+      "path"
+     ],
+     "format": "path",
+     "width": 340
+    },
+    {
+     "key": "program_name",
+     "label": "프로그램",
+     "aliases": [
+      "original_file_name",
+      "name"
+     ]
+    },
+    {
+     "key": "publisher",
+     "label": "게시자",
+     "aliases": [
+      "manufacturer"
+     ]
+    },
+    {
+     "key": "version",
+     "label": "버전",
+     "aliases": [
+      "product_version"
+     ]
+    },
+    {
+     "key": "size_bytes",
+     "label": "크기",
+     "aliases": [
+      "size"
+     ],
+     "format": "bytes",
+     "width": 100
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "sha1",
+     "semantic": "hash",
+     "label": "SHA-1(파일)",
+     "aliases": [
+      "file_id"
+     ],
+     "format": "mono"
+    },
+    {
+     "key": "product_name",
+     "label": "제품"
+    },
+    {
+     "key": "binary_type",
+     "label": "바이너리 유형",
+     "value_labels": {
+      "pe32_i386": "32비트 PE(x86)",
+      "pe64_amd64": "64비트 PE(x64)",
+      "pe64_arm64": "64비트 PE(ARM64)",
+      "pe32_arm": "32비트 PE(ARM)",
+      "pe32_clr_32": "32비트 .NET",
+      "pe32_clr_64": "64비트 .NET",
+      "pe32_unknown": "32비트 PE(아키텍처 불명)"
+     }
+    },
+    {
+     "key": "section",
+     "label": "섹션",
+     "aliases": [
+      "label"
+     ]
+    },
+    {
+     "key": "key_name",
+     "label": "키 이름",
+     "aliases": [
+      "guid"
+     ],
+     "format": "mono"
+    },
+    {
+     "key": "link_date",
+     "label": "링크 시각",
+     "format": "time",
+     "ts_kind": "created"
+    },
+    {
+     "key": "install_date",
+     "label": "설치",
+     "aliases": [
+      "first_install_date"
+     ],
+     "format": "time",
+     "ts_kind": "installed"
+    },
+    {
+     "key": "user_sid",
+     "semantic": "account",
+     "label": "사용자 SID",
+     "aliases": [
+      "sid"
+     ],
+     "format": "sid"
+    },
+    {
+     "key": "user_name",
+     "semantic": "account",
+     "label": "사용자",
+     "aliases": [
+      "user"
+     ]
+    },
+    {
+     "key": "shortcut_target_path",
+     "semantic": "path",
+     "label": "바로 가기 대상",
+     "format": "path"
+    },
+    {
+     "key": "device_instance_id",
+     "semantic": "device",
+     "label": "장치 ID",
+     "aliases": [
+      "container_id"
+     ],
+     "format": "mono"
+    }
+   ],
+   "rules": [
+    "execution.suspicious_path",
+    "execution.name_mismatch",
+    "execution.deleted_executable",
+    "execution.cross_mismatch",
+    "execution.multi_source",
+    "antiforensics.tool_present"
+   ]
+  },
+  {
    "id": "prefetch-file",
    "label": "프리페치",
    "types": [
@@ -5166,6 +5459,21 @@
    ],
    "core_columns": [
     {
+     "key": "executable_hint",
+     "label": "실행 파일",
+     "aliases": [
+      "header_executable_name",
+      "filename_executable_hint"
+     ],
+     "width": 220
+    },
+    {
+     "key": "run_count",
+     "label": "실행 횟수",
+     "format": "number",
+     "width": 90
+    },
+    {
      "key": "last_run_at",
      "label": "최근 실행",
      "aliases": [
@@ -5175,24 +5483,23 @@
      "ts_kind": "run"
     },
     {
-     "key": "executable_hint",
-     "label": "실행 파일",
-     "aliases": [
-      "header_executable_name",
-      "filename_executable_hint"
-     ]
-    },
-    {
-     "key": "run_count",
-     "label": "실행 횟수",
-     "format": "number"
-    },
-    {
      "key": "last_run_times",
-     "label": "실행 시각 목록(최대 8)",
+     "label": "이전 실행(최대 8)",
      "format": "time",
-     "ts_kind": "run"
+     "ts_kind": "run",
+     "width": 180
     },
+    {
+     "key": "volumes",
+     "label": "볼륨(장치 · 일련번호 · 생성 시각)",
+     "aliases": [
+      "volume_candidates"
+     ],
+     "format": "prefetch_volumes",
+     "width": 260
+    }
+   ],
+   "aux_columns": [
     {
      "key": "prefetch_hash",
      "semantic": "hash",
@@ -5207,14 +5514,6 @@
      "label": "버전"
     },
     {
-     "key": "volumes",
-     "label": "볼륨(장치 · 일련번호 · 생성 시각)",
-     "aliases": [
-      "volume_candidates"
-     ],
-     "format": "prefetch_volumes"
-    },
-    {
      "key": "volume_count",
      "label": "볼륨 수",
      "format": "number"
@@ -5227,9 +5526,7 @@
      "key": "referenced_path_count",
      "label": "참조 파일 수",
      "format": "number"
-    }
-   ],
-   "aux_columns": [
+    },
     {
      "key": "run_time_1",
      "label": "실행 1회차",
@@ -10645,7 +10942,26 @@
       "key_path",
       "source_key_path"
      ],
-     "format": "path"
+     "format": "key_tail",
+     "width": 260
+    },
+    {
+     "key": "name",
+     "label": "값 이름",
+     "aliases": [
+      "value_name",
+      "key_name"
+     ]
+    },
+    {
+     "key": "activity_value",
+     "label": "값 데이터",
+     "aliases": [
+      "value_data",
+      "data"
+     ],
+     "format": "mono",
+     "width": 260
     },
     {
      "key": "hive_hint",
@@ -10654,27 +10970,12 @@
       "hive_name",
       "hive"
      ]
-    },
-    {
-     "key": "name",
-     "label": "이름",
-     "aliases": [
-      "value_name",
-      "key_name"
-     ]
-    },
+    }
+   ],
+   "aux_columns": [
     {
      "key": "value_type",
      "label": "값 종류"
-    },
-    {
-     "key": "activity_value",
-     "label": "데이터",
-     "aliases": [
-      "value_data",
-      "data"
-     ],
-     "format": "mono"
     },
     {
      "key": "label",
@@ -10697,9 +10998,7 @@
      "semantic": "account",
      "label": "사용자 SID",
      "format": "sid"
-    }
-   ],
-   "aux_columns": [
+    },
     {
      "key": "user_hive_scope",
      "label": "사용자 하이브"
@@ -12234,8 +12533,16 @@
      "format": "mono"
     },
     {
-     "key": "serial_is_os_generated",
-     "label": "OS가 만든 시리얼"
+     "key": "last_arrival_at",
+     "label": "마지막 연결",
+     "format": "time",
+     "ts_kind": "last-connected"
+    },
+    {
+     "key": "last_removal_at",
+     "label": "마지막 분리",
+     "format": "time",
+     "ts_kind": "last-removal"
     },
     {
      "key": "vid",
@@ -12246,6 +12553,12 @@
      "key": "pid",
      "label": "제품 ID (PID)",
      "format": "mono"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "serial_is_os_generated",
+     "label": "OS가 만든 시리얼"
     },
     {
      "key": "vendor",
@@ -12265,9 +12578,7 @@
      "aliases": [
       "device_class_id"
      ]
-    }
-   ],
-   "aux_columns": [
+    },
     {
      "key": "drive_letters",
      "label": "드라이브 문자",
@@ -12318,18 +12629,6 @@
      "label": "설치",
      "format": "time",
      "ts_kind": "installed"
-    },
-    {
-     "key": "last_arrival_at",
-     "label": "마지막 연결",
-     "format": "time",
-     "ts_kind": "last-connected"
-    },
-    {
-     "key": "last_removal_at",
-     "label": "마지막 분리",
-     "format": "time",
-     "ts_kind": "last-removal"
     },
     {
      "key": "usb_key_last_written_at",
@@ -12711,6 +13010,20 @@
    ],
    "version": 1,
    "status": "provisional",
+   "validation": {
+    "synthetic": true,
+    "real": [
+     {
+      "source": "run-subset10(사건 기간 없음 — 미평가)",
+      "result": "unevaluated",
+      "hits": 0,
+      "checked_at": "2026-10-21",
+      "note_ko": "입력 가능 행 284,292행이 있으나 사건 기간(--incident-start/--incident-end)을 주지 않아 규칙이 동작하지 않음: 0적중은 음성 근거가 아님. r6-s1-run·qa-case1·r4-v1 런은 같은 증거를 다시 처리한 것이라 독립 근거가 아님."
+     }
+    ],
+    "public": [],
+    "notes_ko": "실데이터 미평가(사건 기간 없음). 양성 실데이터 없음 — 공개 데이터셋·VM 생성은 사용자 승인 대기."
+   },
    "params": {
     "signatures": [
      {
@@ -13642,6 +13955,20 @@
    ],
    "version": 2,
    "status": "provisional",
+   "validation": {
+    "synthetic": true,
+    "real": [
+     {
+      "source": "run-subset10(입력 없음 — 해당 없음)",
+      "result": "not_applicable",
+      "hits": 0,
+      "checked_at": "2026-10-21",
+      "note_ko": "서브셋·다른 D 드라이브 런에 클라우드 동기화 업로드 행이 없어 규칙이 읽을 입력이 0행(not_applicable). 0적중은 음성 근거가 아님."
+     }
+    ],
+    "public": [],
+    "notes_ko": "실데이터 입력 없음(해당 없음). 양성 실데이터 없음 — 공개 데이터셋·VM 생성(테스트 계정)은 사용자 승인 대기."
+   },
    "params": {
     "window_minutes": 60,
     "min_count": 50,
@@ -14214,6 +14541,21 @@
    ],
    "version": 1,
    "status": "verified",
+   "validation": {
+    "synthetic": true,
+    "real": [
+     {
+      "source": "run-subset10 이벤트 로그(음성)",
+      "result": "negative",
+      "hits": 0,
+      "false_positives": 0,
+      "checked_at": "2026-10-21",
+      "note_ko": "입력 가능 이벤트 로그 292,370행에서 0적중(기대 최대 0, 통과). 서브셋에 유형 10 외부 IP 로그온이 없어 양성은 확인하지 못함. r6-s1-run·qa-case1·r4-v1 런은 같은 증거를 다시 처리한 것이라 독립 근거가 아님."
+     }
+    ],
+    "public": [],
+    "notes_ko": "실데이터는 음성 대조만(0적중·오탐 0). 양성 실데이터 없음 — 공개 데이터셋·VM 생성은 사용자 승인 대기."
+   },
    "params": {}
   },
   {
@@ -14272,6 +14614,21 @@
    ],
    "version": 1,
    "status": "verified",
+   "validation": {
+    "synthetic": true,
+    "real": [
+     {
+      "source": "run-subset10 이벤트 로그(음성)",
+      "result": "negative",
+      "hits": 0,
+      "false_positives": 0,
+      "checked_at": "2026-10-21",
+      "note_ko": "입력 가능 이벤트 로그 292,370행에서 0적중(기대 최대 0, 통과). 서브셋 Security/System에 1102·104가 없어 양성은 확인하지 못함. r6-s1-run·qa-case1·r4-v1 런은 같은 증거를 다시 처리한 것이라 독립 근거가 아님."
+     }
+    ],
+    "public": [],
+    "notes_ko": "실데이터는 음성 대조만(0적중·오탐 0). 양성 실데이터 없음 — 공개 데이터셋·VM 생성은 사용자 승인 대기."
+   },
    "params": {}
   },
   {
@@ -15378,19 +15735,78 @@
    "family": "mft",
    "grade": "A",
    "label_ko": "$SI 생성 < $FN 생성(타임스톰핑)",
-   "rationale_ko": "$STANDARD_INFORMATION 생성 시각이 $FILE_NAME 생성 시각보다 임계값 이상 앞섬: 사용자 모드 타임스톰핑.",
-   "false_positive_ko": "이동·복사, 설치기(시각 보존 복사).",
+   "rationale_ko": "$STANDARD_INFORMATION 생성 시각이 $FILE_NAME 생성 시각보다 임계값 이상 앞서고 타임스톰핑 보강 근거가 있을 때만 A: ① $SI 생성·수정·MFT 수정이 모두 초 미만 0인데 $FN 생성은 아님(초 단위 SetFileTime·타임스톰핑 도구), ② $SI 수정·MFT 수정도 $FN 생성보다 임계값 이상 앞섬(이름이 생길 때 NTFS가 $SI MFT 수정을 갱신하므로 $SI 시각을 모두 되돌리는 도구만 남기는 모양). 보강 근거 없이 사용자 쓰기 가능 경로의 실행·스크립트 파일이면 B, 그 밖은 C. 보강 근거가 없고 $FN 생성 앞뒤 ±bulk_bucket_seconds/2(이동 창, 정시 경계와 무관) 안에 같은 출처 후보가 bulk_min_records건 이상 몰렸거나 서비싱 경로(WinSxS·servicing·SoftwareDistribution)면 표시하지 않음(보강 근거가 있으면 대량이어도 표시).",
+   "false_positive_ko": "시각을 보존하는 복사·압축 해제·설치기·Windows 기능 업데이트(BSH 전체 $MFT에서 단순 $SI<$FN 174,854건, 87%가 8일에 몰림 — 대부분 2025-02-21·23 기능 업데이트). 초 미만 0은 압축(ZIP 2초 단위) 해제에서도 생기지만 그때 $SI MFT 수정은 해제 시각이라 ①에 걸리지 않음. 시각이 마이크로초로 잘려 있어 100ns 1~9틱만 있는 값은 0으로 읽힘(드묾). 정상 이동·하드 링크도 ②를 남길 수 있어 A는 검토 대상이지 판단이 아님.",
    "sources": [
     "https://www.inversecos.com/2022/04/defence-evasion-technique-timestomping.html",
+    "https://attack.mitre.org/techniques/T1070/006/",
+    "https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-setfiletime",
     "https://opus.bibliothek.uni-augsburg.de/opus4/117569",
-    "https://andreafortuna.org/2017/10/18/windows-forensics-usn-journal/",
-    "https://www.sans.org/blog/ntfs-i30-index-attributes-evidence-of-deleted-and-overwritten-files/",
-    "https://andreafortuna.org/2019/09/26/windows-forensics-analysis-of-recycle-bin-artifacts/"
+    "https://www.sans.org/blog/ntfs-i30-index-attributes-evidence-of-deleted-and-overwritten-files/"
    ],
-   "version": 1,
+   "version": 3,
    "status": "verified",
+   "validation": {
+    "synthetic": true,
+    "real": [
+     {
+      "source": "BSH 전체 이미지 $MFT(버전 1, ntfs-meta source=mft, 1,421,896 레코드)",
+      "result": "negative",
+      "hits": 174852,
+      "false_positives": 10,
+      "sample_size": 10,
+      "checked_at": "2026-10-21",
+      "note_ko": "버전 1(보강 근거 없이 A): 174,852건 적중(파일 156,999·디렉터리 17,855, 사용 중 93,010·삭제 81,844), 무작위 표본 10건 모두 시각 보존 복사·압축 해제·서비싱(오탐), 3건 수동 확인($SI<$FN 자체는 사실). 분석 자체 수 174,854와의 2건 차이는 $SI 1970-01-02인 IME 파일 2개를 1971년 하한으로 버린 것(버전 2에서 수정)."
+     },
+     {
+      "source": "BSH 전체 이미지 $MFT(버전 2 재측정)",
+      "result": "negative",
+      "hits": 8970,
+      "checked_at": "2026-10-21",
+      "note_ko": "버전 2: 후보 174,854건(분석 자체 수와 일치) 중 8,970건 표시 — A 2·B 202·C 8,766, 165,884건은 대량(같은 시간 500건 이상)·서비싱 경로라 미표시. A 2건(AhnLab DLL: $SI MFT 수정도 $FN보다 2년 앞섬 / 루트의 삭제된 GUID 이름 파일: $SI 네 시각이 같은 초 미만 0)은 이상 모양은 맞으나 조작 여부 미확정(내용·USN 없음). B 202건은 사용자 폴더 설치기·추가 기능 압축 해제(검토상 정상)."
+     },
+     {
+      "source": "BSH 전체 이미지 $MFT(버전 3 재측정)",
+      "result": "negative",
+      "hits": 8503,
+      "checked_at": "2026-10-21",
+      "note_ko": "버전 3(대량 판정을 고정 1시간 구간에서 ±30분 이동 창으로): 후보 174,854건 중 8,503건 표시 — A 2·B 202·C 8,299, 166,351건 미표시. 정시를 걸친 대량 복사 C 467건이 더 걸러짐(A·B는 그대로)."
+     }
+    ],
+    "public": [],
+    "notes_ko": "실데이터 1건(BSH 전체 $MFT): 버전 1은 오탐 폭주라 보강 근거·대량·서비싱 조건으로 재설계(버전 2), 대량 판정을 이동 창으로(버전 3). 타임스톰핑 양성 실데이터는 아직 없음(공개 데이터셋·VM 승인 대기)."
+   },
    "params": {
-    "min_delta_seconds": 60
+    "min_delta_seconds": 60,
+    "bulk_min_records": 500,
+    "bulk_bucket_seconds": 3600,
+    "suppress_path_markers": [
+     "\\windows\\winsxs\\",
+     "\\windows\\servicing\\",
+     "\\windows\\softwaredistribution\\"
+    ],
+    "executable_extensions": [
+     "exe",
+     "dll",
+     "sys",
+     "scr",
+     "com",
+     "pif",
+     "cpl",
+     "msi",
+     "bat",
+     "cmd",
+     "ps1",
+     "psm1",
+     "vbs",
+     "vbe",
+     "js",
+     "jse",
+     "wsf",
+     "hta",
+     "jar",
+     "lnk"
+    ]
    }
   },
   {
@@ -15485,6 +15901,20 @@
    ],
    "version": 1,
    "status": "verified",
+   "validation": {
+    "synthetic": true,
+    "real": [
+     {
+      "source": "BSH 전체 이미지 $MFT(해당 없음 — ADS 행 없음)",
+      "result": "not_applicable",
+      "hits": 0,
+      "checked_at": "2026-10-21",
+      "note_ko": "ntfs-meta(source=mft) 분석 행에는 ADS 정보가 없어 규칙이 읽을 입력이 0행(not_applicable). 서브셋에도 ads-stream-candidate 행 없음. 이미지 런의 windows-filesystem 행으로 검증해야 함."
+     }
+    ],
+    "public": [],
+    "notes_ko": "실데이터 해당 없음($MFT 단독 분석에 ADS 없음). 양성 실데이터 없음 — 이미지 런·공개 데이터셋·VM은 사용자 승인 대기."
+   },
    "params": {}
   },
   {
@@ -15678,6 +16108,21 @@
    ],
    "version": 1,
    "status": "verified",
+   "validation": {
+    "synthetic": true,
+    "real": [
+     {
+      "source": "run-subset10 이벤트 로그(음성)",
+      "result": "negative",
+      "hits": 0,
+      "false_positives": 0,
+      "checked_at": "2026-10-21",
+      "note_ko": "입력 가능 이벤트 로그 292,370행에서 0적중(기대 최대 0, 통과). 1149·131 공인 IP 연결이 없어 양성은 확인하지 못함. r6-s1-run·qa-case1·r4-v1 런은 같은 증거를 다시 처리한 것이라 독립 근거가 아님."
+     }
+    ],
+    "public": [],
+    "notes_ko": "실데이터는 음성 대조만(0적중·오탐 0). 양성 실데이터 없음 — 공개 데이터셋·VM 생성은 사용자 승인 대기."
+   },
    "params": {}
   },
   {

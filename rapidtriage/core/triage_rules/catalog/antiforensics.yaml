@@ -535,6 +535,16 @@ rules:
   sources: *af_sources
   version: 1
   status: provisional
+  validation:
+    synthetic: true
+    real:
+    - source: run-subset10(사건 기간 없음 — 미평가)
+      result: unevaluated
+      hits: 0
+      checked_at: '2026-10-21'
+      note_ko: '입력 가능 행 284,292행이 있으나 사건 기간(--incident-start/--incident-end)을 주지 않아 규칙이 동작하지 않음: 0적중은 음성 근거가 아님. r6-s1-run·qa-case1·r4-v1 런은 같은 증거를 다시 처리한 것이라 독립 근거가 아님.'
+    public: []
+    notes_ko: 실데이터 미평가(사건 기간 없음). 양성 실데이터 없음 — 공개 데이터셋·VM 생성은 사용자 승인 대기.
   params:
     signatures: *af_signatures
     categories:

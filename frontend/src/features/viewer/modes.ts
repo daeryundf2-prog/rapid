@@ -131,7 +131,8 @@ export function resolveModes(input: ResolveInput): ResolvedModes {
     return { modes: MODE_ORDER.map((mode) => state(mode, "선택된 행이 없습니다.")), best: null };
   }
   // Decoded artifact rows (F2): the record itself (메타 → 레코드) is what the analyst wants first.
-  const recordFirst = target.ref.collection === "artifacts";
+  // Timeline events too (C10): their row is a decoded record; the hex of a 25 MB hive is not.
+  const recordFirst = target.ref.collection === "artifacts" || target.ref.collection === "timeline";
   if (!target.sourcePath) {
     return {
       modes: MODE_ORDER.map((mode) => (mode === "meta" ? state("meta") : state(mode, REASONS.noPath))),

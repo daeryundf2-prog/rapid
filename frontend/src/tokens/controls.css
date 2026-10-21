@@ -34,7 +34,47 @@ body {
 
 :root {
   --field-edge: color-mix(in srgb, var(--line) 50%, transparent);
-  scrollbar-color: color-mix(in srgb, var(--text-subtle) 45%, transparent) transparent;
+}
+
+/* --- scrollbars (scroll review C4) ------------------------------------------
+   Visible thumbs on every scroller: --sb-thumb is ≥ 3:1 on every surface (check:contrast).
+   Standard properties first; the ::-webkit-scrollbar rules give Chromium a 12px bar with a
+   rounded thumb and a hover state (Chromium ignores them once scrollbar-color is set on the
+   same element, so they apply only where the standard pair is unsupported). */
+* {
+  scrollbar-color: var(--sb-thumb) var(--sb-track);
+  scrollbar-width: auto;
+}
+
+@supports not (scrollbar-color: auto) {
+  ::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+  }
+
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: var(--sb-track);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 6px;
+    background: var(--sb-thumb) padding-box;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--sb-thumb-hover) padding-box;
+  }
+}
+
+/* The main scrollers keep their width when the bar appears and do not chain to the page. */
+.grid-scroll,
+.thumb-scroll,
+.card-scroll,
+.viewer-panel {
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
 }
 
 /* --- text inputs, textarea, select ---------------------------------------- */

@@ -439,6 +439,17 @@
 
 /* Histogram (X15) --------------------------------------------------------- */
 
+/* Short panes (scroll review): the time histogram's fixed-height chart, axis and status line
+   scroll in the view instead of being cut off; the category list keeps its own scroller. */
+.view-pane.hist-view {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.hist-view > :not(.hist-cats) {
+  flex: none;
+}
+
 .hist-bars {
   display: flex;
   align-items: flex-end;

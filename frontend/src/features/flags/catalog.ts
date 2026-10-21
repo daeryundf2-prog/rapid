@@ -7,7 +7,9 @@
  * Contract (D1):
  *   { version, families: [{ id, label, types, kinds?, prefixes?, core_columns, aux_columns, rules }],
  *     rules: [{ id, family, grade, label_ko, rationale_ko, false_positive_ko, sources, version,
- *               status, params }] }
+ *               status, params, validation? }] }
+ *   validation (R6 S4): { synthetic, real: [{ source, hits?, false_positives?, checked_at?, note_ko? }],
+ *               public: [...], notes_ko }
  *   column: { key, label, format?, ts_kind?, width?, aliases?, semantic?, semantic_when?, derive? }
  */
 
@@ -56,6 +58,41 @@ export interface CatalogFamily {
   rules: string[];
 }
 
+/**
+ * What one real-data / public-dataset check proves (UX-round review): `positive` = a confirmed true
+ * positive was flagged; `negative` = the rule ran over real input with no confirmed true positive;
+ * `not_applicable` = no input rows; `unevaluated` = the rule could not run. Only positive/negative count.
+ */
+export type RuleValidationResult = "positive" | "negative" | "not_applicable" | "unevaluated";
+
+const VALIDATION_RESULTS: readonly RuleValidationResult[] = [
+  "positive",
+  "negative",
+  "not_applicable",
+  "unevaluated",
+];
+
+/** One real-data / public-dataset check of a rule (catalogue `validation.real` / `.public`). */
+export interface RuleValidationEntry {
+  source: string;
+  /** Missing in an older payload: read as `unevaluated` (never counted). */
+  result: RuleValidationResult;
+  hits?: number;
+  /** False positives in the reviewed sample (`sample_size` rows when given), not over every hit. */
+  false_positives?: number;
+  sample_size?: number;
+  checked_at?: string;
+  note_ko?: string;
+}
+
+/** What a rule was checked against beyond its code (R6 S4; metadata only, never a verdict). */
+export interface RuleValidation {
+  synthetic: boolean;
+  real: RuleValidationEntry[];
+  public: RuleValidationEntry[];
+  notes_ko: string;
+}
+
 export interface CatalogRule {
   id: string;
   family: string;
@@ -67,6 +104,7 @@ export interface CatalogRule {
   version: string | number;
   status: "verified" | "provisional";
   params: Record<string, unknown>;
+  validation?: RuleValidation;
 }
 
 export interface FamilyCatalog {
@@ -174,6 +212,36 @@ export function familyValueLabel(
   return def ? columnValueLabel(def, raw) : undefined;
 }
 
+function validationEntries(raw: unknown): RuleValidationEntry[] {
+  if (!Array.isArray(raw)) return [];
+  const out: RuleValidationEntry[] = [];
+  for (const entry of raw) {
+    if (!isRecord(entry) || typeof entry.source !== "string" || !entry.source.trim()) continue;
+    const result = VALIDATION_RESULTS.find((item) => item === entry.result) ?? "unevaluated";
+    out.push({
+      source: entry.source,
+      result,
+      ...(typeof entry.hits === "number" ? { hits: entry.hits } : {}),
+      ...(typeof entry.false_positives === "number" ? { false_positives: entry.false_positives } : {}),
+      ...(typeof entry.sample_size === "number" ? { sample_size: entry.sample_size } : {}),
+      ...(typeof entry.checked_at === "string" && entry.checked_at ? { checked_at: entry.checked_at } : {}),
+      ...(typeof entry.note_ko === "string" && entry.note_ko ? { note_ko: entry.note_ko } : {}),
+    });
+  }
+  return out;
+}
+
+/** A rule's `validation` block; undefined when absent or malformed. */
+function ruleValidation(raw: unknown): RuleValidation | undefined {
+  if (!isRecord(raw) || typeof raw.synthetic !== "boolean") return undefined;
+  return {
+    synthetic: raw.synthetic,
+    real: validationEntries(raw.real),
+    public: validationEntries(raw.public),
+    notes_ko: typeof raw.notes_ko === "string" ? raw.notes_ko : "",
+  };
+}
+
 /** Validate a catalogue payload; malformed entries are dropped, a payload without families is null. */
 export function normalizeCatalog(raw: unknown): FamilyCatalog | null {
   if (!isRecord(raw) || !Array.isArray(raw.families)) return null;
@@ -200,6 +268,7 @@ export function normalizeCatalog(raw: unknown): FamilyCatalog | null {
   const rules: CatalogRule[] = [];
   for (const entry of Array.isArray(raw.rules) ? raw.rules : []) {
     if (!isRecord(entry) || typeof entry.id !== "string" || !isGrade(entry.grade)) continue;
+    const validation = ruleValidation(entry.validation);
     rules.push({
       id: entry.id,
       family: typeof entry.family === "string" ? entry.family : "",
@@ -211,6 +280,7 @@ export function normalizeCatalog(raw: unknown): FamilyCatalog | null {
       version: typeof entry.version === "number" || typeof entry.version === "string" ? entry.version : "",
       status: entry.status === "provisional" ? "provisional" : "verified",
       params: isRecord(entry.params) ? entry.params : {},
+      ...(validation ? { validation } : {}),
     });
   }
   return {
@@ -348,6 +418,31 @@ export function familyForKind(kind: string | undefined): CatalogFamily | undefin
   const perFamily = new Map<CatalogFamily, number>();
   let total = 0;
   for (const [type, count] of Object.entries(counts)) {
+    if (typeof count !== "number" || count <= 0) continue;
+    total += count;
+    const family = familyForType(type);
+    if (family) perFamily.set(family, (perFamily.get(family) ?? 0) + count);
+  }
+  let best: [CatalogFamily, number] | undefined;
+  for (const entry of perFamily) if (!best || entry[1] > best[1]) best = entry;
+  return best && total > 0 && best[1] / total > MAJORITY_SHARE ? best[0] : undefined;
+}
+
+/**
+ * Primary family of a node / filter listing several types of one kind (timeline/grid readability
+ * C6): the family holding more than half of those types' rows (`/tree` counts) — rows of the
+ * other types keep their 유형 chip. Undefined without counts or a majority (mixed layout).
+ */
+export function majorityFamilyForTypes(
+  kind: string | undefined,
+  types: readonly string[] | undefined,
+): CatalogFamily | undefined {
+  const counts = kind ? kindTypeCounts.get(kind) : undefined;
+  if (!counts || !types?.length) return undefined;
+  const perFamily = new Map<CatalogFamily, number>();
+  let total = 0;
+  for (const type of types) {
+    const count = counts[type];
     if (typeof count !== "number" || count <= 0) continue;
     total += count;
     const family = familyForType(type);

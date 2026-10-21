@@ -24,7 +24,7 @@ import {
 import { announce } from "../../a11y";
 import { DisabledReason } from "../../a11y/primitives";
 import { ApiError, downloadFile } from "../../api/client";
-import { DOCS_MATCHED } from "../../api/collections";
+import { DOCS_MATCHED, locateTimelineRow } from "../../api/collections";
 import type { RunExtractResult } from "../../api/extract";
 import { getRunTree } from "../../api/runs";
 import type { CollectionRef, GridRow } from "../../contracts/collection";
@@ -105,6 +105,15 @@ const AXIOM_PINNED = "tagstatus";
 
 /** Header-sort reasons on the artifacts grid (server sort only; no silent "loaded rows only" sort). */
 export const SORT_COLUMN_REASON = "이 열은 전체 정렬을 지원하지 않습니다";
+/** Header note of a family core column with no value in any loaded row (kept, not hidden). */
+export const KEPT_EMPTY_COLUMN_NOTE = "이 페이지 값 없음";
+/**
+ * A timeline written before the readability builder (UX-round review). There is no regenerate
+ * action in the console yet, so the hint says what regenerating would change; nothing rebuilds
+ * automatically.
+ */
+export const TIMELINE_LEGACY_HINT =
+  "이 런의 타임라인은 이전 형식입니다 — 다시 생성하면 요약·중복 제거가 적용됩니다";
 export const SORT_KIND_REASON = "유형을 하나 선택하면 전체 정렬할 수 있습니다";
 export const SORT_ANALYSIS_REASON = "분석 결과를 선택하면 전체 정렬할 수 있습니다";
 /** A sorted deep link re-asks for the row's position while the index builds (1 s apart). */
@@ -304,12 +313,25 @@ export function DataGrid(props: DataGridProps = {}) {
   const promotedCols = useMemo(() => effectiveFieldCols(route.cols, fieldScope), [route.cols, fieldScope]);
   const promotedKeys = useMemo(() => colsToKeys(promotedCols), [promotedCols]);
   const q = route.q;
+  // Timeline (timeline/grid readability C3 / C1): the text box searches every event on the server
+  // (`q=`), and events of one target · second · kind of time are one row unless ungrouped.
+  const serverSearch = ref.id === "timeline";
+  const serverQuery = serverSearch ? q.trim() : "";
+  const [timelineGrouped, setTimelineGrouped] = useState(true);
   const treeTypes = useMemo(
     () => (ref.id === "artifacts" ? artifactTypesOfTree(runTree.data?.nodes, ref.kind) : []),
     [ref.id, ref.kind, runTree.data],
   );
   const cq = useCollectionQuery(
-    { ref, offset: 0, limit: PAGE_SIZE, text: q || undefined, search: route.search, sort: routeSort },
+    {
+      ref,
+      offset: 0,
+      limit: PAGE_SIZE,
+      text: q || undefined,
+      search: route.search,
+      sort: routeSort,
+      ...(serverSearch ? { group: timelineGrouped } : {}),
+    },
     { runId, typeOptions: treeTypes },
   );
   const analysisRowTypesSig =
@@ -493,7 +515,8 @@ export function DataGrid(props: DataGridProps = {}) {
     [fieldScope, promotedCols, setCols],
   );
 
-  const needle = q.trim();
+  // A server-searched listing (timeline) never re-filters its rows by the text on the client.
+  const needle = serverSearch ? "" : q.trim();
   const clientSorting = !serverSorted && sorting.length > 0;
   const compactMode = needle !== "" || clientSorting;
 
@@ -515,17 +538,23 @@ export function DataGrid(props: DataGridProps = {}) {
   // loaded row goes (시각, 선별 … — review #9), then the lowest-priority columns go while their
   // minimum widths exceed the grid width. 항목 (the first priority id) always stays.
   const widthPriority = preset === "analysis" ? def.widthPriority?.(ref, filterTypes) : undefined;
+  // Core columns of the grid's family are never hidden for one page without values (P1).
+  const keepWhenEmptySig = (def.keepWhenEmpty?.(ref, filterTypes) ?? []).join("|");
   const loadedRows = cq.loadedRows;
-  const emptyIds = useMemo(
-    () =>
-      widthPriority
-        ? emptyColumnIds(orderedColumns, loadedRows, {
-            candidates: widthPriority.slice(1),
-            keep: pinnedColumns,
-          })
-        : [],
-    [widthPriority, orderedColumns, loadedRows, pinnedColumns],
-  );
+  const emptyIds = useMemo(() => {
+    if (!widthPriority) return [];
+    const keep = new Set(keepWhenEmptySig ? keepWhenEmptySig.split("|") : []);
+    return emptyColumnIds(orderedColumns, loadedRows, {
+      candidates: widthPriority.slice(1).filter((id) => !keep.has(id)),
+      keep: pinnedColumns,
+    });
+  }, [widthPriority, keepWhenEmptySig, orderedColumns, loadedRows, pinnedColumns]);
+  // A core column kept although no loaded row has a value says so in its header (UX-round review):
+  // the column stays (the next page may fill it), the blank is explained.
+  const keptEmptyIds = useMemo(() => {
+    if (!keepWhenEmptySig) return new Set<string>();
+    return new Set(emptyColumnIds(orderedColumns, loadedRows, { candidates: keepWhenEmptySig.split("|") }));
+  }, [keepWhenEmptySig, orderedColumns, loadedRows]);
   const autoHidden = useMemo(() => {
     const out = new Map<string, AutoHideReason>();
     if (!widthPriority) return out;
@@ -754,6 +783,38 @@ export function DataGrid(props: DataGridProps = {}) {
     };
   }, [locateKey, sortReady, runId, artifactKind, routeSort, locateTarget, located, locateRow]);
 
+  // Timeline deep link while grouped / searched / filtered: rows are not at their record index,
+  // so the server says where the event's row is (`locate=` with the same query; C1 / C3).
+  const timelineLocateTarget =
+    ref.id === "timeline" && route.rowRef?.collection === "timeline" ? indexFromRef(route.rowRef) : null;
+  const timelineConditions = cq.query.rowConditions;
+  const timelineLocateKey =
+    timelineLocateTarget !== null &&
+    (timelineGrouped || serverQuery !== "" || Object.keys(timelineConditions ?? {}).length > 0)
+      ? `${runId}|timeline|${JSON.stringify([timelineConditions ?? null, serverQuery, timelineGrouped])}|${timelineLocateTarget}`
+      : null;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the query is identified by timelineLocateKey
+  useEffect(() => {
+    if (!timelineLocateKey || timelineLocateTarget === null || restoredRow.current || !runId) return;
+    if (located?.key === timelineLocateKey) return;
+    const controller = new AbortController();
+    locateTimelineRow(
+      runId,
+      timelineLocateTarget,
+      timelineConditions,
+      { q: serverQuery, group: timelineGrouped },
+      controller.signal,
+    )
+      .then((position) => {
+        if (!controller.signal.aborted) setLocated({ key: timelineLocateKey, position });
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setLocated({ key: timelineLocateKey, position: null });
+      });
+    return () => controller.abort();
+  }, [timelineLocateKey, located]);
+  const activeLocateKey = locateKey ?? timelineLocateKey;
+
   // Deep link: restore `row=` (focus + scroll) once, resolving the server page from the locator.
   useEffect(() => {
     const target = route.rowRef;
@@ -764,8 +825,8 @@ export function DataGrid(props: DataGridProps = {}) {
       return;
     }
     let idx: number | null;
-    if (locateKey) {
-      if (located?.key !== locateKey) return; // waiting for the sorted position
+    if (activeLocateKey) {
+      if (located?.key !== activeLocateKey) return; // waiting for the server position
       idx = located.position;
     } else {
       idx = indexFromRef(target);
@@ -776,7 +837,9 @@ export function DataGrid(props: DataGridProps = {}) {
     }
     ensureRange(idx, idx);
     const row = cq.getRow(idx);
-    if (row && row.ref.locator !== target.locator) {
+    // A grouped timeline row stands for its members: the linked event may be one of them.
+    const members = Array.isArray(row?.fields.groupMembers) ? (row?.fields.groupMembers as unknown[]) : [];
+    if (row && row.ref.locator !== target.locator && !members.includes(indexFromRef(target))) {
       // Path-filtered (unsorted) pages: the locator index is not the display position; leave focus alone.
       restoredRow.current = true;
       return;
@@ -792,7 +855,7 @@ export function DataGrid(props: DataGridProps = {}) {
     ensureRange,
     cq.getRow,
     virtualizer,
-    locateKey,
+    activeLocateKey,
     located,
     routeSort,
     serverPath,
@@ -1207,20 +1270,26 @@ export function DataGrid(props: DataGridProps = {}) {
         ? { icon: "search", text: "검색어를 입력하면 결과가 여기에 표시됩니다." }
         : sortBuilding
           ? { icon: "clock", text: "전체 정렬 인덱스를 만드는 중입니다. 끝나면 정렬된 순서로 표시합니다." }
-          : compactMode && needle
-            ? { icon: "filter", text: "조건에 맞는 행이 없습니다. 불러온 행 안에서만 필터합니다." }
-            : isAnalysis && ref.kind
-              ? {
-                  icon: "inbox",
-                  text: "이 노드에는 결과가 없습니다.",
-                  action: { command: runCommandId(ref.kind), label: "분석 실행" },
-                }
-              : compactMode
-                ? { icon: "filter", text: "조건에 맞는 행이 없습니다. 불러온 행 안에서만 필터합니다." }
-                : { icon: "inbox", text: "이 노드에는 표시할 행이 없습니다." };
+          : serverQuery
+            ? { icon: "search", text: "검색어에 맞는 이벤트가 없습니다. (서버 검색: 전체 이벤트)" }
+            : compactMode && needle
+              ? { icon: "filter", text: "조건에 맞는 행이 없습니다. 불러온 행 안에서만 필터합니다." }
+              : isAnalysis && ref.kind
+                ? {
+                    icon: "inbox",
+                    text: "이 노드에는 결과가 없습니다.",
+                    action: { command: runCommandId(ref.kind), label: "분석 실행" },
+                  }
+                : compactMode
+                  ? { icon: "filter", text: "조건에 맞는 행이 없습니다. 불러온 행 안에서만 필터합니다." }
+                  : { icon: "inbox", text: "이 노드에는 표시할 행이 없습니다." };
 
   const serverFiltering =
-    cq.serverColumnFilters || storeTypes.length > 0 || Boolean(storePath) || Boolean(serverPathFilter(q));
+    cq.serverColumnFilters ||
+    storeTypes.length > 0 ||
+    Boolean(storePath) ||
+    Boolean(serverPathFilter(q)) ||
+    serverQuery !== "";
   const loadingMessage = serverFiltering
     ? "서버에서 조건에 맞는 행을 찾는 중입니다 … (큰 유형은 수 초 걸릴 수 있습니다)"
     : "목록을 불러오는 중입니다 …";
@@ -1362,6 +1431,29 @@ export function DataGrid(props: DataGridProps = {}) {
         </p>
       ) : null}
 
+      {serverSearch && cq.pageMeta?.timeline_legacy === true ? (
+        <p className="flag-grid-notice" role="note" data-testid="grid-timeline-legacy">
+          {TIMELINE_LEGACY_HINT}
+        </p>
+      ) : null}
+
+      {serverSearch ? (
+        <p className="grid-sortstatus" data-testid="grid-group-status">
+          {timelineGrouped
+            ? "같은 대상·같은 초·같은 시각 종류의 이벤트는 한 행으로 묶어 출처 수로 표시합니다."
+            : "이벤트를 하나씩 표시합니다(묶지 않음)."}{" "}
+          <button
+            type="button"
+            className="grid-btn grid-btn-quiet"
+            data-testid="grid-group-toggle"
+            aria-pressed={timelineGrouped}
+            onClick={() => setTimelineGrouped((on) => !on)}
+          >
+            {timelineGrouped ? "묶지 않고 보기" : "출처 묶어 보기"}
+          </button>
+        </p>
+      ) : null}
+
       {statusLines.map((line) => (
         <p key={line.id} className="grid-sortstatus" data-testid={`grid-${line.id}-status`}>
           {line.text}
@@ -1425,8 +1517,14 @@ export function DataGrid(props: DataGridProps = {}) {
                   const reason = sortReason(spec);
                   const hint = hintsActive ? spec.emptyHint : undefined;
                   const hintId = `${hintPrefix}-empty-${spec.id}`;
+                  const noValues = !hint && keptEmptyIds.has(spec.id);
+                  const noValuesId = `${hintPrefix}-novalue-${spec.id}`;
                   const describedBy =
-                    [spec.sortHint ? `${hintPrefix}-${spec.id}` : "", hint ? hintId : ""]
+                    [
+                      spec.sortHint ? `${hintPrefix}-${spec.id}` : "",
+                      hint ? hintId : "",
+                      noValues ? noValuesId : "",
+                    ]
                       .filter(Boolean)
                       .join(" ") || undefined;
                   return (
@@ -1470,6 +1568,16 @@ export function DataGrid(props: DataGridProps = {}) {
                           </span>
                           <EmptyHintLink hint={hint} hintId={hintId} />
                         </>
+                      ) : null}
+                      {noValues ? (
+                        <span
+                          id={noValuesId}
+                          className="grid-hcell-novalue"
+                          title={KEPT_EMPTY_COLUMN_NOTE}
+                          data-testid={`grid-novalue-${spec.id}`}
+                        >
+                          {KEPT_EMPTY_COLUMN_NOTE}
+                        </span>
                       ) : null}
                       <div
                         aria-hidden="true"
@@ -1591,7 +1699,8 @@ export function DataGrid(props: DataGridProps = {}) {
         backend={cq.backend}
         elapsedMs={cq.elapsedMs}
         truncated={cq.truncated}
-        filtering={needle !== ""}
+        filtering={needle !== "" || serverQuery !== ""}
+        serverSearch={serverQuery !== ""}
         sorting={clientSorting}
         loadedCount={cq.loadedCount}
         canLoadMore={compactMode && cq.canLoadMore}

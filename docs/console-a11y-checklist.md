@@ -14,8 +14,9 @@ Verification legend: **U** = vitest unit (`frontend/src/a11y/a11y.test.tsx` and 
 | 1.4.1 Use of color | Review status, deleted marker and tags also carry text or icon | 4.5 tokens | Component review | M |
 | 1.4.3 Contrast (minimum) | Text >= 4.5:1 in dark, light, light-OS themes | 4.4 contrast | Pair table in `check-contrast.mjs` | C |
 | 1.4.4 Resize text | 200% zoom without loss | Q-A7 | rem-based font tokens, manual zoom | M |
-| 1.4.10 Reflow | No 2-D scroll at 320 CSS px except grid/hex viewer | Q-A7 | Manual | M |
-| 1.4.11 Non-text contrast | Focus ring, control borders, status/tag indicators >= 3:1 | 4.4 contrast | `ui` pairs in `check-contrast.mjs` | C |
+| 1.4.10 Reflow | No 2-D scroll at 320 CSS px except grid/hex viewer; below 900 px the left panel is a drawer (stage-rail 탐색 / Esc), the top bar and filter line wrap below 640 px, and the document never scrolls (`scrollWidth` ≤ viewport) | Q-A7, scroll review C2 | `treePane.test.tsx`, Playwright scroll probe (400×950, 800×600) | U, M |
+| 1.4.11 Non-text contrast | Focus ring, control borders, status/tag indicators, scrollbar thumbs (`--sb-thumb`) and pane resize grips (`--resize-grip`) >= 3:1 | 4.4 contrast, scroll review C3/C4 | `ui` pairs in `check-contrast.mjs` | C |
+| 2.1.1 Keyboard (scroll) | Every list that does not fit scrolls in its own box (tree list, stage panels, help body, chip strip): focus moves (End, Tab) reveal items without scrolling a clipped frame; pane handles are focusable separators (arrows resize, double-click resets) | scroll review C1/C3/C6 | `scrollLayout.test.ts`, Playwright scroll probe | U, M |
 | 1.4.12 Text spacing | No clipping with user spacing overrides | Q-A7 | Manual bookmarklet | M |
 | 1.4.13 Content on hover/focus | Disabled-reason tooltip shows on focus and hover, dismissible with Esc, stays while hovered | U3 / 4.4 | `DisabledReason` | U, M |
 | 2.1.1 Keyboard | Every function reachable: tree, grid, viewer tabs, palette, review marks | Q-A1 | Roving tabindex, shortcut map | U, E |

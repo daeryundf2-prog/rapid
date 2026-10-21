@@ -7,7 +7,16 @@
 
 import type { GridRow } from "../../contracts/collection";
 import { flatValue } from "../../utils/flatValue";
-import { type CatalogRule, familyValueLabel, GRADES, type Grade, isGrade, ruleById } from "./catalog";
+import {
+  type CatalogRule,
+  familyValueLabel,
+  GRADES,
+  type Grade,
+  isGrade,
+  type RuleValidation,
+  type RuleValidationEntry,
+  ruleById,
+} from "./catalog";
 
 export interface RowFlag {
   id: string;
@@ -144,6 +153,39 @@ export function flagCitation(flag: RowFlag, rule: CatalogRule | undefined = rule
 /** The flag's rule is provisional ("검증 필요"): the row's status, else the catalogue's. */
 export function isProvisional(flag: RowFlag): boolean {
   return (flag.status ?? ruleById(flag.id)?.status) === "provisional";
+}
+
+/**
+ * One part of the validation line for the real-data or public-dataset checks. Only `positive` /
+ * `negative` entries are validation ("실데이터 음성 1건 · 양성 0건"); entries that are all
+ * not-applicable / unevaluated say so ("실데이터 해당 없음", "실데이터 미평가") and are never counted.
+ */
+function validationPart(name: string, entries: readonly RuleValidationEntry[]): string | null {
+  if (!entries.length) return null;
+  const positive = entries.filter((entry) => entry.result === "positive").length;
+  const negative = entries.filter((entry) => entry.result === "negative").length;
+  if (positive || negative) return `${name} 음성 ${negative}건 · 양성 ${positive}건`;
+  const states: string[] = [];
+  if (entries.some((entry) => entry.result === "not_applicable")) states.push("해당 없음");
+  if (entries.some((entry) => entry.result === "unevaluated")) states.push("미평가");
+  return `${name} ${states.join("·")}`;
+}
+
+/**
+ * One Korean line on what a rule was checked against (R6 S4, catalogue `validation`; UX-round review:
+ * N/A entries are not counted): "검증: 합성 픽스처만" · "검증: 실데이터 음성 1건 · 양성 0건 · 합성 픽스처" ·
+ * "검증: 실데이터 해당 없음 · 합성 픽스처". Null when the rule carries no block.
+ */
+export function validationLine(rule: Pick<CatalogRule, "validation"> | undefined): string | null {
+  const validation: RuleValidation | undefined = rule?.validation;
+  if (!validation) return null;
+  const parts = [
+    validationPart("실데이터", validation.real),
+    validationPart("공개 데이터셋", validation.public),
+  ].filter((part): part is string => part !== null);
+  if (!parts.length) return validation.synthetic ? "검증: 합성 픽스처만" : "검증: 기록 없음";
+  if (validation.synthetic) parts.push("합성 픽스처");
+  return `검증: ${parts.join(" · ")}`;
 }
 
 /** Label of a rule id for chips / the tree (catalogue label, else the id). */

@@ -336,6 +336,8 @@ export interface GridFooterProps {
   filtering: boolean;
   /** Path text sent to the server (artifacts `path_contains`); other columns still filter the loaded rows. */
   serverPathFilter?: string;
+  /** The text is searched on the server over every row (timeline `q=`), not the loaded rows. */
+  serverSearch?: boolean;
   scanned?: number;
   sorting: boolean;
   loadedCount: number;
@@ -377,9 +379,11 @@ export function GridFooter(props: GridFooterProps) {
       {props.filtering ? (
         <span className="grid-note">
           필터 결과 {formatCount(props.shown)}건 ·{" "}
-          {props.serverPathFilter
-            ? `경로는 서버에서 검색${props.scanned ? `(${formatCount(props.scanned)}행 스캔)` : ""}하고, 다른 열은 불러온 ${formatCount(props.loadedCount)}행에서만 찾습니다.`
-            : `서버 필터 미지원: 불러온 ${formatCount(props.loadedCount)}행에서만 찾습니다.`}
+          {props.serverSearch
+            ? "서버 검색: 전체 이벤트에서 요약·대상·경로·이벤트 이름을 찾습니다."
+            : props.serverPathFilter
+              ? `경로는 서버에서 검색${props.scanned ? `(${formatCount(props.scanned)}행 스캔)` : ""}하고, 다른 열은 불러온 ${formatCount(props.loadedCount)}행에서만 찾습니다.`
+              : `서버 필터 미지원: 불러온 ${formatCount(props.loadedCount)}행에서만 찾습니다.`}
         </span>
       ) : null}
       {props.sorting ? (

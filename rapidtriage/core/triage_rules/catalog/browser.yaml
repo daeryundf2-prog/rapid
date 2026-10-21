@@ -12,15 +12,20 @@ families:
     - visit_time
     format: time
     ts_kind: visited
+  - key: title
+    label: 제목
   - key: url
     semantic: url
     label: 주소 (URL)
     format: url
-  - key: title
-    label: 제목
   - key: visit_count
     label: 방문 수
     format: number
+  - key: browser
+    label: 브라우저
+  - key: profile
+    label: 프로필
+  aux_columns:
   - key: typed_count
     label: 직접 입력 수
     format: number
@@ -42,16 +47,11 @@ families:
     label: 머문 시간
     aliases:
     - visit_duration_micros
-  aux_columns:
   - key: visit_time_raw
     label: 방문 시각(원문 WebKit)
     format: mono
   - key: domain
     label: 도메인
-  - key: browser
-    label: 브라우저
-  - key: profile
-    label: 프로필
   - key: user
     semantic: account
     label: 사용자
@@ -157,15 +157,20 @@ families:
     label: 마지막 방문
     format: time
     ts_kind: last-visited
+  - key: title
+    label: 제목
   - key: url
     semantic: url
     label: 주소 (URL)
     format: url
-  - key: title
-    label: 제목
   - key: visit_count
     label: 방문 수
     format: number
+  - key: browser
+    label: 브라우저
+  - key: profile
+    label: 프로필
+  aux_columns:
   - key: typed_count
     label: 직접 입력 수
     format: number
@@ -176,11 +181,6 @@ families:
     format: mono
   - key: domain
     label: 도메인
-  - key: browser
-    label: 브라우저
-  - key: profile
-    label: 프로필
-  aux_columns:
   - key: user
     semantic: account
     label: 사용자
