@@ -32,6 +32,14 @@ request waits for a column -- a request never waits behind the throttle). A
 header that does not match is ignored and the index rebuilt; a folder that cannot be written -- or
 ``RAPIDTRIAGE_INDEX_PERSIST=0`` (``index_cache.index_persist_enabled``) -- keeps the index in
 memory only. Any index failure falls back to the predicate scan -- never a 500.
+
+Display grouping (``group=1``, timeline/grid readability C1 rule 2) adds a fourth saved column,
+``group`` (``array('i')``): the display-group id of each event (index format version 3). The
+search text of ``q=`` (C3, :class:`SearchColumn`, the same text :func:`event_matches_search`
+scans) lives in memory only, built on the first search. Grouping runs after the position
+selection: the matched positions of the conditions and ``q`` are reduced to one leader per group
+(``MATCH_CACHE`` keeps the leaders, so later pages are a slice), and each page row lists its
+members among those matched positions.
 """
 
 from __future__ import annotations
@@ -46,7 +54,9 @@ import struct
 import sys
 import threading
 import time
+import unicodedata
 from array import array
+from bisect import bisect_left
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from pathlib import Path
 
@@ -73,7 +83,7 @@ LOGGER = logging.getLogger(__name__)
 
 INDEX_FILE_NAME = "rapidtriage-timeline-index.bin"
 INDEX_MAGIC = b"RTTLIDX1"
-INDEX_VERSION = 2  # 2: header carries the timeline digest (adversarial review of R6 S3)
+INDEX_VERSION = 3  # 2: header carries the timeline digest (adversarial review of R6 S3); 3: + group ids
 MISSING = -(2**63)  # INT64_MIN: no parseable row time
 US = dt.timedelta(microseconds=1)
 HOUR_US = 3_600_000_000
@@ -90,8 +100,25 @@ CONTENT_BITS: dict[str, int] = {content_id: 1 << bit for bit, content_id in enum
 _PARTIAL_KEYS = frozenset({"parser_error", "parse_status", "decrypt_status", "coverage", *PARTIAL_TRUNCATION_KEYS})
 _TARGET_KEYS = frozenset(TARGET_PATH_KEYS)
 _HEADER_LEN = struct.Struct("<I")
-TIME, CONTENT, PARTIAL = "time", "content", "partial"
-COLUMNS: tuple[str, ...] = (TIME, CONTENT, PARTIAL)
+TIME, CONTENT, PARTIAL, GROUP = "time", "content", "partial", "group"
+COLUMNS: tuple[str, ...] = (TIME, CONTENT, PARTIAL, GROUP)
+# ``group=1`` (timeline/grid readability C1 rule 2): events about the same thing at the same second
+# with the same kind of time -- one file's creation time read from a Jump List, a shortcut and a
+# ShimCache entry -- are one display row (``source_count`` / ``sources``), the events themselves
+# stay listed under it (``group_members``). Key: (UTC second, offset/naive, folded target path /
+# executable / URL, time-kind family); an event without a target or a time is its own row. Kinds
+# of a different family never group (a file's creation is not its modification). The group id
+# per event is the ``group`` column (saved in the index file with the others).
+GROUP_TARGET_KEYS: tuple[str, ...] = ("target_path", "executable_path", "url")
+_KIND_FAMILIES: dict[str, str] = {
+    **dict.fromkeys(("created", "target-created", "item-created", "fs-created", "file-created", "creation"), "created"),
+    **dict.fromkeys(
+        ("modified", "target-modified", "item-modified", "fs-modified", "file-modified", "file-last-modified", "last-modified"),
+        "modified",
+    ),
+    **dict.fromkeys(("accessed", "target-accessed", "item-accessed", "fs-accessed", "file-accessed", "last-accessed"), "accessed"),
+}
+NO_GROUP = -1
 # Timelines up to this many events complete their index (and file) inside the first request;
 # larger ones finish the remaining columns and the file in a background thread.
 SYNC_COMPLETE_MAX_EVENTS = 50_000
@@ -113,6 +140,8 @@ def _rules_fingerprint() -> str:
             sorted(_NEGATIONS),
             sorted(_PARTIAL_KEYS),
             _FRACTION.pattern,
+            GROUP_TARGET_KEYS,
+            sorted(_KIND_FAMILIES.items()),
         )
     )
     return hashlib.sha256(rules.encode("utf-8")).hexdigest()[:16]
@@ -316,6 +345,229 @@ def partial_column(events: Sequence[object], pause: Pause = None) -> bytearray:
     return flags
 
 
+# --- search text (q=) and display groups (group=1) ---------------------------------------------------
+#
+# ``q`` (timeline/grid readability C3) is a case-insensitive "contains" over what an examiner reads
+# of an event: its summary, the thing it is about (target path / executable / URL / key), its source
+# path, event type and Korean event name. Per event the column keeps the folded summary + targets
+# ("own" text); the path / type / label -- shared by many events -- are folded once per distinct
+# value ("shared" text, by id). :func:`event_search_parts` defines both, for the column and the
+# predicate scan alike, so the index answers exactly what the scan answers.
+
+SEARCH_TARGET_KEYS: tuple[str, ...] = tuple(dict.fromkeys((*TARGET_PATH_KEYS, "url", "key_path")))
+SEARCH_MAX_LENGTH = 200  # q is a substring, not a document
+
+
+def fold_text(value: str) -> str:
+    """Case-insensitive, NFC-normalised text (``artifact_filter.nfc_fold``); ASCII just lower-cased."""
+    if value.isascii():
+        return value.lower()
+    return unicodedata.normalize("NFC", value).casefold()
+
+
+def search_needle(q: str | None) -> str:
+    """The folded ``q`` (whitespace runs -> one space; ``""`` = no search)."""
+    if not q:
+        return ""
+    return fold_text(" ".join(q.split())[:SEARCH_MAX_LENGTH])
+
+
+def event_search_parts(row: object) -> tuple[str, str]:
+    """``(own, shared)`` raw texts of one event (not folded); ``("", "")`` for a non-object."""
+    if not _is_mapping(row):
+        return "", ""
+    details = _details_of(row)  # type: ignore[arg-type]
+    own: list[str] = []
+    summary = row.get("summary")  # type: ignore[union-attr]
+    if type(summary) is str and summary:
+        own.append(summary)
+    if details:
+        for key in SEARCH_TARGET_KEYS:
+            value = details.get(key)
+            if type(value) is str and value and value not in own:
+                own.append(value)
+    shared: list[str] = []
+    for value in (
+        row.get("path"),  # type: ignore[union-attr]
+        row.get("event_type"),  # type: ignore[union-attr]
+        details.get("event_label_ko") if details else None,
+    ):
+        if type(value) is str and value:
+            shared.append(value)
+    return "\n".join(own), "\n".join(shared)
+
+
+def event_matches_search(row: object, needle: str) -> bool:
+    """Predicate form of ``q`` (the scan the search column replaces)."""
+    if not needle:
+        return True
+    own, shared = event_search_parts(row)
+    return needle in fold_text(own) or needle in fold_text(shared)
+
+
+class SearchColumn:
+    """Folded own text per event + a shared-text id per event."""
+
+    __slots__ = ("own", "shared", "shared_ids")
+
+    def __init__(self, own: list[str], shared_ids: array, shared: list[str]) -> None:
+        self.own = own
+        self.shared_ids = shared_ids
+        self.shared = shared
+
+    def positions(self, needle: str, candidates: Iterable[int] | None = None) -> list[int]:
+        """Positions (of ``candidates``, default all) whose text contains ``needle``."""
+        hits = bytes(1 if needle in text else 0 for text in self.shared)
+        own, ids = self.own, self.shared_ids
+        if candidates is None:
+            return [i for i, text in enumerate(own) if needle in text or hits[ids[i]]]
+        return [i for i in candidates if needle in own[i] or hits[ids[i]]]
+
+
+_SEARCH_TARGET_SET = frozenset(SEARCH_TARGET_KEYS)
+
+
+def _as_dict(value: object) -> Mapping[str, object] | None:
+    if type(value) is dict:
+        return value  # type: ignore[return-value]
+    return value if isinstance(value, Mapping) else None
+
+
+def _str_or_empty(values: Iterable[object]) -> list[str]:
+    return [value if type(value) is str else "" for value in values]
+
+
+def search_column(events: Sequence[object]) -> SearchColumn:
+    """:func:`event_search_parts` of every event, folded. Built column by column with list
+    comprehensions (a per-event Python loop cost ~4 us an event): the target keys are read only for
+    events whose details hold one, the shared text is keyed by its raw ``(path, event_type,
+    event_label_ko)`` values and folded once per distinct key."""
+    empty: dict[str, object] = {}
+    rows = [found if found is not None else empty for found in map(_as_dict, events)]
+    details = [_as_dict(row.get("details")) for row in rows]
+    texts = _str_or_empty(row.get("summary") for row in rows)
+    target_set, target_keys = _SEARCH_TARGET_SET, SEARCH_TARGET_KEYS
+    for i in [i for i, found in enumerate(details) if found is not None and not target_set.isdisjoint(found)]:
+        found = details[i]
+        assert found is not None
+        parts = [texts[i]] if texts[i] else []
+        for key in target_keys:
+            value = found.get(key)
+            if type(value) is str and value and value not in parts:
+                parts.append(value)
+        texts[i] = "\n".join(parts)
+    own = [text.lower() if text.isascii() else fold_text(text) for text in texts]
+    keys = zip(
+        _str_or_empty(row.get("path") for row in rows),
+        _str_or_empty(row.get("event_type") for row in rows),
+        _str_or_empty(found.get("event_label_ko") if found is not None else None for found in details),
+    )
+    by_key: dict[tuple[str, str, str], int] = {}
+    setdefault = by_key.setdefault
+    ids = array("i", [setdefault(key, len(by_key)) for key in keys])
+    shared = [fold_text("\n".join(part for part in key if part)) for key in by_key]
+    return SearchColumn(own, ids, shared)
+
+
+def kind_family(kind: object) -> str:
+    """The family of a ``timestamp_kind`` (created / modified / accessed, else the kind itself)."""
+    text = str(kind or "").strip().lower()
+    return _KIND_FAMILIES.get(text, text)
+
+
+class GroupColumn:
+    """Group id per event (:data:`NO_GROUP` = never grouped) and the positions of every group
+    with two or more events."""
+
+    __slots__ = ("ids", "members")
+
+    def __init__(self, ids: array) -> None:
+        self.ids = ids
+        counts: dict[int, int] = {}
+        get = counts.get
+        for group in ids:
+            if group != NO_GROUP:
+                counts[group] = get(group, 0) + 1
+        members: dict[int, list[int]] = {}
+        for position, group in enumerate(ids):
+            if group != NO_GROUP and counts[group] > 1:
+                members.setdefault(group, []).append(position)
+        self.members = members
+
+    def leaders(self, positions: Iterable[int]) -> list[int]:
+        """``positions`` (ascending) with every group reduced to its first position."""
+        ids, members = self.ids, self.members
+        seen: set[int] = set()
+        out: list[int] = []
+        append = out.append
+        for position in positions:
+            group = ids[position]
+            if group == NO_GROUP or group not in members:
+                append(position)
+            elif group not in seen:
+                seen.add(group)
+                append(position)
+        return out
+
+
+def event_group_target(row: Mapping[str, object]) -> str:
+    """The folded target an event groups on (``""``: none, never grouped)."""
+    details = _details_of(row)
+    if not details:
+        return ""
+    for key in GROUP_TARGET_KEYS:
+        value = details.get(key)
+        if isinstance(value, str) and value.strip():
+            return fold_text(value.strip())
+    return ""
+
+
+_GROUP_TARGET_SET = frozenset(GROUP_TARGET_KEYS)
+
+
+def group_column(events: Sequence[object], epoch_us: array, has_offset: bytearray, pause: Pause = None) -> array:
+    """Group id per event by :func:`event_group_target` / :func:`kind_family` (inlined: most events
+    -- event logs -- have no target key and are skipped on a set test)."""
+    ids = array("i", [NO_GROUP]) * len(events)
+    by_key: dict[tuple[object, ...], int] = {}
+    families: dict[object, str] = {}
+    target_set, target_keys = _GROUP_TARGET_SET, GROUP_TARGET_KEYS
+    for position, row in _positions(events, pause):
+        value = epoch_us[position]
+        if value == MISSING or not (type(row) is dict or isinstance(row, Mapping)):
+            continue
+        details = row.get("details")  # type: ignore[union-attr]
+        if not (type(details) is dict or isinstance(details, Mapping)) or target_set.isdisjoint(details):
+            continue
+        target = ""
+        for name in target_keys:
+            candidate = details.get(name)
+            if isinstance(candidate, str):
+                candidate = candidate.strip()
+                if candidate:
+                    target = candidate.lower() if candidate.isascii() else fold_text(candidate)
+                    break
+        if not target:
+            continue
+        kind = row.get("timestamp_kind")  # type: ignore[union-attr]
+        family = families.get(kind) if isinstance(kind, str) else None
+        if family is None:
+            family = kind_family(kind)
+            if isinstance(kind, str):
+                families[kind] = family
+        key = (value // 1_000_000, has_offset[position], target, family)
+        group = by_key.get(key)
+        if group is None:
+            group = by_key[key] = len(by_key)
+        ids[position] = group
+    return ids
+
+
+def _positions(events: Sequence[object], pause: Pause) -> Iterator[tuple[int, object]]:
+    for start, chunk in _chunks(events, pause):
+        yield from enumerate(chunk, start)
+
+
 # --- the index ---------------------------------------------------------------------------------------
 
 
@@ -338,7 +590,13 @@ class TimelineIndex:
         self.has_offset: bytearray | None = None
         self.content_mask: array | None = None
         self.partial: bytearray | None = None
+        self.group_ids: array | None = None
         self.saved = False
+        # Memory only (timeline/grid readability C1/C3): the folded search text of ``q=`` and the
+        # members of each display group (from ``group_ids``).
+        self.search: SearchColumn | None = None
+        self.groups: GroupColumn | None = None
+        self._extra_lock = threading.Lock()
         self._lock = threading.Lock()  # saved / completing flags
         # One lock per column: a request never waits for a column it does not need.
         self._column_locks = {column: threading.Lock() for column in COLUMNS}
@@ -357,6 +615,8 @@ class TimelineIndex:
             return self.epoch_us is not None
         if column == CONTENT:
             return self.content_mask is not None
+        if column == GROUP:
+            return self.group_ids is not None
         return self.partial is not None
 
     def complete(self) -> bool:
@@ -406,8 +666,36 @@ class TimelineIndex:
                     self.has_offset, self.epoch_us = offsets, epoch
                 elif column == CONTENT:
                     self.content_mask = content_column(events, self._paced(column, pause))
+                elif column == GROUP:
+                    if not self.has(TIME):  # the group key's second comes from the time column
+                        self._build(events, (TIME,), pause)
+                    assert self.epoch_us is not None and self.has_offset is not None
+                    self.group_ids = group_column(events, self.epoch_us, self.has_offset, self._paced(column, pause))
                 else:
                     self.partial = partial_column(events, self._paced(column, pause))
+
+    def ensure_search(self, events: Sequence[object]) -> SearchColumn:
+        """The ``q=`` text column (built on the first search, memory only)."""
+        found = self.search
+        if found is None:
+            with self._extra_lock:
+                found = self.search
+                if found is None:
+                    found = self.search = search_column(events)
+        return found
+
+    def ensure_groups(self, events: Sequence[object]) -> GroupColumn:
+        """The display groups of ``group=1``: the ``group`` column (from the index file, else built
+        now) and its members (computed once per index, memory only)."""
+        found = self.groups
+        if found is None:
+            self.ensure(events, (GROUP,))
+            with self._extra_lock:
+                found = self.groups
+                if found is None:
+                    assert self.group_ids is not None
+                    found = self.groups = GroupColumn(self.group_ids)
+        return found
 
     def complete_and_save(self, events: Sequence[object], pause: Pause = None) -> None:
         """All columns, then the index file when the timeline is still the indexed revision."""
@@ -458,7 +746,13 @@ def _header(count: int, stamp: tuple[int, int], digest: str | None) -> dict[str,
 def save_index(index: TimelineIndex, index_path: Path, stamp: tuple[int, int], digest: str | None) -> bool:
     """Write a complete index atomically; ``False`` (memory only) when the folder is not writable
     or writing fails in any other way (the temporary file is removed then)."""
-    if index.epoch_us is None or index.has_offset is None or index.content_mask is None or index.partial is None:
+    if (
+        index.epoch_us is None
+        or index.has_offset is None
+        or index.content_mask is None
+        or index.partial is None
+        or index.group_ids is None
+    ):
         return False
     header = json.dumps(_header(index.count, stamp, digest), separators=(",", ":")).encode("utf-8")
     temp = index_path.with_name(f"{index_path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
@@ -471,6 +765,7 @@ def save_index(index: TimelineIndex, index_path: Path, stamp: tuple[int, int], d
             handle.write(index.has_offset)
             index.content_mask.tofile(handle)
             handle.write(index.partial)
+            index.group_ids.tofile(handle)
         os.replace(temp, index_path)
         return True
     except Exception as exc:
@@ -507,12 +802,15 @@ def load_index(
             masks = array("H")
             masks.fromfile(handle, total)
             partial = bytearray(handle.read(total))
+            groups = array("i")
+            groups.fromfile(handle, total)
             if len(offsets) != total or len(partial) != total or handle.read(1):
                 return None
     except (OSError, ValueError, EOFError, struct.error, UnicodeDecodeError):
         return None
     index = TimelineIndex(total, stamp=stamp, timeline_path=None, source="file")
     index.epoch_us, index.has_offset, index.content_mask, index.partial = epoch, offsets, masks, partial
+    index.group_ids = groups
     index.saved = True
     return index
 
@@ -806,34 +1104,118 @@ def _output_file_stamp(stamp: tuple[object, ...], timeline_path: Path) -> tuple[
     return None
 
 
+def _run_index(run_id: str, timeline_path: Path, events: Sequence[object], stamp: tuple[object, ...]) -> TimelineIndex:
+    file_stamp = _output_file_stamp(stamp, timeline_path)
+    return TIMELINE_INDEXES.get_or_build((run_id, stamp), lambda: open_index(timeline_path, len(events), file_stamp))
+
+
 def timeline_positions(
     run_id: str,
     timeline_path: Path,
     events: Sequence[object],
-    conditions: RowConditions,
+    conditions: RowConditions | None,
     stamp: tuple[object, ...],
+    needle: str = "",
 ) -> Callable[[], Iterable[int]]:
     """``MATCH_CACHE`` compute of ``GET /timeline``: positions from the run's index, or the
     predicate scan when the index cannot be used (an index problem never fails the request).
 
-    ``stamp`` is ``row_conditions.output_stamp(timeline_path)`` taken *before* ``events`` were read
-    (the route does so); its ``(size, mtime_ns)`` is the revision the index describes."""
-    file_stamp = _output_file_stamp(stamp, timeline_path)
+    ``conditions`` (``None``: none) and ``needle`` (the folded ``q``, :func:`search_needle`; the
+    search column narrows the condition matches) are AND-ed. ``stamp`` is
+    ``row_conditions.output_stamp(timeline_path)`` taken *before* ``events`` were read (the route
+    does so); its ``(size, mtime_ns)`` is the revision the index describes."""
 
     def compute() -> Iterable[int]:
         try:
-            index = TIMELINE_INDEXES.get_or_build(
-                (run_id, stamp), lambda: open_index(timeline_path, len(events), file_stamp)
-            )
+            index = _run_index(run_id, timeline_path, events, stamp)
             if index.count == len(events):
-                positions = evaluate_building(index, events, conditions)
-                if not index.complete() or not index.saved:
-                    _complete_later(index, events)
-                return positions
+                positions: list[int] | None = None
+                if conditions is not None:
+                    positions = evaluate_building(index, events, conditions)
+                    if not index.complete() or not index.saved:
+                        _complete_later(index, events)
+                if needle:
+                    return index.ensure_search(events).positions(needle, positions)
+                return range(len(events)) if positions is None else positions
             LOGGER.warning("timeline index of %s has %d rows for %d events; scanning", run_id, index.count, len(events))
         except Exception as exc:  # the scan below answers instead of a 500
             LOGGER.warning("timeline index of %s failed (%s); scanning", run_id, exc)
-        predicate = conditions.predicate("timeline")
-        return [i for i, row in enumerate(events) if isinstance(row, Mapping) and predicate(row)]
+        predicate = conditions.predicate("timeline") if conditions is not None else None
+        return [
+            i
+            for i, row in enumerate(events)
+            if isinstance(row, Mapping) and (predicate is None or predicate(row)) and event_matches_search(row, needle)
+        ]
 
     return compute
+
+
+def timeline_groups(
+    run_id: str, timeline_path: Path, events: Sequence[object], stamp: tuple[object, ...]
+) -> GroupColumn:
+    """The run's display groups (``group=1``); built without the shared index when that fails."""
+    try:
+        index = _run_index(run_id, timeline_path, events, stamp)
+        if index.count == len(events):
+            groups = index.ensure_groups(events)
+            if not index.complete() or not index.saved:
+                _complete_later(index, events)
+            return groups
+        LOGGER.warning("timeline index of %s has %d rows for %d events; grouping alone", run_id, index.count, len(events))
+    except Exception as exc:  # grouping is computed on its own instead of a 500
+        LOGGER.warning("timeline index of %s failed (%s); grouping alone", run_id, exc)
+    return TimelineIndex(len(events)).ensure_groups(events)
+
+
+MAX_GROUP_SOURCES = 20
+MAX_GROUP_MEMBERS = 50
+
+
+def group_page_fields(
+    groups: GroupColumn, events: Sequence[object], leader: int, matched: Sequence[int] | None
+) -> dict[str, object]:
+    """``group_id`` / ``source_count`` / ``sources`` / ``group_members`` of a grouped page row.
+
+    ``matched`` (ascending positions, ``None`` = every event) limits the members to the events the
+    request's conditions / search kept. ``sources`` lists each (artifact type, path) once."""
+    group = groups.ids[leader]
+    members = groups.members.get(group) if group != NO_GROUP else None
+    if members and matched is not None:
+        members = [m for m in members if _contains(matched, m)]
+    if not members or len(members) < 2:
+        return {"source_count": 1}
+    sources: list[dict[str, object]] = []
+    seen: set[tuple[str, str]] = set()
+    for position in members:
+        row = events[position]
+        if not _is_mapping(row):
+            continue
+        details = _details_of(row)  # type: ignore[arg-type]
+        artifact_type = str((details or {}).get("artifact_type") or row.get("source") or "")  # type: ignore[union-attr]
+        path = str(row.get("path") or "")  # type: ignore[union-attr]
+        if (artifact_type, path) in seen:
+            continue
+        seen.add((artifact_type, path))
+        if len(sources) < MAX_GROUP_SOURCES:
+            sources.append(
+                {
+                    "artifact_type": artifact_type,
+                    "event_type": row.get("event_type"),  # type: ignore[union-attr]
+                    "path": path,
+                    "record_index": position,
+                }
+            )
+    return {
+        "group_id": f"g{group}",
+        "source_count": len(seen),
+        "event_count": len(members),
+        "sources": sources,
+        "sources_truncated": len(seen) > len(sources),
+        "group_members": members[:MAX_GROUP_MEMBERS],
+        "group_members_truncated": len(members) > MAX_GROUP_MEMBERS,
+    }
+
+
+def _contains(sorted_positions: Sequence[int], position: int) -> bool:
+    at = bisect_left(sorted_positions, position)
+    return at < len(sorted_positions) and sorted_positions[at] == position

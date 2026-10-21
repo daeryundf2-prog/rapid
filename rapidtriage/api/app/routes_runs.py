@@ -9,7 +9,7 @@ import json
 import logging
 import re
 import zipfile
-from collections.abc import Callable, Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -119,7 +119,12 @@ from .runops import (
 )
 from .search_index_service import search_index_available
 from .timeline_hist import build_timeline_histogram
-from .timeline_index import timeline_positions
+from .timeline_index import (
+    group_page_fields,
+    search_needle,
+    timeline_groups,
+    timeline_positions,
+)
 from .tree import build_run_issues, build_run_tree, live_run_block
 from .triage_flags import (
     FlagQuery,
@@ -569,8 +574,18 @@ def build_runs_router(
         partial: str | None = Query(default=None),
         content: list[str] = Query(default=[]),
         geo: str | None = Query(default=None),
+        q: str | None = Query(default=None, max_length=1000),
+        group: str | None = Query(default=None),
     ) -> dict[str, object]:
         """Paged timeline events.
+
+        ``q`` (timeline/grid readability C3): case-insensitive "contains" over the summary, the
+        target (path / executable / URL / key), the source path, event type and Korean event name
+        (``timeline_index.event_search_parts``), on the server -- AND-ed with the row conditions.
+        ``group=1`` (C1 rule 2): events about the same target at the same second with the same
+        family of time kind are one row (``group_id``, ``source_count``, ``sources``,
+        ``group_members`` = their ``record_index`` values); grouping runs on the matched positions
+        (after conditions and ``q``), so ``matched`` counts rows as shown.
 
         Row conditions (plan r4 §2.3) as on ``GET /artifacts``: ``from``, ``to``, ``weekday``,
         ``hours``, ``offhours``, ``tz``, ``partial``, ``content`` (row time = the event's
@@ -594,7 +609,9 @@ def build_runs_router(
             partial=partial,
             content=content,
         )
-        if conditions is None:
+        needle = search_needle(q)
+        grouped = _flag_param("group", group)
+        if conditions is None and not needle and not grouped:
             payload = get_named_output(store, run_id, "timeline")
             return paginate_payload(payload, "events", offset=offset, limit=limit, cursor=cursor)
         # Stamp the timeline *before* reading it: a rewrite in between leaves the cache key and the
@@ -605,17 +622,39 @@ def build_runs_router(
         if limit <= 0:
             raise HTTPException(status_code=400, detail=FILTER_LIMIT_MESSAGE)
         events = payload.get("events") if isinstance(payload.get("events"), list) else []
+        cache_key = ("timeline", run_id, stamp, conditions.cache_key() if conditions is not None else None, needle)
+        # R6 S3: positions from the run's timeline column index (same set as the predicate scan).
+        positions = timeline_positions(run_id, timeline_path, events, conditions, stamp, needle)
+        filtered = conditions is not None or bool(needle)
+        groups = timeline_groups(run_id, timeline_path, events, stamp) if grouped else None
+        if groups is not None:
+
+            def leaders() -> Iterable[int]:
+                matched = MATCH_CACHE.get_or_compute(cache_key, positions) if filtered else range(len(events))
+                return groups.leaders(matched)
+
+            compute: Callable[[], Iterable[int]] = leaders
+            page_key: tuple[object, ...] = (*cache_key, "group")
+        else:
+            compute, page_key = positions, cache_key
         rows, pagination = filter_rows_page(
             events,
-            conditions.predicate("timeline"),
+            lambda _row: True,
             collection="events",
             offset=offset,
             limit=limit,
-            cache_key=("timeline", run_id, stamp, conditions.cache_key()),
-            # R6 S3: positions from the run's timeline column index (same set as the predicate).
-            compute=timeline_positions(run_id, timeline_path, events, conditions, stamp),
+            cache_key=page_key,
+            compute=compute,
         )
-        pagination["conditions"] = conditions.describe()
+        if groups is not None:
+            matched_positions = MATCH_CACHE.get_or_compute(cache_key, positions) if filtered else None
+            for row in rows:
+                if isinstance(row, dict):
+                    row.update(group_page_fields(groups, events, int(row["record_index"]), matched_positions))
+            pagination["grouped"] = True
+        pagination["conditions"] = conditions.describe() if conditions is not None else {}
+        if needle:
+            pagination["search"] = {"q": q, "fields": ["summary", "target", "path", "event_type", "event_label_ko"]}
         page = {key: value for key, value in payload.items() if key != "events"}
         page["events"] = rows
         page["record_count"] = len(events)
