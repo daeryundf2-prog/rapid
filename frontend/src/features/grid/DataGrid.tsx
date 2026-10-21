@@ -105,6 +105,15 @@ const AXIOM_PINNED = "tagstatus";
 
 /** Header-sort reasons on the artifacts grid (server sort only; no silent "loaded rows only" sort). */
 export const SORT_COLUMN_REASON = "이 열은 전체 정렬을 지원하지 않습니다";
+/** Header note of a family core column with no value in any loaded row (kept, not hidden). */
+export const KEPT_EMPTY_COLUMN_NOTE = "이 페이지 값 없음";
+/**
+ * A timeline written before the readability builder (UX-round review). There is no regenerate
+ * action in the console yet, so the hint says what regenerating would change; nothing rebuilds
+ * automatically.
+ */
+export const TIMELINE_LEGACY_HINT =
+  "이 런의 타임라인은 이전 형식입니다 — 다시 생성하면 요약·중복 제거가 적용됩니다";
 export const SORT_KIND_REASON = "유형을 하나 선택하면 전체 정렬할 수 있습니다";
 export const SORT_ANALYSIS_REASON = "분석 결과를 선택하면 전체 정렬할 수 있습니다";
 /** A sorted deep link re-asks for the row's position while the index builds (1 s apart). */
@@ -540,6 +549,12 @@ export function DataGrid(props: DataGridProps = {}) {
       keep: pinnedColumns,
     });
   }, [widthPriority, keepWhenEmptySig, orderedColumns, loadedRows, pinnedColumns]);
+  // A core column kept although no loaded row has a value says so in its header (UX-round review):
+  // the column stays (the next page may fill it), the blank is explained.
+  const keptEmptyIds = useMemo(() => {
+    if (!keepWhenEmptySig) return new Set<string>();
+    return new Set(emptyColumnIds(orderedColumns, loadedRows, { candidates: keepWhenEmptySig.split("|") }));
+  }, [keepWhenEmptySig, orderedColumns, loadedRows]);
   const autoHidden = useMemo(() => {
     const out = new Map<string, AutoHideReason>();
     if (!widthPriority) return out;
@@ -1416,6 +1431,12 @@ export function DataGrid(props: DataGridProps = {}) {
         </p>
       ) : null}
 
+      {serverSearch && cq.pageMeta?.timeline_legacy === true ? (
+        <p className="flag-grid-notice" role="note" data-testid="grid-timeline-legacy">
+          {TIMELINE_LEGACY_HINT}
+        </p>
+      ) : null}
+
       {serverSearch ? (
         <p className="grid-sortstatus" data-testid="grid-group-status">
           {timelineGrouped
@@ -1496,8 +1517,14 @@ export function DataGrid(props: DataGridProps = {}) {
                   const reason = sortReason(spec);
                   const hint = hintsActive ? spec.emptyHint : undefined;
                   const hintId = `${hintPrefix}-empty-${spec.id}`;
+                  const noValues = !hint && keptEmptyIds.has(spec.id);
+                  const noValuesId = `${hintPrefix}-novalue-${spec.id}`;
                   const describedBy =
-                    [spec.sortHint ? `${hintPrefix}-${spec.id}` : "", hint ? hintId : ""]
+                    [
+                      spec.sortHint ? `${hintPrefix}-${spec.id}` : "",
+                      hint ? hintId : "",
+                      noValues ? noValuesId : "",
+                    ]
                       .filter(Boolean)
                       .join(" ") || undefined;
                   return (
@@ -1541,6 +1568,16 @@ export function DataGrid(props: DataGridProps = {}) {
                           </span>
                           <EmptyHintLink hint={hint} hintId={hintId} />
                         </>
+                      ) : null}
+                      {noValues ? (
+                        <span
+                          id={noValuesId}
+                          className="grid-hcell-novalue"
+                          title={KEPT_EMPTY_COLUMN_NOTE}
+                          data-testid={`grid-novalue-${spec.id}`}
+                        >
+                          {KEPT_EMPTY_COLUMN_NOTE}
+                        </span>
                       ) : null}
                       <div
                         aria-hidden="true"

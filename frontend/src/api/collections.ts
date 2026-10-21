@@ -146,6 +146,19 @@ async function jsonPaged(
   if ("ntfs_join" in payload) meta.ntfs_join = payload.ntfs_join;
   // Timeline pages: the acquisition root the event paths start with (출처 행 column strips it).
   if (endpoint === "timeline" && typeof payload.root === "string") meta.root = payload.root;
+  // A timeline written before the readability builder (no `jumplist_lnk_merges` counter in its
+  // summary) has no Jump List merge / readable summaries: the grid says so (UX-round review).
+  if (endpoint === "timeline") {
+    const summary = payload.summary;
+    if (
+      summary &&
+      typeof summary === "object" &&
+      !Array.isArray(summary) &&
+      !("jumplist_lnk_merges" in summary)
+    ) {
+      meta.timeline_legacy = true;
+    }
+  }
   // Files pages (parser-quality r2): candidates vs. every scanned file (`scope=inventory`).
   for (const key of ["scope", "inventory_count", "candidate_count"] as const) {
     if (key in payload) meta[key] = payload[key];

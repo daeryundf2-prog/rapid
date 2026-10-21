@@ -43,7 +43,7 @@ import {
   timelineTarget,
   urlHostPath,
 } from "./columns/timeline";
-import { DataGrid } from "./DataGrid";
+import { DataGrid, KEPT_EMPTY_COLUMN_NOTE, TIMELINE_LEGACY_HINT } from "./DataGrid";
 import { installFetch, jsonResponse, mockLayout, renderWithClient, resetGridStore } from "./testSupport";
 
 vi.mock("../../a11y", async (importOriginal) => ({
@@ -432,6 +432,74 @@ describe("P1 empty columns", () => {
     noteKindTypeCounts("eventlog", { "eventlog-event": 10 });
     const keep = artifactsCollection.keepWhenEmpty?.({ id: "artifacts", kind: "eventlog" }) ?? [];
     expect(keep).toEqual(expect.arrayContaining(["d:subject_user_name", "d:target_user_name", "d:computer"]));
+  });
+});
+
+describe("UX-round review follow-ups", () => {
+  it("a kept core column with no value on the loaded page says so in its header", async () => {
+    noteKindTypeCounts("eventlog", { "eventlog-event": 2 });
+    installFetch({
+      "/artifacts": () =>
+        jsonResponse({
+          artifacts: {
+            eventlog: {
+              artifacts: [0, 1].map((i) => ({
+                artifact_type: "eventlog-event",
+                path: "C:\\Windows\\System32\\winevt\\Logs\\System.evtx",
+                record_index: i,
+                details: {
+                  event_id: "7036",
+                  channel: "System",
+                  computer: "PC-1",
+                  timestamp: "2024-03-01T10:00:00Z",
+                },
+              })),
+              total: 2,
+            },
+          },
+        }),
+    });
+    useGridLocalStore.setState((s) => ({
+      route: { ...s.route, collection: { id: "artifacts", kind: "eventlog" } },
+    }));
+    renderWithClient(<DataGrid />);
+    // 대상 계정 has no value in any loaded row: kept (P1) and marked; 컴퓨터 has values: no mark.
+    const note = await screen.findByTestId("grid-novalue-d:target_user_name");
+    expect(note.textContent).toBe(KEPT_EMPTY_COLUMN_NOTE);
+    expect(
+      note.closest('[role="columnheader"]')?.querySelector("button")?.getAttribute("aria-describedby"),
+    ).toContain(note.id);
+    expect(screen.queryByTestId("grid-novalue-d:computer")).toBeNull();
+  });
+
+  it("a timeline written before the readability builder shows the regenerate hint", async () => {
+    installFetch({
+      "/timeline": () =>
+        jsonResponse({
+          summary: { event_count: 1 },
+          events: [eventlogEvent],
+          matched: 1,
+          pagination: { total: 1, matched: 1, filtered: true, grouped: true },
+        }),
+    });
+    useGridLocalStore.setState((s) => ({ route: { ...s.route, collection: { id: "timeline" } } }));
+    renderWithClient(<DataGrid />);
+    const hint = await screen.findByTestId("grid-timeline-legacy");
+    expect(hint.textContent).toBe(TIMELINE_LEGACY_HINT);
+    expect(TIMELINE_LEGACY_HINT).toBe(
+      "이 런의 타임라인은 이전 형식입니다 — 다시 생성하면 요약·중복 제거가 적용됩니다",
+    );
+  });
+
+  it("a current timeline (summary with jumplist_lnk_merges) shows no hint", async () => {
+    const page = await (async () => {
+      installFetch({
+        "/timeline": () =>
+          jsonResponse({ summary: { event_count: 1, jumplist_lnk_merges: 0 }, events: [eventlogEvent] }),
+      });
+      return fetchTimelinePage("r1", 0, 250, undefined, undefined, {});
+    })();
+    expect(page.meta?.timeline_legacy).toBeUndefined();
   });
 });
 
