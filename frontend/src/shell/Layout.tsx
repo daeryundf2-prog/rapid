@@ -6,7 +6,7 @@ import {
   type PanelImperativeHandle,
   Separator,
 } from "react-resizable-panels";
-import { SkipLink, useEscape } from "../a11y";
+import { SkipLink, useEscape, useFocusTrap } from "../a11y";
 import {
   expandViewerPane,
   focusMain,
@@ -61,6 +61,10 @@ export const TREE_RAIL = "36px";
 /** The grid keeps at least this much beside the tree (and the viewer). */
 export const GRID_MIN = "320px";
 export const VIEWER_DEFAULT = "440px";
+/** Accessible names of the resize separators (UX-round review: every <Separator> has one). */
+export const TREE_SEPARATOR_LABEL = "탐색 패널 너비 조절";
+export const VIEWER_SEPARATOR_LABEL = "뷰어 너비 조절";
+export const ROWS_SEPARATOR_LABEL = "목록·뷰어 높이 조절";
 /** Width of the collapsed viewer rail (no row selected, or 뷰어 접기). */
 export const VIEWER_RAIL = "36px";
 
@@ -156,18 +160,56 @@ function TreePanel({ defaultSize = TREE_DEFAULT }: { defaultSize?: string }) {
   );
 }
 
+/** The stage rail's 탐색 button: where focus returns when the tree drawer closes. */
+const TREE_TOGGLE_SELECTOR = '[data-testid="tree-toggle"]';
+/** The narrow layout's 뷰어 열기 handle: where focus returns when the viewer drawer closes. */
+const VIEWER_OPEN_SELECTOR = '[data-testid="viewer-drawer-open"]';
+
+/**
+ * After a drawer closes (UX-round review): once its focus trap has let go, move focus to `target()`
+ * (else the list) when focus was left inside the now-hidden drawer or on <body>. Effects run after
+ * the trap's cleanup in the same commit, so the trap cannot pull focus back.
+ */
+function useDrawerReturnFocus(
+  open: boolean,
+  ref: { current: HTMLElement | null },
+  target: () => HTMLElement | null,
+): void {
+  const wasOpen = useRef(open);
+  const targetRef = useRef(target);
+  targetRef.current = target;
+  useEffect(() => {
+    const closing = wasOpen.current && !open;
+    wasOpen.current = open;
+    if (!closing) return;
+    const active = document.activeElement;
+    const stranded = !active || active === document.body || (ref.current?.contains(active) ?? false);
+    if (!stranded) return;
+    targetRef.current()?.focus();
+    // No target, or one that cannot take focus (a disabled handle): the list.
+    if (document.activeElement === active || document.activeElement === document.body) focusMain();
+  }, [open, ref]);
+}
+
 /**
  * Below 900px the left panel is an overlay drawer from the left edge (C2), opened from the stage
- * rail's 탐색 패널 button (or the command); Esc, the scrim or picking a node closes it.
+ * rail's 탐색 패널 button (or the command); Esc, the scrim or picking a node closes it. While open
+ * it traps focus (initial focus on the stage heading, UX-round review); closing returns focus to
+ * the 탐색 button, or to the list when a picked node closed it.
  */
 function TreeDrawer() {
   const open = useAppStore((s) => s.treeDrawerOpen);
   const setOverlay = useAppStore((s) => s.setOverlay);
-  const close = () => {
-    setOverlay("treeDrawer", false);
-    focusMain();
-  };
+  const drawerRef = useRef<HTMLDivElement>(null);
+  const pickedNode = useRef(false);
+  const close = () => setOverlay("treeDrawer", false);
   useEscape(close, open);
+  useFocusTrap(drawerRef, { active: open, initialFocus: `#${STAGE_HEADING_ID}`, returnFocus: false });
+  useDrawerReturnFocus(open, drawerRef, () => {
+    const picked = pickedNode.current;
+    pickedNode.current = false;
+    return picked ? null : document.querySelector<HTMLElement>(TREE_TOGGLE_SELECTOR);
+  });
   // Picking a node (another collection / kind / stage) closes the drawer: the list is the goal.
   const place = useAppStore(
     (s) => `${s.route.runId}|${s.route.collection}|${s.route.kind ?? ""}|${s.route.status ?? ""}`,
@@ -176,7 +218,10 @@ function TreeDrawer() {
   useEffect(() => {
     if (place === lastPlace.current) return;
     lastPlace.current = place;
-    if (useAppStore.getState().treeDrawerOpen) setOverlay("treeDrawer", false);
+    if (useAppStore.getState().treeDrawerOpen) {
+      pickedNode.current = true;
+      setOverlay("treeDrawer", false);
+    }
   }, [place, setOverlay]);
   return (
     <>
@@ -189,7 +234,15 @@ function TreeDrawer() {
           onClick={close}
         />
       ) : null}
-      <div className={`tree-drawer${open ? " open" : ""}`} data-testid="tree-drawer" hidden={!open}>
+      <div
+        ref={drawerRef}
+        className={`tree-drawer${open ? " open" : ""}`}
+        data-testid="tree-drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-label="탐색 패널"
+        hidden={!open}
+      >
         <div className="drawer-head">
           <button
             type="button"
@@ -227,7 +280,7 @@ function TwoPanes({ narrow, treeDrawer }: { narrow: boolean; treeDrawer: boolean
   return (
     <Group id="rapidtriage-console-2col" orientation="horizontal" style={{ height: "100%" }}>
       <TreePanel defaultSize={narrow ? "28%" : TREE_DEFAULT} />
-      <Separator className="resize-handle" />
+      <Separator className="resize-handle" aria-label={TREE_SEPARATOR_LABEL} />
       <Panel id={PANEL.grid} minSize={GRID_MIN}>
         <GridPane />
       </Panel>
@@ -374,11 +427,11 @@ function WidePanes() {
       style={{ height: "100%" }}
     >
       <TreePanel />
-      <Separator className="resize-handle" />
+      <Separator className="resize-handle" aria-label={TREE_SEPARATOR_LABEL} />
       <Panel id={PANEL.grid} minSize={GRID_MIN}>
         <GridPane />
       </Panel>
-      <Separator className="resize-handle" />
+      <Separator className="resize-handle" aria-label={VIEWER_SEPARATOR_LABEL} />
       <Panel
         id={PANEL.viewer}
         panelRef={viewerRef}
@@ -413,11 +466,13 @@ function WidePanes() {
 function NarrowPanes({ treeDrawer }: { treeDrawer: boolean }) {
   const open = useAppStore((s) => s.viewerDrawerOpen);
   const setOverlay = useAppStore((s) => s.setOverlay);
-  const close = () => {
-    setOverlay("viewerDrawer", false);
-    focusMain();
-  };
+  const drawerRef = useRef<HTMLElement>(null);
+  const close = () => setOverlay("viewerDrawer", false);
   useEscape(close, open);
+  // Like the tree drawer (UX-round review): trapped while open; closing returns focus to where it
+  // was before (e.g. the row), else to the 뷰어 열기 handle, else to the list.
+  useFocusTrap(drawerRef, { active: open });
+  useDrawerReturnFocus(open, drawerRef, () => document.querySelector<HTMLElement>(VIEWER_OPEN_SELECTOR));
   return (
     <>
       {treeDrawer ? (
@@ -425,7 +480,7 @@ function NarrowPanes({ treeDrawer }: { treeDrawer: boolean }) {
       ) : (
         <Group id="rapidtriage-console-narrow" orientation="horizontal" style={{ height: "100%" }}>
           <TreePanel defaultSize="28%" />
-          <Separator className="resize-handle" />
+          <Separator className="resize-handle" aria-label={TREE_SEPARATOR_LABEL} />
           <Panel id={PANEL.grid} minSize={GRID_MIN}>
             <GridPane />
           </Panel>
@@ -439,6 +494,7 @@ function NarrowPanes({ treeDrawer }: { treeDrawer: boolean }) {
         </div>
       )}
       <aside
+        ref={drawerRef}
         id={VIEWER_ID}
         tabIndex={-1}
         className={`viewer-drawer${open ? " open" : ""}`}
@@ -478,7 +534,7 @@ function ClassicPanes() {
   return (
     <Group id="rapidtriage-console-classic" orientation="horizontal" style={{ height: "100%" }}>
       <TreePanel />
-      <Separator className="resize-handle" />
+      <Separator className="resize-handle" aria-label={TREE_SEPARATOR_LABEL} />
       <Panel id="pane-classic" minSize="420px">
         <Group
           id="rapidtriage-console-classic-rows"
@@ -492,7 +548,7 @@ function ClassicPanes() {
           <Panel id={PANEL.grid} defaultSize="55%" minSize="160px">
             <GridPane />
           </Panel>
-          <Separator className="resize-handle resize-handle-rows" />
+          <Separator className="resize-handle resize-handle-rows" aria-label={ROWS_SEPARATOR_LABEL} />
           <Panel id={PANEL.viewer} defaultSize="45%" minSize="160px">
             <aside
               id={VIEWER_ID}

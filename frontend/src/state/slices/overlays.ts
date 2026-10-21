@@ -27,6 +27,26 @@ function writeViewerPane(mode: ViewerPaneMode): void {
   }
 }
 
+/** Wide layouts: the left panel folded to its rail, kept for the session like the viewer's 뷰어 접기 (UX-round review). */
+export const TREE_COLLAPSED_KEY = "rapidtriage.v2.treeCollapsed";
+
+export function storedTreeCollapsed(): boolean {
+  try {
+    return window.sessionStorage.getItem(TREE_COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeTreeCollapsed(collapsed: boolean): void {
+  try {
+    if (collapsed) window.sessionStorage.setItem(TREE_COLLAPSED_KEY, "1");
+    else window.sessionStorage.removeItem(TREE_COLLAPSED_KEY);
+  } catch {
+    // Session storage may be unavailable; the choice lasts until reload.
+  }
+}
+
 /** The wide viewer pane is shown as its rail (never in the drawer layout). */
 export function viewerPaneCollapsed(
   state: Pick<AppState, "viewerPane" | "viewerIsDrawer"> & { route: { row?: unknown } },
@@ -48,7 +68,7 @@ export interface OverlaySlice {
   /** True while the layout renders the left panel as a drawer (< 900 px). */
   treeIsDrawer: boolean;
   setTreeIsDrawer: (drawer: boolean) => void;
-  /** Wide layouts: the left panel is folded to its 36px rail (dragged shut or 탐색 패널 접기). */
+  /** Wide layouts: the left panel is folded to its 36px rail (dragged shut or 탐색 패널 접기; kept for the session). */
   treeCollapsed: boolean;
   setTreeCollapsed: (collapsed: boolean) => void;
   /** Below 1200 px the viewer is an overlay drawer; this is its open state. */
@@ -91,8 +111,11 @@ export const createOverlaySlice: StateCreator<AppState, [], [], OverlaySlice> = 
   treeIsDrawer: false,
   setTreeIsDrawer: (drawer) =>
     set(drawer ? { treeIsDrawer: true } : { treeIsDrawer: false, treeDrawerOpen: false }),
-  treeCollapsed: false,
-  setTreeCollapsed: (collapsed) => set({ treeCollapsed: collapsed }),
+  treeCollapsed: storedTreeCollapsed(),
+  setTreeCollapsed: (collapsed) => {
+    writeTreeCollapsed(collapsed);
+    set({ treeCollapsed: collapsed });
+  },
   viewerDrawerOpen: false,
   viewerIsDrawer: false,
   viewerPane: storedViewerPane(),

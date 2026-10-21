@@ -1,11 +1,20 @@
 import { QueryClient } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { caseCommands, TREE_EXPAND_ID, toggleTreePane } from "../commands/builtin";
+import { caseCommands, MAIN_ID, TREE_EXPAND_ID, toggleTreePane } from "../commands/builtin";
 import { registerCommands, resetCommandRegistry, runCommand } from "../commands/registry";
+import { useViewPrefs } from "../features/review/viewPrefs";
 import { StageRail } from "../features/stages/StageRail";
+import { STAGE_HEADING_ID } from "../features/stages/stages";
+import { storedTreeCollapsed, TREE_COLLAPSED_KEY } from "../state/slices/overlays";
 import { resetAppStore, useAppStore } from "../state/store";
-import { Layout, TREE_DRAWER_QUERY } from "./Layout";
+import {
+  Layout,
+  ROWS_SEPARATOR_LABEL,
+  TREE_DRAWER_QUERY,
+  TREE_SEPARATOR_LABEL,
+  VIEWER_SEPARATOR_LABEL,
+} from "./Layout";
 
 /** Scroll review C2: the left panel folds to a rail (≥ 900px) or becomes a drawer (< 900px). */
 
@@ -64,6 +73,19 @@ describe("left panel, wide layouts", () => {
     fireEvent.click(expand as HTMLElement);
     expect(useAppStore.getState().treeCollapsed).toBe(false);
     expect(screen.queryByTestId("tree-rail")).toBeNull();
+  });
+
+  it("the folded state is kept for the session like the viewer's (UX-round review)", () => {
+    expect(storedTreeCollapsed()).toBe(false);
+    act(() => toggleTreePane());
+    expect(window.sessionStorage.getItem(TREE_COLLAPSED_KEY)).toBe("1");
+    expect(storedTreeCollapsed()).toBe(true);
+    // A reload starts folded: the panel mounts at the rail.
+    resetAppStore({ route: useAppStore.getState().route, treeCollapsed: storedTreeCollapsed() });
+    render(<Layout />);
+    expect(screen.getByTestId("tree-rail")).toBeTruthy();
+    act(() => toggleTreePane());
+    expect(window.sessionStorage.getItem(TREE_COLLAPSED_KEY)).toBeNull();
   });
 
   it("the stage rail toggle says what it will do", () => {
@@ -138,5 +160,73 @@ describe("left panel drawer (< 900px)", () => {
     s().setOverlay("treeDrawer", true);
     s().setTreeIsDrawer(false);
     expect(s().treeDrawerOpen).toBe(false);
+  });
+});
+
+describe("drawer focus (UX-round review)", () => {
+  beforeEach(() => {
+    narrow = true;
+  });
+
+  it("the tree drawer traps focus from the stage heading and Esc returns it to the 탐색 button", () => {
+    render(<Layout />);
+    const toggle = screen.getByTestId("tree-toggle");
+    toggle.focus();
+    fireEvent.click(toggle);
+    const drawer = screen.getByTestId("tree-drawer");
+    expect(drawer.getAttribute("role")).toBe("dialog");
+    expect(document.activeElement?.id).toBe(STAGE_HEADING_ID);
+    // Focus leaving the drawer (Tab past the end, a click outside) is pulled back in.
+    toggle.focus();
+    expect(drawer.contains(document.activeElement)).toBe(true);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(useAppStore.getState().treeDrawerOpen).toBe(false);
+    expect(document.activeElement).toBe(screen.getByTestId("tree-toggle"));
+    // The close button does the same.
+    fireEvent.click(screen.getByTestId("tree-toggle"));
+    expect(document.activeElement?.id).toBe(STAGE_HEADING_ID);
+    fireEvent.click(screen.getByRole("button", { name: "탐색 패널 닫기 (Esc)" }));
+    expect(document.activeElement).toBe(screen.getByTestId("tree-toggle"));
+  });
+
+  it("picking a node from the tree drawer sends focus to the list", async () => {
+    render(<Layout />);
+    act(() => toggleTreePane());
+    expect(document.activeElement?.id).toBe(STAGE_HEADING_ID);
+    act(() => useAppStore.getState().navigate({ runId: "r1", collection: "files" }));
+    expect(useAppStore.getState().treeDrawerOpen).toBe(false);
+    await waitFor(() => expect(document.activeElement?.id).toBe(MAIN_ID)); // focusMain waits a frame
+  });
+
+  it("the viewer drawer traps focus and closing returns it outside the drawer", () => {
+    useAppStore.getState().navigate({ runId: "r1", collection: "files" });
+    render(<Layout />);
+    act(() => useAppStore.getState().setOverlay("viewerDrawer", true));
+    const drawer = screen.getByTestId("viewer-region");
+    expect(drawer.contains(document.activeElement)).toBe(true);
+    (document.getElementById(MAIN_ID) as HTMLElement).focus();
+    expect(drawer.contains(document.activeElement)).toBe(true);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(useAppStore.getState().viewerDrawerOpen).toBe(false);
+    expect(drawer.contains(document.activeElement)).toBe(false);
+    expect(document.activeElement).not.toBe(document.body);
+  });
+});
+
+describe("resize separators (UX-round review)", () => {
+  function separatorLabels(): (string | null)[] {
+    return [...document.querySelectorAll('[role="separator"]')].map((el) => el.getAttribute("aria-label"));
+  }
+
+  it("every separator has an accessible name (two, three and classic layouts)", () => {
+    render(<Layout />);
+    expect(separatorLabels()).toEqual([TREE_SEPARATOR_LABEL]);
+    act(() => useAppStore.getState().navigate({ runId: "r1", collection: "files" }));
+    expect(separatorLabels()).toEqual([TREE_SEPARATOR_LABEL, VIEWER_SEPARATOR_LABEL]);
+    act(() => useViewPrefs.getState().setClassicSplit(true));
+    expect(separatorLabels()).toEqual([TREE_SEPARATOR_LABEL, ROWS_SEPARATOR_LABEL]);
+    act(() => useViewPrefs.getState().setClassicSplit(false));
+    expect(TREE_SEPARATOR_LABEL).toBe("탐색 패널 너비 조절");
+    expect(VIEWER_SEPARATOR_LABEL).toBe("뷰어 너비 조절");
   });
 });
