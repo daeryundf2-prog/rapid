@@ -100,7 +100,7 @@ describe("run option summary", () => {
     const sent = Object.keys(body).filter((key) => !["wait", "evidence_citation_id"].includes(key));
     expect(rows.map((row) => row.key).sort()).toEqual(sent.sort());
     const byKey = Object.fromEntries(rows.map((row) => [row.key, row.value]));
-    expect(byKey.mode).toBe("침해사고 (hacking)");
+    expect(byKey.mode).toBe("침해사고");
     expect(byKey.max_file_count).toBe("500개");
     expect(byKey.known_good_hash_feeds).toBe("D:/kg.txt");
     expect(byKey.read_only).toBe("예");

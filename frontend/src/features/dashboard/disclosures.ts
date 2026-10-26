@@ -1,8 +1,10 @@
 /**
- * 공개 사항 (parser-quality r1 §2): the run summary's `disclosures` block and `warnings[]` as
- * short Korean lines — missing tools, caps/truncation, timezone, acquisition-copy times,
- * timeline exclusions, document text states. Shown on the 접수 dashboard card and in the 처리
- * plan header. Pure data shaping; no React.
+ * 처리 제한 사항 (parser-quality r1 §2; formerly "공개 사항"): the run summary's `disclosures` block
+ * and `warnings[]` as short Korean lines — missing tools, caps/truncation, timezone,
+ * acquisition-copy times, timeline exclusions, document text states. Shown on the 접수 dashboard
+ * "처리 경고·제한 사항" card and in the 처리 plan header. Raw step / kind / flag ids never reach the
+ * visible text: they are mapped to Korean (stepLabelKo, kindLabel) and kept in `detail` (tooltip).
+ * Pure data shaping; no React.
  */
 
 import type {
@@ -13,6 +15,8 @@ import type {
   RunSummary,
   RunWarning,
 } from "../../api/runs";
+import { kindLabel } from "../derived/tables";
+import { stepNameLabel } from "../stages/stepLabels";
 
 export type DisclosureTone = "warn" | "info";
 
@@ -21,7 +25,54 @@ export interface DisclosureItem {
   label: string;
   text: string;
   tone: DisclosureTone;
+  /** Raw ids behind the line (step names, flag keys) for a tooltip; never the visible text. */
+  detail?: string;
 }
+
+/**
+ * Korean name of a run step: `artifacts-<kind>` reads "아티팩트 수집: <수집기 이름>" (kindLabel),
+ * every other id goes through the shared stepNameLabel.
+ */
+export function stepLabelKo(name: string): string {
+  if (name.startsWith("artifacts-")) return `아티팩트 수집: ${kindLabel(name.slice("artifacts-".length))}`;
+  return stepNameLabel(name);
+}
+
+/** Windows time zone names (registry `TimeZoneKeyName`) → Korean; unknown names stay as sent. */
+const TIMEZONE_KO: Record<string, string> = {
+  "Korea Standard Time": "한국 표준시",
+  "Tokyo Standard Time": "일본 표준시",
+  "China Standard Time": "중국 표준시",
+  "Taipei Standard Time": "타이베이 표준시",
+  "Singapore Standard Time": "싱가포르 표준시",
+  UTC: "협정 세계시",
+  "Coordinated Universal Time": "협정 세계시",
+  "GMT Standard Time": "영국 표준시",
+  "W. Europe Standard Time": "서유럽 표준시",
+  "Central Europe Standard Time": "중부 유럽 표준시",
+  "Eastern Standard Time": "미국 동부 표준시",
+  "Central Standard Time": "미국 중부 표준시",
+  "Mountain Standard Time": "미국 산지 표준시",
+  "Pacific Standard Time": "미국 태평양 표준시",
+};
+
+/** "UTC+09:00" from an ISO offset ("+09:00") or a Windows bias (minutes, UTC − local: -540 → +09:00). */
+export function utcOffsetText(offset: string | undefined, biasMinutes: number | undefined): string {
+  if (offset) {
+    const trimmed = offset.trim().replace(/^UTC\s*/i, "");
+    return `UTC${trimmed.startsWith("+") || trimmed.startsWith("-") ? trimmed : `+${trimmed}`}`;
+  }
+  if (typeof biasMinutes !== "number" || !Number.isFinite(biasMinutes)) return "";
+  const total = -biasMinutes;
+  const sign = total < 0 ? "-" : "+";
+  const abs = Math.abs(total);
+  return `UTC${sign}${String(Math.floor(abs / 60)).padStart(2, "0")}:${String(abs % 60).padStart(2, "0")}`;
+}
+
+/** File-candidate exclusion reasons (core files step) → Korean; unknown reasons stay as sent. */
+const FILE_EXCLUSION_LABEL: Record<string, string> = {
+  "category-not-selected": "선택 안 된 범주",
+};
 
 const TEXT_STATUS: Record<string, string> = {
   ok: "본문 있음",
@@ -47,12 +98,12 @@ const PROFILE_LABELS: Record<string, { text: string; tone: DisclosureTone }> = {
   "Deep - extraction without size limits": { text: "정밀 — 크기 상한 없이 추출", tone: "info" },
   // parser-quality r2: a run whose parser / stage / row caps were hit is never "without limits".
   "Deep - parser/stage caps applied (disclosed)": {
-    text: "정밀 — 파서·단계 상한 적용(공개 사항 참조)",
+    text: "정밀 — 파서·단계 상한 적용(처리 제한 사항 참조)",
     tone: "warn",
   },
   // r1 wording of the same case.
   "Deep - extraction without size limits (parser caps disclosed)": {
-    text: "정밀 — 파서·단계 상한 적용(공개 사항 참조)",
+    text: "정밀 — 파서·단계 상한 적용(처리 제한 사항 참조)",
     tone: "warn",
   },
 };
@@ -154,14 +205,16 @@ export function rowTruncationItems(
     if (!entry || typeof entry !== "object") continue;
     const rows = num(entry.rows_with_truncation);
     const counted = sumValues(entry.count_fields);
-    if (rows || counted) payload.push(rows ? `${kind} ${n(rows)}행` : `${kind} ${n(counted)}건`);
+    const name = kindLabel(kind);
+    if (rows || counted) payload.push(rows ? `${name} ${n(rows)}행` : `${name} ${n(counted)}건`);
     const previewRows = num(entry.preview_only_rows);
     const previewCounted = sumValues(entry.preview_count_fields);
     if (previewRows || previewCounted) {
-      preview.push(previewRows ? `${kind} ${n(previewRows)}행` : `${kind} ${n(previewCounted)}건`);
+      preview.push(previewRows ? `${name} ${n(previewRows)}행` : `${name} ${n(previewCounted)}건`);
     }
   }
   const out: DisclosureItem[] = [];
+  const kinds = Object.keys(truncation).join(", ") || undefined;
   const showPayload = totals ? totals.level === "warning" || totals.payload > 0 : payload.length > 0;
   const showPreview = totals ? totals.preview > 0 : preview.length > 0;
   if (showPayload) {
@@ -173,6 +226,7 @@ export function rowTruncationItems(
         ? `${head}${payload.length ? ` — ${payload.join(" · ")}` : ""}`
         : `${head}: ${payload.join(" · ")}`,
       tone: "warn",
+      detail: kinds,
     });
   }
   if (showPreview) {
@@ -186,9 +240,16 @@ export function rowTruncationItems(
         ? `${head}${preview.length ? ` — ${preview.join(" · ")}` : ""}`
         : `${head}: ${preview.join(" · ")}`,
       tone: "info",
+      detail: kinds,
     });
   }
   return out;
+}
+
+/** "저장 UTC · 증거 시스템 한국 표준시 (UTC+09:00)". */
+function timezoneText(name: string, offset: string | undefined, bias: number | undefined): string {
+  const text = utcOffsetText(offset, bias);
+  return `저장 UTC · 증거 시스템 ${TIMEZONE_KO[name] ?? name}${text ? ` (${text})` : ""}`;
 }
 
 /** Disclosure lines of a run (empty when the summary predates them). */
@@ -217,10 +278,11 @@ export function disclosureItems(summary: RunSummary | undefined): DisclosureItem
       ? {
           id: "caps",
           label: "상한·절단",
-          text: `${caps.length}단계 결과가 전수가 아닙니다 (${caps
-            .map(([step, flags]) => `${step}: ${flags.slice(0, 3).join(", ")}${flags.length > 3 ? " …" : ""}`)
-            .join("; ")})`,
+          text: `${caps.length}단계 결과가 전수가 아닙니다: ${caps.map(([step]) => stepLabelKo(step)).join(", ")}`,
           tone: "warn",
+          detail: caps
+            .map(([step, flags]) => `${step}: ${flags.slice(0, 3).join(", ")}${flags.length > 3 ? " …" : ""}`)
+            .join("; "),
         }
       : { id: "caps", label: "상한·절단", text: "적용된 단계 없음", tone: "info" },
   );
@@ -231,14 +293,9 @@ export function disclosureItems(summary: RunSummary | undefined): DisclosureItem
       ? {
           id: "timezone",
           label: "시간대",
-          text: `저장 UTC · 증거 시스템 ${tz.name || tz.label}${
-            tz.utc_offset
-              ? ` (UTC ${tz.utc_offset})`
-              : typeof tz.bias_minutes === "number"
-                ? ` (bias ${tz.bias_minutes}분)`
-                : ""
-          }`,
+          text: timezoneText(String(tz.name || tz.label), tz.utc_offset, tz.bias_minutes),
           tone: "info",
+          detail: String(tz.name || tz.label),
         }
       : {
           id: "timezone",
@@ -249,7 +306,13 @@ export function disclosureItems(summary: RunSummary | undefined): DisclosureItem
   );
 
   if (d.acquisition_copy_note) {
-    out.push({ id: "copy-time", label: "취득 사본 시각", text: d.acquisition_copy_note, tone: "warn" });
+    out.push({
+      id: "copy-time",
+      label: "취득 사본 시각",
+      // The server names the record fields (`source_file_*`); the examiner reads the field family.
+      text: d.acquisition_copy_note.replace(/source_file_\*\s*/g, "'취득 사본 시각' 필드"),
+      tone: "warn",
+    });
   }
 
   const excluded = d.timeline_excluded;
@@ -313,15 +376,22 @@ export function disclosureItems(summary: RunSummary | undefined): DisclosureItem
       text: `${n(num(d.files?.excluded_file_count))}건 (${Object.entries(
         d.files?.exclusion_reason_counts ?? {},
       )
-        .map(([reason, count]) => `${reason} ${n(num(count))}`)
+        .map(([reason, count]) => `${FILE_EXCLUSION_LABEL[reason] ?? reason} ${n(num(count))}`)
         .join(", ")})`,
       tone: "info",
+      detail: Object.keys(d.files?.exclusion_reason_counts ?? {}).join(", ") || undefined,
     });
   }
 
   for (const [kind, notes] of Object.entries(d.collection_notes ?? {})) {
     if (!Array.isArray(notes) || !notes.length) continue;
-    out.push({ id: `notes:${kind}`, label: `${kind} 수집 메모`, text: notes.join("; "), tone: "info" });
+    out.push({
+      id: `notes:${kind}`,
+      label: `${kindLabel(kind)} 수집 메모`,
+      text: notes.join("; "),
+      tone: "info",
+      detail: kind,
+    });
   }
   return out;
 }
@@ -337,7 +407,7 @@ export function isNotice(warning: RunWarning): boolean {
   return warning.level === "notice";
 }
 
-/** One-line digest for the 처리 plan header ("공개 사항: 누락 도구 2 · 상한 3단계 · 경고 4건"). */
+/** One-line digest for the 처리 plan header ("처리 제한 사항 — 확인 필요: 누락 도구, … · 경고 4건"). */
 export function disclosureDigest(summary: RunSummary | undefined): string {
   const items = disclosureItems(summary);
   const warnings = runWarnings(summary);
@@ -348,5 +418,5 @@ export function disclosureDigest(summary: RunSummary | undefined): string {
     warnings.some((w) => !isNotice(w)) ? `경고 ${n(warnings.filter((w) => !isNotice(w)).length)}건` : "",
     warnings.some(isNotice) ? `알림 ${n(warnings.filter(isNotice).length)}건` : "",
   ].filter(Boolean);
-  return `공개 사항 — ${parts.join(" · ")}`;
+  return `처리 제한 사항 — ${parts.join(" · ")}`;
 }

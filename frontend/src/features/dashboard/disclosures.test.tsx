@@ -12,6 +12,8 @@ import {
   rowTruncationTotalsOf,
   runWarnings,
   sizeCapsLine,
+  stepLabelKo,
+  utcOffsetText,
 } from "./disclosures";
 
 afterEach(cleanup);
@@ -36,15 +38,18 @@ const summary: RunSummary = {
   },
 };
 
-describe("공개 사항 (run summary disclosures + warnings)", () => {
+describe("처리 제한 사항 (run summary disclosures + warnings)", () => {
   it("shapes missing tools, caps, timezone, copy time and exclusions", () => {
     const items = disclosureItems(summary);
     const by = (id: string) => items.find((item) => item.id === id);
     expect(by("missing-tools")).toMatchObject({ text: "YARA 엔진 없음", tone: "warn" });
-    expect(by("caps")?.text).toContain("docs-index: max_text_bytes, max_documents");
+    // Step ids read in Korean; the raw flag keys stay in `detail` (tooltip), never the text.
+    expect(by("caps")?.text).toBe("1단계 결과가 전수가 아닙니다: 문서 색인");
+    expect(by("caps")?.detail).toContain("docs-index: max_text_bytes, max_documents");
     expect(by("timezone")).toMatchObject({
-      text: "저장 UTC · 증거 시스템 Korea Standard Time (UTC +09:00)",
+      text: "저장 UTC · 증거 시스템 한국 표준시 (UTC+09:00)",
       tone: "info",
+      detail: "Korea Standard Time",
     });
     expect(by("copy-time")?.tone).toBe("warn");
     expect(by("timeline-excluded")?.text).toContain("사본 시각만 있는 파일 12건");
@@ -52,7 +57,7 @@ describe("공개 사항 (run summary disclosures + warnings)", () => {
     expect(by("indicators")).toMatchObject({ label: "지표 후보", tone: "warn" });
     expect(runWarnings(summary)).toHaveLength(1);
     expect(disclosureDigest(summary)).toBe(
-      "공개 사항 — 확인 필요: 누락 도구, 상한·절단, 취득 사본 시각, 지표 후보 · 경고 1건",
+      "처리 제한 사항 — 확인 필요: 누락 도구, 상한·절단, 취득 사본 시각, 지표 후보 · 경고 1건",
     );
   });
 
@@ -65,7 +70,7 @@ describe("공개 사항 (run summary disclosures + warnings)", () => {
     expect(tz?.tone).toBe("warn");
   });
 
-  it("renders the 공개 사항 card with chips and the step warnings", () => {
+  it("renders the 처리 제한 사항 card with chips and the step warnings", () => {
     render(<DisclosuresCard items={disclosureItems(summary)} warnings={runWarnings(summary)} />);
     const card = screen.getByTestId("disclosures-card");
     expect(card.textContent).toContain("누락 도구");
@@ -78,9 +83,42 @@ describe("공개 사항 (run summary disclosures + warnings)", () => {
     render(<DisclosuresCard items={[]} warnings={[]} />);
     expect(screen.getByText(/공개 사항이 없습니다/)).toBeTruthy();
   });
+
+  it("never prints raw ids: bias → UTC offset, source_file_*, exclusion reasons, kind ids", () => {
+    expect(utcOffsetText(undefined, -540)).toBe("UTC+09:00");
+    expect(utcOffsetText(undefined, 300)).toBe("UTC-05:00");
+    expect(utcOffsetText("+09:00", undefined)).toBe("UTC+09:00");
+    expect(stepLabelKo("artifacts-recent-files")).toBe("아티팩트 수집: 최근 파일·LNK");
+    expect(stepLabelKo("docs")).toBe("문서 텍스트 추출");
+    const items = disclosureItems({
+      disclosures: {
+        timezone: { evidence_timezone: { name: "Korea Standard Time", bias_minutes: -540 } },
+        acquisition_copy_note: "호스트 시각은 취득 시각이므로 source_file_* 로만 기록했습니다.",
+        caps: { "artifacts-windows-prefetch": ["row-truncation:windows-prefetch"] },
+        files: { excluded_file_count: 3, exclusion_reason_counts: { "category-not-selected": 3 } },
+        collection_notes: { "cloud-export": ["클라우드 내보내기 루트 없음"] },
+      },
+    });
+    const text = items.map((item) => `${item.label} ${item.text}`).join("\n");
+    for (const raw of [
+      "bias",
+      "Korea Standard Time",
+      "source_file_",
+      "category-not-selected",
+      "cloud-export",
+      "row-truncation",
+    ]) {
+      expect(text).not.toContain(raw);
+    }
+    expect(text).toContain("한국 표준시 (UTC+09:00)");
+    expect(text).toContain("'취득 사본 시각' 필드로만");
+    expect(text).toContain("선택 안 된 범주 3");
+    expect(text).toContain("클라우드 내보내기 수집 메모");
+    expect(text).toContain("아티팩트 수집: Prefetch");
+  });
 });
 
-describe("공개 사항 r2: cap_policy, row truncation, docs size caps, profile label", () => {
+describe("처리 제한 사항 r2: cap_policy, row truncation, docs size caps, profile label", () => {
   const r2: RunSummary = {
     processing: { profile_label: "Deep - parser/stage caps applied (disclosed)" },
     steps: [
@@ -138,11 +176,11 @@ describe("공개 사항 r2: cap_policy, row truncation, docs size caps, profile 
     });
     expect(by("row-truncation")).toMatchObject({
       tone: "warn",
-      text: "원문 값 일부만 보존된 행: eventlog 3행",
+      text: "원문 값 일부만 보존된 행: EVTX 3행",
     });
     expect(by("row-preview-truncation")).toMatchObject({
       tone: "info",
-      text: "표시용 미리보기만 잘림(원본 레코드 값은 보존): windows-prefetch 12행",
+      text: "표시용 미리보기만 잘림(원본 레코드 값은 보존): Prefetch 12행",
     });
     // The server's own block wins over the steps; `artifacts-` is stripped from by_step names.
     const server: RunSummary = {
@@ -160,7 +198,7 @@ describe("공개 사항 r2: cap_policy, row truncation, docs size caps, profile 
       expect.objectContaining({
         id: "row-truncation",
         tone: "warn",
-        text: "원문 값 일부만 보존된 행 총 4건 — email 4행",
+        text: "원문 값 일부만 보존된 행 총 4건 — 이메일 4행",
       }),
     ]);
     const none: RunSummary = {
@@ -186,7 +224,10 @@ describe("공개 사항 r2: cap_policy, row truncation, docs size caps, profile 
       text: "파일 64 MB — 초과 문서 없음",
       tone: "info",
     });
-    expect(by("profile")).toMatchObject({ text: "정밀 — 파서·단계 상한 적용(공개 사항 참조)", tone: "warn" });
+    expect(by("profile")).toMatchObject({
+      text: "정밀 — 파서·단계 상한 적용(처리 제한 사항 참조)",
+      tone: "warn",
+    });
     expect(profileLine("Deep - extraction without size limits").tone).toBe("info");
     expect(profileLine("Custom")).toEqual({ text: "Custom", tone: "info" });
   });
