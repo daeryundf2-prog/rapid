@@ -107,6 +107,39 @@ def build_reports_router(
         return package
 
 
+    @router.post("/api/runs/{run_id}/validation-package")
+    def create_run_validation_package(run_id: str) -> dict[str, object]:
+        """Write the run's validation package (+ audit) into the run folder on an explicit request.
+
+        The console's export dialog confirms first and then calls this; the response names every
+        file written (``written``) and a read-only ``download_url`` for the saved package, so the
+        completion toast can show the path and open it without writing again.
+        """
+        package_path = default_run_validation_package_path(store, run_id)
+        package = build_run_validation_package(store, run_id)
+        write_json_file(package_path, package)
+        write_run_validation_package_audit(store, run_id, package_path)
+        audit_path = audit_path_for(package_path)
+        return {
+            "command": "run.validation-package.write",
+            "run_id": run_id,
+            "package_path": str(package_path),
+            "audit": str(audit_path),
+            "written": [str(package_path), str(audit_path)],
+            "download_url": f"/api/runs/{run_id}/validation-package/saved",
+            "package": package,
+        }
+
+
+    @router.get("/api/runs/{run_id}/validation-package/saved")
+    def open_saved_run_validation_package(run_id: str) -> FileResponse:
+        """The package the last export wrote, read-only (404 until one was written)."""
+        package_path = default_run_validation_package_path(store, run_id)
+        if not package_path.is_file():
+            raise HTTPException(status_code=404, detail="저장된 검증 패키지가 없습니다. 먼저 내보내기를 실행하세요")
+        return FileResponse(package_path, filename=package_path.name, media_type="application/json")
+
+
     @router.get("/api/runs/{run_id}/validation-package/file")
     def download_run_validation_package(run_id: str) -> FileResponse:
         package_path = default_run_validation_package_path(store, run_id)

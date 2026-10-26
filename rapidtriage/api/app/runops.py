@@ -76,6 +76,7 @@ from .helpers import (
     model_to_dict,
     optional_int_for_api,
     run_not_finished_message,
+    sqlite_detection,
     stable_payload_sha256,
 )
 from .hex import (
@@ -142,6 +143,7 @@ from .viewer_core import (
     source_viewer_specialization_profile,
     stage10_viewer_item_number,
 )
+from .viewer_hint import sqlite_viewer_hint
 
 
 def build_run_viewer_workflow_validation(
@@ -1085,8 +1087,14 @@ def build_source_preview(run_id: str, source_path: Path, *, max_chars: int = 200
     if mime_type.startswith("image/"):
         payload.update(build_image_preview(source_path, image_url=str(payload["download_url"]), run_id=run_id))
         return payload
-    if is_sqlite_candidate(source_path, suffix):
+    sqlite_detected_by = sqlite_detection(source_path, suffix)
+    if sqlite_detected_by:
         payload.update(build_sqlite_preview(source_path, run_id=run_id))
+        if payload.get("preview_type") == "sqlite":
+            sqlite_payload = payload.get("sqlite")
+            names = sqlite_payload.get("table_names") if isinstance(sqlite_payload, dict) else None
+            # The console's tab choice (r7 L4): detected by the header, not the MIME type.
+            payload["viewer_hint"] = sqlite_viewer_hint(sqlite_detected_by, names if isinstance(names, list) else [])
         return payload
     if suffix in {".json", ".jsonl", ".ndjson"}:
         payload.update(build_json_preview(source_path, suffix))

@@ -495,15 +495,24 @@ def is_probably_binary(source_path: Path, *, sample_size: int = 4096) -> bool:
     return control / len(sample) > 0.08
 
 
-def is_sqlite_candidate(path: Path, suffix: str | None = None) -> bool:
+def sqlite_detection(path: Path, suffix: str | None = None) -> str | None:
+    """How a file is known to be SQLite: ``"extension"`` (a SQLite extension and the header) or
+    ``"magic-bytes"`` (the 16-byte ``SQLite format 3`` + NUL header alone — Chromium ``History``/``Cookies``/
+    ``Login Data`` and other extension-less browser profile databases); ``None`` = not SQLite.
+    Only the 16-byte header is read."""
     normalized_suffix = suffix if suffix is not None else path.suffix.lower()
-    if normalized_suffix not in SQLITE_PREVIEW_EXTS:
-        return False
     try:
         with path.open("rb") as handle:
-            return handle.read(len(SQLITE_HEADER)) == SQLITE_HEADER
+            header = handle.read(len(SQLITE_HEADER))
     except OSError:
-        return False
+        return None
+    if header != SQLITE_HEADER:
+        return None
+    return "extension" if normalized_suffix in SQLITE_PREVIEW_EXTS else "magic-bytes"
+
+
+def is_sqlite_candidate(path: Path, suffix: str | None = None) -> bool:
+    return sqlite_detection(path, suffix) is not None
 
 
 def is_image_preview_candidate(path: Path) -> bool:

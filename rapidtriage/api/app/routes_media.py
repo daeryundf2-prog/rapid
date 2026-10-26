@@ -170,7 +170,10 @@ def build_media_router(
         where_contains: str | None = Query(default=None, min_length=1),
         order_by: str | None = Query(default=None, min_length=1),
         descending: bool = False,
+        locate_rowid: int | None = Query(default=None, ge=0),
     ) -> dict[str, object]:
+        """One table page; ``locate_rowid`` (no filter / order) opens the page holding that rowid
+        (``pagination.located``) — the viewer's jump to a parsed row (e.g. a browser history row)."""
         source_path = resolve_allowed_source_file(store, run_id, path, **row_ref)
         if not is_sqlite_candidate(source_path):
             raise HTTPException(status_code=400, detail="source file is not a supported SQLite database")
@@ -184,6 +187,7 @@ def build_media_router(
             where_contains=where_contains,
             order_by=order_by,
             descending=descending,
+            locate_rowid=locate_rowid,
         )
 
 
