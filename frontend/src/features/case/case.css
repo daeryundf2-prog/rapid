@@ -291,7 +291,9 @@
 }
 
 .landing-case-name {
-  flex: 0 1 auto;
+  /* The name keeps its width (up to 45%); the longer run chip ellipsizes first (R7 C-L1). */
+  flex: 0 0 auto;
+  max-width: 45%;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -470,7 +472,8 @@
   min-width: 0;
 }
 
-.case-run-open {
+.case-tree-run > .case-run-open {
+  display: flex;
   flex: 1 1 auto;
   justify-content: space-between;
   gap: var(--space-3);
@@ -483,7 +486,9 @@
 
 .case-run-text {
   display: grid;
+  justify-items: start;
   min-width: 0;
+  text-align: start;
 }
 
 .case-run-label,
