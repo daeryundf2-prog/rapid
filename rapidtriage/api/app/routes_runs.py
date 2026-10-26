@@ -759,9 +759,28 @@ def build_runs_router(
 
 
     @router.get("/api/runs/{run_id}/timeline-histogram")
-    def get_run_timeline_histogram(run_id: str) -> dict[str, object]:
+    def get_run_timeline_histogram(
+        run_id: str,
+        time_from: str | None = Query(default=None, alias="from"),
+        time_to: str | None = Query(default=None, alias="to"),
+        tz: str | None = Query(default=None),
+    ) -> dict[str, object]:
+        """Time x source density buckets of the whole timeline.
+
+        ``from`` / ``to`` / ``tz`` (as on ``GET /timeline``: inclusive bounds, ``to`` covers the
+        unit it is written to, offset-less values read in ``tz``; Korean 422 on bad values) bucket
+        only the events in that window (R7 S1 re-review C-V2): the response shape is unchanged
+        and adds ``range_excluded_events`` and ``range_filter`` (the applied conditions).
+        """
+        conditions = row_conditions_or_422(
+            time_from=time_from, time_to=time_to, weekday=[], hours=None, offhours=None, tz=tz, partial=None, content=[]
+        )
         payload = get_named_output(store, run_id, "timeline")
-        return build_timeline_histogram(payload)
+        if conditions is None:
+            return build_timeline_histogram(payload)
+        histogram = build_timeline_histogram(payload, range_from=conditions.time_from, range_until=conditions.time_until)
+        histogram["range_filter"] = conditions.describe()
+        return histogram
 
 
     @router.get("/api/runs/{run_id}/indicators")
