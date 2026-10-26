@@ -4,7 +4,8 @@ The parsed query compiles to one parameterised SQL predicate over
 ``search_doc d`` in two shapes:
 
 * **set mode** (whole index): keyword terms are ``d.group_id IN (<FTS LIKE
-  candidates>)`` (the trigram index serves them), field terms are
+  candidates>)`` (the trigram index serves them; 2-character non-ASCII terms
+  use ``search_bigram MATCH`` instead -- index v3), field terms are
   ``IN``-subqueries on ``search_field``/``search_hash``, time windows use the
   ``ts`` index and never touch FTS;
 * **row mode** (a known small candidate set): the same terms as correlated
@@ -66,15 +67,17 @@ from .query import (
 )
 from .regex_guard import GuardedRegex, RowTimeout
 from .schema import (
-    INDEX_VERSION,
+    BIGRAM_RULE,
     QUERY_BUDGET_SECONDS,
     QUERY_GRACE_SECONDS,
+    READABLE_INDEX_VERSIONS,
     TOKENIZER_TRIGRAM,
     open_read_only,
 )
 from .textutil import (
     fold,
     format_offset,
+    is_bigram_term,
     ms_to_iso,
     nfc,
     normalize_hash,
@@ -287,6 +290,11 @@ def register_functions(connection: sqlite3.Connection) -> None:
 # ---------------------------------------------------------------------------
 
 
+def bigram_match(literal: str) -> str:
+    """FTS5 query of one ``search_bigram`` token (both characters are non-ASCII, so never a ``"``)."""
+    return f'"{literal}"'
+
+
 def ascii_lower(text: str) -> str:
     return "".join(char.lower() if char.isascii() else char for char in text)
 
@@ -433,6 +441,7 @@ class Driver:
     """A top-level positive keyword whose FTS order drives the first page."""
 
     literal: str
+    bigram: bool = False  # served by ``search_bigram`` (a 2-character non-ASCII term)
 
 
 @dataclass
@@ -453,6 +462,7 @@ class CompileContext:
     attached: dict[str, str] = field(default_factory=dict)
     temp_tables: int = 0
     uses_review: bool = False
+    bigram: bool = False  # the index has ``search_bigram`` (v3)
     _marks: list[Mapping[str, object]] | None = None
 
     def warn(self, message: str) -> None:
@@ -494,9 +504,21 @@ class Compiler:
     def _fts_ok(self, literal: str) -> bool:
         return self.ctx.tokenizer == TOKENIZER_TRIGRAM and len(literal) >= 3 and "%" not in literal and "_" not in literal
 
+    def _bigram_ok(self, literal: str) -> bool:
+        """A 2-character non-ASCII term on an index with ``search_bigram`` (exact: no re-check needed)."""
+        if not is_bigram_term(literal):
+            return False
+        if not self.ctx.bigram:
+            self.ctx.warn("이전 형식 색인이라 2자 한글 검색어가 전체 본문을 훑습니다(느릴 수 있음). 색인을 다시 만드세요")
+            return False
+        return True
+
     def text_check(self, literal: str, extra: str = "", extra_params: Sequence[object] = ()) -> tuple[str, list[object]]:
         """Rows whose primary text contains ``literal`` (+ ``extra`` on ``{text}``)."""
         if self.mode == "row":
+            if not extra and self._bigram_ok(literal):
+                # Exact without reading the text: the term's (small) row set, computed once.
+                return "d.group_id IN (SELECT rowid FROM search_bigram WHERE search_bigram MATCH ?)", [bigram_match(literal)]
             test, param = contains_sql("p.text", literal)
             sql = f"p.text IS NOT NULL AND {test}"
             params: list[object] = [param]
@@ -507,6 +529,11 @@ class Compiler:
         if self._fts_ok(literal):
             sql = "SELECT rowid FROM search_text WHERE text LIKE ?"
             params = [f"%{literal}%"]
+        elif self._bigram_ok(literal):
+            sql = "SELECT rowid FROM search_bigram WHERE search_bigram MATCH ?"
+            params = [bigram_match(literal)]
+            if extra:  # contentless: the extra checks read the row's text
+                sql = f"SELECT doc_id FROM search_doc WHERE doc_id IN ({sql})"
         else:
             test, param = contains_sql("text", literal)
             sql = f"SELECT doc_id FROM search_doc WHERE text IS NOT NULL AND {test}"
@@ -517,8 +544,11 @@ class Compiler:
         return f"d.group_id IN ({sql})", params
 
     def add_driver(self, literal: str, negated: bool, top: bool) -> None:
-        if self.mode == "set" and top and not negated and self._fts_ok(literal):
-            self.ctx.drivers.append(Driver(literal))
+        if self.mode == "set" and top and not negated:
+            if self._fts_ok(literal):
+                self.ctx.drivers.append(Driver(literal))
+            elif self.ctx.bigram and is_bigram_term(literal):
+                self.ctx.drivers.append(Driver(literal, bigram=True))
 
     # -- text --------------------------------------------------------------
 
@@ -1166,6 +1196,7 @@ class SearchIndex:
         ctx = CompileContext(
             connection=self.connection,
             tokenizer=self.tokenizer,
+            bigram=self.meta.get("bigram") == BIGRAM_RULE,
             tz=tz,
             ref_ms=self.reference_ms(options.reference_ts, tz),
             options=options,
@@ -1412,7 +1443,10 @@ def driver_page(
     selective rest): the caller falls back to the set-mode plan.
     """
     forward = direction == "next"
-    pattern = f"%{driver.literal}%"
+    if driver.bigram:
+        source, pattern = "search_bigram WHERE search_bigram MATCH ?", bigram_match(driver.literal)
+    else:
+        source, pattern = "search_text WHERE text LIKE ?", f"%{driver.literal}%"
     after_doc: int | None = None
     bound: int | None = None
     if after is not None:
@@ -1426,9 +1460,9 @@ def driver_page(
     entries: list[tuple[int, int, object]] = []
     for _round in range(DRIVER_MAX_CHUNKS):
         if forward:
-            sql = "SELECT rowid FROM search_text WHERE text LIKE ?" + (" AND rowid > ?" if bound is not None else "") + " ORDER BY rowid LIMIT ?"
+            sql = f"SELECT rowid FROM {source}" + (" AND rowid > ?" if bound is not None else "") + " ORDER BY rowid LIMIT ?"
         else:
-            sql = "SELECT rowid FROM search_text WHERE text LIKE ?" + (" AND rowid < ?" if bound is not None else "") + " ORDER BY rowid DESC LIMIT ?"
+            sql = f"SELECT rowid FROM {source}" + (" AND rowid < ?" if bound is not None else "") + " ORDER BY rowid DESC LIMIT ?"
         ids = [int(row[0]) for row in connection.execute(sql, [pattern, *([bound] if bound is not None else []), DRIVER_CHUNK])]
         if not ids:
             return (entries if forward else list(reversed(entries))), False
@@ -1734,7 +1768,7 @@ def fetch_rows(connection: sqlite3.Connection, doc_ids: list[int]) -> dict[int, 
 
 
 def _check_index(meta: Mapping[str, object]) -> None:
-    if meta.get("index_version") != INDEX_VERSION:
+    if meta.get("index_version") not in READABLE_INDEX_VERSIONS:
         raise QueryError("검색 색인 형식이 오래되었습니다. 처리 단계에서 색인을 다시 만드세요", status=409)
 
 
