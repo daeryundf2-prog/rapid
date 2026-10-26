@@ -490,13 +490,9 @@ rules:
   label_ko: 메시지 순서·시각 역전
   rationale_ko: '같은 대화방에서 메시지 id 순서와 시각 순서가 역전: 단말 시계 변경·DB 편집.'
   false_positive_ko: 서버 재전송, 오프라인 후 동기화.
-  sources: &id001
+  sources:
   - https://www.group-ib.com/blog/whatsapp-forensic-artifacts/
-  - https://belkasoft.com/android-whatsapp-forensics-analysis
-  - https://www.magnetforensics.com/blog/the-lesser-talked-about-messaging-apps/
-  - https://dfrws.org/presentation/digital-forensic-analysis-of-encrypted-database-files-in-instant-messaging-applications-on-windows-operating-systems/
   - https://www.forensicfocus.com/webinars/cracking-the-code-of-ios-messages-a-guide-to-storage-and-analysis-techniques-for-forensic-examiners/
-  - https://dfrws.org/wp-content/uploads/2025/03/Forensic-analysis-of-Telegram-Messeng_2025_Forensic-Science-International-D.pdf
   version: 1
   status: verified
   params:
@@ -507,7 +503,9 @@ rules:
   label_ko: 서버·단말 시각 차
   rationale_ko: '같은 메시지의 서버 시각과 단말 시각 차가 5분 초과: 시계 조작·시간대 설정 오류.'
   false_positive_ko: 오프라인 큐 지연.
-  sources: *id001
+  sources:
+  - https://www.group-ib.com/blog/whatsapp-forensic-artifacts/
+  - https://dfrws.org/wp-content/uploads/2025/03/Forensic-analysis-of-Telegram-Messeng_2025_Forensic-Science-International-D.pdf
   version: 1
   status: verified
   params:
@@ -518,7 +516,9 @@ rules:
   label_ko: 대화방 메시지 id 결번
   rationale_ko: 'id가 대화방별로 1씩 느는 방에서 결번: 삭제 가능성.'
   false_positive_ko: id가 전역으로 증가하는 앱은 항상 결번.
-  sources: *id001
+  sources:
+  - https://belkasoft.com/android-whatsapp-forensics-analysis
+  - https://dfrws.org/presentation/digital-forensic-analysis-of-encrypted-database-files-in-instant-messaging-applications-on-windows-operating-systems/
   version: 1
   status: provisional
   params:
@@ -529,7 +529,10 @@ rules:
   label_ko: 삭제·WAL에서만 복구된 메시지
   rationale_ko: '활성 테이블이 아닌 WAL/빈 페이지/저널에서만 복구됐거나 삭제 표식이 있는 메시지: 삭제 은닉 정황.'
   false_positive_ko: 앱 자체 정리(자동 삭제).
-  sources: *id001
+  sources:
+  - https://belkasoft.com/android-whatsapp-forensics-analysis
+  - https://www.forensicfocus.com/webinars/cracking-the-code-of-ios-messages-a-guide-to-storage-and-analysis-techniques-for-forensic-examiners/
+  - https://dfrws.org/presentation/digital-forensic-analysis-of-encrypted-database-files-in-instant-messaging-applications-on-windows-operating-systems/
   version: 1
   status: verified
   params: {}
@@ -539,7 +542,9 @@ rules:
   label_ko: 사라지는 메시지 설정
   rationale_ko: '자동 삭제·사라지는 메시지 설정 존재: 증거 보존 한계 설명.'
   false_positive_ko: 정상 개인정보 설정.
-  sources: *id001
+  sources:
+  - https://www.group-ib.com/blog/whatsapp-forensic-artifacts/
+  - https://belkasoft.com/android-whatsapp-forensics-analysis
   version: 1
   status: provisional
   params: {}
@@ -549,7 +554,9 @@ rules:
   label_ko: 외부 파일 공유·단축 URL
   rationale_ko: '본문에 파일 공유·단축 URL: 유출 경로.'
   false_positive_ko: 일반 링크 공유.
-  sources: *id001
+  sources:
+  - https://www.magnetforensics.com/blog/the-lesser-talked-about-messaging-apps/
+  - https://attack.mitre.org/techniques/T1567/
   version: 1
   status: verified
   params:
@@ -602,7 +609,8 @@ rules:
   label_ko: 심야 집중 발신
   rationale_ko: '현지 야간(기본 00–05시)에 짧은 시간 다수 발신: 조사 우선순위.'
   false_positive_ko: 시간대 오판, 야간 근무.
-  sources: *id001
+  sources:
+  - https://www.magnetforensics.com/blog/the-lesser-talked-about-messaging-apps/
   version: 1
   status: provisional
   params:
@@ -617,7 +625,9 @@ rules:
   label_ko: 첨부 파일 없음
   rationale_ko: '메시지에 첨부 메타는 있으나 같은 이름의 파일이 파일 목록에 없음: 미수집 또는 삭제.'
   false_positive_ko: 미다운로드(썸네일만).
-  sources: *id001
+  sources:
+  - https://belkasoft.com/android-whatsapp-forensics-analysis
+  - https://www.group-ib.com/blog/whatsapp-forensic-artifacts/
   version: 1
   status: verified
   params: {}
@@ -627,7 +637,9 @@ rules:
   label_ko: 메시지 기록 큰 공백
   rationale_ko: '한 DB에서 연속 메시지 사이 공백이 임계값 초과: 앱 재설치·데이터 삭제.'
   false_positive_ko: 백업 복원, 장기 미사용.
-  sources: *id001
+  sources:
+  - https://www.group-ib.com/blog/whatsapp-forensic-artifacts/
+  - https://belkasoft.com/android-whatsapp-forensics-analysis
   version: 1
   status: provisional
   params:

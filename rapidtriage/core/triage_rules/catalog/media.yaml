@@ -312,10 +312,8 @@ rules:
   label_ko: 촬영 시각 ≠ 파일 시각
   rationale_ko: 'EXIF DateTimeOriginal(OffsetTimeOriginal 없으면 UTC+9 가정)과 파일 수정 시각 차가 하루 초과: 복사·재저장·시간 조작.'
   false_positive_ko: 파일 복사(복사 시점), 다운로드.
-  sources: &id001
+  sources:
   - https://exiftool.org/TagNames/EXIF.html
-  - https://exiftool.org/forum/index.php?msg=85494
-  - https://exiftool.org/TagNames/Composite.html
   version: 1
   status: verified
   params:
@@ -327,7 +325,8 @@ rules:
   label_ko: 촬영 시각이 미래·기기 이전
   rationale_ko: '촬영 시각이 파일 수정 시각보다 하루 넘게 늦거나 기준 연도 이전: 날조.'
   false_positive_ko: 카메라 시계 오설정.
-  sources: *id001
+  sources:
+  - https://exiftool.org/TagNames/EXIF.html
   version: 1
   status: verified
   params:
@@ -340,7 +339,8 @@ rules:
   label_ko: GPS 좌표 포함
   rationale_ko: 'GPS 태그 존재: 위치 증거·유출 위험.'
   false_positive_ko: 휴대폰 촬영은 흔함.
-  sources: *id001
+  sources:
+  - https://exiftool.org/TagNames/GPS.html
   version: 1
   status: verified
   params: {}
@@ -350,7 +350,9 @@ rules:
   label_ko: GPS 시각과 촬영 시각 불일치
   rationale_ko: 'GPS UTC가 촬영 시각−OffsetTimeOriginal과 다르거나(없으면) 시간대 단위(15분)로 설명되지 않음: 시계 조작·시간대 오류.'
   false_positive_ko: 카메라 시계 오차.
-  sources: *id001
+  sources:
+  - https://exiftool.org/TagNames/GPS.html
+  - https://exiftool.org/TagNames/Composite.html
   version: 1
   status: verified
   params:
@@ -361,7 +363,8 @@ rules:
   label_ko: 편집 소프트웨어 흔적
   rationale_ko: 'Software/CreatorTool이 Photoshop·GIMP·Lightroom 등: 편집 가능성.'
   false_positive_ko: 단순 크기 조절·뷰어 저장.
-  sources: *id001
+  sources:
+  - https://exiftool.org/TagNames/EXIF.html
   version: 1
   status: verified
   params:
@@ -384,7 +387,8 @@ rules:
   label_ko: EXIF 제거
   rationale_ko: 'JPEG/HEIC인데 Make·Model·DateTimeOriginal이 모두 없음: 메신저·SNS 재인코딩, 메타 제거.'
   false_positive_ko: 스크린샷, 웹 이미지.
-  sources: *id001
+  sources:
+  - https://exiftool.org/TagNames/EXIF.html
   version: 1
   status: verified
   params: {}
@@ -394,7 +398,8 @@ rules:
   label_ko: 다른 폴더의 유사 이미지
   rationale_ko: '서로 다른 폴더의 이미지 pHash 거리가 임계값 이하: 은닉 사본·재인코딩.'
   false_positive_ko: 썸네일, 템플릿류.
-  sources: *id001
+  sources:
+  - https://exiftool.org/TagNames/Composite.html
   version: 1
   status: verified
   params:
@@ -407,7 +412,9 @@ rules:
   label_ko: 내장 썸네일 불일치
   rationale_ko: '내장 썸네일 pHash가 본 이미지와 크게 다름: 편집 후 썸네일 미갱신.'
   false_positive_ko: 썸네일만 제거하는 도구.
-  sources: *id001
+  sources:
+  - https://exiftool.org/TagNames/EXIF.html
+  - https://exiftool.org/forum/index.php?msg=85494
   version: 1
   status: provisional
   params:
@@ -418,7 +425,8 @@ rules:
   label_ko: 스크린샷
   rationale_ko: '카메라 Make/Model 없이 스크린샷 파일 이름 또는 화면 해상도: 원본 사진 아님.'
   false_positive_ko: 판정 휴리스틱 오류.
-  sources: *id001
+  sources:
+  - https://exiftool.org/TagNames/EXIF.html
   version: 1
   status: provisional
   params:
@@ -444,7 +452,8 @@ rules:
   label_ko: Live Photo 짝 없음
   rationale_ko: 'HEIC와 같은 이름의 MOV가 같은 폴더에 없음: 일부 삭제·전송.'
   false_positive_ko: 메신저 전송 시 분리.
-  sources: *id001
+  sources:
+  - https://exiftool.org/TagNames/Composite.html
   version: 1
   status: provisional
   params: {}
@@ -454,7 +463,10 @@ rules:
   label_ko: 메타데이터 날짜 충돌
   rationale_ko: 'EXIF 원본/디지털화·XMP·IPTC 날짜가 서로 다름: 후처리·동기화 도구 개입.'
   false_positive_ko: MWG 규칙을 적용하는 도구.
-  sources: *id001
+  sources:
+  - https://exiftool.org/TagNames/EXIF.html
+  - https://exiftool.org/TagNames/Composite.html
+  - https://exiftool.org/forum/index.php?msg=85494
   version: 1
   status: verified
   params:

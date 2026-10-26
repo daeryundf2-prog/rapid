@@ -286,12 +286,10 @@ rules:
   label_ko: 토렌트 업로드(시딩) 기록
   rationale_ko: 'BitTorrent 클라이언트 전송 기록에 다른 사용자에게 보낸 양(uploaded)이 있음: 내려받는 동안·뒤에 조각을 공유한 유포 정황(불법촬영물·저작권 사건의 유포 요건).'
   false_positive_ko: 합법 배포물 공유. 보낸 양은 클라이언트 누적 통계이며 상대·시각별 내역은 아님.
-  sources: &id001
+  sources:
   - https://www.bittorrent.org/beps/bep_0003.html
   - https://www.libtorrent.org/manual-ref.html
   - https://github.com/qbittorrent/qBittorrent/wiki/Explanation-of-Options-in-qBittorrent
-  - https://www.emule-project.net/home/perl/help.cgi?l=1&rm=show_topic&topic_id=232
-  - https://forensics.wiki/emule/
   version: 1
   status: provisional
   params:
@@ -302,7 +300,10 @@ rules:
   label_ko: P2P 내려받기 완료
   rationale_ko: '토렌트·eMule 전송이 완료됨(완료 시각 있음): 파일 입수 정황, 저장 경로에서 실물 확인.'
   false_positive_ko: 합법 배포물(리눅스 배포판·게임 패치).
-  sources: *id001
+  sources:
+  - https://www.bittorrent.org/beps/bep_0003.html
+  - https://www.libtorrent.org/manual-ref.html
+  - https://forensics.wiki/emule/
   version: 1
   status: provisional
   params: {}
@@ -312,7 +313,9 @@ rules:
   label_ko: eMule 공유 파일 업로드 기록
   rationale_ko: 'eMule known.met의 공유 파일에 누적 업로드량·수락된 요청이 있음: 다른 사용자에게 파일을 보낸 유포 정황(국내 "당나귀" 유포 사건).'
   false_positive_ko: 공유 폴더 기본 설정으로 의도 없이 공유된 파일. 누적 통계이며 시각·상대는 없음.
-  sources: *id001
+  sources:
+  - https://www.emule-project.net/home/perl/help.cgi?l=1&rm=show_topic&topic_id=232
+  - https://forensics.wiki/emule/
   version: 1
   status: provisional
   params:

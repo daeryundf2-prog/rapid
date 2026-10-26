@@ -104,11 +104,10 @@ rules:
   label_ko: 사건 시간대 신규 USB
   rationale_ko: USB 장치 최초 설치·연결이 지정한 사건 시간대 안(사건 시간대를 지정해야 동작).
   false_positive_ko: 정상 USB 사용.
-  sources: &id001
-  - https://docs.nxlog.co/integrate/windows-usb-auditing.html
+  sources:
   - https://forensics.wiki/usb_history_viewing/
   - https://www.it-connect.tech/windows-forensics-usb-history/
-  - https://hackmd.io/@M4shl3/USB-Forensics
+  - https://attack.mitre.org/techniques/T1052/001/
   version: 1
   status: verified
   params: {}
@@ -118,7 +117,9 @@ rules:
   label_ko: USB 시리얼 부재·중복
   rationale_ko: '시리얼이 OS 생성값(두 번째 문자 &)·공란·일반값이거나 서로 다른 VID/PID가 같은 시리얼을 씀: 장치 식별 신뢰도 낮음·복제.'
   false_positive_ko: 저가 USB.
-  sources: *id001
+  sources:
+  - https://forensics.wiki/usb_history_viewing/
+  - https://hackmd.io/@M4shl3/USB-Forensics
   version: 1
   status: verified
   params: {}
@@ -128,7 +129,9 @@ rules:
   label_ko: USB 연결 전후 대량 파일 열람
   rationale_ko: 'USB 저장 장치 연결 시각 전후에 바로 가기·ShellBag 기록이 임계값 이상: 유출 정황.'
   false_positive_ko: 백업 작업.
-  sources: *id001
+  sources:
+  - https://www.it-connect.tech/windows-forensics-usb-history/
+  - https://attack.mitre.org/techniques/T1052/001/
   version: 1
   status: verified
   params:
@@ -140,7 +143,9 @@ rules:
   label_ko: 키보드·HID 장치(BadUSB 후보)
   rationale_ko: '키보드/HID 클래스 USB 장치(사건 시간대 지정 시 그 안 설치): 입력 장치 위장.'
   false_positive_ko: 새 키보드·마우스. PS/2·ACPI 장치, 같은 분에 다른 장치 3개 이상과 함께 설치된 경우(OS 설치·드라이버 열거)는 제외.
-  sources: *id001
+  sources:
+  - https://attack.mitre.org/techniques/T1200/
+  - https://hackmd.io/@M4shl3/USB-Forensics
   version: 2
   status: provisional
   params:
@@ -155,7 +160,9 @@ rules:
   label_ko: USB 볼륨 시리얼 ↔ 바로 가기
   rationale_ko: 'Partition/Diagnostic 1006의 VBR 볼륨 시리얼이 LNK LinkInfo 볼륨 시리얼과 같음: 사용자-장치-파일 연결.'
   false_positive_ko: 재포맷 시 VSN 변경.
-  sources: *id001
+  sources:
+  - https://forensics.wiki/usb_history_viewing/
+  - https://www.it-connect.tech/windows-forensics-usb-history/
   version: 1
   status: verified
   params: {}
@@ -165,7 +172,8 @@ rules:
   label_ko: 장치 이벤트 로그 부재(부재 ≠ 미발생)
   rationale_ko: '레지스트리에 USB 장치는 있는데 DriverFrameworks/Partition 이벤트가 없음: 연결 이력은 레지스트리 최신 값에만 의존.'
   false_positive_ko: 기본 설정(비활성).
-  sources: *id001
+  sources:
+  - https://docs.nxlog.co/integrate/windows-usb-auditing.html
   version: 1
   status: verified
   params:
