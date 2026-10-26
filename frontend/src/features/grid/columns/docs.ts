@@ -1,5 +1,6 @@
 import { DOCS_MATCHED, DOCS_UNMATCHED, fetchDocsPage } from "../../../api/collections";
 import type { CollectionDef } from "../types";
+import { labelledCell } from "../valueLabels";
 import { baseName, col, fieldStr, formatBytes, joinList, makeRef, makeRow, str, strOrNull } from "./common";
 
 /** `text_status` of a document (core/doc_text.py) → Korean. */
@@ -72,7 +73,14 @@ export const docsCollection: CollectionDef = {
   columns: [
     col.title("이름", 260),
     col.review(),
-    col.field("kind", "형식", 80, ["analysis", "compact"], (r) => fieldStr(r, "kind")),
+    col.field(
+      "kind",
+      "형식",
+      80,
+      ["analysis", "compact"],
+      (r) => fieldStr(r, "kind"),
+      labelledCell("docKind", (r) => fieldStr(r, "kind")),
+    ),
     col.field("matched", "일치", 70, ["analysis", "compact"], (r) => r.fields.matched === true, {
       format: (r) => (r.fields.matched === true ? "일치" : "—"),
       tooltip: (r) =>

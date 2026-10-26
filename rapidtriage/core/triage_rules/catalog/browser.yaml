@@ -852,12 +852,10 @@ rules:
   label_ko: 파일 공유 사이트 다운로드
   rationale_ko: '다운로드 URL·탭 URL·참조가 파일 공유/일회용 전송 도메인: 유출·악성 반입.'
   false_positive_ko: 업무용 클라우드.
-  sources: &id001
+  sources:
   - https://forensics.wiki/mozilla_firefox/
   - https://sleuthkit.org/autopsy/docs/api-docs/4.19.0/_firefox_8java_source.html
-  - https://developer.chrome.com/docs/extensions/declare_permissions
-  - https://research.chalmers.se/publication/521711
-  - https://docs.velociraptor.app/exchange/artifacts/pages/detection.application.cursedchrome/
+  - https://attack.mitre.org/techniques/T1105/
   version: 1
   status: verified
   params:
@@ -895,9 +893,11 @@ rules:
   family: browser-download
   grade: B
   label_ko: 위험 판정 다운로드
-  rationale_ko: '다운로드 danger_type이 확정 위험(DANGEROUS_FILE/URL/CONTENT/HOST, POTENTIALLY_UNWANTED, USER_VALIDATED 등)이거나, 약한 판정(MAYBE_DANGEROUS_CONTENT/UNCOMMON_CONTENT)인데 대상이 실행·스크립트 파일: 브라우저 보호 기능 경고.'
+  rationale_ko: '브라우저의 다운로드 위험 판정이 확정 위험(위험 파일·URL·콘텐츠·호스트, 원치 않는 프로그램 가능성, 경고를 보고도 사용자가 허용 등)이거나, 약한 판정(위험 가능·드문 콘텐츠)인데 대상이 실행·스크립트 파일: 브라우저 보호 기능 경고.'
   false_positive_ko: 흔치 않은 문서(PDF/HWP/XLSX)나 서명된 보안 플러그인 설치 파일도 약한 판정을 받음(문서는 제외, 실행 파일은 남음). 오래된 값 의미 변화.
-  sources: *id001
+  sources:
+  - https://sleuthkit.org/autopsy/docs/api-docs/4.19.0/_firefox_8java_source.html
+  - https://attack.mitre.org/techniques/T1204/002/
   version: 2
   status: provisional
   params:
@@ -943,7 +943,10 @@ rules:
   label_ko: 다운로드 파일 없음
   rationale_ko: '다운로드 대상 경로가 같은 폴더의 다른 파일은 있는데 목록에 없음: 삭제·이동.'
   false_positive_ko: 이동·정리.
-  sources: *id001
+  sources:
+  - https://forensics.wiki/mozilla_firefox/
+  - https://sleuthkit.org/autopsy/docs/api-docs/4.19.0/_firefox_8java_source.html
+  - https://attack.mitre.org/techniques/T1070/004/
   version: 1
   status: verified
   params: {}
@@ -953,7 +956,9 @@ rules:
   label_ko: 방문 기록 공백(시크릿/삭제)
   rationale_ko: '이벤트·Prefetch 활동은 있는 날이 연속되는데 방문 기록이 비어 있음: 시크릿 모드·기록 삭제.'
   false_positive_ko: 단순 비활성, 다른 브라우저 사용.
-  sources: *id001
+  sources:
+  - https://forensics.wiki/mozilla_firefox/
+  - https://attack.mitre.org/techniques/T1070/
   version: 1
   status: provisional
   params:
@@ -965,7 +970,9 @@ rules:
   label_ko: 방문 기록 앞부분 삭제
   rationale_ko: '남은 기록의 가장 작은 행 id가 임계값보다 큼: 앞부분 기록 삭제.'
   false_positive_ko: 자동 만료(보관기간).
-  sources: *id001
+  sources:
+  - https://forensics.wiki/mozilla_firefox/
+  - https://attack.mitre.org/techniques/T1070/
   version: 1
   status: provisional
   params:
@@ -976,7 +983,11 @@ rules:
   label_ko: 전체 트래픽 열람 확장
   rationale_ko: '확장이 <all_urls>류 호스트 권한과 webRequest를 함께 가짐: 전체 트래픽 열람.'
   false_positive_ko: 광고 차단·번역기 등 합법 확장.
-  sources: *id001
+  sources:
+  - https://developer.chrome.com/docs/extensions/declare_permissions
+  - https://research.chalmers.se/publication/521711
+  - https://docs.velociraptor.app/exchange/artifacts/pages/detection.application.cursedchrome/
+  - https://attack.mitre.org/techniques/T1176/
   version: 1
   status: verified
   params: {}
@@ -986,7 +997,10 @@ rules:
   label_ko: 스토어 밖 설치 확장
   rationale_ko: '웹 스토어 설치도 기본 설치도 아닌 확장: 악성 확장·정책 위반. Secure Preferences HMAC은 우회 가능해 무결성 증거 아님.'
   false_positive_ko: 개발자 확장.
-  sources: *id001
+  sources:
+  - https://research.chalmers.se/publication/521711
+  - https://docs.velociraptor.app/exchange/artifacts/pages/detection.application.cursedchrome/
+  - https://attack.mitre.org/techniques/T1176/
   version: 1
   status: verified
   params: {}
@@ -996,7 +1010,9 @@ rules:
   label_ko: 사건 관련 검색어
   rationale_ko: '검색어가 사건 키워드(삭제 방법·와이핑·해외 송금 등): 의도 정황.'
   false_positive_ko: 일반 정보 검색.
-  sources: *id001
+  sources:
+  - https://forensics.wiki/mozilla_firefox/
+  - https://sleuthkit.org/autopsy/docs/api-docs/4.19.0/_firefox_8java_source.html
   version: 1
   status: verified
   params:
@@ -1028,7 +1044,9 @@ rules:
   label_ko: 사건 직전 저장된 로그인
   rationale_ko: '저장된 로그인 생성 시각이 지정한 사건 시간대 안: 신규 계정 사용(사건 시간대를 지정해야 동작).'
   false_positive_ko: 정상 사용.
-  sources: *id001
+  sources:
+  - https://forensics.wiki/mozilla_firefox/
+  - https://attack.mitre.org/techniques/T1555/003/
   version: 1
   status: verified
   params: {}
@@ -1038,7 +1056,9 @@ rules:
   label_ko: 주소창 직접 입력한 민감 URL
   rationale_ko: '직접 입력(typed) 전이로 파일 공유 사이트나 사건 키워드가 든 URL 방문: 사전 인지.'
   false_positive_ko: 즐겨찾기·자동완성.
-  sources: *id001
+  sources:
+  - https://forensics.wiki/mozilla_firefox/
+  - https://sleuthkit.org/autopsy/docs/api-docs/4.19.0/_firefox_8java_source.html
   version: 1
   status: verified
   params:
@@ -1050,13 +1070,11 @@ rules:
   label_ko: 웹메일 첨부 업로드 후보
   rationale_ko: '캐시 항목·방문 기록 URL이 웹메일(네이버·다음·Gmail·Outlook 웹) 첨부 업로드 경로이거나 그 호스트로 간 POST 요청: 웹메일을 통한 파일 유출 경로.'
   false_positive_ko: 업무 메일 첨부·첨부 열람(약한 근거 attid는 기본 제외). URL은 업로드 흐름의 흔적일 뿐 어떤 파일이 나갔는지는 다른 증거로 확인.
-  sources: &id004
+  sources:
   - https://developers.google.com/gmail/api/reference/rest/v1/users.messages.attachments/get
   - https://learn.microsoft.com/en-us/exchange/client-developer/web-service-reference/createattachment-operation
-  - https://developers.google.com/drive/api/guides/manage-uploads
-  - https://www.dropbox.com/developers/documentation/http/documentation
-  - https://learn.microsoft.com/en-us/onedrive/developer/rest-api/api/driveitem-createuploadsession
   - https://chromium.googlesource.com/chromium/src/+/HEAD/net/disk_cache/simple/simple_entry_format.h
+  - https://attack.mitre.org/techniques/T1567/
   version: 1
   status: provisional
   params:
@@ -1067,7 +1085,12 @@ rules:
   label_ko: 파일 공유·웹하드·클라우드 업로드 후보
   rationale_ko: '캐시 항목·방문 기록 URL이 파일 공유(WeTransfer·Send Anywhere·MEGA)·웹하드·개인 클라우드(Google Drive·Dropbox·OneDrive·MYBOX) 업로드 엔드포인트이거나 그 호스트로 간 POST 요청: 외부 저장소로의 유출 경로.'
   false_positive_ko: 업무용 클라우드·사내 승인 파일 전송. URL은 업로드 흐름의 흔적일 뿐 어떤 파일이 나갔는지는 다른 증거로 확인.
-  sources: *id004
+  sources:
+  - https://developers.google.com/drive/api/guides/manage-uploads
+  - https://www.dropbox.com/developers/documentation/http/documentation
+  - https://learn.microsoft.com/en-us/onedrive/developer/rest-api/api/driveitem-createuploadsession
+  - https://chromium.googlesource.com/chromium/src/+/HEAD/net/disk_cache/simple/simple_entry_format.h
+  - https://attack.mitre.org/techniques/T1567/002/
   version: 1
   status: provisional
   params:

@@ -12,6 +12,7 @@ import { parseFlags } from "../../flags/flags";
 import { kindsForCategory } from "../../tree/categories";
 import { serverPathFilter } from "../gridUtils";
 import type { CollectionDef, ColumnSpec } from "../types";
+import { labelledCell } from "../valueLabels";
 import { recordHighlight, registryCellKindLabel, summarizeArtifact } from "./artifactSummary";
 import {
   col,
@@ -109,7 +110,14 @@ const quietDetailColumn: ColumnSpec = { ...detailColumn, presets: [] };
 /** Server-sorted on `timestamp` (first TIME_KEYS value, the same rule as the server). */
 const timeColumn: ColumnSpec = { ...col.timestamp(170), sortKey: "timestamp" };
 const tail = [
-  col.field("provider", "파서", 130, ["analysis", "source"], (r) => r.provider),
+  col.field(
+    "provider",
+    "파서",
+    130,
+    ["analysis", "source"],
+    (r) => r.provider,
+    labelledCell("provider", (r) => r.provider),
+  ),
   col.field("rules", "탐지 규칙", 160, ["source"], (r) => fieldStr(r, "matchedRules")),
   col.field("supported", "지원", 70, ["source"], (r) => (r.fields.supported === false ? "미지원" : "")),
   col.path(420, ["source"]),

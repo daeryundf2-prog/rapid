@@ -28,6 +28,10 @@ class DoctorCheck:
     summary: str
     details: dict[str, object]
     remediation: str | None = None
+    # Stable id of the summary/remediation wording (`<check>.<outcome>`): the console reads its own
+    # Korean text from it (R7 L3, C-G16) with `details` as the parameters; the English `summary`
+    # stays for the CLI and older clients.
+    message_key: str = ""
 
     def to_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {
@@ -37,6 +41,8 @@ class DoctorCheck:
             "summary": self.summary,
             "details": self.details,
         }
+        if self.message_key:
+            payload["message_key"] = self.message_key
         if self.remediation:
             payload["remediation"] = self.remediation
         return payload
@@ -119,6 +125,7 @@ def check_python_version() -> DoctorCheck:
             category="core",
             status=OK,
             summary=f"Python {current[0]}.{current[1]}.{current[2]} is supported.",
+            message_key="python-version.supported",
             details={"minimum": "3.10", "current": ".".join(str(part) for part in current)},
         )
     return DoctorCheck(
@@ -126,6 +133,7 @@ def check_python_version() -> DoctorCheck:
         category="core",
         status=ERROR,
         summary=f"Python {current[0]}.{current[1]}.{current[2]} is too old.",
+        message_key="python-version.too-old",
         details={"minimum": "3.10", "current": ".".join(str(part) for part in current)},
         remediation="Install Python 3.10 or newer.",
     )
@@ -141,6 +149,7 @@ def check_package_import(package: str, category: str, *, required: bool, extra: 
             category=category,
             status=status,
             summary=f"Python package '{package}' is not importable.",
+            message_key="python-package.missing",
             details={"package": package, "required": required, "extra": extra},
             remediation=remediation,
         )
@@ -150,6 +159,7 @@ def check_package_import(package: str, category: str, *, required: bool, extra: 
         category=category,
         status=OK,
         summary=f"Python package '{package}' is importable.",
+        message_key="python-package.importable",
         details={"package": package, "version": version, "origin": spec.origin},
     )
 
@@ -175,6 +185,7 @@ def check_static_assets(static_dir: Path) -> DoctorCheck:
             category="web",
             status=ERROR,
             summary="Web UI static assets are incomplete.",
+            message_key="web-static-assets.incomplete",
             details={"static_dir": str(static_dir), "missing": missing, "required": list(required)},
             remediation="Reinstall the package or rebuild the release artifact with rapidtriage/web/static included.",
         )
@@ -183,6 +194,7 @@ def check_static_assets(static_dir: Path) -> DoctorCheck:
         category="web",
         status=OK,
         summary="Web UI static assets are present.",
+        message_key="web-static-assets.present",
         details={"static_dir": str(static_dir), "required": list(required)},
     )
 
@@ -196,6 +208,7 @@ def check_app_data_dir(app_data_dir: Path, *, write_probe: bool) -> DoctorCheck:
             category="storage",
             status=OK,
             summary="App data directory path resolved; write probe skipped.",
+            message_key="app-data-dir.probe-skipped",
             details=details,
         )
     try:
@@ -208,6 +221,7 @@ def check_app_data_dir(app_data_dir: Path, *, write_probe: bool) -> DoctorCheck:
             category="storage",
             status=OK,
             summary="App data directory is writable.",
+            message_key="app-data-dir.writable",
             details=details,
         )
     except OSError as exc:
@@ -217,6 +231,7 @@ def check_app_data_dir(app_data_dir: Path, *, write_probe: bool) -> DoctorCheck:
             category="storage",
             status=ERROR,
             summary="App data directory is not writable.",
+            message_key="app-data-dir.not-writable",
             details=details,
             remediation="Choose a writable case/app-data directory or fix filesystem permissions.",
         )
@@ -232,6 +247,7 @@ def check_tesseract(tool_resolver: ToolResolver) -> DoctorCheck:
             category="ocr",
             status=WARN,
             summary="Tesseract is not available; OCR will be disabled.",
+            message_key="tesseract.missing",
             details=details,
             remediation="Install Tesseract OCR and ensure 'tesseract' is on PATH. On Windows, also verify tessdata language files.",
         )
@@ -241,6 +257,7 @@ def check_tesseract(tool_resolver: ToolResolver) -> DoctorCheck:
         category="ocr",
         status=OK,
         summary="Tesseract is available for OCR.",
+        message_key="tesseract.available",
         details=details,
     )
 
@@ -256,6 +273,7 @@ def check_e01_tools(tool_resolver: ToolResolver) -> DoctorCheck:
             category="evidence-image",
             status=WARN,
             summary="E01 direct extraction tools are incomplete.",
+            message_key="e01-tools.incomplete",
             details=details,
             remediation="Install a Sleuth Kit build with EWF support (native Windows builds can read E01 directly) or libewf for ewfmount; alternatively use WSL2 or scan a mounted/extracted folder.",
         )
@@ -264,6 +282,7 @@ def check_e01_tools(tool_resolver: ToolResolver) -> DoctorCheck:
         category="evidence-image",
         status=OK,
         summary="E01 direct extraction tools are available.",
+        message_key="e01-tools.available",
         details=details,
     )
 
@@ -280,6 +299,7 @@ def check_email_tools(tool_resolver: ToolResolver) -> DoctorCheck:
             category="email",
             status=WARN,
             summary="PST/OST 도구 없음: pffexport·readpst가 없어 Outlook 메일함은 컨테이너 인벤토리만 만듭니다.",
+            message_key="email-pst.missing",
             details=details,
             remediation="libpff(pffexport) 또는 libpst(readpst)를 설치해 PATH에 두고 RAPIDTRIAGE_EMAIL_EXTERNAL_TOOLS=1로 런을 실행하면 PST/OST를 메일·일정·연락처·첨부 행으로 변환합니다.",
         )
@@ -288,6 +308,7 @@ def check_email_tools(tool_resolver: ToolResolver) -> DoctorCheck:
         category="email",
         status=OK,
         summary=f"{', '.join(available)} 있음 — 런에서는 RAPIDTRIAGE_EMAIL_EXTERNAL_TOOLS=1일 때만 사용",
+        message_key="email-pst.available",
         details=details,
     )
 
@@ -303,6 +324,7 @@ def check_port_available(host: str, port: int) -> DoctorCheck:
             category="web",
             status=OK,
             summary=f"Web port {host}:{port} is available.",
+            message_key="web-port.available",
             details=details,
         )
     except OSError as exc:
@@ -312,6 +334,7 @@ def check_port_available(host: str, port: int) -> DoctorCheck:
             category="web",
             status=WARN,
             summary=f"Web port {host}:{port} is not available.",
+            message_key="web-port.busy",
             details=details,
             remediation="Stop the process using this port or start rapidtriage web with a different --port.",
         )

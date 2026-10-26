@@ -129,13 +129,23 @@ describe("explorer routes", () => {
     });
     expect(domainRoute({ collection: "files", dir: "" })).toEqual({ collection: "files", dir: "" });
     const model = buildTreeModel(input);
-    const fsDomain = model.find((node) => node.id === "domain:filesystem");
-    expect(fsDomain?.children?.[0]).toMatchObject({
+    // R7 L3 (C-T1/T2): each explorer is one node, under 전체 보기 — never repeated in a domain.
+    const views = model.find((node) => node.id === "views");
+    expect(views?.children?.find((node) => node.id === "fs-explorer")).toMatchObject({
       label: "폴더 탐색기",
       target: { collection: "files", dir: "" },
     });
-    const regDomain = model.find((node) => node.id === "domain:registry");
-    expect(regDomain?.children?.[0]).toMatchObject({ label: "레지스트리 탐색기(키·값)", count: 4 });
+    expect(views?.children?.find((node) => node.id === "registry-explorer")).toMatchObject({
+      label: "레지스트리 탐색기",
+      count: 4,
+    });
+    const labels = (nodes: typeof model): string[] =>
+      nodes.flatMap((node) => [node.label, ...labels(node.children ?? [])]);
+    const all = labels(model);
+    expect(all.filter((label) => label === "파일 목록")).toHaveLength(1);
+    expect(all.filter((label) => label === "폴더 탐색기")).toHaveLength(1);
+    expect(all.filter((label) => label.startsWith("레지스트리 탐색기"))).toHaveLength(1);
+    expect(model.find((node) => node.id === "domain:filesystem")?.label).toBe("NTFS·파일시스템 아티팩트");
 
     registerCommands(explorerCommands());
     const noCase = {

@@ -1,5 +1,6 @@
 import { fetchIndicatorsPage } from "../../../api/collections";
 import type { CollectionDef } from "../types";
+import { labelledCell } from "../valueLabels";
 import { col, fieldStr, isRecord, joinList, makeRef, makeRow, str, strOrNull } from "./common";
 
 function firstSourcePath(sources: unknown): string | null {
@@ -33,10 +34,24 @@ export const indicatorsCollection: CollectionDef = {
       },
     ),
   columns: [
-    col.field("type", "유형", 80, ["analysis", "compact"], (r) => r.artifactType),
+    col.field(
+      "type",
+      "유형",
+      80,
+      ["analysis", "compact"],
+      (r) => r.artifactType,
+      labelledCell("indicatorType", (r) => r.artifactType),
+    ),
     col.title("값", 380),
     col.review(),
-    col.field("classification", "분류", 120, ["analysis", "compact"], (r) => fieldStr(r, "classification")),
+    col.field(
+      "classification",
+      "분류",
+      120,
+      ["analysis", "compact"],
+      (r) => fieldStr(r, "classification"),
+      labelledCell("indicatorScope", (r) => fieldStr(r, "classification")),
+    ),
     col.field(
       "count",
       "건수",
@@ -47,7 +62,14 @@ export const indicatorsCollection: CollectionDef = {
         align: "right",
       },
     ),
-    col.field("riskFlags", "위험 표지", 180, ["analysis"], (r) => fieldStr(r, "riskFlags")),
+    col.field(
+      "riskFlags",
+      "위험 표지",
+      180,
+      ["analysis"],
+      (r) => fieldStr(r, "riskFlags"),
+      labelledCell("riskTag", (r) => fieldStr(r, "riskFlags"), true),
+    ),
     col.path(360, ["source"]),
   ],
 };

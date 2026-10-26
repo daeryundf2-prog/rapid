@@ -1,5 +1,5 @@
 {
- "version": "598449069b41b9ee",
+ "version": "8e33eca66949f549",
  "families": [
   {
    "id": "sam-account",
@@ -12662,9 +12662,8 @@
    "false_positive_ko": "정상 프로비저닝.",
    "sources": [
     "https://docs.logpoint.com/agentx/references/windows-event-ids-reference",
-    "https://www.manageengine.com/products/active-directory-audit/kb/windows-security-log-event-id-4698.html",
-    "https://www.cybertriage.com/blog/windows-registry-forensics-cheat-sheet-2026/",
-    "https://www.sans.org/blog/digital-forensics-application-execution/"
+    "https://attack.mitre.org/techniques/T1136/001/",
+    "https://attack.mitre.org/techniques/T1564/002/"
    ],
    "version": 1,
    "status": "provisional",
@@ -12679,9 +12678,7 @@
    "false_positive_ko": "정상 관리 작업.",
    "sources": [
     "https://docs.logpoint.com/agentx/references/windows-event-ids-reference",
-    "https://www.manageengine.com/products/active-directory-audit/kb/windows-security-log-event-id-4698.html",
-    "https://www.cybertriage.com/blog/windows-registry-forensics-cheat-sheet-2026/",
-    "https://www.sans.org/blog/digital-forensics-application-execution/"
+    "https://attack.mitre.org/techniques/T1098/"
    ],
    "version": 1,
    "status": "verified",
@@ -12695,10 +12692,8 @@
    "rationale_ko": "작업 동작이 사용자 쓰기 경로·PowerShell·LOLBin이거나, 숨김 작업이 분 단위 반복·SYSTEM으로 실행: 지속성.",
    "false_positive_ko": "업데이터.",
    "sources": [
-    "https://docs.logpoint.com/agentx/references/windows-event-ids-reference",
     "https://www.manageengine.com/products/active-directory-audit/kb/windows-security-log-event-id-4698.html",
-    "https://www.cybertriage.com/blog/windows-registry-forensics-cheat-sheet-2026/",
-    "https://www.sans.org/blog/digital-forensics-application-execution/"
+    "https://attack.mitre.org/techniques/T1053/005/"
    ],
    "version": 1,
    "status": "verified",
@@ -12714,10 +12709,9 @@
    "rationale_ko": "TaskCache 키에 SD 값이 없거나(숨김 작업 기법) 작업 파일과 TaskCache 키가 한쪽에만 있음.",
    "false_positive_ko": "손상, 수집 범위 차이.",
    "sources": [
-    "https://docs.logpoint.com/agentx/references/windows-event-ids-reference",
     "https://www.manageengine.com/products/active-directory-audit/kb/windows-security-log-event-id-4698.html",
-    "https://www.cybertriage.com/blog/windows-registry-forensics-cheat-sheet-2026/",
-    "https://www.sans.org/blog/digital-forensics-application-execution/"
+    "https://attack.mitre.org/techniques/T1053/005/",
+    "https://www.cybertriage.com/blog/windows-registry-forensics-cheat-sheet-2026/"
    ],
    "version": 1,
    "status": "provisional",
@@ -12731,10 +12725,8 @@
    "rationale_ko": "서비스 ServiceDll이 System32/SysWOW64 밖: 지속성(svchost 호스팅 악성 DLL).",
    "false_positive_ko": "서드파티 드라이버·서비스.",
    "sources": [
-    "https://docs.logpoint.com/agentx/references/windows-event-ids-reference",
-    "https://www.manageengine.com/products/active-directory-audit/kb/windows-security-log-event-id-4698.html",
     "https://www.cybertriage.com/blog/windows-registry-forensics-cheat-sheet-2026/",
-    "https://www.sans.org/blog/digital-forensics-application-execution/"
+    "https://attack.mitre.org/techniques/T1543/003/"
    ],
    "version": 1,
    "status": "verified",
@@ -12748,10 +12740,7 @@
    "rationale_ko": "ProfileList 프로필 경로가 Users·서비스 프로필 밖: 은닉 계정·비정상 프로필.",
    "false_positive_ko": "이전 OS에서 옮긴 프로필.",
    "sources": [
-    "https://docs.logpoint.com/agentx/references/windows-event-ids-reference",
-    "https://www.manageengine.com/products/active-directory-audit/kb/windows-security-log-event-id-4698.html",
-    "https://www.cybertriage.com/blog/windows-registry-forensics-cheat-sheet-2026/",
-    "https://www.sans.org/blog/digital-forensics-application-execution/"
+    "https://www.cybertriage.com/blog/windows-registry-forensics-cheat-sheet-2026/"
    ],
    "version": 1,
    "status": "provisional",
@@ -12765,9 +12754,6 @@
    "rationale_ko": "WER 보고서의 앱 경로가 Temp/Downloads/Public이거나 실행 파일이 목록에 없음: 실행 흔적 보강.",
    "false_positive_ko": "정상 앱 크래시.",
    "sources": [
-    "https://docs.logpoint.com/agentx/references/windows-event-ids-reference",
-    "https://www.manageengine.com/products/active-directory-audit/kb/windows-security-log-event-id-4698.html",
-    "https://www.cybertriage.com/blog/windows-registry-forensics-cheat-sheet-2026/",
     "https://www.sans.org/blog/digital-forensics-application-execution/"
    ],
    "version": 1,
@@ -12784,8 +12770,6 @@
    "sources": [
     "https://attack.mitre.org/techniques/T1070/",
     "https://attack.mitre.org/techniques/T1070/006/",
-    "https://attack.mitre.org/techniques/T1485/",
-    "https://attack.mitre.org/techniques/T1561/",
     "https://www.sans.org/blog/digital-forensics-application-execution/"
    ],
    "version": 1,
@@ -13002,8 +12986,6 @@
    "rationale_ko": "와이퍼·정리·타임스톰핑 도구(시그니처 목록)의 실행 시각(Prefetch 실행 8회·BAM·UserAssist·PCA·4688 명령줄)이 사건 시작 이후(종료가 있으면 종료 + 유예 일수까지): 증거 인멸 정황(사건 시간대를 지정해야 동작).",
    "false_positive_ko": "정기 정리 작업(예약 실행), 사건과 무관한 일상 정리. 설치 흔적만 있고 실행 시각이 없는 행은 제외.",
    "sources": [
-    "https://attack.mitre.org/techniques/T1070/",
-    "https://attack.mitre.org/techniques/T1070/006/",
     "https://attack.mitre.org/techniques/T1485/",
     "https://attack.mitre.org/techniques/T1561/",
     "https://www.sans.org/blog/digital-forensics-application-execution/"
@@ -13283,8 +13265,7 @@
    "false_positive_ko": "업무용 압축.",
    "sources": [
     "https://www.elastic.co/guide/en/security/8.19/prebuilt-rule-8-3-3-encrypting-files-with-winrar-or-7z.html",
-    "https://pds-ppi.igpp.ucla.edu/volume/PV01_0001/SOFTWARE/SOURCE/ZIP_WARE/APPNOTE.TXT",
-    "https://host-aws.elcomsoft.com/presentations/20190504_forensic_anlysis_cryptocontainers_en.pdf"
+    "https://attack.mitre.org/techniques/T1560/001/"
    ],
    "version": 1,
    "status": "provisional",
@@ -13301,8 +13282,7 @@
    "false_positive_ko": "보안 관행.",
    "sources": [
     "https://www.elastic.co/guide/en/security/8.19/prebuilt-rule-8-3-3-encrypting-files-with-winrar-or-7z.html",
-    "https://pds-ppi.igpp.ucla.edu/volume/PV01_0001/SOFTWARE/SOURCE/ZIP_WARE/APPNOTE.TXT",
-    "https://host-aws.elcomsoft.com/presentations/20190504_forensic_anlysis_cryptocontainers_en.pdf"
+    "https://attack.mitre.org/techniques/T1560/001/"
    ],
    "version": 1,
    "status": "verified",
@@ -13316,8 +13296,6 @@
    "rationale_ko": "시그니처 없음 + 엔트로피 ≥ 7.9 + 크기가 64의 배수: VeraCrypt류 후보(확률적 판정).",
    "false_positive_ko": "압축·난수 데이터, 디스크 이미지.",
    "sources": [
-    "https://www.elastic.co/guide/en/security/8.19/prebuilt-rule-8-3-3-encrypting-files-with-winrar-or-7z.html",
-    "https://pds-ppi.igpp.ucla.edu/volume/PV01_0001/SOFTWARE/SOURCE/ZIP_WARE/APPNOTE.TXT",
     "https://host-aws.elcomsoft.com/presentations/20190504_forensic_anlysis_cryptocontainers_en.pdf"
    ],
    "version": 1,
@@ -13333,11 +13311,10 @@
    "grade": "B",
    "label_ko": "확장자 위장 압축",
    "rationale_ko": "확장자(.dat·.jpg 등)와 달리 압축 시그니처: 위장.",
-   "false_positive_ko": "이름만 틀린 파일. Windows 10 이후 Prefetch(.pf)는 MAM 압축이라 압축 시그니처로 보이므로 제외(ignored_extensions).",
+   "false_positive_ko": "이름만 틀린 파일. Windows 10 이후 Prefetch(.pf)는 MAM 압축이라 압축 시그니처로 보이므로 제외 확장자로 둡니다.",
    "sources": [
-    "https://www.elastic.co/guide/en/security/8.19/prebuilt-rule-8-3-3-encrypting-files-with-winrar-or-7z.html",
     "https://pds-ppi.igpp.ucla.edu/volume/PV01_0001/SOFTWARE/SOURCE/ZIP_WARE/APPNOTE.TXT",
-    "https://host-aws.elcomsoft.com/presentations/20190504_forensic_anlysis_cryptocontainers_en.pdf"
+    "https://attack.mitre.org/techniques/T1036/"
    ],
    "version": 2,
    "status": "verified",
@@ -13355,9 +13332,7 @@
    "rationale_ko": "압축 중첩이 3단계 이상: 탐지 회피.",
    "false_positive_ko": "설치 파일.",
    "sources": [
-    "https://www.elastic.co/guide/en/security/8.19/prebuilt-rule-8-3-3-encrypting-files-with-winrar-or-7z.html",
-    "https://pds-ppi.igpp.ucla.edu/volume/PV01_0001/SOFTWARE/SOURCE/ZIP_WARE/APPNOTE.TXT",
-    "https://host-aws.elcomsoft.com/presentations/20190504_forensic_anlysis_cryptocontainers_en.pdf"
+    "https://pds-ppi.igpp.ucla.edu/volume/PV01_0001/SOFTWARE/SOURCE/ZIP_WARE/APPNOTE.TXT"
    ],
    "version": 1,
    "status": "provisional",
@@ -13373,9 +13348,7 @@
    "rationale_ko": "압축 해제 비율과 크기가 임계값 이상: 분석 방해(zip bomb).",
    "false_positive_ko": "로그 등 반복 데이터.",
    "sources": [
-    "https://www.elastic.co/guide/en/security/8.19/prebuilt-rule-8-3-3-encrypting-files-with-winrar-or-7z.html",
-    "https://pds-ppi.igpp.ucla.edu/volume/PV01_0001/SOFTWARE/SOURCE/ZIP_WARE/APPNOTE.TXT",
-    "https://host-aws.elcomsoft.com/presentations/20190504_forensic_anlysis_cryptocontainers_en.pdf"
+    "https://pds-ppi.igpp.ucla.edu/volume/PV01_0001/SOFTWARE/SOURCE/ZIP_WARE/APPNOTE.TXT"
    ],
    "version": 1,
    "status": "verified",
@@ -13392,9 +13365,7 @@
    "rationale_ko": "실행 파일에 압축 데이터가 붙어 있음(SFX): 은닉 실행.",
    "false_positive_ko": "정상 설치기.",
    "sources": [
-    "https://www.elastic.co/guide/en/security/8.19/prebuilt-rule-8-3-3-encrypting-files-with-winrar-or-7z.html",
-    "https://pds-ppi.igpp.ucla.edu/volume/PV01_0001/SOFTWARE/SOURCE/ZIP_WARE/APPNOTE.TXT",
-    "https://host-aws.elcomsoft.com/presentations/20190504_forensic_anlysis_cryptocontainers_en.pdf"
+    "https://pds-ppi.igpp.ucla.edu/volume/PV01_0001/SOFTWARE/SOURCE/ZIP_WARE/APPNOTE.TXT"
    ],
    "version": 1,
    "status": "verified",
@@ -13408,9 +13379,7 @@
    "rationale_ko": "압축 항목 수정 시각이 압축 파일 자신의 수정 시각보다 늦음: 시계 조작.",
    "false_positive_ko": "DOS 시각(현지)·시간대 차이.",
    "sources": [
-    "https://www.elastic.co/guide/en/security/8.19/prebuilt-rule-8-3-3-encrypting-files-with-winrar-or-7z.html",
-    "https://pds-ppi.igpp.ucla.edu/volume/PV01_0001/SOFTWARE/SOURCE/ZIP_WARE/APPNOTE.TXT",
-    "https://host-aws.elcomsoft.com/presentations/20190504_forensic_anlysis_cryptocontainers_en.pdf"
+    "https://pds-ppi.igpp.ucla.edu/volume/PV01_0001/SOFTWARE/SOURCE/ZIP_WARE/APPNOTE.TXT"
    ],
    "version": 1,
    "status": "verified",
@@ -13428,9 +13397,7 @@
    "sources": [
     "https://forensics.wiki/mozilla_firefox/",
     "https://sleuthkit.org/autopsy/docs/api-docs/4.19.0/_firefox_8java_source.html",
-    "https://developer.chrome.com/docs/extensions/declare_permissions",
-    "https://research.chalmers.se/publication/521711",
-    "https://docs.velociraptor.app/exchange/artifacts/pages/detection.application.cursedchrome/"
+    "https://attack.mitre.org/techniques/T1105/"
    ],
    "version": 1,
    "status": "verified",
@@ -13473,14 +13440,11 @@
    "family": "browser-download",
    "grade": "B",
    "label_ko": "위험 판정 다운로드",
-   "rationale_ko": "다운로드 danger_type이 확정 위험(DANGEROUS_FILE/URL/CONTENT/HOST, POTENTIALLY_UNWANTED, USER_VALIDATED 등)이거나, 약한 판정(MAYBE_DANGEROUS_CONTENT/UNCOMMON_CONTENT)인데 대상이 실행·스크립트 파일: 브라우저 보호 기능 경고.",
+   "rationale_ko": "브라우저의 다운로드 위험 판정이 확정 위험(위험 파일·URL·콘텐츠·호스트, 원치 않는 프로그램 가능성, 경고를 보고도 사용자가 허용 등)이거나, 약한 판정(위험 가능·드문 콘텐츠)인데 대상이 실행·스크립트 파일: 브라우저 보호 기능 경고.",
    "false_positive_ko": "흔치 않은 문서(PDF/HWP/XLSX)나 서명된 보안 플러그인 설치 파일도 약한 판정을 받음(문서는 제외, 실행 파일은 남음). 오래된 값 의미 변화.",
    "sources": [
-    "https://forensics.wiki/mozilla_firefox/",
     "https://sleuthkit.org/autopsy/docs/api-docs/4.19.0/_firefox_8java_source.html",
-    "https://developer.chrome.com/docs/extensions/declare_permissions",
-    "https://research.chalmers.se/publication/521711",
-    "https://docs.velociraptor.app/exchange/artifacts/pages/detection.application.cursedchrome/"
+    "https://attack.mitre.org/techniques/T1204/002/"
    ],
    "version": 2,
    "status": "provisional",
@@ -13536,9 +13500,7 @@
    "sources": [
     "https://forensics.wiki/mozilla_firefox/",
     "https://sleuthkit.org/autopsy/docs/api-docs/4.19.0/_firefox_8java_source.html",
-    "https://developer.chrome.com/docs/extensions/declare_permissions",
-    "https://research.chalmers.se/publication/521711",
-    "https://docs.velociraptor.app/exchange/artifacts/pages/detection.application.cursedchrome/"
+    "https://attack.mitre.org/techniques/T1070/004/"
    ],
    "version": 1,
    "status": "verified",
@@ -13553,10 +13515,7 @@
    "false_positive_ko": "단순 비활성, 다른 브라우저 사용.",
    "sources": [
     "https://forensics.wiki/mozilla_firefox/",
-    "https://sleuthkit.org/autopsy/docs/api-docs/4.19.0/_firefox_8java_source.html",
-    "https://developer.chrome.com/docs/extensions/declare_permissions",
-    "https://research.chalmers.se/publication/521711",
-    "https://docs.velociraptor.app/exchange/artifacts/pages/detection.application.cursedchrome/"
+    "https://attack.mitre.org/techniques/T1070/"
    ],
    "version": 1,
    "status": "provisional",
@@ -13574,10 +13533,7 @@
    "false_positive_ko": "자동 만료(보관기간).",
    "sources": [
     "https://forensics.wiki/mozilla_firefox/",
-    "https://sleuthkit.org/autopsy/docs/api-docs/4.19.0/_firefox_8java_source.html",
-    "https://developer.chrome.com/docs/extensions/declare_permissions",
-    "https://research.chalmers.se/publication/521711",
-    "https://docs.velociraptor.app/exchange/artifacts/pages/detection.application.cursedchrome/"
+    "https://attack.mitre.org/techniques/T1070/"
    ],
    "version": 1,
    "status": "provisional",
@@ -13593,11 +13549,10 @@
    "rationale_ko": "확장이 <all_urls>류 호스트 권한과 webRequest를 함께 가짐: 전체 트래픽 열람.",
    "false_positive_ko": "광고 차단·번역기 등 합법 확장.",
    "sources": [
-    "https://forensics.wiki/mozilla_firefox/",
-    "https://sleuthkit.org/autopsy/docs/api-docs/4.19.0/_firefox_8java_source.html",
     "https://developer.chrome.com/docs/extensions/declare_permissions",
     "https://research.chalmers.se/publication/521711",
-    "https://docs.velociraptor.app/exchange/artifacts/pages/detection.application.cursedchrome/"
+    "https://docs.velociraptor.app/exchange/artifacts/pages/detection.application.cursedchrome/",
+    "https://attack.mitre.org/techniques/T1176/"
    ],
    "version": 1,
    "status": "verified",
@@ -13611,11 +13566,9 @@
    "rationale_ko": "웹 스토어 설치도 기본 설치도 아닌 확장: 악성 확장·정책 위반. Secure Preferences HMAC은 우회 가능해 무결성 증거 아님.",
    "false_positive_ko": "개발자 확장.",
    "sources": [
-    "https://forensics.wiki/mozilla_firefox/",
-    "https://sleuthkit.org/autopsy/docs/api-docs/4.19.0/_firefox_8java_source.html",
-    "https://developer.chrome.com/docs/extensions/declare_permissions",
     "https://research.chalmers.se/publication/521711",
-    "https://docs.velociraptor.app/exchange/artifacts/pages/detection.application.cursedchrome/"
+    "https://docs.velociraptor.app/exchange/artifacts/pages/detection.application.cursedchrome/",
+    "https://attack.mitre.org/techniques/T1176/"
    ],
    "version": 1,
    "status": "verified",
@@ -13630,10 +13583,7 @@
    "false_positive_ko": "일반 정보 검색.",
    "sources": [
     "https://forensics.wiki/mozilla_firefox/",
-    "https://sleuthkit.org/autopsy/docs/api-docs/4.19.0/_firefox_8java_source.html",
-    "https://developer.chrome.com/docs/extensions/declare_permissions",
-    "https://research.chalmers.se/publication/521711",
-    "https://docs.velociraptor.app/exchange/artifacts/pages/detection.application.cursedchrome/"
+    "https://sleuthkit.org/autopsy/docs/api-docs/4.19.0/_firefox_8java_source.html"
    ],
    "version": 1,
    "status": "verified",
@@ -13672,10 +13622,7 @@
    "false_positive_ko": "정상 사용.",
    "sources": [
     "https://forensics.wiki/mozilla_firefox/",
-    "https://sleuthkit.org/autopsy/docs/api-docs/4.19.0/_firefox_8java_source.html",
-    "https://developer.chrome.com/docs/extensions/declare_permissions",
-    "https://research.chalmers.se/publication/521711",
-    "https://docs.velociraptor.app/exchange/artifacts/pages/detection.application.cursedchrome/"
+    "https://attack.mitre.org/techniques/T1555/003/"
    ],
    "version": 1,
    "status": "verified",
@@ -13690,10 +13637,7 @@
    "false_positive_ko": "즐겨찾기·자동완성.",
    "sources": [
     "https://forensics.wiki/mozilla_firefox/",
-    "https://sleuthkit.org/autopsy/docs/api-docs/4.19.0/_firefox_8java_source.html",
-    "https://developer.chrome.com/docs/extensions/declare_permissions",
-    "https://research.chalmers.se/publication/521711",
-    "https://docs.velociraptor.app/exchange/artifacts/pages/detection.application.cursedchrome/"
+    "https://sleuthkit.org/autopsy/docs/api-docs/4.19.0/_firefox_8java_source.html"
    ],
    "version": 1,
    "status": "verified",
@@ -13764,10 +13708,8 @@
    "sources": [
     "https://developers.google.com/gmail/api/reference/rest/v1/users.messages.attachments/get",
     "https://learn.microsoft.com/en-us/exchange/client-developer/web-service-reference/createattachment-operation",
-    "https://developers.google.com/drive/api/guides/manage-uploads",
-    "https://www.dropbox.com/developers/documentation/http/documentation",
-    "https://learn.microsoft.com/en-us/onedrive/developer/rest-api/api/driveitem-createuploadsession",
-    "https://chromium.googlesource.com/chromium/src/+/HEAD/net/disk_cache/simple/simple_entry_format.h"
+    "https://chromium.googlesource.com/chromium/src/+/HEAD/net/disk_cache/simple/simple_entry_format.h",
+    "https://attack.mitre.org/techniques/T1567/"
    ],
    "version": 1,
    "status": "provisional",
@@ -13783,12 +13725,11 @@
    "rationale_ko": "캐시 항목·방문 기록 URL이 파일 공유(WeTransfer·Send Anywhere·MEGA)·웹하드·개인 클라우드(Google Drive·Dropbox·OneDrive·MYBOX) 업로드 엔드포인트이거나 그 호스트로 간 POST 요청: 외부 저장소로의 유출 경로.",
    "false_positive_ko": "업무용 클라우드·사내 승인 파일 전송. URL은 업로드 흐름의 흔적일 뿐 어떤 파일이 나갔는지는 다른 증거로 확인.",
    "sources": [
-    "https://developers.google.com/gmail/api/reference/rest/v1/users.messages.attachments/get",
-    "https://learn.microsoft.com/en-us/exchange/client-developer/web-service-reference/createattachment-operation",
     "https://developers.google.com/drive/api/guides/manage-uploads",
     "https://www.dropbox.com/developers/documentation/http/documentation",
     "https://learn.microsoft.com/en-us/onedrive/developer/rest-api/api/driveitem-createuploadsession",
-    "https://chromium.googlesource.com/chromium/src/+/HEAD/net/disk_cache/simple/simple_entry_format.h"
+    "https://chromium.googlesource.com/chromium/src/+/HEAD/net/disk_cache/simple/simple_entry_format.h",
+    "https://attack.mitre.org/techniques/T1567/002/"
    ],
    "version": 1,
    "status": "provisional",
@@ -13825,8 +13766,8 @@
    "false_positive_ko": "초기 동기화, 신규 기기.",
    "sources": [
     "https://learn.microsoft.com/purview/audit-solutions-overview",
-    "https://exiftool.org/forum/index.php?msg=90811",
-    "https://support.apple.com/en-qa/108306"
+    "https://learn.microsoft.com/purview/audit-log-activities",
+    "https://attack.mitre.org/techniques/T1530/"
    ],
    "version": 1,
    "status": "verified",
@@ -13843,9 +13784,8 @@
    "rationale_ko": "익명 링크·외부 공유 초대 생성: 유출 경로.",
    "false_positive_ko": "정상 협업.",
    "sources": [
-    "https://learn.microsoft.com/purview/audit-solutions-overview",
-    "https://exiftool.org/forum/index.php?msg=90811",
-    "https://support.apple.com/en-qa/108306"
+    "https://learn.microsoft.com/purview/audit-log-activities",
+    "https://learn.microsoft.com/purview/audit-solutions-overview"
    ],
    "version": 1,
    "status": "verified",
@@ -13860,8 +13800,7 @@
    "false_positive_ko": "VPN, 출장.",
    "sources": [
     "https://learn.microsoft.com/purview/audit-solutions-overview",
-    "https://exiftool.org/forum/index.php?msg=90811",
-    "https://support.apple.com/en-qa/108306"
+    "https://attack.mitre.org/techniques/T1078/004/"
    ],
    "version": 1,
    "status": "provisional",
@@ -13877,9 +13816,8 @@
    "rationale_ko": "공유·다운로드한 항목을 한 시간 안에 삭제: 흔적 제거.",
    "false_positive_ko": "정리.",
    "sources": [
-    "https://learn.microsoft.com/purview/audit-solutions-overview",
-    "https://exiftool.org/forum/index.php?msg=90811",
-    "https://support.apple.com/en-qa/108306"
+    "https://learn.microsoft.com/purview/audit-log-activities",
+    "https://attack.mitre.org/techniques/T1070/004/"
    ],
    "version": 1,
    "status": "verified",
@@ -13895,7 +13833,6 @@
    "rationale_ko": "Takeout photoTakenTime과 creationTime 차가 임계값 초과: 오래된 사진 업로드.",
    "false_positive_ko": "사진 일괄 백업.",
    "sources": [
-    "https://learn.microsoft.com/purview/audit-solutions-overview",
     "https://exiftool.org/forum/index.php?msg=90811",
     "https://support.apple.com/en-qa/108306"
    ],
@@ -13913,9 +13850,7 @@
    "rationale_ko": "Takeout geoData와 geoDataExif가 1 km 넘게 다름: 위치 편집 정황.",
    "false_positive_ko": "앱의 위치 수정 기능.",
    "sources": [
-    "https://learn.microsoft.com/purview/audit-solutions-overview",
-    "https://exiftool.org/forum/index.php?msg=90811",
-    "https://support.apple.com/en-qa/108306"
+    "https://exiftool.org/forum/index.php?msg=90811"
    ],
    "version": 1,
    "status": "verified",
@@ -13931,9 +13866,7 @@
    "rationale_ko": "서비스별 가장 이른 감사 기록: 그 이전은 보존기간 밖일 수 있어 부재 ≠ 미발생.",
    "false_positive_ko": "해당 없음(한계 표기).",
    "sources": [
-    "https://learn.microsoft.com/purview/audit-solutions-overview",
-    "https://exiftool.org/forum/index.php?msg=90811",
-    "https://support.apple.com/en-qa/108306"
+    "https://learn.microsoft.com/purview/audit-solutions-overview"
    ],
    "version": 1,
    "status": "verified",
@@ -13999,10 +13932,8 @@
    "rationale_ko": "마지막 저장자가 작성자와 다름: 제3자 수정·전달.",
    "false_positive_ko": "협업, 템플릿 재사용.",
    "sources": [
-    "https://learn.microsoft.com/en-us/previous-versions/office/developer/sharepoint-2007/bb447589(v=office.12)",
     "https://python-pptx.readthedocs.io/en/latest/dev/analysis/pkg-coreprops.html",
-    "https://learn.microsoft.com/en-us/windows/win32/stg/implementing-the-summary-information-property-set",
-    "https://api-reference.pdf-tools.com/pdfsdk/1.20/dotnet/html/T_PdfTools_Pdf_Metadata.htm"
+    "https://learn.microsoft.com/en-us/previous-versions/office/developer/sharepoint-2007/bb447589(v=office.12)"
    ],
    "version": 1,
    "status": "verified",
@@ -14016,10 +13947,8 @@
    "rationale_ko": "총 편집 시간이 0~1분인데 수정 번호가 큼: 자동 생성·변환·메타 조작.",
    "false_positive_ko": "TotalTime을 고정 기록하는 도구.",
    "sources": [
-    "https://learn.microsoft.com/en-us/previous-versions/office/developer/sharepoint-2007/bb447589(v=office.12)",
-    "https://python-pptx.readthedocs.io/en/latest/dev/analysis/pkg-coreprops.html",
     "https://learn.microsoft.com/en-us/windows/win32/stg/implementing-the-summary-information-property-set",
-    "https://api-reference.pdf-tools.com/pdfsdk/1.20/dotnet/html/T_PdfTools_Pdf_Metadata.htm"
+    "https://python-pptx.readthedocs.io/en/latest/dev/analysis/pkg-coreprops.html"
    ],
    "version": 1,
    "status": "verified",
@@ -14036,10 +13965,8 @@
    "rationale_ko": "문서 내부 생성 시각이 수정 시각보다 늦음: 시간 조작·복사 도구.",
    "false_positive_ko": "시계 오차, 형식 변환, 시간대 없는 시각과 UTC 시각의 혼용(같은 날 수 시간 차).",
    "sources": [
-    "https://learn.microsoft.com/en-us/previous-versions/office/developer/sharepoint-2007/bb447589(v=office.12)",
     "https://python-pptx.readthedocs.io/en/latest/dev/analysis/pkg-coreprops.html",
-    "https://learn.microsoft.com/en-us/windows/win32/stg/implementing-the-summary-information-property-set",
-    "https://api-reference.pdf-tools.com/pdfsdk/1.20/dotnet/html/T_PdfTools_Pdf_Metadata.htm"
+    "https://learn.microsoft.com/en-us/windows/win32/stg/implementing-the-summary-information-property-set"
    ],
    "version": 2,
    "status": "verified",
@@ -14055,10 +13982,7 @@
    "rationale_ko": "문서 내부 수정 시각과 파일 시스템 수정 시각 차가 하루 초과: 복사·재저장.",
    "false_positive_ko": "이메일 첨부 저장.",
    "sources": [
-    "https://learn.microsoft.com/en-us/previous-versions/office/developer/sharepoint-2007/bb447589(v=office.12)",
-    "https://python-pptx.readthedocs.io/en/latest/dev/analysis/pkg-coreprops.html",
-    "https://learn.microsoft.com/en-us/windows/win32/stg/implementing-the-summary-information-property-set",
-    "https://api-reference.pdf-tools.com/pdfsdk/1.20/dotnet/html/T_PdfTools_Pdf_Metadata.htm"
+    "https://python-pptx.readthedocs.io/en/latest/dev/analysis/pkg-coreprops.html"
    ],
    "version": 1,
    "status": "verified",
@@ -14074,10 +13998,8 @@
    "rationale_ko": "작성자/마지막 저장자가 라이브러리·변환 도구 이름: 프로그램 생성 문서.",
    "false_positive_ko": "자동화 보고서.",
    "sources": [
-    "https://learn.microsoft.com/en-us/previous-versions/office/developer/sharepoint-2007/bb447589(v=office.12)",
     "https://python-pptx.readthedocs.io/en/latest/dev/analysis/pkg-coreprops.html",
-    "https://learn.microsoft.com/en-us/windows/win32/stg/implementing-the-summary-information-property-set",
-    "https://api-reference.pdf-tools.com/pdfsdk/1.20/dotnet/html/T_PdfTools_Pdf_Metadata.htm"
+    "https://learn.microsoft.com/en-us/windows/win32/stg/implementing-the-summary-information-property-set"
    ],
    "version": 1,
    "status": "verified",
@@ -14109,10 +14031,8 @@
    "rationale_ko": "vbaProject.bin·OLE 개체·DDE 존재: 악성 또는 자동화.",
    "false_positive_ko": "업무 매크로. 한컴이 모든 HWPX에 넣는 기본 스크립트(Scripts/headerScripts.js·sourceScripts.js)는 제외.",
    "sources": [
-    "https://learn.microsoft.com/en-us/previous-versions/office/developer/sharepoint-2007/bb447589(v=office.12)",
-    "https://python-pptx.readthedocs.io/en/latest/dev/analysis/pkg-coreprops.html",
-    "https://learn.microsoft.com/en-us/windows/win32/stg/implementing-the-summary-information-property-set",
-    "https://api-reference.pdf-tools.com/pdfsdk/1.20/dotnet/html/T_PdfTools_Pdf_Metadata.htm"
+    "https://attack.mitre.org/techniques/T1204/002/",
+    "https://attack.mitre.org/techniques/T1559/002/"
    ],
    "version": 2,
    "status": "verified",
@@ -14131,10 +14051,7 @@
    "rationale_ko": "서식 파일·외부 관계가 http(s)/UNC를 가리킴: 템플릿 인젝션.",
    "false_positive_ko": "사내 서버 템플릿.",
    "sources": [
-    "https://learn.microsoft.com/en-us/previous-versions/office/developer/sharepoint-2007/bb447589(v=office.12)",
-    "https://python-pptx.readthedocs.io/en/latest/dev/analysis/pkg-coreprops.html",
-    "https://learn.microsoft.com/en-us/windows/win32/stg/implementing-the-summary-information-property-set",
-    "https://api-reference.pdf-tools.com/pdfsdk/1.20/dotnet/html/T_PdfTools_Pdf_Metadata.htm"
+    "https://attack.mitre.org/techniques/T1221/"
    ],
    "version": 1,
    "status": "verified",
@@ -14148,10 +14065,7 @@
    "rationale_ko": "마지막 인쇄 시각 존재: 인쇄 사실.",
    "false_positive_ko": "인쇄 후 저장.",
    "sources": [
-    "https://learn.microsoft.com/en-us/previous-versions/office/developer/sharepoint-2007/bb447589(v=office.12)",
-    "https://python-pptx.readthedocs.io/en/latest/dev/analysis/pkg-coreprops.html",
-    "https://learn.microsoft.com/en-us/windows/win32/stg/implementing-the-summary-information-property-set",
-    "https://api-reference.pdf-tools.com/pdfsdk/1.20/dotnet/html/T_PdfTools_Pdf_Metadata.htm"
+    "https://learn.microsoft.com/en-us/windows/win32/stg/implementing-the-summary-information-property-set"
    ],
    "version": 1,
    "status": "verified",
@@ -14165,9 +14079,6 @@
    "rationale_ko": "Creator는 오피스 앱인데 Producer는 편집기·온라인 변환기: 재작성·편집 정황.",
    "false_positive_ko": "정상 PDF 변환 파이프라인.",
    "sources": [
-    "https://learn.microsoft.com/en-us/previous-versions/office/developer/sharepoint-2007/bb447589(v=office.12)",
-    "https://python-pptx.readthedocs.io/en/latest/dev/analysis/pkg-coreprops.html",
-    "https://learn.microsoft.com/en-us/windows/win32/stg/implementing-the-summary-information-property-set",
     "https://api-reference.pdf-tools.com/pdfsdk/1.20/dotnet/html/T_PdfTools_Pdf_Metadata.htm"
    ],
    "version": 1,
@@ -14204,9 +14115,6 @@
    "rationale_ko": "%%EOF가 여러 개: 생성 뒤 사후 수정.",
    "false_positive_ko": "전자 서명·양식 입력.",
    "sources": [
-    "https://learn.microsoft.com/en-us/previous-versions/office/developer/sharepoint-2007/bb447589(v=office.12)",
-    "https://python-pptx.readthedocs.io/en/latest/dev/analysis/pkg-coreprops.html",
-    "https://learn.microsoft.com/en-us/windows/win32/stg/implementing-the-summary-information-property-set",
     "https://api-reference.pdf-tools.com/pdfsdk/1.20/dotnet/html/T_PdfTools_Pdf_Metadata.htm"
    ],
    "version": 1,
@@ -14221,10 +14129,7 @@
    "rationale_ko": "변경 추적·메모 작성자가 여럿이거나 작성자와 다른 이름: 협업·타인 개입.",
    "false_positive_ko": "정상 검토.",
    "sources": [
-    "https://learn.microsoft.com/en-us/previous-versions/office/developer/sharepoint-2007/bb447589(v=office.12)",
-    "https://python-pptx.readthedocs.io/en/latest/dev/analysis/pkg-coreprops.html",
-    "https://learn.microsoft.com/en-us/windows/win32/stg/implementing-the-summary-information-property-set",
-    "https://api-reference.pdf-tools.com/pdfsdk/1.20/dotnet/html/T_PdfTools_Pdf_Metadata.htm"
+    "https://learn.microsoft.com/en-us/previous-versions/office/developer/sharepoint-2007/bb447589(v=office.12)"
    ],
    "version": 1,
    "status": "verified",
@@ -14240,10 +14145,8 @@
    "rationale_ko": "속성은 있는데 작성자·마지막 저장자·회사가 모두 공란: 메타 제거.",
    "false_positive_ko": "익명 템플릿.",
    "sources": [
-    "https://learn.microsoft.com/en-us/previous-versions/office/developer/sharepoint-2007/bb447589(v=office.12)",
     "https://python-pptx.readthedocs.io/en/latest/dev/analysis/pkg-coreprops.html",
-    "https://learn.microsoft.com/en-us/windows/win32/stg/implementing-the-summary-information-property-set",
-    "https://api-reference.pdf-tools.com/pdfsdk/1.20/dotnet/html/T_PdfTools_Pdf_Metadata.htm"
+    "https://learn.microsoft.com/en-us/windows/win32/stg/implementing-the-summary-information-property-set"
    ],
    "version": 1,
    "status": "verified",
@@ -14257,9 +14160,8 @@
    "rationale_ko": "Authentication-Results/Received-SPF의 spf=fail/softfail: 발신 서버 비인가.",
    "false_positive_ko": "포워딩·메일링 리스트는 SPF가 깨지는 게 정상.",
    "sources": [
+    "https://www.rfc-editor.org/rfc/rfc7208",
     "https://www.rfc-editor.org/rfc/rfc8601",
-    "https://learn.microsoft.com/en-us/office/client-developer/outlook/mapi/pidtagtransportmessageheaders-canonical-property",
-    "https://technet.microsoft.com/en-us/library/cc815404(v=office.14)",
     "https://mxtoolbox.com/dmarc/spf/spf-alignment"
    ],
    "version": 1,
@@ -14274,10 +14176,8 @@
    "rationale_ko": "dkim=fail/none: 변조 또는 서명 없음.",
    "false_positive_ko": "리스트 서버의 제목·본문 수정.",
    "sources": [
-    "https://www.rfc-editor.org/rfc/rfc8601",
-    "https://learn.microsoft.com/en-us/office/client-developer/outlook/mapi/pidtagtransportmessageheaders-canonical-property",
-    "https://technet.microsoft.com/en-us/library/cc815404(v=office.14)",
-    "https://mxtoolbox.com/dmarc/spf/spf-alignment"
+    "https://www.rfc-editor.org/rfc/rfc6376",
+    "https://www.rfc-editor.org/rfc/rfc8601"
    ],
    "version": 1,
    "status": "verified",
@@ -14291,9 +14191,8 @@
    "rationale_ko": "dmarc=fail: Return-Path/DKIM d=와 From 도메인 정렬 실패.",
    "false_positive_ko": "제3자 발송(마케팅 SaaS).",
    "sources": [
+    "https://www.rfc-editor.org/rfc/rfc7489",
     "https://www.rfc-editor.org/rfc/rfc8601",
-    "https://learn.microsoft.com/en-us/office/client-developer/outlook/mapi/pidtagtransportmessageheaders-canonical-property",
-    "https://technet.microsoft.com/en-us/library/cc815404(v=office.14)",
     "https://mxtoolbox.com/dmarc/spf/spf-alignment"
    ],
    "version": 1,
@@ -14308,10 +14207,8 @@
    "rationale_ko": "From 표시 이름에 실제 주소와 다른 도메인의 주소가 들어 있음: 사칭.",
    "false_positive_ko": "정상 개인 메일 별칭.",
    "sources": [
-    "https://www.rfc-editor.org/rfc/rfc8601",
-    "https://learn.microsoft.com/en-us/office/client-developer/outlook/mapi/pidtagtransportmessageheaders-canonical-property",
-    "https://technet.microsoft.com/en-us/library/cc815404(v=office.14)",
-    "https://mxtoolbox.com/dmarc/spf/spf-alignment"
+    "https://www.rfc-editor.org/rfc/rfc5322",
+    "https://attack.mitre.org/techniques/T1566/"
    ],
    "version": 1,
    "status": "verified",
@@ -14325,10 +14222,8 @@
    "rationale_ko": "Reply-To 도메인이 From 도메인과 다름: 회신 탈취(BEC).",
    "false_positive_ko": "지원센터·비서 대행.",
    "sources": [
-    "https://www.rfc-editor.org/rfc/rfc8601",
-    "https://learn.microsoft.com/en-us/office/client-developer/outlook/mapi/pidtagtransportmessageheaders-canonical-property",
-    "https://technet.microsoft.com/en-us/library/cc815404(v=office.14)",
-    "https://mxtoolbox.com/dmarc/spf/spf-alignment"
+    "https://www.rfc-editor.org/rfc/rfc5322",
+    "https://attack.mitre.org/techniques/T1566/"
    ],
    "version": 1,
    "status": "verified",
@@ -14342,9 +14237,7 @@
    "rationale_ko": "Return-Path(봉투 발신자) 도메인이 From 도메인과 다름: 대리 발송.",
    "false_positive_ko": "ESP 사용.",
    "sources": [
-    "https://www.rfc-editor.org/rfc/rfc8601",
-    "https://learn.microsoft.com/en-us/office/client-developer/outlook/mapi/pidtagtransportmessageheaders-canonical-property",
-    "https://technet.microsoft.com/en-us/library/cc815404(v=office.14)",
+    "https://www.rfc-editor.org/rfc/rfc5322",
     "https://mxtoolbox.com/dmarc/spf/spf-alignment"
    ],
    "version": 1,
@@ -14359,10 +14252,7 @@
    "rationale_ko": "Message-ID 도메인이 From 도메인과 다름: 위조·다른 시스템 발송.",
    "false_positive_ko": "클라우드 메일.",
    "sources": [
-    "https://www.rfc-editor.org/rfc/rfc8601",
-    "https://learn.microsoft.com/en-us/office/client-developer/outlook/mapi/pidtagtransportmessageheaders-canonical-property",
-    "https://technet.microsoft.com/en-us/library/cc815404(v=office.14)",
-    "https://mxtoolbox.com/dmarc/spf/spf-alignment"
+    "https://www.rfc-editor.org/rfc/rfc5322"
    ],
    "version": 1,
    "status": "provisional",
@@ -14376,10 +14266,8 @@
    "rationale_ko": "첨부 이름이 .pdf.exe·.docx.js처럼 문서 확장자 뒤에 실행 확장자: 확장자 위장.",
    "false_positive_ko": "드물게 정상 파일명.",
    "sources": [
-    "https://www.rfc-editor.org/rfc/rfc8601",
-    "https://learn.microsoft.com/en-us/office/client-developer/outlook/mapi/pidtagtransportmessageheaders-canonical-property",
-    "https://technet.microsoft.com/en-us/library/cc815404(v=office.14)",
-    "https://mxtoolbox.com/dmarc/spf/spf-alignment"
+    "https://attack.mitre.org/techniques/T1036/007/",
+    "https://attack.mitre.org/techniques/T1566/001/"
    ],
    "version": 1,
    "status": "verified",
@@ -14393,10 +14281,7 @@
    "rationale_ko": "첨부 앞부분 바이트(매직)가 확장자와 다른 형식: 위장.",
    "false_positive_ko": "서버 변환.",
    "sources": [
-    "https://www.rfc-editor.org/rfc/rfc8601",
-    "https://learn.microsoft.com/en-us/office/client-developer/outlook/mapi/pidtagtransportmessageheaders-canonical-property",
-    "https://technet.microsoft.com/en-us/library/cc815404(v=office.14)",
-    "https://mxtoolbox.com/dmarc/spf/spf-alignment"
+    "https://attack.mitre.org/techniques/T1566/001/"
    ],
    "version": 1,
    "status": "verified",
@@ -14410,10 +14295,7 @@
    "rationale_ko": "실행 파일·스크립트·디스크 이미지 첨부 또는 암호화된 ZIP 첨부: 악성 또는 유출.",
    "false_positive_ko": "업무상 암호화 zip.",
    "sources": [
-    "https://www.rfc-editor.org/rfc/rfc8601",
-    "https://learn.microsoft.com/en-us/office/client-developer/outlook/mapi/pidtagtransportmessageheaders-canonical-property",
-    "https://technet.microsoft.com/en-us/library/cc815404(v=office.14)",
-    "https://mxtoolbox.com/dmarc/spf/spf-alignment"
+    "https://attack.mitre.org/techniques/T1566/001/"
    ],
    "version": 1,
    "status": "verified",
@@ -14427,10 +14309,8 @@
    "rationale_ko": "Date 헤더와 수신 서버 Received 시각 차가 하루 초과: 시계 조작·백데이트.",
    "false_positive_ko": "큐 지연, 시계 오류.",
    "sources": [
-    "https://www.rfc-editor.org/rfc/rfc8601",
-    "https://learn.microsoft.com/en-us/office/client-developer/outlook/mapi/pidtagtransportmessageheaders-canonical-property",
-    "https://technet.microsoft.com/en-us/library/cc815404(v=office.14)",
-    "https://mxtoolbox.com/dmarc/spf/spf-alignment"
+    "https://www.rfc-editor.org/rfc/rfc5322",
+    "https://learn.microsoft.com/en-us/office/client-developer/outlook/mapi/pidtagtransportmessageheaders-canonical-property"
    ],
    "version": 1,
    "status": "verified",
@@ -14446,10 +14326,7 @@
    "rationale_ko": "메일함 소유 도메인에서 같은 외부 주소로 임계값 이상 발송: 자동 전달·유출.",
    "false_positive_ko": "퇴사자 인수인계.",
    "sources": [
-    "https://www.rfc-editor.org/rfc/rfc8601",
-    "https://learn.microsoft.com/en-us/office/client-developer/outlook/mapi/pidtagtransportmessageheaders-canonical-property",
-    "https://technet.microsoft.com/en-us/library/cc815404(v=office.14)",
-    "https://mxtoolbox.com/dmarc/spf/spf-alignment"
+    "https://attack.mitre.org/techniques/T1114/003/"
    ],
    "version": 1,
    "status": "provisional",
@@ -14465,10 +14342,8 @@
    "rationale_ko": "소유 도메인 발신 메일의 수신자(To/Cc/Bcc)에 개인 웹메일 주소: 유출 정황.",
    "false_positive_ko": "정당한 개인 연락.",
    "sources": [
-    "https://www.rfc-editor.org/rfc/rfc8601",
-    "https://learn.microsoft.com/en-us/office/client-developer/outlook/mapi/pidtagtransportmessageheaders-canonical-property",
-    "https://technet.microsoft.com/en-us/library/cc815404(v=office.14)",
-    "https://mxtoolbox.com/dmarc/spf/spf-alignment"
+    "https://attack.mitre.org/techniques/T1048/",
+    "https://attack.mitre.org/techniques/T1114/"
    ],
    "version": 1,
    "status": "verified",
@@ -14534,10 +14409,8 @@
    "rationale_ko": "4624 로그온 유형 10(원격 대화형)의 IpAddress가 사설망·루프백·링크로컬이 아닌 공인 주소: 인터넷에 노출된 RDP로 들어온 접속.",
    "false_positive_ko": "VPN·점프호스트 NAT, 공인 IPv6를 쓰는 사내망.",
    "sources": [
-    "https://learn.microsoft.com/en-us/sysinternals/downloads/sysmon",
     "https://docs.logpoint.com/agentx/references/windows-event-ids-reference",
-    "https://detection.fyi/sigmahq/sigma/windows/builtin/system/microsoft_windows_eventlog/win_system_eventlog_cleared/",
-    "https://www.manageengine.com/products/active-directory-audit/kb/system-events/event-id-7045.html"
+    "https://attack.mitre.org/techniques/T1021/001/"
    ],
    "version": 1,
    "status": "verified",
@@ -14566,10 +14439,8 @@
    "rationale_ko": "같은 출발지 IP(없으면 같은 대상 계정)의 4625가 짧은 시간 안에 임계값 이상: 무차별 대입 시도.",
    "false_positive_ko": "암호가 만료된 서비스 계정, 취약점 스캐너.",
    "sources": [
-    "https://learn.microsoft.com/en-us/sysinternals/downloads/sysmon",
     "https://docs.logpoint.com/agentx/references/windows-event-ids-reference",
-    "https://detection.fyi/sigmahq/sigma/windows/builtin/system/microsoft_windows_eventlog/win_system_eventlog_cleared/",
-    "https://www.manageengine.com/products/active-directory-audit/kb/system-events/event-id-7045.html"
+    "https://attack.mitre.org/techniques/T1110/"
    ],
    "version": 1,
    "status": "verified",
@@ -14586,10 +14457,8 @@
    "rationale_ko": "4625 폭주와 같은 출처(IP 또는 계정)에서 폭주 중이거나 직후에 4624 성공: 무차별 대입 성공 가능성.",
    "false_positive_ko": "사용자 오타 반복 뒤 정상 로그온.",
    "sources": [
-    "https://learn.microsoft.com/en-us/sysinternals/downloads/sysmon",
     "https://docs.logpoint.com/agentx/references/windows-event-ids-reference",
-    "https://detection.fyi/sigmahq/sigma/windows/builtin/system/microsoft_windows_eventlog/win_system_eventlog_cleared/",
-    "https://www.manageengine.com/products/active-directory-audit/kb/system-events/event-id-7045.html"
+    "https://attack.mitre.org/techniques/T1110/"
    ],
    "version": 1,
    "status": "verified",
@@ -14607,10 +14476,8 @@
    "rationale_ko": "Security 1102 또는 System 104(Eventlog 제공자): 이벤트 로그가 지워짐. 안티포렌식의 대표 흔적.",
    "false_positive_ko": "에이전트 롤아웃·골든 이미지 준비 과정의 정상 삭제(Sigma 규칙 참고).",
    "sources": [
-    "https://learn.microsoft.com/en-us/sysinternals/downloads/sysmon",
-    "https://docs.logpoint.com/agentx/references/windows-event-ids-reference",
     "https://detection.fyi/sigmahq/sigma/windows/builtin/system/microsoft_windows_eventlog/win_system_eventlog_cleared/",
-    "https://www.manageengine.com/products/active-directory-audit/kb/system-events/event-id-7045.html"
+    "https://attack.mitre.org/techniques/T1070/001/"
    ],
    "version": 1,
    "status": "verified",
@@ -14639,10 +14506,7 @@
    "rationale_ko": "같은 .evtx 파일의 할당(live) 레코드 EventRecordID가 크게 건너뜀: 레코드 삭제·청크 손실 가능성.",
    "false_positive_ko": "파서가 일부 레코드를 해석하지 못한 경우, 손상 청크.",
    "sources": [
-    "https://learn.microsoft.com/en-us/sysinternals/downloads/sysmon",
-    "https://docs.logpoint.com/agentx/references/windows-event-ids-reference",
-    "https://detection.fyi/sigmahq/sigma/windows/builtin/system/microsoft_windows_eventlog/win_system_eventlog_cleared/",
-    "https://www.manageengine.com/products/active-directory-audit/kb/system-events/event-id-7045.html"
+    "https://attack.mitre.org/techniques/T1070/001/"
    ],
    "version": 1,
    "status": "provisional",
@@ -14658,10 +14522,9 @@
    "rationale_ko": "서비스 설치 이벤트의 ImagePath가 Temp/AppData/UNC/cmd/PowerShell: 지속성 확보·PsExec류 횡이동.",
    "false_positive_ko": "정상 설치 프로그램·드라이버(주체가 SYSTEM인 경우가 흔함). Defender 플랫폼·정의 업데이트 서비스(ProgramData\\Microsoft\\Windows Defender)는 제외.",
    "sources": [
-    "https://learn.microsoft.com/en-us/sysinternals/downloads/sysmon",
-    "https://docs.logpoint.com/agentx/references/windows-event-ids-reference",
-    "https://detection.fyi/sigmahq/sigma/windows/builtin/system/microsoft_windows_eventlog/win_system_eventlog_cleared/",
-    "https://www.manageengine.com/products/active-directory-audit/kb/system-events/event-id-7045.html"
+    "https://www.manageengine.com/products/active-directory-audit/kb/system-events/event-id-7045.html",
+    "https://attack.mitre.org/techniques/T1543/003/",
+    "https://attack.mitre.org/techniques/T1569/002/"
    ],
    "version": 2,
    "status": "verified",
@@ -14680,9 +14543,8 @@
    "false_positive_ko": "관리 스크립트, 배포 도구.",
    "sources": [
     "https://learn.microsoft.com/en-us/sysinternals/downloads/sysmon",
-    "https://docs.logpoint.com/agentx/references/windows-event-ids-reference",
-    "https://detection.fyi/sigmahq/sigma/windows/builtin/system/microsoft_windows_eventlog/win_system_eventlog_cleared/",
-    "https://www.manageengine.com/products/active-directory-audit/kb/system-events/event-id-7045.html"
+    "https://attack.mitre.org/techniques/T1059/001/",
+    "https://attack.mitre.org/techniques/T1027/"
    ],
    "version": 1,
    "status": "verified",
@@ -14698,10 +14560,8 @@
    "rationale_ko": "작업 생성·변경 이벤트의 실행 명령이 사용자 쓰기 경로·LOLBin·인코딩 PowerShell: 지속성.",
    "false_positive_ko": "정상 업데이터(사용자 AppData에 설치되는 앱).",
    "sources": [
-    "https://learn.microsoft.com/en-us/sysinternals/downloads/sysmon",
     "https://docs.logpoint.com/agentx/references/windows-event-ids-reference",
-    "https://detection.fyi/sigmahq/sigma/windows/builtin/system/microsoft_windows_eventlog/win_system_eventlog_cleared/",
-    "https://www.manageengine.com/products/active-directory-audit/kb/system-events/event-id-7045.html"
+    "https://attack.mitre.org/techniques/T1053/005/"
    ],
    "version": 1,
    "status": "verified",
@@ -14715,10 +14575,9 @@
    "rationale_ko": "4720 계정 생성 직후 같은 SID가 4732로 로컬 그룹에 추가되거나, 다른 계정이 4724로 암호를 재설정: 백도어 계정.",
    "false_positive_ko": "정상 계정 프로비저닝, 헬프데스크 암호 재설정.",
    "sources": [
-    "https://learn.microsoft.com/en-us/sysinternals/downloads/sysmon",
     "https://docs.logpoint.com/agentx/references/windows-event-ids-reference",
-    "https://detection.fyi/sigmahq/sigma/windows/builtin/system/microsoft_windows_eventlog/win_system_eventlog_cleared/",
-    "https://www.manageengine.com/products/active-directory-audit/kb/system-events/event-id-7045.html"
+    "https://attack.mitre.org/techniques/T1136/001/",
+    "https://attack.mitre.org/techniques/T1098/"
    ],
    "version": 1,
    "status": "verified",
@@ -14734,10 +14593,9 @@
    "rationale_ko": "4648의 TargetServerName이 로컬이 아니고 프로세스가 일반 시스템 프로세스가 아님: 횡이동 시도.",
    "false_positive_ko": "RunAs, 예약 작업, 네트워크 드라이브 연결.",
    "sources": [
-    "https://learn.microsoft.com/en-us/sysinternals/downloads/sysmon",
     "https://docs.logpoint.com/agentx/references/windows-event-ids-reference",
-    "https://detection.fyi/sigmahq/sigma/windows/builtin/system/microsoft_windows_eventlog/win_system_eventlog_cleared/",
-    "https://www.manageengine.com/products/active-directory-audit/kb/system-events/event-id-7045.html"
+    "https://attack.mitre.org/techniques/T1078/",
+    "https://attack.mitre.org/techniques/T1021/"
    ],
    "version": 1,
    "status": "verified",
@@ -14760,10 +14618,8 @@
    "rationale_ko": "대화형/원격 4624가 그 계정의 시간대 분포에서 드문 시각(비율 < 임계값)에 발생.",
    "false_positive_ko": "교대 근무, 시간대 오판(기본 UTC+9 가정).",
    "sources": [
-    "https://learn.microsoft.com/en-us/sysinternals/downloads/sysmon",
     "https://docs.logpoint.com/agentx/references/windows-event-ids-reference",
-    "https://detection.fyi/sigmahq/sigma/windows/builtin/system/microsoft_windows_eventlog/win_system_eventlog_cleared/",
-    "https://www.manageengine.com/products/active-directory-audit/kb/system-events/event-id-7045.html"
+    "https://attack.mitre.org/techniques/T1078/"
    ],
    "version": 1,
    "status": "provisional",
@@ -14782,9 +14638,8 @@
    "false_positive_ko": "AV/EDR, 개발 도구.",
    "sources": [
     "https://learn.microsoft.com/en-us/sysinternals/downloads/sysmon",
-    "https://docs.logpoint.com/agentx/references/windows-event-ids-reference",
-    "https://detection.fyi/sigmahq/sigma/windows/builtin/system/microsoft_windows_eventlog/win_system_eventlog_cleared/",
-    "https://www.manageengine.com/products/active-directory-audit/kb/system-events/event-id-7045.html"
+    "https://attack.mitre.org/techniques/T1055/",
+    "https://attack.mitre.org/techniques/T1003/001/"
    ],
    "version": 1,
    "status": "verified",
@@ -14812,10 +14667,8 @@
    "rationale_ko": "Security 로그는 충분한데 4688이 하나도 없거나 PowerShell Operational 로그에 4104가 없음: 해당 감사가 꺼져 있었을 가능성. 없다고 해서 실행되지 않았다는 뜻이 아님.",
    "false_positive_ko": "정책상 비활성(기본값).",
    "sources": [
-    "https://learn.microsoft.com/en-us/sysinternals/downloads/sysmon",
     "https://docs.logpoint.com/agentx/references/windows-event-ids-reference",
-    "https://detection.fyi/sigmahq/sigma/windows/builtin/system/microsoft_windows_eventlog/win_system_eventlog_cleared/",
-    "https://www.manageengine.com/products/active-directory-audit/kb/system-events/event-id-7045.html"
+    "https://attack.mitre.org/techniques/T1562/002/"
    ],
    "version": 1,
    "status": "verified",
@@ -14832,8 +14685,6 @@
    "false_positive_ko": "설치 프로그램, 사용자별 설치 앱(제외 목록 참고).",
    "sources": [
     "https://www.sans.org/blog/digital-forensics-application-execution/",
-    "https://belkasoft.com/windows-prefetch-forensics",
-    "https://www.magnetforensics.com/blog/srum-forensic-analysis-of-windows-system-resource-utilization-monitor/",
     "https://docs.velociraptor.app/exchange/artifacts/pages/evidenceofexecution/"
    ],
    "version": 1,
@@ -14855,10 +14706,8 @@
    "rationale_ko": "Prefetch 최근 실행 시각 8개가 한 시간 안에 몰림: 단발성 도구의 반복 실행(Windows 구성 요소 제외).",
    "false_positive_ko": "스케줄 작업, 자동 재시작.",
    "sources": [
-    "https://www.sans.org/blog/digital-forensics-application-execution/",
     "https://belkasoft.com/windows-prefetch-forensics",
-    "https://www.magnetforensics.com/blog/srum-forensic-analysis-of-windows-system-resource-utilization-monitor/",
-    "https://docs.velociraptor.app/exchange/artifacts/pages/evidenceofexecution/"
+    "https://www.sans.org/blog/digital-forensics-application-execution/"
    ],
    "version": 1,
    "status": "provisional",
@@ -14875,10 +14724,8 @@
    "rationale_ko": "svchost.exe·lsass.exe 같은 시스템 파일 이름이 System32/SysWOW64 밖에서 실행: 마스커레이딩.",
    "false_positive_ko": "동명 정상 복사본(백업·설치 매체).",
    "sources": [
-    "https://www.sans.org/blog/digital-forensics-application-execution/",
-    "https://belkasoft.com/windows-prefetch-forensics",
-    "https://www.magnetforensics.com/blog/srum-forensic-analysis-of-windows-system-resource-utilization-monitor/",
-    "https://docs.velociraptor.app/exchange/artifacts/pages/evidenceofexecution/"
+    "https://attack.mitre.org/techniques/T1036/005/",
+    "https://www.sans.org/blog/digital-forensics-application-execution/"
    ],
    "version": 1,
    "status": "verified",
@@ -14894,8 +14741,7 @@
    "sources": [
     "https://www.sans.org/blog/digital-forensics-application-execution/",
     "https://belkasoft.com/windows-prefetch-forensics",
-    "https://www.magnetforensics.com/blog/srum-forensic-analysis-of-windows-system-resource-utilization-monitor/",
-    "https://docs.velociraptor.app/exchange/artifacts/pages/evidenceofexecution/"
+    "https://attack.mitre.org/techniques/T1070/004/"
    ],
    "version": 1,
    "status": "verified",
@@ -14910,8 +14756,6 @@
    "false_positive_ko": "Server는 Prefetch 기본 비활성, ShimCache는 실행이 아닌 존재 증거.",
    "sources": [
     "https://www.sans.org/blog/digital-forensics-application-execution/",
-    "https://belkasoft.com/windows-prefetch-forensics",
-    "https://www.magnetforensics.com/blog/srum-forensic-analysis-of-windows-system-resource-utilization-monitor/",
     "https://docs.velociraptor.app/exchange/artifacts/pages/evidenceofexecution/"
    ],
    "version": 1,
@@ -14926,10 +14770,8 @@
    "rationale_ko": "SRUM 네트워크 사용량에서 한 앱의 BytesSent가 임계값 이상: 유출 가능성.",
    "false_positive_ko": "백업·동기화 앱.",
    "sources": [
-    "https://www.sans.org/blog/digital-forensics-application-execution/",
-    "https://belkasoft.com/windows-prefetch-forensics",
     "https://www.magnetforensics.com/blog/srum-forensic-analysis-of-windows-system-resource-utilization-monitor/",
-    "https://docs.velociraptor.app/exchange/artifacts/pages/evidenceofexecution/"
+    "https://attack.mitre.org/techniques/T1048/"
    ],
    "version": 1,
    "status": "verified",
@@ -14954,8 +14796,6 @@
    "false_positive_ko": "해당 없음(보강 지표).",
    "sources": [
     "https://www.sans.org/blog/digital-forensics-application-execution/",
-    "https://belkasoft.com/windows-prefetch-forensics",
-    "https://www.magnetforensics.com/blog/srum-forensic-analysis-of-windows-system-resource-utilization-monitor/",
     "https://docs.velociraptor.app/exchange/artifacts/pages/evidenceofexecution/"
    ],
    "version": 1,
@@ -14998,8 +14838,6 @@
    "false_positive_ko": "정상 USB 사용.",
    "sources": [
     "https://www.csirt.gov.sk/wp-content/uploads/2021/08/LNK_File_Forensics.pdf",
-    "https://forensics.wiki/jump_lists/",
-    "https://www.it-connect.tech/windows-forensics-jump-lists/",
     "https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-shllink/"
    ],
    "version": 1,
@@ -15015,8 +14853,6 @@
    "false_positive_ko": "정상 공유 폴더. 공유 호스트가 이 컴퓨터 자신(컴퓨터 이름)인 경우는 제외.",
    "sources": [
     "https://www.csirt.gov.sk/wp-content/uploads/2021/08/LNK_File_Forensics.pdf",
-    "https://forensics.wiki/jump_lists/",
-    "https://www.it-connect.tech/windows-forensics-jump-lists/",
     "https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-shllink/"
    ],
    "version": 2,
@@ -15032,9 +14868,7 @@
    "false_positive_ko": "이동식 매체 분리, 수집 범위 밖.",
    "sources": [
     "https://www.csirt.gov.sk/wp-content/uploads/2021/08/LNK_File_Forensics.pdf",
-    "https://forensics.wiki/jump_lists/",
-    "https://www.it-connect.tech/windows-forensics-jump-lists/",
-    "https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-shllink/"
+    "https://forensics.wiki/jump_lists/"
    ],
    "version": 1,
    "status": "verified",
@@ -15049,9 +14883,7 @@
    "false_positive_ko": "정상 설치 파일 실행.",
    "sources": [
     "https://www.csirt.gov.sk/wp-content/uploads/2021/08/LNK_File_Forensics.pdf",
-    "https://forensics.wiki/jump_lists/",
-    "https://www.it-connect.tech/windows-forensics-jump-lists/",
-    "https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-shllink/"
+    "https://attack.mitre.org/techniques/T1204/002/"
    ],
    "version": 1,
    "status": "verified",
@@ -15066,9 +14898,8 @@
    "false_positive_ko": "이미지 복제·이름 변경된 PC. Windows/Program Files 대상(기본 PowerShell 시작 메뉴 바로 가기 등)은 제외.",
    "sources": [
     "https://www.csirt.gov.sk/wp-content/uploads/2021/08/LNK_File_Forensics.pdf",
-    "https://forensics.wiki/jump_lists/",
-    "https://www.it-connect.tech/windows-forensics-jump-lists/",
-    "https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-shllink/"
+    "https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-shllink/",
+    "https://www.it-connect.tech/windows-forensics-jump-lists/"
    ],
    "version": 2,
    "status": "verified",
@@ -15083,9 +14914,8 @@
    "false_positive_ko": "복사된 LNK.",
    "sources": [
     "https://www.csirt.gov.sk/wp-content/uploads/2021/08/LNK_File_Forensics.pdf",
-    "https://forensics.wiki/jump_lists/",
-    "https://www.it-connect.tech/windows-forensics-jump-lists/",
-    "https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-shllink/"
+    "https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-shllink/",
+    "https://attack.mitre.org/techniques/T1070/006/"
    ],
    "version": 1,
    "status": "verified",
@@ -15101,9 +14931,7 @@
    "rationale_ko": "EXIF DateTimeOriginal(OffsetTimeOriginal 없으면 UTC+9 가정)과 파일 수정 시각 차가 하루 초과: 복사·재저장·시간 조작.",
    "false_positive_ko": "파일 복사(복사 시점), 다운로드.",
    "sources": [
-    "https://exiftool.org/TagNames/EXIF.html",
-    "https://exiftool.org/forum/index.php?msg=85494",
-    "https://exiftool.org/TagNames/Composite.html"
+    "https://exiftool.org/TagNames/EXIF.html"
    ],
    "version": 1,
    "status": "verified",
@@ -15120,9 +14948,7 @@
    "rationale_ko": "촬영 시각이 파일 수정 시각보다 하루 넘게 늦거나 기준 연도 이전: 날조.",
    "false_positive_ko": "카메라 시계 오설정.",
    "sources": [
-    "https://exiftool.org/TagNames/EXIF.html",
-    "https://exiftool.org/forum/index.php?msg=85494",
-    "https://exiftool.org/TagNames/Composite.html"
+    "https://exiftool.org/TagNames/EXIF.html"
    ],
    "version": 1,
    "status": "verified",
@@ -15140,9 +14966,7 @@
    "rationale_ko": "GPS 태그 존재: 위치 증거·유출 위험.",
    "false_positive_ko": "휴대폰 촬영은 흔함.",
    "sources": [
-    "https://exiftool.org/TagNames/EXIF.html",
-    "https://exiftool.org/forum/index.php?msg=85494",
-    "https://exiftool.org/TagNames/Composite.html"
+    "https://exiftool.org/TagNames/GPS.html"
    ],
    "version": 1,
    "status": "verified",
@@ -15156,8 +14980,7 @@
    "rationale_ko": "GPS UTC가 촬영 시각−OffsetTimeOriginal과 다르거나(없으면) 시간대 단위(15분)로 설명되지 않음: 시계 조작·시간대 오류.",
    "false_positive_ko": "카메라 시계 오차.",
    "sources": [
-    "https://exiftool.org/TagNames/EXIF.html",
-    "https://exiftool.org/forum/index.php?msg=85494",
+    "https://exiftool.org/TagNames/GPS.html",
     "https://exiftool.org/TagNames/Composite.html"
    ],
    "version": 1,
@@ -15174,9 +14997,7 @@
    "rationale_ko": "Software/CreatorTool이 Photoshop·GIMP·Lightroom 등: 편집 가능성.",
    "false_positive_ko": "단순 크기 조절·뷰어 저장.",
    "sources": [
-    "https://exiftool.org/TagNames/EXIF.html",
-    "https://exiftool.org/forum/index.php?msg=85494",
-    "https://exiftool.org/TagNames/Composite.html"
+    "https://exiftool.org/TagNames/EXIF.html"
    ],
    "version": 1,
    "status": "verified",
@@ -15205,9 +15026,7 @@
    "rationale_ko": "JPEG/HEIC인데 Make·Model·DateTimeOriginal이 모두 없음: 메신저·SNS 재인코딩, 메타 제거.",
    "false_positive_ko": "스크린샷, 웹 이미지.",
    "sources": [
-    "https://exiftool.org/TagNames/EXIF.html",
-    "https://exiftool.org/forum/index.php?msg=85494",
-    "https://exiftool.org/TagNames/Composite.html"
+    "https://exiftool.org/TagNames/EXIF.html"
    ],
    "version": 1,
    "status": "verified",
@@ -15221,8 +15040,6 @@
    "rationale_ko": "서로 다른 폴더의 이미지 pHash 거리가 임계값 이하: 은닉 사본·재인코딩.",
    "false_positive_ko": "썸네일, 템플릿류.",
    "sources": [
-    "https://exiftool.org/TagNames/EXIF.html",
-    "https://exiftool.org/forum/index.php?msg=85494",
     "https://exiftool.org/TagNames/Composite.html"
    ],
    "version": 1,
@@ -15242,8 +15059,7 @@
    "false_positive_ko": "썸네일만 제거하는 도구.",
    "sources": [
     "https://exiftool.org/TagNames/EXIF.html",
-    "https://exiftool.org/forum/index.php?msg=85494",
-    "https://exiftool.org/TagNames/Composite.html"
+    "https://exiftool.org/forum/index.php?msg=85494"
    ],
    "version": 1,
    "status": "provisional",
@@ -15259,9 +15075,7 @@
    "rationale_ko": "카메라 Make/Model 없이 스크린샷 파일 이름 또는 화면 해상도: 원본 사진 아님.",
    "false_positive_ko": "판정 휴리스틱 오류.",
    "sources": [
-    "https://exiftool.org/TagNames/EXIF.html",
-    "https://exiftool.org/forum/index.php?msg=85494",
-    "https://exiftool.org/TagNames/Composite.html"
+    "https://exiftool.org/TagNames/EXIF.html"
    ],
    "version": 1,
    "status": "provisional",
@@ -15293,8 +15107,6 @@
    "rationale_ko": "HEIC와 같은 이름의 MOV가 같은 폴더에 없음: 일부 삭제·전송.",
    "false_positive_ko": "메신저 전송 시 분리.",
    "sources": [
-    "https://exiftool.org/TagNames/EXIF.html",
-    "https://exiftool.org/forum/index.php?msg=85494",
     "https://exiftool.org/TagNames/Composite.html"
    ],
    "version": 1,
@@ -15310,8 +15122,8 @@
    "false_positive_ko": "MWG 규칙을 적용하는 도구.",
    "sources": [
     "https://exiftool.org/TagNames/EXIF.html",
-    "https://exiftool.org/forum/index.php?msg=85494",
-    "https://exiftool.org/TagNames/Composite.html"
+    "https://exiftool.org/TagNames/Composite.html",
+    "https://exiftool.org/forum/index.php?msg=85494"
    ],
    "version": 1,
    "status": "verified",
@@ -15328,11 +15140,7 @@
    "false_positive_ko": "서버 재전송, 오프라인 후 동기화.",
    "sources": [
     "https://www.group-ib.com/blog/whatsapp-forensic-artifacts/",
-    "https://belkasoft.com/android-whatsapp-forensics-analysis",
-    "https://www.magnetforensics.com/blog/the-lesser-talked-about-messaging-apps/",
-    "https://dfrws.org/presentation/digital-forensic-analysis-of-encrypted-database-files-in-instant-messaging-applications-on-windows-operating-systems/",
-    "https://www.forensicfocus.com/webinars/cracking-the-code-of-ios-messages-a-guide-to-storage-and-analysis-techniques-for-forensic-examiners/",
-    "https://dfrws.org/wp-content/uploads/2025/03/Forensic-analysis-of-Telegram-Messeng_2025_Forensic-Science-International-D.pdf"
+    "https://www.forensicfocus.com/webinars/cracking-the-code-of-ios-messages-a-guide-to-storage-and-analysis-techniques-for-forensic-examiners/"
    ],
    "version": 1,
    "status": "verified",
@@ -15349,10 +15157,6 @@
    "false_positive_ko": "오프라인 큐 지연.",
    "sources": [
     "https://www.group-ib.com/blog/whatsapp-forensic-artifacts/",
-    "https://belkasoft.com/android-whatsapp-forensics-analysis",
-    "https://www.magnetforensics.com/blog/the-lesser-talked-about-messaging-apps/",
-    "https://dfrws.org/presentation/digital-forensic-analysis-of-encrypted-database-files-in-instant-messaging-applications-on-windows-operating-systems/",
-    "https://www.forensicfocus.com/webinars/cracking-the-code-of-ios-messages-a-guide-to-storage-and-analysis-techniques-for-forensic-examiners/",
     "https://dfrws.org/wp-content/uploads/2025/03/Forensic-analysis-of-Telegram-Messeng_2025_Forensic-Science-International-D.pdf"
    ],
    "version": 1,
@@ -15369,12 +15173,8 @@
    "rationale_ko": "id가 대화방별로 1씩 느는 방에서 결번: 삭제 가능성.",
    "false_positive_ko": "id가 전역으로 증가하는 앱은 항상 결번.",
    "sources": [
-    "https://www.group-ib.com/blog/whatsapp-forensic-artifacts/",
     "https://belkasoft.com/android-whatsapp-forensics-analysis",
-    "https://www.magnetforensics.com/blog/the-lesser-talked-about-messaging-apps/",
-    "https://dfrws.org/presentation/digital-forensic-analysis-of-encrypted-database-files-in-instant-messaging-applications-on-windows-operating-systems/",
-    "https://www.forensicfocus.com/webinars/cracking-the-code-of-ios-messages-a-guide-to-storage-and-analysis-techniques-for-forensic-examiners/",
-    "https://dfrws.org/wp-content/uploads/2025/03/Forensic-analysis-of-Telegram-Messeng_2025_Forensic-Science-International-D.pdf"
+    "https://dfrws.org/presentation/digital-forensic-analysis-of-encrypted-database-files-in-instant-messaging-applications-on-windows-operating-systems/"
    ],
    "version": 1,
    "status": "provisional",
@@ -15390,12 +15190,9 @@
    "rationale_ko": "활성 테이블이 아닌 WAL/빈 페이지/저널에서만 복구됐거나 삭제 표식이 있는 메시지: 삭제 은닉 정황.",
    "false_positive_ko": "앱 자체 정리(자동 삭제).",
    "sources": [
-    "https://www.group-ib.com/blog/whatsapp-forensic-artifacts/",
     "https://belkasoft.com/android-whatsapp-forensics-analysis",
-    "https://www.magnetforensics.com/blog/the-lesser-talked-about-messaging-apps/",
-    "https://dfrws.org/presentation/digital-forensic-analysis-of-encrypted-database-files-in-instant-messaging-applications-on-windows-operating-systems/",
     "https://www.forensicfocus.com/webinars/cracking-the-code-of-ios-messages-a-guide-to-storage-and-analysis-techniques-for-forensic-examiners/",
-    "https://dfrws.org/wp-content/uploads/2025/03/Forensic-analysis-of-Telegram-Messeng_2025_Forensic-Science-International-D.pdf"
+    "https://dfrws.org/presentation/digital-forensic-analysis-of-encrypted-database-files-in-instant-messaging-applications-on-windows-operating-systems/"
    ],
    "version": 1,
    "status": "verified",
@@ -15410,11 +15207,7 @@
    "false_positive_ko": "정상 개인정보 설정.",
    "sources": [
     "https://www.group-ib.com/blog/whatsapp-forensic-artifacts/",
-    "https://belkasoft.com/android-whatsapp-forensics-analysis",
-    "https://www.magnetforensics.com/blog/the-lesser-talked-about-messaging-apps/",
-    "https://dfrws.org/presentation/digital-forensic-analysis-of-encrypted-database-files-in-instant-messaging-applications-on-windows-operating-systems/",
-    "https://www.forensicfocus.com/webinars/cracking-the-code-of-ios-messages-a-guide-to-storage-and-analysis-techniques-for-forensic-examiners/",
-    "https://dfrws.org/wp-content/uploads/2025/03/Forensic-analysis-of-Telegram-Messeng_2025_Forensic-Science-International-D.pdf"
+    "https://belkasoft.com/android-whatsapp-forensics-analysis"
    ],
    "version": 1,
    "status": "provisional",
@@ -15428,12 +15221,8 @@
    "rationale_ko": "본문에 파일 공유·단축 URL: 유출 경로.",
    "false_positive_ko": "일반 링크 공유.",
    "sources": [
-    "https://www.group-ib.com/blog/whatsapp-forensic-artifacts/",
-    "https://belkasoft.com/android-whatsapp-forensics-analysis",
     "https://www.magnetforensics.com/blog/the-lesser-talked-about-messaging-apps/",
-    "https://dfrws.org/presentation/digital-forensic-analysis-of-encrypted-database-files-in-instant-messaging-applications-on-windows-operating-systems/",
-    "https://www.forensicfocus.com/webinars/cracking-the-code-of-ios-messages-a-guide-to-storage-and-analysis-techniques-for-forensic-examiners/",
-    "https://dfrws.org/wp-content/uploads/2025/03/Forensic-analysis-of-Telegram-Messeng_2025_Forensic-Science-International-D.pdf"
+    "https://attack.mitre.org/techniques/T1567/"
    ],
    "version": 1,
    "status": "verified",
@@ -15493,12 +15282,7 @@
    "rationale_ko": "현지 야간(기본 00–05시)에 짧은 시간 다수 발신: 조사 우선순위.",
    "false_positive_ko": "시간대 오판, 야간 근무.",
    "sources": [
-    "https://www.group-ib.com/blog/whatsapp-forensic-artifacts/",
-    "https://belkasoft.com/android-whatsapp-forensics-analysis",
-    "https://www.magnetforensics.com/blog/the-lesser-talked-about-messaging-apps/",
-    "https://dfrws.org/presentation/digital-forensic-analysis-of-encrypted-database-files-in-instant-messaging-applications-on-windows-operating-systems/",
-    "https://www.forensicfocus.com/webinars/cracking-the-code-of-ios-messages-a-guide-to-storage-and-analysis-techniques-for-forensic-examiners/",
-    "https://dfrws.org/wp-content/uploads/2025/03/Forensic-analysis-of-Telegram-Messeng_2025_Forensic-Science-International-D.pdf"
+    "https://www.magnetforensics.com/blog/the-lesser-talked-about-messaging-apps/"
    ],
    "version": 1,
    "status": "provisional",
@@ -15518,12 +15302,8 @@
    "rationale_ko": "메시지에 첨부 메타는 있으나 같은 이름의 파일이 파일 목록에 없음: 미수집 또는 삭제.",
    "false_positive_ko": "미다운로드(썸네일만).",
    "sources": [
-    "https://www.group-ib.com/blog/whatsapp-forensic-artifacts/",
     "https://belkasoft.com/android-whatsapp-forensics-analysis",
-    "https://www.magnetforensics.com/blog/the-lesser-talked-about-messaging-apps/",
-    "https://dfrws.org/presentation/digital-forensic-analysis-of-encrypted-database-files-in-instant-messaging-applications-on-windows-operating-systems/",
-    "https://www.forensicfocus.com/webinars/cracking-the-code-of-ios-messages-a-guide-to-storage-and-analysis-techniques-for-forensic-examiners/",
-    "https://dfrws.org/wp-content/uploads/2025/03/Forensic-analysis-of-Telegram-Messeng_2025_Forensic-Science-International-D.pdf"
+    "https://www.group-ib.com/blog/whatsapp-forensic-artifacts/"
    ],
    "version": 1,
    "status": "verified",
@@ -15538,11 +15318,7 @@
    "false_positive_ko": "백업 복원, 장기 미사용.",
    "sources": [
     "https://www.group-ib.com/blog/whatsapp-forensic-artifacts/",
-    "https://belkasoft.com/android-whatsapp-forensics-analysis",
-    "https://www.magnetforensics.com/blog/the-lesser-talked-about-messaging-apps/",
-    "https://dfrws.org/presentation/digital-forensic-analysis-of-encrypted-database-files-in-instant-messaging-applications-on-windows-operating-systems/",
-    "https://www.forensicfocus.com/webinars/cracking-the-code-of-ios-messages-a-guide-to-storage-and-analysis-techniques-for-forensic-examiners/",
-    "https://dfrws.org/wp-content/uploads/2025/03/Forensic-analysis-of-Telegram-Messeng_2025_Forensic-Science-International-D.pdf"
+    "https://belkasoft.com/android-whatsapp-forensics-analysis"
    ],
    "version": 1,
    "status": "provisional",
@@ -15578,9 +15354,7 @@
    "false_positive_ko": "정상 설정.",
    "sources": [
     "https://theapplewiki.com/wiki/ITunes_Backup",
-    "https://imazing.com/guides/use-imazing-for-ios-digital-forensic-analysis-and-e-discovery",
-    "https://www.magnetforensics.com/blog/android-messaging-forensics-sms-mms-and-beyond/",
-    "https://epochconverter.com/coredata"
+    "https://imazing.com/guides/use-imazing-for-ios-digital-forensic-analysis-and-e-discovery"
    ],
    "version": 1,
    "status": "verified",
@@ -15594,10 +15368,8 @@
    "rationale_ko": "활성 DB가 아닌 빈 페이지·저널에만 있거나 삭제 표식이 있는 통화·문자: 삭제 정황.",
    "false_positive_ko": "자동 정리.",
    "sources": [
-    "https://theapplewiki.com/wiki/ITunes_Backup",
-    "https://imazing.com/guides/use-imazing-for-ios-digital-forensic-analysis-and-e-discovery",
     "https://www.magnetforensics.com/blog/android-messaging-forensics-sms-mms-and-beyond/",
-    "https://epochconverter.com/coredata"
+    "https://imazing.com/guides/use-imazing-for-ios-digital-forensic-analysis-and-e-discovery"
    ],
    "version": 1,
    "status": "verified",
@@ -15611,10 +15383,7 @@
    "rationale_ko": "연락처에 없는 번호와 통화·문자가 임계값 이상: 은닉 연락.",
    "false_positive_ko": "일반 사업자 번호.",
    "sources": [
-    "https://theapplewiki.com/wiki/ITunes_Backup",
-    "https://imazing.com/guides/use-imazing-for-ios-digital-forensic-analysis-and-e-discovery",
-    "https://www.magnetforensics.com/blog/android-messaging-forensics-sms-mms-and-beyond/",
-    "https://epochconverter.com/coredata"
+    "https://www.magnetforensics.com/blog/android-messaging-forensics-sms-mms-and-beyond/"
    ],
    "version": 1,
    "status": "verified",
@@ -15630,10 +15399,7 @@
    "rationale_ko": "짧은 시간에 통화·문자가 임계값 이상(사건 시간대 지정 시 그 안): 연관 정황.",
    "false_positive_ko": "우연.",
    "sources": [
-    "https://theapplewiki.com/wiki/ITunes_Backup",
-    "https://imazing.com/guides/use-imazing-for-ios-digital-forensic-analysis-and-e-discovery",
-    "https://www.magnetforensics.com/blog/android-messaging-forensics-sms-mms-and-beyond/",
-    "https://epochconverter.com/coredata"
+    "https://www.magnetforensics.com/blog/android-messaging-forensics-sms-mms-and-beyond/"
    ],
    "version": 1,
    "status": "verified",
@@ -15650,10 +15416,7 @@
    "rationale_ko": "메신저·VPN·정리/삭제 앱 설치(사건 시간대 지정 시 그 안): 의도 정황.",
    "false_positive_ko": "일반 앱 설치.",
    "sources": [
-    "https://theapplewiki.com/wiki/ITunes_Backup",
-    "https://imazing.com/guides/use-imazing-for-ios-digital-forensic-analysis-and-e-discovery",
-    "https://www.magnetforensics.com/blog/android-messaging-forensics-sms-mms-and-beyond/",
-    "https://epochconverter.com/coredata"
+    "https://imazing.com/guides/use-imazing-for-ios-digital-forensic-analysis-and-e-discovery"
    ],
    "version": 1,
    "status": "verified",
@@ -15682,10 +15445,7 @@
    "rationale_ko": "위치가 전체 중앙 위치에서 임계 반경 밖: 동선 단서.",
    "false_positive_ko": "위치 오차, 여행.",
    "sources": [
-    "https://theapplewiki.com/wiki/ITunes_Backup",
-    "https://imazing.com/guides/use-imazing-for-ios-digital-forensic-analysis-and-e-discovery",
-    "https://www.magnetforensics.com/blog/android-messaging-forensics-sms-mms-and-beyond/",
-    "https://epochconverter.com/coredata"
+    "https://imazing.com/guides/use-imazing-for-ios-digital-forensic-analysis-and-e-discovery"
    ],
    "version": 1,
    "status": "provisional",
@@ -15702,10 +15462,8 @@
    "rationale_ko": "같은 DB 안에서 원시 시각 자릿수가 다수와 다름(초/나노초 혼재): 변환 오류 방지.",
    "false_positive_ko": "버전 전환.",
    "sources": [
-    "https://theapplewiki.com/wiki/ITunes_Backup",
-    "https://imazing.com/guides/use-imazing-for-ios-digital-forensic-analysis-and-e-discovery",
-    "https://www.magnetforensics.com/blog/android-messaging-forensics-sms-mms-and-beyond/",
-    "https://epochconverter.com/coredata"
+    "https://epochconverter.com/coredata",
+    "https://www.magnetforensics.com/blog/android-messaging-forensics-sms-mms-and-beyond/"
    ],
    "version": 1,
    "status": "verified",
@@ -15720,9 +15478,7 @@
    "false_positive_ko": "새 기기 복원.",
    "sources": [
     "https://theapplewiki.com/wiki/ITunes_Backup",
-    "https://imazing.com/guides/use-imazing-for-ios-digital-forensic-analysis-and-e-discovery",
-    "https://www.magnetforensics.com/blog/android-messaging-forensics-sms-mms-and-beyond/",
-    "https://epochconverter.com/coredata"
+    "https://imazing.com/guides/use-imazing-for-ios-digital-forensic-analysis-and-e-discovery"
    ],
    "version": 1,
    "status": "provisional",
@@ -15735,14 +15491,12 @@
    "family": "mft",
    "grade": "A",
    "label_ko": "$SI 생성 < $FN 생성(타임스톰핑)",
-   "rationale_ko": "$STANDARD_INFORMATION 생성 시각이 $FILE_NAME 생성 시각보다 임계값 이상 앞서고 타임스톰핑 보강 근거가 있을 때만 A: ① $SI 생성·수정·MFT 수정이 모두 초 미만 0인데 $FN 생성은 아님(초 단위 SetFileTime·타임스톰핑 도구), ② $SI 수정·MFT 수정도 $FN 생성보다 임계값 이상 앞섬(이름이 생길 때 NTFS가 $SI MFT 수정을 갱신하므로 $SI 시각을 모두 되돌리는 도구만 남기는 모양). 보강 근거 없이 사용자 쓰기 가능 경로의 실행·스크립트 파일이면 B, 그 밖은 C. 보강 근거가 없고 $FN 생성 앞뒤 ±bulk_bucket_seconds/2(이동 창, 정시 경계와 무관) 안에 같은 출처 후보가 bulk_min_records건 이상 몰렸거나 서비싱 경로(WinSxS·servicing·SoftwareDistribution)면 표시하지 않음(보강 근거가 있으면 대량이어도 표시).",
+   "rationale_ko": "$STANDARD_INFORMATION 생성 시각이 $FILE_NAME 생성 시각보다 임계값 이상 앞서고 타임스톰핑 보강 근거가 있을 때만 A: ① $SI 생성·수정·MFT 수정이 모두 초 미만 0인데 $FN 생성은 아님(초 단위 SetFileTime·타임스톰핑 도구), ② $SI 수정·MFT 수정도 $FN 생성보다 임계값 이상 앞섬(이름이 생길 때 NTFS가 $SI MFT 수정을 갱신하므로 $SI 시각을 모두 되돌리는 도구만 남기는 모양). 보강 근거 없이 사용자 쓰기 가능 경로의 실행·스크립트 파일이면 B, 그 밖은 C. 보강 근거가 없고 $FN 생성 앞뒤 ±(대량 판정 창의 절반, 이동 창이며 정시 경계와 무관) 안에 같은 출처 후보가 대량 판정 건수 이상 몰렸거나 서비싱 경로(WinSxS·servicing·SoftwareDistribution)면 표시하지 않음(보강 근거가 있으면 대량이어도 표시).",
    "false_positive_ko": "시각을 보존하는 복사·압축 해제·설치기·Windows 기능 업데이트(BSH 전체 $MFT에서 단순 $SI<$FN 174,854건, 87%가 8일에 몰림 — 대부분 2025-02-21·23 기능 업데이트). 초 미만 0은 압축(ZIP 2초 단위) 해제에서도 생기지만 그때 $SI MFT 수정은 해제 시각이라 ①에 걸리지 않음. 시각이 마이크로초로 잘려 있어 100ns 1~9틱만 있는 값은 0으로 읽힘(드묾). 정상 이동·하드 링크도 ②를 남길 수 있어 A는 검토 대상이지 판단이 아님.",
    "sources": [
     "https://www.inversecos.com/2022/04/defence-evasion-technique-timestomping.html",
     "https://attack.mitre.org/techniques/T1070/006/",
-    "https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-setfiletime",
-    "https://opus.bibliothek.uni-augsburg.de/opus4/117569",
-    "https://www.sans.org/blog/ntfs-i30-index-attributes-evidence-of-deleted-and-overwritten-files/"
+    "https://opus.bibliothek.uni-augsburg.de/opus4/117569"
    ],
    "version": 3,
    "status": "verified",
@@ -15818,10 +15572,8 @@
    "false_positive_ko": "일부 정상 SW, FAT에서 복사된 파일.",
    "sources": [
     "https://www.inversecos.com/2022/04/defence-evasion-technique-timestomping.html",
-    "https://opus.bibliothek.uni-augsburg.de/opus4/117569",
-    "https://andreafortuna.org/2017/10/18/windows-forensics-usn-journal/",
-    "https://www.sans.org/blog/ntfs-i30-index-attributes-evidence-of-deleted-and-overwritten-files/",
-    "https://andreafortuna.org/2019/09/26/windows-forensics-analysis-of-recycle-bin-artifacts/"
+    "https://attack.mitre.org/techniques/T1070/006/",
+    "https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-setfiletime"
    ],
    "version": 1,
    "status": "verified",
@@ -15837,9 +15589,7 @@
    "sources": [
     "https://www.inversecos.com/2022/04/defence-evasion-technique-timestomping.html",
     "https://opus.bibliothek.uni-augsburg.de/opus4/117569",
-    "https://andreafortuna.org/2017/10/18/windows-forensics-usn-journal/",
-    "https://www.sans.org/blog/ntfs-i30-index-attributes-evidence-of-deleted-and-overwritten-files/",
-    "https://andreafortuna.org/2019/09/26/windows-forensics-analysis-of-recycle-bin-artifacts/"
+    "https://attack.mitre.org/techniques/T1070/006/"
    ],
    "version": 1,
    "status": "provisional",
@@ -15851,15 +15601,12 @@
    "id": "ntfs.usn_basic_info_change",
    "family": "mft",
    "grade": "B",
-   "label_ko": "BASIC_INFO_CHANGE 뒤 과거 $SI",
+   "label_ko": "USN 속성 변경 뒤 과거 $SI",
    "rationale_ko": "USN BASIC_INFO_CHANGE 시점보다 $SI 수정 시각이 하루 이상 과거: 조작 시점 단서. 속성 변경도 같은 플래그라 단독 판단 금지.",
    "false_positive_ko": "속성 변경, 압축 해제·복원.",
    "sources": [
-    "https://www.inversecos.com/2022/04/defence-evasion-technique-timestomping.html",
-    "https://opus.bibliothek.uni-augsburg.de/opus4/117569",
     "https://andreafortuna.org/2017/10/18/windows-forensics-usn-journal/",
-    "https://www.sans.org/blog/ntfs-i30-index-attributes-evidence-of-deleted-and-overwritten-files/",
-    "https://andreafortuna.org/2019/09/26/windows-forensics-analysis-of-recycle-bin-artifacts/"
+    "https://www.inversecos.com/2022/04/defence-evasion-technique-timestomping.html"
    ],
    "version": 1,
    "status": "verified",
@@ -15876,10 +15623,7 @@
    "false_positive_ko": "복사된 파일은 정상적으로 이런 모양.",
    "sources": [
     "https://www.inversecos.com/2022/04/defence-evasion-technique-timestomping.html",
-    "https://opus.bibliothek.uni-augsburg.de/opus4/117569",
-    "https://andreafortuna.org/2017/10/18/windows-forensics-usn-journal/",
-    "https://www.sans.org/blog/ntfs-i30-index-attributes-evidence-of-deleted-and-overwritten-files/",
-    "https://andreafortuna.org/2019/09/26/windows-forensics-analysis-of-recycle-bin-artifacts/"
+    "https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-setfiletime"
    ],
    "version": 1,
    "status": "verified",
@@ -15893,11 +15637,7 @@
    "rationale_ko": "Zone.Identifier가 아닌 대체 데이터 스트림의 내용이 PE(MZ): 은닉 페이로드.",
    "false_positive_ko": "일부 보안 제품의 태그 스트림.",
    "sources": [
-    "https://www.inversecos.com/2022/04/defence-evasion-technique-timestomping.html",
-    "https://opus.bibliothek.uni-augsburg.de/opus4/117569",
-    "https://andreafortuna.org/2017/10/18/windows-forensics-usn-journal/",
-    "https://www.sans.org/blog/ntfs-i30-index-attributes-evidence-of-deleted-and-overwritten-files/",
-    "https://andreafortuna.org/2019/09/26/windows-forensics-analysis-of-recycle-bin-artifacts/"
+    "https://attack.mitre.org/techniques/T1564/004/"
    ],
    "version": 1,
    "status": "verified",
@@ -15925,11 +15665,8 @@
    "rationale_ko": "Zone.Identifier ZoneId=3과 HostUrl: 파일의 다운로드 출처.",
    "false_positive_ko": "해당 없음(출처 정보).",
    "sources": [
-    "https://www.inversecos.com/2022/04/defence-evasion-technique-timestomping.html",
-    "https://opus.bibliothek.uni-augsburg.de/opus4/117569",
-    "https://andreafortuna.org/2017/10/18/windows-forensics-usn-journal/",
-    "https://www.sans.org/blog/ntfs-i30-index-attributes-evidence-of-deleted-and-overwritten-files/",
-    "https://andreafortuna.org/2019/09/26/windows-forensics-analysis-of-recycle-bin-artifacts/"
+    "https://attack.mitre.org/techniques/T1553/005/",
+    "https://attack.mitre.org/techniques/T1564/004/"
    ],
    "version": 1,
    "status": "verified",
@@ -15943,11 +15680,9 @@
    "rationale_ko": "휴지통 $I 레코드 또는 미할당 MFT 엔트리가 문서·압축·이미지 확장자: 삭제 증거.",
    "false_positive_ko": "정상 삭제.",
    "sources": [
-    "https://www.inversecos.com/2022/04/defence-evasion-technique-timestomping.html",
-    "https://opus.bibliothek.uni-augsburg.de/opus4/117569",
-    "https://andreafortuna.org/2017/10/18/windows-forensics-usn-journal/",
+    "https://andreafortuna.org/2019/09/26/windows-forensics-analysis-of-recycle-bin-artifacts/",
     "https://www.sans.org/blog/ntfs-i30-index-attributes-evidence-of-deleted-and-overwritten-files/",
-    "https://andreafortuna.org/2019/09/26/windows-forensics-analysis-of-recycle-bin-artifacts/"
+    "https://andreafortuna.org/2017/10/18/windows-forensics-usn-journal/"
    ],
    "version": 1,
    "status": "verified",
@@ -15990,11 +15725,8 @@
    "rationale_ko": "짧은 시간에 USN RENAME/DELETE가 임계값 이상: 랜섬웨어·와이핑 패턴.",
    "false_positive_ko": "백업·AV·대량 정리.",
    "sources": [
-    "https://www.inversecos.com/2022/04/defence-evasion-technique-timestomping.html",
-    "https://opus.bibliothek.uni-augsburg.de/opus4/117569",
     "https://andreafortuna.org/2017/10/18/windows-forensics-usn-journal/",
-    "https://www.sans.org/blog/ntfs-i30-index-attributes-evidence-of-deleted-and-overwritten-files/",
-    "https://andreafortuna.org/2019/09/26/windows-forensics-analysis-of-recycle-bin-artifacts/"
+    "https://attack.mitre.org/techniques/T1485/"
    ],
    "version": 1,
    "status": "verified",
@@ -16045,9 +15777,7 @@
    "sources": [
     "https://www.bittorrent.org/beps/bep_0003.html",
     "https://www.libtorrent.org/manual-ref.html",
-    "https://github.com/qbittorrent/qBittorrent/wiki/Explanation-of-Options-in-qBittorrent",
-    "https://www.emule-project.net/home/perl/help.cgi?l=1&rm=show_topic&topic_id=232",
-    "https://forensics.wiki/emule/"
+    "https://github.com/qbittorrent/qBittorrent/wiki/Explanation-of-Options-in-qBittorrent"
    ],
    "version": 1,
    "status": "provisional",
@@ -16065,8 +15795,6 @@
    "sources": [
     "https://www.bittorrent.org/beps/bep_0003.html",
     "https://www.libtorrent.org/manual-ref.html",
-    "https://github.com/qbittorrent/qBittorrent/wiki/Explanation-of-Options-in-qBittorrent",
-    "https://www.emule-project.net/home/perl/help.cgi?l=1&rm=show_topic&topic_id=232",
     "https://forensics.wiki/emule/"
    ],
    "version": 1,
@@ -16081,9 +15809,6 @@
    "rationale_ko": "eMule known.met의 공유 파일에 누적 업로드량·수락된 요청이 있음: 다른 사용자에게 파일을 보낸 유포 정황(국내 \"당나귀\" 유포 사건).",
    "false_positive_ko": "공유 폴더 기본 설정으로 의도 없이 공유된 파일. 누적 통계이며 시각·상대는 없음.",
    "sources": [
-    "https://www.bittorrent.org/beps/bep_0003.html",
-    "https://www.libtorrent.org/manual-ref.html",
-    "https://github.com/qbittorrent/qBittorrent/wiki/Explanation-of-Options-in-qBittorrent",
     "https://www.emule-project.net/home/perl/help.cgi?l=1&rm=show_topic&topic_id=232",
     "https://forensics.wiki/emule/"
    ],
@@ -16103,8 +15828,7 @@
    "sources": [
     "https://frsecure.com/blog/rdp-connection-event-logs/",
     "https://www.magnetforensics.com/blog/rdp-artifacts-in-incident-response/",
-    "https://andreafortuna.org/2019/03/27/remote-desktop-connections-forensics/",
-    "https://www.cybertriage.com/?p=26680"
+    "https://attack.mitre.org/techniques/T1021/001/"
    ],
    "version": 1,
    "status": "verified",
@@ -16134,8 +15858,6 @@
    "false_positive_ko": "NLA 실패, 스캔, 로그 보존 기간 차이.",
    "sources": [
     "https://frsecure.com/blog/rdp-connection-event-logs/",
-    "https://www.magnetforensics.com/blog/rdp-artifacts-in-incident-response/",
-    "https://andreafortuna.org/2019/03/27/remote-desktop-connections-forensics/",
     "https://www.cybertriage.com/?p=26680"
    ],
    "version": 1,
@@ -16153,9 +15875,7 @@
    "false_positive_ko": "사용자가 다른 장소에서 재접속.",
    "sources": [
     "https://frsecure.com/blog/rdp-connection-event-logs/",
-    "https://www.magnetforensics.com/blog/rdp-artifacts-in-incident-response/",
-    "https://andreafortuna.org/2019/03/27/remote-desktop-connections-forensics/",
-    "https://www.cybertriage.com/?p=26680"
+    "https://attack.mitre.org/techniques/T1563/002/"
    ],
    "version": 1,
    "status": "provisional",
@@ -16169,10 +15889,8 @@
    "rationale_ko": "원격 데스크톱 클라이언트 1024와 가까운 시각의 4648: 이 PC가 다른 호스트로 접속한 횡이동 출발지.",
    "false_positive_ko": "관리자의 정상 원격 접속.",
    "sources": [
-    "https://frsecure.com/blog/rdp-connection-event-logs/",
-    "https://www.magnetforensics.com/blog/rdp-artifacts-in-incident-response/",
     "https://andreafortuna.org/2019/03/27/remote-desktop-connections-forensics/",
-    "https://www.cybertriage.com/?p=26680"
+    "https://www.magnetforensics.com/blog/rdp-artifacts-in-incident-response/"
    ],
    "version": 1,
    "status": "verified",
@@ -16188,10 +15906,8 @@
    "rationale_ko": "fDenyTSConnections 값을 0으로 설정(Sysmon 13 또는 레지스트리 값): 공격자의 RDP 활성화.",
    "false_positive_ko": "정상 원격 지원 구성.",
    "sources": [
-    "https://frsecure.com/blog/rdp-connection-event-logs/",
     "https://www.magnetforensics.com/blog/rdp-artifacts-in-incident-response/",
-    "https://andreafortuna.org/2019/03/27/remote-desktop-connections-forensics/",
-    "https://www.cybertriage.com/?p=26680"
+    "https://attack.mitre.org/techniques/T1021/001/"
    ],
    "version": 1,
    "status": "provisional",
@@ -16206,9 +15922,8 @@
    "false_positive_ko": "점프 서버, 운영 관리자.",
    "sources": [
     "https://frsecure.com/blog/rdp-connection-event-logs/",
-    "https://www.magnetforensics.com/blog/rdp-artifacts-in-incident-response/",
     "https://andreafortuna.org/2019/03/27/remote-desktop-connections-forensics/",
-    "https://www.cybertriage.com/?p=26680"
+    "https://attack.mitre.org/techniques/T1021/001/"
    ],
    "version": 1,
    "status": "verified",
@@ -16226,9 +15941,7 @@
    "false_positive_ko": "사용자 AppData에 설치되는 자동 업데이트(제외 목록 참고). Squirrel 방식 앱(값 이름 com.squirrel.* → AppData\\Local\\<앱>\\<앱>.exe)은 제외.",
    "sources": [
     "https://www.cybertriage.com/blog/windows-registry-forensics-cheat-sheet-2026/",
-    "https://www.sans.org/blog/digital-forensics-application-execution/",
-    "https://forensics.wiki/usb_history_viewing/",
-    "https://andreafortuna.org/2019/05/15/windows-forensics-program-execution-artifacts/"
+    "https://attack.mitre.org/techniques/T1547/001/"
    ],
    "version": 2,
    "status": "verified",
@@ -16253,9 +15966,7 @@
    "false_positive_ko": "서드파티 서비스.",
    "sources": [
     "https://www.cybertriage.com/blog/windows-registry-forensics-cheat-sheet-2026/",
-    "https://www.sans.org/blog/digital-forensics-application-execution/",
-    "https://forensics.wiki/usb_history_viewing/",
-    "https://andreafortuna.org/2019/05/15/windows-forensics-program-execution-artifacts/"
+    "https://attack.mitre.org/techniques/T1543/003/"
    ],
    "version": 1,
    "status": "verified",
@@ -16270,9 +15981,7 @@
    "false_positive_ko": "설치·패치로 인한 정상 변경.",
    "sources": [
     "https://www.cybertriage.com/blog/windows-registry-forensics-cheat-sheet-2026/",
-    "https://www.sans.org/blog/digital-forensics-application-execution/",
-    "https://forensics.wiki/usb_history_viewing/",
-    "https://andreafortuna.org/2019/05/15/windows-forensics-program-execution-artifacts/"
+    "https://attack.mitre.org/techniques/T1547/001/"
    ],
    "version": 1,
    "status": "verified",
@@ -16286,10 +15995,8 @@
    "rationale_ko": "USBSTOR 장치 시리얼(또는 볼륨 GUID)이 MountedDevices에도 있음: 장치와 드라이브 문자 연결.",
    "false_positive_ko": "시리얼 없는 장치(UASP는 Enum\\SCSI).",
    "sources": [
-    "https://www.cybertriage.com/blog/windows-registry-forensics-cheat-sheet-2026/",
-    "https://www.sans.org/blog/digital-forensics-application-execution/",
     "https://forensics.wiki/usb_history_viewing/",
-    "https://andreafortuna.org/2019/05/15/windows-forensics-program-execution-artifacts/"
+    "https://www.cybertriage.com/blog/windows-registry-forensics-cheat-sheet-2026/"
    ],
    "version": 1,
    "status": "verified",
@@ -16303,9 +16010,7 @@
    "rationale_ko": "UserAssist 실행 경로가 Temp/사용자 쓰기 경로·UNC·이동식 드라이브.",
    "false_positive_ko": "포터블 앱. 바탕 화면·공용 폴더 표시와 바로 가기(.lnk) 실행은 제외.",
    "sources": [
-    "https://www.cybertriage.com/blog/windows-registry-forensics-cheat-sheet-2026/",
     "https://www.sans.org/blog/digital-forensics-application-execution/",
-    "https://forensics.wiki/usb_history_viewing/",
     "https://andreafortuna.org/2019/05/15/windows-forensics-program-execution-artifacts/"
    ],
    "version": 2,
@@ -16328,10 +16033,7 @@
    "rationale_ko": "탐색한 폴더가 이동식 드라이브 또는 UNC/네트워크 위치: 반출·접근 정황.",
    "false_positive_ko": "정상 공유 폴더 사용.",
    "sources": [
-    "https://www.cybertriage.com/blog/windows-registry-forensics-cheat-sheet-2026/",
-    "https://www.sans.org/blog/digital-forensics-application-execution/",
-    "https://forensics.wiki/usb_history_viewing/",
-    "https://andreafortuna.org/2019/05/15/windows-forensics-program-execution-artifacts/"
+    "https://www.cybertriage.com/blog/windows-registry-forensics-cheat-sheet-2026/"
    ],
    "version": 1,
    "status": "verified",
@@ -16346,9 +16048,7 @@
    "false_positive_ko": "관리자 업무.",
    "sources": [
     "https://www.cybertriage.com/blog/windows-registry-forensics-cheat-sheet-2026/",
-    "https://www.sans.org/blog/digital-forensics-application-execution/",
-    "https://forensics.wiki/usb_history_viewing/",
-    "https://andreafortuna.org/2019/05/15/windows-forensics-program-execution-artifacts/"
+    "https://attack.mitre.org/techniques/T1021/002/"
    ],
    "version": 1,
    "status": "provisional",
@@ -16362,10 +16062,9 @@
    "rationale_ko": "USB 장치 최초 설치·연결이 지정한 사건 시간대 안(사건 시간대를 지정해야 동작).",
    "false_positive_ko": "정상 USB 사용.",
    "sources": [
-    "https://docs.nxlog.co/integrate/windows-usb-auditing.html",
     "https://forensics.wiki/usb_history_viewing/",
     "https://www.it-connect.tech/windows-forensics-usb-history/",
-    "https://hackmd.io/@M4shl3/USB-Forensics"
+    "https://attack.mitre.org/techniques/T1052/001/"
    ],
    "version": 1,
    "status": "verified",
@@ -16379,9 +16078,7 @@
    "rationale_ko": "시리얼이 OS 생성값(두 번째 문자 &)·공란·일반값이거나 서로 다른 VID/PID가 같은 시리얼을 씀: 장치 식별 신뢰도 낮음·복제.",
    "false_positive_ko": "저가 USB.",
    "sources": [
-    "https://docs.nxlog.co/integrate/windows-usb-auditing.html",
     "https://forensics.wiki/usb_history_viewing/",
-    "https://www.it-connect.tech/windows-forensics-usb-history/",
     "https://hackmd.io/@M4shl3/USB-Forensics"
    ],
    "version": 1,
@@ -16396,10 +16093,8 @@
    "rationale_ko": "USB 저장 장치 연결 시각 전후에 바로 가기·ShellBag 기록이 임계값 이상: 유출 정황.",
    "false_positive_ko": "백업 작업.",
    "sources": [
-    "https://docs.nxlog.co/integrate/windows-usb-auditing.html",
-    "https://forensics.wiki/usb_history_viewing/",
     "https://www.it-connect.tech/windows-forensics-usb-history/",
-    "https://hackmd.io/@M4shl3/USB-Forensics"
+    "https://attack.mitre.org/techniques/T1052/001/"
    ],
    "version": 1,
    "status": "verified",
@@ -16416,9 +16111,7 @@
    "rationale_ko": "키보드/HID 클래스 USB 장치(사건 시간대 지정 시 그 안 설치): 입력 장치 위장.",
    "false_positive_ko": "새 키보드·마우스. PS/2·ACPI 장치, 같은 분에 다른 장치 3개 이상과 함께 설치된 경우(OS 설치·드라이버 열거)는 제외.",
    "sources": [
-    "https://docs.nxlog.co/integrate/windows-usb-auditing.html",
-    "https://forensics.wiki/usb_history_viewing/",
-    "https://www.it-connect.tech/windows-forensics-usb-history/",
+    "https://attack.mitre.org/techniques/T1200/",
     "https://hackmd.io/@M4shl3/USB-Forensics"
    ],
    "version": 2,
@@ -16441,10 +16134,8 @@
    "rationale_ko": "Partition/Diagnostic 1006의 VBR 볼륨 시리얼이 LNK LinkInfo 볼륨 시리얼과 같음: 사용자-장치-파일 연결.",
    "false_positive_ko": "재포맷 시 VSN 변경.",
    "sources": [
-    "https://docs.nxlog.co/integrate/windows-usb-auditing.html",
     "https://forensics.wiki/usb_history_viewing/",
-    "https://www.it-connect.tech/windows-forensics-usb-history/",
-    "https://hackmd.io/@M4shl3/USB-Forensics"
+    "https://www.it-connect.tech/windows-forensics-usb-history/"
    ],
    "version": 1,
    "status": "verified",
@@ -16458,10 +16149,7 @@
    "rationale_ko": "레지스트리에 USB 장치는 있는데 DriverFrameworks/Partition 이벤트가 없음: 연결 이력은 레지스트리 최신 값에만 의존.",
    "false_positive_ko": "기본 설정(비활성).",
    "sources": [
-    "https://docs.nxlog.co/integrate/windows-usb-auditing.html",
-    "https://forensics.wiki/usb_history_viewing/",
-    "https://www.it-connect.tech/windows-forensics-usb-history/",
-    "https://hackmd.io/@M4shl3/USB-Forensics"
+    "https://docs.nxlog.co/integrate/windows-usb-auditing.html"
    ],
    "version": 1,
    "status": "verified",

@@ -93,6 +93,16 @@ export const EMPTY_FILTERS: FilterState = Object.freeze({
   columns: [],
 }) as FilterState;
 
+/**
+ * Korean artifact-type names for the 유형 chips (R7 L3). Registered by grid/valueLabels: the type
+ * table lives with the tree (tree/domains imports this module), so a direct import would cycle.
+ */
+let chipTypeLabel: (type: string) => string | null = () => null;
+
+export function setChipTypeLabel(resolve: (type: string) => string | null): void {
+  chipTypeLabel = resolve;
+}
+
 export function normalizeExt(value: string): string {
   return value.trim().replace(/^\.+/, "").toLowerCase();
 }
@@ -668,7 +678,9 @@ export function activeChips(
     });
   }
   for (const s of filters.statuses) chips.push({ key: "status", value: s, label: `상태 ${statusLabel(s)}` });
-  for (const t of filters.types) chips.push({ key: "type", value: t, label: `유형 ${t}` });
+  // The type's Korean name (R7 L3, C-D9); the raw id stays the chip value.
+  for (const t of filters.types)
+    chips.push({ key: "type", value: t, label: `유형 ${chipTypeLabel(t) ?? t}` });
   for (const t of filters.tags) chips.push({ key: "tag", value: t, label: `태그 ${t}` });
   for (const e of filters.ext) chips.push({ key: "ext", value: e, label: `확장자 .${e}` });
   if (filters.path) chips.push({ key: "path", label: `경로 ${filters.path}` });
