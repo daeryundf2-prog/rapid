@@ -418,23 +418,22 @@ function WidePanes() {
   }, []);
   // Tree auto-fold (plan r7 §3.2 L2, 구조 D3): opening the viewer on a window narrower than
   // TREE_AUTOFOLD_BELOW folds the tree to its rail so the grid keeps its analysis columns; closing
-  // the viewer unfolds it again — unless the analyst moved the tree themselves in between.
-  // The automatic fold is not the analyst's preference: it is never written to storage.
-  const treeCollapsed = useAppStore((s) => s.treeCollapsed);
-  const autoFolded = useRef(false);
+  // the viewer, leaving the pane (landing, a two-column stage), another run or another stage
+  // unfolds it again — unless the analyst moved the tree themselves in between (setTreeCollapsed
+  // ends the auto-fold). The flag lives in the store: an unmount must not lose it (r7 S2 review).
   useEffect(() => {
-    // The analyst unfolded the auto-folded tree: theirs from here on (no re-fold, no unfold).
-    if (autoFolded.current && !treeCollapsed) autoFolded.current = false;
-  }, [treeCollapsed]);
-  useEffect(() => {
-    if (!collapsed && !useAppStore.getState().treeCollapsed && shouldAutoFoldTree(window.innerWidth)) {
-      autoFolded.current = true;
-      useAppStore.setState({ treeCollapsed: true });
-    } else if (collapsed && autoFolded.current) {
-      autoFolded.current = false;
-      if (useAppStore.getState().treeCollapsed) useAppStore.setState({ treeCollapsed: false });
-    }
+    const s = useAppStore.getState();
+    if (!collapsed && shouldAutoFoldTree(window.innerWidth)) s.autoFoldTree();
+    else if (collapsed) s.releaseTreeAutoFold();
   }, [collapsed]);
+  const place = useAppStore((s) => `${s.route.runId ?? ""}|${stageOf(s.route)}`);
+  const lastPlace = useRef(place);
+  useEffect(() => {
+    if (place === lastPlace.current) return;
+    lastPlace.current = place;
+    useAppStore.getState().releaseTreeAutoFold();
+  }, [place]);
+  useEffect(() => () => useAppStore.getState().releaseTreeAutoFold(), []);
   // Collapse to the rail / expand back to the saved (dragged) width, else the 440px default.
   useEffect(() => {
     const panel = viewerRef.current;

@@ -70,7 +70,18 @@ export interface OverlaySlice {
   setTreeIsDrawer: (drawer: boolean) => void;
   /** Wide layouts: the left panel is folded to its 36px rail (dragged shut or 탐색 패널 접기; kept for the session). */
   treeCollapsed: boolean;
+  /** The analyst's fold / unfold (rail, command, drag): stored for the session; ends an auto-fold. */
   setTreeCollapsed: (collapsed: boolean) => void;
+  /**
+   * The tree is folded only because the viewer opened on a narrow window (plan r7 §3.2 L2). Kept in
+   * the store, not in the pane component, so the fold is undone even when the pane unmounts (the
+   * landing, a two-column stage) — it is never the analyst's preference and never stored.
+   */
+  treeAutoFolded: boolean;
+  /** Fold the tree for the opened viewer (no-op when it is already folded). */
+  autoFoldTree: () => void;
+  /** Undo an automatic fold the analyst has not touched since (no-op otherwise). */
+  releaseTreeAutoFold: () => void;
   /** Below 1200 px the viewer is an overlay drawer; this is its open state. */
   viewerDrawerOpen: boolean;
   /** True while the layout renders the viewer as a drawer (< 1200 px). */
@@ -114,7 +125,16 @@ export const createOverlaySlice: StateCreator<AppState, [], [], OverlaySlice> = 
   treeCollapsed: storedTreeCollapsed(),
   setTreeCollapsed: (collapsed) => {
     writeTreeCollapsed(collapsed);
-    set({ treeCollapsed: collapsed });
+    set({ treeCollapsed: collapsed, treeAutoFolded: false });
+  },
+  treeAutoFolded: false,
+  autoFoldTree: () => {
+    if (!get().treeCollapsed) set({ treeCollapsed: true, treeAutoFolded: true });
+  },
+  releaseTreeAutoFold: () => {
+    const s = get();
+    if (!s.treeAutoFolded) return;
+    set(s.treeCollapsed ? { treeCollapsed: false, treeAutoFolded: false } : { treeAutoFolded: false });
   },
   viewerDrawerOpen: false,
   viewerIsDrawer: false,

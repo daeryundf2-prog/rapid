@@ -296,12 +296,13 @@ test("E3 fixes: propagation from the viewer acts on the viewer row; a tag key to
   const viewer = page.getByRole("region", { name: "원본 뷰어" });
   await expect(viewer).toBeVisible();
 
-  // 더보기 › 같은 해시 행에 전파 lists the row's tags; the default spreads its user tags.
+  // 더보기 › 같은 해시 행에 태그 전파: the default spreads the row's user tags. With one user tag
+  // the per-tag entry would repeat the default, so it is not listed (C-W8).
   await page.getByTestId("viewer-actions-menu").click();
   const menu = page.getByRole("menu", { name: "더보기" });
-  await expect(menu.getByRole("menuitem", { name: "'증거 B'만 전파" })).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "'증거 B'만 전파" })).toHaveCount(0);
   let batch = batchResponse(page);
-  await menu.getByRole("menuitem", { name: "같은 해시 행에 태그 전파: 사용자 태그 전부 (증거 B)" }).click();
+  await menu.getByRole("menuitem", { name: "같은 해시 행에 태그 전파 (증거 B)" }).click();
   const propagated = (await batch).request().postDataJSON() as BatchBody;
   expect(propagated.propagate_by_hash).toBe(true);
   expect(propagated.tag_ids).toEqual([ids.get("증거 B")]);
