@@ -368,6 +368,16 @@ function PopoutRail() {
   );
 }
 
+/**
+ * Below this window width an opened viewer folds the tree (plan r7 §3.2 L2): at 1440px the grid
+ * keeps ≈ 908px instead of ≈ 672px beside a 440px viewer and a 180px tree.
+ */
+export const TREE_AUTOFOLD_BELOW = 1600;
+
+export function shouldAutoFoldTree(windowWidth: number): boolean {
+  return windowWidth > 0 && windowWidth < TREE_AUTOFOLD_BELOW;
+}
+
 function validLayout(layout: Record<string, number> | null): layout is Record<string, number> {
   return Boolean(layout?.[PANEL.tree] && layout[PANEL.grid] && layout[PANEL.viewer]);
 }
@@ -398,6 +408,25 @@ function WidePanes() {
   useEffect(() => {
     if (validLayout(saved) && !initiallyCollapsed) groupRef.current?.setLayout(saved);
   }, []);
+  // Tree auto-fold (plan r7 §3.2 L2, 구조 D3): opening the viewer on a window narrower than
+  // TREE_AUTOFOLD_BELOW folds the tree to its rail so the grid keeps its analysis columns; closing
+  // the viewer unfolds it again — unless the analyst moved the tree themselves in between.
+  // The automatic fold is not the analyst's preference: it is never written to storage.
+  const treeCollapsed = useAppStore((s) => s.treeCollapsed);
+  const autoFolded = useRef(false);
+  useEffect(() => {
+    // The analyst unfolded the auto-folded tree: theirs from here on (no re-fold, no unfold).
+    if (autoFolded.current && !treeCollapsed) autoFolded.current = false;
+  }, [treeCollapsed]);
+  useEffect(() => {
+    if (!collapsed && !useAppStore.getState().treeCollapsed && shouldAutoFoldTree(window.innerWidth)) {
+      autoFolded.current = true;
+      useAppStore.setState({ treeCollapsed: true });
+    } else if (collapsed && autoFolded.current) {
+      autoFolded.current = false;
+      if (useAppStore.getState().treeCollapsed) useAppStore.setState({ treeCollapsed: false });
+    }
+  }, [collapsed]);
   // Collapse to the rail / expand back to the saved (dragged) width, else the 440px default.
   useEffect(() => {
     const panel = viewerRef.current;
