@@ -61,17 +61,23 @@ test("1920 · 전체 아티팩트: the grid fits the pane — no sideways scroll
   await page.setViewportSize({ width: 1920, height: 1000 });
   await open(page, `#/case/${runId}/explore/artifacts`);
   const scroll = page.locator(".grid-scroll").first();
-  await expect.poll(async () => scroll.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
+  await expect
+    .poll(async () => scroll.evaluate((el) => el.scrollWidth - el.clientWidth))
+    .toBeLessThanOrEqual(1);
   await expect(page.getByTestId("grid-scope-badge")).toContainText("불러온");
   await page.screenshot({ path: join(SHOTS, "l2-1920-artifacts-all.png") });
 });
 
-test("1920 · 파일 목록: no sideways scroll; path cells always hold the file name (C-D8)", async ({ page }) => {
+test("1920 · 파일 목록: no sideways scroll; path cells always hold the file name (C-D8)", async ({
+  page,
+}) => {
   await guard(page);
   await page.setViewportSize({ width: 1920, height: 1000 });
   await open(page, `#/case/${runId}/explore/files`);
   const scroll = page.locator(".grid-scroll").first();
-  await expect.poll(async () => scroll.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
+  await expect
+    .poll(async () => scroll.evaluate((el) => el.scrollWidth - el.clientWidth))
+    .toBeLessThanOrEqual(1);
   const pairs = await page.evaluate(() =>
     [...document.querySelectorAll('[role="grid"] [role="row"][data-index]')].slice(0, 40).map((row) => ({
       name: (row.querySelector('[data-col="title"]') as HTMLElement | null)?.innerText ?? "",
@@ -129,7 +135,8 @@ test("1280 + viewer: 조건 on one line, the popover above the viewer and inside
       [r.left + 4, r.bottom - 4],
       [r.right - 4, r.bottom - 4],
     ];
-    return points.filter(([x, y]) => !el.contains(document.elementFromPoint(x as number, y as number))).length;
+    return points.filter(([x, y]) => !el.contains(document.elementFromPoint(x as number, y as number)))
+      .length;
   });
   expect(covered).toBe(0);
   await page.screenshot({ path: join(SHOTS, "l2-1280-viewer-condition-popover.png") });
@@ -146,7 +153,9 @@ test("a header click sorts only: the viewer keeps its row (C-D2)", async ({ page
   const viewerPath = page.locator('[data-testid="viewer-region"] .viewer-path .mid-path');
   await expect(viewerPath).toBeVisible();
   const before = await viewerPath.getAttribute("title");
-  const focusedBefore = await page.locator('[role="grid"] [role="row"][tabindex="0"]').getAttribute("data-row-key");
+  const focusedBefore = await page
+    .locator('[role="grid"] [role="row"][tabindex="0"]')
+    .getAttribute("data-row-key");
   const size = page.locator('[role="columnheader"][data-col="size"]');
   await size.getByRole("button").click();
   await expect(size).toHaveAttribute("aria-sort", "ascending");
