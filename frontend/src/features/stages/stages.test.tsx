@@ -211,7 +211,7 @@ describe("처리 stage (Q-IA-3)", () => {
       within(extra)
         .getAllByRole("link")
         .map((a) => a.textContent?.split("미실행")[0]),
-    ).toHaveLength(7);
+    ).toHaveLength(8);
 
     const card = await screen.findByTestId("analysis-card-carve");
     await waitFor(() => expect(card.className).toContain("is-selected"));
@@ -234,8 +234,8 @@ describe("처리 stage (Q-IA-3)", () => {
     );
     // Step ids read in Korean (files → 파일 목록).
     expect(screen.getByRole("table", { name: "처리 단계" }).textContent).toContain("파일 목록");
-    // Every analysis kind has its card.
-    expect(screen.getAllByTestId(/^analysis-card-/)).toHaveLength(7);
+    // Every analysis kind has its card (R7 P2: + 검색 색인(v2)).
+    expect(screen.getAllByTestId(/^analysis-card-/)).toHaveLength(8);
   });
 
   it("panel cards show state, last run and a run button; the plan table reads counts and notes (S8)", async () => {

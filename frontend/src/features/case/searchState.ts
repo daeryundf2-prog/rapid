@@ -11,6 +11,12 @@ interface SearchState {
   keywords: string[];
   options: SearchOptions;
   popoverOpen: boolean;
+  /**
+   * The search the analyst cancelled with Esc (`searchCancelKey`): its grid pages stay unrequested
+   * (no refetch on focus) until it is submitted again (R7 P2). Null when none.
+   */
+  cancelled: string | null;
+  setCancelled: (key: string | null) => void;
   setKeywords: (keywords: string[]) => void;
   patchOptions: (patch: Partial<SearchOptions>) => void;
   resetOptions: () => void;
@@ -19,10 +25,17 @@ interface SearchState {
   applySaved: (search: SavedSearch) => void;
 }
 
+/** Identity of a run's search for the Esc-cancel marker: run + its keywords. */
+export function searchCancelKey(runId: string | null, keywords: readonly string[]): string {
+  return `${runId ?? ""}\u0000${keywords.join("\u0000")}`;
+}
+
 export const useSearchState = create<SearchState>((set) => ({
   keywords: [],
   options: DEFAULT_SEARCH_OPTIONS,
   popoverOpen: false,
+  cancelled: null,
+  setCancelled: (cancelled) => set({ cancelled }),
   setKeywords: (keywords) => set({ keywords }),
   patchOptions: (patch) => set((s) => ({ options: { ...s.options, ...patch } })),
   resetOptions: () => set({ options: DEFAULT_SEARCH_OPTIONS }),

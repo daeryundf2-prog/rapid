@@ -58,6 +58,13 @@ export function matchesFilter(row: GridRow, needle: string): boolean {
     .every((term) => haystack.includes(term));
 }
 
+/**
+ * Typing pause before a grid text filter (toolbar text, column header filters) is sent (R7 P2:
+ * 300 → 500 ms, fewer server requests while typing; React Query aborts the previous request
+ * when the query key changes, its fetchers pass the AbortSignal).
+ */
+export const GRID_FILTER_DEBOUNCE_MS = 500;
+
 export function backendLabel(backend: string): string {
   switch (backend) {
     case "fts":
@@ -68,6 +75,8 @@ export function backendLabel(backend: string): string {
       return "파일";
     case "case":
       return "케이스";
+    case "index":
+      return "검색 색인(v2)";
     // No engine ("none"): nothing to name (R7 L3 — never the raw token).
     case "none":
     case "":

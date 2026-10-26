@@ -1,4 +1,5 @@
-import { type FormEvent, useEffect, useId, useRef, useState } from "react";
+import { type QueryClient, QueryClientContext } from "@tanstack/react-query";
+import { type FormEvent, type KeyboardEvent, useContext, useEffect, useId, useRef, useState } from "react";
 import { announce, useEscape, useFocusTrap } from "../a11y";
 import { COLLECTION_LABEL } from "../app/collections";
 import { focusGridWhenReady, GLOBAL_SEARCH_ID, NO_RUN_REASON } from "../commands/builtin";
@@ -6,7 +7,7 @@ import { CommandButton } from "../commands/CommandButton";
 import { useCommandState } from "../commands/registry";
 import { RUN_ADD_LABEL } from "../features/case/commands";
 import { SearchOptionsButton } from "../features/case/SearchOptionsPopover";
-import { useSearchState } from "../features/case/searchState";
+import { searchCancelKey, useSearchState } from "../features/case/searchState";
 import { Icon } from "../icons";
 import { keyLabel } from "../shortcuts";
 import { useRoute } from "../state/hooks";
@@ -20,12 +21,32 @@ export function CasePickerFallback() {
   return <CasePickerCombobox />;
 }
 
+/** React Query key prefix of every page of the run's unified-search grid (useCollectionQuery). */
+export function searchQueryKey(runId: string | null) {
+  return ["collection", runId, "search"] as const;
+}
+
+/** Any page of the run's search in flight (false without a QueryClient, e.g. a bare shell). */
+function useSearchBusy(client: QueryClient | undefined, runId: string | null): boolean {
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!client) return;
+    const check = () => setBusy(client.isFetching({ queryKey: searchQueryKey(runId) }) > 0);
+    check();
+    return client.getQueryCache().subscribe(check);
+  }, [client, runId]);
+  return busy;
+}
+
 function GlobalSearch() {
   const { route, openCollection } = useRoute();
   const showNotice = useAppStore((s) => s.showNotice);
   const routedQuery = route.collection === "search" ? (route.q ?? "") : "";
   const [value, setValue] = useState(routedQuery);
   const hintId = useId();
+  const queryClient = useContext(QueryClientContext);
+  // R7 P2: a spinner while the search's pages are in flight; Esc or a new search cancels them.
+  const busy = useSearchBusy(queryClient, route.runId);
 
   useEffect(() => setValue(routedQuery), [routedQuery]);
 
@@ -41,6 +62,13 @@ function GlobalSearch() {
       announce("검색어를 입력하세요");
       return;
     }
+    // Submitting (again) lifts an Esc cancel of this search.
+    useSearchState.getState().setCancelled(null);
+    if (!(route.collection === "search" && q === routedQuery)) {
+      // A new search: abort the previous one's requests (their AbortSignal) before switching.
+      // (The same search again keeps its pages, in flight or cached, as before.)
+      void queryClient?.cancelQueries({ queryKey: searchQueryKey(route.runId) });
+    }
     // S4's search options read the keywords; the grid builds the FTS request (searchPath()).
     useSearchState.getState().setKeywords(q.split(/[\s,]+/).filter(Boolean));
     openCollection("search", { q });
@@ -48,10 +76,26 @@ function GlobalSearch() {
     focusGridWhenReady();
   };
 
+  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== "Escape" || !busy) return;
+    // Esc while searching cancels the search and keeps the typed text (the next Esc clears it).
+    event.preventDefault();
+    event.stopPropagation();
+    // Marked first so the grid does not request the pages again (focus / re-render refetch).
+    const keywords = routedQuery.split(/[\s,]+/).filter(Boolean);
+    useSearchState.getState().setCancelled(searchCancelKey(route.runId, keywords));
+    void queryClient?.cancelQueries({ queryKey: searchQueryKey(route.runId) });
+    announce("검색을 취소했습니다. 다시 검색하려면 Enter를 누르세요");
+  };
+
   return (
-    <search className="global-search" aria-label="전체 검색">
+    <search className="global-search" aria-label="전체 검색" aria-busy={busy || undefined}>
       <form onSubmit={onSubmit}>
-        <Icon name="search" className="global-search-icon" />
+        {busy ? (
+          <Icon name="spinner" className="global-search-icon global-search-spinner" />
+        ) : (
+          <Icon name="search" className="global-search-icon" />
+        )}
         <input
           id={GLOBAL_SEARCH_ID}
           type="search"
@@ -61,9 +105,12 @@ function GlobalSearch() {
           aria-disabled={route.runId ? undefined : true}
           placeholder={route.runId ? "전체 검색 (Enter)" : NO_RUN_REASON}
           onChange={(event) => setValue(event.target.value)}
+          onKeyDown={onKeyDown}
         />
         <span id={hintId} className="visually-hidden">
-          {route.runId ? `${COLLECTION_LABEL.search}로 이동합니다` : NO_RUN_REASON}
+          {route.runId
+            ? `${COLLECTION_LABEL.search}로 이동합니다${busy ? " · 검색 중, Esc로 취소" : ""}`
+            : NO_RUN_REASON}
         </span>
       </form>
       {/* Search options live inside the search field (visual-polish S7). */}

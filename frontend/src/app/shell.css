@@ -454,6 +454,24 @@ kbd {
   pointer-events: none;
 }
 
+/* R7 P2: the search is in flight (Esc cancels it). */
+.global-search-spinner {
+  color: var(--accent);
+  animation: global-search-spin 0.8s linear infinite;
+}
+
+@keyframes global-search-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .global-search-spinner {
+    animation: none;
+  }
+}
+
 /* Search options: an icon button at the end of the search field. */
 .global-search .search-options-anchor {
   position: absolute;
