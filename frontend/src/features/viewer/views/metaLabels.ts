@@ -673,7 +673,7 @@ export const META_KEYED_VALUE_LABELS: Record<string, Record<string, string>> = {
     "evtx-chunk-header": "EVTX 청크 헤더",
     "evtx-record-candidate": "EVTX 레코드 후보",
     "evtx-slack-copy": "EVTX 슬랙 영역 사본",
-    "execution-indicator": "실행 지표",
+    "execution-indicator": "실행 정황",
     "exported-group-membership-hint": "내보낸 그룹 구성원 단서",
     "external-tool-index-row": "외부 도구 색인 행",
     "indexed-document-match": "색인 문서 일치",
@@ -694,7 +694,8 @@ export const META_KEYED_VALUE_LABELS: Record<string, Record<string, string>> = {
     "partial-event-record": "일부만 읽은 이벤트 레코드",
     "persistence-configuration": "지속성 설정",
     "prefetch-file-reference": "Prefetch 파일 참조",
-    "program-presence-not-proof-of-execution": "프로그램 존재(실행 증명 아님)",
+    // The two values the family catalogue reads (value_labels) read the same here.
+    "program-presence-not-proof-of-execution": "존재 흔적(실행 증거 아님)",
     "program-presence-or-execution": "프로그램 존재 또는 실행",
     "program-presence-or-execution-candidate": "프로그램 존재 또는 실행 후보",
     "recent-execution-indicator-candidate": "최근 실행 지표 후보",

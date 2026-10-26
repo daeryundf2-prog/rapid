@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { FALLBACK_CATALOG } from "../../flags/catalog";
 import { isRawToken, metaLabel, metaValueLabel, sectionLabels, viewerLimitationKo } from "./metaLabels";
 
 describe("meta key labels (visual-polish S5)", () => {
@@ -206,10 +207,29 @@ describe("provenance enumerations in Korean (R-10)", () => {
     expect(missing).toEqual([]);
   });
 
+  it("reads like the family catalogue where it labels the same values", () => {
+    const catalogue: Array<[string, string, string]> = [];
+    const walk = (node: unknown): void => {
+      if (Array.isArray(node)) node.forEach(walk);
+      else if (node && typeof node === "object") {
+        const entry = node as { key?: unknown; value_labels?: unknown };
+        const leaf = typeof entry.key === "string" ? entry.key.split(".").pop() : undefined;
+        if ((leaf === "reportability" || leaf === "evidence_strength") && entry.value_labels) {
+          for (const [value, label] of Object.entries(entry.value_labels as Record<string, string>))
+            catalogue.push([leaf, value, label]);
+        }
+        Object.values(node).forEach(walk);
+      }
+    };
+    walk(FALLBACK_CATALOG);
+    expect(catalogue.length).toBeGreaterThan(0);
+    for (const [key, value, label] of catalogue) expect(metaValueLabel(value, key)).toBe(label);
+  });
+
   it("reads the values the 출처 section showed raw", () => {
     expect(metaValueLabel("review", "reportability")).toBe("검토 필요");
     expect(metaValueLabel("program-presence-not-proof-of-execution", "evidence_strength")).toBe(
-      "프로그램 존재(실행 증명 아님)",
+      "존재 흔적(실행 증거 아님)",
     );
     expect(metaValueLabel("review", "source_reference.reportability")).toBe("검토 필요");
   });
