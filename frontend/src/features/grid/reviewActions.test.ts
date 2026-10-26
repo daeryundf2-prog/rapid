@@ -11,6 +11,7 @@ import {
   onReviewApplied,
   optimisticPatch,
   resetCaseDbHandles,
+  skippedNotice,
   storeNotice,
 } from "./reviewActions";
 import { installFetch, jsonResponse } from "./testSupport";
@@ -142,6 +143,77 @@ describe("applyReviewAction", () => {
     off();
     await applyReviewAction("r1", [fileRow(2)], "relevant");
     expect(seen).toEqual(["r1:case-db"]);
+  });
+
+  it("search hits carry the API locator (docs candidates, artifacts with kind) (R7)", async () => {
+    const calls = installFetch({ "/case-db/ensure": ENSURE, "/review-batch": () => jsonResponse({}) });
+    const doc = COLLECTIONS.search.mapRow(
+      {
+        source: "documents",
+        kind: "hwp",
+        pointer: "",
+        path: "D:/root/Users/u/병원.hwp",
+        locator: { collection: "docs", kind: "", pointer: "/candidates/12", record_index: 12, run_id: "r1" },
+      },
+      0,
+      { ref: { id: "search" } },
+    );
+    const web = COLLECTIONS.search.mapRow(
+      {
+        source: "web",
+        kind: "browser",
+        pointer: "/artifacts/3",
+        locator: {
+          collection: "artifacts",
+          kind: "browser",
+          pointer: "/artifacts/3",
+          artifact_id: "artifact-1",
+        },
+      },
+      1,
+      { ref: { id: "search" } },
+    );
+    const file = COLLECTIONS.search.mapRow(
+      {
+        source: "files",
+        kind: "documents",
+        pointer: "/candidates/5",
+        locator: { collection: "files", kind: "", pointer: "/candidates/5" },
+      },
+      2,
+      { ref: { id: "search" } },
+    );
+    expect(doc.rowKey).toBe("search:docs::/candidates/12");
+    const result = await applyReviewAction("r1", [doc, web, file], "excluded");
+    expect(result).toEqual({ applied: 3, store: "case-db" });
+    expect(calls[1]?.body).toMatchObject({
+      status: "excluded",
+      targets: [
+        { collection: "docs", locator: "/candidates/12" },
+        { collection: "artifacts", kind: "browser", locator: "/artifacts/3" },
+        { collection: "files", locator: "/candidates/5" },
+      ],
+    });
+  });
+
+  it("skips rows without a source record and marks the rest, naming the skipped rows (R7)", async () => {
+    const calls = installFetch({ "/case-db/ensure": ENSURE, "/review-batch": () => jsonResponse({}) });
+    const aggregate = COLLECTIONS.search.mapRow({ source: "documents", title: "집계 행", pointer: "" }, 3, {
+      ref: { id: "search" },
+    });
+    const result = await applyReviewAction("r1", [fileRow(1), aggregate, fileRow(2)], "needs-review");
+    expect(result.applied).toBe(2);
+    expect(result.skipped?.map((s) => s.row.title)).toEqual(["집계 행"]);
+    expect(result.skipped?.[0]?.reason).toContain("출처 위치");
+    expect(calls[1]?.body).toMatchObject({
+      targets: [
+        { collection: "files", locator: "/candidates/1" },
+        { collection: "files", locator: "/candidates/2" },
+      ],
+    });
+    expect(skippedNotice(result.skipped ?? [])).toBe(
+      " 출처 위치(원본 레코드)를 알 수 없는 1건은 건너뛰었습니다: 집계 행.",
+    );
   });
 
   it("rejects rows whose source location is unknown without calling the API", async () => {
