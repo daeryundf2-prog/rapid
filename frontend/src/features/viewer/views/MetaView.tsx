@@ -898,7 +898,8 @@ function provenanceEntries(row: GridRow | null): Array<[string, string]> {
       const label = key === "artifact_id" ? "아티팩트 ID" : koreanFieldLabel(key);
       // A record key with no Korean reading is left to the record JSON (never a raw key label).
       if (!label) continue;
-      out.push([`레코드 ${label}`, String(value)]);
+      // R-10: enumerations (보고 가능성 · 증거 강도 …) read in Korean; the raw value is in the JSON.
+      out.push([`레코드 ${label}`, metaValueLabel(value, key) ?? String(value)]);
       if (out.length > 24) break;
     }
   }

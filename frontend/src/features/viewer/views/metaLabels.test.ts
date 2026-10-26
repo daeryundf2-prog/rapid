@@ -83,3 +83,134 @@ describe("viewerLimitationKo (R7 L3)", () => {
     expect(viewerLimitationKo("Something new.")).toBe("Something new.");
   });
 });
+
+/**
+ * Every value the collectors / case DB / QC write into `reportability` and `evidence_strength`
+ * (R-10). Enumerated by grepping the field names in rapidtriage/ (string literals and keyword
+ * arguments, conditional branches included); a new value needs a Korean reading here and in
+ * META_KEYED_VALUE_LABELS.
+ */
+const REPORTABILITY_VALUES = [
+  "bounded-delete-lifecycle-candidate",
+  "bounded-mft-cache-usn-path-candidate",
+  "bounded-mft-cache-usn-review-preview",
+  "bounded-mft-path-cache-quality-profile",
+  "bounded-parent-cache-usn-name-path-candidate",
+  "bounded-rename-pair-candidate",
+  "bounded-scan-path-candidate",
+  "bounded-usn-path-reliability-assessment",
+  "bounded-usn-state-replay-preview",
+  "bounded-usn-state-replay-transition",
+  "bounded-usn-timeline-review-candidate",
+  "candidate-destlist-entry-citation",
+  "candidate-review-only",
+  "commercial-blocked",
+  "excluded-from-execution-evidence",
+  "excluded-from-recent-file-evidence",
+  "internally-covered",
+  "inventory-only",
+  "inventory-triage",
+  "metadata-only",
+  "native-pure-python-decompression",
+  "normal-scca-path",
+  "not-commercial-grade-until-real-case-diff-and-signoff",
+  "not-reportable",
+  "reportable",
+  "review",
+  "review-only",
+  "review-only-string-offset-candidate",
+  "review-pivot",
+  "reviewed-report-candidate",
+  "reviewed-reportable",
+  "source-context-candidate",
+  "triage",
+  "triage-cache-entry-candidate",
+  "triage-embedded-media-candidate",
+  "triage-pivot",
+  "triage-preview-candidate",
+  "triage-timeline-candidate",
+  "usn-state-replay-validation-gate",
+  "validation-diff-attachment-inventory",
+];
+const EVIDENCE_STRENGTH_VALUES = [
+  "account-lifecycle-registry-export",
+  "amcache-native-string-pivot",
+  "application-fault-report",
+  "application-resource-usage-database-presence",
+  "application-resource-usage-indicator",
+  "application-resource-usage-string-pivot",
+  "context",
+  "evtx-chunk-header",
+  "evtx-record-candidate",
+  "evtx-slack-copy",
+  "execution-indicator",
+  "exported-group-membership-hint",
+  "external-tool-index-row",
+  "indexed-document-match",
+  "indicator-pivot",
+  "jumplist-destination-candidate",
+  "kakaotalk-application-database-presence",
+  "kakaotalk-cross-source-presence-candidate",
+  "kakaotalk-deviceinfo-context-preserved",
+  "kakaotalk-macos-database-presence-and-openability",
+  "kakaotalk-user-id-context-preserved",
+  "local-rule-ioc-hit",
+  "mounted-device-registry-key",
+  "native-hive-deviceinfo-string-presence-candidate",
+  "native-hive-deviceinfo-values-preserved",
+  "ntfs-mft-native-attribute-metadata",
+  "ntfs-usn-native-record",
+  "package-integrity-finding",
+  "partial-event-record",
+  "persistence-configuration",
+  "prefetch-file-reference",
+  "program-presence-not-proof-of-execution",
+  "program-presence-or-execution",
+  "program-presence-or-execution-candidate",
+  "recent-execution-indicator-candidate",
+  "registry-deleted-cell-candidate",
+  "registry-deleted-key-candidate",
+  "registry-deleted-value-candidate",
+  "registry-export-key",
+  "registry-hive-header",
+  "registry-hive-string-candidate",
+  "remote-access-destination",
+  "sam-hive-group-key-candidate",
+  "sam-hive-key-candidate",
+  "search-index-database-presence",
+  "search-index-string-pivot",
+  "security-policy-sensitive-location",
+  "security-privilege-assignment",
+  "snapshot-file-delta",
+  "srum-native-row-string-candidate",
+  "srum-row-indicator-candidate",
+  "srum-table-presence-candidate",
+  "strong",
+  "system-service-configuration",
+  "triage",
+  "user-execution-indicator",
+  "user-execution-indicator-candidate",
+  "vsc-snapshot-file-copy",
+  "weak",
+  "windows-search-correlated-native-string-candidate",
+  "windows-search-page-local-string-correlation",
+  "windows-search-table-presence-candidate",
+];
+
+describe("provenance enumerations in Korean (R-10)", () => {
+  it.each([
+    ["reportability", REPORTABILITY_VALUES],
+    ["evidence_strength", EVIDENCE_STRENGTH_VALUES],
+  ] as const)("every %s value has a Korean reading", (key, values) => {
+    const missing = values.filter((value) => !/[가-힣]/.test(metaValueLabel(value, key) ?? ""));
+    expect(missing).toEqual([]);
+  });
+
+  it("reads the values the 출처 section showed raw", () => {
+    expect(metaValueLabel("review", "reportability")).toBe("검토 필요");
+    expect(metaValueLabel("program-presence-not-proof-of-execution", "evidence_strength")).toBe(
+      "프로그램 존재(실행 증명 아님)",
+    );
+    expect(metaValueLabel("review", "source_reference.reportability")).toBe("검토 필요");
+  });
+});
