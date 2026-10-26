@@ -94,6 +94,7 @@ import {
   serverPathFilter,
 } from "./gridUtils";
 import { RowMenu } from "./RowMenu";
+import { searchWarningNote } from "./searchNotes";
 import { type CellValue, type ColumnSpec, DENSITY_ROW_HEIGHT, type GridPreset } from "./types";
 import {
   artifactTypesOfTree,
@@ -1995,6 +1996,7 @@ export function DataGrid(props: DataGridProps = {}) {
               : undefined
         }
         indexHint={searchFooterIndexHint}
+        searchNote={ref.id === "search" ? searchWarningNote(cq.pageMeta?.searchWarnings) : undefined}
       />
       {extractResult ? (
         <section className="grid-extract" role="status" aria-label="추출 결과">

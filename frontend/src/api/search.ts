@@ -110,6 +110,99 @@ interface QueryPayload {
   page?: { next_cursor?: unknown };
   truncated?: unknown;
   elapsed_ms?: unknown;
+  /** Notes of the query (strings, or `{message, counts}` objects with per-source truncated rows). */
+  warnings?: unknown;
+  query?: { parsed?: { warnings?: unknown } };
+}
+
+/**
+ * One v2 search note (R7 S2 #3): the server's Korean sentence, what it is about, and — for rows
+ * whose body the index cut at its cap — the truncated-row count per source.
+ */
+export interface SearchWarning {
+  kind: "truncated-rows" | "short-keyword" | "other";
+  text: string;
+  /** Per-source rows cut at the index cap (source/domain id → rows), when known. */
+  counts?: Record<string, number>;
+}
+
+function firstString(...values: unknown[]): string {
+  return values.find((value): value is string => typeof value === "string" && value !== "") ?? "";
+}
+
+function countsOf(value: unknown): Record<string, number> | undefined {
+  const counts: Record<string, number> = {};
+  if (Array.isArray(value)) {
+    // [{source|domain|name, count|rows|truncated_rows}]
+    for (const item of value) {
+      if (!item || typeof item !== "object") continue;
+      const entry = item as Record<string, unknown>;
+      const name = [entry.source, entry.domain, entry.name].find((v) => typeof v === "string" && v);
+      const count = [entry.count, entry.rows, entry.truncated_rows].find((v) => typeof v === "number");
+      if (typeof name === "string" && typeof count === "number" && count > 0) counts[name] = count;
+    }
+  } else if (value && typeof value === "object") {
+    for (const [name, count] of Object.entries(value as Record<string, unknown>)) {
+      if (typeof count === "number" && Number.isFinite(count) && count > 0) counts[name] = count;
+    }
+  }
+  return Object.keys(counts).length ? counts : undefined;
+}
+
+/** "(문서 12건, artifacts 1,234건)" at the end of the server's truncated-rows sentence. */
+function countsInText(text: string): Record<string, number> | undefined {
+  const detail = /\(([^()]*\d[^()]*)\)\s*$/.exec(text)?.[1];
+  if (!detail) return undefined;
+  const counts: Record<string, number> = {};
+  // The server joins with ", "; "1,200건" keeps its thousands comma.
+  for (const part of detail.split(/,\s+/)) {
+    const match = /^(.+?)\s+([\d,]+)\s*건$/.exec(part.trim());
+    if (match?.[1] && match[2]) counts[match[1]] = Number(match[2].replace(/,/g, ""));
+  }
+  return Object.keys(counts).length ? counts : undefined;
+}
+
+function warningKind(text: string, code: string, counts: Record<string, number> | undefined): SearchWarning["kind"] {
+  if (/truncat/i.test(code) || /잘린 행|색인 상한/.test(text) || (counts && /truncat|row/i.test(code)))
+    return "truncated-rows";
+  if (/short/i.test(code) || /[12]자 검색어|2자 검색어/.test(text)) return "short-keyword";
+  return counts ? "truncated-rows" : "other";
+}
+
+/** v2 notes of a query response, deduplicated (top-level `warnings` and `query.parsed.warnings`). */
+export function searchWarningsOf(payload: QueryPayload): SearchWarning[] {
+  const raw: unknown[] = [];
+  if (Array.isArray(payload.warnings)) raw.push(...payload.warnings);
+  const parsed = payload.query?.parsed?.warnings;
+  if (Array.isArray(parsed)) raw.push(...parsed);
+  const out: SearchWarning[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    let text = "";
+    let code = "";
+    let counts: Record<string, number> | undefined;
+    if (typeof item === "string") {
+      text = item;
+      counts = countsInText(item);
+    } else if (item && typeof item === "object") {
+      const entry = item as Record<string, unknown>;
+      text = firstString(entry.message, entry.text, entry.detail);
+      code = firstString(entry.code, entry.kind, entry.type);
+      counts =
+        countsOf(entry.counts) ??
+        countsOf(entry.by_source) ??
+        countsOf(entry.truncated_by_source) ??
+        countsOf(entry.truncated_by_domain) ??
+        countsOf(entry.sources) ??
+        (text ? countsInText(text) : undefined);
+    }
+    if (!text && !counts) continue;
+    const key = `${code}\u0000${text}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ kind: warningKind(text, code, counts), text, ...(counts ? { counts } : {}) });
+  }
+  return out;
 }
 
 function nextCursorOf(payload: QueryPayload): string | null {
@@ -254,6 +347,6 @@ async function indexPage(
     hasMore,
     truncated,
     elapsedMs: typeof payload.elapsed_ms === "number" ? payload.elapsed_ms : 0,
-    meta: { searchIndex: "ready" },
+    meta: { searchIndex: "ready", searchWarnings: searchWarningsOf(payload) },
   };
 }
