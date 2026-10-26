@@ -8,6 +8,33 @@ import {
 } from "../../../api/viewer";
 import { errorText, useAsync } from "../useAsync";
 
+/** R-10: Korean names of the sidecar ids the server lists in `detected_sidecars`. */
+const SIDECAR_LABELS: Record<string, string> = {
+  wal: "WAL",
+  shm: "SHM",
+  rollback_journal: "롤백 저널",
+  "rollback-journal": "롤백 저널",
+  journal: "롤백 저널",
+};
+
+export function sidecarLabel(id: string): string {
+  return SIDECAR_LABELS[id] ?? id;
+}
+
+/** R-10: Korean WAL header / preview states (api/app/sqlite.py, core/sqlite_wal.py). */
+const WAL_STATUS_LABELS: Record<string, string> = {
+  parsed: "해석됨",
+  "unknown-magic": "알 수 없는 형식(매직 불일치)",
+  "invalid-short-header": "헤더가 짧아 해석 불가",
+  "not-read": "읽지 않음",
+  missing: "없음",
+};
+
+export function walHeaderStatusLabel(status: string | undefined | null): string {
+  if (!status) return "미해석";
+  return WAL_STATUS_LABELS[status] ?? `미분류 상태(${status})`;
+}
+
 export const SQLITE_PAGE_SIZE = 200;
 
 function formatCell(value: unknown): string {
@@ -56,9 +83,9 @@ function WalBanner({
       <p className="viewer-note">
         WAL {sidecars.wal?.exists ? "있음" : "없음"} · SHM {sidecars.shm?.exists ? "있음" : "없음"} · 롤백
         저널 {sidecars.rollback_journal?.exists ? "있음" : "없음"}
-        {detected.length ? ` · 발견: ${detected.join(", ")}` : ""}
+        {detected.length ? ` · 발견: ${detected.map(sidecarLabel).join(", ")}` : ""}
         {sidecars.wal?.exists && header
-          ? ` · WAL 헤더 ${header.status || "미해석"}, 페이지 ${header.page_size ?? "?"}, 추정 프레임 ${header.estimated_frame_count ?? "?"}`
+          ? ` · WAL 헤더 ${walHeaderStatusLabel(header.status)}, 페이지 크기 ${header.page_size ?? "?"}바이트, 추정 프레임 ${header.estimated_frame_count ?? "?"}개`
           : ""}
       </p>
       {sidecars.wal?.exists ? (
@@ -70,8 +97,9 @@ function WalBanner({
       {wal.data ? (
         <div className="sqlite-wal-frames">
           <p className="viewer-note">
-            상태 {wal.data.wal.status || "알 수 없음"} · 추정 프레임 {wal.data.wal.estimated_frame_count ?? 0}{" "}
-            · 미리보기 {wal.data.wal.preview_frame_count ?? wal.data.wal.frames?.length ?? 0} · 삭제 후보{" "}
+            상태 {walHeaderStatusLabel(wal.data.wal.status)} · 추정 프레임{" "}
+            {wal.data.wal.estimated_frame_count ?? 0} · 미리보기{" "}
+            {wal.data.wal.preview_frame_count ?? wal.data.wal.frames?.length ?? 0} · 삭제 후보{" "}
             {wal.data.recovery_scope?.deleted_record_candidate_count ?? 0}건 (신뢰 도구 검증 전에는 단서로만
             사용)
           </p>

@@ -46,6 +46,22 @@ function splitId(id: string): { hive: string; key: string } {
   return at < 0 ? { hive: id, key: "" } : { hive: id.slice(0, at), key: id.slice(at + 1) };
 }
 
+/**
+ * R-10: the citation line as shown — hive path › key path › 마지막 기록 (console time zone) ›
+ * 셀 오프셋 0x… (decimal) — instead of the server's raw ISO text (still the copy text / tooltip).
+ */
+export function citationDisplay(citation: RegistryValues["citation"], timezone: string): string {
+  const parts = [citation.hive_path, citation.key_path].filter(Boolean);
+  if (citation.last_written_at)
+    parts.push(`마지막 기록 ${formatTimestamp(citation.last_written_at, timezone)}`);
+  if (typeof citation.cell_offset === "number" && citation.cell_offset >= 0) {
+    parts.push(
+      `셀 오프셋 0x${citation.cell_offset.toString(16).toUpperCase()} (${citation.cell_offset.toLocaleString("ko-KR")})`,
+    );
+  }
+  return parts.length ? parts.join(" › ") : citation.text;
+}
+
 export function keyItem(hive: string, key: RegistryKey): ExplorerTreeItem {
   const values = key.value_count ?? 0;
   return {
@@ -268,8 +284,13 @@ function KeyDetails({ runId, hive, keyPath }: { runId: string; hive: RegistryHiv
         </DisabledReason>
         {copied ? <span className="explorer-muted">{copied}</span> : null}
       </div>
-      <p className="explorer-citation explorer-mono" title="인용">
-        {data.citation.text}
+      {/* R-10: the shown line reads the time in the console zone; 인용 복사 keeps the server text. */}
+      <p
+        className="explorer-citation explorer-mono"
+        title={data.citation.text}
+        data-testid="registry-citation"
+      >
+        {citationDisplay(data.citation, timezone)}
       </p>
       {data.values_status === "names-only" ? <p className="explorer-note">{data.reason}</p> : null}
       <ValueTable data={data} />

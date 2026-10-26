@@ -480,7 +480,7 @@ export const KIND_COLUMNS: Record<string, KindColumnDef[]> = {
     { header: "게시자", keys: ["publisher"], width: 160 },
     { header: "버전", keys: ["version"], width: 100 },
     { header: "SHA-1", keys: ["sha1"], width: 200, mono: true },
-    { header: "키 기록", keys: ["key_last_written_at"], width: 170 },
+    { header: "키 기록", keys: ["key_last_written_at"], width: 170, time: true },
   ],
   // 앱/앱 경로/오류 모듈/이벤트 시각 stay promotable but are not defaults until the WER parser
   // decodes UTF-16 .wer files (their keys are garbled today; QA run-subset7).
