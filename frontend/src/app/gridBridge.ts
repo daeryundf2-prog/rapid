@@ -51,6 +51,7 @@ export function searchSpec(q: string | undefined): CollectionQuery["search"] {
     mode: options.mode,
     sources: options.sources.length ? options.sources : undefined,
     hideKnownGood: options.hideKnownGood,
+    ...(options.ocr ? { ocr: true } : {}),
   };
 }
 

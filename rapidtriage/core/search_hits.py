@@ -13,7 +13,7 @@ import re
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import PureWindowsPath
 
-from .textnorm import locate_normalized, normalize_nfc
+from .textnorm import locate_normalized, normalize_nfc, normalize_search_text
 
 SNIPPET_LIMIT = 200
 SNIPPET_LEAD = 40
@@ -169,12 +169,23 @@ def search_snippet(source: object, keywords: Sequence[str], *, limit: int = SNIP
     Without a literal match (regex/fuzzy hits) the start of the text is used.
     """
     candidates: Iterator[str]
+    folded_keywords = [normalize_search_text(keyword) for keyword in keywords]
+    # Keywords without whitespace match a leaf's cleaned text iff they match its folded raw
+    # text (cleaning only collapses whitespace): leaves without any are skipped before the
+    # whitespace clean-up and the offset mapping (R7: a record walks thousands of leaves).
+    prefilter = bool(folded_keywords) and all(word and not any(ch.isspace() for ch in word) for word in folded_keywords)
     if isinstance(source, str):
         candidates = iter((_clean(source),))
     else:
-        candidates = (_clean(f"{key}: {text}" if key else text) for key, text in _iter_leaves(source))
+        candidates = (f"{key}: {text}" if key else text for key, text in _iter_leaves(source))
     first = ""
-    for candidate in candidates:
+    for raw in candidates:
+        if prefilter and not isinstance(source, str):
+            if not any(word in normalize_search_text(raw) for word in folded_keywords):
+                if not first:
+                    first = _clean(raw)
+                continue
+        candidate = raw if isinstance(source, str) else _clean(raw)
         if not candidate:
             continue
         first = first or candidate

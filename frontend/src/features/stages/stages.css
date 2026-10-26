@@ -282,13 +282,16 @@
   margin-block: var(--space-2);
 }
 
-.process-plan-disclosures > summary {
+/* …and the folded read-only plan of a finished run (R7 C-G1). */
+.process-plan-disclosures > summary,
+.process-plan-record > summary {
   color: var(--text-muted);
   font-size: var(--fs-table-aux);
   cursor: pointer;
 }
 
-.process-plan-disclosures[open] > summary {
+.process-plan-disclosures[open] > summary,
+.process-plan-record[open] > summary {
   margin-block-end: var(--space-2);
 }
 
@@ -469,6 +472,19 @@
 
 .process-run-note {
   color: var(--text-muted);
+}
+
+/* Results layout of a finished run (R7 C-G1): the "계획 기록 없음(이전 형식)" note and the folded
+   read-only plan record. */
+.run-plan-legacy {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-inline-start: 3px solid var(--text-muted);
+  border-radius: var(--radius-sm, 4px);
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
 }
 
 .run-plan-table tr[role="row"]:focus-visible {
