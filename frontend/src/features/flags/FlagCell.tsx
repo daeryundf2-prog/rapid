@@ -10,7 +10,8 @@ import { useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Popover } from "../../components/Popover";
 import type { GridRow } from "../../contracts/collection";
-import { ruleById } from "./catalog";
+import { evidenceFieldLabel, evidenceValueText } from "../grid/valueLabels";
+import { familyById, ruleById } from "./catalog";
 import {
   evidenceEntries,
   flagCitation,
@@ -61,12 +62,22 @@ export function FlagDetail({ flag, headingLevel = 3 }: { flag: RowFlag; headingL
       {rule?.rationale_ko ? <p className="flag-detail-text">{rule.rationale_ko}</p> : null}
       {evidence.length ? (
         <dl className="flag-evidence">
-          {evidence.map(([key, value]) => (
-            <div key={key}>
-              <dt className="mono">{key}</dt>
-              <dd className="mono">{value || "—"}</dd>
-            </div>
-          ))}
+          {evidence.map(([key, value]) => {
+            // Korean field name (catalogue column label, else the record-key label); the raw key and
+            // value stay the tooltip (R7 L3, C-R4).
+            const label = evidenceFieldLabel(rule ? familyById(rule.family) : undefined, key);
+            const shown = evidenceValueText(rule?.family, key, value);
+            return (
+              <div key={key}>
+                <dt title={key} className={label ? undefined : "mono"} data-raw-ok={label ? undefined : ""}>
+                  {label ?? key}
+                </dt>
+                <dd className="mono" title={shown !== value ? `원래 값: ${value}` : undefined}>
+                  {shown || "—"}
+                </dd>
+              </div>
+            );
+          })}
         </dl>
       ) : (
         <p className="flag-detail-text flag-muted">근거 필드가 기록되지 않았습니다.</p>
@@ -79,7 +90,7 @@ export function FlagDetail({ flag, headingLevel = 3 }: { flag: RowFlag; headingL
       ) : null}
       {rule?.sources.length ? (
         <p className="flag-detail-text flag-sources">
-          <strong>출처:</strong>{" "}
+          <strong>이 지표의 출처:</strong>{" "}
           {rule.sources.map((url, index) => (
             <span key={url}>
               {index ? " · " : ""}
@@ -99,7 +110,11 @@ export function FlagDetail({ flag, headingLevel = 3 }: { flag: RowFlag; headingL
           {validation}
         </p>
       ) : null}
-      <p className="flag-detail-text flag-muted mono" title="보고서 인용 형식(지표 id@버전 + 근거)">
+      <p
+        className="flag-detail-text flag-muted mono"
+        title="보고서 인용 형식(지표 id@버전 + 근거)"
+        data-raw-ok=""
+      >
         {flagCitation(flag, rule)}
       </p>
     </section>
