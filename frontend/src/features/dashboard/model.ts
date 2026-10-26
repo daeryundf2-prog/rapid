@@ -7,6 +7,7 @@ import type { ReviewCounts, SavedSearch } from "../../api/caseDb";
 import type { ExportEntry } from "../../api/dashboard";
 import type { CanonicalCounts, RunTree } from "../../api/runs";
 import type { ReviewStatus } from "../../contracts/collection";
+import { formatElapsed } from "../../shell/StatusBar";
 import { runEvidenceTimezone } from "../../state/hooks";
 import { currentRun } from "../../state/slices/runs";
 import { useAppStore } from "../../state/store";
@@ -70,14 +71,15 @@ export function stageRows(progress: ProgressLike | null | undefined, now = Date.
   return rows;
 }
 
+/**
+ * 소요 of the 접수 cards (C-G4): the console's one duration format and rounding — formatElapsed
+ * ("34:08", h:mm:ss / mm:ss, whole seconds floored) like the run chips and 처리; under a second
+ * reads "1초 미만".
+ */
 export function formatDuration(value: number | null | undefined): string {
-  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
-  if (value < 1000) return `${Math.round(value)}ms`;
-  const s = value / 1000;
-  if (s < 60) return `${s.toFixed(1)}초`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}분 ${Math.round(s % 60)}초`;
-  return `${Math.floor(m / 60)}시간 ${m % 60}분`;
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return "—";
+  if (value < 1000) return "1초 미만";
+  return formatElapsed(value);
 }
 
 /** The display timezone right now (URL `tz=` > preference > evidence zone > browser), outside React. */

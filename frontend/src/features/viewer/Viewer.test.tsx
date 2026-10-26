@@ -464,6 +464,33 @@ describe("Viewer — toolbar actions", () => {
     fireEvent.click(tool("viewer.mark.bookmark"));
     await waitFor(() => expect(live()).toBe("표시 실패: case DB has no row for run locator(s)"));
   });
+
+  it("R-1: a failed mark (403) rolls the status chip back to the previous status", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await show(
+      { preview_type: "text", extension: ".txt", text: "hi" },
+      {},
+      {
+        ensure: () => ({ database: "D:/case.db", case_id: "run-run-1" }),
+        "review-batch": async () => {
+          await gate;
+          return jsonResponse({ detail: "쓰기 차단" }, 403);
+        },
+      },
+    );
+    const chip = () => screen.getByTestId("viewer-review-status");
+    expect(chip().textContent).toBe("미검토");
+    fireEvent.click(tool("viewer.mark.relevant"));
+    // Optimistic while the request is in flight …
+    await waitFor(() => expect(chip().textContent).toBe("관련 있음"));
+    release();
+    // … and back to 미검토 once the server refuses it, with the failure toast.
+    await waitFor(() => expect(live()).toBe("표시 실패: 쓰기 차단"));
+    await waitFor(() => expect(chip().textContent).toBe("미검토"));
+  });
 });
 
 describe("Viewer — history and navigation", () => {

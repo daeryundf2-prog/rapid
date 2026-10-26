@@ -389,8 +389,12 @@ export function GridFooter(props: GridFooterProps) {
         // The search engine and its time are diagnostics, not a finding: tooltip only (R7 L3, C-D16).
         title={props.backend ? `${backendLabel(props.backend) || "조회"} · ${seconds}` : undefined}
       >
-        총{" "}
-        {props.total !== null ? `${formatCount(props.total)}건` : props.loading ? "세는 중…" : "알 수 없음"}
+        {/* R-10: an uncounted total reads "전체 건수 미확정", never "총 알 수 없음". */}
+        {props.total !== null
+          ? `총 ${formatCount(props.total)}건`
+          : props.loading
+            ? "총 세는 중…"
+            : "전체 건수 미확정"}
       </span>
       {props.loadedSummary ? <span data-testid="grid-footer-loaded">{props.loadedSummary}</span> : null}
       {props.selectedCount ? (

@@ -20,6 +20,7 @@ import {
   patchCase,
 } from "../../api/cases";
 import { ApiError } from "../../api/client";
+import { problemMessageKo, stepLabelKo } from "../dashboard/disclosures";
 import { navigate } from "../tree/adapter";
 import { caseRunBody, caseRunFormReason } from "./CaseWizard";
 import { snapshotQueryKey } from "./caseLink";
@@ -603,9 +604,12 @@ export function ProblemsDialog({
               {group.items.map((item, index) => (
                 // biome-ignore lint/suspicious/noArrayIndexKey: problem items have no id; order is stable
                 <tr key={index}>
-                  <td className="mono">{item.step || "—"}</td>
+                  {/* R-7: Korean step name and reasons (key→reason table); raw text stays the tooltip. */}
+                  <td title={item.step || undefined}>{item.step ? stepLabelKo(item.step) : "—"}</td>
                   <td>{LEVEL_LABEL[item.level] ?? item.level}</td>
-                  <td className="break-all">{item.message}</td>
+                  <td className="break-all" title={item.message}>
+                    {problemMessageKo(item.message)}
+                  </td>
                 </tr>
               ))}
             </tbody>

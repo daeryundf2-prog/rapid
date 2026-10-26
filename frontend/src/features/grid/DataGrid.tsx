@@ -33,6 +33,7 @@ import { Icon } from "../../icons";
 import { currentRun } from "../../state/slices/runs";
 import { useAppStore } from "../../state/store";
 import { runCommandId } from "../analysis/commands";
+import { fsFolderEmptyText, fsScopeOf, useFsLevel } from "../explorers/FsExplorer";
 import { setColumnFilter } from "../filters/columnFilters";
 import type { FilterBarVariant } from "../filters/FilterBar";
 import { useFilterStore } from "../filters/filterStore";
@@ -58,6 +59,13 @@ import {
 } from "./columns/fieldColumns";
 import { FILES_SERVER_SORT_KEYS, ntfsJoinOf, runInputIsImage } from "./columns/files";
 import { EmptyHintLink } from "./EmptyHintLink";
+import {
+  sortIneffectiveText,
+  timeBasisBanner,
+  timeBasisEmptyText,
+  timeBasisOf,
+  timeConditionActive,
+} from "./filesTimeBasis";
 import { GridEmpty, type GridEmptyState } from "./GridEmpty";
 import {
   ColumnMenu,
@@ -1040,7 +1048,15 @@ export function DataGrid(props: DataGridProps = {}) {
     const target = event.target as HTMLElement;
     // A row checkbox keeps focus after a click: Esc still clears the selection from there.
     const onRowCheckbox = target.matches('[data-index] input[type="checkbox"]');
-    if (target.closest("input, button, select, textarea") && !(onRowCheckbox && event.key === "Escape"))
+    // R-12: Enter on a 특이사항 chip (focused after a click / Esc from its popover) opens the
+    // viewer like Enter on the row — the grid's preventDefault keeps the chip's popover shut;
+    // the popover stays on click / Space.
+    const onFlagChipEnter = event.key === "Enter" && target.matches("[data-index] button.flag-cell");
+    if (
+      target.closest("input, button, select, textarea") &&
+      !(onRowCheckbox && event.key === "Escape") &&
+      !onFlagChipEnter
+    )
       return;
     const rowEl = target.closest<HTMLElement>("[data-index]");
     // Focus on the grid container (or its scroll area) rather than a row: act on the
@@ -1236,6 +1252,7 @@ export function DataGrid(props: DataGridProps = {}) {
   // and the elapsed time is not part of the key.
   const resultCount = compactMode ? displayCount : (cq.total ?? displayCount);
   const filterSig = useFilterStore((s) => JSON.stringify(s.filters));
+  const timeConditionOn = useFilterStore((s) => timeConditionActive(s.filters));
   const querySig = `${runId}|${collectionKey}|${q}|${routeSort ? `${routeSort.key}:${routeSort.order}` : ""}|${filterSig}`;
   const announcedFor = useRef("");
   const elapsedRef = useRef(cq.elapsedMs);
@@ -1301,6 +1318,17 @@ export function DataGrid(props: DataGridProps = {}) {
   }, [sortState, setSort]);
 
   const sortedSpec = routeSort ? columns.find((c) => c.sortKey === routeSort.key) : undefined;
+  // R-9: a files sort on an unknown key (`?sort=bogus`), one the server did not apply, or one on
+  // an all-empty column says so in the status line instead of silently doing nothing.
+  const sortIneffective =
+    filesGrid && routeSort
+      ? sortIneffectiveText(
+          routeSort.key,
+          sortedSpec?.header,
+          sortState,
+          Boolean(sortedSpec) || FILES_SERVER_SORT_KEYS.has(routeSort.key),
+        )
+      : null;
   // A 409 survived the automatic retry: the server's own words go in the status line.
   const staleDetail =
     serverSorted && cq.error instanceof ApiError && cq.error.status === 409 ? cq.error.message : "";
@@ -1310,21 +1338,23 @@ export function DataGrid(props: DataGridProps = {}) {
       ? `정렬 인덱스를 다시 만들어야 합니다: ${staleDetail}`
       : sortNotice
         ? `전체 정렬을 할 수 없습니다: ${sortNotice}`
-        : routeSort && sortBuilding
-          ? `전체 정렬 인덱스 생성 중 … ${Math.round((sortState?.progress ?? 0) * 100)}%`
-          : routeSort && sortState?.status === "ready"
-            ? `정렬: ${sortedSpec?.header ?? routeSort.key} ${routeSort.order === "desc" ? "내림차순" : "오름차순"} (전체 ${
-                cq.total !== null ? formatCount(cq.total) : "-"
-              }건)`
-            : routeSort
-              ? "전체 정렬 준비 중 …"
-              : "";
+        : sortIneffective
+          ? sortIneffective
+          : routeSort && sortBuilding
+            ? `전체 정렬 인덱스 생성 중 … ${Math.round((sortState?.progress ?? 0) * 100)}%`
+            : routeSort && sortState?.status === "ready"
+              ? `정렬: ${sortedSpec?.header ?? routeSort.key} ${routeSort.order === "desc" ? "내림차순" : "오름차순"} (전체 ${
+                  cq.total !== null ? formatCount(cq.total) : "-"
+                }건)`
+              : routeSort
+                ? "전체 정렬 준비 중 …"
+                : "";
   // The status line is plain text; its transitions go through the one announce() live region.
   const sortAnnouncement = !serverSorted
     ? ""
     : staleDetail
       ? sortStatusText
-      : sortNotice
+      : sortNotice || sortIneffective
         ? sortStatusText
         : routeSort && sortBuilding
           ? "전체 정렬 인덱스 생성을 시작했습니다."
@@ -1400,6 +1430,18 @@ export function DataGrid(props: DataGridProps = {}) {
       </span>
     ) : null;
 
+  // C-E1: the explorer's folder without direct files names its sub-folders in the empty state.
+  const fsFolder = useFsLevel(
+    filesGrid && !ref.recursive && !ref.special ? runId : null,
+    fsScopeOf(ref.category),
+    filesGrid && !ref.recursive && !ref.special ? ref.dir : undefined,
+  );
+  const fsEmptyText = filesGrid && !q.trim() && !timeConditionOn ? fsFolderEmptyText(fsFolder.data) : null;
+  // R-2: files whose times are acquisition-copy times (no NTFS join) say so; a time condition
+  // that matched nothing on them names that reason in the empty state.
+  const timeBasis = filesGrid ? timeBasisOf(cq.pageMeta) : null;
+  const timeBanner = timeBasisBanner(timeBasis);
+  const timeEmptyText = timeConditionOn ? timeBasisEmptyText(timeBasis) : null;
   const emptyState: GridEmptyState = !runId
     ? {
         icon: "folder",
@@ -1423,26 +1465,33 @@ export function DataGrid(props: DataGridProps = {}) {
                   icon: "search",
                   text: `'${serverQuery}'에 맞는 이벤트가 없습니다. (서버 검색: 전체 이벤트)`,
                 }
-              : filesGrid && q.trim()
-                ? {
-                    icon: "search",
-                    // Files filter name/path on the server (plan r7 §3.2 L2); the text names the query (L3).
-                    text: `'${q.trim()}'에 맞는 파일이 없습니다. (서버 검색: 전체 파일의 이름·경로)`,
-                  }
-                : compactMode && needle
-                  ? {
-                      icon: "filter",
-                      text: `'${needle}'에 맞는 행이 없습니다. 불러온 행 안에서만 필터합니다.`,
-                    }
-                  : isAnalysis && ref.kind
+              : timeEmptyText
+                ? { icon: "clock", text: timeEmptyText }
+                : fsEmptyText
+                  ? { icon: "folder", text: fsEmptyText }
+                  : filesGrid && q.trim()
                     ? {
-                        icon: "inbox",
-                        text: "이 노드에는 결과가 없습니다.",
-                        action: { command: runCommandId(ref.kind), label: "분석 실행" },
+                        icon: "search",
+                        // Files filter name/path on the server (plan r7 §3.2 L2); the text names the query (L3).
+                        text: `'${q.trim()}'에 맞는 파일이 없습니다. (서버 검색: 전체 파일의 이름·경로)`,
                       }
-                    : compactMode
-                      ? { icon: "filter", text: "조건에 맞는 행이 없습니다. 불러온 행 안에서만 필터합니다." }
-                      : { icon: "inbox", text: "이 노드에는 표시할 행이 없습니다." };
+                    : compactMode && needle
+                      ? {
+                          icon: "filter",
+                          text: `'${needle}'에 맞는 행이 없습니다. 불러온 행 안에서만 필터합니다.`,
+                        }
+                      : isAnalysis && ref.kind
+                        ? {
+                            icon: "inbox",
+                            text: "이 노드에는 결과가 없습니다.",
+                            action: { command: runCommandId(ref.kind), label: "분석 실행" },
+                          }
+                        : compactMode
+                          ? {
+                              icon: "filter",
+                              text: "조건에 맞는 행이 없습니다. 불러온 행 안에서만 필터합니다.",
+                            }
+                          : { icon: "inbox", text: "이 노드에는 표시할 행이 없습니다." };
 
   const serverFiltering =
     cq.serverColumnFilters ||
@@ -1597,6 +1646,12 @@ export function DataGrid(props: DataGridProps = {}) {
       {serverSorted ? (
         <p className="grid-sortstatus" data-testid="grid-sort-status" hidden={!sortStatusText}>
           {sortStatusText}
+        </p>
+      ) : null}
+
+      {timeBanner ? (
+        <p className="flag-grid-notice" role="note" data-testid="grid-time-basis">
+          {timeBanner}
         </p>
       ) : null}
 

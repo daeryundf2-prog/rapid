@@ -29,6 +29,7 @@ import {
   treeFlagsSection,
 } from "../tree/model";
 import "./stages.css";
+import { TREE_DRAWER_QUERY, useMediaQuery } from "../../shell/Layout";
 
 const BOOKMARK_TAG = "북마크";
 
@@ -217,6 +218,38 @@ export function showCaseTagNodes(state: Pick<CaseTagState, "exists" | "status" |
   return state.exists && (state.status === "ready" || state.tags.length > 0);
 }
 
+/**
+ * The export buttons (C-G8): one 보고서 내보내기… (the dialog chooses the kind and says what is
+ * written where before anything is sent); the other kinds open the same dialog pre-chosen.
+ */
+function ExportButtons({
+  labelledBy,
+  testPrefix = "report-open",
+}: {
+  labelledBy: string;
+  testPrefix?: string;
+}) {
+  return (
+    <ul aria-labelledby={labelledBy}>
+      <li>
+        <CommandButton command="export.open" label="보고서 내보내기…" />
+      </li>
+      {EXPORT_ACTIONS.filter((action) => action.kind !== "case-report").map((action) => (
+        <li key={action.commandId}>
+          <button
+            type="button"
+            className="stage-link"
+            data-testid={`${testPrefix}-${action.kind}`}
+            onClick={() => useCaseDialogs.getState().openDialog("report", { exportKind: action.kind })}
+          >
+            {action.label} 내보내기…
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /** Left panel of the 보고 stage. */
 export function ReportPanel() {
   const { route } = useRoute();
@@ -224,25 +257,7 @@ export function ReportPanel() {
   return (
     <div className="stage-panel" data-testid="report-panel">
       <h2 id="report-actions-title">내보내기</h2>
-      {/* One export button (C-G8): the dialog chooses the kind and says what is written where
-          before anything is sent; the other kinds open the same dialog pre-chosen. */}
-      <ul aria-labelledby="report-actions-title">
-        <li>
-          <CommandButton command="export.open" label="보고서 내보내기…" />
-        </li>
-        {EXPORT_ACTIONS.filter((action) => action.kind !== "case-report").map((action) => (
-          <li key={action.commandId}>
-            <button
-              type="button"
-              className="stage-link"
-              data-testid={`report-open-${action.kind}`}
-              onClick={() => useCaseDialogs.getState().openDialog("report", { exportKind: action.kind })}
-            >
-              {action.label} 내보내기…
-            </button>
-          </li>
-        ))}
-      </ul>
+      <ExportButtons labelledBy="report-actions-title" />
     </div>
   );
 }
@@ -254,10 +269,23 @@ export function ReportPage() {
   const records = useExportHistory((s) => s.records);
   const runId = route.runId;
   const mine = records.filter((record) => record.runId === runId);
+  // R-11: below 900px the left panel is a closed drawer — the export buttons go in the page body
+  // too (only then, so a wide layout never shows them twice).
+  const panelIsDrawer = useMediaQuery(TREE_DRAWER_QUERY);
   if (!runId) return <p className="pane-empty">케이스를 먼저 선택하세요.</p>;
   return (
     <section className="stage-page is-report" aria-labelledby="report-title" data-testid="report-page">
       <h2 id="report-title">보고</h2>
+      {panelIsDrawer ? (
+        <section
+          className="stage-section report-page-actions"
+          aria-labelledby="report-page-actions-title"
+          data-testid="report-page-actions"
+        >
+          <h3 id="report-page-actions-title">내보내기</h3>
+          <ExportButtons labelledBy="report-page-actions-title" testPrefix="report-page-open" />
+        </section>
+      ) : null}
       <section className="stage-section" aria-labelledby="report-history-title">
         <h3 id="report-history-title">내보내기 이력</h3>
         {mine.length === 0 ? (

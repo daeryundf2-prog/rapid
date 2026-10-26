@@ -30,7 +30,8 @@ export interface Command {
   icon?: string;
   /** Returns a Korean reason when the command cannot run now; undefined = enabled. */
   disabledReason?: (ctx: CommandContext) => string | undefined;
-  run: (ctx: CommandContext) => void | Promise<void>;
+  /** Resolving to `false` means the command ran but failed (callers must not show it as applied). */
+  run: (ctx: CommandContext) => void | Promise<void> | Promise<boolean>;
 }
 
 /** The canonical key map. Keys listed here may not be reused elsewhere. */

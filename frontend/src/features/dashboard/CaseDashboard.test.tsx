@@ -232,7 +232,7 @@ describe("CaseDashboard (접수, r7 examiner-first)", () => {
     expect(strip.textContent).toContain("완료");
     expect(strip.textContent).toContain("문서·부정 조사");
     expect(strip.textContent).toContain("총 소요");
-    expect(strip.textContent).toContain("5분 0초");
+    expect(strip.textContent).toContain("총 소요05:00");
     const bar = within(strip).getByRole("progressbar", { name: "처리 단계 진행" });
     expect(bar.getAttribute("aria-valuetext")).toBe("단계 2/2 완료");
     expect(within(strip).getByRole("button", { name: /처리 요약 보기/ })).toBeTruthy();
@@ -259,7 +259,7 @@ describe("CaseDashboard (접수, r7 examiner-first)", () => {
     expect(status.textContent).toContain("증거 지문(해시)");
     expect(status.textContent).not.toContain("fingerprint");
     expect(status.querySelector('td[title="fingerprint"]')?.textContent).toBe("증거 지문(해시)");
-    expect(status.textContent).toContain("1분 0초");
+    expect(status.textContent).toContain("아티팩트 수집완료01:00");
     // 수집기 (provider) and 검증 이슈 sit under one collapsed "단계 상세".
     const details = within(status).getByTestId("stage-details") as HTMLDetailsElement;
     expect(details.open).toBe(false);

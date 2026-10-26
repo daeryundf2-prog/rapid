@@ -255,3 +255,36 @@ describe("live layout keeps the controls (only while running)", () => {
     expect(screen.queryByTestId("run-plan-legacy")).toBeNull();
   });
 });
+
+describe("R-5: 처리 단계 names and the 소요 column", () => {
+  it("artifact steps read the collector's Korean name (stepLabelKo) and an untimed table has no 소요", async () => {
+    setRun({ status: "completed" } as Partial<RunWithProgress>);
+    installFetch({
+      "/plan": () => jsonResponse(legacyPlan()),
+      "/summary": () =>
+        jsonResponse({
+          steps: [
+            { name: "manifest", status: "completed" },
+            { name: "artifacts-browser", status: "completed" },
+            { name: "artifacts-recent-files", status: "completed" },
+          ],
+        }),
+      "/processing-snapshot": () => jsonResponse(SNAPSHOT),
+      "/analyses": () => jsonResponse({ analyses: [] }),
+    });
+    renderPage();
+    const table = await screen.findByRole("table", { name: "처리 단계" });
+    await waitFor(() => expect(table.querySelectorAll("tbody tr")).toHaveLength(3));
+    const names = [...table.querySelectorAll("tbody tr td:first-child")].map((td) => td.textContent);
+    expect(names).toEqual([
+      "증거 목록(매니페스트)",
+      "아티팩트 수집: 브라우저",
+      "아티팩트 수집: 최근 파일·LNK",
+    ]);
+    expect(table.textContent).not.toContain("browser");
+    expect(table.textContent).not.toContain("recent-files");
+    // The raw id stays as the tooltip.
+    expect(table.querySelector("tbody tr:nth-child(2) td")?.getAttribute("title")).toBe("artifacts-browser");
+    expect([...table.querySelectorAll("th")].map((th) => th.textContent)).not.toContain("소요");
+  });
+});

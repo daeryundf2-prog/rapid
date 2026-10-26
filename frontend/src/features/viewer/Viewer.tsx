@@ -295,7 +295,7 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
       }
     },
     mark: async (action: MarkAction) => {
-      if (!target) return;
+      if (!target) return false;
       try {
         const result = await applyMark(target, action);
         const markKey = targetKey(target);
@@ -311,8 +311,10 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
         window.dispatchEvent(
           new CustomEvent("rapidtriage:viewer-marked", { detail: { runId: target.runId } }),
         );
+        return true;
       } catch (error) {
         announce(`표시 실패: ${errorText(error)}`);
+        return false;
       }
     },
     back: () => goHistory("back"),
@@ -329,7 +331,7 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
         copyHash: () => controller.current?.copyHash() ?? Promise.resolve(),
         copyPath: () => controller.current?.copyPath() ?? Promise.resolve(),
         copyCitation: () => controller.current?.copyCitation() ?? Promise.resolve(),
-        mark: (action) => controller.current?.mark(action) ?? Promise.resolve(),
+        mark: (action) => controller.current?.mark(action) ?? Promise.resolve(false),
         back: () => controller.current?.back(),
         forward: () => controller.current?.forward(),
         canBack: () => controller.current?.canBack() ?? false,
@@ -357,9 +359,9 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
       const reason = command.disabledReason?.(ctx);
       if (reason) {
         announce(reason);
-        return;
+        return false;
       }
-      void command.run(ctx);
+      return command.run(ctx);
     },
     [ctx],
   );

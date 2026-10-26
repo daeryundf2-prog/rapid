@@ -344,6 +344,31 @@
   align-self: flex-start;
 }
 
+/* R-6: the anchor ("증거 기준") once above the presets; the segment never overflows the popover. */
+.filter-preset-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  max-width: 100%;
+}
+
+.filter-preset-caption {
+  color: var(--text-muted);
+  font-size: var(--fs-aux);
+}
+
+.segmented.filter-preset-segment {
+  max-width: 100%;
+  flex-wrap: wrap;
+  height: auto;
+}
+
+.segmented.filter-preset-segment > button {
+  height: calc(var(--control-h) - 6px);
+  white-space: nowrap;
+}
+
 /* 상태: a 2×2 segmented block. */
 .segmented.filter-status-grid {
   display: grid;

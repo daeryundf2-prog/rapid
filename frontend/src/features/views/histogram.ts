@@ -19,6 +19,10 @@ export interface TimelineHistogramPayload {
   bucket_count: number;
   range_start: string | null;
   range_end: string | null;
+  /** Events outside the requested `from`/`to` (server-side range, R7 S1 re-review). */
+  range_excluded_events?: number;
+  /** The range the server applied (echo of the conditions). */
+  range_filter?: unknown;
   max_bucket_count?: number;
   sources: Array<{ name: string; count: number }>;
   buckets: Array<{

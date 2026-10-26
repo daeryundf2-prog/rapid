@@ -51,6 +51,7 @@ import {
   type RecordLayout,
   recordLayout,
   type SheetEntry,
+  valueReading as sheetValueReading,
 } from "../fieldSheets";
 import { isDirectoryTarget } from "../modes";
 import { artifactRowRoute, TIMELINE_WINDOW_MS, timelineWindowRoute } from "../pivots";
@@ -583,7 +584,8 @@ function EntryValue({
     );
   }
   // Catalogue reading (발신 for outgoing, a Korean type name …); the raw value is the tooltip.
-  if (scalar && entry.valueLabel) return coded(entry.valueLabel);
+  // An object with a Korean reading (timeline source_record, R-10) reads like a scalar.
+  if (entry.valueLabel && (scalar || isPlainObject(raw))) return coded(entry.valueLabel);
   if (scalar) {
     switch (entry.format) {
       case "eventLevel":
@@ -882,7 +884,12 @@ function provenanceEntries(row: GridRow | null): Array<[string, string]> {
       row.ref.collection === "outputs" ? "종류" : "아티팩트 유형",
       row.ref.collection === "outputs" ? row.artifactType : typeDisplayLabel(row.artifactType),
     ]);
-  if (row.provider) out.push(["수집기", valueLabel("provider", row.provider)]);
+  if (row.provider)
+    out.push([
+      "수집기",
+      // R-10: "windows-execution" → "실행 흔적" (collector kind), else the provider table.
+      sheetValueReading(null, "provider", row.provider) ?? valueLabel("provider", row.provider),
+    ]);
   const record = row.fields.artifact_record;
   if (record && typeof record === "object") {
     for (const [key, value] of Object.entries(record as Record<string, unknown>)) {

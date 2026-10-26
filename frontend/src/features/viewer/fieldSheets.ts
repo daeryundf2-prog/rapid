@@ -18,6 +18,7 @@
 import type { GridRow } from "../../contracts/collection";
 import { flatValue } from "../../utils/flatValue";
 import { eventSummaryKo, fieldOf } from "../derived/derivedFields";
+import { kindLabel } from "../derived/tables";
 import { artifactTypeLabel } from "../filters/typeLabels";
 import { typeValueLabel } from "../flags/catalog";
 import { keyValueReading } from "../grid/valueLabels";
@@ -1983,14 +1984,78 @@ export function recordLayout(row: GridRow | null): RecordLayout {
 }
 
 /** Korean reading of one record value (r2 console fix M7): catalogue `value_labels`, type names. */
+/** Timeline `source` (core/timeline.py) → Korean (R-10). */
+const TIMELINE_SOURCE_KO: Readonly<Record<string, string>> = {
+  artifacts: "아티팩트 출력",
+  files: "파일 목록(파일 시스템 시각)",
+  docs: "문서 후보",
+};
+
+/** Platform ids of browser / app profiles (`source_platform`, R-10). */
+const PLATFORM_KO: Readonly<Record<string, string>> = {
+  windows: "Windows",
+  macos: "macOS",
+  darwin: "macOS",
+  linux: "Linux",
+  android: "Android",
+  ios: "iOS",
+};
+
+/** `artifacts_<kind>` (a run output name) → its collector's Korean name; null when not one. */
+export function outputNameLabel(output: string): string | null {
+  const match = /^artifacts_(.+)$/.exec(output);
+  if (!match?.[1]) return null;
+  const label = kindLabel(match[1]);
+  return label !== match[1] ? `${label} 출력` : null;
+}
+
+/** `{output, row_index}` (timeline `source_record`) → "실행 흔적 출력 · 행 3,358" (R-10). */
+export function sourceRecordLabel(raw: unknown): string | undefined {
+  if (!isRecord(raw)) return undefined;
+  const output = typeof raw.output === "string" ? raw.output : "";
+  const name = output ? (outputNameLabel(output) ?? output) : "";
+  const index = typeof raw.row_index === "number" ? raw.row_index : null;
+  if (!name && index === null) return undefined;
+  return [name, index !== null ? `행 ${index.toLocaleString("ko-KR")}` : ""].filter(Boolean).join(" · ");
+}
+
 export function valueReading(
   artifactType: string | null | undefined,
   key: string,
   raw: unknown,
 ): string | undefined {
-  if ((key === "source_artifact_type" || key === "source_type") && typeof raw === "string" && raw) {
+  if (
+    (key === "source_artifact_type" ||
+      key === "source_type" ||
+      key === "sourceArtifactType" ||
+      key === "artifact_type") &&
+    typeof raw === "string" &&
+    raw
+  ) {
     const label = artifactTypeLabel(raw);
     if (label) return label;
+  }
+  // R-10: machine ids of the 핵심 / 출처 sections read in Korean (the raw value is the tooltip).
+  if (key === "sourceRecord" || key === "source_record") return sourceRecordLabel(raw);
+  if (typeof raw === "string" && raw) {
+    if (key === "eventType" || key === "event_type") {
+      // `artifact-<type>-<time kind>` → "ShimCache · 파일 수정(실행 아님)" (typeLabels).
+      const label = artifactTypeLabel(raw);
+      if (label) return label;
+    }
+    if (key === "source" && TIMELINE_SOURCE_KO[raw]) return TIMELINE_SOURCE_KO[raw];
+    if (key === "output") {
+      const label = outputNameLabel(raw);
+      if (label) return label;
+    }
+    if (key === "kind" || key === "provider" || key === "collector") {
+      const label = kindLabel(raw.replace(/^windows-(?=recent-files$)/, ""));
+      if (label !== raw) return label;
+    }
+    if (key === "source_platform" || key === "platform") {
+      const label = PLATFORM_KO[raw.toLowerCase()];
+      if (label) return label;
+    }
   }
   const mapped = typeValueLabel(artifactType, key, raw) ?? keyValueReading(key, raw);
   return mapped && mapped !== String(raw) ? mapped : undefined;

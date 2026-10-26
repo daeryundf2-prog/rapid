@@ -24,7 +24,7 @@ import type { GridRow } from "../../contracts/collection";
 import { useRoute as useAppRoute, useTimezone } from "../../state/hooks";
 import { tzOffsetMinutes, zoneLabel } from "../../utils/time";
 import { useFilterStore } from "../filters/filterStore";
-import { hasClock, timeWindow } from "../filters/rowConditions";
+import { hasClock, serverConditionParams } from "../filters/rowConditions";
 import { useRoute } from "../grid/adapter";
 import { BaselineHistogram } from "../review/BaselineHistogram";
 import { errorText } from "../viewer/useAsync";
@@ -46,13 +46,25 @@ import {
 import { useAutoLoad, useViewRows } from "./useViewRows";
 import { EmptyState, ErrorState, LoadingCard } from "./ViewState";
 
+/**
+ * `GET /timeline-histogram` — with the time range condition (`from` / `to`, the same server
+ * bounds as `/timeline`) the server buckets only that range (R-9/C-V2 backend) and says how many
+ * events it left out (`range_excluded_events`); no client clip.
+ */
 export function fetchTimelineHistogram(
   runId: string,
   signal?: AbortSignal,
+  range: { from?: string; to?: string } = {},
 ): Promise<TimelineHistogramPayload> {
-  return api<TimelineHistogramPayload>(`/api/runs/${encodeURIComponent(runId)}/timeline-histogram`, {
-    signal,
-  });
+  const params = new URLSearchParams();
+  const bounds = serverConditionParams({ from: range.from, to: range.to }, "UTC", { time: true, geo: false });
+  if (typeof bounds.from === "string") params.set("from", bounds.from);
+  if (typeof bounds.to === "string") params.set("to", bounds.to);
+  const query = params.toString();
+  return api<TimelineHistogramPayload>(
+    `/api/runs/${encodeURIComponent(runId)}/timeline-histogram${query ? `?${query}` : ""}`,
+    { signal },
+  );
 }
 
 const CHART_HEIGHT = 160;
@@ -70,11 +82,16 @@ function ShowInColumns() {
 
 function TimelineHistogram({ runId }: { runId: string }) {
   const queryClient = useQueryClient();
-  const queryKey = useMemo(() => ["timeline-histogram", runId] as const, [runId]);
+  const rangeFrom = useFilterStore((s) => s.filters.from);
+  const rangeTo = useFilterStore((s) => s.filters.to);
+  const queryKey = useMemo(
+    () => ["timeline-histogram", runId, rangeFrom ?? "", rangeTo ?? ""] as const,
+    [runId, rangeFrom, rangeTo],
+  );
   const [cancelled, setCancelled] = useState(false);
   const histogram = useQuery({
     queryKey,
-    queryFn: ({ signal }) => fetchTimelineHistogram(runId, signal),
+    queryFn: ({ signal }) => fetchTimelineHistogram(runId, signal, { from: rangeFrom, to: rangeTo }),
     enabled: !cancelled,
     staleTime: 60_000,
     retry: false,
@@ -83,7 +100,6 @@ function TimelineHistogram({ runId }: { runId: string }) {
   const { timezone } = useTimezone();
   const [width, setWidth] = useState<number | null>(null);
   const filters = useFilterStore((s) => s.filters);
-  const window_ = useMemo(() => timeWindow(filters.from, filters.to), [filters.from, filters.to]);
   // Edges / labels in the display zone, at its offset at the start of the data.
   const anchorDate = useMemo(() => {
     const first = histogram.data?.range_start ? Date.parse(histogram.data.range_start) : Number.NaN;
@@ -105,11 +121,11 @@ function TimelineHistogram({ runId }: { runId: string }) {
     return fitBuckets(histogram.data, {
       maxBars: forced === undefined ? maxBarsFor(width) : Number.MAX_SAFE_INTEGER,
       offsetMinutes,
-      fromMs: window_.from,
-      untilMs: window_.until,
       ...(forced === undefined ? {} : { sizeMs: forced }),
     });
-  }, [histogram.data, choice, width, offsetMinutes, window_]);
+  }, [histogram.data, choice, width, offsetMinutes]);
+  // The server left events outside the time range out of the buckets (`range_excluded_events`).
+  const rangeExcluded = Number(histogram.data?.range_excluded_events ?? 0) > 0;
   const max = useMemo(() => Math.max(1, ...buckets.map((b) => b.count)), [buckets]);
   const [selection, setSelection] = useState<{ anchor: number; focus: number } | null>(null);
   const [active, setActive] = useState(0);
@@ -249,7 +265,7 @@ function TimelineHistogram({ runId }: { runId: string }) {
           이벤트 {data.parsed_events.toLocaleString("ko-KR")}건
           {data.unparsed_events ? ` · 시각 없음 ${data.unparsed_events.toLocaleString("ko-KR")}건 제외` : ""}
           {` · ${zone}`}
-          {clipped ? " · 시간 범위 안만" : ""}
+          {clipped || rangeExcluded ? " · 시간 범위 안만" : ""}
         </span>
         <label className="view-field">
           단위

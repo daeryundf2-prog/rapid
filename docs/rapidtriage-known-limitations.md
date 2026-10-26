@@ -520,3 +520,13 @@ RapidTriage는 아래 기능을 프로젝트 정책으로 구현하지 않는다
 - **제출 매니페스트(R-4)**: `POST …/submission-manifest`가 요청당 한 번 쓰고(감사 1건) `written`·`download_url`(`GET …/submission-manifest/saved`, 읽기 전용)을 준다. 기존 `GET …/submission-manifest`·`…/file`은 호환을 위해 남겨 두었고 여전히 부를 때마다 다시 쓴다. `POST …/case-report`는 `written`(md·html·docx·pdf·manifest·감사 경로)과 `written_files = [{format, path, download_url}]`을 준다.
 - **타임라인 히스토그램 범위(C-V2)**: `GET …/timeline-histogram?from=&to=&tz=`는 범위 안 이벤트만 버킷에 넣고 `range_excluded_events`·`range_filter`를 더한다. `weekday`·`hours` 등 다른 조건은 받지 않는다.
 <!-- r7 S1 re-review (backend): end -->
+
+## R7 단계 1 재검토 — 프런트엔드 수정
+<!-- r7 S1 re-review (frontend): start -->
+- **뷰어 상태 칩(R-1)** — 표시는 낙관적으로 바뀌고 서버가 거부(403 등)하면 이전 상태로 돌아간다. 같은 행에 다른 표시를 연달아 누르면 마지막 것만 되돌림 대상이다(그리드 R 경로와 같은 규칙).
+- **파일 목록 시간 기준(R-2)** — 배너·빈 상태는 서버 `time_basis`(시간 조건 또는 `sort=mtime`일 때만 응답에 있음)를 따른다. 조건·정렬이 없으면 배너도 없다. `mixed`는 "일부 파일" 문구로만 알리고 비율(`time_basis_counts`)은 아직 표시하지 않는다.
+- **정렬 효과 없음(R-9)** — `empty`/`applied:false`는 파일 목록 정렬 서술자에서만 읽는다. 아티팩트 URL `?sort=` 잘못된 키는 라우터가 계속 조용히 버린다(아티팩트 정렬 서술자에 같은 필드가 생기면 같은 상태줄을 쓸 수 있다).
+- **브라우저 특이사항 열(R-11)** — 두 QA 런에서 불러온 500행 중 1행에 특이사항이 있어 "전부 빈 열"이 아니다. 빈 열 규칙은 불러온 행 기준이므로 열을 유지한다(화면에 보이는 첫 행들만 비어 있을 수 있음).
+- **레코드 보기 값 한글화(R-10)** — 핵심/출처의 컬렉션·출력 이름·수집기·플랫폼·원본 행만 바꿨다. `해석 범위 상태`(native-binary-decode), `보고 가능성`(review), `원본 형식`, `위험 표시` 같은 파서 내부 값은 여전히 원문이다.
+- **검증 패키지·제출 매니페스트 열기** — 매니페스트는 POST 한 번 + `/saved` 내려받기로 바뀌었지만, 완료 토스트의 "열기"는 검증 패키지에만 있다.
+<!-- r7 S1 re-review (frontend): end -->

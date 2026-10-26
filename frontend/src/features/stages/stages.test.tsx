@@ -400,3 +400,34 @@ describe("검토 / 보고 stages (Q-IA-5)", () => {
     expect(screen.getByTestId("grid-stub")).toBeTruthy();
   });
 });
+
+describe("R-11: 보고 page export buttons at the drawer width", () => {
+  const mediaMatches = (matches: boolean) =>
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((query: string) => ({
+        matches: matches && query.includes("899.98"),
+        media: query,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      })),
+    );
+
+  it("below 900px (left panel = closed drawer) the page body carries the export buttons", () => {
+    mediaMatches(true);
+    setRoute(`#/case/${RUN}/report/outputs`);
+    renderWithClient(<ReportPage />);
+    const actions = screen.getByTestId("report-page-actions");
+    expect(within(actions).getByRole("button", { name: "보고서 내보내기…" })).toBeTruthy();
+    expect(within(actions).getByTestId("report-page-open-validation-package").textContent).toBe(
+      "검증 패키지 내보내기…",
+    );
+  });
+
+  it("at a wide layout the buttons stay in the left panel only (never twice)", () => {
+    mediaMatches(false);
+    setRoute(`#/case/${RUN}/report/outputs`);
+    renderWithClient(<ReportPage />);
+    expect(screen.queryByTestId("report-page-actions")).toBeNull();
+  });
+});

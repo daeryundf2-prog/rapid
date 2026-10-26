@@ -541,7 +541,9 @@ describe("C10 timeline viewer", () => {
     expect(screen.getByTestId("timeline-group-sources").querySelectorAll("li")).toHaveLength(3);
     // 출처: Korean readings only (C9; R7 L3: the raw id is not shown).
     expect(screen.getAllByText("시각 종류").length).toBeGreaterThan(0);
-    expect(screen.getByText("아티팩트 출력")).toBeTruthy();
+    // R-10: the record 핵심 "출처" reads it in Korean too (was the raw "artifacts").
+    expect(screen.getAllByText("아티팩트 출력").length).toBe(2);
+    expect(screen.queryByText("artifacts")).toBeNull();
     expect(screen.queryByText(/\(artifacts\)/)).toBeNull();
   });
 });

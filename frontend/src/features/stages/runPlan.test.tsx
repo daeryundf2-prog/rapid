@@ -526,3 +526,26 @@ describe("처리 page with a plan", () => {
     expect(screen.queryByTestId("run-plan-error")).toBeNull();
   });
 });
+
+describe("R-5: plan table 소요 column", () => {
+  const headers = () => [...screen.getByRole("treegrid").querySelectorAll("th")].map((th) => th.textContent);
+  it("is hidden on a finished plan where no group or task recorded a duration", () => {
+    const plan = fixture({ run_status: "completed", live: false });
+    for (const g of plan.groups) {
+      g.duration_ms = null;
+      for (const t of g.tasks) {
+        t.duration_ms = null;
+        if (t.status === "running" || t.status === "queued") t.status = "completed";
+      }
+    }
+    renderWithClient(<RunPlanTable runId={RUN} plan={plan} />);
+    expect(headers()).not.toContain("소요");
+    const first = screen.getByTestId("run-plan-group-prepare");
+    expect(first.querySelectorAll("td")).toHaveLength(headers().length);
+  });
+
+  it("stays when any duration exists", () => {
+    renderWithClient(<RunPlanTable runId={RUN} plan={fixture()} />);
+    expect(headers()).toContain("소요");
+  });
+});

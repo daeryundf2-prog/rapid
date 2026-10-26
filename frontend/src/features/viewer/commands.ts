@@ -17,7 +17,8 @@ export interface ViewerController {
   copyHash(): Promise<void>;
   copyPath(): Promise<void>;
   copyCitation(): Promise<void>;
-  mark(action: MarkAction): Promise<void>;
+  /** Resolves `true` when the server stored the mark, `false` when it failed (already announced). */
+  mark(action: MarkAction): Promise<boolean>;
   back(): void;
   forward(): void;
   canBack(): boolean;

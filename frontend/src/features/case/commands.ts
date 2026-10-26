@@ -8,6 +8,9 @@ import { EXPORT_ACTIONS, exportDisabledReason } from "./exports";
 import { useSearchState } from "./searchState";
 import { confirmWrite, notifyWriteFailed, notifyWritten } from "./WriteConfirm";
 
+/** The one name of "start another run in this case" (top bar button and palette, C-G9). */
+export const RUN_ADD_LABEL = "런 추가…";
+
 export const RUN_ACTIVE_REASON = "실행 중 런이 있습니다";
 /** One sentence for "no case open" across the console (r7 L4, C-G11). */
 const NO_CASE = NO_RUN_REASON;
@@ -119,7 +122,7 @@ export function buildCaseCommands(facts: CaseCommandFacts): Command[] {
     },
     {
       id: "case.run.add",
-      label: "런 추가…",
+      label: RUN_ADD_LABEL,
       group: "case",
       disabledReason: (ctx) => (ctx.runIsActive ? RUN_ACTIVE_REASON : caseOfRunReason(ctx.runId)),
       run: (ctx) => {
@@ -132,10 +135,11 @@ export function buildCaseCommands(facts: CaseCommandFacts): Command[] {
       },
     },
     {
-      // 상단 바 "새 런…" with a case open (C-G9): a run of THIS case when the open run is linked to
-      // one, else the quick-run dialog (a separate run, said so in its title).
+      // 상단 바 "런 추가…" with a case open (C-G9): a run of THIS case when the open run is linked
+      // to one, else the quick-run dialog (a separate run, said so in its title). One name in the
+      // top bar and the palette.
       id: "case.run.new",
-      label: "이 케이스에 런 추가…",
+      label: RUN_ADD_LABEL,
       group: "case",
       icon: "play",
       disabledReason: (ctx) => {

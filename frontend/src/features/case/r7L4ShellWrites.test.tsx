@@ -145,10 +145,38 @@ describe("palette without a case (C-G11)", () => {
       "search.options": "열린 케이스가 없습니다",
       "grid.x": "열린 케이스가 없습니다.",
     };
-    const groups = buildPaletteGroups(commands, "", (c) => reasons[c.id], [], { caseOpen: false });
+    // C-G11 remainder: with no query, commands that cannot run stay out of the list …
+    const plain = buildPaletteGroups(commands, "", (c) => reasons[c.id], [], { caseOpen: false });
+    expect(plain.flatMap((g) => g.items)).toEqual([]);
+    // … typing their name finds them, with the one reason.
+    const groups = buildPaletteGroups(commands, "옵션", (c) => reasons[c.id], [], { caseOpen: false });
     const items = groups.flatMap((g) => g.items);
-    expect(items.map((i) => i.key)).toEqual(["search.options", "grid.x"]);
+    expect(items.map((i) => i.key)).toEqual(["search.options"]);
     expect(new Set(items.map((i) => i.disabledReason))).toEqual(new Set([NO_RUN_REASON]));
+    // 이동 stays hidden even when typed.
+    const moves = buildPaletteGroups(commands, "이동", (c) => reasons[c.id], [], { caseOpen: false });
+    expect(moves.flatMap((g) => g.items).map((i) => i.key)).not.toContain("navigate.files");
+  });
+
+  it("enabled commands still list without a query when no case is open", () => {
+    const commands = [command("case.open", "case", "케이스 열기…"), command("grid.x", "grid", "열 설정")];
+    const groups = buildPaletteGroups(
+      commands,
+      "",
+      (c) => (c.id === "grid.x" ? NO_RUN_REASON : undefined),
+      [],
+      { caseOpen: false },
+    );
+    expect(groups.flatMap((g) => g.items).map((i) => i.key)).toEqual(["case.open"]);
+  });
+
+  it("C-G9: one name for adding a run — top bar and palette both read 런 추가…", () => {
+    const commands = [
+      command("case.run.add", "case", "런 추가…"),
+      command("case.run.new", "case", "런 추가…"),
+    ];
+    const items = buildPaletteGroups(commands, "", () => undefined).flatMap((g) => g.items);
+    expect(items.map((i) => [i.key, i.label])).toEqual([["case.run.new", "런 추가…"]]);
   });
 });
 

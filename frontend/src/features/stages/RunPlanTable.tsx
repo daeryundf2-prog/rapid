@@ -199,6 +199,13 @@ export function RunPlanTable({
     }
     return out;
   }, [plan.groups, expanded]);
+  // R-5: a plan without any recorded duration (imported / older run) hides the all-"—" 소요 column.
+  const timed =
+    runActive ||
+    plan.groups.some(
+      (group) =>
+        durationText(group.duration_ms) !== "" || group.tasks.some((t) => durationText(t.duration_ms) !== ""),
+    );
   const tabStop = rows.some((row) => rowKey(row) === focusedKey)
     ? focusedKey
     : rows[0]
@@ -397,9 +404,11 @@ export function RunPlanTable({
               <th scope="col" className="is-right">
                 건수
               </th>
-              <th scope="col" className="is-right">
-                소요
-              </th>
+              {timed ? (
+                <th scope="col" className="is-right">
+                  소요
+                </th>
+              ) : null}
               <th scope="col">비고</th>
               {/* Skip / cancel only while the run runs (C-G1): a finished plan is a record. */}
               {runActive ? (
@@ -470,7 +479,7 @@ export function RunPlanTable({
                         ? `${formatCount(group.artifact_count)}건`
                         : "—"}
                     </td>
-                    <td className="is-right">{durationText(group.duration_ms) || "—"}</td>
+                    {timed ? <td className="is-right">{durationText(group.duration_ms) || "—"}</td> : null}
                     <td className="process-plan-note">
                       {group.counts.skipped ? `건너뜀 ${group.counts.skipped}` : ""}
                       {group.counts.cancelled
@@ -545,7 +554,7 @@ export function RunPlanTable({
                   </td>
                   <td />
                   <td className="is-right">{count}</td>
-                  <td className="is-right">{duration}</td>
+                  {timed ? <td className="is-right">{duration}</td> : null}
                   <td className="process-plan-note" title={tooltip}>
                     {note || "—"}
                   </td>

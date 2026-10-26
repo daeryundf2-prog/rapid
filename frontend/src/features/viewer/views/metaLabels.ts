@@ -311,6 +311,13 @@ export const META_LABELS: Record<string, string> = {
   evidence_refs: "근거 참조",
   primary_evidence: "주요 근거",
   source: "출처",
+  // R-10: browser / app profile provenance and the timeline's source-row pointer.
+  source_database: "원본 데이터베이스",
+  profile_dir: "프로필 폴더",
+  source_platform: "원본 플랫폼",
+  source_record: "원본 행",
+  output: "출력",
+  row_index: "행 번호",
   source_refs: "출처 참조",
   citation_refs: "인용 참조",
   parse_status: "파싱 상태",
