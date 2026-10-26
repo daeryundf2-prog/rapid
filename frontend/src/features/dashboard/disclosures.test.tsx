@@ -3,9 +3,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { RunSummary } from "../../api/runs";
 import { DisclosuresCard } from "./cards";
 import {
+  capFlagsText,
   capPolicyLine,
   disclosureDigest,
   disclosureItems,
+  problemMessageKo,
   profileLine,
   rowTruncationItems,
   rowTruncationOf,
@@ -44,7 +46,7 @@ describe("처리 제한 사항 (run summary disclosures + warnings)", () => {
     const by = (id: string) => items.find((item) => item.id === id);
     expect(by("missing-tools")).toMatchObject({ text: "YARA 엔진 없음", tone: "warn" });
     // Step ids read in Korean; the raw flag keys stay in `detail` (tooltip), never the text.
-    expect(by("caps")?.text).toBe("1단계 결과가 전수가 아닙니다: 문서 색인");
+    expect(by("caps")?.text).toBe("1단계 결과가 전수가 아닙니다: 문서 색인(최대치 상한 도달)");
     expect(by("caps")?.detail).toContain("docs-index: max_text_bytes, max_documents");
     expect(by("timezone")).toMatchObject({
       text: "저장 UTC · 증거 시스템 한국 표준시 (UTC+09:00)",
@@ -237,5 +239,43 @@ describe("처리 제한 사항 r2: cap_policy, row truncation, docs size caps, p
     render(<DisclosuresCard items={disclosureItems(r2)} warnings={runWarnings(r2)} />);
     expect(screen.getByText("단계 경고 1건 · 알림 1건")).toBeTruthy();
     expect(screen.getByTestId("disclosures-card").textContent).toContain("(알림) 미리보기 절단 12행");
+  });
+});
+
+describe("R7 L3 (C-I2): cap flags and problem messages read Korean, raw keys only in the tooltip", () => {
+  it("maps the real-run cap flags to reasons (never the key)", () => {
+    expect(
+      capFlagsText([
+        "summary.size_caps.truncated",
+        "docs:too-large",
+        "docs:binary-rejected",
+        "hash_cache_assessment.hash_cache_manifest.entries_truncated",
+        "hash_cache_manifest.events_truncated",
+        "summary.fuzzy_text_duplicates_truncated",
+        "row-truncation:recent-files",
+        "scan-coverage:synthetic-media",
+      ]),
+    ).toBe(
+      "문서 크기 상한 초과, 크기 초과 문서 본문 미추출, 비인쇄 문자 비율 초과 문서 미색인, 해시 캐시 항목 목록 절단, 해시 캐시 이벤트 목록 절단, 유사 문서(퍼지 중복) 목록 절단, 행 절단(최근 파일·LNK), 스캔 범위 제한(합성 미디어)",
+    );
+    expect(capFlagsText(["something-new"])).toBe("기타 상한 1건");
+  });
+
+  it("rewrites /problems messages: kind names, cap reasons, English notices", () => {
+    expect(problemMessageKo("상한/절단 적용 — 결과가 전수가 아님: summary.size_caps.truncated")).toBe(
+      "상한/절단 적용 — 결과가 전수가 아님: 문서 크기 상한 초과",
+    );
+    expect(
+      problemMessageKo(
+        "recent-files: 행 단위 절단 10행 — 원문 일부만 보존됨 (jumplist-automatic.ole_streams_truncated 10행, jumplist-automatic.destinations_truncated 5행)",
+      ),
+    ).toBe("최근 파일·LNK: 행 단위 절단 10행 — 원문 일부만 보존됨");
+    expect(problemMessageKo("문서 8건: 크기 상한 초과로 본문 미추출 (too-large)")).toBe(
+      "문서 8건: 크기 상한 초과로 본문 미추출",
+    );
+    expect(problemMessageKo("No email artifact rows were collected.")).toBe("이메일: 수집된 행 없음");
+    expect(
+      problemMessageKo("extraction-disabled-by-default; rerun with --extract to copy and hash candidates"),
+    ).toMatch(/^기본 설정으로 추출하지 않음/);
   });
 });

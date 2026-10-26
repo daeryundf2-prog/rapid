@@ -58,6 +58,23 @@ export function SearchOptionsButton({ runId }: { runId: string | null }) {
  * Tab / Shift+Tab stay inside, Esc returns to the trigger, a press outside — including on
  * another popover's trigger — closes it.
  */
+/**
+ * Korean names of the built-in keyword packs (core keyword packs; C-G15). The pack id and its first
+ * keywords are the tooltip; a pack the console does not know keeps the server label, else its id.
+ */
+export const KEYWORD_PACK_LABELS: Readonly<Record<string, string>> = {
+  "browser-ai": "생성형 AI 서비스",
+  credentials: "자격 증명·비밀",
+  execution: "명령 실행 도구",
+  exfiltration: "외부 반출·클라우드 전송",
+  network: "네트워크·다운로드",
+  "windows-ir": "Windows 침해 대응 이벤트",
+};
+
+export function keywordPackLabel(name: string, label?: string | null): string {
+  return KEYWORD_PACK_LABELS[name] ?? (label || name);
+}
+
 export function SearchOptionsPopover({
   runId,
   onClose,
@@ -199,7 +216,9 @@ export function SearchOptionsPopover({
           checked={options.hideKnownGood}
           onChange={(e) => patch({ hideKnownGood: e.target.checked })}
         />{" "}
-        known-good 숨기기
+        <span title="알려진 정상 파일(known-good 해시 목록에 있는 파일)을 결과에서 뺍니다">
+          알려진 정상 파일 숨기기
+        </span>
       </label>
       <fieldset className="case-field">
         <legend>키워드 팩</legend>
@@ -215,7 +234,11 @@ export function SearchOptionsPopover({
                 patch({ keywordPacks: toggle(options.keywordPacks, pack.name, e.target.checked) })
               }
             />{" "}
-            {pack.label || pack.name}
+            <span
+              title={`${pack.name}${Array.isArray(pack.keywords) ? `: ${pack.keywords.slice(0, 8).join(", ")}` : ""}`}
+            >
+              {keywordPackLabel(pack.name, pack.label)}
+            </span>
           </label>
         ))}
       </fieldset>

@@ -308,11 +308,10 @@ rules:
   label_ko: 신규·숨김 계정
   rationale_ko: 4720 계정 생성(사건 시간대 지정 시 그 안), 또는 이름이 $로 끝나는 로컬 SAM 계정(숨김 계정 기법).
   false_positive_ko: 정상 프로비저닝.
-  sources: &id001
+  sources:
   - https://docs.logpoint.com/agentx/references/windows-event-ids-reference
-  - https://www.manageengine.com/products/active-directory-audit/kb/windows-security-log-event-id-4698.html
-  - https://www.cybertriage.com/blog/windows-registry-forensics-cheat-sheet-2026/
-  - https://www.sans.org/blog/digital-forensics-application-execution/
+  - https://attack.mitre.org/techniques/T1136/001/
+  - https://attack.mitre.org/techniques/T1564/002/
   version: 1
   status: provisional
   params: {}
@@ -322,7 +321,9 @@ rules:
   label_ko: 관리자 그룹 추가
   rationale_ko: '4732/4728/4756으로 Administrators(S-1-5-32-544) 또는 *Admins 그룹에 구성원 추가: 권한 상승.'
   false_positive_ko: 정상 관리 작업.
-  sources: *id001
+  sources:
+  - https://docs.logpoint.com/agentx/references/windows-event-ids-reference
+  - https://attack.mitre.org/techniques/T1098/
   version: 1
   status: verified
   params: {}
@@ -332,7 +333,9 @@ rules:
   label_ko: 의심 예약 작업
   rationale_ko: '작업 동작이 사용자 쓰기 경로·PowerShell·LOLBin이거나, 숨김 작업이 분 단위 반복·SYSTEM으로 실행: 지속성.'
   false_positive_ko: 업데이터.
-  sources: *id001
+  sources:
+  - https://www.manageengine.com/products/active-directory-audit/kb/windows-security-log-event-id-4698.html
+  - https://attack.mitre.org/techniques/T1053/005/
   version: 1
   status: verified
   params:
@@ -343,7 +346,10 @@ rules:
   label_ko: 예약 작업 파일·TaskCache 불일치
   rationale_ko: TaskCache 키에 SD 값이 없거나(숨김 작업 기법) 작업 파일과 TaskCache 키가 한쪽에만 있음.
   false_positive_ko: 손상, 수집 범위 차이.
-  sources: *id001
+  sources:
+  - https://www.manageengine.com/products/active-directory-audit/kb/windows-security-log-event-id-4698.html
+  - https://attack.mitre.org/techniques/T1053/005/
+  - https://www.cybertriage.com/blog/windows-registry-forensics-cheat-sheet-2026/
   version: 1
   status: provisional
   params: {}
@@ -353,7 +359,9 @@ rules:
   label_ko: 비표준 ServiceDll
   rationale_ko: '서비스 ServiceDll이 System32/SysWOW64 밖: 지속성(svchost 호스팅 악성 DLL).'
   false_positive_ko: 서드파티 드라이버·서비스.
-  sources: *id001
+  sources:
+  - https://www.cybertriage.com/blog/windows-registry-forensics-cheat-sheet-2026/
+  - https://attack.mitre.org/techniques/T1543/003/
   version: 1
   status: verified
   params: {}
@@ -363,7 +371,8 @@ rules:
   label_ko: 비표준 프로필 경로
   rationale_ko: 'ProfileList 프로필 경로가 Users·서비스 프로필 밖: 은닉 계정·비정상 프로필.'
   false_positive_ko: 이전 OS에서 옮긴 프로필.
-  sources: *id001
+  sources:
+  - https://www.cybertriage.com/blog/windows-registry-forensics-cheat-sheet-2026/
   version: 1
   status: provisional
   params: {}
@@ -373,7 +382,8 @@ rules:
   label_ko: 의심 경로 앱 충돌(WER)
   rationale_ko: 'WER 보고서의 앱 경로가 Temp/Downloads/Public이거나 실행 파일이 목록에 없음: 실행 흔적 보강.'
   false_positive_ko: 정상 앱 크래시.
-  sources: *id001
+  sources:
+  - https://www.sans.org/blog/digital-forensics-application-execution/
   version: 1
   status: provisional
   params: {}

@@ -73,6 +73,37 @@
 - 시각 열 머리는 시각 종류를 이름에 담는다("마지막 방문", "수정"). 칩은 행의 시각 종류가 열과 다를 때만 붙는다.
 - 경로는 끝(파일 이름 + 상위 폴더 2개)을 먼저 보이고 앞부분을 "…"로 줄인다. 전체 경로는 도움말에 있다.
 
+## 값 라벨 (R7 단계 1 L3 — 원시값 0)
+
+화면에 보이는 열거형 값은 아래 한국어 라벨로 쓴다. 원래 값은 도움말("원래 값: …")과 레코드 JSON에만 둔다. 단일 출처: `frontend/src/features/grid/valueLabels.ts`(`VALUE_LABELS`, `KEY_DOMAINS`). 계열 열의 카탈로그 `value_labels`(발신/수신 등)가 이 표보다 우선한다. 표에 없는 값은 사건 값(이름·경로 등)으로 보고 쓰인 그대로 둔다.
+
+| 값 종류 | 원래 값 → 라벨 (예) | 나타나는 곳 |
+|---|---|---|
+| 지표 유형 | ip → IP, url → URL, domain → 도메인, sha256 → SHA-256, keyword → 키워드 | 지표(IOC) 그리드 "유형" |
+| 지표 범위 | global → 공인, private → 사설망, loopback → 루프백, network → 네트워크(URL·도메인 지표의 분류 — 내부망이 아님), hash → 해시, unknown → 미분류 | 지표(IOC) 그리드 "분류" |
+| 위험 태그 | network-indicator → 네트워크 지표, global-ip → 공인 IP, cleartext-url → 평문 URL, url-ip-host → IP 주소 호스트 URL, hash-indicator → 해시 지표, ti-enriched → 위협 정보 보강 | 지표(IOC) 그리드 "위험 표지" |
+| 브라우저 | edge → Edge, chrome → Chrome, whale → 네이버 웨일, firefox → Firefox | 브라우저 계열 열, 요약 열, 뷰어 |
+| 출처 | documents → 문서, artifacts → 아티팩트, files → 파일, timeline → 타임라인, indicators → 지표(IOC), path → 경로 | 검색 결과·타임라인 출처, 뷰어 출처 |
+| 문서 형식 | txt → 텍스트(TXT), log → 로그(LOG), csv → CSV, ini → 설정(INI) | 문서 그리드 "형식" |
+| 증거 성격 | registry-string-trace → 레지스트리 문자열 흔적, string-candidate → 문자열 후보 | 카카오톡 등 계열 열 |
+| 셸 항목 종류 | directory → 폴더, root → 루트, users-property-view → 사용자 속성 보기 | ShellBags 열 |
+| 드라이브 종류 | fixed → 고정 디스크, removable → 이동식, remote → 네트워크 | LNK 열 |
+| 실행 파일 형식 | pe32_i386 → PE32(x86), pe64_amd64 → PE64(x64), pe32_clr_il → PE32(.NET IL) | Amcache 열 |
+| 이미지 형식 | png → PNG, jpeg → JPEG, unknown → 알 수 없음 | 미디어 열 |
+| 다운로드 위험 판정 | DANGEROUS_FILE → 위험 파일 형식, POTENTIALLY_UNWANTED → 원치 않는 프로그램 가능성, USER_VALIDATED → 사용자가 허용함 | 특이사항 근거, 다운로드 열 |
+| 하이브 루트 | HKEY_CURRENT_USER → HKCU, HKEY_LOCAL_MACHINE → HKLM | 레지스트리 열 |
+| 수집기(행 출처) | windows-system-artifacts → Windows 시스템 수집기 | 아티팩트 그리드 "파서", 뷰어 출처 |
+| 아티팩트 유형 | 트리 노드 이름(없으면 계열 이름) — browser-history → 방문 URL | 히스토그램 막대, 뷰어, 레지스트리 탐색기 연결 행 |
+| 특수 노드 | orphan → 고아 파일, unallocated → 미할당 공간, slack → 슬랙 공간 | 폴더 탐색기 |
+| 키워드 팩 | browser-ai → 생성형 AI 서비스, credentials → 자격 증명·비밀, windows-ir → Windows 침해 대응 이벤트 | 검색 옵션 |
+
+- 레코드 키: 한국어 이름이 있는 키만 펼친 "추가 필드"에 보인다. 이름이 없는 키는 반쯤 번역하지 않고("danger 종류 이름" 금지) 접힌 "기타 필드"에 원래 키 그대로 둔다. 도구 자체 점검 키(상용 대비 격차 ID·차단 요인·필요 도구·검증 계획 등)는 증거가 아니므로 분석관 뷰에 표시하지 않는다(레코드 JSON 복사에는 남음).
+- 같은 라벨을 쓰는 두 키는 "앱 이름", "앱 이름 (2)"처럼 번호로 구분한다(원래 키는 도움말).
+- 히스토그램 막대 이름은 겹치지 않는다: 여러 묶음에 나뉜 같은 계열은 "실행 흔적 · 운영체제·계정"처럼 묶음 이름을 붙인다.
+- 특이사항 근거 팝오버: 근거 필드는 계열 열 이름(예: 다운로드 위험 판정), 출처는 그 지표 하나의 참고 문헌(카탈로그 `sources`, 지표별)만 보인다. 인용 줄(`지표 id@버전 (근거)`)은 보고서 인용 형식이라 원래 표기를 유지한다.
+- 탐색 트리: "파일 목록"과 "폴더 탐색기"는 "전체 보기" 아래에 하나씩만 있다. 도메인 이름은 "NTFS·파일시스템 아티팩트", 레지스트리 탐색기는 "전체 보기"에만 있다.
+- 원시값 검사: `frontend/e2e/raw-values.spec.ts`(실데이터 런, 읽기 전용)가 그리드·뷰어 메타·팝오버에서 `^[a-z0-9_-]{3,}$` 토큰·snake_case 키·`{"`로 시작하는 JSON을 찾는다. 허용 목록(파일 이름·경로·URL·해시·SID·제품 이름, `data-raw-ok` 표시 요소)은 스펙 머리 주석에 있다.
+
 ## 런 정체성·시각·처리 결과 (R7 단계 1 갈래 L1)
 
 | 한국어 라벨 | 뜻 | 나타나는 곳 | 금지 동의어 |

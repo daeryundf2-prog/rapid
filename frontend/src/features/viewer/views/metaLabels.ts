@@ -365,6 +365,145 @@ export const META_LABELS: Record<string, string> = {
   detected_at: "탐지 시각",
   detected_at_raw: "원본 시각 값",
   action_label: "조치",
+  // R7 L3: keys seen unlabelled on the real runs (run-subset10 / qa-case1 viewer meta).
+  channel_family: "채널 계열",
+  evtx_integrity_status: "EVTX 무결성 상태",
+  evtx_decoder_version: "EVTX 디코더 버전",
+  decoder: "디코더",
+  provider_guid: "공급자 GUID",
+  event_time_encoding: "이벤트 시각 인코딩",
+  friendly_event_name: "이벤트 이름",
+  record_detail: "레코드 상세",
+  last_run_filetimes: "최근 실행 시각(FILETIME 원문)",
+  last_run_time_slots: "실행 시각 칸",
+  run_time_slots: "실행 시각 칸",
+  last_run_time_offset: "최근 실행 시각 오프셋",
+  last_run_time_offset_hex: "최근 실행 시각 오프셋(16진)",
+  run_count_offset: "실행 횟수 오프셋",
+  run_count_offset_hex: "실행 횟수 오프셋(16진)",
+  nonzero_run_time_count: "기록된 실행 시각 수",
+  prefetch_decompression: "Prefetch 압축 해제",
+  prefetch_decode_coverage: "Prefetch 해석 범위",
+  prefetch_version_metadata: "Prefetch 버전 정보",
+  run_count_cross_check: "실행 횟수 교차 확인",
+  binary_format_detected: "감지된 바이너리 형식",
+  file_metrics: "파일 지표",
+  file_metrics_array: "파일 지표 배열",
+  volume_information: "볼륨 정보",
+  compressed_size: "압축 크기",
+  declared_block_size: "선언된 블록 크기",
+  declared_uncompressed_size: "선언된 압축 해제 크기",
+  payload_size: "페이로드 크기",
+  section_field_offsets: "구역 필드 오프셋",
+  selected_offset_hex: "선택한 오프셋(16진)",
+  selected_value: "선택한 값",
+  alternate_offset_hex: "대체 오프셋(16진)",
+  alternate_value: "대체 값",
+  supported_common_layout: "지원되는 공통 구조",
+  native_binary_layout_decoding_available: "네이티브 바이너리 구조 해석 가능",
+  layout_name: "구조 이름",
+  format_id: "형식 ID",
+  extra_data_blocks: "추가 데이터 블록",
+  omitted_blocks: "생략한 블록",
+  property_store_blocks: "속성 저장소 블록",
+  property_store_data: "속성 저장소 데이터",
+  property_count: "속성 수",
+  property_id: "속성 ID",
+  properties: "속성",
+  shell_item_metadata: "셸 항목 메타데이터",
+  string_data_offset: "문자열 데이터 오프셋",
+  storage_count: "저장소 수",
+  environment_target: "환경 변수 대상",
+  file_information: "파일 정보",
+  media_trusted_diffs: "미디어 대조 차이",
+  image_end_offset: "이미지 끝 오프셋",
+  trailing_data_bytes: "끝에 붙은 데이터(바이트)",
+  decode_status: "해석 상태",
+  dimension_source: "크기 정보 출처",
+  parser_confidence_basis: "파서 신뢰도 근거",
+  container_structure_status: "컨테이너 구조 상태",
+  ocr_candidate: "OCR 후보",
+  content_format: "콘텐츠 형식",
+  document_metadata: "문서 메타데이터",
+  extension_format: "확장자 형식",
+  av_audio: "오디오",
+  kakaotalk_windows_analysis: "카카오톡(Windows) 분석",
+  registry_distinct_path_count: "레지스트리 고유 경로 수",
+  registry_trace_total: "레지스트리 흔적 수",
+  trace_chains: "흔적 연결",
+  string_candidates: "문자열 후보",
+  string_sample_count: "문자열 표본 수",
+  filename_strings: "파일 이름 문자열",
+  guid_candidates: "GUID 후보",
+  candidate_program_names: "후보 프로그램 이름",
+  candidate_path_count: "후보 경로 수",
+  candidate_sha1_count: "후보 SHA-1 수",
+  candidates_truncated: "후보 목록 잘림",
+  message_content_status: "메시지 본문 상태",
+  supports_pc_kakaotalk_triage: "PC 카카오톡 선별 지원",
+  scan_kind: "스캔 종류",
+  area: "영역",
+  field_path: "필드 경로",
+  cache_order: "캐시 순서",
+  control_set: "컨트롤 세트",
+  full_detail_option: "전체 상세 옵션",
+  targetFull: "대상(전체)",
+  key_cell_offset: "키 셀 오프셋",
+  key_depth: "키 깊이",
+  is_root_key: "루트 키 여부",
+  parent_cell_offset: "상위 키 셀 오프셋",
+  value_cell_offset: "값 셀 오프셋",
+  hive_mount: "하이브 마운트",
+  name_encoding: "이름 인코딩",
+  transaction_log_status: "트랜잭션 로그 상태",
+  transaction_log_disclosure: "트랜잭션 로그 안내",
+  key_path_confidence: "키 경로 신뢰도",
+  root_reachable: "루트에서 도달 가능",
+  last_written_filetime: "마지막 기록(FILETIME 원문)",
+  registry_value_type: "레지스트리 값 형식",
+  value_format: "값 형식",
+  relative_offset: "상대 오프셋",
+  ai_score: "AI 생성 점수",
+  score: "점수",
+  band: "점수 구간",
+  band_label: "점수 구간 이름",
+  verdict: "판정",
+  signals: "신호",
+  model_analysis: "모델 분석",
+  model_analysis_available: "모델 분석 가능",
+  pixel_analysis: "픽셀 분석",
+  source_guess: "출처 추정",
+  source_attribution_label: "출처 귀속 라벨",
+  per_file_context_row: "파일별 맥락 행",
+  post_bigbang_caveat: "주의 사항",
+  limitations: "한계",
+  next_checks: "다음 확인",
+  reasons: "사유",
+  method: "방법",
+  signature: "서명",
+  algorithm_id: "알고리즘 ID",
+  windows_family: "Windows 계열",
+  row_cluster_status: "행 묶음 상태",
+  row_cluster_window_bytes: "행 묶음 창(바이트)",
+  clustered_hash_count: "묶인 해시 수",
+  clustered_path_count: "묶인 경로 수",
+  clustered_timestamp_candidate_count: "묶인 시각 후보 수",
+  candidate_row_cluster_count: "후보 행 묶음 수",
+  amcache_candidate_cluster_count: "Amcache 후보 묶음 수",
+  amcache_hive_evidence: "Amcache 하이브 근거",
+  executable_hint_source: "실행 파일 힌트 출처",
+  schema_decode_status: "스키마 해석 상태",
+  schema_row_count: "스키마 행 수",
+  attempted: "시도함",
+  consistent: "일치",
+  items: "항목",
+  fields: "필드",
+  raw_result: "원시 결과",
+  loaded_module_count: "로드된 모듈 수",
+  shellbag_entry_count: "ShellBag 항목 수",
+  bags_exclusion_note: "Bags 제외 안내",
+  bags_view_settings_key_count_excluded: "제외한 Bags 보기 설정 키 수",
+  profile_template: "프로필 템플릿",
 };
 
 /**
@@ -674,17 +813,50 @@ export function metaLabel(key: string): string | null {
 
 /**
  * Labels for the keys of ONE section (review B2-8): keys that share a label (timestamp / time →
- * 시각, user / user_name → 사용자 …) read "라벨 (raw_key)" so the visible text tells them apart
- * — a tooltip alone is not accessible. null = no label (the raw key is shown).
+ * 시각, user / user_name → 사용자 …) read "라벨", "라벨 (2)" … so the visible text tells them apart
+ * without a raw key (R7 L3; the raw key stays the tooltip). null = no label (the raw key is shown).
  */
 export function sectionLabels(keys: readonly string[]): Map<string, string | null> {
   const labels = new Map(keys.map((key) => [key, metaLabel(key)] as const));
   const uses = new Map<string, number>();
   for (const label of labels.values()) if (label) uses.set(label, (uses.get(label) ?? 0) + 1);
+  const seen = new Map<string, number>();
   return new Map(
-    [...labels].map(([key, label]) => [
-      key,
-      label && (uses.get(label) ?? 0) > 1 ? `${label} (${key})` : label,
-    ]),
+    [...labels].map(([key, label]) => {
+      if (!label || (uses.get(label) ?? 0) < 2) return [key, label];
+      const nth = (seen.get(label) ?? 0) + 1;
+      seen.set(label, nth);
+      return [key, nth > 1 ? `${label} (${nth})` : label];
+    }),
   );
+}
+
+/**
+ * Korean text of the source viewer's limitation notes (`viewer_limitations`, api/app/viewer_core.py
+ * source_viewer_limitations — English server sentences); an unknown note is shown as sent.
+ */
+const VIEWER_LIMITATIONS_KO: Readonly<Record<string, string>> = {
+  "Preview is read-only and may be capped to keep large cases responsive.":
+    "미리보기는 읽기 전용이며, 큰 케이스에서도 빠르게 열리도록 일부만 표시될 수 있습니다.",
+  "Use hashes and source download before relying on a preview in a final report.":
+    "최종 보고서에 쓰기 전에 해시와 원본 파일로 확인하세요(미리보기만으로 판단하지 않습니다).",
+  "Image text requires OCR or OCR sidecar review; the file viewer does not OCR images inline.":
+    "이미지 속 글자는 OCR 결과로 확인해야 합니다. 뷰어는 이미지를 바로 OCR하지 않습니다.",
+  "SQLite previews show bounded tables/rows; use file search or a dedicated database tool for full table review.":
+    "SQLite 미리보기는 표·행 일부만 보여 줍니다. 전체 표는 파일 검색이나 전용 DB 도구로 확인하세요.",
+  "Structured parsing is skipped for very large JSON/XML files; use current-file search or external tooling.":
+    "매우 큰 JSON/XML 파일은 구조 해석을 건너뜁니다. 현재 파일 검색이나 외부 도구를 쓰세요.",
+  "Document text extraction is bounded for preview; use source search resume or an external parser for full-document validation.":
+    "문서 본문 추출은 미리보기 범위로 제한됩니다. 문서 전체 확인은 원본 검색이나 외부 파서를 쓰세요.",
+  "Email preview is bounded; only the first parse window is shown until mailbox-specific pagination is implemented.":
+    "메일 미리보기는 처음 해석한 구간만 보여 줍니다.",
+};
+
+export function viewerLimitationKo(note: string): string {
+  const known = VIEWER_LIMITATIONS_KO[note];
+  if (known) return known;
+  const capped = /^Inline text snippets are capped near (\d+) characters\.$/.exec(note);
+  if (capped?.[1])
+    return `본문 미리보기는 약 ${Number(capped[1]).toLocaleString("ko-KR")}자까지만 표시합니다.`;
+  return note;
 }

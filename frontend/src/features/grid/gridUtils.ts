@@ -68,6 +68,10 @@ export function backendLabel(backend: string): string {
       return "파일";
     case "case":
       return "케이스";
+    // No engine ("none"): nothing to name (R7 L3 — never the raw token).
+    case "none":
+    case "":
+      return "";
     default:
       return backend;
   }

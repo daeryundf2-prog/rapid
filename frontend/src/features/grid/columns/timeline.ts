@@ -127,6 +127,19 @@ interface TimelineSource {
   record_index?: unknown;
 }
 
+/**
+ * Older timeline outputs prefix every summary with the producer ("Artifact event: <type> …",
+ * "EventLog event: …"; C-D13). The prefix is a raw id the examiner never needs: it is stripped at
+ * display (the raw summary stays in the row JSON).
+ */
+const LEGACY_SUMMARY_PREFIX = /^(?:Artifact event: \S+ |EventLog event: )/;
+
+export function stripLegacySummaryPrefix(summary: string | null): string | null {
+  if (!summary) return summary;
+  const stripped = summary.replace(LEGACY_SUMMARY_PREFIX, "").trim();
+  return stripped || summary;
+}
+
 export const timelineCollection: CollectionDef = {
   id: "timeline",
   label: "타임라인",
@@ -158,7 +171,7 @@ export const timelineCollection: CollectionDef = {
     const kinds = timestampKindsOf(raw);
     const details = isRecord(raw.details) ? raw.details : {};
     const sourceType = strOrNull(details.artifact_type);
-    const summary = strOrNull(raw.summary);
+    const summary = stripLegacySummaryPrefix(strOrNull(raw.summary));
     // An event-log event is about a record of a channel: "Security · 4624" (its summary is 상세).
     const eventId = sourceType?.startsWith("eventlog-") ? strOrNull(details.event_id) : null;
     const target =

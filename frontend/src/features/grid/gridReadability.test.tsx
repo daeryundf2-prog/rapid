@@ -539,8 +539,9 @@ describe("C10 timeline viewer", () => {
     expect(section.textContent).toContain("E:\\보고서\\A.docx");
     for (const fact of facts?.facts ?? []) expect(section.textContent).toContain(fact.value);
     expect(screen.getByTestId("timeline-group-sources").querySelectorAll("li")).toHaveLength(3);
-    // 출처: Korean readings (C9).
+    // 출처: Korean readings only (C9; R7 L3: the raw id is not shown).
     expect(screen.getAllByText("시각 종류").length).toBeGreaterThan(0);
-    expect(screen.getByText(/아티팩트 출력 \(artifacts\)/)).toBeTruthy();
+    expect(screen.getByText("아티팩트 출력")).toBeTruthy();
+    expect(screen.queryByText(/\(artifacts\)/)).toBeNull();
   });
 });

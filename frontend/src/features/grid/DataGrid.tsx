@@ -1407,23 +1407,39 @@ export function DataGrid(props: DataGridProps = {}) {
       ? { icon: "inbox", text: "접수 요약은 그리드가 아닌 요약 화면에서 확인합니다." }
       : ref.id === "search" && !(route.search && route.search.keywords.length > 0)
         ? { icon: "search", text: "검색어를 입력하면 결과가 여기에 표시됩니다." }
-        : sortBuilding
-          ? { icon: "clock", text: "전체 정렬 인덱스를 만드는 중입니다. 끝나면 정렬된 순서로 표시합니다." }
-          : serverQuery
-            ? { icon: "search", text: "검색어에 맞는 이벤트가 없습니다. (서버 검색: 전체 이벤트)" }
-            : filesGrid && q.trim()
-              ? { icon: "search", text: "검색어가 이름·경로에 맞는 파일이 없습니다. (서버 검색: 전체 파일)" }
-              : compactMode && needle
-                ? { icon: "filter", text: "조건에 맞는 행이 없습니다. 불러온 행 안에서만 필터합니다." }
-                : isAnalysis && ref.kind
+        : ref.id === "search"
+          ? // The empty state names what was searched (R7 L3, C-D16).
+            {
+              icon: "search",
+              text: `'${route.search?.keywords.join(" ") ?? ""}' 검색 결과가 없습니다. 다른 단어로 찾거나 검색 옵션의 범위·방식을 바꿔 보세요.`,
+            }
+          : sortBuilding
+            ? { icon: "clock", text: "전체 정렬 인덱스를 만드는 중입니다. 끝나면 정렬된 순서로 표시합니다." }
+            : serverQuery
+              ? {
+                  icon: "search",
+                  text: `'${serverQuery}'에 맞는 이벤트가 없습니다. (서버 검색: 전체 이벤트)`,
+                }
+              : filesGrid && q.trim()
+                ? {
+                    icon: "search",
+                    // Files filter name/path on the server (plan r7 §3.2 L2); the text names the query (L3).
+                    text: `'${q.trim()}'에 맞는 파일이 없습니다. (서버 검색: 전체 파일의 이름·경로)`,
+                  }
+                : compactMode && needle
                   ? {
-                      icon: "inbox",
-                      text: "이 노드에는 결과가 없습니다.",
-                      action: { command: runCommandId(ref.kind), label: "분석 실행" },
+                      icon: "filter",
+                      text: `'${needle}'에 맞는 행이 없습니다. 불러온 행 안에서만 필터합니다.`,
                     }
-                  : compactMode
-                    ? { icon: "filter", text: "조건에 맞는 행이 없습니다. 불러온 행 안에서만 필터합니다." }
-                    : { icon: "inbox", text: "이 노드에는 표시할 행이 없습니다." };
+                  : isAnalysis && ref.kind
+                    ? {
+                        icon: "inbox",
+                        text: "이 노드에는 결과가 없습니다.",
+                        action: { command: runCommandId(ref.kind), label: "분석 실행" },
+                      }
+                    : compactMode
+                      ? { icon: "filter", text: "조건에 맞는 행이 없습니다. 불러온 행 안에서만 필터합니다." }
+                      : { icon: "inbox", text: "이 노드에는 표시할 행이 없습니다." };
 
   const serverFiltering =
     cq.serverColumnFilters ||

@@ -250,10 +250,8 @@ rules:
   label_ko: 이동식 매체 대상 바로 가기
   rationale_ko: 'LNK 대상 드라이브 종류가 이동식이거나, 대상 볼륨 시리얼·드라이브 문자가 이동식 장치와 일치: 이동식 매체 접근.'
   false_positive_ko: 정상 USB 사용.
-  sources: &id001
+  sources:
   - https://www.csirt.gov.sk/wp-content/uploads/2021/08/LNK_File_Forensics.pdf
-  - https://forensics.wiki/jump_lists/
-  - https://www.it-connect.tech/windows-forensics-jump-lists/
   - https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-shllink/
   version: 1
   status: verified
@@ -264,7 +262,9 @@ rules:
   label_ko: 네트워크 공유 대상 바로 가기
   rationale_ko: 'LNK 대상이 UNC·네트워크 드라이브: 공유 접근·횡이동.'
   false_positive_ko: 정상 공유 폴더. 공유 호스트가 이 컴퓨터 자신(컴퓨터 이름)인 경우는 제외.
-  sources: *id001
+  sources:
+  - https://www.csirt.gov.sk/wp-content/uploads/2021/08/LNK_File_Forensics.pdf
+  - https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-shllink/
   version: 2
   status: verified
   params: {}
@@ -274,7 +274,9 @@ rules:
   label_ko: 대상이 사라진 바로 가기
   rationale_ko: 'LNK 대상 경로가 같은 폴더의 다른 파일은 있는데 파일 목록에 없음: 접근 후 삭제.'
   false_positive_ko: 이동식 매체 분리, 수집 범위 밖.
-  sources: *id001
+  sources:
+  - https://www.csirt.gov.sk/wp-content/uploads/2021/08/LNK_File_Forensics.pdf
+  - https://forensics.wiki/jump_lists/
   version: 1
   status: verified
   params: {}
@@ -284,7 +286,9 @@ rules:
   label_ko: 사용자 경로 실행 파일 바로 가기
   rationale_ko: 'LNK 대상이 Temp/Downloads/AppData/Public의 실행 파일·스크립트: 사용자 실행 흔적.'
   false_positive_ko: 정상 설치 파일 실행.
-  sources: *id001
+  sources:
+  - https://www.csirt.gov.sk/wp-content/uploads/2021/08/LNK_File_Forensics.pdf
+  - https://attack.mitre.org/techniques/T1204/002/
   version: 1
   status: verified
   params: {}
@@ -294,7 +298,10 @@ rules:
   label_ko: 다른 호스트에서 만든 바로 가기
   rationale_ko: 'LNK Tracker의 MachineID(NetBIOS)가 이 증거의 컴퓨터 이름과 다름: 피싱 LNK·외부 복사.'
   false_positive_ko: 이미지 복제·이름 변경된 PC. Windows/Program Files 대상(기본 PowerShell 시작 메뉴 바로 가기 등)은 제외.
-  sources: *id001
+  sources:
+  - https://www.csirt.gov.sk/wp-content/uploads/2021/08/LNK_File_Forensics.pdf
+  - https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-shllink/
+  - https://www.it-connect.tech/windows-forensics-jump-lists/
   version: 2
   status: verified
   params: {}
@@ -304,7 +311,10 @@ rules:
   label_ko: 바로 가기 대상 시각 이상
   rationale_ko: '대상 생성 시각이 바로 가기 기록 시각보다 늦거나, LinkInfo가 있는데 대상 시각이 모두 0: 조작·복사.'
   false_positive_ko: 복사된 LNK.
-  sources: *id001
+  sources:
+  - https://www.csirt.gov.sk/wp-content/uploads/2021/08/LNK_File_Forensics.pdf
+  - https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-shllink/
+  - https://attack.mitre.org/techniques/T1070/006/
   version: 1
   status: verified
   params:

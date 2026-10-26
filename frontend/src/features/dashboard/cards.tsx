@@ -17,7 +17,7 @@ import type { ReviewStatus } from "../../contracts/collection";
 import { Icon } from "../../icons";
 import { kindLabel } from "../derived/tables";
 import { CardEmpty } from "./Card";
-import { type DisclosureItem, isNotice, stepLabelKo } from "./disclosures";
+import { type DisclosureItem, isNotice, problemMessageKo, stepLabelKo } from "./disclosures";
 import {
   type CategoryBar,
   exportTypeLabel,
@@ -628,7 +628,7 @@ export function WarningList({ warnings }: { warnings: RunWarning[] }) {
             {warning.step ? stepLabelKo(String(warning.step)) : ""}
           </span>{" "}
           {isNotice(warning) ? "(알림) " : ""}
-          {String(warning.message ?? "")}
+          {problemMessageKo(String(warning.message ?? ""))}
         </li>
       ))}
     </ul>

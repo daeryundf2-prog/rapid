@@ -110,11 +110,9 @@ rules:
   label_ko: 마지막 저장자 ≠ 작성자
   rationale_ko: '마지막 저장자가 작성자와 다름: 제3자 수정·전달.'
   false_positive_ko: 협업, 템플릿 재사용.
-  sources: &id001
-  - https://learn.microsoft.com/en-us/previous-versions/office/developer/sharepoint-2007/bb447589(v=office.12)
+  sources:
   - https://python-pptx.readthedocs.io/en/latest/dev/analysis/pkg-coreprops.html
-  - https://learn.microsoft.com/en-us/windows/win32/stg/implementing-the-summary-information-property-set
-  - https://api-reference.pdf-tools.com/pdfsdk/1.20/dotnet/html/T_PdfTools_Pdf_Metadata.htm
+  - https://learn.microsoft.com/en-us/previous-versions/office/developer/sharepoint-2007/bb447589(v=office.12)
   version: 1
   status: verified
   params: {}
@@ -124,7 +122,9 @@ rules:
   label_ko: 편집 시간 0·수정 번호 큼
   rationale_ko: '총 편집 시간이 0~1분인데 수정 번호가 큼: 자동 생성·변환·메타 조작.'
   false_positive_ko: TotalTime을 고정 기록하는 도구.
-  sources: *id001
+  sources:
+  - https://learn.microsoft.com/en-us/windows/win32/stg/implementing-the-summary-information-property-set
+  - https://python-pptx.readthedocs.io/en/latest/dev/analysis/pkg-coreprops.html
   version: 1
   status: verified
   params:
@@ -136,7 +136,9 @@ rules:
   label_ko: 생성 시각 > 수정 시각
   rationale_ko: '문서 내부 생성 시각이 수정 시각보다 늦음: 시간 조작·복사 도구.'
   false_positive_ko: 시계 오차, 형식 변환, 시간대 없는 시각과 UTC 시각의 혼용(같은 날 수 시간 차).
-  sources: *id001
+  sources:
+  - https://python-pptx.readthedocs.io/en/latest/dev/analysis/pkg-coreprops.html
+  - https://learn.microsoft.com/en-us/windows/win32/stg/implementing-the-summary-information-property-set
   version: 2
   status: verified
   params:
@@ -147,7 +149,8 @@ rules:
   label_ko: 내부 수정 ≠ 파일 수정
   rationale_ko: '문서 내부 수정 시각과 파일 시스템 수정 시각 차가 하루 초과: 복사·재저장.'
   false_positive_ko: 이메일 첨부 저장.
-  sources: *id001
+  sources:
+  - https://python-pptx.readthedocs.io/en/latest/dev/analysis/pkg-coreprops.html
   version: 1
   status: verified
   params:
@@ -158,7 +161,9 @@ rules:
   label_ko: 작성자가 도구 이름
   rationale_ko: '작성자/마지막 저장자가 라이브러리·변환 도구 이름: 프로그램 생성 문서.'
   false_positive_ko: 자동화 보고서.
-  sources: *id001
+  sources:
+  - https://python-pptx.readthedocs.io/en/latest/dev/analysis/pkg-coreprops.html
+  - https://learn.microsoft.com/en-us/windows/win32/stg/implementing-the-summary-information-property-set
   version: 1
   status: verified
   params:
@@ -184,7 +189,9 @@ rules:
   label_ko: 매크로·OLE·DDE
   rationale_ko: 'vbaProject.bin·OLE 개체·DDE 존재: 악성 또는 자동화.'
   false_positive_ko: 업무 매크로. 한컴이 모든 HWPX에 넣는 기본 스크립트(Scripts/headerScripts.js·sourceScripts.js)는 제외.
-  sources: *id001
+  sources:
+  - https://attack.mitre.org/techniques/T1204/002/
+  - https://attack.mitre.org/techniques/T1559/002/
   version: 2
   status: verified
   params:
@@ -197,7 +204,8 @@ rules:
   label_ko: 원격 템플릿·외부 링크
   rationale_ko: '서식 파일·외부 관계가 http(s)/UNC를 가리킴: 템플릿 인젝션.'
   false_positive_ko: 사내 서버 템플릿.
-  sources: *id001
+  sources:
+  - https://attack.mitre.org/techniques/T1221/
   version: 1
   status: verified
   params: {}
@@ -207,7 +215,8 @@ rules:
   label_ko: 인쇄 기록
   rationale_ko: '마지막 인쇄 시각 존재: 인쇄 사실.'
   false_positive_ko: 인쇄 후 저장.
-  sources: *id001
+  sources:
+  - https://learn.microsoft.com/en-us/windows/win32/stg/implementing-the-summary-information-property-set
   version: 1
   status: verified
   params: {}
@@ -217,7 +226,8 @@ rules:
   label_ko: PDF 작성·생성 도구 불일치
   rationale_ko: 'Creator는 오피스 앱인데 Producer는 편집기·온라인 변환기: 재작성·편집 정황.'
   false_positive_ko: 정상 PDF 변환 파이프라인.
-  sources: *id001
+  sources:
+  - https://api-reference.pdf-tools.com/pdfsdk/1.20/dotnet/html/T_PdfTools_Pdf_Metadata.htm
   version: 1
   status: verified
   params:
@@ -246,7 +256,8 @@ rules:
   label_ko: PDF 증분 저장
   rationale_ko: '%%EOF가 여러 개: 생성 뒤 사후 수정.'
   false_positive_ko: 전자 서명·양식 입력.
-  sources: *id001
+  sources:
+  - https://api-reference.pdf-tools.com/pdfsdk/1.20/dotnet/html/T_PdfTools_Pdf_Metadata.htm
   version: 1
   status: verified
   params: {}
@@ -256,7 +267,8 @@ rules:
   label_ko: 변경 추적 작성자 다수
   rationale_ko: '변경 추적·메모 작성자가 여럿이거나 작성자와 다른 이름: 협업·타인 개입.'
   false_positive_ko: 정상 검토.
-  sources: *id001
+  sources:
+  - https://learn.microsoft.com/en-us/previous-versions/office/developer/sharepoint-2007/bb447589(v=office.12)
   version: 1
   status: verified
   params:
@@ -267,7 +279,9 @@ rules:
   label_ko: 작성자 정보 제거
   rationale_ko: '속성은 있는데 작성자·마지막 저장자·회사가 모두 공란: 메타 제거.'
   false_positive_ko: 익명 템플릿.
-  sources: *id001
+  sources:
+  - https://python-pptx.readthedocs.io/en/latest/dev/analysis/pkg-coreprops.html
+  - https://learn.microsoft.com/en-us/windows/win32/stg/implementing-the-summary-information-property-set
   version: 1
   status: verified
   params: {}
