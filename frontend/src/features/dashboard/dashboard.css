@@ -1,4 +1,12 @@
-/* 접수 dashboard (S7, plan §9 X1/X9/X10/X18). Tokens only; status colours from S10 with fallbacks. */
+/* 접수 dashboard (S7, plan §9 X1/X9/X10/X18; r7 examiner-first redesign). Tokens only; status
+   colours from S10 with fallbacks.
+
+   Layout contract (r7): `.dash` is the only scroll container of the pane; its head (status strip)
+   sticks to the top and every card head sticks right below it (--dash-head-h) while its card is
+   in view. A container query — not the viewport — switches the 12-column band grid on when the
+   pane itself is ≥ 1100 px wide (the 300 px tree no longer counts); below that every card spans
+   the single column. Cards in one band are equal height; a card's long content scrolls inside
+   its body (--card-body-max), tables inside `.dash-scroll`, so nothing paints over a neighbour. */
 
 .dash {
   container: dash / inline-size;
@@ -6,59 +14,171 @@
   position: relative;
   height: 100%;
   overflow: auto;
-  padding: var(--space-3) var(--space-4) var(--space-5);
+  overscroll-behavior: contain;
+  padding: 0 var(--space-4) var(--space-5);
+  --card-body-max: clamp(220px, 46vh, 460px);
 }
 
 .dash-head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  margin-block-end: var(--space-3);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  margin: 0 calc(-1 * var(--space-4)) var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  background: var(--bg);
+  border-block-end: 1px solid var(--line-subtle);
 }
 
-.dash-head h1 {
+.dash-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-4);
+}
+
+.dash-strip-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.dash-strip h1 {
   margin: 0;
   font-size: var(--fs-case);
   overflow-wrap: anywhere;
 }
 
-.dash-head-action {
+.dash-strip-mode {
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
+}
+
+.dash-strip-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  margin: 0;
+  font-size: var(--fs-table-aux);
+}
+
+.dash-strip-facts > div {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.dash-strip-facts dt {
+  color: var(--text-muted);
+}
+
+.dash-strip-facts dd {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.dash-progress {
+  display: inline-block;
+  inline-size: 96px;
+  block-size: 6px;
+  overflow: hidden;
+  background: var(--line-subtle);
+  border-radius: 3px;
+}
+
+.dash-progress-fill {
+  display: block;
+  block-size: 100%;
+  background: var(--accent);
+}
+
+.dash-strip-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
   margin-inline-start: auto;
 }
 
-.dash-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--space-3);
-  align-items: start;
-}
-
-@media (min-width: 1200px) {
-  .dash-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-
-/* A narrow centre pane stays single-column even on a wide screen. */
-@container dash (max-width: 719px) {
-  .dash-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
 .dash-card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
   min-width: 0;
+  /* Clips paint to the card (no bleed over a neighbour) without becoming a scroll container,
+     so the card head can still stick inside `.dash`. */
+  contain: paint;
   background: var(--bg-panel);
   border: 1px solid var(--line-subtle);
   border-radius: var(--radius);
 }
 
+.dash-card.collapsed {
+  height: auto;
+  align-self: start;
+}
+
+/* --- band grid ------------------------------------------------------------------------------ */
+
+.dash-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+  /* Stretch: every card in a band gets the band's height (no empty cell below a short card). */
+  align-items: stretch;
+}
+
+.dash-grid > .dash-card {
+  grid-column: 1 / -1;
+}
+
+@container dash (min-width: 1100px) {
+  .dash-grid {
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+  }
+
+  .dash-grid > .dash-card[data-span="4"] {
+    grid-column: span 4;
+  }
+
+  .dash-grid > .dash-card[data-span="6"] {
+    grid-column: span 6;
+  }
+
+  .dash-grid > .dash-card[data-span="8"] {
+    grid-column: span 8;
+  }
+
+  .dash-grid > .dash-card[data-span="12"] {
+    grid-column: 1 / -1;
+  }
+}
+
+/* One column: cards grow with their content; the pane scroller is the only scroll. */
+@container dash (max-width: 1099.98px) {
+  /* (A container cannot query itself: the override sits on the grid, inherited by the cards.) */
+  .dash-grid {
+    --card-body-max: none;
+  }
+}
+
 .dash-card-head {
+  position: sticky;
+  top: var(--dash-head-h, 0px);
+  z-index: 2;
   display: flex;
+  flex: none;
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-1) var(--space-1) var(--space-1) var(--space-2);
+  background: var(--bg-panel);
   border-block-end: 1px solid var(--line-subtle);
+  border-start-start-radius: var(--radius);
+  border-start-end-radius: var(--radius);
 }
 
 .dash-card.collapsed .dash-card-head {
@@ -103,15 +223,55 @@
   flex: none;
   color: var(--text-muted);
   font-size: var(--fs-table-aux);
+  font-variant-numeric: tabular-nums;
 }
 
 .dash-card-body {
+  flex: 1;
+  min-height: 0;
+  max-block-size: var(--card-body-max);
   padding: var(--space-3);
+  overflow-x: hidden;
+  overflow-y: auto;
   font-size: var(--fs-body);
 }
 
-.dash-card-body > * + * {
+.dash-card-body > * + *,
+.dash-section > * + *,
+.dash-status > * + *,
+.dash-evidence > * + *,
+.dash-warnings > * + *,
+.dash-memo > * + *,
+.dash-review > * + * {
   margin-block-start: var(--space-2);
+}
+
+/* Tables scroll sideways inside their own box; names/paths wrap instead of widening the card. */
+.dash-scroll {
+  max-inline-size: 100%;
+  overflow: auto;
+}
+
+.dash-card .data-table th {
+  /* The sticky table head belongs to the table's own scroller, not the card. */
+  position: static;
+}
+
+.dash-card .dash-wrap,
+.dash-card .data-table td.dash-wrap {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.dash-subhead {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
+  font-weight: 600;
+}
+
+.dash-card .dash-facts {
+  padding: 0;
 }
 
 .dash-menu-anchor {
@@ -202,6 +362,13 @@
   table-layout: auto;
 }
 
+.dash-card .dash-table th,
+.dash-card .dash-table td {
+  height: auto;
+  min-height: var(--row-h);
+  padding-block: 2px;
+}
+
 .dash-table .num {
   text-align: end;
   font-variant-numeric: tabular-nums;
@@ -271,19 +438,6 @@ textarea.dash-input {
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
-}
-
-.dash-row .dash-input {
-  inline-size: auto;
-  flex: 1;
-}
-
-.dash-evidence-name {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  margin: 0;
-  font-weight: 600;
 }
 
 .dash-bars {
@@ -475,4 +629,132 @@ textarea.dash-input {
   max-block-size: 200px;
   overflow: auto;
   font-size: var(--fs-table-aux);
+}
+
+/* --- r7 cards ------------------------------------------------------------------------------- */
+
+.dash-empty-compact {
+  margin: 0;
+  font-size: var(--fs-table-aux);
+}
+
+.dash-empty-compact .dash-empty-title {
+  display: inline;
+  font-weight: 600;
+}
+
+.dash-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7.5em, 1fr));
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dash-tiles li {
+  display: grid;
+  padding: var(--space-2);
+  background: var(--bg);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius);
+}
+
+.dash-tile-value {
+  font-size: var(--fs-case);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.dash-tile-label {
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
+}
+
+.dash-status-now {
+  margin: 0;
+}
+
+.dash-issue-step {
+  color: var(--text-muted);
+}
+
+.dash-evidence-list,
+.dash-limits,
+.dash-exports {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dash-evidence-item {
+  display: grid;
+  gap: 2px;
+  padding-block-end: var(--space-2);
+  border-block-end: 1px solid var(--line-subtle);
+}
+
+.dash-evidence-item p {
+  margin: 0;
+}
+
+.dash-evidence-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px var(--space-2);
+}
+
+.dash-evidence-runs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-2);
+}
+
+.dash-evidence-runs .dash-run-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+}
+
+.dash-evidence-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.dash-limit summary {
+  cursor: pointer;
+}
+
+.dash-limit-text {
+  margin: var(--space-1) 0 0;
+  font-size: var(--fs-table-aux);
+  overflow-wrap: anywhere;
+}
+
+.dash-exports li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0 var(--space-2);
+  align-items: center;
+}
+
+.dash-exports .dash-note {
+  grid-column: 1;
+}
+
+.dash-exports .button {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+}
+
+.dash-examiner {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
 }

@@ -81,7 +81,7 @@ describe("처리 제한 사항 (run summary disclosures + warnings)", () => {
 
   it("explains an empty card", () => {
     render(<DisclosuresCard items={[]} warnings={[]} />);
-    expect(screen.getByText(/공개 사항이 없습니다/)).toBeTruthy();
+    expect(screen.getByText(/처리 제한 사항이 없습니다/)).toBeTruthy();
   });
 
   it("never prints raw ids: bias → UTC offset, source_file_*, exclusion reasons, kind ids", () => {

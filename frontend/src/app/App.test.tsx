@@ -182,7 +182,7 @@ describe("App shell", () => {
     await waitFor(() => expect(screen.getByTestId("intake-pane").textContent).toContain("registry"));
     const intake = screen.getByTestId("intake-pane");
     expect(intake.textContent).toContain("inventory");
-    expect(intake.textContent).toContain("케이스 처리 세부");
+    expect(intake.textContent).toContain("처리 상태");
     expect(intake.textContent).toContain("런이 완료되면 표시됩니다.");
   });
 
