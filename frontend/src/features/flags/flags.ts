@@ -110,6 +110,39 @@ export function topGrade(flags: readonly RowFlag[]): Grade | null {
   return flags[0]?.grade ?? null;
 }
 
+/** Flagged rows among the loaded ones (R-11): how many, and their highest grades (A → C). */
+export interface FlaggedRowsSummary {
+  count: number;
+  loaded: number;
+  grades: Grade[];
+}
+
+export function flaggedRowsSummary(rows: readonly Pick<GridRow, "fields">[]): FlaggedRowsSummary {
+  let count = 0;
+  const seen = new Set<Grade>();
+  for (const row of rows) {
+    const top = topGrade(rowFlags(row));
+    if (!top) continue;
+    count += 1;
+    seen.add(top);
+  }
+  return { count, loaded: rows.length, grades: GRADES.filter((g) => seen.has(g)) };
+}
+
+/**
+ * A 특이사항 column is sparse when at most one loaded row in ten is flagged: it keeps its 90px
+ * minimum instead of the 170px default (R-11) — its header hint says where the flags are.
+ */
+export function flagsColumnSparse(summary: FlaggedRowsSummary): boolean {
+  return summary.count > 0 && summary.count * 10 <= summary.loaded;
+}
+
+/** "특이사항 1건 (B)" — the 특이사항 header hint over the loaded rows; "" without a flagged row. */
+export function flagsHeaderHint(summary: FlaggedRowsSummary): string {
+  if (!summary.count) return "";
+  return `특이사항 ${summary.count.toLocaleString("ko-KR")}건 (${summary.grades.join("·")})`;
+}
+
 /** `flag_grade=B` keeps A and B ("이상"). */
 export function gradeAtLeast(grade: Grade, minimum: Grade): boolean {
   return GRADE_RANK[grade] <= GRADE_RANK[minimum];

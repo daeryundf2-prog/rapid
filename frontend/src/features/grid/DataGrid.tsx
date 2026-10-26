@@ -38,6 +38,7 @@ import { setColumnFilter } from "../filters/columnFilters";
 import type { FilterBarVariant } from "../filters/FilterBar";
 import { useFilterStore } from "../filters/filterStore";
 import { noteKindTypeCounts, useCatalog } from "../flags/catalog";
+import { flaggedRowsSummary, flagsColumnSparse, flagsHeaderHint } from "../flags/flags";
 import { flagsPartialNotice, flagsUnavailableReason, mergedKindNode, policyAbsences } from "../tree/model";
 import { useDensity, useGridLocalStore, useRoute, useSelection, useToast, useViewerTarget } from "./adapter";
 import { BatchBar, batchBarState } from "./BatchBar";
@@ -628,6 +629,15 @@ export function DataGrid(props: DataGridProps = {}) {
     if (!keepWhenEmptySig) return new Set<string>();
     return new Set(emptyColumnIds(orderedColumns, loadedRows, { candidates: keepWhenEmptySig.split("|") }));
   }, [keepWhenEmptySig, orderedColumns, loadedRows]);
+  // 특이사항 over the loaded rows (R-11): a sparse column keeps its 90px minimum, and its header
+  // says how many loaded rows carry a flag (a click sorts them to the top, grade first).
+  const hasFlagsColumn = orderedColumns.some((c) => c.id === "flags");
+  const flagSummary = useMemo(
+    () => (hasFlagsColumn ? flaggedRowsSummary(loadedRows) : null),
+    [hasFlagsColumn, loadedRows],
+  );
+  const flagHint = flagSummary ? flagsHeaderHint(flagSummary) : "";
+  const flagsNarrow = flagSummary ? flagsColumnSparse(flagSummary) : false;
   const autoHidden = useMemo(() => {
     const out = new Map<string, AutoHideReason>();
     for (const id of emptyIds) out.set(id, "empty");
@@ -697,7 +707,11 @@ export function DataGrid(props: DataGridProps = {}) {
   // Spare width goes to the long-text columns by weight (항목 · 경로 · URL · 대상 …, C-D7); a
   // column the user resized keeps its width.
   const widths = fitColumnWidths(
-    visibleColumns.map((c) => c.getSize()),
+    visibleColumns.map((c) =>
+      c.id === "flags" && flagsNarrow && columnSizing.flags === undefined
+        ? (specById.get("flags")?.minWidth ?? c.getSize())
+        : c.getSize(),
+    ),
     {
       grow: columnSizing.title === undefined ? specs.findIndex((s) => s.id === "title") : -1,
       available: paneWidth - SELECT_COL_WIDTH - HEAD_TOOLS_WIDTH,
@@ -1756,11 +1770,14 @@ export function DataGrid(props: DataGridProps = {}) {
                   const hintId = `${hintPrefix}-empty-${spec.id}`;
                   const noValues = !hint && keptEmptyIds.has(spec.id);
                   const noValuesId = `${hintPrefix}-novalue-${spec.id}`;
+                  const flagsHint = spec.id === "flags" && flagHint && flagSummary ? flagHint : "";
+                  const flagsHintId = `${hintPrefix}-flagged-${spec.id}`;
                   const describedBy =
                     [
                       spec.sortHint ? `${hintPrefix}-${spec.id}` : "",
                       hint ? hintId : "",
                       noValues ? noValuesId : "",
+                      flagsHint ? flagsHintId : "",
                     ]
                       .filter(Boolean)
                       .join(" ") || undefined;
@@ -1783,8 +1800,11 @@ export function DataGrid(props: DataGridProps = {}) {
                           title={
                             reason
                               ? undefined
-                              : (spec.sortHint ?? hint?.text ?? sortTitle(spec) ?? spec.header)
+                              : flagsHint
+                                ? `${flagsHint} · 불러온 ${flagSummary?.loaded.toLocaleString("ko-KR")}행 중 — 눌러 등급순 정렬`
+                                : (spec.sortHint ?? hint?.text ?? sortTitle(spec) ?? spec.header)
                           }
+                          data-flag-hint={flagsHint || undefined}
                           onClick={() => cycleSort(spec)}
                         >
                           {spec.header}
@@ -1809,6 +1829,11 @@ export function DataGrid(props: DataGridProps = {}) {
                           </span>
                           <EmptyHintLink hint={hint} hintId={hintId} />
                         </>
+                      ) : null}
+                      {flagsHint ? (
+                        <span id={flagsHintId} hidden>
+                          {flagsHint}
+                        </span>
                       ) : null}
                       {noValues ? (
                         <span

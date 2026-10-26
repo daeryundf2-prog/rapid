@@ -135,6 +135,9 @@ export function problemMessageKo(message: string): string {
   let text = message.trim();
   const noRows = /^No (.+?) artifact rows were collected\.?$/.exec(text);
   if (noRows?.[1]) return `${kindLabel(noRows[1])}: 수집된 행 없음`;
+  const parserErrors = /^(.+?) parser reported (\d+) isolated error\(s\)\.?$/.exec(text);
+  if (parserErrors?.[1] && parserErrors[2])
+    return `${kindLabel(parserErrors[1])}: 파서 오류 ${n(Number(parserErrors[2]))}건 (해당 수집기만 격리됨)`;
   if (/^extraction-disabled-by-default\b/.test(text))
     return "기본 설정으로 추출하지 않음 — 후보를 복사·해시하려면 추출을 켜고 다시 실행하세요";
   // "<kind>: …" → "<수집기 이름>: …"
