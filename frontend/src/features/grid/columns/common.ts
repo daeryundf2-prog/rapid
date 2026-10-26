@@ -156,6 +156,22 @@ export function growWeight(spec: Pick<ColumnSpec, "id" | "header" | "filterKind"
   return 0;
 }
 
+/** Narrowest a long-text column gets before lower-priority columns hide instead: URL / 경로 … · 제목 …. */
+const READABLE_MIN_BY_WEIGHT: Readonly<Record<number, number>> = { 2: 200, 1: 120 };
+
+/**
+ * The width a column may shrink to when the grid is narrower than the default widths: its own
+ * `minWidth` (time columns keep their seconds), raised for the long-text columns so a URL or a
+ * title stays readable (C-D7), never above the default width itself.
+ */
+export function fitMinWidth(
+  spec: Pick<ColumnSpec, "id" | "header" | "filterKind" | "align" | "width" | "minWidth">,
+): number {
+  const own = spec.minWidth ?? 60;
+  const readable = READABLE_MIN_BY_WEIGHT[growWeight(spec)] ?? 0;
+  return Math.min(spec.width, Math.max(own, readable));
+}
+
 /** Shared columns so widths and labels stay uniform across collections. */
 export const col = {
   title(header = "항목", width = 280): ColumnSpec {

@@ -106,18 +106,23 @@ export function serverPathFilter(text: string | undefined): string | undefined {
 
 /**
  * Fit column widths to the visible grid width: slack goes to the flexing column (항목/이름).
- * Columns are never shrunk here — a narrow pane hides low-priority default columns instead
- * (`priorityHiddenColumns`), and whatever is still too wide scrolls sideways. `grow` < 0 (the
- * user resized 항목) or `available` ≤ 0 (not measured yet) leaves the widths unchanged.
+ * A narrow pane first hides low-priority default columns (`priorityHiddenColumns`, which counts
+ * each column at its minimum); with `mins` the columns still wider than the pane then shrink
+ * toward those minimums (fixed-width columns first, then the long-text ones, each by its room
+ * above the minimum), so a layout whose minimums fit never scrolls sideways (the browser kind
+ * at 1920, r7 S1). Without `mins` the widths stay; when even the minimums do not fit, every
+ * column sits at its minimum and the grid scrolls. `grow` < 0 (the user resized 항목)
+ * or `available` ≤ 0 (not measured yet) leaves the widths unchanged.
  */
 export function fitColumnWidths(
   widths: readonly number[],
-  options: { grow: number; available: number; weights?: readonly number[] },
+  options: { grow: number; available: number; weights?: readonly number[]; mins?: readonly number[] },
 ): number[] {
   const out = [...widths];
-  const { grow, available, weights } = options;
+  const { grow, available, weights, mins } = options;
   if (!(available > 0) || out.length === 0) return out;
   const total = out.reduce((sum, w) => sum + w, 0);
+  if (total > available && mins) return shrinkToFit(out, mins, total - available, weights);
   if (total >= available) return out;
   const slack = available - total;
   // Weighted growth (C-D7): the spare width goes to the long-text columns (항목 · 경로 · URL …)
@@ -137,6 +142,52 @@ export function fitColumnWidths(
     return out;
   }
   if (grow >= 0 && grow < out.length) out[grow] = (out[grow] ?? 0) + slack;
+  return out;
+}
+
+/** Take up to `excess` px off the `eligible` columns, by their room above `mins`; returns what it took. */
+function shrinkBy(
+  widths: number[],
+  mins: readonly number[],
+  excess: number,
+  eligible: (i: number) => boolean,
+): number {
+  const room = widths.map((w, i) => (eligible(i) ? Math.max(0, w - Math.min(w, mins[i] ?? w)) : 0));
+  const totalRoom = room.reduce((sum, r) => sum + r, 0);
+  if (totalRoom <= 0 || excess <= 0) return 0;
+  if (totalRoom <= excess) {
+    room.forEach((r, i) => {
+      widths[i] = (widths[i] ?? 0) - r;
+    });
+    return totalRoom;
+  }
+  let taken = 0;
+  let roomiest = 0;
+  room.forEach((r, i) => {
+    if (r > (room[roomiest] ?? 0)) roomiest = i;
+    const cut = Math.floor((excess * r) / totalRoom);
+    widths[i] = (widths[i] ?? 0) - cut;
+    taken += cut;
+  });
+  // The rounding remainder comes off the column with the most room (it has at least that much).
+  widths[roomiest] = (widths[roomiest] ?? 0) - (excess - taken);
+  return excess;
+}
+
+/**
+ * Take `excess` px off the columns above their minimum: the fixed-width columns (time, number,
+ * chips — weight 0) first, the long-text ones (항목 · URL · 제목 …) only for what is left, so the
+ * text keeps its width the longest. Everything at minimum when even that is short.
+ */
+function shrinkToFit(
+  widths: number[],
+  mins: readonly number[],
+  excess: number,
+  weights: readonly number[] | undefined,
+): number[] {
+  const out = [...widths];
+  const taken = shrinkBy(out, mins, excess, (i) => !((weights?.[i] ?? 0) > 0));
+  shrinkBy(out, mins, excess - taken, () => true);
   return out;
 }
 

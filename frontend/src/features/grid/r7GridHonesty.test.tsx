@@ -68,6 +68,26 @@ describe("column widths (C-D6, C-D7, C-D14)", () => {
     expect(fitColumnWidths([220, 180, 200], { grow: 0, available: 500, weights: [3, 0, 2] })).toEqual([
       220, 180, 200,
     ]);
+    // Too wide with minimums (r7 S1, browser kind at 1920): weight-0 columns give their room
+    // above the minimum first (by room), the long-text ones keep their width.
+    expect(
+      fitColumnWidths([240, 150, 150, 200], {
+        grow: 0,
+        available: 640,
+        weights: [3, 0, 0, 2],
+        mins: [120, 60, 100, 200],
+      }),
+    ).toEqual([240, 85, 115, 200]);
+    // More excess than the fixed columns hold: the text columns shrink too, never below minimum.
+    expect(
+      fitColumnWidths([240, 150, 200], { grow: 0, available: 480, weights: [3, 0, 2], mins: [120, 60, 200] }),
+    ).toEqual([220, 60, 200]);
+    // Even the minimums do not fit: everything at minimum, the grid scrolls.
+    expect(
+      fitColumnWidths([240, 150, 200], { grow: 0, available: 300, weights: [3, 0, 2], mins: [120, 60, 200] }),
+    ).toEqual([120, 60, 200]);
+    // No mins: never shrunk (the pre-r7 contract for callers without minimums).
+    expect(fitColumnWidths([240, 150], { grow: 0, available: 300 })).toEqual([240, 150]);
     // No weights: the old single grow column.
     expect(fitColumnWidths([100, 100], { grow: 1, available: 250 })).toEqual([100, 150]);
   });
