@@ -39,6 +39,9 @@ test.describe.configure({ mode: "serial", timeout: 900_000 });
  * labelled enum (LABELLED_KEYS). Every other cell is a label cell: each comma-separated item that
  * is a single raw token fails.
  */
+// r7 S1 sweep (run-subset10): the 12+ lower-case `title` / `sum:main` cells of 전체 아티팩트 are
+// one browser page title as the site wrote it (`omnifit`, URL medicms.omnifit.co.kr) — evidence,
+// shown as written.
 const EVIDENCE_COLUMNS = [
   "title",
   "name",
@@ -74,7 +77,12 @@ const EVIDENCE_COLUMNS = [
   "sum:support",
   "sum:extra",
 ];
-/** Catalogue keys that hold free evidence values (by the key's last word). */
+/**
+ * Catalogue keys that hold free evidence values (by the key's last word). `product_name` /
+ * `publisher` (columns 제품 · 게시자, windows-execution): Amcache stores both lower-cased
+ * (`installshield`, `bandizip`, `microsoft`, `estsoft` … on run-subset10, r7 S1) — evidence
+ * spellings, kept as written.
+ */
 const EVIDENCE_KEY =
   /(name|names|path|paths|title|url|uri|description|comment|strings|hash|publisher|product|value|values|data|target|user|account|host|computer|command|arguments|args|keyword|keywords|subject|sender|recipient|body|message|text|domain|email|file|folder|dir|key|sid|guid|id|version|guidance|location|address|serial|label)$/i;
 /** Catalogue keys with value labels (src/features/grid/valueLabels.ts KEY_DOMAINS): always checked. */
