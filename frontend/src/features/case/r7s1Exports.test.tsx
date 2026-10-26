@@ -121,27 +121,30 @@ describe("R-4: case report writes", () => {
   });
 });
 
-describe("R-4: submission manifest re-reads the saved file", () => {
-  it("downloads /saved after the one GET (no second write)", async () => {
+describe("R-4: submission manifest is written once (POST) and re-read (/saved)", () => {
+  it("POSTs once, then downloads /saved; the result names both written files", async () => {
     const { calls } = mockFetch({
-      "GET /api/runs/r4c/submission-manifest": { files: [] },
+      "POST /api/runs/r4c/submission-manifest": {
+        written: [
+          "D:o\rapidtriage-submission-manifest.json",
+          "D:o\rapidtriage-submission-manifest.audit.json",
+        ],
+        download_url: "/api/runs/r4c/submission-manifest/saved",
+      },
       "GET /api/runs/r4c/submission-manifest/saved": file("rapidtriage-submission-manifest.json"),
     });
     const result = await performExport("submission-manifest", "r4c");
     expect(result.fileName).toBe("rapidtriage-submission-manifest.json");
-    expect(calls.map((c) => c.url.split("?")[0])).toEqual([
-      "/api/runs/r4c/submission-manifest",
-      "/api/runs/r4c/submission-manifest/saved",
+    expect(result.written).toHaveLength(2);
+    expect(calls.map((c) => `${c.method} ${c.url.split("?")[0]}`)).toEqual([
+      "POST /api/runs/r4c/submission-manifest",
+      "GET /api/runs/r4c/submission-manifest/saved",
     ]);
-  });
-
-  it("an older server without /saved falls back to /file", async () => {
-    const { calls } = mockFetch({
-      "GET /api/runs/r4d/submission-manifest": { files: [] },
-      "GET /api/runs/r4d/submission-manifest/file": file("m.json"),
-    });
-    const result = await performExport("submission-manifest", "r4d");
-    expect(result.fileName).toBe("m.json");
-    expect(calls.at(-1)?.url).toBe("/api/runs/r4d/submission-manifest/file");
+    // Never the legacy write-on-read GETs.
+    expect(
+      calls.some(
+        (c) => c.method === "GET" && /submission-manifest(\/file)?$/.test(c.url.split("?")[0] ?? ""),
+      ),
+    ).toBe(false);
   });
 });

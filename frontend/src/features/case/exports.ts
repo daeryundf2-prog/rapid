@@ -1,15 +1,13 @@
 import { create } from "zustand";
-import { ApiError } from "../../api/client";
 import {
   caseReportFile,
   createCaseReport,
   createReviewerBundle,
   downloadFile,
-  getSubmissionManifest,
   reviewerBundleFile,
   savedSubmissionManifestFile,
   savedValidationPackageFile,
-  submissionManifestFile,
+  writeSubmissionManifest,
   writeValidationPackage,
 } from "../../api/reports";
 import { NO_RUN_REASON } from "../../commands/reasons";
@@ -226,17 +224,12 @@ async function runExport(
       return { fileName, path: typeof created.archive === "string" ? created.archive : null };
     }
     case "submission-manifest": {
-      // Written once by the GET; the download re-reads the saved file (`/saved`, backend R-4).
-      // A server without `/saved` (404/405) falls back to `/file`, which rewrites it.
-      await getSubmissionManifest(runId, false, 500);
-      let fileName: string;
-      try {
-        fileName = await downloadFile(savedSubmissionManifestFile(runId), "submission-manifest.json");
-      } catch (error) {
-        if (!(error instanceof ApiError) || (error.status !== 404 && error.status !== 405)) throw error;
-        fileName = await downloadFile(submissionManifestFile(runId), "submission-manifest.json");
-      }
-      return { fileName, path: null };
+      // Written once (POST: manifest + audit); the download re-reads the saved file (`/saved`),
+      // so exporting never writes the manifest or its audit record twice.
+      const written = await writeSubmissionManifest(runId, false, 500);
+      const files = stringsOf(written.written);
+      const fileName = await downloadFile(savedSubmissionManifestFile(runId), "submission-manifest.json");
+      return { fileName, path: files[0] ?? null, ...(files.length ? { written: files } : {}) };
     }
     case "validation-package": {
       // Written once into the run folder (POST); 열기 re-reads the saved file — no second write.

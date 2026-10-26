@@ -39,14 +39,21 @@ export function createReviewerBundle(
 
 export const reviewerBundleFile = (runId: string) => `${run(runId)}/reviewer-bundle/file`;
 
-export function getSubmissionManifest(runId: string, includeAll = false, maxItems = 500) {
-  return api<Record<string, unknown>>(
-    `${run(runId)}/submission-manifest?include_all=${includeAll}&max_items=${maxItems}`,
-  );
+/** `POST /api/runs/{id}/submission-manifest` — writes manifest + audit once (R-4 backend). */
+export interface SubmissionManifestWrite {
+  /** Every file the call wrote (manifest, audit). */
+  written?: string[];
+  /** Read-only GET of the saved manifest (`/submission-manifest/saved`). */
+  download_url?: string;
 }
 
-export const submissionManifestFile = (runId: string) => `${run(runId)}/submission-manifest/file`;
-/** Read-only GET of the manifest the last GET wrote (no rewrite, no second audit record). */
+export function writeSubmissionManifest(runId: string, includeAll = false, maxItems = 500) {
+  return api<SubmissionManifestWrite>(
+    `${run(runId)}/submission-manifest?include_all=${includeAll}&max_items=${maxItems}`,
+    { method: "POST" },
+  );
+}
+/** Read-only GET of the manifest the last POST wrote (no rewrite, no second audit record). */
 export const savedSubmissionManifestFile = (runId: string) => `${run(runId)}/submission-manifest/saved`;
 
 /** `POST /api/runs/{id}/validation-package` — writes package + audit into the run folder (r7 L4). */
