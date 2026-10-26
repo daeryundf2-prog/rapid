@@ -136,12 +136,13 @@ export const timelineCollection: CollectionDef = {
       q: query.text,
       group: query.group === true,
     }),
+  // Beside the open viewer the narrow grid keeps 시각 > 대상 > 시각 종류 > 상세(요약) (C-D15).
   widthPriority: () => [
     "timestamp",
     "target",
     "tsKind",
-    "area",
     "detail",
+    "area",
     "sourceCount",
     "flags",
     "sourceRow",
@@ -250,7 +251,8 @@ export const timelineCollection: CollectionDef = {
     col.field(
       "tsKind",
       "시각 종류",
-      110,
+      // "마지막 방문 +2" whole (C-D14).
+      140,
       ["analysis", "compact", "source"],
       (r) => str(r.fields.tsKind) || null,
       {
@@ -264,6 +266,7 @@ export const timelineCollection: CollectionDef = {
           return kinds.length > 1 ? `${timeKindsText(kinds)} (${kinds.join(", ")})` : str(r.fields.tsKind);
         },
         render: timeKindsCell,
+        minWidth: 140,
       },
     ),
     // 영역·유형: Korean name of the source artifact type; the raw ids in the tooltip.

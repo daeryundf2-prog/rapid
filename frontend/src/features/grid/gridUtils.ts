@@ -108,13 +108,31 @@ export function serverPathFilter(text: string | undefined): string | undefined {
  */
 export function fitColumnWidths(
   widths: readonly number[],
-  options: { grow: number; available: number },
+  options: { grow: number; available: number; weights?: readonly number[] },
 ): number[] {
   const out = [...widths];
-  const { grow, available } = options;
+  const { grow, available, weights } = options;
   if (!(available > 0) || out.length === 0) return out;
   const total = out.reduce((sum, w) => sum + w, 0);
-  if (total < available && grow >= 0 && grow < out.length) out[grow] = (out[grow] ?? 0) + (available - total);
+  if (total >= available) return out;
+  const slack = available - total;
+  // Weighted growth (C-D7): the spare width goes to the long-text columns (항목 · 경로 · URL …)
+  // by weight; the rounding remainder goes to the heaviest one.
+  const weightSum = weights ? weights.reduce((sum, w) => sum + Math.max(0, w), 0) : 0;
+  if (weights && weightSum > 0) {
+    let given = 0;
+    let heaviest = -1;
+    weights.forEach((w, i) => {
+      if (i >= out.length || !(w > 0)) return;
+      const share = Math.floor((slack * w) / weightSum);
+      out[i] = (out[i] ?? 0) + share;
+      given += share;
+      if (heaviest < 0 || w > (weights[heaviest] ?? 0)) heaviest = i;
+    });
+    if (heaviest >= 0) out[heaviest] = (out[heaviest] ?? 0) + (slack - given);
+    return out;
+  }
+  if (grow >= 0 && grow < out.length) out[grow] = (out[grow] ?? 0) + slack;
   return out;
 }
 
@@ -170,12 +188,17 @@ function isEmptyValue(value: unknown): boolean {
 export function emptyColumnIds(
   columns: readonly ColumnSpec[],
   rows: readonly GridRow[],
-  options: { candidates: readonly string[]; keep?: ReadonlySet<string> },
+  options: {
+    candidates: readonly string[];
+    keep?: ReadonlySet<string>;
+    /** The empty-state hints do not apply (files of a folder input: no NTFS-meta to run, C-D12). */
+    ignoreHints?: boolean;
+  },
 ): string[] {
   if (rows.length === 0) return [];
   const wanted = new Set(options.candidates);
   return columns
-    .filter((c) => wanted.has(c.id) && !options.keep?.has(c.id) && !c.emptyHint)
+    .filter((c) => wanted.has(c.id) && !options.keep?.has(c.id) && (options.ignoreHints || !c.emptyHint))
     .filter((c) => rows.every((row) => isEmptyValue(c.value(row)) && displayText(c, row).trim() === ""))
     .map((c) => c.id);
 }

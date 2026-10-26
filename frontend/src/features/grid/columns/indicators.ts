@@ -36,7 +36,7 @@ export const indicatorsCollection: CollectionDef = {
     col.field("type", "유형", 80, ["analysis", "compact"], (r) => r.artifactType),
     col.title("값", 380),
     col.review(),
-    col.field("classification", "분류", 120, ["analysis", "compact"], (r) => fieldStr(r, "classification")),
+    col.field("classification", "범위", 120, ["analysis", "compact"], (r) => fieldStr(r, "classification")),
     col.field(
       "count",
       "건수",
