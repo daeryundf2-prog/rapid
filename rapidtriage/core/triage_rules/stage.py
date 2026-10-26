@@ -113,9 +113,9 @@ def run_triage_stage(
     files_path: Path | None = None,
     files_payload: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
-    """Run the engine over a run's outputs into a new ``analyses/run-triage-flags-<time>/``; returns the run-summary step row."""
+    """Run the engine over a run's outputs into a new ``analyses/run-triage-flags-<time>-<hex>/``; returns the run-summary step row."""
     root = Path(output_dir) / ANALYSES_DIR_NAME
-    analysis_id = f"{RUN_STAGE_ANALYSIS_PREFIX}-{dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%S%f')}"
+    analysis_id = new_run_stage_analysis_id(RUN_STAGE_ANALYSIS_PREFIX)
     directory = root / analysis_id
     state_path = directory / STATE_FILE_NAME
     started_at = _utc_now()
