@@ -1047,7 +1047,15 @@ export function DataGrid(props: DataGridProps = {}) {
     const target = event.target as HTMLElement;
     // A row checkbox keeps focus after a click: Esc still clears the selection from there.
     const onRowCheckbox = target.matches('[data-index] input[type="checkbox"]');
-    if (target.closest("input, button, select, textarea") && !(onRowCheckbox && event.key === "Escape"))
+    // R-12: Enter on a 특이사항 chip (focused after a click / Esc from its popover) opens the
+    // viewer like Enter on the row — the grid's preventDefault keeps the chip's popover shut;
+    // the popover stays on click / Space.
+    const onFlagChipEnter = event.key === "Enter" && target.matches("[data-index] button.flag-cell");
+    if (
+      target.closest("input, button, select, textarea") &&
+      !(onRowCheckbox && event.key === "Escape") &&
+      !onFlagChipEnter
+    )
       return;
     const rowEl = target.closest<HTMLElement>("[data-index]");
     // Focus on the grid container (or its scroll area) rather than a row: act on the
