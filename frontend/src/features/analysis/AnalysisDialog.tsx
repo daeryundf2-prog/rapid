@@ -200,8 +200,10 @@ function Field({ field, value, error, showError, onChange, onTouch, runId }: Fie
   if (field.type === "bool") {
     return (
       <div className="case-field analysis-field">
-        <label>
+        {/* Explicit for/id (r7 L4, C-A1): the name never depends on label nesting. */}
+        <label htmlFor={`${id}-check`}>
           <input
+            id={`${id}-check`}
             type="checkbox"
             checked={value === true}
             aria-describedby={describedBy}
@@ -235,10 +237,18 @@ function Field({ field, value, error, showError, onChange, onTouch, runId }: Fie
       onTouch();
       onChange(on ? [...list.filter((v) => v !== choice), choice] : list.filter((v) => v !== choice));
     };
+    // Each choice is a checkbox named by its own label (C-A1: 카빙 서명 · OCR 언어 had none).
+    const choiceId = (choice: (typeof choices)[number]) => `${id}-c-${choice.id.replace(/[^\w-]/g, "_")}`;
     const renderChoice = (choice: (typeof choices)[number]) => (
-      <label key={choice.id} className={choice.reason ? "is-unavailable" : undefined}>
+      <label
+        key={choice.id}
+        htmlFor={choiceId(choice)}
+        className={choice.reason ? "is-unavailable" : undefined}
+      >
         <input
+          id={choiceId(choice)}
           type="checkbox"
+          aria-label={choice.label}
           checked={list.includes(choice.id)}
           disabled={Boolean(choice.reason) && !list.includes(choice.id)}
           onChange={(event) => toggle(choice.id, event.target.checked)}

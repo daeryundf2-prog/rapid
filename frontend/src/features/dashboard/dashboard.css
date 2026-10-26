@@ -96,6 +96,21 @@
   background: var(--accent);
 }
 
+/* r7 L4 (C-I1): "카드 N/M 준비됨" while the intake cards load. */
+.dash-card-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2, 8px);
+  margin: var(--space-1, 4px) 0 0;
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux, 12px);
+}
+
+.dash-card-progress progress {
+  inline-size: 96px;
+  block-size: 6px;
+}
+
 .dash-strip-actions {
   display: flex;
   flex-wrap: wrap;

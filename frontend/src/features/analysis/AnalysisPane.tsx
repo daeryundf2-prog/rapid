@@ -167,6 +167,15 @@ function Overview({ runId }: { runId: string }) {
               <span className="analysis-desc">
                 {nodeStateLabel(last?.status ?? null)} · {node.description}
               </span>
+              {/* Every result names where it is run (r7 L4, C-A2): the 처리 stage card of the node. */}
+              <a
+                className="stage-link analysis-run-link"
+                href={serializeRoute({ runId, collection: "process", kind: node.id })}
+                data-testid={`analysis-run-link-${node.id}`}
+                aria-label={`${node.label}: 처리 단계에서 실행`}
+              >
+                처리 단계에서 실행 →
+              </a>
             </li>
           );
         })}
