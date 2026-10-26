@@ -91,9 +91,10 @@ describe("landing card (visual-polish S10)", () => {
     expect(screen.getAllByRole("link")[1]?.textContent).toContain("케이스 없음");
   });
 
-  it("with no cases says how to start", () => {
+  it("with no runs says how to start under the heading 최근 런 (C-L6)", () => {
     renderWithQuery(<Landing />);
-    expect(screen.getByText(/아직 케이스가 없습니다/)).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "최근 런" })).toBeTruthy();
+    expect(screen.getByText(/아직 런이 없습니다/)).toBeTruthy();
   });
 
   it("start actions carry their icons: open = folder, run = play, sample = package (B2 #6)", () => {

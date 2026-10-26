@@ -59,6 +59,25 @@ export function planSummaryText(plan: RunPlan, opts: { started?: string; elapsed
   ].join(" · ");
 }
 
+/** Run states with nothing left to run (the plan of such a run is a record, not a control). */
+const FINISHED_RUN_STATES: ReadonlySet<string> = new Set(["completed", "failed", "cancelled", "interrupted"]);
+
+/**
+ * The plan does not describe the finished run (C-G1): it still lists queued / running tasks
+ * although the run ended and no process writes it — a run written before plans existed gets a
+ * plan rebuilt from the preview (all "대기"). The 처리 page shows "계획 기록 없음(이전 형식)".
+ */
+export function isLegacyPlan(plan: RunPlan): boolean {
+  if (plan.live) return false;
+  const status = normalizeRunStatus(plan.run_status);
+  if (!FINISHED_RUN_STATES.has(status)) return false;
+  const tasks = plan.counts.tasks;
+  // A completed run cannot still have work queued; a failed / cancelled / interrupted one may
+  // (resume runs it) — unless the plan never started and nothing in it ever ran.
+  if (status === "completed") return tasks.queued + tasks.running > 0;
+  return !plan.started_at && tasks.completed + tasks.partial + tasks.failed === 0 && tasks.queued > 0;
+}
+
 /** "이벤트 로그, 실행 중, 3/5 태스크" — a group row's accessible name. */
 export function groupAriaLabel(group: PlanGroup): string {
   return `${group.label}, ${statusLabel(group.status)}, ${doneCount(group.counts)}/${group.counts.total} 태스크`;
@@ -319,7 +338,7 @@ export function RunPlanTable({
           응답 없음 · 런 프로세스의 신호가 90초 넘게 없습니다
         </p>
       ) : null}
-      {controls ? (
+      {controls && runActive ? (
         <div className="analysis-actions run-plan-controls">
           <DisabledReason reason={busy ? "요청을 보내는 중입니다" : cancelAllReason}>
             <button
@@ -365,9 +384,12 @@ export function RunPlanTable({
                 소요
               </th>
               <th scope="col">비고</th>
-              <th scope="col">
-                <span className="visually-hidden">동작</span>
-              </th>
+              {/* Skip / cancel only while the run runs (C-G1): a finished plan is a record. */}
+              {runActive ? (
+                <th scope="col">
+                  <span className="visually-hidden">동작</span>
+                </th>
+              ) : null}
             </tr>
           </thead>
           <tbody>
@@ -438,24 +460,26 @@ export function RunPlanTable({
                         ? `${group.counts.skipped ? " · " : ""}취소 ${group.counts.cancelled}`
                         : ""}
                     </td>
-                    <td>
-                      <DisabledReason reason={reason}>
-                        <button
-                          type="button"
-                          className="icon-btn run-plan-x"
-                          aria-label={`${group.label} 그룹 ${verb}`}
-                          tabIndex={-1}
-                          data-action-for={key}
-                          data-action={action ?? "none"}
-                          onClick={() => {
-                            if (!action) return;
-                            void send(action, [{ group: group.id }], `${group.label} 그룹 ${verb}`);
-                          }}
-                        >
-                          <Icon name="close" />
-                        </button>
-                      </DisabledReason>
-                    </td>
+                    {runActive ? (
+                      <td>
+                        <DisabledReason reason={reason}>
+                          <button
+                            type="button"
+                            className="icon-btn run-plan-x"
+                            aria-label={`${group.label} 그룹 ${verb}`}
+                            tabIndex={-1}
+                            data-action-for={key}
+                            data-action={action ?? "none"}
+                            onClick={() => {
+                              if (!action) return;
+                              void send(action, [{ group: group.id }], `${group.label} 그룹 ${verb}`);
+                            }}
+                          >
+                            <Icon name="close" />
+                          </button>
+                        </DisabledReason>
+                      </td>
+                    ) : null}
                   </tr>
                 );
               }
@@ -508,24 +532,26 @@ export function RunPlanTable({
                   <td className="process-plan-note" title={tooltip}>
                     {note || "—"}
                   </td>
-                  <td>
-                    <DisabledReason reason={reason}>
-                      <button
-                        type="button"
-                        className="icon-btn run-plan-x"
-                        aria-label={`${task.label} ${verb}`}
-                        tabIndex={-1}
-                        data-action-for={key}
-                        data-action={action ?? "none"}
-                        onClick={() => {
-                          if (!action) return;
-                          void send(action, [{ task: task.id }], `${task.label} ${verb}`);
-                        }}
-                      >
-                        <Icon name="close" />
-                      </button>
-                    </DisabledReason>
-                  </td>
+                  {runActive ? (
+                    <td>
+                      <DisabledReason reason={reason}>
+                        <button
+                          type="button"
+                          className="icon-btn run-plan-x"
+                          aria-label={`${task.label} ${verb}`}
+                          tabIndex={-1}
+                          data-action-for={key}
+                          data-action={action ?? "none"}
+                          onClick={() => {
+                            if (!action) return;
+                            void send(action, [{ task: task.id }], `${task.label} ${verb}`);
+                          }}
+                        >
+                          <Icon name="close" />
+                        </button>
+                      </DisabledReason>
+                    </td>
+                  ) : null}
                 </tr>
               );
             })}

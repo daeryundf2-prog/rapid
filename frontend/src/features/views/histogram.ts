@@ -157,6 +157,143 @@ export function bucketAriaLabel(bucket: TimeBucket, granularity: Granularity): s
   return `${from} ~ ${to} (UTC): ${bucket.count.toLocaleString("ko-KR")}건`;
 }
 
+// --- width-fitted, zone-aware bars (R7 L1, C-V2) -------------------------------------------------
+
+/** One bar per this many pixels of the bar area (482 bars in 460 px was unreadable). */
+export const BAR_PX = 4;
+/** Bars when the width is unknown (not laid out yet, tests). */
+export const DEFAULT_MAX_BARS = 240;
+
+/** Bar widths tried from the finest, for "자동" (each at least the server bucket). */
+const FIT_SIZES_MS = [
+  HOUR,
+  3 * HOUR,
+  6 * HOUR,
+  12 * HOUR,
+  DAY,
+  2 * DAY,
+  7 * DAY,
+  14 * DAY,
+  30 * DAY,
+  91 * DAY,
+  365 * DAY,
+];
+
+/** How many bars fit `widthPx` (one per BAR_PX), DEFAULT_MAX_BARS when unknown. */
+export function maxBarsFor(widthPx: number | null | undefined): number {
+  if (!widthPx || !Number.isFinite(widthPx) || widthPx <= 0) return DEFAULT_MAX_BARS;
+  return Math.max(1, Math.floor(widthPx / BAR_PX));
+}
+
+export interface FittedBars {
+  granularity: Granularity;
+  /** Bar width in ms. */
+  sizeMs: number;
+  buckets: TimeBucket[];
+  /** Server buckets left out by the range (outside it). */
+  clipped: boolean;
+}
+
+/**
+ * Bars of the timeline histogram fitted to the width (C-V2): the server buckets inside the time
+ * range condition (`[fromMs, untilMs)`; a bucket that straddles a bound is kept whole), merged
+ * into the finest bar width that keeps the count ≤ `maxBars`, with bar edges on the display
+ * zone's hours / days (`offsetMinutes`, minutes east of UTC at the first bar).
+ */
+export function fitBuckets(
+  payload: TimelineHistogramPayload,
+  options: {
+    maxBars: number;
+    offsetMinutes?: number;
+    fromMs?: number | null;
+    untilMs?: number | null;
+    /** A chosen bar width (시간 / 일 / 원본 버킷) instead of the fitted one; never below the server bucket. */
+    sizeMs?: number;
+  },
+): FittedBars {
+  const offset = (options.offsetMinutes ?? 0) * 60_000;
+  const from = options.fromMs ?? null;
+  const until = options.untilMs ?? null;
+  const serverMs = Math.max(1, (payload.bucket_seconds ?? 0) * 1000);
+  const kept: TimeBucket[] = [];
+  let clipped = false;
+  for (const bucket of payload.buckets) {
+    const s = parseMs(bucket.start);
+    const e = parseMs(bucket.end);
+    if (s === null || e === null) continue;
+    if ((until !== null && s >= until) || (from !== null && e <= from)) {
+      if (bucket.count) clipped = true;
+      continue;
+    }
+    if (bucket.count) kept.push({ startMs: s, endMs: e, count: bucket.count });
+  }
+  if (kept.length === 0) return { granularity: "native", sizeMs: serverMs, buckets: [], clipped };
+  const first = Math.min(...kept.map((b) => b.startMs));
+  const last = Math.max(...kept.map((b) => b.endMs));
+  const maxBars = Math.max(1, options.maxBars);
+  const fits = (size: number) => {
+    const origin = Math.floor((first + offset) / size) * size - offset;
+    return Math.ceil((last - origin) / size) <= maxBars;
+  };
+  let size =
+    options.sizeMs !== undefined
+      ? Math.max(options.sizeMs, serverMs)
+      : FIT_SIZES_MS.find((candidate) => candidate >= serverMs && fits(candidate));
+  if (size === undefined) {
+    // Wider than a year per bar, or a coarse server bucket: whole server buckets per bar.
+    const per = Math.max(1, Math.ceil((last - first) / maxBars / serverMs));
+    size = per * serverMs;
+    while (!fits(size)) size += serverMs;
+  }
+  const origin = Math.floor((first + offset) / size) * size - offset;
+  const count = Math.max(1, Math.ceil((last - origin) / size));
+  const buckets: TimeBucket[] = Array.from({ length: count }, (_, index) => ({
+    startMs: origin + index * size,
+    endMs: origin + (index + 1) * size,
+    count: 0,
+  }));
+  for (const bucket of kept) {
+    const index = Math.min(count - 1, Math.max(0, Math.floor((bucket.startMs - origin) / size)));
+    const target = buckets[index];
+    if (target) target.count += bucket.count;
+  }
+  const granularity: Granularity = size === HOUR ? "hour" : size === DAY ? "day" : "native";
+  return { granularity, sizeMs: size, buckets, clipped };
+}
+
+/** "막대 1시간" · "막대 6시간" · "막대 1일" · "막대 7일" · "막대 42분" — the width of one bar. */
+export function barSizeLabel(sizeMs: number): string {
+  if (sizeMs >= DAY && sizeMs % DAY === 0) return `막대 ${sizeMs / DAY}일`;
+  if (sizeMs >= HOUR && sizeMs % HOUR === 0) return `막대 ${sizeMs / HOUR}시간`;
+  return `막대 ${Math.max(1, Math.round(sizeMs / 60_000))}분`;
+}
+
+/** Wall-clock parts of `ms` at a fixed offset (minutes east of UTC). */
+function wall(ms: number, offsetMinutes: number) {
+  const d = new Date(ms + offsetMinutes * 60_000);
+  return {
+    date: `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`,
+    md: `${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`,
+    hour: pad(d.getUTCHours()),
+    minute: pad(d.getUTCMinutes()),
+  };
+}
+
+/** Bar label in the display zone: a day-or-wider bar "2026-10-11", an hour bar "10-11 14시", else "2026-10-11 14:00". */
+export function zonedBucketLabel(ms: number, sizeMs: number, offsetMinutes: number): string {
+  const w = wall(ms, offsetMinutes);
+  if (sizeMs >= DAY) return w.date;
+  if (sizeMs === HOUR) return `${w.md} ${w.hour}시`;
+  return `${w.date} ${w.hour}:${w.minute}`;
+}
+
+/** "2026-10-11 14:00 ~ 2026-10-11 15:00 (KST+09:00): 6건". */
+export function zonedBucketAriaLabel(bucket: TimeBucket, offsetMinutes: number, zone: string): string {
+  const a = wall(bucket.startMs, offsetMinutes);
+  const b = wall(bucket.endMs, offsetMinutes);
+  return `${a.date} ${a.hour}:${a.minute} ~ ${b.date} ${b.hour}:${b.minute} (${zone}): ${bucket.count.toLocaleString("ko-KR")}건`;
+}
+
 export const GRANULARITY_LABELS: Record<GranularityChoice, string> = {
   auto: "자동",
   hour: "시간 단위",

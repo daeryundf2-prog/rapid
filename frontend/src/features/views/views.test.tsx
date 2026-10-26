@@ -850,7 +850,7 @@ describe("HistogramView (timeline)", () => {
     const events = captureFilterEvents();
     renderQ(<HistogramView />);
     const group = await screen.findByRole("group", { name: /타임라인 히스토그램, 막대 3개/ });
-    const bars = Array.from(group.querySelectorAll<HTMLButtonElement>("button.hist-bar"));
+    let bars = Array.from(group.querySelectorAll<HTMLButtonElement>("button.hist-bar"));
     expect(bars).toHaveLength(3);
     expect(bars[1]?.getAttribute("aria-label")).toMatch(/6건$/);
     expect(bars.filter((b) => b.tabIndex === 0)).toHaveLength(1);
@@ -862,6 +862,15 @@ describe("HistogramView (timeline)", () => {
       from: "2026-10-01T10:00:00.000Z",
       to: "2026-10-01T11:59:59.999Z",
     });
+
+    // The range condition now shapes the bars too (C-V2): only the two hours inside it remain.
+    await screen.findByRole("group", { name: /타임라인 히스토그램, 막대 2개/ });
+    expect(screen.getByText(/시간 범위 안만/)).toBeTruthy();
+    act(() => {
+      window.dispatchEvent(new CustomEvent("rapidtriage:filter", { detail: { from: null, to: null } }));
+    });
+    await screen.findByRole("group", { name: /타임라인 히스토그램, 막대 3개/ });
+    bars = Array.from(document.querySelectorAll<HTMLButtonElement>("button.hist-bar"));
 
     act(() => bars[1]?.focus());
     fireEvent.keyDown(bars[1] as HTMLElement, { key: "Escape" }); // clears the dragged range

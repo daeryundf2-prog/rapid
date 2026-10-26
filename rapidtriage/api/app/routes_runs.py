@@ -118,6 +118,7 @@ from .row_conditions import (
     output_stamp,
     parse_row_conditions,
 )
+from .run_times import run_identity_fields
 from .runops import (
     build_run_output_preview,
     build_run_viewer_workflow_validation,
@@ -398,6 +399,8 @@ def build_runs_router(
             # Cross-case dialog filter (plan P1 §3.2 cross-case): one stat, no DB open.
             row.update(cross_case_eligibility(job))
             row["search_index_available"] = search_index_available(job)
+            # Run identity (R7 L1): one representative start / end and the evidence time zone.
+            row.update(run_identity_fields(job))
             if job.status in PROGRESS_RUN_STATUSES:
                 # Compact live progress for the run card (full payload on
                 # GET /api/runs/{run_id}); finished runs skip the file read.
@@ -415,6 +418,8 @@ def build_runs_router(
         payload["progress"] = run_progress_payload(job)
         payload.update(cross_case_eligibility(job))
         payload["search_index_available"] = search_index_available(job)
+        # + the newest evidence time that anchors the relative date presets (R7 L1 C-D5).
+        payload.update(run_identity_fields(job, include_timeline_max=True))
         return payload
 
 
