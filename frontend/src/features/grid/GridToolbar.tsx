@@ -354,14 +354,36 @@ export interface GridFooterProps {
   truncatedText?: string;
   /** Loaded vs total line of a server-paged result (unified search: "불러온 250건 / 전체 441건"). */
   loadedSummary?: string;
+  /** Unified search answered by v1 for want of a v2 search index: one line + a link to build it. */
+  indexHint?: { text: string; href: string; linkText: string };
 }
 
 export const TRUNCATED_NOTICE =
   "결과가 상한 또는 시간 제한으로 일부만 표시되었습니다. 키워드나 범위를 좁혀 다시 검색하세요.";
 
+/** The top bar's Esc cancelled the search in flight (R7 P2). */
+export const SEARCH_CANCELLED_TEXT = "검색을 취소했습니다 — 상단 검색창에서 Enter로 다시 검색";
+
 /** Unified search stopped at its wall-clock budget: the hits found so far, in their stable order. */
 export const SEARCH_TRUNCATED_NOTICE =
   "검색이 시간 제한에 도달해 찾은 결과의 앞부분만 표시합니다. 키워드를 더 구체적으로 쓰거나 출처·확장자를 좁혀 다시 검색하세요.";
+
+/**
+ * Footer hint of a console search that v1 answered because the run's v2 search index is not
+ * usable (R7 P2): the index is never built automatically, the link opens its 처리 card.
+ */
+export function searchIndexHint(status: unknown): { text: string; linkText: string } | undefined {
+  switch (status) {
+    case "none":
+      return { text: "v2 색인 없음", linkText: "처리 단계에서 만들기" };
+    case "stale":
+      return { text: "v2 색인이 런 출력보다 오래됨", linkText: "처리 단계에서 다시 만들기" };
+    case "building":
+      return { text: "v2 색인을 만드는 중(끝나면 색인으로 검색)", linkText: "처리 단계에서 보기" };
+    default:
+      return undefined;
+  }
+}
 
 /** Footer line of a server-paged search: rows loaded so far against the total (or "더 있음"). */
 export function searchLoadedText(loaded: number, total: number | null, hasMore: boolean): string {
@@ -397,6 +419,11 @@ export function GridFooter(props: GridFooterProps) {
             : "전체 건수 미확정"}
       </span>
       {props.loadedSummary ? <span data-testid="grid-footer-loaded">{props.loadedSummary}</span> : null}
+      {props.indexHint ? (
+        <span className="grid-note" data-testid="grid-footer-index-hint">
+          {props.indexHint.text} — <a href={props.indexHint.href}>{props.indexHint.linkText}</a>
+        </span>
+      ) : null}
       {props.selectedCount ? (
         <span data-testid="grid-footer-selected">선택 {formatCount(props.selectedCount)}건</span>
       ) : null}

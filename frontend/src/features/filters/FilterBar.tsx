@@ -27,6 +27,7 @@ import { useAppStore } from "../../state/store";
 import { formatTimestamp } from "../../utils/time";
 import { type Grade, useCatalog } from "../flags/catalog";
 import { REVIEW_LABELS } from "../grid/columns/common";
+import { GRID_FILTER_DEBOUNCE_MS } from "../grid/gridUtils";
 import { DEFAULT_PRESET, DENSITY_LABELS, type Density, type GridPreset, PRESET_LABELS } from "../grid/types";
 import { ClockSection, IncidentRange, ResultSection } from "./ConditionSections";
 import {
@@ -57,7 +58,8 @@ import { typeOptionsFor } from "./typeLabels";
 
 const STATUS_ORDER: ReviewStatus[] = ["relevant", "needs-review", "excluded", "include-in-report"];
 const COMMIT_DEBOUNCE_MS = 250;
-const SEARCH_DEBOUNCE_MS = 200;
+// Toolbar text filter: the grid's server text search (timeline / files `q=`) — R7 P2.
+const SEARCH_DEBOUNCE_MS = GRID_FILTER_DEBOUNCE_MS;
 
 /** Toolbar of a stage (visual-polish S2): 탐색 = full filter popover, 검토 / 보고 = their own controls. */
 export type FilterBarVariant = "explore" | "review" | "report";

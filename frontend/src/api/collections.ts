@@ -13,6 +13,13 @@ import {
 } from "../contracts/collection";
 import { ApiError, api } from "./client";
 import { type ArtifactsQuery, artifactsQueryString } from "./runs";
+import {
+  fetchIndexSearchPage,
+  forgetSearchIndex,
+  indexCoversSearch,
+  type SearchIndexStatus,
+  searchIndexStatus,
+} from "./search";
 
 export type RawRow = Record<string, unknown>;
 
@@ -1051,9 +1058,26 @@ export async function fetchSearchRows(
   if (!spec || spec.keywords.length === 0) {
     return { rows: [], total: 0, offset, backend: "none", truncated: false, elapsedMs: 0 };
   }
+  const pageLimit = Math.min(Math.max(1, limit || SEARCH_PAGE_SIZE), 1000);
+  // R7 P2: the run's v2 search index answers the default console search when it is ready.
+  let indexStatus: SearchIndexStatus | undefined;
+  if (indexCoversSearch(spec, query.extension)) {
+    indexStatus = await searchIndexStatus(runId);
+    if (indexStatus === "ready") {
+      try {
+        return await fetchIndexSearchPage(runId, spec.keywords, offset, pageLimit, signal);
+      } catch (error) {
+        // No index any more (404), an unreadable / older-format index (409) or a locked one (503):
+        // v1 answers instead; anything else (a cancelled request, a bad query) is the search's error.
+        if (!(error instanceof ApiError && [404, 409, 503].includes(error.status))) throw error;
+        forgetSearchIndex(runId);
+        indexStatus = "unknown";
+      }
+    }
+  }
   const params = new URLSearchParams();
   for (const keyword of spec.keywords) params.append("keyword", keyword);
-  params.set("limit", String(Math.min(Math.max(1, limit || SEARCH_PAGE_SIZE), 1000)));
+  params.set("limit", String(pageLimit));
   if (offset > 0) params.set("offset", String(offset));
   params.set("search_mode", spec.mode);
   if (spec.ocr) params.set("ocr", "1");
@@ -1077,6 +1101,8 @@ export async function fetchSearchRows(
     hasMore,
     truncated: payload.truncated === true,
     elapsedMs: asNumber(payload.elapsed_ms) ?? 0,
+    // The footer offers to build the index when v1 answered for want of one.
+    ...(indexStatus !== undefined ? { meta: { searchIndex: indexStatus } } : {}),
   };
 }
 

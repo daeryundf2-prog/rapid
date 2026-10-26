@@ -286,12 +286,22 @@ def hit_locator(match: Mapping[str, object]) -> dict[str, object] | None:
     return {"collection": locator.pop("collection"), "kind": locator.pop("kind"), **locator}
 
 
-def finalize_search_hit(match: Mapping[str, object], *, root: str) -> dict[str, object]:
+def finalize_search_hit(
+    match: Mapping[str, object],
+    *,
+    root: str,
+    snippet_source: object | None = None,
+    record_title: bool = True,
+) -> dict[str, object]:
     """Add ``title``/``display_path``/``artifact_type``/``timestamp``/``snippet``/``locator``.
 
     ``path`` stays the full source path (viewer, extraction, citations); the
     grid shows ``display_path`` and keeps ``path`` for the tooltip. ``preview``
     becomes the snippet so no client ever shows a serialized record.
+
+    The v2 index path (``search_index.hits``) has no whole source record: it passes the
+    index row's match context as ``snippet_source`` and ``record_title=False`` (keep the
+    index title instead of summarizing the record).
     """
     item = dict(match)
     source = str(item.get("source") or "")
@@ -299,17 +309,17 @@ def finalize_search_hit(match: Mapping[str, object], *, root: str) -> dict[str, 
     metadata = item.get("metadata") if isinstance(item.get("metadata"), Mapping) else {}
     path = str(item.get("path") or "")
     if source in {"artifacts", "web"}:
-        title = _artifact_title(metadata) or str(item.get("title") or "")
-        snippet_source: object = {
+        title = (_artifact_title(metadata) if record_title else "") or str(item.get("title") or "")
+        context: object = {
             key: value for key, value in metadata.items() if key not in {"path", "provider", "supported"}
         }
     elif source in {"timeline", "indicators"}:
         title = str(item.get("title") or "")
-        snippet_source = metadata
+        context = metadata
     else:
         title = str(item.get("title") or "")
-        snippet_source = str(item.get("preview") or "")
-    snippet, highlights = search_snippet(snippet_source, keywords)
+        context = str(item.get("preview") or "")
+    snippet, highlights = search_snippet(context if snippet_source is None else snippet_source, keywords)
     item["title"] = _compact(title, TITLE_LIMIT) if title else PureWindowsPath(path).name
     item["artifact_type"] = _artifact_type(item) if source in {"artifacts", "web"} else ""
     item["timestamp"] = hit_timestamp(item)

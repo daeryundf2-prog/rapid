@@ -11,6 +11,7 @@ import {
   type ServerSortState,
 } from "../../contracts/collection";
 import { useTimezone } from "../../state/hooks";
+import { searchCancelKey, useSearchState } from "../case/searchState";
 import { applyColumnFilters } from "../filters/columnFilters";
 import {
   applyClientFilters,
@@ -131,6 +132,8 @@ export interface CollectionQueryResult {
    * null while unknown (more pages / scan cap), undefined when the server did not filter.
    */
   serverMatched: number | null | undefined;
+  /** The search collection's request was cancelled with Esc (nothing is requested until resubmitted). */
+  searchCancelled: boolean;
 }
 
 /** Grid column by id for column filters: the collection's columns, else a promoted `f:<key>` column. */
@@ -311,6 +314,12 @@ export function useCollectionQuery(
   // While the server builds a sort index, page 0 is polled and no later page is requested.
   const gateTotal = page0?.sort?.status === "building" ? null : (page0?.total ?? null);
   const sortBuilding = page0?.sort?.status === "building";
+  // R7 P2: a search cancelled with Esc in the top bar is not requested again until resubmitted.
+  const cancelledSearch = useSearchState((s) => s.cancelled);
+  const searchCancelled =
+    query.ref.id === "search" &&
+    cancelledSearch !== null &&
+    cancelledSearch === searchCancelKey(runId, query.search?.keywords ?? []);
 
   const results = useQueries({
     queries: firstPass.map((p) => ({
@@ -319,6 +328,7 @@ export function useCollectionQuery(
         def.fetch(runId as string, { ...query, offset: p * pageSize, limit: pageSize }, signal),
       enabled:
         runId !== null &&
+        !searchCancelled &&
         (p === 0 ||
           (!sortBuilding &&
             (gateTotal !== null
@@ -590,5 +600,6 @@ export function useCollectionQuery(
     clientColumnFilters: plan.clientColumns.length > 0,
     serverColumnFilters: plan.serverColumns.length > 0,
     serverMatched,
+    searchCancelled,
   };
 }

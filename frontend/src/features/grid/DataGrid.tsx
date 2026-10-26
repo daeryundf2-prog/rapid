@@ -30,6 +30,7 @@ import { getRunTree } from "../../api/runs";
 import type { CollectionRef, GridRow } from "../../contracts/collection";
 import type { CommandContext } from "../../contracts/command";
 import { Icon } from "../../icons";
+import { serializeRoute } from "../../router";
 import { currentRun } from "../../state/slices/runs";
 import { useAppStore } from "../../state/store";
 import { runCommandId } from "../analysis/commands";
@@ -73,7 +74,9 @@ import {
   DocsMatchedToggle,
   GridFooter,
   GridToolbar,
+  SEARCH_CANCELLED_TEXT,
   SEARCH_TRUNCATED_NOTICE,
+  searchIndexHint,
   searchLoadedText,
 } from "./GridToolbar";
 import { buildViewerTarget, type GridCommandHost, runBatch, runNote, useGridCommands } from "./gridCommands";
@@ -374,6 +377,12 @@ export function DataGrid(props: DataGridProps = {}) {
     },
     { runId, typeOptions: treeTypes },
   );
+  // R7 P2: v1 answered the console search for want of a usable v2 index — offer to build it.
+  const indexHintText = ref.id === "search" ? searchIndexHint(cq.pageMeta?.searchIndex) : undefined;
+  const searchFooterIndexHint =
+    indexHintText && runId
+      ? { ...indexHintText, href: serializeRoute({ runId, collection: "process", kind: "search-index" }) }
+      : undefined;
   const analysisRowTypesSig =
     ref.id === "analysis" && ref.analysisId
       ? [...new Set(cq.loadedRows.map((row) => row.artifactType ?? ""))].sort().join(",")
@@ -1979,10 +1988,13 @@ export function DataGrid(props: DataGridProps = {}) {
         scope={cq.category ? categoryScopeText(cq.category) : undefined}
         truncatedText={ref.id === "search" ? SEARCH_TRUNCATED_NOTICE : undefined}
         loadedSummary={
-          ref.id === "search" && cq.loadedCount > 0
-            ? searchLoadedText(cq.loadedCount, cq.total, cq.canLoadMore)
-            : undefined
+          ref.id === "search" && cq.searchCancelled
+            ? SEARCH_CANCELLED_TEXT
+            : ref.id === "search" && cq.loadedCount > 0
+              ? searchLoadedText(cq.loadedCount, cq.total, cq.canLoadMore)
+              : undefined
         }
+        indexHint={searchFooterIndexHint}
       />
       {extractResult ? (
         <section className="grid-extract" role="status" aria-label="추출 결과">

@@ -28,7 +28,8 @@ describe("fetchSearchRows paging (R7)", () => {
         }),
     });
     const page = await fetchSearchRows("r1", { search: spec, offset: 250 }, SEARCH_PAGE_SIZE);
-    const params = new URL(calls[0]?.url ?? "", "http://x").searchParams;
+    const params = new URL(calls.find((call) => call.url.includes("/search?"))?.url ?? "", "http://x")
+      .searchParams;
     expect(params.get("limit")).toBe("250");
     expect(params.get("offset")).toBe("250");
     // analysis / ocr / detail / metadata stay at the server defaults (nothing extra sent).
@@ -50,7 +51,11 @@ describe("fetchSearchRows paging (R7)", () => {
         }),
     });
     const page = await fetchSearchRows("r1", { search: { ...spec, ocr: true } }, SEARCH_PAGE_SIZE);
-    expect(new URL(calls[0]?.url ?? "", "http://x").searchParams.get("ocr")).toBe("1");
+    expect(
+      new URL(calls.find((call) => call.url.includes("/search?"))?.url ?? "", "http://x").searchParams.get(
+        "ocr",
+      ),
+    ).toBe("1");
     expect(page.total).toBe(1);
     expect(page.hasMore).toBe(false);
   });
