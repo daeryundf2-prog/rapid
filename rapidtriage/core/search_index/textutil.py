@@ -25,6 +25,24 @@ def fold(value: object) -> str:
     return unicodedata.normalize("NFC", text).casefold()
 
 
+def ascii_lower(text: str) -> str:
+    """``text`` with only A-Z lowered (what SQLite ``lower``/``LIKE`` fold)."""
+    return text.encode("utf-8", "surrogatepass").lower().decode("utf-8", "surrogatepass")
+
+
+def stored_fold(text: str) -> str | None:
+    """``search_doc.text_fold`` of an NFC row ``text``: its casefold where that differs from the
+    ASCII-lowered text (``ÉCOLE``, ``Ａ``, ``ΑΒΓ``, ``Straße``), else ``None`` (no copy).
+
+    SQLite folds ASCII itself (``LIKE``, ``lower``, the trigram tokenizer), so a row whose
+    non-ASCII characters are all caseless (Korean, CJK) or already folded needs no second copy.
+    """
+    if text.isascii():
+        return None
+    folded = text.casefold()
+    return folded if folded != ascii_lower(text) else None
+
+
 _NON_ASCII_RUN_RE = re.compile(r"[^\x00-\x7f]{2,}")
 
 

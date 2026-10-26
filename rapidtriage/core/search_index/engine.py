@@ -53,6 +53,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..files import CATEGORY_RULES
+from ..textnorm import locate_normalized
 from .query import (
     MAX_LIST_ITEMS,
     Group,
@@ -68,6 +69,7 @@ from .query import (
 from .regex_guard import GuardedRegex, RowTimeout
 from .schema import (
     BIGRAM_RULE,
+    FOLD_RULE,
     QUERY_BUDGET_SECONDS,
     QUERY_GRACE_SECONDS,
     READABLE_INDEX_VERSIONS,
@@ -75,6 +77,7 @@ from .schema import (
     open_read_only,
 )
 from .textutil import (
+    ascii_lower,
     fold,
     format_offset,
     is_bigram_term,
@@ -295,10 +298,6 @@ def bigram_match(literal: str) -> str:
     return f'"{literal}"'
 
 
-def ascii_lower(text: str) -> str:
-    return "".join(char.lower() if char.isascii() else char for char in text)
-
-
 def contains_sql(column: str, literal: str) -> tuple[str, str]:
     """``instr`` test of ``column`` containing ``literal`` ignoring ASCII case: ``(sql, param)``.
 
@@ -463,6 +462,7 @@ class CompileContext:
     temp_tables: int = 0
     uses_review: bool = False
     bigram: bool = False  # the index has ``search_bigram`` (v3)
+    folded: bool = False  # the index has ``text_fold`` and folded full-text content (v4)
     _marks: list[Mapping[str, object]] | None = None
 
     def warn(self, message: str) -> None:
@@ -501,6 +501,15 @@ class Compiler:
             return f"EXISTS (SELECT 1 FROM {source} WHERE {column} = d.group_id AND ({where}))"
         return f"d.group_id IN (SELECT {column} FROM {source} WHERE {where})"
 
+    def match_literal(self, literal: str) -> str:
+        """The form a keyword is compared in: NFC + casefold on a v4 index (its full-text content
+        and bigram pairs are folded the same way), else as typed (SQLite folds ASCII only)."""
+        return fold(literal) if self.ctx.folded else literal
+
+    def fold_column(self, prefix: str = "") -> str:
+        """The folded row text (``text_fold`` where the row has one) -- raw ``text`` before v4."""
+        return f"COALESCE({prefix}text_fold, {prefix}text)" if self.ctx.folded else f"{prefix}text"
+
     def _fts_ok(self, literal: str) -> bool:
         return self.ctx.tokenizer == TOKENIZER_TRIGRAM and len(literal) >= 3 and "%" not in literal and "_" not in literal
 
@@ -514,36 +523,45 @@ class Compiler:
         return True
 
     def text_check(self, literal: str, extra: str = "", extra_params: Sequence[object] = ()) -> tuple[str, list[object]]:
-        """Rows whose primary text contains ``literal`` (+ ``extra`` on ``{text}``)."""
+        """Rows whose primary text contains ``literal`` (+ ``extra`` on ``{text}`` = the raw text,
+        ``{fold}`` = the folded text).
+
+        ``literal`` is compared in :meth:`match_literal` form; ``extra`` always reads
+        ``search_doc`` itself (the full-text content of a v4 index is the folded text).
+        """
+        literal = self.match_literal(literal)
         if self.mode == "row":
             if not extra and self._bigram_ok(literal):
                 # Exact without reading the text: the term's (small) row set, computed once.
                 return "d.group_id IN (SELECT rowid FROM search_bigram WHERE search_bigram MATCH ?)", [bigram_match(literal)]
-            test, param = contains_sql("p.text", literal)
+            test, param = contains_sql(self.fold_column("p."), literal)
             sql = f"p.text IS NOT NULL AND {test}"
             params: list[object] = [param]
             if extra:
-                sql += " AND " + extra.format(text="p.text")
+                sql += " AND " + extra.format(text="p.text", fold=self.fold_column("p."))
                 params.extend(extra_params)
             return f"EXISTS (SELECT 1 FROM search_doc p WHERE p.doc_id = d.group_id AND {sql})", params
         if self._fts_ok(literal):
             sql = "SELECT rowid FROM search_text WHERE text LIKE ?"
             params = [f"%{literal}%"]
+            if extra:
+                sql = f"SELECT doc_id FROM search_doc WHERE doc_id IN ({sql})"
         elif self._bigram_ok(literal):
             sql = "SELECT rowid FROM search_bigram WHERE search_bigram MATCH ?"
             params = [bigram_match(literal)]
             if extra:  # contentless: the extra checks read the row's text
                 sql = f"SELECT doc_id FROM search_doc WHERE doc_id IN ({sql})"
         else:
-            test, param = contains_sql("text", literal)
+            test, param = contains_sql(self.fold_column(), literal)
             sql = f"SELECT doc_id FROM search_doc WHERE text IS NOT NULL AND {test}"
             params = [param]
         if extra:
-            sql += " AND " + extra.format(text="text")
+            sql += " AND " + extra.format(text="text", fold=self.fold_column())
             params.extend(extra_params)
         return f"d.group_id IN ({sql})", params
 
     def add_driver(self, literal: str, negated: bool, top: bool) -> None:
+        literal = self.match_literal(literal)
         if self.mode == "set" and top and not negated:
             if self._fts_ok(literal):
                 self.ctx.drivers.append(Driver(literal))
@@ -595,9 +613,10 @@ class Compiler:
             self.add_driver(left, negated, top)
             extra = "sx_near({text}, ?, ?, ?)"
             params: list[object] = [left, right, distance]
-            if self.mode == "set" and self._fts_ok(right):
-                extra += " AND {text} LIKE ?"
-                params.append(f"%{right}%")
+            folded_right = self.match_literal(right)
+            if self.mode == "set" and self._fts_ok(folded_right):
+                extra += " AND {fold} LIKE ?"
+                params.append(f"%{folded_right}%")
             return self.text_check(left, extra, params)
         parts: list[str] = []
         params = []
@@ -1197,6 +1216,7 @@ class SearchIndex:
             connection=self.connection,
             tokenizer=self.tokenizer,
             bigram=self.meta.get("bigram") == BIGRAM_RULE,
+            folded=self.meta.get("fold") == FOLD_RULE,
             tz=tz,
             ref_ms=self.reference_ms(options.reference_ts, tz),
             options=options,
@@ -1233,7 +1253,9 @@ class SearchIndex:
             spans = prepared.regex_spans.setdefault(job.table, {})
             if job.literal and self.tokenizer == TOKENIZER_TRIGRAM and "%" not in job.literal and "_" not in job.literal:
                 sql = "SELECT d.doc_id, d.text FROM search_doc d WHERE d.doc_id IN (SELECT rowid FROM search_text WHERE text LIKE ?) ORDER BY d.doc_id"
-                params: list[object] = [f"%{job.literal}%"]
+                # A v4 index's full-text content is folded: the (prefilter) literal is folded too.
+                literal = fold(job.literal) if prepared.ctx.folded else job.literal
+                params: list[object] = [f"%{literal}%"]
             elif job.literal:
                 sql = "SELECT doc_id, text FROM search_doc WHERE text IS NOT NULL AND instr(lower(text), ?) > 0 ORDER BY doc_id"
                 params = [ascii_lower(job.literal)]
@@ -1511,6 +1533,12 @@ def build_snippet(
         if found is not None:
             matched.append({"term": literal, "field": field_name})
             spans.append((found.start(), found.end()))
+        elif field_name != "word":
+            # Full case folding (``straße`` ~ ``STRASSE``) that ``re.IGNORECASE`` does not do.
+            located = locate_normalized(text, literal)
+            if located is not None and located[0] == text:
+                matched.append({"term": literal, "field": field_name})
+                spans.append((located[1], located[2]))
     for matcher, span in regexes:
         if span is not None and span[1] > span[0]:
             matched.append({"term": matcher.pattern, "field": "re"})
@@ -1527,11 +1555,16 @@ def build_snippet(
     if highlight:
         for field_name, literal in terms:
             pattern = _word_regex(literal) if field_name == "word" else _literal_regex(literal)
+            before = len(marks)
             for found in pattern.finditer(window):
                 if found.end() > found.start():
                     marks.append([found.start(), found.end()])
                 if len(marks) >= MAX_MARKS:
                     break
+            if len(marks) == before and field_name != "word":
+                located = locate_normalized(window, literal)
+                if located is not None and located[0] == window and located[2] > located[1]:
+                    marks.append([located[1], located[2]])
         for matcher, _span in regexes:
             if len(marks) >= MAX_MARKS:
                 break

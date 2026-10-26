@@ -56,6 +56,7 @@ from .schema import (
     BIGRAM_RULE,
     BUILDING_SUFFIX,
     FLATTEN_VERSION,
+    FOLD_RULE,
     INDEX_FILE_NAME,
     INDEX_VERSION,
     QUERY_BUDGET_SECONDS,
@@ -77,6 +78,7 @@ from .textutil import (
     parse_offset,
     parse_ts_ms,
     path_key,
+    stored_fold,
     target_path_key,
 )
 
@@ -998,7 +1000,7 @@ def extract_document_body(path: str, kind: str) -> tuple[str, bool] | None:
 
 DOC_COLUMNS = (
     "doc_id, group_id, collection, kind, locator, analysis_id, domain, artifact_type, title, path, path_fold, path2, path2_fold, "
-    "ext, size, ts, ts_kind, ts_family, ts_labels, actor, actor_sid, computer, md5, sha1, sha256, text, fields_json, deleted, "
+    "ext, size, ts, ts_kind, ts_family, ts_labels, actor, actor_sid, computer, md5, sha1, sha256, text, text_fold, fields_json, deleted, "
     "sig_mismatch, in_archive, pii_count, truncated"
 )
 DOC_INSERT = f"INSERT INTO search_doc ({DOC_COLUMNS}) VALUES ({', '.join('?' for _ in DOC_COLUMNS.split(','))})"
@@ -1043,6 +1045,8 @@ class IndexWriter:
         name = fold_path.rsplit("/", 1)[-1]
         ext = name.rsplit(".", 1)[-1] if "." in name and not name.startswith("!") else ""
         hashes = {alg: value for alg, value in doc.hashes}
+        text_fold = stored_fold(text)
+        content = text_fold if text_fold is not None else text  # what search_text / search_bigram index
         times = sorted(set(doc.times), key=lambda item: (item[0], item[1])) or [(None, "", ())]
         primary = self.next_id
         fields_json = json.dumps(doc.fields, ensure_ascii=False, default=str)[:FIELDS_MAX_CHARS] if doc.fields else "{}"
@@ -1078,6 +1082,7 @@ class IndexWriter:
                     hashes.get("sha1", ""),
                     hashes.get("sha256", ""),
                     text if position == 0 else None,
+                    text_fold if position == 0 else None,
                     fields_json if position == 0 else "{}",
                     doc.deleted,
                     doc.sig_mismatch,
@@ -1088,8 +1093,8 @@ class IndexWriter:
             )
             self.row_count += 1
         if self.fts_inline:
-            self.fts.append((primary, text))
-        pairs = bigram_tokens(text)
+            self.fts.append((primary, content))
+        pairs = bigram_tokens(content)
         if pairs:
             self.bigrams.append((primary, pairs))
         self.fields.extend((primary, name, value, value_int) for name, value, value_int in doc.search_fields)
@@ -1413,6 +1418,7 @@ def build_search_index(
                 "tz_source": "registry" if ctx.tz_offset is not None else ("timeline" if tz is not None else ""),
                 "tokenizer": tokenizer,
                 "bigram": BIGRAM_RULE,
+                "fold": FOLD_RULE,
                 "analyses_indexed": indexed,
                 "summary": build_summary,
             },
@@ -1527,7 +1533,7 @@ def _build_incremental(
         for analysis_id in wanted:
             hooks.check_cancel()
             removed = connection.execute(
-                "SELECT doc_id, text FROM search_doc WHERE analysis_id = ? AND text IS NOT NULL", (analysis_id,)
+                "SELECT doc_id, COALESCE(text_fold, text) FROM search_doc WHERE analysis_id = ? AND text IS NOT NULL", (analysis_id,)
             ).fetchall()
             connection.executemany(
                 "INSERT INTO search_text(search_text, rowid, text) VALUES ('delete', ?, ?)", [(item[0], item[1]) for item in removed]
@@ -1664,6 +1670,10 @@ def stale_reasons(meta: Mapping[str, object], summary: Mapping[str, object], out
     reasons: list[str] = []
     if meta.get("index_version") == "search-index-v2" and meta.get("flatten_version") == FLATTEN_VERSION:
         reasons.append("2자 한글 검색용 색인(bigram)이 없는 이전 형식입니다. 색인을 다시 만드세요")
+    elif meta.get("index_version") == "search-index-v3" and meta.get("flatten_version") == FLATTEN_VERSION:
+        reasons.append(
+            "이전 형식 색인입니다: 영문 외 대소문자(É·Ａ·Σ·ß 등)를 구분 없이 찾지 못하고 파일·문서 적중 시각이 비어 있습니다. 색인을 다시 만드세요"
+        )
     elif meta.get("index_version") != INDEX_VERSION or meta.get("flatten_version") != FLATTEN_VERSION:
         reasons.append("색인 형식이 바뀌었습니다. 다시 만드세요")
     if meta.get("source_summary_sha256") != summary_sha256(summary):

@@ -28,6 +28,14 @@ Deviations from the plan text (documented in docs/plans/search-2026-10-13.md §3
   same rows as the ``instr`` scan. 2-character terms with an ASCII character and
   1-character terms still scan (budgeted, with a warning). ``meta.bigram`` names
   the pair rule; a v2 index (no table) stays readable and is reported stale.
+* ``text_fold`` (index v4, R7 S2 review #2): SQLite ``LIKE``/``lower``/``instr`` fold
+  only ASCII, so ``ÉCOLE``, full-width ``Ａ``, Greek/Cyrillic capitals and ``ß``
+  (casefold ``ss``) never matched a v1-style (NFC + casefold) keyword. ``text_fold``
+  holds ``casefold(text)`` only where that differs from the ASCII-lowered text (a
+  Korean/ASCII row keeps it NULL: no copy), and ``search_text`` indexes the view
+  ``search_text_src`` (``COALESCE(text_fold, text)``); keywords are folded the same
+  way and the bigram pairs come from the folded text. ``meta.fold`` names the rule;
+  a v2/v3 index stays readable (ASCII-only folding) and is reported stale.
 """
 
 from __future__ import annotations
@@ -37,12 +45,15 @@ from pathlib import Path
 
 INDEX_FILE_NAME = "rapidtriage-search.db"
 BUILDING_SUFFIX = ".building"
-INDEX_VERSION = "search-index-v3"
+INDEX_VERSION = "search-index-v4"
 # Older formats the engine still reads (a v2 index has no ``search_bigram``: its
 # 2-character terms scan and the status asks for a rebuild).
-READABLE_INDEX_VERSIONS = frozenset({"search-index-v2", INDEX_VERSION})
+READABLE_INDEX_VERSIONS = frozenset({"search-index-v2", "search-index-v3", INDEX_VERSION})
 BIGRAM_RULE = "nonascii-pairs-v1"
 BIGRAM_SQL = "CREATE VIRTUAL TABLE IF NOT EXISTS search_bigram USING fts5(g, content='', tokenize='ascii', detail=none)"
+FOLD_RULE = "nfc-casefold-v1"
+# The full-text index reads the folded text where the row has one (index v4).
+FOLD_VIEW_SQL = "CREATE VIEW IF NOT EXISTS search_text_src AS SELECT doc_id, COALESCE(text_fold, text) AS text FROM search_doc"
 # Bump when the flattening rules change: an index of an older rule set is stale.
 FLATTEN_VERSION = "flatten-v2"
 
@@ -87,6 +98,7 @@ CREATE TABLE IF NOT EXISTS search_doc (
     sha1 TEXT NOT NULL DEFAULT '',
     sha256 TEXT NOT NULL DEFAULT '',
     text TEXT,
+    text_fold TEXT,
     fields_json TEXT NOT NULL DEFAULT '{}',
     deleted INTEGER NOT NULL DEFAULT 0,
     sig_mismatch INTEGER NOT NULL DEFAULT 0,
@@ -172,11 +184,12 @@ def fts_sql(tokenizer: str) -> str:
     else:
         options = "tokenize='unicode61 remove_diacritics 0'"
     # Identifiers are constants: the tokenizer is one of two literals above.
-    return f"CREATE VIRTUAL TABLE IF NOT EXISTS search_text USING fts5(text, content='search_doc', content_rowid='doc_id', {options})"
+    return f"CREATE VIRTUAL TABLE IF NOT EXISTS search_text USING fts5(text, content='search_text_src', content_rowid='doc_id', {options})"
 
 
 def create_schema(connection: sqlite3.Connection, tokenizer: str, *, with_indexes: bool) -> None:
     connection.executescript(SCHEMA_TABLES)
+    connection.execute(FOLD_VIEW_SQL)
     connection.execute(fts_sql(tokenizer))
     connection.execute(BIGRAM_SQL)
     if with_indexes:
