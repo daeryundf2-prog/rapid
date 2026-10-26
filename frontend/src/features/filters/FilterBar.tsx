@@ -6,11 +6,25 @@
  * The URL stays the source of truth (filterStore / filterModel are unchanged).
  */
 
-import { type ReactNode, type RefObject, useEffect, useId, useRef, useState, type WheelEvent } from "react";
+import { QueryClientContext, useQuery } from "@tanstack/react-query";
+import {
+  type ReactNode,
+  type RefObject,
+  useContext,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type WheelEvent,
+} from "react";
 import { announce } from "../../a11y";
+import { runDetailQuery, runStartedAt } from "../../api/runs";
 import { Popover } from "../../components/Popover";
 import type { ReviewStatus } from "../../contracts/collection";
 import { Icon } from "../../icons";
+import { useTimezone } from "../../state/hooks";
+import { useAppStore } from "../../state/store";
+import { formatTimestamp } from "../../utils/time";
 import { type Grade, useCatalog } from "../flags/catalog";
 import { REVIEW_LABELS } from "../grid/columns/common";
 import { DEFAULT_PRESET, DENSITY_LABELS, type Density, type GridPreset, PRESET_LABELS } from "../grid/types";
@@ -26,16 +40,14 @@ import {
 } from "./conditionMemory";
 import { useConditionPanel } from "./conditionPanel";
 import {
-  activeChips,
-  activePreset,
-  type FilterChip,
-  hasActiveFilters,
-  presetRange,
-  removeChip,
-  TIME_PRESET_LABELS,
-  type TimePreset,
-  toInputValue,
-} from "./filterModel";
+  activeRelativePreset,
+  type PresetAnchor,
+  presetAnchor,
+  RELATIVE_PRESETS,
+  relativePresetLabel,
+  relativePresetRange,
+} from "./conditionValues";
+import { activeChips, type FilterChip, hasActiveFilters, removeChip, toInputValue } from "./filterModel";
 import { type FilterReport, useFilterStore } from "./filterStore";
 import { orderedRange } from "./rowConditions";
 import "./filters.css";
@@ -146,6 +158,65 @@ export function chipStripWheel(event: WheelEvent<HTMLElement>): void {
   el.scrollLeft += event.deltaY;
 }
 
+/**
+ * 시간 범위 presets (C-D5): counted back from the newest evidence time of the open run (run detail
+ * `timeline_max_ts`), else its start — "증거 기준 최근 7일" — so 2025 evidence opened in 2026 still
+ * finds rows. Without a run (or a query client) they count back from the clock ("최근 7일").
+ */
+function RelativePresets() {
+  const client = useContext(QueryClientContext);
+  const runId = useAppStore((s) => s.route.runId);
+  return client && runId ? (
+    <RunRelativePresets runId={runId} />
+  ) : (
+    <PresetButtons anchor={presetAnchor(null, null)} />
+  );
+}
+
+function RunRelativePresets({ runId }: { runId: string }) {
+  const run = useAppStore((s) => s.runs.find((item) => item.run_id === runId) ?? null);
+  const detail = useQuery({ ...runDetailQuery(runId), staleTime: 60_000, retry: false });
+  const anchor = presetAnchor(
+    detail.data?.timeline_max_ts,
+    detail.data ? runStartedAt(detail.data) : run ? runStartedAt(run) : null,
+  );
+  return <PresetButtons anchor={anchor} />;
+}
+
+function PresetButtons({ anchor }: { anchor: PresetAnchor }) {
+  const filters = useFilterStore((s) => s.filters);
+  const patch = useFilterStore((s) => s.patchFilters);
+  const { timezone } = useTimezone();
+  const preset = activeRelativePreset(filters, anchor);
+  const basis =
+    anchor.source === "evidence"
+      ? `증거 최신 시각 ${formatTimestamp(anchor.ms / 1000, timezone, { precision: "minute" })}부터 거꾸로 셉니다`
+      : anchor.source === "run-start"
+        ? `증거 시각을 모르는 런: 런 시작 ${formatTimestamp(anchor.ms / 1000, timezone, { precision: "minute" })}부터 셉니다`
+        : undefined;
+  return (
+    <div
+      className="segmented filter-segment"
+      data-testid="relative-presets"
+      data-anchor={anchor.source}
+      title={basis}
+    >
+      {RELATIVE_PRESETS.map((id) => (
+        <button
+          key={id}
+          type="button"
+          aria-pressed={preset === id}
+          onClick={() =>
+            preset === id ? patch({ from: undefined, to: undefined }) : patch(relativePresetRange(id, anchor))
+          }
+        >
+          {relativePresetLabel(id, anchor)}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /** Popover body (탐색): time range, type, status, tag, extension, path. */
 function FilterPopoverBody({ tagListId }: { tagListId: string }) {
   const filters = useFilterStore((s) => s.filters);
@@ -154,27 +225,13 @@ function FilterPopoverBody({ tagListId }: { tagListId: string }) {
   const patch = useFilterStore((s) => s.patchFilters);
   const typeCounts = useFilterStore((s) => s.typeCounts);
   const [typeQuery, setTypeQuery] = useState("");
-  const preset = activePreset(filters);
   const types = [...new Set([...typeOptions, ...filters.types])].sort((a, b) => a.localeCompare(b, "ko"));
   const shownTypes = typeOptionsFor(types, typeCounts, typeQuery);
   return (
     <>
       <fieldset className="popover-section" aria-label="시간 범위">
         <legend className="popover-title">시간 범위</legend>
-        <div className="segmented filter-segment">
-          {(Object.keys(TIME_PRESET_LABELS) as TimePreset[]).map((id) => (
-            <button
-              key={id}
-              type="button"
-              aria-pressed={preset === id}
-              onClick={() =>
-                preset === id ? patch({ from: undefined, to: undefined }) : patch(presetRange(id))
-              }
-            >
-              {TIME_PRESET_LABELS[id]}
-            </button>
-          ))}
-        </div>
+        <RelativePresets />
         <IncidentRange />
         <RecentRanges onPick={(range) => patch({ from: range.from, to: range.to })} />
         {/* One column (review #10): a datetime field needs the popover's full width. */}

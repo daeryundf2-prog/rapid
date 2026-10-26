@@ -164,11 +164,11 @@ describe("App shell", () => {
     renderApp();
     // The case picker is a combobox popover (review #5): open it, then pick the case row.
     const picker = await screen.findByTestId("case-picker");
-    await waitFor(() => expect(picker.textContent).toContain("케이스 선택"));
+    await waitFor(() => expect(picker.textContent).toContain("런 선택"));
     fireEvent.click(picker);
-    const search = screen.getByRole("combobox", { name: "케이스 검색" });
+    const search = screen.getByRole("combobox", { name: "런 검색" });
     expect(document.activeElement).toBe(search);
-    const options = within(screen.getByRole("listbox", { name: "케이스" })).getAllByRole("option");
+    const options = within(screen.getByRole("listbox", { name: "런" })).getAllByRole("option");
     expect(options).toHaveLength(1);
     fireEvent.keyDown(search, { key: "Enter" });
     expect(window.location.hash).toBe("#/case/run-aaaaaaaa/intake");

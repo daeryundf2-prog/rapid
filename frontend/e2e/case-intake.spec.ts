@@ -173,10 +173,10 @@ test("Q-X1: 케이스 만들기 3단계 → 실행 → 접수 5 cards, kept afte
     window.location.hash = "";
   });
   await page.getByTestId("landing-open").click();
-  const picker = page.getByRole("dialog", { name: "케이스 전환" });
+  const picker = page.getByRole("dialog", { name: "케이스 열기" });
   await expect(picker.getByRole("list", { name: "케이스 › 증거 › 런" })).toContainText(caseNumber);
   await expect(
-    picker.getByRole("button", { name: new RegExp(`^${caseNumber} › E-01 › .* · 완료$`) }),
+    picker.getByRole("button", { name: new RegExp(`^${caseNumber} › E-01 › .* · 완료 · `) }),
   ).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(picker).toBeHidden();

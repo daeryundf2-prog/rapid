@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import unicodedata
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from pathlib import Path
@@ -13,6 +14,8 @@ from .jsonl_records import iter_artifact_records
 ARTIFACT_PATH_FILTER_SCAN_CAP = 2_000_000
 # Rows scanned per request by the all-kinds ``artifact_type=`` pager.
 CROSS_KIND_SCAN_CAP = 200_000
+# Rows between two wall-clock budget checks of a filter scan.
+BUDGET_CHECK_ROWS = 512
 # ``channel=`` (event-log channel, exact match on ``details.channel``) bounds.
 MAX_CHANNEL_VALUES = 256
 MAX_CHANNEL_CHARS = 256
@@ -140,6 +143,7 @@ def filter_artifact_page(
     channels: ChannelFilter | Collection[str] | None = None,
     fields: FieldFilters | None = None,
     row_filter: Callable[[Mapping[str, object]], bool] | None = None,
+    deadline: float | None = None,
 ) -> dict[str, object]:
     """Page only rows whose ``path`` contains ``path_contains`` (NFC, case-insensitive),
     when ``artifact_types`` is given, whose ``artifact_type`` is one of them,
@@ -155,7 +159,8 @@ def filter_artifact_page(
     ``rows_source`` yields ``(record_index, row)`` in another order (server
     sort); by default rows stream in JSONL order, records ``0..record_limit-1``
     only when ``record_limit`` is given. Every returned row carries its
-    original ``record_index``.
+    original ``record_index``. ``deadline`` (``time.monotonic()``) stops the
+    scan like ``scan_cap`` (``truncated``, ``budget_stopped``).
     """
     needle = nfc_fold(path_contains) if path_contains else ""
     wanted_types = frozenset(artifact_types) if artifact_types else None
@@ -166,6 +171,7 @@ def filter_artifact_page(
     scanned = 0
     has_more = False
     exhausted = True
+    budget_stopped = False
     if rows_source is None:
         rows_source = iter_artifact_records(payload, payload_path=payload_path, limit=record_limit)
     for record_index, row in rows_source:
@@ -173,6 +179,10 @@ def filter_artifact_page(
             # Checked before scanning the next row (like ``filter_across_kinds``):
             # a scan that ends exactly at the cap is complete, not truncated.
             exhausted = False
+            break
+        if deadline is not None and scanned % BUDGET_CHECK_ROWS == 0 and time.monotonic() >= deadline:
+            exhausted = False
+            budget_stopped = True
             break
         scanned += 1
         if matches(row):
@@ -202,6 +212,7 @@ def filter_artifact_page(
         **({"fields": {key: sorted(values) for key, values in fields.items()}} if fields else {}),
         "scanned": scanned,
         "truncated": not exhausted and not has_more,
+        **({"budget_stopped": True} if budget_stopped else {}),
     }
     return page
 
@@ -287,6 +298,7 @@ def filter_across_kinds(
     channels: ChannelFilter | Collection[str] | None = None,
     fields: FieldFilters | None = None,
     row_filter: Callable[[Mapping[str, object]], bool] | None = None,
+    deadline: float | None = None,
 ) -> dict[str, object]:
     """Page filtered rows across kinds (``sources`` order) as one collection (``row_filter``: row conditions).
 
@@ -321,6 +333,7 @@ def filter_across_kinds(
     scanned = 0
     has_more = False
     exhausted = True
+    budget_stopped = False
     last: tuple[str, int] | None = None
     for position in range(start_pos, len(sources)):
         kind, payload, payload_path = sources[position]
@@ -333,6 +346,10 @@ def filter_across_kinds(
         for record_index, row in kind_rows:
             if scanned >= scan_cap:
                 exhausted = False
+                break
+            if deadline is not None and scanned % BUDGET_CHECK_ROWS == 0 and time.monotonic() >= deadline:
+                exhausted = False
+                budget_stopped = True
                 break
             scanned += 1
             if matches(row):
@@ -373,6 +390,7 @@ def filter_across_kinds(
             **({"fields": {key: sorted(values) for key, values in fields.items()}} if fields else {}),
             "scanned": scanned,
             "truncated": not exhausted and not has_more,
+            **({"budget_stopped": True} if budget_stopped else {}),
             **dict(extra or {}),
         },
     }

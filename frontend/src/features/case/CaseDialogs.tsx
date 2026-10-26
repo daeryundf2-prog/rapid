@@ -141,7 +141,7 @@ export function LinkCaseDialog({
         </div>
       }
     >
-      <p className="case-reason">이 런의 처리 옵션을 케이스에 스냅숏으로 남기고 증거 번호를 붙입니다.</p>
+      <p className="case-reason">이 런의 처리 옵션을 케이스에 스냅샷으로 남기고 증거 번호를 붙입니다.</p>
       {cases.isPending ? <p aria-busy="true">케이스 목록을 불러오는 중…</p> : null}
       {cases.isError ? <ErrorText>케이스 목록을 불러오지 못했습니다.</ErrorText> : null}
       {cases.data && sorted.length === 0 ? (

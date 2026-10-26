@@ -27,10 +27,10 @@ describe("case picker model (review #5)", () => {
     const options = casePickerOptions(runs);
     expect(options.map((o) => o.runId)).toEqual(["new22222", "mid33333", "old11111"]);
     expect(options[0]).toMatchObject({ name: "beta", mode: "침해사고", status: "failed", tone: "danger" });
-    expect(options[1]).toMatchObject({ name: "mid33333", mode: "케이스", tone: "info" });
+    expect(options[1]).toMatchObject({ name: "mid33333", mode: "모드 없음", tone: "info" });
     expect(options[2]?.tone).toBe("ok");
     expect(options[0]?.date).toBe(shortDateTime("2026-10-12T09:00:00Z"));
-    expect(shortDateTime("2026-10-12T09:00:00Z")).toMatch(/^2026-10-1\d \d\d:\d\d$/);
+    expect(shortDateTime("2026-10-12T09:00:00Z", "Asia/Seoul")).toBe("2026-10-12 18:00");
     expect(shortDateTime(undefined)).toBe("");
   });
 
@@ -59,7 +59,7 @@ describe("case combobox (review #5)", () => {
 
   const open = () => {
     fireEvent.click(screen.getByTestId("case-picker"));
-    return screen.getByRole("combobox", { name: "케이스 검색" });
+    return screen.getByRole("combobox", { name: "런 검색" });
   };
 
   it("opens a popover with search on top; ↓ / ↑ move, Enter opens the case", () => {
@@ -69,7 +69,7 @@ describe("case combobox (review #5)", () => {
     const search = open();
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
     expect(document.activeElement).toBe(search);
-    const list = screen.getByRole("listbox", { name: "케이스" });
+    const list = screen.getByRole("listbox", { name: "런" });
     const options = within(list).getAllByRole("option");
     expect(options.map((o) => o.querySelector(".case-picker-option-name")?.textContent)).toEqual([
       "beta",
@@ -96,7 +96,7 @@ describe("case combobox (review #5)", () => {
     expect(screen.queryByRole("listbox")).toBeNull();
     expect(document.activeElement).toBe(trigger);
     fireEvent.keyDown(trigger, { key: "a" });
-    const typed = screen.getByRole("combobox", { name: "케이스 검색" }) as HTMLInputElement;
+    const typed = screen.getByRole("combobox", { name: "런 검색" }) as HTMLInputElement;
     expect(typed.value).toBe("a");
     const names = within(screen.getByRole("listbox"))
       .getAllByRole("option")

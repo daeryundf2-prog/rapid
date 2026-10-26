@@ -66,3 +66,90 @@ export function normalizeWeekdays(values: readonly unknown[]): string[] {
 export function normalizeContent(values: readonly unknown[]): string[] {
   return CONTENT_TYPE_IDS.filter((id) => values.includes(id));
 }
+
+// --- relative date presets (R7 L1, C-D5) ---------------------------------------------------------
+// "최근 7일" counted back from the wall clock finds nothing in 2025 evidence opened in 2026: the
+// presets count back from the newest evidence time (`timeline_max_ts` of the run detail), else
+// from the run's start, and say which ("증거 기준 최근 7일").
+
+export type RelativePreset = "today" | "1d" | "7d" | "30d";
+
+export const RELATIVE_PRESETS: readonly RelativePreset[] = ["today", "1d", "7d", "30d"];
+
+const RELATIVE_DAYS: Record<Exclude<RelativePreset, "today">, number> = { "1d": 1, "7d": 7, "30d": 30 };
+
+/** What the presets count back from: the newest evidence time, the run start, or the clock. */
+export interface PresetAnchor {
+  /** Epoch ms of the anchor. */
+  ms: number;
+  source: "evidence" | "run-start" | "now";
+}
+
+/** The anchor of a run: `timeline_max_ts` (evidence), else its start, else now. */
+export function presetAnchor(
+  evidenceMax: string | null | undefined,
+  runStart: string | null | undefined,
+  now: number = Date.now(),
+): PresetAnchor {
+  const evidence = evidenceMax ? Date.parse(evidenceMax) : Number.NaN;
+  if (Number.isFinite(evidence)) return { ms: evidence, source: "evidence" };
+  const start = runStart ? Date.parse(runStart) : Number.NaN;
+  if (Number.isFinite(start)) return { ms: start, source: "run-start" };
+  return { ms: now, source: "now" };
+}
+
+const ANCHOR_PREFIX: Record<PresetAnchor["source"], string> = {
+  evidence: "증거 기준 ",
+  "run-start": "런 시작 기준 ",
+  now: "",
+};
+
+/** "증거 기준 최근 7일" · "증거 기준 마지막 날" (today) · "최근 7일" (clock). */
+export function relativePresetLabel(preset: RelativePreset, anchor: PresetAnchor): string {
+  const prefix = ANCHOR_PREFIX[anchor.source];
+  if (preset === "today") return anchor.source === "now" ? "오늘" : `${prefix}마지막 날`;
+  return `${prefix}최근 ${RELATIVE_DAYS[preset]}일`;
+}
+
+/** Browser-local `YYYY-MM-DDTHH:mm` (the value format of the filter's datetime-local inputs). */
+function localInput(ms: number): string {
+  const date = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+/**
+ * The range of a preset counted back from the anchor: N days before it up to its minute (the
+ * `to` bound covers the whole minute), "today" = the anchor's local day up to the anchor.
+ */
+export function relativePresetRange(
+  preset: RelativePreset,
+  anchor: PresetAnchor,
+): { from: string; to: string } {
+  let start: number;
+  if (preset === "today") {
+    const day = new Date(anchor.ms);
+    day.setHours(0, 0, 0, 0);
+    start = day.getTime();
+  } else {
+    start = anchor.ms - RELATIVE_DAYS[preset] * 86_400_000;
+  }
+  return { from: localInput(start), to: localInput(anchor.ms) };
+}
+
+/** The preset the current range equals (a minute of slack), or null. */
+export function activeRelativePreset(
+  range: { from?: string; to?: string },
+  anchor: PresetAnchor,
+): RelativePreset | null {
+  if (!range.from || !range.to) return null;
+  for (const preset of RELATIVE_PRESETS) {
+    const want = relativePresetRange(preset, anchor);
+    if (
+      Math.abs(Date.parse(want.from) - Date.parse(range.from)) <= 60_000 &&
+      Math.abs(Date.parse(want.to) - Date.parse(range.to)) <= 60_000
+    )
+      return preset;
+  }
+  return null;
+}

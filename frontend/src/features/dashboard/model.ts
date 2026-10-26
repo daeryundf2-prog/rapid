@@ -7,6 +7,10 @@ import type { ReviewCounts, SavedSearch } from "../../api/caseDb";
 import type { ExportEntry } from "../../api/dashboard";
 import type { CanonicalCounts, RunTree } from "../../api/runs";
 import type { ReviewStatus } from "../../contracts/collection";
+import { runEvidenceTimezone } from "../../state/hooks";
+import { currentRun } from "../../state/slices/runs";
+import { useAppStore } from "../../state/store";
+import { formatRunTime } from "../../utils/time";
 import { type ArtifactCategory, groupByCategory } from "../tree/categories";
 import { artifactKindNodes } from "../tree/model";
 
@@ -76,10 +80,20 @@ export function formatDuration(value: number | null | undefined): string {
   return `${Math.floor(m / 60)}시간 ${m % 60}분`;
 }
 
-export function formatTime(value: string | null | undefined): string {
+/** The display timezone right now (URL `tz=` > preference > evidence zone > browser), outside React. */
+export function displayTimezoneNow(): string {
+  const state = useAppStore.getState();
+  return state.route.tz ?? state.timezone ?? runEvidenceTimezone(currentRun(state)) ?? "local";
+}
+
+/**
+ * Times of the 접수 cards (C-G4): the one console format — "2026-10-17 20:18" in the display
+ * timezone (`formatRunTime`), never the browser's `toLocaleString`; "—" when missing, the raw text
+ * when unparseable.
+ */
+export function formatTime(value: string | null | undefined, tz: string = displayTimezoneNow()): string {
   if (!value) return "—";
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString("ko-KR");
+  return formatRunTime(value, tz);
 }
 
 // --- artifact categories ----------------------------------------------------

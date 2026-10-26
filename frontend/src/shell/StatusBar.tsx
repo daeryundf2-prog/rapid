@@ -1,6 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { QueryClientContext, useQuery } from "@tanstack/react-query";
+import { useContext, useEffect, useRef, useState } from "react";
 import { announce } from "../a11y";
-import { normalizeRunStatus, RETRYABLE_RUN_STATUSES } from "../api/runs";
+import { listCases } from "../api/cases";
+import {
+  normalizeRunStatus,
+  RETRYABLE_RUN_STATUSES,
+  type RunEvidenceTimezone,
+  runEvidenceZone,
+  runStartedAt,
+} from "../api/runs";
 import type { RunWithProgress } from "../api/runsProgress";
 import { runDisplayName } from "../app/collections";
 import { CommandButton } from "../commands/CommandButton";
@@ -10,7 +18,7 @@ import { serializeRoute } from "../router";
 import { useRuns, useTimezone } from "../state/hooks";
 import { isRunActive } from "../state/slices/runs";
 import { useAppStore } from "../state/store";
-import { tzOffsetLabel } from "../utils/time";
+import { evidenceZoneOption, tzOffsetLabel } from "../utils/time";
 import { Slot } from "./slots";
 
 const NOTICE_MS = 6000;
@@ -118,7 +126,7 @@ function useNow(active: boolean): number {
 function RunProgress({ run }: { run: RunWithProgress }) {
   const active = isRunActive(run);
   const now = useNow(active);
-  const started = run.created_at ? Date.parse(run.created_at) : Number.NaN;
+  const started = Date.parse(runStartedAt(run) ?? "");
   const errors = run.progress?.error_count ?? 0;
   const planCounts = run.progress?.plan_counts;
   const planTotal = typeof planCounts?.tasks === "number" ? planCounts.tasks : 0;
@@ -233,16 +241,33 @@ const TZ_OPTIONS: ReadonlyArray<[string, string]> = [
   ["Europe/London", "런던"],
 ];
 
+/**
+ * Zone choices of the status bar: the evidence system's zone first when the run recorded one
+ * (P6: "증거 시스템(KST −540)"), then the fixed list; the current choice is kept when unknown.
+ */
+export function timezoneOptions(
+  evidence: RunEvidenceTimezone | null | undefined,
+  current?: string,
+): Array<[string, string]> {
+  const options: Array<[string, string]> = [];
+  const zone = evidenceZoneOption(evidence);
+  if (zone) options.push([zone.value, zone.label]);
+  for (const option of TZ_OPTIONS)
+    if (!options.some(([value]) => value === option[0])) options.push([...option]);
+  if (current && !options.some(([value]) => value === current)) options.unshift([current, current]);
+  return options;
+}
+
 /** "시간대 UTC+09:00" with a select that changes the global display timezone (X4). */
 export function TimezoneControl() {
   const { timezone, setTimezone } = useTimezone();
-  const known = TZ_OPTIONS.some(([value]) => value === timezone);
+  const { currentRun } = useRuns();
+  const options = timezoneOptions(runEvidenceZone(currentRun), timezone);
   return (
     <label className="status-tz" data-testid="status-tz">
       <span>시간대 {tzOffsetLabel(timezone)}</span>
       <select aria-label="표시 시간대" value={timezone} onChange={(event) => setTimezone(event.target.value)}>
-        {known ? null : <option value={timezone}>{timezone}</option>}
-        {TZ_OPTIONS.map(([value, label]) => (
+        {options.map(([value, label]) => (
           <option key={value} value={value}>
             {label}
           </option>
@@ -252,12 +277,25 @@ export function TimezoneControl() {
   );
 }
 
+/** "런 40건 · 케이스 1건" (C-G5); the case count only once known. */
+export function runCountText(runCount: number, caseCount?: number | null): string {
+  const runs = `런 ${n(runCount)}건`;
+  return typeof caseCount === "number" ? `${runs} · 케이스 ${n(caseCount)}건` : runs;
+}
+
+function RunCaseCount({ runCount }: { runCount: number }) {
+  const cases = useQuery({ queryKey: ["cases"], queryFn: listCases, retry: false });
+  return <span data-testid="status-run-count">{runCountText(runCount, cases.data?.length)}</span>;
+}
+
 /** Bottom status bar (plan U8): run progress, cancel/retry, connection, last command notice. */
 export function StatusBar() {
   const { runs, runsStatus, currentRun } = useRuns();
   const notice = useAppStore((s) => s.notice);
   const clearNotice = useAppStore((s) => s.clearNotice);
   const activeCount = runs.filter(isRunActive).length;
+  // Runs and cases are different things (C-G5): "런 40건 · 케이스 1건" (cases need the query client).
+  const queryClient = useContext(QueryClientContext);
 
   useEffect(() => {
     if (!notice) return;
@@ -269,8 +307,10 @@ export function StatusBar() {
     <footer className="statusbar" data-testid="statusbar">
       {currentRun ? (
         <RunProgress run={currentRun} />
+      ) : queryClient ? (
+        <RunCaseCount runCount={runs.length} />
       ) : (
-        <span data-testid="status-run-count">케이스 {runs.length}건</span>
+        <span data-testid="status-run-count">{runCountText(runs.length)}</span>
       )}
       {activeCount > 0 && (!currentRun || !isRunActive(currentRun)) ? (
         <span>실행 중 런 {activeCount}건</span>
