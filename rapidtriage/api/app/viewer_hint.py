@@ -49,4 +49,3 @@ def sqlite_viewer_hint(detected_by: str, table_names: Iterable[str]) -> dict[str
         "sqlite_tables": names,
         "row_tables": row_tables,
     }
-
