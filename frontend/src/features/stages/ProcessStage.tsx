@@ -50,10 +50,10 @@ import { snapshotQueryKey } from "../case/caseLink";
 import { runDurationText, runModeText, runStartText, runTimeTooltip } from "../case/runTime";
 import { DisclosuresCard } from "../dashboard/cards";
 import { SnapshotCard } from "../dashboard/caseCards";
-import { disclosureDigest, disclosureItems, runWarnings } from "../dashboard/disclosures";
+import { disclosureDigest, disclosureItems, runWarnings, stepLabelKo } from "../dashboard/disclosures";
 import { formatCount } from "../grid/gridUtils";
 import { isLegacyPlan, planSummaryText, RunPlanTable } from "./RunPlanTable";
-import { stepNameLabel, stepStatusLabel, stepWarningLabel } from "./stepLabels";
+import { stepStatusLabel, stepWarningLabel } from "./stepLabels";
 import { useNow } from "./useNow";
 import "../analysis/analysis.css";
 import "../dashboard/dashboard.css";
@@ -451,7 +451,7 @@ function StepList({
                 return (
                   // biome-ignore lint/suspicious/noArrayIndexKey: steps have no id; order is stable
                   <tr key={index} data-status={text(step.status) || undefined}>
-                    <td title={id || undefined}>{id ? stepNameLabel(id) : `단계 ${index + 1}`}</td>
+                    <td title={id || undefined}>{id ? stepLabelKo(id) : `단계 ${index + 1}`}</td>
                     <td>
                       {/* Step state as the shared dot + text chip (review #24). */}
                       {status ? (
