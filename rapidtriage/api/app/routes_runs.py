@@ -69,7 +69,11 @@ from .files_index import (
     NtfsTimes,
     files_matched_positions,
     files_ordered_positions,
+    files_sort_values,
+    files_time_basis,
     parse_files_sort,
+    split_sort_order,
+    unknown_sort_descriptor,
 )
 from .files_ntfs import (
     join_files_page,
@@ -1549,7 +1553,7 @@ def build_runs_router(
         flag: list[str] = Query(default=[]),
         flag_grade: str | None = Query(default=None),
         sort: str | None = Query(default=None),
-        order: str | None = Query(default=None, pattern="^(asc|desc)$"),
+        order: str | None = Query(default=None, pattern="^([Aa][Ss][Cc]|[Dd][Ee][Ss][Cc])$"),
         q: str | None = Query(default=None, max_length=512),
         path_prefix: str | None = Query(default=None),
         recursive: str | None = Query(default=None),
@@ -1595,8 +1599,12 @@ def build_runs_router(
         ``category``, ``flag``/``flag_grade``, ``sort=flags``). The row time is the 수정 time:
         ``fs_modified_at``, else for an acquisition copy the NTFS ``$SI`` modified time, looked up
         in the NTFS join index once per join state and only when the list has such rows and the
-        join status is ``joined`` (an acquisition copy without the join has no time and never
-        matches), else ``modified_at``. The matching rows of a query (with ``category`` and the
+        join status is ``joined``, else ``modified_at`` -- also for an acquisition copy without an
+        NTFS time (folder input: the copy's own time, the same time ``sort=mtime`` orders by);
+        placeholder times (1601-01-01, 1970-01-01, 1980-01-01 00:00 UTC) count as none. A page
+        with a time condition (or ``sort=mtime``) reports ``time_basis`` = ``ntfs`` (evidence
+        file-system times only) | ``acquisition-copy`` (copy times only) | ``mixed`` | ``none`` and
+        ``time_basis_counts = {ntfs, acquisition_copy, none}`` over the whole list. The matching rows of a query (with ``category`` and the
         folder filter) are kept per files-output revision and NTFS join state, so later pages do
         not rescan the list: ``matched`` is exact and ``truncated`` false. ``content`` maps to the scan categories
         (문서 documents · 이미지 images · 압축 archives · 실행 executables · DB databases · 메일
@@ -1609,17 +1617,21 @@ def build_runs_router(
         ``category``).
 
         Server sort and text filter (plan r7 §3.2 갈래 L2): ``sort=name|path|size|mtime|ctime``
-        with ``order=asc|desc`` (or ``sort=size:desc``) orders the WHOLE list from the files column
+        with ``order=asc|desc`` (or ``sort=size:desc``; both case-insensitive, ``order`` wins; it
+        also applies to ``sort=flags``: desc = C, B, A, unflagged) orders the WHOLE list from the files column
         index (files_index.files_sort_order: built once per files revision, later pages slice it);
         rows without the value come last in both orders, ties keep list order. ``mtime`` = the
         console's 수정 time (``fs_modified_at``, an acquisition copy's NTFS ``$SI`` modified time
         when joined, else ``modified_at``); ``ctime`` = the "NTFS 생성" column (the NTFS join's
         ``created_at``; without a joined NTFS-meta analysis no row has it). ``q=`` keeps the rows
-        whose name or path holds every whitespace-separated term (case-insensitive). Both need
-        ``limit > 0``, compose with ``category``, the row conditions, the folder filter and the
-        flag filter, and the page reports ``matched`` (exact), ``sort`` = ``{key, order, status:
-        "ready", progress, label}`` and ``text_filter = {q, fields}``. Other ``sort`` values are
-        ignored, as before.
+        whose name or path holds every whitespace-separated term (case-insensitive, Unicode NFC on
+        both sides). Both need ``limit > 0``, compose with ``category``, the row conditions, the
+        folder filter and the flag filter, and the page reports ``matched`` (exact), ``sort`` =
+        ``{key, order, status: "ready", progress, label, applied: true, values, empty}``
+        (``values`` = rows of the whole list with a value of the key, ``empty`` = none has one, so
+        both orders equal list order) and ``text_filter = {q, fields}``. Other ``sort`` values keep
+        list order (200) and report ``sort = {key, order, status: "unsupported", progress: 0,
+        applied: false, reason}``.
 
         ``scope`` picks the files-output list: ``candidates`` (default; files
         of the selected categories) or ``inventory`` (every other scanned file,
@@ -1654,10 +1666,13 @@ def build_runs_router(
         sort_flags = is_flags_sort(sort)
         files_sort = None if sort_flags else parse_files_sort(sort, order)
         needle = " ".join((q or "").split())
-        if sort and sort.strip() and not sort_flags and files_sort is None:
-            # Unknown sort keys are ignored (as before the column-index sorts existed).
-            LOGGER.info("GET /files ignores unsupported sort=%r", sort[:64])
-        flag_query = parse_flag_query(flag, flag_grade, sort_flags=sort_flags)
+        unknown_sort = bool(sort and sort.strip() and not sort_flags and files_sort is None)
+        if unknown_sort:
+            # Unknown sort keys keep list order (200, as before the column-index sorts existed);
+            # the page says so in ``sort = {applied: false, reason}`` (R7 S1 re-review R-9).
+            LOGGER.info("GET /files ignores unsupported sort=%r", (sort or "")[:64])
+        flags_descending = sort_flags and split_sort_order(sort or "", order)[1] == "desc"
+        flag_query = parse_flag_query(flag, flag_grade, sort_flags=sort_flags, descending=flags_descending)
         reject_geo(geo)
         conditions = row_conditions_or_422(
             time_from=time_from,
@@ -1741,10 +1756,27 @@ def build_runs_router(
             rows = page.get(collection) if isinstance(page.get(collection), list) else []
             # ``record_index`` = position in that list of rapidtriage-files.json (locator ``/<scope>/<n>``).
             page[collection] = with_record_index(rows, int(pagination.get("offset") or 0))
+        files_stamp = output_stamp(get_output_path(store, run_id, "files"))
         if files_sort is not None:
-            page["sort"] = files_sort.descriptor()
+            page["sort"] = files_sort.descriptor(
+                files_sort_values(source_rows, run_id=run_id, collection=collection, files_stamp=files_stamp, sort=files_sort)
+            )
             if isinstance(page.get("pagination"), dict):
                 page["pagination"] = {**page["pagination"], "sort": files_sort.key, "order": files_sort.order}  # type: ignore[dict-item]
+        elif unknown_sort:
+            page["sort"] = unknown_sort_descriptor(sort or "", order)
+        if limit > 0 and ((conditions is not None and conditions.uses_time) or (files_sort is not None and files_sort.key == "mtime")):
+            # Where the 수정 times of a time condition / mtime sort come from (R7 S1 re-review R-2):
+            # the console shows "취득 사본 시각 기준" when it is ``acquisition-copy`` or ``mixed``.
+            page.update(
+                files_time_basis(
+                    source_rows,
+                    run_id=run_id,
+                    collection=collection,
+                    files_stamp=files_stamp,
+                    ntfs_join=lambda: _files_ntfs_times(run_id, source_rows),
+                )
+            )
         if needle:
             page["text_filter"] = {"q": needle, "fields": list(FILES_TEXT_FIELDS)}
         candidates = payload.get("candidates") if isinstance(payload.get("candidates"), list) else []
