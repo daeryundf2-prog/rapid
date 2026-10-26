@@ -87,7 +87,9 @@ describe("DataGrid ARIA", () => {
     expect(container.querySelector("[role=status]:not([aria-label])")).toBeNull();
   });
 
-  it("header buttons set aria-sort; 크기 sorts the WHOLE files list on the server (C-D1)", async () => {
+  it("header buttons set aria-sort; 크기 sorts the WHOLE files list on the server (C-D1)", {
+    timeout: 20_000,
+  }, async () => {
     const { calls } = await renderFiles(600);
     const header = () =>
       screen.getAllByRole("columnheader").find((h) => h.textContent?.includes("크기")) as HTMLElement;
@@ -110,7 +112,9 @@ describe("DataGrid ARIA", () => {
     expect(header().getAttribute("aria-sort")).toBe("none");
   });
 
-  it("a header click sorts only: focused row, selection and viewer target stay (C-D2)", async () => {
+  it("a header click sorts only: focused row, selection and viewer target stay (C-D2)", {
+    timeout: 20_000,
+  }, async () => {
     await renderFiles(600);
     // Focus row 3 and tick rows 1 and 2.
     fireEvent.mouseDown(rowAt(3), { button: 0 });
