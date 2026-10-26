@@ -44,8 +44,10 @@ import {
   type PresetAnchor,
   presetAnchor,
   RELATIVE_PRESETS,
+  relativePresetCaption,
   relativePresetLabel,
   relativePresetRange,
+  relativePresetShortLabel,
 } from "./conditionValues";
 import { activeChips, type FilterChip, hasActiveFilters, removeChip, toInputValue } from "./filterModel";
 import { type FilterReport, useFilterStore } from "./filterStore";
@@ -183,7 +185,7 @@ function RunRelativePresets({ runId }: { runId: string }) {
   return <PresetButtons anchor={anchor} />;
 }
 
-function PresetButtons({ anchor }: { anchor: PresetAnchor }) {
+export function PresetButtons({ anchor }: { anchor: PresetAnchor }) {
   const filters = useFilterStore((s) => s.filters);
   const patch = useFilterStore((s) => s.patchFilters);
   const { timezone } = useTimezone();
@@ -194,25 +196,38 @@ function PresetButtons({ anchor }: { anchor: PresetAnchor }) {
       : anchor.source === "run-start"
         ? `증거 시각을 모르는 런: 런 시작 ${formatTimestamp(anchor.ms / 1000, timezone, { precision: "minute" })}부터 셉니다`
         : undefined;
+  const caption = relativePresetCaption(anchor);
+  // R-6: "증거 기준" once above the segment, short labels on the buttons (the full label is the
+  // accessible name), so the three presets fit the popover instead of overflowing it.
   return (
-    <div
-      className="segmented filter-segment"
-      data-testid="relative-presets"
-      data-anchor={anchor.source}
-      title={basis}
-    >
-      {RELATIVE_PRESETS.map((id) => (
-        <button
-          key={id}
-          type="button"
-          aria-pressed={preset === id}
-          onClick={() =>
-            preset === id ? patch({ from: undefined, to: undefined }) : patch(relativePresetRange(id, anchor))
-          }
-        >
-          {relativePresetLabel(id, anchor)}
-        </button>
-      ))}
+    <div className="filter-preset-block">
+      {caption ? (
+        <span className="filter-preset-caption" data-testid="relative-presets-caption" title={basis}>
+          {caption}
+        </span>
+      ) : null}
+      <div
+        className="segmented filter-segment filter-preset-segment"
+        data-testid="relative-presets"
+        data-anchor={anchor.source}
+        title={basis}
+      >
+        {RELATIVE_PRESETS.map((id) => (
+          <button
+            key={id}
+            type="button"
+            aria-pressed={preset === id}
+            aria-label={relativePresetLabel(id, anchor)}
+            onClick={() =>
+              preset === id
+                ? patch({ from: undefined, to: undefined })
+                : patch(relativePresetRange(id, anchor))
+            }
+          >
+            {relativePresetShortLabel(id, anchor)}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

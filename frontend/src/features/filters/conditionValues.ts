@@ -111,6 +111,20 @@ export function relativePresetLabel(preset: RelativePreset, anchor: PresetAnchor
   return `${prefix}최근 ${RELATIVE_DAYS[preset]}일`;
 }
 
+/**
+ * R-6: the segment's own short label ("최근 7일" · "마지막 날" · "오늘"); the anchor prefix is
+ * shown once above the segment (relativePresetCaption) so the buttons fit the popover.
+ */
+export function relativePresetShortLabel(preset: RelativePreset, anchor: PresetAnchor): string {
+  if (preset === "today") return anchor.source === "now" ? "오늘" : "마지막 날";
+  return `최근 ${RELATIVE_DAYS[preset]}일`;
+}
+
+/** "증거 기준" · "런 시작 기준" — the caption over the preset segment; "" when counted from now. */
+export function relativePresetCaption(anchor: PresetAnchor): string {
+  return ANCHOR_PREFIX[anchor.source].trim();
+}
+
 /** Browser-local `YYYY-MM-DDTHH:mm` (the value format of the filter's datetime-local inputs). */
 function localInput(ms: number): string {
   const date = new Date(ms);
