@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type RefObject, useId, useRef, useState } from "react";
-import { ensureCaseDb, saveSearch } from "../../api/caseDb";
+import { saveSearch } from "../../api/caseDb";
 import { listKeywordPacks, SEARCH_SOURCES } from "../../api/keywordPacks";
 import { Popover } from "../../components/Popover";
 import { Icon } from "../../icons";
+import { ensureRunCaseDb } from "../grid/reviewActions";
 import { ErrorText } from "./ErrorText";
 import { ReasonButton } from "./ReasonButton";
 import { invalidateSavedSearches } from "./savedSearches";
@@ -97,7 +98,10 @@ export function SearchOptionsPopover({
 
   const save = useMutation({
     mutationFn: async () => {
-      const db = await ensureCaseDb(runId);
+      // Same handle as the review marks (R7 S2 #13): a run that reports `case_db_ready` needs no
+      // `/case-db/ensure` POST; otherwise ensure once per run.
+      const db = await ensureRunCaseDb(runId);
+      if (!db) throw new Error("이 런은 케이스 DB를 만들 수 없어 검색을 저장할 수 없습니다.");
       return saveSearch({
         database: db.database,
         case_id: db.case_id,
