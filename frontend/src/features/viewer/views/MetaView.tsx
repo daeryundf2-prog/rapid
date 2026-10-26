@@ -35,6 +35,7 @@ import { bytesOfHex, filterUtf16Strings, hexDump, utf16Strings } from "../binary
 import { locatorText } from "../citation";
 import { ROWS_FOR_SOURCE_COMMAND, writeClipboard } from "../commands";
 import { evidenceInfo, isSourceMissing, RECOVERY_LABELS } from "../evidenceInfo";
+import { displayEvidenceTime } from "../evidenceTimeDisplay";
 import {
   bytesLabel,
   eventLevelLabel,
@@ -421,12 +422,18 @@ export function TimeValue({
   const kindLabel = kind ? timestampKindLabel(kind) : "";
   const windowRoute = timelineWindowRoute(runId, reading.iso, TIMELINE_WINDOW_MS, route.tz);
   const raw = typeof filetime === "string" || typeof filetime === "number" ? filetime : null;
+  // Seconds by default, the UTC side with its date; sub-seconds on hover (C-W5).
+  const shown = displayEvidenceTime(reading);
   return (
     <span className="meta-time" data-iso={reading.iso}>
-      <span className="meta-time-text" title={evidenceTimeTooltip(input, timezone, raw)}>
-        <span className="meta-time-local">{reading.local}</span>{" "}
+      <span
+        className="meta-time-text"
+        title={`${shown.precise}
+${evidenceTimeTooltip(input, timezone, raw)}`}
+      >
+        <span className="meta-time-local">{shown.local}</span>{" "}
         <span className="meta-time-zone">({reading.zone})</span>
-        {reading.utc ? <span className="meta-time-utc"> · {reading.utc}</span> : null}
+        {shown.utc ? <span className="meta-time-utc"> · {shown.utc}</span> : null}
       </span>
       {kindLabel ? (
         <span className="meta-time-kind" title={`시각 종류: ${kind}`}>
@@ -1062,7 +1069,11 @@ export function MetaView({
   const note = sessionNote ?? (typeof row?.fields.note === "string" ? row.fields.note : "");
   const formatTime = (value: number | string | undefined) => {
     const reading = evidenceTime(value ?? null, timezone);
-    return reading ? reading.text : value === undefined || value === "" ? "—" : String(value);
+    return reading
+      ? displayEvidenceTime(reading).text
+      : value === undefined || value === ""
+        ? "—"
+        : String(value);
   };
   const directory = isDirectoryTarget(target, preview) || metadata?.is_directory === true;
   const sourceMissing = !directory && Boolean(target.sourcePath) && isSourceMissing(metadataError);

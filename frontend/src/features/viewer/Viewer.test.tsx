@@ -61,17 +61,13 @@ function routes(previewBody: unknown, extra: Record<string, Handler> = {}) {
 const region = () => screen.getByRole("region", { name: "원본 뷰어" });
 const tab = (name: string) => screen.getByRole("tab", { name });
 const live = () => (screen.getByTestId("live-polite").textContent ?? "").trim();
-/** Menu holding each viewer command (review #6): one "⋯" 더보기 menu with 리뷰 / 원본 sections. */
+/** Menu holding each viewer command (review #6): the ⋯ 더보기 menu (marks: the status chip menu). */
 const MENU_OF: Record<string, string> = {
   "viewer.open-original": "더보기",
   "viewer.hash": "더보기",
   "viewer.copy-path": "더보기",
   "viewer.cite": "더보기",
   "navigate.rows-for-source": "더보기",
-  "viewer.mark.needs-review": "더보기",
-  "viewer.mark.excluded": "더보기",
-  "viewer.mark.include-in-report": "더보기",
-  "viewer.mark.bookmark": "더보기",
   "viewer.note": "더보기",
 };
 /** The control of a viewer command, opening the menu that holds it first. */
@@ -79,6 +75,8 @@ const tool = (id: string) => {
   const selector = `[data-command="${id}"]`;
   const shown = document.querySelector(selector);
   if (shown) return shown as HTMLButtonElement;
+  // Every mark lives in the one review-status chip menu (r7 L4, C-W9).
+  if (id.startsWith("viewer.mark.")) fireEvent.click(screen.getByTestId("viewer-review-status-menu"));
   const menu = MENU_OF[id];
   if (menu) fireEvent.click(screen.getByRole("button", { name: menu }));
   return document.querySelector(selector) as HTMLButtonElement;

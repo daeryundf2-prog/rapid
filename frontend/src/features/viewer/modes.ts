@@ -5,6 +5,7 @@
  */
 
 import type { SourcePreview } from "../../api/viewer";
+import type { GridRow } from "../../contracts/collection";
 import type { ViewerMode, ViewerModeState, ViewerTarget } from "../../contracts/viewer";
 
 export const MODE_ORDER: ViewerMode[] = [
@@ -92,12 +93,51 @@ function state(mode: ViewerMode, reason?: string): ViewerModeState {
   return reason ? { mode, available: false, reason } : { mode, available: true };
 }
 
+/**
+ * SQLite by the server's detection (r7 L4, C-W1): `preview_type: "sqlite"` or a `viewer_hint` of
+ * mode sqlite — never the MIME type (Chromium `History` has no extension: application/octet-stream).
+ */
+export function isSqlitePreview(preview: SourcePreview): boolean {
+  return preview.preview_type === "sqlite" || preview.viewer_hint?.mode === "sqlite";
+}
+
+const DIGITS = /^\d+$/;
+
+/**
+ * The SQLite table + rowid a parsed row came from (browser history → `urls` at `source_row_id`): the
+ * row's own `source_table` when the file has that table, else the hint's table for its artifact
+ * type. null when the file is not SQLite or the row carries no row id.
+ */
+export function sqliteRowTarget(
+  preview: SourcePreview | null,
+  row: Pick<GridRow, "artifactType" | "fields"> | null,
+): { table: string; rowid: number } | null {
+  if (!preview || !row || !isSqlitePreview(preview)) return null;
+  const details = row.fields.details;
+  if (!details || typeof details !== "object") return null;
+  const record = details as Record<string, unknown>;
+  const raw = record.source_row_id;
+  const rowid =
+    typeof raw === "number" ? raw : typeof raw === "string" && DIGITS.test(raw) ? Number(raw) : null;
+  if (rowid === null || !Number.isSafeInteger(rowid)) return null;
+  const hint = preview.viewer_hint;
+  const known = new Set([
+    ...(hint?.sqlite_tables ?? []),
+    ...(preview.sqlite?.tables ?? []).map((t) => t.name),
+  ]);
+  const own = typeof record.source_table === "string" ? record.source_table : "";
+  const type = row.artifactType ?? (typeof record.artifact_type === "string" ? record.artifact_type : "");
+  const table = own && known.has(own) ? own : type ? hint?.row_tables?.[type] : undefined;
+  return table ? { table, rowid } : null;
+}
+
 export function isDocumentPreview(preview: SourcePreview): boolean {
   return DOCUMENT_EXTENSIONS.has((preview.extension || "").toLowerCase());
 }
 
 /** Mode the payload naturally belongs to (before availability checks). */
 export function naturalMode(preview: SourcePreview): ViewerMode {
+  if (isSqlitePreview(preview)) return "sqlite";
   switch (preview.preview_type) {
     case "image":
       return "image";
@@ -175,7 +215,7 @@ export function resolveModes(input: ResolveInput): ResolvedModes {
       case "hex":
         return hexState(preview, target);
       case "sqlite":
-        return type === "sqlite" ? state("sqlite") : state("sqlite", REASONS.notSqlite);
+        return isSqlitePreview(preview) ? state("sqlite") : state("sqlite", REASONS.notSqlite);
       case "image":
         return type === "image" ? state("image") : state("image", REASONS.notImage);
       case "document":
