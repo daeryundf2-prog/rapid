@@ -13,6 +13,7 @@ import type { ViewerTarget } from "../../contracts/viewer";
 import { parseHash, serializeRoute } from "../../router";
 import { useAppStore } from "../../state/store";
 import { formatGridTime } from "../../utils/time";
+import { useWriteConfirm } from "../case/WriteConfirm";
 import { FALLBACK_CATALOG, familyById, setCatalog } from "../flags/catalog";
 import { catalogColumn } from "../grid/columns/families";
 import { installFetch, jsonResponse, renderWithClient } from "../grid/testSupport";
@@ -598,6 +599,10 @@ describe("DerivedPane (Q-X5 / Q-X12)", () => {
     expect(await screen.findByText("통합 보기 결과가 없습니다.")).toBeTruthy();
     const button = screen.getByRole("button", { name: /통합 보기 만들기/ });
     fireEvent.click(button);
+    // A write (r7 L4, C-X2): the confirmation comes first and nothing is posted before it.
+    await waitFor(() => expect(useWriteConfirm.getState().pending?.title).toBe("통합 보기 다시 만들기"));
+    expect(calls.some((call) => call.method === "POST")).toBe(false);
+    act(() => useWriteConfirm.getState().settle(true));
     await waitFor(() =>
       expect(calls.some((call) => call.method === "POST" && call.url.endsWith("/analyses"))).toBe(true),
     );

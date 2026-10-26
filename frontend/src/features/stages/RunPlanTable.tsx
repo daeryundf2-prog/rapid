@@ -33,6 +33,7 @@ import { formatElapsed } from "../../shell/StatusBar";
 import { useTimezone } from "../../state/hooks";
 import { useAppStore } from "../../state/store";
 import { formatTimestamp } from "../../utils/time";
+import { confirmWrite, joinRunPath, runOutputDir } from "../case/WriteConfirm";
 import { formatCount } from "../grid/gridUtils";
 import { useNow } from "./useNow";
 
@@ -193,6 +194,22 @@ export function RunPlanTable({
 
   const send = async (action: PlanControlAction, targets: PlanTarget[] | undefined, what: string) => {
     if (action === "cancel_all" && !confirmAction(CANCEL_ALL_CONFIRM)) return;
+    // 그룹/태스크 건너뛰기·취소 changes the run (r7 L4, D8): confirm what is recorded where first.
+    if (action === "skip" || action === "cancel") {
+      const folder = await runOutputDir(runId);
+      const ok = await confirmWrite({
+        title: `${what}`,
+        writes: [
+          {
+            what: `처리 계획에 ${action === "skip" ? "건너뜀" : "취소"} 기록 — 이 처리는 실행되지 않습니다`,
+            where: joinRunPath(folder, "rapidtriage-run-plan.json"),
+          },
+        ],
+        note: "건너뛴 처리는 이 런에서 되돌릴 수 없습니다(다시 실행 = 새 런).",
+        confirmLabel: action === "skip" ? "건너뛰기" : "취소 요청",
+      });
+      if (!ok) return;
+    }
     setBusy(true);
     try {
       // An in-flight plan poll that resolves after the reply would put the old plan back.

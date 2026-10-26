@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { pushToast } from "../../components/toastStore";
+import type { ExportKind } from "./exports";
 
 export type CaseDialogName =
   | "run"
@@ -23,6 +24,8 @@ export interface CaseDialogTarget {
   runId?: string;
   reasonId?: string;
   reasonLabel?: string;
+  /** 보고서 내보내기: the kind chosen when the dialog opens. */
+  exportKind?: ExportKind;
 }
 
 interface CaseDialogState {
