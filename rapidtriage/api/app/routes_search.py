@@ -192,6 +192,10 @@ def build_search_router(
                 expanded_keywords=keywords,
             )
             attach_search_result_source_actions(payload, run_id)
+            for match in payload.get("matches") or []:
+                # The review locator names its run (the console resolves it to the source row).
+                if isinstance(match, dict) and isinstance(match.get("locator"), dict):
+                    match["locator"]["run_id"] = run_id
             # v1 scan search stays for the global box when a run has no index (plan search §3.3).
             payload["deprecated"] = True
             payload["successor"] = f"/api/runs/{run_id}/search/query"
