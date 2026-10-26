@@ -655,15 +655,22 @@ class FilesCacheJoinStateTests(unittest.TestCase):
             candidate.update({"modified_at": "2030-01-01T00:00:00Z", "modified_at_origin": "acquisition-copy"})
         files_path.write_text(json.dumps(payload), encoding="utf-8")
         url = f"/api/runs/{fixture.run_id}/files"
-        before = fixture.client.get(url, params={"limit": 10, "from": "2000-01-01"}).json()
-        self.assertEqual(before["matched"], 0)  # no join: acquisition copies have no time
+        window = {"limit": 10, "from": "2000-01-01", "to": "2029-12-31"}
+        before = fixture.client.get(url, params=window).json()
+        # No join: acquisition copies fall back to their own copy time (2030, outside the window).
+        self.assertEqual(before["matched"], 0)
+        self.assertEqual(before["time_basis"], "acquisition-copy")
+        copies = fixture.client.get(url, params={"limit": 10, "from": "2030-01-01"}).json()
+        self.assertEqual(copies["matched"], len(payload["candidates"]))
         state = fixture.run_ntfs()
         self.assertEqual(state["status"], "completed", state)
         joined = fixture.client.get(url, params={"limit": 10}).json()
         si_modified = joined["candidates"][0]["ntfs"]["si_modified_at"]
-        after = fixture.client.get(url, params={"limit": 10, "from": "2000-01-01"}).json()
+        after = fixture.client.get(url, params=window).json()
+        # The joined NTFS $SI time wins over the copy time; rows without an NTFS entry keep theirs.
         self.assertEqual([row["record_index"] for row in after["candidates"]], [0])
         self.assertEqual(after["matched"], 1)
+        self.assertEqual(after["time_basis"], "mixed" if len(payload["candidates"]) > 1 else "ntfs")
         day = si_modified[:10]
         hit = fixture.client.get(url, params={"limit": 10, "from": day, "to": day}).json()
         self.assertEqual([row["record_index"] for row in hit["candidates"]], [0])

@@ -391,6 +391,8 @@ class FlagQuery:
     rule_ids: frozenset[str] | None = None
     grade: str | None = None
     sort: bool = False
+    # ``sort=flags`` with ``order=desc`` (``GET /files`` only): C, B, A, then unflagged.
+    descending: bool = False
 
     @property
     def filtered(self) -> bool:
@@ -406,7 +408,7 @@ class FlagQuery:
         return {"flag": sorted(self.rule_ids) if self.rule_ids else None, "flag_grade": self.grade}
 
 
-def parse_flag_query(flag: Sequence[str], flag_grade: str | None, *, sort_flags: bool = False) -> FlagQuery:
+def parse_flag_query(flag: Sequence[str], flag_grade: str | None, *, sort_flags: bool = False, descending: bool = False) -> FlagQuery:
     """Validated filters: unknown rule ids, too many ids or a grade other than A/B/C are a 422 (Korean)."""
     rule_ids = frozenset(item.strip() for item in flag if item and item.strip()) or None
     grade = flag_grade.strip().upper() if flag_grade and flag_grade.strip() else None
@@ -419,16 +421,17 @@ def parse_flag_query(flag: Sequence[str], flag_grade: str | None, *, sort_flags:
         unknown = sorted(rule_id[:FLAG_ID_MAX] for rule_id in rule_ids if rule_id not in known)
         if unknown:
             raise HTTPException(status_code=422, detail=f"알 수 없는 특이사항 지표입니다: {', '.join(unknown[:5])}")
-    return FlagQuery(rule_ids=rule_ids, grade=grade, sort=sort_flags)
+    return FlagQuery(rule_ids=rule_ids, grade=grade, sort=sort_flags, descending=sort_flags and descending)
 
 
 def is_flags_sort(sort: str | None) -> bool:
-    """``sort=flags`` (an ``:asc``/``:desc`` suffix is accepted and ignored: the order is always A, B, C, unflagged)."""
+    """``sort=flags`` (any case; an ``:asc``/``:desc`` suffix is accepted -- only ``GET /files``
+    honours a descending order, see :attr:`FlagQuery.descending`)."""
     if not sort:
         return False
     head, _, suffix = sort.strip().rpartition(":")
-    key = head if head and suffix.lower() in {"asc", "desc"} else sort.strip()
-    return key == FLAGS_SORT_KEY
+    key = head if head and suffix.strip().lower() in {"asc", "desc"} else sort.strip()
+    return key.strip().lower() == FLAGS_SORT_KEY
 
 
 FLAGS_SORT_DESCRIPTOR = {"key": FLAGS_SORT_KEY, "order": "asc", "status": "ready", "progress": 1.0}
@@ -450,7 +453,7 @@ def mark_flag_page(
             if record_count is not None:
                 pagination["total"] = record_count
     if query.sort:
-        page["sort"] = dict(FLAGS_SORT_DESCRIPTOR)
+        page["sort"] = {**FLAGS_SORT_DESCRIPTOR, "order": "desc" if query.descending else "asc", "applied": True}
     return page
 
 
@@ -540,7 +543,12 @@ def filter_files_rows(
         order.append(record_index)
     if query.sort and join.index is not None:
         index = join.index
-        order.sort(key=lambda item: (index.best_rank(kind, item), item))
+        if query.descending:
+            # C, B, A (record order inside a grade), unflagged last as in the ascending order.
+            unflagged = len(GRADES)
+            order.sort(key=lambda item: (index.best_rank(kind, item) == unflagged, -index.best_rank(kind, item), item))
+        else:
+            order.sort(key=lambda item: (index.best_rank(kind, item), item))
     window = order[offset : offset + limit] if limit > 0 else order[offset:]
     page_rows = [{**rows[item], "record_index": item} for item in window if isinstance(rows[item], dict)]
     has_more = limit > 0 and offset + len(window) < len(order)

@@ -32,8 +32,11 @@ Query parameters (all optional, AND-ed with each other and with the listing's ot
 Row time (keep aligned with the console's row mapping): artifacts = the first *parseable* scalar
 of ``details`` among ``artifact_sort.TIME_KEYS`` (an unparseable value falls through to the next
 key); files = ``fs_modified_at``, else for an acquisition copy the NTFS ``$SI`` modified time of
-the joined row (none without the join; the ``/files`` route resolves it per row through
-``ntfs_time``), else ``modified_at``; timeline = ``timestamp``. A row without a parseable time
+the joined row (the ``/files`` route resolves it per row through ``ntfs_time``), else
+``modified_at`` -- also for an acquisition copy without an NTFS time (folder-input runs: the copy's
+own time, what the 수정 column and ``sort=mtime`` show); a files value that is missing,
+unparseable or a placeholder (1601-01-01 / 1970-01-01 / 1980-01-01 00:00 UTC) falls through to
+the next source; timeline = ``timestamp``. A row without a parseable time
 never passes a time condition, nor does a time the ``tz`` cannot represent (year 1 / 9999 edges).
 A row time without an offset (naive text) is read as UTC -- never in ``tz`` -- like the console's
 ``parseInstant``.
@@ -266,13 +269,30 @@ def _scalar(value: object) -> bool:
 
 NtfsTime = Callable[[Mapping[str, object]], object]
 
+# Placeholder times that mean "no time" on a files row (R7 S1 re-review R-13): FILETIME 0
+# (1601-01-01), Unix epoch 0 and the DOS / ZIP epoch 1980-01-01T00:00:00 (UTC instants).
+PLACEHOLDER_MOMENTS: frozenset[dt.datetime] = frozenset(
+    dt.datetime(year, 1, 1, tzinfo=dt.timezone.utc) for year in (1601, 1970, 1980)
+)
+
+
+def files_moment(value: object) -> dt.datetime | None:
+    """A files-row time value -> aware datetime; None when missing, unparseable or a
+    :data:`PLACEHOLDER_MOMENTS` value (those count as no time for conditions and sorting)."""
+    if not _scalar(value):
+        return None
+    moment = parse_moment(value)
+    if moment is None or moment in PLACEHOLDER_MOMENTS:
+        return None
+    return moment
+
 
 def needs_ntfs_time(row: object) -> bool:
     """A files row whose time is the joined NTFS ``$SI`` modified time (acquisition copy, no join yet)."""
     return (
         isinstance(row, Mapping)
         and row.get("modified_at_origin") == "acquisition-copy"
-        and not _scalar(row.get("fs_modified_at"))
+        and files_moment(row.get("fs_modified_at")) is None
         and not isinstance(row.get("ntfs"), Mapping)
     )
 
@@ -290,18 +310,21 @@ def row_time(row: Mapping[str, object], collection: str, ntfs_time: NtfsTime | N
                     return moment
         return None
     if collection == "files":
-        fs_time = row.get("fs_modified_at")
-        if _scalar(fs_time):
-            return parse_moment(fs_time)
+        moment = files_moment(row.get("fs_modified_at"))
+        if moment is not None:
+            return moment
         if row.get("modified_at_origin") == "acquisition-copy":
             ntfs = row.get("ntfs")
             if isinstance(ntfs, Mapping):
                 value = ntfs.get("si_modified_at")
             else:
                 value = ntfs_time(row) if ntfs_time is not None else None
-            return parse_moment(value) if _scalar(value) else None
-        value = row.get("modified_at")
-        return parse_moment(value) if _scalar(value) else None
+            moment = files_moment(value)
+            if moment is not None:
+                return moment
+            # No NTFS $SI time (no join, or the entry has none): the copy's own time, as the
+            # 수정 cell and ``sort=mtime`` show it (R7 S1 re-review R-2).
+        return files_moment(row.get("modified_at"))
     value = row.get("timestamp")
     return parse_moment(value) if _scalar(value) else None
 

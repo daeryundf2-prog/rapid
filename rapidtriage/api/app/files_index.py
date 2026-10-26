@@ -27,18 +27,19 @@ from collections import OrderedDict
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 
+from .artifact_filter import nfc_fold
 from .row_conditions import (
     CONTENT_TYPES,
     DEFAULT_OFFHOURS,
     DEFAULT_WEEKEND,
     MATCH_CACHE,
     PARTIAL_TRUNCATION_KEYS,
+    PLACEHOLDER_MOMENTS,
     RowConditions,
     _scalar,
     in_hours,
     parse_moment,
     row_is_partial,
-    row_time,
 )
 
 # Row time sentinels (real times are >= year 1 = about -6.2e16 us).
@@ -51,6 +52,8 @@ _US = dt.timedelta(microseconds=1)
 MIN_US = (dt.datetime(1, 1, 1, tzinfo=dt.timezone.utc) - _EPOCH) // _US
 MAX_US = (dt.datetime(9999, 12, 31, 23, 59, 59, 999999, tzinfo=dt.timezone.utc) - _EPOCH) // _US
 _HOUR_US = 3_600_000_000
+# :data:`row_conditions.PLACEHOLDER_MOMENTS` in epoch microseconds: no time (R7 S1 re-review R-13).
+PLACEHOLDER_US = frozenset((moment - _EPOCH) // _US for moment in PLACEHOLDER_MOMENTS)
 _DAY_US = 86_400_000_000
 FILES_INDEX_MAX_ENTRIES = 4
 # Keys whose absence means :func:`row_conditions.row_is_partial` is False (it reads nothing else).
@@ -128,36 +131,51 @@ def _fast_utc_us(value: str) -> int | None:
     return None
 
 
-def files_row_time_us(row: object) -> int:
-    """Epoch microseconds of :func:`row_conditions.row_time` of a files row (``TIME_NONE`` when
-    none; ``TIME_PENDING_NTFS`` for an acquisition copy that needs the NTFS join -- the rows
-    :func:`row_conditions.needs_ntfs_time` picks)."""
-    if not isinstance(row, Mapping):
-        return TIME_NONE
-    value = row.get("fs_modified_at")
+def _time_value_us(value: object) -> int:
+    """:func:`row_conditions.files_moment` of one value in epoch microseconds (``TIME_NONE`` when
+    missing, unparseable or a placeholder)."""
     if value.__class__ is str:
         fast = _fast_utc_us(value)  # type: ignore[arg-type]
         if fast is not None:
-            return fast
+            return TIME_NONE if fast in PLACEHOLDER_US else fast
     if not _scalar(value):
-        if row.get("modified_at_origin") == "acquisition-copy":
-            if not isinstance(row.get("ntfs"), Mapping):
-                return TIME_PENDING_NTFS
-            return _moment_us(row_time(row, "files"))  # joined ``ntfs`` already on the row
-        value = row.get("modified_at")
-        if value.__class__ is str:
-            fast = _fast_utc_us(value)  # type: ignore[arg-type]
-            if fast is not None:
-                return fast
-        if not _scalar(value):
-            return TIME_NONE
-    return _moment_us(parse_moment(value))
+        return TIME_NONE
+    found = _moment_us(parse_moment(value))
+    return TIME_NONE if found in PLACEHOLDER_US else found
+
+
+def files_copy_time_us(row: object) -> int:
+    """An acquisition copy's own ``modified_at`` (the fallback when it has no NTFS ``$SI`` time)."""
+    return _time_value_us(row.get("modified_at")) if isinstance(row, Mapping) else TIME_NONE
+
+
+def files_row_time_us(row: object) -> int:
+    """Epoch microseconds of :func:`row_conditions.row_time` of a files row (``TIME_NONE`` when
+    none; ``TIME_PENDING_NTFS`` for an acquisition copy that needs the NTFS join -- the rows
+    :func:`row_conditions.needs_ntfs_time` picks; without an NTFS time it gets
+    :func:`files_copy_time_us`). This is also the 수정 column's time (``sort=mtime``)."""
+    if not isinstance(row, Mapping):
+        return TIME_NONE
+    value = _time_value_us(row.get("fs_modified_at"))
+    if value != TIME_NONE:
+        return value
+    if row.get("modified_at_origin") == "acquisition-copy":
+        ntfs = row.get("ntfs")
+        if not isinstance(ntfs, Mapping):
+            return TIME_PENDING_NTFS
+        value = _time_value_us(ntfs.get("si_modified_at"))  # joined ``ntfs`` already on the row
+        if value != TIME_NONE:
+            return value
+    return _time_value_us(row.get("modified_at"))
 
 
 @dataclass
 class _TimeOverlay:
     stamp: tuple[object, ...]
     times: array
+    # Pending acquisition copies that got their NTFS ``$SI`` time / fell back to their copy time.
+    ntfs: int = 0
+    copies: int = 0
 
 
 class FilesColumns:
@@ -222,10 +240,12 @@ class FilesColumns:
                             value = row.get("modified_at")
                         if value.__class__ is str and len(value) == 20 and value[4::3] == "--T::Z" and value[:4].isdigit():
                             try:
-                                append((_fromisoformat(value[:19]) - _EPOCH_NAIVE) // _US)
+                                found = (_fromisoformat(value[:19]) - _EPOCH_NAIVE) // _US
                             except ValueError:
-                                append(TIME_NONE)
-                            continue
+                                found = TIME_NONE
+                            if found != TIME_NONE and found not in PLACEHOLDER_US:
+                                append(found)
+                                continue
                     append(files_row_time_us(row))
                 self._pending = array("L", (index for index, value in enumerate(column) if value == TIME_PENDING_NTFS))
                 self._times = column
@@ -235,25 +255,57 @@ class FilesColumns:
     def joined_times(
         self, rows: Sequence[object], stamp: tuple[object, ...], resolve: Callable[[Sequence[int]], Sequence[int] | None] | None
     ) -> array:
-        """The time column with the acquisition copies' NTFS times of join state ``stamp``."""
+        """The time column with the acquisition copies' NTFS times of join state ``stamp`` (a copy
+        without an NTFS time -- no join, no entry, a placeholder -- gets its own copy time)."""
+        return self._joined(rows, stamp, resolve).times
+
+    def _joined(
+        self, rows: Sequence[object], stamp: tuple[object, ...], resolve: Callable[[Sequence[int]], Sequence[int] | None] | None
+    ) -> _TimeOverlay:
         base, pending = self.times(rows)
         if not pending:
-            return base
+            return _TimeOverlay(stamp, base)
         with self._lock:
             overlay = self._overlay
             if overlay is not None and overlay.stamp == stamp:
-                return overlay.times
+                return overlay
         values = resolve(pending) if resolve is not None else None
         merged = array("q", base)
-        if values is None:
-            for position in pending:
-                merged[position] = TIME_NONE
-        else:
-            for position, value in zip(pending, values):
-                merged[position] = value if MIN_US <= value <= MAX_US else TIME_NONE
+        joined = copies = 0
+        for offset, position in enumerate(pending):
+            value = values[offset] if values is not None else TIME_NONE
+            if MIN_US <= value <= MAX_US and value not in PLACEHOLDER_US:
+                joined += 1
+            else:
+                value = files_copy_time_us(rows[position])
+                copies += value != TIME_NONE
+            merged[position] = value
+        overlay = _TimeOverlay(stamp, merged, joined, copies)
         with self._lock:
-            self._overlay = _TimeOverlay(stamp, merged)
-        return merged
+            self._overlay = overlay
+        return overlay
+
+    def time_basis(
+        self, rows: Sequence[object], stamp: tuple[object, ...] | None, resolve: Callable[[Sequence[int]], Sequence[int] | None] | None
+    ) -> dict[str, object]:
+        """Where the rows' 수정 times come from (:func:`files_time_basis`)."""
+        base, pending = self.times(rows)
+        evidence = sum(1 for value in base if value != TIME_NONE and value != TIME_PENDING_NTFS)
+        overlay = self._joined(rows, stamp or ("no-join",), resolve) if pending else _TimeOverlay(("none",), base)
+        evidence += overlay.ntfs
+        copies = overlay.copies
+        if evidence and copies:
+            basis = "mixed"
+        elif copies:
+            basis = "acquisition-copy"
+        elif evidence:
+            basis = "ntfs"
+        else:
+            basis = "none"
+        return {
+            "time_basis": basis,
+            "time_basis_counts": {"ntfs": evidence, "acquisition_copy": copies, "none": len(rows) - evidence - copies},
+        }
 
     def extension_bits(self, rows: Sequence[object]) -> array:
         """Content bits each row gets from its path extension (영상 · 음성, no scan category)."""
@@ -470,7 +522,7 @@ def files_matched_positions(
             for position in positions:
                 value = times[position]
                 if value <= TIME_PENDING_NTFS:
-                    continue
+                    continue  # no time (a copy without an NTFS time already holds its own)
                 if (low is not None and value < low) or (high is not None and value >= high):
                     continue
                 kept.append(position)
@@ -480,6 +532,23 @@ def files_matched_positions(
         return positions
 
     return MATCH_CACHE.get_or_compute(key, compute)
+
+
+def files_time_basis(
+    rows: Sequence[object], *, run_id: str, collection: str, files_stamp: tuple[object, ...], ntfs_join: NtfsJoinSource | None = None
+) -> dict[str, object]:
+    """``{time_basis, time_basis_counts}`` of the list's 수정 times (the ``from``/``to``/``weekday``
+    and ``sort=mtime`` time): ``"ntfs"`` = every timed row carries an evidence file-system time
+    (``fs_modified_at`` or the joined NTFS ``$SI`` time), ``"acquisition-copy"`` = every timed row
+    falls back to its acquisition copy's own time (folder input without an NTFS join), ``"mixed"``,
+    ``"none"`` = no row has a time. ``time_basis_counts = {ntfs, acquisition_copy, none}``."""
+    columns = FILES_INDEX_CACHE.get(run_id, collection, files_stamp)
+    _times, pending = columns.times(rows)
+    stamp: tuple[object, ...] | None = None
+    resolver: NtfsTimes | None = None
+    if pending:
+        stamp, resolver = ntfs_join() if ntfs_join is not None else (("no-join",), None)
+    return columns.time_basis(rows, stamp, resolver)
 
 
 # -- server sort and text filter (plan r7 §3.2 갈래 L2) -----------------------------------------
@@ -508,24 +577,58 @@ class FilesSort:
     def order(self) -> str:
         return "desc" if self.descending else "asc"
 
-    def descriptor(self) -> dict[str, object]:
-        """``sort`` of a sorted page (the shape of ``GET /artifacts``' sort descriptor)."""
-        return {"key": self.key, "order": self.order, "status": "ready", "progress": 1.0, "label": FILES_SORT_LABELS[self.key]}
+    def descriptor(self, values: int | None = None) -> dict[str, object]:
+        """``sort`` of a sorted page (the shape of ``GET /artifacts``' sort descriptor) plus
+        ``applied: true`` and -- given ``values`` (rows of the list with a value of the key) --
+        ``values`` and ``empty`` (no row has one: both orders equal list order)."""
+        out: dict[str, object] = {
+            "key": self.key,
+            "order": self.order,
+            "status": "ready",
+            "progress": 1.0,
+            "label": FILES_SORT_LABELS[self.key],
+            "applied": True,
+        }
+        if values is not None:
+            out["values"] = values
+            out["empty"] = values == 0
+        return out
+
+
+def split_sort_order(sort: str, order: str | None) -> tuple[str, str]:
+    """``(key, order)`` of ``sort=key`` / ``sort=key:dir`` and ``order=`` (case-insensitive;
+    ``order`` wins over the suffix; default ``asc``)."""
+    text = sort.strip()
+    head, _, suffix = text.rpartition(":")
+    key, suffix_order = (head, suffix.strip().lower()) if head and suffix.strip().lower() in FILES_SORT_ORDERS else (text, None)
+    wanted = (order or suffix_order or "asc").strip().lower()
+    return key.strip().lower(), wanted if wanted in FILES_SORT_ORDERS else "asc"
 
 
 def parse_files_sort(sort: str | None, order: str | None) -> FilesSort | None:
-    """``sort=size&order=desc`` (or ``sort=size:desc``) -> :class:`FilesSort`; None for no sort,
-    ``flags`` and unknown keys (the route keeps ignoring those, as before this parameter)."""
+    """``sort=size&order=desc`` (or ``sort=size:DESC``; any case) -> :class:`FilesSort`; None for
+    no sort, ``flags`` and unknown keys (see :func:`unknown_sort_descriptor`)."""
     if not sort or not sort.strip():
         return None
-    text = sort.strip()
-    head, _, suffix = text.rpartition(":")
-    key, suffix_order = (head, suffix.lower()) if head and suffix.lower() in FILES_SORT_ORDERS else (text, None)
-    key = key.strip().lower()
+    key, wanted = split_sort_order(sort, order)
     if key not in FILES_SORT_KEYS:
         return None
-    wanted = (order or suffix_order or "asc").strip().lower()
     return FilesSort(key, wanted == "desc")
+
+
+def unknown_sort_descriptor(sort: str, order: str | None) -> dict[str, object]:
+    """``sort`` of a page whose ``sort=`` key is not supported (``status: "unsupported"`` like
+    ``GET /artifacts``, ``applied: false`` and a Korean ``reason``): the rows stay in list order."""
+    key, wanted = split_sort_order(sort[:128], order)
+    key = key[:64]
+    return {
+        "key": key,
+        "order": wanted,
+        "status": "unsupported",
+        "progress": 0.0,
+        "applied": False,
+        "reason": f"지원하지 않는 정렬 키입니다: {key} (지원: {', '.join((*FILES_SORT_KEYS, 'flags'))}) — 목록 순서로 표시합니다",
+    }
 
 
 def _text_of(value: object) -> str:
@@ -543,28 +646,9 @@ def _name_of(row: Mapping[str, object]) -> str:
     return trimmed[max(trimmed.rfind("\\"), trimmed.rfind("/")) + 1 :].casefold()
 
 
-def _parse_us(value: object) -> int:
-    if value.__class__ is str:
-        fast = _fast_utc_us(value)  # type: ignore[arg-type]
-        if fast is not None:
-            return fast
-    if value is None or value == "" or not _scalar(value):
-        return TIME_NONE
-    return _moment_us(parse_moment(value))
-
-
-def files_display_mtime_us(row: object) -> int:
-    """The 수정 cell's time of a files row (console ``modifiedTimeOf``): ``fs_modified_at``, else
-    ``modified_at``; ``TIME_PENDING_NTFS`` for an acquisition copy (its NTFS ``$SI`` modified time
-    when joined, else the copy's own ``modified_at`` -- resolved in :func:`files_sort_order`)."""
-    if not isinstance(row, Mapping):
-        return TIME_NONE
-    value = _parse_us(row.get("fs_modified_at"))
-    if value != TIME_NONE:
-        return value
-    if row.get("modified_at_origin") == "acquisition-copy":
-        return TIME_PENDING_NTFS
-    return _parse_us(row.get("modified_at"))
+# The 수정 cell's time of a files row (console ``modifiedTimeOf``) is the row-condition time:
+# sorting and the ``from``/``to``/``weekday`` conditions read the same column (R7 S1 re-review R-2).
+files_display_mtime_us = files_row_time_us
 
 
 class _FilesSortState:
@@ -573,6 +657,8 @@ class _FilesSortState:
     def __init__(self) -> None:
         self.text: list[str] | None = None
         self.orders: dict[tuple[object, ...], tuple[array, array]] = {}
+        # sort cache key -> rows with a value of the key (the descriptor's ``values``).
+        self.present: dict[tuple[object, ...], int] = {}
         self.needles: OrderedDict[str, array] = OrderedDict()
 
 
@@ -588,7 +674,9 @@ def _sort_state(columns: FilesColumns) -> _FilesSortState:
         return state
 
 
-def _sort_values(rows: Sequence[object], key: str, ntfs: NtfsFieldTimes | None) -> tuple[list[object], list[bool]]:
+def _sort_values(
+    rows: Sequence[object], key: str, ntfs: NtfsFieldTimes | None, columns: FilesColumns, join_stamp: tuple[object, ...] | None
+) -> tuple[Sequence[object], list[bool]]:
     """``(values, present)`` of one sort key over every row."""
     if key in ("name", "path"):
         texts = [(_name_of(row) if key == "name" else _text_of(row.get("path"))) if isinstance(row, Mapping) else _MISSING_TEXT for row in rows]
@@ -603,21 +691,19 @@ def _sort_values(rows: Sequence[object], key: str, ntfs: NtfsFieldTimes | None) 
             present.append(ok)
         return values, present
     if key == "mtime":
-        times = [files_display_mtime_us(row) for row in rows]
-        pending = [index for index, value in enumerate(times) if value == TIME_PENDING_NTFS]
-        resolved = ntfs("si_modified_at", pending) if pending and ntfs is not None else None
-        for offset, position in enumerate(pending):
-            value = resolved[offset] if resolved is not None else TIME_NONE
-            if not MIN_US <= value <= MAX_US:
-                row = rows[position]
-                value = _parse_us(row.get("modified_at")) if isinstance(row, Mapping) else TIME_NONE
-            times[position] = value
-        return list(times), [value != TIME_NONE for value in times]
+        # The row-condition time column (with the NTFS overlay of ``join_stamp`` when copies wait
+        # for it): placeholders and missing times sort last in both orders (R-13).
+        if join_stamp is None:
+            times = columns.times(rows)[0]
+        else:
+            resolve = (lambda positions: ntfs("si_modified_at", positions)) if ntfs is not None else None
+            times = columns.joined_times(rows, join_stamp, resolve)
+        return times, [value != TIME_NONE and value != TIME_PENDING_NTFS for value in times]
     # ctime = the "NTFS 생성" column (the NTFS join's ``created_at``); no join = no values.
     resolved = ntfs("created_at", range(len(rows))) if ntfs is not None and rows else None
     if resolved is None:
         return [0] * len(rows), [False] * len(rows)
-    created = [value if MIN_US <= value <= MAX_US else TIME_NONE for value in resolved]
+    created = [value if MIN_US <= value <= MAX_US and value not in PLACEHOLDER_US else TIME_NONE for value in resolved]
     return list(created), [value != TIME_NONE for value in created]
 
 
@@ -645,7 +731,7 @@ def files_sort_order(
         found = state.orders.get(cache_key)
     if found is not None:
         return found
-    values, present = _sort_values(rows, sort.key, resolver)
+    values, present = _sort_values(rows, sort.key, resolver, columns, join_stamp)
     with_value = [position for position in range(len(rows)) if present[position]]
     # Python's sort is stable with reverse=True too: equal values keep list order.
     with_value.sort(key=values.__getitem__, reverse=sort.descending)
@@ -658,14 +744,27 @@ def files_sort_order(
         # A new NTFS join state replaces the older one's order (never served again).
         for stale in [item for item in state.orders if item[:2] == cache_key[:2] and item != cache_key]:
             del state.orders[stale]
+            state.present.pop(stale, None)
         state.orders[cache_key] = (order, rank)
+        state.present[cache_key] = len(with_value)
     return order, rank
+
+
+def files_sort_values(rows: Sequence[object], *, run_id: str, collection: str, files_stamp: tuple[object, ...], sort: FilesSort) -> int | None:
+    """Rows of the list with a value of ``sort.key`` (after :func:`files_sort_order` built it)."""
+    state = _sort_state(FILES_INDEX_CACHE.get(run_id, collection, files_stamp))
+    with _SORT_STATES_LOCK:
+        for cache_key, count in state.present.items():
+            if cache_key[:2] == (sort.key, sort.descending):
+                return count
+    return None
 
 
 def files_text_positions(rows: Sequence[object], *, run_id: str, collection: str, files_stamp: tuple[object, ...], needle: str) -> array:
     """Ascending positions of the rows whose name or path holds every whitespace-separated term
-    of ``needle`` (case-insensitive) -- the ``q=`` filter of ``GET /files``."""
-    terms = [term.casefold() for term in needle.split() if term]
+    of ``needle`` (case-insensitive, Unicode NFC-folded on both sides like ``/artifacts?path_contains``,
+    so an NFD Korean query finds NFC names and vice versa) -- the ``q=`` filter of ``GET /files``."""
+    terms = [nfc_fold(term) for term in needle.split() if term]
     state = _sort_state(FILES_INDEX_CACHE.get(run_id, collection, files_stamp))
     cache_key = "\n".join(terms)
     with _SORT_STATES_LOCK:
@@ -675,7 +774,7 @@ def files_text_positions(rows: Sequence[object], *, run_id: str, collection: str
             return found
         text = state.text
     if text is None:
-        text = [f"{_name_of(row)}\n{_text_of(row.get('path'))}" if isinstance(row, Mapping) else _MISSING_TEXT for row in rows]
+        text = [nfc_fold(f"{_name_of(row)}\n{_text_of(row.get('path'))}") if isinstance(row, Mapping) else _MISSING_TEXT for row in rows]
     matched = array("L", (position for position, value in enumerate(text) if all(term in value for term in terms)))
     with _SORT_STATES_LOCK:
         state.text = text

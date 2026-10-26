@@ -1835,7 +1835,10 @@ class AnalysisApiTests(unittest.TestCase):
         self.assertEqual([row["record_index"] for row in hit["candidates"]], [0])
         self.assertEqual(hit["candidates"][0]["ntfs"]["si_modified_at"], si_modified)  # the page itself is joined
         miss = self.client.get(f"/api/runs/{self.run_id}/files", params={"limit": 10, "from": "2029-12-31"}).json()
-        self.assertEqual(miss["candidates"], [])  # acquisition copies never use modified_at
+        # A joined NTFS $SI time wins over the copy's modified_at (2030); only copies without an
+        # NTFS time fall back to it (R7 S1 re-review R-2).
+        self.assertNotIn(0, [row["record_index"] for row in miss["candidates"]])
+        self.assertTrue(all(not (row.get("ntfs") or {}).get("si_modified_at") for row in miss["candidates"]), miss["candidates"])
 
     def test_files_join_skips_unparsed_ntfs_analyses(self) -> None:
         parsed = self.run_ntfs()
