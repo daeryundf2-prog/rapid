@@ -1373,14 +1373,20 @@ export function DataGrid(props: DataGridProps = {}) {
   const allLoaded = cq.serverTotal !== null && cq.loadedCount >= cq.serverTotal;
   const clientScoped = clientSorting || needle !== "" || cq.clientColumnFilters || cq.clientFiltering;
   const scopeBanner = pagedGrid && clientScoped && !allLoaded && !cq.isLoading;
+  // A listing whose size the server has not counted yet (cross-kind pages) says so, never a guess.
+  const totalText = cq.serverTotal !== null ? formatCount(cq.serverTotal) : "미확인";
   const scopeBadge =
-    pagedGrid && runId && cq.serverTotal !== null ? (
+    pagedGrid && runId && !cq.isLoading ? (
       <span
         className="grid-scope-badge"
         data-testid="grid-scope-badge"
-        title={`서버의 ${formatCount(cq.serverTotal)}행 중 ${formatCount(cq.loadedCount)}행을 불러왔습니다`}
+        title={
+          cq.serverTotal !== null
+            ? `서버의 ${formatCount(cq.serverTotal)}행 중 ${formatCount(cq.loadedCount)}행을 불러왔습니다`
+            : `${formatCount(cq.loadedCount)}행을 불러왔습니다 — 전체 행 수는 끝까지 불러오면 확정됩니다`
+        }
       >
-        불러온 {formatCount(cq.loadedCount)} / 전체 {formatCount(cq.serverTotal)}
+        불러온 {formatCount(cq.loadedCount)} / 전체 {totalText}
       </span>
     ) : null;
 

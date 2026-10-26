@@ -140,15 +140,23 @@ export function Popover({
     triggerRef.current?.focus();
   }, open);
 
+  // A portalled panel is hidden until it is placed: focus moves in once it can take focus.
+  const ready = !portal || placement !== null;
+  const focusedThisOpening = useRef(false);
   // biome-ignore lint/correctness/useExhaustiveDependencies: focus once per opening
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      focusedThisOpening.current = false;
+      return;
+    }
+    if (!ready || focusedThisOpening.current) return;
     const root = ref.current;
     if (!root) return;
+    focusedThisOpening.current = true;
     const first =
       (initialFocus ? root.querySelector<HTMLElement>(initialFocus) : null) ?? getTabbables(root)[0] ?? root;
     first.focus();
-  }, [open]);
+  }, [open, ready]);
 
   useEffect(() => {
     if (!open) return;
