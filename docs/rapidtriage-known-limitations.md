@@ -450,3 +450,15 @@ RapidTriage는 아래 기능을 프로젝트 정책으로 구현하지 않는다
 - **하네스 한계**: `scripts/rule-validation.py`의 "입력 가능 행"은 규칙 선택자가 읽는 행 수(아티팩트 유형 수·파일 목록·분석 행 수)라서 규칙이 실제로 판단하는 행보다 많을 수 있다(`ntfs.si_before_fn`만 MFT 행으로 좁힘). 아티팩트 매니페스트에 `artifact_type_counts`가 없거나 64 MB를 넘으면 그 종류의 입력 가능 행은 "알 수 없음"이다. 파일 목록 규칙의 입력 가능 행은 256 MiB를 넘는 목록도 흘려 읽어 센다(전에는 `null`). 저장된 특이사항 조인이 현재 카탈로그보다 오래되면 경고하며, 재계산은 `--recompute`다.
 - **EVTX 레코드 식별자**: 2026-08-30 Windows T1 발견(물리 레코드 헤더 id ≠ BinXML `EventRecordID`)은 현재 코드에서 해소되었다 — native 파서의 `record_id`는 BinXML `EventRecordID`이고 BinXML을 풀지 못한 레코드만 헤더 id로 대체한다(합성 EVTX 시험). 운영자 호스트의 EvtxECmd 레코드 단위 diff 재실행은 운영자 승인 대기다(`docs/validation/windows-t1-operator-inputs.md`).
 <!-- r6 S4 (validation gaps): end -->
+
+## R7 단계 1 L4 — 쓰기 확인·셸·뷰어·탐색기·검토
+<!-- r7 S1 L4 (writes · shell · viewer · explorer · review): start -->
+- **쓰기 확인의 범위**: 콘솔에서 쓰기 요청을 보내는 버튼·명령(샘플 실행, 내보내기 4종, 통합 보기 다시 만들기, 처리 그룹·태스크 건너뛰기·취소)은 확인 대화상자를 거친다. 리뷰 표시(R·I·X·B·숫자 태그·메모)는 검토 작업 자체라 확인 없이 바로 케이스 DB에 기록한다(알림으로 결과를 보인다). 케이스 DB를 처음 만드는 `POST /case-db/ensure`도 표시의 일부로 확인 없이 보낸다.
+- **검증 패키지 GET 호환**: `GET /api/runs/{id}/validation-package`·`…/file`은 기존 클라이언트를 위해 남겨 두었고 여전히 런 폴더에 쓴다. 콘솔은 더 이상 이 GET을 부르지 않고 `POST …/validation-package`(쓴 경로 반환)와 읽기 전용 `GET …/validation-package/saved`만 쓴다. 보고서·리뷰어 번들·제출 매니페스트의 다운로드 GET(`…/file`)은 기존처럼 파일을 다시 만든다(확인 대화상자 뒤에서만 호출).
+- **`case_db_ready`**: `GET /api/runs/{id}`가 런의 케이스 DB를 읽기 전용으로 열어 증거 소스가 있는지 본다(한 번의 `SELECT … LIMIT 1`). 다른 경로의 케이스 DB를 쓰는 요청(`database` 지정)은 이 플래그와 무관하게 `ensure`를 부른다.
+- **SQLite 판정**: 원본 미리보기는 확장자와 무관하게 첫 16바이트 `SQLite format 3` 헤더로 SQLite를 판정한다(Chromium `History`·`Cookies`·`Login Data` 등). 미리보기 표 목록은 여전히 8개까지 행을 미리 읽고, `viewer_hint.sqlite_tables`는 이름만 256개까지 준다. 브라우저 행의 표 이동은 행의 `source_table`(없으면 `viewer_hint.row_tables`의 유형별 표)과 `source_row_id`(= rowid)로 하며, `source_row_id`가 없는 행(캐시·세션 탭 등)은 표 첫 페이지를 연다. `locate_rowid`는 필터·정렬이 없을 때만 그 rowid가 든 페이지를 계산한다(rowid 순서 = 기본 읽기 순서). WITHOUT ROWID 표는 찾기를 하지 않는다.
+- **폴더 탐색기 하위 폴더 칸**: 가운데 위 칸은 열린 폴더의 하위 폴더를 처음 200개까지 보인다(나머지는 왼쪽 폴더 트리에서 연다). 파일은 기존처럼 아래 그리드에 있고, 폴더와 파일이 한 그리드에 섞이지는 않는다(그리드 소유 갈래 L2와 합칠 때 재검토).
+- **검토 단계 특이사항 노드**: `#/case/{run}/review/flags?flag_grade=A|B`로 검토 단계 안에서 특이사항 행을 연다. 이 목록 그리드에서 Enter가 근거 팝오버를 여는 동작(C-R2 후반)은 그리드·팝오버 소유 갈래(L2·L3) 몫으로 남겼다.
+- **처리 단계 VSS 비활성 이유 인라인(C-A4)**: 처리 단계 카드(`ProcessStage`)는 갈래 L1 소유라 이 갈래에서는 바꾸지 않았다.
+- **시각 표시**: 뷰어 메타 탭의 시각은 이 갈래의 로컬 표시기(`features/viewer/evidenceTimeDisplay.ts`)로 초까지·UTC 날짜 병기로 보인다. 갈래 L1의 공용 시각 도우미가 들어오면 그쪽으로 바꾼다.
+<!-- r7 S1 L4 (writes · shell · viewer · explorer · review): end -->
