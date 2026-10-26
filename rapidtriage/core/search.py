@@ -17,6 +17,7 @@ from .image_io import imread_unicode_safe
 from .json_stream import JsonStreamError, iter_array_items
 from .search_backend import build_search_backend_contract
 from .search_budget import SearchBudget, SourceScan, resolve_scan_budget_seconds
+from .search_hits import finalize_search_hit, scan_root_of
 from .textnorm import normalize_nfc, normalize_search_text
 
 IMAGE_EXTS = set(CATEGORY_RULES["images"]["extensions"])
@@ -177,6 +178,9 @@ def run_unified_search(
 
     if limit:
         matches = matches[:limit]
+    # Readable rows for the grid: title, root-stripped path, record time, snippet, review locator.
+    scan_root = scan_root_of(summary)
+    matches = [finalize_search_hit(match, root=scan_root) for match in matches]
     matches = enrich_unified_search_matches(matches, search_options=search_options)
     query_hit_manifest = build_advanced_search_query_hit_manifest(
         matches=matches,
@@ -234,6 +238,7 @@ def run_unified_search(
         "generated_at": dt.datetime.now().isoformat(),
         "run_summary": str(summary.get("outputs", {}).get("summary", "")),
         "keywords": normalized,
+        "root": scan_root,
         "options": {
             "include_ocr": include_ocr,
             "limit": limit,
@@ -1122,6 +1127,7 @@ def search_docs(
                 "preview": build_preview(text, matched[0]),
                 "search_match": build_search_match_metadata(text, keywords, search_options=search_options),
                 "pointer": f"/results/{result_index_by_path[str(path)]}" if str(path) in result_index_by_path else "",
+                "candidate_index": index,
                 "metadata": dict(candidate),
             }
         )

@@ -396,7 +396,8 @@ def _documents(connection: sqlite3.Connection, context: _SearchContext, scan: So
     candidates = OrdinalRows(docs_path, "candidates")
     result_index_by_path: dict[str, int] | None = None
     for row in _iter_rows(connection, sql, [*params, context.evidence_source_id], scan):
-        candidate = candidates.get(int(row["id"]) - base)
+        ordinal = int(row["id"]) - base
+        candidate = candidates.get(ordinal)
         if candidate is None:
             continue
         path = str(candidate.get("path", ""))
@@ -419,6 +420,7 @@ def _documents(connection: sqlite3.Connection, context: _SearchContext, scan: So
                 "preview": build_preview(body or haystack, matched[0]),
                 "search_match": context.match_metadata(haystack),
                 "pointer": f"/results/{result_index_by_path[path]}" if path in result_index_by_path else "",
+                "candidate_index": ordinal,
                 "metadata": dict(candidate),
             }
         )

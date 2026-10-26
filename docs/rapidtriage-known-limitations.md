@@ -324,6 +324,13 @@ RapidTriage is a local triage and review tool, not a full commercial forensic su
 - **UX 라운드 적대적 리뷰 후속(fix/r6-ux-review)**: 묶음 열이 없는 큰 타임라인(오래된 런, 이벤트 5만 초과)은 `group=1` 첫 요청에서 시각·묶음 열 전체를 만들지 않는다 — 열은 다른 열처럼 배경에서 만들고, 요청은 조건·`q`로 고른 위치 중 대상 키가 있는 이벤트만 자기 시각으로 묶는다(대표·구성원 동일, 다음 페이지는 일치 키별 캐시). `q`와 조건을 함께 처음 요청하면 검색 적중에만 조건 열을 만든다. 실측(run-subset10 32.3만 이벤트, 색인 파일 없음, 3회 중앙값): `group=1` 첫 페이지 0.80 → 0.24 s, `group=1`+`q`+시간 1.78 → 0.81 s, `q`+시간+부분 결과 1.08 → 0.68 s, 다음 페이지 ≤ 0.013 s. 큰 JSON을 메모리에 둔 프로세스에서는 Python 전체 GC(실측 약 0.4 s)가 어느 요청에나 끼어들 수 있다. 타임라인 작성기는 요약·대상 필드(`target_path`·`url`·`command_line` 등)의 `password=`·`token=`·`sharedAccessToken=`·OAuth `state=`·URL 사용자 정보를 `[가림]`으로 바꿔 저장한다(`summary.secret_redacted_events`); 이미 만든 타임라인은 다시 만들어야 적용된다. 문장 속 `state=running`·`key=HKLM\…`은 그대로이고, 키 이름 없이 값만 있는 비밀(`-p 비밀번호`, `/p:…`)은 가리지 않는다. 요약에 `jumplist_lnk_merges`가 없는 이전 형식 타임라인은 그리드에 "이 런의 타임라인은 이전 형식입니다 — 다시 생성하면 요약·중복 제거가 적용됩니다"가 나온다(콘솔에 다시 생성 동작은 아직 없음, 자동 재작성 없음).
 - **콘솔 기본 열(C4)**: 시각 · 시각 종류 · 영역·유형 · 대상 · 상세 · 출처 수 · 특이사항 · 출처 행. 상세는 원본 행 계열의 카탈로그 핵심 열을 이벤트 `details`에서 읽은 한 줄이라, 타임라인 이벤트가 담지 않은 필드(긴 목록 등)는 보이지 않는다 — 메타 탭의 "원본 아티팩트 행으로 이동"이 원본 행을 연다. 출처 행은 타임라인의 수집 루트(`root`)를 뗀 경로의 마지막 두 폴더 + 파일 이름이다.
 
+## R7 검색 결과 행·그리드 선택
+
+- **검색 결과 행(`GET /api/runs/{id}/search`)**: 모든 적중은 `title`·`display_path`(취득 루트 `scan_scope_root`를 뗀 경로, 전체 경로는 `path`에 그대로)·`artifact_type`·`timestamp`·`snippet`(일치 문맥 200자 이하, 일치 앞 40자까지, `snippet_highlights` 강조 구간)·`locator`(`{run_id, collection, kind, pointer, record_index, output_index, output_name, artifact_id?}`)를 가진다. `preview`는 이제 `snippet`과 같다(이전에는 아티팩트·타임라인·지표 적중에서 레코드 JSON 앞 240자). 레코드에서 일치 문맥을 찾을 때는 봉투·프로필 키(`artifact_record`·`commercial_*`·`legal_limitations` 등)를 건너뛰고 값 20,000개까지만 본다 — 그 뒤에만 일치가 있으면 문맥 대신 첫 값이 나온다. 정규식·유사 검색 적중은 글자 그대로의 일치가 없을 수 있어 강조 없이 첫 값이 나온다.
+- **시각**: 아티팩트 적중은 상세(`details`)의 대표 시각 키(`timestamp`·`last_visited_at`·`modified_at`·`last_seen_at` 등) 첫 값, 파일·문서는 `modified_at`이다. 집계 행(브라우저 히스토리·다운로드 집계, 저장소 목록처럼 여러 기록을 묶은 행)은 한 기록의 시각이 없어 비어 있다.
+- **검토 표시**: 문서 적중은 docs-index 결과에 없어도 `docs` `/candidates/<n>` 로케이터로 표시된다. 일괄 표시에서 로케이터가 없는 행(원본 레코드가 없는 행)은 건너뛰고 나머지에 적용하며, 건너뛴 행 제목을 알림에 적는다. 서버가 로케이터를 케이스 DB 행으로 풀지 못하면(런 산출물이 케이스 DB를 만든 뒤 바뀐 경우 등) 요청 전체가 이전처럼 실패한다.
+- **그리드 선택**: 행 클릭은 포커스 행만 옮기고 체크 표시를 바꾸지 않는다(이전에는 클릭한 행 하나만 선택). 체크박스 클릭은 그 행만 토글, Shift+클릭(행 또는 체크박스)은 기준 행부터 범위를 더하고, Ctrl/Cmd+클릭은 토글, Esc는 전체 해제, 바닥줄에 "선택 N건". 키보드 Shift+화살표 범위는 이전처럼 선택을 범위로 바꾼다. 선택은 행 키로 저장되어 스크롤·가상화·다음 페이지에도 남지만 다른 컬렉션·폴더·런으로 옮기면 비워진다.
+
 ## R6 S1 — 기존 증거 점검 후속 수정
 
 근거: `docs/validation/r6-sample-validation-2026-10-19.md` §5.5(D 드라이브 기존 증거 읽기 전용 점검). 테스트는 합성 픽스처만 쓴다(`tests/test_r6_s1_dcheck_gaps.py`).

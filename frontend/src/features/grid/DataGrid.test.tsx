@@ -170,22 +170,62 @@ describe("DataGrid keyboard", () => {
     expect(useGridLocalStore.getState().selectedKeys.size).toBe(3);
   });
 
-  it("click, Ctrl-click and Shift-click select single / toggle / range", async () => {
+  it("click focuses only; Ctrl-click toggles; Shift-click adds the range (R7)", async () => {
     await renderFiles();
     fireEvent.mouseDown(rowAt(2));
-    expect(useGridLocalStore.getState().selectedKeys.size).toBe(1);
+    // A plain click moves the focused row; it never checks or clears rows.
+    expect(useGridLocalStore.getState().selectedKeys.size).toBe(0);
+    expect(rowAt(2).classList.contains("is-focused")).toBe(true);
+    fireEvent.mouseDown(rowAt(2), { ctrlKey: true });
     fireEvent.mouseDown(rowAt(4), { ctrlKey: true });
     expect([...useGridLocalStore.getState().selectedKeys]).toEqual([
       "files:/candidates/2",
       "files:/candidates/4",
     ]);
     fireEvent.mouseDown(rowAt(6), { shiftKey: true });
-    // Range from anchor (row 4) to row 6 replaces the selection.
+    // Range from the anchor (row 4) to row 6 is added; row 2 stays checked.
     expect([...useGridLocalStore.getState().selectedKeys].sort()).toEqual([
+      "files:/candidates/2",
       "files:/candidates/4",
       "files:/candidates/5",
       "files:/candidates/6",
     ]);
+    fireEvent.mouseDown(rowAt(1));
+    expect(useGridLocalStore.getState().selectedKeys.size).toBe(4);
+    rowAt(1).focus();
+    fireEvent.keyDown(rowAt(1), { key: "Escape" });
+    expect(useGridLocalStore.getState().selectedKeys.size).toBe(0);
+  });
+
+  it("a ticked checkbox survives clicking another row and ticking another box (R7)", async () => {
+    await renderFiles();
+    const box = (i: number) =>
+      rowAt(i).querySelector<HTMLInputElement>('input[type="checkbox"]') as HTMLInputElement;
+    fireEvent.click(box(0));
+    fireEvent.mouseDown(rowAt(2));
+    fireEvent.click(rowAt(2));
+    expect(box(0).checked).toBe(true);
+    expect(rowAt(2).classList.contains("is-focused")).toBe(true);
+    expect(box(2).checked).toBe(false);
+    fireEvent.click(box(3));
+    expect([...useGridLocalStore.getState().selectedKeys].sort()).toEqual([
+      "files:/candidates/0",
+      "files:/candidates/3",
+    ]);
+    expect(screen.getByTestId("grid-footer-selected").textContent).toBe("선택 2건");
+    // Shift-click on a box extends from the last toggled box.
+    fireEvent.click(box(5), { shiftKey: true });
+    expect([...useGridLocalStore.getState().selectedKeys].sort()).toEqual([
+      "files:/candidates/0",
+      "files:/candidates/3",
+      "files:/candidates/4",
+      "files:/candidates/5",
+    ]);
+    // Esc from the focused checkbox clears the selection explicitly.
+    box(5).focus();
+    fireEvent.keyDown(box(5), { key: "Escape" });
+    expect(useGridLocalStore.getState().selectedKeys.size).toBe(0);
+    expect(screen.queryByTestId("grid-footer-selected")).toBeNull();
   });
 
   it("Enter publishes the ViewerTarget and requests viewer focus", async () => {

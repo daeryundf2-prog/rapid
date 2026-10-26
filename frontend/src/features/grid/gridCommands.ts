@@ -21,7 +21,9 @@ import {
   EXTRACT_LIMIT,
   MARK_LABELS,
   optimisticPatch,
+  partitionReviewRows,
   reviewTargetOf,
+  skippedNotice,
   storeNotice,
 } from "./reviewActions";
 import type { ColumnSpec } from "./types";
@@ -406,7 +408,8 @@ export function buildRowMarkCommands(hostRef: { current: GridCommandHost }): Com
         if (!h.runId) return "열린 케이스가 없습니다.";
         const rows = menuRows(h);
         if (rows.length === 0) return NO_ROW;
-        if (rows.some((r) => reviewTargetOf(r) === null))
+        // Rows without a source record are skipped (with a note); only all-unknown disables.
+        if (rows.every((r) => reviewTargetOf(r) === null))
           return "출처 위치를 알 수 없는 행은 표시할 수 없습니다.";
         return undefined;
       },
@@ -430,18 +433,23 @@ async function runMark(
   tag?: string,
 ): Promise<boolean> {
   if (rows.length === 0 || !host.runId) return false;
+  // Only rows with a source record change optimistically; the others are skipped (and named).
+  const patched = action === "extract" ? [] : partitionReviewRows(rows).targetable;
   const rollback =
     action === "extract"
       ? () => {}
       : host.patchRows(
-          rows.map((r) => r.rowKey),
+          patched.map((r) => r.rowKey),
           optimisticPatch(action, tag),
         );
   try {
     const result = await applyReviewAction(host.runId, rows, action, { tag });
     if (result.extract) host.showExtract(result.extract);
     else
-      host.toast(`${MARK_LABELS[action]}: ${result.applied}건 처리했습니다.${storeNotice(result)}`, "info");
+      host.toast(
+        `${MARK_LABELS[action]}: ${result.applied}건 처리했습니다.${storeNotice(result)}${skippedNotice(result.skipped ?? [])}`,
+        "info",
+      );
     return true;
   } catch (error) {
     rollback();

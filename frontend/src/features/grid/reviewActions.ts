@@ -46,8 +46,34 @@ export const MARK_LABELS: Record<BatchAction, string> = {
 /** Max rows per extract request (API limit). */
 export const EXTRACT_LIMIT = 500;
 
+/**
+ * Source-row locator a row carries explicitly (search hits: the API `locator`), as
+ * `fields.reviewCollection` / `reviewKind` / `reviewPointer`; null when the row has none.
+ */
+function carriedLocator(row: GridRow): { collection: string; kind: string; pointer: string } | null {
+  const collection = row.fields.reviewCollection;
+  const pointer = row.fields.reviewPointer;
+  if (
+    typeof collection !== "string" ||
+    !collection ||
+    typeof pointer !== "string" ||
+    !pointer.startsWith("/")
+  )
+    return null;
+  const kind = typeof row.fields.reviewKind === "string" ? row.fields.reviewKind : "";
+  if (collection === "artifacts" && !kind) return null;
+  return { collection, kind, pointer };
+}
+
 /** Bookmark API target (`source` alias + JSON pointer) for a grid row, or null when unknown. */
 export function bookmarkTarget(row: GridRow): { source: string; pointer: string } | null {
+  const carried = carriedLocator(row);
+  if (carried) {
+    return {
+      source: carried.collection === "artifacts" ? `artifacts:${carried.kind}` : carried.collection,
+      pointer: carried.pointer,
+    };
+  }
   const raw = row.fields.pointer ? str(row.fields.pointer) : row.ref.locator;
   // Search rows may carry "docs-index:/results/3"; the pointer is the part after the scheme.
   const pointer = raw.includes(":/") ? raw.slice(raw.indexOf(":/") + 1) : raw;
@@ -191,6 +217,8 @@ export interface ApplyResult {
   applied: number;
   extract?: RunExtractResult;
   store?: ReviewStore;
+  /** Rows the mark did not apply to (no source record), each with its reason. */
+  skipped?: SkippedRow[];
 }
 
 /** Toast suffix that tells the analyst a mark went to the case.json fallback, not the case DB. */
@@ -318,15 +346,52 @@ function caseDbMark(action: BatchAction, tag?: string): ReviewMarkBody {
   }
 }
 
+/** A row a mark could not apply to, with the Korean reason shown to the analyst. */
+export interface SkippedRow {
+  row: GridRow;
+  reason: string;
+}
+
+/** Why a row has no review target (shown per row when a batch skips it). */
+export const NO_SOURCE_ROW_REASON = "출처 위치(원본 레코드)를 알 수 없는 행입니다";
+
+/** Rows a review mark can target (case-db id or run-output locator), and the rest with a reason. */
+export function partitionReviewRows(rows: GridRow[]): { targetable: GridRow[]; skipped: SkippedRow[] } {
+  const targetable: GridRow[] = [];
+  const skipped: SkippedRow[] = [];
+  for (const row of rows) {
+    if (reviewTargetOf(row)) targetable.push(row);
+    else skipped.push({ row, reason: NO_SOURCE_ROW_REASON });
+  }
+  return { targetable, skipped };
+}
+
+/** Toast suffix naming the skipped rows ("… 2건은 건너뜀: 제목1, 제목2"). */
+export function skippedNotice(skipped: readonly SkippedRow[]): string {
+  if (skipped.length === 0) return "";
+  const names = skipped
+    .slice(0, 3)
+    .map((item) => item.row.title || item.row.rowKey)
+    .join(", ");
+  const more = skipped.length > 3 ? ` 외 ${skipped.length - 3}건` : "";
+  return ` 출처 위치(원본 레코드)를 알 수 없는 ${skipped.length}건은 건너뛰었습니다: ${names}${more}.`;
+}
+
 async function applyBody(
   runId: string,
-  rows: GridRow[],
+  allRows: GridRow[],
   body: MarkPayload,
   mark: ReviewMarkBody,
 ): Promise<ApplyResult> {
+  // Rows without a source record (aggregates, derived rows) are skipped with a note; the
+  // mark still applies to every row that has one.
+  const { targetable: rows, skipped } = partitionReviewRows(allRows);
+  if (rows.length === 0) {
+    throw new Error(
+      `출처 위치를 알 수 없는 행이 ${allRows.length}건 있습니다(원본 레코드 없음, 집계·파생 행).`,
+    );
+  }
   const targets = rows.map(reviewTargetOf);
-  const unresolved = targets.filter((t) => t === null).length;
-  if (unresolved > 0) throw new Error(`출처 위치를 알 수 없는 행이 ${unresolved}건 있습니다.`);
   // Queue on the (shared, cached) ensure promise: a mark made while the case DB is still being
   // prepared is applied when it resolves, never dropped; the analyst hears that right away.
   const pending = caseDbHandle(runId);
@@ -355,7 +420,7 @@ async function applyBody(
     store = "bookmarks";
   }
   for (const listener of listeners) listener(runId, store);
-  return { applied: rows.length, store };
+  return skipped.length ? { applied: rows.length, store, skipped } : { applied: rows.length, store };
 }
 
 // ---- review tools (AXIOM E3) ---------------------------------------------

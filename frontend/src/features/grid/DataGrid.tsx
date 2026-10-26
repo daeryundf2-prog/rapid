@@ -162,7 +162,8 @@ interface RowViewProps {
   menuOpen: boolean;
   /** Id of the row menu element (trigger aria-controls). */
   menuId: string;
-  onToggle: (index: number, checked: boolean) => void;
+  /** Checkbox click: toggle this row only (`range`: Shift held, extend from the anchor). */
+  onToggle: (index: number, checked: boolean, range: boolean) => void;
   /** aria-rowindex of data row 0 (2, or 3 under the column filter row). */
   ariaRowOffset: number;
 }
@@ -223,7 +224,14 @@ const RowView = memo(function RowView(props: RowViewProps) {
           tabIndex={-1}
           aria-label={`${row.title || "행"} 선택`}
           checked={selected}
-          onChange={(event) => props.onToggle(index, event.target.checked)}
+          onChange={(event) =>
+            props.onToggle(
+              index,
+              event.target.checked,
+              (event.nativeEvent as MouseEvent | undefined)?.shiftKey === true,
+            )
+          }
+          // The checkbox never activates the row (row click = move the focused row only).
           onClick={(event) => event.stopPropagation()}
         />
         <button
@@ -943,7 +951,10 @@ export function DataGrid(props: DataGridProps = {}) {
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement;
-    if (target.closest("input, button, select, textarea")) return;
+    // A row checkbox keeps focus after a click: Esc still clears the selection from there.
+    const onRowCheckbox = target.matches('[data-index] input[type="checkbox"]');
+    if (target.closest("input, button, select, textarea") && !(onRowCheckbox && event.key === "Escape"))
+      return;
     const rowEl = target.closest<HTMLElement>("[data-index]");
     // Focus on the grid container (or its scroll area) rather than a row: act on the
     // current roving row, so J/K/Enter work right after navigation.
@@ -1003,14 +1014,14 @@ export function DataGrid(props: DataGridProps = {}) {
     userNavigated.current = true;
     setFocusIdx(index);
     publishNow(row);
+    // Checked rows (the selection) are only changed on purpose: Shift adds the range from the
+    // anchor, Ctrl/Cmd toggles this row; a plain click moves the focused row and keeps the ticks.
     if (event.shiftKey && anchorRef.current !== null) {
-      const keys = rangeKeys(anchorRef.current, index);
-      setSelectionKeys(event.ctrlKey || event.metaKey ? [...new Set([...selectedKeys, ...keys])] : keys);
+      setSelectionKeys([...new Set([...selectedKeys, ...rangeKeys(anchorRef.current, index)])]);
     } else if (event.ctrlKey || event.metaKey) {
       toggleAt(index);
     } else {
       anchorRef.current = index;
-      setSelectionKeys([row.rowKey]);
     }
   };
 
@@ -1023,10 +1034,9 @@ export function DataGrid(props: DataGridProps = {}) {
     if (!row) return;
     userNavigated.current = true;
     setFocusIdx(index);
-    if (!selectedKeys.has(row.rowKey)) {
-      anchorRef.current = index;
-      setSelectionKeys([row.rowKey]);
-    }
+    // The menu acts on the selection when it holds this row, else on this row alone
+    // (gridCommands.menuRows): opening it never clears the checked rows.
+    if (!selectedKeys.has(row.rowKey)) anchorRef.current = index;
     setMenuRow(index);
     setMenuAnchor({ x: event.clientX, y: event.clientY });
   };
@@ -1047,8 +1057,21 @@ export function DataGrid(props: DataGridProps = {}) {
   }, []);
 
   const onToggleCheckbox = useCallback(
-    (index: number, checked: boolean) => toggleAt(index, checked),
-    [toggleAt],
+    (index: number, checked: boolean, range: boolean) => {
+      if (range && anchorRef.current !== null) {
+        const keys = rangeKeys(anchorRef.current, index);
+        const next = new Set(selectedKeys);
+        for (const key of keys) {
+          if (checked) next.add(key);
+          else next.delete(key);
+        }
+        anchorRef.current = index;
+        setSelectionKeys([...next]);
+        return;
+      }
+      toggleAt(index, checked);
+    },
+    [toggleAt, rangeKeys, selectedKeys, setSelectionKeys],
   );
 
   // `/` focuses the filter (not while typing somewhere else).
@@ -1692,6 +1715,7 @@ export function DataGrid(props: DataGridProps = {}) {
       </div>
 
       <GridFooter
+        selectedCount={selectedKeys.size}
         page={currentPage}
         pageCount={cq.pageCount}
         total={cq.total}
