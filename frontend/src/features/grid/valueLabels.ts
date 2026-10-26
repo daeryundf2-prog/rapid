@@ -179,6 +179,8 @@ export const VALUE_LABELS: Readonly<Record<ValueDomain, Readonly<Record<string, 
     pe32_i386: "PE32(x86)",
     pe64_amd64: "PE64(x64)",
     pe32_clr_il: "PE32(.NET IL)",
+    // AnyCPU .NET built with "Prefer 32-bit" (Amcache BinaryType; 16 rows on run-subset10, r7 S1).
+    pe32_clr_il_prefer32: "PE32(.NET IL, 32비트 우선)",
     pe32_clr_32: "PE32(.NET x86)",
     pe64_arm64: "PE64(ARM64)",
     pe64_clr_64: "PE64(.NET x64)",

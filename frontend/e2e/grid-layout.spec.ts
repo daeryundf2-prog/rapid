@@ -68,6 +68,26 @@ test("1920 · 전체 아티팩트: the grid fits the pane — no sideways scroll
   await page.screenshot({ path: join(SHOTS, "l2-1920-artifacts-all.png") });
 });
 
+// The browser kind (browser-history family, 9 default columns) overflowed by 43px at 1920 on
+// real data (r7 S1 worker sweep): its default widths beat the pane while the minimums fit.
+for (const width of [1920, 1600]) {
+  test(`${width} · 브라우저: no sideways scroll; URL stays readable (r7 S1)`, async ({ page }) => {
+    test.skip(!REAL, "real data only: the bundled sample case has no browser history kind");
+    await guard(page);
+    await page.setViewportSize({ width, height: 1000 });
+    await open(page, `#/case/${runId}/explore/artifacts/browser`);
+    const scroll = page.locator(".grid-scroll").first();
+    // 30 s: under the Vite dev server (playwright.dev.config) the first evaluate can wait out the
+    // page's initial render burst; the layout itself is settled on the first sample.
+    await expect
+      .poll(async () => scroll.evaluate((el) => el.scrollWidth - el.clientWidth), { timeout: 30_000 })
+      .toBeLessThanOrEqual(1);
+    const url = page.locator('[role="columnheader"][data-col="d:url"]').first();
+    if (await url.count()) expect((await url.boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(150);
+    await page.screenshot({ path: join(SHOTS, `r7s1-${width}-browser.png`) });
+  });
+}
+
 test("1920 · 파일 목록: no sideways scroll; path cells always hold the file name (C-D8)", async ({
   page,
 }) => {

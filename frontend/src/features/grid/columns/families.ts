@@ -354,6 +354,9 @@ export function keyTail(path: string, parts = 3): string {
 
 /** Default width of a catalogue column: a time cell holds its kind chip and the time (C7). */
 export const TIME_COLUMN_WIDTH = 200;
+/** Default width of a catalogue URL / path column: wide enough to read a host and a path (r7 S1). */
+export const LINK_COLUMN_WIDTH = 240;
+const LINK_FORMATS = new Set(["url", "path"]);
 
 /**
  * A display-only catalogue column (`derive:`, axiom-adoption §3.2): computed from the row's own
@@ -404,7 +407,13 @@ export function catalogColumn(def: CatalogColumn, aux = false): ColumnSpec {
   return {
     id: familyColumnId(def.key),
     header: def.label,
-    width: def.width ?? (def.format === "time" ? TIME_COLUMN_WIDTH : 150),
+    width:
+      def.width ??
+      (def.format === "time"
+        ? TIME_COLUMN_WIDTH
+        : LINK_FORMATS.has(def.format ?? "")
+          ? LINK_COLUMN_WIDTH
+          : 150),
     // A time never loses its seconds (C-D6, plan r7 §3.2 L2).
     minWidth: def.format === "time" ? TIME_COLUMN_MIN : 60,
     presets: aux ? [] : ["analysis", "axiom"],

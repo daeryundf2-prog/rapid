@@ -44,7 +44,7 @@ import { ColumnFilterRow } from "./ColumnFilterRow";
 import { collectionDef, lockedColumnId, presetColumnIds } from "./columns";
 import { analysisFamily } from "./columns/analysis";
 import { artifactTypeFamily, resolveArtifactFamily } from "./columns/artifacts";
-import { growWeight, isRecord, REVIEW_LABELS } from "./columns/common";
+import { fitMinWidth, growWeight, isRecord, REVIEW_LABELS } from "./columns/common";
 import { auxColumnIds } from "./columns/families";
 import {
   colsToKeys,
@@ -626,7 +626,7 @@ export function DataGrid(props: DataGridProps = {}) {
     if (!widthPriority) return out;
     const shown = orderedColumns
       .filter((c) => visibility[c.id] !== false && !out.has(c.id))
-      .map((c) => ({ id: c.id, min: columnSizing[c.id] ?? c.minWidth ?? c.width }));
+      .map((c) => ({ id: c.id, min: columnSizing[c.id] ?? fitMinWidth(c) }));
     const hidden = priorityHiddenColumns(shown, {
       priority: widthPriority,
       available: paneWidth - SELECT_COL_WIDTH - HEAD_TOOLS_WIDTH,
@@ -694,6 +694,9 @@ export function DataGrid(props: DataGridProps = {}) {
       grow: columnSizing.title === undefined ? specs.findIndex((s) => s.id === "title") : -1,
       available: paneWidth - SELECT_COL_WIDTH - HEAD_TOOLS_WIDTH,
       weights: specs.map((s) => (columnSizing[s.id] === undefined ? growWeight(s) : 0)),
+      // Too wide for the pane: shrink toward the same minimums the priority hiding counted
+      // (a width the user dragged stays as dragged).
+      mins: specs.map((s) => columnSizing[s.id] ?? fitMinWidth(s)),
     },
   );
   // Publish the shown column ids (the meta tab's "기본 열에 이미 표시됩니다" checks them).

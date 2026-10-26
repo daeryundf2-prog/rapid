@@ -446,6 +446,29 @@ class EngineTests(unittest.TestCase):
         # The previous generation stays joinable.
         self.assertTrue((self.root / "analyses" / str(first["analysis_id"]) / "analysis.json").is_file())
 
+    def test_run_stage_failure_in_the_same_clock_tick_keeps_the_previous_generation(self) -> None:
+        # The flaky cause of test_run_stage_failure_is_isolated: with a µs-timestamp id a second
+        # run in the same Windows clock tick reused the first id, the mkdir failure was isolated
+        # and the "failed" step pointed at the first (completed) generation.
+        import datetime as dt
+
+        inputs = tiny_run(self.root)
+        frozen = dt.datetime(2026, 10, 27, 1, 2, 3, 456789, tzinfo=dt.timezone.utc)
+        with patch("rapidtriage.core.triage_rules.stage.dt") as fake_dt:
+            fake_dt.datetime.now.return_value = frozen
+            fake_dt.timezone = dt.timezone
+            first = run_triage_stage(self.root, artifact_outputs=inputs.artifact_payloads)
+            with (
+                patch("rapidtriage.core.triage_rules.stage.run_triage_flags", side_effect=RuntimeError("boom")),
+                self.assertLogs("rapidtriage.core.triage_rules.stage", "ERROR"),
+            ):
+                step = run_triage_stage(self.root, artifact_outputs=inputs.artifact_payloads)
+        self.assertEqual(first["status"], "completed", first)
+        self.assertNotEqual(step["analysis_id"], first["analysis_id"])
+        self.assertIn("RuntimeError: boom", step["warning_messages"][0])
+        self.assertFalse((self.root / "analyses" / str(step["analysis_id"]) / "analysis.json").exists())
+        self.assertTrue((self.root / "analyses" / str(first["analysis_id"]) / "analysis.json").is_file())
+
     def test_run_stage_without_pyyaml_is_isolated_and_cli_imports_stay_clean(self) -> None:
         # The Rust worker CI job runs the CLI with no pip install: importing
         # rapidtriage must not need PyYAML, and a missing module must only

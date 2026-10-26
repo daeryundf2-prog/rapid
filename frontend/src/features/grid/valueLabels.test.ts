@@ -64,6 +64,17 @@ describe("value labels (C-D9)", () => {
     expect(keyValueReading("drive_type_name", "fixed")).toBe("고정 디스크");
     expect(keyValueReading("item_kind", "directory")).toBe("폴더");
     expect(keyValueReading("binary_type", "pe64_amd64")).toBe("PE64(x64)");
+    // Every Amcache BinaryType seen on real data has a reading (r7 S1 raw-value sweep).
+    for (const raw of [
+      "pe32_i386",
+      "pe64_amd64",
+      "pe32_clr_il",
+      "pe32_clr_32",
+      "pe32_clr_il_prefer32",
+      "pe64_arm64",
+      "pe64_clr_64",
+    ])
+      expect(keyValueReading("binary_type", raw)).toMatch(/^PE(32|64)\(/);
     expect(keyValueReading("content_format", "png")).toBe("PNG");
     expect(keyValueReading("danger_type", "POTENTIALLY_UNWANTED")).toBe("원치 않는 프로그램 가능성");
     expect(keyValueReading("browser", "edge")).toBe("Edge");

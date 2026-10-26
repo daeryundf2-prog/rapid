@@ -1,7 +1,10 @@
 // biome-ignore-all lint/a11y: tests drive a virtualized ARIA grid through its DOM roles
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resetArtifactCountsCache } from "../../api/collections";
 import { useAppStore } from "../../state/store";
+import { FALLBACK_CATALOG, setCatalog } from "../flags/catalog";
+import { useGridLocalStore } from "./adapter";
 import { DataGrid } from "./DataGrid";
 import {
   fileCandidates,
@@ -182,4 +185,68 @@ describe("responsive default columns (files, 분석 기본)", () => {
     expect(within(menu).queryByText(/숨김 — 표시/)).toBeNull();
     window.localStorage.removeItem("rapidtriage.grid.preset");
   });
+});
+
+describe("browser kind layout fits the pane (r7 S1, real-data 1920 overflow 43px)", () => {
+  // The real catalogue (not the test mock): the browser kind is the browser-history family —
+  // 마지막 방문 · 항목 · 특이사항 · 제목 · URL · 방문 수 · 브라우저 · 프로필 · 유형. Its default widths
+  // (1576 with the select column) exceed the 1533px pane of a 1920 window; the priority hiding
+  // counts minimums, so nothing hid and the grid scrolled sideways.
+  function browserRows() {
+    return Array.from({ length: 20 }, (_, i) => ({
+      artifact_type: "browser-history",
+      path: "C:/Users/a/AppData/Local/Google/Chrome/User Data/Default/History",
+      details: {
+        timestamp: "2026-01-01T00:00:00Z",
+        title: `Page ${i}`,
+        url: `https://example.com/path/${i}?q=${i}`,
+        visit_count: i,
+        typed_count: 0,
+        browser: "Chrome",
+        profile: "Default",
+      },
+      record_index: i,
+      ...(i % 3 === 0 ? { flags: [{ id: "probe", grade: "B", label: "검토" }] } : {}),
+    }));
+  }
+  const widthOf = (id: string) =>
+    Number.parseFloat(
+      (
+        screen.getAllByRole("columnheader").find((h) => h.getAttribute("data-col") === id) as
+          | HTMLElement
+          | undefined
+      )?.style.width ?? "0",
+    );
+
+  beforeEach(() => {
+    resetArtifactCountsCache();
+    setCatalog(FALLBACK_CATALOG, "server");
+    useGridLocalStore.setState((s) => ({
+      route: { ...s.route, collection: { id: "artifacts", kind: "browser" }, q: "", rowRef: null },
+    }));
+  });
+  afterEach(() => setCatalog(null));
+
+  // 1533 = the grid pane of a 1920 window (measured); 1213 = a 1600 window with the tree open.
+  for (const pane of [1533, 1213]) {
+    it(`fills a ${pane}px pane exactly with URL and 제목 readable`, async () => {
+      restoreWidth = mockGridWidth(pane);
+      installFetch({
+        "/artifacts": () => jsonResponse({ artifacts: { browser: { artifacts: browserRows(), total: 20 } } }),
+      });
+      renderWithClient(<DataGrid />);
+      await waitFor(() => expect(widthOf("d:url")).toBeGreaterThan(0));
+      await waitFor(() => expect(widthOf("flags")).toBeGreaterThan(0));
+      const total = screen
+        .getAllByRole("columnheader")
+        .reduce((sum, h) => sum + (Number.parseFloat(h.style.width) || 0), 0);
+      expect(total).toBe(pane);
+      // URL / 제목 / 항목 keep their default width: the fixed-width columns gave the room first.
+      expect(widthOf("d:url")).toBeGreaterThanOrEqual(240);
+      expect(widthOf("d:title")).toBeGreaterThanOrEqual(150);
+      expect(widthOf("title")).toBeGreaterThanOrEqual(240);
+      // A time cell never loses its seconds.
+      expect(widthOf("d:timestamp")).toBeGreaterThanOrEqual(180);
+    });
+  }
 });
