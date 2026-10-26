@@ -1,4 +1,5 @@
 import { fetchFilesPage } from "../../../api/collections";
+import type { CollectionQuery } from "../../../contracts/collection";
 import { formatGridTime } from "../../../utils/time";
 import { parseFlags } from "../../flags/flags";
 import type { CollectionDef, ColumnSpec } from "../types";
@@ -82,8 +83,57 @@ function ntfsOf(row: { fields: Record<string, unknown> }): Record<string, unknow
   return isRecord(row.fields.ntfs) ? row.fields.ntfs : {};
 }
 
+/** Time columns hold "YYYY-MM-DD HH:MM:SS" whole (C-D6): never narrower than this. */
+export const FILES_TIME_WIDTH = 180;
+
+/**
+ * Sort keys `GET /files` orders the WHOLE list by (files column index, plan r7 §3.2 L2):
+ * 이름 · 경로 · 크기 · 수정 · NTFS 생성, plus 특이사항 (`sort=flags`, grade first).
+ */
+export const FILES_SERVER_SORT_KEYS: ReadonlySet<string> = new Set([
+  "name",
+  "path",
+  "size",
+  "mtime",
+  "ctime",
+  "flags",
+]);
+
+/** The server sort of a files query (`sort=` / `order=`), or undefined for a client-only key. */
+export function filesServerSort(query: CollectionQuery): CollectionQuery["sort"] {
+  return query.sort && FILES_SERVER_SORT_KEYS.has(query.sort.key) ? query.sort : undefined;
+}
+
+/** Image evidence kinds (core/run/source.py source types) and image file extensions. */
+const IMAGE_SOURCE_TYPES = new Set([
+  "e01",
+  "raw-image",
+  "archive-image",
+  "virtual-disk",
+  "image",
+  "disk-image",
+]);
+const IMAGE_EXTENSION = /\.(e01|ex01|l01|dd|raw|img|001|vhdx?|vmdk|aff4?|iso|dmg)$/i;
+
+/**
+ * True when the run's input is a disk image (E01 · raw · VHD …): only then can an NTFS-meta
+ * analysis fill the NTFS columns, so only then do their headers offer "실행" (C-D12). A folder
+ * input (or an unknown one) gets no link — its NTFS columns are plain and hide when empty.
+ */
+export function runInputIsImage(run: unknown): boolean {
+  if (!isRecord(run)) return false;
+  const summary = isRecord(run.summary) ? run.summary : {};
+  const source = isRecord(summary.source) ? summary.source : isRecord(run.source) ? run.source : {};
+  const type = str(source.type).toLowerCase();
+  if (type) return IMAGE_SOURCE_TYPES.has(type);
+  const request = isRecord(run.request) ? run.request : {};
+  const kind = str(request.input_kind).toLowerCase();
+  if (kind) return IMAGE_SOURCE_TYPES.has(kind) || kind.includes("image");
+  return IMAGE_EXTENSION.test(str(request.root ?? run.root).trim());
+}
+
 function ntfsTime(id: string, header: string, key: string): ColumnSpec {
-  return col.field(id, header, 170, ["source"], (r) => strOrNull(ntfsOf(r)[key]), {
+  return col.field(id, header, FILES_TIME_WIDTH, ["source"], (r) => strOrNull(ntfsOf(r)[key]), {
     format: (r) => {
       const value = ntfsOf(r)[key];
       return typeof value === "string" || typeof value === "number"
@@ -91,6 +141,7 @@ function ntfsTime(id: string, header: string, key: string): ColumnSpec {
         : "";
     },
     filterKind: "time",
+    minWidth: FILES_TIME_WIDTH,
     emptyHint: ntfsHint,
   });
 }
@@ -290,6 +341,8 @@ export const filesCollection: CollectionDef = {
       query.ref.category || undefined,
       { ids: query.flags, grade: query.flagGrade, conditions: query.rowConditions },
       { dir: query.ref.dir, recursive: query.ref.recursive, special: query.ref.special },
+      // Server sort + name/path text filter over the whole list (plan r7 §3.2 L2, C-D1).
+      { sort: filesServerSort(query), q: query.text?.trim() || undefined },
     ),
   widthPriority: () => FILES_PRIORITY,
   mapRow: (raw, position, ctx) => {
@@ -354,20 +407,22 @@ export const filesCollection: CollectionDef = {
   // Default layout (visual-polish S4): 이름 · 경로 · 크기 · 수정 · NTFS 생성 · 선별. Default width =
   // minimum width; 이름 takes the slack and a narrow grid hides columns by FILES_PRIORITY.
   columns: [
-    { ...col.title("이름", 220), minWidth: 220 },
+    { ...col.title("이름", 220), minWidth: 220, sortKey: "name" },
     // 특이사항 (U-F4): hidden while no loaded row carries a flag (FILES_PRIORITY empty-column rule).
     flagsColumn(["analysis", "compact"]),
-    col.path(200, ["analysis", "source"]),
+    { ...col.path(200, ["analysis", "source"]), sortKey: "path" },
     col.field("size", "크기", 80, ["analysis", "compact"], (r) => (r.fields.size as number | null) ?? null, {
       align: "right",
       minWidth: 80,
+      sortKey: "size",
       format: (r) => formatBytes(r.fields.size),
     }),
     {
       id: "timestamp",
       header: "수정",
-      width: 150,
-      minWidth: 150,
+      width: FILES_TIME_WIDTH,
+      minWidth: FILES_TIME_WIDTH,
+      sortKey: "mtime",
       presets: ["analysis", "compact"],
       filterKind: "time",
       value: (r) => strOrNull(r.fields.modifiedAt),
@@ -383,8 +438,7 @@ export const filesCollection: CollectionDef = {
     },
     {
       ...ntfsTime("ntfsCreated", "NTFS 생성", "created_at"),
-      width: 150,
-      minWidth: 150,
+      sortKey: "ctime",
       presets: ["analysis", "source"],
     },
     { ...col.review(), width: 88, minWidth: 88 },

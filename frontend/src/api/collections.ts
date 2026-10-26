@@ -166,12 +166,18 @@ async function jsonPaged(
   // Files pages list their large non-row sections instead of carrying them (R6 S3 follow-up):
   // `fetchFilesSection` loads one when its UI opens.
   if (Array.isArray(payload.sections_available)) meta.sections_available = payload.sections_available;
+  // Files server sort (plan r7 §3.2 L2): the whole list was ordered from the column index.
+  const sortState =
+    endpoint === "files" && payload.sort && typeof payload.sort === "object" && !Array.isArray(payload.sort)
+      ? (payload.sort as ServerSortState)
+      : undefined;
   const base = {
     rows,
     offset,
     backend: "file",
     elapsedMs: Math.round(now() - started),
     ...(Object.keys(meta).length ? { meta } : {}),
+    ...(sortState ? { sort: sortState } : {}),
   };
   const pagination =
     payload.pagination && typeof payload.pagination === "object" && !Array.isArray(payload.pagination)
@@ -231,6 +237,28 @@ export function filesPathQueryString(filter: FilesPathFilter | undefined): strin
 }
 
 /** `GET /files` (optionally `category=<id>`: documents, images, archives, databases, emails, …). */
+/**
+ * Server sort and text filter of `GET /files` (plan r7 §3.2 L2): `sort=name|path|size|mtime|ctime`
+ * with `order=`, and `q=` (name/path terms) — both over the WHOLE list, from the column index.
+ */
+export interface FilesOrder {
+  sort?: ServerSort;
+  q?: string;
+}
+
+/** `&sort=…&order=…&q=…` ("" when neither is set). */
+export function filesOrderQueryString(order: FilesOrder | undefined): string {
+  const params = new URLSearchParams();
+  if (order?.sort) {
+    params.set("sort", order.sort.key);
+    params.set("order", order.sort.order);
+  }
+  const q = order?.q?.trim();
+  if (q) params.set("q", q);
+  const text = params.toString();
+  return text ? `&${text}` : "";
+}
+
 export const fetchFilesPage = (
   runId: string,
   offset: number,
@@ -239,9 +267,10 @@ export const fetchFilesPage = (
   category?: string,
   flags?: FlagFilter,
   path?: FilesPathFilter,
+  order?: FilesOrder,
 ) => {
   const route = parseFilesCategory(category);
-  const pathQuery = filesPathQueryString(path);
+  const pathQuery = filesPathQueryString(path) + filesOrderQueryString(order);
   return jsonPaged(
     runId,
     "files",

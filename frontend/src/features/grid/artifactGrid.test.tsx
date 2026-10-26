@@ -5,7 +5,7 @@ import { resetArtifactCountsCache } from "../../api/collections";
 import { EMPTY_CATALOG_FOR_TESTS, setCatalog } from "../flags/catalog";
 import { useGridLocalStore } from "./adapter";
 import { fieldColumnsStorageKey } from "./columns/fieldColumns";
-import { DataGrid, SORT_COLUMN_REASON, SORT_KIND_REASON } from "./DataGrid";
+import { CLIENT_SORT_HINT, DataGrid } from "./DataGrid";
 import {
   installFetch,
   jsonResponse,
@@ -74,31 +74,33 @@ async function renderArtifacts(options: Parameters<typeof sortedArtifactsHandler
 }
 
 describe("artifacts header sort (server, whole kind)", () => {
-  it("a column without a server sort key is aria-disabled with a reason and clicking does nothing", async () => {
+  it("a column without a server sort key sorts the loaded rows (no server call, plan r7 §3.2 L2)", async () => {
     const { calls } = await renderArtifacts();
     const title = header("항목");
     const button = within(title).getByRole("button");
-    expect(button.getAttribute("aria-disabled")).toBe("true");
-    expect(button.getAttribute("data-disabled-reason")).toBe(SORT_COLUMN_REASON);
-    expect(button.hasAttribute("disabled")).toBe(false); // still focusable
+    expect(button.getAttribute("aria-disabled")).toBeNull();
+    expect(button.getAttribute("title")).toBe(CLIENT_SORT_HINT);
     const before = calls.length;
     fireEvent.click(button);
-    expect(title.getAttribute("aria-sort")).toBe("none");
+    expect(title.getAttribute("aria-sort")).toBe("ascending");
     expect(useGridLocalStore.getState().route.sort).toBeUndefined();
+    expect(calls.filter((c) => c.url.includes("sort=")).length).toBe(0);
     expect(calls.length).toBe(before);
-    expect(screen.queryByText(/정렬은 불러온/)).toBeNull();
+    // All 30 rows are loaded: the sort covers the whole kind, so no "loaded rows" banner.
+    expect(screen.queryByTestId("grid-scope-banner")).toBeNull();
+    expect(screen.getByTestId("grid-scope-badge").textContent).toBe("불러온 30 / 전체 30");
   });
 
-  it("the disabled reason is a description, not part of the column header's accessible name", async () => {
+  it("a server sort replaces a loaded-rows sort and the other way round", async () => {
     await renderArtifacts();
-    const title = screen.getByRole("columnheader", { name: "항목" });
-    const button = within(title).getByRole("button", { name: "항목" });
-    const describedBy = button.getAttribute("aria-describedby") ?? "";
-    expect(document.getElementById(describedBy)?.textContent).toBe(SORT_COLUMN_REASON);
-    expect(screen.queryByRole("tooltip")).toBeNull();
-    fireEvent.focus(button);
-    expect(screen.getByRole("tooltip", { hidden: true }).getAttribute("aria-hidden")).toBe("true");
-    expect(screen.getByRole("columnheader", { name: "실행 횟수" }).getAttribute("aria-sort")).toBe("none");
+    fireEvent.click(within(header("항목")).getByRole("button"));
+    expect(header("항목").getAttribute("aria-sort")).toBe("ascending");
+    fireEvent.click(within(header("실행 횟수")).getByRole("button"));
+    expect(useGridLocalStore.getState().route.sort).toEqual({ key: "details.run_count", order: "asc" });
+    expect(header("항목").getAttribute("aria-sort")).toBe("none");
+    fireEvent.click(within(header("항목")).getByRole("button"));
+    expect(useGridLocalStore.getState().route.sort).toBeUndefined();
+    expect(header("항목").getAttribute("aria-sort")).toBe("ascending");
   });
 
   it("multi-key columns sort on their first key and the button says which", async () => {
@@ -170,13 +172,15 @@ describe("artifacts header sort (server, whole kind)", () => {
     expect(header("실행 횟수").getAttribute("aria-sort")).toBe("none");
   });
 
-  it("artifacts without one kind: every header explains that a kind must be chosen", async () => {
+  it("artifacts without one kind: headers sort the loaded rows (the server sorts one kind only)", async () => {
     useGridLocalStore.setState((s) => ({ route: { ...s.route, collection: { id: "artifacts" } } }));
     await renderArtifacts();
-    // Mixed-family layout (U-F8): 항목 still sorts only inside one kind.
     const button = within(header("항목")).getByRole("button");
-    expect(button.getAttribute("aria-disabled")).toBe("true");
-    expect(button.getAttribute("data-disabled-reason")).toBe(SORT_KIND_REASON);
+    expect(button.getAttribute("aria-disabled")).toBeNull();
+    expect(button.getAttribute("title")).toBe(CLIENT_SORT_HINT);
+    fireEvent.click(button);
+    expect(header("항목").getAttribute("aria-sort")).toBe("ascending");
+    expect(useGridLocalStore.getState().route.sort).toBeUndefined();
     expect(screen.queryByRole("button", { name: "열 설정" })).toBeTruthy();
   });
 });
@@ -419,9 +423,10 @@ describe("artifact-columns review fixes", () => {
     fireEvent.click(picker().getByRole("checkbox", { name: "tags" }));
     const tagsHeader = screen.getByRole("columnheader", { name: "tags" });
     expect(tagsHeader.getAttribute("data-col")).toBe("f:tags");
+    // A list-valued column has no server sort: it sorts the loaded rows (header hint).
     const button = within(tagsHeader).getByRole("button", { name: "tags" });
-    expect(button.getAttribute("aria-disabled")).toBe("true");
-    expect(button.getAttribute("data-disabled-reason")).toBe("목록 값은 전체 정렬을 지원하지 않습니다");
+    expect(button.getAttribute("aria-disabled")).toBeNull();
+    expect(button.getAttribute("title")).toBe(CLIENT_SORT_HINT);
   });
 
   it("eventlog 메시지 sorts on the key the cells show: message when present, else raw event_message", async () => {
