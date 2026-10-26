@@ -272,7 +272,7 @@ describe("8. cross-case dialog groups the runs", () => {
     installFetch({ "/analyses": () => jsonResponse({ analyses: [] }) });
     renderWithClient(<AnalysisDialog kind="cross-case" runId={RUN} onClose={() => {}} />);
     const group = within(screen.getByRole("dialog")).getByRole("group", { name: "비교할 케이스" });
-    expect(within(group).getByTestId("cross-case-current").textContent).toMatch(/현재 케이스.*case1/);
+    expect(within(group).getByTestId("cross-case-current").textContent).toMatch(/현재 런.*case1/);
     expect(within(group).getAllByRole("checkbox")).toHaveLength(1);
     const more = within(group).getByRole("button", { name: "사용할 수 없는 런 5개 보기" });
     expect(more.getAttribute("aria-expanded")).toBe("false");
