@@ -33,6 +33,7 @@ import { Icon } from "../../icons";
 import { currentRun } from "../../state/slices/runs";
 import { useAppStore } from "../../state/store";
 import { runCommandId } from "../analysis/commands";
+import { fsFolderEmptyText, fsScopeOf, useFsLevel } from "../explorers/FsExplorer";
 import { setColumnFilter } from "../filters/columnFilters";
 import type { FilterBarVariant } from "../filters/FilterBar";
 import { useFilterStore } from "../filters/filterStore";
@@ -1429,6 +1430,13 @@ export function DataGrid(props: DataGridProps = {}) {
       </span>
     ) : null;
 
+  // C-E1: the explorer's folder without direct files names its sub-folders in the empty state.
+  const fsFolder = useFsLevel(
+    filesGrid && !ref.recursive && !ref.special ? runId : null,
+    fsScopeOf(ref.category),
+    filesGrid && !ref.recursive && !ref.special ? ref.dir : undefined,
+  );
+  const fsEmptyText = filesGrid && !q.trim() && !timeConditionOn ? fsFolderEmptyText(fsFolder.data) : null;
   // R-2: files whose times are acquisition-copy times (no NTFS join) say so; a time condition
   // that matched nothing on them names that reason in the empty state.
   const timeBasis = filesGrid ? timeBasisOf(cq.pageMeta) : null;
@@ -1459,29 +1467,31 @@ export function DataGrid(props: DataGridProps = {}) {
                 }
               : timeEmptyText
                 ? { icon: "clock", text: timeEmptyText }
-                : filesGrid && q.trim()
-                  ? {
-                      icon: "search",
-                      // Files filter name/path on the server (plan r7 §3.2 L2); the text names the query (L3).
-                      text: `'${q.trim()}'에 맞는 파일이 없습니다. (서버 검색: 전체 파일의 이름·경로)`,
-                    }
-                  : compactMode && needle
+                : fsEmptyText
+                  ? { icon: "folder", text: fsEmptyText }
+                  : filesGrid && q.trim()
                     ? {
-                        icon: "filter",
-                        text: `'${needle}'에 맞는 행이 없습니다. 불러온 행 안에서만 필터합니다.`,
+                        icon: "search",
+                        // Files filter name/path on the server (plan r7 §3.2 L2); the text names the query (L3).
+                        text: `'${q.trim()}'에 맞는 파일이 없습니다. (서버 검색: 전체 파일의 이름·경로)`,
                       }
-                    : isAnalysis && ref.kind
+                    : compactMode && needle
                       ? {
-                          icon: "inbox",
-                          text: "이 노드에는 결과가 없습니다.",
-                          action: { command: runCommandId(ref.kind), label: "분석 실행" },
+                          icon: "filter",
+                          text: `'${needle}'에 맞는 행이 없습니다. 불러온 행 안에서만 필터합니다.`,
                         }
-                      : compactMode
+                      : isAnalysis && ref.kind
                         ? {
-                            icon: "filter",
-                            text: "조건에 맞는 행이 없습니다. 불러온 행 안에서만 필터합니다.",
+                            icon: "inbox",
+                            text: "이 노드에는 결과가 없습니다.",
+                            action: { command: runCommandId(ref.kind), label: "분석 실행" },
                           }
-                        : { icon: "inbox", text: "이 노드에는 표시할 행이 없습니다." };
+                        : compactMode
+                          ? {
+                              icon: "filter",
+                              text: "조건에 맞는 행이 없습니다. 불러온 행 안에서만 필터합니다.",
+                            }
+                          : { icon: "inbox", text: "이 노드에는 표시할 행이 없습니다." };
 
   const serverFiltering =
     cq.serverColumnFilters ||

@@ -70,7 +70,7 @@ export function ancestorIds(dir: string): string[] {
   return out;
 }
 
-function useFsLevel(runId: string | null, scope: FsScope, path: string | undefined) {
+export function useFsLevel(runId: string | null, scope: FsScope, path: string | undefined) {
   return useQuery({
     queryKey: ["fs-tree", runId, scope, path ?? ""],
     queryFn: ({ signal }) => fetchFsTree(runId as string, { path, scope, limit: FS_TREE_PAGE }, signal),
@@ -78,6 +78,21 @@ function useFsLevel(runId: string | null, scope: FsScope, path: string | undefin
     staleTime: 60_000,
     retry: false,
   });
+}
+
+/**
+ * Empty state of the explorer's files grid (C-E1): a folder with no direct files names its
+ * sub-folders instead of the generic "표시할 행이 없습니다"; null when it has direct files (the
+ * grid is empty for another reason — a filter) or the folder is not loaded yet.
+ */
+export function fsFolderEmptyText(
+  page: Pick<FsTreePage, "node" | "children" | "child_total"> | undefined,
+): string | null {
+  if (!page || page.node.direct_file_count > 0) return null;
+  const subs = page.child_total ?? page.children.length;
+  return subs > 0
+    ? `이 폴더에 직속 파일이 없습니다 — 하위 폴더 ${n(subs)}개 (위 목록에서 열거나 '하위 폴더 포함'을 켜세요)`
+    : "이 폴더에는 파일도 하위 폴더도 없습니다.";
 }
 
 /** Korean names of the special nodes (C-E2): the route's `special=` id is never shown as text. */
