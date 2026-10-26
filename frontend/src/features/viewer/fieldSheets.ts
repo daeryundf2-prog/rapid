@@ -8,9 +8,11 @@
  *
  * Every other key of the record is classified, never dropped:
  *  - 출처 (provenance): source path, container file hashes, record offsets, parser, decode state;
- *  - 기타 필드: anything else, expanded, with a humanised label (raw key as the tooltip);
- *  - 내부 검증 정보(증거 아님): governance/validation keys only (commercial_*, validation_*,
- *    blockers, *_plan*, readiness, grade …) — folded at the bottom.
+ *  - 추가 필드: other keys with a full Korean label (raw key as the tooltip);
+ *  - 기타 필드: keys with no Korean label, folded, under their raw key (R7 L3: never a
+ *    half-translated "danger 종류 이름");
+ *  - governance/validation keys (commercial_*, validation_*, blockers, *_plan*, readiness, grade …):
+ *    tool self-assessment, kept for the record JSON and never shown in the examiner view (C-W3).
  */
 
 import type { GridRow } from "../../contracts/collection";
@@ -18,6 +20,7 @@ import { flatValue } from "../../utils/flatValue";
 import { eventSummaryKo, fieldOf } from "../derived/derivedFields";
 import { artifactTypeLabel } from "../filters/typeLabels";
 import { typeValueLabel } from "../flags/catalog";
+import { keyValueReading } from "../grid/valueLabels";
 import { metaLabel } from "./views/metaLabels";
 
 export type FieldFormat =
@@ -1479,6 +1482,21 @@ export function isGovernanceKey(key: string): boolean {
   return GOVERNANCE_PATTERN.test(key);
 }
 
+/** Keys inside nested QA groups (차단 요인 ID · 격차 ID · 필요 도구 …) that the pattern does not catch. */
+const INTERNAL_QA_KEYS = new Set([
+  "blocker_id",
+  "gap_id",
+  "gap_ids",
+  "required_tools",
+  "blocked",
+  "item_number",
+]);
+
+/** Tool self-assessment keys at any depth (R7 L3, C-W3): hidden from the examiner view. */
+export function isInternalQaKey(key: string): boolean {
+  return isGovernanceKey(key) || INTERNAL_QA_KEYS.has(key);
+}
+
 /** Provenance: where the record came from and how it was decoded. */
 const PROVENANCE_PATTERN =
   /^(source_path|path|source_index|source_record_id|source_row_id|source_table|source_size|source_offset|source_length|source_locator|source_viewer_locator|source_format|source_files|source_hashes|source_hashes_by_file|record_offset|record_size|record_length|chunk_offset|cell_offset|hbin_offset|offset|length|end_offset|evtx_record_offset|evtx_record_size|evtx_record_sha256|evtx_chunk_index|entry_hint|relative_path|hashes|sha256|sha1|md5|row_hash|parser|parser_version|parser_confidence|confidence|coverage_status|evidence_strength|reportability|row_kind|kind|supported|pointer|recoverySourceId|deletionState|sourceOffset|recoveryInfo|recovery|sourceRecord|timestamp_source|timestamp_status|timestamp_timezone|timestamp_kind|timestamp_label|user_name_source|executable_hint_source|referenced_path_source|time_origin|modified_at_origin|source_file_mtime|source_file_ctime|source_file_atime|raw_preview|header_hex|record_projection|caution_labels|risk_flags|risk_score|scan_status|parser_error)$|_parse_status$|_decode_status$|_status_counts$|_truncated$|^truncated$|_100ns$|_filetime$|_filetimes$|_raw$|^evtx_.*_status$|^native_.*_status$/;
@@ -1711,6 +1729,20 @@ export function fieldLabel(key: string): string {
   return metaLabel(key) ?? humanizeKey(key);
 }
 
+/** A word the humaniser left untranslated ("danger" of "danger 종류 이름"). */
+const UNTRANSLATED_WORD = /(^|\s)[a-z][a-z0-9]*(?=\s|$)/;
+
+/**
+ * Full Korean label of a key (R7 L3): its label, or a humanised label every word of which was
+ * translated; null when any word stays English (the key is listed under 기타 필드 instead).
+ */
+export function koreanFieldLabel(key: string): string | null {
+  const label = metaLabel(key);
+  if (label) return label;
+  const humanized = humanizeKey(key);
+  return humanized !== key && !UNTRANSLATED_WORD.test(humanized) ? humanized : null;
+}
+
 // ---------------------------------------------------------------------------
 // Layout
 // ---------------------------------------------------------------------------
@@ -1750,7 +1782,14 @@ export interface RecordLayout {
   /** Name/value table under 핵심 (EVTX EventData, registry values). */
   table: { key: string; label: string; rows: Array<{ name: string; value: unknown }> } | null;
   provenance: SheetEntry[];
+  /** Keys outside the sheet with a full Korean label (shown). */
   other: SheetEntry[];
+  /**
+   * Keys with no Korean label (R7 L3, C-W2): never a half-translated "danger 종류 이름" — folded as
+   * "기타 필드" with the raw key as written (the key is the only honest name it has).
+   */
+  extra: SheetEntry[];
+  /** Tool self-assessment keys: kept for the record JSON, never shown in the examiner view (C-W3). */
   governance: SheetEntry[];
 }
 
@@ -1895,40 +1934,52 @@ export function recordLayout(row: GridRow | null): RecordLayout {
 
   const provenance: SheetEntry[] = [];
   const other: SheetEntry[] = [];
+  const extra: SheetEntry[] = [];
   const governance: SheetEntry[] = [];
   for (const [key, raw] of Object.entries(fields)) {
     if (used.has(key) || suppressed.has(key) || HIDDEN_KEYS.has(key) || !present(raw)) continue;
+    const korean = koreanFieldLabel(key);
     const entry: SheetEntry = {
       key,
-      label: fieldLabel(key),
+      label: korean ?? key,
       raw,
       format: "text",
       aliases: [],
       fromDetails: Object.hasOwn(details, key),
     };
     if (isGovernanceKey(key)) governance.push(entry);
+    else if (!korean) extra.push(entry);
     else if (isProvenanceKey(key)) provenance.push(entry);
     else other.push(entry);
   }
+  extra.sort((a, b) => a.key.localeCompare(b.key));
   // Aliases are named on the shown entry (tooltip), so nothing is silently dropped.
   for (const [alias, shown] of suppressed) {
-    const target = [...core, ...provenance, ...other].find((entry) => entry.key === shown);
+    const target = [...core, ...provenance, ...other, ...extra].find((entry) => entry.key === shown);
     if (target && !target.aliases.includes(alias)) target.aliases.push(alias);
   }
   provenance.sort((a, b) => provenanceRank(a.key) - provenanceRank(b.key));
   // Two keys outside the sheet that read the same label ("앱 이름" for application_name and
   // app_name) carry their raw key in the visible text (review B2-8).
-  const all = [...core, ...provenance, ...other, ...governance];
+  const all = [...core, ...provenance, ...other, ...extra, ...governance];
   for (const entry of all) {
     const reading = valueReading(row?.artifactType, entry.key, entry.raw);
     if (reading) entry.valueLabel = reading;
   }
+  // Two shown keys that read the same label ("앱 이름" for application_name and app_name) are told
+  // apart by a numbered suffix (review B2-8; the raw key stays the tooltip, never the text).
+  const shown = [...core, ...provenance, ...other];
   const uses = new Map<string, number>();
-  for (const entry of all) uses.set(entry.label, (uses.get(entry.label) ?? 0) + 1);
-  for (const entry of [...provenance, ...other, ...governance]) {
-    if ((uses.get(entry.label) ?? 0) > 1) entry.label = `${entry.label} (${entry.key})`;
+  for (const entry of shown) uses.set(entry.label, (uses.get(entry.label) ?? 0) + 1);
+  const seen = new Map<string, number>();
+  for (const entry of [...provenance, ...other]) {
+    if ((uses.get(entry.label) ?? 0) < 2) continue;
+    const base = entry.label;
+    const nth = (seen.get(base) ?? (core.some((c) => c.label === base) ? 1 : 0)) + 1;
+    seen.set(base, nth);
+    if (nth > 1) entry.label = `${base} (${nth})`;
   }
-  return { sheet, core, table, provenance, other, governance };
+  return { sheet, core, table, provenance, other, extra, governance };
 }
 
 /** Korean reading of one record value (r2 console fix M7): catalogue `value_labels`, type names. */
@@ -1941,7 +1992,7 @@ export function valueReading(
     const label = artifactTypeLabel(raw);
     if (label) return label;
   }
-  const mapped = typeValueLabel(artifactType, key, raw);
+  const mapped = typeValueLabel(artifactType, key, raw) ?? keyValueReading(key, raw);
   return mapped && mapped !== String(raw) ? mapped : undefined;
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isRawToken, metaLabel, metaValueLabel, sectionLabels } from "./metaLabels";
+import { isRawToken, metaLabel, metaValueLabel, sectionLabels, viewerLimitationKo } from "./metaLabels";
 
 describe("meta key labels (visual-polish S5)", () => {
   it("labels provenance and verification keys in Korean", () => {
@@ -61,13 +61,25 @@ describe("meta value readings (visual-polish B2 #5)", () => {
 });
 
 describe("sectionLabels (review B2-8)", () => {
-  it("spells out the raw key when two keys of one section share a label", () => {
+  it("numbers labels two keys of one section share — never the raw key (R7 L3)", () => {
     const labels = sectionLabels(["timestamp", "time", "user", "user_name", "channel", "zz_raw"]);
-    expect(labels.get("timestamp")).toBe("시각 (timestamp)");
-    expect(labels.get("time")).toBe("시각 (time)");
-    expect(labels.get("user")).toBe("사용자 (user)");
-    expect(labels.get("user_name")).toBe("사용자 (user_name)");
+    expect(labels.get("timestamp")).toBe("시각");
+    expect(labels.get("time")).toBe("시각 (2)");
+    expect(labels.get("user")).toBe("사용자");
+    expect(labels.get("user_name")).toBe("사용자 (2)");
     expect(labels.get("channel")).toBe("채널");
     expect(labels.get("zz_raw")).toBeNull();
+  });
+});
+
+describe("viewerLimitationKo (R7 L3)", () => {
+  it("reads the source viewer's English limitation notes in Korean", () => {
+    expect(
+      viewerLimitationKo("Preview is read-only and may be capped to keep large cases responsive."),
+    ).toMatch(/^미리보기는 읽기 전용/);
+    expect(viewerLimitationKo("Inline text snippets are capped near 200000 characters.")).toBe(
+      "본문 미리보기는 약 200,000자까지만 표시합니다.",
+    );
+    expect(viewerLimitationKo("Something new.")).toBe("Something new.");
   });
 });
