@@ -170,6 +170,8 @@ export interface CollectionQuery {
     hideKnownGood?: boolean;
     /** Include OCR sidecar text (`ocr=1`; off by default: it reads every image's sidecar). */
     ocr?: boolean;
+    /** Korean note when the typed keywords were trimmed to the search limits (R7 S2 #4). */
+    keywordNote?: string;
   };
 }
 

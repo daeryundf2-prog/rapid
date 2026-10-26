@@ -38,7 +38,8 @@ export function searchDomainLabel(name: string): string {
   return SEARCH_DOMAIN_LABELS[name] ?? name;
 }
 
-export const SEARCH_SHORT_KEYWORD_NOTE = "1자·영문 2자 검색어는 색인 없이 전체 본문을 훑었습니다(느릴 수 있음)";
+export const SEARCH_SHORT_KEYWORD_NOTE =
+  "1자·영문 2자 검색어는 색인 없이 전체 본문을 훑었습니다(느릴 수 있음)";
 
 function isWarning(value: unknown): value is SearchWarning {
   return (
@@ -49,11 +50,17 @@ function isWarning(value: unknown): value is SearchWarning {
   );
 }
 
-/** One footer line + tooltip for the page's v2 warnings (`meta.searchWarnings`); undefined when none. */
-export function searchWarningNote(value: unknown): { text: string; title: string } | undefined {
+/**
+ * One footer line + tooltip for the page's v2 warnings (`meta.searchWarnings`) and the top bar's
+ * keyword-cap note (R7 S2 #4); undefined when there is neither.
+ */
+export function searchWarningNote(
+  value: unknown,
+  keywordNote?: string,
+): { text: string; title: string } | undefined {
   const warnings = Array.isArray(value) ? value.filter(isWarning) : [];
-  if (!warnings.length) return undefined;
-  const parts: string[] = [];
+  if (!warnings.length && !keywordNote) return undefined;
+  const parts: string[] = keywordNote ? [keywordNote] : [];
   const tooltip: string[] = [];
   const truncated = warnings.filter((w) => w.kind === "truncated-rows");
   if (truncated.length) {

@@ -7,6 +7,7 @@ import { CommandButton } from "../commands/CommandButton";
 import { useCommandState } from "../commands/registry";
 import { RUN_ADD_LABEL } from "../features/case/commands";
 import { SearchOptionsButton } from "../features/case/SearchOptionsPopover";
+import { parseSearchKeywords } from "../features/case/searchKeywords";
 import { searchCancelKey, useSearchState } from "../features/case/searchState";
 import { Icon } from "../icons";
 import { keyLabel } from "../shortcuts";
@@ -70,7 +71,14 @@ function GlobalSearch() {
       void queryClient?.cancelQueries({ queryKey: searchQueryKey(route.runId) });
     }
     // S4's search options read the keywords; the grid builds the FTS request (searchPath()).
-    useSearchState.getState().setKeywords(q.split(/[\s,]+/).filter(Boolean));
+    // R7 S2 #4: 32 keywords / 4,000 characters at most — trimmed here with a Korean note, never a
+    // server validation error.
+    const parsed = parseSearchKeywords(q);
+    useSearchState.getState().setKeywords(parsed.keywords);
+    if (parsed.note) {
+      showNotice(`전체 검색: ${parsed.note}`);
+      announce(`전체 검색: ${parsed.note}`);
+    }
     openCollection("search", { q });
     // The analyst's next key is J: hand focus to the results grid once it renders.
     focusGridWhenReady();
@@ -82,7 +90,7 @@ function GlobalSearch() {
     event.preventDefault();
     event.stopPropagation();
     // Marked first so the grid does not request the pages again (focus / re-render refetch).
-    const keywords = routedQuery.split(/[\s,]+/).filter(Boolean);
+    const { keywords } = parseSearchKeywords(routedQuery);
     useSearchState.getState().setCancelled(searchCancelKey(route.runId, keywords));
     void queryClient?.cancelQueries({ queryKey: searchQueryKey(route.runId) });
     announce("검색을 취소했습니다. 다시 검색하려면 Enter를 누르세요");

@@ -431,7 +431,11 @@ export function GridFooter(props: GridFooterProps) {
         </span>
       ) : null}
       {props.searchNote ? (
-        <span className="grid-note" data-testid="grid-footer-search-note" title={props.searchNote.title || undefined}>
+        <span
+          className="grid-note"
+          data-testid="grid-footer-search-note"
+          title={props.searchNote.title || undefined}
+        >
           {props.searchNote.text}
         </span>
       ) : null}

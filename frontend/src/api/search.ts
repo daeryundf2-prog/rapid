@@ -87,6 +87,21 @@ export function indexCoversSearch(spec: IndexSearchSpec, extensions: readonly st
   );
 }
 
+/** Shown for a search request the server rejected with English (pydantic) validation text. */
+export const SEARCH_REQUEST_REJECTED =
+  "검색 요청을 처리할 수 없습니다. 검색어 수(32개)나 길이(4,000자)를 줄여 다시 검색하세요.";
+
+/**
+ * A search error as the analyst reads it (R7 S2 #4): a 400 / 422 whose text is not Korean (FastAPI
+ * validation messages such as "List should have at most 32 items") becomes a Korean sentence;
+ * Korean server reasons (a rejected cursor, a too-long query) and other errors pass unchanged.
+ */
+export function koreanSearchError(error: unknown): unknown {
+  if (!(error instanceof ApiError) || (error.status !== 400 && error.status !== 422)) return error;
+  if (/[가-힣]/.test(error.message)) return error;
+  return new ApiError(SEARCH_REQUEST_REJECTED, error.status, error.detail);
+}
+
 /** next offset → cursor (null: the result ended there), per (run, keywords). */
 const cursors = new Map<string, Map<number, string | null>>();
 /** (run, keywords, offset) → the in-flight request that will name the cursor at that offset. */
@@ -162,7 +177,11 @@ function countsInText(text: string): Record<string, number> | undefined {
   return Object.keys(counts).length ? counts : undefined;
 }
 
-function warningKind(text: string, code: string, counts: Record<string, number> | undefined): SearchWarning["kind"] {
+function warningKind(
+  text: string,
+  code: string,
+  counts: Record<string, number> | undefined,
+): SearchWarning["kind"] {
   if (/truncat/i.test(code) || /잘린 행|색인 상한/.test(text) || (counts && /truncat|row/i.test(code)))
     return "truncated-rows";
   if (/short/i.test(code) || /[12]자 검색어|2자 검색어/.test(text)) return "short-keyword";

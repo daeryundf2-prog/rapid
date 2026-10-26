@@ -17,6 +17,7 @@ import {
   fetchIndexSearchPage,
   forgetSearchIndex,
   indexCoversSearch,
+  koreanSearchError,
   type SearchIndexStatus,
   searchIndexStatus,
 } from "./search";
@@ -1068,10 +1069,17 @@ export async function fetchSearchRows(
         return await fetchIndexSearchPage(runId, spec.keywords, offset, pageLimit, signal);
       } catch (error) {
         // No index any more (404), an unreadable / older-format index (409) or a locked one (503):
-        // v1 answers instead; anything else (a cancelled request, a bad query) is the search's error.
-        if (!(error instanceof ApiError && [404, 409, 503].includes(error.status))) throw error;
-        forgetSearchIndex(runId);
-        indexStatus = "unknown";
+        // v1 answers instead (the index status is re-read). A request v2 rejects (400 / 422: too
+        // many keywords, a query over 4,000 characters — R7 S2 #4) also goes to v1, which has no
+        // such limits; the index itself is fine. Anything else (a cancelled request) is the
+        // search's error.
+        if (!(error instanceof ApiError && [400, 404, 409, 422, 503].includes(error.status))) throw error;
+        if (error.status === 400 || error.status === 422) {
+          indexStatus = undefined;
+        } else {
+          forgetSearchIndex(runId);
+          indexStatus = "unknown";
+        }
       }
     }
   }
@@ -1084,7 +1092,11 @@ export async function fetchSearchRows(
   for (const source of spec.sources ?? []) params.append("source", source);
   for (const extension of query.extension ?? []) params.append("extension", extension);
   if (spec.hideKnownGood) params.set("hide_known_good", "true");
-  const payload = await api<Record<string, unknown>>(`/api/runs/${enc(runId)}/search?${params}`, { signal });
+  const payload = await api<Record<string, unknown>>(`/api/runs/${enc(runId)}/search?${params}`, {
+    signal,
+  }).catch((error: unknown) => {
+    throw koreanSearchError(error);
+  });
   const rows = asRows(payload.matches);
   const pagination =
     payload.pagination && typeof payload.pagination === "object"

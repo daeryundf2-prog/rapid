@@ -1996,7 +1996,11 @@ export function DataGrid(props: DataGridProps = {}) {
               : undefined
         }
         indexHint={searchFooterIndexHint}
-        searchNote={ref.id === "search" ? searchWarningNote(cq.pageMeta?.searchWarnings) : undefined}
+        searchNote={
+          ref.id === "search"
+            ? searchWarningNote(cq.pageMeta?.searchWarnings, route.search?.keywordNote)
+            : undefined
+        }
       />
       {extractResult ? (
         <section className="grid-extract" role="status" aria-label="추출 결과">

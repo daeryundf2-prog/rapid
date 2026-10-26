@@ -1,10 +1,22 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  KEYWORD_COUNT_NOTE,
+  KEYWORD_LENGTH_NOTE,
+  parseSearchKeywords,
+} from "../features/case/searchKeywords";
 import { GridFooter } from "../features/grid/GridToolbar";
 import { SEARCH_SHORT_KEYWORD_NOTE, searchWarningNote } from "../features/grid/searchNotes";
 import { installFetch, jsonResponse } from "../features/grid/testSupport";
+import { ApiError } from "./client";
 import { fetchSearchRows, SEARCH_PAGE_SIZE } from "./collections";
-import { forgetSearchIndex, indexCoversSearch, isUnindexedKeyword } from "./search";
+import {
+  forgetSearchIndex,
+  indexCoversSearch,
+  isUnindexedKeyword,
+  koreanSearchError,
+  SEARCH_REQUEST_REJECTED,
+} from "./search";
 
 afterEach(() => {
   cleanup();
@@ -41,7 +53,9 @@ describe("R7 S2 #3: v2 warnings in the search results footer", () => {
             },
           },
           // Backend lane (R7 S2 fix): structured per-source truncated-row counts.
-          warnings: [{ code: "truncated_rows", message: "본문이 잘린 행", counts: { docs: 7, artifacts: 0 } }],
+          warnings: [
+            { code: "truncated_rows", message: "본문이 잘린 행", counts: { docs: 7, artifacts: 0 } },
+          ],
         }),
     });
     const page = await fetchSearchRows(
@@ -95,6 +109,72 @@ describe("R7 S2 #3: v2 warnings in the search results footer", () => {
   });
 });
 
+describe("R7 S2 #4: keyword caps, v1 fallback on 400/422, Korean errors only", () => {
+  it("caps keywords at 32 and their total length at 4,000 characters", () => {
+    const many = Array.from({ length: 40 }, (_, i) => `k${i}`);
+    expect(parseSearchKeywords(many.join(","))).toEqual({
+      keywords: many.slice(0, 32),
+      note: KEYWORD_COUNT_NOTE,
+    });
+    const long = ["a".repeat(3000), "b".repeat(1500), "c"];
+    expect(parseSearchKeywords(long.join(" "))).toEqual({ keywords: [long[0]], note: KEYWORD_LENGTH_NOTE });
+    expect(parseSearchKeywords("x".repeat(5000)).keywords[0]).toHaveLength(4000);
+    expect(parseSearchKeywords("계약 계약 근로")).toEqual({ keywords: ["계약", "근로"] });
+  });
+
+  it("a v2 422 / 400 falls back to v1 without forgetting the index", async () => {
+    for (const status of [422, 400]) {
+      const calls = installFetch({
+        "/search/index": () => jsonResponse({ status: "ready" }),
+        "/search/query": () =>
+          jsonResponse(
+            status === 422
+              ? { detail: [{ msg: "List should have at most 32 items after validation, not 33" }] }
+              : { detail: "질의가 너무 깁니다(최대 4,000자)" },
+            status,
+          ),
+        "/search": () =>
+          jsonResponse({
+            matches: [{ source: "files" }],
+            backend: "fts",
+            pagination: { has_more: false, total: 1 },
+          }),
+      });
+      const page = await fetchSearchRows(
+        `run-4-${status}`,
+        { search: { keywords: ["계약서", "근로계약"], mode: "exact" } },
+        SEARCH_PAGE_SIZE,
+      );
+      expect(page.backend).toBe("fts");
+      expect(page.rows).toHaveLength(1);
+      // Not "no index": the footer offers no index build for a rejected request.
+      expect(page.meta).toBeUndefined();
+      expect(calls.some((call) => call.url.includes("/search?"))).toBe(true);
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("English validation text from v1 becomes Korean; Korean reasons pass unchanged", async () => {
+    installFetch({
+      "/search": () =>
+        jsonResponse(
+          { detail: [{ msg: "Input should be less than or equal to 1000", loc: ["query", "limit"] }] },
+          422,
+        ),
+    });
+    const error = await fetchSearchRows(
+      "run-4e",
+      { search: { keywords: ["계약"], mode: "regex" } },
+      250,
+    ).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).message).toBe(SEARCH_REQUEST_REJECTED);
+    expect((error as ApiError).message).not.toMatch(/[A-Za-z]/);
+    const korean = new ApiError("검색 예산이 끝나 이어서 볼 수 없습니다", 400, null);
+    expect(koreanSearchError(korean)).toBe(korean);
+  });
+});
+
 describe("R7 S2 #9: keywords the v2 index cannot look up go to v1", () => {
   it("classifies 1-char and ASCII-containing 2-char keywords as unindexed", () => {
     expect(isUnindexedKeyword("계")).toBe(true);
@@ -121,7 +201,11 @@ describe("R7 S2 #9: keywords the v2 index cannot look up go to v1", () => {
     expect(calls.some((call) => call.url.includes("/search/index"))).toBe(false);
     expect(calls.some((call) => call.url.includes("/search/query"))).toBe(false);
 
-    const long = await fetchSearchRows("run-s", { search: { ...base, keywords: ["계약"] } }, SEARCH_PAGE_SIZE);
+    const long = await fetchSearchRows(
+      "run-s",
+      { search: { ...base, keywords: ["계약"] } },
+      SEARCH_PAGE_SIZE,
+    );
     expect(long.backend).toBe("index");
     expect(calls.some((call) => call.url.includes("/search/query"))).toBe(true);
   });
