@@ -1,9 +1,10 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef } from "react";
-import { getReviewCounts, listSavedSearches } from "../../api/caseDb";
+import { getReviewCounts } from "../../api/caseDb";
 import { getRunDashboard } from "../../api/dashboard";
 import { getRunSummary, getRunTree, type RunTreeLive } from "../../api/runs";
 import { useAnalyses } from "../analysis/store";
+import { useSavedSearches } from "../case/savedSearches";
 import { useSearchState } from "../case/searchState";
 import { navigate, useRunLive } from "./adapter";
 import { buildTreeModel, type TreeModelNode } from "./model";
@@ -60,12 +61,7 @@ export function useTreeData(runId: string | null) {
   });
   const database = review.data?.exists ? review.data.database : null;
   const caseId = review.data?.case_id ?? null;
-  const saved = useQuery({
-    queryKey: ["saved-searches", runId, database],
-    queryFn: () => listSavedSearches(database as string, caseId as string),
-    enabled: Boolean(database && caseId),
-    retry: false,
-  });
+  const saved = useSavedSearches(runId, database, caseId);
   const analyses = useAnalyses(runId);
   // Live run (R4 V1): a provider that finished since the last poll makes its kind readable; the
   // grid's artifact pages refetch (the tree itself refetches on its own interval).

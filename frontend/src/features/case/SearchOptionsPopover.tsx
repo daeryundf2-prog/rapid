@@ -6,6 +6,7 @@ import { Popover } from "../../components/Popover";
 import { Icon } from "../../icons";
 import { ErrorText } from "./ErrorText";
 import { ReasonButton } from "./ReasonButton";
+import { invalidateSavedSearches } from "./savedSearches";
 import { useSearchState } from "./searchState";
 import "./case.css";
 
@@ -109,7 +110,7 @@ export function SearchOptionsPopover({
     },
     onSuccess: () => {
       setSaveName("");
-      void queryClient.invalidateQueries({ queryKey: ["saved-searches", runId] });
+      void invalidateSavedSearches(queryClient, runId);
       void queryClient.invalidateQueries({ queryKey: ["review-counts", runId] });
     },
   });
