@@ -81,6 +81,18 @@ const CARD_META: Record<CardId, { title: string; icon: IconName }> = {
 
 const WAIT_FOR_RUN = "런이 완료되면 표시됩니다.";
 
+/** After 처리 설정 보기: scroll to and focus the 처리 page's settings section once it renders. */
+function focusProcessSettings(tries = 40): void {
+  const target = document.getElementById("process-settings");
+  if (target) {
+    target.scrollIntoView?.({ block: "start" });
+    if (!target.hasAttribute("tabindex")) target.setAttribute("tabindex", "-1");
+    target.focus({ preventScroll: true });
+    return;
+  }
+  if (tries > 0) window.setTimeout(() => focusProcessSettings(tries - 1), 100);
+}
+
 /** One card's own skeleton while its data loads (C-I1): the card is there, its body fills in. */
 function CardSkeleton() {
   return (
@@ -237,7 +249,11 @@ export function CaseDashboard({ runId }: { runId: string }) {
           onOpenSummary={() => {
             if (completed) go("outputs");
           }}
-          onOpenSettings={() => go("process")}
+          onOpenSettings={() => {
+            // L1's anchor on the 처리 page: land on the run's settings, not the top of the page.
+            go("process");
+            focusProcessSettings();
+          }}
         >
           {hiddenCount ? (
             <button type="button" className="button ghost" onClick={showAll}>

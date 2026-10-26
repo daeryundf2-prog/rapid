@@ -497,5 +497,5 @@ RapidTriage는 아래 기능을 프로젝트 정책으로 구현하지 않는다
 - **폴더 탐색기 하위 폴더 칸**: 가운데 위 칸은 열린 폴더의 하위 폴더를 처음 200개까지 보인다(나머지는 왼쪽 폴더 트리에서 연다). 파일은 기존처럼 아래 그리드에 있고, 폴더와 파일이 한 그리드에 섞이지는 않는다(그리드 소유 갈래 L2와 합칠 때 재검토).
 - **검토 단계 특이사항 노드**: `#/case/{run}/review/flags?flag_grade=A|B`로 검토 단계 안에서 특이사항 행을 연다. 이 목록 그리드에서 Enter가 근거 팝오버를 여는 동작(C-R2 후반)은 그리드·팝오버 소유 갈래(L2·L3) 몫으로 남겼다.
 - **처리 단계 VSS 비활성 이유 인라인(C-A4)**: 처리 단계 카드(`ProcessStage`)는 갈래 L1 소유라 이 갈래에서는 바꾸지 않았다.
-- **시각 표시**: 뷰어 메타 탭의 시각은 이 갈래의 로컬 표시기(`features/viewer/evidenceTimeDisplay.ts`)로 초까지·UTC 날짜 병기로 보인다. 갈래 L1의 공용 시각 도우미가 들어오면 그쪽으로 바꾼다.
+- **시각 표시**: 뷰어 메타 탭의 시각은 `features/viewer/evidenceTimeDisplay.ts`가 갈래 L1의 공용 도우미(`evidenceTime`·`formatTimestamp`)로 초까지·UTC 날짜 병기로 보인다. 레지스트리 탐색기의 "마지막 기록"도 같은 형식(원문 ISO는 도움말)이다.
 <!-- r7 S1 L4 (writes · shell · viewer · explorer · review): end -->

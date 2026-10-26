@@ -3,11 +3,11 @@
  * UTC side WITH its date ("UTC 2025-05-29 14:25:26", never a bare clock that may be the previous
  * day), and the source's sub-second digits (µs / 100 ns) only on hover.
  *
- * Local formatter on top of utils/time `evidenceTime` (the reading is not changed). When lane L1's
- * shared time helper lands, this file is the one place to switch over.
+ * Built on the shared utils/time helpers (`evidenceTime`, `formatTimestamp`; lane L1): one format
+ * with the rest of the console, the reading itself unchanged.
  */
 
-import type { EvidenceTime } from "../../utils/time";
+import { type EvidenceTime, formatTimestamp } from "../../utils/time";
 
 const FRACTION = /\.\d+$/;
 
@@ -25,7 +25,7 @@ export interface EvidenceTimeDisplay {
 export function displayEvidenceTime(reading: EvidenceTime): EvidenceTimeDisplay {
   const tail = reading.local.match(FRACTION)?.[0] ?? "";
   const local = reading.local.replace(FRACTION, "");
-  const utc = reading.utc === null ? null : `UTC ${reading.iso.slice(0, 10)} ${reading.iso.slice(11, 19)}`;
+  const utc = reading.utc === null ? null : `UTC ${formatTimestamp(reading.iso, "utc")}`;
   const text = `${local} (${reading.zone})${utc ? ` · ${utc}` : ""}`;
   const precise = `${local}${tail} (${reading.zone})${utc ? ` · ${utc}${tail}` : ""}`;
   return { local, utc, text, precise };

@@ -70,7 +70,7 @@ export function buildCaseCommands(facts: CaseCommandFacts): Command[] {
   const commands: Command[] = [
     {
       id: "case.switch",
-      label: "케이스 전환/삭제…",
+      label: "케이스 열기…",
       group: "case",
       icon: "folder",
       run: () => dialogs().openDialog("picker"),
