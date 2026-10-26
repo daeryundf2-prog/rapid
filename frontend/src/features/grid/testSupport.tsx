@@ -33,7 +33,7 @@ export interface FetchCall {
   body: unknown;
 }
 
-type Handler = (url: URL, init: RequestInit | undefined) => Response | Promise<Response>;
+export type Handler = (url: URL, init: RequestInit | undefined) => Response | Promise<Response>;
 
 /** Replace global fetch with a router keyed by a path substring; records every call. */
 export function installFetch(routes: Record<string, Handler>): FetchCall[] {
