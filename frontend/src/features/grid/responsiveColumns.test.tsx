@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetArtifactCountsCache } from "../../api/collections";
 import { useAppStore } from "../../state/store";
 import { FALLBACK_CATALOG, setCatalog } from "../flags/catalog";
+import { flaggedRowsSummary, flagsColumnSparse, flagsHeaderHint } from "../flags/flags";
 import { useGridLocalStore } from "./adapter";
 import { DataGrid } from "./DataGrid";
 import {
@@ -249,4 +250,57 @@ describe("browser kind layout fits the pane (r7 S1, real-data 1920 overflow 43px
       expect(widthOf("d:timestamp")).toBeGreaterThanOrEqual(180);
     });
   }
+
+  // R-11 (real data: one flagged row among 500 loaded): the column stays (a row has a flag) but is
+  // narrow, and its header says how many loaded rows carry a flag and that a click sorts them up.
+  it("a sparse 특이사항 column keeps its 90px minimum and names the flagged rows in its header", async () => {
+    restoreWidth = mockGridWidth(1533);
+    const rows = browserRows().map((row, i) => {
+      const { flags: _flags, ...rest } = row as typeof row & { flags?: unknown };
+      return i === 4 ? { ...rest, flags: [{ id: "probe", grade: "B", label: "검토" }] } : rest;
+    });
+    installFetch({
+      "/artifacts": () => jsonResponse({ artifacts: { browser: { artifacts: rows, total: 20 } } }),
+    });
+    renderWithClient(<DataGrid />);
+    await waitFor(() => expect(widthOf("flags")).toBeGreaterThan(0));
+    expect(widthOf("flags")).toBe(90);
+    const header = screen.getAllByRole("columnheader").find((h) => h.getAttribute("data-col") === "flags");
+    const sort = within(header as HTMLElement).getByRole("button", { name: /특이사항/ });
+    expect(sort.getAttribute("data-flag-hint")).toBe("특이사항 1건 (B)");
+    expect(sort.getAttribute("title")).toBe("특이사항 1건 (B) · 불러온 20행 중 — 눌러 등급순 정렬");
+    expect(sort.getAttribute("aria-describedby")).toMatch(/flagged-flags/);
+  });
+
+  it("a 특이사항 column with many flagged rows keeps its default width", async () => {
+    restoreWidth = mockGridWidth(1533);
+    installFetch({
+      "/artifacts": () => jsonResponse({ artifacts: { browser: { artifacts: browserRows(), total: 20 } } }),
+    });
+    renderWithClient(<DataGrid />);
+    await waitFor(() => expect(widthOf("flags")).toBeGreaterThan(0));
+    expect(widthOf("flags")).toBeGreaterThan(90);
+    const header = screen.getAllByRole("columnheader").find((h) => h.getAttribute("data-col") === "flags");
+    expect(
+      within(header as HTMLElement)
+        .getByRole("button")
+        .getAttribute("data-flag-hint"),
+    ).toBe("특이사항 7건 (B)");
+  });
+});
+
+describe("flagged rows summary (R-11)", () => {
+  const flagged = (grade: string) => ({ fields: { flags: [{ id: "x", grade, label: "x" }] } });
+  const plain = { fields: {} };
+  it("counts flagged rows, lists their top grades A→C, and calls one in ten sparse", () => {
+    const summary = flaggedRowsSummary([flagged("C"), plain, flagged("A"), plain]);
+    expect(summary).toEqual({ count: 2, loaded: 4, grades: ["A", "C"] });
+    expect(flagsHeaderHint(summary)).toBe("특이사항 2건 (A·C)");
+    expect(flagsColumnSparse(summary)).toBe(false);
+    const sparse = flaggedRowsSummary([flagged("B"), ...Array.from({ length: 499 }, () => plain)]);
+    expect(flagsHeaderHint(sparse)).toBe("특이사항 1건 (B)");
+    expect(flagsColumnSparse(sparse)).toBe(true);
+    expect(flagsHeaderHint(flaggedRowsSummary([plain]))).toBe("");
+    expect(flagsColumnSparse(flaggedRowsSummary([plain]))).toBe(false);
+  });
 });
