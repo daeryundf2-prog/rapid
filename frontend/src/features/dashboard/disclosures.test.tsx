@@ -1,7 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import type { RunSummary } from "../../api/runs";
-import { DisclosuresCard } from "./cards";
+import type { ItemRow, RunDetail, RunSummary } from "../../api/runs";
+import { DisclosuresCard, StatusCard } from "./cards";
 import {
   capFlagsText,
   capPolicyLine,
@@ -277,5 +277,75 @@ describe("R7 L3 (C-I2): cap flags and problem messages read Korean, raw keys onl
     expect(
       problemMessageKo("extraction-disabled-by-default; rerun with --extract to copy and hash candidates"),
     ).toMatch(/^기본 설정으로 추출하지 않음/);
+  });
+});
+
+/** The 19 검증 이슈 of run-subset10 (rapidtriage-run-summary.json processing.warnings), verbatim. */
+const SUBSET10_ISSUES: Array<[string, string]> = [
+  ["docs", "상한/절단 적용 — 결과가 전수가 아님: summary.size_caps.truncated"],
+  ["docs", "문서 8건: 크기 상한 초과로 본문 미추출 (too-large)"],
+  ["docs", "문서 80건: 비인쇄 문자 비율 초과로 본문 미색인 (binary-rejected)"],
+  [
+    "files",
+    "상한/절단 적용 — 결과가 전수가 아님: hash_cache_assessment.hash_cache_manifest.entries_truncated, hash_cache_assessment.hash_cache_manifest.events_truncated, hash_cache_manifest.entries_truncated, hash_cache_manifest.events_truncated, summary.fuzzy_text_duplicate_profile.truncated, summary.fuzzy_text_duplicates_truncated",
+  ],
+  [
+    "artifacts-recent-files",
+    "recent-files: 행 단위 절단 10행 — 원문 일부만 보존됨 (jumplist-automatic.ole_streams_truncated 10행, jumplist-automatic.destlist_entry_candidates_truncated 10행, jumplist-automatic.destinations_truncated 5행)",
+  ],
+  ["artifacts-email", "No email artifact rows were collected."],
+  ["artifacts-cloud-export", "No cloud-export artifact rows were collected."],
+  ["artifacts-cloud-export", "cloud-export: 클라우드 내보내기 루트 없음"],
+  ["artifacts-mobile-export", "No mobile-export artifact rows were collected."],
+  ["artifacts-mobile-export", "mobile-export: 모바일 추출물 없음"],
+  ["artifacts-kakaotalk-macos", "No kakaotalk-macos artifact rows were collected."],
+  ["artifacts-android-apk", "No android-apk artifact rows were collected."],
+  ["artifacts-synthetic-media", "synthetic-media: 후보 1104개 중 592개 파일 미선별 (파일 수 상한 512개)"],
+  ["artifacts-eventlog", "eventlog: 표시용 미리보기 절단 33803행 (원본 레코드 값은 보존, 경고 아님)"],
+  ["artifacts-windows-search-index", "No windows-search-index artifact rows were collected."],
+  [
+    "artifacts-windows-registry",
+    "windows-registry: 행 단위 절단 5행 — 원문 일부만 보존됨 (registry-hive-strings.scan_truncated 5행)",
+  ],
+  [
+    "artifacts-windows-prefetch",
+    "windows-prefetch: 행 단위 절단 276행 — 원문 일부만 보존됨 (prefetch-file.file_reference_candidates_truncated 276행, prefetch-file.referenced_paths_truncated 106행)",
+  ],
+  ["artifacts-linux-system", "No linux-system artifact rows were collected."],
+  ["artifacts-macos-system", "No macos-system artifact rows were collected."],
+];
+/** A raw key (dotted / dashed / snake id) or an English word of two letters or more. */
+const RAW_TOKEN = /[a-z0-9]+(?:[._:-][a-z0-9]+)+|\b[A-Za-z]{2,}\b/g;
+/** Analyst-facing product names inside Korean labels (kindLabel), not raw keys. */
+const NAMES = new Set(["EVTX", "LNK", "Prefetch","APK", "macOS", "Linux", "Windows", "Android", "KakaoTalk"]);
+
+describe("단계 상세 검증 이슈 in Korean (R-7)", () => {
+  it("every run-subset10 issue reads without raw keys or English; the raw text stays as the tooltip", () => {
+    const issues: ItemRow[] = SUBSET10_ISSUES.map(([step, message]) => ({ step, level: "notice", message }));
+    render(
+      <StatusCard
+        run={{ status: "completed" } as RunDetail}
+        stages={[]}
+        counts={undefined}
+        outputDir=""
+        issues={issues}
+      />,
+    );
+    const items = screen.getByRole("list", { name: "검증 이슈" }).querySelectorAll("li");
+    expect(items).toHaveLength(19);
+    const raw = [...items].flatMap((li) => (li.textContent ?? "").match(RAW_TOKEN) ?? []);
+    expect(raw.filter((token) => !NAMES.has(token))).toEqual([]);
+    expect(items[5]?.textContent).toBe("아티팩트 수집: 이메일 이메일: 수집된 행 없음");
+    expect(items[5]?.getAttribute("title")).toBe("No email artifact rows were collected.");
+  });
+
+  it("parser error notes read in Korean (old English runs and the new server text)", () => {
+    expect(problemMessageKo("email parser reported 3 isolated error(s).")).toBe(
+      "이메일: 파서 오류 3건 (해당 수집기만 격리됨)",
+    );
+    expect(problemMessageKo("email: 파서 오류 3건 (해당 수집기만 격리됨)")).toBe(
+      "이메일: 파서 오류 3건 (해당 수집기만 격리됨)",
+    );
+    expect(problemMessageKo("email: 수집된 행 없음")).toBe("이메일: 수집된 행 없음");
   });
 });

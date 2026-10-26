@@ -118,14 +118,15 @@ def build_step_rows(
         messages: list[str]
         if parser_error_count:
             level = "failed"
-            messages = [f"{kind} parser reported {parser_error_count} isolated error(s)."]
+            messages = [f"{kind}: 파서 오류 {parser_error_count}건 (해당 수집기만 격리됨)"]
         elif skipped:
             level = "notice"
             reasons = ", ".join(f"{reason} ({count})" for reason, count in skip_reasons.items()) or "의존성 없음"
             messages = [f"{kind} 수집 건너뜀: {reasons}"]
         elif artifact_count == 0:
             level = "notice"
-            messages = [f"No {kind} artifact rows were collected."]
+            # Korean like the other step notes (R-7); "<kind>: " lets the console name the kind.
+            messages = [f"{kind}: 수집된 행 없음"]
         else:
             level = "none"
             messages = []
