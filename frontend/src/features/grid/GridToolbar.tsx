@@ -377,7 +377,11 @@ export function searchIndexHint(status: unknown): { text: string; linkText: stri
     case "none":
       return { text: "v2 색인 없음", linkText: "처리 단계에서 만들기" };
     case "stale":
-      return { text: "v2 색인이 런 출력보다 오래됨", linkText: "처리 단계에서 다시 만들기" };
+      // Older run outputs or an older index format (R7 S2: a v2-format index has no bigram table).
+      return {
+        text: "v2 색인 재생성 필요(런 출력보다 오래됐거나 이전 형식)",
+        linkText: "처리 단계에서 다시 만들기",
+      };
     case "building":
       return { text: "v2 색인을 만드는 중(끝나면 색인으로 검색)", linkText: "처리 단계에서 보기" };
     default:

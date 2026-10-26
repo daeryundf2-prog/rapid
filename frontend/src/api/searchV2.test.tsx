@@ -157,6 +157,8 @@ describe("search footer v2 hint and grid debounce (R7 P2)", () => {
     expect(searchIndexHint("ready")).toBeUndefined();
     expect(searchIndexHint(undefined)).toBeUndefined();
     expect(searchIndexHint("stale")?.linkText).toBe("처리 단계에서 다시 만들기");
+    // R7 S2: stale also covers an older index format (a v2 index without the bigram table).
+    expect(searchIndexHint("stale")?.text).toBe("v2 색인 재생성 필요(런 출력보다 오래됐거나 이전 형식)");
     render(
       <GridFooter
         {...base}
