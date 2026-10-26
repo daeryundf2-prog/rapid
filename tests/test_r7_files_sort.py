@@ -97,7 +97,7 @@ def mtime_key(row: object):
     value = files_display_mtime_us(row)
     if value == files_index.TIME_PENDING_NTFS:
         # No NTFS join in these tests: the copy's own modified_at.
-        value = files_index._parse_us(row.get("modified_at"))  # type: ignore[union-attr]
+        value = files_index.files_copy_time_us(row)
     return None if value == TIME_NONE else value
 
 
@@ -125,7 +125,7 @@ class FilesSortIndexTests(unittest.TestCase):
 
     def test_ctime_uses_the_ntfs_join_and_is_empty_without_it(self) -> None:
         rows = make_rows(random.Random(3), 200)
-        created = {position: 1_000_000 * ((position * 37) % 101) for position in range(len(rows)) if position % 3}
+        created = {position: 1_000_000 * ((position * 37) % 101 + 1) for position in range(len(rows)) if position % 3}
 
         def join():
             return ("join", 1), lambda field, positions: [created.get(position, TIME_NONE) if field == "created_at" else TIME_NONE for position in positions]
@@ -142,7 +142,7 @@ class FilesSortIndexTests(unittest.TestCase):
             {"path": "C:\\b", "fs_modified_at": "2020-01-01T00:00:00Z"},
             {"path": "C:\\c", "fs_modified_at": None, "modified_at_origin": "acquisition-copy", "modified_at": "2019-01-01T00:00:00Z"},
         ]
-        si = {0: files_index._parse_us("2010-01-01T00:00:00Z")}
+        si = {0: files_index._time_value_us("2010-01-01T00:00:00Z")}
 
         def join():
             return ("join", 2), lambda field, positions: [si.get(position, TIME_NONE) for position in positions]
@@ -255,7 +255,11 @@ class FilesSortApiTests(unittest.TestCase):
     def test_unknown_sort_is_ignored_and_limit_zero_is_refused(self) -> None:
         page = self.page(sort="bogus", limit=3)
         self.assertEqual([row["record_index"] for row in page["candidates"]], [0, 1, 2])
-        self.assertNotIn("sort", page)
+        # R7 S1 re-review R-9: still 200 and list order, but the page says the sort was not applied.
+        self.assertEqual(page["sort"]["applied"], False)
+        self.assertEqual(page["sort"]["status"], "unsupported")
+        self.assertEqual(page["sort"]["key"], "bogus")
+        self.assertIn("지원하지 않는 정렬 키", page["sort"]["reason"])
         self.assertEqual(self.client.get(f"/api/runs/{self.run_id}/files", params={"sort": "size", "limit": 0}).status_code, 400)
         self.assertEqual(self.client.get(f"/api/runs/{self.run_id}/files", params={"q": "x", "limit": 0}).status_code, 400)
         self.assertEqual(self.client.get(f"/api/runs/{self.run_id}/files", params={"sort": "size", "order": "up", "limit": 3}).status_code, 422)

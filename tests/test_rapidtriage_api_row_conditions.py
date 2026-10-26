@@ -276,9 +276,10 @@ class RowConditionApiTests(unittest.TestCase):
         self.assertEqual(paths("content=image,archive"), ["p.jpg", "x.zip"])
         self.assertEqual(paths("content=video"), ["v.mp4"])
         self.assertEqual(paths("content=executable", scope="inventory"), ["a.exe"])
-        # Row time: fs_modified_at, else modified_at; an acquisition copy without an NTFS join has none.
-        self.assertEqual(paths("from=2025-05-26T00:00:00Z&to=2025-05-31T23:59:59Z"), ["r.docx", "p.jpg", "v.mp4"])
-        self.assertEqual(paths("offhours=1&tz=Asia/Seoul"), ["r.docx", "v.mp4"])
+        # Row time: fs_modified_at, else modified_at; an acquisition copy without an NTFS join falls
+        # back to its own copy time (R7 S1 re-review R-2).
+        self.assertEqual(paths("from=2025-05-26T00:00:00Z&to=2025-05-31T23:59:59Z"), ["r.docx", "p.jpg", "x.zip", "v.mp4"])
+        self.assertEqual(paths("offhours=1&tz=Asia/Seoul"), ["r.docx", "x.zip", "v.mp4"])  # x.zip copy time 22:00 KST
         self.assertEqual(paths("category=images&content=image&weekday=mon&tz=Asia/Seoul"), ["p.jpg"])
         page = self.call("files", "limit=1&content=image,archive")
         self.assertEqual((page["matched"], page["pagination"]["has_more"]), (2, True))
@@ -487,7 +488,8 @@ class RowConditionUnitTests(unittest.TestCase):
         self.assertEqual(row_time({"details": {"time_created": "2025-01-01T00:00:00.1234567Z"}}, "artifacts").year, 2025)
         self.assertIsNone(row_time({"details": {"timestamp": {"x": 1}}}, "artifacts"))
         copy = {"modified_at": "2025-01-01T00:00:00Z", "modified_at_origin": "acquisition-copy"}
-        self.assertIsNone(row_time(copy, "files"))
+        self.assertEqual(row_time(copy, "files").year, 2025)  # no NTFS time: the copy's own (R-2)
+        self.assertIsNone(row_time({**copy, "modified_at": "1980-01-01T00:00:00Z"}, "files"))  # placeholder (R-13)
         self.assertEqual(row_time({**copy, "ntfs": {"si_modified_at": "2020-02-02T00:00:00Z"}}, "files").year, 2020)
         self.assertEqual(row_time({"fs_modified_at": "2019-01-01 10:00:00", **copy}, "files").year, 2019)
         self.assertEqual(row_time({"timestamp": 0}, "timeline").year, 1970)
@@ -556,7 +558,8 @@ class RowConditionUnitTests(unittest.TestCase):
         self.assertEqual(row_time(row, "artifacts"), dt.datetime(2025, 1, 2, tzinfo=dt.timezone.utc))
         copy = {"path": "C:/x/a.zip", "modified_at": "2025-01-01T00:00:00Z", "modified_at_origin": "acquisition-copy"}
         self.assertEqual(row_time(copy, "files", lambda _row: "2020-03-03T00:00:00Z").year, 2020)
-        self.assertIsNone(row_time(copy, "files", lambda _row: None))
+        self.assertEqual(row_time(copy, "files", lambda _row: None).year, 2025)  # no $SI time: copy time
+        self.assertEqual(row_time(copy, "files", lambda _row: "1601-01-01T00:00:00Z").year, 2025)  # placeholder $SI
         # Naive row text is UTC, whatever tz says.
         conditions = parse_row_conditions(hours="9-10", tz="Asia/Seoul")
         self.assertFalse(conditions.matches({"timestamp": "2025-05-30T09:30:00"}, "timeline"))

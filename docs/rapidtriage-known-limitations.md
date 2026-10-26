@@ -510,3 +510,13 @@ RapidTriage는 아래 기능을 프로젝트 정책으로 구현하지 않는다
 - **처리 단계 VSS 비활성 이유 인라인(C-A4)**: 처리 단계 카드(`ProcessStage`)는 갈래 L1 소유라 이 갈래에서는 바꾸지 않았다.
 - **시각 표시**: 뷰어 메타 탭의 시각은 `features/viewer/evidenceTimeDisplay.ts`가 갈래 L1의 공용 도우미(`evidenceTime`·`formatTimestamp`)로 초까지·UTC 날짜 병기로 보인다. 레지스트리 탐색기의 "마지막 기록"도 같은 형식(원문 ISO는 도움말)이다.
 <!-- r7 S1 L4 (writes · shell · viewer · explorer · review): end -->
+
+## R7 단계 1 재검토 — 백엔드 수정
+<!-- r7 S1 re-review (backend): start -->
+- **파일 목록 시각 기준(R-2)**: `/files`의 `from`·`to`·`weekday`·`hours`·`offhours`와 `sort=mtime`은 같은 수정 시각을 쓴다: `fs_modified_at`, 없으면 취득 사본의 NTFS `$SI` 수정 시각(조인된 경우), 그것도 없으면 사본 자체의 `modified_at`. 폴더 입력 런(NTFS 조인 없음)에서는 시각 조건이 **취득 사본 시각**(복사 시점일 수 있음)으로 걸린다. 시각 조건이나 `sort=mtime`이 있는 페이지는 `time_basis`(`ntfs`·`acquisition-copy`·`mixed`·`none`)와 `time_basis_counts = {ntfs, acquisition_copy, none}`(목록 전체 기준)을 준다. `ntfs`는 증거 파일 시스템 시각(`fs_modified_at` 또는 NTFS 조인) 전체를 뜻하며 FAT/exFAT 이미지의 `fs_modified_at`도 여기에 든다.
+- **자리표시 시각(R-13)**: 파일 행의 1601-01-01·1970-01-01·1980-01-01 00:00 UTC 값은 시각 없음으로 본다(정렬 시 양방향 모두 끝, 시각 조건 불일치, 다음 출처로 넘어감). 정확히 그 순간에 수정된 실제 파일도 같은 취급을 받는다.
+- **정렬 서술자(R-8·R-9)**: `order`와 `sort=key:dir`은 대소문자를 가리지 않고 `order`가 접미보다 우선한다. `sort=flags&order=desc`는 C·B·A 순, 미표시 행은 끝(`/files`만; `/artifacts`의 `flags` 정렬은 여전히 A→C). 정렬 서술자는 `applied`, `values`(목록 전체에서 값이 있는 행 수), `empty`를 준다. 모르는 정렬 키는 200·목록 순서 그대로이며 `sort = {key, order, status: "unsupported", progress: 0, applied: false, reason}`을 준다.
+- **텍스트 필터(R-3)**: `/files?q=`는 검색어와 이름·경로를 모두 NFC로 맞춘 뒤 대소문자 무시로 비교한다.
+- **제출 매니페스트(R-4)**: `POST …/submission-manifest`가 요청당 한 번 쓰고(감사 1건) `written`·`download_url`(`GET …/submission-manifest/saved`, 읽기 전용)을 준다. 기존 `GET …/submission-manifest`·`…/file`은 호환을 위해 남겨 두었고 여전히 부를 때마다 다시 쓴다. `POST …/case-report`는 `written`(md·html·docx·pdf·manifest·감사 경로)과 `written_files = [{format, path, download_url}]`을 준다.
+- **타임라인 히스토그램 범위(C-V2)**: `GET …/timeline-histogram?from=&to=&tz=`는 범위 안 이벤트만 버킷에 넣고 `range_excluded_events`·`range_filter`를 더한다. `weekday`·`hours` 등 다른 조건은 받지 않는다.
+<!-- r7 S1 re-review (backend): end -->

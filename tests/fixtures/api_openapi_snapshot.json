@@ -379,10 +379,14 @@
       "get": "source_thumbnail_api_runs__run_id__source_thumbnail_get"
     },
     "/api/runs/{run_id}/submission-manifest": {
-      "get": "get_submission_manifest_api_runs__run_id__submission_manifest_get"
+      "get": "get_submission_manifest_api_runs__run_id__submission_manifest_get",
+      "post": "create_submission_manifest_api_runs__run_id__submission_manifest_post"
     },
     "/api/runs/{run_id}/submission-manifest/file": {
       "get": "download_submission_manifest_api_runs__run_id__submission_manifest_file_get"
+    },
+    "/api/runs/{run_id}/submission-manifest/saved": {
+      "get": "open_saved_submission_manifest_api_runs__run_id__submission_manifest_saved_get"
     },
     "/api/runs/{run_id}/summary": {
       "get": "get_run_summary_api_runs__run_id__summary_get"
