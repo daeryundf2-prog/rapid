@@ -348,6 +348,8 @@ export interface GridFooterProps {
   loadingText?: string;
   /** Scope line for category nodes ("범주: 운영 체제 (5 유형)"). */
   scope?: string;
+  /** Checked rows (kept across pages, scrolling and refetches); "선택 N건" when any. */
+  selectedCount?: number;
 }
 
 export const TRUNCATED_NOTICE =
@@ -366,6 +368,9 @@ export function GridFooter(props: GridFooterProps) {
         총{" "}
         {props.total !== null ? `${formatCount(props.total)}건` : props.loading ? "세는 중…" : "알 수 없음"}
       </span>
+      {props.selectedCount ? (
+        <span data-testid="grid-footer-selected">선택 {formatCount(props.selectedCount)}건</span>
+      ) : null}
       {props.loading ? (
         <span className="grid-note" data-testid="grid-footer-loading">
           {props.loadingText ?? "불러오는 중…"}
