@@ -1,7 +1,8 @@
 /**
  * Korean summary rows of a run request (AXIOM adoption E1): the case wizard's 처리 옵션 요약 and the
- * 접수 "처리 설정 스냅샷" card render the SAME function over the request body, so the summary the
- * examiner confirms and the snapshot the server stored list the same keys 1:1.
+ * "처리 설정 스냅샷" table (dashboard SnapshotCard, for the 처리 stage) render the SAME function over the
+ * request body, so the summary the examiner confirms and the snapshot the server stored list the same
+ * keys 1:1. Labels are Korean only: the mode without its raw id, 알려진 정상(known-good) on first use.
  */
 
 import { INPUT_KINDS, RUN_MODES } from "./runForm";
@@ -28,7 +29,7 @@ const FIELDS: Record<string, { label: string; format: (value: unknown) => string
     label: "처리 모드",
     format: (v) => {
       const mode = RUN_MODES.find((m) => m.id === v);
-      return mode ? `${mode.label} (${mode.id})` : String(v ?? "—");
+      return mode ? mode.label : String(v ?? "—");
     },
   },
   input_kind: {
@@ -54,16 +55,16 @@ const FIELDS: Record<string, { label: string; format: (value: unknown) => string
     format: (v) => (Number(v) ? `${n(Math.round(Number(v) / (1024 * 1024)))} MB` : "자동"),
   },
   e01_partition_start_sector: {
-    label: "E01 파티션 시작 섹터",
+    label: "이미지 파티션 시작 섹터",
     format: (v) => (v === null || v === undefined || v === "" ? "자동" : n(Number(v))),
   },
   known_good_hash_feeds: {
-    label: "known-good 해시 목록",
+    label: "알려진 정상(known-good) 해시 목록",
     format: (v) => (Array.isArray(v) && v.length ? v.join(", ") : "없음"),
   },
-  hide_known_good: { label: "known-good 항목 숨기기", format: yesNo },
+  hide_known_good: { label: "알려진 정상 항목 숨기기", format: yesNo },
   known_good_max_hash_bytes: {
-    label: "known-good 해시 상한",
+    label: "알려진 정상 해시 상한",
     format: (v) => (Number(v) ? `${n(Math.round(Number(v) / (1024 * 1024)))} MB` : "제한 없음"),
   },
   rules: { label: "규칙 파일", format: (v) => (v ? String(v) : "기본") },

@@ -1,5 +1,5 @@
-// 접수 case cards (AXIOM adoption E1): 사건 정보 · 증거 목록 · 처리 설정 스냅샷 · 처리 문제 · 케이스 메모, and the
-// caseless-run fallback (Q-X2).
+// 접수 case cards (AXIOM adoption E1; r7 merged cards): 사건 정보 · 증거 · 처리 경고·제한 사항 · 노트·메모,
+// and the caseless-run fallback (Q-X2).
 
 import { cleanup, configure, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -171,6 +171,28 @@ function routes(linked: boolean) {
       return { note };
     },
     "GET /api/runs/r1/problems": problems,
+    "GET /api/runs/r1/dashboard": {
+      run_id: "r1",
+      completed: true,
+      profile: { mode: "fraud", description: "", keywords: [] },
+      evidence_source: {
+        path: "D:/ev/a.E01",
+        name: "a.E01",
+        kind: "image",
+        image_output: "e01",
+        size_bytes: 10,
+        partitions: [],
+        selected_partition: null,
+      },
+      exports: [],
+    },
+    "GET /api/runs/r1/case-notes": {
+      run_id: "r1",
+      examiner: "",
+      summary: "",
+      updated_at: null,
+      exists: false,
+    },
   };
 }
 
@@ -194,45 +216,55 @@ afterEach(() => {
   useCaseDialogs.setState({ open: null, target: {} });
 });
 
-describe("접수 case cards (Q-X1/Q-X3/Q-X4)", () => {
-  it("fills 사건 정보 · 증거 목록 · 스냅샷 · 처리 문제 · 케이스 메모 for a case run", async () => {
+describe("접수 case cards (Q-X1/Q-X3/Q-X4, r7 merged cards)", () => {
+  it("fills 사건 정보 · 증거 · 처리 경고·제한 사항 · 노트·메모 for a case run", async () => {
     const { calls } = mockFetch(routes(true));
     renderWithQuery(<CaseDashboard runId="r1" />);
 
     await waitFor(() => expect(within(cardOf("사건 정보")).getByText("서울중앙지검")).toBeTruthy());
-    expect(screen.getByTestId("case-crumb").textContent).toContain("2026-고단-1234 › E-2 › r1");
+    // The crumb names case › evidence; the raw run id is not printed (tooltip + copy action only).
+    const crumb = screen.getByTestId("case-crumb");
+    expect(crumb.textContent).toContain("2026-고단-1234 › E-2");
+    expect(crumb.textContent).not.toContain("r1");
 
-    const evidence = cardOf("증거 목록");
-    const rows = within(evidence).getAllByRole("row").slice(1);
+    const evidence = cardOf("증거");
+    const numbers = [...evidence.querySelectorAll(".dash-evidence-number")].map((el) => el.textContent);
     // Korean natural order: E-2 before E-10.
-    expect(rows.map((row) => within(row).getAllByRole("rowheader")[0]?.textContent)).toEqual(["E-2", "E-10"]);
-    expect(within(rows[1] as HTMLElement).getByText("해시 불일치")).toBeTruthy();
-    expect(within(rows[0] as HTMLElement).getByRole("link", { name: "증거 E-2 런 r1 열기" })).toBeTruthy();
-    fireEvent.click(within(evidence).getByRole("button", { name: "증거 E-10 런 추가" }));
+    expect(numbers).toEqual(["E-2", "E-10"]);
+    expect(within(evidence).getByText("해시 불일치")).toBeTruthy();
+    expect(within(evidence).getByText("해시 일치")).toBeTruthy();
+    const link = within(evidence).getByRole("link", { name: "증거 E-2 이 런 열기" });
+    expect(link.textContent).toBe("이 런");
+    expect(link.getAttribute("title")).toBe("런 ID r1");
+    fireEvent.click(within(evidence).getByRole("button", { name: "증거 E-10 런 시작" }));
     expect(useCaseDialogs.getState().open).toBe("run-add");
     expect(useCaseDialogs.getState().target).toEqual({
       caseId: "case-1",
       evidenceCitationId: "2026-고단-1234-EVID-000002",
     });
+    expect(within(evidence).getByRole("button", { name: "증거 추가" })).toBeTruthy();
+    // 처리 설정 스냅샷 left the intake dashboard.
+    expect(screen.queryByTestId("snapshot")).toBeNull();
 
-    const snapshot = cardOf("처리 설정 스냅샷");
-    expect(within(snapshot).getByText("런 시작 시 케이스에 고정된 처리 옵션입니다.")).toBeTruthy();
-    expect(within(snapshot).getByText("500개")).toBeTruthy();
-    expect(within(snapshot).getByText("송금, invoice")).toBeTruthy();
-
-    const problemCard = cardOf("처리 문제");
-    await waitFor(() => expect(within(problemCard).getByText("수집된 행 없음")).toBeTruthy());
-    const preview = within(problemCard).getByRole("list", { name: "수집된 행 없음 미리보기" });
+    const warnings = cardOf("처리 경고·제한 사항");
+    await waitFor(() => expect(within(warnings).getByText("수집된 행 없음")).toBeTruthy());
+    const preview = within(warnings).getByRole("list", { name: "수집된 행 없음 미리보기" });
     expect(within(preview).getAllByRole("listitem")).toHaveLength(20);
-    expect(within(problemCard).getByText("미리보기 20건 / 전체 22건")).toBeTruthy();
-    fireEvent.click(within(problemCard).getByRole("button", { name: "수집된 행 없음 전체 보기 (22건)" }));
+    // Step ids read in Korean, the raw id is the tooltip.
+    expect(preview.textContent).not.toContain("artifacts-k0");
+    expect(within(warnings).getByText("미리보기 20건 / 전체 22건")).toBeTruthy();
+    fireEvent.click(within(warnings).getByRole("button", { name: "수집된 행 없음 전체 보기 (22건)" }));
     expect(useCaseDialogs.getState().target).toMatchObject({ runId: "r1", reasonId: "no-rows" });
+    expect(warnings.querySelector(".dash-card-meta")?.textContent).toBe("경고 3 · 알림 20 · 제한 0");
 
-    const memo = cardOf("케이스 메모");
+    const memo = cardOf("노트·메모");
     await waitFor(() => expect(within(memo).getByText("압수 목록 확인")).toBeTruthy());
     expect(within(memo).getByText("홍길동")).toBeTruthy();
+    // One 검사관 field (from the case) drives the memo author.
+    expect((within(memo).getByLabelText("검사관") as HTMLInputElement).value).toBe("홍길동");
+    expect(within(memo).queryByLabelText("작성자")).toBeNull();
+    expect(within(memo).getByRole("button", { name: "이력 1건" })).toBeTruthy();
     fireEvent.change(within(memo).getByLabelText("새 메모"), { target: { value: "USB 2개 확인" } });
-    expect((within(memo).getByLabelText("작성자") as HTMLInputElement).value).toBe("홍길동");
     fireEvent.click(within(memo).getByRole("button", { name: "메모 추가" }));
     await waitFor(() => expect(within(memo).getByText("USB 2개 확인")).toBeTruthy());
     const post = calls.find((call) => call.method === "POST");
@@ -249,14 +281,12 @@ describe("접수 case cards (Q-X1/Q-X3/Q-X4)", () => {
     });
     expect(within(within(info).getByTestId("no-case")).getByText("케이스 없음")).toBeTruthy();
     expect(within(info).getByRole("button", { name: "케이스에 연결" })).toBeTruthy();
-    expect(within(cardOf("증거 목록")).getByText(/케이스에 연결하면/)).toBeTruthy();
-    expect(within(cardOf("케이스 메모")).getByText(/케이스에 연결하면/)).toBeTruthy();
-    expect(
-      within(cardOf("처리 설정 스냅샷")).getByText(
-        "케이스 없이 실행된 런 — 런 요청 기준입니다 (케이스에 고정되지 않음).",
-      ),
-    ).toBeTruthy();
-    await waitFor(() => expect(within(cardOf("처리 문제")).getByText("수집된 행 없음")).toBeTruthy());
+    await waitFor(() => expect(within(cardOf("증거")).getByText("a.E01")).toBeTruthy());
+    expect(within(cardOf("증거")).getByText(/케이스에 연결하면/)).toBeTruthy();
+    expect(within(cardOf("노트·메모")).getByText(/케이스에 연결하면/)).toBeTruthy();
+    await waitFor(() =>
+      expect(within(cardOf("처리 경고·제한 사항")).getByText("수집된 행 없음")).toBeTruthy(),
+    );
     expect(screen.queryByTestId("case-crumb")).toBeNull();
   });
 });
