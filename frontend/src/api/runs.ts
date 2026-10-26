@@ -29,15 +29,129 @@ export interface RunRequest {
   input_kind?: string;
 }
 
+/**
+ * `run_times` of `GET /api/runs` (api/app/run_times.py, R7 L1): the representative start / end of
+ * a run — the run's own progress file, else the job record; `source: "none"` = an imported run
+ * without processing times (its job times are only the import time, `imported_at`).
+ */
+export interface RunTimes {
+  started_at?: string | null;
+  completed_at?: string | null;
+  source?: "run-progress" | "job" | "none" | string;
+  imported_at?: string | null;
+}
+
+/** `evidence_timezone` of a run response: the evidence system's zone (registry). */
+export interface RunEvidenceTimezone {
+  /** Windows zone name ("Korea Standard Time"). */
+  name?: string | null;
+  /** Windows bias: minutes west of UTC (KST = −540). */
+  bias_minutes?: number | null;
+  status?: string | null;
+}
+
 export interface RunListItem {
   run_id: string;
   status: RunStatus | string;
   created_at?: string;
   updated_at?: string;
+  started_at?: string | null;
+  completed_at?: string | null;
   request?: RunRequest;
   origin?: string;
   /** The run this one retries (이어서 실행 / 처음부터 다시), when it is a retry. */
   retry_of_run_id?: string | null;
+  run_times?: RunTimes | null;
+  evidence_timezone?: RunEvidenceTimezone | string | null;
+  /** Run detail only: the newest evidence time (relative date presets anchor, C-D5). */
+  timeline_max_ts?: string | null;
+  timeline_max_source?: "timeline-index" | "evidence-mtime" | string | null;
+}
+
+/** What the run identity helpers read: a run list item, a run detail, or a test's partial run. */
+export type RunTimeSource = Omit<RunListItem, "status"> & {
+  status?: unknown;
+  /** Full progress (run detail) carries `started_at` / `completed_at`; the compact one does not. */
+  progress?: unknown;
+};
+
+function progressTime(run: RunTimeSource, key: "started_at" | "completed_at"): string | null {
+  const progress = run.progress;
+  if (!progress || typeof progress !== "object") return null;
+  const value = (progress as Record<string, unknown>)[key];
+  return typeof value === "string" && value ? value : null;
+}
+
+// --- run identity (R7 L1: one start time / duration per run on every screen) ----------------
+
+const ACTIVE_STATUSES = new Set(["queued", "running"]);
+
+/** The run was added from an existing output folder ("불러오기"), not processed by this server. */
+export function isImportedRun(run: Pick<RunListItem, "origin">): boolean {
+  return run.origin === "imported";
+}
+
+/**
+ * Representative start of a run, the one instant 랜딩 · 처리 · 접수 · 케이스 선택기 print:
+ * `run_times.started_at`, else the progress file's `started_at`, else (a run started here) the
+ * job's start / creation. An imported run without processing times falls back to its import time
+ * (`runTimeIsImport` says so — the screens add "가져옴" then).
+ */
+export function runStartedAt(run: RunTimeSource): string | null {
+  const times = run.run_times;
+  if (times?.started_at) return times.started_at;
+  const progressStart = progressTime(run, "started_at");
+  if (progressStart) return progressStart;
+  if (times?.source === "none" || (!times && isImportedRun(run)))
+    return times?.imported_at ?? run.created_at ?? null;
+  return run.started_at ?? run.created_at ?? null;
+}
+
+/** The start shown is the import time (an imported run without its own processing times). */
+export function runTimeIsImport(run: RunTimeSource): boolean {
+  if (run.run_times?.started_at || progressTime(run, "started_at")) return false;
+  return run.run_times?.source === "none" || isImportedRun(run);
+}
+
+/** Representative end of a finished run, null while it runs or when unknown. */
+export function runCompletedAt(run: RunTimeSource): string | null {
+  if (ACTIVE_STATUSES.has(String(run.status))) return null;
+  if (runTimeIsImport(run)) return null;
+  return run.run_times?.completed_at ?? progressTime(run, "completed_at") ?? run.completed_at ?? null;
+}
+
+/**
+ * 소요 in ms: completed − started (now − started while it runs); null ("—") when a bound is
+ * missing — an imported run without processing times never reads as "import → last update".
+ */
+export function runDurationMs(run: RunTimeSource, now: number = Date.now()): number | null {
+  if (runTimeIsImport(run)) return null;
+  const start = Date.parse(runStartedAt(run) ?? "");
+  if (!Number.isFinite(start)) return null;
+  const end = ACTIVE_STATUSES.has(String(run.status)) ? now : Date.parse(runCompletedAt(run) ?? "");
+  return Number.isFinite(end) ? Math.max(0, end - start) : null;
+}
+
+/** Sort key: newest representative start first (unknown last). */
+export function runStartedMs(run: RunTimeSource): number {
+  const ms = Date.parse(runStartedAt(run) ?? "");
+  return Number.isNaN(ms) ? Number.NEGATIVE_INFINITY : ms;
+}
+
+/** The evidence zone as an object (older servers / requests may carry a bare IANA string). */
+export function runEvidenceZone(run: RunTimeSource | null | undefined): RunEvidenceTimezone | null {
+  const value = run?.evidence_timezone;
+  if (!value || typeof value === "string") return null;
+  return value.name || typeof value.bias_minutes === "number" ? value : null;
+}
+
+/** Query of `GET /api/runs/{id}` — the key the 접수 dashboard shares (`["run-detail", id]`). */
+export function runDetailQuery(runId: string) {
+  return {
+    queryKey: ["run-detail", runId] as const,
+    queryFn: () =>
+      api<RunJob & { progress?: Record<string, unknown> | null }>(`/api/runs/${encodeURIComponent(runId)}`),
+  };
 }
 
 export interface RunJob extends RunListItem {

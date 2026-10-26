@@ -9,6 +9,7 @@ import json
 import logging
 import re
 import sqlite3
+import time
 import zipfile
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from pathlib import Path
@@ -37,6 +38,7 @@ from ...core.jobs import (
     run_output_dir,
 )
 from ...core.run.plan import PlanTargetError, plan_counts_brief, validate_skip_targets
+from ...core.search_budget import resolve_scan_budget_seconds
 from ...core.visible_capabilities import build_visible_capability_response
 from .analyses import run_scope
 from .analysis_kinds import cross_case_eligibility
@@ -53,6 +55,7 @@ from .artifact_filter import (
     parse_field_filters,
     row_matcher,
 )
+from .artifact_path_index import PATH_INDEX_SERVICE
 from .artifact_sort import SORT_ORDERS, paginate_sorted_artifact_output
 from .dashboard import (
     build_run_dashboard,
@@ -94,6 +97,7 @@ from .helpers import (
     run_progress_payload,
     validate_run_evidence_source,
 )
+from .jsonl_records import iter_artifact_records
 from .models import (
     RunCaseNotesRequest,
     RunCreateRequest,
@@ -116,6 +120,7 @@ from .row_conditions import (
     parse_row_conditions,
 )
 from .run_review import canonical_run_case
+from .run_times import run_identity_fields
 from .runops import (
     build_run_output_preview,
     build_run_viewer_workflow_validation,
@@ -195,6 +200,12 @@ def row_conditions_or_422(
 GEO_ARTIFACTS_ONLY = (
     "geo(위치 상자) 조건은 아티팩트 목록(/artifacts)에서만 쓸 수 있습니다 — 파일·타임라인 행에는 좌표가 없습니다"
 )
+
+
+def filter_deadline() -> float | None:
+    """Wall-clock end of one filter scan (the unified-search budget, ``RAPIDTRIAGE_SEARCH_SCAN_BUDGET_SECONDS``)."""
+    seconds = resolve_scan_budget_seconds()
+    return time.monotonic() + seconds if seconds > 0 else None
 
 
 def reject_geo(geo: str | None) -> None:
@@ -419,6 +430,8 @@ def build_runs_router(
             # Cross-case dialog filter (plan P1 §3.2 cross-case): one stat, no DB open.
             row.update(cross_case_eligibility(job))
             row["search_index_available"] = search_index_available(job)
+            # Run identity (R7 L1): one representative start / end and the evidence time zone.
+            row.update(run_identity_fields(job))
             if job.status in PROGRESS_RUN_STATUSES:
                 # Compact live progress for the run card (full payload on
                 # GET /api/runs/{run_id}); finished runs skip the file read.
@@ -436,6 +449,8 @@ def build_runs_router(
         payload["progress"] = run_progress_payload(job)
         payload.update(cross_case_eligibility(job))
         payload["search_index_available"] = search_index_available(job)
+        # + the newest evidence time that anchors the relative date presets (R7 L1 C-D5).
+        payload.update(run_identity_fields(job, include_timeline_max=True))
         payload.update(run_case_db_readiness(job.summary, run_id))
         return payload
 
@@ -1040,20 +1055,34 @@ def build_runs_router(
                         artifacts[name.removeprefix("artifacts_")] = kind_page
                         continue
                     if (needle or wanted_types or wanted_channels or fields or conditions) and limit > 0:
-                        artifacts[name.removeprefix("artifacts_")] = _echo_conditions(
-                            filter_artifact_page(
-                                artifact_payload,
-                                payload_path=get_output_path(store, run_id, name),
-                                path_contains=needle,
-                                offset=offset,
-                                limit=limit,
-                                artifact_types=wanted_types,
-                                channels=wanted_channels,
-                                fields=fields,
-                                row_filter=row_filter,
-                            ),
-                            conditions,
+                        page_path = get_output_path(store, run_id, name)
+                        # path_contains: the kind's path index names the candidate rows (R7);
+                        # the other filters then check only those rows.
+                        path_index = (
+                            PATH_INDEX_SERVICE.get(run_id, name.removeprefix("artifacts_"), artifact_payload, page_path)
+                            if needle and live is None
+                            else None
                         )
+                        kind_page = filter_artifact_page(
+                            artifact_payload,
+                            payload_path=page_path,
+                            path_contains=needle,
+                            offset=offset,
+                            limit=limit,
+                            artifact_types=wanted_types,
+                            channels=wanted_channels,
+                            fields=fields,
+                            row_filter=row_filter,
+                            rows_source=(
+                                path_index.iter_rows(artifact_payload, path_index.matching(nfc_fold(needle)))
+                                if path_index is not None and needle
+                                else None
+                            ),
+                            deadline=filter_deadline(),
+                        )
+                        if needle and isinstance(kind_page.get("pagination"), dict):
+                            kind_page["pagination"]["path_index"] = "ready" if path_index is not None else "scan"  # type: ignore[index]
+                        artifacts[name.removeprefix("artifacts_")] = _echo_conditions(kind_page, conditions)
                         continue
                     artifacts[name.removeprefix("artifacts_")] = paginate_artifact_output(
                         artifact_payload,
@@ -1153,10 +1182,17 @@ def build_runs_router(
                 offset=offset,
                 limit=limit,
                 after=after,
-                rows_for=kind_rows_for_flags(join, flag_query) if flag_query.filtered else None,
+                rows_for=(
+                    kind_rows_for_flags(join, flag_query)
+                    if flag_query.filtered
+                    else _path_index_rows_for(run_id, path_contains)
+                    if path_contains and geo_index  # finished runs only (a live run's outputs still grow)
+                    else None
+                ),
                 extra=extra or None,
                 fields=fields,
                 row_filter=conditions.predicate("artifacts") if conditions is not None else None,
+                deadline=filter_deadline(),
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
@@ -1164,6 +1200,20 @@ def build_runs_router(
             # The index is building (or unusable): the scan's partial results, marked as such.
             response["cross_kind"]["geo_index"] = geo_state  # type: ignore[index]
         return response
+
+
+    def _path_index_rows_for(run_id: str, path_contains: str):
+        """Cross-kind ``rows_for``: a kind with a ready path index yields only its matching rows;
+        the others stream (and get their index built in the background for the next request)."""
+        needle = nfc_fold(path_contains)
+
+        def rows_for(kind: str, payload: dict[str, object], payload_path: Path, start: int):
+            index = PATH_INDEX_SERVICE.ready(run_id, kind, payload, payload_path)
+            if index is None:
+                return iter_artifact_records(payload, payload_path=payload_path, start=start)
+            return index.iter_rows(payload, index.matching(needle), start=start)
+
+        return rows_for
 
 
     def _artifact_sources(run_id: str, kinds: Sequence[str]) -> list[tuple[str, dict[str, object], Path]]:

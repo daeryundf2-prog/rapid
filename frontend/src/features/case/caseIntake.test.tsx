@@ -284,11 +284,15 @@ describe("case switcher (케이스 › 증거 › 런)", () => {
       .getAllByText(/^증거 E-/)
       .map((node) => node.textContent);
     expect(evidence).toEqual(["증거 E-2 · a", "증거 E-10 · z"]);
-    const current = screen.getByRole("button", { name: "가-1 › E-2 › a.E01 · 실행 중" });
+    expect(screen.getByRole("dialog", { name: "케이스 열기" })).toBeTruthy();
+    const current = screen.getByRole("button", { name: /^가-1 › E-2 › a\.E01 · 실행 중 · / });
     expect(current.getAttribute("aria-current")).toBe("true");
     const loose = screen.getByRole("list", { name: "케이스 없는 런 목록" });
-    expect(within(loose).getByRole("button", { name: "old · 완료" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "나-2 › E-01 › b.E01 · 완료" }));
+    expect(within(loose).getByRole("button", { name: /^old · 완료 · / })).toBeTruthy();
+    // Delete is in each row's ⋯ menu, not a button on every row (C-L1).
+    expect(screen.queryByRole("button", { name: /삭제$/ })).toBeNull();
+    expect(screen.getAllByRole("button", { name: /런 메뉴$/ }).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: /^나-2 › E-01 › b\.E01 · 완료 · / }));
     expect(window.location.hash).toContain("run-b");
   });
 });

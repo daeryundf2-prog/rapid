@@ -1,6 +1,6 @@
 /**
  * First screen (visual-polish S10 / U-V6): a centred card with the brand mark, the three ways
- * to start (케이스 만들기 · 케이스 열기 · 케이스 없이 빠른 런 · 샘플), the recent cases and the key hints. Without an API
+ * to start (케이스 만들기 · 케이스 열기 · 케이스 없이 빠른 런 · 샘플), the recent runs and the key hints. Without an API
  * token the same card asks for the token instead (the token gate lives inside the card).
  */
 
@@ -8,7 +8,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { listCases } from "../../api/cases";
 import { setAuthToken } from "../../api/client";
-import { RUN_MODE_LABEL, runDisplayName } from "../../app/collections";
+import { runStartedMs } from "../../api/runs";
+import { runDisplayName } from "../../app/collections";
 import { CommandButton } from "../../commands/CommandButton";
 import { StatusBadge } from "../../components/Badge";
 import { MiddlePath } from "../../components/MiddlePath";
@@ -16,8 +17,8 @@ import { serializeRoute } from "../../router";
 import { BrandMark } from "../../shell/BrandMark";
 import { keyLabel } from "../../shortcuts";
 import { useRuns, useTimezone } from "../../state/hooks";
-import { formatTimestamp } from "../../utils/time";
 import "./case.css";
+import { runChipText, runTimeTooltip } from "./runTime";
 
 /** Recent cases listed on the card (newest first). */
 export const LANDING_RECENT_COUNT = 6;
@@ -70,40 +71,33 @@ function RecentCases() {
         caseOfRun.set(run.run_id, `${item.case_number} › ${evidence.evidence_number}`);
     }
   }
-  const recent = [...runs]
-    .sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")))
-    .slice(0, LANDING_RECENT_COUNT);
+  // Newest representative start first (R7 L1): the time each row prints.
+  const recent = [...runs].sort((a, b) => runStartedMs(b) - runStartedMs(a)).slice(0, LANDING_RECENT_COUNT);
   return (
     <section className="landing-recent" aria-labelledby="landing-recent-title">
       <h2 id="landing-recent-title" className="landing-section-title">
-        최근 케이스
+        최근 런
       </h2>
       {recent.length === 0 ? (
         <p className="landing-note">
-          아직 케이스가 없습니다. 케이스를 만들거나 케이스 없이 빠른 런·샘플로 시작하세요.
+          아직 런이 없습니다. 케이스를 만들거나 케이스 없이 빠른 런·샘플로 시작하세요.
         </p>
       ) : (
         <ul className="landing-cases">
           {recent.map((run) => {
-            const mode = RUN_MODE_LABEL[String(run.request?.mode ?? "")] ?? run.request?.mode ?? "";
-            const when = run.created_at
-              ? formatTimestamp(run.created_at, timezone, { precision: "minute" })
-              : "";
             return (
               <li key={run.run_id}>
                 <a
                   className="landing-case"
                   href={serializeRoute({ runId: run.run_id, collection: "intake" })}
-                  title={run.request?.root ?? run.run_id}
+                  title={runTimeTooltip(run, timezone)}
                 >
                   <span className="landing-case-line">
                     <span className="landing-case-name">{runDisplayName(run)}</span>
                     <span className="landing-case-meta">
                       {[
                         cases.data ? (caseOfRun.get(run.run_id) ?? "케이스 없음") : "",
-                        mode,
-                        when,
-                        run.run_id.slice(0, 8),
+                        runChipText(run, timezone),
                       ]
                         .filter(Boolean)
                         .join(" · ")}

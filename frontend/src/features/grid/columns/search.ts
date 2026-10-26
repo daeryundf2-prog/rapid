@@ -85,8 +85,9 @@ function reviewFields(raw: Record<string, unknown>): Record<string, unknown> {
 export const searchCollection: CollectionDef = {
   id: "search",
   label: "검색 결과",
-  source: "whole",
-  fetch: (runId, query, signal) => fetchSearchRows(runId, query, 1000, signal),
+  // Server pages (R7): `limit`/`offset` per page, the grid asks for the next one on scroll.
+  source: "paged",
+  fetch: (runId, query, signal) => fetchSearchRows(runId, query, query.limit, signal),
   mapRow: (raw, index) => {
     const source = str(raw.source);
     const kind = strOrNull(raw.kind);

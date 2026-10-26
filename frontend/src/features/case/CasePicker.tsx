@@ -1,11 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { koCompare, listCases } from "../../api/cases";
-import { deleteRun, listRuns, type RunListItem } from "../../api/runs";
+import { deleteRun, listRuns, type RunListItem, runStartedMs } from "../../api/runs";
+import { StatusBadge } from "../../components/Badge";
+import { MenuButton } from "../../components/MenuButton";
+import { Icon } from "../../icons";
+import { useTimezone } from "../../state/hooks";
 import { navigate } from "../tree/adapter";
 import { useCaseDialogs } from "./dialogs";
 import { ErrorText } from "./ErrorText";
 import { Modal } from "./Modal";
-import { ReasonButton } from "./ReasonButton";
+import { runChipText, runTimeTooltip } from "./runTime";
 
 const ACTIVE = new Set(["queued", "running"]);
 const STATUS_LABEL: Record<string, string> = {
@@ -39,33 +43,54 @@ function RunRow({
   onClose: () => void;
 }) {
   const confirmDelete = useCaseDialogs((s) => s.confirmDelete);
+  const { timezone } = useTimezone();
+  const status = STATUS_LABEL[run.status] ?? run.status;
+  // Run chip (C-L1): 모드 · 시작 시각 · 소요 · id8 — tells identical evidence names apart.
+  const chip = runChipText(run, timezone);
   return (
-    <li className="case-actions case-tree-run" style={{ justifyContent: "space-between" }}>
+    <li className="case-tree-run">
       <button
         type="button"
-        className="button"
+        className="button case-run-open"
         aria-current={run.run_id === currentRunId ? "true" : undefined}
+        aria-label={`${label} · ${status} · ${chip}`}
+        title={runTimeTooltip(run, timezone)}
+        data-testid="case-picker-run"
         onClick={() => {
           navigate({ runId: run.run_id, collection: "intake" });
           onClose();
         }}
       >
-        {label} · {STATUS_LABEL[run.status] ?? run.status}
+        <span className="case-run-text">
+          <span className="case-run-label">{label}</span>
+          <span className="case-run-chip">{chip}</span>
+        </span>
+        <StatusBadge status={String(run.status)} />
       </button>
-      <ReasonButton
-        aria-label={`${label} 삭제`}
-        reason={ACTIVE.has(run.status) ? "실행 중인 런은 먼저 취소해야 합니다" : undefined}
-        onClick={() => confirmDelete(run.run_id)}
+      {/* Delete lives in the row's ⋯ menu (C-L1), not as a button on every row. */}
+      <MenuButton
+        label={`${label} 런 메뉴`}
+        testId="case-picker-run-menu"
+        items={[
+          {
+            id: "delete",
+            label: "런 삭제…",
+            icon: "trash",
+            disabledReason: ACTIVE.has(run.status) ? "실행 중인 런은 먼저 취소해야 합니다" : undefined,
+            onSelect: () => confirmDelete(run.run_id),
+          },
+        ]}
       >
-        삭제
-      </ReasonButton>
+        <Icon name="more" />
+      </MenuButton>
     </li>
   );
 }
 
 /**
- * Case switcher (AXIOM adoption E1): 케이스 › 증거 › 런, then the runs started without a case
- * ("케이스 없는 런", still openable and deletable). Cases and evidence in Korean natural order.
+ * 케이스 열기 (AXIOM adoption E1, R7 C-L1): 케이스 › 증거 › 런, then the runs started without a
+ * case ("케이스 없는 런", still openable; delete in each row's ⋯ menu). Cases and evidence in
+ * Korean natural order; runs newest start first.
  */
 export function CasePicker({ currentRunId, onClose }: { currentRunId: string | null; onClose: () => void }) {
   const runs = useQuery({ queryKey: ["runs", "picker"], queryFn: listRuns, retry: false });
@@ -76,11 +101,13 @@ export function CasePicker({ currentRunId, onClose }: { currentRunId: string | n
     for (const evidence of item.evidence) for (const run of evidence.runs) linked.add(run.run_id);
   }
   const sortedCases = [...(cases.data ?? [])].sort((a, b) => koCompare(a.case_number, b.case_number));
-  const loose = (runs.data ?? []).filter((run) => !linked.has(run.run_id));
+  const loose = (runs.data ?? [])
+    .filter((run) => !linked.has(run.run_id))
+    .sort((a, b) => runStartedMs(b) - runStartedMs(a));
   const loading = runs.isPending || cases.isPending;
 
   return (
-    <Modal title="케이스 전환" onClose={onClose} wide>
+    <Modal title="케이스 열기" onClose={onClose} wide>
       {loading && <p aria-busy="true">케이스 목록을 불러오는 중…</p>}
       {runs.isError && <ErrorText>런 목록을 불러오지 못했습니다.</ErrorText>}
       {cases.isError && <ErrorText>케이스 목록을 불러오지 못했습니다.</ErrorText>}
@@ -180,15 +207,15 @@ export function DeleteCaseDialog({
     mutationFn: () => deleteRun(runId),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["runs"] });
-      onNotice?.("케이스를 목록에서 제거했습니다.");
+      onNotice?.("런을 목록에서 제거했습니다.");
       if (runId === currentRunId) window.location.hash = "";
       onClose();
     },
   });
   return (
-    <Modal title="케이스 삭제" onClose={onClose}>
+    <Modal title="런 삭제" onClose={onClose}>
       <p>
-        이 케이스를 목록에서 제거합니다. 출력 폴더의 파일은 삭제되지 않으며, 같은 폴더를 불러오기로 다시 열 수
+        이 런을 목록에서 제거합니다. 출력 폴더의 파일은 삭제되지 않으며, 같은 폴더를 불러오기로 다시 열 수
         있습니다.
       </p>
       {mutation.error && (

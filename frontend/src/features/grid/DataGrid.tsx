@@ -57,7 +57,14 @@ import {
 import { ntfsJoinOf } from "./columns/files";
 import { EmptyHintLink } from "./EmptyHintLink";
 import { GridEmpty, type GridEmptyState } from "./GridEmpty";
-import { ColumnMenu, DocsMatchedToggle, GridFooter, GridToolbar } from "./GridToolbar";
+import {
+  ColumnMenu,
+  DocsMatchedToggle,
+  GridFooter,
+  GridToolbar,
+  SEARCH_TRUNCATED_NOTICE,
+  searchLoadedText,
+} from "./GridToolbar";
 import { buildViewerTarget, type GridCommandHost, runBatch, runNote, useGridCommands } from "./gridCommands";
 import {
   type AutoHideReason,
@@ -1736,6 +1743,12 @@ export function DataGrid(props: DataGridProps = {}) {
         loading={cq.isFetching}
         loadingText={displayCount === 0 && cq.isLoading ? loadingMessage : undefined}
         scope={cq.category ? categoryScopeText(cq.category) : undefined}
+        truncatedText={ref.id === "search" ? SEARCH_TRUNCATED_NOTICE : undefined}
+        loadedSummary={
+          ref.id === "search" && cq.loadedCount > 0
+            ? searchLoadedText(cq.loadedCount, cq.total, cq.canLoadMore)
+            : undefined
+        }
       />
       {extractResult ? (
         <section className="grid-extract" role="status" aria-label="추출 결과">
