@@ -24,6 +24,7 @@ import logging
 import os
 import shutil
 import time
+import uuid
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -69,6 +70,18 @@ SUMMARY_STATE_KEYS = (
 
 def _utc_now() -> str:
     return dt.datetime.now(dt.timezone.utc).isoformat()
+
+
+def new_run_stage_analysis_id(prefix: str) -> str:
+    """``<prefix>-<UTC µs time>-<8 hex>``: unique even when two stage runs share a clock tick.
+
+    The Windows clock can return the same microsecond value for consecutive calls, so a
+    timestamp alone collided (``FileExistsError`` on the generation directory). The random
+    suffix keeps the id inside ``[A-Za-z0-9_-]{1,64}`` and the ``<prefix>-`` start that
+    generation cleanup and readers match on; nothing parses the time part.
+    """
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S%f")
+    return f"{prefix}-{stamp}-{uuid.uuid4().hex[:8]}"
 
 
 def _write_state(path: Path, state: Mapping[str, object]) -> None:
