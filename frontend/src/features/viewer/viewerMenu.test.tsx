@@ -72,14 +72,16 @@ describe("viewer header (review #6)", () => {
       expect(item.querySelector(".menu-item-lead")).not.toBeNull();
   });
 
-  it("shows the review status as a chip with text and the parent folder as the path line", async () => {
+  it("shows the review status as a chip with text and the path tail first as the path line", async () => {
     await showText();
     const status = screen.getByTestId("viewer-review-status");
     expect(status.classList.contains("status-chip")).toBe(true);
     expect(status.textContent).toBe("미검토");
     const path = document.querySelector(".viewer-path .mid-path") as HTMLElement;
     expect(path.getAttribute("title")).toBe("C:\\evidence\\Users\\alice\\notes.txt");
-    expect(path.textContent).toBe("C:\\evidence\\Users\\alice");
-    expect(path.querySelector(".mid-path-tail")?.textContent).toBe("alice");
+    // Tail first (plan r7 §3.2 L2, C-W6): file name + two parent folders, the head ellipsizes.
+    expect(path.textContent).toBe("C:\\evidence\\Users\\alice\\notes.txt");
+    expect(path.querySelector(".mid-path-tail")?.textContent).toBe("notes.txt");
+    expect(path.querySelector(".mid-path-parents")?.textContent).toBe("Users\\alice\\");
   });
 });
