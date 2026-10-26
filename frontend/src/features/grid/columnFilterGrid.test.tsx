@@ -98,6 +98,10 @@ function filesPage(total: number, ntfsJoin: unknown, withNtfs = false) {
 describe("files NTFS columns (plan analysis-workbench-p1 U-P1-3)", () => {
   it("before an NTFS-meta analysis the 출처 headers link to its run dialog; names stay clean", async () => {
     setRoute(`#/case/${RUN}/explore/files`);
+    // Only an image input can run NTFS-meta (C-D12): the run is an E01.
+    useAppStore.setState({
+      runs: [{ run_id: RUN, status: "completed", request: { root: "D:/evidence/disk.E01" } }],
+    } as never);
     gridOn({ id: "files" });
     installFetch({
       "/files": filesPage(3, { analysis_id: null, matched: 0, total: 3 }),

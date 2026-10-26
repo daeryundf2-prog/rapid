@@ -764,7 +764,7 @@ export function FilterBar(props: FilterBarProps) {
                 <strong className="filter-trigger-applied">{appliedSummary}</strong>
               </>
             ) : (
-              <span>조건</span>
+              <span className="filter-btn-label">조건</span>
             )}
             {count ? (
               <>
@@ -781,8 +781,10 @@ export function FilterBar(props: FilterBarProps) {
             onClose={() => setPopoverOpen(false)}
             triggerRef={triggerRef}
             label="조건"
-            // Opens leftwards from the button: the grid pane clips anything past its right edge.
             align="start"
+            // In a portal above every pane (the viewer too), flipped into the viewport (C-D4):
+            // the grid pane no longer clips it beside the open viewer.
+            portal
             className="filter-popover"
             // Opening lands on the heading, not on "오늘" (review #10): one Tab reaches the presets.
             initialFocus=".filter-popover-title"
@@ -896,6 +898,7 @@ export function FilterBar(props: FilterBarProps) {
             type="button"
             className="grid-btn grid-btn-quiet"
             data-testid="filter-save"
+            aria-label="조건 저장"
             title="지금 조건을 저장해 조건 패널의 '저장한 조건'에서 다시 적용합니다"
             onClick={() => {
               const name = chips
@@ -907,13 +910,16 @@ export function FilterBar(props: FilterBarProps) {
               announce(`조건을 저장했습니다: ${name}`);
             }}
           >
-            조건 저장
+            <Icon name="bookmark" />
+            <span className="filter-btn-label">조건 저장</span>
           </button>
         ) : null}
         {anyActive ? (
           <button
             type="button"
             className="grid-btn grid-btn-quiet filter-reset"
+            aria-label="조건 지우기"
+            title="조건 지우기"
             onClick={() => {
               clear();
               setText("");
@@ -921,7 +927,8 @@ export function FilterBar(props: FilterBarProps) {
               onQuery("");
             }}
           >
-            조건 지우기
+            <Icon name="close" />
+            <span className="filter-btn-label">조건 지우기</span>
           </button>
         ) : null}
         <span className="filter-row-end">

@@ -25,6 +25,7 @@ import { categoryInfo, isArtifactCategoryId } from "../tree/categories";
 import { useRoute } from "./adapter";
 import { collectionDef } from "./columns";
 import { promotedColumn } from "./columns/fieldColumns";
+import { filesServerSort } from "./columns/files";
 import { serverPathFilter } from "./gridUtils";
 import { overlayReview, useReviewMap } from "./reviewMap";
 import type { CollectionDef, ColumnSpec } from "./types";
@@ -78,6 +79,15 @@ export interface CollectionQueryResult {
   pageSize: number;
   /** Total rows after server filters; null while unknown. */
   total: number | null;
+  /**
+   * Rows the server holds for this query (after server filters, before loaded-row filters); null
+   * while unknown. The toolbar badge "불러온 N / 전체 M" reads it (plan r7 §3.2, C-D1).
+   */
+  serverTotal: number | null;
+  /** Display index of a loaded row by key (-1 when no loaded page holds it). */
+  indexOfKey: (rowKey: string) => number;
+  /** Filter-bar conditions the server cannot apply run over the loaded rows only. */
+  clientFiltering: boolean;
   /** Number of server pages (1 for whole collections); null while total is unknown. */
   pageCount: number | null;
   /** Pages currently loaded. */
@@ -138,9 +148,13 @@ export function columnResolver(
 /** Re-request interval while the server builds a sort index (plan artifact-columns §4.2). */
 export const SORT_POLL_MS = 1000;
 
-/** The sort the server applies: artifacts of exactly one kind, or one analysis job's rows. */
+/**
+ * The sort the server applies: artifacts of exactly one kind, one analysis job's rows, or the
+ * files list on its column-index keys (이름 · 경로 · 크기 · 수정 · NTFS 생성 · 특이사항).
+ */
 export function serverSortOf(query: CollectionQuery): CollectionQuery["sort"] {
   if (!query.sort) return undefined;
+  if (query.ref.id === "files") return filesServerSort(query);
   if (query.ref.id === "artifacts" && query.ref.kind) return query.sort;
   if (query.ref.id === "analysis" && query.ref.analysisId) return query.sort;
   return undefined;
@@ -210,6 +224,8 @@ export function collectionQueryKey(runId: string | null, query: CollectionQuery,
     query.ref.id === "timeline"
       ? `${query.text?.trim() ?? ""}|${query.group === true ? "group" : "flat"}`
       : "",
+    // Files server text filter (`q=` over name/path, plan r7 §3.2 L2).
+    query.ref.id === "files" ? (query.text?.trim() ?? "") : "",
   ] as const;
 }
 
@@ -420,6 +436,19 @@ export function useCollectionQuery(
     if (clientFiltering) requestPages(0, (FILTER_AUTOLOAD_PAGES - 1) * pageSize);
   }, [clientFiltering, requestPages, pageSize]);
 
+  const indexOfKey = useCallback(
+    (rowKey: string): number => {
+      if (def.source === "whole" || clientFiltering)
+        return loadedRows.findIndex((row) => row.rowKey === rowKey);
+      for (const [page, rows] of mappedByPage) {
+        const at = rows.findIndex((row) => row.rowKey === rowKey);
+        if (at >= 0) return page * pageSize + at;
+      }
+      return -1;
+    },
+    [def.source, clientFiltering, loadedRows, mappedByPage, pageSize],
+  );
+
   const lastData = pageData.filter((d): d is RawPage => !!d).at(-1);
   const canLoadMore =
     def.source === "paged" &&
@@ -531,6 +560,9 @@ export function useCollectionQuery(
     query,
     pageSize,
     total,
+    serverTotal,
+    indexOfKey,
+    clientFiltering,
     pageCount,
     pagesLoaded: mappedByPage.size,
     loadedCount: unfilteredRows.length,

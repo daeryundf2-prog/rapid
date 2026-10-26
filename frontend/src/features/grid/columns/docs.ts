@@ -1,5 +1,5 @@
 import { DOCS_MATCHED, DOCS_UNMATCHED, fetchDocsPage } from "../../../api/collections";
-import type { CollectionDef } from "../types";
+import type { CollectionDef, ColumnSpec } from "../types";
 import { labelledCell } from "../valueLabels";
 import { baseName, col, fieldStr, formatBytes, joinList, makeRef, makeRow, str, strOrNull } from "./common";
 
@@ -23,6 +23,20 @@ export function textStatusLabel(status: string, reason = ""): string {
   if (!status) return "";
   if (status === "no-text" && /이미지|image/i.test(reason)) return TEXT_STATUS_LABELS["image-only"] as string;
   return TEXT_STATUS_LABELS[status] ?? status;
+}
+
+/** Columns that only say something on the keyword-match list (C-D11: elsewhere they read "—"). */
+export const DOCS_MATCH_COLUMN_IDS: ReadonlySet<string> = new Set(["matched", "keywords"]);
+
+/**
+ * 문서 columns of a listing: 일치 · 일치 키워드 are default columns only under 일치만
+ * (`category=matched`); on the other listings they start hidden (열 선택 still offers them).
+ */
+export function docsColumnsFor(category: string | undefined): ColumnSpec[] {
+  if (category === DOCS_MATCHED) return docsCollection.columns;
+  return docsCollection.columns.map((column) =>
+    DOCS_MATCH_COLUMN_IDS.has(column.id) ? { ...column, presets: [] } : column,
+  );
 }
 
 export const docsCollection: CollectionDef = {
@@ -103,5 +117,18 @@ export const docsCollection: CollectionDef = {
       format: (r) => formatBytes(r.fields.size),
     }),
     col.path(420),
+  ],
+  columnsFor: (ref) => docsColumnsFor(ref.category),
+  // Empty default columns go first (all-"—" columns hide like the files list, C-D7/C-D11).
+  widthPriority: () => [
+    "title",
+    "kind",
+    "textStatus",
+    "size",
+    "matched",
+    "keywords",
+    "review",
+    "path",
+    "preview",
   ],
 };

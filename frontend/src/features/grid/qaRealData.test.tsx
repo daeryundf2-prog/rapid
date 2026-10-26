@@ -174,9 +174,9 @@ describe("files default preset (17)", () => {
       "ntfsCreated",
       "review",
     ]);
-    // No loaded row is reviewed or flagged yet: 선별 / 특이사항 wait in the 열 menu ("값이 없어 숨김", review #9);
-    // NTFS 생성 stays (its header links to the analysis that fills it).
-    expect(cols).toEqual(["title", "path", "size", "timestamp", "ntfsCreated"]);
+    // No loaded row is reviewed or flagged yet: 검토 / 특이사항 wait in the 열 menu ("값이 없어 숨김", review #9);
+    // NTFS 생성 is empty and this is no image input (nothing to run, C-D12): it waits there too.
+    expect(cols).toEqual(["title", "path", "size", "timestamp"]);
     expect(filesCollection.columns.find((c) => c.id === "ntfsCreated")?.presets).toEqual([
       "analysis",
       "source",

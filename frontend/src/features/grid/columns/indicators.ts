@@ -46,7 +46,8 @@ export const indicatorsCollection: CollectionDef = {
     col.review(),
     col.field(
       "classification",
-      "분류",
+      // 지표 분류 값(공인·내부망…)의 열 이름 (C-D10, 용어 지도: 범위).
+      "범위",
       120,
       ["analysis", "compact"],
       (r) => fieldStr(r, "classification"),

@@ -28,7 +28,7 @@ import { eventLevelLabel, logonTypeLabel, severityLabel } from "../../viewer/fie
 import { EVENT_DATA_KEYS } from "../../viewer/fieldSheets";
 import type { ColumnSpec } from "../types";
 import { keyValueReading } from "../valueLabels";
-import { currentTimezone, formatBytes, isRecord } from "./common";
+import { currentTimezone, formatBytes, isRecord, TIME_COLUMN_MIN } from "./common";
 
 /** Korean reading of a timestamp kind (chip tooltip / accessible text). */
 export const TS_KIND_LABELS: Record<string, string> = {
@@ -405,7 +405,8 @@ export function catalogColumn(def: CatalogColumn, aux = false): ColumnSpec {
     id: familyColumnId(def.key),
     header: def.label,
     width: def.width ?? (def.format === "time" ? TIME_COLUMN_WIDTH : 150),
-    minWidth: 60,
+    // A time never loses its seconds (C-D6, plan r7 §3.2 L2).
+    minWidth: def.format === "time" ? TIME_COLUMN_MIN : 60,
     presets: aux ? [] : ["analysis", "axiom"],
     ...(MONO_FORMATS.has(def.format ?? "") ? { mono: true } : {}),
     ...(numeric ? { align: "right" as const, filterKind: "number" as const } : {}),
@@ -442,6 +443,11 @@ export function catalogColumn(def: CatalogColumn, aux = false): ColumnSpec {
             if (!hit)
               return createElement("span", { className: "grid-cell-empty", "aria-hidden": true }, "—");
             const rowKind = cellTsKind(def, detailsOf(row), hit.from) ?? tsKind;
+            // The column's own kind is its header ("마지막 방문", "수정"): a chip only when this
+            // row's time is another kind ($FN vs $SI, key LastWrite vs value time …; C-D6).
+            if (rowKind === tsKind) {
+              return createElement("span", { className: "grid-cell-text" }, displayValue(def, hit.value));
+            }
             return createElement(
               "span",
               { className: "ts-cell" },

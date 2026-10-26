@@ -4,6 +4,8 @@
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
+  /* The toolbar adapts to its pane's width, not the window's (plan r7 §3.2 L2, C-D3). */
+  container: filterbar / inline-size;
   height: 32px;
   padding: 1px var(--space-3) 2px;
   background: var(--bg-panel);
@@ -18,6 +20,26 @@
   gap: var(--space-2);
   height: 28px;
   min-width: 0;
+}
+
+/* A narrow pane (< 640px, e.g. 1024 with the viewer open): icon-only buttons, named by aria-label. */
+@container filterbar (max-width: 639.98px) {
+  .filter-btn-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .filter-trigger-applied {
+    max-width: 120px;
+  }
+
+  .filter-search {
+    flex-basis: 120px;
+  }
 }
 
 .filter-row-end {
@@ -117,10 +139,21 @@
   width: 120px;
 }
 
+/* Toolbar buttons never wrap their label onto a second line (C-D3: "조건 저장" beside the viewer). */
 .filter-trigger {
   display: inline-flex;
+  flex: none;
   align-items: center;
   gap: var(--space-1);
+  white-space: nowrap;
+}
+
+.filter-row .grid-btn {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-1);
+  white-space: nowrap;
 }
 
 .filter-trigger[aria-expanded="true"] {

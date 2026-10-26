@@ -108,7 +108,7 @@ const detailColumn = col.field("detail", "내용", 320, ["analysis"], (r) => fie
 /** Kind layouts keep the summary column, off by default (the kind columns carry the detail). */
 const quietDetailColumn: ColumnSpec = { ...detailColumn, presets: [] };
 /** Server-sorted on `timestamp` (first TIME_KEYS value, the same rule as the server). */
-const timeColumn: ColumnSpec = { ...col.timestamp(170), sortKey: "timestamp" };
+const timeColumn: ColumnSpec = { ...col.timestamp(), sortKey: "timestamp" };
 const tail = [
   col.field(
     "provider",
@@ -585,7 +585,7 @@ const defaultColumns = (): ColumnSpec[] => [
   // Default width = minimum width: 항목 takes the slack (DataGrid fitColumnWidths); a narrow
   // grid hides 경로 → 선별 → 시각 → 유형 instead of truncating everything (ARTIFACT_PRIORITY).
   // 시각 is in 출처 중심 too: a source review still needs the time (review B2-6).
-  { ...timeColumn, width: 140, minWidth: 140, presets: ["analysis", "compact", "source"] },
+  { ...timeColumn, presets: ["analysis", "compact", "source"] },
   // 130px: the colour dot + ~14 characters ("cloud-messaging") without an ellipsis.
   { ...typeColumn, width: 130, minWidth: 130 },
   { ...col.title("항목", 220), minWidth: 220 },
@@ -762,9 +762,14 @@ export const artifactsCollection: CollectionDef = {
   columns: defaultColumns(),
   columnsFor: (ref, types) => artifactColumnsForKind(ref.kind, types),
   widthPriority: (ref, types) => artifactWidthPriority(ref.kind, types),
-  // A family's core columns stay when one page has no value for them (P1).
-  keepWhenEmpty: (ref, types) =>
-    resolveArtifactFamily(ref.kind, types)?.core_columns.map((def) => familyColumnId(def.key)) ?? [],
+  // A family's core column with no value in any loaded row hides like any empty default column
+  // (C-D7/C-E4, plan r7 §3.2 L2): it comes back as soon as a loaded row has a value, and 열 선택
+  // lists it as "값이 없어 숨김". Only the leading time column stays (the row's place in time).
+  keepWhenEmpty: (ref, types) => {
+    const family = resolveArtifactFamily(ref.kind, types);
+    const lead = family?.core_columns[0];
+    return lead?.format === "time" ? [familyColumnId(lead.key)] : [];
+  },
   locate: (runId, ref, sort, recordIndex, signal) =>
     ref.kind
       ? locateArtifactRow(runId, ref.kind, sort, recordIndex, signal)

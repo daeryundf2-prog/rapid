@@ -222,7 +222,7 @@ describe("kind default columns (§4.3) and sort keys", () => {
       "항목",
       "특이사항",
       "경로",
-      "선별",
+      "검토",
       "내용",
       "파서",
       "탐지 규칙",
@@ -236,7 +236,7 @@ describe("kind default columns (§4.3) and sort keys", () => {
       "항목",
       "특이사항",
       "경로",
-      "선별",
+      "검토",
     ]);
   });
 
