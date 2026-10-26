@@ -20,7 +20,11 @@ except ImportError:  # pragma: no cover
     HAS_FASTAPI = False
 
 from rapidtriage.api.app.artifact_filter import filter_artifact_page, nfc_fold
-from rapidtriage.api.app.artifact_path_index import PATH_INDEX_SERVICE, PathIndexService, build_path_index
+from rapidtriage.api.app.artifact_path_index import (
+    PATH_INDEX_SERVICE,
+    PathIndexService,
+    build_path_index,
+)
 from rapidtriage.core.jobs import RunJobStore, read_output_json
 from rapidtriage.core.search import (
     COMPACT_METADATA_KEYS,
@@ -137,6 +141,51 @@ class UnifiedSearchPagingTests(unittest.TestCase):
                 "source_hashes": {"sha256": "b" * 64},
             },
         )
+
+
+def reference_snippet(source: object, keywords: list[str], limit: int = 200) -> tuple[str, list[list[int]]]:
+    """search_hits.search_snippet before the R7 leaf prefilter (every leaf cleaned and located)."""
+    from rapidtriage.core import search_hits
+
+    if isinstance(source, str):
+        candidates = iter((search_hits._clean(source),))
+    else:
+        candidates = (
+            search_hits._clean(f"{key}: {text}" if key else text) for key, text in search_hits._iter_leaves(source)
+        )
+    first = ""
+    for candidate in candidates:
+        if not candidate:
+            continue
+        first = first or candidate
+        for keyword in keywords:
+            located = search_hits.locate_normalized(candidate, keyword)
+            if located is None:
+                continue
+            display, start, end = located
+            snippet = search_hits._window(display, start, end, limit)
+            return snippet, search_hits._highlights(snippet, keywords)
+    snippet = search_hits._window(first, 0, 0, limit) if first else ""
+    return snippet, search_hits._highlights(snippet, keywords)
+
+
+class SnippetPrefilterTests(unittest.TestCase):
+    def test_prefilter_gives_the_reference_snippet(self) -> None:
+        import unicodedata
+
+        from rapidtriage.core.search_hits import search_snippet
+
+        nfd = unicodedata.normalize("NFD", "계약서 초안")
+        records: list[object] = [
+            {"path": "C:/x.evtx", "details": {"a": "  plain	text  ", "b": ["LiveUpdate.exe  started", 3], "c": nfd}},
+            {"details": {"event_data": {"Name": "계약", "Other": "x" * 500 + " Straße " + "y" * 500}}},
+            {"details": {"liveupdate": "key name match", "z": "nothing"}},
+            {"details": {"n": 12345, "m": "   ", "s": "STRASSE"}},
+            "free   text with LiveUpdate and   계약",
+        ]
+        for keywords in (["LiveUpdate"], ["계약"], ["straße"], ["liveupdate", "계약"], ["live update"], ["12345"], ["zzz"]):
+            for record in records:
+                self.assertEqual(search_snippet(record, keywords), reference_snippet(record, keywords), (keywords, record))
 
 
 class RegexGuardTests(unittest.TestCase):

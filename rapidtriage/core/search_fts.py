@@ -39,7 +39,6 @@ from .run.persist import CASE_DB_FILE_NAME
 from .search import (
     build_keyword_match_plan,
     build_search_match_metadata,
-    compact_json_preview,
     is_known_good_search_match,
     is_simple_word,
     keyword_stems,
@@ -743,7 +742,7 @@ def _artifacts(connection: sqlite3.Connection, context: _SearchContext, scan: So
                 "path": path,
                 "title": str(stored.get("artifact_type") or row["artifact_type"] or artifact_kind),
                 "matched_keywords": matched,
-                "preview": compact_json_preview(stored),
+                "preview": "",  # finalize_search_hit sets the snippet (record JSON preview was discarded)
                 "search_match": context.match_metadata(haystack),
                 "pointer": f"/artifacts/{int(locator.get('row_index') or 0)}",
                 "metadata": stored,
@@ -795,7 +794,7 @@ def _indicators(connection: sqlite3.Connection, context: _SearchContext, scan: S
                 "path": path,
                 "title": title,
                 "matched_keywords": matched,
-                "preview": compact_json_preview(raw),
+                "preview": "",  # finalize_search_hit sets the snippet
                 "search_match": context.match_metadata(haystack),
                 "pointer": pointer,
                 "metadata": raw,
@@ -838,7 +837,7 @@ def _timeline(connection: sqlite3.Connection, context: _SearchContext, scan: Sou
                 "path": path,
                 "title": str(row["description"] or "timeline event"),
                 "matched_keywords": matched,
-                "preview": compact_json_preview(event),
+                "preview": "",  # finalize_search_hit sets the snippet
                 "search_match": context.match_metadata(haystack),
                 "pointer": f"/events/{int(row['id']) - base}",
                 "metadata": event,

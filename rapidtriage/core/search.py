@@ -1749,7 +1749,8 @@ def match_keywords(
             matched.append(keyword)
             continue
         stems = entry.get("stems")
-        if stems:
+        # A stem that is a whole token is also a substring: tokenize only when one occurs at all.
+        if stems and any(stem in lower for stem in stems):  # type: ignore[union-attr]
             if tokens is None:
                 tokens = set(tokenize_folded_words(lower))
             if stems & tokens:
