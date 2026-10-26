@@ -29,7 +29,11 @@ from rapidtriage.core.derived.normalize import (
     phone_e164,
     url_host,
 )
-from rapidtriage.core.derived.stage import DERIVED_ANALYSIS_KIND, RUN_STAGE_ANALYSIS_PREFIX, run_derived_stage
+from rapidtriage.core.derived.stage import (
+    DERIVED_ANALYSIS_KIND,
+    RUN_STAGE_ANALYSIS_PREFIX,
+    run_derived_stage,
+)
 from rapidtriage.core.derived.url_classes import (
     UrlClassError,
     load_url_classes,
