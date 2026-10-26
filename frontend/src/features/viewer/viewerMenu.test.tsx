@@ -6,6 +6,7 @@ import { resetViewerAdapter, setViewerTarget } from "./adapter";
 import { clearCaseDbCache } from "./citation";
 import { installFetch, metadata, preview, target } from "./testSupport";
 import { Viewer } from "./Viewer";
+import { ViewerToolbar } from "./ViewerToolbar";
 
 beforeEach(() => {
   resetAnnouncer();
@@ -84,5 +85,63 @@ describe("viewer header (review #6)", () => {
     expect(path.textContent).toBe("C:\\evidence\\Users\\alice\\notes.txt");
     expect(path.querySelector(".mid-path-tail")?.textContent).toBe("notes.txt");
     expect(path.querySelector(".mid-path-parents")?.textContent).toBe("Users\\alice\\");
+  });
+});
+
+describe("R-1: viewer status chip with a failing onRun", () => {
+  const ctx = {
+    runId: "run-1",
+    collection: "files",
+    selectedRowKeys: [],
+    focusedRowKey: null,
+    viewerHasTarget: true,
+    runIsActive: false,
+  };
+  const mark = (action: string) => ({
+    id: `viewer.mark.${action}`,
+    label: action === "relevant" ? "표시: 관련 있음" : `표시: ${action}`,
+    group: "viewer" as const,
+    run: () => {},
+  });
+
+  for (const [name, outcome] of [
+    ["rejects", () => Promise.reject(new Error("403"))],
+    ["resolves false", () => Promise.resolve(false)],
+  ] as const) {
+    it(`reverts the optimistic status when onRun ${name}`, async () => {
+      act(() => setViewerTarget(target({ sourcePath: "C:evidencea.txt" })));
+      const onRun = vi.fn(outcome);
+      render(
+        <ViewerToolbar
+          sourceCommands={[]}
+          markCommands={[mark("relevant")]}
+          ctx={ctx}
+          onRun={onRun}
+          rowsForSource={{ reason: "없음", run: () => {} }}
+        />,
+      );
+      const chip = () => screen.getByTestId("viewer-review-status");
+      expect(chip().textContent).toBe("미검토");
+      fireEvent.click(screen.getByTestId("viewer-review-status-menu"));
+      fireEvent.click(document.querySelector('[data-command="viewer.mark.relevant"]') as HTMLElement);
+      expect(onRun).toHaveBeenCalledTimes(1);
+      await waitFor(() => expect(chip().textContent).toBe("미검토"));
+    });
+  }
+
+  it("keeps the new status when onRun succeeds", async () => {
+    act(() => setViewerTarget(target({ sourcePath: "C:evidencea.txt" })));
+    render(
+      <ViewerToolbar
+        sourceCommands={[]}
+        markCommands={[mark("relevant")]}
+        ctx={ctx}
+        onRun={() => Promise.resolve()}
+        rowsForSource={{ reason: "없음", run: () => {} }}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("viewer-review-status-menu"));
+    fireEvent.click(document.querySelector('[data-command="viewer.mark.relevant"]') as HTMLElement);
+    await waitFor(() => expect(screen.getByTestId("viewer-review-status").textContent).toBe("관련 있음"));
   });
 });

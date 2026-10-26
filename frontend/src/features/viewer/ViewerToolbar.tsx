@@ -58,7 +58,8 @@ interface ViewerToolbarProps {
   sourceCommands: Command[];
   markCommands: Command[];
   ctx: CommandContext;
-  onRun: (command: Command) => void;
+  /** May return the command's promise; resolving `false` (or rejecting) = the command failed. */
+  onRun: (command: Command) => unknown;
   /** "같은 출처의 다른 행": its reason when it cannot run, and the action. */
   rowsForSource: { reason?: string; run: () => void };
 }
@@ -205,22 +206,41 @@ export function ViewerToolbar({
       void unmark(markAction);
       return;
     }
-    onRun(command);
-    if (markAction && !command.disabledReason?.(ctx)) {
-      const action = markAction;
-      setApplied((prev) => {
-        const base = prev.key === key ? prev : { actions: [], cleared: [] };
-        // Review statuses are exclusive; bookmark / include-in-report accumulate.
-        const kept = EXCLUSIVE.includes(action)
-          ? base.actions.filter((a) => !EXCLUSIVE.includes(a))
-          : base.actions;
-        return {
-          key,
-          actions: [...kept.filter((a) => a !== action), action],
-          cleared: base.cleared.filter((a) => a !== action),
-        };
-      });
+    if (!markAction || command.disabledReason?.(ctx)) {
+      void Promise.resolve(onRun(command)).catch(() => {});
+      return;
     }
+    void markApplied(command, markAction);
+  };
+
+  /**
+   * R-1: optimistic chip + rollback, exactly like the grid's R path (`gridCommands.runMark`):
+   * a failed review-batch (e.g. 403, toast "표시 실패") puts the previous status back.
+   */
+  const markApplied = async (command: Command, action: string) => {
+    const before = applied;
+    let optimistic: typeof applied | null = null;
+    setApplied((prev) => {
+      const base = prev.key === key ? prev : { actions: [], cleared: [] };
+      // Review statuses are exclusive; bookmark / include-in-report accumulate.
+      const kept = EXCLUSIVE.includes(action)
+        ? base.actions.filter((a) => !EXCLUSIVE.includes(a))
+        : base.actions;
+      optimistic = {
+        key,
+        actions: [...kept.filter((a) => a !== action), action],
+        cleared: base.cleared.filter((a) => a !== action),
+      };
+      return optimistic;
+    });
+    let ok: boolean;
+    try {
+      ok = (await onRun(command)) !== false;
+    } catch {
+      ok = false;
+    }
+    // Roll back only our own optimistic state (a later mark on this row wins).
+    if (!ok) setApplied((prev) => (prev === optimistic ? before : prev));
   };
 
   const saveNote = async (text: string) => {
