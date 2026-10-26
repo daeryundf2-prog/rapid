@@ -1,6 +1,6 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import type { ItemRow, RunDetail, RunSummary } from "../../api/runs";
+import type { ItemRow, RunSummary } from "../../api/runs";
 import { DisclosuresCard, StatusCard } from "./cards";
 import {
   capFlagsText,
@@ -17,6 +17,7 @@ import {
   stepLabelKo,
   utcOffsetText,
 } from "./disclosures";
+import type { RunDetail } from "./useDashboardData";
 
 afterEach(cleanup);
 
@@ -317,7 +318,17 @@ const SUBSET10_ISSUES: Array<[string, string]> = [
 /** A raw key (dotted / dashed / snake id) or an English word of two letters or more. */
 const RAW_TOKEN = /[a-z0-9]+(?:[._:-][a-z0-9]+)+|\b[A-Za-z]{2,}\b/g;
 /** Analyst-facing product names inside Korean labels (kindLabel), not raw keys. */
-const NAMES = new Set(["EVTX", "LNK", "Prefetch","APK", "macOS", "Linux", "Windows", "Android", "KakaoTalk"]);
+const NAMES = new Set([
+  "EVTX",
+  "LNK",
+  "Prefetch",
+  "APK",
+  "macOS",
+  "Linux",
+  "Windows",
+  "Android",
+  "KakaoTalk",
+]);
 
 describe("단계 상세 검증 이슈 in Korean (R-7)", () => {
   it("every run-subset10 issue reads without raw keys or English; the raw text stays as the tooltip", () => {

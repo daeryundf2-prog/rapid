@@ -306,10 +306,10 @@ export function StatusCard({
             <>
               <p className="dash-subhead">검증 이슈 {n(issues.length)}건</p>
               <ul className="dash-issues" aria-label="검증 이슈">
+                {/* The server message (raw flag keys, some English) reads in Korean; the raw text
+                    stays as the tooltip (R-7). */}
                 {issues.slice(0, 100).map((issue, index) => (
                   // biome-ignore lint/suspicious/noArrayIndexKey: static read-only list
-                  // The server message (raw flag keys, some English) reads in Korean; the raw text
-                  // stays as the tooltip (R-7).
                   <li key={index} title={String(issue.message ?? "")}>
                     <span className="dash-issue-step" title={String(issue.step ?? "")}>
                       {issue.step ? stepLabelKo(String(issue.step)) : ""}
