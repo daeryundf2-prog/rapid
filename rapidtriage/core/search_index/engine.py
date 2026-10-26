@@ -291,6 +291,18 @@ def ascii_lower(text: str) -> str:
     return "".join(char.lower() if char.isascii() else char for char in text)
 
 
+def contains_sql(column: str, literal: str) -> tuple[str, str]:
+    """``instr`` test of ``column`` containing ``literal`` ignoring ASCII case: ``(sql, param)``.
+
+    SQLite ``lower`` only folds A-Z, so a literal without ASCII letters (a Korean word) matches
+    the raw text exactly where it matches the lowered text -- and skips copying every row's text
+    through ``lower`` (about 20 % of a short-term scan, R7 P2).
+    """
+    if any("a" <= char <= "z" or "A" <= char <= "Z" for char in literal):
+        return f"instr(lower({column}), ?) > 0", ascii_lower(literal)
+    return f"instr({column}, ?) > 0", literal
+
+
 def like_escape(text: str) -> str:
     return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
@@ -485,8 +497,9 @@ class Compiler:
     def text_check(self, literal: str, extra: str = "", extra_params: Sequence[object] = ()) -> tuple[str, list[object]]:
         """Rows whose primary text contains ``literal`` (+ ``extra`` on ``{text}``)."""
         if self.mode == "row":
-            sql = "p.text IS NOT NULL AND instr(lower(p.text), ?) > 0"
-            params: list[object] = [ascii_lower(literal)]
+            test, param = contains_sql("p.text", literal)
+            sql = f"p.text IS NOT NULL AND {test}"
+            params: list[object] = [param]
             if extra:
                 sql += " AND " + extra.format(text="p.text")
                 params.extend(extra_params)
@@ -495,8 +508,9 @@ class Compiler:
             sql = "SELECT rowid FROM search_text WHERE text LIKE ?"
             params = [f"%{literal}%"]
         else:
-            sql = "SELECT doc_id FROM search_doc WHERE text IS NOT NULL AND instr(lower(text), ?) > 0"
-            params = [ascii_lower(literal)]
+            test, param = contains_sql("text", literal)
+            sql = f"SELECT doc_id FROM search_doc WHERE text IS NOT NULL AND {test}"
+            params = [param]
         if extra:
             sql += " AND " + extra.format(text="text")
             params.extend(extra_params)

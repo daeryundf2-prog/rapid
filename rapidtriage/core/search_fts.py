@@ -592,7 +592,7 @@ def _documents(connection: sqlite3.Connection, context: _SearchContext, scan: So
         if not matched:
             continue
         if result_index_by_path is None:
-            result_index_by_path = _docs_result_index(docs_path)
+            result_index_by_path = docs_result_index(docs_path)
         collector.add(
             {
                 "source": "documents",
@@ -611,7 +611,7 @@ def _documents(connection: sqlite3.Connection, context: _SearchContext, scan: So
             return
 
 
-def _docs_result_index(docs_path: Path | None) -> dict[str, int]:
+def docs_result_index(docs_path: Path | None) -> dict[str, int]:
     if docs_path is None or not docs_path.is_file():
         return {}
 
