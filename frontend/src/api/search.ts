@@ -61,11 +61,25 @@ export interface IndexSearchSpec {
   ocr?: boolean;
 }
 
+/**
+ * A keyword the v2 index cannot look up (search_index/query.py `SHORT_ONE_WARNING` /
+ * `SHORT_TWO_WARNING`): one character, or two characters of which one is ASCII (the bigram
+ * table holds non-ASCII pairs only). v2 then scans every body and is slower than v1
+ * (R7 S2 #9: `계` 0.85 vs 0.48 s, `ab` 1.33 vs 0.72 s).
+ */
+export function isUnindexedKeyword(keyword: string): boolean {
+  const chars = [...keyword.normalize("NFC").trim()];
+  if (chars.length === 1) return true;
+  return chars.length === 2 && chars.some((char) => (char.codePointAt(0) ?? 0) < 0x80);
+}
+
 /** Options the v2 console query answers like v1 (anything else: v1 `GET /search`). */
 export function indexCoversSearch(spec: IndexSearchSpec, extensions: readonly string[] | undefined): boolean {
   return (
     spec.mode === "exact" &&
     spec.keywords.length > 0 &&
+    // Only short keywords the index cannot serve: v1 is faster (a mix still uses v2, which warns).
+    !spec.keywords.every(isUnindexedKeyword) &&
     !spec.ocr &&
     !spec.hideKnownGood &&
     (spec.sources ?? []).length === 0 &&
