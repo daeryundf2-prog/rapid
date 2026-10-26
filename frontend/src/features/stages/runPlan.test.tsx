@@ -371,7 +371,7 @@ describe("처리 계획표 (RunPlanTable)", () => {
     ).toBe("대기 중인 태스크가 없습니다");
     view.unmount();
 
-    // A finished run: every control says the run is not running.
+    // A finished run (R7 C-G1): the plan is a record — no 모두 취소 / 마치기, no × column.
     renderWithClient(<RunPlanTable runId={RUN} plan={fixture({ run_status: "completed" })} />);
     for (const name of [
       "모두 취소",
@@ -379,10 +379,10 @@ describe("처리 계획표 (RunPlanTable)", () => {
       "이벤트 로그 그룹 취소",
       "웹 브라우저 그룹 건너뛰기",
     ]) {
-      expect(screen.getByRole("button", { name }).getAttribute("data-disabled-reason")).toBe(
-        "실행 중인 런이 아닙니다",
-      );
+      expect(screen.queryByRole("button", { name })).toBeNull();
     }
+    expect(document.querySelectorAll("button.run-plan-x")).toHaveLength(0);
+    expect(screen.queryByRole("columnheader", { name: "동작" })).toBeNull();
     expect(calls).toHaveLength(2);
   });
 
