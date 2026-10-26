@@ -163,6 +163,8 @@ async function jsonPaged(
   for (const key of ["scope", "inventory_count", "candidate_count"] as const) {
     if (key in payload) meta[key] = payload[key];
   }
+  // R-2: which times the files' time conditions / 수정 sort use ("ntfs" | "acquisition-copy" | "mixed").
+  if (endpoint === "files" && typeof payload.time_basis === "string") meta.time_basis = payload.time_basis;
   // Files pages list their large non-row sections instead of carrying them (R6 S3 follow-up):
   // `fetchFilesSection` loads one when its UI opens.
   if (Array.isArray(payload.sections_available)) meta.sections_available = payload.sections_available;

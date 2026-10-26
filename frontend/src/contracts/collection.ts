@@ -79,6 +79,10 @@ export interface ServerSortState extends ServerSort {
   /** 0..1 while building. */
   progress: number;
   reason?: string;
+  /** Files sort (R-9): every row lacks the column's value — the sort changes nothing. */
+  empty?: boolean;
+  /** Files sort (R-9): false = the server did not sort (unknown key …); `reason` says why. */
+  applied?: boolean;
 }
 
 export type ReviewStatus = "relevant" | "needs-review" | "excluded" | "include-in-report";
