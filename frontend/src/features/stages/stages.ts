@@ -31,7 +31,7 @@ export const STAGE_DEFS: Record<Stage, StageDef> = {
     icon: "inbox",
     shortcut: "Alt+1",
     home: "intake",
-    panelLabel: "탐색 트리",
+    panelLabel: "접수 패널",
   },
   process: {
     id: "process",

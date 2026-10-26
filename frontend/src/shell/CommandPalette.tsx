@@ -1,6 +1,6 @@
 import { type KeyboardEvent, useId, useMemo, useRef, useState } from "react";
 import { announce, useEscape, useFocusTrap } from "../a11y";
-import { focusGridWhenReady } from "../commands/builtin";
+import { focusGridWhenReady, NO_RUN_REASON } from "../commands/builtin";
 import { fuzzyMatchIndexes, fuzzyScore } from "../commands/fuzzy";
 import { disabledReasonOf, runCommand, useCommandContext, useCommands } from "../commands/registry";
 import type { Command, CommandGroup } from "../contracts/command";
@@ -51,18 +51,25 @@ interface PaletteGroup {
   items: PaletteItem[];
 }
 
+/** Older spellings of "no case open" some commands still return; the palette shows one sentence. */
+const NO_CASE_VARIANTS = new Set(["열린 케이스가 없습니다", "열린 케이스가 없습니다."]);
+
 export function buildPaletteGroups(
   commands: readonly Command[],
   query: string,
   reasonOf: (command: Command) => string | undefined,
   extra: PaletteItem[] = [],
+  options: { caseOpen?: boolean } = {},
 ): PaletteGroup[] {
   const items: PaletteItem[] = [];
   // Two commands with the same label in one group lead to the same place (e.g. the
   // shell's navigate.* and the tree's tree.goto.*): show it once (plan U2).
   const seen = new Set<string>();
+  const caseOpen = options.caseOpen ?? true;
   for (const command of commands) {
     if (HIDDEN_IN_PALETTE.has(command.id)) continue;
+    // No case open (C-G11): the hundreds of 이동 entries all say "케이스를 먼저 선택하세요" — hidden.
+    if (!caseOpen && command.group === "navigate") continue;
     const dedupeKey = `${command.group}\u0000${command.label}`;
     if (seen.has(dedupeKey)) continue;
     seen.add(dedupeKey);
@@ -74,7 +81,7 @@ export function buildPaletteGroups(
       group: command.group,
       icon: command.icon,
       shortcut: command.shortcut,
-      disabledReason: reasonOf(command),
+      disabledReason: paletteReason(reasonOf(command)),
       score,
       perform: () => {
         void runCommand(command.id);
@@ -91,6 +98,10 @@ export function buildPaletteGroups(
   // Free-text actions come last so Enter on a matching command never turns into a search.
   if (extra.length) groups.push({ id: "free-text", label: "전체 검색", items: extra });
   return groups;
+}
+
+function paletteReason(reason: string | undefined): string | undefined {
+  return reason && NO_CASE_VARIANTS.has(reason) ? NO_RUN_REASON : reason;
 }
 
 /** The label with the characters the query matched in bold (review #12); plain text otherwise. */
@@ -154,7 +165,7 @@ function PaletteDialog() {
             label: `‘${trimmed}’ 전체 검색`,
             group: "search",
             icon: "search",
-            disabledReason: ctx.runId ? undefined : "케이스를 먼저 선택하세요",
+            disabledReason: ctx.runId ? undefined : NO_RUN_REASON,
             score: Number.POSITIVE_INFINITY,
             perform: () => {
               openCollection("search", { q: trimmed });
@@ -163,7 +174,9 @@ function PaletteDialog() {
           },
         ]
       : [];
-    return buildPaletteGroups(commands, trimmed, (c) => disabledReasonOf(c, ctx), extra);
+    return buildPaletteGroups(commands, trimmed, (c) => disabledReasonOf(c, ctx), extra, {
+      caseOpen: Boolean(ctx.runId),
+    });
   }, [commands, ctx, query, openCollection]);
 
   const flat = useMemo(() => groups.flatMap((g) => g.items), [groups]);

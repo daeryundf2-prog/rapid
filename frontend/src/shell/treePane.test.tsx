@@ -69,7 +69,7 @@ describe("left panel, wide layouts", () => {
     // Folded, not unmounted: the tree keeps its state, the heading is hidden.
     expect(screen.getByTestId("tree-region").hidden).toBe(true);
     const expand = document.getElementById(TREE_EXPAND_ID);
-    expect(expand?.getAttribute("aria-label")).toBe("탐색 패널 펼치기");
+    expect(expand?.getAttribute("aria-label")).toBe("왼쪽 패널 펼치기");
     fireEvent.click(expand as HTMLElement);
     expect(useAppStore.getState().treeCollapsed).toBe(false);
     expect(screen.queryByTestId("tree-rail")).toBeNull();
@@ -91,10 +91,10 @@ describe("left panel, wide layouts", () => {
   it("the stage rail toggle says what it will do", () => {
     render(<StageRail />);
     const toggle = screen.getByTestId("tree-toggle");
-    expect(toggle.getAttribute("aria-label")).toBe("탐색 패널 접기");
+    expect(toggle.getAttribute("aria-label")).toBe("왼쪽 패널 접기");
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
     fireEvent.click(toggle);
-    expect(toggle.getAttribute("aria-label")).toBe("탐색 패널 펼치기");
+    expect(toggle.getAttribute("aria-label")).toBe("왼쪽 패널 펼치기");
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
   });
 
@@ -120,7 +120,7 @@ describe("left panel drawer (< 900px)", () => {
     const drawer = screen.getByTestId("tree-drawer");
     expect(drawer.hidden).toBe(true);
     const toggle = screen.getByTestId("tree-toggle");
-    expect(toggle.getAttribute("aria-label")).toBe("탐색 패널 열기");
+    expect(toggle.getAttribute("aria-label")).toBe("왼쪽 패널 열기");
     fireEvent.click(toggle);
     expect(useAppStore.getState().treeDrawerOpen).toBe(true);
     expect(drawer.hidden).toBe(false);
@@ -185,7 +185,7 @@ describe("drawer focus (UX-round review)", () => {
     // The close button does the same.
     fireEvent.click(screen.getByTestId("tree-toggle"));
     expect(document.activeElement?.id).toBe(STAGE_HEADING_ID);
-    fireEvent.click(screen.getByRole("button", { name: "탐색 패널 닫기 (Esc)" }));
+    fireEvent.click(screen.getByRole("button", { name: "왼쪽 패널 닫기 (Esc)" }));
     expect(document.activeElement).toBe(screen.getByTestId("tree-toggle"));
   });
 

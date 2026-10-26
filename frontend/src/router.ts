@@ -83,7 +83,12 @@ export function stageOfCollection(collection: CollectionId | null | undefined): 
   }
 }
 
-export function stageOf(route: Pick<Route, "collection">): Stage {
+/**
+ * The stage of a route: its collection's, except the 검토 stage's own 특이사항 list (r7 L4, C-R2) —
+ * the flagged artifact rows shown INSIDE 검토 (`inReview`), so the analyst never leaves the stage.
+ */
+export function stageOf(route: Pick<Route, "collection" | "inReview">): Stage {
+  if (route.inReview && route.collection === "artifacts") return "review";
   return stageOfCollection(route.collection);
 }
 
@@ -118,6 +123,11 @@ export interface Route {
   row?: RowRef;
   /** Viewer mode for `row`. */
   mode?: ViewerMode;
+  /**
+   * 검토 stage's 특이사항 node (r7 L4): flagged artifact rows (`collection: "artifacts"` + `flagGrade`)
+   * listed inside the 검토 stage, URL `#/case/{run}/review/flags?flag_grade=B`.
+   */
+  inReview?: boolean;
   /** Filter bar (X19): time range start/end (ISO or `YYYY-MM-DDTHH:mm`), URL `from`/`to`. */
   from?: string;
   to?: string;
@@ -325,8 +335,13 @@ export function parseHash(hash: string): Route {
       route.collection = "process";
       if (segments[3]) route.kind = segments[3];
     } else if (head === "review") {
-      route.collection = "review";
-      sub = segments[3] === "board" ? segments[4] : segments[3];
+      if (segments[3] === "flags") {
+        route.collection = "artifacts";
+        route.inReview = true;
+      } else {
+        route.collection = "review";
+        sub = segments[3] === "board" ? segments[4] : segments[3];
+      }
     } else if (head === "report") {
       route.collection = "outputs";
     } else if (head === "explore") {
@@ -451,7 +466,10 @@ export function serializeRoute(route: Route): string {
   const collection = route.collection ?? "intake";
   const base = `#/case/${encodeURIComponent(route.runId)}`;
   let path: string;
-  switch (stageOfCollection(collection)) {
+  switch (route.inReview && collection === "artifacts" ? "review-flags" : stageOfCollection(collection)) {
+    case "review-flags":
+      path = `${base}/review/flags`;
+      break;
     case "intake":
       path = `${base}/intake`;
       break;
@@ -482,8 +500,12 @@ export function serializeRoute(route: Route): string {
   }
   if (collection === "analysis" && route.analysisId) query.push(`id=${encodeURIComponent(route.analysisId)}`);
   if (route.q) query.push(`q=${encodeURIComponent(route.q)}`);
-  if (route.row) query.push(`row=${encodeRowRef(route.row)}`);
-  if (route.row && route.mode) query.push(`mode=${route.mode}`);
+  // `row=` / `mode=` belong to the viewer: a stage without one (접수·처리·보고) drops them from the
+  // hash (r7 L4, C-G17) — the stage memory still returns the row when the analyst goes back.
+  const viewerRow =
+    route.row && stageHasViewer(stageOf({ collection, inReview: route.inReview })) ? route.row : undefined;
+  if (viewerRow) query.push(`row=${encodeRowRef(viewerRow)}`);
+  if (viewerRow && route.mode) query.push(`mode=${route.mode}`);
   if (route.from) query.push(`from=${encodeURIComponent(route.from)}`);
   if (route.to) query.push(`to=${encodeURIComponent(route.to)}`);
   if (route.statuses?.length) query.push(`status=${route.statuses.join(",")}`);
@@ -531,6 +553,7 @@ export function collectionChanged(a: Route, b: Route): boolean {
   return (
     a.runId !== b.runId ||
     a.collection !== b.collection ||
+    Boolean(a.inReview) !== Boolean(b.inReview) ||
     a.kind !== b.kind ||
     a.status !== b.status ||
     a.category !== b.category ||

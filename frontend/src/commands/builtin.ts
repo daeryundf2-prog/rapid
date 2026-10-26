@@ -12,6 +12,7 @@ import { controlRunPlan, runPlanQueryKey } from "../api/runPlan";
 import { normalizeRunStatus, RETRYABLE_RUN_STATUSES } from "../api/runs";
 import { RUNS_QUERY_KEY, type RunPlanCountsCompact, type RunWithProgress } from "../api/runsProgress";
 import { COLLECTION_NODES, runDisplayName } from "../app/collections";
+import { useToastStore } from "../components/toastStore";
 import type { Command, CommandContext } from "../contracts/command";
 import { conditionsCommand } from "../features/filters/conditionPanel";
 import { useViewPrefs } from "../features/review/viewPrefs";
@@ -279,6 +280,17 @@ export function focusGridWhenReady(
   nextFrame(tick);
 }
 
+function anyOverlayOpen(s: ReturnType<typeof useAppStore.getState>): boolean {
+  return s.paletteOpen || s.helpOpen || s.runDialogOpen || s.treeDrawerOpen || s.viewerDrawerOpen;
+}
+
+/** A modal dialog or an open menu owns Esc; the toast stack must not react to it. */
+function modalDialogOpen(): boolean {
+  return (
+    typeof document !== "undefined" && document.querySelector('[aria-modal="true"], [role="menu"]') !== null
+  );
+}
+
 export function appCommands(): Command[] {
   const store = useAppStore.getState;
   return [
@@ -309,11 +321,16 @@ export function appCommands(): Command[] {
       icon: "close",
       disabledReason: () => {
         const s = store();
-        return s.paletteOpen || s.helpOpen || s.runDialogOpen || s.treeDrawerOpen || s.viewerDrawerOpen
+        return anyOverlayOpen(s) || (!modalDialogOpen() && useToastStore.getState().toasts.length > 0)
           ? undefined
           : "닫을 창이 없습니다";
       },
       run: () => {
+        // No overlay and no dialog: Esc closes the newest toast (r7 L4, C-G12) — "알림 닫기 (Esc)".
+        if (!anyOverlayOpen(store())) {
+          if (!modalDialogOpen()) useToastStore.getState().dismissNewest();
+          return;
+        }
         const wasDrawer =
           (store().treeDrawerOpen || store().viewerDrawerOpen) &&
           !store().paletteOpen &&
@@ -529,7 +546,7 @@ export function caseCommands(queryClient: QueryClient): Command[] {
     },
     {
       id: "view.tree",
-      label: "탐색 패널 접기/펼치기",
+      label: "패널 접기/펼치기",
       group: "app",
       icon: "sidebar",
       disabledReason: needsRun,

@@ -20,8 +20,10 @@ import {
 import { CommandButton } from "../commands/CommandButton";
 import { ToastRegion } from "../components/ToastRegion";
 import { Landing } from "../features/case/Landing";
+import { WriteConfirmHost } from "../features/case/WriteConfirm";
 import { ReviewToolsHost } from "../features/review/ReviewToolsHost";
 import { readClassicLayout, useViewPrefs, writeClassicLayout } from "../features/review/viewPrefs";
+import { IntakePanel } from "../features/stages/IntakePanel";
 import { StageRail } from "../features/stages/StageRail";
 import { STAGE_DEFS, STAGE_HEADING_ID } from "../features/stages/stages";
 import { focusPopout, returnViewerFromPopout, usePopoutHost } from "../features/viewer/popout/host";
@@ -87,13 +89,19 @@ function TreePane({ hidden = false }: { hidden?: boolean }) {
   // The left panel follows the stage (console-ia §3): domain tree, runs, review lists, exports.
   const label = useAppStore((s) => STAGE_DEFS[stageOf(s.route)].panelLabel);
   const stage = useAppStore((s) => (s.route.runId ? STAGE_DEFS[stageOf(s.route)].label : ""));
+  const intake = useAppStore((s) => Boolean(s.route.runId) && stageOf(s.route) === "intake");
   return (
     <nav className="pane-frame" aria-label={label} data-testid="tree-region" hidden={hidden}>
       {/* Stage switches (rail / Alt+1..5) land focus here (console-ia §3, Q-IA-1). */}
       <h1 id={STAGE_HEADING_ID} tabIndex={-1} className="stage-heading">
         {stage || "케이스"}
       </h1>
-      <Slot name="tree" fallback={<p className="pane-empty">탐색 트리를 불러오는 중…</p>} />
+      {/* 접수 has its own left panel (r7 L4, C-I3); every other stage the stage's tree slot. */}
+      {intake ? (
+        <IntakePanel />
+      ) : (
+        <Slot name="tree" fallback={<p className="pane-empty">탐색 트리를 불러오는 중…</p>} />
+      )}
     </nav>
   );
 }
@@ -106,9 +114,9 @@ function TreeRail() {
         type="button"
         id={TREE_EXPAND_ID}
         className="viewer-rail-button"
-        aria-label="탐색 패널 펼치기"
+        aria-label="왼쪽 패널 펼치기"
         aria-expanded={false}
-        title="탐색 패널 펼치기"
+        title="왼쪽 패널 펼치기"
         onClick={() => toggleTreePane()}
       >
         <span className="viewer-rail-icon">
@@ -229,7 +237,7 @@ function TreeDrawer() {
         <button
           type="button"
           className="drawer-scrim"
-          aria-label="탐색 패널 닫기"
+          aria-label="왼쪽 패널 닫기"
           tabIndex={-1}
           onClick={close}
         />
@@ -247,7 +255,7 @@ function TreeDrawer() {
           <button
             type="button"
             className="button ghost icon-only"
-            aria-label="탐색 패널 닫기 (Esc)"
+            aria-label="왼쪽 패널 닫기 (Esc)"
             onClick={close}
           >
             <Icon name="close" />
@@ -471,7 +479,8 @@ function NarrowPanes({ treeDrawer }: { treeDrawer: boolean }) {
   useEscape(close, open);
   // Like the tree drawer (UX-round review): trapped while open; closing returns focus to where it
   // was before (e.g. the row), else to the 뷰어 열기 handle, else to the list.
-  useFocusTrap(drawerRef, { active: open });
+  // Opening lands on the drawer's 닫기 button (review P8: it used to land on the metadata block).
+  useFocusTrap(drawerRef, { active: open, initialFocus: "[data-viewer-drawer-close]" });
   useDrawerReturnFocus(open, drawerRef, () => document.querySelector<HTMLElement>(VIEWER_OPEN_SELECTOR));
   return (
     <>
@@ -507,6 +516,7 @@ function NarrowPanes({ treeDrawer }: { treeDrawer: boolean }) {
             type="button"
             className="button ghost icon-only"
             aria-label="뷰어 닫기 (Esc)"
+            data-viewer-drawer-close=""
             onClick={close}
           >
             <Icon name="close" />
@@ -623,6 +633,7 @@ export function Layout() {
       </div>
       <StatusBar />
       <ToastRegion />
+      <WriteConfirmHost />
       <CommandPalette />
       <HelpOverlay />
       <ReviewToolsHost />
