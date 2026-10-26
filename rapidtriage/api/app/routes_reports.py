@@ -55,6 +55,10 @@ from .search import (
 )
 
 
+# ``POST /case-report`` export formats, in the order its ``written`` list names them.
+CASE_REPORT_FORMATS = ("md", "html", "docx", "pdf", "manifest")
+
+
 def build_reports_router(
     store: RunJobStore,
 ) -> APIRouter:
@@ -87,6 +91,44 @@ def build_reports_router(
         write_json_file(manifest_path, manifest)
         write_submission_audit(store, run_id, manifest_path, include_all=include_all, max_items=max_items)
         return manifest
+
+
+    @router.post("/api/runs/{run_id}/submission-manifest")
+    def create_submission_manifest(
+        run_id: str,
+        include_all: bool = False,
+        max_items: int = Query(500, ge=1, le=5000),
+    ) -> dict[str, object]:
+        """Write the submission manifest (+ one audit record) into the run folder once per request.
+
+        Like ``POST /validation-package``: the response names every file written (``written``)
+        and a read-only ``download_url`` (``GET /submission-manifest/saved``) so the console can
+        show and open the saved manifest without building and writing it again (R7 S1 re-review
+        R-4). ``GET /submission-manifest`` and ``/file`` keep their legacy write-on-read behaviour.
+        """
+        manifest_path = default_submission_manifest_path(store, run_id)
+        manifest = build_run_submission_manifest(store, run_id, include_all=include_all, max_items=max_items)
+        write_json_file(manifest_path, manifest)
+        write_submission_audit(store, run_id, manifest_path, include_all=include_all, max_items=max_items)
+        audit_path = audit_path_for(manifest_path)
+        return {
+            "command": "run.submission-manifest.write",
+            "run_id": run_id,
+            "manifest_path": str(manifest_path),
+            "audit": str(audit_path),
+            "written": [str(manifest_path), str(audit_path)],
+            "download_url": f"/api/runs/{run_id}/submission-manifest/saved",
+            "manifest": manifest,
+        }
+
+
+    @router.get("/api/runs/{run_id}/submission-manifest/saved")
+    def open_saved_submission_manifest(run_id: str) -> FileResponse:
+        """The manifest the last export wrote, read-only (404 until one was written)."""
+        manifest_path = default_submission_manifest_path(store, run_id)
+        if not manifest_path.is_file():
+            raise HTTPException(status_code=404, detail="저장된 제출 매니페스트가 없습니다. 먼저 내보내기를 실행하세요")
+        return FileResponse(manifest_path, filename=manifest_path.name, media_type="application/json")
 
 
     @router.get("/api/runs/{run_id}/submission-manifest/file")
@@ -155,10 +197,18 @@ def build_reports_router(
         markdown = build_run_case_report(store, run_id, request)
         exports = write_case_report_exports(markdown, report_path)
         write_case_report_audit(store, run_id, report_path, request)
+        audit_path = audit_path_for(report_path)
+        # Every file this request wrote (R7 S1 re-review R-4): md, html, docx, pdf, export manifest, audit.
+        formats = [name for name in CASE_REPORT_FORMATS if name in exports]
         return {
             "report_path": str(report_path),
             "exports": exports,
-            "audit": str(audit_path_for(report_path)),
+            "audit": str(audit_path),
+            "written": [*(exports[name] for name in formats), str(audit_path)],
+            "written_files": [
+                *({"format": name, "path": exports[name], "download_url": f"/api/runs/{run_id}/case-report/file/{name}"} for name in formats),
+                {"format": "audit", "path": str(audit_path), "download_url": None},
+            ],
             "markdown": markdown,
         }
 
