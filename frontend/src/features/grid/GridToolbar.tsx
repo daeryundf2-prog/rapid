@@ -364,7 +364,11 @@ export function GridFooter(props: GridFooterProps) {
       <span>
         {props.pageCount !== null ? `페이지 ${props.page}/${formatCount(props.pageCount)}` : "페이지 -"}
       </span>
-      <span data-testid="grid-footer-total">
+      <span
+        data-testid="grid-footer-total"
+        // The search engine and its time are diagnostics, not a finding: tooltip only (R7 L3, C-D16).
+        title={props.backend ? `${backendLabel(props.backend) || "조회"} · ${seconds}` : undefined}
+      >
         총{" "}
         {props.total !== null ? `${formatCount(props.total)}건` : props.loading ? "세는 중…" : "알 수 없음"}
       </span>
@@ -374,11 +378,6 @@ export function GridFooter(props: GridFooterProps) {
       {props.loading ? (
         <span className="grid-note" data-testid="grid-footer-loading">
           {props.loadingText ?? "불러오는 중…"}
-        </span>
-      ) : null}
-      {props.backend ? (
-        <span>
-          {backendLabel(props.backend)} {seconds}
         </span>
       ) : null}
       {props.filtering ? (

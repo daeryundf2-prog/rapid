@@ -410,7 +410,8 @@ describe("DataGrid filter", () => {
   it("shows an empty message when nothing matches", async () => {
     await renderFiles(50);
     fireEvent.change(screen.getByPlaceholderText(/필터/), { target: { value: "zzzz-no-match" } });
-    await waitFor(() => expect(screen.getByText(/조건에 맞는 행이 없습니다/)).toBeTruthy());
+    // The empty state names the filter text (R7 L3, C-D16).
+    await waitFor(() => expect(screen.getByText(/'zzzz-no-match'에 맞는 행이 없습니다/)).toBeTruthy());
   });
 });
 
