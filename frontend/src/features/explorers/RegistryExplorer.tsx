@@ -30,6 +30,7 @@ import { writeClipboard } from "../viewer/commands";
 import { errorText } from "../viewer/useAsync";
 import { type ExplorerChildPage, ExplorerTree, type ExplorerTreeItem } from "./ExplorerTree";
 import "./explorers.css";
+import { typeDisplayLabel } from "../grid/valueLabels";
 
 export const REGISTRY_TREE_PAGE = 200;
 const SEP = "\u0000";
@@ -160,11 +161,15 @@ function LinkedRows({ data, onJump }: { data: RegistryValues; onJump: (row: Regi
               type="button"
               className="view-link"
               onClick={() => onJump(row)}
-              aria-label={`${row.label} 행 열기 (${row.artifact_type})`}
+              aria-label={`${row.label} 행 열기 (${typeDisplayLabel(row.artifact_type)})`}
             >
               {row.label}
             </button>
-            <span className="explorer-muted"> {row.artifact_type}</span>
+            {/* The row's type by its Korean name (C-E3); the raw type id is the tooltip. */}
+            <span className="explorer-muted" title={row.artifact_type}>
+              {" "}
+              {typeDisplayLabel(row.artifact_type)}
+            </span>
           </li>
         ))}
       </ul>

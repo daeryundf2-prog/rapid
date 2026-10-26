@@ -86,6 +86,70 @@ const TEXT_STATUS: Record<string, string> = {
 
 const n = (value: number) => value.toLocaleString("ko-KR");
 
+/**
+ * Korean reasons of the `caps` flags (core/run summary `disclosures.caps[step]`; C-I2): what is not
+ * exhaustive in the step's output. The raw flag keys stay in `detail` (tooltip); an unknown flag
+ * reads "기타 상한(N)" — never the key itself.
+ */
+const CAP_FLAG_KO: ReadonlyArray<[RegExp, string | ((match: RegExpExecArray) => string)]> = [
+  [/^summary\.size_caps\.truncated$/, "문서 크기 상한 초과"],
+  [/^docs:too-large$/, "크기 초과 문서 본문 미추출"],
+  [/^docs:binary-rejected$/, "비인쇄 문자 비율 초과 문서 미색인"],
+  [/hash_cache_manifest\.entries_truncated$/, "해시 캐시 항목 목록 절단"],
+  [/hash_cache_manifest\.events_truncated$/, "해시 캐시 이벤트 목록 절단"],
+  [/fuzzy_text_duplicate(s_truncated|_profile\.truncated)$/, "유사 문서(퍼지 중복) 목록 절단"],
+  [/^row-truncation:(.+)$/, (m) => `행 절단(${kindLabel(m[1] ?? "")})`],
+  [/^scan-coverage:(.+)$/, (m) => `스캔 범위 제한(${kindLabel(m[1] ?? "")})`],
+  [/^file-count-cap:(.+)$/, (m) => `파일 수 상한(${kindLabel(m[1] ?? "")})`],
+  [/^max_[a-z_]+$/, "최대치 상한 도달"],
+  [/(^|[._:])truncated$|_truncated$/, "목록 절단"],
+];
+
+/** Korean reason of one cap flag, null when unknown. */
+export function capFlagLabel(flag: string): string | null {
+  for (const [pattern, label] of CAP_FLAG_KO) {
+    const match = pattern.exec(flag);
+    if (match) return typeof label === "string" ? label : label(match);
+  }
+  return null;
+}
+
+/** Distinct Korean reasons of a step's cap flags ("문서 크기 상한 초과, 크기 초과 문서 본문 미추출"). */
+export function capFlagsText(flags: readonly string[]): string {
+  const reasons: string[] = [];
+  let unknown = 0;
+  for (const flag of flags) {
+    const label = capFlagLabel(flag);
+    if (!label) unknown += 1;
+    else if (!reasons.includes(label)) reasons.push(label);
+  }
+  if (unknown) reasons.push(`기타 상한 ${n(unknown)}건`);
+  return reasons.join(", ");
+}
+
+/**
+ * Korean text of a /problems item message (server warnings: some Korean with raw keys in brackets,
+ * some English): raw flag lists move out of the visible text (the item keeps them as the tooltip).
+ */
+export function problemMessageKo(message: string): string {
+  let text = message.trim();
+  const noRows = /^No (.+?) artifact rows were collected\.?$/.exec(text);
+  if (noRows?.[1]) return `${kindLabel(noRows[1])}: 수집된 행 없음`;
+  if (/^extraction-disabled-by-default\b/.test(text))
+    return "기본 설정으로 추출하지 않음 — 후보를 복사·해시하려면 추출을 켜고 다시 실행하세요";
+  // "<kind>: …" → "<수집기 이름>: …"
+  const head = /^([a-z0-9][a-z0-9-]*):\s*(.*)$/s.exec(text);
+  if (head?.[1] && head[2] !== undefined) text = `${kindLabel(head[1])}: ${head[2]}`;
+  // "…: summary.size_caps.truncated, …" (cap flags) → Korean reasons.
+  const caps = /^(.*?:\s*)([a-z0-9_.:,\s-]+)$/.exec(text);
+  if (caps?.[1] && caps[2] && /[._:-]/.test(caps[2])) {
+    const flags = caps[2].split(/,\s*/).filter(Boolean);
+    if (flags.every((flag) => /^[a-z0-9_.:-]+$/.test(flag))) text = `${caps[1]}${capFlagsText(flags)}`;
+  }
+  // "(jumplist-automatic.ole_streams_truncated 10행, …)" / "(binary-rejected)" → dropped (tooltip).
+  return text.replace(/\s*\([a-z0-9_.,\s-]*[a-z][a-z0-9_.,\s행-]*\)/g, "").trim();
+}
+
 function num(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
@@ -278,7 +342,9 @@ export function disclosureItems(summary: RunSummary | undefined): DisclosureItem
       ? {
           id: "caps",
           label: "상한·절단",
-          text: `${caps.length}단계 결과가 전수가 아닙니다: ${caps.map(([step]) => stepLabelKo(step)).join(", ")}`,
+          text: `${caps.length}단계 결과가 전수가 아닙니다: ${caps
+            .map(([step, flags]) => `${stepLabelKo(step)}(${capFlagsText(flags)})`)
+            .join(", ")}`,
           tone: "warn",
           detail: caps
             .map(([step, flags]) => `${step}: ${flags.slice(0, 3).join(", ")}${flags.length > 3 ? " …" : ""}`)

@@ -29,6 +29,7 @@ import { familyForType } from "../flags/catalog";
 import { GRADE_NAME, rowFlags } from "../flags/flags";
 import { useSelection, useViewerTarget } from "../grid/adapter";
 import { REVIEW_LABELS } from "../grid/columns/common";
+import { rowSummaryFacts } from "../grid/columns/families";
 import { buildViewerTarget, citationText, copyText } from "../grid/gridCommands";
 import { applyReviewAction, optimisticPatch, storeNotice } from "../grid/reviewActions";
 import { registerRowSource } from "../review/rowSource";
@@ -84,7 +85,14 @@ export function cardModel(row: GridRow, tz: string): CardModel {
   const typeText = type ? (artifactTypeLabel(type) ?? type) : "";
   const family = familyForType(type)?.label ?? (row.ref.kind ? kindLabel(row.ref.kind) : "");
   const subtitle = [typeText, family && family !== typeText ? family : ""].filter(Boolean).join(" — ");
-  const time = row.timestamp ? formatGridTime(row.timestamp, tz) : "";
+  // C-V3: a row whose title is only its container file ("History") is titled by its family's main
+  // fact (the visited URL, the executable …), and a row without a timestamp shows its family's
+  // time fact, so the card's first line is the item itself.
+  const container = (row.sourcePath ?? "").split(/[\\/]/).pop() ?? "";
+  const summary = rowSummaryFacts(row);
+  const lead = summary.facts.find((fact) => fact.value && fact.value !== container)?.value ?? "";
+  const ownTitle = row.title && row.title !== container ? row.title : "";
+  const time = row.timestamp ? formatGridTime(row.timestamp, tz) : (summary.time?.value ?? "");
   const [date = "", clock = ""] = time.split(" ");
   const chips: CardModel["chips"] = [];
   for (const flag of rowFlags(row).slice(0, MAX_CHIPS)) {
@@ -99,7 +107,7 @@ export function cardModel(row: GridRow, tz: string): CardModel {
     chips.push({ id: `review:${row.reviewStatus}`, label: REVIEW_LABELS[row.reviewStatus], tone: "review" });
   for (const tag of row.tags.slice(0, MAX_CHIPS)) chips.push({ id: `tag:${tag}`, label: tag, tone: "tag" });
   return {
-    title: row.title || (row.sourcePath ?? "").split(/[\\/]/).pop() || "(제목 없음)",
+    title: ownTitle || lead || row.title || container || "(제목 없음)",
     subtitle,
     time,
     date,

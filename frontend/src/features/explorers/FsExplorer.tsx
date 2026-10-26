@@ -80,12 +80,24 @@ function useFsLevel(runId: string | null, scope: FsScope, path: string | undefin
   });
 }
 
+/** Korean names of the special nodes (C-E2): the route's `special=` id is never shown as text. */
+export const FS_SPECIAL_LABELS: Readonly<Record<string, string>> = {
+  orphan: "고아 파일",
+  unallocated: "미할당 공간",
+  slack: "슬랙 공간",
+};
+
+/** Korean name of a special node id (the server's label when it has one, else the table's). */
+export function fsSpecialLabel(id: string, serverLabel?: string | null): string {
+  return FS_SPECIAL_LABELS[id] ?? serverLabel ?? "특수 노드";
+}
+
 function specialItem(node: FsSpecialNode): ExplorerTreeItem {
   const source =
     node.source === "files" ? "파일 목록" : node.source === "ntfs-meta" ? "NTFS 메타 분석" : "카빙 분석";
   return {
     id: `${SPECIAL_PREFIX}${node.id}`,
-    label: node.label,
+    label: fsSpecialLabel(node.id, node.label),
     badge: n(node.count),
     description: `${n(node.count)}건, 출처 ${source}`,
     hasChildren: false,
@@ -267,7 +279,7 @@ export function FsExplorerPane() {
           <ul>
             {hidden.map((node) => (
               <li key={node.id}>
-                <strong>{node.label}</strong> — {node.reason}
+                <strong>{fsSpecialLabel(node.id, node.label)}</strong> — {node.reason}
               </li>
             ))}
           </ul>
@@ -297,7 +309,7 @@ export function FsExplorerHeader() {
     return (
       <div className="explorer-header" data-testid="fs-explorer-header">
         <p className="explorer-crumbs-text">
-          특수 노드: <strong>{node?.label ?? route.special}</strong>
+          특수 노드: <strong>{fsSpecialLabel(route.special, node?.label)}</strong>
           {node ? ` · ${n(node.count)}건` : ""}
         </p>
         {closeButton}

@@ -727,10 +727,8 @@ rules:
   label_ko: 의심 경로에서 실행
   rationale_ko: '실행 흔적의 전체 경로가 Temp/Downloads/AppData(Roaming)/Public/휴지통/이동식 드라이브: 드롭·포터블 악성 도구(AppData Local의 사용자별 설치 앱은 제외).'
   false_positive_ko: 설치 프로그램, 사용자별 설치 앱(제외 목록 참고).
-  sources: &id001
+  sources:
   - https://www.sans.org/blog/digital-forensics-application-execution/
-  - https://belkasoft.com/windows-prefetch-forensics
-  - https://www.magnetforensics.com/blog/srum-forensic-analysis-of-windows-system-resource-utilization-monitor/
   - https://docs.velociraptor.app/exchange/artifacts/pages/evidenceofexecution/
   version: 1
   status: verified
@@ -746,7 +744,9 @@ rules:
   label_ko: 짧은 시간 반복 실행
   rationale_ko: 'Prefetch 최근 실행 시각 8개가 한 시간 안에 몰림: 단발성 도구의 반복 실행(Windows 구성 요소 제외).'
   false_positive_ko: 스케줄 작업, 자동 재시작.
-  sources: *id001
+  sources:
+  - https://belkasoft.com/windows-prefetch-forensics
+  - https://www.sans.org/blog/digital-forensics-application-execution/
   version: 1
   status: provisional
   params:
@@ -758,7 +758,9 @@ rules:
   label_ko: 시스템 바이너리 이름 위장
   rationale_ko: 'svchost.exe·lsass.exe 같은 시스템 파일 이름이 System32/SysWOW64 밖에서 실행: 마스커레이딩.'
   false_positive_ko: 동명 정상 복사본(백업·설치 매체).
-  sources: *id001
+  sources:
+  - https://attack.mitre.org/techniques/T1036/005/
+  - https://www.sans.org/blog/digital-forensics-application-execution/
   version: 1
   status: verified
   params: {}
@@ -768,7 +770,10 @@ rules:
   label_ko: 삭제된 실행 파일의 실행 흔적
   rationale_ko: 'Prefetch/Amcache/BAM에 남은 실행 파일이 같은 폴더의 다른 파일은 있는데 파일 목록에 없음: 실행 후 삭제(증거 인멸).'
   false_positive_ko: 삭제된 설치기, 수집 범위 밖.
-  sources: *id001
+  sources:
+  - https://www.sans.org/blog/digital-forensics-application-execution/
+  - https://belkasoft.com/windows-prefetch-forensics
+  - https://attack.mitre.org/techniques/T1070/004/
   version: 1
   status: verified
   params: {}
@@ -778,7 +783,9 @@ rules:
   label_ko: ShimCache에만 있는 실행 파일
   rationale_ko: 'ShimCache에는 있으나 Prefetch/Amcache에 같은 이름이 없음: 프리페치 비활성·삭제 정황.'
   false_positive_ko: Server는 Prefetch 기본 비활성, ShimCache는 실행이 아닌 존재 증거.
-  sources: *id001
+  sources:
+  - https://www.sans.org/blog/digital-forensics-application-execution/
+  - https://docs.velociraptor.app/exchange/artifacts/pages/evidenceofexecution/
   version: 1
   status: provisional
   params: {}
@@ -788,7 +795,9 @@ rules:
   label_ko: SRUM 대량 송신
   rationale_ko: 'SRUM 네트워크 사용량에서 한 앱의 BytesSent가 임계값 이상: 유출 가능성.'
   false_positive_ko: 백업·동기화 앱.
-  sources: *id001
+  sources:
+  - https://www.magnetforensics.com/blog/srum-forensic-analysis-of-windows-system-resource-utilization-monitor/
+  - https://attack.mitre.org/techniques/T1048/
   version: 1
   status: verified
   params:
@@ -806,7 +815,9 @@ rules:
   label_ko: 실행 다중 출처 확인
   rationale_ko: '같은 실행 파일(Windows/Program Files 밖)이 Prefetch·Amcache·BAM 모두에 있음: 실행 신뢰도 상승(의심 지표 아님).'
   false_positive_ko: 해당 없음(보강 지표).
-  sources: *id001
+  sources:
+  - https://www.sans.org/blog/digital-forensics-application-execution/
+  - https://docs.velociraptor.app/exchange/artifacts/pages/evidenceofexecution/
   version: 1
   status: verified
   params:

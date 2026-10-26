@@ -63,8 +63,20 @@ from .dashboard import (
     read_case_notes,
     write_case_notes,
 )
-from .files_index import NtfsTimes, files_matched_positions
-from .files_ntfs import join_files_page, ntfs_join_stamp, ntfs_si_modified_times
+from .files_index import (
+    FILES_TEXT_FIELDS,
+    NtfsFieldSource,
+    NtfsTimes,
+    files_matched_positions,
+    files_ordered_positions,
+    parse_files_sort,
+)
+from .files_ntfs import (
+    join_files_page,
+    ntfs_field_times,
+    ntfs_join_stamp,
+    ntfs_si_modified_times,
+)
 from .files_sections import apply_page_sections, section_response
 from .fs_tree import (
     FS_INDEX_CACHE,
@@ -1513,6 +1525,18 @@ def build_runs_router(
             time_scope = None
         return ntfs_join_stamp(time_scope), lambda positions: ntfs_si_modified_times(time_scope, rows, positions)
 
+    def _files_ntfs_fields(run_id: str, rows: Sequence[object]) -> NtfsFieldSource:
+        """``() -> (NTFS join stamp, resolver(field, positions))`` for the sorts that need NTFS times."""
+
+        def source() -> tuple[tuple[object, ...], Callable[[str, Sequence[int]], Sequence[int] | None]]:
+            try:
+                time_scope = run_scope(store, run_id, require_ready=False)
+            except HTTPException:
+                time_scope = None
+            return ntfs_join_stamp(time_scope), lambda field, positions: ntfs_field_times(time_scope, rows, positions, field)
+
+        return source
+
 
     @router.get("/api/runs/{run_id}/files")
     def get_run_files(
@@ -1525,6 +1549,8 @@ def build_runs_router(
         flag: list[str] = Query(default=[]),
         flag_grade: str | None = Query(default=None),
         sort: str | None = Query(default=None),
+        order: str | None = Query(default=None, pattern="^(asc|desc)$"),
+        q: str | None = Query(default=None, max_length=512),
         path_prefix: str | None = Query(default=None),
         recursive: str | None = Query(default=None),
         special: str | None = Query(default=None),
@@ -1579,8 +1605,21 @@ def build_runs_router(
 
         특이사항: rows carry ``flags`` (kind ``files:<scope>``) and the page
         reports ``flags_join`` like ``GET /artifacts``; ``flag``/``flag_grade``
-        filter and ``sort=flags`` (the only sort here; others are a 422)
-        orders A, B, C, unflagged (``limit > 0``; composes with ``category``).
+        filter and ``sort=flags`` orders A, B, C, unflagged (``limit > 0``; composes with
+        ``category``).
+
+        Server sort and text filter (plan r7 §3.2 갈래 L2): ``sort=name|path|size|mtime|ctime``
+        with ``order=asc|desc`` (or ``sort=size:desc``) orders the WHOLE list from the files column
+        index (files_index.files_sort_order: built once per files revision, later pages slice it);
+        rows without the value come last in both orders, ties keep list order. ``mtime`` = the
+        console's 수정 time (``fs_modified_at``, an acquisition copy's NTFS ``$SI`` modified time
+        when joined, else ``modified_at``); ``ctime`` = the "NTFS 생성" column (the NTFS join's
+        ``created_at``; without a joined NTFS-meta analysis no row has it). ``q=`` keeps the rows
+        whose name or path holds every whitespace-separated term (case-insensitive). Both need
+        ``limit > 0``, compose with ``category``, the row conditions, the folder filter and the
+        flag filter, and the page reports ``matched`` (exact), ``sort`` = ``{key, order, status:
+        "ready", progress, label}`` and ``text_filter = {q, fields}``. Other ``sort`` values are
+        ignored, as before.
 
         ``scope`` picks the files-output list: ``candidates`` (default; files
         of the selected categories) or ``inventory`` (every other scanned file,
@@ -1613,8 +1652,10 @@ def build_runs_router(
         collection = scope
         wanted = frozenset(item.strip() for item in category if item.strip())
         sort_flags = is_flags_sort(sort)
-        if sort and sort.strip() and not sort_flags:
-            # Only sort=flags exists here; other values are ignored (as before this parameter existed).
+        files_sort = None if sort_flags else parse_files_sort(sort, order)
+        needle = " ".join((q or "").split())
+        if sort and sort.strip() and not sort_flags and files_sort is None:
+            # Unknown sort keys are ignored (as before the column-index sorts existed).
             LOGGER.info("GET /files ignores unsupported sort=%r", sort[:64])
         flag_query = parse_flag_query(flag, flag_grade, sort_flags=sort_flags)
         reject_geo(geo)
@@ -1630,7 +1671,8 @@ def build_runs_router(
         )
         join = flags_join(_run_output_dir_or_none(get_job(store, run_id).summary))
         restrict, path_filter = _files_path_restriction(payload, run_id, collection, path_prefix, recursive, special)
-        if (flag_query.active or wanted or conditions is not None or restrict is not None) and limit <= 0:
+        ordered = files_sort is not None or bool(needle)
+        if (flag_query.active or wanted or conditions is not None or restrict is not None or ordered) and limit <= 0:
             raise HTTPException(status_code=400, detail=FILTER_LIMIT_MESSAGE)
         source_rows: list[object] = payload.get(collection) if isinstance(payload.get(collection), list) else []  # type: ignore[assignment]
         positions = None
@@ -1647,6 +1689,18 @@ def build_runs_router(
                 restrict=restrict,
                 restrict_key=(path_filter["path"], path_filter["recursive"], path_filter["special"]) if path_filter else None,
                 ntfs_join=lambda: _files_ntfs_times(run_id, source_rows),
+            )
+        if ordered:
+            # Sorted / text-filtered: the kept positions in display order (plan r7 §3.2 갈래 L2).
+            positions = files_ordered_positions(
+                source_rows,
+                run_id=run_id,
+                collection=collection,
+                files_stamp=output_stamp(get_output_path(store, run_id, "files")),
+                base=positions if positions is not None else (list(restrict) if restrict is not None else None),
+                needle=needle,
+                sort=files_sort,
+                ntfs_join=_files_ntfs_fields(run_id, source_rows),
             )
         if flag_query.active or restrict is not None:
             all_rows = source_rows
@@ -1674,7 +1728,7 @@ def build_runs_router(
             if path_filter is not None:
                 page["path_filter"] = path_filter
             _echo_conditions(page, conditions)
-        elif wanted or conditions is not None:
+        elif wanted or conditions is not None or ordered:
             page = _echo_conditions(
                 filter_files_by_category(
                     payload, wanted, offset=offset, limit=limit, collection=collection, rows=source_rows, positions=positions
@@ -1687,6 +1741,12 @@ def build_runs_router(
             rows = page.get(collection) if isinstance(page.get(collection), list) else []
             # ``record_index`` = position in that list of rapidtriage-files.json (locator ``/<scope>/<n>``).
             page[collection] = with_record_index(rows, int(pagination.get("offset") or 0))
+        if files_sort is not None:
+            page["sort"] = files_sort.descriptor()
+            if isinstance(page.get("pagination"), dict):
+                page["pagination"] = {**page["pagination"], "sort": files_sort.key, "order": files_sort.order}  # type: ignore[dict-item]
+        if needle:
+            page["text_filter"] = {"q": needle, "fields": list(FILES_TEXT_FIELDS)}
         candidates = payload.get("candidates") if isinstance(payload.get("candidates"), list) else []
         inventory = payload.get("inventory") if isinstance(payload.get("inventory"), list) else None
         page["scope"] = collection

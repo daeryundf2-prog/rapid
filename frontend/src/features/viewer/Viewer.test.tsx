@@ -592,9 +592,9 @@ describe("Viewer — decoded artifact rows (F2)", () => {
     const source = screen.getByRole("region", { name: "레코드 출처" });
     expect(source.textContent).toContain("EVTX 레코드 오프셋4608");
     expect(source.textContent).toContain("EVTX 레코드 SHA-256");
-    // No "검증" group above the evidence any more; unknown keys are visible, not folded.
+    // No "검증" group above the evidence any more; labelled extra keys are visible (추가 필드).
     expect(screen.queryByRole("region", { name: "레코드 검증" })).toBeNull();
-    const other = screen.getByRole("region", { name: "레코드 기타 필드" });
+    const other = screen.getByRole("region", { name: "레코드 추가 필드" });
     expect(other.textContent).toContain("이벤트 데이터");
   });
 

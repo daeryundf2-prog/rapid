@@ -30,6 +30,8 @@ import { getRunTree } from "../../api/runs";
 import type { CollectionRef, GridRow } from "../../contracts/collection";
 import type { CommandContext } from "../../contracts/command";
 import { Icon } from "../../icons";
+import { currentRun } from "../../state/slices/runs";
+import { useAppStore } from "../../state/store";
 import { runCommandId } from "../analysis/commands";
 import { setColumnFilter } from "../filters/columnFilters";
 import type { FilterBarVariant } from "../filters/FilterBar";
@@ -42,7 +44,7 @@ import { ColumnFilterRow } from "./ColumnFilterRow";
 import { collectionDef, lockedColumnId, presetColumnIds } from "./columns";
 import { analysisFamily } from "./columns/analysis";
 import { artifactTypeFamily, resolveArtifactFamily } from "./columns/artifacts";
-import { isRecord, REVIEW_LABELS } from "./columns/common";
+import { growWeight, isRecord, REVIEW_LABELS } from "./columns/common";
 import { auxColumnIds } from "./columns/families";
 import {
   colsToKeys,
@@ -54,7 +56,7 @@ import {
   toggleFieldCol,
   writeStoredFieldColumns,
 } from "./columns/fieldColumns";
-import { ntfsJoinOf } from "./columns/files";
+import { FILES_SERVER_SORT_KEYS, ntfsJoinOf, runInputIsImage } from "./columns/files";
 import { EmptyHintLink } from "./EmptyHintLink";
 import { GridEmpty, type GridEmptyState } from "./GridEmpty";
 import {
@@ -123,6 +125,15 @@ export const TIMELINE_LEGACY_HINT =
   "이 런의 타임라인은 이전 형식입니다 — 다시 생성하면 요약·중복 제거가 적용됩니다";
 export const SORT_KIND_REASON = "유형을 하나 선택하면 전체 정렬할 수 있습니다";
 export const SORT_ANALYSIS_REASON = "분석 결과를 선택하면 전체 정렬할 수 있습니다";
+/**
+ * Range honesty (plan r7 §3.2 L2, C-D1 / 구조 D2): a paged grid sorted or filtered on the client
+ * covers the loaded rows only — this banner says so whenever that is the case.
+ */
+export const CLIENT_SCOPE_BANNER = "정렬·필터는 불러온 행 기준";
+/** Header tooltip of a column the server cannot sort on a paged grid. */
+export const CLIENT_SORT_HINT = "불러온 행만 정렬합니다 (전체 정렬은 지원하지 않는 열)";
+/** Collections whose all-empty default columns hide (like the files list; C-D7, C-D11, C-E4). */
+const EMPTY_HIDE_COLLECTIONS: ReadonlySet<string> = new Set(["files", "artifacts", "docs", "analysis"]);
 /** A sorted deep link re-asks for the row's position while the index builds (1 s apart). */
 export const LOCATE_MAX_TRIES = 60;
 
@@ -315,7 +326,10 @@ export function DataGrid(props: DataGridProps = {}) {
   // Artifacts (and analysis job rows) are sorted by the server (whole kind / whole job), never
   // client-side over the loaded pages.
   const isAnalysis = ref.id === "analysis";
-  const serverSorted = ref.id === "artifacts" || isAnalysis;
+  // 파일 목록: 이름 · 경로 · 크기 · 수정 · NTFS 생성 · 특이사항 sort the whole list on the server
+  // (files column index, plan r7 §3.2 L2); every other column sorts the loaded rows (banner).
+  const filesGrid = ref.id === "files";
+  const serverSorted = ref.id === "artifacts" || isAnalysis || filesGrid;
   /** The kind whose columns / sort / promoted fields apply; for analysis only once a job is selected. */
   const artifactKind =
     ref.id === "artifacts" ? ref.kind : isAnalysis && ref.analysisId ? ref.kind : undefined;
@@ -323,14 +337,16 @@ export function DataGrid(props: DataGridProps = {}) {
   const fieldScope = artifactKind ? (isAnalysis ? `analysis:${artifactKind}` : artifactKind) : undefined;
   /** RowRef.kind of this grid's rows: the artifact kind, or the analysis job id. */
   const rowKindOfGrid = isAnalysis ? ref.analysisId : ref.kind;
-  const routeSort = artifactKind ? route.sort : undefined;
+  const routeSort = artifactKind || filesGrid ? route.sort : undefined;
   // Promoted record-field columns (URL `cols=`, else the kind's stored set); kept across presets.
   const promotedCols = useMemo(() => effectiveFieldCols(route.cols, fieldScope), [route.cols, fieldScope]);
   const promotedKeys = useMemo(() => colsToKeys(promotedCols), [promotedCols]);
   const q = route.q;
   // Timeline (timeline/grid readability C3 / C1): the text box searches every event on the server
-  // (`q=`), and events of one target · second · kind of time are one row unless ungrouped.
+  // (`q=`), and events of one target · second · kind of time are one row unless ungrouped. The
+  // files list filters name/path on the server too (`q=`, plan r7 §3.2 L2).
   const serverSearch = ref.id === "timeline";
+  const serverText = serverSearch || filesGrid;
   const serverQuery = serverSearch ? q.trim() : "";
   const [timelineGrouped, setTimelineGrouped] = useState(true);
   const treeTypes = useMemo(
@@ -439,6 +455,12 @@ export function DataGrid(props: DataGridProps = {}) {
   /** Default columns the user showed explicitly: never hidden for width / missing values. */
   const [pinnedColumns, setPinnedColumns] = useState<ReadonlySet<string>>(() => new Set());
   const [focusIdx, setFocusIdx] = useState(0);
+  /**
+   * A header click re-sorts only (C-D2): the focused row (its key) is held across the new order —
+   * focus, viewer and `row=` stay on it; it is re-found among the loaded rows when it is there,
+   * and nothing else gets focus meanwhile. Any navigation by the analyst ends the hold.
+   */
+  const [sortHold, setSortHold] = useState<string | null>(null);
   const [menuAnchor, setMenuAnchor] = useState<Anchor>(null);
   /** Row index whose menu is open (trigger aria-expanded / aria-controls). */
   const [menuRow, setMenuRow] = useState<number | null>(null);
@@ -484,6 +506,7 @@ export function DataGrid(props: DataGridProps = {}) {
     setSorting([]);
     setSortNotice(null);
     setColumnSizing({});
+    setSortHold(null);
     setFocusIdx(0);
     anchorRef.current = null;
     restoredRow.current = false;
@@ -500,12 +523,16 @@ export function DataGrid(props: DataGridProps = {}) {
     ? `${routeSort ? `${routeSort.key}:${routeSort.order}` : ""}|${serverPathFilter(q) ?? ""}`
     : "";
   const lastOrderKey = useRef(orderKey);
+  const sortHoldRef = useRef(sortHold);
+  sortHoldRef.current = sortHold;
   useEffect(() => {
     if (lastOrderKey.current === orderKey) return;
     lastOrderKey.current = orderKey;
+    anchorRef.current = null;
+    // A header click holds the focused row (C-D2): no deep-link restore, no jump to row 0.
+    if (sortHoldRef.current !== null) return;
     userNavigated.current = false;
     restoredRow.current = false;
-    anchorRef.current = null;
     setFocusIdx(0);
   }, [orderKey]);
 
@@ -531,8 +558,8 @@ export function DataGrid(props: DataGridProps = {}) {
   );
 
   // A server-searched listing (timeline) never re-filters its rows by the text on the client.
-  const needle = serverSearch ? "" : q.trim();
-  const clientSorting = !serverSorted && sorting.length > 0;
+  const needle = serverText ? "" : q.trim();
+  const clientSorting = sorting.length > 0;
   const compactMode = needle !== "" || clientSorting;
 
   const filtered = useMemo(
@@ -556,14 +583,37 @@ export function DataGrid(props: DataGridProps = {}) {
   // Core columns of the grid's family are never hidden for one page without values (P1).
   const keepWhenEmptySig = (def.keepWhenEmpty?.(ref, filterTypes) ?? []).join("|");
   const loadedRows = cq.loadedRows;
+  // The NTFS columns' "실행" hint applies to image inputs only (C-D12): a folder input's empty
+  // NTFS columns hide like any other empty column.
+  const runRecord = useAppStore((s) => currentRun(s));
+  const inputIsImage = runInputIsImage(runRecord);
+  // Columns the analyst is working with — sorted or column-filtered — never hide (C-D2).
+  const sortedColumnId = routeSort ? columns.find((c) => c.sortKey === routeSort.key)?.id : sorting[0]?.id;
+  const activeSig = [sortedColumnId ?? "", ...(columnFilters ?? []).map((f) => f.col)].join("|");
+  const keepShown = useMemo(() => {
+    const out = new Set(pinnedColumns);
+    for (const id of activeSig.split("|")) if (id) out.add(id);
+    return out;
+  }, [pinnedColumns, activeSig]);
+  // Empty default columns hide on every family / kind layout (C-D7): the width priority's
+  // columns, else (kind layouts without one) every default column but 항목.
+  const emptyCandidates = useMemo(() => {
+    if (preset !== "analysis") return [];
+    if (widthPriority) return widthPriority.slice(1);
+    if (!EMPTY_HIDE_COLLECTIONS.has(ref.id)) return [];
+    return orderedColumns
+      .filter((c, i) => i > 0 && c.id !== "title" && visibility[c.id] !== false)
+      .map((c) => c.id);
+  }, [preset, widthPriority, ref.id, orderedColumns, visibility]);
   const emptyIds = useMemo(() => {
-    if (!widthPriority) return [];
+    if (emptyCandidates.length === 0) return [];
     const keep = new Set(keepWhenEmptySig ? keepWhenEmptySig.split("|") : []);
     return emptyColumnIds(orderedColumns, loadedRows, {
-      candidates: widthPriority.slice(1).filter((id) => !keep.has(id)),
-      keep: pinnedColumns,
+      candidates: emptyCandidates.filter((id) => !keep.has(id)),
+      keep: keepShown,
+      ignoreHints: ref.id === "files" && !inputIsImage,
     });
-  }, [widthPriority, keepWhenEmptySig, orderedColumns, loadedRows, pinnedColumns]);
+  }, [emptyCandidates, keepWhenEmptySig, orderedColumns, loadedRows, keepShown, ref.id, inputIsImage]);
   // A core column kept although no loaded row has a value says so in its header (UX-round review):
   // the column stays (the next page may fill it), the blank is explained.
   const keptEmptyIds = useMemo(() => {
@@ -572,19 +622,19 @@ export function DataGrid(props: DataGridProps = {}) {
   }, [keepWhenEmptySig, orderedColumns, loadedRows]);
   const autoHidden = useMemo(() => {
     const out = new Map<string, AutoHideReason>();
-    if (!widthPriority) return out;
     for (const id of emptyIds) out.set(id, "empty");
+    if (!widthPriority) return out;
     const shown = orderedColumns
       .filter((c) => visibility[c.id] !== false && !out.has(c.id))
       .map((c) => ({ id: c.id, min: columnSizing[c.id] ?? c.minWidth ?? c.width }));
     const hidden = priorityHiddenColumns(shown, {
       priority: widthPriority,
       available: paneWidth - SELECT_COL_WIDTH - HEAD_TOOLS_WIDTH,
-      keep: pinnedColumns,
+      keep: keepShown,
     });
     for (const id of hidden) out.set(id, "width");
     return out;
-  }, [widthPriority, emptyIds, pinnedColumns, orderedColumns, visibility, columnSizing, paneWidth]);
+  }, [widthPriority, emptyIds, keepShown, orderedColumns, visibility, columnSizing, paneWidth]);
   const tableVisibility = useMemo(() => {
     if (autoHidden.size === 0) return visibility;
     const next = { ...visibility };
@@ -636,11 +686,14 @@ export function DataGrid(props: DataGridProps = {}) {
   const specs = visibleColumns.map((c) => specById.get(c.id)).filter((c): c is ColumnSpec => !!c);
   // 항목 flexes into the pane width; nothing shrinks (a narrow grid hides default columns by
   // priority instead, see autoHidden). Widths the user dragged stay as dragged.
+  // Spare width goes to the long-text columns by weight (항목 · 경로 · URL · 대상 …, C-D7); a
+  // column the user resized keeps its width.
   const widths = fitColumnWidths(
     visibleColumns.map((c) => c.getSize()),
     {
       grow: columnSizing.title === undefined ? specs.findIndex((s) => s.id === "title") : -1,
       available: paneWidth - SELECT_COL_WIDTH - HEAD_TOOLS_WIDTH,
+      weights: specs.map((s) => (columnSizing[s.id] === undefined ? growWeight(s) : 0)),
     },
   );
   // Publish the shown column ids (the meta tab's "기본 열에 이미 표시됩니다" checks them).
@@ -720,8 +773,23 @@ export function DataGrid(props: DataGridProps = {}) {
     }
   }, [compactMode, lastVisible, displayCount, cq.canLoadMore, loadMore]);
 
-  const focusedRow = clampedFocus >= 0 ? getDisplayRow(clampedFocus) : undefined;
+  const displayFocusedRow = clampedFocus >= 0 ? getDisplayRow(clampedFocus) : undefined;
+  // While a re-sort holds the focused row and it is not (yet) found, no row is focused.
+  const focusedRow =
+    sortHold !== null && displayFocusedRow?.rowKey !== sortHold ? undefined : displayFocusedRow;
   const selectedKeys = selection.selectedKeys;
+
+  // Re-find the held row in the new order (client sort: the sorted rows; server sort: the loaded
+  // pages). Found: focus moves to its new index; the hold ends once that row is focused.
+  const { indexOfKey } = cq;
+  const heldIndex = useMemo(() => {
+    if (sortHold === null) return -1;
+    if (compactMode) return displayRows.findIndex((row) => row.rowKey === sortHold);
+    return indexOfKey(sortHold);
+  }, [sortHold, compactMode, displayRows, indexOfKey]);
+  useEffect(() => {
+    if (sortHold !== null && heldIndex >= 0) setFocusIdx(heldIndex);
+  }, [sortHold, heldIndex]);
 
   // Rows by key for commands (selection may span pages and filters).
   const rowsByKey = useMemo(() => new Map(cq.loadedRows.map((r) => [r.rowKey, r])), [cq.loadedRows]);
@@ -742,6 +810,14 @@ export function DataGrid(props: DataGridProps = {}) {
     [runId, publishFocusedRow, setRow],
   );
   useEffect(() => {
+    if (sortHold !== null) {
+      // Same row under a new order: the store, viewer and URL already point at it.
+      if (focusedRow?.rowKey === sortHold) {
+        lastPublished.current = focusedRow;
+        setSortHold(null);
+      }
+      return;
+    }
     if (!focusedRow || !userNavigated.current || !runId) {
       setFocused(focusedRow?.rowKey ?? null);
       // Automatic focus (first loaded row, deep-link restore): the viewer loads the row too.
@@ -753,7 +829,7 @@ export function DataGrid(props: DataGridProps = {}) {
       return;
     }
     if (lastPublished.current !== focusedRow) publishNow(focusedRow);
-  }, [focusedRow, runId, setFocused, publishNow, publishFocusedRow]);
+  }, [focusedRow, runId, setFocused, publishNow, publishFocusedRow, sortHold]);
 
   // Server-sorted deep link: the locator is the JSONL record_index, not the display position;
   // ask the server where that record sits in the sorted order (`locate=` → `sort.position`).
@@ -905,6 +981,7 @@ export function DataGrid(props: DataGridProps = {}) {
     (next: number, extend: boolean) => {
       if (displayCount === 0) return;
       const clamped = Math.max(0, Math.min(displayCount - 1, next));
+      setSortHold(null);
       userNavigated.current = true;
       wantDomFocus.current = true;
       if (extend) {
@@ -1018,6 +1095,7 @@ export function DataGrid(props: DataGridProps = {}) {
     const index = Number(rowEl.dataset.index);
     const row = getDisplayRow(index);
     if (!row || event.button !== 0) return;
+    setSortHold(null);
     userNavigated.current = true;
     setFocusIdx(index);
     publishNow(row);
@@ -1039,6 +1117,7 @@ export function DataGrid(props: DataGridProps = {}) {
     const index = Number(rowEl.dataset.index);
     const row = getDisplayRow(index);
     if (!row) return;
+    setSortHold(null);
     userNavigated.current = true;
     setFocusIdx(index);
     // The menu acts on the selection when it holds this row, else on this row alone
@@ -1057,6 +1136,7 @@ export function DataGrid(props: DataGridProps = {}) {
       setMenuRow(null);
       return;
     }
+    setSortHold(null);
     setFocusIdx(index);
     setMenuRow(index);
     const rect = target.getBoundingClientRect();
@@ -1169,23 +1249,29 @@ export function DataGrid(props: DataGridProps = {}) {
       announce(lastToast.message, { politeness: lastToast.tone === "error" ? "assertive" : "polite" });
   }, [lastToast]);
 
+  /** The server sorts this column over the whole collection (else: the loaded rows, with a banner). */
+  const serverSortable = (spec: ColumnSpec): boolean =>
+    Boolean(spec.sortKey) &&
+    (filesGrid ? FILES_SERVER_SORT_KEYS.has(spec.sortKey as string) : Boolean(artifactKind) && serverSorted);
   const sortOf = (spec: ColumnSpec): "ascending" | "descending" | "none" => {
-    if (serverSorted) {
-      if (!routeSort || !spec.sortKey || spec.sortKey !== routeSort.key) return "none";
+    if (routeSort && serverSortable(spec)) {
+      if (spec.sortKey !== routeSort.key) return "none";
       return routeSort.order === "desc" ? "descending" : "ascending";
     }
     const s = sorting.find((item) => item.id === spec.id);
     return s ? (s.desc ? "descending" : "ascending") : "none";
   };
-  const sortReason = (spec: ColumnSpec): string | null => {
-    if (!serverSorted) return null;
-    if (!artifactKind) return isAnalysis ? SORT_ANALYSIS_REASON : SORT_KIND_REASON;
-    return spec.sortKey ? null : (spec.unsortableReason ?? SORT_COLUMN_REASON);
-  };
+  // Every column sorts (plan r7 §3.2 L2): the indexed ones on the server, the others over the
+  // loaded rows under the CLIENT_SCOPE_BANNER — no disabled headers any more.
+  const sortReason = (_spec: ColumnSpec): string | null => null;
+  const sortTitle = (spec: ColumnSpec): string | undefined =>
+    def.source === "paged" && !serverSortable(spec) ? CLIENT_SORT_HINT : undefined;
   const cycleSort = (spec: ColumnSpec) => {
     const current = sortOf(spec);
-    if (serverSorted) {
-      if (sortReason(spec) || !spec.sortKey) return;
+    // Sorting never moves focus, the selection or the viewer (C-D2): hold the focused row.
+    if (focusedRow) setSortHold(focusedRow.rowKey);
+    if (serverSortable(spec) && spec.sortKey) {
+      setSorting([]);
       setSortNotice(null);
       setSort(
         current === "none"
@@ -1194,15 +1280,14 @@ export function DataGrid(props: DataGridProps = {}) {
             ? { key: spec.sortKey, order: "desc" }
             : undefined,
       );
-      setFocusIdx(0);
       scrollRef.current?.scrollTo?.({ top: 0 });
       return;
     }
+    if (routeSort) setSort(undefined);
     const id = spec.id;
     setSorting(
       current === "none" ? [{ id, desc: false }] : current === "ascending" ? [{ id, desc: true }] : [],
     );
-    setFocusIdx(0);
   };
 
   // "unsupported": the server cannot sort this key: say why and drop the sort (never a silent page sort).
@@ -1259,7 +1344,8 @@ export function DataGrid(props: DataGridProps = {}) {
   const rowCountAria = (compactMode ? displayCount : (cq.total ?? -1)) + headRows;
   // Files NTFS columns: until an NTFS-meta analysis is joined their headers link to running it.
   const ntfsJoin = ref.id === "files" ? ntfsJoinOf(cq.pageMeta) : null;
-  const hintsActive = ref.id === "files" && !cq.isLoading && ntfsJoin === null;
+  // "→ 실행" only where an NTFS-meta analysis can run: an image input (C-D12).
+  const hintsActive = ref.id === "files" && !cq.isLoading && ntfsJoin === null && inputIsImage;
   const statusLines: { id: string; text: string }[] = [];
   if (cq.clientColumnFilters) {
     statusLines.push({
@@ -1288,6 +1374,29 @@ export function DataGrid(props: DataGridProps = {}) {
   }
   const currentPage = Math.min(cq.pageCount ?? 1, Math.floor(firstVisible / cq.pageSize) + 1);
 
+  // Range honesty (plan r7 §3.2 L2, 구조 D2): a paged grid always says how many of the server's
+  // rows are loaded, and — while a sort / filter runs over the loaded rows only — says that too.
+  const pagedGrid = def.source === "paged" && ref.id !== "search";
+  const allLoaded = cq.serverTotal !== null && cq.loadedCount >= cq.serverTotal;
+  const clientScoped = clientSorting || needle !== "" || cq.clientColumnFilters || cq.clientFiltering;
+  const scopeBanner = pagedGrid && clientScoped && !allLoaded && !cq.isLoading;
+  // A listing whose size the server has not counted yet (cross-kind pages) says so, never a guess.
+  const totalText = cq.serverTotal !== null ? formatCount(cq.serverTotal) : "미확인";
+  const scopeBadge =
+    pagedGrid && runId && !cq.isLoading ? (
+      <span
+        className="grid-scope-badge"
+        data-testid="grid-scope-badge"
+        title={
+          cq.serverTotal !== null
+            ? `서버의 ${formatCount(cq.serverTotal)}행 중 ${formatCount(cq.loadedCount)}행을 불러왔습니다`
+            : `${formatCount(cq.loadedCount)}행을 불러왔습니다 — 전체 행 수는 끝까지 불러오면 확정됩니다`
+        }
+      >
+        불러온 {formatCount(cq.loadedCount)} / 전체 {totalText}
+      </span>
+    ) : null;
+
   const emptyState: GridEmptyState = !runId
     ? {
         icon: "folder",
@@ -1298,21 +1407,39 @@ export function DataGrid(props: DataGridProps = {}) {
       ? { icon: "inbox", text: "접수 요약은 그리드가 아닌 요약 화면에서 확인합니다." }
       : ref.id === "search" && !(route.search && route.search.keywords.length > 0)
         ? { icon: "search", text: "검색어를 입력하면 결과가 여기에 표시됩니다." }
-        : sortBuilding
-          ? { icon: "clock", text: "전체 정렬 인덱스를 만드는 중입니다. 끝나면 정렬된 순서로 표시합니다." }
-          : serverQuery
-            ? { icon: "search", text: "검색어에 맞는 이벤트가 없습니다. (서버 검색: 전체 이벤트)" }
-            : compactMode && needle
-              ? { icon: "filter", text: "조건에 맞는 행이 없습니다. 불러온 행 안에서만 필터합니다." }
-              : isAnalysis && ref.kind
+        : ref.id === "search"
+          ? // The empty state names what was searched (R7 L3, C-D16).
+            {
+              icon: "search",
+              text: `'${route.search?.keywords.join(" ") ?? ""}' 검색 결과가 없습니다. 다른 단어로 찾거나 검색 옵션의 범위·방식을 바꿔 보세요.`,
+            }
+          : sortBuilding
+            ? { icon: "clock", text: "전체 정렬 인덱스를 만드는 중입니다. 끝나면 정렬된 순서로 표시합니다." }
+            : serverQuery
+              ? {
+                  icon: "search",
+                  text: `'${serverQuery}'에 맞는 이벤트가 없습니다. (서버 검색: 전체 이벤트)`,
+                }
+              : filesGrid && q.trim()
                 ? {
-                    icon: "inbox",
-                    text: "이 노드에는 결과가 없습니다.",
-                    action: { command: runCommandId(ref.kind), label: "분석 실행" },
+                    icon: "search",
+                    // Files filter name/path on the server (plan r7 §3.2 L2); the text names the query (L3).
+                    text: `'${q.trim()}'에 맞는 파일이 없습니다. (서버 검색: 전체 파일의 이름·경로)`,
                   }
-                : compactMode
-                  ? { icon: "filter", text: "조건에 맞는 행이 없습니다. 불러온 행 안에서만 필터합니다." }
-                  : { icon: "inbox", text: "이 노드에는 표시할 행이 없습니다." };
+                : compactMode && needle
+                  ? {
+                      icon: "filter",
+                      text: `'${needle}'에 맞는 행이 없습니다. 불러온 행 안에서만 필터합니다.`,
+                    }
+                  : isAnalysis && ref.kind
+                    ? {
+                        icon: "inbox",
+                        text: "이 노드에는 결과가 없습니다.",
+                        action: { command: runCommandId(ref.kind), label: "분석 실행" },
+                      }
+                    : compactMode
+                      ? { icon: "filter", text: "조건에 맞는 행이 없습니다. 불러온 행 안에서만 필터합니다." }
+                      : { icon: "inbox", text: "이 노드에는 표시할 행이 없습니다." };
 
   const serverFiltering =
     cq.serverColumnFilters ||
@@ -1448,11 +1575,18 @@ export function DataGrid(props: DataGridProps = {}) {
         trailing={columnMenu}
         channelGroupLabels={channelGroupLabels}
         extra={
-          ref.id === "docs" ? (
-            <DocsMatchedToggle
-              on={ref.category === DOCS_MATCHED}
-              onChange={(on) => route.navigate({ id: "docs", ...(on ? { category: DOCS_MATCHED } : {}) }, q)}
-            />
+          ref.id === "docs" || scopeBadge ? (
+            <>
+              {ref.id === "docs" ? (
+                <DocsMatchedToggle
+                  on={ref.category === DOCS_MATCHED}
+                  onChange={(on) =>
+                    route.navigate({ id: "docs", ...(on ? { category: DOCS_MATCHED } : {}) }, q)
+                  }
+                />
+              ) : null}
+              {scopeBadge}
+            </>
           ) : undefined
         }
       />
@@ -1483,6 +1617,19 @@ export function DataGrid(props: DataGridProps = {}) {
           >
             {timelineGrouped ? "묶지 않고 보기" : "출처 묶어 보기"}
           </button>
+        </p>
+      ) : null}
+
+      {scopeBanner ? (
+        <p className="grid-scope-banner" role="note" data-testid="grid-scope-banner">
+          <strong>{CLIENT_SCOPE_BANNER}</strong> — 불러온 {formatCount(cq.loadedCount)}행
+          {cq.serverTotal !== null ? ` / 전체 ${formatCount(cq.serverTotal)}행` : ""}에서만 정렬·필터했습니다.
+          {filesGrid ? " 전체 정렬: 이름·경로·크기·수정·NTFS 생성·특이사항 열." : ""}
+          {cq.canLoadMore ? (
+            <button type="button" className="grid-btn grid-btn-quiet" onClick={loadMore}>
+              더 불러오기
+            </button>
+          ) : null}
         </p>
       ) : null}
 
@@ -1575,7 +1722,11 @@ export function DataGrid(props: DataGridProps = {}) {
                           className="grid-sort"
                           aria-describedby={describedBy}
                           // The full header is always the tooltip (a narrow column truncates it, U-F8).
-                          title={reason ? undefined : (spec.sortHint ?? hint?.text ?? spec.header)}
+                          title={
+                            reason
+                              ? undefined
+                              : (spec.sortHint ?? hint?.text ?? sortTitle(spec) ?? spec.header)
+                          }
                           onClick={() => cycleSort(spec)}
                         >
                           {spec.header}
@@ -1665,7 +1816,7 @@ export function DataGrid(props: DataGridProps = {}) {
                     top={item.start}
                     height={item.size}
                     selected={!!row && selectedKeys.has(row.rowKey)}
-                    focused={item.index === clampedFocus}
+                    focused={item.index === clampedFocus && (sortHold === null || row?.rowKey === sortHold)}
                     specs={specs}
                     widths={widths}
                     lefts={lefts}

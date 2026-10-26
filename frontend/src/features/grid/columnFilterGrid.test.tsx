@@ -98,6 +98,10 @@ function filesPage(total: number, ntfsJoin: unknown, withNtfs = false) {
 describe("files NTFS columns (plan analysis-workbench-p1 U-P1-3)", () => {
   it("before an NTFS-meta analysis the 출처 headers link to its run dialog; names stay clean", async () => {
     setRoute(`#/case/${RUN}/explore/files`);
+    // Only an image input can run NTFS-meta (C-D12): the run is an E01.
+    useAppStore.setState({
+      runs: [{ run_id: RUN, status: "completed", request: { root: "D:/evidence/disk.E01" } }],
+    } as never);
     gridOn({ id: "files" });
     installFetch({
       "/files": filesPage(3, { analysis_id: null, matched: 0, total: 3 }),
@@ -265,7 +269,8 @@ describe("column header filters (plan analysis-workbench-p1 U-P1-4)", () => {
     // The chip reads the Korean type name; the exact artifact_type stays on the element / tooltip.
     expect(typeCell?.textContent).toBe("웹 서버 로그");
     expect(typeCell?.getAttribute("data-type")).toBe("web-server-log");
-    expect(screen.getByRole("button", { name: "유형 web-server-log 조건 제거" })).toBeTruthy();
+    // The 유형 chip reads the Korean name too (R7 L3).
+    expect(screen.getByRole("button", { name: "유형 웹 서버 로그 조건 제거" })).toBeTruthy();
   });
 
   it("analysis rows: 경로 column filter → path_contains on the rows request", async () => {

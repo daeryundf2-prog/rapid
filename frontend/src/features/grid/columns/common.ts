@@ -139,6 +139,23 @@ export function makeRow(
   };
 }
 
+/** Minimum width of every time column: the whole "YYYY-MM-DD HH:MM:SS" (C-D6, plan r7 §3.2). */
+export const TIME_COLUMN_MIN = 180;
+
+/**
+ * Share of the grid's spare width a column takes (C-D7): the long-text columns — 항목/이름 (3),
+ * 경로 · URL · 대상 (2), 제목 · 메시지 · 내용 · 요약 · 미리보기 (1) — grow; time, number and chip
+ * columns keep their width (0).
+ */
+export function growWeight(spec: Pick<ColumnSpec, "id" | "header" | "filterKind" | "align">): number {
+  if (spec.id === "title") return 3;
+  if (spec.filterKind === "time" || spec.filterKind === "number" || spec.align === "right") return 0;
+  const id = spec.id.toLowerCase();
+  if (id === "path" || /(^|[:_])(url|path|uri)$/.test(id) || /경로|URL|대상/.test(spec.header)) return 2;
+  if (/제목|메시지|내용|요약|본문|미리보기|세부 정보|상세/.test(spec.header)) return 1;
+  return 0;
+}
+
 /** Shared columns so widths and labels stay uniform across collections. */
 export const col = {
   title(header = "항목", width = 280): ColumnSpec {
@@ -163,11 +180,13 @@ export const col = {
       render: (r) => pathCell(r.sourcePath),
     };
   },
-  timestamp(width = 170, presets: ColumnSpec["presets"] = ["analysis", "compact"]): ColumnSpec {
+  timestamp(width = TIME_COLUMN_MIN, presets: ColumnSpec["presets"] = ["analysis", "compact"]): ColumnSpec {
     return {
       id: "timestamp",
       header: "시각",
-      width,
+      width: Math.max(width, TIME_COLUMN_MIN),
+      // "YYYY-MM-DD HH:MM:SS" never loses its seconds (C-D6).
+      minWidth: TIME_COLUMN_MIN,
       presets,
       value: (r) => r.timestamp,
       format: (r) => (r.timestamp ? formatGridTime(r.timestamp, currentTimezone()) : ""),
@@ -178,7 +197,8 @@ export const col = {
   review(): ColumnSpec {
     return {
       id: "review",
-      header: "선별",
+      // One word for the review mark everywhere (용어 지도: 검토, C-D10).
+      header: "검토",
       width: 96,
       presets: ["analysis", "source"],
       value: (r) => r.reviewStatus,

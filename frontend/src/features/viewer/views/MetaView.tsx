@@ -23,12 +23,12 @@ import { useFilterStore } from "../../filters/filterStore";
 import { useGridLocalStore } from "../../grid/adapter";
 import { defaultFieldHeaders } from "../../grid/columns/artifacts";
 import { familyCoreFacts } from "../../grid/columns/families";
-import { FIELD_LABELS } from "../../grid/columns/fieldColumns";
 import { NTFS_EMPTY_HINT, NTFS_RUN_COMMAND } from "../../grid/columns/files";
 import { timeKindsText, timelineAreaLabel, tsLabelsOf } from "../../grid/columns/timeline";
 import { EmptyHintLink } from "../../grid/EmptyHintLink";
 import { noteKey, useSessionNote } from "../../grid/sessionNotes";
 import { usePromotedFields } from "../../grid/usePromotedFields";
+import { typeDisplayLabel, valueLabel } from "../../grid/valueLabels";
 import { dispatchCommand, setViewerTarget, useCommandContext, useViewerRouteMode } from "../adapter";
 import { recordBanners } from "../banners";
 import { bytesOfHex, filterUtf16Strings, hexDump, utf16Strings } from "../binaryValue";
@@ -44,13 +44,20 @@ import {
   numberLabel,
   severityLabel,
 } from "../fieldFormat";
-import { humanizeKey, layoutFields, type RecordLayout, recordLayout, type SheetEntry } from "../fieldSheets";
+import {
+  isInternalQaKey,
+  koreanFieldLabel,
+  layoutFields,
+  type RecordLayout,
+  recordLayout,
+  type SheetEntry,
+} from "../fieldSheets";
 import { isDirectoryTarget } from "../modes";
 import { artifactRowRoute, TIMELINE_WINDOW_MS, timelineWindowRoute } from "../pivots";
 import { makeRecordField, type RecordField, recordByteRange } from "../record";
 import { eventRecordXml, hasEventRecord, RECONSTRUCTED_LABEL } from "../recordXml";
 import { isSid, useSidName } from "../sidNames";
-import { isRawToken, metaLabel, metaValueLabel, sectionLabels } from "./metaLabels";
+import { isRawToken, metaValueLabel, sectionLabels, viewerLimitationKo } from "./metaLabels";
 
 export const REVIEW_LABELS: Record<ReviewStatus, string> = {
   relevant: "관련 있음",
@@ -84,16 +91,15 @@ function isHashBundle(value: Record<string, unknown>): boolean {
 
 /** A record key: its Korean label (raw key as tooltip), or the raw key in mono when it has none. */
 function KeyTerm({ name, label: given }: { name: string; label?: string | null }) {
-  // Unknown keys read humanised (snake_case → words); a key that has no readable form stays raw mono.
-  const known = given === undefined ? metaLabel(name) : given;
-  const human = humanizeKey(name);
-  const label = known ?? (human !== name ? human : null);
+  // A key reads Korean (its label, or a humanised label with every word translated); a key with
+  // no Korean reading stays raw mono — never half-translated ("danger 종류 이름", R7 L3).
+  const label = given === undefined ? koreanFieldLabel(name) : given;
   return label ? (
     <dt title={name} data-key={name}>
       {label}
     </dt>
   ) : (
-    <dt className="mono" data-key={name}>
+    <dt className="mono" data-key={name} data-raw-ok="">
       {name}
     </dt>
   );
@@ -170,7 +176,9 @@ function NestedValue({
       </dl>
     );
   }
-  const entries = Object.entries(value);
+  // The tool's own QA keys (차단 요인 · 격차 ID · 필요 도구 · 보고서 등급 …) are not evidence and
+  // never shown, at any depth (R7 L3, C-W3); the record JSON copy keeps them.
+  const entries = Object.entries(value).filter(([k]) => !isInternalQaKey(k));
   const labels = sectionLabels(entries.map(([k]) => k));
   const list = (
     <dl className="viewer-dl viewer-dl-nested">
@@ -630,11 +638,14 @@ function EntryList({
   fields,
   runId,
   columns,
+  raw = false,
 }: {
   entries: SheetEntry[];
   fields: Record<string, unknown>;
   runId: string;
   columns?: ColumnToggle;
+  /** 기타 필드: the labels are raw keys (no Korean reading), shown in mono as written. */
+  raw?: boolean;
 }) {
   useRestorePendingFocus();
   return (
@@ -649,11 +660,17 @@ function EntryList({
           .filter(Boolean)
           .join(" · ");
         const shown = columns?.keys.includes(entry.key) ?? false;
-        const name = FIELD_LABELS[entry.key] ? `${entry.key}(${FIELD_LABELS[entry.key]})` : entry.key;
+        // The button names the field by its Korean label ("방문 횟수 열로 표시", C-W4), never the raw key.
+        const name = entry.label;
         const fieldLike: RecordField = makeRecordField(entry.key, entry.raw, entry.fromDetails);
         return (
           <Fragment key={`${entry.label}:${entry.key}`}>
-            <dt title={tooltip} data-key={entry.key}>
+            <dt
+              title={tooltip}
+              data-key={entry.key}
+              className={raw ? "mono" : undefined}
+              data-raw-ok={raw ? "" : undefined}
+            >
               {entry.label}
             </dt>
             <dd className="viewer-break meta-field" data-key={entry.key}>
@@ -822,34 +839,18 @@ function RecordSection({
         </section>
       ) : null}
       {layout.other.length ? (
-        <section aria-label="레코드 기타 필드" className="meta-record-group" data-testid="record-other">
-          <h4>기타 필드 {layout.other.length}개</h4>
+        <section aria-label="레코드 추가 필드" className="meta-record-group" data-testid="record-other">
+          <h4>추가 필드 {layout.other.length}개</h4>
           <EntryList entries={layout.other} fields={fields} runId={runId} columns={columns} />
         </section>
       ) : null}
+      {layout.extra.length ? (
+        <details className="viewer-details meta-record-group" data-testid="record-extra">
+          <summary>기타 필드 {layout.extra.length}개 (한글 이름 없는 원본 키)</summary>
+          <EntryList entries={layout.extra} fields={fields} runId={runId} columns={columns} raw />
+        </details>
+      ) : null}
     </section>
-  );
-}
-
-/** Governance / validation keys: folded at the very bottom, never above evidence. */
-function GovernanceSection({
-  layout,
-  row,
-  runId,
-}: {
-  layout: RecordLayout;
-  row: GridRow | null;
-  runId: string;
-}) {
-  if (!layout.governance.length) return null;
-  return (
-    <details className="viewer-details meta-record-group meta-governance" data-testid="record-governance">
-      <summary>내부 검증 정보(증거 아님) {layout.governance.length}개</summary>
-      <p className="meta-hint">
-        파서·도구의 자체 점검 항목입니다. 레코드의 내용(증거)이 아니며 보고서의 근거로 쓰지 않습니다.
-      </p>
-      <EntryList entries={layout.governance} fields={layoutFields(row)} runId={runId} />
-    </details>
   );
 }
 
@@ -867,33 +868,30 @@ function provenanceEntries(row: GridRow | null): Array<[string, string]> {
     // Timeline events (C9): Korean readings, the raw ids in brackets.
     const sourceType = typeof row.fields.sourceArtifactType === "string" ? row.fields.sourceArtifactType : "";
     const area = timelineAreaLabel(sourceType || row.artifactType);
-    if (row.artifactType)
-      out.push([
-        "이벤트",
-        area && area !== row.artifactType ? `${area} (${row.artifactType})` : row.artifactType,
-      ]);
+    // Korean readings only (R7 L3): the raw ids are the copy text of the record JSON, not the view.
+    if (row.artifactType) out.push(["이벤트", area || typeDisplayLabel(row.artifactType)]);
     const kinds = timeKindsText(tsLabelsOf(row));
     if (kinds) out.push(["시각 종류", kinds]);
     if (row.provider)
-      out.push([
-        "출처",
-        TIMELINE_SOURCE_LABELS[row.provider]
-          ? `${TIMELINE_SOURCE_LABELS[row.provider]} (${row.provider})`
-          : row.provider,
-      ]);
+      out.push(["출처", TIMELINE_SOURCE_LABELS[row.provider] ?? valueLabel("source", row.provider)]);
     return out;
   }
   // Output-file rows reuse artifactType for their kind (보고 종류 filter): call it 종류 there.
   if (row.artifactType)
-    out.push([row.ref.collection === "outputs" ? "종류" : "아티팩트 유형", row.artifactType]);
-  if (row.provider) out.push(["수집기(provider)", row.provider]);
+    out.push([
+      row.ref.collection === "outputs" ? "종류" : "아티팩트 유형",
+      row.ref.collection === "outputs" ? row.artifactType : typeDisplayLabel(row.artifactType),
+    ]);
+  if (row.provider) out.push(["수집기", valueLabel("provider", row.provider)]);
   const record = row.fields.artifact_record;
   if (record && typeof record === "object") {
     for (const [key, value] of Object.entries(record as Record<string, unknown>)) {
       if (value === null || value === undefined || value === "") continue;
       if (typeof value === "object") continue;
-      const label = key === "artifact_id" ? "아티팩트 ID" : metaLabel(key);
-      out.push([label ? `레코드 ${label}` : `artifact_record.${key}`, String(value)]);
+      const label = key === "artifact_id" ? "아티팩트 ID" : koreanFieldLabel(key);
+      // A record key with no Korean reading is left to the record JSON (never a raw key label).
+      if (!label) continue;
+      out.push([`레코드 ${label}`, String(value)]);
       if (out.length > 24) break;
     }
   }
@@ -1111,7 +1109,7 @@ export function MetaView({
     [promotedFields, defaultHeaders],
   );
   const hasRecord =
-    layout.core.length + layout.provenance.length + layout.other.length + layout.governance.length > 0 ||
+    layout.core.length + layout.provenance.length + layout.other.length + layout.extra.length > 0 ||
     layout.table !== null;
   const isArtifact = row?.ref.collection === "artifacts";
   return (
@@ -1144,7 +1142,7 @@ export function MetaView({
         <dl className="viewer-dl">
           <dt>런</dt>
           <dd className="mono">{target.runId}</dd>
-          <dt>위치(locator)</dt>
+          <dt>위치</dt>
           <dd className="mono viewer-break">{locatorText(target)}</dd>
           {target.ref.caseDbId !== undefined ? (
             <>
@@ -1267,7 +1265,9 @@ export function MetaView({
             <summary>뷰어 한계 {preview.viewer_limitations.length}건</summary>
             <ul>
               {preview.viewer_limitations.map((item) => (
-                <li key={item}>{item}</li>
+                <li key={item} title={item}>
+                  {viewerLimitationKo(item)}
+                </li>
               ))}
             </ul>
           </details>
@@ -1294,7 +1294,6 @@ export function MetaView({
       </section>
       {/* U-F8 fixed tail: the same seven evidence facts on every row, "없음" with a reason. */}
       <EvidenceTail target={target} row={row} onOpenHex={openHex} />
-      <GovernanceSection layout={layout} row={row} runId={target.runId} />
     </div>
   );
 }

@@ -1305,10 +1305,11 @@ export function buildTreeModel(input: TreeModelInput): TreeModelNode[] {
     noSelect: true,
     toggleOnly: true,
     children: [
-      dataNode("files", "전체 파일", counts?.files, "이 런에는 파일 목록이 없습니다", loaded),
+      // R7 L3 (C-T1): one "파일 목록" and one "폴더 탐색기" in the whole tree.
+      dataNode("files", "파일 목록", counts?.files, "이 런에는 파일 목록이 없습니다", loaded),
       explorerViewNode(
         "fs-explorer",
-        "파일 시스템",
+        "폴더 탐색기",
         { collection: "files", dir: "" },
         counts?.files,
         "이 런에는 파일 목록이 없습니다",

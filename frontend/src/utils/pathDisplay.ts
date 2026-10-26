@@ -1,7 +1,7 @@
 /**
- * Path display (review #9 / #6): grid 경로 cells, the viewer header and the 보고 table show the
- * PARENT folder (the file name is already the row's title) with one consistent middle ellipsis —
- * the leading part ellipsizes ("…"), the last folder stays whole, 4px apart.
+ * Path display (review #9 / #6, plan r7 §3.2 L2 C-D8): grid 경로 cells, the viewer header, the
+ * 보고 table and the landing show the path TAIL FIRST — the file name and its two parent folders
+ * stay, the leading folders ellipsize ("…"); the full path is the tooltip.
  */
 
 /** "C:\a\b\file.txt" → "C:\a\b"; "/var/log/syslog" → "/var/log"; "file.txt" → "" (no parent). */
@@ -32,12 +32,36 @@ export function middlePathParts(path: string): MiddlePathParts {
   return { head: trimmed.slice(0, cut + 1), tail: trimmed.slice(cut + 1) };
 }
 
+export interface TailPathParts {
+  /** Leading folders (ellipsize first); "" when the path has no more than the kept tail. */
+  head: string;
+  /** The kept parent folders with their separators ("Users\\kim\\"); ellipsize second. */
+  parents: string;
+  /** The last segment (the file name): never truncated before the others. */
+  name: string;
+}
+
 /**
- * What a path cell shows: the parent folder split for the middle ellipsis. A bare file name
- * (no parent) shows itself; null / "" shows nothing.
+ * Tail-first path parts (C-D8, plan r7 §3.2 L2): the file name plus its `keep` parent folders
+ * stay readable, only the head gives way. "C:\a\b\c\d.txt" → head "C:\a\", parents
+ * "b\c\", name "d.txt". A trailing separator is dropped; a root is its own name.
  */
-export function pathCellParts(path: string | null | undefined): MiddlePathParts | null {
+export function tailPathParts(path: string, keep = 2): TailPathParts {
+  if (/^([A-Za-z]:)?[\\/]$/.test(path)) return { head: "", parents: "", name: path };
+  const trimmed = path.replace(/[\\/]+$/, "") || path;
+  // Split keeping each separator on the segment before it.
+  const segments = trimmed.match(/[^\\/]*[\\/]|[^\\/]+$/g) ?? [trimmed];
+  const name = segments.pop() ?? "";
+  const parents = segments.slice(Math.max(0, segments.length - keep));
+  const head = segments.slice(0, Math.max(0, segments.length - keep));
+  return { head: head.join(""), parents: parents.join(""), name };
+}
+
+/**
+ * What a path cell shows: the whole path, tail first (file name + two parent folders; the head
+ * ellipsizes). null / "" shows nothing.
+ */
+export function pathCellParts(path: string | null | undefined): TailPathParts | null {
   if (!path) return null;
-  const dir = parentDir(path);
-  return middlePathParts(dir || path);
+  return tailPathParts(path);
 }

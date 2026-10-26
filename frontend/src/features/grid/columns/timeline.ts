@@ -127,6 +127,19 @@ interface TimelineSource {
   record_index?: unknown;
 }
 
+/**
+ * Older timeline outputs prefix every summary with the producer ("Artifact event: <type> …",
+ * "EventLog event: …"; C-D13). The prefix is a raw id the examiner never needs: it is stripped at
+ * display (the raw summary stays in the row JSON).
+ */
+const LEGACY_SUMMARY_PREFIX = /^(?:Artifact event: \S+ |EventLog event: )/;
+
+export function stripLegacySummaryPrefix(summary: string | null): string | null {
+  if (!summary) return summary;
+  const stripped = summary.replace(LEGACY_SUMMARY_PREFIX, "").trim();
+  return stripped || summary;
+}
+
 export const timelineCollection: CollectionDef = {
   id: "timeline",
   label: "타임라인",
@@ -136,12 +149,13 @@ export const timelineCollection: CollectionDef = {
       q: query.text,
       group: query.group === true,
     }),
+  // Beside the open viewer the narrow grid keeps 시각 > 대상 > 시각 종류 > 상세(요약) (C-D15).
   widthPriority: () => [
     "timestamp",
     "target",
     "tsKind",
-    "area",
     "detail",
+    "area",
     "sourceCount",
     "flags",
     "sourceRow",
@@ -157,7 +171,7 @@ export const timelineCollection: CollectionDef = {
     const kinds = timestampKindsOf(raw);
     const details = isRecord(raw.details) ? raw.details : {};
     const sourceType = strOrNull(details.artifact_type);
-    const summary = strOrNull(raw.summary);
+    const summary = stripLegacySummaryPrefix(strOrNull(raw.summary));
     // An event-log event is about a record of a channel: "Security · 4624" (its summary is 상세).
     const eventId = sourceType?.startsWith("eventlog-") ? strOrNull(details.event_id) : null;
     const target =
@@ -250,7 +264,8 @@ export const timelineCollection: CollectionDef = {
     col.field(
       "tsKind",
       "시각 종류",
-      110,
+      // "마지막 방문 +2" whole (C-D14).
+      140,
       ["analysis", "compact", "source"],
       (r) => str(r.fields.tsKind) || null,
       {
@@ -264,6 +279,7 @@ export const timelineCollection: CollectionDef = {
           return kinds.length > 1 ? `${timeKindsText(kinds)} (${kinds.join(", ")})` : str(r.fields.tsKind);
         },
         render: timeKindsCell,
+        minWidth: 140,
       },
     ),
     // 영역·유형: Korean name of the source artifact type; the raw ids in the tooltip.

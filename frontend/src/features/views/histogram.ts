@@ -6,6 +6,8 @@
 
 import type { RunTree, TreeNode } from "../../api/runs";
 import type { CollectionId, GridRow } from "../../contracts/collection";
+import { uniqueLabels } from "../grid/columns/families";
+import { typeDisplayLabel } from "../grid/valueLabels";
 
 /** `GET /api/runs/{id}/timeline-histogram` (api/app/timeline_hist.py). */
 export interface TimelineHistogramPayload {
@@ -324,14 +326,19 @@ function findNode(nodes: readonly TreeNode[], match: (node: TreeNode) => boolean
   return null;
 }
 
-/** Kind nodes below the artifacts root (group nodes are flattened). */
-function kindNodes(nodes: readonly TreeNode[]): TreeNode[] {
-  const out: TreeNode[] = [];
+/** Kind nodes below the artifacts root (group nodes are flattened), with their group's label. */
+function kindNodes(nodes: readonly TreeNode[], group = ""): Array<{ node: TreeNode; group: string }> {
+  const out: Array<{ node: TreeNode; group: string }> = [];
   for (const node of nodes) {
-    if (node.kind && !node.artifact_type) out.push(node);
-    else if (node.children) out.push(...kindNodes(node.children));
+    if (node.kind && !node.artifact_type) out.push({ node, group });
+    else if (node.children) out.push(...kindNodes(node.children, node.label));
   }
   return out;
+}
+
+/** Bars with unique labels (R7 L3, C-V1): a kind split over groups names its group. */
+function distinct(bars: Array<CategoryBar & { context?: string }>): CategoryBar[] {
+  return uniqueLabels(bars).map(({ context: _context, ...bar }) => bar);
 }
 
 const byCount = (a: CategoryBar, b: CategoryBar) => b.count - a.count || a.label.localeCompare(b.label);
@@ -344,20 +351,30 @@ export function barsFromTree(tree: RunTree | undefined, kind: string | undefined
   if (!tree) return [];
   if (kind) {
     const node = findNode(tree.nodes, (n) => n.kind === kind && !n.artifact_type);
-    return (node?.children ?? [])
+    const bars = (node?.children ?? [])
       .filter((c) => c.artifact_type)
       .map((c) => ({
         id: c.id,
-        label: c.artifact_type ?? c.label,
+        // The type's Korean name (never the raw id, C-D9); the node label when the type has none.
+        label: c.artifact_type ? typeDisplayLabel(c.artifact_type) : c.label,
         count: c.count,
         artifactType: c.artifact_type,
       }))
       .sort(byCount);
+    return distinct(bars);
   }
   const root = tree.nodes.find((n) => n.id === "artifacts" || (n.collection === "artifacts" && !n.kind));
-  return kindNodes(root?.children ?? [])
-    .map((n) => ({ id: n.id, label: n.label, count: n.count, kind: n.kind }))
-    .sort(byCount);
+  return distinct(
+    kindNodes(root?.children ?? [])
+      .map(({ node, group }) => ({
+        id: node.id,
+        label: node.label,
+        count: node.count,
+        kind: node.kind,
+        context: group,
+      }))
+      .sort(byCount),
+  );
 }
 
 function rowExt(row: GridRow): string {
@@ -375,13 +392,15 @@ export function barsFromRows(rows: readonly GridRow[], collection: CollectionId 
     const key = byExtension ? rowExt(row) : (row.artifactType ?? "");
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
-  return [...counts.entries()]
-    .map(([key, count]): CategoryBar => {
-      const label = key || (byExtension ? "(확장자 없음)" : "(유형 없음)");
-      if (!key) return { id: `none`, label, count };
-      return byExtension
-        ? { id: `ext:${key}`, label: `.${key}`, count, extension: key }
-        : { id: `type:${key}`, label, count, artifactType: key };
-    })
-    .sort(byCount);
+  return distinct(
+    [...counts.entries()]
+      .map(([key, count]): CategoryBar => {
+        const label = key ? typeDisplayLabel(key) : byExtension ? "(확장자 없음)" : "(유형 없음)";
+        if (!key) return { id: `none`, label, count };
+        return byExtension
+          ? { id: `ext:${key}`, label: `.${key}`, count, extension: key }
+          : { id: `type:${key}`, label, count, artifactType: key };
+      })
+      .sort(byCount),
+  );
 }

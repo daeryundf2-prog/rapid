@@ -185,7 +185,7 @@ describe("catalogue columns (U-F3)", () => {
     expect(logon.format?.(r)).toMatch(/원격/);
   });
 
-  it("time columns show their ts_kind chip with a Korean name", () => {
+  it("time columns: the column's own ts_kind is its header (no chip); another kind keeps a chip (C-D6)", () => {
     const time = catalogColumn({
       key: "time_created",
       label: "시각",
@@ -193,11 +193,20 @@ describe("catalogue columns (U-F3)", () => {
       ts_kind: "logged",
       aliases: ["event_created_at"],
     });
-    render(<div>{time.render?.(row({ details }))}</div>);
-    const chip = screen.getByTitle("기록 시각 (logged)");
-    expect(chip.textContent).toBe("기록 시각");
+    const { container } = render(<div>{time.render?.(row({ details }))}</div>);
+    expect(container.querySelector(".ts-kind-chip")).toBeNull();
+    expect(container.textContent).not.toContain("기록 시각");
     expect(time.tooltip?.(row({ details }))).toContain("기록 시각(logged)");
     expect(time.sortKey).toBe("details.time_created");
+    expect(time.minWidth).toBeGreaterThanOrEqual(180);
+    // A `timestamp` column whose row says its time is another kind keeps the chip.
+    const generic = catalogColumn({ key: "timestamp", label: "시각", format: "time", ts_kind: "logged" });
+    render(
+      <div>
+        {generic.render?.(row({ details: { timestamp: "2026-03-01T12:00:00Z", timestamp_kind: "created" } }))}
+      </div>,
+    );
+    expect(screen.getByTitle("생성 (created)").textContent).toBe("생성");
   });
 
   it("family layout: time · 항목 · 특이사항 · core in catalogue order · 선별 · 유형, aux hidden", () => {

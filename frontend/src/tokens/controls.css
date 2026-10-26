@@ -714,9 +714,11 @@ button.chip:hover {
 
 /* --- path (review #9): parent folder, middle ellipsis, mono --------------------- */
 
+/* Tail first (plan r7 §3.2 L2, C-D8 / C-L3): the head gives way first (flex-shrink 1000), the two
+   parent folders next, the file name last. The parts carry their own separators: no gap. */
 .mid-path {
   display: inline-flex;
-  gap: var(--space-1);
+  gap: 0;
   min-width: 0;
   max-width: 100%;
   font-family: var(--font-mono);
@@ -725,11 +727,19 @@ button.chip:hover {
 }
 
 .mid-path-head {
-  flex: 0 1 auto;
+  flex: 0 1000 auto;
   min-width: 1.5em; /* room for the "…" itself */
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--text-subtle);
+}
+
+.mid-path-parents {
+  flex: 0 1 auto;
+  min-width: 1.5em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-muted);
 }
 
 .mid-path-tail {
@@ -737,7 +747,7 @@ button.chip:hover {
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--text-muted);
+  color: var(--text);
 }
 
 /* --- toast (U-V7: one kind, bottom-right) ------------------------------------- */

@@ -219,7 +219,7 @@ describe("C4/C5 timeline columns", () => {
     const priority = timelineCollection.widthPriority?.({ id: "timeline" }) ?? [];
     expect(priority).toEqual(expect.arrayContaining(["sourceCount", "flags", "review"]));
     expect(column("timestamp")?.width).toBe(190);
-    expect(column("tsKind")?.width).toBe(110);
+    expect(column("tsKind")?.width).toBe(140); // C-D14: "마지막 방문 +2" whole
     // 출처 (constant "artifacts") and 이벤트 (raw id) stay selectable, off by default.
     expect(column("source")?.presets).toEqual([]);
     expect(column("eventType")?.presets).toEqual([]);
@@ -428,15 +428,17 @@ describe("C7 / C8 / C9 family cells", () => {
 });
 
 describe("P1 empty columns", () => {
-  it("a family's core columns are never hidden for one page without values", () => {
+  it("a family's empty core columns hide like any empty column; only the leading time stays (C-D7/C-E4)", () => {
     noteKindTypeCounts("eventlog", { "eventlog-event": 10 });
     const keep = artifactsCollection.keepWhenEmpty?.({ id: "artifacts", kind: "eventlog" }) ?? [];
-    expect(keep).toEqual(expect.arrayContaining(["d:subject_user_name", "d:target_user_name", "d:computer"]));
+    expect(keep).not.toContain("d:target_user_name");
+    expect(keep).not.toContain("d:computer");
+    expect(keep.length).toBeLessThanOrEqual(1);
   });
 });
 
 describe("UX-round review follow-ups", () => {
-  it("a kept core column with no value on the loaded page says so in its header", async () => {
+  it("an empty core column hides (값이 없어 숨김) while a column with values stays", async () => {
     noteKindTypeCounts("eventlog", { "eventlog-event": 2 });
     installFetch({
       "/artifacts": () =>
@@ -463,13 +465,13 @@ describe("UX-round review follow-ups", () => {
       route: { ...s.route, collection: { id: "artifacts", kind: "eventlog" } },
     }));
     renderWithClient(<DataGrid />);
-    // 대상 계정 has no value in any loaded row: kept (P1) and marked; 컴퓨터 has values: no mark.
-    const note = await screen.findByTestId("grid-novalue-d:target_user_name");
-    expect(note.textContent).toBe(KEPT_EMPTY_COLUMN_NOTE);
-    expect(
-      note.closest('[role="columnheader"]')?.querySelector("button")?.getAttribute("aria-describedby"),
-    ).toContain(note.id);
-    expect(screen.queryByTestId("grid-novalue-d:computer")).toBeNull();
+    // 대상 계정 has no value in any loaded row: hidden (listed in 열 설정); 컴퓨터 has values: shown.
+    await waitFor(() =>
+      expect(document.querySelector('[role="columnheader"][data-col="d:computer"]')).not.toBeNull(),
+    );
+    expect(document.querySelector('[role="columnheader"][data-col="d:target_user_name"]')).toBeNull();
+    expect(screen.queryByTestId("grid-novalue-d:target_user_name")).toBeNull();
+    expect(KEPT_EMPTY_COLUMN_NOTE).toBe("이 페이지 값 없음");
   });
 
   it("a timeline written before the readability builder shows the regenerate hint", async () => {
@@ -537,8 +539,9 @@ describe("C10 timeline viewer", () => {
     expect(section.textContent).toContain("E:\\보고서\\A.docx");
     for (const fact of facts?.facts ?? []) expect(section.textContent).toContain(fact.value);
     expect(screen.getByTestId("timeline-group-sources").querySelectorAll("li")).toHaveLength(3);
-    // 출처: Korean readings (C9).
+    // 출처: Korean readings only (C9; R7 L3: the raw id is not shown).
     expect(screen.getAllByText("시각 종류").length).toBeGreaterThan(0);
-    expect(screen.getByText(/아티팩트 출력 \(artifacts\)/)).toBeTruthy();
+    expect(screen.getByText("아티팩트 출력")).toBeTruthy();
+    expect(screen.queryByText(/\(artifacts\)/)).toBeNull();
   });
 });

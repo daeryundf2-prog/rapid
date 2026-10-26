@@ -434,14 +434,12 @@ rules:
   family: mft
   grade: A
   label_ko: $SI 생성 < $FN 생성(타임스톰핑)
-  rationale_ko: '$STANDARD_INFORMATION 생성 시각이 $FILE_NAME 생성 시각보다 임계값 이상 앞서고 타임스톰핑 보강 근거가 있을 때만 A: ① $SI 생성·수정·MFT 수정이 모두 초 미만 0인데 $FN 생성은 아님(초 단위 SetFileTime·타임스톰핑 도구), ② $SI 수정·MFT 수정도 $FN 생성보다 임계값 이상 앞섬(이름이 생길 때 NTFS가 $SI MFT 수정을 갱신하므로 $SI 시각을 모두 되돌리는 도구만 남기는 모양). 보강 근거 없이 사용자 쓰기 가능 경로의 실행·스크립트 파일이면 B, 그 밖은 C. 보강 근거가 없고 $FN 생성 앞뒤 ±bulk_bucket_seconds/2(이동 창, 정시 경계와 무관) 안에 같은 출처 후보가 bulk_min_records건 이상 몰렸거나 서비싱 경로(WinSxS·servicing·SoftwareDistribution)면 표시하지 않음(보강 근거가 있으면 대량이어도 표시).'
+  rationale_ko: '$STANDARD_INFORMATION 생성 시각이 $FILE_NAME 생성 시각보다 임계값 이상 앞서고 타임스톰핑 보강 근거가 있을 때만 A: ① $SI 생성·수정·MFT 수정이 모두 초 미만 0인데 $FN 생성은 아님(초 단위 SetFileTime·타임스톰핑 도구), ② $SI 수정·MFT 수정도 $FN 생성보다 임계값 이상 앞섬(이름이 생길 때 NTFS가 $SI MFT 수정을 갱신하므로 $SI 시각을 모두 되돌리는 도구만 남기는 모양). 보강 근거 없이 사용자 쓰기 가능 경로의 실행·스크립트 파일이면 B, 그 밖은 C. 보강 근거가 없고 $FN 생성 앞뒤 ±(대량 판정 창의 절반, 이동 창이며 정시 경계와 무관) 안에 같은 출처 후보가 대량 판정 건수 이상 몰렸거나 서비싱 경로(WinSxS·servicing·SoftwareDistribution)면 표시하지 않음(보강 근거가 있으면 대량이어도 표시).'
   false_positive_ko: '시각을 보존하는 복사·압축 해제·설치기·Windows 기능 업데이트(BSH 전체 $MFT에서 단순 $SI<$FN 174,854건, 87%가 8일에 몰림 — 대부분 2025-02-21·23 기능 업데이트). 초 미만 0은 압축(ZIP 2초 단위) 해제에서도 생기지만 그때 $SI MFT 수정은 해제 시각이라 ①에 걸리지 않음. 시각이 마이크로초로 잘려 있어 100ns 1~9틱만 있는 값은 0으로 읽힘(드묾). 정상 이동·하드 링크도 ②를 남길 수 있어 A는 검토 대상이지 판단이 아님.'
   sources:
   - https://www.inversecos.com/2022/04/defence-evasion-technique-timestomping.html
   - https://attack.mitre.org/techniques/T1070/006/
-  - https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-setfiletime
   - https://opus.bibliothek.uni-augsburg.de/opus4/117569
-  - https://www.sans.org/blog/ntfs-i30-index-attributes-evidence-of-deleted-and-overwritten-files/
   version: 3
   status: verified
   validation:
@@ -481,12 +479,10 @@ rules:
   label_ko: $SI 초 미만 0
   rationale_ko: '$SI 생성·수정의 초 미만이 0인데 $FN은 아님: 초 단위로만 쓰는 시각 조작 도구(약한 지표).'
   false_positive_ko: 일부 정상 SW, FAT에서 복사된 파일.
-  sources: &id001
+  sources:
   - https://www.inversecos.com/2022/04/defence-evasion-technique-timestomping.html
-  - https://opus.bibliothek.uni-augsburg.de/opus4/117569
-  - https://andreafortuna.org/2017/10/18/windows-forensics-usn-journal/
-  - https://www.sans.org/blog/ntfs-i30-index-attributes-evidence-of-deleted-and-overwritten-files/
-  - https://andreafortuna.org/2019/09/26/windows-forensics-analysis-of-recycle-bin-artifacts/
+  - https://attack.mitre.org/techniques/T1070/006/
+  - https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-setfiletime
   version: 1
   status: verified
   params: {}
@@ -496,7 +492,10 @@ rules:
   label_ko: $FN 시각 조작 의심
   rationale_ko: 'USN RENAME_NEW_NAME 이후에도 $FN 변경 시각이 이름 변경보다 앞섬: 고급 타임스톰핑.'
   false_positive_ko: 정상 이동, USN 보존 범위.
-  sources: *id001
+  sources:
+  - https://www.inversecos.com/2022/04/defence-evasion-technique-timestomping.html
+  - https://opus.bibliothek.uni-augsburg.de/opus4/117569
+  - https://attack.mitre.org/techniques/T1070/006/
   version: 1
   status: provisional
   params:
@@ -504,10 +503,12 @@ rules:
 - id: ntfs.usn_basic_info_change
   family: mft
   grade: B
-  label_ko: BASIC_INFO_CHANGE 뒤 과거 $SI
+  label_ko: USN 속성 변경 뒤 과거 $SI
   rationale_ko: 'USN BASIC_INFO_CHANGE 시점보다 $SI 수정 시각이 하루 이상 과거: 조작 시점 단서. 속성 변경도 같은 플래그라 단독 판단 금지.'
   false_positive_ko: 속성 변경, 압축 해제·복원.
-  sources: *id001
+  sources:
+  - https://andreafortuna.org/2017/10/18/windows-forensics-usn-journal/
+  - https://www.inversecos.com/2022/04/defence-evasion-technique-timestomping.html
   version: 1
   status: verified
   params:
@@ -518,7 +519,9 @@ rules:
   label_ko: $SI 수정 < 생성
   rationale_ko: '$SI 수정 시각이 생성 시각보다 앞섬: 복사 또는 조작.'
   false_positive_ko: 복사된 파일은 정상적으로 이런 모양.
-  sources: *id001
+  sources:
+  - https://www.inversecos.com/2022/04/defence-evasion-technique-timestomping.html
+  - https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-setfiletime
   version: 1
   status: verified
   params: {}
@@ -528,7 +531,8 @@ rules:
   label_ko: 실행 파일 ADS
   rationale_ko: 'Zone.Identifier가 아닌 대체 데이터 스트림의 내용이 PE(MZ): 은닉 페이로드.'
   false_positive_ko: 일부 보안 제품의 태그 스트림.
-  sources: *id001
+  sources:
+  - https://attack.mitre.org/techniques/T1564/004/
   version: 1
   status: verified
   validation:
@@ -548,7 +552,9 @@ rules:
   label_ko: 인터넷 다운로드 표시(ZoneId=3)
   rationale_ko: 'Zone.Identifier ZoneId=3과 HostUrl: 파일의 다운로드 출처.'
   false_positive_ko: 해당 없음(출처 정보).
-  sources: *id001
+  sources:
+  - https://attack.mitre.org/techniques/T1553/005/
+  - https://attack.mitre.org/techniques/T1564/004/
   version: 1
   status: verified
   params: {}
@@ -558,7 +564,10 @@ rules:
   label_ko: 민감 파일 삭제 흔적
   rationale_ko: '휴지통 $I 레코드 또는 미할당 MFT 엔트리가 문서·압축·이미지 확장자: 삭제 증거.'
   false_positive_ko: 정상 삭제.
-  sources: *id001
+  sources:
+  - https://andreafortuna.org/2019/09/26/windows-forensics-analysis-of-recycle-bin-artifacts/
+  - https://www.sans.org/blog/ntfs-i30-index-attributes-evidence-of-deleted-and-overwritten-files/
+  - https://andreafortuna.org/2017/10/18/windows-forensics-usn-journal/
   version: 1
   status: verified
   params:
@@ -595,7 +604,9 @@ rules:
   label_ko: 대량 이름 변경·삭제(USN)
   rationale_ko: '짧은 시간에 USN RENAME/DELETE가 임계값 이상: 랜섬웨어·와이핑 패턴.'
   false_positive_ko: 백업·AV·대량 정리.
-  sources: *id001
+  sources:
+  - https://andreafortuna.org/2017/10/18/windows-forensics-usn-journal/
+  - https://attack.mitre.org/techniques/T1485/
   version: 1
   status: verified
   params:

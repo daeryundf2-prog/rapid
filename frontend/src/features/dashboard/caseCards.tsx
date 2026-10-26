@@ -38,7 +38,7 @@ import { EVIDENCE_TYPE_LABEL } from "../case/wizardModel";
 import { formatBytes, partitionLabel } from "../tree/model";
 import { CardEmpty } from "./Card";
 import { DisclosureList, WarningList, warningsSummary } from "./cards";
-import { type DisclosureItem, isNotice, stepLabelKo } from "./disclosures";
+import { type DisclosureItem, isNotice, problemMessageKo, stepLabelKo } from "./disclosures";
 import { evidenceItemCount, formatTime } from "./model";
 
 const n = (value: number) => value.toLocaleString("ko-KR");
@@ -513,13 +513,13 @@ function ProblemGroups({ runId, problems }: { runId: string; problems: RunProble
             <ul className="dash-issues" aria-label={`${group.label_ko} 미리보기`}>
               {group.items.map((item, index) => (
                 // biome-ignore lint/suspicious/noArrayIndexKey: problem items have no id; order is stable
-                <li key={index}>
+                <li key={index} title={item.message}>
                   {item.step ? (
                     <span className="dash-issue-step" title={item.step}>
                       {stepLabelKo(item.step)}
                     </span>
                   ) : null}{" "}
-                  {item.message}
+                  {problemMessageKo(item.message)}
                 </li>
               ))}
             </ul>
