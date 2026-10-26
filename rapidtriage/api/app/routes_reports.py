@@ -54,7 +54,6 @@ from .search import (
     normalize_bookmark_tags,
 )
 
-
 # ``POST /case-report`` export formats, in the order its ``written`` list names them.
 CASE_REPORT_FORMATS = ("md", "html", "docx", "pdf", "manifest")
 

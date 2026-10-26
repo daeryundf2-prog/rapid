@@ -39,7 +39,11 @@ from rapidtriage.api.app.files_index import (
     files_time_basis,
     parse_files_sort,
 )
-from rapidtriage.api.app.row_conditions import MATCH_CACHE, parse_row_conditions, row_time
+from rapidtriage.api.app.row_conditions import (
+    MATCH_CACHE,
+    parse_row_conditions,
+    row_time,
+)
 from rapidtriage.api.app.triage_flags import FlagQuery, filter_files_rows, is_flags_sort
 from rapidtriage.core.jobs import RunJobStore
 
