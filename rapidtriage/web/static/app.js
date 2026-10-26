@@ -5550,6 +5550,11 @@ function bindSearchForm() {
       const params = new URLSearchParams();
       for (const keyword of keywords) params.append("keyword", keyword);
       params.set("ocr", includeOcr ? "true" : "false");
+      // The legacy panel renders the analysis, source-viewer actions and record metadata (R7 made them opt-in).
+      params.set("analysis", "true");
+      params.set("detail", "true");
+      params.set("metadata", "full");
+      params.set("limit", "500");
       if (source) params.append("source", source);
       if (extension) params.append("extension", extension);
       if (pathContains) params.set("path_contains", pathContains);
