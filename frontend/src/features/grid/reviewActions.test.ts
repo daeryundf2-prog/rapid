@@ -288,7 +288,8 @@ describe("case DB still being prepared (slow first import)", () => {
     });
     const first = applyReviewAction("r1", [fileRow(1)], "relevant");
     const second = applyReviewAction("r1", [fileRow(2)], "bookmark");
-    expect(announce).toHaveBeenCalledWith(CASE_DB_PREPARING_NOTICE);
+    // The run record (case_db_ready) is read first; not ready → the notice, before ensure answers.
+    await vi.waitFor(() => expect(announce).toHaveBeenCalledWith(CASE_DB_PREPARING_NOTICE));
     expect(useAppStore.getState().notice?.text).toBe(CASE_DB_PREPARING_NOTICE);
     await Promise.resolve();
     expect(calls.filter((c) => c.url.includes("review-batch"))).toHaveLength(0);

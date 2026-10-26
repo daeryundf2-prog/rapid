@@ -43,6 +43,10 @@ export interface RunListItem {
 export interface RunJob extends RunListItem {
   summary?: RunSummary;
   steps?: Array<Record<string, unknown>>;
+  /** `GET /api/runs/{id}` (r7 L4): the run's case DB is imported — marks need no `/case-db/ensure`. */
+  case_db_ready?: boolean;
+  /** The handle `/case-db/ensure` would return, when ready. */
+  case_db?: { database: string; case_id: string } | null;
   error?: string;
 }
 

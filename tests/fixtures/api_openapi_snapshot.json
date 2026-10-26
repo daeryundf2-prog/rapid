@@ -397,10 +397,14 @@
       "get": "get_run_tree_api_runs__run_id__tree_get"
     },
     "/api/runs/{run_id}/validation-package": {
-      "get": "get_run_validation_package_api_runs__run_id__validation_package_get"
+      "get": "get_run_validation_package_api_runs__run_id__validation_package_get",
+      "post": "create_run_validation_package_api_runs__run_id__validation_package_post"
     },
     "/api/runs/{run_id}/validation-package/file": {
       "get": "download_run_validation_package_api_runs__run_id__validation_package_file_get"
+    },
+    "/api/runs/{run_id}/validation-package/saved": {
+      "get": "open_saved_run_validation_package_api_runs__run_id__validation_package_saved_get"
     },
     "/api/runs/{run_id}/viewer-workflow-validation": {
       "get": "get_run_viewer_workflow_validation_api_runs__run_id__viewer_workflow_validation_get"
