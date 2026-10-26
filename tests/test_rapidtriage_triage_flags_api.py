@@ -306,8 +306,8 @@ class TriageFlagsApiTests(unittest.TestCase):
             response = self.client.get(f"/api/runs/{self.run_id}/artifacts", params=params)
             self.assertEqual(response.status_code, status, (params, response.text))
             self.assertRegex(json.dumps(response.json(), ensure_ascii=False), "[가-힣]|sort requires")
-        # /files keeps ignoring sorts it does not have (only sort=flags exists there).
-        response = self.client.get(f"/api/runs/{self.run_id}/files", params={"limit": 10, "sort": "name"})
+        # /files keeps ignoring sorts it does not have (flags + the column-index sorts of plan r7 §3.2).
+        response = self.client.get(f"/api/runs/{self.run_id}/files", params={"limit": 10, "sort": "bogus"})
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual([row["record_index"] for row in response.json()["candidates"]], [0, 1, 2])
         for record_index in ("-5", "abc", "", "1.5"):

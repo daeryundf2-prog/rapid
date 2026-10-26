@@ -530,6 +530,14 @@ def ntfs_si_modified_times(scope: RunScope | None, all_rows: Sequence[object], p
     """NTFS ``$SI`` modified time (epoch microseconds; ``-2**63`` when the row has none) of the
     rows at ``positions`` -- what :func:`ntfs_si_modified_resolver` gives row by row, resolved in
     one pass (path key -> index entry, no per-row entry dict). None unless the join is ``joined``."""
+    return ntfs_field_times(scope, all_rows, positions, "si_modified_at")
+
+
+def ntfs_field_times(scope: RunScope | None, all_rows: Sequence[object], positions: Sequence[int], name: str) -> list[int] | None:
+    """One NTFS time field (:data:`TIME_FIELDS`, e.g. ``created_at`` = the 파일 목록 "NTFS 생성"
+    column) of the rows at ``positions``, in epoch microseconds (``-2**63`` = none), resolved in one
+    pass like :func:`ntfs_si_modified_times` (server sort ``GET /files?sort=ctime``, plan r7 §3.2).
+    None unless the join is ``joined``."""
     _join, _source_image, index, prefix = _join_context(scope, all_rows)
     if index is None or prefix is None:
         return None
@@ -537,7 +545,7 @@ def ntfs_si_modified_times(scope: RunScope | None, all_rows: Sequence[object], p
     entries = index.entries
     size = _PACK.size
     unpack = _PACK.unpack
-    field = 1 + TIME_FIELDS.index("si_modified_at")
+    field = 1 + TIME_FIELDS.index(name)
     times: list[int] = []
     for position in positions:
         row = all_rows[position]
