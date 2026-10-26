@@ -35,6 +35,7 @@ export const RUN_MODE_LABEL: Record<string, string> = {
   seizure: "전수 수집",
   hacking: "침해사고",
   recovery: "복구",
+  quick: "빠른 선별",
 };
 
 /** Short display name of a run: last path segment of its evidence root. */

@@ -462,6 +462,43 @@
   margin: var(--space-1) 0 0;
 }
 
+/* 케이스 열기 run row (R7 C-L1): the run (name + chip `모드 · 시작 · 소요 · id8` + state) and a ⋯ menu. */
+.case-tree-run {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.case-run-open {
+  flex: 1 1 auto;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+  height: auto;
+  min-height: 36px;
+  padding-block: var(--space-1);
+  text-align: start;
+}
+
+.case-run-text {
+  display: grid;
+  min-width: 0;
+}
+
+.case-run-label,
+.case-run-chip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.case-run-chip {
+  color: var(--text-muted);
+  font-size: var(--fs-aux);
+  font-variant-numeric: tabular-nums;
+}
+
 .case-tree-heading {
   margin: var(--space-3) 0 var(--space-2);
   font-size: var(--fs-aux);

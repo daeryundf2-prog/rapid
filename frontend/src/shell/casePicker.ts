@@ -1,20 +1,27 @@
 /**
- * Case picker model (review #5): the rows of the top bar's case combobox — most recent case
- * first, narrowed by the search text — and the wrap-around keyboard move.
+ * Run picker model (review #5, R7 C-G5 · C-L1): the rows of the top bar's run combobox — newest
+ * representative start first, narrowed by the search text — and the wrap-around keyboard move.
+ * The rows are runs (a case groups runs; the dialog "케이스 열기" shows that tree).
  */
 
-import type { RunListItem } from "../api/runs";
+import { type RunListItem, runStartedMs } from "../api/runs";
 import { RUN_MODE_LABEL, runDisplayName } from "../app/collections";
 import { statusTone } from "../components/Badge";
+import { runChipText, runDurationText, runStartText } from "../features/case/runTime";
+import { formatRunTime, parseInstant } from "../utils/time";
 
 export interface CaseOption {
   runId: string;
   /** Evidence folder name (13px/500 first line). */
   name: string;
-  /** Investigation mode label ("문서·부정 조사"), or "케이스". */
+  /** Investigation mode label ("문서·부정 조사"), or "모드 없음". */
   mode: string;
-  /** "2026-10-13 10:07" (local time), or "" when the run has no time stamp. */
+  /** Representative start "2026-10-13 10:07" in the display zone ("가져옴 …" = import time), or "". */
   date: string;
+  /** 소요 "34:09", "—" when unknown (an imported run without processing times). */
+  duration: string;
+  /** Run chip `모드 · 시작 시각 · 소요 · id8` (C-L1). */
+  chip: string;
   status: string;
   /** Status dot class (controls.css .status-dot.ok / .info / .danger / .warn); "" = neutral. */
   tone: string;
@@ -34,46 +41,42 @@ export function caseStatusLabel(status: string): string {
   return STATUS_LABEL[status] ?? status;
 }
 
-function pad(n: number): string {
-  return String(n).padStart(2, "0");
+/** ISO time → "YYYY-MM-DD HH:mm" in `timezone` ("" when missing or unparsable) — `formatRunTime`. */
+export function shortDateTime(iso: string | undefined | null, timezone = "local"): string {
+  if (!iso || !parseInstant(iso)) return "";
+  return formatRunTime(iso, timezone);
 }
 
-/** ISO time → "YYYY-MM-DD HH:mm" in local time ("" when missing or unparsable). */
-export function shortDateTime(iso: string | undefined): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-function timeOf(run: RunListItem): number {
-  const t = Date.parse(run.updated_at ?? run.created_at ?? "");
-  return Number.isNaN(t) ? Number.NEGATIVE_INFINITY : t;
-}
-
-export function toCaseOption(run: RunListItem): CaseOption {
+export function toCaseOption(run: RunListItem, timezone = "local", now: number = Date.now()): CaseOption {
   const mode = run.request?.mode ?? "";
   const tone = statusTone(run.status);
   return {
     runId: run.run_id,
     name: runDisplayName(run),
-    mode: RUN_MODE_LABEL[mode] ?? (mode || "케이스"),
-    date: shortDateTime(run.created_at ?? run.updated_at),
+    mode: RUN_MODE_LABEL[mode] ?? (mode || "모드 없음"),
+    date: runStartText(run, timezone),
+    duration: runDurationText(run, now),
+    chip: runChipText(run, timezone, now),
     status: run.status,
     tone: tone === "muted" ? "" : tone,
   };
 }
 
 /**
- * Picker rows: most recently updated/created first (stable for equal times), filtered by every
+ * Picker rows: newest representative start first (stable for equal times), filtered by every
  * whitespace-separated term of `query` against the name, the mode label and the run id.
  */
-export function casePickerOptions(runs: readonly RunListItem[], query = ""): CaseOption[] {
+export function casePickerOptions(
+  runs: readonly RunListItem[],
+  query = "",
+  timezone = "local",
+): CaseOption[] {
   const terms = query.toLocaleLowerCase("ko-KR").split(/\s+/).filter(Boolean);
+  const now = Date.now();
   return runs
     .map((run, index) => ({ run, index }))
-    .sort((a, b) => timeOf(b.run) - timeOf(a.run) || a.index - b.index)
-    .map(({ run }) => toCaseOption(run))
+    .sort((a, b) => runStartedMs(b.run) - runStartedMs(a.run) || a.index - b.index)
+    .map(({ run }) => toCaseOption(run, timezone, now))
     .filter((option) => {
       if (terms.length === 0) return true;
       const hay = `${option.name} ${option.mode} ${option.runId}`.toLocaleLowerCase("ko-KR");
