@@ -229,8 +229,10 @@ class ScanBudgetTests(unittest.TestCase):
             self.assertEqual(payload["backend"], "scan")
             self.assertEqual(set(payload["scanned"]), {"timeline"})
             timeline = payload["scanned"]["timeline"]
-            self.assertEqual(timeline["rows"], 20)
+            # limit 2 + one lookahead hit (R7 paging: ``has_more``) = 3 matches = 30 rows.
+            self.assertEqual(timeline["rows"], 30)
             self.assertEqual(timeline["stopped"], "limit")
+            self.assertTrue(payload["pagination"]["has_more"])
             self.assertFalse(payload["truncated"])
             self.assertEqual([m["pointer"] for m in payload["matches"]], ["/events/9", "/events/19"])
 
@@ -239,7 +241,8 @@ class ScanBudgetTests(unittest.TestCase):
             summary = write_synthetic_run(Path(tmp_dir), events=200, needle_every=10)
             payload = run_unified_search(summary, ["needle"], limit=3, include_ocr=False, include_analysis=False)
             self.assertEqual([m["source"] for m in payload["matches"]], ["files", "timeline", "timeline"])
-            self.assertEqual(payload["scanned"]["timeline"]["rows"], 20)
+            # Two timeline hits left after files, plus the lookahead hit: 3 hits = 30 rows.
+            self.assertEqual(payload["scanned"]["timeline"]["rows"], 30)
 
     def test_wall_clock_budget_returns_partial_results_truncated(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

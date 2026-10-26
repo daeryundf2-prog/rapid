@@ -350,10 +350,30 @@ export interface GridFooterProps {
   scope?: string;
   /** Checked rows (kept across pages, scrolling and refetches); "선택 N건" when any. */
   selectedCount?: number;
+  /** Collection-specific wording of the truncation note (unified search). */
+  truncatedText?: string;
+  /** Loaded vs total line of a server-paged result (unified search: "불러온 250건 / 전체 441건"). */
+  loadedSummary?: string;
 }
 
 export const TRUNCATED_NOTICE =
   "결과가 상한 또는 시간 제한으로 일부만 표시되었습니다. 키워드나 범위를 좁혀 다시 검색하세요.";
+
+/** Unified search stopped at its wall-clock budget: the hits found so far, in their stable order. */
+export const SEARCH_TRUNCATED_NOTICE =
+  "검색이 시간 제한에 도달해 찾은 결과의 앞부분만 표시합니다. 키워드를 더 구체적으로 쓰거나 출처·확장자를 좁혀 다시 검색하세요.";
+
+/** Footer line of a server-paged search: rows loaded so far against the total (or "더 있음"). */
+export function searchLoadedText(loaded: number, total: number | null, hasMore: boolean): string {
+  if (total !== null) {
+    return loaded < total
+      ? `불러온 ${formatCount(loaded)}건 / 전체 ${formatCount(total)}건`
+      : `전체 ${formatCount(total)}건 모두 불러옴`;
+  }
+  return hasMore
+    ? `불러온 ${formatCount(loaded)}건 · 더 있음 (아래로 스크롤하면 이어서 불러옵니다)`
+    : `불러온 ${formatCount(loaded)}건`;
+}
 
 export function GridFooter(props: GridFooterProps) {
   const seconds =
@@ -368,6 +388,7 @@ export function GridFooter(props: GridFooterProps) {
         총{" "}
         {props.total !== null ? `${formatCount(props.total)}건` : props.loading ? "세는 중…" : "알 수 없음"}
       </span>
+      {props.loadedSummary ? <span data-testid="grid-footer-loaded">{props.loadedSummary}</span> : null}
       {props.selectedCount ? (
         <span data-testid="grid-footer-selected">선택 {formatCount(props.selectedCount)}건</span>
       ) : null}
@@ -396,7 +417,7 @@ export function GridFooter(props: GridFooterProps) {
       ) : null}
       {props.truncated ? (
         <span className="grid-note grid-warn" role="note">
-          {TRUNCATED_NOTICE}
+          {props.truncatedText ?? TRUNCATED_NOTICE}
         </span>
       ) : null}
       {props.canLoadMore ? (

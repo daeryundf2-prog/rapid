@@ -164,6 +164,8 @@ export interface CollectionQuery {
     mode: "exact" | "fuzzy" | "regex";
     sources?: string[];
     hideKnownGood?: boolean;
+    /** Include OCR sidecar text (`ocr=1`; off by default: it reads every image's sidecar). */
+    ocr?: boolean;
   };
 }
 

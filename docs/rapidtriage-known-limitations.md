@@ -331,6 +331,33 @@ RapidTriage is a local triage and review tool, not a full commercial forensic su
 - **검토 표시**: 문서 적중은 docs-index 결과에 없어도 `docs` `/candidates/<n>` 로케이터로 표시된다. 일괄 표시에서 로케이터가 없는 행(원본 레코드가 없는 행)은 건너뛰고 나머지에 적용하며, 건너뛴 행 제목을 알림에 적는다. 서버가 로케이터를 케이스 DB 행으로 풀지 못하면(런 산출물이 케이스 DB를 만든 뒤 바뀐 경우 등) 요청 전체가 이전처럼 실패한다.
 - **그리드 선택**: 행 클릭은 포커스 행만 옮기고 체크 표시를 바꾸지 않는다(이전에는 클릭한 행 하나만 선택). 체크박스 클릭은 그 행만 토글, Shift+클릭(행 또는 체크박스)은 기준 행부터 범위를 더하고, Ctrl/Cmd+클릭은 토글, Esc는 전체 해제, 바닥줄에 "선택 N건". 키보드 Shift+화살표 범위는 이전처럼 선택을 범위로 바꾼다. 선택은 행 키로 저장되어 스크롤·가상화·다음 페이지에도 남지만 다른 컬렉션·폴더·런으로 옮기면 비워진다.
 
+## R7 검색 지연
+
+근거: 실제 런 b5fabbe09f18(run-subset10)·af54ff24ed5f 측정(`D:\rapid-qa\derived\r7-search-perf\`), 테스트 `tests/test_r7_search_latency.py`.
+
+- **`GET /api/runs/{id}/search` 기본값 변경(API)**: `analysis`·`ocr`·`detail` 기본 끔, `metadata=compact` 기본, `limit` 기본 250(최대 1,000), `offset`(최대 20,000) 페이지. 켜려면 `analysis=1`(개체·동시 출현 분석), `ocr=1` 또는 `source=ocr`(OCR 사이드카), `detail=1`(적중별 `source_verification_profile`·`advanced_search_hit_manifest(_hash)`·`source_viewer_action_profile`, 최상위 `advanced_*`·`core_accuracy_gates`·`commercial_uplift_evidence`·`search_backend_contract`·`workbench_search_profile`·`search_report_grade_assessment`·`search_result_source_action_profile`), `metadata=full`(적중의 원본 레코드 전체). 기본 응답의 `detail_omitted`가 빠진 블록을 적는다. 이전 응답과 같게 받으려면 `analysis=1&ocr=1&detail=1&metadata=full&limit=500`(레거시 패널 `static/app.js`가 그렇게 부른다). CLI `rapidtriage search`와 `run_unified_search`의 파이썬 기본값은 그대로(전체 응답).
+- **compact metadata**: `timestamp`·`timestamp_kind`·`event_type`·`artifact_type`·`provider`·`name`·`extension`·`size`·`modified_at`·`categories`·`is_deleted`·`known_good_status`·`sha256`·`sha1`·`md5`·`hashes`·`source_hashes`만 남긴다(512자 넘는 문자열, 해시 맵의 비스칼라 값은 뺀다). `details` 등 나머지는 없다 — 행을 열면 뷰어가 원본 경로·출력 행을 직접 읽으므로 콘솔은 영향이 없다. `title`·`display_path`·`artifact_type`·`timestamp`·`snippet`·`locator`(finalize_search_hit)는 자르기 전에 전체 레코드로 계산된다.
+- **페이지**: 적중 순서는 출처 순서(문서 → 파일 → 아티팩트 → 지표 → 타임라인 → OCR), 그 안에서 출력/케이스 DB rowid 순서로 고정이다. `pagination = {offset, limit, returned, has_more, next_offset, total}` — `has_more`는 한 건 더 찾아 본 결과, `total`은 검색이 끝까지 간 때(더 없음, 시간 예산 미도달)만 숫자이고 아니면 `null`. `offset` 페이지는 앞 페이지 적중을 다시 찾으므로 뒤 페이지일수록 느리다(커서 없음). 콘솔은 250건씩 받고 끝에 가까이 스크롤하면 다음 페이지를 받으며, 바닥줄에 "불러온 N건 / 전체 M건"(또는 "더 있음"), 시간 예산에 걸리면 "검색이 시간 제한에 도달해 찾은 결과의 앞부분만 표시합니다 …"를 보인다. 상단 바 Enter 제출은 그대로다. 검색 옵션의 "OCR 텍스트 포함"은 이제 실제로 `ocr=1`을 보내며 기본은 꺼짐이다(이전에는 화면 값과 무관하게 서버가 늘 OCR 사이드카를 읽었다).
+- **시간 예산**: `RAPIDTRIAGE_SEARCH_SCAN_BUDGET_SECONDS`(기본 20 s)를 출처별로 나눈다. 케이스 DB(FTS) 백엔드는 SQLite progress handler(4,096 VM 명령마다)로 문장 안에서도 멈춘다 — 이전에는 행과 행 사이에서만 확인해 FTS 접두어 병합·차가운 디스크 읽기 중에는 예산을 넘겼다(157 s, 300 s 시간 초과). 예산에 걸린 결과는 고정 순서의 앞부분이며 `truncated: true`; 그래서 같은 검색이라도 기계 부하에 따라 건수가 다를 수 있다(446 대 500 같은 차이는 이것). 클라이언트가 연결을 끊어도 서버 검색은 예산까지 계속된다(동기 라우트는 연결 끊김을 보지 않음).
+- **정규식**: 패턴은 글자·숫자 2자 이상의 고정 단어로 시작해야 한다(`Live.*Update`, `\bpowershell\.exe`, `^cmd`). `.*Update`·`\d{6}-\d{7}`·`a|b`·`[A-Z]+` 같은 패턴은 422(한국어 이유) — 색인이 단어 앞부분으로만 후보를 좁힐 수 있어 전체 행을 훑어야 하기 때문이다. 주민등록번호 같은 형식 검색은 v2 검색 색인(`/search/query`)이나 지표 탭을 쓴다.
+- **출력 행 캐시**: FTS 적중의 `files.json`/`docs.json` `candidates` 순번 조회, docs 결과 색인, 추출 오류를 출력 리비전(경로·크기·mtime)별로 메모리에 둔다(행당 압축 JSON 문자열, 합계 `RAPIDTRIAGE_SEARCH_ROW_CACHE_MB` 기본 256 MB, 16개 항목; 예산보다 큰 출력은 이전처럼 스트리밍).
+- **아티팩트 경로 필터(`/artifacts?path_contains=`)**: 종류별 경로 색인(서로 다른 경로 목록 + 행별 경로 번호 + JSONL 바이트 위치)으로 답한다. 의미는 이전 스캔과 같다(`path` 없으면 `source_path`, NFC + casefold 부분 일치, 프로필 펼침). 메모리에만 두고(종류 24개 LRU) 파일을 쓰지 않는다. 한 종류 요청은 처음에 색인을 만든다(29.4만 행 이벤트 로그 약 3.5–4 s, 부하 시 10 s — 이전에는 매 요청 8–10 s), 여러 종류 요청은 준비된 색인만 쓰고 나머지는 배경에서 만든다(그동안 그 종류는 스캔). 진행 중인 런은 스캔. 스캔은 이제 같은 시간 예산에서 멈추고 `truncated`·`budget_stopped`를 낸다. 다른 종류(`q`/텍스트) 필터는 바뀌지 않았다 — 타임라인 `q=`는 이미 색인(≤ 30 ms)이다. 응답 `pagination.path_index`: `ready` | `scan`.
+- **측정(R7, 로컬 서버 :8803, `RAPIDTRIAGE_INDEX_PERSIST=0`, 따뜻한 중앙값 5회, 부하 있는 기계)** — 이전 → 이후:
+
+  | 요청 | b5fabbe09f18 | af54ff24ed5f |
+  |---|---|---|
+  | `계약` limit 500 | 3.5 s / 16.3 MB → 0.52 s / 0.62 MB | 3.6 s / 16.3 MB → 0.47 s / 0.62 MB(새 프로세스) |
+  | `계약` 콘솔 기본(250건) | — → 0.78 s / 0.35 MB(2쪽 0.51 s) | — → 0.62 s / 0.35 MB(2쪽 0.40 s) |
+  | `LiveUpdate`+`계약` | 5.2 s / 19.2 MB → 0.54 s / 0.64 MB | 4.9 s / 19.2 MB → 0.69 s / 0.64 MB |
+  | 없는 단어 | 0.57 s → 0.008 s | 0.39 s → 0.012 s |
+  | `LiveUpdate` | 1.05 s / 4.2 MB → 0.13 s / 0.04 MB | 1.03 s → 0.15 s |
+  | 정규식 `Live.*Update` | 시간 초과(300 s) → 5.2 s(500건, 다음 쪽 있음) | 157 s 차갑게 → 차갑게 5.3 s / 따뜻하게 8.0 s |
+  | 정규식 `.*Update` | — → 422, 0.007 s | — → 422 |
+  | `/artifacts?kind=eventlog&path_contains=`(희귀·없음) | 7–10 s → 0.007–0.019 s(첫 요청 색인 생성 4–10 s) | 7–10 s → 0.006–0.016 s(첫 요청 3.5 s) |
+  | 전체 응답(`analysis=1&ocr=1&detail=1&metadata=full`) | 3.5 s / 16.3 MB → 6.1 s / 16.6 MB | → 4.6 s / 16.6 MB |
+
+  큰 출력을 이미 여러 개 읽어 둔 서버 프로세스(같은 프로세스에서 다른 런·전체 응답을 연 뒤)에서는 같은 콘솔 검색이 1.4–1.7 s까지 늘었다(af54, 함수 안 측정 `elapsed_ms` 1.39 s, 새 프로세스 0.47 s) — 파이썬 전체 GC로 추정하며 확인하지 않았다. 남은 비용은 적중 레코드 JSON 왕복·키워드 정규화와 `finalize_search_hit` 문맥 찾기(레코드당 잎 최대 20,000개)다.
+
 ## R6 S1 — 기존 증거 점검 후속 수정
 
 근거: `docs/validation/r6-sample-validation-2026-10-19.md` §5.5(D 드라이브 기존 증거 읽기 전용 점검). 테스트는 합성 픽스처만 쓴다(`tests/test_r6_s1_dcheck_gaps.py`).

@@ -999,31 +999,51 @@ async function fetchArtifactKindsPage(
   };
 }
 
-/** Unified search (FTS when the run has a case DB, else a bounded scan). Not paged by the API. */
+/** Server page size of the unified search (the API default). */
+export const SEARCH_PAGE_SIZE = 250;
+
+/**
+ * Unified search (FTS when the run has a case DB, else a bounded scan), one page of hits.
+ * The API's defaults are the grid's: no `analysis`, no OCR (`ocr=1` only when the search
+ * options ask for it), compact hit metadata, no per-hit audit profiles (`detail`).
+ * `total` is known only once the server reached the end (`pagination.total`); until then
+ * `hasMore` tells the grid another page exists.
+ */
 export async function fetchSearchRows(
   runId: string,
-  query: Pick<CollectionQuery, "search" | "extension">,
+  query: Pick<CollectionQuery, "search" | "extension"> & Partial<Pick<CollectionQuery, "offset">>,
   limit: number,
   signal?: AbortSignal,
 ): Promise<RawPage> {
   const spec = query.search;
+  const offset = Math.max(0, query.offset ?? 0);
   if (!spec || spec.keywords.length === 0) {
-    return { rows: [], total: 0, offset: 0, backend: "none", truncated: false, elapsedMs: 0 };
+    return { rows: [], total: 0, offset, backend: "none", truncated: false, elapsedMs: 0 };
   }
   const params = new URLSearchParams();
   for (const keyword of spec.keywords) params.append("keyword", keyword);
-  params.set("limit", String(Math.min(limit, 1000)));
+  params.set("limit", String(Math.min(Math.max(1, limit || SEARCH_PAGE_SIZE), 1000)));
+  if (offset > 0) params.set("offset", String(offset));
   params.set("search_mode", spec.mode);
+  if (spec.ocr) params.set("ocr", "1");
   for (const source of spec.sources ?? []) params.append("source", source);
   for (const extension of query.extension ?? []) params.append("extension", extension);
   if (spec.hideKnownGood) params.set("hide_known_good", "true");
   const payload = await api<Record<string, unknown>>(`/api/runs/${enc(runId)}/search?${params}`, { signal });
   const rows = asRows(payload.matches);
+  const pagination =
+    payload.pagination && typeof payload.pagination === "object"
+      ? (payload.pagination as Record<string, unknown>)
+      : null;
+  // Older servers answer one unpaged window: its rows are the whole result.
+  const hasMore = pagination ? pagination.has_more === true : false;
+  const total = pagination ? (asNumber(pagination.total) ?? null) : offset + rows.length;
   return {
     rows,
-    total: rows.length,
-    offset: 0,
+    total: hasMore ? null : (total ?? (payload.truncated === true ? null : offset + rows.length)),
+    offset,
     backend: typeof payload.backend === "string" ? payload.backend : "scan",
+    hasMore,
     truncated: payload.truncated === true,
     elapsedMs: asNumber(payload.elapsed_ms) ?? 0,
   };
