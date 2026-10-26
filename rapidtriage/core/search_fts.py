@@ -23,8 +23,12 @@ characters fall back to a bounded rowid-order walk of the index tables.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sqlite3
+import threading
+import time
+from collections import OrderedDict
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
 
@@ -133,6 +137,25 @@ def regex_leading_literal(pattern: str) -> str | None:
     return tokens[0] if tokens and len(tokens[0]) >= 2 else None
 
 
+def regex_literal_prefix_problem(pattern: str) -> str | None:
+    """Korean reason why ``pattern`` cannot run as an indexed regex search, or ``None``.
+
+    The index narrows candidates by the word a regex starts with
+    (:func:`regex_leading_literal`); a pattern without one would walk every
+    indexed row and run the regex on each (minutes on a large case).
+    """
+    if regex_leading_literal(pattern) is not None:
+        return None
+    shown = pattern if len(pattern) <= 80 else pattern[:77] + "..."
+    return (
+        f"정규식 '{shown}'은(는) 고정된 단어로 시작하지 않아 검색할 수 없습니다. "
+        "정규식 검색은 색인에서 정규식의 첫 단어(글자·숫자 2자 이상)로 후보 행을 먼저 좁힌 뒤 정규식을 확인합니다. "
+        "첫 단어가 없는 정규식(예: '.*Update', '\\d{6}-\\d{7}', 'a|b')은 모든 행을 하나씩 확인해야 해 "
+        "수 분이 걸릴 수 있으므로 허용하지 않습니다. 'Live.*Update'처럼 고정 단어로 시작하게 바꾸거나 "
+        "정확히 일치(exact) 검색을 사용하세요."
+    )
+
+
 def build_candidate_query(keywords: Sequence[str], *, mode: str, fuzzy_distance: int) -> str | None:
     terms = []
     for keyword in keywords:
@@ -186,6 +209,116 @@ class MatchCollector:
         return True
 
 
+# Bytes of run-output rows kept in memory for ordinal lookups (all runs).
+OUTPUT_ROW_CACHE_ENV = "RAPIDTRIAGE_SEARCH_ROW_CACHE_MB"
+OUTPUT_ROW_CACHE_DEFAULT_MB = 256
+OUTPUT_ROW_CACHE_MAX_ENTRIES = 16
+
+
+def _output_row_cache_bytes() -> int:
+    raw = os.environ.get(OUTPUT_ROW_CACHE_ENV, "").strip()
+    try:
+        megabytes = float(raw) if raw else OUTPUT_ROW_CACHE_DEFAULT_MB
+    except ValueError:
+        megabytes = OUTPUT_ROW_CACHE_DEFAULT_MB
+    return max(0, int(megabytes * 1024 * 1024))
+
+
+def output_stamp(path: Path) -> tuple[str, int, int] | None:
+    """``(path, size, mtime_ns)``: the revision a cached lookup belongs to (``None`` when unreadable)."""
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return (str(path), stat.st_size, stat.st_mtime_ns)
+
+
+class OutputRowCache:
+    """Bounded LRU of run-output lookups keyed by output revision (path, size, mtime).
+
+    ``rows(path, member)`` keeps one array member (``files.json`` /
+    ``docs.json`` ``candidates``) as compact JSON text per row, so an FTS
+    hit's ordinal lookup no longer re-streams the output on every request;
+    ``value(path, tag, build)`` keeps derived lookups (the docs result index,
+    extraction errors). Entries are bounded by
+    ``RAPIDTRIAGE_SEARCH_ROW_CACHE_MB`` (default 256; ``0`` disables) and
+    :data:`OUTPUT_ROW_CACHE_MAX_ENTRIES`; an output larger than the byte
+    budget is never cached (callers stream it). A rewritten output has
+    another stamp, so its old entry only ages out.
+    """
+
+    def __init__(self, max_bytes: int | None = None, max_entries: int = OUTPUT_ROW_CACHE_MAX_ENTRIES) -> None:
+        self._max_bytes = max_bytes
+        self._max_entries = max_entries
+        self._lock = threading.Lock()
+        self._build_lock = threading.Lock()
+        self._entries: OrderedDict[tuple[object, ...], tuple[object, int]] = OrderedDict()
+        self.builds = 0
+
+    @property
+    def max_bytes(self) -> int:
+        return _output_row_cache_bytes() if self._max_bytes is None else self._max_bytes
+
+    def clear(self) -> None:
+        with self._lock:
+            self._entries.clear()
+
+    def _get(self, key: tuple[object, ...]) -> object | None:
+        with self._lock:
+            found = self._entries.get(key)
+            if found is None:
+                return None
+            self._entries.move_to_end(key)
+            return found[0]
+
+    def _put(self, key: tuple[object, ...], value: object, nbytes: int) -> None:
+        budget = self.max_bytes
+        if nbytes > budget:
+            return
+        with self._lock:
+            self._entries[key] = (value, nbytes)
+            self._entries.move_to_end(key)
+            total = sum(size for _value, size in self._entries.values())
+            while self._entries and (total > budget or len(self._entries) > self._max_entries):
+                _key, (_value, size) = self._entries.popitem(last=False)
+                total -= size
+
+    def rows(self, path: Path, member: str) -> Sequence[str] | None:
+        stamp = output_stamp(path)
+        if stamp is None or stamp[1] > self.max_bytes:
+            return None
+        key = (*stamp, "rows", member)
+        found = self._get(key)
+        if found is not None:
+            return found  # type: ignore[return-value]
+        with self._build_lock:
+            found = self._get(key)
+            if found is not None:
+                return found  # type: ignore[return-value]
+            rows: list[str] = []
+            nbytes = 0
+            for row in OrdinalRows._stream(path, member):
+                text = json.dumps(row, ensure_ascii=False, separators=(",", ":"))
+                rows.append(text)
+                nbytes += len(text) + 64
+            self.builds += 1
+            self._put(key, rows, nbytes)
+            return rows
+
+    def value(self, path: Path, tag: str, build: Callable[[], object], *, nbytes: Callable[[object], int]) -> object:
+        stamp = output_stamp(path)
+        if stamp is None:
+            return build()
+        key = (*stamp, "value", tag)
+        found = self._get(key)
+        if found is not None:
+            return found
+        value = build()
+        self.builds += 1
+        self._put(key, value, nbytes(value))
+        return value
+
+
 class OrdinalRows:
     """Forward-only lookup of run-output array rows by position.
 
@@ -195,8 +328,11 @@ class OrdinalRows:
 
     def __init__(self, path: Path | None, member: str) -> None:
         self._rows: Iterator[object] = iter(())
+        self._cached: Sequence[str] | None = None
         if path is not None and path.is_file():
-            self._rows = self._stream(path, member)
+            self._cached = OUTPUT_ROW_CACHE.rows(path, member)
+            if self._cached is None:
+                self._rows = self._stream(path, member)
         self._position = -1
         self._current: Mapping[str, object] | None = None
 
@@ -210,6 +346,12 @@ class OrdinalRows:
             return
 
     def get(self, ordinal: int) -> Mapping[str, object] | None:
+        if self._cached is not None:
+            # Cached member: random access, one row parsed per lookup.
+            if not 0 <= ordinal < len(self._cached):
+                return None
+            row = json.loads(self._cached[ordinal])
+            return row if isinstance(row, Mapping) else None
         if ordinal < self._position:
             return None
         while self._position < ordinal:
@@ -221,6 +363,9 @@ class OrdinalRows:
             self._position += 1
             self._current = row
         return self._current
+
+
+OUTPUT_ROW_CACHE = OutputRowCache()
 
 
 def _output_path(outputs: Mapping[str, object], name: str) -> Path | None:
@@ -238,14 +383,44 @@ def _iter_rows(
     params: Sequence[object],
     scan: SourceScan,
 ) -> Iterator[sqlite3.Row]:
-    cursor = connection.execute(sql, tuple(params))
+    try:
+        cursor = connection.execute(sql, tuple(params))
+    except sqlite3.OperationalError as exc:
+        if not _interrupted(exc):
+            raise
+        scan.stopped = "budget"
+        return
     try:
         for row in cursor:
             if not scan.tick():
                 return
             yield row
+    except sqlite3.OperationalError as exc:
+        # The progress handler stopped SQLite itself at the budget (a long
+        # FTS prefix merge, or a cold-disk walk between two rows).
+        if not _interrupted(exc):
+            raise
+        scan.stopped = "budget"
     finally:
         cursor.close()
+
+
+def _interrupted(exc: sqlite3.Error) -> bool:
+    return "interrupt" in str(exc).lower()
+
+
+# SQLite VM instructions between two budget checks (microseconds apart).
+PROGRESS_HANDLER_STEPS = 4096
+
+
+class _BudgetGuard:
+    """SQLite progress handler: aborts the running statement once the current source's deadline passed."""
+
+    def __init__(self) -> None:
+        self.deadline: float | None = None
+
+    def __call__(self) -> int:
+        return 1 if self.deadline is not None and time.monotonic() >= self.deadline else 0
 
 
 def _match_clause(fts_table: str, query: str | None) -> tuple[str, str, list[object]]:
@@ -307,6 +482,8 @@ def fts_unified_matches(
     except sqlite3.Error as exc:
         raise CaseIndexError(f"case DB unavailable: {exc}") from exc
     connection.row_factory = sqlite3.Row
+    guard = _BudgetGuard()
+    connection.set_progress_handler(guard, PROGRESS_HANDLER_STEPS)
     try:
         evidence = connection.execute("SELECT MAX(id) AS id FROM evidence_source").fetchone()
         if evidence is None or evidence["id"] is None:
@@ -325,8 +502,15 @@ def fts_unified_matches(
                 budget.skip_source(source, "limit")
                 continue
             scan = budget.start_source(source, sources_left=total_sources - position)
+            guard.deadline = scan.deadline
             before = len(collector.matches)
-            handlers[source](connection, context, scan, sources)
+            try:
+                handlers[source](connection, context, scan, sources)
+            except sqlite3.OperationalError as exc:
+                if not _interrupted(exc):
+                    raise
+                scan.stopped = "budget"
+            guard.deadline = None
             scan.finish(matches=len(collector.matches) - before, limit_reached=collector.full)
         if "documents" in wanted:
             document_errors = _document_errors(outputs)
@@ -429,23 +613,44 @@ def _documents(connection: sqlite3.Connection, context: _SearchContext, scan: So
 
 
 def _docs_result_index(docs_path: Path | None) -> dict[str, int]:
-    index: dict[str, int] = {}
-    for position, item in enumerate(OrdinalRows._stream(docs_path, "results") if docs_path and docs_path.is_file() else ()):
-        if item.get("path"):
-            index.setdefault(str(item.get("path")), position)
-    return index
+    if docs_path is None or not docs_path.is_file():
+        return {}
+
+    def build() -> dict[str, int]:
+        index: dict[str, int] = {}
+        for position, item in enumerate(OrdinalRows._stream(docs_path, "results")):
+            if item.get("path"):
+                index.setdefault(str(item.get("path")), position)
+        return index
+
+    return OUTPUT_ROW_CACHE.value(  # type: ignore[return-value]
+        docs_path,
+        "docs-result-index",
+        build,
+        nbytes=lambda value: sum(len(key) + 80 for key in value),  # type: ignore[attr-defined]
+    )
 
 
 def _document_errors(outputs: Mapping[str, object]) -> list[dict[str, object]]:
     docs_path = _output_path(outputs, "docs")
     if docs_path is None or not docs_path.is_file():
         return []
-    errors = []
-    for item in OrdinalRows._stream(docs_path, "extraction_errors"):
-        normalized = normalize_document_extraction_error(item)
-        if normalized:
-            errors.append(normalized)
-    return errors
+
+    def build() -> list[dict[str, object]]:
+        errors = []
+        for item in OrdinalRows._stream(docs_path, "extraction_errors"):
+            normalized = normalize_document_extraction_error(item)
+            if normalized:
+                errors.append(normalized)
+        return errors
+
+    cached = OUTPUT_ROW_CACHE.value(
+        docs_path,
+        "docs-extraction-errors",
+        build,
+        nbytes=lambda value: len(json.dumps(value, ensure_ascii=False)) + 64,
+    )
+    return [dict(item) for item in cached]  # type: ignore[attr-defined]
 
 
 def _files(connection: sqlite3.Connection, context: _SearchContext, scan: SourceScan, _sources: set[str]) -> None:

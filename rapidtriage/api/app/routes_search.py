@@ -16,6 +16,7 @@ from ...core.keyword_packs import (
     resolve_keyword_packs,
 )
 from ...core.search import SearchError, run_unified_search
+from ...core.search_fts import regex_literal_prefix_problem
 from .analyses import AnalysisRowRef, analysis_row_ref
 from .helpers import (
     get_job,
@@ -30,6 +31,11 @@ from .runops import (
     build_search_result_source_action_profile,
     build_source_search,
 )
+
+# Console page size (R7): a page renders fast; the grid loads the next page on scroll.
+SEARCH_DEFAULT_LIMIT = 250
+# Deep offsets re-collect every earlier hit: bounded so a page stays interactive.
+SEARCH_MAX_OFFSET = 20_000
 
 
 def build_search_router(
@@ -154,29 +160,52 @@ def build_search_router(
     def search_run(
         run_id: str,
         keyword: list[str] = Query(..., min_length=1),
-        ocr: bool = True,
-        limit: int = Query(500, ge=1, le=1000),
+        ocr: bool = False,
+        limit: int = Query(SEARCH_DEFAULT_LIMIT, ge=1, le=1000),
+        offset: int = Query(0, ge=0, le=SEARCH_MAX_OFFSET),
         source: list[str] = Query(default=[]),
         extension: list[str] = Query(default=[]),
         path_contains: str | None = Query(default=None),
-        analysis: bool = True,
+        analysis: bool = False,
+        detail: bool = False,
+        metadata: str = Query("compact", pattern="^(compact|full)$"),
         search_mode: str = Query("exact", pattern="^(exact|fuzzy|regex)$"),
         fuzzy_distance: int = Query(1, ge=0, le=2),
         proximity_window: int = Query(0, ge=0, le=100),
         hide_known_good: bool = False,
         keyword_pack: list[str] = Query(default=[]),
     ) -> dict[str, object]:
+        """Unified keyword search over a finished run (case-DB FTS, else a bounded scan).
+
+        Defaults favour the console grid (R7): ``analysis`` and ``ocr`` are off
+        (``analysis=1`` adds the entity/co-occurrence analysis, ``ocr=1`` or
+        ``source=ocr`` the OCR sidecars), ``detail`` is off (``detail=1`` adds
+        the per-hit source-viewer/verification/manifest profiles and the
+        top-level ``advanced_*`` blocks), ``metadata=compact`` keeps only the
+        record fields the grid reads (``metadata=full``: the whole record).
+        ``limit`` (default 250) and ``offset`` page the hits in a stable order;
+        ``pagination`` reports ``has_more``/``next_offset``/``total``. A regex
+        keyword must start with a literal word (Korean 422 otherwise).
+        """
         job = get_job(store, run_id)
         if job.summary is None:
             raise HTTPException(status_code=409, detail=run_not_finished_message(job))
+        if search_mode == "regex":
+            for pattern in keyword:
+                problem = regex_literal_prefix_problem(pattern)
+                if problem:
+                    raise HTTPException(status_code=422, detail=problem)
         try:
             selected_pack_names = [name.strip() for name in keyword_pack if name.strip()]
             keywords = resolve_keyword_packs(keyword, pack_names=selected_pack_names)
             payload = run_unified_search(
                 job.summary,
                 keywords,
-                include_ocr=ocr,
+                include_ocr=ocr or any(item.strip().lower() == "ocr" for item in source),
                 limit=limit,
+                offset=offset,
+                detail=detail,
+                metadata=metadata,
                 sources=source,
                 extensions=extension,
                 path_contains=path_contains,
@@ -191,7 +220,8 @@ def build_search_router(
                 keyword_count=len(keywords),
                 expanded_keywords=keywords,
             )
-            attach_search_result_source_actions(payload, run_id)
+            if detail:
+                attach_search_result_source_actions(payload, run_id)
             for match in payload.get("matches") or []:
                 # The review locator names its run (the console resolves it to the source row).
                 if isinstance(match, dict) and isinstance(match.get("locator"), dict):
