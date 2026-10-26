@@ -1,13 +1,49 @@
 import { runSampleCase } from "../../api/runs";
+import { NO_RUN_REASON } from "../../commands/reasons";
 import type { Command } from "../../contracts/command";
 import { navigate, registerCommand } from "../tree/adapter";
 import { caseLinkOf } from "./caseLink";
 import { useCaseDialogs } from "./dialogs";
-import { EXPORT_ACTIONS, exportDisabledReason, performExport } from "./exports";
+import { EXPORT_ACTIONS, exportDisabledReason } from "./exports";
 import { useSearchState } from "./searchState";
+import { confirmWrite, notifyWriteFailed, notifyWritten } from "./WriteConfirm";
 
 export const RUN_ACTIVE_REASON = "실행 중 런이 있습니다";
-const NO_CASE = "열린 케이스가 없습니다";
+/** One sentence for "no case open" across the console (r7 L4, C-G11). */
+const NO_CASE = NO_RUN_REASON;
+
+/** Where the server writes the practice case (`POST /api/sample-case/run` default output_dir). */
+export const SAMPLE_CASE_FOLDER = "서버 사용자 폴더\\.rapidtriage\\sample-case";
+
+/**
+ * 샘플 실행 (C-G6): confirm what is written where, then build + import the practice case and open
+ * it. Resolves with the new run id, or null when the analyst cancelled / it failed (toast says why).
+ */
+export async function runSampleWithConfirm(): Promise<string | null> {
+  const ok = await confirmWrite({
+    title: "샘플 케이스 실행",
+    writes: [
+      {
+        what: "합성 샘플 증거와 그 런 결과(이전 샘플은 덮어씀)",
+        where: SAMPLE_CASE_FOLDER,
+      },
+    ],
+    note: "연습용 합성 데이터입니다. 실제 증거·다른 런은 건드리지 않습니다.",
+    confirmLabel: "샘플 실행",
+  });
+  if (!ok) return null;
+  try {
+    const payload = await runSampleCase({});
+    const runId = payload.run.run_id;
+    const folder = payload.run.summary?.output_dir ?? null;
+    notifyWritten("샘플 케이스를 만들고 열었습니다.", folder);
+    navigate({ runId, collection: "intake" });
+    return runId;
+  } catch (error) {
+    notifyWriteFailed("샘플 케이스 실행", error);
+    return null;
+  }
+}
 export const NOT_LINKED_REASON = "케이스에 연결되지 않은 런입니다";
 const CASE_LINK_LOADING = "케이스 정보를 불러오는 중입니다";
 
@@ -30,14 +66,11 @@ export interface CaseCommandFacts {
  */
 export function buildCaseCommands(facts: CaseCommandFacts): Command[] {
   const dialogs = () => useCaseDialogs.getState();
-  const notify = (message: string) => dialogs().setNotice(message);
-  const fail = (error: unknown) =>
-    dialogs().setNotice(error instanceof Error ? error.message : "작업에 실패했습니다.", true);
 
   const commands: Command[] = [
     {
       id: "case.switch",
-      label: "케이스 전환/삭제…",
+      label: "케이스 열기…",
       group: "case",
       icon: "folder",
       run: () => dialogs().openDialog("picker"),
@@ -99,6 +132,30 @@ export function buildCaseCommands(facts: CaseCommandFacts): Command[] {
       },
     },
     {
+      // 상단 바 "새 런…" with a case open (C-G9): a run of THIS case when the open run is linked to
+      // one, else the quick-run dialog (a separate run, said so in its title).
+      id: "case.run.new",
+      label: "이 케이스에 런 추가…",
+      group: "case",
+      icon: "play",
+      disabledReason: (ctx) => {
+        if (!ctx.runId) return NO_CASE;
+        if (ctx.runIsActive) return RUN_ACTIVE_REASON;
+        return caseLinkOf(ctx.runId) === undefined ? CASE_LINK_LOADING : undefined;
+      },
+      run: (ctx) => {
+        const link = caseLinkOf(ctx.runId);
+        if (link) {
+          dialogs().openDialog("run-add", {
+            caseId: link.caseId,
+            evidenceCitationId: link.evidenceCitationId,
+          });
+        } else {
+          dialogs().openDialog("run");
+        }
+      },
+    },
+    {
       id: "case.run",
       label: "케이스 없이 빠른 런…",
       group: "case",
@@ -116,18 +173,12 @@ export function buildCaseCommands(facts: CaseCommandFacts): Command[] {
     },
     {
       id: "case.sample",
-      label: "샘플 케이스 실행",
+      label: "샘플 케이스 실행…",
       group: "case",
       icon: "package",
       disabledReason: (ctx) => (ctx.runIsActive ? RUN_ACTIVE_REASON : undefined),
       run: async () => {
-        try {
-          const payload = await runSampleCase({});
-          notify("샘플 케이스를 불러왔습니다.");
-          navigate({ runId: payload.run.run_id, collection: "intake" });
-        } catch (error) {
-          fail(error);
-        }
+        await runSampleWithConfirm();
       },
     },
     {
@@ -180,7 +231,7 @@ export function buildCaseCommands(facts: CaseCommandFacts): Command[] {
   for (const action of EXPORT_ACTIONS) {
     commands.push({
       id: action.commandId,
-      label: `${action.label} 내보내기`,
+      label: `${action.label} 내보내기…`,
       group: "export",
       disabledReason: (ctx) =>
         exportDisabledReason(action, {
@@ -188,14 +239,10 @@ export function buildCaseCommands(facts: CaseCommandFacts): Command[] {
           runIsActive: ctx.runIsActive,
           reportCandidates: facts.reportCandidates,
         }),
-      run: async (ctx) => {
-        if (!ctx.runId) return;
-        try {
-          const name = await performExport(action.kind, ctx.runId);
-          notify(`${name} 파일을 저장했습니다.`);
-        } catch (error) {
-          fail(error);
-        }
+      // Never a one-key write (C-G7/C-G8): the export dialog, this kind chosen, says what is
+      // written where; 내보내기 there sends it.
+      run: (ctx) => {
+        if (ctx.runId) dialogs().openDialog("report", { exportKind: action.kind });
       },
     });
   }

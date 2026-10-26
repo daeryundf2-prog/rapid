@@ -15,7 +15,7 @@ import { useRoute } from "../../state/hooks";
 import { isRunActive } from "../../state/slices/runs";
 import { useRunCaseLink } from "../case/caseLink";
 import { useSearchState } from "../case/searchState";
-import { Card, CardEmpty, CardError, CardLoading, type CardSpan, useCardLayout } from "./Card";
+import { Card, CardEmpty, CardError, type CardSpan, useCardLayout } from "./Card";
 import {
   CategoryCard,
   ExportsCard,
@@ -81,6 +81,39 @@ const CARD_META: Record<CardId, { title: string; icon: IconName }> = {
 
 const WAIT_FOR_RUN = "런이 완료되면 표시됩니다.";
 
+/** After 처리 설정 보기: scroll to and focus the 처리 page's settings section once it renders. */
+function focusProcessSettings(tries = 40): void {
+  const target = document.getElementById("process-settings");
+  if (target) {
+    target.scrollIntoView?.({ block: "start" });
+    if (!target.hasAttribute("tabindex")) target.setAttribute("tabindex", "-1");
+    target.focus({ preventScroll: true });
+    return;
+  }
+  if (tries > 0) window.setTimeout(() => focusProcessSettings(tries - 1), 100);
+}
+
+/** One card's own skeleton while its data loads (C-I1): the card is there, its body fills in. */
+function CardSkeleton() {
+  return (
+    <div className="dash-skeleton" aria-hidden="true" data-testid="card-skeleton">
+      <span className="skeleton" style={{ width: "60%" }} />
+      <span className="skeleton" style={{ width: "30%" }} />
+      <span className="skeleton" style={{ width: "45%" }} />
+    </div>
+  );
+}
+
+/** "카드 N/M" while the intake cards load (C-I1: a 12 s first load was skeletons only, no progress). */
+function CardProgress({ ready, total }: { ready: number; total: number }) {
+  if (total === 0 || ready >= total) return null;
+  return (
+    <p className="dash-card-progress" data-testid="dash-card-progress">
+      <progress max={total} value={ready} aria-label="접수 카드 불러오기" /> 카드 {ready}/{total} 준비됨
+    </p>
+  );
+}
+
 /** Keeps `--dash-head-h` on the scroller equal to the sticky head's height (card heads stick below it). */
 function useStickyHeadHeight(ready: boolean) {
   const scroller = useRef<HTMLDivElement>(null);
@@ -127,6 +160,7 @@ export function CaseDashboard({ runId }: { runId: string }) {
     const shells = CARD_IDS.filter((id) => !layout.hidden.includes(id));
     return (
       <div className="dash" data-testid="intake-pane" aria-busy="true">
+        <CardProgress ready={0} total={shells.length} />
         <div className="dash-grid">
           {shells.map((id, index) => (
             <section
@@ -190,6 +224,20 @@ export function CaseDashboard({ runId }: { runId: string }) {
   const crumb = caseDetail ? `${caseDetail.case_number} › ${intake.evidenceNumber || "—"}` : null;
   const outputDir = String(run.request?.output_dir ?? snapshot.data?.snapshot.request?.output_dir ?? "");
   const caseLoading = snapshot.isPending || Boolean(intake.caseId && intake.detail.isPending);
+  // Which cards have their data (or know they wait for the run): the "카드 N/M" line.
+  const cardReady: Record<CardId, boolean> = {
+    status: true,
+    evidence: !(caseLoading || (dashboard.isPending && !caseDetail)),
+    categories: !completed || !tree.isPending,
+    warnings: !runFinished || !(intake.problems.isPending || (completed && summary.isPending)),
+    "case-info": !caseLoading,
+    keywords: !completed || !dashboard.isPending,
+    start: true,
+    notes: !(notes.isPending || snapshot.isPending),
+    review: !completed || !(review.isPending || dashboard.isPending),
+  };
+  const shownCards = CARD_IDS.filter((id) => !layout.hidden.includes(id));
+  const readyCards = shownCards.filter((id) => cardReady[id]).length;
 
   return (
     <div className="dash" data-testid="intake-pane" ref={scroller}>
@@ -201,7 +249,11 @@ export function CaseDashboard({ runId }: { runId: string }) {
           onOpenSummary={() => {
             if (completed) go("outputs");
           }}
-          onOpenSettings={() => go("process")}
+          onOpenSettings={() => {
+            // L1's anchor on the 처리 page: land on the run's settings, not the top of the page.
+            go("process");
+            focusProcessSettings();
+          }}
         >
           {hiddenCount ? (
             <button type="button" className="button ghost" onClick={showAll}>
@@ -209,6 +261,7 @@ export function CaseDashboard({ runId }: { runId: string }) {
             </button>
           ) : null}
         </StatusStrip>
+        <CardProgress ready={readyCards} total={shownCards.length} />
       </div>
 
       <div className="dash-grid">
@@ -233,7 +286,7 @@ export function CaseDashboard({ runId }: { runId: string }) {
             meta={caseDetail ? `증거 ${caseDetail.evidence_count} · 런 ${caseDetail.run_count}` : undefined}
           >
             {caseLoading || (dashboard.isPending && !caseDetail) ? (
-              <CardLoading />
+              <CardSkeleton />
             ) : intake.caseId && (intake.detail.isError || !caseDetail) ? (
               <CardError error={intake.detail.error} />
             ) : !caseDetail && (dashboard.isError || !dashboard.data) ? (
@@ -258,7 +311,7 @@ export function CaseDashboard({ runId }: { runId: string }) {
             {!completed ? (
               <CardEmpty title="아티팩트 범주">{WAIT_FOR_RUN}</CardEmpty>
             ) : tree.isPending ? (
-              <CardLoading />
+              <CardSkeleton />
             ) : tree.isError ? (
               <CardError error={tree.error} />
             ) : (
@@ -282,7 +335,7 @@ export function CaseDashboard({ runId }: { runId: string }) {
             {!runFinished ? (
               <CardEmpty title="처리 경고·제한 사항">{WAIT_FOR_RUN}</CardEmpty>
             ) : intake.problems.isPending || (completed && summary.isPending) ? (
-              <CardLoading />
+              <CardSkeleton />
             ) : intake.problems.isError && !summary.data ? (
               <CardError error={intake.problems.error} />
             ) : (
@@ -305,7 +358,7 @@ export function CaseDashboard({ runId }: { runId: string }) {
             meta={caseDetail ? caseDetail.case_number : snapshot.data ? "케이스 없음" : undefined}
           >
             {caseLoading ? (
-              <CardLoading />
+              <CardSkeleton />
             ) : snapshot.isError ? (
               <CardError error={snapshot.error} />
             ) : !intake.caseId ? (
@@ -323,7 +376,7 @@ export function CaseDashboard({ runId }: { runId: string }) {
             {!completed ? (
               <CardEmpty title="키워드 일치">{WAIT_FOR_RUN}</CardEmpty>
             ) : dashboard.isPending ? (
-              <CardLoading />
+              <CardSkeleton />
             ) : (
               <KeywordCard
                 runId={runId}
@@ -353,7 +406,7 @@ export function CaseDashboard({ runId }: { runId: string }) {
             meta={intake.notes.data ? `메모 ${intake.notes.data.count}건` : undefined}
           >
             {notes.isPending || snapshot.isPending ? (
-              <CardLoading />
+              <CardSkeleton />
             ) : (
               <NotesCard
                 runId={runId}
@@ -386,7 +439,7 @@ export function CaseDashboard({ runId }: { runId: string }) {
             {!completed ? (
               <CardEmpty title="검토·보고서">{WAIT_FOR_RUN}</CardEmpty>
             ) : review.isPending || dashboard.isPending ? (
-              <CardLoading />
+              <CardSkeleton />
             ) : (
               <div className="dash-review">
                 {review.isError ? (

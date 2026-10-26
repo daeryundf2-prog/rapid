@@ -10,14 +10,17 @@ import { useId, useMemo, useState } from "react";
 import { announce } from "../../a11y";
 import { type AnalysisKind, fetchAnalysisRowsPage, startAnalysis } from "../../api/analyses";
 import { ApiError } from "../../api/client";
+import { runStartedAt } from "../../api/runs";
 import { runDisplayName } from "../../app/collections";
 import { Icon } from "../../icons";
 import { useRuns } from "../../state/hooks";
 import { useAppStore } from "../../state/store";
+import { formatRunTime } from "../../utils/time";
 import { BrowsePanel } from "../case/BrowsePanel";
 import { ErrorText } from "../case/ErrorText";
 import { Modal } from "../case/Modal";
 import { ReasonButton } from "../case/ReasonButton";
+import { currentTimezone } from "../grid/columns/common";
 import {
   ANALYSIS_FIELDS,
   type AnalysisFormState,
@@ -33,6 +36,16 @@ import { openAnalysis, runDisabledReason } from "./commands";
 import { KIND_CAUTION, kindLabel, nodeOfKind } from "./kinds";
 import { analysesFor, analysesQueryKey, useAnalyses } from "./store";
 import "./analysis.css";
+
+/** A run in the cross-case list (L1 handoff): its name and start time, never the raw run ID. */
+function runChoiceLabel(
+  run: Parameters<typeof runDisplayName>[0] & Parameters<typeof runStartedAt>[0],
+): string {
+  const started = runStartedAt(run);
+  return started
+    ? `${runDisplayName(run)} · ${formatRunTime(started, currentTimezone())}`
+    : runDisplayName(run);
+}
 
 /** 422 `[{loc: ["options", field], msg}]` → per-field Korean messages (shown under the field). */
 export function serverFieldErrors(error: unknown): Record<string, string> {
@@ -200,8 +213,10 @@ function Field({ field, value, error, showError, onChange, onTouch, runId }: Fie
   if (field.type === "bool") {
     return (
       <div className="case-field analysis-field">
-        <label>
+        {/* Explicit for/id (r7 L4, C-A1): the name never depends on label nesting. */}
+        <label htmlFor={`${id}-check`}>
           <input
+            id={`${id}-check`}
             type="checkbox"
             checked={value === true}
             aria-describedby={describedBy}
@@ -228,17 +243,25 @@ function Field({ field, value, error, showError, onChange, onTouch, runId }: Fie
             .sort((a, b) => Number(b.choice.eligible) - Number(a.choice.eligible))
             .map(({ run, choice }) => ({
               id: run.run_id,
-              label: `${runDisplayName(run)} (${run.run_id.slice(0, 8)})`,
+              label: runChoiceLabel(run),
               ...(choice.eligible ? {} : { reason: choice.reason }),
             }));
     const toggle = (choice: string, on: boolean) => {
       onTouch();
       onChange(on ? [...list.filter((v) => v !== choice), choice] : list.filter((v) => v !== choice));
     };
+    // Each choice is a checkbox named by its own label (C-A1: 카빙 서명 · OCR 언어 had none).
+    const choiceId = (choice: (typeof choices)[number]) => `${id}-c-${choice.id.replace(/[^\w-]/g, "_")}`;
     const renderChoice = (choice: (typeof choices)[number]) => (
-      <label key={choice.id} className={choice.reason ? "is-unavailable" : undefined}>
+      <label
+        key={choice.id}
+        htmlFor={choiceId(choice)}
+        className={choice.reason ? "is-unavailable" : undefined}
+      >
         <input
+          id={choiceId(choice)}
           type="checkbox"
+          aria-label={choice.label}
           checked={list.includes(choice.id)}
           disabled={Boolean(choice.reason) && !list.includes(choice.id)}
           onChange={(event) => toggle(choice.id, event.target.checked)}
@@ -263,11 +286,9 @@ function Field({ field, value, error, showError, onChange, onTouch, runId }: Fie
         <legend>{field.label}</legend>
         {field.type === "cases" ? (
           <p className="analysis-help" data-testid="cross-case-current">
-            <span className="badge info">현재 케이스</span>{" "}
-            <strong title={runId}>
-              {currentRun ? runDisplayName(currentRun) : runId.slice(0, 8)} ({runId.slice(0, 8)})
-            </strong>{" "}
-            — 항상 비교에 포함됩니다.
+            <span className="badge info">현재 런</span>{" "}
+            <strong title={`런 ID ${runId}`}>{currentRun ? runChoiceLabel(currentRun) : "이 런"}</strong> —
+            항상 비교에 포함됩니다.
           </p>
         ) : null}
         <div className="analysis-choices">

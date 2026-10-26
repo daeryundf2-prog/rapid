@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { getReviewCounts } from "../../api/caseDb";
 import { caseLinkOf } from "./caseLink";
 import { ErrorText } from "./ErrorText";
@@ -7,11 +7,13 @@ import {
   EXPORT_ACTIONS,
   type ExportKind,
   exportDisabledReason,
+  exportWrites,
   performExport,
   type ReportFormat,
 } from "./exports";
 import { Modal } from "./Modal";
 import { ReasonButton } from "./ReasonButton";
+import { notifyWritten, runOutputDir } from "./WriteConfirm";
 
 const FORMATS: Array<{ id: ReportFormat; label: string }> = [
   { id: "html", label: "HTML" },
@@ -29,14 +31,27 @@ export function ReportDialog({
   runId,
   runIsActive,
   onClose,
-  onNotice,
+  initialKind = "case-report",
 }: {
   runId: string | null;
   runIsActive: boolean;
   onClose: () => void;
-  onNotice?: (message: string) => void;
+  /** The kind chosen when the dialog opens (보고 panel / palette `export.*`). */
+  initialKind?: ExportKind;
 }) {
-  const [kind, setKind] = useState<ExportKind>("case-report");
+  const [kind, setKind] = useState<ExportKind>(initialKind);
+  // Where the files go (r7 L4): the run folder, known before anything is written.
+  const [folder, setFolder] = useState<string | null>(null);
+  useEffect(() => {
+    if (!runId) return;
+    let alive = true;
+    void runOutputDir(runId).then((dir) => {
+      if (alive) setFolder(dir);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [runId]);
   const [format, setFormat] = useState<ReportFormat>("html");
   const [title, setTitle] = useState("");
   // A case run pre-fills 사건 번호 and 분석자 from its case (AXIOM adoption E1).
@@ -52,7 +67,15 @@ export function ReportDialog({
   const exportMutation = useMutation({
     mutationFn: (chosen: ExportKind) =>
       performExport(chosen, runId as string, { format, meta: { title, caseNumber, investigator } }),
-    onSuccess: (name) => onNotice?.(`${name} 파일을 저장했습니다.`),
+    onSuccess: (result, chosen) => {
+      const label = EXPORT_ACTIONS.find((action) => action.kind === chosen)?.label ?? "내보내기";
+      notifyWritten(
+        `${label}: ${result.fileName}을(를) 저장했습니다.`,
+        result.path,
+        result.open ? { label: "열기", run: () => void result.open?.() } : undefined,
+      );
+      onClose();
+    },
   });
   const reasonOf = (action: (typeof EXPORT_ACTIONS)[number]) =>
     exportDisabledReason(action, {
@@ -159,6 +182,22 @@ export function ReportDialog({
           </div>
         </>
       ) : null}
+      <section className="case-field" aria-labelledby={`${groupId}-where`} data-testid="export-writes">
+        <h3 id={`${groupId}-where`} className="case-label">
+          쓰는 위치
+        </h3>
+        <ul className="write-confirm-list">
+          {exportWrites(kind, folder, format).map((item) => (
+            <li key={item.where}>
+              {item.what}
+              <div className="write-confirm-where">{item.where}</div>
+            </li>
+          ))}
+        </ul>
+        <p className="case-reason">
+          내보내기를 누르기 전에는 아무것도 쓰지 않습니다. 원본 증거는 바꾸지 않습니다.
+        </p>
+      </section>
       {exportMutation.error && (
         <ErrorText>
           {exportMutation.error instanceof Error ? exportMutation.error.message : "내보내지 못했습니다."}

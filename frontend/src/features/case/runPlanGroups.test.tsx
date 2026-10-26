@@ -160,7 +160,7 @@ describe("RunDialog 처리 그룹", () => {
       document.getElementById(checkbox("카빙").getAttribute("aria-describedby") as string)?.textContent,
     ).toContain(CARVE_GATED_REASON);
     expect(checkbox("이벤트 로그").checked).toBe(true);
-    expect(fieldset.textContent).toContain("(태스크 2)");
+    expect(fieldset.textContent).toContain("(세부 처리 2개)");
     expect(screen.getByTestId("run-plan-groups-count").textContent).toBe("5개 그룹 중 4개 실행");
 
     // 전부 해제 → every choosable group off; 전부 선택 → all on (gated 카빙 stays off); then a choice.

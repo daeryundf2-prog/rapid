@@ -68,7 +68,12 @@ export function CaseFeature({ runId }: { runId: string | null }) {
       {open === "picker" && <CasePicker currentRunId={runId} onClose={close} />}
       {open === "doctor" && <DoctorDialog onClose={close} />}
       {open === "report" && (
-        <ReportDialog runId={runId} runIsActive={live.active} onClose={close} onNotice={setNotice} />
+        <ReportDialog
+          runId={runId}
+          runIsActive={live.active}
+          onClose={close}
+          initialKind={target.exportKind}
+        />
       )}
       {open === "create" && <CaseWizard runIsActive={live.anyActive} onClose={close} onNotice={setNotice} />}
       {open === "link" && (target.runId ?? runId) && (

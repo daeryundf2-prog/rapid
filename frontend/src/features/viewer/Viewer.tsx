@@ -10,6 +10,7 @@ import {
 import { CLASSIC_COLLAPSE_REASON, collapseViewerPane } from "../../commands/builtin";
 import { runCommand as runShellCommand } from "../../commands/registry";
 import { MiddlePath } from "../../components/MiddlePath";
+import { pushToast } from "../../components/toastStore";
 import type { Command } from "../../contracts/command";
 import type { MarkAction, ViewerMode, ViewerTarget } from "../../contracts/viewer";
 import { Icon } from "../../icons";
@@ -43,7 +44,7 @@ import {
 } from "./commands";
 import { targetKey } from "./history";
 import { ModeTabs, panelId, tabId, VIEWER_PANEL_ID } from "./ModeTabs";
-import { resolveModes } from "./modes";
+import { resolveModes, sqliteRowTarget } from "./modes";
 import { POPOUT_COMMAND_ID } from "./popout/host";
 import { recordByteRange } from "./record";
 import { viewerSession } from "./session";
@@ -61,6 +62,13 @@ import "./viewer.css";
 
 /** Files up to this size get their SHA-256 computed automatically after load. */
 export const AUTO_HASH_MAX_BYTES = 32 * 1024 * 1024;
+
+/** A refused copy (C-W10): one Korean sentence, spoken and shown as an error toast. */
+function copyFailed(what: string, error: unknown): void {
+  const text = `${what}: ${errorText(error)}`;
+  announce(text, { politeness: "assertive" });
+  pushToast(text, "error");
+}
 
 function baseName(path: string): string {
   const parts = path.split(/[\\/]|::/);
@@ -262,7 +270,7 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
         await writeClipboard(sha);
         announce(`SHA-256을 복사했습니다: ${sha.slice(0, 12)}…`);
       } catch (error) {
-        announce(`해시 복사 실패: ${errorText(error)}`);
+        copyFailed("해시 복사 실패", error);
       }
     },
     copyPath: async () => {
@@ -271,7 +279,7 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
         await writeClipboard(target.sourcePath);
         announce("경로를 복사했습니다.");
       } catch (error) {
-        announce(`경로 복사 실패: ${errorText(error)}`);
+        copyFailed("경로 복사 실패", error);
       }
     },
     copyCitation: async () => {
@@ -283,7 +291,7 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
         await writeClipboard(buildCitation({ ...target, highlight }, sha, row, currentTimezone()));
         announce("인용을 복사했습니다.");
       } catch (error) {
-        announce(`인용 복사 실패: ${errorText(error)}`);
+        copyFailed("인용 복사 실패", error);
       }
     },
     mark: async (action: MarkAction) => {
@@ -644,8 +652,21 @@ function ViewerBody(props: ViewerBodyProps) {
           staticRows={preview.container_path ? preview.hex?.rows : undefined}
         />
       );
-    case "sqlite":
-      return <SqliteView key={preview.path} runId={target.runId} preview={preview} highlight={highlight} />;
+    case "sqlite": {
+      // A parsed browser row opens its source table at its rowid (C-W1).
+      const rowTarget = sqliteRowTarget(preview, props.row);
+      const sqliteHighlight = rowTarget
+        ? { ...highlight, table: rowTarget.table, rowid: rowTarget.rowid }
+        : highlight;
+      return (
+        <SqliteView
+          key={`${preview.path}|${sqliteHighlight?.table ?? ""}|${sqliteHighlight?.rowid ?? ""}`}
+          runId={target.runId}
+          preview={preview}
+          highlight={sqliteHighlight}
+        />
+      );
+    }
     case "image":
       return (
         <ImageView key={preview.path} runId={target.runId} preview={preview} onOpenPath={props.onOpenPath} />

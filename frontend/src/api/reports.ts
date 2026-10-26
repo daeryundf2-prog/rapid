@@ -47,10 +47,21 @@ export function getSubmissionManifest(runId: string, includeAll = false, maxItem
 
 export const submissionManifestFile = (runId: string) => `${run(runId)}/submission-manifest/file`;
 
-export function getValidationPackage(runId: string) {
-  return api<Record<string, unknown>>(`${run(runId)}/validation-package`);
+/** `POST /api/runs/{id}/validation-package` — writes package + audit into the run folder (r7 L4). */
+export interface ValidationPackageWrite {
+  package_path: string;
+  audit: string;
+  /** Every file the call wrote. */
+  written: string[];
+  /** Read-only GET of the saved package (no second write). */
+  download_url: string;
 }
 
-export const validationPackageFile = (runId: string) => `${run(runId)}/validation-package/file`;
+export function writeValidationPackage(runId: string) {
+  return api<ValidationPackageWrite>(`${run(runId)}/validation-package`, { method: "POST" });
+}
+
+/** Read-only: the package the last export wrote (404 before one exists). */
+export const savedValidationPackageFile = (runId: string) => `${run(runId)}/validation-package/saved`;
 
 export { downloadFile };

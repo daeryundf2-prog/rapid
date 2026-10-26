@@ -476,19 +476,30 @@
   overflow-x: auto;
 }
 
+/* Text gutter (r7 L4): line numbers in their own column with a rule; a wrapped line stays right of
+   it instead of flowing under the number. */
 .viewer-line {
-  display: block;
+  display: flex;
+  align-items: baseline;
 }
 
 .viewer-ln {
-  display: inline-block;
-  margin-right: var(--space-3);
+  flex: none;
+  position: sticky;
+  left: 0;
+  margin-right: var(--space-2);
+  padding-right: var(--space-2);
+  border-right: 1px solid var(--line-subtle);
+  background: var(--bg-raised, var(--bg));
   color: var(--text-muted);
+  text-align: right;
   user-select: none;
   white-space: pre;
 }
 
 .viewer-lt {
+  flex: 1;
+  min-width: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }

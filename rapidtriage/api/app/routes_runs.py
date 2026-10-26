@@ -8,6 +8,7 @@ import functools
 import json
 import logging
 import re
+import sqlite3
 import time
 import zipfile
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
@@ -130,6 +131,7 @@ from .row_conditions import (
     output_stamp,
     parse_row_conditions,
 )
+from .run_review import canonical_run_case
 from .run_times import run_identity_fields
 from .runops import (
     build_run_output_preview,
@@ -331,6 +333,35 @@ def _run_output_dir_or_none(summary: Mapping[str, object] | None) -> Path | None
         return None
 
 
+def run_case_db_readiness(summary: Mapping[str, object] | None, run_id: str) -> dict[str, object]:
+    """``case_db_ready`` + ``case_db`` handle of ``GET /api/runs/{id}`` (r7 L4, C-G13).
+
+    Ready = the run's canonical case DB file exists and its case already has an evidence source
+    (what ``POST /case-db/ensure`` checks before importing), read with a read-only connection; the
+    console then marks rows without calling ensure (no "케이스 DB 준비 중…" toast). Never creates or
+    imports anything; any read error is simply "not ready".
+    """
+    not_ready: dict[str, object] = {"case_db_ready": False, "case_db": None}
+    if _run_output_dir_or_none(summary) is None or summary is None:
+        return not_ready
+    try:
+        database, case_id = canonical_run_case(summary, run_id)
+        if not database.is_file():
+            return not_ready
+        connection = sqlite3.connect(f"{database.as_uri()}?mode=ro", uri=True)
+        try:
+            row = connection.execute(
+                "SELECT 1 FROM evidence_source WHERE case_id = ? LIMIT 1", (case_id,)
+            ).fetchone()
+        finally:
+            connection.close()
+    except (sqlite3.Error, OSError, ValueError):
+        return not_ready
+    if row is None:
+        return not_ready
+    return {"case_db_ready": True, "case_db": {"database": str(database), "case_id": case_id}}
+
+
 def _attach_artifact_flags(response: dict[str, object], join: FlagsJoin) -> None:
     """``flags`` on every row of every kind page and the response's ``flags_join``."""
     pages = response.get("artifacts")
@@ -432,6 +463,7 @@ def build_runs_router(
         payload["search_index_available"] = search_index_available(job)
         # + the newest evidence time that anchors the relative date presets (R7 L1 C-D5).
         payload.update(run_identity_fields(job, include_timeline_max=True))
+        payload.update(run_case_db_readiness(job.summary, run_id))
         return payload
 
 

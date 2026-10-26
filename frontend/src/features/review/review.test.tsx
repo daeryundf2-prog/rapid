@@ -371,9 +371,10 @@ describe("같은 해시 행에 태그 전파", () => {
     });
 
     const [all, ...each] = propagationItems({ ...viewerRow, tags: ["같은 사진", "북마크"] }, "r1");
-    expect(all?.label).toBe("같은 해시 행에 태그 전파: 사용자 태그 전부 (같은 사진)");
+    expect(all?.label).toBe("같은 해시 행에 태그 전파 (같은 사진)");
     expect(all?.disabledReason).toBeUndefined();
-    expect(each.map((item) => item.label)).toEqual(["'같은 사진'만 전파", "'북마크'만 전파 (시스템 태그)"]);
+    // One user tag = the default entry itself (C-W8): only the system tag gets its own entry.
+    expect(each.map((item) => item.label)).toEqual(["'북마크'만 전파 (시스템 태그)"]);
     all?.onSelect();
     await waitFor(() => expect(batches(calls)).toHaveLength(2));
     expect(batches(calls)[1]).toMatchObject({

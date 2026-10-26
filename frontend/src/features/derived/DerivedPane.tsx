@@ -27,6 +27,7 @@ import { CommandButton } from "../../commands/CommandButton";
 import type { Route } from "../../router";
 import { useRoute, useTimezone } from "../../state/hooks";
 import { formatGridTime } from "../../utils/time";
+import { isSid, wellKnownSid } from "../viewer/sidNames";
 import {
   DERIVED_TABLE_IDS,
   type DerivedRow,
@@ -58,6 +59,29 @@ const PAGE_JUMP = 10;
 /** Rows the value table renders per step ("더 보기", plan r7 §3.2 L2 C-X1). */
 export const DERIVED_ROW_STEP = 200;
 const collator = new Intl.Collator("ko");
+
+/** DOS date-time 0 (1980-01-01 00:00:00): "no date recorded", not a real first/last sighting. */
+const DOS_EPOCH = /^1980-01-01[T ]00:00:00(\.0+)?(Z|[+-]00:?00)?$/;
+
+/**
+ * One derived cell as shown (r7 L4, C-X3): the DOS-epoch sentinel reads "—" (the raw value stays
+ * in the tooltip), and a well-known SID value gets its account name ("S-1-5-18 (SYSTEM …)").
+ */
+export function derivedCellDisplay(
+  columnId: string,
+  row: Pick<DerivedRow, "first_seen" | "last_seen" | "value">,
+  text: string,
+): { text: string; title: string } {
+  const raw = columnId === "first" ? row.first_seen : columnId === "last" ? row.last_seen : null;
+  if (raw && DOS_EPOCH.test(raw.trim())) {
+    return { text: "", title: `기록 없음 — DOS 시각 0(${raw})은 실제 시각이 아닙니다` };
+  }
+  if (columnId === "value" && isSid(text)) {
+    const known = wellKnownSid(text);
+    if (known) return { text: `${text} (${known.name})`, title: `${text} — 잘 알려진 SID: ${known.name}` };
+  }
+  return { text, title: text };
+}
 
 function useDebounced(value: string, delay: number): string {
   const [debounced, setDebounced] = useState(value);
@@ -426,15 +450,15 @@ function DerivedTablePane() {
                 onKeyDown={(event) => onRowKey(event, index)}
               >
                 {columns.map((column) => {
-                  const text = column.text(row, timezone);
+                  const cell = derivedCellDisplay(column.id, row, column.text(row, timezone));
                   return (
                     <div
                       key={column.id}
                       role="gridcell"
                       className={`derived-cell${column.mono ? " derived-mono" : ""}${column.numeric ? " derived-num" : ""}`}
-                      title={text}
+                      title={cell.title}
                     >
-                      {text || <span className="grid-cell-empty">—</span>}
+                      {cell.text || <span className="grid-cell-empty">—</span>}
                     </div>
                   );
                 })}

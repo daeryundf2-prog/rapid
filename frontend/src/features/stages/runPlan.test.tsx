@@ -13,6 +13,7 @@ import { caseCommands } from "../../commands/builtin";
 import { registerCommands, resetCommandRegistry } from "../../commands/registry";
 import { EMPTY_ROUTE, parseHash } from "../../router";
 import { useAppStore } from "../../state/store";
+import { useWriteConfirm } from "../case/WriteConfirm";
 import { installFetch, jsonResponse } from "../grid/testSupport";
 import { ProcessPage } from "./ProcessStage";
 import { groupAriaLabel, planSummaryText, RunPlanTable } from "./RunPlanTable";
@@ -242,6 +243,9 @@ describe("처리 계획표 (RunPlanTable)", () => {
   });
 
   it("stops in-flight plan polls before the POST and before writing the reply", async () => {
+    const stopConfirm = useWriteConfirm.subscribe((state) => {
+      if (state.pending) queueMicrotask(() => useWriteConfirm.getState().settle(true));
+    });
     const order: string[] = [];
     installFetch({
       "/plan/control": () => {
@@ -259,9 +263,17 @@ describe("처리 계획표 (RunPlanTable)", () => {
     await waitFor(() => expect(write).toHaveBeenCalled());
     expect(order).toEqual(["cancel", "post", "cancel"]);
     expect(cancel).toHaveBeenCalledWith({ queryKey: ["run-plan", RUN] });
+    stopConfirm();
   });
 
   it("row × buttons cancel a running group, skip a queued one and explain the rest", async () => {
+    // Each skip / cancel is confirmed first (r7 L4): record the dialogs and accept them.
+    const asked: string[] = [];
+    const stop = useWriteConfirm.subscribe((state) => {
+      if (!state.pending) return;
+      asked.push(state.pending.confirmLabel);
+      queueMicrotask(() => useWriteConfirm.getState().settle(true));
+    });
     const calls = installFetch({
       "/plan/control": () =>
         jsonResponse({ accepted: [{ group: "eventlog" }], rejected: [], plan: fixture() }, 202),
@@ -308,9 +320,14 @@ describe("처리 계획표 (RunPlanTable)", () => {
     fireEvent.click(finished);
     fireEvent.click(required);
     expect(calls).toHaveLength(3);
+    expect(asked).toEqual(["취소 요청", "건너뛰기", "건너뛰기"]);
+    stop();
   });
 
   it("a rejected target is shown and announced assertively", async () => {
+    const stopConfirm = useWriteConfirm.subscribe((state) => {
+      if (state.pending) queueMicrotask(() => useWriteConfirm.getState().settle(true));
+    });
     installFetch({
       "/plan/control": () =>
         jsonResponse(
@@ -337,6 +354,7 @@ describe("처리 계획표 (RunPlanTable)", () => {
     );
     expect(useAppStore.getState().notice).toMatchObject({ tone: "error" });
     expect(useAppStore.getState().notice?.text).toContain("거부");
+    stopConfirm();
   });
 
   it("모두 취소 / 지금까지로 마치기 post cancel_all / finish and explain when they cannot", async () => {

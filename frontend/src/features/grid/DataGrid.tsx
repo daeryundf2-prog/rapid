@@ -1474,7 +1474,9 @@ export function DataGrid(props: DataGridProps = {}) {
     // artifact grid, filtered or not — an empty 특이사항 cell may mean "not read".
     const partial = flagsPartialNotice(runTree.data);
     if (partial) out.push({ id: "partial", text: partial });
-    if (routeFlagsActive || ref.kind === "eventlog") {
+    // Policy-dependent event sources (Sysmon, 4688, 4104 …) are event-log notes: only on the
+    // event-log node (r7 L4, C-R5 — they showed on every flag-filtered grid).
+    if (ref.kind === "eventlog") {
       for (const absent of policyAbsences(runTree.data)) {
         out.push({ id: `policy-${absent.id}`, text: `${absent.label}: ${absent.note}` });
       }

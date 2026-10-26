@@ -753,9 +753,12 @@ export function NotesCard({
               </ul>
             )}
             <form className="dash-notes" onSubmit={onAdd} aria-busy={add.isPending}>
-              <label htmlFor={textId}>새 메모</label>
+              <label htmlFor={textId} id={`${textId}-label`}>
+                새 메모
+              </label>
               <textarea
                 id={textId}
+                aria-labelledby={`${textId}-label`}
                 className="dash-input"
                 rows={2}
                 maxLength={10000}
@@ -813,9 +816,12 @@ export function NotesCard({
               : "저장된 노트 없음"}
         </summary>
         <form className="dash-notes" onSubmit={onSave} aria-busy={save.isPending}>
-          <label htmlFor={summaryId}>케이스 요약</label>
+          <label htmlFor={summaryId} id={`${summaryId}-label`}>
+            케이스 요약
+          </label>
           <textarea
             id={summaryId}
+            aria-labelledby={`${summaryId}-label`}
             className="dash-input"
             rows={3}
             maxLength={20000}

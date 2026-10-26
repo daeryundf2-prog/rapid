@@ -140,7 +140,12 @@ export function TopBar() {
       <Brand />
       <div className="topbar-case">
         <Slot name="case-picker" fallback={<CasePickerFallback />} />
-        <CommandButton command="case.run-dialog" variant="ghost" label="실행" testId="run-dialog-button" />
+        {/* With a case open "실행" was the case-less quick run (C-G9): now a run of THIS case. */}
+        {hasCase ? (
+          <CommandButton command="case.run.new" variant="ghost" label="새 런…" testId="run-dialog-button" />
+        ) : (
+          <CommandButton command="case.run-dialog" variant="ghost" label="실행" testId="run-dialog-button" />
+        )}
       </div>
       <div className="topbar-search">
         {hasCase ? <GlobalSearch /> : null}

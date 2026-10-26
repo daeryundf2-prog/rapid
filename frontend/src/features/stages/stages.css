@@ -137,6 +137,41 @@
   margin-left: auto;
 }
 
+/* r7 L4: stage links that are buttons (보고 panel kinds, 접수 shortcuts) look like the anchors. */
+button.stage-link {
+  width: 100%;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--fs-table-aux);
+  text-align: left;
+  cursor: pointer;
+}
+
+.intake-link > span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.intake-link-hint {
+  color: var(--text-muted);
+  font-size: var(--fs-caption, 11px);
+}
+
+.review-empty-guide p {
+  margin: 0 0 var(--space-1, 4px);
+}
+
+.review-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1, 4px) var(--space-3, 12px);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
 .stage-link .badge ~ .badge {
   margin-left: 0;
 }
@@ -221,8 +256,12 @@
   min-width: 0;
   overflow: hidden;
   line-height: 20px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* r7 L4 (C-A3): two lines before the ellipsis — "볼륨 섀도우 탐색" etc. no longer cut at one line. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow-wrap: anywhere;
 }
 
 .process-card-link:hover .process-card-title {

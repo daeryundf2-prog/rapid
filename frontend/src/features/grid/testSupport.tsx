@@ -50,6 +50,14 @@ export function installFetch(routes: Record<string, Handler>): FetchCall[] {
       ) {
         return jsonResponse({ marks: [], exists: false, truncated: false });
       }
+      // The run record (GET /api/runs/{id}: `case_db_ready`, r7 L4) is read before a first mark;
+      // unless a test routes it, it answers 404 (= ensure as before) and stays out of the calls.
+      if (
+        /^\/api\/runs\/[^/]+$/.test(url.pathname) &&
+        !Object.keys(routes).some((k) => url.pathname.includes(k))
+      ) {
+        return jsonResponse({ detail: "run record not mocked" }, 404);
+      }
       calls.push({
         url: `${url.pathname}${url.search}`,
         method: init?.method ?? "GET",

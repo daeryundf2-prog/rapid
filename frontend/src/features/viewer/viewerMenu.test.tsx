@@ -45,13 +45,14 @@ describe("viewer header (review #6)", () => {
     const triggers = within(header)
       .getAllByRole("button")
       .filter((b) => b.getAttribute("aria-haspopup") === "menu");
-    expect(triggers).toHaveLength(1);
+    // Two menus (r7 L4, C-W9): the one review-status chip ("미검토 ▾") and ⋯ 더보기.
+    expect(triggers.map((b) => b.getAttribute("aria-label"))).toEqual(["리뷰 상태: 미검토", "더보기"]);
     fireEvent.click(screen.getByRole("button", { name: "더보기" }));
     const menu = screen.getByRole("menu", { name: "더보기" });
     // 같은 해시 행에 전파 (AXIOM E3): its own section, always on the viewer row.
     expect([...menu.querySelectorAll(".menu-heading")].map((h) => h.textContent)).toEqual([
       "리뷰",
-      "같은 해시 행에 전파",
+      "태그 전파",
       "원본",
       "피벗",
     ]);

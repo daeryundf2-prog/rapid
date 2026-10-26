@@ -23,7 +23,9 @@ import {
   type RegistryValues,
 } from "../../api/explorers";
 import { Icon } from "../../icons";
-import { useRoute } from "../../state/hooks";
+import { useRoute, useTimezone } from "../../state/hooks";
+import { formatTimestamp } from "../../utils/time";
+import { currentTimezone } from "../grid/columns/common";
 import { writeClipboard } from "../viewer/commands";
 import { errorText } from "../viewer/useAsync";
 import { type ExplorerChildPage, ExplorerTree, type ExplorerTreeItem } from "./ExplorerTree";
@@ -50,7 +52,7 @@ export function keyItem(hive: string, key: RegistryKey): ExplorerTreeItem {
     id: keyId(hive, key.key_path),
     label: key.name,
     badge: key.child_count ? n(key.child_count) : undefined,
-    description: `하위 키 ${n(key.child_count)}개, 값 ${n(values)}개${key.last_written_at ? `, 마지막 기록 ${key.last_written_at}` : ""}`,
+    description: `하위 키 ${n(key.child_count)}개, 값 ${n(values)}개${key.last_written_at ? `, 마지막 기록 ${formatTimestamp(key.last_written_at, currentTimezone())}` : ""}`,
     hasChildren: key.has_children,
     icon: "key",
     title: key.key_path,
@@ -176,6 +178,7 @@ function LinkedRows({ data, onJump }: { data: RegistryValues; onJump: (row: Regi
 }
 
 function KeyDetails({ runId, hive, keyPath }: { runId: string; hive: RegistryHive; keyPath: string }) {
+  const { timezone } = useTimezone();
   const { navigate } = useRoute();
   const [copied, setCopied] = useState("");
   const values = useQuery({
@@ -224,7 +227,9 @@ function KeyDetails({ runId, hive, keyPath }: { runId: string; hive: RegistryHiv
         </div>
         <div>
           <dt>마지막 기록</dt>
-          <dd>{data.key.last_written_at ?? "알 수 없음"}</dd>
+          <dd title={data.key.last_written_at ?? undefined}>
+            {data.key.last_written_at ? formatTimestamp(data.key.last_written_at, timezone) : "알 수 없음"}
+          </dd>
         </div>
         <div>
           <dt>값</dt>

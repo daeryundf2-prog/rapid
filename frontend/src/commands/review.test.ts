@@ -34,6 +34,12 @@ beforeEach(() => {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string, init?: RequestInit) => {
+      // GET /api/runs/{id} (case_db_ready, r7 L4): not ready here, so marks go through ensure.
+      if (/\/api\/runs\/[^/]+$/.test(String(url))) {
+        return new Response(JSON.stringify({ run_id: "r1", case_db_ready: false }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
       posts.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : null });
       const payload = String(url).includes("/case-db/ensure")
         ? { database: "D:/out/rapidtriage-case.db", case_id: "run-out" }

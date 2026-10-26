@@ -307,7 +307,7 @@ describe("case link: commands and citation prefix", () => {
     useCaseLinks.getState().setLink("r1", null);
     expect(find("case.edit")?.disabledReason?.(ctx)).toBe("케이스에 연결되지 않은 런입니다");
     expect(find("case.link")?.disabledReason?.(ctx)).toBeUndefined();
-    expect(find("case.link")?.disabledReason?.({ ...ctx, runId: null })).toBe("열린 케이스가 없습니다");
+    expect(find("case.link")?.disabledReason?.({ ...ctx, runId: null })).toBe("케이스를 먼저 선택하세요");
     useCaseLinks.getState().setLink("r1", {
       caseId: "c1",
       caseNumber: "2026-1",

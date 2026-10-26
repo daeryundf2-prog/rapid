@@ -55,7 +55,8 @@ describe("CommandPalette", () => {
     expect(document.activeElement).toBe(input());
     const listbox = screen.getByRole("listbox");
     expect(input().getAttribute("aria-controls")).toBe(listbox.id);
-    expect(screen.getAllByRole("group").length).toBe(3);
+    // No case open: the 이동 group is hidden (r7 L4, C-G11), the other two stay.
+    expect(screen.getAllByRole("group").length).toBe(2);
     expect(activeOption()?.getAttribute("aria-selected")).toBe("true");
   });
 
