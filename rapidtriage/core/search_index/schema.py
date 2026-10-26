@@ -19,6 +19,15 @@ Deviations from the plan text (documented in docs/plans/search-2026-10-13.md §3
   ``path:``/``under:`` match ``path_fold`` or ``path2_fold``.
 * ``truncated``: 1 when any value, list or the row text was cut at a cap
   (counted per field in ``summary.skipped`` / ``summary.skipped_fields``).
+* ``search_bigram`` (index v3, R7 S2): the trigram index cannot serve 2-character
+  terms, so a contentless FTS5 table (``tokenize='ascii'``, ``detail=none``)
+  holds, per primary row, every distinct pair of adjacent non-ASCII characters
+  of ``text`` as one token (``근로계약서`` -> ``근로 로계 계약 약서``). The
+  ``ascii`` tokenizer keeps non-ASCII characters verbatim (no folding), so
+  ``MATCH '"계약"'`` returns exactly the rows whose text contains ``계약`` -- the
+  same rows as the ``instr`` scan. 2-character terms with an ASCII character and
+  1-character terms still scan (budgeted, with a warning). ``meta.bigram`` names
+  the pair rule; a v2 index (no table) stays readable and is reported stale.
 """
 
 from __future__ import annotations
@@ -28,7 +37,12 @@ from pathlib import Path
 
 INDEX_FILE_NAME = "rapidtriage-search.db"
 BUILDING_SUFFIX = ".building"
-INDEX_VERSION = "search-index-v2"
+INDEX_VERSION = "search-index-v3"
+# Older formats the engine still reads (a v2 index has no ``search_bigram``: its
+# 2-character terms scan and the status asks for a rebuild).
+READABLE_INDEX_VERSIONS = frozenset({"search-index-v2", INDEX_VERSION})
+BIGRAM_RULE = "nonascii-pairs-v1"
+BIGRAM_SQL = "CREATE VIRTUAL TABLE IF NOT EXISTS search_bigram USING fts5(g, content='', tokenize='ascii', detail=none)"
 # Bump when the flattening rules change: an index of an older rule set is stale.
 FLATTEN_VERSION = "flatten-v2"
 
@@ -164,6 +178,7 @@ def fts_sql(tokenizer: str) -> str:
 def create_schema(connection: sqlite3.Connection, tokenizer: str, *, with_indexes: bool) -> None:
     connection.executescript(SCHEMA_TABLES)
     connection.execute(fts_sql(tokenizer))
+    connection.execute(BIGRAM_SQL)
     if with_indexes:
         connection.executescript(SCHEMA_INDEXES)
 

@@ -127,7 +127,8 @@ class QueryGrammarTests(unittest.TestCase):
         self.assert_error("NOT gap:>=6h x", 5, "NOT·OR 안에")
 
     def test_two_char_warning_and_required_literal(self) -> None:
-        self.assertEqual(parse_query("급여").warnings, ["2자 이하 검색어는 느립니다"])
+        self.assertEqual(parse_query("급여").warnings, [])  # 2 Hangul characters: the bigram table (index v3)
+        self.assertEqual(parse_query("ab").warnings, ["영문·숫자·기호가 든 2자 검색어는 색인을 쓰지 못해 전체 본문을 훑습니다(느릴 수 있음)"])
         self.assertEqual(required_literal("급여\\s*대장"), "급여")
         self.assertEqual(required_literal("AnyDesk\\.exe"), "AnyDesk.exe")
         self.assertEqual(required_literal("abcd?ef"), "abc")
@@ -303,10 +304,11 @@ class QueryEngineTests(unittest.TestCase):
         self.assertIn("클라이언트 연결이 끊겨", result["truncated_reason"])
         self.assertEqual(result["rows"], [])
 
-    def test_two_char_keyword_uses_scan_with_warning(self) -> None:
+    def test_short_keywords(self) -> None:
         result = self.run_q("급여")
         self.assertEqual(result["page"]["total"], 4)
-        self.assertIn("2자 이하 검색어는 느립니다", result["query"]["parsed"]["warnings"])
+        self.assertEqual(result["query"]["parsed"]["warnings"], [])  # bigram table, no scan
+        self.assertIn("1자 검색어는 색인을 쓰지 못해 전체 본문을 훑습니다(느릴 수 있음)", self.run_q("급")["query"]["parsed"]["warnings"])
         # LIKE metacharacters are literal text, never wildcards.
         self.assertEqual(self.total("kw:%"), 0)
         self.assertEqual(self.total("kw:_Classes"), 1)  # literal underscore (ShellBags key)

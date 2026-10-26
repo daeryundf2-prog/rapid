@@ -25,6 +25,23 @@ def fold(value: object) -> str:
     return unicodedata.normalize("NFC", text).casefold()
 
 
+_NON_ASCII_RUN_RE = re.compile(r"[^\x00-\x7f]{2,}")
+
+
+def is_bigram_term(term: str) -> bool:
+    """Two characters, both non-ASCII: the ``search_bigram`` table serves it."""
+    return len(term) == 2 and not term[0].isascii() and not term[1].isascii()
+
+
+def bigram_tokens(text: str) -> str:
+    """Distinct adjacent non-ASCII character pairs of ``text``, space separated (``search_bigram.g``)."""
+    pairs: set[str] = set()
+    for match in _NON_ASCII_RUN_RE.finditer(text):
+        run = match.group()
+        pairs.update(run[i : i + 2] for i in range(len(run) - 1))
+    return " ".join(sorted(pairs))
+
+
 def path_key(value: str) -> str:
     """Folded path with ``/`` separators (``\\`` and ``/`` compare equal)."""
     return fold(value).replace("\\", "/")

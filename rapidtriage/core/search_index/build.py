@@ -53,6 +53,7 @@ from ..artifact_profiles import (
 )
 from ..json_stream import JsonStreamError, iter_array_items
 from .schema import (
+    BIGRAM_RULE,
     BUILDING_SUFFIX,
     FLATTEN_VERSION,
     INDEX_FILE_NAME,
@@ -68,6 +69,7 @@ from .schema import (
     write_meta,
 )
 from .textutil import (
+    bigram_tokens,
     fold,
     format_offset,
     nfc,
@@ -1014,6 +1016,7 @@ class IndexWriter:
         self.fields: list[tuple[object, ...]] = []
         self.hashes: list[tuple[object, ...]] = []
         self.fts: list[tuple[int, str]] = []
+        self.bigrams: list[tuple[int, str]] = []
         self.doc_count = 0
         self.row_count = 0
         self.text_bytes = 0
@@ -1086,6 +1089,9 @@ class IndexWriter:
             self.row_count += 1
         if self.fts_inline:
             self.fts.append((primary, text))
+        pairs = bigram_tokens(text)
+        if pairs:
+            self.bigrams.append((primary, pairs))
         self.fields.extend((primary, name, value, value_int) for name, value, value_int in doc.search_fields)
         self.hashes.extend((alg, value, primary) for alg, value in doc.hashes)
         self.doc_count += 1
@@ -1107,6 +1113,9 @@ class IndexWriter:
         if self.fts:
             self.connection.executemany("INSERT INTO search_text(rowid, text) VALUES (?, ?)", self.fts)
             self.fts.clear()
+        if self.bigrams:
+            self.connection.executemany("INSERT INTO search_bigram(rowid, g) VALUES (?, ?)", self.bigrams)
+            self.bigrams.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -1403,6 +1412,7 @@ def build_search_index(
                 "tz": format_offset(tz) if tz is not None else "",
                 "tz_source": "registry" if ctx.tz_offset is not None else ("timeline" if tz is not None else ""),
                 "tokenizer": tokenizer,
+                "bigram": BIGRAM_RULE,
                 "analyses_indexed": indexed,
                 "summary": build_summary,
             },
@@ -1521,6 +1531,11 @@ def _build_incremental(
             ).fetchall()
             connection.executemany(
                 "INSERT INTO search_text(search_text, rowid, text) VALUES ('delete', ?, ?)", [(item[0], item[1]) for item in removed]
+            )
+            # Contentless: a delete names the row's tokens again (the same pairs the writer added).
+            connection.executemany(
+                "INSERT INTO search_bigram(search_bigram, rowid, g) VALUES ('delete', ?, ?)",
+                [(item[0], pairs) for item in removed if (pairs := bigram_tokens(str(item[1])))],
             )
             connection.execute("DELETE FROM search_field WHERE doc_id IN (SELECT doc_id FROM search_doc WHERE analysis_id = ?)", (analysis_id,))
             connection.execute("DELETE FROM search_hash WHERE doc_id IN (SELECT doc_id FROM search_doc WHERE analysis_id = ?)", (analysis_id,))
@@ -1647,7 +1662,9 @@ def _decode_meta(raw: Mapping[str, str]) -> dict[str, object]:
 def stale_reasons(meta: Mapping[str, object], summary: Mapping[str, object], output_dir: Path, load_state: Callable[[Path, str], Mapping[str, object] | None] | None = None) -> list[str]:
     """Korean reasons the index no longer matches the run outputs (empty: fresh)."""
     reasons: list[str] = []
-    if meta.get("index_version") != INDEX_VERSION or meta.get("flatten_version") != FLATTEN_VERSION:
+    if meta.get("index_version") == "search-index-v2" and meta.get("flatten_version") == FLATTEN_VERSION:
+        reasons.append("2자 한글 검색용 색인(bigram)이 없는 이전 형식입니다. 색인을 다시 만드세요")
+    elif meta.get("index_version") != INDEX_VERSION or meta.get("flatten_version") != FLATTEN_VERSION:
         reasons.append("색인 형식이 바뀌었습니다. 다시 만드세요")
     if meta.get("source_summary_sha256") != summary_sha256(summary):
         reasons.append("런 출력 목록이 바뀌었습니다")
