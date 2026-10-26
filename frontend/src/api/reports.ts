@@ -46,6 +46,8 @@ export function getSubmissionManifest(runId: string, includeAll = false, maxItem
 }
 
 export const submissionManifestFile = (runId: string) => `${run(runId)}/submission-manifest/file`;
+/** Read-only GET of the manifest the last GET wrote (no rewrite, no second audit record). */
+export const savedSubmissionManifestFile = (runId: string) => `${run(runId)}/submission-manifest/saved`;
 
 /** `POST /api/runs/{id}/validation-package` — writes package + audit into the run folder (r7 L4). */
 export interface ValidationPackageWrite {

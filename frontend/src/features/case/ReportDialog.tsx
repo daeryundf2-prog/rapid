@@ -10,6 +10,7 @@ import {
   exportWrites,
   performExport,
   type ReportFormat,
+  writtenDetail,
 } from "./exports";
 import { Modal } from "./Modal";
 import { ReasonButton } from "./ReasonButton";
@@ -69,9 +70,12 @@ export function ReportDialog({
       performExport(chosen, runId as string, { format, meta: { title, caseNumber, investigator } }),
     onSuccess: (result, chosen) => {
       const label = EXPORT_ACTIONS.find((action) => action.kind === chosen)?.label ?? "내보내기";
+      const written = result.written ?? [];
       notifyWritten(
-        `${label}: ${result.fileName}을(를) 저장했습니다.`,
-        result.path,
+        written.length > 1
+          ? `${label}: ${written.length}개 파일을 썼습니다 (${result.fileName}은(는) 다운로드 폴더에도 저장).`
+          : `${label}: ${result.fileName}을(를) 저장했습니다.`,
+        written.length > 1 ? writtenDetail(written) : result.path,
         result.open ? { label: "열기", run: () => void result.open?.() } : undefined,
       );
       onClose();

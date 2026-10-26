@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { ApiError } from "../../api/client";
 import {
   caseReportFile,
   createCaseReport,
@@ -6,6 +7,7 @@ import {
   downloadFile,
   getSubmissionManifest,
   reviewerBundleFile,
+  savedSubmissionManifestFile,
   savedValidationPackageFile,
   submissionManifestFile,
   writeValidationPackage,
@@ -81,6 +83,16 @@ export const useExportHistory = create<{ records: ExportRecord[]; add: (record: 
   }),
 );
 
+/** Every file `POST /case-report` writes (server CASE_REPORT_EXPORTS + its audit record). */
+export const CASE_REPORT_FILES: Array<{ format: ReportFormat | null; what: string; name: string }> = [
+  { format: "md", what: "보고서 원본(Markdown)", name: "rapidtriage-case-report.md" },
+  { format: "html", what: "보고서 HTML", name: "rapidtriage-case-report.html" },
+  { format: "docx", what: "보고서 Word(docx)", name: "rapidtriage-case-report.docx" },
+  { format: "pdf", what: "보고서 PDF", name: "rapidtriage-case-report.pdf" },
+  { format: null, what: "형식별 해시 목록(JSON)", name: "rapidtriage-case-report.exports.json" },
+  { format: null, what: "감사 기록", name: "rapidtriage-case-report.audit.md" },
+];
+
 /**
  * Files an export writes into the run folder (server helpers default_*_path), shown in the export
  * dialog before anything is sent (r7 L4) and named again in the completion toast.
@@ -92,13 +104,12 @@ export function exportWrites(
 ): Array<{ what: string; where: string }> {
   switch (kind) {
     case "case-report":
-      return [
-        { what: "보고서 원본(Markdown)·감사 기록", where: joinRunPath(folder, "rapidtriage-case-report.md") },
-        {
-          what: `보고서 ${format.toUpperCase()} 사본 (다운로드 폴더에도 저장)`,
-          where: joinRunPath(folder, `rapidtriage-case-report.${format}`),
-        },
-      ];
+      // R-4: the server writes every format plus its export manifest and the audit record
+      // (core/case_report.py CASE_REPORT_EXPORTS + audit_path_for), whatever format is chosen.
+      return CASE_REPORT_FILES.map((file) => ({
+        what: file.format === format ? `${file.what} (선택 형식 — 다운로드 폴더에도 저장)` : file.what,
+        where: joinRunPath(folder, file.name),
+      }));
     case "reviewer-bundle":
       return [
         {
@@ -109,9 +120,10 @@ export function exportWrites(
     case "submission-manifest":
       return [
         {
-          what: "제출 매니페스트(JSON)·감사 기록 (다운로드 폴더에도 저장)",
+          what: "제출 매니페스트(JSON) (다운로드 폴더에도 저장)",
           where: joinRunPath(folder, "rapidtriage-submission-manifest.json"),
         },
+        { what: "감사 기록", where: joinRunPath(folder, "rapidtriage-submission-manifest.audit.json") },
       ];
     case "validation-package":
       return [
@@ -131,6 +143,43 @@ export interface ExportResult {
   path: string | null;
   /** Read-only re-open of the written file (the toast's 열기). */
   open?: () => Promise<unknown>;
+  /** Every file the server wrote (its own list when it sent one, else the known static list). */
+  written?: string[];
+}
+
+const baseName = (path: string) => path.split(/[\\/]/).pop() || path;
+
+const stringsOf = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((v): v is string => typeof v === "string" && v.length > 0) : [];
+
+/**
+ * Files a `POST /case-report` response says it wrote: its `written` list (backend R-4), else
+ * `report_path` + every `exports` value + `audit`; empty when the response names none.
+ */
+export function caseReportWritten(response: Record<string, unknown> | null | undefined): string[] {
+  if (!response) return [];
+  const listed = stringsOf(response.written);
+  if (listed.length > 0) return listed;
+  const exportsMap =
+    response.exports && typeof response.exports === "object" ? Object.values(response.exports) : [];
+  const all = [response.report_path, ...exportsMap, response.audit].filter(
+    (v): v is string => typeof v === "string" && v.length > 0,
+  );
+  return [...new Set(all)];
+}
+
+const folderOf = (path: string) => {
+  const cut = Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/"));
+  return cut > 0 ? path.slice(0, cut) : "";
+};
+
+/** The completion toast's detail: the folder then every written file name. */
+export function writtenDetail(written: string[]): string | null {
+  const first = written[0];
+  if (!first) return null;
+  const folder = folderOf(first);
+  const names = written.map(baseName).join(", ");
+  return `${folder ? `${folder} — ` : ""}${written.length}개 파일: ${names}`;
 }
 
 /** Run one export (after the dialog confirmed it); resolves with what was saved (recorded in the history). */
@@ -146,8 +195,6 @@ export async function performExport(
     .add({ runId, kind, label, fileName: result.fileName, at: new Date().toISOString() });
   return result;
 }
-
-const baseName = (path: string) => path.split(/[\\/]/).pop() || path;
 
 async function runExport(
   kind: ExportKind,
@@ -167,7 +214,11 @@ async function runExport(
         max_items: 500,
       });
       const fileName = await downloadFile(caseReportFile(runId, format), `case-report.${format}`);
-      return { fileName, path: created.report_path ?? null };
+      const reported = caseReportWritten(created as unknown as Record<string, unknown>);
+      const folder = created.report_path ? folderOf(created.report_path) || null : null;
+      const written =
+        reported.length > 0 ? reported : CASE_REPORT_FILES.map((file) => joinRunPath(folder, file.name));
+      return { fileName, path: created.report_path ?? null, written };
     }
     case "reviewer-bundle": {
       const created = await createReviewerBundle(runId, { include_all: false, max_items: 500 });
@@ -175,8 +226,16 @@ async function runExport(
       return { fileName, path: typeof created.archive === "string" ? created.archive : null };
     }
     case "submission-manifest": {
+      // Written once by the GET; the download re-reads the saved file (`/saved`, backend R-4).
+      // A server without `/saved` (404/405) falls back to `/file`, which rewrites it.
       await getSubmissionManifest(runId, false, 500);
-      const fileName = await downloadFile(submissionManifestFile(runId), "submission-manifest.json");
+      let fileName: string;
+      try {
+        fileName = await downloadFile(savedSubmissionManifestFile(runId), "submission-manifest.json");
+      } catch (error) {
+        if (!(error instanceof ApiError) || (error.status !== 404 && error.status !== 405)) throw error;
+        fileName = await downloadFile(submissionManifestFile(runId), "submission-manifest.json");
+      }
       return { fileName, path: null };
     }
     case "validation-package": {
