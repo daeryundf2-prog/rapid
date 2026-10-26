@@ -27,6 +27,7 @@ import { flagSortValue, flagsAccessibleName, rowFlags } from "../../flags/flags"
 import { eventLevelLabel, logonTypeLabel, severityLabel } from "../../viewer/fieldFormat";
 import { EVENT_DATA_KEYS } from "../../viewer/fieldSheets";
 import type { ColumnSpec } from "../types";
+import { keyValueReading } from "../valueLabels";
 import { currentTimezone, formatBytes, isRecord } from "./common";
 
 /** Korean reading of a timestamp kind (chip tooltip / accessible text). */
@@ -242,6 +243,9 @@ function nameColumn(def: CatalogColumn): boolean {
 export function catalogValueReading(def: CatalogColumn, value: unknown): string | undefined {
   const mapped = columnValueLabel(def, value);
   if (mapped) return mapped;
+  // The shared value-label table (R7 L3): `edge` → Edge, `fixed` → 고정 디스크 under any family.
+  const shared = keyValueReading(def.key, value);
+  if (shared) return shared;
   // A flag reads 예 / 아니오, never true / false (C9; the raw value stays in the tooltip).
   if (typeof value === "boolean") return value ? "예" : "아니오";
   if (def.format === "artifact_type" && typeof value === "string" && value) {
@@ -321,6 +325,12 @@ function displayValue(def: CatalogColumn, value: unknown): string {
       )
       .filter(Boolean);
     if (names.length) return clipValue(names.join(", "), 300);
+  }
+  // One object (synthetic-media `source_guess` {label, confidence, …}): its own label, never a
+  // JSON preview (R7 L3, C-D9).
+  if (isRecord(value)) {
+    const label = value.label_ko ?? value.label ?? value.name ?? value.summary_ko ?? value.summary;
+    if (typeof label === "string" && label) return clipValue(label, 300);
   }
   return clipValue(flatValue(value), 300);
 }
@@ -614,6 +624,14 @@ function factsOf(row: GridRow): ReturnType<typeof rowFacts> {
   return facts;
 }
 
+/**
+ * The row's own family facts as the mixed grids read them (주요 · 지원 · 추가 · 날짜 및 시각): the
+ * card view (C-V3) titles a row by its main fact when the row title is only the container file.
+ */
+export function rowSummaryFacts(row: GridRow): { facts: SummaryEntry[]; time: SummaryEntry | null } {
+  return factsOf(row);
+}
+
 function twoLine(entry: SummaryEntry | null | undefined) {
   if (!entry) return createElement("span", { className: "grid-cell-empty", "aria-hidden": true }, "—");
   return createElement(
@@ -658,4 +676,31 @@ export function mixedSummaryColumns(): ColumnSpec[] {
     summaryColumn("sum:extra", "추가 세부 정보", (row) => factsOf(row).facts[2], 180),
     summaryColumn("sum:time", "날짜 및 시각", (row) => factsOf(row).time, TIME_COLUMN_WIDTH),
   ];
+}
+
+/**
+ * Category labels that never collide (R7 L3, C-V1 "레지스트리 하이브"×3): a label shared by several
+ * entries is qualified by the entry's `context` (its tree group: "실행 흔적 · 운영체제·계정"), and
+ * entries still sharing a label after that are numbered. Never a raw id. Order is kept.
+ */
+export function uniqueLabels<T extends { label: string; context?: string }>(entries: readonly T[]): T[] {
+  const count = (list: readonly { label: string }[]) => {
+    const uses = new Map<string, number>();
+    for (const entry of list) uses.set(entry.label, (uses.get(entry.label) ?? 0) + 1);
+    return uses;
+  };
+  const first = count(entries);
+  const qualified = entries.map((entry) =>
+    (first.get(entry.label) ?? 0) > 1 && entry.context && entry.context !== entry.label
+      ? { ...entry, label: `${entry.label} · ${entry.context}` }
+      : entry,
+  );
+  const second = count(qualified);
+  const seen = new Map<string, number>();
+  return qualified.map((entry) => {
+    if ((second.get(entry.label) ?? 0) < 2) return entry;
+    const nth = (seen.get(entry.label) ?? 0) + 1;
+    seen.set(entry.label, nth);
+    return nth > 1 ? { ...entry, label: `${entry.label} (${nth})` } : entry;
+  });
 }

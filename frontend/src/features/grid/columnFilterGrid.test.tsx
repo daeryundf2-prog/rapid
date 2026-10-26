@@ -265,7 +265,8 @@ describe("column header filters (plan analysis-workbench-p1 U-P1-4)", () => {
     // The chip reads the Korean type name; the exact artifact_type stays on the element / tooltip.
     expect(typeCell?.textContent).toBe("웹 서버 로그");
     expect(typeCell?.getAttribute("data-type")).toBe("web-server-log");
-    expect(screen.getByRole("button", { name: "유형 web-server-log 조건 제거" })).toBeTruthy();
+    // The 유형 chip reads the Korean name too (R7 L3).
+    expect(screen.getByRole("button", { name: "유형 웹 서버 로그 조건 제거" })).toBeTruthy();
   });
 
   it("analysis rows: 경로 column filter → path_contains on the rows request", async () => {
