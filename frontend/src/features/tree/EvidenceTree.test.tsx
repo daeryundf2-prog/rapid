@@ -151,8 +151,8 @@ describe("EvidenceTree (탐색 domain tree)", () => {
     expect(screen.getByRole("tree", { name: "케이스 탐색 트리" })).toBeTruthy();
     expect(item("증거 소스").getAttribute("aria-level")).toBe("1");
     expect(item("전체 보기").getAttribute("aria-expanded")).toBe("true");
-    expect(item("전체 파일").getAttribute("aria-level")).toBe("2");
-    expect(item("전체 파일").textContent).toContain("30");
+    expect(item("파일 목록").getAttribute("aria-level")).toBe("2");
+    expect(item("파일 목록").textContent).toContain("30");
     expect(item("이벤트 로그").getAttribute("aria-level")).toBe("1");
     expect(item("이벤트 로그").getAttribute("aria-expanded")).toBe("false");
     expect(item("이벤트 로그").querySelector(".badge.strong")?.textContent).toBe("100");
@@ -189,7 +189,7 @@ describe("EvidenceTree (탐색 domain tree)", () => {
     await renderTree();
     item("전체 보기").focus();
     fireEvent.keyDown(document.activeElement as Element, { key: "ArrowDown" });
-    expect(document.activeElement).toBe(item("전체 파일"));
+    expect(document.activeElement).toBe(item("파일 목록"));
     fireEvent.keyDown(document.activeElement as Element, { key: "End" });
     expect(document.activeElement).toBe(item("위치·여행"));
     fireEvent.keyDown(document.activeElement as Element, { key: "Home" });
@@ -243,7 +243,7 @@ describe("EvidenceTree (탐색 domain tree)", () => {
 
   it("clicking a view navigates; empty nodes stay put and explain why", async () => {
     await renderTree();
-    fireEvent.click(item("전체 파일"));
+    fireEvent.click(item("파일 목록"));
     expect(window.location.hash).toBe("#/case/r1/explore/files");
     expect(item("문서/메일").getAttribute("aria-disabled")).toBe("true");
     fireEvent.click(item("문서/메일"));
@@ -251,7 +251,7 @@ describe("EvidenceTree (탐색 domain tree)", () => {
     expect(document.querySelector(".case-tree-reason")?.textContent).toBe(
       "docs-index 산출물이 없는 런입니다",
     );
-    fireEvent.click(item("파일시스템").querySelector(".case-tree-twisty") as Element);
+    fireEvent.click(item("NTFS·파일시스템 아티팩트").querySelector(".case-tree-twisty") as Element);
     // Analysis result nodes always open their pane (never-ran state shown there).
     expect(item("복구/카빙").getAttribute("aria-disabled")).toBeNull();
     expect(item("복구/카빙").getAttribute("aria-label")).toContain("미실행");
@@ -269,8 +269,8 @@ describe("EvidenceTree (탐색 domain tree)", () => {
     expect(document.querySelector(".case-tree-reason")?.textContent).toContain("선택되지 않았습니다");
     fireEvent.click(ntfs);
     expect(window.location.hash).toBe("#/case/r1/explore/files");
-    // 전체 파일 owns the files route (first match); evidence shortcuts never render as selected.
-    await waitFor(() => expect(item("전체 파일").getAttribute("aria-selected")).toBe("true"));
+    // 파일 목록 owns the files route (first match); evidence shortcuts never render as selected.
+    await waitFor(() => expect(item("파일 목록").getAttribute("aria-selected")).toBe("true"));
     expect(ntfs.getAttribute("aria-selected")).toBe("false");
   });
 

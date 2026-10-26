@@ -141,9 +141,9 @@ describe("tree model (탐색 domain tree, console-ia §4)", () => {
     for (const gone of ["intake", "review", "outputs", "analyses"]) expect(ids).not.toContain(gone);
     const views = model.find((n) => n.id === "views");
     expect(views?.children?.map((c) => [c.label, c.count])).toEqual([
-      ["전체 파일", 30],
+      ["파일 목록", 30],
       // r4 §2.2 explorers: the file system view counts the files, the registry one its key-tree rows.
-      ["파일 시스템", 30],
+      ["폴더 탐색기", 30],
       ["레지스트리 탐색기", 0],
       ["전체 아티팩트", 120],
       ["전체 타임라인", 0],

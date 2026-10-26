@@ -743,20 +743,16 @@ export const DOMAINS: readonly DomainDef[] = [
       },
     ],
   },
+  // R7 L3 (C-T1/T2, glossary 파일 목록·폴더 탐색기·NTFS·파일시스템 아티팩트): "파일 목록" and
+  // "폴더 탐색기" live once, under 전체 보기 (tree/model.ts); this domain keeps the file categories,
+  // the inventory and the NTFS / file-system artifacts. The registry explorer is likewise only under
+  // 전체 보기.
   {
     id: "filesystem",
-    label: "파일시스템",
+    label: "NTFS·파일시스템 아티팩트",
     icon: "hard-drive",
     nodes: [
-      {
-        id: "fs-explorer",
-        label: "폴더 탐색기",
-        target: { collection: "files", dir: "" },
-        lead: true,
-        note: "볼륨 → 폴더 계층으로 내려가며 폴더의 파일을 목록에 표시합니다(←/→ 펼침, Enter 열기)",
-      },
-      { id: "fs-all", label: "전체 파일", target: { collection: "files" } },
-      { id: "fs-inventory", label: "전체 파일(인벤토리)", target: inventory() },
+      { id: "fs-inventory", label: "인벤토리(스캔한 모든 파일)", target: inventory() },
       { id: "fs-documents", label: "문서", target: files("documents") },
       { id: "fs-images", label: "이미지", target: files("images") },
       { id: "fs-archives", label: "압축", target: files("archives") },
@@ -836,7 +832,7 @@ export const DOMAINS: readonly DomainDef[] = [
       },
       {
         id: "fs-artifacts-all",
-        label: "파일시스템 아티팩트 전체",
+        label: "NTFS·파일시스템 아티팩트 전체",
         target: a("windows-filesystem"),
         catchAll: true,
       },
@@ -847,13 +843,6 @@ export const DOMAINS: readonly DomainDef[] = [
     label: "레지스트리",
     icon: "database",
     nodes: [
-      {
-        id: "reg-explorer",
-        label: "레지스트리 탐색기(키·값)",
-        target: { collection: "registry" },
-        lead: true,
-        note: "하이브 → 키 트리, 값 표(형식·데이터·디코딩), 키에서 나온 아티팩트 행으로 이동",
-      },
       {
         id: "reg-persistence",
         label: "자동 실행/지속성",
