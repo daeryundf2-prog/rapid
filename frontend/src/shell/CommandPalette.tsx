@@ -31,7 +31,9 @@ export const GROUP_LABEL: Record<CommandGroup, string> = {
 };
 
 /** Commands that only make sense as keys, not as palette entries. */
-const HIDDEN_IN_PALETTE = new Set(["app.palette", "app.close"]);
+// case.run.add: the palette's one "런 추가…" is case.run.new (C-G9), the same action plus the
+// unlinked-run fallback — two entries with one name would read as a duplicate.
+const HIDDEN_IN_PALETTE = new Set(["app.palette", "app.close", "case.run.add"]);
 
 interface PaletteItem {
   key: string;
@@ -75,13 +77,17 @@ export function buildPaletteGroups(
     seen.add(dedupeKey);
     const score = fuzzyScore(query, `${command.label} ${command.id}`);
     if (score === null) continue;
+    const reason = paletteReason(reasonOf(command));
+    // No case open (C-G11 remainder): commands that cannot run stay out of the plain list (~60
+    // greyed entries); typing their name still finds them, with the one reason.
+    if (!caseOpen && reason && !query.trim()) continue;
     items.push({
       key: command.id,
       label: command.label,
       group: command.group,
       icon: command.icon,
       shortcut: command.shortcut,
-      disabledReason: paletteReason(reasonOf(command)),
+      disabledReason: reason,
       score,
       perform: () => {
         void runCommand(command.id);

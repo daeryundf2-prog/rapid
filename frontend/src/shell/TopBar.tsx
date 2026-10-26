@@ -4,6 +4,7 @@ import { COLLECTION_LABEL } from "../app/collections";
 import { focusGridWhenReady, GLOBAL_SEARCH_ID, NO_RUN_REASON } from "../commands/builtin";
 import { CommandButton } from "../commands/CommandButton";
 import { useCommandState } from "../commands/registry";
+import { RUN_ADD_LABEL } from "../features/case/commands";
 import { SearchOptionsButton } from "../features/case/SearchOptionsPopover";
 import { useSearchState } from "../features/case/searchState";
 import { Icon } from "../icons";
@@ -142,7 +143,12 @@ export function TopBar() {
         <Slot name="case-picker" fallback={<CasePickerFallback />} />
         {/* With a case open "실행" was the case-less quick run (C-G9): now a run of THIS case. */}
         {hasCase ? (
-          <CommandButton command="case.run.new" variant="ghost" label="새 런…" testId="run-dialog-button" />
+          <CommandButton
+            command="case.run.new"
+            variant="ghost"
+            label={RUN_ADD_LABEL}
+            testId="run-dialog-button"
+          />
         ) : (
           <CommandButton command="case.run-dialog" variant="ghost" label="실행" testId="run-dialog-button" />
         )}
