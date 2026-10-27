@@ -86,8 +86,9 @@ def _metadata(row: Mapping[str, object]) -> dict[str, object]:
     record: dict[str, object] = {key: value for key, value in fields.items() if isinstance(value, (str, int, float, bool))}
     if row.get("collection") == "artifacts":
         record["artifact_type"] = row.get("artifact_type") or ""
-    if row.get("ts"):
-        record["timestamp"] = row.get("ts")
+    record_ts = row.get("record_ts") if row.get("record_ts") is not None else row.get("ts")
+    if record_ts:
+        record["timestamp"] = record_ts
         record["timestamp_kind"] = row.get("ts_kind") or ""
     for algorithm in ("md5", "sha1", "sha256"):
         if hashes.get(algorithm):
@@ -128,8 +129,9 @@ def index_hit(
         "title": title,
         "matched_keywords": matched,
         "metadata": _metadata(row),
-        # v4: the record's own time as v1 shows it; older indexes: the matched row's epoch time.
-        "timestamp": row.get("record_ts") or row.get("ts") or None,
+        # v4: the record's own time as v1 shows it ("": none, like v1); older indexes (record_ts
+        # None): the matched row's epoch time.
+        "timestamp": (row.get("record_ts") or None) if row.get("record_ts") is not None else (row.get("ts") or None),
         "search_match": build_search_match_metadata(snippet_text, keywords, search_options={"search_mode": "exact"}),
     }
     snippet_source: object = snippet_text

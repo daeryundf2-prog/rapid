@@ -1787,7 +1787,8 @@ def _row_payload(
         fields = {}
     fields = dict(list(fields.items())[:20]) if isinstance(fields, dict) else {}
     ts = row["ts"]
-    record_ts = row["pts_text"] if "pts_text" in row.keys() else ""
+    # v4: the record's own time ("" = the record has none); ``None`` before v4 (not indexed).
+    record_ts = str(row["pts_text"] or "") if "pts_text" in row.keys() else None
     return {
         "doc_id": int(row["doc_id"]),
         "group_id": int(row["group_id"]),
@@ -1805,7 +1806,7 @@ def _row_payload(
         "ts_local": ms_to_iso(ts, tz) if ts is not None else None,
         "ts_kind": row["ts_kind"] or None,
         # The record's own time as its source spells it (v4; what a v1 hit shows as ``timestamp``).
-        "record_ts": record_ts or None,
+        "record_ts": record_ts,
         "ts_kinds": ts_kinds if ts_kinds is not None else ([row["ts_kind"]] if row["ts_kind"] else []),
         "actor": row["actor"],
         "computer": row["computer"],
