@@ -178,8 +178,10 @@ class RunDerived:
             self._row_sets[key] = value
         return value
 
-    def family_rows(self, ref: str) -> dict[tuple[str, str], frozenset[int]]:
-        return self._cached(("family", ref), lambda: self.families.family(base_ref(ref) if parse_ref(ref) else ref))
+    def family_rows(self, refs: Sequence[str]) -> dict[tuple[str, str], frozenset[int]]:
+        """Rows of the families of ``refs`` (each item's top-level item and its descendants)."""
+        wanted = tuple(refs)
+        return self._cached(("family", wanted), lambda: [member for ref in wanted for member in self.families.family(base_ref(ref))])
 
     def dup_rows(self, mode: str, status: str) -> dict[tuple[str, str], frozenset[int]]:
         def compute() -> list[str]:

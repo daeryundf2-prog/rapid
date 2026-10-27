@@ -615,13 +615,15 @@ def in_hours(hour: int, window: tuple[int, int]) -> bool:
 # --- row sets (R7 갈래 A) ---------------------------------------------------------------------
 
 DUP_LABELS = {"original": "원본", "duplicate": "중복", "any": "중복 있음"}
+# Items one ``family=`` listing may name (repeated parameter: the union of their families).
+MAX_FAMILY_REFS = 500
 
 
 @dataclass(frozen=True)
 class RowSetQuery:
     """``family=`` / ``dup=`` (+ ``dup_mode=``) / ``irregular=`` of a listing (parsed, unresolved)."""
 
-    family: str | None = None
+    family: tuple[str, ...] | None = None
     dup: str | None = None
     dup_mode: str = "item"
     irregular: frozenset[str] | None = None
@@ -636,7 +638,7 @@ class RowSetQuery:
     def describe(self) -> dict[str, object]:
         out: dict[str, object] = {}
         if self.family is not None:
-            out["family"] = self.family
+            out["family"] = list(self.family)
         if self.dup is not None:
             out["dup"] = self.dup
             out["dup_mode"] = self.dup_mode
@@ -646,15 +648,16 @@ class RowSetQuery:
 
 
 def parse_row_sets(
-    *, family: str | None = None, dup: str | None = None, dup_mode: str | None = None, irregular: Sequence[str] = ()
+    *, family: Sequence[str] = (), dup: str | None = None, dup_mode: str | None = None, irregular: Sequence[str] = ()
 ) -> RowSetQuery | None:
     """Korean ``ValueError`` for a bad value; ``None`` when none is given."""
-    family_ref: str | None = None
-    if family is not None and family.strip():
-        text = family.strip()
+    refs = [text.strip() for text in family if isinstance(text, str) and text.strip()]
+    if len(refs) > MAX_FAMILY_REFS:
+        raise ValueError(f"family 값은 {MAX_FAMILY_REFS}개까지 쓸 수 있습니다")
+    for text in refs:
         if parse_ref(text) is None or text.startswith("source::"):
             raise ValueError("family 값은 항목 참조여야 합니다(예: artifacts:email:/artifacts/3, files::/candidates/12)")
-        family_ref = text
+    family_ref = tuple(dict.fromkeys(refs)) or None
     dup_value: str | None = None
     if dup is not None and dup.strip():
         dup_value = dup.strip().lower()
@@ -817,7 +820,7 @@ def parse_row_conditions(
     partial: bool = False,
     content: Sequence[str] = (),
     geo: str | None = None,
-    family: str | None = None,
+    family: Sequence[str] = (),
     dup: str | None = None,
     dup_mode: str | None = None,
     irregular: Sequence[str] = (),

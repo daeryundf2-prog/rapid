@@ -201,7 +201,10 @@ class FamiliesApiTests(unittest.TestCase):
     def test_family_condition_on_files_artifacts_and_timeline(self) -> None:
         carve_family = self.get(f"files?limit=50&family={quote(f'analysis:{fx.CARVE_ID}:/rows/1', safe='')}")
         self.assertEqual([row["record_index"] for row in carve_family["candidates"]], [0])
-        self.assertEqual(carve_family["pagination"]["conditions"]["family"], f"analysis:{fx.CARVE_ID}:/rows/1")
+        self.assertEqual(carve_family["pagination"]["conditions"]["family"], [f"analysis:{fx.CARVE_ID}:/rows/1"])
+        # Repeated family=: the union of the families (the selection expansion uses it).
+        union = self.get(f"artifacts?limit=50&kind=email&family={quote(EMAIL + '2', safe='')}&family={quote(EMAIL + '8', safe='')}")
+        self.assertEqual([row["record_index"] for row in union["artifacts"]["email"]["artifacts"]], [1, 2, 3, 7, 8])
         backup = self.get(f"artifacts?limit=50&kind=mobile-export&family={quote('artifacts:mobile-export:/artifacts/3', safe='')}")
         self.assertEqual([row["record_index"] for row in backup["artifacts"]["mobile-export"]["artifacts"]], [0, 1, 2, 3])
         timeline = self.get(f"timeline?limit=50&family={quote(EMAIL + '1', safe='')}")

@@ -204,7 +204,7 @@ def row_conditions_or_422(
     partial: str | None,
     content: list[str],
     geo: str | None = None,
-    family: str | None = None,
+    family: list[str] | None = None,
     dup: str | None = None,
     dup_mode: str | None = None,
     irregular: list[str] | None = None,
@@ -222,7 +222,7 @@ def row_conditions_or_422(
             partial=_flag_param("partial", partial),
             content=content,
             geo=geo,
-            family=family,
+            family=family or [],
             dup=dup,
             dup_mode=dup_mode,
             irregular=irregular or [],
@@ -699,7 +699,7 @@ def build_runs_router(
         partial: str | None = Query(default=None),
         content: list[str] = Query(default=[]),
         geo: str | None = Query(default=None),
-        family: str | None = Query(default=None, max_length=2048),
+        family: list[str] = Query(default=[]),
         dup: str | None = Query(default=None),
         dup_mode: str | None = Query(default=None),
         irregular: list[str] = Query(default=[]),
@@ -916,7 +916,7 @@ def build_runs_router(
         partial: str | None = Query(default=None),
         content: list[str] = Query(default=[]),
         geo: str | None = Query(default=None),
-        family: str | None = Query(default=None, max_length=2048),
+        family: list[str] = Query(default=[]),
         dup: str | None = Query(default=None),
         dup_mode: str | None = Query(default=None),
         irregular: list[str] = Query(default=[]),
@@ -936,8 +936,8 @@ def build_runs_router(
         index is narrowed to the matching records) and are echoed as ``conditions`` in the
         pagination; a bad value is a 422 with a Korean message.
 
-        계열·중복·예외 (R7 갈래 A, ``families``): ``family=<item ref>`` (the rows of that item's
-        family: its top-level item and descendants), ``dup=original|duplicate|any`` with
+        계열·중복·예외 (R7 갈래 A, ``families``): ``family=<item ref>`` (repeatable: the rows of those
+        items' families, each a top-level item and its descendants), ``dup=original|duplicate|any`` with
         ``dup_mode=item|family|custodian`` (default ``item``) and ``irregular=<category>``
         (repeatable or comma-joined: any of them) are row sets of the run's derivation (built on
         the first request); they apply at the rows' source like the other conditions (``/files``
@@ -1730,7 +1730,7 @@ def build_runs_router(
         partial: str | None = Query(default=None),
         content: list[str] = Query(default=[]),
         geo: str | None = Query(default=None),
-        family: str | None = Query(default=None, max_length=2048),
+        family: list[str] = Query(default=[]),
         dup: str | None = Query(default=None),
         dup_mode: str | None = Query(default=None),
         irregular: list[str] = Query(default=[]),
