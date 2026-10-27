@@ -29,7 +29,11 @@ from .execution_match import execution_presence_from_artifacts_dir
 from .generic_hidden_dir import hidden_dir_candidate_rows
 from .install import install_rows_for_profile
 from .local_llm_ext import model_file_rows
-from .presence import presence_rows_for_profile
+from .presence import (
+    dedupe_credential_rows,
+    mask_row_identity,
+    presence_rows_for_profile,
+)
 
 __all__ = ["AiAgentsProvider", "load_adapters"]
 
@@ -94,6 +98,7 @@ class AiAgentsProvider:
         self.execution_artifacts_dir = Path(execution_artifacts_dir) if execution_artifacts_dir else None
         self.os_hint = str(os_hint or "")
         self.collection_notes: list[str] = []
+        self._profiles: list[EvidenceProfile] = []
 
     @property
     def options_key(self) -> str:
@@ -122,8 +127,18 @@ class AiAgentsProvider:
             yield row.to_record()
 
     def collect_rows(self, root: Path) -> Iterator[AiRow]:
+        """Every row; credential files reported by both lanes come out once (after the stream)."""
+        yield from dedupe_credential_rows(self._all_rows(root))
+
+    def _all_rows(self, root: Path) -> Iterator[AiRow]:
+        for row in self._lane_a_rows(root):
+            yield mask_row_identity(row)
+        yield from self._adapter_rows(self._profiles)
+
+    def _lane_a_rows(self, root: Path) -> Iterator[AiRow]:
         catalog = load_catalog()
         profiles = enumerate_profiles(root, os_hint=self.os_hint, catalog=catalog)
+        self._profiles = profiles
         self.collection_notes = []
         if not profiles:
             self.collection_notes.append("사용자 프로필 폴더(Users\\<사용자>, /home/<사용자>, /Users/<사용자>)를 찾지 못해 AI 도구 흔적을 검사하지 않았습니다")
@@ -135,7 +150,6 @@ class AiAgentsProvider:
             yield from model_file_rows(catalog, profile, cache)
         if self.execution_artifacts_dir is not None:
             yield from execution_presence_from_artifacts_dir(self.execution_artifacts_dir, catalog=catalog)
-        yield from self._adapter_rows(profiles)
 
     def _adapter_rows(self, profiles: list[EvidenceProfile]) -> Iterator[AiRow]:
         load_adapters()
