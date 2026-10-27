@@ -44,6 +44,7 @@ from .search import (
     keyword_stems,
     match_keywords,
     normalize_document_extraction_error,
+    record_text,
 )
 from .search_budget import SearchBudget, SourceScan
 from .textnorm import normalize_nfc, normalize_search_text
@@ -681,7 +682,7 @@ def _files(connection: sqlite3.Connection, context: _SearchContext, scan: Source
         candidate = candidates.get(ordinal)
         if candidate is None:
             continue
-        haystack = json.dumps(candidate, ensure_ascii=False)
+        haystack = record_text(candidate)
         matched = context.matched(haystack)
         if not matched:
             continue
@@ -734,7 +735,7 @@ def _artifacts(connection: sqlite3.Connection, context: _SearchContext, scan: So
         path = str(stored.get("path", ""))
         if not collector.accepts_path(path):
             continue
-        haystack = json.dumps(stored, ensure_ascii=False)
+        haystack = record_text(stored)
         matched = context.matched(haystack)
         if not matched:
             continue
@@ -775,7 +776,7 @@ def _indicators(connection: sqlite3.Connection, context: _SearchContext, scan: S
         if not isinstance(details, Mapping) or not isinstance(details.get("raw"), Mapping):
             continue
         raw = dict(details["raw"])
-        haystack = json.dumps(raw, ensure_ascii=False)
+        haystack = record_text(raw)
         matched = context.matched(haystack)
         if not matched:
             continue
@@ -831,7 +832,7 @@ def _timeline(connection: sqlite3.Connection, context: _SearchContext, scan: Sou
             "path": path,
             "summary": row["description"],
         }
-        haystack = json.dumps(event, ensure_ascii=False)
+        haystack = record_text(event)
         matched = context.matched(haystack)
         if not matched:
             continue

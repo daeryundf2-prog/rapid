@@ -114,6 +114,29 @@ V1_REGEX_FLAGS = re.IGNORECASE | re.MULTILINE
 _REGEX_UNCHECKED: contextvars.ContextVar[list[int] | None] = contextvars.ContextVar("search_regex_unchecked", default=None)
 
 
+def record_text(record: object) -> str:
+    """The text a v1 keyword is matched against: the record's values, one per line (R7 S2 review #15).
+
+    The JSON serialization matched its own syntax -- ``"`` and ``_`` (key names) hit every row,
+    ``quote"inside`` / ``back\\slash`` / a tab never matched their escaped forms -- so the scan
+    reads the string and number values only (keys, ``null`` and booleans are not evidence text).
+    """
+    parts: list[str] = []
+    stack: list[object] = [record]
+    while stack:
+        value = stack.pop()
+        if isinstance(value, str):
+            if value:
+                parts.append(value)
+        elif isinstance(value, Mapping):
+            stack.extend(reversed(list(value.values())))
+        elif isinstance(value, (list, tuple)):
+            stack.extend(reversed(value))
+        elif isinstance(value, (int, float)) and not isinstance(value, bool):
+            parts.append(str(value))
+    return "\n".join(parts)
+
+
 def regex_guard_problem(pattern: str) -> str | None:
     """Korean reason why ``pattern`` cannot run as a v1 regex keyword, or ``None`` (R7 S2 review #7).
 
@@ -1401,7 +1424,7 @@ def search_files(
             continue
         if scan is not None and not scan.tick():
             break
-        haystack = json.dumps(candidate, ensure_ascii=False)
+        haystack = record_text(candidate)
         matched = match_keywords(haystack, keywords, search_options=search_options, plan=plan)
         if not matched:
             continue
@@ -1449,7 +1472,7 @@ def search_artifacts(
                 continue
             if scan is not None and not scan.tick():
                 return matches
-            haystack = json.dumps(artifact, ensure_ascii=False)
+            haystack = record_text(artifact)
             matched = match_keywords(haystack, keywords, search_options=search_options, plan=plan)
             if not matched:
                 continue
@@ -1488,7 +1511,7 @@ def search_timeline(
             continue
         if scan is not None and not scan.tick():
             break
-        haystack = json.dumps(event, ensure_ascii=False)
+        haystack = record_text(event)
         matched = match_keywords(haystack, keywords, search_options=search_options, plan=plan)
         if not matched:
             continue
@@ -1529,7 +1552,7 @@ def search_indicators(
             continue
         if scan is not None and not scan.tick():
             return matches
-        haystack = json.dumps(indicator, ensure_ascii=False)
+        haystack = record_text(indicator)
         matched = match_keywords(haystack, keywords, search_options=search_options, plan=plan)
         if not matched:
             continue
@@ -1588,7 +1611,7 @@ def search_ioc_scanner_hits(
             continue
         if scan is not None and not scan.tick():
             break
-        haystack = json.dumps(hit, ensure_ascii=False)
+        haystack = record_text(hit)
         matched = match_keywords(haystack, keywords, search_options=search_options, plan=plan)
         if not matched:
             continue

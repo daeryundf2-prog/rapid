@@ -178,6 +178,31 @@ class NonAsciiCaseFoldingTest(SyntheticCase):
         self.assertTrue(any("이전 형식 색인" in reason for reason in reasons), reasons)
 
 
+class ValueTextHaystackTest(SyntheticCase):
+    """#15: v1 matches value text, not the JSON serialization (and the whole review table is v1 == v2)."""
+
+    def test_review_haystack_cases(self) -> None:
+        self.assertEqual(len(self.syn.v1(['"'])), 1)  # only quote"inside.txt, not every row's JSON quotes
+        self.assertEqual(len(self.syn.v1(['quote"inside'])), 1)
+        self.assertEqual(len(self.syn.v1(["back\\slash"])), 1)
+        self.assertEqual(len(self.syn.v1(["_"])), 25)  # names with "_" only, not key names
+        self.assertEqual(len(self.syn.v1(["tab\tname"])), 1)
+        self.assertEqual(len(self.syn.v1(["users\\u"])), len(SYNTHETIC_NAMES))
+
+    def test_all_review_cases_v1_scan_equals_v2(self) -> None:
+        # Documented differences: the index stores evidence paths without the acquisition root
+        # ("E:\\root" itself), and a v2 query is at most 4,000 characters.
+        skipped = (["E:\\root"], ["x" * 5000])
+        compared = 0
+        for keywords in ALL_CASES:
+            if keywords in skipped:
+                continue
+            with self.subTest(keywords=keywords[0][:40]):
+                self.assertEqual(self.syn.v2(keywords), self.syn.v1(keywords))
+                compared += 1
+        self.assertGreaterEqual(compared, 50)
+
+
 class HitTimestampTest(IsolatedEnv):
     """#1: file/document hits carry the record time and artifact hits pick v1's time key."""
 
