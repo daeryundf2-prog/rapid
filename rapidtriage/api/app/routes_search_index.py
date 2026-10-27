@@ -139,11 +139,11 @@ class IndexBuildBody(_Body):
 class SearchQueryBody(_Body):
     # The parser enforces the 4,000-character limit with a Korean 400.
     q: str = Field(default="", max_length=100_000)
+    # The 32-keyword cap is checked in the route (a Korean 422, R7 S3 confirmation), not by pydantic.
     keywords: list[str] | None = Field(
         default=None,
-        max_length=MAX_CONSOLE_KEYWORDS,
         description=(
-            "콘솔 전체 검색(q 대신): 키워드 중 하나라도 들어 있는 행(v1 exact와 같은 정규화). "
+            f"콘솔 전체 검색(q 대신, 최대 {MAX_CONSOLE_KEYWORDS}개 -- 넘으면 422): 키워드 중 하나라도 들어 있는 행(v1 exact와 같은 정규화). "
             "응답은 rows 대신 matches(v1 GET /search 적중 모양)이고 검색 기록에 남지 않는다"
         ),
     )
@@ -307,6 +307,11 @@ def build_search_index_router(store: RunJobStore, *, owner: object | None = None
         if body.page.offset > MAX_POSITION:
             raise HTTPException(status_code=422, detail=f"page.offset은 {MAX_POSITION:,} 이하여야 합니다")
         if body.keywords is not None:
+            if len(body.keywords) > MAX_CONSOLE_KEYWORDS:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"검색어는 {MAX_CONSOLE_KEYWORDS}개까지 사용할 수 있습니다 (받은 수: {len(body.keywords)})",
+                )
             if body.q.strip():
                 raise HTTPException(status_code=400, detail="q와 keywords 중 하나만 주세요")
             keywords = console_keywords(body.keywords)
