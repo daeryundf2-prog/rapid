@@ -173,6 +173,9 @@ describe("files default preset (17)", () => {
       "timestamp",
       "ntfsCreated",
       "review",
+      // R7 갈래 A: 중복 · 계열 (hidden while no loaded row has a value).
+      "dedup",
+      "family",
     ]);
     // No loaded row is reviewed or flagged yet: 검토 / 특이사항 wait in the 열 menu ("값이 없어 숨김", review #9);
     // NTFS 생성 is empty and this is no image input (nothing to run, C-D12): it waits there too.
@@ -358,7 +361,8 @@ describe("directory rows (15)", () => {
       preview: preview({ preview_type: "directory", is_directory: true, size: 0 }),
     });
     expect(resolved.best).toBe("meta");
-    expect(resolved.modes.filter((m) => m.available).map((m) => m.mode)).toEqual(["meta"]);
+    // 계열 (R7 갈래 A) is about the row's relations, not its content: still available.
+    expect(resolved.modes.filter((m) => m.available).map((m) => m.mode)).toEqual(["meta", "family"]);
     expect(resolved.modes.find((m) => m.mode === "hex")?.reason).toContain("디렉터리");
   });
 });

@@ -14,6 +14,7 @@ import { recordCitationParts } from "../viewer/citation";
 import { PIVOT_LABELS, PIVOT_ORDER, type PivotId, recordPivots } from "../viewer/pivots";
 import { registerCommand, registerLocalCommand } from "./adapter";
 import { baseName, currentTimezone, isRecord } from "./columns/common";
+import { buildFamilyCommands } from "./familyCommands";
 import {
   applyNote,
   applyReviewAction,
@@ -505,6 +506,8 @@ export function useGridCommands(host: GridCommandHost): void {
   useEffect(() => {
     const unregister = [
       ...buildGridCommands(hostRef).map(registerCommand),
+      // 계열 보기 · 상위 항목으로 · 선택 확장 (R7 갈래 A).
+      ...buildFamilyCommands(hostRef).map(registerCommand),
       ...buildRowMarkCommands(hostRef).map(registerLocalCommand),
       ...buildReviewToolGridCommands(hostRef).map(registerCommand),
       // Shell review tools (tag propagation, digit keys) read the selection through this.

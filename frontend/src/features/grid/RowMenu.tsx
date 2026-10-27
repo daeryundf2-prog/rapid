@@ -13,6 +13,10 @@ export const ROW_MENU_COMMAND_IDS = [
   "grid.copyCitation",
   "grid.showInTimeline",
   "grid.sameSource",
+  // 계열 (R7 갈래 A): the row's family / parent item; the selection's families.
+  "grid.family.view",
+  "grid.family.parent",
+  "grid.family.expandSelection",
   "grid.ocrSelected",
 ] as const;
 
