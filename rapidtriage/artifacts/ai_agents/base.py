@@ -28,13 +28,13 @@ from __future__ import annotations
 
 import abc
 import datetime as dt
-import re
 import threading
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import ClassVar
 
+from ...core.ai_catalog.profiles import EvidenceProfile, is_credential_name
 from ...core.models import ArtifactRecord
 
 __all__ = [
@@ -91,25 +91,6 @@ COVERAGE_STATUSES: tuple[str, ...] = (
     "schema-not-validated",
 )
 
-# File names that are credentials or session secrets wherever they appear under an AI tool root.
-# ``tokenizer*`` (model vocabularies) is excluded explicitly.
-_CREDENTIAL_NAME_RE = re.compile(
-    r"(token|oauth|secret|credential|\.creds|cookies$|^auth\.json$|\.pem$|\.key$|^id_(?:rsa|ed25519|ecdsa)(?:\.pub)?$|keychain|\.enc$)",
-    re.IGNORECASE,
-)
-_NOT_CREDENTIAL_NAME_RE = re.compile(r"^tokeniz|tokens?[-_]?(?:count|usage|stats?)|^token[-_]?usage", re.IGNORECASE)
-
-
-def is_credential_name(name: str) -> bool:
-    """True for a file / folder name that holds (or names) a credential: ``*token*``, ``*oauth*``,
-    ``*secret*``, ``*credential*``, ``Cookies``, ``auth.json``, ``*.pem``/``*.key``, SSH identities,
-    ``*.enc`` backups. Model tokenizers and token *counters* are not credentials."""
-    text = str(name or "").strip()
-    if not text or _NOT_CREDENTIAL_NAME_RE.search(text):
-        return False
-    return bool(_CREDENTIAL_NAME_RE.search(text))
-
-
 def mtime_iso(path: Path) -> str:
     """``st_mtime`` as ISO 8601 UTC (``+00:00``), ``""`` when the path cannot be stat'ed."""
     try:
@@ -120,23 +101,6 @@ def mtime_iso(path: Path) -> str:
         return dt.datetime.fromtimestamp(stamp, tz=dt.timezone.utc).isoformat()
     except (OverflowError, OSError, ValueError):
         return ""
-
-
-@dataclass(frozen=True)
-class EvidenceProfile:
-    """One user profile (home) inside the evidence."""
-
-    home: Path
-    user: str
-    os: str = "unknown"  # windows | macos | linux | unknown
-    # Evidence root holding ``Users`` / ``home`` (system paths such as ``Program Files`` or
-    # ``/usr/lib`` resolve against it); ``None`` when the evidence root is a bare home folder.
-    system_root: Path | None = None
-
-    @property
-    def label(self) -> str:
-        names = {"windows": "Windows", "macos": "macOS", "linux": "Linux"}
-        return f"{self.user} ({names[self.os]})" if self.os in names else self.user
 
 
 def profile_account_key(profile: EvidenceProfile | None, *parts: str) -> str:
