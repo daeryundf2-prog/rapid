@@ -21,6 +21,7 @@ from rapidtriage.artifacts.ai_agents.base import (
     EvidenceProfile,
     Found,
     clear_adapters,
+    mask_identity_in_path,
     register_adapter,
     registered_adapters,
     unregister_adapter,
@@ -219,11 +220,16 @@ class WindowsImageTests(unittest.TestCase):
             self.assertFalse(details["hash_collected"])
             self.assertIsInstance(details["size"], int)
             self.assertNotIn("sha256", json.dumps(details))
-        # Lane B adapters may report the same file again (their rows carry ``adapter``); the catalog
-        # classification is asserted on lane A's own rows.
-        by_name = {Path(str(row["path"])).name: row["details"]["credential_kind"] for row in creds if "adapter" not in row["details"]}
-        self.assertEqual(by_name[".credentials.json"], "catalog-credential")
-        self.assertEqual(by_name["Cookies"], "name-pattern")
+        # One row per file: a file lane B also reports is merged (``adapters``), the adapter-specific
+        # kind wins and lane A's catalog classification stays in ``credential_kinds``.
+        paths = [str(row["path"]).lower() for row in creds]
+        self.assertEqual(len(paths), len(set(paths)))
+        by_name = {Path(str(row["path"])).name: row["details"] for row in creds}
+        self.assertIn("catalog-credential", by_name[".credentials.json"]["credential_kinds"])
+        self.assertIn("ai-tool-presence", by_name[".credentials.json"]["adapters"])
+        self.assertIn("name-pattern", by_name["Cookies"]["credential_kinds"])
+        if by_name[".credentials.json"].get("adapter"):
+            self.assertEqual(by_name[".credentials.json"]["credential_kind"], "oauth-credentials")
 
     def test_no_credential_value_in_any_row(self) -> None:
         dumped = json.dumps(self.rows, ensure_ascii=False)
@@ -305,8 +311,9 @@ class MacLinuxTests(unittest.TestCase):
             self.assertIn(("codex", "dana"), presence(rows, kind="npm-global"))
             creds = {Path(str(row["path"])).name for row in rows_of(rows, "ai-credential-presence")}
             self.assertIn("oauth_creds.json", creds)
-            self.assertIn(".creds-1-dana@example.com.enc", creds)
+            self.assertIn(mask_identity_in_path(".creds-1-dana@example.com.enc"), creds)
             dumped = json.dumps(rows)
+            self.assertNotIn("dana@example.com", dumped)
             for secret in SECRET_VALUES:
                 self.assertNotIn(secret, dumped)
 

@@ -7,14 +7,25 @@ the tool folder states one, retention note, ``coverage_status`` from the catalog
 ``ai-credential-presence``: one row per credential file (catalog ``credentials`` paths and names
 matching :func:`is_credential_name` below a matched tool folder) — path, size, mtime and how it was
 recognized. Contents are never opened and no hash is computed (plan §3.2 secret policy).
+
+Privacy at the provider's row sink (:class:`~rapidtriage.artifacts.ai_agents.AiAgentsProvider`):
+
+* :func:`mask_row_identity` — every lane A row (presence, install, credential, model file,
+  unknown-tool candidate, execution) has email-like tokens in its path fields rewritten by
+  :func:`~.base.mask_identity_in_path` (``u-<sha256 8 hex>@domain``); no raw copy is kept.
+* :func:`dedupe_credential_rows` — lane A and lane B both report some credential files. One
+  ``ai-credential-presence`` row is kept per (profile user, masked path, key name); the reporting
+  adapters go to ``adapters[]`` and the adapter-specific ``credential_kind`` wins over lane A's
+  generic ``catalog-credential`` / ``name-pattern``.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import json
 import os
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from pathlib import Path
 
 from ...core.ai_catalog.catalog import (
@@ -29,6 +40,7 @@ from .base import (
     AiRow,
     EvidenceProfile,
     is_credential_name,
+    mask_identity_in_path,
     profile_account_key,
 )
 
@@ -36,6 +48,8 @@ __all__ = [
     "MAX_CREDENTIAL_ROWS_PER_PROFILE",
     "MAX_MATCHED_PATH_SAMPLE",
     "credential_rows",
+    "dedupe_credential_rows",
+    "mask_row_identity",
     "path_presence_rows",
     "read_manifest_version",
 ]
@@ -96,9 +110,9 @@ def _iso(stamp: float | None) -> str:
 
 def _relative(path: Path, profile: EvidenceProfile) -> str:
     try:
-        return "~/" + path.relative_to(profile.home).as_posix()
+        return mask_identity_in_path("~/" + path.relative_to(profile.home).as_posix())
     except ValueError:
-        return str(path)
+        return mask_identity_in_path(path)
 
 
 def path_presence_rows(
@@ -134,7 +148,7 @@ def path_presence_rows(
             account_key=profile_account_key(profile),
             profile_label=profile.label,
             user=profile.user,
-            path=str(primary),
+            path=mask_identity_in_path(primary),
             timestamp=newest,
             timestamp_kind="modified" if newest else "",
             modified_at=newest,
@@ -174,7 +188,7 @@ def _credential_row(tool: AiTool, profile: EvidenceProfile, path: Path, *, recog
         account_key=profile_account_key(profile),
         profile_label=profile.label,
         user=profile.user,
-        path=str(path),
+        path=mask_identity_in_path(path),
         timestamp=modified,
         timestamp_kind="modified" if modified else "",
         modified_at=modified,
@@ -266,3 +280,77 @@ def presence_rows_for_profile(catalog: AiCatalog, profile: EvidenceProfile, cach
         yield from path_presence_rows(tool, profile, matches)
         if any(not match.template.shared for match in matches):
             yield from credential_rows(tool, profile, matches, cache, seen=credential_seen)
+
+
+def _mask_value(value: object) -> object:
+    if isinstance(value, str):
+        return mask_identity_in_path(value)
+    if isinstance(value, (list, tuple)):
+        return [_mask_value(item) for item in value]
+    return value
+
+
+def mask_row_identity(row: AiRow) -> AiRow:
+    """``row`` with email-like tokens masked in ``path`` and every text (or list-of-text) payload
+    value — lane A payloads hold paths, names and catalog labels only, never message bodies."""
+    row.path = mask_identity_in_path(row.path)
+    row.payload = {key: _mask_value(value) for key, value in row.payload.items()}
+    return row
+
+
+_LANE_A_ADAPTER = PARSER  # lane A rows carry no ``adapter``; they are listed under the parser id
+
+
+def _row_adapter(row: AiRow) -> str:
+    return str(row.payload.get("adapter") or row.parser or _LANE_A_ADAPTER)
+
+
+def _credential_key(row: AiRow) -> tuple[str, str, str]:
+    path = mask_identity_in_path(row.path).replace("\\", "/").rstrip("/").lower()
+    return (row.user.lower(), path, str(row.payload.get("key_name") or ""))
+
+
+def _unique(values: Iterable[object]) -> list[str]:
+    out: list[str] = []
+    for value in values:
+        text = str(value or "")
+        if text and text not in out:
+            out.append(text)
+    return out
+
+
+def _merge_credential_group(group: Sequence[AiRow]) -> AiRow:
+    # The adapter-specific row (lane B, ``adapter`` set) is the base: its credential_kind wins.
+    base = next((row for row in group if row.payload.get("adapter")), group[0])
+    payload = dict(base.payload)
+    for row in group:
+        for key, value in row.payload.items():
+            payload.setdefault(key, value)
+    payload["adapters"] = _unique(_row_adapter(row) for row in group)
+    payload["credential_kinds"] = _unique(row.payload.get("credential_kind") for row in group)
+    payload["merged_row_count"] = len(group)
+    tools = _unique(row.tool for row in group)
+    if len(tools) > 1:
+        payload["tools"] = tools
+    timed = base if base.timestamp else next((row for row in group if row.timestamp), base)
+    return dataclasses.replace(
+        base,
+        path=mask_identity_in_path(base.path),
+        payload=payload,
+        timestamp=timed.timestamp,
+        timestamp_kind=timed.timestamp_kind,
+        modified_at=base.modified_at or next((row.modified_at for row in group if row.modified_at), ""),
+    )
+
+
+def dedupe_credential_rows(rows: Iterable[AiRow]) -> Iterator[AiRow]:
+    """Pass every row through; ``ai-credential-presence`` rows are held and emitted after the
+    stream, one per (profile user, masked path, key name), in first-seen order."""
+    groups: dict[tuple[str, str, str], list[AiRow]] = {}
+    for row in rows:
+        if row.artifact_type != "ai-credential-presence":
+            yield row
+            continue
+        groups.setdefault(_credential_key(row), []).append(row)
+    for group in groups.values():
+        yield _merge_credential_group(group)
