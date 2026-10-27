@@ -780,15 +780,24 @@ class Compiler:
             self.ctx.text_terms.extend(("pre", word) for word in words)
         anchor = max(words, key=len)
         self.add_driver(anchor, negated, top)
-        extra = "sx_pre({text}, ?, ?)"
-        params: list[object] = [json.dumps(words, ensure_ascii=False), distance]
-        if self.mode == "set":
-            for word in words:
-                folded_word = self.match_literal(word)
-                if word != anchor and self._fts_ok(folded_word):
-                    extra += " AND {fold} LIKE ?"
-                    params.append(f"%{folded_word}%")
-        return self.text_check(anchor, extra, params)
+        # The other words narrow the rows first through their own index (trigram / bigram), so
+        # the ordered check (sx_pre, a Python scan of the row text) runs on few rows.
+        filters: list[str] = []
+        filter_params: list[object] = []
+        for word in words:
+            folded_word = self.match_literal(word)
+            if word == anchor:
+                continue
+            if self._fts_ok(folded_word):
+                filters.append("d.group_id IN (SELECT rowid FROM search_text WHERE text LIKE ?)")
+                filter_params.append(f"%{folded_word}%")
+            elif self.ctx.bigram and is_bigram_term(folded_word):
+                filters.append("d.group_id IN (SELECT rowid FROM search_bigram WHERE search_bigram MATCH ?)")
+                filter_params.append(bigram_match(folded_word))
+        sql, params = self.text_check(anchor, "sx_pre({text}, ?, ?)", [json.dumps(words, ensure_ascii=False), distance])
+        if not filters:
+            return sql, params
+        return " AND ".join([*filters, f"({sql})"]), [*filter_params, *params]
 
     # -- fields ------------------------------------------------------------
 
