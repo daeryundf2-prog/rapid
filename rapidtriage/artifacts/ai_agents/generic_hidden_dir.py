@@ -133,9 +133,10 @@ def _is_candidate(summary: dict[str, object]) -> bool:
 
 
 def hidden_dir_candidate_rows(catalog: AiCatalog, profile: EvidenceProfile, cache: DirCache) -> Iterator[AiRow]:
-    known = catalog_home_roots(catalog) | KNOWN_NON_AI_DOT_DIRS
+    # ``..gemini`` (a double-dot copy seen on the survey PC) counts as the known ``.gemini``.
+    known = {item.lstrip(".") for item in catalog_home_roots(catalog) | KNOWN_NON_AI_DOT_DIRS}
     for name, path, is_dir in cache.entries(profile.home):
-        if not is_dir or not name.startswith(".") or name in known or name.lstrip(".") in {item.lstrip(".") for item in known}:
+        if not is_dir or not name.startswith(".") or name.lstrip(".") in known:
             continue
         summary = _summary(path, cache)
         if not _is_candidate(summary):

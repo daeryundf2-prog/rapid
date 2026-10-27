@@ -11,6 +11,7 @@ recognized. Contents are never opened and no hash is computed (plan §3.2 secret
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import os
 from collections.abc import Iterator, Sequence
@@ -87,8 +88,6 @@ def read_manifest_version(path: Path) -> str:
 def _iso(stamp: float | None) -> str:
     if stamp is None:
         return ""
-    import datetime as dt
-
     try:
         return dt.datetime.fromtimestamp(stamp, tz=dt.timezone.utc).isoformat()
     except (OverflowError, OSError, ValueError):
