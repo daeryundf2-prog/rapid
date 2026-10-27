@@ -461,6 +461,52 @@ class V1RegexGuardTest(IsolatedEnv):
         self.assertIn("행당 시간 한도", payload["warnings"][0])
 
 
+class SnippetRedactionTest(IsolatedEnv):
+    """#16: token=/password= values never reach a hit's snippet, preview or title (v1 and v2)."""
+
+    SECRETS = ("s3cr3tTokenValue", "hunter2pass", "Pwd99zz", "eyJhbGciOiJIUzI1")
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        root = "E:\\root"
+        kinds = {
+            "browser": [
+                {"provider": "browser", "artifact_type": "browser-history", "path": f"{root}\\History",
+                 "details": {"url": "https://login.example/cb?code=1&token=s3cr3tTokenValue&x=1", "title": "callback token=s3cr3tTokenValue"}},
+            ],
+            "windows-execution": [
+                {"provider": "exec", "artifact_type": "process-command-line", "path": f"{root}\\Windows\\tool.exe",
+                 "details": {"command_line": "tool.exe --user admin --password=hunter2pass /pwd=Pwd99zz",
+                             "note": "x" * 150 + " access_token=eyJhbGciOiJIUzI1 tail"}},
+            ],
+        }
+        cls.syn = SearchRun(cls.base, [], kinds=kinds, root=root)
+
+    def assert_clean(self, hits: list[dict[str, object]]) -> None:
+        self.assertTrue(hits)
+        for hit in hits:
+            for field in ("snippet", "preview", "title"):
+                for secret in self.SECRETS:
+                    self.assertNotIn(secret, str(hit[field]), (field, hit[field]))
+            for start, end in hit["snippet_highlights"]:  # type: ignore[union-attr]
+                self.assertLessEqual(end, len(str(hit["snippet"])))
+
+    def test_v1_and_v2_hits_are_masked(self) -> None:
+        for keywords in (["token="], ["password="], ["pwd="], ["access_token"], ["tool.exe"], ["callback"]):
+            with self.subTest(keywords=keywords):
+                self.assert_clean(self.syn.v1_hits(keywords))
+                self.assert_clean(self.syn.v2_hits(keywords))
+        snippet = self.syn.v1_hits(["password="])[0]["snippet"]
+        self.assertIn("password=[가림]", snippet)
+
+    def test_window_starting_with_an_ellipsis(self) -> None:
+        from rapidtriage.core.search_hits import redact_text
+
+        self.assertEqual(redact_text("…token=abc def"), "…token=[가림] def")
+        self.assertEqual(redact_text("plain text"), "plain text")
+
+
 class CompactHashTest(IsolatedEnv):
     """#14: v1 compact metadata has flat md5/sha1/sha256 like v2 hits (the grid's hash columns)."""
 

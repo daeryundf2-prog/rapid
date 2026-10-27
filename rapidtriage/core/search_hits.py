@@ -174,6 +174,18 @@ def _window(text: str, start: int, end: int, limit: int) -> str:
     return prefix + text[lo:hi] + suffix
 
 
+def redact_text(text: str) -> str:
+    """:func:`redact_secret_text` for hit text, also when a snippet window starts with ``…``
+    right before the key (``…token=abc``: the ellipsis is not a pair lead)."""
+    if "=" not in text and "@" not in text:
+        return text
+    from ..artifacts.url_redaction import redact_secret_text
+
+    if text.startswith("…"):
+        return "…" + str(redact_secret_text(" " + text[1:]))[1:]
+    return str(redact_secret_text(text))
+
+
 def search_snippet(source: object, keywords: Sequence[str], *, limit: int = SNIPPET_LIMIT) -> tuple[str, list[list[int]]]:
     """``(snippet, highlight spans)``: the first match in ``source`` (text or a record).
 
@@ -187,10 +199,12 @@ def search_snippet(source: object, keywords: Sequence[str], *, limit: int = SNIP
     # text (cleaning only collapses whitespace): leaves without any are skipped before the
     # whitespace clean-up and the offset mapping (R7: a record walks thousands of leaves).
     prefilter = bool(folded_keywords) and all(word and not any(ch.isspace() for ch in word) for word in folded_keywords)
+    # Credentials (``token=…``, ``password=…``, URL user info) are masked before the window is
+    # cut, so a value is never shown half-cut past the mask (R7 S2 review #16).
     if isinstance(source, str):
-        candidates = iter((_clean(source),))
+        candidates = iter((redact_text(_clean(source)),))
     else:
-        candidates = (f"{key}: {text}" if key else text for key, text in _iter_leaves(source))
+        candidates = (redact_text(f"{key}: {text}" if key else text) for key, text in _iter_leaves(source))
     first = ""
     for raw in candidates:
         if prefilter and not isinstance(source, str):
@@ -371,7 +385,7 @@ def finalize_search_hit(
         title = str(item.get("title") or "")
         context = str(item.get("preview") or "")
     snippet, highlights = search_snippet(context if snippet_source is None else snippet_source, keywords)
-    item["title"] = _compact(title, TITLE_LIMIT) if title else PureWindowsPath(path).name
+    item["title"] = redact_text(_compact(title, TITLE_LIMIT) if title else PureWindowsPath(path).name)
     item["artifact_type"] = _artifact_type(item) if source in {"artifacts", "web"} else ""
     item["timestamp"] = hit_timestamp(item)
     item["display_path"] = display_path(path, root)
