@@ -69,6 +69,11 @@ export interface DomainTarget {
   neverRanReason?: string;
   /** 파일 시스템 탐색기 (r4 §2.2): open the files listing with the folder tree at this folder (`""` = root). */
   dir?: string;
+  /**
+   * Search view query (R7 lane B, collection "search"): the top-bar search runs it — field tokens
+   * such as `hashset:known-bad` filter the run's search index (route `q=`).
+   */
+  q?: string;
 }
 
 export interface DomainNodeDef {
@@ -193,6 +198,17 @@ const channelNode = (group: string): DomainTarget => ({
   channelGroup: group,
   cf: [{ col: CHANNEL_GROUP_FILTER_COLUMN, op: ":", value: group }],
 });
+/**
+ * R7 lane B: a hash-set category in the search view (`hashset:<category>` over the run's search
+ * index; the hash-set store's sets of that category). Counted in the search view, never in a total.
+ */
+const hashSetSearch = (category: "known-good" | "known-bad" | "custom"): DomainTarget => ({
+  collection: "search",
+  q: `hashset:${category}`,
+});
+export const HASH_SET_NOTE =
+  "해시 집합(처리 › 해시 집합 가져오기)의 범주에 든 해시와 같은 파일·아티팩트를 검색 색인에서 찾습니다. 알려진 정상 파일은 검색 옵션에서 숨길 수 있습니다(-hashset:known-good)";
+
 const run = (analysis: AnalysisNodeId): DomainTarget => ({
   collection: "analysis",
   kind: analysis,
@@ -835,6 +851,37 @@ export const DOMAINS: readonly DomainDef[] = [
         label: "NTFS·파일시스템 아티팩트 전체",
         target: a("windows-filesystem"),
         catchAll: true,
+      },
+      // R7 lane B: 해시 집합 categories (search view; counts are the search's own).
+      {
+        id: "fs-hash-sets",
+        label: "해시 집합",
+        target: hashSetSearch("known-bad"),
+        note: HASH_SET_NOTE,
+        detail: true,
+        children: [
+          {
+            id: "fs-hash-sets-known-bad",
+            label: "알려진 악성 해시 일치",
+            target: hashSetSearch("known-bad"),
+            note: HASH_SET_NOTE,
+            detail: true,
+          },
+          {
+            id: "fs-hash-sets-known-good",
+            label: "알려진 정상 해시 일치",
+            target: hashSetSearch("known-good"),
+            note: HASH_SET_NOTE,
+            detail: true,
+          },
+          {
+            id: "fs-hash-sets-custom",
+            label: "사용자 지정 해시 일치",
+            target: hashSetSearch("custom"),
+            note: HASH_SET_NOTE,
+            detail: true,
+          },
+        ],
       },
     ],
   },
@@ -1785,6 +1832,8 @@ export function targetKey(
     /** 파일 시스템 탐색기 folder / special node: the explorer view of files is its own node. */
     dir?: string;
     special?: string;
+    /** Search view query of a search node (R7 lane B): each query is its own node. */
+    q?: string;
     /**
      * Column filters: part of the key only on event-log channel views (`evt_channel(_group)`) and
      * for the analysis `details` server filters (`f:source` / `f:signature_kind` / `f:recovery_method` / `f:in_use`).
@@ -1825,6 +1874,7 @@ export function targetKey(
       [...(target.ext ?? [])].sort().join(","),
     ].join("|") +
     flagPart +
-    detailPart
+    detailPart +
+    (target.collection === "search" && target.q ? `|q=${target.q}` : "")
   );
 }
