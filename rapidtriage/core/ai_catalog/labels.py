@@ -36,6 +36,8 @@ ARTIFACT_TYPE_LABELS_KO: dict[str, str] = {
     "ai-account": "AI 계정",
     "ai-code-attribution": "AI 코드 기여",
     "ai-usage-stat": "AI 사용량",
+    "ai-account-switch": "AI 계정 전환",
+    "ai-retention-cleanup": "AI 기록 보존 정리",
     "ai-agent-parse-error": "AI 기록 읽기 오류",
 }
 INSTALL_KIND_LABELS_KO: dict[str, str] = {
@@ -66,6 +68,21 @@ CATEGORY_LABELS_KO: dict[str, str] = {
 CREDENTIAL_KIND_LABELS_KO: dict[str, str] = {
     "catalog-credential": "카탈로그 자격 증명 경로",
     "name-pattern": "이름 패턴(토큰·OAuth·쿠키·비밀)",
+    # lane B session adapters
+    "oauth-credentials": "OAuth 자격 증명 파일",
+    "oauth-token": "OAuth 토큰 파일",
+    "session-key": "세션 키 파일",
+    "auth-token": "인증 토큰",
+    "auth-file": "인증 파일",
+    "auth-status": "인증 상태 값",
+    "secret-storage": "암호화 비밀 저장소 항목",
+    "sandbox-secrets": "샌드박스 비밀",
+    "mcp-oauth": "MCP OAuth 잠금",
+    "session-tokens": "세션 토큰 파일",
+    "ssh-tokens": "SSH 원격 토큰 파일",
+    "browser-cookies": "브라우저 쿠키",
+    "credential-file": "자격 증명 파일",
+    "encrypted-account-credential": "암호화된 계정 자격 증명 백업",
 }
 EXECUTION_SOURCE_LABELS_KO: dict[str, str] = {
     "prefetch": "Prefetch",
@@ -85,6 +102,19 @@ MODEL_LOCATION_LABELS_KO: dict[str, str] = {
 TIMESTAMP_KIND_LABELS_KO: dict[str, str] = {
     "modified": "수정 시각",
     "executed": "마지막 실행 시각",
+    # lane B session adapters (row-level timestamp_kind)
+    "started": "시작",
+    "message": "메시지",
+    "run": "도구 실행",
+    "accessed": "파일 읽기",
+    "deleted": "삭제",
+    "created": "생성",
+    "observed": "관측",
+    "added": "추가",
+    "last-modified": "마지막 수정",
+    "switched": "계정 전환",
+    "cleanup": "보존 정리",
+    "committed": "커밋",
 }
 _TABLES: dict[str, dict[str, str]] = {
     "artifact_type": ARTIFACT_TYPE_LABELS_KO,
