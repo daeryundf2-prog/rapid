@@ -108,6 +108,11 @@ export interface TreeModelInput {
   analyses?: AnalysisState[];
   /** `GET /api/runs/{id}/irregular/summary` (R7 갈래 A 예외 항목); undefined while unknown. */
   irregular?: IrregularSummary;
+  /**
+   * Console-side facets of a kind's rows, `{kind: {key: rows}}` (AI 사용 › 도구·설치 views,
+   * `DomainTarget.rowFacet`); a kind absent = its facets are unknown ("—").
+   */
+  rowFacets?: Readonly<Record<string, Readonly<Record<string, number>>>>;
 }
 
 export const REVIEW_NODES: Array<{ status: ReviewStatus; label: string }> = [
@@ -658,6 +663,11 @@ export function domainNodeCount(target: DomainTarget, input: TreeModelInput): Do
     const liveState = liveKindState(kindNode);
     if (liveState?.live) return liveState;
     const zero = inventoryReason(kindNode, target.types) ?? zeroReason(kindNode);
+    if (target.rowFacet) {
+      const facets = input.rowFacets?.[target.kind];
+      if (!facets) return { count: UNKNOWN_COUNT };
+      return known(facets[target.rowFacet] ?? 0, true, zero);
+    }
     if (target.channelGroup) {
       // 이벤트 로그 › 채널별: `/tree` channel_groups (absent on outputs written before R3).
       if (!kindNode.channel_groups) return { count: 0, disabledReason: NO_CHANNEL_COUNTS_REASON };

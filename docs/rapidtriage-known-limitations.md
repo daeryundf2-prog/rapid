@@ -633,6 +633,21 @@ RapidTriage는 아래 기능을 프로젝트 정책으로 구현하지 않는다
 - **새 시각 종류**: `switched`(계정 전환), `cleanup`(보존 정리 표식), `committed`(AI 기여 커밋)은 콘솔 한글 라벨(`timeKinds.ts`, 갈래 D)이 아직 없다.
 - **갈래 A 인터페이스 밖 행 유형**: `ai-account-switch`, `ai-retention-cleanup`은 `base.AI_ARTIFACT_TYPES`에 없다(갈래 A에 추가 요청). 어댑터 실행 요약은 `ai-tool-presence`(`presence_kind=adapter-summary`)로 낸다.
 
+## R7 AI (갈래 D) — 콘솔 "AI 사용"
+
+`frontend/src/features/ai/`, `features/tree/domains.ts` AI 블록, `grid/columns/ai.ts`, 대화 보기·접수·처리·보고서 대화상자 (계획 `docs/plans/r7-ai-usage-2026-10-27.md` §3.5·Q-AI10). 검증은 합성 픽스처(`tests/fixtures/ai_agents/make_fixtures.py`를 실제 파이프라인으로 돌린 런, `frontend/e2e/ai_fixture.py`)와 run-subset10(AI 행 0, 읽기 전용)만이다.
+
+- **트리 건수**: 노드 건수는 `/tree`의 유형별 건수다. "도구·설치"의 설치·실행·경로 보기는 서버에 값별 건수가 없어 콘솔이 `ai-tool-presence` 행(최대 5,000행)을 한 번 읽어 `source` 접두사(`install:`·`execution:`·`catalog-path`)로 센다 — 읽기 전에는 "—". 이 보기들은 불러온 행에 출처 열 필터(포함 일치)를 적용하므로 행이 아주 많으면 목록 쪽 건수가 늦게 맞는다. 서버가 `field_type_counts`(예: `install_kind`/`source`)를 주면 그쪽으로 바꿀 수 있다.
+- **서버 도메인**: 서버 `core/artifact_domains.py`에는 `ai` 계열이 없어 `ai-agent`가 서버 트리·검색 색인에서 "기타"로 묶인다(콘솔 트리는 자체 표로 "AI 사용"에 둔다). 백엔드에 `("ai", "ai-agent", None)`과 `DOMAIN_LABELS["ai"]="AI 사용"`을 넣어야 검색 결과의 영역 이름이 맞는다.
+- **대화 보기**: 세션의 "대화 보기"는 `cf=f:session_id:<id>`(포함 일치)로 메시지·도구 호출·파일 접촉·세션 행을 불러 와 정확히 같은 세션을 먼저 연다. 하위 에이전트 세션 ID가 부모 ID를 포함하면(Claude Code `sess-A:a1`) 같은 목록에 따로 나온다. 행은 최대 10,000행까지 자동으로 불러오고 그 뒤는 "더 불러오기". 메시지 시각은 메신저 대화 보기와 같이 원래 표기(UTC)로 보인다.
+- **파일 접촉 링크**: 어댑터가 증거 파일을 찾은 경우(`file_locator`)만 정확한 파일이고, 아니면 도구가 적은 경로의 파일 이름으로 파일 목록을 검색한다(다른 폴더의 같은 이름이 함께 나올 수 있음). 도구가 적은 경로는 원래 PC의 경로라 증거 경로와 다르다.
+- **계열 탭**: 서브에이전트 부모-자식은 계열 파생(갈래 A)이 AI 관계를 공급하기 전까지 계열 탭에 나오지 않는다. 메타 탭의 "상위 세션"·"하위 에이전트 세션" 링크는 `parent_session_id`로 늘 동작한다.
+- **접수 "AI 사용 요약"**: 도구·계정·자격 증명·보존은 작은 행 유형(흔적·자격 증명·계정·전환·보존 정리, 최대 5,000행)을, 기간은 세션 행(최대 5,000개 — 넘으면 "앞 N개 세션 기준")을 읽어 계산한다. "서버 측 증거 필요"는 서버 갭 엔드포인트(`GET /api/runs/{id}/ai-usage/gaps`, 갈래 C — 아직 없음)가 있으면 그 값, 없으면 "흔적은 있으나 세션 행이 없는 도구"(콘솔 계산)다. 그래서 claude-swap처럼 세션을 남기지 않는 계정 전환 도구도 이 목록에 든다.
+- **런 옵션**: "메시지 본문 포함"(`ai_bodies`, 기본 켬)과 "대형 AI 데이터베이스 해시"(`ai_hash_dbs`, 기본 끔)는 기본값과 다를 때만 `collector_options["ai-agent"]`로 보낸다. **현재 런 API(`RunCreateRequest`)는 `collector_options`를 받지 않아 무시된다** — 백엔드가 이 필드를 받아 `AiAgentsProvider.with_options`에 넘길 때까지 바꾼 값은 처리 설정 스냅샷에만 남고 수집에는 반영되지 않는다. 처리 절의 "수집 범위"는 런 요청에 적힌 값(없으면 기본값)을 보인다.
+- **보고서 "AI 사용 절"**: AI 행이 있는 런에서만 `sections: ["ai-usage"]`(끄면 `[]`)를 보낸다. 현재 보고서 API(`CaseReportCreateRequest`)는 `sections`를 모르고 무시하므로 갈래 C가 절과 이 필드를 넣기 전에는 체크 여부와 무관하게 기본 구성이다.
+- **값 라벨**: 도구 이름은 행의 `tool_label`(어댑터 표기) 다음 카탈로그 이름(`features/ai/aiToolNames.ts`, 카탈로그 161개에서 생성 — 도구가 추가되면 다시 생성)이다. 표에 없는 역할·종류·상태 값은 원래 값 그대로 보이고 말풍선 제목은 원래 값을 툴팁에 둔다. 출처(`source`)의 저장소 이름(예: `ItemTable aiCodeTracking…`)은 증거 표기라 그대로 둔다.
+- **비밀값**: 콘솔은 받은 값을 그대로 보인다. 합성 픽스처의 가짜 비밀값 25개(키·토큰·이메일 로컬 부분)가 대화 보기·도구 호출·자격 증명 화면 텍스트에 0건인 것을 e2e로 확인했다(백엔드 마스킹 결과의 확인이지 콘솔 쪽 추가 마스킹은 없다).
+
 ## R7 A — 계열·중복·예외 항목 (Nuix 갈래 A)
 
 파생은 런 출력만 읽는다(파서 변경 없음). 런 완료 `persist` 단계가 `rapidtriage-families.jsonl`·`rapidtriage-dedup.json`·`rapidtriage-irregular.json`을 쓰고, 없거나 오래된 런은 계열·중복·예외 API(또는 `family=`·`dup=`·`irregular=` 조건)의 첫 요청에서 만든다. `RAPIDTRIAGE_INDEX_PERSIST=0`이나 쓰기 금지 폴더는 메모리에만 둔다. 목록의 `family`·`dedup` 행 필드는 이미 있는 파생(캐시 또는 저장 파일)에서만 붙이고 목록 요청이 파생을 시작하지는 않는다.

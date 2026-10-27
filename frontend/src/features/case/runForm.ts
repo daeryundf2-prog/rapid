@@ -17,6 +17,10 @@ export interface RunForm {
   extract: boolean;
   /** Skippable processing groups the examiner unchecked (R4 V1 "처리 그룹"; sent as `skip_groups`). */
   skipGroups: string[];
+  /** R7 AI 사용 기록 (kind `ai-agent`): message bodies (masked) collected — default on. */
+  aiBodies: boolean;
+  /** R7 AI 사용 기록: hash the large AI databases (never copied) — default off. */
+  aiHashDbs: boolean;
 }
 
 export const DEFAULT_RUN_FORM: RunForm = {
@@ -35,6 +39,8 @@ export const DEFAULT_RUN_FORM: RunForm = {
   overwrite: false,
   extract: false,
   skipGroups: [],
+  aiBodies: true,
+  aiHashDbs: false,
 };
 
 export const RUN_MODES: Array<{ id: string; label: string }> = [
@@ -90,10 +96,25 @@ export function firstRunFormError(errors: RunFormErrors): string | undefined {
  */
 export function buildRunBody(form: RunForm): RunCreateBody {
   const skipGroups = [...new Set(form.skipGroups)];
+  const ai = aiCollectorOptions(form, skipGroups);
   return {
     ...buildBaseRunBody(form),
     ...(skipGroups.length ? { skip_groups: skipGroups } : {}),
+    ...(ai ? { collector_options: { "ai-agent": ai } } : {}),
   };
+}
+
+/**
+ * `collector_options["ai-agent"]` of the AI 사용 기록 options: only when they differ from the
+ * defaults (본문 포함 · 해시 안 함) and the `ai` group runs — a default run sends the same body.
+ */
+export function aiCollectorOptions(
+  form: Pick<RunForm, "aiBodies" | "aiHashDbs">,
+  skipGroups: readonly string[] = [],
+): { ai_bodies: boolean; ai_hash_dbs: boolean } | null {
+  if (skipGroups.includes("ai")) return null;
+  if (form.aiBodies !== false && form.aiHashDbs !== true) return null;
+  return { ai_bodies: form.aiBodies !== false, ai_hash_dbs: form.aiHashDbs === true };
 }
 
 function buildBaseRunBody(form: RunForm): RunCreateBody {

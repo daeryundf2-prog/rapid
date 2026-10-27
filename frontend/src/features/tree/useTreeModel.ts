@@ -4,6 +4,7 @@ import { getReviewCounts } from "../../api/caseDb";
 import { getRunDashboard } from "../../api/dashboard";
 import { fetchIrregularSummary } from "../../api/families";
 import { getRunSummary, getRunTree, type RunTreeLive } from "../../api/runs";
+import { useAiRowFacets } from "../ai/useAiUsage";
 import { useAnalyses } from "../analysis/store";
 import { useSavedSearches } from "../case/savedSearches";
 import { useSearchState } from "../case/searchState";
@@ -70,6 +71,8 @@ export function useTreeData(runId: string | null) {
     retry: false,
     staleTime: 60_000,
   });
+  // AI 사용 › 도구·설치 views (R7 갈래 D): counted from the run's presence rows (read once).
+  const rowFacets = useAiRowFacets(runId, tree.data, live.active);
   const database = review.data?.exists ? review.data.database : null;
   const caseId = review.data?.case_id ?? null;
   const saved = useSavedSearches(runId, database, caseId);
@@ -104,6 +107,7 @@ export function useTreeData(runId: string | null) {
     saved: saved.data,
     evidence: dashboard.data?.evidence_source,
     irregular: irregular.data,
+    rowFacets,
     /** First load of the counts/tree (X18 loading card); false once either settles. */
     loading: enabled && summary.isPending && tree.isPending,
     /**
@@ -139,6 +143,7 @@ export function useTreeState(runId: string | null): {
         evidence: data.evidence,
         analyses: data.analyses,
         irregular: data.irregular,
+        rowFacets: data.rowFacets,
         onOpenSavedSearch: (search) => {
           applySavedSearch(search);
           if (runId) navigate({ runId, collection: "search" });
@@ -153,6 +158,7 @@ export function useTreeState(runId: string | null): {
       data.evidence,
       data.analyses,
       data.irregular,
+      data.rowFacets,
       applySavedSearch,
       runId,
     ],

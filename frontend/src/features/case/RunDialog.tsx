@@ -4,6 +4,7 @@ import { ApiError } from "../../api/client";
 import { createRun, getCollectProfiles, planCollect } from "../../api/runs";
 import { useAppStore } from "../../state/store";
 import { navigate } from "../tree/adapter";
+import { AiRunOptionsField } from "./AiRunOptionsField";
 import { BrowsePanel } from "./BrowsePanel";
 import { runSampleWithConfirm } from "./commands";
 import { ErrorText } from "./ErrorText";
@@ -178,6 +179,7 @@ export function RunDialog({
         />
 
         <RunPlanGroupsField form={form} onChange={(skipGroups) => set("skipGroups", skipGroups)} />
+        <AiRunOptionsField form={form} onChange={(patch) => setForm((f) => ({ ...f, ...patch }))} />
 
         {submitError && <ErrorText>{submitError}</ErrorText>}
         <div className="case-actions">
