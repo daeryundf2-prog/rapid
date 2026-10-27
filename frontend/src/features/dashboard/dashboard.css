@@ -793,3 +793,8 @@ textarea.dash-input {
 .dash-muted {
   color: var(--text-muted);
 }
+
+/* AI 사용 요약 block of the 증거 card (R7 AI 갈래 D). */
+.dash-ai-retention {
+  color: var(--warn, inherit);
+}

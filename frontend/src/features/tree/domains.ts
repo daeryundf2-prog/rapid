@@ -19,6 +19,7 @@ import {
   recordFieldsKey,
 } from "../../contracts/collection";
 import type { IconName } from "../../icons";
+import { AI_TYPE_LABELS } from "../ai/aiLabels";
 import type { AnalysisNodeId } from "../analysis/kinds";
 import { IRREGULAR_IDS, IRREGULAR_LABELS } from "../filters/conditionValues";
 import { CHANNEL_FILTER_COLUMN, CHANNEL_GROUP_FILTER_COLUMN } from "../filters/filterModel";
@@ -75,6 +76,12 @@ export interface DomainTarget {
    * count is the category's rows of that list (`GET /irregular/summary`).
    */
   irregular?: string;
+  /**
+   * Count from a console-side facet of the kind's rows (`TreeModelInput.rowFacets[kind][key]`,
+   * AI 사용 › 도구·설치 views: `/tree` has no per-value counts of `ai-tool-presence.source`).
+   * "—" while the facet is unknown; the node opens the kind with its `cf` on the loaded rows.
+   */
+  rowFacet?: string;
 }
 
 export interface DomainNodeDef {
@@ -429,6 +436,140 @@ export const EVENTLOG_CHANNELS_GROUP: DomainNodeDef = {
 function pickLabels(labels: Readonly<Record<string, string>>, types: string[]): Record<string, string> {
   return Object.fromEntries(types.map((type) => [type, labels[type] ?? type]));
 }
+
+// --- AI 사용 (R7 단계 3.5 갈래 D, plan r7-ai-usage §3.5) -----------------------------------------
+
+/** Collector kind of the AI usage rows (core/run/constants.py). */
+export const AI_KIND = "ai-agent";
+const aiTypes = (...types: string[]) => a(AI_KIND, types);
+
+/**
+ * 도구·설치 views over `ai-tool-presence.source` (lane A: `install:<kind>` / `execution:<family>` /
+ * `catalog-path`; the session adapters' presence rows carry no source). The cf runs on the loaded
+ * rows (contains); the count is the console's facet of the presence rows (`rowFacet`).
+ */
+export const AI_PRESENCE_SOURCE_VIEWS: ReadonlyArray<{ id: string; label: string; source: string }> = [
+  { id: "ai-tools-install", label: "설치 흔적(npm·pip·winget·MSIX·확장)", source: "install:" },
+  { id: "ai-tools-execution", label: "실행 흔적(Prefetch·Amcache 등)", source: "execution:" },
+  { id: "ai-tools-path", label: "경로 흔적(카탈로그 경로)", source: "catalog-path" },
+];
+
+/** Facet key of a presence source view (`rowFacets["ai-agent"]`). */
+export const aiSourceFacet = (source: string) => `source:${source}`;
+
+/** Tooltip of AI 사용 › 자격 증명 존재: what the rows are, and what they never hold. */
+export const AI_CREDENTIAL_NOTE =
+  "AI 도구의 토큰·OAuth·쿠키·키 파일이 있었다는 기록입니다 — 경로·크기·수정 시각만 있고 값과 해시는 수집하지 않습니다";
+
+/**
+ * AI 사용: every row of the `ai-agent` kind by what it answers (도구·설치 · 세션 · 메시지 · 도구 호출 ·
+ * 파일 접촉 · MCP · 지침 · 자격 증명 · 계정 · 코드 기여 · 사용량 · 보존 정리 · 미분류 후보), plus the
+ * browser's AI service visits (moved here from 웹·브라우저, still cross-listed there) and the local
+ * LLM inventory of the document scan. A run without AI rows shows every node 0 (hidden by default).
+ */
+export const AI_USAGE_DOMAIN: DomainDef = {
+  id: "ai",
+  label: "AI 사용",
+  icon: "command",
+  nodes: [
+    {
+      id: "ai-tools",
+      label: "도구·설치",
+      target: aiTypes("ai-tool-presence"),
+      lead: true,
+      note: "AI 도구가 이 증거에 있었다는 흔적(카탈로그 경로·설치 패키지·실행 흔적·세션 저장소 위치)입니다 — 흔적이 없다고 사용하지 않았다는 뜻은 아닙니다",
+      children: [
+        {
+          id: "ai-tools-all",
+          label: "도구 흔적 전체",
+          target: aiTypes("ai-tool-presence"),
+          lead: true,
+          typeLabels: { "ai-tool-presence": AI_TYPE_LABELS["ai-tool-presence"] as string },
+        },
+        ...AI_PRESENCE_SOURCE_VIEWS.map(
+          (view): DomainNodeDef => ({
+            id: view.id,
+            label: view.label,
+            target: {
+              ...aiTypes("ai-tool-presence"),
+              cf: [{ col: "f:source", op: ":", value: view.source }],
+              rowFacet: aiSourceFacet(view.source),
+            },
+            note: `${view.label.replace(/\(.*\)$/, "")} 행만 봅니다 — 불러온 행에 출처 열 필터를 적용합니다`,
+          }),
+        ),
+      ],
+    },
+    { id: "ai-sessions", label: "세션", target: aiTypes("ai-agent-session"), lead: true },
+    { id: "ai-messages", label: "메시지", target: aiTypes("ai-agent-message"), lead: true },
+    { id: "ai-tool-calls", label: "도구 호출", target: aiTypes("ai-agent-tool-call"), lead: true },
+    { id: "ai-file-touches", label: "파일 접촉", target: aiTypes("ai-agent-file-touch"), lead: true },
+    { id: "ai-mcp", label: "MCP 서버", target: aiTypes("ai-mcp-server") },
+    { id: "ai-instructions", label: "지침·메모리 파일", target: aiTypes("ai-instruction-file") },
+    {
+      id: "ai-credentials",
+      label: "자격 증명 존재(값 없음)",
+      target: aiTypes("ai-credential-presence"),
+      note: AI_CREDENTIAL_NOTE,
+    },
+    {
+      id: "ai-accounts",
+      label: "계정·전환",
+      target: aiTypes("ai-account", "ai-account-switch"),
+      typeLabels: pickLabels(AI_TYPE_LABELS, ["ai-account", "ai-account-switch"]),
+    },
+    { id: "ai-code", label: "AI 코드 기여", target: aiTypes("ai-code-attribution") },
+    { id: "ai-usage-stats", label: "사용량", target: aiTypes("ai-usage-stat") },
+    {
+      id: "ai-retention",
+      label: "보존 정리",
+      target: aiTypes("ai-retention-cleanup"),
+      note: "도구가 오래된 기록을 지운 표식(예: Claude Code .last-cleanup)과 보존 일수입니다 — 그 이전 기록은 이 PC에 없을 수 있습니다",
+    },
+    {
+      id: "ai-web",
+      label: "웹 AI 방문",
+      target: a("browser", ["browser-ai-usage", "browser-ai-conversation"]),
+      typeLabels: { "browser-ai-usage": "AI 서비스 방문", "browser-ai-conversation": "AI 대화 후보" },
+    },
+    {
+      // AI service exports (ChatGPT / Claude … JSON / JSONL) read by the browser collector.
+      id: "ai-service-exports",
+      label: "AI 서비스 내보내기 대화",
+      target: a("browser", ["ai-service-export-conversation"]),
+    },
+    {
+      // Desktop AI app stores (SQLite / LevelDB candidates) of the document scan.
+      id: "ai-desktop-apps",
+      label: "데스크톱 AI 앱 파일",
+      target: a("generic-documents", ["desktop-ai-app-artifact"]),
+    },
+    { id: "ai-model-files", label: "로컬 LLM·모델 파일", target: aiTypes("ai-model-file") },
+    {
+      id: "ai-local-llm",
+      label: "로컬 LLM 앱 파일·프롬프트 후보",
+      target: a("generic-documents", ["local-llm-artifact", "local-llm-prompt-candidate"]),
+      typeLabels: {
+        "local-llm-artifact": "로컬 LLM 앱 파일",
+        "local-llm-prompt-candidate": "로컬 LLM 프롬프트 후보",
+      },
+    },
+    {
+      id: "ai-unknown",
+      label: "미분류 후보",
+      target: aiTypes("unknown-ai-tool-candidate"),
+      note: "카탈로그에 없는 홈 폴더 중 세션·대화 기록처럼 보이는 구조를 가진 폴더입니다(파일 이름은 적지 않음)",
+    },
+    {
+      id: "ai-errors",
+      label: "AI 기록 읽기 오류",
+      target: aiTypes("ai-agent-parse-error"),
+      detail: true,
+      typeLabels: { "ai-agent-parse-error": AI_TYPE_LABELS["ai-agent-parse-error"] as string },
+    },
+    { id: "ai-all", label: "AI 사용 기록 전체", target: a(AI_KIND), catchAll: true },
+  ],
+};
 
 /**
  * The 15 forensic domains of console-ia §4 (증거 소스 is the evidence node built from the
@@ -1086,10 +1227,12 @@ export const DOMAINS: readonly DomainDef[] = [
         target: a("browser", ["web-upload-candidate"]),
       },
       {
+        // R7 AI 사용 (갈래 D): the primary node moved to AI 사용 › 웹 AI 방문; listed here too.
         id: "web-ai",
         label: "AI 서비스 사용",
         target: a("browser", ["browser-ai-usage", "browser-ai-conversation"]),
-        typeLabels: { "browser-ai-usage": "AI 서비스 방문", "browser-ai-conversation": "AI 대화 후보" },
+        crossRef: true,
+        note: "AI 사용 › 웹 AI 방문과 같은 행입니다(AI 도구 세션·설치 흔적과 함께 보려면 AI 사용 계열을 여세요)",
       },
       {
         id: "web-storage",
@@ -1152,6 +1295,7 @@ export const DOMAINS: readonly DomainDef[] = [
       { id: "web-carved-urls", label: "URL 카빙 후보(페이지 파일·미할당)", target: run("url-carve") },
     ],
   },
+  AI_USAGE_DOMAIN,
   {
     id: "messaging",
     label: "메신저·메일",
@@ -1856,7 +2000,14 @@ export function targetKey(
           .map((filter) => `|${filter.col}=${filter.value}`)
           .sort()
           .join("")
-      : "";
+      : target.collection === "artifacts" && target.kind === AI_KIND
+        ? // AI 사용 › 도구·설치 views (`f:source`) are their own selections.
+          (target.cf ?? [])
+            .filter((filter) => filter.col === "f:source")
+            .map((filter) => `|${filter.col}=${filter.value}`)
+            .sort()
+            .join("")
+        : "";
   const fsExplorer = target.collection === "files" && (target.dir !== undefined || Boolean(target.special));
   const filesCategory = fsExplorer
     ? "|fs"

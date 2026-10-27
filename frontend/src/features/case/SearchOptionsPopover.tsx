@@ -66,6 +66,8 @@ export function SearchOptionsButton({ runId }: { runId: string | null }) {
  */
 export const KEYWORD_PACK_LABELS: Readonly<Record<string, string>> = {
   "browser-ai": "생성형 AI 서비스",
+  // R7 AI 사용 (갈래 A pack): product names, service domains, API key prefixes (never values).
+  "ai-tools": "AI 도구(제품·도메인·키 접두사)",
   credentials: "자격 증명·비밀",
   execution: "명령 실행 도구",
   exfiltration: "외부 반출·클라우드 전송",

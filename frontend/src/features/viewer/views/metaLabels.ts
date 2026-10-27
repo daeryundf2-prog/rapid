@@ -11,9 +11,12 @@
  * 검증 계획 해시").
  */
 
+import { AI_FIELD_LABELS } from "../../ai/aiFields";
 import { FIELD_LABELS } from "../../grid/columns/fieldColumns";
 
 export const META_LABELS: Record<string, string> = {
+  // R7 AI 사용 (갈래 D): the AI rows' keys; a label below for the same key wins.
+  ...AI_FIELD_LABELS,
   // 핵심
   timestamp: "시각",
   time: "시각",

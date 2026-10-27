@@ -31,6 +31,7 @@ import { useRoute, useRuns, useTimezone } from "../../state/hooks";
 import { isRunActive } from "../../state/slices/runs";
 import { useAppStore } from "../../state/store";
 import { formatRunTime, formatTimestamp } from "../../utils/time";
+import { AiProcessSection } from "../ai/AiProcessSection";
 import { History, lastStateText } from "../analysis/AnalysisPane";
 import { cancelAnalysisJob, runCommandId } from "../analysis/commands";
 import {
@@ -773,6 +774,12 @@ export function ProcessPage() {
           <StepList runId={runId} results />
           <DisclosuresSection runId={runId} />
           <SnapshotSection runId={runId} />
+          {/* R7 AI 사용 기록: the ai group's state, rows and collection scope. */}
+          <AiProcessSection
+            runId={runId}
+            plan={plan.data}
+            request={run?.request as Record<string, unknown> | undefined}
+          />
           {plan.data && !legacyPlan ? (
             <details className="process-plan-record" data-testid="process-plan-record">
               <summary>처리 계획 기록 · {planSummaryText(plan.data)}</summary>
