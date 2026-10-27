@@ -264,6 +264,14 @@ class HitTimestampTest(IsolatedEnv):
         # Documents: their own modified_at, spelled as the record spells it.
         self.assertEqual(by_title["zeta-memo.txt"], "2025-05-30T03:35:09.016199+00:00")
 
+    def test_record_without_a_time_shows_none_like_v1(self) -> None:
+        from rapidtriage.core.search_index.hits import index_hit
+
+        row = {"collection": "artifacts", "kind": "recent-files", "locator": "/artifacts/9", "ts": "2015-05-26T08:18:46.000+00:00", "record_ts": ""}
+        self.assertIsNone(index_hit(row, root="", keywords=["x"])["timestamp"])
+        older = dict(row, record_ts=None)  # an index before v4: the matched row's time
+        self.assertEqual(index_hit(older, root="", keywords=["x"])["timestamp"], "2015-05-26T08:18:46.000+00:00")
+
     def test_artifact_time_key_order(self) -> None:
         hits = {hit["display_path"]: hit["timestamp"] for hit in self.syn.v2_hits(["zeta"]) if hit["source"] in {"web", "artifacts"}}
         self.assertEqual(hits["History"], "2025-03-03T03:03:03.000001Z")  # details.last_visited_at before the record's timestamp
@@ -464,7 +472,7 @@ class V1RegexGuardTest(IsolatedEnv):
 class SnippetRedactionTest(IsolatedEnv):
     """#16: token=/password= values never reach a hit's snippet, preview or title (v1 and v2)."""
 
-    SECRETS = ("s3cr3tTokenValue", "hunter2pass", "Pwd99zz", "eyJhbGciOiJIUzI1")
+    SECRETS = ("s3cr3tTokenValue", "hunter2pass", "Pwd99zz", "eyJhbGciOiJIUzI1", "rpcVal77", "sasKey99")
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -478,7 +486,9 @@ class SnippetRedactionTest(IsolatedEnv):
             "windows-execution": [
                 {"provider": "exec", "artifact_type": "process-command-line", "path": f"{root}\\Windows\\tool.exe",
                  "details": {"command_line": "tool.exe --user admin --password=hunter2pass /pwd=Pwd99zz",
-                             "note": "x" * 150 + " access_token=eyJhbGciOiJIUzI1 tail"}},
+                             "note": "x" * 150 + " access_token=eyJhbGciOiJIUzI1 tail",
+                             "endpoint": "Endpoint=sb://x/;SharedAccessKeyName=k;SharedAccessToken=sasKey99",
+                             "frame": "https://apis.example/js?x=%7D))&rpctoken=rpcVal77"}},
             ],
         }
         cls.syn = SearchRun(cls.base, [], kinds=kinds, root=root)
@@ -493,7 +503,7 @@ class SnippetRedactionTest(IsolatedEnv):
                 self.assertLessEqual(end, len(str(hit["snippet"])))
 
     def test_v1_and_v2_hits_are_masked(self) -> None:
-        for keywords in (["token="], ["password="], ["pwd="], ["access_token"], ["tool.exe"], ["callback"]):
+        for keywords in (["token="], ["password="], ["pwd="], ["access_token"], ["tool.exe"], ["callback"], ["rpctoken"], ["SharedAccessToken"]):
             with self.subTest(keywords=keywords):
                 self.assert_clean(self.syn.v1_hits(keywords))
                 self.assert_clean(self.syn.v2_hits(keywords))
@@ -504,6 +514,8 @@ class SnippetRedactionTest(IsolatedEnv):
         from rapidtriage.core.search_hits import redact_text
 
         self.assertEqual(redact_text("…token=abc def"), "…token=[가림] def")
+        self.assertEqual(redact_text('Version=4.0, PublicKeyToken=b77a5c561934e089"'), 'Version=4.0, PublicKeyToken=[가림]"')
+        self.assertEqual(redact_text("a&rpctoken=123&b=1"), "a&rpctoken=[가림]&b=1")
         self.assertEqual(redact_text("plain text"), "plain text")
 
 

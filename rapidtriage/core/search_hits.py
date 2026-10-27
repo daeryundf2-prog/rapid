@@ -174,16 +174,35 @@ def _window(text: str, start: int, end: int, limit: int) -> str:
     return prefix + text[lo:hi] + suffix
 
 
+# Hit text is stricter than :func:`redact_secret_text` (R7 S2 review #16): any ``key=value`` whose
+# key ends in a credential word (``rpctoken=``, ``SharedAccessToken=``, ``PublicKeyToken=``,
+# ``db_password=``), whatever precedes it, has its value masked. The viewer still shows the record.
+_CREDENTIAL_PAIR_RE = re.compile(
+    r"(?P<key>[A-Za-z0-9_.\-]*(?:token|password|passwd|pwd|secret|api_?key))=(?P<value>\"[^\"]*\"|'[^']*'|[^&;#\s\"'),]+)",
+    re.IGNORECASE,
+)
+
+
 def redact_text(text: str) -> str:
-    """:func:`redact_secret_text` for hit text, also when a snippet window starts with ``…``
-    right before the key (``…token=abc``: the ellipsis is not a pair lead)."""
+    """Credentials masked in hit text: :func:`redact_secret_text` (URL user info, query and bare
+    pairs) plus :data:`_CREDENTIAL_PAIR_RE`, also when a snippet window starts with ``…`` right
+    before the key (``…token=abc``: the ellipsis is not a pair lead)."""
     if "=" not in text and "@" not in text:
         return text
-    from ..artifacts.url_redaction import redact_secret_text
+    from ..artifacts.url_redaction import REDACTED_VALUE, redact_secret_text
 
     if text.startswith("…"):
-        return "…" + str(redact_secret_text(" " + text[1:]))[1:]
-    return str(redact_secret_text(text))
+        text = "…" + str(redact_secret_text(" " + text[1:]))[1:]
+    else:
+        text = str(redact_secret_text(text))
+
+    def mask(match: re.Match[str]) -> str:
+        value = match.group("value")
+        if value.strip("\"'").startswith(REDACTED_VALUE):
+            return match.group(0)
+        return f"{match.group('key')}={REDACTED_VALUE}"
+
+    return _CREDENTIAL_PAIR_RE.sub(mask, text) if "=" in text else text
 
 
 def search_snippet(source: object, keywords: Sequence[str], *, limit: int = SNIPPET_LIMIT) -> tuple[str, list[list[int]]]:
