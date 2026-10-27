@@ -1041,8 +1041,10 @@ def parse_mcp_log(ctx: RowContext, path: Path) -> list[AiRow]:
             if not entry["first"]:
                 entry["first"] = stamp
             entry["last"] = stamp
+        # the status words come after the server name (``[error]`` level tags do not count)
+        tail = line[line.find(name) + len(name) :]
         for status, pattern in _LOG_STATUS:
-            if pattern.search(line):
+            if pattern.search(tail):
                 entry["status"] = status
                 break
     rows = [
