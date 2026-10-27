@@ -14,6 +14,11 @@ export interface CaseReportBody {
   conclusion?: string | null;
   include_all?: boolean;
   max_items?: number;
+  /**
+   * Optional report sections to include (R7 AI 사용: `ai-usage`, the AI usage section of 갈래 C);
+   * sent only for a run with AI usage rows, absent = the server's default sections.
+   */
+  sections?: string[];
 }
 
 export function createCaseReport(runId: string, body: CaseReportBody = {}) {

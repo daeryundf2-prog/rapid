@@ -51,7 +51,12 @@ export interface ReportMeta {
   title: string;
   caseNumber: string;
   investigator: string;
+  /** Optional sections (`ai-usage`); undefined = the server default (nothing sent). */
+  sections?: string[];
 }
+
+/** Report section id of the AI usage section (R7 AI 갈래 C). */
+export const AI_REPORT_SECTION = "ai-usage";
 
 export const NO_CANDIDATES_REASON = "보고 후보 0건 — 표시된 항목이 없습니다";
 
@@ -210,6 +215,7 @@ async function runExport(
         investigator: meta.investigator?.trim() || null,
         include_all: false,
         max_items: 500,
+        ...(meta.sections ? { sections: [...meta.sections] } : {}),
       });
       const fileName = await downloadFile(caseReportFile(runId, format), `case-report.${format}`);
       const reported = caseReportWritten(created as unknown as Record<string, unknown>);
