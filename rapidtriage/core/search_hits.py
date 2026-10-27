@@ -312,8 +312,13 @@ def _artifact_title(record: Mapping[str, object]) -> str:
         summary = artifact_summary(record)
     except Exception:  # title is best effort; the row keeps its fallback
         summary = ""
-    path = str(record.get("path") or "")
-    if summary and summary not in {path, str(record.get("artifact_type") or "")}:
+    return summary_title(summary, str(record.get("path") or ""), str(record.get("artifact_type") or ""))
+
+
+def summary_title(summary: str, path: str, artifact_type: str) -> str:
+    """An artifact hit's title from its record's ``artifact_summary``: the summary unless it is
+    just the path or the type, then the path's file name (``""`` without either)."""
+    if summary and summary not in {path, artifact_type}:
         return summary
     return PureWindowsPath(path).name if path else ""
 

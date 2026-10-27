@@ -75,6 +75,7 @@ from .search_index_service import (
     SEARCH_HISTORY,
     QuerySlot,
     ReviewMarks,
+    artifact_summaries,
     completed_run,
     create_saved,
     delete_saved,
@@ -355,7 +356,15 @@ def build_search_index_router(store: RunJobStore, *, owner: object | None = None
                 page_info = result.get("page") if isinstance(result.get("page"), dict) else {}
                 position = page_info.get("position")
                 offset = int(position) if isinstance(position, int) else body.page.offset
-                attach_console_hits(result, keywords, summary=job.summary or {}, run_id=run_id, offset=offset)
+                attach_console_hits(
+                    result,
+                    keywords,
+                    summary=job.summary or {},
+                    run_id=run_id,
+                    offset=offset,
+                    # v1's artifact titles (R7 S2 confirmation #10): this page's records only.
+                    artifact_summaries=lambda keys: artifact_summaries(job, run_id, keys),
+                )
             return result
 
         slot = QUERY_LIMITER.acquire(run_id)

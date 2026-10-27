@@ -18,16 +18,17 @@ What v2 does not cover (documented in docs/rapidtriage-known-limitations.md "R7 
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from pathlib import Path
+from collections.abc import Callable, Mapping, Sequence
+from pathlib import Path, PureWindowsPath
 
+from ..case_db.helpers import artifact_summary
 from ..search import (
     build_search_match_metadata,
     compact_search_metadata,
     normalize_keywords,
 )
 from ..search_fts import docs_result_index
-from ..search_hits import finalize_search_hit, scan_root_of
+from ..search_hits import finalize_search_hit, scan_root_of, summary_title
 
 # The artifact kind whose hits v1 calls "web" (search_fts.BROWSER_OUTPUT_NAME).
 BROWSER_KIND = "browser"
@@ -107,8 +108,12 @@ def index_hit(
     root: str,
     keywords: Sequence[str],
     docs_results: Mapping[str, int] | None = None,
+    summaries: Mapping[tuple[str, str], str] | None = None,
 ) -> dict[str, object]:
-    """One ``search/query`` row -> the v1 unified-search hit (``finalize_search_hit`` applied)."""
+    """One ``search/query`` row -> the v1 unified-search hit (``finalize_search_hit`` applied).
+
+    ``summaries``: ``{(kind, locator): artifact_summary}`` of the page's artifact records (case DB).
+    """
     collection = str(row.get("collection") or "")
     kind = str(row.get("kind") or "")
     locator = str(row.get("locator") or "")
@@ -161,7 +166,39 @@ def index_hit(
         if row.get("artifact_type") == "archive-entry" and fields.get("entry_path"):
             # The entry inside the archive (its locator is ``<archive locator>#entry:<n>``).
             match["entry_path"] = str(fields.get("entry_path"))
+        else:
+            match["title"] = _artifact_hit_title(row, path, title, summaries)
     return finalize_search_hit(match, root=root, snippet_source=snippet_source, record_title=False)
+
+
+def _artifact_hit_title(row: Mapping[str, object], path: str, title: str, summaries: Mapping[tuple[str, str], str] | None) -> str:
+    """v1's title of an artifact/web hit (R7 S2 confirmation #10): ``summary_title`` of the record's
+    ``artifact_summary`` -- the case DB's stored summary of the parent record when the caller
+    looked it up, else (no case DB) the compact index fields when the index title is only the
+    file name (``History``, ``places.sqlite``); otherwise the index title."""
+    artifact_type = str(row.get("artifact_type") or "")
+    key = (str(row.get("kind") or ""), str(row.get("locator") or ""))
+    if summaries is not None and key in summaries:
+        return summary_title(summaries[key], path, artifact_type) or title
+    if path and title == PureWindowsPath(path).name:
+        fields = row.get("fields") if isinstance(row.get("fields"), Mapping) else {}
+        record = {"artifact_type": artifact_type, "path": path, "details": dict(fields)}
+        try:
+            summary = artifact_summary(record)
+        except Exception:  # best effort: keep the index title
+            return title
+        return summary_title(summary, path, artifact_type) or title
+    return title
+
+
+def artifact_summary_keys(rows: Sequence[Mapping[str, object]]) -> list[tuple[str, str]]:
+    """``(kind, locator)`` of the page's artifact/web rows whose title comes from the parent record
+    (archive entries keep their entry name)."""
+    return [
+        (str(row.get("kind") or ""), str(row.get("locator") or ""))
+        for row in rows
+        if row.get("collection") == "artifacts" and row.get("artifact_type") != "archive-entry"
+    ]
 
 
 def index_hits(
@@ -172,11 +209,12 @@ def index_hits(
     run_id: str,
     offset: int = 0,
     docs_results: Mapping[str, int] | None = None,
+    summaries: Mapping[tuple[str, str], str] | None = None,
 ) -> list[dict[str, object]]:
     """A page of index rows as v1 hits, numbered like v1 (``search-hit-<offset + n>``)."""
     hits: list[dict[str, object]] = []
     for position, row in enumerate(rows):
-        hit = index_hit(row, root=root, keywords=keywords, docs_results=docs_results)
+        hit = index_hit(row, root=root, keywords=keywords, docs_results=docs_results, summaries=summaries)
         hit["search_result_id"] = f"search-hit-{offset + position + 1:06d}"
         if isinstance(hit.get("locator"), dict):
             hit["locator"]["run_id"] = run_id
@@ -191,8 +229,14 @@ def attach_console_hits(
     summary: Mapping[str, object],
     run_id: str,
     offset: int = 0,
+    artifact_summaries: Callable[[Sequence[tuple[str, str]]], Mapping[tuple[str, str], str]] | None = None,
 ) -> dict[str, object]:
-    """Replace a ``run_query`` result's ``rows`` by v1 ``matches`` (in place; returns ``result``)."""
+    """Replace a ``run_query`` result's ``rows`` by v1 ``matches`` (in place; returns ``result``).
+
+    ``artifact_summaries(keys)``: the stored ``artifact_summary`` of the parent records of the
+    page's artifact rows (``(kind, locator)`` keys, at most one page) -- the API reads them from
+    the run's case DB; without it (or a record it does not know) see :func:`_artifact_hit_title`.
+    """
     rows = [row for row in result.pop("rows", None) or [] if isinstance(row, Mapping)]
     outputs = summary.get("outputs") if isinstance(summary.get("outputs"), Mapping) else {}
     docs_path = outputs.get("docs") if isinstance(outputs, Mapping) else None
@@ -201,7 +245,15 @@ def attach_console_hits(
         if docs_path and any(row.get("collection") == "docs" for row in rows)
         else None
     )
+    keys = artifact_summary_keys(rows)
+    summaries = artifact_summaries(keys) if artifact_summaries is not None and keys else None
     result["matches"] = index_hits(
-        rows, root=scan_root_of(summary), keywords=keywords, run_id=run_id, offset=offset, docs_results=docs_results
+        rows,
+        root=scan_root_of(summary),
+        keywords=keywords,
+        run_id=run_id,
+        offset=offset,
+        docs_results=docs_results,
+        summaries=summaries,
     )
     return result
