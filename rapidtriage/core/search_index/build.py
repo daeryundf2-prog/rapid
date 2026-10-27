@@ -52,6 +52,7 @@ from ..artifact_profiles import (
     resolve_records_path,
 )
 from ..json_stream import JsonStreamError, iter_array_items
+from ..search_hits import record_time
 from .schema import (
     BIGRAM_RULE,
     BUILDING_SUFFIX,
@@ -218,6 +219,8 @@ class Doc:
     # the path stays searchable with ``path:``/``under:`` but is not repeated in the text.
     text_path: bool = True
     path2: str = ""
+    # The record's own time as v1 hits show it (``search_hits.record_time``; ``search_doc.ts_text``).
+    ts_text: str = ""
     # "<reason>:<field>" -> count of cuts on this row (value/list/text caps).
     cuts: Counter[str] = field(default_factory=Counter)
 
@@ -522,6 +525,7 @@ def _base_doc(ctx: BuildContext, kind: str, record_index: int, row: Mapping[str,
     if not include_source and (kind in CONTAINER_KINDS or artifact_type in CONTAINER_TYPES):
         doc.text_path = False
     doc.times = list(ctx.timeline.get((f"artifacts_{kind}", record_index), ()))
+    doc.ts_text = record_time("artifacts", row) or ""
     return doc, details
 
 
@@ -661,6 +665,7 @@ def flatten_documents(ctx: BuildContext, kind: str, record_index: int, row: Mapp
                 size=_int_or_none(entry.get("uncompressed_size")),
                 in_archive=1,
                 body=[name],
+                ts_text=doc.ts_text,
             )
             child.search_fields.append(("archive_entry", fold(name), None))
             child.fields = {"archive": doc.path, "name": name, "crc32": entry.get("crc32") or ""}
@@ -749,6 +754,7 @@ def flatten_file(ctx: BuildContext, scope: str, index: int, row: Mapping[str, ob
     doc = Doc(collection="files", locator=f"/{scope}/{index}", domain="filesystem", artifact_type=f"file-{scope}", path=raw_path)
     doc.title = str(row.get("name") or Path(raw_path.replace("\\", "/")).name)
     doc.size = _int_or_none(row.get("size"))
+    doc.ts_text = record_time("files", row) or ""
     hashes = row.get("hashes") if isinstance(row.get("hashes"), Mapping) else {}
     _collect_hashes({"hashes": hashes}, doc, include_source=False)
     signature = row.get("file_signature") if isinstance(row.get("file_signature"), Mapping) else {}
@@ -785,6 +791,7 @@ def flatten_doc(ctx: BuildContext, index: int, row: Mapping[str, object], body: 
     doc = Doc(collection="docs", locator=f"/candidates/{index}", domain="media", artifact_type=f"document-{row.get('kind') or 'file'}", path=raw_path)
     doc.title = Path(raw_path.replace("\\", "/")).name
     doc.size = _int_or_none(row.get("size"))
+    doc.ts_text = record_time("documents", row) or ""
     doc.text_cap = TEXT_MAX_CHARS
     if body_cut:
         doc.cuts["text-truncated:body"] += 1
@@ -803,6 +810,7 @@ def flatten_indicator(ctx: BuildContext, index: int, row: Mapping[str, object]) 
     kind = str(row.get("type") or "indicator")
     value = str(row.get("value") or "")
     doc = Doc(collection="indicators", locator=f"/indicators/{index}", domain="incident", artifact_type=f"indicator-{kind}", title=f"{kind}: {value}"[:512])
+    doc.ts_text = record_time("indicators", row) or ""
     flags = row.get("risk_flags") if isinstance(row.get("risk_flags"), list) else []
     doc.body = [value, kind, str(row.get("classification") or ""), *(str(flag) for flag in flags[:20])]
     if kind in {"md5", "sha1", "sha256"}:
@@ -1000,7 +1008,7 @@ def extract_document_body(path: str, kind: str) -> tuple[str, bool] | None:
 
 DOC_COLUMNS = (
     "doc_id, group_id, collection, kind, locator, analysis_id, domain, artifact_type, title, path, path_fold, path2, path2_fold, "
-    "ext, size, ts, ts_kind, ts_family, ts_labels, actor, actor_sid, computer, md5, sha1, sha256, text, text_fold, fields_json, deleted, "
+    "ext, size, ts, ts_kind, ts_text, ts_family, ts_labels, actor, actor_sid, computer, md5, sha1, sha256, text, text_fold, fields_json, deleted, "
     "sig_mismatch, in_archive, pii_count, truncated"
 )
 DOC_INSERT = f"INSERT INTO search_doc ({DOC_COLUMNS}) VALUES ({', '.join('?' for _ in DOC_COLUMNS.split(','))})"
@@ -1073,6 +1081,7 @@ class IndexWriter:
                     doc.size,
                     millis,
                     label,
+                    doc.ts_text[:64] if position == 0 else "",
                     ts_family(label) if label else "",
                     ",".join(extra),
                     nfc(doc.actor)[:256],

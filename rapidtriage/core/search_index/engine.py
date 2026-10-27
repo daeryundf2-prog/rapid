@@ -1757,6 +1757,7 @@ def _row_payload(
         fields = {}
     fields = dict(list(fields.items())[:20]) if isinstance(fields, dict) else {}
     ts = row["ts"]
+    record_ts = row["pts_text"] if "pts_text" in row.keys() else ""
     return {
         "doc_id": int(row["doc_id"]),
         "group_id": int(row["group_id"]),
@@ -1773,6 +1774,8 @@ def _row_payload(
         "ts": ms_to_iso(ts, dt.timedelta(0)) if ts is not None else None,
         "ts_local": ms_to_iso(ts, tz) if ts is not None else None,
         "ts_kind": row["ts_kind"] or None,
+        # The record's own time as its source spells it (v4; what a v1 hit shows as ``timestamp``).
+        "record_ts": record_ts or None,
         "ts_kinds": ts_kinds if ts_kinds is not None else ([row["ts_kind"]] if row["ts_kind"] else []),
         "actor": row["actor"],
         "computer": row["computer"],
@@ -1788,12 +1791,18 @@ def _row_payload(
     }
 
 
+def _has_ts_text(connection: sqlite3.Connection) -> bool:
+    """Index v4 rows carry ``ts_text`` (v2/v3 indexes stay readable without it)."""
+    return any(row[1] == "ts_text" for row in connection.execute("PRAGMA table_info(search_doc)"))
+
+
 def fetch_rows(connection: sqlite3.Connection, doc_ids: list[int]) -> dict[int, sqlite3.Row]:
     if not doc_ids:
         return {}
     marks = ", ".join("?" for _ in doc_ids)
+    record_ts = ", p.ts_text AS pts_text" if _has_ts_text(connection) else ""
     rows = connection.execute(
-        "SELECT d.*, p.text AS ptext, p.fields_json AS pfields FROM search_doc d JOIN search_doc p ON p.doc_id = d.group_id "
+        f"SELECT d.*, p.text AS ptext, p.fields_json AS pfields{record_ts} FROM search_doc d JOIN search_doc p ON p.doc_id = d.group_id "
         f"WHERE d.doc_id IN ({marks})",
         doc_ids,
     ).fetchall()

@@ -14,11 +14,20 @@ import unittest
 from pathlib import Path
 
 from rapidtriage.core.search import run_unified_search
-from rapidtriage.core.search_index.build import build_search_index, index_meta, stale_reasons
+from rapidtriage.core.search_index.build import (
+    build_search_index,
+    index_meta,
+    stale_reasons,
+)
 from rapidtriage.core.search_index.engine import Budget, QueryRequest, run_query
-from rapidtriage.core.search_index.hits import attach_console_hits, console_keywords, console_query
+from rapidtriage.core.search_index.hits import (
+    attach_console_hits,
+    console_keywords,
+    console_query,
+)
 from rapidtriage.core.search_index.schema import FOLD_RULE, INDEX_VERSION
 from rapidtriage.core.search_index.textutil import stored_fold
+from tests.search_index_fixture import write_kind
 
 
 def NFD(text: str) -> str:
@@ -50,52 +59,71 @@ ALL_CASES = [
 ]
 
 
-class SyntheticRun:
-    """The review's synthetic files run, its v4 index, and v1-scan / v2-console searches over it."""
+class SearchRun:
+    """A synthetic run, its v4 index, and v1-scan / v2-console searches over it."""
 
-    def __init__(self, base: Path, names: list[str] = SYNTHETIC_NAMES) -> None:
+    def __init__(
+        self,
+        base: Path,
+        candidates: list[dict[str, object]],
+        *,
+        docs: list[dict[str, object]] | None = None,
+        kinds: dict[str, list[dict[str, object]]] | None = None,
+        root: str = "E:\\root",
+    ) -> None:
         self.run = base / "run"
         self.run.mkdir()
-        candidates = [
-            {"path": f"E:\\root\\Users\\u\\{name}", "name": name, "extension": ".txt", "size": index, "categories": ["documents"], "modified_at": "2025-01-01T00:00:00Z"}
-            for index, name in enumerate(names)
-        ]
         files = self.run / "rapidtriage-files.json"
         files.write_text(json.dumps({"command": "files", "candidates": candidates, "inventory": []}, ensure_ascii=False), encoding="utf-8")
-        self.summary = {
-            "outputs": {"files": str(files), "summary": str(self.run / "rapidtriage-run-summary.json")},
-            "output_dir": str(self.run),
-            "root": "E:\\root",
-            "scan_scope_root": "E:\\root",
-        }
+        outputs: dict[str, str] = {"files": str(files), "summary": str(self.run / "rapidtriage-run-summary.json")}
+        if docs is not None:
+            outputs["docs"] = str(self.run / "rapidtriage-docs.json")
+            Path(outputs["docs"]).write_text(json.dumps({"command": "docs", "candidates": docs, "results": []}, ensure_ascii=False), encoding="utf-8")
+        for kind, rows in (kinds or {}).items():
+            outputs[f"artifacts_{kind}"] = str(write_kind(self.run, kind, rows))
+        self.summary = {"outputs": outputs, "output_dir": str(self.run), "root": root, "scan_scope_root": root}
         (self.run / "rapidtriage-run-summary.json").write_text(json.dumps(self.summary, ensure_ascii=False), encoding="utf-8")
         self.index = base / "idx.db"
-        build_search_index(self.run, self.summary, index_path=self.index, run_id="syn")
+        self.build = build_search_index(self.run, self.summary, index_path=self.index, run_id="syn")
         self.meta = index_meta(self.index)
 
+    def v1_payload(self, keywords: list[str], **options: object) -> dict[str, object]:
+        settings: dict[str, object] = {"include_ocr": False, "limit": 1000, "detail": False, "metadata": "compact", "use_case_db": False, "search_mode": "exact"}
+        settings.update(options)
+        return run_unified_search(self.run, keywords, **settings)  # type: ignore[arg-type]
+
+    def v1_hits(self, keywords: list[str], **options: object) -> list[dict[str, object]]:
+        return self.v1_payload(keywords, **options)["matches"]  # type: ignore[return-value]
+
     def v1(self, keywords: list[str], **options: object) -> list[tuple[str, str]]:
-        payload = run_unified_search(
-            self.run, keywords, include_ocr=False, limit=1000, detail=False, metadata="compact", use_case_db=False, search_mode="exact", **options
-        )
-        return sorted((hit["source"], hit["pointer"]) for hit in payload["matches"])
+        return sorted((hit["source"], hit["pointer"]) for hit in self.v1_hits(keywords, **options))
+
+    def v2_result(self, keywords: list[str], limit: int = 1000) -> dict[str, object]:
+        folded = console_keywords(keywords)
+        result = run_query(self.index, self.meta, QueryRequest(q=console_query(folded), limit=limit, aggregates=False, facets=False, histogram=None), budget=Budget(30))
+        attach_console_hits(result, folded, summary=self.summary, run_id="syn", offset=0)
+        return result
 
     def v2_hits(self, keywords: list[str]) -> list[dict[str, object]]:
-        folded = console_keywords(keywords)
-        result = run_query(self.index, self.meta, QueryRequest(q=console_query(folded), limit=1000, aggregates=False, facets=False, histogram=None), budget=Budget(30))
-        attach_console_hits(result, folded, summary=self.summary, run_id="syn", offset=0)
-        return result["matches"]
+        return self.v2_result(keywords)["matches"]  # type: ignore[return-value]
 
     def v2(self, keywords: list[str]) -> list[tuple[str, str]]:
         return sorted((hit["source"], hit["pointer"]) for hit in self.v2_hits(keywords))
 
 
-class SyntheticCase(unittest.TestCase):
+def synthetic_candidates(names: list[str] = SYNTHETIC_NAMES) -> list[dict[str, object]]:
+    return [
+        {"path": f"E:\\root\\Users\\u\\{name}", "name": name, "extension": ".txt", "size": index, "categories": ["documents"], "modified_at": "2025-01-01T00:00:00Z"}
+        for index, name in enumerate(names)
+    ]
+
+
+class IsolatedEnv(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls._previous = os.environ.get("RAPIDTRIAGE_INDEX_PERSIST")
         os.environ["RAPIDTRIAGE_INDEX_PERSIST"] = "0"
         cls.base = Path(tempfile.mkdtemp(prefix="r7s2-review-"))
-        cls.syn = SyntheticRun(cls.base)
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -104,6 +132,13 @@ class SyntheticCase(unittest.TestCase):
             os.environ.pop("RAPIDTRIAGE_INDEX_PERSIST", None)
         else:
             os.environ["RAPIDTRIAGE_INDEX_PERSIST"] = cls._previous
+
+
+class SyntheticCase(IsolatedEnv):
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        cls.syn = SearchRun(cls.base, synthetic_candidates())
 
 
 class NonAsciiCaseFoldingTest(SyntheticCase):
@@ -141,6 +176,74 @@ class NonAsciiCaseFoldingTest(SyntheticCase):
         meta = dict(self.syn.meta, index_version="search-index-v3")
         reasons = stale_reasons(meta, self.syn.summary, self.syn.run)
         self.assertTrue(any("이전 형식 색인" in reason for reason in reasons), reasons)
+
+
+class HitTimestampTest(IsolatedEnv):
+    """#1: file/document hits carry the record time and artifact hits pick v1's time key."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        evidence = cls.base / "evidence"
+        evidence.mkdir()
+        doc_a = evidence / "zeta-memo.txt"
+        doc_a.write_text("zeta 계약 메모", encoding="utf-8")
+        doc_b = evidence / "zeta-plan.txt"
+        doc_b.write_text("zeta plan", encoding="utf-8")
+        root = str(evidence)
+        candidates = [
+            {"path": f"{root}\\zeta-fs.bin", "name": "zeta-fs.bin", "size": 1, "categories": ["other"],
+             "modified_at": "2026-01-01T00:00:00+00:00", "fs_modified_at": "2020-02-02T02:02:02+00:00", "modified_at_origin": "listing"},
+            {"path": f"{root}\\zeta-copy.bin", "name": "zeta-copy.bin", "size": 2, "categories": ["other"],
+             "modified_at": "2026-01-01T00:00:00.123456+00:00", "modified_at_origin": "acquisition-copy",
+             "ntfs": {"si_modified_at": "2019-09-09T09:09:09.1234567+00:00"}},
+            {"path": f"{root}\\zeta-plain.bin", "name": "zeta-plain.bin", "size": 3, "categories": ["other"],
+             "modified_at": "2024-04-04T04:04:04.427776+00:00", "fs_created_at": "2010-01-01T00:00:00+00:00"},
+        ]
+        docs = [
+            {"path": str(doc_a), "kind": "txt", "size": 10, "text_status": "ok", "modified_at": "2025-05-30T03:35:09.016199+00:00"},
+            {"path": str(doc_b), "kind": "txt", "size": 9, "text_status": "ok", "modified_at": "2025-06-01T00:00:00+00:00", "created_at": "2001-01-01T00:00:00+00:00"},
+        ]
+        kinds = {
+            "browser": [
+                {"provider": "browser", "artifact_type": "browser-history", "path": f"{root}\\History", "timestamp": "2024-12-31T23:59:59Z",
+                 "details": {"url": "https://zeta.example/", "title": "zeta", "last_visited_at": "2025-03-03T03:03:03.000001Z", "created_at": "2000-01-01T00:00:00Z"}},
+            ],
+            "recent-files": [
+                {"provider": "recent", "artifact_type": "lnk-file", "path": f"{root}\\zeta.lnk",
+                 "details": {"target_path": "C:\\zeta.docx", "created_at": "2022-02-02T00:00:00Z", "modified_at": "2022-03-03T00:00:00Z"}},
+                {"provider": "recent", "artifact_type": "lnk-file", "path": f"{root}\\zeta2.lnk", "modified_at": "2023-07-07T07:07:07Z",
+                 "details": {"target_path": "C:\\zeta2.docx"}},
+            ],
+        }
+        cls.syn = SearchRun(cls.base, candidates, docs=docs, kinds=kinds, root=root)
+
+    @staticmethod
+    def _key(hit: dict[str, object]) -> str:
+        return f"{hit['source']}:{hit.get('kind')}:{hit['pointer']}:{hit['path']}"
+
+    def test_same_row_timestamps_equal_v1(self) -> None:
+        v1 = {self._key(hit): hit for hit in self.syn.v1_hits(["zeta"])}
+        v2 = {self._key(hit): hit for hit in self.syn.v2_hits(["zeta"])}
+        self.assertEqual(set(v1), set(v2))
+        self.assertEqual(len(v1), 8)
+        for key, hit in v1.items():
+            with self.subTest(key=key):
+                self.assertTrue(hit["timestamp"], hit)
+                self.assertEqual(v2[key]["timestamp"], hit["timestamp"])
+        by_title = {hit["title"]: hit["timestamp"] for hit in v2.values()}
+        # Files: the grid's 수정 time (fs time > NTFS $SI of an acquisition copy > modified_at).
+        self.assertEqual(by_title["zeta-fs.bin"], "2020-02-02T02:02:02+00:00")
+        self.assertEqual(by_title["zeta-copy.bin"], "2019-09-09T09:09:09.1234567+00:00")
+        self.assertEqual(by_title["zeta-plain.bin"], "2024-04-04T04:04:04.427776+00:00")
+        # Documents: their own modified_at, spelled as the record spells it.
+        self.assertEqual(by_title["zeta-memo.txt"], "2025-05-30T03:35:09.016199+00:00")
+
+    def test_artifact_time_key_order(self) -> None:
+        hits = {hit["display_path"]: hit["timestamp"] for hit in self.syn.v2_hits(["zeta"]) if hit["source"] in {"web", "artifacts"}}
+        self.assertEqual(hits["History"], "2025-03-03T03:03:03.000001Z")  # details.last_visited_at before the record's timestamp
+        self.assertEqual(hits["zeta.lnk"], "2022-03-03T00:00:00Z")  # modified_at before created_at
+        self.assertEqual(hits["zeta2.lnk"], "2023-07-07T07:07:07Z")  # the record's own key without a details time
 
 
 if __name__ == "__main__":

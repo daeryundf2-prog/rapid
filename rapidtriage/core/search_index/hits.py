@@ -128,7 +128,8 @@ def index_hit(
         "title": title,
         "matched_keywords": matched,
         "metadata": _metadata(row),
-        "timestamp": row.get("ts") or None,
+        # v4: the record's own time as v1 shows it; older indexes: the matched row's epoch time.
+        "timestamp": row.get("record_ts") or row.get("ts") or None,
         "search_match": build_search_match_metadata(snippet_text, keywords, search_options={"search_mode": "exact"}),
     }
     snippet_source: object = snippet_text

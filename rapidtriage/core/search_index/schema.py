@@ -36,6 +36,11 @@ Deviations from the plan text (documented in docs/plans/search-2026-10-13.md §3
   ``search_text_src`` (``COALESCE(text_fold, text)``); keywords are folded the same
   way and the bigram pairs come from the folded text. ``meta.fold`` names the rule;
   a v2/v3 index stays readable (ASCII-only folding) and is reported stale.
+* ``ts_text`` (index v4, review #1): the record's own time as v1 shows it
+  (``search_hits.record_time``: files grid 수정 time, documents ``modified_at``,
+  artifacts the first ``_TIME_KEYS`` member of details/record), spelled as the
+  record spells it, on the primary row. Console hits show it (v1 hit ``timestamp``);
+  ``ts`` stays the per-kind epoch time rows for sorting and time filters.
 """
 
 from __future__ import annotations
@@ -89,6 +94,7 @@ CREATE TABLE IF NOT EXISTS search_doc (
     size INTEGER,
     ts INTEGER,
     ts_kind TEXT NOT NULL DEFAULT '',
+    ts_text TEXT NOT NULL DEFAULT '',
     ts_family TEXT NOT NULL DEFAULT '',
     ts_labels TEXT NOT NULL DEFAULT '',
     actor TEXT NOT NULL DEFAULT '',

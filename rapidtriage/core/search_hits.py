@@ -208,14 +208,45 @@ def _first_time(record: Mapping[str, object]) -> str | None:
     return None
 
 
+def _text_or_none(value: object) -> str | None:
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def file_modified_time(record: Mapping[str, object]) -> str | None:
+    """The 수정 time the files grid shows (``modifiedTimeOf``): ``fs_modified_at`` (the evidence
+    filesystem's own time); for an acquisition copy the NTFS join's ``$SI`` modified time when
+    joined; else ``modified_at``."""
+    found = _text_or_none(record.get("fs_modified_at"))
+    if found:
+        return found
+    if record.get("modified_at_origin") == "acquisition-copy":
+        ntfs = record.get("ntfs") if isinstance(record.get("ntfs"), Mapping) else {}
+        found = _text_or_none(ntfs.get("si_modified_at"))
+        if found:
+            return found
+    return _text_or_none(record.get("modified_at"))
+
+
+def record_time(source: str, record: Mapping[str, object]) -> str | None:
+    """The record's own time a hit shows, as the record spells it (v1 and the search index alike).
+
+    Files: :func:`file_modified_time`. Everything else: the first of :data:`_TIME_KEYS` in
+    ``details``, then in the record (event/file/visit time).
+    """
+    if source == "files":
+        return file_modified_time(record)
+    details = record.get("details") if isinstance(record.get("details"), Mapping) else {}
+    return _first_time(details) or _first_time(record)
+
+
 def hit_timestamp(match: Mapping[str, object]) -> str | None:
-    """The record's own time: details first, then the record (event/file time)."""
-    for value in (match.get("timestamp"),):
-        if isinstance(value, str) and value.strip():
-            return value.strip()
+    """The hit's ``timestamp`` when set (index hits: the indexed :func:`record_time`), else
+    :func:`record_time` of its source record."""
+    found = _text_or_none(match.get("timestamp"))
+    if found:
+        return found
     metadata = match.get("metadata") if isinstance(match.get("metadata"), Mapping) else {}
-    details = metadata.get("details") if isinstance(metadata.get("details"), Mapping) else {}
-    return _first_time(details) or _first_time(metadata)
+    return record_time(str(match.get("source") or ""), metadata)
 
 
 def _artifact_title(record: Mapping[str, object]) -> str:
