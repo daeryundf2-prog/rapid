@@ -16,6 +16,7 @@ import {
   isUnindexedKeyword,
   koreanSearchError,
   SEARCH_REQUEST_REJECTED,
+  searchWarningsOf,
 } from "./search";
 
 afterEach(() => {
@@ -106,6 +107,24 @@ describe("R7 S2 #3: v2 warnings in the search results footer", () => {
   it("no warnings, no note (and v1 pages carry none)", () => {
     expect(searchWarningNote(undefined)).toBeUndefined();
     expect(searchWarningNote([])).toBeUndefined();
+  });
+
+  it("reads the backend lane's sentence (Korean source labels after '본문이 잘린 행:')", () => {
+    const warnings = searchWarningsOf({
+      query: {
+        parsed: {
+          warnings: [
+            "색인 상한에서 본문 일부가 잘린 행이 있어 잘린 뒷부분은 검색되지 않습니다(본문이 잘린 행: 아티팩트 1,045건, 문서 8건)",
+          ],
+        },
+      },
+    });
+    expect(warnings).toEqual([
+      expect.objectContaining({ kind: "truncated-rows", counts: { 아티팩트: 1045, 문서: 8 } }),
+    ]);
+    const note = searchWarningNote(warnings);
+    expect(note?.text).toBe("검색 참고: 본문이 색인 상한에서 잘린 행 1,053건은 뒷부분이 검색되지 않았습니다");
+    expect(note?.title).toContain("· 아티팩트 1,045건");
   });
 });
 

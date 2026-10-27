@@ -166,7 +166,8 @@ function countsOf(value: unknown): Record<string, number> | undefined {
 
 /** "(문서 12건, artifacts 1,234건)" at the end of the server's truncated-rows sentence. */
 function countsInText(text: string): Record<string, number> | undefined {
-  const detail = /\(([^()]*\d[^()]*)\)\s*$/.exec(text)?.[1];
+  // "(media 1,200건, filesystem 3건)" or, since the R7 S2 fix, "(본문이 잘린 행: 문서 8건, 아티팩트 45건)".
+  const detail = /\(([^()]*\d[^()]*)\)\s*$/.exec(text)?.[1]?.replace(/^[^:]*:\s*/, "");
   if (!detail) return undefined;
   const counts: Record<string, number> = {};
   // The server joins with ", "; "1,200건" keeps its thousands comma.
