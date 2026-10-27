@@ -13,6 +13,7 @@ import { expandViewerPane, focusViewer, MAIN_ID } from "../commands/builtin";
 import type { CollectionQuery, CollectionRef } from "../contracts/collection";
 import { encodeRowRef, type RowRef } from "../contracts/rowRef";
 import type { ViewerTarget } from "../contracts/viewer";
+import { parseSearchKeywords } from "../features/case/searchKeywords";
 import { useSearchState } from "../features/case/searchState";
 import { type RouteState, useGridLocalStore } from "../features/grid/adapter";
 import { collectionChanged, stageHasViewer, stageOf } from "../router";
@@ -43,7 +44,8 @@ function sameCollection(a: CollectionRef, b: CollectionRef): boolean {
 
 /** Search spec for the grid from the routed keywords + S4's options popover. */
 export function searchSpec(q: string | undefined): CollectionQuery["search"] {
-  const keywords = (q ?? "").split(/[\s,]+/).filter(Boolean);
+  // R7 S2 #4: at most 32 keywords / 4,000 characters (the v2 query's limits), with a Korean note.
+  const { keywords, note } = parseSearchKeywords(q);
   if (keywords.length === 0) return undefined;
   const { options } = useSearchState.getState();
   return {
@@ -52,6 +54,7 @@ export function searchSpec(q: string | undefined): CollectionQuery["search"] {
     sources: options.sources.length ? options.sources : undefined,
     hideKnownGood: options.hideKnownGood,
     ...(options.ocr ? { ocr: true } : {}),
+    ...(note ? { keywordNote: note } : {}),
   };
 }
 

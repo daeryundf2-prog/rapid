@@ -356,6 +356,8 @@ export interface GridFooterProps {
   loadedSummary?: string;
   /** Unified search answered by v1 for want of a v2 search index: one line + a link to build it. */
   indexHint?: { text: string; href: string; linkText: string };
+  /** v2 search notes (R7 S2 #3: truncated rows, short keywords; #4: keywords cut): one line + tooltip. */
+  searchNote?: { text: string; title: string };
 }
 
 export const TRUNCATED_NOTICE =
@@ -426,6 +428,15 @@ export function GridFooter(props: GridFooterProps) {
       {props.indexHint ? (
         <span className="grid-note" data-testid="grid-footer-index-hint">
           {props.indexHint.text} — <a href={props.indexHint.href}>{props.indexHint.linkText}</a>
+        </span>
+      ) : null}
+      {props.searchNote ? (
+        <span
+          className="grid-note"
+          data-testid="grid-footer-search-note"
+          title={props.searchNote.title || undefined}
+        >
+          {props.searchNote.text}
         </span>
       ) : null}
       {props.selectedCount ? (

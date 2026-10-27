@@ -59,6 +59,7 @@ export function buildViewerTarget(runId: string, row: GridRow, mode?: ViewerMode
   const rowMode =
     typeof row.fields.viewerMode === "string" ? (row.fields.viewerMode as ViewerMode) : undefined;
   const preferred = mode ?? rowMode ?? (isArtifact ? "meta" : undefined);
+  const review = reviewLocatorOf(row);
   return {
     ref: row.ref,
     runId,
@@ -66,7 +67,28 @@ export function buildViewerTarget(runId: string, row: GridRow, mode?: ViewerMode
     ...(row.fields.isDirectory === true ? { isDirectory: true, preferredMode: "meta" as const } : {}),
     ...(preferred && row.fields.isDirectory !== true ? { preferredMode: preferred } : {}),
     ...(highlight ? { highlight } : {}),
+    ...(review ? { review } : {}),
   };
+}
+
+/**
+ * The run-output row a search hit carries (`fields.reviewCollection` / `reviewKind` /
+ * `reviewPointer`, from the API `locator`; R7 S2 #8); undefined for every other row.
+ */
+export function reviewLocatorOf(row: GridRow): ViewerTarget["review"] {
+  const { reviewCollection, reviewKind, reviewPointer } = row.fields;
+  if (typeof reviewCollection !== "string" || !reviewCollection) return undefined;
+  if (typeof reviewPointer !== "string" || !reviewPointer.startsWith("/")) return undefined;
+  return typeof reviewKind === "string" && reviewKind
+    ? { collection: reviewCollection, kind: reviewKind, pointer: reviewPointer }
+    : { collection: reviewCollection, pointer: reviewPointer };
+}
+
+/** `collection[:kind]:locator` a citation names: a search hit's source row, else the row's own ref. */
+export function citationLocator(row: GridRow): string {
+  const review = reviewLocatorOf(row);
+  if (review) return [review.collection, review.kind, review.pointer].filter(Boolean).join(":");
+  return `${row.ref.collection}:${row.ref.locator}`;
 }
 
 /**
@@ -74,13 +96,9 @@ export function buildViewerTarget(runId: string, row: GridRow, mode?: ViewerMode
  * sha256, then the record id and record time.
  */
 export function citationText(row: GridRow, runId?: string | null): string {
-  const parts = [
-    ...caseCitationParts(runId),
-    row.sourcePath ?? row.title,
-    `[${row.ref.collection}:${row.ref.locator}]`,
-  ];
-  if (row.sha256)
-    parts.push(`${row.ref.collection === "artifacts" ? "컨테이너 sha256" : "sha256"}=${row.sha256}`);
+  const parts = [...caseCitationParts(runId), row.sourcePath ?? row.title, `[${citationLocator(row)}]`];
+  const artifactRow = row.ref.collection === "artifacts" || reviewLocatorOf(row)?.collection === "artifacts";
+  if (row.sha256) parts.push(`${artifactRow ? "컨테이너 sha256" : "sha256"}=${row.sha256}`);
   const record = recordCitationParts(row, currentTimezone());
   if (record.length) parts.push(...record);
   else if (row.timestamp) parts.push(row.timestamp);

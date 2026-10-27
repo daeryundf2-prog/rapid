@@ -1,8 +1,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { searchSpec } from "../app/gridBridge";
 import { searchCancelKey, useSearchState } from "../features/case/searchState";
-import { resetAppStore } from "../state/store";
+import { resetAppStore, useAppStore } from "../state/store";
 import { searchQueryKey, TopBar } from "./TopBar";
 
 const RUN = "run-p2";
@@ -64,6 +65,21 @@ describe("top bar search: spinner and cancel (R7 P2)", () => {
     expect(useSearchState.getState().cancelled).toBe(searchCancelKey(RUN, ["계약"]));
     fireEvent.submit(input);
     expect(useSearchState.getState().cancelled).toBeNull();
+  });
+
+  it("33 keywords: the search runs on the first 32 with a Korean note (R7 S2 #4)", () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderTopBar(client);
+    const input = screen.getByLabelText("전체 검색어");
+    const words = Array.from({ length: 33 }, (_, i) => `키워드${i + 1}`);
+    fireEvent.change(input, { target: { value: words.join(" ") } });
+    fireEvent.submit(input);
+    expect(useSearchState.getState().keywords).toEqual(words.slice(0, 32));
+    expect(useAppStore.getState().notice?.text).toBe("전체 검색: 검색어 32개까지만 사용합니다");
+    // The grid's request uses the same 32 (and carries the note for the results footer).
+    const spec = searchSpec(words.join(" "));
+    expect(spec?.keywords).toHaveLength(32);
+    expect(spec?.keywordNote).toBe("검색어 32개까지만 사용합니다");
   });
 
   it("a new search aborts the previous one's requests; Enter still submits", async () => {

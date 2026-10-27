@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_SEARCH_OPTIONS } from "../../api/keywordPacks";
+import { resetCaseDbHandles } from "../grid/reviewActions";
 import { SearchOptionsButton } from "./SearchOptionsPopover";
 import { useSearchState } from "./searchState";
 import { mockFetch, renderWithQuery } from "./testUtils";
@@ -8,6 +9,7 @@ import { mockFetch, renderWithQuery } from "./testUtils";
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  resetCaseDbHandles();
   useSearchState.setState({ keywords: [], options: DEFAULT_SEARCH_OPTIONS, popoverOpen: false });
 });
 
@@ -52,6 +54,30 @@ describe("SearchOptionsButton", () => {
       limit: 500,
       sources: ["documents"],
       created_by: "web-ui",
+    });
+  });
+
+  it("reuses the run's case DB when it reports case_db_ready: no /case-db/ensure (R7 S2 #13)", async () => {
+    const { calls } = mockFetch({
+      "GET /api/keyword-packs": { packs: [] },
+      "GET /api/runs/r1": {
+        run_id: "r1",
+        case_db_ready: true,
+        case_db: { database: "/o/ready.db", case_id: "run-r1" },
+      },
+      "POST /api/case-db/saved-searches": { name: "준비됨" },
+    });
+    useSearchState.setState({ keywords: ["계약"] });
+    renderWithQuery(<SearchOptionsButton runId="r1" />);
+    fireEvent.click(screen.getByRole("button", { name: "검색 옵션" }));
+    fireEvent.change(screen.getByLabelText("현재 검색 저장"), { target: { value: "준비됨" } });
+    fireEvent.click(screen.getByRole("button", { name: "저장" }));
+    await waitFor(() => expect(calls.some((c) => c.url === "/api/case-db/saved-searches")).toBe(true));
+    expect(calls.some((c) => c.url.endsWith("/case-db/ensure"))).toBe(false);
+    expect(calls.find((c) => c.url === "/api/case-db/saved-searches")?.body).toMatchObject({
+      database: "/o/ready.db",
+      case_id: "run-r1",
+      keywords: ["계약"],
     });
   });
 
