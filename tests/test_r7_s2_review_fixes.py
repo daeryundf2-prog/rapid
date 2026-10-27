@@ -436,6 +436,74 @@ class V1RegexGuardTest(IsolatedEnv):
         self.assertIn("행당 시간 한도", payload["warnings"][0])
 
 
+class PathIndexBudgetTest(unittest.TestCase):
+    """#12: the artifact path indexes share one byte budget (LRU across kinds)."""
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+
+    def kind(self, name: str, rows: int = 2000) -> tuple[dict[str, object], Path]:
+        from rapidtriage.core.jobs import read_output_json
+
+        root = Path(self.temp.name) / name
+        root.mkdir()
+        data = [{"provider": "p", "artifact_type": "t", "path": f"D:/Logs/{name}-{index % 50}.evtx", "details": {"n": index}} for index in range(rows)]
+        path = write_kind(root, name, data)
+        return read_output_json(path), path
+
+    def test_lru_eviction_by_bytes(self) -> None:
+        from rapidtriage.api.app.artifact_path_index import (
+            PathIndexService,
+            build_path_index,
+        )
+
+        kinds = {name: self.kind(name) for name in ("alpha", "beta", "gamma")}
+        one = build_path_index(*kinds["alpha"]).nbytes()
+        service = PathIndexService(max_bytes=int(one * 2.5))
+        for name, (payload, path) in kinds.items():
+            self.assertIsNotNone(service.get("run", name, payload, path))
+        kept = {key[1] for key in service._items}
+        self.assertEqual(kept, {"beta", "gamma"})  # alpha was least recently used
+        self.assertLessEqual(service.held_bytes(), service.max_bytes)
+        # Using beta makes gamma the oldest: a rebuilt alpha evicts gamma.
+        service.get("run", "beta", *kinds["beta"])
+        service.get("run", "alpha", *kinds["alpha"])
+        self.assertEqual({key[1] for key in service._items}, {"alpha", "beta"})
+        self.assertEqual(service.builds, 4)
+
+    def test_index_larger_than_the_budget_is_not_kept(self) -> None:
+        from rapidtriage.api.app.artifact_path_index import PathIndexService
+
+        payload, path = self.kind("big")
+        service = PathIndexService(max_bytes=1024)
+        self.assertIsNotNone(service.get("run", "big", payload, path))
+        self.assertEqual(len(service._items), 0)
+
+    def test_budget_from_environment(self) -> None:
+        from unittest import mock
+
+        from rapidtriage.api.app.artifact_path_index import (
+            PATH_INDEX_BUDGET_ENV,
+            PathIndexService,
+            path_index_budget_bytes,
+        )
+
+        with mock.patch.dict(os.environ, {PATH_INDEX_BUDGET_ENV: "1.5"}):
+            self.assertEqual(path_index_budget_bytes(), int(1.5 * 1024 * 1024))
+            self.assertEqual(PathIndexService().max_bytes, int(1.5 * 1024 * 1024))
+        with mock.patch.dict(os.environ, {PATH_INDEX_BUDGET_ENV: "x"}):
+            self.assertEqual(path_index_budget_bytes(), 256 * 1024 * 1024)
+
+    def test_needle_cache_growth_counts(self) -> None:
+        from rapidtriage.api.app.artifact_path_index import build_path_index
+
+        index = build_path_index(*self.kind("delta"))
+        before = index.nbytes()
+        index.matching("delta")
+        self.assertGreater(index.nbytes(), before + 2000 * 8 - 1)
+
+
 try:
     from fastapi.testclient import TestClient
 

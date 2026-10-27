@@ -15,7 +15,8 @@ A ``path_contains`` request then tests the distinct paths (substring, same seman
 scan), collects the matching record indices and reads only the rows it pages (and the other
 filters, if any, check only those rows). One index per kind revision
 (``row_conditions.output_stamp`` of the payload and its JSONL), one build at a time, kept in memory
-(LRU of :data:`PATH_INDEX_MAX_KINDS` kinds; no file is written). The first single-kind request
+(LRU over all kinds bounded by bytes, ``RAPIDTRIAGE_PATH_INDEX_MB`` -- default 256 -- and by
+:data:`PATH_INDEX_MAX_KINDS` kinds; no file is written; R7 S2 review #12). The first single-kind request
 builds it synchronously (one pass over the kind, the cost of the old scan); cross-kind requests
 use only ready indexes and start the missing ones in the background (one build at a time), so a
 category filter never waits for a whole-run build. Any failure falls back to the scan.
@@ -25,6 +26,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import sys
 import threading
 from array import array
 from bisect import bisect_left
@@ -46,6 +49,9 @@ LOGGER = logging.getLogger(__name__)
 
 # Kinds whose index is kept (all runs). An event-log kind of 300k rows costs ~4 MB.
 PATH_INDEX_MAX_KINDS = 24
+# Bytes all kept indexes may hold together (paths, per-record arrays, matched-record caches).
+PATH_INDEX_BUDGET_ENV = "RAPIDTRIAGE_PATH_INDEX_MB"
+PATH_INDEX_DEFAULT_MB = 256
 # Kinds with more records are not indexed (the scan with its cap and budget answers).
 PATH_INDEX_MAX_RECORDS = 20_000_000
 # Distinct paths per kind; beyond this the index is useless (every row its own path).
@@ -53,6 +59,16 @@ PATH_INDEX_MAX_PATHS = 2_000_000
 # Matched record lists remembered per index (needle -> indices).
 PATH_INDEX_NEEDLE_CACHE = 32
 NO_PATH = -1
+
+
+def path_index_budget_bytes() -> int:
+    """``RAPIDTRIAGE_PATH_INDEX_MB`` (default 256) in bytes; ``0`` keeps no index (every request scans)."""
+    raw = os.environ.get(PATH_INDEX_BUDGET_ENV, "").strip()
+    try:
+        megabytes = float(raw) if raw else PATH_INDEX_DEFAULT_MB
+    except ValueError:
+        megabytes = PATH_INDEX_DEFAULT_MB
+    return max(0, int(megabytes * 1024 * 1024))
 
 
 @dataclass
@@ -67,6 +83,16 @@ class PathIndex:
     @property
     def total(self) -> int:
         return len(self.path_ids)
+
+    def nbytes(self) -> int:
+        """Approximate memory held: the distinct paths, the per-record arrays and the needle cache."""
+        size = sum(sys.getsizeof(path) for path in self.paths) + sys.getsizeof(self.paths)
+        size += self.path_ids.itemsize * len(self.path_ids)
+        if self.offsets is not None:
+            size += self.offsets.itemsize * len(self.offsets)
+        with self.lock:
+            size += sum(len(needle) + found.itemsize * len(found) + 64 for needle, found in self.needle_cache.items())
+        return size
 
     def matching(self, needle: str) -> array:
         """Record indices (ascending) whose folded path contains ``needle`` (pre-folded)."""
@@ -175,8 +201,9 @@ class PathIndexService:
     A kind that cannot be indexed is remembered as ``False`` (no rebuild per request).
     """
 
-    def __init__(self, max_kinds: int = PATH_INDEX_MAX_KINDS) -> None:
+    def __init__(self, max_kinds: int = PATH_INDEX_MAX_KINDS, max_bytes: int | None = None) -> None:
         self.max_kinds = max_kinds
+        self._max_bytes = max_bytes
         self._lock = threading.Lock()
         self._items: OrderedDict[tuple[object, ...], PathIndex | bool] = OrderedDict()
         self._build_locks: dict[tuple[object, ...], threading.Lock] = {}
@@ -184,9 +211,27 @@ class PathIndexService:
         self._worker_gate = threading.Semaphore(1)
         self.builds = 0
 
+    @property
+    def max_bytes(self) -> int:
+        return path_index_budget_bytes() if self._max_bytes is None else self._max_bytes
+
     def clear(self) -> None:
         with self._lock:
             self._items.clear()
+
+    def held_bytes(self) -> int:
+        with self._lock:
+            items = list(self._items.values())
+        return sum(item.nbytes() for item in items if isinstance(item, PathIndex))
+
+    def _evict(self) -> None:
+        """Drop least-recently used indexes until the byte budget and the kind count hold (lock held)."""
+        budget = self.max_bytes
+        sizes = {key: (item.nbytes() if isinstance(item, PathIndex) else 0) for key, item in self._items.items()}
+        total = sum(sizes.values())
+        while self._items and (total > budget or len(self._items) > self.max_kinds):
+            key, _item = self._items.popitem(last=False)
+            total -= sizes.pop(key, 0)
 
     @staticmethod
     def key(run_id: str, kind: str, payload: Mapping[str, object], payload_path: Path | None) -> tuple[object, ...]:
@@ -205,10 +250,11 @@ class PathIndexService:
             # A new revision of the kind replaces the old one.
             for stale in [item for item in self._items if item[:2] == key[:2] and item != key]:
                 self._items.pop(stale, None)
+            if isinstance(value, PathIndex) and value.nbytes() > self.max_bytes:
+                return  # larger than the whole budget: used for this request only, never kept
             self._items[key] = value
             self._items.move_to_end(key)
-            while len(self._items) > self.max_kinds:
-                self._items.popitem(last=False)
+            self._evict()
 
     def _build(self, payload: Mapping[str, object], payload_path: Path | None) -> PathIndex | bool:
         try:
@@ -224,6 +270,9 @@ class PathIndexService:
         key = self.key(run_id, kind, payload, payload_path)
         found = self._peek(key)
         if found is not None:
+            # Its needle cache may have grown since it was stored: re-check the byte budget.
+            with self._lock:
+                self._evict()
             return found or None
         with self._lock:
             build_lock = self._build_locks.setdefault(key, threading.Lock())
