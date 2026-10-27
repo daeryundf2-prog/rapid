@@ -77,6 +77,31 @@ describe("R7 S2 #8: a search hit opened in the viewer is marked, bookmarked and 
   });
 });
 
+describe("R7 S2 #10: a bare file-name title of a v2 artifact hit", () => {
+  const history = {
+    source: "web",
+    kind: "browser",
+    artifact_type: "browser-history",
+    title: "History",
+    path: "C:\\Users\\kim\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\History",
+  };
+
+  it("gives way to the console's artifact summary when the metadata names something better", () => {
+    const row = map({ ...history, metadata: { name: "example.com — 계약서 양식" } });
+    expect(row.title).toBe("example.com — 계약서 양식");
+  });
+
+  it("stays when nothing better is known, and real titles are never replaced", () => {
+    expect(map(history).title).toBe("History");
+    expect(map({ ...history, title: "네이버 메일", metadata: { name: "other" } }).title).toBe("네이버 메일");
+    // Non-artifact hits keep their title as before.
+    expect(
+      map({ source: "files", title: "places.sqlite", path: "C:\\x\\places.sqlite", metadata: { name: "n" } })
+        .title,
+    ).toBe("places.sqlite");
+  });
+});
+
 describe("R7 S2 #6: archive entry hits get their own row key", () => {
   const parents = [3, 4, 5].map((n) => ({
     source: "files",
