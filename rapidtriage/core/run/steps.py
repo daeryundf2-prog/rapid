@@ -303,6 +303,14 @@ def apply_row_truncation_warnings(
             count = int(status_counts.get(status) or 0)
             if count:
                 _add_step_warning(docs_row, f"문서 {count}건: {label} ({status})", cap=f"docs:{status}")
+    credential_files = summary.get("credential_files") if isinstance(summary, Mapping) else None
+    if docs_row is not None and isinstance(credential_files, Mapping) and int(credential_files.get("count") or 0):
+        # Policy, not a cut: disclosed as a notice (core/credential_files.py).
+        message = str(credential_files.get("note") or "")
+        messages = docs_row.setdefault("warning_messages", [])
+        if message and isinstance(messages, list) and message not in messages:
+            messages.append(message)
+        docs_row["warning_level"] = highest_warning_level([str(docs_row.get("warning_level") or "none"), "notice"])
 
 
 def _add_step_warning(row: dict[str, object], message: str, *, cap: str) -> None:

@@ -9,6 +9,7 @@ from pathlib import Path
 from ..artifacts.windows.antiforensics import file_holds_recovery_secret
 from ..artifacts.windows.system_extras import file_holds_store_secret
 from .audit import compute_sha256
+from .credential_files import BODY_WITHHELD, credential_file_reason
 from .files import (
     ALL_FILE_CATEGORIES,
     normalize_extensions,
@@ -137,6 +138,20 @@ def run_extract(
             continue
         if destination_path.exists() and not overwrite:
             skipped_entries.append({"original_path": str(source_path), "reason": "destination-exists"})
+            continue
+        credential_reason = credential_file_reason(source_path)
+        if credential_reason:
+            # Credential / secret files (core/credential_files.py) are never copied, and no hash
+            # of their bytes is recorded (AI credential policy: no value, no hash).
+            skipped_entries.append(
+                {
+                    "original_path": str(source_path),
+                    "reason": "credential-file",
+                    "credential_reason": credential_reason,
+                    "coverage_status": BODY_WITHHELD,
+                    "size": source_stat.st_size,
+                }
+            )
             continue
         if file_holds_recovery_secret(source_path) or file_holds_store_secret(source_path):
             # BitLocker key files (and small texts holding a checksum-valid recovery password),

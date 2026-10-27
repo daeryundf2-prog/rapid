@@ -9,6 +9,7 @@ import zipfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from .credential_files import credential_file_reason, credential_withheld_preview
 from .docs import SUPPORTED_DOC_EXTS, extract_text
 from .search import SearchError, load_run_summary
 from .source_paths import resolve_source_path_in_roots
@@ -72,6 +73,9 @@ def run_source_read(
             max_chars=max_chars,
             hex_bytes=hex_bytes,
         )
+    elif sqlite_table and credential_file_reason(source_path):
+        # Browser Login Data / Cookies / Web Data and other credential stores: no table rows.
+        preview = credential_withheld_preview(credential_file_reason(source_path))
     elif sqlite_table:
         if bool(sqlite_where_column) != bool(sqlite_where_contains):
             raise SourceReadError("--sqlite-where-column and --sqlite-where-contains must be used together")
@@ -173,8 +177,10 @@ def run_source_search(
         raise SourceReadError("source-read preview is missing")
     source_path = Path(str(source_payload.get("path") or ""))
     is_archive_entry = bool(source_payload.get("archive_entry"))
+    withheld = preview.get("preview_type") == "withheld"  # credential file: nothing to search
     is_sqlite_candidate = (
-        not is_archive_entry
+        not withheld
+        and not is_archive_entry
         and source_path.suffix.lower() in {".db", ".sqlite", ".sqlite3"}
         and source_path.is_file()
     )
@@ -189,7 +195,7 @@ def run_source_search(
         )
         searchable = True
         search_mode = "bounded-sqlite-table-scan"
-    elif can_stream_search_source(source_path, preview):
+    elif not withheld and can_stream_search_source(source_path, preview):
         matches, stream_summary = search_plain_text_source_stream(
             source_path,
             normalized,
@@ -554,6 +560,9 @@ def parse_archived_source_request(raw_path: str) -> dict[str, str] | None:
 
 
 def build_source_read_preview(source_path: Path, *, max_chars: int, hex_bytes: int) -> dict[str, object]:
+    credential_reason = credential_file_reason(source_path)
+    if credential_reason:
+        return credential_withheld_preview(credential_reason)
     suffix = source_path.suffix.lower()
     if suffix in SUPPORTED_DOC_EXTS:
         try:
@@ -630,7 +639,12 @@ def build_archived_source_preview(
         },
     }
 
-    if len(blob) <= max_chars and not is_probably_binary_bytes(blob):
+    credential_reason = credential_file_reason(info.filename, sniff=False)
+    if credential_reason:
+        # Credential / secret entry: no text, no hex and no hash of its bytes.
+        entry_metadata["entry_hashes"] = {}
+        preview = credential_withheld_preview(credential_reason)
+    elif len(blob) <= max_chars and not is_probably_binary_bytes(blob):
         text = blob.decode("utf-8", errors="replace")
         preview = text_preview_payload(text, max_chars=max_chars, strategy="bounded-zip-entry-text")
     else:
