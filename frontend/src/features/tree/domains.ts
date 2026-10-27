@@ -75,6 +75,7 @@ export interface DomainTarget {
    * such as `hashset:known-bad` filter the run's search index (route `q=`).
    */
   q?: string;
+  /**
    * 예외 항목 category (R7 갈래 A, route `irregular=`): the listing's rows of that category; the
    * count is the category's rows of that list (`GET /irregular/summary`).
    */
