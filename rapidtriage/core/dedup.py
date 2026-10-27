@@ -327,4 +327,3 @@ def dedup_index_from_document(document: Mapping[str, object]) -> DedupIndex:
             mode.status.setdefault(str(ref), (value[0], value[1]))
         modes[name] = mode
     return DedupIndex(modes=modes, keys=keys)
-
