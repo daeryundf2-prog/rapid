@@ -1,9 +1,9 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_SEARCH_OPTIONS } from "../../api/keywordPacks";
+import { resetCaseDbHandles } from "../grid/reviewActions";
 import { DOMAINS } from "../tree/domains";
 import { domainRoute } from "../tree/model";
-import { resetCaseDbHandles } from "../grid/reviewActions";
 import { consoleKeywords, EntityPanel } from "./EntityPanel";
 import { SearchOptionsButton } from "./SearchOptionsPopover";
 import { useSearchState } from "./searchState";
@@ -93,7 +93,13 @@ describe("EntityPanel", () => {
       "POST /api/runs/r1/search/query": QUERY,
       "POST /api/runs/r1/search/entities/reveal": () => {
         reveals += 1;
-        return { value: "901010-1234567", masked: "901010-1******", label: "주민등록번호", entity_kind: "rrn", audit_id: "AUD-1" };
+        return {
+          value: "901010-1234567",
+          masked: "901010-1******",
+          label: "주민등록번호",
+          entity_kind: "rrn",
+          audit_id: "AUD-1",
+        };
       },
     });
     useSearchState.setState({ entityQuery: "rrn:verified" });
@@ -113,7 +119,13 @@ describe("EntityPanel", () => {
     expect(await within(dialog).findByText("901010-1234567")).toBeTruthy();
     expect(reveals).toBe(1);
     const body = calls.find((call) => call.url === "/api/runs/r1/search/entities/reveal")?.body;
-    expect(body).toEqual({ collection: "docs", kind: "", locator: "/candidates/3", value_sha256: SHA, reason: "수사 협조" });
+    expect(body).toEqual({
+      collection: "docs",
+      kind: "",
+      locator: "/candidates/3",
+      value_sha256: SHA,
+      reason: "수사 협조",
+    });
     expect(within(dialog).queryByRole("button", { name: "값 보기" })).toBeNull();
     expect(window.sessionStorage.getItem("rapidtriage.reveal-reason")).toBe("수사 협조");
   });
@@ -123,7 +135,9 @@ describe("EntityPanel", () => {
       "POST /api/runs/r1/search/entities": SUMMARY,
       "POST /api/runs/r1/search/query": QUERY,
       "POST /api/runs/r1/search/entities/reveal": new Response(
-        JSON.stringify({ detail: "개인정보 원값 보기가 꺼져 있습니다(RAPIDTRIAGE_PII_REVEAL=off). 관리자에게 문의하세요" }),
+        JSON.stringify({
+          detail: "개인정보 원값 보기가 꺼져 있습니다(RAPIDTRIAGE_PII_REVEAL=off). 관리자에게 문의하세요",
+        }),
         { status: 403, headers: { "content-type": "application/json" } },
       ),
     });
@@ -142,7 +156,9 @@ describe("EntityPanel", () => {
       "POST /api/runs/r1/search/entities": SUMMARY,
       "POST /api/runs/r1/search/query": {
         ...QUERY,
-        lists: [{ id: "ioc-50", name: "IOC 50", omitted: 0, items: [{ item: "10.0.0.0/8", type: "ip", count: 3 }] }],
+        lists: [
+          { id: "ioc-50", name: "IOC 50", omitted: 0, items: [{ item: "10.0.0.0/8", type: "ip", count: 3 }] },
+        ],
       },
     });
     useSearchState.setState({ entityQuery: "list:ioc-50" });
@@ -184,9 +200,9 @@ describe("console field keywords", () => {
     const { fetchSearchRows } = await import("../../api/collections");
     mockFetch({ "GET /api/runs/r1/search/index": { status: "none" } });
     await waitFor(() =>
-      expect(
-        fetchSearchRows("r1", { search: { keywords: ["rrn:*"], mode: "exact" } }, 50),
-      ).rejects.toThrow(/검색 색인으로만/),
+      expect(fetchSearchRows("r1", { search: { keywords: ["rrn:*"], mode: "exact" } }, 50)).rejects.toThrow(
+        /검색 색인으로만/,
+      ),
     );
   });
 });

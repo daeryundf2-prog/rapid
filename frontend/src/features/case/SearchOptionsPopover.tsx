@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type RefObject, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { saveSearch } from "../../api/caseDb";
 import { listKeywordPacks, SEARCH_SOURCES } from "../../api/keywordPacks";
 import { Popover } from "../../components/Popover";
@@ -54,7 +55,10 @@ export function SearchOptionsButton({ runId }: { runId: string | null }) {
           }}
         />
       )}
-      {entityOpen && runId && <EntityPanel runId={runId} onClose={closeEntityPanel} />}
+      {/* Portaled: the top bar is a containing block for fixed children (the dialog would sit in it). */}
+      {entityOpen &&
+        runId &&
+        createPortal(<EntityPanel runId={runId} onClose={closeEntityPanel} />, document.body)}
     </span>
   );
 }

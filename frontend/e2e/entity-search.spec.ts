@@ -37,9 +37,15 @@ test.beforeAll(async ({ request }) => {
   const built = spawnSync(python, ["-c", BUILD, base], { cwd: repoRoot, encoding: "utf-8" });
   expect(built.status, built.stderr).toBe(0);
   const lines = built.stdout.trim().split("\n");
-  const payload = JSON.parse(lines[lines.length - 1] ?? "{}") as { run_dir: string; values: Record<string, string> };
+  const payload = JSON.parse(lines[lines.length - 1] ?? "{}") as {
+    run_dir: string;
+    values: Record<string, string>;
+  };
   values = payload.values;
-  const response = await request.post("/api/runs/import", { headers: HEADERS, data: { output_dir: payload.run_dir } });
+  const response = await request.post("/api/runs/import", {
+    headers: HEADERS,
+    data: { output_dir: payload.run_dir },
+  });
   expect(response.status()).toBe(201);
   runId = ((await response.json()) as { run_id: string }).run_id;
   expect(runId).not.toBe("");
@@ -59,7 +65,7 @@ test("entity chips, masked rows, one audited reveal and a field keyword in the t
   await expect(dialog.getByRole("button", { name: /주민등록번호 2행/ })).toBeVisible();
   await expect(dialog.getByRole("button", { name: /카드번호/ })).toBeVisible();
   await expect(dialog.getByRole("button", { name: /한국어/ })).toBeVisible();
-  await expect(dialog.getByText("개인정보목록.txt")).toBeVisible();
+  await expect(dialog.getByText("개인정보목록.txt", { exact: true })).toBeVisible();
   const before = (await page.content()).toString();
   for (const raw of Object.values(values)) expect(before).not.toContain(raw);
   await expect(dialog.getByText(`${values.rrn?.slice(0, 8)}******`).first()).toBeVisible();
@@ -71,7 +77,11 @@ test("entity chips, masked rows, one audited reveal and a field keyword in the t
 
   // Q-B3: reveal (reason once per session) -> the value once
   const row = dialog.locator(".entity-rows > li").filter({ hasText: "개인정보목록.txt" });
-  await row.locator("li").filter({ hasText: "주민등록번호" }).getByRole("button", { name: "값 보기" }).click();
+  await row
+    .locator("li")
+    .filter({ hasText: "주민등록번호" })
+    .getByRole("button", { name: "값 보기" })
+    .click();
   const confirm = dialog.getByRole("form", { name: "값 공개 확인" });
   await expect(confirm).toContainText("감사 기록 1건");
   await confirm.getByLabel(/공개 사유/).fill("e2e 점검");
@@ -84,7 +94,7 @@ test("entity chips, masked rows, one audited reveal and a field keyword in the t
 
   // Q-B5: a language chip
   await dialog.getByRole("button", { name: /일본어/ }).click();
-  await expect(dialog.getByText("japanese.txt")).toBeVisible();
+  await expect(dialog.getByText("japanese.txt", { exact: true })).toBeVisible();
   await dialog.getByRole("button", { name: "닫기" }).first().click();
   await expect(dialog).toHaveCount(0);
 
@@ -92,7 +102,9 @@ test("entity chips, masked rows, one audited reveal and a field keyword in the t
   const search = page.getByLabel("전체 검색어");
   await search.fill("rrn:verified");
   await search.press("Enter");
-  await expect(page.locator('[role="grid"]').getByText("개인정보목록.txt").first()).toBeVisible();
+  await expect(
+    page.locator('[role="grid"]').getByText("개인정보목록.txt", { exact: true }).first(),
+  ).toBeVisible();
   const after = (await page.content()).toString();
   expect(after).not.toContain(values.card ?? "missing");
 });
