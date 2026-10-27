@@ -17,6 +17,8 @@
 
 import type { GridRow } from "../../contracts/collection";
 import { flatValue } from "../../utils/flatValue";
+import { aiKeyValueLabel } from "../ai/aiLabels";
+import { AI_FIELD_SHEETS } from "../ai/aiSheets";
 import { eventSummaryKo, fieldOf } from "../derived/derivedFields";
 import { kindLabel } from "../derived/tables";
 import { artifactTypeLabel } from "../filters/typeLabels";
@@ -1150,6 +1152,8 @@ const GENERIC_CORE: FieldDef[] = [
 ];
 
 export const FIELD_SHEETS: readonly FieldSheet[] = [
+  // R7 AI 사용 (갈래 D): session · message · tool call · file touch · MCP · credential · account.
+  ...AI_FIELD_SHEETS,
   {
     id: "eventlog-detection",
     label: "이벤트 로그 탐지",
@@ -2057,7 +2061,10 @@ export function valueReading(
       if (label) return label;
     }
   }
-  const mapped = typeValueLabel(artifactType, key, raw) ?? keyValueReading(key, raw);
+  const mapped =
+    typeValueLabel(artifactType, key, raw) ??
+    aiKeyValueLabel(artifactType, key, raw) ??
+    keyValueReading(key, raw);
   return mapped && mapped !== String(raw) ? mapped : undefined;
 }
 

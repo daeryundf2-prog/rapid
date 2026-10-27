@@ -73,11 +73,35 @@ const FIELDS: Record<string, { label: string; format: (value: unknown) => string
     label: "건너뛸 처리 그룹",
     format: (v) => (Array.isArray(v) && v.length ? v.join(", ") : "없음"),
   },
+  // R7 AI 사용 기록: the ai-agent collector options (other kinds' options as written).
+  collector_options: {
+    label: "수집기 옵션",
+    format: (v) => collectorOptionsText(v),
+  },
   skip_tasks: {
     label: "건너뛸 태스크",
     format: (v) => (Array.isArray(v) && v.length ? v.join(", ") : "없음"),
   },
 };
+
+/** "AI 사용 기록: 메시지 본문 포함 · 대형 DB 해시 안 함" of `collector_options`. */
+export function collectorOptionsText(value: unknown): string {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "기본값";
+  const parts: string[] = [];
+  for (const [kind, options] of Object.entries(value as Record<string, unknown>)) {
+    const o = (options && typeof options === "object" ? options : {}) as Record<string, unknown>;
+    if (kind === "ai-agent") {
+      parts.push(
+        `AI 사용 기록: 메시지 본문 ${o.ai_bodies === false ? "수집 안 함(메타만)" : "포함(마스킹)"} · 대형 DB 해시 ${
+          o.ai_hash_dbs === true ? "계산" : "안 함"
+        }`,
+      );
+    } else {
+      parts.push(`${kind}: ${JSON.stringify(options)}`);
+    }
+  }
+  return parts.length ? parts.join(" / ") : "기본값";
+}
 
 /** Keys never shown: the evidence path is its own row, `wait` is transport only. */
 const SKIPPED = new Set(["root", "wait", "evidence_citation_id"]);

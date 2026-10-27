@@ -8,6 +8,7 @@
  */
 
 import type { GridRow } from "../../contracts/collection";
+import { type AiBubble, aiChatFields, aiSessionLabels, isAiChatRow } from "../ai/aiChat";
 
 export interface ChatMessage {
   row: GridRow;
@@ -21,6 +22,8 @@ export interface ChatMessage {
   attachments: string[];
   /** Sent by the device owner (drawn on the right). */
   outgoing: boolean;
+  /** AI agent sessions (R7 AI 사용): role / tool-call block / file-touch link of the bubble. */
+  ai?: AiBubble;
 }
 
 export interface Conversation {
@@ -72,6 +75,8 @@ export function isUnresolvedId(value: string): boolean {
 
 /** Message rows of messenger kinds (mobile-message, kakaotalk-*-message…), not summaries or inventories. */
 export function isMessageRow(row: GridRow): boolean {
+  // AI agent sessions: messages, tool calls and file touches are the session's bubbles.
+  if (isAiChatRow(row)) return true;
   const type = (row.artifactType ?? "").toLowerCase();
   return /message/.test(type) && !/summary|database|inventory|candidate/.test(type);
 }
@@ -122,6 +127,7 @@ function isOutgoing(sources: Rec[]): boolean {
 }
 
 export function chatMessageFromRow(row: GridRow): ChatMessage {
+  if (isAiChatRow(row)) return { row, recipient: "", attachments: [], ...aiChatFields(row) };
   const details = isRec(row.fields.details) ? row.fields.details : {};
   const raw = isRec(details.raw) ? details.raw : {};
   const sources = [details, raw];
@@ -168,6 +174,8 @@ function timeValue(value: string | null): number | null {
  */
 export function groupConversations(rows: readonly GridRow[]): Conversation[] {
   const map = new Map<string, Conversation>();
+  // AI sessions: the session rows (not bubbles) name their conversations.
+  const sessionLabels = aiSessionLabels(rows);
   rows.forEach((row) => {
     if (!isMessageRow(row)) return;
     const message = chatMessageFromRow(row);
@@ -175,7 +183,7 @@ export function groupConversations(rows: readonly GridRow[]): Conversation[] {
     if (!conversation) {
       conversation = {
         id: message.conversationId,
-        label: message.conversationLabel,
+        label: sessionLabels.get(message.conversationId) ?? message.conversationLabel,
         service: message.service,
         participants: [],
         messages: [],
@@ -195,6 +203,8 @@ export function groupConversations(rows: readonly GridRow[]): Conversation[] {
     conversation.messages = indexed.map((x) => x.m);
     // Participants in order of first appearance in the conversation.
     for (const message of conversation.messages) {
+      // AI sessions: tool-call / file-touch blocks are no participants.
+      if (message.ai && message.ai.variant !== "message") continue;
       for (const name of [message.sender, message.recipient]) {
         if (name && !conversation.participants.includes(name)) conversation.participants.push(name);
       }

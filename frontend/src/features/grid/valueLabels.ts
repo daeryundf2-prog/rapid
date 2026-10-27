@@ -87,6 +87,11 @@ export const VALUE_LABELS: Readonly<Record<ValueDomain, Readonly<Record<string, 
     "network-ioc-hit": "네트워크 IOC 일치",
     "file-hash-ioc-hit": "파일 해시 IOC 일치",
     "content-keyword-ioc-hit": "본문 키워드 IOC 일치",
+    // R7 AI 사용: desktop AI app candidates (generic.py).
+    "desktop-ai-app-artifact": "데스크톱 AI 앱 파일",
+    "ai-service-usage": "AI 서비스 사용",
+    "possible-ai-prompt-history": "AI 프롬프트 기록 가능성",
+    "ai-message-table-candidate": "AI 메시지 표 후보",
   },
   /** Browser names as parsers write them. */
   browser: {
@@ -102,6 +107,8 @@ export const VALUE_LABELS: Readonly<Record<ValueDomain, Readonly<Record<string, 
     safari: "Safari",
     ie: "Internet Explorer",
     "internet-explorer": "Internet Explorer",
+    // AI service export files (browser.py build_ai_service_export_record).
+    "service-export": "서비스 내보내기 파일",
     unknown: "알 수 없음",
   },
   /** Output a row / search hit / timeline event came from. */
@@ -127,6 +134,10 @@ export const VALUE_LABELS: Readonly<Record<ValueDomain, Readonly<Record<string, 
     log: "로그(LOG)",
     csv: "CSV",
     tsv: "TSV",
+    // AI agent transcripts / configs (R7 AI 사용 runs).
+    jsonl: "JSON Lines(JSONL)",
+    yaml: "YAML",
+    yml: "YAML",
     xml: "XML",
     json: "JSON",
     ini: "설정(INI)",
@@ -243,10 +254,14 @@ export const VALUE_LABELS: Readonly<Record<ValueDomain, Readonly<Record<string, 
   /** Row `provider` (the collector that wrote the row). */
   provider: {
     "windows-system-artifacts": "Windows 시스템 수집기",
+    "generic-documents": "문서 수집기",
+    "windows-os-account": "OS 계정 수집기",
     "windows-registry-artifacts": "레지스트리 수집기",
     "windows-execution-artifacts": "실행 흔적 수집기",
     "browser-artifacts": "브라우저 수집기",
     "eventlog-artifacts": "이벤트 로그 수집기",
+    // R7 AI 사용 (artifacts/ai_agents AI_PROVIDER_NAME).
+    "ai-agents": "AI 사용 기록 수집기",
   },
   /** Synthetic-media `score_semantics`. */
   scoreSemantics: {

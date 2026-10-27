@@ -165,6 +165,12 @@ export const TIMESTAMP_KIND_LABELS: Readonly<Record<string, string>> = {
   "call-start": "통화 시작",
   "photo-taken": "사진 촬영",
   "photo-synced": "사진 동기화",
+  // R7 AI 사용 (갈래 B rows, core/timeline.py ai block): account switch, retention cleanup marker,
+  // AI-attributed commit, execution-trace match of an AI tool.
+  switched: "계정 전환",
+  cleanup: "보존 정리",
+  committed: "AI 기여 커밋",
+  executed: "실행",
 };
 
 /**

@@ -512,6 +512,11 @@ export interface RunCreateBody {
   /** R4 V1: processing groups / tasks left out of the run plan (`GET /run-plan/preview` ids). */
   skip_groups?: string[];
   skip_tasks?: string[];
+  /**
+   * Per-kind collector options (R7 AI 사용: `{"ai-agent": {ai_bodies, ai_hash_dbs}}`); sent only
+   * when an option differs from its default.
+   */
+  collector_options?: Record<string, Record<string, unknown>>;
 }
 
 export function createRun(body: RunCreateBody): Promise<RunJob> {

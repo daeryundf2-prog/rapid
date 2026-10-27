@@ -12,6 +12,7 @@ import { useRoute, useRuns, useTimezone } from "../../../state/hooks";
 import { flatValue, isScalarish } from "../../../utils/flatValue";
 import { evidenceTime, evidenceTimeTooltip, parseInstant } from "../../../utils/time";
 import { timestampKindLabel } from "../../../utils/timeKinds";
+import { AiSessionLinks } from "../../ai/AiSessionLinks";
 import {
   caseHref,
   caseLabel,
@@ -1124,6 +1125,8 @@ export function MetaView({
     <div className="meta-view">
       <RecordBanners row={row} />
       <TimelineEventSection row={row} />
+      {/* R7 AI 사용: a session's 대화 보기 · 도구 호출 · 파일 접촉 · 상위/하위 세션. */}
+      <AiSessionLinks row={row} runId={target.runId} />
       {sourceMissing ? (
         <p className="meta-notice" role="alert" data-testid="source-missing">
           소스를 찾을 수 없습니다 — 원본 경로: <span className="mono viewer-break">{target.sourcePath}</span>

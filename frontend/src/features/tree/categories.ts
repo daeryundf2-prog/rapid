@@ -72,6 +72,8 @@ export const KIND_CATEGORY: Readonly<Record<string, KindMeta>> = {
   "windows-execution": { category: "application-usage", icon: "play" },
   "windows-remote-access": { category: "application-usage", icon: "monitor" },
   "android-apk": { category: "application-usage", icon: "app" },
+  // R7 AI 사용: AI tool presence, agent sessions, MCP, credentials (values never collected).
+  "ai-agent": { category: "application-usage", icon: "command" },
   "windows-prefetch": { category: "operating-system", icon: "play" },
   eventlog: { category: "operating-system", icon: "list" },
   "windows-registry": { category: "operating-system", icon: "database" },
