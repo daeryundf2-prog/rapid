@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import abc
 import datetime as dt
+import re
 import threading
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -36,6 +37,8 @@ from typing import ClassVar
 
 from ...core.ai_catalog.profiles import EvidenceProfile, is_credential_name
 from ...core.models import ArtifactRecord
+from .redact import _EMAIL_RE as _EMAIL_TOKEN_RE
+from .redact import mask_emails_in
 
 __all__ = [
     "AI_ARTIFACT_TYPES",
@@ -50,6 +53,7 @@ __all__ = [
     "Found",
     "clear_adapters",
     "is_credential_name",
+    "mask_identity_in_path",
     "mtime_iso",
     "profile_account_key",
     "register_adapter",
@@ -92,6 +96,30 @@ COVERAGE_STATUSES: tuple[str, ...] = (
     "unverified",
     "schema-not-validated",
 )
+
+# The ``u-<sha256 8 hex>`` local part :func:`mask_identity_in_path` writes (kept as is on a second pass).
+_MASKED_LOCAL_RE = re.compile(r"u-[0-9a-f]{8}")
+
+
+def _mask_email_token(match: re.Match[str]) -> str:
+    if _MASKED_LOCAL_RE.fullmatch(match.group("local")):
+        return f"{match.group('local')}@{match.group('domain').lower()}"
+    return mask_emails_in(match.group(0))
+
+
+def mask_identity_in_path(path: Path | str) -> str:
+    """``path`` as text with every email-like token (``local@domain``) inside a path component
+    rewritten to ``u-<sha256(local.lower()) 8 hex>@<domain.lower()>``.
+
+    Same scheme, regex and function as lane B's claude-swap adapter
+    (:func:`.redact.mask_emails_in`), so a file both lanes report carries the same masked path.
+    An already-masked token is left unchanged (idempotent). Path separators are never part of a
+    token, so a rewrite stays inside one component."""
+    text = str(path or "")
+    if "@" not in text:
+        return text
+    return _EMAIL_TOKEN_RE.sub(_mask_email_token, text)
+
 
 def mtime_iso(path: Path) -> str:
     """``st_mtime`` as ISO 8601 UTC (``+00:00``), ``""`` when the path cannot be stat'ed."""
