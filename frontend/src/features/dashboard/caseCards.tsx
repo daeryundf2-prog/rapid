@@ -26,11 +26,13 @@ import {
 } from "../../api/cases";
 import { type EvidenceSource, type CaseNotes as RunNotes, saveCaseNotes } from "../../api/dashboard";
 import { fetchIrregularSummary, type IrregularSummary } from "../../api/families";
-import type { CanonicalCounts, RunWarning } from "../../api/runs";
+import { type CanonicalCounts, getRunTree, type RunWarning } from "../../api/runs";
 import { CommandButton } from "../../commands/CommandButton";
 import { StatusBadge } from "../../components/Badge";
 import { ToneChip } from "../../components/ToneChip";
-import { serializeRoute } from "../../router";
+import { type Route, serializeRoute } from "../../router";
+import { AI_TOOL_SOURCE_LABELS, type AiToolSource, type AiUsageSummary, aiToolTitle } from "../ai/aiUsage";
+import { aiRowCount, aiTypeCount, useAiUsageSummary } from "../ai/useAiUsage";
 import { LEVEL_LABEL } from "../case/CaseDialogs";
 import { useCaseDialogs } from "../case/dialogs";
 import { ReasonButton } from "../case/ReasonButton";
@@ -402,6 +404,8 @@ export function EvidenceCard({
       ) : null}
       {/* 예외 항목 (R7 갈래 A): the nine Nuix irregular categories of this run, below 증거. */}
       <IrregularBlock runId={currentRunId} />
+      {/* AI 사용 요약 (R7 AI 갈래 D): only when the run has AI usage rows. */}
+      <AiUsageBlock runId={currentRunId} />
     </div>
   );
 }
@@ -503,6 +507,128 @@ function IrregularTable({ runId, summary }: { runId: string; summary: IrregularS
         </tbody>
       </table>
     </>
+  );
+}
+
+// --- AI 사용 요약 (R7 단계 3.5 갈래 D, plan r7-ai-usage §3.5) -------------------------------------
+
+/** Tree route of an AI 사용 node (the same filters as the tree's node). */
+function aiNodeRoute(runId: string, types: string[]): Route {
+  return { runId, collection: "artifacts", kind: "ai-agent", types };
+}
+
+const AI_SOURCES: AiToolSource[] = ["execution", "install", "path", "session"];
+
+/** "실행 2 · 설치 1 · 세션 9" (classes with tools only). */
+export function aiToolSourcesText(summary: AiUsageSummary): string {
+  return AI_SOURCES.filter((source) => summary.toolsBySource[source] > 0)
+    .map((source) => `${AI_TOOL_SOURCE_LABELS[source]} ${n(summary.toolsBySource[source])}`)
+    .join(" · ");
+}
+
+/**
+ * AI 사용 요약: the AI tools of this evidence (by 실행·설치·경로·세션 evidence), accounts, the session
+ * period, sessions, tool calls, credential files (값 미수집), the tools whose use only server-side
+ * records can show (서버 측 증거 필요 — no local session store) and the retention warning. Hidden
+ * for a run without AI usage rows.
+ */
+export function AiUsageBlock({ runId }: { runId: string }) {
+  const tree = useQuery({
+    queryKey: ["run-tree", runId],
+    queryFn: () => getRunTree(runId),
+    enabled: Boolean(runId),
+    retry: false,
+  });
+  const summary = useAiUsageSummary(runId, tree.data);
+  const sessions = aiTypeCount(tree.data, "ai-agent-session");
+  const calls = aiTypeCount(tree.data, "ai-agent-tool-call");
+  const credentials = aiTypeCount(tree.data, "ai-credential-presence");
+  // A run without AI usage rows shows no block (nothing is requested either).
+  if (!tree.data || !aiRowCount(tree.data)) return null;
+  const data = summary.data;
+  const link = (label: string, count: number | undefined, types: string[], unit: string) =>
+    count === undefined ? (
+      "—"
+    ) : count === 0 ? (
+      `0${unit}`
+    ) : (
+      <a href={serializeRoute(aiNodeRoute(runId, types))} aria-label={`${label} ${n(count)}${unit} 보기`}>
+        {`${n(count)}${unit}`}
+      </a>
+    );
+  return (
+    <section className="dash-irregular dash-ai" aria-label="AI 사용 요약" data-testid="case-ai-usage">
+      <h3 className="dash-subtitle">AI 사용 요약</h3>
+      {summary.isPending ? (
+        <p className="dash-note">AI 사용 기록을 세는 중…</p>
+      ) : summary.isError || !data ? (
+        <p className="dash-note">{`AI 사용 요약을 만들 수 없습니다: ${summary.error instanceof Error ? summary.error.message : "응답 없음"}`}</p>
+      ) : (
+        <>
+          <dl className="detail-grid dash-facts" data-testid="ai-usage-facts">
+            <dt>도구</dt>
+            <dd data-testid="ai-usage-tools">
+              {`${n(data.tools)}개`}
+              {aiToolSourcesText(data) ? (
+                <span className="dash-muted">{` (${aiToolSourcesText(data)})`}</span>
+              ) : null}
+            </dd>
+            <dt>계정</dt>
+            <dd data-testid="ai-usage-accounts">
+              {link("AI 계정", data.accounts, ["ai-account", "ai-account-switch"], "개")}
+              {data.accountSwitches ? (
+                <span className="dash-muted">{` · 전환 ${n(data.accountSwitches)}건`}</span>
+              ) : null}
+            </dd>
+            <dt>기간</dt>
+            <dd data-testid="ai-usage-period">
+              {data.periodFrom ? `${formatTime(data.periodFrom)} ~ ${formatTime(data.periodTo)}` : "—"}
+              {data.sessionsCapped ? (
+                <span className="dash-muted">{` (앞 ${n(data.sessionsRead)}개 세션 기준)`}</span>
+              ) : null}
+            </dd>
+            <dt>세션</dt>
+            <dd data-testid="ai-usage-sessions">{link("AI 세션", sessions, ["ai-agent-session"], "개")}</dd>
+            <dt>도구 호출</dt>
+            <dd data-testid="ai-usage-calls">{link("AI 도구 호출", calls, ["ai-agent-tool-call"], "건")}</dd>
+            <dt>자격 증명 파일</dt>
+            <dd data-testid="ai-usage-credentials">
+              {link("AI 자격 증명 파일", credentials, ["ai-credential-presence"], "개")}
+              <span className="dash-muted"> · 값 미수집</span>
+            </dd>
+            <dt>서버 측 증거 필요</dt>
+            <dd
+              data-testid="ai-usage-gap"
+              title="이 PC에 흔적은 있지만 세션 기록이 없는 도구 — 무엇을 시켰는지는 벤더 감사 로그·조직 관리자 내보내기·OAuth 승인 기록으로만 확인할 수 있습니다"
+            >
+              {data.gapTools.length ? `${n(data.gapTools.length)}도구` : "없음"}
+              {data.gapTools.length ? (
+                <span className="dash-muted">
+                  {` (${data.gapTools
+                    .slice(0, 5)
+                    .map((tool) => aiToolTitle(tool))
+                    .join(", ")}${data.gapTools.length > 5 ? ` 외 ${n(data.gapTools.length - 5)}` : ""})`}
+                </span>
+              ) : null}
+              {data.gapSource === "computed" ? <span className="dash-muted"> · 콘솔 계산</span> : null}
+            </dd>
+          </dl>
+          {data.retentionMarkers || data.retentionTools.length ? (
+            <p className="dash-note dash-ai-retention" role="note" data-testid="ai-usage-retention">
+              {`보존 기한 있는 AI 기록: 도구 ${n(data.retentionTools.length)}개`}
+              {data.retentionMarkers ? ` · 보존 정리 표식 ${n(data.retentionMarkers)}건` : ""}
+              {data.minRetentionDays ? ` · 최소 ${n(data.minRetentionDays)}일` : ""}
+              {" — 그보다 오래된 기록은 도구가 이미 지웠을 수 있습니다(없음 = 미사용 아님)"}
+            </p>
+          ) : null}
+          {data.truncated ? (
+            <p className="dash-note">
+              AI 흔적 행이 많아 앞부분만 셌습니다 — 정확한 건수는 AI 사용 노드에서 보세요.
+            </p>
+          ) : null}
+        </>
+      )}
+    </section>
   );
 }
 
