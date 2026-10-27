@@ -99,6 +99,10 @@ class CaseReportCreateRequest(BaseModel):
     conclusion: str | None = None
     include_all: bool = False
     max_items: int = Field(500, ge=1, le=5000)
+    # R7 AI 갈래 C: the "AI 사용" section (tools, accounts, sessions, gap table) and its placeholders.
+    include_ai_section: bool = True
+    ai_collection_scope: str | None = Field(None, max_length=2000)
+    ai_consent_basis: str | None = Field(None, max_length=2000)
 
 
 class ReviewerBundleCreateRequest(BaseModel):
