@@ -82,6 +82,23 @@ function reviewFields(raw: Record<string, unknown>): Record<string, unknown> {
   return { reviewCollection: collection, reviewKind: str(locator?.kind), reviewPointer: pointer };
 }
 
+/**
+ * The archive entry a hit names (R7 S2 #6): `entry_path` (or `metadata.entry_path`), else the
+ * `#entry:<n>` part of its locator / pointer; null for every other hit.
+ */
+function entryOf(raw: Record<string, unknown>): string | null {
+  const metadata = isRecord(raw.metadata) ? raw.metadata : {};
+  const path = strOrNull(raw.entry_path) ?? strOrNull(metadata.entry_path);
+  if (path) return `entry_path:${path}`;
+  const locator = isRecord(raw.locator) ? raw.locator : {};
+  for (const value of [locator.pointer, locator.locator, raw.pointer]) {
+    const text = typeof value === "string" ? value : "";
+    const at = text.indexOf("#entry:");
+    if (at >= 0) return text.slice(at + 1);
+  }
+  return null;
+}
+
 export const searchCollection: CollectionDef = {
   id: "search",
   label: "검색 결과",
@@ -128,9 +145,15 @@ export const searchCollection: CollectionDef = {
       },
     );
     // Stable identity across refetches: the source row the hit names (else its position).
-    row.rowKey = review.reviewPointer
+    const base = review.reviewPointer
       ? `search:${str(review.reviewCollection)}:${str(review.reviewKind)}:${str(review.reviewPointer)}`
       : `search:${[source, kind, locator].filter(Boolean).join(":")}`;
+    // Archive entries (R7 S2 #6): several hits name one parent row; the entry path (or an entry
+    // locator "<parent>#entry:<n>" not already in the key) keeps each entry its own row.
+    const entry = entryOf(raw);
+    row.rowKey = entry && !base.endsWith(entry) ? `${base}#${entry}` : base;
+    const entryPath = strOrNull(raw.entry_path);
+    if (entryPath) row.fields.entryPath = entryPath;
     return row;
   },
   columns: [
