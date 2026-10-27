@@ -9,7 +9,17 @@
 
 import type { RowRef } from "./rowRef";
 
-export type ViewerMode = "source" | "hex" | "sqlite" | "image" | "document" | "email" | "media" | "meta";
+export type ViewerMode =
+  | "source"
+  | "hex"
+  | "sqlite"
+  | "image"
+  | "document"
+  | "email"
+  | "media"
+  | "meta"
+  /** 계열 (R7 갈래 A): the row's parent, siblings and children. */
+  | "family";
 
 export interface ViewerTarget {
   ref: RowRef;

@@ -52,6 +52,7 @@ import { type AsyncState, errorText, useAsync } from "./useAsync";
 import { ViewerToolbar } from "./ViewerToolbar";
 import { DocumentView } from "./views/DocumentView";
 import { EmailView } from "./views/EmailView";
+import { FamilyView } from "./views/FamilyView";
 import { HexView } from "./views/HexView";
 import { ImageView } from "./views/ImageView";
 import { MediaView } from "./views/MediaView";
@@ -590,6 +591,8 @@ function ViewerBody(props: ViewerBodyProps) {
   const { target, mode, previewState, metadata, highlight } = props;
   const hexKey = `${target.sourcePath}|${highlight?.offset ?? ""}`;
   const preview = previewState.status === "ok" ? previewState.data : null;
+  // 계열 (R7 갈래 A) is about the row's relations: it never waits for the preview.
+  if (mode === "family") return <FamilyView target={target} />;
   if (
     props.resolving ||
     (mode !== "meta" &&

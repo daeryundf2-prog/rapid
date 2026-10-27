@@ -174,10 +174,12 @@ export const KEY_DESCRIPTIONS: Record<keyof typeof KEY_MAP, string> = {
   conditions: "조건 패널 열기/닫기",
   treeEmpty: "탐색 트리: 결과 없는 계열 표시/숨김",
   viewerPopout: "뷰어를 새 창으로",
-  viewerModes: "새 창 뷰어에서만: 모드 전환 (1–8)",
+  viewerModes: "새 창 뷰어에서만: 모드 전환 (1–9)",
   tagShortcuts: "태그 단축키 1–9 (태그 관리에서 지정, 기본 1–5 = 우선순위 1–5)",
   classicSplit: "클래식 분할 보기 (격자 위·세부 아래) 켜기/끄기",
   mediaBlur: "미디어 흐리게 켜기/끄기",
+  familyView: "계열 보기 (상위·형제·하위 항목)",
+  familyParent: "상위 항목으로",
 };
 
 /** Apple platform (review #14): only there does Ctrl+K read as the ⌘ glyph. */
