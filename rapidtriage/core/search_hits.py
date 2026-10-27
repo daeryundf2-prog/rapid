@@ -177,8 +177,11 @@ def _window(text: str, start: int, end: int, limit: int) -> str:
 # Hit text is stricter than :func:`redact_secret_text` (R7 S2 review #16): any ``key=value`` whose
 # key ends in a credential word (``rpctoken=``, ``SharedAccessToken=``, ``PublicKeyToken=``,
 # ``db_password=``), whatever precedes it, has its value masked. The viewer still shows the record.
+# Only the credential word itself is matched: the key's leading characters are kept verbatim by the
+# replacement anyway, and an unanchored ``[A-Za-z0-9_.\-]*`` lead made the scan quadratic on long
+# alphanumeric runs (R7 S2 confirmation: one 16k-character leaf took 7 s).
 _CREDENTIAL_PAIR_RE = re.compile(
-    r"(?P<key>[A-Za-z0-9_.\-]*(?:token|password|passwd|pwd|secret|api_?key))=(?P<value>\"[^\"]*\"|'[^']*'|[^&;#\s\"'),]+)",
+    r"(?P<key>token|password|passwd|pwd|secret|api_?key)=(?P<value>\"[^\"]*\"|'[^']*'|[^&;#\s\"'),]+)",
     re.IGNORECASE,
 )
 
@@ -218,22 +221,29 @@ def search_snippet(source: object, keywords: Sequence[str], *, limit: int = SNIP
     # text (cleaning only collapses whitespace): leaves without any are skipped before the
     # whitespace clean-up and the offset mapping (R7: a record walks thousands of leaves).
     prefilter = bool(folded_keywords) and all(word and not any(ch.isspace() for ch in word) for word in folded_keywords)
-    # Credentials (``token=…``, ``password=…``, URL user info) are masked before the window is
-    # cut, so a value is never shown half-cut past the mask (R7 S2 review #16).
+    # Credentials (``token=…``, ``password=…``, URL user info) are masked in the chosen leaf
+    # before the window is cut, so a value is never shown half-cut past the mask (R7 S2 review
+    # #16). Only the matching leaf (and the fallback leaf) is masked, never every leaf: a record
+    # walks thousands of leaves (R7 S2 confirmation). A keyword found only inside a masked value
+    # does not select the leaf.
     if isinstance(source, str):
-        candidates = iter((redact_text(_clean(source)),))
+        candidates = iter((_clean(source),))
     else:
-        candidates = (redact_text(f"{key}: {text}" if key else text) for key, text in _iter_leaves(source))
+        candidates = (f"{key}: {text}" if key else text for key, text in _iter_leaves(source))
     first = ""
     for raw in candidates:
         if prefilter and not isinstance(source, str):
             if not any(word in normalize_search_text(raw) for word in folded_keywords):
                 if not first:
-                    first = _clean(raw)
+                    first = redact_text(_clean(raw))
                 continue
         candidate = raw if isinstance(source, str) else _clean(raw)
         if not candidate:
             continue
+        if not any(locate_normalized(candidate, keyword) is not None for keyword in keywords):
+            first = first or redact_text(candidate)
+            continue
+        candidate = redact_text(candidate)
         first = first or candidate
         for keyword in keywords:
             located = locate_normalized(candidate, keyword)
