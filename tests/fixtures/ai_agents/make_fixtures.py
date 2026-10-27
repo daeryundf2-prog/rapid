@@ -450,12 +450,336 @@ def build_cursor(home: Path) -> None:
     _json(dot / "mcp.json", {"mcpServers": {"browser": {"command": "npx", "args": ["@example/browser-mcp"], "env": {"KEY": SK_PLAIN}}}})
 
 
+# --- Antigravity ---------------------------------------------------------------------------
+
+ANTIGRAVITY_EXPECTED = {
+    "sessions": 3,
+    "messages": 4,
+    "tool_calls": 3,
+    "file_touches": 5,
+    "mcp_rows": 2,
+    "credential_rows": 1,
+    "conv1_steps": 3,
+}
+
+
+def build_antigravity(home: Path) -> None:
+    base = home / ".gemini" / "antigravity"
+    _db(
+        base / "conversation_summaries.db",
+        """
+        CREATE TABLE conversation_summaries (conversation_id TEXT, title TEXT, preview TEXT, step_count INTEGER, last_modified_time INTEGER,
+          workspace_uris TEXT, status TEXT, source TEXT, project_id TEXT, agent_name TEXT, parent_conversation_id TEXT, nesting_depth INTEGER,
+          battle_id TEXT, winning_conversation_id TEXT, not_fully_idle INTEGER, killed INTEGER, last_user_input_time INTEGER,
+          last_user_input_step_index INTEGER, app_data_dir TEXT, raw_summary BLOB, group_id TEXT);
+        CREATE VIRTUAL TABLE conversations_fts USING fts5(conversation_id, chunk_index, title, user_body, agent_body);
+        """,
+        {
+            "conversation_summaries": [
+                ("conv-1", "Build site", f"build it with {AIZA}", 10, 1790841600, json.dumps(["file:///c%3A/Users/u1/proj"]), "IDLE", "IDE", "proj", "main", "", 0, None, None, 0, 0, 1790841500, 3, "", b"\x08\x01", ""),
+                ("conv-2", "Sub check", "check", 2, 1790841700, "[]", "IDLE", "IDE", "proj", "checker", "conv-1", 1, None, None, 0, 0, 1790841650, 1, "", b"", ""),
+                ("conv-3", "Old chat", "old", 4, 1790000000, "[]", "IDLE", "IDE", "", "main", "", 0, None, None, 0, 1, 1790000000, 1, "", b"", ""),
+            ],
+            "conversations_fts": [("conv-1", 0, "Build site", f"user text {AIZA}", "agent text")],
+        },
+    )
+    steps_sql = """
+        CREATE TABLE steps (idx INTEGER, step_type INTEGER, status INTEGER, has_subtrajectory INTEGER, metadata BLOB, error_details BLOB,
+          permissions BLOB, task_details BLOB, render_info BLOB, step_payload BLOB, step_format INTEGER);
+        CREATE TABLE trajectory_meta (trajectory_id TEXT, cascade_id TEXT, trajectory_type INTEGER, source INTEGER);
+    """
+    _db(
+        base / "conversations" / "conv-1.db",
+        steps_sql,
+        {
+            "steps": [(i, 14 if i else 1, 3, 0, b"", b"", b"", b"", b"", (f"\x0a\x10protobuf {AIZA}" * 3).encode(), 1) for i in range(3)],
+            "trajectory_meta": [("traj-1", "cascade-1", 1, 1)],
+        },
+    )
+    _db(base / "conversations" / "conv-2.db", steps_sql, {"steps": [(0, 1, 3, 0, b"", b"", b"", b"", b"", b"\x0a\x01x", 1)]})
+    logs = base / "brain" / "conv-1" / ".system_generated" / "logs"
+    _jsonl(
+        logs / "transcript.jsonl",
+        [
+            {"content": f"Build a site, my key {AIZA}", "created_at": "2026-09-25T08:00:00Z", "source": "USER_EXPLICIT", "status": "DONE", "step_index": 0, "type": "USER_INPUT"},
+            {
+                "content": "Creating files", "created_at": "2026-09-25T08:00:01Z", "source": "MODEL", "status": "DONE", "step_index": 1, "type": "PLANNER_RESPONSE",
+                "tool_calls": [{"name": "write_to_file", "args": {"TargetFile": f"{CWD}\\index.html", "CodeContent": f"<!-- {GSK} -->"}}, {"name": "run_command", "args": {"CommandLine": "npm install", "Cwd": CWD}}],
+                "input_tokens": 100, "output_tokens": 50,
+            },
+            {"type": "FUTURE_STEP_KIND", "created_at": "2026-09-25T08:00:02Z", "source": "SYSTEM", "step_index": 2},
+        ],
+    )
+    _json(
+        base / "brain" / "conv-1" / ".system_generated" / "messages" / "m1.json",
+        {"id": "m1", "sender": "main", "recipient": "checker", "priority": 1, "content": "please check index.html", "timestamp": "2026-09-25T08:00:05Z",
+         "sourceMetadata": {"tool": {"conversationId": "conv-1", "stepIndex": 2, "toolCall": {"id": "tc9", "name": "view_file", "argumentsJson": json.dumps({"AbsolutePath": f"{CWD}\\index.html"})}}}},
+    )
+    _write(base / "brain" / "conv-1" / "scratch" / "notes.txt", f"scratch {GSK}")
+    _write(base / "brain" / "conv-1" / "plan.md", "# Plan\nbuild\n")
+    _jsonl(base / "brain" / "conv-2" / ".system_generated" / "logs" / "transcript_full.jsonl", [{"content": "check it", "created_at": "2026-09-25T08:01:00Z", "source": "USER_IMPLICIT", "step_index": 0, "type": "USER_INPUT"}])
+    _json(base / "mcp" / "github" / "create_issue.json", {"name": "create_issue"})
+    _json(base / "mcp" / "github" / "list_repos.json", {"name": "list_repos"})
+    _json(base / "mcp" / "fs" / "read.json", {"name": "read"})
+    _write(base / "scratch" / "out.csv", "a,b\n")
+    _db(
+        home / "AppData" / "Roaming" / "Antigravity" / "User" / "globalStorage" / "state.vscdb",
+        _VSCDB_SQL,
+        {"ItemTable": [("antigravityAuthStatus", ANTIGRAVITY_AUTH), ("antigravity.profileUrl", "https://example.invalid/p"), ("antigravity.notification.1", "{}")]},
+    )
+
+
+# --- Kiro ----------------------------------------------------------------------------------
+
+KIRO_EXPECTED = {"sessions": 2, "messages": 2, "mcp_rows": 2, "credential_rows": 1, "instruction_rows": 1}
+
+
+def build_kiro(home: Path) -> None:
+    base = home / ".kiro"
+    _json(
+        base / "sessions" / "wsh1" / "sess_k1" / "session.json",
+        {"id": "sess_k1", "title": "Kiro spec", "createdAt": "2026-08-29T01:00:00Z", "lastModifiedAt": "2026-08-29T02:00:00Z", "modelId": "claude-sonnet-4",
+         "agentMode": "spec", "autopilot": True, "rootPaths": [CWD], "workspacePaths": [CWD], "specWorkflow": True, "dataModelVersion": 2, "schemaVersion": 1},
+    )
+    _json(
+        base / "sessions" / "wsh1" / "sess_k2" / "session.json",
+        {"id": "sess_k2", "title": "Chat", "createdAt": 1788310800000, "lastModifiedAt": 1788314400000, "modelId": "auto",
+         "history": [{"role": "user", "content": f"hi {XAI}"}, {"role": "assistant", "content": "hello"}]},
+    )
+    _jsonl(base / "session-index" / "wsh1.jsonl", [{"at": 1788224400000, "op": "create", "sessionPath": "wsh1/sess_k1"}, {"at": 1788310800000, "op": "create", "sessionPath": "wsh1/sess_k2"}])
+    _write(
+        base / "logs" / "20260829T010000" / "mcp.log",
+        "2026-08-29 01:00:01.000 [info] [fetch] Starting MCP server\n"
+        "2026-08-29 01:00:02.000 [info] [fetch] connected\n"
+        f"2026-08-29 01:00:03.000 [error] [aws-docs] failed to start: token={TOKEN_BARE}\n",
+    )
+    _write(base / "logs" / "20260829T010000" / "kiro.log", "2026-08-29 01:00:00.000 [info] start\n")
+    _write(base / "steering" / "product.md", "# Product\n")
+    _db(
+        home / "AppData" / "Roaming" / "Kiro" / "User" / "globalStorage" / "state.vscdb",
+        _VSCDB_SQL,
+        {"ItemTable": [("chat.ChatSessionStore.index", "{}"), ("kiro.kiroAgent", "{}"), ("kiroAgent.auth.token", CRED_FILE)]},
+    )
+
+
+# --- OmO -----------------------------------------------------------------------------------
+
+OMO_EXPECTED = {"sessions": 2, "messages": 4, "tool_calls": 1, "file_touches": 1, "instruction_rows": 3, "credential_rows": 2}
+
+
+def build_omo(home: Path) -> None:
+    base = home / ".omo"
+    _write(base / "omo.jsonc", f'{{\n  // provider config\n  "apiKey": "{SK_ANT}",\n  "model": "x",\n}}\n')
+    _write(base / "omo.jsonc.bak-20261001", "{}")
+    _json(base / "install.json", {"version": "5.1.28"})
+    sid = "2026-10-09T01-02-03-456Z_0000-uuid1"
+    _jsonl(
+        base / "agent" / "sessions" / "C--Users-u1-proj" / f"{sid}.jsonl",
+        [
+            {"type": "session", "id": "uuid1", "cwd": CWD, "timestamp": "2026-10-09T01:02:03.456Z"},
+            {"type": "message", "timestamp": "2026-10-09T01:02:04Z", "message": {"role": "user", "content": [{"type": "text", "text": f"refactor, token {GHP}"}]}},
+            {"type": "message", "timestamp": "2026-10-09T01:02:05Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "ok"}, {"type": "toolCall", "id": "tc1", "name": "bash", "arguments": {"command": f"Remove-Item -Recurse {CWD}\\dist"}}]}},
+            {"type": "custom", "customType": "omo-state", "data": {"sessionId": "uuid1"}},
+        ],
+    )
+    _write(base / "agent" / "auth.json", CRED_FILE)
+    _write(base / "lsp-daemon" / "daemon.auth", CRED_FILE)
+    _write(base / "memory" / "agents" / "a1" / "notes.md", "# memory\n")
+    _write(base / "plans" / "plan1.md", "# plan\n")
+    run = base / "ulw-loop" / "run1"
+    _write(run / "brief.md", "# brief\n")
+    _json(run / "goals.json", {"activeGoalId": "g1", "goals": [{"id": "g1", "objective": "ship it", "status": "done", "startedAt": "2026-10-09T03:00:00Z"}]})
+    _jsonl(run / "ledger.jsonl", [{"at": "2026-10-09T03:00:00Z", "goalId": "g1", "kind": "start", "message": "start", "status": "active"}, {"at": "2026-10-09T04:00:00Z", "goalId": "g1", "kind": "finish", "message": f"done token={TOKEN_BARE}", "status": "done"}])
+    (base / "migration-backup-20261001-opencode-config").mkdir(parents=True, exist_ok=True)
+
+
+# --- ZCode ---------------------------------------------------------------------------------
+
+ZCODE_EXPECTED = {"sessions": 2, "messages": 4, "tool_calls": 2, "destructive": 1, "file_touches": 1, "usage_rows": 1, "credential_rows": 2}
+
+
+def build_zcode(home: Path) -> None:
+    base = home / ".zcode"
+    ms = 1790500000000
+    tool_part = {"type": "tool", "tool": "bash", "callID": "call1", "state": {"status": "completed", "input": {"command": "rm -rf /home/u1/tmp"}, "output": "ok"}}
+    _db(
+        base / "cli" / "db" / "db.sqlite",
+        """
+        CREATE TABLE session (id TEXT, project_id TEXT, workspace_id TEXT, parent_id TEXT, slug TEXT, directory TEXT, path TEXT, title TEXT, version TEXT,
+          share_url TEXT, summary_additions INTEGER, summary_deletions INTEGER, summary_files INTEGER, time_created INTEGER, time_updated INTEGER,
+          time_archived INTEGER, task_type TEXT, trace_id TEXT);
+        CREATE TABLE message (id TEXT, session_id TEXT, time_created INTEGER, time_updated INTEGER, data TEXT, sequence INTEGER);
+        CREATE TABLE part (id TEXT, message_id TEXT, session_id TEXT, time_created INTEGER, time_updated INTEGER, data TEXT, sequence INTEGER);
+        CREATE TABLE input_history (id INTEGER, project_id TEXT, session_id TEXT, text TEXT, kind TEXT, time_created INTEGER, attachments TEXT);
+        CREATE TABLE model_usage (logical_request_id TEXT, session_id TEXT, turn_id TEXT, trace_id TEXT, provider_id TEXT, model_id TEXT, agent TEXT, mode TEXT,
+          task_type TEXT, status TEXT, started_at INTEGER, completed_at INTEGER, duration_ms INTEGER, input_tokens INTEGER, output_tokens INTEGER, reasoning_tokens INTEGER);
+        CREATE TABLE tool_usage (session_id TEXT, turn_id TEXT, tool_call_id TEXT, tool_name TEXT, side_effect_scope TEXT, read_only INTEGER, destructive INTEGER,
+          approval_status TEXT, status TEXT, started_at INTEGER, completed_at INTEGER, exit_code INTEGER, output_bytes INTEGER, stdout_bytes INTEGER, stderr_bytes INTEGER);
+        CREATE TABLE turn_usage (session_id TEXT, turn_id TEXT, input_tokens INTEGER);
+        CREATE TABLE todo (session_id TEXT, content TEXT, status TEXT, priority TEXT, position INTEGER);
+        CREATE TABLE session_task_link (parent_session_id TEXT, child_session_id TEXT, role TEXT, depth INTEGER, agent_type TEXT, model TEXT, status TEXT);
+        """,
+        {
+            "session": [
+                ("z1", "p1", "w1", None, "slug", CWD, CWD, "Cleanup", "1.0.0", None, 1, 2, 1, ms, ms + 60000, None, "chat", "tr1"),
+                ("z2", "p1", "w1", "z1", "slug2", CWD, CWD, "Sub", "1.0.0", None, 0, 0, 0, ms + 1000, ms + 2000, None, "subagent", "tr2"),
+            ],
+            "message": [
+                ("m1", "z1", ms + 1, ms + 1, json.dumps({"role": "user", "time": {"created": ms + 1}}), 1),
+                ("m2", "z1", ms + 2, ms + 2, json.dumps({"role": "assistant", "modelID": "glm-4.6", "providerID": "zai", "tokens": {"input": 100, "output": 20}, "time": {"created": ms + 2}}), 2),
+                ("m3", "z2", ms + 1001, ms + 1001, json.dumps({"role": "user"}), 1),
+            ],
+            "part": [
+                ("p1", "m1", "z1", ms + 1, ms + 1, json.dumps({"type": "text", "text": f"delete the temp folder, key {GSK}"}), 1),
+                ("p2", "m2", "z1", ms + 2, ms + 2, json.dumps({"type": "text", "text": "deleting"}), 1),
+                ("p3", "m2", "z1", ms + 3, ms + 3, json.dumps(tool_part), 2),
+                ("p4", "m3", "z2", ms + 1001, ms + 1001, json.dumps({"type": "text", "text": "sub task"}), 1),
+            ],
+            "input_history": [(1, "p1", "z1", "delete the temp folder", "prompt", ms, None)],
+            "model_usage": [
+                ("r1", "z1", "t1", "tr1", "zai", "glm-4.6", "build", "chat", "chat", "ok", ms + 2, ms + 5, 3, 100, 20, 0),
+                ("r2", "z1", "t1", "tr1", "zai", "glm-4.6", "build", "chat", "chat", "ok", ms + 6, ms + 9, 3, 50, 10, 0),
+            ],
+            "tool_usage": [
+                ("z1", "t1", "call1", "bash", "workspace", 0, 1, "approved", "completed", ms + 3, ms + 4, 0, 120, 100, 20),
+                ("z1", "t1", "call2", "read", "none", 1, 0, "auto", "completed", ms + 5, ms + 6, None, 50, 50, 0),
+            ],
+            "todo": [("z1", "cleanup", "done", "high", 0)],
+            "session_task_link": [("z1", "z2", "subagent", 1, "explore", "glm-4.6", "done")],
+        },
+    )
+    _json(base / "v2" / "config.json", {"providers": [{"id": "zai", "baseURL": "https://api.z.ai/api/coding/paas/v4", "apiKey": ZCODE_KEY, "models": ["glm-4.6"]}]})
+    _json(base / "v2" / "credentials.json", {"key": ZCODE_KEY})
+    _write(base / "v2" / "certs" / "client.key", ZCODE_KEY)
+    _jsonl(base / "cli" / "rollout" / "r1.jsonl", [{"request": {"headers": {"Authorization": f"Bearer {ZCODE_KEY}"}}}])
+
+
+# --- Claude desktop ------------------------------------------------------------------------
+
+CLAUDE_DESKTOP_EXPECTED = {"sessions": 4, "account_rows": 2, "mcp_rows": 3, "credential_rows": 3, "usage_rows": 1}
+
+
+def build_claude_desktop(home: Path) -> None:
+    local = home / "AppData" / "Local"
+    data = local / "Claude-Data" / "claude_pzs8sxrjxfjjc"
+    ms = 1790900000000
+    sessions = data / "claude-code-sessions"
+    for account, name, sid, offset in (("acct-uuid-1", "local_s1", "sess-A", 0), ("acct-uuid-1", "local_s2", "sess-B", 3600000), ("acct-uuid-2", "local_s3", "sess-Z", 7200000)):
+        _json(
+            sessions / account / f"{name}.json",
+            {"cliSessionId": sid, "cwd": CWD, "originCwd": CWD, "model": "claude-opus-4", "effort": "high", "permissionMode": "default",
+             "createdAt": ms + offset, "lastActivityAt": ms + offset + 600000, "completedTurns": 5, "isArchived": False, "cliBinaryPin": {"version": "2.1.304", "wrapper": "x"}},
+        )
+    _json(data / "local-agent-mode-sessions" / "lam1" / "local_lam1.json", {"sessionId": "lam1", "title": "cowork", "createdAt": ms + 9000000, "lastActivityAt": ms + 9600000, "model": "claude-sonnet-4"})
+    _jsonl(data / "local-agent-mode-sessions" / "lam1" / "audit.jsonl", [{"e": 1}, {"e": 2}])
+    _json(data / "git-worktrees.json", {"p1": {"origin": f"https://x:{TOKEN_BARE}@git.example.com/r.git"}})
+    _json(data / "plan-usage-history.json", {"version": 1, "samples": [{"org": "org-1", "t": ms, "u": {"fh": 0.4}}, {"org": "org-1", "t": ms + 3600000, "u": {"fh": 0.6}}]})
+    _json(data / "claude_desktop_config.json", {"mcpServers": {"fs": {"command": "npx", "args": ["-y", "@example/fs"], "env": {"TOKEN": TOKEN_BARE}}}})
+    _json(data / "buddy-tokens.json", {"t": CRED_FILE})
+    _json(data / "ssh-remote-server-state.json", {"t": CRED_FILE})
+    _write(data / "Network" / "Cookies", COOKIE_FILE)
+    logs = local / "Claude" / "logs"
+    _write(
+        logs / "mcp.log",
+        "2026-10-20T01:00:00.000Z [info] [fs] Initializing server...\n"
+        "2026-10-20T01:00:01.000Z [info] [fs] Server started and connected successfully\n"
+        f"2026-10-20T01:00:05.000Z [error] [remote-x] Server disconnected (Authorization: Bearer {BEARER})\n",
+    )
+    _write(logs / "main.log", "2026-10-20 01:00:00 [info] session start\n2026-10-20 01:00:01 [info] mcp ready\n2026-10-20 01:00:02 [info] window\n")
+    _json(home / "AppData" / "Roaming" / "Claude-NativeHost" / "com.anthropic.claude_browser_extension.json", {"name": "com.anthropic.claude_browser_extension"})
+    (local / "Packages" / "Claude_pzs8sxrjxfjjc" / "Settings").mkdir(parents=True, exist_ok=True)
+
+
+# --- claude-swap ---------------------------------------------------------------------------
+
+CLAUDE_SWAP_EXPECTED = {"account_rows": 2, "switch_rows": 2, "credential_rows": 1}
+
+
+def build_claude_swap(home: Path) -> None:
+    base = home / ".claude-swap-backup"
+    _json(
+        base / "sequence.json",
+        {
+            "accounts": {
+                "1": {"added": "2026-09-01T00:00:00Z", "email": "alice.secret@corp.example", "organizationName": "Corp Org", "organizationUuid": "org-uuid-1", "uuid": "acc-uuid-1"},
+                "2": {"added": "2026-09-05T00:00:00Z", "email": "bob.private@gmail.example", "organizationName": "Personal", "organizationUuid": "org-uuid-2", "uuid": "acc-uuid-2"},
+            },
+            "activeAccountNumber": 2,
+            "lastUpdated": "2026-10-15T00:00:00Z",
+            "sequence": [1, 2],
+        },
+    )
+    _write(
+        base / "claude-swap.log",
+        "2026-10-10T09:00:00Z INFO Switched from account 1 (alice.secret@corp.example) to account 2 (bob.private@gmail.example)\n"
+        "2026-10-15T00:00:00Z INFO Switched to account 2\n"
+        "2026-10-15T01:00:00Z INFO update check\n",
+    )
+    _json(base / "configs" / ".claude-config-1-alice.secret@corp.example.json", {"oauthAccount": {}})
+    _json(base / "configs" / ".claude-config-2-bob.private@gmail.example.json", {"oauthAccount": {}})
+    _write(base / "credentials" / ".creds-1-alice.secret@corp.example.enc", SWAP_CRED)
+    _json(base / "cache" / "usage.json", {"u": 1})
+
+
+# --- Gemini CLI ----------------------------------------------------------------------------
+
+GEMINI_EXPECTED = {"sessions": 1, "messages": 3, "tool_calls": 1, "file_touches": 1, "mcp_rows": 1, "credential_rows": 2, "account_rows": 1, "instruction_rows": 1}
+
+
+def build_gemini_cli(home: Path) -> None:
+    base = home / ".gemini"
+    _write(base / "GEMINI.md", "# Gemini rules\n")
+    _json(base / "settings.json", {"mcpServers": {"gh": {"httpUrl": f"https://mcp.example.org/mcp?key={TOKEN_QUERY}"}}, "selectedAuthType": "oauth-personal"})
+    _json(base / "oauth_creds.json", {"access_token": GEMINI_TOKEN})
+    _write(base / "jetski-standalone-oauth-token", GEMINI_TOKEN)
+    _json(base / "google_accounts.json", {"active": "carol.hidden@gmail.example", "old": []})
+    chat = base / "tmp" / "hash1" / "chats" / "session-2026-10-20T01-00-abc.json"
+    _json(
+        chat,
+        {
+            "sessionId": "g1", "projectHash": "hash1", "startTime": "2026-10-20T01:00:00Z", "lastUpdated": "2026-10-20T01:05:00Z",
+            "messages": [
+                {"id": "1", "timestamp": "2026-10-20T01:00:00Z", "type": "user", "content": f"summarize with {HF}"},
+                {"id": "2", "timestamp": "2026-10-20T01:00:10Z", "type": "gemini", "content": "done", "model": "gemini-2.5-pro", "tokens": {"input": 10, "output": 5},
+                 "toolCalls": [{"id": "tc", "name": "read_file", "args": {"absolute_path": f"{CWD}\\a.md"}, "status": "success", "timestamp": "2026-10-20T01:00:05Z"}]},
+            ],
+        },
+    )
+    _json(base / "tmp" / "hash1" / "logs.json", [{"sessionId": "g1", "messageId": 0, "type": "user", "message": "summarize", "timestamp": "2026-10-20T01:00:00Z"}])
+
+
+# --- presence-only stubs -------------------------------------------------------------------
+
+STUBS_EXPECTED = {"tools": {"copilot", "windsurf", "devin", "opencode", "aider", "goose", "cline"}, "credential_rows": 1}
+
+
+def build_stubs(home: Path) -> None:
+    _json(home / ".copilot" / "config.json", {"x": 1})
+    _write(home / ".copilot" / "logs" / "process-1-1.log", "log\n")
+    _json(home / ".config" / "github-copilot" / "hosts.json", {"github.com": {"oauth_token": CRED_FILE}})
+    (home / ".codeium" / "windsurf" / "cascade").mkdir(parents=True, exist_ok=True)
+    _write(home / ".codeium" / "windsurf" / "installation_id", "id")
+    _json(home / ".devin" / "extensions" / "extensions.json", [])
+    _write(home / ".local" / "share" / "opencode" / "storage" / "session" / "s1.json", "{}")
+    _write(home / ".aider.chat.history.md", "# aider chat\n")
+    _write(home / ".config" / "goose" / "config.yaml", "provider: x\n")
+    _json(home / "AppData" / "Roaming" / "Code" / "User" / "globalStorage" / "saoudrizwan.claude-dev" / "tasks" / "t1" / "api_conversation_history.json", [])
+
+
 # --- driver --------------------------------------------------------------------------------
 
 BUILDERS = {
     "claude_code": build_claude_code,
     "codex": build_codex,
     "cursor": build_cursor,
+    "antigravity": build_antigravity,
+    "kiro": build_kiro,
+    "omo": build_omo,
+    "zcode": build_zcode,
+    "claude_desktop": build_claude_desktop,
+    "claude_swap": build_claude_swap,
+    "gemini_cli": build_gemini_cli,
+    "stubs": build_stubs,
 }
 
 

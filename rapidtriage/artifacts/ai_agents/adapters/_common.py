@@ -864,7 +864,19 @@ class SessionAccumulator:
         if isinstance(is_error, bool):
             row.payload["is_error"] = is_error
 
-    def file_touch(self, op: str, path: str, stamp: str, *, tool_name: str = "", op_source: str = "", source_path: Path | str | None = None, **fields: object) -> AiRow:
+    def file_touch(
+        self,
+        op: str,
+        path: str,
+        stamp: str,
+        *,
+        tool_name: str = "",
+        op_source: str = "",
+        source_path: Path | str | None = None,
+        exists_in_evidence: bool | None = None,
+        file_locator: str = "",
+        **fields: object,
+    ) -> AiRow:
         self.file_touches += 1
         row = self.ctx.row(
             "ai-agent-file-touch",
@@ -877,8 +889,8 @@ class SessionAccumulator:
             touched_path=redact_str(path),
             tool_name=redact_str(tool_name),
             op_source=op_source,
-            exists_in_evidence=None,
-            file_locator="",
+            exists_in_evidence=exists_in_evidence,
+            file_locator=file_locator,
             **fields,
         )
         self.rows.append(row)
