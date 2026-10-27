@@ -1829,16 +1829,26 @@ def _sql_error(exc: Exception) -> QueryError:
     return QueryError(f"검색을 실행할 수 없습니다: {text}")
 
 
-def truncated_warning(meta: Mapping[str, object], domains: Iterable[str]) -> str | None:
-    """Matched domains (all domains when nothing matched) that hold rows cut at an index cap."""
+# Search sources a truncated-rows warning names (collection -> Korean label).
+SOURCE_LABELS = {"docs": "문서", "files": "파일", "artifacts": "아티팩트", "indicators": "지표", "analysis": "분석 결과"}
+
+
+def truncated_warning(meta: Mapping[str, object], collections: Iterable[str], domains: Iterable[str] = ()) -> str | None:
+    """The matched sources (all when nothing matched) that hold rows cut at an index cap, with the
+    number of cut rows per source (``문서 8건, 아티팩트 45건``); indexes before v4 name domains."""
     summary = meta.get("summary") if isinstance(meta.get("summary"), Mapping) else {}
-    by_domain = summary.get("truncated_by_domain") if isinstance(summary.get("truncated_by_domain"), Mapping) else {}
-    wanted = set(domains) or set(by_domain)
-    hits = {str(name): int(count) for name, count in by_domain.items() if name in wanted and isinstance(count, int) and count > 0}
+    by_collection = summary.get("truncated_by_collection")
+    if isinstance(by_collection, Mapping):
+        counts, wanted, labels = by_collection, set(collections), SOURCE_LABELS
+    else:
+        by_domain = summary.get("truncated_by_domain")
+        counts, wanted, labels = (by_domain if isinstance(by_domain, Mapping) else {}), set(domains), {}
+    wanted = wanted or {str(name) for name in counts}
+    hits = {str(name): int(count) for name, count in counts.items() if name in wanted and isinstance(count, int) and count > 0}
     if not hits:
         return None
-    detail = ", ".join(f"{name} {count:,}건" for name, count in sorted(hits.items(), key=lambda item: -item[1])[:6])
-    return f"색인 상한에서 본문 일부가 잘린 행이 있어 그 부분은 검색되지 않습니다({detail})"
+    detail = ", ".join(f"{labels.get(name, name)} {count:,}건" for name, count in sorted(hits.items(), key=lambda item: (-item[1], item[0]))[:6])
+    return f"색인 상한에서 본문 일부가 잘린 행이 있어 잘린 뒷부분은 검색되지 않습니다(본문이 잘린 행: {detail})"
 
 
 def run_query(
@@ -1992,6 +2002,7 @@ def _run_query(
     facets: dict[str, object] | None = None
     histogram: dict[str, object] | None = None
     matched_domains: set[str] = {str(row.get("domain") or "") for row in rows_payload}
+    matched_collections: set[str] = {str(row.get("collection") or "") for row in rows_payload}
     if materialized and request.aggregates:
         try:
             facets, histogram = build_aggregates(
@@ -2007,6 +2018,7 @@ def _run_query(
             )
             if facets is not None:
                 matched_domains |= {str(item["key"]) for item in facets["domain"]}  # type: ignore[index, union-attr]
+                matched_collections |= {str(item["key"]) for item in facets["collection"]}  # type: ignore[index, union-attr]
         except sqlite3.OperationalError:
             if not index.budget.expired():
                 raise
@@ -2017,7 +2029,9 @@ def _run_query(
     if capped:
         warnings.append(f"결과가 {TOTAL_CAP:,}건을 넘어 건수·집계는 처음 {TOTAL_CAP:,}건 기준입니다")
     if ctx.text_terms or ctx.regex_jobs:
-        message = truncated_warning(meta, {domain for domain in matched_domains if domain})
+        message = truncated_warning(
+            meta, {name for name in matched_collections if name}, {domain for domain in matched_domains if domain}
+        )
         if message:
             warnings.append(message)
     return {

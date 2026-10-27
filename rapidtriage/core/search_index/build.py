@@ -89,6 +89,10 @@ SEARCH_INDEX_KIND = "search-index"
 CANCEL_EVERY_ROWS = 500
 BATCH_ROWS = 4000
 TEXT_MAX_CHARS = 64 * 1024
+# Document bodies (R7 S2 review #3): 512 K characters cover 99.6 % of the documents of a real
+# run (run-subset10: 1,998 bodies, p99.5 = 371 K); 64 K cut 3 % of them and their later text
+# was not searchable. Artifact rows keep ARTIFACT_TEXT_MAX_CHARS.
+DOC_TEXT_MAX_CHARS = 512 * 1024
 ARTIFACT_TEXT_MAX_CHARS = 8 * 1024
 EVENTLOG_TEXT_MAX_CHARS = 64 * 1024
 VALUE_MAX_CHARS = 1024
@@ -786,13 +790,13 @@ def flatten_file(ctx: BuildContext, scope: str, index: int, row: Mapping[str, ob
 
 
 def flatten_doc(ctx: BuildContext, index: int, row: Mapping[str, object], body: str | None, *, body_cut: bool = False) -> Doc:
-    """Document candidate: title + body (<= 64 KB) + metadata (author, last saved by, template, company)."""
+    """Document candidate: title + body (<= ``DOC_TEXT_MAX_CHARS``) + metadata (author, last saved by, template, company)."""
     raw_path = str(row.get("path") or "")
     doc = Doc(collection="docs", locator=f"/candidates/{index}", domain="media", artifact_type=f"document-{row.get('kind') or 'file'}", path=raw_path)
     doc.title = Path(raw_path.replace("\\", "/")).name
     doc.size = _int_or_none(row.get("size"))
     doc.ts_text = record_time("documents", row) or ""
-    doc.text_cap = TEXT_MAX_CHARS
+    doc.text_cap = DOC_TEXT_MAX_CHARS
     if body_cut:
         doc.cuts["text-truncated:body"] += 1
     meta = ctx.doc_meta.get(os.path.normcase(raw_path), {})
@@ -976,7 +980,7 @@ def load_document_bodies(case_db: Path | None) -> dict[str, tuple[str, bool]]:
         rows = connection.execute(
             "SELECT f.path, substr(d.body, 1, ?), length(d.body) > ? FROM indexed_document d JOIN file_record f ON f.id = d.file_record_id "
             "WHERE d.source_type = 'document'",
-            (TEXT_MAX_CHARS, TEXT_MAX_CHARS),
+            (DOC_TEXT_MAX_CHARS, DOC_TEXT_MAX_CHARS),
         )
         for path, body, cut in rows:
             if path and body:
@@ -997,7 +1001,7 @@ def extract_document_body(path: str, kind: str) -> tuple[str, bool] | None:
         from ..docs import extract_text
 
         text = extract_text(source, kind)
-        return text[:TEXT_MAX_CHARS], len(text) > TEXT_MAX_CHARS
+        return text[:DOC_TEXT_MAX_CHARS], len(text) > DOC_TEXT_MAX_CHARS
     except Exception:  # extraction failures never stop the build
         return None
 
@@ -1410,6 +1414,7 @@ def build_search_index(
             "skipped": dict(ctx.skipped),
             "skipped_fields": skipped_fields_payload(ctx.skipped_fields),
             "truncated_by_domain": truncated_by_domain(connection),
+            "truncated_by_collection": truncated_by_collection(connection),
             "tokenizer": tokenizer,
         }
         write_meta(
@@ -1513,6 +1518,17 @@ def truncated_by_domain(connection: sqlite3.Connection) -> dict[str, int]:
     }
 
 
+def truncated_by_collection(connection: sqlite3.Connection) -> dict[str, int]:
+    """Primary rows cut at a cap, per collection (``docs``/``files``/``artifacts``/...): the query
+    warning names them per search source."""
+    return {
+        str(collection): int(count)
+        for collection, count in connection.execute(
+            "SELECT collection, COUNT(*) FROM search_doc WHERE truncated = 1 AND doc_id = group_id GROUP BY collection ORDER BY collection"
+        )
+    }
+
+
 def _build_incremental(
     output_dir: Path,
     summary: Mapping[str, object],
@@ -1576,6 +1592,7 @@ def _build_incremental(
             "skipped": dict(skipped),
             "skipped_fields": merge_skipped_fields(previous.get("skipped_fields"), ctx.skipped_fields),
             "truncated_by_domain": truncated_by_domain(connection),
+            "truncated_by_collection": truncated_by_collection(connection),
             "tokenizer": meta.get("tokenizer") or "",
         }
         build_summary["row_count"] = int(connection.execute("SELECT COUNT(*) FROM search_doc").fetchone()[0])

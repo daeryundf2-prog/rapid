@@ -246,5 +246,39 @@ class HitTimestampTest(IsolatedEnv):
         self.assertEqual(hits["zeta2.lnk"], "2023-07-07T07:07:07Z")  # the record's own key without a details time
 
 
+class LongDocumentTest(IsolatedEnv):
+    """#3: document bodies up to 512 K characters are searchable; the warning names cut rows per source."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        evidence = cls.base / "evidence"
+        evidence.mkdir()
+        filler = "가나다라 마바사 " * 4000  # ~36 K characters
+        cls.mid = evidence / "mid.txt"
+        cls.mid.write_text(filler * 3 + " 등록절차 안내 " + filler, encoding="utf-8")  # keyword at ~108 K
+        cls.huge = evidence / "huge.txt"
+        cls.huge.write_text(filler * 16 + " 위탁의료기관용 서식 ", encoding="utf-8")  # keyword past 512 K
+        docs = [
+            {"path": str(cls.mid), "kind": "txt", "size": cls.mid.stat().st_size, "text_status": "ok"},
+            {"path": str(cls.huge), "kind": "txt", "size": cls.huge.stat().st_size, "text_status": "ok"},
+        ]
+        cls.syn = SearchRun(cls.base, [], docs=docs, root=str(evidence))
+
+    def test_keyword_past_64k_found_like_v1(self) -> None:
+        self.assertEqual(self.syn.v1(["등록절차"]), [("documents", "")])
+        hits = self.syn.v2_hits(["등록절차"])
+        self.assertEqual([hit["path"] for hit in hits], [str(self.mid)])
+        self.assertIn("등록절차", hits[0]["snippet"])
+
+    def test_cut_rows_named_per_source(self) -> None:
+        self.assertEqual(self.syn.build["truncated_by_collection"], {"docs": 1})
+        self.assertEqual(self.syn.v1(["위탁의료기관용"]), [("documents", "")])
+        self.assertEqual(self.syn.v2(["위탁의료기관용"]), [])  # past the cap: documented
+        result = self.syn.v2_result(["가나다라"])
+        warnings = result["query"]["parsed"]["warnings"]
+        self.assertIn("색인 상한에서 본문 일부가 잘린 행이 있어 잘린 뒷부분은 검색되지 않습니다(본문이 잘린 행: 문서 1건)", warnings)
+
+
 if __name__ == "__main__":
     unittest.main()
