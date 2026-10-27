@@ -3,6 +3,7 @@ import { kindLabel } from "../../derived/tables";
 import { artifactTypeLabel, timelineEventTypeLabel } from "../../filters/typeLabels";
 import { familyForType } from "../../flags/catalog";
 import type { CollectionDef } from "../types";
+import { summarizeArtifact } from "./artifactSummary";
 import {
   baseName,
   col,
@@ -82,6 +83,46 @@ function reviewFields(raw: Record<string, unknown>): Record<string, unknown> {
   return { reviewCollection: collection, reviewKind: str(locator?.kind), reviewPointer: pointer };
 }
 
+/**
+ * The archive entry a hit names (R7 S2 #6): `entry_path` (or `metadata.entry_path`), else the
+ * `#entry:<n>` part of its locator / pointer; null for every other hit.
+ */
+function entryOf(raw: Record<string, unknown>): string | null {
+  const metadata = isRecord(raw.metadata) ? raw.metadata : {};
+  const path = strOrNull(raw.entry_path) ?? strOrNull(metadata.entry_path);
+  if (path) return `entry_path:${path}`;
+  const locator = isRecord(raw.locator) ? raw.locator : {};
+  for (const value of [locator.pointer, locator.locator, raw.pointer]) {
+    const text = typeof value === "string" ? value : "";
+    const at = text.indexOf("#entry:");
+    if (at >= 0) return text.slice(at + 1);
+  }
+  return null;
+}
+
+/**
+ * Title of a hit (R7 S2 #10). v2 artifact hits keep the index title, which for container rows is
+ * often the bare file name (`History`, `places.sqlite`) where v1 summarized the record (site name,
+ * event id …). When the title is just the file name, the console's own artifact summary
+ * (`summarizeArtifact`, as the artifacts grid titles rows) is tried on the hit's metadata; it wins
+ * only when it names something else than the file or the type. The compact metadata carries few
+ * record fields, so most such rows still read the file name until the server sends a summary.
+ */
+function hitTitle(
+  raw: Record<string, unknown>,
+  source: string,
+  artifactType: string,
+  metadata: Record<string, unknown>,
+  path: string | null,
+): string | null {
+  const title = strOrNull(raw.title);
+  if (source !== "artifacts" && source !== "web") return title;
+  const file = baseName(path);
+  if (title && title !== file) return title;
+  const summary = summarizeArtifact(artifactType || null, metadata, path).title.trim();
+  return summary && summary !== file && summary !== artifactType ? summary : title;
+}
+
 export const searchCollection: CollectionDef = {
   id: "search",
   label: "검색 결과",
@@ -108,7 +149,9 @@ export const searchCollection: CollectionDef = {
     const row = makeRow(
       ref,
       {
-        title: strOrNull(raw.title) ?? (baseName(path) || `결과 ${index + 1}`),
+        title:
+          hitTitle(raw, source, artifactType || kind || "", metadata, path) ??
+          (baseName(path) || `결과 ${index + 1}`),
         sourcePath: path,
         timestamp: strOrNull(raw.timestamp) ?? strOrNull(metadata.timestamp),
         artifactType: artifactType || kind,
@@ -128,9 +171,15 @@ export const searchCollection: CollectionDef = {
       },
     );
     // Stable identity across refetches: the source row the hit names (else its position).
-    row.rowKey = review.reviewPointer
+    const base = review.reviewPointer
       ? `search:${str(review.reviewCollection)}:${str(review.reviewKind)}:${str(review.reviewPointer)}`
       : `search:${[source, kind, locator].filter(Boolean).join(":")}`;
+    // Archive entries (R7 S2 #6): several hits name one parent row; the entry path (or an entry
+    // locator "<parent>#entry:<n>" not already in the key) keeps each entry its own row.
+    const entry = entryOf(raw);
+    row.rowKey = entry && !base.endsWith(entry) ? `${base}#${entry}` : base;
+    const entryPath = strOrNull(raw.entry_path);
+    if (entryPath) row.fields.entryPath = entryPath;
     return row;
   },
   columns: [

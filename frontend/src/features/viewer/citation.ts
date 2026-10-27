@@ -36,6 +36,11 @@ export const MARK_ORDER: MarkAction[] = [
 ];
 
 export function locatorText(target: ViewerTarget): string {
+  // A search hit cites the run-output row it names (R7 S2 #8: `docs:/candidates/3`, not `search:/search/0`).
+  if (target.review) {
+    const { collection, kind, pointer } = target.review;
+    return [collection, kind, pointer].filter(Boolean).join(":");
+  }
   const { ref } = target;
   return [ref.collection, ref.kind, ref.locator].filter(Boolean).join(":");
 }
@@ -74,7 +79,7 @@ export function buildCitation(
   row?: GridRow | null,
   tz = "utc",
 ): string {
-  const isArtifact = target.ref.collection === "artifacts";
+  const isArtifact = (target.review?.collection ?? target.ref.collection) === "artifacts";
   const parts = [
     // 사건=… 증거=… first when the run belongs to a case (AXIOM adoption E1).
     ...caseCitationParts(target.runId),
@@ -178,6 +183,13 @@ export function targetAsGridRow(target: ViewerTarget): GridRow {
   const fields: Record<string, unknown> = {};
   if (pointer) fields.pointer = pointer;
   if (target.ref.caseDbId !== undefined && targetType) fields.targetType = targetType;
+  // Search hits (R7 S2 #8): the run-output row they name is what the case DB / bookmark API
+  // resolves (reviewActions `carriedLocator`), exactly as the grid batch bar posts it.
+  if (target.review) {
+    fields.reviewCollection = target.review.collection;
+    if (target.review.kind) fields.reviewKind = target.review.kind;
+    fields.reviewPointer = target.review.pointer;
+  }
   return {
     rowKey: target.ref.kind
       ? `${target.ref.collection}:${target.ref.kind}:${target.ref.locator}`

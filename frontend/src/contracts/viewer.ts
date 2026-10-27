@@ -25,6 +25,11 @@ export interface ViewerTarget {
   isDirectory?: boolean;
   /** Byte offset / record locator to highlight (hex view, sqlite row). */
   highlight?: { offset?: number; length?: number; table?: string; rowid?: number };
+  /**
+   * The run-output row a search hit names (its API `locator`, R7 S2 #8): review marks, bookmarks
+   * and citations of the viewer use it instead of the hit's own `search` ref.
+   */
+  review?: { collection: string; kind?: string; pointer: string };
 }
 
 export interface ViewerModeState {

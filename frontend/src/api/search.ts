@@ -61,16 +61,45 @@ export interface IndexSearchSpec {
   ocr?: boolean;
 }
 
+/**
+ * A keyword the v2 index cannot look up (search_index/query.py `SHORT_ONE_WARNING` /
+ * `SHORT_TWO_WARNING`): one character, or two characters of which one is ASCII (the bigram
+ * table holds non-ASCII pairs only). v2 then scans every body and is slower than v1
+ * (R7 S2 #9: `계` 0.85 vs 0.48 s, `ab` 1.33 vs 0.72 s).
+ */
+export function isUnindexedKeyword(keyword: string): boolean {
+  const chars = [...keyword.normalize("NFC").trim()];
+  if (chars.length === 1) return true;
+  return chars.length === 2 && chars.some((char) => (char.codePointAt(0) ?? 0) < 0x80);
+}
+
 /** Options the v2 console query answers like v1 (anything else: v1 `GET /search`). */
 export function indexCoversSearch(spec: IndexSearchSpec, extensions: readonly string[] | undefined): boolean {
   return (
     spec.mode === "exact" &&
     spec.keywords.length > 0 &&
+    // Only short keywords the index cannot serve: v1 is faster (a mix still uses v2, which warns).
+    !spec.keywords.every(isUnindexedKeyword) &&
     !spec.ocr &&
     !spec.hideKnownGood &&
     (spec.sources ?? []).length === 0 &&
     (extensions ?? []).length === 0
   );
+}
+
+/** Shown for a search request the server rejected with English (pydantic) validation text. */
+export const SEARCH_REQUEST_REJECTED =
+  "검색 요청을 처리할 수 없습니다. 검색어 수(32개)나 길이(4,000자)를 줄여 다시 검색하세요.";
+
+/**
+ * A search error as the analyst reads it (R7 S2 #4): a 400 / 422 whose text is not Korean (FastAPI
+ * validation messages such as "List should have at most 32 items") becomes a Korean sentence;
+ * Korean server reasons (a rejected cursor, a too-long query) and other errors pass unchanged.
+ */
+export function koreanSearchError(error: unknown): unknown {
+  if (!(error instanceof ApiError) || (error.status !== 400 && error.status !== 422)) return error;
+  if (/[가-힣]/.test(error.message)) return error;
+  return new ApiError(SEARCH_REQUEST_REJECTED, error.status, error.detail);
 }
 
 /** next offset → cursor (null: the result ended there), per (run, keywords). */
@@ -96,6 +125,104 @@ interface QueryPayload {
   page?: { next_cursor?: unknown };
   truncated?: unknown;
   elapsed_ms?: unknown;
+  /** Notes of the query (strings, or `{message, counts}` objects with per-source truncated rows). */
+  warnings?: unknown;
+  query?: { parsed?: { warnings?: unknown } };
+}
+
+/**
+ * One v2 search note (R7 S2 #3): the server's Korean sentence, what it is about, and — for rows
+ * whose body the index cut at its cap — the truncated-row count per source.
+ */
+export interface SearchWarning {
+  kind: "truncated-rows" | "short-keyword" | "other";
+  text: string;
+  /** Per-source rows cut at the index cap (source/domain id → rows), when known. */
+  counts?: Record<string, number>;
+}
+
+function firstString(...values: unknown[]): string {
+  return values.find((value): value is string => typeof value === "string" && value !== "") ?? "";
+}
+
+function countsOf(value: unknown): Record<string, number> | undefined {
+  const counts: Record<string, number> = {};
+  if (Array.isArray(value)) {
+    // [{source|domain|name, count|rows|truncated_rows}]
+    for (const item of value) {
+      if (!item || typeof item !== "object") continue;
+      const entry = item as Record<string, unknown>;
+      const name = [entry.source, entry.domain, entry.name].find((v) => typeof v === "string" && v);
+      const count = [entry.count, entry.rows, entry.truncated_rows].find((v) => typeof v === "number");
+      if (typeof name === "string" && typeof count === "number" && count > 0) counts[name] = count;
+    }
+  } else if (value && typeof value === "object") {
+    for (const [name, count] of Object.entries(value as Record<string, unknown>)) {
+      if (typeof count === "number" && Number.isFinite(count) && count > 0) counts[name] = count;
+    }
+  }
+  return Object.keys(counts).length ? counts : undefined;
+}
+
+/** "(문서 12건, artifacts 1,234건)" at the end of the server's truncated-rows sentence. */
+function countsInText(text: string): Record<string, number> | undefined {
+  // "(media 1,200건, filesystem 3건)" or, since the R7 S2 fix, "(본문이 잘린 행: 문서 8건, 아티팩트 45건)".
+  const detail = /\(([^()]*\d[^()]*)\)\s*$/.exec(text)?.[1]?.replace(/^[^:]*:\s*/, "");
+  if (!detail) return undefined;
+  const counts: Record<string, number> = {};
+  // The server joins with ", "; "1,200건" keeps its thousands comma.
+  for (const part of detail.split(/,\s+/)) {
+    const match = /^(.+?)\s+([\d,]+)\s*건$/.exec(part.trim());
+    if (match?.[1] && match[2]) counts[match[1]] = Number(match[2].replace(/,/g, ""));
+  }
+  return Object.keys(counts).length ? counts : undefined;
+}
+
+function warningKind(
+  text: string,
+  code: string,
+  counts: Record<string, number> | undefined,
+): SearchWarning["kind"] {
+  if (/truncat/i.test(code) || /잘린 행|색인 상한/.test(text) || (counts && /truncat|row/i.test(code)))
+    return "truncated-rows";
+  if (/short/i.test(code) || /[12]자 검색어|2자 검색어/.test(text)) return "short-keyword";
+  return counts ? "truncated-rows" : "other";
+}
+
+/** v2 notes of a query response, deduplicated (top-level `warnings` and `query.parsed.warnings`). */
+export function searchWarningsOf(payload: QueryPayload): SearchWarning[] {
+  const raw: unknown[] = [];
+  if (Array.isArray(payload.warnings)) raw.push(...payload.warnings);
+  const parsed = payload.query?.parsed?.warnings;
+  if (Array.isArray(parsed)) raw.push(...parsed);
+  const out: SearchWarning[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    let text = "";
+    let code = "";
+    let counts: Record<string, number> | undefined;
+    if (typeof item === "string") {
+      text = item;
+      counts = countsInText(item);
+    } else if (item && typeof item === "object") {
+      const entry = item as Record<string, unknown>;
+      text = firstString(entry.message, entry.text, entry.detail);
+      code = firstString(entry.code, entry.kind, entry.type);
+      counts =
+        countsOf(entry.counts) ??
+        countsOf(entry.by_source) ??
+        countsOf(entry.truncated_by_source) ??
+        countsOf(entry.truncated_by_domain) ??
+        countsOf(entry.sources) ??
+        (text ? countsInText(text) : undefined);
+    }
+    if (!text && !counts) continue;
+    const key = `${code}\u0000${text}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ kind: warningKind(text, code, counts), text, ...(counts ? { counts } : {}) });
+  }
+  return out;
 }
 
 function nextCursorOf(payload: QueryPayload): string | null {
@@ -240,6 +367,6 @@ async function indexPage(
     hasMore,
     truncated,
     elapsedMs: typeof payload.elapsed_ms === "number" ? payload.elapsed_ms : 0,
-    meta: { searchIndex: "ready" },
+    meta: { searchIndex: "ready", searchWarnings: searchWarningsOf(payload) },
   };
 }
